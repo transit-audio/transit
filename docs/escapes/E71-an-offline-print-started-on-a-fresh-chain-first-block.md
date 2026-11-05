@@ -69,7 +69,8 @@ that ADR 0038's #332 amendment makes the contract (see item 6).
      `RangeRender::build_with` (`crates/mix/src/offline.rs`) runs every freshly adopted offline
      chain for `RUN_IN_SECONDS` (four seconds) with the transport stopped at the range start,
      every insert processing, and discards the output, so the print matches live play from a
-     stop, as Ableton Live and Logic Pro print through running instances. Time-zero automation
+     stop. In Ableton Live and Logic Pro, a print starts at the automation's value for its
+     position and carries no newly created instance's activation behavior. Time-zero automation
      is applied to the settled chain (the answer to #287 item 2). The tests that used a fresh
      engine's first block as the live reference now play live from a stop or expect the settled
      value:

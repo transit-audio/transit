@@ -2,7 +2,7 @@
 
 - **Status:** proposed 2026-10-31 (#242); amended 2026-11-05 (#332, offline prints start from a settled chain)
 - **Date:** 2026-10-31
-- **Reopen when:** a hosted effect with a note input (a CLAP effect with a note port, a VST3 effect with an event bus) should get the stream too; an insert needs per-voice information the summed audio cannot give it (the per-voice filter of the Macro Oscillator, #243, is that case and stays inside the instrument); a rack strip's own inserts want the notes of the rack's members; or a block's note view overflows in practice (`EventStatus::midi_fx.note_view_dropped` above zero in a field report).
+- **Reopen when:** a hosted effect with a note input (a CLAP effect with a note port, a VST3 effect with an event bus) should get the stream too; an insert needs per-voice information the summed audio cannot give it (the per-voice filter of the Macro Oscillator, #243, is that case and stays inside the instrument); a rack strip's own inserts want the notes of the rack's members; a block's note view overflows in practice (`EventStatus::midi_fx.note_view_dropped` above zero in a field report); or a field report of a plug-in warm-up reaching a print despite the run-in, or the run-in's cost making prints noticeably slower (#332 amendment).
 
 ## Stored parameters at preparation (#280)
 
@@ -101,24 +101,41 @@ shrinkage preserve both tracks' exact impulse positions.
 ## Amendment: offline prints start from a settled chain (#332, 2026-11-05)
 
 An offline print (Bounce in Place and Commit, Freeze, File > Bounce, stems and Bounce Paths, all
-through `RangeRender`) runs its freshly prepared chain for `RUN_IN_SECONDS` (four seconds) of
-audio with the transport stopped at the range start before the first printed frame, exactly as a
-live chain has run between its creation and play: no clip plays, every lane's value at the range
-start is delivered, every insert processes (none is suspended) and the output is discarded.
-Stored values stay snapped before the first block, as the rule above says. Automation at time
-zero is applied to that settled chain: a point at the range start prints its value from frame
-zero, and a ramp starting there continues from it with normal smoothing from a settled smoother.
-A hosted plug-in's activation behavior (an activation fade, parameter smoothing after its state
-is restored) is over before frame zero. This is the Ableton Live and Logic Pro convention: both
-print through the instances already running, so a print starts from a settled chain at the
-automation's value for its position (escape E71).
+through `RangeRender`) runs its freshly prepared chain for `RUN_IN_SECONDS` (four seconds of
+audio, a constant in `crates/mix/src/offline.rs`) with the transport stopped at the range start
+before the first printed frame, as a live chain runs between its creation and play, with no
+insert suspended (the live chain's state while an editor is open); no clip plays, every lane's
+value at the range start is delivered and the output is discarded. A print of [a, b) equals, bit
+for bit, the realtime engine run for `RUN_IN_SECONDS` stopped at a with no insert suspended, then
+played from a in the print's block partition; its first printed block is a locate (clip
+releases, controller chase). Stored values stay snapped before the first block, as the rule
+above says. Automation at time zero is applied to that settled chain: a point at the range start
+prints its value from frame zero, and a ramp starting there continues from it with normal
+smoothing from a settled smoother. A hosted plug-in's activation behavior (an activation fade,
+parameter smoothing after its state is restored) is over before frame zero. A restored
+instrument's state (the Texture Synth's frozen cloud, ADR 0033) is restored at creation as the
+main rule says, then runs through the run-in as a live instance runs while stopped. No clip plays
+during the run-in, so no source is read; a disk-backed source (ADR 0035) is first read at frame
+zero through the synchronous offline reader. Free-running built-in state enters frame zero at its
+phase after the run-in (Dirty Tape's wow/flutter): the #251 regression's measured first Dirty
+Tape position moved from 1128 to 1078 frames. Automation timing is unchanged. This follows the
+Ableton Live and Logic Pro convention. In both, a print starts at the automation's value for its
+position and carries no newly created instance's activation behavior. transit's offline chain is
+created for the print, so transit defines a settled chain as one that has run `RUN_IN_SECONDS`
+with the transport stopped at the range start. That is transit's definition, not either DAW's
+mechanism. A DAW that resets plug-ins when a bounce starts restarts free-running modulation
+there; transit's run-in carries its phase, as live play from a stop does (escape E71).
 
 For users, every print starts as live play from a stop at the range start does, so a plug-in's
-wake-up never lands in a print. The cost is four seconds of processing per print, bounded by the
-chain's own cost: an empty chain runs in for almost nothing, a heavy one costs what four seconds
-of it costs offline. A chain with no inserts and no instrument runs in too, so every print takes
-the same path. A plug-in whose warm-up outlasts the run-in, or that finishes loading on its own
-thread by wall-clock time, can still reach a print (E71's blind spots). The gate:
+wake-up shorter than the run-in does not land in a print. A plug-in whose warm-up outlasts the
+run-in, or that finishes loading on its own thread by wall-clock time, can still reach a print
+(E71's blind spots). The cost is four seconds of processing per run-in, bounded by the chain's
+own cost: a chain with no inserts and no instrument costs only the mix's own summing over four
+seconds of audio, and a heavy one costs what four seconds of it costs offline. Such a chain runs
+in too, so every print takes the same path. The run-in runs once per frozen track, and twice for
+a normalized File > Bounce or Bounce Paths (the measure pass and the write pass). It runs inside
+`RangeRender::try_new`, so it is not split into File > Bounce's 30 ms UI steps: a heavy chain
+blocks one UI frame for the whole run-in at each pass. The gate:
 `an_automated_gain_insert_prints_its_lane_value_from_frame_zero` and
 `a_hosted_plug_in_warm_up_settles_before_the_first_printed_frame`
 (`crates/mix/src/offline_prime_tests.rs`) run with every workspace test, and

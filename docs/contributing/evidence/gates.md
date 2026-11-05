@@ -327,4 +327,6 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   reproductions (`an_automated_gain_insert_prints_its_lane_value_from_frame_zero` and
   `a_hosted_plug_in_warm_up_settles_before_the_first_printed_frame`, `crates/mix/src/offline_prime_tests.rs`)
   guard it. A test that compares a print with live play compares it with live play from a stop,
-  never with a freshly adopted engine's first block (E71, `../../escapes/E71-an-offline-print-started-on-a-fresh-chain-first-block.md`).
+  never with a freshly adopted engine's first block. For tests, live play from a stop means
+  `RUN_IN_SECONDS` stopped at the range start with no insert suspended (`no_suspend = true`, which
+  is not the player's stop state), then play (E71, `../../escapes/E71-an-offline-print-started-on-a-fresh-chain-first-block.md`).
