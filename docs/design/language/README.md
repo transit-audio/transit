@@ -328,7 +328,7 @@ In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gi
 - **Combo box:** the dropdown above: `surface.inset`, 1 px `line`, chevron `text.faint` (`text.muted` on hover or open). Its list is a popup with the current value checked in `text` (lists built from check rows, as in Audio Devices, do this today; lists built from egui's selectable rows still mark the current value with the selection color until they move to check rows).
 - **Checkbox and radio:** a 14 px box in an 18 px hit, radius 3 (the radio round). Off `surface.inset` with `line.strong`; on `signal` with the mark in `surface.inset` (the radio: a 6 px `surface.inset` dot in a `signal` ring). Checked is a value set, like the switch.
 - **Scroll bars:** floating. At rest a 4 px `ink.ghost` handle; on hover 8 px `ink.arrow` on a `surface.panel` track; `text.faint` while dragging. Inset 2, minimum handle 24, round ends.
-- **Selected widgets** (egui's `selectable_label` until it moves to a toggle or segmented control) take the option toggle look: fill `toggle.on.option.fill`, text `signal`. egui backs a text selection with the same fill, so a text selection is the option fill too (it was `signal` at 60 percent, 35 in the light set); **links** `signal`.
+- **Text selection** `signal` at 60 percent (35 in the light set); **links** `signal`.
 
 ### Warnings and errors
 - **A warning** is the message in `text` with a triangle glyph, no color, on a `surface.raised` card with a `line.strong` edge where there is room for one (Audio Devices' low-buffer note in the artboard). A dedicated warning yellow would be a third amber next to `mod` and the old loop color.
