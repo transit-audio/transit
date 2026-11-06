@@ -311,7 +311,7 @@ In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gi
 ### The loop
 The loop region has its own hue, `loop` (magenta), clear of amber (mod) and blue (selection).
 
-- **Brace** (the strip at the top of the ruler): solid `loop` with the range in Mono 9 `ink.dark` ("5.1 – 9.1 · 4 bars"; the length only when it runs bar line to bar line) while Cycle is on; at 30 percent with a 55 percent edge and the range in `text` while Cycle is off (parked, no lane effect).
+- **Brace** (the strip at the top of the ruler): solid `loop` with the range in Mono 9 `ink.dark` ("5.1 – 9.1 · 4 bars"; the length only when it runs bar line to bar line) while Cycle is on; at 30 percent with a 55 percent edge and the range in `text` while Cycle is off (parked, no lane effect). The strip is `arrangement.loopStripHeight`, 14 points, so the Mono 9 range sits centered with at least 2 points above and below its text.
 - **Cycle on:** the ruler under the loop takes the hue at 20 percent; the loop's edges run down the ruler and the lanes at 75 percent; the lanes outside the loop take `overlay`. Nothing tints inside: the selection stays the only color there.
 - **Cycle button:** a role toggle, filled `loop` with an `ink.dark` glyph when on (Toggle table above); the toggle's off look when off.
 - **Piano roll:** out-of-scale rows at 12 percent of the hue (the artboard allows 9 to 12), their key labels in the hue; the keys keep their own fills; a live out-of-scale note is solid `loop`.
