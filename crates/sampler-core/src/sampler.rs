@@ -144,6 +144,58 @@ impl SamplerCore {
         Ok(())
     }
 
+    /// Replaces the whole patch (every zone and pad) in one step, as an adapter adopts a patch it
+    /// prepared off the audio thread: checked first with [`patch::check_patch`] (on an error nothing
+    /// changes), then applied with the rules of [`SamplerCore::set_zone`] and
+    /// [`SamplerCore::set_pad`]: voices of a zone whose region changes fade over
+    /// [`crate::CHOKE_FRAMES`] (a cleared zone's voices end at once), a pad voice fades when the
+    /// pad's zone changes or the new mute and solo exclude it; other voices play on. `zones` is
+    /// [`ZONES`] long. Neither allocates nor frees.
+    pub fn set_patch(&mut self, zones: &[Option<Zone>], pads: &[Pad; PADS]) -> Result<(), PatchError> {
+        if self.zones.len() != ZONES {
+            return Err(PatchError::Zone);
+        }
+        patch::check_patch(zones, pads)?;
+        let rate = self.rate;
+        for (index, zone) in zones.iter().enumerate() {
+            let old = self.zones.get(index).and_then(|s| s.as_ref().map(|s| s.zone.region));
+            if old != zone.map(|z| z.region) {
+                self.fade_where(|v| usize::from(v.zone) == index);
+            }
+            if let Some(slot) = self.zones.get_mut(index) {
+                *slot = zone.map(|zone| Slot { derived: Derived::of(&zone.playback, rate), zone });
+            }
+        }
+        for (index, pad) in pads.iter().enumerate() {
+            let changed = self.pads.get(index).is_some_and(|o| o.zone != pad.zone);
+            if changed && let Some(vi) = self.live_pad_voice(index) {
+                self.fade_voice(vi);
+            }
+        }
+        self.pads = *pads;
+        self.bound = [None; ZONES];
+        for (i, p) in self.pads.iter().enumerate() {
+            if let Some(b) = p.zone.and_then(|z| self.bound.get_mut(usize::from(z))) {
+                *b = Some(i as u8);
+            }
+        }
+        self.any_solo = self.pads.iter().any(|p| p.solo);
+        for q in 0..PADS {
+            if !self.admits(q)
+                && let Some(vi) = self.live_pad_voice(q)
+            {
+                self.fade_voice(vi);
+            }
+        }
+        Ok(())
+    }
+
+    /// The source index of every sounding voice (tails included), in voice-slot order: an adapter
+    /// keeps a source generation until no voice reads it.
+    pub fn playing_sources(&self) -> impl Iterator<Item = u16> + '_ {
+        self.voices.iter().filter(|v| v.active).map(Voice::source)
+    }
+
     /// Zone `index`, if set.
     #[must_use]
     pub fn zone(&self, index: usize) -> Option<&Zone> {

@@ -247,3 +247,19 @@ pub(crate) fn check_pad(index: usize, pad: &Pad, pads: &[Pad; PADS], zone: impl 
     }
     Ok(())
 }
+
+/// Checks a whole patch at once: every zone's settings, and every pad against the other pads of
+/// `pads` and the zones of `zones` (`zones` is [`ZONES`] long). The control side checks a patch with
+/// this before it publishes it; [`crate::SamplerCore::set_patch`] checks again before adopting it.
+pub fn check_patch(zones: &[Option<Zone>], pads: &[Pad; PADS]) -> Result<(), PatchError> {
+    if zones.len() != ZONES {
+        return Err(PatchError::Zone);
+    }
+    for z in zones.iter().flatten() {
+        check_zone(z)?;
+    }
+    for (i, pad) in pads.iter().enumerate() {
+        check_pad(i, pad, pads, |z| zones.get(z).copied().flatten())?;
+    }
+    Ok(())
+}
