@@ -8,7 +8,9 @@
 
 pub mod bipolar_amount;
 pub mod display_well;
+pub mod fader;
 pub mod knob;
+pub mod level_meter;
 pub mod param_knob;
 pub mod section_bar;
 pub mod segmented;
@@ -18,9 +20,15 @@ pub mod toggle;
 #[cfg(test)]
 mod bipolar_amount_tests;
 #[cfg(test)]
+mod demo_tests;
+#[cfg(test)]
 mod display_well_tests;
 #[cfg(test)]
+mod fader_tests;
+#[cfg(test)]
 mod knob_tests;
+#[cfg(test)]
+mod level_meter_tests;
 #[cfg(test)]
 mod section_bar_tests;
 #[cfg(test)]
