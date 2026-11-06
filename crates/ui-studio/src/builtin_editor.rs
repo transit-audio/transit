@@ -143,6 +143,7 @@ impl StudioApp {
 /// Draws the editor window of every open built-in plug-in. Called every frame.
 pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
     app.builtin_editor.windows.clear();
+    crate::macro_osc_panel::window::follow(app);
     let keys = app.ui.plugin_windows.clone();
     let mut closed = Vec::new();
     let mut active: Vec<(TrackId, u64)> = Vec::new();

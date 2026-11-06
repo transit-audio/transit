@@ -66,7 +66,7 @@ fn the_remembered_rect_round_trips_through_ui_json_and_opens_on_screen() {
     assert_eq!(back.device_windows.get(super::MACRO_OSC), Some(&[100.0, 80.0, 1200.0, 700.0]));
     // An older ui.json without the field reads as empty.
     let old: crate::UiState = serde_json::from_value(json!({})).unwrap();
-    assert!(old.device_windows.is_empty() && old.device_sections.is_empty());
+    assert!(old.device_windows.is_empty() && old.device_sections.is_empty() && old.editor_follow.is_empty());
     let tr = t.instrument_track();
     t.open_card(0);
     assert_eq!(t.panel(tr).window, [100.0, 80.0, 1200.0, 700.0], "the device opens where it was last closed");
@@ -88,6 +88,31 @@ fn the_remembered_rect_round_trips_through_ui_json_and_opens_on_screen() {
 }
 
 #[test]
+fn follow_selection_switches_the_shown_device_to_the_focused_track() {
+    let mut t = T::new();
+    let a = t.instrument_track();
+    let b = t.instrument_track();
+    t.app.focus(a);
+    t.frames(3);
+    t.open_card(0);
+    assert_eq!(t.app.ui.plugin_windows, vec![(a, INST)]);
+    // Negative control: with follow off, focusing another track keeps the window on its insert.
+    t.app.focus(b);
+    t.frames(3);
+    assert_eq!(t.app.ui.plugin_windows, vec![(a, INST)]);
+    let link = t.panel(a).title.follow;
+    t.click(mid(link), 1);
+    t.app.focus(b);
+    t.frames(3);
+    assert_eq!(t.app.ui.plugin_windows, vec![(b, INST)], "following: the focused track's Macro Oscillator");
+    assert!(t.panel(b).title.follow_on, "still following");
+    assert_eq!(t.panel(b).title.track, t.app.engine.session().track(b).unwrap().name);
+    t.app.focus(a);
+    t.frames(3);
+    assert_eq!(t.app.ui.plugin_windows, vec![(a, INST)]);
+}
+
+#[test]
 fn both_token_sets_draw_the_panel() {
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
         let (mut t, tr) = T::open();
@@ -98,6 +123,7 @@ fn both_token_sets_draw_the_panel() {
         let k = &p.knob("harmonics").unwrap().knob;
         assert_eq!(k.arc, tokens.signal, "{theme:?}: the value arc");
         assert_eq!(k.cap, tokens.knob_cap, "{theme:?}: the cap");
+        assert_eq!(p.title.follow_fill, tokens.surface_raised, "{theme:?}: the off toggle");
         let bar = p.shaper_bar.unwrap();
         assert_eq!(bar.tag_border, tokens.line_strong);
         let well = &p.wells.iter().find(|w| w.name == "scope").unwrap().well;

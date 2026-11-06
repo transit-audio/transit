@@ -3,6 +3,7 @@
 
 use super::test_rig::{T, info, mid};
 use super::title_bar::{BUTTON, FIELD_W, METER_W, stepped};
+use crate::theme::TOKENS;
 use crate::widgets::test_support::size;
 
 fn names(list: &[(bool, &str)]) -> Vec<(bool, String)> {
@@ -28,7 +29,7 @@ fn the_bar_draws_the_board_anatomy_in_tokens() {
     assert_eq!(size(b.bar).1, crate::tokens::layout::TITLE_BAR_HEIGHT);
     assert_eq!(b.device, "Macro Oscillator");
     assert_eq!(b.track, t.app.engine.session().track(tr).unwrap().name);
-    for r in [b.prev, b.next, b.save, b.bypass, b.menu, b.close] {
+    for r in [b.prev, b.next, b.save, b.bypass, b.menu, b.close, b.follow] {
         assert_eq!(size(r), (BUTTON, BUTTON), "{r:?}");
     }
     assert_eq!(size(b.field).0, FIELD_W);
@@ -37,10 +38,12 @@ fn the_bar_draws_the_board_anatomy_in_tokens() {
     let center = (b.bar[0] + b.bar[2]) / 2.0;
     assert!(b.prev[2] < b.field[0] && b.field[2] < b.next[0] && b.next[2] < b.save[0]);
     assert!(((b.prev[0] + b.save[2]) / 2.0 - center).abs() < 1.0, "the browser is centered");
-    // Right side, from the edge in: close, menu, bypass, then the meter.
-    assert!(b.close[0] > b.menu[2] && b.menu[0] > b.bypass[2] && b.bypass[0] > b.meter[2]);
+    // Right side, from the edge in: close, menu, bypass, follow, then the meter.
+    assert!(b.close[0] > b.menu[2] && b.menu[0] > b.bypass[2] && b.bypass[0] > b.follow[2] && b.follow[0] > b.meter[2]);
     // An instrument has no bypass: the glyph is ghosted and does nothing.
     assert!(!b.bypass_available && !b.bypass_on);
+    assert!(!b.follow_on, "follow selection starts off");
+    assert_eq!(b.follow_fill, TOKENS.surface_raised, "the off toggle");
     assert_eq!(t.window(tr).preset, b.field, "the editor record's preset rect is the field");
 }
 
@@ -140,3 +143,14 @@ fn the_meter_of_a_silent_instrument_is_empty() {
     assert_eq!(size(t.panel(tr).title.meter_fill).0, 0.0, "silence: no fill");
 }
 
+#[test]
+fn the_follow_toggle_latches_in_the_option_role() {
+    let (mut t, tr) = T::open();
+    let link = t.panel(tr).title.follow;
+    t.click(mid(link), 1);
+    assert!(t.panel(tr).title.follow_on);
+    assert_eq!(t.panel(tr).title.follow_fill, TOKENS.toggle_option_fill);
+    assert_eq!(t.app.ui.editor_follow, vec![(tr, transit_mix::INSTRUMENT_SLOT)]);
+    t.click(mid(link), 1);
+    assert!(!t.panel(tr).title.follow_on && t.app.ui.editor_follow.is_empty());
+}

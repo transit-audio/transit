@@ -37,6 +37,9 @@ pub struct UiState {
     /// language's section bar: collapse is a per-user view setting, enable is the parameter). A
     /// section without an entry is collapsed until it is in use.
     pub device_sections: std::collections::BTreeMap<String, bool>,
+    /// Device windows that follow the selection (326-M, the title bar's link toggle), as their
+    /// current (track, slot): such a window shows the focused track's device in the same slot.
+    pub editor_follow: Vec<(TrackId, usize)>,
     /// How long each plug-in type took to load the last time, in milliseconds by plug-in id (issue
     /// #67): "last time 12 s" beside the loading readout. A per-machine preference, updated on
     /// every successful load; older files have none.
@@ -147,6 +150,7 @@ impl Default for UiState {
             plugin_windows: Vec::new(),
             device_windows: std::collections::BTreeMap::new(),
             device_sections: std::collections::BTreeMap::new(),
+            editor_follow: Vec::new(),
             plugin_load_ms: std::collections::BTreeMap::new(),
             header_width: 236.0,
             window_size: [1600.0, 1000.0],

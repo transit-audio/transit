@@ -6,6 +6,9 @@
 //!   moves the window when dragged. The body scrolls between the bar and the footer.
 //! - **Remembered rect:** per device id in `UiState::device_windows` (saved in `ui.json`): a device
 //!   opens where it was last closed, moved and shrunk onto the screen when it no longer fits.
+//! - **Follow selection** (the bar's link toggle, `UiState::editor_follow`): the window shows the
+//!   focused track's device in the same slot when that device is one this panel draws; off, it
+//!   stays on its insert.
 
 use super::{Dev, FOOTER_H, MIN_WIDTH, MacroLayout};
 use crate::StudioApp;
@@ -67,6 +70,26 @@ pub fn opening_rect(remembered: Option<[f32; 4]>, screen: Rect, content_h: f32, 
 impl StudioApp {
 }
 
+/// Follow selection: each following window moves to the focused track's device in its slot.
+pub(crate) fn follow(app: &mut StudioApp) {
+    let Some(focus) = app.ui.focus_track else { return };
+    for key in app.ui.editor_follow.clone() {
+        let target = (focus, key.1);
+        let shows = app.builtin_at(target).is_some_and(|i| super::handles(&i.plugin));
+        if target == key || !shows || app.ui.plugin_windows.contains(&target) || !app.ui.plugin_windows.contains(&key) {
+            continue;
+        }
+        for k in app.ui.plugin_windows.iter_mut().chain(app.ui.editor_follow.iter_mut()) {
+            if *k == key {
+                *k = target;
+            }
+        }
+    }
+    // A following window that closed stops following.
+    let open = app.ui.plugin_windows.clone();
+    app.ui.editor_follow.retain(|k| open.contains(k));
+}
+
 /// Draws the window of `key`; returns whether it stays open.
 pub(crate) fn show(
     app: &mut StudioApp,
@@ -93,6 +116,7 @@ pub(crate) fn show(
     let st = &app.builtin_editor.macro_osc;
     let pos = st.pos.get(&uid).copied().unwrap_or(screen.min);
     let generation = st.generation.get(&uid).copied().unwrap_or(0);
+    let follow = app.ui.editor_follow.contains(&key);
     let mut mlay = MacroLayout::default();
     let mut bar = super::title_bar::TitleOut::default();
     let mut win = crate::theme::device_panel_window(layout.title.clone())
@@ -107,7 +131,7 @@ pub(crate) fn show(
     let shown = win.show(ctx, |ui| {
         let avail = ui.available_rect_before_wrap();
         let top = Rect::from_min_size(avail.min, vec2(avail.width(), space::TITLE_BAR_HEIGHT));
-        bar = super::title_bar::show(app, ui, dev, top, layout, &mut mlay);
+        bar = super::title_bar::show(app, ui, dev, top, follow, layout, &mut mlay);
         ui.allocate_rect(top, Sense::hover());
         let body_h = (avail.height() - space::TITLE_BAR_HEIGHT - FOOTER_H).max(0.0);
         egui::ScrollArea::vertical()
@@ -132,6 +156,13 @@ pub(crate) fn show(
         && let Some(p) = app.builtin_editor.macro_osc.pos.get_mut(&uid)
     {
         *p += bar.drag;
+    }
+    if bar.toggle_follow {
+        if follow {
+            app.ui.editor_follow.retain(|k| *k != key);
+        } else {
+            app.ui.editor_follow.push(key);
+        }
     }
     layout.macro_osc = Some(Box::new(mlay));
     open

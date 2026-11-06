@@ -1,7 +1,7 @@
 //! The device title bar (README, Device anatomy A; the board's header): 52 px on `bg.titlebar`
 //! with a 1 px `line` below. Left: the brand, a divider, the track and the device. Centered: the
 //! preset browser (previous, the name field, next, save) over the existing preset system. Right:
-//! the output meter and its readout, bypass, the device menu, close.
+//! the output meter and its readout, the follow-selection toggle, bypass, the device menu, close.
 //!
 //! The title bar's buttons are the board's: 32 square, `surface.panel` with a 1 px `line` and
 //! radius 6, a 14 px glyph in `text.muted`; close is borderless. The bypass glyph keeps the insert
@@ -14,7 +14,7 @@ use crate::builtin_editor::EditorLayout;
 use crate::presets;
 use crate::theme::TOKENS;
 use crate::tokens::{self, layout as space, radius};
-use crate::widgets::{self, level_meter, r4};
+use crate::widgets::{self, level_meter, r4, toggle};
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 /// The bar's buttons and the preset field.
@@ -45,17 +45,22 @@ pub struct TitleLayout {
     pub meter: [f32; 4],
     pub meter_fill: [f32; 4],
     pub readout: String,
+    pub follow: [f32; 4],
+    pub follow_on: bool,
     pub bypass: [f32; 4],
     pub bypass_available: bool,
     pub bypass_on: bool,
     pub menu: [f32; 4],
     pub close: [f32; 4],
+    #[doc(hidden)]
+    pub follow_fill: Color32,
 }
 
 /// What the bar asks of its window.
 #[derive(Debug, Default)]
 pub struct TitleOut {
     pub close: bool,
+    pub toggle_follow: bool,
     /// The bar dragged by this much (the window moves with it).
     pub drag: egui::Vec2,
 }
@@ -201,7 +206,7 @@ fn meter_level(app: &mut StudioApp, ui: &Ui, dev: Dev) -> f32 {
 }
 
 /// Draws the bar into `rect` (52 high) and records it.
-pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut EditorLayout, out: &mut MacroLayout) -> TitleOut {
+pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follow: bool, lay: &mut EditorLayout, out: &mut MacroLayout) -> TitleOut {
     let t = &TOKENS;
     let mut res = TitleOut::default();
     let uid = dev.uid();
@@ -261,7 +266,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     paint_glyph(&p, save.center(), "save", t.text_muted);
     (tl.prev, tl.field, tl.next, tl.save) = (r4(prev), r4(field), r4(next), r4(save));
 
-    // Right, from the edge in: close, menu, bypass, readout, meter.
+    // Right, from the edge in: close, menu, bypass, follow, readout, meter.
     let mut x = rect.max.x - space::WINDOW_PADDING - BUTTON;
     let close = sq(x);
     let resp = ui.interact(close, id("close"), Sense::click());
@@ -276,6 +281,9 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     paint_glyph(&p, menu.center(), "menu", t.text_muted);
     egui::Popup::menu(&mresp).show(|ui| {
         crate::chrome::menu_style(ui.style_mut());
+        if crate::menus::check_button(ui, follow, "Follow Selection").clicked() {
+            res.toggle_follow = true;
+        }
     });
     x -= GAP + BUTTON;
     let bypass = sq(x);
@@ -293,6 +301,15 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     };
     crate::icons::paint(&p, bypass.center(), crate::icons::Icon::Power, GLYPH + 4.0, glyph);
     (tl.bypass, tl.bypass_available, tl.bypass_on) = (r4(bypass), insert, insert && !dev.ins.bypass);
+    x -= GAP + BUTTON;
+    let link = sq(x);
+    let fresp = ui.interact(link, id("follow"), Sense::click());
+    let (fill, ink, border) = toggle::colors(toggle::Role::Option, follow, true);
+    p.rect(link, BUTTON_RADIUS, if !follow && fresp.hovered() { t.button_hover } else { fill }, Stroke::new(1.0, border), StrokeKind::Inside);
+    paint_glyph(&p, link.center(), "link", ink);
+    fresp.clone().on_hover_text("Follow Selection: show the device of the focused track");
+    res.toggle_follow |= fresp.clicked();
+    (tl.follow, tl.follow_on, tl.follow_fill) = (r4(link), follow, fill);
     x -= GAP + READOUT_W;
     let level = meter_level(app, ui, dev);
     tl.readout = readout(level);
