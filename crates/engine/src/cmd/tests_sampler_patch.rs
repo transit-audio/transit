@@ -425,3 +425,18 @@ fn importing_a_track_brings_its_patch_media_and_never_aliases_a_source() {
     assert_eq!(e.session().source(sid).unwrap().name, "tone", "the patch names the imported copy, not a source of this session");
     assert!(e.session().pool.get(sid).is_some());
 }
+
+#[test]
+fn a_sampler_with_a_patch_refuses_the_one_sample_load() {
+    let d = Dir::new("legacy-load");
+    let mut e = Engine::default();
+    let t = kit(&mut e, &d);
+    let before = e.session_arc();
+    let err = e.execute("mix.sampler_load", &json!({"track": t, "path": s(&d.path("tone.wav"))})).unwrap_err().to_string();
+    assert!(err.contains("mix.sampler_zone_source"), "{err}");
+    let bytes = std::fs::read(d.path("tone.wav")).unwrap();
+    assert!(crate::io::load_sampler_bytes(&mut e, t, "drop.wav", &bytes).is_err(), "dropped bytes too");
+    assert!(e.execute("mix.sampler_clear", &json!({"track": t})).is_err());
+    assert!(Arc::ptr_eq(&before, &e.session_arc()), "no one-sample field beside the patch");
+    assert!(e.session().track(t).unwrap().instrument.as_ref().unwrap().sample.is_none());
+}

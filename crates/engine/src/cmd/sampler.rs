@@ -4,6 +4,10 @@
 //! The source is saved in `Audio Files/` with the session like any other audio, so a session that
 //! uses a sample reopens with it. Sampler parameters (root note, key range, ADSR, loop…) are set
 //! with `mix.instrument_param`, or all at once with `params` here.
+//!
+//! A Sampler that has a patch (ADR 0041, `cmd/sampler_patch.rs`) refuses both: its zones take
+//! their sources through `mix.sampler_zone_source`. A one-sample `Insert::sample` beside a patch
+//! would make an older build play that one sample as the whole kit.
 
 use super::*;
 use crate::cmd;
@@ -72,6 +76,7 @@ pub(crate) fn attach(e: &mut Engine, t: TrackId, name: &str, bytes: &[u8], path:
         return Err(bad(id, "only instrument tracks have a sampler"));
     }
     let info = transit_dsp::plugin_info(SAMPLER).ok_or_else(|| bad(id, "the sampler is not available"))?;
+    refuse_patched(e, id, t)?;
     let ext = Path::new(name).extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase);
     let (format, buf) = transit_audio_io::decode(bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
     if buf.frames() == 0 || buf.num_channels() == 0 {
@@ -101,9 +106,19 @@ pub(crate) fn attach(e: &mut Engine, t: TrackId, name: &str, bytes: &[u8], path:
     Ok(json!({"track": t, "source": src, "name": stem, "frames": frames, "channels": channels, "sample_rate": rate}))
 }
 
+/// Refuses a one-sample edit on a Sampler that has a patch (its zones hold the samples).
+fn refuse_patched(e: &Engine, id: &str, t: TrackId) -> Result<()> {
+    let patched = e.session().track(t).and_then(|tr| tr.instrument.as_ref()).is_some_and(|i| i.plugin == SAMPLER && i.sampler_patch.is_some());
+    if patched {
+        return Err(bad(id, "the track's Sampler has a patch: give a zone its sample with mix.sampler_zone_source"));
+    }
+    Ok(())
+}
+
 fn clear(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "mix.sampler_clear";
     let t = instrument_track(e, id, p)?;
+    refuse_patched(e, id, t)?;
     let ins = e.session_mut().track_mut(t).and_then(|tr| tr.instrument.as_mut()).filter(|i| i.plugin == SAMPLER);
     let ins = ins.ok_or_else(|| bad(id, "the track's instrument is not the sampler"))?;
     let had = ins.sample.take();
