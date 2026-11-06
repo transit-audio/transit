@@ -1,10 +1,33 @@
-//! Sampler: plays one recorded sample across the keyboard, 32 voices.
+//! Sampler: transit's built-in sample instrument (ADR 0041), one plug-in (`SAMPLER_INFO`, id
+//! `sampler`) with two render paths.
 //!
-//! Each note plays the sample pitched from its root note (an octave up plays twice as fast) with
-//! 4-point cubic interpolation, which also converts the sample's own rate to the host's. Key and
-//! velocity ranges, an amp ADSR with velocity sensitivity, a sample start point, forward or
-//! ping-pong loops, and gate or one-shot playback. The host hands the audio over with
-//! [`Plugin::set_sample`]; without one the Sampler is silent.
+//! - **Legacy path** (`legacy.rs`): plays one recorded sample across the keyboard, 32 voices. Each
+//!   note plays the sample pitched from its root note (an octave up plays twice as fast) with
+//!   4-point cubic interpolation, which also converts the sample's own rate to the host's. Key and
+//!   velocity ranges, an amp ADSR with velocity sensitivity, a sample start point, forward or
+//!   ping-pong loops, and gate or one-shot playback, set by the 19 parameters. The host hands the
+//!   audio over with [`Plugin::set_sample`]; without one the Sampler is silent. Every instance
+//!   plays here unless switched (`Insert::sample` sessions), bit for bit as the v0.6.2 release
+//!   (`tests/sampler_legacy_golden.rs`).
+//! - **Core path** (`adapter.rs`): an instance switched with [`Sampler::enable_core`] plays through
+//!   `transit-sampler-core` (zones, 64 pads in four banks, 64 voices, the per-voice shaper and
+//!   matrix). The samples are a [`PreparedBank`] of `Arc`s by stable source id, lent to the core as
+//!   [`Source`] views (`bank.rs`); host events become core events in a fixed array of 1024 with the
+//!   release reserve (`events.rs`); each zone slot has fixed parameter ids (`zone001_level`,
+//!   `zone001_pan`, the shaper and `mod` ids behind the prefix; `params.rs`), built into the zone's
+//!   settings at the session rate. The unprefixed ids keep addressing the legacy renderer.
+//! - **Handoff** (`handoff.rs`): the control side publishes a [`PatchSpec`] through the
+//!   [`Publisher`]; it is checked whole and prepared off the audio thread as a generation. Two
+//!   publication slots (the current generation and at most one pending; edits coalesce on the
+//!   control side), two retirement slots and four bank-generation credits ([`CREDITS`]). At a block
+//!   boundary the audio thread adopts the pending generation only when a retained slot is free for
+//!   the old one; voices of replaced zones fade over 32 frames still reading the retained
+//!   generation, which goes back through the retirement queue once no sounding voice reads it (a
+//!   full queue keeps it retained and holds further adoption). The control side drops retired
+//!   generations: no `Arc` drop, free, lock or allocation on the audio thread.
+//!
+//! No session field selects the core path yet: it is reachable from code and tests; the model's
+//! patch and its save and load follow.
 
 use std::sync::Arc;
 
