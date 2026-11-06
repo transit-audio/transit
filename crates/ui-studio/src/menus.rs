@@ -301,6 +301,13 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let _ = app.run("window.editors_follow", json!({"value": !on}));
                         ui.close();
                     }
+                    // 326-M: every plug-in editor window, built-in and hosted.
+                    let b = ui.add_enabled(!app.ui.plugin_windows.is_empty(), menu_button("Close All Editors"));
+                    window_items.push(crate::mixer::MenuItem::at(ui, "Close All Editors".into(), "window.close_editors".into(), b.rect));
+                    if b.clicked() {
+                        let _ = app.run("window.close_editors", json!({}));
+                        ui.close();
+                    }
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Window".into(), String::new(), window_menu.response.rect));
                 app.arrange.bar_menu.extend(window_items);

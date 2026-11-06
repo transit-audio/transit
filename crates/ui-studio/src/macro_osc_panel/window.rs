@@ -11,12 +11,14 @@
 //! - **Follow selection** (the bar's link toggle, `UiState::editor_follow`): the window shows the
 //!   focused track's device in the same slot when that device is one this panel draws; off, it
 //!   stays on its insert.
+//! - **Window > Close All Editors** (`window.close_editors`) closes every plug-in editor.
 
 use super::{Dev, FOOTER_H, MIN_WIDTH, MacroLayout};
 use crate::StudioApp;
 use crate::builtin_editor::EditorLayout;
 use crate::tokens::layout as space;
 use egui::{Pos2, Rect, Sense, Vec2, pos2, vec2};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use transit_model::{Insert, TrackId};
 
@@ -74,6 +76,15 @@ pub fn opening_rect(remembered: Option<[f32; 4]>, screen: Rect, content_h: f32, 
 }
 
 impl StudioApp {
+    /// `window.close_editors`: closes every plug-in editor window (built-in and hosted).
+    pub(crate) fn close_all_editors(&mut self) -> Value {
+        let keys = self.ui.plugin_windows.clone();
+        for key in &keys {
+            self.close_editor(*key);
+        }
+        json!({"closed": keys.len()})
+    }
+
     /// The open editor key of the insert `uid`, if a window of this panel shows it.
     fn editor_of(&self, uid: u64) -> Option<(TrackId, usize)> {
         self.ui.plugin_windows.iter().copied().find(|k| self.builtin_at(*k).is_some_and(|i| i.uid.get() == uid && super::handles(&i.plugin)))
@@ -182,7 +193,7 @@ pub(crate) fn show(
         super::footer(app, ui, foot, layout, &mut mlay);
         ui.allocate_rect(foot, Sense::hover());
     });
-    let open = !bar.close;
+    let mut open = !bar.close;
     if let Some(w) = &shown {
         let r = w.response.rect;
         layout.rect = crate::widgets::r4(r);
@@ -201,6 +212,10 @@ pub(crate) fn show(
         } else {
             app.ui.editor_follow.push(key);
         }
+    }
+    if bar.close_all {
+        app.close_all_editors();
+        open = false;
     }
     let typing = mlay.knobs.iter().find(|k| k.knob.editing).map(|k| k.param.clone());
     let st = &mut app.builtin_editor.macro_osc;

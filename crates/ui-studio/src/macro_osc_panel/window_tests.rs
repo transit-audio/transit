@@ -114,6 +114,27 @@ fn escape_closes_the_focused_editor_only() {
 }
 
 #[test]
+fn close_all_editors_closes_every_editor_from_the_window_menu() {
+    let mut t = T::new();
+    let tr = t.instrument_track();
+    t.app.add_device(tr, "gain").unwrap();
+    t.frames(4);
+    t.open_card(0);
+    t.open_card(1);
+    assert_eq!(t.app.ui.plugin_windows.len(), 2);
+    let menu = t.app.arrange.bar_menu.iter().find(|m| m.label == "Window").cloned().unwrap();
+    t.click(mid(menu.rect), 1);
+    let item = t.app.arrange.bar_menu.iter().find(|m| m.label == "Close All Editors").cloned().expect("Window > Close All Editors");
+    assert_eq!(item.value, "window.close_editors");
+    t.click(mid(item.rect), 1);
+    assert!(t.app.ui.plugin_windows.is_empty() && t.app.builtin_editor.windows.is_empty(), "both closed");
+    // The command answers agents too, and the device menu offers the same.
+    t.open_card(1);
+    assert_eq!(t.app.run("window.close_editors", json!({})).unwrap()["closed"], 1);
+    assert!(t.app.ui.plugin_windows.is_empty());
+}
+
+#[test]
 fn follow_selection_switches_the_shown_device_to_the_focused_track() {
     let mut t = T::new();
     let a = t.instrument_track();

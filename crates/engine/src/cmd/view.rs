@@ -13,6 +13,8 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(view "window.midi_monitor", "MIDI Monitor", [], None, "{value?: bool; without it the window flips}", always, |_, _| Err(bad("window.midi_monitor", "runs in the transit app only"))),
         // Window > Plug-in Windows Follow transit (#173): a studio app preference; listed for agents.
         cmd!(view "window.editors_follow", "Plug-in Windows Follow transit", [], None, "{value?: bool; without it the setting flips}", always, |_, _| Err(bad("window.editors_follow", "runs in the transit app only"))),
+        // Window > Close All Editors (326-M): the studio app owns the editor windows; listed for agents.
+        cmd!(view "window.close_editors", "Close All Editors", [], None, "{}", always, |_, _| Err(bad("window.close_editors", "runs in the transit app only"))),
         cmd!(view "help.check_updates", "Check for Updates...", [], None, "{}", always, |_, _| Err(bad("help.check_updates", "runs in the transit app only"))),
         // Help > Debug Logging: the studio app owns the logger; listed here for agents.
         cmd!(view "help.debug_logging", "Debug Logging", [], None, "{on?: bool; without it the setting flips}", always, |_, _| Err(bad("help.debug_logging", "runs in the transit app only"))),

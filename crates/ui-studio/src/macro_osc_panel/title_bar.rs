@@ -61,6 +61,7 @@ pub struct TitleLayout {
 pub struct TitleOut {
     pub close: bool,
     pub toggle_follow: bool,
+    pub close_all: bool,
     /// The bar dragged by this much (the window moves with it).
     pub drag: egui::Vec2,
 }
@@ -283,6 +284,9 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follo
         crate::chrome::menu_style(ui.style_mut());
         if crate::menus::check_button(ui, follow, "Follow Selection").clicked() {
             res.toggle_follow = true;
+        }
+        if crate::menus::check_button(ui, false, "Close All Editors").clicked() {
+            res.close_all = true;
         }
     });
     x -= GAP + BUTTON;

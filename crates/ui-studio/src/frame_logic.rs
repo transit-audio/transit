@@ -93,6 +93,9 @@ impl StudioApp {
         if id == "window.editors_follow" {
             return Ok(self.set_editors_follow(params.get("value").and_then(Value::as_bool)));
         }
+        if id == "window.close_editors" {
+            return Ok(self.close_all_editors());
+        }
         if id == "window.midi_monitor" {
             return Ok(self.toggle_midi_monitor(params.get("value").and_then(Value::as_bool)));
         }
