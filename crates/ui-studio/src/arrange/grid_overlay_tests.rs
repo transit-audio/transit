@@ -281,32 +281,61 @@ fn tok(t: &Tokens, kind: Kind) -> Color32 {
     }
 }
 
-/// The overlay is gray: one alpha for all channels, the mean of the token's three distances from
-/// the lane. So over an empty lane it lands on the lane moved by that mean in every channel (to
-/// rounding), and it reproduces the token as closely as a gray can: within the token's own lean,
-/// how far its channels' distances stray from their mean (dark 25, 25, 27 above the lane; the
-/// designed light set's bar line 38, 35, 32 below it, #326). Tighter would need a tinted stroke.
+/// How far, per channel, the gray overlay over an empty lane may land from the grid token it stands
+/// for. The overlay is gray (one alpha for all channels, the mean of the three distances) and the
+/// tokens lean blue, so a channel can land a few steps off. The allowance is fixed, never derived
+/// from the token under test:
+/// - dark: 3, and the token's lean (how far its channel distances stray from their mean) at most 2,
+///   as before this branch (the tokens sit 25, 25, 27 above the lane);
+/// - light: 4. The designed light bar line `#CDD1D6` sits 38, 35, 32 below the lane `#F3F4F6`, so
+///   its blue channel lands 4 off: one step past the old bound of 3, which is the whole reason the
+///   light allowance is 4 (#326).
+const OVERLAY_BOUND_DARK: i32 = 3;
+const OVERLAY_BOUND_LIGHT: i32 = 4;
+/// The dark set's fixed cap on a grid token's lean.
+const DARK_LEAN_CAP: f32 = 2.0;
+
+/// The overlay for `token` over an empty `lane`, checked against the fixed `bound` (and the fixed
+/// lean cap, where there is one): `Err` says what missed.
+fn overlay_reproduces(token: Color32, lane: Color32, bound: i32, lean_cap: Option<f32>) -> Result<(), String> {
+    if let Some(cap) = lean_cap {
+        let d: Vec<f32> =
+            [(token.r(), lane.r()), (token.g(), lane.g()), (token.b(), lane.b())].iter().map(|(a, b)| f32::from(*a) - f32::from(*b)).collect();
+        let mean = d.iter().sum::<f32>() / 3.0;
+        let lean = d.iter().map(|x| (x - mean).abs()).fold(0.0, f32::max);
+        if lean > cap {
+            return Err(format!("lean {lean} over the cap {cap}"));
+        }
+    }
+    let o = translucent(token, lane, 1.0);
+    let got = over(o, [lane.r(), lane.g(), lane.b()]);
+    let want = [token.r(), token.g(), token.b()].map(i32::from);
+    for i in 0..3 {
+        if (got[i] - want[i]).abs() > bound {
+            return Err(format!("channel {i}: {got:?} vs {want:?} (overlay {o:?}, bound {bound})"));
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn the_overlay_over_an_empty_lane_reproduces_the_token_in_both_themes() {
     both_themes(|t| {
+        let (bound, cap) = if t.light_clips { (OVERLAY_BOUND_LIGHT, None) } else { (OVERLAY_BOUND_DARK, Some(DARK_LEAN_CAP)) };
         for k in KINDS {
-            let o = translucent(tok(t, k), t.lane, 1.0);
-            let lane = [t.lane.r(), t.lane.g(), t.lane.b()].map(i32::from);
-            let got = over(o, [t.lane.r(), t.lane.g(), t.lane.b()]);
-            let want = [tok(t, k).r(), tok(t, k).g(), tok(t, k).b()].map(i32::from);
-            let d: Vec<f32> = (0..3).map(|i| (want[i] - lane[i]) as f32).collect();
-            let mean = d.iter().sum::<f32>() / 3.0;
-            let lean = d.iter().map(|x| (x - mean).abs()).fold(0.0, f32::max);
-            for i in 0..3 {
-                assert!((got[i] as f32 - (lane[i] as f32 + mean)).abs() <= 1.5, "{k:?} channel {i}: the gray at the mean distance: {got:?}");
-                assert!((got[i] - want[i]).abs() as f32 <= lean.ceil() + 1.0, "{k:?} channel {i}: {got:?} vs {want:?} (overlay {o:?}, lean {lean})");
-            }
-            // The dark set's tokens lean at most 2: the old bound of 3 still holds there.
-            if !t.light_clips {
-                assert!(lean <= 2.0, "{k:?}: dark lean {lean}");
+            if let Err(e) = overlay_reproduces(tok(t, k), t.lane, bound, cap) {
+                panic!("{k:?}: {e}");
             }
         }
     });
+    // Negative controls: a token a gray cannot stand for fails. A graphite-hue light bar line
+    // (#C8CFD8, 6 off in one channel) misses the light bound of 4; a bluer dark one (#30353B, a lean
+    // of 2.7) misses the dark lean cap.
+    let (d, l) = (&crate::theme::DARK, &crate::theme::LIGHT);
+    assert!(overlay_reproduces(crate::tokens::hex(0xC8CFD8), l.lane, OVERLAY_BOUND_LIGHT, None).is_err(), "light #C8CFD8");
+    assert!(overlay_reproduces(crate::tokens::hex(0x30353B), d.lane, OVERLAY_BOUND_DARK, Some(DARK_LEAN_CAP)).is_err(), "dark #30353B");
+    // And the designed light bar line needs the 4: it misses the old 3.
+    assert!(overlay_reproduces(l.grid_bar, l.lane, OVERLAY_BOUND_DARK, None).is_err(), "the designed light bar line misses 3");
 }
 
 #[test]
