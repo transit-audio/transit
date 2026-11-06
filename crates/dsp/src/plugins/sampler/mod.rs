@@ -220,3 +220,6 @@ impl Plugin for Sampler {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod core_tests;

@@ -273,4 +273,21 @@ impl CorePath {
         self.core.fingerprint(h);
         h.write_u64(self.frame);
     }
+
+    /// The core, for the crate's tests.
+    #[cfg(test)]
+    pub(super) fn core(&self) -> &SamplerCore {
+        &self.core
+    }
+
+    /// Generations held on the audio side: (current, retained).
+    #[cfg(test)]
+    pub(super) fn held(&self) -> (bool, usize) {
+        (self.current.is_some(), self.retained.iter().flatten().count())
+    }
+
+    #[cfg(test)]
+    pub(super) fn queued(&self) -> usize {
+        self.queue.len()
+    }
 }

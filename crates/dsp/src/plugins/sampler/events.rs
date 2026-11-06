@@ -138,4 +138,9 @@ impl CoreQueue {
     pub(super) fn clear(&mut self) {
         self.len = 0;
     }
+
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.len
+    }
 }
