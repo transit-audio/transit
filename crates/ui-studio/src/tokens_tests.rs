@@ -216,7 +216,6 @@ fn the_old_token_names_read_the_design_values() {
         (t.record, c::METER_HOT, "record = meter.hot"),
         (t.mute, c::TEXT, "mute = text (inverted toggle)"),
         (t.solo, c::SIGNAL, "solo = signal"),
-        (t.warn, c::MOD, "warn = mod"),
         (t.monitor, c::METER_OK, "monitor = meter.ok"),
         (t.focus_ring, c::SIGNAL, "focus_ring = signal"),
         (t.ink_dark, c::BG_WINDOW, "ink_dark = bg.window"),
@@ -229,7 +228,6 @@ fn the_old_token_names_read_the_design_values() {
         (l.bg, l.panel, l.accent, l.text_dim, l.record, l.mute, l.solo),
         (l.bg_window, l.surface_panel, l.signal, l.text_muted, l.meter_hot, l.text, l.signal)
     );
-    assert_eq!(l.warn, l.modulation, "light warn = mod");
     assert!(l.button_hover != l.button && t.button_hover != t.button, "hover is a visible step");
 }
 

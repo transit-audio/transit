@@ -42,6 +42,9 @@ pub struct TelemetryLayout {
     pub warning: Option<u64>,
     /// How loaded the readout looks (its color): ok, warning or alert.
     pub level: crate::load_readout::Level,
+    /// The bar's color for that level: `meter.ok`, `text` (a warning) or `meter.hot`.
+    #[serde(skip)]
+    pub tint: egui::Color32,
     pub open: bool,
     pub window: crate::arrange::R4,
     /// The window's lines: histogram rows, then raw counts, as `label: value`.

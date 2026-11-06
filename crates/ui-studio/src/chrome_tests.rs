@@ -293,3 +293,53 @@ fn disabled_text_lands_on_ink_arrow() {
     // Negative control: egui's default (0.5) reads as text.faint, not ink.arrow.
     assert!(!nearest_is_arrow(0.5));
 }
+
+/// The ink of every textured mesh (the icons) and every text in `shapes` inside `area`.
+fn inks(shapes: &[egui::epaint::ClippedShape], area: egui::Rect) -> (Vec<egui::Color32>, Vec<egui::Color32>) {
+    let (mut icons, mut texts) = (Vec::new(), Vec::new());
+    for c in shapes {
+        match &c.shape {
+            egui::Shape::Mesh(m) if m.texture_id != egui::TextureId::default() && area.contains(m.vertices[0].pos) => icons.push(m.vertices[0].color),
+            egui::Shape::Text(t) if area.contains(t.pos) => texts.extend(t.galley.job.sections.iter().map(|s| s.format.color)),
+            _ => {}
+        }
+    }
+    (icons, texts)
+}
+
+#[test]
+fn a_warning_is_text_and_a_triangle_and_an_error_adds_meter_hot() {
+    use chrome::Severity;
+    let mut rig = Rig::new();
+    for _ in 0..2 {
+        rig.idle(|ui| {
+            chrome::status_text(
+                ui.painter(),
+                pos2(40.0, 40.0),
+                "Buffers under 64 samples may drop out",
+                egui::FontId::proportional(12.0),
+                Severity::Warning,
+            )
+        });
+    }
+    let (warn_rect, shapes) = rig.shapes(|ui| {
+        chrome::status_text(
+            ui.painter(),
+            pos2(40.0, 40.0),
+            "Buffers under 64 samples may drop out",
+            egui::FontId::proportional(12.0),
+            Severity::Warning,
+        )
+    });
+    let (icons, texts) = inks(&shapes, warn_rect.expand(1.0));
+    assert_eq!((icons.as_slice(), texts.as_slice()), ([DARK.text].as_slice(), [DARK.text].as_slice()), "a warning: no color");
+    let (err_rect, shapes) = rig
+        .shapes(|ui| chrome::status_text(ui.painter(), pos2(40.0, 140.0), "The device stopped", egui::FontId::proportional(12.0), Severity::Error));
+    let (icons, texts) = inks(&shapes, err_rect.expand(1.0));
+    assert_eq!(icons, [DARK.meter_hot], "an error's triangle is meter.hot");
+    assert_eq!(texts, [DARK.text], "its message stays text");
+    // Negative control: the warning glyph is not the error's.
+    assert_ne!(Severity::Warning.glyph(), Severity::Error.glyph());
+    assert_ne!(Severity::Warning.glyph(), DARK.modulation, "no mod amber on a warning");
+    assert_eq!(style_of(egui::Theme::Dark).visuals.warn_fg_color, DARK.text, "egui's own warnings follow");
+}

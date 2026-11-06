@@ -527,3 +527,15 @@ fn sysex_rows_and_reports_show_the_bounded_prefix_and_search_it() {
     s.push_captured(&event, None, Some(&payload));
     assert_eq!(s.rows[1].raw_len, 1, "an unrelated direction must never attach its payload");
 }
+
+/// #326: a port that could not open or vanished is an error, a quiet open input a warning.
+#[test]
+fn port_lines_read_as_errors_warnings_or_plain() {
+    use crate::chrome::Severity;
+    let port = |state| PortReport { state, tracks: vec![], dir: Dir::In, id: 1, name: "KeyStep".into(), clock_bpm: None, sensing: false };
+    assert_eq!(port_severity(&port(PortState::Failed), "KeyStep (in) · closed: could not be opened"), Some(Severity::Error));
+    assert_eq!(port_severity(&port(PortState::Missing), "KeyStep (in) · closed: missing (unplugged?)"), Some(Severity::Error));
+    assert_eq!(port_severity(&port(PortState::Open), "KeyStep (in) · open · no data in 12 s"), Some(Severity::Warning));
+    // Negative control: an open port with traffic is a plain line.
+    assert_eq!(port_severity(&port(PortState::Open), "KeyStep (in) · open · 30 msg/s"), None);
+}

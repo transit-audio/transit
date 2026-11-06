@@ -3,9 +3,10 @@
 //!
 //! The load is the highest callback work time over about the last second as a share of the
 //! callback's nominal budget (see `CallbackTelemetry::current_load_ppm`), not the since-open peak:
-//! that stays in the details window, which a click opens. Above 80% the readout turns the warning
-//! color; at 100% and over, or for [`OVERLOAD_HOLD_SECS`] after any over-budget callback, the alert
-//! color. Counters are read by `telemetry::poll`, a few times a second.
+//! that stays in the details window, which a click opens. Above 80% the readout is a warning: it
+//! turns from `meter.ok` to `text` (a warning carries no color of its own, #326); at 100% and over,
+//! or for [`OVERLOAD_HOLD_SECS`] after any over-budget callback, it is an error in `meter.hot`.
+//! Counters are read by `telemetry::poll`, a few times a second.
 
 use crate::StudioApp;
 use crate::icons::{self, Icon};
@@ -66,7 +67,7 @@ pub fn host_text(host: &str) -> &str {
 
 /// What the number means.
 pub const TIP: &str = "Audio load: audio thread time per callback / callback budget (buffer frames / sample rate), the highest over \
-about the last second.\nAbove 80% it turns amber; at 100% or after an over-budget callback it turns red for a couple of seconds.";
+about the last second.\nAbove 80% it turns from green to white; at 100% or after an over-budget callback it turns red for a couple of seconds.";
 
 /// Draw the readout (a button that opens the telemetry details window).
 pub fn readout(app: &mut StudioApp, ui: &mut Ui) {
@@ -84,7 +85,7 @@ pub fn readout(app: &mut StudioApp, ui: &mut Ui) {
     let text = if host.is_empty() { format!("{load}  {fmt}") } else { format!("{load}  {fmt}  {host}") };
     let tint: Color32 = match level {
         Level::Ok => TOKENS.monitor,
-        Level::Warning => TOKENS.warn,
+        Level::Warning => TOKENS.text,
         Level::Alert => TOKENS.record,
     };
 
@@ -118,4 +119,5 @@ pub fn readout(app: &mut StudioApp, ui: &mut Ui) {
     l.rect = crate::arrange::r4(r);
     l.warning = errors;
     l.level = level;
+    l.tint = tint;
 }

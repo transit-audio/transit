@@ -112,6 +112,7 @@ fn measure_runs_from_the_card_stores_the_median_under_its_key_and_the_lookup_fol
     let today = transit_playback::devices::utc_today();
     assert_eq!(t.card().external_state, format!("Measured 19.9 ms on {today} at 48 kHz/64"));
     assert_eq!(t.card().external_measure_text, "Measure again");
+    assert_eq!(t.card().external_severity, None, "a stored measurement is a plain line");
     assert_eq!((t.report().latency, matches!(t.report().source, Some(ExternalSource::Measured(_)))), (Some(955), true));
     // A manual value wins while it is set.
     t.app.run("instrument.external", json!({"track": t.track.0, "manual_ms": 20.0})).unwrap();
@@ -120,11 +121,12 @@ fn measure_runs_from_the_card_stores_the_median_under_its_key_and_the_lookup_fol
     t.app.run("instrument.external", json!({"track": t.track.0, "manual_ms": null})).unwrap();
     t.frames(2);
     assert_eq!(t.report().latency, Some(955), "cleared: the measurement again");
-    // The device now runs 128 frames: the measurement is used as is, labeled amber.
+    // The device now runs 128 frames: the measurement is used as is, labeled a warning.
     t.fake().buffer = Some(128);
     t.frames(2);
     assert_eq!(t.card().external_state, "Measured at 48 kHz / 64, now 48 kHz / 128: measure again");
     assert!(t.card().external_stale);
+    assert_eq!(t.card().external_severity, Some(crate::chrome::Severity::Warning), "used, rescaled: a warning (#326)");
     assert_eq!(t.report().latency, Some(955));
     // The session at 44.1 kHz: rescaled by time, still labeled.
     t.app.engine.session_mut().sample_rate = transit_time::SampleRate::new(44_100).unwrap();
@@ -168,6 +170,7 @@ fn measure_is_refused_in_the_adr_words_and_a_failed_run_stores_nothing() {
         t.fake().result = Some(Err(error));
         t.frames(3);
         assert_eq!(t.card().external_state, said);
+        assert_eq!(t.card().external_severity, Some(crate::chrome::Severity::Error), "a refusal is an error (#326): {said}");
         assert_eq!(t.app.status, said);
         assert!(t.stored().is_empty(), "{said}");
     }

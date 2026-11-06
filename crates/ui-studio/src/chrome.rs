@@ -330,3 +330,54 @@ pub fn focus_ring(ctx: &egui::Context) -> Option<Rect> {
     );
     Some(ring)
 }
+
+/// How a status line reads (#326): a warning is the message in `text` with a triangle, no color;
+/// an error adds `meter.hot` to the triangle (and to the edge, where there is one). The message
+/// itself is always `text`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Warning,
+    Error,
+}
+
+impl Severity {
+    /// The triangle's ink.
+    pub fn glyph(self) -> Color32 {
+        match self {
+            Severity::Warning => TOKENS.text,
+            Severity::Error => TOKENS.meter_hot,
+        }
+    }
+
+    /// The message's ink: `text` for both.
+    pub fn ink(self) -> Color32 {
+        TOKENS.text
+    }
+}
+
+/// The triangle's box beside a message of `font_size` points.
+pub fn glyph_size(font_size: f32) -> f32 {
+    (font_size + 3.0).round()
+}
+
+/// Paints a status line from `at` (its left center): the triangle in the severity's ink, then the
+/// message in `text`. Returns the rect of both.
+pub fn status_text(p: &egui::Painter, at: egui::Pos2, text: &str, font: egui::FontId, sev: Severity) -> Rect {
+    let g = glyph_size(font.size);
+    crate::icons::paint(p, egui::pos2(at.x + g / 2.0, at.y), crate::icons::Icon::Warning, g, sev.glyph());
+    let r = p.text(egui::pos2(at.x + g + 3.0, at.y), Align2::LEFT_CENTER, text, font, sev.ink());
+    Rect::from_min_max(egui::pos2(at.x, r.min.y.min(at.y - g / 2.0)), egui::pos2(r.max.x, r.max.y.max(at.y + g / 2.0)))
+}
+
+/// [`status_text`] as a widget: the triangle and a label of `size` points.
+pub fn status_label(ui: &mut Ui, text: impl Into<String>, size: f32, sev: Severity) -> Response {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        let g = glyph_size(size);
+        let (r, _) = ui.allocate_exact_size(vec2(g, g), Sense::hover());
+        crate::icons::paint(ui.painter(), r.center(), crate::icons::Icon::Warning, g, sev.glyph());
+        ui.label(egui::RichText::new(text.into()).size(size).color(sev.ink()))
+    })
+    .inner
+}

@@ -145,7 +145,7 @@ pub fn measured_text(m: &ExternalLatency) -> String {
 }
 
 /// "Measured at 48 kHz / 64, now 44.1 kHz / 128: measure again": the newest measurement of the
-/// chain, made at another rate or buffer (used, rescaled by time across rates; labeled amber).
+/// chain, made at another rate or buffer (used, rescaled by time across rates; labeled a warning).
 #[must_use]
 pub fn stale_text(m: &ExternalLatency, rate: u32, buffer: Option<u32>) -> String {
     let now = buffer.map_or_else(|| rate_text(rate), |b| format!("{} / {b}", rate_text(rate)));
@@ -185,7 +185,7 @@ pub fn progress_text(p: Progress) -> String {
 }
 
 /// What the card's state line says about the latency of a playing device: the manual value, the
-/// measurement of this key, or one made at another rate or buffer; `amber` for the last.
+/// measurement of this key, or one made at another rate or buffer; `true` (a warning) for the last.
 #[must_use]
 pub fn latency_text(frames: u32, source: &ExternalSource, rate: u32, buffer: Option<u32>) -> (String, bool) {
     match source {
@@ -474,6 +474,6 @@ mod tests {
         );
         assert_eq!(progress_text(Progress { note: 3, of: 8, level: 0.0 }), "Measuring\u{2026} 3/8");
         assert_eq!(latency_text(960, &ExternalSource::Manual, 48_000, Some(64)), ("Manual: 20.0 ms".into(), false));
-        assert!(latency_text(955, &ExternalSource::Stale(record(48_000, 64, 955)), 48_000, Some(128)).1, "amber");
+        assert!(latency_text(955, &ExternalSource::Stale(record(48_000, 64, 955)), 48_000, Some(128)).1, "a warning");
     }
 }

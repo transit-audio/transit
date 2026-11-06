@@ -489,8 +489,13 @@ fn card_body(
     // A loaded plug-in that does not answer (#213): the same marker and hover as the insert row.
     let hang = if load.is_none() { app.slot_hang(t, key_slot, &plugin) } else { None };
     let kind = if hang.is_some() { UNRESPONSIVE.to_string() } else { kind };
-    let kind_ink = if hang.is_some() { TOKENS.warn } else { TOKENS.text_dim };
-    let kind_r = pc.text(pos2(r.min.x + 8.0, title.max.y + 12.0), Align2::LEFT_CENTER, &kind, FontId::proportional(10.0), kind_ink);
+    // Unresponsive is an error (#326): the message in `text` after a `meter.hot` triangle.
+    let kind_at = pos2(r.min.x + 8.0, title.max.y + 12.0);
+    let kind_r = if hang.is_some() {
+        crate::chrome::status_text(&pc, kind_at, &kind, FontId::proportional(10.0), crate::chrome::Severity::Error)
+    } else {
+        pc.text(kind_at, Align2::LEFT_CENTER, &kind, FontId::proportional(10.0), TOKENS.text_dim)
+    };
     if let Some(hang) = hang {
         ui.interact(kind_r.intersect(lane), ui.id().with(("unresponsive", t.0, salt)), Sense::hover()).on_hover_text(app.hang_tip(hang, &name));
     }

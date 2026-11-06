@@ -86,12 +86,13 @@ pub(super) fn track_header(
     if let Some((plugin, hang)) = app.track_hang(t) {
         let name = app.plugin_name(&plugin, false);
         let room = Rect::from_min_max(pos2(subtitle.max.x + 6.0, r.min.y + 22.0), pos2(r.max.x - 100.0, r.min.y + 38.0));
-        let m = p.with_clip_rect(room.intersect(list)).text(
+        // An error (#326): the message in `text` after a `meter.hot` triangle.
+        let m = crate::chrome::status_text(
+            &p.with_clip_rect(room.intersect(list)),
             room.left_center(),
-            Align2::LEFT_CENTER,
             crate::devices::UNRESPONSIVE,
             FontId::proportional(10.5),
-            TOKENS.warn,
+            crate::chrome::Severity::Error,
         );
         ui.interact(m.intersect(room).intersect(list), ui.id().with(("unresponsive", t.id.0)), Sense::hover())
             .on_hover_text(app.hang_tip(hang, &name));

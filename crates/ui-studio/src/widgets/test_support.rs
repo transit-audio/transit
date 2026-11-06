@@ -43,6 +43,26 @@ impl Rig {
         out.expect("the frame ran")
     }
 
+    /// One idle frame, returning what `f` returned and every shape the frame painted.
+    pub fn shapes<R>(&mut self, mut f: impl FnMut(&mut Ui) -> R) -> (R, Vec<egui::epaint::ClippedShape>) {
+        self.time += 1.0 / 60.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+            time: Some(self.time),
+            focused: true,
+            ..Default::default()
+        };
+        let mut out = None;
+        let mut full = self.ctx.run_ui(raw, |ui| {
+            crate::theme::follow(ui.ctx());
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(pos2(20.0, 20.0), vec2(700.0, 500.0))));
+            out = Some(f(&mut child));
+        });
+        full.textures_delta.clear();
+        crate::theme::set_current(egui::Theme::Dark);
+        (out.expect("the frame ran"), full.shapes)
+    }
+
     pub fn idle<R>(&mut self, f: impl FnMut(&mut Ui) -> R) -> R {
         self.frame(vec![], f)
     }

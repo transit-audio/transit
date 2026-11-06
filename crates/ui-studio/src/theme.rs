@@ -154,9 +154,6 @@ pub struct Tokens {
     pub focus_ring: Color32,
     /// Dims what lies outside a range (piano roll past the clip end).
     pub overlay: Color32,
-    /// Warnings (a load warning, a stale or unanswered device, a paused view): `mod`, since a
-    /// warning is something acting on the signal that the user did not set.
-    pub warn: Color32,
     /// Text on light fills and on dark fills ([`text_on`]); the dark ink is `bg.window`.
     pub ink_dark: Color32,
     pub ink_light: Color32,
@@ -218,7 +215,6 @@ macro_rules! token_set {
             selection_outline: SELECTION_OUTLINE,
             focus_ring: FOCUS_RING,
             overlay: OVERLAY,
-            warn: WARN,
             ink_dark: INK_DARK,
             ink_light: INK_LIGHT,
             light_clips: $light_clips,
@@ -326,7 +322,8 @@ fn visuals(t: &Tokens, light: bool) -> egui::Visuals {
     v.selection.bg_fill = t.signal.gamma_multiply(if light { c::SELECTION_ALPHA_LIGHT } else { c::SELECTION_ALPHA_DARK });
     v.selection.stroke = egui::Stroke::new(FOCUS_W, t.focus_ring);
     v.hyperlink_color = t.signal;
-    v.warn_fg_color = t.modulation;
+    // A warning is `text` and a triangle; an error adds `meter.hot` ([`crate::chrome::Severity`]).
+    v.warn_fg_color = t.text;
     v.error_fg_color = t.meter_hot;
     v.disabled_alpha = DISABLED_ALPHA;
     v.widgets.noninteractive.bg_fill = t.surface_panel;

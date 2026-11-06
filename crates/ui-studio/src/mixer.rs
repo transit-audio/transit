@@ -276,8 +276,11 @@ pub struct DeviceCard {
     pub status: String,
     /// The Retry button beside "Not responding" (zero otherwise).
     pub retry_button: R4,
-    /// The state line is amber: a measurement made at another rate or buffer ("measure again").
+    /// The state line is a warning: a measurement made at another rate or buffer ("measure again").
     pub external_stale: bool,
+    /// How the card's state reads (#326): a warning (a stale measurement, a result waiting for
+    /// Keep), an error (a refusal or a failed measurement), or plain.
+    pub external_severity: Option<crate::chrome::Severity>,
     /// The Measure button (Cancel while it runs) and Keep (a result with a high spread).
     pub external_measure: R4,
     pub external_keep: R4,

@@ -18,7 +18,7 @@ pub const MENU_LABEL: &str = "External Instrument";
 
 /// What the device card's state line says for `report` (the plan's view of the device),
 /// `live` (an audio device is open), and `port` (`None`: a port is chosen and present; else its
-/// label when missing, or an empty string when none is chosen), and whether it is amber (a
+/// label when missing, or an empty string when none is chosen), and whether it is a warning (a
 /// measurement of another rate or buffer in use). `rate` converts frames to ms and `buffer` is
 /// the open device's, against which a measurement is "measure again".
 #[must_use]
@@ -303,9 +303,19 @@ pub(crate) fn card(
     // A refusal or a result waiting for Keep is said where the state is, until the next Measure.
     let said = app.external_measure.outcome.as_ref().filter(|o| o.track == t && !o.stored).map(|o| o.text.clone());
     let running = app.external_measure.running.as_ref().is_some_and(|x| x.track == t);
+    // A result waiting for Keep and a measurement of another rate or buffer are warnings; a
+    // refusal or a failed measurement is an error (#326: `text`, and a triangle that is
+    // `meter.hot` for an error).
+    let keep_pending = app.external_measure.outcome.as_ref().is_some_and(|o| o.track == t && o.keep.is_some());
+    let severity = match &said {
+        Some(_) if keep_pending => Some(crate::chrome::Severity::Warning),
+        Some(_) => Some(crate::chrome::Severity::Error),
+        None if stale => Some(crate::chrome::Severity::Warning),
+        None => None,
+    };
     let (line, ink) = match &said {
-        Some(text) => (text.clone(), TOKENS.warn),
-        None if stale => (state.clone(), TOKENS.warn),
+        Some(text) => (text.clone(), TOKENS.text),
+        None if stale => (state.clone(), TOKENS.text),
         None => (state.clone(), if ok { TOKENS.text } else { TOKENS.text_dim }),
     };
     // Where the latency comes from (manual or measured) is the result; the rest is status.
@@ -318,7 +328,12 @@ pub(crate) fn card(
         String::new()
     };
     c.external_result = crate::arrange::r4(rows.result);
-    say(&result, rows.result, if running { TOKENS.text } else { ink });
+    match severity.filter(|_| !running && !result.is_empty()) {
+        Some(sev) => {
+            crate::chrome::status_text(&pc.with_clip_rect(rows.result.intersect(clip)), rows.result.left_center(), &result, font.clone(), sev);
+        }
+        None => say(&result, rows.result, if running { TOKENS.text } else { ink }),
+    }
     if !running && app.external_measure.outcome.as_ref().is_some_and(|o| o.track == t && o.keep.is_some()) {
         let resp = ui.interact(rows.keep.intersect(clip), ui.id().with(("ext_keep", t.0)), Sense::click());
         pc.rect_filled(rows.keep, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
@@ -348,16 +363,22 @@ pub(crate) fn card(
     }
     pc.rect_filled(area, crate::theme::RADIUS, TOKENS.button);
     if !status.is_empty() {
-        let galley = pc.layout(status, FontId::proportional(10.0), ink, area.width() - 10.0);
-        pc.with_clip_rect(area.intersect(clip)).galley(
-            pos2(area.center().x - galley.size().x / 2.0, area.center().y - galley.size().y / 2.0),
-            galley,
-            ink,
-        );
+        // A warning or an error keeps its triangle left of the text (#326).
+        let sev = severity.filter(|_| muted.is_none() && said.is_some());
+        let size = crate::chrome::glyph_size(10.0);
+        let g = sev.map_or(0.0, |_| size + 3.0);
+        let galley = pc.layout(status, FontId::proportional(10.0), ink, area.width() - 10.0 - g);
+        let at = pos2(area.center().x - (galley.size().x - g) / 2.0, area.center().y - galley.size().y / 2.0);
+        let painter = pc.with_clip_rect(area.intersect(clip));
+        if let Some(sev) = sev {
+            crate::icons::paint(&painter, pos2(at.x - g + size / 2.0, at.y + size / 2.0), crate::icons::Icon::Warning, size, sev.glyph());
+        }
+        painter.galley(at, galley, ink);
     }
     resp.on_hover_text(format!("{}\n{state}", view.label(t, &output)));
     c.external_state = said.unwrap_or(state);
     c.external_stale = stale;
+    c.external_severity = severity;
     if let Some(change) = change {
         let _ = app.edit_external_instrument(t, change);
     }

@@ -1085,6 +1085,15 @@ fn the_load_readout_warns_above_eighty_percent_and_alerts_at_a_hundred() {
         t.app.telemetry.alert_until = 0.0;
         t.frames(30);
         assert_eq!(t.inspect()["telemetry"]["level"], level, "{ppm}");
+        // #326: a warning carries no color (`text`), an alert is `meter.hot`.
+        let d = &crate::theme::DARK;
+        let want = match level {
+            "warning" => d.text,
+            "alert" => d.meter_hot,
+            _ => d.meter_ok,
+        };
+        assert_eq!(t.app.telemetry.layout.tint, want, "{ppm}");
+        assert_ne!(t.app.telemetry.layout.tint, d.modulation, "never mod amber");
     }
 }
 

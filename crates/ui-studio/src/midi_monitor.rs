@@ -358,6 +358,16 @@ pub fn port_line(p: &PortReport, tracks: &[String], per_sec: f32, silent_secs: f
     parts.join(" · ")
 }
 
+/// How a port's line reads (#326): a port that could not be opened or vanished is an error; an
+/// open input that has gone quiet is a warning; anything else is a plain line.
+pub fn port_severity(p: &PortReport, line: &str) -> Option<crate::chrome::Severity> {
+    match p.state {
+        PortState::Failed | PortState::Missing => Some(crate::chrome::Severity::Error),
+        PortState::Open if line.contains("no data in") => Some(crate::chrome::Severity::Warning),
+        PortState::Open => None,
+    }
+}
+
 /// The text of "Copy report": ports, drop counts and the last [`REPORT_LINES`] lines.
 pub fn report_text(port_lines: &[String], dropped: (u64, u64), rows: &VecDeque<Row>) -> String {
     let mut out = String::from("transit MIDI Monitor report\n\nPorts:\n");
@@ -801,8 +811,14 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             for (p, text) in s.ports.iter().zip(&s.port_lines) {
                 ui.horizontal(|ui| {
                     dot(ui, s.port_color(&p.name));
-                    let bad = p.state != PortState::Open || text.contains("no data in");
-                    ui.label(egui::RichText::new(text).size(11.5).color(if bad { TOKENS.warn } else { TOKENS.text_dim }));
+                    match port_severity(p, text) {
+                        Some(sev) => {
+                            crate::chrome::status_label(ui, text, 11.5, sev);
+                        }
+                        None => {
+                            ui.label(egui::RichText::new(text).size(11.5).color(TOKENS.text_dim));
+                        }
+                    }
                 });
             }
             ui.separator();
@@ -830,7 +846,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     crate::help::hover(ui, &truncated, crate::help::Id::MidiMonitorTruncated);
                 }
                 if s.paused_at.is_some() {
-                    ui.label(egui::RichText::new(format!("Paused: {} new events behind the view", s.behind())).color(TOKENS.warn));
+                    crate::chrome::status_label(ui, format!("Paused: {} new events behind the view", s.behind()), 12.0, crate::chrome::Severity::Warning);
                 }
             });
             match &s.learn {
