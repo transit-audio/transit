@@ -16,6 +16,10 @@ pub struct InstanceSpec {
     /// insert moves to another slot, and a fresh instrument of the same kind replaces its instance
     /// (0 for a clip effect).
     pub uid: u64,
+    /// A built-in Sampler with a patch (ADR 0041): its seed. The instance plays the core path, and
+    /// a patch made or removed or a new seed makes a fresh instance (`None`: every other slot,
+    /// including a one-sample Sampler, which keeps its legacy renderer).
+    pub sampler_core: Option<u32>,
 }
 
 /// Every third-party plugin slot (inserts and instruments) of a session, with the channel count
@@ -57,7 +61,7 @@ pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
                 let uid = ins.uid.get();
                 let uid = if seen.contains(&uid) { 0 } else { uid };
                 seen.push(uid);
-                out.push(InstanceSpec { track: t.id, slot: i, id: ins.plugin.clone(), ch, state: state(ins), uid });
+                out.push(InstanceSpec { track: t.id, slot: i, id: ins.plugin.clone(), ch, state: state(ins), uid, sampler_core: None });
             }
         }
         // An External Instrument has no plug-in instance (the plan reads its return, `external.rs`).
@@ -69,6 +73,7 @@ pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
                 ch: ch.max(2),
                 state: state(ins),
                 uid: ins.uid.get(),
+                sampler_core: sampler_core(ins),
             });
         }
         if t.kind == TrackKind::Audio {
@@ -76,13 +81,19 @@ pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
                 let (eq, comp) = clip_fx_modules(s, clip.id.0);
                 for (want, is_comp, id) in [(eq, false, CLIP_EQ), (comp, true, CLIP_COMP)] {
                     if let Some(slot) = clip_fx_slot(clip.id.0, is_comp).filter(|_| want) {
-                        out.push(InstanceSpec { track: t.id, slot, id: id.to_string(), ch, state: None, uid: 0 });
+                        out.push(InstanceSpec { track: t.id, slot, id: id.to_string(), ch, state: None, uid: 0, sampler_core: None });
                     }
                 }
             }
         }
     }
     out
+}
+
+/// The seed of a built-in Sampler instrument that has a patch (an opaque one too: it plays the
+/// core path, silent).
+fn sampler_core(ins: &transit_model::Insert) -> Option<u32> {
+    (ins.plugin == crate::compile::SAMPLER).then(|| ins.sampler_patch.as_ref().map(transit_model::SamplerPatch::seed)).flatten()
 }
 
 /// Instances being made by [`create_instance`] right now (any thread).

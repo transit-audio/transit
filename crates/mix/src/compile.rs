@@ -114,8 +114,8 @@ struct Desc {
     tail: Vec<crate::graph::tail::Row>,
     strips: Vec<StripDesc>,
     /// Per slot: key, kind, plugin id, channels, layout, long map length (0 inline), sample, insert
-    /// identity (a reordered chain is a new structure).
-    slots: Vec<((TrackId, usize), CellKind, String, usize, u16, usize, usize, u64)>,
+    /// identity (a reordered chain is a new structure), Sampler core seed.
+    slots: Vec<((TrackId, usize), CellKind, String, usize, u16, usize, usize, u64, Option<u32>)>,
     busses: Vec<(BusId, ChannelFormat)>,
     /// The end (exclusive) of each phase-1 layer, in strip table order (see [`render_rows`]).
     layers: Vec<u16>,
@@ -247,6 +247,8 @@ pub struct PlanCompiler {
     /// Vacant active slots the next compile asks the factory for again
     /// ([`PlanCompiler::retry_vacant`]).
     retry: Vec<(TrackId, usize)>,
+    /// The control side of every core-mode Sampler instance this compiler made (ADR 0041).
+    pub(crate) samplers: crate::sampler_link::Links,
 }
 
 /// The planned content of one slot cell.
@@ -396,6 +398,7 @@ impl PlanCompiler {
             no_port: Arc::from(Vec::new()),
             scopes: Arc::new(ScopeHub::default()),
             retry: Vec::new(),
+            samplers: crate::sampler_link::Links::default(),
         }
     }
 
@@ -720,6 +723,7 @@ impl PlanCompiler {
                 tracks: self.active.tracks.clone(),
             };
             self.drop_pool();
+            sync_samplers(&mut self.samplers, &plan.session, &self.active.slots);
             self.last = next;
             self.pending = Some(Pending { generation: next, shadow: None });
             return Ok(PlanEnvelope::new(plan));
@@ -734,6 +738,7 @@ impl PlanCompiler {
                 return Err(e);
             }
         };
+        sync_samplers(&mut self.samplers, &session, &shadow.slots);
         let fresh = tables.bindings();
         let tracks = tables.tracks.clone();
         let plan = PreparedPlan {
@@ -826,7 +831,17 @@ impl PlanCompiler {
                 let Some(spec) = specs.get(&key) else { continue };
                 let params = ins.map_or(0, |i| i.params.len());
                 let sample = if kind == CellKind::Instrument { sample_id(instrument_sample(s, t).as_ref()) } else { 0 };
-                desc.slots.push((key, kind, spec.id.clone(), spec.ch, layout, if needs_storage(params) { params } else { 0 }, sample, spec.uid));
+                desc.slots.push((
+                    key,
+                    kind,
+                    spec.id.clone(),
+                    spec.ch,
+                    layout,
+                    if needs_storage(params) { params } else { 0 },
+                    sample,
+                    spec.uid,
+                    spec.sampler_core,
+                ));
             }
         }
         for b in &s.busses {
@@ -875,6 +890,7 @@ impl PlanCompiler {
             && old.spec.id == p.spec.id
             && old.spec.uid == p.spec.uid
             && old.spec.ch == p.spec.ch
+            && old.spec.sampler_core == p.spec.sampler_core
             && old.layout == layout
         {
             if old.generation == SlotGen::VACANT {
@@ -926,6 +942,11 @@ impl PlanCompiler {
         p.plan = SlotPlan::Fresh(Box::new(slot));
         let SlotPlan::Fresh(slot) = &mut p.plan else { return Ok(()) };
         crate::instance::initialize_params(&mut *slot.plugin, session, &p.spec);
+        if let (Some(seed), Some(ins)) =
+            (p.spec.sampler_core, session.track(p.key.0).and_then(|t| t.instrument.as_ref()).filter(|_| p.kind == CellKind::Instrument))
+        {
+            self.samplers.attach(&mut *slot.plugin, seed, slot.generation, p.spec.uid, ins, session);
+        }
         slot.layout = layout;
         if slot.applied.heap.len() != long {
             slot.applied = Applied::prepared(if long > 0 { vec![f32::NAN; long] } else { Vec::new() });
@@ -1030,6 +1051,15 @@ impl PlanCompiler {
                         Some(sh) => self.active = Shadow { generation, ..sh },
                         None => self.active.generation = generation,
                     }
+                    // Links of instances the confirmed plan no longer holds are dropped here.
+                    let live: Vec<(u64, SlotGen)> = self
+                        .active
+                        .slots
+                        .values()
+                        .filter(|sl| sl.spec.sampler_core.is_some() && sl.kind == CellKind::Instrument)
+                        .map(|sl| (sl.spec.uid, sl.generation))
+                        .collect();
+                    self.samplers.retain(&live);
                     // A hint is done once a confirmed strip holds it (lines never shrink under it).
                     let (active, limit) = (&self.active, self.limits.delay_samples);
                     self.hints.retain(|t, h| active.strips.iter().any(|s| s.track == *t && s.cap < capacity_for(*h, limit)));
@@ -1093,6 +1123,14 @@ impl PlanCompiler {
     #[cfg(test)]
     pub(crate) fn set_slot_generation_for_tests(&mut self, n: u64) {
         self.slot_gen = n;
+    }
+
+    /// The control side's service tick for core-mode Sampler instances (ADR 0041): collects the
+    /// patch generations their audio side retired (dropped here, never on the audio thread) and
+    /// sends a publication or control values that waited for room. The plan bridge calls it from
+    /// its poll; every compile does too.
+    pub fn service_samplers(&mut self) {
+        self.samplers.service();
     }
 
     /// Every instance this compiler destroyed since the last call (dropped on this thread): its
@@ -1174,7 +1212,7 @@ fn instrument_sample(s: &Session, t: &Track) -> Option<Arc<SourceAudio>> {
 }
 
 /// Session audio shared with a sample-playing instrument.
-struct PoolSample(Arc<SourceAudio>);
+pub(crate) struct PoolSample(pub(crate) Arc<SourceAudio>);
 
 impl SampleSource for PoolSample {
     fn sample_rate(&self) -> f32 {
@@ -1185,6 +1223,20 @@ impl SampleSource for PoolSample {
     }
     fn channel(&self, ch: usize) -> Option<&[f32]> {
         self.0.channel(ch)
+    }
+}
+
+/// Publishes to the running core-mode Sampler instances of `slots` what changed in `s`'s patches,
+/// after the service tick.
+fn sync_samplers(links: &mut crate::sampler_link::Links, s: &Session, slots: &HashMap<(TrackId, usize), ShadowSlot>) {
+    links.service();
+    for ((t, k), sl) in slots {
+        if *k != INSTRUMENT_SLOT || sl.spec.sampler_core.is_none() || sl.generation == SlotGen::VACANT {
+            continue;
+        }
+        if let Some(ins) = s.track(*t).and_then(|tr| tr.instrument.as_ref()) {
+            links.sync(sl.spec.uid, sl.generation, ins, s);
+        }
     }
 }
 

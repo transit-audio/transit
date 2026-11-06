@@ -106,6 +106,9 @@ impl Plugin for Probe {
         }
         self.inner.set_sample(s)
     }
+    fn enable_sampler_core(&mut self, seed: u32) -> Option<transit_dsp::plugins::sampler::Publisher> {
+        self.inner.enable_sampler_core(seed)
+    }
 }
 
 impl Drop for Probe {

@@ -424,6 +424,9 @@ impl Control {
             self.compiler.observe(&report.status);
             self.status = Some(report);
         }
+        // The control side's service tick for core-mode Samplers (ADR 0041): retired patch
+        // generations are dropped here, never on the audio thread.
+        self.compiler.service_samplers();
         result
     }
 

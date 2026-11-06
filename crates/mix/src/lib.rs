@@ -124,6 +124,10 @@ mod rack;
 mod render_pool;
 mod routing;
 mod sample_tap;
+mod sampler_link;
+#[cfg(test)]
+mod sampler_link_tests;
+pub use sampler_link::{check_sampler_patch, silent_sampler_zones};
 /// Test seams (issue #210): muted serial blocks, the deterministic deadline, block views.
 #[cfg(feature = "testing")]
 mod sched_seam;
