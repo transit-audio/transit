@@ -13,6 +13,7 @@
 //! [`RowLayout`] in the window's [`EditorLayout`], so the editor's existing checks read it the way
 //! they read the other panels. The panel's own record is [`MacroLayout`].
 
+mod hero;
 mod title_bar;
 pub mod window;
 
@@ -545,6 +546,7 @@ pub fn content_height(app: &StudioApp, key: (TrackId, usize), width: f32) -> f32
     let dev = Dev { key, ins: &ins, info };
     let w = width.max(MIN_WIDTH) - 2.0 * space::WINDOW_PADDING;
     let mut h = 2.0 * space::WINDOW_PADDING;
+    h += hero::height(w);
     h
 }
 
@@ -555,6 +557,10 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     let w = width - 2.0 * space::WINDOW_PADDING;
     let mut y = origin.y + space::WINDOW_PADDING;
     let x = origin.x + space::WINDOW_PADDING;
+    let hero_h = hero::height(w);
+    let left_w = (w - space::PANEL_GAP) * 2.0 / 3.0;
+    hero::show(app, ui, dev, Rect::from_min_size(pos2(x, y), vec2(left_w, hero_h)), lay, out);
+    y += hero_h + space::PANEL_GAP;
     y += space::WINDOW_PADDING;
     ui.allocate_rect(Rect::from_min_max(origin, pos2(origin.x + width, y)), Sense::hover());
 }
