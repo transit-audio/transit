@@ -415,3 +415,45 @@ fn hovering_a_backend_figure_in_audio_devices_explains_it() {
     assert_eq!(t.app.help.layout.text, entry.text);
     assert!(entry.text.contains("Healthy is 0"), "a healthy value is given: {}", entry.text);
 }
+
+/// The hover rects of the figures of each line in `lines`, drawn one under the other in a card
+/// `width` points wide.
+fn status_line_rects(lines: &[String], width: f32) -> Vec<Vec<egui::Rect>> {
+    let ctx = egui::Context::default();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("transit_help_on"), true));
+    let mut all = Vec::new();
+    let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+    let mut out = ctx.run_ui(raw, |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(width, 600.0))), |ui| {
+            for line in lines {
+                help::status_line(ui, line, line.starts_with("Backend"));
+                let targets = ui.ctx().data_mut(|d| d.remove_temp::<Vec<(Id, [f32; 4])>>(egui::Id::new("transit_help_targets"))).unwrap_or_default();
+                all.push(targets.into_iter().map(|(_, r)| egui::Rect::from_min_max(egui::pos2(r[0], r[1]), egui::pos2(r[2], r[3]))).collect());
+            }
+        });
+    });
+    out.textures_delta.clear();
+    all
+}
+
+#[test]
+fn a_long_backend_line_wraps_between_figures_and_never_over_the_next_line() {
+    let s = stats();
+    let backend = format!("Backend (output / input, one ASIO driver): {}", StreamStats::asio_duplex_line(&s, &s, Some(("375/s", "375/s"))));
+    let open = "Output open: Speakers (Realtek) \u{b7} 48000 Hz \u{b7} 2 ch \u{b7} 256-sample buffer \u{b7} WASAPI* exclusive".to_string();
+    let lines = [backend, open];
+    for width in [360.0, 420.0, 520.0, 700.0] {
+        // Run twice: the first pass lays out with fresh fonts.
+        status_line_rects(&lines, width);
+        let rects = status_line_rects(&lines, width);
+        assert!(rects.iter().all(|r| !r.is_empty()), "figures recorded at {width}");
+        for a in &rects[0] {
+            for b in &rects[1] {
+                assert!(!a.intersects(*b), "at {width} the backend figure {a:?} overlaps the next line's {b:?}");
+            }
+        }
+        // Each figure is one row tall: it did not wrap inside itself.
+        let row = rects[1].iter().map(|r| r.height()).fold(0.0_f32, f32::max);
+        assert!(rects[0].iter().all(|r| r.height() <= row + 0.5), "a figure wrapped inside itself at {width}: {:?}", rects[0]);
+    }
+}
