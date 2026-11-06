@@ -782,7 +782,7 @@ fn choices(ui: &mut egui::Ui, current: &str, items: &[(String, String)], out: &m
     let mut picked = None;
     ui.horizontal_wrapped(|ui| {
         for (text, value) in items {
-            let b = ui.selectable_label(value == current, text);
+            let b = crate::chrome_pick::option_label(ui, value == current, text);
             out.push(MenuItem::at(ui, text.clone(), value.clone(), b.rect));
             if b.clicked() {
                 picked = Some(value.clone());
@@ -1086,7 +1086,7 @@ pub fn history_window(app: &mut StudioApp, ctx: &egui::Context) {
                 let all = std::iter::once("Opened".to_string()).chain(labels.iter().cloned());
                 for (keep, text) in all.enumerate() {
                     let current = keep == labels.len();
-                    let b = ui.selectable_label(current, &text);
+                    let b = crate::chrome_pick::choice_label(ui, current, &text);
                     rows.push(HistoryRow { label: text, keep, current, rect: crate::arrange::r4(b.rect) });
                     if b.clicked() && !current {
                         pick = Some(keep);

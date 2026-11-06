@@ -143,9 +143,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             }
             ui.horizontal(|ui| {
                 ui.label("Takeover");
-                crate::chrome::field(ui, |ui| egui::ComboBox::from_id_salt("mm_takeover").selected_text(takeover.label()).width(90.0).icon(crate::chrome::chevron).show_ui(ui, |ui| {
+                crate::chrome::field(ui, |ui| crate::chrome_pick::Combo::new("mm_takeover", takeover.label()).width(90.0).show(ui, |ui| {
                     for m in [MapMode::Scaled, MapMode::Jump, MapMode::Pickup] {
-                        ui.selectable_value(&mut takeover, m, m.label());
+                        crate::chrome_pick::choice_value(ui, &mut takeover, m, m.label());
                     }
                 }));
                 ui.add(

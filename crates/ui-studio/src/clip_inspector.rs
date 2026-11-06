@@ -233,15 +233,11 @@ fn row(app: &mut StudioApp, ui: &mut Ui, s: &Session, clip: ClipId) {
                 let mut shape = fade.shape;
                 let combo = ui.add_enabled_ui(fade.len > 0, |ui| {
                     crate::chrome::field(ui, |ui| {
-                        egui::ComboBox::from_id_salt(("fade_curve", side.label()))
-                            .width(96.0)
-                            .selected_text(shape.label())
-                            .icon(crate::chrome::chevron)
-                            .show_ui(ui, |ui| {
-                                for option in FadeShape::ALL {
-                                    ui.selectable_value(&mut shape, option, option.label());
-                                }
-                            })
+                        crate::chrome_pick::Combo::new(("fade_curve", side.label()), shape.label()).width(96.0).show(ui, |ui| {
+                            for option in FadeShape::ALL {
+                                crate::chrome_pick::choice_value(ui, &mut shape, option, option.label());
+                            }
+                        })
                     })
                 });
                 view.curve = Some(fade.shape.label());

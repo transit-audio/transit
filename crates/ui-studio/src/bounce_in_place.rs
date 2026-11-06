@@ -239,9 +239,9 @@ fn bounce_form(app: &mut StudioApp, ctx: &egui::Context) {
         ui.add_enabled_ui(f.existing && !several, |ui| {
             let label = eligible.iter().find(|(id, _)| Some(*id) == f.destination).map_or("Choose an audio track", |(_, name)| name.as_str());
             let combo = crate::chrome::field(ui, |ui| {
-                egui::ComboBox::from_id_salt("bounce_destination").selected_text(label).icon(crate::chrome::chevron).show_ui(ui, |ui| {
+                crate::chrome_pick::Combo::new("bounce_destination", label).show(ui, |ui| {
                     for (id, name) in &eligible {
-                        let b = ui.selectable_value(&mut f.destination, Some(*id), name);
+                        let b = crate::chrome_pick::choice_value(ui, &mut f.destination, Some(*id), name);
                         layout.destinations.push((*id, r4(b.rect)));
                     }
                 })

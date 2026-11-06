@@ -690,7 +690,7 @@ pub(crate) fn shape_items(app: &mut StudioApp, ui: &mut Ui, clip: ClipId, side: 
     let mut picked = false;
     ui.label(side.label());
     for shape in FadeShape::ALL {
-        let b = ui.selectable_label(f.shape == shape, shape.label());
+        let b = crate::chrome_pick::choice_label(ui, f.shape == shape, shape.label());
         app.arrange.menu.retain(|m| !(m.label == shape.label() && m.value == side.id()));
         app.arrange.menu.push(crate::mixer::MenuItem::at(ui, shape.label().into(), side.id().into(), b.rect));
         if b.clicked() {
