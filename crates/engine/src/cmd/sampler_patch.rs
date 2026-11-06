@@ -543,5 +543,5 @@ pub fn load_zone_bytes(e: &mut Engine, t: TrackId, zone: u16, name: &str, bytes:
 }
 
 #[cfg(test)]
-#[path = "sampler_patch_tests.rs"]
+#[path = "tests_sampler_patch.rs"]
 mod tests;
