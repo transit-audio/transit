@@ -313,8 +313,15 @@ fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &PatchV1) -> Resu
     }
     if let Some(path) = str_param(p, "path") {
         let abs = resolve_path(e, id, path)?;
-        let bytes = crate::io::read_file(&abs)?;
         let name = abs.file_name().and_then(|n| n.to_str()).unwrap_or("Sample").to_string();
+        // Admission from the header alone, before the body is read, for a file sized by its header
+        // (WAV/RF64); any other file is checked from its bytes below, still before decoding.
+        if let Some(info) = crate::io::probe_header(&abs) {
+            let frames = frames_at(info.frames, info.sample_rate, rate).unwrap_or(u64::MAX);
+            let pcm = admit_source(e.session(), &name, frames, u64::from(info.channels), rate).map_err(|m| bad(id, m))?;
+            admit_patch(admitted, e.session(), pcm).map_err(|m| bad(id, m))?;
+        }
+        let bytes = crate::io::read_file(&abs)?;
         let ext = abs.extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase);
         // Admission from the header, before anything is decoded.
         let info = transit_audio_io::probe(&bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;

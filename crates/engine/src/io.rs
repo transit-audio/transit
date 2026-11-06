@@ -42,12 +42,27 @@ pub(crate) fn at_rate(mut buf: AudioBuffer, rate: u32, limit: usize) -> Option<A
 /// never end or never answer. Errors name the file.
 pub fn read_file(path: impl AsRef<Path>) -> Result<Vec<u8>> {
     let path = path.as_ref();
+    #[cfg(test)]
+    WHOLE_READS.with(|n| n.set(n.get() + 1));
     crate::file_access::check_read(path).map_err(EngineError::Io)?;
     let err = |err: std::io::Error| EngineError::Io(format!("{}: {err}", path.display()));
     if !std::fs::metadata(path).map_err(err)?.is_file() {
         return Err(EngineError::Io(format!("{}: not a regular file", path.display())));
     }
     std::fs::read(path).map_err(err)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whole-file reads on this thread ([`read_file`]): a test shows a file was refused from its
+    /// header without its body being read.
+    pub(crate) static WHOLE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// What the header of the audio file at `path` says, read without its body (at most 64 KiB, through
+/// the checked file access). `None` for a file its header does not size (only WAV/RF64 is).
+pub(crate) fn probe_header(path: &Path) -> Option<transit_audio_io::AudioInfo> {
+    disk::probe(path).map(|(info, _)| info)
 }
 
 /// [`read_file`] in 1 MB pieces, calling `progress(read, total)` after each; when it returns

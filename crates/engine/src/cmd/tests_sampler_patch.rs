@@ -440,3 +440,21 @@ fn a_sampler_with_a_patch_refuses_the_one_sample_load() {
     assert!(Arc::ptr_eq(&before, &e.session_arc()), "no one-sample field beside the patch");
     assert!(e.session().track(t).unwrap().instrument.as_ref().unwrap().sample.is_none());
 }
+
+#[test]
+fn a_file_over_a_bound_is_refused_from_its_header_without_reading_its_body() {
+    let d = Dir::new("header");
+    let mut e = Engine::default();
+    let t = kit(&mut e, &d);
+    let long = d.path("long.wav");
+    tone(&long, 100.0, 8_000, 31.0, 1);
+    let reads = crate::io::WHOLE_READS.with(std::cell::Cell::get);
+    let err = e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 5, "path": s(&long)})).unwrap_err().to_string();
+    assert!(err.contains("30 s"), "{err}");
+    assert_eq!(crate::io::WHOLE_READS.with(std::cell::Cell::get), reads, "refused before the body was read");
+    // A file within the bounds is read whole (the counter sees it).
+    let short = d.path("short.wav");
+    tone(&short, 100.0, 8_000, 0.5, 1);
+    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 5, "path": s(&short)})).unwrap();
+    assert_eq!(crate::io::WHOLE_READS.with(std::cell::Cell::get), reads + 1);
+}
