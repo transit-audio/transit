@@ -1,6 +1,6 @@
 # ADR 0010: Typography and iconography: Inter, JetBrains Mono, Lucide
 
-- **Status:** accepted 2026-10-18
+- **Status:** accepted 2026-10-18; decisions 1 to 4 (the fonts) amended by [ADR 0045](0045-design-language-in-code.md) on 2026-11-06: IBM Plex Sans and Plex Mono replace Inter Tab and JetBrains Mono
 - **Date:** 2026-10-18
 - **Implementation:** fonts landed at ad67518 (Inter 4.1 and JetBrains Mono 2.304 in `apps/transit/assets/fonts`). Icons and the final polish pass landed at `cba8e8b` (icons) and `d7b25ef` on `transit`, in `crates/ui-studio/assets/icons`. Attribution is in [`ATTRIBUTION.md`](../../ATTRIBUTION.md).
 - **Reopen when:** egui gains OpenType shaping, so the frozen tabular feature is no longer needed; or the project owner rejects Inter after a 30-minute session on the spike build, in which case the fallback is IBM Plex Sans and Plex Mono; or an icon is needed that Lucide does not cover well enough to justify a second set.
