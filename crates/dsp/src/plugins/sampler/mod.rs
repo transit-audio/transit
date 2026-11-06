@@ -26,8 +26,25 @@
 //!   full queue keeps it retained and holds further adoption). The control side drops retired
 //!   generations: no `Arc` drop, free, lock or allocation on the audio thread.
 //!
-//! No session field selects the core path yet: it is reachable from code and tests; the model's
-//! patch and its save and load follow.
+//! **Sessions and ownership.** An instrument whose `Insert::sampler_patch` is present plays the
+//! core path: the mix's plan compiler, which makes every instance on the control side, switches
+//! a fresh instance with [`Plugin::enable_sampler_core`] before it first processes and keeps its
+//! [`Publisher`] (one per instance, keyed by the insert's uid), so no other thread ever holds it.
+//! It publishes the patch's structure (sources, zones' regions and playback, pads, choke and
+//! layer groups) and sends the controls through the slot parameters: on a fresh instance with
+//! `set_param` before the first block, on a running one through [`Publisher::set_control`],
+//! whose values the audio thread stores at the next block start exactly as `set_param` does.
+//! It calls [`Publisher::collect`] on the control side's service tick (the plan bridge's poll)
+//! and at every compile. A structural change to a running instance is a new publication; a mode
+//! change (a patch made or removed, or a new seed) is a fresh instance. A legacy instance never
+//! switches on its own: opening or saving an old session makes no patch.
+//!
+//! **The control table.** The slot values live in two places outside the callback: the model's
+//! `SamplerPatch::controls` (the sparse map of nondefault values the engine's commands and a
+//! load write and a save reads) and the instance's own table (`params.rs`), which the compiler
+//! keeps equal by sending only the entries that changed. The slot ids are not in
+//! `SAMPLER_INFO.params` or the mix's inline parameter cache, and they are not automatable yet:
+//! the automation lanes would have to learn 28,928 ids (ADR 0041 "Capacities and admission").
 
 use std::sync::Arc;
 

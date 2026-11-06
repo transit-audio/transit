@@ -51,6 +51,18 @@ file as usual. It cannot warn from builds that shipped before it existed: an old
 drops a loop on save (known issue K40). Add an entry to `needs()` and `KNOWN_NEEDS` together when
 a new feature would be lost by an older reader, and test a round-trip with and without it.
 
+## Sampler patch (#269, ADR 0041)
+
+`Insert::sampler_patch` holds the built-in Sampler's patch (`crates/model/src/sampler_patch.rs`),
+schema version 1: populated zones by fixed id, nondefault pads, source references (an absent
+`ownership` is managed audio; `referenced` media keeps its path through every save), groups, the
+seed, the loop's Auto and Manual marker sets, and the sparse map of nondefault slot controls.
+Every field has a default and unknown fields are kept and written back at every level. An unknown
+schema version or an invalid patch is kept as its raw object with a load note, plays silence and is
+never rewritten. A session with a patch lists `sampler_patch` under `needs`, and
+`sampler_slicing_modes` when the patch has a loop; an old one-sample Sampler (`Insert::sample`)
+gets no patch from opening or saving, and a new patch leaves `sample` unset.
+
 ## Track-height format (#314, slice 1)
 
 [ADR 0044](../../adr/0044-vertical-track-zoom.md) uses the already serialized
