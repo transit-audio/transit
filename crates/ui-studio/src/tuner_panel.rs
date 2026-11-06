@@ -12,7 +12,7 @@ use crate::help::{Id, hover};
 use crate::panel::Item::{Knob, Toggle};
 use crate::panel::{Row, Section};
 use crate::theme::{RADIUS_SM, TOKENS};
-use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, vec2};
+use egui::{Align2, FontId, Pos2, Rect, Sense, Stroke, Ui, vec2};
 use transit_dsp::plugins::tuner::{TunerModel, signed_tenths};
 use transit_model::{Insert, TrackId};
 
@@ -29,8 +29,6 @@ const FREQ_H: f32 = 18.0;
 /// The meter spans -50 to +50 cents; within this many cents it reads in tune.
 const SPAN_CENTS: f32 = 50.0;
 const IN_TUNE_CENTS: f32 = 3.0;
-/// The in-tune color: the one green of the meter (the theme has no success token).
-const GREEN: Color32 = Color32::from_rgb(0x3f, 0xb9, 0x5b);
 
 const fn sec(title: &'static str, cols: usize, items: &'static [crate::panel::Item]) -> Section {
     Section { title, cols, items }
@@ -148,7 +146,7 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
     let color = if reading.is_none() {
         TOKENS.text_dim
     } else if t.in_tune {
-        GREEN
+        TOKENS.meter_ok
     } else {
         TOKENS.text
     };
@@ -177,7 +175,7 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
     p.rect_filled(meter, RADIUS_SM, TOKENS.panel_raised);
     let x_of = |cents: f32| meter.center().x + cents.clamp(-SPAN_CENTS, SPAN_CENTS) / SPAN_CENTS * (meter.width() * 0.5 - 4.0);
     let zone = Rect::from_x_y_ranges(x_of(-IN_TUNE_CENTS)..=x_of(IN_TUNE_CENTS), meter.y_range());
-    p.rect_filled(zone, 0.0, GREEN.gamma_multiply(if reading.is_some() { 0.45 } else { 0.2 }));
+    p.rect_filled(zone, 0.0, TOKENS.meter_ok.gamma_multiply(if reading.is_some() { 0.45 } else { 0.2 }));
     for k in -5_i32..=5 {
         let x = x_of(k as f32 * 10.0);
         let len = if k == 0 || k.abs() == 5 { 0.6 } else { 0.3 };

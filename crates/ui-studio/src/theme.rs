@@ -1,6 +1,7 @@
-//! Theme tokens (plan 06 slice 5): a dark and a light set with the same accent hue, picked by
-//! View > Appearance (System follows the OS). Flat: one accent, no gradients, no shadows beyond
-//! a 1 px separator; record, mute and solo keep their conventional state colors.
+//! Theme tokens (plan 06 slice 5, ADR 0045): the device design language's dark set and a light set
+//! derived from it, picked by View > Appearance (System follows the OS). Flat: graphite grounds,
+//! one signal color for what you set, one mod color for modulation, no gradients, no shadows
+//! beyond a 1 px separator. The values come from [`crate::tokens`], which mirrors tokens.json.
 //!
 //! Every color the studio UI paints comes from [`TOKENS`], which reads the theme of the frame
 //! being drawn ([`set_current`], per thread, so tests on parallel threads stay hermetic).
@@ -38,113 +39,179 @@ impl Appearance {
     }
 }
 
-/// Color tokens. Everything the studio UI paints takes its colors from here.
+/// Color tokens. Everything the studio UI paints takes its colors from here. The design names
+/// come first (`docs/design/language`, [`crate::tokens`]); the older names after them read the
+/// same values where the design has one (ADR 0045).
 pub struct Tokens {
+    /// `bg.window`: the window ground.
+    pub bg_window: Color32,
+    /// `bg.titlebar`: title bars, routing-row fill.
+    pub bg_titlebar: Color32,
+    /// `surface.panel`: panels.
+    pub surface_panel: Color32,
+    /// `surface.raised`: chips, model buttons, dropdowns on panels.
+    pub surface_raised: Color32,
+    /// `surface.inset`: display wells, value fields, segmented tracks.
+    pub surface_inset: Color32,
+    /// `surface.selected`: the selected segment.
+    pub surface_selected: Color32,
+    /// `knob.cap`: the knob face.
+    pub knob_cap: Color32,
+    /// `knob.capActive`: the knob face while held; the fader cap.
+    pub knob_cap_active: Color32,
+    /// `line.inset`: display-well borders.
+    pub line_inset: Color32,
+    /// `line.strong`: knob rim, pills, dashed add-row, the switch's off track.
+    pub line_strong: Color32,
+    /// `grid`: grid lines inside displays.
+    pub grid: Color32,
+    /// `text.muted`: control labels, section labels.
+    pub text_muted: Color32,
+    /// `text.faint`: meta, units, column headers.
+    pub text_faint: Color32,
+    /// `ink.ghost`: secondary traces; a disabled knob's arc.
+    pub ink_ghost: Color32,
+    /// `ink.arrow`: routing arrows, unused source dots; a disabled knob's pointer.
+    pub ink_arrow: Color32,
+    /// `signal`: what you set (value arcs, curves, selected outline, switch on).
+    pub signal: Color32,
+    /// `mod` (a Rust keyword, hence the long name): modulation rings, LFO traces, amounts, GR.
+    pub modulation: Color32,
+    /// `meter.ok`: level meters.
+    pub meter_ok: Color32,
+    /// `meter.hot`: clip and over only.
+    pub meter_hot: Color32,
+    /// The monitor and option toggles' on fill (`toggle.on.option.fill`).
+    pub toggle_option_fill: Color32,
+    /// An unavailable toggle's fill (`toggle.unavailable.fill`).
+    pub toggle_unavailable_fill: Color32,
+    /// The switch's knob when on (`switch.onKnob`).
+    pub switch_on_knob: Color32,
+    /// `bg.window`.
     pub bg: Color32,
+    /// `surface.panel`.
     pub panel: Color32,
+    /// `surface.raised`.
     pub panel_raised: Color32,
     pub header: Color32,
     pub header_selected: Color32,
     pub lane: Color32,
     pub lane_alt: Color32,
     pub ruler: Color32,
-    /// The 1 px separator between areas (the only "shadow" there is).
+    /// `line`: panel borders, arc tracks, and the 1 px separator between areas (the only
+    /// "shadow" there is).
     pub line: Color32,
     pub grid_bar: Color32,
     pub grid_beat: Color32,
     /// Sub-beat grid lines (1/8 and finer): fainter than a beat line.
     pub grid_sub: Color32,
+    /// `text`: primary text, values, pointers.
     pub text: Color32,
+    /// `text.muted`.
     pub text_dim: Color32,
-    /// The one accent: selection, focus, active values. Same hue in both themes (darker in light
-    /// so it keeps 3:1 against the light panels).
+    /// `signal`, the one accent: selection, focus, active values.
     pub accent: Color32,
     /// The loop/cycle region: strip fill and handles, ruler cycle tint, the Cycle button when on.
     /// A yellowish amber (not the accent) so looping reads apart from selection; darker in light.
     pub loop_region: Color32,
     pub cursor: Color32,
+    /// Record arm and the clip cap: `meter.hot`.
     pub record: Color32,
+    /// Mute when on: `text` (the toggle is inverted).
     pub mute: Color32,
+    /// Solo when on: `signal`.
     pub solo: Color32,
+    /// Input monitoring and meter levels: `meter.ok`.
     pub monitor: Color32,
+    /// `surface.raised`.
     pub button: Color32,
-    /// The hover token: fill for hovered buttons and rows.
+    /// The hover token: fill for hovered buttons and rows, one step above `surface.raised`
+    /// (`knob.capActive`).
     pub button_hover: Color32,
     pub selection_outline: Color32,
-    /// Keyboard focus ring (and the active pane's outline).
+    /// Keyboard focus ring (and the active pane's outline): `signal`.
     pub focus_ring: Color32,
     /// Dims what lies outside a range (piano roll past the clip end).
     pub overlay: Color32,
-    /// Text on light fills and on dark fills ([`text_on`]).
+    /// Text on light fills and on dark fills ([`text_on`]); the dark ink is `bg.window`.
     pub ink_dark: Color32,
     pub ink_light: Color32,
     /// Light theme: clip bodies are the track color lightened, the name strip the track color.
     pub light_clips: bool,
 }
 
-pub const DARK: Tokens = Tokens {
-    bg: Color32::from_rgb(0x1b, 0x1c, 0x1e),
-    panel: Color32::from_rgb(0x24, 0x25, 0x28),
-    panel_raised: Color32::from_rgb(0x2d, 0x2e, 0x32),
-    header: Color32::from_rgb(0x2a, 0x2b, 0x2f),
-    header_selected: Color32::from_rgb(0x3a, 0x3c, 0x42),
-    lane: Color32::from_rgb(0x1f, 0x20, 0x23),
-    lane_alt: Color32::from_rgb(0x22, 0x23, 0x26),
-    ruler: Color32::from_rgb(0x2b, 0x2c, 0x30),
-    line: Color32::from_rgb(0x14, 0x14, 0x16),
-    grid_bar: Color32::from_rgb(0x38, 0x39, 0x3e),
-    grid_beat: Color32::from_rgb(0x2a, 0x2b, 0x2f),
-    grid_sub: Color32::from_rgb(0x23, 0x24, 0x27),
-    text: Color32::from_rgb(0xdc, 0xdd, 0xe0),
-    // Lifted from 0x8c8e94 (slice 5) so secondary labels keep 4.5:1 on the raised panels.
-    text_dim: Color32::from_rgb(0xb6, 0xb8, 0xbe),
-    accent: Color32::from_rgb(0x4c, 0xb1, 0xf0),
-    loop_region: Color32::from_rgb(0xe8, 0xb3, 0x3c),
-    cursor: Color32::from_rgb(0xe8, 0xe8, 0xea),
-    record: Color32::from_rgb(0xe5, 0x48, 0x48),
-    mute: Color32::from_rgb(0xe0, 0xa2, 0x36),
-    solo: Color32::from_rgb(0xe6, 0xd2, 0x4a),
-    monitor: Color32::from_rgb(0x6f, 0xc2, 0x76),
-    button: Color32::from_rgb(0x36, 0x37, 0x3c),
-    button_hover: Color32::from_rgb(0x42, 0x44, 0x4a),
-    selection_outline: Color32::from_rgb(0xf4, 0xf4, 0xf6),
-    focus_ring: Color32::from_rgb(0x4c, 0xb1, 0xf0),
-    overlay: Color32::from_rgba_premultiplied(0, 0, 0, 70),
-    ink_dark: Color32::from_rgb(0x14, 0x14, 0x16),
-    ink_light: Color32::from_rgb(0xf6, 0xf6, 0xf8),
-    light_clips: false,
+/// One token set from the constants in scope (the dark or the light names of [`crate::tokens`]).
+macro_rules! token_set {
+    ($light_clips:expr) => {
+        Tokens {
+            bg_window: BG_WINDOW,
+            bg_titlebar: BG_TITLEBAR,
+            surface_panel: SURFACE_PANEL,
+            surface_raised: SURFACE_RAISED,
+            surface_inset: SURFACE_INSET,
+            surface_selected: SURFACE_SELECTED,
+            knob_cap: KNOB_CAP,
+            knob_cap_active: KNOB_CAP_ACTIVE,
+            line_inset: LINE_INSET,
+            line_strong: LINE_STRONG,
+            grid: GRID,
+            text_muted: TEXT_MUTED,
+            text_faint: TEXT_FAINT,
+            ink_ghost: INK_GHOST,
+            ink_arrow: INK_ARROW,
+            signal: SIGNAL,
+            modulation: MOD,
+            meter_ok: METER_OK,
+            meter_hot: METER_HOT,
+            toggle_option_fill: TOGGLE_OPTION_FILL,
+            toggle_unavailable_fill: TOGGLE_UNAVAILABLE_FILL,
+            switch_on_knob: SWITCH_ON_KNOB,
+            bg: BG_WINDOW,
+            panel: SURFACE_PANEL,
+            panel_raised: SURFACE_RAISED,
+            header: HEADER,
+            header_selected: HEADER_SELECTED,
+            lane: LANE,
+            lane_alt: LANE_ALT,
+            ruler: RULER,
+            line: LINE,
+            grid_bar: GRID_BAR,
+            grid_beat: GRID_BEAT,
+            grid_sub: GRID_SUB,
+            text: TEXT,
+            text_dim: TEXT_MUTED,
+            accent: SIGNAL,
+            loop_region: LOOP_REGION,
+            cursor: CURSOR,
+            record: RECORD,
+            mute: MUTE,
+            solo: SOLO,
+            monitor: MONITOR,
+            button: SURFACE_RAISED,
+            button_hover: BUTTON_HOVER,
+            selection_outline: SELECTION_OUTLINE,
+            focus_ring: FOCUS_RING,
+            overlay: OVERLAY,
+            ink_dark: INK_DARK,
+            ink_light: INK_LIGHT,
+            light_clips: $light_clips,
+        }
+    };
+}
+
+/// The design (`color` and `arrangement` in tokens.json).
+pub const DARK: Tokens = {
+    use crate::tokens::arrangement::*;
+    use crate::tokens::color::*;
+    use crate::tokens::component::*;
+    token_set!(false)
 };
 
-pub const LIGHT: Tokens = Tokens {
-    bg: Color32::from_rgb(0xff, 0xff, 0xff),
-    panel: Color32::from_rgb(0xee, 0xee, 0xf0),
-    panel_raised: Color32::from_rgb(0xf7, 0xf7, 0xf8),
-    header: Color32::from_rgb(0xe6, 0xe6, 0xe9),
-    header_selected: Color32::from_rgb(0xd5, 0xdb, 0xe6),
-    lane: Color32::from_rgb(0xf8, 0xf8, 0xf9),
-    lane_alt: Color32::from_rgb(0xf1, 0xf1, 0xf3),
-    ruler: Color32::from_rgb(0xe3, 0xe3, 0xe7),
-    line: Color32::from_rgb(0xc9, 0xca, 0xcf),
-    grid_bar: Color32::from_rgb(0xc6, 0xc7, 0xcc),
-    grid_beat: Color32::from_rgb(0xe2, 0xe3, 0xe6),
-    grid_sub: Color32::from_rgb(0xed, 0xee, 0xf0),
-    text: Color32::from_rgb(0x1c, 0x1d, 0x20),
-    text_dim: Color32::from_rgb(0x50, 0x53, 0x5b),
-    accent: Color32::from_rgb(0x18, 0x73, 0xb8),
-    loop_region: Color32::from_rgb(0xa9, 0x77, 0x06),
-    cursor: Color32::from_rgb(0x1c, 0x1d, 0x20),
-    record: Color32::from_rgb(0xc6, 0x2f, 0x2f),
-    mute: Color32::from_rgb(0xe0, 0xa2, 0x36),
-    solo: Color32::from_rgb(0xe6, 0xd2, 0x4a),
-    monitor: Color32::from_rgb(0x2f, 0x9a, 0x3c),
-    button: Color32::from_rgb(0xde, 0xdf, 0xe3),
-    button_hover: Color32::from_rgb(0xd0, 0xd2, 0xd7),
-    selection_outline: Color32::from_rgb(0x1c, 0x1d, 0x20),
-    focus_ring: Color32::from_rgb(0x18, 0x73, 0xb8),
-    overlay: Color32::from_rgba_premultiplied(0, 0, 0, 28),
-    ink_dark: Color32::from_rgb(0x14, 0x14, 0x16),
-    ink_light: Color32::from_rgb(0xf6, 0xf6, 0xf8),
-    light_clips: true,
+/// Derived from the design (`colorLight` in tokens.json): grounds mirrored, inks at least as
+/// legible as in the dark set. Whether light ships in v0.7.0 is open (ADR 0045).
+pub const LIGHT: Tokens = {
+    use crate::tokens::color_light::*;
+    token_set!(true)
 };
 
 thread_local! {
@@ -391,18 +458,30 @@ pub fn rgb(c: [u8; 3]) -> Color32 {
     Color32::from_rgb(c[0], c[1], c[2])
 }
 
-/// The family apps/transit installs for numbers (JetBrains Mono Medium).
-const MONO_MEDIUM: &str = "mono-medium";
+/// The family apps/transit installs for numbers (IBM Plex Mono Medium).
+const MONO_MEDIUM: &str = crate::tokens::FAMILY_MONO_MEDIUM;
 
-/// Notes, once a frame, whether the `mono-medium` family exists (an egui font id naming a family
-/// that was not installed panics, and tests and `--no-fonts` runs have only the defaults).
+/// Notes, once a frame, which of the design's font families exist (an egui font id naming a
+/// family that was not installed panics, and tests and `--no-fonts` runs have only the defaults).
 pub fn probe_fonts(ctx: &egui::Context) {
-    let has = ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name(MONO_MEDIUM.into())));
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("transit-mono-medium"), has));
+    let mask = ctx.fonts(|f| {
+        let families = f.families();
+        crate::tokens::FAMILIES
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| families.contains(&egui::FontFamily::Name((**n).into())))
+            .fold(0u8, |m, (i, _)| m | 1 << i)
+    });
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("transit-font-families"), mask));
+}
+
+/// Whether the app installed the font family `name` (as of the last [`probe_fonts`]).
+pub fn has_family(ctx: &egui::Context, name: &str) -> bool {
+    let mask = ctx.data(|d| d.get_temp::<u8>(egui::Id::new("transit-font-families"))).unwrap_or(0);
+    crate::tokens::FAMILIES.iter().position(|n| *n == name).is_some_and(|i| mask & 1 << i != 0)
 }
 
 /// Digits for clocks and readouts: `mono-medium` where the app installed it, else Monospace.
 pub fn mono(ctx: &egui::Context, size: f32) -> egui::FontId {
-    let has = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("transit-mono-medium"))).unwrap_or(false);
-    if has { egui::FontId::new(size, egui::FontFamily::Name(MONO_MEDIUM.into())) } else { egui::FontId::monospace(size) }
+    if has_family(ctx, MONO_MEDIUM) { egui::FontId::new(size, egui::FontFamily::Name(MONO_MEDIUM.into())) } else { egui::FontId::monospace(size) }
 }

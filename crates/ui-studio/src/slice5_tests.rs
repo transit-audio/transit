@@ -347,6 +347,8 @@ fn tokens_are_the_only_colors() {
         ("waveform.rs", include_str!("waveform.rs")),
         ("icons.rs", include_str!("icons.rs")),
         ("shortcuts.rs", include_str!("shortcuts.rs")),
+        ("tuner_panel.rs", include_str!("tuner_panel.rs")),
+        ("midi_monitor.rs", include_str!("midi_monitor.rs")),
     ] {
         for pat in ["Color32::from_", "Color32::WHITE", "Color32::BLACK", "Color32::RED", "Color32::GRAY", "Color32::LIGHT", "Color32::DARK"] {
             assert!(!src.contains(pat), "{file} paints a literal color ({pat})");

@@ -571,7 +571,7 @@ pub fn led(app: &mut StudioApp, ui: &mut egui::Ui) {
     }
     let c = pos2(r.min.x + 12.0, r.center().y);
     let lit = TOKENS.monitor;
-    let fill = Color32::from_rgba_unmultiplied(lit.r(), lit.g(), lit.b(), (level * 255.0) as u8);
+    let fill = lit.gamma_multiply(level.clamp(0.0, 1.0));
     p.circle_filled(c, 5.0, fill);
     p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, if level > 0.0 { lit } else { TOKENS.line }));
     p.text(pos2(c.x + 11.0, r.center().y), Align2::LEFT_CENTER, "MIDI", font, TOKENS.text_dim);
