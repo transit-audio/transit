@@ -564,11 +564,24 @@ fn both_themes_are_flat_on_the_spacing_grid() {
         let v = &st.visuals;
         assert_eq!(v.window_shadow, egui::Shadow::NONE, "{theme:?}: no window shadow");
         assert_eq!(v.popup_shadow, egui::Shadow::NONE, "{theme:?}: no popup shadow");
-        assert_eq!(v.window_corner_radius, egui::CornerRadius::same(crate::theme::RADIUS as u8));
-        assert_eq!(v.widgets.inactive.corner_radius, egui::CornerRadius::same(crate::theme::RADIUS_SM as u8));
+        assert_eq!(v.window_corner_radius, egui::CornerRadius::same(crate::tokens::radius::PANEL as u8));
+        assert_eq!(v.menu_corner_radius, egui::CornerRadius::same(crate::tokens::radius::CONTROL as u8));
+        assert_eq!(v.widgets.inactive.corner_radius, egui::CornerRadius::same(crate::tokens::radius::CONTROL as u8));
         assert_eq!(v.selection.stroke.width, crate::theme::FOCUS_W, "{theme:?}: focus ring token");
         assert_eq!(st.spacing.item_spacing.x % (crate::theme::SPACE / 2.0), 0.0);
         assert_eq!(st.spacing.menu_margin, egui::Margin::same(crate::theme::SPACE as i8));
+        // The chrome reads the design tokens: graphite fills, 1 px line borders, inset fields.
+        let t = if theme == egui::Theme::Light { &crate::theme::LIGHT } else { &crate::theme::DARK };
+        assert_eq!((v.panel_fill, v.window_fill, v.extreme_bg_color), (t.surface_panel, t.surface_raised, t.surface_inset), "{theme:?}: fills");
+        assert_eq!(v.window_stroke, egui::Stroke::new(1.0, t.line), "{theme:?}: window border");
+        assert_eq!(v.widgets.noninteractive.bg_stroke, egui::Stroke::new(1.0, t.line), "{theme:?}: separators");
+        assert_eq!(
+            (v.widgets.inactive.bg_fill, v.widgets.inactive.bg_stroke),
+            (t.surface_raised, egui::Stroke::new(1.0, t.line)),
+            "{theme:?}: buttons"
+        );
+        assert_eq!(v.widgets.hovered.bg_fill, t.button_hover, "{theme:?}: hover");
+        assert_eq!(v.widgets.active.bg_fill, t.surface_selected, "{theme:?}: pressed");
     }
 }
 

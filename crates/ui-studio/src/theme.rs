@@ -264,36 +264,54 @@ pub const TRANSPORT_H: f32 = 40.0;
 pub const STATUS_H: f32 = 22.0;
 pub const CLIP_NAME_H: f32 = 14.0;
 
-/// egui's own widgets (menus, buttons, windows) in `t`'s colors.
+/// egui's own widgets (menus, buttons, windows, combo boxes, scroll bars) in `t`'s colors, on the
+/// design language's shapes (ADR 0045): flat graphite, 1 px `line` separators and borders, the
+/// panel radius on windows and the control radius on menus and widgets, no shadows.
 fn visuals(t: &Tokens, light: bool) -> egui::Visuals {
+    use crate::tokens::radius;
     let mut v = if light { egui::Visuals::light() } else { egui::Visuals::dark() };
-    v.panel_fill = t.panel;
-    v.window_fill = t.panel_raised;
-    v.extreme_bg_color = t.bg;
+    let line = egui::Stroke::new(1.0, t.line);
+    v.panel_fill = t.surface_panel;
+    v.window_fill = t.surface_raised;
+    // Text fields and scroll tracks are value fields: the inset well.
+    v.extreme_bg_color = t.surface_inset;
+    v.text_edit_bg_color = Some(t.surface_inset);
+    v.code_bg_color = t.surface_inset;
     v.faint_bg_color = t.lane_alt;
-    v.selection.bg_fill = t.accent.gamma_multiply(if light { 0.35 } else { 0.6 });
+    v.weak_text_color = Some(t.text_muted);
+    v.selection.bg_fill = t.signal.gamma_multiply(if light { 0.35 } else { 0.6 });
     v.selection.stroke = egui::Stroke::new(FOCUS_W, t.focus_ring);
-    v.hyperlink_color = t.accent;
-    v.window_stroke = egui::Stroke::new(1.0, t.line);
-    v.widgets.noninteractive.bg_fill = t.panel;
-    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, t.line);
+    v.hyperlink_color = t.signal;
+    v.warn_fg_color = t.modulation;
+    v.error_fg_color = t.meter_hot;
+    v.window_stroke = line;
+    v.widgets.noninteractive.bg_fill = t.surface_panel;
+    v.widgets.noninteractive.weak_bg_fill = t.surface_panel;
+    v.widgets.noninteractive.bg_stroke = line;
     v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, t.text);
-    v.widgets.inactive.bg_fill = t.button;
-    v.widgets.inactive.weak_bg_fill = t.button;
+    v.widgets.inactive.bg_fill = t.surface_raised;
+    v.widgets.inactive.weak_bg_fill = t.surface_raised;
+    v.widgets.inactive.bg_stroke = line;
     v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, t.text);
     v.widgets.hovered.bg_fill = t.button_hover;
     v.widgets.hovered.weak_bg_fill = t.button_hover;
+    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, t.line_strong);
     v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, t.text);
-    v.widgets.active.bg_fill = t.accent.gamma_multiply(0.7);
-    v.widgets.active.weak_bg_fill = t.accent.gamma_multiply(0.7);
+    v.widgets.active.bg_fill = t.surface_selected;
+    v.widgets.active.weak_bg_fill = t.surface_selected;
+    v.widgets.active.bg_stroke = egui::Stroke::new(1.0, t.signal);
+    v.widgets.active.fg_stroke = egui::Stroke::new(1.0, t.text);
+    v.widgets.open.bg_fill = t.button_hover;
     v.widgets.open.weak_bg_fill = t.button_hover;
-    // Flat: no shadows (the 1 px separator is the only edge), one corner radius.
+    v.widgets.open.bg_stroke = egui::Stroke::new(1.0, t.line_strong);
+    v.widgets.open.fg_stroke = egui::Stroke::new(1.0, t.text);
+    // Flat: no shadows (the 1 px separator is the only edge).
     v.window_shadow = egui::Shadow::NONE;
     v.popup_shadow = egui::Shadow::NONE;
-    v.window_corner_radius = egui::CornerRadius::same(RADIUS as u8);
-    v.menu_corner_radius = egui::CornerRadius::same(RADIUS as u8);
+    v.window_corner_radius = egui::CornerRadius::same(radius::PANEL as u8);
+    v.menu_corner_radius = egui::CornerRadius::same(radius::CONTROL as u8);
     for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
-        w.corner_radius = egui::CornerRadius::same(RADIUS_SM as u8);
+        w.corner_radius = egui::CornerRadius::same(radius::CONTROL as u8);
         w.expansion = 0.0;
     }
     v
