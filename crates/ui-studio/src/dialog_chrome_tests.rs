@@ -16,7 +16,11 @@ struct T {
 
 impl T {
     fn new() -> T {
-        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
+        T::with(Services::default())
+    }
+
+    fn with(services: Services) -> T {
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, services);
         let tracks = ["A", "B", "C"]
             .iter()
             .map(|name| TrackId(app.run("track.new", json!({"kind": "audio", "name": name})).unwrap()["tracks"][0].as_u64().unwrap()))
@@ -109,4 +113,60 @@ fn the_save_question_puts_dont_save_alone_left_and_save_rightmost_and_cancel_sti
     t.input("ui.click", json!({"x": (c[0] + c[2]) / 2.0, "y": (c[1] + c[3]) / 2.0}));
     assert!(t.app.dialog.is_none());
     assert_eq!(t.app.engine.session().tracks.len(), 3, "no new session");
+}
+
+/// #326, Enter and Escape in the chrome's modal (Live and Logic agree): Enter is the default
+/// button, Escape is Cancel, in every dialog that uses it.
+#[test]
+fn enter_deletes_the_tracks_and_escape_keeps_them() {
+    let mut t = T::new();
+    t.app.dialog = Some(Dialog::DeleteTracks { tracks: t.tracks[..2].to_vec(), clips: false });
+    t.frames(2);
+    t.input("ui.key", json!({"key": "Escape"}));
+    assert!(t.app.dialog.is_none());
+    assert_eq!(t.app.engine.session().tracks.len(), 3, "Escape deletes nothing");
+    t.app.dialog = Some(Dialog::DeleteTracks { tracks: t.tracks[..2].to_vec(), clips: false });
+    t.frames(2);
+    t.input("ui.key", json!({"key": "Enter"}));
+    assert!(t.app.dialog.is_none());
+    assert_eq!(t.app.engine.session().tracks.len(), 1, "Enter performs Delete 2 Tracks");
+}
+
+#[test]
+fn enter_runs_delete_take_and_escape_does_not() {
+    let mut t = T::new();
+    let status = t.app.status.clone();
+    t.app.dialog = Some(Dialog::DeleteTake { track: t.tracks[0], take: 2 });
+    t.frames(2);
+    t.input("ui.key", json!({"key": "Escape"}));
+    assert!(t.app.dialog.is_none());
+    assert_eq!(t.app.status, status, "Escape runs nothing");
+    t.app.dialog = Some(Dialog::DeleteTake { track: t.tracks[0], take: 2 });
+    t.frames(2);
+    t.input("ui.key", json!({"key": "Enter"}));
+    assert!(t.app.dialog.is_none());
+    // The track has no take 2: the command ran and said so, which is what Enter is for here.
+    assert!(!t.app.status.is_empty() && t.app.status != status, "Enter ran takes.delete: {}", t.app.status);
+}
+
+#[test]
+fn enter_saves_then_continues_and_escape_cancels() {
+    let path = std::env::temp_dir().join(format!("transit-326c-enter-{}.transit", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let target = path.to_string_lossy().to_string();
+    let services = Services { pick_save: Some(Box::new(move |_| Some(target.clone()))), ..Services::default() };
+    let mut t = T::with(services);
+    t.app.dialog = Some(Dialog::SaveChanges { then: ("session.new".into(), json!({})) });
+    t.frames(2);
+    t.input("ui.key", json!({"key": "Escape"}));
+    assert!(t.app.dialog.is_none());
+    assert!(!path.exists(), "Escape saves nothing");
+    assert_eq!(t.app.engine.session().tracks.len(), 3, "and starts no new session");
+    t.app.dialog = Some(Dialog::SaveChanges { then: ("session.new".into(), json!({})) });
+    t.frames(2);
+    t.input("ui.key", json!({"key": "Enter"}));
+    assert!(t.app.dialog.is_none());
+    assert!(path.exists(), "Enter is Save");
+    assert!(t.app.engine.session().tracks.is_empty(), "then the new session it was asked for");
+    let _ = std::fs::remove_file(&path);
 }

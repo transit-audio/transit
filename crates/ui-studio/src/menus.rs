@@ -673,8 +673,8 @@ pub fn dialogs(app: &mut StudioApp, ctx: &egui::Context) {
         return delete_take_dialog(app, ctx, track, take);
     }
     let Some(Dialog::SaveChanges { then }) = app.dialog.clone() else { return };
-    // The chrome's modal (#326): the question is the title; Save is the default, Cancel left of
-    // it, Don't Save alone at the far left. Escape is Cancel.
+    // The chrome's modal (#326): the question is the title; Save is the default (Enter), Cancel
+    // left of it (Escape), Don't Save alone at the far left.
     let ask = crate::chrome::Ask {
         question: format!("Save changes to “{}”?", app.engine.session().name),
         detail: Some("Your changes are lost if you don't save them.".into()),
@@ -682,13 +682,10 @@ pub fn dialogs(app: &mut StudioApp, ctx: &egui::Context) {
         cancel: "Cancel",
         third: Some("Don't Save"),
     };
-    let clicked = crate::chrome::modal(ctx, egui::Id::new("save_changes"), &ask);
-    let cancel = ctx.input(|i| crate::shortcuts::hit(i, A::DialogCancel));
-    let choice = match clicked {
+    let choice = match crate::chrome::modal(ctx, egui::Id::new("save_changes"), &ask) {
         Some(crate::chrome::Choice::Default) => Some(1),
         Some(crate::chrome::Choice::Third) => Some(2),
         Some(crate::chrome::Choice::Cancel) => Some(0),
-        None if cancel => Some(0),
         None => None,
     };
     match choice {
@@ -734,14 +731,7 @@ fn delete_tracks_dialog(app: &mut StudioApp, ctx: &egui::Context, tracks: &[Trac
     let (question, label) = delete_tracks_text(app.engine.session(), tracks, clips);
     let ask = crate::chrome::Ask { question, detail: None, default: &label, cancel: "Cancel", third: None };
     let clicked = crate::chrome::modal(ctx, egui::Id::new("delete_tracks"), &ask);
-    let (confirm, cancel) = ctx.input(|i| (crate::shortcuts::hit(i, A::DialogConfirm), crate::shortcuts::hit(i, A::DialogCancel)));
-    let choice = match clicked {
-        Some(crate::chrome::Choice::Default) => Some(true),
-        Some(_) => Some(false),
-        None if confirm => Some(true),
-        None if cancel => Some(false),
-        None => None,
-    };
+    let choice = clicked.map(|c| c == crate::chrome::Choice::Default);
     if let Some(yes) = choice {
         app.dialog = None;
         if yes {
@@ -763,14 +753,7 @@ fn delete_take_dialog(app: &mut StudioApp, ctx: &egui::Context, track: TrackId, 
         third: None,
     };
     let clicked = crate::chrome::modal(ctx, egui::Id::new("delete_take"), &ask);
-    let (confirm, cancel) = ctx.input(|i| (crate::shortcuts::hit(i, A::DialogConfirm), crate::shortcuts::hit(i, A::DialogCancel)));
-    let choice = match clicked {
-        Some(crate::chrome::Choice::Default) => Some(true),
-        Some(_) => Some(false),
-        None if confirm => Some(true),
-        None if cancel => Some(false),
-        None => None,
-    };
+    let choice = clicked.map(|c| c == crate::chrome::Choice::Default);
     if let Some(yes) = choice {
         app.dialog = None;
         if yes {

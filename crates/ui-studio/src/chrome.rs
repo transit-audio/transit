@@ -224,8 +224,9 @@ pub fn modal_frame(t: &Tokens) -> egui::Frame {
 }
 
 /// A modal dialog over the `overlay` scrim: no title bar (the question is the title, Sans 600 13;
-/// the detail Sans 12 `text.muted`), 380 wide, the footer as [`Ask`] says. Returns the button
-/// clicked this frame; the caller keeps its own Enter (the default) and Escape (Cancel) keys.
+/// the detail Sans 12 `text.muted`), 380 wide, the footer as [`Ask`] says. Returns the choice made
+/// this frame: a click, or the keys. Enter is the default button and Escape is Cancel, as in Live
+/// and Logic (the chrome document: "Enter = default, Escape = Cancel").
 pub fn modal(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>) -> Option<Choice> {
     let t = &TOKENS;
     let frame = modal_frame(t);
@@ -268,7 +269,20 @@ pub fn modal(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>) -> Option<Choice>
     });
     layout.rect = r4(shown.response.rect);
     ctx.data_mut(|d| d.insert_temp(modal_key(id), layout));
-    choice
+    choice.or_else(|| modal_keys(ctx))
+}
+
+/// The modal's keys this frame: Enter is the default button, Escape is Cancel.
+fn modal_keys(ctx: &egui::Context) -> Option<Choice> {
+    use crate::shortcuts::{Action, hit};
+    let (enter, escape) = ctx.input(|i| (hit(i, Action::DialogConfirm), hit(i, Action::DialogCancel)));
+    if enter {
+        Some(Choice::Default)
+    } else if escape {
+        Some(Choice::Cancel)
+    } else {
+        None
+    }
 }
 
 /// A tool window's footer: a 1 px `line` across the window above it, 10 px under the line, the

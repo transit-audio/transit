@@ -247,8 +247,9 @@ strip or track header is highlighted. The edit cursor keeps its track, which sta
 cursor commands (Paste, Split, New MIDI Clip) and of the Devices pane until you click a track
 again. Clicking a track header selects the track and clears the clip selection; the last click
 decides what Delete removes. Deleting a group, several tracks or a track that holds clips asks
-first, and the button says what goes (**Delete Track**, **Delete 3 Tracks**, **Delete Group**);
-Enter confirms and Escape cancels.
+first, and the button says what goes (**Delete Track**, **Delete 3 Tracks**, **Delete Group**).
+In every such question Enter presses the highlighted button and Escape cancels: in the
+save-changes question Enter is **Save**.
 
 ## A plug-in that stops responding
 
