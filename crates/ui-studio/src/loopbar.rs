@@ -151,22 +151,124 @@ pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, str
     let shown = app.arrange.loop_drag.map_or(region, |d| d.range);
     let p = ui.painter().with_clip_rect(strip);
     p.rect_filled(strip, 0.0, TOKENS.lane);
+    let mut view = LoopView::default();
     if !shown.is_empty() {
         let r =
             Rect::from_min_max(pos2(map.x(shown.start), strip.min.y + 1.0), pos2(map.x(shown.end).max(map.x(shown.start) + 1.0), strip.max.y - 1.0));
-        let (fill, edge) = if enabled { (TOKENS.loop_region, TOKENS.text) } else { (TOKENS.loop_region.gamma_multiply(0.3), TOKENS.text_dim) };
-        p.rect_filled(r, crate::theme::RADIUS_SM, fill);
-        p.rect_stroke(r, crate::theme::RADIUS_SM, Stroke::new(1.0, edge.gamma_multiply(0.6)), StrokeKind::Inside);
-        for x in [r.min.x, r.max.x] {
-            p.line_segment([pos2(x, r.min.y), pos2(x, r.max.y)], Stroke::new(2.0, edge));
+        let look = brace(enabled);
+        p.rect_filled(r, crate::theme::RADIUS_SM, look.fill);
+        if let Some(edge) = look.edge {
+            p.rect_stroke(r, crate::theme::RADIUS_SM, Stroke::new(1.0, edge), StrokeKind::Inside);
+        }
+        let text = range_text(s, shown);
+        let font = crate::theme::mono(ui.ctx(), BRACE_TEXT);
+        if ui.painter().layout_no_wrap(text.clone(), font.clone(), look.ink).size().x + 8.0 <= r.width() {
+            p.with_clip_rect(r).text(r.center(), egui::Align2::CENTER_CENTER, &text, font, look.ink);
+            view.range_text = text;
+        }
+        view.brace = crate::arrange::r4(r);
+        view.brace_look = look;
+    }
+    app.arrange.layout.loop_view.brace = view.brace;
+    app.arrange.layout.loop_view.brace_look = view.brace_look;
+    app.arrange.layout.loop_view.range_text = view.range_text;
+}
+
+/// The range in the brace: Mono 9 points.
+pub const BRACE_TEXT: f32 = 9.0;
+
+/// How the brace is painted.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct BraceLook {
+    pub fill: egui::Color32,
+    /// Its 1 px edge (Cycle off only).
+    pub edge: Option<egui::Color32>,
+    /// The range's ink.
+    pub ink: egui::Color32,
+}
+
+/// The brace (#326): solid in the loop hue with the range in `ink.dark` while Cycle is on; at 30
+/// percent with a 55 percent edge and the range in `text` while it is off.
+pub fn brace(enabled: bool) -> BraceLook {
+    use crate::tokens::alpha;
+    let t = &TOKENS;
+    if enabled {
+        BraceLook { fill: t.loop_region, edge: None, ink: t.ink_dark }
+    } else {
+        BraceLook {
+            fill: t.loop_region.gamma_multiply(alpha::LOOP_BRACE_OFF),
+            edge: Some(t.loop_region.gamma_multiply(alpha::LOOP_BRACE_OFF_EDGE)),
+            ink: t.text,
         }
     }
 }
 
-/// The ruler's loop block, under the strip: the stored loop region, drawn amber while Cycle is on
-/// (and then live: edges resize, the body moves, double-click turns Cycle off) and as a faint
-/// outline while it is off, so the user sees what Cycle will use. Nothing when there is no region.
-/// Outside the block the ruler keeps click-to-locate.
+/// "5.1 – 9.1 · 4 bars": the region's start and end as bar.beat, and its length when it runs from
+/// a bar line to a bar line.
+pub fn range_text(s: &Session, range: Range) -> String {
+    let (a, b) = (s.tempo.bar_beat_at(range.start, s.sample_rate), s.tempo.bar_beat_at(range.end, s.sample_rate));
+    let ends = format!("{}.{} – {}.{}", a.bar, a.beat, b.bar, b.beat);
+    let on_bars = a.beat == 1 && a.tick == 0 && b.beat == 1 && b.tick == 0;
+    match b.bar - a.bar {
+        n if on_bars && n == 1 => format!("{ends} · 1 bar"),
+        n if on_bars && n > 1 => format!("{ends} · {n} bars"),
+        _ => ends,
+    }
+}
+
+/// The loop as the arrangement last painted it, for tests and `ui.inspect`.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct LoopView {
+    /// The brace in the strip (zero without a region).
+    pub brace: crate::arrange::R4,
+    #[serde(skip)]
+    pub brace_look: BraceLook,
+    /// The range printed in the brace (empty when it does not fit).
+    pub range_text: String,
+    /// The ruler's tint under the loop while Cycle is on.
+    pub ruler_tint: Option<crate::arrange::R4>,
+    /// The loop's edges (x) down the ruler and the lanes while Cycle is on.
+    pub edges: Vec<f32>,
+    /// What lies outside the loop over the lanes, dimmed by `overlay`, while Cycle is on.
+    pub outside: Vec<crate::arrange::R4>,
+}
+
+/// While Cycle is on (#326): the lanes outside the loop take `overlay` (nothing tints inside, so
+/// the selection stays the only color there) and the loop's edges run from under the brace down
+/// the ruler and the lanes at 75 percent of the hue. Paint after the clips, under the playhead.
+pub(crate) fn lanes(app: &mut StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, lanes: Rect) {
+    let view = &mut app.arrange.layout.loop_view;
+    view.edges.clear();
+    view.outside.clear();
+    let shown = app.arrange.loop_drag.map_or(s.edit.loop_range, |d| d.range);
+    if !s.edit.loop_playback || shown.is_empty() {
+        return;
+    }
+    let (x0, x1) = (map.x(shown.start), map.x(shown.end));
+    let p = ui.painter().with_clip_rect(lanes);
+    for r in
+        [Rect::from_min_max(lanes.min, pos2(x0.min(lanes.max.x), lanes.max.y)), Rect::from_min_max(pos2(x1.max(lanes.min.x), lanes.min.y), lanes.max)]
+    {
+        if r.is_positive() {
+            p.rect_filled(r, 0.0, TOKENS.overlay);
+            view.outside.push(crate::arrange::r4(r));
+        }
+    }
+    let edge = Stroke::new(1.0, TOKENS.loop_region.gamma_multiply(crate::tokens::alpha::LOOP_EDGE));
+    let span = Rect::from_min_max(pos2(ruler.min.x, ruler.min.y + STRIP_H), pos2(ruler.max.x, lanes.max.y));
+    let pe = ui.painter().with_clip_rect(span);
+    for x in [x0 + 0.5, x1 - 0.5] {
+        if x >= span.min.x && x <= span.max.x {
+            pe.line_segment([pos2(x, span.min.y), pos2(x, span.max.y)], edge);
+            view.edges.push(x);
+        }
+    }
+}
+
+/// The ruler's loop block, under the strip: the stored loop region, tinted in the loop hue while
+/// Cycle is on (and then live: edges resize, the body moves, double-click turns Cycle off); while
+/// Cycle is off the parked brace in the strip shows what Cycle will use (#326). Nothing when there
+/// is no region. Outside the block the ruler keeps click-to-locate.
 pub(crate) fn block(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, ruler: Rect) {
     let region = s.edit.loop_range;
     let enabled = s.edit.loop_playback;
@@ -184,15 +286,16 @@ pub(crate) fn block(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, rul
         }
     }
     let shown = app.arrange.loop_drag.map_or(region, |d| d.range);
-    if shown.is_empty() {
+    app.arrange.layout.loop_view.ruler_tint = None;
+    if shown.is_empty() || !enabled {
+        // Cycle off: the brace stays, parked; the ruler and the lanes are left alone (#326).
         return;
     }
-    let r = Rect::from_min_max(pos2(map.x(shown.start), top), pos2(map.x(shown.end), bottom)).intersect(ruler);
-    let p = ui.painter();
-    if enabled {
-        p.rect_filled(r, crate::theme::RADIUS_SM, TOKENS.loop_region.gamma_multiply(0.55));
-    } else {
-        p.rect_stroke(r, crate::theme::RADIUS_SM, Stroke::new(1.0, TOKENS.loop_region.gamma_multiply(0.45)), StrokeKind::Inside);
+    // Cycle on: the ruler under the brace takes the loop hue at 20 percent.
+    let r = Rect::from_min_max(pos2(map.x(shown.start), ruler.min.y + STRIP_H), pos2(map.x(shown.end), ruler.max.y)).intersect(ruler);
+    if r.is_positive() {
+        ui.painter().rect_filled(r, 0.0, TOKENS.loop_region.gamma_multiply(crate::tokens::alpha::LOOP_RULER_TINT));
+        app.arrange.layout.loop_view.ruler_tint = Some(crate::arrange::r4(r));
     }
 }
 

@@ -68,7 +68,7 @@ pub mod arrangement {
         GRID_BAR = "grid.bar" 0x323537;
         GRID_BEAT = "grid.beat" 0x242729;
         GRID_SUB = "grid.sub" 0x1C1F21;
-        LOOP_REGION = "loop" 0xE6AB27;
+        LOOP_REGION = "loop" 0xD05DAD;
         CURSOR = "cursor" 0xE1E1E3;
         SELECTION_OUTLINE = "selection.outline" 0xEDEDF0;
         INK_DARK = "ink.dark" 0x131518;
@@ -133,7 +133,7 @@ pub mod color_light {
         GRID_BAR = "grid.bar" 0xCFCFD1;
         GRID_BEAT = "grid.beat" 0xE3E4E5;
         GRID_SUB = "grid.sub" 0xEEEEF0;
-        LOOP_REGION = "loop" 0x5B430B;
+        LOOP_REGION = "loop" 0xB73590;
         CURSOR = "cursor" 0x28282B;
         SELECTION_OUTLINE = "selection.outline" 0x1F1F26;
         INK_DARK = "ink.dark" 0x131518;
@@ -164,8 +164,26 @@ pub mod alpha {
     pub const MOD_BAND: f32 = 0.1;
     /// A disabled but open section.
     pub const DISABLED_SECTION: f32 = 0.4;
-    pub const ALL: &[(&str, f32)] =
-        &[("curveFill", CURVE_FILL), ("scopeFill", SCOPE_FILL), ("modBand", MOD_BAND), ("disabledSection", DISABLED_SECTION)];
+    /// The loop brace while Cycle is off: its fill and its 1 px edge, in the loop hue.
+    pub const LOOP_BRACE_OFF: f32 = 0.3;
+    pub const LOOP_BRACE_OFF_EDGE: f32 = 0.55;
+    /// The ruler under the loop while Cycle is on.
+    pub const LOOP_RULER_TINT: f32 = 0.2;
+    /// The loop's edges down the ruler and the lanes while Cycle is on.
+    pub const LOOP_EDGE: f32 = 0.75;
+    /// Out-of-scale rows in the piano roll.
+    pub const LOOP_SCALE_ROW: f32 = 0.12;
+    pub const ALL: &[(&str, f32)] = &[
+        ("curveFill", CURVE_FILL),
+        ("scopeFill", SCOPE_FILL),
+        ("modBand", MOD_BAND),
+        ("disabledSection", DISABLED_SECTION),
+        ("loopBraceOff", LOOP_BRACE_OFF),
+        ("loopBraceOffEdge", LOOP_BRACE_OFF_EDGE),
+        ("loopRulerTint", LOOP_RULER_TINT),
+        ("loopEdge", LOOP_EDGE),
+        ("loopScaleRow", LOOP_SCALE_ROW),
+    ];
 }
 
 /// The two type families (`font` in tokens.json).

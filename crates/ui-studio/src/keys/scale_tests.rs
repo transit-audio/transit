@@ -258,3 +258,35 @@ fn step_editor_pitch_menu_picks_a_root_and_a_scale_without_closing_itself() {
     assert_eq!(h.app.keys_scale().key, KeyScale { root: 9, scale: Scale::MinorPentatonic });
     assert_eq!(h.app.keys_scale().key.label(), "A Minor Pentatonic");
 }
+
+/// #326: out-of-scale rows take the loop hue at 12 percent and their key labels the hue; the keys
+/// keep their own fills.
+#[test]
+fn out_of_scale_rows_and_labels_take_the_loop_hue() {
+    let mut h = Harness::new();
+    h.minor(false);
+    let rows = |h: &Harness, pitch: u8| h.app.keys.layout.pitch_rows.iter().find(|(p, _)| *p == pitch).map(|(_, r)| *r).unwrap();
+    let grid = h.app.keys.layout.grid;
+    // C minor: E (64) is out of scale, D (62) is in it.
+    let fill_at = |h: &Harness, pitch: u8| {
+        let r = rows(h, pitch);
+        let y = (r[1] + r[3]) / 2.0;
+        let x = grid[0] + 40.0;
+        h.shapes.iter().rev().find_map(|s| match &s.shape {
+            egui::Shape::Rect(rect) if rect.rect.contains(pos2(x, y)) && rect.rect.width() > 20.0 => Some(rect.fill),
+            _ => None,
+        })
+    };
+    assert_eq!(fill_at(&h, 64), Some(TOKENS.loop_region.gamma_multiply(crate::tokens::alpha::LOOP_SCALE_ROW)), "an out-of-scale row");
+    assert_ne!(fill_at(&h, 62), fill_at(&h, 64), "negative control: an in-scale row is not tinted");
+    let label_ink = |h: &Harness, name: &str| {
+        h.shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.job.text == name => t.galley.job.sections.first().map(|x| x.format.color),
+            _ => None,
+        })
+    };
+    let e = transit_midi::note_name(64);
+    let d = transit_midi::note_name(62);
+    assert_eq!(label_ink(&h, &e), Some(TOKENS.loop_region), "{e}'s key label");
+    assert_eq!(label_ink(&h, &d), Some(TOKENS.text_dim), "{d}'s label stays dim");
+}

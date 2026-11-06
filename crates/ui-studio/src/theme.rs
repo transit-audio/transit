@@ -132,8 +132,9 @@ pub struct Tokens {
     pub text_dim: Color32,
     /// `signal`, the one accent: selection, focus, active values.
     pub accent: Color32,
-    /// The loop/cycle region: strip fill and handles, ruler cycle tint, the Cycle button when on.
-    /// A yellowish amber (not the accent) so looping reads apart from selection; darker in light.
+    /// `loop` (a Rust keyword, hence the long name): the loop region's own hue (#326), magenta, clear
+    /// of signal, mod and the meter colors for every color-vision type. The brace, the ruler tint
+    /// and the edges while Cycle is on, the Cycle button, and the piano roll's out-of-scale rows.
     pub loop_region: Color32,
     pub cursor: Color32,
     /// Record arm and the clip cap: `meter.hot`.

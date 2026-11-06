@@ -228,6 +228,8 @@ pub struct Layout {
     pub ruler: R4,
     /// The loop strip along the top of the ruler.
     pub loop_strip: R4,
+    /// The loop brace, the ruler tint, the edges and the dimmed outside (#326).
+    pub loop_view: crate::loopbar::LoopView,
     pub timeline: R4,
     pub samples_per_px: f64,
     /// The grid as the ruler corner reads it ("Grid: 1/16", "Adaptive 1/32", "Snap off").
@@ -254,6 +256,9 @@ pub struct Layout {
     pub transport: std::collections::BTreeMap<String, R4>,
     /// The icon each transport button shows (its Lucide name, e.g. `play`).
     pub transport_icons: std::collections::BTreeMap<String, String>,
+    /// How the Cycle button was painted (#326).
+    #[serde(skip)]
+    pub cycle_look: crate::transport::CycleLook,
     /// Where a dragged track header would land: a line between rows or a group header's outline.
     pub drop: Option<R4>,
     /// The clips a move/copy drag in progress would land, as painted (#218).
@@ -340,6 +345,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         scroll: map.scroll,
         transport: std::mem::take(&mut app.arrange.layout.transport),
         transport_icons: std::mem::take(&mut app.arrange.layout.transport_icons),
+        cycle_look: app.arrange.layout.cycle_look,
         ..Layout::default()
     };
     let selected_tracks = s.edit.selected_tracks.clone();
@@ -484,9 +490,11 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     layout.loop_strip = r4(strip);
     ruler_input(app, ui, map, Rect::from_min_max(pos2(ruler.min.x, strip.max.y), ruler.max));
     crate::loopbar::block(app, ui, &s, map, ruler);
+    crate::loopbar::lanes(app, ui, &s, map, ruler, tl);
     overlays(app, ui, &s, map, ruler, tl, &rows, &geo, &mut layout);
     scroll_and_zoom(app, ui, map, full, tl, content_h);
     follow_playhead(app, map, tl);
+    layout.loop_view = std::mem::take(&mut app.arrange.layout.loop_view);
     app.arrange.layout = layout;
 }
 

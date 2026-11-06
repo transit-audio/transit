@@ -16,15 +16,25 @@ use transit_time::Samples;
 fn button(app: &mut StudioApp, ui: &mut Ui, name: &str, which: Icon, on: bool, on_color: Color32) -> egui::Response {
     let (r, resp) = ui.allocate_exact_size(vec2(34.0, 28.0), Sense::click());
     let p = ui.painter();
-    let bg = if on {
-        on_color.gamma_multiply(0.35)
-    } else if resp.hovered() {
-        TOKENS.button_hover
+    if name == "cycle" {
+        // Cycle is a role toggle (#326): filled in the loop hue with an `ink.dark` glyph when on;
+        // off, the toggle's off look (`surface.raised`, 1 px `line`, `text.muted` glyph).
+        let look = cycle_look(on, resp.hovered());
+        p.rect_filled(r, crate::tokens::toggle::RADIUS, look.fill);
+        p.rect_stroke(r, crate::tokens::toggle::RADIUS, egui::Stroke::new(1.0, look.border), egui::StrokeKind::Inside);
+        icons::paint_in(p, r, which, look.glyph);
+        app.arrange.layout.cycle_look = look;
     } else {
-        TOKENS.button
-    };
-    p.rect_filled(r, crate::theme::RADIUS, bg);
-    icons::paint_in(p, r, which, if on { on_color } else { TOKENS.text });
+        let bg = if on {
+            on_color.gamma_multiply(0.35)
+        } else if resp.hovered() {
+            TOKENS.button_hover
+        } else {
+            TOKENS.button
+        };
+        p.rect_filled(r, crate::theme::RADIUS, bg);
+        icons::paint_in(p, r, which, if on { on_color } else { TOKENS.text });
+    }
     app.arrange.layout.transport.insert(name.to_string(), [r.min.x, r.min.y, r.max.x, r.max.y]);
     app.arrange.layout.transport_icons.insert(name.to_string(), which.name().to_string());
     let tooltip = if name == "stop" { "Stop: back to start position; again: to the beginning" } else { name };
@@ -43,6 +53,25 @@ fn button(app: &mut StudioApp, ui: &mut Ui, name: &str, which: Icon, on: bool, o
         resp.context_menu(|ui| app.midi_learn_menu(ui, transit_model::TrackId(0), transit_model::Control::Transport(target)));
     }
     resp.on_hover_text(tooltip)
+}
+
+/// How the Cycle button is painted.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CycleLook {
+    pub fill: Color32,
+    pub border: Color32,
+    pub glyph: Color32,
+}
+
+/// The Cycle button's look: on, the loop hue with an `ink.dark` glyph (a role toggle, like solo or
+/// arm); off, a toggle's off look, `button.hover` under the pointer.
+pub fn cycle_look(on: bool, hovered: bool) -> CycleLook {
+    let t = &TOKENS;
+    if on {
+        CycleLook { fill: t.loop_region, border: t.loop_region, glyph: t.ink_dark }
+    } else {
+        CycleLook { fill: if hovered { t.button_hover } else { t.surface_raised }, border: t.line, glyph: t.text_muted }
+    }
 }
 
 impl StudioApp {

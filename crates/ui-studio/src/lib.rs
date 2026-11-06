@@ -678,6 +678,8 @@ mod help_tests;
 #[cfg(test)]
 mod keys_tests;
 #[cfg(test)]
+mod loop_hue_tests;
+#[cfg(test)]
 mod midi_fx_panel_tests;
 #[cfg(test)]
 mod midi_learn_hosted_tests;

@@ -616,7 +616,8 @@ fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &Cli
             } else if map.scale.key.contains(pitch) {
                 TOKENS.lane_alt
             } else {
-                TOKENS.loop_region.gamma_multiply(0.18)
+                // Out of scale: the loop hue at 12 percent (#326).
+                TOKENS.loop_region.gamma_multiply(crate::tokens::alpha::LOOP_SCALE_ROW)
             }
         } else if is_black(pitch) {
             TOKENS.lane
@@ -821,10 +822,11 @@ fn paint_keyboard(app: &StudioApp, ui: &Ui, map: &Map, kb: Rect) {
         } else if map.scale.enabled {
             if pitch % 12 == map.scale.key.root % 12 {
                 TOKENS.accent.gamma_multiply(0.5)
-            } else if map.scale.key.contains(pitch) {
+            } else if map.scale.key.contains(pitch) || !is_black(pitch) {
                 TOKENS.panel_raised
             } else {
-                TOKENS.loop_region.gamma_multiply(0.35)
+                // Out of scale: the key keeps its own fill; its label takes the loop hue (#326).
+                TOKENS.bg
             }
         } else if is_black(pitch) {
             TOKENS.bg
@@ -843,7 +845,14 @@ fn paint_keyboard(app: &StudioApp, ui: &Ui, map: &Map, kb: Rect) {
         );
         let c = if map.scale.enabled { pitch % 12 == map.scale.key.root % 12 } else { pitch.is_multiple_of(12) };
         if c || (map.kh >= 14.0 && (map.scale.enabled || !is_black(pitch))) {
-            let color = if c { TOKENS.text } else { TOKENS.text_dim };
+            let out_of_scale = map.scale.enabled && !map.scale.key.contains(pitch);
+            let color = if c {
+                TOKENS.text
+            } else if out_of_scale {
+                TOKENS.loop_region
+            } else {
+                TOKENS.text_dim
+            };
             p.text(
                 pos2(kb.max.x - 6.0, row.center().y),
                 Align2::RIGHT_CENTER,

@@ -247,7 +247,6 @@ fn derived_arrangement_tokens_keep_their_old_contrast() {
         ("grid_bar", t.grid_bar, old(0x38393e), old_lane, t.lane),
         ("grid_beat", t.grid_beat, old(0x2a2b2f), old_lane, t.lane),
         ("grid_sub", t.grid_sub, old(0x232427), old_lane, t.lane),
-        ("loop_region", t.loop_region, old(0xe8b33c), old_bg, t.bg),
         ("cursor", t.cursor, old(0xe8e8ea), old_bg, t.bg),
         ("selection_outline", t.selection_outline, old(0xf4f4f6), old_bg, t.bg),
     ] {
