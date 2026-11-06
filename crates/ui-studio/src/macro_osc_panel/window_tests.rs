@@ -200,6 +200,27 @@ fn follow_selection_switches_the_shown_device_to_the_focused_track() {
 }
 
 #[test]
+fn a_followed_window_leaves_the_escape_focus_with_the_click_that_changed_the_track() {
+    let mut t = T::new();
+    let a = t.instrument_track();
+    let b = t.instrument_track();
+    t.app.focus(a);
+    t.frames(3);
+    t.open_card(0);
+    let link = t.panel(a).title.follow;
+    t.click(mid(link), 1);
+    // A click outside the editor (where a track header sits), then the focused track changes.
+    t.click((10.0, 450.0), 1);
+    assert_eq!(t.app.builtin_editor.macro_osc.focused, None);
+    t.app.focus(b);
+    t.frames(3);
+    assert_eq!(t.app.ui.plugin_windows, vec![(b, INST)], "the window followed");
+    assert_eq!(t.app.builtin_editor.macro_osc.focused, None, "and did not take the Escape focus");
+    t.key("Escape");
+    assert_eq!(t.app.ui.plugin_windows, vec![(b, INST)], "Escape went to the views, not the editor");
+}
+
+#[test]
 fn both_token_sets_draw_the_panel() {
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
         let (mut t, tr) = T::open();

@@ -44,6 +44,9 @@ pub struct State {
     /// The editor whose model picker holds the arrow keys (from a click on a model until a press
     /// lands elsewhere).
     pub picker: Option<u64>,
+    /// Windows that follow selection moved to this frame: they open without taking the Escape
+    /// focus (the click that changed the track was not in them).
+    no_focus: Vec<u64>,
     /// The editors with a value being typed, and the knob's parameter (that field keeps Escape).
     pub typing: Vec<(u64, String)>,
     /// The windows drawn last frame and this frame, with their rects and layers.
@@ -149,6 +152,7 @@ pub(crate) fn follow(app: &mut StudioApp) {
         let was = app.builtin_at(key).map(|i| i.uid.get());
         // The window keeps its place on the instance it moves to (unless that one has its own).
         let new_uid = app.builtin_at(target).map(|i| i.uid.get());
+        app.builtin_editor.macro_osc.no_focus.extend(new_uid);
         if let (Some(w), Some(n)) = (was, new_uid)
             && let Some(r) = app.ui.editor_rects.get(&w).copied()
         {
@@ -191,7 +195,10 @@ pub(crate) fn show(
         let st = &mut app.builtin_editor.macro_osc;
         *st.generation.entry(uid).or_default() += 1;
         st.pos.insert(uid, r.min);
-        st.focused = Some(uid);
+        if !st.no_focus.contains(&uid) {
+            st.focused = Some(uid);
+        }
+        st.no_focus.retain(|u| *u != uid);
         size = Some(r.size());
     }
     let st = &app.builtin_editor.macro_osc;

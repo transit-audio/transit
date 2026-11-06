@@ -100,4 +100,13 @@ fn arrow_keys_move_the_model_while_the_picker_has_the_focus() {
     assert_eq!(t.param(tr, "model"), 17.0);
     t.key("ArrowLeft");
     assert_eq!(t.param(tr, "model"), 16.0);
+    // Each arrow press is its own undo step.
+    let before = t.undo_len();
+    t.key("ArrowRight");
+    t.key("ArrowRight");
+    assert_eq!(t.param(tr, "model"), 18.0);
+    assert_eq!(t.undo_len(), before + 2, "two presses, two steps");
+    t.app.run("edit.undo", serde_json::json!({})).unwrap();
+    t.frames(2);
+    assert_eq!(t.param(tr, "model"), 17.0, "undo takes one press back");
 }

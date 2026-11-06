@@ -397,8 +397,10 @@ Plucked String, Key Tracked Timbre, and your own: the title bar's arrows step th
 name field lists them (with Save As and Delete), and the save button writes over your own preset
 (on a factory preset it opens the list to Save As). The editor is a floating window inside
 transit's main window, so it minimizes and returns with it. Drag its title bar to move it and its
-edge to resize it; it opens where you last closed it. **Escape** closes the editor you last clicked
-in, and **Window > Close All Editors** closes every editor. The link button in the title bar
+edge to resize it; it opens where you last left it (a second Macro Oscillator's window opens
+beside the first). The body scrolls with the mouse wheel; to nudge a knob with the wheel, hold Ctrl
+(Cmd on macOS). **Escape** closes the editor you last clicked in, and **Window > Close All
+Editors** closes every editor, built-in and hosted. The link button in the title bar
 (**Follow Selection**) makes the window show the Macro Oscillator of whichever track you focus,
 as Logic's Link does; off, the window stays on its own instrument.
 
