@@ -268,6 +268,33 @@ Two parameters on one surface (326-M, Timbre across and Morph up): a display wel
 ### Voice lights
 One 10 px square (radius 3) per voice, eight to a row with 5 px gaps, right-aligned under the controls that set the count: `signal` while a key holds the voice, `signal` at 45% while its release fades, `line` while free. The hero's display says how many sound (`3 voices`).
 
+### Icons
+Every icon the app draws is a Lucide glyph (lucide-static 1.50.0, ISC, unmodified; `crates/ui-studio/assets/icons/`, credit in `ATTRIBUTION.md`) through `crate::icons::Icon`, rasterized in white and tinted with a token. A character is never an icon; typography (the fader scale's `-inf`, an arrow inside a sentence or a readout, a middle dot between facts) stays text. Letters stay letters where they read better (M, S, R, I, Pre/Post).
+
+| Icon | Lucide | Where | Size | Ink |
+|---|---|---|---|---|
+| Rewind | `skip-back` | Transport | 16, filled | `text` |
+| Stop, Play, Record | `square`, `play`, `circle` | Transport, browser preview | 16, filled | `text`; Record `record` when armed |
+| Loop | `repeat` | Transport cycle | 16 | `text`; `loop` when on |
+| Metronome | `metronome` | Click toggle and its popup | 16 | `text` |
+| ChevronRight, ChevronDown | `chevron-right`, `chevron-down` | Disclosure, combo chevron, menu bars | 12-16 | `text.faint`, `text.muted` hot |
+| Plus | `plus` | Add lane, device, effect, send, folder, tempo | 11-24 | `text`, `text.dim` |
+| Remove | `x` | Close lane, remove device, effect, send | 11-14 | `text.dim`, `record` on hover |
+| Minus | `minus` | Meter and tempo steppers | 16 | `text` |
+| Check | `check` | Menu checks | 12 | `text` |
+| Power | `power` | Insert bypass | 12 | `signal` on, `text.faint` off |
+| OpenEditor | `external-link` | Open a plug-in editor, MIDI Monitor direction | 12-16 | `text`, `record` for out |
+| Star, StarFilled | `star` | Favorite plug-ins | 12 | `text.faint`, `signal` filled |
+| Filter | `funnel` | Browser and menu filters | 12-16 | `text.dim` |
+| Folder, FolderOpen, FileAudio, File | `folder`, `folder-open`, `file-audio`, `file` | Browser rows | 14 | `text.dim` |
+| Warning | `triangle-alert` | Warnings (no color) | glyph size of the text | `text` |
+| Error | `circle-alert` | Errors | glyph size of the text | `meter.hot` |
+| Snowflake | `snowflake` | Freeze on the track header | 14 | `text` |
+| Headphones | `headphones` | Browser auto-preview | 16 | `text` |
+| Help | `circle-help` | Window header question mark (18 px hit) | 16 | `text.dim`, `accent` hot |
+
+The unsaved-changes marker in the menu bar is a 6 px dot painted in `text`, not a glyph.
+
 ## Application chrome
 
 egui's own widgets outside the device panels: the menu bar and its menus, popups, dialogs, tool windows, buttons, fields, combo boxes, checkboxes and radio buttons, scroll bars and tooltips. From the maintainer's application chrome document (draft 1, [`mockups/chrome/`](mockups/chrome/)); the numbers are `chrome` in `tokens.json`. One rule carries over from the devices: color means something. Blue is a value you set or the thing that has focus; red is clip, record and error; nothing else is colored.
@@ -301,7 +328,7 @@ In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gi
 - **Combo box:** the dropdown above: `surface.inset`, 1 px `line`, chevron `text.faint` (`text.muted` on hover or open). Its list is a popup with the current value checked in `text` (lists built from check rows, as in Audio Devices, do this today; lists built from egui's selectable rows still mark the current value with the selection color until they move to check rows).
 - **Checkbox and radio:** a 14 px box in an 18 px hit, radius 3 (the radio round). Off `surface.inset` with `line.strong`; on `signal` with the mark in `surface.inset` (the radio: a 6 px `surface.inset` dot in a `signal` ring). Checked is a value set, like the switch.
 - **Scroll bars:** floating. At rest a 4 px `ink.ghost` handle; on hover 8 px `ink.arrow` on a `surface.panel` track; `text.faint` while dragging. Inset 2, minimum handle 24, round ends.
-- **Text selection** `signal` at 60 percent (35 in the light set); **links** `signal`.
+- **Selected widgets** (egui's `selectable_label` until it moves to a toggle or segmented control) take the option toggle look: fill `toggle.on.option.fill`, text `signal`. egui backs a text selection with the same fill, so a text selection is the option fill too (it was `signal` at 60 percent, 35 in the light set); **links** `signal`.
 
 ### Warnings and errors
 - **A warning** is the message in `text` with a triangle glyph, no color, on a `surface.raised` card with a `line.strong` edge where there is room for one (Audio Devices' low-buffer note in the artboard). A dedicated warning yellow would be a third amber next to `mod` and the old loop color.
