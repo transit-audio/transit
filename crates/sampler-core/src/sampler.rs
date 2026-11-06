@@ -283,10 +283,16 @@ impl SamplerCore {
         self.voices.iter().filter(|v| v.active).count()
     }
 
-    /// Every voice cut, controllers cleared, the voices' random state back to its seed.
+    /// Every voice cut, controllers cleared, the voices' random state back to its seed, and every
+    /// zone's level and pan glide completed: the new value is the current one. A glide is keyed to
+    /// the caller's absolute frame, which a reset sets back to zero, so a glide left in place would
+    /// replay the old value until the frame climbed back to it.
     pub fn reset(&mut self) {
         for v in &mut self.voices {
             v.reset();
+        }
+        for s in self.zones.iter_mut().chain(self.ghosts.iter_mut()).flatten() {
+            s.derived.glide = None;
         }
         self.controls = Controls::new();
         self.pad_voice = [None; PADS];

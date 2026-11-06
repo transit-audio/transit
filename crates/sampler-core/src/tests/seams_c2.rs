@@ -137,3 +137,32 @@ fn a_glide_from_an_unchanged_level_is_no_glide() {
     let (l, _) = run(&mut c, 4, &[], 8);
     assert!(l.iter().all(|y| *y == 1.0));
 }
+
+#[test]
+fn a_reset_completes_a_glide_in_progress_to_its_target() {
+    let mut c = core();
+    let zone = gate_zone(&mut c, 0);
+    run(&mut c, 0, &[Event::on(0, 60, 127)], 1000);
+    let mut next = zone;
+    next.playback.level_db = -12.0;
+    next.playback.pan = -0.5;
+    // A glide over 512 frames from frame 1000, interrupted by a reset after 100 of them.
+    c.set_zone_glide(3, next, 1000, 512).unwrap();
+    run(&mut c, 1000, &[], 100);
+    c.reset();
+    // The caller's frame starts again at 0, far before the glide's own frames.
+    let (l, r) = run(&mut c, 0, &[Event::on(0, 60, 127)], 64);
+    let to = math::powf(10.0, -12.0 / 20.0);
+    for n in 0..64 {
+        // Pan to the left lowers the right side: (1, 1 + pan).
+        assert_eq!(l[n].to_bits(), to.to_bits(), "left, frame {n}: the target level, not a stale or interpolated one");
+        assert_eq!(r[n].to_bits(), (to * (1.0 - 0.5)).to_bits(), "right, frame {n}: the target pan");
+    }
+    // A later glide starts from the target, not from the old value.
+    let mut again = next;
+    again.playback.level_db = 0.0;
+    again.playback.pan = 0.0;
+    c.set_zone_glide(3, again, 64, 4).unwrap();
+    let (l, _) = run(&mut c, 64, &[], 4);
+    assert_eq!(l[0].to_bits(), (to + (1.0 - to) * 0.25).to_bits(), "the glide starts at the value reset made current");
+}

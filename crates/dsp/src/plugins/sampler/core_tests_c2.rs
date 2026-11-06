@@ -253,3 +253,28 @@ fn reset_all_controllers_acts_at_its_own_frame() {
         assert_eq!(y.to_bits(), want.to_bits(), "frame {n}: the pedal lifts at frame 8, not at the block start");
     }
 }
+
+#[test]
+fn a_slot_level_or_pan_edit_holds_after_a_reset() {
+    let (mut s, mut p) = instance();
+    p.publish(spec(vec![mono(vec![1.0; 4096])], vec![Some(zone(0, 4096, unity(PlayMode::Gate, 60, 0)))])).unwrap();
+    // A long run first, so the edit lands far from frame 0.
+    for _ in 0..100 {
+        block(&mut s, 512);
+    }
+    assert!(s.set_param("zone001_level", -12.0));
+    assert!(s.set_param("zone001_pan", 50.0));
+    block(&mut s, 512);
+    let to = 10f32.powf(-12.0 / 20.0);
+    on(&mut s, 0, 60);
+    let before = block(&mut s, 16);
+    assert!(before.iter().all(|y| y.to_bits() == (to * 0.5).to_bits()), "the edit holds while playing: {}", before[0]);
+    s.reset();
+    on(&mut s, 0, 60);
+    let mut io = vec![vec![f32::NAN; 64]; 2];
+    s.process(&mut io, 64);
+    for n in 0..64 {
+        assert_eq!(io[0][n].to_bits(), (to * 0.5).to_bits(), "left, frame {n} after the reset: the new level and pan");
+        assert_eq!(io[1][n].to_bits(), to.to_bits(), "right, frame {n} after the reset");
+    }
+}
