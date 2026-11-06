@@ -29,6 +29,10 @@ pub struct UiState {
     /// `transit_mix::INSTRUMENT_SLOT`. `ui.set` opens and closes editors through this list
     /// (the same field `tools/exp-quit.ps1` sets in SoundCraft).
     pub plugin_windows: Vec<(TrackId, usize)>,
+    /// A migrated device window's last rect (min x, min y, max x, max y, logical points) by device
+    /// id (the plug-in id, 326-M): a device opens where it was last closed, kept on screen. Per
+    /// machine, never in the session.
+    pub device_windows: std::collections::BTreeMap<String, [f32; 4]>,
     /// How long each plug-in type took to load the last time, in milliseconds by plug-in id (issue
     /// #67): "last time 12 s" beside the loading readout. A per-machine preference, updated on
     /// every successful load; older files have none.
@@ -137,6 +141,7 @@ impl Default for UiState {
             plugin_dirs: plugin_scan::PluginDirs::default(),
             editors_follow: true,
             plugin_windows: Vec::new(),
+            device_windows: std::collections::BTreeMap::new(),
             plugin_load_ms: std::collections::BTreeMap::new(),
             header_width: 236.0,
             window_size: [1600.0, 1000.0],

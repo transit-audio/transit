@@ -50,6 +50,7 @@ pub mod keys;
 pub mod load_readout;
 mod loopbar;
 mod low_latency;
+pub mod macro_osc_panel;
 pub mod menus;
 pub mod metronome;
 pub mod midi_fx_panel;

@@ -1,4 +1,5 @@
-//! The Macro Oscillator's (and the Resonator's, #198) modulation matrix on its panel (#243): a compact grid below the shaper,
+//! The modulation matrix (#243) of the panels still in the older system (the Resonator, #198, and
+//! the other ported voices; the Macro Oscillator draws routing rows since 326-M): a compact grid below the shaper,
 //! the sixteen rows in two columns of eight, each row a source, a via, a destination and a curve
 //! dropdown and an amount you drag (-100% to +100%). Every cell is a parameter of its own
 //! (`mod<n>_<field>`), so it takes MIDI Learn, automation and undo like the panel's knobs; values go
@@ -44,6 +45,8 @@ fn grid(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     } else if info.id == crate::modal_voice_panel::MODAL_VOICE {
         ("Each row adds amount × curve(source) × via to its destination", crate::help::Id::ModalVoiceMatrix)
     } else {
+        // Reached by no panel since the Macro Oscillator moved to `crate::macro_osc_panel` (326-M);
+        // kept for a voice that adds the grid without its own line.
         ("Each row adds amount × curve(source) × via to its destination, per voice", crate::help::Id::MacroOscMatrix)
     };
     let heading = ui.label(RichText::new(text).size(10.5).color(TOKENS.text_dim));

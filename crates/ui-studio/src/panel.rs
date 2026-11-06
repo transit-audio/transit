@@ -25,10 +25,8 @@ pub enum Item {
     Menu(&'static str, &'static str),
     /// The sidechain key dropdown (compressor and gate).
     Key,
-    /// The voice activity lights of an instrument with voices (the Macro Oscillator).
-    Lights,
-    /// The Macro Oscillator's modulation matrix (#243): a compact grid of its sixteen rows
-    /// (source, via, destination, curve, amount), every row parameter in it.
+    /// The modulation matrix (#243, the Resonator's and the other ported voices'): a compact grid
+    /// of its sixteen rows (source, via, destination, curve, amount), every row parameter in it.
     Matrix,
 }
 
@@ -42,7 +40,7 @@ pub struct Section {
 
 pub type Row = &'static [Section];
 
-use Item::{Choice, Key, Knob, Lights, Matrix, Menu, Toggle};
+use Item::{Choice, Key, Knob, Matrix, Menu, Toggle};
 
 const fn sec(title: &'static str, cols: usize, items: &'static [Item]) -> Section {
     Section { title, cols, items }
@@ -93,9 +91,10 @@ static PLATE: [Row; 1] = [&[
     sec("Mix", 1, &[Knob("mix", "Mix")]),
 ]];
 
-/// transit's addition (#243), shared by the Macro Oscillator and the Resonator (#198): the
-/// shaper, the filter and both LFOs in one row of two lines, so the expanded window stays within
-/// 800 pt (1080p at 125% with the title bar).
+/// transit's addition (#243) in the older panel system, shared by the Resonator (#198) and the
+/// other ported voices: the shaper, the filter and both LFOs in one row of two lines, so the
+/// expanded window stays within 800 pt (1080p at 125% with the title bar). The Macro Oscillator
+/// draws its own in the design language (326-M, `crate::macro_osc_panel`).
 pub(crate) const SHAPER_ROW: Row = &[
     sec(
         "Shaper",
@@ -158,31 +157,9 @@ pub(crate) const SHAPER_ROW: Row = &[
 /// The modulation matrix's row, below the shaper.
 pub(crate) const MATRIX_ROW: Row = &[sec("Modulation Matrix", 1, &[Matrix])];
 
-/// The Macro Oscillator's id (ADR 0033, #195).
-const MACRO_OSC: &str = "macro_oscillator";
-
-static MACRO: [Row; 4] = [
-    &[
-        sec("Model", 1, &[Menu("model", "")]),
-        sec("Tone", 3, &[Knob("harmonics", "Harmonics"), Knob("timbre", "Timbre"), Knob("morph", "Morph")]),
-        sec("Gate", 2, &[Knob("decay", "Decay"), Knob("lpg_color", "LPG Color")]),
-    ],
-    &[
-        sec("Pitch", 2, &[Knob("tune", "Tune"), Knob("bend_range", "Bend")]),
-        sec("Control", 1, &[Choice("mod_wheel", "Mod Wheel")]),
-        sec("Output", 2, &[Knob("aux_mix", "Aux Mix"), Knob("level", "Level")]),
-        sec("Voices", 1, &[Choice("voices", "Voices"), Lights]),
-    ],
-    // From here on: transit's addition (#243), labeled as such above this row.
-    SHAPER_ROW,
-    MATRIX_ROW,
-];
-
-/// The row of the Macro Oscillator's layout where transit's addition starts: the line above it
-/// says so ([`MACRO_OSC_ADDITION`]) and shows or hides the rows from there on.
-const ADDITION_ROW: usize = 2;
-
 /// The line above the shaper and the matrix (#243: the panel labels them as transit's addition).
+/// Shared by the panels still in the older system (the Resonator and the other ported voices);
+/// the name stays from when the Macro Oscillator used it too (326-M moved it to section bars).
 pub const MACRO_OSC_ADDITION: &str = "Shaper and modulation matrix: transit's addition, not part of the original module (off by default)";
 
 /// The Filter's id (#242).
@@ -278,7 +255,6 @@ fn filter_help(param: &str) -> Option<crate::help::Id> {
 
 /// The help entry of a bespoke panel's control, for the plug-ins that have them.
 fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
-    use crate::help::Id;
     if plugin == FILTER {
         return filter_help(param);
     }
@@ -303,66 +279,9 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
     if plugin == crate::modal_voice_panel::MODAL_VOICE {
         return crate::modal_voice_panel::help(param);
     }
-    if plugin != MACRO_OSC {
-        return None;
-    }
-    Some(match param {
-        "model" => Id::MacroOscModel,
-        "harmonics" => Id::MacroOscHarmonics,
-        "timbre" => Id::MacroOscTimbre,
-        "morph" => Id::MacroOscMorph,
-        "decay" => Id::MacroOscDecay,
-        "lpg_color" => Id::MacroOscLpgColor,
-        "aux_mix" => Id::MacroOscAuxMix,
-        "level" => Id::MacroOscLevel,
-        "tune" => Id::MacroOscTune,
-        "bend_range" => Id::MacroOscBendRange,
-        "mod_wheel" => Id::MacroOscModWheel,
-        "voices" => Id::MacroOscVoices,
-        "shaper" => Id::MacroOscShaper,
-        "amp_attack" | "amp_decay" | "amp_sustain" | "amp_release" => Id::MacroOscAmpAdsr,
-        "amp_velocity" => Id::MacroOscAmpVelocity,
-        "filter_mode" => Id::MacroOscFilterMode,
-        "filter_slope" => Id::MacroOscFilterSlope,
-        "cutoff" => Id::MacroOscCutoff,
-        "resonance" => Id::MacroOscResonance,
-        "drive" => Id::MacroOscDrive,
-        "key_track" => Id::MacroOscKeyTrack,
-        "filter_env_amount" => Id::MacroOscFilterEnvAmount,
-        "filter_attack" | "filter_decay" | "filter_sustain" | "filter_release" => Id::MacroOscFilterAdsr,
-        _ => return macro_osc_numbered_help(param),
-    })
+    // The Macro Oscillator's help moved with its panel (326-M, `crate::macro_osc_panel::help`).
+    None
 }
-
-/// The help entry of an LFO control (`lfo<n>_<field>`) or a matrix row's (`mod<n>_<field>`).
-fn macro_osc_numbered_help(param: &str) -> Option<crate::help::Id> {
-    use crate::help::Id;
-    let (head, field) = param.split_once('_')?;
-    if head.strip_prefix("lfo").is_some_and(|n| n == "1" || n == "2") {
-        return Some(match field {
-            "shape" => Id::MacroOscLfoShape,
-            "rate" => Id::MacroOscLfoRate,
-            "sync" => Id::MacroOscLfoSync,
-            "division" => Id::MacroOscLfoDivision,
-            "retrigger" => Id::MacroOscLfoRetrigger,
-            "fade" => Id::MacroOscLfoFade,
-            "amount" => Id::MacroOscLfoAmount,
-            _ => return None,
-        });
-    }
-    head.strip_prefix("mod")?.parse::<usize>().ok().filter(|n| (1..=16).contains(n))?;
-    Some(match field {
-        "source" => Id::MacroOscMatrixSource,
-        "via" => Id::MacroOscMatrixVia,
-        "dest" => Id::MacroOscMatrixDest,
-        "amount" => Id::MacroOscMatrixAmount,
-        "curve" => Id::MacroOscMatrixCurve,
-        _ => return None,
-    })
-}
-
-/// The credit line under the Macro Oscillator's panel (ADR 0033: credit in the instrument's help).
-pub const MACRO_OSC_CREDIT: &str = "A port of Émilie Gillet's open-source macro oscillator (MIT)";
 
 /// The bespoke layout of a plug-in (`None`: it keeps the generic rows).
 pub fn layout(plugin: &str) -> Option<&'static [Row]> {
@@ -371,7 +290,6 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         "expander_gate" => Some(&GATE),
         "eq_7band" => Some(&EQ7),
         "plate_reverb" => Some(&PLATE),
-        MACRO_OSC => Some(&MACRO),
         FILTER => Some(&FILTER_LAYOUT),
         crate::texture_panel::TEXTURE => Some(&crate::texture_panel::LAYOUT),
         crate::time_stretcher_panel::TIME_STRETCHER => Some(&crate::time_stretcher_panel::LAYOUT),
@@ -404,11 +322,6 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
                 section(app, ui, key, ins, info, s, lay);
             }
         });
-    }
-    if info.id == MACRO_OSC {
-        let r = ui.label(RichText::new(MACRO_OSC_CREDIT).size(10.5).color(TOKENS.text_dim));
-        crate::help::hover(ui, &r, crate::help::Id::MacroOscCredits);
-        lay.credit = MACRO_OSC_CREDIT.to_string();
     }
     if info.id == crate::texture_panel::TEXTURE {
         let r = ui.label(RichText::new(crate::texture_panel::CREDIT).size(10.5).color(TOKENS.text_dim));
@@ -477,7 +390,6 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
 /// The row of a plug-in's layout where transit's addition (the shaper and the matrix) starts.
 fn addition_row(plugin: &str) -> Option<usize> {
     match plugin {
-        MACRO_OSC => Some(ADDITION_ROW),
         crate::resonator_panel::RESONATOR => Some(crate::resonator_panel::ADDITION_ROW),
         crate::texture_synth_panel::TEXTURE_SYNTH => Some(crate::texture_synth_panel::ADDITION_ROW),
         crate::modal_voice_panel::MODAL_VOICE => Some(crate::modal_voice_panel::ADDITION_ROW),
@@ -485,7 +397,7 @@ fn addition_row(plugin: &str) -> Option<usize> {
     }
 }
 
-/// The line above the Macro Oscillator's (and the Resonator's) shaper and matrix: it labels them as transit's addition
+/// The line above the Resonator's (and the other ported voices') shaper and matrix: it labels them as transit's addition
 /// and shows or hides them (a click). Until clicked, they show while they are in use (the shaper on
 /// or a matrix row with a source), so a session of defaults keeps the module's own panel size and
 /// a migrated mapping shows its rows. Returns whether they show.
@@ -528,7 +440,6 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     let (id, label) = match item {
         Knob(id, l) | Toggle(id, l) | Item::Hold(id, l) | Choice(id, l) | Menu(id, l) => (id, l),
         Key => return key_dropdown(app, ui, key),
-        Lights => return lights(app, ui, key, ins, lay),
         Matrix => return crate::panel_matrix::show(app, ui, key, ins, info, lay),
     };
     let Some(p) = info.param(id) else { return };
@@ -612,48 +523,6 @@ pub(crate) fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f
     (r, (idx as f32 != v).then_some(idx as f32), p.format(idx as f32))
 }
 
-/// Diameter of one voice light and the lights per line.
-const LIGHT: f32 = 9.0;
-const LIGHTS_PER_LINE: usize = 8;
-
-/// The voice activity lights: one per voice of the instrument's `voices` count, filled while a key
-/// holds the voice, half-lit while its release tail plays, an outline while it is free. Read from
-/// the instrument's scope tap (the render stores `Plugin::voice_activity` while the panel is open).
-fn lights(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, lay: &mut EditorLayout) {
-    let count = ins.params.get("voices").map_or(8, |v| v.round().clamp(0.0, 15.0) as usize + 1);
-    let uid = crate::scope_strip::hub_uid(key, ins);
-    let activity = app.scope_hub().map_or(0, |h| h.voice_activity(key.0, uid));
-    let lines = count.div_ceil(LIGHTS_PER_LINE);
-    let cols = count.min(LIGHTS_PER_LINE);
-    let gap = 4.0;
-    let size = egui::vec2(cols as f32 * (LIGHT + gap), lines as f32 * (LIGHT + gap));
-    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::hover());
-    crate::help::hover(ui, &resp, crate::help::Id::MacroOscVoiceLights);
-    let mut text = String::with_capacity(count);
-    for i in 0..count {
-        let (on, held) = (activity >> i & 1 == 1, activity >> (16 + i) & 1 == 1);
-        let c = rect.min
-            + egui::vec2((i % LIGHTS_PER_LINE) as f32 * (LIGHT + gap) + LIGHT / 2.0, (i / LIGHTS_PER_LINE) as f32 * (LIGHT + gap) + LIGHT / 2.0);
-        let p = ui.painter();
-        if held {
-            p.circle_filled(c, LIGHT / 2.0, TOKENS.accent);
-        } else if on {
-            p.circle_filled(c, LIGHT / 2.0, TOKENS.accent.gamma_multiply(0.45));
-        } else {
-            p.circle_stroke(c, LIGHT / 2.0 - 0.5, egui::Stroke::new(1.0, TOKENS.text_dim));
-        }
-        text.push(if held {
-            'H'
-        } else if on {
-            'R'
-        } else {
-            '-'
-        });
-    }
-    lay.lights = text;
-    lay.lights_rect = [rect.min.x, rect.min.y, rect.max.x, rect.max.y];
-}
-
 /// The sidechain key: None, or another track (or a bus), at the tap the device card last used.
 fn key_dropdown(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize)) {
     let (t, slot) = key;
@@ -695,7 +564,7 @@ mod tests {
         match i {
             Knob(id, _) | Toggle(id, _) | Item::Hold(id, _) | Choice(id, _) | Menu(id, _) => vec![id],
             Matrix => crate::panel_matrix::params().collect(),
-            Key | Lights => Vec::new(),
+            Key => Vec::new(),
         }
     }
 
@@ -706,7 +575,6 @@ mod tests {
             "expander_gate",
             "eq_7band",
             "plate_reverb",
-            MACRO_OSC,
             FILTER,
             crate::texture_panel::TEXTURE,
             crate::time_stretcher_panel::TIME_STRETCHER,
@@ -723,14 +591,6 @@ mod tests {
             want.sort_unstable();
             assert_eq!(ids, want, "{plugin}");
         }
-    }
-
-    #[test]
-    fn every_macro_oscillator_control_has_a_help_entry() {
-        for p in transit_dsp::plugin_info(MACRO_OSC).unwrap().params {
-            assert!(help(MACRO_OSC, p.id).is_some(), "{}", p.id);
-        }
-        assert!(help("compressor", "threshold").is_none());
     }
 
     #[test]
@@ -780,5 +640,6 @@ mod tests {
         for p in transit_dsp::plugin_info(FILTER).unwrap().params {
             assert!(help(FILTER, p.id).is_some(), "{}", p.id);
         }
+        assert!(help("compressor", "threshold").is_none());
     }
 }

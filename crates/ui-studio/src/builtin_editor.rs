@@ -60,19 +60,17 @@ pub struct EditorLayout {
     /// empty elsewhere, and its rect (a click shows or hides them).
     pub addition: String,
     pub addition_rect: [f32; 4],
-    /// The voice activity lights of an instrument with voices, one character per voice: `H` held,
-    /// `R` releasing, `-` free (empty elsewhere), and their rect.
-    pub lights: String,
-    pub lights_rect: [f32; 4],
     /// The Tuner's display as last drawn (empty elsewhere).
     pub tuner: crate::tuner_panel::TunerLayout,
+    /// The Macro Oscillator's panel in the design language as last drawn (326-M; `None` elsewhere).
+    pub macro_osc: Option<Box<crate::macro_osc_panel::MacroLayout>>,
 }
 
 #[derive(Debug, Default)]
 pub struct EditorState {
     pub windows: Vec<EditorLayout>,
     /// A control changed since the pointer went down: its undo step ends on release.
-    gesture: bool,
+    pub(crate) gesture: bool,
     /// The scope taps to use when there is no player (tests, `--no-audio`).
     pub hub: Option<std::sync::Arc<transit_mix::ScopeHub>>,
     /// The frames last read from a tap, reused every frame.
@@ -81,6 +79,8 @@ pub struct EditorState {
     scoped: Vec<(TrackId, u64)>,
     /// The Tuner panels' detectors and readings, by hub uid.
     pub(crate) tuners: std::collections::HashMap<u64, crate::tuner_panel::TunerState>,
+    /// The migrated device windows' memory (326-M).
+    pub(crate) macro_osc: crate::macro_osc_panel::window::State,
 }
 
 fn rect4(r: egui::Rect) -> [f32; 4] {
@@ -170,10 +170,19 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             credit: String::new(),
             addition: String::new(),
             addition_rect: [0.0; 4],
-            lights: String::new(),
-            lights_rect: [0.0; 4],
             tuner: Default::default(),
+            macro_osc: None,
         };
+        if crate::macro_osc_panel::handles(&ins.plugin) {
+            // The first device in the design language (326-M): its own window.
+            if crate::macro_osc_panel::window::show(app, ctx, key, &ins, info, n, &mut layout) {
+                active.push((key.0, crate::scope_strip::hub_uid(key, &ins)));
+            } else {
+                closed.push(key);
+            }
+            app.builtin_editor.windows.push(layout);
+            continue;
+        }
         let mut open = true;
         let shown = crate::theme::device_window(ctx, title)
             .id(egui::Id::new(("builtin_editor", ins.uid.get())))
@@ -198,6 +207,7 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
         }
         app.builtin_editor.windows.push(layout);
     }
+    crate::macro_osc_panel::window::end_frame(app, ctx);
     for key in closed {
         app.close_editor(key);
     }
