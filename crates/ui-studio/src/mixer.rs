@@ -391,7 +391,7 @@ fn edit_field(app: &mut StudioApp, ui: &mut Ui, draw: Rect, id: egui::Id, font: 
         .margin(vec2(3.0, 1.0))
         .horizontal_align(egui::Align::Center)
         .desired_width(rect.width());
-    let resp = ui.put(rect, field);
+    let resp = crate::chrome::field(ui, |ui| ui.put(rect, field));
     if esc {
         return;
     }

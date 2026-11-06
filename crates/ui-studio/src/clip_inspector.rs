@@ -205,8 +205,11 @@ fn row(app: &mut StudioApp, ui: &mut Ui, s: &Session, clip: ClipId) {
                 (_, None) if enabled => CUSTOM.to_string(),
                 _ => "-".to_string(),
             };
-            let resp =
-                ui.add_enabled(enabled, egui::TextEdit::singleline(&mut text).id(ui.id().with(("fade_len", field.label()))).desired_width(FIELD_W));
+            let resp = crate::chrome::text_field_enabled(
+                ui,
+                enabled,
+                egui::TextEdit::singleline(&mut text).id(ui.id().with(("fade_len", field.label()))).desired_width(FIELD_W),
+            );
             if editing && std::mem::take(&mut app.inspector.cancel) {
                 app.inspector.draft = None;
                 resp.surrender_focus();
@@ -229,10 +232,16 @@ fn row(app: &mut StudioApp, ui: &mut Ui, s: &Session, clip: ClipId) {
                 let fade = side.of(&c);
                 let mut shape = fade.shape;
                 let combo = ui.add_enabled_ui(fade.len > 0, |ui| {
-                    egui::ComboBox::from_id_salt(("fade_curve", side.label())).width(96.0).selected_text(shape.label()).show_ui(ui, |ui| {
-                        for option in FadeShape::ALL {
-                            ui.selectable_value(&mut shape, option, option.label());
-                        }
+                    crate::chrome::field(ui, |ui| {
+                        egui::ComboBox::from_id_salt(("fade_curve", side.label()))
+                            .width(96.0)
+                            .selected_text(shape.label())
+                            .icon(crate::chrome::chevron)
+                            .show_ui(ui, |ui| {
+                                for option in FadeShape::ALL {
+                                    ui.selectable_value(&mut shape, option, option.label());
+                                }
+                            })
                     })
                 });
                 view.curve = Some(fade.shape.label());

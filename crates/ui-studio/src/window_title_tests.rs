@@ -69,8 +69,13 @@ fn plain(title: &str) -> egui::Window<'static> {
     egui::Window::new(title.to_string())
 }
 
-/// The title bar's height: the window minus the body and the content margin (8 px each side).
+/// The title bar's height: the window minus the body and the content margin (a tool window's body
+/// padding, 14 px top and bottom; egui's 8 px for the plain "before" window).
 fn bar_height(rect: egui::Rect) -> f32 {
+    rect.height() - BODY_H - 2.0 * crate::tokens::chrome::TOOL_BODY_PADDING[0]
+}
+
+fn plain_bar_height(rect: egui::Rect) -> f32 {
     rect.height() - BODY_H - 2.0 * theme::SPACE
 }
 
@@ -81,11 +86,11 @@ fn the_title_bar_is_short_at_one_and_one_and_a_half_scale() {
         before.settle(false);
         let mut after = W::new(scale);
         after.settle(true);
-        let (old, new) = (bar_height(before.rect), bar_height(after.rect));
+        let (old, new) = (plain_bar_height(before.rect), bar_height(after.rect));
         println!("scale {scale}: title bar {old:.1} px before, {new:.1} px after");
         assert!(new <= 27.0, "scale {scale}: the title bar is {new} px (bound 27.0)");
         assert!(new + 8.0 <= old, "scale {scale}: {new} is much shorter than the heading-sized {old}");
-        assert!((after.rect.width() - before.rect.width()).abs() < 1.0, "the content margin is unchanged: {:?} vs {:?}", after.rect, before.rect);
+        assert!((after.rect.width() - before.rect.width()).abs() < 1.0, "the same window width: {:?} vs {:?}", after.rect, before.rect);
     }
 }
 
@@ -232,4 +237,31 @@ fn the_title_bar_has_the_padding_constants() {
         assert!((got - theme::WINDOW_TITLE_PAD_X as f32).abs() <= 1.5, "{side} padding {got} px (constant {})", theme::WINDOW_TITLE_PAD_X);
     }
     assert_eq!(theme::WINDOW_CLOSE_SIZE, 18.0, "the close hit area is unchanged");
+}
+
+/// #326: a tool window is `surface.panel` with a 1 px `line.strong` edge; its title bar is
+/// `bg.titlebar`, 26 high, with a 1 px `line` under it while the body shows.
+#[test]
+fn the_title_bar_is_bg_titlebar_with_a_line_below_on_a_panel_window() {
+    let t = &theme::DARK;
+    let mut w = W::new(1.0);
+    w.collapsible = true;
+    w.settle(true);
+    w.settle(true); // the window's fade-in ends
+    let layer = w.layer.expect("shown");
+    let line = crate::title_bar::title_line(&w.ctx, layer).expect("a line under the bar");
+    assert_eq!(line.color, t.line);
+    assert!((line.header.height() - crate::tokens::chrome::TITLE_BAR_HEIGHT).abs() < 1.5, "the bar is {} high", line.header.height());
+    assert!((line.y - (line.header.bottom() - 0.5)).abs() < 0.01, "the line is the bar's last pixel row");
+    let frame = line.frame;
+    assert_eq!(frame, Some((t.surface_panel, egui::Stroke::new(1.0, t.line_strong))), "the window frame");
+    // Negative control: a collapsed window has no body, so no line.
+    let chevron = crate::title_bar::painted(&w.ctx, layer)[0].center;
+    w.pointer(chevron, None);
+    w.pointer(chevron, Some(true));
+    w.pointer(chevron, Some(false));
+    for _ in 0..4 {
+        w.settle(true);
+    }
+    assert_eq!(crate::title_bar::title_line(&w.ctx, w.layer.unwrap()), None);
 }

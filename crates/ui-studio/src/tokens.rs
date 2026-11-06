@@ -86,13 +86,16 @@ pub mod arrangement {
 }
 
 /// Fills that the component specs give as literals (toggle option and unavailable fills, the
-/// switch knob), by their path in tokens.json; the fader cap is `knob.capActive`.
+/// switch knob, the default button's hover and pressed fills), by their path in tokens.json; the
+/// fader cap is `knob.capActive`.
 pub mod component {
     use super::*;
     colors! { ALL;
         TOGGLE_OPTION_FILL = "toggle.on.option.fill" 0x1E2A38;
         TOGGLE_UNAVAILABLE_FILL = "toggle.unavailable.fill" 0x1E2125;
         SWITCH_ON_KNOB = "switch.onKnob" 0xFFFFFF;
+        DEFAULT_BUTTON_HOVER = "chrome.defaultButton.hover" 0x66ACFF;
+        DEFAULT_BUTTON_PRESSED = "chrome.defaultButton.pressed" 0x3E85D8;
     }
 }
 
@@ -146,6 +149,8 @@ pub mod color_light {
         TOGGLE_OPTION_FILL = "toggle.on.option.fill" 0xD9E1EB;
         TOGGLE_UNAVAILABLE_FILL = "toggle.unavailable.fill" 0xEAECEF;
         SWITCH_ON_KNOB = "switch.onKnob" 0xFFFFFF;
+        DEFAULT_BUTTON_HOVER = "chrome.defaultButton.hover" 0x1F69C3;
+        DEFAULT_BUTTON_PRESSED = "chrome.defaultButton.pressed" 0x004BA4;
     }
     /// Dims what lies outside a range: black at 28/255 (`#0000001C`).
     pub const OVERLAY: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 28);
@@ -403,4 +408,150 @@ pub mod fader {
     pub const METER_PEAK_ALPHA: f32 = 0.35;
     pub const METER_HOLD: f32 = 2.0;
     pub const METER_CLIP_CELL: f32 = 4.0;
+}
+
+/// The application chrome (`chrome` in tokens.json): egui's own widgets outside device panels,
+/// from the maintainer's application chrome document. [`crate::theme`] maps the global rules onto
+/// egui's style; [`crate::chrome`] draws what egui's shared style cannot (fields, checks, the
+/// default button, dialog frames and footers, the focus ring).
+pub mod chrome {
+    use super::{Family, Ink, TypeRole, role};
+    /// A standard button's label.
+    pub const BUTTON_FONT: TypeRole = role(Family::Sans, 500, 12.0, 0.0, false, Some(Ink::Text));
+    /// The default button's label (its ink is `surface.inset`).
+    pub const DEFAULT_BUTTON_FONT: TypeRole = role(Family::Sans, 600, 12.0, 0.0, false, None);
+    /// A modal's question, which is its title.
+    pub const QUESTION_FONT: TypeRole = role(Family::Sans, 600, 13.0, 0.0, false, Some(Ink::Text));
+    /// A modal's detail line.
+    pub const DETAIL_FONT: TypeRole = role(Family::Sans, 400, 12.0, 0.0, false, Some(Ink::TextMuted));
+    /// A tool window's title.
+    pub const TITLE_FONT: TypeRole = role(Family::Sans, 500, 14.0, 0.0, false, Some(Ink::Text));
+    /// A menu row and a menu bar item.
+    pub const ROW_FONT: TypeRole = role(Family::Sans, 400, 12.0, 0.0, false, Some(Ink::Text));
+    /// A menu row's shortcut, right-aligned.
+    pub const SHORTCUT_FONT: TypeRole = role(Family::Mono, 400, 11.0, 0.0, false, Some(Ink::TextFaint));
+    /// A number in a text field (right-aligned, the unit after it in `text.faint`).
+    pub const NUMBER_FONT: TypeRole = role(Family::Mono, 500, 11.0, 0.0, false, Some(Ink::Text));
+    /// Every chrome type role by its name under `chrome.type` in tokens.json.
+    pub const TYPE_ROLES: &[(&str, TypeRole)] = &[
+        ("button", BUTTON_FONT),
+        ("defaultButton", DEFAULT_BUTTON_FONT),
+        ("question", QUESTION_FONT),
+        ("detail", DETAIL_FONT),
+        ("title", TITLE_FONT),
+        ("row", ROW_FONT),
+        ("shortcut", SHORTCUT_FONT),
+        ("number", NUMBER_FONT),
+    ];
+    /// Window and dialog corners (`radius.panel`).
+    pub const RADIUS_WINDOW: f32 = 8.0;
+    /// Popups (menus, combo lists, tooltips) and controls (`radius.control`).
+    pub const RADIUS_POPUP: f32 = 5.0;
+    pub const RADIUS_CONTROL: f32 = 5.0;
+    /// Menu rows and menu bar items.
+    pub const RADIUS_ROW: f32 = 4.0;
+    pub const RADIUS_CHECKBOX: f32 = 3.0;
+    /// Buttons, text fields and combo boxes.
+    pub const CONTROL_HEIGHT: f32 = 26.0;
+    pub const MENU_BAR_HEIGHT: f32 = 32.0;
+    pub const MENU_BAR_ITEM_HEIGHT: f32 = 22.0;
+    /// A popup row (menu, submenu, context menu, combo list).
+    pub const ROW_HEIGHT: f32 = 24.0;
+    /// App windows and dialogs; devices use the 52 px A bar ([`super::layout::TITLE_BAR_HEIGHT`]).
+    pub const TITLE_BAR_HEIGHT: f32 = 26.0;
+    pub const DEVICE_TITLE_BAR_HEIGHT: f32 = 52.0;
+    /// Vertical, horizontal.
+    pub const BUTTON_PADDING: [f32; 2] = [0.0, 12.0];
+    pub const DEFAULT_BUTTON_PADDING: [f32; 2] = [0.0, 16.0];
+    /// An icon button is this square, its glyph this size.
+    pub const ICON_BUTTON: f32 = 26.0;
+    pub const ICON_GLYPH: f32 = 14.0;
+    pub const MENU_BAR_ITEM_PADDING: [f32; 2] = [0.0, 8.0];
+    pub const POPUP_PADDING: f32 = 4.0;
+    pub const SUBMENU_OVERLAP: f32 = 4.0;
+    pub const CHECK_GUTTER: f32 = 16.0;
+    pub const CHECK_GLYPH: f32 = 12.0;
+    pub const CHEVRON: f32 = 12.0;
+    pub const SEPARATOR_GAP: f32 = 4.0;
+    pub const MODAL_WIDTH: f32 = 380.0;
+    /// Top, sides, bottom.
+    pub const MODAL_PADDING: [f32; 3] = [18.0, 18.0, 16.0];
+    /// Space between a modal's text and its footer.
+    pub const MODAL_FOOTER_GAP: f32 = 14.0;
+    /// Vertical, horizontal.
+    pub const TOOL_BODY_PADDING: [f32; 2] = [14.0, 16.0];
+    pub const TOOL_FOOTER_PADDING: [f32; 2] = [10.0, 16.0];
+    pub const CLOSE_HIT: f32 = 18.0;
+    pub const CHECKBOX_BOX: f32 = 14.0;
+    pub const CHECKBOX_HIT: f32 = 18.0;
+    pub const CHECKBOX_MARK: f32 = 8.0;
+    pub const RADIO_DOT: f32 = 6.0;
+    pub const SCROLL_REST: f32 = 4.0;
+    pub const SCROLL_HOVER: f32 = 8.0;
+    pub const SCROLL_INSET: f32 = 2.0;
+    pub const SCROLL_MIN_HANDLE: f32 = 24.0;
+    pub const TOOLTIP_DELAY_MS: u32 = 500;
+    /// Vertical, horizontal.
+    pub const TOOLTIP_PADDING: [f32; 2] = [5.0, 8.0];
+    pub const TOOLTIP_OFFSET: f32 = 4.0;
+    pub const FOCUS_RING_WIDTH: f32 = 1.5;
+    pub const FOCUS_RING_OFFSET: f32 = 2.0;
+    /// Text selection: `signal` at this alpha.
+    pub const SELECTION_ALPHA_DARK: f32 = 0.6;
+    pub const SELECTION_ALPHA_LIGHT: f32 = 0.35;
+    /// Every number under `chrome` in tokens.json (the type roles aside) by its path; the drift
+    /// test walks the file and this list both ways.
+    pub const METRICS: &[(&str, f32)] = &[
+        ("radius/window", RADIUS_WINDOW),
+        ("radius/popup", RADIUS_POPUP),
+        ("radius/control", RADIUS_CONTROL),
+        ("radius/row", RADIUS_ROW),
+        ("radius/checkbox", RADIUS_CHECKBOX),
+        ("height/control", CONTROL_HEIGHT),
+        ("height/menuBar", MENU_BAR_HEIGHT),
+        ("height/menuBarItem", MENU_BAR_ITEM_HEIGHT),
+        ("height/row", ROW_HEIGHT),
+        ("height/titleBar", TITLE_BAR_HEIGHT),
+        ("height/deviceTitleBar", DEVICE_TITLE_BAR_HEIGHT),
+        ("button/padding/0", BUTTON_PADDING[0]),
+        ("button/padding/1", BUTTON_PADDING[1]),
+        ("button/defaultPadding/0", DEFAULT_BUTTON_PADDING[0]),
+        ("button/defaultPadding/1", DEFAULT_BUTTON_PADDING[1]),
+        ("button/icon", ICON_BUTTON),
+        ("button/glyph", ICON_GLYPH),
+        ("menuBarItem/padding/0", MENU_BAR_ITEM_PADDING[0]),
+        ("menuBarItem/padding/1", MENU_BAR_ITEM_PADDING[1]),
+        ("popup/padding", POPUP_PADDING),
+        ("popup/submenuOverlap", SUBMENU_OVERLAP),
+        ("popup/checkGutter", CHECK_GUTTER),
+        ("popup/checkGlyph", CHECK_GLYPH),
+        ("popup/chevron", CHEVRON),
+        ("popup/separatorGap", SEPARATOR_GAP),
+        ("modal/width", MODAL_WIDTH),
+        ("modal/padding/0", MODAL_PADDING[0]),
+        ("modal/padding/1", MODAL_PADDING[1]),
+        ("modal/padding/2", MODAL_PADDING[2]),
+        ("modal/footerGap", MODAL_FOOTER_GAP),
+        ("toolWindow/bodyPadding/0", TOOL_BODY_PADDING[0]),
+        ("toolWindow/bodyPadding/1", TOOL_BODY_PADDING[1]),
+        ("toolWindow/footerPadding/0", TOOL_FOOTER_PADDING[0]),
+        ("toolWindow/footerPadding/1", TOOL_FOOTER_PADDING[1]),
+        ("toolWindow/closeHit", CLOSE_HIT),
+        ("checkbox/box", CHECKBOX_BOX),
+        ("checkbox/hit", CHECKBOX_HIT),
+        ("checkbox/mark", CHECKBOX_MARK),
+        ("checkbox/radioDot", RADIO_DOT),
+        ("scrollBar/rest", SCROLL_REST),
+        ("scrollBar/hover", SCROLL_HOVER),
+        ("scrollBar/inset", SCROLL_INSET),
+        ("scrollBar/minHandle", SCROLL_MIN_HANDLE),
+        ("tooltip/delayMs", TOOLTIP_DELAY_MS as f32),
+        ("tooltip/padding/0", TOOLTIP_PADDING[0]),
+        ("tooltip/padding/1", TOOLTIP_PADDING[1]),
+        ("tooltip/offset", TOOLTIP_OFFSET),
+        ("focusRing/width", FOCUS_RING_WIDTH),
+        ("focusRing/offset", FOCUS_RING_OFFSET),
+        ("selectionAlpha/dark", SELECTION_ALPHA_DARK),
+        ("selectionAlpha/light", SELECTION_ALPHA_LIGHT),
+    ];
 }

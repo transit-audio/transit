@@ -143,11 +143,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             }
             ui.horizontal(|ui| {
                 ui.label("Takeover");
-                egui::ComboBox::from_id_salt("mm_takeover").selected_text(takeover.label()).width(90.0).show_ui(ui, |ui| {
+                crate::chrome::field(ui, |ui| egui::ComboBox::from_id_salt("mm_takeover").selected_text(takeover.label()).width(90.0).icon(crate::chrome::chevron).show_ui(ui, |ui| {
                     for m in [MapMode::Scaled, MapMode::Jump, MapMode::Pickup] {
                         ui.selectable_value(&mut takeover, m, m.label());
                     }
-                });
+                }));
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(match takeover {
@@ -220,11 +220,13 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                             let edit_id = egui::Id::new(("mm_range_edit", &row.target_id, matches!(row.scope, Scope::Session)));
                             let held: Option<[f32; 2]> = ui.data(|d| d.get_temp(edit_id));
                             let [mut lo, mut hi] = held.unwrap_or(row.range).map(|v| v * 100.0);
-                            // A table cell lays out top down: the pair needs a row of its own.
+                            // A table cell lays out top down: the pair needs a row of its own, as
+                            // tall as the table's row so the fields center in it.
+                            ui.spacing_mut().interact_size.y = ROW_H;
                             let (a, b) = ui
                                 .horizontal(|ui| {
-                                    let a = ui.add(egui::DragValue::new(&mut lo).range(0.0..=100.0).suffix("%").speed(0.5));
-                                    let b = ui.add(egui::DragValue::new(&mut hi).range(0.0..=100.0).suffix("%").speed(0.5));
+                                    let a = crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut lo).range(0.0..=100.0).suffix("%").speed(0.5)));
+                                    let b = crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut hi).range(0.0..=100.0).suffix("%").speed(0.5)));
                                     (a, b)
                                 })
                                 .inner;
@@ -247,8 +249,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                 return;
                             }
                             let mut thru = row.pass_through;
-                            let check = ui
-                                .checkbox(&mut thru, "")
+                            let check = crate::chrome::checkbox(
+                                ui, &mut thru, "")
                                 .on_hover_text("Also send the mapped message to the track (its instrument, a recording). Off: only the control hears it.");
                             crate::help::hover(ui, &check, crate::help::Id::MidiMappingsPassThrough);
                             if check.changed() {

@@ -22,11 +22,19 @@ pub struct Window<'a> {
     inner: egui::Window<'a>,
     collapsible: bool,
     closable: bool,
+    /// The body's button padding when it differs from the theme's (device windows, #326).
+    button_padding: Option<Vec2>,
 }
 
 impl<'a> Window<'a> {
     pub(crate) fn new(inner: egui::Window<'a>) -> Self {
-        Window { inner, collapsible: true, closable: false }
+        Window { inner, collapsible: true, closable: false, button_padding: None }
+    }
+
+    /// The body lays its buttons out with `padding` instead of the theme's.
+    pub(crate) fn button_padding(mut self, padding: Vec2) -> Self {
+        self.button_padding = Some(padding);
+        self
     }
 
     pub fn id(mut self, id: Id) -> Self {
@@ -88,8 +96,13 @@ impl<'a> Window<'a> {
 
     /// Show the window, then swap egui's control shapes for icons.
     pub fn show<R>(self, ctx: &Context, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> Option<InnerResponse<Option<R>>> {
-        let (collapsible, closable) = (self.collapsible, self.closable);
-        let shown = self.inner.show(ctx, add_contents);
+        let (collapsible, closable, padding) = (self.collapsible, self.closable, self.button_padding);
+        let shown = self.inner.show(ctx, |ui| {
+            if let Some(p) = padding {
+                ui.spacing_mut().button_padding = p;
+            }
+            add_contents(ui)
+        });
         if let Some(r) = &shown {
             swap_controls(ctx, r.response.layer_id, r.response.rect, r.inner.is_some(), collapsible, closable);
         }
@@ -103,6 +116,25 @@ pub struct Painted {
     pub icon: Icon,
     pub size: f32,
     pub center: Pos2,
+}
+
+/// The title bar and the line under it, as the last frame painted them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TitleLine {
+    pub header: Rect,
+    pub y: f32,
+    pub color: Color32,
+    /// The window frame's fill and edge.
+    pub frame: Option<(Color32, egui::Stroke)>,
+}
+
+fn line_id(layer: LayerId) -> Id {
+    Id::new(("title-line", layer))
+}
+
+/// The line under `layer`'s title bar as last painted (`None`: collapsed, or no title bar).
+pub fn title_line(ctx: &Context, layer: LayerId) -> Option<TitleLine> {
+    ctx.data(|d| d.get_temp::<Option<TitleLine>>(line_id(layer))).flatten()
 }
 
 fn painted_id(layer: LayerId) -> Id {
@@ -127,10 +159,25 @@ fn swap_controls(ctx: &Context, layer: LayerId, window: Rect, expanded: bool, co
     // Find egui's shapes first (shared borrow), then blank them.
     let mut triangle: Option<(usize, Rect, Color32)> = None;
     let mut cross: Vec<(usize, Rect, Color32)> = Vec::new();
+    // The window's own frame, then its title bar: the rects that span the window's top edge. egui
+    // fills the topmost window's title bar with `widgets.open` (the menu bar's open item,
+    // `button.hover`); every title bar is `bg.titlebar` (#326), so its fill is put back (at the
+    // window's fade-in opacity).
+    let mut spans: Vec<(usize, Rect, f32, Color32, egui::Stroke)> = Vec::new();
+    let titlebar = theme::TOKENS.bg_titlebar;
+    let near = |a: f32, b: f32| (a - b).abs() <= stroke + 0.5;
     ctx.graphics(|g| {
         let Some(list) = g.get(layer) else { return };
         for (i, clipped) in list.all_entries().enumerate() {
             match &clipped.shape {
+                Shape::Rect(r)
+                    if spans.len() < 2
+                        && near(r.rect.top(), window.top())
+                        && near(r.rect.left(), window.left())
+                        && near(r.rect.right(), window.right()) =>
+                {
+                    spans.push((i, r.rect, f32::from(r.fill.a()) / 255.0, r.fill, r.stroke));
+                }
                 Shape::Path(p) if collapsible && p.closed && p.points.len() == 3 && left.contains_rect(clipped.shape.visual_bounding_rect()) => {
                     triangle = Some((i, Rect::from_points(&p.points), p.fill));
                 }
@@ -154,6 +201,27 @@ fn swap_controls(ctx: &Context, layer: LayerId, window: Rect, expanded: bool, co
     if let [(_, a, color), (_, b, _)] = cross[..] {
         paint(a.union(b).center(), Icon::Remove, color);
     }
+    // A 1 px `line` under the title bar when the window shows its body (#326).
+    let header = spans.get(1).copied();
+    if let Some((i, _, opacity, _, _)) = header {
+        ctx.graphics_mut(|g| {
+            if let Some(list) = g.get_mut(layer) {
+                list.mutate_shape(egui::layers::ShapeIdx(i), |c| {
+                    if let Shape::Rect(r) = &mut c.shape {
+                        r.fill = titlebar.gamma_multiply(opacity);
+                    }
+                });
+            }
+        });
+    }
+    let frame = spans.first().map(|f| (f.3, f.4));
+    let line = header.filter(|_| expanded).map(|(_, h, opacity, _, _)| {
+        let y = h.bottom() - 0.5;
+        let color = theme::TOKENS.line.gamma_multiply(opacity);
+        ctx.layer_painter(layer).line_segment([egui::pos2(h.left() + stroke, y), egui::pos2(h.right() - stroke, y)], egui::Stroke::new(1.0, color));
+        TitleLine { header: h, y, color, frame }
+    });
+    ctx.data_mut(|d| d.insert_temp(line_id(layer), line));
     let blank: Vec<usize> = triangle.iter().map(|t| t.0).chain(cross.iter().map(|c| c.0)).collect();
     ctx.graphics_mut(|g| {
         if let Some(list) = g.get_mut(layer) {

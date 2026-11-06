@@ -285,7 +285,7 @@ fn edit_field(app: &mut StudioApp, ui: &mut Ui, r: Rect) {
         .margin(vec2(3.0, 1.0))
         .horizontal_align(egui::Align::Center)
         .desired_width(r.width());
-    let resp = ui.put(r, field);
+    let resp = crate::chrome::field(ui, |ui| ui.put(r, field));
     if esc {
         return;
     }
@@ -377,7 +377,10 @@ fn popup(app: &mut StudioApp, ctx: &egui::Context, field: Rect) {
                     if m.fresh {
                         select_all(ui.ctx(), id, &m.text);
                     }
-                    let resp = ui.add(egui::TextEdit::singleline(&mut m.text).id(id).font(crate::theme::mono(ui.ctx(), 13.0)).desired_width(56.0));
+                    let resp = crate::chrome::text_field(
+                        ui,
+                        egui::TextEdit::singleline(&mut m.text).id(id).font(crate::theme::mono(ui.ctx(), 13.0)).desired_width(56.0),
+                    );
                     if resp.has_focus() {
                         m.fresh = false;
                     }

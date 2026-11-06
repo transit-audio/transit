@@ -48,11 +48,14 @@ impl StudioApp {
 pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
     app.arrange.bar_menu.clear();
     app.recent_menu.clear();
+    // The menu bar (#326): 32 high on `bg.titlebar` with a 1 px `line` below; items 22 high.
+    let item_pad = ((crate::tokens::chrome::MENU_BAR_HEIGHT - crate::tokens::chrome::MENU_BAR_ITEM_HEIGHT) / 2.0) as i8;
     egui::Panel::top("menu_bar")
-        .exact_size(24.0)
-        .frame(egui::Frame::NONE.fill(TOKENS.panel).inner_margin(egui::Margin::symmetric(crate::theme::SPACE as i8, 2)))
+        .exact_size(crate::tokens::chrome::MENU_BAR_HEIGHT)
+        .frame(egui::Frame::NONE.fill(TOKENS.bg_titlebar).inner_margin(egui::Margin::symmetric(crate::theme::SPACE as i8, item_pad)))
         .show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
+            let config = egui::containers::menu::MenuConfig::new().style(crate::chrome::menu_style);
+            egui::MenuBar::new().style(crate::chrome::menu_bar_style).config(config).ui(ui, |ui| {
                 let file_menu = ui.menu_button("File", |ui| {
                     if ui.button("New").clicked() {
                         app.run_or_ask("session.new", json!({}));
@@ -73,7 +76,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         app.save_as();
                     }
                     ui.separator();
-                    let b = ui.add(egui::Button::new("Bounce…").shortcut_text(label(A::Bounce)));
+                    let b = ui.add(egui::Button::new("Bounce…").shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::Bounce))));
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Bounce…".into(), String::new(), b.rect));
                     if b.clicked() {
                         ui.close();
@@ -98,7 +101,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         ("Delete", A::Delete, |a| drop(a.delete_selected())),
                     ];
                     for (text, action, f) in items {
-                        if ui.add(egui::Button::new(text).shortcut_text(label(action))).clicked() {
+                        if ui.add(egui::Button::new(text).shortcut_text(crate::chrome::shortcut(ui.ctx(), label(action)))).clicked() {
                             f(app);
                             ui.close();
                         }
@@ -108,7 +111,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                     ui.separator();
                     crate::edit_tools::edit_menu_items(app, ui);
                     ui.separator();
-                    let b = ui.add(egui::Button::new("Undo History").shortcut_text(label(A::UndoHistory)));
+                    let b = ui.add(egui::Button::new("Undo History").shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::UndoHistory))));
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Undo History".into(), String::new(), b.rect));
                     if b.clicked() {
                         app.ui.show_history = true;
@@ -117,7 +120,10 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Edit".into(), String::new(), edit_menu.response.rect));
                 let track_menu = ui.menu_button("Track", |ui| {
-                    if ui.add(egui::Button::new("Add Mono Audio Track").shortcut_text(label(A::NewAudioTrack))).clicked() {
+                    if ui
+                        .add(egui::Button::new("Add Mono Audio Track").shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::NewAudioTrack))))
+                        .clicked()
+                    {
                         let _ = app.add_audio_track("mono");
                         ui.close();
                     }
@@ -125,7 +131,10 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let _ = app.add_audio_track("stereo");
                         ui.close();
                     }
-                    if ui.add(egui::Button::new("Add Instrument Track").shortcut_text(label(A::NewInstrumentTrack))).clicked() {
+                    if ui
+                        .add(egui::Button::new("Add Instrument Track").shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::NewInstrumentTrack))))
+                        .clicked()
+                    {
                         let _ = app.add_track("instrument");
                         ui.close();
                     }
@@ -147,13 +156,13 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         ui.close();
                     }
                     ui.separator();
-                    let b = ui.add(egui::Button::new("Rename").shortcut_text(label(A::Rename)));
+                    let b = ui.add(egui::Button::new("Rename").shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::Rename))));
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Rename".into(), String::new(), b.rect));
                     if b.clicked() {
                         ui.close();
                         app.rename_selected();
                     }
-                    let b = ui.add(egui::Button::new("Bounce in Place").shortcut_text(label(A::BounceInPlace)));
+                    let b = ui.add(egui::Button::new("Bounce in Place").shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::BounceInPlace))));
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Bounce in Place".into(), String::new(), b.rect));
                     if b.clicked() {
                         ui.close();
@@ -305,7 +314,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         ("Set Cycle to Selection", A::CycleToSelection, "transport.cycle_to_selection", json!({})),
                     ];
                     for (text, action, id, p) in items {
-                        let b = ui.add(menu_button(text).shortcut_text(label(action)));
+                        let b = ui.add(menu_button(text).shortcut_text(crate::chrome::shortcut(ui.ctx(), label(action))));
                         app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, text.into(), String::new(), b.rect));
                         if b.clicked() {
                             let _ = app.run(id, p);
@@ -363,7 +372,11 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         app.ui.show_shortcuts = true;
                         ui.close();
                     }
-                    let b = ui.add(egui::Button::new("Info Panel").selected(app.help.open).shortcut_text(label(A::ToggleInfo)));
+                    let b = ui.add(
+                        egui::Button::new("Info Panel")
+                            .selected(app.help.open)
+                            .shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::ToggleInfo))),
+                    );
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Info Panel".into(), String::new(), b.rect));
                     if b.clicked() {
                         app.help.toggle();
@@ -377,15 +390,13 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let _ = app.run("help.check_updates", json!({}));
                         ui.close();
                     }
-                    let b = ui
-                        .add_enabled(why.is_none(), egui::Checkbox::new(&mut app.ui.check_for_updates, "Check for New Versions on Launch"))
+                    let b = crate::chrome::checkbox_enabled(ui, why.is_none(), &mut app.ui.check_for_updates, "Check for New Versions on Launch")
                         .on_hover_text(crate::update::PRIVACY)
                         .on_disabled_hover_text(why.unwrap_or_default());
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Check for New Versions on Launch".into(), String::new(), b.rect));
                     let logging = app.services.log.is_some();
                     let mut on = app.services.log.as_ref().is_some_and(|l| l.debug());
-                    let b = ui
-                        .add_enabled(logging, egui::Checkbox::new(&mut on, "Debug Logging"))
+                    let b = crate::chrome::checkbox_enabled(ui, logging, &mut on, "Debug Logging")
                         .on_hover_text("Log more detail to the log file for the rest of this session.")
                         .on_disabled_hover_text("This build has no log control.");
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Debug Logging".into(), String::new(), b.rect));
@@ -488,8 +499,9 @@ pub fn status_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
 pub(crate) fn history_item(app: &mut StudioApp, ui: &mut egui::Ui, redo: bool) -> egui::Response {
     let (text, action, command) = if redo { ("Redo", A::Redo, "edit.redo") } else { ("Undo", A::Undo, "edit.undo") };
     let reason = app.history_disabled_reason();
-    let response =
-        ui.add_enabled(reason.is_none(), egui::Button::new(text).shortcut_text(label(action))).on_disabled_hover_text(reason.unwrap_or_default());
+    let response = ui
+        .add_enabled(reason.is_none(), egui::Button::new(text).shortcut_text(crate::chrome::shortcut(ui.ctx(), label(action))))
+        .on_disabled_hover_text(reason.unwrap_or_default());
     if response.clicked() {
         let _ = app.run(command, json!({}));
         ui.close();
@@ -831,7 +843,10 @@ pub fn shortcuts_window(app: &mut StudioApp, ctx: &egui::Context) {
             let resp = ui
                 .horizontal(|ui| {
                     crate::icons::icon(ui, crate::icons::Icon::Filter);
-                    ui.add(egui::TextEdit::singleline(&mut app.ui.shortcuts_filter).hint_text("Filter by action or key").desired_width(f32::INFINITY))
+                    crate::chrome::text_field(
+                        ui,
+                        egui::TextEdit::singleline(&mut app.ui.shortcuts_filter).hint_text("Filter by action or key").desired_width(f32::INFINITY),
+                    )
                 })
                 .inner;
             layout.filter = crate::arrange::r4(resp.rect);
@@ -881,10 +896,12 @@ pub fn shortcuts_window(app: &mut StudioApp, ctx: &egui::Context) {
 
 /// A fixed point-sized state column, followed by egui's point-sized icon spacing.
 /// Keep this slot even for unchecked items and ordinary commands in the same menu.
-const MENU_CHECK_SIZE: f32 = 12.0;
+const MENU_CHECK_SIZE: f32 = crate::tokens::chrome::CHECK_GUTTER;
+/// The check mark inside the gutter (`text`, never `signal`: a menu check is a view setting).
+const MENU_CHECK_GLYPH: f32 = crate::tokens::chrome::CHECK_GLYPH;
 
 pub(crate) fn menu_contents(text: impl Into<egui::WidgetText>) -> (egui::Atom<'static>, egui::WidgetText) {
-    (egui::Atom::custom(egui::Id::new("menu_check"), egui::Vec2::splat(MENU_CHECK_SIZE)), text.into())
+    (egui::Atom::custom(egui::Id::new("menu_check"), egui::Vec2::new(MENU_CHECK_SIZE, crate::tokens::chrome::CHECK_GLYPH)), text.into())
 }
 
 fn menu_button(text: impl Into<egui::WidgetText>) -> egui::Button<'static> {
@@ -899,11 +916,11 @@ pub(crate) fn check_button(ui: &mut egui::Ui, on: bool, text: impl Into<egui::Wi
 fn check_button_with(ui: &mut egui::Ui, on: bool, text: impl Into<egui::WidgetText>, shortcut: Option<String>) -> egui::Response {
     let mut b = menu_button(text);
     if let Some(s) = shortcut {
-        b = b.shortcut_text(s);
+        b = b.shortcut_text(crate::chrome::shortcut(ui.ctx(), s));
     }
     let resp = b.atom_ui(ui);
     if on && let Some(gutter) = resp.rect(egui::Id::new("menu_check")) {
-        crate::icons::paint(ui.painter(), gutter.center(), crate::icons::Icon::Check, MENU_CHECK_SIZE, ui.visuals().text_color());
+        crate::icons::paint(ui.painter(), gutter.center(), crate::icons::Icon::Check, MENU_CHECK_GLYPH, TOKENS.text);
     }
     resp.response
 }

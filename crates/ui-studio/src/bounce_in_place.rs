@@ -226,10 +226,10 @@ fn bounce_form(app: &mut StudioApp, ctx: &egui::Context) {
             layout.span = r4(line.rect);
         }
         ui.label("Destination");
-        let new = ui.radio_value(&mut f.existing, false, "New track");
+        let new = crate::chrome::radio_value(ui, &mut f.existing, false, "New track");
         hover(ui, &new, Id::BouncePlaceDestination);
         layout.new_track = r4(new.rect);
-        let existing = ui.add_enabled(!several, egui::RadioButton::new(f.existing && !several, "Existing track"));
+        let existing = crate::chrome::radio_enabled(ui, !several, f.existing && !several, "Existing track");
         if existing.clicked() {
             f.existing = true;
         }
@@ -238,11 +238,13 @@ fn bounce_form(app: &mut StudioApp, ctx: &egui::Context) {
         layout.existing_track = r4(existing.rect);
         ui.add_enabled_ui(f.existing && !several, |ui| {
             let label = eligible.iter().find(|(id, _)| Some(*id) == f.destination).map_or("Choose an audio track", |(_, name)| name.as_str());
-            let combo = egui::ComboBox::from_id_salt("bounce_destination").selected_text(label).show_ui(ui, |ui| {
-                for (id, name) in &eligible {
-                    let b = ui.selectable_value(&mut f.destination, Some(*id), name);
-                    layout.destinations.push((*id, r4(b.rect)));
-                }
+            let combo = crate::chrome::field(ui, |ui| {
+                egui::ComboBox::from_id_salt("bounce_destination").selected_text(label).icon(crate::chrome::chevron).show_ui(ui, |ui| {
+                    for (id, name) in &eligible {
+                        let b = ui.selectable_value(&mut f.destination, Some(*id), name);
+                        layout.destinations.push((*id, r4(b.rect)));
+                    }
+                })
             });
             layout.dropdown = r4(combo.response.rect);
             hover(ui, &combo.response, Id::BouncePlaceDestination);
@@ -254,7 +256,7 @@ fn bounce_form(app: &mut StudioApp, ctx: &egui::Context) {
         ui.horizontal_wrapped(|ui| {
             let choices = [(Source::Leave, "Leave"), (Source::Mute, "Mute"), (Source::MuteDeactivate, "Mute and deactivate"), (Source::Hide, "Hide")];
             for (value, label) in choices {
-                let b = ui.radio_value(&mut f.source, value, label);
+                let b = crate::chrome::radio_value(ui, &mut f.source, value, label);
                 layout.sources.push(r4(b.rect));
                 hover(ui, &b, Id::BouncePlaceSource);
             }

@@ -152,7 +152,7 @@ fn picker_body(app: &mut StudioApp, ui: &mut Ui, s: &Session, t: &Track, current
     use crate::automation_picker::{DeviceView, device};
     let mut query = std::mem::take(&mut app.auto.picker.query);
     let focus = std::mem::take(&mut app.auto.picker.focus);
-    let te = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search parameters").desired_width(f32::INFINITY));
+    let te = crate::chrome::text_field(ui, egui::TextEdit::singleline(&mut query).hint_text("Search parameters").desired_width(f32::INFINITY));
     if focus {
         te.request_focus();
     }

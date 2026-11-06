@@ -664,7 +664,7 @@ fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) {
                 ui.horizontal(|ui| {
                     dot(ui, s.port_color(n));
                     let mut on = !f.hidden_ports.contains(n);
-                    if ui.checkbox(&mut on, n).changed() {
+                    if crate::chrome::checkbox(ui, &mut on, n).changed() {
                         f.hidden_ports.retain(|h| h != n);
                         if !on {
                             f.hidden_ports.push(n.clone());
@@ -686,7 +686,7 @@ fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) {
             egui::Grid::new("midi_monitor_channels").show(ui, |ui| {
                 for c in 0..16u16 {
                     let mut on = f.channels & (1 << c) != 0;
-                    if ui.checkbox(&mut on, format!("{}", c + 1)).changed() {
+                    if crate::chrome::checkbox(ui, &mut on, format!("{}", c + 1)).changed() {
                         f.channels = if on { f.channels | (1 << c) } else { f.channels & !(1 << c) };
                     }
                     if c % 4 == 3 {
@@ -706,7 +706,7 @@ fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) {
         ] {
             ui.toggle_value(flag, label);
         }
-        ui.add(egui::TextEdit::singleline(&mut f.text).hint_text("Filter text: CC 74, C3, Start").desired_width(170.0));
+        crate::chrome::text_field(ui, egui::TextEdit::singleline(&mut f.text).hint_text("Filter text: CC 74, C3, Start").desired_width(170.0));
     });
 }
 
@@ -815,7 +815,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 crate::help::hover(ui, &learn_toggle, crate::help::Id::MidiMonitorLearn);
                 copy = ui.button("Copy last 100 lines").clicked();
                 copy_report = ui.button("Copy report").clicked();
-                ui.checkbox(&mut prefs.show_clock, "Show clock pulses");
+                crate::chrome::checkbox(ui, &mut prefs.show_clock, "Show clock pulses");
                 let (din, dout) = s.dropped;
                 if din + dout > 0 {
                     let dropped = ui.label(egui::RichText::new(format!("Dropped events: {din} in, {dout} out")).color(TOKENS.record))

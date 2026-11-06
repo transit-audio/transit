@@ -348,7 +348,7 @@ fn entry(app: &mut StudioApp, ui: &mut egui::Ui, tool: Tool) {
     let blocked = app.clip_tool_blocked(tool);
     let mut button = egui::Button::new(tool.label());
     if let Some(a) = tool.action() {
-        button = button.shortcut_text(label(a));
+        button = button.shortcut_text(crate::chrome::shortcut(ui.ctx(), label(a)));
     }
     let hint = match tool {
         Tool::Join => "Joins the span from the first to the last selected clip",
@@ -375,7 +375,7 @@ pub fn context_menu_items(app: &mut StudioApp, ui: &mut egui::Ui) {
         entry(app, ui, tool);
     }
     let has_clip = !app.selected_clips().is_empty();
-    if ui.add_enabled(has_clip, egui::Button::new("Rename").shortcut_text(label(A::Rename))).clicked() {
+    if ui.add_enabled(has_clip, egui::Button::new("Rename").shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::Rename)))).clicked() {
         // The menu is on a clip: rename it even when tracks were picked by their headers.
         app.tracks_selected_by_header = false;
         app.rename_selected();

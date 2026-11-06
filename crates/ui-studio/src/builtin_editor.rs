@@ -175,7 +175,7 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             tuner: Default::default(),
         };
         let mut open = true;
-        let shown = crate::theme::window(ctx, title)
+        let shown = crate::theme::device_window(ctx, title)
             .id(egui::Id::new(("builtin_editor", ins.uid.get())))
             .open(&mut open)
             // A built-in's panel has a fixed layout: the window takes its content size, offers no

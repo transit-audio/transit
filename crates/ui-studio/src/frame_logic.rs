@@ -461,6 +461,7 @@ impl StudioApp {
         builtin_editor::windows(self, &ctx);
         arrange::track_height::boundaries(self, &ctx);
         help::panel(self, &ctx); // last, so it sees the control hovered in this frame
+        crate::chrome::focus_ring(&ctx); // over everything, around the widget the keyboard focused
         if self.is_playing() || self.engine.transport.recording {
             ctx.request_repaint_after(std::time::Duration::from_millis(1000 / 30));
         } else if self.main_meter.level[0] > 0.0001 {

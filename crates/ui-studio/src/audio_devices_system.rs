@@ -94,7 +94,7 @@ pub fn section(
         controls.push(MenuItem::at(ui, ELSEWHERE_NOTE.into(), "system_audio_note".into(), r.rect));
         return;
     }
-    let switch = ui.checkbox(&mut draft.system_audio, "Record what the computer plays");
+    let switch = crate::chrome::checkbox(ui, &mut draft.system_audio, "Record what the computer plays");
     crate::help::hover(ui, &switch, crate::help::Id::AudioDevicesSystemAudio);
     controls.push(MenuItem::at(ui, "Record what the computer plays".into(), "system_audio".into(), switch.rect));
     ui.horizontal(|ui| {

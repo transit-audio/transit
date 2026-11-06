@@ -51,7 +51,7 @@ pub(super) fn selector(app: &mut StudioApp, ui: &mut Ui, rect: Rect, layout: &mu
         ui.horizontal(|ui| {
             ui.label("CC");
             let mut n = current.unwrap_or(64);
-            if ui.add(egui::DragValue::new(&mut n).range(0..=127)).changed() {
+            if crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut n).range(0..=127))).changed() {
                 app.keys.cc.controller = Some(n);
             }
         });
@@ -59,7 +59,7 @@ pub(super) fn selector(app: &mut StudioApp, ui: &mut Ui, rect: Rect, layout: &mu
     if app.keys.cc.controller.is_some() {
         let r = Rect::from_min_size(pos2(rect.min.x, rect.min.y + 25.0), vec2(rect.width(), 24.0));
         let mut channel = app.keys.cc.channel.saturating_add(1).clamp(1, 16);
-        let response = ui.put(r, egui::DragValue::new(&mut channel).range(1..=16).prefix("Ch "));
+        let response = crate::chrome::field(ui, |ui| ui.put(r, egui::DragValue::new(&mut channel).range(1..=16).prefix("Ch ")));
         layout.channel = r4(response.rect);
         if app.keys.cc.channel != channel - 1 {
             app.keys.cc.drag = None;

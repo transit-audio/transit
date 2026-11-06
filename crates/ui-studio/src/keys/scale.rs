@@ -54,13 +54,13 @@ impl StudioApp {
 pub(super) fn controls(app: &mut StudioApp, ui: &mut Ui, layout: &mut KeysLayout) {
     let mode = app.keys_scale();
     let mut enabled = mode.enabled;
-    let response = ui.checkbox(&mut enabled, "Scale mode");
+    let response = crate::chrome::checkbox(ui, &mut enabled, "Scale mode");
     layout.pitch_menu.push(MenuItem::at(ui, "scale_mode".into(), "Scale mode".into(), response.rect));
     if response.changed() {
         let _ = app.keys_scale_set(json!({"enabled": enabled}));
     }
     let mut fold = mode.fold;
-    let response = ui.checkbox(&mut fold, "Fold to scale");
+    let response = crate::chrome::checkbox(ui, &mut fold, "Fold to scale");
     layout.pitch_menu.push(MenuItem::at(ui, "scale_fold".into(), "Fold to scale".into(), response.rect));
     if response.changed() {
         let _ = app.keys_scale_set(json!({"fold": fold}));
@@ -92,7 +92,8 @@ pub(super) fn controls(app: &mut StudioApp, ui: &mut Ui, layout: &mut KeysLayout
             ui.set_width(150.0);
             let filter_id = egui::Id::new("scale_filter");
             let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id)).unwrap_or_default();
-            let field = ui.add(egui::TextEdit::singleline(&mut filter).hint_text("Scale (type to filter)").desired_width(150.0));
+            let field =
+                crate::chrome::text_field(ui, egui::TextEdit::singleline(&mut filter).hint_text("Scale (type to filter)").desired_width(150.0));
             layout.pitch_menu.push(MenuItem::at(ui, "scale_filter".into(), "Scale filter".into(), field.rect));
             ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
             let needle = filter.trim().to_lowercase();

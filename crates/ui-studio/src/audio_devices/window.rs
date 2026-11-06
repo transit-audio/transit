@@ -30,19 +30,21 @@ pub(crate) fn choose_or<T: Clone + PartialEq>(
         (Some(_), None) => "Not available (falls back to the default)".to_string(),
     };
     let r = ui.add_enabled_ui(enabled, |ui| {
-        egui::ComboBox::from_id_salt(("audio_devices", key)).selected_text(&text).width(360.0).show_ui(ui, |ui| {
-            let b = crate::menus::check_button(ui, value.is_none(), none);
-            items.push(MenuItem::at(ui, none.into(), key.into(), b.rect));
-            if b.clicked() {
-                *value = None;
-            }
-            for (v, t) in options {
-                let b = crate::menus::check_button(ui, value.as_ref() == Some(v), t);
-                items.push(MenuItem::at(ui, t.clone(), key.into(), b.rect));
+        crate::chrome::field(ui, |ui| {
+            egui::ComboBox::from_id_salt(("audio_devices", key)).selected_text(&text).width(360.0).icon(crate::chrome::chevron).show_ui(ui, |ui| {
+                let b = crate::menus::check_button(ui, value.is_none(), none);
+                items.push(MenuItem::at(ui, none.into(), key.into(), b.rect));
                 if b.clicked() {
-                    *value = Some(v.clone());
+                    *value = None;
                 }
-            }
+                for (v, t) in options {
+                    let b = crate::menus::check_button(ui, value.as_ref() == Some(v), t);
+                    items.push(MenuItem::at(ui, t.clone(), key.into(), b.rect));
+                    if b.clicked() {
+                        *value = Some(v.clone());
+                    }
+                }
+            })
         })
     });
     (r.inner.response.rect, text)
@@ -53,14 +55,19 @@ pub(crate) fn choose_or<T: Clone + PartialEq>(
 fn choose_backend(ui: &mut egui::Ui, enabled: bool, value: &mut Backend, options: &[Backend], items: &mut Vec<MenuItem>) -> (egui::Rect, String) {
     let text = value.label().to_string();
     let r = ui.add_enabled_ui(enabled, |ui| {
-        egui::ComboBox::from_id_salt(("audio_devices", "backend")).selected_text(&text).width(360.0).show_ui(ui, |ui| {
-            for option in options.iter().copied() {
-                let b = crate::menus::check_button(ui, *value == option, option.label());
-                items.push(MenuItem::at(ui, option.label().into(), "backend".into(), b.rect));
-                if b.clicked() {
-                    *value = option;
-                }
-            }
+        crate::chrome::field(ui, |ui| {
+            egui::ComboBox::from_id_salt(("audio_devices", "backend")).selected_text(&text).width(360.0).icon(crate::chrome::chevron).show_ui(
+                ui,
+                |ui| {
+                    for option in options.iter().copied() {
+                        let b = crate::menus::check_button(ui, *value == option, option.label());
+                        items.push(MenuItem::at(ui, option.label().into(), "backend".into(), b.rect));
+                        if b.clicked() {
+                            *value = option;
+                        }
+                    }
+                },
+            )
         })
     });
     (r.inner.response.rect, text)
@@ -355,7 +362,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                     {
                                                         ui.label("");
                                                         let mut exclusive = !draft.share_device;
-                                                        let b = ui.add_enabled(audio_on, egui::Checkbox::new(&mut exclusive, SHARE_LABEL));
+                                                        let b = crate::chrome::checkbox_enabled(ui, audio_on, &mut exclusive, SHARE_LABEL);
                                                         draft.share_device = !exclusive;
                                                         controls.push((SHARE_LABEL.into(), "share_device", b.rect));
                                                         ui.end_row();

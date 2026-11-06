@@ -1009,14 +1009,19 @@ fn calibration_measure(
         ui.add_enabled_ui(!running, |ui| {
             for (label, key, names, pick) in [("Out", "cal_send", &outputs, &mut *send), ("In", "cal_ret", &inputs, &mut *ret)] {
                 ui.label(egui::RichText::new(label).color(TOKENS.text_dim).size(11.5));
-                let combo = egui::ComboBox::from_id_salt(key).selected_text(pick.as_deref().unwrap_or("None")).show_ui(ui, |ui| {
-                    for n in names {
-                        let b = crate::menus::check_button(ui, pick.as_deref() == Some(*n), *n);
-                        items.push(MenuItem::at(ui, (*n).to_string(), format!("{key}_entry"), b.rect));
-                        if b.clicked() {
-                            *pick = Some((*n).to_string());
-                        }
-                    }
+                let combo = crate::chrome::field(ui, |ui| {
+                    egui::ComboBox::from_id_salt(key).selected_text(pick.as_deref().unwrap_or("None")).icon(crate::chrome::chevron).show_ui(
+                        ui,
+                        |ui| {
+                            for n in names {
+                                let b = crate::menus::check_button(ui, pick.as_deref() == Some(*n), *n);
+                                items.push(MenuItem::at(ui, (*n).to_string(), format!("{key}_entry"), b.rect));
+                                if b.clicked() {
+                                    *pick = Some((*n).to_string());
+                                }
+                            }
+                        },
+                    )
                 });
                 controls.push((pick.clone().unwrap_or_default(), key, combo.response.rect));
             }

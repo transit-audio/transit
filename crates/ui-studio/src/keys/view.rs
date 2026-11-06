@@ -339,18 +339,18 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
     resp.context_menu(|ui| {
         use transit_engine::step_input::StepControl;
         ui.label("Step input settings");
-        ui.checkbox(&mut app.ui.keys.step_hold.enabled, "Hold to lengthen");
+        crate::chrome::checkbox(ui, &mut app.ui.keys.step_hold.enabled, "Hold to lengthen");
         ui.horizontal(|ui| {
             ui.label("Hold threshold (ms)");
-            ui.add(egui::DragValue::new(&mut app.ui.keys.step_hold.threshold_ms).range(1..=60_000));
+            crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut app.ui.keys.step_hold.threshold_ms).range(1..=60_000)));
         });
         ui.horizontal(|ui| {
             ui.label("Repeat floor (ms)");
-            ui.add(egui::DragValue::new(&mut app.ui.keys.step_hold.floor_ms).range(1..=1000));
+            crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut app.ui.keys.step_hold.floor_ms).range(1..=1000)));
         });
         ui.horizontal(|ui| {
             ui.label("Speed up over");
-            let r = ui.add(egui::DragValue::new(&mut app.ui.keys.step_hold.ramp_units).range(0..=64).suffix(" units"));
+            let r = crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut app.ui.keys.step_hold.ramp_units).range(0..=64).suffix(" units")));
             r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Speed up over N units"));
         });
         ui.label("Sustain + the same notes ties the previous chord.");
@@ -517,7 +517,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
 
     let field = Rect::from_min_max(pos2(rx - 44.0, r.min.y + 4.0), pos2(rx, r.max.y - 4.0));
     ui.push_id("keys_new_note_velocity", |ui| {
-        let resp = ui.put(field, egui::DragValue::new(&mut app.ui.keys.velocity).range(1..=127).speed(1));
+        let resp = crate::chrome::field(ui, |ui| ui.put(field, egui::DragValue::new(&mut app.ui.keys.velocity).range(1..=127).speed(1)));
         layout.new_note_velocity = r4(resp.rect);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "New note velocity"));
         resp.on_hover_text("New note velocity (1–127): used for drawing and audition. Drag or click to type.");
@@ -547,7 +547,9 @@ fn note_inspector(app: &mut StudioApp, ui: &mut Ui, rect: Rect, cv: &ClipView, l
     let text = app.keys.length_edit.as_mut().map_or(&mut empty, |(_, text)| text);
     let resp = ui
         .add_enabled_ui(selected.is_some(), |ui| {
-            ui.put(field, egui::TextEdit::singleline(text).id_salt("keys_note_length").font(egui::TextStyle::Monospace))
+            crate::chrome::field(ui, |ui| {
+                ui.put(field, egui::TextEdit::singleline(text).id_salt("keys_note_length").font(egui::TextStyle::Monospace))
+            })
         })
         .inner;
     layout.note_length = r4(resp.rect);

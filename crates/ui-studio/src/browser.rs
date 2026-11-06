@@ -900,7 +900,9 @@ fn body(app: &mut StudioApp, ui: &mut Ui) {
         let text = if files { &mut app.browser.filter } else { &mut app.browser.plugin_filter };
         let id = ui.id().with(if files { "browser_filter" } else { "browser_plugin_filter" });
         let margin = egui::Margin { left: 24, right: 4, top: 2, bottom: 2 };
-        ui.put(fr, egui::TextEdit::singleline(text).id(id).hint_text("Filter").margin(margin).desired_width(fr.width()));
+        crate::chrome::field(ui, |ui| {
+            ui.put(fr, egui::TextEdit::singleline(text).id(id).hint_text("Filter").margin(margin).desired_width(fr.width()))
+        });
         crate::icons::paint(&p, pos2(fr.min.x + 12.0, fr.center().y), Icon::Filter, 13.0, TOKENS.text_dim);
     }
     layout.filter = r4(fr);
@@ -958,7 +960,9 @@ fn locations_bar(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, area: Rect
         let ok = Rect::from_min_size(pos2(field.max.x + 4.0, y), vec2(40.0, 22.0));
         let id = ui.id().with("browser_add_field");
         let mut text = app.browser.adding.take().unwrap_or_default();
-        let fresp = ui.put(field, egui::TextEdit::singleline(&mut text).id(id).hint_text("Folder path, e.g. D:\\").desired_width(field.width()));
+        let fresp = crate::chrome::field(ui, |ui| {
+            ui.put(field, egui::TextEdit::singleline(&mut text).id(id).hint_text("Folder path, e.g. D:\\").desired_width(field.width()))
+        });
         let enter = fresp.lost_focus() && ui.input(|i| crate::shortcuts::hit(i, A::BrowserAddFolder));
         let oresp = ui.interact(ok, ui.id().with("browser_add_ok"), Sense::click());
         p.rect_filled(ok, crate::theme::RADIUS, if oresp.hovered() { TOKENS.button_hover } else { TOKENS.button });

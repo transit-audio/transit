@@ -313,11 +313,11 @@ pub(crate) fn settings(app: &mut StudioApp, ui: &mut egui::Ui) {
         ui.push_id(&name, |ui| {
             ui.label(if connected.contains(&name) { name.clone() } else { format!("{name} (disconnected)") });
             ui.horizontal(|ui| {
-                let b = ui.checkbox(&mut prefs.transport_buttons, "Transport buttons");
+                let b = crate::chrome::checkbox(ui, &mut prefs.transport_buttons, "Transport buttons");
                 crate::help::hover(ui, &b, crate::help::Id::MidiTransportButtons);
                 changed |= b.changed();
                 ui.label("MMC device ID");
-                let id = ui.add(egui::DragValue::new(&mut prefs.mmc_device_id).range(0..=126));
+                let id = crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut prefs.mmc_device_id).range(0..=126)));
                 crate::help::hover(ui, &id, crate::help::Id::MidiMmcDeviceId);
                 changed |= id.changed();
             });

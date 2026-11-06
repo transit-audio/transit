@@ -104,7 +104,7 @@ impl StudioApp {
         ui.horizontal(|ui| {
             ui.label("Low Latency limit");
             let mut limit = self.ui.low_latency_limit_ms;
-            let b = ui.add(egui::DragValue::new(&mut limit).range(0.0..=f64::MAX).speed(0.1).suffix(" ms"));
+            let b = crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut limit).range(0.0..=f64::MAX).speed(0.1).suffix(" ms")));
             crate::help::hover(ui, &b, crate::help::Id::AudioDevicesLowLatencyLimit);
             if b.changed() {
                 let _ = self.run("options.low_latency", json!({"limit_ms": limit}));

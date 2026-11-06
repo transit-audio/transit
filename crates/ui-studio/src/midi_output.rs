@@ -253,13 +253,13 @@ impl OutputView {
                         // Edited locally; one command (one undo step) when the drag or typing ends.
                         let id = ui.id().with(("midi-out-offset", track.0));
                         let mut value = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or_else(|| output.offset_ms());
-                        let response = ui.add(
+                        let response = crate::chrome::field(ui, |ui| ui.add(
                             egui::DragValue::new(&mut value)
                                 .range(-MAX_MIDI_OUT_OFFSET_MS..=MAX_MIDI_OUT_OFFSET_MS)
                                 .speed(0.1)
                                 .fixed_decimals(1)
                                 .suffix(" ms"),
-                        );
+                        ));
                         if response.changed() {
                             ui.data_mut(|d| d.insert_temp(id, value));
                         }
@@ -279,8 +279,8 @@ impl OutputView {
                         ui.add(egui::Label::new(egui::RichText::new(note).weak()).wrap());
                     }
                     let mut allow = allowed;
-                    if ui
-                        .checkbox(&mut allow, ALLOW_ECHO)
+                    if crate::chrome::checkbox(
+                        ui, &mut allow, ALLOW_ECHO)
                         .on_hover_text("A device that passes its MIDI In to its Out sends the echo straight back. The feedback storm detector still mutes a looping input.")
                         .changed()
                     {

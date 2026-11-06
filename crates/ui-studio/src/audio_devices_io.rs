@@ -207,14 +207,16 @@ pub fn section(ui: &mut egui::Ui, io: &IoMap, wasapi: bool, names: &ChannelNames
     let outputs: Vec<&IoPath> = io.paths_of(IoDirection::Output).collect();
     ui.horizontal(|ui| {
         ui.label("Main plays on");
-        let combo = egui::ComboBox::from_id_salt("io_main").selected_text(&io.main).show_ui(ui, |ui| {
-            for p in &outputs {
-                let b = crate::menus::check_button(ui, p.name.eq_ignore_ascii_case(&io.main), &p.name);
-                items.push(MenuItem::at(ui, p.name.clone(), "io_main_entry".into(), b.rect));
-                if b.clicked() {
-                    edit = Some(IoEdit::SetMain { name: p.name.clone() });
+        let combo = crate::chrome::field(ui, |ui| {
+            egui::ComboBox::from_id_salt("io_main").selected_text(&io.main).icon(crate::chrome::chevron).show_ui(ui, |ui| {
+                for p in &outputs {
+                    let b = crate::menus::check_button(ui, p.name.eq_ignore_ascii_case(&io.main), &p.name);
+                    items.push(MenuItem::at(ui, p.name.clone(), "io_main_entry".into(), b.rect));
+                    if b.clicked() {
+                        edit = Some(IoEdit::SetMain { name: p.name.clone() });
+                    }
                 }
-            }
+            })
         });
         items.push(MenuItem::at(ui, io.main.clone(), "io_main".into(), combo.response.rect));
     });
@@ -254,7 +256,7 @@ pub fn section(ui: &mut egui::Ui, io: &IoMap, wasapi: bool, names: &ChannelNames
         }
         ui.horizontal(|ui| {
             let buf = if direction == IoDirection::Input { &mut ed.new_input } else { &mut ed.new_output };
-            ui.add(egui::TextEdit::singleline(buf).hint_text("New path name").desired_width(160.0));
+            crate::chrome::text_field(ui, egui::TextEdit::singleline(buf).hint_text("New path name").desired_width(160.0));
             let b = ui.add_enabled(opened > 0, egui::Button::new("Add"));
             let key = if direction == IoDirection::Input { "io_add:input" } else { "io_add:output" };
             items.push(MenuItem::at(ui, "Add".into(), key.into(), b.rect));
@@ -296,14 +298,19 @@ pub fn hardware_section(
         ui.add_enabled_ui(!running, |ui| {
             for (label, key, names, pick) in [("Send", "hw_send", &outputs, &mut ed.hw_send), ("Return", "hw_ret", &inputs, &mut ed.hw_ret)] {
                 ui.label(label);
-                let combo = egui::ComboBox::from_id_salt(key).selected_text(pick.as_deref().unwrap_or("Choose…")).show_ui(ui, |ui| {
-                    for n in names {
-                        let b = crate::menus::check_button(ui, pick.as_deref() == Some(*n), *n);
-                        items.push(MenuItem::at(ui, (*n).to_string(), format!("{key}_entry"), b.rect));
-                        if b.clicked() {
-                            *pick = Some((*n).to_string());
-                        }
-                    }
+                let combo = crate::chrome::field(ui, |ui| {
+                    egui::ComboBox::from_id_salt(key).selected_text(pick.as_deref().unwrap_or("Choose…")).icon(crate::chrome::chevron).show_ui(
+                        ui,
+                        |ui| {
+                            for n in names {
+                                let b = crate::menus::check_button(ui, pick.as_deref() == Some(*n), *n);
+                                items.push(MenuItem::at(ui, (*n).to_string(), format!("{key}_entry"), b.rect));
+                                if b.clicked() {
+                                    *pick = Some((*n).to_string());
+                                }
+                            }
+                        },
+                    )
                 });
                 items.push(MenuItem::at(ui, pick.clone().unwrap_or_default(), key.into(), combo.response.rect));
             }
@@ -388,7 +395,7 @@ pub fn measured_text(frames: u32, spread: u32, rate: u32) -> String {
 
 fn path_row(ui: &mut egui::Ui, io: &IoMap, p: &IoPath, ed: &mut IoEditor, items: &mut Vec<MenuItem>, edit: &mut Option<IoEdit>) {
     if let Some((_, buf)) = ed.rename.as_mut().filter(|(n, _)| *n == p.name) {
-        let r = ui.add(egui::TextEdit::singleline(buf).desired_width(130.0));
+        let r = crate::chrome::text_field(ui, egui::TextEdit::singleline(buf).desired_width(130.0));
         r.request_focus();
         if r.lost_focus() {
             if ui.input(|i| i.key_pressed(egui::Key::Enter)) && *buf != p.name {
@@ -424,7 +431,7 @@ fn path_row(ui: &mut egui::Ui, io: &IoMap, p: &IoPath, ed: &mut IoEditor, items:
         });
         if can && p.direction == IoDirection::Output {
             let mut live = p.live;
-            let b = ui.checkbox(&mut live, "Live (no shared padding)");
+            let b = crate::chrome::checkbox(ui, &mut live, "Live (no shared padding)");
             crate::help::hover(ui, &b, crate::help::Id::AudioDevicesPathLive);
             items.push(MenuItem::at(ui, "Live (no shared padding)".into(), format!("io_live:{}", p.name), b.rect));
             if b.changed() {

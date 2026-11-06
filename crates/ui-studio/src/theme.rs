@@ -105,6 +105,9 @@ pub struct Tokens {
     pub toggle_unavailable_fill: Color32,
     /// The switch's knob when on (`switch.onKnob`).
     pub switch_on_knob: Color32,
+    /// The default button's fill on hover and while pressed (`chrome.defaultButton`).
+    pub default_button_hover: Color32,
+    pub default_button_pressed: Color32,
     /// `bg.window`.
     pub bg: Color32,
     /// `surface.panel`.
@@ -187,6 +190,8 @@ macro_rules! token_set {
             toggle_option_fill: TOGGLE_OPTION_FILL,
             toggle_unavailable_fill: TOGGLE_UNAVAILABLE_FILL,
             switch_on_knob: SWITCH_ON_KNOB,
+            default_button_hover: DEFAULT_BUTTON_HOVER,
+            default_button_pressed: DEFAULT_BUTTON_PRESSED,
             bg: BG_WINDOW,
             panel: SURFACE_PANEL,
             panel_raised: SURFACE_RAISED,
@@ -286,75 +291,131 @@ pub const TRANSPORT_H: f32 = 40.0;
 pub const STATUS_H: f32 = 22.0;
 pub const CLIP_NAME_H: f32 = 14.0;
 
-/// egui's own widgets (menus, buttons, windows, combo boxes, scroll bars) in `t`'s colors, on the
-/// design language's shapes (ADR 0045): flat graphite, 1 px `line` separators and borders, the
-/// panel radius on windows and the control radius on menus and widgets, no shadows.
+/// egui's own widgets in `t`'s colors, by the application chrome rules (#326, the maintainer's
+/// second design document; `chrome` in tokens.json): flat graphite, no shadows.
+///
+/// - Buttons are borderless `surface.raised`; hover `button.hover`; pressed `surface.selected`
+///   with no signal edge (a bordered control is a latching toggle, never a button).
+/// - Popups (menus, combo lists, tooltips) take `window_fill`, `surface.raised`, with a 1 px
+///   `line.strong` edge; windows and dialogs override the fill with `surface.panel` ([`window`],
+///   [`crate::chrome::modal`]).
+/// - Scroll bars float: a thin `ink.ghost` handle at rest that widens on hover to `ink.arrow` on a
+///   `surface.panel` track and reads `text.faint` while dragged. egui paints the handle from the
+///   widget states' `bg_fill`, which buttons never read (they paint `weak_bg_fill`).
+/// - egui shares one stroke and one fill between buttons, text fields, combo boxes and checkboxes,
+///   so fields and checks take theirs from a scope at the call site ([`crate::chrome::field`],
+///   [`crate::chrome::checkbox`]).
 fn visuals(t: &Tokens, light: bool) -> egui::Visuals {
-    use crate::tokens::radius;
+    use crate::tokens::chrome as c;
     let mut v = if light { egui::Visuals::light() } else { egui::Visuals::dark() };
-    let line = egui::Stroke::new(1.0, t.line);
+    let none = egui::Stroke::NONE;
+    let text = egui::Stroke::new(1.0, t.text);
     v.panel_fill = t.surface_panel;
     v.window_fill = t.surface_raised;
-    // Text fields and scroll tracks are value fields: the inset well.
-    v.extreme_bg_color = t.surface_inset;
+    v.window_stroke = egui::Stroke::new(1.0, t.line_strong);
+    // The topmost window's title bar would take `widgets.open`; every title bar is `bg.titlebar`.
+    v.window_highlight_topmost = false;
+    // The scroll bar's track on hover (egui paints it from `extreme_bg_color`); text fields keep the
+    // inset well through `text_edit_bg_color`.
+    v.extreme_bg_color = t.surface_panel;
     v.text_edit_bg_color = Some(t.surface_inset);
     v.code_bg_color = t.surface_inset;
     v.faint_bg_color = t.lane_alt;
-    v.weak_text_color = Some(t.text_muted);
-    v.selection.bg_fill = t.signal.gamma_multiply(if light { 0.35 } else { 0.6 });
+    // Placeholders and a menu row's shortcut.
+    v.weak_text_color = Some(t.text_faint);
+    v.selection.bg_fill = t.signal.gamma_multiply(if light { c::SELECTION_ALPHA_LIGHT } else { c::SELECTION_ALPHA_DARK });
     v.selection.stroke = egui::Stroke::new(FOCUS_W, t.focus_ring);
     v.hyperlink_color = t.signal;
     v.warn_fg_color = t.modulation;
     v.error_fg_color = t.meter_hot;
-    v.window_stroke = line;
+    v.disabled_alpha = DISABLED_ALPHA;
     v.widgets.noninteractive.bg_fill = t.surface_panel;
     v.widgets.noninteractive.weak_bg_fill = t.surface_panel;
-    v.widgets.noninteractive.bg_stroke = line;
-    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, t.text);
-    v.widgets.inactive.bg_fill = t.surface_raised;
-    v.widgets.inactive.weak_bg_fill = t.surface_raised;
-    v.widgets.inactive.bg_stroke = line;
-    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, t.text);
-    v.widgets.hovered.bg_fill = t.button_hover;
-    v.widgets.hovered.weak_bg_fill = t.button_hover;
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, t.line_strong);
-    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, t.text);
-    v.widgets.active.bg_fill = t.surface_selected;
-    v.widgets.active.weak_bg_fill = t.surface_selected;
-    v.widgets.active.bg_stroke = egui::Stroke::new(1.0, t.signal);
-    v.widgets.active.fg_stroke = egui::Stroke::new(1.0, t.text);
-    v.widgets.open.bg_fill = t.button_hover;
-    v.widgets.open.weak_bg_fill = t.button_hover;
-    v.widgets.open.bg_stroke = egui::Stroke::new(1.0, t.line_strong);
-    v.widgets.open.fg_stroke = egui::Stroke::new(1.0, t.text);
-    // Flat: no shadows (the 1 px separator is the only edge).
+    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, t.line);
+    v.widgets.noninteractive.fg_stroke = text;
+    // (weak_bg_fill: the button face; bg_fill: the scroll handle in that state.)
+    for (w, face, handle) in [
+        (&mut v.widgets.inactive, t.surface_raised, t.ink_ghost),
+        (&mut v.widgets.hovered, t.button_hover, t.ink_arrow),
+        (&mut v.widgets.active, t.surface_selected, t.text_faint),
+        (&mut v.widgets.open, t.button_hover, t.ink_arrow),
+    ] {
+        w.weak_bg_fill = face;
+        w.bg_fill = handle;
+        w.bg_stroke = none;
+        w.fg_stroke = text;
+    }
+    // Flat: no shadows (the 1 px edge is the only lift).
     v.window_shadow = egui::Shadow::NONE;
     v.popup_shadow = egui::Shadow::NONE;
-    v.window_corner_radius = egui::CornerRadius::same(radius::PANEL as u8);
-    v.menu_corner_radius = egui::CornerRadius::same(radius::CONTROL as u8);
+    v.window_corner_radius = egui::CornerRadius::same(c::RADIUS_WINDOW as u8);
+    v.menu_corner_radius = egui::CornerRadius::same(c::RADIUS_POPUP as u8);
     for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
-        w.corner_radius = egui::CornerRadius::same(radius::CONTROL as u8);
+        w.corner_radius = egui::CornerRadius::same(c::RADIUS_CONTROL as u8);
         w.expansion = 0.0;
     }
     v
 }
 
-/// The spacing grid on egui's own widgets.
+/// egui dims a disabled widget by this alpha. The chrome document gives disabled text `ink.arrow`;
+/// `text` at this alpha over `surface.raised` lands on `ink.arrow`'s role (nearer to it than to
+/// `text.faint` or `text.muted`), the nearest egui's one dimming factor comes.
+pub const DISABLED_ALPHA: f32 = 0.3;
+
+/// The spacing grid and the chrome's metrics on egui's own widgets.
 fn spacing(st: &mut egui::Style) {
+    use crate::tokens::chrome as c;
     let sp = &mut st.spacing;
     sp.item_spacing = egui::vec2(SPACE, SPACE / 2.0);
-    sp.button_padding = egui::vec2(SPACE, SPACE / 4.0);
-    sp.menu_margin = egui::Margin::same(SPACE as i8);
+    // A button has 12 px a side and is 26 high with a Sans label: egui sizes a button from its
+    // label and padding (at least `interact_size.y`, which also sets the height of every
+    // horizontal row and grid row, so it keeps egui's 18). The chrome's own buttons
+    // ([`crate::chrome::button`], [`crate::chrome::default_button`]) are exactly 26.
+    sp.button_padding = egui::vec2(c::BUTTON_PADDING[1], BUTTON_PAD_Y);
+    sp.menu_margin = egui::Margin::same(c::POPUP_PADDING as i8);
     sp.window_margin = egui::Margin::same(SPACE as i8);
     sp.indent = 2.0 * SPACE;
-    // egui's window close button is `icon_width` square (so are checkboxes and radio buttons).
+    // egui's window close button is `icon_width` square (so are checkboxes and radio buttons, which
+    // [`crate::chrome::checkbox`] sizes itself).
     sp.icon_width = WINDOW_CLOSE_SIZE;
+    // Floating scroll bars: 4 px at rest, 8 px on hover, 2 px from the edge, round ends.
+    sp.scroll = egui::style::ScrollStyle {
+        floating: true,
+        bar_width: c::SCROLL_HOVER,
+        floating_width: c::SCROLL_REST,
+        floating_allocated_width: 0.0,
+        handle_min_length: c::SCROLL_MIN_HANDLE,
+        bar_inner_margin: c::SCROLL_INSET,
+        bar_outer_margin: c::SCROLL_INSET,
+        foreground_color: false,
+        dormant_background_opacity: 0.0,
+        active_background_opacity: 0.0,
+        interact_background_opacity: 1.0,
+        dormant_handle_opacity: 1.0,
+        active_handle_opacity: 1.0,
+        interact_handle_opacity: 1.0,
+        ..sp.scroll
+    };
+    st.interaction.tooltip_delay = c::TOOLTIP_DELAY_MS as f32 / 1000.0;
     // egui sizes a window's title bar, and the close button inside it, from `TextStyle::Heading`.
     // transit draws no other heading, so Heading is the window-title size too (#206).
     let title = egui::FontId::proportional(WINDOW_TITLE_SIZE);
     st.text_styles.insert(window_title_style(), title.clone());
     st.text_styles.insert(egui::TextStyle::Heading, title);
+    // Button labels: Sans 12.
+    st.text_styles.insert(egui::TextStyle::Button, egui::FontId::proportional(BUTTON_TEXT_SIZE));
 }
+
+/// Button labels, points (Sans 500 12 in the chrome document).
+pub const BUTTON_TEXT_SIZE: f32 = 12.0;
+/// A button's vertical padding. egui sizes a button from its label (the Body style, a 16 px row
+/// in Plex Sans) and this padding, so an egui button is about 24 high: the nearest that still fits
+/// the 24 px rows of dense tables (the MIDI Mappings window). The chrome's own buttons are exactly
+/// 26 ([`crate::chrome::button`], [`crate::chrome::default_button`]).
+pub const BUTTON_PAD_Y: f32 = 4.0;
+/// egui's spacing before the chrome (#206 to #326), kept by device windows until their migration
+/// (326-M): 8 px button sides, 2 px above and below.
+pub const DEVICE_BUTTON_PADDING: egui::Vec2 = egui::vec2(SPACE, SPACE / 4.0);
 
 /// Window title text: Body (13) plus one point, so a title reads as a label of the window and
 /// not as a heading, at 1.0 and at 1.5 scale (the bar scales with the text and the margins).
@@ -381,8 +442,28 @@ pub fn window_title_style() -> egui::TextStyle {
 /// title bar has a tight vertical margin; the content keeps the theme's window margin (#206). Its
 /// collapse and close controls are Lucide icons ([`crate::title_bar`], #227).
 pub fn window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title_bar::Window<'a> {
+    use crate::tokens::chrome as c;
+    let body = egui::Margin::symmetric(c::TOOL_BODY_PADDING[1] as i8, c::TOOL_BODY_PADDING[0] as i8);
+    framed(ctx, title, body)
+}
+
+/// A device's window (a built-in instrument or effect panel): [`window`]'s frame and title bar
+/// with the device body's own 8 px margin; the device language's A bar replaces the title bar
+/// when the panel migrates (#326, 326-M).
+pub fn device_window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title_bar::Window<'a> {
+    framed(ctx, title, egui::Margin::same(SPACE as i8)).button_padding(DEVICE_BUTTON_PADDING)
+}
+
+/// The application chrome's window (#326): `surface.panel` with a 1 px `line.strong` edge and the
+/// panel radius, no shadow; the compact title bar on `bg.titlebar` with a 1 px `line` below it
+/// ([`crate::title_bar`] paints the line); the body inside `body`.
+fn framed<'a>(ctx: &egui::Context, title: impl Into<String>, body: egui::Margin) -> crate::title_bar::Window<'a> {
     let style = ctx.global_style();
-    let title_frame = egui::Frame::window(&style).inner_margin(egui::Margin {
+    let t = &TOKENS;
+    let frame = egui::Frame::window(&style).fill(t.surface_panel).inner_margin(body);
+    // The title frame keeps the window's 1 px edge (egui paints it over the window's own, and it
+    // keeps the bar 26 high, #232); [`crate::title_bar`] paints the `line` along its bottom.
+    let title_frame = egui::Frame::window(&style).fill(t.bg_titlebar).inner_margin(egui::Margin {
         left: WINDOW_TITLE_PAD_X,
         right: WINDOW_TITLE_PAD_X,
         top: WINDOW_TITLE_PAD_TOP,
@@ -392,7 +473,7 @@ pub fn window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title
     let text = egui::RichText::new(title);
     let text =
         if style.text_styles.contains_key(&window_title_style()) { text.text_style(window_title_style()) } else { text.size(WINDOW_TITLE_SIZE) };
-    crate::title_bar::Window::new(egui::Window::new(text).title_frame(title_frame))
+    crate::title_bar::Window::new(egui::Window::new(text).frame(frame).title_frame(title_frame))
 }
 
 /// A dialog: [`window`] over a full-screen scrim that takes the pointer (#244). The scrim is an
@@ -410,6 +491,8 @@ pub fn modal_window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate:
             let r = ctx.content_rect();
             ui.set_clip_rect(r);
             ui.allocate_rect(r, egui::Sense::click_and_drag());
+            // The chrome's scrim: a dialog dims what it covers (`overlay`), it does not lift.
+            ui.painter().rect_filled(r, 0.0, TOKENS.overlay);
         });
     window(ctx, title)
 }

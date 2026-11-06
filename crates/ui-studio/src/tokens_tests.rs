@@ -325,3 +325,66 @@ fn the_design_contrast_claims_hold_in_both_sets() {
         assert!((lum(t.signal) - lum(t.modulation)).abs() > 0.02, "signal and mod differ in lightness");
     }
 }
+
+/// Every number leaf under `value`, by its path below `prefix` (arrays index by position).
+fn number_leaves(value: &Value, prefix: &str, out: &mut Vec<(String, f32)>) {
+    match value {
+        Value::Number(n) => out.push((prefix.to_string(), n.as_f64().unwrap() as f32)),
+        Value::Array(a) => a.iter().enumerate().for_each(|(i, x)| number_leaves(x, &format!("{prefix}/{i}"), out)),
+        Value::Object(o) => o.iter().for_each(|(k, x)| number_leaves(x, &if prefix.is_empty() { k.clone() } else { format!("{prefix}/{k}") }, out)),
+        _ => {}
+    }
+}
+
+/// The application chrome (`chrome` in tokens.json): every number equals its constant and neither
+/// side has a path the other lacks; every type role matches; every named color is a token.
+#[test]
+fn the_chrome_matches_tokens_json_both_ways() {
+    let v = json();
+    let chrome = at(&v, "chrome");
+    let mut leaves = Vec::new();
+    for (k, x) in chrome.as_object().unwrap().iter().filter(|(k, _)| k.as_str() != "type") {
+        number_leaves(x, k, &mut leaves);
+    }
+    let in_json: BTreeSet<&str> = leaves.iter().map(|(p, _)| p.as_str()).collect();
+    let in_rust: BTreeSet<&str> = tokens::chrome::METRICS.iter().map(|(p, _)| *p).collect();
+    assert_eq!(in_rust.len(), tokens::chrome::METRICS.len(), "a chrome path repeats in Rust");
+    assert_eq!(in_json, in_rust, "chrome paths differ between tokens.json and Rust");
+    for (path, x) in tokens::chrome::METRICS {
+        assert_eq!(num(chrome, path), *x, "chrome/{path}");
+    }
+    let obj = at(chrome, "type").as_object().unwrap();
+    let names: BTreeSet<&str> = obj.keys().map(String::as_str).collect();
+    assert_eq!(names, tokens::chrome::TYPE_ROLES.iter().map(|(n, _)| *n).collect::<BTreeSet<_>>(), "chrome type roles differ");
+    for (name, r) in tokens::chrome::TYPE_ROLES {
+        let j = &obj[*name];
+        assert_eq!(j["font"].as_str(), Some(r.family.key()), "{name}: family");
+        assert_eq!(j["weight"].as_u64(), Some(u64::from(r.weight)), "{name}: weight");
+        assert_eq!(j["size"].as_f64().map(|x| x as f32), Some(r.size), "{name}: size");
+        assert_eq!(j["color"].as_str(), r.ink.map(Ink::key), "{name}: color");
+    }
+    // A color a chrome rule names is a token of the color tables, or a component literal
+    // registered under its path.
+    let known: BTreeSet<String> = ["color", "arrangement"]
+        .iter()
+        .flat_map(|k| at(&v, k).as_object().unwrap().keys().cloned())
+        .chain(tokens::component::ALL.iter().map(|(n, _)| n.to_string()))
+        .collect();
+    fn strings(value: &Value, path: &str, out: &mut Vec<(String, String)>) {
+        match value {
+            Value::String(s) => out.push((path.to_string(), s.clone())),
+            Value::Object(o) => o.iter().for_each(|(k, x)| strings(x, &format!("{path}.{k}"), out)),
+            _ => {}
+        }
+    }
+    let mut named = Vec::new();
+    strings(chrome, "chrome", &mut named);
+    for (path, s) in named.iter().filter(|(p, _)| p != "chrome.note" && !p.starts_with("chrome.type.")) {
+        if s.starts_with('#') {
+            let c = tokens::component::ALL.iter().find(|(n, _)| n == path).unwrap_or_else(|| panic!("{path}: literal {s} without a component path"));
+            assert_eq!(parse(s), c.1, "{path}");
+        } else {
+            assert!(known.contains(s), "{path}: {s} is not a token");
+        }
+    }
+}

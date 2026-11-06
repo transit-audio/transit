@@ -614,16 +614,20 @@ pub fn menu_items(app: &mut StudioApp, ui: &mut egui::Ui, on: Option<TrackId>) {
         _ => app.ungroup_targets(),
     };
     let new = ui.button("New Group Track");
-    let group =
-        ui.add_enabled(!tracks.is_empty(), egui::Button::new("Group Tracks").shortcut_text(crate::shortcuts::label(crate::shortcuts::Action::Group)));
+    let group = ui.add_enabled(
+        !tracks.is_empty(),
+        egui::Button::new("Group Tracks").shortcut_text(crate::chrome::shortcut(ui.ctx(), crate::shortcuts::label(crate::shortcuts::Action::Group))),
+    );
     // A rack (ADR 0034): a group that also plays its instruments from one MIDI input.
     let rackable = {
         let s = app.engine.session();
         tracks.iter().any(|t| s.track(*t).is_some_and(|x| x.kind.is_midi())) && !tracks.iter().any(|t| s.track(*t).is_some_and(|x| x.is_folder()))
     };
     let rack = ui.add_enabled(rackable, egui::Button::new("Group into Rack"));
-    let ungroup =
-        ui.add_enabled(!groups.is_empty(), egui::Button::new("Ungroup").shortcut_text(crate::shortcuts::label(crate::shortcuts::Action::Ungroup)));
+    let ungroup = ui.add_enabled(
+        !groups.is_empty(),
+        egui::Button::new("Ungroup").shortcut_text(crate::chrome::shortcut(ui.ctx(), crate::shortcuts::label(crate::shortcuts::Action::Ungroup))),
+    );
     let edit = ui.add_enabled(!tracks.is_empty(), egui::Button::new("Edit Group…"));
     let list = if on.is_some() { &mut app.arrange.menu } else { &mut app.arrange.bar_menu };
     list.retain(|m| !matches!(m.label.as_str(), "Group Tracks" | "Group into Rack" | "Ungroup" | "New Group Track" | "Edit Group…"));

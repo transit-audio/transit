@@ -700,7 +700,7 @@ pub fn rename_field(app: &mut StudioApp, ctx: &egui::Context) {
     let (mut lost, mut has) = (false, false);
     egui::Area::new(egui::Id::new("rename_area")).order(egui::Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
         let field = egui::TextEdit::singleline(&mut r.text).id(id).font(FontId::proportional(13.0)).margin(vec2(4.0, 2.0)).desired_width(w - 8.0);
-        let resp = ui.add_sized(vec2(w, area.height().max(20.0)), field);
+        let resp = crate::chrome::field(ui, |ui| ui.add_sized(vec2(w, area.height().max(20.0)), field));
         (lost, has) = (resp.lost_focus(), resp.has_focus());
     });
     if esc {
@@ -883,7 +883,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
             for c in &mut f.paths {
                 let label = if c.routed { c.name.clone() } else { format!("{} (nothing routed: renders silence)", c.name) };
                 let text = egui::RichText::new(label).color(if c.routed { TOKENS.text } else { TOKENS.text_dim });
-                let b = ui.checkbox(&mut c.checked, text);
+                let b = crate::chrome::checkbox(ui, &mut c.checked, text);
                 lay.paths.push(MenuItem::at(ui, c.name.clone(), c.name.clone(), b.rect));
             }
         } else {
@@ -905,7 +905,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         if let Some(v) = choices(ui, &f.bit_depth, &items, &mut lay.depths) {
             f.bit_depth = v;
         }
-        let n = ui.checkbox(&mut f.normalize, "Normalize to -0.1 dBFS");
+        let n = crate::chrome::checkbox(ui, &mut f.normalize, "Normalize to -0.1 dBFS");
         lay.normalize = crate::arrange::r4(n.rect);
         if f.by_path && f.normalize {
             let items =
@@ -917,7 +917,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         if f.by_path {
             ui.label(egui::RichText::new("Folder (files are named after the session and the path)").color(TOKENS.text_dim));
             ui.horizontal(|ui| {
-                let field = ui.add(egui::TextEdit::singleline(&mut f.dir).id(path_id).desired_width(320.0));
+                let field = crate::chrome::text_field(ui, egui::TextEdit::singleline(&mut f.dir).id(path_id).desired_width(320.0));
                 lay.dir = crate::arrange::r4(field.rect);
                 let b = ui.button("Choose…");
                 lay.choose = crate::arrange::r4(b.rect);
@@ -926,7 +926,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         } else {
             ui.label(egui::RichText::new("Destination").color(TOKENS.text_dim));
             ui.horizontal(|ui| {
-                let field = ui.add(egui::TextEdit::singleline(&mut f.path).id(path_id).desired_width(320.0));
+                let field = crate::chrome::text_field(ui, egui::TextEdit::singleline(&mut f.path).id(path_id).desired_width(320.0));
                 lay.path = crate::arrange::r4(field.rect);
                 let b = ui.button("Choose…");
                 lay.choose = crate::arrange::r4(b.rect);
@@ -999,10 +999,10 @@ fn external_question(app: &mut StudioApp, ctx: &egui::Context, names: &[String])
         ui.label(egui::RichText::new("External Instrument").strong());
         ui.label(egui::RichText::new(format!("{}.", external_notice(names))).color(TOKENS.text_dim));
         if let Some(f) = form.as_mut() {
-            ui.checkbox(&mut f.realtime_stems, "Also write each External Instrument's return as a stem");
+            crate::chrome::checkbox(ui, &mut f.realtime_stems, "Also write each External Instrument's return as a stem");
             let unmeasured = blocker.as_deref().is_some_and(|b| b.contains("is not measured")) || f.uncompensated;
             if unmeasured {
-                ui.checkbox(&mut f.uncompensated, "Render uncompensated (its notes land late by the round trip)");
+                crate::chrome::checkbox(ui, &mut f.uncompensated, "Render uncompensated (its notes land late by the round trip)");
             }
         }
         if let Some(why) = &blocker {

@@ -86,14 +86,16 @@ pub(super) fn window(app: &mut StudioApp, ctx: &egui::Context) {
             .find(|(_, ticks)| *ticks == prefs.grid_ticks)
             .map(|(label, _)| (*label).to_owned())
             .unwrap_or_else(|| format!("{} ticks", prefs.grid_ticks));
-        egui::ComboBox::from_id_salt("quantize_grid").selected_text(label).show_ui(ui, |ui| {
-            for (label, ticks) in GRIDS {
-                ui.selectable_value(&mut prefs.grid_ticks, ticks, label);
-            }
+        crate::chrome::field(ui, |ui| {
+            egui::ComboBox::from_id_salt("quantize_grid").selected_text(label).icon(crate::chrome::chevron).show_ui(ui, |ui| {
+                for (label, ticks) in GRIDS {
+                    ui.selectable_value(&mut prefs.grid_ticks, ticks, label);
+                }
+            })
         });
         ui.add(egui::Slider::new(&mut prefs.strength, 0..=100).text("Strength %"));
         ui.add(egui::Slider::new(&mut prefs.swing, 0..=100).text("Swing %"));
-        ui.checkbox(&mut prefs.ends, "Also quantize note ends");
+        crate::chrome::checkbox(ui, &mut prefs.ends, "Also quantize note ends");
         ui.small("Swing delays alternate grid lines: 100% = one third of the grid interval.");
         ui.small("Outlined notes preview the result. Nothing changes until Apply.");
         ui.horizontal(|ui| {
