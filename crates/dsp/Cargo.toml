@@ -9,7 +9,8 @@ repository.workspace = true
 
 [features]
 # Test seams (`Plugin::fingerprint`, issue #210); never enabled by the app.
-testing = ["transit-instrument-core/testing"]
+# `transit-sampler-core/testing` gives the Sampler's core path its state fingerprint.
+testing = ["transit-instrument-core/testing", "transit-sampler-core/testing"]
 
 [dependencies]
 serde.workspace = true
@@ -33,6 +34,9 @@ transit-random-sequencer.workspace = true
 # The shared instrument primitives (shaper, matrix, SVF, LFO, ADSR; ADR 0041): a same-layer (L1) dependency.
 # `std` named explicitly (ADR 0037): a future minimal dsp configuration cannot turn it on by accident.
 transit-instrument-core = { workspace = true, features = ["std"] }
+# The portable Sampler core (ADR 0041) the Sampler's core path plays through: a same-layer (L1)
+# dependency, `std` named explicitly (ADR 0037). sampler-core never depends on dsp.
+transit-sampler-core = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 proptest.workspace = true

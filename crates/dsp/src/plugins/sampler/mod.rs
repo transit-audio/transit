@@ -9,14 +9,25 @@
 use std::sync::Arc;
 
 use crate::event::PluginEvent;
-use crate::params::{Params, param_plumbing};
+use crate::params::Params;
 use crate::plugins::instrument_queue::{AdsrRates, EventKind, EventQueue, run_block};
 use crate::util::{Smoother, frames_in, ms_to_samples, sane_channels, sane_sr};
-use crate::{Category, Plugin, PluginInfo, SampleSource};
+use crate::{Category, Plugin, PluginInfo, SampleSource, Transport};
+use events::Ingress;
+use transit_sampler_core::event::EventKind as CoreKind;
 
+mod adapter;
+mod bank;
+mod events;
+mod handoff;
 mod legacy;
+mod params;
 
+use adapter::CorePath;
+pub use bank::{CREDITS, PreparedBank, SOURCE_IDS, Source};
+pub use handoff::{PatchSpec, PublishError, Publisher};
 use legacy::{Derived, RELEASE, SAMPLER_PARAMS, VOICES, Voice};
+pub use params::{FIELD_LEVEL, FIELD_PAN, ZONE_FIELDS, field_info, slot_id};
 
 pub static SAMPLER_INFO: PluginInfo = PluginInfo {
     id: "sampler",
@@ -43,6 +54,8 @@ pub struct Sampler {
     events: EventQueue,
     rates: AdsrRates,
     level: Smoother,
+    /// The core path (`None`: the legacy renderer plays).
+    core: Option<Box<CorePath>>,
 }
 
 impl Default for Sampler {
@@ -51,8 +64,43 @@ impl Default for Sampler {
     }
 }
 
+impl Sampler {
+    /// Switches this instance to the core path (ADR 0041) and returns the control side of its
+    /// patch handoff: from now on it plays the generations the [`Publisher`] publishes, through
+    /// `transit-sampler-core`, with the voices' random state from `seed`; until the first one is
+    /// adopted it is silent. The legacy sample and the 19 legacy parameters stay stored but no
+    /// longer sound. Control side only: it allocates the core, the queues and the slot parameters.
+    pub fn enable_core(&mut self, seed: u32) -> Publisher {
+        let (path, publisher) = CorePath::new(seed, self.sr);
+        self.core = Some(Box::new(path));
+        publisher
+    }
+
+    /// Whether the instance plays through the core path.
+    #[must_use]
+    pub fn uses_core(&self) -> bool {
+        self.core.is_some()
+    }
+}
+
 impl Plugin for Sampler {
-    param_plumbing!(SAMPLER_INFO);
+    fn info(&self) -> &'static PluginInfo {
+        &SAMPLER_INFO
+    }
+
+    /// The 19 legacy ids first (their legacy meanings), then, on the core path, the zone slot ids.
+    fn set_param(&mut self, id: &str, value: f32) -> bool {
+        if self.p.set(id, value).is_some() {
+            self.update();
+            true
+        } else {
+            self.core.as_deref_mut().is_some_and(|c| c.set_param(id, value))
+        }
+    }
+
+    fn param(&self, id: &str) -> Option<f32> {
+        self.p.get(id).or_else(|| self.core.as_deref().and_then(|c| c.param(id)))
+    }
 
     fn prepare(&mut self, sample_rate: f32, _max_block: usize, channels: usize) {
         self.sr = sane_sr(sample_rate);
@@ -60,6 +108,9 @@ impl Plugin for Sampler {
         self.level.set_time(20.0, self.sr);
         self.update();
         self.reset();
+        if let Some(c) = self.core.as_deref_mut() {
+            c.prepare(self.sr);
+        }
     }
 
     fn reset(&mut self) {
@@ -68,9 +119,29 @@ impl Plugin for Sampler {
         }
         self.events.clear();
         self.level.snap();
+        if let Some(c) = self.core.as_deref_mut() {
+            c.reset();
+        }
+    }
+
+    fn set_transport(&mut self, transport: &Transport) {
+        if let Some(c) = self.core.as_deref_mut() {
+            c.set_transport(transport);
+        }
+    }
+
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+        if let Some(c) = self.core.as_deref() {
+            c.fingerprint(h);
+        }
     }
 
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        if let Some(c) = self.core.as_deref_mut() {
+            c.process(io, frames, self.ch);
+            return;
+        }
         let ch = self.ch.min(io.len());
         let frames = frames_in(io, frames, ch);
         for b in io.iter_mut().take(ch) {
@@ -85,6 +156,9 @@ impl Plugin for Sampler {
     }
 
     fn tail_samples(&self) -> usize {
+        if let Some(c) = self.core.as_deref() {
+            return c.tail_samples();
+        }
         let release = ms_to_samples(self.p.v(RELEASE), self.sr);
         // A one-shot keeps playing its sample after the note ends.
         let rest = if self.d.one_shot { self.len as f32 * self.sr / self.sample_sr } else { 0.0 };
@@ -93,18 +167,41 @@ impl Plugin for Sampler {
     }
 
     fn note_on(&mut self, offset: usize, note: u8, velocity: u8) {
+        if let Some(c) = self.core.as_deref_mut() {
+            c.push(offset, Ingress::Core(CoreKind::NoteOn { channel: 0, key: note.min(127), velocity: velocity.min(127), id: -1 }));
+            return;
+        }
         self.events.push(offset, EventKind::On(0, note.min(127), velocity.min(127), -1));
     }
 
     fn note_off(&mut self, offset: usize, note: u8) {
+        if let Some(c) = self.core.as_deref_mut() {
+            c.push(offset, Ingress::Core(CoreKind::NoteOff { channel: 0, key: note.min(127), velocity: 64, id: -1 }));
+            return;
+        }
         self.events.push(offset, EventKind::Off(0, note.min(127), -1));
     }
 
+    fn midi(&mut self, offset: usize, msg: [u8; 3]) {
+        if let Some(c) = self.core.as_deref_mut()
+            && let Some(i) = events::from_midi(msg)
+        {
+            c.push(offset, i);
+        }
+    }
+
     fn event(&mut self, offset: u32, ev: &PluginEvent) -> bool {
+        if let Some(c) = self.core.as_deref_mut() {
+            return events::from_event(ev).is_none_or(|i| c.push(offset as usize, i));
+        }
         EventKind::from_event(ev).is_none_or(|kind| self.events.push(offset as usize, kind))
     }
 
     fn all_notes_off(&mut self) {
+        if let Some(c) = self.core.as_deref_mut() {
+            c.push(0, Ingress::Core(CoreKind::AllNotesOff));
+            return;
+        }
         self.events.push(0, EventKind::AllOff);
     }
 

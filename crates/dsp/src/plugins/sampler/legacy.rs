@@ -167,6 +167,7 @@ impl Sampler {
             events: EventQueue::new(),
             rates: AdsrRates::default(),
             level: Smoother::new(1.0),
+            core: None,
         };
         s.update();
         s

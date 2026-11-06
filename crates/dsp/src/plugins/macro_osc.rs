@@ -65,7 +65,11 @@ pub mod voice;
 
 use matrix::{Matrix, Row};
 pub use params::row_param;
+// The shaper block and matrix rows the Sampler's zone slots reuse (ids, ranges and builders).
 use params::*;
+pub(crate) use params::{
+    AMP_RELEASE as AMP_RELEASE_PARAM, COUNT as PARAM_COUNT, PARAMS as PARAM_TABLE, SHAPER as SHAPER_FIRST, matrix_row, shaper_settings,
+};
 use shaper::Settings;
 use voice::{Controls, Shared, Slot};
 
