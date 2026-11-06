@@ -676,6 +676,8 @@ mod groups_tests;
 #[cfg(test)]
 mod help_tests;
 #[cfg(test)]
+mod inactive_hatch_tests;
+#[cfg(test)]
 mod keys_tests;
 #[cfg(test)]
 mod loop_hue_tests;

@@ -153,6 +153,8 @@ fn a_responsive_plug_in_shows_no_marker() {
     assert_eq!(t.marked(track), [false; 3]);
     assert_eq!(t.header(track).unresponsive, "");
     assert_eq!(t.header(track).unresponsive_rect, [0.0; 4]);
+    // #326, negative control: a card whose plug-in answers is not hatched.
+    assert!(t.card().hatch.is_none() && t.card().suspended_note == [0.0; 4]);
 }
 
 #[test]
@@ -165,6 +167,12 @@ fn a_hung_worker_marks_the_row_the_card_and_the_track_header() {
     t.frames(5);
     assert_eq!(t.marked(track), [true; 3], "the same text in all three places");
     assert_ne!(t.header(track).unresponsive_rect, [0.0; 4]);
+    // #326: the card cannot take input, so the hatch fills its body and the reason sits on a
+    // solid card inside it.
+    let card = t.card();
+    let hatch = card.hatch.expect("the card's body is hatched");
+    assert!(crate::widgets::test_support::inside(card.suspended_note, card.rect) && crate::widgets::test_support::inside(hatch.rect, card.rect));
+    assert!(!hatch.lines.is_empty());
     assert_eq!(t.row(other).status, "", "another track's plug-in shows none");
     assert_eq!(t.header(other).unresponsive, "");
 }

@@ -255,6 +255,10 @@ pub struct DeviceCard {
     pub key_label: String,
     /// The track is frozen: the card is greyed and its plug-in is off.
     pub frozen: bool,
+    /// A plug-in that does not answer: the hatch over the card's body (#326) ...
+    pub hatch: Option<crate::widgets::hatch::HatchLayout>,
+    /// ... and the solid card the reason and the way out sit on (zero otherwise).
+    pub suspended_note: R4,
     /// A hardware insert's pair as the card shows it ("HW: Out 3-4 → In 3-4"); empty otherwise.
     pub hardware: String,
     /// A hardware insert's state as the card shows it ("12.8 ms", "Unmeasured", "No input", ...).

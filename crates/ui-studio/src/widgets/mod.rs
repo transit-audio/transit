@@ -9,6 +9,7 @@
 pub mod bipolar_amount;
 pub mod display_well;
 pub mod fader;
+pub mod hatch;
 pub mod knob;
 pub mod level_meter;
 pub mod param_knob;
@@ -25,6 +26,8 @@ mod demo_tests;
 mod display_well_tests;
 #[cfg(test)]
 mod fader_tests;
+#[cfg(test)]
+mod hatch_tests;
 #[cfg(test)]
 mod knob_tests;
 #[cfg(test)]

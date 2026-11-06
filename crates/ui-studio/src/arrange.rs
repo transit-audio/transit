@@ -168,6 +168,12 @@ pub struct TrackRow {
     pub name_rect: R4,
     /// The painted "inactive" tag; zero when active.
     pub inactive_tag: R4,
+    /// An inactive track's hatch over its header and its lane (#326; none under 48 px).
+    pub hatch_header: Option<crate::widgets::hatch::HatchLayout>,
+    pub hatch_lane: Option<crate::widgets::hatch::HatchLayout>,
+    /// The header's color bar as painted (`ink.ghost` while the track is inactive).
+    #[serde(skip)]
+    pub color_bar: egui::Color32,
     pub lane: R4,
     pub mute: R4,
     pub solo: R4,
@@ -380,6 +386,10 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         let lane_fill = if i % 2 == 0 { TOKENS.lane } else { TOKENS.lane_alt };
         let row_rect = Rect::from_min_max(lane.min, pos2(lane.max.x, y0 + geo.heights[i]));
         ui.painter().with_clip_rect(tl).rect_filled(row_rect, 0.0, lane_fill);
+        if t.inactive {
+            // An inactive track cannot take input: its lane is hatched (#326).
+            row.hatch_lane = crate::widgets::hatch::paint(&ui.painter().with_clip_rect(tl), row_rect);
+        }
         if row.frozen {
             // A frozen lane reads cold: the accent, faint, over the lane.
             ui.painter().with_clip_rect(tl).rect_filled(row_rect, 0.0, TOKENS.accent.gamma_multiply(0.12));

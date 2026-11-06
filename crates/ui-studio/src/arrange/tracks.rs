@@ -20,11 +20,18 @@ pub(super) fn track_header(
     let p = ui.painter().with_clip_rect(list);
     let bg = if selected { TOKENS.header_selected } else { TOKENS.header };
     p.rect_filled(r.shrink2(vec2(0.0, 0.5)), 0.0, bg);
+    if t.inactive {
+        // An inactive track cannot take input: its header is hatched, anchored to the window so the
+        // stripes run on into the lane (#326).
+        row.hatch_header = crate::widgets::hatch::paint(&p, r.shrink2(vec2(0.0, 0.5)));
+    }
     // Group members sit indented under their group (slice 2c); a group has a disclosure triangle.
     let indent = row.depth as f32 * crate::groups::INDENT;
     let tri = if t.is_folder() { 14.0 } else { 0.0 };
     let tx = r.min.x + indent + tri;
-    p.rect_filled(Rect::from_min_size(pos2(r.min.x + indent, r.min.y), vec2(5.0, r.height())), 0.0, theme::rgb(t.color));
+    // The color bar goes to `ink.ghost` while the track is inactive (#326).
+    row.color_bar = if t.inactive { TOKENS.ink_ghost } else { theme::rgb(t.color) };
+    p.rect_filled(Rect::from_min_size(pos2(r.min.x + indent, r.min.y), vec2(5.0, r.height())), 0.0, row.color_bar);
     p.line_segment([pos2(r.min.x, r.max.y), pos2(r.max.x, r.max.y)], Stroke::new(1.0, TOKENS.line));
     // Each ancestor group's bar runs down the left edge, from the group's own header through its
     // last visible member: full row height, no gap, drawn over the row separator. Dimmed so the

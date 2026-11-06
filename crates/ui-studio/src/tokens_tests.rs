@@ -385,3 +385,22 @@ fn the_chrome_matches_tokens_json_both_ways() {
         }
     }
 }
+
+/// The hatch (`hatch` in tokens.json): every number equals its constant, both ways; its colors
+/// are tokens.
+#[test]
+fn the_hatch_matches_tokens_json_both_ways() {
+    let v = json();
+    let hatch = at(&v, "hatch");
+    let mut leaves = Vec::new();
+    number_leaves(hatch, "", &mut leaves);
+    let in_json: BTreeSet<&str> = leaves.iter().map(|(p, _)| p.as_str()).collect();
+    let in_rust: BTreeSet<&str> = tokens::hatch::METRICS.iter().map(|(p, _)| *p).collect();
+    assert_eq!(in_json, in_rust, "hatch paths differ between tokens.json and Rust");
+    for (path, x) in tokens::hatch::METRICS {
+        assert_eq!(num(hatch, path), *x, "hatch/{path}");
+    }
+    assert_eq!(at(hatch, "color").as_str(), Some("text"));
+    assert_eq!(at(hatch, "ghostClip/border").as_str(), Some("ink.ghost"));
+    assert_eq!(at(hatch, "anchor").as_str(), Some("window"));
+}

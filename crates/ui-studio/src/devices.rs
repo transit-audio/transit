@@ -406,6 +406,17 @@ fn card_body(
     let load = if ins.is_some() { app.player.as_ref().and_then(|pl| pl.slot_load(t, key_slot)) } else { None };
     let stuck = matches!(load, Some(SlotLoad::NotResponding { .. }));
     let loading = load.is_some() && !stuck;
+    // A plug-in that does not answer (stuck loading, or loaded and hung) cannot take input: the
+    // hatch fills the card's body and the reason and the way out sit on a solid card (#326).
+    let hung = load.is_none() && ins.is_some() && app.slot_hang(t, key_slot, &plugin).is_some();
+    if stuck || hung {
+        let body = Rect::from_min_max(pos2(r.min.x, title.max.y), r.max);
+        c.hatch = crate::widgets::hatch::paint(&pc, body);
+        let note = Rect::from_min_max(pos2(r.min.x + 4.0, title.max.y + 3.0), pos2(r.max.x - 4.0, title.max.y + 21.0));
+        pc.rect_filled(note, crate::tokens::radius::DISPLAY, TOKENS.surface_panel);
+        pc.rect_stroke(note, crate::tokens::radius::DISPLAY, Stroke::new(1.0, TOKENS.line_strong), egui::StrokeKind::Inside);
+        c.suspended_note = r4(note);
+    }
     if stuck {
         // Right-click anywhere on the card: Retry. Made first, so the card's own controls keep
         // their clicks.

@@ -169,9 +169,30 @@ pub(super) fn draw_clip(
     alpha: f32,
     hot: bool,
 ) {
+    let p = p.with_clip_rect(rect.intersect(tl));
+    if t.inactive {
+        // An inactive track's clips drop to ghost outlines (#326): `ink.ghost` with a faint fill of
+        // it; the name stays readable in `text.faint`, and the content is not drawn.
+        let ghost = TOKENS.ink_ghost;
+        p.rect_filled(rect, crate::theme::RADIUS, ghost.gamma_multiply(crate::tokens::hatch::GHOST_FILL * alpha));
+        p.rect_stroke(
+            rect,
+            crate::theme::RADIUS,
+            Stroke::new(if selected { 1.5 } else { 1.0 }, ghost.gamma_multiply(alpha)),
+            egui::StrokeKind::Inside,
+        );
+        let strip = Rect::from_min_max(rect.min, pos2(rect.max.x, (rect.min.y + CLIP_NAME_H).min(rect.max.y)));
+        p.with_clip_rect(strip.intersect(tl)).text(
+            pos2(rect.min.x.max(tl.min.x) + 4.0, strip.center().y),
+            Align2::LEFT_CENTER,
+            crate::takes::labels::clip_label(c, stacks),
+            FontId::proportional(11.0),
+            TOKENS.text_faint.gamma_multiply(alpha),
+        );
+        return;
+    }
     let base = clip_base_color(c, t);
     let (body_col, strip_col, name_col) = theme::clip_colors(base, selected);
-    let p = p.with_clip_rect(rect.intersect(tl));
     p.rect_filled(rect, crate::theme::RADIUS, body_col.gamma_multiply(alpha));
     let strip = Rect::from_min_max(rect.min, pos2(rect.max.x, (rect.min.y + CLIP_NAME_H).min(rect.max.y)));
     p.rect_filled(strip, crate::theme::top_corners(), strip_col.gamma_multiply(alpha));
