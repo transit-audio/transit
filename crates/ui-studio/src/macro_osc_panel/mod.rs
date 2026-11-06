@@ -14,6 +14,7 @@
 //! they read the other panels. The panel's own record is [`MacroLayout`].
 
 mod hero;
+mod modulation;
 mod sections;
 mod shaper;
 mod title_bar;
@@ -30,6 +31,7 @@ use transit_dsp::plugins::macro_osc::row_param;
 use transit_dsp::{ParamInfo, PluginInfo, Unit};
 use transit_model::{Insert, TrackId};
 
+pub use modulation::{ChipRecord, RouteRecord};
 pub use title_bar::TitleLayout;
 
 /// The Macro Oscillator's plug-in id (ADR 0033, #195).
@@ -189,6 +191,8 @@ pub struct MacroLayout {
     pub modulation_bar: Option<widgets::section_bar::SectionBarLayout>,
     pub modulation_body: Option<[f32; 4]>,
     pub formula: String,
+    pub chips: Vec<ChipRecord>,
+    pub routes: Vec<RouteRecord>,
     pub add_route: Option<[f32; 4]>,
     pub credit: String,
     pub credit_rect: [f32; 4],
@@ -448,6 +452,9 @@ pub(crate) fn knob_at(
     let mut c = child(ui, cell);
     let shown = knob::show(&mut c, egui::Id::new(("macro_osc_knob", dev.uid(), p.id)), &k);
     let new = shown.value.map(|n| value_at(p, n)).or_else(|| shown.typed.as_deref().and_then(|t| parse(p, t)));
+    if let (Some(d), Some(chip)) = (dest, shown.response.dnd_release_payload::<modulation::Chip>()) {
+        modulation::drop_route(app, dev, chip.0, d);
+    }
     finish(app, &c, dev, p.id, &shown.response, new, lay);
     out.knobs.push(KnobRecord { param: p.id.to_string(), label: label.to_string(), knob: shown.layout });
     cell
@@ -550,6 +557,7 @@ pub fn content_height(app: &StudioApp, key: (TrackId, usize), width: f32) -> f32
     let mut h = 2.0 * space::WINDOW_PADDING;
     h += hero::height(w);
     h += space::PANEL_GAP + shaper::height(app, dev, w);
+    h += space::PANEL_GAP + modulation::height(app, dev, w);
     h
 }
 
@@ -567,6 +575,7 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     sections::show(app, ui, dev, right, lay, out);
     y += hero_h + space::PANEL_GAP;
     y += shaper::show(app, ui, dev, Rect::from_min_size(pos2(x, y), vec2(w, 0.0)), lay, out) + space::PANEL_GAP;
+    y += modulation::show(app, ui, dev, Rect::from_min_size(pos2(x, y), vec2(w, 0.0)), lay, out);
     y += space::WINDOW_PADDING;
     ui.allocate_rect(Rect::from_min_max(origin, pos2(origin.x + width, y)), Sense::hover());
 }
