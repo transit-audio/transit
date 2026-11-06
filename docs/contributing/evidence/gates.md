@@ -287,6 +287,11 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   trip first; one client's effect is checked from another only after the first client's round
   trip. The server orders requests per connection only (E64, #147: `EditorWindow::new`, resize
   and close end with `settle`).
+- A test on a shared X display maps no top-level window unless its assertions need it mapped
+  (open editors with `open_with`, not `open`), and at most one test in a process maps one: X gives
+  a closed client's resource ids to the next client, and a window manager still handling the
+  closed window acts on the new window with its id (E74, #346: WSLg's window manager reparented
+  the XEmbed fixture's plug, which had the id of a sibling test's raised and closed editor).
 - A test that hosts a plug-in through the player or the plug-in host ends with the app's quit
   order (`StudioApp::shut_down`, or the player dropped and then
   `transit_engine::shutdown_plugin_hosts`) and asserts it was clean before its process ends: the
@@ -321,6 +326,11 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
 - Tests create unique temp dirs: process id plus a per-process counter (or `TemporaryAutosave`),
   never a fixed name or a clock-only suffix; concurrent tests share a process and a clock tick
   (E51, `../../escapes/E51-test-temp-dirs-collided-in-one-process.md`).
+- A test folder is fresh: its name adds the clock to the process id and counter, and the test
+  creates it with `create_dir`, which refuses a folder that exists. A process id repeats across
+  runs (a VM booted for each gate run gives its test processes the same ids), and a reused folder
+  keeps an earlier run's files (E51 recurrence 2026-11-06, #346: `registry_race` loaded a plug-in
+  left in its reused folder, then rewrote the loaded file in place).
 - A test that pumps a fake device faster than real time reads another thread's output (the MIDI
   output thread, a worker) only after waiting for it, never at a fixed block count
   (E52, `../../escapes/E52-measure-cancel-test-assumed-the-output-threads-progress.md`).

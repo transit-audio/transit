@@ -32,3 +32,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E71: an offline print started on a fresh chain's first block (#332)](E71-an-offline-print-started-on-a-fresh-chain-first-block.md)
 - [E72: a far deadline let a host stall skip an unheld strip](E72-a-far-deadline-let-a-host-stall-skip-an-unheld-strip.md)
 - [E73: a monitored port acknowledged its routes before it captured SysEx](E73-a-monitored-port-acknowledged-its-routes-before-it-captured-sysex.md)
+- [E74: a window manager moved a test's plug through a reused window id (#346)](E74-a-window-manager-moved-a-test-plug-through-a-reused-window-id.md)
