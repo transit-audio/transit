@@ -668,6 +668,8 @@ mod builtin_editor_tests;
 #[cfg(test)]
 mod chrome_tests;
 #[cfg(test)]
+mod dialog_chrome_tests;
+#[cfg(test)]
 mod external_measure_tests;
 #[cfg(test)]
 mod groups_tests;

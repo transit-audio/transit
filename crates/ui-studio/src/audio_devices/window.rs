@@ -224,10 +224,13 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 ui.set_width(size.x);
                 let pending = pending_text(&draft, &app.ui.audio);
                 ui.horizontal(|ui| {
-                    let mut apply_button = egui::Button::new("Apply");
-                    if pending.is_some() {
-                        apply_button = apply_button.fill(TOKENS.accent);
-                    }
+                    // With changes pending Apply is the window's default action: `signal` fill,
+                    // `surface.inset` ink (the chrome's default button, #326).
+                    let apply_button = if pending.is_some() {
+                        egui::Button::new(egui::RichText::new("Apply").color(TOKENS.surface_inset)).fill(TOKENS.accent)
+                    } else {
+                        egui::Button::new("Apply")
+                    };
                     let b = ui.add_enabled(!recording && !panel_open, apply_button);
                     controls.push(("Apply".into(), "apply", b.rect));
                     crate::help::hover(ui, &b, crate::help::Id::AudioDevicesApply);

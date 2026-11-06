@@ -114,7 +114,8 @@ the newest when you stop. Takes work the same for audio and MIDI.
   undo step.
 - **Flatten Takes** (the lane menu at the label's right end, the track menu, or the clip menu for
   that stack) keeps what plays and removes the other takes. One undo brings them back.
-- **Delete Take** (the lane menu) removes a take that is not playing, after asking.
+- **Delete Take** (the lane menu) removes a take that is not playing, after asking: the
+  question's **Delete Take** button, or Enter, confirms.
 - A frozen track's takes cannot be changed: unfreeze it first.
 
 Swipe comping (picking a range from one take and the next range from another, with crossfades),
@@ -244,7 +245,9 @@ click on empty space below the tracks or in the mixer, deselects the clips and t
 strip or track header is highlighted. The edit cursor keeps its track, which stays the target of
 cursor commands (Paste, Split, New MIDI Clip) and of the Devices pane until you click a track
 again. Clicking a track header selects the track and clears the clip selection; the last click
-decides what Delete removes.
+decides what Delete removes. Deleting a group, several tracks or a track that holds clips asks
+first, and the button says what goes (**Delete Track**, **Delete 3 Tracks**, **Delete Group**);
+Enter confirms and Escape cancels.
 
 ## A plug-in that stops responding
 
