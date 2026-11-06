@@ -19,6 +19,7 @@ pub mod bounce_in_place;
 pub mod browser;
 pub mod builtin_editor;
 pub mod chrome;
+pub mod chrome_pick;
 pub mod clip_inspector;
 pub mod control;
 pub mod debug_log;
@@ -666,6 +667,8 @@ mod automation_tests;
 mod browser_tests;
 #[cfg(test)]
 mod builtin_editor_tests;
+#[cfg(test)]
+mod chrome_pick_tests;
 #[cfg(test)]
 mod chrome_tests;
 #[cfg(test)]

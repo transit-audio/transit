@@ -498,6 +498,8 @@ pub mod chrome {
     pub const CHECK_GUTTER: f32 = 16.0;
     pub const CHECK_GLYPH: f32 = 12.0;
     pub const CHEVRON: f32 = 12.0;
+    /// A list that opens from a field starts this far below it; menu-bar menus open flush.
+    pub const COMBO_POPUP_GAP: f32 = 4.0;
     pub const SEPARATOR_GAP: f32 = 4.0;
     pub const MODAL_WIDTH: f32 = 380.0;
     /// Top, sides, bottom.
@@ -552,6 +554,7 @@ pub mod chrome {
         ("popup/checkGutter", CHECK_GUTTER),
         ("popup/checkGlyph", CHECK_GLYPH),
         ("popup/chevron", CHEVRON),
+        ("comboPopupGap", COMBO_POPUP_GAP),
         ("popup/separatorGap", SEPARATOR_GAP),
         ("modal/width", MODAL_WIDTH),
         ("modal/padding/0", MODAL_PADDING[0]),

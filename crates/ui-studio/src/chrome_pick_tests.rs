@@ -1,0 +1,154 @@
+//! Choosing in the chrome (#326): the option look, the check rows and the combo's gap.
+//! Deterministic: rects and tokens, no pixels, no wall clock.
+
+use crate::chrome_pick::{Combo, choice_label, option_label, option_toggle, option_value};
+use crate::theme::DARK;
+use crate::tokens::chrome as c;
+use crate::widgets::test_support::{Rig, mid};
+use egui::{Color32, pos2};
+
+fn rect_fills(shapes: &[egui::epaint::ClippedShape]) -> Vec<Color32> {
+    fn walk(s: &egui::Shape, out: &mut Vec<Color32>) {
+        match s {
+            egui::Shape::Rect(r) => out.push(r.fill),
+            egui::Shape::Vec(v) => v.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+    out
+}
+
+#[test]
+fn an_option_label_is_the_option_toggle_and_egui_selectable_label_is_not() {
+    let mut rig = Rig::new();
+    let (r, shapes) = rig.shapes(|ui| option_label(ui, true, "Notes"));
+    assert!(rect_fills(&shapes).contains(&DARK.toggle_option_fill), "on: the option fill");
+    assert_eq!(r.rect.height(), crate::tokens::toggle::HEIGHT, "24 high");
+    let (r, shapes) = rig.shapes(|ui| option_label(ui, false, "Notes"));
+    assert!(!rect_fills(&shapes).contains(&DARK.toggle_option_fill), "off: not the option fill");
+    assert!(rect_fills(&shapes).contains(&DARK.surface_raised), "off: surface.raised");
+    assert_eq!(r.rect.height(), crate::tokens::toggle::HEIGHT);
+    // Negative control: egui's selectable label, selected, is the selection fill.
+    let (_, egui_shapes) = rig.shapes(|ui| ui.selectable_label(true, "Notes"));
+    assert!(!rect_fills(&egui_shapes).contains(&DARK.toggle_option_fill));
+    assert!(rect_fills(&egui_shapes).contains(&DARK.signal.gamma_multiply(c::SELECTION_ALPHA_DARK)));
+}
+
+#[test]
+fn option_value_and_option_toggle_behave_like_the_egui_calls() {
+    let mut rig = Rig::new();
+    let (mut which, mut flag) = (1u8, false);
+    let rects =
+        rig.idle(|ui| (option_value(ui, &mut which, 1, "A").rect, option_value(ui, &mut which, 2, "B").rect, option_toggle(ui, &mut flag, "F").rect));
+    rig.click(mid(crate::widgets::r4(rects.1)), |ui| {
+        option_value(ui, &mut which, 1, "A");
+        option_value(ui, &mut which, 2, "B");
+        option_toggle(ui, &mut flag, "F");
+    });
+    assert_eq!((which, flag), (2, false), "a click on B picks B and touches nothing else");
+    rig.click(mid(crate::widgets::r4(rects.2)), |ui| {
+        option_value(ui, &mut which, 1, "A");
+        option_value(ui, &mut which, 2, "B");
+        option_toggle(ui, &mut flag, "F");
+    });
+    assert!(flag, "a click flips the flag");
+    // Negative control: a click beside the controls changes nothing.
+    rig.click(pos2(600.0, 400.0), |ui| {
+        option_toggle(ui, &mut flag, "F");
+    });
+    assert!(flag);
+}
+
+#[test]
+fn a_choice_label_is_a_menu_row_not_a_toggle() {
+    let mut rig = Rig::new();
+    let (r, shapes) = rig.shapes(|ui| choice_label(ui, true, "Sustain"));
+    assert!(!rect_fills(&shapes).contains(&DARK.toggle_option_fill));
+    assert!(r.rect.height() >= 18.0);
+}
+
+/// The popup rect after a click on a face drawn by `face`, found by id.
+fn popup_top_and_face_bottom(face: impl Fn(&mut egui::Ui) -> egui::Response) -> (f32, f32) {
+    let mut rig = Rig::new();
+    let r = rig.idle(&face);
+    let at = r.rect.center();
+    rig.click(at, &face);
+    let mut area = None;
+    for _ in 0..4 {
+        rig.idle(&face);
+        area = rig.ctx.memory(|m| m.area_rect(r.id.with("popup")));
+    }
+    (area.expect("the popup opened").min.y, r.rect.max.y)
+}
+
+#[test]
+fn a_combo_list_opens_four_px_below_its_field() {
+    let (top, bottom) = popup_top_and_face_bottom(|ui| {
+        Combo::new("pick", "Value")
+            .show(ui, |ui| {
+                choice_label(ui, true, "Value");
+            })
+            .response
+    });
+    assert_eq!(c::COMBO_POPUP_GAP, 4.0);
+    assert_eq!(top, bottom + c::COMBO_POPUP_GAP, "popup top = field bottom + 4");
+    // Negative control: egui's own popup (gap 0) sits flush.
+    let (top, bottom) = popup_top_and_face_bottom(|ui| {
+        let resp = ui.button("Value");
+        egui::Popup::menu(&resp).show(|ui| {
+            ui.label("x");
+        });
+        resp
+    });
+    assert_eq!(top, bottom, "gap 0 is flush");
+}
+
+#[test]
+fn a_menu_bar_menu_still_opens_flush_under_its_item() {
+    let (top, bottom) = popup_top_and_face_bottom(|ui| {
+        egui::MenuBar::new()
+            .ui(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    ui.label("Open");
+                })
+                .response
+            })
+            .inner
+    });
+    assert_eq!(top, bottom, "menus from the bar are flush");
+}
+
+#[test]
+fn no_view_uses_egui_selectable_widgets_any_more() {
+    fn offenders(src: &str) -> usize {
+        src.lines()
+            .filter(|l| {
+                !l.trim_start().starts_with("//")
+                    && (l.contains(".selectable_label(") || l.contains(".selectable_value(") || l.contains(".toggle_value("))
+            })
+            .count()
+    }
+    assert_eq!(offenders("let b = ui.selectable_label(a, \"x\");"), 1, "the scan sees one");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = Vec::new();
+    let mut stack = vec![dir];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(d).unwrap() {
+            let path = e.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            if !name.ends_with(".rs") || name.ends_with("tests.rs") || name == "tests.rs" {
+                continue;
+            }
+            if offenders(&std::fs::read_to_string(&path).unwrap()) > 0 {
+                found.push(name);
+            }
+        }
+    }
+    assert!(found.is_empty(), "migrated to the chrome's option and choice helpers: {found:?}");
+}
