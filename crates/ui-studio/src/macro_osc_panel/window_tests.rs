@@ -257,6 +257,48 @@ fn a_followed_window_leaves_the_escape_focus_with_the_click_that_changed_the_tra
 }
 
 #[test]
+fn a_following_window_stays_put_and_leaves_its_rect_to_the_shown_instance_when_follow_ends() {
+    let mut t = T::new();
+    let a = t.instrument_track();
+    let b = t.instrument_track();
+    t.app.focus(a);
+    t.frames(3);
+    t.open_card(0);
+    let ra = t.panel(a).window;
+    // B has a place of its own: opened (cascaded off A), dragged down, closed.
+    t.app.focus(b);
+    t.frames(3);
+    t.open_card(0);
+    let bar = t.panel(b).title.bar;
+    let grip = (bar[0] + 300.0, (bar[1] + bar[3]) / 2.0);
+    t.drag(grip, (grip.0 - 40.0, grip.1 + 60.0), false);
+    let rb = t.panel(b).window;
+    t.app.close_editor((b, INST));
+    t.frames(2);
+    let uid_b = t.app.builtin_at((b, INST)).unwrap().uid.get();
+    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&rb));
+    // A follows; focusing B swaps the content and the window stays where A's was.
+    t.app.focus(a);
+    t.frames(3);
+    let link = t.panel(a).title.follow;
+    t.click(mid(link), 1);
+    t.app.focus(b);
+    t.frames(3);
+    assert_eq!(t.app.ui.plugin_windows, vec![(b, INST)]);
+    assert_eq!(t.panel(b).window, ra, "the window stays put, not B's own rect");
+    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&rb), "following writes nothing to B's rect");
+    // Follow off: where the window is becomes B's place.
+    let link = t.panel(b).title.follow;
+    t.click(mid(link), 1);
+    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&ra));
+    t.app.close_editor((b, INST));
+    t.frames(2);
+    t.app.toggle_editor((b, INST));
+    t.frames(3);
+    assert_eq!(t.panel(b).window, ra, "B now opens where follow left it");
+}
+
+#[test]
 fn both_token_sets_draw_the_panel() {
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
         let (mut t, tr) = T::open();

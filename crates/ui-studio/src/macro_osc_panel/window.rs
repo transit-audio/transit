@@ -14,8 +14,10 @@
 //! - **Escape** closes the focused editor: the one last clicked or opened, until a click lands
 //!   outside every editor window; a text field, a popup or a dialog keeps Escape.
 //! - **Follow selection** (the bar's link toggle, `UiState::editor_follow`): the window shows the
-//!   focused track's device in the same slot when that device is one this panel draws; off, it
-//!   stays on its insert.
+//!   focused track's device in the same slot when that device is one this panel draws, and stays
+//!   where it is (Logic's Link swaps the content, not the window): while it follows it writes no
+//!   instance's rect, and when follow is turned off its rect becomes the shown instance's. Off,
+//!   it stays on its insert.
 //! - **Window > Close All Editors** (`window.close_editors`) closes every plug-in editor.
 
 use super::{Dev, FOOTER_H, MIN_WIDTH, MacroLayout};
@@ -65,6 +67,8 @@ pub struct State {
     /// knob) lets the merge end.
     pub wheeling: bool,
     pub(crate) wheel_now: bool,
+    /// Where a window that follow selection just moved to an instance opens: where it was.
+    carry: HashMap<u64, [f32; 4]>,
 }
 
 /// A window drawn this frame: its insert, rect, layer and device id.
@@ -159,13 +163,15 @@ pub(crate) fn follow(app: &mut StudioApp) {
             continue;
         }
         let was = app.builtin_at(key).map(|i| i.uid.get());
-        // The window keeps its place on the instance it moves to (unless that one has its own).
+        // The window stays where it is on the instance it moves to (that instance's own rect is
+        // left alone).
         let new_uid = app.builtin_at(target).map(|i| i.uid.get());
-        app.builtin_editor.macro_osc.no_focus.extend(new_uid);
+        let st = &mut app.builtin_editor.macro_osc;
+        st.no_focus.extend(new_uid);
         if let (Some(w), Some(n)) = (was, new_uid)
-            && let Some(r) = app.builtin_editor.macro_osc.rects.get(&w).copied()
+            && let Some(s) = st.shown.iter().find(|s| s.0 == w)
         {
-            app.builtin_editor.macro_osc.rects.entry(n).or_insert(r);
+            st.carry.insert(n, crate::widgets::r4(s.1));
         }
         for k in app.ui.plugin_windows.iter_mut().chain(app.ui.editor_follow.iter_mut()) {
             if *k == key {
@@ -199,7 +205,9 @@ pub(crate) fn show(
     if fresh || !app.builtin_editor.macro_osc.pos.contains_key(&uid) {
         let content = super::content_height(app, key, super::DESIGN_WIDTH.min(screen.width()));
         let open: Vec<Rect> = app.builtin_editor.macro_osc.shown.iter().filter(|s| s.0 != uid).map(|s| s.1).collect();
-        let (own, device) = (app.builtin_editor.macro_osc.rects.get(&uid).copied(), app.ui.device_windows.get(info.id).copied());
+        let carried = app.builtin_editor.macro_osc.carry.remove(&uid);
+        let own = carried.or_else(|| app.builtin_editor.macro_osc.rects.get(&uid).copied());
+        let device = app.ui.device_windows.get(info.id).copied();
         let r = opening_rect(own, device, &open, screen, content, n);
         let st = &mut app.builtin_editor.macro_osc;
         *st.generation.entry(uid).or_default() += 1;
@@ -246,7 +254,10 @@ pub(crate) fn show(
         let r = w.response.rect;
         layout.rect = crate::widgets::r4(r);
         mlay.window = layout.rect;
-        app.builtin_editor.macro_osc.rects.insert(uid, layout.rect);
+        // A following window writes no instance's rect (see `follow`).
+        if !follow {
+            app.builtin_editor.macro_osc.rects.insert(uid, layout.rect);
+        }
         app.builtin_editor.macro_osc.shown_now.push(Shown(uid, r, w.response.layer_id, info.id));
     }
     if bar.drag != Vec2::ZERO
@@ -256,6 +267,8 @@ pub(crate) fn show(
     }
     if bar.toggle_follow {
         if follow {
+            // Follow off: where the window is becomes the shown instance's place.
+            app.builtin_editor.macro_osc.rects.insert(uid, layout.rect);
             app.ui.editor_follow.retain(|k| *k != key);
         } else {
             app.ui.editor_follow.push(key);
