@@ -176,7 +176,7 @@ class Component extends DCLogic {
       { name: 'Bass', num: '2', color: '#5B7CE6', input: 'All MIDI', midi: true, inserts: [['Solid Bus Comp', true]], sends: [], out: 'Main', pan: 0, gain: -6.3, peak: -7.1, lvl: [-11, -11.5], hold: [-7.1, -7.4] },
       { name: 'Pads', num: '3', color: '#4CC1A8', input: 'All MIDI', midi: true, inserts: [['Solid Bus Comp', true]], sends: [['Reverb', -6], ['Delay', -18]], out: 'Main', pan: -0.25, gain: -8.5, peak: -11.4, lvl: [NEG, NEG], hold: [NEG, NEG], muted: true },
       { name: 'Percussion Loop', num: '4', color: '#6CC46A', input: 'In 1', midi: false, inserts: [['Bite', true]], sends: [['Reverb', -20]], out: 'Main', pan: 0.2, gain: 0, peak: -4.7, lvl: [-8, -7.2], hold: [-4.7, -5.2], arm: true, mon: true },
-      { name: 'More Percussion', num: '5', color: '#B5CF4A', input: 'In 1', midi: false, inserts: [['Ozone 11 Equalizer', true], ['Bite', false], ['Raum', true]], sends: [], out: 'Main', pan: 0, gain: -2.9, peak: -11.2, lvl: [-14, -15], hold: [-11.2, -11.9], mon: true },
+      { name: 'More Percussion', num: '5', color: '#B5CF4A', input: 'In 1', midi: false, inserts: [['Mastering EQ', true], ['Bite', false], ['Raum', true]], sends: [], out: 'Main', pan: 0, gain: -2.9, peak: -11.2, lvl: [-14, -15], hold: [-11.2, -11.9], mon: true },
       { name: 'Inst 1', num: '6', color: '#E6C84A', input: 'All MIDI', midi: true, inserts: [], sends: [], out: 'Main', pan: 0, gain: 0, peak: NEG, lvl: [NEG, NEG], hold: [NEG, NEG] }
     ];
     const master = { name: 'Main', num: 'M', color: '#585F69', inserts: [['Maximizer', true]], sends: [], out: 'Out 1–2', pan: 0, gain: 0, peak: -3.1, lvl: [-6, -6.6], hold: [-3.1, -3.5], master: true };

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Light — palette</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#D5D8DC}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1240px; box-sizing: border-box; background: #E6E8EB; color: #1B1E23; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 48px 56px; display: flex; flex-direction: column; gap: 24px">
+
+<div style="display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #D3D7DD; padding-bottom: 20px">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #5F6670; letter-spacing: 0.08em">TRANSIT · LIGHT THEME · DRAFT 1</span>
+<h1 style="margin: 0; font-size: 36px; font-weight: 600; letter-spacing: -0.02em">Designed, not mirrored</h1>
+<p style="margin: 0; font-size: 14px; color: #4A515B; max-width: 900px; line-height: 1.5">The derived set kept every ink at its dark contrast ratio, which pushed mod to brown and meter.ok to forest green, so the colours stopped meaning what they mean. This set keeps the roles and the hues, and sets targets instead: text ≥ 4.5:1, marks ≥ 3:1, and every accent pair ≥ ΔE 20 for normal, protan, deutan and tritan vision.</p>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px">
+<div style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #1764D8">01</span>
+<span style="font-size: 15px; font-weight: 600">Panels are cards</span>
+<span style="font-size: 13px; color: #4A515B; line-height: 1.5">The window is mid-light graphite; panels sit lighter on it, raised controls are white. Up is lighter, as in dark.</span>
+</div>
+<div style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #1764D8">02</span>
+<span style="font-size: 15px; font-weight: 600">Wells recess</span>
+<span style="font-size: 13px; color: #4A515B; line-height: 1.5">Display wells and value fields go one step darker than the panel, not white, so a well still reads as a screen set into the panel.</span>
+</div>
+<div style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #1764D8">03</span>
+<span style="font-size: 15px; font-weight: 600">Orange, not brown</span>
+<span style="font-size: 13px; color: #4A515B; line-height: 1.5">Mod is a true orange (#E17000), not a dark amber that reads brown. It draws rings, traces, dots and amount bars (3:1 on panels), never body text.</span>
+</div>
+<div style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #1764D8">04</span>
+<span style="font-size: 15px; font-weight: 600">Red moves deeper</span>
+<span style="font-size: 13px; color: #4A515B; line-height: 1.5">On white, orange and red collapse for deutan vision (ΔE 6). A golden amber and a deep red keep them apart (ΔE 20+).</span>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1.15fr 1fr; gap: 20px; flex: 1; min-height: 0">
+
+<!-- Core tokens -->
+<div style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 16px 20px 8px; display: flex; flex-direction: column">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #4A515B; padding-bottom: 10px">Core tokens</span>
+<div style="display: grid; grid-template-columns: 130px 70px 1fr 1fr 64px; column-gap: 12px; row-gap: 0; font-size: 12px; align-items: center">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670; padding: 5px 0; border-bottom: 1px solid #D3D7DD">token</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670; padding: 5px 0; border-bottom: 1px solid #D3D7DD">dark</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670; padding: 5px 0; border-bottom: 1px solid #D3D7DD">light (designed)</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670; padding: 5px 0; border-bottom: 1px solid #D3D7DD">was (derived)</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670; padding: 5px 0; border-bottom: 1px solid #D3D7DD">contrast</span>
+
+<span style="padding: 4px 0">bg.window</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #131518"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #E6E8EB; border: 1px solid #B4BBC4"></span>#E6E8EB</span><span style="display: flex; align-items: center; gap: 6px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670"><span style="width: 14px; height: 14px; border-radius: 3px; background: #F9FAFA; border: 1px solid #B4BBC4"></span>#F9FAFA</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">ground</span>
+
+<span style="padding: 4px 0">surface.panel</span><span><span style="display: block; width: 14px; height: 14px; border-radius: 3px; background: #1A1D21"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #F7F8F9; border: 1px solid #B4BBC4"></span>#F7F8F9</span><span style="display: flex; align-items: center; gap: 6px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670"><span style="width: 14px; height: 14px; border-radius: 3px; background: #EFF1F3; border: 1px solid #B4BBC4"></span>#EFF1F3</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">1.15 ↑</span>
+
+<span style="padding: 4px 0">surface.raised</span><span><span style="display: block; width: 14px; height: 14px; border-radius: 3px; background: #22262B"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #FFFFFF; border: 1px solid #B4BBC4"></span>#FFFFFF</span><span style="display: flex; align-items: center; gap: 6px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670"><span style="width: 14px; height: 14px; border-radius: 3px; background: #E3E5E9; border: 1px solid #B4BBC4"></span>#E3E5E9</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">1.23 ↑</span>
+
+<span style="padding: 4px 0">surface.inset</span><span><span style="display: block; width: 14px; height: 14px; border-radius: 3px; background: #0D0F11"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #ECEEF1; border: 1px solid #B4BBC4"></span>#ECEEF1</span><span style="display: flex; align-items: center; gap: 6px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670"><span style="width: 14px; height: 14px; border-radius: 3px; background: #FFFFFF; border: 1px solid #B4BBC4"></span>#FFFFFF</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">recessed</span>
+
+<span style="padding: 4px 0">line · strong</span><span style="display: flex; gap: 3px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #2B3036"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #383E46"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #D3D7DD"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #B4BBC4"></span>#D3D7DD · #B4BBC4</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">#D4D7DD · #BDC3CB</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">1.36 · 1.82</span>
+
+<span style="padding: 4px 0">text</span><span><span style="display: block; width: 14px; height: 14px; border-radius: 3px; background: #E7E9EC"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #1B1E23"></span>#1B1E23</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">#202329</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">15.7</span>
+
+<span style="padding: 4px 0">text.muted · faint</span><span style="display: flex; gap: 3px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #A7ADB6"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #8C939D"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #4A515B"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #5F6670"></span>#4A515B · #5F6670</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">#484D56 · #5B616B</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">7.5 · 5.5</span>
+
+<span style="padding: 4px 0">ink.ghost · arrow</span><span style="display: flex; gap: 3px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #4A5260"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #585F69"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #A2A9B4"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #7D8591"></span>#A2A9B4 · #7D8591</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">#9EA6B5 · #8F96A1</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">2.2 · 3.5</span>
+
+<span style="padding: 4px 0; font-weight: 600">signal</span><span><span style="display: block; width: 14px; height: 14px; border-radius: 3px; background: #4C9EFF"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #1764D8"></span>#1764D8</span><span style="display: flex; align-items: center; gap: 6px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670"><span style="width: 14px; height: 14px; border-radius: 3px; background: #0055BB"></span>#0055BB</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">5.1 text</span>
+
+<span style="padding: 4px 0; font-weight: 600">mod</span><span><span style="display: block; width: 14px; height: 14px; border-radius: 3px; background: #F0A73A"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #E17000"></span>#E17000</span><span style="display: flex; align-items: center; gap: 6px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670"><span style="width: 14px; height: 14px; border-radius: 3px; background: #633E08"></span>#633E08 brown</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">3.0 mark</span>
+
+<span style="padding: 4px 0; font-weight: 600">meter.ok</span><span><span style="display: block; width: 14px; height: 14px; border-radius: 3px; background: #5FCB8E"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #1E8A4C"></span>#1E8A4C</span><span style="display: flex; align-items: center; gap: 6px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670"><span style="width: 14px; height: 14px; border-radius: 3px; background: #1A4F31"></span>#1A4F31 forest</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">4.1 mark</span>
+
+<span style="padding: 4px 0; font-weight: 600">meter.hot</span><span><span style="display: block; width: 14px; height: 14px; border-radius: 3px; background: #FF6B5B"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #A8200E"></span>#A8200E</span><span style="display: flex; align-items: center; gap: 6px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670"><span style="width: 14px; height: 14px; border-radius: 3px; background: #B51200"></span>#B51200</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">6.9 text</span>
+
+<span style="padding: 4px 0; font-weight: 600">loop</span><span><span style="display: block; width: 14px; height: 14px; border-radius: 3px; background: #D05DAD"></span></span><span style="display: flex; align-items: center; gap: 6px; font: 500 11px 'IBM Plex Mono', monospace"><span style="width: 14px; height: 14px; border-radius: 3px; background: #B73590"></span>#B73590</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">(new)</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">5.0 text</span>
+</div>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670; padding: 10px 0 6px">contrast: grounds vs bg.window, inks vs surface.panel</span>
+</div>
+
+<!-- Right column -->
+<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #4A515B">Accents side by side</span>
+<div style="display: flex; gap: 10px">
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px"><span style="height: 40px; border-radius: 6px; background: #1764D8"></span><span style="font: 500 11px 'IBM Plex Mono', monospace">signal</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px"><span style="height: 40px; border-radius: 6px; background: #E17000"></span><span style="font: 500 11px 'IBM Plex Mono', monospace">mod</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px"><span style="height: 40px; border-radius: 6px; background: #B73590"></span><span style="font: 500 11px 'IBM Plex Mono', monospace">loop</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px"><span style="height: 40px; border-radius: 6px; background: #1E8A4C"></span><span style="font: 500 11px 'IBM Plex Mono', monospace">meter.ok</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px"><span style="height: 40px; border-radius: 6px; background: #A8200E"></span><span style="font: 500 11px 'IBM Plex Mono', monospace">meter.hot</span></div>
+</div>
+<div style="display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font: 400 11px 'IBM Plex Mono', monospace; color: #4A515B">
+<span>smallest ΔE, any pair, any vision type</span><span style="color: #1B1E23">21 (signal · ok, tritan)</span>
+<span>mod · hot, deutan: derived set → now</span><span style="color: #1B1E23">6 → 29</span>
+<span>signal · loop (protan)</span><span style="color: #1B1E23">31</span>
+<span>ink on signal / hot / loop fills</span><span style="color: #1B1E23">5.5 / 7.3 / 5.4 (white)</span>
+</div>
+</div>
+
+<div style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #4A515B">Arrangement and fills</span>
+<div style="display: grid; grid-template-columns: 150px 1fr 60px; gap: 6px 12px; font: 400 11px 'IBM Plex Mono', monospace; align-items: center">
+<span>lane · lane.alt</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #F3F4F6; border: 1px solid #B4BBC4"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #EDEFF2; border: 1px solid #B4BBC4"></span>#F3F4F6 · #EDEFF2</span><span style="color: #5F6670">1.12</span>
+<span>ruler · header</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #DDE1E5; border: 1px solid #B4BBC4"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #F0F2F4; border: 1px solid #B4BBC4"></span>#DDE1E5 · #F0F2F4</span><span style="color: #5F6670">1.07</span>
+<span>header.selected</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #DCE1E8; border: 1px solid #B4BBC4"></span>#DCE1E8</span><span style="color: #5F6670"></span>
+<span>grid bar · beat · sub</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #CDD1D6"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #DDE0E4"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #E6E8EB; border: 1px solid #B4BBC4"></span>#CDD1D6 · #DDE0E4 · #E6E8EB</span><span style="color: #5F6670">1.39 lane</span>
+<span>cursor · selection</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #28282B"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #1F1F26"></span>#28282B · #1F1F26</span><span style="color: #5F6670">13+</span>
+<span>button.hover · capActive</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #EEF0F3; border: 1px solid #B4BBC4"></span>#EEF0F3 (hover darkens)</span><span style="color: #5F6670"></span>
+<span>option on · unavailable</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #E3ECFA; border: 1px solid #1764D8"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #EDEFF2; border: 1px solid #D3D7DD"></span>#E3ECFA · #EDEFF2</span><span style="color: #5F6670"></span>
+<span>overlay · hatch</span><span style="color: #4A515B">black 11% · text 6%</span><span></span>
+</div>
+</div>
+
+<div style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 16px 20px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #4A515B">The new light rule</span>
+<span style="font-size: 12px; color: #4A515B; line-height: 1.55">Same roles, same hues. Grounds: window mid-light, panels lighter, raised white, wells one step darker than the panel. Inks: text ≥ 4.5:1 on panel and inset; marks ≥ 3:1; ink on a filled role (solo, arm, cycle, default button) is the light ground. Accents ≥ ΔE 20 from each other under normal, protan, deutan and tritan vision. Clip and track colours stay as chosen.</span>
+</div>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

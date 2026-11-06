@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Content palette</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1380px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 40px 48px; display: flex; flex-direction: column; gap: 20px">
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #8C939D; letter-spacing: 0.08em">TRANSIT · CONTENT PALETTE · DRAFT 1</span>
+<h1 style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -0.01em">16 hues and graphite, for tracks, clips and choke groups</h1>
+<p style="margin: 0; font-size: 14px; color: #A7ADB6; max-width: 1100px; line-height: 1.5">Sixteen hues evenly spaced in OKLCH (22.5° apart, starting at 11°, the rotation that keeps every swatch furthest from the five accents), each with a strong value for bars and tags, a body for clip fills and a darker or deeper strip for clip names. The same names in both themes; the user picks a name, the theme supplies the value.</p>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px">
+<sc-for list="{{themes}}" as="t" hint-placeholder-count="2">
+<div style="background: {{t.window}}; color: {{t.text}}; border: 1px solid {{t.line}}; border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; align-items: baseline; gap: 10px">
+<span style="font-size: 15px; font-weight: 600">{{t.label}}</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: {{t.faint}}">{{t.meta}}</span>
+</div>
+
+<!-- Swatches -->
+<div style="background: {{t.panel}}; border: 1px solid {{t.line}}; border-radius: 8px; padding: 12px; display: grid; grid-template-columns: repeat(17, minmax(0, 1fr)); gap: 4px">
+<sc-for list="{{t.sw}}" as="s" hint-placeholder-count="17">
+<div style="display: flex; flex-direction: column; gap: 3px; align-items: stretch">
+<span style="height: 18px; border-radius: 3px; background: {{s.bar}}"></span>
+<span style="height: 22px; border-radius: 3px; background: {{s.body}}; display: flex; align-items: center; justify-content: center; font: 500 8px 'IBM Plex Mono', monospace; color: {{t.ink}}">{{s.n}}</span>
+<span style="height: 10px; border-radius: 2px; background: {{s.strip}}"></span>
+<span style="font-size: 9px; color: {{t.muted}}; text-align: center; white-space: nowrap; overflow: hidden">{{s.name}}</span>
+</div>
+</sc-for>
+</div>
+
+<!-- Arrangement -->
+<div style="background: {{t.panel}}; border: 1px solid {{t.line}}; border-radius: 8px; overflow: hidden; display: flex">
+<div style="width: 132px; flex: none; display: flex; flex-direction: column">
+<sc-for list="{{t.tracks}}" as="r" hint-placeholder-count="6">
+<div style="height: 44px; box-sizing: border-box; padding: 6px 10px; display: flex; flex-direction: column; justify-content: center; gap: 2px; background: {{t.header}}; border-bottom: 1px solid {{t.lane}}; box-shadow: inset 3px 0 0 {{r.bar}}"><span style="font-size: 12px">{{r.name}}</span><span style="font: 400 10px 'IBM Plex Mono', monospace; color: {{t.faint}}">{{r.color}}</span></div>
+</sc-for>
+</div>
+<div style="flex: 1; position: relative">
+<sc-for list="{{t.tracks}}" as="r" hint-placeholder-count="6">
+<div style="height: 44px; position: relative; background-color: {{r.laneBg}}; background-image: repeating-linear-gradient(90deg, {{t.gridBar}} 0 1px, transparent 1px 56px); border-bottom: 1px solid {{t.gridSub}}">
+<sc-for list="{{r.clips}}" as="c" hint-placeholder-count="2">
+<div style="position: absolute; left: {{c.x}}px; top: 4px; width: {{c.w}}px; height: 36px; border-radius: 4px; overflow: hidden; background: {{r.body}}; outline: {{c.sel}}"><div style="height: 13px; background: {{r.strip}}; padding: 0 5px; font-size: 9px; font-weight: 500; color: {{t.ink}}; white-space: nowrap; overflow: hidden">{{c.name}}</div></div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+</div>
+
+<!-- Pads + picker -->
+<div style="display: flex; gap: 16px; align-items: flex-start">
+<div style="background: {{t.panel}}; border: 1px solid {{t.line}}; border-radius: 8px; padding: 12px; display: grid; grid-template-columns: repeat(4, 56px); gap: 4px">
+<sc-for list="{{t.pads}}" as="p" hint-placeholder-count="8">
+<div style="position: relative; width: 56px; height: 56px; box-sizing: border-box; border-radius: 6px; overflow: hidden; background: {{t.raised}}; border: 1px solid {{t.line}}">
+<sc-if value="{{p.tag}}" hint-placeholder-val="{{false}}"><span style="position: absolute; left: 0; right: 0; top: 0; height: 3px; background: {{p.color}}"></span></sc-if>
+<span style="position: absolute; left: 5px; top: 5px; font: 400 9px 'IBM Plex Mono', monospace; color: {{t.faint}}">{{p.id}}</span>
+<sc-if value="{{p.badge}}" hint-placeholder-val="{{false}}"><span style="position: absolute; right: 4px; top: 4px; min-width: 14px; height: 13px; box-sizing: border-box; border-radius: 3px; border: 1px solid {{t.lineStrong}}; color: {{t.muted}}; font: 500 9px 'IBM Plex Mono', monospace; display: flex; align-items: center; justify-content: center">{{p.g}}</span></sc-if>
+<span style="position: absolute; left: 5px; bottom: 4px; font-size: 10px; font-weight: 500">{{p.name}}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: {{t.faint}}">picker (track header › Color, pad › Choke colour)</span>
+<div style="width: 236px; box-sizing: border-box; background: {{t.raised}}; border: 1px solid {{t.lineStrong}}; border-radius: 5px; padding: 8px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: grid; grid-template-columns: repeat(8, 22px); gap: 5px">
+<sc-for list="{{t.pick}}" as="s" hint-placeholder-count="16">
+<span title="{{s.name}}" style="width: 22px; height: 22px; box-sizing: border-box; border-radius: 4px; background: {{s.bar}}; outline: {{s.ring}}; outline-offset: 2px"></span>
+</sc-for>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; border-top: 1px solid {{t.line}}; padding-top: 8px">
+<span style="width: 22px; height: 22px; border-radius: 4px; background: {{t.graphite}}"></span>
+<span style="font-size: 12px; color: {{t.muted}}">Graphite</span>
+<span style="flex: 1"></span>
+<span style="width: 22px; height: 22px; box-sizing: border-box; border-radius: 4px; border: 1px dashed {{t.lineStrong}}"></span>
+<span style="font-size: 12px; color: {{t.muted}}">None</span>
+</div>
+<span style="font-size: 11px; color: {{t.faint}}">Blue · 12</span>
+</div>
+</div>
+</div>
+</div>
+</sc-for>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px">
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Is 16 enough?</span>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.55">Yes, as hues. Neighbours are only ΔE₂₀₀₀ 8.6 apart already: tellable side by side, not reliably across a screen on a 3 px bar. More hues would add swatches people cannot tell apart. Ableton's 70 are about 14 hues in 5 brightnesses. If tracks ever need more, add a second, muted brightness row of the same 16 hues; choke groups stay at 16, one per group number.</span>
+</div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Content, not signal</span>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.55">With 16 hues round the wheel some swatch always sits near an accent (best rotation: ΔE 5). So palette colours are calmer than accents (OKLCH chroma 0.13 against signal's 0.16) and only ever fill: track bars, clip bodies and strips, choke tags. They never draw a ring, arc, outline, curve or meter.</span>
+</div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Numbers</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #A7ADB6; line-height: 1.7">dark · bar 6.9–7.8:1 on panel · names on body ≥ 5.1, on strip ≥ 7.0<br>light · bar 3.4–4.0:1 on panel · names on body ≥ 11, on strip ≥ 8.9<br>OKLCH · dark bar L .74 C .13 · body .50/.10 · strip .43/.09<br>light bar L .60 C .15 · body .87/.06 · strip .81/.08<br>graphite · chroma .012 at hue 250 (the UI's own grey)</span>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1380}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const NAMES = ['Red', 'Vermilion', 'Orange', 'Amber', 'Yellow', 'Lime', 'Green', 'Jade', 'Teal', 'Cyan', 'Sky', 'Blue', 'Violet', 'Purple', 'Magenta', 'Pink', 'Graphite'];
+    const P = {
+      dark: {
+        bar: '#F08696 #F18A74 #E99454 #D7A03D #BDAD3E #9BB856 #71C178 #3FC59C #00C4BE #00BFDC #49B7F1 #77ACFC #9DA0FB #BC95EE #D58DD7 #E787B8 #A5ACB2'.split(' '),
+        body: '#934955 #934C3C #8E5223 #825B0B #70640C #586C25 #39723F #037559 #007571 #007185 #166B94 #3E639C #5A5B9B #6F5492 #804E82 #8C4A6D #5E646A'.split(' '),
+        strip: '#793943 #793B2E #744117 #6A4900 #5B5100 #465818 #2B5D30 #005F47 #005F5C #005C6D #06567A #2F5081 #484980 #5A4278 #693D6A #733958 #4B5056'.split(' ')
+      },
+      light: {
+        bar: '#C8536A #CA5840 #C16300 #AE7300 #948100 #6F8E00 #369744 #009A70 #009692 #0092AD #008BCD #447FD8 #7272D7 #9366C8 #AD5CB0 #BF558F #7B8187'.split(' '),
+        body: '#F9C5CA #F9C7BB #F4CBAF #EAD0A8 #DCD6A9 #CCDBB0 #BCDFBD #AEE2CD #A7E1DE #A7DFEC #AFDBF7 #BDD6FC #CDD0FC #DCCBF5 #EAC7EA #F4C5DB #CED5DC'.split(' '),
+        strip: '#F0ACB4 #F0AF9F #EAB48F #DDBB86 #CCC386 #B6CA91 #A0CFA2 #8CD2B8 #81D2CD #82CFE0 #8ECAEE #A2C3F5 #B7BCF4 #CBB5EC #DDAFDD #E9ACCA #BBC2C9'.split(' ')
+      }
+    };
+    const U = {
+      dark: { label: 'Dark', meta: 'bar · body · strip', window: '#131518', panel: '#1A1D21', raised: '#22262B', header: '#23262C', lane: '#171A1D', laneAlt: '#1A1E22', gridBar: '#323537', gridSub: '#1C1F21', line: '#2B3036', lineStrong: '#383E46', text: '#E7E9EC', muted: '#A7ADB6', faint: '#8C939D', ink: '#F6F6F8', sel: '#EDEDF0', signal: '#4C9EFF' },
+      light: { label: 'Light', meta: 'bar · body · strip', window: '#E6E8EB', panel: '#F7F8F9', raised: '#FFFFFF', header: '#F0F2F4', lane: '#F3F4F6', laneAlt: '#EDEFF2', gridBar: '#CDD1D6', gridSub: '#E6E8EB', line: '#D3D7DD', lineStrong: '#B4BBC4', text: '#1B1E23', muted: '#4A515B', faint: '#5F6670', ink: '#1B1E23', sel: '#1F1F26', signal: '#1764D8' }
+    };
+    const tracks = [
+      ['Drums', 0, [['Beat A', 20, 220], ['Beat B', 252, 200]]],
+      ['Bass', 3, [['Bass line', 60, 300]]],
+      ['Keys', 7, [['Chords', 116, 180], ['Chords 2', 312, 150, true]]],
+      ['Pad', 12, [['Swell', 20, 420]]],
+      ['Lead', 14, [['Hook', 230, 160]]],
+      ['FX', 16, [['Riser', 360, 100]]]
+    ];
+    const themes = ['dark', 'light'].map((th) => {
+      const p = P[th], u = U[th];
+      const ci = (i) => ({ bar: p.bar[i], body: p.body[i], strip: p.strip[i] });
+      return Object.assign({}, u, {
+        sw: NAMES.map((n, i) => Object.assign({ name: n, n: i < 16 ? String(i + 1) : 'G' }, ci(i))),
+        tracks: tracks.map((t, k) => Object.assign({ name: t[0], color: NAMES[t[1]], laneBg: k % 2 ? u.laneAlt : u.lane }, ci(t[1]), {
+          clips: t[2].map((c) => ({ name: c[0], x: c[1], w: c[2], sel: c[3] ? ('1.5px solid ' + u.sel) : 'none' }))
+        })),
+        pads: [
+          { id: 'A13', name: 'Perc', g: '', badge: false, tag: false, color: 'transparent' },
+          { id: 'A14', name: 'Tom M', g: '2', badge: true, tag: true, color: p.bar[12] },
+          { id: 'A15', name: 'Tom H', g: '2', badge: true, tag: true, color: p.bar[12] },
+          { id: 'A16', name: 'Crash', g: '3', badge: true, tag: false, color: 'transparent' },
+          { id: 'A5', name: 'CH Hat', g: '1', badge: true, tag: true, color: p.bar[8] },
+          { id: 'A6', name: 'OH Hat', g: '1', badge: true, tag: true, color: p.bar[8] },
+          { id: 'A7', name: 'Ped Hat', g: '1', badge: true, tag: true, color: p.bar[8] },
+          { id: 'A8', name: 'Shaker', g: '', badge: false, tag: false, color: 'transparent' }
+        ],
+        pick: NAMES.slice(0, 16).map((n, i) => ({ name: n, bar: p.bar[i], ring: i === 11 ? ('2px solid ' + u.text) : 'none' })),
+        graphite: p.bar[16]
+      });
+    });
+    return { themes: themes };
+  }
+}
+</script>
+</body>
+</html>

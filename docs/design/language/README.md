@@ -24,31 +24,31 @@ The grid is the arrangement's backbone: one structure that carries tempo, meter 
 
 | Token | Hex | Light | Use |
 |---|---|---|---|
-| `bg.window` | `#131518` | `#F9FAFA` | Window ground |
-| `bg.titlebar` | `#16181B` | `#F6F6F8` | Title bar, routing-row fill |
-| `surface.panel` | `#1A1D21` | `#EFF1F3` | Panels |
-| `surface.raised` | `#22262B` | `#E3E5E9` | Chips, model buttons, dropdowns on panels |
-| `surface.inset` | `#0D0F11` | `#FFFFFF` | Display wells, value fields, segmented tracks |
-| `surface.selected` | `#2A2F35` | `#D5D9DE` | Selected segment |
-| `knob.cap` | `#262A30` | `#DCE0E4` | Knob face |
-| `knob.capActive` | `#2E333A` | `#CED3D9` | Knob face while held; fader cap |
-| `line` | `#2B3036` | `#D4D7DD` | Panel borders, arc tracks |
-| `line.inset` | `#23272C` | `#E1E4E8` | Display-well borders |
-| `line.strong` | `#383E46` | `#BDC3CB` | Knob rim, pills, dashed add-row |
-| `grid` | `#1C1F23` | `#EDEEF1` | Grid lines inside displays |
-| `text` | `#E7E9EC` | `#202329` | Primary text, values, pointers |
-| `text.muted` | `#A7ADB6` | `#484D56` | Control labels, section labels |
-| `text.faint` | `#8C939D` | `#5B616B` | Meta, units, column headers (≥ 4.5:1 on panel and inset) |
-| `ink.ghost` | `#4A5260` | `#9EA6B5` | Secondary traces (detuned wave, fade envelope) |
-| `ink.arrow` | `#585F69` | `#8F96A1` | Routing arrows, unused source dots |
-| `signal` | `#4C9EFF` | `#0055BB` | Value arcs, curves, selected outline, switch on |
-| `mod` | `#F0A73A` | `#633E08` | Modulation rings, LFO traces, amounts, GR |
-| `meter.ok` | `#5FCB8E` | `#1A4F31` | Level meters |
-| `meter.hot` | `#FF6B5B` | `#B51200` | Clip, arm, error (an error's icon and edge; its message stays `text`) |
+| `bg.window` | `#131518` | `#E6E8EB` | Window ground |
+| `bg.titlebar` | `#16181B` | `#DFE2E6` | Title bar, routing-row fill |
+| `surface.panel` | `#1A1D21` | `#F7F8F9` | Panels |
+| `surface.raised` | `#22262B` | `#FFFFFF` | Chips, model buttons, dropdowns on panels |
+| `surface.inset` | `#0D0F11` | `#ECEEF1` | Display wells, value fields, segmented tracks |
+| `surface.selected` | `#2A2F35` | `#DCE0E5` | Selected segment |
+| `knob.cap` | `#262A30` | `#FFFFFF` | Knob face |
+| `knob.capActive` | `#2E333A` | `#EEF0F3` | Knob face while held; fader cap |
+| `line` | `#2B3036` | `#D3D7DD` | Panel borders, arc tracks |
+| `line.inset` | `#23272C` | `#DCE0E5` | Display-well borders |
+| `line.strong` | `#383E46` | `#B4BBC4` | Knob rim, pills, dashed add-row |
+| `grid` | `#1C1F23` | `#DFE2E7` | Grid lines inside displays |
+| `text` | `#E7E9EC` | `#1B1E23` | Primary text, values, pointers |
+| `text.muted` | `#A7ADB6` | `#4A515B` | Control labels, section labels |
+| `text.faint` | `#8C939D` | `#5F6670` | Meta, units, column headers (≥ 4.5:1 on panel and inset) |
+| `ink.ghost` | `#4A5260` | `#A2A9B4` | Secondary traces (detuned wave, fade envelope) |
+| `ink.arrow` | `#585F69` | `#7D8591` | Routing arrows, unused source dots |
+| `signal` | `#4C9EFF` | `#1764D8` | Value arcs, curves, selected outline, switch on |
+| `mod` | `#F0A73A` | `#E17000` | Modulation rings, LFO traces, amounts, GR |
+| `meter.ok` | `#5FCB8E` | `#1E8A4C` | Level meters |
+| `meter.hot` | `#FF6B5B` | `#A8200E` | Clip, arm, error (an error's icon and edge; its message stays `text`) |
 
 Signal and mod differ in lightness as well as hue, so they stay distinguishable for colour-blind users. Fills under curves use the curve colour at 12% (8% for the oscilloscope).
 
-**Light theme.** The dark set is the design; the light set is derived from it by one rule, so it keeps every role. Grounds (`bg`, `surface`, `knob`, `line`, `grid` and the arrangement grounds below) mirror the dark set: each keeps its contrast ratio to `bg.window`, in the opposite direction, with `surface.inset` at white and the graphite hue kept. Inks (`text`, `ink`, `signal`, `mod`, `meter`, and the loop, cursor and selection colors) keep their hue and at least the contrast ratio they have against `bg.window` in the dark set. Aliases follow their token. v0.7.0 ships dark only: View > Appearance shows System and Light unavailable, and this derived set stays in code, tested, as the baseline for a designed light theme.
+**Light theme.** Designed, not derived: the light set keeps every role and every hue of the dark set, and meets targets instead of mirroring contrast ratios (mirroring pushed `mod` to brown and `meter.ok` to forest green). Grounds: `bg.window` is a mid-light graphite, panels sit lighter on it as cards, `surface.raised` and `knob.cap` are white, and `surface.inset` is one step darker than the panel so wells still recess. Inks: text roles are ≥ 4.5:1 on panel and inset; marks are ≥ 3:1 on the panel. `mod` is a true orange (`#E17000`; a darker amber reads brown on white) and a mark colour only (rings, traces, dots, amount bars, never body text); its traces inside display wells are 2.5 px, where the well gives 2.77:1. Ink on a filled role (solo, arm, Cycle, the default button) is the light ground. The accents (`signal`, `mod`, `loop`, `meter.ok`, `meter.hot`) stay ≥ ΔE 20 apart for normal, protan, deutan and tritan vision; `meter.hot` is a deep red so it parts from the orange (the derived pair was ΔE 6 for deutan vision). Track, clip and choke colours come from the content palette below. Aliases follow their token. Mockup: the chrome canvas, Light page (palette board, Macro Oscillator, design language, Compressor, Mixer, chrome). v0.7.0 ships dark only: View > Appearance shows System and Light unavailable until this set lands in code.
 
 ### Arrangement and transport
 
@@ -57,24 +57,24 @@ Tokens the device design does not name, used by the arrangement, the transport a
 | Token | Dark | Light | Rust | Contrast (before, now) | Use |
 |---|---|---|---|---|---|
 | `lane` | `#171A1D` | `#F3F4F6` | `lane` | 1.05, 1.05 on the window | Track lanes |
-| `lane.alt` | `#1A1E22` | `#EEF0F2` | `lane_alt` | 1.09, 1.09 | Alternate lanes |
-| `ruler` | `#23282D` | `#E0E3E7` | `ruler` | 1.22, 1.23 | Ruler |
-| `header` | `#23262C` | `#E2E5E9` | `header` | 1.21, 1.21 | Track headers |
-| `header.selected` | `#333840` | `#C6CBD2` | `header_selected` | 1.55, 1.55 | Selected track header |
-| `grid.bar` | `#323537` | `#CFCFD1` | `grid_bar` | 1.41, 1.41 on the lane | Bar lines |
-| `grid.beat` | `#242729` | `#E3E4E5` | `grid_beat` | 1.15, 1.16 | Beat lines |
-| `grid.sub` | `#1C1F21` | `#EEEEF0` | `grid_sub` | 1.05, 1.05 | Sub-beat lines |
+| `lane.alt` | `#1A1E22` | `#EDEFF2` | `lane_alt` | 1.09, 1.09 | Alternate lanes |
+| `ruler` | `#23282D` | `#DDE1E5` | `ruler` | 1.22, 1.23 | Ruler |
+| `header` | `#23262C` | `#F0F2F4` | `header` | 1.21, 1.21 | Track headers |
+| `header.selected` | `#333840` | `#DCE1E8` | `header_selected` | 1.55, 1.55 | Selected track header |
+| `grid.bar` | `#323537` | `#CDD1D6` | `grid_bar` | 1.41, 1.41 on the lane | Bar lines |
+| `grid.beat` | `#242729` | `#DDE0E4` | `grid_beat` | 1.15, 1.16 | Beat lines |
+| `grid.sub` | `#1C1F21` | `#E6E8EB` | `grid_sub` | 1.05, 1.05 | Sub-beat lines |
 | `loop` | `#D05DAD` | `#B73590` | `loop_region` | designed: 5.1 on the window, 4.9 on a lane, 5.35 on the key rows; worst ΔE 23 against signal, mod, meter.ok and meter.hot over every vision type, 36 against text; `ink.dark` on it 5.1 | The loop: the brace, the ruler tint and edges while Cycle is on, the Cycle button, out-of-scale piano roll rows (see The loop below). `loop` is a Rust keyword, so the Rust name stays `loop_region` |
 | `cursor` | `#E1E1E3` | `#28282B` | `cursor` | 13.94, 14.01 | Playhead |
 | `selection.outline` | `#EDEDF0` | `#1F1F26` | `selection_outline` | 15.52, 15.65 | Selected clip outline, marquee |
 | `ink.dark` | `#131518` | `#131518` | `ink_dark` | = `bg.window` | Letters on light fills |
 | `ink.light` | `#F6F6F8` | `#F6F6F8` | `ink_light` | unchanged | Letters on dark fills |
-| `record` | `#FF6B5B` | `#B51200` | `record` | = `meter.hot` | Record arm, clip cap |
-| `mute` | `#E7E9EC` | `#202329` | `mute` | = `text` | Mute on (inverted) |
-| `solo` | `#4C9EFF` | `#0055BB` | `solo` | = `signal` | Solo on |
-| `monitor` | `#5FCB8E` | `#1A4F31` | `monitor` | = `meter.ok` | Input monitoring, meter levels |
-| `focus.ring` | `#4C9EFF` | `#0055BB` | `focus_ring` | = `signal` | Keyboard focus |
-| `button.hover` | `#2E333A` | `#CED3D9` | `button_hover` | = `knob.capActive` | Hovered buttons and rows, one step above `surface.raised` |
+| `record` | `#FF6B5B` | `#A8200E` | `record` | = `meter.hot` | Record arm, clip cap |
+| `mute` | `#E7E9EC` | `#1B1E23` | `mute` | = `text` | Mute on (inverted) |
+| `solo` | `#4C9EFF` | `#1764D8` | `solo` | = `signal` | Solo on |
+| `monitor` | `#5FCB8E` | `#1E8A4C` | `monitor` | = `meter.ok` | Input monitoring, meter levels |
+| `focus.ring` | `#4C9EFF` | `#1764D8` | `focus_ring` | = `signal` | Keyboard focus |
+| `button.hover` | `#2E333A` | `#EEF0F3` | `button_hover` | = `knob.capActive` | Hovered buttons and rows, one step above `surface.raised` |
 | `overlay` | `#00000046` | `#0000001C` | `overlay` | unchanged | Dims what lies outside a range |
 
 The older names in code read the design values: `bg` is `bg.window`, `panel` is `surface.panel`, `panel_raised` and `button` are `surface.raised`, `text_dim` is `text.muted`, `accent` is `signal`. `mod` is `modulation` in Rust (a keyword).
@@ -85,9 +85,38 @@ Literal fills the component specs use, with their light values (the fader cap is
 
 | Path | Dark | Light | Use |
 |---|---|---|---|
-| `toggle.on.option.fill` | `#1E2A38` | `#D9E1EB` | Monitor and option toggles when on |
-| `toggle.unavailable.fill` | `#1E2125` | `#EAECEF` | Unavailable toggles |
+| `toggle.on.option.fill` | `#1E2A38` | `#E3ECFA` | Monitor and option toggles when on |
+| `toggle.unavailable.fill` | `#1E2125` | `#EDEFF2` | Unavailable toggles |
 | `switch.onKnob` | `#FFFFFF` | `#FFFFFF` | The switch's knob when on |
+
+### Content palette
+
+One palette for every colour the user picks: track colour bars, clip bodies and name strips, and choke-group tags. Sixteen hues evenly spaced in OKLCH (22.5° apart from 11°, the rotation that keeps every swatch furthest from the five accents) plus Graphite, the UI's own grey. Each swatch has three values per theme: **bar** (track bars, choke tags, the picker), **body** (clip fill) and **strip** (clip name strip). The user picks a name; the theme supplies the value, so a project's colours survive a theme switch. Mockup: the chrome canvas, Content palette page.
+
+| # | Name | Dark bar · body · strip | Light bar · body · strip |
+|---|---|---|---|
+| 1 | Red | `#F08696` · `#934955` · `#793943` | `#C8536A` · `#F9C5CA` · `#F0ACB4` |
+| 2 | Vermilion | `#F18A74` · `#934C3C` · `#793B2E` | `#CA5840` · `#F9C7BB` · `#F0AF9F` |
+| 3 | Orange | `#E99454` · `#8E5223` · `#744117` | `#C16300` · `#F4CBAF` · `#EAB48F` |
+| 4 | Amber | `#D7A03D` · `#825B0B` · `#6A4900` | `#AE7300` · `#EAD0A8` · `#DDBB86` |
+| 5 | Yellow | `#BDAD3E` · `#70640C` · `#5B5100` | `#948100` · `#DCD6A9` · `#CCC386` |
+| 6 | Lime | `#9BB856` · `#586C25` · `#465818` | `#6F8E00` · `#CCDBB0` · `#B6CA91` |
+| 7 | Green | `#71C178` · `#39723F` · `#2B5D30` | `#369744` · `#BCDFBD` · `#A0CFA2` |
+| 8 | Jade | `#3FC59C` · `#037559` · `#005F47` | `#009A70` · `#AEE2CD` · `#8CD2B8` |
+| 9 | Teal | `#00C4BE` · `#007571` · `#005F5C` | `#009692` · `#A7E1DE` · `#81D2CD` |
+| 10 | Cyan | `#00BFDC` · `#007185` · `#005C6D` | `#0092AD` · `#A7DFEC` · `#82CFE0` |
+| 11 | Sky | `#49B7F1` · `#166B94` · `#06567A` | `#008BCD` · `#AFDBF7` · `#8ECAEE` |
+| 12 | Blue | `#77ACFC` · `#3E639C` · `#2F5081` | `#447FD8` · `#BDD6FC` · `#A2C3F5` |
+| 13 | Violet | `#9DA0FB` · `#5A5B9B` · `#484980` | `#7272D7` · `#CDD0FC` · `#B7BCF4` |
+| 14 | Purple | `#BC95EE` · `#6F5492` · `#5A4278` | `#9366C8` · `#DCCBF5` · `#CBB5EC` |
+| 15 | Magenta | `#D58DD7` · `#804E82` · `#693D6A` | `#AD5CB0` · `#EAC7EA` · `#DDAFDD` |
+| 16 | Pink | `#E787B8` · `#8C4A6D` · `#733958` | `#BF558F` · `#F4C5DB` · `#E9ACCA` |
+| — | Graphite | `#A5ACB2` · `#5E646A` · `#4B5056` | `#7B8187` · `#CED5DC` · `#BBC2C9` |
+
+- **Content, not signal.** With sixteen hues round the wheel some swatch always lands near an accent (best rotation: ΔE 5), so palette colours are calmer than the accents (OKLCH chroma 0.13 against signal's 0.16) and only ever **fill**: bars, clip bodies and strips, choke tags. They never draw a ring, arc, outline, curve or meter, so a blue line still means a value you set on a blue track.
+- **Ink:** clip names are `#F6F6F8` on dark bodies (≥ 5.1:1, strips ≥ 7.0) and `text` on light ones (≥ 11, strips ≥ 8.9). Bars are ≥ 6.9:1 on the dark panel and ≥ 3.4:1 on the light one.
+- **Why sixteen:** neighbours are already ΔE₂₀₀₀ 8.6 apart, tellable side by side but not across a screen on a 3 px bar; more hues add swatches people cannot tell apart. If tracks ever need more, add a second, muted brightness row of the same sixteen hues; choke groups stay at sixteen.
+- **Picker:** a popup (Application chrome) with the sixteen hues as 22 px swatches in two rows of eight, then Graphite and None; the current swatch has a 2 px `text` ring 2 px out. Names show on hover and under the grid.
 
 ## Type
 
@@ -159,13 +188,19 @@ Height 24, radius 4, Sans 600 11. Unavailable toggles stay visible (ghosted) so 
 The **switch** (below) is reserved for enabling an entire section; everything else is a toggle.
 
 ### Pad
-Drum-machine style trigger, for Drum Synth, Sampler slices and any pad grid.
+Drum-machine style trigger, for Drum Synth, Sampler pads and any pad grid. Choke groups follow ADR 0041: Off or groups 1–16, labelled by number, colour supplementary, groups cross banks; a muted pad, or a non-solo pad while any pad is solo, neither sounds nor chokes.
 
 - **Size:** 56 (grid in a panel), 80 (focused / editor). Square, radius 6, `surface.raised`, 1 px `line`. Grids use 4 px gaps, 4 × 4 by default, pad 1 at bottom-left (MPC order).
-- **Content:** pad number top-left (Mono 9–10, `text.faint`), MIDI note top-right (80 px size only), sample name bottom-left (Sans 500 10–11, ellipsis).
+- **Top-left:** the pad id, bank + slot (`A6`), Mono 400 9 (56) or 10 (80), `text.faint`. The bank shows because groups cross banks.
+- **Top-right:** the **choke badge**, the group number in Mono 500 9 inside a box at least 16 × 14, radius 3, 1 px `line.strong`, `text.muted`; absent when Off. The MIDI note moves to the selected-pad strip.
+- **Top edge:** the group's colour as a 3 px tag, the palette **bar** value, only once the user has picked one. A new group has no colour: the number is the identity.
+- **Bottom:** sample name bottom-left (Sans 500 10–11, ellipsis); a 14 px **M** chip (fill `text`, letter `bg.window`) or **S** chip (fill `signal`, letter `surface.inset`) bottom-right.
 - **Hit:** fill rises from the bottom in `signal` at 26%, height = velocity, with a 2 px solid `signal` top edge; it decays over ~250 ms.
-- **States:** idle, hit, selected (2 px `signal` border), muted (40% opacity), choke group / group colour (optional 3 px colour tag on top, same as track colour bars), empty (dashed `line.strong` border, transparent, "+ Drop" — accepts a dropped sample).
-- **Interaction:** click or MIDI to audition, click to select for editing, drag a sample onto it, drag between pads to swap.
+- **Choked:** a pad cut by its group drops its hit fill at once and its badge inverts (fill `text.muted`, number `surface.panel`) for 200 ms, so you can see which pad cut which.
+- **Selected:** 2 px `signal` border. Selecting a grouped pad outlines its peers in this bank (1 px dashed `text.muted`, inset 3, radius 4) and puts a 5 px `text.muted` dot on any other bank button that holds one.
+- **Muted / solo-excluded:** 40% opacity (the M chip says which). **Empty:** dashed `line.strong` border, transparent, "+ Drop" (accepts a dropped sample).
+- **Selected-pad strip:** the choke picker is a segmented row of Off and 1–16 (groups in use brighter, with their colour as a 2 px underline), then a line naming the peers ("Chokes with A5 CH Hat, A7 Ped Hat, B2 Hat FX"), then M and S toggles.
+- **Interaction:** click or MIDI to audition, click to select for editing, drag a sample onto it, drag between pads to swap. Mockup: the chrome canvas, "Pads with choke groups".
 
 ### Channel strip (mixer)
 Built from the parts above, 132 wide (main bus 160). Top to bottom: 3 px track colour bar · name + number · input dropdown (+ MIDI OUT) · inserts and sends · output dropdown · pan knob (36, bipolar) with mono value · 2 × 2 toggle grid M S / R I · channel fader · gain + peak readouts.
@@ -265,7 +300,7 @@ A pattern for a region that cannot take input right now: hatch means "can't take
 
 - `text` at 7 percent (6 in the light set), 1.5 px lines at −45 degrees, 8 px pitch, anchored to the window so the stripes line up across a header and its lane (`hatch` in `tokens.json`).
 - **Use:** inactive tracks (header and lane hatched, clips to ghost outlines in `ink.ghost` with an 18 percent fill, the color bar `ink.ghost`); suspended or missing plug-ins (the hatch fills the panel; the reason and the way out sit on a solid card with a Resume or Retry button); frozen lanes; unavailable insert slots; beyond a clip's end in an editor.
-- **Never:** a disabled-but-editable section (it dims to 40 percent), a muted track, a single small control (ghost it instead), anything under 48 px.
+- **Never:** a disabled-but-editable section (it dims to 40 percent), a muted track, a single small control (ghost it instead). Track headers and lanes hatch at every height down to ADR 0044's 24 px floor (a 24 px row still shows three stripes at the 8 px pitch); `minSize` (16 px on the short side) only keeps slivers from being hatched.
 - In code `widgets/hatch.rs` (`hatch::paint`, a `HatchLayout` with the lines it drew). Its first uses are the inactive track and the device card of a plug-in that does not answer; frozen lanes, unavailable insert slots and the editor's space past a clip's end move to it in their migrations (today a frozen lane is tinted `signal` at 12 percent, and the piano roll dims past the clip's end with `overlay`).
 
 ## Device anatomy

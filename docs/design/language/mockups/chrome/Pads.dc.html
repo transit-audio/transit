@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pads with choke groups</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1080px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 40px 56px; display: flex; flex-direction: column; gap: 20px">
+
+<div style="display: flex; align-items: baseline; gap: 14px">
+<h2 style="margin: 0; font-size: 22px; font-weight: 600">Pads with choke groups</h2>
+<span style="font-size: 13px; color: #A7ADB6">ADR 0041: Off or groups 1–16, labelled by number, colour supplementary, groups cross banks; mute and solo admit and choke nothing. Click pads, banks, groups, M and S.</span>
+</div>
+
+<div style="display: flex; gap: 20px">
+
+<!-- Pad grid panel -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Pads</span>
+<span style="flex: 1"></span>
+<div style="display: flex; background: #0D0F11; border: 1px solid #2B3036; border-radius: 6px; padding: 2px; gap: 2px" role="group" aria-label="Bank">
+<sc-for list="{{banks}}" as="b" hint-placeholder-count="4">
+<button onClick="{{b.pick}}" aria-pressed="{{b.pressed}}" style="position: relative; height: 22px; min-width: 34px; border: none; border-radius: 4px; background: {{b.bg}}; color: {{b.fg}}; font: 500 11px 'IBM Plex Mono', monospace; padding: 0 8px">{{b.name}}<sc-if value="{{b.peers}}" hint-placeholder-val="{{false}}"><span style="position: absolute; top: 2px; right: 3px; width: 5px; height: 5px; border-radius: 3px; background: #A7ADB6"></span></sc-if></button>
+</sc-for>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(4, 80px); gap: 4px">
+<sc-for list="{{pads}}" as="p" hint-placeholder-count="16">
+<button onClick="{{p.pick}}" aria-label="{{p.aria}}" style="position: relative; width: 80px; height: 80px; box-sizing: border-box; border-radius: 6px; padding: 0; text-align: left; overflow: hidden; background: {{p.bg}}; border: {{p.border}}; opacity: {{p.op}}; color: #E7E9EC; font-family: 'IBM Plex Sans', sans-serif">
+<sc-if value="{{p.hit}}" hint-placeholder-val="{{false}}"><span style="position: absolute; left: 0; right: 0; bottom: 0; height: {{p.hitH}}%; background: rgba(76, 158, 255, 0.26); border-top: 2px solid #4C9EFF"></span></sc-if>
+<sc-if value="{{p.tag}}" hint-placeholder-val="{{false}}"><span style="position: absolute; left: 0; right: 0; top: 0; height: 3px; background: {{p.tagColor}}"></span></sc-if>
+<sc-if value="{{p.peer}}" hint-placeholder-val="{{false}}"><span style="position: absolute; inset: 3px; border: 1px dashed #A7ADB6; border-radius: 4px"></span></sc-if>
+<span style="position: absolute; left: 6px; top: 7px; font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">{{p.id}}</span>
+<sc-if value="{{p.badge}}" hint-placeholder-val="{{false}}"><span style="position: absolute; right: 5px; top: 6px; min-width: 16px; height: 14px; box-sizing: border-box; padding: 0 3px; border-radius: 3px; border: 1px solid {{p.badgeLine}}; background: {{p.badgeBg}}; color: {{p.badgeFg}}; font: 500 9px 'IBM Plex Mono', monospace; display: flex; align-items: center; justify-content: center">{{p.choke}}</span></sc-if>
+<sc-if value="{{p.empty}}" hint-placeholder-val="{{false}}"><span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #8C939D">+ Drop</span></sc-if>
+<span style="position: absolute; left: 6px; right: 24px; bottom: 6px; font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{p.name}}</span>
+<sc-if value="{{p.chip}}" hint-placeholder-val="{{false}}"><span style="position: absolute; right: 5px; bottom: 5px; width: 14px; height: 14px; border-radius: 3px; background: {{p.chipBg}}; color: {{p.chipFg}}; font: 600 9px 'IBM Plex Sans', sans-serif; display: flex; align-items: center; justify-content: center">{{p.chipTxt}}</span></sc-if>
+</button>
+</sc-for>
+</div>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">{{statusLine}}</span>
+</div>
+
+<!-- Selected pad strip -->
+<div style="width: 360px; background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Selected pad</span>
+<span style="font-size: 16px; font-weight: 600">{{sel.name}}</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Pad {{sel.id}} · note {{sel.note}}</span>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="font-size: 12px; color: #A7ADB6; width: 54px">Choke</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace">{{sel.chokeLabel}}</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 3px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 6px; padding: 3px" role="group" aria-label="Choke group">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="17">
+<button onClick="{{g.pick}}" aria-pressed="{{g.pressed}}" aria-label="{{g.aria}}" style="position: relative; height: 22px; border: none; border-radius: 4px; background: {{g.bg}}; color: {{g.fg}}; font: 500 10px 'IBM Plex Mono', monospace; padding: 0; overflow: hidden">{{g.label}}<sc-if value="{{g.used}}" hint-placeholder-val="{{false}}"><span style="position: absolute; left: 4px; right: 4px; bottom: 2px; height: 2px; border-radius: 1px; background: {{g.color}}"></span></sc-if></button>
+</sc-for>
+</div>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">{{sel.peersLine}}</span>
+</div>
+
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="font-size: 12px; color: #A7ADB6; width: 54px">Pad</span>
+<button onClick="{{toggleMute}}" aria-pressed="{{sel.muteStr}}" style="height: 24px; min-width: 28px; box-sizing: border-box; border-radius: 4px; border: 1px solid {{sel.mBorder}}; background: {{sel.mBg}}; color: {{sel.mFg}}; font: 600 11px 'IBM Plex Sans', sans-serif">M</button>
+<button onClick="{{toggleSolo}}" aria-pressed="{{sel.soloStr}}" style="height: 24px; min-width: 28px; box-sizing: border-box; border-radius: 4px; border: 1px solid {{sel.sBorder}}; background: {{sel.sBg}}; color: {{sel.sFg}}; font: 600 11px 'IBM Plex Sans', sans-serif">S</button>
+<span style="font-size: 11px; color: #8C939D">muted or solo-excluded pads neither sound nor choke</span>
+</div>
+
+<div style="margin-top: auto; border-top: 1px solid #23272C; padding-top: 12px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Group colours</span>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">Optional, from the track colour palette, drawn only as the 3 px top tag and the underline in this picker. The number is the identity; a group without a colour still reads.</span>
+</div>
+</div>
+
+<!-- Rules -->
+<div style="flex: 1; background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Anatomy</span>
+<div style="display: flex; flex-direction: column; gap: 9px; font-size: 12px; color: #A7ADB6; line-height: 1.45">
+<span><b style="color: #E7E9EC; font-weight: 500">Top-left</b> pad id, bank + slot (A6), Mono 10 text.faint. Replaces the bare number: groups cross banks, so the bank must show.</span>
+<span><b style="color: #E7E9EC; font-weight: 500">Top-right</b> choke badge: the group number, Mono 500 9 in a 14 px box, 1 px line.strong, text.muted. Absent when Off.</span>
+<span><b style="color: #E7E9EC; font-weight: 500">Top edge</b> the group's colour as a 3 px tag, only if the group has one.</span>
+<span><b style="color: #E7E9EC; font-weight: 500">Selecting</b> a grouped pad outlines its peers (1 px dashed text.muted, inset 3) and dots any other bank that holds one.</span>
+<span><b style="color: #E7E9EC; font-weight: 500">Choked</b> a pad cut by its group drops its hit fill at once and its badge inverts (text.muted fill) for 200 ms: you see who cut whom.</span>
+<span><b style="color: #E7E9EC; font-weight: 500">Bottom-right</b> M (text fill, inverted) or S (signal fill) chip. Muted pads 40%; while any pad is solo, the others dim to 40% too.</span>
+</div>
+</div>
+</div>
+
+<!-- State gallery -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">States at grid size (56)</span>
+<div style="display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 12px">
+<sc-for list="{{gallery}}" as="p" hint-placeholder-count="10">
+<div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-start">
+<div style="position: relative; width: 56px; height: 56px; box-sizing: border-box; border-radius: 6px; overflow: hidden; background: {{p.bg}}; border: {{p.border}}; opacity: {{p.op}}">
+<sc-if value="{{p.hit}}" hint-placeholder-val="{{false}}"><span style="position: absolute; left: 0; right: 0; bottom: 0; height: {{p.hitH}}%; background: rgba(76, 158, 255, 0.26); border-top: 2px solid #4C9EFF"></span></sc-if>
+<sc-if value="{{p.tag}}" hint-placeholder-val="{{false}}"><span style="position: absolute; left: 0; right: 0; top: 0; height: 3px; background: {{p.tagColor}}"></span></sc-if>
+<sc-if value="{{p.peer}}" hint-placeholder-val="{{false}}"><span style="position: absolute; inset: 3px; border: 1px dashed #A7ADB6; border-radius: 4px"></span></sc-if>
+<span style="position: absolute; left: 5px; top: 5px; font: 400 9px 'IBM Plex Mono', monospace; color: #8C939D">{{p.id}}</span>
+<sc-if value="{{p.badge}}" hint-placeholder-val="{{false}}"><span style="position: absolute; right: 4px; top: 4px; min-width: 14px; height: 13px; box-sizing: border-box; padding: 0 2px; border-radius: 3px; border: 1px solid {{p.badgeLine}}; background: {{p.badgeBg}}; color: {{p.badgeFg}}; font: 500 9px 'IBM Plex Mono', monospace; display: flex; align-items: center; justify-content: center">{{p.choke}}</span></sc-if>
+<sc-if value="{{p.empty}}" hint-placeholder-val="{{false}}"><span style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #8C939D">+ Drop</span></sc-if>
+<span style="position: absolute; left: 5px; right: 18px; bottom: 4px; font-size: 10px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{p.name}}</span>
+<sc-if value="{{p.chip}}" hint-placeholder-val="{{false}}"><span style="position: absolute; right: 4px; bottom: 4px; width: 12px; height: 12px; border-radius: 3px; background: {{p.chipBg}}; color: {{p.chipFg}}; font: 600 8px 'IBM Plex Sans', sans-serif; display: flex; align-items: center; justify-content: center">{{p.chipTxt}}</span></sc-if>
+</div>
+<span style="font-size: 11px; color: #A7ADB6">{{p.caption}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const bank = st.bank || 'A';
+    const sel = st.sel || 'A6';
+    const over = st.over || {};
+    const COLORS = { 1: '#4CC1A8', 2: '#8E7BD9' };
+    const base = {
+      A: [['Kick', 0], ['Snare', 0], ['Clap', 0], ['Rim', 0], ['CH Hat', 1], ['OH Hat', 1], ['Ped Hat', 1], ['Shaker', 0], ['Tom L', 2], ['Tom M', 2], ['Tom H', 2], ['Crash', 0], ['Perc 1', 0, { mute: true }], ['Perc 2', 0], null, null],
+      B: [['Vox chop', 0], ['Hat FX', 1], ['Riser', 0], ['Impact', 0], null, null, null, null, null, null, null, null, null, null, null, null],
+      C: Array(16).fill(null),
+      D: Array(16).fill(null)
+    };
+    const all = {};
+    Object.keys(base).forEach((b) => base[b].forEach((d, i) => {
+      const id = b + (i + 1);
+      const o = over[id] || {};
+      all[id] = d ? { id: id, bank: b, slot: i + 1, name: d[0], choke: o.choke !== undefined ? o.choke : d[1], mute: o.mute !== undefined ? o.mute : !!(d[2] && d[2].mute), solo: !!o.solo, empty: false } : { id: id, bank: b, slot: i + 1, name: '', choke: 0, mute: false, solo: false, empty: true };
+    }));
+    const anySolo = Object.values(all).some((p) => p.solo);
+    const sp = all[sel];
+    const peerIds = sp.choke ? Object.values(all).filter((p) => !p.empty && p.choke === sp.choke && p.id !== sp.id).map((p) => p.id) : [];
+    const look = (p, size, extra) => {
+      extra = extra || {};
+      const isSel = extra.sel !== undefined ? extra.sel : p.id === sel;
+      const excluded = anySolo && !p.solo;
+      const choked = extra.choked !== undefined ? extra.choked : (p.id === 'A5' && !st.touched);
+      const hitH = extra.hitH !== undefined ? extra.hitH : (p.id === 'A6' && !st.touched ? 78 : 0);
+      return {
+        id: p.id, name: p.name, empty: p.empty,
+        bg: p.empty ? 'transparent' : '#22262B',
+        border: p.empty ? '1px dashed #383E46' : (isSel ? '2px solid #4C9EFF' : '1px solid #2B3036'),
+        op: (p.mute || (excluded && !p.empty)) ? 0.4 : 1,
+        hit: hitH > 0, hitH: hitH,
+        tag: !!(p.choke && COLORS[p.choke]), tagColor: COLORS[p.choke] || 'transparent',
+        peer: extra.peer !== undefined ? extra.peer : peerIds.indexOf(p.id) >= 0,
+        badge: !!p.choke, choke: p.choke,
+        badgeLine: choked ? '#A7ADB6' : '#383E46', badgeBg: choked ? '#A7ADB6' : 'transparent', badgeFg: choked ? '#1A1D21' : '#A7ADB6',
+        chip: p.mute || p.solo, chipTxt: p.solo ? 'S' : 'M', chipBg: p.solo ? '#4C9EFF' : '#E7E9EC', chipFg: p.solo ? '#0D0F11' : '#131518',
+        aria: p.empty ? ('Pad ' + p.id + ', empty') : ('Pad ' + p.id + ' ' + p.name + (p.choke ? ', choke group ' + p.choke : '')),
+        caption: extra.caption || ''
+      };
+    };
+    const order = [13, 14, 15, 16, 9, 10, 11, 12, 5, 6, 7, 8, 1, 2, 3, 4];
+    const pads = order.map((n) => {
+      const p = all[bank + n];
+      return Object.assign(look(p, 80), { pick: () => this.setState({ sel: p.id, touched: true }) });
+    });
+    const banks = ['A', 'B', 'C', 'D'].map((b) => ({
+      name: b, pressed: b === bank ? 'true' : 'false',
+      bg: b === bank ? '#2A2F35' : 'transparent', fg: b === bank ? '#E7E9EC' : '#8C939D',
+      peers: b !== bank && peerIds.some((id) => id[0] === b),
+      pick: () => this.setState({ bank: b })
+    }));
+    const used = {};
+    Object.values(all).forEach((p) => { if (p.choke) used[p.choke] = true; });
+    const setOver = (patch) => { const o = Object.assign({}, over); o[sel] = Object.assign({}, o[sel] || {}, patch); this.setState({ over: o, touched: true }); };
+    const groups = [{ n: 0, label: 'Off' }].concat(Array.from({ length: 16 }, (_, i) => ({ n: i + 1, label: String(i + 1) }))).map((g) => ({
+      label: g.label, pressed: sp.choke === g.n ? 'true' : 'false', aria: g.n ? 'Choke group ' + g.n : 'Choke off',
+      bg: sp.choke === g.n ? '#2A2F35' : 'transparent', fg: sp.choke === g.n ? '#E7E9EC' : (used[g.n] ? '#A7ADB6' : '#585F69'),
+      used: !!(g.n && used[g.n] && COLORS[g.n]), color: COLORS[g.n] || 'transparent',
+      pick: () => setOver({ choke: g.n })
+    }));
+    const peerNames = peerIds.map((id) => id + ' ' + all[id].name);
+    const tg = (on, kind) => on ? (kind === 's' ? ['#4C9EFF', '#4C9EFF', '#0D0F11'] : ['#E7E9EC', '#E7E9EC', '#131518']) : ['#2B3036', '#22262B', '#A7ADB6'];
+    const m = tg(sp.mute, 'm'), s = tg(sp.solo, 's');
+    const g0 = { id: 'A1', name: 'Kick', choke: 0, mute: false, solo: false, empty: false };
+    const gh = { id: 'A5', name: 'CH Hat', choke: 1, mute: false, solo: false, empty: false };
+    const gallery = [
+      look(g0, 56, { sel: false, peer: false, choked: false, hitH: 0, caption: 'Idle' }),
+      look(Object.assign({}, g0, { id: 'A2', name: 'Snare' }), 56, { sel: false, peer: false, choked: false, hitH: 70, caption: 'Hit (velocity)' }),
+      look(Object.assign({}, g0, { id: 'A3', name: 'Clap' }), 56, { sel: true, peer: false, choked: false, hitH: 0, caption: 'Selected' }),
+      look(gh, 56, { sel: false, peer: false, choked: false, hitH: 0, caption: 'Group 1 member' }),
+      look(Object.assign({}, gh, { id: 'A9', name: 'Tom L', choke: 3 }), 56, { sel: false, peer: false, choked: false, hitH: 0, caption: 'Group, no colour' }),
+      look(gh, 56, { sel: false, peer: false, choked: true, hitH: 0, caption: 'Choked (200 ms)' }),
+      look(Object.assign({}, gh, { id: 'A7', name: 'Ped Hat' }), 56, { sel: false, peer: true, choked: false, hitH: 0, caption: 'Peer of selection' }),
+      look(Object.assign({}, g0, { id: 'A13', name: 'Perc 1', mute: true }), 56, { sel: false, peer: false, choked: false, hitH: 0, caption: 'Muted' }),
+      look(Object.assign({}, g0, { id: 'A14', name: 'Perc 2', solo: true }), 56, { sel: false, peer: false, choked: false, hitH: 0, caption: 'Solo' }),
+      look({ id: 'A15', name: '', choke: 0, mute: false, solo: false, empty: true }, 56, { sel: false, peer: false, choked: false, hitH: 0, caption: 'Empty' })
+    ];
+    const loaded = Object.values(all).filter((p) => p.bank === bank && !p.empty).length;
+    return {
+      banks: banks, pads: pads, groups: groups, gallery: gallery,
+      statusLine: 'Bank ' + bank + ' · ' + loaded + ' of 16 loaded' + (st.touched ? '' : ' · A6 just hit and choked A5'),
+      sel: {
+        id: sp.id, name: sp.empty ? 'Empty pad' : sp.name, note: 60 + (['A', 'B', 'C', 'D'].indexOf(sp.bank) * 16 + sp.slot - 1),
+        chokeLabel: sp.choke ? 'Group ' + sp.choke + ' · ' + (peerIds.length + 1) + ' pads' : 'Off',
+        peersLine: sp.choke ? (peerNames.length ? 'Chokes with ' + peerNames.join(', ') + '.' : 'Alone in group ' + sp.choke + ' so far.') : 'Not in a choke group. Pick a number to join one; the same number in any bank is the same group.',
+        muteStr: sp.mute ? 'true' : 'false', soloStr: sp.solo ? 'true' : 'false',
+        mBorder: m[0], mBg: m[1], mFg: m[2], sBorder: s[0], sBg: s[1], sFg: s[2]
+      },
+      toggleMute: () => setOver({ mute: !sp.mute }),
+      toggleSolo: () => setOver({ solo: !sp.solo })
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Light — Compressor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#D5D8DC}
+</style>
+</helmet>
+<div style="width: 960px; height: 620px; box-sizing: border-box; background: #E6E8EB; color: #1B1E23; font-family: 'IBM Plex Sans', system-ui, sans-serif; display: flex; flex-direction: column">
+<header style="height: 52px; box-sizing: border-box; padding: 0 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #D3D7DD; background: #DFE2E6">
+<span style="font-weight: 600; font-size: 15px">transit</span>
+<span style="width: 1px; height: 18px; background: #B4BBC4"></span>
+<span style="font-size: 13px; color: #5F6670">Vox Bus</span>
+<span style="font-size: 13px; color: #5F6670">/</span>
+<span style="font-size: 14px; font-weight: 500">Compressor</span>
+<span style="flex: 1"></span>
+<button type="button" style="width: 220px; height: 32px; border-radius: 6px; border: 1px solid #D3D7DD; background: #ECEEF1; color: #1B1E23; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 500 13px 'IBM Plex Sans', sans-serif"><span><span style="color: #5F6670; font-weight: 400">Factory · </span>Gentle Glue</span><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#5F6670" stroke-width="1.6" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+<span style="flex: 1"></span>
+<button type="button" aria-label="Bypass" style="width: 32px; height: 32px; border-radius: 6px; border: 1px solid #D3D7DD; background: #F7F8F9; color: #1764D8; display: flex; align-items: center; justify-content: center"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 1.5 V7.5 M4.3 3.8 A5.5 5.5 0 1 0 11.7 3.8"></path></svg></button>
+<button type="button" aria-label="Close" style="width: 32px; height: 32px; border: 0; background: transparent; color: #4A515B; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5 L12.5 12.5 M12.5 3.5 L3.5 12.5"></path></svg></button>
+</header>
+
+<main style="flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<section style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 14px 16px; display: flex; gap: 12px">
+<div style="width: 236px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #4A515B">Transfer</span>
+<div style="background: #ECEEF1; border: 1px solid #DCE0E5; border-radius: 6px; padding: 8px">
+<svg width="218" height="218" viewBox="0 0 218 218" role="img" aria-label="Compressor transfer curve">
+<path d="M54.5 0 V218 M109 0 V218 M163.5 0 V218 M0 54.5 H218 M0 109 H218 M0 163.5 H218" stroke="#DFE2E7" stroke-width="1"></path>
+<line x1="0" y1="218" x2="218" y2="0" stroke="#D3D7DD" stroke-width="1" stroke-dasharray="3 3"></line>
+<path d="{{transfer}}" fill="none" stroke="#1764D8" stroke-width="2"></path>
+<circle cx="{{dotX}}" cy="{{dotY}}" r="5" fill="#E17000" stroke="#ECEEF1" stroke-width="2"></circle>
+</svg>
+</div>
+</div>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #4A515B">History</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">IN · OUT · GR</span>
+</div>
+<div style="flex: 1; background: #ECEEF1; border: 1px solid #DCE0E5; border-radius: 6px; padding: 8px">
+<svg width="100%" height="218" viewBox="0 0 520 218" preserveAspectRatio="none" role="img" aria-label="Level and gain reduction history">
+<path d="M0 54.5 H520 M0 109 H520 M0 163.5 H520" stroke="#DFE2E7" stroke-width="1"></path>
+<path d="{{inFill}}" fill="#A2A9B4" fill-opacity="0.35"></path>
+<path d="{{outLine}}" fill="none" stroke="#1764D8" stroke-width="1.75"></path>
+<path d="{{grFill}}" fill="#E17000" fill-opacity="0.22"></path>
+<path d="{{grLine}}" fill="none" stroke="#E17000" stroke-width="1.75"></path>
+<line x1="0" y1="{{threshY}}" x2="520" y2="{{threshY}}" stroke="#1B1E23" stroke-opacity="0.45" stroke-width="1" stroke-dasharray="4 4"></line>
+</svg>
+</div>
+</div>
+<div style="width: 64px; display: flex; flex-direction: column; gap: 6px; align-items: center">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: #4A515B">GR</span>
+<div style="flex: 1; width: 14px; background: #ECEEF1; border: 1px solid #DCE0E5; border-radius: 3px; position: relative; overflow: hidden"><div style="position: absolute; top: 0; left: 0; right: 0; height: 28%; background: #E17000"></div></div>
+<span style="font: 500 12px 'IBM Plex Mono', monospace">−4.2</span>
+</div>
+</section>
+
+<section style="background: #F7F8F9; border: 1px solid #D3D7DD; border-radius: 8px; padding: 14px 16px; display: flex; align-items: center; gap: 8px">
+<sc-for list="{{knobs}}" as="k" hint-placeholder-count="7">
+<button type="button" aria-label="{{k.aria}}" style="all: unset; cursor: ns-resize; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 84px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#D3D7DD" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="#1764D8" stroke-width="6" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#FFFFFF" stroke="#B4BBC4" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="#1B1E23" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 12px; color: #4A515B">{{k.label}}</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #1B1E23">{{k.txt}}</span>
+</button>
+</sc-for>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 8px; padding-left: 12px; border-left: 1px solid #D3D7DD">
+<label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #4A515B">Sidechain
+<button type="button" style="width: 110px; height: 26px; border-radius: 5px; border: 1px solid #D3D7DD; background: #ECEEF1; color: #1B1E23; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font: 500 12px 'IBM Plex Sans', sans-serif">Kick · pre<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#5F6670" stroke-width="1.8" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+</label>
+<div style="display: flex; gap: 2px; background: #ECEEF1; border: 1px solid #D3D7DD; border-radius: 6px; padding: 2px">
+<button type="button" aria-pressed="true" style="flex: 1; height: 22px; border: 0; border-radius: 4px; background: #DCE0E5; color: #1B1E23; font: 500 11px 'IBM Plex Sans', sans-serif">Peak</button>
+<button type="button" aria-pressed="false" style="flex: 1; height: 22px; border: 0; border-radius: 4px; background: transparent; color: #5F6670; font: 500 11px 'IBM Plex Sans', sans-serif">RMS</button>
+<button type="button" aria-pressed="false" style="flex: 1; height: 22px; border: 0; border-radius: 4px; background: transparent; color: #5F6670; font: 500 11px 'IBM Plex Sans', sans-serif">Limit</button>
+</div>
+</div>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":960,"height":620}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const f = (n) => n.toFixed(1);
+    const pt = (a, r) => { const t = a * Math.PI / 180; return [50 + r * Math.sin(t), 50 - r * Math.cos(t)]; };
+    const arc = (r, a0, a1) => {
+      if (a1 - a0 < 0.6) return '';
+      const p0 = pt(a0, r), p1 = pt(a1, r);
+      return 'M' + f(p0[0]) + ' ' + f(p0[1]) + ' A' + r + ' ' + r + ' 0 ' + (a1 - a0 > 180 ? 1 : 0) + ' 1 ' + f(p1[0]) + ' ' + f(p1[1]);
+    };
+    const knob = (label, v, txt, size) => {
+      const ang = -135 + 270 * v;
+      const a = pt(ang, 9), b = pt(ang, 24);
+      return { label: label, txt: txt, size: size || 48, track: arc(40, -135, 135), val: arc(40, -135, ang), x1: f(a[0]), y1: f(a[1]), x2: f(b[0]), y2: f(b[1]), aria: label + ' ' + txt };
+    };
+    // transfer: -60..0 dB both axes, threshold -18, ratio 4, knee 6
+    const S = 218, T = -18, R = 4, K = 6;
+    const map = (db) => (db + 60) / 60 * S;
+    const out = (x) => {
+      if (x < T - K / 2) return x;
+      if (x > T + K / 2) return T + (x - T) / R;
+      const d = x - T + K / 2;
+      return x + (1 / R - 1) * d * d / (2 * K);
+    };
+    let tr = '';
+    for (let i = 0; i <= 120; i++) { const x = -60 + 60 * i / 120; tr += (i ? ' L' : 'M') + f(map(x)) + ' ' + f(S - map(out(x))); }
+    const xin = -9;
+    // history
+    const HW = 520, HH = 218, N = 130;
+    let inP = 'M0 ' + HH, outP = '', grP = '', grF = 'M0 0';
+    const lv = (i) => { const t = i / N; const e = Math.pow(Math.abs(Math.sin(t * Math.PI * 7.2)), 3); return -34 + e * 28 + Math.sin(t * 53) * 2; };
+    for (let i = 0; i <= N; i++) {
+      const x = i / N * HW, l = lv(i), o = out(l), gr = o - l;
+      const y = HH - map(l) , yo = HH - map(o), yg = -gr / 12 * 60;
+      inP += ' L' + f(x) + ' ' + f(y);
+      outP += (i ? ' L' : 'M') + f(x) + ' ' + f(yo);
+      grP += (i ? ' L' : 'M') + f(x) + ' ' + f(yg);
+      grF += ' L' + f(x) + ' ' + f(yg);
+    }
+    inP += ' L' + HW + ' ' + HH + ' Z';
+    grF += ' L' + HW + ' 0 Z';
+    return {
+      transfer: tr, dotX: f(map(xin)), dotY: f(S - map(out(xin))),
+      inFill: inP, outLine: outP, grLine: grP, grFill: grF, threshY: f(HH - map(T)),
+      knobs: [knob('Threshold', 0.7, '−18 dB'), knob('Ratio', 0.4, '4:1'), knob('Knee', 0.3, '6 dB'), knob('Attack', 0.25, '10 ms'), knob('Release', 0.45, '120 ms'), knob('Makeup', 0.55, '+4.0 dB'), knob('Mix', 1, '100%')]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Light — mod orange</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#D5D8DC}
+</style>
+</helmet>
+<div style="width: 1440px; height: 720px; box-sizing: border-box; background: #E6E8EB; color: #1B1E23; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 40px 48px; display: flex; flex-direction: column; gap: 18px">
+
+<div style="display: flex; align-items: baseline; gap: 14px">
+<h2 style="margin: 0; font-size: 22px; font-weight: 600">Mod in light: orange, not brown</h2>
+<span style="font-size: 13px; color: #4A515B">Brown is orange that is darker than its surround and low in chroma. Same 3:1 floor, more chroma, hue pulled toward orange.</span>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px">
+<sc-for list="{{variants}}" as="v" hint-placeholder-count="5">
+<div style="background: #F7F8F9; border: 1px solid {{v.frame}}; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #5F6670">{{v.tag}}</span>
+<span style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600"><span style="width: 16px; height: 16px; border-radius: 4px; background: {{v.c}}"></span>{{v.hex}}</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">{{v.meta}}</span>
+</div>
+
+<!-- knobs -->
+<div style="display: flex; gap: 10px; align-items: flex-end">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 3px">
+<svg role="img" aria-label="Cutoff knob, modulated" width="56" height="56" viewBox="0 0 100 100"><path d="M21.7 78.3 A40 40 0 1 1 78.3 78.3" fill="none" stroke="#D3D7DD" stroke-width="6" stroke-linecap="round"></path><path d="M21.7 78.3 A40 40 0 0 1 50 10" fill="none" stroke="#1764D8" stroke-width="6" stroke-linecap="round"></path><path d="M50 3 A47 47 0 0 1 90 25" fill="none" stroke="{{v.c}}" stroke-width="3.5" stroke-linecap="round"></path><circle cx="50" cy="50" r="28" fill="#FFFFFF" stroke="#B4BBC4" stroke-width="1.5"></circle><path d="M50 41 L50 26" stroke="#1B1E23" stroke-width="4" stroke-linecap="round"></path></svg>
+<span style="font-size: 11px; color: #4A515B">Cutoff</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 3px">
+<svg role="img" aria-label="Timbre knob, modulated" width="44" height="44" viewBox="0 0 100 100"><path d="M21.7 78.3 A40 40 0 1 1 78.3 78.3" fill="none" stroke="#D3D7DD" stroke-width="6" stroke-linecap="round"></path><path d="M21.7 78.3 A40 40 0 0 1 12 38" fill="none" stroke="#1764D8" stroke-width="6" stroke-linecap="round"></path><path d="M6 38 A47 47 0 0 1 30 7" fill="none" stroke="{{v.c}}" stroke-width="3.5" stroke-linecap="round"></path><circle cx="50" cy="50" r="28" fill="#FFFFFF" stroke="#B4BBC4" stroke-width="1.5"></circle><path d="M42 46 L28 40" stroke="#1B1E23" stroke-width="4" stroke-linecap="round"></path></svg>
+<span style="font-size: 11px; color: #4A515B">Timbre</span>
+</div>
+</div>
+
+<!-- LFO trace in a well -->
+<div style="background: #ECEEF1; border: 1px solid #DCE0E5; border-radius: 6px; padding: 6px">
+<svg role="img" aria-label="LFO trace" width="100%" height="54" viewBox="0 0 200 54" preserveAspectRatio="none"><path d="M0 27 C 25 2, 25 2, 50 27 S 75 52, 100 27 S 125 2, 150 27 S 175 52, 200 27 L200 54 L0 54 Z" fill="{{v.c}}" fill-opacity="0.12"></path><path d="M0 27 C 25 2, 25 2, 50 27 S 75 52, 100 27 S 125 2, 150 27 S 175 52, 200 27" fill="none" stroke="{{v.c}}" stroke-width="2"></path></svg>
+</div>
+
+<!-- source chip + amount bar -->
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 12px; background: #FFFFFF; border: 1px solid #B4BBC4; font-size: 11px"><span style="width: 8px; height: 8px; border-radius: 4px; background: {{v.c}}"></span>LFO 1<span style="font: 500 10px 'IBM Plex Mono', monospace; color: #5F6670">×2</span></span>
+<svg role="img" aria-label="Amount +24%" width="90" height="16" viewBox="0 0 90 16"><rect x="0" y="6" width="90" height="4" rx="2" fill="#D3D7DD"></rect><rect x="45" y="4.5" width="22" height="7" rx="2" fill="{{v.c}}"></rect><rect x="44.5" y="2" width="1" height="12" fill="#5F6670"></rect></svg>
+<span style="font: 500 11px 'IBM Plex Mono', monospace">+24%</span>
+</div>
+
+<!-- GR meter -->
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="font: 500 10px 'IBM Plex Mono', monospace; color: #5F6670; border: 1px solid #B4BBC4; border-radius: 3px; padding: 1px 4px">GR</span>
+<div style="flex: 1; height: 10px; background: #ECEEF1; border: 1px solid #DCE0E5; border-radius: 2px; position: relative; overflow: hidden"><div style="position: absolute; right: 0; top: 0; bottom: 0; width: 38%; background: {{v.c}}"></div></div>
+<span style="font: 500 11px 'IBM Plex Mono', monospace">−4.2 dB</span>
+</div>
+
+<!-- next to the other accents -->
+<div style="display: flex; gap: 4px; padding-top: 4px; border-top: 1px solid #DCE0E5">
+<span style="flex: 1; height: 14px; border-radius: 3px; background: #1764D8"></span>
+<span style="flex: 1; height: 14px; border-radius: 3px; background: {{v.c}}"></span>
+<span style="flex: 1; height: 14px; border-radius: 3px; background: #B73590"></span>
+<span style="flex: 1; height: 14px; border-radius: 3px; background: #1E8A4C"></span>
+<span style="flex: 1; height: 14px; border-radius: 3px; background: #A8200E"></span>
+</div>
+</div>
+</sc-for>
+</div>
+
+<div style="display: flex; gap: 32px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670; line-height: 1.6">
+<span>dark mod #F0A73A is LCh hue 74, chroma 74: an amber that only works because the ground is dark</span>
+<span>every candidate: ≥ 3.0:1 on panel, ≥ ΔE 21 from signal, loop, meter.ok, meter.hot for all four vision types</span>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":720}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const v = (tag, c, meta, pick) => ({ tag: tag, c: c, hex: c, meta: meta, frame: pick ? '#1764D8' : '#D3D7DD' });
+    return {
+      variants: [
+        v('CURRENT DRAFT', '#B37B09', 'hue 77 · chroma 56 · 3.4:1', false),
+        v('AMBER', '#CB7D00', 'hue 71 · chroma 70 · 3.0:1', false),
+        v('AMBER-ORANGE', '#D57900', 'hue 66 · chroma 73 · 3.0:1', false),
+        v('ORANGE · CHOSEN', '#E17000', 'hue 60 · chroma 78 · 3.0:1', true),
+        v('VIVID ORANGE', '#EA6900', 'hue 56 · chroma 82 · 3.0:1', false)
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
