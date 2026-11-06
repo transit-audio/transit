@@ -34,7 +34,7 @@ The studio already paints every color from one token table (the UI plan's slice 
 ## Consequences
 
 - The whole app moves to graphite in one landing (chrome through `visuals()`, everything else through the remapped names), while the panels keep their current layouts until their migration.
-- Some old names now alias the same value (`solo` and `accent` are both `signal`; `record` is `meter.hot`). A mixer meter that used `solo` for its hot segment reads blue until the mixer migration replaces it with the kit's meter.
+- Some old names now alias the same value (`solo` and `accent` are both `signal`; `record` is `meter.hot`; the new `warn` is `mod`, used at every warning site the remap had turned near-white or blue, and a bypassed device's status reads `text.faint`). A mixer meter that used `solo` for its hot segment reads blue until the mixer migration replaces it with the kit's meter.
 - The loop region keeps an amber close to `mod`; the main window migration decides whether it moves.
 - The light theme's inks are darker than before (signal, mod and the meters keep their dark contrast against a near-white window), which users of the light theme will notice.
 

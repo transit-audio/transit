@@ -84,7 +84,7 @@ pub fn readout(app: &mut StudioApp, ui: &mut Ui) {
     let text = if host.is_empty() { format!("{load}  {fmt}") } else { format!("{load}  {fmt}  {host}") };
     let tint: Color32 = match level {
         Level::Ok => TOKENS.monitor,
-        Level::Warning => TOKENS.mute,
+        Level::Warning => TOKENS.warn,
         Level::Alert => TOKENS.record,
     };
 

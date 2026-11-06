@@ -133,6 +133,9 @@ pub struct Tokens {
     pub focus_ring: Color32,
     /// Dims what lies outside a range (piano roll past the clip end).
     pub overlay: Color32,
+    /// Warnings (a load warning, a stale or unanswered device, a paused view): `mod`, since a
+    /// warning is something acting on the signal that the user did not set.
+    pub warn: Color32,
     /// Text on light fills and on dark fills ([`text_on`]); the dark ink is `bg.window`.
     pub ink_dark: Color32,
     pub ink_light: Color32,
@@ -192,6 +195,7 @@ macro_rules! token_set {
             selection_outline: SELECTION_OUTLINE,
             focus_ring: FOCUS_RING,
             overlay: OVERLAY,
+            warn: WARN,
             ink_dark: INK_DARK,
             ink_light: INK_LIGHT,
             light_clips: $light_clips,

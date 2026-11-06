@@ -91,7 +91,7 @@ pub(super) fn track_header(
             Align2::LEFT_CENTER,
             crate::devices::UNRESPONSIVE,
             FontId::proportional(10.5),
-            TOKENS.solo,
+            TOKENS.warn,
         );
         ui.interact(m.intersect(room).intersect(list), ui.id().with(("unresponsive", t.id.0)), Sense::hover())
             .on_hover_text(app.hang_tip(hang, &name));

@@ -304,8 +304,8 @@ pub(crate) fn card(
     let said = app.external_measure.outcome.as_ref().filter(|o| o.track == t && !o.stored).map(|o| o.text.clone());
     let running = app.external_measure.running.as_ref().is_some_and(|x| x.track == t);
     let (line, ink) = match &said {
-        Some(text) => (text.clone(), TOKENS.solo),
-        None if stale => (state.clone(), TOKENS.solo),
+        Some(text) => (text.clone(), TOKENS.warn),
+        None if stale => (state.clone(), TOKENS.warn),
         None => (state.clone(), if ok { TOKENS.text } else { TOKENS.text_dim }),
     };
     // Where the latency comes from (manual or measured) is the result; the rest is status.

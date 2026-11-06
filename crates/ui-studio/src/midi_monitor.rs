@@ -802,7 +802,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     dot(ui, s.port_color(&p.name));
                     let bad = p.state != PortState::Open || text.contains("no data in");
-                    ui.label(egui::RichText::new(text).size(11.5).color(if bad { TOKENS.mute } else { TOKENS.text_dim }));
+                    ui.label(egui::RichText::new(text).size(11.5).color(if bad { TOKENS.warn } else { TOKENS.text_dim }));
                 });
             }
             ui.separator();
@@ -830,7 +830,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     crate::help::hover(ui, &truncated, crate::help::Id::MidiMonitorTruncated);
                 }
                 if s.paused_at.is_some() {
-                    ui.label(egui::RichText::new(format!("Paused: {} new events behind the view", s.behind())).color(TOKENS.mute));
+                    ui.label(egui::RichText::new(format!("Paused: {} new events behind the view", s.behind())).color(TOKENS.warn));
                 }
             });
             match &s.learn {

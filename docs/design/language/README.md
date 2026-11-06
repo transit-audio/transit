@@ -52,7 +52,7 @@ Signal and mod differ in lightness as well as hue, so they stay distinguishable 
 
 ### Arrangement and transport
 
-Tokens the device design does not name, used by the arrangement, the transport and the track headers. The grounds and lines are re-derived on the graphite ground at the contrast ratio each had on the previous ground (lanes, ruler and headers against `bg.window`; grid lines against the lane). Grid lines are the lane tinted toward white (toward black in light), so the translucent Grid Over Clips overlay reproduces them over an empty lane. The state colors alias design tokens: record arm is `meter.hot`, mute is `text` (the toggle inverts), solo is `signal`, monitoring and meter levels are `meter.ok`.
+Tokens the device design does not name, used by the arrangement, the transport and the track headers. The grounds and lines are re-derived on the graphite ground at the contrast ratio each had on the previous ground (lanes, ruler and headers against `bg.window`; grid lines against the lane). Grid lines are the lane tinted toward white (toward black in light), so the translucent Grid Over Clips overlay reproduces them over an empty lane. The state colors alias design tokens: record arm is `meter.hot`, mute is `text` (the toggle inverts), solo is `signal`, monitoring and meter levels are `meter.ok`, warnings are `mod`. A bypassed device's status reads `text.faint`, as an insert slot's does.
 
 | Token | Dark | Light | Rust | Contrast (before, now) | Use |
 |---|---|---|---|---|---|
@@ -75,6 +75,7 @@ Tokens the device design does not name, used by the arrangement, the transport a
 | `monitor` | `#5FCB8E` | `#1A4F31` | `monitor` | = `meter.ok` | Input monitoring, meter levels |
 | `focus.ring` | `#4C9EFF` | `#0055BB` | `focus_ring` | = `signal` | Keyboard focus |
 | `button.hover` | `#2E333A` | `#CED3D9` | `button_hover` | = `knob.capActive` | Hovered buttons and rows, one step above `surface.raised` |
+| `warn` | `#F0A73A` | `#633E08` | `warn` | = `mod` | Warnings: a load warning, a stale or unanswered device, a paused view (something acting on the signal that the user did not set) |
 | `overlay` | `#00000046` | `#0000001C` | `overlay` | unchanged | Dims what lies outside a range |
 
 The older names in code read the design values: `bg` is `bg.window`, `panel` is `surface.panel`, `panel_raised` and `button` are `surface.raised`, `text_dim` is `text.muted`, `accent` is `signal`. `mod` is `modulation` in Rust (a keyword).

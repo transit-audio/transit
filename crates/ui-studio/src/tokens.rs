@@ -54,7 +54,8 @@ pub mod color {
 
 /// Arrangement and transport colors (`arrangement` in tokens.json), dark theme: the tokens the
 /// design does not name, re-derived against the graphite ground at the contrast ratios they had
-/// on the old ground, and the state colors that alias a design token. The grid lines are the lane
+/// on the old ground, and the state colors that alias a design token (`warn` is `mod`: a warning
+/// is something acting on the signal that the user did not set). The grid lines are the lane
 /// tinted toward white (toward black in light) so the gray Grid Over Clips overlay reproduces them.
 pub mod arrangement {
     use super::*;
@@ -78,6 +79,7 @@ pub mod arrangement {
         MONITOR = "monitor" 0x5FCB8E;
         FOCUS_RING = "focus.ring" 0x4C9EFF;
         BUTTON_HOVER = "button.hover" 0x2E333A;
+        WARN = "warn" 0xF0A73A;
     }
     /// Dims what lies outside a range: black at 70/255 (`#00000046`).
     pub const OVERLAY: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 70);
@@ -140,6 +142,7 @@ pub mod color_light {
         MONITOR = "monitor" 0x1A4F31;
         FOCUS_RING = "focus.ring" 0x0055BB;
         BUTTON_HOVER = "button.hover" 0xCED3D9;
+        WARN = "warn" 0x633E08;
         TOGGLE_OPTION_FILL = "toggle.on.option.fill" 0xD9E1EB;
         TOGGLE_UNAVAILABLE_FILL = "toggle.unavailable.fill" 0xEAECEF;
         SWITCH_ON_KNOB = "switch.onKnob" 0xFFFFFF;
