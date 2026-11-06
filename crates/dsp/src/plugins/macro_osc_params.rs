@@ -4,12 +4,13 @@
 //! `velocity_harmonics` .. `key_decay`) are gone; `transit_model::legacy_mapping` turns them into
 //! matrix rows when an old session or preset loads.
 
-use super::matrix::{CURVES, DESTINATIONS, ROWS, SOURCES};
-use super::shaper::{FILTER_MODES, LFO_SHAPES};
+use super::matrix::{CURVES, DESTINATIONS, ROWS, Row, SOURCES};
+use super::shaper::{self, FILTER_MODES, LFO_SHAPES, LfoSettings, Settings};
 use super::{MODELS, VOICE_COUNTS, WHEEL_DESTINATIONS};
-use crate::params::{choice, lin, log, toggle};
+use crate::params::{choice, choice_index, lin, log, on, toggle};
+use crate::plugins::instrument_queue::AdsrRates;
 use crate::plugins::lfo::DIVISIONS;
-use crate::{ParamInfo, Unit};
+use crate::{ParamInfo, Unit, db_to_gain};
 
 pub(super) const MODEL: usize = 0;
 pub(super) const HARMONICS: usize = 1;
@@ -23,7 +24,7 @@ pub(super) const TUNE: usize = 8;
 pub(super) const BEND_RANGE: usize = 9;
 pub(super) const MOD_WHEEL: usize = 10;
 pub(super) const VOICES: usize = 11;
-pub(super) const SHAPER: usize = 12;
+pub(crate) const SHAPER: usize = 12;
 pub(super) const AMP_ATTACK: usize = 13;
 pub(super) const AMP_DECAY: usize = 14;
 pub(super) const AMP_SUSTAIN: usize = 15;
@@ -61,7 +62,7 @@ pub(super) const ROW_AMOUNT: usize = 3;
 pub(super) const ROW_CURVE: usize = 4;
 
 /// Parameters in all.
-pub(super) const COUNT: usize = ROW1 + ROWS * ROW_PARAMS;
+pub(crate) const COUNT: usize = ROW1 + ROWS * ROW_PARAMS;
 
 /// The table: the fixed parameters, then one LFO's seven per LFO, then five per matrix row.
 macro_rules! table {
@@ -88,7 +89,7 @@ macro_rules! table {
     };
 }
 
-pub(super) static PARAMS: [ParamInfo; COUNT] = table!(
+pub(crate) static PARAMS: [ParamInfo; COUNT] = table!(
     [
         choice("model", "Model", &MODELS, 8),
         lin("harmonics", "Harmonics", 0.0, 100.0, 50.0, Unit::Percent),
@@ -128,4 +129,53 @@ pub(super) static PARAMS: [ParamInfo; COUNT] = table!(
 #[must_use]
 pub fn row_param(row: usize, field: usize) -> Option<&'static str> {
     (row < ROWS && field < ROW_PARAMS).then(|| PARAMS.get(ROW1 + row * ROW_PARAMS + field).map(|p| p.id)).flatten()
+}
+
+/// The shaper's settings at rate `sr` from the parameter values `v` gives by index into [`PARAMS`]
+/// (the shaper block, [`SHAPER`] to the last LFO parameter): the Macro Oscillator reads its own
+/// table, the Sampler a zone's slot values laid out the same way (ADR 0041), so both build the
+/// same bits from the same values.
+pub(crate) fn shaper_settings(v: &dyn Fn(usize) -> f32, bar_quarters: f64, bar_origin: (i64, f64), sr: f32) -> Settings {
+    let pct = |i: usize| v(i) / 100.0;
+    let lfo = |first: usize| {
+        LfoSettings::new(
+            choice_index(v(first + LFO_SHAPE)),
+            v(first + LFO_RATE),
+            on(v(first + LFO_SYNC)),
+            choice_index(v(first + LFO_DIVISION)),
+            on(v(first + LFO_RETRIGGER)),
+            v(first + LFO_FADE),
+            pct(first + LFO_AMOUNT),
+            bar_quarters,
+            bar_origin,
+            sr,
+        )
+    };
+    Settings {
+        on: on(v(SHAPER)),
+        amp: AdsrRates::new(v(AMP_ATTACK), v(AMP_DECAY), pct(AMP_SUSTAIN), v(AMP_RELEASE), sr),
+        amp_velocity: pct(AMP_VELOCITY),
+        filter_env: AdsrRates::new(v(FILTER_ATTACK), v(FILTER_DECAY), pct(FILTER_SUSTAIN), v(FILTER_RELEASE), sr),
+        mode: shaper::filter_mode(choice_index(v(FILTER_MODE))),
+        slope24: choice_index(v(FILTER_SLOPE)) == 1,
+        cutoff_log2: v(CUTOFF).max(1.0).log2(),
+        resonance: pct(RESONANCE),
+        drive: db_to_gain(v(DRIVE)),
+        key_track: pct(KEY_TRACK),
+        env_amount: pct(FILTER_ENV_AMOUNT),
+        lfo: [lfo(LFO1), lfo(LFO2)],
+        sr,
+    }
+}
+
+/// Matrix row `r` (0-based) from the parameter values `v` gives by index into [`PARAMS`].
+pub(crate) fn matrix_row(v: &dyn Fn(usize) -> f32, r: usize) -> Row {
+    let at = ROW1 + r * ROW_PARAMS;
+    Row {
+        source: choice_index(v(at + ROW_SOURCE)),
+        via: choice_index(v(at + ROW_VIA)),
+        dest: choice_index(v(at + ROW_DEST)),
+        curve: choice_index(v(at + ROW_CURVE)),
+        amount: v(at + ROW_AMOUNT) / 100.0,
+    }
 }

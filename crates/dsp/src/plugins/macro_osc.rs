@@ -48,7 +48,7 @@
 
 use crate::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_RESET_CONTROLLERS, CC_SUSTAIN, Message, PluginEvent};
 use crate::params::{Params, param_plumbing};
-use crate::plugins::instrument_queue::{AdsrRates, MAX_EVENTS, RELEASE_RESERVE};
+use crate::plugins::instrument_queue::{MAX_EVENTS, RELEASE_RESERVE};
 use crate::util::{Smoother, frames_in, sane_channels, sane_sr, sort_events};
 use crate::{Category, Plugin, PluginInfo, Transport, db_to_gain};
 use transit_macro_osc::SampleRate;
@@ -66,7 +66,7 @@ pub mod voice;
 use matrix::{Matrix, Row};
 pub use params::row_param;
 use params::*;
-use shaper::{LfoSettings, Settings};
+use shaper::Settings;
 use voice::{Controls, Shared, Slot};
 
 /// The voice's block: its envelopes advance once per render call, timed for 12 frames.
@@ -329,50 +329,12 @@ impl MacroOscillator {
 
     /// Matrix row `r` (0-based) as its parameters set it.
     fn row(&self, r: usize) -> Row {
-        let at = ROW1 + r * ROW_PARAMS;
-        Row {
-            source: self.p.choice(at + ROW_SOURCE),
-            via: self.p.choice(at + ROW_VIA),
-            dest: self.p.choice(at + ROW_DEST),
-            curve: self.p.choice(at + ROW_CURVE),
-            amount: self.p.v(at + ROW_AMOUNT) / 100.0,
-        }
+        params::matrix_row(&|i| self.p.v(i), r)
     }
 
     /// The shaper's settings from the parameters, at the host rate.
     fn settings(&self) -> Settings {
-        let p = &self.p;
-        let pct = |i: usize| p.v(i) / 100.0;
-        let sr = self.host_sr;
-        let lfo = |first: usize| {
-            LfoSettings::new(
-                p.choice(first + LFO_SHAPE),
-                p.v(first + LFO_RATE),
-                p.on(first + LFO_SYNC),
-                p.choice(first + LFO_DIVISION),
-                p.on(first + LFO_RETRIGGER),
-                p.v(first + LFO_FADE),
-                pct(first + LFO_AMOUNT),
-                self.bar_quarters,
-                self.bar_origin,
-                sr,
-            )
-        };
-        Settings {
-            on: p.on(SHAPER),
-            amp: AdsrRates::new(p.v(AMP_ATTACK), p.v(AMP_DECAY), pct(AMP_SUSTAIN), p.v(AMP_RELEASE), sr),
-            amp_velocity: pct(AMP_VELOCITY),
-            filter_env: AdsrRates::new(p.v(FILTER_ATTACK), p.v(FILTER_DECAY), pct(FILTER_SUSTAIN), p.v(FILTER_RELEASE), sr),
-            mode: shaper::filter_mode(p.choice(FILTER_MODE)),
-            slope24: p.choice(FILTER_SLOPE) == 1,
-            cutoff_log2: p.v(CUTOFF).max(1.0).log2(),
-            resonance: pct(RESONANCE),
-            drive: db_to_gain(p.v(DRIVE)),
-            key_track: pct(KEY_TRACK),
-            env_amount: pct(FILTER_ENV_AMOUNT),
-            lfo: [lfo(LFO1), lfo(LFO2)],
-            sr,
-        }
+        params::shaper_settings(&|i| self.p.v(i), self.bar_quarters, self.bar_origin, self.host_sr)
     }
 
     fn push(&mut self, offset: usize, kind: Kind) -> bool {

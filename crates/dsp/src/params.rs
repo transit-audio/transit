@@ -81,14 +81,27 @@ impl Params {
 
     #[inline]
     pub(crate) fn on(&self, idx: usize) -> bool {
-        self.v(idx) >= 0.5
+        on(self.v(idx))
     }
 
     #[inline]
     pub(crate) fn choice(&self, idx: usize) -> usize {
-        let v = self.v(idx);
-        if v.is_finite() && v > 0.0 { v.round() as usize } else { 0 }
+        choice_index(self.v(idx))
     }
+}
+
+/// A toggle's value read as on (the reading of [`Params::on`], for values kept outside a
+/// [`Params`] table).
+#[inline]
+pub(crate) fn on(v: f32) -> bool {
+    v >= 0.5
+}
+
+/// A choice's value read as its index (the reading of [`Params::choice`], for values kept outside
+/// a [`Params`] table).
+#[inline]
+pub(crate) fn choice_index(v: f32) -> usize {
+    if v.is_finite() && v > 0.0 { v.round() as usize } else { 0 }
 }
 
 /// Implements `info`, `set_param` and `param` for a plugin struct with a `p: Params` field and an
