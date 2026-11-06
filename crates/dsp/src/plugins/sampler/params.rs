@@ -66,6 +66,15 @@ fn split(id: &str) -> Option<(usize, &str)> {
     ((1..=ZONES).contains(&n)).then(|| id.get(PREFIX..).map(|rest| (n - 1, rest))).flatten()
 }
 
+/// The zone index and field index slot id `id` names (control side: no table needed; a linear
+/// search of the field ids).
+#[must_use]
+pub fn resolve(id: &str) -> Option<(usize, usize)> {
+    let (zone, rest) = split(id)?;
+    let field = (0..ZONE_FIELDS).find(|&f| field_info(f).is_some_and(|p| p.id == rest))?;
+    Some((zone, field))
+}
+
 /// Every zone slot's values, by zone then field, with the zones changed since the last block.
 pub(super) struct SlotParams {
     values: Vec<f32>,
@@ -99,7 +108,14 @@ impl SlotParams {
     /// Clamps and stores (NaN becomes the default) and marks the zone; `false` for an unknown id.
     pub(super) fn set(&mut self, id: &str, value: f32) -> bool {
         let Some((zone, field)) = self.resolve(id) else { return false };
-        let (Some(info), Some(slot)) = (field_info(field), self.values.get_mut(zone * ZONE_FIELDS + field)) else { return false };
+        self.set_index(zone, field, value)
+    }
+
+    /// Clamps and stores zone `zone`'s field `field` (NaN becomes the default) and marks the
+    /// zone, as [`SlotParams::set`] does for an id; out-of-range indices change nothing.
+    pub(super) fn set_index(&mut self, zone: usize, field: usize, value: f32) -> bool {
+        let (Some(info), true) = (field_info(field), zone < ZONES) else { return false };
+        let Some(slot) = self.values.get_mut(zone * ZONE_FIELDS + field) else { return false };
         *slot = info.clamp(value);
         if let Some(w) = self.dirty.get_mut(zone / 64) {
             *w |= 1 << (zone % 64);

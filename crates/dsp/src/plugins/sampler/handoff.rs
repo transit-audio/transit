@@ -20,8 +20,13 @@
 //!   preparation is refused ([`PublishError::NoCredit`]) and waits on the control side; replacing
 //!   a waiting generation reuses its credit.
 //!
-//! The queues are `rtrb` rings allocated with the channel; moving a `Box` through them neither
-//! allocates nor frees.
+//! - **Controls.** Slot parameter values set on the control side ([`Publisher::set_control`])
+//!   travel through a third ring of [`CONTROL_RING`] numeric entries, drained at the next block
+//!   start into the slot table exactly as `set_param` stores them; while the ring is full they
+//!   wait on the control side, in order, and go at [`Publisher::collect`].
+//!
+//! The queues are `rtrb` rings allocated with the channel; moving a `Box` or a numeric entry
+//! through them neither allocates nor frees.
 
 use std::sync::Arc;
 
@@ -31,8 +36,20 @@ use transit_instrument_core::shaper::Settings;
 use transit_sampler_core::patch::{Pad, PatchError, Zone, check_patch};
 use transit_sampler_core::{PADS, ZONES};
 
-use super::bank::{CREDITS, PreparedBank, SOURCE_IDS};
+use super::bank::{CREDITS, PreparedBank, SOURCE_IDS, readable_frames};
+use super::params::resolve;
 use crate::SampleSource;
+
+/// Control entries the ring between the control side and the audio thread holds.
+pub const CONTROL_RING: usize = 4096;
+
+/// One slot parameter value: zone, field, value (clamped on the audio side, as `set_param` does).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ControlEdit {
+    pub(super) zone: u16,
+    pub(super) field: u16,
+    pub(super) value: f32,
+}
 
 /// What the control side asks the core path to play.
 pub struct PatchSpec {
@@ -63,6 +80,9 @@ pub enum PublishError {
     Channels { zone: usize },
     /// Zone `zone`'s region runs past its source's end.
     Region { zone: usize },
+    /// Zone `zone`'s region runs past the shorter channel of its stereo source (whose channels
+    /// differ in length; the shorter one is what plays).
+    ShortChannel { zone: usize },
     /// The core refuses the zones or pads.
     Patch(PatchError),
     /// Every bank-generation credit is in use: collect retired generations first.
@@ -88,6 +108,7 @@ impl Generation {
 pub(super) struct AudioEnd {
     pub(super) publications: Consumer<Box<Generation>>,
     pub(super) retirements: Producer<Box<Generation>>,
+    pub(super) controls: Consumer<ControlEdit>,
 }
 
 impl AudioEnd {
@@ -112,14 +133,26 @@ pub struct Publisher {
     live: usize,
     /// The newest prepared generation, not yet sent (coalesced edits).
     waiting: Option<Box<Generation>>,
+    controls: Producer<ControlEdit>,
+    /// Control values the full ring could not take yet, oldest first.
+    backlog: std::collections::VecDeque<ControlEdit>,
 }
 
 /// The two ends of a new handoff.
 pub(super) fn channel() -> (Publisher, AudioEnd) {
     let (publish, publications) = RingBuffer::new(1);
     let (retire, retirements) = RingBuffer::new(2);
-    let publisher = Publisher { publications: publish, retirements, ids: (0..SOURCE_IDS).map(|_| None).collect(), live: 0, waiting: None };
-    (publisher, AudioEnd { publications, retirements: retire })
+    let (control, controls) = RingBuffer::new(CONTROL_RING);
+    let publisher = Publisher {
+        publications: publish,
+        retirements,
+        ids: (0..SOURCE_IDS).map(|_| None).collect(),
+        live: 0,
+        waiting: None,
+        controls: control,
+        backlog: std::collections::VecDeque::new(),
+    };
+    (publisher, AudioEnd { publications, retirements: retire, controls })
 }
 
 /// Identity of a shared sample (its data pointer; the vtable is not compared).
@@ -143,16 +176,24 @@ impl Publisher {
         let mut failed = false;
         for z in g.zones.iter_mut().flatten() {
             let li = usize::from(z.region.source);
-            let known = local.get(li).copied().flatten();
-            let id = known.or_else(|| {
-                let sample = spec.sources.get(li)?;
-                let id = self.take_id(sample)?;
-                g.bank.insert(id, Arc::clone(sample));
-                if let Some(slot) = local.get_mut(li) {
-                    *slot = Some(id);
+            let id = match (local.get(li).copied().flatten(), spec.sources.get(li)) {
+                (Some(id), _) => Some(id),
+                (None, Some(sample)) => {
+                    // A sample listed twice takes one id and one holder count (the generation
+                    // releases each of its ids once).
+                    let twin = spec.sources.iter().zip(&local).find_map(|(s, l)| l.filter(|_| identity(s) == identity(sample)));
+                    let id = twin.or_else(|| {
+                        let id = self.take_id(sample)?;
+                        g.bank.insert(id, Arc::clone(sample));
+                        Some(id)
+                    });
+                    if let (Some(slot), Some(id)) = (local.get_mut(li), id) {
+                        *slot = Some(id);
+                    }
+                    id
                 }
-                Some(id)
-            });
+                (None, None) => None,
+            };
             match id {
                 Some(id) => z.region.source = id,
                 None => failed = true,
@@ -185,7 +226,46 @@ impl Publisher {
             n += 1;
         }
         self.flush();
+        self.flush_controls();
         n
+    }
+
+    /// Whether a publication now would get a credit (collect first when it would not).
+    #[must_use]
+    pub fn has_credit(&self) -> bool {
+        self.live < CREDITS || self.waiting.is_some()
+    }
+
+    /// Sends slot parameter `id`'s new value (`zone001_level`, ...) to the instance, which stores
+    /// it at its next block start as `set_param` would. `false` for an id that is not a slot
+    /// parameter. Values the full ring cannot take wait here, in order (see [`Publisher::collect`]).
+    pub fn set_control(&mut self, id: &str, value: f32) -> bool {
+        let Some((zone, field)) = resolve(id) else { return false };
+        let (Ok(zone), Ok(field)) = (u16::try_from(zone), u16::try_from(field)) else { return false };
+        self.backlog.push_back(ControlEdit { zone, field, value });
+        self.flush_controls();
+        true
+    }
+
+    /// Source ids handed out and still held by a live generation.
+    #[cfg(test)]
+    pub(super) fn held_ids(&self) -> usize {
+        self.ids.iter().flatten().count()
+    }
+
+    /// Control values still waiting for room in the ring.
+    #[must_use]
+    pub fn controls_waiting(&self) -> usize {
+        self.backlog.len()
+    }
+
+    fn flush_controls(&mut self) {
+        while let Some(&c) = self.backlog.front() {
+            if self.controls.push(c).is_err() {
+                return;
+            }
+            self.backlog.pop_front();
+        }
     }
 
     /// Credits in use (at most [`CREDITS`]).
@@ -247,7 +327,7 @@ impl Publisher {
 /// Checks a spec before anything is prepared and returns its [`ZONES`] zones, sources still by the
 /// spec's indices: counts, each zone's source (present, mono or stereo, long enough for its
 /// region), then the zones and pads whole as the core will check them on adoption.
-fn check(spec: &PatchSpec) -> Result<Vec<Option<Zone>>, PublishError> {
+pub(super) fn check(spec: &PatchSpec) -> Result<Vec<Option<Zone>>, PublishError> {
     if spec.sources.len() > ZONES || spec.zones.len() > ZONES {
         return Err(PublishError::TooMany);
     }
@@ -258,8 +338,10 @@ fn check(spec: &PatchSpec) -> Result<Vec<Option<Zone>>, PublishError> {
         if !(1..=2).contains(&s.num_channels()) {
             return Err(PublishError::Channels { zone: i });
         }
-        if (s.frames() as u64) < z.region.end {
-            return Err(PublishError::Region { zone: i });
+        if readable_frames(s.as_ref()) < z.region.end {
+            // The shorter channel of a stereo source is what plays: a region past it is refused,
+            // and named as such when the source's own length would have held it.
+            return Err(if (s.frames() as u64) < z.region.end { PublishError::Region { zone: i } } else { PublishError::ShortChannel { zone: i } });
         }
         // The controls are the slot parameters', always in range: check the structure.
         z.playback.level_db = 0.0;

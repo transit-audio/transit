@@ -30,9 +30,16 @@ pub struct Source {
     rate: f32,
 }
 
+/// The frames every channel the core reads holds: the first channel's for mono, the shorter of the
+/// first two for stereo (whatever [`SampleSource::frames`] says).
+pub(super) fn readable_frames(s: &dyn SampleSource) -> u64 {
+    let len = |c: usize| s.channel(c).map_or(0, <[f32]>::len) as u64;
+    if s.num_channels() >= 2 { len(0).min(len(1)) } else { len(0) }
+}
+
 impl Source {
     fn new(sample: Arc<dyn SampleSource>) -> Source {
-        let frames = sample.frames() as u64;
+        let frames = readable_frames(sample.as_ref());
         let rate = sample.sample_rate();
         Source { sample, frames, rate }
     }

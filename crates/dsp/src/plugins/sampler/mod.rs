@@ -36,7 +36,6 @@ use crate::params::Params;
 use crate::plugins::instrument_queue::{AdsrRates, EventKind, EventQueue, run_block};
 use crate::util::{Smoother, frames_in, ms_to_samples, sane_channels, sane_sr};
 use crate::{Category, Plugin, PluginInfo, SampleSource, Transport};
-use events::Ingress;
 use transit_sampler_core::event::EventKind as CoreKind;
 
 mod adapter;
@@ -48,9 +47,19 @@ mod params;
 
 use adapter::CorePath;
 pub use bank::{CREDITS, PreparedBank, SOURCE_IDS, Source};
-pub use handoff::{PatchSpec, PublishError, Publisher};
+pub use handoff::{CONTROL_RING, PatchSpec, PublishError, Publisher};
 use legacy::{Derived, RELEASE, SAMPLER_PARAMS, VOICES, Voice};
-pub use params::{FIELD_LEVEL, FIELD_PAN, ZONE_FIELDS, field_info, slot_id};
+pub use params::{FIELD_LEVEL, FIELD_PAN, ZONE_FIELDS, field_info, resolve, slot_id};
+pub use transit_sampler_core::patch::{Membership, Pad, PatchError, PlayMode, Playback, Zone};
+pub use transit_sampler_core::playhead::{LoopMode, Region};
+pub use transit_sampler_core::{PADS, ZONES};
+
+/// Checks a spec as [`Publisher::publish`] will before it prepares anything (counts, sources,
+/// regions, the zones and pads as the core checks them), without publishing: a command validates
+/// an edit with it before it changes the document.
+pub fn check_spec(spec: &PatchSpec) -> Result<(), PublishError> {
+    handoff::check(spec).map(|_| ())
+}
 
 pub static SAMPLER_INFO: PluginInfo = PluginInfo {
     id: "sampler",
@@ -191,7 +200,7 @@ impl Plugin for Sampler {
 
     fn note_on(&mut self, offset: usize, note: u8, velocity: u8) {
         if let Some(c) = self.core.as_deref_mut() {
-            c.push(offset, Ingress::Core(CoreKind::NoteOn { channel: 0, key: note.min(127), velocity: velocity.min(127), id: -1 }));
+            c.push(offset, CoreKind::NoteOn { channel: 0, key: note.min(127), velocity: velocity.min(127), id: -1 });
             return;
         }
         self.events.push(offset, EventKind::On(0, note.min(127), velocity.min(127), -1));
@@ -199,7 +208,7 @@ impl Plugin for Sampler {
 
     fn note_off(&mut self, offset: usize, note: u8) {
         if let Some(c) = self.core.as_deref_mut() {
-            c.push(offset, Ingress::Core(CoreKind::NoteOff { channel: 0, key: note.min(127), velocity: 64, id: -1 }));
+            c.push(offset, CoreKind::NoteOff { channel: 0, key: note.min(127), velocity: 64, id: -1 });
             return;
         }
         self.events.push(offset, EventKind::Off(0, note.min(127), -1));
@@ -222,10 +231,14 @@ impl Plugin for Sampler {
 
     fn all_notes_off(&mut self) {
         if let Some(c) = self.core.as_deref_mut() {
-            c.push(0, Ingress::Core(CoreKind::AllNotesOff));
+            c.push(0, CoreKind::AllNotesOff);
             return;
         }
         self.events.push(0, EventKind::AllOff);
+    }
+
+    fn enable_sampler_core(&mut self, seed: u32) -> Option<Publisher> {
+        Some(self.enable_core(seed))
     }
 
     fn set_sample(&mut self, sample: Option<Arc<dyn SampleSource>>) -> bool {

@@ -10,6 +10,15 @@
 //! fuller fade also ends held notes, as transport stops do in Ableton and Logic). A locate or a
 //! loop wrap while playing sends nothing. While playing, the song position at the block's first
 //! frame goes to the core, which interpolates it inside the block (see the block-size test).
+//!
+//! Slot level and pan changes glide: a changed `zoneNNN_level` or `zoneNNN_pan` ramps linearly
+//! across the block it applies in, from the old value to the new, every frame by the same
+//! increment, the same for every voice of the zone (`SamplerCore::set_zone_glide`). The dsp crate's
+//! other smoothed parameters (a plug-in's output level, through `util::Smoother`) glide with a
+//! one-pole filter on the plug-in's own output; a zone's level and pan are per-voice gains inside
+//! the core, rendered voice by voice, so the glide is keyed to absolute frames instead, which
+//! needs no per-zone state stepped in frame order. The other slot parameters (the shaper and the
+//! matrix) apply at the block start, as the Macro Oscillator's do.
 
 use transit_sampler_core::event::{Context, Event, EventKind};
 use transit_sampler_core::patch::PlayMode;
@@ -17,7 +26,7 @@ use transit_sampler_core::reader::RegionReader;
 use transit_sampler_core::{SamplerCore, ZONES};
 
 use super::bank::Banks;
-use super::events::{CoreQueue, Ingress, RESET_CONTROLLERS};
+use super::events::CoreQueue;
 use super::handoff::{self, AudioEnd, Generation, Publisher};
 use super::params::SlotParams;
 use crate::Transport;
@@ -34,7 +43,6 @@ pub(super) struct CorePath {
     /// Every zone's controls must be rebuilt (the rate or the bar changed).
     all_dirty: bool,
     stop_due: bool,
-    reset_controllers: bool,
     playing: bool,
     /// Frames since the last reset (the core's absolute frame).
     frame: u64,
@@ -62,7 +70,6 @@ impl CorePath {
             queue: CoreQueue::new(),
             all_dirty: false,
             stop_due: false,
-            reset_controllers: false,
             playing: false,
             frame: 0,
             tempo: 120.0,
@@ -87,7 +94,6 @@ impl CorePath {
         self.core.reset();
         self.queue.clear();
         self.stop_due = false;
-        self.reset_controllers = false;
         self.playing = false;
         self.frame = 0;
         self.quarters = None;
@@ -111,14 +117,8 @@ impl CorePath {
     }
 
     /// Queues a host event; `false` when the queue refused it.
-    pub(super) fn push(&mut self, offset: usize, ingress: Ingress) -> bool {
-        match ingress {
-            Ingress::Core(kind) => self.queue.push(offset, kind),
-            Ingress::ResetControllers => {
-                self.reset_controllers = true;
-                true
-            }
-        }
+    pub(super) fn push(&mut self, offset: usize, kind: EventKind) -> bool {
+        self.queue.push(offset, kind)
     }
 
     pub(super) fn set_param(&mut self, id: &str, value: f32) -> bool {
@@ -132,24 +132,19 @@ impl CorePath {
     /// Renders a block into the first `ch` channels of `io` (a third channel and beyond get the
     /// mean of left and right).
     pub(super) fn process(&mut self, io: &mut [Vec<f32>], frames: usize, ch: usize) {
-        self.adopt();
-        self.apply_params();
         let ch = ch.min(io.len());
         let frames = frames_in(io, frames, ch);
+        self.take_controls();
+        self.adopt();
+        self.apply_params(frames);
         let CorePath { core, current, retained, queue, .. } = self;
         let [r0, r1] = retained;
         let banks = Banks { banks: [current.as_deref().map(|g| &g.bank), r0.as_deref().map(|g| &g.bank), r1.as_deref().map(|g| &g.bank)] };
         let ctx = Context { frame: self.frame, tempo: self.tempo, quarters: self.quarters };
-        if self.stop_due || self.reset_controllers {
+        if self.stop_due {
             // Before the block's own events, at its first frame, without rendering.
-            let stop = [Event::new(0, EventKind::Stop)];
-            let first: &[Event] = if self.stop_due { &stop } else { &[] };
-            core.process(&ctx, &banks, first, &mut []);
-            if self.reset_controllers {
-                core.process(&ctx, &banks, &RESET_CONTROLLERS, &mut []);
-            }
+            core.process(&ctx, &banks, &[Event::new(0, EventKind::Stop)], &mut []);
             self.stop_due = false;
-            self.reset_controllers = false;
         }
         let events = queue.sorted();
         let rendered = match (ch, &mut *io) {
@@ -178,6 +173,14 @@ impl CorePath {
         self.retire();
     }
 
+    /// Stores the slot values the control side sent ([`Publisher::set_control`]) as `set_param`
+    /// stores them. Bounded by the ring's capacity; no allocation.
+    fn take_controls(&mut self) {
+        while let Ok(c) = self.end.controls.pop() {
+            self.params.set_index(usize::from(c.zone), usize::from(c.field), c.value);
+        }
+    }
+
     /// Takes the waiting generation when a retained slot is free for the current one.
     fn adopt(&mut self) {
         let Some(free) = self.retained.iter().position(Option::is_none) else { return };
@@ -201,8 +204,8 @@ impl CorePath {
     }
 
     /// Hands the core every zone whose slot parameters changed (all of them after a rate or bar
-    /// change).
-    fn apply_params(&mut self) {
+    /// change); a level or pan change glides over the block's `frames`.
+    fn apply_params(&mut self, frames: usize) {
         let dirty = self.params.take_dirty();
         let all = std::mem::take(&mut self.all_dirty);
         let Some(g) = self.current.as_deref_mut() else { return };
@@ -213,7 +216,7 @@ impl CorePath {
             {
                 self.params.compose(z, zone, self.bar_quarters, self.bar_origin, self.sr);
                 // Same region: no fade; checked when it was published.
-                let _ = self.core.set_zone(z, Some(*zone));
+                let _ = self.core.set_zone_glide(z, *zone, self.frame, u32::try_from(frames).unwrap_or(u32::MAX));
             }
         }
     }

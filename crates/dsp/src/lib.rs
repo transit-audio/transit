@@ -424,6 +424,13 @@ pub trait Plugin: Send {
     fn set_sample(&mut self, _sample: Option<Arc<dyn SampleSource>>) -> bool {
         false
     }
+    /// The built-in Sampler's patch seam (ADR 0041): switches the instance to its core path, with
+    /// the voices' random state from `seed`, and returns the control side of its patch handoff
+    /// (multi-source banks, which [`Plugin::set_sample`]'s single source cannot carry). `None` for
+    /// every other plugin. Control side only, before the instance first processes: it allocates.
+    fn enable_sampler_core(&mut self, _seed: u32) -> Option<plugins::sampler::Publisher> {
+        None
+    }
     /// The plugin's complete internal state as an opaque blob (third-party plugins), as its
     /// [`Plugin::state_reader`] reads it. `None` when the plugin has no state beyond its
     /// parameters (built-ins) or the plugin refused. May allocate: never call it in steady-state
