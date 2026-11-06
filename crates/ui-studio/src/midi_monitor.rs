@@ -208,6 +208,8 @@ pub struct State {
     pub led: Led,
     /// Where the header LED was last drawn.
     pub led_rect: crate::arrange::R4,
+    /// Where the filter bar's controls were last drawn.
+    pub filter_bar: Option<FilterBar>,
 }
 
 const CC_NAMES: [(u8, &str); 15] = [
@@ -604,6 +606,7 @@ pub fn inspect(app: &StudioApp) -> Value {
         "dropped": [s.dropped.0, s.dropped.1],
         "window": s.window,
         "led": s.led_rect,
+        "filter_bar": s.filter_bar,
         "learn": format!("{:?}", s.learn),
         "last_rows": s.rows.iter().rev().take(5).rev().map(line).collect::<Vec<_>>(),
     })
@@ -657,55 +660,88 @@ fn dot(ui: &mut egui::Ui, color: Color32) {
     ui.painter().circle_filled(r.center(), 4.0, color);
 }
 
-fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) {
+/// Where the filter bar's controls were last drawn, for `ui.inspect` and the layout tests.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct FilterBar {
+    pub dir: crate::widgets::segmented::SegmentedLayout,
+    pub devices: crate::arrange::R4,
+    pub channels: crate::arrange::R4,
+    pub types: Vec<crate::widgets::toggle::ToggleLayout>,
+}
+
+/// The filter bar by the kit: direction is a segmented control, the message classes are option
+/// toggles, Devices and Channels are the chrome's combo (inset, chevron) over their checklists.
+fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) -> FilterBar {
+    use crate::widgets::{segmented, toggle};
+    let mut bar = None;
     ui.horizontal_wrapped(|ui| {
         let f = &mut prefs.filters;
-        for (d, label) in [(DirFilter::Both, "In + Out"), (DirFilter::In, "In"), (DirFilter::Out, "Out")] {
-            ui.selectable_value(&mut f.dir, d, label);
+        let dirs = [DirFilter::Both, DirFilter::In, DirFilter::Out];
+        let selected = dirs.iter().position(|d| *d == f.dir).unwrap_or(0);
+        let seg = segmented::show(ui, egui::Id::new("midi_monitor_dir"), &["In + Out", "In", "Out"], selected, None);
+        if let Some(i) = seg.picked {
+            f.dir = dirs[i];
         }
         ui.separator();
         let names = s.port_names();
         let shown = names.iter().filter(|n| !f.hidden_ports.contains(n)).count();
-        ui.menu_button(format!("Devices ({shown}/{})", names.len()), |ui| {
-            if names.is_empty() {
-                ui.label(egui::RichText::new("No ports yet").color(TOKENS.text_dim));
-            }
-            for n in &names {
-                ui.horizontal(|ui| {
-                    dot(ui, s.port_color(n));
-                    let mut on = !f.hidden_ports.contains(n);
-                    if crate::chrome::checkbox(ui, &mut on, n).changed() {
-                        f.hidden_ports.retain(|h| h != n);
-                        if !on {
-                            f.hidden_ports.push(n.clone());
-                        }
+        let devices = crate::chrome::field(ui, |ui| {
+            egui::ComboBox::from_id_salt("midi_monitor_devices")
+                .selected_text(format!("Devices ({shown}/{})", names.len()))
+                .icon(crate::chrome::chevron)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show_ui(ui, |ui| {
+                    if names.is_empty() {
+                        ui.label(egui::RichText::new("No ports yet").color(TOKENS.text_dim));
                     }
-                });
-            }
+                    for n in &names {
+                        ui.horizontal(|ui| {
+                            dot(ui, s.port_color(n));
+                            let mut on = !f.hidden_ports.contains(n);
+                            if crate::chrome::checkbox(ui, &mut on, n).changed() {
+                                f.hidden_ports.retain(|h| h != n);
+                                if !on {
+                                    f.hidden_ports.push(n.clone());
+                                }
+                            }
+                        });
+                    }
+                })
+                .response
+                .rect
         });
         let chans = if f.channels == u16::MAX { "all".to_string() } else { format!("{}/16", f.channels.count_ones()) };
-        ui.menu_button(format!("Channels ({chans})"), |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("All").clicked() {
-                    f.channels = u16::MAX;
-                }
-                if ui.button("None").clicked() {
-                    f.channels = 0;
-                }
-            });
-            egui::Grid::new("midi_monitor_channels").show(ui, |ui| {
-                for c in 0..16u16 {
-                    let mut on = f.channels & (1 << c) != 0;
-                    if crate::chrome::checkbox(ui, &mut on, format!("{}", c + 1)).changed() {
-                        f.channels = if on { f.channels | (1 << c) } else { f.channels & !(1 << c) };
-                    }
-                    if c % 4 == 3 {
-                        ui.end_row();
-                    }
-                }
-            });
+        let channels = crate::chrome::field(ui, |ui| {
+            egui::ComboBox::from_id_salt("midi_monitor_channels_combo")
+                .selected_text(format!("Channels ({chans})"))
+                .icon(crate::chrome::chevron)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show_ui(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("All").clicked() {
+                            f.channels = u16::MAX;
+                        }
+                        if ui.button("None").clicked() {
+                            f.channels = 0;
+                        }
+                    });
+                    egui::Grid::new("midi_monitor_channels").show(ui, |ui| {
+                        for c in 0..16u16 {
+                            let mut on = f.channels & (1 << c) != 0;
+                            if crate::chrome::checkbox(ui, &mut on, format!("{}", c + 1)).changed() {
+                                f.channels = if on { f.channels | (1 << c) } else { f.channels & !(1 << c) };
+                            }
+                            if c % 4 == 3 {
+                                ui.end_row();
+                            }
+                        }
+                    });
+                })
+                .response
+                .rect
         });
         ui.separator();
+        let mut types = Vec::new();
         for (flag, label) in [
             (&mut f.notes, "Notes"),
             (&mut f.cc, "CC"),
@@ -714,10 +750,16 @@ fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) {
             (&mut f.sysex, "SysEx"),
             (&mut f.real_time, "Real-time"),
         ] {
-            ui.toggle_value(flag, label);
+            let out = toggle::show(ui, egui::Id::new(("midi_monitor_class", label)), label, toggle::Role::Option, *flag, true, None);
+            if out.toggled {
+                *flag = !*flag;
+            }
+            types.push(out.layout);
         }
         crate::chrome::text_field(ui, egui::TextEdit::singleline(&mut f.text).hint_text("Filter text: CC 74, C3, Start").desired_width(170.0));
+        bar = Some(FilterBar { dir: seg.layout, devices: crate::arrange::r4(devices), channels: crate::arrange::r4(channels), types });
     });
+    bar.expect("the bar ran")
 }
 
 fn row_ui(ui: &mut egui::Ui, r: &Row, s: &State, mono: &egui::FontId, cw: f32, hover: &mut Option<u8>, height: f32) {
@@ -786,6 +828,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let has_player = app.player.is_some();
     let mut hover = None;
     let mut drawn_spotlight = None;
+    let mut filter_bar_layout = None;
     let r = crate::theme::window(ctx, "MIDI Monitor")
         .open(&mut open)
         .collapsible(false)
@@ -822,7 +865,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 });
             }
             ui.separator();
-            filter_bar(ui, &mut prefs, s);
+            filter_bar_layout = Some(filter_bar(ui, &mut prefs, s));
             ui.horizontal_wrapped(|ui| {
                 ui.toggle_value(&mut pause, "Pause");
                 clear = ui.button("Clear").clicked();
@@ -889,6 +932,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let s = &mut app.midi_monitor;
     s.hover_key = hover;
     s.drawn_spotlight = drawn_spotlight;
+    s.filter_bar = filter_bar_layout;
     s.spotlight_scroll = None;
     if clear {
         s.rows.clear();

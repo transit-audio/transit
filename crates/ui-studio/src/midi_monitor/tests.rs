@@ -539,3 +539,56 @@ fn port_lines_read_as_errors_warnings_or_plain() {
     // Negative control: an open port with traffic is a plain line.
     assert_eq!(port_severity(&port(PortState::Open), "KeyStep (in) · open · 30 msg/s"), None);
 }
+
+fn click(app: &mut StudioApp, at: (f32, f32)) {
+    let (req, _rx) = crate::ControlRequest::new("ui.click", json!({"x": at.0, "y": at.1}));
+    let _ = crate::control::handle_for_test(app, &egui::Context::default(), &req);
+}
+
+fn centre(r: [f32; 4]) -> (f32, f32) {
+    ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0)
+}
+
+fn bar_after(ctx: &egui::Context, app: &mut StudioApp, from: f64) -> FilterBar {
+    for i in 0..4 {
+        frame(ctx, app, from + f64::from(i) / 60.0);
+    }
+    app.midi_monitor.filter_bar.clone().expect("the filter bar was drawn")
+}
+
+#[test]
+fn the_filter_bar_is_the_kit_a_segmented_direction_option_toggles_and_chrome_combos() {
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
+    app.run("window.midi_monitor", json!({"value": true})).unwrap();
+    let ctx = egui::Context::default();
+    let bar = bar_after(&ctx, &mut app, 1.0);
+    assert_eq!(bar.dir.segments.len(), 3, "In + Out | In | Out");
+    assert_eq!(bar.dir.selected, 0);
+    assert_eq!(bar.types.len(), 6);
+    let labels: Vec<&str> = bar.types.iter().map(|t| t.text.as_str()).collect();
+    assert_eq!(labels, ["Notes", "CC", "Pitch/Touch", "Program", "SysEx", "Real-time"]);
+    for t in &bar.types {
+        assert!(t.on, "{}: every class starts shown", t.text);
+        assert_eq!(
+            (t.fill, t.ink, t.border),
+            (crate::theme::TOKENS.toggle_option_fill, crate::theme::TOKENS.signal, crate::theme::TOKENS.signal),
+            "{}: the option look, not a solid signal button",
+            t.text
+        );
+    }
+    for combo in [bar.devices, bar.channels] {
+        assert_eq!(combo[3] - combo[1], crate::tokens::chrome::CONTROL_HEIGHT, "a chrome combo is the control height: {combo:?}");
+    }
+    // The behavior is unchanged: a class toggles, the direction picks.
+    click(&mut app, centre(bar.types[0].rect));
+    let bar = bar_after(&ctx, &mut app, 2.0);
+    assert!(!app.ui.midi_monitor.filters.notes && !bar.types[0].on, "Notes toggled off");
+    assert!(bar.types[1].on, "and only Notes");
+    click(&mut app, centre(bar.dir.segments[2]));
+    let bar = bar_after(&ctx, &mut app, 3.0);
+    assert_eq!((app.ui.midi_monitor.filters.dir, bar.dir.selected), (DirFilter::Out, 2));
+    // Negative control: a click beside the controls changes nothing.
+    click(&mut app, (bar.types[5].rect[2] + 300.0, bar.types[5].rect[1] - 40.0));
+    let again = bar_after(&ctx, &mut app, 4.0);
+    assert_eq!((app.ui.midi_monitor.filters.dir, again.dir.selected, again.types[0].on), (DirFilter::Out, 2, false));
+}
