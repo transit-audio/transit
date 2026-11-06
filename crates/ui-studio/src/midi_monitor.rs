@@ -685,11 +685,9 @@ fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) -> FilterBar {
         let names = s.port_names();
         let shown = names.iter().filter(|n| !f.hidden_ports.contains(n)).count();
         let devices = crate::chrome::field(ui, |ui| {
-            egui::ComboBox::from_id_salt("midi_monitor_devices")
-                .selected_text(format!("Devices ({shown}/{})", names.len()))
-                .icon(crate::chrome::chevron)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show_ui(ui, |ui| {
+            crate::chrome_pick::Combo::new("midi_monitor_devices", format!("Devices ({shown}/{})", names.len()))
+                .keep_open()
+                .show(ui, |ui| {
                     if names.is_empty() {
                         ui.label(egui::RichText::new("No ports yet").color(TOKENS.text_dim));
                     }
@@ -711,11 +709,9 @@ fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) -> FilterBar {
         });
         let chans = if f.channels == u16::MAX { "all".to_string() } else { format!("{}/16", f.channels.count_ones()) };
         let channels = crate::chrome::field(ui, |ui| {
-            egui::ComboBox::from_id_salt("midi_monitor_channels_combo")
-                .selected_text(format!("Channels ({chans})"))
-                .icon(crate::chrome::chevron)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show_ui(ui, |ui| {
+            crate::chrome_pick::Combo::new("midi_monitor_channels_combo", format!("Channels ({chans})"))
+                .keep_open()
+                .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         if ui.button("All").clicked() {
                             f.channels = u16::MAX;
@@ -866,10 +862,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             ui.separator();
             filter_bar_layout = Some(filter_bar(ui, &mut prefs, s));
             ui.horizontal_wrapped(|ui| {
-                ui.toggle_value(&mut pause, "Pause");
+                crate::chrome_pick::option_toggle(ui, &mut pause, "Pause");
                 clear = ui.button("Clear").clicked();
-                ui.toggle_value(&mut prefs.autoscroll, "Follow");
-                let learn_toggle = ui.toggle_value(&mut learn, "Learn").on_hover_text("Press a button on your controller: the next message is shown here in large type.");
+                crate::chrome_pick::option_toggle(ui, &mut prefs.autoscroll, "Follow");
+                let learn_toggle = crate::chrome_pick::option_toggle(ui, &mut learn, "Learn").on_hover_text("Press a button on your controller: the next message is shown here in large type.");
                 crate::help::hover(ui, &learn_toggle, crate::help::Id::MidiMonitorLearn);
                 copy = ui.button("Copy last 100 lines").clicked();
                 copy_report = ui.button("Copy report").clicked();
