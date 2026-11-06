@@ -66,7 +66,7 @@ fn the_remembered_rect_round_trips_through_ui_json_and_opens_on_screen() {
     assert_eq!(back.device_windows.get(super::MACRO_OSC), Some(&[100.0, 80.0, 1200.0, 700.0]));
     // An older ui.json without the field reads as empty.
     let old: crate::UiState = serde_json::from_value(json!({})).unwrap();
-    assert!(old.device_windows.is_empty() && old.editor_rects.is_empty() && old.device_sections.is_empty() && old.editor_follow.is_empty());
+    assert!(old.device_windows.is_empty() && old.device_sections.is_empty() && old.editor_follow.is_empty());
     let tr = t.instrument_track();
     t.open_card(0);
     assert_eq!(t.panel(tr).window, [100.0, 80.0, 1200.0, 700.0], "the device opens where it was last closed");
@@ -125,6 +125,42 @@ fn two_instances_keep_their_own_rects_and_the_second_opens_cascaded() {
     let r = Rect::from_min_size(pos2(32.0, 32.0), vec2(100.0, 100.0));
     assert_eq!(cascaded(r, &[]).min, r.min);
     assert_eq!(cascaded(r, &[r, r.translate(vec2(24.0, 24.0))]).min, pos2(80.0, 80.0));
+}
+
+#[test]
+fn after_a_restart_an_instance_opens_at_the_device_rect_never_at_another_instances() {
+    // The first launch: A is left at one place, B at another; A closes first, so the device's
+    // rect (the one ui.json keeps) is B's.
+    let mut t = T::new();
+    let a = t.instrument_track();
+    let b = t.instrument_track();
+    t.app.focus(a);
+    t.frames(3);
+    t.open_card(0);
+    let ra = t.panel(a).window;
+    t.app.focus(b);
+    t.frames(3);
+    t.open_card(0);
+    let rb = t.panel(b).window;
+    // (B overlaps A's close button, so A closes from its card.)
+    t.app.close_editor((a, INST));
+    t.frames(2);
+    t.click(mid(t.panel(b).title.close), 1);
+    assert!(t.app.ui.plugin_windows.is_empty());
+    let mut saved = serde_json::to_value(&t.app.ui).unwrap();
+    // The next launch numbers its inserts from 1 again: its first instance may get A's old uid.
+    // Model that by filing A's rect under the new instance's uid, as a uid-keyed ui.json would.
+    let mut next = T::new();
+    let x = next.instrument_track();
+    let uid_x = next.app.builtin_at((x, INST)).unwrap().uid.get();
+    saved["editor_rects"] = json!({ uid_x.to_string(): ra });
+    let restored: crate::UiState = serde_json::from_value(saved).unwrap();
+    next.app.ui = restored;
+    next.app.toggle_editor((x, INST));
+    next.frames(3);
+    let rx = next.panel(x).window;
+    assert_eq!(rx, rb, "the device's rect from ui.json, not the instance that had this uid before");
+    assert_ne!(rx, ra);
 }
 
 #[test]

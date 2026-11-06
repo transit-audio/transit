@@ -820,7 +820,7 @@ fn a_built_in_window_fits_its_panel_and_has_no_resize_handle() {
     t.frames(3);
     assert_eq!(t.window(tr).rect, resized, "stable");
     let uid = t.window(tr).uid;
-    assert_eq!(t.app.ui.editor_rects.get(&uid), Some(&resized), "remembered for the next opening");
+    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid), Some(&resized), "remembered for the next opening");
 }
 
 #[test]

@@ -4,11 +4,13 @@
 //! - **Frame:** the device window rule: the `bg.window` ground its panels sit on, a 1 px
 //!   `line.strong` edge, radius 8, no shadow, no egui title bar: the device's own A bar, which
 //!   moves the window when dragged. The body scrolls between the bar and the footer.
-//! - **Remembered rect:** per insert in `UiState::editor_rects` (keyed by `Insert.uid`, saved in
-//!   `ui.json`): an instance opens where it was left. An instance never opened before takes the
-//!   device's last closed rect (`UiState::device_windows`, written when a window closes), moved
-//!   24 px down and right while it would land on an open window. Either is moved and shrunk onto
-//!   the screen when it no longer fits.
+//! - **Remembered rect:** per instance while the app runs ([`State::rects`], keyed by
+//!   `Insert.uid`, which is unique within a launch and not saved), per device across launches
+//!   (`UiState::device_windows` in `ui.json`, written when a window closes). An instance opens
+//!   where it was left; one never opened in this launch takes the device's rect, moved 24 px down
+//!   and right while it would land on an open window. Either is moved and shrunk onto the screen
+//!   when it no longer fits. No saved key would survive a restart: the uid restarts every launch,
+//!   and a slot moves when the chain is reordered.
 //! - **Escape** closes the focused editor: the one last clicked or opened, until a click lands
 //!   outside every editor window; a text field, a popup or a dialog keeps Escape.
 //! - **Follow selection** (the bar's link toggle, `UiState::editor_follow`): the window shows the
@@ -56,6 +58,8 @@ pub struct State {
     generation: HashMap<u64, u32>,
     /// Where each open window sits (its bar moves it).
     pos: HashMap<u64, Pos2>,
+    /// Each instance's last rect by insert uid, for this launch (it survives the window closing).
+    pub rects: HashMap<u64, [f32; 4]>,
 }
 
 /// A window drawn this frame: its insert, rect, layer and device id.
@@ -154,9 +158,9 @@ pub(crate) fn follow(app: &mut StudioApp) {
         let new_uid = app.builtin_at(target).map(|i| i.uid.get());
         app.builtin_editor.macro_osc.no_focus.extend(new_uid);
         if let (Some(w), Some(n)) = (was, new_uid)
-            && let Some(r) = app.ui.editor_rects.get(&w).copied()
+            && let Some(r) = app.builtin_editor.macro_osc.rects.get(&w).copied()
         {
-            app.ui.editor_rects.entry(n).or_insert(r);
+            app.builtin_editor.macro_osc.rects.entry(n).or_insert(r);
         }
         for k in app.ui.plugin_windows.iter_mut().chain(app.ui.editor_follow.iter_mut()) {
             if *k == key {
@@ -190,7 +194,7 @@ pub(crate) fn show(
     if fresh || !app.builtin_editor.macro_osc.pos.contains_key(&uid) {
         let content = super::content_height(app, key, super::DESIGN_WIDTH.min(screen.width()));
         let open: Vec<Rect> = app.builtin_editor.macro_osc.shown.iter().filter(|s| s.0 != uid).map(|s| s.1).collect();
-        let (own, device) = (app.ui.editor_rects.get(&uid).copied(), app.ui.device_windows.get(info.id).copied());
+        let (own, device) = (app.builtin_editor.macro_osc.rects.get(&uid).copied(), app.ui.device_windows.get(info.id).copied());
         let r = opening_rect(own, device, &open, screen, content, n);
         let st = &mut app.builtin_editor.macro_osc;
         *st.generation.entry(uid).or_default() += 1;
@@ -237,7 +241,7 @@ pub(crate) fn show(
         let r = w.response.rect;
         layout.rect = crate::widgets::r4(r);
         mlay.window = layout.rect;
-        app.ui.editor_rects.insert(uid, layout.rect);
+        app.builtin_editor.macro_osc.rects.insert(uid, layout.rect);
         app.builtin_editor.macro_osc.shown_now.push(Shown(uid, r, w.response.layer_id, info.id));
     }
     if bar.drag != Vec2::ZERO
