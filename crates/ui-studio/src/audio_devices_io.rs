@@ -223,7 +223,7 @@ pub fn section(ui: &mut egui::Ui, io: &IoMap, wasapi: bool, names: &ChannelNames
     for line in overlap_lines(io) {
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(egui::vec2(icons::ICON, icons::ICON), egui::Sense::hover());
-            icons::paint(ui.painter(), r.center(), Icon::Warning, 14.0, TOKENS.record);
+            icons::paint(ui.painter(), r.center(), Icon::Error, 14.0, TOKENS.record);
             ui.label(egui::RichText::new(line).color(TOKENS.text).size(11.5));
         });
     }

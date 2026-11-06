@@ -248,8 +248,8 @@ In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gi
 
 ### Warnings and errors
 - **A warning** is the message in `text` with a triangle glyph, no color, on a `surface.raised` card with a `line.strong` edge where there is room for one (Audio Devices' low-buffer note in the artboard). A dedicated warning yellow would be a third amber next to `mod` and the old loop color.
-- **An error** adds `meter.hot` to the icon and to the edge; the message stays `text`.
-- In code: `chrome::Severity` and `chrome::status_text` / `status_label` (the triangle is Lucide's triangle-alert for both; the artboard draws an error with a circle-alert). The load readout above 80 percent is a warning (the bar and figures in `text`), at 100 percent an error; the MIDI Monitor's closed or missing port is an error, a quiet open input and the paused line warnings; the Unresponsive marker on a device card and a track header is an error; the External Instrument's refused or failed measurement is an error, a stale measurement or a result waiting for Keep a warning.
+- **An error** is a circle-alert in `meter.hot`, with a `meter.hot` edge where there is one; the message stays `text`.
+- In code: `chrome::Severity` and `chrome::status_text` / `status_label`: Lucide's triangle-alert for a warning, circle-alert for an error, as the artboard draws them (every red alert icon in the app is circle-alert). The load readout above 80 percent is a warning (the bar and figures in `text`), at 100 percent an error; the MIDI Monitor's closed or missing port is an error, a quiet open input and the paused line warnings; the Unresponsive marker on a device card and a track header is an error; the External Instrument's refused or failed measurement is an error, a stale measurement or a result waiting for Keep a warning.
 
 ### The loop
 The loop region has its own hue, `loop` (magenta), clear of amber (mod) and blue (selection).

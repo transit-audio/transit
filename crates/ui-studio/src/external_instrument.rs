@@ -371,7 +371,7 @@ pub(crate) fn card(
         let at = pos2(area.center().x - (galley.size().x - g) / 2.0, area.center().y - galley.size().y / 2.0);
         let painter = pc.with_clip_rect(area.intersect(clip));
         if let Some(sev) = sev {
-            crate::icons::paint(&painter, pos2(at.x - g + size / 2.0, at.y + size / 2.0), crate::icons::Icon::Warning, size, sev.glyph());
+            crate::icons::paint(&painter, pos2(at.x - g + size / 2.0, at.y + size / 2.0), sev.icon(), size, sev.glyph());
         }
         painter.galley(at, galley, ink);
     }

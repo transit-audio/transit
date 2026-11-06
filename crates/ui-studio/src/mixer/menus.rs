@@ -45,7 +45,7 @@ pub(super) fn dropdown(
     let mut text_r = r.shrink2(vec2(4.0, 0.0));
     if tip.is_some() {
         // A tip marks a route that is not on this device: the warning icon leads the text.
-        crate::icons::paint(&p, pos2(text_r.min.x + 5.0, r.center().y), crate::icons::Icon::Warning, 10.0, TOKENS.record);
+        crate::icons::paint(&p, pos2(text_r.min.x + 5.0, r.center().y), crate::icons::Icon::Error, 10.0, TOKENS.record);
         text_r.min.x += 12.0;
     }
     p.with_clip_rect(text_r.intersect(clip)).text(text_r.left_center(), Align2::LEFT_CENTER, current, FontId::proportional(10.5), TOKENS.text);

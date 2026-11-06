@@ -731,7 +731,7 @@ fn midi_output_button(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip:
     p.rect_filled(r, crate::theme::RADIUS_SM, fill);
     let ink = if missing || t.midi_output.is_external() { theme::text_on(fill) } else { TOKENS.text };
     if missing {
-        crate::icons::paint(p, r.center(), crate::icons::Icon::Warning, 11.0, ink);
+        crate::icons::paint(p, r.center(), crate::icons::Icon::Error, 11.0, ink);
     } else {
         p.with_clip_rect(r.intersect(clip)).text(r.center(), Align2::CENTER_CENTER, "Out", FontId::proportional(9.5), ink);
     }

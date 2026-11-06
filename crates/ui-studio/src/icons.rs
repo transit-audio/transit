@@ -37,8 +37,10 @@ pub enum Icon {
     FolderOpen,
     FileAudio,
     File,
-    /// A warning (Lucide triangle-alert): audio backend trouble in the telemetry readout.
+    /// A warning (Lucide triangle-alert), drawn in `text`: a warning carries no color (#326).
     Warning,
+    /// An error (Lucide circle-alert), drawn in `meter.hot` (#326).
+    Error,
     /// Lucide snowflake: Freeze on the track header.
     Snowflake,
     /// Lucide headphones: the browser's auto-preview toggle.
@@ -46,7 +48,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Icon; 24] = [
+    pub const ALL: [Icon; 25] = [
         Icon::Rewind,
         Icon::Stop,
         Icon::Play,
@@ -69,6 +71,7 @@ impl Icon {
         Icon::FileAudio,
         Icon::File,
         Icon::Warning,
+        Icon::Error,
         Icon::Snowflake,
         Icon::Headphones,
     ];
@@ -98,6 +101,7 @@ impl Icon {
             Icon::FileAudio => "file-audio",
             Icon::File => "file",
             Icon::Warning => "triangle-alert",
+            Icon::Error => "circle-alert",
             Icon::Snowflake => "snowflake",
             Icon::Headphones => "headphones",
         }
@@ -126,6 +130,7 @@ impl Icon {
             Icon::FileAudio => include_bytes!("../assets/icons/file-audio.svg"),
             Icon::File => include_bytes!("../assets/icons/file.svg"),
             Icon::Warning => include_bytes!("../assets/icons/triangle-alert.svg"),
+            Icon::Error => include_bytes!("../assets/icons/circle-alert.svg"),
             Icon::Snowflake => include_bytes!("../assets/icons/snowflake.svg"),
             Icon::Headphones => include_bytes!("../assets/icons/headphones.svg"),
         }

@@ -338,6 +338,11 @@ fn a_warning_is_text_and_a_triangle_and_an_error_adds_meter_hot() {
     let (icons, texts) = inks(&shapes, err_rect.expand(1.0));
     assert_eq!(icons, [DARK.meter_hot], "an error's triangle is meter.hot");
     assert_eq!(texts, [DARK.text], "its message stays text");
+    // The glyphs are the artboard's: triangle-alert for a warning, circle-alert for an error.
+    use crate::icons::Icon;
+    assert_eq!((Severity::Warning.icon(), Severity::Error.icon()), (Icon::Warning, Icon::Error));
+    assert_eq!((Icon::Warning.name(), Icon::Error.name()), ("triangle-alert", "circle-alert"));
+    assert_ne!(Severity::Warning.icon(), Severity::Error.icon(), "negative control: two shapes, not one");
     // Negative control: the warning glyph is not the error's.
     assert_ne!(Severity::Warning.glyph(), Severity::Error.glyph());
     assert_ne!(Severity::Warning.glyph(), DARK.modulation, "no mod amber on a warning");

@@ -298,7 +298,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                         for n in &app.audio_devices.notes {
                             ui.horizontal(|ui| {
                                 let (r, _) = ui.allocate_exact_size(egui::vec2(icons::ICON, icons::ICON), egui::Sense::hover());
-                                icons::paint(ui.painter(), r.center(), Icon::Warning, 14.0, TOKENS.record);
+                                icons::paint(ui.painter(), r.center(), Icon::Error, 14.0, TOKENS.record);
                                 ui.label(egui::RichText::new(n).color(TOKENS.text).size(11.5));
                             });
                         }

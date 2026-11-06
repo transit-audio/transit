@@ -90,7 +90,7 @@ pub(crate) fn send_row(
     }
     let mut text_r = tr.shrink2(vec2(4.0, 0.0));
     if not_here {
-        crate::icons::paint(&p, pos2(text_r.min.x + 5.0, tr.center().y), crate::icons::Icon::Warning, 10.0, TOKENS.record);
+        crate::icons::paint(&p, pos2(text_r.min.x + 5.0, tr.center().y), crate::icons::Icon::Error, 10.0, TOKENS.record);
         text_r.min.x += 12.0;
     }
     p.with_clip_rect(text_r.intersect(clip)).text(text_r.left_center(), Align2::LEFT_CENTER, &target, FontId::proportional(10.5), TOKENS.text);
