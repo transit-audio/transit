@@ -14,6 +14,7 @@
 //! they read the other panels. The panel's own record is [`MacroLayout`].
 
 mod hero;
+mod sections;
 mod title_bar;
 pub mod window;
 
@@ -560,6 +561,8 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     let hero_h = hero::height(w);
     let left_w = (w - space::PANEL_GAP) * 2.0 / 3.0;
     hero::show(app, ui, dev, Rect::from_min_size(pos2(x, y), vec2(left_w, hero_h)), lay, out);
+    let right = Rect::from_min_size(pos2(x + left_w + space::PANEL_GAP, y), vec2(w - left_w - space::PANEL_GAP, hero_h));
+    sections::show(app, ui, dev, right, lay, out);
     y += hero_h + space::PANEL_GAP;
     y += space::WINDOW_PADDING;
     ui.allocate_rect(Rect::from_min_max(origin, pos2(origin.x + width, y)), Sense::hover());
