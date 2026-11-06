@@ -444,3 +444,19 @@ fn the_pad_matches_tokens_json_both_ways() {
         assert!(known.contains(name), "pad/{path}: {name} is not a token");
     }
 }
+
+/// The dark loop hue's contrast as the design README's loop row states it (#326): 5.1 on the
+/// window, 4.9 on a lane, 5.35 on the key rows (the inset well), and `ink.dark` 5.1 on it.
+#[test]
+fn the_loop_row_contrast_figures_hold() {
+    let d: &Tokens = &DARK;
+    let r = |a, b| (contrast(a, b) * 100.0).round() / 100.0;
+    assert_eq!(d.loop_region, tokens::hex(0xD05DAD));
+    assert_eq!(r(d.loop_region, d.bg_window), 5.10, "on the window");
+    assert_eq!((r(d.loop_region, d.lane) * 10.0).round() / 10.0, 4.9, "on a lane");
+    assert_eq!(r(d.loop_region, d.surface_inset), 5.35, "on the key rows");
+    assert_eq!((r(d.ink_dark, d.loop_region) * 10.0).round() / 10.0, 5.1, "ink.dark on the hue");
+    // Negative control: the old amber's figure on the window was 8.9, not the README's 5.1.
+    assert_ne!(r(tokens::hex(0xE6AB27), d.bg_window), 5.10);
+}
+
