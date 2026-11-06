@@ -327,7 +327,10 @@ fn visuals(t: &Tokens, light: bool) -> egui::Visuals {
     v.faint_bg_color = t.lane_alt;
     // Placeholders and a menu row's shortcut.
     v.weak_text_color = Some(t.text_faint);
-    v.selection.bg_fill = t.signal.gamma_multiply(if light { c::SELECTION_ALPHA_LIGHT } else { c::SELECTION_ALPHA_DARK });
+    // egui paints a selected widget (`selectable_label`) with `selection.bg_fill` and the text in
+    // `selection.stroke.color`: the option toggle's look (fill `toggle.on.option.fill`, `signal` text), not a
+    // solid signal button. The same fill backs a text selection, which therefore reads as the option well too.
+    v.selection.bg_fill = t.toggle_option_fill;
     v.selection.stroke = egui::Stroke::new(FOCUS_W, t.focus_ring);
     v.hyperlink_color = t.signal;
     // A warning is `text` and a triangle; an error adds `meter.hot` ([`crate::chrome::Severity`]).

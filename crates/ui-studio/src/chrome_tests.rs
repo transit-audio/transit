@@ -199,8 +199,7 @@ fn popups_are_raised_with_a_strong_edge_and_nothing_casts_a_shadow() {
         assert!(!v.window_highlight_topmost, "every title bar stays bg.titlebar");
         assert_eq!(v.weak_text_color, Some(t.text_faint), "shortcuts and placeholders");
         assert_eq!(v.hyperlink_color, t.signal);
-        let alpha = if theme == egui::Theme::Light { c::SELECTION_ALPHA_LIGHT } else { c::SELECTION_ALPHA_DARK };
-        assert_eq!(v.selection.bg_fill, t.signal.gamma_multiply(alpha));
+        assert_eq!(v.selection.bg_fill, t.toggle_option_fill, "{theme:?}: a selected widget takes the option toggle fill (#326)");
         assert_eq!(st.interaction.tooltip_delay, c::TOOLTIP_DELAY_MS as f32 / 1000.0, "500 ms");
     }
 }
@@ -347,4 +346,41 @@ fn a_warning_is_text_and_a_triangle_and_an_error_adds_meter_hot() {
     assert_ne!(Severity::Warning.glyph(), Severity::Error.glyph());
     assert_ne!(Severity::Warning.glyph(), DARK.modulation, "no mod amber on a warning");
     assert_eq!(style_of(egui::Theme::Dark).visuals.warn_fg_color, DARK.text, "egui's own warnings follow");
+}
+
+/// The fills of every rect a frame painted.
+fn rect_fills(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::Color32> {
+    fn walk(s: &egui::Shape, out: &mut Vec<egui::Color32>) {
+        match s {
+            egui::Shape::Rect(r) => out.push(r.fill),
+            egui::Shape::Vec(v) => v.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+    out
+}
+
+#[test]
+fn a_selected_selectable_label_reads_as_an_option_toggle_not_a_solid_signal_button() {
+    for theme in THEMES {
+        let t = tokens(theme);
+        let mut rig = Rig::themed(theme);
+        let (resp, shapes) = rig.shapes(|ui| ui.selectable_label(true, "Notes"));
+        let fills = rect_fills(&shapes);
+        assert!(fills.contains(&t.toggle_option_fill), "{theme:?}: option fill, got {fills:?}");
+        assert!(!fills.iter().any(|f| *f == t.signal), "{theme:?}: never a solid signal fill");
+        let st = style_of(theme);
+        assert_eq!(st.visuals.selection.stroke.color, t.signal, "{theme:?}: the text and stroke are signal");
+        assert!(resp.rect.width() > 0.0);
+        // Negative control: with the mapping removed (egui's selection fill as it was) the option fill is gone.
+        let mut rig = Rig::themed(theme);
+        let alpha = if theme == egui::Theme::Light { c::SELECTION_ALPHA_LIGHT } else { c::SELECTION_ALPHA_DARK };
+        let (_, old) = rig.shapes(|ui| {
+            ui.visuals_mut().selection.bg_fill = t.signal.gamma_multiply(alpha);
+            ui.selectable_label(true, "Notes")
+        });
+        assert!(!rect_fills(&old).contains(&t.toggle_option_fill), "{theme:?}: negative control");
+    }
 }
