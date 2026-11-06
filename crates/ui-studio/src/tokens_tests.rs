@@ -255,59 +255,29 @@ fn derived_arrangement_tokens_keep_their_old_contrast() {
     }
 }
 
-/// The light rule (ADR 0045): grounds mirror their dark contrast to the window, inks are at least
-/// as legible as in the dark set.
+/// The light set is the maintainer's designed set (#326; the drift test pins every value to
+/// `colorLight`). Its stated targets hold: text roles at 4.5:1 or more on the panel and the inset
+/// well, marks at 3:1 or more on the panel, the raised surface and the knob cap white, the inset well
+/// darker than the panel so it still recesses.
 #[test]
-fn the_light_set_follows_its_rule() {
-    let (d, l) = (&DARK, &LIGHT);
-    let grounds = |t: &Tokens| {
-        [
-            t.bg_titlebar,
-            t.surface_panel,
-            t.surface_raised,
-            t.surface_inset,
-            t.surface_selected,
-            t.knob_cap,
-            t.knob_cap_active,
-            t.line,
-            t.line_inset,
-            t.line_strong,
-            t.grid,
-            t.lane,
-            t.lane_alt,
-            t.ruler,
-            t.header,
-            t.header_selected,
-        ]
-    };
-    for (i, (dg, lg)) in grounds(d).into_iter().zip(grounds(l)).enumerate() {
-        let (dr, lr) = (contrast(dg, d.bg_window), contrast(lg, l.bg_window));
-        assert!((dr - lr).abs() <= 0.01, "ground {i}: dark {dr:.3}, light {lr:.3}");
-        // Mirrored: lighter than the window in dark is darker than it in light.
-        let lum = crate::theme::luminance;
-        assert_eq!(lum(dg) > lum(d.bg_window), lum(lg) < lum(l.bg_window), "ground {i} keeps its direction mirrored");
+fn the_light_set_meets_its_designed_targets() {
+    let l: &Tokens = &LIGHT;
+    for (name, ink) in [("text", l.text), ("text.muted", l.text_muted), ("text.faint", l.text_faint)] {
+        for (ground, g) in [("panel", l.surface_panel), ("inset", l.surface_inset)] {
+            assert!(contrast(ink, g) >= 4.5, "{name} on {ground}: {}", contrast(ink, g));
+        }
     }
-    let inks = |t: &Tokens| {
-        [
-            t.text,
-            t.text_muted,
-            t.text_faint,
-            t.ink_ghost,
-            t.ink_arrow,
-            t.signal,
-            t.modulation,
-            t.meter_ok,
-            t.meter_hot,
-            t.loop_region,
-            t.cursor,
-            t.selection_outline,
-        ]
-    };
-    for (i, (di, li)) in inks(d).into_iter().zip(inks(l)).enumerate() {
-        let (dr, lr) = (contrast(di, d.bg_window), contrast(li, l.bg_window));
-        assert!(lr >= dr, "ink {i}: light {lr:.3} is below dark {dr:.3}");
+    for (name, mark) in [("signal", l.signal), ("mod", l.modulation), ("loop", l.loop_region), ("meter.ok", l.meter_ok), ("meter.hot", l.meter_hot)] {
+        assert!(contrast(mark, l.surface_panel) >= 3.0, "{name} on the panel: {}", contrast(mark, l.surface_panel));
     }
-    assert_eq!(l.surface_inset, Color32::WHITE, "the light anchor");
+    assert_eq!((l.surface_raised, l.knob_cap), (Color32::WHITE, Color32::WHITE));
+    let lum = crate::theme::luminance;
+    assert!(lum(l.surface_inset) < lum(l.surface_panel), "wells recess");
+    // Negative controls: the targets discriminate. ink.ghost (a secondary trace, not a mark) is
+    // under 3:1 on the panel, ink.arrow (not a text role) under 4.5:1; and mod is the designed
+    // orange, not the derived brown it replaces.
+    assert!(contrast(l.ink_ghost, l.surface_panel) < 3.0 && contrast(l.ink_arrow, l.surface_panel) < 4.5);
+    assert_ne!(l.modulation, tokens::hex(0x633E08));
 }
 
 /// The design's own claims: faint text reads at 4.5:1 on panel and inset; signal and mod differ
@@ -403,4 +373,74 @@ fn the_hatch_matches_tokens_json_both_ways() {
     assert_eq!(at(hatch, "color").as_str(), Some("text"));
     assert_eq!(at(hatch, "ghostClip/border").as_str(), Some("ink.ghost"));
     assert_eq!(at(hatch, "anchor").as_str(), Some("window"));
+}
+
+/// The content palette (`palette` in tokens.json): the names, every bar, body and strip value of
+/// both themes, the inks and the OKLCH figures, both ways.
+#[test]
+fn the_palette_matches_tokens_json_both_ways() {
+    let v = json();
+    let p = at(&v, "palette");
+    let names: Vec<&str> = at(p, "names").as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect();
+    assert_eq!(names, tokens::palette::NAMES);
+    use tokens::palette as pl;
+    for (path, rust) in [
+        ("dark/bar", pl::DARK_BAR),
+        ("dark/body", pl::DARK_BODY),
+        ("dark/strip", pl::DARK_STRIP),
+        ("light/bar", pl::LIGHT_BAR),
+        ("light/body", pl::LIGHT_BODY),
+        ("light/strip", pl::LIGHT_STRIP),
+    ] {
+        let json: Vec<Color32> = at(p, path).as_array().unwrap().iter().map(|h| parse(h.as_str().unwrap())).collect();
+        assert_eq!(json, rust, "palette/{path}");
+    }
+    assert_eq!((parse(at(p, "ink/dark").as_str().unwrap()), parse(at(p, "ink/light").as_str().unwrap())), (pl::INK_DARK, pl::INK_LIGHT));
+    let mut leaves = Vec::new();
+    number_leaves(at(p, "oklch"), "", &mut leaves);
+    let in_json: BTreeSet<&str> = leaves.iter().map(|(p, _)| p.as_str()).collect();
+    let in_rust: BTreeSet<&str> = pl::OKLCH.iter().map(|(p, _)| *p).collect();
+    assert_eq!(in_json, in_rust, "palette.oklch paths differ");
+    for (path, x) in pl::OKLCH {
+        assert_eq!(num(at(p, "oklch"), path), *x, "palette/oklch/{path}");
+    }
+    // Negative control: the palette is keyed by theme, so the two sets differ.
+    assert_ne!(pl::DARK_BAR, pl::LIGHT_BAR);
+}
+
+/// The pad (`pad` in tokens.json): every number both ways; the colors it names are tokens.
+#[test]
+fn the_pad_matches_tokens_json_both_ways() {
+    let v = json();
+    let pad = at(&v, "pad");
+    let mut leaves = Vec::new();
+    number_leaves(pad, "", &mut leaves);
+    let in_json: BTreeSet<&str> = leaves.iter().map(|(p, _)| p.as_str()).collect();
+    let in_rust: BTreeSet<&str> = tokens::pad::METRICS.iter().map(|(p, _)| *p).collect();
+    assert_eq!(in_json, in_rust, "pad paths differ between tokens.json and Rust");
+    for (path, x) in tokens::pad::METRICS {
+        assert_eq!(num(pad, path), *x, "pad/{path}");
+    }
+    let known: BTreeSet<String> = ["color", "arrangement"].iter().flat_map(|k| at(&v, k).as_object().unwrap().keys().cloned()).collect();
+    for path in [
+        "fill",
+        "border",
+        "hit/color",
+        "selected/border",
+        "id/color",
+        "chokeBadge/border",
+        "chokeBadge/text",
+        "chokeBadge/chokedFill",
+        "chokeBadge/chokedText",
+        "peer/border",
+        "bankPeerDot/color",
+        "chip/mute/fill",
+        "chip/mute/text",
+        "chip/solo/fill",
+        "chip/solo/text",
+        "empty/border",
+    ] {
+        let name = at(pad, path).as_str().unwrap();
+        assert!(known.contains(name), "pad/{path}: {name} is not a token");
+    }
 }

@@ -1,5 +1,5 @@
 //! The device UI design language's tokens (`docs/design/language/tokens.json`, ADR 0045) as Rust
-//! constants: colors (the dark set is the design; the light set is derived), the arrangement and
+//! constants: colors (the dark set and the designed light set), the arrangement and
 //! transport colors the design does not name, type roles, the space scale, layout metrics, radii
 //! and the component metrics the widget kit draws with.
 //!
@@ -98,57 +98,59 @@ pub mod component {
     }
 }
 
-/// The light theme (`colorLight` in tokens.json): grounds mirror the dark grounds (each keeps its
-/// contrast ratio to `bg.window`, in the opposite direction, with `surface.inset` white); inks keep
-/// their hue and at least their dark contrast against `bg.window`.
+/// The light theme (`colorLight` in tokens.json): the maintainer's designed set, not a formula.
+/// It keeps every role and hue of the dark set and meets targets: text roles at 4.5:1 or more on
+/// the panel and the inset well, marks at 3:1 on the panel, `mod` a mark-only orange, the accents
+/// kept apart for every color-vision type, `surface.raised` and `knob.cap` white on a mid-light
+/// graphite window.
 pub mod color_light {
     use super::*;
     colors! { ALL;
-        BG_WINDOW = "bg.window" 0xF9FAFA;
-        BG_TITLEBAR = "bg.titlebar" 0xF6F6F8;
-        SURFACE_PANEL = "surface.panel" 0xEFF1F3;
-        SURFACE_RAISED = "surface.raised" 0xE3E5E9;
-        SURFACE_INSET = "surface.inset" 0xFFFFFF;
-        SURFACE_SELECTED = "surface.selected" 0xD5D9DE;
-        KNOB_CAP = "knob.cap" 0xDCE0E4;
-        KNOB_CAP_ACTIVE = "knob.capActive" 0xCED3D9;
-        LINE = "line" 0xD4D7DD;
-        LINE_INSET = "line.inset" 0xE1E4E8;
-        LINE_STRONG = "line.strong" 0xBDC3CB;
-        GRID = "grid" 0xEDEEF1;
-        TEXT = "text" 0x202329;
-        TEXT_MUTED = "text.muted" 0x484D56;
-        TEXT_FAINT = "text.faint" 0x5B616B;
-        INK_GHOST = "ink.ghost" 0x9EA6B5;
-        INK_ARROW = "ink.arrow" 0x8F96A1;
-        SIGNAL = "signal" 0x0055BB;
-        MOD = "mod" 0x633E08;
-        METER_OK = "meter.ok" 0x1A4F31;
-        METER_HOT = "meter.hot" 0xB51200;
+        BG_WINDOW = "bg.window" 0xE6E8EB;
+        BG_TITLEBAR = "bg.titlebar" 0xDFE2E6;
+        SURFACE_PANEL = "surface.panel" 0xF7F8F9;
+        SURFACE_RAISED = "surface.raised" 0xFFFFFF;
+        SURFACE_INSET = "surface.inset" 0xECEEF1;
+        SURFACE_SELECTED = "surface.selected" 0xDCE0E5;
+        KNOB_CAP = "knob.cap" 0xFFFFFF;
+        KNOB_CAP_ACTIVE = "knob.capActive" 0xEEF0F3;
+        LINE = "line" 0xD3D7DD;
+        LINE_INSET = "line.inset" 0xDCE0E5;
+        LINE_STRONG = "line.strong" 0xB4BBC4;
+        GRID = "grid" 0xDFE2E7;
+        TEXT = "text" 0x1B1E23;
+        TEXT_MUTED = "text.muted" 0x4A515B;
+        TEXT_FAINT = "text.faint" 0x5F6670;
+        INK_GHOST = "ink.ghost" 0xA2A9B4;
+        INK_ARROW = "ink.arrow" 0x7D8591;
+        SIGNAL = "signal" 0x1764D8;
+        MOD = "mod" 0xE17000;
+        METER_OK = "meter.ok" 0x1E8A4C;
+        METER_HOT = "meter.hot" 0xA8200E;
         LANE = "lane" 0xF3F4F6;
-        LANE_ALT = "lane.alt" 0xEEF0F2;
-        RULER = "ruler" 0xE0E3E7;
-        HEADER = "header" 0xE2E5E9;
-        HEADER_SELECTED = "header.selected" 0xC6CBD2;
-        GRID_BAR = "grid.bar" 0xCFCFD1;
-        GRID_BEAT = "grid.beat" 0xE3E4E5;
-        GRID_SUB = "grid.sub" 0xEEEEF0;
+        LANE_ALT = "lane.alt" 0xEDEFF2;
+        RULER = "ruler" 0xDDE1E5;
+        HEADER = "header" 0xF0F2F4;
+        HEADER_SELECTED = "header.selected" 0xDCE1E8;
+        GRID_BAR = "grid.bar" 0xCDD1D6;
+        GRID_BEAT = "grid.beat" 0xDDE0E4;
+        GRID_SUB = "grid.sub" 0xE6E8EB;
         LOOP_REGION = "loop" 0xB73590;
         CURSOR = "cursor" 0x28282B;
         SELECTION_OUTLINE = "selection.outline" 0x1F1F26;
         INK_DARK = "ink.dark" 0x131518;
         INK_LIGHT = "ink.light" 0xF6F6F8;
-        RECORD = "record" 0xB51200;
-        MUTE = "mute" 0x202329;
-        SOLO = "solo" 0x0055BB;
-        MONITOR = "monitor" 0x1A4F31;
-        FOCUS_RING = "focus.ring" 0x0055BB;
-        BUTTON_HOVER = "button.hover" 0xCED3D9;
-        TOGGLE_OPTION_FILL = "toggle.on.option.fill" 0xD9E1EB;
-        TOGGLE_UNAVAILABLE_FILL = "toggle.unavailable.fill" 0xEAECEF;
+        RECORD = "record" 0xA8200E;
+        MUTE = "mute" 0x1B1E23;
+        SOLO = "solo" 0x1764D8;
+        MONITOR = "monitor" 0x1E8A4C;
+        FOCUS_RING = "focus.ring" 0x1764D8;
+        BUTTON_HOVER = "button.hover" 0xEEF0F3;
+        TOGGLE_OPTION_FILL = "toggle.on.option.fill" 0xE3ECFA;
+        TOGGLE_UNAVAILABLE_FILL = "toggle.unavailable.fill" 0xEDEFF2;
         SWITCH_ON_KNOB = "switch.onKnob" 0xFFFFFF;
-        DEFAULT_BUTTON_HOVER = "chrome.defaultButton.hover" 0x1F69C3;
-        DEFAULT_BUTTON_PRESSED = "chrome.defaultButton.pressed" 0x004BA4;
+        DEFAULT_BUTTON_HOVER = "chrome.defaultButton.hover" 0x1457BE;
+        DEFAULT_BUTTON_PRESSED = "chrome.defaultButton.pressed" 0x4A86E0;
     }
     /// Dims what lies outside a range: black at 28/255 (`#0000001C`).
     pub const OVERLAY: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 28);
@@ -597,5 +599,201 @@ pub mod hatch {
         ("pitch", PITCH),
         ("minSize", MIN_SIZE),
         ("ghostClip/fillAlpha", GHOST_FILL),
+    ];
+}
+
+/// The content palette (`palette` in tokens.json): the colors a user picks for track bars, clip
+/// bodies and name strips, and choke-group tags. Sixteen OKLCH hues 22.5 degrees apart from 11,
+/// plus Graphite; each has a bar, a body and a strip value per theme, so a project's colors survive
+/// a theme switch. Documented ahead of its use: the fixed track colors move to it in a later job.
+pub mod palette {
+    use super::*;
+    pub const NAMES: [&str; 17] = [
+        "Red",
+        "Vermilion",
+        "Orange",
+        "Amber",
+        "Yellow",
+        "Lime",
+        "Green",
+        "Jade",
+        "Teal",
+        "Cyan",
+        "Sky",
+        "Blue",
+        "Violet",
+        "Purple",
+        "Magenta",
+        "Pink",
+        "Graphite",
+    ];
+    pub const DARK_BAR: [Color32; 17] = [
+        hex(0xF08696),
+        hex(0xF18A74),
+        hex(0xE99454),
+        hex(0xD7A03D),
+        hex(0xBDAD3E),
+        hex(0x9BB856),
+        hex(0x71C178),
+        hex(0x3FC59C),
+        hex(0x00C4BE),
+        hex(0x00BFDC),
+        hex(0x49B7F1),
+        hex(0x77ACFC),
+        hex(0x9DA0FB),
+        hex(0xBC95EE),
+        hex(0xD58DD7),
+        hex(0xE787B8),
+        hex(0xA5ACB2),
+    ];
+    pub const DARK_BODY: [Color32; 17] = [
+        hex(0x934955),
+        hex(0x934C3C),
+        hex(0x8E5223),
+        hex(0x825B0B),
+        hex(0x70640C),
+        hex(0x586C25),
+        hex(0x39723F),
+        hex(0x037559),
+        hex(0x007571),
+        hex(0x007185),
+        hex(0x166B94),
+        hex(0x3E639C),
+        hex(0x5A5B9B),
+        hex(0x6F5492),
+        hex(0x804E82),
+        hex(0x8C4A6D),
+        hex(0x5E646A),
+    ];
+    pub const DARK_STRIP: [Color32; 17] = [
+        hex(0x793943),
+        hex(0x793B2E),
+        hex(0x744117),
+        hex(0x6A4900),
+        hex(0x5B5100),
+        hex(0x465818),
+        hex(0x2B5D30),
+        hex(0x005F47),
+        hex(0x005F5C),
+        hex(0x005C6D),
+        hex(0x06567A),
+        hex(0x2F5081),
+        hex(0x484980),
+        hex(0x5A4278),
+        hex(0x693D6A),
+        hex(0x733958),
+        hex(0x4B5056),
+    ];
+    pub const LIGHT_BAR: [Color32; 17] = [
+        hex(0xC8536A),
+        hex(0xCA5840),
+        hex(0xC16300),
+        hex(0xAE7300),
+        hex(0x948100),
+        hex(0x6F8E00),
+        hex(0x369744),
+        hex(0x009A70),
+        hex(0x009692),
+        hex(0x0092AD),
+        hex(0x008BCD),
+        hex(0x447FD8),
+        hex(0x7272D7),
+        hex(0x9366C8),
+        hex(0xAD5CB0),
+        hex(0xBF558F),
+        hex(0x7B8187),
+    ];
+    pub const LIGHT_BODY: [Color32; 17] = [
+        hex(0xF9C5CA),
+        hex(0xF9C7BB),
+        hex(0xF4CBAF),
+        hex(0xEAD0A8),
+        hex(0xDCD6A9),
+        hex(0xCCDBB0),
+        hex(0xBCDFBD),
+        hex(0xAEE2CD),
+        hex(0xA7E1DE),
+        hex(0xA7DFEC),
+        hex(0xAFDBF7),
+        hex(0xBDD6FC),
+        hex(0xCDD0FC),
+        hex(0xDCCBF5),
+        hex(0xEAC7EA),
+        hex(0xF4C5DB),
+        hex(0xCED5DC),
+    ];
+    pub const LIGHT_STRIP: [Color32; 17] = [
+        hex(0xF0ACB4),
+        hex(0xF0AF9F),
+        hex(0xEAB48F),
+        hex(0xDDBB86),
+        hex(0xCCC386),
+        hex(0xB6CA91),
+        hex(0xA0CFA2),
+        hex(0x8CD2B8),
+        hex(0x81D2CD),
+        hex(0x82CFE0),
+        hex(0x8ECAEE),
+        hex(0xA2C3F5),
+        hex(0xB7BCF4),
+        hex(0xCBB5EC),
+        hex(0xDDAFDD),
+        hex(0xE9ACCA),
+        hex(0xBBC2C9),
+    ];
+    /// The ink on a palette fill, per theme.
+    pub const INK_DARK: Color32 = hex(0xF6F6F8);
+    pub const INK_LIGHT: Color32 = hex(0x1B1E23);
+    /// Every number under `palette.oklch` by its path (lightness, chroma pairs; the hue rotation).
+    pub const OKLCH: &[(&str, f32)] = &[
+        ("hueStart", 11.0),
+        ("hueStep", 22.5),
+        ("dark/bar/0", 0.74),
+        ("dark/bar/1", 0.13),
+        ("dark/body/0", 0.50),
+        ("dark/body/1", 0.1),
+        ("dark/strip/0", 0.43),
+        ("dark/strip/1", 0.09),
+        ("light/bar/0", 0.60),
+        ("light/bar/1", 0.15),
+        ("light/body/0", 0.87),
+        ("light/body/1", 0.06),
+        ("light/strip/0", 0.81),
+        ("light/strip/1", 0.08),
+        ("graphiteChroma", 0.012),
+        ("graphiteHue", 250.0),
+    ];
+}
+
+/// The pad (`pad` in tokens.json): every number of its spec, by its path. Documented ahead of the
+/// kit's pad widget (a later job); the drift test keeps the two in step.
+pub mod pad {
+    pub const METRICS: &[(&str, f32)] = &[
+        ("sizes/grid", 56.0),
+        ("sizes/focus", 80.0),
+        ("gap", 4.0),
+        ("radius", 6.0),
+        ("hit/alpha", 0.26),
+        ("hit/edge", 2.0),
+        ("hit/decayMs", 250.0),
+        ("selected/width", 2.0),
+        ("muted/opacity", 0.4),
+        ("tag/height", 3.0),
+        ("id/size/grid", 9.0),
+        ("id/size/focus", 10.0),
+        ("id/weight", 400.0),
+        ("chokeBadge/minWidth", 16.0),
+        ("chokeBadge/height", 14.0),
+        ("chokeBadge/radius", 3.0),
+        ("chokeBadge/weight", 500.0),
+        ("chokeBadge/size", 9.0),
+        ("chokeBadge/chokedMs", 200.0),
+        ("peer/width", 1.0),
+        ("peer/inset", 3.0),
+        ("peer/radius", 4.0),
+        ("bankPeerDot/size", 5.0),
+        ("chip/size", 14.0),
+        ("chip/radius", 3.0),
+        ("soloExcluded/opacity", 0.4),
     ];
 }

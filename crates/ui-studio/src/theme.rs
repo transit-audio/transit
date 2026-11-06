@@ -1,5 +1,5 @@
-//! Theme tokens (plan 06 slice 5, ADR 0045): the device design language's dark set and a light set
-//! derived from it, picked by View > Appearance (System follows the OS). Flat: graphite grounds,
+//! Theme tokens (plan 06 slice 5, ADR 0045): the device design language's dark set and its designed
+//! light set, picked by View > Appearance (System follows the OS). Flat: graphite grounds,
 //! one signal color for what you set, one mod color for modulation, no gradients, no shadows
 //! beyond a 1 px separator. The values come from [`crate::tokens`], which mirrors tokens.json.
 //!
@@ -51,8 +51,8 @@ impl Appearance {
     }
 }
 
-/// Whether the light theme ships: false for v0.7.0, which is dark only (ADR 0045). [`LIGHT`] and
-/// its derivation rule stay in code, tested, as the baseline for the light theme's design pass.
+/// Whether the light theme ships: false for v0.7.0, which is dark only (ADR 0045). [`LIGHT`] is the
+/// maintainer's designed set, in code and tested; the maintainer decides when it ships.
 pub const LIGHT_SHIPS: bool = false;
 /// The hover text on the unavailable System and Light choices.
 pub const LIGHT_UNAVAILABLE_TIP: &str = "Returns with the light theme design pass";
@@ -231,8 +231,10 @@ pub const DARK: Tokens = {
     token_set!(false)
 };
 
-/// Derived from the design (`colorLight` in tokens.json): grounds mirrored, inks at least as
-/// legible as in the dark set. v0.7.0 ships dark only ([`LIGHT_SHIPS`]); this set is the baseline for the light design pass.
+/// The maintainer's designed light set (`colorLight` in tokens.json, #326): designed, not derived; the
+/// same roles and hues as the dark set, text roles at 4.5:1 on panel and inset, marks at 3:1 on the
+/// panel, `mod` a mark-only orange. v0.7.0 ships dark only ([`LIGHT_SHIPS`]): the set is in code and
+/// tested, and the maintainer decides when it ships.
 pub const LIGHT: Tokens = {
     use crate::tokens::color_light::*;
     token_set!(true)

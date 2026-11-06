@@ -281,18 +281,29 @@ fn tok(t: &Tokens, kind: Kind) -> Color32 {
     }
 }
 
-/// Within 3 per channel: the overlay is gray (one alpha for all channels, the mean of the three
-/// distances) and the tokens lean blue (dark 25, 25, 27 above the lane; light 50, 49, 45 below),
-/// so the blue channel of the bar line lands 2 to 3 off. Tighter would need a tinted stroke.
+/// The overlay is gray: one alpha for all channels, the mean of the token's three distances from
+/// the lane. So over an empty lane it lands on the lane moved by that mean in every channel (to
+/// rounding), and it reproduces the token as closely as a gray can: within the token's own lean,
+/// how far its channels' distances stray from their mean (dark 25, 25, 27 above the lane; the
+/// designed light set's bar line 38, 35, 32 below it, #326). Tighter would need a tinted stroke.
 #[test]
 fn the_overlay_over_an_empty_lane_reproduces_the_token_in_both_themes() {
     both_themes(|t| {
         for k in KINDS {
             let o = translucent(tok(t, k), t.lane, 1.0);
+            let lane = [t.lane.r(), t.lane.g(), t.lane.b()].map(i32::from);
             let got = over(o, [t.lane.r(), t.lane.g(), t.lane.b()]);
             let want = [tok(t, k).r(), tok(t, k).g(), tok(t, k).b()].map(i32::from);
+            let d: Vec<f32> = (0..3).map(|i| (want[i] - lane[i]) as f32).collect();
+            let mean = d.iter().sum::<f32>() / 3.0;
+            let lean = d.iter().map(|x| (x - mean).abs()).fold(0.0, f32::max);
             for i in 0..3 {
-                assert!((got[i] - want[i]).abs() <= 3, "{k:?} channel {i}: {got:?} vs {want:?} (overlay {o:?})");
+                assert!((got[i] as f32 - (lane[i] as f32 + mean)).abs() <= 1.5, "{k:?} channel {i}: the gray at the mean distance: {got:?}");
+                assert!((got[i] - want[i]).abs() as f32 <= lean.ceil() + 1.0, "{k:?} channel {i}: {got:?} vs {want:?} (overlay {o:?}, lean {lean})");
+            }
+            // The dark set's tokens lean at most 2: the old bound of 3 still holds there.
+            if !t.light_clips {
+                assert!(lean <= 2.0, "{k:?}: dark lean {lean}");
             }
         }
     });
