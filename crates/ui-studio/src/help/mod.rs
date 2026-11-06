@@ -112,8 +112,7 @@ pub fn header_button(app: &mut StudioApp, ui: &mut Ui, id: Id) {
     let hot = resp.hovered();
     let p = ui.painter();
     let ink = if hot { TOKENS.accent } else { TOKENS.text_dim };
-    p.circle_stroke(r.center(), 8.0, egui::Stroke::new(1.0, ink));
-    p.text(r.center(), Align2::CENTER_CENTER, "?", egui::FontId::proportional(11.5), ink);
+    crate::icons::paint(p, r.center(), crate::icons::Icon::Help, 16.0, ink);
     app.help.layout.question_marks.insert(id.key().to_owned(), r4(r));
     hover(ui, &resp, id);
     if resp.clicked() {

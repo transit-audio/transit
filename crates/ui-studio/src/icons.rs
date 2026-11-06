@@ -45,10 +45,12 @@ pub enum Icon {
     Snowflake,
     /// Lucide headphones: the browser's auto-preview toggle.
     Headphones,
+    /// Lucide circle-help: the window header's question mark (#326).
+    Help,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 25] = [
+    pub const ALL: [Icon; 26] = [
         Icon::Rewind,
         Icon::Stop,
         Icon::Play,
@@ -74,6 +76,7 @@ impl Icon {
         Icon::Error,
         Icon::Snowflake,
         Icon::Headphones,
+        Icon::Help,
     ];
 
     /// The Lucide name (the file under `assets/icons/`), plus `-filled` for filled variants.
@@ -104,6 +107,7 @@ impl Icon {
             Icon::Error => "circle-alert",
             Icon::Snowflake => "snowflake",
             Icon::Headphones => "headphones",
+            Icon::Help => "circle-help",
         }
     }
 
@@ -133,6 +137,7 @@ impl Icon {
             Icon::Error => include_bytes!("../assets/icons/circle-alert.svg"),
             Icon::Snowflake => include_bytes!("../assets/icons/snowflake.svg"),
             Icon::Headphones => include_bytes!("../assets/icons/headphones.svg"),
+            Icon::Help => include_bytes!("../assets/icons/circle-help.svg"),
         }
     }
 
