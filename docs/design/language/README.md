@@ -154,8 +154,8 @@ The app bundles IBM Plex Sans (Regular, Medium, SemiBold) and IBM Plex Mono (Reg
 - **Modulation ring:** outer arc r 47, stroke 3.5, `mod`, from the base value to base + depth. Hidden when the modulation section is disabled.
 - States: default, active (cap `#2E333A`), modulated, disabled (arc `ink.ghost`, pointer `ink.arrow`).
 - Label below in `label.control`, value below that in `value`. Hero knobs add a context sub-label (`text.faint`, 11) that changes with the engine/model.
-- Interaction: vertical drag, Shift for fine, double-click to reset, click the value to type, scroll to nudge. In a device window, Escape while a value is typed gives the typing up and leaves the window open.
-- In code (`widgets/knob.rs`): 200 px of drag for the full travel, Shift a tenth; a wheel notch nudges 1% (Shift 0.1%); the cell is the dial plus a 16 px label row and a 15 px value row, at least 56 wide. The knob reports a normalized position and the typed text; the caller maps, formats and parses.
+- Interaction: vertical drag, Shift for fine, double-click to reset, click the value to type, Ctrl+scroll (Cmd on macOS) to nudge. A plain wheel is never the knob's: it scrolls the panel or window around it (a device body scrolls) and leaves the value alone; Ctrl+wheel over a knob nudges it and does not scroll. In a device window, Escape while a value is typed gives the typing up and leaves the window open.
+- In code (`widgets/knob.rs`): 200 px of drag for the full travel, Shift a tenth; a Ctrl+wheel notch nudges 1% (Shift 0.1%) and is consumed (`widgets::command_wheel`); the cell is the dial plus a 16 px label row and a 15 px value row, at least 56 wide. The knob reports a normalized position and the typed text; the caller maps, formats and parses.
 
 ### Fader
 One dB taper everywhere, shared by the fader, its scale and any meter beside it so positions line up.

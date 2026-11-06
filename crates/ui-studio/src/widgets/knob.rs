@@ -5,7 +5,8 @@
 //! `label.control` (`label.hero` at size L) and the value below that in mono.
 //!
 //! Interaction: vertical drag (Shift for fine), double-click to reset, click the value to type,
-//! scroll to nudge. The knob works on a normalized position (0..1); the caller maps it to the
+//! Ctrl+scroll (Cmd on macOS) to nudge. A plain wheel is never the knob's: it scrolls the panel
+//! around it and leaves the value alone (326-M: a device body scrolls). The knob works on a normalized position (0..1); the caller maps it to the
 //! parameter, formats the value text and parses what was typed.
 
 use super::r4;
@@ -16,7 +17,7 @@ use egui::{Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 /// Pixels of vertical drag for the full travel, and the divisor Shift applies.
 pub const DRAG_PX: f32 = 200.0;
 pub const FINE: f32 = 10.0;
-/// One wheel notch (or 40 px of smooth scroll) moves this much; Shift a tenth of it.
+/// One Ctrl+wheel notch (or 40 px of smooth scroll) moves this much; Shift a tenth of it.
 pub const NUDGE: f32 = 0.01;
 /// Rows under the dial: the label and the value.
 pub const LABEL_H: f32 = 16.0;
@@ -190,7 +191,9 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
             new = Some(k.default);
         }
         if response.hovered() {
-            let notches = super::wheel_notches(ui);
+            // Only a wheel with Ctrl (Cmd) is the knob's, and the knob takes it; a plain wheel
+            // stays with the scroll area around it.
+            let (notches, fine) = super::command_wheel(ui);
             if notches != 0.0 {
                 let n = nudged(k.value, notches, fine);
                 if (n - k.value).abs() > f32::EPSILON {

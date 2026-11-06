@@ -139,3 +139,21 @@ fn the_collapsed_bar_summarizes_the_settings() {
     let (text, _) = bar.middle.expect("the summary");
     assert!(text.starts_with("Amp ") && text.contains("LP 12 dB · 1.20 kHz") && text.contains("LFO 1 2.0 Hz"), "{text}");
 }
+
+#[test]
+fn a_plain_wheel_over_a_knob_scrolls_the_body_and_ctrl_wheel_nudges_it() {
+    let (mut t, tr) = T::open();
+    t.expand(tr);
+    t.set(tr, "resonance", 50.0);
+    let dial = t.knob(tr, "resonance");
+    let before = (t.param(tr, "resonance"), t.undo_len());
+    t.send("ui.scroll", serde_json::json!({"x": mid(dial).0, "y": mid(dial).1, "dy": -120.0}));
+    let after = t.panel(tr).knob("resonance").unwrap().knob.dial;
+    assert!(after[1] < dial[1] - 20.0, "the body scrolled under the pointer: {dial:?} -> {after:?}");
+    assert_eq!((t.param(tr, "resonance"), t.undo_len()), before, "and the knob wrote nothing");
+    // Ctrl+wheel: one notch nudges 1 percent of the travel and the body stays put.
+    let dial = t.knob(tr, "resonance");
+    t.send("ui.scroll", serde_json::json!({"x": mid(dial).0, "y": mid(dial).1, "dy": 40.0, "ctrl": true}));
+    assert!((t.param(tr, "resonance") - 51.0).abs() < 1e-3, "{}", t.param(tr, "resonance"));
+    assert_eq!(t.panel(tr).knob("resonance").unwrap().knob.dial, dial, "no scroll");
+}

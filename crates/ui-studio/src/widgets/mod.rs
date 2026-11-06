@@ -70,6 +70,29 @@ pub fn role_size(painter: &egui::Painter, role: &crate::tokens::TypeRole, text: 
     painter.layout_job(role.job(painter.ctx(), text, egui::Color32::WHITE)).size()
 }
 
+/// Wheel notches this frame from the events with Ctrl (Cmd on macOS) held, and whether Shift was
+/// held with them; those events are consumed, so nothing else (a scroll area, a zoom) takes them.
+/// A plain wheel is left alone. One notch is a line, or 40 points of smooth scroll.
+pub fn command_wheel(ui: &egui::Ui) -> (f32, bool) {
+    ui.input_mut(|i| {
+        let (mut sum, mut fine) = (0.0f32, false);
+        i.events.retain(|e| match e {
+            egui::Event::MouseWheel { unit, delta, modifiers, .. } if modifiers.command || modifiers.ctrl => {
+                let d = delta.y + delta.x;
+                sum += match unit {
+                    egui::MouseWheelUnit::Point => d / 40.0,
+                    egui::MouseWheelUnit::Line => d,
+                    egui::MouseWheelUnit::Page => d * 4.0,
+                };
+                fine |= modifiers.shift;
+                false
+            }
+            _ => true,
+        });
+        (sum.clamp(-4.0, 4.0), fine)
+    })
+}
+
 /// Wheel notches this frame (up positive; one notch is a line, or 40 points of smooth scroll),
 /// from the raw wheel events so Shift, which egui turns into horizontal scrolling, still counts.
 pub fn wheel_notches(ui: &egui::Ui) -> f32 {

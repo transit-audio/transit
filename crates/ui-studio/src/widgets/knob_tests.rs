@@ -107,13 +107,16 @@ fn double_click_resets_to_the_default() {
 }
 
 #[test]
-fn scrolling_nudges_by_one_step_per_notch() {
+fn ctrl_scrolling_nudges_by_one_step_per_notch_and_a_plain_wheel_does_nothing() {
     let mut rig = Rig::new();
     let dial = rig.idle(|ui| draw(ui, &Knob::new("Gain", "0.0 dB", 0.5))).layout.dial;
-    let out = rig.frame(Rig::wheel(mid(dial), 40.0, Modifiers::NONE), |ui| draw(ui, &Knob::new("Gain", "0.0 dB", 0.5)));
+    let out = rig.frame(Rig::wheel(mid(dial), 40.0, Modifiers::COMMAND), |ui| draw(ui, &Knob::new("Gain", "0.0 dB", 0.5)));
     assert_eq!(out.value, Some(0.51));
-    let out = rig.frame(Rig::wheel(mid(dial), -40.0, Modifiers::NONE), |ui| draw(ui, &Knob::new("Gain", "0.0 dB", 0.5)));
+    let out = rig.frame(Rig::wheel(mid(dial), -40.0, Modifiers::CTRL), |ui| draw(ui, &Knob::new("Gain", "0.0 dB", 0.5)));
     assert_eq!(out.value, Some(0.49));
+    // A plain wheel is the scroll area's, never the knob's.
+    let out = rig.frame(Rig::wheel(mid(dial), 40.0, Modifiers::NONE), |ui| draw(ui, &Knob::new("Gain", "0.0 dB", 0.5)));
+    assert_eq!(out.value, None);
     assert!((knob::nudged(0.5, 1.0, true) - (0.5 + 0.001)).abs() < 1e-6, "Shift nudges finer");
 }
 
