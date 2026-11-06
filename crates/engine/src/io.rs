@@ -301,6 +301,9 @@ pub fn load_sampler_bytes(e: &mut Engine, track: TrackId, name: &str, bytes: &[u
 mod midi;
 pub use midi::{export_midi, import_midi_bytes};
 
+/// Dropped bytes as a Sampler zone's source (ADR 0041), one undo step.
+pub use crate::cmd::sampler_patch::load_zone_bytes;
+
 mod session_data;
 pub(crate) use session_data::import_session_data;
 

@@ -37,6 +37,10 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
         picked.iter().flat_map(|t| t.playlists.iter().flat_map(|pl| pl.clips.iter().filter_map(|c| c.source()))).collect();
     // A Sampler's sample is session audio too.
     needed.extend(picked.iter().filter_map(|t| t.instrument.as_ref().and_then(|i| i.sample)));
+    // And a Sampler patch's sources (ADR 0041), an opaque patch's included.
+    needed.extend(
+        picked.iter().filter_map(|t| t.instrument.as_ref().and_then(|i| i.sampler_patch.as_ref())).flat_map(transit_model::SamplerPatch::media),
+    );
     needed.sort_by_key(|x| x.0);
     needed.dedup();
     let sr = e.session().sample_rate.hz();
@@ -92,6 +96,11 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
         // The donor's source ids mean nothing here: remap the sample, or drop it when it didn't come along.
         if let Some(ins) = tr.instrument.as_mut() {
             ins.sample = ins.sample.and_then(|sid| map.get(&sid.0).copied());
+            // A patch keeps every reference: one that did not come along gets an id of its own that
+            // names nothing here (silent, reported), never another source of this session.
+            if let Some(patch) = ins.sampler_patch.as_mut() {
+                patch.remap_media(|sid| map.get(&sid.0).copied().unwrap_or_else(|| SourceId(s.alloc())));
+            }
         }
         // Busses are matched by name (created when missing).
         let remap = |s: &mut Session, r: &Route| -> Route {

@@ -183,6 +183,17 @@ impl Imports {
     /// Queue `path` to be prepared at `rate`; returns its id. The automation roots in force on
     /// this thread apply on the worker too.
     pub fn prepare(&mut self, path: &str, rate: u32) -> u64 {
+        self.prepare_on(path, rate, false)
+    }
+
+    /// [`Imports::prepare`] on the calling thread, finished when it returns: crate tests drive the
+    /// import transaction without waiting on a worker.
+    #[cfg(test)]
+    pub(crate) fn prepare_here_for_testing(&mut self, path: &str, rate: u32) -> u64 {
+        self.prepare_on(path, rate, true)
+    }
+
+    fn prepare_on(&mut self, path: &str, rate: u32, here: bool) -> u64 {
         let id = self.next;
         self.next += 1;
         let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("Audio").to_string();
@@ -210,7 +221,9 @@ impl Imports {
             }
             spawn
         };
-        if spawn {
+        if spawn && here {
+            work(&self.shared);
+        } else if spawn {
             let shared = Arc::clone(&self.shared);
             if let Err(err) = std::thread::Builder::new().name("soundcraft-import".into()).spawn(move || work(&shared)) {
                 log::warn!("import worker not started ({err}); preparing on this thread");

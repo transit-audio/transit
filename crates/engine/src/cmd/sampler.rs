@@ -29,10 +29,13 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("mix.sampler_clear", "Clear Sampler Sample", [], None, "{track?}: the track's Sampler stops playing its sample", has_selection, clear),
     ]
+    .into_iter()
+    .chain(super::sampler_patch::specs())
+    .collect()
 }
 
 /// The instrument track a sampler command acts on.
-fn instrument_track(e: &Engine, id: &str, p: &Value) -> Result<TrackId> {
+pub(super) fn instrument_track(e: &Engine, id: &str, p: &Value) -> Result<TrackId> {
     let t = tracks_required(e, id, p)?.first().copied().ok_or_else(|| bad(id, "no track"))?;
     if e.session().track(t).map(|tr| tr.kind) != Some(TrackKind::Instrument) {
         return Err(bad(id, "only instrument tracks have a sampler"));

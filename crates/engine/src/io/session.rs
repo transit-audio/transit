@@ -58,6 +58,13 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
     };
     // Files written for audio during this save: sources playing the same audio share one.
     let mut files: HashMap<*const SourceAudio, String> = HashMap::new();
+    // Files a Sampler patch references where they are (ADR 0041): a save keeps their paths.
+    let referenced: HashSet<transit_model::SourceId> = s
+        .tracks
+        .iter()
+        .filter_map(|t| t.instrument.as_ref().and_then(|i| i.sampler_patch.as_ref()))
+        .flat_map(transit_model::SamplerPatch::referenced)
+        .collect();
     for (i, src) in s.sources.iter_mut().enumerate() {
         let streamed = s.pool.get(src.id).is_some_and(|a| a.is_disk());
         if !same_dir
@@ -80,6 +87,10 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
         let Some(audio) = s.pool.get(src.id) else { continue };
         // A disk-backed source's file is its audio (ADR 0035): referenced where it is, never rewritten.
         if audio.is_disk() {
+            continue;
+        }
+        if referenced.contains(&src.id) && Path::new(&src.path).is_absolute() {
+            src.unsaved = false;
             continue;
         }
         if let Some(path) = files.get(&Arc::as_ptr(audio)) {
@@ -286,6 +297,7 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
         st.folder.clone_from(&s.folder);
     }
     let mut notes = std::mem::take(&mut s.load_notes);
+    notes.extend(sampler_silence_notes(&s));
     // Takes an older build could not place (#192) are placed now when their files are there: a
     // change to the session as saved, so it opens modified.
     let mut as_saved = None;
@@ -316,6 +328,26 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     }
     crate::takes::migration::on_open(e);
     Ok(missing)
+}
+
+/// One note per Sampler zone that plays silence in `s` because its audio is missing or unusable
+/// (ADR 0041: the reference stays in the patch, to be relinked; it is never dropped).
+pub fn sampler_silence_notes(s: &Session) -> Vec<String> {
+    let mut out = Vec::new();
+    for t in &s.tracks {
+        let Some(p) = t.instrument.as_ref().and_then(|i| i.sampler_patch.as_ref()).and_then(transit_model::SamplerPatch::ready) else { continue };
+        let silent = transit_mix::silent_sampler_zones(p, s);
+        if !silent.is_empty() {
+            let zones: Vec<String> = silent.iter().take(16).map(|z| (z + 1).to_string()).collect();
+            let more = if silent.len() > 16 { format!(" and {} more", silent.len() - 16) } else { String::new() };
+            out.push(format!(
+                "track \"{}\": Sampler zones {}{more} play silence: their audio is missing or cannot be played from memory",
+                t.name,
+                zones.join(", ")
+            ));
+        }
+    }
+    out
 }
 
 /// One INFO line per stored parameter a built-in instrument or effect no longer has (an id renamed

@@ -40,6 +40,7 @@ mod query;
 mod rack;
 mod realtime_render;
 pub(crate) mod sampler;
+pub(crate) mod sampler_patch;
 mod setup_more;
 mod surround;
 mod tab;
