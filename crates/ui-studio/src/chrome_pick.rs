@@ -135,6 +135,9 @@ impl Combo {
         let behavior = if self.keep_open { egui::PopupCloseBehavior::CloseOnClickOutside } else { egui::PopupCloseBehavior::CloseOnClick };
         let inner = dropdown(&response).width(rect.width()).close_behavior(behavior).show(|ui| {
             ui.set_min_width(ui.available_width());
+            // The Menus board's row: padding 4 on the left, a 16 px check gutter, the text straight after it.
+            ui.spacing_mut().icon_spacing = 0.0;
+            ui.spacing_mut().button_padding = vec2(c::POPUP_PADDING, 0.0);
             egui::ScrollArea::vertical()
                 .max_height(ui.spacing().combo_height)
                 .show(ui, |ui| {

@@ -152,3 +152,44 @@ fn no_view_uses_egui_selectable_widgets_any_more() {
     }
     assert!(found.is_empty(), "migrated to the chrome's option and choice helpers: {found:?}");
 }
+
+/// The x of the text "Row" a popup list painted, and the left edge of its row.
+fn list_text_offset(icon_spacing: Option<f32>) -> f32 {
+    use std::cell::Cell;
+    let row = Cell::new(egui::Rect::NOTHING);
+    let face = |ui: &mut egui::Ui| {
+        Combo::new("rows", "Value")
+            .show(ui, |ui| {
+                if let Some(g) = icon_spacing {
+                    ui.spacing_mut().icon_spacing = g;
+                }
+                row.set(choice_label(ui, true, "Row").rect);
+            })
+            .response
+    };
+    let mut rig = Rig::new();
+    let r = rig.idle(face);
+    rig.click(r.rect.center(), face);
+    for _ in 0..3 {
+        rig.idle(face);
+    }
+    let (_, shapes) = rig.shapes(face);
+    fn find(s: &egui::Shape, out: &mut Option<f32>) {
+        match s {
+            egui::Shape::Text(t) if t.galley.job.text == "Row" => *out = Some(t.pos.x),
+            egui::Shape::Vec(v) => v.iter().for_each(|x| find(x, out)),
+            _ => {}
+        }
+    }
+    let mut x = None;
+    shapes.iter().for_each(|c| find(&c.shape, &mut x));
+    x.expect("the row text was painted") - row.get().min.x
+}
+
+#[test]
+fn a_combo_list_row_starts_its_text_after_the_padding_and_the_check_gutter() {
+    let offset = list_text_offset(None);
+    assert_eq!(offset, c::POPUP_PADDING + c::CHECK_GUTTER, "text x = padding 4 + gutter 16");
+    // Negative control: egui's default icon spacing left in adds its gap.
+    assert!(list_text_offset(Some(4.0)) > offset);
+}
