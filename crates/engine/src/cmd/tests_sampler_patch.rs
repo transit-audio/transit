@@ -458,3 +458,31 @@ fn a_file_over_a_bound_is_refused_from_its_header_without_reading_its_body() {
     e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 5, "path": s(&short)})).unwrap();
     assert_eq!(crate::io::WHOLE_READS.with(std::cell::Cell::get), reads + 1);
 }
+
+#[test]
+fn a_pad_or_zone_holding_only_unknown_fields_survives_load_edit_and_save() {
+    let d = Dir::new("unknown");
+    let mut e = Engine::default();
+    let t = kit(&mut e, &d);
+    {
+        let p = e.session_mut().track_mut(t).unwrap().instrument.as_mut().unwrap().sampler_patch.as_mut().unwrap().ready_mut().unwrap();
+        let mut pad = transit_model::sampler_patch::PadEntry { index: 3, ..Default::default() };
+        pad.extra.insert("color".into(), json!("red"));
+        p.pads.push(pad);
+        p.zones[0].extra.insert("lfo3".into(), json!({"rate": 2}));
+    }
+    let path = d.path("song.transit");
+    e.execute("session.save_as", &json!({"path": s(&path)})).unwrap();
+    let mut back = Engine::default();
+    back.execute("session.open", &json!({"path": s(&path)})).unwrap();
+    // Edits that store that pad and that zone again.
+    back.execute("mix.sampler_pad_set", &json!({"track": t, "pad": 4, "mute": false})).unwrap();
+    back.execute("mix.sampler_zone_edit", &json!({"track": t, "zone": 1, "playback": {"transpose": 1}})).unwrap();
+    back.execute("session.save", &json!({})).unwrap();
+    let mut again = Engine::default();
+    again.execute("session.open", &json!({"path": s(&path)})).unwrap();
+    let p = patch(&again, t);
+    assert_eq!(p.pad(3).extra.get("color"), Some(&json!("red")), "the pad with only an unknown field is kept: {:?}", p.pads);
+    assert_eq!(p.zone(0).unwrap().extra.get("lfo3"), Some(&json!({"rate": 2})));
+    assert_eq!(p.zone(0).unwrap().transpose, 1.0);
+}
