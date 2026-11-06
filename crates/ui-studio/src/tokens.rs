@@ -125,7 +125,7 @@ pub mod color_light {
         INK_ARROW = "ink.arrow" 0x7D8591;
         SIGNAL = "signal" 0x1764D8;
         MOD = "mod" 0xE17000;
-        METER_OK = "meter.ok" 0x1E8A4C;
+        METER_OK = "meter.ok" 0x1A7943;
         METER_HOT = "meter.hot" 0xA8200E;
         LANE = "lane" 0xF3F4F6;
         LANE_ALT = "lane.alt" 0xEDEFF2;
@@ -143,7 +143,7 @@ pub mod color_light {
         RECORD = "record" 0xA8200E;
         MUTE = "mute" 0x1B1E23;
         SOLO = "solo" 0x1764D8;
-        MONITOR = "monitor" 0x1E8A4C;
+        MONITOR = "monitor" 0x1A7943;
         FOCUS_RING = "focus.ring" 0x1764D8;
         BUTTON_HOVER = "button.hover" 0xEEF0F3;
         TOGGLE_OPTION_FILL = "toggle.on.option.fill" 0xE3ECFA;

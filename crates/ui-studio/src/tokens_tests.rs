@@ -460,3 +460,16 @@ fn the_loop_row_contrast_figures_hold() {
     assert_ne!(r(tokens::hex(0xE6AB27), d.bg_window), 5.10);
 }
 
+/// The light meter.ok (#1A7943, the maintainer's value) carries a letter at 4.5:1; the canvas's
+/// first value, #1E8A4C, did not.
+#[test]
+fn the_light_meter_ok_carries_a_letter() {
+    crate::theme::set_current(egui::Theme::Light);
+    let ok = contrast(crate::theme::text_on(LIGHT.meter_ok), LIGHT.meter_ok);
+    let old = tokens::hex(0x1E8A4C);
+    let was = contrast(crate::theme::text_on(old), old);
+    crate::theme::set_current(egui::Theme::Dark);
+    assert!(ok >= 4.5, "{ok}");
+    assert!(was < 4.5, "negative control: #1E8A4C {was}");
+    assert!(contrast(LIGHT.meter_ok, LIGHT.surface_panel) >= 3.0, "the bar still reads on the panel");
+}

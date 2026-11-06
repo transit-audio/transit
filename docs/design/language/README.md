@@ -43,12 +43,12 @@ The grid is the arrangement's backbone: one structure that carries tempo, meter 
 | `ink.arrow` | `#585F69` | `#7D8591` | Routing arrows, unused source dots |
 | `signal` | `#4C9EFF` | `#1764D8` | Value arcs, curves, selected outline, switch on |
 | `mod` | `#F0A73A` | `#E17000` | Modulation rings, LFO traces, amounts, GR |
-| `meter.ok` | `#5FCB8E` | `#1E8A4C` | Level meters |
+| `meter.ok` | `#5FCB8E` | `#1A7943` | Level meters |
 | `meter.hot` | `#FF6B5B` | `#A8200E` | Clip, arm, error (an error's icon and edge; its message stays `text`) |
 
 Signal and mod differ in lightness as well as hue, so they stay distinguishable for colour-blind users. Fills under curves use the curve colour at 12% (8% for the oscilloscope).
 
-**Light theme.** Designed, not derived: the light set keeps every role and every hue of the dark set, and meets targets instead of mirroring contrast ratios (mirroring pushed `mod` to brown and `meter.ok` to forest green). Grounds: `bg.window` is a mid-light graphite, panels sit lighter on it as cards, `surface.raised` and `knob.cap` are white, and `surface.inset` is one step darker than the panel so wells still recess. Inks: text roles are ≥ 4.5:1 on panel and inset; marks are ≥ 3:1 on the panel. `mod` is a true orange (`#E17000`; a darker amber reads brown on white) and a mark colour only (rings, traces, dots, amount bars, never body text); its traces inside display wells are 2.5 px, where the well gives 2.77:1. Ink on a filled role (solo, arm, Cycle, the default button) is the light ground. The accents (`signal`, `mod`, `loop`, `meter.ok`, `meter.hot`) stay ≥ ΔE 20 apart for normal, protan, deutan and tritan vision; `meter.hot` is a deep red so it parts from the orange (the derived pair was ΔE 6 for deutan vision). Track, clip and choke colours come from the content palette below. Aliases follow their token. Mockup: the chrome canvas, Light page (palette board, Macro Oscillator, design language, Compressor, Mixer, chrome). v0.7.0 ships dark only: View > Appearance shows System and Light unavailable until this set lands in code.
+**Light theme.** Designed, not derived: the light set keeps every role and every hue of the dark set, and meets targets instead of mirroring contrast ratios (mirroring pushed `mod` to brown and `meter.ok` to forest green). Grounds: `bg.window` is a mid-light graphite, panels sit lighter on it as cards, `surface.raised` and `knob.cap` are white, and `surface.inset` is one step darker than the panel so wells still recess. Inks: text roles are ≥ 4.5:1 on panel and inset; marks are ≥ 3:1 on the panel. `mod` is a true orange (`#E17000`; a darker amber reads brown on white) and a mark colour only (rings, traces, dots, amount bars, never body text); its traces inside display wells are 2.5 px, where the well gives 2.77:1. Ink on a filled role (solo, arm, Cycle, the default button) is the light ground. `meter.ok` is `#1A7943`, one step darker than `#1E8A4C`, chosen so a letter on its fill (the monitor toggle) clears 4.5:1 while the bar still clears 3:1 on the panel. The accents (`signal`, `mod`, `loop`, `meter.ok`, `meter.hot`) stay ≥ ΔE 20 apart for normal, protan, deutan and tritan vision; `meter.hot` is a deep red so it parts from the orange (the derived pair was ΔE 6 for deutan vision). Track, clip and choke colours come from the content palette below. Aliases follow their token. Mockup: the chrome canvas, Light page (palette board, Macro Oscillator, design language, Compressor, Mixer, chrome). v0.7.0 ships dark only: View > Appearance shows System and Light unavailable until this set lands in code.
 
 ### Arrangement and transport
 
@@ -72,7 +72,7 @@ Tokens the device design does not name, used by the arrangement, the transport a
 | `record` | `#FF6B5B` | `#A8200E` | `record` | = `meter.hot` | Record arm, clip cap |
 | `mute` | `#E7E9EC` | `#1B1E23` | `mute` | = `text` | Mute on (inverted) |
 | `solo` | `#4C9EFF` | `#1764D8` | `solo` | = `signal` | Solo on |
-| `monitor` | `#5FCB8E` | `#1E8A4C` | `monitor` | = `meter.ok` | Input monitoring, meter levels |
+| `monitor` | `#5FCB8E` | `#1A7943` | `monitor` | = `meter.ok` | Input monitoring, meter levels |
 | `focus.ring` | `#4C9EFF` | `#1764D8` | `focus_ring` | = `signal` | Keyboard focus |
 | `button.hover` | `#2E333A` | `#EEF0F3` | `button_hover` | = `knob.capActive` | Hovered buttons and rows, one step above `surface.raised` |
 | `overlay` | `#00000046` | `#0000001C` | `overlay` | unchanged | Dims what lies outside a range |
