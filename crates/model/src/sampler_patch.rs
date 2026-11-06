@@ -918,6 +918,27 @@ impl SamplerPatch {
         self.ready().map(|p| p.sources.iter().filter(|s| s.ownership == Ownership::Referenced).map(|s| s.source).collect()).unwrap_or_default()
     }
 
+    /// Renames every session source the patch names through `f` (a track moved to another session),
+    /// also in an opaque patch's raw object.
+    pub fn remap_media(&mut self, mut f: impl FnMut(SourceId) -> SourceId) {
+        match &mut self.state {
+            PatchState::Ready(p) => {
+                for r in &mut p.sources {
+                    r.source = f(r.source);
+                }
+            }
+            PatchState::Unknown { raw, .. } | PatchState::Invalid { raw, .. } => {
+                if let Some(a) = raw.get_mut("sources").and_then(Value::as_array_mut) {
+                    for s in a.iter_mut().take(MAX_SOURCES) {
+                        if let Some(n) = s.get("source").and_then(Value::as_u64) {
+                            s["source"] = Value::from(f(SourceId(n)).0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Whether the patch carries loop slicing state (the `sampler_slicing_modes` need).
     #[must_use]
     pub fn uses_slicing(&self) -> bool {
