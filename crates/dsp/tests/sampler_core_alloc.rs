@@ -195,6 +195,65 @@ fn the_core_path_allocates_and_frees_nothing_on_the_audio_thread() {
     assert_eq!(VOICES, 64);
 }
 
+/// A session load, then edits, as the engine drives them (C2): the control side switches a fresh
+/// instance, sets the saved controls with `set_param` and publishes the structure before the
+/// instance is live; on the audio thread the first block adopts it, control values sent through
+/// the lane glide in (level, pan) or apply (shaper, matrix), a cleared zone's voices fade, a new
+/// publication is adopted and the old generation retires, Reset All Controllers acts at its frame.
+/// Nothing on the audio thread allocates or frees.
+#[test]
+fn a_load_and_its_edits_allocate_and_free_nothing_on_the_audio_thread() {
+    let sources: Vec<Arc<dyn SampleSource>> = (0..PADS).map(|i| source(i, 0.0)).collect();
+    let mut s = Sampler::new();
+    s.prepare(RATE, BLOCK, 2);
+    // The load: control side, before the instance first processes.
+    let p = s.enable_sampler_core(3).unwrap();
+    for z in 1..=PADS {
+        let mut id = [0u8; 32];
+        assert!(s.set_param(fmt(&mut id, z, "level"), -3.0));
+        assert!(s.set_param(fmt(&mut id, z, "pan"), 25.0));
+        assert!(s.set_param(fmt(&mut id, z, "shaper"), 1.0));
+    }
+    let mut rig = Rig { s, p, io: vec![vec![0.0; BLOCK]; 2], total: AllocStats::default(), frame: 0 };
+    rig.p.publish(spec(&sources)).unwrap();
+    rig.block(true);
+    rig.audio(|s, _| {
+        for k in 0..PADS as u8 {
+            assert!(s.event(u32::from(k), &ev(30 + k, true)));
+        }
+    });
+    rig.block(true);
+    // Edits: control values through the lane (sent on the control side, stored and glided on the
+    // audio side), then a structural edit clearing ten zones (their pads unbound).
+    for b in 0..8 {
+        for z in 1..=PADS {
+            let mut id = [0u8; 32];
+            assert!(rig.p.set_control(fmt(&mut id, z, "level"), -(b as f32)));
+            assert!(rig.p.set_control(fmt(&mut id, z, "pan"), b as f32 * 10.0 - 40.0));
+            assert!(rig.p.set_control(fmt(&mut id, z, "cutoff"), 300.0 + 100.0 * b as f32));
+        }
+        rig.block(true);
+        rig.p.collect();
+    }
+    let mut cleared = spec(&sources);
+    for z in 0..10 {
+        cleared.zones[z] = None;
+        cleared.pads[z].zone = None;
+    }
+    rig.p.publish(cleared).unwrap();
+    let mut retired = 0;
+    for _ in 0..16 {
+        rig.audio(|s, _| assert!(s.event(5, &PluginEvent { channel: 0, note_id: -1, message: Message::Control { cc: 121, value: 0 } })));
+        rig.block(true);
+        retired += rig.p.collect();
+    }
+    assert_eq!(rig.total.allocs, 0, "allocations on the audio thread: {:?}", rig.total);
+    assert_eq!(rig.total.frees, 0, "frees on the audio thread: {:?}", rig.total);
+    assert_eq!(retired, 1, "the loaded generation retired and dropped on the control side");
+    assert_eq!(rig.p.controls_waiting(), 0);
+    assert!(rig.io[0].iter().chain(&rig.io[1]).all(|x| x.is_finite()));
+}
+
 /// Writes `zoneNNN_<field>` into `buf` without allocating.
 fn fmt<'a>(buf: &'a mut [u8; 32], zone: usize, field: &str) -> &'a str {
     let head = [b'z', b'o', b'n', b'e', b'0' + (zone / 100) as u8, b'0' + (zone / 10 % 10) as u8, b'0' + (zone % 10) as u8, b'_'];

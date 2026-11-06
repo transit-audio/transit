@@ -259,3 +259,6 @@ mod tests;
 
 #[cfg(test)]
 mod core_tests;
+
+#[cfg(test)]
+mod core_tests_c2;
