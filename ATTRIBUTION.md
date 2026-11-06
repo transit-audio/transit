@@ -90,7 +90,7 @@ the notices.
 
 ## Fonts
 
-SoundCraft bundles no font files; the transit app bundles Inter and JetBrains Mono (rows under Files). SoundCraft uses the default fonts shipped inside the `egui` crate
+SoundCraft bundles no font files; the transit app bundles IBM Plex Sans and IBM Plex Mono (rows under Files). SoundCraft uses the default fonts shipped inside the `egui` crate
 (Ubuntu-Light: Ubuntu Font Licence 1.0; Hack: MIT; Noto Emoji: OFL-1.1; emoji-icon-font: OFL-1.1/MIT)
 and, at runtime, the operating system's own UI fonts when available (never redistributed).
 
@@ -127,14 +127,12 @@ and, at runtime, the operating system's own UI fonts when available (never redis
 | `site/assets/transit-wordmark-white.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
 | `site/assets/transit-wordmark-graphite.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
 | `site/assets/transit-wordmark-white-2172.png` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
-| `apps/transit/assets/fonts/inter/Inter-Regular.ttf` | The Inter Project Authors | Inter 4.1, https://github.com/rsms/inter | SIL OFL 1.1 (`apps/transit/assets/fonts/inter/OFL.txt`); modified: tabular figures (tnum) and ss02 frozen as defaults with opentype-feature-freezer; family renamed Inter Tab |
-| `apps/transit/assets/fonts/inter/Inter-Medium.ttf` | The Inter Project Authors | Inter 4.1, https://github.com/rsms/inter | SIL OFL 1.1 (`apps/transit/assets/fonts/inter/OFL.txt`); modified: tabular figures (tnum) and ss02 frozen as defaults with opentype-feature-freezer; family renamed Inter Tab |
-| `apps/transit/assets/fonts/inter/Inter-SemiBold.ttf` | The Inter Project Authors | Inter 4.1, https://github.com/rsms/inter | SIL OFL 1.1 (`apps/transit/assets/fonts/inter/OFL.txt`); modified: tabular figures (tnum) and ss02 frozen as defaults with opentype-feature-freezer; family renamed Inter Tab |
-| `apps/transit/assets/fonts/inter/Inter-Bold.ttf` | The Inter Project Authors | Inter 4.1, https://github.com/rsms/inter | SIL OFL 1.1 (`apps/transit/assets/fonts/inter/OFL.txt`); modified: tabular figures (tnum) and ss02 frozen as defaults with opentype-feature-freezer; family renamed Inter Tab |
-| `apps/transit/assets/fonts/inter/OFL.txt` | The Inter Project Authors | license text | SIL OFL 1.1 |
-| `apps/transit/assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf` | The JetBrains Mono Project Authors | JetBrains Mono 2.304, https://github.com/JetBrains/JetBrainsMono | SIL OFL 1.1 (`apps/transit/assets/fonts/jetbrains-mono/OFL.txt`); unmodified |
-| `apps/transit/assets/fonts/jetbrains-mono/JetBrainsMono-Medium.ttf` | The JetBrains Mono Project Authors | JetBrains Mono 2.304, https://github.com/JetBrains/JetBrainsMono | SIL OFL 1.1 (`apps/transit/assets/fonts/jetbrains-mono/OFL.txt`); unmodified |
-| `apps/transit/assets/fonts/jetbrains-mono/JetBrainsMono-Bold.ttf` | The JetBrains Mono Project Authors | JetBrains Mono 2.304, https://github.com/JetBrains/JetBrainsMono | SIL OFL 1.1 (`apps/transit/assets/fonts/jetbrains-mono/OFL.txt`); unmodified |
-| `apps/transit/assets/fonts/jetbrains-mono/OFL.txt` | The JetBrains Mono Project Authors | license text | SIL OFL 1.1 |
+| `apps/transit/assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf` | IBM Corp. | IBM Plex Sans 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-sans/OFL.txt`); unmodified; Reserved Font Name "Plex" |
+| `apps/transit/assets/fonts/ibm-plex-sans/IBMPlexSans-Medium.ttf` | IBM Corp. | IBM Plex Sans 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-sans/OFL.txt`); unmodified; Reserved Font Name "Plex" |
+| `apps/transit/assets/fonts/ibm-plex-sans/IBMPlexSans-SemiBold.ttf` | IBM Corp. | IBM Plex Sans 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-sans/OFL.txt`); unmodified; Reserved Font Name "Plex" |
+| `apps/transit/assets/fonts/ibm-plex-sans/OFL.txt` | IBM Corp. | license text | SIL OFL 1.1 |
+| `apps/transit/assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf` | IBM Corp. | IBM Plex Mono 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-mono/OFL.txt`); unmodified; Reserved Font Name "Plex" |
+| `apps/transit/assets/fonts/ibm-plex-mono/IBMPlexMono-Medium.ttf` | IBM Corp. | IBM Plex Mono 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-mono/OFL.txt`); unmodified; Reserved Font Name "Plex" |
+| `apps/transit/assets/fonts/ibm-plex-mono/OFL.txt` | IBM Corp. | license text | SIL OFL 1.1 |
 | `crates/ui-studio/assets/icons/` (all `.svg` files) | Lucide Contributors | lucide-static 1.50.0, https://github.com/lucide-icons/lucide | ISC (`crates/ui-studio/assets/icons/LICENSE.txt`); unmodified (tinted and, for transport glyphs and the favorite star, filled at load time) |
 | `crates/ui-studio/assets/icons/LICENSE.txt` | Lucide Contributors | license text | ISC |

@@ -18,6 +18,7 @@
 
 mod config;
 mod control_server;
+mod fonts;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
 mod logging;
@@ -113,55 +114,6 @@ fn set_title(ctx: &egui::Context, title: String) {
     }
 }
 
-macro_rules! font {
-    ($path:literal) => {
-        Arc::new(egui::FontData::from_static(include_bytes!(concat!("../assets/fonts/", $path))))
-    };
-}
-
-/// Inter for the UI, JetBrains Mono for numbers, the extra weights as named families, and the
-/// SoundCraft definitions (egui's built-in fonts, the system Hangul fallback) behind them.
-fn font_definitions() -> egui::FontDefinitions {
-    use egui::FontFamily;
-    let mut defs = transit_ui_studio::fonts::definitions();
-    let faces = [
-        ("inter-regular", font!("inter/Inter-Regular.ttf")),
-        ("inter-medium", font!("inter/Inter-Medium.ttf")),
-        ("inter-semibold", font!("inter/Inter-SemiBold.ttf")),
-        ("inter-bold", font!("inter/Inter-Bold.ttf")),
-        ("mono-regular", font!("jetbrains-mono/JetBrainsMono-Regular.ttf")),
-        ("mono-medium", font!("jetbrains-mono/JetBrainsMono-Medium.ttf")),
-        ("mono-bold", font!("jetbrains-mono/JetBrainsMono-Bold.ttf")),
-    ];
-    for (name, data) in faces {
-        defs.font_data.insert(name.into(), data);
-    }
-    // Each family: its face first, then whatever was there (fallbacks for emoji, icons, Hangul).
-    let mut put = |family: FontFamily, face: &str| {
-        let rest = defs.families.get(&family).cloned().unwrap_or_default();
-        let mut list = vec![face.to_string()];
-        list.extend(rest.into_iter().filter(|f| f != face));
-        defs.families.insert(family, list);
-    };
-    put(FontFamily::Proportional, "inter-regular");
-    put(FontFamily::Monospace, "mono-regular");
-    let proportional = defs.families[&FontFamily::Proportional].clone();
-    let monospace = defs.families[&FontFamily::Monospace].clone();
-    let mut named = |name: &str, face: &str, base: &[String]| {
-        let mut list = vec![face.to_string()];
-        list.extend(base.iter().filter(|f| *f != face).cloned());
-        defs.families.insert(FontFamily::Name(name.into()), list);
-    };
-    named("inter-medium", "inter-medium", &proportional);
-    named("inter-semibold", "inter-semibold", &proportional);
-    named("inter-bold", "inter-bold", &proportional);
-    named("mono-medium", "mono-medium", &monospace);
-    named("mono-bold", "mono-bold", &monospace);
-    // SoundCraft's own bold family (headings, theme::bold) becomes Inter Bold too.
-    named("bold", "inter-bold", &proportional);
-    defs
-}
-
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Before egui-wgpu paints this frame: on a lost device its buffer upload would panic.
@@ -177,7 +129,7 @@ impl eframe::App for App {
         let id = egui::Id::new("transit_fonts");
         if ctx.data(|d| d.get_temp::<bool>(id)).is_none() {
             ctx.data_mut(|d| d.insert_temp(id, true));
-            ctx.set_fonts(font_definitions());
+            ctx.set_fonts(fonts::definitions());
         }
         let dropped: Vec<String> =
             ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_string_lossy().into_owned()).filter(|s| !s.is_empty()).collect());
