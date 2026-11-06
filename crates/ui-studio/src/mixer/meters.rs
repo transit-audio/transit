@@ -14,7 +14,7 @@ pub(super) fn draw_meter(p: &egui::Painter, r: Rect, level: [f32; 2], clip: bool
         let x = r.min.x + 1.0 + c as f32 * (w + 1.0);
         let h = (r.height() - 2.0) * meter_k(*lvl);
         let bar = Rect::from_min_max(pos2(x, r.max.y - 1.0 - h), pos2(x + w, r.max.y - 1.0));
-        p.rect_filled(bar, 0.0, if *lvl > 0.9 { TOKENS.solo } else { TOKENS.monitor });
+        p.rect_filled(bar, 0.0, if *lvl > 0.9 { TOKENS.meter_hot } else { TOKENS.monitor });
     }
     // A clip latch is a small red cap at the top of the bar, not a red bar.
     if clip {
