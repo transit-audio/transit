@@ -213,7 +213,7 @@ the latency `manual_ms` set by hand; the measured latency is per machine (Measur
   says which: "No audio device", "MODEL D missing: notes are not sent", "Return In 1 is not on
   this interface", "Needs a duplex device", "Not measured: notes sound late by the round trip",
   else where C comes from: "Manual: 19.5 ms", "Measured 19.9 ms on 2026-10-24 at 48 kHz/64", or
-  in amber "Measured at 48 kHz / 64, now 44.1 kHz / 128: measure again".
+  as a warning "Measured at 48 kHz / 64, now 44.1 kHz / 128: measure again".
 - **Measure (slice 2, decision 3).** The card's Measure button (and `instrument.measure_external
   {track, action?: start|cancel|keep|status}`) plays one unmeasured warm-up note (200 ms), then 8
   notes 1500 ms apart (note 60, velocity 100, held 100 ms) on the track's channel (channel 1 when

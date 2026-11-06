@@ -13,7 +13,7 @@ text = "How hard the audio thread is working. Every audio callback has a time bu
 [[entry]]
 id = "telemetry.readout"
 name = "Load readout"
-text = "Audio thread time per callback as a share of the callback budget, the highest over the last 1,024 callbacks (about 2.7 s at 128 frames, 11 s at 512), next to the buffer size and sample rate. It turns amber above 80% and red at 100% or after an over-budget callback. Click for the details window; if it stays amber or red, raise the buffer size or freeze heavy tracks."
+text = "Audio thread time per callback as a share of the callback budget, the highest over the last 1,024 callbacks (about 2.7 s at 128 frames, 11 s at 512), next to the buffer size and sample rate. It turns from green to white above 80% and red at 100% or after an over-budget callback. Click for the details window; if it stays white or red, raise the buffer size or freeze heavy tracks."
 
 [[entry]]
 id = "telemetry.histogram"
@@ -23,7 +23,7 @@ text = "How many callbacks took each amount of work time, in bins from up to 1 Â
 [[entry]]
 id = "telemetry.load_now"
 name = "Load now"
-text = "Audio thread time per callback divided by the callback budget, the highest over the last 1,024 callbacks (about 2.7 s at 128 frames, 11 s at 512). The readout turns amber above 80% and red at 100%, so steady values near those mean dropouts are close. If it climbs, freeze or simplify heavy tracks or raise the buffer size."
+text = "Audio thread time per callback divided by the callback budget, the highest over the last 1,024 callbacks (about 2.7 s at 128 frames, 11 s at 512). The readout turns white above 80% and red at 100%, so steady values near those mean dropouts are close. If it climbs, freeze or simplify heavy tracks or raise the buffer size."
 
 [[entry]]
 id = "telemetry.recent_over_budget"

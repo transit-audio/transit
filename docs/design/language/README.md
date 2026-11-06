@@ -2,7 +2,7 @@
 
 One panel language for every transit device (instruments, effects, utilities). Graphite surfaces, one **signal** colour for what you set, one **mod** colour for what moves it. Every device is built from the same panels, knobs, displays and routing rows.
 
-Machine-readable tokens: [`tokens.json`](tokens.json). Mockup sources: [`mockups/`](mockups/) (Design canvas `.dc.html` files; they render on the canvas, not standalone).
+Machine-readable tokens: [`tokens.json`](tokens.json). Mockup sources: [`mockups/`](mockups/) (Design canvas `.dc.html` files; they render on the canvas, not standalone). The application chrome document (draft 1: controls, the decisions, menus, dialogs, the loop indicator, the loop hue, the hatch) is in [`mockups/chrome/`](mockups/chrome/).
 
 In code ([ADR 0045](../../adr/0045-design-language-in-code.md)): `crates/ui-studio/src/tokens.rs` mirrors `tokens.json` (a test reads the file and fails on any value or name that differs, in either direction), `theme.rs` builds the dark and light token sets from it, and the controls below live in `crates/ui-studio/src/widgets/`, one file per control with its layout test.
 
@@ -11,7 +11,7 @@ In code ([ADR 0045](../../adr/0045-design-language-in-code.md)): `crates/ui-stud
 ## Principles
 
 1. **Show the sound.** Every section leads with a display of what it does: waveform, curve, envelope, response.
-2. **Two colours mean two things.** Signal blue is a value you set. Mod amber is modulation acting on it. Nothing else is coloured, apart from level meters.
+2. **Two colours mean two things.** Signal blue is a value you set. Mod amber is modulation acting on it. Nothing else is coloured, apart from level meters, clip, arm and error (`meter.hot`), and the loop's own hue (magenta, kept apart from both). A warning is not colored.
 3. **Values are always readable.** Every control prints its value in mono, in real units (`1.20 kHz`, `320 ms`, `−3.2 dB`). No hover needed to know a setting.
 4. **Panels, not chrome.** Flat raised panels on a graphite ground. No skeuomorphic metal, glow or gradients.
 5. **No analog dials.** A slow reading is a ballistics mode of the flat meter, never a needle on a dial; the trace or the bar shows the signal, and the VU mode shows how it sits.
@@ -44,7 +44,7 @@ The grid is the arrangement's backbone: one structure that carries tempo, meter 
 | `signal` | `#4C9EFF` | `#0055BB` | Value arcs, curves, selected outline, switch on |
 | `mod` | `#F0A73A` | `#633E08` | Modulation rings, LFO traces, amounts, GR |
 | `meter.ok` | `#5FCB8E` | `#1A4F31` | Level meters |
-| `meter.hot` | `#FF6B5B` | `#B51200` | Clip / over only |
+| `meter.hot` | `#FF6B5B` | `#B51200` | Clip, arm, error (an error's icon and edge; its message stays `text`) |
 
 Signal and mod differ in lightness as well as hue, so they stay distinguishable for colour-blind users. Fills under curves use the curve colour at 12% (8% for the oscilloscope).
 
@@ -52,7 +52,7 @@ Signal and mod differ in lightness as well as hue, so they stay distinguishable 
 
 ### Arrangement and transport
 
-Tokens the device design does not name, used by the arrangement, the transport and the track headers. The grounds and lines are re-derived on the graphite ground at the contrast ratio each had on the previous ground (lanes, ruler and headers against `bg.window`; grid lines against the lane). Grid lines are the lane tinted toward white (toward black in light), so the translucent Grid Over Clips overlay reproduces them over an empty lane. The state colors alias design tokens: record arm is `meter.hot`, mute is `text` (the toggle inverts), solo is `signal`, monitoring and meter levels are `meter.ok`, warnings are `mod`. A bypassed device's status reads `text.faint`, as an insert slot's does.
+Tokens the device design does not name, used by the arrangement, the transport and the track headers. The grounds and lines are re-derived on the graphite ground at the contrast ratio each had on the previous ground (lanes, ruler and headers against `bg.window`; grid lines against the lane). Grid lines are the lane tinted toward white (toward black in light), so the translucent Grid Over Clips overlay reproduces them over an empty lane. The state colors alias design tokens: record arm is `meter.hot`, mute is `text` (the toggle inverts), solo is `signal`, monitoring and meter levels are `meter.ok`. A warning has no color (see Warnings and errors under Application chrome). A bypassed device's status reads `text.faint`, as an insert slot's does. The loop has its own hue, `loop`, chosen to stay clear of `signal`, `mod`, `meter.ok` and `meter.hot` for normal, protan, deutan and tritan vision.
 
 | Token | Dark | Light | Rust | Contrast (before, now) | Use |
 |---|---|---|---|---|---|
@@ -64,7 +64,7 @@ Tokens the device design does not name, used by the arrangement, the transport a
 | `grid.bar` | `#323537` | `#CFCFD1` | `grid_bar` | 1.41, 1.41 on the lane | Bar lines |
 | `grid.beat` | `#242729` | `#E3E4E5` | `grid_beat` | 1.15, 1.16 | Beat lines |
 | `grid.sub` | `#1C1F21` | `#EEEEF0` | `grid_sub` | 1.05, 1.05 | Sub-beat lines |
-| `loop` | `#E6AB27` | `#5B430B` | `loop_region` | 8.89, 8.90 | Loop region, Cycle on |
+| `loop` | `#D05DAD` | `#B73590` | `loop_region` | designed: 5.1 on the window, 4.9 on a lane, 5.35 on the key rows; worst ΔE 23 against signal, mod, meter.ok and meter.hot over every vision type, 36 against text; `ink.dark` on it 5.1 | The loop: the brace, the ruler tint and edges while Cycle is on, the Cycle button, out-of-scale piano roll rows (see The loop below). `loop` is a Rust keyword, so the Rust name stays `loop_region` |
 | `cursor` | `#E1E1E3` | `#28282B` | `cursor` | 13.94, 14.01 | Playhead |
 | `selection.outline` | `#EDEDF0` | `#1F1F26` | `selection_outline` | 15.52, 15.65 | Selected clip outline, marquee |
 | `ink.dark` | `#131518` | `#131518` | `ink_dark` | = `bg.window` | Letters on light fills |
@@ -75,7 +75,6 @@ Tokens the device design does not name, used by the arrangement, the transport a
 | `monitor` | `#5FCB8E` | `#1A4F31` | `monitor` | = `meter.ok` | Input monitoring, meter levels |
 | `focus.ring` | `#4C9EFF` | `#0055BB` | `focus_ring` | = `signal` | Keyboard focus |
 | `button.hover` | `#2E333A` | `#CED3D9` | `button_hover` | = `knob.capActive` | Hovered buttons and rows, one step above `surface.raised` |
-| `warn` | `#F0A73A` | `#633E08` | `warn` | = `mod` | Warnings: a load warning, a stale or unanswered device, a paused view (something acting on the signal that the user did not set) |
 | `overlay` | `#00000046` | `#0000001C` | `overlay` | unchanged | Dims what lies outside a range |
 
 The older names in code read the design values: `bg` is `bg.window`, `panel` is `surface.panel`, `panel_raised` and `button` are `surface.raised`, `text_dim` is `text.muted`, `accent` is `signal`. `mod` is `modulation` in Rust (a keyword).
@@ -152,6 +151,7 @@ Used for M / S / R / I, option toggles (SYNC, RETRIG, HZ) and any on/off that is
 | Solo | — | fill `signal`, text `surface.inset` |
 | Record arm | — | fill `meter.hot`, text `bg.window` |
 | Monitor / option | — | fill `#1E2A38`, text + 1 px border `signal` |
+| Cycle | — | fill `loop`, glyph `ink.dark` (a role color, like solo or arm) |
 | Unavailable | fill `#1E2125`, text `ink.arrow`, disabled | — |
 
 Height 24, radius 4, Sans 600 11. Unavailable toggles stay visible (ghosted) so strips keep the same layout. A muted channel also dims its name and fader fill. A toggle is at least square and otherwise fits its label plus 12 px (`widgets/toggle.rs`).
@@ -184,7 +184,7 @@ In code (`widgets/display_well.rs`): the readout row is 14 px; points are r 4.5 
 Track `surface.inset`, 1 px `line`, radius 6, 2 px padding. Selected segment `surface.selected` with `text`; others transparent with `text.faint`. Icons for shapes (LFO), text for modes (LP/BP/HP). In code (`widgets/segmented.rs`): the track is 24 high, segments are radius 4 (`radius.segment`) with Mono 500 11 text, sized to their text plus 10 px a side or spread evenly over a given width.
 
 ### Dropdown
-`surface.inset` on panels (`surface.raised` inside routing rows), 1 px `line`, radius 5, chevron in `text.faint`.
+`surface.inset` on panels (`surface.raised` inside routing rows), 1 px `line`, radius 5, chevron in `text.faint`. egui's combo box is this dropdown (Application chrome below).
 
 ### Switch
 34 × 20, radius 10. On: `signal` track, white knob. Off: `line.strong` track, `text.muted` knob. Paired with a mono `ON`/`OFF` readout. In code (`widgets/switch.rs`): the 14 px knob sits 3 px inside the track; the readout (`value`, `text` on, `text.faint` off) takes a 24 px slot 6 px left of the track so the track never moves.
@@ -211,6 +211,62 @@ Track 4 px `line`; fill 7 px `mod` from the centre tick (`text.faint`) towards t
 4 px bars on a `line` track, `meter.ok`, `meter.hot` only above 0 dBFS.
 
 **Ballistics** are a pair of time constants (attack and release, the time to reach 99% of a step), with two presets. **Peak fall-off** (attack 0, release 300 ms) is the default for every meter: the bar jumps to any higher value within the frame and falls off over 300 ms, so only the fall is smoothed and transients are never hidden. **VU** (attack 300 ms, release 300 ms) is the symmetric averaging reading, scaled so 0 VU sits at a reference that defaults to −18 dBFS (a device may set −20 or −14), with `meter.hot` only above 0 VU and a `VU` tag. Device panels pick; the peak-hold line and the clip cell are never smoothed. The same bar reads gain reduction: it fills down from the top in `mod`, with a `GR` tag and no over zone. In code (`widgets/level_meter.rs`) the widget is stateless: the caller holds the displayed value and steps it each frame with `meter_step(prev, target, dt, ballistics)`, a one-pole integration in dB on the fader's taper.
+
+## Application chrome
+
+egui's own widgets outside the device panels: the menu bar and its menus, popups, dialogs, tool windows, buttons, fields, combo boxes, checkboxes and radio buttons, scroll bars and tooltips. From the maintainer's application chrome document (draft 1, [`mockups/chrome/`](mockups/chrome/)); the numbers are `chrome` in `tokens.json`. One rule carries over from the devices: color means something. Blue is a value you set or the thing that has focus; red is clip, record and error; nothing else is colored.
+
+In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gives buttons, fields and checks one shared stroke and fill, so `crate::chrome` sets the field, combo box, checkbox and radio rules at the call site (`chrome::field`, `chrome::text_field`, `chrome::checkbox`, `chrome::radio_value`) and draws the default button, the modal, the tool-window footer, the menu styles, the status lines and the keyboard focus ring. Device windows keep their 8 px body and egui's earlier button padding until their migration (326-M).
+
+### Buttons
+- **Standard:** `surface.raised`, no border, height 26, radius 5, padding 0 12, Sans 500 12 in `text`. Hover `button.hover`; pressed `surface.selected` (no signal edge: that is the option-on look); keyboard focus a 1.5 px `focus.ring` 2 px outside; disabled dims to read as `ink.arrow` (egui dims by one alpha, 0.3).
+- **Default:** `signal` fill, ink `surface.inset`, Sans 600 12, padding 0 16; hover `#66ACFF`, pressed `#3E85D8` (`chrome.defaultButton`); disabled the unavailable fill with `ink.arrow`. At most one per dialog; it is the action Enter performs.
+- **Icon:** 26 square, transparent, a 14 px glyph in `text.muted`.
+- **Toggles keep their 1 px line and muted caps** (Toggle above), so a button and an off toggle never look alike: borderless means momentary, outlined means it latches.
+- **Destructive actions:** the label names the loss ("Delete 3 Tracks", "Delete Track", "Delete Group", "Delete Take", never "OK" or a bare "Delete"), never red; it takes the default style when Enter performs it.
+- egui sizes its own buttons from the label (egui 0.36 sets it in the Body style) and the padding, so an egui button is about 24 high (12 px a side, 4 above and below); the chrome's own buttons (`chrome::button`, `chrome::default_button`) are exactly 26. egui's interact height stays 18: it also sets the height of every horizontal row and grid row.
+
+### Windows and dialogs
+- **Every window:** `surface.panel`, 1 px `line.strong` edge, radius 8, no shadow.
+- **Modal:** width 380, padding 18 18 16, no title bar: the question is the title (Sans 600 13), the detail below it (Sans 12, `text.muted`). The scrim is `overlay`. Footer: the default button rightmost, Cancel left of it, a third choice ("Don't Save") alone at the far left, 14 px under the text. Enter is the default, Escape is Cancel. The save-changes question and the delete confirmations are this modal (`chrome::modal`). Windows that open modally with a title bar (About, Keyboard Shortcuts, Quantize) dim what they cover with `overlay` too.
+- **Tool window:** the compact title bar, 26 high, on `bg.titlebar` with a 1 px `line` below it; title Sans 500 14; close with an 18 px hit. Body padding 14 16; groups under `label.section`, split by 1 px `line.inset`; the label column `text.muted`. Footer (`chrome::tool_footer`): padding 10 16, a 1 px line above, buttons right-aligned.
+- **Two title bars, never mixed:** app windows and dialogs 26 (above); devices 52 (Device anatomy, A).
+
+### Menus and popups
+- **Menu bar:** height 32 on `bg.titlebar` with a 1 px `line` below; items height 22, padding 0 8, radius 4, Sans 400 12; the open item takes `button.hover`.
+- **Popup** (menu, submenu, context menu, combo list, tooltip): `surface.raised`, 1 px `line.strong`, radius 5, padding 4, no shadow; it opens flush under its item, a submenu overlapping its parent by 4.
+- **Row:** height 24, radius 4, Sans 400 12. A 16 px check gutter (the check mark 12 px in `text`, never `signal`: a menu check is a view setting, not a value on a device). The shortcut Mono 400 11 in `text.faint`, right-aligned; a submenu chevron 12 in `text.faint`. Hover `button.hover`; disabled `ink.arrow`. Separator: 1 px `line`, 4 above and below. Delete stays a plain row (no red in menus).
+- **Tooltip:** padding 5 8, Sans 12 `text`, after 500 ms, no arrow, 4 px below the target, the shortcut in mono.
+- In code the menu bar's menus take the row style (`chrome::menu_style`, 24 px rows); context menus opened elsewhere keep egui's menu style (egui offers no global one), so their rows keep egui's 18 px interact height, and egui keeps its own separator spacing and tooltip padding (the popup padding, 4).
+
+### Fields and controls
+- **Text field:** `surface.inset`, 1 px `line` (`line.strong` on hover), radius 5, height 26. Names Sans 400 12; numbers Mono 500 11, right-aligned, the unit after in `text.faint`. Focus 1.5 px `signal`. Error 1.5 px `meter.hot` with the message in `text`. Disabled `#1E2125` with a `line.inset` edge and `ink.arrow` text (in code egui dims a disabled field by its one alpha).
+- **Combo box:** the dropdown above: `surface.inset`, 1 px `line`, chevron `text.faint` (`text.muted` on hover or open). Its list is a popup with the current value checked in `text` (lists built from check rows, as in Audio Devices, do this today; lists built from egui's selectable rows still mark the current value with the selection color until they move to check rows).
+- **Checkbox and radio:** a 14 px box in an 18 px hit, radius 3 (the radio round). Off `surface.inset` with `line.strong`; on `signal` with the mark in `surface.inset` (the radio: a 6 px `surface.inset` dot in a `signal` ring). Checked is a value set, like the switch.
+- **Scroll bars:** floating. At rest a 4 px `ink.ghost` handle; on hover 8 px `ink.arrow` on a `surface.panel` track; `text.faint` while dragging. Inset 2, minimum handle 24, round ends.
+- **Text selection** `signal` at 60 percent (35 in the light set); **links** `signal`.
+
+### Warnings and errors
+- **A warning** is the message in `text` with a triangle glyph, no color, on a `surface.raised` card with a `line.strong` edge where there is room for one (Audio Devices' low-buffer note in the artboard). A dedicated warning yellow would be a third amber next to `mod` and the old loop color.
+- **An error** adds `meter.hot` to the icon and to the edge; the message stays `text`.
+- In code: `chrome::Severity` and `chrome::status_text` / `status_label` (the triangle is Lucide's triangle-alert for both; the artboard draws an error with a circle-alert). The load readout above 80 percent is a warning (the bar and figures in `text`), at 100 percent an error; the MIDI Monitor's closed or missing port is an error, a quiet open input and the paused line warnings; the Unresponsive marker on a device card and a track header is an error; the External Instrument's refused or failed measurement is an error, a stale measurement or a result waiting for Keep a warning.
+
+### The loop
+The loop region has its own hue, `loop` (magenta), clear of amber (mod) and blue (selection).
+
+- **Brace** (the strip at the top of the ruler): solid `loop` with the range in Mono 9 `ink.dark` ("5.1 – 9.1 · 4 bars"; the length only when it runs bar line to bar line) while Cycle is on; at 30 percent with a 55 percent edge and the range in `text` while Cycle is off (parked, no lane effect).
+- **Cycle on:** the ruler under the loop takes the hue at 20 percent; the loop's edges run down the ruler and the lanes at 75 percent; the lanes outside the loop take `overlay`. Nothing tints inside: the selection stays the only color there.
+- **Cycle button:** a role toggle, filled `loop` with an `ink.dark` glyph when on (Toggle table above); the toggle's off look when off.
+- **Piano roll:** out-of-scale rows at 12 percent of the hue (the artboard allows 9 to 12), their key labels in the hue; the keys keep their own fills; a live out-of-scale note is solid `loop`.
+- The ranges the artboard allows (ruler tint 16 to 20 percent, edges 60 to 75) are pinned to one value each in `alpha` (`loopRulerTint`, `loopEdge`, `loopBraceOff`, `loopBraceOffEdge`, `loopScaleRow`).
+
+### Hatch
+A pattern for a region that cannot take input right now: hatch means "can't take input"; dim means "off, still editable"; never both.
+
+- `text` at 7 percent (6 in the light set), 1.5 px lines at −45 degrees, 8 px pitch, anchored to the window so the stripes line up across a header and its lane (`hatch` in `tokens.json`).
+- **Use:** inactive tracks (header and lane hatched, clips to ghost outlines in `ink.ghost` with an 18 percent fill, the color bar `ink.ghost`); suspended or missing plug-ins (the hatch fills the panel; the reason and the way out sit on a solid card with a Resume or Retry button); frozen lanes; unavailable insert slots; beyond a clip's end in an editor.
+- **Never:** a disabled-but-editable section (it dims to 40 percent), a muted track, a single small control (ghost it instead), anything under 48 px.
+- In code `widgets/hatch.rs` (`hatch::paint`, a `HatchLayout` with the lines it drew). Its first uses are the inactive track and the device card of a plug-in that does not answer; frozen lanes, unavailable insert slots and the editor's space past a clip's end move to it in their migrations (today a frozen lane is tinted `signal` at 12 percent, and the piano roll dims past the clip's end with `overlay`).
 
 ## Device anatomy
 

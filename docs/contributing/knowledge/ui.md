@@ -144,8 +144,9 @@ While clips are selected, every Cycle On and Set Cycle to Selection takes the cl
 `EditState::cycle_range()` still falls back to the selection for a session that arrives with Cycle
 on and no region; playback reads it unchanged.
 
-The ruler shows the stored `loop_range` (never the selection): an amber block while Cycle is on, a
-faint outline while off, nothing without a region. The block is live (`loopbar::block`, sharing
+The ruler shows the stored `loop_range` (never the selection): tinted in the loop hue while Cycle
+is on (with the edges down the lanes and `overlay` outside the loop), only the parked brace in the
+strip while off, nothing without a region (#326, design README "The loop"). The block is live (`loopbar::block`, sharing
 `loopbar::gesture` with the 8 px strip): edges resize, the body moves, double-click toggles Cycle,
 all as one `transport.loop`. A plain click on the block, or anywhere else on the ruler, locates.
 
