@@ -113,10 +113,10 @@ impl InputView {
         let muted = self.muted(track).map_or_else(String::new, |m| format!("\n{}", m.text()));
         response.clone().on_hover_text(format!("{}{muted}\n{}\nArm this track to receive MIDI input.", self.label(input), self.status));
         let mut change = None;
-        egui::Popup::menu(response).width(240.0).show(|ui| {
+        crate::chrome_pick::dropdown(response).width(240.0).show(|ui| {
             ui.label("MIDI input");
             for (port, label) in [(MidiPort::All, "All MIDI inputs"), (MidiPort::None, "No MIDI input")] {
-                if ui.selectable_label(input.port == port, label).clicked() {
+                if crate::chrome_pick::choice_label(ui, input.port == port, label).clicked() {
                     change = Some(json!({"track": track.0, "port": if port == MidiPort::All { "all" } else { "none" }}));
                     ui.close();
                 }
@@ -129,7 +129,7 @@ impl InputView {
             }
             egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
                 for (port, label) in &self.ports {
-                    if ui.selectable_label(self.same_port(&input.port, port), label).clicked() {
+                    if crate::chrome_pick::choice_label(ui, self.same_port(&input.port, port), label).clicked() {
                         if let MidiPort::Device { backend, name, ordinal, id } = port {
                             change = Some(json!({"track": track.0, "port": {"backend": backend, "name": name, "ordinal": ordinal, "id": id}}));
                         }
@@ -149,12 +149,12 @@ impl InputView {
             }
             ui.separator();
             ui.menu_button("Channel", |ui| {
-                if ui.selectable_label(input.channel.is_none(), "All channels").clicked() {
+                if crate::chrome_pick::choice_label(ui, input.channel.is_none(), "All channels").clicked() {
                     change = Some(json!({"track": track.0, "channel": "all"}));
                     ui.close();
                 }
                 for channel in 1u8..=16 {
-                    if ui.selectable_label(input.channel == Some(channel - 1), format!("Channel {channel}")).clicked() {
+                    if crate::chrome_pick::choice_label(ui, input.channel == Some(channel - 1), format!("Channel {channel}")).clicked() {
                         change = Some(json!({"track": track.0, "channel": channel}));
                         ui.close();
                     }

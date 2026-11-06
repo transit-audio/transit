@@ -236,7 +236,7 @@ pub(crate) fn card(
     c.external_return = crate::arrange::r4(rb);
     let resp = resp.on_hover_text("The input the synth's audio comes back on");
     let inputs: Vec<String> = app.engine.io_map().paths_of(IoDirection::Input).map(|p| p.name.clone()).collect();
-    egui::Popup::menu(&resp).width(180.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+    crate::chrome_pick::dropdown(&resp).width(180.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         for name in &inputs {
             let b = crate::menus::check_button(ui, e.ret.eq_ignore_ascii_case(name), name);
             menu.push(MenuItem::at(ui, name.clone(), format!("return:{name}"), b.rect));

@@ -994,7 +994,7 @@ fn lane_header(
         app.auto.picker.query.clear();
         app.auto.picker.focus = true;
     }
-    if let Some(id) = egui::Popup::menu(&resp).width(260.0).show(|ui| picker_body(app, ui, &s, t, &lid, menu)).and_then(|r| r.inner) {
+    if let Some(id) = crate::chrome_pick::dropdown(&resp).width(260.0).show(|ui| picker_body(app, ui, &s, t, &lid, menu)).and_then(|r| r.inner) {
         picked = Some(id);
     }
     if let Some(to) = picked {
@@ -1024,7 +1024,7 @@ fn lane_header(
             "Automation mode: Read plays the lanes; Touch, Latch and Write record while playing. Touch holds the control's value while you hold it and returns to the lane when you let go",
         );
         let mut picked = None;
-        egui::Popup::menu(&resp).width(120.0).show(|ui| {
+        crate::chrome_pick::dropdown(&resp).width(120.0).show(|ui| {
             for m in MODES {
                 let b = crate::menus::check_button(ui, m == mode, mode_label(m));
                 menu.push(MenuItem::at(ui, mode_label(m).into(), m.label().into(), b.rect));

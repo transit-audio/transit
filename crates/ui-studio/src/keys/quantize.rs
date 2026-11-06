@@ -87,9 +87,9 @@ pub(super) fn window(app: &mut StudioApp, ctx: &egui::Context) {
             .map(|(label, _)| (*label).to_owned())
             .unwrap_or_else(|| format!("{} ticks", prefs.grid_ticks));
         crate::chrome::field(ui, |ui| {
-            egui::ComboBox::from_id_salt("quantize_grid").selected_text(label).icon(crate::chrome::chevron).show_ui(ui, |ui| {
+            crate::chrome_pick::Combo::new("quantize_grid", label).show(ui, |ui| {
                 for (label, ticks) in GRIDS {
-                    ui.selectable_value(&mut prefs.grid_ticks, ticks, label);
+                    crate::chrome_pick::choice_value(ui, &mut prefs.grid_ticks, ticks, label);
                 }
             })
         });

@@ -202,9 +202,9 @@ impl OutputView {
     pub(crate) fn popup(&self, response: &egui::Response, track: TrackId, output: &MidiOutput, external: bool) -> Option<Value> {
         response.clone().on_hover_text(format!("{}\n{}", self.label(track, output), self.status));
         let mut change = None;
-        egui::Popup::menu(response).width(260.0).show(|ui| {
+        crate::chrome_pick::dropdown(response).width(260.0).show(|ui| {
             ui.label("MIDI output");
-            if ui.selectable_label(output.is_internal(), "Instrument (internal)").clicked() {
+            if crate::chrome_pick::choice_label(ui, output.is_internal(), "Instrument (internal)").clicked() {
                 change = Some(json!({"track": track.0, "port": "internal"}));
                 ui.close();
             }
@@ -217,7 +217,7 @@ impl OutputView {
             egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
                 for (port, label) in &self.ports {
                     let selected = matches!(output, MidiOutput::External { port: current, .. } if same_port(current, port, &self.ports));
-                    if ui.selectable_label(selected, label).clicked() {
+                    if crate::chrome_pick::choice_label(ui, selected, label).clicked() {
                         change = Some(
                             json!({"track": track.0, "port": {"backend": port.backend, "name": port.name, "ordinal": port.ordinal, "id": port.id}}),
                         );
@@ -231,12 +231,12 @@ impl OutputView {
             if let MidiOutput::External { channel, .. } = output {
                 ui.separator();
                 ui.menu_button("Channel", |ui| {
-                    if ui.selectable_label(*channel == MidiOutChannel::AsRecorded, "As recorded").clicked() {
+                    if crate::chrome_pick::choice_label(ui, *channel == MidiOutChannel::AsRecorded, "As recorded").clicked() {
                         change = Some(json!({"track": track.0, "channel": "as_recorded"}));
                         ui.close();
                     }
                     for c in 1u8..=16 {
-                        if ui.selectable_label(*channel == MidiOutChannel::Channel(c - 1), format!("Channel {c}")).clicked() {
+                        if crate::chrome_pick::choice_label(ui, *channel == MidiOutChannel::Channel(c - 1), format!("Channel {c}")).clicked() {
                             change = Some(json!({"track": track.0, "channel": c}));
                             ui.close();
                         }

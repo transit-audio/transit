@@ -57,7 +57,7 @@ pub(super) fn dropdown(
 /// A [`NEW_FX`] entry comes after a separator. Returns the value picked.
 pub(super) fn choice_menu(resp: &egui::Response, current: &str, choices: &[RoutingChoice], menu: &mut Vec<MenuItem>) -> Option<String> {
     let mut picked = None;
-    egui::Popup::menu(resp).width(150.0).show(|ui| {
+    crate::chrome_pick::dropdown(resp).width(150.0).show(|ui| {
         if choices.is_empty() {
             ui.weak("Nothing to pick");
         }

@@ -35,13 +35,13 @@ pub(super) fn selector(app: &mut StudioApp, ui: &mut Ui, rect: Rect, layout: &mu
     let button = Rect::from_min_size(rect.min, vec2(rect.width(), 24.0));
     let resp = ui.put(button, egui::Button::new(label).small());
     layout.selector = r4(resp.rect);
-    egui::Popup::menu(&resp).show(|ui| {
-        if ui.selectable_label(current.is_none(), "Velocity").clicked() {
+    crate::chrome_pick::dropdown(&resp).show(|ui| {
+        if crate::chrome_pick::choice_label(ui, current.is_none(), "Velocity").clicked() {
             app.keys.cc.controller = None;
             ui.close();
         }
         for (n, label) in [(64, "Sustain"), (1, "Mod wheel"), (11, "Expression")] {
-            let choice = ui.selectable_label(current == Some(n), label);
+            let choice = crate::chrome_pick::choice_label(ui, current == Some(n), label);
             layout.choices.push((n, r4(choice.rect)));
             if choice.clicked() {
                 app.keys.cc.controller = Some(n);

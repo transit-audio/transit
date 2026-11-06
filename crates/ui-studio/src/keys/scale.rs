@@ -77,7 +77,7 @@ pub(super) fn controls(app: &mut StudioApp, ui: &mut Ui, layout: &mut KeysLayout
             ui.small("Root");
             egui::Grid::new("scale_root").num_columns(2).spacing([2.0, 2.0]).show(ui, |ui| {
                 for (root, label) in transit_midi::scale::ROOT_NAMES.iter().enumerate() {
-                    let response = ui.selectable_label(usize::from(key.root) == root, *label);
+                    let response = crate::chrome_pick::option_label(ui, usize::from(key.root) == root, *label);
                     layout.pitch_menu.push(MenuItem::at(ui, format!("root_{root}"), (*label).into(), response.rect));
                     if response.clicked() {
                         key.root = root as u8;
@@ -99,7 +99,7 @@ pub(super) fn controls(app: &mut StudioApp, ui: &mut Ui, layout: &mut KeysLayout
             let needle = filter.trim().to_lowercase();
             egui::ScrollArea::vertical().id_salt("scale_list").max_height(190.0).auto_shrink([false, true]).show(ui, |ui| {
                 for scale in Scale::ALL.iter().copied().filter(|s| s.name().to_lowercase().contains(&needle)) {
-                    let response = ui.selectable_label(key.scale == scale, scale.name());
+                    let response = crate::chrome_pick::choice_label(ui, key.scale == scale, scale.name());
                     layout.pitch_menu.push(MenuItem::at(ui, format!("scale_{}", scale.id()), scale.name().into(), response.rect));
                     if response.clicked() {
                         key.scale = scale;
