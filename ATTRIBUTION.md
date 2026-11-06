@@ -131,8 +131,8 @@ and, at runtime, the operating system's own UI fonts when available (never redis
 | `apps/transit/assets/fonts/ibm-plex-sans/IBMPlexSans-Medium.ttf` | IBM Corp. | IBM Plex Sans 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-sans/OFL.txt`); unmodified; Reserved Font Name "Plex" |
 | `apps/transit/assets/fonts/ibm-plex-sans/IBMPlexSans-SemiBold.ttf` | IBM Corp. | IBM Plex Sans 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-sans/OFL.txt`); unmodified; Reserved Font Name "Plex" |
 | `apps/transit/assets/fonts/ibm-plex-sans/OFL.txt` | IBM Corp. | license text | SIL OFL 1.1 |
-| `apps/transit/assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf` | IBM Corp. | IBM Plex Mono 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-mono/OFL.txt`); unmodified; Reserved Font Name "Plex" |
-| `apps/transit/assets/fonts/ibm-plex-mono/IBMPlexMono-Medium.ttf` | IBM Corp. | IBM Plex Mono 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-mono/OFL.txt`); unmodified; Reserved Font Name "Plex" |
+| `apps/transit/assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf` | IBM Corp. | IBM Plex Mono 2.5.0 release (font version 2.005), https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-mono/OFL.txt`); unmodified; Reserved Font Name "Plex" |
+| `apps/transit/assets/fonts/ibm-plex-mono/IBMPlexMono-Medium.ttf` | IBM Corp. | IBM Plex Mono 2.5.0 release (font version 2.005), https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-mono/OFL.txt`); unmodified; Reserved Font Name "Plex" |
 | `apps/transit/assets/fonts/ibm-plex-mono/OFL.txt` | IBM Corp. | license text | SIL OFL 1.1 |
 | `crates/ui-studio/assets/icons/` (all `.svg` files) | Lucide Contributors | lucide-static 1.50.0, https://github.com/lucide-icons/lucide | ISC (`crates/ui-studio/assets/icons/LICENSE.txt`); unmodified (tinted and, for transport glyphs and the favorite star, filled at load time) |
 | `crates/ui-studio/assets/icons/LICENSE.txt` | Lucide Contributors | license text | ISC |
