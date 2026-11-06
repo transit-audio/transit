@@ -101,6 +101,8 @@ fn floating_only_opens_with_one_probe_and_no_warning() {
     inst.link().close();
 }
 
+/// Opened without raising the window: on a shared display, a top-level that a test maps and
+/// closes can pass its id to the next test's window, which the window manager then moves (E74).
 #[cfg(target_os = "linux")]
 #[test]
 fn timer_required_paints_only_after_the_host_delivers_its_registered_timer() {
@@ -109,7 +111,7 @@ fn timer_required_paints_only_after_the_host_delivers_its_registered_timer() {
     }
     let inst = gain("timer_required");
     let before = transit_rt::run_loop::counts();
-    inst.link().open("Fixture Gain").unwrap();
+    inst.link().open_with("Fixture Gain", |_| {}).unwrap();
     assert_eq!(transit_rt::run_loop::counts(), (before.0, before.1 + 1));
     assert!(!inst.load_state(b"CMD:gui-painted"));
     let callbacks = inst.link().host().timer_callbacks();
@@ -120,6 +122,23 @@ fn timer_required_paints_only_after_the_host_delivers_its_registered_timer() {
     assert_eq!(transit_rt::run_loop::counts(), before);
 }
 
+/// Round-trips the host thread's X connection (the host window's surface readout queries the
+/// server): the server has processed every request the host sent before this returns. It orders
+/// requests per connection only, so a readout on the fixture's separate connection sees a host
+/// request only after the host's own round trip (E64). The host maps the child with a round
+/// trip but resizes it with a request it only flushes; a readout right after the map could
+/// precede the resize and fail at the size (#346).
+#[cfg(target_os = "linux")]
+fn settle_host(inst: &Instance) {
+    let link = inst.link();
+    let g = link.lock();
+    assert!(g.window.as_ref().and_then(|w| w.surface_readout()).is_some(), "the host window lives on this thread");
+}
+
+/// The only test in this process that maps a top-level window. X gives a closed client's
+/// resource ids to the next client, so the fixture's plug can get the id of a window another
+/// test just mapped and closed; a window manager still handling that window then moves the plug
+/// out of the content window (E74, #346: WSLg's Weston reparented it to its own window).
 #[cfg(target_os = "linux")]
 #[test]
 fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
@@ -129,12 +148,15 @@ fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
     let q = transit_rt::gui_thread::MessageQueue::attach();
     let inst = gain("xembed_plug");
     inst.link().open("XEmbed Fixture").unwrap();
-    // Explicit readouts on the fixture's separate X connection. Each load_state round-trips
-    // that connection and records ClientMessages. 64 bounded idle passes allow the finite
-    // create/property/notify exchanges to drain, without asserting elapsed time or timers.
+    // Explicit readouts on the fixture's separate X connection, each after a host round trip.
+    // Each load_state round-trips that connection and records ClientMessages. The passes count
+    // host dispatches, not time: the host maps the child on the dispatch after the one that
+    // detects it (a 100 ms fallback only makes that sooner), and a stalled host or server
+    // delays a pass without using one up. 64 passes leave room for the finite exchanges.
     for _ in 0..64 {
         q.dispatch(256);
         inst.link().idle();
+        settle_host(&inst);
         if inst.load_state(b"CMD:xembed-mapped") && inst.load_state(b"CMD:xembed-notified") {
             break;
         }
@@ -148,6 +170,8 @@ fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
     for _ in 0..64 {
         q.dispatch(256);
         inst.link().idle();
+        // The host unmaps with a request it only flushes, as it resizes.
+        settle_host(&inst);
         if inst.load_state(b"CMD:xembed-unmapped") {
             break;
         }

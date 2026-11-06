@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use transit_clap_host as host;
 
 static SERIAL: Mutex<()> = Mutex::new(());
@@ -21,9 +21,16 @@ impl Test {
     fn new() -> Self {
         let serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let fixture = common::fixture_dir().to_path_buf();
-        let dir =
-            Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("clap-registry-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
-        std::fs::create_dir_all(&dir).unwrap();
+        // A fresh folder per test, never one left by an earlier run (E51 recurrence, #346). The
+        // process id and counter alone repeat across runs whose processes get the same ids (a VM
+        // that boots for each run), and a reused `install` already held a plug-in: the scan
+        // loaded it, and `copy_tree` then rewrote the loaded file in place. The clock makes the
+        // name unique; `create_dir` refuses a folder that exists instead of reusing it.
+        let root = Path::new(env!("CARGO_TARGET_TMPDIR"));
+        std::fs::create_dir_all(root).unwrap();
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = root.join(format!("clap-registry-{}-{}-{nanos}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir(&dir).unwrap();
         host::set_scan_extra_dirs_only(true);
         host::set_scan_hook(None);
         host::set_extra_dirs(Vec::new());
