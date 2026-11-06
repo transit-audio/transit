@@ -60,7 +60,7 @@ pub(crate) fn collapsed(app: &StudioApp, dev: Dev) -> bool {
 fn row_h() -> f32 {
     let p = space::PANEL_PADDING[0];
     let m = knob::cell(knob::Size::M).y;
-    p + 24.0 + GAP + FILTER_WELL_H + SCALE_H + GAP + m + GAP + 1.0 + GAP + FENV_WELL_H + LABEL_H + 4.0 + p
+    p + segmented::HEIGHT + GAP + FILTER_WELL_H + SCALE_H + GAP + m + GAP + 1.0 + GAP + FENV_WELL_H + LABEL_H + 4.0 + p
 }
 
 /// The section's height: the bar, and the row when open.

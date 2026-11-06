@@ -22,7 +22,7 @@ const LIGHT_GAP: f32 = 5.0;
 const PER_ROW: usize = 8;
 /// The Output panel's dropdowns.
 pub const DROPDOWN_W: f32 = 104.0;
-const DROPDOWN_H: f32 = 26.0;
+const DROPDOWN_H: f32 = space::CONTROL_HEIGHT[0];
 const LABEL_GAP: f32 = 10.0;
 
 pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut EditorLayout, out: &mut MacroLayout) {

@@ -31,8 +31,8 @@ pub const DISPLAY_H: f32 = PAD + 6.0 + PAD_READOUT;
 const HEADER_H: f32 = 26.0;
 /// A model button's height, the grid's gaps, and the group label column.
 pub const MODEL_H: f32 = 30.0;
-const MODEL_GAP: f32 = 4.0;
-const GROUP_GAP: f32 = 8.0;
+const MODEL_GAP: f32 = tokens::SPACE[0];
+const GROUP_GAP: f32 = tokens::SPACE[1];
 const GROUP_W: f32 = 92.0;
 const PER_ROW: usize = 8;
 /// The pad point's dot, rim and halo radii.

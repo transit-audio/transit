@@ -52,9 +52,10 @@ pub struct RouteRecord {
     pub texts: [String; 5],
 }
 
-const ROW_H: f32 = 40.0;
-const ROW_GAP: f32 = 4.0;
-const CHIP_H: f32 = 26.0;
+const ROW_H: f32 = space::ROUTING_ROW_HEIGHT;
+const ROW_GAP: f32 = tokens::SPACE[0];
+/// A source chip is a pill: twice its corner radius high.
+const CHIP_H: f32 = 2.0 * radius::CHIP;
 const CHIP_GAP: f32 = 6.0;
 const HEADER_H: f32 = 16.0;
 const FORMULA: &str = "out = amount × curve(source) × via · per voice";
@@ -62,7 +63,7 @@ const CHIPS_LABEL: &str = "Sources — drag onto any knob";
 /// The routing row's columns at the board's width: #, source, arrow, destination (the rest), via,
 /// curve, amount, remove; they shrink together below it.
 const COLUMNS: [f32; 8] = [32.0, 200.0, 24.0, 0.0, 180.0, 140.0, 300.0, 64.0];
-const COLUMN_GAP: f32 = 8.0;
+const COLUMN_GAP: f32 = tokens::SPACE[1];
 /// The narrowest the destination column gets before the fixed columns shrink.
 const DEST_MIN: f32 = 160.0;
 
@@ -367,7 +368,7 @@ fn route_row(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, row: usize,
     widgets::role_text(&p, &tokens::VALUE, &amount_text, t.text, Align2::RIGHT_CENTER, pos2(amt.min.x + bar_w + 10.0 + 48.0, amt.center().y));
     finish(app, ui, dev, aid, &a.response, a.amount.map(|v| v * 100.0), lay);
     // Remove.
-    let rr = Rect::from_center_size(pos2(rem.max.x - 13.0, rem.center().y), vec2(26.0, 26.0));
+    let rr = Rect::from_center_size(pos2(rem.max.x - 13.0, rem.center().y), vec2(tokens::chrome::ICON_BUTTON, tokens::chrome::ICON_BUTTON));
     let resp = ui.interact(rr, id("remove"), Sense::click());
     if resp.hovered() {
         p.rect_filled(rr, radius::SEGMENT, t.button_hover);

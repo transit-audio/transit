@@ -18,15 +18,15 @@ use crate::widgets::{self, level_meter, r4, toggle};
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 /// The bar's buttons and the preset field.
-pub const BUTTON: f32 = 32.0;
+pub const BUTTON: f32 = space::CONTROL_HEIGHT[1];
 const BUTTON_RADIUS: f32 = radius::DISPLAY;
-const GLYPH: f32 = 14.0;
+const GLYPH: f32 = tokens::chrome::ICON_GLYPH;
 pub const FIELD_W: f32 = 300.0;
 /// The output meter: a 4 px bar 140 wide, and its readout's slot.
 pub const METER_W: f32 = 140.0;
 const METER_H: f32 = 4.0;
 const READOUT_W: f32 = 64.0;
-const GAP: f32 = 12.0;
+const GAP: f32 = tokens::SPACE[2];
 
 /// The title bar as last drawn.
 #[derive(Debug, Clone, Default)]

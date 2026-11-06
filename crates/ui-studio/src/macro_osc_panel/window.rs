@@ -28,9 +28,9 @@ use transit_model::{Insert, TrackId};
 /// The shortest the window gets.
 pub const MIN_HEIGHT: f32 = 360.0;
 /// Room kept between a default-sized window and the screen's edges.
-const SCREEN_MARGIN: f32 = 32.0;
+const SCREEN_MARGIN: f32 = crate::tokens::SPACE[5];
 /// Each further window opens this much down and to the right of the one before.
-const CASCADE: f32 = 24.0;
+const CASCADE: f32 = crate::tokens::SPACE[4];
 
 /// The windows' memory between frames.
 #[derive(Debug, Default)]
