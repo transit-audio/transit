@@ -321,3 +321,28 @@ fn play_returns_to_normal_once_the_request_clears() {
     click_play(&mut t);
     assert!(t.app.is_playing(), "Play works again");
 }
+
+#[test]
+fn the_low_latency_button_keeps_its_width_and_the_next_item_still_while_pending() {
+    // Without a player the poll clears `pending` every frame, so draw the button directly.
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
+    let ctx = egui::Context::default();
+    let mut draw = |pending: bool| {
+        app.low_latency.pending = pending;
+        let mut next = egui::Rect::NOTHING;
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))), ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| {
+            ui.horizontal(|ui| {
+                app.low_latency_button(ui);
+                next = ui.allocate_exact_size(egui::vec2(40.0, 20.0), egui::Sense::hover()).0;
+            });
+        });
+        out.textures_delta.clear();
+        (app.arrange.layout.transport["low_latency"], next)
+    };
+    draw(false); // the first frame sizes the fonts
+    let idle = draw(false);
+    let pending = draw(true);
+    assert_eq!(idle, pending, "the button and the item to its right do not move");
+    assert!(idle.0[2] - idle.0[0] > 100.0, "the button holds the longer label: {:?}", idle.0);
+}

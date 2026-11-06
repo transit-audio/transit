@@ -91,8 +91,11 @@ impl StudioApp {
     }
 
     pub(crate) fn low_latency_button(&mut self, ui: &mut egui::Ui) {
-        let label = if self.low_latency.pending { "Low Latency (pending)" } else { "Low Latency" };
-        let b = ui.add(egui::Button::new(label).selected(self.ui.low_latency));
+        let label = if self.low_latency.pending { LABEL_PENDING } else { LABEL };
+        // The button is as wide as its longer label in the current font, so "(pending)" appearing
+        // never moves what sits to its right.
+        let width = low_latency_width(ui, LABEL_PENDING);
+        let b = ui.add(egui::Button::new(label).selected(self.ui.low_latency).min_size(egui::vec2(width, 0.0)));
         self.arrange.layout.transport.insert("low_latency".into(), [b.rect.min.x, b.rect.min.y, b.rect.max.x, b.rect.max.y]);
         crate::help::hover(ui, &b, crate::help::Id::TransportLowLatency);
         if b.on_hover_text(format!("{}\nShared/Main path, including device output latency", self.engine.path_latency.text())).clicked() {
@@ -113,6 +116,15 @@ impl StudioApp {
         let b = ui.label(self.engine.path_latency.text());
         crate::help::hover(ui, &b, crate::help::Id::DiagnosticsPathLatency);
     }
+}
+
+const LABEL: &str = "Low Latency";
+const LABEL_PENDING: &str = "Low Latency (pending)";
+
+/// A button's width for `label` in the current button font and padding.
+pub(crate) fn low_latency_width(ui: &egui::Ui, label: &str) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    ui.painter().layout_no_wrap(label.into(), font, egui::Color32::WHITE).size().x + 2.0 * ui.spacing().button_padding.x
 }
 
 fn notice(on: bool, count: usize, saved: f64) -> String {
