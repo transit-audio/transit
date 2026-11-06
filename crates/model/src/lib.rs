@@ -28,6 +28,8 @@ mod midi_output;
 mod mixer;
 mod rack;
 mod route_graph;
+pub mod sampler_patch;
+pub use sampler_patch::SamplerPatch;
 mod session;
 mod source;
 mod takes;
@@ -60,7 +62,7 @@ pub use route_graph::{
 };
 pub use session::{
     BUNDLE_EXTENSION, BitDepthSetting, EditMode, EditState, FEET_FRAMES_START, MAX_COMMENT_CHARS, MAX_NAME_CHARS, SESSION_EXTENSION, Session,
-    SessionError, Tool, UNPLACED_NOTE, ZoomState, ZoomToggle, is_session_file, truncate_chars,
+    SessionError, Tool, UNPLACED_NOTE, ZoomState, ZoomToggle, is_session_file, truncate_chars, unknown_needs, unknown_needs_note,
 };
 pub use source::{Source, SourceAudio, SourcePool};
 pub use takes::{StackTake, TakeStack, same_material};

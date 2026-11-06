@@ -402,7 +402,7 @@ impl Session {
     }
 
     /// Features a file can list under `needs` (see [`Session::to_json`]) that this build understands.
-    pub const KNOWN_NEEDS: [&'static str; 2] = ["clip_loop", "clip_scale_mode"];
+    pub const KNOWN_NEEDS: [&'static str; 4] = ["clip_loop", "clip_scale_mode", "sampler_patch", "sampler_slicing_modes"];
 
     /// The `needs` entries this session's content requires: a reader that does not know one would
     /// silently drop or misplay it. Empty for a session that uses none.
@@ -411,6 +411,14 @@ impl Session {
         let mut needs = if looped { vec!["clip_loop"] } else { Vec::new() };
         if self.all_clips().any(|c| c.scale_mode != Default::default()) {
             needs.push("clip_scale_mode");
+        }
+        // ADR 0041: a Sampler patch, and its loop's two marker sets and mode.
+        let patches = || self.tracks.iter().filter_map(|t| t.instrument.as_ref()).filter_map(|i| i.sampler_patch.as_ref());
+        if patches().next().is_some() {
+            needs.push("sampler_patch");
+        }
+        if patches().any(crate::SamplerPatch::uses_slicing) {
+            needs.push("sampler_slicing_modes");
         }
         needs
     }
@@ -703,18 +711,7 @@ impl Session {
         if ver > u64::from(Self::FORMAT_VERSION) {
             return Err(SessionError::Version(u32::try_from(ver).unwrap_or(u32::MAX)));
         }
-        let unknown: Vec<String> = v
-            .get("needs")
-            .and_then(serde_json::Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .filter(|n| !Self::KNOWN_NEEDS.contains(n))
-                    .map(|n| n.chars().take(40).collect::<String>())
-                    .take(8)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let unknown = unknown_needs(&v, &Self::KNOWN_NEEDS);
         let had_video = crate::legacy::drop_video(&mut v);
         let had_transport = crate::midi_transport::strip_session_rows(&mut v);
         let mut s: Session = serde_json::from_value(v).map_err(|e| SessionError::Format(e.to_string()))?;
@@ -728,12 +725,12 @@ impl Session {
         for take in &s.unplaced_takes {
             s.load_notes.push(format!("{UNPLACED_NOTE} {take}"));
         }
-        if !unknown.is_empty() {
-            s.load_notes.push(format!(
-                "this session uses features this version does not know ({}): parts of it may be missing or sound different, and saving it from here can drop them",
-                unknown.join(", ")
-            ));
+        if let Some(note) = unknown_needs_note(&unknown) {
+            s.load_notes.push(note);
         }
+        let patch_notes: Vec<String> =
+            s.tracks.iter().filter_map(|t| t.instrument.as_ref().and_then(|i| i.sampler_patch.as_ref()).and_then(|p| p.note(&t.name))).collect();
+        s.load_notes.extend(patch_notes);
         let changes = crate::legacy_synth::uses_retired_synth(&s)
             || crate::legacy_effects::uses_retired_effects(&s)
             || crate::legacy_mapping::migration_changes(&s);
@@ -837,6 +834,33 @@ pub fn truncate_chars(s: &mut String, max: usize) {
     if let Some((end, _)) = s.char_indices().nth(max) {
         s.truncate(end);
     }
+}
+
+/// The entries of a saved session's `needs` that a reader knowing `known` does not know (at most
+/// eight, each cut to 40 characters). [`Session::from_json`] reads with [`Session::KNOWN_NEEDS`];
+/// a test reads with an older build's list to show what that build says.
+pub fn unknown_needs(v: &serde_json::Value, known: &[&str]) -> Vec<String> {
+    v.get("needs")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|n| !known.contains(n))
+                .map(|n| n.chars().take(40).collect::<String>())
+                .take(8)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The one load note for needs a reader does not know (`None` when there are none).
+pub fn unknown_needs_note(unknown: &[String]) -> Option<String> {
+    (!unknown.is_empty()).then(|| {
+        format!(
+            "this session uses features this version does not know ({}): parts of it may be missing or sound different, and saving it from here can drop them",
+            unknown.join(", ")
+        )
+    })
 }
 
 #[cfg(test)]

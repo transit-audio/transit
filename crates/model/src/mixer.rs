@@ -572,6 +572,11 @@ pub struct Insert {
     /// The session audio source a sample-playing instrument (the built-in Sampler) plays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sample: Option<SourceId>,
+    /// The built-in Sampler's patch (ADR 0041): zones, pads, slicing and controls. Present only
+    /// once a patch was made for the instrument; an old one-sample Sampler (`sample`) has none,
+    /// and opening or saving it never makes one. A new patch leaves `sample` unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampler_patch: Option<crate::SamplerPatch>,
     /// The sidechain key this insert detects on (built-in compressor and gate); the key belongs
     /// to the slot and moves with it. Hosted plug-ins ignore it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -602,6 +607,7 @@ impl Insert {
             state: None,
             frozen_recording: None,
             sample: None,
+            sampler_patch: None,
             key: None,
             hardware: None,
             external: None,
