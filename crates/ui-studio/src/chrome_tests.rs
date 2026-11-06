@@ -370,7 +370,7 @@ fn a_selected_selectable_label_reads_as_an_option_toggle_not_a_solid_signal_butt
         let (resp, shapes) = rig.shapes(|ui| ui.selectable_label(true, "Notes"));
         let fills = rect_fills(&shapes);
         assert!(fills.contains(&t.toggle_option_fill), "{theme:?}: option fill, got {fills:?}");
-        assert!(!fills.iter().any(|f| *f == t.signal), "{theme:?}: never a solid signal fill");
+        assert!(!fills.contains(&t.signal), "{theme:?}: never a solid signal fill");
         let st = style_of(theme);
         assert_eq!(st.visuals.selection.stroke.color, t.signal, "{theme:?}: the text and stroke are signal");
         assert!(resp.rect.width() > 0.0);
