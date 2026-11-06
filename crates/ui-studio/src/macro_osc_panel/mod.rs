@@ -15,6 +15,7 @@
 
 mod hero;
 mod sections;
+mod shaper;
 mod title_bar;
 pub mod window;
 
@@ -548,6 +549,7 @@ pub fn content_height(app: &StudioApp, key: (TrackId, usize), width: f32) -> f32
     let w = width.max(MIN_WIDTH) - 2.0 * space::WINDOW_PADDING;
     let mut h = 2.0 * space::WINDOW_PADDING;
     h += hero::height(w);
+    h += space::PANEL_GAP + shaper::height(app, dev, w);
     h
 }
 
@@ -564,6 +566,7 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     let right = Rect::from_min_size(pos2(x + left_w + space::PANEL_GAP, y), vec2(w - left_w - space::PANEL_GAP, hero_h));
     sections::show(app, ui, dev, right, lay, out);
     y += hero_h + space::PANEL_GAP;
+    y += shaper::show(app, ui, dev, Rect::from_min_size(pos2(x, y), vec2(w, 0.0)), lay, out) + space::PANEL_GAP;
     y += space::WINDOW_PADDING;
     ui.allocate_rect(Rect::from_min_max(origin, pos2(origin.x + width, y)), Sense::hover());
 }

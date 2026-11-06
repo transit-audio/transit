@@ -33,6 +33,10 @@ pub struct UiState {
     /// id (the plug-in id, 326-M): a device opens where it was last closed, kept on screen. Per
     /// machine, never in the session.
     pub device_windows: std::collections::BTreeMap<String, [f32; 4]>,
+    /// A device window's collapsed section bars by `<device id>/<section>` (326-M; the design
+    /// language's section bar: collapse is a per-user view setting, enable is the parameter). A
+    /// section without an entry is collapsed until it is in use.
+    pub device_sections: std::collections::BTreeMap<String, bool>,
     /// How long each plug-in type took to load the last time, in milliseconds by plug-in id (issue
     /// #67): "last time 12 s" beside the loading readout. A per-machine preference, updated on
     /// every successful load; older files have none.
@@ -142,6 +146,7 @@ impl Default for UiState {
             editors_follow: true,
             plugin_windows: Vec::new(),
             device_windows: std::collections::BTreeMap::new(),
+            device_sections: std::collections::BTreeMap::new(),
             plugin_load_ms: std::collections::BTreeMap::new(),
             header_width: 236.0,
             window_size: [1600.0, 1000.0],
