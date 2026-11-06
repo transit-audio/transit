@@ -80,6 +80,8 @@ pub mod arrangement {
         FOCUS_RING = "focus.ring" 0x4C9EFF;
         BUTTON_HOVER = "button.hover" 0x2E333A;
     }
+    /// Height of the loop strip at the top of the ruler (points): a Mono 9 label with 2 px or more above and below.
+    pub const LOOP_STRIP_HEIGHT: f32 = 14.0;
     /// Dims what lies outside a range: black at 70/255 (`#00000046`).
     pub const OVERLAY: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 70);
 }

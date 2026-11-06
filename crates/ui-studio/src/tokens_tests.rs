@@ -37,7 +37,7 @@ fn num(v: &Value, path: &str) -> f32 {
 /// The object at `key` and `rust` name the same colors with the same values.
 fn same_colors(v: &Value, key: &str, rust: &[(&str, Color32)]) {
     let obj = at(v, key).as_object().unwrap_or_else(|| panic!("{key} is not an object"));
-    let in_json: BTreeSet<&str> = obj.keys().map(String::as_str).collect();
+    let in_json: BTreeSet<&str> = obj.iter().filter(|(_, x)| x.is_string()).map(|(k, _)| k.as_str()).collect();
     let in_rust: BTreeSet<&str> = rust.iter().map(|(n, _)| *n).collect();
     assert_eq!(in_rust.len(), rust.len(), "{key}: a name repeats in Rust");
     let missing_in_rust: Vec<_> = in_json.difference(&in_rust).collect();
@@ -48,6 +48,17 @@ fn same_colors(v: &Value, key: &str, rust: &[(&str, Color32)]) {
         let hex = obj[*name].as_str().unwrap_or_else(|| panic!("{key}.{name} is not a string"));
         assert_eq!(parse(hex), *c, "{key}.{name}: tokens.json {hex}, Rust {c:?}");
     }
+}
+
+/// The names under `key` whose value is a color string (the arrangement group also holds metrics).
+fn color_names(v: &Value, key: &str) -> Vec<String> {
+    at(v, key).as_object().unwrap().iter().filter(|(_, x)| x.is_string()).map(|(k, _)| k.clone()).collect()
+}
+
+#[test]
+fn the_loop_strip_height_matches_tokens_json() {
+    assert_eq!(num(&json(), "arrangement/loopStripHeight"), tokens::arrangement::LOOP_STRIP_HEIGHT);
+    assert_eq!(tokens::arrangement::LOOP_STRIP_HEIGHT, 14.0);
 }
 
 #[test]
@@ -69,11 +80,8 @@ fn the_light_set_matches_tokens_json_both_ways() {
     same_colors(&json(), "colorLight", &rust);
     // Every dark name has a light value, and the light set has no name of its own.
     let v = json();
-    let dark: BTreeSet<String> = ["color", "arrangement"]
-        .iter()
-        .flat_map(|k| at(&v, k).as_object().unwrap().keys().cloned())
-        .chain(tokens::component::ALL.iter().map(|(n, _)| n.to_string()))
-        .collect();
+    let dark: BTreeSet<String> =
+        ["color", "arrangement"].iter().flat_map(|k| color_names(&v, k)).chain(tokens::component::ALL.iter().map(|(n, _)| n.to_string())).collect();
     let light: BTreeSet<String> = at(&v, "colorLight").as_object().unwrap().keys().cloned().collect();
     assert_eq!(dark, light, "the light set names exactly the dark names");
 }
@@ -332,11 +340,8 @@ fn the_chrome_matches_tokens_json_both_ways() {
     }
     // A color a chrome rule names is a token of the color tables, or a component literal
     // registered under its path.
-    let known: BTreeSet<String> = ["color", "arrangement"]
-        .iter()
-        .flat_map(|k| at(&v, k).as_object().unwrap().keys().cloned())
-        .chain(tokens::component::ALL.iter().map(|(n, _)| n.to_string()))
-        .collect();
+    let known: BTreeSet<String> =
+        ["color", "arrangement"].iter().flat_map(|k| color_names(&v, k)).chain(tokens::component::ALL.iter().map(|(n, _)| n.to_string())).collect();
     fn strings(value: &Value, path: &str, out: &mut Vec<(String, String)>) {
         match value {
             Value::String(s) => out.push((path.to_string(), s.clone())),
@@ -421,7 +426,7 @@ fn the_pad_matches_tokens_json_both_ways() {
     for (path, x) in tokens::pad::METRICS {
         assert_eq!(num(pad, path), *x, "pad/{path}");
     }
-    let known: BTreeSet<String> = ["color", "arrangement"].iter().flat_map(|k| at(&v, k).as_object().unwrap().keys().cloned()).collect();
+    let known: BTreeSet<String> = ["color", "arrangement"].iter().flat_map(|k| color_names(&v, k)).collect();
     for path in [
         "fill",
         "border",

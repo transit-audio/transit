@@ -12,7 +12,7 @@ use transit_model::Session;
 use transit_time::{Range, Samples};
 
 /// Height of the strip, at the top of the ruler (points).
-pub const STRIP_H: f32 = 8.0;
+pub const STRIP_H: f32 = crate::tokens::arrangement::LOOP_STRIP_HEIGHT;
 /// How close (points) to a region edge a press grabs the edge instead of the body.
 pub const HANDLE: f32 = 6.0;
 
@@ -162,8 +162,10 @@ pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, str
         }
         let text = range_text(s, shown);
         let font = crate::theme::mono(ui.ctx(), BRACE_TEXT);
-        if ui.painter().layout_no_wrap(text.clone(), font.clone(), look.ink).size().x + 8.0 <= r.width() {
+        let galley = ui.painter().layout_no_wrap(text.clone(), font.clone(), look.ink);
+        if galley.size().x + 8.0 <= r.width() {
             p.with_clip_rect(r).text(r.center(), egui::Align2::CENTER_CENTER, &text, font, look.ink);
+            view.text_rect = crate::arrange::r4(Rect::from_center_size(r.center(), galley.size()));
             view.range_text = text;
         }
         view.brace = crate::arrange::r4(r);
@@ -172,6 +174,7 @@ pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, str
     app.arrange.layout.loop_view.brace = view.brace;
     app.arrange.layout.loop_view.brace_look = view.brace_look;
     app.arrange.layout.loop_view.range_text = view.range_text;
+    app.arrange.layout.loop_view.text_rect = view.text_rect;
 }
 
 /// The range in the brace: Mono 9 points.
@@ -225,6 +228,8 @@ pub struct LoopView {
     pub brace_look: BraceLook,
     /// The range printed in the brace (empty when it does not fit).
     pub range_text: String,
+    /// The printed range's text rect (zero when none is printed).
+    pub text_rect: crate::arrange::R4,
     /// The ruler's tint under the loop while Cycle is on.
     pub ruler_tint: Option<crate::arrange::R4>,
     /// The loop's edges (x) down the ruler and the lanes while Cycle is on.

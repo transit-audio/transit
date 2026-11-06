@@ -159,8 +159,9 @@ fn the_bounce_dialog_cycle_range_is_the_cycle_range() {
 
 /// A point in the ruler's loop block (under the strip) at sample `at`, plus `dx` points.
 fn block_at(app: &StudioApp, at: i64, dx: f32) -> (f32, f32) {
-    let (x, y) = strip_at(app, at, dx);
-    (x, y + 20.0)
+    // The block's hit rect starts 14 points under the strip's bottom (a 6 point band above the ruler's edge).
+    let (x, _) = strip_at(app, at, dx);
+    (x, app.arrange.layout.loop_strip[3] + 17.0)
 }
 
 fn one_bar(app: &StudioApp) -> i64 {

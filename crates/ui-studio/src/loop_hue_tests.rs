@@ -118,3 +118,39 @@ fn the_brace_range_reads_bar_beat_and_bars_on_bar_lines_only() {
     // Negative control: off the bar lines there is no length.
     assert_eq!(range_text(s, Range::new(t.bar(1), beat2)), "1.1 – 2.2");
 }
+
+/// The brace's range keeps at least this much strip above and below its text rect (#326).
+const LABEL_MARGIN: f32 = 2.0;
+
+/// The margins (above, below) of the printed range inside the strip, from the last frame.
+fn label_margins(t: &T) -> (f32, f32) {
+    let l = &t.app.arrange.layout;
+    let (strip, text) = (l.loop_strip, l.loop_view.text_rect);
+    (text[1] - strip[1], strip[3] - text[3])
+}
+
+#[test]
+fn the_loop_strip_is_14_points_and_the_label_has_margins_above_and_below() {
+    let mut t = T::new();
+    t.set_loop(1, 9, true);
+    let l = &t.app.arrange.layout;
+    assert_eq!(l.loop_strip[3] - l.loop_strip[1], crate::tokens::arrangement::LOOP_STRIP_HEIGHT);
+    assert_eq!(crate::loopbar::STRIP_H, 14.0);
+    assert_eq!(l.loop_view.range_text, "1.1 – 9.1 · 8 bars");
+    let (above, below) = label_margins(&t);
+    assert!(above >= LABEL_MARGIN && below >= LABEL_MARGIN, "label margins {above} / {below}");
+    assert!((above - below).abs() < 0.5, "centered: {above} / {below}");
+    // The bar numbers and ticks still fit under the strip, inside the ruler.
+    assert!(l.loop_strip[3] + 20.0 <= l.timeline[1], "the ruler keeps room under the strip");
+}
+
+#[test]
+fn an_8_point_strip_fails_the_margin_rule() {
+    // Negative control: the old strip height leaves the same text rect under 2 points of margin.
+    let mut t = T::new();
+    t.set_loop(1, 9, true);
+    let text = t.app.arrange.layout.loop_view.text_rect;
+    let h = text[3] - text[1];
+    assert!((8.0 - h) / 2.0 < LABEL_MARGIN, "a {h} point label in 8 points has {} per side", (8.0 - h) / 2.0);
+    assert!((14.0 - h) / 2.0 >= LABEL_MARGIN, "and in 14 points {}", (14.0 - h) / 2.0);
+}
