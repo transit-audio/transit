@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Application chrome — decisions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1360px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 48px 56px; display: flex; flex-direction: column; gap: 24px">
+
+<div style="display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #2B3036; padding-bottom: 20px">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #8C939D; letter-spacing: 0.08em">TWO OPEN CALLS</span>
+<h2 style="margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.01em">Where the build and the spec disagree</h2>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px">
+
+<!-- Call 1 -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #4C9EFF">01</span>
+<span style="font-size: 16px; font-weight: 600">A button and an off toggle look the same</span>
+<span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">Both are surface.raised with a 1 px line. Which one latches?</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<div style="background: #131518; border: 1px solid #23272C; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #8C939D">AS BUILT</span>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 6px; padding: 12px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
+<button style="height: 26px; padding: 0 10px; border: 1px solid #2B3036; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">Freeze</button>
+<button style="height: 24px; padding: 0 9px; border: 1px solid #2B3036; border-radius: 4px; background: #22262B; color: #A7ADB6; font: 600 11px 'IBM Plex Sans', sans-serif">SYNC</button>
+<button style="height: 26px; padding: 0 10px; border: 1px solid #2B3036; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">Bounce</button>
+<button style="height: 24px; padding: 0 9px; border: 1px solid #2B3036; border-radius: 4px; background: #22262B; color: #A7ADB6; font: 600 11px 'IBM Plex Sans', sans-serif">RETRIG</button>
+</div>
+<span style="font-size: 12px; color: #8C939D; line-height: 1.45">Only case and a 1 px radius tell them apart.</span>
+</div>
+<div style="background: #131518; border: 1px solid #23272C; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #E7E9EC">PROPOSED</span>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 6px; padding: 12px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
+<button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif">Freeze</button>
+<button style="height: 24px; padding: 0 9px; border: 1px solid #2B3036; border-radius: 4px; background: #22262B; color: #A7ADB6; font: 600 11px 'IBM Plex Sans', sans-serif">SYNC</button>
+<button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif">Bounce</button>
+<button style="height: 24px; padding: 0 9px; border: 1px solid #4C9EFF; border-radius: 4px; background: #1E2A38; color: #4C9EFF; font: 600 11px 'IBM Plex Sans', sans-serif">RETRIG</button>
+</div>
+<span style="font-size: 12px; color: #8C939D; line-height: 1.45">A button has no border. If it's outlined, it latches.</span>
+</div>
+</div>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">Alternative if you'd rather keep the border on buttons: drop it from <em>toggles</em> instead. That would mean changing the device spec, which has already landed, so I'd change the chrome side.</span>
+</div>
+
+<!-- Call 2 -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #4C9EFF">02</span>
+<span style="font-size: 16px; font-weight: 600">Warnings are painted modulation amber</span>
+<span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">egui's warn colour is set to mod. One panel over, that same amber means "this is being moved."</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<div style="background: #131518; border: 1px solid #23272C; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #8C939D">AS BUILT</span>
+<div style="display: flex; align-items: center; gap: 12px">
+<svg role="img" aria-label="Knob with modulation ring" width="44" height="44" viewBox="0 0 100 100"><path d="M21.7 78.3 A40 40 0 1 1 78.3 78.3" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path><path d="M21.7 78.3 A40 40 0 0 1 50 10" fill="none" stroke="#4C9EFF" stroke-width="6" stroke-linecap="round"></path><path d="M50 3 A47 47 0 0 1 90 25" fill="none" stroke="#F0A73A" stroke-width="3.5" stroke-linecap="round"></path><circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="1.5"></circle><path d="M50 41 L50 26" stroke="#E7E9EC" stroke-width="4" stroke-linecap="round"></path></svg>
+<span style="font-size: 12px; color: #A7ADB6">Cutoff <span style="font: 500 11px 'IBM Plex Mono', monospace; color: #F0A73A">+24%</span></span>
+</div>
+<div style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: #F0A73A; line-height: 1.45"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F0A73A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4M12 17h.01"></path></svg>Buffers under 64 samples may drop out on this driver.</div>
+</div>
+<div style="background: #131518; border: 1px solid #23272C; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #E7E9EC">PROPOSED</span>
+<div style="display: flex; align-items: flex-start; gap: 8px; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 8px 10px; font-size: 12px; color: #E7E9EC; line-height: 1.45"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4M12 17h.01"></path></svg>Buffers under 64 samples may drop out on this driver.</div>
+<div style="display: flex; align-items: flex-start; gap: 8px; background: #22262B; border: 1px solid #FF6B5B; border-radius: 5px; padding: 8px 10px; font-size: 12px; color: #E7E9EC; line-height: 1.45"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FF6B5B" stroke-width="2.2" stroke-linecap="round" style="flex: none; margin-top: 2px"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16.5v.01"></path></svg>The device stopped. Reconnect it or pick another output.</div>
+<span style="font-size: 12px; color: #8C939D; line-height: 1.45">A warning is ink and a triangle. An error adds meter.hot.</span>
+</div>
+</div>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">A dedicated warning yellow would be a third amber next to mod (#F0A73A) and loop (#E6AB27). Loop already sits close to mod, which is worth its own look later.</span>
+</div>
+</div>
+
+<!-- Full list -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 20px 6px; display: flex; flex-direction: column">
+<div style="display: flex; align-items: center; gap: 10px; padding-bottom: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Every chrome rule, as it would be written down</span>
+</div>
+<div style="display: grid; grid-template-columns: 190px minmax(0, 1.45fr) 96px minmax(0, 1fr); column-gap: 18px; font-size: 12px; line-height: 1.4">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; padding: 6px 0; border-bottom: 1px solid #2B3036">element</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; padding: 6px 0; border-bottom: 1px solid #2B3036">rule</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; padding: 6px 0; border-bottom: 1px solid #2B3036">status</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; padding: 6px 0; border-bottom: 1px solid #2B3036">why / was</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Window, dialog radius</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">8 (radius.panel)</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">AS BUILT</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">A dialog is a floating panel</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Menu, popup, widget radius</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">5 (radius.control) · menu rows 4</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">AS BUILT</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">A menu is an open dropdown; rows r 4 is new</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Window fill + edge</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">surface.panel · 1 px line.strong</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Was raised + line. Raised buttons need a lower step to sit on; no shadow, so the edge lifts</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Popups (menu, list, tooltip)</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">surface.raised · 1 px line.strong · pad 4</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Was line; one step above what it opens over</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Standard button</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">surface.raised · no border · h 26</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Call 01. Was + 1 px line</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Pressed (any widget)</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">surface.selected · no signal edge</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Was a signal edge, which is the option-on look</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Default button</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">signal fill · surface.inset ink · one per dialog</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">New. Committing a dialog sets its values</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Destructive action</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">label names the loss · never red</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">New. Takes the default style when Enter does it</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Text field</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">surface.inset · 1 px line · focus 1.5 signal</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">AS BUILT</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">The value-field well</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Combo box</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">surface.inset · line · chevron text.faint</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Was raised; the spec's dropdown is inset</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Checkbox, radio</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">14 in 18 · on = signal</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Matches the switch</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Scroll bar</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">floating · 4 → 8 px · ghost → arrow → faint</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Was egui defaults</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Text selection, link</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">signal 60% (light 35%) · links signal</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">AS BUILT</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Selection is signal's job</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Error</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">meter.hot icon + edge · message in text</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">AS BUILT</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">meter.hot's rule widens to clip, arm, error</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Warning</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">text + triangle · no colour</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #E7E9EC">PROPOSED</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Call 02. Was mod</span>
+
+<span style="padding: 7px 0; border-bottom: 1px solid #23272C">Shadows, scrim</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font-family: 'IBM Plex Mono', monospace; font-size: 11px">none · modals over the overlay token</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">AS BUILT</span><span style="padding: 7px 0; border-bottom: 1px solid #23272C; color: #A7ADB6">Flat; the scrim dims, it doesn't lift</span>
+
+<span style="padding: 7px 0">Title bars</span><span style="padding: 7px 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px">app windows 26 compact · devices A (52)</span><span style="padding: 7px 0; font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">AS BUILT</span><span style="padding: 7px 0; color: #A7ADB6">Two kinds, written down</span>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1360}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

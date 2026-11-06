@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Application chrome — dialogs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="width: 1440px; height: 960px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 40px 56px; display: flex; flex-direction: column; gap: 20px">
+
+<div style="display: flex; align-items: baseline; gap: 14px">
+<h2 style="margin: 0; font-size: 22px; font-weight: 600">Dialogs and windows</h2>
+<span style="font-size: 13px; color: #A7ADB6">A modal asks one question over a scrim. A tool window is a floating panel with the compact title bar.</span>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; flex: 1; min-height: 0">
+
+<!-- Left: modals over scrim -->
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="position: relative; height: 380px; background: #171A1D; border: 1px solid #2B3036; border-radius: 8px; overflow: hidden">
+<div style="height: 32px; background: #16181B; border-bottom: 1px solid #2B3036"></div>
+<div style="height: 24px; background: #23282D"></div>
+<div style="height: 64px; position: relative"><div style="position: absolute; left: 120px; top: 6px; width: 260px; height: 52px; border-radius: 4px; background: #3B5878"></div></div>
+<div style="height: 64px; background: #1A1E22; position: relative"><div style="position: absolute; left: 300px; top: 6px; width: 200px; height: 52px; border-radius: 4px; background: #5A4A78"></div></div>
+<div style="height: 64px; position: relative"><div style="position: absolute; left: 60px; top: 6px; width: 180px; height: 52px; border-radius: 4px; background: #3E6A55"></div></div>
+<div style="position: absolute; inset: 0; background: rgba(0, 0, 0, 0.27)"></div>
+<div role="dialog" aria-label="Save changes" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 380px; box-sizing: border-box; background: #1A1D21; border: 1px solid #383E46; border-radius: 8px; padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; font-weight: 600">Save changes to “Night drive”?</span>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">Your changes are lost if you don't save them.</span>
+<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px">
+<button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif">Don't Save</button>
+<span style="flex: 1"></span>
+<button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif">Cancel</button>
+<button style="height: 26px; padding: 0 16px; border: none; border-radius: 5px; background: #4C9EFF; color: #0D0F11; font: 600 12px 'IBM Plex Sans', sans-serif">Save</button>
+</div>
+</div>
+</div>
+
+<div style="position: relative; height: 200px; background: #171A1D; border: 1px solid #2B3036; border-radius: 8px; overflow: hidden">
+<div style="position: absolute; inset: 0; background: rgba(0, 0, 0, 0.27)"></div>
+<div role="dialog" aria-label="Delete tracks" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 380px; box-sizing: border-box; background: #1A1D21; border: 1px solid #383E46; border-radius: 8px; padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; font-weight: 600">Delete 3 tracks and their clips?</span>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">Undo brings them back.</span>
+<div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px">
+<button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif">Cancel</button>
+<button style="height: 26px; padding: 0 16px; border: none; border-radius: 5px; background: #4C9EFF; color: #0D0F11; font: 600 12px 'IBM Plex Sans', sans-serif">Delete 3 Tracks</button>
+</div>
+</div>
+</div>
+
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Modal</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7">w 380 · surface.panel · 1 px line.strong · r 8 · pad 18 18 16 · scrim = overlay<br>no title bar: the question is the title (Sans 600 13), detail below (Sans 12 text.muted)<br>footer: default rightmost · Cancel left of it · a third choice alone at the far left<br>Enter = default · Escape = Cancel · the label says what happens (“Delete 3 Tracks”, not “OK”)</span>
+</div>
+</div>
+
+<!-- Right: tool window -->
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="background: #131518; border: 1px dashed #2B3036; border-radius: 8px; padding: 22px; display: flex; justify-content: center">
+<div role="dialog" aria-label="Audio Devices" style="width: 460px; box-sizing: border-box; background: #1A1D21; border: 1px solid #383E46; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column">
+<div style="height: 26px; box-sizing: border-box; padding: 0 6px 0 10px; display: flex; align-items: center; gap: 8px; background: #16181B; border-bottom: 1px solid #2B3036">
+<span style="flex: 1; font-size: 14px; font-weight: 500">Audio Devices</span>
+<button aria-label="Close" style="width: 18px; height: 18px; border: none; border-radius: 4px; background: transparent; color: #A7ADB6; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+</div>
+<div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Device</span>
+<div style="display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px 12px; align-items: center">
+<span style="font-size: 12px; color: #A7ADB6">Driver</span>
+<button style="height: 26px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">WASAPI<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+<span style="font-size: 12px; color: #A7ADB6">Output</span>
+<button style="height: 26px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">Speakers (Scarlett 2i2 USB)<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+<span style="font-size: 12px; color: #A7ADB6">Input</span>
+<button style="height: 26px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">Analogue 1 + 2 (Scarlett 2i2 USB)<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+</div>
+<div style="height: 1px; background: #23272C"></div>
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Timing</span>
+<div style="display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px 12px; align-items: center">
+<span style="font-size: 12px; color: #A7ADB6">Sample rate</span>
+<button style="width: 150px; height: 26px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">48 000 Hz<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+<label for="buf" style="font-size: 12px; color: #A7ADB6">Buffer size</label>
+<div style="display: flex; align-items: center; gap: 8px">
+<input id="buf" value="32" style="width: 80px; height: 26px; box-sizing: border-box; padding: 0 8px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; color: #E7E9EC; font: 500 11px 'IBM Plex Mono', monospace; text-align: right">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">samples · 0.67 ms</span>
+</div>
+</div>
+<div style="display: flex; align-items: flex-start; gap: 8px; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 8px 10px; font-size: 12px; color: #E7E9EC; line-height: 1.45"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4M12 17h.01"></path></svg>Buffers under 64 samples may drop out on this driver.</div>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E7E9EC"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 3px; background: #4C9EFF; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0D0F11" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>Exclusive mode</label>
+</div>
+<div style="padding: 10px 16px; border-top: 1px solid #2B3036; display: flex; justify-content: flex-end; gap: 8px">
+<button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif">Cancel</button>
+<button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif">Apply</button>
+<button style="height: 26px; padding: 0 16px; border: none; border-radius: 5px; background: #4C9EFF; color: #0D0F11; font: 600 12px 'IBM Plex Sans', sans-serif">OK</button>
+</div>
+</div>
+</div>
+
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Tool window</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7">surface.panel · 1 px line.strong · r 8 · no shadow<br>title bar 26 · bg.titlebar · 1 px line below · title Sans 500 14 · close 18 hit<br>body pad 14 16 · groups under label.section, split by 1 px line.inset<br>label column text.muted · footer pad 10 16, 1 px line above, buttons right</span>
+</div>
+
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Two title bars, never mixed</span>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="height: 26px; box-sizing: border-box; padding: 0 6px 0 10px; display: flex; align-items: center; background: #16181B; border: 1px solid #2B3036; border-radius: 5px; font-size: 14px; font-weight: 500"><span style="flex: 1">Audio Devices</span><span style="font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">26 · APP WINDOWS, DIALOGS</span></div>
+<div style="height: 52px; box-sizing: border-box; padding: 0 12px; display: flex; align-items: center; gap: 10px; background: #16181B; border: 1px solid #2B3036; border-radius: 5px"><span style="font-size: 14px; font-weight: 500">Lead · Macro Oscillator</span><span style="flex: 1; display: flex; justify-content: center"><span style="width: 180px; height: 26px; border-radius: 5px; background: #0D0F11; border: 1px solid #2B3036; display: flex; align-items: center; padding: 0 8px; font-size: 12px; color: #A7ADB6; box-sizing: border-box">Init patch</span></span><span style="font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">52 · DEVICES (A)</span></div>
+</div>
+</div>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

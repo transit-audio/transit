@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Application chrome — menus</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="width: 1440px; height: 820px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 40px 56px; display: flex; flex-direction: column; gap: 20px">
+
+<div style="display: flex; align-items: baseline; gap: 14px">
+<h2 style="margin: 0; font-size: 22px; font-weight: 600">Menus</h2>
+<span style="font-size: 13px; color: #A7ADB6">Menu bar, drop-down, submenu, context menu. Real entries from menus.rs.</span>
+</div>
+
+<div style="display: flex; gap: 24px; flex: 1; min-height: 0">
+
+<!-- App window -->
+<div style="position: relative; flex: 1; background: #171A1D; border: 1px solid #2B3036; border-radius: 8px; overflow: hidden">
+<div style="height: 32px; background: #16181B; border-bottom: 1px solid #2B3036; display: flex; align-items: center; gap: 2px; padding: 0 8px">
+<span style="font-size: 13px; font-weight: 600; padding: 0 10px 0 4px">transit</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px">File</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px">Edit</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px">Track</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px">Automation</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px; background: #2E333A">View</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px">Options</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px">Window</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px">Transport</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px">Audio</span>
+<span style="height: 22px; padding: 0 8px; display: flex; align-items: center; font-size: 12px; border-radius: 4px">Help</span>
+</div>
+<!-- lanes -->
+<div style="display: flex; flex-direction: column">
+<div style="height: 24px; background: #23282D; border-bottom: 1px solid #2B3036"></div>
+<div style="height: 64px; border-bottom: 1px solid #1C1F21; position: relative"><div style="position: absolute; left: 520px; top: 6px; width: 260px; height: 52px; border-radius: 4px; background: #3B5878"></div></div>
+<div style="height: 64px; background: #1A1E22; border-bottom: 1px solid #1C1F21; position: relative"><div style="position: absolute; left: 470px; top: 6px; width: 180px; height: 52px; border-radius: 4px; background: #5A4A78"></div></div>
+<div style="height: 64px; border-bottom: 1px solid #1C1F21; position: relative"><div style="position: absolute; left: 600px; top: 6px; width: 200px; height: 52px; border-radius: 4px; background: #3E6A55; outline: 1.5px solid #EDEDF0"></div></div>
+<div style="height: 64px; background: #1A1E22; border-bottom: 1px solid #1C1F21"></div>
+<div style="height: 64px; border-bottom: 1px solid #1C1F21"></div>
+</div>
+
+<!-- View menu -->
+<div style="position: absolute; left: 262px; top: 33px; width: 248px; box-sizing: border-box; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 4px; display: flex; flex-direction: column">
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px; display: flex; justify-content: center"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span><span style="flex: 1">Browser</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Ctrl+Alt+B</span></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px; display: flex; justify-content: center"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span><span style="flex: 1">Mixer</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Ctrl+Alt+M</span></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px"></span><span style="flex: 1">Devices</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Ctrl+Alt+L</span></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px"></span><span style="flex: 1">Full Mixer Window</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">F3</span></div>
+<div style="height: 1px; background: #2B3036; margin: 4px 0"></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px"></span><span style="flex: 1">Track Height</span><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2.2" stroke-linecap="round"><path d="m9 6 6 6-6 6"></path></svg></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px; display: flex; justify-content: center"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span><span style="flex: 1">Grid Over Clips</span></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 4px; gap: 4px; font-size: 12px; background: #2E333A; border-radius: 4px"><span style="width: 16px"></span><span style="flex: 1">Appearance</span><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A7ADB6" stroke-width="2.2" stroke-linecap="round"><path d="m9 6 6 6-6 6"></path></svg></div>
+</div>
+
+<!-- Appearance submenu -->
+<div style="position: absolute; left: 506px; top: 197px; width: 232px; box-sizing: border-box; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 4px; display: flex; flex-direction: column">
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px"></span><span style="flex: 1">System</span></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px; display: flex; justify-content: center"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span><span style="flex: 1">Dark</span></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px; color: #585F69"><span style="width: 16px"></span><span style="flex: 1">Light</span><span style="font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">returns later</span></div>
+<div style="height: 1px; background: #2B3036; margin: 4px 0"></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px"></span><span style="flex: 1">Interface zoom: 100%</span><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2.2" stroke-linecap="round"><path d="m9 6 6 6-6 6"></path></svg></div>
+</div>
+
+<!-- Context menu on the selected clip -->
+<div style="position: absolute; left: 700px; top: 250px; width: 220px; box-sizing: border-box; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 4px; display: flex; flex-direction: column">
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px; gap: 4px; font-size: 12px"><span style="flex: 1">Rename</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">F2</span></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 8px; gap: 4px; font-size: 12px"><span style="flex: 1">Color</span><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2.2" stroke-linecap="round"><path d="m9 6 6 6-6 6"></path></svg></div>
+<div style="height: 1px; background: #2B3036; margin: 4px 0"></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px; gap: 4px; font-size: 12px; background: #2E333A; border-radius: 4px"><span style="flex: 1">Duplicate</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #A7ADB6">Ctrl+D</span></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px; gap: 4px; font-size: 12px"><span style="flex: 1">Split at Cursor</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Ctrl+E</span></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px; gap: 4px; font-size: 12px; color: #585F69"><span style="flex: 1">Paste at Cursor</span><span style="font: 400 11px 'IBM Plex Mono', monospace">Ctrl+V</span></div>
+<div style="height: 1px; background: #2B3036; margin: 4px 0"></div>
+<div style="height: 24px; display: flex; align-items: center; padding: 0 8px; gap: 4px; font-size: 12px"><span style="flex: 1">Delete</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Del</span></div>
+</div>
+</div>
+
+<!-- Spec column -->
+<div style="width: 320px; flex: none; display: flex; flex-direction: column; gap: 14px">
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Menu bar</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7">h 32 · bg.titlebar · 1 px line below<br>items h 22 · pad 0 8 · r 4 · Sans 400 12 text<br>open item: button.hover fill</span>
+</div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Popup</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7">surface.raised · 1 px line.strong · r 5 · pad 4<br>no shadow · opens flush under its item<br>submenu overlaps its parent by 4</span>
+</div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Row</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7">h 24 · r 4 · Sans 400 12 text<br>16 px check gutter when any row checks<br>check ✓ in text, never signal<br>shortcut Mono 400 11 text.faint, right<br>submenu chevron 12 text.faint<br>hover button.hover · disabled ink.arrow<br>separator 1 px line, 4 above and below</span>
+</div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Why the check is not blue</span>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">A menu check is a view setting, not a value on a device. The ink is already how menus.rs paints it; this writes it down. Delete stays a plain row too, since there's no red in menus.</span>
+</div>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

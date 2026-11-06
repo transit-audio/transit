@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Application chrome — controls</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+input::placeholder{color:#8C939D}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1360px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 48px 56px; display: flex; flex-direction: column; gap: 28px">
+
+<!-- Header -->
+<div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #2B3036; padding-bottom: 22px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #8C939D; letter-spacing: 0.08em">TRANSIT · APPLICATION CHROME · DRAFT 1</span>
+<h1 style="margin: 0; font-size: 36px; font-weight: 600; letter-spacing: -0.02em">egui's own widgets, in the device language</h1>
+<p style="margin: 0; font-size: 14px; color: #A7ADB6; max-width: 820px; line-height: 1.5">Menus, dialogs, text fields, scroll bars and the ordinary buttons outside device panels. One rule carries over from the devices: colour means something. Blue is a value you set or the thing that has focus; red is clip, record and error; nothing else is coloured.</p>
+</div>
+<div style="display: flex; gap: 8px; align-items: center">
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #8C939D; border: 1px solid #383E46; border-radius: 4px; padding: 3px 6px">AS BUILT</span>
+<span style="font-size: 12px; color: #8C939D">records ui/326-foundation</span>
+<span style="width: 12px"></span>
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #E7E9EC; border: 1px solid #A7ADB6; border-radius: 4px; padding: 3px 6px">PROPOSED</span>
+<span style="font-size: 12px; color: #8C939D">changes it</span>
+</div>
+</div>
+
+<!-- Buttons -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Buttons</span>
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #E7E9EC; border: 1px solid #A7ADB6; border-radius: 4px; padding: 2px 5px">PROPOSED</span>
+<span style="font-size: 12px; color: #8C939D">Borderless, so a momentary button never reads as an off toggle (toggles keep their 1 px line).</span>
+</div>
+
+<div style="display: grid; grid-template-columns: 150px repeat(5, minmax(0, 1fr)); gap: 10px 16px; align-items: center">
+<span></span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">rest</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">hover</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">pressed</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">keyboard focus</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">disabled</span>
+
+<span style="font-size: 12px; color: #A7ADB6">Standard</span>
+<div><button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif">Export…</button></div>
+<div><button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #2E333A; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif">Export…</button></div>
+<div><button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #2A2F35; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif; box-shadow: inset 0 1px 0 #0D0F11">Export…</button></div>
+<div><button style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif; outline: 1.5px solid #4C9EFF; outline-offset: 2px">Export…</button></div>
+<div><button disabled style="height: 26px; padding: 0 12px; border: none; border-radius: 5px; background: #1E2125; color: #585F69; font: 500 12px 'IBM Plex Sans', sans-serif">Export…</button></div>
+
+<span style="font-size: 12px; color: #A7ADB6">Default <span style="color: #8C939D">(Enter)</span></span>
+<div><button style="height: 26px; padding: 0 16px; border: none; border-radius: 5px; background: #4C9EFF; color: #0D0F11; font: 600 12px 'IBM Plex Sans', sans-serif">OK</button></div>
+<div><button style="height: 26px; padding: 0 16px; border: none; border-radius: 5px; background: #66ACFF; color: #0D0F11; font: 600 12px 'IBM Plex Sans', sans-serif">OK</button></div>
+<div><button style="height: 26px; padding: 0 16px; border: none; border-radius: 5px; background: #3E85D8; color: #0D0F11; font: 600 12px 'IBM Plex Sans', sans-serif">OK</button></div>
+<div><button style="height: 26px; padding: 0 16px; border: none; border-radius: 5px; background: #4C9EFF; color: #0D0F11; font: 600 12px 'IBM Plex Sans', sans-serif; outline: 1.5px solid #4C9EFF; outline-offset: 2px">OK</button></div>
+<div><button disabled style="height: 26px; padding: 0 16px; border: none; border-radius: 5px; background: #1E2125; color: #585F69; font: 600 12px 'IBM Plex Sans', sans-serif">OK</button></div>
+
+<span style="font-size: 12px; color: #A7ADB6">Icon</span>
+<div><button aria-label="Settings" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: transparent; color: #A7ADB6; display: inline-flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg></button></div>
+<div><button aria-label="Settings" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: #2E333A; color: #E7E9EC; display: inline-flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg></button></div>
+<div><button aria-label="Settings" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: #2A2F35; color: #E7E9EC; display: inline-flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg></button></div>
+<div><button aria-label="Settings" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: transparent; color: #A7ADB6; display: inline-flex; align-items: center; justify-content: center; outline: 1.5px solid #4C9EFF; outline-offset: 2px"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg></button></div>
+<div><button disabled aria-label="Settings" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: transparent; color: #585F69; display: inline-flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg></button></div>
+
+<span style="font-size: 12px; color: #A7ADB6">Toggle <span style="color: #8C939D">(spec, for contrast)</span></span>
+<div style="display: flex; gap: 6px"><button style="height: 24px; padding: 0 9px; border: 1px solid #2B3036; border-radius: 4px; background: #22262B; color: #A7ADB6; font: 600 11px 'IBM Plex Sans', sans-serif">SYNC</button><button style="height: 24px; padding: 0 9px; border: 1px solid #4C9EFF; border-radius: 4px; background: #1E2A38; color: #4C9EFF; font: 600 11px 'IBM Plex Sans', sans-serif">SYNC</button></div>
+<span style="grid-column: span 4; font-size: 12px; color: #8C939D">Off toggle: bordered, muted, caps. Button: borderless, full-strength ink, sentence case. The two never look alike at rest.</span>
+</div>
+
+<div style="display: flex; gap: 28px; font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; border-top: 1px solid #23272C; padding-top: 12px; flex-wrap: wrap">
+<span>standard · h 26 · r 5 · pad 0 12 · Sans 500 12 · fill surface.raised · hover button.hover · pressed surface.selected</span>
+<span>default · signal fill · ink surface.inset · Sans 600 12 · one per dialog</span>
+<span>icon · 26² · transparent · glyph 14 text.muted</span>
+<span>focus · 1.5 focus.ring · offset 2</span>
+</div>
+</div>
+
+<!-- Row: fields + combo/checks -->
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px">
+
+<!-- Text fields -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Text fields</span>
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #8C939D; border: 1px solid #383E46; border-radius: 4px; padding: 2px 5px">AS BUILT</span>
+<span style="font-size: 12px; color: #8C939D">The value-field well: surface.inset, 1 px line, r 5.</span>
+</div>
+<div style="display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 14px; align-items: center">
+<label for="f1" style="font-size: 12px; color: #A7ADB6">Rest</label>
+<input id="f1" value="Lead vox" style="height: 26px; box-sizing: border-box; padding: 0 8px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">
+<label for="f2" style="font-size: 12px; color: #A7ADB6">Focused</label>
+<input id="f2" value="Lead vox double|" style="height: 26px; box-sizing: border-box; padding: 0 8px; background: #0D0F11; border: 1.5px solid #4C9EFF; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">
+<label for="f3" style="font-size: 12px; color: #A7ADB6">Search</label>
+<div style="position: relative; display: flex; align-items: center">
+<svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2" stroke-linecap="round" style="position: absolute; left: 8px"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+<input id="f3" placeholder="Search devices" style="width: 100%; height: 26px; box-sizing: border-box; padding: 0 8px 0 27px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">
+</div>
+<label for="f4" style="font-size: 12px; color: #A7ADB6">Number</label>
+<div style="display: flex; align-items: center; gap: 8px">
+<input id="f4" value="256" style="width: 96px; height: 26px; box-sizing: border-box; padding: 0 8px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; color: #E7E9EC; font: 500 11px 'IBM Plex Mono', monospace; text-align: right">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">samples · 5.33 ms</span>
+</div>
+<label for="f5" style="font-size: 12px; color: #A7ADB6">Error</label>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<input id="f5" value="Drums" style="height: 26px; box-sizing: border-box; padding: 0 8px; background: #0D0F11; border: 1.5px solid #FF6B5B; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #E7E9EC"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#FF6B5B" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16.5v.01"></path></svg>Track 4 already has this name.</span>
+</div>
+<label for="f6" style="font-size: 12px; color: #A7ADB6">Disabled</label>
+<input id="f6" disabled value="Main" style="height: 26px; box-sizing: border-box; padding: 0 8px; background: #1E2125; border: 1px solid #23272C; border-radius: 5px; color: #585F69; font: 400 12px 'IBM Plex Sans', sans-serif">
+</div>
+<div style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; border-top: 1px solid #23272C; padding-top: 12px">h 26 · Sans 400 12 (names) or Mono 500 11 right-aligned (numbers, unit after in text.faint) · focus 1.5 signal · error 1.5 meter.hot + message in text</div>
+</div>
+
+<!-- Combo + checks -->
+<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Combo box</span>
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #E7E9EC; border: 1px solid #A7ADB6; border-radius: 4px; padding: 2px 5px">PROPOSED</span>
+<span style="font-size: 12px; color: #8C939D">Is the spec's dropdown: inset fill (built as raised).</span>
+</div>
+<div style="display: flex; gap: 16px; align-items: flex-start">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">rest</span>
+<button style="width: 170px; height: 26px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">48 000 Hz<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; margin-top: 8px">hover</span>
+<button style="width: 170px; height: 26px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; background: #0D0F11; border: 1px solid #383E46; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">48 000 Hz<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A7ADB6" stroke-width="2.2" stroke-linecap="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">open</span>
+<button style="width: 190px; height: 26px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; background: #0D0F11; border: 1px solid #383E46; border-radius: 5px; color: #E7E9EC; font: 400 12px 'IBM Plex Sans', sans-serif">48 000 Hz<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A7ADB6" stroke-width="2.2" stroke-linecap="round"><path d="m18 15-6-6-6 6"></path></svg></button>
+<div style="width: 190px; box-sizing: border-box; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 4px; display: flex; flex-direction: column">
+<div style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 12px; color: #E7E9EC"><span style="width: 12px"></span>44 100 Hz</div>
+<div style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 12px; color: #E7E9EC"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>48 000 Hz</div>
+<div style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 12px; color: #E7E9EC; background: #2E333A; border-radius: 4px"><span style="width: 12px"></span>88 200 Hz</div>
+<div style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 12px; color: #E7E9EC"><span style="width: 12px"></span>96 000 Hz</div>
+<div style="height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 12px; color: #585F69"><span style="width: 12px"></span>192 000 Hz</div>
+</div>
+</div>
+</div>
+<div style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; border-top: 1px solid #23272C; padding-top: 12px">list = a menu popup: surface.raised · 1 px line.strong · r 5 · pad 4 · rows 24, r 4 · current value ✓ in text</div>
+</div>
+
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Checkbox &amp; radio</span>
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #E7E9EC; border: 1px solid #A7ADB6; border-radius: 4px; padding: 2px 5px">PROPOSED</span>
+<span style="font-size: 12px; color: #8C939D">Checked is a value set: signal, like the switch.</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 9px">
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E7E9EC"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 3px; background: #0D0F11; border: 1px solid #383E46"></span>Count in one bar</label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E7E9EC"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 3px; background: #4C9EFF; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0D0F11" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>Grid over clips</label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #585F69"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 3px; background: #1E2125; border: 1px solid #2B3036"></span>Exclusive mode (ASIO only)</label>
+</div>
+<div style="display: flex; flex-direction: column; gap: 9px" role="radiogroup" aria-label="Appearance">
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E7E9EC"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 7px; background: #0D0F11; border: 1px solid #383E46"></span>System</label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E7E9EC"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 7px; background: #0D0F11; border: 4px solid #4C9EFF"></span>Dark</label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #585F69"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 7px; background: #1E2125; border: 1px solid #2B3036"></span>Light <span style="color: #8C939D">— returns with the light pass</span></label>
+</div>
+</div>
+<div style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; border-top: 1px solid #23272C; padding-top: 12px">box 14 in an 18 hit · r 3 (radio round) · off surface.inset + line.strong · on signal, mark surface.inset</div>
+</div>
+</div>
+</div>
+
+<!-- Row: scroll bars + tooltip -->
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px">
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Scroll bars</span>
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #E7E9EC; border: 1px solid #A7ADB6; border-radius: 4px; padding: 2px 5px">PROPOSED</span>
+<span style="font-size: 12px; color: #8C939D">Floating, thin until you reach for them.</span>
+</div>
+<div style="display: flex; gap: 16px">
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">rest</span>
+<div style="position: relative; height: 132px; background: #0D0F11; border: 1px solid #23272C; border-radius: 6px; overflow: hidden; padding: 4px 0">
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Bass DI.wav</div>
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Bass amp.wav</div>
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Gtr L.wav</div>
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Gtr R.wav</div>
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Keys.wav</div>
+<div style="position: absolute; right: 2px; top: 24px; width: 4px; height: 44px; border-radius: 2px; background: #4A5260"></div>
+</div>
+</div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">hover · drag</span>
+<div style="position: relative; height: 132px; background: #0D0F11; border: 1px solid #23272C; border-radius: 6px; overflow: hidden; padding: 4px 0">
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Bass DI.wav</div>
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Bass amp.wav</div>
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Gtr L.wav</div>
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Gtr R.wav</div>
+<div style="padding: 0 10px; height: 24px; display: flex; align-items: center; font-size: 12px; color: #E7E9EC">Keys.wav</div>
+<div style="position: absolute; right: 2px; top: 2px; bottom: 2px; width: 8px; border-radius: 4px; background: #1A1D21"></div>
+<div style="position: absolute; right: 2px; top: 24px; width: 8px; height: 44px; border-radius: 4px; background: #585F69"></div>
+</div>
+</div>
+</div>
+<div style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; border-top: 1px solid #23272C; padding-top: 12px">rest 4 px ink.ghost · hover 8 px ink.arrow on a surface.panel track · drag text.faint · inset 2 · min handle 24 · round ends</div>
+</div>
+
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Tooltip</span>
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #E7E9EC; border: 1px solid #A7ADB6; border-radius: 4px; padding: 2px 5px">PROPOSED</span>
+<span style="font-size: 12px; color: #8C939D">A one-line popup; shortcut in mono.</span>
+</div>
+<div style="height: 132px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 6px; padding-left: 40px">
+<div style="display: flex; gap: 4px; background: #16181B; border: 1px solid #2B3036; border-radius: 6px; padding: 4px">
+<button aria-label="Loop" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: #2E333A; color: #E7E9EC; display: inline-flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg></button>
+<button aria-label="Metronome" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: transparent; color: #A7ADB6; display: inline-flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l4 18H5z"></path><path d="m12 15 6-9"></path></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 14px; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 5px 8px; margin-left: 4px">
+<span style="font-size: 12px; color: #E7E9EC">Loop</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">L</span>
+</div>
+</div>
+<div style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; border-top: 1px solid #23272C; padding-top: 12px">surface.raised · 1 px line.strong · r 5 · pad 5 8 · Sans 12 text · after 500 ms · no arrow, 4 px below the target</div>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1360}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

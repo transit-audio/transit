@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loop with its own hue</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 40px 56px; display: flex; flex-direction: column; gap: 18px">
+
+<div style="display: flex; align-items: baseline; gap: 14px">
+<h2 style="margin: 0; font-size: 22px; font-weight: 600">A third hue for loop and scale</h2>
+<span style="font-size: 13px; color: #A7ADB6">Colour kept, meaning kept apart: chosen to stay clear of signal, mod, meter.ok and meter.hot for normal, protan, deutan and tritan vision.</span>
+</div>
+
+<!-- swatches -->
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+<div style="display: flex; align-items: center; gap: 12px; background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 12px 16px">
+<span style="width: 36px; height: 36px; border-radius: 6px; background: #E6B4E9; flex: none"></span>
+<div style="display: flex; flex-direction: column; gap: 3px">
+<span style="font-size: 14px; font-weight: 600">A · Lilac <span style="font: 500 12px 'IBM Plex Mono', monospace; color: #A7ADB6">#E6B4E9</span></span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">worst ΔE 29 (signal, protan) · vs text 20 (deutan) · 10.0:1 on lane</span>
+</div>
+<span style="flex: 1"></span>
+<div style="display: flex; gap: 4px"><span style="width: 18px; height: 18px; border-radius: 4px; background: #4C9EFF"></span><span style="width: 18px; height: 18px; border-radius: 4px; background: #F0A73A"></span><span style="width: 18px; height: 18px; border-radius: 4px; background: #5FCB8E"></span><span style="width: 18px; height: 18px; border-radius: 4px; background: #FF6B5B"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 12px 16px">
+<span style="width: 36px; height: 36px; border-radius: 6px; background: #D05DAD; flex: none"></span>
+<div style="display: flex; flex-direction: column; gap: 3px">
+<span style="font-size: 14px; font-weight: 600">B · Magenta <span style="font: 500 12px 'IBM Plex Mono', monospace; color: #A7ADB6">#D05DAD</span> <span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #E7E9EC; border: 1px solid #A7ADB6; border-radius: 4px; padding: 2px 5px; margin-left: 6px">CHOSEN</span></span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">worst ΔE 23 · vs text 36 · 4.9:1 on lane, 5.1 on window, 5.35 on key rows · light set #B73590</span>
+</div>
+<span style="flex: 1"></span>
+<div style="display: flex; gap: 4px"><span style="width: 18px; height: 18px; border-radius: 4px; background: #4C9EFF"></span><span style="width: 18px; height: 18px; border-radius: 4px; background: #F0A73A"></span><span style="width: 18px; height: 18px; border-radius: 4px; background: #5FCB8E"></span><span style="width: 18px; height: 18px; border-radius: 4px; background: #FF6B5B"></span></div>
+</div>
+</div>
+
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6; margin-bottom: -8px">Cycle on · selection inside the loop · mod ring in view</span>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+
+<!-- A lilac -->
+<div style="background: #171A1D; border: 1px solid #2B3036; border-radius: 8px; overflow: hidden">
+<div style="height: 36px; box-sizing: border-box; background: #16181B; border-bottom: 1px solid #2B3036; display: flex; align-items: center; gap: 4px; padding: 0 8px">
+<button aria-label="Play" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: transparent; color: #A7ADB6; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"></path></svg></button>
+<button aria-label="Stop" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: transparent; color: #A7ADB6; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="1"></rect></svg></button>
+<button aria-label="Cycle" style="width: 26px; height: 26px; box-sizing: border-box; border: 1px solid #E6B4E9; border-radius: 4px; background: #E6B4E9; color: #131518; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg></button>
+<span style="width: 10px"></span>
+<span style="font: 500 12px 'IBM Plex Mono', monospace; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; padding: 3px 8px">7.2.1</span>
+<span style="flex: 1"></span>
+<span style="font-size: 11px; color: #8C939D">Cutoff mod</span>
+<svg role="img" aria-label="Knob with modulation ring" width="28" height="28" viewBox="0 0 100 100"><path d="M21.7 78.3 A40 40 0 1 1 78.3 78.3" fill="none" stroke="#2B3036" stroke-width="7" stroke-linecap="round"></path><path d="M21.7 78.3 A40 40 0 0 1 50 10" fill="none" stroke="#4C9EFF" stroke-width="7" stroke-linecap="round"></path><path d="M50 3 A47 47 0 0 1 90 25" fill="none" stroke="#F0A73A" stroke-width="5" stroke-linecap="round"></path><circle cx="50" cy="50" r="26" fill="#262A30"></circle></svg>
+</div>
+<div style="position: relative; height: 246px">
+<div style="height: 16px; background: #16181B"></div>
+<div style="height: 22px; background: #23282D; position: relative; font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">
+<span style="position: absolute; left: 19px; top: 5px">1</span><span style="position: absolute; left: 67px; top: 5px">2</span><span style="position: absolute; left: 115px; top: 5px">3</span><span style="position: absolute; left: 163px; top: 5px">4</span><span style="position: absolute; left: 211px; top: 5px">5</span><span style="position: absolute; left: 259px; top: 5px">6</span><span style="position: absolute; left: 307px; top: 5px">7</span><span style="position: absolute; left: 355px; top: 5px">8</span><span style="position: absolute; left: 403px; top: 5px">9</span><span style="position: absolute; left: 451px; top: 5px">10</span><span style="position: absolute; left: 499px; top: 5px">11</span><span style="position: absolute; left: 547px; top: 5px">12</span><span style="position: absolute; left: 595px; top: 5px">13</span>
+</div>
+<div style="height: 52px; background-color: #171A1D; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 48px); background-position: 16px 0"></div>
+<div style="height: 52px; background-color: #1A1E22; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 48px); background-position: 16px 0"></div>
+<div style="height: 52px; background-color: #171A1D; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 48px); background-position: 16px 0"></div>
+<div style="height: 52px; background-color: #1A1E22; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 48px); background-position: 16px 0"></div>
+<div style="position: absolute; left: 64px; top: 42px; width: 288px; height: 44px; border-radius: 4px; background: #3B5878; overflow: hidden"><div style="height: 13px; background: #2E465F; font-size: 9px; padding: 0 5px">Drums</div></div>
+<div style="position: absolute; left: 160px; top: 94px; width: 336px; height: 44px; border-radius: 4px; background: #7A5A2E; overflow: hidden"><div style="height: 13px; background: #61471F; font-size: 9px; padding: 0 5px">Bass</div></div>
+<div style="position: absolute; left: 208px; top: 146px; width: 240px; height: 44px; border-radius: 4px; background: #5A4A78; overflow: hidden"><div style="height: 13px; background: #483B60; font-size: 9px; padding: 0 5px">Pad</div></div>
+<div style="position: absolute; left: 304px; top: 198px; width: 144px; height: 44px; border-radius: 4px; background: #3E6A55; overflow: hidden"><div style="height: 13px; background: #305442; font-size: 9px; padding: 0 5px">Lead</div></div>
+<div style="position: absolute; left: 208px; top: 16px; width: 192px; height: 22px; background: rgba(230, 180, 233, 0.16)"></div>
+<div style="position: absolute; left: 256px; top: 16px; width: 72px; height: 22px; background: rgba(76, 158, 255, 0.3)"></div>
+<div style="position: absolute; left: 256px; top: 90px; width: 72px; height: 104px; background: rgba(76, 158, 255, 0.18); box-shadow: inset 1px 0 0 #4C9EFF, inset -1px 0 0 #4C9EFF"></div>
+<div style="position: absolute; left: 0; top: 38px; width: 208px; height: 208px; background: rgba(0, 0, 0, 0.27)"></div>
+<div style="position: absolute; left: 400px; top: 38px; right: 0; height: 208px; background: rgba(0, 0, 0, 0.27)"></div>
+<div style="position: absolute; left: 208px; top: 16px; width: 1px; height: 230px; background: rgba(230, 180, 233, 0.6)"></div>
+<div style="position: absolute; left: 399px; top: 16px; width: 1px; height: 230px; background: rgba(230, 180, 233, 0.6)"></div>
+<div style="position: absolute; left: 208px; top: 2px; width: 192px; height: 12px; border-radius: 2px; background: #E6B4E9; display: flex; align-items: center; justify-content: center; font: 500 9px 'IBM Plex Mono', monospace; color: #131518">5.1 – 9.1 · 4 bars</div>
+<div style="position: absolute; left: 316px; top: 16px; width: 1.5px; height: 230px; background: #E1E1E3"></div>
+</div>
+</div>
+
+<!-- B magenta -->
+<div style="background: #171A1D; border: 1px solid #2B3036; border-radius: 8px; overflow: hidden">
+<div style="height: 36px; box-sizing: border-box; background: #16181B; border-bottom: 1px solid #2B3036; display: flex; align-items: center; gap: 4px; padding: 0 8px">
+<button aria-label="Play" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: transparent; color: #A7ADB6; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"></path></svg></button>
+<button aria-label="Stop" style="width: 26px; height: 26px; border: none; border-radius: 5px; background: transparent; color: #A7ADB6; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="1"></rect></svg></button>
+<button aria-label="Cycle" style="width: 26px; height: 26px; box-sizing: border-box; border: 1px solid #D05DAD; border-radius: 4px; background: #D05DAD; color: #131518; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg></button>
+<span style="width: 10px"></span>
+<span style="font: 500 12px 'IBM Plex Mono', monospace; background: #0D0F11; border: 1px solid #2B3036; border-radius: 5px; padding: 3px 8px">7.2.1</span>
+<span style="flex: 1"></span>
+<span style="font-size: 11px; color: #8C939D">Cutoff mod</span>
+<svg role="img" aria-label="Knob with modulation ring" width="28" height="28" viewBox="0 0 100 100"><path d="M21.7 78.3 A40 40 0 1 1 78.3 78.3" fill="none" stroke="#2B3036" stroke-width="7" stroke-linecap="round"></path><path d="M21.7 78.3 A40 40 0 0 1 50 10" fill="none" stroke="#4C9EFF" stroke-width="7" stroke-linecap="round"></path><path d="M50 3 A47 47 0 0 1 90 25" fill="none" stroke="#F0A73A" stroke-width="5" stroke-linecap="round"></path><circle cx="50" cy="50" r="26" fill="#262A30"></circle></svg>
+</div>
+<div style="position: relative; height: 246px">
+<div style="height: 16px; background: #16181B"></div>
+<div style="height: 22px; background: #23282D; position: relative; font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">
+<span style="position: absolute; left: 19px; top: 5px">1</span><span style="position: absolute; left: 67px; top: 5px">2</span><span style="position: absolute; left: 115px; top: 5px">3</span><span style="position: absolute; left: 163px; top: 5px">4</span><span style="position: absolute; left: 211px; top: 5px">5</span><span style="position: absolute; left: 259px; top: 5px">6</span><span style="position: absolute; left: 307px; top: 5px">7</span><span style="position: absolute; left: 355px; top: 5px">8</span><span style="position: absolute; left: 403px; top: 5px">9</span><span style="position: absolute; left: 451px; top: 5px">10</span><span style="position: absolute; left: 499px; top: 5px">11</span><span style="position: absolute; left: 547px; top: 5px">12</span><span style="position: absolute; left: 595px; top: 5px">13</span>
+</div>
+<div style="height: 52px; background-color: #171A1D; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 48px); background-position: 16px 0"></div>
+<div style="height: 52px; background-color: #1A1E22; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 48px); background-position: 16px 0"></div>
+<div style="height: 52px; background-color: #171A1D; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 48px); background-position: 16px 0"></div>
+<div style="height: 52px; background-color: #1A1E22; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 48px); background-position: 16px 0"></div>
+<div style="position: absolute; left: 64px; top: 42px; width: 288px; height: 44px; border-radius: 4px; background: #3B5878; overflow: hidden"><div style="height: 13px; background: #2E465F; font-size: 9px; padding: 0 5px">Drums</div></div>
+<div style="position: absolute; left: 160px; top: 94px; width: 336px; height: 44px; border-radius: 4px; background: #7A5A2E; overflow: hidden"><div style="height: 13px; background: #61471F; font-size: 9px; padding: 0 5px">Bass</div></div>
+<div style="position: absolute; left: 208px; top: 146px; width: 240px; height: 44px; border-radius: 4px; background: #5A4A78; overflow: hidden"><div style="height: 13px; background: #483B60; font-size: 9px; padding: 0 5px">Pad</div></div>
+<div style="position: absolute; left: 304px; top: 198px; width: 144px; height: 44px; border-radius: 4px; background: #3E6A55; overflow: hidden"><div style="height: 13px; background: #305442; font-size: 9px; padding: 0 5px">Lead</div></div>
+<div style="position: absolute; left: 208px; top: 16px; width: 192px; height: 22px; background: rgba(208, 93, 173, 0.2)"></div>
+<div style="position: absolute; left: 256px; top: 16px; width: 72px; height: 22px; background: rgba(76, 158, 255, 0.3)"></div>
+<div style="position: absolute; left: 256px; top: 90px; width: 72px; height: 104px; background: rgba(76, 158, 255, 0.18); box-shadow: inset 1px 0 0 #4C9EFF, inset -1px 0 0 #4C9EFF"></div>
+<div style="position: absolute; left: 0; top: 38px; width: 208px; height: 208px; background: rgba(0, 0, 0, 0.27)"></div>
+<div style="position: absolute; left: 400px; top: 38px; right: 0; height: 208px; background: rgba(0, 0, 0, 0.27)"></div>
+<div style="position: absolute; left: 208px; top: 16px; width: 1px; height: 230px; background: rgba(208, 93, 173, 0.75)"></div>
+<div style="position: absolute; left: 399px; top: 16px; width: 1px; height: 230px; background: rgba(208, 93, 173, 0.75)"></div>
+<div style="position: absolute; left: 208px; top: 2px; width: 192px; height: 12px; border-radius: 2px; background: #D05DAD; display: flex; align-items: center; justify-content: center; font: 500 9px 'IBM Plex Mono', monospace; color: #131518">5.1 – 9.1 · 4 bars</div>
+<div style="position: absolute; left: 316px; top: 16px; width: 1.5px; height: 230px; background: #E1E1E3"></div>
+</div>
+</div>
+</div>
+
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6; margin-bottom: -8px">Piano roll · C major · out-of-scale rows and a live out-of-scale note</span>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+<!-- A piano -->
+<div style="background: #171A1D; border: 1px solid #2B3036; border-radius: 8px; overflow: hidden; display: flex">
+<div style="width: 44px; flex: none; display: flex; flex-direction: column; font: 400 9px 'IBM Plex Mono', monospace; color: #8C939D">
+<div style="height: 14px; background: #2A2F35; padding-left: 4px">C4</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">B3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E6B4E9">A#</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">A3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E6B4E9">G#</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">G3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E6B4E9">F#</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">F3</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">E3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E6B4E9">D#</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">D3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E6B4E9">C#</div>
+</div>
+<div style="flex: 1; position: relative; display: flex; flex-direction: column; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 96px)">
+<div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(230, 180, 233, 0.09)"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(230, 180, 233, 0.09)"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(230, 180, 233, 0.09)"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(230, 180, 233, 0.09)"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(230, 180, 233, 0.09)"></div>
+<div style="position: absolute; left: 30px; top: 113px; width: 80px; height: 12px; border-radius: 2px; background: #3B5878"></div>
+<div style="position: absolute; left: 130px; top: 85px; width: 60px; height: 12px; border-radius: 2px; background: #3B5878"></div>
+<div style="position: absolute; left: 210px; top: 71px; width: 70px; height: 12px; border-radius: 2px; background: #4C9EFF"></div>
+<div style="position: absolute; left: 210px; top: 85px; width: 70px; height: 12px; border-radius: 2px; background: #E6B4E9"></div>
+<div style="position: absolute; left: 300px; top: 43px; width: 90px; height: 12px; border-radius: 2px; background: #3B5878"></div>
+<div style="position: absolute; left: 245px; top: 0; width: 1.5px; height: 168px; background: #E1E1E3"></div>
+</div>
+</div>
+<!-- B piano -->
+<div style="background: #171A1D; border: 1px solid #2B3036; border-radius: 8px; overflow: hidden; display: flex">
+<div style="width: 44px; flex: none; display: flex; flex-direction: column; font: 400 9px 'IBM Plex Mono', monospace; color: #8C939D">
+<div style="height: 14px; background: #2A2F35; padding-left: 4px">C4</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">B3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E07DC2">A#</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">A3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E07DC2">G#</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">G3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E07DC2">F#</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">F3</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">E3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E07DC2">D#</div><div style="height: 14px; background: #2A2F35; padding-left: 4px">D3</div><div style="height: 14px; background: #0D0F11; padding-left: 4px; color: #E07DC2">C#</div>
+</div>
+<div style="flex: 1; position: relative; display: flex; flex-direction: column; background-image: repeating-linear-gradient(90deg, #323537 0 1px, transparent 1px 96px)">
+<div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(208, 93, 173, 0.12)"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(208, 93, 173, 0.12)"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(208, 93, 173, 0.12)"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(208, 93, 173, 0.12)"></div><div style="height: 14px; border-bottom: 1px solid #1C1F21; box-sizing: border-box"></div><div style="height: 14px; background: rgba(208, 93, 173, 0.12)"></div>
+<div style="position: absolute; left: 30px; top: 113px; width: 80px; height: 12px; border-radius: 2px; background: #3B5878"></div>
+<div style="position: absolute; left: 130px; top: 85px; width: 60px; height: 12px; border-radius: 2px; background: #3B5878"></div>
+<div style="position: absolute; left: 210px; top: 71px; width: 70px; height: 12px; border-radius: 2px; background: #4C9EFF"></div>
+<div style="position: absolute; left: 210px; top: 85px; width: 70px; height: 12px; border-radius: 2px; background: #D05DAD"></div>
+<div style="position: absolute; left: 300px; top: 43px; width: 90px; height: 12px; border-radius: 2px; background: #3B5878"></div>
+<div style="position: absolute; left: 245px; top: 0; width: 1.5px; height: 168px; background: #E1E1E3"></div>
+</div>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7; border-top: 1px solid #2B3036; padding-top: 14px">
+<span>brace · solid hue, range in ink.dark · ruler tint hue 16–20%<br>edges · hue at 60–75% · outside the loop still takes overlay</span>
+<span>Cycle on · filled in the hue, ink.dark glyph: a role colour like solo or arm<br>off · the brace keeps today's 30% rule, in the new hue</span>
+<span>out-of-scale · rows tinted 9–12%, key label in the hue<br>live out-of-scale note · solid hue (code: loop_region today)</span>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
