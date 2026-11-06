@@ -12,6 +12,16 @@ Global shortcuts apply anywhere unless a text field or dialog has the keyboard.
 
 Ableton's Info View and Logic's Quick Help both use Shift+?. The panel sits bottom-left and explains the control or figure under the pointer, with its key and a More button for the docs page. Help > Info Panel does the same.
 
+## Device editors
+
+| Scope | Action | Keys |
+|---|---|---|
+| Device editor | Close Editor | Escape |
+
+Escape closes the device editor window you last clicked in or opened; a click outside every
+editor window hands the keyboard back to the views. A value being typed in a knob's field, an open
+list or a dialog keeps Escape for itself. **Window > Close All Editors** closes every editor.
+
 ## Interface and arrangement zoom
 
 | Scope | Action | Keys |

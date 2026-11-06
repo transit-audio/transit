@@ -46,7 +46,7 @@ The grid is the arrangement's backbone: one structure that carries tempo, meter 
 | `meter.ok` | `#5FCB8E` | `#1A7943` | Level meters |
 | `meter.hot` | `#FF6B5B` | `#A8200E` | Clip, arm, error (an error's icon and edge; its message stays `text`) |
 
-Signal and mod differ in lightness as well as hue, so they stay distinguishable for colour-blind users. Fills under curves use the curve colour at 12% (8% for the oscilloscope).
+Signal and mod differ in lightness as well as hue, so they stay distinguishable for colour-blind users. Fills under curves use the curve colour at 12% (8% for the oscilloscope). An XY pad's point sits on a `signal` halo at 14% (`alpha.padHalo`), and a voice light whose release is fading is `signal` at 45% (`alpha.voiceReleasing`, "half lit").
 
 **Light theme.** Designed, not derived: the light set keeps every role and every hue of the dark set, and meets targets instead of mirroring contrast ratios (mirroring pushed `mod` to brown and `meter.ok` to forest green). Grounds: `bg.window` is a mid-light graphite, panels sit lighter on it as cards, `surface.raised` and `knob.cap` are white, and `surface.inset` is one step darker than the panel so wells still recess. Inks: text roles are ≥ 4.5:1 on panel and inset; marks are ≥ 3:1 on the panel. `mod` is a true orange (`#E17000`; a darker amber reads brown on white) and a mark colour only (rings, traces, dots, amount bars, never body text); its traces inside display wells are 2.5 px, where the well gives 2.77:1. Ink on a filled role (solo, arm, Cycle, the default button) is the light ground. `meter.ok` is `#1A7943`, one step darker than `#1E8A4C`, chosen so a letter on its fill (the monitor toggle) clears 4.5:1 while the bar still clears 3:1 on the panel. The accents (`signal`, `mod`, `loop`, `meter.ok`, `meter.hot`) stay ≥ ΔE 20 apart for normal, protan, deutan and tritan vision; `meter.hot` is a deep red so it parts from the orange (the derived pair was ΔE 6 for deutan vision). Track, clip and choke colours come from the content palette below. Aliases follow their token. Mockup: the chrome canvas, Light page (palette board, Macro Oscillator, design language, Compressor, Mixer, chrome). v0.7.0 ships dark only: View > Appearance shows System and Light unavailable until this set lands in code.
 
@@ -143,6 +143,7 @@ The app bundles IBM Plex Sans (Regular, Medium, SemiBold) and IBM Plex Mono (Reg
 - Radius: panel 8, display well 6, control 5, segment 4, source chip pill (13).
 - Heights: title bar 52; control 26–32; routing row 40; segment 22–24.
 - Panels lay out on a 12-column grid.
+- **Device windows** lay out at the board's width, 1440, and below it shrink their fractional columns (the hero's 2fr and 1fr, the Shaper's 3, 5, 2 and 2 columns, a routing row's destination) down to a minimum content width of 1040, which is also the window's minimum width. The body scrolls vertically between the title bar and the footer; the window opens at the content's height, at most the screen less 32 a side.
 
 ## Components
 
@@ -153,7 +154,7 @@ The app bundles IBM Plex Sans (Regular, Medium, SemiBold) and IBM Plex Mono (Reg
 - **Modulation ring:** outer arc r 47, stroke 3.5, `mod`, from the base value to base + depth. Hidden when the modulation section is disabled.
 - States: default, active (cap `#2E333A`), modulated, disabled (arc `ink.ghost`, pointer `ink.arrow`).
 - Label below in `label.control`, value below that in `value`. Hero knobs add a context sub-label (`text.faint`, 11) that changes with the engine/model.
-- Interaction: vertical drag, Shift for fine, double-click to reset, click the value to type, scroll to nudge.
+- Interaction: vertical drag, Shift for fine, double-click to reset, click the value to type, scroll to nudge. In a device window, Escape while a value is typed gives the typing up and leaves the window open.
 - In code (`widgets/knob.rs`): 200 px of drag for the full travel, Shift a tenth; a wheel notch nudges 1% (Shift 0.1%); the cell is the dial plus a 16 px label row and a 15 px value row, at least 56 wide. The knob reports a normalized position and the typed text; the caller maps, formats and parses.
 
 ### Fader
@@ -216,10 +217,10 @@ Inset `surface.inset`, 1 px `line.inset`, radius 6, padding 8. Readouts in `read
 In code (`widgets/display_well.rs`): the readout row is 14 px; points are r 4.5 in `text` (white in dark) on `surface.inset` with an 8 px larger hit box; positions are normalized (x left to right, y bottom to top) and a dragged point comes back as a normalized position.
 
 ### Segmented control
-Track `surface.inset`, 1 px `line`, radius 6, 2 px padding. Selected segment `surface.selected` with `text`; others transparent with `text.faint`. Icons for shapes (LFO), text for modes (LP/BP/HP). In code (`widgets/segmented.rs`): the track is 24 high, segments are radius 4 (`radius.segment`) with Mono 500 11 text, sized to their text plus 10 px a side or spread evenly over a given width.
+Track `surface.inset`, 1 px `line`, radius 6, 2 px padding. Selected segment `surface.selected` with `text`; others transparent with `text.faint`. Icons for shapes (LFO), text for modes (LP/BP/HP). Until the kit has shape icons, LFO shapes are short text (`SIN TRI SAW SQR S&H RND`) spread evenly over the panel's width. In code (`widgets/segmented.rs`): the track is 24 high, segments are radius 4 (`radius.segment`) with Mono 500 11 text, sized to their text plus 10 px a side or spread evenly over a given width.
 
 ### Dropdown
-`surface.inset` on panels (`surface.raised` inside routing rows), 1 px `line`, radius 5, chevron in `text.faint`. egui's combo box is this dropdown (Application chrome below).
+`surface.inset` on panels (`surface.raised` inside routing rows), 1 px `line`, radius 5, chevron in `text.faint`. egui's combo box is this dropdown (Application chrome below). In device panels (326-M, `macro_osc_panel::dropdown`): 26 high on panels (104 wide in an Output column, the label left in `label.control`), 28 in routing rows; the text Sans 500 12 (mono for numbers) with a lead before it: a faint group or operator (`Tone`, `×`), an 8 px dot, or room for an icon; hover `button.hover`; the list is a popup of check rows.
 
 ### Switch
 34 × 20, radius 10. On: `signal` track, white knob. Off: `line.strong` track, `text.muted` knob. Paired with a mono `ON`/`OFF` readout. In code (`widgets/switch.rs`): the 14 px knob sits 3 px inside the track; the readout (`value`, `text` on, `text.faint` off) takes a 24 px slot 6 px left of the track so the track never moves.
@@ -231,13 +232,22 @@ Used for optional or secondary sections (e.g. Shaper, Modulation).
 - **Right:** `ON`/`OFF` readout + switch. Enables/disables only.
 - Collapse and enable are independent. A disabled-but-open section dims to 40% opacity and stays editable.
 - **Persistence:** collapse is a per-user view setting; enable is a patch parameter saved with the preset.
+- **Without an enable parameter** (the Macro Oscillator's Modulation: the matrix has none) the bar has no switch; its middle says the count (`5 / 16 routes`) while open and adds the summary while collapsed.
+- **Before the user chooses**, a section is open while it is in use (the Shaper on, a route set) and collapsed otherwise; the user's choice is kept per device and section (`UiState::device_sections`, in `ui.json`).
 - **In code** (`widgets/section_bar.rs`): the bar is 32 high (the larger control height); a 12 px chevron (stroke 1.5, `text.muted`) and the title in `title.sectionBar` form one button; the tag is boxed 18 high with 6 px padding and radius 4; the description is `label.control` in `text.muted`, the summary `readout.display` in `text.faint`, clipped before the switch. The kit stores neither state: both come in as inputs and go out as clicks, and `body_opacity` gives the 40% dim.
 
 ### Source chip
 Pill, `surface.raised`, 1 px `line.strong`, 8 px dot (`mod` when the source is routed, `ink.arrow` when unused), name, route count `×n` in mono. Draggable onto any knob to create a route.
 
+- **In code** (326-M): 26 high, radius 13, padding 6 then 8, the name Sans 500 12, the badge in the `tag` type and `text.faint`; hover `button.hover`. One chip per source of the device, in the matrix's order, wrapping after the `Sources — drag onto any knob` label (`label.control`, `text.faint`).
+- **Drop:** while carried, a copy follows the pointer with a `mod` edge. Dropped on a knob that has a matrix destination, the first free row (source and destination Off) takes the chip's source and the knob's destination at amount 0, one undo step; the knob then draws its ring. A knob without a destination takes nothing.
+
 ### Routing row
 Grid: `#` · Source · → · Destination (with group prefix) · Via · Curve (icon + name) · Amount (bipolar bar + mono value) · mute / remove. Row fill `bg.titlebar`, 1 px `line.inset`, radius 6, height 40. Only active routes are shown; a dashed **Add route** row sits below. The header shows `n / 16 routes`.
+
+- **Columns** (326-M): 32 · 200 · 24 · the rest · 180 · 140 · 300 · 64, gap 8, padding 0 8; below the board's width the fixed columns shrink together and the destination keeps at least 160. Column headers are `label.section` in `text.faint`.
+- **Cells:** the source a `surface.raised` dropdown with a `mod` dot; the arrow 1.5 px `ink.arrow`; the destination a `surface.raised` dropdown with its group in `text.faint` (Pitch; Tone for Harmonics, Timbre and Morph; Gate for Decay; Output for Level and Pan; Filter for Cutoff, Resonance and Env amount; LFO 1 and LFO 2 for their rate and amount); via and curve on `surface.panel`, via led by `×` and reading `None` when off; the curve's icon is the curve itself sampled into 26 by 18 (1.6 px `text`); the amount bar takes the column less 58 and prints a signed whole percent (`+32%`) right-aligned in a 48 slot; remove is a 26 px icon button (`text.faint`, hover `button.hover`).
+- **Active** means a source or a destination is set; **Add route** reveals the next unused row for the session and writes nothing; remove returns the row to its defaults in one undo step. The mute button waits for a per-row mute parameter (not drawn).
 
 ### Bipolar amount bar
 Track 4 px `line`; fill 7 px `mod` from the centre tick (`text.faint`) towards the value. In code (`widgets/bipolar_amount.rs`): the amount runs from −1 to +1 across the full width; drag sideways (Shift a tenth), double-click for zero; the bar is 16 high with a 1 px tick 11 high.
@@ -245,13 +255,24 @@ Track 4 px `line`; fill 7 px `mod` from the centre tick (`text.faint`) towards t
 ### Level meter
 4 px bars on a `line` track, `meter.ok`, `meter.hot` only above 0 dBFS.
 
+**Title bar variant** (Device anatomy A, 326-M): a 140 by 4 bar, radius 2, filled along the fader's taper with peak fall-off, its readout beside it in `value` and `text.muted` (`-6.0 dB`, `-inf dB`) in a 64 slot. One bar while the device's tap carries the peak of its channels; the board's pair waits for a per-channel tap.
+
 **Ballistics** are a pair of time constants (attack and release, the time to reach 99% of a step), with two presets. **Peak fall-off** (attack 0, release 300 ms) is the default for every meter: the bar jumps to any higher value within the frame and falls off over 300 ms, so only the fall is smoothed and transients are never hidden. **VU** (attack 300 ms, release 300 ms) is the symmetric averaging reading, scaled so 0 VU sits at a reference that defaults to −18 dBFS (a device may set −20 or −14), with `meter.hot` only above 0 VU and a `VU` tag. Device panels pick; the peak-hold line and the clip cell are never smoothed. The same bar reads gain reduction: it fills down from the top in `mod`, with a `GR` tag and no over zone. In code (`widgets/level_meter.rs`) the widget is stateless: the caller holds the displayed value and steps it each frame with `meter_step(prev, target, dt, ballistics)`, a one-pole integration in dB on the fader's taper.
+
+### Model picker
+A device's engine choice as a grid of buttons (326-M, the Macro Oscillator): eight columns with 4 px gaps, buttons 30 high, radius 5; groups labeled in a 92 px column on the left (`label.section` in `text.faint`), 8 px between groups. Each button prints its number (two digits, `tag` type) and name (Sans 500 12), clipped to the button. Off: `surface.raised`, 1 px `line`, the number `text.faint`, the name `text.muted`, hover `button.hover`. Current: the option fill (`toggle.on.option.fill`) with a `signal` edge, the number `signal`, the name `text`. A click selects; after it the picker holds the arrow keys (left and right one, up and down a row, not past either end) and shows the keyboard focus ring until a press lands elsewhere. The Macro Oscillator numbers its 24 models in the firmware's order: Pitched 1 to 16, Noise · Perc 17 to 24 (the board's group, from Swarm on).
+
+### XY pad
+Two parameters on one surface (326-M, Timbre across and Morph up): a display well 212 square with grid lines at the quarters in `grid`; its axes named inside it in `readout.display` (`TIMBRE →` bottom left, `↑ MORPH` top left); the point a 7 px `signal` dot with a 2 px `text` rim on the halo. Drag sets both (the point follows the pointer), Shift drags fine (a tenth of the pointer's travel), double-click resets both, one undo step per gesture. A route to either parameter draws its reach as a dashed `mod` trail (3 px, dash 1 gap 5) from the point, the horizontal one ending in a hollow 4 px circle. The values print below in `value`, the letters `T` and `M` in `text.faint`.
+
+### Voice lights
+One 10 px square (radius 3) per voice, eight to a row with 5 px gaps, right-aligned under the controls that set the count: `signal` while a key holds the voice, `signal` at 45% while its release fades, `line` while free. The hero's display says how many sound (`3 voices`).
 
 ## Application chrome
 
 egui's own widgets outside the device panels: the menu bar and its menus, popups, dialogs, tool windows, buttons, fields, combo boxes, checkboxes and radio buttons, scroll bars and tooltips. From the maintainer's application chrome document (draft 1, [`mockups/chrome/`](mockups/chrome/)); the numbers are `chrome` in `tokens.json`. One rule carries over from the devices: color means something. Blue is a value you set or the thing that has focus; red is clip, record and error; nothing else is colored.
 
-In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gives buttons, fields and checks one shared stroke and fill, so `crate::chrome` sets the field, combo box, checkbox and radio rules at the call site (`chrome::field`, `chrome::text_field`, `chrome::checkbox`, `chrome::radio_value`) and draws the default button, the modal, the tool-window footer, the menu styles, the status lines and the keyboard focus ring. Device windows keep their 8 px body and egui's earlier button padding until their migration (326-M).
+In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gives buttons, fields and checks one shared stroke and fill, so `crate::chrome` sets the field, combo box, checkbox and radio rules at the call site (`chrome::field`, `chrome::text_field`, `chrome::checkbox`, `chrome::radio_value`) and draws the default button, the modal, the tool-window footer, the menu styles, the status lines and the keyboard focus ring. The Macro Oscillator's window is the first device window in the language (326-M, Device window below); the other device windows keep their 8 px body and egui's earlier button padding until their migrations.
 
 ### Buttons
 - **Standard:** `surface.raised`, no border, height 26, radius 5, padding 0 12, Sans 500 12 in `text`. Hover `button.hover`; pressed `surface.selected` (no signal edge: that is the option-on look); keyboard focus a 1.5 px `focus.ring` 2 px outside; disabled dims to read as `ink.arrow` (egui dims by one alpha, 0.3).
@@ -266,6 +287,7 @@ In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gi
 - **Modal:** width 380, padding 18 18 16, no title bar: the question is the title (Sans 600 13), the detail below it (Sans 12, `text.muted`). The scrim is `overlay`. Footer: the default button rightmost, Cancel left of it, a third choice ("Don't Save") alone at the far left, 14 px under the text. Enter is the default, Escape is Cancel. The save-changes question and the delete confirmations are this modal (`chrome::modal`). Windows that open modally with a title bar (About, Keyboard Shortcuts, Quantize) dim what they cover with `overlay` too.
 - **Tool window:** the compact title bar, 26 high, on `bg.titlebar` with a 1 px `line` below it; title Sans 500 14; close with an 18 px hit. Body padding 14 16; groups under `label.section`, split by 1 px `line.inset`; the label column `text.muted`. Footer (`chrome::tool_footer`): padding 10 16, a 1 px line above, buttons right-aligned.
 - **Two title bars, never mixed:** app windows and dialogs 26 (above); devices 52 (Device anatomy, A).
+- **Device window** (326-M; devices stay floating windows, the maintainer's decision of 2026-11-06): the window rule's edge, radius and no shadow, but on the `bg.window` ground the device's panels sit on as cards (the board's), with no egui title bar: the device's A bar is its top and moves the window when dragged; the footer (32, 1 px `line` above) carries the credit and the load readout in `text.faint`. One window per device instance; it remembers its rect per device (`UiState::device_windows`, in `ui.json`) and opens where that device was last closed, moved and shrunk onto the screen when it no longer fits. **Escape** closes the focused device window (the one last clicked or opened, until a press lands outside every device window); a value being typed, an open list or a dialog keeps Escape. **Window > Close All Editors** closes every plug-in editor, built-in and hosted.
 
 ### Menus and popups
 - **Menu bar:** height 32 on `bg.titlebar` with a 1 px `line` below; items height 22, padding 0 8, radius 4, Sans 400 12; the open item takes `button.hover`.
@@ -306,6 +328,10 @@ A pattern for a region that cannot take input right now: hatch means "can't take
 ## Device anatomy
 
 - **A · Title bar.** Track / device, centred preset browser (prev, field, next, save), output meter, bypass, menu, close. Identical on every device.
+  - In code (326-M, `macro_osc_panel::title_bar`): 52 high on `bg.titlebar` with a 1 px `line` below, padding 0 16, gaps 12. Left: `transit` in `title.brand`, an 18 px `line.strong` divider, the track in `label.control` and `text.faint`, `/`, the device in `title.device`. Centered: previous, the field (300 by 32, `surface.inset`, `line.strong` on hover, the list's name, `Factory` or `User`, in `text.faint` before the preset's, the chevron right), next, and 8 px further, save. The buttons are 32 square, `surface.panel` with a 1 px `line` and radius 6 (hover `button.hover`), their 14 px glyphs `text.muted`; close is borderless.
+  - The preset browser is the existing preset system: previous and next step through the factory presets then the user's (wrapping; from no preset next is the first and previous the last), each a recall in one undo step; the field opens the same list as before (factory, user, Save As, Delete); save writes the current values over the current user preset and, for a factory preset or none, opens the list to Save As.
+  - Bypass keeps the insert slot's meaning (`signal` on, `text.faint` bypassed) and is ghosted (`ink.arrow`, no click) on an instrument, which has no bypass. The menu holds Follow Selection and Close All Editors.
+  - **Follow selection** (a link glyph, the toggle's option role at 32 square, between the readout and bypass): on, the window shows the focused track's device in the same slot whenever that device is one the panel draws (Logic's Link); off, the default, it stays on its device.
 - **B · Hero.** The device's main display plus its 2–4 most important controls: oscillator scope + XY pad, sample waveform, EQ curve, compressor transfer curve.
 - **C · Sections.** Panels on the 12-column grid. Each panel: section label, optional display well, a row of knobs.
 - **D · Routing.** Source chips plus routing rows, full width at the bottom. Only for devices that modulate.
@@ -314,7 +340,7 @@ A pattern for a region that cannot take input right now: hatch means "can't take
 
 | Device | Hero display | Sections |
 |---|---|---|
-| Macro Oscillator | Scope + spectrum + Timbre/Morph XY pad, model picker | Tone, Gate, Pitch, Output · Shaper (Amp env, Filter, LFOs) · Modulation |
+| Macro Oscillator | Scope + spectrum + Timbre/Morph XY pad, model picker | Tone, Gate, Pitch, Output · Shaper (Amp env, Filter, LFOs) · Modulation. Landed: 326-M (`crates/ui-studio/src/macro_osc_panel/`); the spectrum, the note readout and the per-model labels wait for their sources |
 | Compressor | Transfer curve + level/GR history + GR meter | Dynamics knobs, detector mode, sidechain |
 | Sampler | Waveform with start/end/loop handles | Playback, Amp env, Filter, LFOs · Modulation |
 | EQ 7-Band | Response curve with band handles over a live spectrum | Selected-band controls, band list |

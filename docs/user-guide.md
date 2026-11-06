@@ -298,15 +298,20 @@ Oliver Rockstedt's Rust port (MIT): the digital synthesis is the original's, che
 sample against her C++ code, but it is a port, not an emulation of the hardware module or its
 analog stages. Their license notices are in **Help > About transit**.
 
-- **Model** picks the synthesis model. **Harmonics**, **Timbre** and **Morph** are the model's
-  three tone controls; what each does depends on the model (hover a control with the Info panel on,
-  Shift+?, for a summary).
+- **Model** picks the synthesis model: the picker under the display lists all 24, numbered,
+  Pitched first and Noise · Perc after; click one, then the arrow keys step through them (left and
+  right one, up and down a row). **Harmonics**, **Timbre** and **Morph** are the model's three tone
+  controls (the large knobs under Tone); what each does depends on the model (hover a control with
+  the Info panel on, Shift+?, for a summary). The square pad beside the display sets Timbre (across)
+  and Morph (up) together: drag it, hold Shift to move finely, double-click to return both to the
+  middle. A route to Timbre or Morph shows on the pad as a dashed amber trail.
 - **Playing**: a note opens the voice's low-pass gate at the note's velocity; releasing it closes
   the gate over **Decay**, and **LPG Color** sets how it closes (filtering as it fades at 0%, a plain
   fade and a longer release at 100%). The drum models ring out by themselves over **Decay**; the Chiptune model holds while its key is
   held and fades over **Decay** after it.
-- **Voices** sets how many notes sound at once, 1 to 16 (8 by default); the lights beside it show
-  each voice (lit: a key holds it; half lit: its release is fading; dark: free). A new note takes a
+- **Voices** sets how many notes sound at once, 1 to 16 (8 by default); the lights under it show
+  each voice (lit: a key holds it; half lit: its release is fading; dark: free), and the display
+  above counts the voices sounding. A new note takes a
   free voice, else the quietest voice whose release is still fading, else the oldest held note, so
   the newest note always sounds. A released note fades over **Decay** on its own voice while you
   play on. Each voice has its own noise, so a chord on a noise model is not one noise in unison, and
@@ -332,10 +337,12 @@ analog stages. Their license notices are in **Help > About transit**.
 
 ### Shaper and modulation matrix
 
-Below the module's own controls, a line labels the **shaper** and the **modulation matrix** as
-transit's addition: they are not part of the original module, and both are off by default (with the
-shaper off and every matrix row Off, the instrument plays exactly as the module does). Click the
-line to show or hide them; they show by themselves while they are in use.
+Below the module's own controls, two section bars, **Shaper** and **Modulation**, carry the
+TRANSIT EXTENSION tag: they are not part of the original module, and both are off by default (with
+the shaper off and every matrix row Off, the instrument plays exactly as the module does). Click a
+bar's title to show or hide its section (the choice is remembered per machine); until you choose,
+a section shows while it is in use. The switch at the right of the Shaper bar turns the shaper on
+and off, and a disabled Shaper that is shown dims and stays editable.
 
 - **Shaper** switches on a section after each voice's low-pass gate, per voice: an **amp envelope**
   (Attack, Decay, Sustain, Release, and **Velocity**: how much velocity sets the level) that becomes
@@ -355,8 +362,11 @@ line to show or hide them; they show by themselves while they are in use.
   limit: the song position sets a synced LFO's phase, but Sample & hold and Smooth random values
   depend on the cycles before, so playback from bar 5 and an export from bar 1 can differ in those
   two shapes (the other four match).
-- The **matrix** has 16 rows, in two columns of eight. Each row has a **Source**, a **Via**, a
-  **Destination**, a **Curve** and an **Amount** (-100% to +100%): every 12 frames, for every voice,
+- The **matrix** has 16 rows; the Modulation section shows the rows in use, one under another,
+  and **Add route** shows the next free one. Drag a source chip (LFO 1, Velocity and the others)
+  onto a knob to route it there in the first free row, then drag the row's amount bar; a knob with
+  a route draws an amber ring from its value to its reach, and the x at a row's end clears it. Each
+  row has a **Source**, a **Destination**, a **Via**, a **Curve** and an **Amount** (-100% to +100%): every 12 frames, for every voice,
   it adds amount × curve(source) × via to its destination. Sources: LFO 1 and 2, the amp and filter
   envelopes, velocity, the key (centered on middle C, C3), release velocity, aftertouch, poly
   aftertouch, the mod wheel, pitch bend, a random value per note, and the rack's eight macros when
@@ -383,8 +393,14 @@ column follows ES2's modulation router (Source, Via, Target), and Alchemy's modu
 Every control can be automated (lanes `plugin:instrument:<id>`, for example
 `plugin:instrument:timbre`, or `plugin:instrument:mod1_amount` for the first matrix row's amount)
 and mapped to a MIDI controller (right-click it). Presets: Init, Analog Bass (mono), Glass Bell,
-Plucked String, Key Tracked Timbre, and your own from the panel's preset menu. The panel opens in a
-window inside transit's main window, so it minimizes and returns with it.
+Plucked String, Key Tracked Timbre, and your own: the title bar's arrows step through them, the
+name field lists them (with Save As and Delete), and the save button writes over your own preset
+(on a factory preset it opens the list to Save As). The editor is a floating window inside
+transit's main window, so it minimizes and returns with it. Drag its title bar to move it and its
+edge to resize it; it opens where you last closed it. **Escape** closes the editor you last clicked
+in, and **Window > Close All Editors** closes every editor. The link button in the title bar
+(**Follow Selection**) makes the window show the Macro Oscillator of whichever track you focus,
+as Logic's Link does; off, the window stays on its own instrument.
 
 ## Resonator
 

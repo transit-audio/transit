@@ -37,6 +37,7 @@ The studio already paints every color from one token table (the UI plan's slice 
 - Some old names now alias the same value (`solo` and `accent` are both `signal`; `record` is `meter.hot`; a bypassed device's status reads `text.faint`). The mixer meter's hot segment, which used `solo`, reads `meter.hot` (since `1d9c2b1a`); its threshold (linear 0.9, about −0.9 dBFS) moves to above 0 dBFS when the mixer migrates to the kit's meter.
 - The application chrome rules (menus, popups, dialogs, tool windows, buttons, fields, warnings and errors), the loop's own hue and the hatch come from the maintainer's second design document, the application chrome (draft 1), written into the design README; a warning carries no color, so `warn` left the token set.
 - The derived light set's inks are darker than before (signal, mod and the meters keep their dark contrast against a near-white window); it does not ship in v0.7.0, and View > Appearance shows System and Light unavailable.
+- The Macro Oscillator is the first device migrated to the kit (326-M): its editor draws the maintainer's board in a floating device window, and every other device keeps the older panel system until its own migration.
 - As of the #326 chrome landing the light set is the maintainer's designed set (`colorLight`, pinned by the drift test), not the derivation of decision 6, and still does not ship; the content palette (`palette`) and the pad spec (`pad`) are documented in the design README and tokens.json ahead of their implementation.
 
 ## Judging round (2026-11-06)
