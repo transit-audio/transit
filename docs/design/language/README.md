@@ -4,6 +4,8 @@ One panel language for every transit device (instruments, effects, utilities). G
 
 Machine-readable tokens: [`tokens.json`](tokens.json). Mockup sources: [`mockups/`](mockups/) (Design canvas `.dc.html` files; they render on the canvas, not standalone).
 
+In code ([ADR 0045](../../adr/0045-design-language-in-code.md)): `crates/ui-studio/src/tokens.rs` mirrors `tokens.json` (a test reads the file and fails on any value or name that differs, in either direction), `theme.rs` builds the dark and light token sets from it, and the controls below live in `crates/ui-studio/src/widgets/`, one file per control with its layout test.
+
 ---
 
 ## Principles
@@ -12,6 +14,7 @@ Machine-readable tokens: [`tokens.json`](tokens.json). Mockup sources: [`mockups
 2. **Two colours mean two things.** Signal blue is a value you set. Mod amber is modulation acting on it. Nothing else is coloured, apart from level meters.
 3. **Values are always readable.** Every control prints its value in mono, in real units (`1.20 kHz`, `320 ms`, `−3.2 dB`). No hover needed to know a setting.
 4. **Panels, not chrome.** Flat raised panels on a graphite ground. No skeuomorphic metal, glow or gradients.
+5. **No analog dials.** A slow reading is a ballistics mode of the flat meter, never a needle on a dial; the trace or the bar shows the signal, and the VU mode shows how it sits.
 
 ### Arrangement grid
 
@@ -19,30 +22,72 @@ The grid is the arrangement's backbone: one structure that carries tempo, meter 
 
 ## Colour
 
-| Token | Hex | Use |
-|---|---|---|
-| `bg.window` | `#131518` | Window ground |
-| `bg.titlebar` | `#16181B` | Title bar, routing-row fill |
-| `surface.panel` | `#1A1D21` | Panels |
-| `surface.raised` | `#22262B` | Chips, model buttons, dropdowns on panels |
-| `surface.inset` | `#0D0F11` | Display wells, value fields, segmented tracks |
-| `surface.selected` | `#2A2F35` | Selected segment |
-| `knob.cap` | `#262A30` | Knob face |
-| `line` | `#2B3036` | Panel borders, arc tracks |
-| `line.inset` | `#23272C` | Display-well borders |
-| `line.strong` | `#383E46` | Knob rim, pills, dashed add-row |
-| `grid` | `#1C1F23` | Grid lines inside displays |
-| `text` | `#E7E9EC` | Primary text, values, pointers |
-| `text.muted` | `#A7ADB6` | Control labels, section labels |
-| `text.faint` | `#8C939D` | Meta, units, column headers (≥ 4.5:1 on panel and inset) |
-| `ink.ghost` | `#4A5260` | Secondary traces (detuned wave, fade envelope) |
-| `ink.arrow` | `#585F69` | Routing arrows, unused source dots |
-| `signal` | `#4C9EFF` | Value arcs, curves, selected outline, switch on |
-| `mod` | `#F0A73A` | Modulation rings, LFO traces, amounts, GR |
-| `meter.ok` | `#5FCB8E` | Level meters |
-| `meter.hot` | `#FF6B5B` | Clip / over only |
+| Token | Hex | Light | Use |
+|---|---|---|---|
+| `bg.window` | `#131518` | `#F9FAFA` | Window ground |
+| `bg.titlebar` | `#16181B` | `#F6F6F8` | Title bar, routing-row fill |
+| `surface.panel` | `#1A1D21` | `#EFF1F3` | Panels |
+| `surface.raised` | `#22262B` | `#E3E5E9` | Chips, model buttons, dropdowns on panels |
+| `surface.inset` | `#0D0F11` | `#FFFFFF` | Display wells, value fields, segmented tracks |
+| `surface.selected` | `#2A2F35` | `#D5D9DE` | Selected segment |
+| `knob.cap` | `#262A30` | `#DCE0E4` | Knob face |
+| `knob.capActive` | `#2E333A` | `#CED3D9` | Knob face while held; fader cap |
+| `line` | `#2B3036` | `#D4D7DD` | Panel borders, arc tracks |
+| `line.inset` | `#23272C` | `#E1E4E8` | Display-well borders |
+| `line.strong` | `#383E46` | `#BDC3CB` | Knob rim, pills, dashed add-row |
+| `grid` | `#1C1F23` | `#EDEEF1` | Grid lines inside displays |
+| `text` | `#E7E9EC` | `#202329` | Primary text, values, pointers |
+| `text.muted` | `#A7ADB6` | `#484D56` | Control labels, section labels |
+| `text.faint` | `#8C939D` | `#5B616B` | Meta, units, column headers (≥ 4.5:1 on panel and inset) |
+| `ink.ghost` | `#4A5260` | `#9EA6B5` | Secondary traces (detuned wave, fade envelope) |
+| `ink.arrow` | `#585F69` | `#8F96A1` | Routing arrows, unused source dots |
+| `signal` | `#4C9EFF` | `#0055BB` | Value arcs, curves, selected outline, switch on |
+| `mod` | `#F0A73A` | `#633E08` | Modulation rings, LFO traces, amounts, GR |
+| `meter.ok` | `#5FCB8E` | `#1A4F31` | Level meters |
+| `meter.hot` | `#FF6B5B` | `#B51200` | Clip / over only |
 
 Signal and mod differ in lightness as well as hue, so they stay distinguishable for colour-blind users. Fills under curves use the curve colour at 12% (8% for the oscilloscope).
+
+**Light theme.** The dark set is the design; the light set is derived from it by one rule, so it keeps every role. Grounds (`bg`, `surface`, `knob`, `line`, `grid` and the arrangement grounds below) mirror the dark set: each keeps its contrast ratio to `bg.window`, in the opposite direction, with `surface.inset` at white and the graphite hue kept. Inks (`text`, `ink`, `signal`, `mod`, `meter`, and the loop, cursor and selection colors) keep their hue and at least the contrast ratio they have against `bg.window` in the dark set. Aliases follow their token. Whether the light theme ships in v0.7.0 is the maintainer's call; View > Appearance offers it today.
+
+### Arrangement and transport
+
+Tokens the device design does not name, used by the arrangement, the transport and the track headers. The grounds and lines are re-derived on the graphite ground at the contrast ratio each had on the previous ground (lanes, ruler and headers against `bg.window`; grid lines against the lane). Grid lines are the lane tinted toward white (toward black in light), so the translucent Grid Over Clips overlay reproduces them over an empty lane. The state colors alias design tokens: record arm is `meter.hot`, mute is `text` (the toggle inverts), solo is `signal`, monitoring and meter levels are `meter.ok`.
+
+| Token | Dark | Light | Rust | Contrast (before, now) | Use |
+|---|---|---|---|---|---|
+| `lane` | `#171A1D` | `#F3F4F6` | `lane` | 1.05, 1.05 on the window | Track lanes |
+| `lane.alt` | `#1A1E22` | `#EEF0F2` | `lane_alt` | 1.09, 1.09 | Alternate lanes |
+| `ruler` | `#23282D` | `#E0E3E7` | `ruler` | 1.22, 1.23 | Ruler |
+| `header` | `#23262C` | `#E2E5E9` | `header` | 1.21, 1.21 | Track headers |
+| `header.selected` | `#333840` | `#C6CBD2` | `header_selected` | 1.55, 1.55 | Selected track header |
+| `grid.bar` | `#323537` | `#CFCFD1` | `grid_bar` | 1.41, 1.41 on the lane | Bar lines |
+| `grid.beat` | `#242729` | `#E3E4E5` | `grid_beat` | 1.15, 1.16 | Beat lines |
+| `grid.sub` | `#1C1F21` | `#EEEEF0` | `grid_sub` | 1.05, 1.05 | Sub-beat lines |
+| `loop` | `#E6AB27` | `#5B430B` | `loop_region` | 8.89, 8.90 | Loop region, Cycle on |
+| `cursor` | `#E1E1E3` | `#28282B` | `cursor` | 13.94, 14.01 | Playhead |
+| `selection.outline` | `#EDEDF0` | `#1F1F26` | `selection_outline` | 15.52, 15.65 | Selected clip outline, marquee |
+| `ink.dark` | `#131518` | `#131518` | `ink_dark` | = `bg.window` | Letters on light fills |
+| `ink.light` | `#F6F6F8` | `#F6F6F8` | `ink_light` | unchanged | Letters on dark fills |
+| `record` | `#FF6B5B` | `#B51200` | `record` | = `meter.hot` | Record arm, clip cap |
+| `mute` | `#E7E9EC` | `#202329` | `mute` | = `text` | Mute on (inverted) |
+| `solo` | `#4C9EFF` | `#0055BB` | `solo` | = `signal` | Solo on |
+| `monitor` | `#5FCB8E` | `#1A4F31` | `monitor` | = `meter.ok` | Input monitoring, meter levels |
+| `focus.ring` | `#4C9EFF` | `#0055BB` | `focus_ring` | = `signal` | Keyboard focus |
+| `button.hover` | `#2E333A` | `#CED3D9` | `button_hover` | = `knob.capActive` | Hovered buttons and rows, one step above `surface.raised` |
+| `overlay` | `#00000046` | `#0000001C` | `overlay` | unchanged | Dims what lies outside a range |
+
+The older names in code read the design values: `bg` is `bg.window`, `panel` is `surface.panel`, `panel_raised` and `button` are `surface.raised`, `text_dim` is `text.muted`, `accent` is `signal`. `mod` is `modulation` in Rust (a keyword).
+
+### Component fills
+
+Literal fills the component specs use, with their light values (the fader cap is `knob.capActive`).
+
+| Path | Dark | Light | Use |
+|---|---|---|---|
+| `toggle.on.option.fill` | `#1E2A38` | `#D9E1EB` | Monitor and option toggles when on |
+| `toggle.unavailable.fill` | `#1E2125` | `#EAECEF` | Unavailable toggles |
+| `switch.onKnob` | `#FFFFFF` | `#FFFFFF` | The switch's knob when on |
 
 ## Type
 
@@ -59,6 +104,8 @@ IBM Plex Sans for UI text, IBM Plex Mono for every number and readout.
 | `value` | Mono 500 11, `text` |
 | `readout.display` | Mono 400 11, `text.faint` (inside display wells) |
 | `tag` | Mono 500 10, +6% tracking, 1 px `line.strong` border |
+
+The app bundles IBM Plex Sans (Regular, Medium, SemiBold) and IBM Plex Mono (Regular, Medium), unmodified, under the SIL OFL 1.1, and registers them as the families `sans`, `sans-medium`, `sans-semibold`, `mono` and `mono-medium`; each role picks the family for its weight (`TypeRole::font_id`). Tracking is applied as extra letter spacing. Plex draws tabular digits by default, so readouts do not jitter.
 
 ## Space & shape
 
@@ -78,6 +125,7 @@ IBM Plex Sans for UI text, IBM Plex Mono for every number and readout.
 - States: default, active (cap `#2E333A`), modulated, disabled (arc `ink.ghost`, pointer `ink.arrow`).
 - Label below in `label.control`, value below that in `value`. Hero knobs add a context sub-label (`text.faint`, 11) that changes with the engine/model.
 - Interaction: vertical drag, Shift for fine, double-click to reset, click the value to type, scroll to nudge.
+- In code (`widgets/knob.rs`): 200 px of drag for the full travel, Shift a tenth; a wheel notch nudges 1% (Shift 0.1%); the cell is the dial plus a 16 px label row and a 15 px value row, at least 56 wide. The knob reports a normalized position and the typed text; the caller maps, formats and parses.
 
 ### Fader
 One dB taper everywhere, shared by the fader, its scale and any meter beside it so positions line up.
@@ -91,6 +139,7 @@ One dB taper everywhere, shared by the fader, its scale and any meter beside it 
 - **Meter:** per channel a `surface.inset` well with 1 px `line.inset`; peak fill `meter.ok` at 35%, RMS fill solid on top, 2 px `text` peak-hold line, 4 px clip cell above the scale (`meter.hot` when latched). `meter.hot` is never used below 0 dBFS.
 - **Readouts:** gain field under the fader (Mono 12, click to type), peak readout under the meter (Mono 11, click to reset; `meter.hot` when > 0).
 - **Interaction:** vertical drag, Shift for fine, Alt-click or double-click to unity, scroll to nudge 0.5 dB.
+- **In code** (`widgets/fader.rs`): `taper` and its inverse `db_at` are the one taper (below −90 dB is −∞). The Channel variant lays out a 36 px fader column, a 30 px scale column (labels right-aligned at its end, Mono 10) and the meter slot to the right; Compact draws 4 px ticks in `line.strong` beside the track. Gain and peak readouts belong to the strip, not the fader.
 
 ### Toggle (latching button)
 Used for M / S / R / I, option toggles (SYNC, RETRIG, HZ) and any on/off that isn't a whole section.
@@ -104,7 +153,7 @@ Used for M / S / R / I, option toggles (SYNC, RETRIG, HZ) and any on/off that is
 | Monitor / option | — | fill `#1E2A38`, text + 1 px border `signal` |
 | Unavailable | fill `#1E2125`, text `ink.arrow`, disabled | — |
 
-Height 24, radius 4, Sans 600 11. Unavailable toggles stay visible (ghosted) so strips keep the same layout. A muted channel also dims its name and fader fill.
+Height 24, radius 4, Sans 600 11. Unavailable toggles stay visible (ghosted) so strips keep the same layout. A muted channel also dims its name and fader fill. A toggle is at least square and otherwise fits its label plus 12 px (`widgets/toggle.rs`).
 
 The **switch** (below) is reserved for enabling an entire section; everything else is a toggle.
 
@@ -128,14 +177,16 @@ Built from the parts above, 132 wide (main bus 160). Top to bottom: 3 px track c
 ### Display well
 Inset `surface.inset`, 1 px `line.inset`, radius 6, padding 8. Readouts in `readout.display` across the top. Curve in `signal`, stroke 2, 12% fill. Draggable points are hollow white circles (r 4–5, stroke 1.5). A modulation range is a `mod` band at 10% or a dashed `mod` trail.
 
+In code (`widgets/display_well.rs`): the readout row is 14 px; points are r 4.5 in `text` (white in dark) on `surface.inset` with an 8 px larger hit box; positions are normalized (x left to right, y bottom to top) and a dragged point comes back as a normalized position.
+
 ### Segmented control
-Track `surface.inset`, 1 px `line`, radius 6, 2 px padding. Selected segment `surface.selected` with `text`; others transparent with `text.faint`. Icons for shapes (LFO), text for modes (LP/BP/HP).
+Track `surface.inset`, 1 px `line`, radius 6, 2 px padding. Selected segment `surface.selected` with `text`; others transparent with `text.faint`. Icons for shapes (LFO), text for modes (LP/BP/HP). In code (`widgets/segmented.rs`): the track is 24 high, segments are radius 4 (`radius.segment`) with Mono 500 11 text, sized to their text plus 10 px a side or spread evenly over a given width.
 
 ### Dropdown
 `surface.inset` on panels (`surface.raised` inside routing rows), 1 px `line`, radius 5, chevron in `text.faint`.
 
 ### Switch
-34 × 20, radius 10. On: `signal` track, white knob. Off: `line.strong` track, `text.muted` knob. Paired with a mono `ON`/`OFF` readout.
+34 × 20, radius 10. On: `signal` track, white knob. Off: `line.strong` track, `text.muted` knob. Paired with a mono `ON`/`OFF` readout. In code (`widgets/switch.rs`): the 14 px knob sits 3 px inside the track; the readout (`value`, `text` on, `text.faint` off) takes a 24 px slot 6 px left of the track so the track never moves.
 
 ### Section bar (collapsible)
 Used for optional or secondary sections (e.g. Shaper, Modulation).
@@ -144,6 +195,7 @@ Used for optional or secondary sections (e.g. Shaper, Modulation).
 - **Right:** `ON`/`OFF` readout + switch. Enables/disables only.
 - Collapse and enable are independent. A disabled-but-open section dims to 40% opacity and stays editable.
 - **Persistence:** collapse is a per-user view setting; enable is a patch parameter saved with the preset.
+- **In code** (`widgets/section_bar.rs`): the bar is 32 high (the larger control height); a 12 px chevron (stroke 1.5, `text.muted`) and the title in `title.sectionBar` form one button; the tag is boxed 18 high with 6 px padding and radius 4; the description is `label.control` in `text.muted`, the summary `readout.display` in `text.faint`, clipped before the switch. The kit stores neither state: both come in as inputs and go out as clicks, and `body_opacity` gives the 40% dim.
 
 ### Source chip
 Pill, `surface.raised`, 1 px `line.strong`, 8 px dot (`mod` when the source is routed, `ink.arrow` when unused), name, route count `×n` in mono. Draggable onto any knob to create a route.
@@ -152,10 +204,12 @@ Pill, `surface.raised`, 1 px `line.strong`, 8 px dot (`mod` when the source is r
 Grid: `#` · Source · → · Destination (with group prefix) · Via · Curve (icon + name) · Amount (bipolar bar + mono value) · mute / remove. Row fill `bg.titlebar`, 1 px `line.inset`, radius 6, height 40. Only active routes are shown; a dashed **Add route** row sits below. The header shows `n / 16 routes`.
 
 ### Bipolar amount bar
-Track 4 px `line`; fill 7 px `mod` from the centre tick (`text.faint`) towards the value.
+Track 4 px `line`; fill 7 px `mod` from the centre tick (`text.faint`) towards the value. In code (`widgets/bipolar_amount.rs`): the amount runs from −1 to +1 across the full width; drag sideways (Shift a tenth), double-click for zero; the bar is 16 high with a 1 px tick 11 high.
 
 ### Level meter
 4 px bars on a `line` track, `meter.ok`, `meter.hot` only above 0 dBFS.
+
+**Ballistics** are a pair of time constants (attack and release, the time to reach 99% of a step), with two presets. **Peak fall-off** (attack 0, release 300 ms) is the default for every meter: the bar jumps to any higher value within the frame and falls off over 300 ms, so only the fall is smoothed and transients are never hidden. **VU** (attack 300 ms, release 300 ms) is the symmetric averaging reading, scaled so 0 VU sits at a reference that defaults to −18 dBFS (a device may set −20 or −14), with `meter.hot` only above 0 VU and a `VU` tag. Device panels pick; the peak-hold line and the clip cell are never smoothed. The same bar reads gain reduction: it fills down from the top in `mod`, with a `GR` tag and no over zone. In code (`widgets/level_meter.rs`) the widget is stateless: the caller holds the displayed value and steps it each frame with `meter_step(prev, target, dt, ballistics)`, a one-pole integration in dB on the fader's taper.
 
 ## Device anatomy
 
