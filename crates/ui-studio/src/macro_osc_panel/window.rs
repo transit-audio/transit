@@ -60,6 +60,11 @@ pub struct State {
     pos: HashMap<u64, Pos2>,
     /// Each instance's last rect by insert uid, for this launch (it survives the window closing).
     pub rects: HashMap<u64, [f32; 4]>,
+    /// A knob took a Ctrl+wheel nudge last frame: the frame logic keeps the merge open, so a wheel
+    /// gesture is one undo step; a frame without one (the wheel stopped, or the pointer left the
+    /// knob) lets the merge end.
+    pub wheeling: bool,
+    pub(crate) wheel_now: bool,
 }
 
 /// A window drawn this frame: its insert, rect, layer and device id.
@@ -295,4 +300,5 @@ pub(crate) fn end_frame(app: &mut StudioApp, ctx: &egui::Context) {
         st.picker = None;
     }
     st.shown = now;
+    st.wheeling = std::mem::take(&mut st.wheel_now);
 }

@@ -157,3 +157,24 @@ fn a_plain_wheel_over_a_knob_scrolls_the_body_and_ctrl_wheel_nudges_it() {
     assert!((t.param(tr, "resonance") - 51.0).abs() < 1e-3, "{}", t.param(tr, "resonance"));
     assert_eq!(t.panel(tr).knob("resonance").unwrap().knob.dial, dial, "no scroll");
 }
+
+#[test]
+fn a_ctrl_wheel_gesture_is_one_undo_step() {
+    let (mut t, tr) = T::open();
+    t.expand(tr);
+    t.set(tr, "resonance", 50.0);
+    let dial = t.knob(tr, "resonance");
+    let before = t.undo_len();
+    // Eight frames of Ctrl+wheel, one notch each (a trackpad's smooth scroll arrives this way).
+    t.send("ui.scroll", serde_json::json!({"x": mid(dial).0, "y": mid(dial).1, "dy": 320.0, "steps": 8, "ctrl": true}));
+    assert!((t.param(tr, "resonance") - 58.0).abs() < 1e-3, "eight nudges: {}", t.param(tr, "resonance"));
+    assert_eq!(t.undo_len(), before + 1, "one gesture, one undo step");
+    // A frame without the wheel ends it: the next gesture is a step of its own.
+    t.frames(2);
+    t.send("ui.scroll", serde_json::json!({"x": mid(dial).0, "y": mid(dial).1, "dy": 80.0, "steps": 2, "ctrl": true}));
+    assert!((t.param(tr, "resonance") - 60.0).abs() < 1e-3);
+    assert_eq!(t.undo_len(), before + 2, "two gestures, two steps");
+    t.app.run("edit.undo", serde_json::json!({})).unwrap();
+    t.frames(2);
+    assert!((t.param(tr, "resonance") - 58.0).abs() < 1e-3, "undo takes the second gesture back whole");
+}

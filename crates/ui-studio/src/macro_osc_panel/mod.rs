@@ -467,6 +467,10 @@ pub(crate) fn knob_at(
     let mut c = child(ui, cell);
     let shown = knob::show(&mut c, egui::Id::new(("macro_osc_knob", dev.uid(), p.id)), &k);
     let new = shown.value.map(|n| value_at(p, n)).or_else(|| shown.typed.as_deref().and_then(|t| parse(p, t)));
+    if shown.wheeled {
+        // A wheel gesture's nudges merge into one undo step while the wheel keeps coming.
+        app.builtin_editor.macro_osc.wheel_now = true;
+    }
     if let (Some(d), Some(chip)) = (dest, shown.response.dnd_release_payload::<modulation::Chip>()) {
         modulation::drop_route(app, dev, chip.0, d);
     }

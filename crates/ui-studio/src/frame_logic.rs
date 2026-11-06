@@ -297,6 +297,7 @@ impl StudioApp {
             && !self.midi_learn.sweeping()
             && !ctx.input(|i| i.pointer.any_down())
             && !ctx.egui_wants_keyboard_input()
+            && !self.builtin_editor.macro_osc.wheeling
         {
             self.engine.end_merge();
         }

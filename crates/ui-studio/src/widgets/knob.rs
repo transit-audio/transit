@@ -116,6 +116,9 @@ pub struct KnobOut {
     pub value: Option<f32>,
     /// Text the user typed into the value field and confirmed with Enter.
     pub typed: Option<String>,
+    /// The new value came from a Ctrl+wheel nudge (the caller merges a wheel gesture's nudges into
+    /// one undo step while the wheel continues).
+    pub wheeled: bool,
 }
 
 /// The pointer angle of a normalized position: degrees clockwise from 12 o'clock.
@@ -178,6 +181,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
     let mut editing = ui.data(|d| d.get_temp::<String>(edit_id));
     let mut new = None;
     let mut typed = None;
+    let mut wheeled = false;
     if !k.disabled {
         let fine = ui.input(|i| i.modifiers.shift);
         if response.dragged() {
@@ -198,6 +202,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
                 let n = nudged(k.value, notches, fine);
                 if (n - k.value).abs() > f32::EPSILON {
                     new = Some(n);
+                    wheeled = true;
                 }
             }
         }
@@ -281,5 +286,5 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
         pointer: pointer_c,
         editing: editing.is_some(),
     };
-    KnobOut { response, layout, value: new, typed }
+    KnobOut { response, layout, value: new, typed, wheeled }
 }
