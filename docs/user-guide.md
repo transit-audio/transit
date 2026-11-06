@@ -142,7 +142,7 @@ land in a print.
   **Track > Make Active**, **Make Active** in the track's header menu, or click the **inactive**
   tag on its header or mixer strip, and unmute it if needed. Inactive tracks have dimmed names and
   the tag in both views; in the arrangement their color bar turns gray, their clips become gray
-  outlines, and a track 48 px or taller is striped across its header and lane. A source that is already inactive is refused with "<track> is inactive:
+  outlines, and the track is striped across its header and lane. A source that is already inactive is refused with "<track> is inactive:
   Track > Make Active first", and nothing changes.
 
 **Enter** bounces; **Esc** cancels. Choices are remembered for the current session. The destination

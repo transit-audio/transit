@@ -1,4 +1,4 @@
-//! The hatch (#326): its tokens, its anchoring to the window, its 48 px floor.
+//! The hatch (#326): its tokens, its anchoring to the window, its 16 px floor.
 
 use super::hatch::{self, HatchLayout};
 use super::test_support::Rig;
@@ -50,10 +50,14 @@ fn stripes_are_anchored_to_the_window_so_a_header_and_its_lane_line_up() {
 }
 
 #[test]
-fn nothing_under_48_px_is_hatched() {
+fn only_slivers_under_16_px_skip_the_hatch() {
     let mut rig = Rig::new();
-    assert!(paint(&mut rig, Rect::from_min_size(pos2(40.0, 40.0), vec2(400.0, 46.0))).is_none(), "a 46 px row");
-    assert!(paint(&mut rig, Rect::from_min_size(pos2(40.0, 40.0), vec2(30.0, 200.0))).is_none(), "a small control");
-    // Negative control: 48 px is enough.
-    assert!(paint(&mut rig, Rect::from_min_size(pos2(40.0, 40.0), vec2(48.0, 48.0))).is_some());
+    assert_eq!(crate::tokens::hatch::MIN_SIZE, 16.0);
+    assert!(paint(&mut rig, Rect::from_min_size(pos2(40.0, 40.0), vec2(400.0, 46.0))).is_some(), "a 46 px row");
+    assert!(paint(&mut rig, Rect::from_min_size(pos2(40.0, 40.0), vec2(400.0, 24.0))).is_some(), "a 24 px row (ADR 0044's floor)");
+    assert!(paint(&mut rig, Rect::from_min_size(pos2(40.0, 40.0), vec2(400.0, 16.0))).is_some(), "16 px is enough");
+    assert!(paint(&mut rig, Rect::from_min_size(pos2(40.0, 40.0), vec2(400.0, 15.0))).is_none(), "a sliver");
+    // Negative control: the old 48 px floor is gone, so a 46 px row is no longer refused.
+    assert_ne!(crate::tokens::hatch::MIN_SIZE, 48.0);
+    assert!(46.0 < 48.0 && hatch::applies(Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 46.0))));
 }

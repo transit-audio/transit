@@ -586,8 +586,9 @@ pub mod hatch {
     pub const ANGLE: f32 = -45.0;
     /// The distance between lines, across them.
     pub const PITCH: f32 = 8.0;
-    /// Nothing under this (either way) is hatched.
-    pub const MIN_SIZE: f32 = 48.0;
+    /// Nothing under this (either way) is hatched: only slivers; track headers and lanes hatch at
+    /// every height.
+    pub const MIN_SIZE: f32 = 16.0;
     /// A clip on an inactive track: a ghost outline in `ink.ghost` with a fill of it at this alpha.
     pub const GHOST_FILL: f32 = 0.18;
     /// Every number under `hatch` in tokens.json by its path.

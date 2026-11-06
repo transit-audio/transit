@@ -8,8 +8,13 @@ pub(super) fn show(app: &mut StudioApp, ui: &mut Ui, t: &Track, r: Rect, list: R
     let clip = content.intersect(list);
     let p = ui.painter().with_clip_rect(clip);
     p.rect_filled(r, 0.0, if selected { TOKENS.header_selected } else { TOKENS.header });
+    if t.inactive {
+        // An inactive track is hatched at every height (#326; only slivers skip it).
+        row.hatch_header = crate::widgets::hatch::paint(&p, r);
+    }
     let x = r.min.x + row.depth as f32 * crate::groups::INDENT;
-    p.rect_filled(Rect::from_min_max(pos2(x, r.min.y), pos2(x + 5.0, r.max.y)), 0.0, theme::rgb(t.color));
+    row.color_bar = if t.inactive { TOKENS.ink_ghost } else { theme::rgb(t.color) };
+    p.rect_filled(Rect::from_min_max(pos2(x, r.min.y), pos2(x + 5.0, r.max.y)), 0.0, row.color_bar);
     let mut right = r.max.x - 8.0;
     if r.height() >= 24.0 {
         for (label, on, color, command, applicable) in [

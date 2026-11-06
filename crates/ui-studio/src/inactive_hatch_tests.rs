@@ -65,12 +65,16 @@ fn an_inactive_track_is_hatched_across_header_and_lane_with_a_ghost_color_bar() 
     let a = t.row(on);
     assert!(a.hatch_header.is_none() && a.hatch_lane.is_none());
     assert_ne!(a.color_bar, DARK.ink_ghost);
-    // Under 48 px (the Small height, 46) nothing is hatched; the color bar still ghosts.
-    t.app.run("track.height", json!({"tracks": [off.0], "height": "small"})).unwrap();
-    t.frames(3);
-    let small = t.row(off);
-    assert!(small.hatch_header.is_none() && small.hatch_lane.is_none(), "{}", small.height);
-    assert_eq!(small.color_bar, DARK.ink_ghost);
+    // Every height hatches (#326, the floor is 16): the Small default (46) and Mini (24, the
+    // compact header) as well; the old 48 px floor would have refused both.
+    for height in ["small", "mini"] {
+        t.app.run("track.height", json!({"tracks": [off.0], "height": height})).unwrap();
+        t.frames(3);
+        let r = t.row(off);
+        assert!(r.height < 48.0, "{height}: {}", r.height);
+        assert!(r.hatch_header.is_some() && r.hatch_lane.is_some(), "{height} ({} px) is hatched", r.height);
+        assert_eq!(r.color_bar, DARK.ink_ghost);
+    }
 }
 
 #[test]

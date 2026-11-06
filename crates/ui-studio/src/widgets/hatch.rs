@@ -6,8 +6,8 @@
 //!
 //! Use it for inactive tracks, suspended or missing plug-ins, frozen lanes, unavailable insert
 //! slots and the space beyond a clip's end in an editor. Never for a disabled-but-editable section
-//! (that dims to 40 percent), a muted track, a single small control (ghost it instead), or anything
-//! under 48 px ([`applies`]). The kit stores nothing: [`paint`] takes the rect and returns what it
+//! (that dims to 40 percent), a muted track, a single small control (ghost it instead), or a
+//! sliver under 16 px ([`applies`]): track headers and lanes hatch at every height. The kit stores nothing: [`paint`] takes the rect and returns what it
 //! drew.
 
 use crate::theme::TOKENS;
@@ -36,7 +36,8 @@ pub fn color() -> Color32 {
     TOKENS.text.gamma_multiply(if light { h::ALPHA_LIGHT } else { h::ALPHA })
 }
 
-/// Whether a region is large enough to hatch: 48 px or more in both directions.
+/// Whether a region is large enough to hatch: `hatch.minSize` (16 px) or more in both directions,
+/// so only slivers skip it.
 pub fn applies(rect: Rect) -> bool {
     rect.width() >= h::MIN_SIZE && rect.height() >= h::MIN_SIZE
 }
