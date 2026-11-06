@@ -819,7 +819,8 @@ fn a_built_in_window_fits_its_panel_and_has_no_resize_handle() {
     assert_eq!((resized[0], resized[1]), (after[0], after[1]), "resizing keeps the position");
     t.frames(3);
     assert_eq!(t.window(tr).rect, resized, "stable");
-    assert_eq!(t.app.ui.device_windows.get("macro_oscillator"), Some(&resized), "remembered for the next opening");
+    let uid = t.window(tr).uid;
+    assert_eq!(t.app.ui.editor_rects.get(&uid), Some(&resized), "remembered for the next opening");
 }
 
 #[test]
@@ -864,7 +865,7 @@ fn a_macro_oscillator_preset_from_before_the_matrix_parses_into_rows() {
 fn the_expanded_macro_oscillator_window_fits_1080p_at_125_percent() {
     use crate::macro_osc_panel::window::opening_rect;
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1536.0, 864.0));
-    let r = opening_rect(None, screen, 1400.0, 0);
+    let r = opening_rect(None, None, &[], screen, 1400.0, 0);
     assert!(r.height() <= 800.0 && r.width() <= 1440.0 && screen.contains_rect(r), "{r:?}");
     let mut t = T::new();
     let (tr, _) = open_plugin(&mut t, "macro_oscillator");

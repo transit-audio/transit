@@ -4,8 +4,11 @@
 //! - **Frame:** the device window rule: the `bg.window` ground its panels sit on, a 1 px
 //!   `line.strong` edge, radius 8, no shadow, no egui title bar: the device's own A bar, which
 //!   moves the window when dragged. The body scrolls between the bar and the footer.
-//! - **Remembered rect:** per device id in `UiState::device_windows` (saved in `ui.json`): a device
-//!   opens where it was last closed, moved and shrunk onto the screen when it no longer fits.
+//! - **Remembered rect:** per insert in `UiState::editor_rects` (keyed by `Insert.uid`, saved in
+//!   `ui.json`): an instance opens where it was left. An instance never opened before takes the
+//!   device's last closed rect (`UiState::device_windows`, written when a window closes), moved
+//!   24 px down and right while it would land on an open window. Either is moved and shrunk onto
+//!   the screen when it no longer fits.
 //! - **Escape** closes the focused editor: the one last clicked or opened, until a click lands
 //!   outside every editor window; a text field, a popup or a dialog keeps Escape.
 //! - **Follow selection** (the bar's link toggle, `UiState::editor_follow`): the window shows the
@@ -44,13 +47,17 @@ pub struct State {
     /// The editors with a value being typed, and the knob's parameter (that field keeps Escape).
     pub typing: Vec<(u64, String)>,
     /// The windows drawn last frame and this frame, with their rects and layers.
-    shown: Vec<(u64, Rect, egui::LayerId)>,
-    shown_now: Vec<(u64, Rect, egui::LayerId)>,
+    shown: Vec<Shown>,
+    shown_now: Vec<Shown>,
     /// Bumped each time a window opens, so it opens fresh at its remembered rect.
     generation: HashMap<u64, u32>,
     /// Where each open window sits (its bar moves it).
     pos: HashMap<u64, Pos2>,
 }
+
+/// A window drawn this frame: its insert, rect, layer and device id.
+#[derive(Debug, Clone, Copy)]
+struct Shown(u64, Rect, egui::LayerId, &'static str);
 
 /// `rect` moved and shrunk to lie on `screen`.
 pub fn on_screen(rect: Rect, screen: Rect) -> Rect {
@@ -60,12 +67,28 @@ pub fn on_screen(rect: Rect, screen: Rect) -> Rect {
     Rect::from_min_size(pos2(x, y), size)
 }
 
-/// Where a window opens: the device's remembered rect, else the board's width (less a margin on a
-/// smaller screen), the content's height up to the screen, cascaded by `n`; on screen either way.
-pub fn opening_rect(remembered: Option<[f32; 4]>, screen: Rect, content_h: f32, n: usize) -> Rect {
-    let r = match remembered {
-        Some([x0, y0, x1, y1]) => Rect::from_min_max(pos2(x0, y0), pos2(x1, y1)),
-        None => {
+/// `fallback` moved 24 px down and right while its corner sits on an open window's (at most a
+/// screen's worth of steps).
+pub fn cascaded(fallback: Rect, open: &[Rect]) -> Rect {
+    let mut r = fallback;
+    for _ in 0..64 {
+        if !open.iter().any(|o| (o.min - r.min).length() < 1.0) {
+            break;
+        }
+        r = r.translate(vec2(CASCADE, CASCADE));
+    }
+    r
+}
+
+/// Where a window opens: its own remembered rect, else the device's (cascaded off the `open`
+/// windows), else the board's width (less a margin on a smaller screen) and the content's height
+/// up to the screen, cascaded by `n`; on screen either way.
+pub fn opening_rect(own: Option<[f32; 4]>, device: Option<[f32; 4]>, open: &[Rect], screen: Rect, content_h: f32, n: usize) -> Rect {
+    let rect = |[x0, y0, x1, y1]: [f32; 4]| Rect::from_min_max(pos2(x0, y0), pos2(x1, y1));
+    let r = match (own, device) {
+        (Some(o), _) => rect(o),
+        (None, Some(d)) => cascaded(rect(d), open),
+        (None, None) => {
             let w = super::DESIGN_WIDTH.min(screen.width() - 2.0 * SCREEN_MARGIN).max(MIN_WIDTH);
             let h = (space::TITLE_BAR_HEIGHT + content_h + FOOTER_H).min(screen.height() - 2.0 * SCREEN_MARGIN).max(MIN_HEIGHT);
             let off = CASCADE * n as f32;
@@ -124,6 +147,13 @@ pub(crate) fn follow(app: &mut StudioApp) {
             continue;
         }
         let was = app.builtin_at(key).map(|i| i.uid.get());
+        // The window keeps its place on the instance it moves to (unless that one has its own).
+        let new_uid = app.builtin_at(target).map(|i| i.uid.get());
+        if let (Some(w), Some(n)) = (was, new_uid)
+            && let Some(r) = app.ui.editor_rects.get(&w).copied()
+        {
+            app.ui.editor_rects.entry(n).or_insert(r);
+        }
         for k in app.ui.plugin_windows.iter_mut().chain(app.ui.editor_follow.iter_mut()) {
             if *k == key {
                 *k = target;
@@ -155,7 +185,9 @@ pub(crate) fn show(
     let mut size = None;
     if fresh || !app.builtin_editor.macro_osc.pos.contains_key(&uid) {
         let content = super::content_height(app, key, super::DESIGN_WIDTH.min(screen.width()));
-        let r = opening_rect(app.ui.device_windows.get(info.id).copied(), screen, content, n);
+        let open: Vec<Rect> = app.builtin_editor.macro_osc.shown.iter().filter(|s| s.0 != uid).map(|s| s.1).collect();
+        let (own, device) = (app.ui.editor_rects.get(&uid).copied(), app.ui.device_windows.get(info.id).copied());
+        let r = opening_rect(own, device, &open, screen, content, n);
         let st = &mut app.builtin_editor.macro_osc;
         *st.generation.entry(uid).or_default() += 1;
         st.pos.insert(uid, r.min);
@@ -198,8 +230,8 @@ pub(crate) fn show(
         let r = w.response.rect;
         layout.rect = crate::widgets::r4(r);
         mlay.window = layout.rect;
-        app.ui.device_windows.insert(info.id.to_string(), layout.rect);
-        app.builtin_editor.macro_osc.shown_now.push((uid, r, w.response.layer_id));
+        app.ui.editor_rects.insert(uid, layout.rect);
+        app.builtin_editor.macro_osc.shown_now.push(Shown(uid, r, w.response.layer_id, info.id));
     }
     if bar.drag != Vec2::ZERO
         && let Some(p) = app.builtin_editor.macro_osc.pos.get_mut(&uid)
@@ -232,9 +264,14 @@ pub(crate) fn show(
 pub(crate) fn end_frame(app: &mut StudioApp, ctx: &egui::Context) {
     let st = &mut app.builtin_editor.macro_osc;
     let now = std::mem::take(&mut st.shown_now);
+    // A window that closed leaves its rect as its device's, for instances never opened before.
+    for gone in st.shown.iter().filter(|s| !now.iter().any(|n| n.0 == s.0)) {
+        app.ui.device_windows.insert(gone.3.to_string(), crate::widgets::r4(gone.1));
+    }
+    let st = &mut app.builtin_editor.macro_osc;
     if let Some(at) = ctx.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten()) {
         let top = ctx.layer_id_at(at);
-        st.focused = now.iter().find(|(_, r, layer)| r.contains(at) && top == Some(*layer)).map(|(u, ..)| *u).or_else(|| {
+        st.focused = now.iter().find(|s| s.1.contains(at) && top == Some(s.2)).map(|s| s.0).or_else(|| {
             // A press on a popup the window opened (a list, a menu) keeps its focus.
             top.filter(|l| l.order == egui::Order::Foreground || l.order == egui::Order::Tooltip).and(st.focused)
         });

@@ -29,10 +29,13 @@ pub struct UiState {
     /// `transit_mix::INSTRUMENT_SLOT`. `ui.set` opens and closes editors through this list
     /// (the same field `tools/exp-quit.ps1` sets in SoundCraft).
     pub plugin_windows: Vec<(TrackId, usize)>,
-    /// A migrated device window's last rect (min x, min y, max x, max y, logical points) by device
-    /// id (the plug-in id, 326-M): a device opens where it was last closed, kept on screen. Per
-    /// machine, never in the session.
+    /// A migrated device window's last closed rect (min x, min y, max x, max y, logical points) by
+    /// device id (the plug-in id, 326-M): where an instance never opened before opens (cascaded
+    /// when it would land on an open window). Per machine, never in the session.
     pub device_windows: std::collections::BTreeMap<String, [f32; 4]>,
+    /// Each device window's own rect by its insert (`Insert.uid`, 326-M): an instance opens where
+    /// it was left. Kept with the preferences, never in the session.
+    pub editor_rects: std::collections::BTreeMap<u64, [f32; 4]>,
     /// A device window's collapsed section bars by `<device id>/<section>` (326-M; the design
     /// language's section bar: collapse is a per-user view setting, enable is the parameter). A
     /// section without an entry is collapsed until it is in use.
@@ -149,6 +152,7 @@ impl Default for UiState {
             editors_follow: true,
             plugin_windows: Vec::new(),
             device_windows: std::collections::BTreeMap::new(),
+            editor_rects: std::collections::BTreeMap::new(),
             device_sections: std::collections::BTreeMap::new(),
             editor_follow: Vec::new(),
             plugin_load_ms: std::collections::BTreeMap::new(),

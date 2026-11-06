@@ -2,7 +2,7 @@
 //! Escape, Window > Close All Editors, follow selection, and both token sets.
 
 use super::test_rig::{T, info, mid};
-use super::window::{on_screen, opening_rect};
+use super::window::{cascaded, on_screen, opening_rect};
 use egui::{Rect, pos2, vec2};
 use serde_json::json;
 
@@ -66,7 +66,7 @@ fn the_remembered_rect_round_trips_through_ui_json_and_opens_on_screen() {
     assert_eq!(back.device_windows.get(super::MACRO_OSC), Some(&[100.0, 80.0, 1200.0, 700.0]));
     // An older ui.json without the field reads as empty.
     let old: crate::UiState = serde_json::from_value(json!({})).unwrap();
-    assert!(old.device_windows.is_empty() && old.device_sections.is_empty() && old.editor_follow.is_empty());
+    assert!(old.device_windows.is_empty() && old.editor_rects.is_empty() && old.device_sections.is_empty() && old.editor_follow.is_empty());
     let tr = t.instrument_track();
     t.open_card(0);
     assert_eq!(t.panel(tr).window, [100.0, 80.0, 1200.0, 700.0], "the device opens where it was last closed");
@@ -82,9 +82,49 @@ fn the_remembered_rect_round_trips_through_ui_json_and_opens_on_screen() {
     t.open_card(0);
     assert_eq!(t.panel(tr).window, moved);
     // Negative control: a rect off the screen comes back onto it.
-    let r = opening_rect(Some([1300.0, 850.0, 2400.0, 1600.0]), screen, 900.0, 0);
+    let r = opening_rect(Some([1300.0, 850.0, 2400.0, 1600.0]), None, &[], screen, 900.0, 0);
     assert!(screen.contains_rect(r), "{r:?}");
     assert_eq!(on_screen(Rect::from_min_size(pos2(10.0, 10.0), vec2(500.0, 400.0)), screen).min, pos2(10.0, 10.0), "a rect on screen stays");
+}
+
+#[test]
+fn two_instances_keep_their_own_rects_and_the_second_opens_cascaded() {
+    let mut t = T::new();
+    let a = t.instrument_track();
+    let b = t.instrument_track();
+    t.app.focus(a);
+    t.frames(3);
+    t.open_card(0);
+    let ra = t.panel(a).window;
+    t.app.focus(b);
+    t.frames(3);
+    t.open_card(0);
+    let rb = t.panel(b).window;
+    assert_eq!((rb[0] - ra[0], rb[1] - ra[1]), (24.0, 24.0), "B cascades off A instead of covering it: {ra:?} {rb:?}");
+    // Drag B by its bar, close it, open it again: B's own place; A never moves.
+    let bar = t.panel(b).title.bar;
+    let grip = (bar[0] + 300.0, (bar[1] + bar[3]) / 2.0);
+    t.drag(grip, (grip.0 - 40.0, grip.1 + 30.0), false);
+    let moved = t.panel(b).window;
+    assert_eq!((moved[0], moved[1]), (rb[0] - 40.0, rb[1] + 30.0));
+    let close = t.panel(b).title.close;
+    t.click(mid(close), 1);
+    assert_eq!(t.app.ui.plugin_windows, vec![(a, INST)]);
+    assert_eq!(t.app.ui.device_windows.get(super::MACRO_OSC), Some(&moved), "the closed window left its rect as the device's");
+    // A closes after it: the device's rect is now A's, and B still reopens at its own.
+    let close_a = t.panel(a).title.close;
+    t.click(mid(close_a), 1);
+    assert_eq!(t.app.ui.device_windows.get(super::MACRO_OSC), Some(&ra));
+    t.open_card(0);
+    assert_eq!(t.panel(b).window, moved, "B reopens where B was left, not at the device's rect");
+    t.app.focus(a);
+    t.frames(3);
+    t.open_card(0);
+    assert_eq!(t.panel(a).window, ra, "A unchanged");
+    // The cascade only steps off open windows.
+    let r = Rect::from_min_size(pos2(32.0, 32.0), vec2(100.0, 100.0));
+    assert_eq!(cascaded(r, &[]).min, r.min);
+    assert_eq!(cascaded(r, &[r, r.translate(vec2(24.0, 24.0))]).min, pos2(80.0, 80.0));
 }
 
 #[test]
