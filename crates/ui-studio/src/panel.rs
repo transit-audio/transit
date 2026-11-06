@@ -8,7 +8,7 @@
 use crate::StudioApp;
 use crate::builtin_editor::{EditorLayout, RowLayout};
 use crate::theme::{RADIUS, TOKENS};
-use crate::widgets::knob;
+use crate::widgets::param_knob as knob;
 use egui::{RichText, Ui};
 use transit_dsp::{ParamInfo, PluginInfo};
 use transit_model::{Insert, KeyFrom, TrackId};

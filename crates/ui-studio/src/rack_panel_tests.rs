@@ -200,8 +200,8 @@ fn the_macro_knobs_do_not_overlap_each_other_or_the_member_rows() {
     let card = t.app.mixer.devices.rack.clone().expect("the rack card");
     assert_eq!(card.macros.len(), 8);
     for (i, k) in card.macros.iter().enumerate() {
-        assert!(k[2] - k[0] >= crate::widgets::knob::CELL_W, "knob {i} is wide enough for the widget: {k:?}");
-        assert!(k[3] - k[1] >= crate::widgets::knob::CELL_H, "knob {i} is tall enough for dial and label: {k:?}");
+        assert!(k[2] - k[0] >= crate::widgets::param_knob::CELL_W, "knob {i} is wide enough for the widget: {k:?}");
+        assert!(k[3] - k[1] >= crate::widgets::param_knob::CELL_H, "knob {i} is tall enough for dial and label: {k:?}");
     }
     let hit = |a: &[f32; 4], b: &[f32; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
     for i in 0..8 {

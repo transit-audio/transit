@@ -3,6 +3,9 @@
 //!
 //! Drag up or down to turn (Shift for fine), double-click to reset. The widget only reports the
 //! new value; the caller writes it, through the merged-command path, so a drag is one undo step.
+//!
+//! This is the knob the panels draw today. The design language's knob is [`super::knob`]; panels
+//! move to it as they migrate (ADR 0045), and this one is retired with the last of them.
 
 use crate::theme::{RADIUS_SM, TOKENS};
 use egui::{Align2, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2};

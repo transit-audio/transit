@@ -23,8 +23,8 @@ use transit_model::{AutoParam, Control, RACK_MACROS, Track, TrackId, Zone};
 /// The card's width and its parts.
 pub const CARD_W: f32 = 660.0;
 const HEAD_H: f32 = 20.0;
-const KNOB_W: f32 = crate::widgets::knob::CELL_W;
-const KNOB_H: f32 = crate::widgets::knob::CELL_H;
+const KNOB_W: f32 = crate::widgets::param_knob::CELL_W;
+const KNOB_H: f32 = crate::widgets::param_knob::CELL_H;
 const ROW_H: f32 = 18.0;
 const NAME_W: f32 = 92.0;
 const KEY_W: f32 = 170.0;
@@ -167,7 +167,7 @@ fn macro_knob(
 ) {
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cell.intersect(lane)));
     child.spacing_mut().item_spacing = vec2(0.0, 0.0);
-    let k = crate::widgets::knob::show(&mut child, egui::Id::new(("rack_macro", rack.0, i)), name, &MACRO_INFO, value);
+    let k = crate::widgets::param_knob::show(&mut child, egui::Id::new(("rack_macro", rack.0, i)), name, &MACRO_INFO, value);
     crate::help::hover(ui, &k.response, crate::help::Id::DeviceChainRackMacro);
     if mapped {
         p.circle_filled(pos2(cell.max.x - 8.0, cell.min.y + 4.0), 2.5, TOKENS.accent);

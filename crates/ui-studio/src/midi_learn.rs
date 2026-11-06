@@ -268,7 +268,7 @@ impl StudioApp {
 /// The parameter value the knob position `norm` (0..1) stands for: the parameter's own range, the
 /// taper honored, whole numbers where the parameter is one (the same step a panel knob takes).
 pub fn plugin_value(p: &transit_dsp::ParamInfo, norm: f32) -> f32 {
-    p.clamp(crate::widgets::knob::value_at(p, norm.clamp(0.0, 1.0)))
+    p.clamp(crate::widgets::param_knob::value_at(p, norm.clamp(0.0, 1.0)))
 }
 
 /// [`plugin_value`] for the device `device` (its plug-in id): a hosted VST3 parameter follows the
