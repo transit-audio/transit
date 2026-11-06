@@ -31,7 +31,7 @@ pub(crate) fn choose_or<T: Clone + PartialEq>(
     };
     let r = ui.add_enabled_ui(enabled, |ui| {
         crate::chrome::field(ui, |ui| {
-            egui::ComboBox::from_id_salt(("audio_devices", key)).selected_text(&text).width(360.0).icon(crate::chrome::chevron).show_ui(ui, |ui| {
+            crate::chrome_pick::Combo::new(("audio_devices", key), &text).width(360.0).show(ui, |ui| {
                 let b = crate::menus::check_button(ui, value.is_none(), none);
                 items.push(MenuItem::at(ui, none.into(), key.into(), b.rect));
                 if b.clicked() {
@@ -56,18 +56,15 @@ fn choose_backend(ui: &mut egui::Ui, enabled: bool, value: &mut Backend, options
     let text = value.label().to_string();
     let r = ui.add_enabled_ui(enabled, |ui| {
         crate::chrome::field(ui, |ui| {
-            egui::ComboBox::from_id_salt(("audio_devices", "backend")).selected_text(&text).width(360.0).icon(crate::chrome::chevron).show_ui(
-                ui,
-                |ui| {
-                    for option in options.iter().copied() {
-                        let b = crate::menus::check_button(ui, *value == option, option.label());
-                        items.push(MenuItem::at(ui, option.label().into(), "backend".into(), b.rect));
-                        if b.clicked() {
-                            *value = option;
-                        }
+            crate::chrome_pick::Combo::new(("audio_devices", "backend"), &text).width(360.0).show(ui, |ui| {
+                for option in options.iter().copied() {
+                    let b = crate::menus::check_button(ui, *value == option, option.label());
+                    items.push(MenuItem::at(ui, option.label().into(), "backend".into(), b.rect));
+                    if b.clicked() {
+                        *value = option;
                     }
-                },
-            )
+                }
+            })
         })
     });
     (r.inner.response.rect, text)
@@ -317,7 +314,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                         ui.vertical(|ui| {
                             ui.set_width(SIDEBAR_WIDTH);
                             for s in Section::ALL {
-                                let b = ui.selectable_label(section == s, s.label());
+                                let b = crate::chrome_pick::option_label(ui, section == s, s.label());
                                 controls.push((s.label().into(), s.key(), b.rect));
                                 if b.clicked() {
                                     section = s;

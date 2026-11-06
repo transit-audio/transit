@@ -208,7 +208,7 @@ pub fn section(ui: &mut egui::Ui, io: &IoMap, wasapi: bool, names: &ChannelNames
     ui.horizontal(|ui| {
         ui.label("Main plays on");
         let combo = crate::chrome::field(ui, |ui| {
-            egui::ComboBox::from_id_salt("io_main").selected_text(&io.main).icon(crate::chrome::chevron).show_ui(ui, |ui| {
+            crate::chrome_pick::Combo::new("io_main", &io.main).show(ui, |ui| {
                 for p in &outputs {
                     let b = crate::menus::check_button(ui, p.name.eq_ignore_ascii_case(&io.main), &p.name);
                     items.push(MenuItem::at(ui, p.name.clone(), "io_main_entry".into(), b.rect));
@@ -246,7 +246,7 @@ pub fn section(ui: &mut egui::Ui, io: &IoMap, wasapi: bool, names: &ChannelNames
                 dim(ui, format!("{} channels (1 to {MAX_PATH_WIDTH}):", p.name));
                 for c in 0..opened {
                     let text = channel_text(c, names.of(direction));
-                    let b = ui.selectable_label(p.channels.contains(&c), &text);
+                    let b = crate::chrome_pick::option_label(ui, p.channels.contains(&c), &text);
                     items.push(MenuItem::at(ui, text, format!("io_channel:{}", p.name), b.rect));
                     if b.clicked() {
                         edit = Some(IoEdit::SetChannels { name: p.name.clone(), channels: toggled(&p.channels, c) });
@@ -299,18 +299,15 @@ pub fn hardware_section(
             for (label, key, names, pick) in [("Send", "hw_send", &outputs, &mut ed.hw_send), ("Return", "hw_ret", &inputs, &mut ed.hw_ret)] {
                 ui.label(label);
                 let combo = crate::chrome::field(ui, |ui| {
-                    egui::ComboBox::from_id_salt(key).selected_text(pick.as_deref().unwrap_or("Choose…")).icon(crate::chrome::chevron).show_ui(
-                        ui,
-                        |ui| {
-                            for n in names {
-                                let b = crate::menus::check_button(ui, pick.as_deref() == Some(*n), *n);
-                                items.push(MenuItem::at(ui, (*n).to_string(), format!("{key}_entry"), b.rect));
-                                if b.clicked() {
-                                    *pick = Some((*n).to_string());
-                                }
+                    crate::chrome_pick::Combo::new(key, pick.as_deref().unwrap_or("Choose…")).show(ui, |ui| {
+                        for n in names {
+                            let b = crate::menus::check_button(ui, pick.as_deref() == Some(*n), *n);
+                            items.push(MenuItem::at(ui, (*n).to_string(), format!("{key}_entry"), b.rect));
+                            if b.clicked() {
+                                *pick = Some((*n).to_string());
                             }
-                        },
-                    )
+                        }
+                    })
                 });
                 items.push(MenuItem::at(ui, pick.clone().unwrap_or_default(), key.into(), combo.response.rect));
             }
