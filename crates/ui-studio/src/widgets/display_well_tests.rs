@@ -62,7 +62,7 @@ fn dragging_a_point_reports_its_new_normalized_position() {
     let from = mid(l.points[0]);
     let plot_h = l.plot[3] - l.plot[1];
     let outs = rig.drag(from, vec2(0.0, plot_h * 0.25), 2, well);
-    let got = outs.iter().filter_map(|o| o.dragged).last().expect("a drag reported");
+    let got = outs.iter().filter_map(|o| o.dragged).next_back().expect("a drag reported");
     assert_eq!(got.0, 0);
     assert!((got.1[0] - 0.5).abs() < 0.01 && (got.1[1] - 0.55).abs() < 0.01, "{got:?}");
     let plot = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));
