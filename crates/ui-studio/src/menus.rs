@@ -422,8 +422,12 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Help".into(), String::new(), help.response.rect));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let s = app.engine.session();
-                    let dirty = if app.engine.is_dirty() { " •" } else { "" };
-                    ui.label(egui::RichText::new(format!("{}{dirty}", s.name)).color(TOKENS.text_dim));
+                    // Right to left: the unsaved-changes dot (6 px, painted in `text`) goes first so it sits after the name.
+                    if app.engine.is_dirty() {
+                        let (dot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                        ui.painter().circle_filled(dot.center(), 3.0, TOKENS.text);
+                    }
+                    ui.label(egui::RichText::new(s.name.clone()).color(TOKENS.text_dim));
                 });
             });
         });
