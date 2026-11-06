@@ -94,6 +94,22 @@ impl<'a> Window<'a> {
         self
     }
 
+    /// Without egui's title bar: a device window draws its own 52 px A bar (326-M).
+    pub fn title_bar(mut self, title_bar: bool) -> Self {
+        self.inner = self.inner.title_bar(title_bar);
+        self
+    }
+
+    pub fn movable(mut self, movable: bool) -> Self {
+        self.inner = self.inner.movable(movable);
+        self
+    }
+
+    pub fn current_pos(mut self, pos: impl Into<Pos2>) -> Self {
+        self.inner = self.inner.current_pos(pos);
+        self
+    }
+
     /// Show the window, then swap egui's control shapes for icons.
     pub fn show<R>(self, ctx: &Context, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> Option<InnerResponse<Option<R>>> {
         let (collapsible, closable, padding) = (self.collapsible, self.closable, self.button_padding);

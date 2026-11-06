@@ -230,56 +230,60 @@ impl StudioApp {
     }
 }
 
-/// The preset dropdown in an editor window: factory and user presets, Save As and Delete.
-pub fn control(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, out: &mut [f32; 4]) {
-    let root = app.services.config_dir.clone();
-    let user = root.as_deref().map(|r| user_names(r, info.id)).unwrap_or_default();
-    let current = if ins.preset.is_empty() { "Preset" } else { ins.preset.as_str() };
-    let name_id = ui.id().with(("preset_name", ins.uid.get()));
-    let mut name: String = ui.data_mut(|d| d.get_temp(name_id)).unwrap_or_default();
-    let mut pick: Option<(String, Result<Preset, String>)> = None;
-    let mut delete = None;
-    let mut save = None;
-    let r = egui::ComboBox::from_id_salt(("builtin_preset", ins.uid.get())).selected_text(current).width(150.0).show_ui(ui, |ui| {
-        let factory = factory_for(info.id);
-        if !factory.is_empty() {
-            ui.label(egui::RichText::new("Factory").size(10.5).color(TOKENS.text_dim));
+/// What the user chose in a preset list this frame.
+#[derive(Default)]
+pub(crate) struct Picked {
+    pub pick: Option<(String, Result<Preset, String>)>,
+    pub delete: Option<String>,
+    pub save: Option<String>,
+}
+
+/// The preset list (the dropdown's and the device title bar's, 326-M): factory and user presets,
+/// Save As and Delete. `name` is the Save As field's text.
+pub(crate) fn list(ui: &mut Ui, ins: &Insert, info: &'static PluginInfo, root: Option<&Path>, user: &[String], name: &mut String) -> Picked {
+    let mut out = Picked::default();
+    let factory = factory_for(info.id);
+    if !factory.is_empty() {
+        ui.label(egui::RichText::new("Factory").size(10.5).color(TOKENS.text_dim));
+    }
+    for (n, p) in factory {
+        if ui.selectable_label(ins.preset == n, n).clicked() {
+            out.pick = Some((n.to_string(), Ok(p)));
         }
-        for (n, p) in factory {
-            if ui.selectable_label(ins.preset == n, n).clicked() {
-                pick = Some((n.to_string(), Ok(p)));
-            }
-        }
-        if !user.is_empty() {
-            ui.separator();
-            ui.label(egui::RichText::new("User").size(10.5).color(TOKENS.text_dim));
-        }
-        for n in &user {
-            if ui.selectable_label(ins.preset == *n, n).clicked() {
-                pick = Some((n.clone(), root.as_deref().map_or(Err("no config folder".into()), |r| load_user(r, info.id, n))));
-            }
-        }
+    }
+    if !user.is_empty() {
         ui.separator();
-        ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut name).hint_text("Save As…").desired_width(100.0));
-            if ui.add_enabled(root.is_some() && !file_name(&name).is_empty(), egui::Button::new("Save")).clicked() {
-                save = Some(name.clone());
-            }
-        });
-        if user.contains(&ins.preset) && ui.button(format!("Delete \"{}\"", ins.preset)).clicked() {
-            delete = Some(ins.preset.clone());
+        ui.label(egui::RichText::new("User").size(10.5).color(TOKENS.text_dim));
+    }
+    for n in user {
+        if ui.selectable_label(ins.preset == *n, n).clicked() {
+            out.pick = Some((n.clone(), root.map_or(Err("no config folder".into()), |r| load_user(r, info.id, n))));
+        }
+    }
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.add(egui::TextEdit::singleline(name).hint_text("Save As…").desired_width(100.0));
+        if ui.add_enabled(root.is_some() && !file_name(name).is_empty(), egui::Button::new("Save")).clicked() {
+            out.save = Some(name.clone());
         }
     });
-    *out = [r.response.rect.min.x, r.response.rect.min.y, r.response.rect.max.x, r.response.rect.max.y];
-    ui.data_mut(|d| d.insert_temp(name_id, name));
-    if let Some((n, p)) = pick {
+    if user.contains(&ins.preset) && ui.button(format!("Delete \"{}\"", ins.preset)).clicked() {
+        out.delete = Some(ins.preset.clone());
+    }
+    out
+}
+
+/// Carries out what the user chose in a preset list: recall, Save As (and clear the field), Delete.
+pub(crate) fn act(app: &mut StudioApp, ui: &Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, picked: Picked, name_id: egui::Id) {
+    let root = app.services.config_dir.clone();
+    if let Some((n, p)) = picked.pick {
         match p {
             Ok(p) => app.apply_preset(key, info, &n, &p),
             Err(e) => app.status = format!("Preset: {e}"),
         }
     }
     let Some(root) = root else { return };
-    if let Some(n) = save {
+    if let Some(n) = picked.save {
         let values: BTreeMap<String, f32> =
             info.params.iter().map(|p| (p.id.to_string(), p.clamp(ins.params.get(p.id).copied().unwrap_or(p.default)))).collect();
         match save_user(&root, info, &n, &values) {
@@ -293,11 +297,28 @@ pub fn control(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &In
             Err(e) => app.status = format!("Preset: {e}"),
         }
     }
-    if let Some(n) = delete
+    if let Some(n) = picked.delete
         && let Err(e) = delete_user(&root, info.id, &n)
     {
         app.status = format!("Preset: {e}");
     }
+}
+
+/// The preset dropdown in an editor window: factory and user presets, Save As and Delete.
+pub fn control(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, out: &mut [f32; 4]) {
+    let root = app.services.config_dir.clone();
+    let user = root.as_deref().map(|r| user_names(r, info.id)).unwrap_or_default();
+    let current = if ins.preset.is_empty() { "Preset" } else { ins.preset.as_str() };
+    let name_id = ui.id().with(("preset_name", ins.uid.get()));
+    let mut name: String = ui.data_mut(|d| d.get_temp(name_id)).unwrap_or_default();
+    let mut picked = Picked::default();
+    let r = egui::ComboBox::from_id_salt(("builtin_preset", ins.uid.get()))
+        .selected_text(current)
+        .width(150.0)
+        .show_ui(ui, |ui| picked = list(ui, ins, info, root.as_deref(), &user, &mut name));
+    *out = [r.response.rect.min.x, r.response.rect.min.y, r.response.rect.max.x, r.response.rect.max.y];
+    ui.data_mut(|d| d.insert_temp(name_id, name));
+    act(app, ui, key, ins, info, picked, name_id);
 }
 
 #[cfg(test)]

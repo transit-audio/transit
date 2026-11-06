@@ -175,6 +175,10 @@ pub mod alpha {
     pub const LOOP_EDGE: f32 = 0.75;
     /// Out-of-scale rows in the piano roll.
     pub const LOOP_SCALE_ROW: f32 = 0.12;
+    /// The halo under an XY pad's point (`signal`, 326-M, the board's 14 percent).
+    pub const PAD_HALO: f32 = 0.14;
+    /// A voice light while its voice's release fades ("half lit", the older panel's 45 percent).
+    pub const VOICE_RELEASING: f32 = 0.45;
     pub const ALL: &[(&str, f32)] = &[
         ("curveFill", CURVE_FILL),
         ("scopeFill", SCOPE_FILL),
@@ -185,6 +189,8 @@ pub mod alpha {
         ("loopRulerTint", LOOP_RULER_TINT),
         ("loopEdge", LOOP_EDGE),
         ("loopScaleRow", LOOP_SCALE_ROW),
+        ("padHalo", PAD_HALO),
+        ("voiceReleasing", VOICE_RELEASING),
     ];
 }
 

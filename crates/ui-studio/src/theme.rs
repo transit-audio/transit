@@ -280,7 +280,12 @@ pub const FOCUS_W: f32 = 1.5;
 
 /// Rounded top corners only (a card's title, a clip's name strip).
 pub fn top_corners() -> egui::CornerRadius {
-    let r = RADIUS as u8;
+    top_corners_of(RADIUS)
+}
+
+/// Top corners rounded by `radius` (a device window's title bar inside the window's 8).
+pub fn top_corners_of(radius: f32) -> egui::CornerRadius {
+    let r = radius as u8;
     egui::CornerRadius { nw: r, ne: r, sw: 0, se: 0 }
 }
 
@@ -452,6 +457,27 @@ pub fn window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title
 /// when the panel migrates (#326, 326-M).
 pub fn device_window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title_bar::Window<'a> {
     framed(ctx, title, egui::Margin::same(SPACE as i8)).button_padding(DEVICE_BUTTON_PADDING)
+}
+
+/// The frame of a migrated device's window (see [`device_panel_window`]).
+pub fn device_panel_frame() -> egui::Frame {
+    let t = &TOKENS;
+    egui::Frame::new()
+        .fill(t.bg_window)
+        .stroke(egui::Stroke::new(1.0, t.line_strong))
+        .corner_radius(crate::tokens::chrome::RADIUS_WINDOW)
+        .shadow(egui::epaint::Shadow::NONE)
+        .inner_margin(egui::Margin::ZERO)
+}
+
+/// A migrated device's window (326-M, the device language's window rule): no egui title bar (the
+/// device draws its 52 px A bar), the `bg.window` ground its panels sit on as cards, a 1 px
+/// `line.strong` edge, the panel radius, no shadow and no margin (the bar and the footer run edge
+/// to edge).
+pub fn device_panel_window<'a>(title: impl Into<String>) -> crate::title_bar::Window<'a> {
+    let frame = device_panel_frame();
+    let text = egui::RichText::new(title);
+    crate::title_bar::Window::new(egui::Window::new(text).frame(frame).title_bar(false)).collapsible(false)
 }
 
 /// The application chrome's window (#326): `surface.panel` with a 1 px `line.strong` edge and the
