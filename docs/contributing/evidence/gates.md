@@ -328,7 +328,7 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   (E51, `../../escapes/E51-test-temp-dirs-collided-in-one-process.md`).
 - A test folder is fresh: its name adds the clock to the process id and counter, and the test
   creates it with `create_dir`, which refuses a folder that exists. A process id repeats across
-  runs (a VM booted for each gate run gives its test processes the same ids), and a reused folder
+  runs (a VM that restarts between runs gives its test processes the same ids), and a reused folder
   keeps an earlier run's files (E51 recurrence 2026-11-06, #346: `registry_race` loaded a plug-in
   left in its reused folder, then rewrote the loaded file in place).
 - A test that pumps a fake device faster than real time reads another thread's output (the MIDI

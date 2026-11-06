@@ -28,7 +28,9 @@
    parent was the window manager's own window. Plugs that got the id of a closed frame that had
    never been mapped (11 traced) passed. Reproduction counts on
    761d8baa: 0 of 20 runs of the test alone quiet, 0 of 20 loaded, 0 of 400 under heavier CPU and
-   X client load, and 1 of 30 runs of the whole crate under load (the mapped assertion).
+   X client load, and 1 of 30 runs of the whole crate under load (the mapped assertion). With only
+   the host round trip applied, 9 of 75 whole-crate runs under load still failed, every one with
+   the plug reparented, so the round trip alone does not close the class.
 3. **Why checks missed it.** The test reads protocol state, not time, and its single runs never
    fail: the collision needs a sibling test in the same process that maps a top-level and closes
    it just before the plug connects, and a window manager that is behind. CI runs the editor
