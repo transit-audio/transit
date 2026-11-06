@@ -6,6 +6,7 @@ mod blocks;
 mod gate1;
 mod loops;
 mod seams;
+mod seams_c2;
 mod shaped;
 
 use crate::event::{Context, Event};

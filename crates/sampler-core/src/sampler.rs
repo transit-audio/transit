@@ -18,7 +18,7 @@
 use alloc::vec::Vec;
 
 use crate::event::{Context, Control, Event, EventKind};
-use crate::patch::{self, Derived, Pad, PatchError, Zone};
+use crate::patch::{self, Derived, Glide, Pad, PatchError, Zone};
 use crate::reader::SourceBank;
 use crate::voice::{Controls, Owner, Start, Transport, Voice};
 use crate::{LAYERS_PER_NOTE, PADS, VOICES, ZONES, math};
@@ -49,6 +49,8 @@ pub struct SamplerCore {
     rate: f32,
     seed: u32,
     zones: Vec<Option<Slot>>,
+    /// The settings of each cleared zone, which its voices read while they fade out.
+    ghosts: Vec<Option<Slot>>,
     /// The pad each zone is bound to.
     bound: [Option<u8>; ZONES],
     pads: [Pad; PADS],
@@ -79,6 +81,7 @@ impl SamplerCore {
             rate: 48_000.0,
             seed: 1,
             zones: Vec::new(),
+            ghosts: Vec::new(),
             bound: [None; ZONES],
             pads: core::array::from_fn(Pad::new),
             voices: Vec::new(),
@@ -100,13 +103,16 @@ impl SamplerCore {
         if self.zones.len() != ZONES {
             self.zones = (0..ZONES).map(|_| None).collect();
         }
+        if self.ghosts.len() != ZONES {
+            self.ghosts = (0..ZONES).map(|_| None).collect();
+        }
         if self.voices.len() != VOICES || self.seed != seed {
             self.voices =
                 (0..VOICES as u32).map(|i| Voice::new(seed.wrapping_mul(0x9E37_79B9) ^ i.wrapping_add(1).wrapping_mul(0x85EB_CA6B))).collect();
         }
         self.seed = seed;
         let rate = self.rate;
-        for s in self.zones.iter_mut().flatten() {
+        for s in self.zones.iter_mut().chain(self.ghosts.iter_mut()).flatten() {
             s.derived = Derived::of(&s.zone.playback, rate);
         }
         self.reset();
@@ -119,7 +125,9 @@ impl SamplerCore {
     }
 
     /// Sets (or with `None` clears) zone `index`. Voices playing it fade over [`crate::CHOKE_FRAMES`] when its
-    /// region changes. A zone bound to a pad cannot be cleared or given membership.
+    /// region changes or it is cleared (ADR 0041's structural-edit rule; a cleared zone's voices
+    /// read its last settings while they fade). A zone bound to a pad cannot be cleared or given
+    /// membership.
     pub fn set_zone(&mut self, index: usize, zone: Option<Zone>) -> Result<(), PatchError> {
         if index >= ZONES || self.zones.len() != ZONES {
             return Err(PatchError::Zone);
@@ -137,9 +145,37 @@ impl SamplerCore {
         if old != zone.map(|z| z.region) {
             self.fade_where(|v| usize::from(v.zone) == index);
         }
+        self.replace_slot(index, zone);
+        Ok(())
+    }
+
+    /// Puts `zone` in slot `index`; a cleared zone's settings move to its ghost for its fading
+    /// voices. No allocation (the slots are moved, not boxed).
+    fn replace_slot(&mut self, index: usize, zone: Option<Zone>) {
         let rate = self.rate;
-        if let Some(slot) = self.zones.get_mut(index) {
-            *slot = zone.map(|zone| Slot { derived: Derived::of(&zone.playback, rate), zone });
+        let Some(slot) = self.zones.get_mut(index) else { return };
+        let old = core::mem::replace(slot, zone.map(|zone| Slot { derived: Derived::of(&zone.playback, rate), zone }));
+        if slot.is_none()
+            && old.is_some()
+            && let Some(ghost) = self.ghosts.get_mut(index)
+        {
+            *ghost = old;
+        }
+    }
+
+    /// Sets zone `index` as [`SamplerCore::set_zone`] does, but a change of its level or pan
+    /// glides: it ramps linearly from the value at absolute frame `start` (the
+    /// [`crate::event::Context::frame`] of the block it applies in) to the new one over `frames`
+    /// output frames, the same for every voice of the zone, each frame by the same increment.
+    /// Other settings apply at once. The adapter's slot level and pan changes come this way.
+    pub fn set_zone_glide(&mut self, index: usize, zone: Zone, start: u64, frames: u32) -> Result<(), PatchError> {
+        let old = self.zones.get(index).and_then(Option::as_ref).map(|s| s.derived.level_pan_at(s.zone.playback.pan, start));
+        self.set_zone(index, Some(zone))?;
+        if let (Some((from_level, from_pan)), Some(Some(slot))) = (old, self.zones.get_mut(index))
+            && frames > 0
+            && (from_level != slot.derived.level || from_pan != slot.zone.playback.pan)
+        {
+            slot.derived.glide = Some(Glide { from_level, from_pan, start, len: frames });
         }
         Ok(())
     }
@@ -147,8 +183,8 @@ impl SamplerCore {
     /// Replaces the whole patch (every zone and pad) in one step, as an adapter adopts a patch it
     /// prepared off the audio thread: checked first with [`patch::check_patch`] (on an error nothing
     /// changes), then applied with the rules of [`SamplerCore::set_zone`] and
-    /// [`SamplerCore::set_pad`]: voices of a zone whose region changes fade over
-    /// [`crate::CHOKE_FRAMES`] (a cleared zone's voices end at once), a pad voice fades when the
+    /// [`SamplerCore::set_pad`]: voices of a zone whose region changes or that is cleared fade
+    /// over [`crate::CHOKE_FRAMES`], a pad voice fades when the
     /// pad's zone changes or the new mute and solo exclude it; other voices play on. `zones` is
     /// [`ZONES`] long. Neither allocates nor frees.
     pub fn set_patch(&mut self, zones: &[Option<Zone>], pads: &[Pad; PADS]) -> Result<(), PatchError> {
@@ -156,15 +192,12 @@ impl SamplerCore {
             return Err(PatchError::Zone);
         }
         patch::check_patch(zones, pads)?;
-        let rate = self.rate;
         for (index, zone) in zones.iter().enumerate() {
             let old = self.zones.get(index).and_then(|s| s.as_ref().map(|s| s.zone.region));
             if old != zone.map(|z| z.region) {
                 self.fade_where(|v| usize::from(v.zone) == index);
             }
-            if let Some(slot) = self.zones.get_mut(index) {
-                *slot = zone.map(|zone| Slot { derived: Derived::of(&zone.playback, rate), zone });
-            }
+            self.replace_slot(index, *zone);
         }
         for (index, pad) in pads.iter().enumerate() {
             let changed = self.pads.get(index).is_some_and(|o| o.zone != pad.zone);
@@ -300,14 +333,15 @@ impl SamplerCore {
     }
 
     fn render<B: SourceBank + ?Sized>(&mut self, ctx: &Context, sources: &B, out: &mut [&mut [f32]], from: usize, to: usize) {
-        let SamplerCore { voices, zones, controls, order, order_len, rate, .. } = self;
+        let SamplerCore { voices, zones, ghosts, controls, order, order_len, rate, .. } = self;
         let per_frame = ctx.tempo / 60.0 / f64::from(*rate);
         for &vi in order.iter().take(*order_len) {
             let Some(v) = voices.get_mut(usize::from(vi)) else { continue };
             if !v.active {
                 continue;
             }
-            let Some(Some(slot)) = zones.get(usize::from(v.zone)) else {
+            let z = usize::from(v.zone);
+            let Some(slot) = zones.get(z).and_then(Option::as_ref).or_else(|| ghosts.get(z).and_then(Option::as_ref)) else {
                 v.cut();
                 continue;
             };
@@ -316,7 +350,8 @@ impl SamplerCore {
                 if !v.active {
                     break;
                 }
-                let t = Transport { tempo: ctx.tempo, quarters: ctx.quarters.map(|q| q + n as f64 * per_frame) };
+                let t =
+                    Transport { tempo: ctx.tempo, quarters: ctx.quarters.map(|q| q + n as f64 * per_frame), frame: ctx.frame.wrapping_add(n as u64) };
                 let (l, r) = v.frame(&slot.zone, &slot.derived, source, controls, t);
                 match out {
                     [m] => {
@@ -407,6 +442,15 @@ impl SamplerCore {
             }
             EventKind::AllSoundOff => {
                 self.voices.iter_mut().for_each(Voice::cut);
+                false
+            }
+            EventKind::ResetControllers => {
+                self.control(Control::Sustain(false));
+                let k = &mut self.controls;
+                k.wheel = 0.0;
+                k.bend = 0.0;
+                k.aftertouch = 0.0;
+                k.poly = [0.0; 128];
                 false
             }
             EventKind::Stop => {

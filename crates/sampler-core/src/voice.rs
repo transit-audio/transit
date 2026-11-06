@@ -8,7 +8,9 @@
 //! switched (the shaper's 12-frame rule); the declick ramp; level and pan; the choke fade; then the
 //! phase moves on. Modulation (the matrix, the filter's coefficients, the LFOs, the step's pitch,
 //! level and pan) is worked out on the voice's own 12-frame grid, which starts at its note and
-//! persists across host blocks, so the result does not depend on where blocks end.
+//! persists across host blocks, so the result does not depend on where blocks end. While its zone's
+//! level and pan glide ([`crate::SamplerCore::set_zone_glide`]) the gains follow the glide every
+//! frame, with the matrix's Level and Pan sums of the last grid point.
 
 use transit_instrument_core::matrix::{NDST, NSRC, PITCH_SEMITONES, RATE_OCTAVES, dst, src};
 use transit_instrument_core::shaper::{Fade, FilterMods, Shaper};
@@ -48,6 +50,8 @@ impl Controls {
 pub(crate) struct Transport {
     pub tempo: f64,
     pub quarters: Option<f64>,
+    /// The absolute output frame (a zone's level and pan glide is keyed to it).
+    pub frame: u64,
 }
 
 /// What a voice starts with.
@@ -98,6 +102,10 @@ pub(crate) struct Voice {
     /// Frames rendered since the note.
     age: u64,
     gains: (f32, f32),
+    /// The matrix's Level and Pan sums at the last grid point (a gliding zone's gains are worked
+    /// out per frame from them).
+    level_mod: f32,
+    pan_mod: f32,
     pub fade: Option<Ramp>,
     /// Frames left on the modulation grid (0: modulate before the next frame).
     grid: u32,
@@ -149,6 +157,8 @@ impl Voice {
             declick: 0,
             age: 0,
             gains: (1.0, 1.0),
+            level_mod: 0.0,
+            pan_mod: 0.0,
             fade: None,
             grid: 0,
             shaped: false,
@@ -216,6 +226,8 @@ impl Voice {
         self.declick = if self.head.looping { d.declick } else { d.declick.min(u32::try_from(rendered / 2).unwrap_or(u32::MAX)) };
         self.age = 0;
         self.gains = (d.level, d.level);
+        self.level_mod = 0.0;
+        self.pan_mod = 0.0;
         self.grid = 0;
         self.shaped = z.shaper.on;
         self.switch = Fade::None;
@@ -346,10 +358,9 @@ impl Voice {
         if step.is_finite() && step > 0.0 {
             self.step = step;
         }
-        let lvl = sum(dst::LEVEL);
-        let level = if lvl == 0.0 { d.level } else { d.level * (1.0 + lvl).clamp(0.0, 2.0) };
-        let (l, r) = balance(z.playback.pan + sum(dst::PAN));
-        self.gains = (level * l, level * r);
+        self.level_mod = sum(dst::LEVEL);
+        self.pan_mod = sum(dst::PAN);
+        self.gains = self.gains_for(d.level, z.playback.pan);
         let [s0, s1] = &mut self.shaper;
         if self.shaped || self.switch != Fade::None {
             let m = FilterMods { cutoff: sum(dst::CUTOFF), resonance: sum(dst::RESONANCE), env_amount: sum(dst::ENV_AMOUNT) };
@@ -360,6 +371,15 @@ impl Voice {
         s0.lfo_amount_mod = [sum(dst::LFO1_AMOUNT), sum(dst::LFO2_AMOUNT)];
         let rate = |i: usize| RATE_OCTAVES * sum(i).clamp(-1.0, 1.0);
         s0.advance_lfos(s, t.tempo, [rate(dst::LFO1_RATE), rate(dst::LFO2_RATE)], t.quarters.is_some());
+    }
+
+    /// Left and right gains for the linear level `level` and pan `pan`, with the matrix's Level and
+    /// Pan sums of the last grid point.
+    fn gains_for(&self, level: f32, pan: f32) -> (f32, f32) {
+        let lvl = self.level_mod;
+        let level = if lvl == 0.0 { level } else { level * (1.0 + lvl).clamp(0.0, 2.0) };
+        let (l, r) = balance(pan + self.pan_mod);
+        (level * l, level * r)
     }
 
     /// Renders one frame and moves on: the voice's left and right output (0 when idle).
@@ -418,7 +438,13 @@ impl Voice {
         }
         let [yl, yr] = y;
         let yr = if channels == 2 { yr } else { yl };
-        let (mut l, mut r) = (yl * self.gains.0, yr * self.gains.1);
+        let gains = if d.glides_at(t.frame) {
+            let (level, pan) = d.level_pan_at(z.playback.pan, t.frame);
+            self.gains_for(level, pan)
+        } else {
+            self.gains
+        };
+        let (mut l, mut r) = (yl * gains.0, yr * gains.1);
         let mut faded = false;
         if let Some(f) = &mut self.fade {
             let g = f.advance();

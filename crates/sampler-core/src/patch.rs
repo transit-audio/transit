@@ -169,12 +169,26 @@ pub enum PatchError {
     ZoneTaken,
 }
 
+/// A level and pan change gliding linearly over `len` output frames from absolute frame `start`
+/// (see [`crate::SamplerCore::set_zone_glide`]): frame `start + j` has
+/// `from + (to - from) * (j + 1) / len`, so the last frame of the glide is the new value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Glide {
+    /// The linear level and the pan the glide starts from.
+    pub from_level: f32,
+    pub from_pan: f32,
+    pub start: u64,
+    pub len: u32,
+}
+
 /// What the voices read of a zone, worked out when it is set or the rate changes.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Derived {
     pub env: EnvelopeFrames,
     pub level: f32,
     pub declick: u32,
+    /// A level and pan change still gliding in.
+    pub glide: Option<Glide>,
 }
 
 impl Derived {
@@ -183,7 +197,25 @@ impl Derived {
             env: EnvelopeFrames::from_ms(p.attack_ms, p.decay_ms, p.sustain, p.release_ms, rate),
             level: math::powf(10.0, p.level_db / 20.0),
             declick: crate::envelope::ms_to_frames(p.declick_ms, rate),
+            glide: None,
         }
+    }
+
+    /// The linear level and the pan at absolute frame `frame`, `pan` being the zone's own: the
+    /// glide's value while it runs, else the zone's values.
+    pub(crate) fn level_pan_at(&self, pan: f32, frame: u64) -> (f32, f32) {
+        match self.glide {
+            Some(g) if frame < g.start.saturating_add(u64::from(g.len)) && g.len > 0 => {
+                let k = (frame.saturating_sub(g.start) + 1) as f32 / g.len as f32;
+                (g.from_level + (self.level - g.from_level) * k, g.from_pan + (pan - g.from_pan) * k)
+            }
+            _ => (self.level, pan),
+        }
+    }
+
+    /// Whether a glide runs at absolute frame `frame`.
+    pub(crate) fn glides_at(&self, frame: u64) -> bool {
+        self.glide.is_some_and(|g| frame < g.start.saturating_add(u64::from(g.len)))
     }
 }
 

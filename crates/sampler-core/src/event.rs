@@ -76,6 +76,10 @@ pub enum EventKind {
     AllNotesOff,
     /// Cuts every voice at the frame.
     AllSoundOff,
+    /// Reset All Controllers (CC 121): the sustain pedal lifts (sustained voices release), the mod
+    /// wheel, pitch bend, channel pressure and every note's pressure go to rest. Rack macros are
+    /// not MIDI controllers and keep their values.
+    ResetControllers,
     /// The transport stopped (or located): every voice fades over [`crate::CHOKE_FRAMES`], the
     /// sustain pedal lifts.
     Stop,
