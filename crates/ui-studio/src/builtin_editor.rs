@@ -240,7 +240,7 @@ fn body(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     let (t, slot) = key;
     ui.horizontal(|ui| {
         if !instrument {
-            let r = ui.selectable_label(ins.bypass, if ins.bypass { "Bypassed" } else { "Bypass" });
+            let r = crate::chrome_pick::option_label(ui, ins.bypass, if ins.bypass { "Bypassed" } else { "Bypass" });
             lay.bypass = rect4(r.rect);
             if r.on_hover_text("Bypass this effect").clicked() {
                 let _ = app.toggle_bypass(t, slot);
@@ -283,9 +283,9 @@ fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inse
     let mut x = v;
     let (resp, reset) = if p.unit == Unit::Choice && !p.choices.is_empty() {
         let mut idx = (x.round().max(0.0) as usize).min(p.choices.len() - 1);
-        let r = egui::ComboBox::from_id_salt(("builtin_choice", ins.uid.get(), p.id)).selected_text(p.choices[idx]).show_ui(ui, |ui| {
+        let r = crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), p.choices[idx]).dense().show(ui, |ui| {
             for (i, c) in p.choices.iter().enumerate() {
-                ui.selectable_value(&mut idx, i, *c);
+                crate::chrome_pick::choice_value(ui, &mut idx, i, *c);
             }
         });
         x = idx as f32;

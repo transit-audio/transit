@@ -450,7 +450,7 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
             (k.response, k.value, p.format(k.value.unwrap_or(v)))
         }
         Toggle(..) => {
-            let r = ui.selectable_label(v >= 0.5, label);
+            let r = crate::chrome_pick::option_label(ui, v >= 0.5, label);
             let clicked = r.clicked().then_some(if v >= 0.5 { 0.0 } else { 1.0 });
             (r, clicked, p.format(v))
         }
@@ -458,7 +458,7 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
             // On while the pointer holds it down, off when it lets go (wherever it is then). It
             // senses drags as well: a click-only widget loses the press once the pointer moves
             // off it with the button still down.
-            let r = ui.selectable_label(v >= 0.5, label).interact(egui::Sense::click_and_drag());
+            let r = crate::chrome_pick::option_label(ui, v >= 0.5, label).interact(egui::Sense::click_and_drag());
             let down = r.is_pointer_button_down_on();
             let changed = (down != (v >= 0.5)).then_some(if down { 1.0 } else { 0.0 });
             (r, changed, p.format(v))
@@ -506,12 +506,12 @@ pub(crate) fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f
     let mut idx = (v.round().max(0.0) as usize).min(p.choices.len().saturating_sub(1));
     let r = ui
         .vertical(|ui| {
-            let c = egui::ComboBox::from_id_salt(("builtin_choice", ins.uid.get(), p.id))
+            let c = crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), p.choices.get(idx).copied().unwrap_or(""))
                 .width(width)
-                .selected_text(p.choices.get(idx).copied().unwrap_or(""))
-                .show_ui(ui, |ui| {
+                .dense()
+                .show(ui, |ui| {
                     for (i, name) in p.choices.iter().enumerate() {
-                        ui.selectable_value(&mut idx, i, *name);
+                        crate::chrome_pick::choice_value(ui, &mut idx, i, *name);
                     }
                 });
             if !label.is_empty() {
@@ -534,17 +534,17 @@ fn key_dropdown(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize)) {
     let pre = current.map_or(app.mixer.key_pre, |k| k.tap == transit_model::Tap::Pre);
     let mut pick: Option<Option<KeyFrom>> = None;
     ui.vertical(|ui| {
-        egui::ComboBox::from_id_salt(("panel_key", t.0, slot)).width(150.0).selected_text(label).show_ui(ui, |ui| {
-            if ui.selectable_label(current.is_none(), "None").clicked() {
+        crate::chrome_pick::Combo::new(("panel_key", t.0, slot), label).width(150.0).dense().show(ui, |ui| {
+            if crate::chrome_pick::choice_label(ui, current.is_none(), "None").clicked() {
                 pick = Some(None);
             }
             for (id, name) in &tracks {
-                if ui.selectable_label(current.is_some_and(|k| k.from == KeyFrom::Track(*id)), name).clicked() {
+                if crate::chrome_pick::choice_label(ui, current.is_some_and(|k| k.from == KeyFrom::Track(*id)), name).clicked() {
                     pick = Some(Some(KeyFrom::Track(*id)));
                 }
             }
             for (id, name) in &busses {
-                if ui.selectable_label(current.is_some_and(|k| k.from == KeyFrom::Bus(*id)), name).clicked() {
+                if crate::chrome_pick::choice_label(ui, current.is_some_and(|k| k.from == KeyFrom::Bus(*id)), name).clicked() {
                     pick = Some(Some(KeyFrom::Bus(*id)));
                 }
             }
