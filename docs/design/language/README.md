@@ -48,7 +48,7 @@ The grid is the arrangement's backbone: one structure that carries tempo, meter 
 
 Signal and mod differ in lightness as well as hue, so they stay distinguishable for colour-blind users. Fills under curves use the curve colour at 12% (8% for the oscilloscope).
 
-**Light theme.** The dark set is the design; the light set is derived from it by one rule, so it keeps every role. Grounds (`bg`, `surface`, `knob`, `line`, `grid` and the arrangement grounds below) mirror the dark set: each keeps its contrast ratio to `bg.window`, in the opposite direction, with `surface.inset` at white and the graphite hue kept. Inks (`text`, `ink`, `signal`, `mod`, `meter`, and the loop, cursor and selection colors) keep their hue and at least the contrast ratio they have against `bg.window` in the dark set. Aliases follow their token. Whether the light theme ships in v0.7.0 is the maintainer's call; View > Appearance offers it today.
+**Light theme.** The dark set is the design; the light set is derived from it by one rule, so it keeps every role. Grounds (`bg`, `surface`, `knob`, `line`, `grid` and the arrangement grounds below) mirror the dark set: each keeps its contrast ratio to `bg.window`, in the opposite direction, with `surface.inset` at white and the graphite hue kept. Inks (`text`, `ink`, `signal`, `mod`, `meter`, and the loop, cursor and selection colors) keep their hue and at least the contrast ratio they have against `bg.window` in the dark set. Aliases follow their token. v0.7.0 ships dark only: View > Appearance shows System and Light unavailable, and this derived set stays in code, tested, as the baseline for a designed light theme.
 
 ### Arrangement and transport
 

@@ -95,33 +95,50 @@ fn pick_appearance(t: &mut T, label: &str) {
     t.click(mid(view_item(t, label)));
 }
 
+/// The View > Appearance entry's value: `appearance` when offered, `appearance.unavailable` when
+/// shown ghosted (open the Appearance submenu first).
+fn appearance_value(t: &T, label: &str) -> String {
+    t.app.arrange.bar_menu.iter().find(|m| m.label == label).unwrap_or_else(|| panic!("no {label}")).value.clone()
+}
+
+/// v0.7.0 ships dark only (ADR 0045): System and Light are listed but unavailable, a click on
+/// Light changes nothing, and the frame stays dark.
 #[test]
-fn view_appearance_switches_the_theme_by_clicks_and_never_dirties() {
+fn view_appearance_offers_dark_only_and_never_dirties() {
     let mut t = T::new();
     assert_eq!(t.app.ui.appearance, crate::theme::Appearance::System);
-    assert_eq!(t.inspect()["theme"], "dark", "no OS theme in a test: egui falls back to dark");
+    assert_eq!(t.inspect()["theme"], "dark");
     let dirty = t.app.engine.is_dirty();
     let rev = t.app.engine.revision;
-    pick_appearance(&mut t, "Light");
-    assert_eq!(t.app.ui.appearance, crate::theme::Appearance::Light);
-    assert_eq!(t.inspect()["theme"], "light");
-    assert_eq!(t.inspect()["ui"]["appearance"], "light", "kept in UiState");
-    assert_eq!(t.ctx.theme(), egui::Theme::Light, "egui's own widgets follow");
-    assert_eq!(t.ctx.global_style().visuals.panel_fill, crate::theme::LIGHT.panel);
-    pick_appearance(&mut t, "Dark");
+    t.click(mid(view_item(&t, "View")));
+    t.click(mid(view_item(&t, "Appearance")));
+    assert_eq!(appearance_value(&t, "Dark"), "appearance");
+    assert_eq!(appearance_value(&t, "Light"), "appearance.unavailable", "Light is shown unavailable");
+    assert_eq!(appearance_value(&t, "System"), "appearance.unavailable", "System is shown unavailable");
+    t.click(mid(view_item(&t, "Light")));
+    assert_eq!(t.app.ui.appearance, crate::theme::Appearance::System, "an unavailable entry does nothing");
     assert_eq!(t.inspect()["theme"], "dark");
+    assert_eq!(t.ctx.theme(), egui::Theme::Dark, "egui's own widgets stay dark");
     assert_eq!(t.ctx.global_style().visuals.panel_fill, crate::theme::DARK.panel);
+    pick_appearance(&mut t, "Dark");
+    assert_eq!(t.app.ui.appearance, crate::theme::Appearance::Dark);
+    assert_eq!(t.inspect()["theme"], "dark");
     assert_eq!((t.app.engine.is_dirty(), t.app.engine.revision), (dirty, rev), "appearance is view state, not the document");
 }
 
+/// Neither a light OS nor a saved Light preference draws light in v0.7.0.
 #[test]
-fn system_appearance_follows_the_os_theme() {
+fn the_frame_stays_dark_with_a_light_os_or_a_saved_light_preference() {
     let mut t = T::new();
     t.ctx.options_mut(|o| o.fallback_theme = egui::Theme::Light);
     t.frames(2);
-    assert_eq!(t.inspect()["theme"], "light", "System follows what egui resolves for the OS");
-    pick_appearance(&mut t, "Dark");
-    assert_eq!(t.inspect()["theme"], "dark", "a pinned theme ignores the OS");
+    assert_eq!(t.inspect()["theme"], "dark", "System does not follow a light OS while light does not ship");
+    t.app.ui.appearance = crate::theme::Appearance::Light;
+    t.frames(2);
+    assert_eq!(t.inspect()["theme"], "dark", "a saved Light preference draws dark");
+    assert_eq!(t.inspect()["ui"]["appearance"], "light", "the preference itself is kept");
+    assert_eq!(t.ctx.global_style().visuals.panel_fill, crate::theme::DARK.panel);
+    assert_eq!(crate::theme::LIGHT_UNAVAILABLE_TIP, "Returns with the light theme design pass");
 }
 
 #[test]

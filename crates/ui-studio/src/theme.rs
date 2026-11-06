@@ -30,6 +30,18 @@ impl Appearance {
         }
     }
 
+    /// Whether View > Appearance offers this choice: v0.7.0 ships dark only, so System and Light
+    /// are shown unavailable until the light theme's design pass ([`LIGHT_SHIPS`]).
+    pub fn available(self) -> bool {
+        LIGHT_SHIPS || self == Appearance::Dark
+    }
+
+    /// The appearance the frame draws: the preference itself once light ships, Dark until then
+    /// (a saved System or Light preference is kept in `ui.json` but not applied).
+    pub fn effective(self) -> Appearance {
+        if LIGHT_SHIPS { self } else { Appearance::Dark }
+    }
+
     fn preference(self) -> egui::ThemePreference {
         match self {
             Appearance::System => egui::ThemePreference::System,
@@ -38,6 +50,12 @@ impl Appearance {
         }
     }
 }
+
+/// Whether the light theme ships: false for v0.7.0, which is dark only (ADR 0045). [`LIGHT`] and
+/// its derivation rule stay in code, tested, as the baseline for the light theme's design pass.
+pub const LIGHT_SHIPS: bool = false;
+/// The hover text on the unavailable System and Light choices.
+pub const LIGHT_UNAVAILABLE_TIP: &str = "Returns with the light theme design pass";
 
 /// Color tokens. Everything the studio UI paints takes its colors from here. The design names
 /// come first (`docs/design/language`, [`crate::tokens`]); the older names after them read the
@@ -212,7 +230,7 @@ pub const DARK: Tokens = {
 };
 
 /// Derived from the design (`colorLight` in tokens.json): grounds mirrored, inks at least as
-/// legible as in the dark set. Whether light ships in v0.7.0 is open (ADR 0045).
+/// legible as in the dark set. v0.7.0 ships dark only ([`LIGHT_SHIPS`]); this set is the baseline for the light design pass.
 pub const LIGHT: Tokens = {
     use crate::tokens::color_light::*;
     token_set!(true)
@@ -396,17 +414,31 @@ pub fn modal_window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate:
     window(ctx, title)
 }
 
-/// Install both themes' visuals and follow `appearance` (System: the OS setting, through egui's
-/// `system_theme`). Call when the appearance changes; [`follow`] runs every frame.
+/// Install both themes' visuals and follow `appearance`'s effective choice (System: the OS
+/// setting, through egui's `system_theme`; Dark only while [`LIGHT_SHIPS`] is false). Call when
+/// the appearance changes; [`follow`] runs every frame.
 pub fn apply(ctx: &egui::Context, appearance: Appearance) {
+    install(ctx);
+    ctx.set_theme(appearance.effective().preference());
+    set_current(ctx.theme());
+}
+
+/// Both themes' visuals and spacing.
+fn install(ctx: &egui::Context) {
     for (theme, tokens) in [(egui::Theme::Dark, &DARK), (egui::Theme::Light, &LIGHT)] {
         ctx.style_mut_of(theme, |st| {
             st.visuals = visuals(tokens, theme == egui::Theme::Light);
             spacing(st);
         });
     }
-    ctx.set_theme(appearance.preference());
-    set_current(ctx.theme());
+}
+
+/// Draw `theme` whatever ships: the widget kit's tests check both token sets.
+#[cfg(test)]
+pub(crate) fn apply_pinned(ctx: &egui::Context, theme: egui::Theme) {
+    install(ctx);
+    ctx.set_theme(theme);
+    set_current(theme);
 }
 
 /// Point the tokens at the theme egui resolved for this frame (System follows the OS live).

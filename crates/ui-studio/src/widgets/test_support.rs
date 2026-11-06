@@ -17,8 +17,7 @@ impl Rig {
 
     pub fn themed(theme: egui::Theme) -> Rig {
         let ctx = egui::Context::default();
-        let appearance = if theme == egui::Theme::Light { crate::theme::Appearance::Light } else { crate::theme::Appearance::Dark };
-        crate::theme::apply(&ctx, appearance);
+        crate::theme::apply_pinned(&ctx, theme);
         Rig { ctx, time: 0.0, modifiers: Modifiers::NONE }
     }
 

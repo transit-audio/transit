@@ -1,9 +1,8 @@
 # User guide: appearance and interface size
 
-Open **View > Appearance** to choose **System**, **Dark**, or **Light**. System follows
-your operating system's appearance. These choices are saved per machine in `ui.json`.
-Dark is the graphite look of the device design language; Light is derived from it, so its
-blues, ambers and meter greens are deeper than before to stay as legible as in Dark.
+**View > Appearance** lists **System**, **Dark**, and **Light**. v0.7.0 is dark only: Dark is
+the graphite look of the device design language, and System and Light are shown unavailable
+until a designed light theme follows. The choice is saved per machine in `ui.json`.
 
 **View > Appearance > Interface zoom** shows the current zoom and offers **100%**, **125%**,
 **150%**, **175%**, and **200%** presets. Zoom changes every widget and painted label, including

@@ -218,13 +218,17 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let _ = app.run("view.grid_over_clips", json!({}));
                         ui.close();
                     }
-                    // Appearance: System follows the OS; kept in `UiState` (slice 5).
+                    // Appearance: System follows the OS; kept in `UiState` (slice 5). v0.7.0 ships
+                    // dark only: System and Light show unavailable (ADR 0045).
                     let sub = ui.menu_button(menu_contents("Appearance"), |ui| {
                         for a in crate::theme::Appearance::ALL {
-                            let on = app.ui.appearance == a;
-                            let b = check_button(ui, on, a.label());
-                            view_items.push(crate::mixer::MenuItem::at(ui, a.label().into(), "appearance".into(), b.rect));
-                            if b.clicked() {
+                            let on = app.ui.appearance.effective() == a;
+                            let available = a.available();
+                            let b = ui.add_enabled_ui(available, |ui| check_button(ui, on, a.label())).inner;
+                            let b = b.on_disabled_hover_text(crate::theme::LIGHT_UNAVAILABLE_TIP);
+                            let value = if available { "appearance" } else { "appearance.unavailable" };
+                            view_items.push(crate::mixer::MenuItem::at(ui, a.label().into(), value.into(), b.rect));
+                            if available && b.clicked() {
                                 app.ui.appearance = a;
                                 ui.close();
                             }
