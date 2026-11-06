@@ -78,6 +78,34 @@ fn the_shared_host_registries_hold_no_scan_folders_or_results() {
 }
 
 /// Run frames of the real UI, feeding `app.synthetic` like the control channel does.
+/// One frame, returning every shape it painted.
+pub(crate) fn frame_shapes(app: &mut StudioApp, ctx: &egui::Context, t0: &mut f64) -> Vec<egui::epaint::ClippedShape> {
+    *t0 += 1.0 / 60.0;
+    let mut raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))),
+        time: Some(*t0),
+        ..Default::default()
+    };
+    app.raw_input_hook(&mut raw);
+    let mut out = ctx.run_ui(raw, |ui| {
+        app.logic(ui.ctx());
+        app.ui(ui);
+    });
+    out.textures_delta.clear();
+    out.shapes
+}
+
+/// The ink each text `text` was painted in, in `shapes`.
+pub(crate) fn text_inks(shapes: &[egui::epaint::ClippedShape], text: &str) -> Vec<egui::Color32> {
+    shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.job.text == text => t.galley.job.sections.first().map(|x| x.format.color),
+            _ => None,
+        })
+        .collect()
+}
+
 pub(crate) fn frames(app: &mut StudioApp, ctx: &egui::Context, n: usize, t0: &mut f64) {
     for _ in 0..n {
         *t0 += 1.0 / 60.0;

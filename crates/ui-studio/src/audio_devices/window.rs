@@ -307,7 +307,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                         copy_diagnostics |= clicked;
                     });
                 if recording {
-                    ui.label(egui::RichText::new(REFUSED_RECORDING).color(TOKENS.record).size(11.5));
+                    // An error (#326): the circle-alert in `meter.hot`, the message in `text`.
+                    crate::chrome::status_label(ui, REFUSED_RECORDING, 11.5, crate::chrome::Severity::Error);
                 }
                 ui.separator();
                 let body = egui::vec2(size.x, ui.available_height());

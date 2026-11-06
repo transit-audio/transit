@@ -1465,3 +1465,18 @@ fn the_report_names_the_track_plugin_and_phase_of_the_longest_callback() {
     t.app.telemetry.injected = Some(CallbackTelemetry::default());
     assert!(!t.app.diagnostics_report(0.0).render(&Redaction::default()).contains("Longest callbacks:"));
 }
+
+/// #326: the refusal while recording is an error: its message is text, only the icon is meter.hot.
+#[test]
+fn the_recording_refusal_line_reads_text() {
+    let mut app = crate::tests::app();
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    app.engine.transport.recording = true;
+    app.open_audio_devices();
+    crate::tests::frames(&mut app, &ctx, 4, &mut time);
+    let shapes = crate::tests::frame_shapes(&mut app, &ctx, &mut time);
+    let inks = crate::tests::text_inks(&shapes, REFUSED_RECORDING);
+    assert_eq!(inks, [crate::theme::DARK.text]);
+    assert!(!inks.contains(&crate::theme::DARK.record), "negative control: not meter.hot");
+}

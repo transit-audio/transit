@@ -504,6 +504,11 @@ mod output_paths {
         app.engine.set_io_map(IoMap::default());
         frames(&mut app, &ctx, 3, &mut time);
         assert_eq!(app.io_warning().as_deref(), Some("1 route not on this device"));
+        // #326: an error's message is text; only its icon is meter.hot.
+        let shapes = crate::tests::frame_shapes(&mut app, &ctx, &mut time);
+        let inks = crate::tests::text_inks(&shapes, "1 route not on this device");
+        assert_eq!(inks, [crate::theme::DARK.text], "the status line's message");
+        assert!(!inks.contains(&crate::theme::DARK.record), "negative control: not meter.hot");
         assert_eq!(strip(&app, t).output_label, "Headphones");
         assert_eq!(app.engine.session().track(t).unwrap().mixer.output, Route::Hardware("Headphones".into()));
     }

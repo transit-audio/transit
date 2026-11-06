@@ -480,8 +480,10 @@ pub fn status_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 if let Some(w) = app.io_warning() {
                     ui.add_space(crate::theme::SPACE);
                     let (r, _) = ui.allocate_exact_size(egui::vec2(crate::icons::ICON, crate::icons::ICON), egui::Sense::hover());
-                    crate::icons::paint(ui.painter(), r.center(), crate::icons::Icon::Error, 14.0, TOKENS.record);
-                    let text = egui::RichText::new(w).color(TOKENS.record).size(11.5);
+                    // An error (#326): the circle-alert in `meter.hot`, the message in `text`.
+                    let sev = crate::chrome::Severity::Error;
+                    crate::icons::paint(ui.painter(), r.center(), sev.icon(), 14.0, sev.glyph());
+                    let text = egui::RichText::new(w).color(sev.ink()).size(11.5);
                     if ui.add(egui::Label::new(text).sense(egui::Sense::click())).on_hover_text("Open Audio Devices").clicked() {
                         app.open_audio_devices();
                     }
