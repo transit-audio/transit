@@ -272,5 +272,6 @@ fn the_macro_oscillator_editor_stays_with_the_main_window_and_is_never_duplicate
     assert_eq!(drawn(&t), 1);
     let w = t.app.builtin_editor.windows.iter().find(|w| w.key == key).cloned().unwrap();
     assert!(w.rect[0] >= 0.0 && w.rect[2] <= 1400.0 && w.rect[1] >= 0.0, "inside the main window: {:?}", w.rect);
-    assert_eq!(w.lights, "--------", "eight voices, all free");
+    // 326-M: the voice lights are the design language panel's.
+    assert_eq!(w.macro_osc.as_ref().expect("the Macro Oscillator's panel").lights, "--------", "eight voices, all free");
 }

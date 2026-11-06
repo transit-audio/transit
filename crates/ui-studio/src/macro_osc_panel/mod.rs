@@ -20,6 +20,21 @@ mod shaper;
 mod title_bar;
 pub mod window;
 
+#[cfg(test)]
+mod hero_tests;
+#[cfg(test)]
+mod modulation_tests;
+#[cfg(test)]
+mod sections_tests;
+#[cfg(test)]
+mod shaper_tests;
+#[cfg(test)]
+mod test_rig;
+#[cfg(test)]
+mod title_bar_tests;
+#[cfg(test)]
+mod window_tests;
+
 use crate::StudioApp;
 use crate::builtin_editor::{EditorLayout, RowLayout};
 use crate::theme::TOKENS;

@@ -367,6 +367,13 @@ fn tokens_are_the_only_colors() {
         ("shortcuts.rs", include_str!("shortcuts.rs")),
         ("tuner_panel.rs", include_str!("tuner_panel.rs")),
         ("midi_monitor.rs", include_str!("midi_monitor.rs")),
+        ("macro_osc_panel/mod.rs", include_str!("macro_osc_panel/mod.rs")),
+        ("macro_osc_panel/title_bar.rs", include_str!("macro_osc_panel/title_bar.rs")),
+        ("macro_osc_panel/hero.rs", include_str!("macro_osc_panel/hero.rs")),
+        ("macro_osc_panel/sections.rs", include_str!("macro_osc_panel/sections.rs")),
+        ("macro_osc_panel/shaper.rs", include_str!("macro_osc_panel/shaper.rs")),
+        ("macro_osc_panel/modulation.rs", include_str!("macro_osc_panel/modulation.rs")),
+        ("macro_osc_panel/window.rs", include_str!("macro_osc_panel/window.rs")),
     ] {
         for pat in ["Color32::from_", "Color32::WHITE", "Color32::BLACK", "Color32::RED", "Color32::GRAY", "Color32::LIGHT", "Color32::DARK"] {
             assert!(!src.contains(pat), "{file} paints a literal color ({pat})");
@@ -529,7 +536,10 @@ fn help_keyboard_shortcuts_opens_groups_by_scope_and_filters() {
     let w = t.inspect()["shortcuts"].clone();
     assert_eq!(w["open"], true);
     let scopes: Vec<String> = serde_json::from_value(w["scopes"].clone()).unwrap();
-    assert_eq!(scopes, ["Global", "Arrangement", "Piano roll", "Step entry", "Automation", "Browser", "Mixer", "Dialogs", "Name field"]);
+    assert_eq!(
+        scopes,
+        ["Global", "Arrangement", "Piano roll", "Step entry", "Automation", "Browser", "Mixer", "Dialogs", "Name field"]
+    );
     let all = w["rows"].as_array().unwrap().len();
     assert_eq!(all, crate::shortcuts::TABLE.len(), "every row shown");
     // Filter by typing in its box.
@@ -664,6 +674,13 @@ fn painted_corners_use_the_radius_tokens() {
         ("transport.rs", include_str!("transport.rs")),
         ("telemetry.rs", include_str!("telemetry.rs")),
         ("load_readout.rs", include_str!("load_readout.rs")),
+        ("macro_osc_panel/mod.rs", include_str!("macro_osc_panel/mod.rs")),
+        ("macro_osc_panel/title_bar.rs", include_str!("macro_osc_panel/title_bar.rs")),
+        ("macro_osc_panel/hero.rs", include_str!("macro_osc_panel/hero.rs")),
+        ("macro_osc_panel/sections.rs", include_str!("macro_osc_panel/sections.rs")),
+        ("macro_osc_panel/shaper.rs", include_str!("macro_osc_panel/shaper.rs")),
+        ("macro_osc_panel/modulation.rs", include_str!("macro_osc_panel/modulation.rs")),
+        ("macro_osc_panel/window.rs", include_str!("macro_osc_panel/window.rs")),
     ] {
         // (call, index of the radius argument)
         for (call, at) in
