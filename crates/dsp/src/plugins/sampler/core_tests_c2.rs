@@ -273,8 +273,8 @@ fn a_slot_level_or_pan_edit_holds_after_a_reset() {
     on(&mut s, 0, 60);
     let mut io = vec![vec![f32::NAN; 64]; 2];
     s.process(&mut io, 64);
-    for n in 0..64 {
-        assert_eq!(io[0][n].to_bits(), (to * 0.5).to_bits(), "left, frame {n} after the reset: the new level and pan");
-        assert_eq!(io[1][n].to_bits(), to.to_bits(), "right, frame {n} after the reset");
+    for (n, (l, r)) in io[0].iter().zip(&io[1]).enumerate() {
+        assert_eq!(l.to_bits(), (to * 0.5).to_bits(), "left, frame {n} after the reset: the new level and pan");
+        assert_eq!(r.to_bits(), to.to_bits(), "right, frame {n} after the reset");
     }
 }

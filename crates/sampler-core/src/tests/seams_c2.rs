@@ -153,10 +153,10 @@ fn a_reset_completes_a_glide_in_progress_to_its_target() {
     // The caller's frame starts again at 0, far before the glide's own frames.
     let (l, r) = run(&mut c, 0, &[Event::on(0, 60, 127)], 64);
     let to = math::powf(10.0, -12.0 / 20.0);
-    for n in 0..64 {
+    for (n, (a, b)) in l.iter().zip(&r).enumerate() {
         // Pan to the left lowers the right side: (1, 1 + pan).
-        assert_eq!(l[n].to_bits(), to.to_bits(), "left, frame {n}: the target level, not a stale or interpolated one");
-        assert_eq!(r[n].to_bits(), (to * (1.0 - 0.5)).to_bits(), "right, frame {n}: the target pan");
+        assert_eq!(a.to_bits(), to.to_bits(), "left, frame {n}: the target level, not a stale or interpolated one");
+        assert_eq!(b.to_bits(), (to * (1.0 - 0.5)).to_bits(), "right, frame {n}: the target pan");
     }
     // A later glide starts from the target, not from the old value.
     let mut again = next;
