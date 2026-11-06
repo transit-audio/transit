@@ -704,6 +704,11 @@ pub fn dialogs(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
+/// The delete questions' detail line (the artboard's): the deletion is one undo step.
+pub(crate) fn undo_detail(many: bool) -> &'static str {
+    if many { "Undo brings them back." } else { "Undo brings it back." }
+}
+
 /// What the delete-tracks question asks and what its default button says: the label names the
 /// loss ("Delete 3 Tracks", never "OK"; #326).
 pub(crate) fn delete_tracks_text(s: &transit_model::Session, tracks: &[TrackId], clips: bool) -> (String, String) {
@@ -729,7 +734,8 @@ pub(crate) fn delete_tracks_text(s: &transit_model::Session, tracks: &[TrackId],
 /// "Delete 3 tracks and their clips?" [Cancel] [Delete 3 Tracks]; Enter confirms, Escape cancels.
 fn delete_tracks_dialog(app: &mut StudioApp, ctx: &egui::Context, tracks: &[TrackId], clips: bool) {
     let (question, label) = delete_tracks_text(app.engine.session(), tracks, clips);
-    let ask = crate::chrome::Ask { question, detail: None, default: &label, cancel: "Cancel", third: None };
+    let detail = Some(undo_detail(tracks.len() > 1).to_string());
+    let ask = crate::chrome::Ask { question, detail, default: &label, cancel: "Cancel", third: None };
     let clicked = crate::chrome::modal(ctx, egui::Id::new("delete_tracks"), &ask);
     let choice = clicked.map(|c| c == crate::chrome::Choice::Default);
     if let Some(yes) = choice {
@@ -743,11 +749,11 @@ fn delete_tracks_dialog(app: &mut StudioApp, ctx: &egui::Context, tracks: &[Trac
 /// The delete-take question's default button: it names the loss (#326).
 pub(crate) const DELETE_TAKE_LABEL: &str = "Delete Take";
 
-/// "Delete take 2? Ctrl+Z undoes." [Cancel] [Delete Take]; Enter confirms, Escape cancels.
+/// "Delete take 2?" / "Undo brings it back." [Cancel] [Delete Take]; Enter confirms, Escape cancels.
 fn delete_take_dialog(app: &mut StudioApp, ctx: &egui::Context, track: TrackId, take: u32) {
     let ask = crate::chrome::Ask {
-        question: format!("Delete take {take}? {} undoes.", label(A::Undo)),
-        detail: None,
+        question: format!("Delete take {take}?"),
+        detail: Some(undo_detail(false).to_string()),
         default: DELETE_TAKE_LABEL,
         cancel: "Cancel",
         third: None,

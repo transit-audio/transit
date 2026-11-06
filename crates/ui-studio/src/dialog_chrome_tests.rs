@@ -72,6 +72,7 @@ fn the_delete_question_names_the_loss_on_its_default_button_rightmost() {
     t.frames(3);
     let l = t.modal("delete_tracks");
     assert_eq!(texts(&l), ["Cancel", "Delete 3 Tracks"]);
+    assert_eq!(l.detail_text.as_deref(), Some("Undo brings them back."), "the artboard's detail line");
     assert!(l.buttons[1].default && !l.buttons[0].default, "the destructive action takes the default style: Enter performs it");
     assert!(l.buttons[1].rect[0] >= l.buttons[0].rect[2], "rightmost");
     assert_eq!(l.rect[2] - l.rect[0], crate::tokens::chrome::MODAL_WIDTH);
@@ -95,6 +96,11 @@ fn every_delete_label_says_what_goes() {
     t.frames(3);
     let l = t.modal("delete_take");
     assert_eq!(texts(&l), ["Cancel", crate::menus::DELETE_TAKE_LABEL]);
+    assert_eq!(l.detail_text.as_deref(), Some("Undo brings it back."));
+    // Negative control: the save question's detail is its own.
+    t.app.dialog = Some(Dialog::SaveChanges { then: ("session.new".into(), json!({})) });
+    t.frames(3);
+    assert_eq!(t.modal("save_changes").detail_text.as_deref(), Some("Your changes are lost if you don't save them."));
     assert_eq!(crate::menus::DELETE_TAKE_LABEL, "Delete Take");
 }
 

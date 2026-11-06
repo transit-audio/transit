@@ -200,6 +200,8 @@ pub struct ModalLayout {
     pub scrim: Color32,
     pub question: [f32; 4],
     pub detail: Option<[f32; 4]>,
+    /// The detail line's text.
+    pub detail_text: Option<String>,
     /// Left to right.
     pub buttons: Vec<ButtonLayout>,
 }
@@ -242,6 +244,7 @@ pub fn modal(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>) -> Option<Choice>
         if let Some(detail) = &ask.detail {
             let d = ui.label(egui::RichText::new(detail).font(c::DETAIL_FONT.font_id(ui.ctx())).color(t.text_muted));
             layout.detail = Some(r4(d.rect));
+            layout.detail_text = Some(detail.clone());
         }
         ui.add_space(c::MODAL_FOOTER_GAP - ui.spacing().item_spacing.y);
         ui.horizontal(|ui| {
