@@ -673,7 +673,6 @@ pub struct FilterBar {
 /// toggles, Devices and Channels are the chrome's combo (inset, chevron) over their checklists.
 fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) -> FilterBar {
     use crate::widgets::{segmented, toggle};
-    let mut bar = None;
     ui.horizontal_wrapped(|ui| {
         let f = &mut prefs.filters;
         let dirs = [DirFilter::Both, DirFilter::In, DirFilter::Out];
@@ -757,9 +756,9 @@ fn filter_bar(ui: &mut egui::Ui, prefs: &mut Prefs, s: &State) -> FilterBar {
             types.push(out.layout);
         }
         crate::chrome::text_field(ui, egui::TextEdit::singleline(&mut f.text).hint_text("Filter text: CC 74, C3, Start").desired_width(170.0));
-        bar = Some(FilterBar { dir: seg.layout, devices: crate::arrange::r4(devices), channels: crate::arrange::r4(channels), types });
-    });
-    bar.expect("the bar ran")
+        FilterBar { dir: seg.layout, devices: crate::arrange::r4(devices), channels: crate::arrange::r4(channels), types }
+    })
+    .inner
 }
 
 fn row_ui(ui: &mut egui::Ui, r: &Row, s: &State, mono: &egui::FontId, cw: f32, hover: &mut Option<u8>, height: f32) {
