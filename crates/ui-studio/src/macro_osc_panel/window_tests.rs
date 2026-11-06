@@ -88,6 +88,32 @@ fn the_remembered_rect_round_trips_through_ui_json_and_opens_on_screen() {
 }
 
 #[test]
+fn escape_closes_the_focused_editor_only() {
+    let (mut t, tr) = T::open();
+    assert_eq!(t.app.builtin_editor.macro_osc.focused, Some(t.window(tr).uid), "a window that opens takes the focus");
+    t.key("Escape");
+    assert!(t.app.ui.plugin_windows.is_empty(), "Escape closed it");
+    // Negative control: a click outside every editor hands the keyboard back.
+    t.open_card(0);
+    t.click((10.0, 450.0), 1);
+    assert_eq!(t.app.builtin_editor.macro_osc.focused, None);
+    t.key("Escape");
+    assert_eq!(t.app.ui.plugin_windows, vec![(tr, INST)], "Escape elsewhere leaves the editor open");
+    // A click in the window focuses it again; a value being typed keeps Escape for itself.
+    let bar = t.panel(tr).title.bar;
+    t.click((bar[0] + 300.0, (bar[1] + bar[3]) / 2.0), 1);
+    assert_eq!(t.app.builtin_editor.macro_osc.focused, Some(t.window(tr).uid));
+    let value = t.panel(tr).knob("decay").unwrap().knob.value;
+    t.click(mid(value), 1);
+    assert!(t.panel(tr).knob("decay").unwrap().knob.editing);
+    t.key("Escape");
+    assert!(!t.panel(tr).knob("decay").unwrap().knob.editing, "the field took Escape");
+    assert_eq!(t.app.ui.plugin_windows.len(), 1, "and the window stayed");
+    t.key("Escape");
+    assert!(t.app.ui.plugin_windows.is_empty());
+}
+
+#[test]
 fn follow_selection_switches_the_shown_device_to_the_focused_track() {
     let mut t = T::new();
     let a = t.instrument_track();

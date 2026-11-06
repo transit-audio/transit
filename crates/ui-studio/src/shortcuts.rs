@@ -34,10 +34,12 @@ pub enum Scope {
     Rename,
     /// Automation lanes with points selected (slice 7).
     Automation,
+    /// A device editor window: the one last clicked or opened (326-M).
+    Editor,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 9] = [
+    pub const ALL: [Scope; 10] = [
         Scope::Global,
         Scope::Arrangement,
         Scope::PianoRoll,
@@ -47,6 +49,7 @@ impl Scope {
         Scope::Mixer,
         Scope::Dialog,
         Scope::Rename,
+        Scope::Editor,
     ];
 
     pub fn label(self) -> &'static str {
@@ -60,6 +63,7 @@ impl Scope {
             Scope::Dialog => "Dialogs",
             Scope::Rename => "Name field",
             Scope::Automation => "Automation",
+            Scope::Editor => "Device editor",
         }
     }
 }
@@ -161,6 +165,7 @@ pub enum Action {
     PickerPickFirst,
     DialogConfirm,
     DialogCancel,
+    CloseEditor,
     ToggleAutomation,
     GridNarrow,
     GridWiden,
@@ -485,6 +490,15 @@ pub const TABLE: &[Shortcut] = &[
     // Dialogs.
     row(A::DialogConfirm, "Confirm", NONE, Key::Enter, S::Dialog, "Delete Tracks."),
     row(A::DialogCancel, "Cancel", NONE, Key::Escape, S::Dialog, "Every dialog."),
+    // Device editors (326-M).
+    row(
+        A::CloseEditor,
+        "Close Editor",
+        NONE,
+        Key::Escape,
+        S::Editor,
+        "Ours: Escape closes the device window last clicked or opened; a value being typed or an open list keeps it.",
+    ),
     // Help.
     row(
         A::ToggleInfo,

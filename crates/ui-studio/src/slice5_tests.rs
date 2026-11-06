@@ -487,6 +487,7 @@ fn every_handler_takes_its_keys_from_the_table() {
         include_str!("midi_learn.rs"),
         include_str!("automation.rs"),
         include_str!("automation_picker.rs"),
+        include_str!("macro_osc_panel/window.rs"),
     ];
     for src in sources {
         for raw in ["consume_key(", "key_pressed(", "shortcut_text(\"", "Key::"] {
@@ -538,7 +539,7 @@ fn help_keyboard_shortcuts_opens_groups_by_scope_and_filters() {
     let scopes: Vec<String> = serde_json::from_value(w["scopes"].clone()).unwrap();
     assert_eq!(
         scopes,
-        ["Global", "Arrangement", "Piano roll", "Step entry", "Automation", "Browser", "Mixer", "Dialogs", "Name field"]
+        ["Global", "Arrangement", "Piano roll", "Step entry", "Automation", "Browser", "Mixer", "Dialogs", "Name field", "Device editor"]
     );
     let all = w["rows"].as_array().unwrap().len();
     assert_eq!(all, crate::shortcuts::TABLE.len(), "every row shown");

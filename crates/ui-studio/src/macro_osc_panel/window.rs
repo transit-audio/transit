@@ -6,6 +6,8 @@
 //!   moves the window when dragged. The body scrolls between the bar and the footer.
 //! - **Remembered rect:** per device id in `UiState::device_windows` (saved in `ui.json`): a device
 //!   opens where it was last closed, moved and shrunk onto the screen when it no longer fits.
+//! - **Escape** closes the focused editor: the one last clicked or opened, until a click lands
+//!   outside every editor window; a text field, a popup or a dialog keeps Escape.
 //! - **Follow selection** (the bar's link toggle, `UiState::editor_follow`): the window shows the
 //!   focused track's device in the same slot when that device is one this panel draws; off, it
 //!   stays on its insert.
@@ -32,9 +34,13 @@ pub struct State {
     pub meters: HashMap<u64, f32>,
     /// Rows Add route revealed, by insert uid (view state for the session).
     pub pending: HashMap<u64, Vec<usize>>,
+    /// The editor Escape closes.
+    pub focused: Option<u64>,
     /// The editor whose model picker holds the arrow keys (from a click on a model until a press
     /// lands elsewhere).
     pub picker: Option<u64>,
+    /// The editors with a value being typed, and the knob's parameter (that field keeps Escape).
+    pub typing: Vec<(u64, String)>,
     /// The windows drawn last frame and this frame, with their rects and layers.
     shown: Vec<(u64, Rect, egui::LayerId)>,
     shown_now: Vec<(u64, Rect, egui::LayerId)>,
@@ -68,6 +74,33 @@ pub fn opening_rect(remembered: Option<[f32; 4]>, screen: Rect, content_h: f32, 
 }
 
 impl StudioApp {
+    /// The open editor key of the insert `uid`, if a window of this panel shows it.
+    fn editor_of(&self, uid: u64) -> Option<(TrackId, usize)> {
+        self.ui.plugin_windows.iter().copied().find(|k| self.builtin_at(*k).is_some_and(|i| i.uid.get() == uid && super::handles(&i.plugin)))
+    }
+}
+
+/// Escape closes the focused editor (before the views' own Escape: a click in an editor window
+/// makes it the focused one, a click elsewhere hands the keyboard back).
+pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
+    let Some(uid) = app.builtin_editor.macro_osc.focused else { return };
+    if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || egui::Popup::is_any_open(ctx) {
+        return;
+    }
+    if let Some((_, param)) = app.builtin_editor.macro_osc.typing.iter().find(|t| t.0 == uid) {
+        // The value being typed keeps Escape: it gives the typing up (the views after this would
+        // take the key otherwise, egui having already let go of the field's focus).
+        if crate::shortcuts::pressed(ctx, crate::shortcuts::Action::CloseEditor) {
+            let id = egui::Id::new(("macro_osc_knob", uid, param.as_str())).with("editing");
+            ctx.data_mut(|d| d.remove::<String>(id));
+        }
+        return;
+    }
+    let Some(key) = app.editor_of(uid) else { return };
+    if crate::shortcuts::pressed(ctx, crate::shortcuts::Action::CloseEditor) {
+        app.close_editor(key);
+        app.builtin_editor.macro_osc.focused = None;
+    }
 }
 
 /// Follow selection: each following window moves to the focused track's device in its slot.
@@ -79,10 +112,14 @@ pub(crate) fn follow(app: &mut StudioApp) {
         if target == key || !shows || app.ui.plugin_windows.contains(&target) || !app.ui.plugin_windows.contains(&key) {
             continue;
         }
+        let was = app.builtin_at(key).map(|i| i.uid.get());
         for k in app.ui.plugin_windows.iter_mut().chain(app.ui.editor_follow.iter_mut()) {
             if *k == key {
                 *k = target;
             }
+        }
+        if was.is_some() && app.builtin_editor.macro_osc.focused == was {
+            app.builtin_editor.macro_osc.focused = app.builtin_at(target).map(|i| i.uid.get());
         }
     }
     // A following window that closed stops following.
@@ -111,6 +148,7 @@ pub(crate) fn show(
         let st = &mut app.builtin_editor.macro_osc;
         *st.generation.entry(uid).or_default() += 1;
         st.pos.insert(uid, r.min);
+        st.focused = Some(uid);
         size = Some(r.size());
     }
     let st = &app.builtin_editor.macro_osc;
@@ -164,17 +202,32 @@ pub(crate) fn show(
             app.ui.editor_follow.push(key);
         }
     }
+    let typing = mlay.knobs.iter().find(|k| k.knob.editing).map(|k| k.param.clone());
+    let st = &mut app.builtin_editor.macro_osc;
+    st.typing.retain(|u| u.0 != uid);
+    if let Some(param) = typing {
+        st.typing.push((uid, param));
+    }
     layout.macro_osc = Some(Box::new(mlay));
     open
 }
 
-/// After every window is drawn: the windows no longer shown forget their place.
-pub(crate) fn end_frame(app: &mut StudioApp, _ctx: &egui::Context) {
+/// After every window is drawn: a press inside a window focuses it, a press outside all of them
+/// hands the keyboard back; the windows no longer shown forget their place.
+pub(crate) fn end_frame(app: &mut StudioApp, ctx: &egui::Context) {
     let st = &mut app.builtin_editor.macro_osc;
     let now = std::mem::take(&mut st.shown_now);
+    if let Some(at) = ctx.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten()) {
+        let top = ctx.layer_id_at(at);
+        st.focused = now.iter().find(|(_, r, layer)| r.contains(at) && top == Some(*layer)).map(|(u, ..)| *u).or_else(|| {
+            // A press on a popup the window opened (a list, a menu) keeps its focus.
+            top.filter(|l| l.order == egui::Order::Foreground || l.order == egui::Order::Tooltip).and(st.focused)
+        });
+    }
     st.pos.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.meters.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.pending.retain(|u, _| now.iter().any(|s| s.0 == *u));
+    st.typing.retain(|u| now.iter().any(|s| s.0 == u.0));
     if st.picker.is_some_and(|u| !now.iter().any(|s| s.0 == u)) {
         st.picker = None;
     }
