@@ -457,3 +457,25 @@ fn a_long_backend_line_wraps_between_figures_and_never_over_the_next_line() {
         assert!(rects[0].iter().all(|r| r.height() <= row + 0.5), "a figure wrapped inside itself at {width}: {:?}", rects[0]);
     }
 }
+
+#[test]
+fn a_single_segment_line_wraps_inside_the_card_and_not_over_the_next_line() {
+    // A Recovery line from the reopen path: one label, about 580 points on one row.
+    let recovery = "Recovery: the output device was lost and reopened at 48000 Hz after 3 attempts; the previous stream was closed, \
+                    its buffered audio was dropped and playback resumed from the last position the engine had confirmed"
+        .to_string();
+    let open = "Output open: Speakers (Realtek) \u{b7} 48000 Hz".to_string();
+    let lines = [recovery, open];
+    let width = 440.0;
+    status_line_rects(&lines, width);
+    let rects = status_line_rects(&lines, width);
+    assert!(rects.iter().all(|r| !r.is_empty()));
+    let one_row = rects[1].iter().map(|r| r.height()).fold(0.0_f32, f32::max);
+    assert!(rects[0][0].height() > one_row + 1.0, "the long line wraps: {:?}", rects[0]);
+    assert!(rects[0][0].max.x <= 10.0 + width + 0.5, "and stays inside the card: {:?}", rects[0]);
+    for a in &rects[0] {
+        for b in &rects[1] {
+            assert!(!a.intersects(*b), "the recovery line {a:?} overlaps the next line {b:?}");
+        }
+    }
+}

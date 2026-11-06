@@ -126,13 +126,17 @@ pub fn header_button(app: &mut StudioApp, ui: &mut Ui, id: Id) {
 pub fn status_line(ui: &mut Ui, line: &str, mono: bool) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        for seg in map::status_segments(line) {
+        let segments = map::status_segments(line);
+        // A line that is one label keeps egui's wrapping and allocates its own rows; only a line of
+        // several figures needs whole figures moved between rows.
+        let mode = if segments.len() > 1 { egui::TextWrapMode::Extend } else { egui::TextWrapMode::Wrap };
+        for seg in segments {
             let text = egui::RichText::new(&seg.text).color(TOKENS.text_dim).size(11.5);
             // One row per figure: a label wraps inside itself by default, which makes its galley taller
             // than the row the layout advanced by and lets the next line paint over it. Extend
             // keeps it whole, so the wrapped layout moves whole figures to the next row.
             let text = if mono { text.monospace() } else { text };
-            let resp = ui.add(egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend));
+            let resp = ui.add(egui::Label::new(text).wrap_mode(mode));
             if let Some(id) = seg.id {
                 hover(ui, &resp, id);
             }
