@@ -122,6 +122,8 @@ ids! {
     DeviceChainMidiTranspose => "device_chain.midi_transpose",
     DeviceChainMidiVelocity => "device_chain.midi_velocity",
     DeviceChainSidechain => "device_chain.sidechain",
+    // help\compressor.toml
+    CompressorHistory => "compressor.history",
     // help\filter.toml
     FilterCurve => "filter.curve",
     FilterMode => "filter.mode",

@@ -246,6 +246,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     history::legend(ui, hw.max.x, hl.center().y, &mut out.hero.history);
     history::record(app, ui, dev, gr_raw(app, dev));
     history::show(app, ui, dev, hw, hplot, &mut out.hero.history);
+    history::help(ui, dev.uid(), hw, &mut out.hero.history);
     out.wells.push(WellRecord { name: "history".to_string(), well: hist.layout, grid: lines });
     lay.scope = r4(hw);
     // The gain-reduction bar and its readout.

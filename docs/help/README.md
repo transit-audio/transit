@@ -18,6 +18,7 @@ optional `key` (spelled as the shortcut table spells it) and an optional `link` 
 | [`mixer-strip.toml`](mixer-strip.toml) | A mixer channel strip. |
 | [`device-chain.toml`](device-chain.toml) | The device chain: instrument, effects, sidechain keys. |
 | [`filter.toml`](filter.toml) | The Filter insert's panel. |
+| [`compressor.toml`](compressor.toml) | The Compressor insert's history well. |
 | [`texture.toml`](texture.toml) | The Texture insert's panel. |
 | [`time-stretcher.toml`](time-stretcher.toml) | The Time Stretcher insert's panel. |
 | [`cross-modulator.toml`](cross-modulator.toml) | The Cross Modulator insert's panel. |

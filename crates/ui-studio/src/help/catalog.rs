@@ -26,6 +26,7 @@ const FILES: &[&str] = &[
     include_str!("../../../../docs/help/mixer-strip.toml"),
     include_str!("../../../../docs/help/device-chain.toml"),
     include_str!("../../../../docs/help/filter.toml"),
+    include_str!("../../../../docs/help/compressor.toml"),
     include_str!("../../../../docs/help/macro-osc.toml"),
     include_str!("../../../../docs/help/resonator.toml"),
     include_str!("../../../../docs/help/texture-synth.toml"),

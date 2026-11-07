@@ -1,0 +1,9 @@
+# The Compressor's panel.
+area = "compressor"
+title = "Compressor"
+link = "design/language/README.md#compressor-displays"
+
+[[entry]]
+id = "compressor.history"
+name = "History"
+text = "IN and OUT are absolute levels in dBFS at the detector, so OUT includes the makeup gain and sits above IN until the gain reduction exceeds the makeup. GR is the gain reduction, measured down from the top of the well (0 to 24 dB)."

@@ -153,3 +153,27 @@ fn the_windows_content_height_includes_the_history_well() {
     // Control: a window one well shorter would cut the well off at the footer.
     assert!(well[3] > p.footer[1] - hero::WELL);
 }
+
+#[test]
+fn the_legend_and_the_well_carry_the_measurement_convention_as_help() {
+    let (mut t, tr) = T::open();
+    let p = t.panel(tr);
+    let h = &p.hero.history;
+    // The text states the convention in plain words.
+    for want in ["absolute levels in dBFS at the detector", "OUT includes the makeup gain", "GR is the gain reduction", "from the top"] {
+        assert!(h.help_text.contains(want), "{want:?} missing from {:?}", h.help_text);
+    }
+    // Control: the legend's labels alone do not carry it.
+    assert!(!h.legend.iter().all(|l| l.label.contains("dBFS")));
+    // Hovering the legend or the well shows that entry in the Info panel.
+    t.app.help.open = true;
+    t.frames(3);
+    let well = rect(p.well("history").unwrap().well.well);
+    let legend = h.legend_rect;
+    assert!(legend[2] > legend[0] && legend[3] > legend[1], "the legend has bounds: {legend:?}");
+    for (name, at) in [("legend", super::test_rig::mid(legend)), ("well", (well.center().x, well.center().y))] {
+        t.send("ui.move", serde_json::json!({"x": at.0, "y": at.1}));
+        assert_eq!(t.app.help.layout.id.as_deref(), Some("compressor.history"), "hovering the {name}");
+        assert_eq!(t.app.help.layout.text, h.help_text);
+    }
+}

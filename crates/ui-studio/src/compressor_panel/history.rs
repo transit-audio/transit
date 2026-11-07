@@ -126,6 +126,10 @@ pub struct HistoryRecord {
     /// `−4 s` and `now` and where they sit.
     pub time_labels: Vec<(String, [f32; 4])>,
     pub legend: Vec<LegendItem>,
+    /// The legend's bounds, the rect that carries the measurement-convention help.
+    pub legend_rect: [f32; 4],
+    /// The help text the legend and the well show on hover (the `compressor.history` entry's).
+    pub help_text: String,
 }
 
 /// The vertical grid lines, one each second inside the window, in `grid`; returns them.
@@ -246,7 +250,23 @@ pub(crate) fn legend(ui: &Ui, right: f32, cy: f32, out: &mut HistoryRecord) {
         x = swatch.min.x - LEGEND_GAP;
     }
     drawn.reverse();
+    let rect4 = |r: [f32; 4]| Rect::from_min_max(pos2(r[0], r[1]), pos2(r[2], r[3]));
+    out.legend_rect = drawn.iter().map(|l| rect4(l.swatch).union(rect4(l.text))).reduce(|a, b| a.union(b)).map_or([0.0; 4], r4);
     out.legend = drawn;
+}
+
+/// The measurement convention on hover: over the legend and over the well, the Info panel shows
+/// the `compressor.history` entry and a tooltip carries its text.
+pub(crate) fn help(ui: &Ui, uid: impl std::fmt::Debug + std::hash::Hash, well: Rect, out: &mut HistoryRecord) {
+    let id = crate::help::Id::CompressorHistory;
+    let text = crate::help::entry(id).map_or_else(String::new, |e| e.text.clone());
+    let legend = Rect::from_min_max(pos2(out.legend_rect[0], out.legend_rect[1]), pos2(out.legend_rect[2], out.legend_rect[3])).expand(2.0);
+    for (name, rect) in [("legend", legend), ("well", well)] {
+        let r = ui.interact(rect, egui::Id::new(("compressor_history_help", name, &uid)), egui::Sense::hover());
+        crate::help::hover(ui, &r, id);
+        r.on_hover_text(text.as_str());
+    }
+    out.help_text = text;
 }
 
 /// Adds the quad `v` (in order around it) to `mesh` in `color`.
