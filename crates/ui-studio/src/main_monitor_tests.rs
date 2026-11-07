@@ -1,5 +1,5 @@
 //! The main bus monitoring set on the strip (#366): M, Mono, Dim and Ref in the 2 by 2 grid, the
-//! subtitle under the name, the output label as the path name, the loudness footer; the
+//! loudness footer and the main fader that makes room for it; the
 //! `mix.monitor` command and its state in `ui.inspect`; the toggles reaching the Player and the
 //! readout following its live loudness. Each check has a negative control.
 
@@ -25,7 +25,7 @@ fn alt_click(app: &mut StudioApp, at: (f32, f32)) {
 }
 
 #[test]
-fn the_main_bus_has_m_mono_dim_ref_the_subtitle_the_path_as_output_and_the_loudness_footer() {
+fn the_main_bus_has_m_mono_dim_ref_and_the_loudness_footer() {
     let (mut app, ctx, mut time, a) = mixer_app();
     master(&mut app);
     for full in [true, false] {
@@ -41,16 +41,13 @@ fn the_main_bus_has_m_mono_dim_ref_the_subtitle_the_path_as_output_and_the_loudn
         assert!(m.mono[1] == m.mute[1] && m.mono[0] > m.mute[0], "Mono beside M");
         assert!(m.dim[0] == m.mute[0] && m.dim[1] > m.mute[1], "Dim under M");
         assert!(m.reference[0] == m.mono[0] && m.reference[1] == m.dim[1], "Ref under Mono");
-        assert_eq!(m.subtitle, "Out 1-2 · no device", "the path Main plays on; no device in a test");
-        assert_eq!(m.subtitle_rect, m.input, "in the input row's place");
-        assert_eq!(m.output_label, "Out 1-2", "the output is the path name, not \"Main\"");
         assert_eq!(m.lufs_text, "—", "nothing measured");
         assert!(m.lufs_rect[1] >= m.readout_rect[3] && m.lufs_rect[3] <= m.rect[3], "the footer under the readouts, inside the strip");
         assert!(m.fader[3] < m.readout_rect[1], "the fader keeps clear of the readouts");
         // Negative control: a channel has none of it.
         let s = strip(&app, a);
-        assert_eq!((s.mono, s.dim, s.reference, s.lufs_rect, s.subtitle_rect), ([0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4]));
-        assert!(s.subtitle.is_empty() && s.lufs_text.is_empty());
+        assert_eq!((s.mono, s.dim, s.reference, s.lufs_rect), ([0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4]));
+        assert!(s.lufs_text.is_empty());
         assert_eq!(s.toggles.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), ["M", "S", "R", "I"]);
     }
 }
@@ -113,7 +110,6 @@ fn mix_monitor_checks_its_fields_and_ui_inspect_shows_the_state() {
     frames(&mut app, &ctx, 5, &mut time);
     let v = app.inspect(&ctx);
     assert_eq!(v["monitor"]["mono"], true);
-    assert_eq!(v["monitor"]["subtitle"], "Out 1-2 · no device");
     // The command is listed for agents and the palette.
     assert!(transit_engine::cmd::command_specs().iter().any(|c| c.id == "mix.monitor"));
 }
@@ -128,7 +124,6 @@ fn the_main_out_strip_without_a_master_track_has_the_monitoring_set_too() {
         m.toggles.iter().map(|t| (t.text.as_str(), t.available)).collect::<Vec<_>>(),
         [("M", false), ("Mono", true), ("Dim", true), ("Ref", true)]
     );
-    assert_eq!(m.subtitle, "Out 1-2 · no device");
     assert_eq!(m.lufs_text, "—");
     click(&mut app, mid(m.mono));
     frames(&mut app, &ctx, 5, &mut time);

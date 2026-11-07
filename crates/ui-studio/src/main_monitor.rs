@@ -1,5 +1,5 @@
 //! The main bus monitoring set (#366): Mono, Dim and Ref with the per-machine monitor level, the
-//! live integrated loudness readout, and the main bus strip's output subtitle.
+//! live integrated loudness readout.
 //!
 //! Monitor state is a per-machine preference kept with the audio settings in `ui.json`
 //! ([`MonitorPrefs`], `UiState::monitor`), never in the session and never an undo step. It reaches
@@ -58,14 +58,6 @@ pub fn loudness_text(lufs: Option<f32>) -> String {
     }
 }
 
-/// The main bus strip's subtitle: the output path Main plays on and the device it feeds
-/// ("Out 1-2 · Speakers"), "no device" while nothing is open.
-#[must_use]
-pub fn subtitle(path: &str, device: Option<&str>) -> String {
-    let device = device.map(str::trim).filter(|d| !d.is_empty()).unwrap_or("no device");
-    format!("{path} · {device}")
-}
-
 impl StudioApp {
     /// Hand the monitoring set to the player. Atomic stores only; safe to call every frame.
     pub(crate) fn push_monitor(&self) {
@@ -91,11 +83,6 @@ impl StudioApp {
         if let Some(p) = &self.player {
             p.monitor().reset_loudness();
         }
-    }
-
-    /// The main bus strip's subtitle as it reads now.
-    pub(crate) fn main_subtitle(&self) -> String {
-        subtitle(&self.engine.io_map().main, self.player.as_ref().map(|p| p.device_name.as_str()))
     }
 
     /// `mix.monitor`: sets any of Mono, Dim, Ref and the monitor level, and with `store_ref` stores
@@ -149,7 +136,6 @@ impl StudioApp {
             "ref_db": m.reference_db,
             "lufs": lufs,
             "lufs_text": loudness_text(lufs),
-            "subtitle": self.main_subtitle(),
         })
     }
 }
@@ -159,13 +145,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_readout_and_the_subtitle_read_as_the_board_does() {
+    fn the_readout_reads_as_the_board_does() {
         assert_eq!(loudness_text(Some(-14.24)), "\u{2212}14.2 LUFS");
         assert_eq!(loudness_text(Some(3.0)), "3.0 LUFS");
         assert_eq!(loudness_text(None), "—");
-        assert_eq!(subtitle("Out 1-2", Some("Speakers")), "Out 1-2 · Speakers");
-        assert_eq!(subtitle("Out 3-4", None), "Out 3-4 · no device");
-        assert_eq!(subtitle("Out 1-2", Some("  ")), "Out 1-2 · no device");
     }
 
     #[test]
