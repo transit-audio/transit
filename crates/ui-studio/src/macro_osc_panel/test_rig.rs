@@ -127,6 +127,16 @@ impl T {
         self.frames(12);
     }
 
+    /// Advances the synthetic clock once past egui's triple-click window, so the next click starts
+    /// afresh. egui reports a click as a triple when it lands within twice
+    /// `InputOptions::max_double_click_delay` of the click before last, so a double click made
+    /// soon after another click arrives as a triple pair (326-X, `widgets::reset_click`).
+    pub fn age_clicks(&mut self) {
+        let delay = self.ctx.options(|o| o.input_options.max_double_click_delay);
+        self.time += 2.0 * delay + 1.0 / 60.0;
+        self.frames(1);
+    }
+
     pub fn click(&mut self, at: (f32, f32), count: u32) {
         self.send("ui.click", json!({"x": at.0, "y": at.1, "count": count}));
     }

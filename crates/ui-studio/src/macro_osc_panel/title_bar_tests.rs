@@ -295,8 +295,8 @@ fn a_double_click_on_the_empty_bar_collapses_the_macro_oscillator_to_its_bar_and
     // Negative control: a single click does nothing.
     t.click(at, 1);
     assert_eq!(t.panel(tr).window, open);
-    // Let the single click age out, or the double click soon after it reads as a triple pair.
-    t.frames(60);
+    // The double click must not follow the single one inside egui's triple-click window.
+    t.age_clicks();
     t.click(at, 2);
     let p = t.panel(tr);
     assert_eq!(p.window[3] - p.window[1], crate::tokens::layout::TITLE_BAR_HEIGHT + crate::device_window::edge().y, "the bar and the edge");
