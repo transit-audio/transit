@@ -46,6 +46,14 @@ pub(crate) fn fader_k(db: f32) -> f32 {
     1.0 - crate::widgets::fader::taper(db)
 }
 
+/// The top of the design taper (+6 dB): the strip's fader, its gain field and its wheel stop
+/// here, as Ableton's and Logic's do. A higher gain from elsewhere (an old session, an automation
+/// lane, MIDI Learn) still reads truthfully, with the cap pinned at the top of the travel.
+pub(crate) const FADER_TOP_DB: f32 = match crate::tokens::fader::TAPER[0].0 {
+    Some(db) => db,
+    None => 0.0,
+};
+
 /// The gain at a fader position (the inverse of [`fader_k`]); the bottom is silence.
 pub(crate) fn fader_db(k: f32) -> f32 {
     let db = crate::widgets::fader::db_at(1.0 - k.clamp(0.0, 1.0));

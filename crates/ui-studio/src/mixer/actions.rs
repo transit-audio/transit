@@ -144,7 +144,13 @@ impl StudioApp {
             (false, false) => fine::WHEEL_DB,
             (false, true) => fine::WHEEL_DB_FINE,
         };
-        let (lo, hi) = if t.is_pan() { (-1.0, 1.0) } else { (fine::DB_MIN, fine::DB_MAX) };
+        let (lo, hi) = match t {
+            Target::Pan(_) | Target::SendPan(..) => (-1.0, 1.0),
+            // The strip's fader stops at the taper's top; a higher gain from elsewhere is not
+            // pulled down by a notch.
+            Target::Fader(_) => (fine::DB_MIN, super::controls::FADER_TOP_DB.max(cur)),
+            Target::Send(..) => (fine::DB_MIN, fine::DB_MAX),
+        };
         let v = fine::nudge(cur, notches, step).clamp(lo, hi);
         if self.mixer.wheel.map(|w| w.target) != Some(t) && !crate::automation::passing(self) {
             self.engine.end_merge();

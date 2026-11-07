@@ -402,7 +402,8 @@ fn the_fader_readout_edits_in_place_and_applies_cancels_and_clamps() {
     let f = mid(strip(&app, t).fader);
     assert!(!rects_overlap(strip(&app, t).readout_rect, strip(&app, t).fader), "distinct hit rects");
     assert_eq!(strip(&app, t).volume_text, "+0.0");
-    for (text, want) in [("-6", -6.0), ("-6.0", -6.0), ("-6 dB", -6.0), ("+1.5", 1.5), ("99", 12.0), ("-500", -144.0)] {
+    // The gain field stops at the taper's top, +6 dB, like the drag (#326).
+    for (text, want) in [("-6", -6.0), ("-6.0", -6.0), ("-6 dB", -6.0), ("+1.5", 1.5), ("99", 6.0), ("-500", -144.0)] {
         let before = undo_len(&mut app);
         edit_readout(&mut app, &ctx, &mut time, ro, text, "Enter");
         assert_eq!(volume(&app, t), want, "{text:?} applies");
