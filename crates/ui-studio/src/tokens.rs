@@ -351,6 +351,12 @@ pub mod layout {
     /// Smallest and largest control height.
     pub const CONTROL_HEIGHT: [f32; 2] = [26.0, 32.0];
     pub const SEGMENT_HEIGHT: [f32; 2] = [22.0, 24.0];
+    /// Every control inside a device panel or strip (combo, dropdown, field).
+    pub const DENSE_CONTROL_HEIGHT: f32 = 24.0;
+    /// The application chrome's own fields and buttons.
+    pub const CHROME_CONTROL_HEIGHT: f32 = 26.0;
+    /// List and menu rows.
+    pub const LIST_ROW_HEIGHT: f32 = 22.0;
 }
 
 /// Corner radii (`radius` in tokens.json).
@@ -847,6 +853,12 @@ pub mod channel_strip {
     pub const INSERT_SLOT_GAP: f32 = 3.0;
     pub const INDICATOR_SIZE: f32 = 12.0;
     pub const INDICATOR_STROKE: f32 = 1.5;
+    /// The strip's overflow edge fades (px) and the hidden-count font (Mono 400 10).
+    pub const OVERFLOW_FADE: f32 = 12.0;
+    pub const OVERFLOW_COUNT_WEIGHT: f32 = 400.0;
+    pub const OVERFLOW_COUNT_SIZE: f32 = 10.0;
+    /// The unresponsive-insert glyph (`circle-alert` in `meter.hot`).
+    pub const UNRESPONSIVE_SIZE: f32 = 10.0;
     pub const METRICS: &[(&str, f32)] = &[
         ("width", WIDTH),
         ("widthMain", WIDTH_MAIN),
@@ -875,5 +887,47 @@ pub mod channel_strip {
         ("insertSlot/gap", INSERT_SLOT_GAP),
         ("insertSlot/indicatorSize", INDICATOR_SIZE),
         ("insertSlot/indicatorStroke", INDICATOR_STROKE),
+        ("overflow/fade", OVERFLOW_FADE),
+        ("overflow/hiddenCountFont/weight", OVERFLOW_COUNT_WEIGHT),
+        ("overflow/hiddenCountFont/size", OVERFLOW_COUNT_SIZE),
+        ("unresponsive/size", UNRESPONSIVE_SIZE),
+    ];
+}
+
+/// The compressor's displays (`compressor` in tokens.json): the unity diagonal, the operating
+/// point and the history well. Numbers only; the colors are named in the design and read from the
+/// color tables. Checked both ways by the drift test.
+pub mod compressor {
+    pub const UNITY_WIDTH: f32 = 1.0;
+    pub const UNITY_DASH: [f32; 2] = [3.0, 3.0];
+    pub const OPERATING_POINT_SIZE: f32 = 8.0;
+    pub const OPERATING_POINT_RING_WIDTH: f32 = 2.0;
+    pub const OPERATING_POINT_HIDE_BELOW_DB: f32 = -60.0;
+    pub const HISTORY_WINDOW_SECONDS: f32 = 4.0;
+    pub const HISTORY_INPUT_ALPHA: f32 = 0.35;
+    pub const HISTORY_OUTPUT_WIDTH: f32 = 1.75;
+    pub const HISTORY_GR_ALPHA: f32 = 0.22;
+    pub const HISTORY_GR_WIDTH: f32 = 1.75;
+    pub const HISTORY_GR_RANGE_DB: f32 = 24.0;
+    pub const HISTORY_THRESHOLD_ALPHA: f32 = 0.45;
+    pub const HISTORY_THRESHOLD_WIDTH: f32 = 1.0;
+    pub const HISTORY_THRESHOLD_DASH: [f32; 2] = [4.0, 4.0];
+    pub const METRICS: &[(&str, f32)] = &[
+        ("unity/width", UNITY_WIDTH),
+        ("unity/dash/0", UNITY_DASH[0]),
+        ("unity/dash/1", UNITY_DASH[1]),
+        ("operatingPoint/size", OPERATING_POINT_SIZE),
+        ("operatingPoint/ringWidth", OPERATING_POINT_RING_WIDTH),
+        ("operatingPoint/hideBelowDb", OPERATING_POINT_HIDE_BELOW_DB),
+        ("history/windowSeconds", HISTORY_WINDOW_SECONDS),
+        ("history/input/alpha", HISTORY_INPUT_ALPHA),
+        ("history/output/width", HISTORY_OUTPUT_WIDTH),
+        ("history/gainReduction/alpha", HISTORY_GR_ALPHA),
+        ("history/gainReduction/width", HISTORY_GR_WIDTH),
+        ("history/gainReduction/rangeDb", HISTORY_GR_RANGE_DB),
+        ("history/threshold/alpha", HISTORY_THRESHOLD_ALPHA),
+        ("history/threshold/width", HISTORY_THRESHOLD_WIDTH),
+        ("history/threshold/dash/0", HISTORY_THRESHOLD_DASH[0]),
+        ("history/threshold/dash/1", HISTORY_THRESHOLD_DASH[1]),
     ];
 }

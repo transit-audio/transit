@@ -138,7 +138,10 @@ fn space_layout_radius_and_alpha_match_tokens_json() {
     assert_eq!(num(&v, "layout/routingRowHeight"), l::ROUTING_ROW_HEIGHT);
     assert_eq!([num(&v, "layout/controlHeight/0"), num(&v, "layout/controlHeight/1")], l::CONTROL_HEIGHT);
     assert_eq!([num(&v, "layout/segmentHeight/0"), num(&v, "layout/segmentHeight/1")], l::SEGMENT_HEIGHT);
-    assert_eq!(at(&v, "layout").as_object().unwrap().len(), 8, "a layout metric without a Rust constant");
+    assert_eq!(num(&v, "layout/denseControlHeight"), l::DENSE_CONTROL_HEIGHT);
+    assert_eq!(num(&v, "layout/chromeControlHeight"), l::CHROME_CONTROL_HEIGHT);
+    assert_eq!(num(&v, "layout/listRowHeight"), l::LIST_ROW_HEIGHT);
+    assert_eq!(at(&v, "layout").as_object().unwrap().len(), 11, "a layout metric without a Rust constant");
     for (key, rust) in [("radius", tokens::radius::ALL), ("alpha", tokens::alpha::ALL)] {
         let obj = at(&v, key).as_object().unwrap();
         let in_json: BTreeSet<&str> = obj.keys().map(String::as_str).collect();
@@ -502,8 +505,43 @@ fn the_channel_strip_matches_tokens_json_both_ways() {
         "insertSlot/on/name",
         "insertSlot/bypassed/glyph",
         "insertSlot/bypassed/name",
+        "overflow/hiddenCountFont/color",
+        "unresponsive/color",
+        "unresponsive/ring",
     ] {
         let name = at(cs, path).as_str().unwrap();
         assert!(known.contains(name), "channelStrip/{path}: {name} is not a token");
+    }
+}
+
+/// The compressor displays (`compressor` in tokens.json): every number equals its constant, neither
+/// side has a path the other lacks, and every named color is a token.
+#[test]
+fn the_compressor_displays_match_tokens_json_both_ways() {
+    let v = json();
+    let cp = at(&v, "compressor");
+    let mut leaves = Vec::new();
+    number_leaves(cp, "", &mut leaves);
+    let in_json: BTreeSet<&str> = leaves.iter().map(|(p, _)| p.as_str()).collect();
+    let in_rust: BTreeSet<&str> = tokens::compressor::METRICS.iter().map(|(p, _)| *p).collect();
+    assert_eq!(in_json, in_rust, "compressor paths differ between tokens.json and Rust");
+    for (path, x) in tokens::compressor::METRICS {
+        assert_eq!(num(cp, path), *x, "compressor/{path}");
+    }
+    let known: BTreeSet<String> = ["color", "arrangement"].iter().flat_map(|k| color_names(&v, k)).collect();
+    for path in [
+        "unity/color",
+        "operatingPoint/fill",
+        "operatingPoint/ring",
+        "history/input/fill",
+        "history/output/stroke",
+        "history/gainReduction/fill",
+        "history/gainReduction/stroke",
+        "history/threshold/color",
+        "history/secondLines",
+        "history/quarterLines",
+    ] {
+        let name = at(cp, path).as_str().unwrap();
+        assert!(known.contains(name), "compressor/{path}: {name} is not a token");
     }
 }
