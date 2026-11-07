@@ -20,7 +20,7 @@ fn the_controls_panel_lays_out_the_boards_row() {
     }
     assert_eq!(p.knobs[0].knob.size, crate::widgets::knob::Size::M);
     // The divider after the knobs, then the sidechain column: the label left of its dropdown, the
-    // dropdown 110 by 26 at the right, the mode spread under it.
+    // dropdown 110 by 24 at the right, the mode spread under it.
     let last = p.knobs.last().unwrap().knob.rect;
     assert!(p.divider[0] > last[2] && p.divider[2] - p.divider[0] == 1.0);
     let k = &p.key;

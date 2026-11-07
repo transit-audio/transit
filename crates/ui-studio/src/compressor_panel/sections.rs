@@ -39,10 +39,10 @@ pub const DYNAMICS: [(&str, &str); 7] = [
 pub const SLOT: f32 = 84.0;
 pub const SLOT_GAP: f32 = 8.0;
 /// The sidechain column: its padding from the divider, the key dropdown and the room between its
-/// rows (the board's 12, 110 by 26 and 8).
+/// rows (the board's 12, 110 by 24 and 8).
 pub const COLUMN_PAD: f32 = 12.0;
 pub const KEY_W: f32 = 110.0;
-pub const KEY_H: f32 = space::CONTROL_HEIGHT[0];
+pub const KEY_H: f32 = space::DENSE_CONTROL_HEIGHT;
 pub const ROW_GAP: f32 = 8.0;
 /// The mode's segments: compress (the peak detector) or limit.
 pub const MODES: [&str; 2] = ["Peak", "Limit"];
@@ -103,7 +103,7 @@ fn key_dropdown(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, out: &mu
     let mut pick: Option<KeyPick> = None;
     let mut rows: Vec<(String, [f32; 4])> = Vec::new();
     let mut c = super::child(ui, rect);
-    let shown = crate::chrome_pick::Combo::new(("compressor_key", dev.uid()), &text).width(rect.width()).show(&mut c, |ui| {
+    let shown = crate::chrome_pick::Combo::new(("compressor_key", dev.uid()), &text).width(rect.width()).dense().show(&mut c, |ui| {
         let mut row = |ui: &mut Ui, on: bool, label: &str, to: KeyPick| {
             let r = crate::chrome_pick::choice_label(ui, on, label);
             rows.push((label.to_string(), r4(r.rect)));

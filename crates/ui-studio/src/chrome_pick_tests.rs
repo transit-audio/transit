@@ -223,3 +223,14 @@ fn a_list_with_a_field_closes_on_the_click_into_it_unless_it_is_dropdown_with_fi
     // Negative control: the default close-on-click closes it at the first click.
     assert!(!open_after_clicking_the_field(crate::chrome_pick::dropdown), "the plain dropdown closes");
 }
+
+/// Gap 11: a combo inside a device panel is the dense control height, a chrome combo the chrome's.
+#[test]
+fn a_panel_combo_face_is_the_dense_control_height() {
+    use crate::tokens::layout;
+    let mut rig = Rig::new();
+    let dense = rig.idle(|ui: &mut egui::Ui| Combo::new("d", "Value").dense().show(ui, |_| ()).response);
+    assert_eq!(dense.rect.height(), layout::DENSE_CONTROL_HEIGHT, "panel combo is 24 (fails at 22)");
+    let chrome = rig.idle(|ui: &mut egui::Ui| Combo::new("c", "Value").show(ui, |_| ()).response);
+    assert_eq!(chrome.rect.height(), layout::CHROME_CONTROL_HEIGHT, "chrome combo stays 26");
+}

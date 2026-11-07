@@ -91,7 +91,7 @@ impl Combo {
         self
     }
 
-    /// The face is a button high (text plus padding, 22) instead of the control height (26), for dense device panels.
+    /// The face is the dense control height (24, `layout.denseControlHeight`) instead of the chrome's 26, for device panels and strips.
     pub fn dense(mut self) -> Self {
         self.dense = true;
         self
@@ -109,17 +109,8 @@ impl Combo {
         let galley = ui.painter().layout_no_wrap(self.text.clone(), font.clone(), TOKENS.text);
         let pad = 8.0;
         let w = self.width.unwrap_or_else(|| (galley.size().x + 2.0 * pad + c::CHEVRON + pad).max(60.0));
-        let (rect, _) = ui.allocate_exact_size(
-            vec2(
-                w,
-                if self.dense {
-                    (galley.size().y + 2.0 * ui.spacing().button_padding.y).max(ui.spacing().interact_size.y)
-                } else {
-                    c::CONTROL_HEIGHT
-                },
-            ),
-            Sense::hover(),
-        );
+        let (rect, _) =
+            ui.allocate_exact_size(vec2(w, if self.dense { crate::tokens::layout::DENSE_CONTROL_HEIGHT } else { c::CONTROL_HEIGHT }), Sense::hover());
         let id = ui.make_persistent_id(self.salt);
         let sense = if ui.is_enabled() { Sense::click() } else { Sense::hover() };
         let response = ui.interact(rect, id, sense);
