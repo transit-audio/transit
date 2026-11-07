@@ -58,6 +58,21 @@ pub fn value_at(p: &ParamInfo, norm: f32) -> f32 {
     if matches!(p.unit, Unit::Semitones | Unit::Cents | Unit::Choice) { p.clamp(v.round()) } else { v }
 }
 
+/// The value a knob's gesture sets: a reset is the parameter's default itself (never the value at
+/// the default's position, which a log taper's round trip leaves an ulp off: 3.9999998 for a ratio
+/// of 4), a turn or nudge the value at the new position, typing the value it reads as.
+pub fn knob_value(p: &ParamInfo, shown: &widgets::knob::KnobOut) -> Option<f32> {
+    gesture_value(p, shown.value, shown.reset, shown.typed.as_deref())
+}
+
+/// [`knob_value`] from the gesture's parts: the new position, whether it is a reset, the text typed.
+pub fn gesture_value(p: &ParamInfo, position: Option<f32>, reset: bool, typed: Option<&str>) -> Option<f32> {
+    if reset {
+        return Some(p.default);
+    }
+    position.map(|n| value_at(p, n)).or_else(|| typed.and_then(|t| parse(p, t)))
+}
+
 /// A value typed into a knob's field: a number in the parameter's unit (`1.2k` and `1.2 kHz` for
 /// kilohertz; for a time, a bare number or `ms` is milliseconds and a trailing `s` seconds), or a
 /// choice by name. `None` when it does not read.
@@ -162,4 +177,28 @@ pub(crate) fn dropdown(
 pub(crate) fn chevron(p: &egui::Painter, c: Pos2, w: f32, color: Color32) {
     let h = w / 2.0;
     p.add(egui::Shape::line(vec![c + vec2(-h, -h / 2.0), c + vec2(0.0, h / 2.0), c + vec2(h, -h / 2.0)], Stroke::new(1.5, color)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reset_stores_exactly_the_default_of_a_log_parameter() {
+        let ratio = transit_dsp::plugin_info("compressor").unwrap().param("ratio").unwrap();
+        let cutoff = transit_dsp::plugin_info("macro_oscillator").unwrap().param("cutoff").unwrap();
+        for p in [ratio, cutoff] {
+            assert_eq!(p.taper, transit_dsp::Taper::Log, "{}", p.id);
+            let at_default = p.to_normalized(p.default);
+            assert_eq!(gesture_value(p, Some(at_default), true, None), Some(p.default), "{}", p.id);
+        }
+        // Negative control: the position's round trip through the taper misses the default (the
+        // ratio's 4 comes back as 3.9999998), which is why a reset never takes that path.
+        let round = value_at(ratio, ratio.to_normalized(ratio.default));
+        assert_ne!(round, ratio.default, "{round}");
+        assert_eq!(gesture_value(ratio, Some(ratio.to_normalized(ratio.default)), false, None), Some(round));
+        // A turn and typing still map as before.
+        assert_eq!(gesture_value(ratio, Some(1.0), false, None), Some(ratio.max));
+        assert_eq!(gesture_value(ratio, None, false, Some("8")), Some(8.0));
+    }
 }

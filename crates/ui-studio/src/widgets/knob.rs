@@ -114,6 +114,9 @@ pub struct KnobOut {
     pub layout: KnobLayout,
     /// The new normalized value, when the user turned, nudged or reset it.
     pub value: Option<f32>,
+    /// The new value is a reset (a double or triple click): the caller sets the parameter's
+    /// default itself, not the value at the default's position.
+    pub reset: bool,
     /// Text the user typed into the value field and confirmed with Enter.
     pub typed: Option<String>,
     /// The new value came from a Ctrl+wheel nudge (the caller merges a wheel gesture's nudges into
@@ -182,6 +185,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
     let mut new = None;
     let mut typed = None;
     let mut wheeled = false;
+    let mut reset = false;
     if !k.disabled {
         let fine = ui.input(|i| i.modifiers.shift);
         if response.dragged() {
@@ -193,6 +197,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
         }
         if super::reset_click(&response) {
             new = Some(k.default);
+            reset = true;
         }
         if response.hovered() {
             // Only a wheel with Ctrl (Cmd) is the knob's, and the knob takes it; a plain wheel
@@ -265,7 +270,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
         pointer: dial_paint.pointer,
         editing: editing.is_some(),
     };
-    KnobOut { response, layout, value: new, typed, wheeled }
+    KnobOut { response, layout, value: new, reset, typed, wheeled }
 }
 
 /// What [`paint_dial`] drew: the angles, radii and inks.

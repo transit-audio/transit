@@ -47,8 +47,10 @@ use transit_dsp::plugins::macro_osc::matrix::{ROWS, dst};
 use transit_dsp::plugins::macro_osc::row_param;
 use transit_model::TrackId;
 
+#[cfg(test)]
+pub(crate) use crate::device_editor::parse;
 pub use crate::device_editor::title_bar::TitleLayout;
-pub(crate) use crate::device_editor::{Dev, Lead, bipolar, child, dropdown, parse, set, value_at};
+pub(crate) use crate::device_editor::{Dev, Lead, bipolar, child, dropdown, set, value_at};
 pub use modulation::{ChipRecord, RouteRecord};
 
 /// The Macro Oscillator's plug-in id (ADR 0033, #195).
@@ -413,7 +415,7 @@ pub(crate) fn knob_at(
     };
     let mut c = child(ui, cell);
     let shown = knob::show(&mut c, egui::Id::new(("macro_osc_knob", dev.uid(), p.id)), &k);
-    let new = shown.value.map(|n| value_at(p, n)).or_else(|| shown.typed.as_deref().and_then(|t| parse(p, t)));
+    let new = crate::device_editor::knob_value(p, &shown);
     if shown.wheeled {
         // A wheel gesture's nudges merge into one undo step while the wheel keeps coming.
         app.builtin_editor.devices.wheel_now = true;

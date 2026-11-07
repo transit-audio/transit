@@ -35,7 +35,7 @@ mod window_tests;
 use crate::StudioApp;
 use crate::builtin_editor::{EditorLayout, RowLayout};
 use crate::device_editor::title_bar::TitleLayout;
-use crate::device_editor::{Dev, bipolar, child, parse, set, value_at};
+use crate::device_editor::{Dev, bipolar, child, set};
 use crate::theme::TOKENS;
 use crate::tokens::{self, layout as space, radius};
 use crate::widgets::{self, knob, r4};
@@ -225,10 +225,7 @@ pub(crate) fn knob_at(
     };
     let mut c = child(ui, cell);
     let shown = knob::show(&mut c, knob_id(dev.uid(), p.id), &k);
-    // The default's position is the default (a reset), not the taper's round trip of it (a log
-    // range maps 4.0 to its position and back to 3.9999998).
-    let at = |n: f32| if n == k.default { p.default } else { value_at(p, n) };
-    let new = shown.value.map(at).or_else(|| shown.typed.as_deref().and_then(|t| parse(p, t)));
+    let new = crate::device_editor::knob_value(p, &shown);
     if shown.wheeled {
         // A wheel gesture's nudges merge into one undo step while the wheel keeps coming.
         app.builtin_editor.devices.wheel_now = true;
