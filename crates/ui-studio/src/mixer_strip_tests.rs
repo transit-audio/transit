@@ -216,14 +216,14 @@ fn the_meter_fills_on_the_taper_and_its_clip_cell_latches_and_clears() {
 }
 
 #[test]
-fn the_main_bus_is_160_wide_with_mute_only_and_wider_meters() {
+fn the_main_bus_is_160_wide_with_the_monitoring_toggles_and_wider_meters() {
     let (mut app, ctx, mut time, a) = mixer_app();
     app.run("track.new", json!({"kind": "master"})).unwrap();
     full_mixer(&mut app, &ctx, &mut time);
     let m = app.mixer.layout.master.clone().expect("the main bus");
     assert_eq!(m.rect[2] - m.rect[0], cs::WIDTH_MAIN);
     assert_eq!(m.number, "M");
-    assert_eq!(m.toggles.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), ["M"], "Mute only: Mono, Dim and Ref wait for the engine");
+    assert_eq!(m.toggles.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), ["M", "Mono", "Dim", "Ref"], "the monitoring set (#366)");
     let well = m.meter_layout.as_ref().unwrap().wells[0];
     assert_eq!(well[2] - well[0], crate::tokens::fader::METER_BAR_MAIN, "14 px bars");
     // Negative control: a channel's strip and bars are narrower and it has all four toggles.

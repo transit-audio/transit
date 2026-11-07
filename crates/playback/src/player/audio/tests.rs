@@ -23,6 +23,7 @@ pub(super) fn fixture_session(device_rate: u32, session: Arc<Session>) -> (Contr
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
         metro: crate::Metro::default(),
+        monitor: Default::default(),
     });
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 };
     let key = ClockKey { generation: 1, domain: 1, direction: Direction::Output };
@@ -183,6 +184,7 @@ fn owner_fixture() -> (crate::player::RuntimeControl<Command, ActionResult>, Aud
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
         metro: crate::Metro::default(),
+        monitor: Default::default(),
     });
     let (mut owner, ports) = crate::player::RuntimeControl::new(Arc::new(session), None, target, PlanLimits::default()).unwrap();
     owner.service();
@@ -321,6 +323,7 @@ fn invalid_audio_initialization_returns_every_endpoint_for_main_thread_retiremen
             speed: AtomicU32::new(1000),
             editors_open: AtomicBool::new(false),
             metro: crate::Metro::default(),
+            monitor: Default::default(),
         });
         let (mut owner, ports) = crate::player::RuntimeControl::new(session, None, target, PlanLimits::default()).unwrap();
         owner.service();
@@ -1020,6 +1023,7 @@ fn play_on_device(session: Session, channels: usize, io: Option<transit_model::I
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
         metro: crate::Metro::default(),
+        monitor: Default::default(),
     });
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: channels as u16, in_channels: 0 };
     let key = ClockKey { generation: 1, domain: 1, direction: Direction::Output };
@@ -1080,6 +1084,7 @@ fn a_path_table_edit_on_an_open_stream_moves_main_through_the_published_plan() {
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
         metro: crate::Metro::default(),
+        monitor: Default::default(),
     });
     let channels = 10;
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: channels as u16, in_channels: 0 };
@@ -1397,4 +1402,5 @@ fn an_external_instruments_notes_are_not_stamped_with_the_mixs_delay() {
 }
 
 mod count_in;
+mod monitor_path;
 mod preview;
