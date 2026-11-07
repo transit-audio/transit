@@ -10,27 +10,12 @@ fn saved_asio_estimates_keep_a_usable_map_without_claiming_hardware_calibration(
         for direction in [Direction::Input, Direction::Output] {
             let k = key(100 + opened, direction);
             let (observer, mut observations) = observation_lane(k, 48_000);
-            let mut adapter = CpalObserver::new(observer);
+            let mut adapter = StampObserver::new(observer);
             let mut fitter = ClockFitter::new(k);
-            let direction_name = if direction == Direction::Input { "input" } else { "output" };
             let mut count = 0;
-            for line in trace.lines().filter(|line| !line.starts_with('#')) {
-                let fields: Vec<_> = line.split(',').collect();
-                if fields[0].parse::<u64>().unwrap() != opened || fields[1] != direction_name {
-                    continue;
-                }
-                let frames = fields[2].parse::<usize>().unwrap();
-                let callback = instant(fields[3].parse().unwrap());
-                let sample = instant(fields[4].parse().unwrap());
-                let host = fields[5].parse::<u64>().unwrap();
-                match direction {
-                    Direction::Input => {
-                        adapter.input(frames, &cpal::InputCallbackInfo::new(cpal::InputStreamTimestamp { callback, capture: sample }), Some(host))
-                    }
-                    Direction::Output => {
-                        adapter.output(frames, &cpal::OutputCallbackInfo::new(cpal::OutputStreamTimestamp { callback, playback: sample }), Some(host))
-                    }
-                }
+            for callback in trace_callbacks(trace, opened, direction) {
+                let host = callback.host_ns.unwrap();
+                adapter.record(callback);
                 let result = fitter.observe(observations.pop().unwrap());
                 if count >= 256 {
                     let map = result.unwrap_or_else(|error| panic!("open {opened} {direction:?} callback {count}: {error:?}"));
@@ -70,12 +55,89 @@ fn estimated_timestamp_jitter_does_not_relax_discontinuity_or_drift_checks() {
     }
 }
 
+/// One device callback of a test clock: its frames, the backend's callback and first-frame times
+/// in signed nanoseconds of the backend's own domain, and the host time of the callback.
+#[derive(Debug, Clone, Copy)]
+struct Callback {
+    frames: usize,
+    callback_ns: i64,
+    frame_ns: i64,
+    host_ns: Option<u64>,
+}
+
+/// The backend-neutral stamp mapping the fitter tests run on (ADR 0046): backend times become
+/// signed offsets from the stream's first callback, a block without frames claims nothing, a
+/// missing host time or an offset outside `i64` is invalid, and no calibrated offset is claimed.
+/// [`the_neutral_stamp_harness_matches_the_cpal_stamper_on_every_moved_input`] proves it equal to
+/// the cpal adapter's `Stamper` on every input the moved tests use.
+#[derive(Default)]
+struct NeutralStamper {
+    origin: Option<i64>,
+}
+
+impl NeutralStamper {
+    fn stamp(&mut self, c: Callback) -> Stamp {
+        if c.frames == 0 {
+            return Stamp::INVALID;
+        }
+        let origin = *self.origin.get_or_insert(c.callback_ns);
+        let callback = c.callback_ns.checked_sub(origin);
+        let frame = c.frame_ns.checked_sub(origin);
+        let valid = callback.is_some() && frame.is_some() && c.host_ns.is_some();
+        Stamp {
+            host_callback_ns: c.host_ns.unwrap_or(0),
+            backend_callback_ns: callback.unwrap_or(0),
+            backend_frame_ns: frame.unwrap_or(0),
+            quality: if valid { Quality::BackendEstimate } else { Quality::Invalid },
+            offset_uncertainty_ns: None,
+        }
+    }
+}
+
+/// The neutral stamp harness: [`Stamp`] values straight into an observation lane, as a backend's
+/// callback records them.
+struct StampObserver {
+    observer: Observer,
+    stamper: NeutralStamper,
+}
+
+impl StampObserver {
+    fn new(observer: Observer) -> Self {
+        Self { observer, stamper: NeutralStamper::default() }
+    }
+    fn record(&mut self, callback: Callback) {
+        let stamp = self.stamper.stamp(callback);
+        self.observer.record(callback.frames, stamp);
+    }
+}
+
+/// The callbacks of open `opened` in `direction` of the saved ASIO trace.
+fn trace_callbacks(trace: &str, opened: u64, direction: Direction) -> Vec<Callback> {
+    let name = if direction == Direction::Input { "input" } else { "output" };
+    let mut callbacks = Vec::new();
+    for line in trace.lines().filter(|line| !line.starts_with('#')) {
+        let fields: Vec<_> = line.split(',').collect();
+        if fields[0].parse::<u64>().unwrap() != opened || fields[1] != name {
+            continue;
+        }
+        callbacks.push(Callback {
+            frames: fields[2].parse().unwrap(),
+            callback_ns: fields[3].parse().unwrap(),
+            frame_ns: fields[4].parse().unwrap(),
+            host_ns: Some(fields[5].parse().unwrap()),
+        });
+    }
+    callbacks
+}
+
 /// The cpal timestamp mapping of the adapter, feeding an observation lane as a real callback does.
+#[cfg(not(windows))]
 struct CpalObserver {
     observer: Observer,
     stamper: crate::backend::cpal::Stamper,
 }
 
+#[cfg(not(windows))]
 impl CpalObserver {
     fn new(observer: Observer) -> Self {
         Self { observer, stamper: crate::backend::cpal::Stamper::default() }
@@ -97,40 +159,47 @@ fn instant(ns: i64) -> cpal::StreamInstant {
     cpal::StreamInstant::new(ns.div_euclid(1_000_000_000), ns.rem_euclid(1_000_000_000) as u32)
 }
 
-fn fake_clock(key: ClockKey, nominal: u32, actual: f64, partitions: &[usize], epoch: i64, backend_scale: f64) -> (ClockMap, u64) {
-    let (observer, mut records) = observation_lane(key, nominal);
-    let mut adapter = CpalObserver::new(observer);
-    let mut fitter = ClockFitter::new(key);
+/// The callbacks of a synthetic device clock running at `actual` frames per second in blocks of
+/// `partitions` (cycled) for 0.16 s, whose backend clock starts at `epoch` and runs `backend_scale`
+/// times host time.
+fn fake_clock_callbacks(direction: Direction, actual: f64, partitions: &[usize], epoch: i64, backend_scale: f64) -> Vec<Callback> {
+    let mut callbacks = Vec::new();
     let mut frame = 0u64;
-    let mut latest_host = 0;
     for &length in partitions.iter().cycle().take(10_000) {
         let first_ns = (frame as f64 * 1e9 / actual).round() as i64;
-        let callback_ns = match key.direction {
+        let callback_ns = match direction {
             Direction::Input => first_ns + (length as f64 * 1e9 / actual).round() as i64 + 1_000_000,
             Direction::Output => first_ns - 3_000_000,
         };
-        let backend = |ns: i64| instant(epoch + (ns as f64 * backend_scale).round() as i64);
-        latest_host = (1_000_000_000 + callback_ns) as u64;
-        let (_, stats) = measure(|| match key.direction {
-            Direction::Input => adapter.input(
-                length,
-                &cpal::InputCallbackInfo::new(cpal::InputStreamTimestamp { callback: backend(callback_ns), capture: backend(first_ns) }),
-                Some(latest_host),
-            ),
-            Direction::Output => adapter.output(
-                length,
-                &cpal::OutputCallbackInfo::new(cpal::OutputStreamTimestamp { callback: backend(callback_ns), playback: backend(first_ns) }),
-                Some(latest_host),
-            ),
+        let backend = |ns: i64| epoch + (ns as f64 * backend_scale).round() as i64;
+        callbacks.push(Callback {
+            frames: length,
+            callback_ns: backend(callback_ns),
+            frame_ns: backend(first_ns),
+            host_ns: Some((1_000_000_000 + callback_ns) as u64),
         });
-        assert!(stats.is_zero());
-        let observation = records.pop().unwrap();
-        assert_eq!(observation.first_frame, frame);
-        let _ = fitter.observe(observation);
         frame += length as u64;
         if frame as f64 / actual >= 0.16 {
             break;
         }
+    }
+    callbacks
+}
+
+fn fake_clock(key: ClockKey, nominal: u32, actual: f64, partitions: &[usize], epoch: i64, backend_scale: f64) -> (ClockMap, u64) {
+    let (observer, mut records) = observation_lane(key, nominal);
+    let mut adapter = StampObserver::new(observer);
+    let mut fitter = ClockFitter::new(key);
+    let mut frame = 0u64;
+    let mut latest_host = 0;
+    for callback in fake_clock_callbacks(key.direction, actual, partitions, epoch, backend_scale) {
+        latest_host = callback.host_ns.unwrap();
+        let (_, stats) = measure(|| adapter.record(callback));
+        assert!(stats.is_zero());
+        let observation = records.pop().unwrap();
+        assert_eq!(observation.first_frame, frame);
+        let _ = fitter.observe(observation);
+        frame += callback.frames as u64;
     }
     let map = fitter.map().unwrap();
     assert_eq!(map.quality, Quality::BackendEstimate);
@@ -364,6 +433,7 @@ fn fractional_loop_overshoot_survives_callback_boundaries_and_the_next_cursor_is
     assert_eq!(timeline.position().unwrap().sample, 0);
 }
 
+#[cfg(not(windows))]
 #[test]
 fn timestamp_extraction_does_not_fabricate_host_time_and_checks_signed_range() {
     let k = key(9, Direction::Input);
@@ -460,6 +530,7 @@ fn measured_quality_does_not_invent_a_missing_uncertainty_bound() {
     }
 }
 
+#[cfg(not(windows))]
 #[test]
 fn noisy_and_millisecond_quantized_cpal_clocks_converge_and_retain_delayed_capture_coverage() {
     for direction in [Direction::Input, Direction::Output] {
@@ -642,6 +713,7 @@ fn an_input_clock_cannot_be_used_as_the_consumed_output_timeline() {
 
 /// ADR 0016 slice (a): the stamps the CPAL timestamp mapping produces for the saved ASIO trace
 /// were captured before the backend trait; the adapter reproduces them bit for bit.
+#[cfg(not(windows))]
 #[test]
 fn cpal_stamp_sequences_match_the_captured_golden() {
     let trace = include_str!("tests/focusrite_asio_trace.csv");
@@ -688,8 +760,64 @@ fn cpal_stamp_sequences_match_the_captured_golden() {
     assert_eq!(lines, STAMP_GOLDEN);
 }
 
+#[cfg(not(windows))]
 const STAMP_GOLDEN: [&str; 4] =
     ["0 input 512 e5a107c5575f2515", "0 output 512 2e994bbcddb8133c", "1 input 512 8518b35c4e70450a", "1 output 512 94f5f075b969a85e"];
+
+/// The inputs of the moved tests' synthetic clocks (`fake_clock`): direction, actual rate,
+/// partitions, backend epoch and backend scale. The nominal rate and the key's generation do not
+/// reach the stamps.
+const FAKE_CLOCK_INPUTS: [(Direction, f64, &[usize], i64, f64); 7] = [
+    // independent_device_schedules_place_capture_impulse_and_midi_across_loop_wraps
+    (Direction::Input, 44_100.0, &[147, 441, 1, 109, 512, 117, 448], -4_000_000_000_000, 0.9999),
+    (Direction::Output, 48_000.0, &[64, 256, 31, 512, 100, 777], 9_000_000_000_000, 1.0001),
+    (Direction::Input, 44_100.0, &[256; 8], -4_000_000_000_000, 0.9999),
+    (Direction::Output, 48_000.0, &[128; 16], 9_000_000_000_000, 1.0001),
+    // independent_drift_is_fitted_instead_of_equating_nominal_rates
+    (Direction::Output, 48_012.0, &[480; 16], i64::MAX - 1_000_000_000, 1.0002),
+    // restart_a_b_a_never_reuses_old_observations_events_or_take_placement (both clocks)
+    (Direction::Output, 48_000.0, &[128; 8], 3_000_000, 1.0),
+    // an_input_clock_cannot_be_used_as_the_consumed_output_timeline
+    (Direction::Input, 48_000.0, &[512; 16], 0, 1.0),
+];
+
+/// The stamp the cpal adapter's `Stamper` makes of `c`.
+fn cpal_stamp(stamper: &mut crate::backend::cpal::Stamper, direction: Direction, c: Callback) -> Stamp {
+    let (callback, sample) = (instant(c.callback_ns), instant(c.frame_ns));
+    match direction {
+        Direction::Input => {
+            stamper.input(c.frames, &cpal::InputCallbackInfo::new(cpal::InputStreamTimestamp { callback, capture: sample }), c.host_ns)
+        }
+        Direction::Output => {
+            stamper.output(c.frames, &cpal::OutputCallbackInfo::new(cpal::OutputStreamTimestamp { callback, playback: sample }), c.host_ns)
+        }
+    }
+}
+
+/// ADR 0046, the control of the moved fitter tests: the neutral harness and the cpal adapter's
+/// `Stamper` make bit-identical stamp sequences of every input the moved tests feed (the saved
+/// ASIO trace, both opens and directions, and every synthetic clock), so the tests prove on the
+/// neutral harness what they proved on cpal.
+#[test]
+fn the_neutral_stamp_harness_matches_the_cpal_stamper_on_every_moved_input() {
+    let trace = include_str!("tests/focusrite_asio_trace.csv");
+    let mut inputs = Vec::new();
+    for opened in 0..2 {
+        for direction in [Direction::Input, Direction::Output] {
+            inputs.push((format!("trace open {opened} {direction:?}"), direction, trace_callbacks(trace, opened, direction)));
+        }
+    }
+    for (i, (direction, actual, partitions, epoch, scale)) in FAKE_CLOCK_INPUTS.into_iter().enumerate() {
+        inputs.push((format!("synthetic clock {i}"), direction, fake_clock_callbacks(direction, actual, partitions, epoch, scale)));
+    }
+    for (name, direction, callbacks) in inputs {
+        assert!(!callbacks.is_empty(), "{name}");
+        let (mut neutral, mut cpal) = (NeutralStamper::default(), crate::backend::cpal::Stamper::default());
+        let ours: Vec<Stamp> = callbacks.iter().map(|c| neutral.stamp(*c)).collect();
+        let theirs: Vec<Stamp> = callbacks.iter().map(|c| cpal_stamp(&mut cpal, direction, *c)).collect();
+        assert_eq!(ours, theirs, "{name}");
+    }
+}
 
 /// Fits `blocks` render stamps of a calibrated native stream whose presentation time (callback +
 /// queued padding + stream latency) jitters by up to `jitter_ns` either way, in a pattern: the

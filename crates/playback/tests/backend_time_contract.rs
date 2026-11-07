@@ -1,5 +1,7 @@
 //! Hermetic arithmetic contract for the exact CPAL fork used by playback.
 //! This does not certify backend timestamp quality or a shared origin between streams.
+//! Off Windows only (ADR 0046): the Linux, FreeBSD and macOS builds keep cpal; Windows builds lose it.
+#![cfg(not(windows))]
 #![forbid(unsafe_code)]
 
 use cpal::StreamInstant;
