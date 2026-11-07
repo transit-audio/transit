@@ -308,6 +308,19 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let _ = app.run("window.close_editors", json!({}));
                         ui.close();
                     }
+                    // 326-V: fold every device window to its title bar, and back.
+                    for (label, id, help) in [
+                        ("Collapse All Editors", "window.collapse_editors", crate::help::Id::WindowCollapseEditors),
+                        ("Expand All Editors", "window.expand_editors", crate::help::Id::WindowExpandEditors),
+                    ] {
+                        let b = ui.add_enabled(!app.ui.plugin_windows.is_empty(), menu_button(label));
+                        crate::help::hover(ui, &b, help);
+                        window_items.push(crate::mixer::MenuItem::at(ui, label.into(), id.into(), b.rect));
+                        if b.clicked() {
+                            let _ = app.run(id, json!({}));
+                            ui.close();
+                        }
+                    }
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Window".into(), String::new(), window_menu.response.rect));
                 app.arrange.bar_menu.extend(window_items);

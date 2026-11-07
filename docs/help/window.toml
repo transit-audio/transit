@@ -1,0 +1,13 @@
+area = "window"
+title = "Window"
+link = "user-guide.md"
+
+[[entry]]
+id = "window.collapse_editors"
+name = "Collapse All Editors"
+text = "Folds every open device window to its title bar, which keeps every control and still drags and closes. A double click on an empty part of a device's title bar folds that one window and unfolds it again; the fold lasts for the session. Ableton Live folds a device the same way."
+
+[[entry]]
+id = "window.expand_editors"
+name = "Expand All Editors"
+text = "Unfolds every device window that is collapsed to its title bar."

@@ -38,6 +38,7 @@ const FILES: &[&str] = &[
     include_str!("../../../../docs/help/audio-devices.toml"),
     include_str!("../../../../docs/help/midi-monitor.toml"),
     include_str!("../../../../docs/help/midi-mappings.toml"),
+    include_str!("../../../../docs/help/window.toml"),
 ];
 
 #[derive(serde::Deserialize)]

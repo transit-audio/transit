@@ -15,6 +15,9 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(view "window.editors_follow", "Plug-in Windows Follow transit", [], None, "{value?: bool; without it the setting flips}", always, |_, _| Err(bad("window.editors_follow", "runs in the transit app only"))),
         // Window > Close All Editors (326-M): the studio app owns the editor windows; listed for agents.
         cmd!(view "window.close_editors", "Close All Editors", [], None, "{}", always, |_, _| Err(bad("window.close_editors", "runs in the transit app only"))),
+        // Window > Collapse All Editors / Expand All Editors (326-V): fold every device window to its title bar, and back.
+        cmd!(view "window.collapse_editors", "Collapse All Editors", [], None, "{}", always, |_, _| Err(bad("window.collapse_editors", "runs in the transit app only"))),
+        cmd!(view "window.expand_editors", "Expand All Editors", [], None, "{}", always, |_, _| Err(bad("window.expand_editors", "runs in the transit app only"))),
         cmd!(view "help.check_updates", "Check for Updates...", [], None, "{}", always, |_, _| Err(bad("help.check_updates", "runs in the transit app only"))),
         // Help > Debug Logging: the studio app owns the logger; listed here for agents.
         cmd!(view "help.debug_logging", "Debug Logging", [], None, "{on?: bool; without it the setting flips}", always, |_, _| Err(bad("help.debug_logging", "runs in the transit app only"))),

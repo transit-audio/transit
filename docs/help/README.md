@@ -28,6 +28,7 @@ optional `key` (spelled as the shortcut table spells it) and an optional `link` 
 | [`modal-voice.toml`](modal-voice.toml) | The Modal Voice's panel. |
 | [`telemetry.toml`](telemetry.toml) | The load readout and every figure of Callback Telemetry. |
 | [`audio-devices.toml`](audio-devices.toml) | The Audio Devices status card and its buttons. |
+| [`window.toml`](window.toml) | The Window menu's Collapse All Editors and Expand All Editors. |
 | [`midi-monitor.toml`](midi-monitor.toml) | The MIDI Monitor window. |
 | [`midi-mappings.toml`](midi-mappings.toml) | The MIDI Mappings window. |
 

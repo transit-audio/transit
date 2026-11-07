@@ -96,6 +96,9 @@ impl StudioApp {
         if id == "window.close_editors" {
             return Ok(self.close_all_editors());
         }
+        if matches!(id, "window.collapse_editors" | "window.expand_editors") {
+            return Ok(self.collapse_all_editors(id == "window.collapse_editors"));
+        }
         if id == "window.midi_monitor" {
             return Ok(self.toggle_midi_monitor(params.get("value").and_then(Value::as_bool)));
         }

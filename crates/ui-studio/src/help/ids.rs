@@ -50,6 +50,8 @@ ids! {
     ArrangeHeaderHeight => "arrange_header.height",
     ViewTrackHeight => "view.track_height",
     ViewGridOverClips => "view.grid_over_clips",
+    WindowCollapseEditors => "window.collapse_editors",
+    WindowExpandEditors => "window.expand_editors",
     ArrangeHeaderName => "arrange_header.name",
     ArrangeHeaderMonitor => "arrange_header.monitor",
     ArrangeHeaderArm => "arrange_header.arm",
