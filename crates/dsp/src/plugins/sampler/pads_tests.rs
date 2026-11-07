@@ -14,7 +14,16 @@ fn source(frames: usize, offset: f32) -> Arc<dyn SampleSource> {
 }
 
 fn one_shot(note: u8) -> Playback {
-    Playback { mode: PlayMode::OneShot, key_tracking: false, root: note, attack_ms: 0.0, decay_ms: 0.0, sustain: 1.0, release_ms: 0.0, ..Playback::pad(note) }
+    Playback {
+        mode: PlayMode::OneShot,
+        key_tracking: false,
+        root: note,
+        attack_ms: 0.0,
+        decay_ms: 0.0,
+        sustain: 1.0,
+        release_ms: 0.0,
+        ..Playback::pad(note)
+    }
 }
 
 /// Pads 0..n bound to zones 0..n, each its own 4800-frame source, choke groups as given, and the

@@ -143,7 +143,8 @@ pub struct Pad<'a> {
 /// The hit fill's height (0..1) `age_ms` after a trigger at `velocity`: the velocity's share of
 /// the pad, falling linearly to nothing over [`HIT_DECAY_MS`].
 pub fn hit_fill(velocity: u8, age_ms: f32) -> f32 {
-    if !(age_ms >= 0.0) {
+    // A future (negative) or unreadable (NaN) age shows nothing.
+    if age_ms.is_nan() || age_ms < 0.0 {
         return 0.0;
     }
     f32::from(velocity.min(127)) / 127.0 * (1.0 - age_ms / HIT_DECAY_MS).clamp(0.0, 1.0)
@@ -231,7 +232,9 @@ pub fn show(ui: &mut Ui, id: egui::Id, at: egui::Pos2, pad: &Pad) -> PadOut {
 fn dashed(p: &egui::Painter, r: Rect, color: Color32) {
     let stroke = Stroke::new(1.0, color);
     let r = r.shrink(0.5);
-    for seg in [[r.left_top(), r.right_top()], [r.right_top(), r.right_bottom()], [r.right_bottom(), r.left_bottom()], [r.left_bottom(), r.left_top()]] {
+    for seg in
+        [[r.left_top(), r.right_top()], [r.right_top(), r.right_bottom()], [r.right_bottom(), r.left_bottom()], [r.left_bottom(), r.left_top()]]
+    {
         p.extend(egui::Shape::dashed_line(&seg, stroke, 3.0, 2.0));
     }
 }
@@ -281,7 +284,8 @@ pub fn paint(painter: &egui::Painter, rect: Rect, pad: &Pad) -> PadLayout {
     if !is_dashed {
         p.rect_stroke(rect, RADIUS, Stroke::new(border_width, border), StrokeKind::Inside);
     }
-    let id_rect = super::role_text(&p, &face(Family::Mono, 400, m.id_size), pad.id, t.text_faint, Align2::LEFT_TOP, rect.min + vec2(m.id[0], m.id[1]));
+    let id_rect =
+        super::role_text(&p, &face(Family::Mono, 400, m.id_size), pad.id, t.text_faint, Align2::LEFT_TOP, rect.min + vec2(m.id[0], m.id[1]));
     let (badge_fill, badge_line, badge_ink) =
         if pad.choked { (t.text_muted, t.text_muted, t.surface_panel) } else { (Color32::TRANSPARENT, t.line_strong, t.text_muted) };
     let badge_text = if pad.choke != 0 { pad.choke.to_string() } else { String::new() };
@@ -293,8 +297,12 @@ pub fn paint(painter: &egui::Painter, rect: Rect, pad: &Pad) -> PadLayout {
         super::role_text(&p, &role, &badge_text, badge_ink, Align2::CENTER_CENTER, b.center());
         r4(b)
     });
-    let drop_label = pad.empty.then(|| r4(super::role_text(&p, &face(Family::Sans, 400, m.drop_size), DROP, t.text_faint, Align2::CENTER_CENTER, rect.center())));
-    let name_rect = Rect::from_min_max(pos2(rect.min.x + m.name[0], rect.max.y - m.name[2] - m.name_size * 1.4), pos2(rect.max.x - m.name[1], rect.max.y - m.name[2]));
+    let drop_label =
+        pad.empty.then(|| r4(super::role_text(&p, &face(Family::Sans, 400, m.drop_size), DROP, t.text_faint, Align2::CENTER_CENTER, rect.center())));
+    let name_rect = Rect::from_min_max(
+        pos2(rect.min.x + m.name[0], rect.max.y - m.name[2] - m.name_size * 1.4),
+        pos2(rect.max.x - m.name[1], rect.max.y - m.name[2]),
+    );
     if !pad.empty && !pad.name.is_empty() {
         let role = face(Family::Sans, 500, m.name_size);
         let mut job = role.job(p.ctx(), pad.name, t.text);

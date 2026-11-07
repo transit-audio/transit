@@ -112,7 +112,9 @@ fn selected_and_peer_outlines() {
 #[test]
 fn an_empty_pad_is_dashed_and_reads_drop() {
     let mut rig = Rig::new();
-    let (l, shapes) = rig.shapes(|ui| pad::show(ui, egui::Id::new("pad"), egui::pos2(40.0, 40.0), &Pad { empty: true, choke: 3, mute: true, ..base(Size::Grid) }).layout);
+    let (l, shapes) = rig.shapes(|ui| {
+        pad::show(ui, egui::Id::new("pad"), egui::pos2(40.0, 40.0), &Pad { empty: true, choke: 3, mute: true, ..base(Size::Grid) }).layout
+    });
     assert!(l.dashed && l.drop_label.is_some());
     assert_eq!((l.border, l.fill, l.name.as_str()), (DARK.line_strong, egui::Color32::TRANSPARENT, ""));
     assert_eq!((l.badge, l.chip, l.hit), (None, None, None), "an empty pad shows no group, chip or hit");
