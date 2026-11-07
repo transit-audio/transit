@@ -1151,6 +1151,62 @@ mod hardware {
         stream_two_seconds(MODEL12, 44_100, None);
     }
 
+    /// The #363 experiment's driver: its registry name from `TRANSIT_363_DRIVER` (the maintainer's
+    /// interface, named only on his machine).
+    fn experiment_driver() -> String {
+        std::env::var("TRANSIT_363_DRIVER").expect("set TRANSIT_363_DRIVER to the driver's registry name")
+    }
+
+    /// Loads (instantiates and initializes) the experiment's driver, queries it, closes it (released
+    /// on the host thread) and ends the host thread, printing each step's time.
+    fn experiment_cycle(backend: &AsioBackend, name: &str, round: usize) {
+        let started = Instant::now();
+        let loaded = backend.load(name).unwrap_or_else(|e| panic!("round {round}: load {name}: {e}"));
+        let info = loaded.info().clone();
+        loaded.close().unwrap_or_else(|e| panic!("round {round}: close {name}: {e}"));
+        println!("round {round}: {name} loaded, queried ({} in / {} out) and released in {:?}", info.inputs, info.outputs, started.elapsed());
+    }
+
+    /// #363 step 3 (a): one clean instantiation and release of the real driver. Only with the
+    /// maintainer at the desk, on the coordinator's go: `TRANSIT_363_DRIVER="<registry name>" cargo
+    /// test --locked -p transit-audio-asio --lib -- --ignored --exact hardware::hardware_363_a_one_clean_cycle
+    /// --nocapture --test-threads 1`.
+    #[test]
+    #[ignore = "#363 step 3 (a): instantiates and releases the real driver once (maintainer at the desk only)"]
+    fn hardware_363_a_one_clean_cycle() {
+        let name = experiment_driver();
+        let backend = AsioBackend::new().expect("backend");
+        experiment_cycle(&backend, &name, 1);
+        assert!(backend.host.shut_down(RELEASE_WAIT), "the host thread ended");
+    }
+
+    /// #363 step 3 (b): ten clean cycles, a second apart.
+    #[test]
+    #[ignore = "#363 step 3 (b): instantiates and releases the real driver ten times (maintainer at the desk only)"]
+    fn hardware_363_b_ten_clean_cycles() {
+        let name = experiment_driver();
+        let backend = AsioBackend::new().expect("backend");
+        for round in 1..=10 {
+            experiment_cycle(&backend, &name, round);
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        assert!(backend.host.shut_down(RELEASE_WAIT), "the host thread ended");
+    }
+
+    /// #363 step 3 (c): the abandoned path, deliberately: the driver is instantiated and initialized,
+    /// then the handle and the backend are forgotten, so the process ends with the driver never
+    /// released (what an abandoned host thread left before the fix).
+    #[test]
+    #[ignore = "#363 step 3 (c): ends the process with the real driver initialized and never released (maintainer at the desk only)"]
+    fn hardware_363_c_abandoned_without_release() {
+        let name = experiment_driver();
+        let backend = AsioBackend::new().expect("backend");
+        let loaded = backend.load(&name).unwrap_or_else(|e| panic!("load {name}: {e}"));
+        println!("{name} loaded ({} in / {} out); ending the process without releasing it", loaded.info().inputs, loaded.info().outputs);
+        std::mem::forget(loaded);
+        std::mem::forget(backend);
+    }
+
     #[test]
     #[ignore = "opens the Focusrite driver's control panel (a window the owner must close)"]
     fn hardware_control_panel_opens_and_returns() {
