@@ -702,12 +702,14 @@ impl StudioApp {
     /// else cpal's, and native JACK) and the native ASIO lister, when this build has one.
     fn machine_listing(&self) -> (Vec<AudioSystem>, Option<AsioLister>) {
         #[cfg(test)]
-        if let Some((systems, lister)) = &self.audio_devices.machine {
-            return (systems.clone(), Some(std::sync::Arc::clone(lister)));
-        }
-        let lister: Option<AsioLister> = devices::NATIVE_ASIO_COMPILED
-            .then(|| std::sync::Arc::new(|selected: Option<String>| devices::native_asio_system(selected.as_deref())) as AsioLister);
-        (devices::audio_systems_without_asio(), lister)
+        let scripted = self.audio_devices.machine.as_ref();
+        #[cfg(not(test))]
+        let scripted = None;
+        listing_from(scripted, cfg!(test), || {
+            let lister: Option<AsioLister> = devices::NATIVE_ASIO_COMPILED
+                .then(|| std::sync::Arc::new(|selected: Option<String>| devices::native_asio_system(selected.as_deref())) as AsioLister);
+            (devices::audio_systems_without_asio(), lister)
+        })
     }
 
     /// Lists the ASIO system for [`Self::asio_selection`] on a worker thread (probing a driver can
@@ -836,6 +838,22 @@ impl StudioApp {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Err(std::sync::mpsc::TryRecvError::Disconnected) => self.audio_devices.panel = None,
         }
+    }
+}
+
+/// The machine's listing: the `scripted` one (tests), else nothing in a test build (`test`), else
+/// what `machine` lists (enumerating, and probing the selected ASIO driver through the lister). A
+/// test never lists or probes the machine's devices: a probe loads the selected ASIO driver, which
+/// takes a running interface away from whatever else uses it (#363).
+pub(crate) fn listing_from(
+    scripted: Option<&(Vec<AudioSystem>, AsioLister)>,
+    test: bool,
+    machine: impl FnOnce() -> (Vec<AudioSystem>, Option<AsioLister>),
+) -> (Vec<AudioSystem>, Option<AsioLister>) {
+    match scripted {
+        Some((systems, lister)) => (systems.clone(), Some(std::sync::Arc::clone(lister))),
+        None if test => (Vec::new(), None),
+        None => machine(),
     }
 }
 

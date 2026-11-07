@@ -20,8 +20,19 @@ fn the_window_shows_the_requested_buffer_next_to_the_one_the_device_runs() {
         .with_fixed_buffer(256);
     let again = driver.clone();
     let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+    // A scripted listing: the window never lists or probes the machine's drivers (#363).
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = std::sync::Arc::clone(&asked);
+    t.app.audio_devices.machine = Some((
+        Vec::new(),
+        std::sync::Arc::new(move |_: Option<String>| {
+            counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            None
+        }),
+    ));
     t.app.ui.audio.buffer_size = Some(128);
     t.open_window();
+    assert!(asked.load(std::sync::atomic::Ordering::Relaxed) <= 1, "only the scripted lister was asked");
     let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
     assert!(lines[0].starts_with("Output open") && lines[0].contains("256-sample buffer"), "{lines:?}");
     assert_eq!(lines[1], "Requested 128 · running at 256", "{lines:?}");
@@ -546,4 +557,33 @@ fn the_window_lists_the_native_wasapi_system_as_the_default_on_windows() {
         t.layout()["items"].as_array().unwrap().iter().filter(|i| i["value"] == "output").map(|i| i["label"].as_str().unwrap().to_string()).collect();
     assert_eq!(items[0], "System default");
     assert_eq!(items[1..], rows[..], "the untouched default system is WASAPI and its rows are the native list's");
+}
+
+/// #363: no test lists or probes the machine's audio devices. Without a scripted listing a test build
+/// lists nothing and never calls the machine's lister (a probe loads the selected ASIO driver).
+/// Control: outside a test build (`test: false`) the machine's lister is called.
+#[test]
+fn a_test_never_lists_or_probes_the_machines_devices() {
+    use crate::audio_devices::listing_from;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let machine_calls = AtomicUsize::new(0);
+    let machine = || {
+        machine_calls.fetch_add(1, Ordering::Relaxed);
+        (Vec::new(), None)
+    };
+    let (systems, lister) = listing_from(None, true, machine);
+    assert!(systems.is_empty() && lister.is_none());
+    assert_eq!(machine_calls.load(Ordering::Relaxed), 0, "a test build never reaches the machine");
+    let scripted: crate::audio_devices::AsioLister = std::sync::Arc::new(|_| None);
+    let (_, lister) = listing_from(Some(&(Vec::new(), scripted)), true, || (Vec::new(), None));
+    assert!(lister.is_some(), "the scripted lister");
+    let _ = listing_from(None, false, || {
+        machine_calls.fetch_add(1, Ordering::Relaxed);
+        (Vec::new(), None)
+    });
+    assert_eq!(machine_calls.load(Ordering::Relaxed), 1, "control: the app lists the machine");
+    // A device-free test Player refuses its input instead of opening a real device.
+    let t = T::new();
+    let player = transit_playback::Player::prepare_device_free(t.app.engine.session_arc()).unwrap();
+    assert!(player.open_input(&AudioConfig::default()).is_err_and(|e| e.contains("test Player")));
 }
