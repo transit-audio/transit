@@ -117,7 +117,7 @@ spec converts the WAV or FLAC bounce with another tool.
 
 - Every package grows by the compiled libopus: the Windows x64 release `transit.exe` grows by
   516,608 bytes (45,246,464 to 45,763,072, about 0.5 MB or 1.1 percent; `cargo build --release -p
-  transit` at the branch's base `8d0cd3c9` and at this revision, MSVC x64), which also counts the Rust
+  transit` at the branch's base `8d0cd3c9` and at revision `8be964b5`, MSVC x64), which also counts the Rust
   Ogg, resampler and dialog code. The source tree grows by 3.1 MB of C under
   `crates/opus/vendor/`.
 - The app build needs a C compiler on every platform: MSVC on Windows and the Xcode Command Line
@@ -127,7 +127,8 @@ spec converts the WAV or FLAC bounce with another tool.
 - A libopus update is a vendored-source change: new tarball and hash, the same file set, the
   tests' measured figures (pre-skip, spectrum floor, bitrate ratios) measured again, and the
   quoted-unsafe review.
-- libopus security releases are applied within the next transit release. `.opus` import passes
+- libopus security releases are applied within the next transit release (pending the
+  maintainer's confirmation). `.opus` import passes
   packets from user files to the C decoder (the Ogg parsing is Rust; the decoder is built with
   `ENABLE_HARDENING`). Release housekeeping checks xiph's release page
   (https://downloads.xiph.org/releases/opus/) for a newer release, and the update follows

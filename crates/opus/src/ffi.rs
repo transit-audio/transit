@@ -15,8 +15,8 @@
 //!    buffer of exactly `frame_size * channels` samples for the `frame_size` it passes. The
 //!    lengths are checked before the call.
 //! 4. **CTL argument types.** Each `opus_encoder_ctl` call passes the argument type its request
-//!    macro in opus_defines.h passes: `opus_int32` for the setters (`__opus_check_int`), an
-//!    `opus_int32*` to a live local for `OPUS_GET_LOOKAHEAD` (`__opus_check_int_ptr`).
+//!    macro in opus_defines.h passes: `opus_int32` for the setters (`opus_check_int`), an
+//!    `opus_int32*` to a live local for `OPUS_GET_LOOKAHEAD` (`opus_check_int_ptr`).
 
 use std::ffi::{CStr, c_char, c_int, c_uchar};
 use std::ptr::NonNull;
@@ -142,7 +142,7 @@ impl RawEncoder {
         }
         // SAFETY: the state is valid (invariant 1) and exclusively borrowed (invariant 2); each
         // request accepted above is a setter whose opus_defines.h macro passes exactly one
-        // `opus_int32` (`__opus_check_int(x)`), which `value` is (invariant 4).
+        // `opus_int32` (`opus_check_int(x)`), which `value` is (invariant 4).
         let r = unsafe { opus_encoder_ctl(self.st.as_ptr(), request, value as c_int) };
         if r == OPUS_OK { Ok(()) } else { Err(r) }
     }
@@ -151,7 +151,7 @@ impl RawEncoder {
     pub(crate) fn lookahead(&mut self) -> Result<i32, c_int> {
         let mut value: c_int = 0;
         // SAFETY: the state is valid and exclusively borrowed (invariants 1, 2);
-        // `OPUS_GET_LOOKAHEAD(x)` passes one `opus_int32*` (`__opus_check_int_ptr(x)`), here a live
+        // `OPUS_GET_LOOKAHEAD(x)` passes one `opus_int32*` (`opus_check_int_ptr(x)`), here a live
         // local libopus writes once before returning (invariant 4).
         let r = unsafe { opus_encoder_ctl(self.st.as_ptr(), OPUS_GET_LOOKAHEAD_REQUEST, &raw mut value) };
         if r == OPUS_OK { Ok(value) } else { Err(r) }

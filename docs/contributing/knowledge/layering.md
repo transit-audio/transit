@@ -5,7 +5,7 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 
 | Layer | Crates |
 |---|---|
-| L0 | `time`, `rt`, `audio-io`, `audio-backend`, `audio-wasapi`, `audio-asio`, `audio-jack`, `midi-io`, `midi` |
+| L0 | `time`, `rt`, `audio-io`, `opus`, `audio-backend`, `audio-wasapi`, `audio-asio`, `audio-jack`, `midi-io`, `midi` |
 | L1 | `dsp`, `instrument-core`, `sampler-core`, `macro-osc`, `resonator`, `modal-voice`, `texture`, `granular`, `modulator`, `random-sequencer`, `clap-host`, `vst3-host`, `au-host`, `plugin-host` |
 | L2 | `model` (the session document) |
 | L3 | `mix` (the render engine) |
