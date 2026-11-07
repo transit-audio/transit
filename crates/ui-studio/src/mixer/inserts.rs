@@ -11,7 +11,8 @@ use super::channel::{CONTROL, SMALL_VALUE, text_in};
 use super::*;
 use crate::tokens::channel_strip as cs;
 
-/// The rows a full-height inserts body holds: three slots and "+ Insert".
+/// The rows a full-height inserts body holds: three slots and "+ Insert" (past three the slots
+/// scroll, [`super::overflow`]).
 pub(super) const INSERT_ROWS: usize = 4;
 /// The shortest fader travel a strip keeps; below it the short variant shows.
 pub(super) const MIN_FADER: f32 = 80.0;
@@ -173,60 +174,103 @@ fn insert_slot(
     }
 }
 
-/// The insert rows of a track in `rows` slots from `row_r`: one slot per occupied insert, then
-/// "+ Insert" while a slot is free; a list that does not fit above it gives up its last visible
-/// row to "n more…", which opens the device chain.
+/// The occupied insert slots of a track, in slot order.
+fn occupied(t: &Track) -> Vec<(usize, transit_model::Insert)> {
+    t.mixer.inserts.iter().enumerate().filter_map(|(i, x)| x.clone().map(|x| (i, x))).collect()
+}
+
+/// The insert rows of a track from `row_r`, drawn and hit inside `clip`: one slot per occupied
+/// insert.
 #[allow(clippy::too_many_arguments)]
 fn insert_rows(
     app: &mut StudioApp,
     ui: &mut Ui,
     t: &Track,
-    rows: usize,
+    list: &[(usize, transit_model::Insert)],
     row_r: &dyn Fn(usize) -> Rect,
     clip: Rect,
     sl: &mut StripLayout,
     menu: &mut Vec<MenuItem>,
 ) {
-    let id = t.id;
-    let list: Vec<(usize, transit_model::Insert)> = t.mixer.inserts.iter().enumerate().filter_map(|(i, x)| x.clone().map(|x| (i, x))).collect();
-    let free = list.len() < t.mixer.inserts.len();
-    let room = rows.saturating_sub(usize::from(free));
-    let fits = list.len() <= room;
-    let shown = if fits { list.len() } else { room.saturating_sub(1) };
     let p = ui.painter().with_clip_rect(clip);
-    for (i, (slot, ins)) in list.iter().take(shown).enumerate() {
+    for (i, (slot, ins)) in list.iter().enumerate() {
         let row = insert_slot(app, ui, &p, clip, t, *slot, ins, row_r(i), menu);
         sl.inserts.push(row);
     }
-    if !fits {
-        let rr = row_r(shown);
-        let resp = ui.interact(rr.intersect(clip), ui.id().with(("more_inserts", id.0)), Sense::click());
-        let ink = if resp.hovered() { TOKENS.text } else { TOKENS.text_faint };
-        text_in(&p, &CONTROL, &format!("{} more…", list.len() - shown), ink, rr.shrink2(vec2(8.0, 0.0)), Align2::LEFT_CENTER);
-        if resp.on_hover_text("Show all devices in the device chain").clicked() {
-            app.focus(id);
-            app.ui.show_devices = true;
-        }
-    }
-    if free {
-        let rr = row_r(if fits { list.len() } else { shown + 1 });
-        let resp = ui.interact(rr.intersect(clip), ui.id().with(("add_insert", id.0)), Sense::click());
-        crate::help::hover(ui, &resp, crate::help::Id::MixerStripAddEffect);
-        add_row(&p, rr, "+ Insert", resp.hovered());
-        let resp = resp.on_hover_text("Add an effect to this track");
-        let before = list.len();
-        crate::devices::add_device_menu(app, &resp, id, menu);
-        if app.engine.session().track(id).is_some_and(|x| x.mixer.inserts.iter().flatten().count() > before) {
-            app.focus(id);
-        }
-        sl.add_insert = r4(rr);
-    }
 }
 
-/// The full-height inserts section's slots in `body` (under its INSERTS label).
+/// "+ Insert" in `rr` while a slot is free; `hidden`, an overflowing section's count after its
+/// label. Returns the count's text and rect when it drew one.
+#[allow(clippy::too_many_arguments)]
+fn add_insert(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    t: &Track,
+    rr: Rect,
+    clip: Rect,
+    hidden: Option<usize>,
+    sl: &mut StripLayout,
+    menu: &mut Vec<MenuItem>,
+) -> Option<(String, R4)> {
+    let id = t.id;
+    let p = ui.painter().with_clip_rect(clip);
+    let free = t.mixer.inserts.iter().any(Option::is_none);
+    if !free {
+        // Every slot in use: the pinned row keeps the count alone.
+        return hidden.map(|n| super::overflow::paint_count(&p, rr, n));
+    }
+    let resp = ui.interact(rr.intersect(clip), ui.id().with(("add_insert", id.0)), Sense::click());
+    crate::help::hover(ui, &resp, crate::help::Id::MixerStripAddEffect);
+    let count = match hidden {
+        Some(n) => {
+            add_row_left(&p, rr, "+ Insert", resp.hovered());
+            Some(super::overflow::paint_count(&p, rr, n))
+        }
+        None => {
+            add_row(&p, rr, "+ Insert", resp.hovered());
+            None
+        }
+    };
+    let resp = resp.on_hover_text("Add an effect to this track");
+    let before = t.mixer.inserts.iter().flatten().count();
+    crate::devices::add_device_menu(app, &resp, id, menu);
+    if app.engine.session().track(id).is_some_and(|x| x.mixer.inserts.iter().flatten().count() > before) {
+        app.focus(id);
+    }
+    sl.add_insert = r4(rr);
+    count
+}
+
+/// An add row with its label at the left (6 px in), as an overflowing section's pinned row draws
+/// it with the hidden count at the right (the Strip details board).
+pub(super) fn add_row_left(p: &egui::Painter, r: Rect, label: &str, hovered: bool) {
+    if hovered {
+        p.rect_filled(r, cs::INSERT_SLOT_RADIUS, TOKENS.button_hover);
+    }
+    dashed(p, r);
+    text_in(p, &CONTROL, label, if hovered { TOKENS.text } else { TOKENS.text_faint }, r.shrink2(vec2(6.0, 0.0)), Align2::LEFT_CENTER);
+}
+
+/// The full-height inserts section's slots in `body` (under its INSERTS label): three slots and
+/// "+ Insert"; past three the slots scroll in the three slots' view and "+ Insert" stays pinned
+/// under it with the hidden count (Overflow).
 pub(super) fn inserts_block(app: &mut StudioApp, ui: &mut Ui, t: &Track, body: Rect, clip: Rect, sl: &mut StripLayout, menu: &mut Vec<MenuItem>) {
     let rows = anatomy::slots_in(body).min(INSERT_ROWS);
-    insert_rows(app, ui, t, rows, &|i| anatomy::slot(body, i), clip, sl, menu);
+    let visible = rows.saturating_sub(1);
+    let list = occupied(t);
+    if list.len() <= visible {
+        insert_rows(app, ui, t, &list, &|i| anatomy::slot(body, i), clip, sl, menu);
+        let _ = add_insert(app, ui, t, anatomy::slot(body, list.len()), clip, None, sl, menu);
+        return;
+    }
+    let view = Rect::from_min_max(anatomy::slot(body, 0).min, anatomy::slot(body, visible - 1).max);
+    let ov = super::overflow::Overflow::begin(app, ui, t.id, super::overflow::Section::Inserts, view, clip, list.len(), visible);
+    insert_rows(app, ui, t, &list, &|i| ov.row(i), ov.clip(), sl, menu);
+    let mut layout = ov.finish(ui.painter());
+    if let Some((text, at)) = add_insert(app, ui, t, anatomy::slot(body, visible), clip, Some(layout.hidden), sl, menu) {
+        (layout.count_text, layout.count_rect) = (text, at);
+    }
+    sl.inserts_overflow = Some(layout);
 }
 
 /// A short count button (`FX n`, `Snd n`): `surface.raised`, 1 px `line`, radius 4, the label in
@@ -270,7 +314,11 @@ pub(super) fn fx_button(
     let free = count < t.mixer.inserts.len();
     let mut drawn = StripLayout::default();
     let list = super::short::list(app, ui, t.id, super::short::ShortList::Inserts, &resp, count + usize::from(free), |app, ui, rows, clip| {
-        insert_rows(app, ui, t, rows.len(), &|i| rows[i], clip, &mut drawn, menu);
+        let list = occupied(t);
+        insert_rows(app, ui, t, &list, &|i| rows[i], clip, &mut drawn, menu);
+        if let Some(rr) = rows.get(list.len()) {
+            let _ = add_insert(app, ui, t, *rr, clip, None, &mut drawn, menu);
+        }
     });
     (sl.inserts, sl.add_insert) = (drawn.inserts, drawn.add_insert);
     sl.list_rect = list.map_or([0.0; 4], r4);

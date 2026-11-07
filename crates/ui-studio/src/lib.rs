@@ -790,6 +790,8 @@ mod mixer_layout_tests;
 #[cfg(test)]
 mod mixer_meter_tests;
 #[cfg(test)]
+mod mixer_overflow_tests;
+#[cfg(test)]
 mod mixer_routing_tests;
 #[cfg(test)]
 mod mixer_strip_tests;

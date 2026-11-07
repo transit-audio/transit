@@ -30,6 +30,7 @@ mod hue;
 mod inserts;
 mod menus;
 mod meters;
+mod overflow;
 mod routing;
 mod sends;
 mod short;
@@ -42,6 +43,7 @@ pub use hue::{CHROMA_FLOOR, chroma_hue, hues, nearest};
 use inserts::{MIN_FADER, inserts_block, midi_output_button};
 use menus::{choice_menu, dropdown, paint_dropdown};
 pub use meters::{CLIP_CAP, peak_text};
+pub use overflow::{OverflowLayout, Section as OverflowSection};
 use meters::{meter_bounds, strip_meter};
 use routing::{NOT_HERE, push_unused_entry, same_route, unresolved_output};
 pub use routing::{
@@ -156,6 +158,10 @@ pub struct StripLayout {
     /// The full-height inserts and sends sections' bodies (zero in the short variant).
     pub inserts_section: R4,
     pub sends_section: R4,
+    /// A full-height section past its rows (more than three inserts, two sends): its scrolling
+    /// view, fades, scroll bar and the add row's hidden count; `None` while it fits.
+    pub inserts_overflow: Option<OverflowLayout>,
+    pub sends_overflow: Option<OverflowLayout>,
     /// The short variant's count buttons and what they read ("FX 3", "Snd +").
     pub fx_button: R4,
     pub fx_text: String,
@@ -420,6 +426,8 @@ pub struct MixerState {
     pub hover: Option<Target>,
     /// A control took the wheel this frame, so the strips don't scroll.
     wheel_taken: bool,
+    /// How far each overflowing section's rows are scrolled (points), by track and section.
+    pub(crate) overflow: std::collections::HashMap<(u64, OverflowSection), f32>,
     /// The key dropdown's tap choice while an insert has no key yet: pre-fader when true.
     pub(crate) key_pre: bool,
     /// The track a "Hardware Insert…" picker is open for.

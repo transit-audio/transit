@@ -248,17 +248,13 @@ fn insert_rows_cap_and_keep_every_fader_aligned() {
     }
     full_mixer(&mut app, &ctx, &mut time);
     let (sa, sb) = (strip(&app, a), strip(&app, b));
-    assert_eq!(sa.inserts.len(), 2, "two rows, an n-more row and the +");
+    // Past three the rows scroll in the fixed box (Strip details 12); the "n more…" row is gone.
+    let ov = sa.inserts_overflow.clone().expect("five inserts overflow");
+    assert_eq!((sa.inserts.len(), ov.hidden), (5, 2), "every insert is a row; two lie outside the view");
     assert!(sa.add_insert[3] > sa.add_insert[1], "the + stays while the list overflows");
-    assert!(sa.add_insert[1] > sa.inserts[1].rect[3], "the + is below the n-more row");
+    assert!(sa.add_insert[1] >= ov.view[3], "the + is pinned below the rows' view");
     assert_eq!((sa.fader[1], sa.fader[3]), (sb.fader[1], sb.fader[3]), "the faders line up with and without inserts");
-    app.focus(b);
-    frames(&mut app, &ctx, 3, &mut time);
-    let more = [sa.rect[0] + 14.0, sa.inserts[1].rect[3] + 14.0];
-    click(&mut app, (more[0], more[1]));
-    frames(&mut app, &ctx, 4, &mut time);
-    assert!(app.ui.show_devices, "n more… points at the device chain");
-    assert_eq!(app.focus_track(), Some(a), "and focuses that strip");
+    assert!(sb.inserts_overflow.is_none(), "a strip without inserts does not overflow");
 }
 
 #[test]
@@ -393,48 +389,50 @@ fn the_pan_dial_paints_with_the_kit_tokens_on_normal_and_selected_audio_and_aux_
 }
 
 #[test]
-fn mixer_insert_overflow_paint_never_overlaps_the_add_glyph_row() {
+fn mixer_insert_overflow_counts_hidden_rows_on_the_pinned_add_row() {
     // The full-height section (the docked pane is short and lists every insert in its FX popup).
-    for height in [0.0] {
-        for count in [1, 4, 9, 10] {
-            let (mut app, ctx, mut time, track) = mixer_app();
-            app.focus(track);
-            for _ in 0..count {
-                app.add_device(track, "gain").unwrap();
+    for count in [1usize, 4, 9, 10] {
+        let (mut app, ctx, mut time, track) = mixer_app();
+        app.focus(track);
+        for _ in 0..count {
+            app.add_device(track, "gain").unwrap();
+        }
+        full_mixer(&mut app, &ctx, &mut time);
+        let shapes = mixer_paint(&mut app, &ctx, &mut time);
+        let sl = strip(&app, track);
+        let section = egui::Rect::from_min_max(
+            egui::pos2(sl.inserts_section[0], sl.inserts_section[1]),
+            egui::pos2(sl.inserts_section[2], sl.inserts_section[3]),
+        );
+        let want = count.saturating_sub(3);
+        let mut labels = Vec::new();
+        for shape in &shapes {
+            if let egui::Shape::Text(text) = shape
+                && text.galley.text().ends_with(" more")
+                && (sl.rect[0]..sl.rect[2]).contains(&text.pos.x)
+            {
+                labels.push((text.galley.text().to_string(), text.galley.rect.translate(text.pos.to_vec2())));
             }
-            full_mixer(&mut app, &ctx, &mut time);
-            let shapes = mixer_paint(&mut app, &ctx, &mut time);
-            let sl = strip(&app, track);
-            let add = egui::Rect::from_min_max(egui::pos2(sl.add_insert[0], sl.add_insert[1]), egui::pos2(sl.add_insert[2], sl.add_insert[3]));
-            let mut labels = 0;
-            let mut overflow_at = None;
-            for shape in &shapes {
-                if let egui::Shape::Text(text) = shape
-                    && text.galley.text().ends_with(" more…")
-                    && (sl.rect[0]..sl.rect[2]).contains(&text.pos.x)
-                {
-                    labels += 1;
-                    overflow_at = Some((text.pos.x + 3.0, text.pos.y + 3.0));
-                    let painted = text.galley.rect.translate(text.pos.to_vec2());
-                    assert!(!painted.intersects(add), "height={height}, count={count}, label={painted:?}, add={add:?}");
-                }
-            }
-            if count >= 4 {
-                assert_eq!(labels, 1, "overflow remains visible beside the + row (height {height})");
-            }
-            if let Some(at) = overflow_at {
-                click(&mut app, at);
-                frames(&mut app, &ctx, 4, &mut time);
-                assert!(app.ui.show_devices, "overflow still opens the device chain");
-                // The chain takes the window's height: back to the full-height strips.
-                full_mixer(&mut app, &ctx, &mut time);
-            }
+        }
+        // The hidden count rides the pinned add row, under the rows' view and inside the box.
+        if want > 0 {
+            let ov = sl.inserts_overflow.clone().expect("past three, the section overflows");
+            assert_eq!(labels.len(), 1, "count={count}: one count");
+            let (text, painted) = &labels[0];
+            assert_eq!(text, &format!("{want} more"));
+            assert!(section.contains_rect(*painted) && painted.min.y >= ov.view[3], "count={count}: {painted:?} under the view in {section:?}");
             if count < 10 {
-                let add_at = mid(strip(&app, track).add_insert);
-                click(&mut app, add_at);
-                frames(&mut app, &ctx, 4, &mut time);
-                assert!(app.mixer.layout.menu.iter().any(|m| m.value == "gain"), "add remains usable");
+                let add = egui::Rect::from_min_max(egui::pos2(sl.add_insert[0], sl.add_insert[1]), egui::pos2(sl.add_insert[2], sl.add_insert[3]));
+                assert!(add.contains_rect(*painted), "count={count}: in the add row");
             }
+        } else {
+            assert!(labels.is_empty() && sl.inserts_overflow.is_none(), "count={count}: nothing to count");
+        }
+        if count < 10 {
+            let add_at = mid(strip(&app, track).add_insert);
+            click(&mut app, add_at);
+            frames(&mut app, &ctx, 4, &mut time);
+            assert!(app.mixer.layout.menu.iter().any(|m| m.value == "gain"), "add remains usable");
         }
     }
 }

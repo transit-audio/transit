@@ -446,70 +446,77 @@ fn strip_send_row(
     row
 }
 
-/// The send rows of a track in `rows` slots from `row_r`: its sends in slot order, then "+ Send"
-/// while a slot is free; when they do not all fit, the last row says how many more there are (the
-/// device chain lists them all).
+/// The occupied send slots of a track, in slot order.
+fn occupied(t: &Track) -> Vec<(usize, SendSlot)> {
+    t.mixer.sends.iter().enumerate().filter_map(|(i, x)| x.clone().map(|x| (i, x))).collect()
+}
+
+/// The send rows of a track from `row_r`, drawn and hit inside `clip`.
 #[allow(clippy::too_many_arguments)]
-fn send_list(
+fn send_rows(
     app: &mut StudioApp,
     ui: &mut Ui,
     s: &Session,
     t: &Track,
-    rows: usize,
+    sends: &[(usize, SendSlot)],
     row_r: &dyn Fn(usize) -> Rect,
     clip: Rect,
     sl: &mut StripLayout,
     menu: &mut Vec<MenuItem>,
 ) {
-    if rows == 0 || !takes_sends(t.kind) {
-        return;
-    }
-    let sends: Vec<(usize, SendSlot)> = t.mixer.sends.iter().enumerate().filter_map(|(i, x)| x.clone().map(|x| (i, x))).collect();
-    let free = sends.len() < t.mixer.sends.len();
-    let fits = sends.len() + usize::from(free) <= rows;
-    let shown = if fits { sends.len() } else { rows.saturating_sub(1) };
-    for (i, (slot, snd)) in sends.iter().take(shown).enumerate() {
+    for (i, (slot, snd)) in sends.iter().enumerate() {
         let row = send_row(app, ui, s, t, *slot, snd, row_r(i), clip, false, menu);
         sl.sends.push(row);
     }
-    let p = ui.painter().with_clip_rect(clip);
-    if fits {
-        if free {
-            let r = row_r(shown);
-            let resp = ui.interact(r.intersect(clip), ui.id().with(("add_send", t.id.0, r.min.x as i32)), Sense::click());
-            super::inserts::add_row(&p, r, "+ Send", resp.hovered());
-            let mut choices = send_targets(s, t, None, app.engine.io_map());
-            choices.push(RoutingChoice::Entry { label: "New FX Channel…".into(), value: NEW_FX.into() });
-            push_unused_entry(s, &mut choices);
-            if let Some(v) = choice_menu(&resp, "", &choices, menu) {
-                if v == REMOVE_UNUSED {
-                    let _ = app.remove_unused_busses();
-                } else {
-                    let _ = app.add_send(t.id, &v);
-                }
-            }
-            sl.add_send = r4(r);
-        }
-    } else {
-        let r = row_r(shown);
-        let resp = ui.interact(r.intersect(clip), ui.id().with(("more_sends", t.id.0)), Sense::click());
-        let ink = if resp.hovered() { TOKENS.text } else { TOKENS.text_faint };
-        super::channel::text_in(
-            &p,
-            &super::channel::CONTROL,
-            &format!("{} more…", sends.len() - shown),
-            ink,
-            r.shrink2(vec2(8.0, 0.0)),
-            Align2::LEFT_CENTER,
-        );
-        if resp.on_hover_text("Show all sends in the device chain").clicked() {
-            app.focus(t.id);
-            app.ui.show_devices = true;
-        }
-    }
 }
 
-/// The full-height sends section's rows in `body` (under its SENDS label): two sends and "+ Send".
+/// "+ Send" in `r` while a slot is free; `hidden`, an overflowing section's count after its label.
+/// Returns the count's text and rect when it drew one.
+#[allow(clippy::too_many_arguments)]
+fn add_send(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    s: &Session,
+    t: &Track,
+    r: Rect,
+    clip: Rect,
+    hidden: Option<usize>,
+    sl: &mut StripLayout,
+    menu: &mut Vec<MenuItem>,
+) -> Option<(String, R4)> {
+    let p = ui.painter().with_clip_rect(clip);
+    if !t.mixer.sends.iter().any(Option::is_none) {
+        // Every slot in use: the pinned row keeps the count alone.
+        return hidden.map(|n| super::overflow::paint_count(&p, r, n));
+    }
+    let resp = ui.interact(r.intersect(clip), ui.id().with(("add_send", t.id.0, r.min.x as i32)), Sense::click());
+    let count = match hidden {
+        Some(n) => {
+            super::inserts::add_row_left(&p, r, "+ Send", resp.hovered());
+            Some(super::overflow::paint_count(&p, r, n))
+        }
+        None => {
+            super::inserts::add_row(&p, r, "+ Send", resp.hovered());
+            None
+        }
+    };
+    let mut choices = send_targets(s, t, None, app.engine.io_map());
+    choices.push(RoutingChoice::Entry { label: "New FX Channel…".into(), value: NEW_FX.into() });
+    push_unused_entry(s, &mut choices);
+    if let Some(v) = choice_menu(&resp, "", &choices, menu) {
+        if v == REMOVE_UNUSED {
+            let _ = app.remove_unused_busses();
+        } else {
+            let _ = app.add_send(t.id, &v);
+        }
+    }
+    sl.add_send = r4(r);
+    count
+}
+
+/// The full-height sends section's rows in `body` (under its SENDS label): two sends and "+ Send";
+/// past two the rows scroll in the two rows' view and "+ Send" stays pinned under it with the
+/// hidden count (Overflow).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn sends_block(
     app: &mut StudioApp,
@@ -522,7 +529,24 @@ pub(super) fn sends_block(
     menu: &mut Vec<MenuItem>,
 ) {
     let rows = super::anatomy::slots_in(body);
-    send_list(app, ui, s, t, rows, &|i| super::anatomy::slot(body, i), clip, sl, menu);
+    if rows == 0 || !takes_sends(t.kind) {
+        return;
+    }
+    let visible = rows - 1;
+    let sends = occupied(t);
+    if sends.len() <= visible {
+        send_rows(app, ui, s, t, &sends, &|i| super::anatomy::slot(body, i), clip, sl, menu);
+        let _ = add_send(app, ui, s, t, super::anatomy::slot(body, sends.len()), clip, None, sl, menu);
+        return;
+    }
+    let view = Rect::from_min_max(super::anatomy::slot(body, 0).min, super::anatomy::slot(body, visible - 1).max);
+    let ov = super::overflow::Overflow::begin(app, ui, t.id, super::overflow::Section::Sends, view, clip, sends.len(), visible);
+    send_rows(app, ui, s, t, &sends, &|i| ov.row(i), ov.clip(), sl, menu);
+    let mut layout = ov.finish(ui.painter());
+    if let Some((text, at)) = add_send(app, ui, s, t, super::anatomy::slot(body, visible), clip, Some(layout.hidden), sl, menu) {
+        (layout.count_text, layout.count_rect) = (text, at);
+    }
+    sl.sends_overflow = Some(layout);
 }
 
 /// The short variant's `Snd n` button: it opens the track's send rows and "+ Send" in a list under
@@ -550,7 +574,11 @@ pub(super) fn snd_button(
     let free = count < t.mixer.sends.len();
     let mut drawn = StripLayout::default();
     let list = super::short::list(app, ui, t.id, super::short::ShortList::Sends, &resp, count + usize::from(free), |app, ui, rows, clip| {
-        send_list(app, ui, s, t, rows.len(), &|i| rows[i], clip, &mut drawn, menu);
+        let sends = occupied(t);
+        send_rows(app, ui, s, t, &sends, &|i| rows[i], clip, &mut drawn, menu);
+        if let Some(r) = rows.get(sends.len()) {
+            let _ = add_send(app, ui, s, t, *r, clip, None, &mut drawn, menu);
+        }
     });
     (sl.sends, sl.add_send) = (drawn.sends, drawn.add_send);
     sl.list_rect = list.map_or(sl.list_rect, r4);
