@@ -13,6 +13,7 @@ mod clip;
 mod clip_bounce;
 mod clip_list;
 mod clip_more;
+mod device_pages;
 mod edit;
 mod edit_more;
 mod event;
@@ -166,6 +167,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(midi::specs());
         v.extend(midi_input::specs());
         v.extend(midi_effect::specs());
+        v.extend(device_pages::specs());
         v.extend(midi_map::specs());
         v.extend(midi_output::specs());
         v.extend(view_more::specs());

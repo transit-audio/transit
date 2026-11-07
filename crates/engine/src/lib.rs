@@ -11,6 +11,7 @@ pub mod catalog_more;
 pub mod clip_group_file;
 pub mod cmd;
 pub mod demo;
+pub mod device_pages;
 pub mod edit;
 pub mod emergency;
 pub mod file_access;
