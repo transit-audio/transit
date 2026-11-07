@@ -81,6 +81,8 @@ In progress. Slices as in decision 8, each through the usual implementer, review
 
 Slice 1 landed: the cpal helpers moved into `backend/cpal.rs`, the fitter tests run on a neutral stamp harness proven bit-identical to the cpal `Stamper`, and `transit-audio-wasapi` tests its conversion against `convert_golden.rs` without cpal.
 
+Slice 2 landed: on Windows the WASAPI system is listed by the native enumerator (`backend::native::wasapi_system()`, the default system, errors as diagnostics) for Audio Devices and the report, which names the lister; the native lookup warns on a name two endpoints share; `cpal_and_native_wasapi_list_the_same_names` compares both listings.
+
 ## Gate
 
 Decision 7 is the gate. In short: `cargo xtask windows-deps` passes with its positive control and its negative controls fail; Windows offers no cpal choice; the effective backend shows the native controls for `Auto` and former `cpal` users; WASAPI is the default system; a forced native open failure is a visible error with the device closed and no other open attempted; saved device names resolve to the same endpoint, proven against cpal on real endpoints before slice 3; the WASAPI conversion goldens pass without cpal; the fitter tests run on Windows on a harness proven bit-identical to the cpal one.
