@@ -7,7 +7,8 @@
 //!   `fl32`/`fl64`) with native readers, and everything else (FLAC, MP3, Ogg Vorbis, AAC/ALAC in
 //!   MP4, CAF, Matroska, ADPCM/A-law/µ-law WAV, ...) through `symphonia`.
 //! * [`encode`] writes WAV/BWF (RF64 above 4 GiB), AIFF / AIFF-C `fl32`, and FLAC (built-in
-//!   encoder), with optional TPDF dither.
+//!   encoder), with optional TPDF dither, and Ogg Opus (RFC 7845, libopus from transit-opus, #238),
+//!   transit's only lossy export. Ogg Opus also reads back through the same libopus decoder.
 //! * [`wav_float_header`] heads a float WAV written while it grows (recording).
 //! * [`peaks`] builds multi-resolution min/max overviews for waveform drawing.
 //! * [`FileEncoder`] writes the same formats block by block into any `Write + Seek`, so a file
@@ -22,13 +23,17 @@ mod buffer;
 mod caf;
 mod flac;
 mod mp4;
+mod ogg;
+mod opus;
 mod pcm;
 pub mod peaks;
+mod resample;
 mod symph;
 mod wav;
 
 pub use blocks::{BlockReader, MAX_HELD_BYTES, ReadSeek};
 pub use buffer::AudioBuffer;
+pub use opus::{DEFAULT_OPUS_KBPS, OPUS_BITRATES_KBPS, opus_granules, opus_tags};
 pub use pcm::MAX_DECODE_SAMPLES;
 use std::io::{Seek, Write};
 
@@ -63,6 +68,8 @@ pub enum FileFormat {
     Flac,
     Mp3,
     Ogg,
+    /// Ogg Opus (RFC 7845).
+    Opus,
     Aac,
     Alac,
     Caf,
@@ -126,18 +133,26 @@ pub enum BitDepth {
 /// Options for [`encode`].
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EncodeOptions {
-    /// `Wav`, `Aiff` or `Flac`; anything else is [`AudioError::Unsupported`].
+    /// `Wav`, `Aiff`, `Flac` or `Opus`; anything else is [`AudioError::Unsupported`].
     pub format: FileFormat,
+    /// Ignored for Opus (a lossy codec has no bit depth).
     pub bit_depth: BitDepth,
-    /// Add TPDF dither when quantizing to an integer depth.
+    /// Add TPDF dither when quantizing to an integer depth (ignored for Opus).
     pub dither: bool,
     /// Write a BWF `bext` chunk (WAV only; ignored for other formats).
     pub bwf: Option<BwfInfo>,
+    /// The Opus bitrate in kb/s (the VBR target; `None`: [`DEFAULT_OPUS_KBPS`]). Ignored for the
+    /// lossless formats.
+    #[serde(default)]
+    pub bitrate_kbps: Option<u16>,
+    /// The title tag (`TITLE` in the Opus OpusTags; ignored for the other formats).
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 impl Default for EncodeOptions {
     fn default() -> Self {
-        Self { format: FileFormat::Wav, bit_depth: BitDepth::Int24, dither: false, bwf: None }
+        Self { format: FileFormat::Wav, bit_depth: BitDepth::Int24, dither: false, bwf: None, bitrate_kbps: None, title: None }
     }
 }
 
@@ -161,6 +176,7 @@ fn detect_by_magic(b: &[u8], depth: u32) -> Option<FileFormat> {
     }
     match head(4)? {
         b"fLaC" => return Some(FileFormat::Flac),
+        b"OggS" if opus::is_opus(b) => return Some(FileFormat::Opus),
         b"OggS" => return Some(FileFormat::Ogg),
         b"caff" => return Some(FileFormat::Caf),
         [0x1A, 0x45, 0xDF, 0xA3] => return Some(FileFormat::Other),
@@ -200,6 +216,7 @@ fn detect_by_ext(ext: &str) -> FileFormat {
         "flac" => FileFormat::Flac,
         "mp3" | "mp2" | "mp1" => FileFormat::Mp3,
         "ogg" | "oga" => FileFormat::Ogg,
+        "opus" => FileFormat::Opus,
         "aac" | "m4a" | "m4b" | "mp4" | "adts" => FileFormat::Aac,
         "caf" => FileFormat::Caf,
         _ => FileFormat::Other,
@@ -227,6 +244,7 @@ pub fn probe(bytes: &[u8], ext_hint: Option<&str>) -> Result<AudioInfo> {
             aiff::AiffParse::Native(l) => Ok(l.info),
             aiff::AiffParse::Foreign => symph::probe(bytes, format),
         },
+        FileFormat::Opus if opus::is_opus(bytes) => opus::probe(bytes),
         _ => symph::probe(bytes, format),
     }
 }
@@ -272,30 +290,44 @@ pub fn decode(bytes: &[u8], ext_hint: Option<&str>) -> Result<(AudioInfo, AudioB
             }
             aiff::AiffParse::Foreign => symph::decode(bytes, format),
         },
+        FileFormat::Opus if opus::is_opus(bytes) => opus::decode(bytes),
         _ => symph::decode(bytes, format),
     }
 }
 
-/// Encode `buf` as WAV/BWF, AIFF/AIFF-C or FLAC. Samples are clamped to [-1, 1].
+/// Encode `buf` as WAV/BWF, AIFF/AIFF-C, FLAC or Ogg Opus. Samples are clamped to [-1, 1].
 pub fn encode(buf: &AudioBuffer, opts: &EncodeOptions) -> Result<Vec<u8>> {
     match opts.format {
         FileFormat::Wav => wav::encode(buf, opts.bit_depth, opts.dither, opts.bwf.as_ref(), false, None),
         FileFormat::Aiff => aiff::encode(buf, opts.bit_depth, opts.dither),
         FileFormat::Flac => flac::encode(buf, opts.bit_depth, opts.dither),
+        FileFormat::Opus => opus::encode(buf, opts.bitrate_kbps, opts.title.as_deref()),
         other => Err(AudioError::Unsupported(format!("encoding {other:?} is not supported"))),
     }
 }
 
 /// Formats [`encode`] can write, as the extensions that name them.
-pub const ENCODE_EXTENSIONS: &str = "wav, aif, aiff, flac";
+pub const ENCODE_EXTENSIONS: &str = "wav, aif, aiff, flac, opus";
 
-/// The format [`encode`] writes for a file extension or format name (`wav`, `aiff`, `flac`, case-insensitive), or `None` when it cannot write it.
+/// The format [`encode`] writes for a file extension or format name (`wav`, `aiff`, `flac`, `opus`, case-insensitive), or `None` when it cannot write it.
 pub fn encode_format_for(name: &str) -> Option<FileFormat> {
     match name.trim_start_matches('.').to_ascii_lowercase().as_str() {
         "wav" | "wave" | "bwf" => Some(FileFormat::Wav),
         "aif" | "aiff" => Some(FileFormat::Aiff),
         "flac" => Some(FileFormat::Flac),
+        "opus" => Some(FileFormat::Opus),
         _ => None,
+    }
+}
+
+/// The extension a file [`encode`] writes in `format` is named with: `wav`, `aif`, `flac` or `opus`
+/// (`wav` for a format it cannot write).
+pub fn encode_extension(format: FileFormat) -> &'static str {
+    match format {
+        FileFormat::Aiff => "aif",
+        FileFormat::Flac => "flac",
+        FileFormat::Opus => "opus",
+        _ => "wav",
     }
 }
 
@@ -314,14 +346,15 @@ pub fn encode_with_channel_mask(buf: &AudioBuffer, opts: &EncodeOptions, mask: u
     }
 }
 
-/// Writes WAV/BWF (RF64 above 4 GiB), AIFF / AIFF-C `fl32` or FLAC block by block, producing
-/// the same bytes [`encode_with_channel_mask`] would for the whole buffer.
+/// Writes WAV/BWF (RF64 above 4 GiB), AIFF / AIFF-C `fl32`, FLAC or Ogg Opus block by block,
+/// producing the same bytes [`encode_with_channel_mask`] would for the whole buffer.
 pub struct FileEncoder<W: Write + Seek>(Writer<W>);
 
-enum Writer<W> {
+enum Writer<W: Write + Seek> {
     Wav(wav::Writer<W>),
     Aiff(aiff::Writer<W>),
     Flac(flac::Writer<W>),
+    Opus(Box<opus::Writer<W>>),
 }
 
 impl<W: Write + Seek> FileEncoder<W> {
@@ -333,6 +366,7 @@ impl<W: Write + Seek> FileEncoder<W> {
             FileFormat::Wav => Writer::Wav(wav::Writer::new(out, channels, sample_rate, depth, dither, opts.bwf.as_ref(), mask, false)?),
             FileFormat::Aiff => Writer::Aiff(aiff::Writer::new(out, channels, sample_rate, depth, dither)?),
             FileFormat::Flac => Writer::Flac(flac::Writer::new(out, channels, sample_rate, depth, dither)?),
+            FileFormat::Opus => Writer::Opus(Box::new(opus::Writer::new(out, channels, sample_rate, opts.bitrate_kbps, opts.title.as_deref())?)),
             other => return Err(AudioError::Unsupported(format!("encoding {other:?} is not supported"))),
         }))
     }
@@ -344,6 +378,7 @@ impl<W: Write + Seek> FileEncoder<W> {
             Writer::Wav(w) => w.check_room(frames),
             Writer::Aiff(w) => w.check_room(frames),
             Writer::Flac(w) => w.check_room(frames),
+            Writer::Opus(w) => w.check_room(frames),
         }
         .map(drop)
     }
@@ -355,6 +390,7 @@ impl<W: Write + Seek> FileEncoder<W> {
             Writer::Wav(w) => w.write(block, frames),
             Writer::Aiff(w) => w.write(block, frames),
             Writer::Flac(w) => w.write(block, frames),
+            Writer::Opus(w) => w.write(block, frames),
         }
     }
 
@@ -364,6 +400,7 @@ impl<W: Write + Seek> FileEncoder<W> {
             Writer::Wav(w) => w.finish(),
             Writer::Aiff(w) => w.finish(),
             Writer::Flac(w) => w.finish(),
+            Writer::Opus(w) => w.finish(),
         }
     }
 }

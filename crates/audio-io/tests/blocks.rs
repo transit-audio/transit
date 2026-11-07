@@ -45,7 +45,7 @@ fn assert_bit_exact(name: &str, bytes: &[u8], hint: &str) {
 
 #[test]
 fn every_writable_format_streams_exactly_what_decode_returns() {
-    let opts = |format, bit_depth| EncodeOptions { format, bit_depth, dither: false, bwf: None };
+    let opts = |format, bit_depth| EncodeOptions { format, bit_depth, dither: false, bwf: None, bitrate_kbps: None, title: None };
     let mono = tone(1, 30_011, 44_100);
     let stereo = tone(2, 30_011, 48_000);
     let six = tone(6, 9_001, 96_000);
@@ -91,8 +91,11 @@ fn a_recorder_take_streams_as_decode_reads_it_rf64_and_still_growing_included() 
 #[test]
 fn a_header_past_the_first_megabyte_is_read_from_the_whole_file() {
     // A JUNK chunk larger than the header read pushes `data` out of the first bytes.
-    let wav =
-        encode(&tone(2, 5_000, 48_000), &EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Int16, dither: false, bwf: None }).unwrap();
+    let wav = encode(
+        &tone(2, 5_000, 48_000),
+        &EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Int16, dither: false, bwf: None, bitrate_kbps: None, title: None },
+    )
+    .unwrap();
     let junk = 3 << 20;
     let mut bytes = wav[..12].to_vec();
     bytes.extend_from_slice(b"JUNK");
@@ -113,7 +116,11 @@ fn a_file_that_is_not_audio_is_refused_at_open() {
 #[test]
 fn native_pcm_seeks_to_a_frame_and_reads_on_from_there() {
     let buf = tone(2, 10_000, 48_000);
-    let bytes = encode(&buf, &EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None }).unwrap();
+    let bytes = encode(
+        &buf,
+        &EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None, bitrate_kbps: None, title: None },
+    )
+    .unwrap();
     let mut r = BlockReader::open(Box::new(Cursor::new(bytes.clone())), bytes.len() as u64, Some("wav")).unwrap();
     let mut block = Vec::new();
     assert!(r.seek(7_000).unwrap());
@@ -121,7 +128,11 @@ fn native_pcm_seeks_to_a_frame_and_reads_on_from_there() {
     assert_eq!(block[1], buf.channels[1][7_000..7_100]);
     assert!(r.seek(20_000).unwrap(), "past the end clamps to it");
     assert_eq!(r.read(&mut block, 100).unwrap(), 0);
-    let flac = encode(&buf, &EncodeOptions { format: FileFormat::Flac, bit_depth: BitDepth::Int16, dither: false, bwf: None }).unwrap();
+    let flac = encode(
+        &buf,
+        &EncodeOptions { format: FileFormat::Flac, bit_depth: BitDepth::Int16, dither: false, bwf: None, bitrate_kbps: None, title: None },
+    )
+    .unwrap();
     let mut r = BlockReader::open(Box::new(Cursor::new(flac.clone())), flac.len() as u64, Some("flac")).unwrap();
     assert!(!r.seek(7_000).unwrap(), "a decoded format does not seek");
 }

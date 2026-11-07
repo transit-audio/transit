@@ -36,7 +36,7 @@ fn float_wav_export_contains_the_corrected_mix_sample_for_sample() {
     let (s, _) = session("compressor", &[0.0, 5.0, 0.0], &[2085, 6175]);
     let range = Range::new(0, LEN as i64);
     let expected = transit_mix::render_range(&s, range, 1024);
-    let options = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None };
+    let options = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None, bitrate_kbps: None, title: None };
     Bounce::new(Arc::new(s), &path, range, &options, None, false, false).unwrap().run().unwrap();
     let bytes = std::fs::read(&path).unwrap();
     let (_, decoded) = transit_audio_io::decode(&bytes, None).unwrap();

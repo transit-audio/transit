@@ -7,12 +7,13 @@
 //! caller's reader. Everything else (FLAC, MP3, Ogg, ADPCM WAV, compressed AIFF-C, ...) goes through
 //! the symphonia packet decoder [`crate::decode`] uses, over the whole file held in memory: the
 //! container checks that bound symphonia's allocations walk the whole file. Only the decoded
-//! audio is streamed. Either way the samples are exactly [`crate::decode`]'s (the tests compare
-//! them).
+//! audio is streamed. Ogg Opus, which symphonia does not decode, is decoded whole by the crate's
+//! libopus reader when the file is opened and handed out from memory. Either way the samples are
+//! exactly [`crate::decode`]'s (the tests compare them).
 
 use crate::pcm::{PcmKind, decode_sample};
 use crate::symph::{Packets, guarded};
-use crate::{AudioError, AudioInfo, Result, aiff, detect_format, wav};
+use crate::{AudioBuffer, AudioError, AudioInfo, FileFormat, Result, aiff, detect_format, wav};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::sync::Arc;
 
@@ -36,6 +37,8 @@ pub struct BlockReader {
 enum Inner {
     Pcm(Pcm),
     Packets(Box<Held>),
+    /// A file decoded whole (Ogg Opus) and the next frame to hand out.
+    Decoded(AudioBuffer, usize),
 }
 
 /// Native PCM: the data region, read through the caller's source.
@@ -117,6 +120,10 @@ impl BlockReader {
             Some(Err(e)) => Err(e),
             None => {
                 let format = detect_format(&all, ext_hint);
+                if format == FileFormat::Opus && crate::opus::is_opus(&all) {
+                    let (info, buf) = crate::opus::decode(&all)?;
+                    return Ok(BlockReader { info, inner: Inner::Decoded(buf, 0) });
+                }
                 let packets = guarded(|| Packets::open(&all, Box::new(Cursor::new(Arc::clone(&all))), format))?;
                 let info = AudioInfo { frames: packets.declared_frames.unwrap_or(0), ..packets.info.clone() };
                 Ok(BlockReader { info, inner: Inner::Packets(Box::new(Held { packets, at: 0, frames: 0, channels: 0, done: false })) })
@@ -139,9 +146,14 @@ impl BlockReader {
         &self.info
     }
 
-    /// Move to `frame` (clamped to the end) when the file can seek: native PCM can, a symphonia
-    /// decode cannot (`Ok(false)`, nothing moves). The next [`Self::read`] starts there.
+    /// Move to `frame` (clamped to the end) when the file can seek: native PCM and a file decoded
+    /// whole can, a symphonia decode cannot (`Ok(false)`, nothing moves). The next [`Self::read`]
+    /// starts there.
     pub fn seek(&mut self, frame: u64) -> Result<bool> {
+        if let Inner::Decoded(buf, at) = &mut self.inner {
+            *at = usize::try_from(frame).unwrap_or(usize::MAX).min(buf.frames());
+            return Ok(true);
+        }
         let Inner::Pcm(p) = &mut self.inner else { return Ok(false) };
         let block = (p.kind.bytes() * p.channels) as u64;
         let at = p.start.saturating_add(frame.saturating_mul(block)).min(p.end);
@@ -159,6 +171,16 @@ impl BlockReader {
             Inner::Packets(h) => {
                 let n = h.read(out, max)?;
                 self.info.channels = h.packets.info.channels;
+                n
+            }
+            Inner::Decoded(buf, at) => {
+                let n = buf.frames().saturating_sub(*at).min(max);
+                out.resize_with(buf.channels.len(), Vec::new);
+                for (dst, src) in out.iter_mut().zip(&buf.channels) {
+                    dst.clear();
+                    dst.extend_from_slice(src.get(*at..*at + n).unwrap_or_default());
+                }
+                *at += n;
                 n
             }
         };

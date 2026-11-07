@@ -75,8 +75,14 @@ pub fn export(e: &Engine, ids: &[ClipId], path: &str) -> Result<usize> {
                     }
                     None => {
                         let rel = format!("{name}.wav");
-                        let opts =
-                            EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
+                        let opts = EncodeOptions {
+                            format: FileFormat::Wav,
+                            bit_depth: transit_audio_io::BitDepth::Float32,
+                            dither: false,
+                            bwf: None,
+                            bitrate_kbps: None,
+                            title: None,
+                        };
                         let bytes = transit_audio_io::encode(&buf.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
                         crate::io::write_path(dir.join(&rel), bytes)?;
                         rel

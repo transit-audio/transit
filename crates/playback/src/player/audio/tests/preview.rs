@@ -10,7 +10,7 @@ fn constant(name: &str, value: f32, frames: usize) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let buf = AudioBuffer { sample_rate: 48_000, channels: vec![vec![value; frames]; 2] };
-    let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None };
+    let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None, bitrate_kbps: None, title: None };
     let path = dir.join("take.wav");
     std::fs::write(&path, encode(&buf, &opts).unwrap()).unwrap();
     path

@@ -41,7 +41,7 @@ fn tone(path: &Path, freq: f32, rate: u32, secs: f32, channels: usize) {
     let n = (rate as f32 * secs) as usize;
     let one: Vec<f32> = (0..n).map(|i| 0.5 * (std::f32::consts::TAU * freq * i as f32 / rate as f32).sin()).collect();
     let buf = AudioBuffer { sample_rate: rate, channels: vec![one; channels] };
-    let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Int16, dither: false, bwf: None };
+    let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Int16, dither: false, bwf: None, bitrate_kbps: None, title: None };
     std::fs::write(path, transit_audio_io::encode(&buf, &opts).unwrap()).unwrap();
 }
 

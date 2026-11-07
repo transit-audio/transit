@@ -111,7 +111,14 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
                 continue;
             }
         }
-        let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
+        let opts = EncodeOptions {
+            format: FileFormat::Wav,
+            bit_depth: transit_audio_io::BitDepth::Float32,
+            dither: false,
+            bwf: None,
+            bitrate_kbps: None,
+            title: None,
+        };
         let bytes = transit_audio_io::encode(&audio.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
         let (name, new) = store_wav(&audio_dir, &stem, &bytes)?;
         src.path = format!("Audio Files/{name}");
@@ -480,7 +487,14 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
                 read_file(d.path())?
             }
             None => {
-                let opts_wav = EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
+                let opts_wav = EncodeOptions {
+                    format: FileFormat::Wav,
+                    bit_depth: transit_audio_io::BitDepth::Float32,
+                    dither: false,
+                    bwf: None,
+                    bitrate_kbps: None,
+                    title: None,
+                };
                 transit_audio_io::encode(&audio.buffer, &opts_wav).map_err(|err| EngineError::Io(err.to_string()))?
             }
         };

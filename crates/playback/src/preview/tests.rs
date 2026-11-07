@@ -26,7 +26,7 @@ fn ramp(channels: usize, frames: usize, rate: u32) -> AudioBuffer {
 
 fn write(dir: &Path, name: &str, buf: &AudioBuffer, format: FileFormat) -> PathBuf {
     let bit_depth = if format == FileFormat::Flac { BitDepth::Int24 } else { BitDepth::Float32 };
-    let bytes = encode(buf, &EncodeOptions { format, bit_depth, dither: false, bwf: None }).unwrap();
+    let bytes = encode(buf, &EncodeOptions { format, bit_depth, dither: false, bwf: None, bitrate_kbps: None, title: None }).unwrap();
     let path = dir.join(name);
     std::fs::write(&path, bytes).unwrap();
     path

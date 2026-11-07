@@ -241,6 +241,8 @@ fn export_of_a_short_file_forced_disk_backed_equals_the_in_memory_render_bit_for
         bit_depth: transit_audio_io::BitDepth::Int24,
         dither: false,
         bwf: None,
+        bitrate_kbps: None,
+        title: None,
     };
     let bytes = transit_audio_io::encode(&AudioBuffer { sample_rate: 48_000, channels: data }, &opts).unwrap();
     std::fs::write(&path, &bytes).unwrap();

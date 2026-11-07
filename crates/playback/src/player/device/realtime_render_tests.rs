@@ -134,6 +134,8 @@ fn opts() -> transit_audio_io::EncodeOptions {
         bit_depth: transit_audio_io::BitDepth::Float32,
         dither: false,
         bwf: None,
+        bitrate_kbps: None,
+        title: None,
     }
 }
 

@@ -24,7 +24,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn opts() -> EncodeOptions {
-    EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None }
+    EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None, bitrate_kbps: None, title: None }
 }
 
 fn io() -> IoMap {
