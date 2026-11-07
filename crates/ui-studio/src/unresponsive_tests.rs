@@ -228,3 +228,69 @@ fn a_stuck_host_thread_marks_its_loaded_plug_in_and_clears_when_it_returns() {
     t.release.take();
     assert!(t.frames_until(Duration::from_secs(5), |t| t.marked(track) == [false; 3]), "cleared once the call returns");
 }
+
+impl T {
+    fn strip(&self, t: TrackId) -> crate::mixer::StripLayout {
+        self.app.mixer.layout.strips.iter().find(|s| s.track == t.0).cloned().expect("a strip")
+    }
+}
+
+/// #326, Strip details (13): on a full-height slot the circle-alert in `meter.hot` takes the power
+/// glyph's place, the name drops to `text.muted`, and a click opens the device card.
+#[test]
+fn an_unresponsive_insert_slot_shows_the_alert_glyph_and_opens_its_card() {
+    let mut t = T::new();
+    let track = t.fx_track();
+    let other = t.fx_track();
+    t.app.focus(other);
+    FAKE.with(|f| f.set(Some((track, Hang::Worker))));
+    t.frames(5);
+    assert!(!t.strip(track).short, "full-height strips");
+    let row = t.row(track);
+    assert!(row.alert, "the alert glyph");
+    assert_eq!((row.glyph_color, row.name_color), (crate::theme::DARK.meter_hot.to_array(), crate::theme::DARK.text_muted.to_array()));
+    assert_eq!(row.status, UNRESPONSIVE, "the state stays readable");
+    // Negative control: the other track's plug-in answers, so it keeps the power glyph in `signal`.
+    let fine = t.row(other);
+    assert!(!fine.alert && fine.glyph_color == crate::theme::DARK.signal.to_array());
+    t.app.ui.show_devices = false;
+    t.frames(2);
+    let at = crate::tests::mid(t.row(track).name_rect);
+    crate::tests::click(&mut t.app, at);
+    t.frames(3);
+    assert!(t.app.ui.show_devices && t.app.focus_track() == Some(track), "a click opens the device card");
+}
+
+/// #326, Strip details (13): the short strip's FX button carries one 10 px circle-alert riding its
+/// top-right corner, and its tooltip names every insert that does not answer.
+#[test]
+fn the_short_fx_button_carries_one_alert_naming_the_inserts_that_do_not_answer() {
+    let mut t = T::new();
+    t.app.ui.mixer_height = 0.0;
+    let track = t.fx_track();
+    t.app.engine.session_mut().track_mut(track).unwrap().mixer.inserts[1] = Some(Insert::new(HOSTED));
+    t.frames(3);
+    assert!(t.strip(track).short, "the docked pane at its minimum shows the short strip");
+    // Negative control: nothing hung, no glyph and no tip.
+    FAKE.with(|f| f.set(None));
+    t.frames(3);
+    let s = t.strip(track);
+    assert_eq!((s.fx_alert, s.fx_alert_tip.as_str()), ([0.0; 4], ""));
+    FAKE.with(|f| f.set(Some((track, Hang::Worker))));
+    t.frames(3);
+    let s = t.strip(track);
+    let (a, b) = (s.fx_alert, s.fx_button);
+    assert_eq!((a[2] - a[0], a[3] - a[1]), (10.0, 10.0), "a 10 px glyph");
+    assert_eq!((a[2], a[1]), (b[2] + 4.0, b[1] - 4.0), "riding the top-right corner");
+    let name = t.app.plugin_name(HOSTED, false);
+    assert_eq!(s.fx_alert_tip, format!("{name} and {name} are not responding"), "two: one glyph, the tooltip lists them");
+}
+
+#[test]
+fn the_not_responding_tip_names_one_or_lists_several() {
+    let n = |v: &[&str]| crate::mixer::not_responding_tip(&v.iter().map(ToString::to_string).collect::<Vec<_>>());
+    assert_eq!(n(&["Room Reverb"]), "Room Reverb is not responding");
+    assert_eq!(n(&["Room Reverb", "Bite"]), "Room Reverb and Bite are not responding");
+    assert_eq!(n(&["A", "B", "C"]), "A, B and C are not responding");
+    assert_eq!(n(&[]), "", "none: no tip");
+}

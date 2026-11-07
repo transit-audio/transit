@@ -40,11 +40,13 @@ use channel::strip;
 use controls::{Readout, control, readout};
 pub use controls::{balance_of, db_to_k, k_to_db, pans_for};
 pub use hue::{CHROMA_FLOOR, chroma_hue, hues, nearest};
+#[cfg(test)]
+pub(crate) use inserts::not_responding_tip;
 use inserts::{MIN_FADER, inserts_block, midi_output_button};
 use menus::{choice_menu, dropdown, paint_dropdown};
 pub use meters::{CLIP_CAP, peak_text};
-pub use overflow::{OverflowLayout, Section as OverflowSection};
 use meters::{meter_bounds, strip_meter};
+pub use overflow::{OverflowLayout, Section as OverflowSection};
 use routing::{NOT_HERE, push_unused_entry, same_route, unresolved_output};
 pub use routing::{
     RoutingChoice, bus_label, feeding_loops, input_choices, input_choices_with, listening_loops, orphan_busses, output_choices, path_choices,
@@ -165,6 +167,10 @@ pub struct StripLayout {
     /// The short variant's count buttons and what they read ("FX 3", "Snd +").
     pub fx_button: R4,
     pub fx_text: String,
+    /// The circle-alert riding the FX button while an insert does not answer, and its tooltip
+    /// naming them; zero and empty otherwise.
+    pub fx_alert: R4,
+    pub fx_alert_tip: String,
     /// The short variant's open list (FX or Snd) under its button; zero while closed.
     pub list_rect: R4,
     pub snd_button: R4,
@@ -267,6 +273,9 @@ pub struct InsertRow {
     pub status: String,
     /// The Retry button of a "Not responding" row (zero otherwise, issue #82).
     pub retry: R4,
+    /// The plug-in does not answer (#213): the circle-alert in `meter.hot` takes the power
+    /// glyph's place and the name drops to `text.muted`; a click opens its device card.
+    pub alert: bool,
 }
 
 /// Last frame's mixer geometry.

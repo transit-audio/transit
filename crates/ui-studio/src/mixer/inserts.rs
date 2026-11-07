@@ -92,7 +92,9 @@ fn insert_slot(
     if hang.is_some() {
         status = crate::devices::UNRESPONSIVE.to_string();
     }
-    let shown = if status.is_empty() { name.clone() } else { format!("{name} ({status})") };
+    // A plug-in that does not answer reads by its glyph (the circle-alert in the power glyph's
+    // place, Strip details 13) and its tooltip; a load in progress still says so after the name.
+    let shown = if status.is_empty() || hang.is_some() { name.clone() } else { format!("{name} ({status})") };
     let mut text_r = Rect::from_min_max(pos2(rr.min.x + 8.0, rr.min.y), pos2(power.min.x, rr.max.y));
     let mut retry = R4::default();
     if stuck {
@@ -105,16 +107,34 @@ fn insert_slot(
     // Latency mode), the name dimmed to `text.muted` with it.
     let mode = app.mode_bypassed(ins.uid.get());
     let on = !(ins.bypass || mode);
-    let (glyph_ink, name_ink) = if on { (TOKENS.signal, TOKENS.text) } else { (TOKENS.text_faint, TOKENS.text_muted) };
+    let (glyph_ink, name_ink) = if hang.is_some() {
+        (TOKENS.meter_hot, TOKENS.text_muted)
+    } else if on {
+        (TOKENS.signal, TOKENS.text)
+    } else {
+        (TOKENS.text_faint, TOKENS.text_muted)
+    };
     text_in(p, &CONTROL, &shown, name_ink, text_r, Align2::LEFT_CENTER);
-    power_glyph(p, power.center(), cs::INDICATOR_SIZE, cs::INDICATOR_STROKE, glyph_ink);
-    if glyph.on_hover_text(if ins.bypass { "Turn on" } else { "Bypass" }).clicked() {
+    if hang.is_some() {
+        crate::icons::paint(p, power.center(), crate::icons::Icon::Error, cs::INDICATOR_SIZE, glyph_ink);
+        // The glyph names the trouble; a click on it opens the device card, as the name does.
+        let tip = hang.map(|h| app.hang_tip(h, &name)).unwrap_or_default();
+        if glyph.on_hover_text(tip).clicked() {
+            open_card(app, id);
+        }
+    } else if glyph.on_hover_text(if ins.bypass { "Turn on" } else { "Bypass" }).clicked() {
         let _ = app.toggle_bypass(id, slot);
+    }
+    if hang.is_none() {
+        power_glyph(p, power.center(), cs::INDICATOR_SIZE, cs::INDICATOR_STROKE, glyph_ink);
     }
     // A built-in's editor is our own window: it needs no player (the card does the same).
     let builtin = app.builtin_at((id, slot)).is_some();
     let enabled = builtin || app.player.as_ref().is_some_and(|pl| crate::devices::hosted(&ins.plugin) || pl.has_editor(id, slot));
-    if resp.clicked() && enabled {
+    if resp.clicked() && hang.is_some() {
+        // A plug-in that does not answer: its device card, hatched with the reason and Resume.
+        open_card(app, id);
+    } else if resp.clicked() && enabled {
         // Selecting an insert opens its editor, or raises the one already open (#173).
         app.show_editor((id, slot));
     }
@@ -171,7 +191,47 @@ fn insert_slot(
         name_color: name_ink.to_array(),
         status,
         retry,
+        alert: hang.is_some(),
     }
+}
+
+/// Opens the device chain on `track`, where an unresponsive insert's card is hatched with the
+/// reason and Resume.
+fn open_card(app: &mut StudioApp, track: TrackId) {
+    app.focus(track);
+    app.ui.show_devices = true;
+}
+
+/// The names of the inserts on `t` that do not answer, in slot order.
+fn hung_inserts(app: &mut StudioApp, t: &Track) -> Vec<String> {
+    let hung: Vec<&str> = t
+        .mixer
+        .inserts
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, ins)| ins.as_ref().filter(|ins| app.slot_hang(t.id, slot, &ins.plugin).is_some()).map(|ins| ins.plugin.as_str()))
+        .collect();
+    hung.into_iter().map(|id| app.plugin_name(id, false)).collect()
+}
+
+/// The FX button's tooltip for the inserts that do not answer: "Room Reverb is not responding",
+/// or the list ("Room Reverb and Bite are not responding").
+pub(crate) fn not_responding_tip(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => format!("{one} is not responding"),
+        [rest @ .., last] => format!("{} and {last} are not responding", rest.join(", ")),
+    }
+}
+
+/// The 10 px circle-alert riding the FX button's top-right corner (the board: 4 past its right
+/// and top edges), on a disc of the panel fill that rings it. Returns the glyph's rect.
+fn paint_alert(p: &egui::Painter, button: Rect) -> Rect {
+    let size = cs::UNRESPONSIVE_SIZE;
+    let r = Rect::from_min_size(pos2(button.max.x + 4.0 - size, button.min.y - 4.0), vec2(size, size));
+    p.circle_filled(r.center(), size / 2.0 + 1.0, TOKENS.surface_panel);
+    crate::icons::paint(p, r.center(), crate::icons::Icon::Error, size, TOKENS.meter_hot);
+    r
 }
 
 /// The occupied insert slots of a track, in slot order.
@@ -308,7 +368,16 @@ pub(super) fn fx_button(
     let p = ui.painter().with_clip_rect(clip);
     let (resp, text) = count_button(ui, &p, clip, r, ui.id().with(("fx_button", t.id.0)), "FX", count);
     crate::help::hover(ui, &resp, crate::help::Id::MixerStripInsert);
-    let resp = resp.on_hover_text(format!("Inserts ({count}): click for the list"));
+    let hung = hung_inserts(app, t);
+    let resp = if hung.is_empty() {
+        resp.on_hover_text(format!("Inserts ({count}): click for the list"))
+    } else {
+        // One glyph however many do not answer; the tooltip names them (Strip details 13).
+        let tip = not_responding_tip(&hung);
+        sl.fx_alert = r4(paint_alert(&ui.painter().with_clip_rect(clip.expand(6.0)), r));
+        sl.fx_alert_tip = tip.clone();
+        resp.on_hover_text(tip)
+    };
     sl.fx_button = r4(r);
     sl.fx_text = text;
     let free = count < t.mixer.inserts.len();
