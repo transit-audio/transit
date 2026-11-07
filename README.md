@@ -260,6 +260,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 ### Sessions and rendering
 
 - Bounce the main mix or any bus over the selection or loop range to WAV, AIFF or FLAC at 16-bit, 24-bit or 32-bit float.
+- Opus export for sharing: mix, stems and clips as `.opus` at 96 to 256 kb/s (160 by default), encoded by the reference libopus. No MP3, on purpose: Opus sounds better at every bitrate and its license is BSD.
 - Stems by output path from the Bounce dialog.
 - Bounce in Place turns a track's clips into audio.
 - Full undo history; every edit is a command.

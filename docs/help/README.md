@@ -8,6 +8,7 @@ optional `key` (spelled as the shortcut table spells it) and an optional `link` 
 
 | File | Covers |
 |---|---|
+| [`bounce.toml`](bounce.toml) | The Bounce dialog's format and Opus bitrate rows. |
 | [`track-menu.toml`](track-menu.toml) | Make Active and Make Inactive in the track menus. |
 | [`transport.toml`](transport.toml) | The transport bar: buttons, readouts, tempo, meter, meters. |
 | [`options.toml`](options.toml) | The per-machine Low Latency option. |

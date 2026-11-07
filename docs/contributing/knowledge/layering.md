@@ -18,9 +18,10 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 
 - Every crate is registered in `LAYERS`; a new crate needs a row (and a layer you can justify).
 - No dependency points upward (dev-dependencies excepted).
-- The standalone crates (`STANDALONE`: `time`, `audio-io`, `audio-backend`, `midi-io`, `midi`,
+- The standalone crates (`STANDALONE`: `time`, `opus`, `audio-backend`, `midi-io`, `midi`,
   `macro-osc`, `instrument-core`, `resonator`, `texture`, `granular`, `modulator`, `random-sequencer`) have no
-  production workspace dependencies at all. `modal-voice` depends on `resonator` at L1, and
+  production workspace dependencies at all. `audio-io` was standalone until it took `opus`, the
+  vendored libopus behind its Ogg Opus writer and reader (#238, ADR 0048, a same-layer L0 edge). `modal-voice` depends on `resonator` at L1, and
   `sampler-core` (the portable Sampler core, ADR 0041) on `instrument-core` at L1, its only
   workspace dependency: never on `dsp`.
   `dsp` was standalone until it took

@@ -122,6 +122,27 @@ Swipe comping (picking a range from one take and the next range from another, wi
 renaming or coloring takes and auditioning a lane are not in this version. Logic's Take Folder and
 Live's Take Lanes work the same way for everything above.
 
+## Bounce
+
+File > Bounce… (Ctrl+Alt+B) writes the main mix or a bus over the selection, the cycle range or
+the whole song, or one file per output path (**Stems by output path**). **Format** is WAV, AIFF or
+FLAC, lossless at the bit depth you pick (16-bit, 24-bit or 32-bit float), or **Opus**, transit's
+lossy format for sharing: small files that play in every browser, phone and messaging app.
+
+With Opus the bit depth row gives way to **Bitrate**: 96, 128, 160 (the default), 192 or 256 kb/s.
+The encoder is the reference libopus at its highest quality setting, with a variable bitrate that
+stays near the rate you pick, so a three-minute song at 160 kb/s is about 3.6 MB. Opus files are
+always 48 kHz: a session at another rate is converted as the file is written, and the file is
+exactly as long as the range you bounced. Opus is mono or stereo; a surround mix or path is refused
+(fold it down to stereo, or bounce WAV or FLAC). The destination's extension follows the format
+(`mix.wav` becomes `mix.opus`). transit does not export MP3: Opus sounds better at every bitrate,
+and its encoder is BSD-licensed where MP3's is LGPL. Importing MP3 still works, and `.opus` files
+import too.
+
+The control channel's `file.bounce_mix`, `file.bounce_stems`, `file.bounce_paths` and
+`file.export_clips` take `format: "opus"` and `bitrate` in kb/s (6 to 510; the dialog offers the
+five above); a `path` ending in `.opus` picks Opus on its own.
+
 ## Bounce in Place
 
 Choose **Track > Bounce in Place** (Commit, **Alt+Shift+C**) to print the focused track through
