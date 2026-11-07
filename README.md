@@ -156,7 +156,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Clips snap to the grid as you drag; Ctrl-drag or Alt-drag copies; Shift bypasses snap.
 - Move and copy drags preview every selected clip at its destination, not only the one under the pointer.
 - Drag a rectangle across empty lane space to select every clip it touches, as in Logic: Shift adds to the selection, Ctrl toggles, Escape cancels, and a click still sets the cursor.
-- Loop strip on the ruler, in amber: drag to make a loop, drag its edges to resize it, double-click to toggle it. The loop follows tempo changes.
+- Loop strip on the ruler, in its own magenta hue (kept apart from the blue and amber of the device panels): drag to make a loop, drag its edges to resize it, double-click to toggle it. The loop follows tempo changes.
 - Automation lanes under any track for volume, pan, mute, sends and every device parameter; Read, Touch, Latch and Write modes.
 - Touch mode suspends a lane while you hold its control, and the lane takes over again over 0.2 s after you let go, as in Logic and Ableton.
 - Tempo and meter changes along the timeline, edited by dragging or typing in the transport.
@@ -177,6 +177,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 ### Mixer and routing
 
 - Per-track device chains: drag a device to reorder the chain; Alt-drag copies it.
+- Mixer strips in the design language: fixed sections, so faders line up across strips; one dB taper shared by the fader, its scale and a stereo meter with clip cells; insert slots with a power glyph for on and bypassed; faders top out at +6 dB. The docked mixer shows a short strip, with count buttons that open the inserts and sends.
 - Buses and sends, with a warning for routes that point nowhere and a refusal for routing loops.
 - Sidechain any compressor or gate from any track or bus, pre- or post-fader, latency-aligned.
 - Hosted plug-ins can take a sidechain key too.
@@ -199,7 +200,13 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Modal Voice: a gated exciter-and-resonator voice ported from Émilie Gillet's modal synthesizer firmware (MIT) and checked bit for bit against it: a bow, a blow and a strike (samples, mallet, plectrum or particles) under an envelope, into a modal bank, a string or five chord strings (or the module's hidden FM voice), with its space reverb; played mono from MIDI with a real gate (the pedal holds it), velocity as the module's strength input, at the module's own 32 kHz converted at the edge (latency compensated), with the Macro Oscillator's shaper and matrix; presets Bowed Glass, Breath Pipe, Struck Bar, Temple Bell, Plucked Wire and Noise Pad.
 - The Macro Oscillator's optional per-voice shaper (amp and filter envelopes, a multimode filter, two LFOs with tempo sync) and a 16-row modulation matrix with via sources and curves (aftertouch, poly aftertouch, the envelopes, the LFOs, rack macros and more), transit's own addition, off by default.
 - Work toward more built-in instruments, under [ADR 0033](docs/adr/0033-built-in-instruments-mutable-instruments-port.md): a dev-only test oracle wraps Émilie Gillet's original C++ DSP (MIT licensed), and a Rust port of all 24 synthesis engines nulls against it bit for bit. The first of them, the Macro Oscillator (Plaits), is the built-in instrument and the default for a new instrument track.
-- Built-in panels with knobs, and bespoke layouts for Compressor, Gate, EQ, Macro Oscillator, Resonator, Texture Synth, Modal Voice and Plate; factory and user presets; a scope and a gain-reduction display on the dynamics panels. Moving a plug-in knob while a lane is armed (Write, Latch, Touch) records into it.
+- Built-in panels with knobs, factory and user presets, and a scope and a gain-reduction display on the dynamics panels. Moving a plug-in knob while a lane is armed (Write, Latch, Touch) records into it.
+- A device design language ([ADR 0045](docs/adr/0045-design-language-in-code.md), [the spec](docs/design/language/README.md)): graphite panels, blue for a value you set, amber for what modulates it, with its tokens, controls and window chrome in code. Dark only for now. The Macro Oscillator and the mixer strip are the first surfaces in it; the other panels follow.
+- Macro Oscillator editor, rebuilt in that language: a floating window sized to its content with no resize handle, a title bar with the preset browser and an output meter, and a model picker with short names and a description of the model you chose. The Tone knobs and the pad's axes are relabeled per model.
+- Macro Oscillator display and pad: the display draws one cycle of the current model and follows the note you hold; the Timbre/Morph pad sets both together.
+- Macro Oscillator Shaper and modulation: amp envelope, filter and two LFO cards, a filter graph that shades how far the modulation can move the cutoff, and a matrix where you drag a source chip onto a knob to route it. A knob with a route shows a ring from its value to its reach.
+- Time readouts show three significant digits, in milliseconds below a second and in seconds from there; type a bare number or `ms` for milliseconds, or a trailing `s` for seconds.
+- Controls: a double or triple click resets a knob, fader or pad; Ctrl+wheel (Cmd on macOS) nudges a knob, and a plain wheel scrolls the panel instead. Escape closes the editor you last clicked in, and Window > Close All Editors closes them all.
 - Built-in dynamics and EQ: Compressor/Limiter, Expander/Gate, EQ 7-Band, EQ 1-Band.
 - Built-in effects: Room and Plate Reverb, Saturator.
 - The effects inherited from the SoundCraft fork are retired in stages ([ADR 0040](docs/adr/0040-inherited-built-in-effects-retired-in-stages.md)): twelve are gone in v0.6.0 (Pitch Shifter, Drum Synth, Channel Strip, Maximizer, De-Esser, Rectifier, Lo-Fi, Time Shift, Mod Delay, Chorus, Flanger, Phaser). A session that used one opens with that slot emptied and says so.
@@ -266,6 +273,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - One renderer: playback and offline render both use the plan renderer; the legacy renderer is gone.
 - Offline render and playback are checked against each other by golden tests.
 - Every edit is a named command, which is what makes undo and the command catalog uniform.
+- App-wide polish: Lucide icons for every glyph (credited in [ATTRIBUTION.md](ATTRIBUTION.md)), option toggles in place of blue selectable labels, dropdown lists that open with a gap and a check beside the current value, user presets saved from the preset list, and Escape closing popups.
 - Assistant access (the control server and MCP tools) addresses positions as bar|beat and can add chords.
 - In-app help: Shift+? opens an Info panel that explains the control under the mouse. The diagnostics windows have question-mark markers, and the Callback Telemetry and Audio Devices figures are explained in the same help catalog the troubleshooting guide draws on.
 
