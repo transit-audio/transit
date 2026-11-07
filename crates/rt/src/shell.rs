@@ -131,6 +131,39 @@ fn icons_imp(_hwnd: isize) -> bool {
     false
 }
 
+/// Windows only: where the mouse cursor is now, in client pixels of the window `hwnd` (origin at
+/// the client area's top left; negative or past the client size when the cursor is outside it).
+/// A file dropped from the file manager carries no position through winit 0.30, so the app asks at
+/// the drop's frame (#368). Returns `None` for a null handle, when either call fails (a desktop
+/// that is not the input desktop, a destroyed window), and on every other platform.
+#[must_use]
+pub fn cursor_in_client(hwnd: isize) -> Option<(i32, i32)> {
+    cursor_imp(hwnd)
+}
+
+#[cfg(windows)]
+fn cursor_imp(hwnd: isize) -> Option<(i32, i32)> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    if hwnd == 0 {
+        return None;
+    }
+    let mut pt = POINT { x: 0, y: 0 };
+    // SAFETY: `pt` is a POINT on this stack frame, valid and writable for the whole of both calls,
+    // and neither call keeps the pointer. `GetCursorPos` only writes it; `ScreenToClient` reads and
+    // writes it and reads the window handle `hwnd` from the caller (the app's own top-level window,
+    // non-null, checked above; a stale handle makes the call fail, it is not undefined behavior).
+    // Both return a BOOL; zero is a failure and the wrapper returns `None` then.
+    let ok = unsafe { GetCursorPos(&raw mut pt) != 0 && ScreenToClient(hwnd as _, &raw mut pt) != 0 };
+    ok.then_some((pt.x, pt.y))
+}
+
+#[cfg(not(windows))]
+fn cursor_imp(_hwnd: isize) -> Option<(i32, i32)> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -141,5 +174,11 @@ mod tests {
     #[test]
     fn a_null_window_gets_no_icons() {
         assert!(!super::set_window_icons_from_exe(0));
+    }
+
+    /// A real cursor query needs a window; only the null-handle refusal is testable here.
+    #[test]
+    fn a_null_window_has_no_cursor_position() {
+        assert_eq!(super::cursor_in_client(0), None);
     }
 }

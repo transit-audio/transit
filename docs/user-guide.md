@@ -523,8 +523,8 @@ Files dragged in from the file manager go to whatever is under the pointer where
 Sampler's window, a file dropped on a pad becomes that pad's sample (a one-sample Sampler takes it
 anywhere in its window); dropped elsewhere on a device window, it is ignored. Anywhere else, the
 file is imported into the arrangement at the cursor (a `.transit` file opens as the session, a MIDI
-file imports as MIDI). The drop lands as soon as the pointer moves after you let go (see the known
-issues).
+file imports as MIDI). On Windows the drop lands where you let go; on other platforms it lands as
+soon as the pointer moves after you let go (see the known issues).
 
 ## Resonator
 

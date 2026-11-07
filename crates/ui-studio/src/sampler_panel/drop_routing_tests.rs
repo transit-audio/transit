@@ -94,3 +94,71 @@ fn the_legacy_window_loads_its_one_sample_without_an_import() {
     assert_eq!(t.clip_count(), clips + 1);
     assert!(t.window(tr).sample.starts_with("Hit"));
 }
+
+#[test]
+fn a_drop_with_the_pointer_gone_is_held_and_the_next_position_binds_the_pad() {
+    let (mut t, tr) = T::open();
+    let snare = t.sample("Snare.wav", 2400);
+    let clips = t.clip_count();
+    t.drop_gone(&snare);
+    t.frames(2);
+    assert_eq!(t.clip_count(), clips, "no blind import on PointerGone");
+    assert!(t.patch(tr).zones.is_empty(), "and no pad yet");
+    t.point(t.pad_at(tr, 2));
+    assert_eq!(t.patch(tr).pad(2).zone, Some(0), "the pad under the pointer's next report is bound");
+    assert_eq!(t.clip_count(), clips, "and no clip was imported");
+}
+
+#[test]
+fn a_drop_with_the_pointer_gone_then_a_position_on_the_arrangement_imports_a_clip() {
+    let (mut t, tr) = T::open();
+    let snare = t.sample("Snare.wav", 2400);
+    let clips = t.clip_count();
+    t.drop_gone(&snare);
+    assert_eq!(t.clip_count(), clips, "held");
+    t.point(arrangement_point(&t, tr));
+    assert_eq!(t.clip_count(), clips + 1, "one clip imported");
+    assert!(t.patch(tr).zones.is_empty(), "no pad bound");
+}
+
+#[test]
+fn a_drop_held_after_the_pointer_left_goes_to_the_arrangement_after_the_grace_frames() {
+    let (mut t, tr) = T::open();
+    let snare = t.sample("Snare.wav", 2400);
+    let clips = t.clip_count();
+    // The drop frame counts as the first held frame; the last held frame is the grace count.
+    t.drop_gone(&snare);
+    t.frames(crate::drops::GONE_GRACE_FRAMES as usize - 1);
+    assert_eq!(t.clip_count(), clips, "still held on the last grace frame");
+    t.frames(1);
+    assert_eq!(t.clip_count(), clips + 1, "then imported to the arrangement: the drop never vanishes");
+    assert!(t.patch(tr).zones.is_empty());
+}
+
+#[test]
+fn the_gone_rule_holds_where_the_old_rule_imported() {
+    use crate::drops::{GONE_GRACE_FRAMES, Placement, placement};
+    // The #368 rule, kept here as the negative control: `(None, true)` routed blind at once.
+    let old = |moved: Option<egui::Pos2>, gone: bool| match (moved, gone) {
+        (Some(p), _) => Placement::Route(Some(p)),
+        (None, true) => Placement::Route(None),
+        (None, false) => Placement::Hold,
+    };
+    assert_eq!(old(None, true), Placement::Route(None), "the old rule imports on PointerGone");
+    let mut count = None;
+    assert_eq!(placement(None, true, &mut count), Placement::Hold, "the new rule holds");
+    for _ in 1..GONE_GRACE_FRAMES {
+        assert_eq!(placement(None, false, &mut count), Placement::Hold);
+    }
+    assert_eq!(placement(None, false, &mut count), Placement::Route(None), "released after the grace frames");
+    assert_eq!(count, None, "and the count is reset");
+    // A position wins at any point and resets the count; no gone and no position holds forever.
+    let p = egui::pos2(10.0, 20.0);
+    let mut count = None;
+    let _ = placement(None, true, &mut count);
+    assert_eq!(placement(Some(p), true, &mut count), Placement::Route(Some(p)));
+    assert_eq!(count, None);
+    for _ in 0..(GONE_GRACE_FRAMES * 2) {
+        assert_eq!(placement(None, false, &mut count), Placement::Hold);
+    }
+}

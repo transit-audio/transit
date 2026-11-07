@@ -18,6 +18,7 @@
 
 mod config;
 mod control_server;
+mod drop_cursor;
 mod fonts;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
@@ -50,12 +51,20 @@ impl transit_ui_studio::debug_log::LogControl for LoggerControl {
 }
 
 /// The studio, the logger, the preferences checkpoint, the graphics device watch (issue #104)
-/// and, once it has run, whether the quit order shut plug-in hosting down cleanly.
-struct App(StudioApp, Option<&'static logging::AppLogger>, PrefsCheckpoint, Arc<shutdown::DeviceWatch>, Option<transit_ui_studio::host::ShutDown>);
+/// and, once it has run, whether the quit order shut plug-in hosting down cleanly; last, the main
+/// window's native handle for the cursor query at a file drop (`drop_cursor`; 0: none, off Windows).
+struct App(
+    StudioApp,
+    Option<&'static logging::AppLogger>,
+    PrefsCheckpoint,
+    Arc<shutdown::DeviceWatch>,
+    Option<transit_ui_studio::host::ShutDown>,
+    isize,
+);
 
 impl App {
     fn new(studio: StudioApp, logger: Option<&'static logging::AppLogger>, device_watch: Arc<shutdown::DeviceWatch>) -> App {
-        App(studio, logger, PrefsCheckpoint::default(), device_watch, None)
+        App(studio, logger, PrefsCheckpoint::default(), device_watch, None, 0)
     }
 
     /// The quit order, once, under the shutdown watchdog (issue #104): preferences, then the
@@ -152,7 +161,10 @@ impl eframe::App for App {
         let dirty = if self.0.engine.is_dirty() { " *" } else { "" };
         set_title(ctx, format!("{}{dirty} — transit", self.0.engine.session().name));
     }
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // A file drop carries no position (#368): ask the OS where the cursor is (Windows only).
+        let hwnd = self.5;
+        drop_cursor::place_drop(raw, ctx.zoom_factor(), || transit_rt::cursor_in_client(hwnd));
         self.0.raw_input_hook(raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -347,6 +359,22 @@ fn apply_exe_icons(cc: &eframe::CreationContext<'_>) {
     }
 }
 
+/// The main window's native handle (`HWND`) for the cursor query at a file drop; 0 when eframe has
+/// none to give and on every other platform (the query then answers nothing).
+fn window_hwnd(cc: &eframe::CreationContext<'_>) -> isize {
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = cc.window_handle()
+            && let RawWindowHandle::Win32(h) = handle.as_raw()
+        {
+            return h.hwnd.get();
+        }
+    }
+    let _ = cc;
+    0
+}
+
 /// Prints one line for a command-line mode (`--report`, `--version`). Normally that is standard
 /// output. A Windows release build started from a terminal has none (`console`: it attached to the
 /// parent's), so the line goes to the console device. Started without a terminal (a shortcut) there
@@ -526,7 +554,9 @@ fn main() -> eframe::Result {
                 for f in &files {
                     transit_ui_studio::drops::open_path(&mut app, f);
                 }
-                Ok(Box::new(App::new(app, logger, device_watch)))
+                let mut app = App::new(app, logger, device_watch);
+                app.5 = window_hwnd(cc);
+                Ok(Box::new(app))
             }),
         )
     }));

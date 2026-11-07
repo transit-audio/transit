@@ -23,6 +23,8 @@ pub struct T {
     drop: Option<(Vec<PathBuf>, Option<egui::Pos2>)>,
     /// Where the pointer moves in the next frame.
     point: Option<egui::Pos2>,
+    /// The next frame reports the pointer gone (egui-winit's `CursorLeft`).
+    gone: bool,
     /// The folder of the test's generated files.
     pub dir: PathBuf,
 }
@@ -84,8 +86,17 @@ impl T {
         let n = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("transit-sampler-pads-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut t =
-            T { app, ctx: egui::Context::default(), time: 0.0, shapes: Vec::new(), screen: egui::vec2(1400.0, 900.0), drop: None, point: None, dir };
+        let mut t = T {
+            app,
+            ctx: egui::Context::default(),
+            time: 0.0,
+            shapes: Vec::new(),
+            screen: egui::vec2(1400.0, 900.0),
+            drop: None,
+            point: None,
+            gone: false,
+            dir,
+        };
         t.frames(3);
         t
     }
@@ -104,6 +115,9 @@ impl T {
             if let Some((files, at)) = self.drop.take() {
                 raw.events.extend(at.map(egui::Event::PointerMoved));
                 raw.dropped_files = files.into_iter().map(|p| Arc::new(Dropped(p)) as egui::DroppedFileHandle).collect();
+            }
+            if std::mem::take(&mut self.gone) {
+                raw.events.push(egui::Event::PointerGone);
             }
             self.app.raw_input_hook(&mut raw);
             let app = &mut self.app;
@@ -151,6 +165,14 @@ impl T {
     pub fn drop_unplaced(&mut self, path: &Path) {
         self.drop = Some((vec![path.to_path_buf()], None));
         self.frames(3);
+    }
+
+    /// Drops `path` in a frame that reports the pointer gone and no position (what the maintainer's
+    /// Windows machine produced before the cursor query), and runs that one frame only.
+    pub fn drop_gone(&mut self, path: &Path) {
+        self.drop = Some((vec![path.to_path_buf()], None));
+        self.gone = true;
+        self.frames(1);
     }
 
     /// Moves the pointer to `at` in the next frame, then runs a few frames.
