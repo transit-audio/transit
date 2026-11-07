@@ -44,13 +44,11 @@ pub(super) fn tag(p: &egui::Painter, row: Rect, right: f32, text: &str, ink: Col
     r
 }
 
-/// The track color bar's fill: the palette's bar value of the track's hue. The model keeps a
-/// free RGB color, not a palette hue, so every bar takes Graphite (the content palette's last
-/// swatch) until tracks carry a palette name.
-pub(super) fn bar_color() -> Color32 {
-    use crate::tokens::palette;
-    let graphite = palette::DARK_BAR.len() - 1;
-    if crate::theme::current() == egui::Theme::Dark { palette::DARK_BAR[graphite] } else { palette::LIGHT_BAR[graphite] }
+/// The track color bar's fill: the palette's `bar` value of the hue nearest the track's RGB
+/// ([`super::hue`], the bridge until tracks carry a palette name), or Graphite when the RGB is
+/// grey or there is no track (the main-out strip without a master).
+pub(super) fn bar_color(rgb: Option<[u8; 3]>) -> Color32 {
+    super::hue::bar_for(rgb.unwrap_or([128, 128, 128]))
 }
 
 /// One channel strip in `r` (clipped to `clip`): a track's, or the master's (the main bus).
@@ -76,7 +74,7 @@ pub(super) fn strip(
     let a = anatomy::anatomy(r, short, main);
     let p = ui.painter().with_clip_rect(clip);
     p.rect_filled(r, tokens::radius::PANEL, TOKENS.surface_panel);
-    let bar = bar_color();
+    let bar = bar_color(Some(t.color));
     p.rect_filled(a.bar, crate::theme::top_corners_of(tokens::radius::PANEL - 1.0), bar);
     let mut sl = StripLayout {
         track: id.0,

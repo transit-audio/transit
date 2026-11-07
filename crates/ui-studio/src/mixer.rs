@@ -26,6 +26,7 @@ mod actions;
 mod anatomy;
 mod channel;
 mod controls;
+mod hue;
 mod inserts;
 mod menus;
 mod meters;
@@ -37,6 +38,7 @@ mod strip;
 use channel::strip;
 use controls::{Readout, control, readout};
 pub use controls::{balance_of, db_to_k, k_to_db, pans_for};
+pub use hue::{CHROMA_FLOOR, chroma_hue, hues, nearest};
 use inserts::{MIN_FADER, inserts_block, midi_output_button};
 use menus::{choice_menu, dropdown, paint_dropdown};
 pub use meters::{CLIP_CAP, peak_text};
@@ -50,7 +52,7 @@ pub use sends::SEND_ROW_H;
 use sends::sends_block;
 pub(crate) use sends::{add_send_row, send_row};
 pub use short::ShortList;
-pub use strip::{panes, show_full};
+pub use strip::{min_pane_height, panes, show_full, strip_fits};
 
 use crate::StudioApp;
 use crate::arrange::R4;
@@ -463,6 +465,8 @@ fn edit_field(app: &mut StudioApp, ui: &mut Ui, draw: Rect, id: egui::Id, font: 
     if resp.lost_focus() {
         if enter {
             let v = if e.target.is_pan() { fine::parse_pan(&e.text) } else { fine::parse_db(&e.text) };
+            // The strip's gain field stops at the taper's top, like its drag.
+            let v = if matches!(e.target, Target::Fader(_)) { v.map(|db| db.min(controls::FADER_TOP_DB)) } else { v };
             match v {
                 Some(v) => {
                     let _ = app.set_value(e.target, v);

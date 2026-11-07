@@ -19,7 +19,7 @@ pub fn panes(app: &mut StudioApp, ui: &mut Ui) {
     }
     app.mixer.layout.visible = app.ui.show_mixer || app.ui.mixer_full;
     if app.ui.show_mixer && !app.ui.mixer_full {
-        let h = app.ui.mixer_height.clamp(260.0, 600.0);
+        let h = app.ui.mixer_height.clamp(min_pane_height(), 600.0);
         egui::Panel::bottom("mixer").exact_size(h).frame(egui::Frame::NONE.fill(TOKENS.bg)).show(ui, |ui| strips(app, ui));
     }
     crate::keys::switcher_panel(app, ui);
@@ -28,6 +28,23 @@ pub fn panes(app: &mut StudioApp, ui: &mut Ui) {
 /// The mixer filling the window (F3).
 pub fn show_full(app: &mut StudioApp, ui: &mut Ui) {
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(TOKENS.bg)).show(ui, |ui| strips(app, ui));
+}
+
+/// The docked pane's margins above and below its strips (4 each) and the panel's 1 px edge.
+const PANE_MARGINS: f32 = 9.0;
+
+/// The docked pane's smallest height: the short strip's sections and a fader with
+/// [`MIN_FADER`] of travel, so the readouts never leave the pane (#326; 379 points).
+pub fn min_pane_height() -> f32 {
+    PANE_MARGINS + anatomy::fixed_height(true) + MIN_FADER + 2.0 * crate::tokens::fader::INSET
+}
+
+/// Whether a strip in a lane `height` tall keeps its sections in order: the readouts below the
+/// toggles, and the fader [`MIN_FADER`] of travel between them.
+pub fn strip_fits(height: f32, short: bool) -> bool {
+    let a = anatomy::anatomy(Rect::from_min_size(pos2(0.0, 0.0), vec2(STRIP_W, height)), short, false);
+    let travel = a.fader.height() - 2.0 * crate::tokens::fader::INSET;
+    a.gain.min.y >= a.toggles[3].max.y && travel >= MIN_FADER - 0.01 && a.gain.max.y <= height
 }
 
 /// Whether strips in a lane `height` tall take the short variant: when the full sections would
@@ -160,7 +177,7 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLay
     let a = anatomy::anatomy(r, short, true);
     let p = ui.painter().clone();
     p.rect_filled(r, tokens::radius::PANEL, TOKENS.surface_panel);
-    let bar = channel::bar_color();
+    let bar = channel::bar_color(None);
     p.rect_filled(a.bar, crate::theme::top_corners_of(tokens::radius::PANEL - 1.0), bar);
     channel::text_in(&p, &channel::NUMBER, "M", TOKENS.text_faint, a.name, Align2::RIGHT_CENTER);
     channel::text_in(&p, &channel::NAME, "Main", TOKENS.text, a.name, Align2::LEFT_CENTER);
