@@ -443,8 +443,8 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
             let changed = (down != (v >= 0.5)).then_some(if down { 1.0 } else { 0.0 });
             (r, changed, p.format(v))
         }
-        Menu(..) => choice(ui, ins, p, label, v, MENU_W),
-        _ => choice(ui, ins, p, label, v, knob::CELL_W - 10.0),
+        Menu(..) => choice(ui, ins, p, label, v, MENU_W, None),
+        _ => choice(ui, ins, p, label, v, knob::CELL_W - 10.0, None),
     };
     finish(app, ui, key, info, id, (resp, new, shown), v, lay);
 }
@@ -482,18 +482,25 @@ pub(crate) fn finish(
 /// The width of a [`Item::Menu`] dropdown.
 const MENU_W: f32 = 150.0;
 
-pub(crate) fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f32, width: f32) -> (egui::Response, Option<f32>, String) {
+pub(crate) fn choice(
+    ui: &mut Ui,
+    ins: &Insert,
+    p: &ParamInfo,
+    label: &str,
+    v: f32,
+    width: f32,
+    row: Option<f32>,
+) -> (egui::Response, Option<f32>, String) {
     let mut idx = (v.round().max(0.0) as usize).min(p.choices.len().saturating_sub(1));
     let r = ui
         .vertical(|ui| {
-            let c = crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), p.choices.get(idx).copied().unwrap_or(""))
-                .width(width)
-                .dense()
-                .show(ui, |ui| {
-                    for (i, name) in p.choices.iter().enumerate() {
-                        crate::chrome_pick::choice_value(ui, &mut idx, i, *name);
-                    }
-                });
+            let combo =
+                crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), p.choices.get(idx).copied().unwrap_or("")).width(width);
+            let c = if let Some(h) = row { combo.row(h) } else { combo.dense() }.show(ui, |ui| {
+                for (i, name) in p.choices.iter().enumerate() {
+                    crate::chrome_pick::choice_value(ui, &mut idx, i, *name);
+                }
+            });
             if !label.is_empty() {
                 ui.label(RichText::new(label).size(10.5).color(TOKENS.text_dim));
             }

@@ -102,7 +102,7 @@ fn cell(
         let new = if reset { Some(p.default) } else { (x != v).then_some(x) };
         (r, new, p.format(new.unwrap_or(v)))
     } else {
-        choice(ui, ins, p, "", v, width - 8.0)
+        choice(ui, ins, p, "", v, width - 8.0, Some(LINE_H))
     };
     finish(app, ui, key, info, id, drawn, v, lay);
 }

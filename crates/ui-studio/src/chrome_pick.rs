@@ -78,11 +78,12 @@ pub struct Combo {
     width: Option<f32>,
     keep_open: bool,
     dense: bool,
+    row: Option<f32>,
 }
 
 impl Combo {
     pub fn new(salt: impl Hash + std::fmt::Debug, text: impl Display) -> Self {
-        Self { salt: egui::Id::NULL.with(salt), text: text.to_string(), width: None, keep_open: false, dense: false }
+        Self { salt: egui::Id::NULL.with(salt), text: text.to_string(), width: None, keep_open: false, dense: false, row: None }
     }
 
     /// A fixed face width (default: the value's text and the chevron).
@@ -94,6 +95,13 @@ impl Combo {
     /// The face is the dense control height (24, `layout.denseControlHeight`) instead of the chrome's 26, for device panels and strips.
     pub fn dense(mut self) -> Self {
         self.dense = true;
+        self
+    }
+
+    /// The face is `height` high: a cell in a compact grid of rows (the generic panel's modulation
+    /// matrix), which sets its own line height, not a control standing alone.
+    pub fn row(mut self, height: f32) -> Self {
+        self.row = Some(height);
         self
     }
 
@@ -109,8 +117,14 @@ impl Combo {
         let galley = ui.painter().layout_no_wrap(self.text.clone(), font.clone(), TOKENS.text);
         let pad = 8.0;
         let w = self.width.unwrap_or_else(|| (galley.size().x + 2.0 * pad + c::CHEVRON + pad).max(60.0));
-        let (rect, _) =
-            ui.allocate_exact_size(vec2(w, if self.dense { crate::tokens::layout::DENSE_CONTROL_HEIGHT } else { c::CONTROL_HEIGHT }), Sense::hover());
+        let h = if let Some(h) = self.row {
+            h
+        } else if self.dense {
+            crate::tokens::layout::DENSE_CONTROL_HEIGHT
+        } else {
+            c::CONTROL_HEIGHT
+        };
+        let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
         let id = ui.make_persistent_id(self.salt);
         let sense = if ui.is_enabled() { Sense::click() } else { Sense::hover() };
         let response = ui.interact(rect, id, sense);
