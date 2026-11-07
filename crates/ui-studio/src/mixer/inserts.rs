@@ -1,5 +1,5 @@
 //! A strip's inserts: the full-height section (up to three insert slots and "+ Insert" in a fixed
-//! 112 px body), the short variant's `FX n` button that opens the same slots in a popup, and the
+//! 112 px body), the short variant's `FX n` button that opens the same slots in an area, and the
 //! MIDI OUT button of a MIDI strip's input row. An insert slot is 22 high on `surface.raised` with
 //! a 1 px `line` and radius 4: the device name on the left (Sans 500 11, ellipsis) and the 12 px
 //! power glyph on the right, `signal` while the insert is on and `text.faint` while bypassed (the

@@ -31,7 +31,10 @@ fn the_peak_readout_holds_the_loudest_peak_until_clicked() {
     click_with(&mut app, at, json!({"ctrl": true}));
     frames(&mut app, &ctx, 4, &mut time);
     assert_eq!(strip(&app, b).peak_text, "-inf");
-    assert_eq!(crate::mixer::peak_text(1.0), ("0.0".to_string(), true));
+    // Exactly 0 dBFS reads plain, as the fill draws no hot at 0; the first tick above is hot with
+    // its plus sign. Negative control: +0.1 dB (1.0116) is hot.
+    assert_eq!(crate::mixer::peak_text(1.0), ("0.0".to_string(), false));
+    assert_eq!(crate::mixer::peak_text(1.0116), ("+0.1".to_string(), true));
     assert_eq!(crate::mixer::peak_text(0.5), ("-6.0".to_string(), false));
 }
 

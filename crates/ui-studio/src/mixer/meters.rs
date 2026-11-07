@@ -85,9 +85,10 @@ pub fn peak_text(lin: f32) -> (String, bool) {
     }
     let db = 20.0 * lin.log10();
     let t = format!("{db:.1}");
-    let over = db >= -0.05;
+    // Hot only above 0 dBFS, the rule of the meter's fill (the README: `meter.hot` when > 0).
+    let over = db > 0.0;
     (
-        if db > 0.05 {
+        if over {
             format!("+{t}")
         } else if t == "-0.0" {
             "0.0".into()

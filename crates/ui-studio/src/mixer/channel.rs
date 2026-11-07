@@ -453,12 +453,12 @@ fn fader_and_meter(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Re
     );
     sl.readout_rect = r4(a.gain);
     sl.volume_text = text;
-    // Peak: Mono 11 under the meter, click to reset; `meter.hot` from 0 dBFS or while latched.
+    // Peak: Mono 11 under the meter, click to reset; `meter.hot` above 0 dBFS or while latched.
     peak_readout(app, ui, p, clip, a.peak, d.peak, d.clip, Some(id), sl);
     sl.meter_layout = Some(meter);
 }
 
-/// The peak readout: the held peak in Mono 11 (`text.muted`, `meter.hot` from 0 dBFS or while the
+/// The peak readout: the held peak in Mono 11 (`text.muted`, `meter.hot` above 0 dBFS or while the
 /// clip latch is lit) in a 1 px `line.inset` box; a click resets the strip's (`None`: the main
 /// meter's), Ctrl-click every strip's.
 #[allow(clippy::too_many_arguments)]
