@@ -230,7 +230,7 @@ pub struct StudioApp {
     /// When to reopen the device after its driver asked for it (ASIO reset), and what to say.
     pub(crate) reopen: transit_playback::reopen::Reopener,
     /// Opens the replacement Player of an automatic reopen in tests (a scripted driver); the app
-    /// uses `Player::with_config`.
+    /// uses `Player::with_config_and_monitor`.
     #[cfg(test)]
     pub(crate) reopen_with: Option<Box<dyn Fn(std::sync::Arc<transit_model::Session>, &transit_playback::AudioConfig) -> Player>>,
     lost_shown: u64,

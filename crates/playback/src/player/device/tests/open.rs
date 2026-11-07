@@ -201,3 +201,55 @@ fn the_plan_table_follows_where_the_input_carries_system_audio() {
     player.set_input(record::InputRing::new(2, 48_000)).unwrap();
     assert_eq!(player.io_map().system_audio, None);
 }
+
+/// The #366 reopen note: a device opens with the app's saved monitoring set already in its
+/// controls and its monitor stage at rest there, so with Dim on its first sounding block is
+/// dimmed, not unity until the next UI frame stores the set (and then a ramp down). The same
+/// session through the same fake, opened at unity, is the reference: every frame from the first
+/// one that sounds is the reference times the Dim gain, with no ramp anywhere.
+#[test]
+fn a_device_opened_with_dim_on_plays_dimmed_from_its_first_sounding_block() {
+    use crate::monitor_path::{DIM_DB, MonitorSettings};
+    use ab::fake::SliceSink;
+    use transit_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
+    const BLOCK: usize = 256;
+    let sounding = |monitor: &MonitorSettings| {
+        let mut s = Session::default();
+        s.edit.click = false;
+        let len = 48_000;
+        let src = SourceId(s.next_id + 10_000);
+        let audio = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.5; len], vec![0.25; len]] };
+        s.pool.insert(src, Arc::new(SourceAudio::new(audio)));
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, Some("Tone"));
+        let cid = s.new_clip_id();
+        s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(Clip::audio(cid, "tone", src, 0, 0, len as i64));
+        let fake = fake_factory(false);
+        let player = Player::open_native_monitored(
+            Arc::new(s),
+            &AudioConfig::default(),
+            Box::new(fake.clone()),
+            &fake_factory(false),
+            NativeKind::Wasapi,
+            monitor,
+        )
+        .unwrap();
+        player.play(0, None, None).unwrap();
+        let mut out = Vec::new();
+        let mut block = vec![0.0f32; BLOCK * 2];
+        for _ in 0..60 {
+            assert!(fake.pump_render(BLOCK, ab::Stamp::INVALID, &mut SliceSink { data: &mut block, channels: 2 }));
+            out.extend_from_slice(&block);
+            player.service().unwrap();
+        }
+        let first = out.iter().position(|x| x.abs() > 1e-6).expect("the clip reaches the output");
+        out.split_off(first - first % 2)
+    };
+    let unity = sounding(&MonitorSettings::default());
+    let dimmed = sounding(&MonitorSettings { dim: true, ..MonitorSettings::default() });
+    let dim = transit_dsp::db_to_gain(DIM_DB);
+    assert!(unity.len() >= 2 * BLOCK * 4 && dimmed.len() >= 2 * BLOCK * 4, "several sounding blocks");
+    assert!(unity.iter().any(|x| (x - 0.5).abs() < 1e-3), "the reference plays at unity");
+    for (i, (d, u)) in dimmed.iter().zip(&unity).take(2 * BLOCK * 4).enumerate() {
+        assert!((d - u * dim).abs() < 1e-5, "frame {} channel {}: {d} against {} (unity {u})", i / 2, i % 2, u * dim);
+    }
+}

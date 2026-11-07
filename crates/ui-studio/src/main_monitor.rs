@@ -12,7 +12,7 @@
 
 use crate::StudioApp;
 use serde_json::{Value, json};
-use transit_playback::monitor_path::LEVEL_FLOOR_DB;
+use transit_playback::monitor_path::{LEVEL_FLOOR_DB, MonitorSettings};
 
 /// The monitoring set as this machine keeps it.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -46,6 +46,13 @@ impl MonitorPrefs {
     pub fn sane(self) -> Self {
         Self { level_db: level(self.level_db), reference_db: level(self.reference_db), ..self }
     }
+
+    /// What the player's monitor controls take, every frame and at a device open.
+    #[must_use]
+    pub fn settings(self) -> MonitorSettings {
+        let p = self.sane();
+        MonitorSettings { mono: p.mono, dim: p.dim, reference: p.reference, level_db: p.level_db, reference_db: p.reference_db }
+    }
 }
 
 /// The footer's text: `INT` and the figure ("−14.2 LUFS"), or "—" before the first gated block.
@@ -62,13 +69,7 @@ impl StudioApp {
     /// Hand the monitoring set to the player. Atomic stores only; safe to call every frame.
     pub(crate) fn push_monitor(&self) {
         if let Some(p) = &self.player {
-            let m = p.monitor();
-            let prefs = self.ui.monitor.sane();
-            m.set_mono(prefs.mono);
-            m.set_dim(prefs.dim);
-            m.set_reference(prefs.reference);
-            m.set_level_db(prefs.level_db);
-            m.set_reference_db(prefs.reference_db);
+            p.monitor().store(&self.ui.monitor.settings());
         }
     }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::monitor_path::MonitorSettings;
 
 impl Player {
     pub fn new(session: Arc<Session>) -> Self {
@@ -8,7 +9,14 @@ impl Player {
     /// Device failure falls back to an explicitly silent runtime. Initialization
     /// or identity exhaustion instead returns a faulted facade that rejects work.
     pub fn with_config(session: Arc<Session>, cfg: &AudioConfig) -> Self {
-        match Self::open(Arc::clone(&session), cfg) {
+        Self::with_config_and_monitor(session, cfg, &MonitorSettings::default())
+    }
+
+    /// [`Self::with_config`], the device's monitor stage at rest at `monitor` from its first block
+    /// (#366): the app opens and reopens with its saved monitoring set, so Dim or a low monitor
+    /// level holds across a reopen instead of unity until the next UI frame stores it.
+    pub fn with_config_and_monitor(session: Arc<Session>, cfg: &AudioConfig, monitor: &MonitorSettings) -> Self {
+        match Self::open(Arc::clone(&session), cfg, monitor) {
             Ok(player) => player,
             Err(error) => {
                 log::warn!("audio output unavailable: {error}");
@@ -22,7 +30,7 @@ impl Player {
     #[doc(hidden)]
     pub fn prepare_device_free(session: Arc<Session>) -> Result<Self, String> {
         let rate = session.sample_rate.hz();
-        Self::prepare_with(session, rate, IoMap::default(), true).map(|(mut player, access, _clock)| {
+        Self::prepare_with(session, rate, IoMap::default(), true, &MonitorSettings::default()).map(|(mut player, access, _clock)| {
             let output = DeviceOutput::new(access, &player, 2);
             *player.test_output.get_mut() = Some(output);
             player.fake_only = true;
@@ -139,16 +147,18 @@ impl Player {
         device_rate: u32,
         io: IoMap,
     ) -> Result<(Self, AudioAccess<Audio>, device_clock::CallbackClock), String> {
-        Self::prepare_with(session, device_rate, io, false)
+        Self::prepare_with(session, device_rate, io, false, &MonitorSettings::default())
     }
 
     /// [`Self::prepare`]; `manual_preview` runs the preview's feeder in `step_device_free` instead
-    /// of on its thread (device-free tests).
+    /// of on its thread (device-free tests); the monitor controls hold `monitor` before the audio
+    /// state (and its monitor stage, at rest where they point) is built.
     fn prepare_with(
         session: Arc<Session>,
         device_rate: u32,
         io: IoMap,
         manual_preview: bool,
+        monitor: &MonitorSettings,
     ) -> Result<(Self, AudioAccess<Audio>, device_clock::CallbackClock), String> {
         let (callback_clock, reader) = device_clock::stream_clock(device_clock::Direction::Output, device_rate)?;
         let key = reader.key();
@@ -160,6 +170,7 @@ impl Player {
             in_channels: io.inputs,
         };
         let mut player = Self::empty(device_rate);
+        player.shared.monitor.store(monitor);
         player.epoch = EngineEpoch(key.generation);
         player.origin = reader.host_origin();
         let (mut owner, ports) = Owner::new(session, None, target, PlanLimits::default()).map_err(|e| e.to_string())?;
@@ -236,15 +247,15 @@ impl Player {
     /// Open `cfg` through the native backend of its effective backend; off Windows through cpal when
     /// no native backend serves it. On Windows nothing else opens (ADR 0046): no native backend for
     /// the system (the ASIO system of a 32-bit build) is an error.
-    fn open(session: Arc<Session>, cfg: &AudioConfig) -> Result<Self, String> {
+    fn open(session: Arc<Session>, cfg: &AudioConfig, monitor: &MonitorSettings) -> Result<Self, String> {
         let cfg = crate::backend::native::open_config(cfg);
         if let Some((native, kind)) = crate::backend::native::factory_for(&cfg) {
-            return Self::open_native(session, &cfg, native, &crate::backend::cpal::CpalFactory, kind);
+            return Self::open_native_monitored(session, &cfg, native, &crate::backend::cpal::CpalFactory, kind, monitor);
         }
         if cfg!(windows) {
             return Err(crate::backend::native::unserved(&cfg));
         }
-        Self::open_with(session, &cfg, &crate::backend::cpal::CpalFactory)
+        Self::open_with(session, &cfg, &crate::backend::cpal::CpalFactory, monitor)
     }
 
     /// A native ASIO Player over a scripted duplex driver, for the caller's device-free tests: the
@@ -313,6 +324,18 @@ impl Player {
         }
     }
 
+    /// [`Self::open_native_monitored`] at unity (the tests' and the test hooks' opens).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub(super) fn open_native(
+        session: Arc<Session>,
+        cfg: &AudioConfig,
+        native: Box<dyn ab::BackendFactory>,
+        fallback: &dyn ab::BackendFactory,
+        kind: NativeKind,
+    ) -> Result<Self, String> {
+        Self::open_native_monitored(session, cfg, native, fallback, kind, &MonitorSettings::default())
+    }
+
     /// A native backend (WASAPI, ASIO or JACK, through the same [`Self::open_stepped`] ladder).
     /// When native WASAPI or native ASIO cannot open (before `start()` succeeded) and the ladder has
     /// no step left, the open fails with the backend's reason and the caller runs silent with it:
@@ -323,12 +346,14 @@ impl Player {
     /// native stream joins its thread or waits for the driver's host thread (see
     /// `transit-audio-wasapi`'s `RenderStream`, `transit-audio-asio`'s `AsioStream`) and must never
     /// happen on a callback thread.
-    pub(super) fn open_native(
+    /// The monitor controls hold `monitor` from the first block.
+    pub(super) fn open_native_monitored(
         session: Arc<Session>,
         cfg: &AudioConfig,
         native: Box<dyn ab::BackendFactory>,
         fallback: &dyn ab::BackendFactory,
         kind: NativeKind,
+        monitor: &MonitorSettings,
     ) -> Result<Self, String> {
         // WASAPI: shared unless the user asked for exclusive control of the device; each step down
         // the ladder (`exclusive_fallback`) reopens the whole device, before any stream has started.
@@ -347,7 +372,7 @@ impl Player {
         }
         let mut notes: Vec<String> = Vec::new();
         loop {
-            match Self::open_stepped(Arc::clone(&session), cfg, &*native, step) {
+            match Self::open_stepped(Arc::clone(&session), cfg, &*native, step, monitor) {
                 Ok(mut player) => {
                     player.native_backend = true;
                     player.native_kind = Some(kind);
@@ -375,7 +400,7 @@ impl Player {
                         return Err(reason);
                     }
                     log::warn!("{} did not open ({reason}); using the cpal backend", kind.label());
-                    let mut player = Self::open_with(session, cfg, fallback)?;
+                    let mut player = Self::open_with(session, cfg, fallback, monitor)?;
                     player.backend_note = Some(kind.fallback_note(&reason));
                     return Ok(player);
                 }
@@ -386,8 +411,8 @@ impl Player {
     /// Open the output through the audio system `factory` makes. Every device call goes through
     /// the backend trait; the adapter owns the sample format, the ASIO duplex order and the
     /// timestamps of the clocks.
-    fn open_with(session: Arc<Session>, cfg: &AudioConfig, factory: &dyn ab::BackendFactory) -> Result<Self, String> {
-        Self::open_stepped(session, cfg, factory, OpenStep::PLANNED).map_err(|failure| failure.text)
+    fn open_with(session: Arc<Session>, cfg: &AudioConfig, factory: &dyn ab::BackendFactory, monitor: &MonitorSettings) -> Result<Self, String> {
+        Self::open_stepped(session, cfg, factory, OpenStep::PLANNED, monitor).map_err(|failure| failure.text)
     }
 
     /// [`Self::open_with`] with `step` applied to every planned request; the failure keeps the
@@ -400,7 +425,13 @@ impl Player {
     /// rule of `transit-audio-asio` (`createBuffers` once for both directions, the driver started
     /// by the first `start`) and the order cpal's ASIO host needs; native WASAPI pairs two
     /// endpoints the same way. Recording later takes the held input without touching the streams.
-    fn open_stepped(session: Arc<Session>, cfg: &AudioConfig, factory: &dyn ab::BackendFactory, step: OpenStep) -> Result<Self, OpenFailure> {
+    fn open_stepped(
+        session: Arc<Session>,
+        cfg: &AudioConfig,
+        factory: &dyn ab::BackendFactory,
+        step: OpenStep,
+        monitor: &MonitorSettings,
+    ) -> Result<Self, OpenFailure> {
         let want_ch = u16::try_from(transit_mix::main_channels(&session)).unwrap_or(2);
         let backend = factory.backend(cfg.system.as_deref()).ok_or_else(|| "no audio system".to_string())?;
         // Prefer a config at the chosen (else session) rate; else the device default (we resample).
@@ -439,7 +470,7 @@ impl Player {
             if system_audio {
                 io.system_audio = Some(inputs);
             }
-            let (mut player, access, clock) = Self::prepare(Arc::clone(&session), rate, io)?;
+            let (mut player, access, clock) = Self::prepare_with(Arc::clone(&session), rate, io, false, monitor)?;
             player.system_audio.set(player.io.get_mut().system_audio);
             *player.input.get_mut() = if duplex {
                 let progress = player.record_start.get_mut().as_ref().map(record::start::Control::input_progress);

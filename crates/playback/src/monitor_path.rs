@@ -37,6 +37,27 @@ pub fn level_gain(db: f32) -> f32 {
     if db.is_nan() { 1.0 } else { transit_dsp::db_to_gain(db.min(0.0)) }
 }
 
+/// The monitoring set as Main keeps it (`ui-studio`'s per-machine preference): what
+/// [`MonitorControls::store`] hands the audio thread every UI frame, and what a device opens with
+/// (`Player::with_config_and_monitor`), so a reopened device's first block already plays at the
+/// saved Dim, Ref and level instead of unity until the next frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MonitorSettings {
+    pub mono: bool,
+    pub dim: bool,
+    pub reference: bool,
+    /// The monitor level and the level Ref recalls, in dB (−∞ to 0; see [`level_gain`]).
+    pub level_db: f32,
+    pub reference_db: f32,
+}
+
+impl Default for MonitorSettings {
+    /// Unity: every control off, both levels 0 dB.
+    fn default() -> Self {
+        Self { mono: false, dim: false, reference: false, level_db: 0.0, reference_db: 0.0 }
+    }
+}
+
 /// The monitor controls Main sets and the published loudness it reads.
 #[derive(Debug)]
 pub struct MonitorControls {
@@ -67,6 +88,15 @@ impl Default for MonitorControls {
 }
 
 impl MonitorControls {
+    /// Stores the whole monitoring set: atomic stores only, safe every frame. The UI frame and
+    /// the device open both come through here.
+    pub fn store(&self, settings: &MonitorSettings) {
+        self.set_mono(settings.mono);
+        self.set_dim(settings.dim);
+        self.set_reference(settings.reference);
+        self.set_level_db(settings.level_db);
+        self.set_reference_db(settings.reference_db);
+    }
     pub fn set_mono(&self, on: bool) {
         self.mono.store(on, Ordering::Relaxed);
     }

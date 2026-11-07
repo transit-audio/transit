@@ -5,22 +5,23 @@
 //! callback. The bounce's offline integrator, [`crate::meter::LoudnessMeter`], is the reference:
 //! the same K-weighting filters, the same 400 ms blocks at 75 percent overlap built from 100 ms
 //! sub-blocks, the same absolute gate (−70 LUFS) and relative gate (−10 LU) applied the same way.
-//! The one difference is the histogram that holds the block loudness history for the relative
-//! gate: 0.1 LU bins from −70 to +10 LUFS (each bin keeps its block count and its summed energy,
-//! so the figure itself is not quantized; only the relative gate's decision is, per bin center).
-//! A block louder than +10 LUFS lands in the top bin with its exact energy.
+//! The histogram that holds the block loudness history for the relative gate is the offline
+//! meter's grid too, its constants shared, not copied ([`HIST_MIN`], [`HIST_STEP`], [`HIST_BINS`]:
+//! 0.05 LU bins from −70 to +20 LUFS), so both meters keep and drop the same blocks at the gate.
+//! Each bin keeps its block count and its summed energy, so the figure itself is not quantized;
+//! only the relative gate's decision is, per bin center. A block louder than +20 LUFS lands in
+//! the top bin with its exact energy, as offline. The difference is storage only: fixed arrays
+//! here, vectors there.
 
 use crate::biquad::Biquad;
 use crate::meter::{k_weighting, lufs};
 use crate::util::sane_sr;
 
+/// The histogram's grid: the offline meter's own definition (#366 review).
+pub use crate::meter::{HIST_BINS, HIST_MIN, HIST_STEP};
+
 /// The widest main bus the mixer builds (9.1.6).
 pub const CHANNELS: usize = 16;
-/// The histogram's floor (the absolute gate) and bin width, in LUFS and LU.
-pub const HIST_MIN: f32 = -70.0;
-pub const HIST_STEP: f32 = 0.1;
-/// −70 ..= +10 LUFS.
-pub const HIST_BINS: usize = 800;
 /// Sub-blocks per gating block (4 × 100 ms = 400 ms; a new block every 100 ms is 75 percent overlap).
 const WINDOW: usize = 4;
 

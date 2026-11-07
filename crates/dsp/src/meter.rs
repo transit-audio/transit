@@ -8,9 +8,12 @@ use crate::util::sane_sr;
 use crate::{MIN_DB, gain_to_db};
 
 const SUB_BLOCKS: usize = 30; // 3 s of 100 ms sub-blocks
-const HIST_MIN: f32 = -70.0;
-const HIST_STEP: f32 = 0.05;
-const HIST_BINS: usize = 1800; // -70 .. +20 LUFS
+/// The integrated loudness histogram's grid, shared by this meter and the live one
+/// ([`crate::loudness::LiveLoudness`]), so both decide the relative gate on the same bin centers:
+/// the floor (the absolute gate) in LUFS, the bin width in LU, and the bin count (−70 .. +20 LUFS).
+pub const HIST_MIN: f32 = -70.0;
+pub const HIST_STEP: f32 = 0.05;
+pub const HIST_BINS: usize = 1800;
 const TP_PHASES: usize = 4;
 const TP_TAPS: usize = 12;
 
