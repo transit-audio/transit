@@ -436,8 +436,7 @@ and mapped to a MIDI controller (right-click it). Presets: Init, Analog Bass (mo
 Plucked String, Key Tracked Timbre, and your own: the title bar's arrows step through them, the
 name field lists them (with Save As and Delete), and the save button writes over your own preset
 (on a factory preset it opens the list to Save As). The editor is a floating window inside
-transit's main window, so it minimizes and returns with it. Drag its title bar to move it and its
-edge to resize it; it opens where you last left it (a second Macro Oscillator's window opens
+transit's main window, so it minimizes and returns with it. Drag its title bar to move it. Device windows size themselves to their content, with no resize handle, and re-fit when a section opens or closes; one that would run off the bottom of the screen moves up, and past that its body scrolls. It opens where you last left it (a second Macro Oscillator's window opens
 beside the first). The body scrolls with the mouse wheel; to nudge a knob with the wheel, hold Ctrl
 (Cmd on macOS). **Escape** closes the editor you last clicked in, and **Window > Close All
 Editors** closes every editor, built-in and hosted. The link button in the title bar
