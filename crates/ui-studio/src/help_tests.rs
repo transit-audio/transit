@@ -588,6 +588,9 @@ fn a_one_label_line_still_wraps_with_egui_and_clears_the_rows_below() {
     let (hint, figures) = card_rects(&lines, 440.0, 1.5);
     assert!(figures[1][0].height() > figures[0][0].height() + 1.0, "the long line wraps: {:?}", figures[1]);
     assert!(!figures[1][0].intersects(figures[0][0]) && !figures[1][0].intersects(hint));
+    // A one-label line keeps the old container's row: at least the interact height (18 pt), not its 13.3 pt text.
+    let short = card_rects(&["Requested 128 \u{b7} running at 256".to_string()], 440.0, 1.5).1;
+    assert!(short[0][0].height() >= 18.0, "a one-label line is a full row tall: {:?}", short[0][0]);
 }
 
 #[test]

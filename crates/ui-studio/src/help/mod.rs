@@ -153,9 +153,15 @@ pub fn status_line(ui: &mut Ui, line: &str, mono: bool) {
         let text = egui::RichText::new(&seg.text).color(TOKENS.text_dim).size(11.5);
         if mono { text.monospace() } else { text }
     };
-    // A line that is one label keeps egui's wrapping: a label allocates the rows it wraps to.
+    // A line that is one label keeps egui's wrapping, at the old container's rhythm: a row is never
+    // shorter than the interact height.
+    let min_row = ui.spacing().interact_size.y;
     if let [seg] = segments.as_slice() {
-        let resp = ui.add(egui::Label::new(text(seg)).wrap_mode(egui::TextWrapMode::Wrap));
+        let width = ui.available_width();
+        let galley = egui::WidgetText::from(text(seg)).into_galley(ui, Some(egui::TextWrapMode::Wrap), width, egui::TextStyle::Body);
+        let (area, resp) = ui.allocate_exact_size(egui::vec2(width, galley.size().y.max(min_row)), egui::Sense::hover());
+        let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(area));
+        cell.add(egui::Label::new(text(seg)).wrap_mode(egui::TextWrapMode::Wrap));
         if let Some(id) = seg.id {
             hover(ui, &resp, id);
         }
@@ -168,7 +174,7 @@ pub fn status_line(ui: &mut Ui, line: &str, mono: bool) {
         .collect();
     let rows = pack_rows(&sizes.iter().map(|s| s.x).collect::<Vec<_>>(), available);
     let row_count = rows.last().map_or(0, |last| last + 1);
-    let row_height = |row: usize| rows.iter().zip(&sizes).filter(|(r, _)| **r == row).map(|(_, s)| s.y).fold(0.0_f32, f32::max);
+    let row_height = |row: usize| rows.iter().zip(&sizes).filter(|(r, _)| **r == row).map(|(_, s)| s.y).fold(min_row, f32::max);
     let gap = ui.spacing().item_spacing.y;
     let total = (0..row_count).map(row_height).sum::<f32>() + gap * row_count.saturating_sub(1) as f32;
     let (area, _) = ui.allocate_exact_size(egui::vec2(available, total), egui::Sense::hover());
