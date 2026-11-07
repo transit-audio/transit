@@ -5,7 +5,7 @@
 //!
 //! Anatomy (README, Device anatomy): A, the shared 52 px title bar
 //! ([`crate::device_editor::title_bar`]); B, the hero panel ([`hero`]): the transfer curve in a
-//! display well with the operating point, the level and gain-reduction
+//! display well with the unity diagonal and the operating point, the level and gain-reduction
 //! history well, and the gain-reduction meter with its readout; C, the controls
 //! panel ([`sections`]): the dynamics knobs (Threshold, Ratio, Knee,
 //! Attack, Release, Makeup, Mix, the board's order), then beside a divider the sidechain key and
@@ -47,7 +47,7 @@ use crate::widgets::{self, knob, r4};
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use transit_model::TrackId;
 
-pub use hero::{DotRecord, transfer_db, transfer_gr_db};
+pub use hero::{DotRecord, UnityRecord, transfer_db, transfer_gr_db};
 
 /// The Compressor's plug-in id.
 pub const COMPRESSOR: &str = "compressor";
@@ -99,6 +99,8 @@ pub struct HeroLayout {
     pub gr_db: f32,
     pub gr_readout: String,
     pub gr_readout_rect: [f32; 4],
+    /// The transfer well's unity diagonal.
+    pub unity: Option<UnityRecord>,
     /// The operating point (`None` while hidden: nothing published yet, or below −60 dB).
     pub dot: Option<DotRecord>,
 }

@@ -1,13 +1,13 @@
 //! The transfer well's displays (README, Compressor displays; job 326-U): the operating point on
-//! the curve from the published detector level; and the compressor's color names as the theme
-//! draws them. Each assertion has its control.
+//! the curve from the published detector level, and the unity diagonal under the curve; and the
+//! compressor's color names as the theme draws them. Each assertion has its control.
 
 use super::test_rig::{SLOT, T};
 use super::{hero, named};
 use crate::theme::TOKENS;
 use crate::tokens::compressor as tok;
 use crate::widgets::display_well;
-use egui::{Rect, pos2};
+use egui::{Pos2, Rect, Shape, pos2};
 use std::sync::Arc;
 use transit_mix::{ScopeHub, ScopeTap};
 use transit_model::TrackId;
@@ -28,6 +28,57 @@ pub(super) fn open_with_tap() -> (T, TrackId, Arc<ScopeTap>) {
     t.open_card(0);
     assert!(tap.enabled(), "the open panel switched its tap on");
     (t, tr, tap)
+}
+
+/// Every painted line segment, in paint order, with its index.
+fn segments(t: &T) -> Vec<(usize, [Pos2; 2], egui::Stroke)> {
+    fn walk(s: &Shape, i: &mut usize, out: &mut Vec<(usize, [Pos2; 2], egui::Stroke)>) {
+        match s {
+            Shape::Vec(v) => v.iter().for_each(|x| walk(x, i, out)),
+            Shape::LineSegment { points, stroke } => {
+                out.push((*i, *points, *stroke));
+                *i += 1;
+            }
+            _ => *i += 1,
+        }
+    }
+    let (mut i, mut out) = (0, Vec::new());
+    t.shapes.iter().for_each(|c| walk(&c.shape, &mut i, &mut out));
+    out
+}
+
+/// The paint index of the first path stroked `width` in `color` whose points all lie in `area`.
+fn path_index(t: &T, area: Rect, width: f32, color: egui::Color32) -> Option<usize> {
+    fn walk(s: &Shape, i: &mut usize, f: &dyn Fn(&Shape) -> bool, hit: &mut Option<usize>) {
+        match s {
+            Shape::Vec(v) => v.iter().for_each(|x| walk(x, i, f, hit)),
+            _ => {
+                if hit.is_none() && f(s) {
+                    *hit = Some(*i);
+                }
+                *i += 1;
+            }
+        }
+    }
+    let f = |s: &Shape| match s {
+        Shape::Path(p) => {
+            p.points.len() > 2
+                && p.points.iter().all(|q| area.expand(1.0).contains(*q))
+                && p.stroke.width == width
+                && p.stroke.color == egui::epaint::ColorMode::Solid(color)
+        }
+        _ => false,
+    };
+    let (mut i, mut hit) = (0, None);
+    t.shapes.iter().for_each(|c| walk(&c.shape, &mut i, &f, &mut hit));
+    hit
+}
+
+/// Dashes of `dash` on `gap`: every piece no longer than the dash, and enough of them to cover the
+/// line at that rhythm.
+fn is_dashed(pieces: &[f32], total: f32, dash: [f32; 2]) -> bool {
+    let want = (total / (dash[0] + dash[1])).floor() as usize;
+    !pieces.is_empty() && pieces.iter().all(|l| *l <= dash[0] + 0.01) && pieces.len() >= want
 }
 
 #[test]
@@ -78,4 +129,33 @@ fn the_operating_point_sits_on_the_curve_at_the_published_level() {
     tap.push_detector(Some(-80.0));
     t.frames(60);
     assert!(t.panel(tr).hero.dot.is_none(), "hidden below −60 dB");
+}
+
+#[test]
+fn the_unity_diagonal_runs_corner_to_corner_dashed_under_the_curve() {
+    let (mut t, tr) = T::open();
+    // Past the window's fade-in, so the painted colors are the tokens'.
+    t.frames(30);
+    let p = t.panel(tr);
+    let plot = rect(p.well("transfer").unwrap().well.plot);
+    let u = p.hero.unity.clone().expect("the unity diagonal");
+    // Its ends are the well's (−60, −60) and (0, 0) corners on the dB axes.
+    assert_eq!(u.from, [plot.min.x, plot.max.y]);
+    assert_eq!(u.to, [plot.max.x, plot.min.y]);
+    assert_ne!(u.from, [plot.min.x, plot.min.y], "control: not the other diagonal");
+    assert_eq!((u.stroke.width, u.stroke.color, u.dash), (1.0, TOKENS.line, [3.0, 3.0]));
+    // What was painted: 1 px `line` pieces on the diagonal, each a 3 px dash.
+    let (a, b) = (pos2(u.from[0], u.from[1]), pos2(u.to[0], u.to[1]));
+    let on_line = |q: Pos2| ((q.x - a.x) * (b.y - a.y) - (q.y - a.y) * (b.x - a.x)).abs() / a.distance(b) < 0.01;
+    let pieces: Vec<_> = segments(&t)
+        .into_iter()
+        .filter(|(_, pts, s)| s.color == TOKENS.line && s.width == 1.0 && on_line(pts[0]) && on_line(pts[1]) && plot.expand(0.5).contains(pts[0]))
+        .collect();
+    let lengths: Vec<f32> = pieces.iter().map(|(_, pts, _)| pts[0].distance(pts[1])).collect();
+    assert!(is_dashed(&lengths, a.distance(b), u.dash), "{} pieces, longest {:?}", lengths.len(), lengths.iter().copied().fold(0.0f32, f32::max));
+    // Control: one solid stroke corner to corner fails the dash assertion.
+    assert!(!is_dashed(&[a.distance(b)], a.distance(b), u.dash));
+    // Under the curve: painted before it.
+    let curve = path_index(&t, plot, display_well::CURVE_STROKE, TOKENS.signal).expect("the curve");
+    assert!(pieces.iter().all(|(i, _, _)| *i < curve), "the diagonal lies under the curve");
 }

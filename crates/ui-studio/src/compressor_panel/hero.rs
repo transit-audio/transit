@@ -5,10 +5,10 @@
 //!   static transfer curve in `signal` over its fill (input dB across, output dB up, both −60 to
 //!   0 dB, the board's scale), from the threshold, ratio, knee and makeup the way the plug-in's
 //!   gain computer applies them ([`transfer_db`]; Limit is its ratio of 1000).
-//!   Over the curve the operating point, a solid 8 px `text` dot with a 2 px `surface.inset` ring
-//!   at the published detector level and the curve's output there, stepped with the peak fall-off
-//!   ballistics and hidden below −60 dB or until a level is published (README, Compressor
-//!   displays).
+//!   Under the curve the unity diagonal (1 px `line`, dashed 3 3, corner to corner); over it the
+//!   operating point, a solid 8 px `text` dot with a 2 px `surface.inset` ring at the published
+//!   detector level and the curve's output there, stepped with the peak fall-off ballistics and
+//!   hidden below −60 dB or until a level is published (README, Compressor displays).
 //! - **History** (the rest): a display well with grid lines at the quarters.
 //! - **GR** (64 wide): the kit's gain-reduction bar (14 wide, the board's), filling down from the
 //!   top with its `GR` tag, stepped with the peak fall-off ballistics, and the readout under it.
@@ -20,6 +20,15 @@ use crate::theme::TOKENS;
 use crate::tokens::{self, alpha, compressor as tok, layout as space};
 use crate::widgets::{self, display_well, level_meter, r4};
 use egui::{Align2, Color32, Mesh, Pos2, Rect, Shape, Stroke, Ui, pos2, vec2};
+
+/// The unity diagonal as drawn: its ends (the plot's −60 dB and 0 dB corners), stroke and dash.
+#[derive(Debug, Clone, Default)]
+pub struct UnityRecord {
+    pub from: [f32; 2],
+    pub to: [f32; 2],
+    pub stroke: Stroke,
+    pub dash: [f32; 2],
+}
 
 /// The operating point as drawn: the displayed input level, the curve's output there, the
 /// center, the dot's radius, fill and ring.
@@ -153,6 +162,16 @@ fn gr_level(app: &mut StudioApp, ui: &Ui, dev: Dev) -> f32 {
     shown
 }
 
+/// The diagonal where output equals input, from the plot's (−60, −60) corner to its (0, 0) corner,
+/// dashed; drawn before the curve, so it lies under it.
+fn paint_unity(ui: &Ui, plot: Rect) -> UnityRecord {
+    let stroke = Stroke::new(tok::UNITY_WIDTH, named(tok::UNITY_COLOR));
+    let (from, to) = (display_well::to_screen(plot, [0.0, 0.0]), display_well::to_screen(plot, [1.0, 1.0]));
+    let [dash, gap] = tok::UNITY_DASH;
+    ui.painter().extend(Shape::dashed_line(&[from, to], stroke, dash, gap));
+    UnityRecord { from: [from.x, from.y], to: [to.x, to.y], stroke, dash: tok::UNITY_DASH }
+}
+
 /// The operating point's displayed input level: the tap's newest detector level, stepped with the
 /// peak fall-off ballistics; `None` until a level has been published since the editor opened.
 fn dot_level(app: &mut StudioApp, ui: &Ui, dev: Dev) -> Option<f32> {
@@ -202,6 +221,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     // The grid first, then the curve over its fill (the well's curve rule), as the board layers them.
     let plot = rect_of(well.layout.plot);
     let lines = grid(ui, plot, true);
+    out.hero.unity = Some(paint_unity(ui, plot));
     paint_curve(ui, plot, &curve);
     out.hero.curve = curve;
     out.hero.dot = dot_level(app, ui, dev).and_then(|db| paint_dot(app, ui, dev, plot, db));
