@@ -12,6 +12,9 @@ pub struct UiState {
     pub low_latency_limit_ms: f64,
     /// The audio device choice, kept with the preferences: per machine.
     pub audio: transit_playback::AudioConfig,
+    /// The main bus monitoring set (#366): Mono, Dim, Ref, the monitor level and the reference
+    /// level. Per machine, with the audio settings; never in the session or its undo history.
+    pub monitor: main_monitor::MonitorPrefs,
     /// The Audio Devices window's last section (`audio_devices::Section::key`): per machine, in
     /// `ui.json`, never in the session.
     pub audio_devices_section: String,
@@ -146,6 +149,7 @@ impl Default for UiState {
             low_latency: false,
             low_latency_limit_ms: 0.0,
             audio: transit_playback::AudioConfig::default(),
+            monitor: main_monitor::MonitorPrefs::default(),
             audio_devices_section: String::new(),
             io_maps: Vec::new(),
             recent_files: Vec::new(),

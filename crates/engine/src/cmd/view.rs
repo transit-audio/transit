@@ -18,6 +18,10 @@ pub fn specs() -> Vec<CommandSpec> {
         // Window > Collapse All Editors / Expand All Editors (326-V): fold every device window to its title bar, and back.
         cmd!(view "window.collapse_editors", "Collapse All Editors", [], None, "{}", always, |_, _| Err(bad("window.collapse_editors", "runs in the transit app only"))),
         cmd!(view "window.expand_editors", "Expand All Editors", [], None, "{}", always, |_, _| Err(bad("window.expand_editors", "runs in the transit app only"))),
+        // The main bus monitoring set (#366): a per-machine preference the studio app owns and
+        // hands to the audio device's output; listed here for agents. Not undoable: monitor state
+        // is not a session edit, and it never reaches a bounce, a freeze, a stem or a send.
+        cmd!(view "mix.monitor", "Main Bus Monitoring", [], None, "{mono?: bool, dim?: bool, ref?: bool, level_db?: \"-inf\"..0, store_ref?: bool; each optional; store_ref stores the monitor level as Ref's level; monitor path only, not undoable (not a session edit)}", always, |_, _| Err(bad("mix.monitor", "runs in the transit app only"))),
         cmd!(view "help.check_updates", "Check for Updates...", [], None, "{}", always, |_, _| Err(bad("help.check_updates", "runs in the transit app only"))),
         // Help > Debug Logging: the studio app owns the logger; listed here for agents.
         cmd!(view "help.debug_logging", "Debug Logging", [], None, "{on?: bool; without it the setting flips}", always, |_, _| Err(bad("help.debug_logging", "runs in the transit app only"))),

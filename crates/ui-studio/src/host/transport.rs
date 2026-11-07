@@ -146,6 +146,7 @@ impl StudioApp {
             self.engine.transport_requests = later;
         }
         self.push_metronome_level();
+        self.push_monitor();
         // The count-in is over (or was cancelled): the status line says what happens next.
         if let Some(failure) = self.player.as_ref().and_then(Player::take_start_failure)
             && self.recording_active()

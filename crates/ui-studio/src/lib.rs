@@ -55,6 +55,7 @@ pub mod load_readout;
 mod loopbar;
 mod low_latency;
 pub mod macro_osc_panel;
+pub mod main_monitor;
 pub mod menus;
 pub mod metronome;
 pub mod midi_fx_panel;
@@ -670,6 +671,7 @@ impl StudioApp {
         v["help"] = json!(self.help.layout);
         v["editor_windows"] = editor_group::inspect(self);
         v["recording_pass"] = self.recording_pass_inspect();
+        v["monitor"] = self.monitor_state();
         v
     }
 }
@@ -702,6 +704,8 @@ mod inactive_hatch_tests;
 mod keys_tests;
 #[cfg(test)]
 mod loop_hue_tests;
+#[cfg(test)]
+mod main_monitor_tests;
 #[cfg(test)]
 mod midi_fx_panel_tests;
 #[cfg(test)]
