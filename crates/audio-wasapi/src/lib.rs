@@ -108,7 +108,40 @@ fn attempts(info: &EndpointInfo, wished: Vec<u32>, period: Option<u32>) -> Vec<a
         .collect()
 }
 
+/// The endpoint a saved device names (`device`, a friendly name or an endpoint id) among
+/// `candidates` (`(name, id)` in default-first order): the first match (ADR 0046, decision 2), and a
+/// warning when the name matches more than one endpoint, since another lister could pick a different
+/// one of them. `None` when nothing matches.
+fn find_named<'a>(candidates: impl IntoIterator<Item = (&'a str, &'a str)>, device: &str, direction: &str) -> (Option<usize>, Option<String>) {
+    let matches: Vec<(usize, &str)> =
+        candidates.into_iter().enumerate().filter(|(_, (name, id))| *name == device || *id == device).map(|(i, (_, id))| (i, id)).collect();
+    let warning = (matches.len() > 1).then(|| {
+        format!("{} WASAPI {direction} endpoints match \"{device}\"; opening the first in default-first order ({})", matches.len(), matches[0].1)
+    });
+    (matches.first().map(|(i, _)| *i), warning)
+}
+
+/// The endpoint `device` names, else the first (the default), logging a duplicate-name warning.
+fn resolve<'a>(endpoints: &'a [EndpointInfo], device: Option<&str>, direction: &str) -> Option<&'a EndpointInfo> {
+    let named = device.and_then(|device| {
+        let (at, warning) = find_named(endpoints.iter().map(|e| (e.name.as_str(), e.id.as_str())), device, direction);
+        if let Some(warning) = warning {
+            log::warn!("{warning}");
+        }
+        at
+    });
+    named.and_then(|at| endpoints.get(at)).or_else(|| endpoints.first())
+}
+
 impl WasapiBackend {
+    /// The active endpoints of `direction` in default-first order and the id of the default
+    /// endpoint (`None` when the system has none): the Audio Devices listing (ADR 0046, decision 2).
+    pub fn listing(&self, direction: ab::Direction) -> Result<(Vec<ab::Endpoint>, Option<String>), ab::OpenError> {
+        let output = direction == ab::Direction::Output;
+        let (found, default) = com::list_endpoints_and_default(output)?;
+        Ok((found.iter().map(|info| endpoint_of(info, output)).collect(), default))
+    }
+
     /// The exclusive-mode formats `endpoint` accepts among [`ab::exclusive_candidates`] for
     /// `rate_first` and `channels`, for the device report. It probes the device (a control-thread
     /// call that fails while another app holds it); enumeration never calls it.
@@ -148,23 +181,13 @@ impl ab::Backend for WasapiBackend {
 
     fn plan_render(&self, wish: &ab::OutputWish) -> Result<ab::Plan, String> {
         let endpoints = com::list_endpoints(true).map_err(|e| e.to_string())?;
-        let info = wish
-            .device
-            .as_deref()
-            .and_then(|name| endpoints.iter().find(|e| e.name == name || e.id == name))
-            .or_else(|| endpoints.first())
-            .ok_or("no output device")?;
+        let info = resolve(&endpoints, wish.device.as_deref(), "output").ok_or("no output device")?;
         Ok(ab::Plan { endpoint: endpoint_of(info, true), attempts: attempts(info, wish.rates.clone(), wish.period) })
     }
 
     fn plan_capture(&self, wish: &ab::InputWish) -> Result<ab::Plan, String> {
         let endpoints = com::list_endpoints(false).map_err(|e| e.to_string())?;
-        let info = wish
-            .device
-            .as_deref()
-            .and_then(|name| endpoints.iter().find(|e| e.name == name || e.id == name))
-            .or_else(|| endpoints.first())
-            .ok_or("no input device")?;
+        let info = resolve(&endpoints, wish.device.as_deref(), "input").ok_or("no input device")?;
         Ok(ab::Plan { endpoint: endpoint_of(info, false), attempts: attempts(info, wish.rate.into_iter().collect(), wish.period) })
     }
 
@@ -281,6 +304,32 @@ mod attempt_order {
     fn wished_rates_keep_their_order_and_the_mix_rate_is_not_repeated() {
         assert_eq!(rates(&endpoint(48_000), vec![96_000, 48_000, 44_100]), [96_000, 48_000, 44_100]);
         assert_eq!(rates(&endpoint(48_000), vec![]), [48_000]);
+    }
+
+    fn named(name: &str, id: &str) -> EndpointInfo {
+        EndpointInfo { id: id.into(), name: name.into(), ..endpoint(48_000) }
+    }
+
+    /// ADR 0046, decision 2: a saved name two endpoints share opens the first in default-first
+    /// order and says so; a unique name, an id or a missing name never warns.
+    #[test]
+    fn a_saved_name_two_endpoints_share_opens_the_first_and_warns() {
+        let twins = [named("Speakers (USB Audio)", "{a}"), named("Headphones", "{b}"), named("Speakers (USB Audio)", "{c}")];
+        let candidates = || twins.iter().map(|e| (e.name.as_str(), e.id.as_str()));
+        let (at, warning) = find_named(candidates(), "Speakers (USB Audio)", "output");
+        assert_eq!(at, Some(0));
+        assert_eq!(
+            warning.as_deref(),
+            Some("2 WASAPI output endpoints match \"Speakers (USB Audio)\"; opening the first in default-first order ({a})")
+        );
+        assert_eq!(resolve(&twins, Some("Speakers (USB Audio)"), "output").map(|e| e.id.as_str()), Some("{a}"));
+        assert_eq!(find_named(candidates(), "{c}", "output"), (Some(2), None), "an id names one endpoint");
+        // Control: distinct names, no warning.
+        let distinct = [named("Speakers (USB Audio)", "{a}"), named("Headphones", "{b}"), named("Line (USB Audio)", "{c}")];
+        let (at, warning) = find_named(distinct.iter().map(|e| (e.name.as_str(), e.id.as_str())), "Line (USB Audio)", "input");
+        assert_eq!((at, warning), (Some(2), None));
+        assert_eq!(resolve(&distinct, Some("Gone"), "output").map(|e| e.id.as_str()), Some("{a}"), "a missing name opens the default");
+        assert_eq!(resolve(&distinct, None, "output").map(|e| e.id.as_str()), Some("{a}"));
     }
 }
 

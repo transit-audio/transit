@@ -97,8 +97,10 @@ fn describe(endpoint: &ab::Endpoint, direction: ab::Direction, is_default: bool)
 /// one is the default: a native plan opens it when no device is named), then every `installed`
 /// device the backend could not describe (another driver held the process's one ASIO slot), offered
 /// with unknown counts as `add_unlisted` does for cpal, and the diagnostics of those that failed.
+/// `is_default` marks the platform's default system (WASAPI on Windows; never ASIO or JACK).
 pub fn system_from_endpoints(
     name: &str,
+    is_default: bool,
     outputs: &[ab::Endpoint],
     inputs: &[ab::Endpoint],
     installed: &[String],
@@ -111,11 +113,56 @@ pub fn system_from_endpoints(
     };
     AudioSystem {
         name: name.to_owned(),
-        is_default: false,
+        is_default,
         outputs: list(outputs, ab::Direction::Output),
         inputs: list(inputs, ab::Direction::Input),
         diagnostics,
     }
+}
+
+/// One direction as an enumerator lists it: the endpoints and the id of the default one (`None`
+/// when the system has no default).
+pub type Listing = (Vec<ab::Endpoint>, Option<String>);
+
+/// The WASAPI system as the native backend lists it (ADR 0046, decision 2): every active endpoint
+/// per direction by its friendly name (`PKEY_Device_FriendlyName`, the property cpal names them by),
+/// from `IMMDeviceEnumerator`, with the `eConsole` default first and marked. The default system on
+/// Windows. An enumerator error is the system's diagnostic ("WASAPI: <error>") over an empty list.
+#[cfg(all(windows, feature = "native-wasapi"))]
+pub fn wasapi_system() -> AudioSystem {
+    let backend = transit_audio_wasapi::WasapiBackend::default();
+    wasapi_system_from(|direction| backend.listing(direction).map_err(|e| e.to_string()))
+}
+
+/// [`wasapi_system`] over any lister: `list` answers one direction. The endpoints are put in
+/// default-first order (the order a native plan resolves in) and only the default one is marked;
+/// a default the list does not hold marks none.
+pub fn wasapi_system_from(list: impl Fn(ab::Direction) -> Result<Listing, String>) -> AudioSystem {
+    let mut diagnostics = Vec::new();
+    let mut side = |direction| -> (Vec<ab::Endpoint>, Option<String>) {
+        match list(direction) {
+            Ok((mut endpoints, default)) => {
+                endpoints.sort_by_key(|e| Some(&e.id) != default.as_ref());
+                (endpoints, default)
+            }
+            Err(e) => {
+                let note = format!("{}: {e}", devices::WASAPI_SYSTEM);
+                if !diagnostics.contains(&note) {
+                    diagnostics.push(note);
+                }
+                (Vec::new(), None)
+            }
+        }
+    };
+    let (outputs, default_out) = side(ab::Direction::Output);
+    let (inputs, default_in) = side(ab::Direction::Input);
+    let mut system = system_from_endpoints(devices::WASAPI_SYSTEM, true, &outputs, &inputs, &[], diagnostics);
+    for (listed, endpoints, default) in [(&mut system.outputs, &outputs, default_out), (&mut system.inputs, &inputs, default_in)] {
+        for (device, endpoint) in listed.iter_mut().zip(endpoints) {
+            device.is_default = default.as_ref() == Some(&endpoint.id);
+        }
+    }
+    system
 }
 
 /// The ASIO system as the native backend lists it: every installed driver by its registry name,
@@ -131,7 +178,9 @@ pub fn asio_system(selected: Option<&str>) -> AudioSystem {
     use transit_audio_asio::AsioBackend;
     let backend = match AsioBackend::shared() {
         Ok(backend) => backend,
-        Err(e) => return system_from_endpoints(devices::ASIO_SYSTEM, &[], &[], &[], vec![format!("the native ASIO backend did not start: {e}")]),
+        Err(e) => {
+            return system_from_endpoints(devices::ASIO_SYSTEM, false, &[], &[], &[], vec![format!("the native ASIO backend did not start: {e}")]);
+        }
     };
     let mut diagnostics = Vec::new();
     let installed: Vec<String> = match backend.driver_names() {
@@ -142,11 +191,11 @@ pub fn asio_system(selected: Option<&str>) -> AudioSystem {
         }
     };
     let Some(selected) = selected else {
-        return system_from_endpoints(devices::ASIO_SYSTEM, &[], &[], &installed, diagnostics);
+        return system_from_endpoints(devices::ASIO_SYSTEM, false, &[], &[], &installed, diagnostics);
     };
     if !installed.iter().any(|n| n == selected) {
         diagnostics.push(format!("{selected}: this ASIO driver is not installed"));
-        return system_from_endpoints(devices::ASIO_SYSTEM, &[], &[], &installed, diagnostics);
+        return system_from_endpoints(devices::ASIO_SYSTEM, false, &[], &[], &installed, diagnostics);
     }
     if let Err(e) = backend.probe(selected) {
         log::info!("ASIO: listing \"{selected}\": {e}");
@@ -158,7 +207,7 @@ pub fn asio_system(selected: Option<&str>) -> AudioSystem {
     if let Some(Err(problem)) = backend.probed(selected).filter(|p| p.as_ref().is_err_and(|d| !d.blocked)) {
         diagnostics.push(problem.to_string());
     }
-    system_from_endpoints(devices::ASIO_SYSTEM, &outputs, &inputs, &installed, diagnostics)
+    system_from_endpoints(devices::ASIO_SYSTEM, false, &outputs, &inputs, &installed, diagnostics)
 }
 
 /// The JACK system as the native backend lists it (ADR 0021, decision 3): one device per port group,
@@ -179,6 +228,7 @@ pub fn jack_system() -> AudioSystem {
             }));
             let mut system = system_from_endpoints(
                 devices::JACK_SYSTEM,
+                false,
                 &server.endpoints(ab::Direction::Output),
                 &server.endpoints(ab::Direction::Input),
                 &[],
@@ -195,7 +245,7 @@ pub fn jack_system() -> AudioSystem {
         _ => {
             let mut diagnostics: Vec<String> = state.diagnostic().into_iter().collect();
             diagnostics.extend(backend.library_note());
-            system_from_endpoints(devices::JACK_SYSTEM, &[], &[], &[], diagnostics)
+            system_from_endpoints(devices::JACK_SYSTEM, false, &[], &[], &[], diagnostics)
         }
     }
 }
@@ -255,7 +305,7 @@ mod tests {
     #[test]
     fn the_jack_system_under_pipewire_offers_the_servers_quantum_range() {
         let group = endpoint("alsa_output.pci", 0, 2, &[48_000]);
-        let mut system = system_from_endpoints(devices::JACK_SYSTEM, std::slice::from_ref(&group), &[], &[], Vec::new());
+        let mut system = system_from_endpoints(devices::JACK_SYSTEM, false, std::slice::from_ref(&group), &[], &[], Vec::new());
         let clock = crate::pipewire::ServerClock {
             rate: Some(48_000),
             quantum: Some(128),
@@ -279,6 +329,7 @@ mod tests {
         let installed = ["Model Mixer ASIO Driver".to_string(), "Focusrite USB ASIO".to_string()];
         let system = system_from_endpoints(
             "ASIO",
+            false,
             std::slice::from_ref(&model12),
             std::slice::from_ref(&model12),
             &installed,
@@ -296,10 +347,61 @@ mod tests {
         assert_eq!(system.diagnostics, ["Broken: init failed"]);
     }
 
+    fn names(list: &[DeviceInfo]) -> Vec<(&str, bool)> {
+        list.iter().map(|d| (d.name.as_str(), d.is_default)).collect()
+    }
+
+    /// ADR 0046, decision 2: the native WASAPI list is the default system, default endpoint first
+    /// and marked, whatever order the enumerator returned.
+    #[test]
+    fn the_wasapi_system_lists_the_default_endpoint_first_and_is_the_default_system() {
+        let [a, b, c] = [endpoint("Speakers", 0, 2, &[48_000]), endpoint("Headphones", 0, 2, &[48_000]), endpoint("Monitors", 0, 8, &[48_000])];
+        let mic = endpoint("Microphone", 1, 0, &[48_000]);
+        let list = |default: &'static str| {
+            let (outputs, inputs) = (vec![a.clone(), b.clone(), c.clone()], vec![mic.clone()]);
+            move |direction| -> Result<Listing, String> {
+                Ok(match direction {
+                    ab::Direction::Output => (outputs.clone(), Some(default.to_owned())),
+                    ab::Direction::Input => (inputs.clone(), Some("Microphone".to_owned())),
+                })
+            }
+        };
+        let system = wasapi_system_from(list("Monitors"));
+        assert_eq!(system.name, "WASAPI");
+        assert!(system.is_default, "WASAPI is the default system");
+        assert_eq!(names(&system.outputs), [("Monitors", true), ("Speakers", false), ("Headphones", false)]);
+        assert_eq!(system.outputs[0].max_channels, 8);
+        assert_eq!(names(&system.inputs), [("Microphone", true)]);
+        assert!(system.diagnostics.is_empty());
+        // Control: another default reorders and marks that one, not the third.
+        let other = wasapi_system_from(list("Headphones"));
+        assert_eq!(names(&other.outputs), [("Headphones", true), ("Speakers", false), ("Monitors", false)]);
+        // A default the list does not hold (its client did not activate) marks none.
+        let gone = wasapi_system_from(list("Unplugged"));
+        assert_eq!(names(&gone.outputs), [("Speakers", false), ("Headphones", false), ("Monitors", false)]);
+    }
+
+    /// An enumerator error is the WASAPI system's diagnostic over an empty list, never a panic or a
+    /// silent empty list; a direction that lists keeps its endpoints.
+    #[test]
+    fn a_wasapi_enumerator_error_is_the_systems_diagnostic() {
+        let failed = wasapi_system_from(|_| Err("EnumAudioEndpoints failed: 0x80070005".to_owned()));
+        assert!(failed.outputs.is_empty() && failed.inputs.is_empty());
+        assert_eq!(failed.diagnostics, ["WASAPI: EnumAudioEndpoints failed: 0x80070005"], "one note for both directions");
+        assert_eq!(failed.system_notes().collect::<Vec<_>>(), ["WASAPI: EnumAudioEndpoints failed: 0x80070005"]);
+        let speakers = endpoint("Speakers", 0, 2, &[48_000]);
+        let half = wasapi_system_from(|direction| match direction {
+            ab::Direction::Output => Ok((vec![speakers.clone()], Some("Speakers".to_owned()))),
+            ab::Direction::Input => Err("GetCount failed".to_owned()),
+        });
+        assert_eq!(names(&half.outputs), [("Speakers", true)]);
+        assert_eq!(half.diagnostics, ["WASAPI: GetCount failed"]);
+    }
+
     #[test]
     fn an_unsupported_sample_type_lists_the_driver_with_no_rate() {
         let msb = endpoint("Big Endian", 2, 2, &[]);
-        let system = system_from_endpoints("ASIO", &[msb], &[], &[], Vec::new());
+        let system = system_from_endpoints("ASIO", false, &[msb], &[], &[], Vec::new());
         assert_eq!((system.outputs[0].max_channels, system.outputs[0].sample_rates.len()), (2, 0));
         assert!(system.inputs.is_empty());
     }

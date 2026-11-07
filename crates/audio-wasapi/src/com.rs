@@ -343,6 +343,13 @@ fn describe(device: &IMMDevice) -> Result<EndpointInfo, ab::OpenError> {
 
 /// The active endpoints of one direction, default first.
 pub(crate) fn list_endpoints(output: bool) -> Result<Vec<EndpointInfo>, ab::OpenError> {
+    list_endpoints_and_default(output).map(|(found, _)| found)
+}
+
+/// The active endpoints of one direction, default first, and the id of the `eConsole` default
+/// endpoint (`None` when there is none; it can be missing from the list when its client did not
+/// activate).
+pub(crate) fn list_endpoints_and_default(output: bool) -> Result<(Vec<EndpointInfo>, Option<String>), ab::OpenError> {
     on_mta(|| {
         let flow: EDataFlow = if output { eRender } else { eCapture };
         let enumerator = enumerator()?;
@@ -357,7 +364,7 @@ pub(crate) fn list_endpoints(output: bool) -> Result<Vec<EndpointInfo>, ab::Open
         let default = unsafe { enumerator.GetDefaultAudioEndpoint(flow, eConsole) }.ok().and_then(|d| id_of(&d).ok());
         let mut found: Vec<EndpointInfo> = devices.iter().filter_map(|d| describe(d).ok()).collect();
         found.sort_by_key(|e| Some(&e.id) != default.as_ref());
-        Ok(found)
+        Ok((found, default))
     })
 }
 

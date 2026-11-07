@@ -459,6 +459,9 @@ impl AudioSystem {
 /// The name of the ASIO audio system, served by the native ASIO backend (cpal has no ASIO host here).
 pub const ASIO_SYSTEM: &str = "ASIO";
 
+/// The name of the WASAPI audio system: the same string in cpal's listing and the native backend's.
+pub const WASAPI_SYSTEM: &str = "WASAPI";
+
 /// Opens the control panel ("Driver settings") of the ASIO driver `driver` through the native
 /// backend: the call runs on its host thread, from a thread of its own, and the receiver gets the
 /// result when the panel closes. Drivers do not reliably report what changed there: reopen the
@@ -479,10 +482,36 @@ pub fn native_asio_control_panel(driver: &str) -> Result<std::sync::mpsc::Receiv
 /// ([`native_asio_system`], with no driver selected: the registry names only), not cpal's ASIO
 /// host, whichever backend then opens it: the driver names are the same registry names.
 pub fn audio_systems() -> Vec<AudioSystem> {
-    let mut systems = cpal_audio_systems();
+    let mut systems = audio_systems_without_asio();
     systems.extend(native_asio_system(None));
+    systems
+}
+
+/// [`audio_systems`] without the ASIO system: what the Audio Devices window lists at once (it lists
+/// ASIO on a worker thread, probing the selected driver). In a Windows build with the native WASAPI
+/// backend the WASAPI system is the native one (`backend::native::wasapi_system`, ADR 0046
+/// decision 2); elsewhere cpal's systems, then native JACK where built.
+pub fn audio_systems_without_asio() -> Vec<AudioSystem> {
+    #[cfg(all(windows, feature = "native-wasapi"))]
+    let mut systems = vec![crate::backend::native::wasapi_system()];
+    #[cfg(not(all(windows, feature = "native-wasapi")))]
+    let mut systems = cpal_audio_systems();
     systems.extend(native_jack_system());
     systems
+}
+
+/// What listed `system` in [`audio_systems`] in this build, for the diagnostics report: the native
+/// backend's enumerator where one lists it, else cpal.
+pub fn enumerator_of(system: &str) -> &'static str {
+    if NATIVE_WASAPI_COMPILED && system == WASAPI_SYSTEM {
+        "native WASAPI (IMMDeviceEnumerator)"
+    } else if NATIVE_ASIO_COMPILED && system == ASIO_SYSTEM {
+        "native ASIO (driver registry)"
+    } else if NATIVE_JACK_COMPILED && system == JACK_SYSTEM {
+        "native JACK"
+    } else {
+        "cpal"
+    }
 }
 
 /// The MIDI ports present now as `(name, input)`, inputs first, named as the MIDI menus name them:
@@ -520,7 +549,8 @@ pub fn native_asio_system(selected: Option<&str>) -> Option<AudioSystem> {
 }
 
 /// The audio systems cpal lists (every one but the ASIO system in a build with the native ASIO
-/// backend, which [`native_asio_system`] lists).
+/// backend, which [`native_asio_system`] lists). In a Windows build with the native WASAPI backend
+/// only the name-equality test calls it (ADR 0046, decision 2).
 pub fn cpal_audio_systems() -> Vec<AudioSystem> {
     let default_id = cpal::default_host().id();
     cpal::available_hosts()
