@@ -33,6 +33,9 @@ ids! {
     // help\track-menu.toml
     TrackMenuMakeActive => "track_menu.make_active",
     TrackMenuMakeInactive => "track_menu.make_inactive",
+    // help\bounce.toml
+    BounceFormat => "bounce.format",
+    BounceBitrate => "bounce.bitrate",
     // help\bounce-in-place.toml
     BouncePlaceDestination => "bounce_in_place.destination",
     BouncePlaceSource => "bounce_in_place.source",

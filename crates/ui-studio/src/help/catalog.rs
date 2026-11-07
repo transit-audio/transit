@@ -14,6 +14,7 @@ pub const DOCS_URL: &str = "https://github.com/transit-audio/transit/blob/main/d
 const FILES: &[&str] = &[
     include_str!("../../../../docs/help/view.toml"),
     include_str!("../../../../docs/help/track-menu.toml"),
+    include_str!("../../../../docs/help/bounce.toml"),
     include_str!("../../../../docs/help/bounce-in-place.toml"),
     include_str!("../../../../docs/help/hidden-tracks.toml"),
     include_str!("../../../../docs/help/automation.toml"),

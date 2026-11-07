@@ -77,8 +77,8 @@ pub fn specs() -> Vec<CommandSpec> {
             let tracks = crate::io::import_midi_bytes(e, &bytes, at, bool_or(p, "tempo_map", true))?;
             Ok(json!({"tracks": tracks}))
         }),
-        cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: true, fold_down?: stereo, mode?: realtime|offline_without_external, without_external?: false, stems?: false, uncompensated?: false} — with External Instruments, `mode: realtime` plays the range through the live device and keeps the mix (and with `stems`, each return); `offline_without_external` leaves them out", always, bounce),
-        cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, fold_down?: stereo, mode?: offline_without_external, without_external?: false}", has_tracks, |e, p| {
+        cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac|opus, bit_depth?: 16|24|32f, bitrate?: kb/s (Opus: 6-510, default 160), start?, end?, source?: main|bus name, normalize?: false, dither?: true, fold_down?: stereo, mode?: realtime|offline_without_external, without_external?: false, stems?: false, uncompensated?: false} — with External Instruments, `mode: realtime` plays the range through the live device and keeps the mix (and with `stems`, each return); `offline_without_external` leaves them out", always, bounce),
+        cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac|opus, bit_depth?: 16|24|32f, bitrate?: kb/s (Opus), start?, end?, fold_down?: stereo, mode?: offline_without_external, without_external?: false}", has_tracks, |e, p| {
             let dir = str_param(p, "dir").ok_or_else(|| bad("file.bounce_stems", "`dir` required"))?.to_string();
             let left_out = super::external_instrument::render_guard(e, "file.bounce_stems", p)?;
             let r = range_param(e, "file.bounce_stems", p)?;
@@ -86,18 +86,15 @@ pub fn specs() -> Vec<CommandSpec> {
             let format = match str_param(p, "format") {
                 Some("aiff") | Some("aif") => transit_audio_io::FileFormat::Aiff,
                 Some("flac") => transit_audio_io::FileFormat::Flac,
+                Some("opus") => transit_audio_io::FileFormat::Opus,
                 _ => transit_audio_io::FileFormat::Wav,
             };
-            let bit_depth = match p.get("bit_depth").map(|b| b.to_string().trim_matches('"').to_string()).as_deref() {
-                Some("16") => transit_audio_io::BitDepth::Int16,
-                Some("32") | Some("32f") => transit_audio_io::BitDepth::Float32,
-                _ => transit_audio_io::BitDepth::Int24,
-            };
+            let opts = transit_audio_io::EncodeOptions { dither: true, ..encode_options(e, "file.bounce_stems", p, format)? };
             let fold = fold_down_param(p, "file.bounce_stems")?;
-            let files = crate::io::bounce_stems_with(e, &dir, r, &transit_audio_io::EncodeOptions { format, bit_depth, dither: true, bwf: None }, fold)?;
+            let files = crate::io::bounce_stems_with(e, &dir, r, &opts, fold)?;
             Ok(json!({"files": files, "left_out": left_out}))
         }),
-        cmd!(noundo "file.bounce_paths", "Bounce Stems by Output Path...", [], None, "{dir, paths?: [output path name | main] | all (default: every routed path), format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, normalize?: false|true|joint|each, dither?: true, mode?: offline_without_external, without_external?: false}", has_tracks, bounce_paths),
+        cmd!(noundo "file.bounce_paths", "Bounce Stems by Output Path...", [], None, "{dir, paths?: [output path name | main] | all (default: every routed path), format?: wav|aiff|flac|opus, bit_depth?: 16|24|32f, bitrate?: kb/s (Opus), start?, end?, normalize?: false|true|joint|each, dither?: true, mode?: offline_without_external, without_external?: false}", has_tracks, bounce_paths),
         cmd!(noundo "file.export_midi", "MIDI...", ["File", "Export"], None, "{path, tracks?}", always, |e, p| {
             let path = str_param(p, "path").ok_or_else(|| bad("file.export_midi", "`path` required"))?.to_string();
             let only = if p.get("tracks").is_some() || p.get("track").is_some() { Some(tracks_param(e, "file.export_midi", p)?) } else { None };
@@ -112,7 +109,7 @@ pub fn specs() -> Vec<CommandSpec> {
             }
             Ok(json!({"text": text}))
         }),
-        cmd!(noundo "file.export_clips", "Export Clips as Files...", [], Some("Cmd+Shift+K"), "{dir, clips?, format?: wav}", always, |e, p| {
+        cmd!(noundo "file.export_clips", "Export Clips as Files...", [], Some("Cmd+Shift+K"), "{dir, clips?, format?: wav|aiff|flac|opus, bit_depth?: 16|24|32f (default 24), bitrate?: kb/s (Opus)}", always, |e, p| {
             let dir = str_param(p, "dir").ok_or_else(|| bad("file.export_clips", "`dir` required"))?.to_string();
             let ids = clip_ids_param(e, p);
             if ids.is_empty() {
@@ -122,7 +119,11 @@ pub fn specs() -> Vec<CommandSpec> {
                 let channels = e.session().track(t).map_or(1, |x| x.channels());
                 crate::io::refuse_longer(e.session(), "file.export_clips", &c.name, "export", c.length, crate::io::render_limit(channels))?;
             }
-            let n = crate::io::export_clips(e, &ids, &dir)?;
+            let format_name = str_param(p, "format").unwrap_or("wav");
+            let format = transit_audio_io::encode_format_for(format_name)
+                .ok_or_else(|| bad("file.export_clips", format!("cannot write `{format_name}` files (supported: {})", transit_audio_io::ENCODE_EXTENSIONS)))?;
+            let opts = transit_audio_io::EncodeOptions { dither: bool_or(p, "dither", false), ..encode_options(e, "file.export_clips", p, format)? };
+            let n = crate::io::export_clips(e, &ids, &dir, &opts)?;
             Ok(json!({"written": n, "dir": dir}))
         }),
         cmd!(noundo "file.export_selected_tracks_as_session", "Selected Tracks as New Session...", ["File", "Export"], None, "{path, tracks?, replace?: false}", has_selection, |e, p| {
@@ -337,6 +338,36 @@ fn bounce_bus(e: &Engine, p: &Value) -> Result<Option<transit_model::BusId>> {
     e.session().bus_by_name(name).map(|b| Some(b.id)).ok_or_else(|| bad("file.bounce_mix", format!("unknown bus `{name}`")))
 }
 
+/// The encoding a bounce command asks for in `format`: `bit_depth` (16, 24 or 32f, default 24) and
+/// `dither` (default on) for the lossless formats, `bitrate` in kb/s for Opus (default 160; Opus
+/// takes 6 to 510), and the session's name as the title tag.
+pub(crate) fn encode_options(e: &Engine, id: &str, p: &Value, format: transit_audio_io::FileFormat) -> Result<transit_audio_io::EncodeOptions> {
+    let bit_depth = match p.get("bit_depth").map(|b| b.to_string().trim_matches('"').to_string()).as_deref() {
+        Some("16") => transit_audio_io::BitDepth::Int16,
+        Some("32") | Some("32f") => transit_audio_io::BitDepth::Float32,
+        _ => transit_audio_io::BitDepth::Int24,
+    };
+    let bitrate_kbps = match p.get("bitrate") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let k = v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().trim_end_matches("kbps").trim_end_matches("k").trim().parse().ok()));
+            match k.and_then(|k| u16::try_from(k).ok()).filter(|k| (6..=510).contains(k)) {
+                Some(k) => Some(k),
+                None => return Err(bad(id, format!("`bitrate` is in kb/s, 6 to 510 (the dialog offers 96, 128, 160, 192, 256), not {v}"))),
+            }
+        }
+    };
+    let name = e.session().name.trim();
+    Ok(transit_audio_io::EncodeOptions {
+        format,
+        bit_depth,
+        dither: bool_or(p, "dither", true),
+        bwf: None,
+        bitrate_kbps,
+        title: (!name.is_empty()).then(|| name.to_string()),
+    })
+}
+
 /// `fold_down: "stereo"` bounces an ITU stereo fold-down of a surround mix.
 fn fold_down_param(p: &Value, id: &str) -> Result<bool> {
     match str_param(p, "fold_down").map(str::trim) {
@@ -375,12 +406,7 @@ pub fn bounce_job(e: &Engine, p: &Value) -> Result<crate::io::Bounce> {
     let format_name = str_param(p, "format").unwrap_or(ext.as_str());
     let format = transit_audio_io::encode_format_for(format_name)
         .ok_or_else(|| bad("file.bounce_mix", format!("cannot write `{format_name}` files (supported: {})", transit_audio_io::ENCODE_EXTENSIONS)))?;
-    let bit_depth = match p.get("bit_depth").map(|b| b.to_string().trim_matches('"').to_string()).as_deref() {
-        Some("16") => transit_audio_io::BitDepth::Int16,
-        Some("32") | Some("32f") => transit_audio_io::BitDepth::Float32,
-        _ => transit_audio_io::BitDepth::Int24,
-    };
-    let opts = transit_audio_io::EncodeOptions { format, bit_depth, dither: bool_or(p, "dither", true), bwf: None };
+    let opts = encode_options(e, "file.bounce_mix", p, format)?;
     let normalize = bool_or(p, "normalize", false);
     let fold = fold_down_param(p, "file.bounce_mix")?;
     let bus = bounce_bus(e, p)?;
@@ -430,12 +456,7 @@ pub fn bounce_paths_job(e: &Engine, p: &Value) -> Result<crate::io::PathBounce> 
     let format_name = str_param(p, "format").unwrap_or("wav");
     let format = transit_audio_io::encode_format_for(format_name)
         .ok_or_else(|| bad(ID, format!("cannot write `{format_name}` files (supported: {})", transit_audio_io::ENCODE_EXTENSIONS)))?;
-    let bit_depth = match p.get("bit_depth").map(|b| b.to_string().trim_matches('"').to_string()).as_deref() {
-        Some("16") => transit_audio_io::BitDepth::Int16,
-        Some("32") | Some("32f") => transit_audio_io::BitDepth::Float32,
-        _ => transit_audio_io::BitDepth::Int24,
-    };
-    let opts = transit_audio_io::EncodeOptions { format, bit_depth, dither: bool_or(p, "dither", true), bwf: None };
+    let opts = encode_options(e, ID, p, format)?;
     let normalize = match p.get("normalize") {
         None | Some(Value::Null) | Some(Value::Bool(false)) => PathNormalize::Off,
         Some(Value::Bool(true)) => PathNormalize::Joint,

@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 transit-time.workspace = true
+transit-audio-io.workspace = true
 transit-midi.workspace = true
 transit-model.workspace = true
 transit-dsp.workspace = true

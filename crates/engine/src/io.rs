@@ -687,21 +687,23 @@ pub(crate) fn validate_bounce_destination(s: &Session, sources: &[TrackId], dest
     Ok(())
 }
 
-pub fn export_clips(e: &Engine, ids: &[transit_model::ClipId], dir: &str) -> Result<usize> {
+pub fn export_clips(e: &Engine, ids: &[transit_model::ClipId], dir: &str, opts: &EncodeOptions) -> Result<usize> {
     let s = e.session();
     make_dir(dir)?;
+    let ext = transit_audio_io::encode_extension(opts.format);
     let mut n = 0;
     for id in ids {
         let Some((t, c)) = s.find_clip(*id) else { continue };
         let _offline = offline();
         let audio = transit_mix::render_clips(s, t, c.range());
         let buf = AudioBuffer { sample_rate: s.sample_rate.hz(), channels: audio };
-        let bytes = transit_audio_io::encode(&buf, &EncodeOptions::default()).map_err(|err| EngineError::Io(err.to_string()))?;
+        let opts = EncodeOptions { title: Some(c.name.clone()), ..opts.clone() };
+        let bytes = transit_audio_io::encode(&buf, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
         let stem = sanitize_name(&c.name);
-        let mut path = Path::new(dir).join(format!("{stem}.wav"));
+        let mut path = Path::new(dir).join(format!("{stem}.{ext}"));
         let mut k = 2u32;
         while path.exists() {
-            path = Path::new(dir).join(format!("{stem}-{k}.wav"));
+            path = Path::new(dir).join(format!("{stem}-{k}.{ext}"));
             k = k.saturating_add(1);
             if k > 10_000 {
                 return Err(EngineError::Io(format!("{dir}: too many files named {stem}")));

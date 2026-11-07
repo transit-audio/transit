@@ -147,12 +147,7 @@ pub fn realtime_plan(e: &Engine, p: &Value) -> Result<RealtimePlan> {
     let format_name = str_param(p, "format").unwrap_or(ext.as_str());
     let format = transit_audio_io::encode_format_for(format_name)
         .ok_or_else(|| bad(ID, format!("cannot write `{format_name}` files (supported: {})", transit_audio_io::ENCODE_EXTENSIONS)))?;
-    let bit_depth = match p.get("bit_depth").map(|b| b.to_string().trim_matches('"').to_string()).as_deref() {
-        Some("16") => transit_audio_io::BitDepth::Int16,
-        Some("32") | Some("32f") => transit_audio_io::BitDepth::Float32,
-        _ => transit_audio_io::BitDepth::Int24,
-    };
-    let opts = transit_audio_io::EncodeOptions { format, bit_depth, dither: bool_or(p, "dither", true), bwf: None };
+    let opts = super::file::encode_options(e, ID, p, format)?;
     for file in std::iter::once(&path).chain(stems.iter().filter_map(|s| s.path.as_ref())) {
         crate::file_access::check_write(file).map_err(EngineError::Io)?;
     }

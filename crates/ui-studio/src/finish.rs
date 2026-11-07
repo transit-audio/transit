@@ -60,7 +60,10 @@ pub struct BounceForm {
     /// `main`, or the name of a bus (an FX channel or a group).
     pub source: String,
     pub format: String,
+    /// The lossless formats' bit depth (`16`, `24`, `32f`); not offered for Opus.
     pub bit_depth: String,
+    /// The Opus bitrate in kb/s (`96` to `256`, default `160`); offered for Opus only (#238).
+    pub bitrate: String,
     pub normalize: bool,
     pub path: String,
     /// Stems by output path instead of one mix (ADR 0015 slice e).
@@ -146,7 +149,10 @@ pub struct BounceLayout {
     pub norm_modes: Vec<MenuItem>,
     pub dir: R4,
     pub formats: Vec<MenuItem>,
+    /// The bit depths (empty for Opus, which has none).
     pub depths: Vec<MenuItem>,
+    /// The Opus bitrates (empty for the lossless formats).
+    pub bitrates: Vec<MenuItem>,
     pub normalize: R4,
     pub path: R4,
     pub choose: R4,
@@ -217,7 +223,7 @@ pub enum Replace {
 }
 
 /// The extensions of audio files a bounce can write or replace.
-const AUDIO_EXTS: [&str; 6] = ["wav", "aif", "aiff", "flac", "mp3", "ogg"];
+const AUDIO_EXTS: [&str; 7] = ["wav", "aif", "aiff", "flac", "opus", "mp3", "ogg"];
 
 /// `path` with the extension `format` writes. A known audio extension is replaced; any other
 /// (`mix.v2`) is part of the name, so the new one is appended (`mix.v2.wav`).
@@ -378,6 +384,7 @@ impl StudioApp {
             source: "main".into(),
             format: "wav".into(),
             bit_depth: "24".into(),
+            bitrate: transit_audio_io::DEFAULT_OPUS_KBPS.to_string(),
             normalize: false,
             path: dir.join(name).to_string_lossy().into_owned(),
             by_path: false,
@@ -449,6 +456,7 @@ impl StudioApp {
             "start": start,
             "end": end,
         });
+        add_bitrate(&mut p, &f);
         if f.source != "main" {
             p["source"] = json!(f.source);
         }
@@ -491,6 +499,7 @@ impl StudioApp {
         };
         let mut p =
             json!({"dir": dir, "paths": picked, "format": f.format, "bit_depth": f.bit_depth, "normalize": normalize, "start": start, "end": end});
+        add_bitrate(&mut p, f);
         if f.without_external {
             p["without_external"] = json!(true);
         }
@@ -519,7 +528,7 @@ impl StudioApp {
 
     /// The `file.bounce_mix` request of the form in real time, over `start..end` to `path`.
     fn realtime_params(f: &BounceForm, path: &std::path::Path, start: i64, end: i64) -> Value {
-        json!({
+        let mut p = json!({
             "path": path.to_string_lossy(),
             "format": f.format,
             "bit_depth": f.bit_depth,
@@ -528,7 +537,9 @@ impl StudioApp {
             "mode": "realtime",
             "stems": f.realtime_stems,
             "uncompensated": f.uncompensated,
-        })
+        });
+        add_bitrate(&mut p, f);
+        p
     }
 
     /// The form's range, or `None` when it names an empty selection.
@@ -782,12 +793,35 @@ fn step_path_bounce(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
+/// The form's Opus bitrate on a bounce request (`bitrate`, kb/s); the lossless formats carry none.
+fn add_bitrate(p: &mut Value, f: &BounceForm) {
+    if f.format == "opus"
+        && let Ok(k) = f.bitrate.trim().parse::<u16>()
+    {
+        p["bitrate"] = json!(k);
+    }
+}
+
 /// A row of choices; returns the picked value.
 fn choices(ui: &mut egui::Ui, current: &str, items: &[(String, String)], out: &mut Vec<MenuItem>) -> Option<String> {
+    choices_with_help(ui, current, items, out, None)
+}
+
+/// [`choices`] whose options show the help entry `help` on hover.
+fn choices_with_help(
+    ui: &mut egui::Ui,
+    current: &str,
+    items: &[(String, String)],
+    out: &mut Vec<MenuItem>,
+    help: Option<crate::help::Id>,
+) -> Option<String> {
     let mut picked = None;
     ui.horizontal_wrapped(|ui| {
         for (text, value) in items {
             let b = crate::chrome_pick::option_label(ui, value == current, text);
+            if let Some(id) = help {
+                crate::help::hover(ui, &b, id);
+            }
             out.push(MenuItem::at(ui, text.clone(), value.clone(), b.rect));
             if b.clicked() {
                 picked = Some(value.clone());
@@ -901,14 +935,22 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         }
         ui.label(egui::RichText::new("Format").color(TOKENS.text_dim));
         let items: Vec<(String, String)> =
-            [("WAV", "wav"), ("AIFF", "aiff"), ("FLAC", "flac")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
-        if let Some(v) = choices(ui, &f.format, &items, &mut lay.formats) {
+            [("WAV", "wav"), ("AIFF", "aiff"), ("FLAC", "flac"), ("Opus", "opus")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+        if let Some(v) = choices_with_help(ui, &f.format, &items, &mut lay.formats, Some(crate::help::Id::BounceFormat)) {
             f.format = v;
         }
-        let items: Vec<(String, String)> =
-            [("16-bit", "16"), ("24-bit", "24"), ("32-bit float", "32f")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
-        if let Some(v) = choices(ui, &f.bit_depth, &items, &mut lay.depths) {
-            f.bit_depth = v;
+        if f.format == "opus" {
+            // A lossy codec has no bit depth: its rate is the choice instead (#238).
+            let items: Vec<(String, String)> = transit_audio_io::OPUS_BITRATES_KBPS.iter().map(|k| (format!("{k} kb/s"), k.to_string())).collect();
+            if let Some(v) = choices_with_help(ui, &f.bitrate, &items, &mut lay.bitrates, Some(crate::help::Id::BounceBitrate)) {
+                f.bitrate = v;
+            }
+        } else {
+            let items: Vec<(String, String)> =
+                [("16-bit", "16"), ("24-bit", "24"), ("32-bit float", "32f")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+            if let Some(v) = choices(ui, &f.bit_depth, &items, &mut lay.depths) {
+                f.bit_depth = v;
+            }
         }
         let n = crate::chrome::checkbox(ui, &mut f.normalize, "Normalize to -0.1 dBFS");
         lay.normalize = crate::arrange::r4(n.rect);

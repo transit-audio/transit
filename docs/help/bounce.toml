@@ -1,0 +1,13 @@
+area = "bounce"
+title = "Bounce"
+link = "user-guide.md#bounce"
+
+[[entry]]
+id = "bounce.format"
+name = "Bounce format"
+text = "WAV, AIFF and FLAC are lossless, at the bit depth you pick. Opus is transit's lossy format, for sharing: small files that play in every browser, phone and messaging app. transit does not write MP3: Opus sounds better at every bitrate and links under a BSD license, where the MP3 encoder is LGPL."
+
+[[entry]]
+id = "bounce.bitrate"
+name = "Opus bitrate"
+text = "The average rate the Opus encoder aims for (variable bitrate). 160 kb/s is the default and transparent for most music; 96 kb/s suits demos and voice, 256 kb/s leaves the most headroom. Opus files are always 48 kHz: other session rates are converted as the file is written."

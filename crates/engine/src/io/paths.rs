@@ -12,7 +12,7 @@ use super::{Out, bounce_layout, check_bounce_range, make_dir, sanitize_name};
 use crate::{EngineError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use transit_audio_io::{EncodeOptions, FileEncoder, FileFormat};
+use transit_audio_io::{EncodeOptions, FileEncoder};
 use transit_model::{ChannelFormat, IoDirection, IoMap, Route, Session, TrackKind};
 use transit_time::Range;
 
@@ -133,11 +133,7 @@ impl PathBounce {
             return Err(EngineError::BadParams(CMD.into(), "no output paths to bounce".into()));
         }
         make_dir(dir)?;
-        let ext = match opts.format {
-            FileFormat::Aiff => "aif",
-            FileFormat::Flac => "flac",
-            _ => "wav",
-        };
+        let ext = transit_audio_io::encode_extension(opts.format);
         // Hosted plug-ins are created while the render is compiled: offline mode must already be on.
         let offline = transit_vst3_host::offline_scope();
         let render = transit_mix::RangeRender::try_new_paths(&s, r, 1024, io)

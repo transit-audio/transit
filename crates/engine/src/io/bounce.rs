@@ -230,11 +230,7 @@ pub fn bounce_stems_with(e: &Engine, dir: &str, r: Range, opts: &EncodeOptions, 
     let s = e.session();
     check_bounce_range(s, r, "file.bounce_stems")?;
     make_dir(dir)?;
-    let ext = match opts.format {
-        FileFormat::Aiff => "aif",
-        FileFormat::Flac => "flac",
-        _ => "wav",
-    };
+    let ext = transit_audio_io::encode_extension(opts.format);
     let mut out = Vec::new();
     let stems: Vec<(TrackId, String)> = s
         .tracks
