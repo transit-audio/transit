@@ -3,4 +3,6 @@
 //! (`transit-audio-wasapi`, `transit-audio-asio`), chosen by [`native::factory_for`].
 
 pub mod cpal;
+#[cfg(test)]
+mod cpal_convert_golden;
 pub mod native;

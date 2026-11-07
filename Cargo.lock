@@ -4170,7 +4170,6 @@ dependencies = [
 name = "transit-audio-wasapi"
 version = "0.6.2"
 dependencies = [
- "cpal",
  "log",
  "transit-audio-backend",
  "transit-rt",

@@ -27,7 +27,6 @@ windows = { version = "0.62", features = [
 
 [target.'cfg(windows)'.dev-dependencies]
 transit-rt = { workspace = true, features = ["testing"] }
-cpal.workspace = true
 
 # ADR 0013, second amendment: this crate may contain `unsafe` for COM and WASAPI through the
 # `windows` crate only. Every `unsafe` block carries a `// SAFETY:` comment quoting the rule it

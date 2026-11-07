@@ -1,6 +1,8 @@
 //! Device-format conversion for the render callback: the `f32` the Player produces goes to the
 //! bytes of the endpoint's format. Allocation-free (scratch is lent by the stream thread) and
-//! byte-identical to the cpal adapter's conversion for samples in `[-1.0, 1.0)`.
+//! byte-identical to the cpal adapter's conversion as of c5b93418 (cpal 0.16.0, the pinned fork at
+//! commit 31b5dd4) for samples in `[-1.0, 1.0)`: the tests compare against the table captured from
+//! it in `convert_golden.rs` (ADR 0046).
 #![deny(clippy::disallowed_macros, clippy::disallowed_methods)]
 
 use transit_audio_backend::{CaptureSource, RenderSink};
@@ -118,13 +120,7 @@ impl CaptureSource for ConvertSource<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cpal::{I24, Sample as _};
-
-    fn input() -> Vec<f32> {
-        let mut v: Vec<f32> = (0..2048).map(|i| (i as f32 / 1024.0 - 1.0) * 0.999).collect();
-        v.extend([-1.0, 0.0, 0.5, -0.5, 0.999_999, 1e-9, -1e-9, 0.123_456_79]);
-        v
-    }
+    use crate::convert_golden::{I16_READ, I16_WRITE, I24_READ, I24_WRITE, I32_READ, I32_WRITE, input};
 
     fn through(wire: Wire, x: &[f32]) -> Vec<u8> {
         let mut scratch = vec![0.0f32; 7]; // a scratch smaller than the block forces chunking
@@ -148,21 +144,21 @@ mod tests {
     #[test]
     fn i16_matches_the_cpal_adapters_conversion() {
         let x = input();
-        let want: Vec<u8> = x.iter().flat_map(|v| i16::from_sample(*v).to_le_bytes()).collect();
+        let want: Vec<u8> = I16_WRITE.iter().flat_map(|v| v.to_le_bytes()).collect();
         assert_eq!(through(Wire::I16, &x), want);
     }
 
     #[test]
     fn i32_matches_the_cpal_adapters_conversion() {
         let x = input();
-        let want: Vec<u8> = x.iter().flat_map(|v| i32::from_sample(*v).to_le_bytes()).collect();
+        let want: Vec<u8> = I32_WRITE.iter().flat_map(|v| v.to_le_bytes()).collect();
         assert_eq!(through(Wire::I32, &x), want);
     }
 
     #[test]
     fn i24_is_cpals_i24_value_packed_in_three_bytes() {
         let x = input();
-        let want: Vec<u8> = x.iter().flat_map(|v| I24::from_sample(*v).inner().to_le_bytes()[..3].to_vec()).collect();
+        let want: Vec<u8> = I24_WRITE.iter().flat_map(|v| v.to_le_bytes()[..3].to_vec()).collect();
         assert_eq!(through(Wire::I24, &x), want);
     }
 
@@ -200,11 +196,9 @@ mod tests {
             let got = read_through(wire, &bytes, 2, 3);
             let want: Vec<f32> = match wire {
                 Wire::F32 => x.clone(),
-                Wire::I16 => words(&bytes, 2).map(|b| f32::from_sample(i16::from_le_bytes([b[0], b[1]]))).collect(),
-                Wire::I32 => words(&bytes, 4).map(|b| f32::from_sample(i32::from_le_bytes([b[0], b[1], b[2], b[3]]))).collect(),
-                Wire::I24 => {
-                    words(&bytes, 3).map(|b| f32::from_sample(I24::new((i32::from_le_bytes([0, b[0], b[1], b[2]])) >> 8).unwrap())).collect()
-                }
+                Wire::I16 => I16_READ.iter().map(|b| f32::from_bits(*b)).collect(),
+                Wire::I32 => I32_READ.iter().map(|b| f32::from_bits(*b)).collect(),
+                Wire::I24 => I24_READ.iter().map(|b| f32::from_bits(*b)).collect(),
             };
             assert_eq!(got.len(), want.len());
             assert!(got.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()), "{wire:?} differs from cpal");

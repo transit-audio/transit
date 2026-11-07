@@ -16,6 +16,8 @@
 mod capture_loop;
 mod com;
 mod convert;
+#[cfg(test)]
+mod convert_golden;
 mod exclusive;
 mod lifecycle;
 mod loopback;
