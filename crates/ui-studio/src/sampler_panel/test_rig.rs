@@ -18,8 +18,11 @@ pub struct T {
     pub shapes: Vec<egui::epaint::ClippedShape>,
     /// The screen the frames run on (1400 by 900 unless a test sets another).
     pub screen: egui::Vec2,
-    /// Files dropped in the next frame, and where the pointer is.
-    drop: Option<(Vec<PathBuf>, egui::Pos2)>,
+    /// Files dropped in the next frame, and where the pointer reports itself in that frame (none:
+    /// the OS drag sent no motion, as on Windows).
+    drop: Option<(Vec<PathBuf>, Option<egui::Pos2>)>,
+    /// Where the pointer moves in the next frame.
+    point: Option<egui::Pos2>,
     /// The folder of the test's generated files.
     pub dir: PathBuf,
 }
@@ -81,7 +84,8 @@ impl T {
         let n = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("transit-sampler-pads-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, shapes: Vec::new(), screen: egui::vec2(1400.0, 900.0), drop: None, dir };
+        let mut t =
+            T { app, ctx: egui::Context::default(), time: 0.0, shapes: Vec::new(), screen: egui::vec2(1400.0, 900.0), drop: None, point: None, dir };
         t.frames(3);
         t
     }
@@ -94,8 +98,11 @@ impl T {
                 time: Some(self.time),
                 ..Default::default()
             };
-            if let Some((files, at)) = self.drop.take() {
+            if let Some(at) = self.point.take() {
                 raw.events.push(egui::Event::PointerMoved(at));
+            }
+            if let Some((files, at)) = self.drop.take() {
+                raw.events.extend(at.map(egui::Event::PointerMoved));
                 raw.dropped_files = files.into_iter().map(|p| Arc::new(Dropped(p)) as egui::DroppedFileHandle).collect();
             }
             self.app.raw_input_hook(&mut raw);
@@ -135,8 +142,26 @@ impl T {
 
     /// Drops `path` at `at` (the next frame sees it), then runs a few frames.
     pub fn drop_file(&mut self, path: &Path, at: (f32, f32)) {
-        self.drop = Some((vec![path.to_path_buf()], egui::pos2(at.0, at.1)));
+        self.drop = Some((vec![path.to_path_buf()], Some(egui::pos2(at.0, at.1))));
         self.frames(3);
+    }
+
+    /// Drops `path` with no pointer motion in the drop's frame (egui's pointer stays where it last
+    /// was), then runs a few frames.
+    pub fn drop_unplaced(&mut self, path: &Path) {
+        self.drop = Some((vec![path.to_path_buf()], None));
+        self.frames(3);
+    }
+
+    /// Moves the pointer to `at` in the next frame, then runs a few frames.
+    pub fn point(&mut self, at: (f32, f32)) {
+        self.point = Some(egui::pos2(at.0, at.1));
+        self.frames(3);
+    }
+
+    /// Every clip in the arrangement.
+    pub fn clip_count(&self) -> usize {
+        self.app.engine.session().tracks.iter().map(|t| t.clips().len()).sum()
     }
 
     /// A generated WAV of `frames` frames named `name` in the test's folder.

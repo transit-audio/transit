@@ -251,17 +251,13 @@ pub(crate) fn end_drag(app: &mut StudioApp, ctx: &egui::Context, dev: Dev, out: 
     }
 }
 
-/// Audio files dropped on the window this frame: the first one on a pad becomes its sample.
-pub(crate) fn drops(app: &mut StudioApp, ctx: &egui::Context, dev: Dev, out: &SamplerLayout) {
-    let (files, pos) = ctx.input(|i| (i.raw.dropped_files.clone(), i.pointer.latest_pos()));
-    if files.is_empty() {
-        return;
-    }
-    let Some(at) = pos else { return };
+/// The drop this window claimed (#368): the first audio file, if it landed on a pad, becomes its
+/// sample; anywhere else in the window it is refused.
+pub(crate) fn drops(app: &mut StudioApp, dev: Dev, out: &SamplerLayout) {
+    let Some(offer) = crate::drops::take(app, dev.key) else { return };
+    let Some(at) = offer.pos else { return };
     let Some(index) = out.pads.iter().find(|r| super::grid_rect(r.pad.rect).contains(at)).map(|r| r.index) else { return };
-    if let Some(path) =
-        files.iter().map(|f| f.path().to_path_buf()).find(|p| p.is_absolute() && crate::builtin_editor::is_audio_name(&p.to_string_lossy()))
-    {
+    if let Some(path) = offer.paths.iter().find(|p| p.is_absolute() && crate::builtin_editor::is_audio_name(&p.to_string_lossy())) {
         drop_file(app, dev, index, &path.to_string_lossy());
     }
 }

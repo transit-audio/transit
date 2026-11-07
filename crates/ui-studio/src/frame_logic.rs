@@ -313,6 +313,7 @@ impl StudioApp {
         self.save_good_audio();
         finish::step_bounce(self, ctx);
         import::step(self, ctx);
+        crate::drops::step(self, ctx);
         // Stop the old playback before sending a replacement session to the audio thread.
         self.handle_transport(dt);
         automation::write_pass(self, ctx);

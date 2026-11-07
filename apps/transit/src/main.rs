@@ -131,11 +131,6 @@ impl eframe::App for App {
             ctx.data_mut(|d| d.insert_temp(id, true));
             ctx.set_fonts(fonts::definitions());
         }
-        let dropped: Vec<String> =
-            ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_string_lossy().into_owned()).filter(|s| !s.is_empty()).collect());
-        for p in dropped {
-            open_path(&mut self.0, &p);
-        }
         if self.0.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         } else if ctx.input(|i| i.viewport().close_requested()) && self.0.engine.is_dirty() {
@@ -171,27 +166,6 @@ impl eframe::App for App {
         if !self.shut_down().clean {
             transit_engine::emergency::end_process(false);
         }
-    }
-}
-
-fn open_path(app: &mut StudioApp, p: &str) {
-    let lower = p.to_ascii_lowercase();
-    if lower.ends_with(".transit") {
-        app.run_or_ask("session.open", serde_json::json!({"path": p}));
-        return;
-    }
-    let r = if lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf") {
-        app.run("file.import_midi", serde_json::json!({"path": p}))
-    } else {
-        let at = app.cursor();
-        let mut params = serde_json::json!({"path": p, "at": at});
-        if let Some(t) = app.cursor_track() {
-            params["track"] = serde_json::json!(t.0);
-        }
-        app.run("file.import_audio", params)
-    };
-    if let Err(e) = r {
-        log::warn!("{p}: {e}");
     }
 }
 
@@ -550,7 +524,7 @@ fn main() -> eframe::Result {
                     app = app.with_control(rx);
                 }
                 for f in &files {
-                    open_path(&mut app, f);
+                    transit_ui_studio::drops::open_path(&mut app, f);
                 }
                 Ok(Box::new(App::new(app, logger, device_watch)))
             }),

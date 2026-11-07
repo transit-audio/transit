@@ -32,6 +32,8 @@ mod zone;
 #[cfg(test)]
 mod behavior_tests;
 #[cfg(test)]
+mod drop_routing_tests;
+#[cfg(test)]
 mod grid_tests;
 #[cfg(test)]
 mod legacy_tests;
@@ -419,7 +421,7 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     let data = pads.get(usize::from(selected)).cloned();
     y += zone::show(app, ui, dev, &patch, data.as_ref(), Rect::from_min_size(pos2(x, y), vec2(w, zone::height(&p))), lay, out);
     y += space::WINDOW_PADDING;
-    behavior::drops(app, ui.ctx(), dev, out);
+    behavior::drops(app, dev, out);
     behavior::end_drag(app, ui.ctx(), dev, out);
     if live::moving(app, dev.uid(), now) {
         ui.ctx().request_repaint();

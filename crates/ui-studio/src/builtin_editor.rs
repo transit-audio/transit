@@ -85,6 +85,8 @@ pub struct EditorState {
     pub(crate) tuners: std::collections::HashMap<u64, crate::tuner_panel::TunerState>,
     /// The migrated device windows' memory (326-M).
     pub(crate) devices: crate::device_editor::window::State,
+    /// Files dropped on the window and the editor windows that can claim them (#368).
+    pub(crate) drops: crate::drops::Router,
 }
 
 fn rect4(r: egui::Rect) -> [f32; 4] {
@@ -147,6 +149,7 @@ impl StudioApp {
 /// Draws the editor window of every open built-in plug-in. Called every frame.
 pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
     app.builtin_editor.windows.clear();
+    app.builtin_editor.drops.windows.clear();
     crate::device_editor::window::follow(app);
     let keys = app.ui.plugin_windows.clone();
     let mut closed = Vec::new();
@@ -210,9 +213,7 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             .show(ctx, |ui| body(app, ui, key, &ins, info, instrument, &mut layout));
         if let Some(w) = shown {
             layout.rect = rect4(w.response.rect);
-            if ins.plugin == SAMPLER {
-                dropped_sample(app, ctx, key.0, w.response.rect);
-            }
+            app.builtin_editor.drops.windows.push((w.response.layer_id, key));
         }
         if !open {
             closed.push(key);
@@ -229,17 +230,6 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
     if app.builtin_editor.gesture && ctx.input(|i| i.pointer.any_released()) {
         app.builtin_editor.gesture = false;
         app.engine.end_merge();
-    }
-}
-
-/// An audio file dropped on a Sampler editor loads as its sample.
-fn dropped_sample(app: &mut StudioApp, ctx: &egui::Context, t: TrackId, r: egui::Rect) {
-    let (files, pos) = ctx.input(|i| (i.raw.dropped_files.clone(), i.pointer.latest_pos()));
-    if files.is_empty() || pos.is_some_and(|p| !r.contains(p)) {
-        return;
-    }
-    if let Some(path) = files.iter().map(|f| f.path()).find(|p| p.is_absolute() && is_audio_name(&p.to_string_lossy())) {
-        load_sample(app, t, &path.to_string_lossy());
     }
 }
 

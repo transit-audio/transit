@@ -52,13 +52,10 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     out.panels.push(("sample".to_string(), r4(card)));
     legacy.panel = r4(card);
     out.legacy = Some(legacy);
-    // A file dropped anywhere on the window loads as the sample (the old window's behavior).
-    let (files, pos) = ui.ctx().input(|i| (i.raw.dropped_files.clone(), i.pointer.latest_pos()));
-    let window = Rect::from_min_max(rect.min, pos2(rect.max.x, bottom + space::WINDOW_PADDING));
-    if !files.is_empty()
-        && pos.is_none_or(|p| window.contains(p))
-        && let Some(path) =
-            files.iter().map(|f| f.path().to_path_buf()).find(|p| p.is_absolute() && crate::builtin_editor::is_audio_name(&p.to_string_lossy()))
+    // A file dropped anywhere on the window loads as the sample (the old window's behavior): the
+    // window claimed the drop (#368).
+    if let Some(offer) = crate::drops::take(app, dev.key)
+        && let Some(path) = offer.paths.iter().find(|p| p.is_absolute() && crate::builtin_editor::is_audio_name(&p.to_string_lossy()))
     {
         crate::builtin_editor::load_sample(app, dev.key.0, &path.to_string_lossy());
     }

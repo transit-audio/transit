@@ -315,6 +315,7 @@ pub(crate) fn show<P: Panel>(
     let mut open = !bar.close;
     if let Some(w) = &shown {
         let r = w.response.rect;
+        app.builtin_editor.drops.windows.push((w.response.layer_id, key));
         layout.rect = crate::widgets::r4(r);
         P::set_window(&mut rec, layout.rect);
         // A following window writes no instance's position (see `follow`).

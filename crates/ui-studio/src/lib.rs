@@ -28,6 +28,7 @@ pub mod device_editor;
 pub mod device_window;
 pub mod devices;
 pub mod diagnostics;
+pub mod drops;
 pub mod edit_tools;
 mod editor_group;
 mod editors;
