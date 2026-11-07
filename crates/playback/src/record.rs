@@ -330,9 +330,27 @@ impl Recorder {
 
     /// Open the input device `audio` chooses (else the default) at its chosen rate and buffer
     /// size when the device offers them, else at the device's defaults. Integer devices (ASIO
-    /// drivers usually are) are converted to f32.
+    /// drivers usually are) are converted to f32. On Windows through the native backend of the
+    /// effective backend, never cpal (ADR 0046); elsewhere through cpal.
     pub fn open_with(audio: &crate::AudioConfig) -> Result<Recorder, String> {
-        Recorder::open_through(audio, &crate::backend::cpal::CpalFactory)
+        let audio = crate::backend::native::open_config(audio);
+        Recorder::open_on(&audio, cfg!(windows), crate::backend::native::input_factory(&audio), &crate::backend::cpal::CpalFactory)
+    }
+
+    /// [`Self::open_with`] with the platform (`windows`), the native factory and the cpal adapter as
+    /// parameters (fakes in tests): on Windows `native` opens it, or the open fails when there is
+    /// none, and `cpal` is never asked. Elsewhere `cpal` opens it.
+    pub(crate) fn open_on(
+        audio: &crate::AudioConfig,
+        windows: bool,
+        native: Option<Box<dyn ab::BackendFactory>>,
+        cpal: &dyn ab::BackendFactory,
+    ) -> Result<Recorder, String> {
+        if !windows {
+            return Recorder::open_through(audio, cpal);
+        }
+        let native = native.ok_or_else(|| crate::backend::native::unserved(audio))?;
+        Recorder::open_through(audio, &*native)
     }
 
     pub(crate) fn open_through(audio: &crate::AudioConfig, factory: &dyn ab::BackendFactory) -> Result<Recorder, String> {

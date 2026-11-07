@@ -24,14 +24,17 @@ impl NativeKind {
         }
     }
 
-    /// What the Player says when this backend did not open and cpal did. cpal has no ASIO host,
-    /// so a failed native ASIO open falls to cpal's default host, WASAPI shared.
+    /// Whether a failed open of this backend falls back to cpal: native JACK only (off Windows, ADR
+    /// 0021). Native WASAPI and native ASIO never do: their failure is the visible error with the
+    /// device closed (ADR 0046).
+    pub const fn falls_back_to_cpal(self) -> bool {
+        matches!(self, NativeKind::Jack)
+    }
+
+    /// What the Player says when native JACK did not open and cpal did. Never produced for native
+    /// WASAPI or native ASIO ([`Self::falls_back_to_cpal`]).
     pub fn fallback_note(self, reason: &str) -> String {
-        let opened = match self {
-            NativeKind::Asio => "WASAPI shared",
-            NativeKind::Wasapi | NativeKind::Jack => "the cpal backend",
-        };
-        format!("{} failed: {reason}; using {opened}", self.label())
+        format!("{} failed: {reason}; using the cpal backend", self.label())
     }
 }
 
@@ -61,6 +64,32 @@ pub fn factory_for(cfg: &AudioConfig) -> Option<(Box<dyn ab::BackendFactory>, Na
         devices::Backend::NativeJack => Some((Box::new(transit_audio_jack::JackFactory), NativeKind::Jack)),
         _ => None,
     }
+}
+
+/// The configuration a native open uses for `cfg` (ADR 0046): on Windows a saved audio system no
+/// native backend serves (a configuration from another platform, "ALSA" say) opens the default
+/// system, native WASAPI, as cpal opened its default host for an unknown name; the app's note says
+/// "Audio system “ALSA” is not available; using the default." Otherwise `cfg` as it is.
+pub fn open_config(cfg: &AudioConfig) -> std::borrow::Cow<'_, AudioConfig> {
+    let system = cfg.system.as_deref();
+    if cfg!(windows) && system.is_some() && !devices::is_asio_system(system) && !devices::is_wasapi_system(system) {
+        std::borrow::Cow::Owned(AudioConfig { system: None, ..cfg.clone() })
+    } else {
+        std::borrow::Cow::Borrowed(cfg)
+    }
+}
+
+/// The native factory of the effective backend of `cfg` for an input that opens by itself
+/// (`Recorder::open_with`, a silent runtime's input): on Windows the one [`factory_for`] picks;
+/// `None` elsewhere, where cpal opens inputs.
+pub fn input_factory(cfg: &AudioConfig) -> Option<Box<dyn ab::BackendFactory>> {
+    if cfg!(windows) { factory_for(cfg).map(|(factory, _)| factory) } else { None }
+}
+
+/// Why nothing opens `cfg` on Windows when no native backend serves its system (the ASIO system of
+/// a build without native ASIO): said instead of opening another backend (ADR 0046).
+pub fn unserved(cfg: &AudioConfig) -> String {
+    format!("no native backend serves the audio system “{}” in this build", cfg.system.as_deref().unwrap_or(devices::WASAPI_SYSTEM))
 }
 
 /// Whether `Auto` would open the native JACK backend for `cfg` when a JACK or PipeWire-JACK server
@@ -427,7 +456,8 @@ mod tests {
         let wasapi = AudioConfig { backend: Backend::NativeWasapi, system: Some("WASAPI".into()), ..Default::default() };
         assert_eq!(factory_for(&wasapi).map(|(_, kind)| kind), devices::NATIVE_WASAPI_COMPILED.then_some(NativeKind::Wasapi));
         let jack = AudioConfig { backend: Backend::NativeJack, system: Some("JACK".into()), ..Default::default() };
-        assert_eq!(factory_for(&jack).map(|(_, kind)| kind), devices::NATIVE_JACK_COMPILED.then_some(NativeKind::Jack));
+        let jack_kind = if cfg!(windows) { Some(NativeKind::Wasapi) } else { devices::NATIVE_JACK_COMPILED.then_some(NativeKind::Jack) };
+        assert_eq!(factory_for(&jack).map(|(_, kind)| kind), jack_kind, "on Windows any system but ASIO is native WASAPI's");
         let auto_jack = AudioConfig { backend: Backend::Auto, system: Some("JACK".into()), ..Default::default() };
         assert!(auto_jack_candidate(&auto_jack), "Auto on the JACK system opens native JACK when a server answers");
         assert!(auto_jack_candidate(&AudioConfig::default()), "so does the untouched default");
@@ -450,7 +480,7 @@ mod tests {
             factory_for(&AudioConfig { backend: Backend::Cpal, ..asio }).map(|(_, kind)| kind),
             devices::NATIVE_ASIO_COMPILED.then_some(NativeKind::Asio)
         );
-        assert_eq!(NativeKind::Asio.fallback_note("no driver"), "Native ASIO failed: no driver; using WASAPI shared");
+        assert!(!NativeKind::Wasapi.falls_back_to_cpal() && !NativeKind::Asio.falls_back_to_cpal() && NativeKind::Jack.falls_back_to_cpal());
         assert_eq!(
             NativeKind::Jack.fallback_note("JACK/PipeWire server not running"),
             "Native JACK failed: JACK/PipeWire server not running; using the cpal backend"

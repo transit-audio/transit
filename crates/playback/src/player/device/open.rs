@@ -103,6 +103,7 @@ impl Player {
             paired_input: None,
             device_system: String::new(),
             native_backend: false,
+            native_kind: None,
             native_factory: None,
             // This crate's unit tests never open an input on the machine's devices (#363).
             fake_only: cfg!(test),
@@ -231,11 +232,18 @@ impl Player {
         Ok((player, access, callback_clock))
     }
 
+    /// Open `cfg` through the native backend of its effective backend; off Windows through cpal when
+    /// no native backend serves it. On Windows nothing else opens (ADR 0046): no native backend for
+    /// the system (the ASIO system of a 32-bit build) is an error.
     fn open(session: Arc<Session>, cfg: &AudioConfig) -> Result<Self, String> {
-        if let Some((native, kind)) = crate::backend::native::factory_for(cfg) {
-            return Self::open_native(session, cfg, native, &crate::backend::cpal::CpalFactory, kind);
+        let cfg = crate::backend::native::open_config(cfg);
+        if let Some((native, kind)) = crate::backend::native::factory_for(&cfg) {
+            return Self::open_native(session, &cfg, native, &crate::backend::cpal::CpalFactory, kind);
         }
-        Self::open_with(session, cfg, &crate::backend::cpal::CpalFactory)
+        if cfg!(windows) {
+            return Err(crate::backend::native::unserved(&cfg));
+        }
+        Self::open_with(session, &cfg, &crate::backend::cpal::CpalFactory)
     }
 
     /// A native ASIO Player over a scripted duplex driver, for the caller's device-free tests: the
@@ -264,7 +272,8 @@ impl Player {
         }
     }
 
-    /// [`Self::open_native`] for native WASAPI with a scripted backend (tests).
+    /// [`Self::open_native`] for native WASAPI with a scripted backend (tests); `fallback` stands in
+    /// the old cpal fallback's position, which native WASAPI never reaches (ADR 0046).
     #[cfg(test)]
     pub(super) fn open_native_or_cpal(
         session: Arc<Session>,
@@ -272,14 +281,28 @@ impl Player {
         native: &ab::fake::FakeBackend,
         fallback: &dyn ab::BackendFactory,
     ) -> Result<Self, String> {
-        Self::open_native(session, cfg, Box::new(native.clone()), fallback, NativeKind::Wasapi)
+        Self::open_native_kind(session, cfg, native, fallback, NativeKind::Wasapi)
     }
 
-    /// A native backend (WASAPI or ASIO, through the same [`Self::open_stepped`] ladder); when it
-    /// cannot open (before `start()` succeeded) the cpal backend opens the same choices and the
-    /// Player says why. WASAPI starts shared or exclusive as the user chose and steps down the
-    /// exclusive-mode ladder; ASIO has one mode (the driver's), so it opens as planned and has no
-    /// step. The failed attempt's streams are dropped here, on the control thread: dropping a
+    /// [`Self::open_native`] for `kind` with a scripted backend (tests).
+    #[cfg(test)]
+    pub(super) fn open_native_kind(
+        session: Arc<Session>,
+        cfg: &AudioConfig,
+        native: &ab::fake::FakeBackend,
+        fallback: &dyn ab::BackendFactory,
+        kind: NativeKind,
+    ) -> Result<Self, String> {
+        Self::open_native(session, cfg, Box::new(native.clone()), fallback, kind)
+    }
+
+    /// A native backend (WASAPI, ASIO or JACK, through the same [`Self::open_stepped`] ladder).
+    /// When native WASAPI or native ASIO cannot open (before `start()` succeeded) and the ladder has
+    /// no step left, the open fails with the backend's reason and the caller runs silent with it:
+    /// nothing else opens (ADR 0046). Only native JACK, off Windows, still falls back to cpal with
+    /// the same choices and says why (`fallback`). WASAPI starts shared or exclusive as the user
+    /// chose and steps down the exclusive-mode ladder; ASIO has one mode (the driver's), so it opens
+    /// as planned and has no step. The failed attempt's streams are dropped here, on the control thread: dropping a
     /// native stream joins its thread or waits for the driver's host thread (see
     /// `transit-audio-wasapi`'s `RenderStream`, `transit-audio-asio`'s `AsioStream`) and must never
     /// happen on a callback thread.
@@ -310,6 +333,7 @@ impl Player {
             match Self::open_stepped(Arc::clone(&session), cfg, &*native, step) {
                 Ok(mut player) => {
                     player.native_backend = true;
+                    player.native_kind = Some(kind);
                     player.native_factory = Some(native);
                     player.backend_note = (!notes.is_empty()).then(|| notes.join("; "));
                     return Ok(player);
@@ -328,6 +352,11 @@ impl Player {
                         return Err("the ASIO driver's settings panel is open; close it and reconnect".to_owned());
                     }
                     let reason = failure.text;
+                    // The ladder's last step (ADR 0016, step 4) is the visible error (ADR 0046).
+                    if !kind.falls_back_to_cpal() {
+                        log::warn!("{} did not open: {reason}", kind.label());
+                        return Err(reason);
+                    }
                     log::warn!("{} did not open ({reason}); using the cpal backend", kind.label());
                     let mut player = Self::open_with(session, cfg, fallback)?;
                     player.backend_note = Some(kind.fallback_note(&reason));
@@ -631,7 +660,7 @@ impl From<&str> for OpenFailure {
 
 /// The next step down the exclusive-mode ladder (ADR 0016) for an open at `step` that failed with
 /// `error`, and what to tell the user; `None` when `error` is not one the ladder answers (the
-/// caller falls back to cpal). Only before `start()` succeeded: a running stream is never reopened.
+/// open fails with it; native JACK alone then falls back to cpal, ADR 0046). Only before `start()` succeeded: a running stream is never reopened.
 fn exclusive_fallback(step: OpenStep, cfg: &AudioConfig, error: &ab::OpenError) -> Option<(OpenStep, String)> {
     if step.mode != Some(ab::Mode::Exclusive) {
         return None;

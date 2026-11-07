@@ -16,13 +16,14 @@ fn a_native_backend_that_opens_is_marked_and_says_nothing() {
     assert_eq!((native.opens().len(), fallback.opens().len()), (1, 0), "cpal was not touched");
 }
 
+/// ADR 0046: a native WASAPI open that fails is the open's error; the backend in the old cpal
+/// fallback position is never asked to open.
 #[test]
-fn a_native_backend_that_fails_to_open_falls_back_and_says_why() {
+fn a_native_backend_that_fails_to_open_is_the_error_and_nothing_else_opens() {
     let (native, fallback) = (fake_factory(true), fake_factory(false));
-    let player = Player::open_native_or_cpal(Arc::new(Session::default()), &AudioConfig::default(), &native, &fallback).unwrap();
-    assert!(!player.native_backend && !player.silent, "the fallback backend serves the device");
-    assert_eq!(player.backend_note.as_deref(), Some("Native WASAPI failed: scripted; using the cpal backend"));
-    assert_eq!(fallback.opens().len(), 1);
+    let error = Player::open_native_or_cpal(Arc::new(Session::default()), &AudioConfig::default(), &native, &fallback).err();
+    assert_eq!(error.as_deref(), Some("scripted"));
+    assert!(fallback.opens().is_empty(), "no second open");
 }
 
 /// The fake's `set_host_blocked` is the hook for a stuck ASIO host thread (a driver settings panel
@@ -34,13 +35,6 @@ fn a_native_open_refused_by_a_stuck_host_does_not_fall_back_to_cpal() {
     let error = Player::open_native_or_cpal(Arc::new(Session::default()), &AudioConfig::default(), &native, &fallback).err();
     assert_eq!(error.as_deref(), Some("the ASIO driver's settings panel is open; close it and reconnect"));
     assert!(fallback.opens().is_empty(), "cpal was not asked to open the driver again");
-}
-
-#[test]
-fn both_backends_failing_reports_the_fallbacks_error() {
-    let (native, fallback) = (fake_factory(true), fake_factory(true));
-    let error = Player::open_native_or_cpal(Arc::new(Session::default()), &AudioConfig::default(), &native, &fallback).err();
-    assert_eq!(error.as_deref(), Some("scripted"));
 }
 
 pub(super) fn modes(fake: &ab::fake::FakeBackend) -> Vec<(ab::Direction, ab::Mode, ab::Period)> {
@@ -65,10 +59,6 @@ fn the_native_backend_is_asked_for_exclusive_unless_the_user_shares_the_device()
         assert_eq!(modes(&native), [(ab::Direction::Output, mode, ab::Period::Default)], "share_device {share_device}");
         assert_eq!(player.device_exclusive, mode == ab::Mode::Exclusive);
     }
-    // The cpal backend has only shared streams: it is never asked for anything else.
-    let fallback = fake_factory(false);
-    let _ = Player::open_native_or_cpal(Arc::new(Session::default()), &AudioConfig::default(), &fake_factory(true), &fallback).unwrap();
-    assert_eq!(modes(&fallback), [(ab::Direction::Output, ab::Mode::Shared, ab::Period::Default)]);
 }
 
 #[test]
@@ -103,7 +93,7 @@ fn a_refused_period_retries_exclusive_at_the_device_period_and_says_so() {
 }
 
 #[test]
-fn a_period_error_at_the_device_period_has_no_step_left_and_falls_back_to_cpal() {
+fn a_period_error_at_the_device_period_has_no_step_left_and_is_the_error() {
     let native = fake_factory(false);
     native.fail_next_open(ab::OpenError::PeriodRefused {
         requested_frames: 128,
@@ -112,11 +102,11 @@ fn a_period_error_at_the_device_period_has_no_step_left_and_falls_back_to_cpal()
         message: "Initialize(exclusive): the period is outside the range the device accepts".into(),
     });
     let fallback = fake_factory(false);
-    let player =
+    let error =
         Player::open_native_or_cpal(Arc::new(Session::default()), &AudioConfig { share_device: false, ..Default::default() }, &native, &fallback)
-            .unwrap();
-    assert!(!player.native_backend);
-    assert!(player.backend_note.as_deref().is_some_and(|n| n.starts_with("Native WASAPI failed: ") && n.ends_with("; using the cpal backend")));
+            .err();
+    assert!(error.as_deref().is_some_and(|e| e.contains("the period is outside the range the device accepts")), "{error:?}");
+    assert_eq!((native.opens().len(), fallback.opens().len()), (1, 0), "the ladder's last step is the error (ADR 0046)");
 }
 
 #[test]
@@ -146,7 +136,7 @@ fn a_device_held_by_another_app_or_closed_to_exclusive_use_opens_shared_and_says
 }
 
 #[test]
-fn any_other_exclusive_error_and_any_shared_error_fall_back_to_cpal() {
+fn any_other_exclusive_error_and_any_shared_error_are_the_error_with_no_other_open() {
     for (share_device, error) in [
         (false, ab::OpenError::DeviceNotAvailable("gone".into())),
         (false, ab::OpenError::Other("the device takes no 48000 Hz, 2-channel format in exclusive mode".into())),
@@ -156,10 +146,9 @@ fn any_other_exclusive_error_and_any_shared_error_fall_back_to_cpal() {
         native.fail_next_open(error.clone());
         let fallback = fake_factory(false);
         let cfg = AudioConfig { share_device, ..Default::default() };
-        let player = Player::open_native_or_cpal(Arc::new(Session::default()), &cfg, &native, &fallback).unwrap();
-        assert_eq!((native.opens().len(), fallback.opens().len()), (1, 1), "{error}");
-        assert!(!player.native_backend);
-        assert_eq!(player.backend_note, Some(NativeKind::Wasapi.fallback_note(&error.to_string())));
+        let failed = Player::open_native_or_cpal(Arc::new(Session::default()), &cfg, &native, &fallback).err();
+        assert_eq!((native.opens().len(), fallback.opens().len()), (1, 0), "{error}");
+        assert_eq!(failed, Some(error.to_string()));
     }
 }
 

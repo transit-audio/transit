@@ -106,6 +106,8 @@ pub struct Player {
     /// The open device is served by a native backend (WASAPI or ASIO, ADR 0016 and its draft ASIO
     /// amendment), not cpal; `device_system` says which.
     pub native_backend: bool,
+    /// Which native backend serves the device (`None`: cpal, or the silent clock).
+    native_kind: Option<NativeKind>,
     /// The native backend that serves the device, kept for the input when it opens on demand.
     native_factory: Option<Box<dyn ab::BackendFactory>>,
     /// A Player of the tests' fakes (device-free, a scripted backend, or this crate's unit tests): an
@@ -122,7 +124,9 @@ pub struct Player {
     /// The open device was opened in WASAPI exclusive mode (native backend only; false when the
     /// user asked to share the device or the open fell back to shared).
     pub device_exclusive: bool,
-    /// Said when the chosen backend did not open and another did: "Native WASAPI failed: ...".
+    /// What the open says beside the device: an exclusive-mode ladder step ("Exclusive mode
+    /// unavailable: ..."), or native JACK falling back to cpal ("Native JACK failed: ..."). Never a
+    /// backend fallback on Windows (ADR 0046).
     pub backend_note: Option<String>,
     pub device_rate: u32,
     pub device_channels: u16,
@@ -974,18 +978,24 @@ impl Player {
                 // re-enumerates, and the recorder must not silently run at another rate.
                 let config = AudioConfig { sample_rate: Some(self.device_rate), ..config.clone() };
                 // Through the backend that serves the output (issue #3): a native output's input
-                // is the native backend's too, falling back to cpal only if it cannot open.
-                // A test Player never reaches the machine's devices (#363).
+                // is the native backend's too. Native WASAPI and native ASIO return their error
+                // (ADR 0046); only native JACK falls back to cpal if it cannot open. A test Player
+                // never reaches the machine's devices (#363).
                 let recorder = match &self.native_factory {
                     Some(native) => record::Recorder::open_through(&config, &**native).or_else(|error| {
-                        if self.fake_only {
+                        if self.fake_only || !self.native_kind.is_some_and(NativeKind::falls_back_to_cpal) {
+                            log::warn!("the native backend's input did not open: {error}");
                             return Err(error);
                         }
                         log::warn!("the native backend's input did not open ({error}); using the cpal backend");
                         record::Recorder::open_through(&config, cpal)
                     })?,
                     None if self.fake_only => return Err(TEST_PLAYER_INPUT.into()),
-                    None => record::Recorder::open_through(&config, cpal)?,
+                    // A silent runtime's input: on Windows the native backend of the effective backend.
+                    None => {
+                        let config = crate::backend::native::open_config(&config);
+                        record::Recorder::open_on(&config, cfg!(windows), crate::backend::native::input_factory(&config), cpal)?
+                    }
                 };
                 check_input_rate(recorder.sample_rate, self.device_rate)?;
                 let system = config.system.as_deref().unwrap_or(&self.device_system);

@@ -791,7 +791,7 @@ mod tests {
         let native = |list: Vec<Backend>| list.into_iter().filter(|b| b.is_native()).collect::<Vec<_>>();
         assert_eq!(native(Backend::offered(Some("ASIO"))), if NATIVE_ASIO_COMPILED { vec![NativeAsio] } else { vec![] });
         assert_eq!(native(Backend::offered(Some("WASAPI"))), if NATIVE_WASAPI_COMPILED { vec![NativeWasapi] } else { vec![] });
-        assert!(native(Backend::offered(Some("CoreAudio"))).is_empty());
+        assert!(native(Backend::offered_on(Some("CoreAudio"), false)).is_empty());
         assert!(Backend::offered_on(Some("ASIO"), false).starts_with(&[Auto, Cpal]), "off Windows Auto and cpal stay");
         assert!(!NativeAsio.native_on(Some("WASAPI")) && !NativeWasapi.native_on(Some("ASIO")) && !Cpal.native_on(Some("ASIO")));
         assert!(!is_asio_system(None), "the default system is never ASIO");
