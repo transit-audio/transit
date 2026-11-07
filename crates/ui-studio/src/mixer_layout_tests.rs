@@ -139,6 +139,9 @@ fn escape_and_a_click_on_empty_space_clear_the_focused_track() {
 #[test]
 fn focus_follows_both_views_and_views_never_dirty_the_document() {
     let (mut app, ctx, mut time, t) = mixer_app();
+    // The test window is 800 tall: the docked pane at its minimum leaves the arrangement room for
+    // the second track's header beside the device chain.
+    app.ui.mixer_height = crate::mixer::min_pane_height();
     let r = app.run("track.new", json!({"kind": "instrument", "name": "Keys"})).unwrap();
     let t2 = TrackId(r["tracks"][0].as_u64().unwrap());
     let path = std::env::temp_dir().join(format!("transit-mixer-{}.sc", std::process::id()));

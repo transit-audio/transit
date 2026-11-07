@@ -43,6 +43,15 @@ pub fn min_pane_height() -> f32 {
     PANE_MARGINS + anatomy::fixed_height(true) + MIN_FADER + 2.0 * crate::tokens::fader::INSET
 }
 
+/// The short strip's fader travel on the Mixer board (its fader is 196 tall: 176 of travel).
+pub const BOARD_SHORT_TRAVEL: f32 = 176.0;
+
+/// The docked pane's default height: the short strip's sections and the board's
+/// [`BOARD_SHORT_TRAVEL`] with the fader's insets and the pane's margins (#326; 475 points).
+pub fn default_pane_height() -> f32 {
+    PANE_MARGINS + anatomy::fixed_height(true) + BOARD_SHORT_TRAVEL + 2.0 * crate::tokens::fader::INSET
+}
+
 /// Whether a strip in a lane `height` tall keeps its sections in order: the readouts below the
 /// toggles, and the fader [`MIN_FADER`] of travel between them.
 pub fn strip_fits(height: f32, short: bool) -> bool {

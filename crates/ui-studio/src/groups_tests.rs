@@ -27,6 +27,9 @@ impl T {
         }
         app.ui.show_mixer = true;
         app.ui.show_devices = true;
+        // The 900 tall test window keeps the arrangement's rows on screen beside the device chain
+        // with the docked pane at the height these tests were laid out against.
+        app.ui.mixer_height = 420.0;
         app.engine.mark_clean();
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0, a: ids[0], b: ids[1], c: ids[2] };
         t.frames(3);

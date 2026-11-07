@@ -466,3 +466,28 @@ fn the_main_bus_follows_the_last_strip_and_is_pinned_only_when_the_strips_overfl
     assert_eq!(m.rect[2], area[2] - 6.0, "pinned right");
     assert!(app.mixer.layout.strips.iter().all(|s| s.rect[0] < m.rect[0]), "the strips lie left of it");
 }
+
+/// #326: the docked pane opens at the height that gives the short strip the Mixer board's 176 of
+/// fader travel (its sections, 270, the travel, the fader's insets and the pane's margins: 475);
+/// the full window's strips keep filling the window.
+#[test]
+fn the_docked_pane_defaults_to_the_boards_short_travel_and_the_full_window_fills() {
+    use crate::mixer::{BOARD_SHORT_TRAVEL, default_pane_height, min_pane_height};
+    assert_eq!(default_pane_height(), 475.0);
+    assert_eq!(min_pane_height(), 379.0, "the minimum stays");
+    let (mut app, ctx, mut time, a) = mixer_app();
+    assert_eq!(app.ui.mixer_height, default_pane_height(), "the default");
+    frames(&mut app, &ctx, 3, &mut time);
+    let s = strip(&app, a);
+    assert!(s.short);
+    assert!((s.fader[3] - s.fader[1] - BOARD_SHORT_TRAVEL).abs() <= 1.0, "the board's travel: {:?}", s.fader);
+    // Negative control: the old default, 420, left the short strip 121 of travel.
+    app.ui.mixer_height = 420.0;
+    frames(&mut app, &ctx, 3, &mut time);
+    let old = strip(&app, a);
+    assert!(old.fader[3] - old.fader[1] < BOARD_SHORT_TRAVEL - 50.0, "{:?}", old.fader);
+    full_mixer(&mut app, &ctx, &mut time);
+    let full = strip(&app, a);
+    let area = app.mixer.layout.area;
+    assert!(full.rect[3] >= area[3] - 4.01, "the full strip fills the window: {:?} in {area:?}", full.rect);
+}

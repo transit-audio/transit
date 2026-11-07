@@ -70,7 +70,9 @@ pub struct UiState {
     pub midi_takeover: transit_model::MapMode,
     /// The mixer fills the window instead of the arrangement (Cubase's F3).
     pub mixer_full: bool,
-    /// Height of the mixer pane in points.
+    /// Height of the mixer pane in points. A saved 420, the default before the short strip's
+    /// board travel (#326), reads as the current default.
+    #[serde(deserialize_with = "pane_height")]
     pub mixer_height: f32,
     /// The edit cursor: where Play starts and Paste lands. View state of the open session, not
     /// part of the document (setting it never dirties it) and not saved with the preferences.
@@ -165,7 +167,7 @@ impl Default for UiState {
             midi_transport: Default::default(),
             midi_takeover: transit_model::MapMode::takeover_default(),
             mixer_full: false,
-            mixer_height: 420.0,
+            mixer_height: crate::mixer::default_pane_height(),
             cursor: 0,
             cursor_track: None,
             focus_track: None,
@@ -191,6 +193,14 @@ impl Default for UiState {
     }
 }
 
+/// The docked pane's default before #326 (a pane height nothing else ever wrote).
+const OLD_PANE_DEFAULT: f32 = 420.0;
+
+fn pane_height<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    let h = <f32 as serde::Deserialize>::deserialize(d)?;
+    Ok(if h == OLD_PANE_DEFAULT { crate::mixer::default_pane_height() } else { h })
+}
+
 #[cfg(test)]
 mod height_tests {
     use super::UiState;
@@ -205,5 +215,16 @@ mod height_tests {
             let old: UiState = serde_json::from_value(json!({"track_height":height})).unwrap();
             assert_eq!(serde_json::to_value(old).unwrap(), saved);
         }
+    }
+
+    #[test]
+    fn the_old_default_pane_height_reads_as_the_new_one_and_a_chosen_height_stays() {
+        let new = crate::mixer::default_pane_height();
+        let old: UiState = serde_json::from_value(json!({"mixer_height": 420.0})).unwrap();
+        assert_eq!(old.mixer_height, new);
+        // Negative control: any other saved height is the user's and stays.
+        let chosen: UiState = serde_json::from_value(json!({"mixer_height": 500.0})).unwrap();
+        assert_eq!(chosen.mixer_height, 500.0);
+        assert_eq!(UiState::default().mixer_height, new);
     }
 }

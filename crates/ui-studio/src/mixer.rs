@@ -56,7 +56,7 @@ pub use sends::SEND_ROW_H;
 use sends::sends_block;
 pub(crate) use sends::{add_send_row, send_row};
 pub use short::{ShortList, list_origin};
-pub use strip::{min_pane_height, panes, show_full, strip_fits};
+pub use strip::{BOARD_SHORT_TRAVEL, default_pane_height, min_pane_height, panes, show_full, strip_fits};
 
 use crate::StudioApp;
 use crate::arrange::R4;
