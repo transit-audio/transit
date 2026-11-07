@@ -29,6 +29,20 @@ mod strip;
 pub mod window;
 mod zone;
 
+#[cfg(test)]
+mod behavior_tests;
+#[cfg(test)]
+mod grid_tests;
+#[cfg(test)]
+mod legacy_tests;
+#[cfg(test)]
+mod live_tests;
+#[cfg(test)]
+mod test_rig;
+#[cfg(test)]
+mod width_tests;
+#[cfg(test)]
+mod window_tests;
 
 use crate::StudioApp;
 use crate::builtin_editor::EditorLayout;
