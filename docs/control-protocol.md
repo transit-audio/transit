@@ -88,6 +88,18 @@ Errors: `{"id": 1, "ok": false, "error": "bad parameters for `mix.volume`: no tr
   `"samples:48000"`.
 - Ranges: `start` + `end` (or `start` + `length`); omitted = the current edit selection.
 
+## Device pages
+
+The macro strip's pages ([ADR 0047](adr/0047-device-macro-strip.md)) are read and written through
+two commands (run them with `engine.execute`). A device is addressed on its track by an insert
+letter `a` to `j`, `instrument`, `midi1` to `midi8` (the MIDI effect at that position in the chain,
+plus one, when the command runs) or `rack` (a rack card).
+
+| Command | Params | What it does |
+|---|---|---|
+| `mix.device_pages` | `{track?, device, pages: [{name, slots: [id \| null, ...]}]}` | Replaces the device's user pages, one undo step. At most 16 pages; each page is read by the session file's rules (name trimmed and cut to 32 characters, eight slots, empty, non-string and over-long ids read empty, a repeated id keeps its first slot). `[]` clears them. A rack card, a hardware insert, an External Instrument and a device without parameters refuse it. |
+| `mix.device_pages_list` | `{track?, device}` | The device's pages: the factory tier, then the user tier. Each page has `tier` (`factory` or `user`), `name` and eight `slots`, each `{id, name, state}` with `state` one of `ok`, `empty`, `missing` (the id is not in the device's table, or the plug-in is not installed) or `pending` (a hosted plug-in's table is still loading), and `enable` on a factory slot that dims while that toggle is off. |
+
 ## Examples
 
 ```sh

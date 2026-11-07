@@ -2,7 +2,7 @@
 
 - **Status:** accepted 2026-11-07 (#355); settled after four judging rounds
 - **Date:** 2026-11-07
-- **Implementation:** none yet; five slices below, each with main green.
+- **Implementation:** five slices below, each with main green. Slice 1 landed: the page data in `transit_dsp` (`PageInfo`, `PageSlot`, `PluginInfo::pages`, the Macro Oscillator's `PAGES`, the derived-page allow-list), `UserPage` on `Insert` and `MidiEffectSlot` with the read rules and the `device_pages` need (`crates/model/src/device_pages.rs`), the resolver and the current-page identity rules (`crates/engine/src/device_pages.rs`), and `mix.device_pages` and `mix.device_pages_list`.
 - **Amends:** [ADR 0028](0028-midi-learn-mappings.md) (adds the `selected:` mapping targets, their takeover generation and the `plugin:midi<n>:` target form for MIDI effects, decision 6; its stores, worker contract and takeover modes are otherwise unchanged). On acceptance, ADR 0028's file and README row gain "amended by ADR 0047".
 - **Reopen when:** a controller or surface needs a bank wider than eight (sixteen encoders as one page); users ask for the current page to survive closing a session; a factory page needs a deliberate gap or a hidden factory page; VST3 or AU gains a remote-pages mechanism; selecting a device from its editor window (not only from the Devices view) is asked for (see 6); users ask for large hosted plug-ins to fill their strips themselves, or for small ones not to (see 3.1); a rack's page needs Touch and Latch writing (ADR 0034's open slice); or the current page should follow the plug-in's preset (CLAP `is_for_preset` pages changing on every preset load is the likely trigger).
 

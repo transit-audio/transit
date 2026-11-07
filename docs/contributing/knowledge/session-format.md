@@ -63,6 +63,18 @@ never rewritten. A session with a patch lists `sampler_patch` under `needs`, and
 `sampler_slicing_modes` when the patch has a loop; an old one-sample Sampler (`Insert::sample`)
 gets no patch from opening or saving, and a new patch leaves `sample` unset.
 
+## Device pages (#355, ADR 0047)
+
+`Insert::pages` (instruments and inserts) and `MidiEffectSlot::pages` hold the macro strip's user
+pages (`crates/model/src/device_pages.rs`): `{name, slots}` with all eight slots written, `null`
+for empty, and the field absent while the list is empty, so sessions without pages are unchanged.
+Reading follows ADR 0047 decision 4.2 and never fails: a bad name reads empty, a name is trimmed
+and cut to 32 characters, slots pad or cut to eight, a non-string, empty or over-long (past 64
+characters) id reads empty, a repeated id keeps its first slot, and pages past the sixteenth are
+dropped with one load note per device. A session with user pages anywhere lists `device_pages`
+under `needs`. The pages are part of the slot record, so they are also freeze material: a frozen
+track refuses a pages edit as it refuses any other edit of its devices.
+
 ## Track-height format (#314, slice 1)
 
 [ADR 0044](../../adr/0044-vertical-track-zoom.md) uses the already serialized
