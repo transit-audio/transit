@@ -35,12 +35,12 @@ pub struct LoudnessMeter {
 }
 
 /// Loudness from mean-square energy (BS.1770 eq. 2).
-fn lufs(energy: f64) -> f32 {
+pub(crate) fn lufs(energy: f64) -> f32 {
     if energy <= 1e-20 { MIN_DB } else { (-0.691 + 10.0 * energy.log10()) as f32 }
 }
 
 /// K-weighting pre-filter (high shelf) and RLB high-pass designed for any sample rate.
-fn k_weighting(sr: f32) -> [Coeffs; 2] {
+pub(crate) fn k_weighting(sr: f32) -> [Coeffs; 2] {
     let sr = f64::from(sr);
     // Bilinear prewarp. A corner at or past Nyquist wraps tan() negative (poles outside the unit
     // circle) or aliases it, so it is held just below Nyquist, as `Coeffs::design` does.

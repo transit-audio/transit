@@ -17,6 +17,7 @@ pub mod biquad;
 pub mod editor_header;
 pub mod event;
 pub mod host_call;
+pub mod loudness;
 pub mod meter;
 pub mod midi_fx;
 pub mod offline;
