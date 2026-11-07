@@ -121,16 +121,25 @@ fn find_named<'a>(candidates: impl IntoIterator<Item = (&'a str, &'a str)>, devi
     (matches.first().map(|(i, _)| *i), warning)
 }
 
-/// The endpoint `device` names, else the first (the default), logging a duplicate-name warning.
-fn resolve<'a>(endpoints: &'a [EndpointInfo], device: Option<&str>, direction: &str) -> Option<&'a EndpointInfo> {
+/// The index among `candidates` (`(name, id)` in default-first order) of the endpoint a saved
+/// `device` (a friendly name or an endpoint id) opens: the first match, else 0, the default
+/// endpoint; `None` when there is no endpoint. Logs the duplicate-name warning. The rule
+/// `plan_render` and `plan_capture` resolve a saved device by (ADR 0046, decision 2).
+pub fn saved_endpoint<'a>(candidates: &[(&'a str, &'a str)], device: Option<&str>, direction: &str) -> Option<usize> {
     let named = device.and_then(|device| {
-        let (at, warning) = find_named(endpoints.iter().map(|e| (e.name.as_str(), e.id.as_str())), device, direction);
+        let (at, warning) = find_named(candidates.iter().copied(), device, direction);
         if let Some(warning) = warning {
             log::warn!("{warning}");
         }
         at
     });
-    named.and_then(|at| endpoints.get(at)).or_else(|| endpoints.first())
+    named.or_else(|| (!candidates.is_empty()).then_some(0))
+}
+
+/// The endpoint `device` names, else the first (the default), logging a duplicate-name warning.
+fn resolve<'a>(endpoints: &'a [EndpointInfo], device: Option<&str>, direction: &str) -> Option<&'a EndpointInfo> {
+    let candidates: Vec<(&str, &str)> = endpoints.iter().map(|e| (e.name.as_str(), e.id.as_str())).collect();
+    saved_endpoint(&candidates, device, direction).and_then(|at| endpoints.get(at))
 }
 
 impl WasapiBackend {

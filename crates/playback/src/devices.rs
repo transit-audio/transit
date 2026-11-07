@@ -785,6 +785,61 @@ mod tests {
         assert!(only_shared.calibration_for("WASAPI", device, None, &req).is_none(), "a shared calibration never applies to an exclusive open");
     }
 
+    /// ADR 0046, decision 1: the resolver table. Every saved value times the systems, on and off
+    /// Windows: on Windows the ASIO system (any case) is native ASIO and every other system (the
+    /// untouched default too) native WASAPI; off Windows the saved value. `effective` is the table
+    /// for the platform this runs on. Control: a resolver that returned the saved value on Windows
+    /// fails every row whose saved value is not the system's native variant.
+    #[test]
+    fn the_effective_backend_follows_the_system_on_windows_and_the_saved_value_elsewhere() {
+        use Backend::*;
+        let systems = [Some("WASAPI"), Some("ASIO"), Some("asio"), None, Some("ALSA"), Some("JACK")];
+        for saved in Backend::ALL {
+            for system in systems {
+                let windows = if is_asio_system(system) { NativeAsio } else { NativeWasapi };
+                assert_eq!(saved.effective_on(system, true), windows, "Windows: {saved:?} on {system:?}");
+                assert_eq!(saved.effective_on(system, false), saved, "elsewhere: {saved:?} on {system:?}");
+                assert_eq!(saved.effective(system), saved.effective_on(system, cfg!(windows)));
+            }
+        }
+        assert_eq!(NativeAsio.effective_on(Some("WASAPI"), true), NativeWasapi, "the crossed configuration opens native WASAPI");
+        assert_eq!(Cpal.effective_on(None, true), NativeWasapi, "a former cpal user on the default system");
+    }
+
+    /// ADR 0046, decision 2's one migration: a saved `"cpal"` loads as `Auto` on Windows and is saved
+    /// as `"auto"` on the next save; off Windows it stays cpal. The variant still parses everywhere,
+    /// and native values are never rewritten.
+    #[test]
+    fn a_saved_cpal_backend_loads_as_auto_on_windows() {
+        use Backend::*;
+        for saved in Backend::ALL {
+            assert_eq!(saved.loaded_on(true), if saved == Cpal { Auto } else { saved }, "Windows: {saved:?}");
+            assert_eq!(saved.loaded_on(false), saved, "elsewhere: {saved:?}");
+        }
+        let loaded = serde_json::from_str::<AudioConfig>(r#"{"backend":"cpal","system":"WASAPI"}"#).unwrap();
+        assert_eq!(loaded.backend, Cpal.loaded(), "the config file's backend goes through the migration");
+        let saved = serde_json::to_string(&loaded).unwrap();
+        assert!(saved.contains(if cfg!(windows) { "\"backend\":\"auto\"" } else { "\"backend\":\"cpal\"" }), "{saved}");
+        let native = serde_json::from_str::<AudioConfig>(r#"{"backend":"native_asio","system":"WASAPI"}"#).unwrap();
+        assert_eq!(native.backend, NativeAsio, "a crossed configuration is read as saved: the resolver decides at the sites");
+    }
+
+    /// ADR 0046, decision 7: no cpal choice on Windows. `offered` on either system holds only the
+    /// system's native variant (one choice, so the row is hidden). Control: the choices off Windows
+    /// keep Auto and cpal, which restoring `Cpal` to the Windows list would bring back.
+    #[test]
+    fn windows_offers_only_the_systems_native_backend() {
+        use Backend::*;
+        assert_eq!(Backend::offered_on(Some("WASAPI"), true), [NativeWasapi]);
+        assert_eq!(Backend::offered_on(Some("ASIO"), true), [NativeAsio]);
+        assert_eq!(Backend::offered_on(None, true), [NativeWasapi]);
+        if cfg!(windows) {
+            assert_eq!(Backend::offered(Some("WASAPI")), [NativeWasapi]);
+            assert!(!Backend::offered(Some("ASIO")).contains(&Cpal));
+        }
+        assert!(Backend::offered_on(Some("WASAPI"), false).starts_with(&[Auto, Cpal]), "control: elsewhere cpal is offered");
+    }
+
     #[test]
     fn each_system_offers_only_its_own_native_backend() {
         use Backend::*;

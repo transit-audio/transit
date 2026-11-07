@@ -187,7 +187,6 @@ fn the_calibration_command_wraps_inside_the_window_and_has_a_copy_button() {
     }
     let mut t = T::new();
     t.open_window();
-    t.pick("backend", Backend::NativeWasapi.label());
     let window: [f32; 4] = serde_json::from_value(t.layout()["window"].clone()).unwrap();
     let text = t.control_rect("calibration_text");
     let copy = t.control_rect("calibration_copy");

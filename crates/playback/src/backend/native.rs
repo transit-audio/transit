@@ -92,6 +92,14 @@ pub fn unserved(cfg: &AudioConfig) -> String {
     format!("no native backend serves the audio system “{}” in this build", cfg.system.as_deref().unwrap_or(devices::WASAPI_SYSTEM))
 }
 
+/// The index of the endpoint native WASAPI opens for a saved `device` among `candidates` (`(name,
+/// id)` in default-first order): the first match by name or id, else 0, the default endpoint
+/// (`transit_audio_wasapi::saved_endpoint`, ADR 0046 decision 2).
+#[cfg(windows)]
+pub fn wasapi_saved_endpoint(candidates: &[(&str, &str)], device: Option<&str>) -> Option<usize> {
+    transit_audio_wasapi::saved_endpoint(candidates, device, "output")
+}
+
 /// Whether `Auto` would open the native JACK backend for `cfg` when a JACK or PipeWire-JACK server
 /// answers (ADR 0021, slice 2 amendment): the JACK system, or the platform default with no device
 /// named (a saved ALSA device name keeps cpal). [`factory_for`] asks this only in a Linux build

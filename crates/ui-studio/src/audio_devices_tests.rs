@@ -4,6 +4,8 @@
 
 #[path = "audio_devices/calibration_tests.rs"]
 mod calibration_tests;
+#[path = "audio_devices/selection_tests.rs"]
+mod selection_tests;
 #[path = "audio_devices/system_audio_tests.rs"]
 mod system_audio_tests;
 #[path = "audio_devices/window_tests.rs"]
@@ -233,24 +235,32 @@ fn has_control(t: &T, key: &str) -> bool {
     t.layout()["controls"].as_array().unwrap().iter().any(|c| c["value"] == key)
 }
 
+/// ADR 0046, decision 7: the Audio Devices window offers no cpal choice on Windows. The Backend row
+/// is not drawn on either system and "cpal (legacy)" appears nowhere, while the exclusive-mode
+/// checkbox (outside the row) is still drawn on WASAPI. Off Windows these systems have no native
+/// backend in this build, so no row either. Control: `backend_row` draws the row for two offered
+/// variants (the choices off Windows, which include cpal), so restoring `Cpal` to the Windows
+/// `offered` would draw it here and fail.
 #[test]
-fn the_backend_selector_is_offered_only_with_the_feature_on_the_wasapi_system() {
+fn the_backend_row_is_hidden_on_windows_with_the_exclusive_checkbox_still_drawn() {
     let mut t = T::new();
     t.open_window();
-    let compiled = transit_playback::devices::NATIVE_WASAPI_COMPILED;
-    assert_eq!(has_control(&t, "backend"), compiled, "WASAPI is the default system of the fake devices");
-    t.pick("system", "ASIO");
-    assert_eq!(has_control(&t, "backend"), transit_playback::devices::NATIVE_ASIO_COMPILED, "ASIO has a choice only with native ASIO built");
-    t.pick("system", "WASAPI");
-    assert_eq!(has_control(&t, "backend"), compiled);
-    if compiled {
-        t.pick("backend", Backend::NativeWasapi.label());
-        assert_eq!(t.app.audio_devices.draft.backend, Backend::NativeWasapi);
-        let apply = t.control_rect("apply");
-        t.click(mid(apply));
-        assert_eq!(t.reopened().last().map(|c| c.backend), Some(Backend::NativeWasapi), "changing the backend reopens the device");
-        assert_eq!(t.app.ui.audio.backend, Backend::NativeWasapi);
+    let windows = transit_playback::devices::NATIVE_WASAPI_COMPILED;
+    for system in ["WASAPI", "ASIO", "WASAPI"] {
+        t.pick("system", system);
+        assert!(!has_control(&t, "backend"), "no Backend row on {system}");
+        let shown = t.layout().to_string();
+        assert!(!shown.contains(Backend::Cpal.label()), "no cpal choice anywhere on {system}: {shown}");
+        assert_eq!(has_control(&t, "share_device"), windows && system == "WASAPI", "the exclusive checkbox on {system}");
     }
+    use crate::audio_devices::window::backend_row;
+    for system in [Some("WASAPI"), Some("ASIO"), None] {
+        assert_eq!(backend_row(true, Backend::offered_on(system, true)), None, "one choice on Windows hides the row ({system:?})");
+    }
+    let two = Backend::offered_on(Some("WASAPI"), false);
+    assert!(two.len() > 1 && two.contains(&Backend::Cpal));
+    assert_eq!(backend_row(true, two.clone()), Some(two), "control: two offered variants draw the row");
+    assert_eq!(backend_row(false, Backend::offered_on(Some("ALSA"), false)), None, "and no native backend draws none");
 }
 
 const MODEL12: &str = "Model Mixer ASIO Driver";
@@ -292,27 +302,20 @@ fn the_asio_system_lists_its_drivers_and_says_which_failed_to_load() {
     );
 }
 
+/// ADR 0046: an `Auto` configuration on the ASIO system is native ASIO, with no Backend choice: the
+/// Calibration line shows, and once it runs `running_native_asio` reports the driver (Driver
+/// settings opens its panel). The saved value stays `Auto`.
 #[test]
-fn native_asio_is_chosen_on_the_asio_system_with_its_calibration_line_and_driver_settings() {
+fn native_asio_opens_on_the_asio_system_with_its_calibration_line_and_driver_settings() {
     let mut t = T::new();
     t.control("audio.fake_devices", asio_devices()).unwrap();
     t.open_window();
     t.pick("system", "ASIO");
+    assert!(!has_control(&t, "backend"), "no Backend row: the ASIO system decides the backend");
     if !transit_playback::devices::NATIVE_ASIO_COMPILED {
-        assert!(!has_control(&t, "backend"));
         return;
     }
-    t.click(mid(t.control_rect("backend")));
-    let offered: Vec<String> = t.layout()["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|i| i["value"] == "backend")
-        .map(|i| i["label"].as_str().unwrap().to_string())
-        .collect();
-    assert_eq!(offered, ["Auto", "cpal (legacy)", Backend::NativeAsio.label()], "ASIO offers its own native backend, not WASAPI's");
-    t.click(mid(T::rect(&t.layout()["items"], Some(Backend::NativeAsio.label()), "backend")));
-    assert_eq!(t.app.audio_devices.draft.backend, Backend::NativeAsio);
+    assert_eq!(t.app.audio_devices.draft.backend, Backend::Auto, "the saved value is not rewritten");
     assert!(!has_control(&t, "paired_input") && !has_control(&t, "share_device"), "no pairing and no sharing choice on ASIO");
     let line = t.layout()["calibration"].as_str().unwrap().to_string();
     assert!(line.starts_with("not calibrated: the driver's own latency figures are used; Measure checks the loop"), "{line}");
@@ -321,7 +324,7 @@ fn native_asio_is_chosen_on_the_asio_system_with_its_calibration_line_and_driver
     t.pick("output", &format!("{MODEL12} · 10 ch"));
     t.click(mid(t.control_rect("apply")));
     let applied = t.reopened().last().cloned().unwrap();
-    assert_eq!((applied.backend, applied.system.as_deref(), applied.output.as_deref()), (Backend::NativeAsio, Some("ASIO"), Some(MODEL12)));
+    assert_eq!((applied.backend, applied.system.as_deref(), applied.output.as_deref()), (Backend::Auto, Some("ASIO"), Some(MODEL12)));
     let panel = T::rect(&t.layout()["controls"], Some(crate::audio_devices::DRIVER_SETTINGS), "panel");
     t.click(mid(panel));
     assert_eq!(t.app.audio_devices.panel_opened.as_deref(), Some(MODEL12), "Driver settings opens the running driver's panel");
@@ -339,8 +342,6 @@ fn while_the_driver_settings_panel_is_open_reconnect_apply_and_rescan_wait_and_n
     t.control("audio.fake_devices", asio_devices()).unwrap();
     t.open_window();
     t.pick("system", "ASIO");
-    t.click(mid(t.control_rect("backend")));
-    t.click(mid(T::rect(&t.layout()["items"], Some(Backend::NativeAsio.label()), "backend")));
     t.pick("output", &format!("{MODEL12} · 10 ch"));
     t.click(mid(t.control_rect("apply")));
     let panel = T::rect(&t.layout()["controls"], Some(crate::audio_devices::DRIVER_SETTINGS), "panel");
@@ -602,8 +603,6 @@ fn driver_panel_follows_running_system_not_draft() {
     let has_panel = |t: &T| t.layout()["controls"].as_array().unwrap().iter().any(|c| c["value"] == "panel");
     t.pick("system", "ASIO");
     assert!(!has_panel(&t), "WASAPI is still running");
-    t.click(mid(t.control_rect("backend")));
-    t.click(mid(T::rect(&t.layout()["items"], Some(Backend::NativeAsio.label()), "backend")));
     t.pick("output", &format!("{MODEL12} · 10 ch"));
     t.click(mid(t.control_rect("apply")));
     assert!(has_panel(&t), "ASIO is running now");

@@ -50,6 +50,13 @@ pub(crate) fn choose_or<T: Clone + PartialEq>(
     (r.inner.response.rect, text)
 }
 
+/// The Backend row's choices, `None` when the row is hidden: it is drawn only where a native backend
+/// serves the system (`native`) and more than one choice exists (`options`, `Backend::offered`), so
+/// never on Windows, where the audio system decides the backend (ADR 0046).
+pub(crate) fn backend_row(native: bool, options: Vec<Backend>) -> Option<Vec<Backend>> {
+    (native && options.len() > 1).then_some(options)
+}
+
 /// The Backend selector: Auto, cpal, and the native backend of the system (`options`). Returns the
 /// combo's rect and text.
 fn choose_backend(ui: &mut egui::Ui, enabled: bool, value: &mut Backend, options: &[Backend], items: &mut Vec<MenuItem>) -> (egui::Rect, String) {
@@ -344,7 +351,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                     // Devices belong to their system, and so does a native backend (on Windows the
                                                     // effective backend follows the new system: nothing to reset, ADR 0046).
                                                     (draft.output, draft.input, draft.input_pairing) = (None, None, None);
-                                                    if draft.backend.is_native() && !draft.backend.effective(draft.system.as_deref()).native_on(draft.system.as_deref()) {
+                                                    if draft.backend.is_native()
+                                                        && !draft.backend.effective(draft.system.as_deref()).native_on(draft.system.as_deref())
+                                                    {
                                                         draft.backend = Backend::Auto;
                                                     }
                                                 }
@@ -354,8 +363,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                 // Offered only where it can apply (a build with the native backend of this system)
                                                 // and only when there is more than one choice: on Windows the system decides the
                                                 // backend, so the row is hidden there (ADR 0046).
-                                                let options = Backend::offered(draft.system.as_deref());
-                                                if devices::native_offered(draft.system.as_deref()) && options.len() > 1 {
+                                                let row = backend_row(
+                                                    devices::native_offered(draft.system.as_deref()),
+                                                    Backend::offered(draft.system.as_deref()),
+                                                );
+                                                if let Some(options) = row {
                                                     label(ui, "Backend");
                                                     let (rect, text) = choose_backend(ui, audio_on, &mut draft.backend, &options, &mut lay.items);
                                                     controls.push((text, "backend", rect));
@@ -438,8 +450,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                 }
                                                 // The backend that serves the chosen system decides (ADR 0046), not the saved value.
                                                 let effective = draft.backend.effective(draft.system.as_deref());
-                                                let native = devices::native_wasapi_offered(draft.system.as_deref()) && effective == Backend::NativeWasapi;
-                                                let native_asio = devices::native_asio_offered(draft.system.as_deref()) && effective == Backend::NativeAsio;
+                                                let native =
+                                                    devices::native_wasapi_offered(draft.system.as_deref()) && effective == Backend::NativeWasapi;
+                                                let native_asio =
+                                                    devices::native_asio_offered(draft.system.as_deref()) && effective == Backend::NativeAsio;
                                                 label(ui, "Input");
                                                 let ins: Vec<(String, String)> = sys
                                                     .map(|s| {

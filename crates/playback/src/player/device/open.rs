@@ -296,6 +296,22 @@ impl Player {
         Self::open_native(session, cfg, Box::new(native.clone()), fallback, kind)
     }
 
+    /// [`Self::open_native_kind`], or the silent runtime with its error when it does not open, as
+    /// [`Self::with_config`] does (tests).
+    #[cfg(test)]
+    pub(super) fn with_native_kind(
+        session: Arc<Session>,
+        cfg: &AudioConfig,
+        native: &ab::fake::FakeBackend,
+        fallback: &dyn ab::BackendFactory,
+        kind: NativeKind,
+    ) -> Self {
+        match Self::open_native_kind(Arc::clone(&session), cfg, native, fallback, kind) {
+            Ok(player) => player,
+            Err(error) => Self::silent_runtime(session, error),
+        }
+    }
+
     /// A native backend (WASAPI, ASIO or JACK, through the same [`Self::open_stepped`] ladder).
     /// When native WASAPI or native ASIO cannot open (before `start()` succeeded) and the ladder has
     /// no step left, the open fails with the backend's reason and the caller runs silent with it:

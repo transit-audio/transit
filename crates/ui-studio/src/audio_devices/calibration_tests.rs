@@ -60,17 +60,21 @@ fn the_calibration_line_reports_the_measured_pair_or_the_command_that_measures_i
     );
 }
 
+/// ADR 0046: the effective backend drives the native controls. On Windows `Auto` on WASAPI is
+/// native WASAPI, so the pairing and its Calibration line show with no Backend choice; another
+/// system (ASIO) has no pairing. Without native WASAPI (off Windows) neither shows.
 #[test]
-fn the_paired_input_and_calibration_line_exist_only_under_the_native_backend() {
+fn the_paired_input_and_calibration_line_follow_the_effective_backend() {
     let mut t = T::new();
     t.open_window();
     let calibration_shown = |t: &T| !t.layout()["calibration"].is_null();
-    assert!(!has_control(&t, "paired_input") && !calibration_shown(&t), "the default backend has no pairing");
+    assert_eq!(t.app.audio_devices.draft.backend, Backend::Auto);
     if !transit_playback::devices::NATIVE_WASAPI_COMPILED {
+        assert!(!has_control(&t, "paired_input") && !calibration_shown(&t), "cpal has no pairing");
         return;
     }
-    t.pick("backend", Backend::NativeWasapi.label());
-    assert!(has_control(&t, "paired_input") && calibration_shown(&t), "the native backend pairs an input");
+    assert!(!has_control(&t, "backend"), "no Backend row on Windows");
+    assert!(has_control(&t, "paired_input") && calibration_shown(&t), "Auto on WASAPI is native WASAPI: it pairs an input");
     let line = t.layout()["calibration"].as_str().unwrap().to_string();
     assert!(
         line.starts_with("not calibrated \u{b7} shared: run audio-bench --backend wasapi --loopback --out-device \"Speakers (Realtek)\""),
@@ -82,23 +86,27 @@ fn the_paired_input_and_calibration_line_exist_only_under_the_native_backend() {
     let apply = t.control_rect("apply");
     t.click(mid(apply));
     assert_eq!(t.reopened().last().and_then(|c| c.input_pairing.clone()).as_deref(), Some(SCARLETT_IN), "the pairing is applied and saved");
-    t.pick("backend", Backend::Auto.label());
-    assert!(!has_control(&t, "paired_input") && !calibration_shown(&t), "back to the default backend");
-    t.pick("backend", Backend::NativeWasapi.label());
+    t.pick("system", "ASIO");
+    assert!(!has_control(&t, "paired_input"), "ASIO pairs nothing: the input is the driver's");
+    t.pick("system", "WASAPI");
+    assert!(has_control(&t, "paired_input"), "back on WASAPI the pairing returns");
+    t.pick("paired_input", &format!("{SCARLETT_IN} \u{b7} 2 ch"));
     t.pick("paired_input", PAIRED_AUTOMATIC);
     assert_eq!(t.app.audio_devices.draft.input_pairing, None);
 }
 
+/// ADR 0046: the exclusive-mode checkbox sits outside the (hidden) Backend row and follows the
+/// effective backend: `Auto` on WASAPI shows it on Windows, ASIO does not, and changing the system
+/// from ASIO back to WASAPI shows it again.
 #[test]
-fn the_share_checkbox_follows_the_native_backend_and_applies_with_the_devices() {
+fn the_share_checkbox_follows_the_effective_backend_and_applies_with_the_devices() {
     let mut t = T::new();
     t.open_window();
-    assert!(!has_control(&t, "share_device"), "the default backend has no sharing choice");
     if !transit_playback::devices::NATIVE_WASAPI_COMPILED {
+        assert!(!has_control(&t, "share_device"), "cpal has no sharing choice");
         return;
     }
-    t.pick("backend", Backend::NativeWasapi.label());
-    assert!(has_control(&t, "share_device"), "the native backend offers it");
+    assert!(!has_control(&t, "backend") && has_control(&t, "share_device"), "Auto on WASAPI offers it with no Backend row");
     assert_eq!(SHARE_LABEL, "Take exclusive control of the device");
     assert!(t.app.audio_devices.draft.share_device, "unchecked: shared is the default");
     assert!(t.layout()["calibration"].as_str().unwrap().contains("shared"), "the Calibration line names the mode");
@@ -113,8 +121,10 @@ fn the_share_checkbox_follows_the_native_backend_and_applies_with_the_devices() 
     assert!(t.app.audio_devices.draft.share_device);
     t.click(mid(t.control_rect("apply")));
     assert_eq!(t.reopened().last().map(|c| c.share_device), Some(true));
-    t.pick("backend", Backend::Auto.label());
-    assert!(!has_control(&t, "share_device"), "back to the default backend");
+    t.pick("system", "ASIO");
+    assert!(!has_control(&t, "share_device"), "ASIO has no sharing choice");
+    t.pick("system", "WASAPI");
+    assert!(has_control(&t, "share_device"), "changing the system from ASIO to WASAPI shows the checkbox");
 }
 
 #[test]
