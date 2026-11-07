@@ -368,7 +368,9 @@ fn field_ui(app: &mut StudioApp, ui: &mut Ui, dev: Dev, field: Rect, names: &[(b
     let name_id = egui::Id::new(("macro_osc_preset_name", dev.uid()));
     let mut name: String = ui.data_mut(|d| d.get_temp(name_id)).unwrap_or_default();
     let mut picked = presets::Picked::default();
-    crate::chrome_pick::dropdown(&resp).width(FIELD_W).show(|ui| picked = presets::list(ui, dev.ins, dev.info, root.as_deref(), &user, &mut name));
+    crate::chrome_pick::dropdown_with_fields(&resp)
+        .width(FIELD_W)
+        .show(|ui| picked = presets::list(ui, dev.ins, dev.info, root.as_deref(), &user, &mut name));
     ui.data_mut(|d| d.insert_temp(name_id, name));
     presets::act(app, ui, dev.key, dev.ins, dev.info, picked, name_id);
 }

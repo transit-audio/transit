@@ -62,6 +62,13 @@ pub fn dropdown(response: &Response) -> egui::Popup<'static> {
     egui::Popup::menu(response).gap(c::COMBO_POPUP_GAP).style(crate::chrome::menu_style)
 }
 
+/// [`dropdown`] for a list that holds an editable field (a Save As name): it closes on a click
+/// outside only, since egui's default closes on any click, the click into the field included. What
+/// ends the choice (a pick, Save, Delete) calls `ui.close()` itself; Escape closes it as always.
+pub fn dropdown_with_fields(response: &Response) -> egui::Popup<'static> {
+    dropdown(response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+}
+
 /// The spec's dropdown: a `surface.inset` face with a 1 px `line` (`line.strong` on hover or while
 /// open), radius 5, 26 high, the value in `text` and a `text.faint` chevron (`text.muted` hot);
 /// its list is a [`dropdown`] popup as wide as the face.

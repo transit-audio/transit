@@ -193,3 +193,33 @@ fn a_combo_list_row_starts_its_text_after_the_padding_and_the_check_gutter() {
     // Negative control: egui's default icon spacing left in adds its gap.
     assert!(list_text_offset(Some(4.0)) > offset);
 }
+
+/// Whether a list holding a text field is still open after a click into the field.
+fn open_after_clicking_the_field(popup: impl Fn(&egui::Response) -> egui::Popup<'static>) -> bool {
+    let mut text = String::new();
+    let field_at = std::cell::Cell::new(None);
+    let mut face = |ui: &mut egui::Ui| {
+        let r = ui.button("Open");
+        popup(&r).show(|ui| {
+            field_at.set(Some(ui.text_edit_singleline(&mut text).rect.center()));
+        });
+        r
+    };
+    let mut rig = Rig::new();
+    let r = rig.idle(&mut face);
+    rig.click(r.rect.center(), &mut face);
+    for _ in 0..3 {
+        rig.idle(&mut face);
+    }
+    let at = field_at.get().expect("the list opened");
+    rig.click(at, &mut face);
+    rig.idle(&mut face);
+    egui::Popup::is_id_open(&rig.ctx, egui::Popup::default_response_id(&r))
+}
+
+#[test]
+fn a_list_with_a_field_closes_on_the_click_into_it_unless_it_is_dropdown_with_fields() {
+    assert!(open_after_clicking_the_field(crate::chrome_pick::dropdown_with_fields), "stays open");
+    // Negative control: the default close-on-click closes it at the first click.
+    assert!(!open_after_clicking_the_field(crate::chrome_pick::dropdown), "the plain dropdown closes");
+}

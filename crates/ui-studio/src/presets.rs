@@ -262,13 +262,20 @@ pub(crate) fn list(ui: &mut Ui, ins: &Insert, info: &'static PluginInfo, root: O
     }
     ui.separator();
     ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(name).hint_text("Save As…").desired_width(100.0));
-        if ui.add_enabled(root.is_some() && !file_name(name).is_empty(), egui::Button::new("Save")).clicked() {
+        let field = ui.add(egui::TextEdit::singleline(name).hint_text("Save As…").desired_width(100.0));
+        let can_save = root.is_some() && !file_name(name).is_empty();
+        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() || (can_save && entered) {
             out.save = Some(name.clone());
         }
     });
     if user.contains(&ins.preset) && ui.button(format!("Delete \"{}\"", ins.preset)).clicked() {
         out.delete = Some(ins.preset.clone());
+    }
+    // The list holds an editable field, so it closes on a click outside only (see
+    // `chrome_pick::dropdown_with_fields`); what ends the choice closes it here.
+    if out.pick.is_some() || out.save.is_some() || out.delete.is_some() {
+        ui.close();
     }
     out
 }
@@ -315,6 +322,7 @@ pub fn control(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &In
     let r = crate::chrome_pick::Combo::new(("builtin_preset", ins.uid.get()), current)
         .width(150.0)
         .dense()
+        .keep_open()
         .show(ui, |ui| picked = list(ui, ins, info, root.as_deref(), &user, &mut name));
     *out = [r.response.rect.min.x, r.response.rect.min.y, r.response.rect.max.x, r.response.rect.max.y];
     ui.data_mut(|d| d.insert_temp(name_id, name));

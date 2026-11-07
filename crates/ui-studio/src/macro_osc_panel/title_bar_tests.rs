@@ -154,3 +154,36 @@ fn the_follow_toggle_latches_in_the_option_role() {
     t.click(mid(link), 1);
     assert!(!t.panel(tr).title.follow_on && t.app.ui.editor_follow.is_empty());
 }
+
+#[test]
+fn the_title_bar_preset_list_stays_open_for_save_as_then_saves_and_closes() {
+    let dir = std::env::temp_dir().join(format!("transit-326p-saveas-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (mut t, tr) = T::open();
+    t.app.services.config_dir = Some(dir.clone());
+    let synth = info();
+    let field = t.panel(tr).title.field;
+    t.click(mid(field), 1);
+    assert!(t.painted("Factory").0 >= 1, "the list opens");
+    // Click into the Save As field: the list stays open.
+    let hint = t.painted("Save As\u{2026}").1.expect("the Save As field is in the list");
+    t.click(hint, 1);
+    assert!(t.painted("Factory").0 >= 1, "the click into the field does not close the list");
+    t.send("ui.text", serde_json::json!({"text": "Fresh"}));
+    assert!(t.painted("Factory").0 >= 1, "typing keeps it open");
+    assert!(crate::presets::user_names(&dir, synth.id).is_empty(), "nothing is saved before Enter");
+    t.key("enter");
+    assert_eq!(crate::presets::user_names(&dir, synth.id), ["Fresh"], "Enter saves under the typed name");
+    assert_eq!(t.painted("Factory").0, 0, "and the list closes");
+    // A pick closes the list; Escape closes it too.
+    t.click(mid(field), 1);
+    let pick = t.painted("Init").1.expect("a factory preset is listed");
+    t.click(pick, 1);
+    assert_eq!(t.painted("Factory").0, 0, "a pick closes the list");
+    t.click(mid(field), 1);
+    assert!(t.painted("Factory").0 >= 1);
+    t.key("escape");
+    assert_eq!(t.painted("Factory").0, 0, "Escape closes it");
+    let _ = std::fs::remove_dir_all(dir);
+}

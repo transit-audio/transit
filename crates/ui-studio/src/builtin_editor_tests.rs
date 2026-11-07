@@ -1022,3 +1022,26 @@ fn the_tuner_reference_moves_the_reading_and_hold_freezes_the_display() {
     tone.run(&mut t, &tap, 220.0, 12);
     assert_eq!(t.window(tr).tuner.note, "A3", "released");
 }
+
+#[test]
+fn the_dropdown_preset_list_stays_open_for_save_as_then_saves_and_closes() {
+    let dir = temp_config("saveas");
+    let mut t = T::new();
+    t.app.services.config_dir = Some(dir.clone());
+    let (tr, _) = open_plugin(&mut t, "compressor");
+    let preset = t.window(tr).preset;
+    t.click(mid(preset), 1);
+    let hint = t.painted("Save As\u{2026}").1.expect("the list opens with its Save As field");
+    t.click(hint, 1);
+    assert!(t.painted("Save As\u{2026}").0 >= 1, "the click into the field does not close the list");
+    t.send("ui.text", json!({"text": "Fresh"}));
+    assert!(crate::presets::user_names(&dir, "compressor").is_empty(), "nothing is saved before Enter");
+    t.send("ui.key", json!({"key": "enter"}));
+    assert_eq!(crate::presets::user_names(&dir, "compressor"), ["Fresh"]);
+    assert_eq!(t.painted("Save").0, 0, "the list closes after the save");
+    t.click(mid(preset), 1);
+    assert!(t.painted("Save").0 >= 1, "it opens again");
+    t.send("ui.key", json!({"key": "escape"}));
+    assert_eq!(t.painted("Save").0, 0, "Escape closes it");
+    let _ = std::fs::remove_dir_all(dir);
+}

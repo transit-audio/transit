@@ -319,6 +319,7 @@ In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gi
 ### Menus and popups
 - **Menu bar:** height 32 on `bg.titlebar` with a 1 px `line` below; items height 22, padding 0 8, radius 4, Sans 400 12; the open item takes `button.hover`.
 - **Popup** (menu, submenu, context menu, combo list, tooltip): `surface.raised`, 1 px `line.strong`, radius 5, padding 4, no shadow; it opens flush under its item, a submenu overlapping its parent by 4.
+- **A list that holds a field** (the preset list's Save As name) closes on a click outside only (`chrome_pick::dropdown_with_fields`, `Combo::keep_open`); a pick, Save, Delete and Escape close it explicitly, so the click into the field and the typing never do.
 - **Row:** height 24, radius 4, Sans 400 12. A 16 px check gutter (the check mark 12 px in `text`, never `signal`: a menu check is a view setting, not a value on a device). The shortcut Mono 400 11 in `text.faint`, right-aligned; a submenu chevron 12 in `text.faint`. Hover `button.hover`; disabled `ink.arrow`. Separator: 1 px `line`, 4 above and below. Delete stays a plain row (no red in menus).
 - **Tooltip:** padding 5 8, Sans 12 `text`, after 500 ms, no arrow, 4 px below the target, the shortcut in mono.
 - In code the menu bar's menus take the row style (`chrome::menu_style`, 24 px rows); context menus opened elsewhere keep egui's menu style (egui offers no global one), so their rows keep egui's 18 px interact height, and egui keeps its own separator spacing and tooltip padding (the popup padding, 4).

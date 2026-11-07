@@ -534,6 +534,11 @@ pub fn pressed(ctx: &egui::Context, action: Action) -> bool {
             hit
         });
     }
+    // An open popup (a menu, a combo or preset list) gets Escape first: it closes, and the key is
+    // not also an action (Select None, Cancel).
+    if egui::Popup::is_any_open(ctx) && rows(action).any(|s| s.key == Key::Escape) {
+        return false;
+    }
     ctx.input_mut(|i| rows(action).fold(false, |hit, s| hit | (i.modifiers.matches_exact(s.mods) && i.consume_key(s.mods, s.key))))
 }
 
