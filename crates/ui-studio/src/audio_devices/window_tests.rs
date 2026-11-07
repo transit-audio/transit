@@ -516,3 +516,34 @@ fn the_live_cue_checkbox_edits_only_named_outputs_and_leaves_the_session_clean()
     t.click(mid(item(&t, "io_live:Out 3-4", "Live (no shared padding)")));
     assert!(!t.app.engine.io_map().path("Out 3-4").unwrap().live);
 }
+
+/// ADR 0046, decision 2: in a Windows build with native WASAPI the window lists what
+/// `devices::audio_systems_without_asio` lists (the source `machine_listing` takes): the native
+/// WASAPI system, the default system even with the ASIO system beside it, its endpoints as the
+/// output rows. Enumeration only; nothing opens. On a machine without endpoints the rows are empty.
+#[test]
+fn the_window_lists_the_native_wasapi_system_as_the_default_on_windows() {
+    use transit_playback::devices;
+    if !devices::NATIVE_WASAPI_COMPILED {
+        return;
+    }
+    let mut systems = devices::audio_systems_without_asio();
+    assert_eq!(systems.iter().map(|s| (s.name.as_str(), s.is_default)).collect::<Vec<_>>(), [("WASAPI", true)]);
+    let rows: Vec<String> = systems[0].outputs.iter().map(crate::audio_devices::device_label).collect();
+    systems.push(devices::AudioSystem {
+        name: devices::ASIO_SYSTEM.into(),
+        is_default: false,
+        outputs: Vec::new(),
+        inputs: Vec::new(),
+        diagnostics: Vec::new(),
+    });
+    let mut t = T::new();
+    t.app.audio_devices.fake.as_mut().expect("the rig's stand-in devices").systems = systems;
+    t.open_window();
+    assert_eq!(t.layout()["systems"], json!(["WASAPI", "ASIO"]));
+    t.click(mid(t.control_rect("output")));
+    let items: Vec<String> =
+        t.layout()["items"].as_array().unwrap().iter().filter(|i| i["value"] == "output").map(|i| i["label"].as_str().unwrap().to_string()).collect();
+    assert_eq!(items[0], "System default");
+    assert_eq!(items[1..], rows[..], "the untouched default system is WASAPI and its rows are the native list's");
+}

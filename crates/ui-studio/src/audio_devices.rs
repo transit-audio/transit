@@ -697,7 +697,8 @@ impl StudioApp {
         }
     }
 
-    /// The systems listed at once (cpal's) and the native ASIO lister, when this build has one.
+    /// The systems listed at once (`devices::audio_systems_without_asio`: native WASAPI on Windows,
+    /// else cpal's, and native JACK) and the native ASIO lister, when this build has one.
     fn machine_listing(&self) -> (Vec<AudioSystem>, Option<AsioLister>) {
         #[cfg(test)]
         if let Some((systems, lister)) = &self.audio_devices.machine {
@@ -705,9 +706,7 @@ impl StudioApp {
         }
         let lister: Option<AsioLister> = devices::NATIVE_ASIO_COMPILED
             .then(|| std::sync::Arc::new(|selected: Option<String>| devices::native_asio_system(selected.as_deref())) as AsioLister);
-        let mut systems = devices::cpal_audio_systems();
-        systems.extend(devices::native_jack_system());
-        (systems, lister)
+        (devices::audio_systems_without_asio(), lister)
     }
 
     /// Lists the ASIO system for [`Self::asio_selection`] on a worker thread (probing a driver can

@@ -141,17 +141,10 @@ fn run(program: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// The audio systems this build can list without opening a stream: cpal's, native JACK, and the
-/// native ASIO driver names (none probed).
+/// The audio systems this build can list without opening a stream: `devices::audio_systems()`
+/// (native WASAPI on Windows, else cpal's; native JACK; the native ASIO driver names, none probed).
 pub fn machine_systems() -> Vec<AudioSystem> {
-    use transit_playback::devices;
-    let mut systems = devices::cpal_audio_systems();
-    systems.extend(devices::native_jack_system());
-    if devices::NATIVE_ASIO_COMPILED {
-        systems.retain(|s| s.name != devices::ASIO_SYSTEM);
-        systems.extend(devices::native_asio_system(None));
-    }
-    systems
+    transit_playback::devices::audio_systems()
 }
 
 /// The end of the log: at most `lines` lines of the file, oldest first. A missing file is an empty
@@ -398,6 +391,7 @@ impl Report {
         }
         for s in &self.systems {
             o.push_str(&format!("{}{}\n", s.name, if s.is_default { " (default system)" } else { "" }));
+            o.push_str(&format!("  Listed by: {}\n", transit_playback::devices::enumerator_of(&s.name)));
             // An ASIO driver without channels in a direction says why (the Audio Devices window
             // marks the same ones): its rate list is the standard choices, not what it offers.
             for (label, devices) in [("Output", &s.outputs), ("Input", &s.inputs)] {
@@ -849,6 +843,7 @@ mod tests {
             "Cores: 8",
             "pipewire: pipewire 1.0.0",
             "Output: Speakers (default) \u{b7} 2 ch \u{b7} rates 44100 48000 \u{b7} buffer 32-4096",
+            "ALSA (default system)\n  Listed by: cpal\n",
             "Note: driver X: busy",
             "Audio system: ALSA",
             "Buffer size: 128 samples",
