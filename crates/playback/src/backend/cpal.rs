@@ -1,7 +1,11 @@
-//! The cpal adapter of the audio backend trait (ADR 0016 slice a). This module and `devices.rs`
-//! are the only users of cpal types: it owns device selection (`choose_output`,
-//! `output_attempts`), the sample-format fan-out and conversion, the mapping of cpal timestamps to stamps, the observation of
-//! the device worker's scheduling, and the platform cfgs (FreeBSD has no capture).
+//! The cpal adapter of the audio backend trait (ADR 0016 slice a). It owns device selection
+//! (`choose_output`, `output_attempts`), the sample-format fan-out and conversion, the mapping of cpal timestamps to stamps, the
+//! observation of the device worker's scheduling, and the platform cfgs (FreeBSD has no capture).
+//! The cpal-typed helpers live here too since ADR 0046 (slice 1 moved them from `devices.rs`): the
+//! format preference (`FORMATS`, `format_rank`), device naming, description and lookup, the
+//! process-wide hosts (`shared_host`, `host_named`, `cpal_system_for`) and the buffer-size rule
+//! (`buffer_size`, `buffer_size_on`). Outside this module, `devices::cpal_audio_systems` (the
+//! cpal enumeration) and the adapter's entry points still name cpal.
 //!
 //! CPAL owns Windows device-worker promotion before the first data callback and releases the
 //! registration on the same worker at exit. The pinned fork exposes its actual helper result.

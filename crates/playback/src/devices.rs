@@ -2,6 +2,10 @@
 //! and buffer size to open. The choice is per machine (the app keeps it with its preferences, not
 //! in sessions). Anything that cannot be honoured falls back to the system default: a device that
 //! is unplugged, a rate or buffer size the device does not offer.
+//!
+//! The cpal-typed helpers (sample-format preference, device description and lookup, the shared
+//! hosts, the buffer-size rule) live in the cpal adapter, `backend::cpal` (ADR 0046); this module
+//! keeps the platform-neutral types and the enumeration of audio systems.
 
 use crate::backend::cpal::{describe, device_name, shared_host};
 use cpal::traits::HostTrait;
