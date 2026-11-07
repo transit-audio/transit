@@ -384,6 +384,35 @@ pub(crate) fn section_label(ui: &Ui, inner: Rect, text: &str) -> Rect {
     widgets::role_text(ui.painter(), &tokens::LABEL_SECTION, text, TOKENS.text_muted, Align2::LEFT_TOP, inner.min)
 }
 
+/// Whether `id` is a LFO's sync division (a Choice whose table order is not the order of time).
+pub(crate) fn division_param(id: &str) -> bool {
+    matches!(id, "lfo1_division" | "lfo2_division")
+}
+
+/// The division table's indices from the longest cycle to the shortest, triplets and dotted
+/// values where their durations fall (the order the sync-rate lists of Ableton and Logic use).
+/// A display and drag mapping only: the stored index and saved sessions keep the table's order.
+pub fn division_order() -> Vec<usize> {
+    use transit_dsp::plugins::lfo::{DIVISIONS, division_quarters};
+    let mut order: Vec<usize> = (0..DIVISIONS.len()).collect();
+    order.sort_by(|a, b| division_quarters(*b, 4.0).total_cmp(&division_quarters(*a, 4.0)));
+    order
+}
+
+/// The knob position (0..1) of the stored division index `v`.
+fn division_norm(v: f32) -> f32 {
+    let order = division_order();
+    let rank = order.iter().position(|i| *i == v.round() as usize).unwrap_or(0);
+    rank as f32 / (order.len() - 1) as f32
+}
+
+/// The stored division index at knob position `norm`.
+fn division_at(norm: f32) -> f32 {
+    let order = division_order();
+    let rank = (norm.clamp(0.0, 1.0) * (order.len() - 1) as f32).round() as usize;
+    order[rank] as f32
+}
+
 /// A knob for parameter `id` at `at` (the top left of its cell), mapped through the parameter's
 /// range and taper; a source chip dropped on it makes a route to its destination.
 #[allow(clippy::too_many_arguments)]
@@ -403,11 +432,12 @@ pub(crate) fn knob_at(
     let v = dev.value(app, id);
     let text = p.format(v);
     let dest = destination_of(id);
+    let synced = division_param(id);
     let k = knob::Knob {
         size,
         label,
         value_text: &text,
-        value: p.to_normalized(v),
+        value: if synced { division_norm(v) } else { p.to_normalized(v) },
         default: p.to_normalized(p.default),
         bipolar: bipolar(p),
         modulation: dest.and_then(|d| ring_depth(app, dev, d)),
@@ -415,7 +445,11 @@ pub(crate) fn knob_at(
     };
     let mut c = child(ui, cell);
     let shown = knob::show(&mut c, egui::Id::new(("macro_osc_knob", dev.uid(), p.id)), &k);
-    let new = crate::device_editor::knob_value(p, &shown);
+    let new = match shown.value {
+        // A sync division's knob travels the divisions in duration order, not table order.
+        Some(n) if synced && !shown.reset => Some(division_at(n)),
+        _ => crate::device_editor::knob_value(p, &shown),
+    };
     if shown.wheeled {
         // A wheel gesture's nudges merge into one undo step while the wheel keeps coming.
         app.builtin_editor.devices.wheel_now = true;
