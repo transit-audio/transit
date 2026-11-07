@@ -25,6 +25,7 @@ impl Player {
         Self::prepare_with(session, rate, IoMap::default(), true).map(|(mut player, access, _clock)| {
             let output = DeviceOutput::new(access, &player, 2);
             *player.test_output.get_mut() = Some(output);
+            player.fake_only = true;
             player
         })
     }
@@ -103,6 +104,8 @@ impl Player {
             device_system: String::new(),
             native_backend: false,
             native_factory: None,
+            // This crate's unit tests never open an input on the machine's devices (#363).
+            fake_only: cfg!(test),
             output_latency: None,
             output_sample: None,
             output_channel_names: Vec::new(),
@@ -241,7 +244,9 @@ impl Player {
     #[doc(hidden)]
     pub fn open_fake_native_asio(session: Arc<Session>, cfg: &AudioConfig, driver: &ab::fake::FakeBackend) -> Result<Self, String> {
         let fallback = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32));
-        Self::open_native(session, cfg, Box::new(driver.clone()), &fallback, NativeKind::Asio)
+        let mut player = Self::open_native(session, cfg, Box::new(driver.clone()), &fallback, NativeKind::Asio)?;
+        player.fake_only = true;
+        Ok(player)
     }
 
     /// [`Self::open_fake_native_asio`], or the silent runtime with its error when it does not open
@@ -251,7 +256,11 @@ impl Player {
     pub fn with_fake_native_asio(session: Arc<Session>, cfg: &AudioConfig, driver: &ab::fake::FakeBackend) -> Self {
         match Self::open_fake_native_asio(Arc::clone(&session), cfg, driver) {
             Ok(player) => player,
-            Err(error) => Self::silent_runtime(session, error),
+            Err(error) => {
+                let mut player = Self::silent_runtime(session, error);
+                player.fake_only = true;
+                player
+            }
         }
     }
 

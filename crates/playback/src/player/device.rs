@@ -19,6 +19,9 @@ use transit_time::{Range, Samples};
 type Owner = RuntimeControl<Command, ActionResult>;
 pub type PlayerNotice = Notice<Command, ActionResult>;
 
+/// Why a test Player's input does not open (#363): it has no fake backend for it, and a test never
+/// opens the machine's real devices.
+const TEST_PLAYER_INPUT: &str = "this test Player has no audio input device";
 /// A prepared MIDI recording pass.
 struct MidiPass {
     reader: record::start::Reader,
@@ -105,6 +108,9 @@ pub struct Player {
     pub native_backend: bool,
     /// The native backend that serves the device, kept for the input when it opens on demand.
     native_factory: Option<Box<dyn ab::BackendFactory>>,
+    /// A Player of the tests' fakes (device-free, a scripted backend, or this crate's unit tests): an
+    /// input it has no fake backend for is refused, never opened on the machine's real devices (#363).
+    fake_only: bool,
     /// The output stream's latency as the backend reported it at open (ASIO: `getLatencies`).
     pub output_latency: Option<std::time::Duration>,
     /// The device sample format the output stream converts to.
@@ -957,6 +963,10 @@ impl Player {
         self.native_factory.as_ref().and_then(|native| native.backend(config.system.as_deref())).is_some_and(|backend| backend.host_blocked())
     }
     pub fn open_input(&self, config: &AudioConfig) -> Result<record::Recorder, String> {
+        self.open_input_with(config, &crate::backend::cpal::CpalFactory)
+    }
+    /// [`Self::open_input`] with `cpal` as the cpal adapter (a counting fake in tests).
+    pub(super) fn open_input_with(&self, config: &AudioConfig, cpal: &dyn ab::BackendFactory) -> Result<record::Recorder, String> {
         let mut input = self.input.try_borrow_mut().map_err(|_| "input transition is busy")?;
         match &mut *input {
             HeldInput::No => {
@@ -965,12 +975,17 @@ impl Player {
                 let config = AudioConfig { sample_rate: Some(self.device_rate), ..config.clone() };
                 // Through the backend that serves the output (issue #3): a native output's input
                 // is the native backend's too, falling back to cpal only if it cannot open.
+                // A test Player never reaches the machine's devices (#363).
                 let recorder = match &self.native_factory {
                     Some(native) => record::Recorder::open_through(&config, &**native).or_else(|error| {
+                        if self.fake_only {
+                            return Err(error);
+                        }
                         log::warn!("the native backend's input did not open ({error}); using the cpal backend");
-                        record::Recorder::open_with(&config)
+                        record::Recorder::open_through(&config, cpal)
                     })?,
-                    None => record::Recorder::open_with(&config)?,
+                    None if self.fake_only => return Err(TEST_PLAYER_INPUT.into()),
+                    None => record::Recorder::open_through(&config, cpal)?,
                 };
                 check_input_rate(recorder.sample_rate, self.device_rate)?;
                 let system = config.system.as_deref().unwrap_or(&self.device_system);
