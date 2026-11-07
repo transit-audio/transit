@@ -38,7 +38,7 @@ use transit_time::{Samples, TICKS_PER_QUARTER as PPQ};
 /// Width of the keyboard column, heights of the pane's rows (points).
 pub const KEY_W: f32 = 52.0;
 const HANDLE_H: f32 = 5.0;
-const HEADER_H: f32 = 28.0;
+pub(crate) const HEADER_H: f32 = 28.0;
 const RULER_H: f32 = 20.0;
 const VEL_H: f32 = 52.0;
 /// How close (points) to either note edge a press resizes instead of moving.

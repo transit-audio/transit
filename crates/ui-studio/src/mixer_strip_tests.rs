@@ -477,13 +477,14 @@ fn the_docked_pane_defaults_to_the_boards_short_travel_and_the_full_window_fills
     assert_eq!(min_pane_height(), 379.0, "the minimum stays");
     let (mut app, ctx, mut time, a) = mixer_app();
     assert_eq!(app.ui.mixer_height, default_pane_height(), "the default");
-    frames(&mut app, &ctx, 3, &mut time);
+    // A window tall enough that the default is not capped (326-T review: an 800 window is).
+    frames_at(&mut app, &ctx, 3, &mut time, 1920.0, 1080.0);
     let s = strip(&app, a);
     assert!(s.short);
     assert!((s.fader[3] - s.fader[1] - BOARD_SHORT_TRAVEL).abs() <= 1.0, "the board's travel: {:?}", s.fader);
     // Negative control: the old default, 420, left the short strip 121 of travel.
     app.ui.mixer_height = 420.0;
-    frames(&mut app, &ctx, 3, &mut time);
+    frames_at(&mut app, &ctx, 3, &mut time, 1920.0, 1080.0);
     let old = strip(&app, a);
     assert!(old.fader[3] - old.fader[1] < BOARD_SHORT_TRAVEL - 50.0, "{:?}", old.fader);
     full_mixer(&mut app, &ctx, &mut time);
@@ -548,4 +549,92 @@ fn the_midi_input_reads_all_midi_beside_out() {
     app.run("midi.input", json!({"track": k.0, "channel": 3})).unwrap();
     frames(&mut app, &ctx, 3, &mut time);
     assert_eq!(strip(&app, k).input_label, "All MIDI · Ch 3");
+}
+
+/// Frames of the real UI in a `w` x `h` window.
+fn frames_at(app: &mut StudioApp, ctx: &egui::Context, n: usize, t0: &mut f64, w: f32, h: f32) {
+    for _ in 0..n {
+        *t0 += 1.0 / 60.0;
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, h))),
+            time: Some(*t0),
+            ..Default::default()
+        };
+        app.raw_input_hook(&mut raw);
+        let mut out = ctx.run_ui(raw, |ui| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        });
+        out.textures_delta.clear();
+    }
+}
+
+fn scroll_at(app: &mut StudioApp, at: (f32, f32), dy: f32) {
+    send_control(app, "ui.scroll", json!({"x": at.0, "y": at.1, "dy": dy, "unit": "point", "steps": 1}));
+}
+
+/// The docked mixer's height as drawn: from its top edge (the strip lane's area) to the device
+/// chain's top, or the window's bottom less the status bar.
+fn pane_h(app: &StudioApp) -> f32 {
+    h(app.mixer.layout.area)
+}
+
+/// 326-T review: the default pane is `min(475, available - ARRANGE_MIN)`, so a window 800 tall
+/// with the device chain open on an instrument keeps the ruler and two full 48 pt track rows; a
+/// window 1080 tall gets the full 475.
+#[test]
+fn the_default_pane_leaves_two_track_rows_at_800_and_is_475_at_1080() {
+    use crate::mixer::{ARRANGE_MIN_ROW, default_pane_height, min_pane_height, pane_height};
+    let mut app = app();
+    for _ in 0..8 {
+        app.run("track.new", json!({"kind": "instrument"})).unwrap();
+    }
+    app.ui.show_mixer = true;
+    app.ui.show_devices = true;
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    assert_eq!(app.ui.mixer_height, default_pane_height());
+    frames_at(&mut app, &ctx, 4, &mut time, 1280.0, 800.0);
+    assert!(!app.mixer.devices.cards.is_empty(), "the device chain shows the instrument");
+    let list = h(app.arrange.layout.track_list);
+    assert!(list >= 2.0 * ARRANGE_MIN_ROW - 0.01, "two full rows at 1280x800: {list}");
+    assert!(pane_h(&app) < default_pane_height() && pane_h(&app) >= min_pane_height() - 0.01, "{}", pane_h(&app));
+    // Negative control: the fixed 475 leaves the 800 window less than two rows.
+    assert!(list - (default_pane_height() - pane_h(&app)) < 2.0 * ARRANGE_MIN_ROW, "a fixed 475 would leave {list}");
+    frames_at(&mut app, &ctx, 4, &mut time, 1920.0, 1080.0);
+    assert!((pane_h(&app) - default_pane_height()).abs() < 1.01, "475 at 1920x1080: {}", pane_h(&app));
+    // A height the user chose is kept as before, clamped to the pane's range.
+    assert_eq!(pane_height(500.0, 300.0), 500.0);
+    assert_eq!(pane_height(900.0, 2000.0), 600.0);
+    assert_eq!(pane_height(default_pane_height(), 2000.0), default_pane_height());
+    assert_eq!(pane_height(default_pane_height(), 100.0), min_pane_height(), "never under the pane's minimum");
+}
+
+/// 326-T review: with the main bus following the strips the lane holds the strips alone, so a
+/// wheel over a lone strip moves nothing; six strips in a 600-wide window still scroll under the
+/// pinned main bus.
+#[test]
+fn strips_that_fit_beside_the_main_bus_do_not_scroll_and_overflowing_strips_still_do() {
+    let (mut app, ctx, mut time, a) = mixer_app();
+    let (s, m) = (strip(&app, a), app.mixer.layout.master.clone().unwrap());
+    assert!(m.rect[0] > s.rect[2] && m.rect[2] < app.mixer.layout.area[2] - 6.0, "the main bus follows the strip");
+    let add = app.mixer.layout.add_fx;
+    // Negative control: with the old 110 in the content width this slid the strip 114 left.
+    scroll_at(&mut app, mid(s.name_rect), -150.0);
+    frames(&mut app, &ctx, 8, &mut time);
+    assert_eq!(app.mixer.hscroll, 0.0);
+    let (s2, m2) = (strip(&app, a), app.mixer.layout.master.clone().unwrap());
+    assert_eq!((s2.rect, m2.rect, app.mixer.layout.add_fx), (s.rect, m.rect, add), "every x unchanged");
+    for _ in 0..5 {
+        app.run("track.new", json!({"kind": "audio", "format": "stereo"})).unwrap();
+    }
+    frames_at(&mut app, &ctx, 4, &mut time, 600.0, 800.0);
+    let area = app.mixer.layout.area;
+    let m = app.mixer.layout.master.clone().unwrap();
+    assert_eq!(m.rect[2], area[2] - 6.0, "pinned right");
+    let first = strip(&app, a);
+    scroll_at(&mut app, mid(first.name_rect), -150.0);
+    frames_at(&mut app, &ctx, 8, &mut time, 600.0, 800.0);
+    assert!(app.mixer.hscroll > 0.0, "six strips in 600 scroll");
+    assert_eq!(app.mixer.layout.master.clone().unwrap().rect, m.rect, "the main bus stays pinned");
 }

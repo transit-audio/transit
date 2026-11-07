@@ -19,7 +19,7 @@ pub fn panes(app: &mut StudioApp, ui: &mut Ui) {
     }
     app.mixer.layout.visible = app.ui.show_mixer || app.ui.mixer_full;
     if app.ui.show_mixer && !app.ui.mixer_full {
-        let h = app.ui.mixer_height.clamp(min_pane_height(), 600.0);
+        let h = pane_height(app.ui.mixer_height, ui.available_height());
         egui::Panel::bottom("mixer").exact_size(h).frame(egui::Frame::NONE.fill(TOKENS.bg)).show(ui, |ui| strips(app, ui));
     }
     crate::keys::switcher_panel(app, ui);
@@ -33,6 +33,10 @@ pub fn show_full(app: &mut StudioApp, ui: &mut Ui) {
 /// The room "+ FX Channel" takes after the main bus when it follows the strips: 6, the button's
 /// 96 and the 6 to the window's edge.
 const ADD_FX_ROOM: f32 = 108.0;
+
+/// The room "+ FX Channel" takes in the lane after the last strip while the main bus is pinned:
+/// 6, the button's 96 and 8 to the lane's edge.
+const ADD_FX_TAIL: f32 = 110.0;
 
 /// The docked pane's margins above and below its strips (4 each) and the panel's 1 px edge.
 const PANE_MARGINS: f32 = 9.0;
@@ -50,6 +54,24 @@ pub const BOARD_SHORT_TRAVEL: f32 = 176.0;
 /// [`BOARD_SHORT_TRAVEL`] with the fader's insets and the pane's margins (#326; 475 points).
 pub fn default_pane_height() -> f32 {
     PANE_MARGINS + anatomy::fixed_height(true) + BOARD_SHORT_TRAVEL + 2.0 * crate::tokens::fader::INSET
+}
+
+/// A track row the arrangement keeps whole beside the docked panes (the review's 48 pt row).
+pub const ARRANGE_MIN_ROW: f32 = 48.0;
+
+/// What the docked mixer must leave above it: the bottom switcher (drawn over the mixer whenever
+/// a pane is docked), the arrangement's ruler and two full [`ARRANGE_MIN_ROW`] track rows (158
+/// points). The menu bar, the transport, the status bar and the device chain are already outside
+/// the height [`pane_height`] is given.
+pub const ARRANGE_MIN: f32 = crate::keys::HEADER_H + crate::theme::RULER_H + 2.0 * ARRANGE_MIN_ROW;
+
+/// The docked mixer's height in `available` points (the window under the menu bar, the transport,
+/// the status bar and the device chain): the default is `min(default_pane_height(), available -
+/// ARRANGE_MIN)`, never under [`min_pane_height`], so a short window keeps two track rows; a
+/// height the user chose is kept as before, clamped to the pane's range.
+pub fn pane_height(stored: f32, available: f32) -> f32 {
+    let h = stored.clamp(min_pane_height(), 600.0);
+    if stored == default_pane_height() { h.min(available - ARRANGE_MIN).max(min_pane_height()) } else { h }
 }
 
 /// Whether a strip in a lane `height` tall keeps its sections in order: the readouts below the
@@ -101,7 +123,10 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
         (master, Rect::from_min_max(pos2(area.min.x + 4.0, area.min.y + 4.0), pos2(master.min.x - gap_main, area.max.y - 4.0)))
     };
     let short = short_for(lane.height());
-    let content_w = channels.len() as f32 * (STRIP_W + GAP) + block_gap + 110.0;
+    // What the lane actually holds: the strips alone while the main bus and "+ FX Channel" follow
+    // them (the lane ends at the last strip, so nothing scrolls), or the strips and the button
+    // after the last of them while the main bus is pinned right.
+    let content_w = if unpinned { strips_w } else { channels.len() as f32 * (STRIP_W + GAP) + block_gap + ADD_FX_TAIL };
     app.mixer.hscroll = app.mixer.hscroll.clamp(0.0, (content_w - lane.width()).max(0.0));
     let mut layout = MixerLayout { visible: true, area: r4(area), short, menu: std::mem::take(&mut app.mixer.layout.menu), ..MixerLayout::default() };
     // Empty mixer space deselects, like empty space in the arranger. Registered first so every

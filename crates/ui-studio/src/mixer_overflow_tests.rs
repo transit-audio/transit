@@ -86,3 +86,38 @@ fn a_section_that_fits_builds_no_box_and_the_wheel_goes_to_the_mixer() {
     frames(&mut app, &ctx, 8, &mut time);
     assert!(app.mixer.hscroll > 0.0, "a box that fits leaves the wheel to the mixer");
 }
+
+fn ctrl_wheel(app: &mut StudioApp, at: (f32, f32), dy: f32) {
+    send_control(app, "ui.scroll", json!({"x": at.0, "y": at.1, "dy": dy, "unit": "point", "steps": 1, "ctrl": true}));
+}
+
+#[test]
+fn the_plain_wheel_over_a_send_level_in_an_overflowing_box_scrolls_the_box_and_leaves_the_send() {
+    // Negative control: before the box consumed the plain wheel, the row's control read the same
+    // events and the send moved 0.0 to -0.08 dB while the box scrolled.
+    let (mut app, ctx, mut time, t) = rig(0, 3);
+    let s = strip(&app, t);
+    assert_eq!(s.sends_overflow.as_ref().unwrap().offset, 0.0);
+    let (level, readout) = (s.sends[0].level_rect, s.sends[0].readout_rect);
+    for at in [mid(level), mid(readout)] {
+        wheel(&mut app, at, -10.0);
+        frames(&mut app, &ctx, 8, &mut time);
+    }
+    let s = strip(&app, t);
+    let ov = s.sends_overflow.clone().unwrap();
+    assert!(ov.offset > 0.0, "the box scrolled: {ov:?}");
+    assert!(s.sends.iter().all(|r| r.level_db == 0.0), "no send moved: {:?}", s.sends.iter().map(|r| r.level_db).collect::<Vec<_>>());
+    assert_eq!(app.mixer.hscroll, 0.0, "the mixer did not scroll");
+}
+
+#[test]
+fn ctrl_wheel_over_a_send_level_in_an_overflowing_box_edits_the_send_and_does_not_scroll() {
+    let (mut app, ctx, mut time, t) = rig(0, 3);
+    let level = strip(&app, t).sends[0].level_rect;
+    ctrl_wheel(&mut app, mid(level), -40.0);
+    frames(&mut app, &ctx, 8, &mut time);
+    let s = strip(&app, t);
+    assert_eq!(s.sends_overflow.as_ref().unwrap().offset, 0.0, "Ctrl+wheel does not scroll the box");
+    assert!(s.sends[0].level_db < 0.0, "Ctrl+wheel nudged the send: {}", s.sends[0].level_db);
+    assert_eq!(app.mixer.hscroll, 0.0, "the mixer did not scroll");
+}

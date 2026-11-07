@@ -5,7 +5,8 @@
 //! 12 px fade into the panel fill marks each clipped edge, and the scroll bar is the chrome's
 //! floating one (4 px `ink.ghost` at rest, 8 px `ink.arrow` on a `surface.panel` track on hover,
 //! `text.faint` while dragged; inset 2, handle at least 24). The wheel scrolls the box only while
-//! it overflows (it is taken from the mixer then); a box that fits never builds one.
+//! it overflows (it is taken from the mixer then, and the rows' controls nudge only on Ctrl+wheel);
+//! a box that fits never builds one.
 
 use super::*;
 use crate::tokens::{channel_strip as cs, chrome};
@@ -79,9 +80,20 @@ impl Overflow {
         let seen = view.intersect(clip);
         let hovered = seen.is_positive() && ui.rect_contains_pointer(seen);
         if hovered && app.mixer.gesture.is_none() {
+            // One owner per wheel event: the plain wheel scrolls the box and is consumed here,
+            // before the rows run, so a row's `control()` never nudges with it; Ctrl+wheel (Cmd
+            // on macOS, the kit's nudge modifier, `widgets::command_wheel`) is left for the
+            // hovered row's control and does not scroll the box.
+            let command = ui.input_mut(|i| {
+                let command = i.modifiers.ctrl
+                    || i.modifiers.command
+                    || i.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { modifiers, .. } if modifiers.ctrl || modifiers.command));
+                i.events.retain(|e| !matches!(e, egui::Event::MouseWheel { modifiers, .. } if !(modifiers.ctrl || modifiers.command)));
+                command
+            });
             let d = ui.input(|i| i.smooth_scroll_delta);
             let d = if d.x.abs() > d.y.abs() { d.x } else { d.y };
-            if d.abs() > 0.1 {
+            if !command && d.abs() > 0.1 {
                 offset = (offset - d).clamp(0.0, max);
             }
             // The box overflows: the wheel is its, never the mixer's, while over it.
