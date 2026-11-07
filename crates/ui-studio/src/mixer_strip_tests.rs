@@ -199,19 +199,20 @@ fn the_meter_fills_on_the_taper_and_its_clip_cell_latches_and_clears() {
     assert!((right[1] - y(reading[1])).abs() < 0.02 && right[1] > left[1], "{right:?}");
     assert_eq!(m.grid.len(), 8, "a grid line at each taper mark");
     // The clip cell: `line` until a peak of 1.0 or more, then `meter.hot` until the readout click.
-    assert!(!m.clip && m.clip_color == DARK.line);
+    assert!(!m.clip && m.clip_colors == [DARK.line, DARK.line]);
     let cell = m.clip_cells[0];
     assert!(cell[3] <= well[1] && cell[3] - cell[1] == crate::tokens::fader::METER_CLIP_CELL, "a 4 px cell above the well");
     feed(&mut app, a, [1.2, 0.1], 1);
     frames(&mut app, &ctx, 2, &mut time);
     let lit = strip(&app, a);
     let m = lit.meter_layout.clone().unwrap();
-    assert!(m.clip && m.clip_color == DARK.meter_hot, "latched");
+    // The engine publishes a peak per channel: only the channel that clipped latches.
+    assert!(m.clip && m.clips == [true, false] && m.clip_colors == [DARK.meter_hot, DARK.line], "the left channel latched, the right did not");
     assert_eq!(color(lit.peak_color), DARK.meter_hot, "the readout turns hot");
     click(&mut app, mid(lit.peak_rect));
     frames(&mut app, &ctx, 4, &mut time);
     let m = strip(&app, a).meter_layout.unwrap();
-    assert!(!m.clip && m.clip_color == DARK.line, "the peak readout click clears it");
+    assert!(!m.clip && m.clip_colors == [DARK.line, DARK.line], "the peak readout click clears it");
 }
 
 #[test]
@@ -238,17 +239,74 @@ fn the_main_bus_is_160_wide_with_mute_only_and_wider_meters() {
 }
 
 #[test]
-fn the_color_bar_is_graphite_until_tracks_carry_a_palette_hue() {
-    let (mut app, ctx, mut time, a) = mixer_app();
-    let b = new_track(&mut app, json!({"kind": "audio", "format": "stereo", "name": "B"}));
-    app.run("track.color", json!({"tracks": [b.0], "color": [200, 40, 40]})).unwrap();
-    frames(&mut app, &ctx, 3, &mut time);
-    let graphite = crate::tokens::palette::DARK_BAR[16];
-    for t in [a, b] {
-        let s = strip(&app, t);
-        assert_eq!(color(s.color_bar_color), graphite, "the palette's Graphite bar value");
-        // Negative control: the track's free RGB color is not what the bar paints.
-        let rgb = app.engine.session().track(t).unwrap().color;
-        assert_ne!(color(s.color_bar_color), egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+fn the_color_bar_takes_the_palette_hue_nearest_the_tracks_rgb() {
+    use crate::mixer::{hues, nearest};
+    let table = hues();
+    assert_eq!(table[0], 11.0, "hueStart from tokens.json");
+    assert_eq!(table[1] - table[0], 22.5, "hueStep from tokens.json");
+    // Pure red is OKLCH hue 29: Vermilion (33.5); pure green 142: Green (146); pure blue 264:
+    // Blue (258.5); a grey has no chroma: Graphite.
+    let samples: [([u8; 3], usize); 4] = [([255, 0, 0], 1), ([0, 255, 0], 6), ([0, 0, 255], 11), ([128, 128, 128], 16)];
+    for (rgb, want) in samples {
+        assert_eq!(nearest(rgb, &table), want, "{rgb:?} maps to {}", crate::tokens::palette::NAMES[want]);
     }
+    // Negative control: a hue table rotated half a step maps the same samples elsewhere.
+    let wrong: [f32; 16] = std::array::from_fn(|i| table[i] + 11.25);
+    assert!(samples[..3].iter().any(|(rgb, want)| nearest(*rgb, &wrong) != *want), "a wrong hue table fails");
+    // On a strip: the track's RGB gives the bar its hue's `bar` value.
+    let (mut app, ctx, mut time, a) = mixer_app();
+    app.run("track.color", json!({"tracks": [a.0], "color": [0, 0, 255]})).unwrap();
+    let grey = new_track(&mut app, json!({"kind": "audio", "format": "stereo", "name": "Grey"}));
+    app.run("track.color", json!({"tracks": [grey.0], "color": [128, 128, 128]})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(color(strip(&app, a).color_bar_color), crate::tokens::palette::DARK_BAR[11], "Blue's bar");
+    assert_eq!(color(strip(&app, grey).color_bar_color), crate::tokens::palette::DARK_BAR[16], "Graphite's bar");
+}
+
+#[test]
+fn the_gain_field_stops_at_plus_6_and_a_higher_gain_reads_truthfully_at_the_top() {
+    let (mut app, ctx, mut time, a) = mixer_app();
+    // A gain above the taper's top from elsewhere (an old session, a lane, MIDI Learn).
+    app.run("mix.volume", json!({"tracks": [a.0], "db": 9.0})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let s = strip(&app, a);
+    assert_eq!(s.volume_text, "+9.0", "the readout tells the truth");
+    let cap = s.fader_layout.as_ref().unwrap().cap;
+    assert!(((cap[1] + cap[3]) / 2.0 - s.fader[1]).abs() < 0.02, "the cap is pinned at the top of the travel");
+    // Typing past +6 stops at +6, like the drag.
+    let ro = mid(s.readout_rect);
+    click(&mut app, ro);
+    frames(&mut app, &ctx, 6, &mut time);
+    typed(&mut app, "12");
+    frames(&mut app, &ctx, 3, &mut time);
+    key(&mut app, "Enter");
+    frames(&mut app, &ctx, 6, &mut time);
+    assert_eq!(app.engine.session().track(a).unwrap().mixer.volume_db, 6.0);
+    // Negative control: at 0 dB the cap sits at 14 percent of the travel, not the top.
+    app.run("mix.volume", json!({"tracks": [a.0], "db": 0.0})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let s = strip(&app, a);
+    let cap = s.fader_layout.as_ref().unwrap().cap;
+    assert!((cap[1] + cap[3]) / 2.0 > s.fader[1] + 10.0);
+}
+
+#[test]
+fn at_the_docked_panes_minimum_the_short_strip_keeps_its_readouts_inside() {
+    use crate::mixer::{min_pane_height, strip_fits};
+    let (mut app, ctx, mut time, a) = mixer_app();
+    app.ui.mixer_height = 0.0;
+    frames(&mut app, &ctx, 4, &mut time);
+    let l = &app.mixer.layout;
+    // The panel's own 1 px edge comes off the area egui gives the strips.
+    assert!((l.area[3] - l.area[1] - min_pane_height()).abs() <= 1.0, "the pane clamps to its minimum: {:?}", l.area);
+    let s = strip(&app, a);
+    assert!(s.short);
+    for r in [s.readout_rect, s.peak_rect] {
+        assert!(r[1] >= l.area[1] && r[3] <= l.area[3], "{r:?} inside {:?}", l.area);
+        assert!(r[1] >= s.toggles[3].rect[3], "below the toggles");
+    }
+    assert!(s.fader[3] - s.fader[1] >= 80.0 - 0.01, "the fader keeps its travel");
+    assert!(strip_fits(min_pane_height() - 9.0, true));
+    // Negative control: the old minimum, 260, does not fit the short strip.
+    assert!(!strip_fits(260.0 - 8.0, true));
 }
