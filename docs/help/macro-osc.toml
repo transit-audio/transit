@@ -6,12 +6,12 @@ link = "user-guide.md#macro-oscillator"
 [[entry]]
 id = "macro_osc.model"
 name = "Model"
-text = "Chooses one of 24 synthesis models, from virtual analog and FM to speech, physical models and drums. Harmonics, Timbre and Morph mean something different for each model."
+text = "Chooses one of 24 synthesis models, from virtual analog and FM to speech, physical models and drums. The model card shows a one-line description of the current model, and the picker prints each model's short name (hover for the full one). Harmonics, Timbre and Morph mean something different for each model, and their labels change with it."
 
 [[entry]]
 id = "macro_osc.harmonics"
 name = "Harmonics"
-text = "The first of the model's three tone controls: usually the spread or mix of partials, the chord, or the bank of sounds the model picks from."
+text = "The first of the model's three tone controls; its label names what it does in the current model, for example Detune, Chord type or Resonance. Usually the spread or mix of partials, the chord, or the bank of sounds the model picks from."
 
 [[entry]]
 id = "macro_osc.timbre"
