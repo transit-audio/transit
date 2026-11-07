@@ -394,7 +394,7 @@ and off, and a disabled Shaper that is shown dims and stays editable.
   attack (on, a held note goes through the filter at its envelopes' current level); notes already
   released finish the way they started, so the switch does not click.
 - **LFO 1** and **LFO 2**, per voice: Sine, Triangle, Saw, Square, Sample & hold or Smooth random;
-  a **Rate** or, with **Sync**, a **Division** of the tempo; **Retrigger** (on: each new note starts
+  a **Rate** or, with **Sync**, a **Division** of the tempo (the divisions run in duration order, with triplets and dotted values where they fall); **Retrigger** (on: each new note starts
   the cycle; off: notes pick up the instrument's running LFO, so held notes move together);
   **Fade In** after each note; **Amount**. A synced LFO with Retrigger off follows the song position
   while the transport plays, so it lines up with the bars wherever playback starts. The envelopes
