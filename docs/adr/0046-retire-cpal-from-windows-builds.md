@@ -77,7 +77,7 @@ The maintainer decided on 2026-11-06 to remove cpal from Windows builds complete
 
 ## Implementation
 
-Not started. Slices as in decision 8, each through the usual implementer, review and chain gates; slice 3 waits for the slice 2 name-equality evidence.
+In progress. Slices as in decision 8, each through the usual implementer, review and chain gates; slice 3 waits for the slice 2 name-equality evidence.
 
 Slice 1 landed: the cpal helpers moved into `backend/cpal.rs`, the fitter tests run on a neutral stamp harness proven bit-identical to the cpal `Stamper`, and `transit-audio-wasapi` tests its conversion against `convert_golden.rs` without cpal.
 
