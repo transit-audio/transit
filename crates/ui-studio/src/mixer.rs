@@ -1,7 +1,9 @@
-//! The mixer: one channel strip per track plus the master, as a pane under the arrangement
-//! (Ableton's Ctrl+Alt+M) or filling the window (Cubase's F3). A strip has the track's name and
-//! color, input and output dropdowns, a balance knob, Mute/Solo/Record/Monitor, a
-//! fader and a meter. Flat, like the arrangement: fills, no borders or gradients, one accent.
+//! The mixer: one channel strip per track plus the main bus, as a pane under the arrangement
+//! (Ableton's Ctrl+Alt+M) or filling the window (Cubase's F3). A strip is the design language's
+//! channel strip (`docs/design/language`, Components > Channel strip; #326): the color bar, name
+//! and number, input and output dropdowns, inserts and sends (or the short variant's `FX n` /
+//! `Snd n`), a bipolar pan knob, M S / R I, the Channel fader with its scale and stereo meter, and
+//! the gain and peak readouts, in fixed sections so every fader lines up ([`anatomy`]).
 //!
 //! Everything a strip changes goes through engine commands. A fader or knob drag is one undo step
 //! (`Engine::execute_merged` with a per-track key). Which strip is focused, the panes and the
@@ -14,35 +16,40 @@
 //!   whose input is the bus), not the bus. "Add FX Channel" is four commands, one undo step.
 //! - L12: the master is an optional track. Without one the main-out strip shows the main meter
 //!   and offers to add a master fader.
-//! - L4: sends are ten fixed slots. A strip lists the occupied ones as rows (target, level,
-//!   remove) under its input, Logic style, and "+ Send" fills the first free slot.
+//! - L4: sends are ten fixed slots. A strip lists the occupied ones as rows (target, level)
+//!   under its inserts, Logic style, and "+ Send" fills the first free slot.
 //!
 //! Routing menus use the same route-change checks as the engine (ADR 0015), including
 //! sidechain keys. The engine validates the chosen route again on execution.
 
 mod actions;
+mod anatomy;
+mod channel;
 mod controls;
 mod inserts;
 mod menus;
 mod meters;
 mod routing;
 mod sends;
+mod short;
 mod strip;
 
-use controls::{Readout, control, draw_knob, fader_widget, readout};
-use inserts::{INSERT_ROW_H, INSERT_ROWS, MIN_FADER, inserts_block, midi_output_button};
+use channel::strip;
+use controls::{Readout, control, readout};
 pub use controls::{balance_of, db_to_k, k_to_db, pans_for};
-use menus::{choice_menu, dropdown, small_button};
-use meters::draw_meter;
+use inserts::{MIN_FADER, inserts_block, midi_output_button};
+use menus::{choice_menu, dropdown, paint_dropdown};
 pub use meters::{CLIP_CAP, peak_text};
+use meters::{meter_bounds, strip_meter};
 use routing::{NOT_HERE, push_unused_entry, same_route, unresolved_output};
 pub use routing::{
     RoutingChoice, bus_label, feeding_loops, input_choices, input_choices_with, listening_loops, orphan_busses, output_choices, path_choices,
     reaches, route_label, send_targets, takes_sends,
 };
 pub use sends::SEND_ROW_H;
+use sends::sends_block;
 pub(crate) use sends::{add_send_row, send_row};
-use sends::{send_rows_of, sends_block};
+pub use short::ShortList;
 pub use strip::{panes, show_full};
 
 use crate::StudioApp;
@@ -53,9 +60,9 @@ use egui::{Align2, Color32, CursorIcon, FontId, Rect, Sense, Stroke, Ui, pos2, v
 use serde_json::{Value, json};
 use transit_model::{BusId, IoDirection, IoMap, IoPath, KeyFrom, Route, SendSlot, Session, Track, TrackId, TrackKind};
 
-/// Strip width and gap (points).
-pub const STRIP_W: f32 = 88.0;
-const GAP: f32 = 2.0;
+/// A channel strip's width and the gap between strips (points): `channelStrip` in tokens.json.
+pub const STRIP_W: f32 = crate::tokens::channel_strip::WIDTH;
+const GAP: f32 = crate::tokens::channel_strip::GAP;
 /// Space separating ordinary tracks (including groups) from aux buses and returns.
 const FX_GAP: f32 = 12.0;
 /// The fader's top, in dB.
@@ -96,9 +103,12 @@ pub struct SendRow {
     /// What the readout shows.
     pub level_text: String,
     pub remove: R4,
+    /// A strip row's level fill (on the fader's taper); zero in the device chain.
+    pub level_fill: R4,
     /// The pre/post toggle (device chain only; strips have it in the row's right-click menu).
     pub pre: R4,
-    /// Slice 7: the send's mute toggle and whether it is muted.
+    /// Slice 7: the send's mute toggle (device chain; a strip row mutes from its right-click menu)
+    /// and whether it is muted.
     pub mute: R4,
     pub muted: bool,
     /// Slice 7: the send's pan (device chain only) and what it shows.
@@ -128,6 +138,37 @@ impl MenuItem {
 pub struct StripLayout {
     pub track: u64,
     pub name: String,
+    /// The track's number ("1", "2", ...; "M" for the main bus).
+    pub number: String,
+    /// The name's ink: `text`, `text.faint` while the channel is muted or inactive.
+    pub name_color: [u8; 4],
+    /// The 3 px track color bar and its fill.
+    pub color_bar: R4,
+    pub color_bar_color: [u8; 4],
+    /// The border's ink: `signal` on the selected strip, `line` otherwise.
+    pub border_color: [u8; 4],
+    /// The short variant: inserts and sends collapse to the `FX n` / `Snd n` buttons.
+    pub short: bool,
+    /// The full-height inserts and sends sections' bodies (zero in the short variant).
+    pub inserts_section: R4,
+    pub sends_section: R4,
+    /// The short variant's count buttons and what they read ("FX 3", "Snd +").
+    pub fx_button: R4,
+    pub fx_text: String,
+    /// The short variant's open list (FX or Snd) under its button; zero while closed.
+    pub list_rect: R4,
+    pub snd_button: R4,
+    pub snd_text: String,
+    /// The pan dial as painted.
+    pub knob_paint: Option<crate::widgets::knob::DialPaint>,
+    /// M S / R I as painted (the main bus: M only).
+    pub toggles: Vec<crate::widgets::toggle::ToggleLayout>,
+    /// The Channel fader as painted: its rect, travel, cap, scale labels and meter slot.
+    pub fader_layout: Option<crate::widgets::fader::FaderLayout>,
+    /// The stereo meter as painted: wells, fills, hold lines, clip cells and grid.
+    pub meter_layout: Option<crate::widgets::level_meter::ChannelMeterLayout>,
+    /// The peak readout's ink: `text.muted`, `meter.hot` from 0 dBFS or while latched.
+    pub peak_color: [u8; 4],
     pub kind: Option<TrackKind>,
     pub rect: R4,
     pub name_rect: R4,
@@ -150,23 +191,25 @@ pub struct StripLayout {
     pub solo: R4,
     pub arm: R4,
     pub monitor: R4,
+    /// The fader's travel (its track: +6 dB at the top, minus infinity at the bottom).
     pub fader: R4,
-    /// The y of the line through the fader cap, and of the 0 dB tick, as painted last frame.
-    /// Both are on physical pixel centers, so at 0 dB they are one y.
+    /// The y of the cap's center line, and of the meter's 0 dB grid line, as painted last frame.
+    /// Both are on whole physical pixels, so at 0 dB they share one center.
     pub cap_line_y: Option<f32>,
     pub zero_tick_y: Option<f32>,
-    /// The physical pixel rows [top, bottom) each of the two covers; the cap line is as thick as the
-    /// tick and covers exactly its rows at 0 dB.
+    /// The physical pixel rows [top, bottom) each of the two covers; at 0 dB the cap line's rows
+    /// hold the grid line's.
     pub cap_line_span: Option<[i32; 2]>,
     pub zero_tick_span: Option<[i32; 2]>,
+    /// The meter's wells and clip cells (a click clears the latch and the hold).
     pub meter: R4,
-    /// The dB readout under the fader (double-click types a level) and its text.
+    /// The gain field under the fader (a click types a level) and its text.
     pub readout_rect: R4,
     pub volume_text: String,
-    /// The held peak above the meter ("-3.2", "+1.4"; click resets, Ctrl-click resets all).
+    /// The held peak under the meter ("-3.2", "+1.4"; click resets, Ctrl-click resets all).
     pub peak_rect: R4,
     pub peak_text: String,
-    /// The pan readout under the knob and its text ("C", "L20", "R35").
+    /// The pan value beside the knob (a click types it) and its text ("C", "L20", "R35").
     pub pan_readout_rect: R4,
     pub pan_text: String,
     pub volume_db: f32,
@@ -180,9 +223,10 @@ pub struct StripLayout {
     pub sends: Vec<SendRow>,
     /// "+ Send" (zero when the strip takes no sends or all ten are in use).
     pub add_send: R4,
-    /// The occupied insert slots listed under the input (at most three rows).
+    /// The insert slots drawn: the full section's (at most three), or the open FX list's.
     pub inserts: Vec<InsertRow>,
-    /// The "+" row that adds an effect to this track (zero when all ten slots are in use).
+    /// "+ Insert", which adds an effect to this track (zero when all ten slots are in use, or in
+    /// the short variant while its list is closed).
     pub add_insert: R4,
     /// The strip is the focused track's (the device chain follows it).
     pub focused: bool,
@@ -198,6 +242,14 @@ pub struct InsertRow {
     pub name: String,
     pub bypass: bool,
     pub rect: R4,
+    /// The name (a click opens the device) and the power glyph (a click toggles bypass).
+    pub name_rect: R4,
+    pub power: R4,
+    /// The insert is on: neither bypassed nor taken out by the Low Latency mode.
+    pub on: bool,
+    /// The glyph's ink (`signal` on, `text.faint` bypassed) and the name's (`text`, `text.muted`).
+    pub glyph_color: [u8; 4],
+    pub name_color: [u8; 4],
     /// What the row reads after the name while the plug-in is on its way ("Loading…",
     /// "Loading… (slow) 12 s", "Not responding"); empty once it is live.
     pub status: String,
@@ -209,6 +261,8 @@ pub struct InsertRow {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct MixerLayout {
     pub visible: bool,
+    /// The strips take the short variant (the lane is too short for the full sections).
+    pub short: bool,
     pub area: R4,
     pub strips: Vec<StripLayout>,
     /// The master strip (`track` 0 when there is no master track yet).
@@ -330,6 +384,8 @@ pub struct PluginEntry {
 #[derive(Debug, Default)]
 pub struct MixerState {
     pub gesture: Option<MixGesture>,
+    /// The short strip whose FX or Snd list is open.
+    pub short_list: Option<(TrackId, ShortList)>,
     /// Horizontal scroll of the strips (points).
     pub hscroll: f32,
     pub layout: MixerLayout,

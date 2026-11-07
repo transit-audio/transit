@@ -40,83 +40,16 @@ pub fn balance_of(pan: &[f32]) -> f32 {
     }
 }
 
-/// Mix the strip background toward its readable theme ink to a fixed contrast. Selected
-/// and normal strips therefore retain the same visual hierarchy in either appearance.
-fn knob_ink(background: Color32, ratio: f32) -> Color32 {
-    let ink = theme::text_on(background);
-    let mix = |k: f32| background.lerp_to_gamma(ink, k);
-    let (mut low, mut high) = (0.0, 1.0);
-    for _ in 0..12 {
-        let mid = (low + high) * 0.5;
-        if theme::contrast(mix(mid), background) < ratio {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    mix(high)
+/// A fader position (0 at the bottom, 1 at the top) on the design's one taper
+/// (`widgets::fader::taper`), shared by the strip's fader, its scale and its meter.
+pub(crate) fn fader_k(db: f32) -> f32 {
+    1.0 - crate::widgets::fader::taper(db)
 }
 
-pub(super) fn draw_knob(p: &egui::Painter, r: Rect, b: f32, hot: bool, background: Color32) {
-    // Flat: a thin ring for the travel and the accent from the center to the value.
-    let c = r.center();
-    let rad = r.width() / 2.0 - 4.0;
-    let ang = |v: f32| (-90.0 + v * 135.0_f32).to_radians();
-    let arc = |from: f32, to: f32| -> Vec<egui::Pos2> {
-        let n = 24;
-        (0..=n).map(|i| from + (to - from) * i as f32 / n as f32).map(|v| c + vec2(ang(v).cos(), ang(v).sin()) * rad).collect()
-    };
-    p.add(egui::Shape::line(arc(-1.0, 1.0), Stroke::new(3.0, knob_ink(background, 3.0))));
-    // The center notch: a short line across the ring at the top.
-    p.line_segment([c + vec2(0.0, -(rad - 3.5)), c + vec2(0.0, -(rad + 3.5))], Stroke::new(1.0, knob_ink(background, 4.5)));
-    p.add(egui::Shape::line(arc(0.0, b), Stroke::new(3.0, if hot { theme::lighten(TOKENS.accent, 0.15) } else { TOKENS.accent })));
-    p.circle_filled(c + vec2(ang(b).cos(), ang(b).sin()) * rad, 2.5, knob_ink(background, 7.0));
-}
-
-/// A one-point line at `y` as whole physical pixels: the y of its center, the rows it covers
-/// ([top, bottom)) and its thickness in points, so the line is crisp at any scale.
-fn snap_line(y: f32, ppp: f32) -> (f32, [i32; 2], f32) {
-    let n = ppp.round().max(1.0);
-    let top = (y * ppp - n / 2.0).round();
-    ((top + n / 2.0) / ppp, [top as i32, (top + n) as i32], n / ppp)
-}
-
-type Mark = (Option<f32>, Option<[i32; 2]>);
-
-/// Draws the fader; returns the (center y, pixel rows) of the cap's center line and of the 0 dB tick.
-pub(super) fn fader_widget(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, id: TrackId, db: f32, r: Rect) -> (Mark, Mark) {
-    let ppp = ui.ctx().pixels_per_point();
-    let mut zero = (None, None);
-    let me = Target::Fader(id);
-    let resp = ui.interact(r.expand2(vec2(4.0, 6.0)).intersect(clip), ui.id().with(("fader", id.0)), Sense::click_and_drag());
-    crate::help::hover(ui, &resp, crate::help::Id::MixerStripFader);
-    // Track and marks: a line across the track at 0 dB, fainter ticks at -6, -12 and -24.
-    let groove = Rect::from_center_size(r.center(), vec2(4.0, r.height()));
-    p.rect_filled(groove, crate::theme::RADIUS_SM, TOKENS.bg);
-    let y_of = |k: f32| r.max.y - k * r.height();
-    for mark in fine::DB_MARKS {
-        let (yy, rows, w) = snap_line(y_of(db_to_k(mark)), ppp);
-        if mark == 0.0 {
-            zero = (Some(yy), Some(rows));
-            p.line_segment([pos2(r.min.x, yy), pos2(r.max.x, yy)], Stroke::new(w, TOKENS.text_dim));
-        } else {
-            p.line_segment([pos2(r.center().x - 8.0, yy), pos2(r.center().x + 8.0, yy)], Stroke::new(w, TOKENS.text_dim.gamma_multiply(0.5)));
-        }
-    }
-    let k = db_to_k(db);
-    let (cap_y, cap_rows, cap_w) = snap_line(y_of(k), ppp);
-    let cap = Rect::from_center_size(pos2(r.center().x, cap_y), vec2(r.width().min(26.0), 12.0));
-    let hot = resp.hovered() || app.mixer.gesture.is_some_and(|g| g.target == me);
-    p.rect_filled(cap, crate::theme::RADIUS_SM, if hot { TOKENS.accent } else { TOKENS.text_dim });
-    // The line through the cap marks the exact point the value sits at, to line up with the 0 dB line.
-    p.line_segment([pos2(cap.min.x, cap_y), pos2(cap.max.x, cap_y)], Stroke::new(cap_w, TOKENS.bg));
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
-    }
-    control(app, ui, &resp, me, r.height().max(1.0), true, true);
-    resp.context_menu(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Volume));
-    crate::midi_learn::mark(app, p, r.expand2(vec2(4.0, 0.0)), id, transit_model::Control::Volume);
-    ((Some(cap_y), Some(cap_rows)), zero)
+/// The gain at a fader position (the inverse of [`fader_k`]); the bottom is silence.
+pub(crate) fn fader_db(k: f32) -> f32 {
+    let db = crate::widgets::fader::db_at(1.0 - k.clamp(0.0, 1.0));
+    if db.is_finite() { db.max(fine::DB_MIN) } else { fine::DB_MIN }
 }
 
 /// A number under a control that is also a way in: double-click types a value in its place,
@@ -136,6 +69,8 @@ pub(super) struct Readout {
     pub(super) align: Align2,
     /// Also drag it like the control (a send's number).
     pub(super) drag: bool,
+    /// A plain click opens the field (the gain field, a knob's value); otherwise a double-click.
+    pub(super) click_to_type: bool,
 }
 
 pub(super) fn readout(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, ro: Readout) {
@@ -156,7 +91,8 @@ pub(super) fn readout(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip:
         color,
     );
     control(app, ui, &resp, ro.target, 1.0, ro.drag, false);
-    if resp.double_clicked() {
+    let plain = ui.input(|i| !(i.modifiers.alt || i.modifiers.ctrl || i.modifiers.command));
+    if resp.double_clicked() || (ro.click_to_type && resp.clicked() && plain) {
         app.mixer.edit = Some(fine::ReadoutEdit { target: ro.target, salt: ro.salt, text: ro.edit_text, fresh: true });
     }
 }
@@ -182,7 +118,11 @@ pub(super) fn control(app: &mut StudioApp, ui: &Ui, resp: &egui::Response, t: Ta
                 app.engine.end_merge();
             }
             app.mixer.wheel = None;
-            let raw = app.shown_value(t).map_or(0.0, |v| if t.is_pan() { v } else { db_to_k(v) });
+            let raw = app.shown_value(t).map_or(0.0, |v| match t {
+                Target::Pan(_) | Target::SendPan(..) => v,
+                Target::Fader(_) => fader_k(v),
+                Target::Send(..) => db_to_k(v),
+            });
             app.mixer.gesture = Some(MixGesture { target: t, raw, height });
         }
         if resp.dragged()
@@ -211,7 +151,7 @@ pub(super) fn control(app: &mut StudioApp, ui: &Ui, resp: &egui::Response, t: Ta
                 Target::Pan(_) | Target::SendPan(..) if slow => fine::snap_pan(g.raw),
                 Target::Pan(_) | Target::SendPan(..) => g.raw,
                 Target::Fader(_) => {
-                    let db = k_to_db(g.raw);
+                    let db = fader_db(g.raw);
                     if slow { fine::snap_db(db, &fine::DB_MARKS) } else { db }
                 }
                 Target::Send(..) => {

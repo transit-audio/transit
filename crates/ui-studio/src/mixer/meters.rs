@@ -1,28 +1,28 @@
 use super::*;
 
-fn meter_k(lin: f32) -> f32 {
-    if lin <= 0.0 {
-        return 0.0;
-    }
-    ((20.0 * lin.log10() + 60.0) / 66.0).clamp(0.0, 1.0)
+/// A strip's stereo meter (Fader > Meter) at `x`, spanning the fader's `travel`: the kit's
+/// vertical channel meter fed with the strip's fall-off reading, peak hold and clip latch. The
+/// engine publishes peaks only, so the RMS layer is left out. The main bus has the wider bars.
+pub(super) fn strip_meter(
+    p: &egui::Painter,
+    x: f32,
+    travel: Rect,
+    d: &crate::MeterDisplay,
+    main: bool,
+) -> crate::widgets::level_meter::ChannelMeterLayout {
+    use crate::widgets::level_meter::{Channel, paint_channel};
+    let db = |lin: f32| if lin > 0.0 { 20.0 * lin.log10() } else { f32::NEG_INFINITY };
+    let channels = [0, 1].map(|c| Channel { peak_db: db(d.falloff[c]), rms_db: None, hold_db: Some(db(d.hold[c])) });
+    let bar = if main { crate::tokens::fader::METER_BAR_MAIN } else { crate::tokens::fader::METER_BAR };
+    paint_channel(p, x, travel, bar, &channels, d.clip)
 }
 
-pub(super) fn draw_meter(p: &egui::Painter, r: Rect, level: [f32; 2], clip: bool) {
-    p.rect_filled(r, crate::theme::RADIUS_SM, TOKENS.bg);
-    let w = (r.width() - 3.0) / 2.0;
-    for (c, lvl) in level.iter().enumerate() {
-        let x = r.min.x + 1.0 + c as f32 * (w + 1.0);
-        let h = (r.height() - 2.0) * meter_k(*lvl);
-        let bar = Rect::from_min_max(pos2(x, r.max.y - 1.0 - h), pos2(x + w, r.max.y - 1.0));
-        p.rect_filled(bar, 0.0, if *lvl > 0.9 { TOKENS.meter_hot } else { TOKENS.monitor });
-    }
-    // A clip latch is a small red cap at the top of the bar, not a red bar.
-    if clip {
-        p.rect_filled(Rect::from_min_size(r.min, vec2(r.width(), CLIP_CAP)), 0.0, TOKENS.record);
-    }
+/// The rect around a channel meter's wells and clip cells (what a click on the meter hits).
+pub(super) fn meter_bounds(m: &crate::widgets::level_meter::ChannelMeterLayout) -> Rect {
+    m.wells.iter().chain(&m.clip_cells).fold(Rect::NOTHING, |acc, r| acc.union(Rect::from_min_max(pos2(r[0], r[1]), pos2(r[2], r[3]))))
 }
 
-/// Height of the clip latch's cap at the top of a meter.
+/// Height of the clip latch's cap on the transport's main meter.
 pub const CLIP_CAP: f32 = 3.0;
 
 impl StudioApp {

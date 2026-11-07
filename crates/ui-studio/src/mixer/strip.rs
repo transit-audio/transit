@@ -30,6 +30,13 @@ pub fn show_full(app: &mut StudioApp, ui: &mut Ui) {
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(TOKENS.bg)).show(ui, |ui| strips(app, ui));
 }
 
+/// Whether strips in a lane `height` tall take the short variant: when the full sections would
+/// leave the fader less than [`MIN_FADER`] of travel (the docked pane, normally; the full mixer
+/// window shows them full height).
+pub(super) fn short_for(height: f32) -> bool {
+    height - anatomy::fixed_height(false) < MIN_FADER + 2.0 * crate::tokens::fader::INSET
+}
+
 fn strips(app: &mut StudioApp, ui: &mut Ui) {
     let area = ui.max_rect();
     let p = ui.painter();
@@ -44,20 +51,20 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
     let track_count = channels.len();
     let block_gap = if track_count > 0 && !aux.is_empty() { FX_GAP } else { 0.0 };
     channels.extend(aux);
-    // The master strip is pinned right; the others scroll under it.
-    let master_rect = Rect::from_min_max(pos2(area.max.x - STRIP_W - 6.0, area.min.y + 4.0), pos2(area.max.x - 6.0, area.max.y - 4.0));
-    let lane = Rect::from_min_max(pos2(area.min.x + 4.0, area.min.y + 4.0), pos2(master_rect.min.x - 10.0, area.max.y - 4.0));
+    // A track's number is its place in the document among the tracks that are not the master.
+    let numbers: std::collections::HashMap<TrackId, usize> =
+        s.tracks.iter().filter(|t| t.kind != TrackKind::Master).enumerate().map(|(i, t)| (t.id, i + 1)).collect();
+    // The main bus strip is pinned right; the others scroll under it.
+    let main_w = anatomy::width(true);
+    let master_rect = Rect::from_min_max(pos2(area.max.x - main_w - 6.0, area.min.y + 4.0), pos2(area.max.x - 6.0, area.max.y - 4.0));
+    let lane = Rect::from_min_max(
+        pos2(area.min.x + 4.0, area.min.y + 4.0),
+        pos2(master_rect.min.x - crate::tokens::channel_strip::GAP_MAIN, area.max.y - 4.0),
+    );
+    let short = short_for(lane.height());
     let content_w = channels.len() as f32 * (STRIP_W + GAP) + block_gap + 110.0;
     app.mixer.hscroll = app.mixer.hscroll.clamp(0.0, (content_w - lane.width()).max(0.0));
-    let mut layout = MixerLayout { visible: true, area: r4(area), menu: std::mem::take(&mut app.mixer.layout.menu), ..MixerLayout::default() };
-    // The sends block is as tall on every strip (the most sends plus "+ Send"), so the faders
-    // line up, and never so tall that a fader gets shorter than MIN_FADER.
-    let wanted = channels.iter().filter(|t| takes_sends(t.kind)).map(|t| send_rows_of(t)).max().unwrap_or(0);
-    // Insert rows come first (up to INSERT_ROWS, fewer in a short pane); sends get what is left.
-    let free = lane.height() - STRIP_FIXED_H - MIN_FADER;
-    let ins_rows = (((free - 2.0 * SEND_ROW_H) / INSERT_ROW_H).floor().max(1.0) as usize).min(INSERT_ROWS);
-    let room = ((free - ins_rows as f32 * INSERT_ROW_H) / SEND_ROW_H).floor().max(0.0) as usize;
-    let rows = wanted.min(room);
+    let mut layout = MixerLayout { visible: true, area: r4(area), short, menu: std::mem::take(&mut app.mixer.layout.menu), ..MixerLayout::default() };
     // Empty mixer space deselects, like empty space in the arranger. Registered first so every
     // strip and control above it wins the click.
     if ui.interact(area, ui.id().with("mixer_empty"), Sense::click()).clicked() {
@@ -69,7 +76,8 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
         if r.max.x < lane.min.x || r.min.x > lane.max.x {
             continue;
         }
-        let sl = strip(app, ui, &s, t, r, lane, focus == Some(t.id), (rows, ins_rows), &mut layout.menu);
+        let number = numbers.get(&t.id).map_or(String::new(), ToString::to_string);
+        let sl = strip(app, ui, &s, t, r, lane, focus == Some(t.id), short, &number, &mut layout.menu);
         layout.strips.push(sl);
     }
     layout.groups = group_links(ui, &s, &channels[..track_count], lane, area, app.mixer.hscroll);
@@ -94,15 +102,14 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
         }
     }
     layout.add_fx = r4(add);
-    // Master.
-    ui.painter().line_segment([pos2(master_rect.min.x - 5.0, area.min.y), pos2(master_rect.min.x - 5.0, area.max.y)], Stroke::new(1.0, TOKENS.line));
+    // The main bus.
     match master {
         Some(m) => {
-            let sl = strip(app, ui, &s, m, master_rect, master_rect, focus == Some(m.id), (rows, ins_rows), &mut layout.menu);
+            let sl = strip(app, ui, &s, m, master_rect, master_rect, focus == Some(m.id), short, "M", &mut layout.menu);
             layout.master = Some(sl);
         }
         None => {
-            let (sl, add) = main_out(app, ui, master_rect);
+            let (sl, add) = main_out(app, ui, master_rect, short);
             layout.master = Some(sl);
             layout.add_master = add;
         }
@@ -146,28 +153,31 @@ fn group_links(ui: &Ui, s: &Session, channels: &[&Track], lane: Rect, area: Rect
     out
 }
 
-/// The main-out strip when the session has no master track: the main meter and an offer.
-fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect) -> (StripLayout, R4) {
-    let p = ui.painter();
-    p.rect_filled(r, crate::theme::RADIUS, TOKENS.panel);
-    p.text(pos2(r.center().x, r.min.y + 12.0), Align2::CENTER_CENTER, "Main", FontId::proportional(12.0), TOKENS.text);
-    let add = Rect::from_min_size(pos2(r.min.x + 6.0, r.min.y + 28.0), vec2(r.width() - 12.0, 34.0));
+/// The main-out strip when the session has no master track: the main bus strip's frame with the
+/// main meter in its meter slot, its peak readout, and an offer to add a master fader.
+fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLayout, R4) {
+    use crate::tokens;
+    let a = anatomy::anatomy(r, short, true);
+    let p = ui.painter().clone();
+    p.rect_filled(r, tokens::radius::PANEL, TOKENS.surface_panel);
+    let bar = channel::bar_color();
+    p.rect_filled(a.bar, crate::theme::top_corners_of(tokens::radius::PANEL - 1.0), bar);
+    channel::text_in(&p, &channel::NUMBER, "M", TOKENS.text_faint, a.name, Align2::RIGHT_CENTER);
+    channel::text_in(&p, &channel::NAME, "Main", TOKENS.text, a.name, Align2::LEFT_CENTER);
+    let add = a.input;
     let resp = ui.interact(add, ui.id().with("add_master"), Sense::click());
-    p.rect_filled(add, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
-    crate::icons::paint_labeled(p, add, false, crate::icons::Icon::Plus, 11.0, "Master\nfader", FontId::proportional(10.5), TOKENS.text);
-    if resp.clicked() {
+    inserts::add_row(&p, add, "+ Master Fader", resp.hovered());
+    if resp.on_hover_text("Add a master fader").clicked() {
         let _ = app.run("track.new", json!({"kind": "master"}));
     }
-    let meter = Rect::from_min_max(pos2(r.center().x - 8.0, r.min.y + 76.0), pos2(r.center().x + 8.0, r.max.y - 26.0));
-    draw_meter(p, meter, app.main_meter.level, app.main_meter.clip);
-    let peak_r = Rect::from_min_max(pos2(r.min.x + 6.0, r.min.y + 63.0), pos2(r.max.x - 6.0, r.min.y + 75.0));
-    let (text, over) = peak_text(app.main_meter.peak);
-    let resp = ui.interact(peak_r, ui.id().with("main_peak"), Sense::click());
-    p.rect_filled(peak_r, crate::theme::RADIUS_SM, TOKENS.bg);
-    let color = if over || app.main_meter.clip { TOKENS.record } else { TOKENS.text_dim };
-    p.text(peak_r.center(), Align2::CENTER_CENTER, &text, FontId::proportional(10.0), color);
-    let on_meter = ui.interact(meter, ui.id().with("main_meter_click"), Sense::click());
-    if resp.clicked() || on_meter.clicked() {
+    // The meter where the main bus fader's meter sits, so it lines up with the strips beside it.
+    let travel = crate::widgets::fader::track_rect(crate::widgets::fader::Variant::Channel, a.fader);
+    let x = a.fader.min.x + crate::widgets::fader::CHANNEL_FADER_W + crate::widgets::fader::CHANNEL_SCALE_W + 6.0;
+    let d = app.main_meter;
+    let meter = strip_meter(&p, x, travel, &d, true);
+    let wells = meter_bounds(&meter);
+    let on_meter = ui.interact(wells, ui.id().with("main_meter_click"), Sense::click());
+    if on_meter.clicked() {
         let all = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
         if all {
             app.reset_meters(None);
@@ -175,383 +185,20 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect) -> (StripLayout, R4) {
             app.reset_main_meter();
         }
     }
-    let sl = StripLayout {
-        peak_rect: r4(peak_r),
-        peak_text: text,
+    let mut sl = StripLayout {
         name: "Main".into(),
+        number: "M".into(),
         rect: r4(r),
-        meter: r4(meter),
+        color_bar: r4(a.bar),
+        color_bar_color: bar.to_array(),
+        short,
+        meter: r4(wells),
         level: app.main_meter.level,
         ..StripLayout::default()
     };
+    channel::peak_readout(app, ui, &p, r, a.peak, d.peak, d.clip, None, &mut sl);
+    sl.meter_layout = Some(meter);
+    p.rect_stroke(r, tokens::radius::PANEL, Stroke::new(1.0, TOKENS.line), egui::StrokeKind::Inside);
+    sl.border_color = TOKENS.line.to_array();
     (sl, r4(add))
 }
-
-const STRIP_FIXED_H: f32 = 207.0;
-/// One channel strip.
-#[allow(clippy::too_many_arguments)]
-fn strip(
-    app: &mut StudioApp,
-    ui: &mut Ui,
-    s: &Session,
-    t: &Track,
-    r: Rect,
-    clip: Rect,
-    focused: bool,
-    (rows, ins_rows): (usize, usize),
-    menu: &mut Vec<MenuItem>,
-) -> StripLayout {
-    let id = t.id;
-    let m = &t.mixer;
-    // Under Read automation the controls show the lane's value at the playhead (no command, no edit).
-    let vol_db = app.followed(t, &crate::automation::Lane::Volume).unwrap_or(m.volume_db);
-    let bal = app.followed(t, &crate::automation::Lane::Pan).unwrap_or_else(|| balance_of(&m.pan));
-    let p = ui.painter().with_clip_rect(clip);
-    let background = if focused { TOKENS.header_selected } else { TOKENS.panel };
-    p.rect_filled(r, crate::theme::RADIUS, background);
-    let mut sl = StripLayout {
-        track: id.0,
-        name: t.name.clone(),
-        kind: Some(t.kind),
-        rect: r4(r),
-        volume_db: vol_db,
-        balance: bal,
-        pan: m.pan.clone(),
-        level: app.meters.get(&id).map_or([0.0; 2], |d| d.level),
-        fx: t.kind == TrackKind::Aux,
-        focused,
-        folder: t.folder.map(|f| f.0),
-        ..StripLayout::default()
-    };
-    let x0 = r.min.x + 4.0;
-    let w = r.width() - 8.0;
-    // Name and color: click focuses the track.
-    let name_r = Rect::from_min_size(pos2(r.min.x, r.min.y), vec2(r.width(), 22.0));
-    p.rect_filled(Rect::from_min_size(name_r.min, vec2(r.width(), 4.0)), crate::theme::top_corners(), theme::rgb(t.color));
-    let mut tr = name_r.shrink2(vec2(5.0, 0.0));
-    if t.inactive {
-        let tag = Rect::from_min_size(pos2(tr.max.x - 40.0, tr.center().y - 5.0), vec2(40.0, 13.0));
-        p.rect_filled(tag, crate::theme::RADIUS_SM, TOKENS.button);
-        p.text(tag.center(), Align2::CENTER_CENTER, "inactive", FontId::proportional(9.5), TOKENS.text_dim);
-        sl.inactive_tag = r4(tag);
-        tr.max.x = tag.min.x - 3.0;
-    }
-    if t.is_rack() {
-        // A rack (ADR 0034): a "Rack" tag in the accent color.
-        let tag = Rect::from_min_size(pos2(tr.max.x - 28.0, tr.center().y - 5.0), vec2(28.0, 13.0));
-        p.rect_filled(tag, crate::theme::RADIUS_SM, TOKENS.accent);
-        p.text(tag.center(), Align2::CENTER_CENTER, "Rack", FontId::proportional(9.5), theme::text_on(TOKENS.accent));
-        let resp = ui.interact(tag.intersect(clip), ui.id().with(("rack_tag", t.id.0)), Sense::hover());
-        crate::help::hover(ui, &resp, crate::help::Id::MixerStripRack);
-        tr.max.x = tag.min.x - 3.0;
-    }
-    if sl.fx {
-        // FX channels: a small "FX" tag and a muted name.
-        let tag = Rect::from_min_size(pos2(tr.max.x - 18.0, tr.center().y - 5.0), vec2(18.0, 13.0));
-        p.rect_filled(tag, crate::theme::RADIUS_SM, TOKENS.button);
-        p.text(tag.center(), Align2::CENTER_CENTER, "FX", FontId::proportional(9.5), TOKENS.text_dim);
-        tr.max.x = tag.min.x - 3.0;
-    }
-    p.with_clip_rect(tr.intersect(clip)).text(
-        pos2(tr.min.x, tr.center().y + 2.0),
-        Align2::LEFT_CENTER,
-        &t.name,
-        FontId::proportional(13.0),
-        if t.inactive {
-            TOKENS.text_dim
-        } else if focused {
-            TOKENS.accent
-        } else if sl.fx {
-            TOKENS.text_dim
-        } else {
-            TOKENS.text
-        },
-    );
-    sl.name_rect = r4(name_r);
-    // Anywhere on the strip focuses it; controls drawn after this take their own clicks.
-    let resp = ui.interact(r.intersect(clip), ui.id().with(("strip_name", id.0)), Sense::click());
-    crate::help::hover(ui, &resp, crate::help::Id::MixerStripName);
-    if resp.clicked() {
-        let shift = ui.input(|i| i.modifiers.shift);
-        app.focus_header(id, shift);
-    }
-    // The inactive tag lies over the strip, so it is interacted after it: a click is Make Active (#333).
-    let tag_resp = t.inactive.then(|| {
-        let tag = Rect::from_min_size(pos2(name_r.max.x - 5.0 - 40.0, name_r.center().y - 5.0), vec2(40.0, 13.0));
-        let tag_resp = ui.interact(tag.intersect(clip), ui.id().with(("inactive_tag", id.0)), Sense::click());
-        crate::help::hover(ui, &tag_resp, crate::help::Id::MixerStripInactive);
-        let tag_resp = tag_resp.on_hover_text("Make Active");
-        if tag_resp.clicked() {
-            let _ = app.run("track.make_inactive", json!({"tracks": [id.0], "inactive": false}));
-        }
-        tag_resp
-    });
-    // Slice 6: double-click the name to rename the track in place.
-    if resp.double_clicked() && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| name_r.contains(p)) {
-        app.start_rename(crate::finish::RenameTarget::Track(id), r4(name_r));
-    }
-    let mut track_menu = |ui: &mut Ui| {
-        if t.kind == TrackKind::Audio {
-            crate::arrange::width_item(app, ui, id);
-        }
-        menu.push(crate::menus::activity_item(app, ui, Some(id)));
-    };
-    resp.context_menu(&mut track_menu);
-    // The tag covers part of the name, so it gets the same menu on right-click.
-    if let Some(tag_resp) = &tag_resp {
-        egui::Popup::context_menu(tag_resp).id(tag_resp.id.with("strip-menu")).show(&mut track_menu);
-    }
-    let mut y = r.min.y + 26.0;
-    // Hardware/bus input for audio tracks; device/channel input for MIDI and instruments.
-    let in_r = Rect::from_min_size(pos2(x0, y), vec2(w, 16.0));
-    if matches!(t.kind, TrackKind::Audio | TrackKind::Aux) {
-        let cur = route_label(s, &m.input, true, if t.kind == TrackKind::Audio { t.channels() } else { 0 });
-        let mut choices = input_choices_with(s, t, app.device_inputs(), app.engine.io_map(), app.system_audio_on());
-        push_unused_entry(s, &mut choices);
-        if let Some(v) = dropdown(ui, clip, in_r, ui.id().with(("input", id.0)), &cur, None, &choices, menu) {
-            if v == REMOVE_UNUSED {
-                let _ = app.remove_unused_busses();
-            } else {
-                let _ = app.set_input(id, &v);
-            }
-        }
-        sl.input = r4(in_r);
-        sl.input_label = cur;
-    } else if t.kind.is_midi() {
-        // The MIDI output destination (#61) is the small Out button at the row's end.
-        let out_w = 22.0;
-        let out_r = Rect::from_min_max(pos2(in_r.max.x - out_w, in_r.min.y), in_r.max);
-        let mut in_r = Rect::from_min_max(in_r.min, pos2(in_r.max.x - out_w - 2.0, in_r.max.y));
-        midi_output_button(app, ui, &p, clip, t, out_r, &mut sl);
-        if !t.midi_effects.is_empty() {
-            // The MIDI effects ahead of the instrument (#201): a small marker, their chain on hover.
-            let tag = Rect::from_min_max(pos2(in_r.max.x - 26.0, in_r.min.y + 1.5), pos2(in_r.max.x, in_r.max.y - 1.5));
-            let all_off = t.midi_effects.iter().all(|f| f.bypass);
-            p.rect_filled(tag, crate::theme::RADIUS_SM, if all_off { TOKENS.button } else { TOKENS.accent });
-            let ink = if all_off { TOKENS.text_dim } else { theme::text_on(TOKENS.accent) };
-            p.text(tag.center(), Align2::CENTER_CENTER, "MFX", FontId::proportional(8.5), ink);
-            let chain: Vec<String> = t
-                .midi_effects
-                .iter()
-                .map(|f| {
-                    let name = crate::midi_fx_panel::name_of(&f.plugin);
-                    if f.bypass { format!("{name} (bypassed)") } else { name }
-                })
-                .collect();
-            let resp = ui.interact(tag.intersect(clip), ui.id().with(("midi_fx_tag", id.0)), Sense::hover());
-            crate::help::hover(ui, &resp, crate::help::Id::MixerStripMidiEffects);
-            resp.on_hover_text(format!("MIDI effects: {}", chain.join(" → ")));
-            sl.midi_fx = r4(tag);
-            sl.midi_fx_count = t.midi_effects.len();
-            in_r.max.x = tag.min.x - 2.0;
-        }
-        let view = crate::midi_input::InputView::read(app.player.as_ref());
-        let label = view.label(&t.midi_input);
-        let resp = ui.interact(in_r.intersect(clip), ui.id().with(("midi-input", id.0)), Sense::click());
-        p.rect_filled(in_r, crate::theme::RADIUS_SM, if resp.hovered() { TOKENS.button_hover } else { TOKENS.bg });
-        let text_r = in_r.shrink2(vec2(4.0, 0.0));
-        p.with_clip_rect(text_r.intersect(clip)).text(text_r.left_center(), Align2::LEFT_CENTER, &label, FontId::proportional(10.5), TOKENS.text);
-        crate::icons::paint(&p, pos2(in_r.max.x - 7.0, in_r.center().y), crate::icons::Icon::ChevronDown, 10.0, TOKENS.text_dim);
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "MIDI input"));
-        if let Some(params) = view.popup(&resp, id, &t.midi_input) {
-            let _ = app.run("midi.input", params);
-        }
-        sl.input = r4(in_r);
-        sl.input_label = label;
-    }
-    y += 19.0;
-    // Inserts (Logic: under the input), then sends.
-    inserts_block(app, ui, t, x0, w, y, ins_rows, clip, &mut sl, menu);
-    y += ins_rows as f32 * INSERT_ROW_H;
-    // Sends (Logic: between the input and the output).
-    sends_block(app, ui, s, t, x0, w, y, rows, clip, &mut sl, menu);
-    y += rows as f32 * SEND_ROW_H;
-    // Output.
-    let out_r = Rect::from_min_size(pos2(x0, y), vec2(w, 16.0));
-    let cur = route_label(s, &m.output, false, t.channels());
-    let mut choices = output_choices(s, t, app.engine.io_map());
-    push_unused_entry(s, &mut choices);
-    let tip = unresolved_output(app.engine.io_map(), &m.output).then_some(NOT_HERE);
-    if let Some(v) = dropdown(ui, clip, out_r, ui.id().with(("output", id.0)), &cur, tip, &choices, menu) {
-        if v == REMOVE_UNUSED {
-            let _ = app.remove_unused_busses();
-        } else {
-            let _ = app.set_output(id, &v);
-        }
-    }
-    sl.output = r4(out_r);
-    sl.output_label = cur;
-    y += 20.0;
-    y += 4.0;
-    // Balance knob.
-    let knob = Rect::from_center_size(pos2(r.center().x, y + 18.0), vec2(34.0, 34.0));
-    sl.knob = r4(knob);
-    let b = bal;
-    let has_pan = !m.pan.is_empty();
-    let pan = Target::Pan(id);
-    let resp = ui.interact(knob.intersect(clip), ui.id().with(("knob", id.0)), Sense::click_and_drag());
-    crate::help::hover(ui, &resp, crate::help::Id::MixerStripPan);
-    let hot = resp.hovered() || app.mixer.gesture.is_some_and(|g| g.target == pan);
-    draw_knob(&p, knob, b, hot, background);
-    if has_pan {
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
-        }
-        control(app, ui, &resp, pan, 1.0, true, true);
-        resp.context_menu(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Pan));
-        crate::midi_learn::mark(app, &p, knob, id, transit_model::Control::Pan);
-    }
-    let pan_r = Rect::from_center_size(pos2(r.center().x, knob.max.y + 7.0), vec2(34.0, 12.0));
-    let pan_text = fine::pan_text(b);
-    if has_pan {
-        readout(
-            app,
-            ui,
-            &p,
-            clip,
-            Readout {
-                target: pan,
-                salt: 0,
-                draw: pan_r,
-                hit: pan_r,
-                text: pan_text.clone(),
-                edit_text: pan_text.clone(),
-                font: theme::mono(ui.ctx(), 9.5),
-                color: TOKENS.text_dim,
-                align: Align2::CENTER_CENTER,
-                drag: false,
-            },
-        );
-    } else {
-        p.text(pan_r.center(), Align2::CENTER_CENTER, &pan_text, theme::mono(ui.ctx(), 9.5), TOKENS.text_dim);
-    }
-    sl.pan_readout_rect = r4(pan_r);
-    sl.pan_text = pan_text;
-    y = knob.max.y + 16.0;
-    // M S / R I.
-    let bw = (w - 3.0) / 2.0;
-    let cell = |i: usize, row: f32| Rect::from_min_size(pos2(x0 + (i as f32) * (bw + 3.0), row), vec2(bw, 16.0));
-    let buttons: [(&str, bool, Color32, &str, bool, Rect); 4] = [
-        ("M", m.mute, TOKENS.mute, "mix.mute", true, cell(0, y)),
-        ("S", m.solo, TOKENS.solo, "mix.solo", true, cell(1, y)),
-        ("R", m.record_arm, TOKENS.record, "mix.record_arm", t.kind.has_playlist(), cell(0, y + 19.0)),
-        ("I", m.input_monitor, TOKENS.monitor, "mix.input_monitor", t.kind == TrackKind::Audio, cell(1, y + 19.0)),
-    ];
-    if t.kind == TrackKind::Master {
-        // A master has no solo, record or input.
-        let resp = small_button(ui, clip, cell(0, y), ui.id().with(("mix.mute", id.0)), "M", m.mute, TOKENS.mute, true);
-        crate::help::hover(ui, &resp, crate::help::Id::MixerStripMute);
-        if resp.clicked() {
-            let _ = app.run("mix.mute", json!({"tracks": [id.0], "value": !m.mute}));
-        }
-        resp.context_menu(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Mute));
-        crate::midi_learn::mark(app, &p, cell(0, y), id, transit_model::Control::Mute);
-        sl.mute = r4(cell(0, y));
-    } else {
-        for (label, on, color, cmd, enabled, br) in buttons {
-            let resp = small_button(ui, clip, br, ui.id().with((cmd, id.0, "strip")), label, on, color, enabled);
-            crate::help::hover(
-                ui,
-                &resp,
-                match label {
-                    "M" => crate::help::Id::MixerStripMute,
-                    "S" => crate::help::Id::MixerStripSolo,
-                    "R" => crate::help::Id::MixerStripArm,
-                    _ => crate::help::Id::MixerStripMonitor,
-                },
-            );
-            if resp.clicked() && enabled {
-                let _ = app.run(cmd, json!({"tracks": [id.0], "value": !on}));
-            }
-            let learnable = match label {
-                "M" => Some(transit_model::Control::Mute),
-                "S" => Some(transit_model::Control::Solo),
-                "R" => Some(transit_model::Control::Arm),
-                _ => None,
-            };
-            if let Some(control) = learnable.filter(|_| enabled) {
-                resp.context_menu(|ui| app.midi_learn_menu(ui, id, control.clone()));
-                crate::midi_learn::mark(app, &p, br, id, control);
-            }
-            match label {
-                "M" => sl.mute = r4(br),
-                "S" => sl.solo = r4(br),
-                "R" => sl.arm = r4(br),
-                _ => sl.monitor = r4(br),
-            }
-        }
-    }
-    y += 42.0;
-    // The held peak above the meter.
-    let peak_r = Rect::from_min_max(pos2(r.center().x + 2.0, y + 1.0), pos2(r.max.x - 6.0, y + 14.0));
-    let held = app.meters.get(&id).map_or(0.0, |d| d.peak);
-    let (peak_text, over) = peak_text(held);
-    let over = over || app.meters.get(&id).is_some_and(|d| d.clip);
-    let resp = ui.interact(peak_r.intersect(clip), ui.id().with(("peak", id.0)), Sense::click());
-    crate::help::hover(ui, &resp, crate::help::Id::MixerStripPeak);
-    p.rect_filled(peak_r, crate::theme::RADIUS_SM, TOKENS.bg);
-    p.with_clip_rect(peak_r).text(
-        peak_r.center(),
-        Align2::CENTER_CENTER,
-        &peak_text,
-        FontId::proportional(10.0),
-        if over {
-            TOKENS.record
-        } else if resp.hovered() {
-            TOKENS.accent
-        } else {
-            TOKENS.text_dim
-        },
-    );
-    if resp.on_hover_text("Peak hold. Click to reset, Ctrl-click to reset all").clicked() {
-        let all = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
-        app.reset_meters(if all { None } else { Some(id) });
-    }
-    sl.peak_rect = r4(peak_r);
-    sl.peak_text = peak_text;
-    y += 12.0;
-    // Fader and meter.
-    let bottom = r.max.y - 22.0;
-    let fader = Rect::from_min_max(pos2(x0 + 4.0, y + 6.0), pos2(r.center().x + 4.0, bottom - 6.0));
-    let meter = Rect::from_min_max(pos2(r.center().x + 12.0, y + 6.0), pos2(r.max.x - 10.0, bottom - 6.0));
-    sl.fader = r4(fader);
-    sl.meter = r4(meter);
-    let d = app.meters.get(&id).copied().unwrap_or_default();
-    draw_meter(&p, meter, d.level, d.clip);
-    let resp = ui.interact(meter.intersect(clip), ui.id().with(("meter", id.0)), Sense::click());
-    crate::help::hover(ui, &resp, crate::help::Id::MixerStripMeter);
-    if resp.on_hover_text("Click to clear the clip latch and the peak hold, Ctrl-click for every strip").clicked() {
-        let all = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
-        app.reset_meters(if all { None } else { Some(id) });
-    }
-    let ((cy, cs), (zy, zs)) = fader_widget(app, ui, &p, clip, id, vol_db, fader);
-    (sl.cap_line_y, sl.cap_line_span, sl.zero_tick_y, sl.zero_tick_span) = (cy, cs, zy, zs);
-    let db = vol_db;
-    let text = fine::db_text(db);
-    let ro = Rect::from_min_max(pos2(x0, bottom), pos2(r.max.x - 4.0, r.max.y - 4.0));
-    p.rect_filled(ro, crate::theme::RADIUS_SM, TOKENS.bg);
-    let fader_id = Target::Fader(id);
-    let hot = app.mixer.gesture.is_some_and(|g| g.target == fader_id);
-    readout(
-        app,
-        ui,
-        &p,
-        clip,
-        Readout {
-            target: fader_id,
-            salt: 0,
-            draw: ro,
-            hit: ro,
-            text: text.clone(),
-            edit_text: fine::edit_text_db(db),
-            font: theme::mono(ui.ctx(), 10.5),
-            color: if hot { TOKENS.accent } else { TOKENS.text },
-            align: Align2::CENTER_CENTER,
-            drag: false,
-        },
-    );
-    sl.readout_rect = r4(ro);
-    sl.volume_text = text;
-    sl
-}
-

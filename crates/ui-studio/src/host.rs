@@ -153,6 +153,12 @@ pub fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
             d.clip = true;
         }
         d.peak = d.peak.max(v);
+        // The channel meter's reading: the kit's peak fall-off, a one-pole step in dB.
+        if let Some(x) = d.falloff.get_mut(c) {
+            let db = |lin: f32| if lin > 0.0 { 20.0 * lin.log10() } else { f32::NEG_INFINITY };
+            let stepped = crate::widgets::level_meter::meter_step(db(*x), db(v), dt, crate::widgets::level_meter::Ballistics::PEAK_FALLOFF);
+            *x = if stepped <= crate::widgets::fader::FLOOR_DB { 0.0 } else { 10f32.powf(stepped / 20.0) };
+        }
     }
     d.hold_age += dt;
     if d.hold_age > 2.0 {

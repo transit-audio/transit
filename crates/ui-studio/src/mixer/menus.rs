@@ -1,26 +1,25 @@
 use super::*;
+use crate::tokens;
 
-/// A small text button inside a strip; returns its response.
-pub(super) fn small_button(ui: &mut Ui, clip: Rect, r: Rect, id: egui::Id, label: &str, on: bool, color: Color32, enabled: bool) -> egui::Response {
-    let resp = ui.interact(r.intersect(clip), id, Sense::click());
-    let p = ui.painter().with_clip_rect(clip);
-    let fill = if on {
-        color
-    } else if resp.hovered() && enabled {
-        TOKENS.button_hover
-    } else {
-        TOKENS.button
-    };
-    p.rect_filled(r, crate::theme::RADIUS_SM, fill);
-    let fg = if on {
-        theme::text_on(color)
-    } else if enabled {
-        TOKENS.text
-    } else {
-        TOKENS.text_dim.gamma_multiply(0.5)
-    };
-    p.text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(11.0), fg);
-    resp
+/// The strip's dropdown face (Dropdown): `surface.inset`, 1 px `line` (`line.strong` while hot or
+/// open), radius 5, the value in Sans 500 11 cut with an ellipsis, the chevron in `text.faint`
+/// (`text.muted` while hot). A route that is not on this device leads with the error glyph.
+pub(super) fn paint_dropdown(p: &egui::Painter, r: Rect, current: &str, hot: bool, tip: Option<&str>) {
+    p.rect_filled(r, tokens::radius::CONTROL, TOKENS.surface_inset);
+    p.rect_stroke(r, tokens::radius::CONTROL, Stroke::new(1.0, if hot { TOKENS.line_strong } else { TOKENS.line }), egui::StrokeKind::Inside);
+    let mut text_r = Rect::from_min_max(pos2(r.min.x + 6.0, r.min.y), pos2(r.max.x - 6.0 - 9.0 - 4.0, r.max.y));
+    if tip.is_some() {
+        crate::icons::paint(p, pos2(text_r.min.x + 5.0, r.center().y), crate::icons::Icon::Error, 10.0, TOKENS.meter_hot);
+        text_r.min.x += 14.0;
+    }
+    super::channel::text_in(p, &super::channel::CONTROL, current, TOKENS.text, text_r, Align2::LEFT_CENTER);
+    crate::icons::paint(
+        p,
+        pos2(r.max.x - 6.0 - 4.5, r.center().y),
+        crate::icons::Icon::ChevronDown,
+        9.0,
+        if hot { TOKENS.text_muted } else { TOKENS.text_faint },
+    );
 }
 
 /// A dropdown field: its current value, and a menu of `choices` when clicked. Returns the value
@@ -40,16 +39,8 @@ pub(super) fn dropdown(
     if let Some(tip) = tip {
         resp = resp.on_hover_text(tip);
     }
-    let p = ui.painter().with_clip_rect(clip);
-    p.rect_filled(r, crate::theme::RADIUS_SM, if resp.hovered() { TOKENS.button_hover } else { TOKENS.bg });
-    let mut text_r = r.shrink2(vec2(4.0, 0.0));
-    if tip.is_some() {
-        // A tip marks a route that is not on this device: the warning icon leads the text.
-        crate::icons::paint(&p, pos2(text_r.min.x + 5.0, r.center().y), crate::icons::Icon::Error, 10.0, TOKENS.record);
-        text_r.min.x += 12.0;
-    }
-    p.with_clip_rect(text_r.intersect(clip)).text(text_r.left_center(), Align2::LEFT_CENTER, current, FontId::proportional(10.5), TOKENS.text);
-    crate::icons::paint(&p, pos2(r.max.x - 7.0, r.center().y), crate::icons::Icon::ChevronDown, 10.0, TOKENS.text_dim);
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
+    paint_dropdown(&ui.painter().with_clip_rect(clip), r, current, resp.hovered() || open, tip);
     choice_menu(&resp, current, choices, menu)
 }
 
