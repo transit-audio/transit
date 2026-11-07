@@ -12,7 +12,7 @@ In code ([ADR 0045](../../adr/0045-design-language-in-code.md)): `crates/ui-stud
 
 1. **Show the sound.** Every section leads with a display of what it does: waveform, curve, envelope, response.
 2. **Two colours mean two things.** Signal blue is a value you set. Mod amber is modulation acting on it. Nothing else is coloured, apart from level meters, clip, arm and error (`meter.hot`), and the loop's own hue (magenta, kept apart from both). A warning is not colored.
-3. **Values are always readable.** Every control prints its value in mono, in real units (`1.20 kHz`, `320 ms`, `−3.2 dB`). No hover needed to know a setting.
+3. **Values are always readable.** Every control prints its value in mono, in real units (`1.20 kHz`, `320 ms`, `−3.2 dB`). No hover needed to know a setting. A time prints in milliseconds below a second and in seconds from 1000 ms (`999.9 ms`, `1.50 s`), as Ableton and Logic print envelope and LFO times; typing takes a bare number or `ms` as milliseconds and a trailing `s` as seconds.
 4. **Panels, not chrome.** Flat raised panels on a graphite ground. No skeuomorphic metal, glow or gradients.
 5. **No analog dials.** A slow reading is a ballistics mode of the flat meter, never a needle on a dial; the trace or the bar shows the signal, and the VU mode shows how it sits.
 

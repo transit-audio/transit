@@ -370,6 +370,22 @@ fn parameter_ids_are_stable_and_round_trip() {
     assert_eq!(PARAMS[MODEL].format(13.0), "Wavetable");
 }
 
+/// A time prints in milliseconds below a second and in seconds from 1000 ms (#326, Ableton's and
+/// Logic's envelope readouts), so the widest time reads `999.9 ms` or `10.00 s`.
+#[test]
+fn times_print_in_seconds_from_a_thousand_milliseconds() {
+    let p = MACRO_OSC_INFO.param("amp_attack").unwrap();
+    assert_eq!(p.format(2.0), "2.0 ms");
+    assert_eq!(p.format(999.9), "999.9 ms");
+    assert_eq!(p.format(1000.0), "1.00 s");
+    assert_eq!(p.format(1500.0), "1.50 s");
+    assert_eq!(p.format(10_000.0), "10.00 s");
+    let decay = MACRO_OSC_INFO.param("amp_decay").unwrap();
+    assert_eq!(decay.format(20_000.0), "20.00 s");
+    // Negative control: just under a second stays in milliseconds.
+    assert_eq!(p.format(999.94), "999.9 ms");
+}
+
 /// State is the parameters: a new instance given the same values plays the same bits.
 #[test]
 fn the_parameters_are_the_state() {

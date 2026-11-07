@@ -285,7 +285,8 @@ pub fn value_at(p: &ParamInfo, norm: f32) -> f32 {
 }
 
 /// A value typed into a knob's field: a number in the parameter's unit (`1.2k` and `1.2 kHz` for
-/// kilohertz), or a choice by name. `None` when it does not read.
+/// kilohertz; for a time, a bare number or `ms` is milliseconds and a trailing `s` seconds), or a
+/// choice by name. `None` when it does not read.
 pub fn parse(p: &ParamInfo, text: &str) -> Option<f32> {
     let t = text.trim().to_lowercase();
     if !p.choices.is_empty() {
@@ -293,7 +294,11 @@ pub fn parse(p: &ParamInfo, text: &str) -> Option<f32> {
     }
     let num: String = t.chars().take_while(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+')).collect();
     let mut v: f32 = num.parse().ok()?;
-    if p.unit == Unit::Hz && t[num.len()..].trim_start().starts_with('k') {
+    let rest = t[num.len()..].trim_start();
+    if p.unit == Unit::Hz && rest.starts_with('k') {
+        v *= 1000.0;
+    }
+    if p.unit == Unit::Ms && rest.starts_with('s') {
         v *= 1000.0;
     }
     v.is_finite().then(|| p.clamp(v))

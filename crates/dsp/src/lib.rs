@@ -150,6 +150,8 @@ impl ParamInfo {
                     format!("{v:.1} Hz")
                 }
             }
+            // Seconds from 1000 ms, as Ableton and Logic print envelope and LFO times (#326).
+            Unit::Ms if v >= 1000.0 => format!("{:.2} s", v / 1000.0),
             Unit::Ms => format!("{v:.1} ms"),
             Unit::Percent => format!("{v:.0}%"),
             Unit::Ratio => format!("{v:.1}:1"),
