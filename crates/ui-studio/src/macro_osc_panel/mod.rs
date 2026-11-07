@@ -65,7 +65,7 @@ pub const DESIGN_WIDTH: f32 = 1440.0;
 /// Set by the content (326-X, `width_tests`): the narrowest multiple of 8 at which, with every
 /// section open and every knob at the widest value it prints, no label or readout meets its
 /// neighbor or leaves its panel.
-pub const MIN_WIDTH: f32 = 1264.0;
+pub const MIN_WIDTH: f32 = 1192.0;
 /// The footer under the content.
 pub const FOOTER_H: f32 = 32.0;
 

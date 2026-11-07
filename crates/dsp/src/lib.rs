@@ -230,12 +230,14 @@ pub struct VoiceShape {
 }
 
 /// A time in milliseconds as Ableton and Logic print envelope and LFO times (#326): three
-/// significant digits, milliseconds below a second and seconds from it (`9.99 ms`, `35.0 ms`,
-/// `350 ms`, `1.00 s`, `10.0 s`). The rounding comes first, so `999.6 ms` reads `1.00 s`.
+/// significant digits with at most two decimals, milliseconds below a second and seconds from it
+/// (`0.00 ms` under 0.005 ms, `0.01 ms`, `0.50 ms`, `9.99 ms`, `35.0 ms`, `350 ms`, `1.00 s`,
+/// `10.0 s`). The rounding comes first, so `999.6 ms` reads `1.00 s` and no readout grows past
+/// three digits; the two-decimal cap is the smallest display step, so a leftover a hair above
+/// zero (a drag that came back) reads `0.00 ms`.
 pub fn time_text(ms: f32) -> String {
     let ms = f64::from(ms);
-    let r = sig3(ms);
-    if r.abs() >= 1000.0 { format!("{} s", sig3_text(ms / 1000.0)) } else { format!("{} ms", sig3_text(ms)) }
+    if sig3(ms).abs() >= 1000.0 { format!("{} s", sig3_text(ms / 1000.0)) } else { format!("{} ms", sig3_text(ms)) }
 }
 
 /// `x` rounded to three significant digits.
@@ -247,11 +249,19 @@ fn sig3(x: f64) -> f64 {
     (x * scale).round() / scale
 }
 
-/// `x` printed with three significant digits (`0.00` for zero).
+/// `x` printed with three significant digits and at most two decimals (`0.00` for anything that
+/// rounds to zero there).
 fn sig3_text(x: f64) -> String {
+    const MAX_DECIMALS: i32 = 2;
     let r = sig3(x);
-    let decimals = if r == 0.0 || !r.is_finite() { 2 } else { (2 - r.abs().log10().floor() as i32).max(0) as usize };
-    format!("{r:.decimals$}")
+    let decimals = if r == 0.0 || !r.is_finite() { MAX_DECIMALS } else { (2 - r.abs().log10().floor() as i32).clamp(0, MAX_DECIMALS) };
+    let scale = 10f64.powi(decimals);
+    let q = (r * scale).round() / scale;
+    if q == 0.0 {
+        return format!("{:.2}", 0.0);
+    }
+    let decimals = decimals as usize;
+    format!("{q:.decimals$}")
 }
 
 fn key_part(s: &[f32], start: usize) -> impl Iterator<Item = f32> + '_ {

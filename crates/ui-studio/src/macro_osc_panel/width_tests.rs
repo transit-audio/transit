@@ -15,12 +15,15 @@ fn text_w(p: &egui::Painter, role: &TypeRole, text: &str) -> f32 {
     crate::widgets::role_size(p, role, text).x
 }
 
-/// The value of `param` whose printed text is the widest (sampled over the knob's travel, both
-/// ends included).
+/// The value of `param` whose printed text is the widest: sampled over the knob's travel (both
+/// ends included), and at the floor and just above it (1e-9, 1e-6 and 1e-3 of the range), where a
+/// leftover of a drag that came back sits and a readout without a smallest step would print it in
+/// full.
 pub fn widest(p: &egui::Painter, param: &transit_dsp::ParamInfo) -> (f32, String) {
+    let travel = (0..=2000).map(|i| super::value_at(param, i as f32 / 2000.0));
+    let above = [0.0, 1e-9, 1e-6, 1e-3].map(|f| param.clamp(param.min + f * (param.max - param.min)));
     let mut best = (param.min, param.format(param.min));
-    for i in 0..=2000 {
-        let v = super::value_at(param, i as f32 / 2000.0);
+    for v in travel.chain(above) {
         let s = param.format(v);
         if text_w(p, &tokens::VALUE, &s) > text_w(p, &tokens::VALUE, &best.1) {
             best = (v, s);
@@ -165,4 +168,30 @@ fn the_minimum_width_is_the_narrowest_multiple_of_8_where_the_widest_readouts_fi
     let (t, tr, _) = open_at(min - 80.0, Some(min - 80.0));
     let f = faults(&t, tr);
     assert!(!f.is_empty(), "at {}", min - 80.0);
+}
+
+/// The review's case: a knob at its floor dragged up by one physical pixel and back at 150%
+/// scaling (2/3 pt each way, one frame each), through the knob's own drag and the parameter's
+/// taper, the value going back through the parameter between the frames as it does in the panel.
+/// The leftover the float round trip leaves must read as the floor does.
+#[test]
+fn a_drag_up_and_back_by_a_pixel_leaves_the_floors_readout() {
+    use crate::widgets::knob::dragged;
+    let info = super::test_rig::info();
+    let round_trip = |param: &transit_dsp::ParamInfo, fine: bool| {
+        let up = super::value_at(param, dragged(param.to_normalized(param.min), -2.0 / 3.0, fine));
+        super::value_at(param, dragged(param.to_normalized(up), 2.0 / 3.0, fine))
+    };
+    for id in ["lfo1_fade", "lfo2_fade", "amp_attack", "filter_attack", "amp_decay", "resonance", "key_track"] {
+        let param = info.param(id).unwrap();
+        for fine in [false, true] {
+            let v = round_trip(param, fine);
+            assert_eq!(param.format(v), param.format(param.min), "{id} fine {fine}: {v}");
+        }
+    }
+    // Negative control: on the linear-from-zero fade the round trip leaves a leftover, so it is the
+    // readout's smallest step that keeps it from printing.
+    let fade = info.param("lfo1_fade").unwrap();
+    let left = round_trip(fade, false).max(round_trip(fade, true));
+    assert!(left > 0.0, "the round trip came back exactly: {left}");
 }

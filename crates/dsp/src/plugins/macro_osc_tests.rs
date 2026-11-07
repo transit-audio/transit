@@ -370,13 +370,13 @@ fn parameter_ids_are_stable_and_round_trip() {
     assert_eq!(PARAMS[MODEL].format(13.0), "Wavetable");
 }
 
-/// A time prints three significant digits, in milliseconds below a second and in seconds from it
-/// (#326, Ableton's and Logic's envelope readouts).
+/// A time prints three significant digits with at most two decimals, in milliseconds below a
+/// second and in seconds from it (#326, Ableton's and Logic's envelope readouts).
 #[test]
 fn times_print_three_significant_digits_in_ms_then_seconds() {
     let p = MACRO_OSC_INFO.param("amp_attack").unwrap();
     for (ms, want) in [
-        (0.5, "0.500 ms"),
+        (0.5, "0.50 ms"),
         (2.0, "2.00 ms"),
         (9.99, "9.99 ms"),
         (35.0, "35.0 ms"),
@@ -390,9 +390,23 @@ fn times_print_three_significant_digits_in_ms_then_seconds() {
         assert_eq!(p.format(ms), want, "{ms}");
     }
     assert_eq!(MACRO_OSC_INFO.param("amp_decay").unwrap().format(20_000.0), "20.0 s");
-    // Negative control: never four digits (the rounding carries into the next unit or decade).
+    // Never four digits: the rounding carries into the next decade or unit.
     assert_eq!(p.format(9.996), "10.0 ms");
     assert_eq!(crate::time_text(99.96), "100 ms");
+    // The smallest step is 0.01 ms (the Compressor's attack floor); a leftover a hair above zero, as
+    // a drag that came back or a Shift-drag leaves on a linear-from-zero time, reads 0.00 ms.
+    assert_eq!(crate::time_text(0.01), "0.01 ms");
+    assert_eq!(crate::time_text(0.0), "0.00 ms");
+    for leftover in [2.33e-6, 7.28e-8, 0.004_9] {
+        assert_eq!(crate::time_text(leftover), "0.00 ms", "{leftover}");
+    }
+    // Negative control: three significant digits without the two-decimal cap print the leftover
+    // in full.
+    let uncapped = |x: f64| {
+        let d = (2 - x.abs().log10().floor() as i32).max(0) as usize;
+        format!("{:.d$} ms", (x * 10f64.powi(d as i32)).round() / 10f64.powi(d as i32))
+    };
+    assert_eq!(uncapped(f64::from(2.33e-6_f32)), "0.00000233 ms");
 }
 
 /// State is the parameters: a new instance given the same values plays the same bits.
