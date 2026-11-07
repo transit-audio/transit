@@ -338,7 +338,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                 ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                                     ui.set_width(size.x - SIDEBAR_WIDTH - 32.0);
                                     match section {
-                                        Section::Midi => crate::midi_transport::settings(app, ui),
+                                        Section::Midi => controls.extend(crate::midi_transport::settings(app, ui)),
                                         Section::System => {
                                             app.low_latency_limit(ui);
                                             egui::Grid::new("audio_devices_grid").num_columns(2).spacing([2.0 * SPACE, SPACE]).show(ui, |ui| {

@@ -586,3 +586,43 @@ fn a_test_never_lists_or_probes_the_machines_devices() {
     let player = transit_playback::Player::prepare_device_free(t.app.engine.session_arc()).unwrap();
     assert!(player.open_input(&AudioConfig::default()).is_err_and(|e| e.contains("test Player")));
 }
+
+/// Audio Devices > MIDI (maintainer screenshot): in each device row the checkbox, the "MMC device ID"
+/// label and the field share one vertical center, and the note under the rows wraps inside the pane.
+#[test]
+fn the_midi_rows_center_on_one_line_and_the_note_stays_inside_the_pane() {
+    let mut t = T::new();
+    for name in ["Launchkey MIDI", "Faderport 8 (a device with a rather long port name)"] {
+        t.app.ui.midi_transport.insert(name.into(), Default::default());
+    }
+    t.open_window();
+    t.screen = egui::vec2(520.0, 400.0); // the smallest window: the pane is 480 - 130 - 32 wide, and scrolls
+    t.frames(3);
+    t.section("section_midi");
+    let controls = t.layout()["controls"].clone();
+    let all = |key: &str| -> Vec<[f32; 4]> {
+        controls.as_array().unwrap().iter().filter(|c| c["value"] == key).map(|c| serde_json::from_value(c["rect"].clone()).unwrap()).collect()
+    };
+    let (checks, labels, fields) = (all("midi_transport_buttons"), all("midi_id_label"), all("midi_id_field"));
+    assert_eq!((checks.len(), labels.len(), fields.len()), (2, 2, 2), "one row per device");
+    for i in 0..2 {
+        let centers = [checks[i], labels[i], fields[i]].map(|r| mid(r).1);
+        let spread = centers.iter().cloned().fold(f32::MIN, f32::max) - centers.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(
+            spread <= 1.0,
+            "row {i}: checkbox, label and field share a vertical center within 1 pt: {centers:?} {:?}",
+            [checks[i], labels[i], fields[i]]
+        );
+    }
+    let gap = |i: usize| fields[i][0] - labels[i][2];
+    assert!((gap(0) - gap(1)).abs() <= 0.5, "the same label-to-field gap on every row");
+    // The pane starts where the note does and is the window's width less the sidebar and gutters.
+    let note = all("midi_note")[0];
+    let pane = (t.screen.x - 40.0).clamp(480.0, 780.0) - 130.0 - 32.0;
+    let right = note[0] + pane + 0.5;
+    assert!(note[2] <= right, "the note's right edge {} is inside the pane ({right})", note[2]);
+    assert!(note[3] - note[1] > 20.0, "a sentence this long wraps to more than one line: {note:?}");
+    for r in checks.iter().chain(&fields) {
+        assert!(r[2] <= right, "{r:?} stays in the pane");
+    }
+}

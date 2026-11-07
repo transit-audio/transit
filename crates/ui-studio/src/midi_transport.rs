@@ -299,7 +299,11 @@ impl StudioApp {
     }
 }
 
-pub(crate) fn settings(app: &mut StudioApp, ui: &mut egui::Ui) {
+/// What the MIDI section drew, for the window's layout report: (text, key, rect).
+pub(crate) type Drawn = Vec<(String, &'static str, egui::Rect)>;
+
+pub(crate) fn settings(app: &mut StudioApp, ui: &mut egui::Ui) -> Drawn {
+    let mut drawn = Drawn::new();
     let connected: BTreeSet<String> =
         app.player.as_ref().and_then(|p| p.midi_status().ok()).map(|s| s.inputs.into_iter().map(|p| p.key.name).collect()).unwrap_or_default();
     let names: BTreeSet<String> = connected.iter().cloned().chain(app.ui.midi_transport.keys().cloned()).collect();
@@ -312,14 +316,22 @@ pub(crate) fn settings(app: &mut StudioApp, ui: &mut egui::Ui) {
         let prefs = app.ui.midi_transport.entry(name.clone()).or_default();
         ui.push_id(&name, |ui| {
             ui.label(if connected.contains(&name) { name.clone() } else { format!("{name} (disconnected)") });
-            ui.horizontal(|ui| {
-                let b = crate::chrome::checkbox(ui, &mut prefs.transport_buttons, "Transport buttons");
-                crate::help::hover(ui, &b, crate::help::Id::MidiTransportButtons);
-                changed |= b.changed();
-                ui.label("MMC device ID");
-                let id = crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut prefs.mmc_device_id).range(0..=126)));
-                crate::help::hover(ui, &id, crate::help::Id::MidiMmcDeviceId);
-                changed |= id.changed();
+            // The row is the field's height before anything is placed, so every element centers on it
+            // (a row sized by its last, tallest widget leaves the earlier ones riding high).
+            ui.scope(|ui| {
+                ui.spacing_mut().interact_size.y = crate::tokens::chrome::CONTROL_HEIGHT;
+                ui.horizontal(|ui| {
+                    let b = crate::chrome::checkbox(ui, &mut prefs.transport_buttons, "Transport buttons");
+                    crate::help::hover(ui, &b, crate::help::Id::MidiTransportButtons);
+                    changed |= b.changed();
+                    drawn.push((name.clone(), "midi_transport_buttons", b.rect));
+                    let label = ui.label("MMC device ID");
+                    drawn.push((name.clone(), "midi_id_label", label.rect));
+                    let id = crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut prefs.mmc_device_id).range(0..=126)));
+                    crate::help::hover(ui, &id, crate::help::Id::MidiMmcDeviceId);
+                    changed |= id.changed();
+                    drawn.push((name.clone(), "midi_id_field", id.rect));
+                });
             });
         });
     }
@@ -330,7 +342,8 @@ pub(crate) fn settings(app: &mut StudioApp, ui: &mut egui::Ui) {
         }
         app.midi_transport.held.clear();
     }
-    ui.label("MMC Record Exit ends recording and stops playback; it does not punch out and continue playing.");
+    let note = ui.add(egui::Label::new("MMC Record Exit ends recording and stops playback; it does not punch out and continue playing.").wrap());
+    drawn.push((String::new(), "midi_note", note.rect));
     ui.separator();
     ui.label("Learn a note or CC button for this machine:");
     for target in TransportControl::ALL {
@@ -340,6 +353,7 @@ pub(crate) fn settings(app: &mut StudioApp, ui: &mut egui::Ui) {
             let _ = app.run("midi.learn", json!({"target": target.target().to_string(), "scope": "profile"}));
         }
     }
+    drawn
 }
 
 #[cfg(test)]

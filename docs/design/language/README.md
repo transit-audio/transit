@@ -318,6 +318,7 @@ In code: `theme.rs` maps the global rules onto egui's style (`visuals`); egui gi
 - **Toggles keep their 1 px line and muted caps** (Toggle above), so a button and an off toggle never look alike: borderless means momentary, outlined means it latches.
 - **Destructive actions:** the label names the loss ("Delete 3 Tracks", "Delete Track", "Delete Group", "Delete Take", never "OK" or a bare "Delete"), never red; it takes the default style when Enter performs it.
 - egui sizes its own buttons from the label (egui 0.36 sets it in the Body style) and the padding, so an egui button is about 24 high (12 px a side, 4 above and below); the chrome's own buttons (`chrome::button`, `chrome::default_button`) are exactly 26. egui's interact height stays 18: it also sets the height of every horizontal row and grid row.
+- **A legacy dialog's row centers on its field:** a row holding a field (`chrome::field` around a drag value, `chrome::text_field`) sets `interact_size.y` to the control height in a scope around `ui.horizontal`, so the row is the field's height before anything is placed and the check and the labels center on it (Audio Devices > MIDI). A note under the rows wraps (`Label::wrap`) to the pane.
 
 ### Windows and dialogs
 - **Every window:** `surface.panel`, 1 px `line.strong` edge, radius 8, no shadow.
