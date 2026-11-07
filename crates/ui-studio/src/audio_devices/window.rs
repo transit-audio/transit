@@ -351,29 +351,30 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                 controls.push((text, "system", rect));
                                                 ui.end_row();
 
-                                                // Offered only where it can apply: a build with the native backend of this system
-                                                // (WASAPI or ASIO).
-                                                if devices::native_offered(draft.system.as_deref()) {
+                                                // Offered only where it can apply (a build with the native backend of this system)
+                                                // and only when there is more than one choice: on Windows the system decides the
+                                                // backend, so the row is hidden there (ADR 0046).
+                                                let options = Backend::offered(draft.system.as_deref());
+                                                if devices::native_offered(draft.system.as_deref()) && options.len() > 1 {
                                                     label(ui, "Backend");
-                                                    let options = Backend::offered(draft.system.as_deref());
                                                     let (rect, text) = choose_backend(ui, audio_on, &mut draft.backend, &options, &mut lay.items);
                                                     controls.push((text, "backend", rect));
                                                     ui.end_row();
-                                                    if draft.backend == Backend::NativeWasapi
-                                                        && devices::native_wasapi_offered(draft.system.as_deref())
-                                                    {
-                                                        ui.label("");
-                                                        let mut exclusive = !draft.share_device;
-                                                        let b = crate::chrome::checkbox_enabled(ui, audio_on, &mut exclusive, SHARE_LABEL);
-                                                        draft.share_device = !exclusive;
-                                                        controls.push((SHARE_LABEL.into(), "share_device", b.rect));
-                                                        ui.end_row();
-                                                        ui.label("");
-                                                        ui.label(
-                                                            egui::RichText::new(share_hint(draft.share_device)).color(TOKENS.text_dim).size(11.0),
-                                                        );
-                                                        ui.end_row();
-                                                    }
+                                                }
+                                                // Outside the Backend row, so it shows when the row is hidden: the effective backend
+                                                // decides.
+                                                if draft.backend.effective(draft.system.as_deref()) == Backend::NativeWasapi
+                                                    && devices::native_wasapi_offered(draft.system.as_deref())
+                                                {
+                                                    ui.label("");
+                                                    let mut exclusive = !draft.share_device;
+                                                    let b = crate::chrome::checkbox_enabled(ui, audio_on, &mut exclusive, SHARE_LABEL);
+                                                    draft.share_device = !exclusive;
+                                                    controls.push((SHARE_LABEL.into(), "share_device", b.rect));
+                                                    ui.end_row();
+                                                    ui.label("");
+                                                    ui.label(egui::RichText::new(share_hint(draft.share_device)).color(TOKENS.text_dim).size(11.0));
+                                                    ui.end_row();
                                                 }
 
                                                 label(ui, "Output");

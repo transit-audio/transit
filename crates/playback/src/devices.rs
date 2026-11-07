@@ -57,9 +57,18 @@ impl Backend {
         }
     }
 
-    /// The choices the Backend selector offers on `system`: Auto, cpal, and the native backend of
-    /// that system where this build has it.
+    /// The choices the Backend selector offers on `system`. On Windows only the system's native
+    /// backend (ADR 0046: no cpal choice, and one choice hides the row); elsewhere Auto, cpal, and the
+    /// native backend of that system where this build has it.
     pub fn offered(system: Option<&str>) -> Vec<Backend> {
+        Self::offered_on(system, cfg!(windows))
+    }
+
+    /// [`Backend::offered`] with the platform as a parameter (`windows`), for tests on every platform.
+    pub fn offered_on(system: Option<&str>, windows: bool) -> Vec<Backend> {
+        if windows {
+            return vec![Backend::Auto.effective_on(system, true)];
+        }
         Self::ALL.into_iter().filter(|b| !b.is_native() || b.native_on(system)).collect()
     }
 
@@ -783,7 +792,7 @@ mod tests {
         assert_eq!(native(Backend::offered(Some("ASIO"))), if NATIVE_ASIO_COMPILED { vec![NativeAsio] } else { vec![] });
         assert_eq!(native(Backend::offered(Some("WASAPI"))), if NATIVE_WASAPI_COMPILED { vec![NativeWasapi] } else { vec![] });
         assert!(native(Backend::offered(Some("CoreAudio"))).is_empty());
-        assert!(Backend::offered(Some("ASIO")).starts_with(&[Auto, Cpal]));
+        assert!(Backend::offered_on(Some("ASIO"), false).starts_with(&[Auto, Cpal]), "off Windows Auto and cpal stay");
         assert!(!NativeAsio.native_on(Some("WASAPI")) && !NativeWasapi.native_on(Some("ASIO")) && !Cpal.native_on(Some("ASIO")));
         assert!(!is_asio_system(None), "the default system is never ASIO");
         assert_eq!(native_offered(Some("asio")), NATIVE_ASIO_COMPILED, "system names compare without case");
