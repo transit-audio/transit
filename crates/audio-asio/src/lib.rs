@@ -10,6 +10,13 @@
 //!   [`AsioBackend::probe`] loads, initializes, queries and unloads one (ASIO allows one loaded
 //!   driver per process), the one the app selects, and keeps what it found for the listing. A
 //!   driver that cannot be probed is reported by [`AsioBackend::diagnostics`] and a `log::warn!`.
+//!   The app's listing never probes (#363): [`AsioBackend::probe_open`] describes only the driver
+//!   this process already has open, queried in place, and instantiates nothing otherwise.
+//! - Every instantiated driver is released on the host thread (the session's stop and
+//!   disposeBuffers first): after a probe, a failed init or query, a closed or dropped handle (even
+//!   one dropped while the host was stuck), a closed session, a call whose caller gave up, and the
+//!   end of the host thread, which waits (bounded, [`RELEASE_WAIT`]) for a driver call it is
+//!   blocked in. [`AsioBackend::shut_down_shared`] ends the shared host at the end of the process.
 //! - [`AsioBackend::load`] keeps one driver loaded and initialized, with no buffers created, for
 //!   queries, the sample rate and the control panel; [`Loaded::close`] (or dropping it) releases it.
 //! - `open_render` and `open_capture` open the two directions of one driver's [`session`]: one
@@ -49,7 +56,7 @@ pub use driver::{
     BufferSize, DirectionType, DriverDiagnostic, DriverEntry, DriverInfo, PROBE_RATES, ResolvedDriver, SampleType, resolve_driver_name,
 };
 
-use host::{Host, Loader, Slot};
+use host::{HandleOwner, Host, Loader, Slot};
 use session::{Callback, SideOwner};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -63,6 +70,10 @@ pub const HOST_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a fresh host thread may take to be scheduled and create its window and apartment;
 /// unrelated to how long a driver call may run ([`HOST_TIMEOUT`]).
 pub const HOST_START_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long the end of a host thread waits for a driver call it is blocked in (an `init` that has
+/// not returned) before the thread is left to finish by itself: the thread releases the driver on
+/// its own thread when the call returns, never another thread (#363).
+pub const RELEASE_WAIT: Duration = Duration::from_secs(10);
 /// How long a caller waits for a control panel call (some panels are modal).
 const PANEL_TIMEOUT: Duration = Duration::from_secs(600);
 /// A driver's probe is reused this long, so a plan right after the listing loads it once.
@@ -111,7 +122,8 @@ struct Probed {
 /// Listing instantiates nothing: the registry names come from [`AsioBackend::drivers`], and a
 /// driver is loaded, queried and unloaded only when it is probed ([`AsioBackend::probe`], the
 /// driver the app selects) or planned (`plan_render`/`plan_capture` of it, which reuse a probe
-/// younger than five seconds). [`ab::Backend::endpoints`] lists the probed drivers.
+/// younger than five seconds). [`ab::Backend::endpoints`] lists the probed drivers. The app's
+/// listing describes only the driver it has open ([`AsioBackend::probe_open`], #363).
 #[derive(Clone)]
 pub struct AsioBackend {
     host: Arc<Host>,
@@ -126,11 +138,10 @@ impl AsioBackend {
         Self::with_loader(Box::new(com::ComLoader), Slot::process(), HOST_TIMEOUT)
     }
 
-    /// The process's one backend, started on first use and kept for the life of the process (a
-    /// failed start is retried by the next call). Dropping a host can block for up to
-    /// [`HOST_TIMEOUT`], so the shared one is never dropped.
+    /// The process's one backend, started on first use and kept until [`AsioBackend::shut_down_shared`]
+    /// at the end of the process (a failed start is retried by the next call). Dropping a host can
+    /// block for up to [`RELEASE_WAIT`], so the shared one is never dropped.
     pub fn shared() -> Result<Self, ab::OpenError> {
-        static SHARED: Mutex<Option<AsioBackend>> = Mutex::new(None);
         let mut shared = SHARED.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(backend) = shared.as_ref() {
             return Ok(backend.clone());
@@ -138,6 +149,15 @@ impl AsioBackend {
         let backend = Self::new()?;
         *shared = Some(backend.clone());
         Ok(backend)
+    }
+
+    /// Ends the process's shared backend, if it was ever started (it never starts one): its host
+    /// thread releases the loaded driver on that thread (stop and disposeBuffers first) and exits,
+    /// waiting up to [`RELEASE_WAIT`] for a driver call it is blocked in. Call at the end of the
+    /// process, after the streams are closed: a driver is not left initialized when the process
+    /// ends (#363). Whether the thread had ended within the bound (true when none was started).
+    pub fn shut_down_shared() -> bool {
+        shut_down_slot(&SHARED, RELEASE_WAIT)
     }
 
     fn with_loader(loader: Box<dyn Loader>, slot: Slot, timeout: Duration) -> Result<Self, ab::OpenError> {
@@ -160,13 +180,39 @@ impl AsioBackend {
     /// listing ([`ab::Backend::endpoints`], [`AsioBackend::diagnostics`]) and the plans. A name
     /// that is not installed is an error listing the installed drivers.
     pub fn probe(&self, name: &str) -> Result<DriverInfo, ab::OpenError> {
-        let installed = self.drivers()?;
-        let Some(entry) = installed.iter().find(|e| e.name == name).cloned() else {
-            let names: Vec<String> = installed.into_iter().map(|e| e.name).collect();
-            return Err(ab::OpenError::DeviceNotAvailable(driver::not_installed(name, &names)));
-        };
+        let entry = self.installed(name)?;
         self.probe_entry(&entry)
             .map_err(|d| if d.blocked { ab::OpenError::InUse(d.problem) } else { ab::OpenError::DeviceNotAvailable(d.to_string()) })
+    }
+
+    /// The registry entry of `name`, else the error listing the installed drivers.
+    fn installed(&self, name: &str) -> Result<DriverEntry, ab::OpenError> {
+        let installed = self.drivers()?;
+        if let Some(entry) = installed.iter().find(|e| e.name == name) {
+            return Ok(entry.clone());
+        }
+        let names: Vec<String> = installed.into_iter().map(|e| e.name).collect();
+        Err(ab::OpenError::DeviceNotAvailable(driver::not_installed(name, &names)))
+    }
+
+    /// Describes the driver registered as `name` only when this process holds it open (a stream or
+    /// a [`Loaded`] handle): it is queried in place and kept for the listing like a probe. `None`
+    /// when it is not open: nothing is instantiated and nothing is kept, so the listing names it
+    /// from the registry alone (#363). A name that is not installed is an error.
+    pub fn probe_open(&self, name: &str) -> Result<Option<DriverInfo>, ab::OpenError> {
+        let entry = self.installed(name)?;
+        let query = entry.clone();
+        match self.host.call(&format!("query of the open \"{name}\""), move |s| s.query_loaded(&query)) {
+            Ok(Some(info)) => {
+                self.remember(&entry, Ok(info.clone()));
+                Ok(Some(info))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => {
+                log::info!("ASIO: querying the open \"{name}\": {e}");
+                Err(e)
+            }
+        }
     }
 
     /// What the last probe of `name` found, if it was probed: its report, or why it failed.
@@ -282,8 +328,8 @@ impl AsioBackend {
             )));
         }
         let load = entry.clone();
-        let info = self.host.call(&format!("load of \"{name}\""), move |s| s.load(&load))?;
-        Ok(Loaded { host: Arc::clone(&self.host), name: name.to_owned(), info, open: true })
+        let (info, owner) = self.host.call(&format!("load of \"{name}\""), move |s| s.load(&load))?;
+        Ok(Loaded { host: Arc::clone(&self.host), name: name.to_owned(), info, open: true, _owner: owner })
     }
 
     fn endpoint(entry: &DriverEntry, info: &DriverInfo, direction: ab::Direction) -> ab::Endpoint {
@@ -471,6 +517,8 @@ pub struct Loaded {
     name: String,
     info: DriverInfo,
     open: bool,
+    /// Tells the host the handle is gone even when its unload could not be sent (#363).
+    _owner: HandleOwner,
 }
 
 impl Loaded {
@@ -688,6 +736,20 @@ fn attempts(endpoint: &ab::Endpoint, direction: ab::Direction, wished: &[u32], p
             })
         })
         .collect()
+}
+
+/// The process's one backend ([`AsioBackend::shared`]).
+static SHARED: Mutex<Option<AsioBackend>> = Mutex::new(None);
+
+/// Takes the backend out of `slot`, if one was started there, and ends its host thread within
+/// `bound` ([`AsioBackend::shut_down_shared`]).
+fn shut_down_slot(slot: &Mutex<Option<AsioBackend>>, bound: Duration) -> bool {
+    let Some(backend) = slot.lock().unwrap_or_else(PoisonError::into_inner).take() else { return true };
+    let ended = backend.host.shut_down(bound);
+    if !ended {
+        log::warn!("ASIO: the host thread is still in a driver call after {} s; it releases the driver when the call returns", bound.as_secs());
+    }
+    ended
 }
 
 const _: () = {

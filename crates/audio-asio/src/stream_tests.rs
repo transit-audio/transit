@@ -18,7 +18,9 @@ static ALLOC: CountingAlloc = CountingAlloc;
 
 static STREAMING: Mutex<()> = Mutex::new(());
 
-fn lock() -> MutexGuard<'static, ()> {
+/// The process-wide callback state allows one session at a time: every test that opens a stream
+/// takes this lock (the release audit's too, `host::release_tests`).
+pub(crate) fn lock() -> MutexGuard<'static, ()> {
     STREAMING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 

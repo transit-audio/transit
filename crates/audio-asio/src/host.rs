@@ -19,6 +19,14 @@
 //! the thread is still blocked, and a load whose caller gave up is undone when the call finally
 //! returns.
 //!
+//! Release (#363): the driver is released only on this thread, the one that created and
+//! initialized it. Ending the thread ([`Host::shut_down`], the drop, a thread start that timed
+//! out) waits up to [`crate::RELEASE_WAIT`] for a driver call it is blocked in, then the thread
+//! releases the loaded driver (stop and disposeBuffers first) and exits; past the bound it is left
+//! to do so by itself when the call returns. A handle dropped while the host was stuck is let go
+//! between requests (the sweep), so its driver is not kept for the life of the process. The tests:
+//! `release_tests.rs`.
+//!
 //! Messages are pumped between requests, not during a driver call. A driver whose `init`,
 //! `createBuffers` or `controlPanel` waits for one of its own threads that `SendMessage`s to the
 //! `sysRef` window (cross-thread, so the message is only delivered when this thread pumps) cannot
@@ -80,6 +88,19 @@ impl Slot {
 /// Frees the slot when the driver is released.
 struct SlotGuard(Slot);
 
+/// A [`crate::Loaded`] handle's claim on the driver: the flag is set when the handle goes,
+/// including a handle whose unload request could not be sent (the host was stuck in another call)
+/// and a load whose caller gave up, so the host releases the driver between requests instead of
+/// keeping it for the life of the process (#363).
+#[derive(Debug)]
+pub(crate) struct HandleOwner(Arc<AtomicBool>);
+
+impl Drop for HandleOwner {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
 impl Drop for SlotGuard {
     fn drop(&mut self) {
         *self.0.0.lock().unwrap_or_else(PoisonError::into_inner) = None;
@@ -94,10 +115,25 @@ struct Loaded {
     info: DriverInfo,
     /// The streams of the driver, when any were opened.
     session: Option<Session>,
-    /// Whether a [`crate::Loaded`] handle holds the driver (it stays loaded while either holds it).
-    handle: bool,
+    /// The [`crate::Loaded`] handle's flag while one holds the driver (it stays loaded while a
+    /// handle or a session holds it); the flag is set once that handle is gone.
+    handle: Option<Arc<AtomicBool>>,
     driver: Driver,
     _slot: SlotGuard,
+}
+
+impl Loaded {
+    /// Whether a live handle holds the driver.
+    fn held(&self) -> bool {
+        self.handle.as_ref().is_some_and(|gone| !gone.load(Ordering::Acquire))
+    }
+
+    /// A new handle's claim on the driver.
+    fn claim_handle(&mut self) -> HandleOwner {
+        let gone = Arc::new(AtomicBool::new(false));
+        self.handle = Some(Arc::clone(&gone));
+        HandleOwner(gone)
+    }
 }
 
 /// The state of the host thread; requests run against it on that thread.
@@ -121,22 +157,21 @@ impl HostState {
         self.loaded.as_ref().map(|l| l.entry.name.clone())
     }
 
-    /// Loads and initializes `entry` (no buffers) and queries it, for a [`crate::Loaded`] handle.
-    /// The driver of a running stream session is shared with the handle.
-    pub(crate) fn load(&mut self, entry: &DriverEntry) -> Result<DriverInfo, ab::OpenError> {
+    /// Loads and initializes `entry` (no buffers) and queries it, for a [`crate::Loaded`] handle,
+    /// which holds the returned claim. The driver of a running stream session is shared with the
+    /// handle.
+    pub(crate) fn load(&mut self, entry: &DriverEntry) -> Result<(DriverInfo, HandleOwner), ab::OpenError> {
         if let Some(loaded) = self.loaded.as_mut()
             && loaded.entry.name == entry.name
-            && !loaded.handle
+            && !loaded.held()
             && loaded.session.is_some()
         {
-            loaded.handle = true;
-            return driver::query(&entry.name, &mut loaded.driver);
+            let info = driver::query(&entry.name, &mut loaded.driver)?;
+            return Ok((info, loaded.claim_handle()));
         }
         let info = self.load_driver(entry)?;
-        if let Some(loaded) = self.loaded.as_mut() {
-            loaded.handle = true;
-        }
-        Ok(info)
+        let Some(loaded) = self.loaded.as_mut() else { return Err(not_open(&entry.name)) };
+        Ok((info, loaded.claim_handle()))
     }
 
     fn in_use(open: &str, entry: &DriverEntry) -> ab::OpenError {
@@ -165,7 +200,7 @@ impl HostState {
             return Err(ab::OpenError::DeviceNotAvailable(format!("ASIO driver \"{}\": init failed{detail}", entry.name)));
         }
         let info = driver::query(&entry.name, &mut driver)?;
-        self.loaded = Some(Loaded { entry: entry.clone(), info: info.clone(), session: None, handle: false, driver, _slot: guard });
+        self.loaded = Some(Loaded { entry: entry.clone(), info: info.clone(), session: None, handle: None, driver, _slot: guard });
         Ok(info)
     }
 
@@ -176,9 +211,19 @@ impl HostState {
         {
             return driver::query(&entry.name, &mut loaded.driver);
         }
-        let info = self.load(entry)?;
-        self.unload(&entry.name)?;
+        let info = self.load_driver(entry)?;
+        self.release();
         Ok(info)
+    }
+
+    /// Queries `entry` in place when it is the driver this host holds loaded (open by a stream or a
+    /// handle); `None`, instantiating nothing, when it is not (#363: a listing never loads a
+    /// driver).
+    pub(crate) fn query_loaded(&mut self, entry: &DriverEntry) -> Result<Option<DriverInfo>, ab::OpenError> {
+        match self.loaded.as_mut() {
+            Some(loaded) if loaded.entry.name == entry.name => driver::query(&entry.name, &mut loaded.driver).map(Some),
+            _ => Ok(None),
+        }
     }
 
     /// The handle of the loaded driver `name` lets go; the driver is released unless a stream
@@ -186,7 +231,7 @@ impl HostState {
     pub(crate) fn unload(&mut self, name: &str) -> Result<(), ab::OpenError> {
         match self.loaded.as_mut() {
             Some(loaded) if loaded.entry.name == name => {
-                loaded.handle = false;
+                loaded.handle = None;
                 if loaded.session.is_none() {
                     self.release();
                 }
@@ -236,7 +281,7 @@ impl HostState {
                 opened
             }),
         };
-        if result.is_err() && loaded.session.is_none() && !loaded.handle {
+        if result.is_err() && loaded.session.is_none() && !loaded.held() {
             self.release();
         }
         result
@@ -272,10 +317,21 @@ impl HostState {
         Ok(())
     }
 
-    /// Tears down a session whose streams are all gone (a stream whose open answer was abandoned).
+    /// Tears down a session whose streams are all gone (a stream whose open answer was abandoned),
+    /// and lets go of a handle that is gone without its unload (dropped while the host was stuck, or
+    /// a load whose caller gave up), releasing the driver when nothing else holds it.
     fn sweep(&mut self) {
         if self.loaded.as_ref().and_then(|l| l.session.as_ref()).is_some_and(Session::abandoned) {
             self.end_session();
+        }
+        if let Some(loaded) = self.loaded.as_mut()
+            && loaded.handle.is_some()
+            && !loaded.held()
+        {
+            loaded.handle = None;
+            if loaded.session.is_none() {
+                self.release();
+            }
         }
     }
 
@@ -284,7 +340,7 @@ impl HostState {
         if let Some(session) = loaded.session.take() {
             session.teardown(&loaded.entry.name, &mut loaded.driver);
         }
-        if !loaded.handle {
+        if !loaded.held() {
             self.release();
         }
     }
@@ -357,7 +413,8 @@ pub(crate) struct Host {
     timeout: Duration,
     /// Behind a mutex so the handle is `Sync` (a `Receiver` is not).
     exited: Mutex<Receiver<()>>,
-    thread: Option<JoinHandle<()>>,
+    /// Taken when the thread is joined ([`Host::shut_down`] or the drop).
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Host {
@@ -415,14 +472,20 @@ impl Host {
             }
             Err(_) => {
                 // The thread may still start late: tell it to end and wake it, so it does not sleep
-                // in its wait forever with a window and an apartment nobody will use.
+                // in its wait forever with a window and an apartment nobody will use, then join it
+                // (bounded). No request can have reached it, so it holds no driver (#363).
                 shared.quit.store(true, Ordering::Release);
                 drop(tx);
                 wake.set();
+                if join_within(&exited, &mut Some(thread), crate::RELEASE_WAIT) {
+                    log::warn!("ASIO: the host thread started after its caller gave up; it ended without serving a request");
+                } else {
+                    log::warn!("ASIO: the host thread did not start within {} s and is left to end by itself", crate::RELEASE_WAIT.as_secs());
+                }
                 return Err(ab::OpenError::Other("the ASIO host thread did not start".into()));
             }
         }
-        Ok(Self { tx: Some(tx), wake, shared, timeout, exited: Mutex::new(exited), thread: Some(thread) })
+        Ok(Self { tx: Some(tx), wake, shared, timeout, exited: Mutex::new(exited), thread: Mutex::new(Some(thread)) })
     }
 
     /// Runs `request` on the host thread and waits up to the host's timeout for its answer.
@@ -441,6 +504,9 @@ impl Host {
         timeout: Duration,
         request: impl FnOnce(&mut HostState) -> Result<R, ab::OpenError> + Send + 'static,
     ) -> Result<R, ab::OpenError> {
+        if self.shared.quit.load(Ordering::Acquire) {
+            return Err(exited());
+        }
         if self.shared.stuck.load(Ordering::Acquire) {
             let busy = self.shared.busy.lock().unwrap_or_else(PoisonError::into_inner).clone().unwrap_or_else(|| "a driver call".into());
             return Err(ab::OpenError::Other(format!("the ASIO host thread is still blocked in {busy}; {label} was not sent")));
@@ -489,6 +555,18 @@ impl Host {
         self.shared.thread.load(Ordering::Acquire) == crate::com::current_thread_id()
     }
 
+    /// Ends the host thread: it finishes the request it is in (a driver call that blocks, such as an
+    /// `init`, is waited for up to `bound`), releases the loaded driver on its own thread (the
+    /// session's stop and disposeBuffers first) and exits; later requests fail at once. Whether
+    /// the thread exited within `bound` (it is joined then). For the end of the process, where
+    /// the shared host is never dropped (#363).
+    pub(crate) fn shut_down(&self, bound: Duration) -> bool {
+        self.shared.quit.store(true, Ordering::Release);
+        self.wake.set();
+        let exited = self.exited.lock().unwrap_or_else(PoisonError::into_inner);
+        join_within(&exited, &mut self.thread.lock().unwrap_or_else(PoisonError::into_inner), bound)
+    }
+
     /// Whether a request timed out and the host thread has not finished it yet.
     pub(crate) fn is_stuck(&self) -> bool {
         self.shared.stuck.load(Ordering::Acquire)
@@ -515,19 +593,31 @@ fn exited() -> ab::OpenError {
     ab::OpenError::Other("the ASIO host thread has exited".into())
 }
 
+/// Waits up to `bound` for the host thread to say it exited (or to be gone), then joins it.
+/// Whether it exited; a thread still blocked in a driver call after `bound` is not joined.
+fn join_within(exited: &Receiver<()>, thread: &mut Option<JoinHandle<()>>, bound: Duration) -> bool {
+    let gone = match exited.recv_timeout(bound) {
+        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => true,
+        Err(mpsc::RecvTimeoutError::Timeout) => false,
+    };
+    if gone && let Some(thread) = thread.take() {
+        let _ = thread.join();
+    }
+    gone
+}
+
 impl Drop for Host {
+    /// Ends the thread as [`Host::shut_down`] does: a thread blocked in a driver call (an `init`
+    /// that has not returned) is waited for up to [`crate::RELEASE_WAIT`], so the driver is
+    /// released on its own thread before the drop returns. Past that bound it is left to finish:
+    /// when the call returns it releases the driver on that thread and exits.
     fn drop(&mut self) {
-        self.shared.quit.store(true, Ordering::Release);
         self.tx = None;
-        self.wake.set();
-        // A thread blocked in a driver call cannot be joined; it is left to finish on its own.
-        let exited = self.exited.lock().unwrap_or_else(PoisonError::into_inner).recv_timeout(self.timeout).is_ok();
-        if exited {
-            if let Some(thread) = self.thread.take() {
-                let _ = thread.join();
-            }
-        } else {
-            log::warn!("ASIO: the host thread did not exit within {} s; left running", self.timeout.as_secs());
+        if !self.shut_down(crate::RELEASE_WAIT) {
+            log::warn!(
+                "ASIO: the host thread did not exit within {} s (blocked in a driver call); it releases the driver when the call returns",
+                crate::RELEASE_WAIT.as_secs()
+            );
         }
     }
 }
@@ -600,6 +690,10 @@ fn serve(state: &mut HostState, job: Job, label: String, shared: &Shared) {
 }
 
 #[cfg(test)]
+#[path = "release_tests.rs"]
+mod release_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::abi;
@@ -616,7 +710,7 @@ mod tests {
         let a = entry("A", 1);
         let (host, observed) = host(vec![(a.clone(), FakeSpec::new("A", 2, 2, abi::ASIOST_INT32_LSB))], Slot::default(), Duration::from_secs(10));
         let e = a.clone();
-        let info = host.call("load A", move |s| s.load(&e)).expect("loads");
+        let (info, _held) = host.call("load A", move |s| s.load(&e)).expect("loads");
         assert_eq!((info.inputs, info.outputs), (2, 2));
         host.call("unload A", |s| s.unload("A")).expect("unloads");
         let threads = observed.threads.lock().unwrap().clone();
@@ -637,7 +731,7 @@ mod tests {
         let (first, observed) = host(drivers.clone(), slot.clone(), Duration::from_secs(10));
         let (second, _) = host(drivers, slot.clone(), Duration::from_secs(10));
         let ea = a.clone();
-        first.call("load A", move |s| s.load(&ea)).expect("A loads");
+        let _a = first.call("load A", move |s| s.load(&ea)).expect("A loads");
         let eb = b.clone();
         let same_host = first.call("load B", move |s| s.load(&eb)).unwrap_err();
         assert!(matches!(&same_host, ab::OpenError::InUse(t) if t.contains("\"A\"") && t.contains("\"B\"")), "{same_host:?}");
@@ -652,7 +746,7 @@ mod tests {
         assert_eq!(observed.max_live.load(Ordering::Acquire), 1, "never two drivers alive");
         first.call("unload A", |s| s.unload("A")).expect("unloads");
         let eb = b.clone();
-        second.call("load B", move |s| s.load(&eb)).expect("B loads once A is released");
+        let _b = second.call("load B", move |s| s.load(&eb)).expect("B loads once A is released");
         drop(second);
         let ea = a.clone();
         first.call("load A", move |s| s.load(&ea)).expect("dropping a host frees the slot");
@@ -777,7 +871,7 @@ mod tests {
         let (host, observed) = host(vec![(a.clone(), liar), (b.clone(), honest)], Slot::default(), Duration::from_secs(10));
         let err = host.call("load Liar", move |s| s.load(&a)).unwrap_err();
         assert!(matches!(err, ab::OpenError::DeviceNotAvailable(_)), "{err:?}");
-        host.call("load Bool", move |s| s.load(&b)).expect("a true low byte is a success");
+        let _held = host.call("load Bool", move |s| s.load(&b)).expect("a true low byte is a success");
         host.call("unload", |s| s.unload("Bool")).expect("unloads");
         assert_eq!(observed.live.load(Ordering::Acquire), 0);
     }
@@ -792,7 +886,7 @@ mod tests {
         let a = entry("Poster", 22);
         let (host, observed) =
             host(vec![(a.clone(), FakeSpec::new("Poster", 2, 2, abi::ASIOST_INT32_LSB))], Slot::default(), Duration::from_secs(10));
-        host.call("load", move |s| s.load(&a)).expect("loads");
+        let _held = host.call("load", move |s| s.load(&a)).expect("loads");
         let window = sys_ref(&observed);
         let (done_tx, done_rx) = mpsc::channel();
         std::thread::spawn(move || {

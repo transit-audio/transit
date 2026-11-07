@@ -743,6 +743,10 @@ pub(crate) mod fake {
             *self.open.lock().unwrap() = true;
             self.changed.notify_all();
         }
+        /// Closes the latch again: the next `init` waits until it is opened.
+        pub(crate) fn close(&self) {
+            *self.open.lock().unwrap() = false;
+        }
         fn wait(&self) {
             let mut open = self.open.lock().unwrap();
             while !*open {
@@ -820,6 +824,8 @@ pub(crate) mod fake {
         pub max_live: AtomicUsize,
         pub created: AtomicUsize,
         pub released: AtomicUsize,
+        /// The thread of each object's last `Release` (#363: always the host thread).
+        pub releases: Mutex<Vec<ThreadId>>,
         pub panels: AtomicUsize,
         pub threads: Mutex<Vec<ThreadId>>,
         pub sys_refs: Mutex<Vec<usize>>,
@@ -920,6 +926,7 @@ pub(crate) mod fake {
         if left == 0 {
             obj.observed.live.fetch_sub(1, Ordering::AcqRel);
             obj.observed.released.fetch_add(1, Ordering::AcqRel);
+            obj.observed.releases.lock().unwrap().push(std::thread::current().id());
             // SAFETY: the last reference: the box came from `Box::into_raw` in `create` and is
             // freed once; `obj` is not used after this.
             drop(unsafe { Box::from_raw(this.cast::<FakeObject>()) });
