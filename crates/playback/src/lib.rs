@@ -24,6 +24,7 @@ pub mod external_probe;
 pub mod hardware_probe;
 pub mod loop_probe;
 pub mod midi_capture;
+pub mod monitor_path;
 pub mod onset;
 mod open_log;
 pub mod pipewire;
@@ -84,6 +85,8 @@ struct Shared {
     /// running while stopped, because such GUIs initialise and sync through `process` calls.
     editors_open: AtomicBool,
     metro: Metro,
+    /// Mono, Dim, Ref, the monitor levels and the published loudness (#366).
+    monitor: monitor_path::MonitorControls,
 }
 
 /// The click's level and the record count-in, shared between Main and the audio thread. Plain

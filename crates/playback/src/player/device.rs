@@ -873,6 +873,11 @@ impl Player {
         let gain = if db.is_finite() { 10f32.powf(db.clamp(-60.0, 12.0) / 20.0) } else { 1.0 };
         self.shared.metro.gain.store(gain.to_bits(), Ordering::Relaxed);
     }
+    /// The main bus monitoring set (#366): Mono, Dim, Ref, the monitor levels and the live
+    /// integrated loudness. Atomic stores and loads; never a session change or an undo step.
+    pub fn monitor(&self) -> &crate::monitor_path::MonitorControls {
+        &self.shared.monitor
+    }
     /// A record count-in under way: (samples left, whole length) in project samples.
     pub fn count_in(&self) -> Option<(Samples, Samples)> {
         let left = self.shared.metro.count_in_left.load(Ordering::Relaxed);

@@ -70,6 +70,7 @@ impl Player {
             speed: AtomicU32::new(1000),
             editors_open: AtomicBool::new(false),
             metro: crate::Metro::default(),
+            monitor: Default::default(),
         })
     }
 

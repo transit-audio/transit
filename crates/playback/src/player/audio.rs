@@ -494,6 +494,9 @@ pub(super) struct Audio {
     /// The browser's preview (#211): Main asks, a feeder decodes, this thread adds it after Main's
     /// master section. Never part of the plan.
     preview: Option<crate::preview::PreviewVoice>,
+    /// Mono, Dim, Ref and the monitor level on Main's way to the device, and the live loudness of
+    /// the mix (#366). Never part of the plan or of a render.
+    monitor: Box<crate::monitor_path::MonitorStage>,
     /// The callback's phase marker (#162).
     marker: Option<Arc<crate::telemetry::PhaseMarker>>,
     transport: Transport,
@@ -585,6 +588,7 @@ impl Audio {
             Err(error) => return Err(InitError { error, ports: Box::new(ports) }),
         };
         let (record_control, record_start) = start::pair(transit_mix::EngineEpoch(key.generation));
+        let monitor = crate::monitor_path::MonitorStage::new(target.sample_rate, &shared.monitor);
         Ok((
             Self {
                 plans: ports.plans,
@@ -599,6 +603,7 @@ impl Audio {
                 ext_probe: None,
                 render_tap: None,
                 preview: None,
+                monitor,
                 marker: None,
                 shared,
                 pending: 0,
@@ -914,6 +919,11 @@ impl Audio {
         {
             capture.mark_overrun(crate::midi_capture::OverrunMark { frame: block_output, strips: overruns });
         }
+        // The live loudness reads Main's post-fader mix as rendered, before the preview and the
+        // monitor path join it (#366). A start from a stop resets it.
+        let channels = self.plans.engine().main_channels();
+        let running = state.playing || state.count_in.is_some();
+        self.monitor.measure(&self.shared.monitor, self.plans.output(), channels, frames, running);
         // A real-time render keeps Main and the External Instruments' returns of this block, as
         // live playback renders and reads them (ADR 0027): a copy into its ring, nothing more.
         if let Some(tap) = &self.render_tap {
@@ -926,6 +936,9 @@ impl Audio {
             let channels = self.plans.engine().main_channels();
             preview.mix(self.plans.output_mut(), channels, frames, state.playing || state.count_in.is_some());
         }
+        // The monitor path last (#366): Mono, Dim, Ref and the monitor level act on what reaches the
+        // device only, after the meters, the render tap and the preview.
+        self.monitor.apply(&self.shared.monitor, self.plans.output_mut(), channels, frames);
         // An External Instrument Measure records the return the plan read for this block and
         // sends the notes due at its first frame, stamped with that frame's presentation time.
         if let (Some(probe), Some(external), Some(block)) = (&self.ext_probe, &mut self.external, external_block) {
