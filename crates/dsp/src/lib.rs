@@ -150,9 +150,7 @@ impl ParamInfo {
                     format!("{v:.1} Hz")
                 }
             }
-            // Seconds from 1000 ms, as Ableton and Logic print envelope and LFO times (#326).
-            Unit::Ms if v >= 1000.0 => format!("{:.2} s", v / 1000.0),
-            Unit::Ms => format!("{v:.1} ms"),
+            Unit::Ms => time_text(v),
             Unit::Percent => format!("{v:.0}%"),
             Unit::Ratio => format!("{v:.1}:1"),
             Unit::Semitones => format!("{v:.0} st"),
@@ -229,6 +227,31 @@ pub struct VoiceShape {
     pub harmonics: f32,
     pub timbre: f32,
     pub morph: f32,
+}
+
+/// A time in milliseconds as Ableton and Logic print envelope and LFO times (#326): three
+/// significant digits, milliseconds below a second and seconds from it (`9.99 ms`, `35.0 ms`,
+/// `350 ms`, `1.00 s`, `10.0 s`). The rounding comes first, so `999.6 ms` reads `1.00 s`.
+pub fn time_text(ms: f32) -> String {
+    let ms = f64::from(ms);
+    let r = sig3(ms);
+    if r.abs() >= 1000.0 { format!("{} s", sig3_text(ms / 1000.0)) } else { format!("{} ms", sig3_text(ms)) }
+}
+
+/// `x` rounded to three significant digits.
+fn sig3(x: f64) -> f64 {
+    if x == 0.0 || !x.is_finite() {
+        return x;
+    }
+    let scale = 10f64.powi(2 - x.abs().log10().floor() as i32);
+    (x * scale).round() / scale
+}
+
+/// `x` printed with three significant digits (`0.00` for zero).
+fn sig3_text(x: f64) -> String {
+    let r = sig3(x);
+    let decimals = if r == 0.0 || !r.is_finite() { 2 } else { (2 - r.abs().log10().floor() as i32).max(0) as usize };
+    format!("{r:.decimals$}")
 }
 
 fn key_part(s: &[f32], start: usize) -> impl Iterator<Item = f32> + '_ {

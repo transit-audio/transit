@@ -370,20 +370,29 @@ fn parameter_ids_are_stable_and_round_trip() {
     assert_eq!(PARAMS[MODEL].format(13.0), "Wavetable");
 }
 
-/// A time prints in milliseconds below a second and in seconds from 1000 ms (#326, Ableton's and
-/// Logic's envelope readouts), so the widest time reads `999.9 ms` or `10.00 s`.
+/// A time prints three significant digits, in milliseconds below a second and in seconds from it
+/// (#326, Ableton's and Logic's envelope readouts).
 #[test]
-fn times_print_in_seconds_from_a_thousand_milliseconds() {
+fn times_print_three_significant_digits_in_ms_then_seconds() {
     let p = MACRO_OSC_INFO.param("amp_attack").unwrap();
-    assert_eq!(p.format(2.0), "2.0 ms");
-    assert_eq!(p.format(999.9), "999.9 ms");
-    assert_eq!(p.format(1000.0), "1.00 s");
-    assert_eq!(p.format(1500.0), "1.50 s");
-    assert_eq!(p.format(10_000.0), "10.00 s");
-    let decay = MACRO_OSC_INFO.param("amp_decay").unwrap();
-    assert_eq!(decay.format(20_000.0), "20.00 s");
-    // Negative control: just under a second stays in milliseconds.
-    assert_eq!(p.format(999.94), "999.9 ms");
+    for (ms, want) in [
+        (0.5, "0.500 ms"),
+        (2.0, "2.00 ms"),
+        (9.99, "9.99 ms"),
+        (35.0, "35.0 ms"),
+        (350.0, "350 ms"),
+        (999.0, "999 ms"),
+        (999.6, "1.00 s"),
+        (1000.0, "1.00 s"),
+        (1500.0, "1.50 s"),
+        (10_000.0, "10.0 s"),
+    ] {
+        assert_eq!(p.format(ms), want, "{ms}");
+    }
+    assert_eq!(MACRO_OSC_INFO.param("amp_decay").unwrap().format(20_000.0), "20.0 s");
+    // Negative control: never four digits (the rounding carries into the next unit or decade).
+    assert_eq!(p.format(9.996), "10.0 ms");
+    assert_eq!(crate::time_text(99.96), "100 ms");
 }
 
 /// State is the parameters: a new instance given the same values plays the same bits.
