@@ -101,3 +101,29 @@ fn drag_shift_drag_unity_and_scroll() {
     }
     assert_eq!(got, Some(0.0), "double-click to unity");
 }
+
+#[test]
+fn the_channel_scale_has_a_six_px_tick_beside_the_cap_column_at_every_mark() {
+    let mut rig = Rig::new();
+    // The cap at +6 and at minus infinity: the ticks stay where the board puts them either way.
+    for db in [6.0, f32::NEG_INFINITY] {
+        let l = rig.idle(|ui| fader::show(ui, egui::Id::new("f"), Variant::Channel, 220.0, db, false)).layout;
+        assert_eq!(l.ticks.len(), 8, "a tick at each scale mark");
+        for (i, (t, db)) in l.ticks.iter().zip(crate::tokens::fader::SCALE_LABELS).enumerate() {
+            assert_eq!(size(*t).0, 6.0, "6 px long");
+            assert!((size(*t).1 - 1.0).abs() < 0.01, "one pixel row");
+            let cap_right = mid(l.track).x + 16.0;
+            assert_eq!(t[0], cap_right + 2.0, "2 px right of the cap column");
+            let y = l.track[1] + fader::taper(db.unwrap_or(f32::NEG_INFINITY)) * (l.track[3] - l.track[1]);
+            assert!((mid(*t).y - y).abs() < 0.6, "{db:?} on its mark");
+            assert!(t[2] < l.marks[i].1[0], "{db:?}: left of its label");
+            let ink = if i == 1 { DARK.text_muted } else { DARK.line_strong };
+            assert_eq!(l.tick_inks[i], ink, "{db:?}: `line.strong`, `text.muted` at 0 dB");
+        }
+    }
+    // Negative control: the other variants draw no Channel ticks (Compact keeps its own beside the track).
+    for variant in [Variant::Compact, Variant::Horizontal] {
+        let l = rig.idle(|ui| fader::show(ui, egui::Id::new("f"), variant, 220.0, 0.0, false)).layout;
+        assert!(l.ticks.is_empty() && l.tick_inks.is_empty(), "{variant:?}");
+    }
+}

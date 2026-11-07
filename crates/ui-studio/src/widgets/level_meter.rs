@@ -245,6 +245,18 @@ pub struct ChannelMeterLayout {
     pub grid: Vec<[f32; 4]>,
     /// The y of the 0 dBFS line.
     pub reference_y: f32,
+    /// The wells' corner radius.
+    pub well_radius: f32,
+    /// The well's fill and its 1 px edge (`surface.inset`, `line.inset`).
+    #[serde(skip)]
+    pub well_fill: egui::Color32,
+    #[serde(skip)]
+    pub well_edge: egui::Color32,
+    /// The grid lines' ink (`line`) and the hold line's (`text`).
+    #[serde(skip)]
+    pub grid_color: egui::Color32,
+    #[serde(skip)]
+    pub hold_color: egui::Color32,
     #[serde(skip)]
     pub peak_color: egui::Color32,
     /// The ink of the part of the peak fill above 0 dBFS.
@@ -257,6 +269,10 @@ pub struct ChannelMeterLayout {
 
 /// The gap between the clip cell and the top of the well.
 pub const CHANNEL_CLIP_GAP: f32 = 4.0;
+/// The corner radius of a channel meter's well and fills, and of its clip cell (the Mixer board:
+/// `rx 1.5` and `rx 1`).
+pub const CHANNEL_WELL_RADIUS: f32 = 1.5;
+pub const CHANNEL_CLIP_RADIUS: f32 = 1.0;
 
 /// The vertical channel meter (Fader > Meter, the mixer's stereo meter): one `surface.inset` well
 /// per channel, `bar` wide with the meter gap between, spanning `travel` (the fader's track, so
@@ -270,6 +286,11 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
     let mut out = ChannelMeterLayout {
         peak_color: t.meter_ok.gamma_multiply(spec::METER_PEAK_ALPHA),
         peak_over_color: t.meter_hot.gamma_multiply(spec::METER_PEAK_ALPHA),
+        well_radius: CHANNEL_WELL_RADIUS,
+        well_fill: t.surface_inset,
+        well_edge: t.line_inset,
+        grid_color: t.line,
+        hold_color: t.text,
         ..Default::default()
     };
     out.clip = channels.iter().any(|c| c.clip);
@@ -279,7 +300,8 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         let well = Rect::from_min_max(pos2(x0, travel.min.y), pos2(x0 + bar, travel.max.y));
         let reference_y = y_of(0.0, well);
         out.reference_y = reference_y;
-        p.rect_filled(well, 0.0, t.surface_inset);
+        let rad = CHANNEL_WELL_RADIUS;
+        p.rect_filled(well, rad, t.surface_inset);
         for m in spec::SCALE_LABELS {
             let (top, bottom) = fader::snap_rows(p, y_of(m.unwrap_or(f32::NEG_INFINITY), well), 1.0);
             let line = Rect::from_min_max(pos2(well.min.x, top), pos2(well.max.x, bottom));
@@ -292,7 +314,7 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         let fill_to = |db: f32| (db > fader::FLOOR_DB).then(|| Rect::from_min_max(pos2(well.min.x, y_of(db, well).max(reference_y)), well.max));
         let peak = fill_to(ch.peak_db);
         if let Some(r) = peak {
-            p.rect_filled(r, 0.0, out.peak_color);
+            p.rect_filled(r, rad, out.peak_color);
         }
         let peak_over = (ch.peak_db > 0.0).then(|| Rect::from_min_max(pos2(well.min.x, y_of(ch.peak_db, well)), pos2(well.max.x, reference_y)));
         if let Some(r) = peak_over {
@@ -300,7 +322,7 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         }
         let rms = ch.rms_db.and_then(fill_to);
         if let Some(r) = rms {
-            p.rect_filled(r, 0.0, t.meter_ok);
+            p.rect_filled(r, rad, t.meter_ok);
         }
         let over = ch.rms_db.filter(|db| *db > 0.0).map(|db| Rect::from_min_max(pos2(well.min.x, y_of(db, well)), pos2(well.max.x, reference_y)));
         if let Some(r) = over {
@@ -313,13 +335,13 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         if let Some(r) = hold {
             p.rect_filled(r, 0.0, t.text);
         }
-        p.rect_stroke(well, 0.0, Stroke::new(1.0, t.line_inset), StrokeKind::Inside);
+        p.rect_stroke(well, rad, Stroke::new(1.0, t.line_inset), StrokeKind::Inside);
         let cell = Rect::from_min_max(
             pos2(well.min.x, well.min.y - CHANNEL_CLIP_GAP - spec::METER_CLIP_CELL),
             pos2(well.max.x, well.min.y - CHANNEL_CLIP_GAP),
         );
         let ink = if ch.clip { t.meter_hot } else { t.line };
-        p.rect_filled(cell, 0.0, ink);
+        p.rect_filled(cell, CHANNEL_CLIP_RADIUS, ink);
         out.clips.push(ch.clip);
         out.clip_colors.push(ink);
         out.wells.push(r4(well));

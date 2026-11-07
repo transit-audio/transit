@@ -346,3 +346,23 @@ fn the_open_fx_list_lies_inside_the_docked_pane() {
     assert!(l[3] > l[1], "the list is open");
     assert!(l[1] >= area[1] - 0.01 && l[3] <= area[3] + 0.01, "{l:?} inside {area:?}");
 }
+
+#[test]
+fn every_strip_draws_the_scale_ticks_beside_its_cap_column_in_both_variants() {
+    let (mut app, ctx, mut time, a) = mixer_app();
+    for full in [false, true] {
+        if full {
+            full_mixer(&mut app, &ctx, &mut time);
+        }
+        let s = strip(&app, a);
+        let f = s.fader_layout.clone().unwrap();
+        let well = s.meter_layout.as_ref().unwrap().wells[0];
+        assert_eq!(f.ticks.len(), 8, "full {full}: a tick per scale mark");
+        for (t, (_, label)) in f.ticks.iter().zip(&f.marks) {
+            assert!(t[0] >= f.cap[2] && t[2] < label[0] && t[2] < well[0], "full {full}: between the cap column and the label: {t:?}");
+        }
+        assert_eq!(f.tick_inks[1], DARK.text_muted, "the 0 dB tick");
+        // Negative control: every other tick is `line.strong`, never the 0 dB ink.
+        assert!(f.tick_inks.iter().enumerate().all(|(i, c)| (i == 1) == (*c == DARK.text_muted)));
+    }
+}

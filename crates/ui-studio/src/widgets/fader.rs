@@ -22,6 +22,10 @@ pub const FINE: f32 = 10.0;
 pub const CHANNEL_FADER_W: f32 = 36.0;
 pub const CHANNEL_SCALE_W: f32 = 30.0;
 const TICK: f32 = 4.0;
+/// The Channel variant's tick beside the cap column at each scale mark (the Mixer board: 6 px,
+/// starting 2 px right of the cap; `line.strong`, `text.muted` at 0 dB).
+pub const CHANNEL_TICK: f32 = 6.0;
+pub const CHANNEL_TICK_GAP: f32 = 2.0;
 
 /// Fraction of travel from the top (0 at +6 dB, 1 at minus infinity) for `db`.
 pub fn taper(db: f32) -> f32 {
@@ -107,6 +111,8 @@ pub struct FaderLayout {
     pub center_line: [f32; 4],
     /// Scale labels (Channel) or ticks (Compact): text and where it sits.
     pub marks: Vec<(String, [f32; 4])>,
+    /// The Channel variant's ticks beside the cap column, one per scale mark (empty otherwise).
+    pub ticks: Vec<[f32; 4]>,
     /// Where the caller draws the meter (Channel only).
     pub meter: Option<[f32; 4]>,
     pub muted: bool,
@@ -118,6 +124,8 @@ pub struct FaderLayout {
     pub cap_rim: Color32,
     #[serde(skip)]
     pub mark_inks: Vec<Color32>,
+    #[serde(skip)]
+    pub tick_inks: Vec<Color32>,
 }
 
 pub struct FaderOut {
@@ -213,10 +221,21 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
     // Scale labels (Channel) or ticks (Compact) at the taper's marks.
     let mut marks = Vec::new();
     let mut mark_inks = Vec::new();
+    let (mut ticks, mut tick_inks) = (Vec::new(), Vec::new());
     if !horizontal {
         for m in spec::SCALE_LABELS {
             let y = track.min.y + taper(m.unwrap_or(f32::NEG_INFINITY)) * track.height();
             let ink = if m == Some(0.0) { t.text } else { t.text_faint };
+            if variant == Variant::Channel {
+                // The tick beside the cap column, on whole physical pixel rows like the meter's grid.
+                let x = track.center().x + cw / 2.0 + CHANNEL_TICK_GAP;
+                let (top, bottom) = snap_rows(p, y, 1.0);
+                let r = Rect::from_min_max(pos2(x, top), pos2(x + CHANNEL_TICK, bottom));
+                let tick_ink = if m == Some(0.0) { t.text_muted } else { t.line_strong };
+                p.rect_filled(r, 0.0, tick_ink);
+                ticks.push(r4(r));
+                tick_inks.push(tick_ink);
+            }
             let r = if variant == Variant::Channel {
                 let role = tokens::TypeRole { size: 10.0, ..tokens::READOUT_DISPLAY };
                 super::role_text(p, &role, &label(m), ink, Align2::RIGHT_CENTER, pos2(rect.min.x + CHANNEL_FADER_W + CHANNEL_SCALE_W, y))
@@ -242,11 +261,13 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
         cap: r4(cap),
         center_line: r4(center_line),
         marks,
+        ticks,
         meter,
         muted,
         fill_color,
         cap_fill: t.knob_cap_active,
         cap_rim: t.ink_arrow,
         mark_inks,
+        tick_inks,
     }
 }

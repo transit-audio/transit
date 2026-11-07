@@ -4,7 +4,7 @@
 
 use super::fader;
 use super::level_meter::{self, Ballistics, Kind, Meter};
-use super::test_support::{Rig, inside, mid};
+use super::test_support::{Rig, inside, mid, size};
 use crate::theme::DARK;
 
 /// Steps a reading from `from` toward `to` in frames of `dt` up to the first frame at or past
@@ -139,6 +139,10 @@ fn the_channel_meter_draws_a_well_per_channel_on_the_taper() {
     assert_eq!(l.clip_cells[0], [100.0, 32.0, 110.0, 36.0], "4 px, 4 above the well");
     assert_eq!((l.clip, l.clip_colors.clone()), (false, vec![DARK.line, DARK.line]));
     assert_eq!(l.grid.len(), 8, "a line at each scale mark");
+    // The well, its edge, grid and hold inks and the board's corner radius.
+    assert_eq!((l.well_fill, l.well_edge, l.grid_color, l.hold_color), (DARK.surface_inset, DARK.line_inset, DARK.line, DARK.text));
+    assert_eq!(l.well_radius, 1.5);
+    assert!((size(l.holds[0].unwrap()).1 - 2.0).abs() < 0.01, "a 2 px hold line");
     assert!((l.reference_y - y(0.0)).abs() < 0.02);
     // Negative control: an RMS reading draws the solid layer, hot only above 0 dBFS, and a latch
     // lights the cells.
