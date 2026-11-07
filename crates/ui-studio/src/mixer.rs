@@ -27,7 +27,7 @@ mod anatomy;
 mod channel;
 mod controls;
 mod hue;
-mod inserts;
+pub(crate) mod inserts;
 mod main_bus;
 mod menus;
 mod meters;

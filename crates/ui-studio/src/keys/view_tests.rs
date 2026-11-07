@@ -481,3 +481,11 @@ fn an_old_ui_json_with_both_panes_on_loads_with_the_mixer_shown() {
     let saved = serde_json::to_value(&ui).unwrap();
     assert!(saved["show_mixer"] == false && saved["show_devices"] == true);
 }
+
+#[test]
+fn opening_a_device_card_from_the_mixer_leaves_exactly_one_pane_shown() {
+    let mut t = T::new();
+    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
+    crate::mixer::inserts::open_card(&mut t.app, t.track);
+    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer, "devices shown, mixer hidden");
+}

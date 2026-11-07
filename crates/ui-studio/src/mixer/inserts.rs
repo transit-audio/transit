@@ -197,9 +197,9 @@ fn insert_slot(
 
 /// Opens the device chain on `track`, where an unresponsive insert's card is hatched with the
 /// reason and Resume.
-fn open_card(app: &mut StudioApp, track: TrackId) {
+pub(crate) fn open_card(app: &mut StudioApp, track: TrackId) {
     app.focus(track);
-    app.ui.show_devices = true;
+    app.ui.show_devices_pane();
 }
 
 /// The names of the inserts on `t` that do not answer, in slot order.
