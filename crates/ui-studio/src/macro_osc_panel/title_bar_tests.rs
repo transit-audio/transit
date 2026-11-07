@@ -2,7 +2,7 @@
 //! system, the output meter, bypass and the follow toggle.
 
 use super::test_rig::{T, info, mid};
-use super::title_bar::{BUTTON, FIELD_W, METER_W, stepped};
+use super::title_bar::{BUTTON, FIELD_MIN, FIELD_W, METER_W, preset_layout, preset_width, stepped};
 use crate::theme::TOKENS;
 use crate::widgets::test_support::size;
 
@@ -32,12 +32,13 @@ fn the_bar_draws_the_board_anatomy_in_tokens() {
     for r in [b.prev, b.next, b.save, b.bypass, b.menu, b.close, b.follow] {
         assert_eq!(size(r), (BUTTON, BUTTON), "{r:?}");
     }
-    assert_eq!(size(b.field).0, FIELD_W);
+    assert!((size(b.field).0 - FIELD_W).abs() < 0.01, "{:?}", b.field);
     assert_eq!(size(b.meter).0, METER_W);
-    // The field is centered on the bar; prev, field, next, save run left to right.
-    let center = (b.bar[0] + b.bar[2]) / 2.0;
+    // The browser centers in the free space between the side groups; prev, field, next, save run
+    // left to right.
+    let center = (b.device_rect[2] + b.meter[0]) / 2.0;
     assert!(b.prev[2] < b.field[0] && b.field[2] < b.next[0] && b.next[2] < b.save[0]);
-    assert!(((b.prev[0] + b.save[2]) / 2.0 - center).abs() < 1.0, "the browser is centered");
+    assert!(((b.prev[0] + b.save[2]) / 2.0 - center).abs() < 1.0, "the browser is centered in the free space");
     // Right side, from the edge in: close, menu, bypass, follow, then the meter.
     assert!(b.close[0] > b.menu[2] && b.menu[0] > b.bypass[2] && b.bypass[0] > b.follow[2] && b.follow[0] > b.meter[2]);
     // An instrument has no bypass: the glyph is ghosted and does nothing.
@@ -186,4 +187,94 @@ fn the_title_bar_preset_list_stays_open_for_save_as_then_saves_and_closes() {
     t.key("escape");
     assert_eq!(t.painted("Factory").0, 0, "Escape closes it");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Every rect the bar records, named.
+fn bar_rects(b: &super::TitleLayout) -> Vec<(&'static str, [f32; 4])> {
+    vec![
+        ("track", b.track_rect),
+        ("device", b.device_rect),
+        ("prev", b.prev),
+        ("field", b.field),
+        ("next", b.next),
+        ("save", b.save),
+        ("meter", b.meter),
+        ("readout", b.readout_rect),
+        ("follow", b.follow),
+        ("bypass", b.bypass),
+        ("menu", b.menu),
+        ("close", b.close),
+    ]
+}
+
+fn overlaps(a: [f32; 4], b: [f32; 4]) -> bool {
+    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+}
+
+/// The pairs of rects that intersect and the rects outside the bar.
+fn faults(b: &super::TitleLayout) -> Vec<String> {
+    let r = bar_rects(b);
+    let mut out = Vec::new();
+    for (i, (n, a)) in r.iter().enumerate() {
+        if a[0] < b.bar[0] || a[2] > b.bar[2] || a[1] < b.bar[1] || a[3] > b.bar[3] {
+            out.push(format!("{n} outside the bar"));
+        }
+        for (m, c) in &r[i + 1..] {
+            if overlaps(*a, *c) {
+                out.push(format!("{n} meets {m}"));
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn the_bar_reflows_without_overlap_from_the_minimum_to_the_design_width() {
+    for width in [super::MIN_WIDTH, super::DESIGN_WIDTH] {
+        let (mut t, tr) = T::open();
+        t.screen = egui::vec2(width + 2.0 * crate::device_window::SCREEN_MARGIN, 900.0);
+        t.frames(3);
+        let p = t.panel(tr);
+        assert_eq!(p.window[2] - p.window[0], width);
+        let b = p.title;
+        assert_eq!(faults(&b), Vec::<String>::new(), "at {width}");
+        assert!(size(b.field).0 >= FIELD_MIN && size(b.field).0 <= FIELD_W + 0.01, "at {width}: {:?}", b.field);
+        let full = crate::widgets::role_size(
+            &egui::Painter::new(t.ctx.clone(), egui::LayerId::background(), egui::Rect::EVERYTHING),
+            &crate::tokens::TITLE_DEVICE,
+            &b.device,
+        )
+        .x;
+        assert!((b.device_rect[2] - b.device_rect[0] - full).abs() < 0.01, "at {width}: the device title in full");
+        if width == super::MIN_WIDTH {
+            // Negative control: the browser centered on the bar (before 326-X) meets a side group.
+            let w = preset_width(FIELD_W);
+            let x = (b.bar[0] + b.bar[2]) / 2.0 - w / 2.0;
+            let (y0, y1) = (b.prev[1], b.prev[3]);
+            let mut old = b.clone();
+            old.prev = [x, y0, x + BUTTON, y1];
+            old.field = [x + BUTTON + 4.0, y0, x + BUTTON + 4.0 + FIELD_W, y1];
+            old.next = [old.field[2] + 4.0, y0, old.field[2] + 4.0 + BUTTON, y1];
+            old.save = [old.next[2] + 8.0, y0, old.next[2] + 8.0 + BUTTON, y1];
+            assert!(!faults(&old).is_empty(), "the old centering would overlap at {width}");
+        }
+    }
+}
+
+#[test]
+fn the_field_shrinks_to_its_floor_before_the_device_title_truncates() {
+    // Room for the widest field: it centers in the free space.
+    let (x, field, cut) = preset_layout(300.0, 1000.0, 200.0);
+    assert_eq!((field, cut), (FIELD_W, None));
+    assert_eq!(x - 312.0, 988.0 - (x + preset_width(FIELD_W)), "centered between the groups");
+    // Less room: the field narrows, nothing else moves.
+    let (_, field, cut) = preset_layout(300.0, 700.0, 200.0);
+    assert!(field < FIELD_W && field > FIELD_MIN && cut.is_none(), "{field}");
+    // Below the floor: the field keeps 160 against the right group, the device title gives way.
+    let (x, field, cut) = preset_layout(300.0, 560.0, 200.0);
+    assert_eq!(field, FIELD_MIN);
+    assert_eq!(x + preset_width(FIELD_MIN), 548.0, "against the right group");
+    assert_eq!(cut, Some(x - 12.0 - 200.0), "the device title ends a gap before the browser");
+    // Negative control: never a field under the floor.
+    assert_eq!(preset_layout(300.0, 320.0, 200.0).1, FIELD_MIN);
 }

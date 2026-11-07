@@ -1,7 +1,12 @@
 //! The device title bar (README, Device anatomy A; the board's header): 52 px on `bg.titlebar`
-//! with a 1 px `line` below. Left: the brand, a divider, the track and the device. Centered: the
-//! preset browser (previous, the name field, next, save) over the existing preset system. Right:
-//! the output meter and its readout, the follow-selection toggle, bypass, the device menu, close.
+//! with a 1 px `line` below. Left: the brand, a divider, the track and the device. Centered in
+//! the free space between the two side groups: the preset browser (previous, the name field,
+//! next, save) over the existing preset system. Right: the output meter and its readout, the
+//! follow-selection toggle, bypass, the device menu, close.
+//!
+//! **Reflow** (326-X, [`preset_layout`]): the side groups keep their places; the field shrinks
+//! from 300 toward 160 before anything moves; below that the device title truncates with an
+//! ellipsis, never a control.
 //!
 //! The title bar's buttons are the board's: 32 square, `surface.panel` with a 1 px `line` and
 //! radius 6, a 14 px glyph in `text.muted`; close is borderless. The bypass glyph keeps the insert
@@ -22,6 +27,8 @@ pub const BUTTON: f32 = space::CONTROL_HEIGHT[1];
 const BUTTON_RADIUS: f32 = radius::DISPLAY;
 const GLYPH: f32 = tokens::chrome::ICON_GLYPH;
 pub const FIELD_W: f32 = 300.0;
+/// The narrowest the preset field gets before the device title gives way (326-X).
+pub const FIELD_MIN: f32 = 160.0;
 /// The output meter: a 4 px bar 140 wide, and its readout's slot.
 pub const METER_W: f32 = 140.0;
 const METER_H: f32 = 4.0;
@@ -35,6 +42,9 @@ pub struct TitleLayout {
     pub bar: [f32; 4],
     pub track: String,
     pub device: String,
+    /// The left group: the brand to the track's "/" (326-X), and the device title as drawn.
+    pub track_rect: [f32; 4],
+    pub device_rect: [f32; 4],
     pub prev: [f32; 4],
     pub field: [f32; 4],
     /// The field's text: the list the preset is in ("Factory", "User"; empty for neither) and its name.
@@ -45,6 +55,7 @@ pub struct TitleLayout {
     pub meter: [f32; 4],
     pub meter_fill: [f32; 4],
     pub readout: String,
+    pub readout_rect: [f32; 4],
     pub follow: [f32; 4],
     pub follow_on: bool,
     pub bypass: [f32; 4],
@@ -206,6 +217,35 @@ fn meter_level(app: &mut StudioApp, ui: &Ui, dev: Dev) -> f32 {
     shown
 }
 
+/// The preset browser's width with a field `field` wide: previous, the field, next, save.
+pub fn preset_width(field: f32) -> f32 {
+    BUTTON + 4.0 + field + 4.0 + BUTTON + 8.0 + BUTTON
+}
+
+/// Where the preset browser goes between the left group (ending at `left_end` with the device
+/// title at full width) and the right group (starting at `right_start`): its left edge, the
+/// field's width, and the widest the device title may draw from `device_x` (`None`: in full).
+/// The browser centers in the free space with the widest field up to [`FIELD_W`] that fits;
+/// below [`FIELD_MIN`] it keeps the floor against the right group and the device title gives way.
+pub fn preset_layout(left_end: f32, right_start: f32, device_x: f32) -> (f32, f32, Option<f32>) {
+    let (from, to) = (left_end + GAP, right_start - GAP);
+    let field = (to - from - preset_width(0.0)).clamp(FIELD_MIN, FIELD_W);
+    let w = preset_width(field);
+    if to - from >= w {
+        (from + (to - from - w) / 2.0, field, None)
+    } else {
+        let x = to - w;
+        (x, field, Some((x - GAP - device_x).max(0.0)))
+    }
+}
+
+/// `text` in `role` cut to `max_w` with an ellipsis (the names' rule: insert slots, pads).
+fn fitted(painter: &egui::Painter, role: &tokens::TypeRole, text: &str, color: Color32, max_w: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = role.job(painter.ctx(), text, color);
+    job.wrap = egui::text::TextWrapping { max_width: max_w, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    painter.layout_job(job)
+}
+
 /// Draws the bar into `rect` (52 high) and records it.
 pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follow: bool, lay: &mut EditorLayout, out: &mut MacroLayout) -> TitleOut {
     let t = &TOKENS;
@@ -233,11 +273,18 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follo
     let r = widgets::role_text(&p, &tokens::LABEL_CONTROL, &tl.track, t.text_faint, Align2::LEFT_CENTER, pos2(x, cy));
     let r = widgets::role_text(&p, &tokens::LABEL_CONTROL, "/", t.text_faint, Align2::LEFT_CENTER, pos2(r.max.x + 8.0, cy));
     tl.device = dev.info.name.to_string();
-    widgets::role_text(&p, &tokens::TITLE_DEVICE, &tl.device, t.text, Align2::LEFT_CENTER, pos2(r.max.x + 8.0, cy));
+    let device_x = r.max.x + 8.0;
+    let left_end = device_x + widgets::role_size(&p, &tokens::TITLE_DEVICE, &tl.device).x;
+    let right_start = rect.max.x - space::WINDOW_PADDING - 4.0 * BUTTON - 4.0 * GAP - READOUT_W - GAP - METER_W;
+    let (px, field_w, device_max) = preset_layout(left_end, right_start, device_x);
+    let galley = fitted(&p, &tokens::TITLE_DEVICE, &tl.device, t.text, device_max.unwrap_or(f32::INFINITY));
+    let device_r = Align2::LEFT_CENTER.anchor_size(pos2(device_x, cy), galley.size());
+    p.galley(device_r.min, galley, t.text);
+    tl.device_rect = r4(device_r);
+    tl.track_rect = r4(Rect::from_min_max(pos2(rect.min.x + space::WINDOW_PADDING, r.min.y), r.max));
 
-    // Centered: previous, the field, next, save.
-    let total = BUTTON + 4.0 + FIELD_W + 4.0 + BUTTON + 8.0 + BUTTON;
-    let mut x = rect.center().x - total / 2.0;
+    // Centered in the free space: previous, the field, next, save.
+    let mut x = px;
     let sq = |x: f32| Rect::from_min_size(pos2(x, cy - BUTTON / 2.0), vec2(BUTTON, BUTTON));
     let names = preset_names(app, dev.info.id);
     let prev = sq(x);
@@ -248,10 +295,10 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follo
     }
     paint_glyph(&p, prev.center(), "prev", t.text_muted);
     x += BUTTON + 4.0;
-    let field = Rect::from_min_size(pos2(x, cy - BUTTON / 2.0), vec2(FIELD_W, BUTTON));
+    let field = Rect::from_min_size(pos2(x, cy - BUTTON / 2.0), vec2(field_w, BUTTON));
     field_ui(app, ui, dev, field, &names, &mut tl);
     lay.preset = r4(field);
-    x += FIELD_W + 4.0;
+    x += field_w + 4.0;
     let next = sq(x);
     if button(ui, id("next"), next, !names.is_empty()).clicked()
         && let Some(i) = stepped(&names, &dev.ins.preset, 1)
@@ -317,7 +364,8 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follo
     x -= GAP + READOUT_W;
     let level = meter_level(app, ui, dev);
     tl.readout = readout(level);
-    widgets::role_text(&p, &tokens::VALUE, &tl.readout, t.text_muted, Align2::LEFT_CENTER, pos2(x, cy));
+    let rr = widgets::role_text(&p, &tokens::VALUE, &tl.readout, t.text_muted, Align2::LEFT_CENTER, pos2(x, cy));
+    tl.readout_rect = r4(rr);
     x -= GAP + METER_W;
     let meter = Rect::from_min_size(pos2(x, cy - METER_H / 2.0), vec2(METER_W, METER_H));
     p.rect_filled(meter, tokens::fader::TRACK_RADIUS, t.line);
