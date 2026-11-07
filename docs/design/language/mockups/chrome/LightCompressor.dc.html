@@ -36,24 +36,26 @@ body{margin:0;background:#D5D8DC}
 <path d="M54.5 0 V218 M109 0 V218 M163.5 0 V218 M0 54.5 H218 M0 109 H218 M0 163.5 H218" stroke="#DFE2E7" stroke-width="1"></path>
 <line x1="0" y1="218" x2="218" y2="0" stroke="#D3D7DD" stroke-width="1" stroke-dasharray="3 3"></line>
 <path d="{{transfer}}" fill="none" stroke="#1764D8" stroke-width="2"></path>
-<circle cx="{{dotX}}" cy="{{dotY}}" r="5" fill="#E17000" stroke="#ECEEF1" stroke-width="2"></circle>
+<circle cx="{{dotX}}" cy="{{dotY}}" r="4" fill="#1B1E23" stroke="#ECEEF1" stroke-width="2"></circle>
 </svg>
 </div>
 </div>
 <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px">
 <div style="display: flex; justify-content: space-between">
 <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #4A515B">History</span>
-<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670">IN · OUT · GR</span>
+<span style="display: flex; align-items: center; gap: 10px; font: 400 11px 'IBM Plex Mono', monospace; color: #5F6670"><span style="display: flex; align-items: center; gap: 4px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #A2A9B4; opacity: 0.6"></span>IN</span><span style="display: flex; align-items: center; gap: 4px"><span style="width: 10px; height: 2px; border-radius: 1px; background: #1764D8"></span>OUT</span><span style="display: flex; align-items: center; gap: 4px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #E17000; opacity: 0.5"></span>GR</span></span>
 </div>
-<div style="flex: 1; background: #ECEEF1; border: 1px solid #DCE0E5; border-radius: 6px; padding: 8px">
+<div style="flex: 1; background: #ECEEF1; border: 1px solid #DCE0E5; border-radius: 6px; padding: 8px; position: relative">
 <svg width="100%" height="218" viewBox="0 0 520 218" preserveAspectRatio="none" role="img" aria-label="Level and gain reduction history">
 <path d="M0 54.5 H520 M0 109 H520 M0 163.5 H520" stroke="#DFE2E7" stroke-width="1"></path>
+<path d="M130 0 V218 M260 0 V218 M390 0 V218" stroke="#DFE2E7" stroke-width="1"></path>
 <path d="{{inFill}}" fill="#A2A9B4" fill-opacity="0.35"></path>
 <path d="{{outLine}}" fill="none" stroke="#1764D8" stroke-width="1.75"></path>
 <path d="{{grFill}}" fill="#E17000" fill-opacity="0.22"></path>
 <path d="{{grLine}}" fill="none" stroke="#E17000" stroke-width="1.75"></path>
 <line x1="0" y1="{{threshY}}" x2="520" y2="{{threshY}}" stroke="#1B1E23" stroke-opacity="0.45" stroke-width="1" stroke-dasharray="4 4"></line>
 </svg>
+<span style="position: absolute; left: 12px; bottom: 10px; font: 400 10px 'IBM Plex Mono', monospace; color: #5F6670">−4 s</span><span style="position: absolute; right: 12px; bottom: 10px; font: 400 10px 'IBM Plex Mono', monospace; color: #5F6670">now</span>
 </div>
 </div>
 <div style="width: 64px; display: flex; flex-direction: column; gap: 6px; align-items: center">
