@@ -9,11 +9,11 @@
 //!   operating point, a solid 8 px `text` dot with a 2 px `surface.inset` ring at the published
 //!   detector level and the curve's output there, stepped with the peak fall-off ballistics and
 //!   hidden below −60 dB or until a level is published (README, Compressor displays).
-//! - **History** (the rest): a display well with grid lines at the quarters.
+//! - **History** (the rest): the [`super::history`] well, its `IN · OUT · GR` legend in the label row.
 //! - **GR** (64 wide): the kit's gain-reduction bar (14 wide, the board's), filling down from the
 //!   top with its `GR` tag, stepped with the peak fall-off ballistics, and the readout under it.
 
-use super::{CompressorLayout, Dev, WellRecord, named, panel, section_label};
+use super::{CompressorLayout, Dev, WellRecord, history, named, panel, section_label};
 use crate::StudioApp;
 use crate::builtin_editor::EditorLayout;
 use crate::theme::TOKENS;
@@ -109,6 +109,12 @@ pub fn gr_readout(gr_db: f32) -> String {
     if gr_db < 0.05 { "0.0 dB".to_string() } else { format!("-{gr_db:.1} dB") }
 }
 
+/// The tap's newest gain reduction in dB (at least 0).
+fn gr_raw(app: &StudioApp, dev: Dev) -> f32 {
+    let uid = crate::scope_strip::hub_uid(dev.key, dev.ins);
+    app.scope_hub().map_or(0.0, |h| h.gain_reduction_db(dev.key.0, uid)).max(0.0)
+}
+
 /// Grid lines at the quarters across a well's plot (`vertical` adds the three upright ones), in
 /// `grid`, 1 px.
 fn grid(ui: &Ui, plot: Rect, vertical: bool) -> Vec<[f32; 4]> {
@@ -152,8 +158,7 @@ fn paint_curve(ui: &Ui, plot: Rect, curve: &[[f32; 2]]) {
 /// The gain reduction the meter shows: the tap's newest reading, stepped with the peak fall-off
 /// ballistics (a deeper reduction shows within the frame, a recovery falls off over 300 ms).
 fn gr_level(app: &mut StudioApp, ui: &Ui, dev: Dev) -> f32 {
-    let uid = crate::scope_strip::hub_uid(dev.key, dev.ins);
-    let target = app.scope_hub().map_or(0.0, |h| h.gain_reduction_db(dev.key.0, uid)).max(0.0);
+    let target = gr_raw(app, dev);
     let dt = ui.input(|i| i.stable_dt).clamp(0.0, 0.1);
     let st = &mut app.builtin_editor.devices;
     let prev = st.gr.get(&dev.uid()).copied().unwrap_or(0.0);
@@ -235,7 +240,12 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let hw = Rect::from_min_max(pos2(hx, well_y), pos2(gr_col.min.x - space::PANEL_GAP, well_y + WELL));
     let mut c = super::child(ui, hw);
     let hist = display_well::show(&mut c, egui::Id::new(("compressor_history", dev.uid())), hw.size(), &display_well::Well::default());
-    let lines = grid(ui, rect_of(hist.layout.plot), false);
+    let hplot = rect_of(hist.layout.plot);
+    let mut lines = grid(ui, hplot, false);
+    lines.extend(history::second_lines(ui, hplot));
+    history::legend(ui, hw.max.x, hl.center().y, &mut out.hero.history);
+    history::record(app, ui, dev, gr_raw(app, dev));
+    history::show(app, ui, dev, hw, hplot, &mut out.hero.history);
     out.wells.push(WellRecord { name: "history".to_string(), well: hist.layout, grid: lines });
     lay.scope = r4(hw);
     // The gain-reduction bar and its readout.

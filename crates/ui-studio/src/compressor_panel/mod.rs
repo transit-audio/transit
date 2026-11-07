@@ -6,7 +6,7 @@
 //! Anatomy (README, Device anatomy): A, the shared 52 px title bar
 //! ([`crate::device_editor::title_bar`]); B, the hero panel ([`hero`]): the transfer curve in a
 //! display well with the unity diagonal and the operating point, the level and gain-reduction
-//! history well, and the gain-reduction meter with its readout; C, the controls
+//! history well ([`history`]), and the gain-reduction meter with its readout; C, the controls
 //! panel ([`sections`]): the dynamics knobs (Threshold, Ratio, Knee,
 //! Attack, Release, Makeup, Mix, the board's order), then beside a divider the sidechain key and
 //! the mode (Peak or Limit); then the Detector section bar (lookahead and the sidechain's
@@ -19,6 +19,7 @@
 //! The panel's own record is [`CompressorLayout`].
 
 mod hero;
+pub mod history;
 mod sections;
 pub mod window;
 
@@ -26,6 +27,8 @@ pub mod window;
 mod collapse_tests;
 #[cfg(test)]
 mod hero_tests;
+#[cfg(test)]
+mod history_tests;
 #[cfg(test)]
 mod sections_tests;
 #[cfg(test)]
@@ -103,6 +106,8 @@ pub struct HeroLayout {
     pub unity: Option<UnityRecord>,
     /// The operating point (`None` while hidden: nothing published yet, or below −60 dB).
     pub dot: Option<DotRecord>,
+    /// The history well's traces, threshold, time labels and legend.
+    pub history: history::HistoryRecord,
 }
 
 /// The sidechain key as last drawn: its label, the dropdown and the text it shows.

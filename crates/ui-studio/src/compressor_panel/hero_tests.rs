@@ -84,7 +84,7 @@ fn the_hero_lays_out_the_boards_three_columns() {
     }
     // The grids: the quarters across and up in the transfer well, across in the history.
     assert_eq!(tw.grid.len(), 6);
-    assert_eq!(hw.grid.len(), 3);
+    assert_eq!(hw.grid.len(), 6, "and a line each second");
     assert_eq!(tw.well.curve_color, crate::theme::TOKENS.signal);
 }
 

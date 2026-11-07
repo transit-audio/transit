@@ -80,6 +80,8 @@ pub struct State {
     /// The Compressor's operating points' displayed input levels (dB) by insert uid, once a level
     /// has been published since the window opened.
     pub dots: HashMap<u64, f32>,
+    /// The Compressor's history rings by insert uid.
+    pub history: HashMap<u64, crate::compressor_panel::history::History>,
     /// Rows Add route revealed, by insert uid (view state for the session; the Macro Oscillator).
     pub pending: HashMap<u64, Vec<usize>>,
     /// The editor Escape closes.
@@ -376,6 +378,7 @@ pub(crate) fn end_frame(app: &mut StudioApp, ctx: &egui::Context) {
     st.meters.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.gr.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.dots.retain(|u, _| now.iter().any(|s| s.0 == *u));
+    st.history.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.pending.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.collapsed.retain(|u| now.iter().any(|s| s.0 == *u));
     st.typing.retain(|u| now.iter().any(|s| s.0 == u.0));
