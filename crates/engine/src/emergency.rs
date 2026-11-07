@@ -14,8 +14,13 @@ use std::time::Duration;
 
 /// How long the shutdown work may take before the watchdog ends the process. It covers the
 /// autosave (with a capture of plug-in state), closing the input, dropping the player and the
-/// plug-in host thread's own 5 s shutdown wait, with room to spare. A normal quit takes well under
-/// a second.
+/// plug-in host thread's own 5 s shutdown wait, with room to spare. Last comes the native ASIO
+/// host's release (#363), which waits up to `transit_audio_asio::RELEASE_WAIT` (10 s) only when
+/// that thread is blocked in a driver call. A hung driver can therefore overrun this bound: the
+/// worst case is a player drop whose stream close waits the 10 s ASIO call timeout, plus the 5 s
+/// plug-in wait, plus the 10 s release wait. The watchdog then ends the process
+/// ([`EXIT_WATCHDOG`]) with that driver unreleased, which is no worse than before the release wait
+/// existed. A normal quit takes well under a second.
 // timing: stall-bound a ceiling for a hung plug-in or driver, far above a normal shutdown
 pub const SHUTDOWN_BOUND: Duration = Duration::from_secs(15);
 

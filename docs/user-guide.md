@@ -210,7 +210,7 @@ The ASIO list comes from the registry: transit lists every installed driver by n
 any of them. A driver is loaded only when transit opens it (on **Apply**, **Reconnect** or at startup
 with ASIO saved), so its channel counts, rates and buffer sizes show once it is open; until then the
 lists offer the standard choices. Loading a driver another app is using can take the interface away
-from that app, so transit never does it just to list. With `--no-audio` no device is listed or opened
+from that app, so transit never does it just to list. With `--no-audio` no audio device is listed or opened
 at all, so a second copy started that way never touches the driver the first one holds (a second
 copy with audio on opens its saved device like the first). When transit quits it releases the driver
 it holds before the process ends.

@@ -1193,18 +1193,47 @@ mod hardware {
         assert!(backend.host.shut_down(RELEASE_WAIT), "the host thread ended");
     }
 
-    /// #363 step 3 (c): the abandoned path, deliberately: the driver is instantiated and initialized,
-    /// then the handle and the backend are forgotten, so the process ends with the driver never
-    /// released (what an abandoned host thread left before the fix).
+    /// #363 step 3 (c): the abandoned path, deliberately. The test re-runs its own binary as a child
+    /// process (with `TRANSIT_363_CHILD=1`) in which the driver is instantiated and initialized, then
+    /// the handle and the backend are forgotten, so the child ends with the driver never released
+    /// (what an abandoned host thread left before the fix). The parent records the child's exit
+    /// code and timing even if the driver crashes or hangs the child at its exit (bounded at 60 s,
+    /// then killed).
     #[test]
-    #[ignore = "#363 step 3 (c): ends the process with the real driver initialized and never released (maintainer at the desk only)"]
+    #[ignore = "#363 step 3 (c): a child process ends with the real driver initialized and never released (maintainer at the desk only)"]
     fn hardware_363_c_abandoned_without_release() {
         let name = experiment_driver();
-        let backend = AsioBackend::new().expect("backend");
-        let loaded = backend.load(&name).unwrap_or_else(|e| panic!("load {name}: {e}"));
-        println!("{name} loaded ({} in / {} out); ending the process without releasing it", loaded.info().inputs, loaded.info().outputs);
-        std::mem::forget(loaded);
-        std::mem::forget(backend);
+        if std::env::var_os("TRANSIT_363_CHILD").is_some() {
+            let backend = AsioBackend::new().expect("backend");
+            let loaded = backend.load(&name).unwrap_or_else(|e| panic!("load {name}: {e}"));
+            println!("child: {name} loaded ({} in / {} out); ending the process without releasing it", loaded.info().inputs, loaded.info().outputs);
+            std::mem::forget(loaded);
+            std::mem::forget(backend);
+            return;
+        }
+        let exe = std::env::current_exe().expect("the test binary");
+        let started = Instant::now();
+        let mut child = std::process::Command::new(&exe)
+            .args(["--ignored", "--exact", "hardware::hardware_363_c_abandoned_without_release", "--nocapture", "--test-threads", "1"])
+            .env("TRANSIT_363_CHILD", "1")
+            .spawn()
+            .expect("start the child");
+        let deadline = started + Duration::from_secs(60);
+        let status = loop {
+            match child.try_wait().expect("wait for the child") {
+                Some(status) => break Some(status),
+                None if Instant::now() >= deadline => break None,
+                None => std::thread::sleep(Duration::from_millis(50)),
+            }
+        };
+        match status {
+            Some(status) => println!("parent: the child ended after {:?} with {status} (exit code {:?})", started.elapsed(), status.code()),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                println!("parent: the child did not end within 60 s; killed after {:?}", started.elapsed());
+            }
+        }
     }
 
     #[test]
