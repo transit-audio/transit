@@ -62,8 +62,11 @@ pub struct BounceForm {
     pub format: String,
     /// The lossless formats' bit depth (`16`, `24`, `32f`); not offered for Opus.
     pub bit_depth: String,
-    /// The Opus bitrate in kb/s (`96` to `256`, default `160`); offered for Opus only (#238).
+    /// The Opus bitrate in kb/s; offered for Opus only (#238). Until the user picks one it follows
+    /// the source: 160 for stereo (of 96 to 256), 96 for a mono bus (of 96 to 160).
     pub bitrate: String,
+    /// The user picked the bitrate: it no longer follows the source's default.
+    pub bitrate_picked: bool,
     pub normalize: bool,
     pub path: String,
     /// Stems by output path instead of one mix (ADR 0015 slice e).
@@ -385,6 +388,7 @@ impl StudioApp {
             format: "wav".into(),
             bit_depth: "24".into(),
             bitrate: transit_audio_io::DEFAULT_OPUS_KBPS.to_string(),
+            bitrate_picked: false,
             normalize: false,
             path: dir.join(name).to_string_lossy().into_owned(),
             by_path: false,
@@ -793,6 +797,18 @@ fn step_path_bounce(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
+/// The channel count the form's Opus bounce has, for its bitrate presets: 1 for a mono bus,
+/// otherwise 2 (the main mix bounces as stereo at least; stems by path use the stereo presets).
+fn opus_channels(f: &BounceForm, s: &transit_model::Session) -> usize {
+    if f.by_path || f.source == "main" {
+        return 2;
+    }
+    match s.bus_by_name(&f.source) {
+        Some(b) if b.format.channels() == 1 => 1,
+        _ => 2,
+    }
+}
+
 /// The form's Opus bitrate on a bounce request (`bitrate`, kb/s); the lossless formats carry none.
 fn add_bitrate(p: &mut Value, f: &BounceForm) {
     if f.format == "opus"
@@ -941,9 +957,16 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         }
         if f.format == "opus" {
             // A lossy codec has no bit depth: its rate is the choice instead (#238).
-            let items: Vec<(String, String)> = transit_audio_io::OPUS_BITRATES_KBPS.iter().map(|k| (format!("{k} kb/s"), k.to_string())).collect();
+            let channels = opus_channels(&f, &s);
+            let offered = transit_audio_io::opus_bitrates_kbps(channels);
+            if !f.bitrate_picked || !offered.iter().any(|k| k.to_string() == f.bitrate) {
+                f.bitrate = transit_audio_io::default_opus_kbps(channels).to_string();
+                f.bitrate_picked = false;
+            }
+            let items: Vec<(String, String)> = offered.iter().map(|k| (format!("{k} kb/s"), k.to_string())).collect();
             if let Some(v) = choices_with_help(ui, &f.bitrate, &items, &mut lay.bitrates, Some(crate::help::Id::BounceBitrate)) {
                 f.bitrate = v;
+                f.bitrate_picked = true;
             }
         } else {
             let items: Vec<(String, String)> =

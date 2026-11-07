@@ -129,7 +129,8 @@ the whole song, or one file per output path (**Stems by output path**). **Format
 FLAC, lossless at the bit depth you pick (16-bit, 24-bit or 32-bit float), or **Opus**, transit's
 lossy format for sharing: small files that play in every browser, phone and messaging app.
 
-With Opus the bit depth row gives way to **Bitrate**: 96, 128, 160 (the default), 192 or 256 kb/s.
+With Opus the bit depth row gives way to **Bitrate**: 96, 128, 160 (the default), 192 or 256 kb/s
+for stereo; a mono bus offers 96 (the default), 128 or 160 kb/s.
 The encoder is the reference libopus at its highest quality setting, with a variable bitrate that
 stays near the rate you pick, so a three-minute song at 160 kb/s is about 3.6 MB. Opus files are
 always 48 kHz: a session at another rate is converted as the file is written, and the file is

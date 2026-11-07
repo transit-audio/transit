@@ -17,8 +17,10 @@ thiserror.workspace = true
 [build-dependencies]
 cc = "1"
 
-# Mirrors `[workspace.lints]`, except that `unsafe` is allowed for the FFI module only (src/ffi.rs);
-# every other module carries `#![forbid(unsafe_code)]` (ADR 0013 rule, ADR 0048 implementation note).
+# Mirrors `[workspace.lints]`, except that `unsafe` is allowed for the FFI module only (src/ffi.rs):
+# the crate root carries `#![deny(unsafe_code)]` (deny, not forbid, so the one `#[allow(unsafe_code)]`
+# on `mod ffi` can take effect), and `cargo xtask layers` checks that allow is the only one (ADR 0048,
+# ADR 0013 amendment 2026-11-08).
 [lints.rust]
 unsafe_code = "allow"
 unsafe_op_in_unsafe_fn = "forbid"

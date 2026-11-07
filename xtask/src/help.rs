@@ -145,7 +145,7 @@ pub fn problems(entries: &[Entry], ids: &[(String, String)], sources: &[(String,
     out
 }
 
-fn rust_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+pub(crate) fn rust_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     let Ok(read) = std::fs::read_dir(dir) else { return };
     for entry in read.flatten() {
         let path = entry.path();

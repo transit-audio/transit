@@ -33,7 +33,10 @@ mod wav;
 
 pub use blocks::{BlockReader, MAX_HELD_BYTES, ReadSeek};
 pub use buffer::AudioBuffer;
-pub use opus::{DEFAULT_OPUS_KBPS, OPUS_BITRATES_KBPS, opus_granules, opus_tags};
+pub use opus::{
+    DEFAULT_OPUS_KBPS, DEFAULT_OPUS_MONO_KBPS, OPUS_BITRATES_KBPS, OPUS_MONO_BITRATES_KBPS, default_opus_kbps, opus_bitrates_kbps, opus_granules,
+    opus_tags,
+};
 pub use pcm::MAX_DECODE_SAMPLES;
 use std::io::{Seek, Write};
 
@@ -141,7 +144,7 @@ pub struct EncodeOptions {
     pub dither: bool,
     /// Write a BWF `bext` chunk (WAV only; ignored for other formats).
     pub bwf: Option<BwfInfo>,
-    /// The Opus bitrate in kb/s (the VBR target; `None`: [`DEFAULT_OPUS_KBPS`]). Ignored for the
+    /// The Opus bitrate in kb/s (the VBR target; `None`: [`default_opus_kbps`], 160 stereo, 96 mono). Ignored for the
     /// lossless formats.
     #[serde(default)]
     pub bitrate_kbps: Option<u16>,

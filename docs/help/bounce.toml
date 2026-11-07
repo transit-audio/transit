@@ -10,4 +10,4 @@ text = "WAV, AIFF and FLAC are lossless, at the bit depth you pick. Opus is tran
 [[entry]]
 id = "bounce.bitrate"
 name = "Opus bitrate"
-text = "The average rate the Opus encoder aims for (variable bitrate). 160 kb/s is the default and transparent for most music; 96 kb/s suits demos and voice, 256 kb/s leaves the most headroom. Opus files are always 48 kHz: other session rates are converted as the file is written."
+text = "The average rate the Opus encoder aims for (variable bitrate). For stereo, 160 kb/s is the default and transparent for most music, and 256 kb/s leaves the most headroom; a mono bus defaults to 96 kb/s. Opus files are always 48 kHz: other session rates are converted as the file is written."

@@ -216,10 +216,42 @@ fn check_layers(metadata: &Metadata, read_manifest: impl Fn(&Path) -> Result<Str
     if problems.is_empty() { Ok(()) } else { Err(problems.join("\n")) }
 }
 
+/// Allowlisted crates whose `unsafe` is confined to one module by a crate-root `deny` (ADR 0048):
+/// the crate directory and the module. The manifest check cannot see inside a package.
+const UNSAFE_MODULES: &[(&str, &str)] = &[("crates/opus", "ffi")];
+
+/// `lib` (the crate root) denies `unsafe_code`, and `sources` (every `.rs` file of the crate, root
+/// included) hold exactly one `allow(unsafe_code)`: the line before `mod <module>;` in the root.
+fn check_unsafe_module(lib: &str, sources: &[String], module: &str) -> Result<(), String> {
+    if !lib.lines().any(|l| l.trim() == "#![deny(unsafe_code)]") {
+        return Err("the crate root does not carry #![deny(unsafe_code)]".into());
+    }
+    let allows: usize = sources.iter().map(|s| s.matches("allow(unsafe_code)").count()).sum();
+    let lines: Vec<&str> = lib.lines().map(str::trim).collect();
+    let paired = lines.windows(2).any(|w| w[0] == "#[allow(unsafe_code)]" && w[1] == format!("mod {module};"));
+    if allows != 1 || !paired {
+        return Err(format!("allow(unsafe_code) appears {allows} times; it may appear once, on `mod {module};` in the crate root"));
+    }
+    Ok(())
+}
+
+fn unsafe_modules(root: &Path) -> Result<(), String> {
+    for (dir, module) in UNSAFE_MODULES {
+        let src = root.join(dir).join("src");
+        let lib = std::fs::read_to_string(src.join("lib.rs")).map_err(|e| format!("{dir}: {e}"))?;
+        let mut files = Vec::new();
+        help::rust_files(&src, &mut files);
+        let sources = files.iter().map(std::fs::read_to_string).collect::<Result<Vec<_>, _>>().map_err(|e| format!("{dir}: {e}"))?;
+        check_unsafe_module(&lib, &sources, module).map_err(|e| format!("{dir}: {e}"))?;
+    }
+    Ok(())
+}
+
 fn layers() -> Result<(), String> {
     let out = cargo_command().args(["metadata", "--locked", "--format-version", "1", "--no-deps"]).output().map_err(|e| e.to_string())?;
     let metadata = metadata_output(out)?;
     check_layers(&metadata, |path| std::fs::read_to_string(path).map_err(|e| e.to_string()))?;
+    unsafe_modules(&root())?;
     file_size::run(&root())?;
     println!("layers: ok");
     Ok(())

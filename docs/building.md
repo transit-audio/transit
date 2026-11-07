@@ -9,6 +9,7 @@
 - Linux, headless test runs (CI, containers, WSL2): the egui tests render with wgpu and need a Vulkan adapter. Install `mesa-vulkan-drivers libvulkan1` (Mesa's CPU driver, lavapipe) and run with `WGPU_BACKEND=vulkan VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json` (`VK_DRIVER_FILES` is the newer name for the same setting). CI sets both. On WSL2 the default GL path can segfault, so set these there too.
 - macOS: the Xcode Command Line Tools (`xcode-select --install`).
 - A C++ compiler for workspace-wide builds and tests (`cargo build`/`cargo test` at the root or `--workspace`): the dev-only null-test oracle `crates/macro-osc-oracle` compiles vendored C++ (ADR 0033). MSVC on Windows (the Build Tools above), `g++` on Linux (`sudo apt install g++`), the Xcode Command Line Tools on macOS. The app itself (`-p transit`) never builds or links it.
+- A C compiler for the app itself: `transit-opus` compiles the vendored libopus with the `cc` crate for Opus export and import (ADR 0048). MSVC on Windows and the Xcode Command Line Tools on macOS (both above); `gcc` (or any `cc`) on Linux (`sudo apt install gcc`). No cmake or system libopus. It adds about 0.5 MB to the Windows release `transit.exe` (516,608 bytes, measured for #238). A cross build, such as aarch64 Linux for the ADR 0037 reference board, also needs a C cross compiler for that target; `cc` finds it through `CC_<target>` (for example `CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc`).
 
 ## Build and run
 

@@ -1036,6 +1036,32 @@ fn an_opus_bounce_follows_the_extension_and_carries_the_bitrate() {
 }
 
 #[test]
+fn a_mono_bus_offers_the_mono_bitrates_with_96_by_default() {
+    let mut t = T::new();
+    t.midi_clip();
+    t.app.run("mix.new_bus", json!({"name": "Voice", "format": "mono"})).unwrap();
+    t.app.open_bounce();
+    t.frames(3);
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    t.click(mid(lay.formats.iter().find(|m| m.value == "opus").unwrap().rect));
+    // Negative control: the main mix (stereo) offers the five stereo rates at 160.
+    let rates = |t: &T| t.app.finish.layout.bounce.clone().unwrap().bitrates.iter().map(|m| m.value.clone()).collect::<Vec<_>>();
+    assert_eq!(rates(&t), ["96", "128", "160", "192", "256"]);
+    assert_eq!(t.app.finish.bounce_form.as_ref().unwrap().bitrate, "160");
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    t.click(mid(lay.sources.iter().find(|m| m.value == "Voice").unwrap().rect));
+    t.frames(1);
+    assert_eq!(rates(&t), ["96", "128", "160"], "a mono bus offers the mono rates");
+    assert_eq!(t.app.finish.bounce_form.as_ref().unwrap().bitrate, "96", "96 kb/s is the mono default");
+    // A rate the user picked is kept while it is offered.
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    t.click(mid(lay.bitrates.iter().find(|m| m.value == "128").unwrap().rect));
+    t.click(mid(t.app.finish.layout.bounce.clone().unwrap().sources.iter().find(|m| m.value == "main").unwrap().rect));
+    t.frames(1);
+    assert_eq!(t.app.finish.bounce_form.as_ref().unwrap().bitrate, "128");
+}
+
+#[test]
 fn the_bounce_request_names_the_bitrate_for_opus_only() {
     let dir = Dir::new("opus-paths");
     let mut t = T::new();

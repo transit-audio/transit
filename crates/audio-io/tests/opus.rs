@@ -282,9 +282,14 @@ fn every_bitrate_preset_decodes_and_sizes_with_its_rate() {
 }
 
 #[test]
-fn the_default_bitrate_is_160_and_out_of_range_rates_are_refused() {
+fn the_default_bitrate_is_160_stereo_96_mono_and_out_of_range_rates_are_refused() {
     let src = music(48_000, 2, 48_000);
     assert_eq!(encode(&src, &opus(None)).unwrap(), encode(&src, &opus(Some(160))).unwrap());
+    let mono = music(48_000, 1, 48_000);
+    assert_eq!(encode(&mono, &opus(None)).unwrap(), encode(&mono, &opus(Some(96))).unwrap(), "96 kb/s is the mono default");
+    assert_ne!(encode(&mono, &opus(None)).unwrap(), encode(&mono, &opus(Some(160))).unwrap());
+    assert_eq!(transit_audio_io::opus_bitrates_kbps(1), [96, 128, 160]);
+    assert_eq!(transit_audio_io::opus_bitrates_kbps(2), OPUS_BITRATES_KBPS);
     for bad in [0u16, 5, 511, 1000] {
         assert!(matches!(encode(&src, &opus(Some(bad))), Err(AudioError::Unsupported(_))), "{bad} kb/s");
     }

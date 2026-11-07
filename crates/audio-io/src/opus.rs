@@ -15,10 +15,26 @@ use crate::resample::Resampler;
 use crate::{AudioBuffer, AudioError, AudioInfo, FileFormat, Result, SampleFormat};
 use std::io::{Seek, Write};
 
-/// The bitrates the Bounce dialog offers, in kb/s; the first default is 160.
+/// The bitrates the Bounce dialog offers for stereo, in kb/s (ADR 0048).
 pub const OPUS_BITRATES_KBPS: [u16; 5] = [96, 128, 160, 192, 256];
-/// The bitrate when none is asked for.
+/// The bitrates the Bounce dialog offers for mono, in kb/s: a mono stream needs about half the
+/// rate of a stereo one (ADR 0048, pending the maintainer's confirmation).
+pub const OPUS_MONO_BITRATES_KBPS: [u16; 3] = [96, 128, 160];
+/// The stereo bitrate when none is asked for.
 pub const DEFAULT_OPUS_KBPS: u16 = 160;
+/// The mono bitrate when none is asked for.
+pub const DEFAULT_OPUS_MONO_KBPS: u16 = 96;
+
+/// The bitrates the dialog offers for a bounce of `channels` channels.
+pub fn opus_bitrates_kbps(channels: usize) -> &'static [u16] {
+    if channels == 1 { &OPUS_MONO_BITRATES_KBPS } else { &OPUS_BITRATES_KBPS }
+}
+
+/// The bitrate a bounce of `channels` channels gets when none is asked for: 96 kb/s mono,
+/// 160 kb/s stereo.
+pub fn default_opus_kbps(channels: usize) -> u16 {
+    if channels == 1 { DEFAULT_OPUS_MONO_KBPS } else { DEFAULT_OPUS_KBPS }
+}
 
 /// 20 ms at 48 kHz.
 const FRAME: usize = 960;
@@ -59,10 +75,10 @@ fn tags_packet(vendor: &str, comments: &[String]) -> Vec<u8> {
     t
 }
 
-/// The bitrate in bits per second for `kbps` (`None`: 160 kb/s). Opus takes 6 to 510 kb/s for a
-/// stereo stream; anything outside that is refused rather than clamped.
-pub(crate) fn bitrate_bps(kbps: Option<u16>) -> Result<i32> {
-    let k = kbps.unwrap_or(DEFAULT_OPUS_KBPS);
+/// The bitrate in bits per second for `kbps` (`None`: [`default_opus_kbps`] for `channels`). Opus
+/// takes 6 to 510 kb/s for a stereo stream; anything outside that is refused rather than clamped.
+pub(crate) fn bitrate_bps(kbps: Option<u16>, channels: usize) -> Result<i32> {
+    let k = kbps.unwrap_or(default_opus_kbps(channels));
     if !(6..=510).contains(&k) {
         return Err(AudioError::Unsupported(format!("an Opus bitrate of {k} kb/s (use 6 to 510; the dialog offers 96 to 256)")));
     }
@@ -97,9 +113,13 @@ impl<W: Write + Seek> Writer<W> {
                 "Opus export of {channels} channels: transit writes mono and stereo Opus only; fold the bounce down to stereo, or bounce WAV or FLAC"
             )));
         }
-        let encoder =
-            transit_opus::Encoder::new(transit_opus::EncoderSettings { channels, bitrate_bps: bitrate_bps(kbps)?, vbr: true, complexity: 10 })
-                .map_err(codec_err)?;
+        let encoder = transit_opus::Encoder::new(transit_opus::EncoderSettings {
+            channels,
+            bitrate_bps: bitrate_bps(kbps, channels)?,
+            vbr: true,
+            complexity: 10,
+        })
+        .map_err(codec_err)?;
         let pre_skip = encoder.lookahead();
         let pre_skip16 = u16::try_from(pre_skip).map_err(|_| AudioError::Encode(format!("a pre-skip of {pre_skip} samples")))?;
         let mut pages = PageWriter::new(out, SERIAL);

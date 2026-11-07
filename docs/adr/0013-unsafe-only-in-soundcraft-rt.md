@@ -92,3 +92,12 @@ Accepted with ADR 0021 (approved by the project owner on 2026-10-24).
 ## Amendment 2026-10-29 (ADR 0033): the dev-only C++ oracle
 
 The dev-only oracle crate `crates/macro-osc-oracle` (`transit-macro-osc-oracle`, #194) is on the xtask unsafe allowlist under ADR 0033's oracle rule, with its FFI `unsafe` confined to `src/ffi.rs` and never linked into the app (`DEV_ONLY` in `xtask/src/main.rs`); the quoted-unsafe refutation review requirement (ADR 0009) is unchanged.
+
+## Amendment 2026-11-08 (ADR 0048, proposed): transit-opus, the first vendored C in the shipped app
+
+Proposed with [ADR 0048](0048-export-formats-opus-no-mp3.md) (#238); it takes effect when ADR 0048 is accepted.
+
+- The crate `crates/opus` (`transit-opus`) may contain `unsafe` for the libopus C API, in `src/ffi.rs` only. Unlike the oracle (ADR 0033), this crate **is linked into the shipped app**, through `transit-audio-io`: it is the first vendored C in a release binary (libopus 1.6.1, unchanged, built with `cc`; `crates/opus/VENDOR.md`).
+- Confinement rests on the crate root: `src/lib.rs` carries `#![deny(unsafe_code)]` (not `forbid`, so that the single `#[allow(unsafe_code)]` on `mod ffi;` can take effect). The manifest check below sees only the package's `unsafe_code = "allow"`, so `cargo xtask layers` also checks, for every crate listed in `UNSAFE_MODULES`, that the root denies `unsafe_code` and that `allow(unsafe_code)` appears exactly once in the crate's sources, on `mod ffi;`. The reviewer still confirms that no `unsafe` reaches past the FFI module through a macro or an `include!`.
+- Every `unsafe` block carries a `// SAFETY:` comment quoting `opus.h` or `opus_defines.h` for the rule it relies on; the handles are `Send` and never `Sync`, each with the quoted rule. The crate gets a quoted-unsafe refutation review (ADR 0009) before merge and again on every libopus update.
+- The allowlist sentence of the wasapi amendment above ("lists exactly ...") is out of date. The xtask unsafe allowlist (`UNSAFE_ALLOWED`) is now, in full: `transit-rt`, `transit-audio-wasapi`, `transit-audio-asio`, `transit-audio-jack`, `transit-clap-host`, `transit-vst3-host`, `transit-au-host`, `transit-macro-osc-oracle` (dev-only, never linked into the app) and `transit-opus`. The check still reads every package manifest, exempt ones included, and flags any `unsafe_code` setting other than `forbid` outside that list.

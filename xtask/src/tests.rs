@@ -337,3 +337,21 @@ fn every_xvfb_the_tests_run_on_keeps_running_when_its_last_client_leaves() -> Re
     assert!(resetting.is_empty(), "an Xvfb without -noreset (E68): {resetting:?}");
     Ok(())
 }
+
+#[test]
+fn an_unsafe_module_crate_allows_unsafe_on_its_one_module_only() {
+    let lib = "#![deny(unsafe_code)]\n\n#[allow(unsafe_code)]\nmod ffi;\n";
+    assert!(check_unsafe_module(lib, &[lib.to_string(), "fn safe() {}".into()], "ffi").is_ok());
+    // A second allow anywhere in the crate fails.
+    let stray = "#[allow(unsafe_code)]\nmod other;".to_string();
+    assert!(check_unsafe_module(lib, &[lib.to_string(), stray], "ffi").is_err());
+    // A crate root without the deny fails, and so does the allow on another module.
+    assert!(check_unsafe_module("#[allow(unsafe_code)]\nmod ffi;\n", &["#[allow(unsafe_code)]\nmod ffi;".into()], "ffi").is_err());
+    let moved = "#![deny(unsafe_code)]\n#[allow(unsafe_code)]\nmod util;\n";
+    assert!(check_unsafe_module(moved, &[moved.to_string()], "ffi").is_err());
+}
+
+#[test]
+fn the_repository_unsafe_modules_pass() {
+    unsafe_modules(&root()).unwrap();
+}
