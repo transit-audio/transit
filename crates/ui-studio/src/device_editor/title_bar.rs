@@ -13,9 +13,10 @@
 //! slot's meaning: `signal` while the device plays, `text.faint` while bypassed, and ghosted
 //! (`ink.arrow`, no click) for an instrument, which has no bypass (plan 06, L17).
 
-use super::{Dev, MacroLayout};
+use super::Dev;
 use crate::StudioApp;
 use crate::builtin_editor::EditorLayout;
+use crate::macro_osc_panel::MacroLayout;
 use crate::presets;
 use crate::theme::TOKENS;
 use crate::tokens::{self, layout as space, radius};
