@@ -9,6 +9,8 @@ mod automation;
 pub mod b64;
 mod clip;
 pub mod device_pages;
+#[cfg(test)]
+mod device_pages_tests;
 mod frozen_recording;
 pub use frozen_recording::FrozenRecording;
 pub mod disk;

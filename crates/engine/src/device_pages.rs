@@ -304,3 +304,7 @@ pub fn indicator(pages: &[Page], current: Option<CurrentPage>) -> (usize, usize,
         None => (1, pages.len(), pages.first().map(|p| p.name.clone()).unwrap_or_default()),
     }
 }
+
+#[cfg(test)]
+#[path = "device_pages_tests.rs"]
+mod tests;

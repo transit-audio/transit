@@ -34,6 +34,8 @@ pub(super) fn target() -> RenderTarget {
 pub(super) struct Log {
     pub(super) drops: Mutex<Vec<ThreadId>>,
     pub(super) made: AtomicUsize,
+    /// `prepare` calls on instances already made (the factory prepares a new one itself).
+    pub(super) prepared: AtomicUsize,
     /// Latency every `clap:test.latent` instance reports.
     pub(super) latency: AtomicUsize,
     /// `set_sample` unwinds (armed after the instances are made).
@@ -56,6 +58,7 @@ impl Plugin for Probe {
         self.inner.info()
     }
     fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
+        self.log.prepared.fetch_add(1, Ordering::Relaxed);
         self.inner.prepare(sr, mb, ch);
     }
     fn reset(&mut self) {

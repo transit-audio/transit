@@ -106,6 +106,8 @@ mod offline;
 mod parameter_delivery;
 pub use parameter_delivery::ParameterDelivery;
 #[cfg(test)]
+mod device_pages_tests;
+#[cfg(test)]
 mod parameter_delivery_tests;
 mod plan;
 #[cfg(test)]

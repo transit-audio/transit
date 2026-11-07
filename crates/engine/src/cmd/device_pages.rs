@@ -131,3 +131,7 @@ fn list_pages(e: &mut Engine, p: &Value) -> Result<Value> {
     };
     Ok(json!({"track": t, "device": device.to_string(), "pages": resolved}))
 }
+
+#[cfg(test)]
+#[path = "device_pages_tests.rs"]
+mod tests;
