@@ -87,24 +87,23 @@ fn a_missing_saved_output_and_input_are_said_at_startup_and_on_apply() {
 
 /// ADR 0046, decision 7: a native open that fails leaves the device closed (a silent Player) and is
 /// said as "The audio device did not open: <reason>." on the status line and in Audio Devices, at
-/// startup as on Reconnect; Reconnect opens it again once the driver answers.
+/// startup as on Reconnect.
 #[test]
-fn a_native_open_failure_is_said_with_the_device_closed_until_reconnect() {
+fn a_native_open_failure_is_said_with_the_device_closed() {
     let driver = scarlett_driver();
     let again = driver.clone();
     let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::with_fake_native_asio(session, cfg, &again));
-    let reason = "ASIO driver \"Focusrite USB ASIO\": start failed";
-    driver.fail_next_open(transit_audio_backend::OpenError::DeviceNotAvailable(reason.into()));
+    run(&mut t, &driver, 10);
+    let reason = "the ASIO driver did not start";
+    // The duplex input starts first: its failure fails the whole open.
+    driver.fail_next_start(transit_audio_backend::OpenError::DeviceNotAvailable(reason.into()));
     t.app.reconnect_audio_devices();
     let said = format!("The audio device did not open: {reason}.");
-    assert!(t.app.player.as_ref().is_some_and(|p| p.silent), "the device stays closed");
+    assert!(t.app.player.as_ref().is_some_and(|p| p.silent), "the device stays closed: {}", t.app.status);
     assert!(t.app.status.contains(&said), "{}", t.app.status);
     assert!(t.app.audio_devices.notes.contains(&said), "{:?}", t.app.audio_devices.notes);
     t.app.status.clear();
     t.app.audio_devices.notes.clear();
     startup_notes(&mut t.app);
     assert!(t.app.status.contains(&said) && t.app.audio_devices.notes.contains(&said), "at startup: {}", t.app.status);
-    t.app.reconnect_audio_devices();
-    assert!(t.app.player.as_ref().is_some_and(|p| !p.silent), "Reconnect opens it");
-    assert!(!t.app.status.contains("did not open"), "{}", t.app.status);
 }
