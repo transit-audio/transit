@@ -8,6 +8,7 @@
 mod automation;
 pub mod b64;
 mod clip;
+pub mod device_pages;
 mod frozen_recording;
 pub use frozen_recording::FrozenRecording;
 pub mod disk;
@@ -37,6 +38,7 @@ mod track;
 
 pub use automation::{AutoParam, AutomationLane, AutomationMode, AutomationPoint};
 pub use clip::{Clip, ClipContent, ClipLoop, Fade, FadeShape, MIN_CYCLE, WholeFades};
+pub use device_pages::{DeviceRef, MAX_USER_PAGES, PagesError, UserPage};
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
 pub use io_map::{
     ExternalLatency, ExternalLookup, ExternalSource, HardwareLatency, IoDirection, IoError, IoMap, IoPath, MAX_DEVICE_CHANNELS, MAX_PATH_WIDTH,

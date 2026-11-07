@@ -402,7 +402,7 @@ impl Session {
     }
 
     /// Features a file can list under `needs` (see [`Session::to_json`]) that this build understands.
-    pub const KNOWN_NEEDS: [&'static str; 4] = ["clip_loop", "clip_scale_mode", "sampler_patch", "sampler_slicing_modes"];
+    pub const KNOWN_NEEDS: [&'static str; 5] = ["clip_loop", "clip_scale_mode", "device_pages", "sampler_patch", "sampler_slicing_modes"];
 
     /// The `needs` entries this session's content requires: a reader that does not know one would
     /// silently drop or misplay it. Empty for a session that uses none.
@@ -411,6 +411,10 @@ impl Session {
         let mut needs = if looped { vec!["clip_loop"] } else { Vec::new() };
         if self.all_clips().any(|c| c.scale_mode != Default::default()) {
             needs.push("clip_scale_mode");
+        }
+        // ADR 0047: user pages on any instrument, insert or MIDI effect.
+        if self.tracks.iter().any(Track::has_device_pages) {
+            needs.push("device_pages");
         }
         // ADR 0041: a Sampler patch, and its loop's two marker sets and mode.
         let patches = || self.tracks.iter().filter_map(|t| t.instrument.as_ref()).filter_map(|i| i.sampler_patch.as_ref());
@@ -712,6 +716,7 @@ impl Session {
             return Err(SessionError::Version(u32::try_from(ver).unwrap_or(u32::MAX)));
         }
         let unknown = unknown_needs(&v, &Self::KNOWN_NEEDS);
+        let dropped_pages = crate::device_pages::dropped_page_notes(&v);
         let had_video = crate::legacy::drop_video(&mut v);
         let had_transport = crate::midi_transport::strip_session_rows(&mut v);
         let mut s: Session = serde_json::from_value(v).map_err(|e| SessionError::Format(e.to_string()))?;
@@ -731,6 +736,7 @@ impl Session {
         let patch_notes: Vec<String> =
             s.tracks.iter().filter_map(|t| t.instrument.as_ref().and_then(|i| i.sampler_patch.as_ref()).and_then(|p| p.note(&t.name))).collect();
         s.load_notes.extend(patch_notes);
+        s.load_notes.extend(dropped_pages);
         let changes = crate::legacy_synth::uses_retired_synth(&s)
             || crate::legacy_effects::uses_retired_effects(&s)
             || crate::legacy_mapping::migration_changes(&s);

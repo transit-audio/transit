@@ -590,6 +590,10 @@ pub struct Insert {
     /// input path (ADR 0020).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<ExternalInstrument>,
+    /// The device's user pages for the macro strip (ADR 0047 decision 4), read by the rules of
+    /// [`crate::device_pages`]. Not written when empty, so sessions without pages are unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "crate::device_pages::deserialize_pages")]
+    pub pages: Vec<crate::UserPage>,
 }
 
 fn yes() -> bool {
@@ -611,6 +615,7 @@ impl Insert {
             key: None,
             hardware: None,
             external: None,
+            pages: Vec::new(),
             uid: InsertUid::default(),
         }
     }

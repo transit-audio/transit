@@ -31,6 +31,9 @@ pub struct MidiEffectSlot {
     /// Opaque effect state (hosted MIDI effects, later), standard base64. Built-ins keep none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// The effect's user pages for the macro strip (ADR 0047 decision 4); not written when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "crate::device_pages::deserialize_pages")]
+    pub pages: Vec<crate::UserPage>,
 }
 
 /// Loads a chain of at most [`MAX_MIDI_EFFECTS`]: a hand-edited file with more keeps the first
@@ -46,7 +49,7 @@ pub(crate) fn at_most_max<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<
 
 impl MidiEffectSlot {
     pub fn new(plugin: impl Into<String>) -> Self {
-        MidiEffectSlot { uid: InsertUid::default(), plugin: plugin.into(), params: BTreeMap::new(), bypass: false, state: None }
+        MidiEffectSlot { uid: InsertUid::default(), plugin: plugin.into(), params: BTreeMap::new(), bypass: false, state: None, pages: Vec::new() }
     }
 }
 
