@@ -85,8 +85,11 @@ fn control_native_jack_still_asks_the_fallback() {
 #[test]
 fn the_on_demand_input_returns_the_native_error_and_asks_nothing_else() {
     let native = fake_factory(false).with_capture(2, false);
-    let player = Player::open_native_or_cpal(Arc::new(Session::default()), &AudioConfig::default(), &native, &Counting::default()).unwrap();
+    let mut player = Player::open_native_or_cpal(Arc::new(Session::default()), &AudioConfig::default(), &native, &Counting::default()).unwrap();
     assert!(player.native_backend && !player.silent);
+    // Without the test-Player guard (#363), so the native kind alone decides; the counting fake
+    // gives no backend, so nothing real opens.
+    player.fake_only = false;
     native.fail_next_open(ab::OpenError::DeviceNotAvailable("the capture endpoint is gone".into()));
     let cpal = Counting::default();
     let error = player.open_input_with(&AudioConfig::default(), &cpal, &|_| None).err();
