@@ -282,3 +282,39 @@ fn the_field_shrinks_to_its_floor_before_the_device_title_truncates() {
     // Negative control: never a field under the floor.
     assert_eq!(preset_layout(300.0, 320.0, 200.0).1, FIELD_MIN);
 }
+
+#[test]
+fn a_double_click_on_the_empty_bar_collapses_the_macro_oscillator_to_its_bar_and_a_second_restores_it() {
+    let (mut t, tr) = T::open();
+    t.expand(tr);
+    let open = t.panel(tr).window;
+    let title = t.panel(tr).title;
+    let p = t.panel(tr);
+    assert!(p.shaper_body.is_some() && p.modulation_body.is_some() && !p.panels.is_empty() && p.hero.panel != [0.0; 4]);
+    let at = ((title.device_rect[2] + title.prev[0]) / 2.0, mid(title.bar).1);
+    // Negative control: a single click does nothing.
+    t.click(at, 1);
+    assert_eq!(t.panel(tr).window, open);
+    // Let the single click age out, or the double click soon after it reads as a triple pair.
+    t.frames(60);
+    t.click(at, 2);
+    let p = t.panel(tr);
+    assert_eq!(p.window[3] - p.window[1], crate::tokens::layout::TITLE_BAR_HEIGHT + crate::device_window::edge().y, "the bar and the edge");
+    assert_eq!((p.window[0], p.window[1], p.window[2]), (open[0], open[1], open[2]));
+    assert!(p.title.collapsed);
+    assert!(
+        p.panels.is_empty() && p.knobs.is_empty() && p.shaper_bar.is_none() && p.shaper_body.is_none() && p.hero.panel == [0.0; 4],
+        "no hero or Shaper"
+    );
+    assert!(p.modulation_bar.is_none() && p.modulation_body.is_none() && p.routes.is_empty(), "no Modulation");
+    // The preset browser works collapsed; the instrument's bypass stays ghosted (no bypass).
+    let factory = crate::presets::factory_for(super::MACRO_OSC);
+    t.app.services.config_dir = None;
+    t.click(mid(p.title.next), 1);
+    assert_eq!(t.app.builtin_at((tr, transit_mix::INSTRUMENT_SLOT)).unwrap().preset, factory[0].0, "next recalls the first preset");
+    assert!(!p.title.bypass_available);
+    t.click(mid(p.title.bypass), 1);
+    assert_eq!(t.panel(tr).window[3] - t.panel(tr).window[1], p.window[3] - p.window[1], "the ghosted bypass did nothing");
+    t.click(at, 2);
+    assert_eq!(t.panel(tr).window, open, "the second double click restores the exact rect");
+}
