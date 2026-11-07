@@ -383,8 +383,10 @@ fn the_macro_oscillator_model_combo_applies_its_choice_and_the_panel_says_model_
     assert_eq!(t.row(tr, "model").value, MODELS[8]);
     let before = render_instrument(&t, tr);
     assert!(before.iter().any(|v| v.abs() > 1e-4), "the default model sounds");
-    let (n, at) = t.painted(MODELS[2]);
-    assert_eq!(n, 1, "the picker lists {} once", MODELS[2]);
+    // 326-N: a picker button prints the short name; the full name is its tooltip and the card's.
+    let short = transit_dsp::plugins::macro_osc::models::MODEL_INFO[2].short_name;
+    let (n, at) = t.painted(short);
+    assert_eq!(n, 1, "the picker lists {short} once");
     t.click(at.unwrap(), 1);
     t.frames(3);
     assert_eq!(t.param(tr, slot, "model"), Some(2.0), "choosing a model writes the model parameter");

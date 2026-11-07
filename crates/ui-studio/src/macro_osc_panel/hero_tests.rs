@@ -1,9 +1,10 @@
 //! The hero: the model card and readouts, the Timbre/Morph pad and the model picker.
 
-use super::hero::{MODEL_H, NOISE_FROM, PAD, model_step, pad_drag, voice_states, voices_text};
+use super::hero::{MODEL_H, NOISE_FROM, PAD, card_text, model_step, name_slot, pad_drag, voice_states, voices_text};
 use super::test_rig::{T, info, mid};
 use crate::widgets::test_support::size;
 use transit_dsp::plugins::macro_osc::MODELS;
+use transit_dsp::plugins::macro_osc::models::{MODEL_INFO, ModelInfo};
 
 #[test]
 fn the_card_and_the_scope_readouts_name_the_model_and_the_voices() {
@@ -109,4 +110,80 @@ fn arrow_keys_move_the_model_while_the_picker_has_the_focus() {
     t.app.run("edit.undo", serde_json::json!({})).unwrap();
     t.frames(2);
     assert_eq!(t.param(tr, "model"), 17.0, "undo takes one press back");
+}
+
+/// A Macro Oscillator opened at the narrowest the window lays out (`MIN_WIDTH`).
+fn open_narrow() -> (T, transit_model::TrackId) {
+    let mut t = T::new();
+    t.app.ui.device_windows.insert(super::MACRO_OSC.into(), [100.0, 20.0, 100.0 + super::MIN_WIDTH, 880.0]);
+    let tr = t.instrument_track();
+    t.open_card(0);
+    (t, tr)
+}
+
+/// The galley width of `text` at the picker button's type role.
+fn name_width(t: &T, text: &str) -> f32 {
+    let p = t.ctx.layer_painter(egui::LayerId::background());
+    crate::widgets::role_size(&p, &crate::tokens::chrome::BUTTON_FONT, text).x
+}
+
+#[test]
+fn every_short_name_fits_its_picker_button_at_the_narrowest_width() {
+    let (t, tr) = open_narrow();
+    let p = t.panel(tr);
+    assert!((p.window[2] - p.window[0] - super::MIN_WIDTH).abs() < 3.0, "the window is at MIN_WIDTH: {:?}", p.window);
+    let h = p.hero;
+    let painter = t.ctx.layer_painter(egui::LayerId::background());
+    let number_w = |m: usize| crate::widgets::role_size(&painter, &crate::tokens::TAG, &format!("{:02}", m + 1)).x;
+    let widest_number = (0..MODELS.len()).map(number_w).fold(0.0, f32::max);
+    let button_w = size(h.picker[0].1).0;
+    let slot = name_slot(button_w, widest_number);
+    for (m, r, _) in &h.picker {
+        let short = MODEL_INFO[*m].short_name;
+        let w = name_width(&t, short);
+        assert!(w < slot, "model {m} `{short}` is {w} px, the slot {slot} px (button {button_w})");
+        // What was drawn sits inside the button, clear of its edge.
+        let drawn = h.picker_names[*m].1;
+        assert_eq!(h.picker_names[*m].0, short);
+        assert!(drawn[0] >= r[0] + 2.0 && drawn[2] <= r[2] - 2.0, "model {m}: {drawn:?} in {r:?}");
+    }
+    // Negative control: the 13-character name does not fit (nor does an ADR name).
+    assert!(name_width(&t, "Thirteen char") > slot);
+    assert!(name_width(&t, MODELS[0]) > slot, "the full name clips, which is why the picker prints short names");
+}
+
+#[test]
+fn the_card_and_the_tone_labels_follow_the_model() {
+    let (mut t, tr) = T::open();
+    for m in [0usize, 13, 21] {
+        t.set(tr, "model", m as f32);
+        let e = &MODEL_INFO[m];
+        let p = t.panel(tr);
+        assert_eq!(p.hero.model_name, e.name, "model {m}: the card keeps the full name");
+        assert_eq!(p.hero.model_desc, e.description, "model {m}: the card shows the description");
+        assert!(p.hero.model_desc_rect[2] <= p.hero.panel[2], "the description stays inside the panel");
+        assert_eq!(
+            [&p.knob("harmonics").unwrap().label, &p.knob("timbre").unwrap().label, &p.knob("morph").unwrap().label],
+            [e.harmonics, e.timbre, e.morph],
+            "model {m}: the Tone labels"
+        );
+        assert_eq!(p.hero.pad_labels, [format!("{} →", e.timbre.to_uppercase()), format!("↑ {}", e.morph.to_uppercase())], "model {m}: the pad axes");
+        assert_eq!(t.painted(e.description).0, 1, "the description is painted once");
+    }
+    // Negative control: the labels of one model are not another's, and a changed entry changes the card.
+    assert_ne!((MODEL_INFO[0].harmonics, MODEL_INFO[0].morph), (MODEL_INFO[13].harmonics, MODEL_INFO[13].morph));
+    let changed = ModelInfo { description: "A different line", ..MODEL_INFO[13] };
+    assert_ne!(card_text(&changed), card_text(&MODEL_INFO[13]));
+    assert_eq!(card_text(&changed).1, "A different line");
+}
+
+#[test]
+fn a_picker_button_names_the_full_model_in_its_tooltip() {
+    let (mut t, tr) = T::open();
+    let (_, r, _) = t.panel(tr).hero.picker[0];
+    // Negative control: before the pointer rests on the button, the full name is not painted there.
+    let before = t.painted_all(MODELS[0]).len();
+    t.send("ui.move", serde_json::json!({"x": mid(r).0, "y": mid(r).1}));
+    t.frames(80);
+    assert!(t.painted_all(MODELS[0]).len() > before, "the tooltip prints `{}`", MODELS[0]);
 }

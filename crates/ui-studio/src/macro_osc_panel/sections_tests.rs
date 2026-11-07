@@ -7,9 +7,10 @@ use crate::widgets::knob::Size;
 
 /// (parameter, label, size) of every knob in the four sections, as the board places them.
 const KNOBS: [(&str, &str, Size); 9] = [
-    ("harmonics", "Harmonics", Size::L),
-    ("timbre", "Timbre", Size::L),
-    ("morph", "Morph", Size::L),
+    // The Tone labels follow the model (the default, Virtual analog; see the hero tests).
+    ("harmonics", "Detune", Size::L),
+    ("timbre", "Square shape", Size::L),
+    ("morph", "Saw shape", Size::L),
     ("decay", "Decay", Size::M),
     ("lpg_color", "LPG color", Size::M),
     ("tune", "Tune", Size::M),

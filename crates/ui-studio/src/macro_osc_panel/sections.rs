@@ -13,6 +13,7 @@ use crate::theme::TOKENS;
 use crate::tokens::{alpha, layout as space};
 use crate::widgets::{knob, r4};
 use egui::{Align2, Rect, Sense, Stroke, Ui, pos2, vec2};
+use transit_dsp::plugins::macro_osc::models::model_info;
 
 /// A voice light, the gap between lights, and the lights per row.
 pub const LIGHT: f32 = 10.0;
@@ -36,7 +37,9 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let inner = panel(ui, tone, "tone", out);
     section_label(ui, inner, "Tone");
     let row = Rect::from_min_max(pos2(inner.min.x, inner.min.y + 14.0 + LABEL_GAP), inner.max);
-    knob_row(app, ui, dev, row, &[("harmonics", "Harmonics"), ("timbre", "Timbre"), ("morph", "Morph")], knob::Size::L, lay, out);
+    // The three labels follow the selected model (326-N).
+    let info = model_info(dev.index(app, "model"));
+    knob_row(app, ui, dev, row, &[("harmonics", info.harmonics), ("timbre", info.timbre), ("morph", info.morph)], knob::Size::L, lay, out);
     // Gate · LPG and Pitch.
     let y = tone.max.y + space::PANEL_GAP;
     let half = (rect.width() - space::PANEL_GAP) / 2.0;

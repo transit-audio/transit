@@ -166,6 +166,11 @@ pub struct HeroLayout {
     /// The model card's name and where it sits.
     pub model_name: String,
     pub model_rect: [f32; 4],
+    /// The card's one-line description and where it sits.
+    pub model_desc: String,
+    pub model_desc_rect: [f32; 4],
+    /// The pad's axis labels (the model's Timbre and Morph names).
+    pub pad_labels: [String; 2],
     /// The scope well's readouts: the model on the left, the voice count on the right.
     pub readout: String,
     pub voices: String,
@@ -178,6 +183,8 @@ pub struct HeroLayout {
     pub morph_text: String,
     /// The model picker: model index, button rect, selected; and its group labels.
     pub picker: Vec<(usize, [f32; 4], bool)>,
+    /// Each picker button's short name and where it was drawn.
+    pub picker_names: Vec<(String, [f32; 4])>,
     pub groups: Vec<(String, [f32; 4])>,
 }
 

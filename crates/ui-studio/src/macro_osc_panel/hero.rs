@@ -8,8 +8,10 @@
 //!   pointer), Shift drags fine (a tenth of the pointer's travel), double-click resets both. The
 //!   point is a 7 px `signal` dot with a 2 px `text` rim over a 16 px halo; a route to Timbre or
 //!   Morph draws its reach as a dashed `mod` trail. T and M print below in `value`.
+//! - **Model card:** the model's name and, beside it, its one-line description (326-N).
 //! - **Model picker:** the 24 models numbered in the firmware's order, eight to a row, grouped
-//!   Pitched (1 to 16) and Noise · Perc (17 to 24, the board's group from Swarm on). The current
+//!   Pitched (1 to 16) and Noise · Perc (17 to 24, the board's group from Swarm on); a button
+//!   prints the model's short name and its tooltip the full one (326-N). The current
 //!   model is outlined in `signal` on the option fill; a click selects, and with the picker
 //!   focused the arrow keys move (left and right one, up and down a row).
 
@@ -22,6 +24,7 @@ use crate::widgets::{self, display_well, r4};
 use egui::{Align2, Mesh, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use transit_dsp::plugins::macro_osc::MODELS;
 use transit_dsp::plugins::macro_osc::matrix::dst;
+use transit_dsp::plugins::macro_osc::models::{ModelInfo, model_info};
 
 /// The pad's side and the gap above its readouts.
 pub const PAD: f32 = 212.0;
@@ -38,8 +41,27 @@ const PER_ROW: usize = 8;
 /// The pad point's dot, rim and halo radii.
 const DOT: f32 = 7.0;
 const HALO: f32 = 16.0;
+/// A picker button's inner padding left of its number and right of its short name (the clip
+/// is 2 px in), and the gap between the number and the name.
+pub const BUTTON_PAD: [f32; 2] = [5.0, 3.0];
+const NUMBER_GAP: f32 = 4.0;
 /// Models from here on are the Noise · Perc group.
 pub const NOISE_FROM: usize = 16;
+
+/// The picker buttons' width in a hero panel whose inner (padded) width is `inner_w`.
+pub fn button_width(inner_w: f32) -> f32 {
+    (inner_w - GROUP_W - 10.0 - MODEL_GAP * (PER_ROW - 1) as f32) / PER_ROW as f32
+}
+
+/// The room a button leaves for the short name after its number (`number_w` wide).
+pub fn name_slot(button_w: f32, number_w: f32) -> f32 {
+    button_w - BUTTON_PAD[0] - BUTTON_PAD[1] - number_w - NUMBER_GAP
+}
+
+/// The text of a model's card: the name and the description (326-N).
+pub fn card_text(info: &ModelInfo) -> (&'static str, &'static str) {
+    (info.name, info.description)
+}
 
 /// The picker's height: two rows of Pitched, one of Noise · Perc.
 fn picker_h() -> f32 {
@@ -98,6 +120,13 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let r =
         widgets::role_text(ui.painter(), &tokens::LABEL_HERO, MODELS[model], t.text, Align2::LEFT_CENTER, pos2(label.max.x + 10.0, label.center().y));
     out.hero.model_rect = r4(r);
+    let info = model_info(model);
+    out.hero.model_desc = card_text(info).1.to_string();
+    let dx = r.max.x + 14.0;
+    let clip =
+        ui.painter().with_clip_rect(Rect::from_min_max(pos2(dx, label.min.y), pos2(inner.max.x, label.max.y)).intersect(ui.painter().clip_rect()));
+    let d = widgets::role_text(&clip, &tokens::LABEL_CONTROL, &out.hero.model_desc, t.text_muted, Align2::LEFT_CENTER, pos2(dx, label.center().y));
+    out.hero.model_desc_rect = r4(d);
     let y = inner.min.y + HEADER_H + space::PANEL_GAP;
     let pad_x = inner.max.x - PAD;
     scope(app, ui, dev, Rect::from_min_max(pos2(inner.min.x, y), pos2(pad_x - space::PANEL_GAP, y + DISPLAY_H)), model, out);
@@ -213,8 +242,11 @@ fn pad(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, out: &mut MacroLa
     p.circle_filled(c, HALO, t.signal.gamma_multiply(alpha::PAD_HALO));
     p.circle(c, DOT, t.signal, Stroke::new(2.0, t.text));
     let lbl = |text: &str, anchor: Align2, at: Pos2| widgets::role_text(&p, &tokens::READOUT_DISPLAY, text, t.text_faint, anchor, at);
-    lbl("TIMBRE →", Align2::LEFT_BOTTOM, pos2(rect.min.x + 8.0, rect.max.y - 6.0));
-    lbl("↑ MORPH", Align2::LEFT_TOP, pos2(rect.min.x + 8.0, rect.min.y + 6.0));
+    // The axes carry the model's names for the two controls.
+    let info = model_info(dev.index(app, "model"));
+    out.hero.pad_labels = [format!("{} →", info.timbre.to_uppercase()), format!("↑ {}", info.morph.to_uppercase())];
+    lbl(&out.hero.pad_labels[0], Align2::LEFT_BOTTOM, pos2(rect.min.x + 8.0, rect.max.y - 6.0));
+    lbl(&out.hero.pad_labels[1], Align2::LEFT_TOP, pos2(rect.min.x + 8.0, rect.min.y + 6.0));
     let ry = rect.max.y + 6.0 + PAD_READOUT / 2.0;
     out.hero.timbre_text = tp.format(super::value_at(tp, shown[0]));
     out.hero.morph_text = mp.format(super::value_at(mp, shown[1]));
@@ -256,7 +288,7 @@ fn picker(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, 
     }
     let p = ui.painter().clone();
     let grid_x = rect.min.x + GROUP_W + 10.0;
-    let col_w = (rect.max.x - grid_x - MODEL_GAP * (PER_ROW - 1) as f32) / PER_ROW as f32;
+    let col_w = button_width(rect.width());
     for (g, (name, first, rows)) in [("Pitched", 0usize, 2usize), ("Noise · Perc", NOISE_FROM, 1)].into_iter().enumerate() {
         let gy = rect.min.y + g as f32 * (2.0 * MODEL_H + MODEL_GAP + GROUP_GAP);
         let lr = widgets::role_text(&p, &tokens::LABEL_SECTION, name, t.text_faint, Align2::LEFT_CENTER, pos2(rect.min.x, gy + MODEL_H / 2.0));
@@ -271,6 +303,8 @@ fn picker(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, 
                 Rect::from_min_size(pos2(grid_x + col as f32 * (col_w + MODEL_GAP), gy + row as f32 * (MODEL_H + MODEL_GAP)), vec2(col_w, MODEL_H));
             let resp = ui.interact(r, focus_id.with(m), Sense::click());
             crate::help::hover(ui, &resp, crate::help::Id::MacroOscModel);
+            let info = model_info(m);
+            let resp = resp.on_hover_text(info.name);
             if resp.clicked() {
                 new = Some(m);
                 app.builtin_editor.macro_osc.picker = Some(dev.uid());
@@ -285,11 +319,24 @@ fn picker(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, 
             let clip = p.with_clip_rect(r.shrink(2.0).intersect(p.clip_rect()));
             let number = format!("{:02}", m + 1);
             let nw = widgets::role_size(&clip, &tokens::TAG, &number).x;
-            let name_w = widgets::role_size(&clip, &tokens::chrome::BUTTON_FONT, MODELS[m]).x;
-            let x0 = (r.center().x - (nw + 6.0 + name_w) / 2.0).max(r.min.x + 6.0);
+            let name_w = widgets::role_size(&clip, &tokens::chrome::BUTTON_FONT, info.short_name).x;
+            // Centered when the name fits its slot; a longer one starts at the left pad and clips.
+            let x0 = if name_w <= name_slot(r.width(), nw) {
+                (r.center().x - (nw + NUMBER_GAP + name_w) / 2.0).max(r.min.x + BUTTON_PAD[0])
+            } else {
+                r.min.x + BUTTON_PAD[0]
+            };
             widgets::role_text(&clip, &tokens::TAG, &number, num, Align2::LEFT_CENTER, pos2(x0, r.center().y));
-            widgets::role_text(&clip, &tokens::chrome::BUTTON_FONT, MODELS[m], ink, Align2::LEFT_CENTER, pos2(x0 + nw + 6.0, r.center().y));
+            let nr = widgets::role_text(
+                &clip,
+                &tokens::chrome::BUTTON_FONT,
+                info.short_name,
+                ink,
+                Align2::LEFT_CENTER,
+                pos2(x0 + nw + NUMBER_GAP, r.center().y),
+            );
             out.hero.picker.push((m, r4(r), sel));
+            out.hero.picker_names.push((info.short_name.to_string(), r4(nr)));
         }
     }
     if app.builtin_editor.macro_osc.picker == Some(dev.uid()) {
