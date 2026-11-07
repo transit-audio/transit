@@ -967,5 +967,108 @@ fn the_transport_menu_lists_set_cycle_to_selection_and_it_leaves_cycle_alone() {
     assert!(!t.app.engine.session().edit.loop_playback);
 }
 
+// ---- Opus (#238) ----
+
+#[test]
+fn choosing_opus_swaps_the_depth_row_for_the_bitrate_row() {
+    let mut t = T::new();
+    t.midi_clip();
+    t.app.open_bounce();
+    t.frames(3);
+    // Negative control: WAV shows the depths and no bitrates.
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    assert_eq!(lay.depths.len(), 3);
+    assert!(lay.bitrates.is_empty());
+    let values: Vec<&str> = lay.formats.iter().map(|m| m.value.as_str()).collect();
+    assert_eq!(values, ["wav", "aiff", "flac", "opus"], "Opus is offered and MP3 is not");
+    t.click(mid(lay.formats.iter().find(|m| m.value == "opus").unwrap().rect));
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    assert!(lay.depths.is_empty(), "Opus has no bit depth");
+    let rates: Vec<(&str, &str)> = lay.bitrates.iter().map(|m| (m.label.as_str(), m.value.as_str())).collect();
+    assert_eq!(rates, [("96 kb/s", "96"), ("128 kb/s", "128"), ("160 kb/s", "160"), ("192 kb/s", "192"), ("256 kb/s", "256")]);
+    assert_eq!(t.app.finish.bounce_form.as_ref().unwrap().bitrate, "160", "160 kb/s is the default");
+    // Back to FLAC: the depths return.
+    t.click(mid(lay.formats.iter().find(|m| m.value == "flac").unwrap().rect));
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    assert_eq!((lay.depths.len(), lay.bitrates.len()), (3, 0));
+}
+
+#[test]
+fn an_opus_bounce_follows_the_extension_and_carries_the_bitrate() {
+    let dir = Dir::new("opus");
+    let mut t = T::new();
+    t.midi_clip();
+    t.app.run("edit.select", json!({"start": 0, "end": 48_000})).unwrap();
+    t.app.open_bounce();
+    t.frames(3);
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    t.click(mid(lay.ranges.iter().find(|r| r.value == "selection").unwrap().rect));
+    t.click(mid(lay.formats.iter().find(|m| m.value == "opus").unwrap().rect));
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    t.click(mid(lay.bitrates.iter().find(|m| m.value == "96").unwrap().rect));
+    // Choose... starts from the .opus name.
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let sink = seen.clone();
+    t.app.services.pick_save = Some(Box::new(move |name| {
+        *sink.borrow_mut() = name.to_string();
+        None
+    }));
+    if let Some(f) = &mut t.app.finish.bounce_form {
+        f.path = dir.0.join("mix.wav").to_string_lossy().into_owned();
+    }
+    t.frames(2);
+    t.click(mid(t.app.finish.layout.bounce.clone().unwrap().choose));
+    assert_eq!(*seen.borrow(), "mix.opus", "the extension follows the format");
+    let ok = t.app.finish.layout.bounce.clone().unwrap().ok;
+    t.click(mid(ok));
+    for _ in 0..50 {
+        if t.app.finish.job.is_none() {
+            break;
+        }
+        t.frames(5);
+    }
+    assert!(t.app.status.starts_with("Bounced to"), "{}", t.app.status);
+    let out = dir.0.join("mix.opus");
+    assert!(!dir.0.join("mix.wav").exists(), "a typed .wav is renamed for Opus");
+    let bytes = std::fs::read(&out).unwrap();
+    let (info, buf) = transit_audio_io::decode(&bytes, None).unwrap();
+    assert_eq!((info.format, info.sample_rate, info.channels, buf.frames()), (transit_audio_io::FileFormat::Opus, 48_000, 2, 48_000));
+}
+
+#[test]
+fn the_bounce_request_names_the_bitrate_for_opus_only() {
+    let dir = Dir::new("opus-paths");
+    let mut t = T::new();
+    t.midi_clip();
+    for (format, bitrate) in [("wav", None), ("opus", Some(192))] {
+        t.app.open_bounce();
+        t.frames(3);
+        let lay = t.app.finish.layout.bounce.clone().unwrap();
+        t.click(mid(lay.modes.iter().find(|m| m.value == "paths").unwrap().rect));
+        t.click(mid(t.app.finish.layout.bounce.clone().unwrap().formats.iter().find(|m| m.value == format).unwrap().rect));
+        if let Some(k) = bitrate {
+            let lay = t.app.finish.layout.bounce.clone().unwrap();
+            t.click(mid(lay.bitrates.iter().find(|m| m.value == k.to_string()).unwrap().rect));
+        }
+        if let Some(f) = &mut t.app.finish.bounce_form {
+            f.dir = dir.0.join(format).to_string_lossy().into_owned();
+        }
+        t.frames(2);
+        t.click(mid(t.app.finish.layout.bounce.clone().unwrap().ok));
+        let request = t.app.finish.paths_request.clone().expect("the form started a job");
+        assert_eq!(request["format"], json!(format));
+        assert_eq!(request.get("bitrate").cloned(), bitrate.map(|k| json!(k)), "{format}");
+        for _ in 0..50 {
+            if t.app.finish.path_job.is_none() {
+                break;
+            }
+            t.frames(5);
+        }
+        assert!(t.app.finish.path_job.is_none(), "{}", t.app.status);
+        let files: Vec<_> = std::fs::read_dir(dir.0.join(format)).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert!(!files.is_empty() && files.iter().all(|f| f.ends_with(&format!(".{format}"))), "{files:?}");
+    }
+}
+
 #[path = "take_lanes_tests.rs"]
 mod take_lanes;
