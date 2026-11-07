@@ -2,7 +2,8 @@
 //! kept as `UiState.audio` (saved in `ui.json` with the other preferences). Every choice starts at
 //! "System default".
 //!
-//! The lists come from [`transit_playback::devices::cpal_audio_systems`] and, in a build with
+//! The lists come from [`transit_playback::devices::audio_systems_without_asio`] (the native
+//! WASAPI system on Windows, else cpal's systems, and native JACK where built) and, in a build with
 //! the native ASIO backend, [`transit_playback::devices::native_asio_system`], read when the
 //! window opens and on Rescan, never per frame. The ASIO system is listed on a worker thread (it
 //! probes the driver that runs, which can take seconds): the window says "Listing the ASIO

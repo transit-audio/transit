@@ -81,7 +81,7 @@ In progress. Slices as in decision 8, each through the usual implementer, review
 
 Slice 1 landed: the cpal helpers moved into `backend/cpal.rs`, the fitter tests run on a neutral stamp harness proven bit-identical to the cpal `Stamper`, and `transit-audio-wasapi` tests its conversion against `convert_golden.rs` without cpal.
 
-Slice 2 landed: on Windows the WASAPI system is listed by the native enumerator (`backend::native::wasapi_system()`, the default system, errors as diagnostics) for Audio Devices and the report, which names the lister; the native lookup warns on a name two endpoints share; `cpal_and_native_wasapi_list_the_same_names` compares both listings.
+Slice 2 landed: on Windows the WASAPI system is listed by the native enumerator (`backend::native::wasapi_system()`, the default system, errors as diagnostics) for Audio Devices and the report, which names the lister; the native lookup warns on a name two endpoints share; `cpal_and_native_wasapi_list_the_same_names` compares both listings, and per endpoint the buffer sizes and rates. Note for slice 3: the native rows report an unknown buffer range while cpal opens WASAPI; the shared-mode engine period (often 480-480) and `STANDARD_BUFFERS` having no 480 or 441 are inputs to the honest native offer settled there.
 
 ## Gate
 
