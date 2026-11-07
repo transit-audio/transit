@@ -22,6 +22,7 @@
 
 mod actions;
 mod controls;
+mod inserts;
 mod menus;
 mod meters;
 mod routing;
@@ -29,6 +30,7 @@ mod sends;
 mod strip;
 
 use controls::{Readout, control, draw_knob, fader_widget, readout};
+use inserts::{INSERT_ROW_H, INSERT_ROWS, MIN_FADER, inserts_block, midi_output_button};
 pub use controls::{balance_of, db_to_k, k_to_db, pans_for};
 use menus::{choice_menu, dropdown, small_button};
 use meters::draw_meter;
