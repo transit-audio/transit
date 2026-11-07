@@ -161,7 +161,7 @@ fn scope(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, o
         lpg_color: knob("lpg_color"),
     };
     let req = wave::request(knobs, newest);
-    let shown = app.builtin_editor.macro_osc.wave.show(ui.ctx(), dev.uid(), req).cloned();
+    let shown = app.builtin_editor.devices.wave.show(ui.ctx(), dev.uid(), req).cloned();
     let label = if preview::kind_of(model) == preview::Kind::Burst { "BURST" } else { "WAVE" };
     out.hero.readout = format!("{label} · {}", MODELS[model]);
     out.hero.voices = voices_text(&states);
@@ -280,10 +280,10 @@ fn picker(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, 
     let mut new = None;
     // The picker holds the arrow keys from a click on a model until a press lands elsewhere.
     let pressed_elsewhere = ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p)));
-    if pressed_elsewhere && app.builtin_editor.macro_osc.picker == Some(dev.uid()) {
-        app.builtin_editor.macro_osc.picker = None;
+    if pressed_elsewhere && app.builtin_editor.devices.picker == Some(dev.uid()) {
+        app.builtin_editor.devices.picker = None;
     }
-    let focused = app.builtin_editor.macro_osc.picker == Some(dev.uid());
+    let focused = app.builtin_editor.devices.picker == Some(dev.uid());
     if focused && !ui.ctx().egui_wants_keyboard_input() {
         for key in [egui::Key::ArrowLeft, egui::Key::ArrowRight, egui::Key::ArrowUp, egui::Key::ArrowDown] {
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key))
@@ -314,7 +314,7 @@ fn picker(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, 
             let resp = resp.on_hover_text(info.name);
             if resp.clicked() {
                 new = Some(m);
-                app.builtin_editor.macro_osc.picker = Some(dev.uid());
+                app.builtin_editor.devices.picker = Some(dev.uid());
             }
             let sel = new.unwrap_or(model) == m;
             let (fill, border, ink, num) = if sel {
@@ -346,7 +346,7 @@ fn picker(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, 
             out.hero.picker_names.push((info.short_name.to_string(), r4(nr)));
         }
     }
-    if app.builtin_editor.macro_osc.picker == Some(dev.uid()) {
+    if app.builtin_editor.devices.picker == Some(dev.uid()) {
         // The keyboard focus ring (Application chrome, Buttons): the arrows move the model.
         use crate::tokens::chrome as c;
         let ring = rect.expand(c::FOCUS_RING_OFFSET + c::FOCUS_RING_WIDTH / 2.0);

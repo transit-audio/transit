@@ -2,7 +2,7 @@
 //! system, the output meter, bypass and the follow toggle.
 
 use super::test_rig::{T, info, mid};
-use super::title_bar::{BUTTON, FIELD_MIN, FIELD_W, METER_W, preset_layout, preset_width, stepped};
+use crate::device_editor::title_bar::{BUTTON, FIELD_MIN, FIELD_W, METER_W, preset_layout, preset_width, stepped};
 use crate::theme::TOKENS;
 use crate::widgets::test_support::size;
 
@@ -109,7 +109,7 @@ fn save_writes_over_the_current_user_preset_and_opens_the_list_for_a_factory_one
 
 #[test]
 fn the_meter_reads_the_newest_peak_on_the_fader_taper_with_peak_fall_off() {
-    use super::title_bar::{meter_fractions, newest_peak_db, readout};
+    use crate::device_editor::title_bar::{meter_fractions, newest_peak_db, readout};
     use crate::widgets::level_meter::{Ballistics, meter_step};
     let mut frames = vec![0.0f32; 2048];
     assert_eq!(readout(newest_peak_db(&frames)), "-inf dB");
@@ -235,7 +235,7 @@ fn the_bar_reflows_without_overlap_from_the_minimum_to_the_design_width() {
     const OLD_MIN: f32 = 1040.0;
     for width in [super::MIN_WIDTH, super::DESIGN_WIDTH, OLD_MIN] {
         let (mut t, tr) = T::open();
-        t.app.builtin_editor.macro_osc.min_override = Some(width.min(super::MIN_WIDTH));
+        t.app.builtin_editor.devices.min_override = Some(width.min(super::MIN_WIDTH));
         t.screen = egui::vec2(width + 2.0 * crate::device_window::SCREEN_MARGIN, 900.0);
         t.frames(3);
         let p = t.panel(tr);

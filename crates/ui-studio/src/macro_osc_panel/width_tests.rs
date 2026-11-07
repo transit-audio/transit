@@ -56,7 +56,7 @@ fn painted_rect(t: &T, want: &str, row: [f32; 4]) -> Option<[f32; 4]> {
 /// text).
 pub fn open_at(width: f32, min: Option<f32>) -> (T, TrackId, Vec<(String, String)>) {
     let (mut t, tr) = T::open();
-    t.app.builtin_editor.macro_osc.min_override = min;
+    t.app.builtin_editor.devices.min_override = min;
     t.screen = egui::vec2(width + 2.0 * crate::device_window::SCREEN_MARGIN, 2400.0);
     t.frames(3);
     t.expand(tr);

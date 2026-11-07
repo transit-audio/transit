@@ -5,6 +5,7 @@
 //! Compressor the second (326-K); the window policy is [`crate::device_window`].
 
 pub mod title_bar;
+pub mod window;
 
 use crate::StudioApp;
 use crate::theme::TOKENS;

@@ -209,7 +209,7 @@ fn tap(t: &mut T, tr: TrackId) -> Arc<transit_mix::ScopeTap> {
 }
 
 fn sent(t: &T, tr: TrackId) -> Request {
-    t.app.builtin_editor.macro_osc.wave.sent(t.window(tr).uid).expect("the well sent a request")
+    t.app.builtin_editor.devices.wave.sent(t.window(tr).uid).expect("the well sent a request")
 }
 
 #[test]

@@ -297,7 +297,7 @@ impl StudioApp {
             && !self.midi_learn.sweeping()
             && !ctx.input(|i| i.pointer.any_down())
             && !ctx.egui_wants_keyboard_input()
-            && !self.builtin_editor.macro_osc.wheeling
+            && !self.builtin_editor.devices.wheeling
         {
             self.engine.end_merge();
         }
@@ -418,7 +418,7 @@ impl StudioApp {
         finish::rename_keys(self, &ctx); // slice 6: a name being typed owns Escape and Enter
         tempo_edit::keys(self, &ctx); // the tempo and meter fields own Escape and Enter
         clip_inspector::keys(self, &ctx); // Escape in a fade field gives its draft up
-        macro_osc_panel::window::keys(self, &ctx); // 326-M: Escape closes the focused device editor
+        crate::device_editor::window::keys(self, &ctx); // 326-M: Escape closes the focused device editor
         keys::shortcuts(self, &ctx); // slice 3: before the arrangement's keys
         automation::shortcuts(self, &ctx); // slice 7: selected points take Delete before clips
         groups::shortcuts(self, &ctx);

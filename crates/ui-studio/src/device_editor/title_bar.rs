@@ -16,7 +16,6 @@
 use super::Dev;
 use crate::StudioApp;
 use crate::builtin_editor::EditorLayout;
-use crate::macro_osc_panel::MacroLayout;
 use crate::presets;
 use crate::theme::TOKENS;
 use crate::tokens::{self, layout as space, radius};
@@ -212,9 +211,9 @@ fn meter_level(app: &mut StudioApp, ui: &Ui, dev: Dev) -> f32 {
     let target = newest_peak_db(&frames);
     app.builtin_editor.frames = frames;
     let dt = ui.input(|i| i.stable_dt).clamp(0.0, 0.1);
-    let prev = app.builtin_editor.macro_osc.meters.get(&dev.uid()).copied().unwrap_or(crate::widgets::fader::FLOOR_DB);
+    let prev = app.builtin_editor.devices.meters.get(&dev.uid()).copied().unwrap_or(crate::widgets::fader::FLOOR_DB);
     let shown = level_meter::meter_step(prev, target, dt, level_meter::Ballistics::PEAK_FALLOFF);
-    app.builtin_editor.macro_osc.meters.insert(dev.uid(), shown);
+    app.builtin_editor.devices.meters.insert(dev.uid(), shown);
     shown
 }
 
@@ -248,7 +247,7 @@ fn fitted(painter: &egui::Painter, role: &tokens::TypeRole, text: &str, color: C
 }
 
 /// Draws the bar into `rect` (52 high) and records it.
-pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follow: bool, lay: &mut EditorLayout, out: &mut MacroLayout) -> TitleOut {
+pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follow: bool, lay: &mut EditorLayout, out: &mut TitleLayout) -> TitleOut {
     let t = &TOKENS;
     let mut res = TitleOut::default();
     let uid = dev.uid();
@@ -380,7 +379,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follo
         p.rect_filled(hot, 0.0, t.meter_hot);
     }
     (tl.meter, tl.meter_fill, tl.menu, tl.close) = (r4(meter), r4(fill), r4(menu), r4(close));
-    out.title = tl;
+    *out = tl;
     res
 }
 

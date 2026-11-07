@@ -247,19 +247,19 @@ fn after_a_restart_an_instance_opens_at_the_device_rect_never_at_another_instanc
 #[test]
 fn escape_closes_the_focused_editor_only() {
     let (mut t, tr) = T::open();
-    assert_eq!(t.app.builtin_editor.macro_osc.focused, Some(t.window(tr).uid), "a window that opens takes the focus");
+    assert_eq!(t.app.builtin_editor.devices.focused, Some(t.window(tr).uid), "a window that opens takes the focus");
     t.key("Escape");
     assert!(t.app.ui.plugin_windows.is_empty(), "Escape closed it");
     // Negative control: a click outside every editor hands the keyboard back.
     t.open_card(0);
     t.click((10.0, 450.0), 1);
-    assert_eq!(t.app.builtin_editor.macro_osc.focused, None);
+    assert_eq!(t.app.builtin_editor.devices.focused, None);
     t.key("Escape");
     assert_eq!(t.app.ui.plugin_windows, vec![(tr, INST)], "Escape elsewhere leaves the editor open");
     // A click in the window focuses it again; a value being typed keeps Escape for itself.
     let bar = t.panel(tr).title.bar;
     t.click((bar[0] + 300.0, (bar[1] + bar[3]) / 2.0), 1);
-    assert_eq!(t.app.builtin_editor.macro_osc.focused, Some(t.window(tr).uid));
+    assert_eq!(t.app.builtin_editor.devices.focused, Some(t.window(tr).uid));
     let value = t.panel(tr).knob("decay").unwrap().knob.value;
     t.click(mid(value), 1);
     assert!(t.panel(tr).knob("decay").unwrap().knob.editing);
@@ -328,11 +328,11 @@ fn a_followed_window_leaves_the_escape_focus_with_the_click_that_changed_the_tra
     t.click(mid(link), 1);
     // A click outside the editor (where a track header sits), then the focused track changes.
     t.click((10.0, 450.0), 1);
-    assert_eq!(t.app.builtin_editor.macro_osc.focused, None);
+    assert_eq!(t.app.builtin_editor.devices.focused, None);
     t.app.focus(b);
     t.frames(3);
     assert_eq!(t.app.ui.plugin_windows, vec![(b, INST)], "the window followed");
-    assert_eq!(t.app.builtin_editor.macro_osc.focused, None, "and did not take the Escape focus");
+    assert_eq!(t.app.builtin_editor.devices.focused, None, "and did not take the Escape focus");
     t.key("Escape");
     assert_eq!(t.app.ui.plugin_windows, vec![(b, INST)], "Escape went to the views, not the editor");
 }
@@ -357,7 +357,7 @@ fn a_following_window_stays_put_and_leaves_its_rect_to_the_shown_instance_when_f
     t.app.close_editor((b, INST));
     t.frames(2);
     let uid_b = t.app.builtin_at((b, INST)).unwrap().uid.get();
-    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&pos2(rb[0], rb[1])));
+    assert_eq!(t.app.builtin_editor.devices.rects.get(&uid_b), Some(&pos2(rb[0], rb[1])));
     // A follows; focusing B swaps the content and the window stays where A's was.
     t.app.focus(a);
     t.frames(3);
@@ -367,11 +367,11 @@ fn a_following_window_stays_put_and_leaves_its_rect_to_the_shown_instance_when_f
     t.frames(3);
     assert_eq!(t.app.ui.plugin_windows, vec![(b, INST)]);
     assert_eq!(t.panel(b).window, ra, "the window stays put, not B's own rect");
-    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&pos2(rb[0], rb[1])), "following writes nothing to B's position");
+    assert_eq!(t.app.builtin_editor.devices.rects.get(&uid_b), Some(&pos2(rb[0], rb[1])), "following writes nothing to B's position");
     // Follow off: where the window is becomes B's place.
     let link = t.panel(b).title.follow;
     t.click(mid(link), 1);
-    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&pos2(ra[0], ra[1])));
+    assert_eq!(t.app.builtin_editor.devices.rects.get(&uid_b), Some(&pos2(ra[0], ra[1])));
     t.app.close_editor((b, INST));
     t.frames(2);
     t.app.toggle_editor((b, INST));

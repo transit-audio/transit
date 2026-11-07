@@ -17,7 +17,7 @@ mod hero;
 mod modulation;
 mod sections;
 mod shaper;
-mod wave;
+pub(crate) mod wave;
 pub mod window;
 
 #[cfg(test)]
@@ -47,7 +47,6 @@ use transit_dsp::plugins::macro_osc::matrix::{ROWS, dst};
 use transit_dsp::plugins::macro_osc::row_param;
 use transit_model::TrackId;
 
-pub(crate) use crate::device_editor::title_bar;
 pub use crate::device_editor::title_bar::TitleLayout;
 pub(crate) use crate::device_editor::{Dev, Lead, bipolar, child, dropdown, parse, set, value_at};
 pub use modulation::{ChipRecord, RouteRecord};
@@ -417,7 +416,7 @@ pub(crate) fn knob_at(
     let new = shown.value.map(|n| value_at(p, n)).or_else(|| shown.typed.as_deref().and_then(|t| parse(p, t)));
     if shown.wheeled {
         // A wheel gesture's nudges merge into one undo step while the wheel keeps coming.
-        app.builtin_editor.macro_osc.wheel_now = true;
+        app.builtin_editor.devices.wheel_now = true;
     }
     if let (Some(d), Some(chip)) = (dest, shown.response.dnd_release_payload::<modulation::Chip>()) {
         modulation::drop_route(app, dev, chip.0, d);

@@ -373,6 +373,7 @@ fn tokens_are_the_only_colors() {
         ("macro_osc_panel/mod.rs", include_str!("macro_osc_panel/mod.rs")),
         ("device_editor/mod.rs", include_str!("device_editor/mod.rs")),
         ("device_editor/title_bar.rs", include_str!("device_editor/title_bar.rs")),
+        ("device_editor/window.rs", include_str!("device_editor/window.rs")),
         ("macro_osc_panel/hero.rs", include_str!("macro_osc_panel/hero.rs")),
         ("macro_osc_panel/sections.rs", include_str!("macro_osc_panel/sections.rs")),
         ("macro_osc_panel/shaper.rs", include_str!("macro_osc_panel/shaper.rs")),
@@ -493,6 +494,7 @@ fn every_handler_takes_its_keys_from_the_table() {
         include_str!("automation.rs"),
         include_str!("automation_picker.rs"),
         include_str!("macro_osc_panel/window.rs"),
+        include_str!("device_editor/window.rs"),
     ];
     for src in sources {
         for raw in ["consume_key(", "key_pressed(", "shortcut_text(\"", "Key::"] {
@@ -686,6 +688,7 @@ fn painted_corners_use_the_radius_tokens() {
         ("macro_osc_panel/mod.rs", include_str!("macro_osc_panel/mod.rs")),
         ("device_editor/mod.rs", include_str!("device_editor/mod.rs")),
         ("device_editor/title_bar.rs", include_str!("device_editor/title_bar.rs")),
+        ("device_editor/window.rs", include_str!("device_editor/window.rs")),
         ("macro_osc_panel/hero.rs", include_str!("macro_osc_panel/hero.rs")),
         ("macro_osc_panel/sections.rs", include_str!("macro_osc_panel/sections.rs")),
         ("macro_osc_panel/shaper.rs", include_str!("macro_osc_panel/shaper.rs")),

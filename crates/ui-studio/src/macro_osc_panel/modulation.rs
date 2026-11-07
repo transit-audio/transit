@@ -101,7 +101,7 @@ pub(crate) fn collapsed(app: &StudioApp, dev: Dev) -> bool {
 
 /// The rows shown: in use, or revealed by Add route.
 pub(crate) fn shown_rows(app: &StudioApp, dev: Dev) -> Vec<usize> {
-    let pending = app.builtin_editor.macro_osc.pending.get(&dev.uid());
+    let pending = app.builtin_editor.devices.pending.get(&dev.uid());
     (0..ROWS).filter(|r| active(&route(app, dev, *r)) || pending.is_some_and(|p| p.contains(r))).collect()
 }
 
@@ -172,7 +172,7 @@ pub(crate) fn drop_route(app: &mut StudioApp, dev: Dev, source: usize, dest: usi
 pub(crate) fn remove_route(app: &mut StudioApp, dev: Dev, row: usize) {
     let values: Vec<(&str, f32)> = (0..5).filter_map(|f| row_param(row, f)).filter_map(|id| dev.param(id).map(|p| (id, p.default))).collect();
     super::set_many(app, dev, &values);
-    if let Some(p) = app.builtin_editor.macro_osc.pending.get_mut(&dev.uid()) {
+    if let Some(p) = app.builtin_editor.devices.pending.get_mut(&dev.uid()) {
         p.retain(|r| *r != row);
     }
 }
@@ -181,7 +181,7 @@ pub(crate) fn remove_route(app: &mut StudioApp, dev: Dev, row: usize) {
 pub(crate) fn add_route(app: &mut StudioApp, dev: Dev) -> Option<usize> {
     let shown = shown_rows(app, dev);
     let row = (0..ROWS).find(|r| !shown.contains(r))?;
-    app.builtin_editor.macro_osc.pending.entry(dev.uid()).or_default().push(row);
+    app.builtin_editor.devices.pending.entry(dev.uid()).or_default().push(row);
     Some(row)
 }
 
