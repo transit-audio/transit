@@ -180,6 +180,8 @@ pub struct StripLayout {
     pub output: R4,
     pub input_label: String,
     pub output_label: String,
+    /// The routing arrow leading the output dropdown (Lucide arrow-right).
+    pub output_arrow: R4,
     /// MIDI tracks: the output destination button (#61), what it says, and whether its device is
     /// missing.
     pub midi_output: R4,

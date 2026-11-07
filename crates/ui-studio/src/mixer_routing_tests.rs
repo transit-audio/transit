@@ -21,6 +21,19 @@ fn the_output_dropdown_runs_track_output() {
     assert_eq!(strip(&app, t).output_label, "FX 1");
 }
 
+/// The output dropdown leads with Lucide's arrow-right in `ink.arrow` (the board's output row):
+/// its 10 px box sits inside the face, left of the label, clear of the right-hand chevron.
+#[test]
+fn the_output_dropdown_leads_with_the_routing_arrow() {
+    let (app, _ctx, _time, t) = mixer_app();
+    let s = strip(&app, t);
+    let (face, arrow) = (s.output, s.output_arrow);
+    assert_eq!((arrow[2] - arrow[0], arrow[3] - arrow[1]), (10.0, 10.0));
+    assert!(arrow[0] >= face[0] + 6.0 && arrow[2] < mid(face).0 && arrow[1] >= face[1] && arrow[3] <= face[3], "{arrow:?} in {face:?}");
+    // Negative control: the arrow stays out of the right-hand chevron's 19 px.
+    assert!(arrow[2] <= face[2] - 19.0, "clear of the chevron");
+}
+
 #[test]
 fn add_fx_channel_is_one_undo_step_and_adds_no_send() {
     let mut app = app();

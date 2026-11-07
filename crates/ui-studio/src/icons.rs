@@ -47,10 +47,12 @@ pub enum Icon {
     Headphones,
     /// Lucide circle-help: the window header's question mark (#326).
     Help,
+    /// Lucide arrow-right: the routing arrow leading the mixer strip's output dropdown.
+    ArrowRight,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 26] = [
+    pub const ALL: [Icon; 27] = [
         Icon::Rewind,
         Icon::Stop,
         Icon::Play,
@@ -77,6 +79,7 @@ impl Icon {
         Icon::Snowflake,
         Icon::Headphones,
         Icon::Help,
+        Icon::ArrowRight,
     ];
 
     /// The Lucide name (the file under `assets/icons/`), plus `-filled` for filled variants.
@@ -108,6 +111,7 @@ impl Icon {
             Icon::Snowflake => "snowflake",
             Icon::Headphones => "headphones",
             Icon::Help => "circle-help",
+            Icon::ArrowRight => "arrow-right",
         }
     }
 
@@ -138,6 +142,7 @@ impl Icon {
             Icon::Snowflake => include_bytes!("../assets/icons/snowflake.svg"),
             Icon::Headphones => include_bytes!("../assets/icons/headphones.svg"),
             Icon::Help => include_bytes!("../assets/icons/circle-help.svg"),
+            Icon::ArrowRight => include_bytes!("../assets/icons/arrow-right.svg"),
         }
     }
 
@@ -312,6 +317,20 @@ mod tests {
         assert!(px(Icon::Play).a() > 200);
         assert!(px(Icon::StarFilled).a() > 200);
         assert_eq!(px(Icon::Star).a(), 0);
+    }
+
+    /// Arrow-right is the Lucide outline: its shaft crosses the middle row (negative control: the
+    /// outlined Star leaves it empty).
+    #[test]
+    fn arrow_right_is_the_lucide_outline() {
+        let mid = |i: Icon| {
+            let hint = egui::SizeHint::Size { width: 32, height: 32, maintain_aspect_ratio: true };
+            let img = egui_extras::image::load_svg_bytes_with_size(i.svg().as_bytes(), hint, &resvg::usvg::Options::default()).unwrap();
+            img.pixels[16 * 32 + 12]
+        };
+        assert!(mid(Icon::ArrowRight).a() > 200);
+        assert_eq!(mid(Icon::Star).a(), 0);
+        assert_eq!(Icon::ArrowRight.name(), "arrow-right");
     }
 
     /// A symbol-only button or a check mark is an icon (ADR 0010), never a text character: no

@@ -284,6 +284,7 @@ Every icon the app draws is a Lucide glyph (lucide-static 1.50.0, ISC, unmodifie
 | Loop | `repeat` | Transport cycle | 16 | `text`; `loop` when on |
 | Metronome | `metronome` | Click toggle and its popup | 16 | `text` |
 | ChevronRight, ChevronDown | `chevron-right`, `chevron-down` | Disclosure, combo chevron, menu bars | 12-16 | `text.faint`, `text.muted` hot |
+| ArrowRight | `arrow-right` | Mixer strip output dropdown (leads the label) | 10 | `ink.arrow` |
 | Plus | `plus` | Add lane, device, effect, send, folder, tempo | 11-24 | `text`, `text.dim` |
 | Remove | `x` | Close lane, remove device, effect, send | 11-14 | `text.dim`, `record` on hover |
 | Minus | `minus` | Meter and tempo steppers | 16 | `text` |

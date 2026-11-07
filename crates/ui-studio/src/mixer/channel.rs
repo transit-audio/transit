@@ -212,7 +212,7 @@ fn input_row(
         let cur = route_label(s, &m.input, true, if t.kind == TrackKind::Audio { t.channels() } else { 0 });
         let mut choices = input_choices_with(s, t, app.device_inputs(), app.engine.io_map(), app.system_audio_on());
         push_unused_entry(s, &mut choices);
-        if let Some(v) = dropdown(ui, clip, in_r, ui.id().with(("input", id.0)), &cur, None, &choices, menu) {
+        if let Some(v) = dropdown(ui, clip, in_r, ui.id().with(("input", id.0)), &cur, None, &choices, menu, false) {
             if v == REMOVE_UNUSED {
                 let _ = app.remove_unused_busses();
             } else {
@@ -247,7 +247,7 @@ fn input_row(
         let view = crate::midi_input::InputView::read(app.player.as_ref());
         let label = view.label(&t.midi_input);
         let resp = ui.interact(in_r.intersect(clip), ui.id().with(("midi-input", id.0)), Sense::click());
-        paint_dropdown(p, in_r, &label, resp.hovered(), None);
+        paint_dropdown(p, in_r, &label, resp.hovered(), None, false);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "MIDI input"));
         if let Some(params) = view.popup(&resp, id, &t.midi_input) {
             let _ = app.run("midi.input", params);
@@ -265,7 +265,7 @@ fn output_row(app: &mut StudioApp, ui: &mut Ui, clip: Rect, s: &Session, t: &Tra
     let mut choices = output_choices(s, t, app.engine.io_map());
     push_unused_entry(s, &mut choices);
     let tip = unresolved_output(app.engine.io_map(), &m.output).then_some(NOT_HERE);
-    if let Some(v) = dropdown(ui, clip, out_r, ui.id().with(("output", t.id.0)), &cur, tip, &choices, menu) {
+    if let Some(v) = dropdown(ui, clip, out_r, ui.id().with(("output", t.id.0)), &cur, tip, &choices, menu, true) {
         if v == REMOVE_UNUSED {
             let _ = app.remove_unused_busses();
         } else {
@@ -273,6 +273,7 @@ fn output_row(app: &mut StudioApp, ui: &mut Ui, clip: Rect, s: &Session, t: &Tra
         }
     }
     sl.output = r4(out_r);
+    sl.output_arrow = r4(super::menus::arrow_rect(out_r));
     sl.output_label = cur;
 }
 
