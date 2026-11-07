@@ -479,3 +479,134 @@ fn a_single_segment_line_wraps_inside_the_card_and_not_over_the_next_line() {
         }
     }
 }
+
+/// The card of the Audio Devices diagnostics as the window lays it out: in a bottom-up column (the
+/// window's Apply row sits at the bottom), the hint first, then each of `lines` in order, so each
+/// later line is placed above the earlier ones. Returns the hint's rect and the painted rects of
+/// each line's figures, at `ppp` pixels per point in a card `width` points wide.
+fn card_rects(lines: &[String], width: f32, ppp: f32) -> (egui::Rect, Vec<Vec<egui::Rect>>) {
+    let ctx = egui::Context::default();
+    ctx.set_pixels_per_point(ppp);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("transit_help_on"), true));
+    let mut hint = egui::Rect::NOTHING;
+    let mut figures = Vec::new();
+    let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+    for _ in 0..2 {
+        // Twice: the first pass lays out with fresh fonts.
+        let mut out = ctx.run_ui(raw.clone(), |ui| {
+            figures.clear();
+            ui.allocate_ui_with_layout(egui::vec2(width, 800.0), egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                egui::Frame::NONE.inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        hint = ui.label(egui::RichText::new("Hover a figure for what it means.").size(11.0)).rect;
+                    });
+                    for line in lines {
+                        help::status_line(ui, line, line.starts_with("Backend"));
+                        let targets =
+                            ui.ctx().data_mut(|d| d.remove_temp::<Vec<(Id, [f32; 4])>>(egui::Id::new("transit_help_targets"))).unwrap_or_default();
+                        figures.push(
+                            targets
+                                .into_iter()
+                                .map(|(_, r)| egui::Rect::from_min_max(egui::pos2(r[0], r[1]), egui::pos2(r[2], r[3])))
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+                });
+            });
+        });
+        out.textures_delta.clear();
+    }
+    (hint, figures)
+}
+
+/// The card of an ASIO driver open at 128 samples: the open line, the one-driver Backend line with
+/// the widest figures seen, the input line.
+fn asio_card_lines() -> [String; 3] {
+    let s = StreamStats { max_wake_late_us: 17791, max_service_us: 17791, wakes: 100, ..stats() };
+    [
+        "Output open: Speakers (Realtek) \u{b7} 48000 Hz \u{b7} 2 ch \u{b7} 128-sample buffer \u{b7} ASIO".to_string(),
+        format!("Backend (output / input, one ASIO driver): {}", StreamStats::asio_duplex_line(&s, &s, Some(("374/s", "374/s")))),
+        "Input open: none yet (it opens when a track is armed or monitored)".to_string(),
+    ]
+}
+
+/// The tallest overlap, over card widths, between the Backend line's figures and the rows placed
+/// before it (the hint and the open line): `(card width, overlap height)`.
+fn worst_backend_overlap(ppp: f32) -> (f32, f32) {
+    let lines = asio_card_lines();
+    let mut worst = (0.0_f32, 0.0_f32);
+    for width in (400..=760).step_by(20).map(|w| w as f32) {
+        let (hint, figures) = card_rects(&lines, width, ppp);
+        for a in &figures[1] {
+            for b in figures[0].iter().chain(std::iter::once(&hint)) {
+                let overlap = a.intersect(*b);
+                if overlap.is_positive() && overlap.height() > worst.1 {
+                    worst = (width, overlap.height());
+                }
+            }
+        }
+    }
+    worst
+}
+
+#[test]
+fn the_asio_backend_line_at_150_percent_never_paints_over_the_rows_below() {
+    assert_eq!(worst_backend_overlap(1.5), (0.0, 0.0), "worst overlap (card width pt, height pt)");
+}
+
+#[test]
+fn the_backend_line_clears_the_rows_below_at_every_scale() {
+    for ppp in [1.0, 1.25, 1.5, 2.0, 3.0] {
+        assert_eq!(worst_backend_overlap(ppp), (0.0, 0.0), "at {ppp} px/pt: worst overlap (card width pt, height pt)");
+    }
+}
+
+#[test]
+fn the_wasapi_backend_line_clears_the_rows_below_in_the_bottom_up_card() {
+    let s = stats();
+    let lines = [
+        "Output open: Speakers (Realtek) \u{b7} 48000 Hz \u{b7} 2 ch \u{b7} 128-sample buffer \u{b7} WASAPI* exclusive".to_string(),
+        crate::telemetry::backend_line(&s, false, Some(375), StatsBackend::Wasapi),
+    ];
+    for width in [400.0, 520.0, 700.0] {
+        let (hint, figures) = card_rects(&lines, width, 1.5);
+        for a in &figures[1] {
+            for b in figures[0].iter().chain(std::iter::once(&hint)) {
+                assert!(!a.intersects(*b), "at {width} pt the figure {a:?} overlaps {b:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_one_label_line_still_wraps_with_egui_and_clears_the_rows_below() {
+    let long = "Recovery: the output device was lost and reopened at 48000 Hz after 3 attempts; the previous stream was closed, \
+                its buffered audio was dropped and playback resumed from the last position the engine had confirmed"
+        .to_string();
+    let lines = ["Output open: Speakers (Realtek) \u{b7} 48000 Hz".to_string(), long];
+    let (hint, figures) = card_rects(&lines, 440.0, 1.5);
+    assert!(figures[1][0].height() > figures[0][0].height() + 1.0, "the long line wraps: {:?}", figures[1]);
+    assert!(!figures[1][0].intersects(figures[0][0]) && !figures[1][0].intersects(hint));
+}
+
+#[test]
+fn pack_rows_moves_whole_segments_between_rows() {
+    // Everything fits one row.
+    assert_eq!(help::pack_rows(&[10.0, 20.0, 30.0], 100.0), [0, 0, 0]);
+    // Exactly full stays on the row; one more point moves on.
+    assert_eq!(help::pack_rows(&[50.0, 50.0], 100.0), [0, 0]);
+    assert_eq!(help::pack_rows(&[50.0, 50.5], 100.0), [0, 1]);
+    // Three widths of row over the same segments.
+    let widths = [40.0, 40.0, 40.0, 40.0, 40.0];
+    assert_eq!(help::pack_rows(&widths, 400.0), [0, 0, 0, 0, 0]);
+    assert_eq!(help::pack_rows(&widths, 100.0), [0, 0, 1, 1, 2]);
+    assert_eq!(help::pack_rows(&widths, 50.0), [0, 1, 2, 3, 4]);
+    // One segment, and none.
+    assert_eq!(help::pack_rows(&[30.0], 100.0), [0]);
+    assert!(help::pack_rows(&[], 100.0).is_empty());
+    // Wider than a whole row: alone on its row, and the next starts after it.
+    assert_eq!(help::pack_rows(&[20.0, 150.0], 100.0), [0, 1]);
+    assert_eq!(help::pack_rows(&[150.0, 20.0], 100.0), [0, 1]);
+    assert_eq!(help::pack_rows(&[20.0, 150.0, 20.0, 30.0], 100.0), [0, 1, 2, 2]);
+}

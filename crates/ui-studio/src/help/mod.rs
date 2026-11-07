@@ -120,27 +120,73 @@ pub fn header_button(app: &mut StudioApp, ui: &mut Ui, id: Id) {
     }
 }
 
+/// Which row each of `widths` (points) lands on when whole segments are moved between rows of
+/// `available` points: a segment that does not fit after the ones before it starts the next row,
+/// and one wider than a whole row sits alone on its own row. Row numbers start at 0 and never
+/// decrease.
+pub(crate) fn pack_rows(widths: &[f32], available: f32) -> Vec<usize> {
+    let (mut row, mut x) = (0, 0.0_f32);
+    widths
+        .iter()
+        .map(|&w| {
+            if x > 0.0 && x + w > available {
+                row += 1;
+                x = 0.0;
+            }
+            x += w;
+            row
+        })
+        .collect()
+}
+
 /// Draw one status line of the Audio Devices card with a hover on each figure in it: the pieces
 /// come from [`map::status_segments`] and join back to the line unchanged.
+///
+/// A line of several figures moves whole figures between rows. egui's wrapped layout cannot say
+/// how tall it ended up before the parent has placed the next line, and the card is a bottom-up
+/// column that places each line by the height asked for up front (#307). So each figure is
+/// measured at the real scale, packed into rows with [`pack_rows`], and the sum of the row heights
+/// is allocated before any figure is drawn.
 pub fn status_line(ui: &mut Ui, line: &str, mono: bool) {
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        let segments = map::status_segments(line);
-        // A line that is one label keeps egui's wrapping and allocates its own rows; only a line of
-        // several figures needs whole figures moved between rows.
-        let mode = if segments.len() > 1 { egui::TextWrapMode::Extend } else { egui::TextWrapMode::Wrap };
-        for seg in segments {
-            let text = egui::RichText::new(&seg.text).color(TOKENS.text_dim).size(11.5);
-            // One row per figure: a label wraps inside itself by default, which makes its galley taller
-            // than the row the layout advanced by and lets the next line paint over it. Extend
-            // keeps it whole, so the wrapped layout moves whole figures to the next row.
-            let text = if mono { text.monospace() } else { text };
-            let resp = ui.add(egui::Label::new(text).wrap_mode(mode));
-            if let Some(id) = seg.id {
-                hover(ui, &resp, id);
-            }
+    let segments = map::status_segments(line);
+    let text = |seg: &map::Segment| {
+        let text = egui::RichText::new(&seg.text).color(TOKENS.text_dim).size(11.5);
+        if mono { text.monospace() } else { text }
+    };
+    // A line that is one label keeps egui's wrapping: a label allocates the rows it wraps to.
+    if let [seg] = segments.as_slice() {
+        let resp = ui.add(egui::Label::new(text(seg)).wrap_mode(egui::TextWrapMode::Wrap));
+        if let Some(id) = seg.id {
+            hover(ui, &resp, id);
         }
-    });
+        return;
+    }
+    let available = ui.available_width();
+    let sizes: Vec<egui::Vec2> = segments
+        .iter()
+        .map(|seg| egui::WidgetText::from(text(seg)).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body).size())
+        .collect();
+    let rows = pack_rows(&sizes.iter().map(|s| s.x).collect::<Vec<_>>(), available);
+    let row_count = rows.last().map_or(0, |last| last + 1);
+    let row_height = |row: usize| rows.iter().zip(&sizes).filter(|(r, _)| **r == row).map(|(_, s)| s.y).fold(0.0_f32, f32::max);
+    let gap = ui.spacing().item_spacing.y;
+    let total = (0..row_count).map(row_height).sum::<f32>() + gap * row_count.saturating_sub(1) as f32;
+    let (area, _) = ui.allocate_exact_size(egui::vec2(available, total), egui::Sense::hover());
+    let (mut y, mut x, mut at) = (area.top(), 0.0_f32, 0);
+    for (seg, (&row, size)) in segments.iter().zip(rows.iter().zip(&sizes)) {
+        if row != at {
+            y += row_height(at) + gap;
+            (x, at) = (0.0, row);
+        }
+        let rect = egui::Rect::from_min_size(egui::pos2(area.left() + x, y), *size);
+        // A child at the rect: `Ui::put` would advance the parent's cursor a second time.
+        let mut cell = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        let resp = cell.add(egui::Label::new(text(seg)).wrap_mode(egui::TextWrapMode::Extend));
+        x += size.x;
+        if let Some(id) = seg.id {
+            hover(ui, &resp, id);
+        }
+    }
 }
 
 /// The Info panel, drawn last in the frame (bottom-left, above the status bar). Picks up what
