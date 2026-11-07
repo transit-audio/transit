@@ -268,6 +268,8 @@ pub struct Slot {
     pub gain: (f32, f32),
     pub(crate) shaper: Shaper,
     seed: u32,
+    /// The Harmonics, Timbre and Morph (0..1) the last block's patch carried, after the matrix.
+    pub shape: [f32; 3],
 }
 
 impl Slot {
@@ -293,6 +295,7 @@ impl Slot {
             gain: (1.0, 1.0),
             shaper: Shaper::new(seed),
             seed,
+            shape: [0.0; 3],
         };
         s.voice.set_tuning(Tuning::Concert);
         s.voice.set_same_pitch_restart(true);
@@ -446,6 +449,7 @@ impl Slot {
         let [harmonics, timbre, morph, decay] = targets(s.knobs, s.wheel, [sum(dst::HARMONICS), sum(dst::TIMBRE), sum(dst::MORPH), sum(dst::DECAY)]);
         let pitch = sum(dst::PITCH);
         let note = if pitch == 0.0 { s.offset } else { (s.offset + PITCH_SEMITONES * pitch).clamp(-96.0, 96.0) };
+        self.shape = [harmonics, timbre, morph];
         let mut patch = Patch { note, harmonics, timbre, morph, engine: s.engine, decay, lpg_colour: s.lpg_color, ..Patch::default() };
         if s.engine == CHIPTUNE && !sounding {
             patch.timbre_modulation_amount = chiptune_release(decay);

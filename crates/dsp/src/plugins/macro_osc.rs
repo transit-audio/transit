@@ -50,7 +50,7 @@ use crate::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_RESET_CONTROLLERS, CC_
 use crate::params::{Params, param_plumbing};
 use crate::plugins::instrument_queue::{MAX_EVENTS, RELEASE_RESERVE};
 use crate::util::{Smoother, frames_in, sane_channels, sane_sr, sort_events};
-use crate::{Category, Plugin, PluginInfo, Transport, db_to_gain};
+use crate::{Category, Plugin, PluginInfo, Transport, VoiceShape, db_to_gain};
 use transit_macro_osc::SampleRate;
 use transit_macro_osc::utils::random::Random;
 
@@ -515,6 +515,15 @@ impl MacroOscillator {
     pub fn activity(&self) -> u32 {
         self.slots.iter().enumerate().fold(0, |m, (i, s)| m | u32::from(!s.idle) << i | u32::from(s.notes.any_held()) << (16 + i))
     }
+
+    /// The newest voice a key holds (or the pedal keeps) and rendered the last block: its key and
+    /// the Harmonics, Timbre and Morph its patch carried; `None` when no key holds a voice.
+    #[must_use]
+    pub fn newest(&self) -> Option<VoiceShape> {
+        let s = self.slots.iter().filter(|s| s.rendered && s.sounding()).max_by_key(|s| s.age)?;
+        let [harmonics, timbre, morph] = s.shape;
+        Some(VoiceShape { note: s.note.clamp(0.0, 127.0) as u8, harmonics, timbre, morph })
+    }
 }
 
 /// The random seed of voice `index` of an instance seeded `seed`.
@@ -639,6 +648,10 @@ impl Plugin for MacroOscillator {
         self.activity()
     }
 
+    fn newest_voice(&self) -> Option<VoiceShape> {
+        self.newest()
+    }
+
     fn note_on(&mut self, offset: usize, note: u8, velocity: u8) {
         self.push(offset, Kind::On(note.min(127), velocity.min(127)));
     }
@@ -685,3 +698,7 @@ mod release_tests;
 #[cfg(test)]
 #[path = "macro_osc_preview_tests.rs"]
 mod preview_tests;
+
+#[cfg(test)]
+#[path = "macro_osc_newest_tests.rs"]
+mod newest_tests;

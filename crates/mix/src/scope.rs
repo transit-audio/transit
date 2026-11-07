@@ -14,6 +14,7 @@ use crate::sample_tap::SampleTap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use transit_dsp::VoiceShape;
 use transit_model::TrackId;
 
 /// The hub key of an instrument (an instrument's instance has no insert uid).
@@ -34,7 +35,14 @@ pub struct ScopeTap {
     gr: AtomicU32,
     /// An instrument's voices as of the last block (`Plugin::voice_activity`).
     voices: AtomicU32,
+    /// The newest voice's key as of the last block (`Plugin::newest_voice`), [`NO_VOICE`] for none.
+    newest_note: AtomicU32,
+    /// Its Harmonics, Timbre and Morph, as `f32` bits.
+    newest_shape: [AtomicU32; 3],
 }
+
+/// The newest-voice note a tap holds while no key holds a voice.
+pub const NO_VOICE: u32 = u32::MAX;
 
 impl Default for ScopeTap {
     fn default() -> Self {
@@ -52,6 +60,8 @@ impl ScopeTap {
             write: AtomicUsize::new(0),
             gr: AtomicU32::new(0),
             voices: AtomicU32::new(0),
+            newest_note: AtomicU32::new(NO_VOICE),
+            newest_shape: [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)],
         }
     }
 
@@ -85,6 +95,33 @@ impl ScopeTap {
     pub fn push_voices(&self, activity: u32) {
         if self.enabled() {
             self.voices.store(activity, Ordering::Relaxed);
+        }
+    }
+
+    /// An instrument's newest voice as the render last stored it (`Plugin::newest_voice`); `None`
+    /// when no key held a voice. The note is published after the values, so a reader that sees a
+    /// note sees values at least as new as the block before it (a display: a torn block is fine).
+    #[must_use]
+    pub fn newest_voice(&self) -> Option<VoiceShape> {
+        let note = self.newest_note.load(Ordering::Acquire);
+        let note = u8::try_from(note).ok()?;
+        let [h, t, m] = [0, 1, 2].map(|i| self.newest_shape.get(i).map_or(0.0, |a| f32::from_bits(a.load(Ordering::Relaxed))));
+        Some(VoiceShape { note, harmonics: h, timbre: t, morph: m })
+    }
+
+    /// Audio thread: stores an instrument's newest voice. Does nothing while disabled.
+    pub fn push_newest(&self, voice: Option<VoiceShape>) {
+        if !self.enabled() {
+            return;
+        }
+        match voice {
+            Some(v) => {
+                for (a, x) in self.newest_shape.iter().zip([v.harmonics, v.timbre, v.morph]) {
+                    a.store(x.to_bits(), Ordering::Relaxed);
+                }
+                self.newest_note.store(u32::from(v.note), Ordering::Release);
+            }
+            None => self.newest_note.store(NO_VOICE, Ordering::Release),
         }
     }
 
@@ -218,6 +255,13 @@ impl ScopeHub {
     pub fn voice_activity(&self, track: TrackId, uid: u64) -> u32 {
         self.get(track, uid).map_or(0, |t| t.voice_activity())
     }
+
+    /// An instrument's newest voice as last reported (see [`ScopeTap::newest_voice`]); `None` with
+    /// no tap or no voice.
+    #[must_use]
+    pub fn newest_voice(&self, track: TrackId, uid: u64) -> Option<VoiceShape> {
+        self.get(track, uid)?.newest_voice()
+    }
 }
 
 #[cfg(test)]
@@ -250,6 +294,23 @@ mod tests {
         t.set_enabled(true);
         t.push_voices(0b101 | 1 << 16);
         assert_eq!(t.voice_activity(), 0b101 | 1 << 16);
+    }
+
+    #[test]
+    fn the_hub_reads_back_the_newest_voice_the_tap_received() {
+        let hub = ScopeHub::default();
+        let t = Arc::new(ScopeTap::new());
+        hub.register(TrackId(2), INSTRUMENT_UID, &t);
+        let v = VoiceShape { note: 64, harmonics: 0.25, timbre: 0.5, morph: 0.75 };
+        // Negative control: a disabled tap stores nothing.
+        t.push_newest(Some(v));
+        assert_eq!(hub.newest_voice(TrackId(2), INSTRUMENT_UID), None);
+        t.set_enabled(true);
+        t.push_newest(Some(v));
+        assert_eq!(hub.newest_voice(TrackId(2), INSTRUMENT_UID), Some(v));
+        assert_eq!(hub.newest_voice(TrackId(3), INSTRUMENT_UID), None, "another track has no tap");
+        t.push_newest(None);
+        assert_eq!(hub.newest_voice(TrackId(2), INSTRUMENT_UID), None, "no key holds a voice");
     }
 
     #[test]

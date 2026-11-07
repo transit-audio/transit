@@ -219,6 +219,16 @@ pub enum ProcessStatus {
     Sleep,
 }
 
+/// An instrument's newest sounding voice as of the last block ([`Plugin::newest_voice`]): its key
+/// and the Harmonics, Timbre and Morph (0..1) it rendered that block, after the modulation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VoiceShape {
+    pub note: u8,
+    pub harmonics: f32,
+    pub timbre: f32,
+    pub morph: f32,
+}
+
 fn key_part(s: &[f32], start: usize) -> impl Iterator<Item = f32> + '_ {
     s.get(start..).unwrap_or(&[]).iter().copied()
 }
@@ -348,6 +358,13 @@ pub trait Plugin: Send {
     /// `process`, on the audio thread, so it must be cheap and allocation-free. The default: none.
     fn voice_activity(&self) -> u32 {
         0
+    }
+    /// Instruments that draw their voice's shape (the Macro Oscillator's well, #326): the newest
+    /// voice a key holds, with the values it rendered the last block, or `None` when no key holds
+    /// one. Read after `process`, on the audio thread, so it must be cheap and allocation-free.
+    /// The default: none.
+    fn newest_voice(&self) -> Option<VoiceShape> {
+        None
     }
     /// Test seam (feature `testing`, issue #210): writes the plug-in's DSP state (whatever a
     /// later block's output depends on: detector envelopes, filter memories, delay-line contents

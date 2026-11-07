@@ -179,6 +179,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                     tap.push(&strip.buf, frames, 0.0);
                     if tap.enabled() {
                         tap.push_voices(inst.plugin.voice_activity());
+                        tap.push_newest(inst.plugin.newest_voice());
                     }
                 }
                 if contain_failure(inst, &mut strip.buf, frames) {
