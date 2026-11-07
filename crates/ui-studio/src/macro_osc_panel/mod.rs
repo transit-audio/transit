@@ -153,7 +153,7 @@ pub struct ToggleRecord {
     pub toggle: widgets::toggle::ToggleLayout,
 }
 
-/// A display well as last drawn: `scope`, `pad`, `amp_env`, `filter`, `filter_env`, `lfo1`, `lfo2`.
+/// A display well as last drawn: `scope`, `pad`, `amp_env`, `filter`, `lfo1`, `lfo2`.
 #[derive(Debug, Clone)]
 pub struct WellRecord {
     pub name: String,
@@ -217,6 +217,9 @@ pub struct MacroLayout {
     /// The Shaper's body (`None` while collapsed) and the opacity it drew at.
     pub shaper_body: Option<[f32; 4]>,
     pub shaper_opacity: f32,
+    /// The filter row's divider and the `FILTER ENV` caption over the envelope's knobs (326-X).
+    pub filter_divider: [f32; 4],
+    pub filter_env_caption: [f32; 4],
     pub modulation_bar: Option<widgets::section_bar::SectionBarLayout>,
     pub modulation_body: Option<[f32; 4]>,
     pub formula: String,

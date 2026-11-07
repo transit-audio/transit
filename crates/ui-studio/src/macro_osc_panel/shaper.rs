@@ -1,17 +1,21 @@
 //! The Shaper (transit's addition, #243) behind its section bar (README, Section bar; the board's
 //! Row C): Amp Envelope, Filter with Filter Env, LFO 1 and LFO 2 on the 12-column grid (3, 5, 2
-//! and 2 columns).
+//! and 2 columns). The row is as tall as its tallest card's content, and all four cards share
+//! that height (326-X: none stretches to a taller neighbor's).
 //!
 //! The bar collapses (a per-user view setting, `UiState::device_sections`) and enables (the
 //! `shaper` parameter, saved with the preset). Until the user collapses or expands it, it is open
 //! while the shaper is on. A disabled but open Shaper dims its body to 40 percent and stays
 //! editable.
 //!
-//! - **Amp Envelope** and **Filter Env** draw their shape in a display well (segment lengths from
-//!   the knobs' positions, a fixed hold).
+//! - **Amp Envelope** draws its shape in a display well (segment lengths from the knobs'
+//!   positions, a fixed hold).
 //! - **Filter:** mode (LP, BP, HP) and slope (12 dB, 24 dB) as segmented controls; the response
 //!   well on the 20 Hz to 20 kHz log scale, −42 to +18 dB, its point at the cutoff (drag it across
-//!   to set the cutoff); a route to Cutoff draws its reach as a `mod` band.
+//!   to set the cutoff); then one knob row: Cutoff, Resonance, Drive, Key track, Env amt, a 1 px
+//!   `line` divider, and the filter envelope's Attack, Decay, Sustain, Release under a
+//!   `FILTER ENV` caption (326-X; the envelope's own mini display is gone).
+//! - A route to Cutoff draws its reach as a `mod` band.
 //! - **LFO:** RETRIG and SYNC / HZ as option toggles, the shape as a segmented control in text (the
 //!   kit has no shape icons), the trace in `mod` with the fade-in as a dashed `ink.ghost` envelope;
 //!   the Rate knob sets the division while SYNC is on and the rate in Hz otherwise.
@@ -32,9 +36,11 @@ const GAP: f32 = 10.0;
 const ENV_WELL_H: f32 = 136.0;
 const FILTER_WELL_H: f32 = 120.0;
 const SCALE_H: f32 = 14.0;
-const FENV_W: f32 = 170.0;
-const FENV_WELL_H: f32 = 64.0;
 const LFO_WELL_H: f32 = 68.0;
+/// The space either side of the filter row's divider (the Output panel's divider gap).
+const DIVIDER_GAP: f32 = crate::tokens::SPACE[1];
+/// The room between the caption over the filter envelope's knobs and the knobs.
+const CAPTION_GAP: f32 = 4.0;
 /// The filter's mode labels (the parameter's choices are Low pass, Band pass, High pass).
 pub const MODES: [&str; 3] = ["LP", "BP", "HP"];
 pub const SLOPES: [&str; 2] = ["12 dB", "24 dB"];
@@ -56,11 +62,19 @@ pub(crate) fn collapsed(app: &StudioApp, dev: Dev) -> bool {
     app.ui.device_sections.get(&section_key("shaper")).copied().unwrap_or(!dev.on(app, "shaper"))
 }
 
-/// Row C's height (the Filter panel, the tallest).
-fn row_h() -> f32 {
+/// Each card's content height: Amp Envelope, Filter, an LFO.
+pub fn card_heights() -> [f32; 3] {
     let p = space::PANEL_PADDING[0];
-    let m = knob::cell(knob::Size::M).y;
-    p + segmented::HEIGHT + GAP + FILTER_WELL_H + SCALE_H + GAP + m + GAP + 1.0 + GAP + FENV_WELL_H + LABEL_H + 4.0 + p
+    let (m, s) = (knob::cell(knob::Size::M).y, knob::cell(knob::Size::S).y);
+    let amp = p + LABEL_H + GAP + ENV_WELL_H + GAP + s + p;
+    let filter = p + segmented::HEIGHT + GAP + FILTER_WELL_H + SCALE_H + GAP + LABEL_H + CAPTION_GAP + m.max(s) + p;
+    let lfo = p + toggle_h() + GAP + segmented::HEIGHT + GAP + LFO_WELL_H + GAP + toggle_h() + GAP + s + p;
+    [amp, filter, lfo]
+}
+
+/// Row C's height: the tallest card's content.
+pub fn row_h() -> f32 {
+    card_heights().into_iter().fold(0.0, f32::max)
 }
 
 /// The section's height: the bar, and the row when open.
@@ -76,6 +90,17 @@ pub fn freq_x(hz: f32) -> f32 {
 /// The frequency at `x` (0..1) on the response well.
 pub fn x_freq(x: f32) -> f32 {
     20.0 * 1000f32.powf(x.clamp(0.0, 1.0))
+}
+
+/// The response curve at `cutoff`, sampled across the well (normalized).
+fn response_curve(mode: usize, slope24: bool, cutoff: f32, res: f32) -> Vec<[f32; 2]> {
+    (0..=180)
+        .map(|i| {
+            let x = i as f32 / 180.0;
+            let db = response_db(mode, slope24, cutoff, res, x_freq(x)).clamp(DB_FLOOR, DB_TOP);
+            [x, (db - DB_FLOOR) / (DB_TOP - DB_FLOOR)]
+        })
+        .collect()
 }
 
 /// The filter's response in dB at `hz`: a two-pole low, band or high pass (mode 0, 1, 2) at
@@ -340,13 +365,7 @@ fn filter(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut Edit
     // The response well.
     let (mode, slope24) = (dev.index(app, "filter_mode"), dev.index(app, "filter_slope") == 1);
     let (cutoff, res) = (dev.value(app, "cutoff"), dev.value(app, "resonance") / 100.0);
-    let curve: Vec<[f32; 2]> = (0..=180)
-        .map(|i| {
-            let x = i as f32 / 180.0;
-            let db = response_db(mode, slope24, cutoff, res, x_freq(x)).clamp(DB_FLOOR, DB_TOP);
-            [x, (db - DB_FLOOR) / (DB_TOP - DB_FLOOR)]
-        })
-        .collect();
+    let curve = response_curve(mode, slope24, cutoff, res);
     let cx = freq_x(cutoff);
     let at_cut = (response_db(mode, slope24, cutoff, res, cutoff).clamp(DB_FLOOR, DB_TOP) - DB_FLOOR) / (DB_TOP - DB_FLOOR);
     let band = super::ring_depth(app, dev, dst::CUTOFF).map(|d| [cx, (cx + d).clamp(0.0, 1.0)]);
@@ -376,26 +395,23 @@ fn filter(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut Edit
     {
         super::set(app, dev, "cutoff", cp.clamp(x_freq(x)));
     }
-    // The knobs.
-    let ky = wr.max.y + SCALE_H + GAP;
+    // One knob row: the filter's five, a divider, the filter envelope's four under its caption.
+    // Nine equal slots; the knobs share the label and value lines (the smaller ones sit lower).
+    let cy = wr.max.y + SCALE_H + GAP;
+    let ky = cy + LABEL_H + CAPTION_GAP;
+    let (m, s) = (knob::cell(knob::Size::M).y, knob::cell(knob::Size::S).y);
+    let slot = (inner.width() - 2.0 * DIVIDER_GAP - 1.0) / 9.0;
+    let left = Rect::from_min_size(pos2(inner.min.x, ky), vec2(5.0 * slot, m));
     let items = [("cutoff", "Cutoff"), ("resonance", "Resonance"), ("drive", "Drive"), ("key_track", "Key track"), ("filter_env_amount", "Env amt")];
-    let kh = knob_row(app, ui, dev, Rect::from_min_max(pos2(inner.min.x, ky), pos2(inner.max.x, ky + 80.0)), &items, knob::Size::M, lay, out);
-    // Filter Env: its well and knobs under a divider.
-    let dy = ky + kh + GAP;
-    p.line_segment([pos2(inner.min.x, dy), pos2(inner.max.x, dy)], Stroke::new(1.0, t.line));
-    let ey = dy + 1.0 + GAP;
-    crate::widgets::role_text(&p, &crate::tokens::LABEL_SECTION, "Filter Env", t.text_muted, Align2::LEFT_TOP, pos2(inner.min.x, ey));
-    let curve = env_curve(
-        norm(app, dev, "filter_attack"),
-        norm(app, dev, "filter_decay"),
-        norm(app, dev, "filter_sustain"),
-        norm(app, dev, "filter_release"),
-    );
-    let fw = Rect::from_min_size(pos2(inner.min.x, ey + LABEL_H + 4.0), vec2(FENV_W, FENV_WELL_H));
-    well(ui, dev, fw, "filter_env", &display_well::Well { curve: &curve, ..Default::default() }, out);
+    knob_row(app, ui, dev, left, &items, knob::Size::M, lay, out);
+    let dx = left.max.x + DIVIDER_GAP + 0.5;
+    p.line_segment([pos2(dx, cy), pos2(dx, ky + m)], Stroke::new(1.0, t.line));
+    out.filter_divider = [dx - 0.5, cy, dx + 0.5, ky + m];
+    let right = Rect::from_min_size(pos2(dx + 0.5 + DIVIDER_GAP, ky + m - s), vec2(4.0 * slot, s));
+    let caption = crate::widgets::role_text(&p, &crate::tokens::LABEL_SECTION, "Filter Env", t.text_muted, Align2::LEFT_TOP, pos2(right.min.x, cy));
+    out.filter_env_caption = r4(caption);
     let items = [("filter_attack", "Attack"), ("filter_decay", "Decay"), ("filter_sustain", "Sustain"), ("filter_release", "Release")];
-    let row = Rect::from_min_max(pos2(fw.max.x + 12.0, ey), pos2(inner.max.x, inner.max.y));
-    knob_row(app, ui, dev, row, &items, knob::Size::S, lay, out);
+    knob_row(app, ui, dev, right, &items, knob::Size::S, lay, out);
 }
 
 fn lfo(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, n: usize, lay: &mut EditorLayout, out: &mut MacroLayout) {

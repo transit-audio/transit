@@ -178,3 +178,57 @@ fn a_ctrl_wheel_gesture_is_one_undo_step() {
     t.frames(2);
     assert!((t.param(tr, "resonance") - 58.0).abs() < 1e-3, "undo takes the second gesture back whole");
 }
+
+#[test]
+fn the_shaper_row_is_its_tallest_cards_height_and_the_four_cards_share_it() {
+    use super::shaper::{card_heights, row_h};
+    // The row before 326-X: the filter card with its envelope's well and knobs under a divider.
+    let p = crate::tokens::layout::PANEL_PADDING[0];
+    let m = crate::widgets::knob::cell(crate::widgets::knob::Size::M).y;
+    let previous = p + crate::widgets::segmented::HEIGHT + 10.0 + 120.0 + 14.0 + 10.0 + m + 10.0 + 1.0 + 10.0 + 64.0 + 14.0 + 4.0 + p;
+    assert!(row_h() < previous, "{} -> {}", previous, row_h());
+    assert_eq!(row_h(), card_heights().into_iter().fold(0.0, f32::max));
+    let (mut t, tr) = T::open();
+    t.expand(tr);
+    let panel = t.panel(tr);
+    let h = |name: &str| panel.panels.iter().find(|(n, _)| n == name).map(|(_, r)| r[3] - r[1]).unwrap();
+    for name in ["amp_env", "filter", "lfo1", "lfo2"] {
+        assert_eq!(h(name), row_h(), "{name}");
+    }
+    let body = panel.shaper_body.unwrap();
+    assert_eq!(body[3] - body[1], row_h());
+    // Negative control: the cards' contents differ, so sharing is a choice, not a coincidence.
+    let [amp, filter, lfo] = card_heights();
+    assert!(amp != filter && lfo != filter);
+}
+
+#[test]
+fn the_filter_card_is_the_graph_and_one_row_of_nine_knobs_with_the_envelope_captioned() {
+    let (mut t, tr) = T::open();
+    t.expand(tr);
+    let p = t.panel(tr);
+    assert!(p.wells.iter().all(|w| w.name != "filter_env"), "the envelope's mini display is gone");
+    let order =
+        ["cutoff", "resonance", "drive", "key_track", "filter_env_amount", "filter_attack", "filter_decay", "filter_sustain", "filter_release"];
+    let knobs: Vec<_> = order.iter().map(|id| p.knob(id).unwrap_or_else(|| panic!("{id}")).knob.clone()).collect();
+    for (k, id) in knobs.iter().zip(order) {
+        assert_eq!(k.label[1], knobs[0].label[1], "{id}: one label line");
+        assert_eq!(k.value[1], knobs[0].value[1], "{id}: one value line");
+    }
+    assert!(knobs.windows(2).all(|w| w[0].dial[0] < w[1].dial[0]), "left to right");
+    // The divider sits between Env amt and Attack; the caption over the envelope's four.
+    let d = p.filter_divider;
+    assert!(knobs[4].dial[2] < d[0] && d[2] < knobs[5].dial[0], "{d:?}");
+    assert_eq!(d[2] - d[0], 1.0);
+    let c = p.filter_env_caption;
+    assert!(c[0] >= d[2] && c[3] <= knobs[5].dial[1] && c[3] > knobs[0].dial[1] - 30.0, "{c:?}");
+    assert!(t.painted("FILTER ENV").0 == 1, "the caption in the section label role (uppercase)");
+    // Negative control: the filter's own knobs have no caption over them.
+    assert!(c[0] > knobs[4].dial[2]);
+    let filter = p.panels.iter().find(|(n, _)| n == "filter").unwrap().1;
+    assert!(knobs.iter().all(|k| k.rect[0] >= filter[0] && k.rect[2] <= filter[2] && k.rect[3] <= filter[3]), "inside the card");
+    // Help entries kept.
+    for id in order {
+        assert!(super::help(id).is_some(), "{id}");
+    }
+}
