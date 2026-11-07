@@ -199,7 +199,7 @@ pub(super) fn track_header(
     if resp.drag_stopped() {
         app.arrange.gesture = None;
     }
-    if resp.double_clicked() {
+    if crate::widgets::reset_click(&resp) {
         let _ = app.run("mix.volume", json!({"tracks": [t.id.0], "db": 0.0}));
     }
     // Freeze: the snowflake left of the volume readout (Unfreeze when frozen).

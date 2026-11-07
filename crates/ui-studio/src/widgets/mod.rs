@@ -65,6 +65,15 @@ pub fn role_text(
     rect
 }
 
+/// A reset gesture on a control: a double click, or a triple click. egui counts a click as a
+/// triple when it lands within twice `InputOptions::max_double_click_delay` of the click before
+/// last (`PointerState`'s `last_last_click_time`), so a double click made soon after any other
+/// click reports `triple_clicked` and not `double_clicked`; a triple click has no other meaning on
+/// a control that resets (326-X).
+pub fn reset_click(response: &egui::Response) -> bool {
+    response.double_clicked() || response.triple_clicked()
+}
+
 /// The size a role's text takes.
 pub fn role_size(painter: &egui::Painter, role: &crate::tokens::TypeRole, text: &str) -> egui::Vec2 {
     painter.layout_job(role.job(painter.ctx(), text, egui::Color32::WHITE)).size()

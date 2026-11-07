@@ -191,7 +191,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
                 new = Some(n);
             }
         }
-        if response.double_clicked() {
+        if super::reset_click(&response) {
             new = Some(k.default);
         }
         if response.hovered() {

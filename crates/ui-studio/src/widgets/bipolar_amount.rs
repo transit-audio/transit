@@ -51,7 +51,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, width: f32, amount: f32) -> AmountOut {
             new = Some(dragged(amount, dx, width, fine));
         }
     }
-    if response.double_clicked() {
+    if super::reset_click(&response) {
         new = Some(0.0);
     }
     let shown = new.unwrap_or(amount).clamp(-1.0, 1.0);

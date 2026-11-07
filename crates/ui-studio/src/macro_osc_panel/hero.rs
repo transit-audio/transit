@@ -224,7 +224,7 @@ fn pad(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, out: &mut MacroLa
             new = Some(pad_drag(norm, n, [d.x / plot.width(), -d.y / plot.height()], fine));
         }
     }
-    if resp.double_clicked() {
+    if crate::widgets::reset_click(&resp) {
         new = Some([tp.to_normalized(tp.default), mp.to_normalized(mp.default)]);
     }
     if let Some([x, y]) = new {

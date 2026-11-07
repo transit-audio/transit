@@ -115,7 +115,7 @@ pub(super) fn control(app: &mut StudioApp, ui: &Ui, resp: &egui::Response, t: Ta
         app.mixer.hover = Some(t);
         app.mixer.wheel_taken = true;
     }
-    if (resp.clicked() && (mods.alt || mods.ctrl || mods.command)) || (dbl_reset && resp.double_clicked()) {
+    if (resp.clicked() && (mods.alt || mods.ctrl || mods.command)) || (dbl_reset && crate::widgets::reset_click(resp)) {
         app.reset_control(t);
         return;
     }

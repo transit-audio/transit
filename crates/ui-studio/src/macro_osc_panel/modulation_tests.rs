@@ -91,10 +91,8 @@ fn the_amount_bar_drags_and_double_click_zeroes_it() {
     t.drag(mid(bar), (mid(bar).0 + w / 4.0, mid(bar).1), false);
     assert!((t.param(tr, "mod1_amount") - 50.0).abs() < 1.5, "a quarter of the width is +50%: {}", t.param(tr, "mod1_amount"));
     assert!(t.panel(tr).routes[0].amount.fill[2] > t.panel(tr).routes[0].amount.tick[2]);
-    // A pause before the double-click (fixed 1/60 s frames): within egui's 0.3 s the drag's press
-    // and the two clicks read as a triple click. The window no longer scrolls here (326-X: it
-    // grew to fit the route), and the scroll's frames had made that pause.
-    t.frames(20);
+    // The double click lands within 0.6 s of the click that opened the editor, so egui counts its
+    // second click as a triple; the kit resets on either (`widgets::reset_click`, 326-X).
     let bar = t.in_view(tr, |p| p.routes[0].amount.rect);
     t.click(mid(bar), 2);
     assert_eq!(t.param(tr, "mod1_amount"), 0.0);

@@ -106,6 +106,37 @@ fn double_click_resets_to_the_default() {
     assert_eq!(got, Some(0.25));
 }
 
+/// A double click soon after any other click is a triple click to egui (within twice
+/// `max_double_click_delay` of the click before last); it resets all the same (326-X), as three
+/// clicks on the dial do.
+#[test]
+fn a_triple_click_resets_too() {
+    let k = |v| Knob { default: 0.25, ..Knob::new("Gain", "0.0 dB", v) };
+    for elsewhere in [true, false] {
+        let mut rig = Rig::new();
+        let dial = rig.idle(|ui| draw(ui, &k(0.8))).layout.dial;
+        let at = mid(dial);
+        // The first click: elsewhere on the screen (a track, another control), or on the dial.
+        let first = if elsewhere { egui::pos2(700.0, 500.0) } else { at };
+        let mut clicks = vec![Rig::press(first, Modifiers::NONE), Rig::release(first, Modifiers::NONE)];
+        for _ in 0..2 {
+            clicks.push(Rig::press(at, Modifiers::NONE));
+            clicks.push(Rig::release(at, Modifiers::NONE));
+        }
+        let mut on_triple = Vec::new();
+        for events in clicks {
+            let out = rig.frame(events, |ui| draw(ui, &k(0.8)));
+            if out.response.triple_clicked() {
+                // Negative control: egui reports this click as a triple and not as a double, so
+                // only the triple branch can reset on it.
+                assert!(!out.response.double_clicked());
+                on_triple.push(out.value);
+            }
+        }
+        assert_eq!(on_triple, [Some(0.25)], "the triple click resets (elsewhere first: {elsewhere})");
+    }
+}
+
 #[test]
 fn ctrl_scrolling_nudges_by_one_step_per_notch_and_a_plain_wheel_does_nothing() {
     let mut rig = Rig::new();

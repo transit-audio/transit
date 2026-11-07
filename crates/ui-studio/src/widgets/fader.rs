@@ -161,7 +161,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, variant: Variant, length: f32, db: f32, m
         }
     }
     let alt_click = response.clicked() && ui.input(|i| i.modifiers.alt);
-    if alt_click || response.double_clicked() {
+    if alt_click || super::reset_click(&response) {
         new = Some(0.0);
     }
     if response.hovered() {
