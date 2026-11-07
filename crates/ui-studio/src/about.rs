@@ -1,5 +1,5 @@
 //! Help > About transit: the wordmark, the version, the repository link, the fork credit to SoundCraft, the licenses, the
-//! third-party credits and notices (the Macro Oscillator's, ADR 0033) and a button that copies the facts a bug report needs.
+//! third-party credits and notices (the Macro Oscillator's, ADR 0033; libopus's, ADR 0048) and a button that copies the facts a bug report needs.
 
 use crate::StudioApp;
 use crate::arrange::{R4, r4};
@@ -21,7 +21,8 @@ Time Stretcher: a port of Émilie Gillet's texture processor firmware and stmlib
 Cross Modulator: a port of Émilie Gillet's meta-modulator firmware and stmlib (MIT)
 Resonator: a port of Émilie Gillet's resonator firmware and stmlib (MIT)
 Modal Voice: a port of Émilie Gillet's modal synthesizer firmware and stmlib (MIT)
-Random Sequencer: a port of Émilie Gillet's random sampler firmware and stmlib (MIT)";
+Random Sequencer: a port of Émilie Gillet's random sampler firmware and stmlib (MIT)
+Opus export and import: libopus 1.6.1, the Opus reference implementation, by the Xiph.Org Foundation and the Opus contributors (BSD 3-clause)";
 /// Their license notices, verbatim.
 pub const THIRD_PARTY_NOTICES: &str = concat!(
     include_str!("../../macro-osc/LICENSE-THIRD-PARTY"),
@@ -44,7 +45,11 @@ pub const THIRD_PARTY_NOTICES: &str = concat!(
     "
 
 ",
-    include_str!("../../random-sequencer/LICENSE-THIRD-PARTY")
+    include_str!("../../random-sequencer/LICENSE-THIRD-PARTY"),
+    "
+
+",
+    include_str!("../../opus/LICENSE-THIRD-PARTY")
 );
 /// Wordmark width in points.
 const WORDMARK_W: f32 = 260.0;

@@ -107,6 +107,9 @@ fn the_help_menu_opens_about_with_wordmark_version_and_credit() {
     // #202: the Random Sequencer's credit and notices.
     assert!(crate::about::THIRD_PARTY.contains("Random Sequencer: a port of Émilie Gillet's random sampler firmware"));
     assert!(notices.contains("Third-party licenses: transit-random-sequencer") && notices.contains("Copyright 2015 Emilie Gillet"));
+    // #238: libopus's credit and BSD notice.
+    assert!(crate::about::THIRD_PARTY.contains("Opus export and import: libopus 1.6.1"));
+    assert!(notices.contains("Third-party licenses: transit-opus") && notices.contains("Copyright 2001-2023 Xiph.Org"));
     let w = rect(&about["wordmark"]);
     assert!((w[2] - w[0] - 260.0).abs() < 1.5, "260 points wide: {w:?}");
     assert!(((w[2] - w[0]) / (w[3] - w[1]) - 3.0).abs() < 0.05, "3:1, never stretched");

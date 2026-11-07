@@ -57,6 +57,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-time", 0),
     ("transit-rt", 0),
     ("transit-audio-io", 0),
+    ("transit-opus", 0),
     ("transit-audio-backend", 0),
     ("transit-audio-wasapi", 0),
     ("transit-audio-asio", 0),
@@ -85,9 +86,10 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-ui-studio", 6),
 ];
 /// Standalone crates have no workspace dependencies (dev-dependencies excepted).
+/// transit-audio-io left the list with #238: it takes the Opus codec from transit-opus (L0, ADR 0048).
 const STANDALONE: &[&str] = &[
     "transit-time",
-    "transit-audio-io",
+    "transit-opus",
     "transit-audio-backend",
     "transit-midi-io",
     "transit-midi",
@@ -104,7 +106,7 @@ const UI_CRATES: &[&str] = &["egui", "eframe", "winit", "rfd", "egui-wgpu", "egu
 // audio-bench is an app over playback and the native backends, not an engine layer.
 const EXEMPT: &[&str] = &["soundcraft", "transit-cli", "transit", "xtask", "audio-bench"];
 /// Manifest exceptions to the workspace unsafe forbid (ADR 0013 and its amendments; the oracle's FFI
-/// module per ADR 0033).
+/// module per ADR 0033; the libopus FFI module of transit-opus per ADR 0048).
 const UNSAFE_ALLOWED: &[&str] = &[
     "transit-rt",
     "transit-audio-wasapi",
@@ -114,6 +116,7 @@ const UNSAFE_ALLOWED: &[&str] = &[
     "transit-vst3-host",
     "transit-au-host",
     "transit-macro-osc-oracle",
+    "transit-opus",
 ];
 /// Dev-only crates (ADR 0033: the C++ null-test oracle). No package, apps included, may take one as a
 /// normal or build dependency, so none can be linked into a shipped binary; a dev-dependency is

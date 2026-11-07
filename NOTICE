@@ -84,4 +84,13 @@ written by transit from her C++, under the MIT License:
 The full notices are in crates/random-sequencer/LICENSE-THIRD-PARTY and in the app under
 Help > About transit.
 
+transit's Opus export and import use libopus 1.6.1, the Opus reference implementation
+(https://opus-codec.org/), compiled into the app from its unchanged source under the BSD 3-clause
+license:
+
+  Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry,
+  CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon
+
+The full notice is in crates/opus/LICENSE-THIRD-PARTY and in the app under Help > About transit.
+
 transit is based on SoundCraft by storytold (https://github.com/storytold/soundcraft), MIT OR Apache-2.0.

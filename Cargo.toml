@@ -16,6 +16,7 @@ toml = "1.1"
 transit-time = { path = "crates/time" }
 transit-rt = { path = "crates/rt" }
 transit-audio-io = { path = "crates/audio-io" }
+transit-opus = { path = "crates/opus" }
 transit-audio-backend = { path = "crates/audio-backend" }
 transit-audio-wasapi = { path = "crates/audio-wasapi" }
 transit-audio-asio = { path = "crates/audio-asio" }

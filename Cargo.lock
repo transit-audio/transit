@@ -4153,6 +4153,7 @@ dependencies = [
  "serde_json",
  "symphonia",
  "thiserror 2.0.21",
+ "transit-opus",
 ]
 
 [[package]]
@@ -4357,6 +4358,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-opus"
+version = "0.6.2"
+dependencies = [
+ "cc",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "transit-playback"
 version = "0.6.2"
 dependencies = [
@@ -4455,6 +4464,7 @@ dependencies = [
  "serde_json",
  "toml",
  "transit-audio-backend",
+ "transit-audio-io",
  "transit-clap-host",
  "transit-dsp",
  "transit-engine",

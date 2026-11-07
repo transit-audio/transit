@@ -1,0 +1,33 @@
+[package]
+name = "transit-opus"
+description = "transit's Opus codec: the reference libopus 1.6.1 built from vendored source with cc, behind a safe encoder and decoder (#238, ADR 0048)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+# transit's own code is MIT OR Apache-2.0; the vendored C under vendor/ is BSD-3-Clause (LICENSE-THIRD-PARTY).
+license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
+publish = false
+build = "build.rs"
+links = "transit_opus"
+
+[dependencies]
+thiserror.workspace = true
+
+[build-dependencies]
+cc = "1"
+
+# Mirrors `[workspace.lints]`, except that `unsafe` is allowed for the FFI module only (src/ffi.rs);
+# every other module carries `#![forbid(unsafe_code)]` (ADR 0013 rule, ADR 0048 implementation note).
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "forbid"
+missing_docs = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
