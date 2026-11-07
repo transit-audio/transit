@@ -277,11 +277,10 @@ pub fn switcher_panel(app: &mut StudioApp, ui: &mut Ui) {
         app.keys.switcher = rects;
         match clicked {
             Some(0) => app.toggle_keys(),
-            // A click on the active tab hides its pane; on the other, that one shows and this hides.
-            Some(1) if app.ui.show_mixer => app.ui.show_mixer = false,
-            Some(2) if app.ui.show_devices => app.ui.show_devices = false,
-            Some(1) => app.ui.show_mixer_pane(),
-            Some(_) => app.ui.show_devices_pane(),
+            // Each tab toggles its own pane; the Mixer and Devices panes are independent and may
+            // both be shown.
+            Some(1) => crate::menus::toggle_mixer(&mut app.ui),
+            Some(_) => crate::menus::toggle_devices(&mut app.ui),
             None => {}
         }
     });
@@ -302,9 +301,9 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
         Some(which) => {
             app.close_keys();
             if which == 1 {
-                app.ui.show_mixer_pane();
+                app.ui.show_mixer = true;
             } else {
-                app.ui.show_devices_pane();
+                app.ui.show_devices = true;
             }
         }
         None => {}

@@ -23,11 +23,13 @@ See the [shortcuts reference](shortcuts.md) and **Help > Keyboard Shortcuts** fo
 
 ## Lower panes: Piano Roll, Mixer, Devices
 
-The tabs under the arrangement toggle: click the active **Mixer** or **Devices** tab to hide its
-pane, click the other to switch to it. The tab strip stays when no pane is shown, so a pane is
-one click away. The Mixer and Devices panes are exclusive, never stacked, through the tabs,
-**View > Mixer**, **View > Devices**, and their shortcuts (Ctrl+Alt+M, Ctrl+Alt+L; Cmd+Alt on
-macOS). An older `ui.json` with both on loads with the Mixer shown.
+The tabs under the arrangement toggle: click the **Mixer** or **Devices** tab to show its pane,
+and click it again to hide it. The two panes are independent and can both be open at once, the
+Devices pane at the bottom and the Mixer above it; **View > Mixer**, **View > Devices** and their
+shortcuts (Ctrl+Alt+M, Ctrl+Alt+L; Cmd+Alt on macOS) toggle them the same way. The tab strip
+stays when no pane is shown, so a pane is one click away. With both open in a short window the
+Mixer pane gives up height first so the arrangement keeps two track rows, down to the Mixer's
+smallest height.
 
 ## Arrangement: track height
 

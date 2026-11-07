@@ -180,7 +180,7 @@ fn the_view_switcher_shows_in_the_piano_roll_the_mixer_and_the_devices() {
     t.click(mid(l.tab_mixer));
     assert!(t.app.mixer.layout.visible);
     t.click(mid(t.app.keys.switcher[2]));
-    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer);
+    assert!(t.app.ui.show_devices && t.app.ui.show_mixer, "Devices joins the Mixer");
     assert!(t.app.keys.switcher.iter().all(|r| have(*r)), "devices view");
     // Piano Roll from the strip reopens the clip.
     t.click(mid(t.app.keys.switcher[0]));
@@ -198,9 +198,10 @@ fn a_double_click_on_a_midi_clip_opens_the_piano_roll_and_tabs_shortcut_and_esca
     assert!(l.visible && l.clip == Some(t.clip.0) && l.track == Some(t.track.0), "{l:?}");
     assert!(!t.app.mixer.layout.visible, "the piano roll replaces the mixer pane");
     assert!(l.pane[1] > t.app.arrange.layout.timeline[1], "in the bottom pane");
-    // Devices tab: the device chain comes back in its place.
+    // Devices tab: the piano roll closes and the device chain shows; the Mixer pane is
+    // independent and stays as it was (shown), so both panes come back.
     t.click(mid(l.tab_devices));
-    assert!(!t.app.keys.layout.visible && t.app.ui.show_devices && !t.app.ui.show_mixer);
+    assert!(!t.app.keys.layout.visible && t.app.ui.show_devices && t.app.ui.show_mixer);
     // Ctrl+Alt+K brings the same clip back.
     t.key("K", json!({"cmd": true, "alt": true}));
     assert!(t.app.keys.layout.visible && t.app.keys.layout.clip == Some(t.clip.0));
@@ -443,49 +444,70 @@ fn a_click_on_the_active_mixer_tab_hides_the_pane_and_the_strip_stays() {
 }
 
 #[test]
-fn a_click_on_the_active_devices_tab_hides_the_pane() {
-    let mut t = T::new();
-    t.click(mid(t.app.keys.switcher[2]));
-    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer, "Devices while the Mixer is shown switches");
-    t.click(mid(t.app.keys.switcher[2]));
-    assert!(!t.app.ui.show_devices && !t.app.ui.show_mixer);
-    assert!(t.app.keys.switcher.iter().all(|r| have(*r)));
-}
-
-#[test]
-fn the_view_menu_and_shortcuts_never_stack_the_mixer_and_devices() {
+fn the_mixer_and_devices_tabs_toggle_independently_and_both_panes_show() {
     let mut t = T::new();
     assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
-    // The View menu's Devices action while the Mixer is shown.
-    crate::menus::toggle_devices(&mut t.app.ui);
-    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer, "exactly one pane");
-    crate::menus::toggle_mixer(&mut t.app.ui);
-    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices, "exactly one pane");
-    // Hiding is unchanged.
-    crate::menus::toggle_mixer(&mut t.app.ui);
+    // Devices while the Mixer is shown: both on, both drawn, both tabs lit.
+    t.click(mid(t.app.keys.switcher[2]));
+    assert!(t.app.ui.show_mixer && t.app.ui.show_devices, "the Mixer stays when Devices shows");
+    assert!(t.app.mixer.layout.visible && t.app.mixer.devices.visible, "both panes drawn");
+    assert!(have(t.app.mixer.layout.area) && have(t.app.mixer.devices.area));
+    // The active Devices tab hides only its own pane.
+    t.click(mid(t.app.keys.switcher[2]));
+    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
+    // From nothing shown, two clicks show both; the strip stayed in between.
+    t.click(mid(t.app.keys.switcher[1]));
     assert!(!t.app.ui.show_mixer && !t.app.ui.show_devices);
-    // The shortcuts: Ctrl+Alt+L shows Devices, Ctrl+Alt+M then swaps to the Mixer.
-    t.key("L", json!({"cmd": true, "alt": true}));
-    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer);
-    t.key("M", json!({"cmd": true, "alt": true}));
-    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
+    assert!(t.app.keys.switcher.iter().all(|r| have(*r)), "the strip stays with nothing shown");
+    t.click(mid(t.app.keys.switcher[2]));
+    t.click(mid(t.app.keys.switcher[1]));
+    assert!(t.app.ui.show_mixer && t.app.ui.show_devices, "both tabs on after two clicks");
+    assert!(t.app.mixer.layout.visible && t.app.mixer.devices.visible);
+}
+
+/// The View menu entry `label`, from the menu bar (open the View menu first).
+fn view_item(t: &T, label: &str) -> [f32; 4] {
+    t.app.arrange.bar_menu.iter().find(|m| m.label == label).unwrap_or_else(|| panic!("no {label}: {:?}", t.app.arrange.bar_menu)).rect
 }
 
 #[test]
-fn an_old_ui_json_with_both_panes_on_loads_with_the_mixer_shown() {
+fn the_view_menu_and_shortcuts_show_both_panes_and_hide_only_their_own() {
+    let mut t = T::new();
+    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
+    // View > Devices while the Mixer is shown, by clicks: both shown.
+    t.click(mid(view_item(&t, "View")));
+    t.click(mid(view_item(&t, "Devices")));
+    assert!(t.app.ui.show_mixer && t.app.ui.show_devices, "View > Devices keeps the Mixer");
+    // The menu offers both entries (checked from the same two flags) and View > Mixer hides only it.
+    t.click(mid(view_item(&t, "View")));
+    t.click(mid(view_item(&t, "Mixer")));
+    assert!(!t.app.ui.show_mixer && t.app.ui.show_devices, "View > Mixer hides only the Mixer");
+    // The shortcuts: Ctrl+Alt+M shows the Mixer beside Devices; Ctrl+Alt+L hides only Devices.
+    t.key("M", json!({"cmd": true, "alt": true}));
+    assert!(t.app.ui.show_mixer && t.app.ui.show_devices);
+    t.key("L", json!({"cmd": true, "alt": true}));
+    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
+    t.key("L", json!({"cmd": true, "alt": true}));
+    assert!(t.app.ui.show_mixer && t.app.ui.show_devices);
+}
+
+#[test]
+fn a_ui_json_with_both_panes_on_loads_both() {
     let ui: crate::UiState = serde_json::from_value(json!({"show_mixer": true, "show_devices": true})).unwrap();
-    assert!(ui.show_mixer && !ui.show_devices);
+    assert!(ui.show_mixer && ui.show_devices, "both stay on");
+    let saved = serde_json::to_value(&ui).unwrap();
+    assert!(saved["show_mixer"] == true && saved["show_devices"] == true);
     let ui: crate::UiState = serde_json::from_value(json!({"show_mixer": false, "show_devices": true})).unwrap();
     assert!(!ui.show_mixer && ui.show_devices);
-    // Both booleans are still saved.
-    let saved = serde_json::to_value(&ui).unwrap();
-    assert!(saved["show_mixer"] == false && saved["show_devices"] == true);
 }
 
 #[test]
-fn opening_a_device_card_from_the_mixer_leaves_exactly_one_pane_shown() {
+fn opening_a_device_card_from_the_mixer_shows_devices_and_leaves_the_mixer() {
     let mut t = T::new();
     assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
     crate::mixer::inserts::open_card(&mut t.app, t.track);
-    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer, "devices shown, mixer hidden");
+    assert!(t.app.ui.show_devices && t.app.ui.show_mixer, "devices shown, mixer untouched");
+    t.app.ui.show_mixer = false;
+    crate::mixer::inserts::open_card(&mut t.app, t.track);
+    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer, "a hidden mixer stays hidden");
 }

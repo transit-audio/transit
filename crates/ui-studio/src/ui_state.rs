@@ -5,7 +5,7 @@ use super::*;
 /// Our own UI state (serde, so agents can read and set it; saved as `ui.json` in the transit
 /// settings folder). Not `transit-ui-egui`'s `UiState` (plan 06, L13).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(default, remote = "Self")]
+#[serde(default)]
 pub struct UiState {
     pub low_latency: bool,
     #[serde(deserialize_with = "low_latency::deserialize_limit")]
@@ -205,37 +205,6 @@ fn pane_height<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> 
     Ok(if h == OLD_PANE_DEFAULT { crate::mixer::default_pane_height() } else { h })
 }
 
-impl serde::Serialize for UiState {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        Self::serialize(self, s)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for UiState {
-    /// An older `ui.json` may have both lower panes on; they never stack, so the mixer wins.
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let mut ui = Self::deserialize(d)?;
-        if ui.show_mixer {
-            ui.show_devices = false;
-        }
-        Ok(ui)
-    }
-}
-
-impl UiState {
-    /// Show the Mixer pane; the Devices pane hides (the two never stack).
-    pub fn show_mixer_pane(&mut self) {
-        self.show_mixer = true;
-        self.show_devices = false;
-    }
-
-    /// Show the Devices pane; the Mixer pane hides.
-    pub fn show_devices_pane(&mut self) {
-        self.show_devices = true;
-        self.show_mixer = false;
-    }
-}
-
 #[cfg(test)]
 mod height_tests {
     use super::UiState;
@@ -261,5 +230,152 @@ mod height_tests {
         let chosen: UiState = serde_json::from_value(json!({"mixer_height": 500.0})).unwrap();
         assert_eq!(chosen.mixer_height, 500.0);
         assert_eq!(UiState::default().mixer_height, new);
+    }
+}
+
+/// The `ui.json` round trip (permanent since the pane toggles: the derive is plain again and no
+/// load-time rule rewrites a field). Every leaf of the saved state is perturbed in turn; each
+/// value that loads saves back unchanged and is a byte-identical fixed point, and a file with
+/// every accepted perturbation and filled collections is one too.
+#[cfg(test)]
+mod round_trip_tests {
+    use super::UiState;
+    use serde_json::{Value, json};
+
+    /// Fields that normalize on load by design: the old default pane height and the clamped ones.
+    const NORMALIZED: [&str; 0] = [];
+
+    fn load(v: &Value) -> Result<UiState, serde_json::Error> {
+        serde_json::from_value(v.clone())
+    }
+
+    fn save(ui: &UiState) -> Value {
+        serde_json::to_value(ui).unwrap()
+    }
+
+    /// The text saved, loaded and saved again must be the same bytes.
+    fn assert_fixed_point(v: &Value, what: &str) {
+        let text = serde_json::to_string_pretty(&save(&load(v).unwrap())).unwrap();
+        let again = serde_json::to_string_pretty(&save(&serde_json::from_str::<UiState>(&text).unwrap())).unwrap();
+        assert_eq!(text, again, "{what}: not a fixed point");
+    }
+
+    fn leaves(v: &Value, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+        match v {
+            Value::Object(m) => {
+                for (k, c) in m {
+                    path.push(k.clone());
+                    leaves(c, path, out);
+                    path.pop();
+                }
+            }
+            Value::Array(a) if !a.is_empty() => {
+                for (i, c) in a.iter().enumerate() {
+                    path.push(i.to_string());
+                    leaves(c, path, out);
+                    path.pop();
+                }
+            }
+            _ => out.push(path.clone()),
+        }
+    }
+
+    fn at<'a>(v: &'a mut Value, path: &[String]) -> &'a mut Value {
+        path.iter().fold(v, |v, k| match v {
+            Value::Array(a) => &mut a[k.parse::<usize>().unwrap()],
+            _ => &mut v[k.as_str()],
+        })
+    }
+
+    fn candidates(v: &Value) -> Vec<Value> {
+        match v {
+            Value::Bool(b) => vec![json!(!b)],
+            Value::Number(n) if n.is_u64() => vec![json!(n.as_u64().unwrap() + 1), json!(2)],
+            Value::Number(n) if n.is_i64() => vec![json!(n.as_i64().unwrap() + 1), json!(2)],
+            Value::Number(n) => {
+                let f = n.as_f64().unwrap();
+                vec![json!(f + 1.0), json!(f * 0.75), json!(1.5)]
+            }
+            Value::String(_) => ["x", "dark", "light", "jump", "pickup"].iter().map(|s| json!(s)).collect(),
+            Value::Null => vec![json!(1), json!("x")],
+            Value::Array(_) | Value::Object(_) => Vec::new(),
+        }
+    }
+
+    /// The default state with every collection given an entry, so their leaves are walked too.
+    fn filled() -> Value {
+        // The controller profile and the transport buttons, learned the way a user does.
+        let mut app = crate::tests::app();
+        app.run("track.new", json!({"kind": "instrument"})).unwrap();
+        app.midi_learn_feed(0.0);
+        let source = json!({"port": "KeyStep", "channel": 2, "kind": "cc", "number": 21});
+        app.run("midi.map", json!({"source": source, "target": "strip:1:volume", "scope": "profile"})).unwrap();
+        let button = json!({"port": "Controller", "kind": "cc", "number": 20, "channel": 1});
+        app.run("midi.map", json!({"target": "transport:cycle", "scope": "profile", "source": button})).unwrap();
+        app.midi_learn_feed(0.0);
+        let mut ui = UiState { midi_profile: app.engine.midi_profile().clone(), midi_transport: app.ui.midi_transport.clone(), ..UiState::default() };
+        assert!(!ui.midi_profile.is_empty(), "the controller profile is filled");
+        assert!(!ui.midi_transport.is_empty(), "the transport buttons are filled");
+        ui.plugin_dirs.vst3.push("D:/VST3".into());
+        ui.plugin_dirs.clap.push("D:/CLAP".into());
+        ui.io_maps.push(transit_model::IoMap::for_device("WASAPI", "Speakers", 2, 2));
+        ui.recent_files.push(super::recent::RecentFile { path: "C:/a/b.transit".into(), opened_at: 7 });
+        let mut v = save(&ui);
+        v["plugin_windows"] = json!([[3, 1]]);
+        v["editor_follow"] = json!([[4, 2]]);
+        v["device_windows"] = json!({"plaits": [10.0, 20.0]});
+        v["device_sections"] = json!({"plaits/env": true});
+        v["plugin_load_ms"] = json!({"vst3:abc": 1200});
+        let loaded = save(&load(&v).unwrap());
+        assert_eq!(loaded, v, "the filled collections load and save unchanged");
+        v
+    }
+
+    #[test]
+    fn every_field_survives_save_and_load_unchanged() {
+        let base = filled();
+        assert_fixed_point(&json!({}), "an empty file");
+        assert_fixed_point(&base, "the filled default");
+        let mut paths = Vec::new();
+        leaves(&base, &mut Vec::new(), &mut paths);
+        let mut all = base.clone();
+        let mut covered = std::collections::BTreeSet::new();
+        for path in &paths {
+            let old = at(&mut base.clone(), path).clone();
+            for c in candidates(&old) {
+                let mut v = base.clone();
+                *at(&mut v, path) = c.clone();
+                let Ok(ui) = load(&v) else { continue };
+                let saved = save(&ui);
+                let what = path.join(".");
+                if !NORMALIZED.contains(&what.as_str()) {
+                    assert_eq!(at(&mut saved.clone(), path), &c, "{what} saves back what was loaded");
+                }
+                assert_fixed_point(&v, &what);
+                if c != old {
+                    covered.insert(path[0].clone());
+                    *at(&mut all, path) = c;
+                    break;
+                }
+            }
+        }
+        assert_fixed_point(&all, "every perturbation at once");
+        let all_saved = save(&load(&all).unwrap());
+        assert_eq!(all_saved, all, "the all-perturbed file loads and saves unchanged");
+        // `collapsed` is shown by `ui.inspect` and never loaded (`skip_deserializing`).
+        let keys: Vec<&String> = base.as_object().unwrap().keys().filter(|k| !covered.contains(*k) && *k != "collapsed").collect();
+        assert!(keys.is_empty(), "fields with no perturbation that loads: {keys:?}");
+        // The two lower panes are independent: both on stays both on.
+        let mut both = base.clone();
+        both["show_mixer"] = json!(true);
+        both["show_devices"] = json!(true);
+        assert_eq!(save(&load(&both).unwrap()), both);
+        // An unknown field is ignored and a missing newer one takes its default, as before.
+        let mut extra = base.clone();
+        extra["no_such_field"] = json!(1);
+        assert_eq!(save(&load(&extra).unwrap()), base);
+        let mut missing = base.clone();
+        missing.as_object_mut().unwrap().remove("check_for_updates");
+        assert_eq!(save(&load(&missing).unwrap()), base);
     }
 }

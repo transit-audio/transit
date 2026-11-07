@@ -199,7 +199,7 @@ fn insert_slot(
 /// reason and Resume.
 pub(crate) fn open_card(app: &mut StudioApp, track: TrackId) {
     app.focus(track);
-    app.ui.show_devices_pane();
+    app.ui.show_devices = true;
 }
 
 /// The names of the inserts on `t` that do not answer, in slot order.

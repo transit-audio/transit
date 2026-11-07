@@ -61,17 +61,21 @@ pub const ARRANGE_MIN_ROW: f32 = 48.0;
 
 /// What the docked mixer must leave above it: the bottom switcher (drawn over the mixer whenever
 /// a pane is docked), the arrangement's ruler and two full [`ARRANGE_MIN_ROW`] track rows (158
-/// points). The menu bar, the transport, the status bar and the device chain are already outside
-/// the height [`pane_height`] is given.
+/// points). The menu bar, the transport, the status bar and the Devices pane (when it is shown:
+/// the panes are independent and may both be open) are already outside the height
+/// [`pane_height`] is given.
 pub const ARRANGE_MIN: f32 = crate::keys::HEADER_H + crate::theme::RULER_H + 2.0 * ARRANGE_MIN_ROW;
 
-/// The docked mixer's height in `available` points (the window under the menu bar, the transport,
-/// the status bar and the device chain): the default is `min(default_pane_height(), available -
-/// ARRANGE_MIN)`, never under [`min_pane_height`], so a short window keeps two track rows; a
-/// height the user chose is kept as before, clamped to the pane's range.
+/// The docked mixer's height in `available` points (the window under the menu bar, the transport
+/// and the status bar, less the Devices pane when it is shown, since that pane is laid out first):
+/// `min(stored, available - ARRANGE_MIN)`, never under [`min_pane_height`], so a short window keeps
+/// two track rows beside both panes whenever the floor allows. When even the floor leaves fewer
+/// than two rows the mixer sits at its floor, the Devices pane keeps its height, and only then
+/// does the arrangement shrink below two rows. The stored height (the default, or one the user
+/// set) is clamped to the pane's range first and is never rewritten, so a taller window restores
+/// it.
 pub fn pane_height(stored: f32, available: f32) -> f32 {
-    let h = stored.clamp(min_pane_height(), 600.0);
-    if stored == default_pane_height() { h.min(available - ARRANGE_MIN).max(min_pane_height()) } else { h }
+    stored.clamp(min_pane_height(), 600.0).min(available - ARRANGE_MIN).max(min_pane_height())
 }
 
 /// Whether a strip in a lane `height` tall keeps its sections in order: the readouts below the

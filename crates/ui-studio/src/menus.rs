@@ -953,20 +953,14 @@ fn check_button_with(ui: &mut egui::Ui, on: bool, text: impl Into<egui::WidgetTe
     resp.response
 }
 
-/// View > Mixer and its shortcut: show it (the Devices pane hides) or hide it.
+/// View > Mixer, its shortcut and the Mixer tab: show or hide the Mixer pane. The Devices pane is
+/// independent; both may be shown.
 pub(crate) fn toggle_mixer(ui: &mut crate::UiState) {
-    if ui.show_mixer {
-        ui.show_mixer = false;
-    } else {
-        ui.show_mixer_pane();
-    }
+    ui.show_mixer = !ui.show_mixer;
 }
 
-/// View > Devices and its shortcut: show it (the Mixer pane hides) or hide it.
+/// View > Devices, its shortcut and the Devices tab: show or hide the Devices pane, independent of
+/// the Mixer pane.
 pub(crate) fn toggle_devices(ui: &mut crate::UiState) {
-    if ui.show_devices {
-        ui.show_devices = false;
-    } else {
-        ui.show_devices_pane();
-    }
+    ui.show_devices = !ui.show_devices;
 }

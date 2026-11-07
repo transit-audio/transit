@@ -584,7 +584,7 @@ fn pane_h(app: &StudioApp) -> f32 {
 /// window 1080 tall gets the full 475.
 #[test]
 fn the_default_pane_leaves_two_track_rows_at_800_and_is_475_at_1080() {
-    use crate::mixer::{ARRANGE_MIN_ROW, default_pane_height, min_pane_height, pane_height};
+    use crate::mixer::{ARRANGE_MIN, ARRANGE_MIN_ROW, default_pane_height, min_pane_height, pane_height};
     let mut app = app();
     for _ in 0..8 {
         app.run("track.new", json!({"kind": "instrument"})).unwrap();
@@ -603,8 +603,10 @@ fn the_default_pane_leaves_two_track_rows_at_800_and_is_475_at_1080() {
     assert!(list - (default_pane_height() - pane_h(&app)) < 2.0 * ARRANGE_MIN_ROW, "a fixed 475 would leave {list}");
     frames_at(&mut app, &ctx, 4, &mut time, 1920.0, 1080.0);
     assert!((pane_h(&app) - default_pane_height()).abs() < 1.01, "475 at 1920x1080: {}", pane_h(&app));
-    // A height the user chose is kept as before, clamped to the pane's range.
-    assert_eq!(pane_height(500.0, 300.0), 500.0);
+    // A height the user chose is clamped to the pane's range and capped the same way.
+    assert_eq!(pane_height(500.0, 2000.0), 500.0);
+    assert_eq!(pane_height(500.0, 600.0), 600.0 - ARRANGE_MIN);
+    assert_eq!(pane_height(500.0, 300.0), min_pane_height(), "the floor wins over the cap");
     assert_eq!(pane_height(900.0, 2000.0), 600.0);
     assert_eq!(pane_height(default_pane_height(), 2000.0), default_pane_height());
     assert_eq!(pane_height(default_pane_height(), 100.0), min_pane_height(), "never under the pane's minimum");
@@ -637,4 +639,51 @@ fn strips_that_fit_beside_the_main_bus_do_not_scroll_and_overflowing_strips_stil
     frames_at(&mut app, &ctx, 8, &mut time, 600.0, 800.0);
     assert!(app.mixer.hscroll > 0.0, "six strips in 600 scroll");
     assert_eq!(app.mixer.layout.master.clone().unwrap().rect, m.rect, "the main bus stays pinned");
+}
+
+/// Both lower panes at the maintainer's short window (200 percent zoom on a 1000 by 544 point
+/// window): the mixer's cap is taken from the room left under the Devices pane, so the arrangement
+/// keeps the ruler and two full 48 pt rows whenever the 379 floor allows. At 544 itself the floor
+/// does not allow it: the mixer sits at its floor, the Devices pane keeps its height, and only
+/// then does the arrangement shrink below two rows. A little taller and the two rows come back.
+#[test]
+fn both_panes_at_1000x544_keep_two_rows_when_the_floors_allow_else_the_mixer_is_at_its_floor() {
+    use crate::mixer::{ARRANGE_MIN, ARRANGE_MIN_ROW, default_pane_height, min_pane_height};
+    let mut app = app();
+    for _ in 0..8 {
+        app.run("track.new", json!({"kind": "instrument"})).unwrap();
+    }
+    app.ui.show_mixer = true;
+    app.ui.show_devices = true;
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    let rows = 2.0 * ARRANGE_MIN_ROW;
+    frames_at(&mut app, &ctx, 4, &mut time, 1000.0, 544.0);
+    assert!(app.mixer.layout.visible && app.mixer.devices.visible, "both panes drawn");
+    let devices = h(app.mixer.devices.area);
+    let want = crate::devices::pane_height(&app).max(crate::midi_fx_panel::pane_height(&app));
+    assert!((devices - want).abs() < 1.01, "the Devices pane keeps its height: {devices} vs {want}");
+    let list = h(app.arrange.layout.track_list);
+    let floor = min_pane_height();
+    // 544 points: under the transport there is room for the Devices pane and the mixer's floor
+    // but not for two rows as well, so the mixer is at its floor, the Devices pane keeps its
+    // height and the arrangement shrinks below two rows (only here).
+    assert!(list < rows, "the floors leave fewer than two rows at 1000x544: {list}");
+    assert!((pane_h(&app) - floor).abs() < 1.01, "the mixer at its floor: {}", pane_h(&app));
+    // A window tall enough for both panes, two rows and 40 points of mixer above its floor: the
+    // chrome above the ruler and below the Devices pane, then the panes and ARRANGE_MIN.
+    let above = app.arrange.layout.track_list[1] - crate::theme::RULER_H;
+    let below = 544.0 - app.mixer.devices.area[3];
+    let tall = above + ARRANGE_MIN + floor + 40.0 + devices + below;
+    frames_at(&mut app, &ctx, 4, &mut time, 1000.0, tall);
+    let list = h(app.arrange.layout.track_list);
+    let mixer = pane_h(&app);
+    assert!(list >= rows - 0.5, "two full rows beside both panes at 1000x{tall}: {list}");
+    assert!(mixer > floor + 1.0 && mixer < default_pane_height() - 1.0, "capped between the floor and the default: {mixer}");
+    assert!((h(app.mixer.devices.area) - devices).abs() < 1.01, "the Devices pane keeps its height");
+    // Negative control: the single-pane cap (against the room before the Devices pane) would give
+    // the mixer the Devices pane's height back and leave fewer than two rows.
+    let available = mixer + ARRANGE_MIN + (list - rows);
+    let single = default_pane_height().min(available + devices - ARRANGE_MIN).max(floor);
+    assert!(list - (single - mixer) < rows, "the single-pane cap would leave {} at 1000x{tall}", list - (single - mixer));
 }
