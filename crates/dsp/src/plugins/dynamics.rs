@@ -69,6 +69,8 @@ pub struct Compressor {
     mix: Smoother,
     lookahead: usize,
     gr_meter: f32,
+    /// The block's peak detector level (linear), for the operating point (#326).
+    det_peak: f32,
 }
 
 impl Default for Compressor {
@@ -91,6 +93,7 @@ impl Compressor {
             mix: Smoother::new(1.0),
             lookahead: 0,
             gr_meter: 0.0,
+            det_peak: 0.0,
         };
         c.update();
         c
@@ -122,6 +125,7 @@ impl Compressor {
         let hpf = self.p.on(6);
         let la = self.lookahead;
         let mut max_gr = 0.0f32;
+        let mut det_peak = 0.0f32;
         for n in 0..frames {
             let mut level = 0.0f32;
             for c in 0..ch {
@@ -134,6 +138,7 @@ impl Compressor {
                     level = level.max(s.abs());
                 }
             }
+            det_peak = det_peak.max(level);
             let gr = self.gain_for(level);
             max_gr = max_gr.max(gr);
             let g = db_to_gain(-gr) * self.makeup.next();
@@ -147,6 +152,7 @@ impl Compressor {
             }
         }
         self.gr_meter = max_gr;
+        self.det_peak = det_peak;
     }
 
     /// Processes one frame of gain computation from a sidechain level (linear).
@@ -188,6 +194,7 @@ impl Plugin for Compressor {
         self.delay.iter_mut().for_each(DelayLine::clear);
         self.gr = 0.0;
         self.gr_meter = 0.0;
+        self.det_peak = 0.0;
         self.makeup.snap();
         self.mix.snap();
     }
@@ -209,6 +216,10 @@ impl Plugin for Compressor {
 
     fn gain_reduction_db(&self) -> f32 {
         self.gr_meter
+    }
+
+    fn detector_level_db(&self) -> Option<f32> {
+        Some(gain_to_db(self.det_peak))
     }
 
     /// The detector envelope, the sidechain filters' memory, the lookahead lines (contents and

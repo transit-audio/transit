@@ -88,6 +88,9 @@ impl Plugin for Probe {
     fn gain_reduction_db(&self) -> f32 {
         self.inner.gain_reduction_db()
     }
+    fn detector_level_db(&self) -> Option<f32> {
+        self.inner.detector_level_db()
+    }
     fn set_transport(&mut self, t: &Transport) {
         self.inner.set_transport(t);
     }

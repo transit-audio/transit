@@ -483,6 +483,14 @@ pub trait Plugin: Send {
     fn gain_reduction_db(&self) -> f32 {
         0.0
     }
+    /// Dynamics plug-ins that draw an operating point (the Compressor's, #326): the level in dB
+    /// its detector measured over the last block (the block's peak of what the detector saw: the
+    /// external key when one is given, after the sidechain filter), or `None` with no detector.
+    /// Read after `process`, on the audio thread, so it must be cheap and allocation-free. The
+    /// default: none.
+    fn detector_level_db(&self) -> Option<f32> {
+        None
+    }
     /// Instruments with voices: which sound, for a panel's activity lights. Bit `i`: voice `i`
     /// sounds (a key holds it or its release tail plays); bit `16 + i`: a key holds it. Read after
     /// `process`, on the audio thread, so it must be cheap and allocation-free. The default: none.

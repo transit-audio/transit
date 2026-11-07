@@ -318,6 +318,27 @@ fn compressor_steady_state_gain_reduction() {
     assert_eq!(p.latency(), 240);
 }
 
+/// The level the detector measured is published per block (#326, the operating point): a constant
+/// input publishes its own level, and with an external key the key's, which is what the detector
+/// sees. Negative control: the publication removed (the trait's default) fails the first check.
+#[test]
+fn compressor_publishes_its_detector_level() {
+    let mut p = prepared("compressor");
+    assert_eq!(p.detector_level_db(), Some(transit_dsp::MIN_DB), "silence before any block");
+    let level = db_to_gain(-17.0);
+    run(p.as_mut(), &vec![vec![level; 4 * BLOCK]; 2]);
+    let got = p.detector_level_db().expect("the Compressor publishes its detector level");
+    assert!((got - -17.0).abs() < 0.1, "constant input: {got}");
+    // The key drives the detector: a quiet input keyed by a loud kick publishes the kick's level.
+    let mut io = vec![vec![db_to_gain(-40.0); BLOCK]; 2];
+    let key = vec![vec![db_to_gain(-6.0); BLOCK]; 2];
+    p.process_with_key(&mut io, &key, BLOCK);
+    let got = p.detector_level_db().unwrap();
+    assert!((got - -6.0).abs() < 0.1, "external key: {got}");
+    // A plug-in with no detector publishes none.
+    assert_eq!(prepared("eq_7band").detector_level_db(), None);
+}
+
 #[test]
 fn gate_closes_below_threshold() {
     let mut p = prepared("expander_gate");

@@ -33,6 +33,10 @@ pub struct ScopeTap {
     write: AtomicUsize,
     /// The plug-in's gain reduction in dB as of the last block, as `f32` bits.
     gr: AtomicU32,
+    /// The level the plug-in's detector measured in dB as of the last block
+    /// (`Plugin::detector_level_db`), as `f32` bits; [`NO_LEVEL`] for none since the tap was
+    /// switched on.
+    detector: AtomicU32,
     /// An instrument's voices as of the last block (`Plugin::voice_activity`).
     voices: AtomicU32,
     /// The newest voice's key as of the last block (`Plugin::newest_voice`), [`NO_VOICE`] for none.
@@ -46,6 +50,9 @@ pub struct ScopeTap {
 
 /// The newest-voice note a tap holds while no key holds a voice.
 pub const NO_VOICE: u32 = u32::MAX;
+
+/// The detector level a tap holds while none has been published (a NaN's bits).
+const NO_LEVEL: u32 = 0x7FC0_0000;
 
 impl Default for ScopeTap {
     fn default() -> Self {
@@ -62,6 +69,7 @@ impl ScopeTap {
             buf: (0..SCOPE_FRAMES).map(|_| AtomicU32::new(0)).collect(),
             write: AtomicUsize::new(0),
             gr: AtomicU32::new(0),
+            detector: AtomicU32::new(NO_LEVEL),
             voices: AtomicU32::new(0),
             newest_note: AtomicU32::new(NO_VOICE),
             newest_shape: [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)],
@@ -78,14 +86,35 @@ impl ScopeTap {
         self.enabled.load(Ordering::Relaxed)
     }
 
+    /// Switches the render's writes on or off. Switching on clears the detector level, so a panel
+    /// that opens shows only what the render publishes from then on.
     pub fn set_enabled(&self, on: bool) {
-        self.enabled.store(on, Ordering::Relaxed);
+        let was = self.enabled.swap(on, Ordering::Relaxed);
+        if on && !was {
+            self.detector.store(NO_LEVEL, Ordering::Relaxed);
+        }
     }
 
     /// The gain reduction in dB the render last stored (positive: reducing).
     #[must_use]
     pub fn gain_reduction_db(&self) -> f32 {
         f32::from_bits(self.gr.load(Ordering::Relaxed))
+    }
+
+    /// The level in dB the plug-in's detector last measured (`Plugin::detector_level_db`); `None`
+    /// when none has been published since the tap was switched on, or the plug-in has no detector.
+    #[must_use]
+    pub fn detector_level_db(&self) -> Option<f32> {
+        let db = f32::from_bits(self.detector.load(Ordering::Relaxed));
+        (!db.is_nan()).then_some(db)
+    }
+
+    /// Audio thread: stores the level the plug-in's detector measured (`None`: it has none). Does
+    /// nothing while disabled.
+    pub fn push_detector(&self, level_db: Option<f32>) {
+        if self.enabled() {
+            self.detector.store(level_db.filter(|d| !d.is_nan()).map_or(NO_LEVEL, f32::to_bits), Ordering::Relaxed);
+        }
     }
 
     /// An instrument's voices as the render last stored them (`Plugin::voice_activity`: bit `i`
@@ -147,9 +176,9 @@ impl ScopeTap {
         }
     }
 
-    /// Audio thread: stores the peak of each of the first `frames` frames of `buf` and `gr_db`.
-    /// Does nothing while disabled.
-    pub(crate) fn push(&self, buf: &[Vec<f32>], frames: usize, gr_db: f32) {
+    /// Audio thread: stores the peak of each of the first `frames` frames of `buf`, `gr_db` and
+    /// the detector's level `detector_db`. Does nothing while disabled.
+    pub(crate) fn push(&self, buf: &[Vec<f32>], frames: usize, gr_db: f32, detector_db: Option<f32>) {
         if !self.enabled() {
             return;
         }
@@ -169,6 +198,7 @@ impl ScopeTap {
             }
         }
         self.gr.store(gr_db.to_bits(), Ordering::Relaxed);
+        self.push_detector(detector_db);
         self.write.store(w.wrapping_add(frames), Ordering::Release);
     }
 
@@ -272,6 +302,13 @@ impl ScopeHub {
         self.get(track, uid).map_or(0.0, |t| t.gain_reduction_db())
     }
 
+    /// The insert's last published detector level in dB (see [`ScopeTap::detector_level_db`]);
+    /// `None` with no tap or none published.
+    #[must_use]
+    pub fn detector_level_db(&self, track: TrackId, uid: u64) -> Option<f32> {
+        self.get(track, uid)?.detector_level_db()
+    }
+
     /// An instrument's last reported voice activity (see [`ScopeTap::voice_activity`]); 0 with no tap.
     #[must_use]
     pub fn voice_activity(&self, track: TrackId, uid: u64) -> u32 {
@@ -303,12 +340,12 @@ mod tests {
     #[test]
     fn disabled_tap_writes_nothing_and_enabled_tap_keeps_the_peak_of_the_channels() {
         let t = ScopeTap::new();
-        t.push(&block(0.25, 64), 64, 3.0);
+        t.push(&block(0.25, 64), 64, 3.0, None);
         let mut out = [1.0f32; 8];
         assert_eq!(t.read(&mut out), 0);
         assert!(out.iter().all(|x| *x == 0.0));
         t.set_enabled(true);
-        t.push(&block(0.25, 64), 64, 3.0);
+        t.push(&block(0.25, 64), 64, 3.0, None);
         assert_eq!(t.read(&mut out), 8);
         assert!(out.iter().all(|x| (*x - 0.5).abs() < 1e-6));
         assert!((t.gain_reduction_db() - 3.0).abs() < 1e-6);
@@ -362,7 +399,7 @@ mod tests {
         let t = ScopeTap::new();
         t.set_enabled(true);
         let ramp: Vec<f32> = (0..5000).map(|i| i as f32).collect();
-        t.push(&[ramp], 5000, 0.0);
+        t.push(&[ramp], 5000, 0.0, None);
         let mut out = [0.0f32; 4];
         t.read(&mut out);
         assert_eq!(out, [4996.0, 4997.0, 4998.0, 4999.0]);
@@ -387,6 +424,28 @@ mod tests {
         assert!(hub.get_samples(TrackId(1), 7).is_none());
         let mut out = [1.0f32; 4];
         assert_eq!(hub.samples(TrackId(1), 7, &mut out), 0);
+    }
+
+    #[test]
+    fn the_hub_reads_back_the_detector_level_and_switching_on_clears_it() {
+        let hub = ScopeHub::default();
+        let t = Arc::new(ScopeTap::new());
+        hub.register(TrackId(4), 9, &t);
+        assert_eq!(hub.detector_level_db(TrackId(4), 9), None, "nothing published yet");
+        // Negative control: a disabled tap stores nothing.
+        t.push(&block(0.25, 16), 16, 0.0, Some(-12.0));
+        assert_eq!(hub.detector_level_db(TrackId(4), 9), None);
+        assert!(hub.set_enabled(TrackId(4), 9, true));
+        t.push(&block(0.25, 16), 16, 0.0, Some(-12.0));
+        assert_eq!(hub.detector_level_db(TrackId(4), 9), Some(-12.0));
+        // Switching on again while on keeps it; off and on again clears it.
+        assert!(hub.set_enabled(TrackId(4), 9, true));
+        assert_eq!(hub.detector_level_db(TrackId(4), 9), Some(-12.0));
+        assert!(hub.set_enabled(TrackId(4), 9, false));
+        assert!(hub.set_enabled(TrackId(4), 9, true));
+        assert_eq!(hub.detector_level_db(TrackId(4), 9), None, "a panel that opens starts with no level");
+        t.push(&block(0.25, 16), 16, 0.0, None);
+        assert_eq!(hub.detector_level_db(TrackId(4), 9), None, "a plug-in with no detector publishes none");
     }
 
     #[test]

@@ -203,6 +203,9 @@ impl Plugin for Hosted {
     fn gain_reduction_db(&self) -> f32 {
         self.inner.as_ref().map_or(0.0, |p| p.gain_reduction_db())
     }
+    fn detector_level_db(&self) -> Option<f32> {
+        self.inner.as_ref().and_then(|p| p.detector_level_db())
+    }
     fn set_transport(&mut self, transport: &Transport) {
         if let Some(p) = &mut self.inner {
             p.set_transport(transport);

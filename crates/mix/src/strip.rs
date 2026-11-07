@@ -176,7 +176,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 }
                 inst.woken = inst.plugin.params_pending();
                 if let Some(tap) = &inst.tap {
-                    tap.push(&strip.buf, frames, 0.0);
+                    tap.push(&strip.buf, frames, 0.0, None);
                     if tap.enabled() {
                         tap.push_voices(inst.plugin.voice_activity());
                         tap.push_newest(inst.plugin.newest_voice());
@@ -269,7 +269,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
             gr = slot_gr;
         }
         if let Some(tap) = &slot.tap {
-            tap.push(&strip.buf, frames, slot_gr);
+            tap.push(&strip.buf, frames, slot_gr, slot.plugin.detector_level_db());
         }
         if let Some(tap) = &slot.sample_tap {
             tap.push(&strip.buf, frames);
@@ -369,7 +369,7 @@ pub(crate) fn process_master(
             if run_insert(slot, &mut strip.buf, None, frames, transport, live.no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
                 strip.failures.record(i);
             } else if let Some(tap) = &slot.tap {
-                tap.push(&strip.buf, frames, slot.plugin.gain_reduction_db());
+                tap.push(&strip.buf, frames, slot.plugin.gain_reduction_db(), slot.plugin.detector_level_db());
                 if let Some(samples) = &slot.sample_tap {
                     samples.push(&strip.buf, frames);
                 }
