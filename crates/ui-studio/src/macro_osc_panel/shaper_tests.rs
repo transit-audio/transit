@@ -303,3 +303,35 @@ fn a_typed_time_reads_bare_and_ms_as_milliseconds_and_s_as_seconds() {
         "a frequency takes no seconds suffix (clamped to its 20 Hz floor)"
     );
 }
+
+#[test]
+fn the_sync_rate_knob_follows_a_slow_drag_through_the_divisions_in_duration_order() {
+    use super::{division_norm, division_order};
+    use transit_dsp::plugins::lfo::{DIVISIONS, division_quarters};
+    let (mut t, tr) = T::open();
+    t.expand(tr);
+    let sync = t.in_view(tr, |p| p.toggles.iter().find(|x| x.param == "lfo1_sync").unwrap().toggle.rect);
+    t.click(mid(sync), 1);
+    for dy in [1.0, 4.0] {
+        let sweep = t.full_travel(tr, "lfo1_division", 0.0, dy, 13, division_norm);
+        // The knob's travel visits the divisions longest to shortest, each once.
+        let mut visited: Vec<usize> = Vec::new();
+        for f in &sweep {
+            let i = f.after as usize;
+            if visited.last() != Some(&i) {
+                visited.push(i);
+            }
+        }
+        let quarters: Vec<f64> = visited.iter().map(|i| division_quarters(*i, 4.0)).collect();
+        assert!(quarters.windows(2).all(|w| w[0] > w[1]), "{dy} px: {visited:?} {quarters:?}");
+        // Negative control: the table's own order is not the order of time (1/4 T, a longer cycle,
+        // follows 1/32).
+        let table: Vec<f64> = (0..DIVISIONS.len()).map(|i| division_quarters(i, 4.0)).collect();
+        assert!(table.windows(2).any(|w| w[0] < w[1]), "{table:?}");
+    }
+    let names: Vec<&str> = division_order().iter().map(|i| DIVISIONS[*i]).collect();
+    assert_eq!(names, ["4 bars", "2 bars", "1 bar", "1/2", "1/4 D", "1/4", "1/8 D", "1/4 T", "1/8", "1/16 D", "1/8 T", "1/16", "1/16 T", "1/32"]);
+    // The stored index and a saved session are unchanged: the table keeps its order.
+    assert_eq!(DIVISIONS[0], "4 bars");
+    assert_eq!(DIVISIONS[4], "1/4");
+}

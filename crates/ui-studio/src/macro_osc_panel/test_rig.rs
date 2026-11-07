@@ -17,6 +17,14 @@ pub struct T {
     pub screen: egui::Vec2,
 }
 
+/// One frame of a [`T::sweep`].
+#[derive(Debug, Clone, Copy)]
+pub struct SweepFrame {
+    pub before: f32,
+    pub after: f32,
+    pub painted_deg: f32,
+}
+
 pub fn mid(r: [f32; 4]) -> (f32, f32) {
     ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0)
 }
@@ -37,6 +45,13 @@ impl T {
 
     pub fn frames(&mut self, n: usize) {
         for _ in 0..n {
+            self.frame_with(Vec::new());
+        }
+    }
+
+    /// One frame (1/60 s) with `events` appended after the synthetic queue's own.
+    pub fn frame_with(&mut self, events: Vec<egui::Event>) {
+        {
             self.time += 1.0 / 60.0;
             let mut raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.screen)),
@@ -44,6 +59,7 @@ impl T {
                 ..Default::default()
             };
             self.app.raw_input_hook(&mut raw);
+            raw.events.extend(events);
             let app = &mut self.app;
             let mut out = self.ctx.run_ui(raw, |ui| {
                 app.logic(ui.ctx());
@@ -52,6 +68,56 @@ impl T {
             self.shapes = out.shapes;
             out.textures_delta.clear();
         }
+    }
+
+    /// Drags the knob for `param` by `dy` points per frame (negative is up) for `frames` frames,
+    /// one pointer move per frame through the real panel, then releases. Returns each frame's
+    /// record: the session value the dial was drawn from (before the frame), the session value
+    /// after it, and the pointer angle the dial painted.
+    pub fn sweep(&mut self, tr: TrackId, param: &str, dy: f32, frames: usize) -> Vec<SweepFrame> {
+        use egui::{Event, PointerButton};
+        let dial = self.knob(tr, param);
+        let at = egui::pos2(mid(dial).0, mid(dial).1);
+        self.frame_with(vec![Event::PointerMoved(at)]);
+        self.frame_with(vec![Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+        let mut out = Vec::new();
+        for i in 1..=frames {
+            let before = self.param(tr, param);
+            self.frame_with(vec![Event::PointerMoved(at + egui::vec2(0.0, dy * i as f32))]);
+            let painted = self.panel(tr).knob(param).expect("the knob").knob.pointer_deg;
+            out.push(SweepFrame { before, after: self.param(tr, param), painted_deg: painted });
+        }
+        let end = at + egui::vec2(0.0, dy * frames as f32);
+        self.frame_with(vec![Event::PointerButton { pos: end, button: PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+        self.frames(2);
+        out
+    }
+
+    /// Sweeps `param`'s knob up over its whole travel (200 points and the drag threshold) at `dy`
+    /// points per frame, from `start` (the parameter's minimum), and checks the guards of the
+    /// accumulating drag: the value never falls, it visits every one of the `steps` steps and ends
+    /// within one step of the maximum, and on every frame the dial points at the session value it
+    /// was drawn from. `norm` maps a session value to the knob's position. One undo step.
+    pub fn full_travel(&mut self, tr: TrackId, param: &str, start: f32, dy: f32, steps: usize, norm: impl Fn(f32) -> f32) -> Vec<SweepFrame> {
+        self.set(tr, param, start);
+        let before = self.undo_len();
+        let frames = ((crate::widgets::knob::DRAG_PX + 8.0) / dy.abs()).ceil() as usize;
+        let sweep = self.sweep(tr, param, -dy.abs(), frames);
+        assert_eq!(self.undo_len(), before + 1, "{param}: one undo step for the gesture");
+        let mut seen: Vec<i32> = Vec::new();
+        for (i, f) in sweep.iter().enumerate() {
+            assert!(norm(f.after) >= norm(f.before) - 1e-6, "{param}: frame {i} fell {f:?}");
+            let want = crate::widgets::knob::angle(norm(f.before));
+            assert!((f.painted_deg - want).abs() < 0.01, "{param}: frame {i} dial {} is not the session value's angle {want}", f.painted_deg);
+            let key = (norm(f.after) * steps as f32).round() as i32;
+            if !seen.contains(&key) {
+                seen.push(key);
+            }
+        }
+        let last = sweep.last().unwrap().after;
+        assert!(norm(last) >= 1.0 - 1.0 / steps as f32 - 1e-4, "{param}: ended at {last} (norm {})", norm(last));
+        assert!(seen.len() >= steps, "{param}: visited {} of {} steps", seen.len(), steps + 1);
+        sweep
     }
 
     pub fn send(&mut self, id: &str, p: Value) {

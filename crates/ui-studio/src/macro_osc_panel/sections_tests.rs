@@ -103,3 +103,42 @@ fn the_output_panel_holds_the_dropdowns_and_the_voice_lights() {
     assert_eq!(t.param(tr, "voices"), 3.0);
     assert_eq!(t.panel(tr).lights.len(), 4);
 }
+
+/// The drag as it was before the gesture accumulated: each frame starts again from the rounded
+/// value the caller passed back, so a movement under half a step is rounded away.
+fn rounded_each_frame(start: f32, dy: f32, frames: usize, round: impl Fn(f32) -> f32) -> f32 {
+    (0..frames).fold(start, |n, _| round(crate::widgets::knob::dragged(n, dy, false)))
+}
+
+#[test]
+fn stepped_knobs_follow_a_slow_drag_and_the_dial_shows_the_stored_value() {
+    let (mut t, tr) = T::open();
+    for (param, steps) in [("tune", 48), ("bend_range", 24)] {
+        let p = info().param(param).unwrap();
+        for dy in [1.0, 4.0] {
+            let norm = |v: f32| p.to_normalized(v);
+            let sweep = t.full_travel(tr, param, p.min, dy, steps, norm);
+            assert_eq!(sweep.last().unwrap().after.fract(), 0.0, "{param}: whole semitones");
+            // Negative control: the pre-fix recurrence on the same drag never leaves the start while a frame's
+            // movement is under half a step (Tune under 2.1 points, Bend under 4.2).
+            let whole = |n: f32| p.to_normalized(crate::widgets::param_knob::value_at(p, n));
+            let frames = ((200.0 + 8.0) / dy) as usize;
+            if dy < 200.0 / steps as f32 / 2.0 {
+                assert_eq!(p.from_normalized(rounded_each_frame(0.0, -dy, frames, whole)), p.min, "{param} at {dy} px: the old drag stays put");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_continuous_knob_still_moves_two_percent_per_four_points() {
+    let (mut t, tr) = T::open();
+    t.set(tr, "harmonics", 0.0);
+    let sweep = t.sweep(tr, "harmonics", -4.0, 20);
+    let steps: Vec<f32> = sweep.windows(2).map(|w| w[1].after - w[0].after).collect();
+    assert!(steps.iter().skip(1).all(|d| (d - 2.0).abs() < 0.01), "{steps:?}");
+    let p = info().param("harmonics").unwrap();
+    for f in &sweep {
+        assert!((f.painted_deg - crate::widgets::knob::angle(p.to_normalized(f.before))).abs() < 0.01, "{f:?}");
+    }
+}

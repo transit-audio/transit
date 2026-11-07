@@ -167,3 +167,29 @@ fn clicking_the_value_opens_a_field_and_enter_returns_the_typed_text() {
     assert!(!out.layout.editing, "Enter closes the field");
     assert_eq!(out.value, None, "typing reports text; the caller parses it");
 }
+
+#[test]
+fn a_drag_accumulates_so_a_rounding_caller_follows_a_slow_pointer() {
+    // A caller that rounds to 4 steps (a Choice) and passes the rounded value back. Each frame's
+    // 2 points are 1 percent of the travel, far under the half step of 12.5 percent.
+    let round = |n: f32| (n * 4.0).round() / 4.0;
+    let mut rig = Rig::new();
+    let dial = rig.idle(|ui| draw(ui, &Knob::new("Rate", "1/4", 0.5))).layout.dial;
+    let mut shown = 0.5;
+    let mut painted = Vec::new();
+    rig.drag(mid(dial), vec2(0.0, -160.0), 40, |ui| {
+        let out = draw(ui, &Knob::new("Rate", "1/4", shown));
+        painted.push(out.layout.pointer_deg);
+        if let Some(n) = out.value {
+            shown = round(n);
+        }
+    });
+    assert_eq!(shown, 1.0, "160 points up is 80 percent: it reaches the top step");
+    // The dial painted only stored values, never the raw position between steps.
+    for deg in painted {
+        assert!([0.0, 67.5, 135.0, -67.5, -135.0].iter().any(|s| (deg - s).abs() < 0.01), "{deg}");
+    }
+    // Negative control: without the gesture's memory (each frame from the rounded value) it never moves.
+    let stuck = (0..40).fold(0.5, |n, _| round(knob::dragged(n, -4.0, false)));
+    assert_eq!(stuck, 0.5);
+}
