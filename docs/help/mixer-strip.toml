@@ -35,6 +35,26 @@ name = "Input monitor (I)"
 text = "Hear the track's live input through the mixer. Audio tracks only."
 
 [[entry]]
+id = "mixer_strip.mono"
+name = "Mono (main bus)"
+text = "Hear the mix summed to mono, to check how it holds up on one speaker. It changes only what you hear: a bounce, a freeze or a stem never has it."
+
+[[entry]]
+id = "mixer_strip.dim"
+name = "Dim (main bus)"
+text = "Turns what you hear down 20 dB without touching the mix. A bounce never has it."
+
+[[entry]]
+id = "mixer_strip.ref"
+name = "Ref (main bus)"
+text = "Plays at your stored reference listening level while it is on. Alt+click stores the current monitor level as the reference. A bounce never has it."
+
+[[entry]]
+id = "mixer_strip.loudness"
+name = "Integrated loudness (INT)"
+text = "The loudness of the whole mix since the last reset, in LUFS (gated, as streaming services measure it). Click to reset it; starting the transport from a stop resets it too. A dash means nothing loud enough has played yet."
+
+[[entry]]
 id = "mixer_strip.peak"
 name = "Peak hold"
 text = "The highest level since it was cleared; it turns red above 0 dB. Click to reset it, Ctrl-click to reset every strip."

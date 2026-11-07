@@ -145,6 +145,9 @@ pub(super) fn strip(
     pan(app, ui, &p, clip, t, &a, bal, &mut sl);
     toggles(app, ui, &p, clip, t, &a, &mut sl);
     fader_and_meter(app, ui, &p, clip, t, &a, vol_db, &mut sl);
+    if let Some(footer) = a.footer {
+        super::main_bus::footer(app, ui, &p, clip, footer, &mut sl);
+    }
     // The border last, over everything: 1 px `line`, `signal` on the selected strip.
     let edge = if focused { TOKENS.signal } else { TOKENS.line };
     p.rect_stroke(r, tokens::radius::PANEL, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
@@ -389,8 +392,8 @@ fn pan(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, t: &Trac
     sl.pan_text = pan_text;
 }
 
-/// M S / R I: the kit's toggles. The main bus has Mute only (Mono, Dim and Ref wait for engine
-/// controls); an unavailable toggle stays, ghosted, so every strip keeps its layout.
+/// M S / R I: the kit's toggles. The main bus has M, Mono, Dim and Ref ([`super::main_bus`]); an
+/// unavailable toggle stays, ghosted, so every strip keeps its layout.
 #[allow(clippy::too_many_arguments)]
 fn toggles(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, t: &Track, a: &Anatomy, sl: &mut StripLayout) {
     let id = t.id;
@@ -405,7 +408,7 @@ fn toggles(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, t: &
     ];
     for (i, (label, role, on, cmd, enabled)) in cells.into_iter().enumerate() {
         if main && i > 0 {
-            // The main bus has no solo, record or input; its other toggles wait for the engine.
+            // The main bus has no solo, record or input: its other cells are the monitoring set.
             continue;
         }
         let br = a.toggles[i];
@@ -441,6 +444,9 @@ fn toggles(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, t: &
             _ => sl.monitor = r4(br),
         }
         sl.toggles.push(lay);
+    }
+    if main {
+        super::main_bus::monitor_toggles(app, ui, p, clip, [a.toggles[1], a.toggles[2], a.toggles[3]], sl);
     }
 }
 

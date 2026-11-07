@@ -28,6 +28,7 @@ mod channel;
 mod controls;
 mod hue;
 mod inserts;
+mod main_bus;
 mod menus;
 mod meters;
 mod overflow;
@@ -177,8 +178,15 @@ pub struct StripLayout {
     pub snd_text: String,
     /// The pan dial as painted.
     pub knob_paint: Option<crate::widgets::knob::DialPaint>,
-    /// M S / R I as painted (the main bus: M only).
+    /// M S / R I as painted (the main bus: M, Mono, Dim, Ref).
     pub toggles: Vec<crate::widgets::toggle::ToggleLayout>,
+    /// The main bus's Mono, Dim and Ref toggles (#366); zero on a channel.
+    pub mono: R4,
+    pub dim: R4,
+    pub reference: R4,
+    /// The main bus's footer line: the integrated loudness ("−14.2 LUFS", "—"); a click resets it.
+    pub lufs_rect: R4,
+    pub lufs_text: String,
     /// The Channel fader as painted: its rect, travel, cap, scale labels and meter slot.
     pub fader_layout: Option<crate::widgets::fader::FaderLayout>,
     /// The stereo meter as painted: wells, fills, hold lines, clip cells and grid.

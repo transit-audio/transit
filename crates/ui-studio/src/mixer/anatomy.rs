@@ -30,6 +30,9 @@ pub(super) struct Anatomy {
     pub fader: Rect,
     pub gain: Rect,
     pub peak: Rect,
+    /// The main bus's footer line under the readouts (the integrated loudness, #366); `None` on a
+    /// channel.
+    pub footer: Option<Rect>,
 }
 
 /// Everything above the fader, from the strip's top edge.
@@ -60,6 +63,9 @@ fn above_fader(short: bool) -> f32 {
 const BELOW_FADER: f32 = cs::SECTION_GAP + cs::READOUT_HEIGHT + cs::PADDING[2] + 1.0;
 /// The space above the fader's own rect (the board's 2 px).
 const FADER_TOP: f32 = 2.0;
+/// The main bus's footer line: one line of Mono 10 (the board's "INT −14.2 LUFS" row, 13 px), a
+/// section gap under the readouts. The main fader gives up this height; channels are unchanged.
+pub(super) const FOOTER_HEIGHT: f32 = 13.0;
 
 /// The height of a strip's sections without its fader.
 pub(super) fn fixed_height(short: bool) -> f32 {
@@ -112,7 +118,8 @@ pub(super) fn anatomy(r: Rect, short: bool, main: bool) -> Anatomy {
     };
     let toggles = [cell(0, 0), cell(1, 0), cell(0, 1), cell(1, 1)];
     y += 2.0 * toggle::HEIGHT + cs::GAP + cs::SECTION_GAP + FADER_TOP;
-    let bottom = r.max.y - BELOW_FADER;
+    let footer_room = if main { cs::SECTION_GAP + FOOTER_HEIGHT } else { 0.0 };
+    let bottom = r.max.y - BELOW_FADER - footer_room;
     // The Channel fader is 116 wide in a channel; the main bus gives its meters the extra width.
     let fw = if main { w } else { fader::Variant::Channel.size(0.0).x.min(w) };
     let fader = Rect::from_min_max(pos2(x0 + (w - fw) / 2.0, y), pos2(x0 + (w + fw) / 2.0, bottom.max(y)));
@@ -120,7 +127,26 @@ pub(super) fn anatomy(r: Rect, short: bool, main: bool) -> Anatomy {
     let peak_w = if main { cs::PEAK_WIDTH_MAIN } else { cs::PEAK_WIDTH };
     let gain = Rect::from_min_size(pos2(x0, ry), vec2(w - cs::GAP - peak_w, cs::READOUT_HEIGHT));
     let peak = Rect::from_min_size(pos2(x0 + w - peak_w, ry), vec2(peak_w, cs::READOUT_HEIGHT));
-    Anatomy { bar, name, input, inserts, inserts_line, sends, sends_line, fx_button, snd_button, output, dial, pan_value, toggles, fader, gain, peak }
+    let footer = main.then(|| Rect::from_min_size(pos2(x0, gain.max.y + cs::SECTION_GAP), vec2(w, FOOTER_HEIGHT)));
+    Anatomy {
+        bar,
+        name,
+        input,
+        inserts,
+        inserts_line,
+        sends,
+        sends_line,
+        fx_button,
+        snd_button,
+        output,
+        dial,
+        pan_value,
+        toggles,
+        fader,
+        gain,
+        peak,
+        footer,
+    }
 }
 
 /// The rows inside an inserts or sends body: the section label, then slot `i` (22 high, 3 apart).

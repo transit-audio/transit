@@ -220,7 +220,9 @@ fn group_links(ui: &Ui, s: &Session, channels: &[&Track], lane: Rect, area: Rect
 }
 
 /// The main-out strip when the session has no master track: the main bus strip's frame with the
-/// main meter in its meter slot, its peak readout, and an offer to add a master fader.
+/// main meter in its meter slot, its peak readout, and an offer to add a master fader. The
+/// monitoring set does not need a master track (#366): M is ghosted (there is no fader to mute),
+/// Mono, Dim and Ref work, and the footer shows the loudness.
 fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLayout, R4) {
     use crate::tokens;
     let a = anatomy::anatomy(r, short, true);
@@ -263,6 +265,12 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLay
         level: app.main_meter.level,
         ..StripLayout::default()
     };
+    sl.toggles.push(crate::widgets::toggle::paint(&p, a.toggles[0], "M", crate::widgets::toggle::Role::Mute, false, false));
+    sl.mute = r4(a.toggles[0]);
+    main_bus::monitor_toggles(app, ui, &p, r, [a.toggles[1], a.toggles[2], a.toggles[3]], &mut sl);
+    if let Some(footer) = a.footer {
+        main_bus::footer(app, ui, &p, r, footer, &mut sl);
+    }
     channel::peak_readout(app, ui, &p, r, a.peak, d.peak, d.clip, None, &mut sl);
     sl.meter_layout = Some(meter);
     p.rect_stroke(r, tokens::radius::PANEL, Stroke::new(1.0, TOKENS.line), egui::StrokeKind::Inside);
