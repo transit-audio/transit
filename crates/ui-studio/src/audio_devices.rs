@@ -418,14 +418,7 @@ pub fn fallback_notes(cfg: &AudioConfig, systems: Option<&[AudioSystem]>, opened
     {
         notes.push(format!("Output “{want}” is not available; using “{got}”."));
     }
-    let asio = cfg.system.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(devices::ASIO_SYSTEM));
-    if let (Some(want), Some(list)) = (cfg.input.as_deref(), systems)
-        && !asio
-        && let Some(sys) = pick_system(list, cfg.system.as_deref())
-        && !sys.inputs.iter().any(|d| d.name == want)
-    {
-        notes.push(format!("Input “{want}” is not available; recording uses the default input."));
-    }
+    notes.extend(systems.and_then(|list| input_note(cfg, list)));
     if let (Some(want), Some(got)) = (cfg.sample_rate, opened.rate)
         && want != got
     {
@@ -441,6 +434,15 @@ pub fn fallback_notes(cfg: &AudioConfig, systems: Option<&[AudioSystem]>, opened
         });
     }
     notes
+}
+
+/// The note for a saved input that `systems` does not list (the default input records instead);
+/// `None` when it is listed, when none is saved, and on ASIO (the input is the output's driver).
+fn input_note(cfg: &AudioConfig, systems: &[AudioSystem]) -> Option<String> {
+    let want = cfg.input.as_deref()?;
+    let asio = cfg.system.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(devices::ASIO_SYSTEM));
+    let sys = pick_system(systems, cfg.system.as_deref()).filter(|_| !asio)?;
+    (!sys.inputs.iter().any(|d| d.name == want)).then(|| format!("Input “{want}” is not available; recording uses the default input."))
 }
 
 impl StudioApp {
@@ -858,18 +860,13 @@ pub(crate) fn listing_from(
     }
 }
 
-/// Say once what the saved choices did not get: the output at startup, the input when it opens.
+/// Say once what the saved choices did not get: the output and the input at startup, the input
+/// again when it opens.
 fn check(app: &mut StudioApp) {
     app.poll_native_asio_panel();
     if !app.audio_devices.startup_checked && app.player.is_some() {
         app.audio_devices.startup_checked = true;
-        let mut notes = fallback_notes(&app.ui.audio, None, &app.opened());
-        notes.extend(app.player.as_ref().and_then(|p| p.backend_note.clone()));
-        notes.extend(app.not_opened_note());
-        if !notes.is_empty() {
-            app.status = format!("{} {CHOOSE_ANOTHER}", notes.join(" "));
-            app.audio_devices.notes = notes;
-        }
+        startup_notes(app);
     }
     let (Some(want), Some(r)) = (app.ui.audio.input.as_deref(), &app.recorder) else { return };
     let pair = (want.to_string(), r.device_name.clone());
@@ -892,6 +889,29 @@ fn check(app: &mut StudioApp) {
 pub const PAIRED_AUTOMATIC: &str = "Automatic (same device)";
 /// The button that opens the running native ASIO driver's own settings panel.
 pub const DRIVER_SETTINGS: &str = "Driver settings";
+
+/// The startup case of the notes Apply gives (ADR 0046, decision 1: a missing saved device opens the
+/// default and says so at startup as well as on apply): the output that opened instead of the
+/// saved one, a saved input the system does not list, the rate and buffer, and why nothing opened;
+/// on the status line and in Audio Devices.
+pub(crate) fn startup_notes(app: &mut StudioApp) {
+    let mut notes = fallback_notes(&app.ui.audio, None, &app.opened());
+    if app.ui.audio.input.is_some() {
+        let systems = match (&app.audio_devices.systems, &app.audio_devices.fake) {
+            (Some(listed), _) => listed.clone(),
+            (None, Some(f)) => f.systems.clone(),
+            // The systems listed at once (no ASIO probe; the input note skips ASIO anyway).
+            (None, None) => app.machine_listing().0,
+        };
+        notes.extend(input_note(&app.ui.audio, &systems));
+    }
+    notes.extend(app.player.as_ref().and_then(|p| p.backend_note.clone()));
+    notes.extend(app.not_opened_note());
+    if !notes.is_empty() {
+        app.status = format!("{} {CHOOSE_ANOTHER}", notes.join(" "));
+        app.audio_devices.notes = notes;
+    }
+}
 
 /// The `ui.json` the running app saves to, as `audio-bench --settings` should name it.
 fn settings_path(app: &StudioApp) -> String {
