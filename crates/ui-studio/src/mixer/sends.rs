@@ -4,11 +4,6 @@ use super::*;
 pub const SEND_ROW_H: f32 = 17.0;
 /// The send level bar along a row's bottom edge.
 const BAR_H: f32 = 5.0;
-/// The rows a track's sends block wants: its sends plus "+ Send" while a slot is free.
-pub(super) fn send_rows_of(t: &Track) -> usize {
-    let used = t.mixer.sends.iter().flatten().count();
-    used + usize::from(used < t.mixer.sends.len())
-}
 
 /// How a send level reads: whole dB in a strip, tenths in the device chain.
 fn level_text(db: f32, wide: bool) -> String {
@@ -48,6 +43,9 @@ pub(crate) fn send_row(
         shown.pan = app.followed(t, &crate::automation::Lane::SendPan(i)).unwrap_or(snd.pan);
     }
     let snd = &shown;
+    if !wide {
+        return strip_send_row(app, ui, s, t, slot, snd, r, clip, menu);
+    }
     let p = ui.painter().with_clip_rect(clip);
     let target = match &snd.target {
         Route::Bus(b) => bus_label(s, *b),
@@ -191,6 +189,7 @@ pub(crate) fn send_row(
                 color: if hot { TOKENS.accent } else { TOKENS.text },
                 align: Align2::CENTER_CENTER,
                 drag: true,
+                click_to_type: false,
             },
         );
         row.pan = r4(above(pnr));
@@ -233,6 +232,7 @@ pub(crate) fn send_row(
             color: if hot { TOKENS.accent } else { TOKENS.text },
             align: Align2::RIGHT_CENTER,
             drag: true,
+            click_to_type: false,
         },
     );
     row.readout_rect = r4(lr);
@@ -268,18 +268,195 @@ pub(crate) fn add_send_row(app: &mut StudioApp, ui: &mut Ui, s: &Session, t: &Tr
     r4(r)
 }
 
-/// A strip's sends block: `rows` rows at `y`, the sends in slot order, then "+ Send". When the
-/// sends don't all fit, the last row says how many more there are (the device chain lists all).
+/// The retarget menu (a click on the target) and the row's right-click menu (pre/post, mute in
+/// a strip, remove, MIDI Learn) of a send whose target reads `target`.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn sends_block(
+fn send_menus(
+    app: &mut StudioApp,
+    s: &Session,
+    t: &Track,
+    slot: usize,
+    snd: &SendSlot,
+    resp: &egui::Response,
+    target: &str,
+    with_mute: bool,
+    menu: &mut Vec<MenuItem>,
+) {
+    let id = t.id;
+    let mut choices = send_targets(s, t, Some(slot), app.engine.io_map());
+    if !choices.iter().any(|choice| {
+        matches!(choice, RoutingChoice::Entry { label, value } if *label == target || matches!(&snd.target, Route::Hardware(h) if h.eq_ignore_ascii_case(value)))
+    }) {
+        choices.insert(0, RoutingChoice::Entry { label: target.to_string(), value: String::new() });
+    }
+    push_unused_entry(s, &mut choices);
+    if let Some(v) = choice_menu(resp, target, &choices, menu)
+        && !v.is_empty()
+        && v != target
+    {
+        if v == REMOVE_UNUSED {
+            let _ = app.remove_unused_busses();
+        } else {
+            let _ = app.retarget_send(id, slot, &v);
+        }
+    }
+    // Its own popup id: `Popup::context_menu` closes the popup on a primary click, which would
+    // otherwise be the retarget menu's (both default to the response's id).
+    egui::Popup::context_menu(resp).id(resp.id.with("send_ctx")).show(|ui| {
+        let label = if snd.pre_fader { "Post-fader" } else { "Pre-fader" };
+        let b = ui.button(label);
+        menu.push(MenuItem::at(ui, label.into(), "pre".into(), b.rect));
+        if b.clicked() {
+            let _ = app.set_send_pre(id, slot, !snd.pre_fader);
+            ui.close();
+        }
+        if with_mute {
+            let label = if snd.mute { "Unmute Send" } else { "Mute Send" };
+            let b = ui.button(label);
+            menu.push(MenuItem::at(ui, label.into(), "mute".into(), b.rect));
+            if b.clicked() {
+                let _ = app.set_send_mute(id, slot, !snd.mute);
+                ui.close();
+            }
+        }
+        let b = ui.button("Remove Send");
+        menu.push(MenuItem::at(ui, "Remove Send".into(), "remove".into(), b.rect));
+        if b.clicked() {
+            let _ = app.remove_send(id, slot);
+            ui.close();
+        }
+        if let Ok(n) = u8::try_from(slot) {
+            ui.separator();
+            app.midi_learn_menu(ui, id, transit_model::Control::Send(n));
+        }
+    });
+}
+
+/// The strip's send row (Channel strip, sends): 22 high on `bg.titlebar` with a 1 px `line` and
+/// radius 4; the target in Sans 500 11 (a click sends it elsewhere; right-click: pre/post, mute,
+/// remove), a 28 px level bar on the fader's taper (4 px `line` track, 6 px `signal` fill,
+/// `ink.ghost` while the send is muted) and the level in Mono 500 10 `text.muted`. The bar and the
+/// number drag the level (one undo step); a double-click resets it (the bar) or types it (the
+/// number). A pre-fader send leads with a faint "P".
+#[allow(clippy::too_many_arguments)]
+fn strip_send_row(
     app: &mut StudioApp,
     ui: &mut Ui,
     s: &Session,
     t: &Track,
-    x0: f32,
-    w: f32,
-    y: f32,
+    slot: usize,
+    snd: &SendSlot,
+    r: Rect,
+    clip: Rect,
+    menu: &mut Vec<MenuItem>,
+) -> SendRow {
+    use super::channel::{CONTROL, SMALL_VALUE, text_in};
+    use crate::tokens::channel_strip as cs;
+    let id = t.id;
+    let salt = (id.0, slot, false);
+    let p = ui.painter().with_clip_rect(clip);
+    let target = match &snd.target {
+        Route::Bus(b) => bus_label(s, *b),
+        other => route_label(s, other, false, 0),
+    };
+    let not_here = unresolved_output(app.engine.io_map(), &snd.target);
+    let mut row = SendRow {
+        slot,
+        target: target.clone(),
+        level_db: snd.level_db,
+        pre_fader: snd.pre_fader,
+        rect: r4(r),
+        muted: snd.mute,
+        ..SendRow::default()
+    };
+    p.rect_filled(r, cs::INSERT_SLOT_RADIUS, TOKENS.bg_titlebar);
+    p.rect_stroke(r, cs::INSERT_SLOT_RADIUS, Stroke::new(1.0, TOKENS.line), egui::StrokeKind::Inside);
+    let value_r = Rect::from_min_max(pos2(r.max.x - 6.0 - 22.0, r.min.y), pos2(r.max.x - 6.0, r.max.y));
+    let bar_r = Rect::from_min_max(pos2(value_r.min.x - 6.0 - 28.0, r.center().y - 3.0), pos2(value_r.min.x - 6.0, r.center().y + 3.0));
+    let level_hit = Rect::from_min_max(pos2(bar_r.min.x - 3.0, r.min.y), pos2(value_r.min.x - 1.0, r.max.y));
+    let mut name_r = Rect::from_min_max(pos2(r.min.x + 6.0, r.min.y), pos2(level_hit.min.x - 3.0, r.max.y));
+    let target_hit = Rect::from_min_max(r.min, pos2(level_hit.min.x, r.max.y));
+    // Target: another bus, or right-click for pre/post, mute and remove.
+    let mut resp = ui.interact(target_hit.intersect(clip), ui.id().with(("send_target", salt)), Sense::click());
+    if not_here {
+        resp = resp.on_hover_text(NOT_HERE);
+    }
+    if resp.hovered() {
+        p.rect_filled(target_hit.shrink(1.0), cs::INSERT_SLOT_RADIUS, TOKENS.button_hover);
+    }
+    if snd.pre_fader {
+        let at = text_in(&p, &SMALL_VALUE, "P", TOKENS.text_faint, name_r, Align2::LEFT_CENTER);
+        name_r.min.x = at.max.x + 4.0;
+    }
+    if not_here {
+        crate::icons::paint(&p, pos2(name_r.min.x + 5.0, r.center().y), crate::icons::Icon::Error, 10.0, TOKENS.meter_hot);
+        name_r.min.x += 13.0;
+    }
+    text_in(&p, &CONTROL, &target, if snd.mute { TOKENS.text_muted } else { TOKENS.text }, name_r, Align2::LEFT_CENTER);
+    row.target_rect = r4(target_hit);
+    send_menus(app, s, t, slot, snd, &resp, &target, true, menu);
+    if let Ok(n) = u8::try_from(slot) {
+        crate::midi_learn::mark(app, &p, r, id, transit_model::Control::Send(n));
+    }
+    // The level bar on the fader's taper.
+    let track = Rect::from_min_max(pos2(bar_r.min.x, bar_r.min.y + 1.0), pos2(bar_r.max.x, bar_r.max.y - 1.0));
+    p.rect_filled(track, crate::tokens::fader::TRACK_RADIUS, TOKENS.line);
+    let k = super::controls::fader_k(snd.level_db);
+    let fill = Rect::from_min_max(bar_r.min, pos2(bar_r.min.x + k * bar_r.width(), bar_r.max.y));
+    if k > 0.0 {
+        p.rect_filled(fill, crate::tokens::fader::TRACK_RADIUS, if snd.mute { TOKENS.ink_ghost } else { TOKENS.signal });
+    }
+    row.level_fill = r4(fill);
+    let me = Target::Send(id, slot);
+    let resp = ui.interact(level_hit.intersect(clip), ui.id().with(("send_level", salt)), Sense::click_and_drag());
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+    }
+    control(app, ui, &resp, me, 1.0, true, true);
+    let _ = resp.on_hover_text(format!(
+        "{target}: {} ({}{}). Drag to change, double-click for 0 dB, wheel for 0.1 dB",
+        level_text(snd.level_db, true),
+        if snd.pre_fader { "pre-fader" } else { "post-fader" },
+        if snd.mute { ", muted" } else { "" }
+    ));
+    row.level_rect = r4(level_hit);
+    let text = level_text(snd.level_db, false);
+    let hot = app.mixer.gesture.is_some_and(|g| g.target == me);
+    readout(
+        app,
+        ui,
+        &p,
+        clip,
+        Readout {
+            target: me,
+            salt: 0,
+            draw: value_r,
+            hit: value_r,
+            text: text.clone(),
+            edit_text: fine::edit_text_db(snd.level_db),
+            font: SMALL_VALUE.font_id(ui.ctx()),
+            color: if hot { TOKENS.signal } else { TOKENS.text_muted },
+            align: Align2::RIGHT_CENTER,
+            drag: true,
+            click_to_type: false,
+        },
+    );
+    row.readout_rect = r4(value_r);
+    row.level_text = text;
+    row
+}
+
+/// The send rows of a track in `rows` slots from `row_r`: its sends in slot order, then "+ Send"
+/// while a slot is free; when they do not all fit, the last row says how many more there are (the
+/// device chain lists them all).
+#[allow(clippy::too_many_arguments)]
+fn send_list(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    s: &Session,
+    t: &Track,
     rows: usize,
+    row_r: &dyn Fn(usize) -> Rect,
     clip: Rect,
     sl: &mut StripLayout,
     menu: &mut Vec<MenuItem>,
@@ -289,30 +466,92 @@ pub(super) fn sends_block(
     }
     let sends: Vec<(usize, SendSlot)> = t.mixer.sends.iter().enumerate().filter_map(|(i, x)| x.clone().map(|x| (i, x))).collect();
     let free = sends.len() < t.mixer.sends.len();
-    let row_r = |i: usize| Rect::from_min_size(pos2(x0, y + i as f32 * SEND_ROW_H), vec2(w, SEND_ROW_H - 2.0));
     let fits = sends.len() + usize::from(free) <= rows;
     let shown = if fits { sends.len() } else { rows.saturating_sub(1) };
     for (i, (slot, snd)) in sends.iter().take(shown).enumerate() {
         let row = send_row(app, ui, s, t, *slot, snd, row_r(i), clip, false, menu);
         sl.sends.push(row);
     }
+    let p = ui.painter().with_clip_rect(clip);
     if fits {
         if free {
-            sl.add_send = add_send_row(app, ui, s, t, row_r(shown), clip, menu);
+            let r = row_r(shown);
+            let resp = ui.interact(r.intersect(clip), ui.id().with(("add_send", t.id.0, r.min.x as i32)), Sense::click());
+            super::inserts::add_row(&p, r, "+ Send", resp.hovered());
+            let mut choices = send_targets(s, t, None, app.engine.io_map());
+            choices.push(RoutingChoice::Entry { label: "New FX Channel…".into(), value: NEW_FX.into() });
+            push_unused_entry(s, &mut choices);
+            if let Some(v) = choice_menu(&resp, "", &choices, menu) {
+                if v == REMOVE_UNUSED {
+                    let _ = app.remove_unused_busses();
+                } else {
+                    let _ = app.add_send(t.id, &v);
+                }
+            }
+            sl.add_send = r4(r);
         }
     } else {
         let r = row_r(shown);
         let resp = ui.interact(r.intersect(clip), ui.id().with(("more_sends", t.id.0)), Sense::click());
-        ui.painter().with_clip_rect(clip).text(
-            pos2(r.min.x + 4.0, r.center().y),
+        let ink = if resp.hovered() { TOKENS.text } else { TOKENS.text_faint };
+        super::channel::text_in(
+            &p,
+            &super::channel::CONTROL,
+            &format!("{} more…", sends.len() - shown),
+            ink,
+            r.shrink2(vec2(8.0, 0.0)),
             Align2::LEFT_CENTER,
-            format!("{} more…", sends.len() - shown),
-            FontId::proportional(10.5),
-            TOKENS.text_dim,
         );
         if resp.on_hover_text("Show all sends in the device chain").clicked() {
             app.focus(t.id);
             app.ui.show_devices = true;
         }
     }
+}
+
+/// The full-height sends section's rows in `body` (under its SENDS label): two sends and "+ Send".
+#[allow(clippy::too_many_arguments)]
+pub(super) fn sends_block(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    s: &Session,
+    t: &Track,
+    body: Rect,
+    clip: Rect,
+    sl: &mut StripLayout,
+    menu: &mut Vec<MenuItem>,
+) {
+    let rows = super::anatomy::slots_in(body);
+    send_list(app, ui, s, t, rows, &|i| super::anatomy::slot(body, i), clip, sl, menu);
+}
+
+/// The short variant's `Snd n` button: it opens the track's send rows and "+ Send" in a list under
+/// it (every send). A strip that takes no sends keeps the button so every strip keeps its layout.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn snd_button(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    s: &Session,
+    t: &Track,
+    r: Rect,
+    clip: Rect,
+    sl: &mut StripLayout,
+    menu: &mut Vec<MenuItem>,
+) {
+    let count = t.mixer.sends.iter().flatten().count();
+    let p = ui.painter().with_clip_rect(clip);
+    let (resp, text) = super::inserts::count_button(ui, &p, clip, r, ui.id().with(("snd_button", t.id.0)), "Snd", count);
+    sl.snd_button = r4(r);
+    sl.snd_text = text;
+    if !takes_sends(t.kind) {
+        return;
+    }
+    let resp = resp.on_hover_text(format!("Sends ({count}): click for the list"));
+    let free = count < t.mixer.sends.len();
+    let mut drawn = StripLayout::default();
+    let list = super::short::list(app, ui, t.id, super::short::ShortList::Sends, &resp, count + usize::from(free), |app, ui, rows, clip| {
+        send_list(app, ui, s, t, rows.len(), &|i| rows[i], clip, &mut drawn, menu);
+    });
+    (sl.sends, sl.add_send) = (drawn.sends, drawn.add_send);
+    sl.list_rect = list.map_or(sl.list_rect, r4);
 }
