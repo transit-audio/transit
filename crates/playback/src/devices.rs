@@ -3,23 +3,14 @@
 //! in sessions). Anything that cannot be honoured falls back to the system default: a device that
 //! is unplugged, a rate or buffer size the device does not offer.
 
-use cpal::traits::{DeviceTrait, HostTrait};
-use std::sync::{Mutex, PoisonError};
+use crate::backend::cpal::{describe, device_name, shared_host};
+use cpal::traits::HostTrait;
 
 /// Rates offered when a device supports them (any rate inside a supported range is possible, but
 /// these are the ones interfaces actually run at).
 pub const STANDARD_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
 /// Buffer sizes offered when the device reports a range that contains them.
 pub const STANDARD_BUFFERS: [u32; 9] = [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192];
-
-/// Sample formats the streams convert to and from, best first (ASIO drivers usually run in
-/// 32-bit integers, WASAPI and Core Audio in float).
-pub(crate) const FORMATS: [cpal::SampleFormat; 3] = [cpal::SampleFormat::F32, cpal::SampleFormat::I32, cpal::SampleFormat::I16];
-
-/// Preference of a sample format (lower is better); `None` when it is not supported.
-pub(crate) fn format_rank(f: cpal::SampleFormat) -> Option<usize> {
-    FORMATS.iter().position(|x| *x == f)
-}
 
 /// Which implementation talks to the audio system (ADR 0016).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -461,31 +452,6 @@ impl AudioSystem {
     }
 }
 
-#[allow(deprecated)]
-fn device_name(d: &cpal::Device) -> Option<String> {
-    d.name().ok()
-}
-
-fn describe(d: &cpal::Device, default_name: Option<&str>, output: bool) -> Option<DeviceInfo> {
-    let name = device_name(d)?;
-    let ranges: Vec<cpal::SupportedStreamConfigRange> = if output {
-        d.supported_output_configs().ok()?.filter(|c| format_rank(c.sample_format()).is_some()).collect()
-    } else {
-        d.supported_input_configs().ok()?.filter(|c| format_rank(c.sample_format()).is_some()).collect()
-    };
-    let max_channels = ranges.iter().map(cpal::SupportedStreamConfigRange::channels).max().unwrap_or(0);
-    let sample_rates =
-        STANDARD_RATES.iter().copied().filter(|r| ranges.iter().any(|c| c.min_sample_rate().0 <= *r && c.max_sample_rate().0 >= *r)).collect();
-    let (mut buffer_min, mut buffer_max) = (None::<u32>, None::<u32>);
-    for c in &ranges {
-        if let cpal::SupportedBufferSize::Range { min, max } = c.buffer_size() {
-            buffer_min = Some(buffer_min.map_or(*min, |m| m.min(*min)));
-            buffer_max = Some(buffer_max.map_or(*max, |m| m.max(*max)));
-        }
-    }
-    Some(DeviceInfo { is_default: default_name == Some(name.as_str()), name, max_channels, sample_rates, buffer_min, buffer_max })
-}
-
 /// The name of the ASIO audio system, served by the native ASIO backend (cpal has no ASIO host here).
 pub const ASIO_SYSTEM: &str = "ASIO";
 
@@ -598,91 +564,6 @@ pub(crate) fn add_unlisted(list: &mut Vec<DeviceInfo>, installed: &[String]) {
     }
 }
 
-/// One cpal host per audio system for the whole process, created on first use (a handful at most,
-/// kept for good). ASIO needs this: the SDK holds a single global driver and loading any driver
-/// first unloads it, while each cpal ASIO host only knows the drivers it loaded itself. With a
-/// fresh host per call, listing devices or opening a new stream unloaded the driver a running
-/// stream used (its control panel then reported no driver). One host returns the open driver
-/// instead, and refuses to load another while it is in use.
-fn shared_host(id: cpal::HostId) -> Option<&'static cpal::Host> {
-    static HOSTS: Mutex<Vec<&'static cpal::Host>> = Mutex::new(Vec::new());
-    let mut hosts = HOSTS.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(h) = hosts.iter().find(|h| h.id() == id) {
-        return Some(h);
-    }
-    let host: &'static cpal::Host = Box::leak(Box::new(cpal::host_from_id(id).ok()?));
-    hosts.push(host);
-    Some(host)
-}
-
-/// The cpal host name that serves `system`. The JACK system belongs to the native JACK backend; in a
-/// build with it, cpal has no JACK host (its `jack` feature is off), so `Auto` and cpal on that
-/// system open the same ALSA host they use without the feature (`Auto` on that system opens the
-/// native backend instead when a server answers, ADR 0021 slice 2).
-pub(crate) fn cpal_system_for(system: Option<&str>) -> Option<&str> {
-    if NATIVE_JACK_COMPILED && is_jack_system(system) && !cpal::available_hosts().iter().any(|id| id.name().eq_ignore_ascii_case(JACK_SYSTEM)) {
-        return Some("ALSA");
-    }
-    system
-}
-
-/// The named audio system, else the default one.
-pub(crate) fn host_named(system: Option<&str>) -> Option<&'static cpal::Host> {
-    let system = cpal_system_for(system);
-    let chosen = system.and_then(|want| cpal::available_hosts().into_iter().find(|id| id.name().eq_ignore_ascii_case(want))).and_then(shared_host);
-    chosen.or_else(|| {
-        if let Some(s) = system {
-            log::warn!("audio system `{s}` is not available; using the default");
-        }
-        shared_host(cpal::default_host().id())
-    })
-}
-
-/// The chosen audio system, else the default one.
-#[cfg(test)]
-pub(crate) fn host(cfg: &AudioConfig) -> Option<&'static cpal::Host> {
-    host_named(cfg.system.as_deref())
-}
-
-pub(crate) fn find_device(host: &cpal::Host, name: Option<&str>, output: bool) -> Option<cpal::Device> {
-    if let Some(want) = name {
-        let found = if output { host.output_devices().ok() } else { host.input_devices().ok() }
-            .and_then(|mut ds| ds.find(|d| device_name(d).as_deref() == Some(want)));
-        if found.is_some() {
-            return found;
-        }
-        log::warn!("audio device `{want}` is not available; using the default");
-    }
-    if output { host.default_output_device() } else { host.default_input_device() }
-}
-
-/// [`buffer_size`] on a device whose range the PipeWire server narrows (#230): the same range the
-/// window's list offers ([`crate::pipewire::alsa_server_range`]), so a saved size the list snaps
-/// opens at the size the window says.
-pub(crate) fn buffer_size_on(want: Option<u32>, supported: &cpal::SupportedBufferSize, system: &str, device: &str) -> cpal::BufferSize {
-    let narrowed = match (crate::pipewire::alsa_server_range(system, device), supported) {
-        (Some((lo, hi)), cpal::SupportedBufferSize::Range { min, max }) if lo.max(*min) <= hi.min(*max) => {
-            cpal::SupportedBufferSize::Range { min: lo.max(*min), max: hi.min(*max) }
-        }
-        (Some((lo, hi)), cpal::SupportedBufferSize::Unknown) => cpal::SupportedBufferSize::Range { min: lo, max: hi },
-        _ => *supported,
-    };
-    buffer_size(want, &narrowed)
-}
-
-/// The buffer to request: the chosen size, clamped into the device's range (#230: a saved size the
-/// device no longer allows opens at the nearest one it does, and the window says so, instead of
-/// silently falling to the device's default).
-pub(crate) fn buffer_size(want: Option<u32>, supported: &cpal::SupportedBufferSize) -> cpal::BufferSize {
-    match (want, supported) {
-        (Some(n), cpal::SupportedBufferSize::Range { min, max }) if min <= max => cpal::BufferSize::Fixed(n.clamp(*min, *max)),
-        // The device does not say: ask anyway, inside the sizes any backend takes (cpal reports an
-        // error if it cannot, and the caller falls back to the default).
-        (Some(n), cpal::SupportedBufferSize::Unknown) => cpal::BufferSize::Fixed(n.clamp(16, 8192)),
-        _ => cpal::BufferSize::Default,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -690,18 +571,6 @@ mod tests {
     #[test]
     fn the_native_jack_backend_is_labeled_native_jack() {
         assert_eq!(Backend::NativeJack.label(), "Native JACK");
-    }
-
-    #[test]
-    fn auto_and_cpal_on_the_jack_system_use_alsa_in_a_native_jack_build() {
-        if NATIVE_JACK_COMPILED && !cpal::available_hosts().iter().any(|id| id.name() == JACK_SYSTEM) {
-            assert_eq!(cpal_system_for(Some("JACK")), Some("ALSA"));
-            assert_eq!(cpal_system_for(Some("jack")), Some("ALSA"));
-        } else {
-            assert_eq!(cpal_system_for(Some("JACK")), Some("JACK"));
-        }
-        assert_eq!(cpal_system_for(Some("ALSA")), Some("ALSA"));
-        assert_eq!(cpal_system_for(None), None);
     }
 
     fn sample_calibration() -> LoopbackCalibration {
@@ -885,29 +754,6 @@ mod tests {
     }
 
     #[test]
-    fn buffer_sizes_follow_the_device_range() {
-        let r = cpal::SupportedBufferSize::Range { min: 64, max: 1024 };
-        assert_eq!(buffer_size(Some(256), &r), cpal::BufferSize::Fixed(256));
-        // A saved size outside the range opens at the nearest end of it (#230), not the default.
-        assert_eq!(buffer_size(Some(32), &r), cpal::BufferSize::Fixed(64));
-        assert_eq!(buffer_size(Some(4096), &r), cpal::BufferSize::Fixed(1024));
-        assert_eq!(buffer_size(None, &r), cpal::BufferSize::Default);
-        assert_eq!(buffer_size(Some(128), &cpal::SupportedBufferSize::Unknown), cpal::BufferSize::Fixed(128));
-        assert_eq!(buffer_size(Some(1 << 20), &cpal::SupportedBufferSize::Unknown), cpal::BufferSize::Fixed(8192));
-        let d = DeviceInfo {
-            name: "x".into(),
-            is_default: true,
-            max_channels: 2,
-            sample_rates: vec![48_000],
-            buffer_min: Some(64),
-            buffer_max: Some(1024),
-        };
-        assert_eq!(d.buffer_sizes(), [64, 128, 256, 512, 1024]);
-        let open = DeviceInfo { buffer_min: None, buffer_max: None, ..d };
-        assert_eq!(open.buffer_sizes().len(), STANDARD_BUFFERS.len());
-    }
-
-    #[test]
     fn installed_asio_drivers_cpal_could_not_list_are_offered() {
         let open = DeviceInfo {
             name: "Open Driver".into(),
@@ -924,17 +770,6 @@ mod tests {
         assert_eq!(list[1].name, "Other Driver");
         assert_eq!(list[1].sample_rates, STANDARD_RATES);
         assert_eq!(list[1].buffer_sizes().len(), STANDARD_BUFFERS.len());
-    }
-
-    #[test]
-    #[ignore = "hardware enumeration: opt in only on a test audio machine"]
-    fn unknown_systems_and_devices_fall_back_to_the_defaults() {
-        let cfg = AudioConfig { system: Some("No Such System".into()), ..Default::default() };
-        assert_eq!(host(&cfg).map(|h| h.id()), Some(cpal::default_host().id()));
-        // No device with this name exists: the default (or none, on a machine without audio).
-        let h = cpal::default_host();
-        let fallback = crate::backend::cpal::device_on(&h, Some("No Such Device 1234"), true).as_ref().and_then(device_name);
-        assert_eq!(fallback, h.default_output_device().as_ref().and_then(device_name));
     }
 
     #[test]
