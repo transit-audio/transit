@@ -1,4 +1,5 @@
 use crate::tests::*;
+use crate::theme::TOKENS;
 
 #[test]
 fn the_peak_readout_holds_the_loudest_peak_until_clicked() {
@@ -122,4 +123,77 @@ fn clearing_the_main_meter_clears_the_master_tracks_meter_and_back() {
     hot(&mut app);
     app.reset_meters(None);
     assert!(!app.main_meter.clip && !app.meters[&master].clip, "Ctrl-click clears everything");
+}
+
+/// A device-free Player on the app's session, and `n` device blocks with a UI frame after each.
+fn step(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64, n: usize) {
+    for _ in 0..n {
+        app.player.as_ref().unwrap().step_device_free();
+        frames(app, ctx, 1, time);
+    }
+}
+
+/// What an idle strip must show: no latch on either cell, the floor in the peak readout and no
+/// `meter.hot` anywhere on it.
+fn assert_idle(app: &StudioApp, t: TrackId, why: &str) {
+    let d = app.meters.get(&t).copied().unwrap_or_default();
+    assert_eq!((d.clip, d.clip_ch, d.peak), (false, [false; 2], 0.0), "{why}: the meter state");
+    let s = strip(app, t);
+    assert_eq!(s.peak_text, "-inf", "{why}: the readout reads the floor");
+    assert_ne!(s.peak_color, TOKENS.meter_hot.to_array(), "{why}: the readout is not hot");
+    let m = s.meter_layout.unwrap();
+    assert!(m.clip_colors.iter().all(|c| *c == TOKENS.line), "{why}: both clip cells are `line`");
+    assert!(m.peaks.iter().chain(&m.peak_over).all(Option::is_none), "{why}: no fill");
+}
+
+#[test]
+fn a_fresh_instrument_track_that_played_nothing_shows_no_latch_and_the_floor() {
+    let mut app = app();
+    let t = new_track(&mut app, json!({"kind": "instrument"}));
+    app.ui.show_mixer = true;
+    app.player = Some(transit_playback::Player::prepare_device_free(app.engine.session_arc()).unwrap());
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    frames(&mut app, &ctx, 3, &mut time);
+    // About two seconds of device blocks with the default instrument loaded and no note.
+    step(&mut app, &ctx, &mut time, 200);
+    assert_idle(&app, t, "a fresh instrument track");
+}
+
+/// The idle-strip latch (#326): a new document reuses track ids, and the meter snapshot the last
+/// document's Player published was fed into the new document's strips. Track 1 of the old document
+/// played at +0.1 dBFS; track 1 of the new one is an instrument that never played.
+#[test]
+fn a_new_document_does_not_inherit_the_last_documents_meters() {
+    use transit_model::SourceId;
+    let mut app = app();
+    let loud = new_track(&mut app, json!({"kind": "audio", "format": "stereo"}));
+    {
+        // A square wave at 1.0116 (+0.1 dBFS) for ten seconds.
+        let demo = transit_engine::demo::demo_session();
+        let mut buf = demo.pool.get(demo.pool.ids().next().unwrap()).unwrap().buffer.clone();
+        let len = 480_000usize;
+        let sig: Vec<f32> = (0..len).map(|i| if (i / 50) % 2 == 0 { 1.0116 } else { -1.0116 }).collect();
+        (buf.sample_rate, buf.channels) = (48_000, vec![sig.clone(), sig]);
+        let s = app.engine.session_mut();
+        s.pool.insert(SourceId(1), std::sync::Arc::new(transit_model::SourceAudio::new(buf)));
+        let id = s.new_clip_id();
+        s.track_mut(loud).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::audio(id, "x", SourceId(1), 0, 0, len as i64));
+    }
+    app.ui.show_mixer = true;
+    app.player = Some(transit_playback::Player::prepare_device_free(app.engine.session_arc()).unwrap());
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    frames(&mut app, &ctx, 3, &mut time);
+    app.run("transport.play", json!({})).unwrap();
+    step(&mut app, &ctx, &mut time, 100);
+    // Control: the old document's strip did latch and read +0.1.
+    assert_eq!((app.meters[&loud].clip_ch, strip(&app, loud).peak_text.as_str()), ([true; 2], "+0.1"));
+    // A new document while it plays; its first track takes the same id.
+    app.run("session.new", json!({})).unwrap();
+    let idle = new_track(&mut app, json!({"kind": "instrument"}));
+    assert_eq!(idle, loud, "the new document reuses the id");
+    frames(&mut app, &ctx, 1, &mut time);
+    step(&mut app, &ctx, &mut time, 50);
+    assert_idle(&app, idle, "the new document's idle instrument track");
 }

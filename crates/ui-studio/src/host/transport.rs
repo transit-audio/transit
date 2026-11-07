@@ -184,6 +184,9 @@ impl StudioApp {
                     self.copied.clear();
                     self.meters.clear();
                     self.main_meter = MeterDisplay::default();
+                    // The Player's last snapshot is keyed by the old document's track ids, which
+                    // the new document reuses: fed on, it lit an idle strip's clip latch (#326).
+                    self.meter_snapshot = transit_playback::MeterSnapshot::default();
                     // The cursor is per-session view state.
                     self.ui.cursor = 0;
                     self.ui.cursor_track = None;
@@ -304,7 +307,9 @@ impl StudioApp {
             crate::debug_log::track_run_counts(&mut self.run_counts, p, playing);
             crate::debug_log::track_midi_outputs(&mut self.midi_out_connected, p);
             let now = self.last_frame.unwrap_or_default();
-            if now - self.last_meter_poll >= 1.0 / 20.0 {
+            // While a stop is pending (a new document's first step) the Player may still run the
+            // old plan, whose meters are keyed by the old document's track ids.
+            if now - self.last_meter_poll >= 1.0 / 20.0 && self.player_requests.stop.is_none() {
                 self.player_requests.result(&mut self.status, p.copy_meters(&mut self.meter_snapshot));
                 self.last_meter_poll = now;
             }
