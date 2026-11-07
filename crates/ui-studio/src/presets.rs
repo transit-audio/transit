@@ -247,7 +247,7 @@ pub(crate) fn list(ui: &mut Ui, ins: &Insert, info: &'static PluginInfo, root: O
         ui.label(egui::RichText::new("Factory").size(10.5).color(TOKENS.text_dim));
     }
     for (n, p) in factory {
-        if ui.selectable_label(ins.preset == n, n).clicked() {
+        if crate::chrome_pick::choice_label(ui, ins.preset == n, n).clicked() {
             out.pick = Some((n.to_string(), Ok(p)));
         }
     }
@@ -256,7 +256,7 @@ pub(crate) fn list(ui: &mut Ui, ins: &Insert, info: &'static PluginInfo, root: O
         ui.label(egui::RichText::new("User").size(10.5).color(TOKENS.text_dim));
     }
     for n in user {
-        if ui.selectable_label(ins.preset == *n, n).clicked() {
+        if crate::chrome_pick::choice_label(ui, ins.preset == *n, n).clicked() {
             out.pick = Some((n.clone(), root.map_or(Err("no config folder".into()), |r| load_user(r, info.id, n))));
         }
     }
@@ -312,10 +312,10 @@ pub fn control(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &In
     let name_id = ui.id().with(("preset_name", ins.uid.get()));
     let mut name: String = ui.data_mut(|d| d.get_temp(name_id)).unwrap_or_default();
     let mut picked = Picked::default();
-    let r = egui::ComboBox::from_id_salt(("builtin_preset", ins.uid.get()))
-        .selected_text(current)
+    let r = crate::chrome_pick::Combo::new(("builtin_preset", ins.uid.get()), current)
         .width(150.0)
-        .show_ui(ui, |ui| picked = list(ui, ins, info, root.as_deref(), &user, &mut name));
+        .dense()
+        .show(ui, |ui| picked = list(ui, ins, info, root.as_deref(), &user, &mut name));
     *out = [r.response.rect.min.x, r.response.rect.min.y, r.response.rect.max.x, r.response.rect.max.y];
     ui.data_mut(|d| d.insert_temp(name_id, name));
     act(app, ui, key, ins, info, picked, name_id);

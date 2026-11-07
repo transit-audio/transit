@@ -564,7 +564,7 @@ pub(crate) fn dropdown(
     widgets::role_text(&clip, &role, text, t.text, Align2::LEFT_CENTER, pos2(x, cy));
     chevron(p, pos2(rect.max.x - 11.0, cy), 8.0, t.text_faint);
     let mut pick = None;
-    egui::Popup::menu(&resp).show(|ui| {
+    crate::chrome_pick::dropdown(&resp).show(|ui| {
         crate::chrome::menu_style(ui.style_mut());
         for (i, c) in choices.iter().enumerate() {
             if crate::menus::check_button(ui, i == selected, *c).clicked() && i != selected {
