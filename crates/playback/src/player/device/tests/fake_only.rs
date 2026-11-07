@@ -1,6 +1,8 @@
 //! #363: a test Player never opens an input on the machine's real devices. The counting factory
 //! stands at the cpal adapter's boundary; it must stay at zero for a test Player, and it counts once
-//! the guard is off (the control).
+//! the guard is off (the control): on Windows the native factory alone, elsewhere the cpal adapter
+//! alone. The native lookup is lazy, so off Windows it is never called (it used to be called and
+//! its answer dropped, which counted twice in Linux).
 
 use super::*;
 
@@ -43,5 +45,6 @@ fn a_test_player_never_opens_an_input_on_the_machines_devices() {
     let (mut unguarded, _output) = super::prepared();
     unguarded.fake_only = false;
     assert!(unguarded.open_input_with(&AudioConfig::default(), &cpal, &native_for).is_err());
-    assert_eq!(cpal.calls() + native_calls.load(Ordering::Relaxed), 1, "cpal off Windows, the native factory on Windows");
+    let asked = (cpal.calls(), native_calls.load(Ordering::Relaxed));
+    assert_eq!(asked, if cfg!(windows) { (0, 1) } else { (1, 0) }, "(cpal, native): the native factory on Windows, cpal elsewhere");
 }

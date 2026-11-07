@@ -107,20 +107,25 @@ fn the_on_demand_input_returns_the_native_error_and_asks_nothing_else() {
 
 /// `Recorder::open` and `open_with` on Windows open through the native factory of the effective
 /// backend and never ask cpal; without a native factory the open is an error, still without cpal.
-/// Control: off Windows (`windows: false`) cpal is the one asked.
+/// Control: off Windows (`windows: false`) cpal is the one asked and the native lookup is never called.
 #[test]
 fn the_recorder_on_windows_never_asks_cpal() {
     let native = fake_factory(false).with_capture(2, false);
     let cpal = Counting::default();
-    let recorder = record::Recorder::open_on(&AudioConfig::default(), true, Some(Box::new(native.clone())), &cpal);
+    let recorder = record::Recorder::open_on(&AudioConfig::default(), true, || Some(Box::new(native.clone())), &cpal);
     assert!(recorder.is_ok(), "{:?}", recorder.err());
     assert_eq!(modes(&native).first().map(|m| m.0), Some(ab::Direction::Input), "the native factory opened the input");
     assert_eq!(cpal.calls(), 0);
     let cfg = AudioConfig { system: Some("ASIO".into()), ..Default::default() };
-    let error = record::Recorder::open_on(&cfg, true, None, &cpal).err();
+    let error = record::Recorder::open_on(&cfg, true, || None, &cpal).err();
     assert_eq!(error.as_deref(), Some("no native backend serves the audio system “ASIO” in this build"));
     assert_eq!(cpal.calls(), 0, "no native factory is an error, not cpal");
-    // Control: off Windows cpal opens it.
-    assert!(record::Recorder::open_on(&AudioConfig::default(), false, Some(Box::new(native)), &cpal).is_err());
-    assert_eq!(cpal.calls(), 1);
+    // Control: off Windows cpal opens it, and the native factory is not even looked up.
+    let looked_up = AtomicUsize::new(0);
+    let lookup = || -> Option<Box<dyn ab::BackendFactory>> {
+        looked_up.fetch_add(1, Ordering::Relaxed);
+        Some(Box::new(native))
+    };
+    assert!(record::Recorder::open_on(&AudioConfig::default(), false, lookup, &cpal).is_err());
+    assert_eq!((cpal.calls(), looked_up.load(Ordering::Relaxed)), (1, 0));
 }

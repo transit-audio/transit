@@ -1000,7 +1000,7 @@ impl Player {
                     // A silent runtime's input: on Windows the native backend of the effective backend.
                     None => {
                         let config = crate::backend::native::open_config(&config);
-                        record::Recorder::open_on(&config, cfg!(windows), native_for(&config), cpal)?
+                        record::Recorder::open_on(&config, cfg!(windows), || native_for(&config), cpal)?
                     }
                 };
                 check_input_rate(recorder.sample_rate, self.device_rate)?;

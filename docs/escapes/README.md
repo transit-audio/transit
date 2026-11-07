@@ -33,3 +33,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E72: a far deadline let a host stall skip an unheld strip](E72-a-far-deadline-let-a-host-stall-skip-an-unheld-strip.md)
 - [E73: a monitored port acknowledged its routes before it captured SysEx](E73-a-monitored-port-acknowledged-its-routes-before-it-captured-sysex.md)
 - [E74: a window manager moved a test's plug through a reused window id (#346)](E74-a-window-manager-moved-a-test-plug-through-a-reused-window-id.md)
+- [E75: an input open looked up the native factory off Windows (#354)](E75-an-input-open-looked-up-the-native-factory-off-windows.md)

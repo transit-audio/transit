@@ -334,22 +334,23 @@ impl Recorder {
     /// effective backend, never cpal (ADR 0046); elsewhere through cpal.
     pub fn open_with(audio: &crate::AudioConfig) -> Result<Recorder, String> {
         let audio = crate::backend::native::open_config(audio);
-        Recorder::open_on(&audio, cfg!(windows), crate::backend::native::input_factory(&audio), &crate::backend::cpal::CpalFactory)
+        Recorder::open_on(&audio, cfg!(windows), || crate::backend::native::input_factory(&audio), &crate::backend::cpal::CpalFactory)
     }
 
-    /// [`Self::open_with`] with the platform (`windows`), the native factory and the cpal adapter as
-    /// parameters (fakes in tests): on Windows `native` opens it, or the open fails when there is
-    /// none, and `cpal` is never asked. Elsewhere `cpal` opens it.
+    /// [`Self::open_with`] with the platform (`windows`), the native factory lookup and the cpal
+    /// adapter as parameters (fakes in tests): on Windows the factory `native` gives opens it, or
+    /// the open fails when there is none, and `cpal` is never asked. Elsewhere `cpal` opens it and
+    /// `native` is never called: each platform asks exactly one boundary.
     pub(crate) fn open_on(
         audio: &crate::AudioConfig,
         windows: bool,
-        native: Option<Box<dyn ab::BackendFactory>>,
+        native: impl FnOnce() -> Option<Box<dyn ab::BackendFactory>>,
         cpal: &dyn ab::BackendFactory,
     ) -> Result<Recorder, String> {
         if !windows {
             return Recorder::open_through(audio, cpal);
         }
-        let native = native.ok_or_else(|| crate::backend::native::unserved(audio))?;
+        let native = native().ok_or_else(|| crate::backend::native::unserved(audio))?;
         Recorder::open_through(audio, &*native)
     }
 
