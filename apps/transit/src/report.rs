@@ -31,6 +31,7 @@ pub fn run(
         build: env!("TRANSIT_BUILD").into(),
         machine: Machine::probe(),
         systems: diagnostics::machine_systems(),
+        devices_note: None,
         settings,
         opened: vec!["Output open: none (report mode opens no stream)".into()],
         preview: None,

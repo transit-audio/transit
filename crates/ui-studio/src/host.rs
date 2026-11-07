@@ -61,14 +61,20 @@ impl StudioApp {
 
     /// The quit order (E5, issue #104): close the session's autosave (unsaved changes stay in it
     /// unless the user chose Quit), finish any take and hand the input back to the player, release
-    /// the player and its plug-in instances, then shut plug-in hosting down. Used by the quit, a
+    /// the player and its plug-in instances, shut plug-in hosting down, then end the native ASIO
+    /// host thread (its driver released on that thread). Used by the quit, a
     /// lost graphics device and a panic on the UI thread, under a watchdog
     /// ([`transit_engine::emergency`]).
     pub fn shut_down(&mut self) -> ShutDown {
         let autosaved = self.close_autosave();
         self.close_input();
         self.player = None;
-        ShutDown { clean: transit_engine::shutdown_plugin_hosts(), autosaved }
+        let clean = transit_engine::shutdown_plugin_hosts();
+        // With the streams closed, the native ASIO host releases its driver on its own thread
+        // before the process ends (#363); a no-op when it never started. Last: a driver call it is
+        // blocked in can hold it for up to ten seconds.
+        transit_playback::devices::release_native_drivers();
+        ShutDown { clean, autosaved }
     }
 
     pub(crate) fn poll_player(&mut self) {

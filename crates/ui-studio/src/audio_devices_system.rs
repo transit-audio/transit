@@ -151,7 +151,9 @@ impl crate::StudioApp {
         if offered && self.audio_devices.system_outputs.is_none() {
             let listed = match &self.audio_devices.fake {
                 Some(fake) => fake.systems.iter().filter(|s| s.name == "WASAPI").flat_map(|s| s.outputs.iter().map(|d| d.name.clone())).collect(),
-                None => system_audio::outputs(),
+                // Never under `--no-audio` (#363), never the machine's in a test build.
+                None if self.may_list_machine() && !cfg!(test) => system_audio::outputs(),
+                None => Vec::new(),
             };
             self.audio_devices.system_outputs = Some(listed);
         }

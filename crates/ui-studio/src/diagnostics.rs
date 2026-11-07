@@ -309,6 +309,8 @@ pub struct Report {
     pub build: String,
     pub machine: Machine,
     pub systems: Vec<AudioSystem>,
+    /// Why no audio system is listed, when that is not a failure (a run with audio off).
+    pub devices_note: Option<String>,
     pub settings: AudioConfig,
     /// The lines the Audio Devices window shows for what is open (output, input, backend, reopen,
     /// and the requested-versus-running note).
@@ -387,7 +389,7 @@ impl Report {
         }
         section(&mut o, "Audio devices");
         if self.systems.is_empty() {
-            o.push_str("No audio systems listed.\n");
+            o.push_str(&format!("{}\n", self.devices_note.as_deref().unwrap_or("No audio systems listed.")));
         }
         for s in &self.systems {
             o.push_str(&format!("{}{}\n", s.name, if s.is_default { " (default system)" } else { "" }));
@@ -576,6 +578,9 @@ impl crate::StudioApp {
     }
 }
 
+/// The report's device list in a run with audio off (#363).
+pub const NO_AUDIO_DEVICES: &str = "Audio is off in this run (--no-audio): the audio devices were not listed, and no driver was loaded.";
+
 /// The MIDI note of a report made without a Player (no audio device): MIDI runs with the audio.
 pub const NO_PLAYER_MIDI: &str = "MIDI is not running (no audio device is open): the ports are listed, none is open";
 
@@ -621,7 +626,12 @@ impl crate::StudioApp {
         report.generated = now_secs();
         // Not listed yet (the Audio Devices window never opened): the worker lists, so the UI
         // thread does not wait on the drivers. Nothing is opened either way.
-        let list_here = report.systems.is_empty() && self.audio_devices.systems.is_none() && self.audio_devices.fake.is_none();
+        // Never without a player (`--no-audio`, #363): the report says the devices were not listed.
+        let unlisted = report.systems.is_empty() && self.audio_devices.systems.is_none() && self.audio_devices.fake.is_none();
+        let list_here = unlisted && self.may_list_machine();
+        if report.systems.is_empty() && self.player.is_none() && self.audio_devices.fake.is_none() {
+            report.devices_note = Some(NO_AUDIO_DEVICES.into());
+        }
         // No Player, no MIDI side to ask: the worker lists the ports (enumeration, nothing opened).
         let list_midi = self.player.is_none() && self.audio_devices.fake.is_none();
         let redaction = Redaction::from_env();
@@ -729,6 +739,7 @@ mod tests {
                 inputs: Vec::new(),
                 diagnostics: vec!["driver X: busy".into()],
             }],
+            devices_note: None,
             settings: AudioConfig {
                 system: Some("ALSA".into()),
                 output: Some("Speakers".into()),

@@ -213,14 +213,13 @@ pub fn wasapi_system_from(list: impl Fn(ab::Direction) -> Result<Listing, String
     system
 }
 
-/// The ASIO system as the native backend lists it: every installed driver by its registry name,
-/// none of them instantiated, and only `selected` (the driver chosen in Audio Devices, else the one
-/// running) probed through the backend for its channels, rates and buffer range (the driver this
-/// process has open is queried in place); the others are offered with unknown counts. A selected
-/// driver that failed to load (or is not installed) is the one diagnostic. While cpal's ASIO host
-/// holds a driver nothing is probed (two loaded drivers in one process is what ASIO forbids): the
-/// registry names only. This can take seconds on a misbehaving driver: the app calls it off its UI
-/// thread.
+/// The ASIO system as the native backend lists it (#363): every installed driver by its registry
+/// name, none of them instantiated. Only `selected` (the driver this process has open) is described,
+/// queried in place for its channels, rates and buffer range ([`transit_audio_asio::AsioBackend::probe_open`]);
+/// when it is not open (it closed meanwhile) it is named like the others, with unknown counts, and
+/// nothing is loaded to describe it: a driver is instantiated only to open it. A selected driver
+/// that is not installed, or whose query failed, is the one diagnostic. A query of a driver blocked
+/// in a call can take seconds: the app calls this off its UI thread.
 #[cfg(all(windows, target_pointer_width = "64"))]
 pub fn asio_system(selected: Option<&str>) -> AudioSystem {
     use transit_audio_asio::AsioBackend;
@@ -245,16 +244,25 @@ pub fn asio_system(selected: Option<&str>) -> AudioSystem {
         diagnostics.push(format!("{selected}: this ASIO driver is not installed"));
         return system_from_endpoints(devices::ASIO_SYSTEM, false, &[], &[], &installed, diagnostics);
     }
-    if let Err(e) = backend.probe(selected) {
-        log::info!("ASIO: listing \"{selected}\": {e}");
-    }
+    let open = match backend.probe_open(selected) {
+        Ok(Some(_)) => true,
+        Ok(None) => {
+            log::debug!("ASIO: listing \"{selected}\" by name: it is not open");
+            false
+        }
+        Err(e) => {
+            log::info!("ASIO: listing \"{selected}\": {e}");
+            diagnostics.push(format!("{selected}: {e}"));
+            false
+        }
+    };
     let described = |direction| -> Vec<ab::Endpoint> {
+        if !open {
+            return Vec::new();
+        }
         ab::Backend::endpoints(&backend, direction).unwrap_or_default().into_iter().filter(|e| e.name == selected).collect()
     };
     let (outputs, inputs) = (described(ab::Direction::Output), described(ab::Direction::Input));
-    if let Some(Err(problem)) = backend.probed(selected).filter(|p| p.as_ref().is_err_and(|d| !d.blocked)) {
-        diagnostics.push(problem.to_string());
-    }
     system_from_endpoints(devices::ASIO_SYSTEM, false, &outputs, &inputs, &installed, diagnostics)
 }
 

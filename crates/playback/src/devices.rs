@@ -447,8 +447,9 @@ impl DeviceInfo {
 }
 
 /// What the listing of an ASIO system knows of one driver in one direction ([`asio_description`]).
-/// Only the driver that runs is probed (probing opens a driver, and ASIO allows one per process,
-/// #108); every other installed driver is listed by name with the standard choices.
+/// Only the driver that runs is described, queried in place (#363: listing never instantiates a
+/// driver, and ASIO allows one per process, #108); every other installed driver is listed by name
+/// with the standard choices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AsioDescription {
     /// Probed: the channels, rates and buffer range are the driver's.
@@ -584,10 +585,23 @@ pub fn native_jack_system() -> Option<AudioSystem> {
     None
 }
 
+/// Ends the native ASIO backend's host thread at the end of the process, if it was ever started (it
+/// never starts one): the driver it holds is released on that thread, after the stop and
+/// disposeBuffers, waiting up to ten seconds for a driver call it is blocked in (#363). Call after
+/// the Player and the inputs are closed. Whether it ended within that bound (true when nothing was
+/// started, and in builds without native ASIO).
+pub fn release_native_drivers() -> bool {
+    #[cfg(all(windows, target_pointer_width = "64"))]
+    return transit_audio_asio::AsioBackend::shut_down_shared();
+    #[cfg(not(all(windows, target_pointer_width = "64")))]
+    true
+}
+
 /// The ASIO system as the native ASIO backend lists it, `None` in a build without it: every
-/// installed driver by name, and only `selected` probed for its channels, rates and buffers (see
-/// `backend::native::asio_system`). Probing a misbehaving driver can take seconds (each host
-/// request waits at most ten): call it off the UI thread.
+/// installed driver by name from the registry, none instantiated, and `selected` described only
+/// when this process has it open, queried in place (see `backend::native::asio_system`, #363). A
+/// query of a driver blocked in a call can take seconds (each host request waits at most ten):
+/// call it off the UI thread.
 pub fn native_asio_system(selected: Option<&str>) -> Option<AudioSystem> {
     #[cfg(all(windows, target_pointer_width = "64"))]
     return Some(crate::backend::native::asio_system(selected));

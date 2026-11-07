@@ -5,11 +5,14 @@
 //! The lists come from [`transit_playback::devices::audio_systems_without_asio`] (the native
 //! WASAPI system on Windows, else cpal's systems, and native JACK where built) and, in a build with
 //! the native ASIO backend, [`transit_playback::devices::native_asio_system`], read when the
-//! window opens and on Rescan, never per frame. The ASIO system is listed on a worker thread (it
-//! probes the driver that runs, which can take seconds): the window says "Listing the ASIO
-//! drivers…" until it answers and stops waiting after [`ASIO_LISTING_LIMIT`]. A driver only chosen
-//! in the window is never probed (that opens it): its lists are stale until Apply, then listed again. Without a player (`--no-audio`, tests) nothing is enumerated:
-//! the choices are only saved, for the next start.
+//! window opens and on Rescan, never per frame. The ASIO list is the registry's driver names: no
+//! driver is instantiated to list it (#363). Only the driver that runs is described (channels,
+//! rates, buffer range), queried in place on a worker thread (a busy driver can take seconds): the
+//! window says "Listing the ASIO drivers…" until it answers and stops waiting after
+//! [`ASIO_LISTING_LIMIT`]. A driver only chosen in the window is never loaded to describe it: its
+//! lists are the standard choices until Apply opens it, then listed again. Without a player
+//! (`--no-audio`) nothing is enumerated ([`StudioApp::may_list_machine`]): the choices are only
+//! saved, for the next start.
 //!
 //! Apply reopens the devices through [`StudioApp::reconnect_audio`] (plug-in editors close first,
 //! on the main thread, and the old device closes before the new one opens: an ASIO driver is
@@ -209,6 +212,9 @@ pub struct AudioDevicesState {
     /// the ASIO lister the worker runs.
     #[cfg(test)]
     pub(crate) machine: Option<(Vec<AudioSystem>, AsioLister)>,
+    /// How many times a listing passed [`StudioApp::may_list_machine`] (tests, #363).
+    #[cfg(test)]
+    pub(crate) machine_listings: std::sync::atomic::AtomicUsize,
     /// The outputs System Audio can capture (#268), listed once per listing.
     pub(crate) system_outputs: Option<Vec<String>>,
     /// The System Audio level meter as shown (it falls back slowly between peaks).
@@ -678,28 +684,41 @@ impl StudioApp {
     /// thread ([`Self::start_asio_listing`]): until it answers the ASIO system is listed empty and
     /// the window says [`ASIO_LISTING`].
     fn listing(&mut self) -> Vec<AudioSystem> {
-        match (&mut self.audio_devices.fake, &self.player) {
-            (Some(f), _) => {
-                f.enumerations += 1;
-                f.systems.clone()
-            }
-            (None, Some(_)) => {
-                let (mut systems, lister) = self.machine_listing();
-                if let Some(lister) = lister {
-                    systems.retain(|s| s.name != devices::ASIO_SYSTEM);
-                    systems.push(AudioSystem {
-                        name: devices::ASIO_SYSTEM.into(),
-                        is_default: false,
-                        outputs: Vec::new(),
-                        inputs: Vec::new(),
-                        diagnostics: Vec::new(),
-                    });
-                    self.start_asio_listing(lister);
-                }
-                systems
-            }
-            (None, None) => Vec::new(),
+        if let Some(f) = &mut self.audio_devices.fake {
+            f.enumerations += 1;
+            return f.systems.clone();
         }
+        if !self.may_list_machine() {
+            return Vec::new();
+        }
+        let (mut systems, lister) = self.machine_listing();
+        if let Some(lister) = lister {
+            systems.retain(|s| s.name != devices::ASIO_SYSTEM);
+            systems.push(AudioSystem {
+                name: devices::ASIO_SYSTEM.into(),
+                is_default: false,
+                outputs: Vec::new(),
+                inputs: Vec::new(),
+                diagnostics: Vec::new(),
+            });
+            self.start_asio_listing(lister);
+        }
+        systems
+    }
+
+    /// The one gate in front of every listing of the machine's audio devices (#363): the Audio
+    /// Devices window's systems and ASIO drivers, its System Audio outputs, the startup notes and
+    /// the diagnostics worker's list. Only a run with a player lists; without one (`--no-audio`)
+    /// nothing is enumerated, so no ASIO driver and no WASAPI client is created. A test build counts
+    /// each listing let through ([`AudioDevicesState::machine_listings`]) and still never reaches the
+    /// machine (scripted listings, [`listing_from`]).
+    pub(crate) fn may_list_machine(&self) -> bool {
+        let allowed = self.player.is_some();
+        #[cfg(test)]
+        if allowed {
+            self.audio_devices.machine_listings.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        allowed
     }
 
     /// The systems listed at once (`devices::audio_systems_without_asio`: native WASAPI on Windows,
@@ -738,7 +757,8 @@ impl StudioApp {
 
     /// Lists the ASIO system again for another chosen driver, keeping the rest of the listing.
     fn relist_asio(&mut self) {
-        if let (None, Some(_)) = (&self.audio_devices.fake, &self.player)
+        if self.audio_devices.fake.is_none()
+            && self.may_list_machine()
             && let (_, Some(lister)) = self.machine_listing()
         {
             self.start_asio_listing(lister);
@@ -773,8 +793,9 @@ impl StudioApp {
         }
     }
 
-    /// The ASIO driver the listing probes: the native ASIO driver that runs; `None` probes none
-    /// (names only). A driver chosen in the window is never probed before Apply: probing opens it.
+    /// The ASIO driver the listing describes: the native ASIO driver that runs, queried in place;
+    /// `None` describes none (registry names only). A driver chosen in the window is never loaded
+    /// to describe it: it is read when Apply opens it (#363).
     pub(crate) fn asio_selection(&self) -> Option<String> {
         self.running_native_asio()
     }
@@ -903,7 +924,8 @@ pub(crate) fn startup_notes(app: &mut StudioApp) {
             (Some(listed), _) => listed.clone(),
             (None, Some(f)) => f.systems.clone(),
             // The systems listed at once (no ASIO probe; the input note skips ASIO anyway).
-            (None, None) => app.machine_listing().0,
+            (None, None) if app.may_list_machine() => app.machine_listing().0,
+            (None, None) => Vec::new(),
         };
         notes.extend(input_note(&app.ui.audio, &systems));
     }
