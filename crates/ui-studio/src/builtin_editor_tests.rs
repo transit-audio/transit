@@ -319,6 +319,11 @@ fn each_bespoke_panel_opens_and_lists_every_parameter() {
             // every matrix row after Add route, and each LFO's division with SYNC on.
             got = reveal_macro_oscillator(&mut t, tr);
         }
+        if plugin == "compressor" {
+            // 326-K: the Detector section's parameters show once its section bar is open.
+            let bar = t.window(tr).compressor.expect("the Compressor's panel").detector_bar.unwrap().button;
+            t.click(mid(bar), 1);
+        }
         let w = t.window(tr);
         got.extend(w.rows.iter().map(|r| r.param.clone()));
         got.sort();
@@ -676,10 +681,12 @@ fn tap_for(t: &mut T, tr: TrackId, slot: usize) -> std::sync::Arc<transit_mix::S
 }
 
 #[test]
-fn a_compressor_panel_shows_a_scope_and_gain_reduction_and_drives_its_tap() {
+fn a_gate_panel_shows_a_scope_and_gain_reduction_and_drives_its_tap() {
+    // The older panel's scope strip serves the Expander/Gate; the Compressor's own panel (326-K)
+    // has its tap and gain-reduction tests in `compressor_panel::hero_tests`.
     let mut t = T::new();
     let tr = t.track("audio");
-    t.app.add_device(tr, "compressor").unwrap();
+    t.app.add_device(tr, "expander_gate").unwrap();
     t.frames(4);
     let tap = tap_for(&mut t, tr, 0);
     assert!(!tap.enabled(), "a closed panel leaves the tap off");
@@ -766,7 +773,8 @@ fn double_clicking_a_card_title_opens_the_editor_and_the_button_reads_edit() {
 #[test]
 fn a_built_in_window_fits_its_panel_and_has_no_resize_handle() {
     for scale in [1.0_f32, 1.5] {
-        for plugin in ["compressor", "gain"] {
+        // The Compressor moved to the shared device window (326-K, checked in its own tests).
+        for plugin in ["plate_reverb", "gain"] {
             let mut t = T::new();
             t.ctx.set_pixels_per_point(scale);
             let (tr, _) = open_plugin(&mut t, plugin);
