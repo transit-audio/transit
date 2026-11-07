@@ -34,3 +34,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E73: a monitored port acknowledged its routes before it captured SysEx](E73-a-monitored-port-acknowledged-its-routes-before-it-captured-sysex.md)
 - [E74: a window manager moved a test's plug through a reused window id (#346)](E74-a-window-manager-moved-a-test-plug-through-a-reused-window-id.md)
 - [E75: an input open looked up the native factory off Windows (#354)](E75-an-input-open-looked-up-the-native-factory-off-windows.md)
+- [E76: a shutdown test let the bound decide an idle worker's fate (#346)](E76-a-shutdown-test-let-the-bound-decide-an-idle-worker.md)

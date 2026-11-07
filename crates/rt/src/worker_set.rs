@@ -1004,9 +1004,18 @@ impl WorkerSet {
     /// reported; see the module docs ("Retirement and quarantine"). Off the audio thread. After
     /// it, `begin_block` and `publish` are refused. A second call returns an empty report.
     pub fn shutdown(&mut self, bound: Duration) -> Quarantine {
-        let mut q = Quarantine::default();
+        if !self.stop_and_wake() {
+            return Quarantine::default();
+        }
+        self.join_within(bound)
+    }
+
+    /// The first half of [`WorkerSet::shutdown`]: sets the stop flag and wakes every worker
+    /// explicitly (an idle worker never depends on a poll to see the stop). False when the set
+    /// was already shut down.
+    fn stop_and_wake(&mut self) -> bool {
         if self.shut {
-            return q;
+            return false;
         }
         self.shut = true;
         self.generation = 0;
@@ -1015,6 +1024,13 @@ impl WorkerSet {
             w.woken.store(true, Ordering::Release);
             t.unpark();
         }
+        true
+    }
+
+    /// The second half of [`WorkerSet::shutdown`]: joins each worker within `bound` (one
+    /// deadline for all, from this call) and abandons the ones still running at it.
+    fn join_within(&mut self, bound: Duration) -> Quarantine {
+        let mut q = Quarantine::default();
         let deadline = Instant::now().checked_add(bound);
         for (k, handle) in self.handles.iter_mut().enumerate() {
             let Some(h) = handle.take() else { continue };

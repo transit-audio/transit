@@ -18,11 +18,11 @@ use std::sync::atomic::{AtomicU8, AtomicU32};
 /// lost wake-up, a slot stuck claimed) into a failure instead of a stuck test run.
 pub(super) const STALL: Duration = Duration::from_secs(60);
 
-/// How far past its deadline `finish` (or past its bound `shutdown`) may return. The overshoot
-/// by design is one sweep of the slots (finish) or one 1 ms sleep (shutdown); on a loaded runner
-/// the test thread (not promoted) can still be preempted for several scheduler quanta (about
-/// 15 ms each on Windows). 200 ms is over ten quanta: a failure means the call waited for a
-/// worker, not jitter.
+/// How far past its deadline `finish` may return. The overshoot by design is one sweep of the
+/// slots; on a loaded runner the test thread (not promoted) can still be preempted for several
+/// scheduler quanta (about 15 ms each on Windows). 200 ms is over ten quanta: a failure means the
+/// call waited for a worker, not jitter. `shutdown` is not asserted against it (E76): its
+/// tests assert who returned and who was still inside a strip, never how long it took.
 pub(super) const SLACK: Duration = Duration::from_millis(200);
 
 /// A worker-side behavior of the fake runner, per strip.
@@ -534,22 +534,48 @@ fn workers_are_promoted_once_at_start() {
     drop(off);
 }
 
-/// Gate 5: an idle set retires at once.
+/// Gate 5: an idle set retires with every worker joined. The bound is a stall bound: the report,
+/// not the time taken, is the assertion (E76). Freshly spawned workers may see the stop before
+/// they first park, so this test does not prove the wake on shutdown; the stalled-worker test
+/// below does (its idle worker has parked after its block).
 #[test]
-fn shutdown_of_an_idle_set_returns_every_worker_at_once() {
+fn shutdown_of_an_idle_set_returns_every_worker() {
     let fake = Fake::new(4, Duration::ZERO);
     let mut set = set_of(&fake, 4);
-    let t0 = Instant::now();
     let q = set.shutdown(STALL);
     assert!(q.is_empty(), "{q:?}");
-    // timing: stall-bound an idle worker returns on its wake; this only proves no worker took
-    // the bound
-    assert!(t0.elapsed() < Duration::from_secs(10));
+    assert!(set.handles.iter().all(Option::is_none), "every worker was joined");
 }
 
-/// Gate 5: a worker stalled inside a strip is quarantined within the bound, its slot stays
-/// `Claimed`, and releasing it later does not crash the process (its state was leaked, not
-/// freed).
+/// The worker inside `strip`, once one has entered it (the fake's stall holds it there).
+fn worker_inside(set: &WorkerSet, strip: usize) -> usize {
+    let mut found = None;
+    wait_until("a worker inside the strip", || {
+        found = set.shared.workers.iter().position(|w| w.current.load(Ordering::Acquire) == strip + 1);
+        found.is_some()
+    });
+    found.unwrap()
+}
+
+/// [`WorkerSet::shutdown`] with its two halves taken apart at the one point that otherwise
+/// depends on the OS scheduler: after the stop and the wakes, it waits (stall-bounded) until each
+/// worker in `returned` has exited, and only then starts the bound. Which workers the bound
+/// abandons is then decided by the test's script, not by how fast a woken idle thread is
+/// scheduled on a loaded machine (E76). Returns the report and the time `join_within` took.
+fn shutdown_once_returned(set: &mut WorkerSet, returned: &[usize], bound: Duration) -> (Quarantine, Duration) {
+    assert!(set.stop_and_wake(), "the set was not shut down yet");
+    for &k in returned {
+        wait_until("a woken worker's return", || set.handles[k].as_ref().is_some_and(JoinHandle::is_finished));
+    }
+    let t0 = Instant::now();
+    let q = set.join_within(bound);
+    (q, t0.elapsed())
+}
+
+/// Gate 5: a worker stalled inside a strip is quarantined at the bound, its slot stays `Claimed`,
+/// an idle worker is not quarantined, shutdown returns while the stalled worker is still inside
+/// the strip (it never waits on it), and releasing it later does not crash the process (its
+/// state was leaked, not freed).
 #[test]
 fn shutdown_quarantines_a_stalled_worker_within_its_bound() {
     const BOUND: Duration = Duration::from_millis(200);
@@ -562,15 +588,15 @@ fn shutdown_quarantines_a_stalled_worker_within_its_bound() {
     wait_done(&set, 3, 1);
     let r = set.finish(Instant::now(), |_| panic!("nothing is left to render inline"));
     assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 1, faulted: 0, inline_refused: 0, upstream_missed: 0 });
+    let stalled = worker_inside(&set, 1);
+    let idle = 1 - stalled;
 
-    let t0 = Instant::now();
-    let q = set.shutdown(BOUND);
-    let took = t0.elapsed();
+    let (q, took) = shutdown_once_returned(&mut set, &[idle], BOUND);
+    assert_eq!(q, Quarantine { workers: vec![stalled], strips: vec![1] }, "only the stalled worker is quarantined");
+    assert!(fake.strips[1].inside.load(Ordering::Acquire), "shutdown returned while the stalled worker was inside the strip");
+    // By construction, not a scheduling claim: the stalled worker cannot return, so the join
+    // waits until its deadline, `bound` after the call began (a monotonic clock).
     assert!(took >= BOUND, "the stalled worker cannot have returned");
-    // timing: stall-bound SLACK is over ten scheduler quanta; see its definition
-    assert!(took < BOUND + SLACK, "shutdown took {took:?}");
-    assert_eq!(q.workers.len(), 1, "{q:?}");
-    assert_eq!(q.strips, vec![1]);
     assert_eq!(set.jobs().slot(1).map(JobSlot::state), Some(State::Claimed));
     drop(set);
 

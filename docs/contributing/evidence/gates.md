@@ -239,6 +239,7 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   falsely rejects tests that inject timestamps through a helper (for example `worst_tests::run`
   in `crates/playback/src/telemetry.rs`), and an unrelated injection call cannot prove that the
   asserted marker uses an injected clock. Review follows the marks and readout through helpers.
+- A bounded join or wait must not let its bound decide the fate of a thread whose progress depends only on scheduling (an idle worker woken at shutdown). Wait, stall-bounded, for every thread the test expects to return before the bound starts, so the bound abandons only what the test holds; assert the bound only as a lower bound by construction, never as an upper bound (E49 recurrence 2026-11-08, E76, `../../escapes/E76-a-shutdown-test-let-the-bound-decide-an-idle-worker.md`). This is a review rule: the timing scan does not see a deadline inside a product call.
 - A test fixture that holds a worker while the test thread or callback keeps working must not expire by total elapsed hold time: renew the watchdog on the test's own progress (a block counter) and keep only a generous no-progress ceiling as the hang bound (E49 recurrence 2026-11-02, `crates/mix/tests/common/stall.rs`).
 - The timing gate also checks sleep/park/yield polling loops (rule d, #120): a `for`, `while` or
   `loop` with `sleep`, `park_timeout` or `yield_now` must not exit against a short wall-clock
