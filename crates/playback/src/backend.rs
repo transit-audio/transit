@@ -6,3 +6,5 @@ pub mod cpal;
 #[cfg(test)]
 mod cpal_convert_golden;
 pub mod native;
+#[cfg(all(test, windows, feature = "native-wasapi"))]
+mod wasapi_names;
