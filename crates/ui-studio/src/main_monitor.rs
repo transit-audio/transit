@@ -53,7 +53,7 @@ impl MonitorPrefs {
 pub fn loudness_text(lufs: Option<f32>) -> String {
     match lufs {
         // A true minus (U+2212), as the board sets it.
-        Some(v) if v.is_finite() => format!("{v:.1} LUFS").replace('-', "\u{2212}"),
+        Some(v) if v.is_finite() => format!("{v:.1} LUFS").chars().map(|c| if c == '-' { '\u{2212}' } else { c }).collect(),
         _ => "—".into(),
     }
 }
