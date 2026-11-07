@@ -290,7 +290,8 @@ fn the_device_chain_and_strip_plus_menus_list_effects_only_and_both_add() {
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);
     assert_eq!(app.engine.session().track(t).unwrap().mixer.inserts[0].as_ref().unwrap().plugin, "gain");
-    // The strip's "+" is the same menu.
+    // The strip's "+" is the same menu (on the full-height strip of the full mixer window).
+    full_mixer(&mut app, &ctx, &mut time);
     let at = mid(strip(&app, t).add_insert);
     click(&mut app, at);
     frames(&mut app, &ctx, 6, &mut time);

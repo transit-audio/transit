@@ -113,3 +113,37 @@ fn the_presets_match_tokens_json() {
     assert_eq!((f(&b["vu"]["attack_ms"]), f(&b["vu"]["release_ms"])), (Some(Ballistics::VU.attack_ms), Some(Ballistics::VU.release_ms)));
     assert_eq!(f(&b["vu"]["reference_dbfs"]), Some(level_meter::VU_REFERENCE_DBFS));
 }
+
+/// The vertical channel meter (the mixer's stereo meter): one well per channel on the fader's
+/// travel, the 35 percent peak fill on the taper, the RMS layer only when there is a reading, the
+/// hold line, a 4 px clip cell above each well (`line`, `meter.hot` latched) and the grid.
+#[test]
+fn the_channel_meter_draws_a_well_per_channel_on_the_taper() {
+    use super::level_meter::{Channel, channel_width, paint_channel};
+    let mut rig = Rig::new();
+    let travel = egui::Rect::from_min_max(egui::pos2(40.0, 40.0), egui::pos2(60.0, 240.0));
+    let peaks = [Channel { peak_db: -6.0, rms_db: None, hold_db: Some(-3.0) }, Channel { peak_db: -24.0, rms_db: None, hold_db: None }];
+    let l = rig.idle(|ui| paint_channel(ui.painter(), 100.0, travel, 10.0, &peaks, false));
+    assert_eq!(l.wells.len(), 2);
+    assert_eq!(l.wells[0], [100.0, 40.0, 110.0, 240.0], "the first well spans the travel");
+    assert_eq!(l.wells[1][0], 113.0, "3 px between wells");
+    assert_eq!(channel_width(2, 10.0), 23.0);
+    let y = |db: f32| 40.0 + fader::taper(db) * 200.0;
+    assert!((l.peaks[0].unwrap()[1] - y(-6.0)).abs() < 0.02 && (l.peaks[1].unwrap()[1] - y(-24.0)).abs() < 0.02, "peaks on the taper");
+    assert_eq!(l.peak_color, DARK.meter_ok.gamma_multiply(0.35));
+    assert!(l.rms.iter().all(Option::is_none) && l.over.iter().all(Option::is_none), "peak only: no solid layer");
+    assert!((mid(l.holds[0].unwrap()).y - y(-3.0)).abs() < 0.02 && l.holds[1].is_none());
+    assert_eq!(l.clip_cells[0], [100.0, 32.0, 110.0, 36.0], "4 px, 4 above the well");
+    assert_eq!((l.clip, l.clip_color), (false, DARK.line));
+    assert_eq!(l.grid.len(), 8, "a line at each scale mark");
+    assert!((l.reference_y - y(0.0)).abs() < 0.02);
+    // Negative control: an RMS reading draws the solid layer, hot only above 0 dBFS, and a latch
+    // lights the cells.
+    let loud = [Channel { peak_db: 3.0, rms_db: Some(2.0), hold_db: None }, Channel { peak_db: -12.0, rms_db: Some(-18.0), hold_db: None }];
+    let l = rig.idle(|ui| paint_channel(ui.painter(), 100.0, travel, 10.0, &loud, true));
+    assert!((l.rms[1].unwrap()[1] - y(-18.0)).abs() < 0.02 && l.over[1].is_none());
+    let over = l.over[0].expect("the part above 0 dBFS");
+    assert!((over[3] - y(0.0)).abs() < 0.02 && (over[1] - y(2.0)).abs() < 0.02);
+    assert!((l.rms[0].unwrap()[1] - y(0.0)).abs() < 0.02, "below the reference the RMS fill stays meter.ok");
+    assert_eq!((l.clip, l.clip_color), (true, DARK.meter_hot));
+}

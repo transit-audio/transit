@@ -79,6 +79,9 @@ impl T {
         let mut app = StudioApp::new(engine, Some(player), Services::default());
         app.ui.show_mixer = true;
         app.ui.show_devices = true;
+        // The docked pane at its tallest, in a window tall enough for it and the arrangement: the
+        // strips are full height and list their insert rows (#326).
+        app.ui.mixer_height = 600.0;
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0, host, release: None };
         t.frames(3);
         t
@@ -89,7 +92,7 @@ impl T {
             self.app.player.as_ref().unwrap().step_device_free();
             self.time += 1.0 / 60.0;
             let mut raw = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1300.0))),
                 time: Some(self.time),
                 ..Default::default()
             };

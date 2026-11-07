@@ -204,7 +204,7 @@ fn a_strip_plus_adds_an_insert_to_that_track_whatever_is_focused() {
     let r = app.run("track.new", json!({"kind": "audio", "format": "stereo", "name": "Vox"})).unwrap();
     let b = TrackId(r["tracks"][0].as_u64().unwrap());
     app.focus(a);
-    frames(&mut app, &ctx, 3, &mut time);
+    full_mixer(&mut app, &ctx, &mut time);
     assert!(strip(&app, a).focused && !strip(&app, b).focused, "the focused strip is marked");
     let before = undo_len(&mut app);
     let plus = mid(strip(&app, b).add_insert);
@@ -246,7 +246,7 @@ fn insert_rows_cap_and_keep_every_fader_aligned() {
     for _ in 0..5 {
         app.add_device(a, "gain").unwrap();
     }
-    frames(&mut app, &ctx, 3, &mut time);
+    full_mixer(&mut app, &ctx, &mut time);
     let (sa, sb) = (strip(&app, a), strip(&app, b));
     assert_eq!(sa.inserts.len(), 2, "two rows, an n-more row and the +");
     assert!(sa.add_insert[3] > sa.add_insert[1], "the + stays while the list overflows");
@@ -254,7 +254,7 @@ fn insert_rows_cap_and_keep_every_fader_aligned() {
     assert_eq!((sa.fader[1], sa.fader[3]), (sb.fader[1], sb.fader[3]), "the faders line up with and without inserts");
     app.focus(b);
     frames(&mut app, &ctx, 3, &mut time);
-    let more = [sa.rect[0] + 10.0, sa.inserts[1].rect[3] + 8.0];
+    let more = [sa.rect[0] + 14.0, sa.inserts[1].rect[3] + 14.0];
     click(&mut app, (more[0], more[1]));
     frames(&mut app, &ctx, 4, &mut time);
     assert!(app.ui.show_devices, "n more… points at the device chain");
@@ -263,7 +263,9 @@ fn insert_rows_cap_and_keep_every_fader_aligned() {
 
 #[test]
 fn the_insert_plus_is_always_there_and_opens_its_menu() {
-    for height in [260.0, 420.0] {
+    // The docked pane at both heights shows the short variant (its + is in the FX list); the full
+    // mixer window shows the full-height section.
+    for height in [260.0, 420.0, 0.0] {
         // 10 is every slot: nothing left to add to, so no +.
         for n in [0usize, 1, 4, 9, 10] {
             let (mut app, ctx, mut time, a) = mixer_app();
@@ -272,6 +274,14 @@ fn the_insert_plus_is_always_there_and_opens_its_menu() {
                 app.add_device(a, "gain").unwrap();
             }
             frames(&mut app, &ctx, 4, &mut time);
+            if height == 0.0 {
+                full_mixer(&mut app, &ctx, &mut time);
+            } else {
+                assert!(strip(&app, a).short, "height {height}: the docked pane is short");
+                let fx = mid(strip(&app, a).fx_button);
+                click(&mut app, fx);
+                frames(&mut app, &ctx, 4, &mut time);
+            }
             let s = strip(&app, a);
             if n == 10 {
                 assert_eq!(s.add_insert, [0.0; 4], "a full strip has no +");
@@ -291,7 +301,7 @@ fn adding_through_a_strip_plus_focuses_that_strip() {
     let r = app.run("track.new", json!({"kind": "audio", "format": "stereo", "name": "Vox"})).unwrap();
     let b = TrackId(r["tracks"][0].as_u64().unwrap());
     app.focus(a);
-    frames(&mut app, &ctx, 3, &mut time);
+    full_mixer(&mut app, &ctx, &mut time);
     assert!(!strip(&app, b).focused);
     let plus = mid(strip(&app, b).add_insert);
     click(&mut app, plus);
@@ -351,7 +361,7 @@ fn mixer_paint(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64) -> Vec<
 }
 
 #[test]
-fn mixer_knob_paint_keeps_contrast_on_normal_and_selected_audio_and_aux_strips() {
+fn the_pan_dial_paints_with_the_kit_tokens_on_normal_and_selected_audio_and_aux_strips() {
     for appearance in [crate::theme::Appearance::Dark, crate::theme::Appearance::Light] {
         let (mut app, ctx, mut time, audio) = mixer_app();
         let aux = app.new_fx_channel(Some(audio), -12.0).unwrap();
@@ -361,49 +371,22 @@ fn mixer_knob_paint_keeps_contrast_on_normal_and_selected_audio_and_aux_strips()
             app.focus(focus);
             frames(&mut app, &ctx, 3, &mut time);
             let shapes = mixer_paint(&mut app, &ctx, &mut time);
+            let t: &crate::theme::Tokens = &crate::theme::TOKENS;
             for track in [audio, aux] {
                 let sl = strip(&app, track);
                 let rect = |r: [f32; 4]| egui::Rect::from_min_max(egui::pos2(r[0], r[1]), egui::pos2(r[2], r[3]));
-                let knob = rect(sl.knob);
                 let background = shapes
                     .iter()
                     .find_map(|s| match s {
-                        egui::Shape::Rect(r) if r.rect == rect(sl.rect) => Some(r.fill),
+                        egui::Shape::Rect(r) if r.rect == rect(sl.rect) && r.fill != egui::Color32::TRANSPARENT => Some(r.fill),
                         _ => None,
                     })
                     .expect("painted strip background");
-                let pointer = shapes
-                    .iter()
-                    .find_map(|s| match s {
-                        egui::Shape::Circle(c) if knob.contains(c.center) && c.radius == 2.5 => Some(c.fill),
-                        _ => None,
-                    })
-                    .expect("painted knob pointer");
-                let tick = shapes
-                    .iter()
-                    .find_map(|s| match s {
-                        egui::Shape::LineSegment { points, stroke } if stroke.width == 1.0 && points.iter().all(|p| knob.contains(*p)) => {
-                            Some(stroke.color)
-                        }
-                        _ => None,
-                    })
-                    .expect("painted center tick");
-                let ring = shapes
-                    .iter()
-                    .find_map(|s| match s {
-                        egui::Shape::Path(p) if p.points.len() == 25 && p.points.iter().all(|p| knob.contains(*p)) => Some(p.stroke.color.clone()),
-                        _ => None,
-                    })
-                    .expect("painted travel ring");
-                let egui::epaint::ColorMode::Solid(ring) = ring else { panic!("solid ring") };
-                for (name, ink, target) in [("pointer", pointer, 7.0), ("tick", tick, 4.5), ("track", ring, 3.0)] {
-                    let ratio = crate::theme::contrast(ink, background);
-                    assert!(
-                        (target..target + 0.15).contains(&ratio),
-                        "{appearance:?} focused={} {name} contrast={ratio} target={target}",
-                        sl.focused
-                    );
-                }
+                assert_eq!(background, t.surface_panel, "{appearance:?}: every strip is a panel, selected or not");
+                let dial = sl.knob_paint.clone().expect("the pan dial");
+                assert_eq!((dial.cap, dial.arc, dial.pointer), (t.knob_cap, t.signal, t.text), "{appearance:?}: the kit's knob tokens");
+                let edge = egui::Color32::from_rgba_premultiplied(sl.border_color[0], sl.border_color[1], sl.border_color[2], sl.border_color[3]);
+                assert_eq!(edge, if sl.focused { t.signal } else { t.line }, "{appearance:?} focused={}", sl.focused);
             }
         }
     }
@@ -411,16 +394,15 @@ fn mixer_knob_paint_keeps_contrast_on_normal_and_selected_audio_and_aux_strips()
 
 #[test]
 fn mixer_insert_overflow_paint_never_overlaps_the_add_glyph_row() {
-    for height in [260.0, 420.0] {
+    // The full-height section (the docked pane is short and lists every insert in its FX popup).
+    for height in [0.0] {
         for count in [1, 4, 9, 10] {
             let (mut app, ctx, mut time, track) = mixer_app();
-            app.ui.mixer_height = height;
-            app.ui.show_devices = false;
             app.focus(track);
             for _ in 0..count {
                 app.add_device(track, "gain").unwrap();
             }
-            frames(&mut app, &ctx, 4, &mut time);
+            full_mixer(&mut app, &ctx, &mut time);
             let shapes = mixer_paint(&mut app, &ctx, &mut time);
             let sl = strip(&app, track);
             let add = egui::Rect::from_min_max(egui::pos2(sl.add_insert[0], sl.add_insert[1]), egui::pos2(sl.add_insert[2], sl.add_insert[3]));
@@ -437,13 +419,15 @@ fn mixer_insert_overflow_paint_never_overlaps_the_add_glyph_row() {
                     assert!(!painted.intersects(add), "height={height}, count={count}, label={painted:?}, add={add:?}");
                 }
             }
-            if height == 260.0 || count >= 9 {
-                assert_eq!(labels, 1, "overflow remains visible in compact and separate rows");
+            if count >= 4 {
+                assert_eq!(labels, 1, "overflow remains visible beside the + row (height {height})");
             }
             if let Some(at) = overflow_at {
                 click(&mut app, at);
                 frames(&mut app, &ctx, 4, &mut time);
                 assert!(app.ui.show_devices, "overflow still opens the device chain");
+                // The chain takes the window's height: back to the full-height strips.
+                full_mixer(&mut app, &ctx, &mut time);
             }
             if count < 10 {
                 let add_at = mid(strip(&app, track).add_insert);

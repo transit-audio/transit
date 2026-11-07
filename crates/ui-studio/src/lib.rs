@@ -778,6 +778,8 @@ mod mixer_meter_tests;
 #[cfg(test)]
 mod mixer_routing_tests;
 #[cfg(test)]
+mod mixer_strip_tests;
+#[cfg(test)]
 mod plugin_header_tests;
 #[cfg(test)]
 mod plugin_host_tests;

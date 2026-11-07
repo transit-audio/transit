@@ -65,6 +65,7 @@ fn the_plus_fx_channel_button_adds_the_channel_and_no_send() {
 #[test]
 fn new_fx_channel_from_a_strip_is_one_undo_step_at_minus_12_db() {
     let (mut app, ctx, mut time, t) = mixer_app();
+    full_mixer(&mut app, &ctx, &mut time);
     let tracks = app.engine.session().tracks.len();
     let before = undo_len(&mut app);
     let at = mid(strip(&app, t).add_send);
@@ -179,9 +180,12 @@ fn a_send_target_click_retargets_and_a_right_click_has_pre_post_and_remove() {
     app.new_fx_channel(Some(t), 0.0).unwrap();
     app.new_fx_channel(None, 0.0).unwrap();
     app.focus(t);
-    frames(&mut app, &ctx, 3, &mut time);
+    full_mixer(&mut app, &ctx, &mut time);
     let send = |app: &StudioApp| app.engine.session().track(t).unwrap().mixer.sends[0].clone().unwrap();
     for wide in [false, true] {
+        // The strip's rows in the full mixer window; the device chain's with the chain shown.
+        app.ui.show_devices = wide;
+        frames(&mut app, &ctx, 4, &mut time);
         let menu_of = |app: &StudioApp| if wide { app.mixer.devices.menu.clone() } else { app.mixer.layout.menu.clone() };
         let row_of = |app: &StudioApp| if wide { app.mixer.devices.sends[0].clone() } else { strip(app, t).sends[0].clone() };
         let pre0 = send(&app).pre_fader;
@@ -204,7 +208,10 @@ fn a_send_target_click_retargets_and_a_right_click_has_pre_post_and_remove() {
         click_right(&mut app, at);
         frames(&mut app, &ctx, 6, &mut time);
         let labels: Vec<String> = menu_of(&app).iter().map(|m| m.label.clone()).collect();
-        assert_eq!(labels, ["Pre-fader", "Remove Send"], "only the context items (wide={wide})");
+        // A strip's row has no room for the mute toggle the device chain's row carries, so its
+        // menu holds Mute Send as well (#326).
+        let want: &[&str] = if wide { &["Pre-fader", "Remove Send"] } else { &["Pre-fader", "Mute Send", "Remove Send"] };
+        assert_eq!(labels, want, "only the context items (wide={wide})");
         let item = menu_of(&app).into_iter().find(|m| m.label == "Pre-fader").unwrap();
         click(&mut app, mid(item.rect));
         frames(&mut app, &ctx, 6, &mut time);
@@ -418,7 +425,7 @@ mod output_paths {
             let separator = choices.iter().position(|choice| *choice == RoutingChoice::Separator).unwrap();
             assert_eq!(choices[separator + 1], RoutingChoice::Entry { label: label.clone(), value: name.into() });
             app.engine.set_io_map(io);
-            frames(&mut app, &ctx, 3, &mut time);
+            full_mixer(&mut app, &ctx, &mut time);
             let before = undo_len(&mut app);
             let at = mid(if send { strip(&app, t).add_send } else { strip(&app, t).output });
             click(&mut app, at);
@@ -449,12 +456,14 @@ mod output_paths {
     fn a_send_to_a_path_runs_mix_send() {
         let (mut app, ctx, mut time, t) = mixer_app();
         app.engine.set_io_map(map());
-        frames(&mut app, &ctx, 3, &mut time);
+        full_mixer(&mut app, &ctx, &mut time);
         let at = mid(strip(&app, t).add_send);
         click(&mut app, at);
         click_item(&mut app, &ctx, &mut time, "Out 5-6");
         let sends = &app.engine.session().track(t).unwrap().mixer.sends;
         assert_eq!(sends[0].as_ref().map(|x| x.target.clone()), Some(Route::Hardware("Out 5-6".into())));
+        app.ui.show_devices = true;
+        frames(&mut app, &ctx, 4, &mut time);
         assert_eq!(app.mixer.devices.sends[0].target, "Out 5-6");
     }
 

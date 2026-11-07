@@ -57,6 +57,10 @@ fn command_publishes_without_a_session_edit_and_query_reports_adopted_latency() 
     let ctx = egui::Context::default();
     let mut now = 0.0;
     crate::tests::frames(&mut app, &ctx, 2, &mut now);
+    // The docked pane is short: the main bus's inserts are in its FX list (#326).
+    let fx = crate::tests::mid(app.mixer.layout.master.as_ref().unwrap().fx_button);
+    crate::tests::click(&mut app, fx);
+    crate::tests::frames(&mut app, &ctx, 6, &mut now);
     assert!(app.mixer.layout.master.as_ref().unwrap().inserts[0].low_latency_bypass);
     assert!(app.mixer.devices.cards.iter().any(|c| c.low_latency_bypass));
     assert!(app.arrange.layout.transport.contains_key("low_latency"));

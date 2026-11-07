@@ -2,18 +2,20 @@ use crate::tests::*;
 
 #[test]
 fn the_fader_cap_has_a_line_at_the_value() {
-    use crate::{fine::Target, mixer::db_to_k};
+    use crate::fine::Target;
     let (mut app, ctx, mut time, t) = mixer_app();
     ctx.set_pixels_per_point(1.5);
     frames(&mut app, &ctx, 3, &mut time);
-    let want = |s: &crate::mixer::StripLayout, db: f32| s.fader[3] - db_to_k(db) * (s.fader[3] - s.fader[1]);
-    // At 0 dB the cap's line is the 0 dB tick.
+    let want = |s: &crate::mixer::StripLayout, db: f32| s.fader[1] + crate::widgets::fader::taper(db) * (s.fader[3] - s.fader[1]);
+    // At 0 dB the cap's line is on the meter's 0 dB grid line.
     let s = strip(&app, t);
-    let (cap, zero) = (s.cap_line_y.expect("the cap line was painted"), s.zero_tick_y.expect("the 0 dB tick was painted"));
-    assert_eq!(cap, zero, "at 0 dB the cap line sits on the 0 dB line");
-    assert_eq!(s.cap_line_span, s.zero_tick_span, "the same physical pixel rows as the tick");
-    let [a, b] = s.zero_tick_span.unwrap();
-    assert_eq!(b - a, 2, "a one-point tick is 2 physical pixels at 1.5x");
+    let (cap, zero) = (s.cap_line_y.expect("the cap line was painted"), s.zero_tick_y.expect("the 0 dB line was painted"));
+    // Within half a physical pixel (the layout rounds rects to 0.01).
+    assert!((cap - zero).abs() <= 0.5 / 1.5 + 0.01, "at 0 dB the cap line sits on the 0 dB line: {cap} vs {zero}");
+    let ([ca, cb], [za, zb]) = (s.cap_line_span.unwrap(), s.zero_tick_span.unwrap());
+    assert!(ca <= za && zb <= cb, "the cap line covers the 0 dB line's physical pixel rows: {ca}..{cb} vs {za}..{zb}");
+    assert_eq!(zb - za, 2, "a one-point line is 2 physical pixels at 1.5x");
+    assert_eq!(cb - ca, 3, "the two-point cap line is 3 physical pixels at 1.5x");
     assert!((cap - want(&s, 0.0)).abs() <= 0.5, "and on the value position: {cap} vs {}", want(&s, 0.0));
     // At -12 dB it follows the value, away from the 0 dB line.
     app.set_value(Target::Fader(t), -12.0).unwrap();
@@ -46,8 +48,7 @@ fn fader_and_balance_laws_round_trip() {
 fn a_fader_drag_is_one_undo_step() {
     let (mut app, ctx, mut time, t) = mixer_app();
     let f = strip(&app, t).fader;
-    let k0 = crate::mixer::db_to_k(0.0);
-    let cap_y = f[3] - k0 * (f[3] - f[1]);
+    let cap_y = f[1] + crate::widgets::fader::taper(0.0) * (f[3] - f[1]);
     let x = (f[0] + f[2]) / 2.0;
     let before = undo_len(&mut app);
     drag(&mut app, (x, cap_y), (x, cap_y + 40.0), json!({}));
@@ -79,7 +80,7 @@ fn the_pan_knob_is_a_balance_control() {
 fn a_send_row_drag_is_one_undo_step() {
     let (mut app, ctx, mut time, t) = mixer_app();
     app.new_fx_channel(Some(t), 0.0).unwrap();
-    frames(&mut app, &ctx, 3, &mut time);
+    full_mixer(&mut app, &ctx, &mut time);
     let row = strip(&app, t).sends.first().cloned().expect("a send row");
     assert_eq!((row.slot, row.target.as_str(), row.level_db), (0, "FX 1", 0.0));
     let before = undo_len(&mut app);
@@ -119,11 +120,11 @@ fn balance(app: &StudioApp, t: TrackId) -> f32 {
     crate::mixer::balance_of(&app.engine.session().track(t).unwrap().mixer.pan)
 }
 
-/// A mixer app whose track has one send, at 0 dB.
+/// A mixer app whose track has one send, at 0 dB, in the full mixer window (full-height strips).
 fn send_app() -> (StudioApp, egui::Context, f64, TrackId) {
     let (mut app, ctx, mut time, t) = mixer_app();
     app.new_fx_channel(Some(t), 0.0).unwrap();
-    frames(&mut app, &ctx, 3, &mut time);
+    full_mixer(&mut app, &ctx, &mut time);
     (app, ctx, time, t)
 }
 
@@ -198,17 +199,18 @@ fn double_click_resets_a_pan_knob_and_a_send_level() {
 #[test]
 fn shift_drag_moves_a_tenth_as_far() {
     use crate::mixer::db_to_k;
+    use crate::widgets::fader::taper;
     let (mut app, ctx, mut time, t) = send_app();
     let f = strip(&app, t).fader;
     let x = (f[0] + f[2]) / 2.0;
-    let cap_y = f[3] - db_to_k(0.0) * (f[3] - f[1]);
+    let cap_y = f[1] + taper(0.0) * (f[3] - f[1]);
     let mut moved = Vec::new();
     for mods in [json!({}), json!({"shift": true})] {
         app.run("mix.volume", json!({"tracks": [t.0], "db": 0.0})).unwrap();
         frames(&mut app, &ctx, 3, &mut time);
         drag(&mut app, (x, cap_y), (x, cap_y + 40.0), mods);
         frames(&mut app, &ctx, 30, &mut time);
-        moved.push(db_to_k(0.0) - db_to_k(volume(&app, t)));
+        moved.push(taper(volume(&app, t)) - taper(0.0));
     }
     assert!(moved[0] > 0.1, "a plain drag moves the fader: {moved:?}");
     assert!((moved[1] / moved[0] - 0.1).abs() < 0.01, "shift-drag moves a tenth as far: {moved:?}");
@@ -238,11 +240,12 @@ fn shift_drag_moves_a_tenth_as_far() {
 #[test]
 fn a_slow_drag_snaps_to_a_mark_and_a_fast_one_does_not() {
     use crate::mixer::db_to_k;
+    use crate::widgets::fader::taper;
     let (mut app, ctx, mut time, t) = send_app();
     let f = strip(&app, t).fader;
     let (x, h) = ((f[0] + f[2]) / 2.0, f[3] - f[1]);
-    let cap_y = f[3] - db_to_k(0.0) * h;
-    let travel = (db_to_k(0.0) - db_to_k(-6.1)) * h;
+    let cap_y = f[1] + taper(0.0) * h;
+    let travel = (taper(-6.1) - taper(0.0)) * h;
     for (steps, snaps) in [(150, true), (4, false)] {
         app.run("mix.volume", json!({"tracks": [t.0], "db": 0.0})).unwrap();
         frames(&mut app, &ctx, 3, &mut time);
@@ -467,6 +470,7 @@ fn the_pan_and_send_readouts_edit_in_place() {
     edit_readout(&mut app, &ctx, &mut time, num, "3", "Escape");
     assert_eq!(send_db(&app, t), -7.25, "Escape leaves the send alone");
     app.focus(t);
+    app.ui.show_devices = true;
     frames(&mut app, &ctx, 3, &mut time);
     let wide = mid(app.mixer.devices.sends[0].readout_rect);
     assert!(app.mixer.devices.sends[0].level_text.ends_with("dB"));
@@ -511,15 +515,15 @@ fn run_probe(ctx: &egui::Context) {
 
 #[test]
 fn shift_drag_does_not_snap_to_a_mark() {
-    use crate::mixer::db_to_k;
+    use crate::widgets::fader::taper;
     let (mut app, ctx, mut time, t) = send_app();
     let f = strip(&app, t).fader;
     let (x, h) = ((f[0] + f[2]) / 2.0, f[3] - f[1]);
     app.run("mix.volume", json!({"tracks": [t.0], "db": -0.5})).unwrap();
     frames(&mut app, &ctx, 3, &mut time);
-    let from = f[3] - db_to_k(-0.5) * h;
+    let from = f[1] + taper(-0.5) * h;
     // Shift moves a tenth as far, so ten times the travel for +0.6 dB; slowly, so a plain drag would snap to 0.
-    let travel = (db_to_k(0.1) - db_to_k(-0.5)) * h * 10.0;
+    let travel = (taper(-0.5) - taper(0.1)) * h * 10.0;
     drag(&mut app, (x, from), (x, from - travel), json!({"shift": true, "steps": 150}));
     frames(&mut app, &ctx, 200, &mut time);
     let db = volume(&app, t);

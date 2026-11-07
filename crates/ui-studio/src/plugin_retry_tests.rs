@@ -260,6 +260,8 @@ fn a_not_responding_slot_offers_retry_on_the_card_and_the_mixer_row() {
     let fx = t.track("audio");
     t.host_plugin(fx, Some(0), &[2]);
     t.app.focus(keys);
+    // The full mixer window: full-height strips list the insert rows (the docked pane is short).
+    t.app.ui.mixer_full = true;
     assert!(t.frames_until(Duration::from_secs(10), |t| t.stuck(keys, SLOT) && t.stuck(fx, 0)), "both read Not responding");
     t.frames(2);
     assert!(t.app.status.contains("2 plug-ins are not responding"), "{}", t.app.status);

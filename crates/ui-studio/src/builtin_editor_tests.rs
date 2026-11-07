@@ -724,6 +724,7 @@ fn double_click_on_a_built_in_mixer_insert_slot_opens_its_editor_without_a_playe
     let mut t = T::new();
     let tr = t.track("audio");
     t.app.add_device(tr, "gain").unwrap();
+    t.app.ui.mixer_full = true;
     t.frames(4);
     assert!(t.app.player.is_none());
     let at = t.strip_row(tr, 0);
@@ -737,6 +738,7 @@ fn the_insert_slot_context_menu_offers_open_and_close_editor() {
     let mut t = T::new();
     let tr = t.track("audio");
     t.app.add_device(tr, "gain").unwrap();
+    t.app.ui.mixer_full = true;
     t.frames(4);
     let at = t.strip_row(tr, 0);
     t.send("ui.click", json!({"x": at.0, "y": at.1, "button": "right"}));

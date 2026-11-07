@@ -483,11 +483,22 @@ fn send_mute_is_one_step_on_strips_and_in_the_device_chain() {
     assert!(t.app.engine.session().track(a).unwrap().mixer.sends[0].as_ref().unwrap().mute, "muted");
     assert_eq!(t.undo_len(), before + 1);
     assert!(t.app.mixer.devices.sends[0].muted);
-    // The strip's own mute unmutes it.
+    // The strip's own mute unmutes it: its row has no room for the toggle, so it is in the row's
+    // menu (#326), on the full-height strip of the full mixer window.
+    t.app.ui.mixer_full = true;
+    t.app.ui.show_devices = false;
+    t.frames(4);
     let strip = t.app.mixer.layout.strips.iter().find(|s| s.track == a.0).unwrap().clone();
-    t.click(mid(strip.sends[0].mute));
+    assert!(strip.sends[0].muted, "the strip's row reads the mute");
+    t.input("ui.click", json!({"x": mid(strip.sends[0].target_rect).0, "y": mid(strip.sends[0].target_rect).1, "button": "right"}));
+    let item = t.app.mixer.layout.menu.iter().find(|m| m.value == "mute").cloned().expect("Unmute Send");
+    assert_eq!(item.label, "Unmute Send");
+    t.click(mid(item.rect));
     assert!(!t.app.engine.session().track(a).unwrap().mixer.sends[0].as_ref().unwrap().mute);
     assert_eq!(t.undo_len(), before + 2);
+    t.app.ui.mixer_full = false;
+    t.app.ui.show_devices = true;
+    t.frames(4);
     // Send pan in the device chain: a drag is one step; Alt-click centers it.
     let pan = t.app.mixer.devices.sends[0].pan;
     assert_eq!(t.app.mixer.devices.sends[0].pan_text, "C");

@@ -346,6 +346,9 @@ fn tokens_are_the_only_colors() {
         ("mixer/routing.rs", include_str!("mixer/routing.rs")),
         ("mixer/sends.rs", include_str!("mixer/sends.rs")),
         ("mixer/strip.rs", include_str!("mixer/strip.rs")),
+        ("mixer/channel.rs", include_str!("mixer/channel.rs")),
+        ("mixer/inserts.rs", include_str!("mixer/inserts.rs")),
+        ("mixer/short.rs", include_str!("mixer/short.rs")),
         ("keys/view.rs", include_str!("keys/view.rs")),
         ("arrange/tracks.rs", include_str!("arrange/tracks.rs")),
         ("arrange/clips.rs", include_str!("arrange/clips.rs")),
@@ -442,7 +445,8 @@ fn interface_zoom_at_150_percent_keeps_the_mixer_inside_a_1920_by_1080_display()
         assert!(!mixer.strips.is_empty());
         for strip in mixer.strips.iter().chain(mixer.master.iter()) {
             assert!(area.contains_rect(rect(strip.rect)), "strip fits at full={full}");
-            for control in [strip.fader, strip.add_insert] {
+            // The short variant's FX button stands where the full section's + Insert is.
+            for control in [strip.fader, if strip.short { strip.fx_button } else { strip.add_insert }] {
                 assert!(rect(strip.rect).contains_rect(rect(control)), "control fits at full={full}");
             }
         }
@@ -660,6 +664,9 @@ fn painted_corners_use_the_radius_tokens() {
         ("mixer/routing.rs", include_str!("mixer/routing.rs")),
         ("mixer/sends.rs", include_str!("mixer/sends.rs")),
         ("mixer/strip.rs", include_str!("mixer/strip.rs")),
+        ("mixer/channel.rs", include_str!("mixer/channel.rs")),
+        ("mixer/inserts.rs", include_str!("mixer/inserts.rs")),
+        ("mixer/short.rs", include_str!("mixer/short.rs")),
         ("keys/view.rs", include_str!("keys/view.rs")),
         ("arrange/tracks.rs", include_str!("arrange/tracks.rs")),
         ("arrange/clips.rs", include_str!("arrange/clips.rs")),

@@ -236,6 +236,15 @@ pub(crate) fn mixer_app() -> (StudioApp, egui::Context, f64, TrackId) {
     (app, ctx, time, t)
 }
 
+/// The full mixer window (F3) without the device chain: a lane tall enough for the full-height
+/// strips (inserts and sends sections), where the docked pane shows the short variant (#326).
+pub(crate) fn full_mixer(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64) {
+    app.ui.mixer_full = true;
+    app.ui.show_devices = false;
+    frames(app, ctx, 4, time);
+    assert!(!app.mixer.layout.short, "the full mixer window shows full-height strips");
+}
+
 pub(crate) fn strip(app: &StudioApp, t: TrackId) -> crate::mixer::StripLayout {
     app.mixer.layout.strips.iter().find(|s| s.track == t.0).cloned().unwrap()
 }
