@@ -12,6 +12,7 @@ pub mod fader;
 pub mod hatch;
 pub mod knob;
 pub mod level_meter;
+pub mod pad;
 pub mod param_knob;
 pub mod section_bar;
 pub mod segmented;
@@ -32,6 +33,8 @@ mod hatch_tests;
 mod knob_tests;
 #[cfg(test)]
 mod level_meter_tests;
+#[cfg(test)]
+mod pad_tests;
 #[cfg(test)]
 mod section_bar_tests;
 #[cfg(test)]

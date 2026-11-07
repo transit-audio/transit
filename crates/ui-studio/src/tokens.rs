@@ -777,8 +777,8 @@ pub mod palette {
     ];
 }
 
-/// The pad (`pad` in tokens.json): every number of its spec, by its path. Documented ahead of the
-/// kit's pad widget (a later job); the drift test keeps the two in step.
+/// The pad (`pad` in tokens.json): every number of its spec, by its path. The kit's pad widget
+/// (`widgets/pad.rs`, 326-S) uses these numbers; the drift test keeps this table and the file in step.
 pub mod pad {
     pub const METRICS: &[(&str, f32)] = &[
         ("sizes/grid", 56.0),
