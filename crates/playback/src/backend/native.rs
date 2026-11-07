@@ -202,10 +202,10 @@ pub fn wasapi_system_from(list: impl Fn(ab::Direction) -> Result<Listing, String
         for (device, endpoint) in listed.iter_mut().zip(endpoints) {
             device.is_default = default.as_ref() == Some(&endpoint.id);
             // The buffer range is reported as unknown, as cpal's WASAPI rows did, so every standard
-            // size stays offered and a saved size still resolves: cpal still opens WASAPI in this
-            // slice. The endpoint's shared-mode engine period (often 480-480, and `STANDARD_BUFFERS`
-            // has no 480 or 441) would leave only "System default". The honest native offer is
-            // settled in slice 3 of ADR 0046, when the native backend opens these rows.
+            // size stays offered and a saved size still resolves. The endpoint's shared-mode engine
+            // period (often 480-480, and `STANDARD_BUFFERS` has no 480 or 441) would leave only
+            // "System default". The honest native offer is an open decision of ADR 0046 (slice 3
+            // left it as it was).
             device.buffer_min = None;
             device.buffer_max = None;
         }
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(names(&system.outputs), [("Monitors", true), ("Speakers", false), ("Headphones", false)]);
         assert_eq!(system.outputs[0].max_channels, 8);
         let d = &system.outputs[0];
-        assert_eq!((d.buffer_min, d.buffer_max), (None, None), "the engine period (32-2048 here) is not offered until slice 3");
+        assert_eq!((d.buffer_min, d.buffer_max), (None, None), "the engine period (32-2048 here) is not offered yet");
         assert_eq!(d.buffer_sizes(), devices::STANDARD_BUFFERS, "every standard size, as cpal's rows offered");
         assert_eq!(names(&system.inputs), [("Microphone", true)]);
         assert!(system.diagnostics.is_empty());

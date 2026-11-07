@@ -967,10 +967,16 @@ impl Player {
         self.native_factory.as_ref().and_then(|native| native.backend(config.system.as_deref())).is_some_and(|backend| backend.host_blocked())
     }
     pub fn open_input(&self, config: &AudioConfig) -> Result<record::Recorder, String> {
-        self.open_input_with(config, &crate::backend::cpal::CpalFactory)
+        self.open_input_with(config, &crate::backend::cpal::CpalFactory, &crate::backend::native::input_factory)
     }
-    /// [`Self::open_input`] with `cpal` as the cpal adapter (a counting fake in tests).
-    pub(super) fn open_input_with(&self, config: &AudioConfig, cpal: &dyn ab::BackendFactory) -> Result<record::Recorder, String> {
+    /// [`Self::open_input`] with `cpal` as the cpal adapter and `native_for` as the native factory of
+    /// a silent runtime's input (`backend::native::input_factory`); counting fakes in tests.
+    pub(super) fn open_input_with(
+        &self,
+        config: &AudioConfig,
+        cpal: &dyn ab::BackendFactory,
+        native_for: &dyn Fn(&AudioConfig) -> Option<Box<dyn ab::BackendFactory>>,
+    ) -> Result<record::Recorder, String> {
         let mut input = self.input.try_borrow_mut().map_err(|_| "input transition is busy")?;
         match &mut *input {
             HeldInput::No => {
@@ -994,7 +1000,7 @@ impl Player {
                     // A silent runtime's input: on Windows the native backend of the effective backend.
                     None => {
                         let config = crate::backend::native::open_config(&config);
-                        record::Recorder::open_on(&config, cfg!(windows), crate::backend::native::input_factory(&config), cpal)?
+                        record::Recorder::open_on(&config, cfg!(windows), native_for(&config), cpal)?
                     }
                 };
                 check_input_rate(recorder.sample_rate, self.device_rate)?;

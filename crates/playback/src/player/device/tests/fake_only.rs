@@ -25,17 +25,23 @@ impl ab::BackendFactory for Counting {
 fn a_test_player_never_opens_an_input_on_the_machines_devices() {
     let (player, _output) = super::prepared();
     let cpal = Counting::default();
-    assert_eq!(player.open_input_with(&AudioConfig::default(), &cpal).err().as_deref(), Some(TEST_PLAYER_INPUT));
-    assert_eq!(cpal.calls(), 0, "a device-free test Player asks no real backend");
+    // The native factory a silent runtime's input would use on Windows: counted, never real.
+    let native_calls = AtomicUsize::new(0);
+    let native_for = |_: &AudioConfig| -> Option<Box<dyn ab::BackendFactory>> {
+        native_calls.fetch_add(1, Ordering::Relaxed);
+        None
+    };
+    assert_eq!(player.open_input_with(&AudioConfig::default(), &cpal, &native_for).err().as_deref(), Some(TEST_PLAYER_INPUT));
+    assert_eq!(cpal.calls() + native_calls.load(Ordering::Relaxed), 0, "a device-free test Player asks no real backend");
     // A scripted native output whose input fails: its error, not the cpal adapter.
     let native = fake_factory(false).with_capture(2, false);
     let scripted = Player::open_native_or_cpal(Arc::new(Session::default()), &AudioConfig::default(), &native, &fake_factory(false)).unwrap();
     native.fail_next_open(ab::OpenError::DeviceNotAvailable("scripted".into()));
-    assert_eq!(scripted.open_input_with(&AudioConfig::default(), &cpal).err().as_deref(), Some("scripted"));
-    assert_eq!(cpal.calls(), 0, "nor does a scripted backend's Player");
+    assert_eq!(scripted.open_input_with(&AudioConfig::default(), &cpal, &native_for).err().as_deref(), Some("scripted"));
+    assert_eq!(cpal.calls() + native_calls.load(Ordering::Relaxed), 0, "nor does a scripted backend's Player");
     // Control: with the guard off the cpal boundary is reached (and the counting fake refuses).
     let (mut unguarded, _output) = super::prepared();
     unguarded.fake_only = false;
-    assert!(unguarded.open_input_with(&AudioConfig::default(), &cpal).is_err());
-    assert_eq!(cpal.calls(), 1);
+    assert!(unguarded.open_input_with(&AudioConfig::default(), &cpal, &native_for).is_err());
+    assert_eq!(cpal.calls() + native_calls.load(Ordering::Relaxed), 1, "cpal off Windows, the native factory on Windows");
 }

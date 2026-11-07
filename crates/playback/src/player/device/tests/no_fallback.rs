@@ -89,15 +89,16 @@ fn the_on_demand_input_returns_the_native_error_and_asks_nothing_else() {
     assert!(player.native_backend && !player.silent);
     native.fail_next_open(ab::OpenError::DeviceNotAvailable("the capture endpoint is gone".into()));
     let cpal = Counting::default();
-    let error = player.open_input_with(&AudioConfig::default(), &cpal).err();
+    let error = player.open_input_with(&AudioConfig::default(), &cpal, &|_| None).err();
     assert_eq!(error.as_deref(), Some("the capture endpoint is gone"));
     assert_eq!(cpal.calls(), 0, "no cpal input was asked");
     // Control: a native JACK output falls back for its input, so the same position is asked.
     let jack = fake_factory(false).with_capture(2, false);
-    let player = Player::with_native_kind(Arc::new(Session::default()), &AudioConfig::default(), &jack, &Counting::default(), NativeKind::Jack);
+    let mut player = Player::with_native_kind(Arc::new(Session::default()), &AudioConfig::default(), &jack, &Counting::default(), NativeKind::Jack);
+    player.fake_only = false; // the counting fake gives no backend: nothing real opens
     jack.fail_next_open(ab::OpenError::DeviceNotAvailable("gone".into()));
     let cpal = Counting::default();
-    assert!(player.open_input_with(&AudioConfig::default(), &cpal).is_err());
+    assert!(player.open_input_with(&AudioConfig::default(), &cpal, &|_| None).is_err());
     assert_eq!(cpal.calls(), 1);
 }
 
