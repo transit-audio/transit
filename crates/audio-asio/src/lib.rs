@@ -60,6 +60,9 @@ use transit_audio_backend as ab;
 pub const SYSTEM: &str = "ASIO";
 /// How long a caller waits for the host thread before a request fails (a blocking driver).
 pub const HOST_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a fresh host thread may take to be scheduled and create its window and apartment;
+/// unrelated to how long a driver call may run ([`HOST_TIMEOUT`]).
+pub const HOST_START_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a caller waits for a control panel call (some panels are modal).
 const PANEL_TIMEOUT: Duration = Duration::from_secs(600);
 /// A driver's probe is reused this long, so a plan right after the listing loads it once.

@@ -370,11 +370,20 @@ impl Host {
     /// [`Host::spawn`] with `watchdog_floor` as the sessions' shortest stall limit (tests that
     /// drive the callbacks by hand use a long one).
     pub(crate) fn spawn_watching(loader: Box<dyn Loader>, slot: Slot, timeout: Duration, watchdog_floor: Duration) -> Result<Self, ab::OpenError> {
-        Self::spawn_after(loader, slot, timeout, watchdog_floor, Duration::ZERO)
+        Self::spawn_after(loader, slot, timeout, crate::HOST_START_TIMEOUT, watchdog_floor, Duration::ZERO)
     }
 
-    /// [`Host::spawn`] with the thread pausing `delay` before it starts (tests of the start timeout).
-    fn spawn_after(loader: Box<dyn Loader>, slot: Slot, timeout: Duration, watchdog_floor: Duration, delay: Duration) -> Result<Self, ab::OpenError> {
+    /// [`Host::spawn_watching`] with `start_timeout` as the bound on the thread's start (separate
+    /// from the per-call `timeout`) and the thread pausing `delay` before it starts (tests of the
+    /// start timeout).
+    fn spawn_after(
+        loader: Box<dyn Loader>,
+        slot: Slot,
+        timeout: Duration,
+        start_timeout: Duration,
+        watchdog_floor: Duration,
+        delay: Duration,
+    ) -> Result<Self, ab::OpenError> {
         let (tx, rx) = mpsc::channel::<Envelope>();
         let (started_tx, started_rx) = mpsc::channel();
         let (exited_tx, exited) = mpsc::channel();
@@ -398,7 +407,7 @@ impl Host {
                 let _ = exited_tx.send(());
             })
             .map_err(|e| ab::OpenError::Other(format!("could not start the ASIO host thread: {e}")))?;
-        match started_rx.recv_timeout(timeout) {
+        match started_rx.recv_timeout(start_timeout) {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
                 let _ = thread.join();
@@ -737,6 +746,7 @@ mod tests {
         let err = Host::spawn_after(
             Box::new(loader),
             Slot::default(),
+            crate::HOST_TIMEOUT,
             Duration::from_millis(100),
             crate::watchdog::STALL_FLOOR,
             Duration::from_millis(400),
