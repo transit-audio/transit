@@ -1,6 +1,6 @@
 //! The floating window of a device panel in the design language (326-M; the maintainer decided on
 //! 2026-11-06 that devices stay floating windows): one window per insert, keyed by `Insert.uid`.
-//! Every migrated panel (the Macro Oscillator, the Compressor) draws through [`show`] with its own
+//! Every migrated panel (the Macro Oscillator, the Compressor, the Sampler) draws through [`show`] with its own
 //! [`Panel`]; the state between frames ([`State`]) and the frame logic (Escape, follow selection,
 //! Close All Editors, the remembered positions) are this one implementation.
 //!
@@ -61,7 +61,7 @@ pub(crate) trait Panel {
 
 /// Whether `plugin`'s editor is one of the migrated device panels.
 pub fn handles(plugin: &str) -> bool {
-    crate::macro_osc_panel::handles(plugin) || crate::compressor_panel::handles(plugin)
+    crate::macro_osc_panel::handles(plugin) || crate::compressor_panel::handles(plugin) || crate::sampler_panel::handles(plugin)
 }
 
 /// The windows' memory between frames.
@@ -80,6 +80,8 @@ pub struct State {
     pub picker: Option<u64>,
     /// The Macro Oscillator's hero wells' rendered pictures and their worker (326-W).
     pub wave: crate::macro_osc_panel::wave::Preview,
+    /// The Sampler's Pads views: bank, selection, live pad state (326-S).
+    pub sampler: crate::sampler_panel::ViewState,
     /// Windows that follow selection moved to this frame: they open without taking the Escape
     /// focus (the click that changed the track was not in them).
     no_focus: Vec<u64>,

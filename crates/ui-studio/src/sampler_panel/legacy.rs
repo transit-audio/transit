@@ -1,0 +1,66 @@
+//! A Sampler on the legacy one-sample path (ADR 0041 decision 8: an old one-sample instrument
+//! keeps its legacy renderer until a structural edit converts it). Its window keeps what it had:
+//! the sample line, Load Sample and Clear (`builtin_editor::sample_picker`) and the 19 legacy
+//! parameter rows, in a panel card in the device window, with a New Kit button that runs
+//! `mix.sampler_new_patch` (the one-sample field is left unset, ADR 0041) and switches the window
+//! to the pads. A dropped audio file loads as the sample, as before. The legacy controls have no
+//! board of their own and are not restyled.
+
+use super::{LegacyLayout, SamplerLayout, behavior, section_label};
+use crate::StudioApp;
+use crate::builtin_editor::EditorLayout;
+use crate::device_editor::Dev;
+use crate::theme::TOKENS;
+use crate::tokens::{layout as space, radius};
+use crate::widgets::r4;
+use egui::{Rect, Stroke, StrokeKind, Ui, pos2, vec2};
+
+/// The body's height before it is first measured.
+pub const ESTIMATE: f32 = 640.0;
+
+/// Draws the legacy body from `rect`'s top left at its width; returns its height.
+pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut EditorLayout, out: &mut SamplerLayout) -> f32 {
+    let t = &TOKENS;
+    let card_min = rect.min + vec2(space::WINDOW_PADDING, space::WINDOW_PADDING);
+    let card_w = rect.width() - 2.0 * space::WINDOW_PADDING;
+    let bg = ui.painter().add(egui::Shape::Noop);
+    let inner_min = card_min + vec2(space::PANEL_PADDING[1], space::PANEL_PADDING[0]);
+    let label = section_label(ui.painter(), inner_min, "Sample");
+    let content = Rect::from_min_size(pos2(inner_min.x, label.max.y + 10.0), vec2(card_w - 2.0 * space::PANEL_PADDING[1], 4000.0));
+    let mut c = ui.new_child(egui::UiBuilder::new().max_rect(content).layout(egui::Layout::top_down(egui::Align::Min)));
+    let mut legacy = LegacyLayout::default();
+    crate::builtin_editor::sample_picker(app, &mut c, dev.key.0, dev.ins, lay);
+    let (kit, _) = crate::chrome::button(&mut c, "New Kit");
+    legacy.new_kit = r4(kit.rect);
+    let kit = kit.on_hover_text("Make this Sampler a kit of pads (its one sample is not carried over)");
+    if kit.clicked() {
+        behavior::new_kit(app, dev);
+    }
+    c.add_space(8.0);
+    egui::ScrollArea::vertical().id_salt(("sampler_legacy_rows", dev.uid())).max_height(480.0).show(&mut c, |ui| {
+        ui.spacing_mut().slider_width = 170.0;
+        egui::Grid::new(("builtin_params", dev.uid())).num_columns(3).spacing([8.0, 4.0]).show(ui, |ui| {
+            for p in dev.info.params {
+                crate::builtin_editor::param_row(app, ui, dev.key, dev.ins, p, lay);
+                ui.end_row();
+            }
+        });
+    });
+    let bottom = c.min_rect().max.y + space::PANEL_PADDING[0];
+    let card = Rect::from_min_max(card_min, pos2(card_min.x + card_w, bottom));
+    ui.painter().set(bg, egui::epaint::RectShape::new(card, radius::PANEL, t.surface_panel, Stroke::new(1.0, t.line), StrokeKind::Inside));
+    out.panels.push(("sample".to_string(), r4(card)));
+    legacy.panel = r4(card);
+    out.legacy = Some(legacy);
+    // A file dropped anywhere on the window loads as the sample (the old window's behavior).
+    let (files, pos) = ui.ctx().input(|i| (i.raw.dropped_files.clone(), i.pointer.latest_pos()));
+    let window = Rect::from_min_max(rect.min, pos2(rect.max.x, bottom + space::WINDOW_PADDING));
+    if !files.is_empty()
+        && pos.is_none_or(|p| window.contains(p))
+        && let Some(path) =
+            files.iter().map(|f| f.path().to_path_buf()).find(|p| p.is_absolute() && crate::builtin_editor::is_audio_name(&p.to_string_lossy()))
+    {
+        crate::builtin_editor::load_sample(app, dev.key.0, &path.to_string_lossy());
+    }
+    bottom + space::WINDOW_PADDING - rect.min.y
+}

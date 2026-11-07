@@ -75,6 +75,7 @@ pub mod rack_panel;
 pub mod random_sequencer_panel;
 pub mod recent;
 pub mod resonator_panel;
+pub mod sampler_panel;
 pub mod scope_strip;
 pub mod shortcuts;
 pub mod splash;

@@ -21,6 +21,8 @@ pub use realtime::{Conditions as RealtimeConditions, RealtimeState, Rendering, d
 pub enum RenameTarget {
     Track(TrackId),
     Clip(ClipId),
+    /// A Sampler pad (0-based) on the track's instrument (326-S).
+    Pad(TrackId, u8),
 }
 
 /// A name being typed in place.
@@ -297,6 +299,7 @@ impl StudioApp {
         let name = match target {
             RenameTarget::Track(t) => s.track(t).map(|t| t.name.clone()),
             RenameTarget::Clip(c) => s.find_clip(c).map(|(_, c)| c.name.clone()),
+            RenameTarget::Pad(t, pad) => crate::sampler_panel::shown_pad_name(s, t, pad),
         };
         let Some(text) = name else { return };
         self.finish.rename = Some(Rename { target, text, rect, fresh: true, refocus: false, keys: (false, false) });
@@ -342,6 +345,7 @@ impl StudioApp {
         let current = match target {
             RenameTarget::Track(t) => self.engine.session().track(t).map(|t| t.name.clone()),
             RenameTarget::Clip(c) => self.engine.session().find_clip(c).map(|(_, c)| c.name.clone()),
+            RenameTarget::Pad(t, pad) => crate::sampler_panel::shown_pad_name(self.engine.session(), t, pad),
         };
         if name.is_empty() {
             self.status = "A name can't be empty; kept the old one.".into();
@@ -353,6 +357,7 @@ impl StudioApp {
         match target {
             RenameTarget::Track(t) => self.run("track.rename", json!({"track": t.0, "name": name})),
             RenameTarget::Clip(c) => self.run("clip.rename", json!({"clips": [c.0], "name": name})),
+            RenameTarget::Pad(t, pad) => self.run("mix.sampler_pad_set", json!({"track": t.0, "pad": pad + 1, "name": name})),
         }
     }
 

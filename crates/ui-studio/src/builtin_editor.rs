@@ -66,6 +66,8 @@ pub struct EditorLayout {
     pub macro_osc: Option<Box<crate::macro_osc_panel::MacroLayout>>,
     /// The Compressor's panel in the design language as last drawn (326-K; `None` elsewhere).
     pub compressor: Option<Box<crate::compressor_panel::CompressorLayout>>,
+    /// The Sampler's panel in the design language as last drawn (326-S; `None` elsewhere).
+    pub sampler: Option<Box<crate::sampler_panel::SamplerLayout>>,
 }
 
 #[derive(Debug, Default)]
@@ -106,7 +108,7 @@ fn format_param(plugin: &str, p: &ParamInfo, value: f32) -> String {
     p.format(value)
 }
 
-fn is_audio_name(name: &str) -> bool {
+pub(crate) fn is_audio_name(name: &str) -> bool {
     std::path::Path::new(name).extension().and_then(|x| x.to_str()).is_some_and(|x| AUDIO_EXTS.contains(&x.to_ascii_lowercase().as_str()))
 }
 
@@ -176,11 +178,14 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             tuner: Default::default(),
             macro_osc: None,
             compressor: None,
+            sampler: None,
         };
         if crate::device_editor::window::handles(&ins.plugin) {
-            // The devices in the design language (326-M, 326-K): the shared device window.
+            // The devices in the design language (326-M, 326-K, 326-S): the shared device window.
             let open = if crate::compressor_panel::handles(&ins.plugin) {
                 crate::device_editor::window::show::<crate::compressor_panel::window::Panel>(app, ctx, key, &ins, info, n, &mut layout)
+            } else if crate::sampler_panel::handles(&ins.plugin) {
+                crate::device_editor::window::show::<crate::sampler_panel::window::Panel>(app, ctx, key, &ins, info, n, &mut layout)
             } else {
                 crate::device_editor::window::show::<crate::macro_osc_panel::window::Panel>(app, ctx, key, &ins, info, n, &mut layout)
             };
@@ -238,7 +243,7 @@ fn dropped_sample(app: &mut StudioApp, ctx: &egui::Context, t: TrackId, r: egui:
     }
 }
 
-fn load_sample(app: &mut StudioApp, t: TrackId, path: &str) {
+pub(crate) fn load_sample(app: &mut StudioApp, t: TrackId, path: &str) {
     if let Err(e) = app.run("mix.sampler_load", json!({"track": t.0, "path": path})) {
         app.status = e;
     }
@@ -285,7 +290,7 @@ pub(crate) fn double_clicked(ui: &Ui, r: &egui::Response) -> bool {
     })
 }
 
-fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, p: &ParamInfo, lay: &mut EditorLayout) {
+pub(crate) fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, p: &ParamInfo, lay: &mut EditorLayout) {
     let v = p.clamp(app.followed_param(key, p.id).or_else(|| ins.params.get(p.id).copied()).unwrap_or(p.default));
     ui.label(RichText::new(p.name).color(TOKENS.text_dim));
     let mut x = v;
@@ -336,7 +341,7 @@ fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inse
 }
 
 /// The Sampler's sample line, "Load Sample…" and Clear.
-fn sample_picker(app: &mut StudioApp, ui: &mut Ui, t: TrackId, ins: &Insert, lay: &mut EditorLayout) {
+pub(crate) fn sample_picker(app: &mut StudioApp, ui: &mut Ui, t: TrackId, ins: &Insert, lay: &mut EditorLayout) {
     let name = ins.sample.and_then(|id| app.engine.session().source(id)).map(|s| s.name.clone());
     let secs = ins.sample.and_then(|id| app.engine.session().pool.get(id)).map(|a| a.frames() as f64 / f64::from(a.buffer.sample_rate.max(1)));
     lay.sample = match (name, secs) {
