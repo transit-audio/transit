@@ -48,6 +48,8 @@ pub struct State {
     /// The editor whose model picker holds the arrow keys (from a click on a model until a press
     /// lands elsewhere).
     pub picker: Option<u64>,
+    /// The hero wells' rendered pictures and their worker (326-W).
+    pub wave: super::wave::Preview,
     /// Windows that follow selection moved to this frame: they open without taking the Escape
     /// focus (the click that changed the track was not in them).
     no_focus: Vec<u64>,

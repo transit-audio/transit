@@ -1,9 +1,11 @@
 //! The hero row's oscillator panel (README, Device anatomy B; the board's Row B left): the model
 //! card, the scope well with its readouts, the Timbre/Morph pad and the model picker.
 //!
-//! - **Scope well:** the instrument's output envelope from its scope tap (the tap carries each
-//!   frame's peak, so the trace is the envelope above and below the center line), `signal` at 2 px
-//!   over an 8 percent fill; readouts `WAVE · <model>` on the left and the voice count on the right.
+//! - **Well:** one cycle of the current model rendered from the parameters (the newest voice's note
+//!   and modulated values while a key holds one; a 50 ms burst for the noise and percussion group),
+//!   never a live scope ([`super::wave`]): `signal` at 2 px over an 8 percent fill, stretched across
+//!   the plot and scaled so its peak reaches half the height. Readouts `WAVE · <model>` (`BURST ·`)
+//!   on the left; the voice count and the note it was rendered at (`C3` at rest) on the right.
 //! - **Pad:** a 212 px display well; x is Timbre, y is Morph. Drag sets both (the point follows the
 //!   pointer), Shift drags fine (a tenth of the pointer's travel), double-click resets both. The
 //!   point is a 7 px `signal` dot with a 2 px `text` rim over a 16 px halo; a route to Timbre or
@@ -15,16 +17,16 @@
 //!   model is outlined in `signal` on the option fill; a click selects, and with the picker
 //!   focused the arrow keys move (left and right one, up and down a row).
 
-use super::{Dev, MacroLayout, finish, panel, section_label};
+use super::{Dev, MacroLayout, finish, panel, section_label, wave};
 use crate::StudioApp;
 use crate::builtin_editor::EditorLayout;
 use crate::theme::TOKENS;
 use crate::tokens::{self, alpha, layout as space, radius};
 use crate::widgets::{self, display_well, r4};
 use egui::{Align2, Mesh, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
-use transit_dsp::plugins::macro_osc::MODELS;
 use transit_dsp::plugins::macro_osc::matrix::dst;
 use transit_dsp::plugins::macro_osc::models::{ModelInfo, model_info};
+use transit_dsp::plugins::macro_osc::{MODELS, preview};
 
 /// The pad's side and the gap above its readouts.
 pub const PAD: f32 = 212.0;
@@ -135,7 +137,8 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     picker(app, ui, dev, Rect::from_min_max(pos2(inner.min.x, py), pos2(inner.max.x, py + picker_h())), model, lay, out);
 }
 
-/// The scope well and its readouts.
+/// The well and its readouts: one cycle of the model (a burst for the noise and percussion group)
+/// rendered from the parameters, or from the newest voice while a key holds one ([`super::wave`]).
 fn scope(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, out: &mut MacroLayout) {
     let t = &TOKENS;
     let mut c = super::child(ui, rect);
@@ -146,12 +149,29 @@ fn scope(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, o
     let hub = app.scope_hub();
     let count = dev.index(app, "voices") + 1;
     let activity = hub.as_ref().map_or(0, |h| h.voice_activity(dev.key.0, uid));
+    let newest = hub.as_ref().and_then(|h| h.newest_voice(dev.key.0, uid));
     let states = voice_states(activity, count);
-    out.hero.readout = format!("WAVE · {}", MODELS[model]);
+    let knob = |id: &str| dev.value(app, id) / 100.0;
+    let knobs = wave::Knobs {
+        engine: model,
+        harmonics: knob("harmonics"),
+        timbre: knob("timbre"),
+        morph: knob("morph"),
+        decay: knob("decay"),
+        lpg_color: knob("lpg_color"),
+    };
+    let req = wave::request(knobs, newest);
+    let shown = app.builtin_editor.macro_osc.wave.show(ui.ctx(), dev.uid(), req).cloned();
+    let label = if preview::kind_of(model) == preview::Kind::Burst { "BURST" } else { "WAVE" };
+    out.hero.readout = format!("{label} · {}", MODELS[model]);
     out.hero.voices = voices_text(&states);
+    let note = shown.as_ref().map_or(req.note, |r| r.0.note);
+    out.hero.wave_note = transit_midi::note_name(note.clamp(0.0, 127.0) as u8);
+    out.hero.wave_kind = shown.as_ref().map(|r| r.1);
     let top = rect.min.y + display_well::PADDING + display_well::READOUT_H / 2.0;
+    let right = format!("{} · {}", out.hero.voices, out.hero.wave_note);
     widgets::role_text(&p, &tokens::READOUT_DISPLAY, &out.hero.readout, t.text_faint, Align2::LEFT_CENTER, pos2(plot.min.x, top));
-    widgets::role_text(&p, &tokens::READOUT_DISPLAY, &out.hero.voices, t.text_faint, Align2::RIGHT_CENTER, pos2(plot.max.x, top));
+    widgets::role_text(&p, &tokens::READOUT_DISPLAY, &right, t.text_faint, Align2::RIGHT_CENTER, pos2(plot.max.x, top));
     // Grid: the center line and two verticals (the board's 40 and 80 percent).
     let mid = plot.center().y;
     p.line_segment([pos2(plot.min.x, mid), pos2(plot.max.x, mid)], Stroke::new(1.0, t.line_inset));
@@ -159,34 +179,21 @@ fn scope(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, o
         let x = plot.min.x + plot.width() * f;
         p.line_segment([pos2(x, plot.min.y), pos2(x, plot.max.y)], Stroke::new(1.0, t.grid));
     }
-    let mut frames = std::mem::take(&mut app.builtin_editor.frames);
-    frames.resize(transit_mix::SCOPE_FRAMES, 0.0);
-    if let Some(h) = hub.as_ref() {
-        h.frames(dev.key.0, uid, &mut frames);
-    }
-    let cols = crate::scope_strip::reduce(&frames, plot.width().max(1.0) as usize);
-    app.builtin_editor.frames = frames;
-    let half = plot.height() / 2.0 - 2.0;
-    let (mut upper, mut lower) = (Vec::with_capacity(cols.len()), Vec::with_capacity(cols.len()));
-    for (x, (_, hi)) in cols.iter().enumerate() {
-        let h = crate::scope_strip::height(*hi) * half;
-        let px = plot.min.x + x as f32 + 0.5;
-        upper.push(pos2(px, mid - h));
-        lower.push(pos2(px, mid + h));
-    }
+    let points = shown.as_ref().map(|r| wave::trace(plot, &r.2)).unwrap_or_default();
+    // The fill between the trace and the midline.
     let fill = t.signal.gamma_multiply(alpha::SCOPE_FILL);
     let mut mesh = Mesh::default();
-    for (a, b) in upper.windows(2).zip(lower.windows(2)) {
+    for w in points.windows(2) {
         let base = mesh.vertices.len() as u32;
-        for v in [a[0], a[1], b[1], b[0]] {
+        for v in [w[0], w[1], pos2(w[1].x, mid), pos2(w[0].x, mid)] {
             mesh.colored_vertex(v, fill);
         }
         mesh.add_triangle(base, base + 1, base + 2);
         mesh.add_triangle(base, base + 2, base + 3);
     }
     p.add(Shape::mesh(mesh));
-    p.add(Shape::line(upper, Stroke::new(display_well::CURVE_STROKE, t.signal)));
-    p.add(Shape::line(lower, Stroke::new(display_well::CURVE_STROKE, t.signal)));
+    out.hero.wave_points = points.len();
+    p.add(Shape::line(points, Stroke::new(display_well::CURVE_STROKE, t.signal)));
     out.hero.scope = r4(rect);
     out.wells.push(super::WellRecord { name: "scope".into(), well: well.layout });
     out.lights = states;

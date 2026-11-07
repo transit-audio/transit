@@ -2,9 +2,15 @@
 
 use super::hero::{MODEL_H, NOISE_FROM, PAD, card_text, model_step, name_slot, pad_drag, voice_states, voices_text};
 use super::test_rig::{T, info, mid};
+use super::wave::{self, Knobs, REST_NOTE};
 use crate::widgets::test_support::size;
+use egui::{Rect, pos2};
+use std::sync::Arc;
+use transit_dsp::VoiceShape;
 use transit_dsp::plugins::macro_osc::MODELS;
 use transit_dsp::plugins::macro_osc::models::{MODEL_INFO, ModelInfo};
+use transit_dsp::plugins::macro_osc::preview::{Kind, Request, period};
+use transit_model::TrackId;
 
 #[test]
 fn the_card_and_the_scope_readouts_name_the_model_and_the_voices() {
@@ -13,6 +19,7 @@ fn the_card_and_the_scope_readouts_name_the_model_and_the_voices() {
     assert_eq!(h.model_name, "Virtual analog");
     assert_eq!(h.readout, "WAVE · Virtual analog");
     assert_eq!(h.voices, "0 voices");
+    assert_eq!(h.wave_note, "C3", "at rest the well renders at C3");
     t.set(tr, "model", 13.0);
     assert_eq!(t.panel(tr).hero.model_name, MODELS[13], "the card follows the model");
     assert_eq!(voice_states(0b0101 | 0b0001 << 16, 4), "H-R-");
@@ -186,4 +193,111 @@ fn a_picker_button_names_the_full_model_in_its_tooltip() {
     t.send("ui.move", serde_json::json!({"x": mid(r).0, "y": mid(r).1}));
     t.frames(80);
     assert!(t.painted_all(MODELS[0]).len() > before, "the tooltip prints `{}`", MODELS[0]);
+}
+
+/// A headless hub with the instrument's tap for `tr` (the panel switches it on when open).
+fn tap(t: &mut T, tr: TrackId) -> Arc<transit_mix::ScopeTap> {
+    let hub = Arc::new(transit_mix::ScopeHub::default());
+    let tap = Arc::new(transit_mix::ScopeTap::new());
+    hub.register(tr, transit_mix::INSTRUMENT_UID, &tap);
+    t.app.builtin_editor.hub = Some(hub);
+    t.frames(3);
+    tap
+}
+
+fn sent(t: &T, tr: TrackId) -> Request {
+    t.app.builtin_editor.macro_osc.wave.sent(t.window(tr).uid).expect("the well sent a request")
+}
+
+#[test]
+fn at_rest_the_well_renders_one_cycle_of_the_knobs_at_c3() {
+    let (mut t, tr) = T::open();
+    t.set(tr, "timbre", 30.0);
+    t.set(tr, "harmonics", 20.0);
+    let r = sent(&t, tr);
+    assert_eq!((r.engine, r.note), (8, REST_NOTE));
+    assert_eq!((r.harmonics, r.timbre, r.morph), (0.2, 0.3, 0.5));
+    assert_eq!((r.decay, r.lpg_color), (t.param(tr, "decay") / 100.0, t.param(tr, "lpg_color") / 100.0));
+    let h = t.panel(tr).hero;
+    assert_eq!(h.wave_kind, Some(Kind::Cycle));
+    assert_eq!(h.wave_points, 183, "one period at C3, stretched across the plot");
+    assert_eq!(t.painted("0 voices · C3").0, 1, "the note after the voice count");
+    // Negative control: a knob move changes the request.
+    t.set(tr, "timbre", 60.0);
+    assert_eq!(sent(&t, tr).timbre, 0.6);
+}
+
+#[test]
+fn a_held_voice_moves_the_request_to_its_note_and_values() {
+    let (mut t, tr) = T::open();
+    let tap = tap(&mut t, tr);
+    assert!(tap.enabled(), "the open panel switches the instrument's tap on");
+    // Negative control: nothing published, the knobs at C3.
+    assert_eq!(sent(&t, tr).note, REST_NOTE);
+    tap.push_newest(Some(VoiceShape { note: 67, harmonics: 0.1, timbre: 0.9, morph: 0.4 }));
+    t.frames(2);
+    let r = sent(&t, tr);
+    assert_eq!((r.note, r.harmonics, r.timbre, r.morph), (67.0, 0.1, 0.9, 0.4));
+    assert_eq!(t.panel(tr).hero.wave_note, "G3");
+    // Released: back to the knobs at C3; the well keeps drawing (the same shape, no flat line).
+    tap.push_newest(None);
+    t.frames(2);
+    let r = sent(&t, tr);
+    assert_eq!((r.note, r.timbre), (REST_NOTE, 0.5));
+    assert_eq!(t.panel(tr).hero.wave_points, 183);
+}
+
+#[test]
+fn the_readout_says_burst_for_the_noise_and_percussion_group() {
+    let (mut t, tr) = T::open();
+    t.set(tr, "model", 16.0);
+    let h = t.panel(tr).hero;
+    assert_eq!(h.readout, "BURST · Swarm", "engine 17");
+    assert_eq!((h.wave_kind, h.wave_points), (Some(Kind::Burst), 2400));
+    t.set(tr, "model", 2.0);
+    assert_eq!(t.panel(tr).hero.readout, "WAVE · Six-op FM 1", "engine 3");
+    // Negative control: the last pitched model (engine 16) is a cycle.
+    t.set(tr, "model", 15.0);
+    assert_eq!(t.panel(tr).hero.readout, "WAVE · Speech");
+}
+
+#[test]
+fn the_trace_stays_inside_the_plot() {
+    let plot = Rect::from_min_max(pos2(10.0, 20.0), pos2(410.0, 120.0));
+    let bounds = |pts: &[egui::Pos2]| pts.iter().fold(Rect::NOTHING, |r, p| r.union(Rect::from_min_max(*p, *p)));
+    let full: Vec<f32> = (0..183).map(|i| (i as f32 / 183.0 * std::f32::consts::TAU).sin()).collect();
+    let b = bounds(&wave::trace(plot, &full));
+    assert!(plot.contains_rect(b), "{b:?} in {plot:?}");
+    assert!((b.min.x - plot.min.x).abs() < 1e-3 && (b.max.x - plot.max.x).abs() < 1e-3, "across the full width");
+    // Negative control of the containment: the full-scale cycle does reach half the height.
+    assert!((b.min.y - plot.min.y).abs() < 0.5 && (b.max.y - plot.max.y).abs() < 0.5, "{b:?}");
+    let zero = wave::trace(plot, &[0.0; 183]);
+    let z = bounds(&zero);
+    assert!(plot.contains_rect(z));
+    assert!(zero.iter().all(|p| p.y == plot.center().y), "a silent render draws the midline");
+    // A quiet cycle is scaled up to the same height (the well scales, the render is not normalized).
+    let quiet: Vec<f32> = full.iter().map(|x| x * 0.01).collect();
+    assert_eq!(bounds(&wave::trace(plot, &quiet)).height().round(), b.height().round());
+}
+
+#[test]
+fn the_worker_renders_only_the_newest_request_per_instance() {
+    let k = Knobs { engine: 8, harmonics: 0.5, timbre: 0.5, morph: 0.5, decay: 0.5, lpg_color: 0.5 };
+    let at = |note: f32| Request { note, ..wave::request(k, None) };
+    let (tx, rx) = std::sync::mpsc::channel();
+    for (uid, note) in [(1, 60.0), (2, 62.0), (1, 64.0), (1, 65.0)] {
+        tx.send((uid, at(note))).unwrap();
+    }
+    let mut queued = std::collections::HashMap::new();
+    wave::latest(&mut queued, &rx);
+    assert_eq!(queued.len(), 2, "one request per instance");
+    assert_eq!(queued[&1].note, 65.0, "the newest wins");
+    assert_eq!(queued[&2].note, 62.0);
+    // The request and the result: the render holds what it was asked for.
+    let (req, kind, samples) = wave::render(queued[&1]);
+    assert_eq!((req, kind, samples.len()), (at(65.0), Kind::Cycle, period(65.0)));
+    // Negative control: a request with a voice published is not the rest request.
+    let held = wave::request(k, Some(VoiceShape { note: 72, harmonics: 0.5, timbre: 0.5, morph: 0.5 }));
+    assert_ne!(held, wave::request(k, None));
+    assert_eq!(held, at(72.0));
 }

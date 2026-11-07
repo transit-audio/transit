@@ -18,6 +18,7 @@ mod modulation;
 mod sections;
 mod shaper;
 mod title_bar;
+mod wave;
 pub mod window;
 
 #[cfg(test)]
@@ -171,10 +172,16 @@ pub struct HeroLayout {
     pub model_desc_rect: [f32; 4],
     /// The pad's axis labels (the model's Timbre and Morph names).
     pub pad_labels: [String; 2],
-    /// The scope well's readouts: the model on the left, the voice count on the right.
+    /// The well's readouts: `WAVE · <model>` (`BURST · <model>` for the noise and percussion
+    /// group) on the left, the voice count on the right.
     pub readout: String,
     pub voices: String,
     pub scope: [f32; 4],
+    /// The rendered picture the well draws (`None` before the first render lands), the note it
+    /// was rendered at (`C3` at rest) and the points of its trace.
+    pub wave_kind: Option<transit_dsp::plugins::macro_osc::preview::Kind>,
+    pub wave_note: String,
+    pub wave_points: usize,
     /// The Timbre/Morph pad, its point and its T and M readouts.
     pub pad: [f32; 4],
     pub pad_point: [f32; 2],
