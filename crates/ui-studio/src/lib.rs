@@ -21,6 +21,7 @@ pub mod builtin_editor;
 pub mod chrome;
 pub mod chrome_pick;
 pub mod clip_inspector;
+pub mod compressor_panel;
 pub mod control;
 pub mod debug_log;
 pub mod device_editor;

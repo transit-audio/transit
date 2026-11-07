@@ -64,6 +64,8 @@ pub struct EditorLayout {
     pub tuner: crate::tuner_panel::TunerLayout,
     /// The Macro Oscillator's panel in the design language as last drawn (326-M; `None` elsewhere).
     pub macro_osc: Option<Box<crate::macro_osc_panel::MacroLayout>>,
+    /// The Compressor's panel in the design language as last drawn (326-K; `None` elsewhere).
+    pub compressor: Option<Box<crate::compressor_panel::CompressorLayout>>,
 }
 
 #[derive(Debug, Default)]
@@ -173,10 +175,16 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             addition_rect: [0.0; 4],
             tuner: Default::default(),
             macro_osc: None,
+            compressor: None,
         };
-        if crate::macro_osc_panel::handles(&ins.plugin) {
-            // The first device in the design language (326-M): its own window.
-            if crate::device_editor::window::show::<crate::macro_osc_panel::window::Panel>(app, ctx, key, &ins, info, n, &mut layout) {
+        if crate::device_editor::window::handles(&ins.plugin) {
+            // The devices in the design language (326-M, 326-K): the shared device window.
+            let open = if crate::compressor_panel::handles(&ins.plugin) {
+                crate::device_editor::window::show::<crate::compressor_panel::window::Panel>(app, ctx, key, &ins, info, n, &mut layout)
+            } else {
+                crate::device_editor::window::show::<crate::macro_osc_panel::window::Panel>(app, ctx, key, &ins, info, n, &mut layout)
+            };
+            if open {
                 active.push((key.0, crate::scope_strip::hub_uid(key, &ins)));
             } else {
                 closed.push(key);

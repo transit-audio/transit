@@ -23,7 +23,7 @@ pub enum Item {
     Choice(&'static str, &'static str),
     /// A choice with long labels: a wide dropdown.
     Menu(&'static str, &'static str),
-    /// The sidechain key dropdown (compressor and gate).
+    /// The sidechain key dropdown (the gate; the Compressor draws its own, 326-K).
     Key,
     /// The modulation matrix (#243, the Resonator's and the other ported voices'): a compact grid
     /// of its sixteen rows (source, via, destination, curve, amount), every row parameter in it.
@@ -45,25 +45,6 @@ use Item::{Choice, Key, Knob, Matrix, Menu, Toggle};
 const fn sec(title: &'static str, cols: usize, items: &'static [Item]) -> Section {
     Section { title, cols, items }
 }
-
-static COMPRESSOR: [Row; 2] = [
-    &[
-        sec(
-            "Dynamics",
-            3,
-            &[
-                Knob("threshold", "Threshold"),
-                Knob("ratio", "Ratio"),
-                Knob("attack", "Attack"),
-                Knob("release", "Release"),
-                Knob("knee", "Knee"),
-                Knob("makeup", "Makeup"),
-            ],
-        ),
-        sec("Output", 3, &[Toggle("limiter", "Limit"), Knob("lookahead", "Lookahead"), Knob("mix", "Mix")]),
-    ],
-    &[sec("Key", 2, &[Key, Toggle("sc_hpf_on", "SC HPF"), Knob("sc_hpf_freq", "HPF Freq")])],
-];
 
 static GATE: [Row; 2] = [
     &[
@@ -286,7 +267,6 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
 /// The bespoke layout of a plug-in (`None`: it keeps the generic rows).
 pub fn layout(plugin: &str) -> Option<&'static [Row]> {
     match plugin {
-        "compressor" => Some(&COMPRESSOR),
         "expander_gate" => Some(&GATE),
         "eq_7band" => Some(&EQ7),
         "plate_reverb" => Some(&PLATE),
@@ -571,7 +551,6 @@ mod tests {
     #[test]
     fn every_layout_places_each_parameter_of_its_plugin_exactly_once() {
         for plugin in [
-            "compressor",
             "expander_gate",
             "eq_7band",
             "plate_reverb",

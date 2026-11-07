@@ -61,7 +61,7 @@ pub(crate) trait Panel {
 
 /// Whether `plugin`'s editor is one of the migrated device panels.
 pub fn handles(plugin: &str) -> bool {
-    crate::macro_osc_panel::handles(plugin)
+    crate::macro_osc_panel::handles(plugin) || crate::compressor_panel::handles(plugin)
 }
 
 /// The windows' memory between frames.
@@ -69,6 +69,8 @@ pub fn handles(plugin: &str) -> bool {
 pub struct State {
     /// The title bars' output meters' displayed levels by insert uid.
     pub meters: HashMap<u64, f32>,
+    /// The Compressor's gain-reduction meters' displayed reductions (dB) by insert uid.
+    pub gr: HashMap<u64, f32>,
     /// Rows Add route revealed, by insert uid (view state for the session; the Macro Oscillator).
     pub pending: HashMap<u64, Vec<usize>>,
     /// The editor Escape closes.
@@ -321,6 +323,7 @@ pub(crate) fn end_frame(app: &mut StudioApp, ctx: &egui::Context) {
     }
     st.pos.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.meters.retain(|u, _| now.iter().any(|s| s.0 == *u));
+    st.gr.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.pending.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.typing.retain(|u| now.iter().any(|s| s.0 == u.0));
     if st.picker.is_some_and(|u| !now.iter().any(|s| s.0 == u)) {
