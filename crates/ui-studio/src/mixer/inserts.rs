@@ -38,6 +38,25 @@ pub(super) fn add_row(p: &egui::Painter, r: Rect, label: &str, hovered: bool) {
     text_in(p, &CONTROL, label, if hovered { TOKENS.text } else { TOKENS.text_faint }, r, Align2::CENTER_CENTER);
 }
 
+/// Lucide's `power` glyph (a 24 unit box: the stem from (12, 2) to (12, 12), the arc of radius 9
+/// about (12, 13) from 45 degrees right of the top round to 45 degrees left of it), drawn `size`
+/// square with a `stroke` point line: the insert slot's indicator at 12 with the README's 1.5,
+/// where the rasterized icon would scale Lucide's stroke of 2 down to 1.
+pub(super) fn power_glyph(p: &egui::Painter, center: egui::Pos2, size: f32, stroke: f32, color: Color32) {
+    let k = size / 24.0;
+    let at = |x: f32, y: f32| center + vec2((x - 12.0) * k, (y - 12.0) * k);
+    let line = Stroke::new(stroke, color);
+    p.line_segment([at(12.0, 2.0), at(12.0, 12.0)], line);
+    let n = 32;
+    let arc: Vec<egui::Pos2> = (0..=n)
+        .map(|i| {
+            let a = (-45.0 + 270.0 * i as f32 / n as f32).to_radians();
+            at(12.0 + 9.0 * a.cos(), 13.0 + 9.0 * a.sin())
+        })
+        .collect();
+    p.add(egui::Shape::line(arc, line));
+}
+
 /// One insert slot in `rr`.
 #[allow(clippy::too_many_arguments)]
 fn insert_slot(
@@ -87,7 +106,7 @@ fn insert_slot(
     let on = !(ins.bypass || mode);
     let (glyph_ink, name_ink) = if on { (TOKENS.signal, TOKENS.text) } else { (TOKENS.text_faint, TOKENS.text_muted) };
     text_in(p, &CONTROL, &shown, name_ink, text_r, Align2::LEFT_CENTER);
-    crate::icons::paint(p, power.center(), crate::icons::Icon::Power, cs::INDICATOR_SIZE, glyph_ink);
+    power_glyph(p, power.center(), cs::INDICATOR_SIZE, cs::INDICATOR_STROKE, glyph_ink);
     if glyph.on_hover_text(if ins.bypass { "Turn on" } else { "Bypass" }).clicked() {
         let _ = app.toggle_bypass(id, slot);
     }
