@@ -62,6 +62,8 @@ pub mod models;
 #[path = "macro_osc_params.rs"]
 mod params;
 pub use transit_instrument_core::shaper;
+#[path = "macro_osc_preview.rs"]
+pub mod preview;
 #[path = "macro_osc_voice.rs"]
 pub mod voice;
 
@@ -679,3 +681,7 @@ mod retrigger_tests;
 #[cfg(test)]
 #[path = "macro_osc_release_tests.rs"]
 mod release_tests;
+
+#[cfg(test)]
+#[path = "macro_osc_preview_tests.rs"]
+mod preview_tests;
