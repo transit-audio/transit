@@ -53,6 +53,7 @@ pub static COMP_INFO: PluginInfo = PluginInfo {
     params: &COMP_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 /// Feed-forward compressor / limiter with optional lookahead and sidechain high-pass.
@@ -243,6 +244,7 @@ pub static GATE_INFO: PluginInfo = PluginInfo {
     params: &GATE_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 /// Downward expander / gate with hold.

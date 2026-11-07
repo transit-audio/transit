@@ -142,6 +142,7 @@ mod windows {
         params: &[],
         is_instrument: false,
         audiosuite: false,
+        pages: &[],
     };
 
     /// Counts the windows its editor made.

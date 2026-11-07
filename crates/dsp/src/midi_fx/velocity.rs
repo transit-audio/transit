@@ -25,6 +25,7 @@ pub static VELOCITY_INFO: PluginInfo = PluginInfo {
     params: &VELOCITY_PARAMS,
     is_instrument: false,
     audiosuite: false,
+    pages: &[],
 };
 
 #[derive(Clone, Debug)]

@@ -41,6 +41,7 @@ pub static EQ7_INFO: PluginInfo = PluginInfo {
     params: &EQ7_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 const EQ1_TYPES: &[&str] = &["Peak", "Low Shelf", "High Shelf", "High Pass", "Low Pass", "Notch", "Band Pass"];
@@ -61,6 +62,7 @@ pub static EQ1_INFO: PluginInfo = PluginInfo {
     params: &EQ1_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 #[inline]

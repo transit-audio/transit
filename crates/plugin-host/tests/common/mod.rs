@@ -15,6 +15,7 @@ pub static INFO: PluginInfo = PluginInfo {
     params: &[],
     is_instrument: false,
     audiosuite: false,
+    pages: &[],
 };
 
 /// What a fake did, and on which thread.

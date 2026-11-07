@@ -15,6 +15,7 @@ pub static DELAY_INFO: PluginInfo = PluginInfo {
     params: &DELAY_PARAMS,
     is_instrument: false,
     audiosuite: false,
+    pages: &[],
 };
 
 #[derive(Clone, Debug, Default)]

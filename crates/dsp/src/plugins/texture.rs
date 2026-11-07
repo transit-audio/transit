@@ -107,6 +107,7 @@ pub static TEXTURE_INFO: PluginInfo = PluginInfo {
     is_instrument: false,
     // An insert that learns its input level and keeps a buffer: not an offline process.
     audiosuite: false,
+    pages: &[],
 };
 
 /// What restarts the firmware when it changes.

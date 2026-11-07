@@ -32,6 +32,9 @@ mod util;
 #[path = "util/smoother_tests.rs"]
 mod smoother_tests;
 
+#[cfg(test)]
+mod pages_tests;
+
 pub use editor_header::{EditorHeader, HeaderAction, JobPoll, LoadedValues, StateJob};
 pub use offline::FadeShape;
 pub use osc::Waveform;
@@ -173,12 +176,61 @@ pub struct PluginInfo {
     pub is_instrument: bool,
     /// Usable as an offline (AudioSuite-style) process.
     pub audiosuite: bool,
+    /// The device's factory pages for the macro strip (ADR 0047 decision 2), declared beside its
+    /// parameter table. Empty for a built-in still on its derived page ([`PluginInfo::derived_page`])
+    /// and for every hosted type (hosted pages are per instance).
+    pub pages: &'static [PageInfo],
+}
+
+/// Controls on one macro strip page (ADR 0047 decision 1.1): one row of knobs, one controller
+/// bank, CLAP's `CLAP_REMOTE_CONTROLS_COUNT`.
+pub const PAGE_SLOTS: usize = 8;
+
+/// The name of a built-in's derived page (ADR 0047 decision 2.4).
+pub const DERIVED_PAGE_NAME: &str = "Main";
+
+/// One factory page of a built-in device (ADR 0047 decision 2.1): a name and at most
+/// [`PAGE_SLOTS`] slots, packed from the left; slots after the last are empty.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct PageInfo {
+    pub name: &'static str,
+    pub slots: &'static [PageSlot],
+}
+
+/// One slot of a factory page: a parameter id of the device's own table, and the id of a
+/// `Unit::Toggle` parameter that must be on for the slot to read as active (`enable` dims, it
+/// does not lock: ADR 0047 decision 2.2).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct PageSlot {
+    pub param: &'static str,
+    pub enable: Option<&'static str>,
+}
+
+impl PageSlot {
+    /// A slot with no `enable` toggle.
+    #[must_use]
+    pub const fn new(param: &'static str) -> Self {
+        PageSlot { param, enable: None }
+    }
+
+    /// A slot that reads as active only while toggle `enable` is on.
+    #[must_use]
+    pub const fn enabled_by(param: &'static str, enable: &'static str) -> Self {
+        PageSlot { param, enable: Some(enable) }
+    }
 }
 
 impl PluginInfo {
     /// Looks up a parameter description by id.
     pub fn param(&self, id: &str) -> Option<&'static ParamInfo> {
         self.params.iter().find(|p| p.id == id)
+    }
+
+    /// The derived page of a built-in without declared pages (ADR 0047 decision 2.4): its first
+    /// [`PAGE_SLOTS`] parameters in table order, named [`DERIVED_PAGE_NAME`]. Fewer fill from the
+    /// left; a device with no parameters has none (and no page).
+    pub fn derived_page(&self) -> impl Iterator<Item = &'static ParamInfo> + use<> {
+        self.params.iter().take(PAGE_SLOTS)
     }
 }
 

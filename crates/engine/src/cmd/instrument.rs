@@ -127,6 +127,7 @@ mod tests {
             params: &PARAMS,
             is_instrument: true,
             audiosuite: false,
+            pages: &[],
         };
         let builtin = PluginInfo { id: "builtin", ..hosted.clone() };
         // The default a hosted plugin reports (often 0) is not its real setting: pushing it would

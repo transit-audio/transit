@@ -19,6 +19,7 @@ pub static TRANSPOSE_INFO: PluginInfo = PluginInfo {
     params: &TRANSPOSE_PARAMS,
     is_instrument: false,
     audiosuite: false,
+    pages: &[],
 };
 
 /// Notes Transpose remembers at once: more than the mix holds open per instrument (224).

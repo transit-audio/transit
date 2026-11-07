@@ -10,7 +10,7 @@ use super::{MODELS, VOICE_COUNTS, WHEEL_DESTINATIONS};
 use crate::params::{choice, choice_index, lin, log, on, toggle};
 use crate::plugins::instrument_queue::AdsrRates;
 use crate::plugins::lfo::DIVISIONS;
-use crate::{ParamInfo, Unit, db_to_gain};
+use crate::{PageInfo, PageSlot, ParamInfo, Unit, db_to_gain};
 
 pub(super) const MODEL: usize = 0;
 pub(super) const HARMONICS: usize = 1;
@@ -124,6 +124,23 @@ pub(crate) static PARAMS: [ParamInfo; COUNT] = table!(
     ["1", "2"],
     ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"]
 );
+
+/// The factory pages of the macro strip (ADR 0047 decision 2.3). Page 1, "Main": the module's
+/// four macros and level, then the shaper's cutoff and amp envelope ends, which act only while
+/// `shaper` is on and so dim with it. The second page ("Shaper") comes with #356.
+pub(crate) static PAGES: [PageInfo; 1] = [PageInfo {
+    name: "Main",
+    slots: &[
+        PageSlot::new("model"),
+        PageSlot::new("harmonics"),
+        PageSlot::new("timbre"),
+        PageSlot::new("morph"),
+        PageSlot::new("level"),
+        PageSlot::enabled_by("cutoff", "shaper"),
+        PageSlot::enabled_by("amp_attack", "shaper"),
+        PageSlot::enabled_by("amp_release", "shaper"),
+    ],
+}];
 
 /// The id of matrix row `row`'s (0-based) parameter at offset `field` (a `ROW_*` offset).
 #[must_use]

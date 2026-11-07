@@ -20,6 +20,7 @@ pub static SAT_INFO: PluginInfo = PluginInfo {
     params: &SAT_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 /// Smooth tanh waveshaper, normalized so a full-scale input still peaks near full scale (more

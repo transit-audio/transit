@@ -21,6 +21,7 @@ pub static TUNER_INFO: PluginInfo = PluginInfo {
     params: &TUNER_PARAMS,
     is_instrument: false,
     audiosuite: false,
+    pages: &[],
 };
 
 /// The device: leaves the buffers alone. Its parameters are read by the panel.

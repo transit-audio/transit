@@ -46,6 +46,7 @@ pub static GAIN_INFO: PluginInfo = PluginInfo {
     params: &GAIN_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 /// Smoothed gain change (-inf .. +24 dB).
@@ -108,6 +109,7 @@ pub static TRIM_INFO: PluginInfo = PluginInfo {
     params: &TRIM_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 /// Trim (-inf .. +12 dB) with a click-free polarity switch.
@@ -155,8 +157,16 @@ impl Plugin for Trim {
 
 // ---------------------------------------------------------------------------------------------
 
-pub static INVERT_INFO: PluginInfo =
-    PluginInfo { id: "invert", name: "Invert", short_name: "Invert", category: Category::Other, params: &[], is_instrument: false, audiosuite: true };
+pub static INVERT_INFO: PluginInfo = PluginInfo {
+    id: "invert",
+    name: "Invert",
+    short_name: "Invert",
+    category: Category::Other,
+    params: &[],
+    is_instrument: false,
+    audiosuite: true,
+    pages: &[],
+};
 
 /// Polarity inversion.
 #[derive(Default)]
@@ -202,6 +212,7 @@ pub static DC_INFO: PluginInfo = PluginInfo {
     params: &DC_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 /// One-pole DC-blocking high-pass.
@@ -269,6 +280,7 @@ pub static GEN_INFO: PluginInfo = PluginInfo {
     params: &GEN_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 /// Test-tone and noise generator; replaces its input.
@@ -354,6 +366,7 @@ pub static DITHER_INFO: PluginInfo = PluginInfo {
     params: &DITHER_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 /// TPDF dither and requantization with optional first-order error-feedback noise shaping.

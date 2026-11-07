@@ -127,6 +127,7 @@ pub static MACRO_OSC_INFO: PluginInfo = PluginInfo {
     params: &PARAMS,
     is_instrument: true,
     audiosuite: false,
+    pages: &PAGES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -132,6 +132,7 @@ pub static TEXTURE_SYNTH_INFO: PluginInfo = PluginInfo {
     params: &PARAMS,
     is_instrument: true,
     audiosuite: false,
+    pages: &[],
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]

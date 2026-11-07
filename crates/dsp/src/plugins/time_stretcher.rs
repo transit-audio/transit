@@ -97,6 +97,7 @@ pub static TIME_STRETCHER_INFO: PluginInfo = PluginInfo {
     is_instrument: false,
     // An insert that keeps a buffer and a correlator's state: not an offline process.
     audiosuite: false,
+    pages: &[],
 };
 
 /// The restart fade. A quality that returns to the running one during `Out` cancels the restart.

@@ -87,6 +87,7 @@ pub static SAMPLER_INFO: PluginInfo = PluginInfo {
     params: &SAMPLER_PARAMS,
     is_instrument: true,
     audiosuite: false,
+    pages: &[],
 };
 
 /// Plays a sample across the keyboard.

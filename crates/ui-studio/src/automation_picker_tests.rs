@@ -208,6 +208,7 @@ mod grouping {
             params: Box::leak(params.into_boxed_slice()),
             is_instrument: false,
             audiosuite: false,
+            pages: &[],
         }))
     }
 

@@ -115,6 +115,7 @@ pub static FILTER_INFO: PluginInfo = PluginInfo {
     is_instrument: false,
     // It plays from the track's notes, which an offline process does not have.
     audiosuite: false,
+    pages: &[],
 };
 
 /// One note-stream event at a sample offset.

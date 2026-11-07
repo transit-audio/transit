@@ -55,6 +55,7 @@ pub static ROOM_INFO: PluginInfo = PluginInfo {
     params: &ROOM_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 pub static PLATE_INFO: PluginInfo = PluginInfo {
@@ -65,6 +66,7 @@ pub static PLATE_INFO: PluginInfo = PluginInfo {
     params: &PLATE_PARAMS,
     is_instrument: false,
     audiosuite: true,
+    pages: &[],
 };
 
 /// Schroeder allpass section with a fixed delay.

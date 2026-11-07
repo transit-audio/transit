@@ -162,6 +162,7 @@ fn build_info(d: &AuDescriptor, inst: &Instance) -> &'static PluginInfo {
         params: Box::leak(params.into_boxed_slice()),
         is_instrument: d.is_instrument,
         audiosuite: false,
+        pages: &[],
     }))
 }
 

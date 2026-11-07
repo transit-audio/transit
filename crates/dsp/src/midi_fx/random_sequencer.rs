@@ -133,6 +133,7 @@ pub static RANDOM_SEQUENCER_INFO: PluginInfo = PluginInfo {
     params: &RANDOM_SEQUENCER_PARAMS,
     is_instrument: false,
     audiosuite: false,
+    pages: &[],
 };
 
 /// The credit line of the panel and the help (ADR 0033).

@@ -12,6 +12,7 @@ static INFO: PluginInfo = PluginInfo {
     params: &[],
     is_instrument: false,
     audiosuite: false,
+    pages: &[],
 };
 struct Controller(Arc<AtomicUsize>);
 impl PluginEditor for Controller {

@@ -89,6 +89,7 @@ pub static MODULATOR_INFO: PluginInfo = PluginInfo {
     is_instrument: false,
     // It plays a second signal from the sidechain: not an offline process.
     audiosuite: false,
+    pages: &[],
 };
 
 /// The internal oscillator's MIDI note for a frequency, Hz (A4 = 440 Hz is note 69).

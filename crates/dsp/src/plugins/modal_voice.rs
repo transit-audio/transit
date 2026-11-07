@@ -134,6 +134,7 @@ pub static MODAL_VOICE_INFO: PluginInfo = PluginInfo {
     params: &PARAMS,
     is_instrument: true,
     audiosuite: false,
+    pages: &[],
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
