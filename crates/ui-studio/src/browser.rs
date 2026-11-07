@@ -13,6 +13,9 @@
 //! A drag onto the arrangement, a mixer strip or the device chain, or a double-click, runs engine
 //! commands: audio is imported in the background (`crate::import`, one undo step per file),
 //! plug-ins load with `mix.instrument` or `mix.insert` (one undo step per drop).
+//! An audio file dropped on a pad of an open Sampler window becomes the pad's sample (the pad's
+//! own drop, one undo step), or on a legacy Sampler window its one sample; an editor window on top
+//! takes every drop over it, so nothing behind it is reached.
 //! Everything else here (tabs, width, expanding, filters, favorites) is view state.
 //!
 //! The footer previews the selected file outside the document (issue #211, [`preview`]).
@@ -189,7 +192,16 @@ pub enum Target {
     Track { track: TrackId, at: Option<Samples> },
     /// Below the tracks: a new track.
     Below { at: Option<Samples> },
+    /// Pad `pad` (0-based) of an open Sampler's Pads window: an audio file becomes its sample.
+    Pad { dev: (TrackId, usize), pad: u8 },
+    /// An open one-sample (legacy) Sampler window: an audio file loads as its sample.
+    SamplerWindow { dev: (TrackId, usize) },
 }
+
+/// The status after a drag of audio files released on no target.
+pub const HINT_AUDIO: &str = "Drop onto a track lane, header, strip, the device chain or a Sampler pad";
+/// The status after a plug-in drag released on no target.
+pub const HINT: &str = "Drop onto a track lane, header, strip or the device chain";
 
 #[derive(Debug, Clone)]
 pub struct Drag {
@@ -644,8 +656,14 @@ impl StudioApp {
         self.import_files(files, track, self.cursor())
     }
 
-    /// What lies under `pos` for a drop, from last frame's arrangement, mixer and device layouts.
-    fn drop_target(&self, pos: Pos2, snap: bool) -> Option<(Target, R4)> {
+    /// What lies under `pos` for a drop, from last frame's editor windows, arrangement, mixer and
+    /// device layouts. An editor window on top at `pos` comes first and takes the drop whole:
+    /// `audio` (the payload holds an audio file) lands on a Sampler pad or a legacy Sampler
+    /// window, anything else over a window is no target (nothing behind a window is reached).
+    fn drop_target(&self, ctx: &egui::Context, pos: Pos2, snap: bool, audio: bool) -> Option<(Target, R4)> {
+        if let Some(key) = self.editor_window_at(ctx, pos) {
+            return if audio { self.editor_target(key, pos) } else { None };
+        }
         let m = &self.mixer.layout;
         if m.visible {
             for s in m.strips.iter().chain(m.master.iter()) {
@@ -686,6 +704,25 @@ impl StudioApp {
         None
     }
 
+    /// The editor window on top at `pos`: egui's own layer order (`layer_id_at`) over the editor
+    /// layers drawn last frame, the list the #368 drop router keeps.
+    fn editor_window_at(&self, ctx: &egui::Context, pos: Pos2) -> Option<(TrackId, usize)> {
+        let top = ctx.layer_id_at(pos)?;
+        self.builtin_editor.drops.windows.iter().find(|(layer, _)| *layer == top).map(|(_, key)| *key)
+    }
+
+    /// Where an audio file over the editor window `key` lands: the pad under `pos` in a Pads
+    /// window, the whole window of a legacy Sampler, else nothing (the window refuses it).
+    fn editor_target(&self, key: (TrackId, usize), pos: Pos2) -> Option<(Target, R4)> {
+        let w = self.builtin_editor.windows.iter().find(|w| w.key == key)?;
+        let s = w.sampler.as_ref()?;
+        if s.legacy.is_some() {
+            return Some((Target::SamplerWindow { dev: key }, w.rect));
+        }
+        let pad = s.pads.iter().find(|r| crate::sampler_panel::grid_rect(r.pad.rect).contains(pos))?;
+        Some((Target::Pad { dev: key, pad: pad.index }, pad.pad.rect))
+    }
+
     /// Run a finished drag.
     fn drop_payload(&mut self, payload: Payload, target: Target) {
         match payload {
@@ -693,6 +730,19 @@ impl StudioApp {
                 let (track, at) = match target {
                     Target::Track { track, at } => (Some(track), at),
                     Target::Below { at } => (None, at),
+                    Target::Pad { dev, pad } => {
+                        // The pad's own drop (#368): its zone takes the first audio file, one step.
+                        if let Some(p) = first_audio(&files) {
+                            crate::sampler_panel::drop_file_on_pad(self, dev, pad, &p.to_string_lossy());
+                        }
+                        return;
+                    }
+                    Target::SamplerWindow { dev } => {
+                        if let Some(p) = first_audio(&files) {
+                            crate::builtin_editor::load_sample(self, dev.0, &p.to_string_lossy());
+                        }
+                        return;
+                    }
                 };
                 let _ = self.import_files(&files, track, at.unwrap_or_else(|| self.cursor()));
             }
@@ -701,6 +751,11 @@ impl StudioApp {
             }
         }
     }
+}
+
+/// The first audio file of a drag.
+fn first_audio(files: &[PathBuf]) -> Option<&PathBuf> {
+    files.iter().find(|p| kind_of(&p.to_string_lossy(), false) == Some(Kind::Audio))
 }
 
 /// Why a file can't be imported.
@@ -833,14 +888,23 @@ pub fn panel(app: &mut StudioApp, ui: &mut Ui) {
 fn drive_drag(app: &mut StudioApp, ctx: &egui::Context) {
     let Some(drag) = app.browser.drag.clone() else { return };
     let (down, pos, shift) = ctx.input(|i| (i.pointer.primary_down(), i.pointer.latest_pos(), i.modifiers.shift));
-    let target = pos.and_then(|p| app.drop_target(p, !shift));
+    let audio = matches!(&drag.payload, Payload::Files(f) if first_audio(f).is_some());
+    let target = pos.and_then(|p| app.drop_target(ctx, p, !shift, audio));
     if down {
         if let Some(d) = &mut app.browser.drag {
             d.target = target;
         }
         let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("browser-drag")));
-        if let Some((_, r)) = target {
-            p.rect_stroke(rect(r).shrink(1.0), crate::theme::RADIUS_SM, Stroke::new(2.0, TOKENS.accent), StrokeKind::Inside);
+        match target {
+            // A pad shows the Pad's selected border (2 px `signal`): the kit has no drop-hover state.
+            Some((Target::Pad { .. }, r)) => {
+                let w = crate::widgets::pad::SELECTED_WIDTH;
+                p.rect_stroke(rect(r), crate::widgets::pad::RADIUS, Stroke::new(w, TOKENS.signal), StrokeKind::Inside);
+            }
+            Some((_, r)) => {
+                p.rect_stroke(rect(r).shrink(1.0), crate::theme::RADIUS_SM, Stroke::new(2.0, TOKENS.accent), StrokeKind::Inside);
+            }
+            None => {}
         }
         if let Some(pos) = pos {
             let label = match &drag.payload {
@@ -862,7 +926,7 @@ fn drive_drag(app: &mut StudioApp, ctx: &egui::Context) {
     if let Some((t, _)) = target {
         app.drop_payload(drag.payload, t);
     } else {
-        app.status = "Drop onto a track lane, header, strip or the device chain".to_string();
+        app.status = if audio { HINT_AUDIO } else { HINT }.to_string();
     }
 }
 

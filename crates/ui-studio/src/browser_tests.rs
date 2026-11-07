@@ -654,7 +654,8 @@ fn a_drop_on_no_target_says_where_drops_go_and_escape_cancels_a_drag() {
     let from = mid(t.row_named("loop 90.wav").rect.unwrap());
     // Released over the transport: no target.
     t.drag(from, (700.0, 8.0), json!({}));
-    assert_eq!(t.app.status, "Drop onto a track lane, header, strip or the device chain");
+    assert_eq!(t.app.status, crate::browser::HINT_AUDIO);
+    assert_eq!(crate::browser::HINT_AUDIO, "Drop onto a track lane, header, strip, the device chain or a Sampler pad");
     assert_eq!(t.undo_len(), u0);
     // Escape mid-drag: no action, no message.
     t.app.status.clear();
@@ -1020,4 +1021,187 @@ fn dragging_a_folder_row_onto_the_locations_header_adds_it() {
     // A drag of the same folder again does not duplicate it.
     t.drag(mid(t.tree_row(&t.path("Snares")).rect.unwrap()), (header.0 - 40.0, header.1), json!({}));
     assert_eq!(t.app.ui.browser.locations.len(), 2);
+}
+
+// ---- Drops onto a Sampler's window: its pads, or a legacy Sampler's window. ----
+
+impl T {
+    /// The instrument track plays a Sampler (a kit when `kit`, else the one-sample legacy path),
+    /// its editor window open.
+    fn sampler(&mut self, kit: bool) -> (TrackId, usize) {
+        let tr = self.track(TrackKind::Instrument);
+        self.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
+        if kit {
+            self.app.run("mix.sampler_new_patch", json!({"track": tr.0})).unwrap();
+        }
+        let key = (tr, transit_mix::INSTRUMENT_SLOT);
+        self.app.toggle_editor(key);
+        // The window sizes itself to its content over its first frames.
+        self.frames(30);
+        key
+    }
+
+    fn sampler_panel(&self, key: (TrackId, usize)) -> crate::sampler_panel::SamplerLayout {
+        let w = self.app.builtin_editor.windows.iter().find(|w| w.key == key).expect("the Sampler's window");
+        *w.sampler.clone().expect("the Sampler's panel")
+    }
+
+    fn window_rect(&self, key: (TrackId, usize)) -> [f32; 4] {
+        self.app.builtin_editor.windows.iter().find(|w| w.key == key).expect("the Sampler's window").rect
+    }
+
+    fn pad_at(&self, key: (TrackId, usize), index: u8) -> (f32, f32) {
+        mid(self.sampler_panel(key).pad(index).expect("the pad is shown").pad.rect)
+    }
+
+    fn patch(&self, key: (TrackId, usize)) -> transit_model::sampler_patch::PatchV1 {
+        let s = self.app.engine.session();
+        s.track(key.0).unwrap().instrument.as_ref().unwrap().sampler_patch.as_ref().unwrap().ready().unwrap().clone()
+    }
+
+    fn all_clips(&self) -> usize {
+        self.app.engine.session().tracks.iter().map(|t| t.clips().len()).sum()
+    }
+
+    /// Presses on `from` and moves to `over`, holding the button (the drag in flight).
+    fn hold_over(&mut self, from: (f32, f32), over: (f32, f32)) {
+        let mut ev = |e| self.app.synthetic.push(e);
+        ev(egui::Event::PointerMoved(egui::pos2(from.0, from.1)));
+        ev(egui::Event::PointerButton {
+            pos: egui::pos2(from.0, from.1),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        });
+        for k in 1..=10 {
+            let f = k as f32 / 10.0;
+            ev(egui::Event::PointerMoved(egui::pos2(from.0 + (over.0 - from.0) * f, from.1 + (over.1 - from.1) * f)));
+        }
+        self.drain();
+    }
+
+    /// Frames until the synthetic input is fed (one pointer event a frame), and a few more.
+    fn drain(&mut self) {
+        while !self.app.synthetic.is_empty() {
+            self.frames(1);
+        }
+        self.frames(3);
+    }
+
+    fn release_at(&mut self, at: (f32, f32)) {
+        let up = egui::pos2(at.0, at.1);
+        self.app.synthetic.push(egui::Event::PointerButton {
+            pos: up,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        });
+        self.drain();
+    }
+}
+
+#[test]
+fn an_audio_file_dragged_onto_pad_a2_binds_the_pad_in_one_step_and_imports_no_clip() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let key = t.sampler(true);
+    let from = mid(t.row_named("loop 90.wav").rect.unwrap());
+    let a2 = t.pad_at(key, 1);
+    let (clips, u0) = (t.all_clips(), t.undo_len());
+    // While held over the pad: the pad is the target, outlined on its own rect.
+    t.hold_over(from, a2);
+    assert_eq!(t.app.browser.layout.drop_target, Some(crate::browser::Target::Pad { dev: key, pad: 1 }));
+    assert_eq!(t.app.browser.layout.drop, Some(t.sampler_panel(key).pad(1).unwrap().pad.rect));
+    t.release_at(a2);
+    assert_eq!(t.patch(key).pad(1).zone, Some(0), "pad A2 is bound: {}", t.app.status);
+    assert_eq!(t.all_clips(), clips, "no clip");
+    assert!(!t.app.imports.active(), "no import queued");
+    assert_eq!(t.undo_len(), u0 + 1, "one undo step");
+    // Negative control: with the pad target gone (the window closed), the same drag imports a clip.
+    t.app.toggle_editor(key);
+    t.frames(4);
+    t.drag(from, a2, json!({}));
+    t.settle_imports();
+    assert_eq!(t.all_clips(), clips + 1, "the arrangement import the pad target kept out: {}", t.app.status);
+}
+
+#[test]
+fn an_audio_file_released_on_the_pads_window_strip_does_nothing() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let key = t.sampler(true);
+    let from = mid(t.row_named("loop 90.wav").rect.unwrap());
+    let strip = mid(t.sampler_panel(key).strip.panel);
+    let (clips, u0) = (t.all_clips(), t.undo_len());
+    t.hold_over(from, strip);
+    assert_eq!(t.app.browser.layout.drop_target, None, "the window swallows the drop");
+    t.release_at(strip);
+    assert_eq!(t.all_clips(), clips, "no clip");
+    assert!(!t.app.imports.active(), "no import queued");
+    assert!(t.patch(key).zones.is_empty(), "no pad");
+    assert_eq!(t.undo_len(), u0);
+    assert_eq!(t.app.status, crate::browser::HINT_AUDIO);
+    // Negative control: the same release on a pad is taken.
+    let a1 = t.pad_at(key, 0);
+    t.drag(from, a1, json!({}));
+    assert_eq!(t.patch(key).pad(0).zone, Some(0));
+}
+
+#[test]
+fn an_audio_file_released_on_a_legacy_sampler_window_loads_as_its_sample() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let key = t.sampler(false);
+    let legacy = t.sampler_panel(key).legacy.expect("the legacy body").panel;
+    let from = mid(t.row_named("loop 90.wav").rect.unwrap());
+    let clips = t.all_clips();
+    t.hold_over(from, mid(legacy));
+    assert_eq!(t.app.browser.layout.drop_target, Some(crate::browser::Target::SamplerWindow { dev: key }));
+    assert_eq!(t.app.browser.layout.drop, Some(t.window_rect(key)));
+    t.release_at(mid(legacy));
+    let ins = t.app.engine.session().track(key.0).unwrap().instrument.clone().unwrap();
+    assert!(ins.sample.is_some(), "the sample loaded: {}", t.app.status);
+    assert_eq!(t.all_clips(), clips, "no clip");
+    assert!(!t.app.imports.active(), "no import queued");
+}
+
+#[test]
+fn a_plugin_dragged_over_a_pad_has_no_target() {
+    let mut t = T::new();
+    let key = t.sampler(true);
+    let a4 = t.pad_at(key, 3);
+    // Audio tracks until one's header or lane lies under pad A4: a plug-in target behind the window.
+    let covered = |t: &T| {
+        let l = &t.app.arrange.layout;
+        l.tracks
+            .iter()
+            .find(|r| [r.lane, r.header].iter().any(|b| a4.0 >= b[0] && a4.0 <= b[2] && a4.1 >= b[1] && a4.1 <= b[3]))
+            .map(|r| TrackId(r.id))
+    };
+    for _ in 0..30 {
+        if covered(&t).is_some() {
+            break;
+        }
+        t.app.run("track.new", json!({"kind": "audio", "format": "stereo"})).unwrap();
+        t.frames(3);
+    }
+    let behind = covered(&t).expect("a track behind pad A4");
+    let fx = t.app.builtin_plugins().into_iter().find(|p| !p.instrument).unwrap().name;
+    t.click(mid(t.app.browser.layout.tab_plugins));
+    let from = mid(t.plugin(&fx).rect.unwrap());
+    let inserts = |t: &T| t.app.engine.session().track(behind).unwrap().mixer.inserts.iter().flatten().count();
+    let u0 = t.undo_len();
+    t.hold_over(from, a4);
+    assert!(t.app.browser.drag.is_some(), "the plug-in drag is in flight");
+    assert_eq!(t.app.browser.layout.drop_target, None, "a plug-in over a pad is no target");
+    t.release_at(a4);
+    assert_eq!(t.undo_len(), u0, "nothing changed");
+    assert_eq!(inserts(&t), 0, "the track behind the window took nothing");
+    assert!(t.patch(key).zones.is_empty());
+    assert_eq!(t.app.status, crate::browser::HINT, "the plug-in hint names no pad");
+    // Negative control: with the window closed, the same drag lands on the track behind it.
+    t.app.toggle_editor(key);
+    t.frames(4);
+    t.drag(from, a4, json!({}));
+    assert_eq!(inserts(&t), 1, "{}", t.app.status);
 }

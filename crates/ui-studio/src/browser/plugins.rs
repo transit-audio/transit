@@ -18,6 +18,11 @@ impl StudioApp {
                 self.status = format!("Drop {name} on a track, a mixer strip or the device chain");
                 return Err(self.status.clone());
             }
+            // Not offered for a plug-in (`drop_target`), kept refused here.
+            Target::Pad { .. } | Target::SamplerWindow { .. } => {
+                self.status = format!("Drop {name} on a track, a mixer strip or the device chain");
+                return Err(self.status.clone());
+            }
         };
         let Some(t) = self.engine.session().track(track).map(|t| (t.kind, t.name.clone())) else { return Err("no such track".into()) };
         if instrument {

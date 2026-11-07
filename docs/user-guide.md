@@ -521,12 +521,15 @@ Editors** closes every editor, built-in and hosted. The link button in the title
 (**Follow Selection**) makes the window show the Macro Oscillator of whichever track you focus,
 as Logic's Link does; off, the window stays on its own instrument.
 
-Files dragged in from the file manager go to whatever is under the pointer where you let go. On a
-Sampler's window, a file dropped on a pad becomes that pad's sample (a one-sample Sampler takes it
-anywhere in its window); dropped elsewhere on a device window, it is ignored. Anywhere else, the
-file is imported into the arrangement at the cursor (a `.transit` file opens as the session, a MIDI
-file imports as MIDI). On Windows the drop lands where you let go; on other platforms it lands as
-soon as the pointer moves after you let go (see the known issues).
+To give a Sampler pad its sample, drag a sample from the Files browser or from your file manager
+onto a pad: the file dropped on a pad becomes that pad's sample, in one undo step (a one-sample
+Sampler takes it anywhere in its window). While you drag from the browser, the pad under the pointer
+is outlined. A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
+drop, so nothing behind it is reached. Anywhere else, a browser drag lands on the track lane,
+header, mixer strip or device chain where you let go, and a file from the file manager is imported
+into the arrangement at the cursor (a `.transit` file opens as the session, a MIDI file imports as
+MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
+platforms it lands as soon as the pointer moves after you let go (see the known issues).
 
 ## Resonator
 

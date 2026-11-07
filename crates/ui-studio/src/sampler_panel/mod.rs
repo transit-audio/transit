@@ -309,6 +309,14 @@ pub(crate) fn section_label(p: &egui::Painter, at: Pos2, text: &str) -> Rect {
     widgets::role_text(p, &tokens::LABEL_SECTION, text, TOKENS.text_muted, Align2::LEFT_TOP, at)
 }
 
+/// An audio file dragged from the browser onto pad `pad` of the Sampler `key`: the pad's own drop
+/// (`behavior::drop_file`, one undo step; a refusal shows as the panel's note).
+pub(crate) fn drop_file_on_pad(app: &mut StudioApp, key: (TrackId, usize), pad: u8, path: &str) -> bool {
+    let Some(ins) = app.builtin_at(key) else { return false };
+    let Some(info) = transit_dsp::plugin_info(&ins.plugin) else { return false };
+    behavior::drop_file(app, Dev { key, ins: &ins, info }, pad, path)
+}
+
 /// A layout rect as an egui rect.
 pub(crate) fn grid_rect(r: [f32; 4]) -> Rect {
     Rect::from_min_max(pos2(r[0], r[1]), pos2(r[2], r[3]))
