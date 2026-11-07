@@ -809,3 +809,71 @@ pub mod pad {
         ("soloExcluded/opacity", 0.4),
     ];
 }
+
+/// The mixer's channel strip (`channelStrip` in tokens.json): its widths, the fixed section
+/// heights that keep every fader aligned, and the insert slot. Every number by its path for the
+/// drift test.
+pub mod channel_strip {
+    pub const WIDTH: f32 = 132.0;
+    pub const WIDTH_MAIN: f32 = 160.0;
+    pub const GAP: f32 = 4.0;
+    /// The extra space before the main bus strip.
+    pub const GAP_MAIN: f32 = 8.0;
+    pub const COLOR_BAR: f32 = 3.0;
+    /// Padding inside the strip: top (under the color bar), sides, bottom.
+    pub const PADDING: [f32; 3] = [7.0, 8.0, 8.0];
+    /// Between sections, top to bottom.
+    pub const SECTION_GAP: f32 = 6.0;
+    pub const NAME_HEIGHT: f32 = 18.0;
+    /// The input and output dropdowns and the toggles.
+    pub const ROW_HEIGHT: f32 = 24.0;
+    /// The inserts and sends sections' bodies (under a 1 px `line.inset` and 6 px of padding).
+    pub const INSERTS_HEIGHT: f32 = 112.0;
+    pub const SENDS_HEIGHT: f32 = 86.0;
+    /// The padding between a section's top line and its body.
+    pub const SECTION_PADDING: f32 = 6.0;
+    /// The short variant's `FX n` / `Snd n` row.
+    pub const SHORT_ROW: f32 = 22.0;
+    pub const PAN_KNOB: f32 = 36.0;
+    pub const PAN_ROW: f32 = 40.0;
+    pub const PAN_VALUE_WIDTH: f32 = 30.0;
+    /// The MIDI OUT button beside the input.
+    pub const MIDI_OUT_WIDTH: f32 = 32.0;
+    pub const READOUT_HEIGHT: f32 = 26.0;
+    pub const PEAK_WIDTH: f32 = 46.0;
+    pub const PEAK_WIDTH_MAIN: f32 = 56.0;
+    pub const INSERT_SLOT_HEIGHT: f32 = 22.0;
+    pub const INSERT_SLOT_RADIUS: f32 = 4.0;
+    pub const INSERT_SLOT_GAP: f32 = 3.0;
+    pub const INDICATOR_SIZE: f32 = 12.0;
+    pub const INDICATOR_STROKE: f32 = 1.5;
+    pub const METRICS: &[(&str, f32)] = &[
+        ("width", WIDTH),
+        ("widthMain", WIDTH_MAIN),
+        ("gap", GAP),
+        ("gapMain", GAP_MAIN),
+        ("colorBar", COLOR_BAR),
+        ("padding/0", PADDING[0]),
+        ("padding/1", PADDING[1]),
+        ("padding/2", PADDING[2]),
+        ("sectionGap", SECTION_GAP),
+        ("nameHeight", NAME_HEIGHT),
+        ("rowHeight", ROW_HEIGHT),
+        ("insertsHeight", INSERTS_HEIGHT),
+        ("sendsHeight", SENDS_HEIGHT),
+        ("sectionPadding", SECTION_PADDING),
+        ("shortRow", SHORT_ROW),
+        ("panKnob", PAN_KNOB),
+        ("panRow", PAN_ROW),
+        ("panValueWidth", PAN_VALUE_WIDTH),
+        ("midiOutWidth", MIDI_OUT_WIDTH),
+        ("readoutHeight", READOUT_HEIGHT),
+        ("peakWidth", PEAK_WIDTH),
+        ("peakWidthMain", PEAK_WIDTH_MAIN),
+        ("insertSlot/height", INSERT_SLOT_HEIGHT),
+        ("insertSlot/radius", INSERT_SLOT_RADIUS),
+        ("insertSlot/gap", INSERT_SLOT_GAP),
+        ("insertSlot/indicatorSize", INDICATOR_SIZE),
+        ("insertSlot/indicatorStroke", INDICATOR_STROKE),
+    ];
+}

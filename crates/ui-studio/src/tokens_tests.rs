@@ -478,3 +478,32 @@ fn the_light_meter_ok_carries_a_letter() {
     assert!(was < 4.5, "negative control: #1E8A4C {was}");
     assert!(contrast(LIGHT.meter_ok, LIGHT.surface_panel) >= 3.0, "the bar still reads on the panel");
 }
+
+/// The channel strip (`channelStrip` in tokens.json): every number both ways; the colors it names
+/// are tokens.
+#[test]
+fn the_channel_strip_matches_tokens_json_both_ways() {
+    let v = json();
+    let cs = at(&v, "channelStrip");
+    let mut leaves = Vec::new();
+    number_leaves(cs, "", &mut leaves);
+    let in_json: BTreeSet<&str> = leaves.iter().map(|(p, _)| p.as_str()).collect();
+    let in_rust: BTreeSet<&str> = tokens::channel_strip::METRICS.iter().map(|(p, _)| *p).collect();
+    assert_eq!(in_json, in_rust, "channelStrip paths differ between tokens.json and Rust");
+    for (path, x) in tokens::channel_strip::METRICS {
+        assert_eq!(num(cs, path), *x, "channelStrip/{path}");
+    }
+    let known: BTreeSet<String> = ["color", "arrangement"].iter().flat_map(|k| color_names(&v, k)).collect();
+    for path in [
+        "selectedBorder",
+        "insertSlot/fill",
+        "insertSlot/border",
+        "insertSlot/on/glyph",
+        "insertSlot/on/name",
+        "insertSlot/bypassed/glyph",
+        "insertSlot/bypassed/name",
+    ] {
+        let name = at(cs, path).as_str().unwrap();
+        assert!(known.contains(name), "channelStrip/{path}: {name} is not a token");
+    }
+}
