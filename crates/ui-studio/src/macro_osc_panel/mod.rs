@@ -34,6 +34,8 @@ mod test_rig;
 #[cfg(test)]
 mod title_bar_tests;
 #[cfg(test)]
+mod width_tests;
+#[cfg(test)]
 mod window_tests;
 
 use crate::StudioApp;
@@ -60,7 +62,10 @@ pub const CREDIT: &str = "A port of Émilie Gillet's open-source macro oscillato
 /// windows shrink the fractional columns down to [`MIN_WIDTH`].
 pub const DESIGN_WIDTH: f32 = 1440.0;
 /// The narrowest the window's content lays out; below it the window keeps this width.
-pub const MIN_WIDTH: f32 = 1040.0;
+/// Set by the content (326-X, `width_tests`): the narrowest multiple of 8 at which, with every
+/// section open and every knob at the widest value it prints, no label or readout meets its
+/// neighbor or leaves its panel.
+pub const MIN_WIDTH: f32 = 1336.0;
 /// The footer under the content.
 pub const FOOTER_H: f32 = 32.0;
 
@@ -598,7 +603,7 @@ pub fn content_height(app: &StudioApp, ctx: &egui::Context, key: (TrackId, usize
     let Some(ins) = app.builtin_at(key) else { return 0.0 };
     let Some(info) = transit_dsp::plugin_info(&ins.plugin) else { return 0.0 };
     let dev = Dev { key, ins: &ins, info };
-    let w = width.max(MIN_WIDTH - crate::device_window::edge().x) - 2.0 * space::WINDOW_PADDING;
+    let w = width.max(window::min_width(app) - crate::device_window::edge().x) - 2.0 * space::WINDOW_PADDING;
     let mut h = 2.0 * space::WINDOW_PADDING;
     h += hero::height(w);
     h += space::PANEL_GAP + shaper::height(app, dev, w);
@@ -609,7 +614,7 @@ pub fn content_height(app: &StudioApp, ctx: &egui::Context, key: (TrackId, usize
 /// Draws the panel's body (below the title bar, above the footer) into `ui` at `width`.
 pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorLayout, out: &mut MacroLayout) {
     // The window's inside: its width less the frame's edge (never under the minimum's).
-    let width = ui.available_width().max(MIN_WIDTH - crate::device_window::edge().x);
+    let width = ui.available_width().max(window::min_width(app) - crate::device_window::edge().x);
     let origin = ui.cursor().min;
     let w = width - 2.0 * space::WINDOW_PADDING;
     let mut y = origin.y + space::WINDOW_PADDING;

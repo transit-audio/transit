@@ -230,8 +230,12 @@ fn faults(b: &super::TitleLayout) -> Vec<String> {
 
 #[test]
 fn the_bar_reflows_without_overlap_from_the_minimum_to_the_design_width() {
-    for width in [super::MIN_WIDTH, super::DESIGN_WIDTH] {
+    // The minimum, the design width, and 1040 (the minimum before 326-X, where the bar broke:
+    // the reflow holds below the minimum too, and there the old centering fails).
+    const OLD_MIN: f32 = 1040.0;
+    for width in [super::MIN_WIDTH, super::DESIGN_WIDTH, OLD_MIN] {
         let (mut t, tr) = T::open();
+        t.app.builtin_editor.macro_osc.min_override = Some(width.min(super::MIN_WIDTH));
         t.screen = egui::vec2(width + 2.0 * crate::device_window::SCREEN_MARGIN, 900.0);
         t.frames(3);
         let p = t.panel(tr);
@@ -246,7 +250,7 @@ fn the_bar_reflows_without_overlap_from_the_minimum_to_the_design_width() {
         )
         .x;
         assert!((b.device_rect[2] - b.device_rect[0] - full).abs() < 0.01, "at {width}: the device title in full");
-        if width == super::MIN_WIDTH {
+        if width == OLD_MIN {
             // Negative control: the browser centered on the bar (before 326-X) meets a side group.
             let w = preset_width(FIELD_W);
             let x = (b.bar[0] + b.bar[2]) / 2.0 - w / 2.0;

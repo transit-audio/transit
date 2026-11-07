@@ -67,6 +67,10 @@ pub struct State {
     pub(crate) wheel_now: bool,
     /// Where a window that follow selection just moved to an instance opens: where it was.
     carry: HashMap<u64, Pos2>,
+    /// A lower minimum width, so a test can lay the content out narrower than [`MIN_WIDTH`]
+    /// allows (the minimum's negative control).
+    #[cfg(test)]
+    pub min_override: Option<f32>,
 }
 
 /// A window drawn this frame: its insert, rect, layer and device id.
@@ -75,6 +79,16 @@ struct Shown(u64, Rect, egui::LayerId, &'static str);
 
 /// The panel's widths for the shared policy.
 pub const WIDTHS: Widths = Widths { design: super::DESIGN_WIDTH, min: MIN_WIDTH };
+
+/// The minimum width the window and its content keep.
+pub fn min_width(app: &StudioApp) -> f32 {
+    #[cfg(test)]
+    if let Some(w) = app.builtin_editor.macro_osc.min_override {
+        return w;
+    }
+    let _ = app;
+    MIN_WIDTH
+}
 
 /// The window's size on `screen` for a body `content_h` tall (the shared rule with this panel's
 /// widths, title bar and footer).
@@ -170,8 +184,9 @@ pub(crate) fn show(
     let screen = ctx.content_rect();
     // The content's height at the width the window will have, this frame (a section that opened
     // or closed since the last frame counts).
-    let width = device_window::width(WIDTHS, screen) - device_window::edge().x;
-    let size = window_size(screen, super::content_height(app, ctx, key, width));
+    let widths = Widths { min: min_width(app), ..WIDTHS };
+    let width = device_window::width(widths, screen) - device_window::edge().x;
+    let size = device_window::size(widths, screen, space::TITLE_BAR_HEIGHT, super::content_height(app, ctx, key, width), FOOTER_H);
     let fresh = !app.builtin_editor.macro_osc.shown.iter().any(|s| s.0 == uid);
     if fresh || !app.builtin_editor.macro_osc.pos.contains_key(&uid) {
         let open: Vec<Rect> = app.builtin_editor.macro_osc.shown.iter().filter(|s| s.0 != uid).map(|s| s.1).collect();
