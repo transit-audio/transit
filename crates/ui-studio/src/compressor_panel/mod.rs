@@ -5,8 +5,9 @@
 //!
 //! Anatomy (README, Device anatomy): A, the shared 52 px title bar
 //! ([`crate::device_editor::title_bar`]); B, the hero panel ([`hero`]): the transfer curve in a
-//! display well, the level and gain-reduction history well, and the gain-reduction meter with its
-//! readout; C, the controls panel ([`sections`]): the dynamics knobs (Threshold, Ratio, Knee,
+//! display well with the operating point, the level and gain-reduction
+//! history well, and the gain-reduction meter with its readout; C, the controls
+//! panel ([`sections`]): the dynamics knobs (Threshold, Ratio, Knee,
 //! Attack, Release, Makeup, Mix, the board's order), then beside a divider the sidechain key and
 //! the mode (Peak or Limit); then the Detector section bar (lookahead and the sidechain's
 //! high-pass, the parameters the board does not place), collapsed while they are at rest; then the
@@ -30,6 +31,8 @@ mod sections_tests;
 #[cfg(test)]
 mod test_rig;
 #[cfg(test)]
+mod transfer_tests;
+#[cfg(test)]
 mod width_tests;
 #[cfg(test)]
 mod window_tests;
@@ -41,10 +44,10 @@ use crate::device_editor::{Dev, bipolar, child, set};
 use crate::theme::TOKENS;
 use crate::tokens::{self, layout as space, radius};
 use crate::widgets::{self, knob, r4};
-use egui::{Align2, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use transit_model::TrackId;
 
-pub use hero::{transfer_db, transfer_gr_db};
+pub use hero::{DotRecord, transfer_db, transfer_gr_db};
 
 /// The Compressor's plug-in id.
 pub const COMPRESSOR: &str = "compressor";
@@ -96,6 +99,8 @@ pub struct HeroLayout {
     pub gr_db: f32,
     pub gr_readout: String,
     pub gr_readout_rect: [f32; 4],
+    /// The operating point (`None` while hidden: nothing published yet, or below −60 dB).
+    pub dot: Option<DotRecord>,
 }
 
 /// The sidechain key as last drawn: its label, the dropdown and the text it shows.
@@ -150,6 +155,21 @@ impl CompressorLayout {
     /// The section or panel named `name`.
     pub fn section(&self, name: &str) -> Option<[f32; 4]> {
         self.sections.iter().chain(&self.panels).find(|s| s.0 == name).map(|s| s.1)
+    }
+}
+
+/// A color the compressor's tokens name (`compressor` in tokens.json), as the theme draws it.
+pub(crate) fn named(name: &str) -> Color32 {
+    let t = &TOKENS;
+    match name {
+        "line" => t.line,
+        "grid" => t.grid,
+        "text" => t.text,
+        "surface.inset" => t.surface_inset,
+        "ink.ghost" => t.ink_ghost,
+        "signal" => t.signal,
+        "mod" => t.modulation,
+        _ => Color32::MAGENTA,
     }
 }
 

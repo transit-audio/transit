@@ -895,9 +895,39 @@ pub mod channel_strip {
 }
 
 /// The compressor's displays (`compressor` in tokens.json): the unity diagonal, the operating
-/// point and the history well. Numbers only; the colors are named in the design and read from the
-/// color tables. Checked both ways by the drift test.
+/// point and the history well. The numbers, and the color names and labels as the design writes
+/// them (the panel draws each name with its theme token). Checked both ways by the drift test.
 pub mod compressor {
+    pub const UNITY_COLOR: &str = "line";
+    pub const OPERATING_POINT_FILL: &str = "text";
+    pub const OPERATING_POINT_RING: &str = "surface.inset";
+    pub const OPERATING_POINT_SOURCE: &str = "detector input level, dB, at UI rate";
+    pub const HISTORY_SECOND_LINES: &str = "grid";
+    pub const HISTORY_QUARTER_LINES: &str = "grid";
+    pub const HISTORY_TIME_LABELS: [&str; 2] = ["\u{2212}4 s", "now"];
+    pub const HISTORY_INPUT_FILL: &str = "ink.ghost";
+    pub const HISTORY_OUTPUT_STROKE: &str = "signal";
+    pub const HISTORY_GR_FILL: &str = "mod";
+    pub const HISTORY_GR_STROKE: &str = "mod";
+    pub const HISTORY_THRESHOLD_COLOR: &str = "text";
+    /// Every string under `compressor` in tokens.json by its path.
+    pub const STRINGS: &[(&str, &str)] = &[
+        ("unity/color", UNITY_COLOR),
+        ("operatingPoint/fill", OPERATING_POINT_FILL),
+        ("operatingPoint/ring", OPERATING_POINT_RING),
+        ("operatingPoint/source", OPERATING_POINT_SOURCE),
+        ("history/secondLines", HISTORY_SECOND_LINES),
+        ("history/quarterLines", HISTORY_QUARTER_LINES),
+        ("history/timeLabels/0", HISTORY_TIME_LABELS[0]),
+        ("history/timeLabels/1", HISTORY_TIME_LABELS[1]),
+        ("history/input/fill", HISTORY_INPUT_FILL),
+        ("history/output/stroke", HISTORY_OUTPUT_STROKE),
+        ("history/gainReduction/fill", HISTORY_GR_FILL),
+        ("history/gainReduction/stroke", HISTORY_GR_STROKE),
+        ("history/threshold/color", HISTORY_THRESHOLD_COLOR),
+    ];
+    /// The gain-reduction band hangs from the top (`history/gainReduction/fromTop`).
+    pub const HISTORY_GR_FROM_TOP: bool = true;
     pub const UNITY_WIDTH: f32 = 1.0;
     pub const UNITY_DASH: [f32; 2] = [3.0, 3.0];
     pub const OPERATING_POINT_SIZE: f32 = 8.0;

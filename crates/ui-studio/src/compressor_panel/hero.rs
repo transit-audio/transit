@@ -5,21 +5,33 @@
 //!   static transfer curve in `signal` over its fill (input dB across, output dB up, both −60 to
 //!   0 dB, the board's scale), from the threshold, ratio, knee and makeup the way the plug-in's
 //!   gain computer applies them ([`transfer_db`]; Limit is its ratio of 1000).
+//!   Over the curve the operating point, a solid 8 px `text` dot with a 2 px `surface.inset` ring
+//!   at the published detector level and the curve's output there, stepped with the peak fall-off
+//!   ballistics and hidden below −60 dB or until a level is published (README, Compressor
+//!   displays).
 //! - **History** (the rest): a display well with grid lines at the quarters.
 //! - **GR** (64 wide): the kit's gain-reduction bar (14 wide, the board's), filling down from the
 //!   top with its `GR` tag, stepped with the peak fall-off ballistics, and the readout under it.
-//!
-//! What the board draws and the design language does not yet name is left out and reported (the
-//! 326-K result): the operating-point dot, the unity diagonal, the history's traces, its
-//! threshold line and its `IN · OUT · GR` legend, and its time window.
 
-use super::{CompressorLayout, Dev, WellRecord, panel, section_label};
+use super::{CompressorLayout, Dev, WellRecord, named, panel, section_label};
 use crate::StudioApp;
 use crate::builtin_editor::EditorLayout;
 use crate::theme::TOKENS;
-use crate::tokens::{self, alpha, layout as space};
+use crate::tokens::{self, alpha, compressor as tok, layout as space};
 use crate::widgets::{self, display_well, level_meter, r4};
-use egui::{Align2, Mesh, Pos2, Rect, Shape, Stroke, Ui, pos2, vec2};
+use egui::{Align2, Color32, Mesh, Pos2, Rect, Shape, Stroke, Ui, pos2, vec2};
+
+/// The operating point as drawn: the displayed input level, the curve's output there, the
+/// center, the dot's radius, fill and ring.
+#[derive(Debug, Clone, Default)]
+pub struct DotRecord {
+    pub input_db: f32,
+    pub output_db: f32,
+    pub center: [f32; 2],
+    pub radius: f32,
+    pub fill: Color32,
+    pub ring: Stroke,
+}
 
 /// A column label's row and the room under it (the board's 6).
 pub const LABEL_H: f32 = 14.0;
@@ -141,6 +153,39 @@ fn gr_level(app: &mut StudioApp, ui: &Ui, dev: Dev) -> f32 {
     shown
 }
 
+/// The operating point's displayed input level: the tap's newest detector level, stepped with the
+/// peak fall-off ballistics; `None` until a level has been published since the editor opened.
+fn dot_level(app: &mut StudioApp, ui: &Ui, dev: Dev) -> Option<f32> {
+    let uid = crate::scope_strip::hub_uid(dev.key, dev.ins);
+    let target = app.scope_hub().and_then(|h| h.detector_level_db(dev.key.0, uid));
+    let dt = ui.input(|i| i.stable_dt).clamp(0.0, 0.1);
+    let st = &mut app.builtin_editor.devices;
+    let prev = st.dots.get(&dev.uid()).copied();
+    let target = match (prev, target) {
+        (None, None) => return None,
+        (_, Some(t)) => t,
+        (Some(_), None) => crate::widgets::fader::FLOOR_DB,
+    };
+    let shown = level_meter::meter_step(prev.unwrap_or(target), target, dt, level_meter::Ballistics::PEAK_FALLOFF);
+    st.dots.insert(dev.uid(), shown);
+    Some(shown)
+}
+
+/// The operating point at (`input_db`, the curve's output there), unless it is below the floor.
+fn paint_dot(app: &StudioApp, ui: &Ui, dev: Dev, plot: Rect, input_db: f32) -> Option<DotRecord> {
+    if input_db < tok::OPERATING_POINT_HIDE_BELOW_DB {
+        return None;
+    }
+    let v = |id: &str| dev.value(app, id);
+    let output_db = transfer_db(input_db, v("threshold"), v("ratio"), v("knee"), v("makeup"), dev.on(app, "limiter"));
+    let c = display_well::to_screen(plot, [scale(input_db), scale(output_db)]);
+    let radius = tok::OPERATING_POINT_SIZE / 2.0;
+    let fill = named(tok::OPERATING_POINT_FILL);
+    let ring = Stroke::new(tok::OPERATING_POINT_RING_WIDTH, named(tok::OPERATING_POINT_RING));
+    ui.painter().circle(c, radius, fill, ring);
+    Some(DotRecord { input_db, output_db, center: [c.x, c.y], radius, fill, ring })
+}
+
 /// Draws the hero panel into `rect`.
 pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut EditorLayout, out: &mut CompressorLayout) {
     let t = &TOKENS;
@@ -159,6 +204,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let lines = grid(ui, plot, true);
     paint_curve(ui, plot, &curve);
     out.hero.curve = curve;
+    out.hero.dot = dot_level(app, ui, dev).and_then(|db| paint_dot(app, ui, dev, plot, db));
     out.wells.push(WellRecord { name: "transfer".to_string(), well: well.layout, grid: lines });
     // GR, right-aligned.
     let gr_col = Rect::from_min_max(pos2(inner.max.x - GR_W, inner.min.y), inner.max);

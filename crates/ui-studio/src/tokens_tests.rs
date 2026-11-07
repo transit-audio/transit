@@ -544,4 +544,22 @@ fn the_compressor_displays_match_tokens_json_both_ways() {
         let name = at(cp, path).as_str().unwrap();
         assert!(known.contains(name), "compressor/{path}: {name} is not a token");
     }
+    // The strings (color names, labels) both ways, and the one flag.
+    let mut strings = Vec::new();
+    string_leaves(cp, "", &mut strings);
+    let in_json: BTreeSet<(&str, &str)> = strings.iter().map(|(p, s)| (p.as_str(), s.as_str())).collect();
+    let in_rust: BTreeSet<(&str, &str)> = tokens::compressor::STRINGS.iter().copied().collect();
+    assert_eq!(in_json, in_rust, "compressor strings differ between tokens.json and Rust");
+    assert_eq!(at(cp, "history/gainReduction/fromTop").as_bool(), Some(tokens::compressor::HISTORY_GR_FROM_TOP));
+}
+
+/// Every string leaf under `value` by its path (`a/b/0`).
+fn string_leaves(value: &Value, prefix: &str, out: &mut Vec<(String, String)>) {
+    let join = |k: &str| if prefix.is_empty() { k.to_string() } else { format!("{prefix}/{k}") };
+    match value {
+        Value::String(s) => out.push((prefix.to_string(), s.clone())),
+        Value::Array(a) => a.iter().enumerate().for_each(|(i, x)| string_leaves(x, &join(&i.to_string()), out)),
+        Value::Object(o) => o.iter().for_each(|(k, x)| string_leaves(x, &join(k), out)),
+        _ => {}
+    }
 }
