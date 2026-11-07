@@ -345,25 +345,25 @@ three columns are what the Tone knobs are called while the model is selected.
 
 | # | Model | Picker | What it is | Harmonics | Timbre | Morph |
 |---|---|---|---|---|---|---|
-| 1 | Filtered analog | VCF | Analog waves through a resonant low-pass filter | Resonance | Cutoff | Wave and sub |
-| 2 | Phase distortion | Phase | A sine bent by an asymmetric triangle modulator | Bend pitch | Bend amount | Skew |
+| 1 | Filtered analog | Filtered | Analog waves through a resonant low-pass filter | Resonance | Cutoff | Wave and sub |
+| 2 | Phase distortion | Phase | A sine bent by an asymmetric triangle modulator | Bend freq | Bend amount | Skew |
 | 3 | Six-op FM 1 | 6-op 1 | Six-operator FM, first bank of 32 patches | Patch | Mod level | Env stretch |
 | 4 | Six-op FM 2 | 6-op 2 | Six-operator FM, second bank of 32 patches | Patch | Mod level | Env stretch |
 | 5 | Six-op FM 3 | 6-op 3 | Six-operator FM, third bank of 32 patches | Patch | Mod level | Env stretch |
 | 6 | Wave terrain | Terrain | A 2D surface read along an elliptical path | Terrain | Path radius | Path offset |
 | 7 | String machine | Strings | Divide-down string-machine chords with filter and chorus | Chord | Filter, chorus | Waveform |
-| 8 | Chiptune | Chip | Square-wave chords with an arpeggiator and a triangle voice | Chord | Arp, inversion | Pulse or sync |
+| 8 | Chiptune | Chiptune | Square-wave chords with an arpeggiator and a triangle voice | Chord | Arp, inversion | Pulse or sync |
 | 9 | Virtual analog | Analog | Two classic waves with sync and crossfade | Detune | Square shape | Saw shape |
 | 10 | Waveshaper | Shaper | A triangle through a waveshaper and a wavefolder | Shaper wave | Fold amount | Asymmetry |
 | 11 | FM | FM | Two sine operators modulating each other's phase | Ratio | FM index | Feedback |
 | 12 | Grain | Grain | A formant oscillator built from windowed sine segments | Formant ratio | Formant pitch | Formant width |
-| 13 | Additive | Add | Sine harmonics shaped into a movable spectral bump | Bump count | Peak harmonic | Bump width |
-| 14 | Wavetable | Table | Four banks of 8 by 8 waveforms, scanned by row and column | Bank | Row | Column |
+| 13 | Additive | Additive | Sine harmonics shaped into a movable spectral bump | Bump count | Peak harmonic | Bump width |
+| 14 | Wavetable | Wavetbl | Four banks of 8 by 8 waveforms, scanned by row and column | Bank | Row | Column |
 | 15 | Chord | Chord | Four-note chords from analog or wavetable oscillators | Chord type | Inversion | Waveform |
-| 16 | Speech | Voice | Vowel and word synthesis in several speech styles | Speech style | Formant shift | Phoneme, word |
+| 16 | Speech | Speech | Vowel and word synthesis in several speech styles | Speech style | Formant shift | Phoneme, word |
 | 17 | Swarm | Swarm | Eight enveloped saw grains in a drifting cloud | Pitch scatter | Density | Grain length |
 | 18 | Filtered noise | Noise | Clocked noise through a resonant filter | Filter type | Clock rate | Resonance |
-| 19 | Particle noise | Dust | Random dust clicks through resonant filter networks | Pitch scatter | Density | Filter type |
+| 19 | Particle noise | Particle | Random dust clicks through filter networks | Pitch scatter | Density | Filter type |
 | 20 | Inharmonic string | Pluck | A struck or plucked string, from tuned to inharmonic | Material | Brightness | Decay |
 | 21 | Modal | Modal | A modal resonator struck by noise or dust | Material | Brightness | Decay |
 | 22 | Bass drum | Kick | Analog-style kick: a punchy attack and a tuned body | Attack, drive | Brightness | Decay |
