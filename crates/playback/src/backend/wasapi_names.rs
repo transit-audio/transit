@@ -23,6 +23,23 @@ fn duplicates(list: &[DeviceInfo]) -> Vec<(String, usize)> {
     counts.into_iter().filter(|(_, n)| *n > 1).map(|(name, n)| (name.to_owned(), n)).collect()
 }
 
+/// What the Audio Devices window offers for each endpoint both listers name, compared by name: the
+/// buffer sizes (`buffer_sizes()`) and the sample-rate set. One line per difference.
+fn row_differences(direction: &str, from_cpal: &[DeviceInfo], from_native: &[DeviceInfo]) -> Vec<String> {
+    let mut differences = Vec::new();
+    for c in from_cpal {
+        let Some(n) = from_native.iter().find(|n| n.name == c.name) else { continue };
+        if c.buffer_sizes() != n.buffer_sizes() {
+            differences.push(format!("{direction} \"{}\" buffer sizes differ: cpal {:?}, native {:?}", c.name, c.buffer_sizes(), n.buffer_sizes()));
+        }
+        let rates = |d: &DeviceInfo| d.sample_rates.iter().copied().collect::<BTreeSet<u32>>();
+        if rates(c) != rates(n) {
+            differences.push(format!("{direction} \"{}\" sample rates differ: cpal {:?}, native {:?}", c.name, rates(c), rates(n)));
+        }
+    }
+    differences
+}
+
 fn default_name(list: &[DeviceInfo]) -> Option<&str> {
     list.iter().find(|d| d.is_default).map(|d| d.name.as_str())
 }
@@ -64,6 +81,17 @@ fn cpal_and_native_wasapi_list_the_same_names() {
                 native_names.difference(&cpal_names).collect::<Vec<_>>()
             ));
         }
+        let rows = row_differences(direction, from_cpal, from_native);
+        if rows.is_empty() {
+            eprintln!("{direction}s: every endpoint offers the same buffer sizes and sample rates in both");
+        }
+        for difference in &rows {
+            eprintln!("{difference}");
+        }
+        failures.extend(rows);
+        for d in from_native {
+            eprintln!("  native {direction} \"{}\": buffer sizes {:?}, rates {:?}", d.name, d.buffer_sizes(), d.sample_rates);
+        }
         let (cpal_default, native_default) = (default_name(from_cpal), default_name(from_native));
         eprintln!("{direction} default: cpal {cpal_default:?}, native {native_default:?}");
         if cpal_default != native_default {
@@ -71,4 +99,28 @@ fn cpal_and_native_wasapi_list_the_same_names() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The control of the row comparison: a native row whose buffer range is narrowed (the engine
+/// period, 480-480) or whose rates differ is a difference; equal rows are none.
+#[test]
+fn a_narrowed_native_row_is_a_difference() {
+    let row = |buffer_min, buffer_max, sample_rates: Vec<u32>| DeviceInfo {
+        name: "Speakers".into(),
+        is_default: true,
+        max_channels: 2,
+        sample_rates,
+        buffer_min,
+        buffer_max,
+    };
+    let cpal = [row(Some(0), Some(u32::MAX), vec![44_100, 48_000])];
+    assert!(row_differences("output", &cpal, &[row(None, None, vec![48_000, 44_100])]).is_empty(), "same sizes and rates");
+    assert_eq!(
+        row_differences("output", &cpal, &[row(Some(480), Some(480), vec![44_100, 48_000])]),
+        ["output \"Speakers\" buffer sizes differ: cpal [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192], native []"]
+    );
+    assert_eq!(
+        row_differences("output", &cpal, &[row(None, None, vec![48_000])]),
+        ["output \"Speakers\" sample rates differ: cpal {44100, 48000}, native {48000}"]
+    );
 }
