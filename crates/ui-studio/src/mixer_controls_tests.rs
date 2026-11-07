@@ -297,11 +297,11 @@ fn the_wheel_nudges_and_one_gesture_is_one_undo_step() {
         wheel(&mut app, at, 1.0, json!({}));
         frames(&mut app, &ctx, 4, &mut time);
     }
-    assert!((volume(&app, t) - 0.3).abs() < 1e-4, "three notches up: {}", volume(&app, t));
+    assert!((volume(&app, t) - 1.5).abs() < 1e-4, "three notches up, 0.5 dB each: {}", volume(&app, t));
     assert_eq!(undo_len(&mut app), before + 1, "the notches merge into one undo step");
     wheel(&mut app, at, -1.0, json!({"shift": true}));
     frames(&mut app, &ctx, 4, &mut time);
-    assert!((volume(&app, t) - 0.29).abs() < 1e-4, "Shift+wheel is 0.01 dB: {}", volume(&app, t));
+    assert!((volume(&app, t) - 1.4).abs() < 1e-4, "Shift+wheel is 0.1 dB: {}", volume(&app, t));
     assert_eq!(undo_len(&mut app), before + 1);
     frames(&mut app, &ctx, 45, &mut time);
     wheel(&mut app, at, 1.0, json!({}));
@@ -312,9 +312,9 @@ fn the_wheel_nudges_and_one_gesture_is_one_undo_step() {
     wheel(&mut app, at, 1.0, json!({}));
     frames(&mut app, &ctx, 4, &mut time);
     assert_eq!(undo_len(&mut app), before + 3, "after leaving the control a new step");
-    assert!((volume(&app, t) - 0.49).abs() < 1e-3, "{}", volume(&app, t));
+    assert!((volume(&app, t) - 2.4).abs() < 1e-3, "{}", volume(&app, t));
     app.run("edit.undo", json!({})).unwrap();
-    assert!((volume(&app, t) - 0.39).abs() < 1e-3, "{}", volume(&app, t));
+    assert!((volume(&app, t) - 1.9).abs() < 1e-3, "{}", volume(&app, t));
     let knob = mid(strip(&app, t).knob);
     wheel(&mut app, knob, 1.0, json!({}));
     frames(&mut app, &ctx, 4, &mut time);

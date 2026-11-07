@@ -134,15 +134,17 @@ impl StudioApp {
         let _ = self.set_value(t, 0.0);
     }
 
-    /// A wheel notch or several on a control: 0.1 dB each (Shift: 0.01; a knob 1 %, Shift 0.1 %).
+    /// A wheel notch or several on a control: a fader 0.5 dB (Shift: 0.1), a send 0.1 dB (Shift: 0.01), a knob 1 % (Shift 0.1 %).
     /// The nudges of one wheel gesture are one undo step.
     pub(super) fn wheel_nudge(&mut self, t: Target, notches: f32, shift: bool, rect: Rect, now: f64) {
         let Some(cur) = self.shown_value(t) else { return };
-        let step = match (t.is_pan(), shift) {
-            (true, false) => fine::WHEEL_PAN,
-            (true, true) => fine::WHEEL_PAN_FINE,
-            (false, false) => fine::WHEEL_DB,
-            (false, true) => fine::WHEEL_DB_FINE,
+        let step = match (t.is_pan(), matches!(t, Target::Fader(_)), shift) {
+            (true, _, false) => fine::WHEEL_PAN,
+            (true, _, true) => fine::WHEEL_PAN_FINE,
+            (false, true, false) => fine::WHEEL_FADER_DB,
+            (false, true, true) => fine::WHEEL_FADER_DB_FINE,
+            (false, false, false) => fine::WHEEL_DB,
+            (false, false, true) => fine::WHEEL_DB_FINE,
         };
         let (lo, hi) = match t {
             Target::Pan(_) | Target::SendPan(..) => (-1.0, 1.0),

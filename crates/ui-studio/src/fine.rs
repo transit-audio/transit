@@ -17,7 +17,10 @@ pub const SNAP_PAN: f32 = 0.02;
 pub const SLOW_PT: f32 = 2.0;
 /// Shift-drag moves this fraction as far (10x slower).
 pub const FINE: f32 = 0.1;
-/// A wheel notch moves a level this many dB, and a pan this much of its travel; Shift is 10x finer.
+/// A wheel notch moves a strip's fader this many dB (as the kit fader does); Shift is 5x finer.
+pub const WHEEL_FADER_DB: f32 = 0.5;
+pub const WHEEL_FADER_DB_FINE: f32 = 0.1;
+/// A wheel notch moves a send level this many dB, and a pan this much of its travel; Shift is 10x finer.
 pub const WHEEL_DB: f32 = 0.1;
 pub const WHEEL_DB_FINE: f32 = 0.01;
 pub const WHEEL_PAN: f32 = 0.01;
