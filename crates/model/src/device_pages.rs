@@ -222,6 +222,81 @@ impl std::fmt::Display for PagesError {
     }
 }
 
+/// A slot record seen without its pages, for freeze material (`Track::freeze_inputs`): equal
+/// when every other field is equal, serialized as the record with no pages (the field is then
+/// left out, so the bytes are those of a record that never had any).
+pub(crate) struct NoPages<'a, T>(pub(crate) &'a T);
+
+/// A slot record that carries user pages.
+pub(crate) trait HasPages: Clone + serde::Serialize {
+    /// Whether every field but `pages` (and the uid, which never takes part) is equal.
+    fn same_without_pages(&self, other: &Self) -> bool;
+    fn pages_mut(&mut self) -> &mut Vec<UserPage>;
+}
+
+impl HasPages for crate::Insert {
+    fn same_without_pages(&self, other: &Self) -> bool {
+        // Spelled out field by field, so a new field fails to compile here until it is placed.
+        let crate::Insert {
+            uid: _,
+            plugin,
+            params,
+            bypass,
+            active,
+            preset,
+            state,
+            frozen_recording,
+            sample,
+            sampler_patch,
+            key,
+            hardware,
+            external,
+            pages: _,
+        } = self;
+        *plugin == other.plugin
+            && *params == other.params
+            && *bypass == other.bypass
+            && *active == other.active
+            && *preset == other.preset
+            && *state == other.state
+            && *frozen_recording == other.frozen_recording
+            && *sample == other.sample
+            && *sampler_patch == other.sampler_patch
+            && *key == other.key
+            && *hardware == other.hardware
+            && *external == other.external
+    }
+    fn pages_mut(&mut self) -> &mut Vec<UserPage> {
+        &mut self.pages
+    }
+}
+
+impl HasPages for crate::MidiEffectSlot {
+    fn same_without_pages(&self, other: &Self) -> bool {
+        let crate::MidiEffectSlot { uid: _, plugin, params, bypass, state, pages: _ } = self;
+        *plugin == other.plugin && *params == other.params && *bypass == other.bypass && *state == other.state
+    }
+    fn pages_mut(&mut self) -> &mut Vec<UserPage> {
+        &mut self.pages
+    }
+}
+
+impl<T: HasPages> PartialEq for NoPages<'_, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.same_without_pages(other.0)
+    }
+}
+
+impl<T: HasPages> serde::Serialize for NoPages<'_, T> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        // Only a freeze hash serializes this (at freeze time, not per edit), so the copy is cheap
+        // enough.
+        let mut copy = self.0.clone();
+        copy.pages_mut().clear();
+        copy.serialize(s)
+    }
+}
+
 impl Track {
     /// The user pages of `device` (`None` when nothing sits there; a rack card has none).
     #[must_use]

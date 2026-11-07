@@ -217,3 +217,23 @@ fn device_addresses_parse_and_print() {
         assert_eq!(DeviceRef::parse(bad), None, "{bad}");
     }
 }
+
+/// Pages are not freeze material: a session with pages has the same freeze hash, and the same
+/// freeze inputs, as the same session without them. Control: a parameter change does change both.
+#[test]
+fn pages_do_not_change_the_freeze_hash() {
+    let plain = session();
+    let mut paged = plain.clone();
+    for device in [DeviceRef::Instrument, DeviceRef::Insert(1), DeviceRef::MidiEffect(0)] {
+        paged.tracks[0].set_device_pages(device, &[page("User 1", &["level"])]).unwrap();
+    }
+    assert_eq!(paged.tracks[0].freeze_hash(), plain.tracks[0].freeze_hash());
+    assert!(paged.tracks[0].same_freeze_inputs(&plain.tracks[0]));
+    let mut tweaked = paged.clone();
+    tweaked.tracks[0].instrument.as_mut().unwrap().params.insert("level".into(), -3.0);
+    assert_ne!(tweaked.tracks[0].freeze_hash(), plain.tracks[0].freeze_hash());
+    assert!(!tweaked.tracks[0].same_freeze_inputs(&paged.tracks[0]));
+    let mut fx = paged.clone();
+    fx.tracks[0].midi_effects[0].bypass = true;
+    assert!(!fx.tracks[0].same_freeze_inputs(&paged.tracks[0]));
+}

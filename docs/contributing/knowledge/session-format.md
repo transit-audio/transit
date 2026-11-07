@@ -72,8 +72,9 @@ Reading follows ADR 0047 decision 4.2 and never fails: a bad name reads empty, a
 and cut to 32 characters, slots pad or cut to eight, a non-string, empty or over-long (past 64
 characters) id reads empty, a repeated id keeps its first slot, and pages past the sixteenth are
 dropped with one load note per device. A session with user pages anywhere lists `device_pages`
-under `needs`. The pages are part of the slot record, so they are also freeze material: a frozen
-track refuses a pages edit as it refuses any other edit of its devices.
+under `needs`. Pages are not freeze material: `Track::freeze_inputs` hashes and compares the slot
+records without them, so a pages edit is allowed on a frozen track and never changes its freeze
+hash (ADR 0047 decision 4.5).
 
 ## Track-height format (#314, slice 1)
 

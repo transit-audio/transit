@@ -156,16 +156,27 @@ fn a_rack_lists_its_macros_and_takes_no_user_pages() {
     assert!(err.contains("takes no user pages"), "{err}");
 }
 
-/// Pages are part of the slot record, which is freeze material: a frozen track refuses a pages
-/// edit as it refuses any other edit of its devices (ADR 0047 does not address freezing; this
-/// pins today's behavior).
+/// Pages are not freeze material (ADR 0047 decision 4): a pages edit on a frozen track is
+/// allowed and keeps its freeze and hash. Control: a parameter edit of the same device is still
+/// refused, so the frozen check is live.
 #[test]
-fn a_frozen_track_refuses_a_pages_edit() {
+fn a_frozen_track_accepts_a_pages_edit_and_keeps_its_freeze() {
     let (mut e, t) = engine();
     let tr = &mut e.session_mut().tracks[0];
-    tr.freeze =
-        Some(transit_model::Frozen { source: transit_model::SourceId(1), start: 0, length: 10, hash: tr.freeze_hash(), revision: 1, latency: 0 });
-    let err = e.execute("mix.device_pages", &json!({"track": t, "device": "instrument", "pages": one_page(&["level"])})).unwrap_err();
+    let frozen = transit_model::Frozen { source: transit_model::SourceId(1), start: 0, length: 10, hash: tr.freeze_hash(), revision: 1, latency: 0 };
+    tr.freeze = Some(frozen.clone());
+    let hash = e.session().tracks[0].freeze_hash();
+    for device in ["instrument", "b", "midi1"] {
+        e.execute("mix.device_pages", &json!({"track": t, "device": device, "pages": one_page(&["level"])})).unwrap();
+    }
+    let tr = &e.session().tracks[0];
+    assert_eq!(tr.instrument.as_ref().unwrap().pages.len(), 1, "the edit landed");
+    assert_eq!(tr.midi_effects[0].pages.len(), 1);
+    assert_eq!(tr.freeze_hash(), hash, "the freeze hash is unchanged");
+    assert_eq!(tr.freeze, Some(frozen), "the track stays frozen");
+    // Control: a real parameter edit on the frozen track is still refused.
+    let err = e.execute("mix.instrument_param", &json!({"track": t, "param": "level", "value": -12.0})).unwrap_err();
     assert!(matches!(err, crate::EngineError::TrackFrozen), "{err}");
-    assert!(e.session().tracks[0].instrument.as_ref().unwrap().pages.is_empty());
+    let err = e.execute("mix.insert_param", &json!({"track": t, "slot": "b", "param": e.session().tracks[0].mixer.inserts[1].as_ref().unwrap().params.keys().next().unwrap().clone(), "value": 0.5})).unwrap_err();
+    assert!(matches!(err, crate::EngineError::TrackFrozen), "{err}");
 }

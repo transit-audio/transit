@@ -1,5 +1,6 @@
 //! Tracks and playlists.
 
+use crate::device_pages::NoPages;
 use crate::{AutoParam, AutomationLane, ChannelFormat, Clip, ClipId, Insert, Mixer, SourceId, TrackId};
 use transit_time::Samples;
 
@@ -214,11 +215,13 @@ struct FreezeInputs<'a> {
     ticks_timebase: bool,
     elastic: &'a Option<String>,
     clips: &'a [Clip],
-    instrument: &'a Option<Insert>,
+    /// Slot records without their macro strip pages (ADR 0047 decision 4): pages change nothing
+    /// audible, so a page edit never makes a render stale and the hash is the one without them.
+    instrument: Option<NoPages<'a, Insert>>,
     /// Left out while empty, so a track without MIDI effects keeps the hash older builds gave it.
-    #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    midi_effects: &'a [crate::MidiEffectSlot],
-    inserts: &'a [Option<Insert>],
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    midi_effects: Vec<NoPages<'a, crate::MidiEffectSlot>>,
+    inserts: Vec<Option<NoPages<'a, Insert>>>,
     plugin_lanes: Vec<&'a AutomationLane>,
 }
 
@@ -364,9 +367,9 @@ impl Track {
             ticks_timebase: self.ticks_timebase,
             elastic: &self.elastic,
             clips: self.clips(),
-            instrument: &self.instrument,
-            midi_effects: &self.midi_effects,
-            inserts: &self.mixer.inserts,
+            instrument: self.instrument.as_ref().map(NoPages),
+            midi_effects: self.midi_effects.iter().map(NoPages).collect(),
+            inserts: self.mixer.inserts.iter().map(|i| i.as_ref().map(NoPages)).collect(),
             plugin_lanes: self.automation.iter().filter(|l| matches!(l.param, AutoParam::Plugin { .. })).collect(),
         }
     }
