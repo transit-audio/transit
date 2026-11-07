@@ -57,6 +57,12 @@ pub fn size(widths: Widths, screen: Rect, title_h: f32, content_h: f32, footer_h
     vec2(width(widths, screen), (title_h + content_h + footer_h + edge().y).min(screen.height()))
 }
 
+/// The size of a window collapsed to its title bar `title_h` high (326-V): [`width`] wide, the bar
+/// and the frame's edge high.
+pub fn collapsed_size(widths: Widths, screen: Rect, title_h: f32) -> Vec2 {
+    vec2(width(widths, screen), title_h + edge().y)
+}
+
 /// `rect` moved and shrunk to lie on `screen`.
 pub fn on_screen(rect: Rect, screen: Rect) -> Rect {
     let size = rect.size().min(screen.size());
@@ -134,6 +140,8 @@ mod tests {
         assert_eq!(width(W, narrow), 1200.0);
         // Content taller than the screen: the screen's height (the body scrolls).
         assert_eq!(size(W, SCREEN, 52.0, 2000.0, 32.0).y, 900.0);
+        // Collapsed: the bar and the edge only, at the same width.
+        assert_eq!(collapsed_size(W, SCREEN, 52.0), vec2(size(W, SCREEN, 52.0, 600.0, 32.0).x, 52.0 + e.y));
         // Content grows by d: the window grows by exactly d.
         let (a, b) = (size(W, SCREEN, 52.0, 400.0, 32.0), size(W, SCREEN, 52.0, 523.0, 32.0));
         assert_eq!(b.y - a.y, 123.0);

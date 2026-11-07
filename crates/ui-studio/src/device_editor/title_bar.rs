@@ -58,6 +58,8 @@ pub struct TitleLayout {
     pub readout_rect: [f32; 4],
     pub follow: [f32; 4],
     pub follow_on: bool,
+    /// The window is collapsed to this bar (326-V).
+    pub collapsed: bool,
     pub bypass: [f32; 4],
     pub bypass_available: bool,
     pub bypass_on: bool,
@@ -73,6 +75,8 @@ pub struct TitleOut {
     pub close: bool,
     pub toggle_follow: bool,
     pub close_all: bool,
+    /// A double (or triple) click on an empty part of the bar: collapse or expand the window.
+    pub toggle_collapse: bool,
     /// The bar dragged by this much (the window moves with it).
     pub drag: egui::Vec2,
 }
@@ -247,21 +251,37 @@ fn fitted(painter: &egui::Painter, role: &tokens::TypeRole, text: &str, color: C
 }
 
 /// Draws the bar into `rect` (52 high) and records it.
-pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follow: bool, lay: &mut EditorLayout, out: &mut TitleLayout) -> TitleOut {
+pub(crate) fn show(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    dev: Dev,
+    rect: Rect,
+    (follow, collapsed): (bool, bool),
+    lay: &mut EditorLayout,
+    out: &mut TitleLayout,
+) -> TitleOut {
     let t = &TOKENS;
     let mut res = TitleOut::default();
     let uid = dev.uid();
     let p = ui.painter().clone();
-    p.rect_filled(rect, crate::theme::top_corners_of(radius::PANEL), t.bg_titlebar);
+    // Collapsed, the bar is the whole window: its bottom corners are the window's.
+    let corners = if collapsed { egui::CornerRadius::same(radius::PANEL as u8) } else { crate::theme::top_corners_of(radius::PANEL) };
+    p.rect_filled(rect, corners, t.bg_titlebar);
     p.line_segment([pos2(rect.min.x, rect.max.y - 0.5), pos2(rect.max.x, rect.max.y - 0.5)], Stroke::new(1.0, t.line));
-    // Dragging the bar moves the window (its controls take their own clicks).
-    let drag = ui.interact(rect, egui::Id::new(("macro_osc_title", uid)), Sense::drag());
-    if drag.dragged() {
+    // Dragging the bar moves the window (its controls take their own clicks); a double click on
+    // an empty part of it folds the window (Ableton's device fold; see `toggles_collapse`).
+    let drag = ui.interact(rect, egui::Id::new(("macro_osc_title", uid)), Sense::click_and_drag());
+    if drag.drag_started() {
+        // The click-or-drag threshold has passed: the window catches up with the whole movement
+        // since the press, so it stays under the pointer.
+        let origin = ui.input(|i| i.pointer.press_origin());
+        res.drag = origin.zip(drag.interact_pointer_pos()).map_or(drag.drag_delta(), |(o, now)| now - o);
+    } else if drag.dragged() {
         res.drag = drag.drag_delta();
     }
     let cy = rect.center().y;
     let id = |s: &str| egui::Id::new(("macro_osc_title", uid, s.to_string()));
-    let mut tl = TitleLayout { uid, bar: r4(rect), ..TitleLayout::default() };
+    let mut tl = TitleLayout { uid, bar: r4(rect), collapsed, ..TitleLayout::default() };
 
     // Left: brand, divider, track / device.
     let mut x = rect.min.x + space::WINDOW_PADDING;
@@ -379,8 +399,26 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, follo
         p.rect_filled(hot, 0.0, t.meter_hot);
     }
     (tl.meter, tl.meter_fill, tl.menu, tl.close) = (r4(meter), r4(fill), r4(menu), r4(close));
+    // The bar's controls, as the double click's hit rule sees them: the preset browser (previous
+    // to save), the output meter with its readout (the full bar height), follow, bypass, menu, close.
+    let controls = [
+        Rect::from_min_max(prev.min, save.max),
+        Rect::from_min_max(pos2(meter.min.x, rect.min.y), pos2(rr.max.x.max(meter.max.x), rect.max.y)),
+        link,
+        bypass,
+        menu,
+        close,
+    ];
+    res.toggle_collapse = toggles_collapse(&drag, &controls);
     *out = tl;
     res
+}
+
+/// Whether `bar`'s response is a collapse gesture: a double click (or a triple, the kit's reset
+/// rule: `widgets::reset_click`, 326-X) whose pointer is on none of the bar's `controls`, so a
+/// double click on a control does what the control does.
+fn toggles_collapse(bar: &egui::Response, controls: &[Rect]) -> bool {
+    widgets::reset_click(bar) && bar.interact_pointer_pos().is_some_and(|at| !controls.iter().any(|c| c.contains(at)))
 }
 
 /// The preset name field: `surface.inset`, the list's name in `text.faint` before the preset's,

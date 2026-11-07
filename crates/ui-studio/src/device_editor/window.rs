@@ -22,7 +22,13 @@
 //!   (Logic's Link swaps the content, not the window): while it follows it writes no instance's
 //!   position, and when follow is turned off its position becomes the shown instance's. Off, it
 //!   stays on its insert.
-//! - **Window > Close All Editors** (`window.close_editors`) closes every plug-in editor.
+//! - **Collapse** (326-V): a double click on an empty part of the bar folds the window to the
+//!   bar and back (Ableton's device fold); the window re-fits to the bar and the frame's edge
+//!   ([`device_window::collapsed_size`]), the body and footer are not drawn, every bar control
+//!   keeps working. The flag is [`State::collapsed`], per instance for the session, never saved;
+//!   follow selection carries it to the instance the window moves to.
+//! - **Window > Close All Editors** (`window.close_editors`) closes every plug-in editor; **Collapse All Editors** and **Expand All
+//!   Editors** (`window.collapse_editors`, `window.expand_editors`) fold or unfold every device window.
 
 use super::Dev;
 use super::title_bar::{self, TitleLayout};
@@ -32,7 +38,7 @@ use crate::device_window::{self, Positions, Widths};
 use crate::tokens::layout as space;
 use egui::{Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use transit_model::{Insert, TrackId};
 
 /// What a panel tells the shared window about itself.
@@ -87,6 +93,9 @@ pub struct State {
     no_focus: Vec<u64>,
     /// The editors with a value being typed, and the knob's id (that field keeps Escape).
     pub typing: Vec<(u64, egui::Id)>,
+    /// The instances whose window is collapsed to its title bar (326-V): per instance for the
+    /// session, never saved; a window that closes forgets it, so a reopened editor is expanded.
+    pub collapsed: HashSet<u64>,
     /// The windows drawn last frame and this frame, with their rects and layers.
     shown: Vec<Shown>,
     shown_now: Vec<Shown>,
@@ -132,6 +141,22 @@ impl StudioApp {
             self.close_editor(*key);
         }
         json!({"closed": keys.len()})
+    }
+
+    /// `window.collapse_editors` / `window.expand_editors`: collapses (or expands) every open
+    /// device editor; answers how many it set.
+    pub(crate) fn collapse_all_editors(&mut self, collapse: bool) -> Value {
+        let uids: Vec<u64> =
+            self.ui.plugin_windows.iter().filter_map(|k| self.builtin_at(*k).filter(|i| handles(&i.plugin)).map(|i| i.uid.get())).collect();
+        let st = &mut self.builtin_editor.devices;
+        for uid in &uids {
+            if collapse {
+                st.collapsed.insert(*uid);
+            } else {
+                st.collapsed.remove(uid);
+            }
+        }
+        json!({if collapse { "collapsed" } else { "expanded" }: uids.len()})
     }
 
     /// The open editor key of the insert `uid`, if a migrated panel's window shows it.
@@ -185,6 +210,12 @@ pub(crate) fn follow(app: &mut StudioApp) {
         {
             st.carry.insert(n, s.1.min);
         }
+        // A collapsed window stays collapsed on the instance it moves to.
+        if let (Some(w), Some(n)) = (was, new_uid)
+            && st.collapsed.remove(&w)
+        {
+            st.collapsed.insert(n);
+        }
         for k in app.ui.plugin_windows.iter_mut().chain(app.ui.editor_follow.iter_mut()) {
             if *k == key {
                 *k = target;
@@ -217,7 +248,12 @@ pub(crate) fn show<P: Panel>(
     let widths = P::widths(app);
     let footer_h = P::footer_h();
     let width = device_window::width(widths, screen) - device_window::edge().x;
-    let size = device_window::size(widths, screen, space::TITLE_BAR_HEIGHT, P::content_height(app, ctx, key, width), footer_h);
+    let collapsed = app.builtin_editor.devices.collapsed.contains(&uid);
+    let size = if collapsed {
+        device_window::collapsed_size(widths, screen, space::TITLE_BAR_HEIGHT)
+    } else {
+        device_window::size(widths, screen, space::TITLE_BAR_HEIGHT, P::content_height(app, ctx, key, width), footer_h)
+    };
     let fresh = !app.builtin_editor.devices.shown.iter().any(|s| s.0 == uid);
     if fresh || !app.builtin_editor.devices.pos.contains_key(&uid) {
         let open: Vec<Rect> = app.builtin_editor.devices.shown.iter().filter(|s| s.0 != uid).map(|s| s.1).collect();
@@ -249,8 +285,12 @@ pub(crate) fn show<P: Panel>(
     let shown = win.show(ctx, |ui| {
         let avail = ui.available_rect_before_wrap();
         let top = Rect::from_min_size(avail.min, vec2(avail.width(), space::TITLE_BAR_HEIGHT));
-        bar = title_bar::show(app, ui, dev, top, follow, layout, P::title(&mut rec));
+        bar = title_bar::show(app, ui, dev, top, (follow, collapsed), layout, P::title(&mut rec));
         ui.allocate_rect(top, Sense::hover());
+        if collapsed {
+            // The bar is the window: the body and the footer are not drawn and take no input.
+            return;
+        }
         let body_h = (avail.height() - space::TITLE_BAR_HEIGHT - footer_h).max(0.0);
         // The body takes exactly the room between the bar and the footer (no item spacing above
         // it: the window's height is the content's).
@@ -277,6 +317,12 @@ pub(crate) fn show<P: Panel>(
             app.builtin_editor.devices.rects.insert(uid, r.min);
         }
         app.builtin_editor.devices.shown_now.push(Shown(uid, r, w.response.layer_id, info.id));
+    }
+    if bar.toggle_collapse {
+        let st = &mut app.builtin_editor.devices;
+        if !st.collapsed.remove(&uid) {
+            st.collapsed.insert(uid);
+        }
     }
     if bar.drag != Vec2::ZERO
         && let Some(p) = app.builtin_editor.devices.pos.get_mut(&uid)
@@ -327,6 +373,7 @@ pub(crate) fn end_frame(app: &mut StudioApp, ctx: &egui::Context) {
     st.meters.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.gr.retain(|u, _| now.iter().any(|s| s.0 == *u));
     st.pending.retain(|u, _| now.iter().any(|s| s.0 == *u));
+    st.collapsed.retain(|u| now.iter().any(|s| s.0 == *u));
     st.typing.retain(|u| now.iter().any(|s| s.0 == u.0));
     if st.picker.is_some_and(|u| !now.iter().any(|s| s.0 == u)) {
         st.picker = None;
