@@ -310,3 +310,39 @@ fn at_the_docked_panes_minimum_the_short_strip_keeps_its_readouts_inside() {
     // Negative control: the old minimum, 260, does not fit the short strip.
     assert!(!strip_fits(260.0 - 8.0, true));
 }
+
+/// A short strip's FX and Snd lists stay inside the pane when the button is at the bottom edge:
+/// the list opens over the button, and a list taller than either side is pushed back inside.
+#[test]
+fn a_list_at_the_panes_bottom_opens_upward_inside_the_pane() {
+    use crate::mixer::list_origin;
+    let pane = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(300.0, 400.0));
+    let button = egui::Rect::from_min_size(egui::pos2(10.0, 360.0), egui::vec2(60.0, 20.0));
+    let h = 120.0;
+    let (pos, pivot) = list_origin(button, h, pane);
+    let list = egui::Rect::from_min_size(egui::pos2(pos.x - pivot.x().to_factor() * 150.0, pos.y - pivot.y().to_factor() * h), egui::vec2(150.0, h));
+    assert!(pane.contains_rect(list), "{list:?} inside {pane:?}");
+    // Negative control: the unclamped position, under the button, leaves the pane.
+    let under = egui::Rect::from_min_size(button.left_bottom(), egui::vec2(150.0, h));
+    assert!(!pane.contains_rect(under));
+    // Room below keeps the list under the button.
+    let top = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(60.0, 20.0));
+    assert_eq!(list_origin(top, h, pane), (top.left_bottom(), egui::Align2::LEFT_TOP));
+}
+
+/// The open FX list of a short strip lies inside the docked pane.
+#[test]
+fn the_open_fx_list_lies_inside_the_docked_pane() {
+    let (mut app, ctx, mut time, a) = mixer_app();
+    for _ in 0..6 {
+        app.add_device(a, "gain").unwrap();
+    }
+    app.ui.mixer_height = 0.0;
+    frames(&mut app, &ctx, 4, &mut time);
+    let s = strip(&app, a);
+    click(&mut app, mid(s.fx_button));
+    frames(&mut app, &ctx, 4, &mut time);
+    let (l, area) = (strip(&app, a).list_rect, app.mixer.layout.area);
+    assert!(l[3] > l[1], "the list is open");
+    assert!(l[1] >= area[1] - 0.01 && l[3] <= area[3] + 0.01, "{l:?} inside {area:?}");
+}

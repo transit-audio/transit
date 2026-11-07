@@ -1,5 +1,5 @@
 //! The short variant's lists (Channel strip, Short): the `FX n` and `Snd n` buttons open the
-//! strip's full insert or send list in a popup under the button. The list is an area of its own,
+//! strip's full insert or send list in a popup under the button (over it when the strip sits at the pane's bottom edge). The list is an area of its own,
 //! not an egui popup, so the menus opened from inside it (+ Insert's device menu, a send's target
 //! menu, a slot's right-click menu) can open while it stays: egui keeps one popup open at a time.
 //! It closes on a second click on its button, Escape, or a press outside it while no menu is open.
@@ -19,6 +19,22 @@ fn rows(ui: &mut Ui, n: usize) -> Vec<Rect> {
     let w = cs::WIDTH - 2.0 * cs::PADDING[1];
     ui.spacing_mut().item_spacing.y = cs::INSERT_SLOT_GAP;
     (0..n).map(|_| ui.allocate_exact_size(vec2(w, cs::INSERT_SLOT_HEIGHT), Sense::hover()).0).collect()
+}
+
+/// Where a list `h` high opens for a button at `anchor` in `pane`: under the button, or over it
+/// (growing upward) when it would leave the pane at the bottom and fits above. The area is also
+/// constrained to the pane, so a list taller than either side is moved up to fit.
+pub fn list_origin(anchor: Rect, h: f32, pane: Rect) -> (egui::Pos2, egui::Align2) {
+    if anchor.max.y + h > pane.max.y && anchor.min.y - h >= pane.min.y {
+        (anchor.left_top(), egui::Align2::LEFT_BOTTOM)
+    } else {
+        (anchor.left_bottom(), egui::Align2::LEFT_TOP)
+    }
+}
+
+/// The height of a list of `n` rows with its frame.
+fn list_height(n: usize) -> f32 {
+    n as f32 * cs::INSERT_SLOT_HEIGHT + n.saturating_sub(1) as f32 * cs::INSERT_SLOT_GAP + 2.0 * tokens::chrome::POPUP_PADDING + 2.0
 }
 
 /// The list `which` of `track` under `button` while it is open, with `n` rows filled by `fill`
@@ -43,9 +59,13 @@ pub(super) fn list(
         return None;
     }
     let anchor = button.rect;
+    let pane = ui.max_rect();
+    let (pos, pivot) = list_origin(anchor, list_height(n), pane);
     let area = egui::Area::new(egui::Id::new(("mixer_short_list", track.0, which)))
         .order(egui::Order::Foreground)
-        .fixed_pos(anchor.left_bottom())
+        .fixed_pos(pos)
+        .pivot(pivot)
+        .constrain_to(pane)
         .show(ui.ctx(), |ui| {
             egui::Frame::new()
                 .fill(TOKENS.surface_raised)
