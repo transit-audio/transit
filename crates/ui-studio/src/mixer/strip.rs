@@ -178,7 +178,7 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLay
     let p = ui.painter().clone();
     p.rect_filled(r, tokens::radius::PANEL, TOKENS.surface_panel);
     let bar = channel::bar_color(None);
-    p.rect_filled(a.bar, crate::theme::top_corners_of(tokens::radius::PANEL - 1.0), bar);
+    let outline = channel::paint_bar(&p, r, a.bar, bar);
     channel::text_in(&p, &channel::NUMBER, "M", TOKENS.text_faint, a.name, Align2::RIGHT_CENTER);
     channel::text_in(&p, &channel::NAME, "Main", TOKENS.text, a.name, Align2::LEFT_CENTER);
     let add = a.input;
@@ -207,6 +207,7 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLay
         number: "M".into(),
         rect: r4(r),
         color_bar: r4(a.bar),
+        color_bar_outline: outline,
         color_bar_color: bar.to_array(),
         short,
         meter: r4(wells),

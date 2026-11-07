@@ -366,3 +366,56 @@ fn every_strip_draws_the_scale_ticks_beside_its_cap_column_in_both_variants() {
         assert!(f.tick_inks.iter().enumerate().all(|(i, c)| (i == 1) == (*c == DARK.text_muted)));
     }
 }
+
+/// Whether `q` lies inside the strip `r`'s rounded rect less its 1 px border (radius 7).
+fn inside_corners(r: [f32; 4], q: [f32; 2]) -> bool {
+    let (rad, c) = (crate::tokens::radius::PANEL, crate::tokens::radius::PANEL - 1.0);
+    let cx = if q[0] < r[0] + rad {
+        r[0] + rad
+    } else if q[0] > r[2] - rad {
+        r[2] - rad
+    } else {
+        q[0]
+    };
+    let cy = if q[1] < r[1] + rad {
+        r[1] + rad
+    } else if q[1] > r[3] - rad {
+        r[3] - rad
+    } else {
+        q[1]
+    };
+    ((q[0] - cx).powi(2) + (q[1] - cy).powi(2)).sqrt() <= c + 1e-3
+}
+
+#[test]
+fn the_color_bar_stays_inside_the_strips_rounded_corners_in_both_views() {
+    let (mut app, ctx, mut time, a) = mixer_app();
+    app.run("track.new", json!({"kind": "master"})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    for full in [false, true] {
+        if full {
+            full_mixer(&mut app, &ctx, &mut time);
+        }
+        let strips: Vec<_> = app.mixer.layout.strips.iter().chain(app.mixer.layout.master.iter()).cloned().collect();
+        assert!(strips.len() >= 2, "a channel and the main bus");
+        for s in strips {
+            let bar = s.color_bar;
+            assert!(s.color_bar_outline.len() >= 4, "{}: an outline", s.name);
+            for q in &s.color_bar_outline {
+                assert!(inside_corners(s.rect, *q), "full {full}, {}: {q:?} lies outside the corner radius", s.name);
+                assert!(q[1] >= bar[1] - 1e-3 && q[1] <= bar[3] + 1e-3, "{}: within the bar's rows", s.name);
+            }
+            let top = s.color_bar_outline.iter().filter(|q| (q[1] - bar[1]).abs() < 1e-3).map(|q| q[0]);
+            let (l, r) = top.fold((f32::MAX, f32::MIN), |(l, r), x| (l.min(x), r.max(x)));
+            assert!(
+                (l - (s.rect[0] + 8.0)).abs() < 1e-3 && (r - (s.rect[2] - 8.0)).abs() < 1e-3,
+                "{}: the top row starts where the curve does",
+                s.name
+            );
+            // Negative control: the bar's plain rect (what a 3 px rect with a clamped radius paints)
+            // has its corners outside the radius.
+            assert!(!inside_corners(s.rect, [bar[0], bar[1]]) && !inside_corners(s.rect, [bar[2], bar[1]]), "{}", s.name);
+        }
+        let _ = a;
+    }
+}

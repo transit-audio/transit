@@ -51,6 +51,32 @@ pub(super) fn bar_color(rgb: Option<[u8; 3]>) -> Color32 {
     super::hue::bar_for(rgb.unwrap_or([128, 128, 128]))
 }
 
+/// The color bar's outline: the bar rect `bar` (inside the strip's 1 px border) cut by the panel's
+/// rounded rect, so its top corners follow the border's inner edge (radius 8 less the border, 7)
+/// instead of egui's corner radius, which a 3 px bar clamps to half its height. Clockwise from the
+/// bottom-left; convex.
+pub(super) fn bar_outline(strip: Rect, bar: Rect) -> Vec<egui::Pos2> {
+    let r = tokens::radius::PANEL - 1.0;
+    let cy = strip.min.y + tokens::radius::PANEL;
+    // The arc's x inset from the bar's edge at height `y` (zero below the corner).
+    let inset = |y: f32| {
+        let dy = (cy - y).max(0.0);
+        if dy >= r { r } else { r - (r * r - dy * dy).sqrt() }
+    };
+    const STEPS: usize = 6;
+    let ys: Vec<f32> = (0..=STEPS).map(|i| bar.max.y - (bar.max.y - bar.min.y) * i as f32 / STEPS as f32).collect();
+    let mut pts: Vec<egui::Pos2> = ys.iter().map(|&y| pos2(bar.min.x + inset(y), y)).collect();
+    pts.extend(ys.iter().rev().map(|&y| pos2(bar.max.x - inset(y), y)));
+    pts
+}
+
+/// Paints the color bar inside the panel's rounded corners; returns its outline.
+pub(super) fn paint_bar(p: &egui::Painter, strip: Rect, bar: Rect, color: Color32) -> Vec<[f32; 2]> {
+    let pts = bar_outline(strip, bar);
+    p.add(egui::Shape::convex_polygon(pts.clone(), color, Stroke::NONE));
+    pts.iter().map(|q| [q.x, q.y]).collect()
+}
+
 /// One channel strip in `r` (clipped to `clip`): a track's, or the master's (the main bus).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn strip(
@@ -75,7 +101,7 @@ pub(super) fn strip(
     let p = ui.painter().with_clip_rect(clip);
     p.rect_filled(r, tokens::radius::PANEL, TOKENS.surface_panel);
     let bar = bar_color(Some(t.color));
-    p.rect_filled(a.bar, crate::theme::top_corners_of(tokens::radius::PANEL - 1.0), bar);
+    let outline = paint_bar(&p, r, a.bar, bar);
     let mut sl = StripLayout {
         track: id.0,
         name: t.name.clone(),
@@ -83,6 +109,7 @@ pub(super) fn strip(
         kind: Some(t.kind),
         rect: r4(r),
         color_bar: r4(a.bar),
+        color_bar_outline: outline,
         color_bar_color: bar.to_array(),
         short,
         volume_db: vol_db,

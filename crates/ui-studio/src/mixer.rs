@@ -146,6 +146,8 @@ pub struct StripLayout {
     pub name_color: [u8; 4],
     /// The 3 px track color bar and its fill.
     pub color_bar: R4,
+    /// The bar as painted: its rect cut by the panel's rounded corners (radius 7 inside the border).
+    pub color_bar_outline: Vec<[f32; 2]>,
     pub color_bar_color: [u8; 4],
     /// The border's ink: `signal` on the selected strip, `line` otherwise.
     pub border_color: [u8; 4],
