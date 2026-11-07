@@ -178,6 +178,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 
 - Per-track device chains: drag a device to reorder the chain; Alt-drag copies it.
 - Mixer strips in the design language: fixed sections, so faders line up across strips; one dB taper shared by the fader, its scale and a stereo meter with clip cells; insert slots with a power glyph for on and bypassed; faders top out at +6 dB. The docked mixer shows a short strip, with count buttons that open the inserts and sends.
+- Main bus monitoring: Mono, Dim (-20 dB) and Ref (a stored reference listening level, Alt+click to store) on the main bus strip, acting only on what you hear, never on a bounce; a live integrated loudness readout (LUFS, BS.1770-4) under the main bus, reset with a click or a transport start.
 - Buses and sends, with a warning for routes that point nowhere and a refusal for routing loops.
 - Sidechain any compressor or gate from any track or bus, pre- or post-fader, latency-aligned.
 - Hosted plug-ins can take a sidechain key too.

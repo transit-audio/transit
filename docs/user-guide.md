@@ -265,6 +265,29 @@ first, and the button says what goes (**Delete Track**, **Delete 3 Tracks**, **D
 In every such question Enter presses the highlighted button and Escape cancels: in the
 save-changes question Enter is **Save**.
 
+## Main bus monitoring
+
+The main bus strip (the rightmost strip in the mixer) has a monitoring set beside its M: **Mono**,
+**Dim** and **Ref**. They change only what you hear from your speakers or headphones, after the
+master fader. A bounce, a freeze, a stem, a send and the meters never have them: a bounce made
+with Mono or Dim on is identical to one made with them off. They are settings of this computer,
+kept with the audio settings, not part of the session, and never an undo step.
+
+- **Mono** sums the left and right sides to mono, each at -3 dB, to check how the mix holds up on
+  one speaker.
+- **Dim** turns what you hear down 20 dB until you press it again.
+- **Ref** plays at your stored reference listening level while it is on. **Alt+click** on Ref
+  stores the current monitor level as the reference. The monitor level itself (0 dB, the default,
+  down to silence) is set with the `mix.monitor` command for now; the master fader stays the mix
+  level.
+
+The line under the main bus's readouts, **INT**, is the integrated loudness of the mix in LUFS
+(ITU-R BS.1770-4, gated, as streaming services measure it), running since the last reset. It
+measures the mix after the master fader, not what Dim or Ref make of it. Click it to reset it;
+starting the transport from a stop resets it too. A dash means nothing loud enough has played
+yet. Under the strip's name, the main bus shows the output path it plays on and the audio device
+that path feeds ("Out 1-2 · Speakers"; the path alone while no device is open).
+
 ## A plug-in that stops responding
 
 If a plug-in stops responding (its editor turns white), transit names it in a message: audio keeps playing, **Save now** saves the session with the plug-in's last stored state, and **Give up on <plug-in>** lets transit carry on without it until you restart; End Task on the plug-in's window would end transit ([troubleshooting](troubleshooting.md#a-plug-in-stopped-responding)).
