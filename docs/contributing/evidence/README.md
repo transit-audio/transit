@@ -13,6 +13,7 @@ a new gate only fixes one instance.
 | [`escape-record.md`](escape-record.md) | Recording an escaped defect and the gate it produced. |
 | [`tests-as-evidence.md`](tests-as-evidence.md) | Writing a test that proves something. |
 | [`hardware-and-ci.md`](hardware-and-ci.md) | What counts as hardware evidence; CI gates every pull request and push to `main`. |
+| [`2026-11-07-cpal-native-wasapi-name-equality.md`](2026-11-07-cpal-native-wasapi-name-equality.md) | ADR 0046 slice 2: cpal and the native WASAPI enumerator list the same endpoints, defaults, buffer sizes and rates on the maintainer's machine. |
 
 Reading order for a pull request: `gates.md`, then `tests-as-evidence.md`, then
 `refutation-review.md`.

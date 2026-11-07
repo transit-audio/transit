@@ -83,6 +83,8 @@ Slice 1 landed: the cpal helpers moved into `backend/cpal.rs`, the fitter tests 
 
 Slice 2 landed: on Windows the WASAPI system is listed by the native enumerator (`backend::native::wasapi_system()`, the default system, errors as diagnostics) for Audio Devices and the report, which names the lister; the native lookup warns on a name two endpoints share; `cpal_and_native_wasapi_list_the_same_names` compares both listings, and per endpoint the buffer sizes and rates. Note for slice 3: the native rows report an unknown buffer range while cpal opens WASAPI; the shared-mode engine period (often 480-480) and `STANDARD_BUFFERS` having no 480 or 441 are inputs to the honest native offer settled there.
 
+Slice 2 evidence filed: [name-equality run](../contributing/evidence/2026-11-07-cpal-native-wasapi-name-equality.md).
+
 ## Gate
 
 Decision 7 is the gate. In short: `cargo xtask windows-deps` passes with its positive control and its negative controls fail; Windows offers no cpal choice; the effective backend shows the native controls for `Auto` and former `cpal` users; WASAPI is the default system; a forced native open failure is a visible error with the device closed and no other open attempted; saved device names resolve to the same endpoint, proven against cpal on real endpoints before slice 3; the WASAPI conversion goldens pass without cpal; the fitter tests run on Windows on a harness proven bit-identical to the cpal one.
