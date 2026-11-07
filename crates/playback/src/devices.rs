@@ -508,7 +508,7 @@ pub fn enumerator_of(system: &str) -> &'static str {
     } else if NATIVE_ASIO_COMPILED && system == ASIO_SYSTEM {
         "native ASIO (driver registry)"
     } else if NATIVE_JACK_COMPILED && system == JACK_SYSTEM {
-        "native JACK"
+        "native JACK (port groups through a probe client)"
     } else {
         "cpal"
     }
