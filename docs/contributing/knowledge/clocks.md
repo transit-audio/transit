@@ -41,13 +41,12 @@ see `../evidence/hardware-and-ci.md`. Device backend work: [ADR 0016](../../adr/
 ## Which backend serves the device
 
 `AudioConfig.backend` (`Auto | Cpal | NativeWasapi | NativeAsio`, saved with the audio settings)
-picks the implementation: `NativeWasapi` on the WASAPI system, `NativeAsio` on the ASIO system
-(`Backend::native_on`; `crates/playback/src/backend/native.rs`, `factory_for`); `Auto` is cpal until
-ADR 0016 slice (f). A native choice takes effect only in a build with its feature (`native-wasapi`,
-or `native-asio` on 64-bit Windows; `transit`, `transit-playback`, `audio-bench`); if its open
-fails before `start()`, the Player opens cpal with the same choices and keeps "Native WASAPI failed:
-<reason>; using the cpal backend" (or "Native ASIO failed: ...") in `Player::backend_note`, shown on
-the status line and in Audio Devices. An input opened on demand goes through the backend that serves
+is read through `Backend::effective` (ADR 0046): on Windows the audio system decides, native ASIO
+on the ASIO system and native WASAPI on any other, whatever was saved (`crates/playback/src/backend/native.rs`,
+`factory_for`); elsewhere the saved choice (native JACK on Linux, else cpal). On Windows an open
+that fails before `start()` with no ladder step left is the error: the Player runs silent with the
+reason ("The audio device did not open: <reason>." on the status line and in Audio Devices) and
+nothing else opens. Only native JACK still falls back to cpal ("Native JACK failed: ..."). An input opened on demand goes through the backend that serves
 the output. The load readout's host text is `WASAPI* shared`/`WASAPI* exclusive` or `ASIO*` while a
 native backend serves the device and `WASAPI`/`ASIO` for cpal; the saved I/O map is keyed by the
 system name (`WASAPI`, `ASIO`) and the device name (an ASIO driver's registry name) in both cases.

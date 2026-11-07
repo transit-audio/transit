@@ -278,11 +278,9 @@ listing), `crates/playback/src/player/device.rs` (`open_native`, `open_stepped`)
 `crates/playback/src/devices.rs` (`Backend::NativeAsio`, calibration keys),
 `crates/ui-studio/src/audio_devices.rs` (the window).
 
-- **Selection.** `AudioConfig.backend` is `NativeAsio` (saved as `"native_asio"`), offered in Audio
-  Devices as "Native ASIO" when Audio system is ASIO, in a 64-bit Windows build with
-  `transit/native-asio`. Each system offers only its own native backend (`Backend::offered`); a native
-  choice that does not serve a newly chosen system goes back to Auto. Without the feature the choice
-  is not offered and a saved `NativeAsio` opens cpal.
+- **Selection.** Since ADR 0046 the audio system decides on Windows: the ASIO system opens native
+  ASIO whatever backend was saved (`Backend::effective`), in every 64-bit Windows build; there is no
+  Backend choice. A saved `NativeAsio` with the WASAPI system opens native WASAPI.
 - **Listing** (slice d2). With the feature, the ASIO system of the Audio Devices lists comes from this
   crate, whichever backend then opens it, not from cpal's ASIO host: every installed driver by its
   registry name, none instantiated, and only the selected driver (the window's Output choice, else
@@ -313,8 +311,8 @@ listing), `crates/playback/src/player/device.rs` (`open_native`, `open_stepped`)
   `capture_with_render` is true, `open_stepped` builds the input first (`Recorder::build_on`, an
   `open_capture` on the render endpoint), then opens the output, then starts the input, then the
   output: both opens before either start, which is this crate's open-order rule. The Player already
-  ran in that order for cpal ASIO, so nothing was restructured. A native open error falls back to the
-  cpal adapter before `start` only. cpal has no ASIO host, so that opens its default host ("Native ASIO failed: ...; using WASAPI shared").
+  ran in that order for cpal ASIO, so nothing was restructured. A native open error is the open's
+  error (ADR 0046): the Player runs silent with the reason and nothing else opens.
 - **Multichannel.** The plans open every channel (`format.channels` is the driver's count), so the
   Model 12 opens 12 in / 10 out; `IoMap::for_device` gives every channel a path ("Out 9-10", "In 12",
   "In 11-12"), keyed `("ASIO", <registry name>)` as cpal's ASIO tables were. `Backend::channel_names`
@@ -329,7 +327,7 @@ listing), `crates/playback/src/player/device.rs` (`open_native`, `open_stepped`)
   [Loopback calibration](#loopback-calibration-20-k31)). Without one the stamps use the driver's
   `getLatencies` figures and the line says so.
 - **Input on demand.** An input that does not open with the output (`HeldInput::No`, native WASAPI
-  without a pairing) opens through the native backend that serves the output, cpal only if that fails.
+  without a pairing) opens through the native backend that serves the output; its error reaches the caller (ADR 0046).
 - **Reset.** `StreamError::ResetRequested` stops the output like a lost device
   (`OutputTrouble::ResetRequested`), and the app reopens the device by itself:
   [Reset handling](#reset-handling-slice-d1).
@@ -338,7 +336,7 @@ listing), `crates/playback/src/player/device.rs` (`open_native`, `open_stepped`)
   of its own so a modal panel does not hold the UI; the status line says when it closed. While the
   panel is open the host thread is busy, so Reconnect, Apply and Rescan Devices wait for it to
   close (they are disabled, and a listing keeps the last list), and an open refused by that blocked
-  host does not fall back to cpal, which would load the same driver twice. A reset the driver asks
+  host says so ("the ASIO driver's settings panel is open; close it and reconnect"). A reset the driver asks
   for while its panel is open is reopened when the panel closes.
 
 Hardware (2026-10-22, `cargo test -p transit-playback --lib -- --ignored

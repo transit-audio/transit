@@ -169,6 +169,20 @@ when omitted. `track.hide {tracks, hidden: false}` also shows them.
 
 ## Audio setup
 
+### Audio devices on Windows
+
+On Windows the audio system decides how transit talks to the device: **WASAPI** opens through
+transit's native WASAPI backend and **ASIO** through its native ASIO backend. There is no Backend
+choice in **Audio > Audio Devices**. On WASAPI, **Take exclusive control of the device** opens the
+device exclusively (other apps go silent while transit runs); shared is the default.
+
+If the device does not open, transit says why and leaves it closed, with no other backend standing
+in: the status line and Audio Devices read "The audio device did not open: <reason>." Fix the cause
+(close the driver's settings panel, plug the interface in, free it from another app), then change
+a choice and press **Apply**, or press **Reconnect**. If a saved output or input is not connected,
+the system's default opens instead and transit says so at startup and on Apply, for example
+"Output “X” is not available; using “Y”."
+
 ### Low Latency mode
 
 Turn on **Low Latency** in the transport bar or **Options** when playing an instrument or monitoring an input through a long effect chain. It temporarily bypasses eligible software audio inserts on armed or monitored tracks, their downstream buses, and the master. The master is included even when no track is armed. Inserts with the largest reported latency are bypassed first; equal latencies use stable track and insert identities.

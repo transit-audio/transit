@@ -85,6 +85,8 @@ Slice 2 landed: on Windows the WASAPI system is listed by the native enumerator 
 
 Slice 2 evidence filed: [name-equality run](../contributing/evidence/2026-11-07-cpal-native-wasapi-name-equality.md).
 
+Slice 3 landed: `Backend::effective` makes the audio system choose the native backend on Windows (a saved `cpal` loads as `Auto`), the Backend row is hidden there with the exclusive checkbox outside it, every Windows open and input path is native or a visible error with the device closed, a missing saved input is said at startup as well as on apply, and the `native-wasapi` and `native-asio` features are gone. The WASAPI buffer offer is unchanged (the rows still report an unknown range); the honest offer remains open for a decision.
+
 ## Gate
 
 Decision 7 is the gate. In short: `cargo xtask windows-deps` passes with its positive control and its negative controls fail; Windows offers no cpal choice; the effective backend shows the native controls for `Auto` and former `cpal` users; WASAPI is the default system; a forced native open failure is a visible error with the device closed and no other open attempted; saved device names resolve to the same endpoint, proven against cpal on real endpoints before slice 3; the WASAPI conversion goldens pass without cpal; the fitter tests run on Windows on a harness proven bit-identical to the cpal one.
