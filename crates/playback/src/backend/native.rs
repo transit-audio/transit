@@ -35,18 +35,22 @@ impl NativeKind {
     }
 }
 
-/// The native backend `cfg` selects on its audio system in this build, else `None` (cpal serves
-/// it): native WASAPI on the WASAPI system, native ASIO on the ASIO system, native JACK on the JACK
-/// system.
+/// The native backend of the effective backend of `cfg` (`Backend::effective`, ADR 0046), else
+/// `None` (cpal serves it, off Windows only). On Windows the audio system decides: native ASIO on
+/// the ASIO system (64-bit builds), native WASAPI on any other, whatever backend was saved.
+/// Elsewhere the saved choice where it serves the system: native JACK on the JACK system, or `Auto`
+/// when a JACK server answers (ADR 0021).
 pub fn factory_for(cfg: &AudioConfig) -> Option<(Box<dyn ab::BackendFactory>, NativeKind)> {
     #[cfg(all(target_os = "linux", feature = "native-jack"))]
     if auto_jack_candidate(cfg) && matches!(transit_audio_jack::JackBackend::shared().probe(), transit_audio_jack::ServerState::Running(_)) {
         return Some((Box::new(transit_audio_jack::JackFactory), NativeKind::Jack));
     }
-    if !cfg.backend.native_on(cfg.system.as_deref()) {
+    let system = cfg.system.as_deref();
+    let backend = cfg.backend.effective(system);
+    if !cfg!(windows) && !backend.native_on(system) {
         return None;
     }
-    match cfg.backend {
+    match backend {
         #[cfg(windows)]
         devices::Backend::NativeWasapi => {
             Some((Box::new(transit_audio_wasapi::WasapiFactory { input_pairing: cfg.input_pairing.clone() }), NativeKind::Wasapi))
@@ -431,7 +435,7 @@ mod tests {
         assert!(!auto_jack_candidate(&alsa_device), "a saved ALSA device keeps cpal");
         assert!(!auto_jack_candidate(&AudioConfig { system: Some("ALSA".into()), ..Default::default() }));
         assert!(!auto_jack_candidate(&AudioConfig { backend: Backend::Cpal, ..auto_jack.clone() }), "cpal is cpal");
-        if !devices::NATIVE_JACK_COMPILED {
+        if !cfg!(windows) && !devices::NATIVE_JACK_COMPILED {
             assert!(factory_for(&auto_jack).is_none(), "a build without the backend stays cpal");
         }
         assert_eq!(
@@ -439,8 +443,13 @@ mod tests {
             "Native JACK (JACK 1.9.20) runs at 48000 Hz (the server's rate) with a 128-sample buffer; a size picked here is requested of the server on Apply. To pin one instead (PipeWire: pw-metadata -n settings 0 clock.force-quantum 128; JACK 2: jackd -p 128)"
         );
         let crossed = AudioConfig { backend: Backend::NativeAsio, system: Some("WASAPI".into()), ..Default::default() };
-        assert!(factory_for(&crossed).is_none(), "native ASIO never serves the WASAPI system");
-        assert!(factory_for(&AudioConfig { backend: Backend::Cpal, ..asio }).is_none());
+        // ADR 0046: on Windows the system decides, so the crossed configuration opens native WASAPI and
+        // a saved cpal on ASIO opens native ASIO; elsewhere native ASIO never serves WASAPI and cpal is cpal.
+        assert_eq!(factory_for(&crossed).map(|(_, kind)| kind), cfg!(windows).then_some(NativeKind::Wasapi));
+        assert_eq!(
+            factory_for(&AudioConfig { backend: Backend::Cpal, ..asio }).map(|(_, kind)| kind),
+            devices::NATIVE_ASIO_COMPILED.then_some(NativeKind::Asio)
+        );
         assert_eq!(NativeKind::Asio.fallback_note("no driver"), "Native ASIO failed: no driver; using WASAPI shared");
         assert_eq!(
             NativeKind::Jack.fallback_note("JACK/PipeWire server not running"),

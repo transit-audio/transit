@@ -341,9 +341,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                 let before = draft.system.clone();
                                                 let (rect, text) = choose(ui, "system", audio_on, &mut draft.system, &names, &mut lay.items);
                                                 if draft.system != before {
-                                                    // Devices belong to their system, and so does a native backend.
+                                                    // Devices belong to their system, and so does a native backend (on Windows the
+                                                    // effective backend follows the new system: nothing to reset, ADR 0046).
                                                     (draft.output, draft.input, draft.input_pairing) = (None, None, None);
-                                                    if draft.backend.is_native() && !draft.backend.native_on(draft.system.as_deref()) {
+                                                    if draft.backend.is_native() && !draft.backend.effective(draft.system.as_deref()).native_on(draft.system.as_deref()) {
                                                         draft.backend = Backend::Auto;
                                                     }
                                                 }
@@ -434,10 +435,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                     controls.push((line, "fallback_system", shown.rect));
                                                     ui.end_row();
                                                 }
-                                                let native =
-                                                    devices::native_wasapi_offered(draft.system.as_deref()) && draft.backend == Backend::NativeWasapi;
-                                                let native_asio =
-                                                    devices::native_asio_offered(draft.system.as_deref()) && draft.backend == Backend::NativeAsio;
+                                                // The backend that serves the chosen system decides (ADR 0046), not the saved value.
+                                                let effective = draft.backend.effective(draft.system.as_deref());
+                                                let native = devices::native_wasapi_offered(draft.system.as_deref()) && effective == Backend::NativeWasapi;
+                                                let native_asio = devices::native_asio_offered(draft.system.as_deref()) && effective == Backend::NativeAsio;
                                                 label(ui, "Input");
                                                 let ins: Vec<(String, String)> = sys
                                                     .map(|s| {

@@ -795,7 +795,8 @@ impl StudioApp {
         if let Some(f) = &self.audio_devices.fake
             && let Some(p) = &f.connection
         {
-            return (p.config.backend.native_on(p.config.system.as_deref())).then(|| f.output_for(&p.config)).flatten();
+            let system = p.config.system.as_deref();
+            return p.config.backend.effective(system).native_on(system).then(|| f.output_for(&p.config)).flatten();
         }
         self.player.as_ref().filter(|p| p.native_backend && devices::is_asio_system(Some(&p.device_system))).map(|p| p.device_name.clone())
     }

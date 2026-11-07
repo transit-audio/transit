@@ -357,7 +357,7 @@ impl Report {
     /// system is another one (ASIO, say). The untouched default system on Windows is WASAPI (#163).
     fn backend_is_wasapi(&self, windows: bool) -> bool {
         // The audio system decides, not the saved backend: a native ASIO backend saved with the
-        // WASAPI system still opens cpal WASAPI (the crossed configuration).
+        // WASAPI system opens native WASAPI (the crossed configuration, ADR 0046).
         windows && self.settings.system.as_deref().is_none_or(|s| transit_playback::devices::is_wasapi_system(Some(s)))
     }
 

@@ -16,19 +16,24 @@ pub const STANDARD_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 1
 /// Buffer sizes offered when the device reports a range that contains them.
 pub const STANDARD_BUFFERS: [u32; 9] = [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192];
 
-/// Which implementation talks to the audio system (ADR 0016).
+/// Which implementation talks to the audio system (ADR 0016). On Windows the saved value does not
+/// decide: the audio system does ([`Backend::effective`], ADR 0046).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Backend {
-    /// The app's choice: cpal in this slice.
+    /// The app's choice: on Windows the native backend of the audio system; elsewhere cpal (native
+    /// JACK on Linux when a server answers, see below).
     #[default]
     Auto,
+    /// cpal. Off Windows only; kept on every platform so a saved `"cpal"` still parses, and on
+    /// Windows a loaded `Cpal` reads as `Auto` ([`Backend::loaded`], ADR 0046 decision 2).
     Cpal,
-    /// The native WASAPI backend (shared mode by default, exclusive on request; ADR 0016). Used only on the WASAPI system
-    /// of a build with the `native-wasapi` feature; otherwise, or if it fails to open, cpal.
+    /// The native WASAPI backend (shared mode by default, exclusive on request; ADR 0016). On
+    /// Windows it serves every audio system but ASIO, whatever was saved; a failed open is an error,
+    /// never another backend (ADR 0046).
     NativeWasapi,
-    /// The native ASIO backend (`transit-audio-asio`, draft ADR 0016 amendment). Used only on the ASIO system of a
-    /// 64-bit Windows build with the `native-asio` feature; otherwise, or if it fails to open, cpal.
+    /// The native ASIO backend (`transit-audio-asio`, draft ADR 0016 amendment). On 64-bit Windows it
+    /// serves the ASIO system, whatever was saved; a failed open is an error (ADR 0046).
     NativeAsio,
     /// The native JACK backend (`transit-audio-jack`, ADR 0021): JACK 2 or PipeWire through the JACK
     /// client API. Used only on the JACK system of a Linux build with the `native-jack` feature;
@@ -56,6 +61,35 @@ impl Backend {
     /// that system where this build has it.
     pub fn offered(system: Option<&str>) -> Vec<Backend> {
         Self::ALL.into_iter().filter(|b| !b.is_native() || b.native_on(system)).collect()
+    }
+
+    /// The backend that serves `system` (ADR 0046, decision 1): on Windows `NativeAsio` for the ASIO
+    /// system and `NativeWasapi` for any other (the untouched default, `None`, too), for every saved
+    /// value; elsewhere the saved value itself (ADR 0021's JACK rule stays in `factory_for`). Every
+    /// site that asks which native backend runs reads this, not the saved value.
+    pub fn effective(self, system: Option<&str>) -> Backend {
+        self.effective_on(system, cfg!(windows))
+    }
+
+    /// [`Backend::effective`] with the platform as a parameter (`windows`), for tests on every platform.
+    pub fn effective_on(self, system: Option<&str>, windows: bool) -> Backend {
+        match (windows, is_asio_system(system)) {
+            (false, _) => self,
+            (true, true) => Backend::NativeAsio,
+            (true, false) => Backend::NativeWasapi,
+        }
+    }
+
+    /// How a saved value loads (ADR 0046, decision 2's one migration): on Windows `Cpal` reads as
+    /// `Auto`, and is saved as `auto` on the next save; every other value, and every value off
+    /// Windows, as saved. The saved value is never rewritten to a native variant.
+    pub fn loaded(self) -> Backend {
+        self.loaded_on(cfg!(windows))
+    }
+
+    /// [`Backend::loaded`] with the platform as a parameter, for tests on every platform.
+    pub fn loaded_on(self, windows: bool) -> Backend {
+        if windows && self == Backend::Cpal { Backend::Auto } else { self }
     }
 
     /// Whether this is one of the native backends.
@@ -122,8 +156,10 @@ pub fn native_offered(system: Option<&str>) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct AudioConfig {
-    /// Which backend opens the device: a native one where it serves the chosen system (WASAPI or
-    /// ASIO, see [`Backend::native_on`]), else cpal (`Auto` is cpal).
+    /// Which backend opens the device: on Windows the audio system decides ([`Backend::effective`]);
+    /// elsewhere a native one where it serves the chosen system ([`Backend::native_on`]), else cpal.
+    /// A saved `cpal` loads as `Auto` on Windows ([`Backend::loaded`]).
+    #[serde(deserialize_with = "load_backend")]
     pub backend: Backend,
     /// Audio system (cpal host name: "WASAPI", "ASIO", "CoreAudio", "ALSA", "JACK", ...).
     pub system: Option<String>,
@@ -155,6 +191,11 @@ pub struct AudioConfig {
     pub system_audio: bool,
     /// The output System Audio captures (its name or id); `None` is the system's default output.
     pub system_audio_output: Option<String>,
+}
+
+/// The saved backend through [`Backend::loaded`].
+fn load_backend<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Backend, D::Error> {
+    <Backend as serde::Deserialize>::deserialize(deserializer).map(Backend::loaded)
 }
 
 impl Default for AudioConfig {
