@@ -229,6 +229,49 @@ pub struct VoiceShape {
     pub morph: f32,
 }
 
+/// Pads a pad instrument publishes ([`Plugin::pad_activity`]): the Sampler's four banks of sixteen.
+pub const PAD_SLOTS: usize = 64;
+
+/// One pad's activity as a pad instrument publishes it ([`Plugin::pad_activity`]), packed in a
+/// `u32` so a tap can carry it in one atomic: bits 0..8 the velocity of the pad's last admitted
+/// trigger (0 before the first), bits 8..16 a count of its admitted triggers and bits 16..24 a count
+/// of the times its choke group cut it (both wrapping). A panel compares the counts with the ones
+/// it last saw, so a trigger or a cut between two frames is never missed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PadWord(pub u32);
+
+impl PadWord {
+    /// The velocity of the last admitted trigger.
+    #[must_use]
+    pub fn velocity(self) -> u8 {
+        (self.0 & 0xFF) as u8
+    }
+
+    /// Admitted triggers so far (wrapping).
+    #[must_use]
+    pub fn hits(self) -> u8 {
+        (self.0 >> 8 & 0xFF) as u8
+    }
+
+    /// Cuts by the pad's choke group so far (wrapping).
+    #[must_use]
+    pub fn chokes(self) -> u8 {
+        (self.0 >> 16 & 0xFF) as u8
+    }
+
+    /// The word after an admitted trigger at `velocity`.
+    #[must_use]
+    pub fn hit(self, velocity: u8) -> PadWord {
+        PadWord(u32::from(self.chokes()) << 16 | u32::from(self.hits().wrapping_add(1)) << 8 | u32::from(velocity.min(127)))
+    }
+
+    /// The word after a cut by the pad's choke group.
+    #[must_use]
+    pub fn choked(self) -> PadWord {
+        PadWord(u32::from(self.chokes().wrapping_add(1)) << 16 | (self.0 & 0xFFFF))
+    }
+}
+
 /// A time in milliseconds as Ableton and Logic print envelope and LFO times (#326): three
 /// significant digits with at most two decimals, milliseconds below a second and seconds from it
 /// (`0.00 ms` under 0.005 ms, `0.01 ms`, `0.50 ms`, `9.99 ms`, `35.0 ms`, `350 ms`, `1.00 s`,
@@ -400,6 +443,13 @@ pub trait Plugin: Send {
     /// The default: none.
     fn newest_voice(&self) -> Option<VoiceShape> {
         None
+    }
+    /// Pad instruments (the Sampler's core path, #326): each pad's [`PadWord`] (its admitted
+    /// triggers with the last velocity, and its cuts by a choke group) into `out`, indexed by pad
+    /// (bank A is 0..16); `false` when the instrument has no pads. Read after `process`, on the
+    /// audio thread, so it must be cheap and allocation-free. The default: no pads.
+    fn pad_activity(&self, _out: &mut [u32; PAD_SLOTS]) -> bool {
+        false
     }
     /// Test seam (feature `testing`, issue #210): writes the plug-in's DSP state (whatever a
     /// later block's output depends on: detector envelopes, filter memories, delay-line contents

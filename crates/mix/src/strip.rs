@@ -180,6 +180,11 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                     if tap.enabled() {
                         tap.push_voices(inst.plugin.voice_activity());
                         tap.push_newest(inst.plugin.newest_voice());
+                        // A pad instrument's pads (the Sampler, #326): a fixed array on the stack.
+                        let mut pads = [0u32; transit_dsp::PAD_SLOTS];
+                        if inst.plugin.pad_activity(&mut pads) {
+                            tap.push_pads(&pads);
+                        }
                     }
                 }
                 if contain_failure(inst, &mut strip.buf, frames) {

@@ -119,3 +119,27 @@ fn a_retired_generation_is_dropped_on_the_control_thread_at_the_service_tick() {
     rig.comp.service_samplers();
     assert!(first.upgrade().is_none(), "dropped at the service tick, on this thread");
 }
+
+#[test]
+fn the_instruments_tap_carries_the_pads_its_instance_published() {
+    // Pad 1 (note 60) holds the clip's note from frame 0 (#326, the Pads view's live state).
+    let (s, t) = session(Some(kit(1)));
+    let mut rig = Rig::new();
+    rig.publish(&s);
+    let hub = rig.comp.scope_hub();
+    assert!(hub.set_enabled(t, crate::INSTRUMENT_UID, true), "the instrument has a tap");
+    rig.render(4);
+    let words = hub.pad_activity(t, crate::INSTRUMENT_UID).expect("the tap is alive");
+    let w = transit_dsp::PadWord(words[0]);
+    assert_eq!((w.hits(), w.velocity(), w.chokes()), (1, 127, 0));
+    assert!(words[1..].iter().all(|w| *w == 0), "no other pad did anything");
+    // Negative control: the one-sample Sampler on its legacy renderer publishes no pads.
+    let (legacy, lt) = session(None);
+    let mut rig = Rig::new();
+    rig.publish(&legacy);
+    let hub = rig.comp.scope_hub();
+    assert!(hub.set_enabled(lt, crate::INSTRUMENT_UID, true));
+    let out = rig.render(4);
+    assert!(out.iter().any(|x| *x != 0.0), "the legacy renderer plays the note");
+    assert_eq!(hub.pad_activity(lt, crate::INSTRUMENT_UID), Some([0; transit_dsp::PAD_SLOTS]));
+}

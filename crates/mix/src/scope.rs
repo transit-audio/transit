@@ -14,7 +14,7 @@ use crate::sample_tap::SampleTap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use transit_dsp::VoiceShape;
+use transit_dsp::{PAD_SLOTS, VoiceShape};
 use transit_model::TrackId;
 
 /// The hub key of an instrument (an instrument's instance has no insert uid).
@@ -39,6 +39,9 @@ pub struct ScopeTap {
     newest_note: AtomicU32,
     /// Its Harmonics, Timbre and Morph, as `f32` bits.
     newest_shape: [AtomicU32; 3],
+    /// A pad instrument's pads as of the last block (`Plugin::pad_activity`, a
+    /// [`transit_dsp::PadWord`] each).
+    pads: Box<[AtomicU32]>,
 }
 
 /// The newest-voice note a tap holds while no key holds a voice.
@@ -62,11 +65,12 @@ impl ScopeTap {
             voices: AtomicU32::new(0),
             newest_note: AtomicU32::new(NO_VOICE),
             newest_shape: [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)],
+            pads: (0..PAD_SLOTS).map(|_| AtomicU32::new(0)).collect(),
         }
     }
 
     /// Bytes one tap holds (counted in the plan's prepared bytes).
-    pub(crate) const BYTES: usize = SCOPE_FRAMES * size_of::<AtomicU32>() + size_of::<ScopeTap>();
+    pub(crate) const BYTES: usize = (SCOPE_FRAMES + PAD_SLOTS) * size_of::<AtomicU32>() + size_of::<ScopeTap>();
 
     /// Whether the render writes to this tap.
     #[must_use]
@@ -122,6 +126,24 @@ impl ScopeTap {
                 self.newest_note.store(u32::from(v.note), Ordering::Release);
             }
             None => self.newest_note.store(NO_VOICE, Ordering::Release),
+        }
+    }
+
+    /// A pad instrument's pads as the render last stored them (`Plugin::pad_activity`: a
+    /// [`transit_dsp::PadWord`] per pad; all zero before the first block or for an instrument
+    /// without pads).
+    #[must_use]
+    pub fn pad_activity(&self) -> [u32; PAD_SLOTS] {
+        core::array::from_fn(|i| self.pads.get(i).map_or(0, |a| a.load(Ordering::Relaxed)))
+    }
+
+    /// Audio thread: stores a pad instrument's pads. Does nothing while disabled.
+    pub fn push_pads(&self, words: &[u32; PAD_SLOTS]) {
+        if !self.enabled() {
+            return;
+        }
+        for (a, w) in self.pads.iter().zip(words) {
+            a.store(*w, Ordering::Relaxed);
         }
     }
 
@@ -256,6 +278,12 @@ impl ScopeHub {
         self.get(track, uid).map_or(0, |t| t.voice_activity())
     }
 
+    /// A pad instrument's pads as last reported (see [`ScopeTap::pad_activity`]); `None` with no tap.
+    #[must_use]
+    pub fn pad_activity(&self, track: TrackId, uid: u64) -> Option<[u32; PAD_SLOTS]> {
+        self.get(track, uid).map(|t| t.pad_activity())
+    }
+
     /// An instrument's newest voice as last reported (see [`ScopeTap::newest_voice`]); `None` with
     /// no tap or no voice.
     #[must_use]
@@ -294,6 +322,22 @@ mod tests {
         t.set_enabled(true);
         t.push_voices(0b101 | 1 << 16);
         assert_eq!(t.voice_activity(), 0b101 | 1 << 16);
+    }
+
+    #[test]
+    fn pad_activity_is_stored_only_while_enabled_and_read_back_through_the_hub() {
+        let t = Arc::new(ScopeTap::new());
+        let mut words = [0u32; PAD_SLOTS];
+        words[5] = transit_dsp::PadWord(0).hit(90).0;
+        t.push_pads(&words);
+        assert_eq!(t.pad_activity(), [0; PAD_SLOTS], "negative control: a disabled tap stores nothing");
+        t.set_enabled(true);
+        t.push_pads(&words);
+        assert_eq!(t.pad_activity(), words);
+        let hub = ScopeHub::default();
+        hub.register(TrackId(4), INSTRUMENT_UID, &t);
+        assert_eq!(hub.pad_activity(TrackId(4), INSTRUMENT_UID), Some(words));
+        assert_eq!(hub.pad_activity(TrackId(5), INSTRUMENT_UID), None, "another track has no tap");
     }
 
     #[test]

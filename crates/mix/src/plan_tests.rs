@@ -109,6 +109,9 @@ impl Plugin for Probe {
     fn enable_sampler_core(&mut self, seed: u32) -> Option<transit_dsp::plugins::sampler::Publisher> {
         self.inner.enable_sampler_core(seed)
     }
+    fn pad_activity(&self, out: &mut [u32; transit_dsp::PAD_SLOTS]) -> bool {
+        self.inner.pad_activity(out)
+    }
 }
 
 impl Drop for Probe {

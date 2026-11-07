@@ -28,6 +28,7 @@ use transit_sampler_core::{SamplerCore, ZONES};
 use super::bank::Banks;
 use super::events::CoreQueue;
 use super::handoff::{self, AudioEnd, Generation, Publisher};
+use super::pads::PadWords;
 use super::params::SlotParams;
 use crate::Transport;
 use crate::util::frames_in;
@@ -40,6 +41,8 @@ pub(super) struct CorePath {
     retained: [Option<Box<Generation>>; 2],
     params: SlotParams,
     queue: CoreQueue,
+    /// What each pad did, for the Pads view (`pads.rs`).
+    pads: PadWords,
     /// Every zone's controls must be rebuilt (the rate or the bar changed).
     all_dirty: bool,
     stop_due: bool,
@@ -68,6 +71,7 @@ impl CorePath {
             retained: [None, None],
             params: SlotParams::new(),
             queue: CoreQueue::new(),
+            pads: PadWords::new(),
             all_dirty: false,
             stop_due: false,
             playing: false,
@@ -137,7 +141,7 @@ impl CorePath {
         self.take_controls();
         self.adopt();
         self.apply_params(frames);
-        let CorePath { core, current, retained, queue, .. } = self;
+        let CorePath { core, current, retained, queue, pads, .. } = self;
         let [r0, r1] = retained;
         let banks = Banks { banks: [current.as_deref().map(|g| &g.bank), r0.as_deref().map(|g| &g.bank), r1.as_deref().map(|g| &g.bank)] };
         let ctx = Context { frame: self.frame, tempo: self.tempo, quarters: self.quarters };
@@ -147,6 +151,8 @@ impl CorePath {
             self.stop_due = false;
         }
         let events = queue.sorted();
+        // Before the core renders: the pads as they stand and the voices playing at the block start.
+        pads.observe(core, events);
         let rendered = match (ch, &mut *io) {
             (0, _) | (_, []) => {
                 core.process(&ctx, &banks, events, &mut []);
@@ -268,6 +274,11 @@ impl CorePath {
             })
             .fold(0.0f64, f64::max);
         if longest.is_finite() { longest.min(1.0e9) as usize } else { 0 }
+    }
+
+    /// Each pad's [`crate::PadWord`] as of the last block.
+    pub(super) fn pad_words(&self) -> &[u32; transit_sampler_core::PADS] {
+        self.pads.words()
     }
 
     /// The state fingerprint (feature `testing`): the core's, the adapter's frame counter.

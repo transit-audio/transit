@@ -60,6 +60,7 @@ mod bank;
 mod events;
 mod handoff;
 mod legacy;
+mod pads;
 mod params;
 
 use adapter::CorePath;
@@ -254,6 +255,13 @@ impl Plugin for Sampler {
         self.events.push(0, EventKind::AllOff);
     }
 
+    /// The core path's pads (`pads.rs`); a legacy instance has none.
+    fn pad_activity(&self, out: &mut [u32; crate::PAD_SLOTS]) -> bool {
+        let Some(c) = self.core.as_deref() else { return false };
+        out.copy_from_slice(c.pad_words());
+        true
+    }
+
     fn enable_sampler_core(&mut self, seed: u32) -> Option<Publisher> {
         Some(self.enable_core(seed))
     }
@@ -279,3 +287,6 @@ mod core_tests;
 
 #[cfg(test)]
 mod core_tests_c2;
+
+#[cfg(test)]
+mod pads_tests;
