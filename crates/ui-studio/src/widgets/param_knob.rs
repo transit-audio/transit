@@ -72,18 +72,25 @@ pub fn show(ui: &mut Ui, id: egui::Id, label: &str, p: &ParamInfo, value: f32) -
     let r = ui.interact(dial, id, Sense::click_and_drag());
     let norm = p.to_normalized(value);
     let mut new = None;
+    let drag_id = id.with("drag");
     if r.dragged() {
+        // The gesture accumulates (see `knob::show`): whole-step parameters follow the pointer.
         let (dy, fine) = ui.input(|i| (i.pointer.delta().y, i.modifiers.shift));
-        let n = dragged(norm, dy, fine);
-        if (n - norm).abs() > f32::EPSILON {
+        let base = if r.drag_started() { norm } else { ui.data(|d| d.get_temp::<f32>(drag_id)).unwrap_or(norm) };
+        let n = dragged(base, dy, fine);
+        ui.data_mut(|d| d.insert_temp(drag_id, n));
+        if (n - base).abs() > f32::EPSILON {
             new = Some(p.clamp(value_at(p, n)));
         }
+    } else {
+        ui.data_mut(|d| d.remove::<f32>(drag_id));
     }
     let double = crate::builtin_editor::double_clicked(ui, &r);
     if double {
         new = Some(p.default);
     }
-    let shown = new.unwrap_or(value);
+    // A drag paints the stored value, never the raw position.
+    let shown = if r.dragged() && !double { value } else { new.unwrap_or(value) };
     let norm = p.to_normalized(shown);
     let active = r.hovered() || r.dragged();
     let c = dial.center();

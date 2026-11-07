@@ -4,7 +4,8 @@
 //! depth, a `knob.cap` face with a `line.strong` rim and a `text` pointer; the label below in
 //! `label.control` (`label.hero` at size L) and the value below that in mono.
 //!
-//! Interaction: vertical drag (Shift for fine), double-click to reset, click the value to type,
+//! Interaction: vertical drag (Shift for fine; a drag accumulates from where it started, so a stepped
+//! parameter follows the pointer and the dial shows the stored value), double-click to reset, click the value to type,
 //! Ctrl+scroll (Cmd on macOS) to nudge. A plain wheel is never the knob's: it scrolls the panel
 //! around it and leaves the value alone (326-M: a device body scrolls). The knob works on a normalized position (0..1); the caller maps it to the
 //! parameter, formats the value text and parses what was typed.
@@ -181,6 +182,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
     let response = ui.interact(dial, id, sense);
     let value_resp = ui.interact(value_r, id.with("value"), if k.disabled { Sense::hover() } else { Sense::click() });
     let edit_id = id.with("editing");
+    let drag_id = id.with("drag");
     let mut editing = ui.data(|d| d.get_temp::<String>(edit_id));
     let mut new = None;
     let mut typed = None;
@@ -189,11 +191,18 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
     if !k.disabled {
         let fine = ui.input(|i| i.modifiers.shift);
         if response.dragged() {
+            // The gesture accumulates: the running position starts at the stored value when the
+            // drag starts and takes every frame's delta, so the caller's rounding (a Choice, whole
+            // semitones) only picks the step and never becomes the next frame's base.
             let dy = ui.input(|i| i.pointer.delta().y);
-            let n = dragged(k.value, dy, fine);
-            if (n - k.value).abs() > f32::EPSILON {
+            let base = if response.drag_started() { k.value } else { ui.data(|d| d.get_temp::<f32>(drag_id)).unwrap_or(k.value) };
+            let n = dragged(base, dy, fine);
+            ui.data_mut(|d| d.insert_temp(drag_id, n));
+            if (n - base).abs() > f32::EPSILON {
                 new = Some(n);
             }
+        } else {
+            ui.data_mut(|d| d.remove::<f32>(drag_id));
         }
         if super::reset_click(&response) {
             new = Some(k.default);
@@ -235,7 +244,9 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
             d.remove::<String>(edit_id);
         }
     });
-    let shown = new.unwrap_or(k.value);
+    // A drag paints the stored value (what the session holds after the caller's rounding), never
+    // the raw position; the other gestures paint their result.
+    let shown = if response.dragged() && !reset && !wheeled { k.value } else { new.unwrap_or(k.value) };
     let state = if k.disabled {
         State::Disabled
     } else if response.dragged() || response.hovered() {
