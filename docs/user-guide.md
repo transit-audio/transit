@@ -206,6 +206,15 @@ transit's native WASAPI backend and **ASIO** through its native ASIO backend. Th
 choice in **Audio > Audio Devices**. On WASAPI, **Take exclusive control of the device** opens the
 device exclusively (other apps go silent while transit runs); shared is the default.
 
+The ASIO list comes from the registry: transit lists every installed driver by name without loading
+any of them. A driver is loaded only when transit opens it (on **Apply**, **Reconnect** or at startup
+with ASIO saved), so its channel counts, rates and buffer sizes show once it is open; until then the
+lists offer the standard choices. Loading a driver another app is using can take the interface away
+from that app, so transit never does it just to list. With `--no-audio` no device is listed or opened
+at all, so a second copy started that way never touches the driver the first one holds (a second
+copy with audio on opens its saved device like the first). When transit quits it releases the driver
+it holds before the process ends.
+
 If the device does not open, transit says why and leaves it closed, with no other backend standing
 in: the status line and Audio Devices read "The audio device did not open: <reason>." Fix the cause
 (close the driver's settings panel, plug the interface in, free it from another app), then change
