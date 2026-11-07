@@ -233,6 +233,9 @@ pub struct ChannelMeterLayout {
     pub rms: Vec<Option<[f32; 4]>>,
     /// The part of an RMS reading above 0 dBFS, in `meter.hot`.
     pub over: Vec<Option<[f32; 4]>>,
+    /// The part of the peak fill above 0 dBFS, in `meter.hot` at the peak fill's alpha (absent
+    /// while the peak is at or below 0 dBFS).
+    pub peak_over: Vec<Option<[f32; 4]>>,
     pub holds: Vec<Option<[f32; 4]>>,
     pub clip_cells: Vec<[f32; 4]>,
     /// Each channel's latch, and whether either is lit.
@@ -244,6 +247,9 @@ pub struct ChannelMeterLayout {
     pub reference_y: f32,
     #[serde(skip)]
     pub peak_color: egui::Color32,
+    /// The ink of the part of the peak fill above 0 dBFS.
+    #[serde(skip)]
+    pub peak_over_color: egui::Color32,
     /// Each clip cell's ink: `meter.hot` while its channel is latched, `line` otherwise.
     #[serde(skip)]
     pub clip_colors: Vec<egui::Color32>,
@@ -255,13 +261,17 @@ pub const CHANNEL_CLIP_GAP: f32 = 4.0;
 /// The vertical channel meter (Fader > Meter, the mixer's stereo meter): one `surface.inset` well
 /// per channel, `bar` wide with the meter gap between, spanning `travel` (the fader's track, so
 /// the bar shares the taper and every mark lines up); grid lines in `line` at the scale's marks;
-/// the peak fill in `meter.ok` at 35 percent, the RMS fill solid on top (`meter.hot` only above
+/// the peak fill in `meter.ok` at 35 percent (`meter.hot` at 35 percent above 0 dBFS), the RMS fill solid on top (`meter.hot` only above
 /// 0 dBFS), a 2 px `text` peak-hold line; above each well, in the fader's top inset, a 4 px clip
 /// cell, `meter.hot` while that channel is latched and `line` otherwise. Paints only: the caller owns
 /// the clicks and steps the readings with [`meter_step`].
 pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels: &[Channel]) -> ChannelMeterLayout {
     let t = &TOKENS;
-    let mut out = ChannelMeterLayout { peak_color: t.meter_ok.gamma_multiply(spec::METER_PEAK_ALPHA), ..Default::default() };
+    let mut out = ChannelMeterLayout {
+        peak_color: t.meter_ok.gamma_multiply(spec::METER_PEAK_ALPHA),
+        peak_over_color: t.meter_hot.gamma_multiply(spec::METER_PEAK_ALPHA),
+        ..Default::default()
+    };
     out.clip = channels.iter().any(|c| c.clip);
     let y_of = |db: f32, well: Rect| well.min.y + fader::taper(db) * well.height();
     for (i, ch) in channels.iter().enumerate() {
@@ -283,6 +293,10 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         let peak = fill_to(ch.peak_db);
         if let Some(r) = peak {
             p.rect_filled(r, 0.0, out.peak_color);
+        }
+        let peak_over = (ch.peak_db > 0.0).then(|| Rect::from_min_max(pos2(well.min.x, y_of(ch.peak_db, well)), pos2(well.max.x, reference_y)));
+        if let Some(r) = peak_over {
+            p.rect_filled(r, 0.0, out.peak_over_color);
         }
         let rms = ch.rms_db.and_then(fill_to);
         if let Some(r) = rms {
@@ -312,6 +326,7 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         out.peaks.push(peak.map(r4));
         out.rms.push(rms.map(r4));
         out.over.push(over.map(r4));
+        out.peak_over.push(peak_over.map(r4));
         out.holds.push(hold.map(r4));
         out.clip_cells.push(r4(cell));
     }

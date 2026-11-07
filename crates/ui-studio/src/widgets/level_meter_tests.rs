@@ -157,3 +157,21 @@ fn the_channel_meter_draws_a_well_per_channel_on_the_taper() {
         "each channel its own cell"
     );
 }
+
+/// The channel meter's peak fill turns `meter.hot` above the 0 dBFS line and stays `meter.ok`
+/// below it, the rule the device meter already follows.
+#[test]
+fn the_channel_peak_fill_is_hot_only_above_zero_dbfs() {
+    use super::level_meter::{Channel, paint_channel};
+    let mut rig = Rig::new();
+    let travel = egui::Rect::from_min_max(egui::pos2(40.0, 40.0), egui::pos2(60.0, 240.0));
+    let y = |db: f32| 40.0 + fader::taper(db) * 200.0;
+    let ch = |peak_db| Channel { peak_db, rms_db: None, hold_db: None, clip: false };
+    let l = rig.idle(|ui| paint_channel(ui.painter(), 100.0, travel, 10.0, &[ch(3.0), ch(-3.0), ch(0.0)]));
+    let hot = l.peak_over[0].expect("hot between 0 and +3");
+    assert!((hot[1] - y(3.0)).abs() < 0.02 && (hot[3] - y(0.0)).abs() < 0.02, "hot spans +3 to 0");
+    assert!((l.peaks[0].unwrap()[1] - y(0.0)).abs() < 0.02, "the ok fill stops at the 0 dBFS line");
+    assert_eq!(l.peak_over_color, DARK.meter_hot.gamma_multiply(0.35));
+    // Negative control: a peak at -3 dB or exactly 0 draws no hot.
+    assert!(l.peak_over[1].is_none() && l.peak_over[2].is_none(), "meter.hot is never used at or below 0 dBFS");
+}
