@@ -1,6 +1,6 @@
 # ADR 0028: MIDI Learn mappings
 
-- **Status:** accepted 2026-10-25 (decided by Derek for v0.3.0, #97)
+- **Status:** accepted 2026-10-25 (decided by Derek for v0.3.0, #97); amended by [ADR 0047](0047-device-macro-strip.md): the `selected:` controller-bank targets and the `plugin:midi<n>` target
 - **Date:** 2026-10-25
 - **Reopen when:** a controller needs 14-bit CC pairs, NRPN, relative (endless encoder) CCs or LED feedback; or mappings must follow a track across sessions by name rather than by position (slice 2 and later).
 
