@@ -340,7 +340,7 @@ impl StudioApp {
             HeaderAction::LearnNext => self.learn_next_touched(key),
             HeaderAction::ShowInChain => {
                 self.focus(t);
-                self.ui.show_devices = true;
+                self.ui.show_devices_pane();
             }
         }
     }

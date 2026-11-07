@@ -5,7 +5,7 @@ use super::*;
 /// Our own UI state (serde, so agents can read and set it; saved as `ui.json` in the transit
 /// settings folder). Not `transit-ui-egui`'s `UiState` (plan 06, L13).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[serde(default, remote = "Self")]
 pub struct UiState {
     pub low_latency: bool,
     #[serde(deserialize_with = "low_latency::deserialize_limit")]
@@ -203,6 +203,37 @@ const OLD_PANE_DEFAULT: f32 = 420.0;
 fn pane_height<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     let h = <f32 as serde::Deserialize>::deserialize(d)?;
     Ok(if h == OLD_PANE_DEFAULT { crate::mixer::default_pane_height() } else { h })
+}
+
+impl serde::Serialize for UiState {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        Self::serialize(self, s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for UiState {
+    /// An older `ui.json` may have both lower panes on; they never stack, so the mixer wins.
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut ui = Self::deserialize(d)?;
+        if ui.show_mixer {
+            ui.show_devices = false;
+        }
+        Ok(ui)
+    }
+}
+
+impl UiState {
+    /// Show the Mixer pane; the Devices pane hides (the two never stack).
+    pub fn show_mixer_pane(&mut self) {
+        self.show_mixer = true;
+        self.show_devices = false;
+    }
+
+    /// Show the Devices pane; the Mixer pane hides.
+    pub fn show_devices_pane(&mut self) {
+        self.show_devices = true;
+        self.show_mixer = false;
+    }
 }
 
 #[cfg(test)]

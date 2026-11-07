@@ -424,3 +424,60 @@ fn the_clip_length_readout_says_looped_to() {
     assert_eq!(crate::keys::clip_length_text(4 * bar, None), "Clip length 4.00 bars");
     assert_eq!(crate::keys::clip_length_text(bar, Some(bar)), "Clip length 1.00 bars");
 }
+
+fn have(r: [f32; 4]) -> bool {
+    r[2] > r[0] && r[3] > r[1]
+}
+
+#[test]
+fn a_click_on_the_active_mixer_tab_hides_the_pane_and_the_strip_stays() {
+    let mut t = T::new();
+    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
+    t.click(mid(t.app.keys.switcher[1]));
+    assert!(!t.app.ui.show_mixer && !t.app.ui.show_devices, "the active tab toggles its pane off");
+    assert!(!t.app.mixer.layout.visible);
+    assert!(t.app.keys.switcher.iter().all(|r| have(*r)), "the strip stays with nothing shown: {:?}", t.app.keys.switcher);
+    // One click brings it back.
+    t.click(mid(t.app.keys.switcher[1]));
+    assert!(t.app.ui.show_mixer && t.app.mixer.layout.visible);
+}
+
+#[test]
+fn a_click_on_the_active_devices_tab_hides_the_pane() {
+    let mut t = T::new();
+    t.click(mid(t.app.keys.switcher[2]));
+    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer, "Devices while the Mixer is shown switches");
+    t.click(mid(t.app.keys.switcher[2]));
+    assert!(!t.app.ui.show_devices && !t.app.ui.show_mixer);
+    assert!(t.app.keys.switcher.iter().all(|r| have(*r)));
+}
+
+#[test]
+fn the_view_menu_and_shortcuts_never_stack_the_mixer_and_devices() {
+    let mut t = T::new();
+    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
+    // The View menu's Devices action while the Mixer is shown.
+    crate::menus::toggle_devices(&mut t.app.ui);
+    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer, "exactly one pane");
+    crate::menus::toggle_mixer(&mut t.app.ui);
+    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices, "exactly one pane");
+    // Hiding is unchanged.
+    crate::menus::toggle_mixer(&mut t.app.ui);
+    assert!(!t.app.ui.show_mixer && !t.app.ui.show_devices);
+    // The shortcuts: Ctrl+Alt+L shows Devices, Ctrl+Alt+M then swaps to the Mixer.
+    t.key("L", json!({"cmd": true, "alt": true}));
+    assert!(t.app.ui.show_devices && !t.app.ui.show_mixer);
+    t.key("M", json!({"cmd": true, "alt": true}));
+    assert!(t.app.ui.show_mixer && !t.app.ui.show_devices);
+}
+
+#[test]
+fn an_old_ui_json_with_both_panes_on_loads_with_the_mixer_shown() {
+    let ui: crate::UiState = serde_json::from_value(json!({"show_mixer": true, "show_devices": true})).unwrap();
+    assert!(ui.show_mixer && !ui.show_devices);
+    let ui: crate::UiState = serde_json::from_value(json!({"show_mixer": false, "show_devices": true})).unwrap();
+    assert!(!ui.show_mixer && ui.show_devices);
+    // Both booleans are still saved.
+    let saved = serde_json::to_value(&ui).unwrap();
+    assert!(saved["show_mixer"] == false && saved["show_devices"] == true);
+}

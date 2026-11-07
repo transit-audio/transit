@@ -205,15 +205,20 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 let view_menu = ui.menu_button("View", |ui| {
                     let u = &mut app.ui;
                     for (name, action, flag) in [
-                        ("Browser", A::ToggleBrowser, &mut u.browser.show),
-                        ("Mixer", A::ToggleMixer, &mut u.show_mixer),
-                        ("Devices", A::ToggleDevices, &mut u.show_devices),
-                        ("Full Mixer Window", A::FullMixer, &mut u.mixer_full),
+                        ("Browser", A::ToggleBrowser, u.browser.show),
+                        ("Mixer", A::ToggleMixer, u.show_mixer),
+                        ("Devices", A::ToggleDevices, u.show_devices),
+                        ("Full Mixer Window", A::FullMixer, u.mixer_full),
                     ] {
-                        let b = check_button_with(ui, *flag, name, Some(label(action)));
+                        let b = check_button_with(ui, flag, name, Some(label(action)));
                         view_items.push(crate::mixer::MenuItem::at(ui, name.into(), String::new(), b.rect));
                         if b.clicked() {
-                            *flag = !*flag;
+                            match action {
+                                A::ToggleBrowser => u.browser.show = !flag,
+                                A::ToggleMixer => toggle_mixer(u),
+                                A::ToggleDevices => toggle_devices(u),
+                                _ => u.mixer_full = !flag,
+                            }
                             ui.close();
                         }
                     }
@@ -641,10 +646,10 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     }
     // Views (Ableton where it has a key; Cubase's F3 for the full mixer).
     if pressed(ctx, A::ToggleMixer) {
-        app.ui.show_mixer = !app.ui.show_mixer;
+        toggle_mixer(&mut app.ui);
     }
     if pressed(ctx, A::ToggleDevices) {
-        app.ui.show_devices = !app.ui.show_devices;
+        toggle_devices(&mut app.ui);
     }
     if pressed(ctx, A::FullMixer) {
         app.ui.mixer_full = !app.ui.mixer_full;
@@ -946,4 +951,22 @@ fn check_button_with(ui: &mut egui::Ui, on: bool, text: impl Into<egui::WidgetTe
         crate::icons::paint(ui.painter(), gutter.center(), crate::icons::Icon::Check, MENU_CHECK_GLYPH, TOKENS.text);
     }
     resp.response
+}
+
+/// View > Mixer and its shortcut: show it (the Devices pane hides) or hide it.
+pub(crate) fn toggle_mixer(ui: &mut crate::UiState) {
+    if ui.show_mixer {
+        ui.show_mixer = false;
+    } else {
+        ui.show_mixer_pane();
+    }
+}
+
+/// View > Devices and its shortcut: show it (the Mixer pane hides) or hide it.
+pub(crate) fn toggle_devices(ui: &mut crate::UiState) {
+    if ui.show_devices {
+        ui.show_devices = false;
+    } else {
+        ui.show_devices_pane();
+    }
 }

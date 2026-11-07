@@ -21,6 +21,14 @@ Plug-in editor windows follow the display scale, not this zoom.
 
 See the [shortcuts reference](shortcuts.md) and **Help > Keyboard Shortcuts** for key bindings.
 
+## Lower panes: Piano Roll, Mixer, Devices
+
+The tabs under the arrangement toggle: click the active **Mixer** or **Devices** tab to hide its
+pane, click the other to switch to it. The tab strip stays when no pane is shown, so a pane is
+one click away. The Mixer and Devices panes are exclusive, never stacked, through the tabs,
+**View > Mixer**, **View > Devices**, and their shortcuts (Ctrl+Alt+M, Ctrl+Alt+L; Cmd+Alt on
+macOS). An older `ui.json` with both on loads with the Mixer shown.
+
 ## Arrangement: track height
 
 Drag the bottom edge of a track header to resize its main row from 16 to 440 points.

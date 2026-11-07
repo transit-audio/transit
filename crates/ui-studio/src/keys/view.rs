@@ -245,7 +245,7 @@ fn switcher(ui: &mut Ui, r: Rect, on: [bool; 3]) -> (f32, [R4; 3], Option<usize>
         let resp = ui.interact(b, ui.id().with(("keys_tab", which)), Sense::click());
         let on = on[which];
         let p = ui.painter();
-        if resp.hovered() && !on {
+        if resp.hovered() {
             p.rect_filled(b, crate::theme::RADIUS, TOKENS.button_hover);
         }
         p.text(b.center(), Align2::CENTER_CENTER, label, font.clone(), if on { TOKENS.text } else { TOKENS.text_dim });
@@ -253,7 +253,7 @@ fn switcher(ui: &mut Ui, r: Rect, on: [bool; 3]) -> (f32, [R4; 3], Option<usize>
             p.line_segment([pos2(b.min.x + 6.0, b.max.y), pos2(b.max.x - 6.0, b.max.y)], Stroke::new(2.0, TOKENS.accent));
         }
         rects[which] = r4(b);
-        if resp.clicked() && !on {
+        if resp.clicked() {
             clicked = Some(which);
         }
     }
@@ -264,7 +264,9 @@ fn switcher(ui: &mut Ui, r: Rect, on: [bool; 3]) -> (f32, [R4; 3], Option<usize>
 /// header), so the three views switch the same way from each. Call after the panes are added.
 pub fn switcher_panel(app: &mut StudioApp, ui: &mut Ui) {
     app.keys.switcher = Default::default();
-    if !(app.ui.show_devices || app.ui.show_mixer && !app.ui.mixer_full) {
+    // The strip stays when nothing is shown, so the panes are one click away; the full mixer and
+    // the piano roll bring their own.
+    if app.ui.mixer_full || app.keys_shown() {
         return;
     }
     egui::Panel::bottom("bottom_switcher").exact_size(HEADER_H).frame(egui::Frame::NONE.fill(TOKENS.panel)).show(ui, |ui| {
@@ -275,10 +277,11 @@ pub fn switcher_panel(app: &mut StudioApp, ui: &mut Ui) {
         app.keys.switcher = rects;
         match clicked {
             Some(0) => app.toggle_keys(),
-            Some(w) => {
-                app.ui.show_mixer = w == 1;
-                app.ui.show_devices = w == 2;
-            }
+            // A click on the active tab hides its pane; on the other, that one shows and this hides.
+            Some(1) if app.ui.show_mixer => app.ui.show_mixer = false,
+            Some(2) if app.ui.show_devices => app.ui.show_devices = false,
+            Some(1) => app.ui.show_mixer_pane(),
+            Some(_) => app.ui.show_devices_pane(),
             None => {}
         }
     });
@@ -293,10 +296,18 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
     layout.tab_keys = rects[0];
     layout.tab_mixer = rects[1];
     layout.tab_devices = rects[2];
-    if let Some(which) = clicked.filter(|w| *w != 0) {
-        app.close_keys();
-        app.ui.show_mixer = which == 1;
-        app.ui.show_devices = which == 2;
+    match clicked {
+        // The active Piano Roll tab closes the piano roll, back to the pane under it.
+        Some(0) => app.close_keys(),
+        Some(which) => {
+            app.close_keys();
+            if which == 1 {
+                app.ui.show_mixer_pane();
+            } else {
+                app.ui.show_devices_pane();
+            }
+        }
+        None => {}
     }
     // The clip: a separator, a swatch in the track color, then its name (not a tab).
     let (track_name, color) = app.engine.session().track(cv.track).map(|t| (t.name.clone(), t.color)).unwrap_or_default();
