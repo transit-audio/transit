@@ -12,9 +12,9 @@ pub(super) fn strip_meter(
 ) -> crate::widgets::level_meter::ChannelMeterLayout {
     use crate::widgets::level_meter::{Channel, paint_channel};
     let db = |lin: f32| if lin > 0.0 { 20.0 * lin.log10() } else { f32::NEG_INFINITY };
-    let channels = [0, 1].map(|c| Channel { peak_db: db(d.falloff[c]), rms_db: None, hold_db: Some(db(d.hold[c])) });
+    let channels = [0, 1].map(|c| Channel { peak_db: db(d.falloff[c]), rms_db: None, hold_db: Some(db(d.hold[c])), clip: d.clip_ch[c] });
     let bar = if main { crate::tokens::fader::METER_BAR_MAIN } else { crate::tokens::fader::METER_BAR };
-    paint_channel(p, x, travel, bar, &channels, d.clip)
+    paint_channel(p, x, travel, bar, &channels)
 }
 
 /// The rect around a channel meter's wells and clip cells (what a click on the meter hits).
@@ -31,15 +31,24 @@ impl StudioApp {
         match only {
             Some(id) => {
                 if let Some(d) = self.meters.get_mut(&id) {
-                    (d.peak, d.clip) = (0.0, false);
+                    {
+                        d.peak = 0.0;
+                        d.clear_clip();
+                    }
                 }
                 if self.engine.session().track(id).is_some_and(|t| t.kind == TrackKind::Master) {
-                    (self.main_meter.peak, self.main_meter.clip) = (0.0, false);
+                    {
+                        self.main_meter.peak = 0.0;
+                        self.main_meter.clear_clip();
+                    }
                 }
             }
             None => {
                 for d in self.meters.values_mut().chain(std::iter::once(&mut self.main_meter)) {
-                    (d.peak, d.clip) = (0.0, false);
+                    {
+                        d.peak = 0.0;
+                        d.clear_clip();
+                    }
                 }
             }
         }
@@ -48,10 +57,16 @@ impl StudioApp {
     /// Clear the main meter and, when there is one, the Master track's own meter: the master
     /// strip shows `meters[master]` and the transport shows `main_meter`.
     pub fn reset_main_meter(&mut self) {
-        (self.main_meter.peak, self.main_meter.clip) = (0.0, false);
+        {
+            self.main_meter.peak = 0.0;
+            self.main_meter.clear_clip();
+        }
         let master = self.engine.session().tracks.iter().find(|t| t.kind == TrackKind::Master).map(|t| t.id);
         if let Some(d) = master.and_then(|id| self.meters.get_mut(&id)) {
-            (d.peak, d.clip) = (0.0, false);
+            {
+                d.peak = 0.0;
+                d.clear_clip();
+            }
         }
     }
 
@@ -59,7 +74,7 @@ impl StudioApp {
     /// peak holds stay until clicked.
     pub fn clear_clip_latches(&mut self) {
         for d in self.meters.values_mut().chain(std::iter::once(&mut self.main_meter)) {
-            d.clip = false;
+            d.clear_clip();
         }
     }
 }

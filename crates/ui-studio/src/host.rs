@@ -151,6 +151,9 @@ pub fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
         }
         if v >= 1.0 {
             d.clip = true;
+            if let Some(c) = d.clip_ch.get_mut(c) {
+                *c = true;
+            }
         }
         d.peak = d.peak.max(v);
         // The channel meter's reading: the kit's peak fall-off, a one-pole step in dB.

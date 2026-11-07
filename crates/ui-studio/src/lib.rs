@@ -143,6 +143,16 @@ pub struct MeterDisplay {
     /// The mixer's channel meter reading per channel (linear): the incoming peaks stepped with
     /// the kit's peak fall-off ballistics (`widgets::level_meter`), fed with `level`.
     pub falloff: [f32; 2],
+    /// The clip latch per channel (the engine publishes a peak per channel); `clip` is either.
+    pub clip_ch: [bool; 2],
+}
+
+impl MeterDisplay {
+    /// Clears the clip latches (both channels).
+    pub fn clear_clip(&mut self) {
+        self.clip = false;
+        self.clip_ch = [false; 2];
+    }
 }
 
 /// A modal question.

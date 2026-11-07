@@ -219,6 +219,8 @@ pub struct Channel {
     pub rms_db: Option<f32>,
     /// The peak-hold line (never smoothed).
     pub hold_db: Option<f32>,
+    /// This channel's clip latch is lit.
+    pub clip: bool,
 }
 
 /// Where the channel meter drew, per channel, and with which inks.
@@ -233,6 +235,8 @@ pub struct ChannelMeterLayout {
     pub over: Vec<Option<[f32; 4]>>,
     pub holds: Vec<Option<[f32; 4]>>,
     pub clip_cells: Vec<[f32; 4]>,
+    /// Each channel's latch, and whether either is lit.
+    pub clips: Vec<bool>,
     pub clip: bool,
     /// The grid lines across the wells, one per taper mark, on whole physical pixels.
     pub grid: Vec<[f32; 4]>,
@@ -240,8 +244,9 @@ pub struct ChannelMeterLayout {
     pub reference_y: f32,
     #[serde(skip)]
     pub peak_color: egui::Color32,
+    /// Each clip cell's ink: `meter.hot` while its channel is latched, `line` otherwise.
     #[serde(skip)]
-    pub clip_color: egui::Color32,
+    pub clip_colors: Vec<egui::Color32>,
 }
 
 /// The gap between the clip cell and the top of the well.
@@ -252,12 +257,12 @@ pub const CHANNEL_CLIP_GAP: f32 = 4.0;
 /// the bar shares the taper and every mark lines up); grid lines in `line` at the scale's marks;
 /// the peak fill in `meter.ok` at 35 percent, the RMS fill solid on top (`meter.hot` only above
 /// 0 dBFS), a 2 px `text` peak-hold line; above each well, in the fader's top inset, a 4 px clip
-/// cell, `meter.hot` while `clip` is latched and `line` otherwise. Paints only: the caller owns
+/// cell, `meter.hot` while that channel is latched and `line` otherwise. Paints only: the caller owns
 /// the clicks and steps the readings with [`meter_step`].
-pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels: &[Channel], clip: bool) -> ChannelMeterLayout {
+pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels: &[Channel]) -> ChannelMeterLayout {
     let t = &TOKENS;
-    let mut out = ChannelMeterLayout { clip, peak_color: t.meter_ok.gamma_multiply(spec::METER_PEAK_ALPHA), ..Default::default() };
-    out.clip_color = if clip { t.meter_hot } else { t.line };
+    let mut out = ChannelMeterLayout { peak_color: t.meter_ok.gamma_multiply(spec::METER_PEAK_ALPHA), ..Default::default() };
+    out.clip = channels.iter().any(|c| c.clip);
     let y_of = |db: f32, well: Rect| well.min.y + fader::taper(db) * well.height();
     for (i, ch) in channels.iter().enumerate() {
         let x0 = x + i as f32 * (bar + spec::METER_GAP);
@@ -299,7 +304,10 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
             pos2(well.min.x, well.min.y - CHANNEL_CLIP_GAP - spec::METER_CLIP_CELL),
             pos2(well.max.x, well.min.y - CHANNEL_CLIP_GAP),
         );
-        p.rect_filled(cell, 0.0, out.clip_color);
+        let ink = if ch.clip { t.meter_hot } else { t.line };
+        p.rect_filled(cell, 0.0, ink);
+        out.clips.push(ch.clip);
+        out.clip_colors.push(ink);
         out.wells.push(r4(well));
         out.peaks.push(peak.map(r4));
         out.rms.push(rms.map(r4));
