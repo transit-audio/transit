@@ -5,9 +5,10 @@ pub const SEND_ROW_H: f32 = 17.0;
 /// The send level bar along a row's bottom edge.
 const BAR_H: f32 = 5.0;
 
-/// How a send level reads: whole dB in a strip, tenths in the device chain.
+/// How a send level reads: whole dB in a strip, tenths in the device chain; the typographic minus
+/// ([`fine::minus`]).
 fn level_text(db: f32, wide: bool) -> String {
-    if db <= -144.0 {
+    fine::minus(if db <= -144.0 {
         "-inf".into()
     } else if wide {
         format!("{db:.1} dB")
@@ -15,7 +16,7 @@ fn level_text(db: f32, wide: bool) -> String {
         "0".into()
     } else {
         format!("{db:.0}")
-    }
+    })
 }
 
 /// One send row: the target (click: send it somewhere else; right-click: pre/post and remove),
@@ -47,8 +48,10 @@ pub(crate) fn send_row(
         return strip_send_row(app, ui, s, t, slot, snd, r, clip, menu);
     }
     let p = ui.painter().with_clip_rect(clip);
+    // The target by name: the FX channel listening to the bus, else the bus itself, never with a
+    // "Bus:" prefix (the board's rows read "Reverb", "Delay").
     let target = match &snd.target {
-        Route::Bus(b) => bus_label(s, *b),
+        Route::Bus(b) => super::routing::bus_name(s, *b),
         other => route_label(s, other, false, 0),
     };
     let not_here = unresolved_output(app.engine.io_map(), &snd.target);
@@ -355,8 +358,10 @@ fn strip_send_row(
     let id = t.id;
     let salt = (id.0, slot, false);
     let p = ui.painter().with_clip_rect(clip);
+    // The target by name: the FX channel listening to the bus, else the bus itself, never with a
+    // "Bus:" prefix (the board's rows read "Reverb", "Delay").
     let target = match &snd.target {
-        Route::Bus(b) => bus_label(s, *b),
+        Route::Bus(b) => super::routing::bus_name(s, *b),
         other => route_label(s, other, false, 0),
     };
     let not_here = unresolved_output(app.engine.io_map(), &snd.target);

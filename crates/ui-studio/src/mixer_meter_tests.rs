@@ -7,7 +7,7 @@ fn the_peak_readout_holds_the_loudest_peak_until_clicked() {
     let r = app.run("track.new", json!({"kind": "audio", "format": "stereo", "name": "Vox"})).unwrap();
     let b = TrackId(r["tracks"][0].as_u64().unwrap());
     frames(&mut app, &ctx, 3, &mut time);
-    assert_eq!(strip(&app, a).peak_text, "-inf");
+    assert_eq!(strip(&app, a).peak_text, "−inf");
     // A known peak (0.7 is -3.1 dBFS), then silence: the readout holds it.
     for (t, peak) in [(a, 0.7f32), (b, 1.2f32)] {
         let d = app.meters.entry(t).or_default();
@@ -15,28 +15,28 @@ fn the_peak_readout_holds_the_loudest_peak_until_clicked() {
         crate::host::feed_meter(d, [0.0, 0.0], 0.0, 0.016);
     }
     frames(&mut app, &ctx, 3, &mut time);
-    assert_eq!(strip(&app, a).peak_text, "-3.1");
+    assert_eq!(strip(&app, a).peak_text, "−3.1");
     assert_eq!(strip(&app, b).peak_text, "+1.6", "over 0 dBFS reads with a plus sign");
     let d = app.meters.get_mut(&a).unwrap();
     crate::host::feed_meter(d, [0.5, 0.0], 0.0, 0.016);
     frames(&mut app, &ctx, 3, &mut time);
-    assert_eq!(strip(&app, a).peak_text, "-3.1", "a quieter peak does not lower the hold");
+    assert_eq!(strip(&app, a).peak_text, "−3.1", "a quieter peak does not lower the hold");
     // Click resets that strip only.
     let at = mid(strip(&app, a).peak_rect);
     click(&mut app, at);
     frames(&mut app, &ctx, 4, &mut time);
-    assert_eq!(strip(&app, a).peak_text, "-inf");
+    assert_eq!(strip(&app, a).peak_text, "−inf");
     assert_eq!(strip(&app, b).peak_text, "+1.6");
     // Ctrl-click resets all.
     let at = mid(strip(&app, b).peak_rect);
     click_with(&mut app, at, json!({"ctrl": true}));
     frames(&mut app, &ctx, 4, &mut time);
-    assert_eq!(strip(&app, b).peak_text, "-inf");
+    assert_eq!(strip(&app, b).peak_text, "−inf");
     // Exactly 0 dBFS reads plain, as the fill draws no hot at 0; the first tick above is hot with
     // its plus sign. Negative control: +0.1 dB (1.0116) is hot.
     assert_eq!(crate::mixer::peak_text(1.0), ("0.0".to_string(), false));
     assert_eq!(crate::mixer::peak_text(1.0116), ("+0.1".to_string(), true));
-    assert_eq!(crate::mixer::peak_text(0.5), ("-6.0".to_string(), false));
+    assert_eq!(crate::mixer::peak_text(0.5), ("−6.0".to_string(), false));
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn assert_idle(app: &StudioApp, t: TrackId, why: &str) {
     let d = app.meters.get(&t).copied().unwrap_or_default();
     assert_eq!((d.clip, d.clip_ch, d.peak), (false, [false; 2], 0.0), "{why}: the meter state");
     let s = strip(app, t);
-    assert_eq!(s.peak_text, "-inf", "{why}: the readout reads the floor");
+    assert_eq!(s.peak_text, "−inf", "{why}: the readout reads the floor");
     assert_ne!(s.peak_color, TOKENS.meter_hot.to_array(), "{why}: the readout is not hot");
     let m = s.meter_layout.unwrap();
     assert!(m.clip_colors.iter().all(|c| *c == TOKENS.line), "{why}: both clip cells are `line`");

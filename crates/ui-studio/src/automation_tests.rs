@@ -594,7 +594,7 @@ fn strip_controls_follow_read_automation_without_commands_or_dirt() {
     assert!((want - -10.0).abs() < 0.5, "halfway between -20 and 0 dB is near -10: {want}");
     let strip = strip_of(&t, a);
     assert!((strip.volume_db - want).abs() < 1e-3, "the strip shows the automated value: {} vs {want}", strip.volume_db);
-    assert_eq!(strip.volume_text, crate::fine::db_text(want));
+    assert_eq!(strip.volume_text, crate::fine::minus(crate::fine::db_text(want)));
     assert!(strip.balance.abs() < 0.05, "pan halfway between hard left and right is center: {}", strip.balance);
     assert_eq!(t.app.engine.session().track(a).unwrap().mixer.volume_db, static_db, "the document value is untouched");
     assert_eq!(t.app.engine.is_dirty(), dirty, "following automation does not dirty the document");

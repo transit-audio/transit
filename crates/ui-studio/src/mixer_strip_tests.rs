@@ -491,3 +491,61 @@ fn the_docked_pane_defaults_to_the_boards_short_travel_and_the_full_window_fills
     let area = app.mixer.layout.area;
     assert!(full.rect[3] >= area[3] - 4.01, "the full strip fills the window: {:?} in {area:?}", full.rect);
 }
+
+/// #326: the gain, peak and send readouts print the typographic minus the fader's scale prints
+/// (U+2212, one formatter), `−inf` included; typed text and positives keep their signs.
+#[test]
+fn the_strip_readouts_print_a_true_minus() {
+    assert_eq!(crate::fine::minus("-6.0".into()), "−6.0");
+    assert_eq!(crate::fine::minus("-inf".into()), "−inf");
+    // Negative control: a positive or unsigned figure is left alone.
+    assert_eq!((crate::fine::minus("+1.5".into()), crate::fine::minus("0".into())), ("+1.5".to_string(), "0".to_string()));
+    let (mut app, ctx, mut time, t) = mixer_app();
+    app.new_fx_channel(Some(t), 0.0).unwrap();
+    full_mixer(&mut app, &ctx, &mut time);
+    app.run("mix.volume", json!({"tracks": [t.0], "db": -10.0})).unwrap();
+    app.engine.session_mut().track_mut(t).unwrap().mixer.sends.iter_mut().flatten().for_each(|s| s.level_db = -12.0);
+    crate::host::feed_meter(app.meters.entry(t).or_default(), [0.5, 0.5], 0.0, 0.016);
+    frames(&mut app, &ctx, 3, &mut time);
+    let s = strip(&app, t);
+    assert_eq!((s.volume_text.as_str(), s.peak_text.as_str(), s.sends[0].level_text.as_str()), ("−10.0", "−6.0", "−12"));
+    let all = [&s.volume_text, &s.peak_text, &s.sends[0].level_text];
+    assert!(all.iter().all(|x| !x.contains('-')), "no ASCII hyphen: {all:?}");
+}
+
+/// #326: a send row names its target without a "Bus:" prefix (the board's "Reverb", "Delay"), for
+/// a bus no channel listens to as for an FX channel's.
+#[test]
+fn a_send_row_names_the_bus_without_a_prefix() {
+    use transit_model::{ChannelFormat, Route, SendSlot};
+    let (mut app, ctx, mut time, t) = mixer_app();
+    app.new_fx_channel(Some(t), 0.0).unwrap();
+    {
+        let s = app.engine.session_mut();
+        let bare = s.add_bus("Delay", ChannelFormat::Stereo);
+        s.track_mut(t).unwrap().mixer.sends[1] = Some(SendSlot::new(Route::Bus(bare)));
+    }
+    full_mixer(&mut app, &ctx, &mut time);
+    let s = strip(&app, t);
+    let targets: Vec<&str> = s.sends.iter().map(|r| r.target.as_str()).collect();
+    assert_eq!(targets, ["FX 1", "Delay"], "no prefix");
+    // Negative control: the routing menus keep naming a bare bus as a bus.
+    let bare = app.engine.session().busses.iter().find(|b| b.name == "Delay").unwrap().id;
+    assert_eq!(crate::mixer::bus_label(app.engine.session(), bare), "Bus: Delay");
+}
+
+/// #326: a MIDI strip's input reads "All MIDI" beside OUT, as the board draws it; a picked channel
+/// joins it, and the full label stays the dropdown's hover text.
+#[test]
+fn the_midi_input_reads_all_midi_beside_out() {
+    let (mut app, ctx, mut time, _) = mixer_app();
+    let k = new_track(&mut app, json!({"kind": "instrument"}));
+    frames(&mut app, &ctx, 3, &mut time);
+    let s = strip(&app, k);
+    assert_eq!(s.input_label, "All MIDI");
+    assert!(s.input[2] < s.midi_output[0], "beside OUT");
+    // Negative control: a picked channel shows.
+    app.run("midi.input", json!({"track": k.0, "channel": 3})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(strip(&app, k).input_label, "All MIDI · Ch 3");
+}

@@ -99,6 +99,21 @@ impl InputView {
         self.muted.iter().find(|m| m.tracks.contains(&track))
     }
 
+    /// The strip's short form (the Mixer board's "All MIDI" beside OUT): the port, and the channel
+    /// only when one is picked. The full [`Self::label`] is the dropdown's hover text.
+    pub(crate) fn short_label(&self, input: &MidiInput) -> String {
+        let port = match &input.port {
+            MidiPort::All => "All MIDI".into(),
+            MidiPort::None => "No MIDI".into(),
+            device => self.port_label(device),
+        };
+        match input.channel {
+            None => port,
+            Some(c) if c < 16 => format!("{port} · Ch {}", c + 1),
+            Some(_) => format!("{port} · Invalid channel"),
+        }
+    }
+
     pub(crate) fn label(&self, input: &MidiInput) -> String {
         let channel = match input.channel {
             None => "All ch".into(),

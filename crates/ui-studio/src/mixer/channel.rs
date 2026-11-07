@@ -279,7 +279,7 @@ fn input_row(
             in_r.max.x = r.min.x - cs::GAP;
         }
         let view = crate::midi_input::InputView::read(app.player.as_ref());
-        let label = view.label(&t.midi_input);
+        let label = view.short_label(&t.midi_input);
         let resp = ui.interact(in_r.intersect(clip), ui.id().with(("midi-input", id.0)), Sense::click());
         paint_dropdown(p, in_r, &label, resp.hovered(), None, false);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "MIDI input"));
@@ -488,7 +488,7 @@ fn fader_and_meter(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Re
     let fader_hot = app.mixer.gesture.is_some_and(|g| g.target == me);
     p.rect_filled(a.gain, tokens::radius::CONTROL, TOKENS.surface_inset);
     p.rect_stroke(a.gain, tokens::radius::CONTROL, Stroke::new(1.0, TOKENS.line), egui::StrokeKind::Inside);
-    let text = fine::db_text(vol_db);
+    let text = fine::minus(fine::db_text(vol_db));
     readout(
         app,
         ui,

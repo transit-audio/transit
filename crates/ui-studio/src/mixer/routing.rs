@@ -25,6 +25,11 @@ fn channel_of_bus(s: &Session, bus: BusId) -> Option<&Track> {
 }
 
 /// A bus as a routing target reads: the FX channel it feeds, else "Bus: name".
+/// A bus by name for a strip's send row: the channel listening to it, else the bus's own name.
+pub(super) fn bus_name(s: &Session, bus: BusId) -> String {
+    channel_of_bus(s, bus).map_or_else(|| s.bus(bus).map_or_else(|| "?".into(), |b| b.name.clone()), |c| c.name.clone())
+}
+
 pub fn bus_label(s: &Session, bus: BusId) -> String {
     channel_of_bus(s, bus).map_or_else(|| format!("Bus: {}", s.bus(bus).map_or("?", |b| b.name.as_str())), |c| c.name.clone())
 }

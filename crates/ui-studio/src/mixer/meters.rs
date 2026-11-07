@@ -79,9 +79,11 @@ impl StudioApp {
     }
 }
 
+/// The peak readout's text (with the typographic minus, [`crate::fine::minus`]) and whether it
+/// is above 0 dBFS.
 pub fn peak_text(lin: f32) -> (String, bool) {
     if lin <= 0.0 {
-        return ("-inf".into(), false);
+        return (crate::fine::minus("-inf".into()), false);
     }
     let db = 20.0 * lin.log10();
     let t = format!("{db:.1}");
@@ -93,7 +95,7 @@ pub fn peak_text(lin: f32) -> (String, bool) {
         } else if t == "-0.0" {
             "0.0".into()
         } else {
-            t
+            crate::fine::minus(t)
         },
         over,
     )

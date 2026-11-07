@@ -142,6 +142,16 @@ pub fn db_text(db: f32) -> String {
     if db <= DB_MIN { "-inf".to_string() } else { format!("{db:+.1}") }
 }
 
+/// A readout's number with the typographic minus (U+2212) the fader's scale prints, for the
+/// mixer strip's gain, peak and send readouts (`−6.0`, `−inf`); the one formatter they share.
+/// Typed text keeps the ASCII hyphen ([`edit_text_db`]); [`parse_db`] takes either.
+pub fn minus(text: String) -> String {
+    match text.strip_prefix('-') {
+        Some(rest) => format!("−{rest}"),
+        None => text,
+    }
+}
+
 /// What a readout starts as when its edit opens: the value with no sign on positives.
 pub fn edit_text_db(db: f32) -> String {
     if db <= DB_MIN { "-inf".to_string() } else { format!("{db:.1}") }

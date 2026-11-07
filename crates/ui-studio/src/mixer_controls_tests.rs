@@ -412,7 +412,7 @@ fn the_fader_readout_edits_in_place_and_applies_cancels_and_clamps() {
         }
         assert!(app.mixer.edit.is_none(), "Enter closes the field");
     }
-    assert_eq!(strip(&app, t).volume_text, "-inf");
+    assert_eq!(strip(&app, t).volume_text, "−inf");
     app.run("mix.volume", json!({"tracks": [t.0], "db": 2.0})).unwrap();
     frames(&mut app, &ctx, 3, &mut time);
     let before = undo_len(&mut app);
@@ -486,7 +486,7 @@ fn inspect_exposes_the_readouts() {
     frames(&mut app, &ctx, 3, &mut time);
     let v = app.inspect(&ctx);
     let s = v["mixer"]["strips"].as_array().unwrap().iter().find(|s| s["track"] == json!(t.0)).unwrap().clone();
-    assert_eq!(s["volume_text"], json!("-6.0"));
+    assert_eq!(s["volume_text"], json!("−6.0"));
     assert!(s["readout_rect"][2].as_f64().unwrap() > s["readout_rect"][0].as_f64().unwrap());
     assert_eq!(s["pan_text"], json!("C"));
     assert!(s["pan_readout_rect"][3].as_f64().unwrap() > 0.0);

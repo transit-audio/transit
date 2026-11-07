@@ -28,7 +28,7 @@ pub(super) fn paint_dropdown(p: &egui::Painter, r: Rect, current: &str, hot: boo
     );
 }
 
-/// The size of the output dropdown's routing arrow (the board gives none: the error glyph's).
+/// The size of the output dropdown's routing arrow (the Mixer board's 10).
 pub(super) const ARROW_SIZE: f32 = 10.0;
 
 /// Where the routing arrow sits in a dropdown face `r`: after the 6 px padding, centered.
