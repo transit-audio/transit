@@ -69,11 +69,16 @@ pub fn show(ui: &mut Ui, id: egui::Id, text: &str, role: Role, on: bool, availab
     let (rect, _) = ui.allocate_exact_size(vec2(w, spec::HEIGHT), Sense::hover());
     let response = ui.interact(rect, id, if available { Sense::click() } else { Sense::hover() });
     let toggled = available && response.clicked();
+    let layout = paint(ui.painter(), rect, text, role, on, available);
+    ToggleOut { response, layout, toggled }
+}
+
+/// Paints a toggle in `rect` without taking input (the caller owns the click, as the mixer's
+/// strips do); [`show`] is this plus the click.
+pub fn paint(p: &egui::Painter, rect: egui::Rect, text: &str, role: Role, on: bool, available: bool) -> ToggleLayout {
     let (fill, ink, border) = colors(role, on, available);
-    let p = ui.painter();
     p.rect_filled(rect, spec::RADIUS, fill);
     p.rect_stroke(rect, spec::RADIUS, Stroke::new(1.0, border), StrokeKind::Inside);
     super::role_text(p, &spec::FONT, text, ink, Align2::CENTER_CENTER, rect.center());
-    let layout = ToggleLayout { rect: r4(rect), text: text.to_string(), on, available, fill, ink, border };
-    ToggleOut { response, layout, toggled }
+    ToggleLayout { rect: r4(rect), text: text.to_string(), on, available, fill, ink, border }
 }

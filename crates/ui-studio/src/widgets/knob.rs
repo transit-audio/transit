@@ -240,29 +240,8 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
     } else {
         State::Default
     };
-    let s = d / geo::BOX;
-    let c = dial.center();
-    let (cap, arc_c, pointer_c) = match state {
-        State::Disabled => (t.knob_cap, t.ink_ghost, t.ink_arrow),
-        State::Active => (t.knob_cap_active, t.signal, t.text),
-        _ => (t.knob_cap, t.signal, t.text),
-    };
+    let dial_paint = paint_dial(ui.painter(), dial, shown, k.bipolar, k.modulation, state);
     let p = ui.painter();
-    let (track_r, ring_r, cap_r) = (geo::TRACK_RADIUS * s, geo::MOD_RING_RADIUS * s, geo::CAP_RADIUS * s);
-    p.add(Shape::line(arc(c, track_r, angle(0.0), angle(1.0)), Stroke::new(geo::TRACK_STROKE * s, t.line)));
-    let span = arc_span(shown, k.bipolar);
-    if span[1] - span[0] > 0.1 {
-        p.add(Shape::line(arc(c, track_r, span[0], span[1]), Stroke::new(geo::TRACK_STROKE * s, arc_c)));
-    }
-    let mod_deg = k.modulation.filter(|_| !k.disabled).map(|depth| mod_span(shown, depth));
-    if let Some([a, b]) = mod_deg
-        && b - a > 0.1
-    {
-        p.add(Shape::line(arc(c, ring_r, a, b), Stroke::new(geo::MOD_RING_STROKE * s, t.modulation)));
-    }
-    p.circle(c, cap_r, cap, Stroke::new(geo::CAP_RIM_STROKE * s, t.line_strong));
-    let a = angle(shown);
-    p.line_segment([polar(c, geo::POINTER_FROM * s, a), polar(c, geo::POINTER_TO * s, a)], Stroke::new(geo::POINTER_STROKE * s, pointer_c));
     let label_role = if k.size == Size::L { tokens::LABEL_HERO } else { tokens::LABEL_CONTROL };
     let label_ink = if k.disabled { t.text_faint } else { label_role.color() };
     super::role_text(p, &label_role, k.label, label_ink, Align2::CENTER_CENTER, label.center());
@@ -277,14 +256,61 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
         value: r4(value_r),
         size: k.size,
         state,
-        pointer_deg: a,
-        arc_deg: span,
-        mod_deg,
-        radii: [track_r, ring_r, cap_r],
-        cap,
-        arc: arc_c,
-        pointer: pointer_c,
+        pointer_deg: dial_paint.pointer_deg,
+        arc_deg: dial_paint.arc_deg,
+        mod_deg: dial_paint.mod_deg,
+        radii: dial_paint.radii,
+        cap: dial_paint.cap,
+        arc: dial_paint.arc,
+        pointer: dial_paint.pointer,
         editing: editing.is_some(),
     };
     KnobOut { response, layout, value: new, typed, wheeled }
+}
+
+/// What [`paint_dial`] drew: the angles, radii and inks.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct DialPaint {
+    pub dial: [f32; 4],
+    pub state: State,
+    pub pointer_deg: f32,
+    pub arc_deg: [f32; 2],
+    pub mod_deg: Option<[f32; 2]>,
+    pub radii: [f32; 3],
+    #[serde(skip)]
+    pub cap: Color32,
+    #[serde(skip)]
+    pub arc: Color32,
+    #[serde(skip)]
+    pub pointer: Color32,
+}
+
+/// Paints the dial alone in `dial` (track, value arc, modulation ring, cap, pointer) at the
+/// normalized `value`, without a label, a value row or any input: [`show`] draws its dial with
+/// it, and a caller that owns its own gestures (the mixer's pan knob) uses it directly.
+pub fn paint_dial(p: &egui::Painter, dial: Rect, value: f32, bipolar: bool, modulation: Option<f32>, state: State) -> DialPaint {
+    let t = &TOKENS;
+    let s = dial.width() / geo::BOX;
+    let c = dial.center();
+    let (cap, arc_c, pointer_c) = match state {
+        State::Disabled => (t.knob_cap, t.ink_ghost, t.ink_arrow),
+        State::Active => (t.knob_cap_active, t.signal, t.text),
+        _ => (t.knob_cap, t.signal, t.text),
+    };
+    let (track_r, ring_r, cap_r) = (geo::TRACK_RADIUS * s, geo::MOD_RING_RADIUS * s, geo::CAP_RADIUS * s);
+    p.add(Shape::line(arc(c, track_r, angle(0.0), angle(1.0)), Stroke::new(geo::TRACK_STROKE * s, t.line)));
+    let span = arc_span(value, bipolar);
+    if span[1] - span[0] > 0.1 {
+        p.add(Shape::line(arc(c, track_r, span[0], span[1]), Stroke::new(geo::TRACK_STROKE * s, arc_c)));
+    }
+    let mod_deg = modulation.filter(|_| state != State::Disabled).map(|depth| mod_span(value, depth));
+    if let Some([a, b]) = mod_deg
+        && b - a > 0.1
+    {
+        p.add(Shape::line(arc(c, ring_r, a, b), Stroke::new(geo::MOD_RING_STROKE * s, t.modulation)));
+    }
+    p.circle(c, cap_r, cap, Stroke::new(geo::CAP_RIM_STROKE * s, t.line_strong));
+    let a = angle(value);
+    p.line_segment([polar(c, geo::POINTER_FROM * s, a), polar(c, geo::POINTER_TO * s, a)], Stroke::new(geo::POINTER_STROKE * s, pointer_c));
+    DialPaint { dial: r4(dial), state, pointer_deg: a, arc_deg: span, mod_deg, radii: [track_r, ring_r, cap_r], cap, arc: arc_c, pointer: pointer_c }
 }

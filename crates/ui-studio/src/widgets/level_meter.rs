@@ -207,3 +207,110 @@ pub fn show(ui: &mut Ui, width: f32, height: f32, m: &Meter) -> MeterLayout {
         clip_color: if m.clip { t.meter_hot } else { t.surface_inset },
     }
 }
+
+/// One channel of the vertical channel meter.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Channel {
+    /// The peak reading in dBFS, already stepped by the caller (peak fall-off by default); drawn
+    /// in `meter.ok` at 35 percent.
+    pub peak_db: f32,
+    /// The RMS reading drawn solid on top; `None` where the source publishes peaks only (the
+    /// layer is left out, never faked).
+    pub rms_db: Option<f32>,
+    /// The peak-hold line (never smoothed).
+    pub hold_db: Option<f32>,
+}
+
+/// Where the channel meter drew, per channel, and with which inks.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct ChannelMeterLayout {
+    pub wells: Vec<[f32; 4]>,
+    /// The 35 percent peak fill of each channel (absent while silent).
+    pub peaks: Vec<Option<[f32; 4]>>,
+    /// The solid RMS fill of each channel (absent while silent or without an RMS source).
+    pub rms: Vec<Option<[f32; 4]>>,
+    /// The part of an RMS reading above 0 dBFS, in `meter.hot`.
+    pub over: Vec<Option<[f32; 4]>>,
+    pub holds: Vec<Option<[f32; 4]>>,
+    pub clip_cells: Vec<[f32; 4]>,
+    pub clip: bool,
+    /// The grid lines across the wells, one per taper mark, on whole physical pixels.
+    pub grid: Vec<[f32; 4]>,
+    /// The y of the 0 dBFS line.
+    pub reference_y: f32,
+    #[serde(skip)]
+    pub peak_color: egui::Color32,
+    #[serde(skip)]
+    pub clip_color: egui::Color32,
+}
+
+/// The gap between the clip cell and the top of the well.
+pub const CHANNEL_CLIP_GAP: f32 = 4.0;
+
+/// The vertical channel meter (Fader > Meter, the mixer's stereo meter): one `surface.inset` well
+/// per channel, `bar` wide with the meter gap between, spanning `travel` (the fader's track, so
+/// the bar shares the taper and every mark lines up); grid lines in `line` at the scale's marks;
+/// the peak fill in `meter.ok` at 35 percent, the RMS fill solid on top (`meter.hot` only above
+/// 0 dBFS), a 2 px `text` peak-hold line; above each well, in the fader's top inset, a 4 px clip
+/// cell, `meter.hot` while `clip` is latched and `line` otherwise. Paints only: the caller owns
+/// the clicks and steps the readings with [`meter_step`].
+pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels: &[Channel], clip: bool) -> ChannelMeterLayout {
+    let t = &TOKENS;
+    let mut out = ChannelMeterLayout { clip, peak_color: t.meter_ok.gamma_multiply(spec::METER_PEAK_ALPHA), ..Default::default() };
+    out.clip_color = if clip { t.meter_hot } else { t.line };
+    let y_of = |db: f32, well: Rect| well.min.y + fader::taper(db) * well.height();
+    for (i, ch) in channels.iter().enumerate() {
+        let x0 = x + i as f32 * (bar + spec::METER_GAP);
+        let well = Rect::from_min_max(pos2(x0, travel.min.y), pos2(x0 + bar, travel.max.y));
+        let reference_y = y_of(0.0, well);
+        out.reference_y = reference_y;
+        p.rect_filled(well, 0.0, t.surface_inset);
+        for m in spec::SCALE_LABELS {
+            let (top, bottom) = fader::snap_rows(p, y_of(m.unwrap_or(f32::NEG_INFINITY), well), 1.0);
+            let line = Rect::from_min_max(pos2(well.min.x, top), pos2(well.max.x, bottom));
+            p.rect_filled(line, 0.0, t.line);
+            if i == 0 {
+                out.grid
+                    .push(r4(Rect::from_min_max(pos2(x, top), pos2(x + channels.len() as f32 * (bar + spec::METER_GAP) - spec::METER_GAP, bottom))));
+            }
+        }
+        let fill_to = |db: f32| (db > fader::FLOOR_DB).then(|| Rect::from_min_max(pos2(well.min.x, y_of(db, well).max(reference_y)), well.max));
+        let peak = fill_to(ch.peak_db);
+        if let Some(r) = peak {
+            p.rect_filled(r, 0.0, out.peak_color);
+        }
+        let rms = ch.rms_db.and_then(fill_to);
+        if let Some(r) = rms {
+            p.rect_filled(r, 0.0, t.meter_ok);
+        }
+        let over = ch.rms_db.filter(|db| *db > 0.0).map(|db| Rect::from_min_max(pos2(well.min.x, y_of(db, well)), pos2(well.max.x, reference_y)));
+        if let Some(r) = over {
+            p.rect_filled(r, 0.0, t.meter_hot);
+        }
+        let hold = ch.hold_db.filter(|db| *db > fader::FLOOR_DB).map(|db| {
+            let y = y_of(db, well).clamp(well.min.y + spec::METER_HOLD / 2.0, well.max.y - spec::METER_HOLD / 2.0);
+            Rect::from_min_max(pos2(well.min.x, y - spec::METER_HOLD / 2.0), pos2(well.max.x, y + spec::METER_HOLD / 2.0))
+        });
+        if let Some(r) = hold {
+            p.rect_filled(r, 0.0, t.text);
+        }
+        p.rect_stroke(well, 0.0, Stroke::new(1.0, t.line_inset), StrokeKind::Inside);
+        let cell = Rect::from_min_max(
+            pos2(well.min.x, well.min.y - CHANNEL_CLIP_GAP - spec::METER_CLIP_CELL),
+            pos2(well.max.x, well.min.y - CHANNEL_CLIP_GAP),
+        );
+        p.rect_filled(cell, 0.0, out.clip_color);
+        out.wells.push(r4(well));
+        out.peaks.push(peak.map(r4));
+        out.rms.push(rms.map(r4));
+        out.over.push(over.map(r4));
+        out.holds.push(hold.map(r4));
+        out.clip_cells.push(r4(cell));
+    }
+    out
+}
+
+/// The width of a channel meter of `n` bars `bar` wide.
+pub fn channel_width(n: usize, bar: f32) -> f32 {
+    n as f32 * bar + n.saturating_sub(1) as f32 * spec::METER_GAP
+}

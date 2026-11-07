@@ -147,7 +147,6 @@ fn at(track: Rect, horizontal: bool, db: f32) -> Pos2 {
 
 /// Draws a fader with a travel of `length` at `db`.
 pub fn show(ui: &mut Ui, id: egui::Id, variant: Variant, length: f32, db: f32, muted: bool) -> FaderOut {
-    let t = &TOKENS;
     let (rect, _) = ui.allocate_exact_size(variant.size(length), Sense::hover());
     let (track, horizontal) = travel(variant, rect);
     let response = ui.interact(rect, id, Sense::click_and_drag());
@@ -173,8 +172,32 @@ pub fn show(ui: &mut Ui, id: egui::Id, variant: Variant, length: f32, db: f32, m
             new = Some((base + step).min(spec::TAPER[0].0.unwrap_or(0.0)));
         }
     }
-    let shown = new.unwrap_or(db);
-    let c = at(track, horizontal, shown);
+    let layout = paint(ui.painter(), rect, variant, new.unwrap_or(db), muted);
+    FaderOut { response, layout, db: new }
+}
+
+/// The travel's span for a fader laid out in `rect` (the track's rect: its top and bottom are the
+/// taper's +6 dB and minus infinity).
+pub fn track_rect(variant: Variant, rect: Rect) -> Rect {
+    travel(variant, rect).0
+}
+
+/// A line `thickness` points thick centered on `y`, as whole physical pixel rows (crisp at any
+/// scale): the rect it covers.
+pub fn snap_rows(p: &egui::Painter, y: f32, thickness: f32) -> (f32, f32) {
+    let ppp = p.pixels_per_point();
+    let n = (thickness * ppp).round().max(1.0);
+    let top = (y * ppp - n / 2.0).round();
+    (top / ppp, (top + n) / ppp)
+}
+
+/// Paints a fader in `rect` at `db` without taking any input (the caller owns the gestures, as
+/// the mixer's strips do); [`show`] is this plus the kit's gestures. The cap's center line is
+/// snapped to whole physical pixels.
+pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bool) -> FaderLayout {
+    let t = &TOKENS;
+    let (track, horizontal) = travel(variant, rect);
+    let c = at(track, horizontal, db);
     let [cw, ch] = variant.cap();
     let cap = Rect::from_center_size(c, vec2(cw, ch));
     let fill = if horizontal { Rect::from_min_max(track.min, pos2(c.x, track.max.y)) } else { Rect::from_min_max(pos2(track.min.x, c.y), track.max) };
@@ -182,9 +205,9 @@ pub fn show(ui: &mut Ui, id: egui::Id, variant: Variant, length: f32, db: f32, m
     let center_line = if horizontal {
         Rect::from_center_size(c, vec2(spec::CAP_CENTER_LINE, ch - 6.0))
     } else {
-        Rect::from_center_size(c, vec2(cw - 8.0, spec::CAP_CENTER_LINE))
+        let (top, bottom) = snap_rows(p, c.y, spec::CAP_CENTER_LINE);
+        Rect::from_min_max(pos2(c.x - (cw - 8.0) / 2.0, top), pos2(c.x + (cw - 8.0) / 2.0, bottom))
     };
-    let p = ui.painter().clone();
     p.rect_filled(track, spec::TRACK_RADIUS, t.line);
     p.rect_filled(fill, spec::TRACK_RADIUS, fill_color);
     // Scale labels (Channel) or ticks (Compact) at the taper's marks.
@@ -196,7 +219,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, variant: Variant, length: f32, db: f32, m
             let ink = if m == Some(0.0) { t.text } else { t.text_faint };
             let r = if variant == Variant::Channel {
                 let role = tokens::TypeRole { size: 10.0, ..tokens::READOUT_DISPLAY };
-                super::role_text(&p, &role, &label(m), ink, Align2::RIGHT_CENTER, pos2(rect.min.x + CHANNEL_FADER_W + CHANNEL_SCALE_W, y))
+                super::role_text(p, &role, &label(m), ink, Align2::RIGHT_CENTER, pos2(rect.min.x + CHANNEL_FADER_W + CHANNEL_SCALE_W, y))
             } else {
                 let r = Rect::from_min_max(pos2(track.max.x + 6.0, y - 0.5), pos2(track.max.x + 6.0 + TICK, y + 0.5));
                 p.rect_filled(r, 0.0, t.line_strong);
@@ -211,7 +234,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, variant: Variant, length: f32, db: f32, m
     p.rect_filled(center_line, 0.0, t.text);
     let meter = (variant == Variant::Channel)
         .then(|| r4(Rect::from_min_max(pos2(rect.min.x + CHANNEL_FADER_W + CHANNEL_SCALE_W + 6.0, track.min.y), pos2(rect.max.x, track.max.y))));
-    let layout = FaderLayout {
+    FaderLayout {
         rect: r4(rect),
         variant,
         track: r4(track),
@@ -225,6 +248,5 @@ pub fn show(ui: &mut Ui, id: egui::Id, variant: Variant, length: f32, db: f32, m
         cap_fill: t.knob_cap_active,
         cap_rim: t.ink_arrow,
         mark_inks,
-    };
-    FaderOut { response, layout, db: new }
+    }
 }
