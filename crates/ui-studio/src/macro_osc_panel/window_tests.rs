@@ -127,9 +127,20 @@ fn opening_a_section_grows_the_window_by_exactly_the_body_and_closing_it_shrinks
 
 #[test]
 fn the_window_never_leaves_the_screen_and_the_body_scrolls_when_it_cannot_fit() {
-    let (mut t, tr) = T::open();
+    // The window remembered near the bottom edge: opening, and every section that opens after,
+    // must move it up (the shift-up rule at panel level).
+    let mut t = T::new();
     t.screen = vec2(1400.0, 700.0);
-    t.frames(3);
+    t.app.ui.device_windows.insert(super::MACRO_OSC.into(), [20.0, 600.0]);
+    let tr = t.instrument_track();
+    t.open_card(0);
+    let opened = t.panel(tr).window;
+    assert!(screen(&t).contains_rect(Rect::from_min_max(pos2(opened[0], opened[1]), pos2(opened[2], opened[3]))), "{opened:?}");
+    assert!(opened[1] < 600.0, "negative control: moved up from where it was remembered: {opened:?}");
+    // Exactly where the shared rule puts it (egui's own constrain would also keep it on screen,
+    // but not at this position).
+    let want = crate::device_window::anchored(pos2(20.0, 600.0), vec2(size(opened).0, size(opened).1), screen(&t));
+    assert_eq!((opened[0], opened[1]), (want.x, want.y));
     t.expand(tr);
     for _ in 0..6 {
         let add = t.in_view(tr, |p| p.add_route.unwrap());
