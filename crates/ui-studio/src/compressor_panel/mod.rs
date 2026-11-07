@@ -22,6 +22,8 @@ mod sections;
 pub mod window;
 
 #[cfg(test)]
+mod collapse_tests;
+#[cfg(test)]
 mod hero_tests;
 #[cfg(test)]
 mod sections_tests;
