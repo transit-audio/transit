@@ -419,3 +419,50 @@ fn the_color_bar_stays_inside_the_strips_rounded_corners_in_both_views() {
         let _ = a;
     }
 }
+
+/// #326: the main bus's input row says where it plays, the output path and the device it feeds
+/// ("Out 1-2 · Speakers"), and its output reads the path. The device name comes from the fake's
+/// published listing, never from a probe: the fake counts every enumeration.
+#[test]
+fn the_main_bus_names_its_output_path_and_the_device_it_feeds() {
+    let (mut app, ctx, mut time, a) = mixer_app();
+    app.run("track.new", json!({"kind": "master"})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    // Negative control: no device open, so the path alone.
+    let m = app.mixer.layout.master.clone().unwrap();
+    assert_eq!((m.input_label.as_str(), m.output_label.as_str()), ("Out 1-2", "Out 1-2"));
+    app.audio_devices.fake = crate::audio_devices::fake_from_json(&json!({"systems": [{
+        "name": "Test", "is_default": true,
+        "outputs": [{"name": "Headphones"}, {"name": "Speakers", "is_default": true}]
+    }]}))
+    .unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let m = app.mixer.layout.master.clone().unwrap();
+    assert_eq!(m.input_label, "Out 1-2 · Speakers", "the path and the device it feeds");
+    assert_eq!(m.output_label, "Out 1-2", "the output reads the path name");
+    assert!(m.input[2] > m.input[0], "drawn in the input row's place");
+    assert_eq!(app.audio_devices.fake.as_ref().unwrap().enumerations, 0, "nothing listed the machine's devices");
+    // A channel's output to the main mix still reads Main.
+    assert_eq!(strip(&app, a).output_label, "Main");
+}
+
+/// #326: the main bus sits `gapMain` (8) after the last strip, not at the window's edge, while the
+/// strips fit; with more strips than fit it is pinned right and the strips scroll under it.
+#[test]
+fn the_main_bus_follows_the_last_strip_and_is_pinned_only_when_the_strips_overflow() {
+    let (mut app, ctx, mut time, a) = mixer_app();
+    app.run("track.new", json!({"kind": "master"})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let (m, s) = (app.mixer.layout.master.clone().unwrap(), strip(&app, a));
+    assert_eq!(m.rect[0], s.rect[2] + cs::GAP_MAIN, "8 after the last strip");
+    assert!(app.mixer.layout.add_fx[0] >= m.rect[2], "+ FX Channel after the main bus");
+    // Negative control: thirty strips do not fit, so the main bus is pinned at the right edge.
+    for _ in 0..30 {
+        app.run("track.new", json!({"kind": "audio", "format": "stereo"})).unwrap();
+    }
+    frames(&mut app, &ctx, 3, &mut time);
+    let m = app.mixer.layout.master.clone().unwrap();
+    let area = app.mixer.layout.area;
+    assert_eq!(m.rect[2], area[2] - 6.0, "pinned right");
+    assert!(app.mixer.layout.strips.iter().all(|s| s.rect[0] < m.rect[0]), "the strips lie left of it");
+}

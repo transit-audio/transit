@@ -248,6 +248,13 @@ fn input_row(
         }
         sl.input = r4(in_r);
         sl.input_label = cur;
+    } else if t.kind == TrackKind::Master {
+        // The main bus has no input: the row says where it plays, the output path and the device
+        // it feeds (the Mixer board's "Out 1–2 · Speakers"), in Mono 11 `text.faint`.
+        let text = main_destination(app, s, t);
+        text_in(p, &MAIN_DESTINATION, &text, TOKENS.text_faint, in_r.shrink2(vec2(2.0, 0.0)), Align2::LEFT_CENTER);
+        sl.input = r4(in_r);
+        sl.input_label = text;
     } else if t.kind.is_midi() {
         let out_r = Rect::from_min_max(pos2(in_r.max.x - cs::MIDI_OUT_WIDTH, in_r.min.y), in_r.max);
         let mut in_r = Rect::from_min_max(in_r.min, pos2(out_r.min.x - cs::GAP, in_r.max.y));
@@ -284,11 +291,34 @@ fn input_row(
     }
 }
 
+/// The main bus's destination line: Mono 11.
+const MAIN_DESTINATION: TypeRole = TypeRole { size: 11.0, ..tokens::READOUT_DISPLAY };
+
+/// The output path the main bus plays on, by name: the I/O map's Main path for the main mix, a
+/// named path as it is.
+fn main_path(app: &StudioApp, s: &Session, t: &Track) -> String {
+    match &t.mixer.output {
+        Route::Main => app.engine.io_map().main.clone(),
+        other => route_label(s, other, false, t.channels()),
+    }
+}
+
+/// "Out 1-2 · Speakers": the main bus's output path and the device the audio system opened for
+/// it (what the Player recorded or the fake's listing says); the path alone without a device.
+fn main_destination(app: &StudioApp, s: &Session, t: &Track) -> String {
+    let path = main_path(app, s, t);
+    match app.opened().output {
+        Some(device) => format!("{path} · {device}"),
+        None => path,
+    }
+}
+
 /// The output dropdown.
 #[allow(clippy::too_many_arguments)]
 fn output_row(app: &mut StudioApp, ui: &mut Ui, clip: Rect, s: &Session, t: &Track, out_r: Rect, sl: &mut StripLayout, menu: &mut Vec<MenuItem>) {
     let m = &t.mixer;
-    let cur = route_label(s, &m.output, false, t.channels());
+    // The main bus reads the path it plays on ("Out 1-2"), not the main mix's own name.
+    let cur = if t.kind == TrackKind::Master { main_path(app, s, t) } else { route_label(s, &m.output, false, t.channels()) };
     let mut choices = output_choices(s, t, app.engine.io_map());
     push_unused_entry(s, &mut choices);
     let tip = unresolved_output(app.engine.io_map(), &m.output).then_some(NOT_HERE);

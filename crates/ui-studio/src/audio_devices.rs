@@ -595,7 +595,9 @@ impl StudioApp {
         Some(format!("The audio device did not open: {why}."))
     }
 
-    fn opened(&self) -> Opened {
+    /// What the Player opened: from the fake's listing in tests and screenshot runs, from the
+    /// Player's own record otherwise (never a probe of the machine's devices).
+    pub(crate) fn opened(&self) -> Opened {
         if let Some(f) = &self.audio_devices.fake
             && let Some(p) = &f.connection
         {

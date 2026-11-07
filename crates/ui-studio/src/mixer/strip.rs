@@ -30,6 +30,10 @@ pub fn show_full(app: &mut StudioApp, ui: &mut Ui) {
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(TOKENS.bg)).show(ui, |ui| strips(app, ui));
 }
 
+/// The room "+ FX Channel" takes after the main bus when it follows the strips: 6, the button's
+/// 96 and the 6 to the window's edge.
+const ADD_FX_ROOM: f32 = 108.0;
+
 /// The docked pane's margins above and below its strips (4 each) and the panel's 1 px edge.
 const PANE_MARGINS: f32 = 9.0;
 
@@ -71,13 +75,22 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
     // A track's number is its place in the document among the tracks that are not the master.
     let numbers: std::collections::HashMap<TrackId, usize> =
         s.tracks.iter().filter(|t| t.kind != TrackKind::Master).enumerate().map(|(i, t)| (t.id, i + 1)).collect();
-    // The main bus strip is pinned right; the others scroll under it.
+    // The main bus strip sits `gapMain` after the last strip, with "+ FX Channel" after it (the
+    // Mixer board); when the strips do not fit beside it, it is pinned right and the others
+    // scroll under it, "+ FX Channel" after the last of them.
     let main_w = anatomy::width(true);
-    let master_rect = Rect::from_min_max(pos2(area.max.x - main_w - 6.0, area.min.y + 4.0), pos2(area.max.x - 6.0, area.max.y - 4.0));
-    let lane = Rect::from_min_max(
-        pos2(area.min.x + 4.0, area.min.y + 4.0),
-        pos2(master_rect.min.x - crate::tokens::channel_strip::GAP_MAIN, area.max.y - 4.0),
-    );
+    let gap_main = crate::tokens::channel_strip::GAP_MAIN;
+    let strips_w = if channels.is_empty() { 0.0 } else { channels.len() as f32 * (STRIP_W + GAP) - GAP + block_gap };
+    let lead = if channels.is_empty() { 0.0 } else { gap_main };
+    let unpinned = area.min.x + 4.0 + strips_w + lead + main_w + ADD_FX_ROOM <= area.max.x;
+    let (master_rect, lane) = if unpinned {
+        let x = area.min.x + 4.0 + strips_w + lead;
+        let master = Rect::from_min_max(pos2(x, area.min.y + 4.0), pos2(x + main_w, area.max.y - 4.0));
+        (master, Rect::from_min_max(pos2(area.min.x + 4.0, area.min.y + 4.0), pos2(x - lead, area.max.y - 4.0)))
+    } else {
+        let master = Rect::from_min_max(pos2(area.max.x - main_w - 6.0, area.min.y + 4.0), pos2(area.max.x - 6.0, area.max.y - 4.0));
+        (master, Rect::from_min_max(pos2(area.min.x + 4.0, area.min.y + 4.0), pos2(master.min.x - gap_main, area.max.y - 4.0)))
+    };
     let short = short_for(lane.height());
     let content_w = channels.len() as f32 * (STRIP_W + GAP) + block_gap + 110.0;
     app.mixer.hscroll = app.mixer.hscroll.clamp(0.0, (content_w - lane.width()).max(0.0));
@@ -106,12 +119,14 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
             layout.fx_divider = Some(r4(divider));
         }
     }
-    // "Add FX Channel" after the last strip.
-    let ax = lane.min.x + channels.len() as f32 * (STRIP_W + GAP) + block_gap - app.mixer.hscroll + 6.0;
+    // "Add FX Channel" after the last strip, or after the main bus when it follows the strips.
+    let ax =
+        if unpinned { master_rect.max.x + 6.0 } else { lane.min.x + channels.len() as f32 * (STRIP_W + GAP) + block_gap - app.mixer.hscroll + 6.0 };
     let add = Rect::from_min_size(pos2(ax, lane.min.y + 4.0), vec2(96.0, 24.0));
-    if add.min.x < lane.max.x {
-        let resp = ui.interact(add.intersect(lane), ui.id().with("add_fx"), Sense::click());
-        let p = ui.painter().with_clip_rect(lane);
+    let add_clip = if unpinned { area } else { lane };
+    if add.min.x < add_clip.max.x {
+        let resp = ui.interact(add.intersect(add_clip), ui.id().with("add_fx"), Sense::click());
+        let p = ui.painter().with_clip_rect(add_clip);
         p.rect_filled(add, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
         crate::icons::paint_labeled(&p, add, false, crate::icons::Icon::Plus, 12.0, "FX Channel", FontId::proportional(11.5), TOKENS.text);
         if resp.on_hover_text("A new FX channel (add a send to it from a strip's + Send)").clicked() {
