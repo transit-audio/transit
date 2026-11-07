@@ -23,6 +23,7 @@ pub mod chrome_pick;
 pub mod clip_inspector;
 pub mod control;
 pub mod debug_log;
+pub mod device_window;
 pub mod devices;
 pub mod diagnostics;
 pub mod edit_tools;

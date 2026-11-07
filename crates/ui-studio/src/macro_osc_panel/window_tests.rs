@@ -1,10 +1,19 @@
-//! The floating window: the device window rule, every parameter reachable, the remembered rect,
-//! Escape, Window > Close All Editors, follow selection, and both token sets.
+//! The floating window: the device window rule, every parameter reachable, the content-sized
+//! window (326-X), the remembered position, Escape, Window > Close All Editors, follow selection,
+//! and both token sets. The shared policy's own tests are in `crate::device_window`.
 
 use super::test_rig::{T, info, mid};
-use super::window::{cascaded, on_screen, opening_rect};
+use super::window::window_size;
 use egui::{Rect, pos2, vec2};
 use serde_json::json;
+
+fn size(w: [f32; 4]) -> (f32, f32) {
+    (w[2] - w[0], w[3] - w[1])
+}
+
+fn screen(t: &T) -> Rect {
+    Rect::from_min_size(egui::Pos2::ZERO, t.screen)
+}
 
 const INST: usize = transit_mix::INSTRUMENT_SLOT;
 
@@ -57,34 +66,99 @@ fn every_parameter_is_reachable_from_the_panel() {
 }
 
 #[test]
-fn the_remembered_rect_round_trips_through_ui_json_and_opens_on_screen() {
-    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0));
+fn the_remembered_position_round_trips_through_ui_json_and_an_old_rect_opens_content_sized_there() {
     let mut t = T::new();
-    t.app.ui.device_windows.insert(super::MACRO_OSC.into(), [100.0, 80.0, 1200.0, 700.0]);
+    // An entry written before 326-X is a rect: its position is read, its size read past.
+    let old: crate::UiState = serde_json::from_value(json!({"device_windows": {super::MACRO_OSC: [20.0, 80.0, 1120.0, 700.0]}})).unwrap();
+    assert_eq!(old.device_windows.get(super::MACRO_OSC), Some(&[20.0, 80.0]));
+    t.app.ui.device_windows = old.device_windows;
     let json = serde_json::to_string(&t.app.ui).unwrap();
     let back: crate::UiState = serde_json::from_str(&json).unwrap();
-    assert_eq!(back.device_windows.get(super::MACRO_OSC), Some(&[100.0, 80.0, 1200.0, 700.0]));
+    assert_eq!(back.device_windows.get(super::MACRO_OSC), Some(&[20.0, 80.0]), "the new shape: position only");
     // An older ui.json without the field reads as empty.
-    let old: crate::UiState = serde_json::from_value(json!({})).unwrap();
-    assert!(old.device_windows.is_empty() && old.device_sections.is_empty() && old.editor_follow.is_empty());
+    let none: crate::UiState = serde_json::from_value(json!({})).unwrap();
+    assert!(none.device_windows.is_empty() && none.device_sections.is_empty() && none.editor_follow.is_empty());
     let tr = t.instrument_track();
     t.open_card(0);
-    assert_eq!(t.panel(tr).window, [100.0, 80.0, 1200.0, 700.0], "the device opens where it was last closed");
+    let w = t.panel(tr).window;
+    assert_eq!((w[0], w[1]), (20.0, 80.0), "the device opens where it was last closed");
+    let content = super::content_height(&t.app, &t.ctx, (tr, INST), window_size(screen(&t), 0.0).x - crate::device_window::edge().x);
+    let want = window_size(screen(&t), content);
+    assert_eq!(size(w), (want.x, want.y), "content-sized");
+    assert_ne!(size(w), (1100.0, 620.0), "negative control: not the old entry's size");
     // Moved by its bar, closed, opened again: where it was left.
     let bar = t.panel(tr).title.bar;
     let grip = (bar[0] + 300.0, (bar[1] + bar[3]) / 2.0);
     t.drag(grip, (grip.0 + 40.0, grip.1 + 30.0), false);
     let moved = t.panel(tr).window;
-    assert_eq!((moved[0], moved[1]), (140.0, 110.0), "the bar moves the window");
+    assert_eq!((moved[0], moved[1]), (60.0, 110.0), "the bar moves the window");
     let close = t.panel(tr).title.close;
     t.click(mid(close), 1);
     assert!(t.app.ui.plugin_windows.is_empty());
+    assert_eq!(t.app.ui.device_windows.get(super::MACRO_OSC), Some(&[60.0, 110.0]), "closing writes the position");
     t.open_card(0);
     assert_eq!(t.panel(tr).window, moved);
-    // Negative control: a rect off the screen comes back onto it.
-    let r = opening_rect(Some([1300.0, 850.0, 2400.0, 1600.0]), None, &[], screen, 900.0, 0);
-    assert!(screen.contains_rect(r), "{r:?}");
-    assert_eq!(on_screen(Rect::from_min_size(pos2(10.0, 10.0), vec2(500.0, 400.0)), screen).min, pos2(10.0, 10.0), "a rect on screen stays");
+}
+
+#[test]
+fn opening_a_section_grows_the_window_by_exactly_the_body_and_closing_it_shrinks_it_back() {
+    let (mut t, tr) = T::open();
+    t.screen = vec2(1600.0, 1600.0);
+    t.frames(3);
+    let before = t.panel(tr).window;
+    let button = t.panel(tr).shaper_bar.unwrap().button;
+    t.click(mid(button), 1);
+    let p = t.panel(tr);
+    let body = p.shaper_body.expect("the Shaper opened");
+    let grown = p.window;
+    assert_eq!((grown[0], grown[1]), (before[0], before[1]), "anchored at the top left");
+    assert_eq!(grown[3] - grown[1], before[3] - before[1] + crate::tokens::layout::PANEL_GAP + (body[3] - body[1]), "the body's height and its gap");
+    assert_ne!(grown, before, "negative control: the window did change");
+    t.click(mid(button), 1);
+    assert!(t.panel(tr).shaper_body.is_none());
+    assert_eq!(t.panel(tr).window, before, "collapsed: back to the same rect");
+    // The window holds its content exactly: the footer sits right under the body's last panel.
+    let button = t.panel(tr).modulation_bar.unwrap().button;
+    t.click(mid(button), 1);
+    let p = t.panel(tr);
+    let m = p.modulation_body.expect("the Modulation opened");
+    assert_eq!(p.window[3] - 1.0 - super::FOOTER_H, m[3] + crate::tokens::layout::WINDOW_PADDING, "no scroll, no gap");
+}
+
+#[test]
+fn the_window_never_leaves_the_screen_and_the_body_scrolls_when_it_cannot_fit() {
+    let (mut t, tr) = T::open();
+    t.screen = vec2(1400.0, 700.0);
+    t.frames(3);
+    t.expand(tr);
+    for _ in 0..6 {
+        let add = t.in_view(tr, |p| p.add_route.unwrap());
+        t.click(mid(add), 1);
+    }
+    let w = t.panel(tr).window;
+    assert!(screen(&t).contains_rect(Rect::from_min_max(pos2(w[0], w[1]), pos2(w[2], w[3]))), "{w:?}");
+    assert_eq!(size(w).1, 700.0, "as tall as the screen");
+    let content = super::content_height(&t.app, &t.ctx, (tr, INST), size(w).0 - crate::device_window::edge().x);
+    assert!(content + crate::tokens::layout::TITLE_BAR_HEIGHT + super::FOOTER_H > 700.0, "negative control: the content is taller than the screen");
+    // The bottom is reachable: the body scrolls.
+    let add = t.in_view(tr, |p| p.add_route.unwrap());
+    assert!(add[3] <= w[3] - super::FOOTER_H, "{add:?} {w:?}");
+}
+
+#[test]
+fn dragging_the_window_edge_does_not_resize_it() {
+    let (mut t, tr) = T::open();
+    let w = t.panel(tr).window;
+    for (x, y) in [(w[2] - 2.0, w[3] - 2.0), (w[2] - 1.0, (w[1] + w[3]) / 2.0), ((w[0] + w[2]) / 2.0, w[3] - 1.0)] {
+        t.drag((x, y), (x + 120.0, y + 90.0), false);
+        assert_eq!(t.panel(tr).window, w, "no resize handle at ({x}, {y})");
+    }
+    // Negative control: the same drag on the bar moves the window (the gesture arrives).
+    let bar = t.panel(tr).title.bar;
+    let grip = (bar[0] + 300.0, (bar[1] + bar[3]) / 2.0);
+    t.drag(grip, (grip.0 + 20.0, grip.1 + 10.0), false);
+    let moved = t.panel(tr).window;
+    assert_eq!((moved[0] - w[0], moved[1] - w[1], size(moved)), (20.0, 10.0, size(w)));
 }
 
 #[test]
@@ -110,21 +184,17 @@ fn two_instances_keep_their_own_rects_and_the_second_opens_cascaded() {
     let close = t.panel(b).title.close;
     t.click(mid(close), 1);
     assert_eq!(t.app.ui.plugin_windows, vec![(a, INST)]);
-    assert_eq!(t.app.ui.device_windows.get(super::MACRO_OSC), Some(&moved), "the closed window left its rect as the device's");
+    assert_eq!(t.app.ui.device_windows.get(super::MACRO_OSC), Some(&[moved[0], moved[1]]), "the closed window left its position as the device's");
     // A closes after it: the device's rect is now A's, and B still reopens at its own.
     let close_a = t.panel(a).title.close;
     t.click(mid(close_a), 1);
-    assert_eq!(t.app.ui.device_windows.get(super::MACRO_OSC), Some(&ra));
+    assert_eq!(t.app.ui.device_windows.get(super::MACRO_OSC), Some(&[ra[0], ra[1]]));
     t.open_card(0);
     assert_eq!(t.panel(b).window, moved, "B reopens where B was left, not at the device's rect");
     t.app.focus(a);
     t.frames(3);
     t.open_card(0);
     assert_eq!(t.panel(a).window, ra, "A unchanged");
-    // The cascade only steps off open windows.
-    let r = Rect::from_min_size(pos2(32.0, 32.0), vec2(100.0, 100.0));
-    assert_eq!(cascaded(r, &[]).min, r.min);
-    assert_eq!(cascaded(r, &[r, r.translate(vec2(24.0, 24.0))]).min, pos2(80.0, 80.0));
 }
 
 #[test]
@@ -276,7 +346,7 @@ fn a_following_window_stays_put_and_leaves_its_rect_to_the_shown_instance_when_f
     t.app.close_editor((b, INST));
     t.frames(2);
     let uid_b = t.app.builtin_at((b, INST)).unwrap().uid.get();
-    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&rb));
+    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&pos2(rb[0], rb[1])));
     // A follows; focusing B swaps the content and the window stays where A's was.
     t.app.focus(a);
     t.frames(3);
@@ -286,11 +356,11 @@ fn a_following_window_stays_put_and_leaves_its_rect_to_the_shown_instance_when_f
     t.frames(3);
     assert_eq!(t.app.ui.plugin_windows, vec![(b, INST)]);
     assert_eq!(t.panel(b).window, ra, "the window stays put, not B's own rect");
-    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&rb), "following writes nothing to B's rect");
+    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&pos2(rb[0], rb[1])), "following writes nothing to B's position");
     // Follow off: where the window is becomes B's place.
     let link = t.panel(b).title.follow;
     t.click(mid(link), 1);
-    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&ra));
+    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid_b), Some(&pos2(ra[0], ra[1])));
     t.app.close_editor((b, INST));
     t.frames(2);
     t.app.toggle_editor((b, INST));

@@ -123,13 +123,17 @@ fn chip_rects(p: &egui::Painter, origin: Pos2, width: f32) -> (Rect, Vec<Rect>) 
     (label, out)
 }
 
-/// The section's height (chips estimated at two lines when no painter is at hand).
-pub(crate) fn height(app: &StudioApp, dev: Dev, _width: f32) -> f32 {
+/// The section's height at `width`: the chips laid out as [`show`] lays them (326-X: the window
+/// takes this height, so an estimate would scroll or leave a gap).
+pub(crate) fn height(app: &StudioApp, ctx: &egui::Context, dev: Dev, width: f32) -> f32 {
     let bar = super::shaper::BAR_TOP + section_bar::HEIGHT;
     if collapsed(app, dev) {
         return bar;
     }
-    bar + space::PANEL_GAP + body_h(shown_rows(app, dev).len(), 2.0 * CHIP_H + CHIP_GAP)
+    let p = egui::Painter::new(ctx.clone(), egui::LayerId::background(), Rect::EVERYTHING);
+    let (label, chips) = chip_rects(&p, Pos2::ZERO, width - 2.0 * space::PANEL_PADDING[1]);
+    let chips_h = chips.last().map_or(CHIP_H, |r| r.max.y - label.min.y);
+    bar + space::PANEL_GAP + body_h(shown_rows(app, dev).len(), chips_h)
 }
 
 fn body_h(rows: usize, chips: f32) -> f32 {

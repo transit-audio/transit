@@ -13,6 +13,8 @@ pub struct T {
     pub ctx: egui::Context,
     pub time: f64,
     pub shapes: Vec<egui::epaint::ClippedShape>,
+    /// The screen the frames run on (1400 by 900 unless a test sets another).
+    pub screen: egui::Vec2,
 }
 
 pub fn mid(r: [f32; 4]) -> (f32, f32) {
@@ -28,7 +30,7 @@ impl T {
         let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         app.ui.show_mixer = true;
         app.ui.show_devices = true;
-        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, shapes: Vec::new() };
+        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, shapes: Vec::new(), screen: egui::vec2(1400.0, 900.0) };
         t.frames(3);
         t
     }
@@ -37,7 +39,7 @@ impl T {
         for _ in 0..n {
             self.time += 1.0 / 60.0;
             let mut raw = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.screen)),
                 time: Some(self.time),
                 ..Default::default()
             };

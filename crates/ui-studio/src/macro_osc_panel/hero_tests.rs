@@ -121,8 +121,11 @@ fn arrow_keys_move_the_model_while_the_picker_has_the_focus() {
 
 /// A Macro Oscillator opened at the narrowest the window lays out (`MIN_WIDTH`).
 fn open_narrow() -> (T, transit_model::TrackId) {
+    // 326-X: the window is content-sized (the design width on screen, never under MIN_WIDTH), so a
+    // screen just wide enough for MIN_WIDTH and its margins opens it at MIN_WIDTH.
     let mut t = T::new();
-    t.app.ui.device_windows.insert(super::MACRO_OSC.into(), [100.0, 20.0, 100.0 + super::MIN_WIDTH, 880.0]);
+    t.screen = egui::vec2(super::MIN_WIDTH + 2.0 * crate::device_window::SCREEN_MARGIN, 900.0);
+    t.app.ui.device_windows.insert(super::MACRO_OSC.into(), [0.0, 20.0]);
     let tr = t.instrument_track();
     t.open_card(0);
     (t, tr)

@@ -4,37 +4,32 @@
 //! - **Frame:** the device window rule: the `bg.window` ground its panels sit on, a 1 px
 //!   `line.strong` edge, radius 8, no shadow, no egui title bar: the device's own A bar, which
 //!   moves the window when dragged. The body scrolls between the bar and the footer.
-//! - **Remembered rect:** per instance while the app runs ([`State::rects`], keyed by
-//!   `Insert.uid`, which is unique within a launch and not saved), per device across launches
-//!   (`UiState::device_windows` in `ui.json`, written when a window closes). An instance opens
-//!   where it was left; one never opened in this launch takes the device's rect, moved 24 px down
-//!   and right while it would land on an open window. Either is moved and shrunk onto the screen
-//!   when it no longer fits. No saved key would survive a restart: the uid restarts every launch,
-//!   and a slot moves when the chain is reordered.
+//! - **Content-sized, position remembered:** the shared device window policy
+//!   ([`crate::device_window`], 326-X): this panel's design width and [`MIN_WIDTH`], its content's
+//!   height recomputed every frame (a section that opens or closes re-fits the window that frame),
+//!   no resize handle, anchored at the top left. Positions are remembered per instance while the
+//!   app runs ([`State::rects`], keyed by `Insert.uid`, unique within a launch and not saved) and
+//!   per device across launches (`UiState::device_windows`, written when a window closes). An
+//!   instance opens where it was left; one never opened in this launch takes the device's
+//!   position, moved 24 px down and right while it would land on an open window.
 //! - **Escape** closes the focused editor: the one last clicked or opened, until a click lands
 //!   outside every editor window; a text field, a popup or a dialog keeps Escape.
 //! - **Follow selection** (the bar's link toggle, `UiState::editor_follow`): the window shows the
 //!   focused track's device in the same slot when that device is one this panel draws, and stays
 //!   where it is (Logic's Link swaps the content, not the window): while it follows it writes no
-//!   instance's rect, and when follow is turned off its rect becomes the shown instance's. Off,
-//!   it stays on its insert.
+//!   instance's position, and when follow is turned off its position becomes the shown
+//!   instance's. Off, it stays on its insert.
 //! - **Window > Close All Editors** (`window.close_editors`) closes every plug-in editor.
 
 use super::{Dev, FOOTER_H, MIN_WIDTH, MacroLayout};
 use crate::StudioApp;
 use crate::builtin_editor::EditorLayout;
+use crate::device_window::{self, Positions, Widths};
 use crate::tokens::layout as space;
 use egui::{Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use transit_model::{Insert, TrackId};
-
-/// The shortest the window gets.
-pub const MIN_HEIGHT: f32 = 360.0;
-/// Room kept between a default-sized window and the screen's edges.
-const SCREEN_MARGIN: f32 = crate::tokens::SPACE[5];
-/// Each further window opens this much down and to the right of the one before.
-const CASCADE: f32 = crate::tokens::SPACE[4];
 
 /// The windows' memory between frames.
 #[derive(Debug, Default)]
@@ -58,62 +53,33 @@ pub struct State {
     /// The windows drawn last frame and this frame, with their rects and layers.
     shown: Vec<Shown>,
     shown_now: Vec<Shown>,
-    /// Bumped each time a window opens, so it opens fresh at its remembered rect.
+    /// Bumped each time a window opens, so it opens fresh at its remembered position.
     generation: HashMap<u64, u32>,
     /// Where each open window sits (its bar moves it).
     pos: HashMap<u64, Pos2>,
-    /// Each instance's last rect by insert uid, for this launch (it survives the window closing).
-    pub rects: HashMap<u64, [f32; 4]>,
+    /// Each instance's last position (the window's top left) by insert uid, for this launch (it
+    /// survives the window closing).
+    pub rects: Positions,
     /// A knob took a Ctrl+wheel nudge last frame: the frame logic keeps the merge open, so a wheel
     /// gesture is one undo step; a frame without one (the wheel stopped, or the pointer left the
     /// knob) lets the merge end.
     pub wheeling: bool,
     pub(crate) wheel_now: bool,
     /// Where a window that follow selection just moved to an instance opens: where it was.
-    carry: HashMap<u64, [f32; 4]>,
+    carry: HashMap<u64, Pos2>,
 }
 
 /// A window drawn this frame: its insert, rect, layer and device id.
 #[derive(Debug, Clone, Copy)]
 struct Shown(u64, Rect, egui::LayerId, &'static str);
 
-/// `rect` moved and shrunk to lie on `screen`.
-pub fn on_screen(rect: Rect, screen: Rect) -> Rect {
-    let size = rect.size().min(screen.size());
-    let x = rect.min.x.clamp(screen.min.x, screen.max.x - size.x);
-    let y = rect.min.y.clamp(screen.min.y, screen.max.y - size.y);
-    Rect::from_min_size(pos2(x, y), size)
-}
+/// The panel's widths for the shared policy.
+pub const WIDTHS: Widths = Widths { design: super::DESIGN_WIDTH, min: MIN_WIDTH };
 
-/// `fallback` moved 24 px down and right while its corner sits on an open window's (at most a
-/// screen's worth of steps).
-pub fn cascaded(fallback: Rect, open: &[Rect]) -> Rect {
-    let mut r = fallback;
-    for _ in 0..64 {
-        if !open.iter().any(|o| (o.min - r.min).length() < 1.0) {
-            break;
-        }
-        r = r.translate(vec2(CASCADE, CASCADE));
-    }
-    r
-}
-
-/// Where a window opens: its own remembered rect, else the device's (cascaded off the `open`
-/// windows), else the board's width (less a margin on a smaller screen) and the content's height
-/// up to the screen, cascaded by `n`; on screen either way.
-pub fn opening_rect(own: Option<[f32; 4]>, device: Option<[f32; 4]>, open: &[Rect], screen: Rect, content_h: f32, n: usize) -> Rect {
-    let rect = |[x0, y0, x1, y1]: [f32; 4]| Rect::from_min_max(pos2(x0, y0), pos2(x1, y1));
-    let r = match (own, device) {
-        (Some(o), _) => rect(o),
-        (None, Some(d)) => cascaded(rect(d), open),
-        (None, None) => {
-            let w = super::DESIGN_WIDTH.min(screen.width() - 2.0 * SCREEN_MARGIN).max(MIN_WIDTH);
-            let h = (space::TITLE_BAR_HEIGHT + content_h + FOOTER_H).min(screen.height() - 2.0 * SCREEN_MARGIN).max(MIN_HEIGHT);
-            let off = CASCADE * n as f32;
-            Rect::from_min_size(pos2(screen.center().x - w / 2.0 + off, screen.min.y + SCREEN_MARGIN + off), vec2(w, h))
-        }
-    };
-    on_screen(r, screen)
+/// The window's size on `screen` for a body `content_h` tall (the shared rule with this panel's
+/// widths, title bar and footer).
+pub fn window_size(screen: Rect, content_h: f32) -> Vec2 {
+    device_window::size(WIDTHS, screen, space::TITLE_BAR_HEIGHT, content_h, FOOTER_H)
 }
 
 impl StudioApp {
@@ -165,15 +131,15 @@ pub(crate) fn follow(app: &mut StudioApp) {
             continue;
         }
         let was = app.builtin_at(key).map(|i| i.uid.get());
-        // The window stays where it is on the instance it moves to (that instance's own rect is
-        // left alone).
+        // The window stays where it is on the instance it moves to (that instance's own position
+        // is left alone).
         let new_uid = app.builtin_at(target).map(|i| i.uid.get());
         let st = &mut app.builtin_editor.macro_osc;
         st.no_focus.extend(new_uid);
         if let (Some(w), Some(n)) = (was, new_uid)
             && let Some(s) = st.shown.iter().find(|s| s.0 == w)
         {
-            st.carry.insert(n, crate::widgets::r4(s.1));
+            st.carry.insert(n, s.1.min);
         }
         for k in app.ui.plugin_windows.iter_mut().chain(app.ui.editor_follow.iter_mut()) {
             if *k == key {
@@ -202,51 +168,55 @@ pub(crate) fn show(
     let uid = ins.uid.get();
     let dev = Dev { key, ins, info };
     let screen = ctx.content_rect();
+    // The content's height at the width the window will have, this frame (a section that opened
+    // or closed since the last frame counts).
+    let width = device_window::width(WIDTHS, screen) - device_window::edge().x;
+    let size = window_size(screen, super::content_height(app, ctx, key, width));
     let fresh = !app.builtin_editor.macro_osc.shown.iter().any(|s| s.0 == uid);
-    let mut size = None;
     if fresh || !app.builtin_editor.macro_osc.pos.contains_key(&uid) {
-        let content = super::content_height(app, key, super::DESIGN_WIDTH.min(screen.width()));
         let open: Vec<Rect> = app.builtin_editor.macro_osc.shown.iter().filter(|s| s.0 != uid).map(|s| s.1).collect();
         let carried = app.builtin_editor.macro_osc.carry.remove(&uid);
         let own = carried.or_else(|| app.builtin_editor.macro_osc.rects.get(&uid).copied());
         let device = app.ui.device_windows.get(info.id).copied();
-        let r = opening_rect(own, device, &open, screen, content, n);
+        let at = device_window::opening_pos(own, device, &open, screen, size, n);
         let st = &mut app.builtin_editor.macro_osc;
         *st.generation.entry(uid).or_default() += 1;
-        st.pos.insert(uid, r.min);
+        st.pos.insert(uid, at);
         if !st.no_focus.contains(&uid) {
             st.focused = Some(uid);
         }
         st.no_focus.retain(|u| *u != uid);
-        size = Some(r.size());
     }
-    let st = &app.builtin_editor.macro_osc;
-    let pos = st.pos.get(&uid).copied().unwrap_or(screen.min);
+    let st = &mut app.builtin_editor.macro_osc;
+    // Anchored at its top left: a bottom that would leave the screen moves the window up.
+    let pos = device_window::anchored(st.pos.get(&uid).copied().unwrap_or(screen.min), size, screen);
+    st.pos.insert(uid, pos);
     let generation = st.generation.get(&uid).copied().unwrap_or(0);
     let follow = app.ui.editor_follow.contains(&key);
     let mut mlay = MacroLayout::default();
     let mut bar = super::title_bar::TitleOut::default();
-    let mut win = crate::theme::device_panel_window(layout.title.clone())
-        .id(egui::Id::new(("macro_osc_editor", uid, generation)))
-        .current_pos(pos)
-        .movable(false)
-        .resizable(true)
-        .min_size(vec2(MIN_WIDTH, MIN_HEIGHT));
-    if let Some(s) = size {
-        win = win.default_size(s);
-    }
+    let win = device_window::configure(
+        crate::theme::device_panel_window(layout.title.clone()).id(egui::Id::new(("macro_osc_editor", uid, generation))),
+        pos,
+        size,
+    );
     let shown = win.show(ctx, |ui| {
         let avail = ui.available_rect_before_wrap();
         let top = Rect::from_min_size(avail.min, vec2(avail.width(), space::TITLE_BAR_HEIGHT));
         bar = super::title_bar::show(app, ui, dev, top, follow, layout, &mut mlay);
         ui.allocate_rect(top, Sense::hover());
         let body_h = (avail.height() - space::TITLE_BAR_HEIGHT - FOOTER_H).max(0.0);
+        // The body takes exactly the room between the bar and the footer (no item spacing above
+        // it: the window's height is the content's).
+        let body_r = Rect::from_min_size(pos2(avail.min.x, top.max.y), vec2(avail.width(), body_h));
+        let mut body_ui = ui.new_child(egui::UiBuilder::new().max_rect(body_r).layout(egui::Layout::top_down(egui::Align::Min)));
         egui::ScrollArea::vertical()
             .id_salt(("macro_osc_body", uid))
             .max_height(body_h)
             .min_scrolled_height(body_h)
             .auto_shrink([false, false])
-            .show(ui, |ui| super::body(app, ui, dev, layout, &mut mlay));
+            .show(&mut body_ui, |ui| super::body(app, ui, dev, layout, &mut mlay));
+        ui.allocate_rect(body_r, Sense::hover());
         let foot = Rect::from_min_size(pos2(avail.min.x, top.max.y + body_h), vec2(avail.width(), FOOTER_H));
         super::footer(app, ui, foot, layout, &mut mlay);
         ui.allocate_rect(foot, Sense::hover());
@@ -256,9 +226,9 @@ pub(crate) fn show(
         let r = w.response.rect;
         layout.rect = crate::widgets::r4(r);
         mlay.window = layout.rect;
-        // A following window writes no instance's rect (see `follow`).
+        // A following window writes no instance's position (see `follow`).
         if !follow {
-            app.builtin_editor.macro_osc.rects.insert(uid, layout.rect);
+            app.builtin_editor.macro_osc.rects.insert(uid, r.min);
         }
         app.builtin_editor.macro_osc.shown_now.push(Shown(uid, r, w.response.layer_id, info.id));
     }
@@ -270,7 +240,7 @@ pub(crate) fn show(
     if bar.toggle_follow {
         if follow {
             // Follow off: where the window is becomes the shown instance's place.
-            app.builtin_editor.macro_osc.rects.insert(uid, layout.rect);
+            app.builtin_editor.macro_osc.rects.insert(uid, pos2(layout.rect[0], layout.rect[1]));
             app.ui.editor_follow.retain(|k| *k != key);
         } else {
             app.ui.editor_follow.push(key);
@@ -295,9 +265,9 @@ pub(crate) fn show(
 pub(crate) fn end_frame(app: &mut StudioApp, ctx: &egui::Context) {
     let st = &mut app.builtin_editor.macro_osc;
     let now = std::mem::take(&mut st.shown_now);
-    // A window that closed leaves its rect as its device's, for instances never opened before.
+    // A window that closed leaves its position as its device's, for instances never opened before.
     for gone in st.shown.iter().filter(|s| !now.iter().any(|n| n.0 == s.0)) {
-        app.ui.device_windows.insert(gone.3.to_string(), crate::widgets::r4(gone.1));
+        app.ui.device_windows.insert(gone.3.to_string(), [gone.1.min.x, gone.1.min.y]);
     }
     let st = &mut app.builtin_editor.macro_osc;
     if let Some(at) = ctx.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten()) {

@@ -581,22 +581,24 @@ pub(crate) fn chevron(p: &egui::Painter, c: Pos2, w: f32, color: Color32) {
     p.add(egui::Shape::line(vec![c + vec2(-h, -h / 2.0), c + vec2(0.0, h / 2.0), c + vec2(h, -h / 2.0)], Stroke::new(1.5, color)));
 }
 
-/// The panel's content height at `width`, for the window's default size.
-pub fn content_height(app: &StudioApp, key: (TrackId, usize), width: f32) -> f32 {
+/// The panel's content height at `width` (the window's inside), for the window's size (326-X: every
+/// frame).
+pub fn content_height(app: &StudioApp, ctx: &egui::Context, key: (TrackId, usize), width: f32) -> f32 {
     let Some(ins) = app.builtin_at(key) else { return 0.0 };
     let Some(info) = transit_dsp::plugin_info(&ins.plugin) else { return 0.0 };
     let dev = Dev { key, ins: &ins, info };
-    let w = width.max(MIN_WIDTH) - 2.0 * space::WINDOW_PADDING;
+    let w = width.max(MIN_WIDTH - crate::device_window::edge().x) - 2.0 * space::WINDOW_PADDING;
     let mut h = 2.0 * space::WINDOW_PADDING;
     h += hero::height(w);
     h += space::PANEL_GAP + shaper::height(app, dev, w);
-    h += space::PANEL_GAP + modulation::height(app, dev, w);
+    h += space::PANEL_GAP + modulation::height(app, ctx, dev, w);
     h
 }
 
 /// Draws the panel's body (below the title bar, above the footer) into `ui` at `width`.
 pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorLayout, out: &mut MacroLayout) {
-    let width = ui.available_width().max(MIN_WIDTH);
+    // The window's inside: its width less the frame's edge (never under the minimum's).
+    let width = ui.available_width().max(MIN_WIDTH - crate::device_window::edge().x);
     let origin = ui.cursor().min;
     let w = width - 2.0 * space::WINDOW_PADDING;
     let mut y = origin.y + space::WINDOW_PADDING;

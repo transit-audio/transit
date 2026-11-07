@@ -84,6 +84,12 @@ impl<'a> Window<'a> {
         self
     }
 
+    /// Exactly `size` (the outer size), with no resize handle (device windows, 326-X).
+    pub fn fixed_size(mut self, size: impl Into<Vec2>) -> Self {
+        self.inner = self.inner.fixed_size(size);
+        self
+    }
+
     pub fn min_size(mut self, size: impl Into<Vec2>) -> Self {
         self.inner = self.inner.min_size(size);
         self

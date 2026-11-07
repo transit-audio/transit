@@ -761,8 +761,8 @@ fn double_clicking_a_card_title_opens_the_editor_and_the_button_reads_edit() {
 }
 
 /// #232: a built-in's window takes its panel's size, has no resize handle, and re-fits when the
-/// panel changes (the Macro Oscillator's Voices section). 326-M: the Macro Oscillator's window is
-/// the device window instead: resizable, its body scrolling, its rect remembered (checked below).
+/// panel changes (the Macro Oscillator's Voices section). 326-X: the Macro Oscillator's device
+/// window follows the same rule through the shared device window policy (checked below).
 #[test]
 fn a_built_in_window_fits_its_panel_and_has_no_resize_handle() {
     for scale in [1.0_f32, 1.5] {
@@ -814,17 +814,15 @@ fn a_built_in_window_fits_its_panel_and_has_no_resize_handle() {
     let after = t.window(tr).rect;
     println!("voices 8 -> 2: {before:?} -> {after:?}");
     assert!(after[0] == before[0] && after[1] == before[1], "the position is kept");
-    // 326-M: the device window has a resize handle, keeps its new size, and remembers it.
+    // 326-X: the device window has no resize handle either, and remembers its position.
     let corner = egui::pos2(after[2] - 2.0, after[3] - 2.0);
     t.send("ui.drag", json!({"x": corner.x, "y": corner.y, "to_x": corner.x - 120.0, "to_y": corner.y - 90.0}));
     t.frames(4);
-    let resized = t.window(tr).rect;
-    assert!(resized[2] < after[2] - 60.0 && resized[3] < after[3] - 45.0, "{after:?} -> {resized:?}");
-    assert_eq!((resized[0], resized[1]), (after[0], after[1]), "resizing keeps the position");
+    assert_eq!(t.window(tr).rect, after, "the size is fixed");
     t.frames(3);
-    assert_eq!(t.window(tr).rect, resized, "stable");
+    assert_eq!(t.window(tr).rect, after, "stable");
     let uid = t.window(tr).uid;
-    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid), Some(&resized), "remembered for the next opening");
+    assert_eq!(t.app.builtin_editor.macro_osc.rects.get(&uid), Some(&egui::pos2(after[0], after[1])), "remembered for the next opening");
 }
 
 #[test]
@@ -862,15 +860,15 @@ fn a_macro_oscillator_preset_from_before_the_matrix_parses_into_rows() {
 
 /// The Macro Oscillator's window with the shaper and the matrix shown fits a 1080p screen at 125%
 /// scaling with its title bar (864 pt of height there, less the title bar and a taskbar): at most
-/// 800 pt tall at 100% (#243, #232). 326-M: the window opens at the board's width less a margin and
-/// at most 800 pt tall on that screen, and showing the shaper and the matrix scrolls its body
-/// instead of growing it.
+/// 800 pt tall at 100% (#243, #232). 326-X: the window is content-sized, at most the screen: on
+/// that screen it is at most 864 tall and the board's width less a margin, and once the shaper
+/// and the matrix outgrow it the body scrolls.
 #[test]
 fn the_expanded_macro_oscillator_window_fits_1080p_at_125_percent() {
-    use crate::macro_osc_panel::window::opening_rect;
+    use crate::macro_osc_panel::window::window_size;
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1536.0, 864.0));
-    let r = opening_rect(None, None, &[], screen, 1400.0, 0);
-    assert!(r.height() <= 800.0 && r.width() <= 1440.0 && screen.contains_rect(r), "{r:?}");
+    let s = window_size(screen, 1400.0);
+    assert!(s.y <= 864.0 && s.x <= 1440.0, "{s:?}");
     let mut t = T::new();
     let (tr, _) = open_plugin(&mut t, "macro_oscillator");
     t.frames(3);
@@ -881,8 +879,8 @@ fn the_expanded_macro_oscillator_window_fits_1080p_at_125_percent() {
     }
     let w = t.window(tr);
     assert!(w.rows.iter().any(|r| r.param == "mod16_amount") && w.rows.iter().any(|r| r.param == "lfo2_amount"), "all of it shows");
-    assert_eq!(w.rect, c, "the window keeps its size: the body scrolls");
-    assert!(w.rect[3] - w.rect[1] <= 900.0 - 64.0, "{:?}", w.rect);
+    assert_eq!(w.rect[2] - w.rect[0], c[2] - c[0], "the window keeps its width");
+    assert!(w.rect[3] - w.rect[1] <= 900.0, "at most the screen: the body scrolls {:?}", w.rect);
 }
 
 /// A headless hub with a scope tap and a sample tap for the Tuner in slot 0 of `tr`.

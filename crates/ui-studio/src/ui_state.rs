@@ -29,10 +29,12 @@ pub struct UiState {
     /// `transit_mix::INSTRUMENT_SLOT`. `ui.set` opens and closes editors through this list
     /// (the same field `tools/exp-quit.ps1` sets in SoundCraft).
     pub plugin_windows: Vec<(TrackId, usize)>,
-    /// A migrated device window's last closed rect (min x, min y, max x, max y, logical points) by
-    /// device id (the plug-in id, 326-M): where an instance never opened before opens (cascaded
-    /// when it would land on an open window). Per machine, never in the session.
-    pub device_windows: std::collections::BTreeMap<String, [f32; 4]>,
+    /// A migrated device window's last closed position (its top left, logical points) by device id
+    /// (the plug-in id, 326-M; position only since 326-X, `crate::device_window`): where an
+    /// instance never opened before opens (cascaded when it would land on an open window). An
+    /// older entry's size is read past. Per machine, never in the session.
+    #[serde(deserialize_with = "crate::device_window::read_device_positions")]
+    pub device_windows: crate::device_window::DevicePositions,
     /// A device window's collapsed section bars by `<device id>/<section>` (326-M; the design
     /// language's section bar: collapse is a per-user view setting, enable is the parameter). A
     /// section without an entry is collapsed until it is in use.
