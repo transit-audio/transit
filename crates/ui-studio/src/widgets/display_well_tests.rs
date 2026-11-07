@@ -15,7 +15,7 @@ fn well(ui: &mut egui::Ui) -> display_well::WellOut {
         ui,
         egui::Id::new("w"),
         vec2(240.0, 120.0),
-        &Well { readouts: &["1.20 kHz", "Q 0.71"], curve: &CURVE, points: &POINTS, mod_band: Some([0.4, 0.6]) },
+        &Well { readouts: &["1.20 kHz", "Q 0.71"], curve: &CURVE, points: &POINTS, mod_band: Some([0.4, 0.6]), between: None },
     )
 }
 
@@ -67,4 +67,33 @@ fn dragging_a_point_reports_its_new_normalized_position() {
     assert!((got.1[0] - 0.5).abs() < 0.01 && (got.1[1] - 0.55).abs() < 0.01, "{got:?}");
     let plot = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));
     assert_eq!(display_well::to_norm(plot, pos2(-20.0, 140.0)), [0.0, 0.0], "clamped to the plot");
+}
+
+#[test]
+fn a_reach_fills_between_two_curves_and_mismatched_curves_draw_none() {
+    const LO: [[f32; 2]; 3] = [[0.0, 0.1], [0.5, 0.3], [1.0, 0.2]];
+    const HI: [[f32; 2]; 3] = [[0.0, 0.6], [0.5, 0.9], [1.0, 0.7]];
+    let mut rig = Rig::new();
+    let l = rig
+        .idle(|ui| {
+            display_well::show(ui, egui::Id::new("r"), vec2(240.0, 120.0), &Well { curve: &CURVE, between: Some((&LO, &HI)), ..Default::default() })
+        })
+        .layout;
+    let plot = Rect::from_min_max(pos2(l.plot[0], l.plot[1]), pos2(l.plot[2], l.plot[3]));
+    let b = l.between.expect("the reach is drawn");
+    let (top, bottom) = (display_well::to_screen(plot, [0.5, 0.9]).y, display_well::to_screen(plot, [0.0, 0.1]).y);
+    assert!((b[0] - plot.min.x).abs() < 0.02 && (b[2] - plot.max.x).abs() < 0.02, "{b:?}");
+    assert!((b[1] - top).abs() < 0.02 && (b[3] - bottom).abs() < 0.02, "from the highest to the lowest point: {b:?}");
+    // Negative control: curves sampled at different counts make no reach.
+    let l = rig
+        .idle(|ui| {
+            display_well::show(
+                ui,
+                egui::Id::new("r"),
+                vec2(240.0, 120.0),
+                &Well { curve: &CURVE, between: Some((&LO, &HI[..2])), ..Default::default() },
+            )
+        })
+        .layout;
+    assert!(l.between.is_none());
 }

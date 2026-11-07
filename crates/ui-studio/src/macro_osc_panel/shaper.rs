@@ -15,7 +15,9 @@
 //!   to set the cutoff); then one knob row: Cutoff, Resonance, Drive, Key track, Env amt, a 1 px
 //!   `line` divider, and the filter envelope's Attack, Decay, Sustain, Release under a
 //!   `FILTER ENV` caption (326-X; the envelope's own mini display is gone).
-//! - A route to Cutoff draws its reach as a `mod` band.
+//! - **Modulation reach** (326-X): while anything modulates the cutoff (a route to Cutoff, or
+//!   Env amt), the well fills between the responses at the lowest and the highest cutoff it can
+//!   reach in `mod` at the band alpha, under the base response ([`cutoff_reach`]).
 //! - **LFO:** RETRIG and SYNC / HZ as option toggles, the shape as a segmented control in text (the
 //!   kit has no shape icons), the trace in `mod` with the fade-in as a dashed `ink.ghost` envelope;
 //!   the Rate knob sets the division while SYNC is on and the rate in Hz otherwise.
@@ -27,7 +29,9 @@ use crate::theme::TOKENS;
 use crate::tokens::layout as space;
 use crate::widgets::{display_well, knob, r4, section_bar, segmented, toggle};
 use egui::{Align2, Rect, Shape, Stroke, Ui, pos2, vec2};
-use transit_dsp::plugins::macro_osc::matrix::dst;
+use transit_dsp::plugins::filter::svf::MIN_CUTOFF;
+use transit_dsp::plugins::macro_osc::matrix::{ROWS, dst};
+use transit_dsp::plugins::macro_osc::shaper::MOD_OCTAVES;
 
 /// Room above a section bar (the board's 6 px).
 pub const BAR_TOP: f32 = 6.0;
@@ -90,6 +94,29 @@ pub fn freq_x(hz: f32) -> f32 {
 /// The frequency at `x` (0..1) on the response well.
 pub fn x_freq(x: f32) -> f32 {
     20.0 * 1000f32.powf(x.clamp(0.0, 1.0))
+}
+
+/// The cutoff (Hz) the shaper sets for the knob at `cutoff` and a modulation `offset` (the
+/// matrix's Cutoff sum plus Env amt times the envelope's level; 1 is full scale): the formula of
+/// the shaper's `design` (key tracking aside, which depends on the note): [`MOD_OCTAVES`] octaves
+/// per unit on log2 of the knob, at least the filter's floor. Its ceiling (0.49 of the sample
+/// rate) lies above the well's 20 kHz edge at every rate the engine runs.
+pub fn modulated_cutoff(cutoff: f32, offset: f32) -> f32 {
+    (cutoff.max(1.0).log2() + MOD_OCTAVES * offset).exp2().max(MIN_CUTOFF)
+}
+
+/// The lowest and the highest cutoff the modulation can reach from the knob at `cutoff`: the
+/// routes to Cutoff move it up to their summed `|amount|` (`route_depth`, 1 is 100%) either way
+/// (a source may swing both ways), Env amt (`env`, −1..1) from 0 to its full offset (an envelope
+/// only adds). `None` when nothing moves it.
+pub fn cutoff_reach(cutoff: f32, route_depth: f32, env: f32) -> Option<[f32; 2]> {
+    let (lo, hi) = (-route_depth.abs() + env.min(0.0), route_depth.abs() + env.max(0.0));
+    (hi > lo).then(|| [modulated_cutoff(cutoff, lo), modulated_cutoff(cutoff, hi)])
+}
+
+/// The summed `|amount|` (1 is 100%) of the rows that route a source to Cutoff.
+pub(crate) fn cutoff_depth(app: &StudioApp, dev: Dev) -> f32 {
+    (0..ROWS).map(|r| super::route(app, dev, r)).filter(|r| r.source != 0 && r.dest == dst::CUTOFF).map(|r| r.amount.abs() / 100.0).sum()
 }
 
 /// The response curve at `cutoff`, sampled across the well (normalized).
@@ -362,17 +389,19 @@ fn filter(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut Edit
     );
     let mx = head.max.x - slope_w - 8.0 - mode_w;
     segments(app, ui, dev, "filter_mode", &MODES, Rect::from_min_size(pos2(mx, head.min.y), vec2(mode_w, head.height())), None, lay, out);
-    // The response well.
+    // The response well, with the modulation's reach under the base response.
     let (mode, slope24) = (dev.index(app, "filter_mode"), dev.index(app, "filter_slope") == 1);
     let (cutoff, res) = (dev.value(app, "cutoff"), dev.value(app, "resonance") / 100.0);
     let curve = response_curve(mode, slope24, cutoff, res);
     let cx = freq_x(cutoff);
     let at_cut = (response_db(mode, slope24, cutoff, res, cutoff).clamp(DB_FLOOR, DB_TOP) - DB_FLOOR) / (DB_TOP - DB_FLOOR);
-    let band = super::ring_depth(app, dev, dst::CUTOFF).map(|d| [cx, (cx + d).clamp(0.0, 1.0)]);
+    let reach = cutoff_reach(cutoff, cutoff_depth(app, dev), dev.value(app, "filter_env_amount") / 100.0);
+    let edges = reach.map(|[lo, hi]| (response_curve(mode, slope24, lo, res), response_curve(mode, slope24, hi, res)));
     let wr = Rect::from_min_size(pos2(inner.min.x, head.max.y + GAP), vec2(inner.width(), FILTER_WELL_H));
-    let shown =
-        well(ui, dev, wr, "filter", &display_well::Well { curve: &curve, points: &[[cx, at_cut]], mod_band: band, ..Default::default() }, out);
+    let between = edges.as_ref().map(|(lo, hi)| (lo.as_slice(), hi.as_slice()));
+    let shown = well(ui, dev, wr, "filter", &display_well::Well { curve: &curve, points: &[[cx, at_cut]], between, ..Default::default() }, out);
     let plot = display_well::plot_rect(wr, false);
+    out.filter_reach = reach.map(|[lo, hi]| [plot.min.x + plot.width() * freq_x(lo), plot.min.x + plot.width() * freq_x(hi)]);
     for hz in [100.0, 1000.0, 10_000.0] {
         let x = plot.min.x + plot.width() * freq_x(hz);
         p.line_segment([pos2(x, plot.min.y), pos2(x, plot.max.y)], Stroke::new(1.0, t.grid));

@@ -41,7 +41,13 @@ fn one_of_every_control_lays_out_without_overlap_in_both_themes() {
                     ui,
                     id.with("well"),
                     vec2(320.0, 110.0),
-                    &display_well::Well { readouts: &["1.20 kHz"], curve: &[[0.0, 0.3], [1.0, 0.7]], points: &[[1.0, 0.7]], mod_band: None },
+                    &display_well::Well {
+                        readouts: &["1.20 kHz"],
+                        curve: &[[0.0, 0.3], [1.0, 0.7]],
+                        points: &[[1.0, 0.7]],
+                        mod_band: None,
+                        between: None,
+                    },
                 )
                 .layout
                 .well,

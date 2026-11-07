@@ -232,3 +232,56 @@ fn the_filter_card_is_the_graph_and_one_row_of_nine_knobs_with_the_envelope_capt
         assert!(super::help(id).is_some(), "{id}");
     }
 }
+
+/// The reach band's edges (screen x) on the filter well with `cutoff` and the params set.
+fn reach(t: &mut T, tr: transit_model::TrackId, set: &[(&str, f32)]) -> (Option<[f32; 2]>, [f32; 4], bool) {
+    for (id, v) in set {
+        t.set(tr, id, *v);
+    }
+    let p = t.panel(tr);
+    let w = p.wells.iter().find(|w| w.name == "filter").unwrap().well.clone();
+    (p.filter_reach, w.plot, w.between.is_some())
+}
+
+fn x_of(plot: [f32; 4], hz: f32) -> f32 {
+    plot[0] + (plot[2] - plot[0]) * freq_x(hz)
+}
+
+#[test]
+fn a_route_to_cutoff_shades_the_reach_between_its_two_cutoffs_on_the_log_axis() {
+    use super::shaper::modulated_cutoff;
+    let (mut t, tr) = T::open();
+    t.expand(tr);
+    let (band, plot, drawn) = reach(&mut t, tr, &[("cutoff", 1000.0), ("mod1_source", 1.0), ("mod1_dest", 7.0), ("mod1_amount", -25.0)]);
+    let [lo, hi] = band.expect("a band");
+    assert!(drawn, "the well fills it");
+    // 25% of the matrix's six octaves either way: 1000 Hz times 2^(±1.5).
+    let (want_lo, want_hi) = (1000.0 * 2f32.powf(-1.5), 1000.0 * 2f32.powf(1.5));
+    assert!((modulated_cutoff(1000.0, -0.25) - want_lo).abs() < 0.01 && (modulated_cutoff(1000.0, 0.25) - want_hi).abs() < 0.05);
+    assert!((lo - x_of(plot, want_lo)).abs() < 0.02 && (hi - x_of(plot, want_hi)).abs() < 0.02, "{lo} {hi}");
+    // Negative control: a linear mapping (1000 Hz times 1 ± 6 × 0.25 clamped) lands elsewhere.
+    let linear_hi = 1000.0 * (1.0 + 6.0 * 0.25);
+    assert!((hi - x_of(plot, linear_hi)).abs() > 5.0, "the edge is the exponential mapping's");
+    // Two routes add their depths.
+    let (band, plot, _) = reach(&mut t, tr, &[("mod2_source", 5.0), ("mod2_dest", 7.0), ("mod2_amount", 25.0)]);
+    assert!((band.unwrap()[1] - x_of(plot, 1000.0 * 2f32.powf(3.0))).abs() < 0.02);
+}
+
+#[test]
+fn env_amt_alone_shades_one_side_and_nothing_shades_without_modulation() {
+    let (mut t, tr) = T::open();
+    t.expand(tr);
+    let (band, _, drawn) = reach(&mut t, tr, &[("cutoff", 1000.0)]);
+    assert!(band.is_none() && !drawn, "no route, no Env amt: no band");
+    let (band, plot, drawn) = reach(&mut t, tr, &[("filter_env_amount", 50.0)]);
+    let [lo, hi] = band.expect("Env amt reaches");
+    assert!(drawn);
+    assert!((lo - x_of(plot, 1000.0)).abs() < 0.02, "an envelope only adds: the low edge is the knob");
+    assert!((hi - x_of(plot, 8000.0)).abs() < 0.02, "half of six octaves up");
+    let (band, plot, _) = reach(&mut t, tr, &[("filter_env_amount", -50.0)]);
+    let [lo, hi] = band.unwrap();
+    assert!((lo - x_of(plot, 125.0)).abs() < 0.02 && (hi - x_of(plot, 1000.0)).abs() < 0.02, "negative: down to 125 Hz");
+    // Negative control: a route with its source Off moves nothing.
+    let (band, _, _) = reach(&mut t, tr, &[("filter_env_amount", 0.0), ("mod1_dest", 7.0), ("mod1_amount", 50.0)]);
+    assert!(band.is_none());
+}

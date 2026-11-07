@@ -217,6 +217,9 @@ pub struct MacroLayout {
     /// The Shaper's body (`None` while collapsed) and the opacity it drew at.
     pub shaper_body: Option<[f32; 4]>,
     pub shaper_opacity: f32,
+    /// The filter well's modulation reach: the screen x of the lowest and the highest cutoff the
+    /// modulation reaches (`None` when nothing modulates the cutoff, 326-X).
+    pub filter_reach: Option<[f32; 2]>,
     /// The filter row's divider and the `FILTER ENV` caption over the envelope's knobs (326-X).
     pub filter_divider: [f32; 4],
     pub filter_env_caption: [f32; 4],

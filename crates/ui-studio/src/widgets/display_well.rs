@@ -1,7 +1,8 @@
 //! The display well (`docs/design/language`, Components > Display well): an inset `surface.inset`
 //! with a 1 px `line.inset`, radius 6 and 8 px padding; readouts in `readout.display` across the
 //! top; the curve in `signal`, stroke 2, over a 12 percent fill; draggable points as hollow
-//! circles (r 4.5, stroke 1.5); a modulation range as a `mod` band at 10 percent.
+//! circles (r 4.5, stroke 1.5); a modulation range as a `mod` band at 10 percent: across x, or
+//! between two curves (a reach: the curve at the modulation's two extremes, under the curve).
 //!
 //! Positions are normalized: x 0..1 left to right, y 0..1 bottom to top. The caller maps them to
 //! its units and owns the values; a dragged point comes back as a new normalized position.
@@ -27,6 +28,9 @@ pub struct Well<'a> {
     pub points: &'a [[f32; 2]],
     /// A modulation range across x (normalized).
     pub mod_band: Option<[f32; 2]>,
+    /// A modulation reach: the region between two curves sampled at the same x positions
+    /// (normalized), filled in the band color under the curve (326-X).
+    pub between: Option<(&'a [[f32; 2]], &'a [[f32; 2]])>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -37,6 +41,8 @@ pub struct WellLayout {
     pub readouts: Vec<[f32; 4]>,
     pub points: Vec<[f32; 4]>,
     pub band: Option<[f32; 4]>,
+    /// The reach's bounds when one is drawn.
+    pub between: Option<[f32; 4]>,
     #[serde(skip)]
     pub curve_color: Color32,
     #[serde(skip)]
@@ -90,6 +96,21 @@ pub fn show(ui: &mut Ui, id: egui::Id, size: egui::Vec2, w: &Well) -> WellOut {
         p.rect_filled(r, 0.0, band_color);
         r4(r)
     });
+    let between = w.between.filter(|(a, b)| a.len() >= 2 && a.len() == b.len()).map(|(a, b)| {
+        let (a, b): (Vec<Pos2>, Vec<Pos2>) = (a.iter().map(|n| to_screen(plot, *n)).collect(), b.iter().map(|n| to_screen(plot, *n)).collect());
+        let mut mesh = Mesh::default();
+        for i in 0..a.len() - 1 {
+            let base = mesh.vertices.len() as u32;
+            for v in [a[i], a[i + 1], b[i + 1], b[i]] {
+                mesh.colored_vertex(v, band_color);
+            }
+            mesh.add_triangle(base, base + 1, base + 2);
+            mesh.add_triangle(base, base + 2, base + 3);
+        }
+        let bounds = mesh.calc_bounds();
+        p.add(Shape::mesh(mesh));
+        r4(bounds)
+    });
     let fill_color = t.signal.gamma_multiply(alpha::CURVE_FILL);
     if w.curve.len() >= 2 {
         let pts: Vec<Pos2> = w.curve.iter().map(|n| to_screen(plot, *n)).collect();
@@ -119,6 +140,6 @@ pub fn show(ui: &mut Ui, id: egui::Id, size: egui::Vec2, w: &Well) -> WellOut {
         p.circle(c, POINT_R, t.surface_inset, Stroke::new(POINT_STROKE, t.text));
         points.push(r4(Rect::from_center_size(c, vec2(2.0 * POINT_R, 2.0 * POINT_R))));
     }
-    let layout = WellLayout { well: r4(well), plot: r4(plot), readouts, points, band, curve_color: t.signal, fill_color, band_color };
+    let layout = WellLayout { well: r4(well), plot: r4(plot), readouts, points, band, between, curve_color: t.signal, fill_color, band_color };
     WellOut { response, layout, dragged }
 }
