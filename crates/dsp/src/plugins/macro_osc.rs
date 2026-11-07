@@ -57,6 +57,8 @@ use transit_macro_osc::utils::random::Random;
 // The matrix and the shaper moved to the shared instrument primitives (ADR 0041); their old
 // paths stay.
 pub use transit_instrument_core::matrix;
+#[path = "macro_osc_models.rs"]
+pub mod models;
 #[path = "macro_osc_params.rs"]
 mod params;
 pub use transit_instrument_core::shaper;
