@@ -6,7 +6,7 @@
 `main`, and cancels a superseded run. Jobs:
 
 - `windows`: `cargo xtask layers` (which includes the file-size ratchet), `cargo xtask assets`, `cargo xtask timing`, then clippy (`-D warnings`) and the tests for
-  the whole workspace with `--features transit/native-wasapi,transit/native-asio`.
+  the whole workspace (every Windows build has native WASAPI and native ASIO; no feature, ADR 0046).
 - `linux`: `cargo fmt --check`, `cargo xtask timing`, clippy and the tests on default features, plus the native JACK
   clippy and tests. It is the Linux compile proof.
 - `macos`: clippy and the tests on default features (`crates/au-host` and the objc2 code compile only
@@ -22,8 +22,8 @@ Not gated: FreeBSD, `cargo xtask rt-targets` and the device-free `audio-bench` r
 advisories (no `deny.toml`), and every hardware test. Hardware tests are `#[ignore]`d and never CI
 gates: they need a real device and a person (see below).
 
-The Windows release job builds one target, `windows-x86_64` (`transit/native-wasapi` and
-`transit/native-asio`, no SDK); the `windows` job in `ci.yml` builds and tests both.
+The Windows release job builds one target, `windows-x86_64` (native WASAPI and native ASIO are in
+every Windows build, no SDK); the `windows` job in `ci.yml` builds and tests both.
 
 ## Hardware evidence
 
@@ -32,7 +32,7 @@ The Windows release job builds one target, `windows-x86_64` (`transit/native-was
 From a clone, on the machine with the interface (Windows, 64-bit):
 
 ```
-cargo test --release -p transit-playback --features native-asio,native-wasapi -- --ignored hardware_ --nocapture
+cargo test --release -p transit-playback -- --ignored hardware_ --nocapture
 ```
 
 `--test-threads=1` is no longer required (every hardware test holds one process-wide lock) but is

@@ -11,14 +11,10 @@ workspace = true
 
 [features]
 # A once-a-day check for a newer release (one anonymous request to the GitHub API). Headless and distro builds can leave it out.
-# The native Windows audio backends are on by default and compile to nothing on other targets;
-# `--no-default-features` leaves them out.
-default = ["update-check", "native-wasapi", "native-asio"]
+# The native Windows audio backends (WASAPI, and ASIO on 64-bit Windows) are not features: every
+# Windows build has them (ADR 0046).
+default = ["update-check"]
 update-check = ["dep:ureq", "dep:semver"]
-# The native WASAPI backend (ADR 0016): the "Native WASAPI" choice in Audio Devices.
-native-wasapi = ["transit-playback/native-wasapi"]
-# The native ASIO backend (no SDK): the "Native ASIO" choice when Audio system is ASIO.
-native-asio = ["transit-playback/native-asio"]
 # The native JACK backend (ADR 0021, Linux): the "Native JACK" choice when Audio system is JACK.
 native-jack = ["transit-playback/native-jack"]
 

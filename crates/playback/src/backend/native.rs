@@ -47,11 +47,11 @@ pub fn factory_for(cfg: &AudioConfig) -> Option<(Box<dyn ab::BackendFactory>, Na
         return None;
     }
     match cfg.backend {
-        #[cfg(all(windows, feature = "native-wasapi"))]
+        #[cfg(windows)]
         devices::Backend::NativeWasapi => {
             Some((Box::new(transit_audio_wasapi::WasapiFactory { input_pairing: cfg.input_pairing.clone() }), NativeKind::Wasapi))
         }
-        #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+        #[cfg(all(windows, target_pointer_width = "64"))]
         devices::Backend::NativeAsio => Some((Box::new(transit_audio_asio::AsioFactory), NativeKind::Asio)),
         #[cfg(all(target_os = "linux", feature = "native-jack"))]
         devices::Backend::NativeJack => Some((Box::new(transit_audio_jack::JackFactory), NativeKind::Jack)),
@@ -128,7 +128,7 @@ pub type Listing = (Vec<ab::Endpoint>, Option<String>);
 /// per direction by its friendly name (`PKEY_Device_FriendlyName`, the property cpal names them by),
 /// from `IMMDeviceEnumerator`, with the `eConsole` default first and marked. The default system on
 /// Windows. An enumerator error is the system's diagnostic ("WASAPI: <error>") over an empty list.
-#[cfg(all(windows, feature = "native-wasapi"))]
+#[cfg(windows)]
 pub fn wasapi_system() -> AudioSystem {
     let backend = transit_audio_wasapi::WasapiBackend::default();
     wasapi_system_from(|direction| backend.listing(direction).map_err(|e| e.to_string()))
@@ -180,7 +180,7 @@ pub fn wasapi_system_from(list: impl Fn(ab::Direction) -> Result<Listing, String
 /// holds a driver nothing is probed (two loaded drivers in one process is what ASIO forbids): the
 /// registry names only. This can take seconds on a misbehaving driver: the app calls it off its UI
 /// thread.
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 pub fn asio_system(selected: Option<&str>) -> AudioSystem {
     use transit_audio_asio::AsioBackend;
     let backend = match AsioBackend::shared() {
@@ -272,7 +272,7 @@ pub fn apply_server_clock(system: &mut AudioSystem, clock: &crate::pipewire::Ser
 /// call to the driver is made), from a thread of its own so a modal panel does not hold the caller.
 /// The receiver gets the panel's result when it closes. The driver of a running stream is shared
 /// with the panel; another driver is loaded for the panel only while no stream holds one.
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 pub fn asio_control_panel(driver: &str) -> Result<std::sync::mpsc::Receiver<Result<(), String>>, String> {
     let backend = transit_audio_asio::AsioBackend::shared().map_err(|e| e.to_string())?;
     let (tx, rx) = std::sync::mpsc::channel();

@@ -19,7 +19,7 @@ fn install_ctrl_c(interrupt: &Arc<Interrupt>) -> Result<(), String> {
 
 /// Print a MIDI mode's report lines and the command, and write its JSON where asked.
 fn finish(lines: Vec<String>, json: impl FnOnce(&str) -> serde_json::Value, path: Option<&std::path::Path>, args: &[String]) -> Result<(), String> {
-    let command = format!("cargo run -p audio-bench --features native-asio --release -- {}", command_line(args));
+    let command = format!("cargo run -p audio-bench --release -- {}", command_line(args));
     for line in lines {
         println!("{line}");
     }

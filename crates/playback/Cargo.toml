@@ -30,12 +30,12 @@ transit-midi-io.workspace = true
 cpal = { workspace = true, features = ["audio_thread_priority"] }
 
 [target.'cfg(windows)'.dependencies]
-# The native WASAPI backend (ADR 0016), behind the `native-wasapi` feature.
-transit-audio-wasapi = { workspace = true, optional = true }
+# The native WASAPI backend (ADR 0016): on every Windows build since ADR 0046 (no feature).
+transit-audio-wasapi.workspace = true
 
 [target.'cfg(all(windows, target_pointer_width = "64"))'.dependencies]
-# The native ASIO backend (draft ADR 0016 amendment), behind the `native-asio` feature.
-transit-audio-asio = { workspace = true, optional = true }
+# The native ASIO backend (draft ADR 0016 amendment): on every 64-bit Windows build since ADR 0046.
+transit-audio-asio.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The native JACK backend (ADR 0021), behind the `native-jack` feature.
@@ -44,13 +44,6 @@ transit-audio-jack = { workspace = true, optional = true }
 [features]
 # Device-free callback probes used only by dependent crates' tests.
 test-hooks = []
-# The native WASAPI render backend (ADR 0016 slice c): the "Native WASAPI" choice in
-# Audio Devices. Off by default; without it the choice is not offered and `Backend::NativeWasapi` opens cpal.
-native-wasapi = ["dep:transit-audio-wasapi"]
-# The native ASIO backend (no Steinberg SDK, no LLVM): the "Native ASIO" choice in
-# Audio Devices on the ASIO system. Off by default; without it the choice is not offered and
-# `Backend::NativeAsio` opens cpal.
-native-asio = ["dep:transit-audio-asio"]
 # The native JACK backend (ADR 0021; JACK 2 or PipeWire's libjack, loaded at run time): the
 # "Native JACK" choice in Audio Devices on the JACK system. Linux only; off by default; without it
 # the JACK system is not listed and `Backend::NativeJack` opens cpal. The build needs jack.pc

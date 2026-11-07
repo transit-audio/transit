@@ -115,8 +115,8 @@ Design notes: [contributing/knowledge/jack-backend.md](contributing/knowledge/ja
 
 ## Building with ASIO (Windows)
 
-The ASIO backend is native: it needs nothing beyond the Windows prerequisites above. The app offers
-it with the `native-asio` feature, which is on by default. (The earlier cpal ASIO path, which needed
+The ASIO backend is native: it needs nothing beyond the Windows prerequisites above, and every 64-bit
+Windows build has it (it is not a feature since ADR 0046). (The earlier cpal ASIO path, which needed
 the Steinberg SDK and libclang, was retired; see ADR 0016.)
 
 ### Native ASIO backend (no SDK)
@@ -125,14 +125,12 @@ the Steinberg SDK and libclang, was retired; see ADR 0016.)
 no C++ compile, no bindgen, no libclang, no `CPAL_ASIO_DIR` and no environment variables. It is
 compiled only on 64-bit Windows (`cfg(all(windows, target_pointer_width = "64"))`; the crate is empty
 elsewhere) and builds with a plain `cargo build`. A plain `cargo build --release -p transit`
-on Windows includes it and Native WASAPI: the `native-asio` and `native-wasapi` features are default
-features (they compile to nothing on Linux and macOS). Choose Audio system ASIO, then Backend "Native
-ASIO" in Audio Devices. To opt out, build with `--no-default-features` (add `--features update-check`
-to keep the update check); then the build has no ASIO. The benchmark uses it through the `audio-bench/native-asio`
-feature:
+on Windows includes it and native WASAPI; there are no features to turn them on or off (ADR 0046).
+Choose Audio system ASIO in Audio Devices: the audio system decides the backend, so there is no
+Backend choice on Windows. The benchmark has it too:
 
 ```powershell
-cargo build --release -p audio-bench --features audio-bench/native-asio
+cargo build --release -p audio-bench
 target\release\audio-bench.exe --list-devices --system ASIO
 target\release\audio-bench.exe --backend asio --device "<driver registry name>" --loopback --out-ch 1 --in-ch 1 --seconds 10
 ```

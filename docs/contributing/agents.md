@@ -87,8 +87,8 @@ A good brief is the biggest token saver. Include:
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
-cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio --no-fail-fast
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --locked --workspace --no-fail-fast
 cargo test -p transit-rt --release
 cargo xtask layers
 cargo xtask assets

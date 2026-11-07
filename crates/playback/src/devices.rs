@@ -74,10 +74,10 @@ impl Backend {
     }
 }
 
-/// Whether this build can open the native WASAPI backend (Windows with the `native-wasapi` feature).
-pub const NATIVE_WASAPI_COMPILED: bool = cfg!(all(windows, feature = "native-wasapi"));
-/// Whether this build can open the native ASIO backend (64-bit Windows with the `native-asio` feature).
-pub const NATIVE_ASIO_COMPILED: bool = cfg!(all(windows, target_pointer_width = "64", feature = "native-asio"));
+/// Whether this build can open the native WASAPI backend: every Windows build (ADR 0046).
+pub const NATIVE_WASAPI_COMPILED: bool = cfg!(windows);
+/// Whether this build can open the native ASIO backend: every 64-bit Windows build (ADR 0046).
+pub const NATIVE_ASIO_COMPILED: bool = cfg!(all(windows, target_pointer_width = "64"));
 /// Whether this build can open the native JACK backend (Linux with the `native-jack` feature).
 pub const NATIVE_JACK_COMPILED: bool = cfg!(all(target_os = "linux", feature = "native-jack"));
 /// The native JACK backend's audio system (JACK 2, or PipeWire through its JACK library).
@@ -467,9 +467,9 @@ pub const WASAPI_SYSTEM: &str = "WASAPI";
 /// result when the panel closes. Drivers do not reliably report what changed there: reopen the
 /// device afterwards. Fails at once in a build without the native ASIO backend.
 pub fn native_asio_control_panel(driver: &str) -> Result<std::sync::mpsc::Receiver<Result<(), String>>, String> {
-    #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+    #[cfg(all(windows, target_pointer_width = "64"))]
     return crate::backend::native::asio_control_panel(driver);
-    #[cfg(not(all(windows, target_pointer_width = "64", feature = "native-asio")))]
+    #[cfg(not(all(windows, target_pointer_width = "64")))]
     {
         let _ = driver;
         Err("this build has no native ASIO backend".into())
@@ -492,9 +492,9 @@ pub fn audio_systems() -> Vec<AudioSystem> {
 /// backend the WASAPI system is the native one (`backend::native::wasapi_system`, ADR 0046
 /// decision 2); elsewhere cpal's systems, then native JACK where built.
 pub fn audio_systems_without_asio() -> Vec<AudioSystem> {
-    #[cfg(all(windows, feature = "native-wasapi"))]
+    #[cfg(windows)]
     let mut systems = vec![crate::backend::native::wasapi_system()];
-    #[cfg(not(all(windows, feature = "native-wasapi")))]
+    #[cfg(not(windows))]
     let mut systems = cpal_audio_systems();
     systems.extend(native_jack_system());
     systems
@@ -539,9 +539,9 @@ pub fn native_jack_system() -> Option<AudioSystem> {
 /// `backend::native::asio_system`). Probing a misbehaving driver can take seconds (each host
 /// request waits at most ten): call it off the UI thread.
 pub fn native_asio_system(selected: Option<&str>) -> Option<AudioSystem> {
-    #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+    #[cfg(all(windows, target_pointer_width = "64"))]
     return Some(crate::backend::native::asio_system(selected));
-    #[cfg(not(all(windows, target_pointer_width = "64", feature = "native-asio")))]
+    #[cfg(not(all(windows, target_pointer_width = "64")))]
     {
         let _ = selected;
         None

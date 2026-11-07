@@ -125,7 +125,7 @@ Say in the release notes when the build was signed; the notes say unsigned other
 ## ASIO
 
 The release has one Windows download (zip and MSI). It carries the native ASIO backend
-(`transit/native-asio`), which is SDK-free and needs no Steinberg agreement. The earlier cpal ASIO
+(in every 64-bit Windows build since ADR 0046), which is SDK-free and needs no Steinberg agreement. The earlier cpal ASIO
 host, which compiled against the Steinberg SDK, has been removed.
 
 Because the zip and MSI ship the native ASIO backend, `README-WINDOWS.txt` in the zip carries the

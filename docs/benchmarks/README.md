@@ -119,7 +119,7 @@ automatically with that output, compared without regard to case; a run that name
 matches Automatic only if the record names none):
 
 ```
-cargo run -p audio-bench --features native-wasapi --release -- --backend wasapi --loopback --out-device "<Scarlett out>" --in-device "<Scarlett in>" --settings "%APPDATA%\transit\ui.json"
+cargo run -p audio-bench --release -- --backend wasapi --loopback --out-device "<Scarlett out>" --in-device "<Scarlett in>" --settings "%APPDATA%\transit\ui.json"
 ```
 
 It prints the round trip in frames and ms with its uncertainty (`+-` the spread of the per-click
@@ -134,7 +134,7 @@ channel); the clicks play at -6 dBFS and a detection needs about -20 dBFS on the
 
 `--mode exclusive` (with `--backend wasapi`) opens both streams in WASAPI exclusive mode, which skips
 the Windows audio engine and runs at the driver's period: for example
-`cargo run -p audio-bench --features native-wasapi --release -- --backend wasapi --mode exclusive --period 128 --loopback --out-device "<Scarlett out>" --in-device "<Scarlett in>"`.
+`cargo run -p audio-bench --release -- --backend wasapi --mode exclusive --period 128 --loopback --out-device "<Scarlett out>" --in-device "<Scarlett in>"`.
 While it runs it holds the device and every other app on it is silenced; a device another app holds
 exclusively fails with "in use", and one whose Advanced settings forbid exclusive control says so. The
 Notes column gives the format and period the driver granted ("exclusive, i32/24 valid, 128 fr"), and
@@ -154,7 +154,7 @@ The hardware tests open the owner's default endpoints and stay `#[ignore]`d; run
 
 ```
 cargo test -p transit-audio-wasapi -- --ignored hardware_ --nocapture
-cargo test -p transit-playback --features native-wasapi -- --ignored hardware_ --nocapture
+cargo test -p transit-playback -- --ignored hardware_ --nocapture
 ```
 
 Without a device (what CI runs; opens no audio device and finishes at once, in virtual time):
@@ -195,7 +195,7 @@ with its **fastest attack and shortest release**, no delay or reverb, no arpeggi
 repository root:
 
 ```
-cargo run -p audio-bench --features native-asio --release -- --midi-roundtrip --midi-out "<port name or part>" --midi-channel 1 --in 1 --backend asio --device "<ASIO driver>" --rate 44100 --buffer 256 --trials 10 --gap-ms 1500 --json docs/benchmarks/<date>-<machine>-<synth>.json
+cargo run -p audio-bench --release -- --midi-roundtrip --midi-out "<port name or part>" --midi-channel 1 --in 1 --backend asio --device "<ASIO driver>" --rate 44100 --buffer 256 --trials 10 --gap-ms 1500 --json docs/benchmarks/<date>-<machine>-<synth>.json
 ```
 
 Native ASIO only: both ends are counted in the driver's sample positions. Defaults: note 60,
@@ -292,7 +292,7 @@ each run, and one reading line, "compensated placement within +-X ms" (the large
 compensated run). Without `--compensation` it plays once and suggests the mean as the compensation.
 
 ```
-cargo run -p audio-bench --features native-asio --release -- --placement --compensation <samples, or <ms>ms> --midi-out "<port name or part>" --midi-channel 1 --in 1 --backend asio --device "<ASIO driver>" --rate 44100 --buffer 256 --json docs/benchmarks/<date>-<machine>-<synth>-placement.json
+cargo run -p audio-bench --release -- --placement --compensation <samples, or <ms>ms> --midi-out "<port name or part>" --midi-channel 1 --in 1 --backend asio --device "<ASIO driver>" --rate 44100 --buffer 256 --json docs/benchmarks/<date>-<machine>-<synth>-placement.json
 ```
 
 Options beside the round trip's (all but `--trials`): `--compensation 1070` (samples) or

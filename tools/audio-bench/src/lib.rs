@@ -26,9 +26,9 @@ pub enum Kind {
     /// The cpal adapter (WASAPI shared or ASIO, chosen with `--system`).
     Cpal,
     /// The native WASAPI backend (shared mode through `IAudioClient3`, or exclusive with
-    /// `--mode exclusive`); needs the `native-wasapi` feature.
+    /// `--mode exclusive`); Windows only.
     Wasapi,
-    /// The native ASIO backend (`transit-audio-asio`); needs the `native-asio` feature.
+    /// The native ASIO backend (`transit-audio-asio`); 64-bit Windows only.
     Asio,
     /// The scripted [`ab::fake::FakeBackend`] in virtual time.
     Fake,
@@ -214,20 +214,20 @@ pub fn cpal_backend(system: Option<&str>) -> Result<Box<dyn ab::Backend>, String
 }
 
 /// The native WASAPI backend (`--backend wasapi`).
-#[cfg(all(windows, feature = "native-wasapi"))]
+#[cfg(windows)]
 pub fn wasapi_backend() -> Result<Box<dyn ab::Backend>, String> {
     use ab::BackendFactory;
     transit_audio_wasapi::WasapiFactory::default().backend(None).ok_or_else(|| "the native WASAPI backend is not available".to_string())
 }
 
-/// Without the feature (or off Windows) there is no native backend to measure.
-#[cfg(not(all(windows, feature = "native-wasapi")))]
+/// Off Windows there is no native WASAPI backend to measure.
+#[cfg(not(windows))]
 pub fn wasapi_backend() -> Result<Box<dyn ab::Backend>, String> {
-    Err("--backend wasapi needs Windows and a build with --features native-wasapi".into())
+    Err("--backend wasapi needs Windows".into())
 }
 
 /// The native ASIO backend (`--backend asio`): the process-wide one the app's factory hands out.
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 pub fn asio_backend() -> Result<Box<dyn ab::Backend>, String> {
     use ab::BackendFactory;
     transit_audio_asio::AsioFactory.backend(None).ok_or_else(|| "the native ASIO backend is not available".to_string())
@@ -236,7 +236,7 @@ pub fn asio_backend() -> Result<Box<dyn ab::Backend>, String> {
 /// `--device` of `--backend asio` as an installed driver's registry name: the exact name, else the
 /// one that matches ignoring case or contains it ("model mixer"), said on stderr. An unknown or
 /// ambiguous name is an error listing the installed drivers; the default driver never stands in.
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 pub fn resolve_asio_device(request: &session::Request) -> Result<session::Request, String> {
     let Some(wanted) = request.device.as_deref() else { return Ok(request.clone()) };
     let backend = transit_audio_asio::AsioBackend::shared().map_err(|e| format!("the native ASIO backend did not start: {e}"))?;
@@ -249,15 +249,15 @@ pub fn resolve_asio_device(request: &session::Request) -> Result<session::Reques
 }
 
 /// Without the native ASIO backend there is no driver to resolve (`asio_backend` says why).
-#[cfg(not(all(windows, target_pointer_width = "64", feature = "native-asio")))]
+#[cfg(not(all(windows, target_pointer_width = "64")))]
 pub fn resolve_asio_device(request: &session::Request) -> Result<session::Request, String> {
     Ok(request.clone())
 }
 
-/// Without the feature (or off 64-bit Windows) there is no native ASIO backend to measure.
-#[cfg(not(all(windows, target_pointer_width = "64", feature = "native-asio")))]
+/// Off 64-bit Windows there is no native ASIO backend to measure.
+#[cfg(not(all(windows, target_pointer_width = "64")))]
 pub fn asio_backend() -> Result<Box<dyn ab::Backend>, String> {
-    Err("--backend asio needs 64-bit Windows and a build with --features native-asio".into())
+    Err("--backend asio needs 64-bit Windows".into())
 }
 
 /// The device names of a cpal system, for `--list-devices` (enumerates; opens no stream); the JACK

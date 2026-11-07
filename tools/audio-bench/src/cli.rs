@@ -6,8 +6,8 @@ use transit_audio_backend as ab;
 
 pub const USAGE: &str = "\
 usage: audio-bench [options]
-  --backend cpal|wasapi|asio|fake  backend to measure (default cpal; wasapi and asio are the native backends, built with
-                         --features native-wasapi or native-asio)
+  --backend cpal|wasapi|asio|fake  backend to measure (default cpal; wasapi and asio are the native backends, in every
+                         Windows build; asio on 64-bit Windows)
   --backend jack         with --list-devices: the native JACK backend's port groups, or why there are none (Linux,
                          built with --features native-jack; it never starts a server; measuring comes later)
   --system ASIO|WASAPI   audio system of the cpal backend (default: the platform default)

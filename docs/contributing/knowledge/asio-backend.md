@@ -10,12 +10,11 @@ only; the crate is empty elsewhere. No ASIO SDK, C++, bindgen or LLVM in its bui
 Nothing to install: the crate has no SDK, C++, bindgen, libclang or environment variables, and it is
 compiled only under `cfg(all(windows, target_pointer_width = "64"))`, so a plain `cargo build` or
 `cargo test -p transit-audio-asio` works on Windows and is a no-op elsewhere. Run the bench with
-`cargo build --release -p audio-bench --features audio-bench/native-asio`, then
+`cargo build --release -p audio-bench`, then
 `audio-bench --backend asio --device "<driver registry name>"`. The hardware tests are ignored by
 default: `cargo test -p transit-audio-asio -- --ignored hardware_ --nocapture --test-threads 1`, or
-one by name (for example `hardware_scarlett_duplex_streams_two_seconds`). The app uses it with the
-`transit/native-asio` feature (`transit-playback/native-asio`), as "Native ASIO"
-under Audio system ASIO; see [In the app](#in-the-app-slice-c). The legacy cpal ASIO feature was retired
+one by name (for example `hardware_scarlett_duplex_streams_two_seconds`). Every 64-bit Windows build of the app
+uses it (no feature since ADR 0046) for Audio system ASIO; see [In the app](#in-the-app-slice-c). The legacy cpal ASIO feature was retired
 (ADR 0016, amendment 2026-10-25); build notes are in [docs/building.md](../../building.md).
 
 ## The host thread (`src/host.rs`)
@@ -242,7 +241,7 @@ as overloads, position jumps or over-budget callbacks in Callback Telemetry. Tes
 
 ### Measuring it
 
-`audio-bench --backend asio --device "<driver registry name>"` (build with `--features native-asio`;
+`audio-bench --backend asio --device "<driver registry name>"` (any 64-bit Windows build;
 no SDK and no LLVM) measures the native backend through the trait, with `--period` as the buffer size
 asked of `createBuffers` and the usual `--loopback --out-ch --in-ch`. A loopback run also prints the
 driver-reported latencies in frames and ms, the calibration the app would store (the click loop by
@@ -342,7 +341,7 @@ listing), `crates/playback/src/player/device.rs` (`open_native`, `open_stepped`)
   host does not fall back to cpal, which would load the same driver twice. A reset the driver asks
   for while its panel is open is reopened when the panel closes.
 
-Hardware (2026-10-22, `cargo test -p transit-playback --features native-asio --lib -- --ignored
+Hardware (2026-10-22, `cargo test -p transit-playback --lib -- --ignored
 hardware_player_opens_native_asio --nocapture --test-threads 1`): the whole Player path opens the
 Scarlett at 48 kHz, 64 frames (2 in / 2 out, `i32`, 2.9 ms out / 3.9 ms in) and the Model 12 at
 44.1 kHz, 256 frames (12 in / 10 out, `i24`, 15.8 ms out / 6.8 ms in) and runs two seconds with no

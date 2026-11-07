@@ -9,16 +9,6 @@ repository.workspace = true
 publish = false
 
 [features]
-# The native backends are on by default (Windows only; no-ops elsewhere). `--no-default-features` leaves them out.
-default = ["native-wasapi", "native-asio"]
-
-# `--backend wasapi`: the native WASAPI backend (ADR 0016 slice c), Windows only.
-native-wasapi = ["dep:transit-audio-wasapi"]
-
-# `--backend asio`: the native ASIO backend (draft ADR 0016 amendment, ASIO slice b), 64-bit
-# Windows only. No ASIO SDK and no LLVM: unlike `asio` (cpal's host), it builds like the rest.
-native-asio = ["dep:transit-audio-asio"]
-
 # `--backend jack --list-devices`: the native JACK backend's listing (ADR 0021 slice 1), Linux only.
 # Measuring through it comes with slice 2.
 native-jack = ["transit-playback/native-jack"]
@@ -32,9 +22,14 @@ transit-midi-io.workspace = true
 # `--midi-roundtrip` releases its note on Ctrl+C (a console's default handler ends the process without unwinding).
 ctrlc = "=3.5.2"
 
+# `--backend wasapi`: the native WASAPI backend (ADR 0016 slice c), on every Windows build (ADR 0046).
 [target.'cfg(windows)'.dependencies]
-transit-audio-wasapi = { workspace = true, optional = true }
-transit-audio-asio = { workspace = true, optional = true }
+transit-audio-wasapi.workspace = true
+
+# `--backend asio`: the native ASIO backend (draft ADR 0016 amendment, ASIO slice b), on every
+# 64-bit Windows build. No ASIO SDK and no LLVM.
+[target.'cfg(all(windows, target_pointer_width = "64"))'.dependencies]
+transit-audio-asio.workspace = true
 
 [dev-dependencies]
 transit-midi-io = { workspace = true, features = ["fake"] }

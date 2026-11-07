@@ -529,8 +529,8 @@ fn the_round_trip_bounds_are_the_driver_figure_minus_one_buffer_to_plus_eight_bu
 }
 
 /// Opens the owner's default endpoint through the whole Player path with the native backend.
-/// Run it with `cargo test -p transit-playback --features native-wasapi -- --ignored hardware_ --nocapture`.
-#[cfg(all(windows, feature = "native-wasapi"))]
+/// Run it with `cargo test -p transit-playback -- --ignored hardware_ --nocapture`.
+#[cfg(windows)]
 #[test]
 #[ignore = "opens the default audio endpoint"]
 fn hardware_player_opens_native_wasapi() {
@@ -553,8 +553,8 @@ fn hardware_player_opens_native_wasapi() {
 
 /// Opens `driver` through the whole Player path with the native ASIO backend, takes the duplex input
 /// as the recorder does, runs two seconds and checks both streams' counts. Run with
-/// `cargo test -p transit-playback --features native-asio --lib -- --ignored hardware_player_opens_native_asio --nocapture --test-threads 1`.
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+/// `cargo test -p transit-playback --lib -- --ignored hardware_player_opens_native_asio --nocapture --test-threads 1`.
+#[cfg(all(windows, target_pointer_width = "64"))]
 fn player_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>) -> (u16, usize) {
     let _hardware = hardware_guard();
     let cfg = AudioConfig {
@@ -606,7 +606,7 @@ fn player_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>) -> (u16, 
 /// app makes (`MeasureKind::Loop`), with the send and return channels the app builds from the
 /// calibration paths (0-based, from `loopback_pair`; a stereo send plays the click on both
 /// outputs). Holds the hardware lock, then checks the measured loop against the driver's figures.
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, (send, ret): LoopbackPair) {
     let _hardware = hardware_guard();
     let cfg = AudioConfig {
@@ -664,39 +664,39 @@ fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, (s
     assert!((lo..=hi).contains(&frames), "{frames} frames is outside {lo}..={hi}: driver output + input {driver_frames}, buffer {buffer_frames}");
 }
 
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 #[test]
 #[ignore = "plays a click train out of the Scarlett through the Player (TRANSIT_LOOPBACK_SCARLETT, default 2:2)"]
 fn hardware_player_measures_a_hardware_insert_on_the_scarlett_over_native_asio() {
     hardware_ping_on_native_asio("Focusrite USB ASIO", 48_000, Some(64), loopback_pair("TRANSIT_LOOPBACK_SCARLETT", "2:2"));
 }
 
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 #[test]
 #[ignore = "plays a click train out of the Scarlett through the Player (TRANSIT_LOOPBACK_SCARLETT, default 2:2)"]
 fn hardware_player_measures_a_hardware_insert_on_the_scarlett_at_128_over_native_asio() {
     hardware_ping_on_native_asio("Focusrite USB ASIO", 48_000, Some(128), loopback_pair("TRANSIT_LOOPBACK_SCARLETT", "2:2"));
 }
 
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 /// The Model 12's rig: the click plays on USB OUT 1 and OUT 2 together (the stereo path "1-2", as the
 /// Audio Devices window's Measure sends it) and returns from MAIN L on input 1. Mixer channel 2 is in PC
 /// mode, so OUT 2 reaches the main bus and the cable on MAIN L carries it.
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 #[test]
 #[ignore = "plays a click train out of the Model 12 through the Player (TRANSIT_LOOPBACK_MODEL12, default 1-2:1)"]
 fn hardware_player_measures_a_hardware_insert_on_the_model12_over_native_asio() {
     hardware_ping_on_native_asio("Model Mixer ASIO Driver", 44_100, None, loopback_pair("TRANSIT_LOOPBACK_MODEL12", "1-2:1"));
 }
 
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 #[test]
 #[ignore = "opens the Focusrite ASIO driver through the Player for two seconds"]
 fn hardware_player_opens_native_asio_on_the_scarlett() {
     assert_eq!(player_on_native_asio("Focusrite USB ASIO", 48_000, Some(64)), (2, 2));
 }
 
-#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[cfg(all(windows, target_pointer_width = "64"))]
 #[test]
 #[ignore = "opens the Model 12 ASIO driver through the Player for two seconds"]
 fn hardware_player_opens_native_asio_on_the_model12() {

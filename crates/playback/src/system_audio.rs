@@ -178,11 +178,11 @@ impl Opened {
 /// The backend that captures System Audio on this platform: native WASAPI on Windows (in a build
 /// with it), whatever backend serves the session; none elsewhere.
 pub fn loopback_backend() -> Option<Box<dyn ab::Backend>> {
-    #[cfg(all(windows, feature = "native-wasapi"))]
+    #[cfg(windows)]
     {
         Some(Box::new(transit_audio_wasapi::WasapiBackend::default()))
     }
-    #[cfg(not(all(windows, feature = "native-wasapi")))]
+    #[cfg(not(windows))]
     {
         None
     }
@@ -190,7 +190,7 @@ pub fn loopback_backend() -> Option<Box<dyn ab::Backend>> {
 
 /// Whether this build can capture System Audio (Windows with the native WASAPI backend).
 pub fn offered() -> bool {
-    cfg!(all(windows, feature = "native-wasapi"))
+    cfg!(windows)
 }
 
 /// Whether `cfg` asks for System Audio and this build can capture it: the input then reserves the pair.

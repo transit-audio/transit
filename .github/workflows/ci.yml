@@ -35,7 +35,7 @@ env:
 
 jobs:
   windows:
-    name: windows (wasapi, native-wasapi)
+    name: windows (native WASAPI, native ASIO)
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -55,11 +55,11 @@ jobs:
       - run: cargo xtask help
       # Check production host code without the integration tests' self-dev feature activation.
       - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
-      - run: cargo clippy --locked --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       # Lib targets only: the dev-dependencies of the test targets turn the `testing` feature on, so a
       # warning that exists only with it off would otherwise reach the release build alone (#215).
       - run: cargo clippy --locked -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings
-      - run: cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio
+      - run: cargo test --locked --workspace
 
   linux:
     name: linux

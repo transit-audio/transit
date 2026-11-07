@@ -58,7 +58,7 @@ fn report_writes_a_file_with_every_section_and_prints_its_path() {
     assert!(text.contains("MIDI Learn mappings: no session, 0 controller profile"), "{text}");
     assert!(text.contains("report mode opens no MIDI port") || text.contains("the MIDI ports could not be listed"), "{text}");
     assert!(text.contains("last line"), "the log's lines are in: {text}");
-    if cfg!(all(windows, feature = "native-wasapi")) {
+    if cfg!(windows) {
         assert!(text.contains("WASAPI (default system)\n  Listed by: native WASAPI (IMMDeviceEnumerator)\n"), "ADR 0046: {text}");
     }
     assert!(text.contains("INFO user <user> opened a file"), "and the user name is not: {text}");
