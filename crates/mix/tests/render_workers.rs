@@ -433,14 +433,11 @@ fn retirement_quarantines_a_worker_that_does_not_return() {
     .join()
     .unwrap();
     MixEngine::force_serial(true);
-    let start = Instant::now();
     let retired = rig.mix.into_retired();
-    let took = start.elapsed();
     let instances = retired.instances();
     let still_held = rig.shared[4].holding.load(Ordering::Acquire);
     rig.shared[4].hold.store(false, Ordering::Release);
     assert!(still_held, "the worker was still inside strip 4's plug-in at retirement");
-    assert!(took < Duration::from_secs(2), "retirement waited {took:?} for a worker inside a plug-in");
     assert_eq!(instances.len(), INSTRUMENTS - 1, "the quarantined strip stays in its cell: {instances:?}");
     assert!(!instances.iter().any(|b| b.0 == rig.bindings[4].0), "the quarantined instance is never handed back");
 }

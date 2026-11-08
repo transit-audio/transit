@@ -36,6 +36,10 @@
    quarantine; removing the wake from `stop_and_wake` fails the stalled-worker test at its
    stall bound (the idle worker stays parked). With the 300 ms exit sleep the new tests pass.
    Twenty release runs during a parallel release build of the workspace passed.
+   The second instance, `retirement_quarantines_a_worker_that_does_not_return`
+   (`crates/mix/tests/render_workers.rs`), dropped its 2 s upper bound on a 500 ms retirement;
+   its existing `still_held` check already proves retirement returned while the worker was
+   inside the plug-in.
 5. **Gate class.** E49: a bounded join or wait must not let its bound decide the fate of a
    thread whose progress depends only on scheduling. Wait (stall-bounded) for every thread the
    test expects to return before starting the bound, so the bound abandons only what the test
@@ -44,8 +48,5 @@
    `docs/contributing/evidence/gates.md`. Owner: the maintainer. Blind spots: the idle-set test
    does not prove the wake on shutdown, because freshly spawned workers may see the stop before
    they first park; the stalled-worker test does, unless its idle worker is preempted between
-   its last sweep and its park (a false pass, never a false failure).
-   `retirement_quarantines_a_worker_that_does_not_return` (`crates/mix/tests/render_workers.rs`)
-   still holds a 2 s upper bound on a 500 ms retirement; it is tracked on #346 for the same
-   treatment. The rule is a review rule; the timing scan does not see a deadline inside a
-   product call.
+   its last sweep and its park (a false pass, never a false failure). The rule is a review
+   rule; the timing scan does not see a deadline inside a product call.
