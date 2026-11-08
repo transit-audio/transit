@@ -296,17 +296,25 @@ mod tests {
         // The binary, inside a bundle on macOS as installed there.
         let file = if cfg!(target_os = "macos") { path.join("Contents/MacOS/Fixture") } else { path.clone() };
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        // Truncate and write (the inode stays), with a modification time the test sets (E60).
-        let write = |at: SystemTime| {
-            std::fs::write(&file, &bytes).unwrap();
-            std::fs::File::options().write(true).open(&file).unwrap().set_modified(at).unwrap();
-        };
+        // Modification times the test sets (E60).
+        let stamp = |at: SystemTime| std::fs::File::options().write(true).open(&file).unwrap().set_modified(at).unwrap();
         let t0 = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        write(t0);
+        std::fs::write(&file, &bytes).unwrap();
+        stamp(t0);
         let first = Bundle::load(&path).unwrap();
         assert_eq!(first.descriptors().len(), 2);
         assert!(Arc::ptr_eq(&first, &Bundle::load(&path).unwrap()), "an unchanged file is served from the cache");
-        write(t0 + Duration::from_secs(1));
+        // On Unix the same bytes are written over the loaded file in place, without truncating:
+        // a truncation drops the loaded copy's relocated pages (the #348 crash itself). Windows
+        // refuses to write a loaded DLL, so there it is renamed aside and copied anew.
+        if cfg!(unix) {
+            use std::io::Write as _;
+            std::fs::File::options().write(true).open(&file).unwrap().write_all(&bytes).unwrap();
+        } else {
+            std::fs::rename(&file, file.with_extension("old")).unwrap();
+            std::fs::write(&file, &bytes).unwrap();
+        }
+        stamp(t0 + Duration::from_secs(1));
         let changed = |b: Result<Arc<Bundle>, ClapError>| matches!(b, Err(ClapError::Load(_, m)) if m.contains("changed on disk"));
         assert!(changed(Bundle::load(&path)), "served while the bundle is held, as an instance holds it");
         let old = Arc::downgrade(&first);
