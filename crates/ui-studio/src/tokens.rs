@@ -463,12 +463,30 @@ pub mod fader {
     pub const TICK_GAP_AFTER_LABEL: f32 = 3.0;
     pub const TICK_COLOR: &str = "line.strong";
     pub const TICK_ZERO_COLOR: &str = "text.muted";
-    /// The meter's 0 dB grid line (the others are `line`).
+    /// The meter's 0 dB grid line (the others are `line.inset`, [`METER_GRID_COLOR`]).
     pub const ZERO_GRID_LINE: &str = "line.strong";
     /// The order a meter well paints its layers in: nothing is drawn over the level.
     pub const METER_DRAW_ORDER: [&str; 5] = ["well", "grid", "peak", "rms", "hold"];
+    /// The meter grid (`fader.meterGrid`): a line only where a label is placed (the set the
+    /// Channel scale's ticks use), `line.inset`, the 0 dB line `line.strong`.
+    pub const METER_GRID_AT: &str = "placedLabels";
+    pub const METER_GRID_COLOR: &str = "line.inset";
+    pub const METER_GRID_ZERO_COLOR: &str = "line.strong";
+    /// Where a main bus without a fader offers to add one (`fader.mainAddFader`): its routing rows.
+    pub const MAIN_ADD_FADER: &str = "routingRow";
+    /// The fill runs from this gain to the cap (`fader.fill.fromDb`): gain is bipolar around unity.
+    pub const FILL_FROM_DB: f32 = 0.0;
+    /// The unity notch across the track at 0 dB (`fader.unityNotch`): 12 by 1 in `ink.arrow`.
+    pub const UNITY_NOTCH: [f32; 2] = [12.0, 1.0];
+    pub const UNITY_NOTCH_COLOR: &str = "ink.arrow";
+    /// A meter source with no RMS reading draws its peak at this alpha (`fader.meter.peakAlphaWithoutRms`).
+    pub const METER_PEAK_ALPHA_WITHOUT_RMS: f32 = 1.0;
+    /// The meter fills' and hold line's corner radius, and the well's (`fader.meter.fillRadius`,
+    /// `fader.meter.wellRadius`).
+    pub const METER_FILL_RADIUS: f32 = 0.0;
+    pub const METER_WELL_RADIUS: f32 = 1.5;
     /// The keys of `fader` in tokens.json, all mirrored here (the drift test checks both ways).
-    pub const KEYS: [&str; 18] = [
+    pub const KEYS: [&str; 21] = [
         "taper",
         "taperNote",
         "scaleLabels",
@@ -479,6 +497,9 @@ pub mod fader {
         "tick",
         "zeroGridLine",
         "meterDrawOrder",
+        "meterGrid",
+        "mainAddFader",
+        "unityNotch",
         "inset",
         "track",
         "fill",

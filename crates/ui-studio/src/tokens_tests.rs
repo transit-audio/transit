@@ -200,6 +200,12 @@ fn component_metrics_match_tokens_json() {
         ("fader/meter/peakAlpha", f::METER_PEAK_ALPHA),
         ("fader/meter/holdHeight", f::METER_HOLD),
         ("fader/meter/clipCell", f::METER_CLIP_CELL),
+        ("fader/meter/peakAlphaWithoutRms", f::METER_PEAK_ALPHA_WITHOUT_RMS),
+        ("fader/meter/fillRadius", f::METER_FILL_RADIUS),
+        ("fader/meter/wellRadius", f::METER_WELL_RADIUS),
+        ("fader/fill/fromDb", f::FILL_FROM_DB),
+        ("fader/unityNotch/width", f::UNITY_NOTCH[0]),
+        ("fader/unityNotch/height", f::UNITY_NOTCH[1]),
     ] {
         assert_eq!(num(&v, path), x, "{path}");
     }
@@ -243,12 +249,21 @@ fn the_fader_construction_keys_match_tokens_json_both_ways() {
     assert_eq!(pair("channelColumns/fader"), f::COLUMN_FADER);
     assert_eq!(pair("channelColumns/tick"), f::COLUMN_TICK);
     assert_eq!(at(fd, "frame/sharedAcrossRow").as_bool(), Some(f::FRAME_SHARED_ACROSS_ROW));
-    for (path, name) in [("tick/color", f::TICK_COLOR), ("tick/zeroColor", f::TICK_ZERO_COLOR), ("zeroGridLine", f::ZERO_GRID_LINE)] {
+    for (path, name) in [
+        ("tick/color", f::TICK_COLOR),
+        ("tick/zeroColor", f::TICK_ZERO_COLOR),
+        ("zeroGridLine", f::ZERO_GRID_LINE),
+        ("meterGrid/at", f::METER_GRID_AT),
+        ("meterGrid/color", f::METER_GRID_COLOR),
+        ("meterGrid/zeroColor", f::METER_GRID_ZERO_COLOR),
+        ("mainAddFader", f::MAIN_ADD_FADER),
+        ("unityNotch/color", f::UNITY_NOTCH_COLOR),
+    ] {
         assert_eq!(at(fd, path).as_str(), Some(name), "fader/{path}");
     }
     // Every number under the new keys has a mirror above (a new leaf in tokens.json fails here).
     let mut leaves = Vec::new();
-    for key in ["labelMinGap", "frame", "channelColumns", "tick"] {
+    for key in ["labelMinGap", "frame", "channelColumns", "tick", "unityNotch"] {
         number_leaves(at(fd, key), key, &mut leaves);
     }
     let mirrored: BTreeSet<&str> = [
@@ -265,6 +280,8 @@ fn the_fader_construction_keys_match_tokens_json_both_ways() {
         "channelColumns/mainBlockWidth",
         "tick/length",
         "tick/gapAfterLabel",
+        "unityNotch/width",
+        "unityNotch/height",
     ]
     .into_iter()
     .collect();
@@ -276,7 +293,8 @@ fn the_fader_construction_keys_match_tokens_json_both_ways() {
     assert_eq!(f::BLOCK_WIDTH, f::CHANNEL_WIDTH);
     assert_eq!(f::COLUMN_TICK, [f::COLUMN_LABEL_RIGHT + f::TICK_GAP_AFTER_LABEL, f::COLUMN_LABEL_RIGHT + f::TICK_GAP_AFTER_LABEL + f::TICK_LENGTH]);
     let names: BTreeSet<String> = color_names(&v, "color").into_iter().collect();
-    for name in [f::TICK_COLOR, f::TICK_ZERO_COLOR, f::ZERO_GRID_LINE] {
+    assert_eq!(f::METER_GRID_ZERO_COLOR, f::ZERO_GRID_LINE, "fader/meterGrid/zeroColor is fader/zeroGridLine");
+    for name in [f::TICK_COLOR, f::TICK_ZERO_COLOR, f::ZERO_GRID_LINE, f::METER_GRID_COLOR, f::METER_GRID_ZERO_COLOR, f::UNITY_NOTCH_COLOR] {
         assert!(names.contains(name), "{name} is not a color token");
     }
 }
