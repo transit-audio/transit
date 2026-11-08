@@ -151,6 +151,9 @@ pub struct MeterDisplay {
     pub falloff: [f32; 2],
     /// The clip latch per channel (the engine publishes a peak per channel); `clip` is either.
     pub clip_ch: [bool; 2],
+    /// The engine's RMS per channel (linear, over `transit_mix::RMS_WINDOW_MS`), shown as
+    /// published: the window is its ballistics. The channel meter's solid layer (#395).
+    pub rms: [f32; 2],
 }
 
 impl MeterDisplay {

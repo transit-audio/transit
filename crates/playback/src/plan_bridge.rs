@@ -26,6 +26,9 @@ mod delivery;
 struct AtomicMeter {
     peak: [AtomicU32; 2],
     peaks: [AtomicU32; MAX_DEVICE_CHANNELS],
+    /// Linear RMS per channel (#395): one store per channel per block, the reader derives the
+    /// stereo pair from it.
+    rms: [AtomicU32; MAX_DEVICE_CHANNELS],
     channels: AtomicUsize,
     reduction: AtomicU32,
     failures: AtomicU32,
@@ -37,6 +40,7 @@ impl AtomicMeter {
         Self {
             peak: std::array::from_fn(|_| AtomicU32::new(0)),
             peaks: std::array::from_fn(|_| AtomicU32::new(0)),
+            rms: std::array::from_fn(|_| AtomicU32::new(0)),
             channels: AtomicUsize::new(0),
             reduction: AtomicU32::new(0),
             failures: AtomicU32::new(0),
@@ -51,6 +55,9 @@ impl AtomicMeter {
         for (dst, src) in self.peaks.iter().zip(&source.peaks) {
             dst.store(src.to_bits(), Ordering::Relaxed);
         }
+        for (dst, src) in self.rms.iter().zip(&source.rms_channels) {
+            dst.store(src.to_bits(), Ordering::Relaxed);
+        }
         self.channels.store(source.peaks.len().min(MAX_DEVICE_CHANNELS), Ordering::Relaxed);
         self.reduction.store(source.gain_reduction_db.to_bits(), Ordering::Relaxed);
         self.failures.store(source.plugin_failures.count, Ordering::Relaxed);
@@ -58,7 +65,7 @@ impl AtomicMeter {
     }
 
     fn clear(&self) {
-        for peak in self.peak.iter().chain(&self.peaks) {
+        for peak in self.peak.iter().chain(&self.peaks).chain(&self.rms) {
             peak.store(0, Ordering::Relaxed);
         }
         self.reduction.store(0, Ordering::Relaxed);
@@ -72,6 +79,12 @@ impl AtomicMeter {
         for (dst, src) in out.peaks.iter_mut().zip(&self.peaks) {
             *dst = f32::from_bits(src.load(Ordering::Relaxed));
         }
+        out.rms_channels.resize(out.peaks.len(), 0.0);
+        for (dst, src) in out.rms_channels.iter_mut().zip(&self.rms) {
+            *dst = f32::from_bits(src.load(Ordering::Relaxed));
+        }
+        let last = out.rms_channels.len().saturating_sub(1);
+        out.rms = [out.rms_channels.first().copied().unwrap_or(0.0), out.rms_channels.get(1.min(last)).copied().unwrap_or(0.0)];
         out.gain_reduction_db = f32::from_bits(self.reduction.load(Ordering::Relaxed));
         out.plugin_failures.count = self.failures.load(Ordering::Relaxed);
         out.plugin_failures.last = self.last_failure.load(Ordering::Relaxed);

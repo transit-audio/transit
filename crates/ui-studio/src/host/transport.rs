@@ -318,6 +318,7 @@ impl StudioApp {
             for (id, m) in &snap.tracks {
                 let d = self.meters.entry(*id).or_default();
                 feed_meter(d, m.peak, m.gain_reduction_db, dt);
+                d.rms = m.rms;
                 if m.plugin_failures.count != d.plugin_failures {
                     d.plugin_failures = m.plugin_failures.count;
                     if let Some(msg) = failed_plugin_status(self.engine.session(), *id, m.plugin_failures.last) {
@@ -327,6 +328,7 @@ impl StudioApp {
             }
             let main = snap.main.peak;
             feed_meter(&mut self.main_meter, main, 0.0, dt);
+            self.main_meter.rms = snap.main.rms;
             if ended && self.player_requests.stop.is_none() {
                 self.complete_stop();
             }

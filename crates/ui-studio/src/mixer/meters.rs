@@ -14,7 +14,8 @@ pub(super) fn strip_meter(
 ) -> crate::widgets::level_meter::ChannelMeterLayout {
     use crate::widgets::level_meter::{Channel, paint_channel};
     let db = |lin: f32| if lin > 0.0 { 20.0 * lin.log10() } else { f32::NEG_INFINITY };
-    let channels = [0, 1].map(|c| Channel { peak_db: db(d.falloff[c]), rms_db: None, hold_db: Some(db(d.hold[c])), clip: d.clip_ch[c] });
+    let channels =
+        [0, 1].map(|c| Channel { peak_db: db(d.falloff[c]), rms_db: Some(db(d.rms[c])), hold_db: Some(db(d.hold[c])), clip: d.clip_ch[c] });
     let bar = if main { crate::tokens::fader::METER_BAR_MAIN } else { crate::tokens::fader::METER_BAR };
     paint_channel(p, x, travel, bar, &channels)
 }
