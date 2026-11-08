@@ -3,7 +3,7 @@ title: A plug-in host thread per process owns hosted instances (create, state, e
 -->
 # ADR 0018: A plug-in host thread owns hosted instances; the UI only sends requests
 
-- **Status:** accepted 2026-10-24 (shipped 2026-10-23, #36 #56 #66)
+- **Status:** accepted 2026-10-24 (shipped 2026-10-23, #36 #56 #66); amendments 2026-10-25, 2026-10-29 and 2026-10-30
 - **Date:** 2026-10-23
 - **Reopen when:** a reference plug-in misbehaves because its main thread is not the process main thread on Windows; macOS needs the same guarantee (that needs editors out of process, or a run-loop design); or out-of-process hosting (G-13) is taken up, which replaces the stuck-thread handling below.
 

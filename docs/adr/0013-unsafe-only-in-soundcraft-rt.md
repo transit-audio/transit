@@ -3,7 +3,7 @@ title: Unsafe lives only in `transit-rt` (safe API, per-platform modules with a 
 -->
 # ADR 0013: Unsafe lives only in `transit-rt`, tested, reviewed, cross-platform
 
-- **Status:** accepted 2026-10-18; implemented: transit-rt merged into transit at 23ad6fd (2026-10-18); CI legs all four green on run 39191937448 (2026-10-18), §5 satisfied; local gate `cargo xtask rt-targets`
+- **Status:** accepted 2026-10-18; implemented: transit-rt merged into transit at 23ad6fd (2026-10-18); CI legs all four green on run 39191937448 (2026-10-18), §5 satisfied; local gate `cargo xtask rt-targets`; amendments 2026-10-19 to 2026-10-29; amended by [ADR 0048](0048-export-formats-opus-no-mp3.md) on 2026-11-08
 - **Date:** 2026-10-18
 - **Parity:** the upstream-parity motivation is retired as of 2026-10-21 (see the amendment at the end); the unsafe discipline stands.
 - **Reopen when:** a required OS or realtime call cannot be expressed behind a safe API in `transit-rt`, or the per-platform code grows past what one reviewer can audit in a single pass. Either case needs a new ADR, not a quiet exception.

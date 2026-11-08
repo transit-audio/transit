@@ -3,7 +3,7 @@ title: I/O routing abstraction: a per-machine IoMap of named I/O paths of any wi
 -->
 # ADR 0015: I/O routing abstraction: a device channel map, named paths, one route graph
 
-- **Status:** accepted 2026-10-21 (direction pre-approved by the project owner; refutation review round 1 resolved)
+- **Status:** accepted 2026-10-21 (direction pre-approved by the project owner; refutation review round 1 resolved); amendment 2026-11-04, Low Latency mode proposed
 - **Date:** 2026-10-21
 - **Implementation:** Slice 0 and slices (a) to (e) landed, including (d) hardware inserts f1add1e+074baac. The master hardware repair (#322) and the live cue flag landed as the prerequisites of (f). Slice (f) Low Latency mode landed with the per-machine preference, deterministic insert override, adopted-state display and shared/Main path-latency query.
 - **Reopen when:** a slice's gate proves unmeasurable on the reference machine; or upstream SoundCraft lands its own multi-output or sidechain model that we should converge with; or the TASCAM Model 12 shows that device channel counts differ between input and output (or between USB modes) enough that one channel-map shape cannot describe both; or dependency layers for key edges prove too costly in slice (c) (fallback in section 4). WASAPI shared mode exposing one channel count is a stated limit, not a reopen trigger (section 1).

@@ -3,7 +3,7 @@ title: Loops live inside the clip: an optional loop range plus an arrangement le
 -->
 # ADR 0019: Loops live inside the clip; linked copies stay as Repeat
 
-- **Status:** accepted (2026-10-23) (issue #59)
+- **Status:** accepted 2026-10-23 (issue #59)
 - **Date:** 2026-10-23
 - **Reopen when:** a loop needs a phase the model cannot express (a loop that starts mid-cycle after a split of MIDI), a second loop level (nested loops) is asked for, or the Session view needs per-scene loop lengths that the arrangement length cannot carry.
 
