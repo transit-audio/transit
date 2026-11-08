@@ -65,7 +65,7 @@ pub(super) fn choice_menu(resp: &egui::Response, current: &str, choices: &[Routi
     let mut picked = None;
     crate::chrome_pick::dropdown(resp).width(150.0).show(|ui| {
         if choices.is_empty() {
-            ui.weak("Nothing to pick");
+            crate::chrome::menu_note(ui, egui::RichText::new("Nothing to pick").weak());
         }
         for choice in choices {
             let (label, value) = match choice {
@@ -79,7 +79,7 @@ pub(super) fn choice_menu(resp: &egui::Response, current: &str, choices: &[Routi
                 ui.separator();
             }
             // The current entry is marked by label, or by the path name the route holds.
-            let b = crate::menus::check_button(ui, label == current || (!value.is_empty() && value == current), label.as_str());
+            let b = ui.add(crate::chrome::MenuRow::new(label.as_str()).checked(label == current || (!value.is_empty() && value == current)));
             menu.push(MenuItem::at(ui, label.clone(), value.clone(), b.rect));
             if b.clicked() {
                 picked = Some(value.clone());

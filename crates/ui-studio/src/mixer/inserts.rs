@@ -148,16 +148,16 @@ fn insert_slot(
     let bypass = ins.bypass;
     let editor_open = app.ui.plugin_windows.contains(&(id, slot));
     let retry_name = name.clone();
-    egui::Popup::context_menu(&resp).id(resp.id.with("insert_ctx")).show(|ui| {
+    crate::chrome::context_menu(&resp).id(resp.id.with("insert_ctx")).show(|ui| {
         let label = if editor_open { "Close editor" } else { "Open editor" };
-        let b = ui.add_enabled(enabled, egui::Button::new(label));
+        let b = ui.add_enabled(enabled, crate::chrome::MenuRow::new(label));
         menu.push(MenuItem::at(ui, label.into(), "editor".into(), b.rect));
         if b.clicked() {
             app.toggle_editor((id, slot));
             ui.close();
         }
         if stuck {
-            let b = ui.button("Retry").on_hover_text(format!("Retry loading {retry_name}"));
+            let b = ui.add(crate::chrome::MenuRow::new("Retry")).on_hover_text(format!("Retry loading {retry_name}"));
             menu.push(MenuItem::at(ui, "Retry".into(), "retry".into(), b.rect));
             if b.clicked() {
                 let _ = app.retry_plugin(id, slot);
@@ -165,13 +165,13 @@ fn insert_slot(
             }
         }
         let label = if bypass { "Turn On" } else { "Bypass" };
-        let b = ui.button(label);
+        let b = ui.add(crate::chrome::MenuRow::new(label));
         menu.push(MenuItem::at(ui, label.into(), "bypass".into(), b.rect));
         if b.clicked() {
             let _ = app.toggle_bypass(id, slot);
             ui.close();
         }
-        let b = ui.button("Remove");
+        let b = ui.add(crate::chrome::MenuRow::new("Remove"));
         menu.push(MenuItem::at(ui, "Remove".into(), "remove".into(), b.rect));
         if b.clicked() {
             let _ = app.remove_device(id, slot);

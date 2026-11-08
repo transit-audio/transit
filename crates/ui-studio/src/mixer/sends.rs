@@ -115,15 +115,15 @@ pub(crate) fn send_row(
     }
     // Its own popup id: `Popup::context_menu` closes the popup on a primary click, which would
     // otherwise be the retarget menu's (both default to the response's id).
-    egui::Popup::context_menu(&resp).id(resp.id.with("send_ctx")).show(|ui| {
+    crate::chrome::context_menu(&resp).id(resp.id.with("send_ctx")).show(|ui| {
         let label = if snd.pre_fader { "Post-fader" } else { "Pre-fader" };
-        let b = ui.button(label);
+        let b = ui.add(crate::chrome::MenuRow::new(label));
         menu.push(MenuItem::at(ui, label.into(), "pre".into(), b.rect));
         if b.clicked() {
             let _ = app.set_send_pre(id, slot, !snd.pre_fader);
             ui.close();
         }
-        let b = ui.button("Remove Send");
+        let b = ui.add(crate::chrome::MenuRow::new("Remove Send"));
         menu.push(MenuItem::at(ui, "Remove Send".into(), "remove".into(), b.rect));
         if b.clicked() {
             let _ = app.remove_send(id, slot);
@@ -305,9 +305,9 @@ fn send_menus(
     }
     // Its own popup id: `Popup::context_menu` closes the popup on a primary click, which would
     // otherwise be the retarget menu's (both default to the response's id).
-    egui::Popup::context_menu(resp).id(resp.id.with("send_ctx")).show(|ui| {
+    crate::chrome::context_menu(resp).id(resp.id.with("send_ctx")).show(|ui| {
         let label = if snd.pre_fader { "Post-fader" } else { "Pre-fader" };
-        let b = ui.button(label);
+        let b = ui.add(crate::chrome::MenuRow::new(label));
         menu.push(MenuItem::at(ui, label.into(), "pre".into(), b.rect));
         if b.clicked() {
             let _ = app.set_send_pre(id, slot, !snd.pre_fader);
@@ -315,14 +315,14 @@ fn send_menus(
         }
         if with_mute {
             let label = if snd.mute { "Unmute Send" } else { "Mute Send" };
-            let b = ui.button(label);
+            let b = ui.add(crate::chrome::MenuRow::new(label));
             menu.push(MenuItem::at(ui, label.into(), "mute".into(), b.rect));
             if b.clicked() {
                 let _ = app.set_send_mute(id, slot, !snd.mute);
                 ui.close();
             }
         }
-        let b = ui.button("Remove Send");
+        let b = ui.add(crate::chrome::MenuRow::new("Remove Send"));
         menu.push(MenuItem::at(ui, "Remove Send".into(), "remove".into(), b.rect));
         if b.clicked() {
             let _ = app.remove_send(id, slot);
