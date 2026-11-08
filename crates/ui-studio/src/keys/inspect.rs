@@ -81,6 +81,9 @@ pub struct KeysLayout {
     pub step_cursor: i64,
     pub step_ticks: i64,
     pub new_note_velocity: R4,
+    /// The `New note velocity` and `Length` labels' text boxes (they share the controls' center line).
+    pub new_note_velocity_label: R4,
+    pub note_length_label: R4,
     pub use_selected_velocity: R4,
     /// Exact length inspector for a single selected note, in ticks.
     pub note_length: R4,

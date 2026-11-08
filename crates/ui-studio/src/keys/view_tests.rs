@@ -511,3 +511,112 @@ fn opening_a_device_card_from_the_mixer_shows_devices_and_leaves_the_mixer() {
     crate::mixer::inserts::open_card(&mut t.app, t.track);
     assert!(t.app.ui.show_devices && !t.app.ui.show_mixer, "a hidden mixer stays hidden");
 }
+
+/// Every right-hand header control, the Length field, and the two labels, as `(name, rect)`.
+fn header_rects(l: &crate::keys::KeysLayout) -> Vec<(&'static str, [f32; 4])> {
+    vec![
+        ("step", l.step),
+        ("step_velocity", l.step_velocity),
+        ("audition", l.audition),
+        ("quantize", l.quantize),
+        ("pitch", l.pitch),
+        ("snap", l.snap),
+        ("use_selected_velocity", l.use_selected_velocity),
+        ("new_note_velocity", l.new_note_velocity),
+        ("note_length", l.note_length),
+        ("new_note_velocity_label", l.new_note_velocity_label),
+        ("note_length_label", l.note_length_label),
+    ]
+}
+
+/// Every header control is the same height on one center line, within a physical pixel.
+fn aligned(l: &crate::keys::KeysLayout, ppp: f32, narrow: bool) -> Result<(), String> {
+    let px = 1.0 / ppp;
+    let all = header_rects(l);
+    let controls: Vec<_> = all.iter().filter(|(name, _)| !name.ends_with("_label")).filter(|(name, _)| !narrow || *name == "note_length").collect();
+    let want_h = crate::tokens::layout::DENSE_CONTROL_HEIGHT;
+    let want_cy = controls[0].1;
+    let want_cy = (want_cy[1] + want_cy[3]) / 2.0;
+    for (name, r) in
+        controls.iter().copied().copied().chain(all.iter().copied().filter(|(n, _)| n.ends_with("_label") && (!narrow || *n == "note_length_label")))
+    {
+        let (h, cy) = (r[3] - r[1], (r[1] + r[3]) / 2.0);
+        if !name.ends_with("_label") && (h - want_h).abs() > px {
+            return Err(format!("{name}: height {h}, want {want_h}"));
+        }
+        if (cy - want_cy).abs() > px {
+            return Err(format!("{name}: center {cy}, want {want_cy}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn piano_roll_header_controls_share_one_height_and_center_line() {
+    for ppp in [1.0f32, 1.5] {
+        for narrow in [false, true] {
+            let mut t = T::open();
+            t.ctx.set_pixels_per_point(ppp);
+            if narrow {
+                t.width = 1024.0;
+            }
+            t.add(60, 480, 480);
+            t.click(mid(t.note_rect(60, 480)));
+            t.frames(3);
+            let l = &t.app.keys.layout;
+            aligned(l, ppp, narrow).unwrap_or_else(|e| panic!("ppp {ppp} narrow {narrow}: {e}"));
+        }
+    }
+}
+
+#[test]
+fn the_check_fails_on_the_pre_fix_sizing() {
+    // Measured before the fix (build a007ee27): buttons and Length 20 high at cy 458, the
+    // velocity box 22 high at cy 459, the labels 13 high.
+    let mut l = crate::keys::KeysLayout::default();
+    for r in [
+        &mut l.step,
+        &mut l.step_velocity,
+        &mut l.audition,
+        &mut l.quantize,
+        &mut l.pitch,
+        &mut l.snap,
+        &mut l.use_selected_velocity,
+        &mut l.note_length,
+    ] {
+        *r = [0.0, 448.0, 50.0, 468.0];
+    }
+    l.new_note_velocity = [0.0, 448.0, 44.0, 470.0];
+    l.new_note_velocity_label = [0.0, 451.5, 80.0, 464.5];
+    l.note_length_label = [0.0, 451.5, 40.0, 464.5];
+    assert!(aligned(&l, 1.0, false).is_err());
+}
+
+#[test]
+fn every_header_control_still_dispatches_its_command() {
+    let mut t = T::open();
+    t.add(60, 480, 480);
+    t.click(mid(t.note_rect(60, 480)));
+    let vel = t.notes()[0].velocity;
+    t.app.ui.keys.velocity = if vel == 50 { 51 } else { 50 };
+    t.click(mid(t.app.keys.layout.use_selected_velocity));
+    assert_eq!(t.app.ui.keys.velocity, vel, "the eyedropper takes the selected note's velocity");
+    let fixed = t.app.ui.keys.step_fixed;
+    t.click(mid(t.app.keys.layout.step_velocity));
+    assert_eq!(t.app.ui.keys.step_fixed, !fixed, "the step velocity button toggles Played and Fixed");
+    let audition = t.app.ui.keys.audition;
+    t.click(mid(t.app.keys.layout.audition));
+    assert_eq!(t.app.ui.keys.audition, !audition);
+    t.click(mid(t.app.keys.layout.step));
+    assert!(t.app.keys.layout.step_on, "Step turns step entry on");
+    t.click(mid(t.app.keys.layout.quantize));
+    assert!(t.app.keys.quantize_open, "Quantize opens its panel");
+    t.app.keys.quantize_open = false;
+    t.click(mid(t.app.keys.layout.pitch));
+    t.frames(2);
+    assert!(!t.app.keys.layout.pitch_menu.is_empty(), "Pitch opens its menu");
+    t.key("Escape", json!({}));
+    t.click(mid(t.app.keys.layout.snap));
+    t.frames(2);
+    assert!(!t.app.keys.layout.snap_menu.is_empty(), "Grid opens its list");
+}

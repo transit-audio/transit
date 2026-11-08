@@ -137,7 +137,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
 
     header_row(app, ui, header, &cv, &all, &mut layout);
     if narrow {
-        let rect = Rect::from_min_size(pos2(area.min.x + 8.0, header.max.y + 4.0), vec2(138.0, HEADER_H - 8.0));
+        let rect = Rect::from_min_size(pos2(area.min.x + 8.0, header.max.y), vec2(138.0, HEADER_H));
         note_inspector(app, ui, rect, &mut layout);
     }
     pane_handle(app, ui, handle, &mut layout);
@@ -311,6 +311,22 @@ pub fn switcher_panel(app: &mut StudioApp, ui: &mut Ui) {
     });
 }
 
+/// The height of every control in the header row: the dense control height, so the buttons, the
+/// velocity field and the Length field are one size on one center line (#412).
+const HEADER_CONTROL_H: f32 = crate::tokens::layout::DENSE_CONTROL_HEIGHT;
+
+/// The header's control band: [`HEADER_CONTROL_H`] high, centered on `row`'s center line.
+fn control_band(row: Rect, x0: f32, x1: f32) -> Rect {
+    Rect::from_center_size(pos2((x0 + x1) / 2.0, row.center().y), vec2(x1 - x0, HEADER_CONTROL_H))
+}
+
+/// Makes egui's own fields (drag value, text edit) come out [`HEADER_CONTROL_H`] high, not the
+/// taller of their font and padding; use inside a style-scoped closure (the style is restored).
+fn exact_height(ui: &mut Ui) {
+    ui.spacing_mut().interact_size.y = HEADER_CONTROL_H;
+    ui.spacing_mut().button_padding.y = 0.0;
+}
+
 /// Tabs (Piano Roll, Mixer, Devices), the clip's name, grid, Quantize and the audition switch.
 fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Composite, layout: &mut KeysLayout) {
     let p = ui.painter();
@@ -351,7 +367,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Co
     // Right side, right to left: Audition, Quantize, Grid, velocity and its eyedropper.
     let mut rx = r.max.x - 8.0;
     let mut button = |ui: &mut Ui, w: f32, salt: &str| {
-        let b = Rect::from_min_max(pos2(rx - w, r.min.y + 4.0), pos2(rx, r.max.y - 4.0));
+        let b = control_band(r, rx - w, rx);
         rx -= w + 6.0;
         (b, ui.interact(b, ui.id().with(("keys_btn", salt)), Sense::click()))
     };
@@ -532,7 +548,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Co
         [note] if app.keys_all().is_some_and(|all| all.notes.contains(note)) => Some(note.velocity),
         _ => None,
     };
-    let b = Rect::from_min_max(pos2(rx - 24.0, r.min.y + 4.0), pos2(rx, r.max.y - 4.0));
+    let b = control_band(r, rx - 24.0, rx);
     rx -= 30.0;
     let resp = ui.add_enabled_ui(selected.is_some(), |ui| ui.put(b, egui::Button::new(""))).inner;
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, selected.is_some(), "Use selected note's velocity"));
@@ -552,18 +568,22 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Co
         app.ui.keys.velocity = velocity.clamp(1, 127);
     }
 
-    let field = Rect::from_min_max(pos2(rx - 44.0, r.min.y + 4.0), pos2(rx, r.max.y - 4.0));
+    let field = control_band(r, rx - 44.0, rx);
     ui.push_id("keys_new_note_velocity", |ui| {
-        let resp = crate::chrome::field(ui, |ui| ui.put(field, egui::DragValue::new(&mut app.ui.keys.velocity).range(1..=127).speed(1)));
+        let resp = crate::chrome::field(ui, |ui| {
+            exact_height(ui);
+            ui.put(field, egui::DragValue::new(&mut app.ui.keys.velocity).range(1..=127).speed(1))
+        });
         layout.new_note_velocity = r4(resp.rect);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "New note velocity"));
         resp.on_hover_text("New note velocity (1–127): used for drawing and audition. Drag or click to type.");
     });
     rx -= 150.0;
-    ui.painter().text(pos2(rx, r.center().y), Align2::LEFT_CENTER, "New note velocity", FontId::proportional(11.5), TOKENS.text);
+    let label = ui.painter().text(pos2(rx, r.center().y), Align2::LEFT_CENTER, "New note velocity", FontId::proportional(11.5), TOKENS.text);
+    layout.new_note_velocity_label = r4(label);
     if r.width() >= 1200.0 {
         rx -= 146.0;
-        note_inspector(app, ui, Rect::from_min_max(pos2(rx, r.min.y + 4.0), pos2(rx + 138.0, r.max.y - 4.0)), layout);
+        note_inspector(app, ui, Rect::from_min_max(pos2(rx, r.min.y), pos2(rx + 138.0, r.max.y)), layout);
     }
     let title_rect = Rect::from_min_max(pos2(x + 32.0, r.min.y), pos2((rx - 8.0).max(x + 32.0), r.max.y));
     ui.painter().with_clip_rect(title_rect).text(title_rect.left_center(), Align2::LEFT_CENTER, title, FontId::proportional(11.5), TOKENS.text_dim);
@@ -578,14 +598,17 @@ fn note_inspector(app: &mut StudioApp, ui: &mut Ui, rect: Rect, layout: &mut Key
     if app.keys.length_edit.as_ref().map(|(note, _)| *note) != selected {
         app.keys.length_edit = selected.map(|note| (note, note.length.to_string()));
     }
-    ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, "Length", FontId::proportional(11.5), TOKENS.text);
-    let field = Rect::from_min_max(pos2(rect.min.x + 44.0, rect.min.y), rect.max);
+    let label = ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, "Length", FontId::proportional(11.5), TOKENS.text);
+    layout.note_length_label = r4(label);
+    let field = control_band(rect, rect.min.x + 44.0, rect.max.x);
     let mut empty = String::new();
     let text = app.keys.length_edit.as_mut().map_or(&mut empty, |(_, text)| text);
     let resp = ui
         .add_enabled_ui(selected.is_some(), |ui| {
             crate::chrome::field(ui, |ui| {
-                ui.put(field, egui::TextEdit::singleline(text).id_salt("keys_note_length").font(egui::TextStyle::Monospace))
+                exact_height(ui);
+                let edit = egui::TextEdit::singleline(text).id_salt("keys_note_length").font(egui::TextStyle::Monospace);
+                ui.put(field, edit.min_size(vec2(0.0, HEADER_CONTROL_H)).vertical_align(egui::Align::Center))
             })
         })
         .inner;
