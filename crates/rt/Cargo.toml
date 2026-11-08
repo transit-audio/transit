@@ -24,6 +24,13 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Grap
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc = "=0.2.190"
 
+# macOS plug-in editor windows (an NSWindow), moved here from vst3-host so both hosts share it; the
+# same pinned versions vst3-host used, so no new dependency.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSGeometry", "NSString"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSView", "NSWindow", "NSGraphics"] }
+
 # Linux plug-in editor windows (issue #147): the pure-Rust X11 client already in the tree (winit),
 # no default features (no libxcb, no unsafe of its own).
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -33,6 +40,11 @@ x11rb = { version = "=0.13.2", default-features = false }
 # when there is no DISPLAY (run it under `xvfb-run -a` in CI).
 [[test]]
 name = "editor_x11"
+harness = false
+
+# macOS editor windows on the process main thread (the standard harness never runs there).
+[[test]]
+name = "editor_macos"
 harness = false
 
 # ADR 0013: this crate is where new `unsafe` lives. It opts out of the workspace

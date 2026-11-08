@@ -911,6 +911,10 @@ unsafe extern "C" fn gui_set_parent(p: *const clap_plugin, window: *const clap_w
     // SAFETY: the host passes this live fixture instance on its main thread.
     let f = unsafe { fx(p) };
     assert!(f.gui_created && !f.gui_floating && !window.is_null(), "set_parent");
+    // SAFETY: set_parent supplies a valid clap_window for this call; the macOS host chose
+    // CLAP_WINDOW_API_COCOA, whose union member is cocoa (the window's content NSView).
+    #[cfg(target_os = "macos")]
+    assert!(!unsafe { (*window).specific.cocoa }.is_null(), "set_parent: a cocoa parent view");
     #[cfg(target_os = "linux")]
     if f.gui_mode == Mode::XembedPlug {
         // SAFETY: set_parent supplies a valid clap_window for this call. The Linux host chose
@@ -938,6 +942,8 @@ unsafe extern "C" fn gui_destroy(p: *const clap_plugin) {
 unsafe extern "C" fn gui_set_scale(p: *const clap_plugin, scale: f64) -> bool {
     let f = unsafe { fx(p) };
     assert!(f.gui_created && !f.gui_floating, "set_scale is for a created embedded GUI");
+    // clap gui.h on CLAP_WINDOW_API_COCOA: "uses logical size, don't call set_scale()".
+    assert!(!cfg!(target_os = "macos"), "set_scale on a cocoa GUI");
     if f.gui_self_scaling || !(scale > 0.0) {
         return false;
     }
