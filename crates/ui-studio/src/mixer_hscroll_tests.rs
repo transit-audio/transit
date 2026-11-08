@@ -1,8 +1,9 @@
-//! The strips lane's floating scroll bar (#414).
+//! The strips lane's floating scroll bar (#414) and the aux divider's centering (#415).
 
 use crate::mixer::{STRIP_W, StripLayout};
 use crate::tests::*;
 use crate::tokens::chrome;
+use transit_model::TrackKind;
 
 /// The scrolling lane, from the layout: the area less its 4 pt margin, ending 8 pt before the
 /// pinned main bus.
@@ -87,4 +88,45 @@ fn strips_that_fit_paint_no_scroll_bar() {
     }
     frames(&mut app, &ctx, 3, &mut time);
     assert!(app.mixer.layout.lane_bar.is_none());
+}
+
+/// The space either side of the divider, between it and the neighboring strips.
+fn sides(app: &StudioApp, last: TrackId, fx: TrackId) -> (f32, f32) {
+    let d = app.mixer.layout.fx_divider.expect("divider");
+    (d[0] - strip(app, last).rect[2], strip(app, fx).rect[0] - d[2])
+}
+
+#[test]
+fn the_aux_divider_sits_in_the_middle_of_its_gap_at_both_zooms() {
+    for ppp in [1.0_f32, 1.5] {
+        for scrolled in [false, true] {
+            let (mut app, ctx, mut time, last) = mixer_app();
+            ctx.set_pixels_per_point(ppp);
+            let fx = app.new_fx_channel(None, 0.0).unwrap();
+            if scrolled {
+                for _ in 0..18 {
+                    app.run("track.new", json!({"kind": "audio"})).unwrap();
+                }
+            }
+            app.run("track.new", json!({"kind": "master"})).unwrap();
+            frames(&mut app, &ctx, 4, &mut time);
+            let last =
+                if scrolled { TrackId(app.engine.session().tracks.iter().rev().find(|t| t.kind == TrackKind::Audio).unwrap().id.0) } else { last };
+            if scrolled {
+                app.mixer.hscroll = f32::MAX;
+                frames(&mut app, &ctx, 4, &mut time);
+                // Fractional scroll offsets must not move the divider off its pixel.
+                app.mixer.hscroll -= 0.37;
+                frames(&mut app, &ctx, 4, &mut time);
+            }
+            let gap = strip(&app, fx).rect[0] - strip(&app, last).rect[2];
+            assert_eq!(gap, 16.0, "the gap itself is unchanged");
+            let (l, r) = sides(&app, last, fx);
+            assert!((l - r).abs() <= 1.0 / ppp + 1e-3, "ppp {ppp} scrolled {scrolled}: {l} vs {r}");
+            let d = app.mixer.layout.fx_divider.unwrap();
+            for x in [d[0], d[2]] {
+                assert!((x * ppp - (x * ppp).round()).abs() < 1e-3, "edge {x} on a physical pixel at {ppp}");
+            }
+        }
+    }
 }

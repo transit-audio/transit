@@ -151,8 +151,13 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
     }
     layout.groups = group_links(ui, &s, &channels[..track_count], lane, area, app.mixer.hscroll);
     if block_gap > 0.0 {
-        let x = lane.min.x + track_count as f32 * (STRIP_W + GAP) + block_gap / 2.0 - app.mixer.hscroll;
-        let divider = Rect::from_min_max(pos2(x, lane.min.y), pos2(x + 1.0, lane.max.y)).intersect(lane);
+        // The gap between the last track strip and the first aux strip runs from `base - GAP`
+        // to `base + block_gap`; the divider is centered in it, its edges on whole physical pixels.
+        let base = lane.min.x + track_count as f32 * (STRIP_W + GAP) - app.mixer.hscroll;
+        let center = base + (block_gap - GAP) / 2.0;
+        let ppp = ui.ctx().pixels_per_point();
+        let snap = |x: f32| (x * ppp).round() / ppp;
+        let divider = Rect::from_min_max(pos2(snap(center - 0.5), lane.min.y), pos2(snap(center + 0.5), lane.max.y)).intersect(lane);
         if divider.is_positive() {
             ui.painter().with_clip_rect(lane).rect_filled(divider, 0.0, TOKENS.line);
             layout.fx_divider = Some(r4(divider));
