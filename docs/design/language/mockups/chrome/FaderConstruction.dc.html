@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fader construction</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 1420px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; overflow: hidden">
+
+<div style="position: absolute; left: 56px; top: 36px; right: 56px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #8C939D; letter-spacing: 0.08em">TRANSIT · MIXER · FADER CONSTRUCTION</span>
+<span style="font-size: 26px; font-weight: 600">One frame, one taper, labels that fit</span>
+<span style="font-size: 13px; color: #A7ADB6; max-width: 1150px; line-height: 1.5">Everything in a channel's level block hangs off one vertical frame: travel top Y0 and bottom Y1. The cap's centre, every scale label, every tick, the meter wells and their grid lines are placed by taper(dB) between those two lines, and every strip in a row, the main bus included, shares the same Y0 and Y1.</span>
+</div>
+
+<!-- section titles -->
+<span style="position: absolute; left: 56px; top: 138px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">A · Anatomy at 2×, travel 200</span>
+<span style="position: absolute; left: 640px; top: 138px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">B · Labels by travel, 1× (greedy, 13 px apart)</span>
+<span style="position: absolute; left: 640px; top: 570px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">C · The main bus shares the frame</span>
+
+<!-- blocks -->
+<sc-for list="{{blocks}}" as="b" hint-placeholder-count="8">
+<div style="position: absolute; left: {{b.x}}px; top: {{b.y}}px; width: {{b.ow}}px; height: {{b.oh}}px">
+<div style="position: absolute; left: 0; top: 0; width: {{b.w}}px; height: {{b.h}}px; transform: scale({{b.k}}); transform-origin: 0 0; background: {{b.bg}}">
+<sc-for list="{{b.els}}" as="e" hint-placeholder-count="40">
+<span style="position: absolute; left: {{e.x}}px; top: {{e.y}}px; width: {{e.w}}px; height: {{e.h}}px; box-sizing: border-box; background: {{e.bg}}; border: {{e.bd}}; border-radius: {{e.r}}px; font: {{e.font}}; color: {{e.c}}; text-align: {{e.ta}}; line-height: {{e.h}}px; white-space: nowrap; opacity: {{e.op}}">{{e.t}}</span>
+</sc-for>
+</div>
+<span style="position: absolute; left: 0; top: {{b.capY}}px; width: {{b.ow}}px; text-align: left; font: 500 11px 'IBM Plex Mono', monospace; color: #A7ADB6; white-space: nowrap">{{b.cap}}</span>
+<span style="position: absolute; left: 0; top: {{b.cap2Y}}px; width: 220px; font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D; white-space: normal; line-height: 1.4">{{b.cap2}}</span>
+</div>
+</sc-for>
+
+<!-- annotations for A -->
+<sc-for list="{{notes}}" as="n" hint-placeholder-count="12">
+<span style="position: absolute; left: {{n.lx}}px; top: {{n.ly}}px; width: {{n.lw}}px; height: 1px; background: #585F69"></span>
+<span style="position: absolute; left: {{n.tx}}px; top: {{n.ty}}px; font: 400 11px 'IBM Plex Mono', monospace; color: {{n.c}}; white-space: nowrap">{{n.t}}</span>
+</sc-for>
+<sc-for list="{{dims}}" as="d" hint-placeholder-count="4">
+<span style="position: absolute; left: {{d.x}}px; top: {{d.y}}px; width: {{d.w}}px; height: 1px; background: #4C9EFF; opacity: 0.6"></span>
+<span style="position: absolute; left: {{d.x}}px; top: {{d.ty}}px; width: {{d.w}}px; text-align: center; font: 500 10px 'IBM Plex Mono', monospace; color: #4C9EFF">{{d.t}}</span>
+</sc-for>
+
+<!-- D · build callouts -->
+<div style="position: absolute; left: 56px; top: 960px; width: 1328px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">D · What the 2026-11-08 screenshots show (idle and with meters running), and the rule that fixes each</span>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<sc-for list="{{fixes}}" as="x" hint-placeholder-count="4">
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px">
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font: 500 11px 'IBM Plex Mono', monospace; color: #4C9EFF">{{x.n}}</span><span style="font-size: 13px; font-weight: 600">{{x.t}}</span></span>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.45">{{x.seen}}</span>
+<span style="font-size: 12px; color: #E7E9EC; line-height: 1.45">{{x.fix}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1420}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const TAPER = [[6, 0], [0, 0.14], [-6, 0.28], [-12, 0.42], [-24, 0.6], [-36, 0.74], [-48, 0.86], [-60, 0.94], [-1e9, 1]];
+    const tp = (db) => {
+      if (db >= 6) return 0;
+      for (let i = 0; i < TAPER.length - 1; i++) {
+        const [d0, f0] = TAPER[i], [d1, f1] = TAPER[i + 1];
+        if (db <= d0 && db >= d1) { if (d1 < -1e8) { return db <= -90 ? 1 : 0.94 + 0.06 * (-60 - db) / 30; } return f0 + (f1 - f0) * (d0 - db) / (d0 - d1); }
+      }
+      return 1;
+    };
+    const MARKS = [6, 0, -6, -12, -24, -36, -48, null];
+    const PRIORITY = [0, null, -12, -24, 6, -48, -6, -36];
+    const GAP = 13;
+    const pickLabels = (T) => {
+      const placed = [];
+      PRIORITY.forEach((m) => { const y = (m === null ? 1 : tp(m)) * T; if (placed.every((p) => Math.abs(p.y - y) >= GAP)) placed.push({ m: m, y: y }); });
+      return placed;
+    };
+    const lbl = (m) => m === null ? '−∞' : (m > 0 ? '+' + m : (m === 0 ? '0' : '−' + (-m)));
+    const MONO10 = "400 10px 'IBM Plex Mono', monospace";
+    // one block: the level block of a channel (116 wide) or the main bus (144 wide)
+    const block = (o) => {
+      const T = o.T, main = !!o.main, hasFader = o.fader !== false;
+      const Y0 = 10, Y1 = 10 + T, W = main ? 144 : 116, H = T + 20;
+      const els = [];
+      const add = (e) => els.push(Object.assign({ bg: 'transparent', bd: 'none', r: 0, font: MONO10, c: '#8C939D', ta: 'left', t: '', op: 1 }, e));
+      const yOf = (m) => Y0 + (m === null ? 1 : tp(m)) * T;
+      const bw = main ? 14 : 10, mx = 72, bx = [mx, mx + bw + 3];
+      // meter wells, grid lines, levels
+      bx.forEach((x, i) => {
+        add({ x: x, y: Y0, w: bw, h: T, bg: '#0D0F11', bd: '1px solid #23272C', r: 1 });
+        MARKS.forEach((m) => { if (m === null || m === 6) return; add({ x: x + 1, y: Math.round(yOf(m)), w: bw - 2, h: 1, bg: m === 0 ? '#383E46' : '#2B3036' }); });
+        const pk = o.peak[i], rms = o.rms[i];
+        const yp = Math.min(yOf(pk), yOf(0));
+        add({ x: x + 1, y: yOf(pk), w: bw - 2, h: Y1 - yOf(pk) - 1, bg: 'rgba(95, 203, 142, 0.35)' });
+        if (pk > 0) add({ x: x + 1, y: yOf(pk), w: bw - 2, h: yOf(0) - yOf(pk), bg: 'rgba(255, 107, 91, 0.35)' });
+        add({ x: x + 1, y: yOf(rms), w: bw - 2, h: Y1 - yOf(rms) - 1, bg: '#5FCB8E' });
+        add({ x: x + 1, y: yOf(o.hold[i]) - 1, w: bw - 2, h: 2, bg: '#E7E9EC' });
+        add({ x: x, y: 0, w: bw, h: 4, bg: o.clip ? '#FF6B5B' : '#23272C', r: 1 });
+      });
+      // scale: labels right-aligned ending at x 60, a 4 px tick from 63 to 67, then the meter at 72
+      const labels = pickLabels(T);
+      labels.forEach((p) => {
+        const y = Y0 + p.y;
+        add({ x: 36, y: y - 6.5, w: 24, h: 13, t: lbl(p.m), ta: 'right', c: p.m === 0 ? '#E7E9EC' : '#8C939D' });
+        add({ x: 63, y: Math.round(y), w: 4, h: 1, bg: p.m === 0 ? '#A7ADB6' : '#383E46' });
+      });
+      if (hasFader) {
+        const c = Y0 + tp(o.gain) * T;
+        add({ x: 16, y: Y0, w: 4, h: T, bg: '#2B3036', r: 2 });
+        add({ x: 16, y: c, w: 4, h: Y1 - c, bg: o.muted ? '#4A5260' : '#4C9EFF', r: 2 });
+        add({ x: 2, y: c - 8, w: 32, h: 16, bg: '#2E333A', bd: '1px solid #585F69', r: 3 });
+        add({ x: 6, y: Math.round(c) - 1, w: 24, h: 2, bg: '#E7E9EC' });
+      } else {
+        add({ x: 2, y: Y0, w: 32, h: 24, bd: '1px dashed #383E46', r: 4, t: '+ Fader', ta: 'center', c: '#8C939D', font: "400 9px 'IBM Plex Sans', sans-serif" });
+      }
+      const k = o.k || 1;
+      return { x: o.x, y: o.y, w: W, h: H, k: k, ow: W * k, oh: H * k + 46, bg: o.bg || 'transparent', els: els, cap: o.cap || '', capY: H * k + 8, cap2: o.cap2 || '', cap2Y: H * k + 24 };
+    };
+    const lvl = { peak: [-3, -5], rms: [-12, -14], hold: [-2, -4] };
+    const A = block(Object.assign({ x: 56, y: 166, T: 200, k: 2, gain: 0, bg: '#1A1D21', cap: 'Channel, travel 200, at 2×' }, lvl));
+    const travels = [200, 100, 92, 80];
+    let bxp = 640;
+    const B = travels.map((T, i) => { const b = block(Object.assign({ x: bxp, y: 166, T: T, gain: -6, cap: 'travel ' + T, cap2: pickLabels(T).sort((a, z) => a.y - z.y).map((p) => lbl(p.m)).join(' '), bg: '#1A1D21' }, lvl)); bxp += 116 + 34; return b; });
+    const yC = 596;
+    const C = [
+      block(Object.assign({ x: 640, y: yC, T: 200, gain: 0, cap: 'Inst 1', bg: '#1A1D21' }, lvl)),
+      block({ x: 790, y: yC, T: 200, gain: 0, main: true, cap: 'Main, with a fader', bg: '#1A1D21', peak: [0.9, 0.4], rms: [-8, -9], hold: [0.9, 0.4], clip: true }),
+      block({ x: 968, y: yC, T: 200, main: true, fader: false, cap: 'Main, no fader yet', cap2: 'the frame, scale and meters stay; the fader column holds + Fader', bg: '#1A1D21', peak: [0.9, 0.4], rms: [-8, -9], hold: [0.9, 0.4], clip: true })
+    ];
+    // a line across C at Y0 and Y1, to show the shared frame
+    // annotations for A (2×): coordinates in board px
+    const ax = 56, ay = 166, k = 2, Y0 = 10, T = 200;
+    const by = (y) => ay + y * k;
+    const right = ax + 116 * k;
+    const n = (y, t, c) => ({ lx: right + 6, ly: by(y), lw: 22, tx: right + 34, ty: by(y) - 7, t: t, c: c || '#A7ADB6' });
+    const notes = [
+      n(2, 'clip cell 4 high, 6 above Y0, over each meter bar'),
+      n(Y0, 'Y0 · travel top (inset 10 from the block top)', '#E7E9EC'),
+      n(Y0 + tp(0) * T, '0 dB: cap centre line, label in text, tick text.muted, grid line.strong'),
+      n(Y0 + tp(-12) * T, 'every mark: label right-aligned at x 60 · 3 · tick 4 · 5 · meter'),
+      n(Y0 + tp(-24) * T, 'meter grid lines at each mark in line (1 px, whole pixels)'),
+      n(Y0 + tp(-48) * T, 'labels drop by priority when closer than 13 px (B)'),
+      n(Y0 + T, 'Y1 · travel bottom = −∞, 10 above the block bottom', '#E7E9EC'),
+      n(Y0 + tp(0) * T + 26, 'cap 32 × 16, radius 3, rim ink.arrow, centre line 2 px text'),
+      n(Y0 + tp(0) * T + 46, 'fill: signal from Y1 up to the cap centre (ink.ghost when muted)'),
+      n(Y0 + T * 0.75, 'meter wells span exactly Y0 to Y1: the same taper as the cap')
+    ];
+    const dims = [
+      { x: ax, y: by(T + 20) + 30, w: 36 * k, ty: by(T + 20) + 34, t: 'fader 36' },
+      { x: ax + 36 * k, y: by(T + 20) + 30, w: 32 * k, ty: by(T + 20) + 34, t: 'scale 32' },
+      { x: ax + 72 * k, y: by(T + 20) + 30, w: 23 * k, ty: by(T + 20) + 34, t: 'meter 10·3·10' }
+    ];
+    return {
+      blocks: [A].concat(B).concat(C),
+      notes: notes, dims: dims,
+      fixes: [
+        { n: '1', t: 'Labels collide in the docked strip', seen: 'At about 80 pt of travel all eight labels are drawn and run into each other.', fix: 'Place labels greedily in priority order 0, −∞, −12, −24, +6, −48, −6, −36, skipping any closer than 13 px to one already placed. At 80 that leaves 0 −12 −24 −∞; at 320 and up, all eight. Ticks follow their labels.' },
+        { n: '2', t: '“−0”', seen: 'A long dash sits just left of the 0 label, so it reads as a minus sign.', fix: 'Ticks go after the label, toward the meter: label right-aligned at x 60, 3 px, a 4 px tick, 5 px, then the meter. 0 is marked by its label in text, its tick in text.muted and its meter grid line in line.strong, never by a longer dash on the cap side.' },
+        { n: '3', t: 'The main bus misses the frame', seen: 'The main meters stop short of the channel meters and carry no scale, so a level cannot be read off them.', fix: 'Every strip in a row places its level block on the same Y0 and Y1. A main bus with no fader keeps its scale column and meters on that frame, and its fader column holds a dashed + Fader at the top.' },
+        { n: '4', t: 'Peak and RMS read as one fill', seen: 'With meters running each bar is one dull green from the bottom up: no bright RMS core, and the +1.1 dB over 0 shows no meter.hot zone.', fix: 'Two fills per bar, in this order: peak, meter.ok at 35% from Y1 to the peak (meter.hot at 35% from the 0 dB line to a peak above it); then RMS, solid meter.ok from Y1 to the RMS level, over the peak fill. Then the 2 px text hold line. A sustained tone shows a bright bar with a pale cap above it.' },
+        { n: '5', t: 'Grid lines over the level', seen: 'The scale\u2019s grid lines are drawn on top of the fill, so the bars read as segmented LEDs and the level edge blurs.', fix: 'Draw order inside a well: well fill and edge, grid lines, peak fill, RMS fill, hold line, then nothing over them. The grid shows only through the empty part of the well and the 35% peak zone; the solid RMS covers it.' },
+        { n: '6', t: 'Main bus meter width: correct', seen: 'Checked with meters running: the main\u2019s bars are about 1.4 times a channel\u2019s, as 14 against 10 should be.', fix: 'No change. (Withdrawn from the first list.)' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

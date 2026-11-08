@@ -9,6 +9,7 @@
     "StripDetails.dc.html": { "h": 980, "title": "Strip details — dense height, overflow, unresponsive insert", "w": 1440, "x": 0, "y": 4840 },
     "SamplerInstrument.dc.html": { "h": 1200, "title": "Sampler — Instrument view", "w": 1460, "x": 0, "y": 0, "page": "sampler" },
     "SamplerSlices.dc.html": { "h": 1200, "title": "Sampler — Slices view", "w": 1460, "x": 1540, "y": 0, "page": "sampler", "is_interactive": true },
+    "FaderConstruction.dc.html": { "h": 1420, "title": "Fader construction — frame, labels, main bus", "w": 1440, "x": 0, "y": 5940 },
     "Pads.dc.html": { "h": 1080, "title": "Pads with choke groups", "w": 1440, "x": 1520, "y": 3860, "is_interactive": true },
     "Palette.dc.html": { "h": 1380, "title": "Content palette — tracks, clips, choke groups", "w": 1440, "x": 0, "y": 0, "page": "palette" },
     "LightChrome.dc.html": { "h": 1360, "page": "light", "title": "Light — application chrome", "w": 1440, "x": 0, "y": 3480 },
@@ -30,7 +31,7 @@
     "t2": { "kind": "title1", "maxW": 2960, "page": "light", "text": "transit · light theme (draft 1)", "w": 240, "x": 0, "y": -300 }
   },
   "order": [
-    "Main.dc.html", "Decisions.dc.html", "Menus.dc.html", "Dialogs.dc.html", "Arrange.dc.html", "LoopColor.dc.html", "Hatch.dc.html", "Pads.dc.html", "StripDetails.dc.html", "SamplerInstrument.dc.html", "SamplerSlices.dc.html", "Palette.dc.html",
+    "Main.dc.html", "Decisions.dc.html", "Menus.dc.html", "Dialogs.dc.html", "Arrange.dc.html", "LoopColor.dc.html", "Hatch.dc.html", "Pads.dc.html", "StripDetails.dc.html", "SamplerInstrument.dc.html", "SamplerSlices.dc.html", "FaderConstruction.dc.html", "Palette.dc.html",
     "LightPalette.dc.html", "LightMacroOsc.dc.html", "LightDesignLanguage.dc.html", "LightCompressor.dc.html", "LightMixer.dc.html", "LightChrome.dc.html", "LightMod.dc.html"
   ],
   "pages": [ { "id": "chrome", "name": "Chrome & loop (dark)" }, { "id": "light", "name": "Light" }, { "id": "palette", "name": "Content palette" }, { "id": "sampler", "name": "Sampler views" } ],
