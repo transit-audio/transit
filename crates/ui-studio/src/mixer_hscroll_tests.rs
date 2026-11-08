@@ -112,20 +112,26 @@ fn the_aux_divider_sits_in_the_middle_of_its_gap_at_both_zooms() {
             frames(&mut app, &ctx, 4, &mut time);
             let last =
                 if scrolled { TrackId(app.engine.session().tracks.iter().rev().find(|t| t.kind == TrackKind::Audio).unwrap().id.0) } else { last };
+            // Fractional scroll offsets (a sweep) must neither move the divider off its pixel nor
+            // change its width: one physical pixel wide, so it does not flicker while scrolling.
+            let sweep: Vec<f32> = if scrolled { (0..8).map(|i| i as f32 * 0.13 + 0.01).collect() } else { vec![0.0] };
             if scrolled {
                 app.mixer.hscroll = f32::MAX;
                 frames(&mut app, &ctx, 4, &mut time);
-                // Fractional scroll offsets must not move the divider off its pixel.
-                app.mixer.hscroll -= 0.37;
-                frames(&mut app, &ctx, 4, &mut time);
             }
-            let gap = strip(&app, fx).rect[0] - strip(&app, last).rect[2];
-            assert_eq!(gap, 16.0, "the gap itself is unchanged");
-            let (l, r) = sides(&app, last, fx);
-            assert!((l - r).abs() <= 1.0 / ppp + 1e-3, "ppp {ppp} scrolled {scrolled}: {l} vs {r}");
-            let d = app.mixer.layout.fx_divider.unwrap();
-            for x in [d[0], d[2]] {
-                assert!((x * ppp - (x * ppp).round()).abs() < 1e-3, "edge {x} on a physical pixel at {ppp}");
+            let top = app.mixer.hscroll;
+            for off in sweep {
+                if scrolled {
+                    app.mixer.hscroll = top - off;
+                    frames(&mut app, &ctx, 3, &mut time);
+                }
+                let gap = strip(&app, fx).rect[0] - strip(&app, last).rect[2];
+                assert_eq!(gap, 16.0, "the gap itself is unchanged");
+                let (l, r) = sides(&app, last, fx);
+                assert!((l - r).abs() <= 1.0 / ppp + 1e-3, "ppp {ppp} offset {off}: {l} vs {r}");
+                let d = app.mixer.layout.fx_divider.unwrap();
+                assert!((d[2] - d[0] - 1.0 / ppp).abs() < 1e-4, "ppp {ppp} offset {off}: width {} is not one physical pixel", d[2] - d[0]);
+                assert!((d[0] * ppp - (d[0] * ppp).round()).abs() < 1e-3, "left edge {} on a physical pixel at {ppp}", d[0]);
             }
         }
     }
