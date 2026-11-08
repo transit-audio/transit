@@ -2,6 +2,12 @@
 
 use super::*;
 
+/// Who the host says it is to every plug-in (`clap_host`): the same name, vendor and URL the app's
+/// About box shows. Some plug-ins keep per-host settings keyed on the name.
+const HOST_NAME: &CStr = c"transit";
+const HOST_VENDOR: &CStr = c"transit contributors";
+const HOST_URL: &CStr = c"https://github.com/transit-audio/transit";
+
 // ---- loaded binaries -----------------------------------------------------------------------
 
 /// A plugin descriptor as reported by the factory.
@@ -149,9 +155,9 @@ impl Bundle {
         let host = Box::new(clap_host {
             clap_version: CLAP_VERSION,
             host_data: Arc::as_ptr(&state).cast_mut().cast::<c_void>(),
-            name: c"SoundCraft".as_ptr(),
-            vendor: c"SoundCraft contributors".as_ptr(),
-            url: c"https://github.com/storytold/soundcraft".as_ptr(),
+            name: HOST_NAME.as_ptr(),
+            vendor: HOST_VENDOR.as_ptr(),
+            url: HOST_URL.as_ptr(),
             version: c"0.1.0".as_ptr(),
             get_extension: Some(host_get_extension),
             request_restart: Some(host_request_restart),
@@ -224,5 +230,17 @@ impl Drop for Bundle {
             // to this bundle any more (they keep it alive), so no plugin code still runs.
             unsafe { deinit() };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_host_presents_itself_as_transit() {
+        assert_eq!(HOST_NAME, c"transit");
+        assert_eq!(HOST_VENDOR, c"transit contributors");
+        assert_eq!(HOST_URL, c"https://github.com/transit-audio/transit");
     }
 }

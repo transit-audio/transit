@@ -2,6 +2,10 @@
 
 use super::*;
 
+/// The name the host reports to every plug-in (`IHostApplication::getName`), as the CLAP host does.
+/// Some plug-ins keep per-host settings keyed on it.
+const HOST_NAME: &str = "transit";
+
 // ---- host-side COM objects -----------------------------------------------------------------
 
 /// The host context handed to `initialize` (`IHostApplication`) and to the controller
@@ -72,7 +76,7 @@ impl IHostApplicationTrait for HostContext {
         // SAFETY: the plugin passes a pointer to a writable String128 (or null, handled).
         match unsafe { name.as_mut() } {
             Some(n) => {
-                write_c16("SoundCraft", n);
+                write_c16(HOST_NAME, n);
                 sb::kResultOk
             }
             None => sb::kInvalidArgument,

@@ -568,8 +568,8 @@ mod tests {
     #[test]
     fn strings_are_bounded() {
         let mut b = [0u16; 4];
-        write_c16("SoundCraft", &mut b);
-        assert_eq!(read_c16(&b), "Sou");
+        write_c16("transit", &mut b);
+        assert_eq!(read_c16(&b), "tra");
         let full: Vec<u16> = "abcd".encode_utf16().collect();
         assert_eq!(read_c16(&full), "abcd");
         let c: Vec<c_char> = b"Fx|EQ\0junk".iter().map(|&x| x as c_char).collect();
@@ -658,7 +658,7 @@ mod tests {
             assert_eq!(h.getName(&mut name), sb::kResultOk);
             assert_eq!(h.restartComponent(sv::RestartFlags_::kLatencyChanged as i32), sb::kResultOk);
         }
-        assert_eq!(read_c16(&name), "SoundCraft");
+        assert_eq!(read_c16(&name), "transit");
         assert!(h.latency_changed.load(Ordering::Relaxed));
         assert!(!h.titles_changed.load(Ordering::Relaxed) && !h.values_changed.load(Ordering::Relaxed), "latency alone leaves both");
         // SAFETY: as above.

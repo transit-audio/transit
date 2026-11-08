@@ -139,3 +139,6 @@ A new issue is a new row; give it its own file only if the row cannot hold what 
   and settings with any timing issue (`../contributing/evidence/hardware-and-ci.md`).
 - Audio Devices: an ASIO driver other than the one that runs is not described until Apply opens
   it, so its rate and buffer lists are the standard choices marked "updates after Apply".
+- Since the build after v0.6.2, transit reports itself to plug-ins as "transit" (CLAP and VST3; it
+  said "SoundCraft" before). Plug-ins that keep settings per host see a new host once: a first-run
+  dialog or per-host defaults may come back.
