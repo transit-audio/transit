@@ -86,7 +86,7 @@ pub fn label(db: Option<f32>) -> String {
 /// `travel` points, top to bottom. Each mark is placed greedily in `fader.labelPriority` order
 /// (0, minus infinity, −12, −24, +6, −48, −6, −36) and skipped when its center would fall closer
 /// than `fader.labelMinGap` (13) to a mark already placed, so labels never collide on a short
-/// strip. A tick goes with each placed label only; the meter's grid lines stay at every mark.
+/// strip. A tick goes with each placed label only, and so does a meter grid line (Meter grid).
 pub fn placed_marks(travel: f32) -> Vec<Option<f32>> {
     let y = |m: Option<f32>| taper(m.unwrap_or(f32::NEG_INFINITY)) * travel;
     let mut placed: Vec<Option<f32>> = Vec::new();
@@ -141,6 +141,9 @@ pub struct FaderLayout {
     pub marks: Vec<(String, [f32; 4])>,
     /// The Channel variant's ticks, one per placed label, after it toward the meter (empty otherwise).
     pub ticks: Vec<[f32; 4]>,
+    /// The marks the Channel scale placed (its labels and ticks, [`placed_marks`]); the meter
+    /// beside it draws its grid lines at these (Meter grid). Empty for the other variants.
+    pub placed: Vec<Option<f32>>,
     /// Where the caller draws the meter (Channel only).
     pub meter: Option<[f32; 4]>,
     pub muted: bool,
@@ -232,6 +235,9 @@ pub fn snap_rows(p: &egui::Painter, y: f32, thickness: f32) -> (f32, f32) {
 /// The Channel variant's scale as painted: the placed labels and a tick with each.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct ChannelScale {
+    /// The marks placed for the travel ([`placed_marks`]), top to bottom: the set the ticks and the
+    /// meter's grid lines use.
+    pub placed: Vec<Option<f32>>,
     pub marks: Vec<(String, [f32; 4])>,
     #[serde(skip)]
     pub mark_inks: Vec<Color32>,
@@ -248,8 +254,8 @@ pub struct ChannelScale {
 pub fn paint_channel_scale(p: &egui::Painter, rect: Rect) -> ChannelScale {
     let t = &TOKENS;
     let track = travel(Variant::Channel, rect).0;
-    let mut out = ChannelScale::default();
-    for m in placed_marks(track.height()) {
+    let mut out = ChannelScale { placed: placed_marks(track.height()), ..ChannelScale::default() };
+    for m in out.placed.clone() {
         let y = track.min.y + taper(m.unwrap_or(f32::NEG_INFINITY)) * track.height();
         let ink = if m == Some(0.0) { t.text } else { t.text_faint };
         let (top, bottom) = snap_rows(p, y, 1.0);
@@ -308,9 +314,9 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
     }
     p.rect_filled(notch, 0.0, t.ink_arrow);
     // Scale labels (Channel) or ticks (Compact) at the taper's marks.
-    let (mut marks, mut mark_inks, mut ticks, mut tick_inks) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut placed, mut marks, mut mark_inks, mut ticks, mut tick_inks) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if variant == Variant::Channel {
-        ChannelScale { marks, mark_inks, ticks, tick_inks } = paint_channel_scale(p, rect);
+        ChannelScale { placed, marks, mark_inks, ticks, tick_inks } = paint_channel_scale(p, rect);
     } else if !horizontal {
         for m in spec::SCALE_LABELS {
             let y = track.min.y + taper(m.unwrap_or(f32::NEG_INFINITY)) * track.height();
@@ -335,6 +341,7 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
         center_line: r4(center_line),
         marks,
         ticks,
+        placed,
         meter,
         muted,
         fill_color,

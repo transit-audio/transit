@@ -473,7 +473,7 @@ fn fader_and_meter(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Re
     // The meter, in the fader's meter slot.
     let d = app.meters.get(&id).copied().unwrap_or_default();
     let slot = lay.meter.map_or(Rect::NOTHING, rect);
-    let meter = strip_meter(p, slot.min.x, travel, &d, main);
+    let meter = strip_meter(p, slot.min.x, travel, &lay.placed, &d, main);
     let wells = meter_bounds(&meter);
     let resp = ui.interact(wells.intersect(clip), ui.id().with(("meter", id.0)), Sense::click());
     crate::help::hover(ui, &resp, crate::help::Id::MixerStripMeter);

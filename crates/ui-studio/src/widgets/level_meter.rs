@@ -241,7 +241,8 @@ pub struct ChannelMeterLayout {
     /// Each channel's latch, and whether either is lit.
     pub clips: Vec<bool>,
     pub clip: bool,
-    /// The grid lines across the wells, one per taper mark, on whole physical pixels.
+    /// The grid lines across the wells, one per placed label (Meter grid: the marks the fader's
+    /// scale places for this travel, the set its ticks use), on whole physical pixels.
     pub grid: Vec<[f32; 4]>,
     /// The y of the 0 dBFS line.
     pub reference_y: f32,
@@ -252,8 +253,8 @@ pub struct ChannelMeterLayout {
     pub well_fill: egui::Color32,
     #[serde(skip)]
     pub well_edge: egui::Color32,
-    /// The grid lines' ink (`line`), the 0 dB grid line's (`line.strong`, `fader.zeroGridLine`)
-    /// and the hold line's (`text`).
+    /// The grid lines' ink (`line.inset`, `fader.meterGrid`), the 0 dB grid line's (`line.strong`,
+    /// `fader.zeroGridLine`) and the hold line's (`text`).
     #[serde(skip)]
     pub grid_color: egui::Color32,
     #[serde(skip)]
@@ -280,12 +281,15 @@ pub const CHANNEL_CLIP_RADIUS: f32 = 1.0;
 
 /// The vertical channel meter (Fader > Meter, the mixer's stereo meter): one `surface.inset` well
 /// per channel, `bar` wide with the meter gap between, spanning `travel` (the fader's track, so
-/// the bar shares the taper and every mark lines up); grid lines in `line` at the scale's marks;
+/// the bar shares the taper and every mark lines up); grid lines only at `marks`, the labels the
+/// fader's scale places for this travel (Meter grid; the caller passes the set its ticks use, from
+/// [`fader::FaderLayout::placed`] or [`fader::ChannelScale::placed`]), 0 dB in `line.strong` and the
+/// rest in `line.inset`;
 /// the peak fill in `meter.ok` at 35 percent (`meter.hot` at 35 percent above 0 dBFS), the RMS fill solid on top (`meter.hot` only above
 /// 0 dBFS), a 2 px `text` peak-hold line; above each well, in the fader's top inset, a 4 px clip
 /// cell, `meter.hot` while that channel is latched and `line` otherwise. Paints only: the caller owns
 /// the clicks and steps the readings with [`meter_step`].
-pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels: &[Channel]) -> ChannelMeterLayout {
+pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, marks: &[Option<f32>], channels: &[Channel]) -> ChannelMeterLayout {
     let t = &TOKENS;
     let mut out = ChannelMeterLayout {
         peak_color: t.meter_ok.gamma_multiply(spec::METER_PEAK_ALPHA),
@@ -293,7 +297,7 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         well_radius: CHANNEL_WELL_RADIUS,
         well_fill: t.surface_inset,
         well_edge: t.line_inset,
-        grid_color: t.line,
+        grid_color: t.line_inset,
         zero_grid_color: t.line_strong,
         hold_color: t.text,
         ..Default::default()
@@ -310,10 +314,10 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         // lines, the peak fill, the solid RMS fill, the hold line; nothing over the level.
         p.rect_filled(well, rad, t.surface_inset);
         p.rect_stroke(well, rad, Stroke::new(1.0, t.line_inset), StrokeKind::Inside);
-        for m in spec::SCALE_LABELS {
+        for &m in marks {
             let (top, bottom) = fader::snap_rows(p, y_of(m.unwrap_or(f32::NEG_INFINITY), well), 1.0);
             let line = Rect::from_min_max(pos2(well.min.x, top), pos2(well.max.x, bottom));
-            p.rect_filled(line, 0.0, if m == Some(0.0) { t.line_strong } else { t.line });
+            p.rect_filled(line, 0.0, if m == Some(0.0) { out.zero_grid_color } else { out.grid_color });
             if i == 0 {
                 out.grid
                     .push(r4(Rect::from_min_max(pos2(x, top), pos2(x + channels.len() as f32 * (bar + spec::METER_GAP) - spec::METER_GAP, bottom))));

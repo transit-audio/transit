@@ -126,7 +126,7 @@ fn the_channel_meter_draws_a_well_per_channel_on_the_taper() {
         Channel { peak_db: -6.0, rms_db: None, hold_db: Some(-3.0), clip: false },
         Channel { peak_db: -24.0, rms_db: None, hold_db: None, clip: false },
     ];
-    let l = rig.idle(|ui| paint_channel(ui.painter(), 100.0, travel, 10.0, &peaks));
+    let l = rig.idle(|ui| paint_channel(ui.painter(), 100.0, travel, 10.0, &crate::tokens::fader::SCALE_LABELS, &peaks));
     assert_eq!(l.wells.len(), 2);
     assert_eq!(l.wells[0], [100.0, 40.0, 110.0, 240.0], "the first well spans the travel");
     assert_eq!(l.wells[1][0], 113.0, "3 px between wells");
@@ -138,9 +138,9 @@ fn the_channel_meter_draws_a_well_per_channel_on_the_taper() {
     assert!((mid(l.holds[0].unwrap()).y - y(-3.0)).abs() < 0.02 && l.holds[1].is_none());
     assert_eq!(l.clip_cells[0], [100.0, 30.0, 110.0, 34.0], "4 px, 6 above the well (the Frame)");
     assert_eq!((l.clip, l.clip_colors.clone()), (false, vec![DARK.line, DARK.line]));
-    assert_eq!(l.grid.len(), 8, "a line at each scale mark");
+    assert_eq!(l.grid.len(), 8, "a line at each mark passed (all eight placed at travel 200)");
     // The well, its edge, grid and hold inks and the board's corner radius.
-    assert_eq!((l.well_fill, l.well_edge, l.grid_color, l.hold_color), (DARK.surface_inset, DARK.line_inset, DARK.line, DARK.text));
+    assert_eq!((l.well_fill, l.well_edge, l.grid_color, l.hold_color), (DARK.surface_inset, DARK.line_inset, DARK.line_inset, DARK.text));
     assert_eq!(l.well_radius, 1.5);
     assert_eq!(l.zero_grid_color, DARK.line_strong, "the 0 dB grid line in `line.strong` (`fader.zeroGridLine`)");
     assert!((size(l.holds[0].unwrap()).1 - 2.0).abs() < 0.01, "a 2 px hold line");
@@ -151,7 +151,7 @@ fn the_channel_meter_draws_a_well_per_channel_on_the_taper() {
         Channel { peak_db: 3.0, rms_db: Some(2.0), hold_db: None, clip: true },
         Channel { peak_db: -12.0, rms_db: Some(-18.0), hold_db: None, clip: false },
     ];
-    let l = rig.idle(|ui| paint_channel(ui.painter(), 100.0, travel, 10.0, &loud));
+    let l = rig.idle(|ui| paint_channel(ui.painter(), 100.0, travel, 10.0, &crate::tokens::fader::SCALE_LABELS, &loud));
     assert!((l.rms[1].unwrap()[1] - y(-18.0)).abs() < 0.02 && l.over[1].is_none());
     let over = l.over[0].expect("the part above 0 dBFS");
     assert!((over[3] - y(0.0)).abs() < 0.02 && (over[1] - y(2.0)).abs() < 0.02);
@@ -172,7 +172,7 @@ fn the_channel_peak_fill_is_hot_only_above_zero_dbfs() {
     let travel = egui::Rect::from_min_max(egui::pos2(40.0, 40.0), egui::pos2(60.0, 240.0));
     let y = |db: f32| 40.0 + fader::taper(db) * 200.0;
     let ch = |peak_db| Channel { peak_db, rms_db: None, hold_db: None, clip: false };
-    let l = rig.idle(|ui| paint_channel(ui.painter(), 100.0, travel, 10.0, &[ch(3.0), ch(-3.0), ch(0.0)]));
+    let l = rig.idle(|ui| paint_channel(ui.painter(), 100.0, travel, 10.0, &crate::tokens::fader::SCALE_LABELS, &[ch(3.0), ch(-3.0), ch(0.0)]));
     let hot = l.peak_over[0].expect("hot between 0 and +3");
     assert!((hot[1] - y(3.0)).abs() < 0.02 && (hot[3] - y(0.0)).abs() < 0.02, "hot spans +3 to 0");
     assert!((l.peaks[0].unwrap()[1] - y(0.0)).abs() < 0.02, "the ok fill stops at the 0 dBFS line");
@@ -191,7 +191,7 @@ fn layer(shape: &egui::Shape, well: egui::Rect) -> Option<&'static str> {
     let hot = DARK.meter_hot.gamma_multiply(crate::tokens::fader::METER_PEAK_ALPHA);
     if (r.stroke.color == DARK.line_inset && r.stroke.width > 0.0) || r.fill == DARK.surface_inset {
         Some("well")
-    } else if (r.fill == DARK.line || r.fill == DARK.line_strong) && r.rect.height() <= 1.01 {
+    } else if (r.fill == DARK.line_inset || r.fill == DARK.line_strong) && r.rect.height() <= 1.01 {
         Some("grid")
     } else if r.fill == peak || r.fill == hot {
         Some("peak")
@@ -216,7 +216,7 @@ fn paint_one(
     ch: super::level_meter::Channel,
 ) -> (super::level_meter::ChannelMeterLayout, egui::Rect, Vec<egui::epaint::ClippedShape>) {
     let travel = egui::Rect::from_min_max(egui::pos2(40.0, 40.0), egui::pos2(60.0, 240.0));
-    let (l, shapes) = rig.shapes(|ui| super::level_meter::paint_channel(ui.painter(), 100.0, travel, 10.0, &[ch]));
+    let (l, shapes) = rig.shapes(|ui| super::level_meter::paint_channel(ui.painter(), 100.0, travel, 10.0, &crate::tokens::fader::SCALE_LABELS, &[ch]));
     let well = egui::Rect::from_min_max(egui::pos2(l.wells[0][0], l.wells[0][1]), egui::pos2(l.wells[0][2], l.wells[0][3]));
     (l, well, shapes)
 }
@@ -271,4 +271,57 @@ fn the_channel_meter_paints_well_grid_peak_rms_hold_in_that_order() {
     let mut edge_last = layers.clone();
     edge_last.push("well");
     assert!(!in_draw_order(&edge_last), "the well's edge over the level is out of order");
+}
+
+/// Meter grid (Fader > Meter grid): the meter draws a grid line only where the scale beside it
+/// placed a label, on the same physical pixel row as that label's tick, at the docked strip's
+/// travel (80, four lines) and taller ones, at 1.0 and 1.5; 0 dB in `line.strong`, the rest in
+/// `line.inset`.
+#[test]
+fn the_meter_grid_rows_are_the_faders_tick_rows() {
+    use super::level_meter::{Channel, paint_channel};
+    for ppp in [1.0f32, 1.5] {
+        let mut rig = Rig::new();
+        rig.ctx.set_pixels_per_point(ppp);
+        for travel in [80.0f32, 100.0, 200.0] {
+            let (l, m, shapes) = {
+                let ((l, m), shapes) = rig.shapes(|ui| {
+                    let l = fader::show(ui, egui::Id::new("f"), fader::Variant::Channel, travel + 20.0, 0.0, false).layout;
+                    let track = egui::Rect::from_min_max(egui::pos2(l.track[0], l.track[1]), egui::pos2(l.track[2], l.track[3]));
+                    let ch = Channel { peak_db: f32::NEG_INFINITY, rms_db: None, hold_db: None, clip: false };
+                    let m = paint_channel(ui.painter(), l.meter.unwrap()[0], track, crate::tokens::fader::METER_BAR, &l.placed, &[ch, ch]);
+                    (l, m)
+                });
+                (l, m, shapes)
+            };
+            let what = format!("{ppp}x travel {travel}");
+            let rows = |r: &[f32; 4]| [(r[1] * ppp).round() as i32, (r[3] * ppp).round() as i32];
+            let grid: Vec<_> = m.grid.iter().map(rows).collect();
+            let ticks: Vec<_> = l.ticks.iter().map(rows).collect();
+            assert_eq!(grid, ticks, "{what}: one grid line per tick, on its row");
+            assert_eq!(l.placed, fader::placed_marks(travel), "{what}");
+            if travel == 80.0 {
+                assert_eq!(grid.len(), 4, "{what}: 0, −12, −24, −∞ on the docked strip");
+            }
+            // The inks as painted: one `line.strong` line (0 dB), the rest `line.inset`.
+            let well = egui::Rect::from_min_max(egui::pos2(m.wells[0][0], m.wells[0][1]), egui::pos2(m.wells[0][2], m.wells[0][3]));
+            let inks: Vec<egui::Color32> = shapes
+                .iter()
+                .filter(|s| layer(&s.shape, well) == Some("grid"))
+                .filter_map(|s| if let egui::Shape::Rect(r) = &s.shape { Some(r.fill) } else { None })
+                .collect();
+            assert_eq!(inks.len(), grid.len(), "{what}: {inks:?}");
+            assert_eq!(inks.iter().filter(|c| **c == DARK.line_strong).count(), 1, "{what}: the 0 dB line");
+            assert!(inks.iter().all(|c| *c == DARK.line_strong || *c == DARK.line_inset), "{what}: never `line`");
+            // Negative control: the old grid (every mark) fails the tick equality where labels thin.
+            if travel <= 100.0 {
+                let old = rig.idle(|ui| {
+                    let track = egui::Rect::from_min_max(egui::pos2(l.track[0], l.track[1]), egui::pos2(l.track[2], l.track[3]));
+                    let ch = Channel { peak_db: f32::NEG_INFINITY, rms_db: None, hold_db: None, clip: false };
+                    paint_channel(ui.painter(), l.meter.unwrap()[0], track, 10.0, &crate::tokens::fader::SCALE_LABELS, &[ch])
+                });
+                assert_ne!(old.grid.iter().map(rows).collect::<Vec<_>>(), ticks, "{what}: the every-mark grid is a ladder");
+            }
+        }
+    }
 }

@@ -364,6 +364,10 @@ fn every_strip_draws_the_scale_ticks_after_its_labels_in_both_variants() {
             assert!(t[0] > label[2] && t[2] < well[0], "full {full}: {text}: between its label and the meter: {t:?}");
             assert_eq!((t[0] - x0, t[2] - x0), (63.0, 67.0), "full {full}: {text}: x 63 to 67");
         }
+        // Meter grid: a grid line on each tick's row and nowhere else.
+        let grid: Vec<[f32; 2]> = s.meter_layout.as_ref().unwrap().grid.iter().map(|g| [g[1], g[3]]).collect();
+        let tick_rows: Vec<[f32; 2]> = f.ticks.iter().map(|t| [t[1], t[3]]).collect();
+        assert_eq!(grid, tick_rows, "full {full}: the meter's grid rows are the tick rows");
         let zero = f.marks.iter().position(|(t, _)| t == "0").unwrap();
         assert_eq!(f.tick_inks[zero], DARK.text_muted, "the 0 dB tick");
         // Negative control: every other tick is `line.strong`, never the 0 dB ink.

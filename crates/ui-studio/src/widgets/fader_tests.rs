@@ -210,7 +210,7 @@ fn the_board_sections_a_and_b_as_rects() {
                 let l = fader::show(ui, egui::Id::new("f"), Variant::Channel, travel + 20.0, 0.0, false).layout;
                 let track = egui::Rect::from_min_max(egui::pos2(l.track[0], l.track[1]), egui::pos2(l.track[2], l.track[3]));
                 let ch = Channel { peak_db: -3.0, rms_db: None, hold_db: Some(-2.0), clip: false };
-                let m = paint_channel(ui.painter(), l.meter.unwrap()[0], track, crate::tokens::fader::METER_BAR, &[ch, ch]);
+                let m = paint_channel(ui.painter(), l.meter.unwrap()[0], track, crate::tokens::fader::METER_BAR, &l.placed, &[ch, ch]);
                 (l, m)
             });
             let (x0, y0) = (l.rect[0], l.rect[1]);

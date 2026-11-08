@@ -492,6 +492,10 @@ fn the_main_bus_shares_the_channels_frame() {
                 };
                 let m_scale: Vec<(String, f32)> = m_marks.iter().map(|(t, r)| (t.clone(), (r[1] + r[3]) / 2.0)).collect();
                 assert_eq!(ch_scale, m_scale, "{what}: one scale across the row");
+                // Meter grid: the main bus's grid rows are its scale's tick rows.
+                let m_ticks = m.fader_layout.as_ref().map(|f| f.ticks.clone()).or_else(|| m.main_scale.as_ref().map(|s| s.ticks.clone())).unwrap();
+                let rows = |v: &[[f32; 4]]| v.iter().map(|r| [r[1], r[3]]).collect::<Vec<_>>();
+                assert_eq!(rows(&m.meter_layout.as_ref().unwrap().grid), rows(&m_ticks), "{what}: the main bus's grid at its placed labels");
                 if !master {
                     let add = m.add_fader;
                     let x0 = m.meter_layout.as_ref().unwrap().wells[0][0] - 72.0;

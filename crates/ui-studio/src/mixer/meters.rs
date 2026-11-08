@@ -2,12 +2,14 @@ use super::*;
 
 /// A strip's stereo meter (Fader > Meter) at `x`, spanning the fader's `travel`: the kit's
 /// vertical channel meter fed with the strip's fall-off reading, the engine's RMS per channel (the
-/// solid `meter.ok` layer over the 35 percent peak, #395), peak hold and clip latch. The main bus
-/// has the wider bars.
+/// solid `meter.ok` layer over the 35 percent peak, #395), peak hold and clip latch, its grid
+/// lines at `marks` (the scale's placed labels beside it, Meter grid). The main bus has the wider
+/// bars.
 pub(super) fn strip_meter(
     p: &egui::Painter,
     x: f32,
     travel: Rect,
+    marks: &[Option<f32>],
     d: &crate::MeterDisplay,
     main: bool,
 ) -> crate::widgets::level_meter::ChannelMeterLayout {
@@ -16,7 +18,7 @@ pub(super) fn strip_meter(
     let channels =
         [0, 1].map(|c| Channel { peak_db: db(d.falloff[c]), rms_db: Some(db(d.rms[c])), hold_db: Some(db(d.hold[c])), clip: d.clip_ch[c] });
     let bar = if main { crate::tokens::fader::METER_BAR_MAIN } else { crate::tokens::fader::METER_BAR };
-    paint_channel(p, x, travel, bar, &channels)
+    paint_channel(p, x, travel, bar, marks, &channels)
 }
 
 /// The rect around a channel meter's wells and clip cells (what a click on the meter hits).

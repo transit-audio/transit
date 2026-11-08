@@ -257,7 +257,7 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLay
     let scale = kit_fader::paint_channel_scale(&p, a.fader);
     let x = a.fader.min.x + kit_fader::CHANNEL_METER_X;
     let d = app.main_meter;
-    let meter = strip_meter(&p, x, travel, &d, true);
+    let meter = strip_meter(&p, x, travel, &scale.placed, &d, true);
     let column = kit_fader::COLUMN_FADER_CAP;
     let add_fader = Rect::from_min_size(pos2(a.fader.min.x + column[0], travel.min.y), vec2(column[1] - column[0], ADD_FADER_H));
     let resp = ui.interact(add_fader, ui.id().with("add_master_fader"), Sense::click());
