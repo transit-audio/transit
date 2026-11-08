@@ -341,8 +341,7 @@ What comes next, by milestone: [docs/roadmap.md](docs/roadmap.md).
 transit began in October 2026 as a fork of [SoundCraft](https://github.com/storytold/soundcraft) by
 storytold, an open-source Rust digital audio workstation. transit has its own audio engine (native
 WASAPI and native ASIO backends) and its own product direction; the plug-in hosts and a number of
-crates were inherited (renamed from `soundcraft-*` to `transit-*` in #37). Engine fixes that
-apply upstream may be offered back.
+crates were inherited (renamed from `soundcraft-*` to `transit-*` in #37).
 
 ## License
 
