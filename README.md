@@ -279,7 +279,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 
 ## Status
 
-Pre-alpha. The product is now called transit, and its settings folder moved from `transitDAW` to `transit` (your settings are moved once on first launch). Windows is tested daily and needs Windows 10 version 1607 or later; macOS and Linux build but are untested (their packaging ids are `dev.derekmwright.transit`). The packaging scripts under `packaging/` build the transit app on every platform ([docs/building.md](docs/building.md#packaging)). The Windows release is one download (zip and MSI) with native WASAPI and native ASIO.
+[Alpha](docs/roadmap.md#beta). The product is now called transit, and its settings folder moved from `transitDAW` to `transit` (your settings are moved once on first launch). Windows is tested daily and needs Windows 10 version 1607 or later; macOS and Linux build but are untested (their packaging ids are `dev.derekmwright.transit`). The packaging scripts under `packaging/` build the transit app on every platform ([docs/building.md](docs/building.md#packaging)). The Windows release is one download (zip and MSI) with native WASAPI and native ASIO.
 Expect rough edges and breaking changes to the session format. Back up anything you care about.
 
 ## Build
@@ -329,7 +329,7 @@ Render settings are read once at startup; restart transit after changing them.
 
 ## Status and known issues
 
-- Pre-alpha; the session format and UI change freely.
+- Alpha; the session format and UI change freely.
 - A heavy plug-in can still block the UI for the duration of its single create call.
 - Approximate record alignment on devices whose clock never validates can differ by up to one input block (K14); Freeze renders a fixed 2 second tail.
 - The Windows release is one download (zip and MSI) with native WASAPI and native ASIO. It is unsigned: SmartScreen shows "More info", then "Run anyway".

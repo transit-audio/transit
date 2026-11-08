@@ -130,7 +130,7 @@ jobs:
           "@
           $bench | Set-Content -Encoding utf8 "$d/BENCH-README.txt"
           @"
-          transit for Windows (pre-alpha)
+          transit for Windows (alpha)
 
           - Audio: native WASAPI and native ASIO are included, plus the standard WASAPI host.
           - Install: run the .msi (the installer, with the Start Menu shortcut and .transit/.transitz file associations). This zip is the portable form: unzip and run transit.exe.
@@ -197,7 +197,7 @@ jobs:
           mkdir "$d"
           cp target/release/transit target/release/audio-bench LICENSE-MIT LICENSE-APACHE NOTICE "$d"
           if [ "$RUNNER_OS" = "macOS" ]; then
-            printf '%s\n' 'transit for macOS (pre-alpha, Apple silicon)' '' \
+            printf '%s\n' 'transit for macOS (alpha, Apple silicon)' '' \
               'The matching .dmg release asset holds transit.app: open it and drag transit to Applications.' \
               'This tarball holds the bare binary and the audio-bench harness.' '' \
               'Unsigned (ad-hoc signed only) unless the release notes say notarized. If macOS refuses to open it, run:' \
@@ -273,6 +273,8 @@ jobs:
           merge-multiple: true
       # The release body: docs/releases/<tag>.md from the repository when it exists, else the generic
       # text below. Either way it lands in $RUNNER_TEMP/release-body.md and the step after uses it.
+      # While transit is alpha, a fixed alpha block is prepended to either body, so no release ships
+      # without it; the HTML comments around it let the Discord step skip it.
       - name: Release body
         id: body
         shell: bash
@@ -299,6 +301,15 @@ jobs:
           EOF
             echo "notes=false" >> "$GITHUB_OUTPUT"
           fi
+          cat - "$out" > "$out.new" <<'EOF'
+          <!-- alpha -->
+          ## Alpha software
+
+          transit is alpha: it changes every week, and some things are rough or missing. A release can change or reset your settings, the plug-in caches and the session format, so back up your sessions before upgrading. Tell us what breaks on the [Discord](https://discord.gg/7PPUBZqA66) or in the [testing thread](https://github.com/transit-audio/transit/issues/49).
+          <!-- /alpha -->
+
+          EOF
+          mv "$out.new" "$out"
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
@@ -322,7 +333,10 @@ jobs:
         run: |
           if [ -z "$DISCORD_WEBHOOK_URL" ]; then echo "no webhook, skipping"; exit 0; fi
           url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
-          body="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body | tr -d '\r' | awk 'tolower($0) ~ /checksum/ {exit} {print}')"
+          # The alpha block the release body starts with is left out here; one alpha sentence leads instead.
+          body="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body | tr -d '\r' \
+            | awk '/<!-- alpha -->/ {skip = 1} !skip {print} /<!-- \/alpha -->/ {skip = 0}' \
+            | awk 'tolower($0) ~ /checksum/ {exit} {print}')"
           # What is new: the top-level bullets of the "## Highlights" section (split on lines, since
           # the bullets may have no blank lines between them), whole bullets up to 1800 characters.
           # Sub-bullets and wrapped continuation lines are dropped. Without a Highlights section,
@@ -334,7 +348,8 @@ jobs:
           if [ -z "$desc" ]; then
             desc="$(printf '%s\n' "$body" | awk -v max=1800 'BEGIN { RS = ""; ORS = "" } NR == 1 { print (length($0) > max ? substr($0, 1, max) "…" : $0); exit }')"
           fi
-          desc="${desc}"$'\n\n'"Full notes and downloads: ${url}"
+          alpha="transit is alpha software: a release can change or reset your settings, the plug-in caches and the session format, so back up your sessions before upgrading."
+          desc="${alpha}"$'\n\n'"${desc}"$'\n\n'"Full notes and downloads: ${url}"
           # Minor releases (vX.Y.0) ping @everyone; patch releases and prereleases never do. Discord has no
           # webhook permission for mentions: allowed_mentions in the payload is the only control, so it is
           # always explicit and a stray "@everyone" in the notes cannot ping.
