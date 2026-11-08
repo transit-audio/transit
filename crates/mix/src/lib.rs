@@ -98,6 +98,9 @@ mod key;
 mod low_latency;
 pub use low_latency::{SlotLatencies, low_latency_bypass, low_latency_frames};
 mod matrix;
+mod meter_rms;
+pub use meter_rms::RMS_WINDOW_MS;
+use meter_rms::RmsWindow;
 mod midi;
 mod midi_fx;
 mod note_delay;
@@ -253,18 +256,26 @@ fn clip_fx_modules(s: &Session, clip: u64) -> (bool, bool) {
     clip_fx_params(s, clip).map_or((false, false), |p| (p.clone().any(|(k, _)| k.starts_with("eq.")), p.clone().any(|(k, _)| k.starts_with("comp."))))
 }
 
-/// Peak meter values for one strip (linear, per channel, max over the last block).
+/// Meter values for one strip (linear, per channel): the peak, max over the last block, and the
+/// RMS over the last [`RMS_WINDOW_MS`], measured from the same blocks.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StripMeter {
     /// First two channels (mono strips repeat channel 0), for stereo meters.
     pub peak: [f32; 2],
     /// Every channel of the strip (or of the main mix).
     pub peaks: Vec<f32>,
+    /// RMS of the first two channels (mono strips repeat channel 0), like `peak`.
+    pub rms: [f32; 2],
+    /// RMS of every channel, like `peaks`: the running mean square over [`RMS_WINDOW_MS`] as of
+    /// the last block, its square root taken (the reader converts it to dBFS).
+    pub rms_channels: Vec<f32>,
     /// Gain reduction of the first dynamics insert, dB.
     pub gain_reduction_db: f32,
     pub plugin_failures: PluginFailures,
     /// Render-clock origin of the host block whose sub-block peaks are being accumulated.
     host_frame: Option<u64>,
+    /// Each channel's running mean square, prepared with the plan (empty in a reader's copy).
+    rms_window: Vec<RmsWindow>,
 }
 
 /// How often a strip's plugins were taken out of the signal path for putting out NaN or infinity.
@@ -285,6 +296,25 @@ impl PluginFailures {
 }
 
 impl StripMeter {
+    /// Prepared storage per channel: the peak, the RMS and the running mean square.
+    pub(crate) const CHANNEL_BYTES: usize = 2 * size_of::<f32>() + size_of::<RmsWindow>();
+
+    /// A meter of `ch` channels for a plan at `sample_rate`, all storage prepared.
+    pub(crate) fn prepared(ch: usize, sample_rate: u32) -> Self {
+        StripMeter { peaks: vec![0.0; ch], rms_channels: vec![0.0; ch], rms_window: vec![RmsWindow::new(sample_rate); ch], ..StripMeter::default() }
+    }
+
+    /// Zeroes every reading in place, the RMS windows included (fixed storage, nothing freed).
+    fn zero(&mut self) {
+        self.peak = [0.0; 2];
+        self.peaks.fill(0.0);
+        self.rms = [0.0; 2];
+        self.rms_channels.fill(0.0);
+        self.rms_window.iter_mut().for_each(RmsWindow::reset);
+        self.gain_reduction_db = 0.0;
+        self.plugin_failures = PluginFailures::default();
+    }
+
     fn measure(&mut self, bufs: &[Vec<f32>], frames: usize, gr: f32, host_frame: u64) {
         let append = self.host_frame == Some(host_frame);
         self.host_frame = Some(host_frame);
@@ -292,8 +322,15 @@ impl StripMeter {
             let value = peak(b.get(..frames).unwrap_or(&[]));
             *p = if append { p.max(value) } else { value };
         }
+        // Every sub-block is new frames, so each one goes into the window (no append rule).
+        for ((r, w), b) in self.rms_channels.iter_mut().zip(self.rms_window.iter_mut()).zip(bufs.iter()) {
+            w.push(b.get(..frames).unwrap_or(&[]));
+            *r = w.rms();
+        }
         let last = self.peaks.len().saturating_sub(1);
         self.peak = [self.peaks.first().copied().unwrap_or(0.0), self.peaks.get(1.min(last)).copied().unwrap_or(0.0)];
+        let last = self.rms_channels.len().saturating_sub(1);
+        self.rms = [self.rms_channels.first().copied().unwrap_or(0.0), self.rms_channels.get(1.min(last)).copied().unwrap_or(0.0)];
         self.gain_reduction_db = if append { self.gain_reduction_db.max(gr) } else { gr };
     }
 }
@@ -966,10 +1003,7 @@ impl MixEngine {
         // Meters are fixed storage, zeroed in place.
         if let Some(p) = self.plan.as_deref_mut() {
             for m in p.tables.strips.iter_mut().map(|s| &mut s.meter).chain(std::iter::once(&mut p.tables.main_meter)) {
-                m.peak = [0.0; 2];
-                m.peaks.fill(0.0);
-                m.gain_reduction_db = 0.0;
-                m.plugin_failures = PluginFailures::default();
+                m.zero();
             }
         }
     }

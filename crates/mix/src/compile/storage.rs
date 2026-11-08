@@ -25,7 +25,7 @@ pub(crate) fn strip_bytes(ch: usize, block: usize, cap: usize, inserts: usize, c
     let delays = if cap == 0 { 0 } else { mul(mul(mul(ch, add(cap, block)?)?, 2)?, f)? };
     let slots = mul(inserts, size_of::<Option<PluginSlot>>() + size_of::<bool>())?;
     let entries = mul(clips, size_of::<(u64, ClipFx)>())?;
-    let meter = mul(ch, f)?;
+    let meter = mul(ch, StripMeter::CHANNEL_BYTES)?;
     [scratch, delays, slots, entries, meter, size_of::<Strip>()].into_iter().try_fold(bufs, add)
 }
 
@@ -93,7 +93,7 @@ pub(super) fn measure(
         bytes = add(bytes, size_of::<(BusId, BusBuf)>())?;
     }
     bytes = add(bytes, mul(mul(main_ch, block)?, size_of::<f32>())?)?;
-    bytes = add(bytes, mul(main_ch, size_of::<f32>())?)?;
+    bytes = add(bytes, mul(main_ch, StripMeter::CHANNEL_BYTES)?)?;
     bytes = add(bytes, mul(cells, size_of::<CellLoc>() + 2 * size_of::<bool>())?)?;
     bytes = add(bytes, mul(s.tracks.len(), size_of::<(TrackId, u16)>() + size_of::<BusId>())?)?;
     // Conservative tail table/run and edge storage bound, including deduplication scratch.

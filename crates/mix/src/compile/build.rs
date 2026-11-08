@@ -129,7 +129,7 @@ impl PlanCompiler {
             st.track = u16::try_from(*ti).unwrap_or(u16::MAX);
             st.id = t.id;
             st.layout = *layout;
-            st.meter = StripMeter { peaks: vec![0.0; ch], ..StripMeter::default() };
+            st.meter = StripMeter::prepared(ch, self.target.sample_rate);
             st.clip_fx = ClipFxTable(clips.iter().map(|(c, _, _)| (*c, ClipFx::new(sr, ch, false))).collect());
             let generation = match self.active.movable_strip(t.id, ch16, *layout).filter(|_| mode == CompileMode::Update) {
                 Some((from, old)) => {
@@ -239,7 +239,7 @@ impl PlanCompiler {
         tables.main = vec![vec![0.0; block]; main_ch];
         tables.sinks = desc.sinks.iter().map(|sp| Sink::new(sp, block)).collect();
         tables.io = Arc::clone(&self.io);
-        tables.main_meter = StripMeter { peaks: vec![0.0; main_ch], ..StripMeter::default() };
+        tables.main_meter = StripMeter::prepared(main_ch, self.target.sample_rate);
         shadow.cells = cells.len();
         tables.cells = cells.into_boxed_slice();
         shadow.tracks = tables.tracks.clone();
