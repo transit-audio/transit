@@ -67,22 +67,23 @@ impl Bundle {
     /// (#348): written over in place, the cached code is no longer what the file holds; renamed
     /// over, the library loader hands back the old code for the same path while it stays loaded.
     pub fn load(path: &Path) -> Result<Arc<Bundle>, ClapError> {
-        let cached = loaded().lock().unwrap_or_else(PoisonError::into_inner).get(path).cloned();
-        if let Some(b) = cached {
-            // Read outside the map lock: a stalled file system must not hold up every other load.
-            if b.identity != identity(&b.exe) {
-                let m = "changed on disk or was removed since transit loaded it; restart transit to load it again";
-                return Err(ClapError::Load(path.display().to_string(), m.into()));
+        let b = {
+            let mut map = loaded().lock().unwrap_or_else(PoisonError::into_inner);
+            match map.get(path) {
+                Some(b) => b.clone(),
+                None => {
+                    let b = Arc::new(Bundle::open(path)?);
+                    map.insert(path.to_path_buf(), b.clone());
+                    return Ok(b);
+                }
             }
-            return Ok(b);
+        };
+        // Every cached bundle, also one another thread opened while this one waited for the lock,
+        // is checked here, outside the lock: a stalled file system must not hold up other loads.
+        if b.identity != identity(&b.exe) {
+            let m = "changed on disk or was removed since transit loaded it; restart transit to load it again";
+            return Err(ClapError::Load(path.display().to_string(), m.into()));
         }
-        let mut map = loaded().lock().unwrap_or_else(PoisonError::into_inner);
-        // Another thread may have loaded it meanwhile.
-        if let Some(b) = map.get(path) {
-            return Ok(b.clone());
-        }
-        let b = Arc::new(Bundle::open(path)?);
-        map.insert(path.to_path_buf(), b.clone());
         Ok(b)
     }
 
@@ -290,7 +291,9 @@ mod tests {
         let bytes = std::fs::read(scan::bundle_executable(&fixture[0].path).unwrap()).unwrap();
         // A private copy: the in-place rewrite below must not touch a file other tests map.
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let dir = std::env::temp_dir().join(format!("transit-clap-rewrite-{}-{nanos}", std::process::id()));
+        // Beside the fixture's own install, where binaries may run (a temp folder can be noexec).
+        let root = super::super::fixture::unregistered_fixture_dir().parent().unwrap();
+        let dir = root.join(format!("clap-rewrite-{}-{nanos}", std::process::id()));
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("Fixture.clap");
         // The binary, inside a bundle on macOS as installed there.
