@@ -49,9 +49,9 @@ pub(super) fn row_menu(app: &mut StudioApp, resp: &Response, row: &Row) -> Optio
         return None;
     }
     let mut act = None;
-    resp.context_menu(|ui| {
+    crate::chrome::context_menu(resp).show(|ui| {
         if let Some(Some(li)) = row.root {
-            let b = ui.button("Remove from Locations");
+            let b = ui.add(crate::chrome::MenuRow::new("Remove from Locations"));
             publish(app, ui, &b, "Remove from Locations", "remove");
             if b.clicked() {
                 act = Some(Act::Remove(li));
@@ -59,12 +59,12 @@ pub(super) fn row_menu(app: &mut StudioApp, resp: &Response, row: &Row) -> Optio
             }
         } else if row.root.is_none() {
             let same = same_as(&app.ui.browser.locations, &row.path);
-            let b = ui.add_enabled(same.is_none(), egui::Button::new("Add to Locations"));
+            let b = ui.add_enabled(same.is_none(), crate::chrome::MenuRow::new("Add to Locations"));
             publish(app, ui, &b, "Add to Locations", if same.is_some() { "disabled" } else { "add" });
             if let Some(by) = same {
-                ui.weak(format!("Already in Locations: {by}"));
+                crate::chrome::menu_note(ui, egui::RichText::new(format!("Already in Locations: {by}")).weak());
             } else if let Some(by) = inside(&app.ui.browser.locations, &row.path) {
-                ui.weak(format!("Inside the location {by}; adds it as its own"));
+                crate::chrome::menu_note(ui, egui::RichText::new(format!("Inside the location {by}; adds it as its own")).weak());
             }
             if b.clicked() {
                 act = Some(Act::Add(row.path.clone()));

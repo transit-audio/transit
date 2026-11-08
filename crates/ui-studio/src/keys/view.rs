@@ -373,7 +373,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Co
     let label = if on { format!("Step {}", step::length_label(app.step_len())) } else { "Step".into() };
     p.text(b.center(), Align2::CENTER_CENTER, label, small.clone(), if on { theme::text_on(TOKENS.accent) } else { TOKENS.text_dim });
     layout.step = r4(b);
-    resp.context_menu(|ui| {
+    crate::chrome::context_menu(&resp).show(|ui| {
         use transit_engine::step_input::StepControl;
         ui.label("Step input settings");
         crate::chrome::checkbox(ui, &mut app.ui.keys.step_hold.enabled, "Hold to lengthen");
