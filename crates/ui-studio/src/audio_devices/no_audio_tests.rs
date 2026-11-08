@@ -41,7 +41,14 @@ fn a_run_without_audio_lists_no_machine_device_and_creates_no_driver() {
     assert_eq!(asked.load(Ordering::Relaxed), 0, "the ASIO lister was never asked");
     assert_eq!(t.layout()["systems"], json!([]), "nothing listed");
     assert!(t.app.diag.copied.contains(crate::diagnostics::NO_AUDIO_DEVICES), "the report says why: {}", t.app.diag.copied);
-    assert_eq!(t.app.audio_devices.system_outputs.as_deref(), Some(&[][..]), "no System Audio outputs listed");
+    // No System Audio output is listed. Where System Audio is offered (Windows) the block ran and
+    // recorded an empty list; elsewhere there is no System Audio block, so nothing is ever listed.
+    let outputs = t.app.audio_devices.system_outputs.as_deref();
+    if transit_playback::system_audio::offered() {
+        assert_eq!(outputs, Some(&[][..]), "the System Audio block listed no output");
+    } else {
+        assert_eq!(outputs, None, "no System Audio block off Windows: nothing listed");
+    }
 
     // Control: a player lets the same window's listing through, to the scripted machine.
     t.app.player = Some(transit_playback::Player::prepare_device_free(t.app.engine.session_arc()).unwrap());
