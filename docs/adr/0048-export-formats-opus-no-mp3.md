@@ -1,9 +1,9 @@
 # ADR 0048: Export formats: Opus, no MP3
 
-- **Status:** accepted 2026-11-09 (#238; the maintainer's format decision of 2026-10-30)
+- **Status:** accepted 2026-11-08 (#238; the maintainer's format decision of 2026-10-30)
 - **Date:** 2026-11-08
 - **Implementation:** #238, branch `io/238-opus-export`: `crates/opus` (`transit-opus`, libopus 1.6.1 vendored and built with `cc`), the Ogg Opus writer and reader in `transit-audio-io`, the Bounce dialog's Opus row and bitrate row, and `format: "opus"` with `bitrate` on the bounce commands.
-- **Amends:** [ADR 0013](0013-unsafe-only-in-soundcraft-rt.md): its section "Amendment 2026-11-08 (ADR 0048, proposed)" adds `transit-opus` to the unsafe allowlist with its FFI in `src/ffi.rs` only, and restates the allowlist in full (decision 4). On acceptance, ADR 0013's README row gains "amended by ADR 0048".
+- **Amends:** [ADR 0013](0013-unsafe-only-in-soundcraft-rt.md): its section "Amendment 2026-11-08 (ADR 0048, accepted)" adds `transit-opus` to the unsafe allowlist with its FFI in `src/ffi.rs` only, and restates the allowlist in full (decision 4). On acceptance, ADR 0013's README row gains "amended by ADR 0048".
 - **Reopen when:** a user needs surround Opus (channel mapping family 1, K112); a platform transit ships on cannot compile the vendored C with its own compiler; libopus's license changes; a lossy format other than Opus is asked for by more than one user with a reason Opus cannot meet (AAC for a delivery spec is the likely one); an MP3 encoder of LAME's quality appears under a license compatible with MIT/Apache (that removes the license reason and leaves the quality one for the maintainer to weigh); or the reference encoder's quality is overtaken by a maintained pure-Rust encoder that the tests below can hold to the same figures.
 
 ## Context
@@ -127,11 +127,9 @@ spec converts the WAV or FLAC bounce with another tool.
 - A libopus update is a vendored-source change: new tarball and hash, the same file set, the
   tests' measured figures (pre-skip, spectrum floor, bitrate ratios) measured again, and the
   quoted-unsafe review.
-- libopus security releases are applied within the next transit release. `.opus` import passes
+- A libopus security release is picked up in the next transit release; release housekeeping checks xiph's release page (https://downloads.xiph.org/releases/opus/) for a newer release, and the update follows VENDOR.md's procedure. `.opus` import passes
   packets from user files to the C decoder (the Ogg parsing is Rust; the decoder is built with
-  `ENABLE_HARDENING`). Release housekeeping checks xiph's release page
-  (https://downloads.xiph.org/releases/opus/) for a newer release, and the update follows
-  VENDOR.md's procedure.
+  `ENABLE_HARDENING`).
 - MP3 export requests have a documented answer (the user guide's Bounce section and the help
   entry say why in one sentence).
 - Surround Opus is a known issue (K112) until family 1 lands; its scope is Rust only (decision 3).

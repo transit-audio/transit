@@ -18,7 +18,7 @@ use std::io::{Seek, Write};
 /// The bitrates the Bounce dialog offers for stereo, in kb/s (ADR 0048).
 pub const OPUS_BITRATES_KBPS: [u16; 5] = [96, 128, 160, 192, 256];
 /// The bitrates the Bounce dialog offers for mono, in kb/s: a mono stream needs about half the
-/// rate of a stereo one (ADR 0048, pending the maintainer's confirmation).
+/// rate of a stereo one (ADR 0048).
 pub const OPUS_MONO_BITRATES_KBPS: [u16; 3] = [96, 128, 160];
 /// The stereo bitrate when none is asked for.
 pub const DEFAULT_OPUS_KBPS: u16 = 160;
