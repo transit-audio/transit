@@ -189,10 +189,9 @@ pub struct StripLayout {
     pub lufs_text: String,
     /// The Channel fader as painted: its rect, travel, cap, scale labels and meter slot.
     pub fader_layout: Option<crate::widgets::fader::FaderLayout>,
-    /// The main bus without a master fader: its scale on the frame (labels and ticks), and the
-    /// dashed "+ Fader" in its fader column at Y0; `None` and zero otherwise.
+    /// The main bus without a master fader: its scale on the frame (labels and ticks); its fader
+    /// column stays empty (`+ Master Fader` in the routing rows adds the fader); `None` otherwise.
     pub main_scale: Option<crate::widgets::fader::ChannelScale>,
-    pub add_fader: R4,
     /// The stereo meter as painted: wells, fills, hold lines, clip cells and grid.
     pub meter_layout: Option<crate::widgets::level_meter::ChannelMeterLayout>,
     /// The peak readout's ink: `text.muted`, `meter.hot` from 0 dBFS or while latched.

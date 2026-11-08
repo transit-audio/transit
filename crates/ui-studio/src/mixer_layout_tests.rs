@@ -448,8 +448,8 @@ fn frame_of(s: &crate::mixer::StripLayout) -> (f32, f32) {
 /// Fault 3 of the Fader construction board: every strip in a row, the main bus included, places
 /// its level block on the same Y0 and Y1, docked (short) and in the full mixer, with and without a
 /// master fader, at 1.0 and 1.5; each meter well spans exactly Y0 to Y1 with its clip cell 4 high,
-/// 6 above Y0. Without a master fader the main bus keeps the scale on that frame and holds the
-/// dashed "+ Fader" (24 high) in its fader column at Y0.
+/// 6 above Y0. Without a master fader the main bus keeps the scale on that frame and its fader
+/// column stays empty: `+ Master Fader` in its routing rows is the one way to add the fader.
 #[test]
 fn the_main_bus_shares_the_channels_frame() {
     let (mut app, ctx, mut time, a) = mixer_app();
@@ -497,12 +497,19 @@ fn the_main_bus_shares_the_channels_frame() {
                 let rows = |v: &[[f32; 4]]| v.iter().map(|r| [r[1], r[3]]).collect::<Vec<_>>();
                 assert_eq!(rows(&m.meter_layout.as_ref().unwrap().grid), rows(&m_ticks), "{what}: the main bus's grid at its placed labels");
                 if !master {
-                    let add = m.add_fader;
+                    // The fader column (x 0 to 36 of the block, Y0 to Y1) paints nothing.
                     let x0 = m.meter_layout.as_ref().unwrap().wells[0][0] - 72.0;
-                    assert_eq!((add[0] - x0, add[2] - x0), (2.0, 34.0), "{what}: + Fader in the cap column");
-                    assert!((add[1] - c0).abs() < 0.01 && (add[3] - add[1] - 24.0).abs() < 0.01, "{what}: 24 high at Y0: {add:?}");
-                } else {
-                    assert_eq!(m.add_fader, [0.0; 4], "{what}: no + Fader with a master fader");
+                    let column = egui::Rect::from_min_max(egui::pos2(x0, c0), egui::pos2(x0 + crate::widgets::fader::CHANNEL_FADER_W, c1));
+                    let shapes = mixer_paint(&mut app, &ctx, &mut time);
+                    let inside: Vec<&egui::Shape> =
+                        shapes.iter().filter(|s| column.expand(1.0).contains_rect(s.visual_bounding_rect()) && s.visual_bounding_rect().is_positive()).collect();
+                    assert!(inside.is_empty(), "{what}: the main bus's fader column stays empty: {inside:?}");
+                    let texts: Vec<String> = shapes
+                        .iter()
+                        .filter_map(|s| if let egui::Shape::Text(t) = s { Some(t.galley.text().to_string()) } else { None })
+                        .collect();
+                    assert!(!texts.iter().any(|t| t == "+ Fader"), "{what}: no second + Fader");
+                    assert_eq!(texts.iter().filter(|t| *t == "+ Master Fader").count(), 1, "{what}: + Master Fader in the routing rows, once");
                 }
                 // Negative control: the old frame (the main fader giving up the footer's height)
                 // fails the equality.
@@ -552,14 +559,13 @@ fn the_board_section_c_as_rects() {
                 let rel = |r: [f32; 4]| [r[0] - x0, r[1] - y0, r[2] - x0, r[3] - y0].map(|v| (v * 100.0).round() / 100.0);
                 let ml = s.meter_layout.as_ref().unwrap();
                 println!(
-                    "C {what} {who}: Y0 {} Y1 {} (row y {}..{}) wells {:?} clip cells {:?} add_fader {:?}",
+                    "C {what} {who}: Y0 {} Y1 {} (row y {}..{}) wells {:?} clip cells {:?}",
                     s.fader[1] - y0,
                     s.fader[3] - y0,
                     s.fader[1],
                     s.fader[3],
                     ml.wells.iter().map(|w| rel(*w)).collect::<Vec<_>>(),
                     ml.clip_cells.iter().map(|w| rel(*w)).collect::<Vec<_>>(),
-                    (s.add_fader != [0.0; 4]).then(|| rel(s.add_fader)),
                 );
             }
         }
