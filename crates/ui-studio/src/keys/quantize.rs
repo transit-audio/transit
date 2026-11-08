@@ -61,6 +61,7 @@ impl StudioApp {
         if groups.is_empty() {
             return Ok(());
         }
+        self.keys_refuse_frozen(&groups.iter().map(|(p, _)| p.clip).collect::<Vec<_>>())?;
         let prefs = self.ui.keys.quantize.clone();
         let key = self.keys_merge_key();
         self.ensure_clip_selected(clip);

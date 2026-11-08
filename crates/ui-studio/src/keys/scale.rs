@@ -25,6 +25,7 @@ impl StudioApp {
                 None => groups.push((part.clip, vec![local], vec![new.pitch])),
             }
         }
+        self.keys_refuse_frozen(&groups.iter().map(|g| g.0).collect::<Vec<_>>())?;
         let key = self.keys_merge_key();
         for (clip, indices, pitches) in groups {
             self.keys_exec("midi.notes_move", json!({"clip": clip.0, "indices": indices, "pitches": pitches, "ticks": ticks}), &key)?;
