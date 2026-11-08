@@ -283,10 +283,73 @@ fn heading(body: &str) -> Option<&str> {
     body.lines().find_map(|l| l.strip_prefix("# "))
 }
 
-/// The short index status derived from a status line: the text up to the first `;`, ` (` or sentence end.
+/// Splits on `;` and on a sentence end (`. `) outside parentheses.
+fn top_level_clauses(line: &str) -> Vec<&str> {
+    let (mut out, mut depth, mut start) = (Vec::new(), 0usize, 0usize);
+    let bytes = line.as_bytes();
+    for (i, c) in line.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ';' if depth == 0 => {
+                out.push(&line[start..i]);
+                start = i + 1;
+            }
+            '.' if depth == 0 && bytes.get(i + 1) == Some(&b' ') => {
+                out.push(&line[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&line[start..]);
+    out
+}
+
+/// A clause without its parentheticals (a link target `](...)` stays), cut at its first `: `.
+fn trim_clause(clause: &str) -> String {
+    let mut out = String::new();
+    let (mut depth, mut prev) = (0usize, ' ');
+    let mut link = 0usize;
+    for c in clause.chars() {
+        match c {
+            '(' if depth == 0 && link == 0 && prev == ']' => {
+                link = 1;
+                out.push(c);
+            }
+            '(' if link > 0 => {
+                link += 1;
+                out.push(c);
+            }
+            ')' if link > 0 => {
+                link -= 1;
+                out.push(c);
+            }
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            _ if depth > 0 => {}
+            _ => out.push(c),
+        }
+        prev = c;
+    }
+    let out = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    let end = out.find(": ").unwrap_or(out.len());
+    out[..end].trim().trim_end_matches(['.', ':']).to_string()
+}
+
+/// Whether a clause marks an amendment or a supersession (a whole word, any case).
+fn marks_amendment(clause: &str) -> bool {
+    clause.split(|c: char| !c.is_alphanumeric()).any(|w| matches!(w.to_lowercase().as_str(), "amended" | "amendment" | "amendments" | "superseded"))
+}
+
+/// The short index status derived from a status line: its first clause, plus every later clause (split at `;` or a
+/// sentence end) that marks an amendment or a supersession, each without its parentheticals and cut at its first `: `.
 pub fn short_status(line: &str) -> String {
-    let end = [line.find(';'), line.find(" ("), line.find(". ")].into_iter().flatten().min().unwrap_or(line.len());
-    line[..end].trim().trim_end_matches('.').to_string()
+    let clauses = top_level_clauses(line);
+    let mut kept = vec![trim_clause(clauses[0])];
+    kept.extend(clauses[1..].iter().filter(|c| marks_amendment(c)).map(|c| trim_clause(c)));
+    kept.retain(|k| !k.is_empty());
+    kept.join("; ")
 }
 
 /// The (title, status) the index shows for an ADR: the title from the block's override, else the heading; the

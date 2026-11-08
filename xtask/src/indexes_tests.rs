@@ -243,7 +243,7 @@ fn ids_are_unique_across_known_issues_and_escapes() {
 fn an_adr_or_escape_takes_its_text_from_its_heading_unless_a_block_overrides_it() {
     let (title, status) =
         adr_index_text("0099-x.md", "# ADR 0099: A title: with a colon\n\n- **Status:** accepted 2026-11-08 (decided); amended later.\n").unwrap();
-    assert_eq!((title.as_str(), status.as_str()), ("A title: with a colon", "accepted 2026-11-08"));
+    assert_eq!((title.as_str(), status.as_str()), ("A title: with a colon", "accepted 2026-11-08; amended later"));
     let over = "<!-- transit-index\ntitle: Short\nstatus: ignored\n-->\n# ADR 0099: Long title\n\n- **Status:** accepted. Then more.\n";
     assert_eq!(adr_index_text("0099-x.md", over).unwrap(), ("Short".to_string(), "accepted".to_string()), "the status is never overridden");
     assert!(adr_index_text("0099-x.md", "# ADR 0099: No status\n").unwrap_err().contains("Status"));
@@ -252,6 +252,51 @@ fn an_adr_or_escape_takes_its_text_from_its_heading_unless_a_block_overrides_it(
         short_status("implemented in `transit` and verified 2026-10-18; **filed upstream**"),
         "implemented in `transit` and verified 2026-10-18"
     );
+}
+
+/// The rule this replaced: the first clause only.
+fn first_clause_only(line: &str) -> String {
+    let end = [line.find(';'), line.find(" ("), line.find(". ")].into_iter().flatten().min().unwrap_or(line.len());
+    line[..end].trim().trim_end_matches('.').to_string()
+}
+
+#[test]
+fn an_amended_record_keeps_its_amendment_marks_in_the_index() {
+    // The Status lines of ADRs 0010, 0028, 0041 and 0037 as the records carry them.
+    let cases = [
+        (
+            "accepted 2026-10-18; decisions 1 to 4 (the fonts) amended by [ADR 0045](0045-design-language-in-code.md) on 2026-11-06: IBM Plex Sans and Plex Mono replace Inter",
+            "accepted 2026-10-18; decisions 1 to 4 amended by [ADR 0045](0045-design-language-in-code.md) on 2026-11-06",
+        ),
+        (
+            "accepted 2026-10-25 (decided by Derek for v0.3.0, #97); amended by [ADR 0047](0047-device-macro-strip.md): the `selected:` controller-bank targets",
+            "accepted 2026-10-25; amended by [ADR 0047](0047-device-macro-strip.md)",
+        ),
+        (
+            "accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer; slices filed); amended 2026-11-03; amended 2026-11-08, accepted",
+            "accepted 2026-11-04; amended 2026-11-03; amended 2026-11-08, accepted",
+        ),
+        ("accepted; amended 2026-11-03 (two tiers of portability)", "accepted; amended 2026-11-03"),
+        (
+            "accepted 2026-10-21 (direction; review resolved); amendment 2026-11-04, Low Latency mode proposed",
+            "accepted 2026-10-21; amendment 2026-11-04, Low Latency mode proposed",
+        ),
+    ];
+    for (line, want) in cases {
+        assert_eq!(short_status(line), want, "{line}");
+    }
+    // Control: the first-clause-only rule drops every amendment mark, so the same cases fail under it.
+    for (line, want) in &cases[..4] {
+        assert_ne!(first_clause_only(line), *want, "the old rule must fail this case: {line}");
+        assert!(!first_clause_only(line).contains("amend"));
+    }
+    // An amendment written as a sentence is kept too (ADR 0029).
+    assert_eq!(
+        short_status("accepted 2026-10-29 (issue #124). Slice 1 is implemented. Amended 2026-10-29 for #174: scheduling."),
+        "accepted 2026-10-29; Amended 2026-10-29 for #174"
+    );
+    // A clause that merely mentions work done is not an amendment mark.
+    assert_eq!(short_status("accepted 2026-10-18; implemented: merged at 23ad6fd; CI green"), "accepted 2026-10-18");
 }
 
 #[test]
