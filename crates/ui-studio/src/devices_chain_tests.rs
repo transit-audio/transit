@@ -285,7 +285,15 @@ fn the_device_chain_and_strip_plus_menus_list_effects_only_and_both_add() {
     assert_filter_box_follows_entry_count(&app.mixer.filter_rect, &menu);
     assert!(menu.iter().all(|m| m.value != "sampler" && m.value != "macro_oscillator"), "instruments are refused in an effects menu");
     // The chain menu's rows are reachable by UI input, like the instrument menu's.
-    let item = menu.iter().find(|m| m.value == "gain").cloned().unwrap();
+    let mut item = menu.iter().find(|m| m.value == "gain").cloned().unwrap();
+    if !item.visible {
+        // The chrome's 24 px rows (#409) scroll the lower built-ins out of a menu that opens above
+        // the "+"; the filter box (shown above the threshold) reaches them, as on the strip.
+        assert_ne!(app.mixer.filter_rect, [0.0; 4], "rows only scroll out of a menu that has a filter box");
+        app.mixer.effect_filter = "gain".into();
+        frames(&mut app, &ctx, 3, &mut time);
+        item = app.mixer.devices.menu.iter().find(|m| m.value == "gain").cloned().expect("Gain survives its own filter");
+    }
     assert!(item.visible);
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);

@@ -700,6 +700,8 @@ mod chrome_pick_tests;
 #[cfg(test)]
 mod chrome_tests;
 #[cfg(test)]
+mod context_menu_tests;
+#[cfg(test)]
 mod dialog_chrome_tests;
 #[cfg(test)]
 mod external_measure_tests;

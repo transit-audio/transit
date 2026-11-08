@@ -9,16 +9,16 @@ use serde_json::{Value, json};
 use transit_model::TrackId;
 
 /// Text start inside the edge's inner side: padding, row inset, gutter, gap.
-const TEXT_IN: f32 = c::POPUP_PADDING + c::ROW_PADDING[0] + c::CHECK_GUTTER + c::ROW_GAP;
+pub(crate) const TEXT_IN: f32 = c::POPUP_PADDING + c::ROW_PADDING[0] + c::CHECK_GUTTER + c::ROW_GAP;
 /// Shortcut end inside the edge's inner side: padding and the row's right inset.
-const SHORTCUT_IN: f32 = c::POPUP_PADDING + c::ROW_PADDING[1];
+pub(crate) const SHORTCUT_IN: f32 = c::POPUP_PADDING + c::ROW_PADDING[1];
 /// The popup's edge (`window_stroke`, 1 px `line.strong`).
-const EDGE: f32 = 1.0;
+pub(crate) const EDGE: f32 = 1.0;
 
-type Shapes = Vec<egui::epaint::ClippedShape>;
+pub(crate) type Shapes = Vec<egui::epaint::ClippedShape>;
 
 /// Text shapes with exactly `text` in a frame's output.
-fn texts(shapes: &Shapes, text: &str) -> Vec<Rect> {
+pub(crate) fn texts(shapes: &Shapes, text: &str) -> Vec<Rect> {
     shapes
         .iter()
         .filter_map(|c| match &c.shape {
@@ -29,18 +29,18 @@ fn texts(shapes: &Shapes, text: &str) -> Vec<Rect> {
 }
 
 /// The popup area holding `p` (its frame's outer rect, edge included).
-fn popup_at(ctx: &egui::Context, p: egui::Pos2) -> Rect {
+pub(crate) fn popup_at(ctx: &egui::Context, p: egui::Pos2) -> Rect {
     let layer = ctx.layer_id_at(p).expect("a layer under the text");
     assert_eq!(layer.order, egui::Order::Foreground, "the text is in a popup");
     ctx.memory(|m| m.area_rect(layer.id)).expect("the popup's area")
 }
 
 /// (text start, shortcut end) inside the edge's inner side.
-fn insets(frame: Rect, text: Rect, shortcut: Rect) -> (f32, f32) {
+pub(crate) fn insets(frame: Rect, text: Rect, shortcut: Rect) -> (f32, f32) {
     (text.min.x - (frame.min.x + EDGE), (frame.max.x - EDGE) - shortcut.max.x)
 }
 
-fn near(a: f32, b: f32) -> bool {
+pub(crate) fn near(a: f32, b: f32) -> bool {
     (a - b).abs() < 0.5
 }
 
@@ -234,7 +234,7 @@ fn the_view_menu_check_rows_and_submenus_share_the_text_x_28_inside_the_edge() {
 }
 
 #[test]
-fn a_track_header_context_menu_keeps_the_popup_padding() {
+fn a_track_header_context_menu_keeps_the_popup_padding_and_the_chrome_rows() {
     let mut t = T::new();
     let id = TrackId(t.app.run("track.new", json!({"kind": "audio", "name": "A"})).unwrap()["tracks"][0].as_u64().unwrap());
     t.frames();
@@ -244,9 +244,10 @@ fn a_track_header_context_menu_keeps_the_popup_padding() {
     let frame = popup_at(&t.ctx, egui::pos2((freeze[0] + freeze[2]) / 2.0, (freeze[1] + freeze[3]) / 2.0));
     assert!(near(freeze[0] - frame.min.x, EDGE + c::POPUP_PADDING), "the row sits 4 inside the edge on the left");
     assert!(near(frame.max.x - freeze[2], EDGE + c::POPUP_PADDING), "and on the right");
-    // The helpers shared with the Track menu keep egui's plain rows here (context menus take the
-    // chrome rows later), so the group and activity rows start where Freeze does.
+    // The helpers shared with the Track menu draw the same chrome rows here (#409), so the group
+    // and activity rows start where Freeze does, 28 inside the edge.
     let freeze_x = t.text("Freeze").min.x;
+    assert!(near(freeze_x - (frame.min.x + EDGE), TEXT_IN), "Freeze starts {} inside the edge", freeze_x - frame.min.x - EDGE);
     assert!(near(t.text("New Group Track").min.x, freeze_x));
     assert!(near(t.text("Make Inactive").min.x, freeze_x));
 }
