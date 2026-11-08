@@ -374,31 +374,31 @@ impl Bundle {
     pub fn load(path: &Path) -> Result<Arc<Bundle>, Vst3Error> {
         let err = |m: &str| Vst3Error::Load(path.display().to_string(), m.to_string());
         let cached = || loaded().lock().unwrap_or_else(PoisonError::into_inner).iter().find(|(p, _)| p == path).map(|(_, b)| b.clone());
-        if let Some(b) = cached() {
-            // Read outside every lock: a stalled file system must not hold up other loads. A hit
-            // in the claim loop below was opened by another thread just now.
-            if b.identity != identity(&b.exe) {
-                return Err(err("changed on disk or was removed since transit loaded it; restart transit to load it again"));
-            }
-            return Ok(b);
-        }
-        // Claim the binary, or wait for the thread that is opening it and take its result.
+        // Claim the binary (`Ok`), or wait for the thread that is opening it and take its result
+        // from the cache (`Err`).
         let claim = {
             let (list, done) = opening();
             let mut list = list.lock().unwrap_or_else(PoisonError::into_inner);
             loop {
                 if let Some(b) = cached() {
-                    return Ok(b);
+                    break Err(b);
                 }
                 if MODULES_EXITED.load(Ordering::Acquire) {
                     return Err(err("plugin hosting has shut down"));
                 }
                 if !list.iter().any(|p| p == path) {
                     list.push(path.to_path_buf());
-                    break Opening(path);
+                    break Ok(Opening(path));
                 }
                 list = done.wait(list).unwrap_or_else(PoisonError::into_inner);
             }
+        };
+        let claim = match claim {
+            Ok(claim) => claim,
+            // Every cached result, also one another thread opened while this one waited, is
+            // checked here, outside every lock: a stalled file system must not hold up other loads.
+            Err(b) if b.identity == identity(&b.exe) => return Ok(b),
+            Err(_) => return Err(err("changed on disk or was removed since transit loaded it; restart transit to load it again")),
         };
         let b = if on_main_thread() {
             Bundle::open(path, EntryThread::Here(os_thread()))?
@@ -633,7 +633,8 @@ mod tests {
 
     /// A `.vst3` binary rewritten after it loaded (an installer, or a new build copied over it)
     /// is refused, not served from the cache, also once nothing holds the bundle loaded before;
-    /// that bundle stays cached (its module exit still runs at process exit). The CLAP twin is #348.
+    /// that bundle stays cached (its module exit still runs at process exit). Issue #380, the VST3 twin
+    /// of #348.
     #[test]
     fn a_binary_rewritten_after_load_is_not_served_from_the_cache() {
         use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -643,7 +644,9 @@ mod tests {
         let bytes = std::fs::read(&shared).unwrap();
         // A private copy of the bundle: the rewrite below must not touch a file other tests map.
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let dir = std::env::temp_dir().join(format!("transit-vst3-rewrite-{}-{nanos}", std::process::id()));
+        // Beside the fixture's own install, where binaries may run (a temp folder can be noexec).
+        let root = super::super::fixture::unregistered_fixture_dir().parent().unwrap();
+        let dir = root.join(format!("vst3-rewrite-{}-{nanos}", std::process::id()));
         let path = dir.join("Fixture.vst3");
         let file = path.join(shared.strip_prefix(&fixture[0].path).unwrap());
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
