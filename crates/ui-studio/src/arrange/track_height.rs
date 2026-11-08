@@ -259,13 +259,13 @@ pub(super) fn handle(app: &StudioApp, ui: &mut Ui, r: Rect, list: Rect, row: &mu
 }
 
 pub(crate) fn menu(app: &mut StudioApp, ui: &mut Ui, items: &mut Vec<crate::mixer::MenuItem>) {
-    let response = ui.menu_button("Track Height", |ui| {
+    let response = ui.menu_button(crate::chrome::submenu_atoms("Track Height"), |ui| {
         for (label, command, params) in [
             ("Increase All", "track.height_zoom", json!({"direction": "in"})),
             ("Decrease All", "track.height_zoom", json!({"direction": "out"})),
             ("Reset Track Heights", "track.height_reset", json!({})),
         ] {
-            let button = ui.button(label);
+            let button = ui.add(crate::chrome::MenuRow::new(label));
             crate::help::hover(ui, &button, crate::help::Id::ViewTrackHeight);
             items.push(crate::mixer::MenuItem::at(ui, label.into(), command.into(), button.rect));
             if button.clicked() {

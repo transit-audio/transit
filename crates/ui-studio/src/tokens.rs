@@ -550,6 +550,11 @@ pub mod chrome {
     pub const POPUP_PADDING: f32 = 4.0;
     pub const SUBMENU_OVERLAP: f32 = 4.0;
     pub const CHECK_GUTTER: f32 = 16.0;
+    /// A menu row's inset inside its hover fill: left (before the check gutter), right (after the
+    /// shortcut or the text).
+    pub const ROW_PADDING: [f32; 2] = [4.0, 8.0];
+    /// Between a menu row's check gutter, text and shortcut.
+    pub const ROW_GAP: f32 = 4.0;
     pub const CHECK_GLYPH: f32 = 12.0;
     pub const CHEVRON: f32 = 12.0;
     /// A list that opens from a field starts this far below it; menu-bar menus open flush.
@@ -636,6 +641,9 @@ pub mod chrome {
         ("popup/padding", POPUP_PADDING),
         ("popup/submenuOverlap", SUBMENU_OVERLAP),
         ("popup/checkGutter", CHECK_GUTTER),
+        ("popup/rowPadding/0", ROW_PADDING[0]),
+        ("popup/rowPadding/1", ROW_PADDING[1]),
+        ("popup/rowGap", ROW_GAP),
         ("popup/checkGlyph", CHECK_GLYPH),
         ("popup/chevron", CHEVRON),
         ("comboPopupGap", COMBO_POPUP_GAP),

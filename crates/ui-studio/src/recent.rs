@@ -108,7 +108,7 @@ impl ExistenceCache {
 pub fn menu(app: &mut StudioApp, ui: &mut egui::Ui) {
     let empty = app.ui.recent_files.is_empty();
     let sub = ui.add_enabled_ui(!empty, |ui| {
-        ui.menu_button("Open Recent", |ui| {
+        ui.menu_button(crate::chrome::submenu_atoms("Open Recent"), |ui| {
             let mut picked = None;
             let entries: Vec<PathBuf> = app.ui.recent_files.iter().map(|r| r.path.clone()).collect();
             let cache_id = egui::Id::new("recent_file_existence");
@@ -121,7 +121,7 @@ pub fn menu(app: &mut StudioApp, ui: &mut egui::Ui) {
                 let folder = path.parent().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 let text = egui::RichText::new(&name);
                 let text = if missing { text.color(TOKENS.text_dim) } else { text };
-                let b = ui.add(egui::Button::new(text).shortcut_text(egui::RichText::new(&folder).color(TOKENS.text_dim)));
+                let b = ui.add(crate::chrome::MenuRow::new(text).right_text(egui::RichText::new(&folder).color(TOKENS.text_dim)));
                 app.recent_menu.push(RecentItemLayout {
                     name,
                     folder,
@@ -134,7 +134,7 @@ pub fn menu(app: &mut StudioApp, ui: &mut egui::Ui) {
                 }
             }
             ui.separator();
-            let clear = ui.button("Clear Menu");
+            let clear = ui.add(crate::chrome::MenuRow::new("Clear Menu"));
             app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Clear Menu".into(), String::new(), clear.rect));
             if clear.clicked() {
                 app.ui.recent_files.clear();

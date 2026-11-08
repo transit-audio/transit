@@ -9,7 +9,7 @@ fn open_id() -> egui::Id {
 }
 
 pub(super) fn menu(ui: &mut egui::Ui) {
-    if ui.button("Session Settings…").clicked() {
+    if ui.add(crate::chrome::MenuRow::new("Session Settings…")).clicked() {
         ui.ctx().data_mut(|d| d.insert_temp(open_id(), true));
         ui.close();
     }

@@ -344,11 +344,12 @@ impl StudioApp {
 }
 
 /// One menu entry for `tool`: disabled with the reason as its hover text when nothing applies.
-fn entry(app: &mut StudioApp, ui: &mut egui::Ui, tool: Tool) {
+/// `bar`: the Edit menu's row (the clip context menu keeps egui's plain row).
+fn entry(app: &mut StudioApp, ui: &mut egui::Ui, tool: Tool, bar: bool) {
     let blocked = app.clip_tool_blocked(tool);
-    let mut button = egui::Button::new(tool.label());
+    let mut button = crate::chrome::MenuRow::new(tool.label()).gutter(bar);
     if let Some(a) = tool.action() {
-        button = button.shortcut_text(crate::chrome::shortcut(ui.ctx(), label(a)));
+        button = button.shortcut(label(a));
     }
     let hint = match tool {
         Tool::Join => "Joins the span from the first to the last selected clip",
@@ -365,14 +366,14 @@ fn entry(app: &mut StudioApp, ui: &mut egui::Ui, tool: Tool) {
 /// The tools as Edit menu entries.
 pub fn edit_menu_items(app: &mut StudioApp, ui: &mut egui::Ui) {
     for tool in Tool::ALL {
-        entry(app, ui, tool);
+        entry(app, ui, tool, true);
     }
 }
 
 /// The tools, Rename and Color as clip context menu entries (the right-clicked clip is selected).
 pub fn context_menu_items(app: &mut StudioApp, ui: &mut egui::Ui) {
     for tool in Tool::ALL {
-        entry(app, ui, tool);
+        entry(app, ui, tool, false);
     }
     let has_clip = !app.selected_clips().is_empty();
     if ui.add_enabled(has_clip, egui::Button::new("Rename").shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::Rename)))).clicked() {

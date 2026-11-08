@@ -308,12 +308,110 @@ pub fn menu_bar_style(st: &mut egui::Style) {
     row_corners(st);
 }
 
-/// Menu rows (`MenuConfig::style`): 24 high, radius 4, no border, hover `button.hover`.
+/// Menu rows (`MenuConfig::style`): 24 high, radius 4, no border, hover `button.hover`; a row's
+/// left inset is `button_padding.x` ([`MenuRow`] adds the rest of the right inset).
 pub fn menu_style(st: &mut egui::Style) {
     egui::containers::menu::menu_style(st);
     st.spacing.interact_size.y = c::ROW_HEIGHT;
-    st.spacing.button_padding = vec2(c::POPUP_PADDING, 0.0);
+    st.spacing.button_padding = vec2(c::ROW_PADDING[0], 0.0);
     row_corners(st);
+}
+
+/// The atom id of a menu row's check gutter (its rect is where the check is painted).
+pub const MENU_CHECK_ATOM: &str = "menu_check";
+
+/// A menu row as the chrome's Menus artboard draws it (#386; README "Menus and popups", Row):
+/// 4 px inset, the 16 px check gutter on every row (the 12 px check centered in it when checked,
+/// empty otherwise), 4 px gaps, the text, then the shortcut right-aligned with an 8 px inset. The
+/// height, the corners and the hover fill come from the menu's style ([`menu_style`]), so in the
+/// menu bar's menus the text starts 28 pt and the shortcut ends 12 pt inside the popup's edge.
+///
+/// `gutter(false)` draws egui's plain row instead, for a helper shared with a context menu that
+/// keeps egui's own row style (until context menus take the chrome rows too).
+#[must_use]
+pub struct MenuRow {
+    text: egui::WidgetText,
+    shortcut: Option<String>,
+    right: Option<egui::WidgetText>,
+    checked: bool,
+    gutter: bool,
+}
+
+impl MenuRow {
+    pub fn new(text: impl Into<egui::WidgetText>) -> Self {
+        Self { text: text.into(), shortcut: None, right: None, checked: false, gutter: true }
+    }
+
+    /// The row's keyboard shortcut, in the shortcut role ([`shortcut`]).
+    pub fn shortcut(mut self, keys: impl Into<String>) -> Self {
+        self.shortcut = Some(keys.into());
+        self
+    }
+
+    /// Other right-aligned text in the shortcut's place (Open Recent's folder).
+    pub fn right_text(mut self, text: impl Into<egui::WidgetText>) -> Self {
+        self.right = Some(text.into());
+        self
+    }
+
+    /// Show the check mark in the gutter.
+    pub fn checked(mut self, on: bool) -> Self {
+        self.checked = on;
+        self
+    }
+
+    /// False: no gutter and no extra right inset (egui's plain row).
+    pub fn gutter(mut self, on: bool) -> Self {
+        self.gutter = on;
+        self
+    }
+}
+
+impl egui::Widget for MenuRow {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let right: Option<egui::WidgetText> = match (self.shortcut, self.right) {
+            (Some(keys), _) => Some(shortcut(ui.ctx(), keys).into()),
+            (None, other) => other,
+        };
+        if !self.gutter {
+            let mut b = egui::Button::new(self.text);
+            if let Some(r) = right {
+                b = b.shortcut_text(r);
+            }
+            return ui.add(b);
+        }
+        let gutter = egui::Id::new(MENU_CHECK_ATOM);
+        let atoms = (egui::Atom::custom(gutter, vec2(c::CHECK_GUTTER, c::CHECK_GLYPH)), self.text);
+        // The right inset is the style's left one, a gap and this spacer.
+        let end = egui::Atom::custom(egui::Id::new("menu_row_end"), vec2(c::ROW_PADDING[1] - c::ROW_PADDING[0] - c::ROW_GAP, 0.0));
+        let b = egui::Button::new(atoms).gap(c::ROW_GAP);
+        let b = match right {
+            Some(r) => b.shortcut_text((r, end)),
+            None => b.shortcut_text(end),
+        };
+        let resp = b.atom_ui(ui);
+        if self.checked
+            && let Some(r) = resp.rect(gutter)
+        {
+            crate::icons::paint(ui.painter(), r.center(), crate::icons::Icon::Check, c::CHECK_GLYPH, TOKENS.text);
+        }
+        resp.response
+    }
+}
+
+/// A line of text in a menu (Audio's device name) set where the rows' text starts.
+pub fn menu_note(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
+    ui.horizontal(|ui| {
+        ui.add_space(ui.spacing().button_padding.x + c::CHECK_GUTTER + c::ROW_GAP);
+        ui.label(text)
+    })
+    .inner
+}
+
+/// The atoms of a submenu's button: the empty check gutter, then the text, so its text lines up
+/// with the rows' ([`MenuRow`]).
+pub fn submenu_atoms(text: impl Into<egui::WidgetText>) -> (egui::Atom<'static>, egui::WidgetText) {
+    (egui::Atom::custom(egui::Id::new(MENU_CHECK_ATOM), vec2(c::CHECK_GUTTER, c::CHECK_GLYPH)), text.into())
 }
 
 fn row_corners(st: &mut egui::Style) {
