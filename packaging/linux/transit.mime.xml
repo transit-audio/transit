@@ -3,7 +3,7 @@
      the system database. Installed to /usr/share/mime/packages/ (update-mime-database runs on
      install). -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-  <mime-type type="application/x-soundcraft-session">
+  <mime-type type="application/x-transit-session">
     <comment>transit session</comment>
     <sub-class-of type="application/json"/>
     <icon name="transit"/>

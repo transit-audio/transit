@@ -48,7 +48,7 @@
   <key>NSHumanReadableCopyright</key>
   <string>Copyright © the transit authors. MIT OR Apache-2.0.</string>
 
-  <!-- transit's own session format (extension and MIME type unchanged): a JSON session file next to an "Audio Files" folder. -->
+  <!-- transit's own session format (MIME type application/x-transit-session since 0.7.0, ADR 0049): a JSON session file next to an "Audio Files" folder. -->
   <key>UTExportedTypeDeclarations</key>
   <array>
     <dict>
@@ -68,7 +68,7 @@
         <key>public.filename-extension</key>
         <array><string>transit</string></array>
         <key>public.mime-type</key>
-        <array><string>application/x-soundcraft-session</string></array>
+        <array><string>application/x-transit-session</string></array>
       </dict>
     </dict>
   </array>

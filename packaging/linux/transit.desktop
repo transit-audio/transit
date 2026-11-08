@@ -10,5 +10,5 @@ Terminal=false
 StartupNotify=true
 StartupWMClass=dev.derekmwright.transit
 Categories=AudioVideo;Audio;Midi;Mixer;Sequencer;Recorder;
-MimeType=application/x-soundcraft-session;audio/x-wav;audio/wav;audio/vnd.wave;audio/x-aiff;audio/aiff;audio/flac;audio/x-flac;audio/mpeg;audio/midi;audio/x-midi;
+MimeType=application/x-transit-session;audio/x-wav;audio/wav;audio/vnd.wave;audio/x-aiff;audio/aiff;audio/flac;audio/x-flac;audio/mpeg;audio/midi;audio/x-midi;
 Keywords=daw;audio;mixer;recording;multitrack;midi;editor;music;

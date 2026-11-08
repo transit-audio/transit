@@ -600,6 +600,47 @@ mod tests {
         assert!(wxs.contains(&format!("Value=\"{APP_USER_MODEL_ID}\"")), "the MSI's AppUserModelID differs from the app's");
     }
 
+    /// The session MIME type at its five registration points (ADR 0049).
+    const SESSION_MIME: &str = "application/x-transit-session";
+
+    /// Does a registration file name `mime` in the place its format registers a session type?
+    fn registers(text: &str, before: &str, mime: &str, after: &str) -> bool {
+        text.contains(&format!("{before}{mime}{after}"))
+    }
+
+    #[test]
+    fn every_registration_point_names_the_transit_session_mime_type() {
+        let points = [
+            (include_str!("../../../packaging/linux/transit.mime.xml"), "<mime-type type=\"", "\">"),
+            (include_str!("../../../packaging/linux/transit.desktop"), "MimeType=", ";"),
+            (include_str!("../../../packaging/linux/transit.metainfo.xml.in"), "<mediatype>", "</mediatype>"),
+            (include_str!("../../../packaging/macos/Info.plist.in"), "<array><string>", "</string></array>"),
+            (include_str!("../../../packaging/windows/transit.wxs"), "ContentType=\"", "\""),
+        ];
+        let old = ["application/x-", "soundcraft-session"].concat();
+        for (i, (text, before, after)) in points.iter().enumerate() {
+            assert!(registers(text, before, SESSION_MIME, after), "registration point {i} does not name {SESSION_MIME}");
+            // Negative control: the same check finds no registration of the inherited type.
+            assert!(!registers(text, before, &old, after), "registration point {i} still names {old}");
+        }
+        // Nothing under packaging/ names the inherited type.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging");
+        let mut stack = vec![root];
+        let mut scanned = 0;
+        while let Some(path) = stack.pop() {
+            if path.is_dir() {
+                stack.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+            } else if let Ok(text) = std::fs::read_to_string(&path) {
+                assert!(!text.contains(&old), "{} names {old}", path.display());
+                scanned += 1;
+            }
+        }
+        assert!(scanned >= 5, "the scan found the packaging files ({scanned})");
+        // The check itself: an old registration is caught.
+        assert!(registers(&format!("MimeType={old};"), "MimeType=", &old, ";"));
+        assert!(!registers(&format!("MimeType={old};"), "MimeType=", SESSION_MIME, ";"));
+    }
+
     #[test]
     fn nonsense_window_sizes_fall_back() {
         assert_eq!(sane_window_size([f32::NAN, 10.0]), [1600.0, 1000.0]);

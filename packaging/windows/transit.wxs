@@ -65,9 +65,9 @@
           </Shortcut>
         </File>
 
-        <!-- .transit: transit's session format (MIME type unchanged); transit is its default app. -->
+        <!-- .transit: transit's session format (MIME type application/x-transit-session since 0.7.0, ADR 0049); transit is its default app. -->
         <ProgId Id="transit.Session" Description="transit Session" Icon="TransitExe" IconIndex="0">
-          <Extension Id="transit" ContentType="application/x-soundcraft-session">
+          <Extension Id="transit" ContentType="application/x-transit-session">
             <Verb Id="open" Command="Open" TargetFile="TransitExe" Argument="&quot;%1&quot;" />
           </Extension>
         </ProgId>

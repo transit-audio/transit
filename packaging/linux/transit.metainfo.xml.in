@@ -53,7 +53,7 @@
   </supports>
   <provides>
     <binary>transit</binary>
-    <mediatype>application/x-soundcraft-session</mediatype>
+    <mediatype>application/x-transit-session</mediatype>
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
