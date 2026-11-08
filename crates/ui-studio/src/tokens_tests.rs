@@ -354,7 +354,15 @@ fn the_chrome_matches_tokens_json_both_ways() {
     }
     let mut named = Vec::new();
     strings(chrome, "chrome", &mut named);
-    for (path, s) in named.iter().filter(|(p, _)| p != "chrome.note" && !p.starts_with("chrome.type.")) {
+    // The icons a rule names are Lucide names, mirrored both ways; the patterns' colors too.
+    let icons: BTreeSet<(String, &str)> =
+        named.iter().filter(|(p, _)| p.ends_with(".icon")).map(|(p, s)| (p.trim_start_matches("chrome.").replace('.', "/"), s.as_str())).collect();
+    let rust_icons: BTreeSet<(String, &str)> = tokens::chrome::ICONS.iter().map(|(p, s)| (p.to_string(), *s)).collect();
+    assert_eq!(icons, rust_icons, "chrome icons differ between tokens.json and Rust");
+    for (path, name) in tokens::chrome::PATTERN_COLORS {
+        assert_eq!(at(chrome, path).as_str(), Some(*name), "chrome/{path}");
+    }
+    for (path, s) in named.iter().filter(|(p, _)| p != "chrome.note" && !p.starts_with("chrome.type.") && !p.ends_with(".icon")) {
         if s.starts_with('#') {
             let c = tokens::component::ALL.iter().find(|(n, _)| n == path).unwrap_or_else(|| panic!("{path}: literal {s} without a component path"));
             assert_eq!(parse(s), c.1, "{path}");
@@ -587,10 +595,18 @@ fn the_sampler_views_match_tokens_json_both_ways() {
         "bench/ghost/line",
         "bench/ghost/refused",
         "bench/sliceLoop/color",
+        "bench/flagStripLine",
+        "candidate/line",
+        "lockGlyph/color",
+        "seed/sequential",
     ] {
         let name = at(sp, path).as_str().unwrap();
         assert!(known.contains(name), "sampler/{path}: {name} is not a token");
     }
+    // The flag and the exact seed range (an f32 cannot hold 4 294 967 295).
+    assert_eq!(at(sp, "candidate/flag").as_bool(), Some(tokens::sampler::CANDIDATE_FLAG));
+    assert_eq!(at(sp, "seed/min").as_u64(), Some(u64::from(tokens::sampler::SEED_MIN)));
+    assert_eq!(at(sp, "seed/max").as_u64(), Some(u64::from(tokens::sampler::SEED_MAX)));
     let mut strings = Vec::new();
     string_leaves(sp, "", &mut strings);
     let in_json: BTreeSet<(&str, &str)> = strings.iter().map(|(p, s)| (p.as_str(), s.as_str())).collect();

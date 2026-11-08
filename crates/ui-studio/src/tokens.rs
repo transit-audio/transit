@@ -535,7 +535,37 @@ pub mod chrome {
     pub const SELECTION_ALPHA_LIGHT: f32 = 0.35;
     /// Every number under `chrome` in tokens.json (the type roles aside) by its path; the drift
     /// test walks the file and this list both ways.
+    /// The Notice pattern (an info line with one action, no color) and the Success pattern (a
+    /// last-edit line with a check, no color, no banner): Sampler round 2.
+    pub const NOTICE_FILL: &str = "surface.raised";
+    pub const NOTICE_BORDER: &str = "line.strong";
+    pub const NOTICE_RADIUS: f32 = 5.0;
+    pub const NOTICE_PADDING: [f32; 4] = [6.0, 8.0, 6.0, 10.0];
+    pub const NOTICE_ICON: &str = "info";
+    pub const NOTICE_ICON_SIZE: f32 = 13.0;
+    pub const NOTICE_INK: &str = "text";
+    pub const NOTICE_ACTION_FILL: &str = "button.hover";
+    pub const SUCCESS_ICON: &str = "check";
+    pub const SUCCESS_ICON_SIZE: f32 = 12.0;
+    pub const SUCCESS_INK: &str = "text";
+    /// The icons chrome rules name (Lucide names, not colors), by path.
+    pub const ICONS: &[(&str, &str)] = &[("notice/icon", NOTICE_ICON), ("success/icon", SUCCESS_ICON)];
+    /// The colors the Notice and Success patterns name, by path.
+    pub const PATTERN_COLORS: &[(&str, &str)] = &[
+        ("notice/fill", NOTICE_FILL),
+        ("notice/border", NOTICE_BORDER),
+        ("notice/ink", NOTICE_INK),
+        ("notice/actionFill", NOTICE_ACTION_FILL),
+        ("success/ink", SUCCESS_INK),
+    ];
     pub const METRICS: &[(&str, f32)] = &[
+        ("notice/radius", NOTICE_RADIUS),
+        ("notice/padding/0", NOTICE_PADDING[0]),
+        ("notice/padding/1", NOTICE_PADDING[1]),
+        ("notice/padding/2", NOTICE_PADDING[2]),
+        ("notice/padding/3", NOTICE_PADDING[3]),
+        ("notice/iconSize", NOTICE_ICON_SIZE),
+        ("success/iconSize", SUCCESS_ICON_SIZE),
         ("radius/window", RADIUS_WINDOW),
         ("radius/popup", RADIUS_POPUP),
         ("radius/control", RADIUS_CONTROL),
@@ -991,6 +1021,25 @@ pub mod sampler {
     pub const SLICE_LOOP_COLOR: &str = "loop";
     pub const SLICE_LOOP_GLYPH_FORWARD: &str = "\u{21bb}";
     pub const SLICE_LOOP_GLYPH_PING_PONG: &str = "\u{21c4}";
+    /// Round 2 (ADR 0041): the flag strip's line, the type roles, the candidate line, the lock
+    /// glyph, the seed field and the view switch.
+    pub const BENCH_FLAG_STRIP_LINE: &str = "line.inset";
+    /// The Sampler's type roles: (name, family, weight, size).
+    pub const TYPE: [(&str, &str, f32, f32); 6] = [
+        ("zoneLabel", "mono", 500.0, 9.0),
+        ("rrTag", "mono", 500.0, 8.0),
+        ("octaveName", "mono", 500.0, 8.0),
+        ("axis", "mono", 400.0, 10.0),
+        ("flagLetter", "sans", 600.0, 9.0),
+        ("braceLabel", "mono", 500.0, 9.0),
+    ];
+    pub const CANDIDATE_LINE: &str = "text.faint";
+    pub const CANDIDATE_FLAG: bool = false;
+    pub const LOCK_GLYPH_ICON: &str = "lock";
+    pub const LOCK_GLYPH_COLOR: &str = "text.faint";
+    pub const SEED_REROLL_ICON: &str = "dices";
+    pub const SEED_SEQUENTIAL: &str = "ink.arrow";
+    pub const VIEW_SWITCH_FONT: &str = "sans";
     /// Every string under `sampler` in tokens.json by its path.
     pub const STRINGS: &[(&str, &str)] = &[
         ("viewBar/font/font", VIEW_BAR_FONT),
@@ -1020,6 +1069,19 @@ pub mod sampler {
         ("bench/sliceLoop/color", SLICE_LOOP_COLOR),
         ("bench/sliceLoop/glyphForward", SLICE_LOOP_GLYPH_FORWARD),
         ("bench/sliceLoop/glyphPingPong", SLICE_LOOP_GLYPH_PING_PONG),
+        ("bench/flagStripLine", BENCH_FLAG_STRIP_LINE),
+        ("type/zoneLabel/font", TYPE[0].1),
+        ("type/rrTag/font", TYPE[1].1),
+        ("type/octaveName/font", TYPE[2].1),
+        ("type/axis/font", TYPE[3].1),
+        ("type/flagLetter/font", TYPE[4].1),
+        ("type/braceLabel/font", TYPE[5].1),
+        ("candidate/line", CANDIDATE_LINE),
+        ("lockGlyph/icon", LOCK_GLYPH_ICON),
+        ("lockGlyph/color", LOCK_GLYPH_COLOR),
+        ("seed/rerollIcon", SEED_REROLL_ICON),
+        ("seed/sequential", SEED_SEQUENTIAL),
+        ("viewSwitch/font/font", VIEW_SWITCH_FONT),
     ];
     pub const VIEW_BAR_HEIGHT: f32 = 24.0;
     pub const VIEW_BAR_FONT_WEIGHT: f32 = 500.0;
@@ -1047,6 +1109,20 @@ pub mod sampler {
     pub const SLICE_LOOP_WASH_ALPHA: f32 = 0.07;
     pub const SLICE_LOOP_HATCH_ALPHA: f32 = 0.28;
     pub const BENCH_ZOOMS: [f32; 4] = [1.0, 2.0, 4.0, 8.0];
+    /// The flag's corner radii (top left, top right, bottom right, bottom left).
+    pub const BENCH_FLAG_RADIUS: [f32; 4] = [0.0, 3.0, 3.0, 0.0];
+    pub const CHIP: f32 = 22.0;
+    pub const PREVIEW_CELL: f32 = 12.0;
+    pub const UNUSED_CONTROL_ALPHA: f32 = 0.4;
+    pub const CANDIDATE_DASH: [f32; 2] = [3.0, 3.0];
+    pub const FADE_FLOOR_ALPHA: f32 = 0.25;
+    pub const LOCK_GLYPH_SIZE: f32 = 10.0;
+    /// The seed field's range (ADR 0041: 1 to 4 294 967 295, 0 normalized to 1).
+    pub const SEED_MIN: u32 = 1;
+    pub const SEED_MAX: u32 = u32::MAX;
+    pub const VIEW_SWITCH_FONT_WEIGHT: f32 = 500.0;
+    pub const VIEW_SWITCH_FONT_SIZE: f32 = 12.0;
+    pub const VIEW_SWITCH_PADDING_X: f32 = 12.0;
     pub const METRICS: &[(&str, f32)] = &[
         ("viewBar/height", VIEW_BAR_HEIGHT),
         ("viewBar/font/weight", VIEW_BAR_FONT_WEIGHT),
@@ -1077,5 +1153,33 @@ pub mod sampler {
         ("bench/zooms/1", BENCH_ZOOMS[1]),
         ("bench/zooms/2", BENCH_ZOOMS[2]),
         ("bench/zooms/3", BENCH_ZOOMS[3]),
+        ("bench/flagRadius/0", BENCH_FLAG_RADIUS[0]),
+        ("bench/flagRadius/1", BENCH_FLAG_RADIUS[1]),
+        ("bench/flagRadius/2", BENCH_FLAG_RADIUS[2]),
+        ("bench/flagRadius/3", BENCH_FLAG_RADIUS[3]),
+        ("type/zoneLabel/weight", TYPE[0].2),
+        ("type/zoneLabel/size", TYPE[0].3),
+        ("type/rrTag/weight", TYPE[1].2),
+        ("type/rrTag/size", TYPE[1].3),
+        ("type/octaveName/weight", TYPE[2].2),
+        ("type/octaveName/size", TYPE[2].3),
+        ("type/axis/weight", TYPE[3].2),
+        ("type/axis/size", TYPE[3].3),
+        ("type/flagLetter/weight", TYPE[4].2),
+        ("type/flagLetter/size", TYPE[4].3),
+        ("type/braceLabel/weight", TYPE[5].2),
+        ("type/braceLabel/size", TYPE[5].3),
+        ("chip", CHIP),
+        ("previewCell", PREVIEW_CELL),
+        ("unusedControlAlpha", UNUSED_CONTROL_ALPHA),
+        ("candidate/dash/0", CANDIDATE_DASH[0]),
+        ("candidate/dash/1", CANDIDATE_DASH[1]),
+        ("fadeFloorAlpha", FADE_FLOOR_ALPHA),
+        ("lockGlyph/size", LOCK_GLYPH_SIZE),
+        ("seed/min", SEED_MIN as f32),
+        ("seed/max", SEED_MAX as f32),
+        ("viewSwitch/font/weight", VIEW_SWITCH_FONT_WEIGHT),
+        ("viewSwitch/font/size", VIEW_SWITCH_FONT_SIZE),
+        ("viewSwitch/paddingX", VIEW_SWITCH_PADDING_X),
     ];
 }
