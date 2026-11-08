@@ -4,17 +4,32 @@ use super::*;
 use transit_midi::scale::{Scale, ScaleMode};
 
 impl StudioApp {
+    /// A move (old, new) applied as one `midi.notes_move` per open clip, one undo step.
     pub(super) fn scale_apply_move(&mut self, pairs: &[(Note, Note)]) -> Result<Vec<Note>, String> {
-        let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
+        let Some(all) = self.keys_all() else { return Err("no clip".into()) };
         let old: Vec<_> = pairs.iter().map(|(a, _)| *a).collect();
-        let indices = resolve(&self.keys_notes(), &old);
+        let indices = resolve(&all.notes, &old);
         if indices.len() != pairs.len() {
             return Err("notes changed during move".into());
         }
         let ticks = pairs.first().map_or(0, |(a, b)| b.start - a.start);
-        let pitches: Vec<_> = pairs.iter().map(|(_, b)| b.pitch).collect();
+        // Per clip, in the pairs' order: its local indices and the new pitches.
+        let mut groups: Vec<(ClipId, Vec<usize>, Vec<u8>)> = Vec::new();
+        for (i, (_, new)) in indices.into_iter().zip(pairs) {
+            let Some((part, local)) = all.locate(i) else { continue };
+            match groups.iter_mut().find(|g| g.0 == part.clip) {
+                Some(g) => {
+                    g.1.push(local);
+                    g.2.push(new.pitch);
+                }
+                None => groups.push((part.clip, vec![local], vec![new.pitch])),
+            }
+        }
+        self.keys_refuse_frozen(&groups.iter().map(|g| g.0).collect::<Vec<_>>())?;
         let key = self.keys_merge_key();
-        self.keys_exec("midi.notes_move", json!({"clip": clip.0, "indices": indices, "pitches": pitches, "ticks": ticks}), &key)?;
+        for (clip, indices, pitches) in groups {
+            self.keys_exec("midi.notes_move", json!({"clip": clip.0, "indices": indices, "pitches": pitches, "ticks": ticks}), &key)?;
+        }
         Ok(pairs.iter().map(|(_, b)| *b).collect())
     }
 
@@ -41,7 +56,8 @@ impl StudioApp {
     /// note; keyboard moves pass `None` and the lowest note leads.
     pub(super) fn scale_move(&self, notes: &[Note], ticks: i64, degrees: i64, anchor: Option<u8>) -> Vec<(Note, Note)> {
         let mode = self.keys_scale();
-        let min = notes.iter().map(|n| n.start).min().unwrap_or(0);
+        // How far left they may go: to their own clips' starts.
+        let min = self.keys_all().map_or_else(|| notes.iter().map(|n| n.start).min().unwrap_or(0), |all| all.local_min(notes));
         let ticks = ticks.max(-min);
         let pitches: Vec<u8> = notes.iter().map(|n| n.pitch).collect();
         let lowest = pitches.iter().copied().min().unwrap_or(0);

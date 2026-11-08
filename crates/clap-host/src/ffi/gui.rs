@@ -33,7 +33,7 @@ fn window_api() -> Option<&'static CStr> {
 }
 
 /// The embedded editor's parent for `set_parent`: the content window (`HWND` on Win32, the X11
-/// window id on Linux).
+/// window id on Linux, the window's content `NSView` on macOS).
 #[cfg(windows)]
 fn window_handle(win: &hostwin::HostWindow) -> clap_window_handle {
     clap_window_handle { win32: win.parent() }
@@ -42,7 +42,11 @@ fn window_handle(win: &hostwin::HostWindow) -> clap_window_handle {
 fn window_handle(win: &hostwin::HostWindow) -> clap_window_handle {
     clap_window_handle { x11: std::ffi::c_ulong::try_from(win.parent().addr()).unwrap_or(0) }
 }
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
+fn window_handle(win: &hostwin::HostWindow) -> clap_window_handle {
+    clap_window_handle { cocoa: win.parent() }
+}
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn window_handle(win: &hostwin::HostWindow) -> clap_window_handle {
     clap_window_handle { ptr: win.parent() }
 }
@@ -161,7 +165,7 @@ impl GuiLink {
         let vt = GuiLink::vt(&g).ok_or_else(|| "no gui extension".to_string())?;
         let api = window_api().ok_or_else(|| "plugin editors are not supported on this platform".to_string())?;
         let (Some(supported), Some(create)) = (vt.is_api_supported, vt.create) else { return Err("create failed".into()) };
-        // Embedded where this host has its own window (Windows; Linux on X11, issue #147): the
+        // Embedded where this host has its own window (Windows; Linux on X11, issue #147; macOS): the
         // Windows window carries the header strip (issue #68). Floating otherwise, when the plug-in offers nothing else, or when
         // embedding fails and the plug-in also offers a floating editor (as before #68).
         // SAFETY: live plugin; `api` is a static NUL-terminated string; main thread.

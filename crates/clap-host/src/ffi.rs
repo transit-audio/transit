@@ -136,8 +136,33 @@ mod hostwin {
         (u32::try_from(w).unwrap_or(0), u32::try_from(h).unwrap_or(0))
     }
 }
+/// The macOS host window: `transit_rt`'s `NSWindow` editor window (the one the VST3 host uses), on
+/// the process main thread; its content view is the plugin's `cocoa` parent. No header strip, as on
+/// Linux. Closing it only hides it, as above.
+#[cfg(target_os = "macos")]
+mod hostwin {
+    pub use transit_rt::editor_window::{EditorWindow as HostWindow, resize_content as resize};
+
+    pub const SUPPORTED: bool = true;
+
+    /// None: clap gui.h on `CLAP_WINDOW_API_COCOA`: "uses logical size, don't call
+    /// clap_plugin_gui->set_scale()".
+    pub fn content_scale(_win: &HostWindow) -> Option<f64> {
+        None
+    }
+
+    pub fn scale_change(_win: &HostWindow) -> Option<f64> {
+        None
+    }
+
+    /// The plug-in content's size, in points (cocoa's logical size).
+    pub fn content_size(win: &HostWindow) -> (u32, u32) {
+        let (w, h) = win.content_size();
+        (u32::try_from(w).unwrap_or(0), u32::try_from(h).unwrap_or(0))
+    }
+}
 /// Other platforms: embedded editors are not hosted (floating ones still are).
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 mod hostwin {
     use std::ffi::c_void;
 

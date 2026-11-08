@@ -1,6 +1,7 @@
 //! Plugin editors must be driven from the process main thread, which the standard test harness
-//! never uses, so this test binary has its own `main` (`harness = false`). The fixture's GUI is
-//! window-less: nothing appears on screen.
+//! never uses, so this test binary has its own `main` (`harness = false`). The fixture's GUI draws
+//! nothing; the host's own window for an embedded editor (Windows, macOS, Linux on X11) flashes
+//! on screen.
 
 mod common;
 
@@ -64,9 +65,9 @@ fn main() {
     assert!(ed.is_open());
     let _ = ed.idle(); // the fixture's resize request reaches the window
     assert!(ed.is_open());
-    // Embedded on Windows, and on Linux with an X server (#147; without one the window cannot be
-    // made and the floating editor opens); floating elsewhere.
-    let embedded = cfg!(windows) || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some());
+    // Embedded on Windows, macOS, and on Linux with an X server (#147; without one the window
+    // cannot be made and the floating editor opens); floating elsewhere.
+    let embedded = cfg!(any(windows, target_os = "macos")) || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some());
     assert_eq!(p.load_state(b"CMD:gui-was-floating"), !embedded, "embedded where transit has a window");
     ed.close();
     assert!(!ed.is_open());

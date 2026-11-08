@@ -23,7 +23,8 @@
 //! Contract: every [`EditorWindow`] method and [`resize_content`] act only on a window of the
 //! calling thread (they do nothing otherwise); [`HeaderCell`] may be used from any thread.
 //! Nothing here panics. Linux has the same window on X11 (`x11.rs`, issue #147; Wayland sessions
-//! through `XWayland`), without the strip yet; macOS has none here: [`EditorWindow::new`] says so.
+//! through `XWayland`), without the strip yet; so has macOS (`macos.rs`, an `NSWindow` on the
+//! process main thread).
 //!
 //! **Following the main window** (issue #173, ADR 0030). The windows have no owner (ADR 0018
 //! section 7: a cross-thread owner attaches input queues, so a hung plug-in would hang the UI).
@@ -548,15 +549,27 @@ pub use x11::{EditorWindow, apply, current_thread_id, group, hide_thread_windows
 #[cfg(all(target_os = "linux", not(feature = "force-fallback")))]
 pub(crate) use x11::{connection_fd, dispatch_complete, pump};
 
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::{EditorWindow, resize_content};
+
+/// macOS has its own window (`macos`) but none of the Windows grouping (ADR 0030); other platforms
+/// have neither.
 #[cfg(not(any(windows, target_os = "linux")))]
 mod other {
+    #[cfg(not(target_os = "macos"))]
     use super::HeaderCell;
+    #[cfg(not(target_os = "macos"))]
     use std::ffi::c_void;
+    #[cfg(not(target_os = "macos"))]
     use std::sync::Arc;
 
     /// No editor windows are hosted on this platform.
+    #[cfg(not(target_os = "macos"))]
     pub struct EditorWindow;
 
+    #[cfg(not(target_os = "macos"))]
     impl EditorWindow {
         /// Always an error here.
         ///
@@ -604,6 +617,7 @@ mod other {
     }
 
     /// Nothing to resize on this platform (see the Windows version).
+    #[cfg(not(target_os = "macos"))]
     pub fn resize_content(_window: *mut c_void, _w: f64, _h: f64) -> bool {
         false
     }
@@ -652,8 +666,10 @@ mod other {
         Vec::new()
     }
 }
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+pub use other::{EditorWindow, resize_content};
 #[cfg(not(any(windows, target_os = "linux")))]
-pub use other::{EditorWindow, apply, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
+pub use other::{apply, current_thread_id, group, hide_thread_windows, raise_window, take_created, window_state};
 
 #[cfg(test)]
 mod tests {
