@@ -133,15 +133,16 @@ fn the_channel_meter_draws_a_well_per_channel_on_the_taper() {
     assert_eq!(channel_width(2, 10.0), 23.0);
     let y = |db: f32| 40.0 + fader::taper(db) * 200.0;
     assert!((l.peaks[0].unwrap()[1] - y(-6.0)).abs() < 0.02 && (l.peaks[1].unwrap()[1] - y(-24.0)).abs() < 0.02, "peaks on the taper");
-    assert_eq!(l.peak_color, DARK.meter_ok.gamma_multiply(0.35));
-    assert!(l.rms.iter().all(Option::is_none) && l.over.iter().all(Option::is_none), "peak only: no solid layer");
+    assert_eq!(l.peak_color, DARK.meter_ok.gamma_multiply(0.35), "the peak over an RMS reading");
+    assert_eq!(l.peak_inks, vec![DARK.meter_ok, DARK.meter_ok], "peak only: the peak is the level, solid");
+    assert!(l.rms.iter().all(Option::is_none) && l.over.iter().all(Option::is_none), "peak only: no RMS layer");
     assert!((mid(l.holds[0].unwrap()).y - y(-3.0)).abs() < 0.02 && l.holds[1].is_none());
     assert_eq!(l.clip_cells[0], [100.0, 30.0, 110.0, 34.0], "4 px, 6 above the well (the Frame)");
     assert_eq!((l.clip, l.clip_colors.clone()), (false, vec![DARK.line, DARK.line]));
     assert_eq!(l.grid.len(), 8, "a line at each mark passed (all eight placed at travel 200)");
     // The well, its edge, grid and hold inks and the board's corner radius.
     assert_eq!((l.well_fill, l.well_edge, l.grid_color, l.hold_color), (DARK.surface_inset, DARK.line_inset, DARK.line_inset, DARK.text));
-    assert_eq!(l.well_radius, 1.5);
+    assert_eq!((l.well_radius, l.fill_radius), (1.5, 0.0), "the well keeps 1.5, the fills are square");
     assert_eq!(l.zero_grid_color, DARK.line_strong, "the 0 dB grid line in `line.strong` (`fader.zeroGridLine`)");
     assert!((size(l.holds[0].unwrap()).1 - 2.0).abs() < 0.01, "a 2 px hold line");
     assert!((l.reference_y - y(0.0)).abs() < 0.02);
@@ -244,10 +245,11 @@ fn the_channel_meter_draws_the_rms_solid_over_the_35_percent_peak() {
     };
     assert_eq!(ink("rms", rms[1]), DARK.meter_ok, "the RMS is solid `meter.ok`");
     assert_eq!(ink("peak", peak[1]).a(), DARK.meter_ok.gamma_multiply(0.35).a(), "the peak at 35 percent");
-    // Negative control: the old single fill (the peak at 35 percent alone) has no solid core.
-    let (old, _, old_shapes) = paint_one(&mut rig, Channel { peak_db: 2.0, rms_db: None, hold_db: Some(2.0), clip: false });
+    // Negative control: a source with no RMS reading has no RMS layer; its peak is drawn solid
+    // instead (Fills are square), never at the 35 percent of a zone above an RMS bar.
+    let (old, _, _) = paint_one(&mut rig, Channel { peak_db: 2.0, rms_db: None, hold_db: Some(2.0), clip: false });
     assert!(old.rms[0].is_none());
-    assert!(!old_shapes.iter().any(|s| layer(&s.shape, well) == Some("rms")), "one fill: no solid core");
+    assert_eq!((old.peak_inks[0], old.peak_over_inks[0]), (DARK.meter_ok, DARK.meter_hot), "peak only: solid, `meter.hot` solid above 0");
 }
 
 /// Fault 5 of the Fader construction board: the draw order inside a well is the well and its
@@ -324,4 +326,52 @@ fn the_meter_grid_rows_are_the_faders_tick_rows() {
             }
         }
     }
+}
+
+/// Fills are square (Fader > Meter): the peak, RMS and hot fills and the hold line have no corner
+/// radius and sit 1 px inside the well; only the well keeps its 1.5 radius. A peak-only source
+/// paints its peak opaque (`meter.ok`, `meter.hot` above 0).
+#[test]
+fn the_channel_meter_fills_are_square_inside_the_well() {
+    use super::level_meter::Channel;
+    let mut rig = Rig::new();
+    for ch in [
+        Channel { peak_db: 4.0, rms_db: Some(2.0), hold_db: Some(4.0), clip: false },
+        Channel { peak_db: -6.0, rms_db: Some(-12.0), hold_db: Some(6.0), clip: false },
+        Channel { peak_db: 3.0, rms_db: None, hold_db: Some(-90.0 + 1.0), clip: false },
+    ] {
+        let (l, well, shapes) = paint_one(&mut rig, ch);
+        let mut seen = 0;
+        for s in &shapes {
+            let egui::Shape::Rect(r) = &s.shape else { continue };
+            let in_well = r.rect.min.x >= well.min.x - 0.01 && r.rect.max.x <= well.max.x + 0.01 && r.rect.min.y >= well.min.y - 0.01;
+            let layer = layer(&s.shape, well);
+            if layer == Some("well") {
+                assert_ne!(r.corner_radius, egui::CornerRadius::ZERO, "{ch:?}: the well keeps its radius");
+            } else if matches!(layer, Some("peak" | "rms" | "hold")) || (in_well && r.fill == DARK.meter_hot) {
+                assert_eq!(r.corner_radius, egui::CornerRadius::ZERO, "{ch:?}: a square fill: {r:?}");
+                assert!(r.rect.min.x >= well.min.x + 1.0 - 0.01 && r.rect.max.x <= well.max.x - 1.0 + 0.01, "{ch:?}: 1 px inside: {r:?}");
+                assert!(r.rect.min.y >= well.min.y + 1.0 - 0.01 && r.rect.max.y <= well.max.y - 1.0 + 0.01, "{ch:?}: 1 px inside: {r:?}");
+                seen += 1;
+            }
+        }
+        assert!(seen >= 3, "{ch:?}: the fills and hold were checked ({seen})");
+        for r in l.peaks.iter().chain(&l.rms).chain(&l.over).chain(&l.peak_over).chain(&l.holds).flatten() {
+            assert!(r[0] >= l.wells[0][0] + 1.0 - 0.01 && r[2] <= l.wells[0][2] - 1.0 + 0.01 && r[3] <= l.wells[0][3] - 1.0 + 0.01, "{r:?}");
+        }
+    }
+    // A peak-only source paints its peak opaque, hot opaque above 0.
+    let (l, _, shapes) = paint_one(&mut rig, Channel { peak_db: 3.0, rms_db: None, hold_db: None, clip: false });
+    let ink = |r: [f32; 4]| {
+        shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Rect(x) if (x.rect.min.y - r[1]).abs() < 0.01 && (x.rect.max.y - r[3]).abs() < 0.01 && x.rect.width() < 10.0 => Some(x.fill),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(ink(l.peaks[0].unwrap()), DARK.meter_ok);
+    assert_eq!(ink(l.peak_over[0].unwrap()).a(), 255, "opaque `meter.hot` above 0");
+    assert_eq!(ink(l.peak_over[0].unwrap()), DARK.meter_hot);
 }

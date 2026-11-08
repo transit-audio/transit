@@ -246,8 +246,17 @@ pub struct ChannelMeterLayout {
     pub grid: Vec<[f32; 4]>,
     /// The y of the 0 dBFS line.
     pub reference_y: f32,
-    /// The wells' corner radius.
+    /// The wells' corner radius (`fader.meter.wellRadius`).
     pub well_radius: f32,
+    /// The corner radius of every fill and the hold line (`fader.meter.fillRadius`: square).
+    pub fill_radius: f32,
+    /// Each channel's peak fill ink: [`ChannelMeterLayout::peak_color`] over an RMS reading, solid
+    /// `meter.ok` for a source with no RMS reading (`fader.meter.peakAlphaWithoutRms`).
+    #[serde(skip)]
+    pub peak_inks: Vec<egui::Color32>,
+    /// Each channel's ink for the part of its peak fill above 0 dBFS (`meter.hot` at the peak's alpha).
+    #[serde(skip)]
+    pub peak_over_inks: Vec<egui::Color32>,
     /// The well's fill and its 1 px edge (`surface.inset`, `line.inset`).
     #[serde(skip)]
     pub well_fill: egui::Color32,
@@ -274,9 +283,10 @@ pub struct ChannelMeterLayout {
 /// The gap between the clip cell and the top of the well (the Frame: the cells sit 6 above Y0,
 /// `fader.frame.clipCellGap`).
 pub const CHANNEL_CLIP_GAP: f32 = spec::FRAME_CLIP_CELL_GAP;
-/// The corner radius of a channel meter's well and fills, and of its clip cell (the Mixer board:
-/// `rx 1.5` and `rx 1`).
-pub const CHANNEL_WELL_RADIUS: f32 = 1.5;
+/// The corner radius of a channel meter's well (`fader.meter.wellRadius`, the Mixer board's
+/// `rx 1.5`) and of its clip cell (`rx 1`). The fills and the hold line are square
+/// (`fader.meter.fillRadius`), 1 px inside the well.
+pub const CHANNEL_WELL_RADIUS: f32 = spec::METER_WELL_RADIUS;
 pub const CHANNEL_CLIP_RADIUS: f32 = 1.0;
 
 /// The vertical channel meter (Fader > Meter, the mixer's stereo meter): one `surface.inset` well
@@ -286,7 +296,9 @@ pub const CHANNEL_CLIP_RADIUS: f32 = 1.0;
 /// [`fader::FaderLayout::placed`] or [`fader::ChannelScale::placed`]), 0 dB in `line.strong` and the
 /// rest in `line.inset`;
 /// the peak fill in `meter.ok` at 35 percent (`meter.hot` at 35 percent above 0 dBFS), the RMS fill solid on top (`meter.hot` only above
-/// 0 dBFS), a 2 px `text` peak-hold line; above each well, in the fader's top inset, a 4 px clip
+/// 0 dBFS), a 2 px `text` peak-hold line; a source with no RMS reading draws its peak solid, since
+/// its peak is then the level. The fills and the hold line are square, 1 px inside the well (Fills
+/// are square); only the well keeps its 1.5 radius; above each well, in the fader's top inset, a 4 px clip
 /// cell, `meter.hot` while that channel is latched and `line` otherwise. Paints only: the caller owns
 /// the clicks and steps the readings with [`meter_step`].
 pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, marks: &[Option<f32>], channels: &[Channel]) -> ChannelMeterLayout {
@@ -295,6 +307,7 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, marks: &
         peak_color: t.meter_ok.gamma_multiply(spec::METER_PEAK_ALPHA),
         peak_over_color: t.meter_hot.gamma_multiply(spec::METER_PEAK_ALPHA),
         well_radius: CHANNEL_WELL_RADIUS,
+        fill_radius: spec::METER_FILL_RADIUS,
         well_fill: t.surface_inset,
         well_edge: t.line_inset,
         grid_color: t.line_inset,
@@ -310,6 +323,12 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, marks: &
         let reference_y = y_of(0.0, well);
         out.reference_y = reference_y;
         let rad = CHANNEL_WELL_RADIUS;
+        let square = spec::METER_FILL_RADIUS;
+        // The fills sit 1 px inside the well, so they never meet its rounded corners.
+        let inner = well.shrink(1.0);
+        // A source with no RMS reading: its peak is the level, drawn solid.
+        let alpha = if ch.rms_db.is_some() { spec::METER_PEAK_ALPHA } else { spec::METER_PEAK_ALPHA_WITHOUT_RMS };
+        let (peak_ink, peak_over_ink) = (t.meter_ok.gamma_multiply(alpha), t.meter_hot.gamma_multiply(alpha));
         // The draw order inside a well (`fader.meterDrawOrder`): the well and its edge, the grid
         // lines, the peak fill, the solid RMS fill, the hold line; nothing over the level.
         p.rect_filled(well, rad, t.surface_inset);
@@ -323,29 +342,31 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, marks: &
                     .push(r4(Rect::from_min_max(pos2(x, top), pos2(x + channels.len() as f32 * (bar + spec::METER_GAP) - spec::METER_GAP, bottom))));
             }
         }
-        let fill_to = |db: f32| (db > fader::FLOOR_DB).then(|| Rect::from_min_max(pos2(well.min.x, y_of(db, well).max(reference_y)), well.max));
+        let top = |db: f32| y_of(db, well).max(inner.min.y);
+        let fill_to = |db: f32| (db > fader::FLOOR_DB).then(|| Rect::from_min_max(pos2(inner.min.x, top(db).max(reference_y)), inner.max));
+        let over_to = |db: f32| Rect::from_min_max(pos2(inner.min.x, top(db)), pos2(inner.max.x, reference_y));
         let peak = fill_to(ch.peak_db);
         if let Some(r) = peak {
-            p.rect_filled(r, rad, out.peak_color);
+            p.rect_filled(r, square, peak_ink);
         }
-        let peak_over = (ch.peak_db > 0.0).then(|| Rect::from_min_max(pos2(well.min.x, y_of(ch.peak_db, well)), pos2(well.max.x, reference_y)));
+        let peak_over = (ch.peak_db > 0.0).then(|| over_to(ch.peak_db));
         if let Some(r) = peak_over {
-            p.rect_filled(r, 0.0, out.peak_over_color);
+            p.rect_filled(r, square, peak_over_ink);
         }
         let rms = ch.rms_db.and_then(fill_to);
         if let Some(r) = rms {
-            p.rect_filled(r, rad, t.meter_ok);
+            p.rect_filled(r, square, t.meter_ok);
         }
-        let over = ch.rms_db.filter(|db| *db > 0.0).map(|db| Rect::from_min_max(pos2(well.min.x, y_of(db, well)), pos2(well.max.x, reference_y)));
+        let over = ch.rms_db.filter(|db| *db > 0.0).map(over_to);
         if let Some(r) = over {
-            p.rect_filled(r, 0.0, t.meter_hot);
+            p.rect_filled(r, square, t.meter_hot);
         }
         let hold = ch.hold_db.filter(|db| *db > fader::FLOOR_DB).map(|db| {
-            let y = y_of(db, well).clamp(well.min.y + spec::METER_HOLD / 2.0, well.max.y - spec::METER_HOLD / 2.0);
-            Rect::from_min_max(pos2(well.min.x, y - spec::METER_HOLD / 2.0), pos2(well.max.x, y + spec::METER_HOLD / 2.0))
+            let y = y_of(db, well).clamp(inner.min.y + spec::METER_HOLD / 2.0, inner.max.y - spec::METER_HOLD / 2.0);
+            Rect::from_min_max(pos2(inner.min.x, y - spec::METER_HOLD / 2.0), pos2(inner.max.x, y + spec::METER_HOLD / 2.0))
         });
         if let Some(r) = hold {
-            p.rect_filled(r, 0.0, t.text);
+            p.rect_filled(r, square, t.text);
         }
         let cell = Rect::from_min_max(
             pos2(well.min.x, well.min.y - CHANNEL_CLIP_GAP - spec::METER_CLIP_CELL),
@@ -357,6 +378,8 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, marks: &
         out.clip_colors.push(ink);
         out.wells.push(r4(well));
         out.peaks.push(peak.map(r4));
+        out.peak_inks.push(peak_ink);
+        out.peak_over_inks.push(peak_over_ink);
         out.rms.push(rms.map(r4));
         out.over.push(over.map(r4));
         out.peak_over.push(peak_over.map(r4));

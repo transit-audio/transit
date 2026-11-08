@@ -197,7 +197,7 @@ fn the_meter_fills_on_the_taper_and_its_clip_cell_latches_and_clears() {
     // Negative control: the quieter channel's fill tops lower.
     let right = m.peaks[1].expect("a peak fill");
     assert!((right[1] - y(reading[1])).abs() < 0.02 && right[1] > left[1], "{right:?}");
-    assert_eq!(m.grid.len(), 8, "a grid line at each taper mark");
+    assert_eq!(m.grid.len(), crate::widgets::fader::placed_marks(well[3] - well[1]).len(), "a grid line at each placed label");
     // The clip cell: `line` until a peak of 1.0 or more, then `meter.hot` until the readout click.
     assert!(!m.clip && m.clip_colors == [DARK.line, DARK.line]);
     let cell = m.clip_cells[0];
