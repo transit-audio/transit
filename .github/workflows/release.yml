@@ -315,7 +315,8 @@ jobs:
           files: dist/*
           body_path: ${{ runner.temp }}/release-body.md
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          # Every release is a GitHub pre-release while transit is alpha.
+          prerelease: true
           # Generated notes only with the generic body; a notes file is the whole body.
           generate_release_notes: ${{ steps.body.outputs.notes != 'true' }}
 
