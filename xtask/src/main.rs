@@ -104,7 +104,7 @@ const STANDALONE: &[&str] = &[
 // The image crate encodes screenshots (PNG); it is not a UI-only dependency.
 const UI_CRATES: &[&str] = &["egui", "eframe", "winit", "rfd", "egui-wgpu", "egui_glow", "egui_extras", "resvg", "wgpu"];
 // audio-bench is an app over playback and the native backends, not an engine layer.
-const EXEMPT: &[&str] = &["soundcraft", "transit-cli", "transit", "xtask", "audio-bench"];
+const EXEMPT: &[&str] = &["transit-cli", "transit", "xtask", "audio-bench"];
 /// Manifest exceptions to the workspace unsafe forbid (ADR 0013 and its amendments; the oracle's FFI
 /// module per ADR 0033; the libopus FFI module of transit-opus per ADR 0048).
 const UNSAFE_ALLOWED: &[&str] = &[
