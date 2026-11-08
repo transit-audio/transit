@@ -3,7 +3,7 @@ title: The External Instrument is an instrument-slot device; its measured round 
 -->
 # ADR 0020: The External Instrument is an instrument-slot device; its compensation is plan latency in frames
 
-- **Status:** accepted 2026-10-24 (issue #71, slice 3)
+- **Status:** accepted 2026-10-24 (issue #71, slice 3); amendments 2026-10-24 and 2026-10-26
 - **Date:** 2026-10-24
 - **Reopen when:** the latency an External Instrument adds to the whole mix (about 20 ms on the reference chain) gets in the way of playing other instruments live along with it, which asks for sending MIDI early instead (rejected below for v1); a driver whose loop phase changes between opens makes stored figures wrong often enough to need a measure on every open; or offline render is asked to include hardware (it cannot; see decision 9).
 

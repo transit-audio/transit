@@ -3,7 +3,7 @@ title: Built-in instruments are a Rust port of the Mutable Instruments family (P
 -->
 # ADR 0033: Built-in instruments: a port of the Mutable Instruments family
 
-- **Status:** proposed 2026-10-29 (maintainer decision)
+- **Status:** proposed 2026-10-29 (maintainer decision); amendment 2026-10-29, crate naming and the Plaits source decision
 - **Date:** 2026-10-29
 - **Reopen when:** the crates.io evaluation finds no acceptable starting point and the Rust port proves too costly to carry; the upstream license terms change; the null-test residual floor cannot be measured stably on CI hardware; or a product question asks for engines the family does not cover.
 

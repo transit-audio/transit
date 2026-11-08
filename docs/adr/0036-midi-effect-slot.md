@@ -3,7 +3,7 @@ title: MIDI effect slot: `Track::midi_effects` ahead of the instrument (at most 
 -->
 # ADR 0036: MIDI effect slot
 
-- **Status:** proposed 2026-10-30 (#201)
+- **Status:** proposed 2026-10-30 (#201); amendments 2026-11-01 (release priority) and 2026-11-05 (the carry's own-note eviction)
 - **Date:** 2026-10-30
 - **Reopen when:** hosted MIDI effects (CLAP note effects) are wanted, a generator needs more than the fixed carry, keyed plans move off the audio thread (#174) and change where an instrument's events are delivered.
 

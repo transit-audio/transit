@@ -3,7 +3,7 @@ title: Racks layer instruments through track groups: a group sums its members, r
 -->
 # ADR 0034: Racks: layering instruments through track groups
 
-- **Status:** proposed 2026-10-29
+- **Status:** proposed 2026-10-29; amendment 2026-10-30, slice 1 (the model, the distribution and fade rules, macro curves)
 - **Date:** 2026-10-29
 - **Reopen when:** groups cannot carry the macro model or the zones, or keyed plans move off the audio thread (#174) and change the render path.
 
