@@ -26,6 +26,9 @@ pub(crate) struct RawDescriptor {
 pub(crate) struct Bundle {
     entry: *const clap_plugin_entry,
     factory: *const clap_plugin_factory,
+    /// The binary that was opened, and its identity then (see [`identity`]).
+    exe: PathBuf,
+    identity: Option<Identity>,
     // Dropped last: the library must outlive every pointer above.
     _lib: libloading::Library,
 }
@@ -41,21 +44,54 @@ fn loaded() -> &'static Mutex<HashMap<PathBuf, Arc<Bundle>>> {
     L.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Size, modification time and, on Unix, the device and inode of a binary: a file rewritten in
+/// place or renamed over the one loaded before changes at least one of them (#348).
+type Identity = (u64, std::time::SystemTime, u64, u64);
+
+fn identity(exe: &Path) -> Option<Identity> {
+    let m = std::fs::metadata(exe).ok()?;
+    #[cfg(unix)]
+    let (dev, ino) = {
+        use std::os::unix::fs::MetadataExt as _;
+        (m.dev(), m.ino())
+    };
+    // Windows refuses to write a loaded DLL in place; size and time cover a rename-over.
+    #[cfg(not(unix))]
+    let (dev, ino) = (0, 0);
+    Some((m.len(), m.modified().ok()?, dev, ino))
+}
+
 impl Bundle {
     /// Loads (once per path, then cached for the life of the process) and initialises a `.clap`.
+    /// A binary that changed on disk since it loaded is refused, never served from the cache
+    /// (#348): written over in place, the cached code is no longer what the file holds; renamed
+    /// over, the library loader hands back the old code for the same path while it stays loaded.
     pub fn load(path: &Path) -> Result<Arc<Bundle>, ClapError> {
-        let mut map = loaded().lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(b) = map.get(path) {
-            return Ok(b.clone());
+        let b = {
+            let mut map = loaded().lock().unwrap_or_else(PoisonError::into_inner);
+            match map.get(path) {
+                Some(b) => b.clone(),
+                None => {
+                    let b = Arc::new(Bundle::open(path)?);
+                    map.insert(path.to_path_buf(), b.clone());
+                    return Ok(b);
+                }
+            }
+        };
+        // Every cached bundle, also one another thread opened while this one waited for the lock,
+        // is checked here, outside the lock: a stalled file system must not hold up other loads.
+        if b.identity != identity(&b.exe) {
+            let m = "changed on disk or was removed since transit loaded it; restart transit to load it again";
+            return Err(ClapError::Load(path.display().to_string(), m.into()));
         }
-        let b = Arc::new(Bundle::open(path)?);
-        map.insert(path.to_path_buf(), b.clone());
         Ok(b)
     }
 
     fn open(path: &Path) -> Result<Bundle, ClapError> {
         let err = |m: String| ClapError::Load(path.display().to_string(), m);
         let exe = scan::bundle_executable(path).ok_or_else(|| err("no loadable binary".into()))?;
+        // Read before the library loads: a file that changes meanwhile then reads as changed.
+        let identity = identity(&exe);
         // SAFETY: loading a shared library runs its static initialisers. That is inherent to
         // hosting plugins; we only load files found in CLAP plugin folders or named explicitly.
         let lib = unsafe { libloading::Library::new(&exe) }.map_err(|e| err(e.to_string()))?;
@@ -89,7 +125,7 @@ impl Bundle {
             }
             return Err(err("no plugin factory".into()));
         }
-        Ok(Bundle { entry, factory, _lib: lib })
+        Ok(Bundle { entry, factory, exe, identity, _lib: lib })
     }
 
     fn factory(&self) -> clap_plugin_factory {
@@ -242,5 +278,52 @@ mod tests {
         assert_eq!(HOST_NAME, c"transit");
         assert_eq!(HOST_VENDOR, c"transit contributors");
         assert_eq!(HOST_URL, c"https://github.com/transit-audio/transit");
+    }
+
+    /// #348: a plug-in file rewritten in place after it loaded (an installer, or a new build
+    /// copied over it) is refused, not served from the cache, also once nothing holds the bundle
+    /// loaded before; that bundle is never unloaded (an instance's code stays mapped).
+    #[test]
+    fn a_file_rewritten_after_load_is_not_served_from_the_cache() {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        crate::set_scan_extra_dirs_only(true);
+        let fixture = crate::scan_paths(&[super::super::fixture::unregistered_fixture_dir().to_path_buf()]);
+        let bytes = std::fs::read(scan::bundle_executable(&fixture[0].path).unwrap()).unwrap();
+        // A private copy: the in-place rewrite below must not touch a file other tests map.
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        // Beside the fixture's own install, where binaries may run (a temp folder can be noexec).
+        let root = super::super::fixture::unregistered_fixture_dir().parent().unwrap();
+        let dir = root.join(format!("clap-rewrite-{}-{nanos}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("Fixture.clap");
+        // The binary, inside a bundle on macOS as installed there.
+        let file = if cfg!(target_os = "macos") { path.join("Contents/MacOS/Fixture") } else { path.clone() };
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        // Modification times the test sets (E60).
+        let stamp = |at: SystemTime| std::fs::File::options().write(true).open(&file).unwrap().set_modified(at).unwrap();
+        let t0 = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        std::fs::write(&file, &bytes).unwrap();
+        stamp(t0);
+        let first = Bundle::load(&path).unwrap();
+        assert_eq!(first.descriptors().len(), 2);
+        assert!(Arc::ptr_eq(&first, &Bundle::load(&path).unwrap()), "an unchanged file is served from the cache");
+        // On Unix the same bytes are written over the loaded file in place, without truncating:
+        // a truncation drops the loaded copy's relocated pages (the #348 crash itself). Windows
+        // refuses to write a loaded DLL, so there it is renamed aside and copied anew.
+        if cfg!(unix) {
+            use std::io::Write as _;
+            std::fs::File::options().write(true).open(&file).unwrap().write_all(&bytes).unwrap();
+        } else {
+            std::fs::rename(&file, file.with_extension("old")).unwrap();
+            std::fs::write(&file, &bytes).unwrap();
+        }
+        stamp(t0 + Duration::from_secs(1));
+        let changed = |b: Result<Arc<Bundle>, ClapError>| matches!(b, Err(ClapError::Load(_, m)) if m.contains("changed on disk"));
+        assert!(changed(Bundle::load(&path)), "served while the bundle is held, as an instance holds it");
+        let old = Arc::downgrade(&first);
+        drop(first);
+        assert!(changed(Bundle::load(&path)), "served once nothing holds the bundle");
+        assert!(old.upgrade().is_some(), "the bundle loaded before was unloaded");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
