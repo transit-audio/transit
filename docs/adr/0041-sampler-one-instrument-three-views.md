@@ -1063,14 +1063,14 @@ stored as 1)`). The
 field offers 1 to 4,294,967,295 and writes 1 for 0 (design round 2). A file whose stored seed is
 0 is not rewritten on open; it plays as 1 and the queries report 1.
 
-**12. Deferred by design, named.** In 0.7.0: no zone table (the key map and the Zone and Group
-panels are the editor); fades are drawn on the key map but not dragged (the Zone panel's four
-fields edit them); no 64-cell slice strip (the flag strip selects, the selection line names the
-slice, and moving a slice between pads is the Pads view's drag); loop points inside a slice
-(item 1); and the open states of the Shaper and Modulation section bars, which stay collapsed
-bars as the Pads view has them. Each is tracked in the issue tracker (v0.7.1) and reopens on a
-maintainer request or at the next Sampler design round; the zone table also reopens when SFZ
-import (#271) makes large maps common.
+**12. Deferred by design, named.** In 0.7.0: no zone table, the key map and the Zone and Group
+panels being the editor (#387); fades drawn on the key map but not dragged, the Zone panel's four
+fields editing them (#388); no 64-cell slice strip, the flag strip selecting, the selection line
+naming the slice and the Pads view's drag moving a slice between pads (#389); no loop points
+inside a slice (item 1, #390); and no open states for the Shaper and Modulation section bars,
+which stay collapsed bars as the Pads view has them (#391). Each reopens on a maintainer request
+or at the next Sampler design round; the zone table also reopens when SFZ import (#271) makes
+large maps common.
 
 **Pads view bar: Load kit… and Expand to rack….** **Expand to rack…** is shown disabled at the
 unused-control alpha, with a tooltip saying it is not available yet, until #272 lands; it then
@@ -1082,7 +1082,9 @@ defaults, referenced by path (the save model's default); an SFZ in the folder is
 executed (#271). It decodes off-thread through the import transaction, refuses through the
 existing admission rules (capacity previewed and refused without truncating, the in-memory and
 aggregate media bounds, an unreadable file refusing the whole load and naming it), is one undo
-step, and on a legacy one-sample patch is disabled behind the Notice's **New Kit**.
+step, and on a legacy one-sample patch is disabled behind the Notice's **New Kit**. Per-zone
+color on the key map (zones stay neutral `surface.raised` until then, as design round 2 notes) is
+#392.
 
 **Validator changes.** The body says to reject an invalid new edit and, on load, to preserve an
 invalid patch opaquely (silent). For exactly the following cases that rule is replaced: the
