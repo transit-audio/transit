@@ -99,6 +99,8 @@ mod low_latency;
 pub use low_latency::{SlotLatencies, low_latency_bypass, low_latency_frames};
 mod matrix;
 mod meter_rms;
+#[cfg(test)]
+mod meter_rms_tests;
 pub use meter_rms::RMS_WINDOW_MS;
 use meter_rms::RmsWindow;
 mod midi;

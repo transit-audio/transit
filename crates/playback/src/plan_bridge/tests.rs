@@ -161,6 +161,44 @@ fn meter_snapshots_follow_confirmed_layout_and_clear_without_audio_heap_work() {
     control.retire(audio);
 }
 
+/// #395: the per-channel RMS rides the same publication as the peaks: the control side's snapshot
+/// carries it per channel (and the stereo pair), the callback publishes it without heap work, and
+/// clearing zeroes it.
+#[test]
+fn meter_snapshots_carry_the_rms_per_channel() {
+    let (mut control, mut audio) = plan_bridge::pair(target(), PlanLimits::default());
+    let mut s = Session::default();
+    let track = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+    let channels = vec![vec![0.25f32; 48_000], vec![-0.5f32; 48_000]];
+    s.pool.insert(SourceId(6), Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels })));
+    let clip = s.new_clip_id();
+    s.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(Clip::audio(clip, "dc", SourceId(6), 0, 0, 48_000));
+    control.request(Arc::new(s), None);
+    control.prepare(&mut make).unwrap();
+    adopt(&mut audio);
+    // 300 ms at 48 kHz is 14 400 frames: 32 blocks of 512 fill the window.
+    let ((), stats) = measure(|| {
+        for block in 0..32i64 {
+            audio.render(block * 512, 512);
+        }
+    });
+    assert!(stats.is_zero(), "{stats:?}");
+    control.poll();
+    let mut meters = MeterSnapshot::default();
+    control.copy_meters(&mut meters);
+    let m = &meters.tracks[&track];
+    assert_eq!(m.rms_channels.len(), 2);
+    assert!((m.rms_channels[0] - 0.25).abs() < 1e-4 && (m.rms_channels[1] - 0.5).abs() < 1e-4, "{:?}", m.rms_channels);
+    assert_eq!(m.rms, [m.rms_channels[0], m.rms_channels[1]]);
+    assert_eq!(meters.main.rms_channels.len(), meters.main.peaks.len());
+    assert!(meters.main.rms[0] > 0.1, "the main bus: {:?}", meters.main.rms);
+    let ((), stats) = measure(|| audio.clear_meters());
+    assert!(stats.is_zero());
+    control.copy_meters(&mut meters);
+    assert_eq!((meters.tracks[&track].rms, meters.main.rms), ([0.0; 2], [0.0; 2]));
+    control.retire(audio);
+}
+
 #[test]
 fn target_and_storage_limits_reject_before_factories_or_active_changes() {
     let (mut control, audio) = plan_bridge::pair(target(), PlanLimits { tracks: 0, ..PlanLimits::default() });

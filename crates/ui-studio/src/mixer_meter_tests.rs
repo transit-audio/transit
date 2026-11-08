@@ -197,3 +197,52 @@ fn a_new_document_does_not_inherit_the_last_documents_meters() {
     step(&mut app, &ctx, &mut time, 50);
     assert_idle(&app, idle, "the new document's idle instrument track");
 }
+
+/// #395: the engine's per-channel RMS reaches the UI snapshot, the strip's meter state and the
+/// solid RMS layer, end to end through a device-free Player. A full-scale sine on the left reads
+/// −3.01 dBFS RMS at a 0 dBFS peak; a half-scale square on the right reads −6.02 for both.
+#[test]
+fn the_strip_meter_draws_the_engines_rms() {
+    use transit_model::SourceId;
+    let mut app = app();
+    let t = new_track(&mut app, json!({"kind": "audio", "format": "stereo"}));
+    {
+        let demo = transit_engine::demo::demo_session();
+        let mut buf = demo.pool.get(demo.pool.ids().next().unwrap()).unwrap().buffer.clone();
+        let len = 480_000usize;
+        let sine: Vec<f32> = (0..len).map(|i| (std::f32::consts::TAU * (i % 48) as f32 / 48.0).sin()).collect();
+        let square: Vec<f32> = (0..len).map(|i| if (i / 24) % 2 == 0 { 0.5 } else { -0.5 }).collect();
+        (buf.sample_rate, buf.channels) = (48_000, vec![sine, square]);
+        let s = app.engine.session_mut();
+        s.pool.insert(SourceId(1), std::sync::Arc::new(transit_model::SourceAudio::new(buf)));
+        let id = s.new_clip_id();
+        s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::audio(id, "x", SourceId(1), 0, 0, len as i64));
+    }
+    app.ui.show_mixer = true;
+    app.player = Some(transit_playback::Player::prepare_device_free(app.engine.session_arc()).unwrap());
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    frames(&mut app, &ctx, 3, &mut time);
+    // Silence first: no RMS layer.
+    step(&mut app, &ctx, &mut time, 10);
+    assert!(strip(&app, t).meter_layout.unwrap().rms.iter().all(Option::is_none), "stopped: silence");
+    app.run("transport.play", json!({})).unwrap();
+    // 100 blocks of 512 frames: past the 14 400-frame window.
+    step(&mut app, &ctx, &mut time, 100);
+    let db = |lin: f32| 20.0 * lin.log10();
+    let snap = &app.meter_snapshot.tracks[&t];
+    assert_eq!(snap.rms_channels.len(), 2, "the snapshot carries an RMS per channel");
+    let rms = app.meters[&t].rms.map(db);
+    assert!((rms[0] + 3.01).abs() < 0.05 && (rms[1] + 6.02).abs() < 0.05, "the strip's RMS: {rms:?}");
+    let s = strip(&app, t);
+    let m = s.meter_layout.clone().expect("the meter");
+    let well = m.wells[0];
+    let y = |db: f32| well[1] + crate::widgets::fader::taper(db) * (well[3] - well[1]);
+    for (c, want) in [(0, rms[0]), (1, rms[1])] {
+        let fill = m.rms[c].unwrap_or_else(|| panic!("channel {c}: a solid RMS layer"));
+        assert!((fill[1] - y(want)).abs() < 0.02, "channel {c}: the RMS fill tops at {want} dB on the taper: {fill:?}");
+    }
+    // Negative control: the sine's RMS fill tops below its peak fill.
+    let (peak, sine_rms) = (m.peaks[0].unwrap(), m.rms[0].unwrap());
+    assert!(sine_rms[1] > peak[1] + 1.0, "RMS below peak: {sine_rms:?} {peak:?}");
+}

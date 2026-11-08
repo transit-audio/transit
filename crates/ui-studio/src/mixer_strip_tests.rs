@@ -191,7 +191,7 @@ fn the_meter_fills_on_the_taper_and_its_clip_cell_latches_and_clears() {
     assert!((left[1] - y(reading[0])).abs() < 0.02, "the peak fill tops at the reading on the taper: {left:?}");
     assert!((mid(m.holds[0].unwrap()).1 - y(20.0 * 0.5f32.log10())).abs() < 0.02, "the hold line stays at the -6 dB peak");
     assert_eq!(m.peak_color, DARK.meter_ok.gamma_multiply(0.35), "meter.ok at 35 percent");
-    assert!(m.rms.iter().all(Option::is_none), "the engine publishes peaks only: no RMS layer");
+    assert!(m.rms.iter().all(Option::is_none), "no RMS fed (only peaks): no RMS layer");
     let hold = m.holds[0].expect("a hold line");
     assert_eq!(hold[3] - hold[1], 2.0, "the 2 px hold line");
     // Negative control: the quieter channel's fill tops lower.
