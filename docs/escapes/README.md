@@ -35,3 +35,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E74: a window manager moved a test's plug through a reused window id (#346)](E74-a-window-manager-moved-a-test-plug-through-a-reused-window-id.md)
 - [E75: an input open looked up the native factory off Windows (#354)](E75-an-input-open-looked-up-the-native-factory-off-windows.md)
 - [E76: a shutdown test let the bound decide an idle worker's fate (#346)](E76-a-shutdown-test-let-the-bound-decide-an-idle-worker.md)
+- [E77: a diagnostics test assumed the output thread's poll had run (#410)](E77-a-diagnostics-test-assumed-the-output-poll-had-run.md)

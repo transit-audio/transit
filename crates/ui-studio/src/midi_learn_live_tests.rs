@@ -50,7 +50,10 @@ impl T {
     }
 
     /// Frames until `ready`, sending `cc` (CC 74 on channel 1) before each when given.
+    /// Every state these tests assert that a worker thread produces (the ingress worker, the MIDI
+    /// thread, the output thread's port poll) is waited for here, never assumed after some frames.
     fn until(&mut self, what: &str, port: &FakeInputPort, cc: Option<u8>, mut ready: impl FnMut(&StudioApp) -> bool) {
+        // timing: stall-bound ten seconds catches a stuck worker or port; success always requires the named state
         let deadline = Instant::now() + Duration::from_secs(10);
         while !ready(&self.app) {
             assert!(Instant::now() < deadline, "did not reach: {what} (status: {})", self.app.status);
@@ -156,6 +159,7 @@ fn the_diagnostics_report_lists_the_live_midi_ports_mappings_and_last_source() {
     t.until("the knob is learned", &port, Some(10), |app| !app.engine.session().midi_mappings.is_empty());
     t.until("the mapping is in force", &port, None, |app| app.midi_learn.resolved_len() == 1);
     // A note on channel 3 after the knob on channel 1: the last one counts.
+    // timing: stall-bound ten seconds catches a stuck worker; success always requires the note heard
     let deadline = Instant::now() + Duration::from_secs(10);
     while t.app.player.as_ref().unwrap().midi_activity().0.bytes[0] & 0x0F != 2 {
         assert!(Instant::now() < deadline, "the note is not heard");
@@ -163,6 +167,11 @@ fn the_diagnostics_report_lists_the_live_midi_ports_mappings_and_last_source() {
         port.deliver(0, &[0x82, 60, 0]);
         t.frames(1);
     }
+    // The output ports come from the output thread's own periodic poll, not from the inputs'
+    // worker: wait until that poll has listed the port, in the status the report reads (#410).
+    t.until("the output thread lists the output port", &port, None, |app| {
+        app.player.as_ref().unwrap().midi_status().is_ok_and(|s| s.output.ports.iter().any(|p| p.display_name == "Model 12"))
+    });
     let lines = t.app.diagnostics_midi().lines();
     assert_eq!(
         lines,
