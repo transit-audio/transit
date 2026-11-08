@@ -29,8 +29,28 @@ pub(crate) struct Bundle {
     /// Set when plugin objects were leaked on purpose (see [`EditorLink::kill`]): the module exit
     /// must not run while any of its objects are alive.
     leaked: AtomicBool,
+    /// The binary that was opened, and its identity then (see [`identity`]).
+    exe: PathBuf,
+    identity: Option<Identity>,
     // Never closed: code stays mapped for the process lifetime, even after the module exit.
     _lib: ManuallyDrop<libloading::Library>,
+}
+
+/// Size, modification time and, on Unix, the device and inode of a binary: a file rewritten in
+/// place or renamed over the one loaded before changes at least one of them.
+type Identity = (u64, std::time::SystemTime, u64, u64);
+
+fn identity(exe: &Path) -> Option<Identity> {
+    let m = std::fs::metadata(exe).ok()?;
+    #[cfg(unix)]
+    let (dev, ino) = {
+        use std::os::unix::fs::MetadataExt as _;
+        (m.dev(), m.ino())
+    };
+    // Windows refuses to write a loaded DLL in place; size and time cover a rename-over.
+    #[cfg(not(unix))]
+    let (dev, ino) = (0, 0);
+    Some((m.len(), m.modified().ok()?, dev, ino))
 }
 
 /// Loaded binaries, oldest first (module exits run newest first, the reverse of loading).
@@ -347,26 +367,38 @@ impl Bundle {
     /// The module entry and `GetPluginFactory` run without the cache lock (K38): a module entry
     /// that never returns blocks later loads of the same binary only, which wait for it; other
     /// binaries load meanwhile. The bundle is cached under the lock once it is open.
+    ///
+    /// A binary that changed on disk since it loaded is refused, never served from the cache:
+    /// written over in place, the cached code is no longer what the file holds; renamed over, the
+    /// library loader hands back the old code for the same path while it stays loaded.
     pub fn load(path: &Path) -> Result<Arc<Bundle>, Vst3Error> {
         let err = |m: &str| Vst3Error::Load(path.display().to_string(), m.to_string());
         let cached = || loaded().lock().unwrap_or_else(PoisonError::into_inner).iter().find(|(p, _)| p == path).map(|(_, b)| b.clone());
-        // Claim the binary, or wait for the thread that is opening it and take its result.
+        // Claim the binary (`Ok`), or wait for the thread that is opening it and take its result
+        // from the cache (`Err`).
         let claim = {
             let (list, done) = opening();
             let mut list = list.lock().unwrap_or_else(PoisonError::into_inner);
             loop {
                 if let Some(b) = cached() {
-                    return Ok(b);
+                    break Err(b);
                 }
                 if MODULES_EXITED.load(Ordering::Acquire) {
                     return Err(err("plugin hosting has shut down"));
                 }
                 if !list.iter().any(|p| p == path) {
                     list.push(path.to_path_buf());
-                    break Opening(path);
+                    break Ok(Opening(path));
                 }
                 list = done.wait(list).unwrap_or_else(PoisonError::into_inner);
             }
+        };
+        let claim = match claim {
+            Ok(claim) => claim,
+            // Every cached result, also one another thread opened while this one waited, is
+            // checked here, outside every lock: a stalled file system must not hold up other loads.
+            Err(b) if b.identity == identity(&b.exe) => return Ok(b),
+            Err(_) => return Err(err("changed on disk or was removed since transit loaded it; restart transit to load it again")),
         };
         let b = if on_main_thread() {
             Bundle::open(path, EntryThread::Here(os_thread()))?
@@ -392,6 +424,8 @@ impl Bundle {
     fn open(path: &Path, entered_on: EntryThread) -> Result<Bundle, Vst3Error> {
         let err = |m: String| Vst3Error::Load(path.display().to_string(), m);
         let exe = scan::bundle_binary(path).ok_or_else(|| err("no loadable binary".into()))?;
+        // Read before the library loads: a file that changes meanwhile then reads as changed.
+        let identity = identity(&exe);
         let (lib, exit) = open_library(path, &exe).map_err(err)?;
         // The module entry ran: balance it before giving up on the module.
         let fail = |m: String| {
@@ -411,7 +445,7 @@ impl Bundle {
         // SAFETY: a non-null result is a factory pointer with one reference owned by the caller
         // (VST3 contract), which the `ComPtr` takes over.
         let factory = unsafe { ComPtr::from_raw(raw) }.ok_or_else(|| fail("GetPluginFactory returned null".into()))?;
-        Ok(Bundle { factory, exit, entered_on, leaked: AtomicBool::new(false), _lib: ManuallyDrop::new(lib) })
+        Ok(Bundle { factory, exit, entered_on, leaked: AtomicBool::new(false), exe, identity, _lib: ManuallyDrop::new(lib) })
     }
 
     /// Releases the factory, then runs the module exit, as the VST3 SDK's own host does.
@@ -591,4 +625,58 @@ pub(super) fn tuid_bytes(t: &sb::TUID) -> [u8; 16] {
 /// Upper-case hex of a class id (the form used in `vst3:<hex>` ids).
 pub(crate) fn hex(cid: &[u8; 16]) -> String {
     cid.iter().map(|b| format!("{b:02X}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `.vst3` binary rewritten after it loaded (an installer, or a new build copied over it)
+    /// is refused, not served from the cache, also once nothing holds the bundle loaded before;
+    /// that bundle stays cached (its module exit still runs at process exit). Issue #380, the VST3 twin
+    /// of #348.
+    #[test]
+    fn a_binary_rewritten_after_load_is_not_served_from_the_cache() {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        crate::set_scan_extra_dirs_only(true);
+        let fixture = crate::scan_paths(&[super::super::fixture::unregistered_fixture_dir().to_path_buf()]);
+        let shared = scan::bundle_binary(&fixture[0].path).unwrap();
+        let bytes = std::fs::read(&shared).unwrap();
+        // A private copy of the bundle: the rewrite below must not touch a file other tests map.
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        // Beside the fixture's own install, where binaries may run (a temp folder can be noexec).
+        let root = super::super::fixture::unregistered_fixture_dir().parent().unwrap();
+        let dir = root.join(format!("vst3-rewrite-{}-{nanos}", std::process::id()));
+        let path = dir.join("Fixture.vst3");
+        let file = path.join(shared.strip_prefix(&fixture[0].path).unwrap());
+        // `create_dir` refuses a folder that exists instead of reusing it (E51).
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        // Modification times the test sets (E60).
+        let stamp = |at: SystemTime| std::fs::File::options().write(true).open(&file).unwrap().set_modified(at).unwrap();
+        let t0 = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        std::fs::write(&file, &bytes).unwrap();
+        stamp(t0);
+        let first = Bundle::load(&path).unwrap();
+        assert!(!first.classes().is_empty());
+        assert!(Arc::ptr_eq(&first, &Bundle::load(&path).unwrap()), "an unchanged binary is served from the cache");
+        // On Unix the same bytes are written over the loaded file in place, without truncating:
+        // a truncation drops the loaded copy's relocated pages. Windows refuses to write a loaded
+        // DLL, so there it is renamed aside and copied anew.
+        if cfg!(unix) {
+            use std::io::Write as _;
+            std::fs::File::options().write(true).open(&file).unwrap().write_all(&bytes).unwrap();
+        } else {
+            std::fs::rename(&file, file.with_extension("old")).unwrap();
+            std::fs::write(&file, &bytes).unwrap();
+        }
+        stamp(t0 + Duration::from_secs(1));
+        let changed = |b: Result<Arc<Bundle>, Vst3Error>| matches!(b, Err(Vst3Error::Load(_, m)) if m.contains("changed on disk"));
+        assert!(changed(Bundle::load(&path)), "served while the bundle is held, as an instance holds it");
+        let old = Arc::downgrade(&first);
+        drop(first);
+        assert!(changed(Bundle::load(&path)), "served once nothing holds the bundle");
+        assert!(old.upgrade().is_some(), "the bundle loaded before left the cache");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
