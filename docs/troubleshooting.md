@@ -245,7 +245,7 @@ Three ways, from least to most effort:
    ```
 
    Order of precedence: `--log`, then `--verbose`, then `RUST_LOG`, then the built-in setting
-   (`warn,soundcraft*=info,transit*=info`). `--verbose` together with `--log` uses the directives of
+   (`warn,transit*=info`). `--verbose` together with `--log` uses the directives of
    `--log` and still raises transit's own messages to debug.
 
 ## Watching the log in a terminal

@@ -6,18 +6,18 @@
 //! audio devices that failed to open or broke, plugins that refused their stored state or failed
 //! to activate, CLAP plugins' own log messages, decode errors on import) vanished. A launch from a
 //! desktop menu has no terminal, so the file is what a bug report can attach:
-//! `<settings dir>/logs/soundcraft.log`, beside `ui.json`, `Autosave/` and `Presets/`. Each start
-//! moves the previous log to `soundcraft.1.log` (and that one to `.2`), so the log of a run that
-//! crashed survives the next launch. Runs without preferences (`SOUNDCRAFT_NO_PREFS`, agents' test
+//! `<settings dir>/logs/transit.log`, beside `ui.json`, `Autosave/` and `Presets/`. Each start
+//! moves the previous log to `transit.1.log` (and that one to `.2`), so the log of a run that
+//! crashed survives the next launch. Runs without preferences (`TRANSIT_NO_PREFS`, agents' test
 //! runs) log to standard error only, so they don't rotate away the user's own logs.
 //!
-//! Levels: `info` for SoundCraft's own crates, `warn` for everything else (wgpu and naga are
+//! Levels: `info` for transit's own crates, `warn` for everything else (wgpu and naga are
 //! chatty). `RUST_LOG` replaces that with env_logger-style directives: `debug`,
 //! `warn,transit_mix=trace`, `wgpu_core=info`. A directive ending in `*` matches every target
-//! that starts with it (`soundcraft*=debug`).
+//! that starts with it (`transit*=debug`).
 //!
 //! Choosing the filter (issue #84), strongest first: `--log <directives>` (the same syntax), then
-//! `--verbose` (the default filter with debug for every soundcraft and transit target), then
+//! `--verbose` (the default filter with debug for every transit target), then
 //! `RUST_LOG`, then the default ([`resolve`]). Help > Debug Logging raises our targets to debug for
 //! the rest of the session without a restart and puts them back ([`AppLogger::set_debug`]); the
 //! filter the logger reads is the startup one plus that one atomic switch.
@@ -53,16 +53,16 @@ use log::LevelFilter;
 pub const LOG_FILE: &str = "transit.log";
 /// The log directory inside the settings directory.
 pub const LOG_DIR: &str = "logs";
-/// How many previous logs are kept (`soundcraft.1.log` … `soundcraft.<KEEP>.log`).
+/// How many previous logs are kept (`transit.1.log` … `transit.<KEEP>.log`).
 pub const KEEP: usize = 2;
 /// The log file stops growing past this size (a runaway warning can't fill the disk).
 pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 /// Records kept in memory until the log file is attached.
 pub const MAX_PENDING: usize = 512;
 /// The built-in filter when `RUST_LOG` is unset or empty.
-pub const DEFAULT_FILTER: &str = "warn,soundcraft*=info,transit*=info";
+pub const DEFAULT_FILTER: &str = "warn,transit*=info";
 /// The targets `--verbose` and Help > Debug Logging raise to debug: every crate of ours.
-const OWN_TARGET_PREFIXES: [&str; 2] = ["soundcraft", "transit"];
+const OWN_TARGET_PREFIXES: [&str; 1] = ["transit"];
 /// The longest message kept from the audio thread (longer ones are cut, marked with `…`).
 pub const REALTIME_MESSAGE_BYTES: usize = 480;
 /// The longest target kept from the audio thread.
@@ -134,7 +134,7 @@ impl Source {
 /// The logging flags of the command line.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LogArgs {
-    /// `--verbose`: debug for every soundcraft and transit target.
+    /// `--verbose`: debug for every transit target.
     pub verbose: bool,
     /// `--log <directives>` (or `--log=<directives>`).
     pub log: Option<String>,
@@ -507,7 +507,7 @@ impl AppLogger {
         }
     }
 
-    /// No log file this run (no settings directory, `SOUNDCRAFT_NO_PREFS`, or the directory can't
+    /// No log file this run (no settings directory, `TRANSIT_NO_PREFS`, or the directory can't
     /// be used): stop keeping records for one.
     pub fn no_file(&self) {
         self.sink.lock().unwrap_or_else(PoisonError::into_inner).no_file();
@@ -608,15 +608,25 @@ mod tests {
     }
 
     #[test]
-    fn the_default_filter_shows_soundcraft_info_and_other_crates_warnings() {
+    fn the_default_filter_shows_transit_info_and_other_crates_warnings() {
         let f = Filter::parse(DEFAULT_FILTER);
-        assert_eq!(f.level_for("soundcraft"), LevelFilter::Info);
-        assert_eq!(f.level_for("soundcraft::control_server"), LevelFilter::Info);
+        assert_eq!(f.level_for("transit"), LevelFilter::Info);
+        assert_eq!(f.level_for("transit::control_server"), LevelFilter::Info);
+        assert_eq!(f.level_for("soundcraft"), LevelFilter::Warn, "the inherited prefix is not ours any more");
         assert_eq!(f.level_for("transit_playback"), LevelFilter::Info);
         assert_eq!(f.level_for("transit_clap_host::ffi"), LevelFilter::Info);
         assert_eq!(f.level_for("wgpu_core::device"), LevelFilter::Warn);
         assert_eq!(f.level_for("cpal"), LevelFilter::Warn);
         assert_eq!(f.max(), LevelFilter::Info);
+    }
+
+    #[test]
+    fn only_transit_targets_are_our_own() {
+        assert!(is_own_target("transit"));
+        assert!(is_own_target("transit_mix::render"));
+        assert!(!is_own_target("soundcraft"));
+        assert!(!is_own_target("soundcraft_playback"));
+        assert!(!is_own_target("wgpu_core"));
     }
 
     #[test]
@@ -648,13 +658,13 @@ mod tests {
             "=",
             "==",
             "=debug",
-            "soundcraft=",
+            "transit=",
             "nonsense=loud",
             "🦀=info",
             "*",
             "*=debug",
             "a=b=c",
-            "warn,,soundcraft=DEBUG",
+            "warn,,transit=DEBUG",
             " \t ",
             "\u{0}",
             "é*=trace",
@@ -662,12 +672,12 @@ mod tests {
         ];
         for spec in specs {
             let f = Filter::parse(spec);
-            for target in ["soundcraft", "", "🦀", "é", "a::b"] {
+            for target in ["transit", "", "🦀", "é", "a::b"] {
                 let _ = f.level_for(target);
             }
             let _ = f.max();
         }
-        assert_eq!(Filter::parse("warn,,soundcraft=DEBUG").level_for("soundcraft"), LevelFilter::Debug);
+        assert_eq!(Filter::parse("warn,,transit=DEBUG").level_for("transit"), LevelFilter::Debug);
         assert_eq!(Filter::parse("nonsense=loud").level_for("nonsense"), LevelFilter::Error);
         assert_eq!(Filter::parse("=debug").max(), LevelFilter::Error, "a directive without a name is skipped");
         assert_eq!(Filter::parse("*=debug").level_for("anything"), LevelFilter::Debug, "a lone `*` matches every target");
@@ -858,16 +868,16 @@ mod tests {
     fn the_logger_filters_records_and_writes_them_to_the_attached_file() {
         let dir = temp_dir("logger");
         let logger = AppLogger::new(Filter::parse(DEFAULT_FILTER), false);
-        record(&logger, log::Level::Info, "soundcraft", "SoundCraft starting");
+        record(&logger, log::Level::Info, "transit", "transit starting");
         record(&logger, log::Level::Info, "wgpu_core::device", "too chatty");
         let path = logger.attach_dir(&dir).expect("attach");
         assert_eq!(path, dir.join(LOG_FILE));
         record(&logger, log::Level::Warn, "wgpu_hal::vulkan", "a real warning");
-        record(&logger, log::Level::Debug, "soundcraft", "below info");
+        record(&logger, log::Level::Debug, "transit", "below info");
         let text = read(&path);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
-        assert!(lines.first().is_some_and(|l| l.contains(" INFO  [") && l.ends_with("soundcraft: SoundCraft starting")), "{text}");
+        assert!(lines.first().is_some_and(|l| l.contains(" INFO  [") && l.ends_with("transit: transit starting")), "{text}");
         assert!(lines.get(1).is_some_and(|l| l.ends_with("wgpu_hal::vulkan: a real warning")), "{text}");
         assert!(logger.enabled(&log::Metadata::builder().level(log::Level::Info).target("transit_engine").build()));
         assert!(!logger.enabled(&log::Metadata::builder().level(log::Level::Info).target("naga").build()));
@@ -887,14 +897,14 @@ mod tests {
             for _ in 0..4 {
                 s.spawn(|| {
                     for _ in 0..100 {
-                        record(&logger, log::Level::Info, "soundcraft", "from a worker");
+                        record(&logger, log::Level::Info, "transit", "from a worker");
                     }
                 });
             }
         });
         let text = read(&path);
         assert_eq!(text.lines().count(), 400);
-        assert!(text.lines().all(|l| l.ends_with("soundcraft: from a worker")), "{text}");
+        assert!(text.lines().all(|l| l.ends_with("transit: from a worker")), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -903,7 +913,7 @@ mod tests {
         let dir = temp_dir("unusable");
         std::fs::write(&dir, "not a directory").expect("block");
         let logger = AppLogger::new(Filter::parse("info"), false);
-        record(&logger, log::Level::Info, "soundcraft", "kept for a file");
+        record(&logger, log::Level::Info, "transit", "kept for a file");
         let e = logger.attach_dir(&dir).expect_err("a file is not a log directory");
         assert!(e.contains(&dir.display().to_string()), "{e}");
         record(&logger, log::Level::Error, "x", "still fine");
@@ -916,9 +926,9 @@ mod tests {
     #[test]
     fn a_run_without_a_log_file_keeps_nothing_for_one() {
         let logger = AppLogger::new(Filter::parse("info"), false);
-        record(&logger, log::Level::Info, "soundcraft", "early");
+        record(&logger, log::Level::Info, "transit", "early");
         logger.no_file();
-        record(&logger, log::Level::Info, "soundcraft", "late");
+        record(&logger, log::Level::Info, "transit", "late");
         let sink = logger.sink.lock().expect("sink");
         assert!(sink.file.is_none() && sink.pending.is_empty() && sink.dropped == 0);
     }
@@ -933,7 +943,7 @@ mod tests {
             panic!("poison the sink");
         }));
         assert!(logger.sink.is_poisoned());
-        record(&logger, log::Level::Info, "soundcraft", "after the panic");
+        record(&logger, log::Level::Info, "transit", "after the panic");
         assert!(read(&path).contains("after the panic"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -987,12 +997,12 @@ mod tests {
         assert_eq!(read(&path), text);
         // The next record from any other thread reports what the audio thread kept since, first.
         on_audio_thread(|| record(&logger, log::Level::Error, "transit_clap_host::ffi", "clap plugin: out of voices"));
-        record(&logger, log::Level::Info, "soundcraft", "UI thread");
+        record(&logger, log::Level::Info, "transit", "UI thread");
         let text = read(&path);
         let tail: Vec<&str> = text.lines().skip(2).collect();
         assert_eq!(tail.len(), 2, "{text}");
         assert!(tail.first().is_some_and(|l| l.contains(" ERROR [audio] transit_clap_host::ffi: clap plugin: out of voices")), "{text}");
-        assert!(tail.get(1).is_some_and(|l| l.ends_with("soundcraft: UI thread")), "{text}");
+        assert!(tail.get(1).is_some_and(|l| l.ends_with("transit: UI thread")), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1002,10 +1012,10 @@ mod tests {
         let logger = AppLogger::new(Filter::parse("info"), false);
         let path = logger.attach_dir(&dir).expect("attach");
         let long = "é".repeat(REALTIME_MESSAGE_BYTES);
-        on_audio_thread(|| record(&logger, log::Level::Warn, "soundcraft", &long));
+        on_audio_thread(|| record(&logger, log::Level::Warn, "transit", &long));
         logger.report_audio_thread();
         let text = read(&path);
-        let message = text.split("soundcraft: ").nth(1).expect("message");
+        let message = text.split("transit: ").nth(1).expect("message");
         assert!(message.ends_with("…\n"), "{text}");
         assert!(message.len() <= REALTIME_MESSAGE_BYTES + "…\n".len(), "{}", message.len());
         assert!(message.trim_end_matches(['…', '\n']).chars().all(|c| c == 'é'));
