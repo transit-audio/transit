@@ -102,6 +102,11 @@ impl T {
         self.input("ui.key", merged(json!({"key": key}), mods));
     }
 
+    fn n_edge(&mut self, pressed: bool) {
+        self.app.synthetic.push(egui::Event::Key { key: egui::Key::N, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE });
+        self.frames(1);
+    }
+
     /// The point on the grid at `tick` (from the clip start) in the middle of `pitch`'s row.
     fn at(&self, tick: f64, pitch: u8) -> (f32, f32) {
         let l = &self.app.keys.layout;

@@ -129,6 +129,7 @@ pub enum Action {
     ResetControl,
     ReadoutApply,
     ReadoutCancel,
+    NotesFocus,
     NotesClose,
     NotesSelectAll,
     NotesDuplicate,
@@ -405,6 +406,7 @@ pub const TABLE: &[Shortcut] = &[
         "While a readout is being typed, or a mixer control waits for a controller (#97; a readout being typed keeps it).",
     ),
     // Piano roll.
+    row(A::NotesFocus, "Focus Mode", NONE, Key::N, S::PianoRoll, "Ableton Live. Only the foreground clip is edited."),
     row(A::NotesClose, "Close Piano Roll", NONE, Key::Escape, S::PianoRoll, "Ours; first cancels a gesture."),
     row(A::NotesSelectAll, "Select All Notes", CMD, Key::A, S::PianoRoll, "All DAWs."),
     row(A::NotesDuplicate, "Duplicate Notes", CMD, Key::D, S::PianoRoll, "Ableton."),
@@ -514,6 +516,26 @@ pub const TABLE: &[Shortcut] = &[
 /// The rows of `action`, in table order.
 pub fn rows(action: Action) -> impl Iterator<Item = &'static Shortcut> {
     TABLE.iter().filter(move |s| s.action == action)
+}
+
+/// Consume both press and release edges of `action`, excluding OS key repeat.
+pub fn edges(ctx: &egui::Context, action: Action) -> Vec<bool> {
+    ctx.input_mut(|i| {
+        let mut edges = Vec::new();
+        i.events.retain(|event| {
+            if let egui::Event::Key { key, pressed, repeat, modifiers, .. } = event
+                && rows(action).any(|s| s.key == *key && modifiers.matches_exact(s.mods))
+            {
+                if !repeat {
+                    edges.push(*pressed);
+                }
+                false
+            } else {
+                true
+            }
+        });
+        edges
+    })
 }
 
 /// Consume a press of any of `action`'s keys. The held modifiers must be exactly the row's.

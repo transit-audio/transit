@@ -28,6 +28,9 @@ pub fn pane(app: &mut StudioApp, ui: &mut Ui) -> bool {
     let down = ui.input(|i| i.pointer.any_down());
     // Focus lost: nothing may keep sounding.
     let blurred = ui.input(|i| i.viewport().focused == Some(false));
+    if blurred {
+        app.keys_focus_cancel();
+    }
     app.release_auditions(if blurred { f64::INFINITY } else { now }, down && !blurred);
     if !app.keys_shown() {
         app.keys.quantize_open = false;
@@ -63,8 +66,15 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     if let Some(p) = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None }) {
         app.keys.active = area.contains(p);
     }
-    let mut layout =
-        KeysLayout { visible: true, clip: Some(clip.0), track: Some(cv.track.0), pane: r4(area), notes: Vec::new(), ..KeysLayout::default() };
+    let mut layout = KeysLayout {
+        visible: true,
+        clip: Some(clip.0),
+        track: Some(cv.track.0),
+        pane: r4(area),
+        notes: Vec::new(),
+        focus: all.several().then_some(app.keys.focus),
+        ..KeysLayout::default()
+    };
     let handle = Rect::from_min_max(area.min, pos2(area.max.x, area.min.y + HANDLE_H));
     let header = Rect::from_min_max(pos2(area.min.x, handle.max.y), pos2(area.max.x, handle.max.y + HEADER_H));
     let narrow = area.width() < 1200.0;
@@ -844,6 +854,7 @@ fn paint_notes(
     };
     for (i, n) in notes.iter().enumerate() {
         let selected = sel_idx.contains(&i);
+        let dimmed = layout.focus == Some(true) && part_of(i).is_some_and(|part| part.clip != all.parts[0].clip);
         let r = map.note_rect(n);
         layout.notes.push(NoteRect {
             index: i,
@@ -856,11 +867,13 @@ fn paint_notes(
             rect: r4(r),
             vel_rect: r4(stem(n)),
             clip: all.several().then(|| part_of(i).map(|p| p.clip.0)).flatten(),
+            dimmed: (layout.focus == Some(true)).then_some(dimmed),
         });
         if r.max.x < grid.min.x || r.min.x > grid.max.x || r.max.y < grid.min.y || r.min.y > grid.max.y {
             continue;
         }
-        draw(n, selected, if moving.contains(&i) { 0.3 } else { 1.0 }, span_end(i), ink(part_of(i)));
+        let alpha = if moving.contains(&i) { 0.3 } else { 1.0 };
+        draw(n, selected, if dimmed { alpha * 0.35 } else { alpha }, span_end(i), ink(part_of(i)));
     }
     if let Some((pairs, _)) = preview {
         let sources: Vec<Note> = pairs.iter().map(|(a, _)| *a).collect();

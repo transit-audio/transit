@@ -2,8 +2,9 @@
 //! arrangement, shown in the bottom pane instead of the mixer and device chain (Ableton's clip
 //! view). A tab strip in its header switches back; Ctrl+Alt+K toggles it; Escape closes it.
 //!
-//! No draw tool (Ableton): a double-click on empty grid adds a note, a double-click on a note
-//! deletes it; a click selects, Shift-click adds, a drag on empty grid selects with a rubber band;
+//! No draw tool (Ableton): a double-click on empty grid adds a note. With one clip open, a
+//! double-click on a note deletes it; with several, it focuses that note's clip. A click selects,
+//! Shift-click adds, a drag on empty grid selects with a rubber band;
 //! dragging notes moves them (Ctrl copies, Alt+Shift moves without snap), either edge resizes (Alt:
 //! without snap), Alt+drag on a body or the velocity lane sets velocity. Every edit is a `midi.*` / `event.*` command, one undo step per gesture.
 //! Notes are addressed by index and indices shift after each edit (plan 06, section 1), so the
@@ -17,7 +18,8 @@
 //! clip the foreground. Edits across clips are one command per clip under one undo step; new notes
 //! go to the clip whose span they are drawn in, the foreground first, and outside every clip they are
 //! refused. Step entry, the controller lane, the loop ghosts and the clip-end handle are the
-//! foreground's.
+//! foreground's. N toggles Focus Mode (hold for momentary): the other clips dim and only the
+//! foreground is edited.
 
 mod view;
 pub use view::{pane, switcher_panel};
@@ -242,128 +244,8 @@ pub enum KeysGesture {
     ClipEnd,
 }
 
-/// One note as last drawn (for `ui.inspect`; scripts click and drag them).
-#[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct NoteRect {
-    pub index: usize,
-    pub pitch: u8,
-    pub start: i64,
-    pub length: i64,
-    pub velocity: u8,
-    pub selected: bool,
-    /// Starts at or past the clip's end: it never sounds (drawn dimmed and hatched).
-    pub outside: bool,
-    pub rect: R4,
-    /// The note's stem in the velocity lane.
-    pub vel_rect: R4,
-    /// The clip the note is in, when several clips are open (#329).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub clip: Option<u64>,
-}
-
-/// One clip open in the roll when several are (#329), as last drawn.
-#[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct OpenClip {
-    pub clip: u64,
-    pub track: u64,
-    /// Its start in the roll's ticks (the foreground's start is 0) and the span the roll edits.
-    pub offset_ticks: i64,
-    pub ticks: i64,
-    pub foreground: bool,
-    pub color: [u8; 3],
-    /// Its bar in the ruler: click to make it the foreground.
-    pub bar: R4,
-}
-
-/// One repeat of a looped clip's cycle drawn as a dimmed ghost note (not interactive).
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
-pub struct GhostNote {
-    pub pitch: u8,
-    pub start: i64,
-    pub length: i64,
-}
-
-/// Last frame's piano roll geometry and state.
-#[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct KeysLayout {
-    pub cc: cc::Layout,
-    pub visible: bool,
-    /// The clip being edited: the foreground clip when several are open.
-    pub clip: Option<u64>,
-    pub track: Option<u64>,
-    /// Every clip open, the foreground first, when there are several (#329).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub clips: Vec<OpenClip>,
-    /// The pane takes the keyboard (Delete, arrows, Ctrl+A/D/U, Escape).
-    pub active: bool,
-    pub pane: R4,
-    /// The pane's top edge: drag to resize.
-    pub handle: R4,
-    pub tab_keys: R4,
-    pub tab_mixer: R4,
-    pub tab_devices: R4,
-    pub snap: R4,
-    pub snap_menu: Vec<MenuItem>,
-    pub quantize: R4,
-    pub quantize_apply: R4,
-    pub quantize_cancel: R4,
-    pub quantize_preview: Vec<Note>,
-    pub pitch: R4,
-    pub pitch_menu: Vec<MenuItem>,
-    pub audition: R4,
-    /// The Step toggle, whether Step entry is on, and its cursor and step length in ticks.
-    pub step: R4,
-    pub step_on: bool,
-    pub step_cursor: i64,
-    pub step_ticks: i64,
-    pub new_note_velocity: R4,
-    pub use_selected_velocity: R4,
-    /// Exact length inspector for a single selected note, in ticks.
-    pub note_length: R4,
-    /// Lengths painted beside the pointer during a note gesture.
-    pub drag_lengths: Vec<i64>,
-    pub ruler: R4,
-    pub keyboard: R4,
-    /// Visible pitches and keyboard row rectangles, including folded accidental rows.
-    pub pitch_rows: Vec<(u8, R4)>,
-    pub grid: R4,
-    pub velocity: R4,
-    /// Mapping: x = grid[0] + (tick - scroll_ticks) * px_per_tick, ticks relative to the clip;
-    /// in chromatic view y = grid[1] + (top_pitch - p) * key_h; folded views use pitch_rows.
-    pub px_per_tick: f64,
-    pub scroll_ticks: f64,
-    pub top_pitch: f32,
-    pub key_h: f32,
-    /// The clip's start (absolute ticks) and length in ticks.
-    pub clip_start_ticks: i64,
-    pub clip_ticks: i64,
-    /// A looped clip (ADR 0019): the arrangement length in ticks, the loop cycle `(start, end)` in ticks
-    /// (`clip_ticks` is then `end`, the first pass the roll edits), and the repeats drawn as ghosts.
-    pub looped_to_ticks: Option<i64>,
-    pub loop_cycle: Option<(i64, i64)>,
-    /// The one-shot lead-in before the cycle's start, in ticks (0 when the cycle starts at the clip start).
-    pub lead_in_ticks: i64,
-    pub loop_ghosts: Vec<GhostNote>,
-    /// The clip-end handle in the ruler (slice 6): drag to lengthen or shorten the clip.
-    pub end_handle: R4,
-    pub grid_ticks: Option<i64>,
-    /// The grid step in force (ticks) even with snap off, and the corner's text.
-    pub grid_step: i64,
-    pub grid_text: String,
-    /// Step velocity control.
-    pub step_velocity: R4,
-    pub notes: Vec<NoteRect>,
-    /// Instrument/MIDI tracks with no clips, which show the "create a clip" hint (set by the arrangement).
-    pub hint_tracks: Vec<u64>,
-    pub selected: usize,
-    /// Notes auditioned so far, and the last one as (pitch, velocity): with or without a player.
-    pub auditions: u64,
-    pub last_audition: Option<(u8, u8)>,
-    /// Auditioned pitches still sounding.
-    pub sounding: Vec<u8>,
-    /// Keys held on an armed MIDI input, as (pitch, velocity), lowest first.
-    pub live: Vec<(u8, u8)>,
-}
+mod inspect;
+pub use inspect::*;
 
 #[derive(Debug)]
 pub struct KeysState {
@@ -373,6 +255,10 @@ pub struct KeysState {
     pub clip: Option<ClipId>,
     /// The other clips open with it (#329), in selection order.
     pub others: Vec<ClipId>,
+    /// Focus Mode: edits are scoped to the foreground clip (#329 slice 2).
+    pub focus: bool,
+    /// N's press time and the mode it found, for momentary Focus Mode.
+    focus_down: Option<(f64, bool)>,
     /// The track of every audition, in order (tests check a note sounds on its own clip's track).
     #[cfg(test)]
     pub audition_tracks: Vec<TrackId>,
@@ -419,6 +305,8 @@ impl Default for KeysState {
             quantize_open: false,
             clip: None,
             others: Vec::new(),
+            focus: false,
+            focus_down: None,
             #[cfg(test)]
             audition_tracks: Vec::new(),
             reopen: None,
@@ -650,6 +538,8 @@ impl StudioApp {
             self.keys.selection.clear();
             self.keys.fit = true;
             self.keys.step = StepState::default();
+            self.keys.focus = false;
+            self.keys.focus_down = None;
         }
         self.keys.cc.cancel();
         self.keys.length_edit = None;
@@ -688,6 +578,8 @@ impl StudioApp {
         self.ui.keys.show = false;
         self.keys.gesture = None;
         self.keys.active = false;
+        self.keys.focus = false;
+        self.keys.focus_down = None;
         self.release_auditions(f64::INFINITY, false);
     }
 
@@ -790,18 +682,23 @@ fn clamp_move(sel: &[Note], min_start: i64, dt: i64, ds: i64) -> (i64, i64) {
 /// The piano roll's keys. Runs before the arrangement's shortcuts, so Delete, Ctrl+A/D, the
 /// arrows and Escape go to the notes while the pane has the keyboard.
 pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
-    use crate::shortcuts::{Action as A, pressed};
+    use crate::shortcuts::{Action as A, edges, pressed};
     if !app.step_active() || !app.keys.active || ctx.egui_wants_keyboard_input() || app.dialog.is_some() {
         app.step_keyboard_cancel();
     }
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() {
+        app.keys_focus_cancel();
         return;
     }
     if pressed(ctx, A::TogglePianoRoll) {
         app.toggle_keys();
     }
     if !app.keys_shown() || !app.keys.active {
+        app.keys_focus_cancel();
         return;
+    }
+    for down in edges(ctx, A::NotesFocus) {
+        app.keys_focus_edge(down, ctx.input(|i| i.time));
     }
     if pressed(ctx, A::NotesClose) {
         if app.keys.gesture.take().is_none() {
@@ -962,6 +859,11 @@ fn hit(layout: &KeysLayout, pos: Pos2) -> Option<(usize, NoteDrag)> {
     })
 }
 
+/// A note that Focus Mode allows an edit gesture to start on.
+fn hit_editable(layout: &KeysLayout, pos: Pos2) -> Option<(usize, NoteDrag)> {
+    hit(layout, pos).filter(|(i, _)| layout.notes.get(*i).is_some_and(|n| n.dimmed != Some(true)))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect, cv: &ClipView, all: &Composite, now: f64, layout: &mut KeysLayout) {
     let resp = ui.interact(grid, ui.id().with("keys_grid"), Sense::click_and_drag());
@@ -989,8 +891,16 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
         d
     });
     if double && let Some(pos) = click {
-        match hit(layout, pos).map(|(i, k)| (first(i), k)) {
-            // Double-click a note: delete it (Ableton).
+        match hit(layout, pos) {
+            Some((i, _)) if all.several() => {
+                // Several clips: double-click a note to focus its clip (#329 slice 2).
+                app.keys.selection = vec![notes[i]];
+                if let Some((part, _)) = all.locate(i) {
+                    app.keys_foreground(part.clip);
+                }
+                app.keys_focus_set(true);
+            }
+            // One clip: double-click a note deletes it (Ableton).
             Some((i, _)) => {
                 app.keys.selection = vec![notes[i]];
                 let _ = app.keys_delete();
@@ -999,7 +909,9 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
             None => {
                 let pitch = map.pitch(pos.y);
                 let start = map.floor(map.tick(pos.x));
-                if !all.several() && start >= cv.len {
+                if app.keys.focus && all.target(start).is_none_or(|part| part.clip != all.parts[0].clip) {
+                    app.status = "Outside the focused clip: draw inside it".into();
+                } else if !all.several() && start >= cv.len {
                     app.status = "Outside the clip: drag the clip end to extend".into();
                 } else if all.several() && all.target(start).is_none() {
                     app.status = "Outside the open clips: draw inside one of them".into();
@@ -1053,7 +965,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
     if resp.drag_started()
         && let Some(press) = ui.input(|i| i.pointer.press_origin())
     {
-        match hit(layout, press).map(|(i, k)| (first(i), k)) {
+        match hit_editable(layout, press).map(|(i, k)| (first(i), k)) {
             Some((i, edge)) => {
                 let n = notes[i];
                 if !app.keys.selection.contains(&n) {
@@ -1160,6 +1072,7 @@ fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, all: &Composite, l
             let inside: Vec<Note> = layout
                 .notes
                 .iter()
+                .filter(|n| n.dimmed != Some(true))
                 .filter(|n| band.intersects(Rect::from_min_max(pos2(n.rect[0], n.rect[1]), pos2(n.rect[2], n.rect[3]))))
                 .map(|n| notes[n.index])
                 .collect();
@@ -1189,6 +1102,7 @@ fn lane_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, vel: Rect, all: &Comp
         layout
             .notes
             .iter()
+            .filter(|n| n.dimmed != Some(true))
             .map(|n| (n.index, (n.vel_rect[0] + 1.5 - x).abs()))
             .filter(|(_, d)| *d <= 6.0)
             .min_by(|a, b| a.1.total_cmp(&b.1))
