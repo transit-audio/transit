@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Compact mixer</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 1420px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; overflow: hidden">
+
+<div style="position: absolute; left: 56px; top: 36px; right: 56px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #8C939D; letter-spacing: 0.08em">TRANSIT · MIXER · COMPACT HEIGHT</span>
+<span style="font-size: 26px; font-weight: 600">At 80 pt the meters have to show</span>
+<span style="font-size: 13px; color: #A7ADB6; max-width: 1180px; line-height: 1.5">The 2026-11-08 afternoon build follows the fader rules: frame, labels, ticks and the main bus all check out. It still reads badly because two of those rules were written for a full-height strip. In a short row, grid lines at every mark turn the empty meters into ladders, and with the transport stopped (the screenshot sits at 1.1.1) the meters are empty, so the solid blue fader fills are the only marks and read as the levels. Drawn at 1.5×, travel 80 pt, the screenshot's size. Strips 1, 2 and 5 are silent; 3, 4 and the main bus are playing.</span>
+</div>
+
+<sc-for list="{{rows}}" as="row" hint-placeholder-count="3">
+<div style="position: absolute; left: 56px; top: {{row.y}}px; width: 1328px">
+<div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: {{row.tagc}}">{{row.tag}}</span>
+<span style="font-size: 14px; font-weight: 600">{{row.t}}</span>
+<span style="font-size: 12px; color: #A7ADB6">{{row.sub}}</span>
+</div>
+<div style="position: relative; height: {{row.h}}px; background: #0F1113; border-radius: 6px">
+<sc-for list="{{row.strips}}" as="s" hint-placeholder-count="6">
+<div style="position: absolute; left: {{s.x}}px; top: 0; width: {{s.ow}}px; height: {{s.oh}}px">
+<div style="position: absolute; left: 0; top: 0; width: {{s.w}}px; height: {{s.h}}px; transform: scale({{s.k}}); transform-origin: 0 0; background: #1A1D21; border-right: 1px solid #23272C; box-sizing: border-box">
+<sc-for list="{{s.els}}" as="e" hint-placeholder-count="40">
+<span style="position: absolute; left: {{e.x}}px; top: {{e.y}}px; width: {{e.w}}px; height: {{e.h}}px; box-sizing: border-box; background: {{e.bg}}; border: {{e.bd}}; border-radius: {{e.r}}px; font: {{e.font}}; color: {{e.c}}; text-align: {{e.ta}}; line-height: {{e.h}}px; white-space: nowrap">{{e.t}}</span>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-for>
+
+<div style="position: absolute; left: 56px; top: 1000px; width: 1328px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">What changes, and why</span>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<sc-for list="{{fixes}}" as="x" hint-placeholder-count="4">
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px">
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font: 500 11px 'IBM Plex Mono', monospace; color: #4C9EFF">{{x.n}}</span><span style="font-size: 13px; font-weight: 600">{{x.t}}</span></span>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.45">{{x.seen}}</span>
+<span style="font-size: 12px; color: #E7E9EC; line-height: 1.45">{{x.fix}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1420}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const TAPER = [[6, 0], [0, 0.14], [-6, 0.28], [-12, 0.42], [-24, 0.6], [-36, 0.74], [-48, 0.86], [-60, 0.94], [-1e9, 1]];
+    const tp = (db) => {
+      if (db >= 6) return 0;
+      for (let i = 0; i < TAPER.length - 1; i++) {
+        const [d0, f0] = TAPER[i], [d1, f1] = TAPER[i + 1];
+        if (db <= d0 && db >= d1) { if (d1 < -1e8) { return db <= -90 ? 1 : 0.94 + 0.06 * (-60 - db) / 30; } return f0 + (f1 - f0) * (d0 - db) / (d0 - d1); }
+      }
+      return 1;
+    };
+    const MARKS = [0, -6, -12, -24, -36, -48];
+    const PRIORITY = [0, null, -12, -24, 6, -48, -6, -36];
+    const pickLabels = (T) => {
+      const placed = [];
+      PRIORITY.forEach((m) => { const y = (m === null ? 1 : tp(m)) * T; if (placed.every((p) => Math.abs(p.y - y) >= 13)) placed.push({ m: m, y: y }); });
+      return placed;
+    };
+    const lbl = (m) => m === null ? '−∞' : (m > 0 ? '+' + m : (m === 0 ? '0' : '−' + (-m)));
+    const MONO10 = "400 10px 'IBM Plex Mono', monospace";
+    const K = 1.5, T = 80, SW = 136, MW = 168, H = T + 34;
+    const strip = (o, v) => {
+      const main = !!o.main, hasFader = o.fader !== false;
+      const Y0 = 16, Y1 = Y0 + T, ox = 12;
+      const els = [];
+      const add = (e) => els.push(Object.assign({ bg: 'transparent', bd: 'none', r: 0, font: MONO10, c: '#8C939D', ta: 'left', t: '' }, e));
+      const yOf = (m) => Y0 + (m === null ? 1 : tp(m)) * T;
+      const labels = pickLabels(T);
+      const placed = labels.map((p) => p.m);
+      const bw = main ? 14 : 10, bx = [ox + 72, ox + 72 + bw + 3];
+      bx.forEach((x, i) => {
+        add({ x: x, y: Y0, w: bw, h: T, bg: '#0D0F11', bd: '1px solid #23272C', r: 1 });
+        MARKS.forEach((m) => {
+          if (v.grid === 'placed' && placed.indexOf(m) < 0) return;
+          const c = m === 0 ? '#383E46' : (v.grid === 'placed' ? '#23272C' : '#2B3036');
+          add({ x: x + 1, y: Math.round(yOf(m)), w: bw - 2, h: 1, bg: c });
+        });
+        const pk = o.peak[i], rms = o.rms[i];
+        if (pk > -90) {
+          add({ x: x + 1, y: yOf(pk), w: bw - 2, h: Y1 - yOf(pk) - 1, bg: 'rgba(95, 203, 142, 0.35)' });
+          if (pk > 0) add({ x: x + 1, y: yOf(pk), w: bw - 2, h: yOf(0) - yOf(pk), bg: 'rgba(255, 107, 91, 0.35)' });
+          add({ x: x + 1, y: yOf(rms), w: bw - 2, h: Y1 - yOf(rms) - 1, bg: '#5FCB8E' });
+          add({ x: x + 1, y: yOf(o.hold[i]) - 1, w: bw - 2, h: 2, bg: '#E7E9EC' });
+        }
+        add({ x: x, y: Y0 - 6 - 4, w: bw, h: 4, bg: o.clip ? '#FF6B5B' : '#23272C', r: 1 });
+      });
+      labels.forEach((p) => {
+        const y = Y0 + p.y;
+        add({ x: ox + 36, y: y - 6.5, w: 24, h: 13, t: lbl(p.m), ta: 'right', c: p.m === 0 ? '#E7E9EC' : '#8C939D' });
+        add({ x: ox + 63, y: Math.round(y), w: 4, h: 1, bg: p.m === 0 ? '#A7ADB6' : '#383E46' });
+      });
+      if (hasFader) {
+        const c = Y0 + tp(o.gain) * T, z = yOf(0);
+        add({ x: ox + 16, y: Y0, w: 4, h: T, bg: '#2B3036', r: 2 });
+        if (v.fill === 'full') add({ x: ox + 16, y: c, w: 4, h: Y1 - c, bg: '#4C9EFF', r: 2 });
+        if (v.fill === 'unity' && Math.abs(c - z) > 0.5) add({ x: ox + 16, y: Math.min(c, z), w: 4, h: Math.abs(c - z), bg: '#4C9EFF', r: 2 });
+        if (v.fill !== 'full') add({ x: ox + 12, y: Math.round(z), w: 12, h: 1, bg: '#585F69' });
+        add({ x: ox + 2, y: c - 8, w: 32, h: 16, bg: '#2E333A', bd: '1px solid #585F69', r: 3 });
+        add({ x: ox + 6, y: Math.round(c) - 1, w: 24, h: 2, bg: '#E7E9EC' });
+      } else if (v.plus === 'none') {
+        // the fader column stays empty: + Master Fader lives in the routing rows
+      } else if (v.plus === 'icon') {
+        add({ x: ox + 6, y: Y0, w: 24, h: 24, bd: '1px dashed #383E46', r: 4, t: '+', ta: 'center', c: '#A7ADB6', font: "400 15px 'IBM Plex Sans', sans-serif" });
+      } else {
+        add({ x: ox + 2, y: Y0, w: 32, h: 24, bd: '1px dashed #383E46', r: 4, t: '+ Fader', ta: 'center', c: '#8C939D', font: "400 9px 'IBM Plex Sans', sans-serif" });
+      }
+      const W = main ? MW : SW;
+      return { w: W, h: H, k: K, ow: W * K, oh: H * K, els: els };
+    };
+    const idle = { peak: [-200, -200], rms: [-200, -200], hold: [-200, -200] };
+    const chans = [
+      Object.assign({ gain: 0 }, idle),
+      Object.assign({ gain: -7 }, idle),
+      { gain: -2, peak: [-4, -6], rms: [-13, -15], hold: [-3, -5] },
+      { gain: -4.5, peak: [-9, -8], rms: [-19, -18], hold: [-7, -7] },
+      Object.assign({ gain: 0 }, idle),
+      { main: true, fader: false, peak: [0.8, -0.6], rms: [-9, -10], hold: [0.8, -0.6], clip: true }
+    ];
+    const lay = (v) => { let x = 0; return chans.map((c) => { const s = strip(c, v); s.x = x; x += s.ow; return s; }); };
+    const rowH = H * K;
+    const rows = [
+      { tag: 'AS BUILT', tagc: '#8C939D', t: 'Today’s rules at compact height', sub: 'fill from −∞ · grid at every mark · a second “+ Fader”', v: { fill: 'full', grid: 'all', plus: 'text', meter: 'pale' } },
+      { tag: 'PROPOSED', tagc: '#4C9EFF', t: 'Fill measured from unity', sub: 'signal runs from the 0 dB line to the cap · grid only where a label is placed · one + Master Fader', v: { fill: 'unity', grid: 'placed', plus: 'none', meter: 'solid' } },
+      { tag: 'CONSIDERED', tagc: '#8C939D', t: 'No fill (the Logic and Pro Tools convention)', sub: 'groove and a unity notch; the cap alone carries the value', v: { fill: 'none', grid: 'placed', plus: 'none', meter: 'solid' } }
+    ].map((r, i) => Object.assign(r, { y: 170 + i * 270, h: rowH, strips: lay(r.v) }));
+    return {
+      rows: rows,
+      fixes: [
+        { n: '1', t: 'The fill measures from unity', seen: 'As built the fill runs from −∞ to the cap, so every strip near 0 dB is a tall blue bar. With the meters empty or low, those bars read as the levels.', fix: 'Gain is a bipolar value with 0 dB as its rest, like pan around C and a mod amount around zero, so it fills the same way: signal from the 0 dB line to the cap, down for a cut, up for a boost. A strip at unity shows only the notch, and a strip you’ve moved stands out. The one inversion: a fader pulled to −∞ is the longest bar, which is honest, since it is the biggest change.' },
+        { n: '2', t: 'Grid ladders in empty wells', seen: 'Grid lines at all six marks in every 80 pt well draw two ladders per strip; across a row it reads as a fence.', fix: 'A meter grid line is drawn only where a label is placed, the same set as the ticks: 0 −12 −24 here, all six at full height. 0 dB stays line.strong; the rest drop to line.inset, so they only show in the empty well.' },
+        { n: '3', t: 'At rest, the fills are all you see', seen: 'With the transport stopped every meter is empty, and a fill from −∞ leaves eight tall blue bars that look like a mixer playing loud.', fix: 'Filling from unity makes the mixer at rest quiet: notches at unity and short bars where you changed something. (A source with no RMS reading draws its peak fill solid, since the peak is then the level; the mixer has RMS since #395.)' },
+        { n: '4', t: 'Two ways to add a master fader', seen: 'The main bus shows “+ Master Fader” in its routing rows and a cramped “+ Fader” in the fader column, where Sans 9 fills the box edge to edge and reads as “+Fader 0”.', fix: 'Keep the routing-row button, which has room for its words. The fader column stays empty until there is a fader; the scale and meters stay on the frame.' },
+        { n: '5', t: 'Considered: fill from −∞, or none', seen: 'Logic and Pro Tools draw a cap on a dark slot with no fill; Ableton’s mixer puts a small handle beside the meter; Bitwig and many plug-ins fill from the bottom.', fix: 'A fill from −∞ says “how loud”, which the meter already says. No fill would make the fader the only transit control that doesn’t show its value. From unity says “what you changed”, which is the question you ask a mixer.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
