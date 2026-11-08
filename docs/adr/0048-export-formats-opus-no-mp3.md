@@ -1,6 +1,6 @@
 # ADR 0048: Export formats: Opus, no MP3
 
-- **Status:** proposed 2026-11-08 (#238; the maintainer's format decision of 2026-10-30)
+- **Status:** accepted 2026-11-09 (#238; the maintainer's format decision of 2026-10-30)
 - **Date:** 2026-11-08
 - **Implementation:** #238, branch `io/238-opus-export`: `crates/opus` (`transit-opus`, libopus 1.6.1 vendored and built with `cc`), the Ogg Opus writer and reader in `transit-audio-io`, the Bounce dialog's Opus row and bitrate row, and `format: "opus"` with `bitrate` on the bounce commands.
 - **Amends:** [ADR 0013](0013-unsafe-only-in-soundcraft-rt.md): its section "Amendment 2026-11-08 (ADR 0048, proposed)" adds `transit-opus` to the unsafe allowlist with its FFI in `src/ffi.rs` only, and restates the allowlist in full (decision 4). On acceptance, ADR 0013's README row gains "amended by ADR 0048".
@@ -64,7 +64,7 @@ spec converts the WAV or FLAC bounce with another tool.
    complexity 10, constrained VBR at a bitrate from `EncodeOptions::bitrate_kbps`.
    - *Bitrates.* Stereo: 96, 128, 160, 192 and 256 kb/s, 160 by default. Mono (a mono bus): 96,
      128 and 160 kb/s, 96 by default, since a mono stream needs about half the rate of a stereo
-     one (pending the maintainer's confirmation). The commands take 6 to 510 kb/s; without
+     one. The commands take 6 to 510 kb/s; without
      `bitrate` they use the default for the bounce's channel count.
    - *Constrained VBR.* It is libopus's own default VBR mode (`opus_defines.h`: "Constrained VBR
      (default)"). It bounds the rate over a short window, so "160 kb/s" means a file of about that
@@ -103,7 +103,7 @@ spec converts the WAV or FLAC bounce with another tool.
    import: the sniffer tells `OggS` + `OpusHead` from other Ogg, the reader decodes at 48 kHz,
    drops the pre-skip, trims to the last granule position and applies the header's output gain.
    Mono and stereo only, as for export.
-7. **The rest of #238's list** (each pending the maintainer's confirmation):
+7. **The rest of #238's list:**
    - *A 64 kb/s preset:* dropped. It is a speech rate, below what a music mix needs; it is added
      on request, and the commands already reach it (`bitrate: 64`).
    - *A VBR/CBR toggle:* dropped. Constrained VBR is libopus's default and already bounds the
@@ -127,8 +127,7 @@ spec converts the WAV or FLAC bounce with another tool.
 - A libopus update is a vendored-source change: new tarball and hash, the same file set, the
   tests' measured figures (pre-skip, spectrum floor, bitrate ratios) measured again, and the
   quoted-unsafe review.
-- libopus security releases are applied within the next transit release (pending the
-  maintainer's confirmation). `.opus` import passes
+- libopus security releases are applied within the next transit release. `.opus` import passes
   packets from user files to the C decoder (the Ogg parsing is Rust; the decoder is built with
   `ENABLE_HARDENING`). Release housekeeping checks xiph's release page
   (https://downloads.xiph.org/releases/opus/) for a newer release, and the update follows
