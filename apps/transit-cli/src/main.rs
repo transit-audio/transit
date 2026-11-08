@@ -1,4 +1,4 @@
-//! `transit-cli`: SoundCraft without a window.
+//! `transit-cli`: transit without a window.
 //!
 //! ```text
 //! transit-cli info FILE                       audio file or .transit summary
@@ -65,7 +65,7 @@ fn main() -> ExitCode {
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
     let code = match cmd.as_str() {
         "--version" | "-V" | "version" => {
-            outln!("SoundCraft CLI {}", env!("CARGO_PKG_VERSION"));
+            outln!("transit-cli {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         "--help" | "-h" | "help" => {
