@@ -3,13 +3,21 @@ use super::*;
 /// The piano roll pane at the bottom of the window. Returns true when it is shown (it then
 /// replaces the mixer and device chain panes). Call before the central panel.
 pub fn pane(app: &mut StudioApp, ui: &mut Ui) -> bool {
-    // A deleted clip (or a new session) closes the editor.
+    // A deleted clip (or a new session) closes the editor; with several open, the next one takes
+    // the foreground and the others stay.
+    let gone = |app: &StudioApp, c: ClipId| clip_view(app.engine.session(), c).is_none();
+    app.keys.others.retain(|c| clip_view(app.engine.session(), *c).is_some());
     if let Some(c) = app.keys.clip
-        && clip_view(app.engine.session(), c).is_none()
+        && gone(app, c)
     {
         app.keys.clip = None;
         app.keys.selection.clear();
         app.keys.gesture = None;
+        if !app.keys.others.is_empty() {
+            let next = app.keys.others.remove(0);
+            app.keys.clip = Some(next);
+            app.keys.fit = true;
+        }
     }
     let now = ui.input(|i| i.time);
     let down = ui.input(|i| i.pointer.any_down());
@@ -44,6 +52,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     let Some(clip) = app.keys.clip else { return };
     let s = app.engine.session_arc();
     let Some(cv) = clip_view(&s, clip) else { return };
+    let Some(all) = Composite::new(&s, clip, &app.keys.others) else { return };
     let now = ui.input(|i| i.time);
     // The pane takes the keyboard after a press inside it, and gives it up after one outside.
     if let Some(p) = ui.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None }) {
@@ -69,16 +78,17 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     // The corner has room for little: "Auto 1/16", "Grid: 1/8T", "Snap off".
     let grid_text = grid::label_at(ppt, grid::bar_ticks(&s), &prefs.grid).replace("Adaptive", "Auto");
     let rows = grid.height() / kh;
-    let row_map = scale::Rows::new(app.keys_scale(), &cv.notes, &app.keys.live, ui.input(|i| chromatic(i.modifiers)));
+    let row_map = scale::Rows::new(app.keys_scale(), &all.notes, &app.keys.live, ui.input(|i| chromatic(i.modifiers)));
     if app.keys.fit {
         app.keys.fit = false;
-        let (lo, hi) = (cv.notes.iter().map(|n| n.pitch).min(), cv.notes.iter().map(|n| n.pitch).max());
+        let (lo, hi) = (all.notes.iter().map(|n| n.pitch).min(), all.notes.iter().map(|n| n.pitch).max());
         let center = match (lo, hi) {
             (Some(a), Some(b)) => (f32::from(a) + f32::from(b)) / 2.0,
             _ => 60.0,
         };
         app.keys.top = row_map.pitch((row_map.rank(center) + rows / 2.0).round());
-        app.keys.scroll = 0.0;
+        // From the earliest open clip (the foreground's start when it is the only one).
+        app.keys.scroll = all.parts.iter().map(|p| p.off).min().unwrap_or(0).min(0) as f64;
     }
     let last_row = row_map.last_rank();
     app.keys.top = row_map.pitch(row_map.rank(app.keys.top).clamp((rows - 1.0).min(last_row), last_row));
@@ -105,20 +115,20 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
         })
         .collect();
     // Drop selected notes that no longer exist (undo, another view).
-    let present = resolve(&cv.notes, &app.keys.selection);
+    let present = resolve(&all.notes, &app.keys.selection);
     if present.len() != app.keys.selection.len() {
-        app.keys.selection = present.iter().map(|i| cv.notes[*i]).collect();
+        app.keys.selection = present.iter().map(|i| all.notes[*i]).collect();
     }
 
-    header_row(app, ui, header, &cv, &mut layout);
+    header_row(app, ui, header, &cv, &all, &mut layout);
     if narrow {
         let rect = Rect::from_min_size(pos2(area.min.x + 8.0, header.max.y + 4.0), vec2(138.0, HEADER_H - 8.0));
         note_inspector(app, ui, rect, &cv, &mut layout);
     }
     pane_handle(app, ui, handle, &mut layout);
-    paint_grid(ui, &s, &map, grid, ruler, &cv);
-    let preview = preview(app, ui, &map, vel, &cv.notes);
-    paint_notes(app, ui, &map, grid, vel, &cv.notes, cv.len, preview.as_ref(), &mut layout);
+    paint_grid(ui, &s, &map, grid, ruler, &cv, &all, &mut layout);
+    let preview = preview(app, ui, &map, vel, &all);
+    paint_notes(app, ui, &map, grid, vel, &all, preview.as_ref(), &mut layout);
     paint_loop_ghosts(ui, &map, grid, &cv, &mut layout);
     if app.keys.quantize_open {
         layout.quantize_preview = app.keys_quantize_preview();
@@ -136,15 +146,15 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
     }
-    grid_input(app, ui, &map, grid, vel, &cv, now, &mut layout);
+    grid_input(app, ui, &map, grid, vel, &cv, &all, now, &mut layout);
     if app.keys.cc.controller.is_none() {
-        lane_input(app, ui, &map, vel, &cv, &layout);
+        lane_input(app, ui, &map, vel, &all, &layout);
     } else {
         cc::lane(app, ui, &map, vel, &cv, &mut layout.cc);
     }
     paint_keyboard(app, ui, &map, keyboard);
     keyboard_input(app, ui, &map, keyboard, now);
-    ruler_input(app, ui, &map, ruler, &s);
+    ruler_input(app, ui, &map, ruler, &s, &layout.clips);
     clip_end_handle(app, ui, &map, ruler, grid, &cv, clip, &mut layout);
     wheel(app, ui, &map, Rect::from_min_max(pos2(area.min.x, body_top), area.max));
     // Overlays: rubber band, cursor and playhead.
@@ -287,7 +297,7 @@ pub fn switcher_panel(app: &mut StudioApp, ui: &mut Ui) {
 }
 
 /// Tabs (Piano Roll, Mixer, Devices), the clip's name, grid, Quantize and the audition switch.
-fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: &mut KeysLayout) {
+fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Composite, layout: &mut KeysLayout) {
     let p = ui.painter();
     p.rect_filled(r, 0.0, TOKENS.panel);
     p.line_segment([pos2(r.min.x, r.max.y - 0.5), pos2(r.max.x, r.max.y - 0.5)], Stroke::new(1.0, TOKENS.line));
@@ -311,6 +321,8 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
     // The clip: a separator, a swatch in the track color, then its name (not a tab).
     let (track_name, color) = app.engine.session().track(cv.track).map(|t| (t.name.clone(), t.color)).unwrap_or_default();
     let title = if cv.name.is_empty() || cv.name == track_name { track_name } else { format!("{track_name} · {}", cv.name) };
+    // Several clips: how many, then the foreground's name (#329).
+    let title = if all.several() { format!("{} clips · {title}", all.parts.len()) } else { title };
     // A frozen track plays its render: its notes are read-only (edits are refused) until unfrozen.
     let title = if app.engine.session().track(cv.track).is_some_and(|t| t.freeze.is_some()) {
         format!("{title} · Frozen (unfreeze to edit)")
@@ -606,11 +618,17 @@ fn pane_handle(app: &mut StudioApp, ui: &mut Ui, handle: Rect, layout: &mut Keys
     layout.handle = r4(handle);
 }
 
-/// Key rows, the clip's range, bar, beat and grid lines, and the ruler with bar numbers.
-fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &ClipView) {
+/// Key rows, the clips' ranges, bar, beat and grid lines, and the ruler with bar numbers.
+#[allow(clippy::too_many_arguments)]
+fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &ClipView, all: &Composite, layout: &mut KeysLayout) {
     let p = ui.painter().with_clip_rect(grid);
     p.rect_filled(grid, 0.0, TOKENS.bg);
-    let inside = Rect::from_min_max(pos2(map.x(0).max(grid.min.x), grid.min.y), pos2(map.x(cv.len).min(grid.max.x), grid.max.y));
+    // Each open clip's span in the roll's ticks (one clip: its own `0..len`).
+    let spans: Vec<(i64, i64)> = all.parts.iter().map(|part| (part.off, part.off + part.len)).collect();
+    let insides: Vec<Rect> = spans
+        .iter()
+        .map(|&(a, b)| Rect::from_min_max(pos2(map.x(a).max(grid.min.x), grid.min.y), pos2(map.x(b).min(grid.max.x), grid.max.y)))
+        .collect();
     let lo = map.pitch(grid.max.y).clamp(0, 127);
     let hi = map.pitch(grid.min.y).clamp(0, 127);
     for pitch in lo..=hi {
@@ -634,8 +652,8 @@ fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &Cli
         } else {
             TOKENS.lane_alt
         };
-        if inside.width() > 0.0 {
-            p.rect_filled(row.intersect(inside), 0.0, fill);
+        for inside in insides.iter().filter(|r| r.width() > 0.0) {
+            p.rect_filled(row.intersect(*inside), 0.0, fill);
         }
         if pitch.is_multiple_of(12) {
             p.line_segment([pos2(grid.min.x, y + map.kh), pos2(grid.max.x, y + map.kh)], Stroke::new(1.0, TOKENS.grid_bar));
@@ -643,7 +661,29 @@ fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &Cli
     }
     let rp = ui.painter().with_clip_rect(ruler);
     rp.rect_filled(ruler, 0.0, TOKENS.ruler);
-    rp.rect_filled(Rect::from_min_max(pos2(map.x(0), ruler.max.y - 4.0), pos2(map.x(cv.len), ruler.max.y)), 0.0, TOKENS.text_dim.gamma_multiply(0.5));
+    if all.several() {
+        // Each clip's bar in its color, the foreground's brighter: click one to bring it forward.
+        for part in &all.parts {
+            let fg = part.clip == all.parts[0].clip;
+            let bar = Rect::from_min_max(pos2(map.x(part.off), ruler.max.y - 6.0), pos2(map.x(part.off + part.len), ruler.max.y));
+            rp.rect_filled(bar, 0.0, theme::rgb(part.color).gamma_multiply(if fg { 1.0 } else { 0.55 }));
+            layout.clips.push(OpenClip {
+                clip: part.clip.0,
+                track: part.track.0,
+                offset_ticks: part.off,
+                ticks: part.len,
+                foreground: fg,
+                color: part.color,
+                bar: r4(bar.intersect(ruler)),
+            });
+        }
+    } else {
+        rp.rect_filled(
+            Rect::from_min_max(pos2(map.x(0), ruler.max.y - 4.0), pos2(map.x(cv.len), ruler.max.y)),
+            0.0,
+            TOKENS.text_dim.gamma_multiply(0.5),
+        );
+    }
     rp.line_segment([pos2(ruler.min.x, ruler.max.y - 0.5), pos2(ruler.max.x, ruler.max.y - 0.5)], Stroke::new(1.0, TOKENS.line));
     // Lines: grid subdivisions, beats, bars (absolute ticks; the clip starts at c0).
     let t_left = (map.tick(grid.min.x) as i64 + map.c0).max(0);
@@ -684,13 +724,31 @@ fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &Cli
             rp.text(pos2(x + 4.0, ruler.min.y + 8.0), Align2::LEFT_CENTER, bar.to_string(), FontId::proportional(10.5), TOKENS.text);
         }
     }
-    // Outside the clip: dimmed.
+    // Outside every clip: dimmed (the gaps between the spans, merged, and both ends).
     let dim = TOKENS.overlay;
-    if map.x(0) > grid.min.x {
-        p.rect_filled(Rect::from_min_max(grid.min, pos2(map.x(0), grid.max.y)), 0.0, dim);
+    let mut merged: Vec<(i64, i64)> = Vec::new();
+    let mut sorted = spans.clone();
+    sorted.sort_unstable();
+    for (a, b) in sorted {
+        match merged.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => merged.push((a, b)),
+        }
     }
-    if map.x(cv.len) < grid.max.x {
-        p.rect_filled(Rect::from_min_max(pos2(map.x(cv.len), grid.min.y), grid.max), 0.0, dim);
+    let mut x = grid.min.x;
+    for (a, b) in &merged {
+        if map.x(*a) > x {
+            p.rect_filled(Rect::from_min_max(pos2(x, grid.min.y), pos2(map.x(*a), grid.max.y)), 0.0, dim);
+        }
+        x = x.max(map.x(*b));
+    }
+    if x < grid.max.x {
+        p.rect_filled(Rect::from_min_max(pos2(x, grid.min.y), grid.max), 0.0, dim);
+    }
+    // The other clips' starts, in their colors.
+    for part in all.parts.iter().skip(1) {
+        let x = map.x(part.off);
+        p.line_segment([pos2(x, grid.min.y), pos2(x, grid.max.y)], Stroke::new(1.5, theme::rgb(part.color)));
     }
     if let Some((start, end)) = cv.cycle {
         // The one-shot lead-in before the cycle, the repeats' dividers and the loop end with its label.
@@ -733,11 +791,15 @@ fn paint_notes(
     map: &Map,
     grid: Rect,
     vel: Rect,
-    notes: &[Note],
-    clip_len: i64,
+    all: &Composite,
     preview: Option<&(Vec<(Note, Note)>, bool)>,
     layout: &mut KeysLayout,
 ) {
+    let notes = &all.notes;
+    // A note's clip: its span in the roll's ticks and, with several open, its color (#329).
+    let part_of = |i: usize| all.locate(i).map(|(p, _)| p);
+    let span_end = |i: usize| part_of(i).map_or(i64::MAX, |p| p.off + p.len);
+    let ink = |part: Option<&Part>| if all.several() { part.map_or(TOKENS.accent, |p| theme::rgb(p.color)) } else { TOKENS.accent };
     let p = ui.painter().with_clip_rect(grid);
     let vp = ui.painter().with_clip_rect(vel);
     vp.rect_filled(vel, 0.0, TOKENS.panel);
@@ -751,12 +813,12 @@ fn paint_notes(
         let h = (vel.height() - 6.0) * f32::from(n.velocity) / 127.0;
         Rect::from_min_max(pos2(x, vel.max.y - h), pos2(x + 3.0, vel.max.y))
     };
-    let draw = |n: &Note, selected: bool, alpha: f32| {
+    let draw = |n: &Note, selected: bool, alpha: f32, end: i64, accent: egui::Color32| {
         let r = map.note_rect(n);
-        let outside = n.start >= clip_len;
+        let outside = n.start >= end;
         let alpha = if outside { alpha * 0.4 } else { alpha };
         let a = NOTE_MIN_ALPHA + 0.55 * f32::from(n.velocity) / 127.0;
-        let fill = if selected { theme::lighten(TOKENS.accent, 0.25) } else { TOKENS.accent.gamma_multiply(a) };
+        let fill = if selected { theme::lighten(accent, 0.25) } else { accent.gamma_multiply(a) };
         p.rect_filled(r, crate::theme::RADIUS_SM, fill.gamma_multiply(alpha));
         if selected {
             p.rect_stroke(r, crate::theme::RADIUS_SM, Stroke::new(1.0, TOKENS.selection_outline.gamma_multiply(alpha)), StrokeKind::Inside);
@@ -771,7 +833,7 @@ fn paint_notes(
             }
         }
         let s = stem(n);
-        let c = if selected { TOKENS.selection_outline } else { TOKENS.accent };
+        let c = if selected { TOKENS.selection_outline } else { accent };
         vp.rect_filled(s, 0.0, c.gamma_multiply(alpha * 0.9));
         vp.rect_filled(Rect::from_min_size(pos2(s.min.x - 1.5, s.min.y - 1.5), vec2(6.0, 3.0)), crate::theme::RADIUS_SM, c.gamma_multiply(alpha));
     };
@@ -785,18 +847,20 @@ fn paint_notes(
             length: n.length,
             velocity: n.velocity,
             selected,
-            outside: n.start >= clip_len,
+            outside: n.start >= span_end(i),
             rect: r4(r),
             vel_rect: r4(stem(n)),
+            clip: all.several().then(|| part_of(i).map(|p| p.clip.0)).flatten(),
         });
         if r.max.x < grid.min.x || r.min.x > grid.max.x || r.max.y < grid.min.y || r.min.y > grid.max.y {
             continue;
         }
-        draw(n, selected, if moving.contains(&i) { 0.3 } else { 1.0 });
+        draw(n, selected, if moving.contains(&i) { 0.3 } else { 1.0 }, span_end(i), ink(part_of(i)));
     }
     if let Some((pairs, _)) = preview {
-        for (_, n) in pairs {
-            draw(n, true, 0.9);
+        let sources: Vec<Note> = pairs.iter().map(|(a, _)| *a).collect();
+        for ((_, n), part) in pairs.iter().zip(all.owners(&sources)) {
+            draw(n, true, 0.9, part.map_or(i64::MAX, |p| p.off + p.len), ink(part));
         }
         layout.drag_lengths = pairs.iter().map(|(_, n)| n.length).collect();
         if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
@@ -876,7 +940,7 @@ fn paint_keyboard(app: &StudioApp, ui: &Ui, map: &Map, kb: Rect) {
 }
 
 /// The ruler: a click sets the cursor; a drag up or down zooms time around the pointer, sideways scrolls.
-fn ruler_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, s: &Session) {
+fn ruler_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, s: &Session, clips: &[OpenClip]) {
     let resp = ui.interact(ruler, ui.id().with("keys_ruler"), Sense::click_and_drag());
     if resp.dragged() {
         ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
@@ -886,8 +950,14 @@ fn ruler_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, s: &Ses
     if resp.clicked()
         && let Some(pos) = resp.interact_pointer_pos()
     {
-        let abs = (map.c0 as f64 + map.tick(pos.x)).max(0.0) as i64;
-        app.click_ruler(s.tempo.tick_to_samples(abs, s.sample_rate));
+        // A clip's bar at the ruler's foot: that clip comes forward (#329); elsewhere the ruler sets the playhead.
+        let on_bar = clips.iter().find(|c| pos.x >= c.bar[0] && pos.x <= c.bar[2] && pos.y >= c.bar[1] && pos.y <= c.bar[3]);
+        if let Some(c) = on_bar {
+            app.keys_foreground(ClipId(c.clip));
+        } else {
+            let abs = (map.c0 as f64 + map.tick(pos.x)).max(0.0) as i64;
+            app.click_ruler(s.tempo.tick_to_samples(abs, s.sample_rate));
+        }
     }
     if resp.drag_started()
         && let Some(press) = ui.input(|i| i.pointer.press_origin())
