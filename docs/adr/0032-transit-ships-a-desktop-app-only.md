@@ -1,3 +1,6 @@
+<!-- transit-index
+title: transit ships a desktop app only: `apps/soundcraft-web`, `crates/ui-egui`, `packaging/web`, the `cargo xtask wasm` gate, the CI `wasm` job and every wasm32-only branch are removed; `fonts.rs` moves to `ui-studio`; shared engine coverage is ported to studio tests
+-->
 # ADR 0032: transit ships a desktop app only
 
 - **Status:** accepted 2026-10-28 (decided by Derek, issue #177)

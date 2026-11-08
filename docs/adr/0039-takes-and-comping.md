@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Takes and comping: a take stack is clips across a track's playlists that overlap and hold two takes (copies of active clips excluded); `Clip::take` numbers takes; the active take is the one on the active playlist (all the mix renders), and choosing a take moves its clip there and what it replaces to its playlist (`takes.set_active`, one undo step); recording keeps the track's own playlist playing with the newest pass on top and opens the lanes after cycle recording; `takes.flatten`, `takes.delete`, `takes.list`; lanes per take, newest on top (Logic Take Folder, Live 11 Take Lanes)
+-->
 # ADR 0039: Takes and comping: take stacks, the active take, take lanes and Flatten
 
 - **Status:** proposed 2026-10-31 (#25 slice 1)

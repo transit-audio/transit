@@ -1,3 +1,6 @@
+<!-- transit-index
+title: MIDI device layer (midir-based `transit-midi-io`; learn, transport, clock) on a timestamped, realtime-safe engine contract, behind prerequisite gates from the engine audit
+-->
 # ADR 0012: MIDI device layer on a timestamped, realtime-safe engine contract
 
 - **Status:** proposed 2026-10-18

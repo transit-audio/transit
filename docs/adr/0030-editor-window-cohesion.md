@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Editor windows follow the main window without an OS owner: the UI posts park, unpark, front and raise requests through the host threads' queues on the main window's minimize, restore and activation (deactivation lowers them with the app); an open plug-in's editor is raised, not duplicated; tool-window style behind Window > Plug-in Windows Follow transit; X11 `WM_TRANSIENT_FOR` and Wayland parenting after #147; invariant: no UI thread depends on a plug-in's thread; amends ADR 0018 section 7
+-->
 # ADR 0030: Editor window cohesion without an OS owner
 
 - **Status:** accepted 2026-10-30 (issue #173; Windows. Linux after #147)

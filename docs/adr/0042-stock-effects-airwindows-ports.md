@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Stock effects from the Airwindows catalog, with stability bounds and bit-exact Rust ports: 12 curated inserts, tape and saturation in slice 1 and plate beside hall in slice 3; de-essing deferred for normal-domain overflow; original MIT C++ in one dev-only oracle, recorded stability patches, nulls against the patched reference over the admitted domain and the unpatched reference in normal use on MSVC, GCC and Apple silicon; transit controls, help, presets and explicit attribution
+-->
 # ADR 0042: Stock effects from the Airwindows catalog, with stability bounds and bit-exact Rust ports
 
 - **Status:** accepted 2026-11-03 (maintainer decision; proposed 2026-11-02, six judging rounds)

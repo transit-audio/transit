@@ -1,3 +1,6 @@
+<!-- transit-index
+title: E63: the Speech model played out of tune away from 48 kHz (#195)
+-->
 # E63: the Speech model played out of tune away from 48 kHz
 
 1. **Failure.** Found in review of #195 slice 3, before any build

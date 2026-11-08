@@ -1,3 +1,6 @@
+<!-- transit-index
+title: `transit` integration branch that only merges; one fix per branch
+-->
 # ADR 0003: An integration branch that only merges; one fix per branch off its narrowest base
 
 - **Status:** accepted

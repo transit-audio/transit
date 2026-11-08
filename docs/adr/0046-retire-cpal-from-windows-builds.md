@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Retire cpal from Windows builds, stage one of retiring cpal: on Windows no cpal choice, fallback or enumeration; the audio system decides the backend through one resolver (`Backend::effective`: ASIO opens native ASIO, WASAPI native WASAPI) and the Backend row is hidden; a native open failure is a visible error and the device stays closed; WASAPI is listed through `IMMDeviceEnumerator` as the default system, saved names proven equal to cpal's before selection changes (a saved `cpal` backend reads as Auto); the WASAPI conversion tests compare against a stored table; `native-wasapi` and `native-asio` stop being features; `cargo xtask windows-deps` fails if cpal returns to the Windows graph; stage two Linux ALSA and FreeBSD, stage three macOS after a native CoreAudio backend
+-->
 # ADR 0046: Retire cpal from Windows builds (stage one of retiring cpal)
 
 - **Status:** accepted 2026-11-06 (the maintainer's decision, #354); settled after two judging rounds

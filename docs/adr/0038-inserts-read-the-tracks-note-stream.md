@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Inserts may read the track's note stream: `Plugin::reads_track_notes`; what the instrument accepted (after the MIDI effect slot) is kept in a fixed per-block view and given to reading inserts at the same offsets, a skipped reader gets all-notes-off; the Filter insert (multimode SVF, 12/24 dB, drive) plays a paraphonic ADSR from it, plus LFO, envelope follower, key tracking and an amp envelope, bit-identical across host block sizes; Ableton's and Logic's auto filters have no note-triggered envelope
+-->
 # ADR 0038: Inserts may read the track's note stream; the Filter insert plays envelopes from it
 
 - **Status:** proposed 2026-10-31 (#242); amended 2026-11-05 (#332, offline prints start from a settled chain)

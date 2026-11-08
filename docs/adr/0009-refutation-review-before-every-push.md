@@ -1,3 +1,6 @@
+<!-- transit-index
+title: A fresh-context refutation review runs before every push to an upstream PR
+-->
 # ADR 0009: A fresh-context refutation review runs before every push
 
 - **Status:** accepted 2026-10-18.

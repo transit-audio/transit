@@ -1,3 +1,6 @@
+<!-- transit-index
+title: I/O routing abstraction: a per-machine IoMap of named I/O paths of any width over all opened device channels (cap 32); per-session assignments by path name; any track, bus or send routes to any path or bus; ordinary sinks padded to one shared latency by default; sidechain key inputs as route-graph edges with dependency layering; hardware inserts with measured latency; slices 0 to (e) landed; amendment 2026-11-04: Low Latency mode bypasses selected live-path inserts without changing session flags, with an adopted-plan path latency readout; cue opt-out and master hardware repair are prerequisites
+-->
 # ADR 0015: I/O routing abstraction: a device channel map, named paths, one route graph
 
 - **Status:** accepted 2026-10-21 (direction pre-approved by the project owner; refutation review round 1 resolved)

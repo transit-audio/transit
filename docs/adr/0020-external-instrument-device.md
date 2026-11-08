@@ -1,3 +1,6 @@
+<!-- transit-index
+title: The External Instrument is an instrument-slot device; its measured round trip is plan latency (delay-compensated like a hardware insert; MIDI is not sent early in v1)
+-->
 # ADR 0020: The External Instrument is an instrument-slot device; its compensation is plan latency in frames
 
 - **Status:** accepted 2026-10-24 (issue #71, slice 3)

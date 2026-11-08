@@ -1,3 +1,6 @@
+<!-- transit-index
+title: MIDI effect slot: `Track::midi_effects` ahead of the instrument (at most 8, instrument tracks), run by a host in the instrument's event state on every event the mix sends it, in chain order with stable offset sorting; events past the block wait in each effect's fixed carry; bypass is bit-transparent; an add, remove, move or bypass ends the chain's notes; fixed capacities with `EventStatus::midi_fx` counters; built-ins Transpose and Velocity, automation slots 240..247; a rack's own chain runs before its distribution (lands with #197)
+-->
 # ADR 0036: MIDI effect slot
 
 - **Status:** proposed 2026-10-30 (#201)

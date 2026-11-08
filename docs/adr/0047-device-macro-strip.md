@@ -1,3 +1,6 @@
+<!-- transit-index
+title: The device macro strip: every device with parameters (MIDI effects and the rack card included) gets one row of eight S knobs with paging; factory pages (a built-in's `PAGES` beside `PARAMS`, validated, a derived first-eight page until its panel migrates; a CLAP plug-in's remote-controls pages held per instance; a hosted table of at most 64 parameters filled in order) then user pages (Configure: copy on the first touch, at most 16, saved on the device, a per-plug-in default file); the current page is UI state; no `format_version` bump, a `device_pages` need; a missing id shows as missing and never reorders; controllers follow the selected device's current page through `selected:` MIDI Learn targets with a takeover generation; rack macros keep their bindings and are the rack's one page
+-->
 # ADR 0047: The device macro strip: eight controls per page, factory, remote and user pages
 
 - **Status:** accepted 2026-11-07 (#355); settled after four judging rounds

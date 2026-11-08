@@ -1,3 +1,6 @@
+<!-- transit-index
+title: An adaptable core: desktop-only product; Tier A core with `std` and a headless build/test gate (#236); Tier B DSP and instruments with `no_std` + `alloc` and a bare-metal ARM compile gate, retrofitted per crate; small-Linux-board benchmark (#237); no firmware or board-support scope
+-->
 # ADR 0037: An adaptable core: the desktop DAW is the product, the engine must stay fit for small dedicated hardware
 
 - **Status:** accepted; amended 2026-11-03 (two tiers of portability)

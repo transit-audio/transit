@@ -1,3 +1,6 @@
+<!-- transit-index
+title: A render with an External Instrument (`file.bounce_mix {mode: "realtime"}`) plays the range through the live Player from a pre-roll of max(C, one block), sending MIDI as playback does; the audio thread copies Main and each return into a preallocated ring, a writer thread places the mix at s + A and each return stem at s + C; refusals shown before starting; Cancel, a failure or a device loss stop, release the synths and write nothing; a full ring fails the render; `offline_without_external` is the offline alternative
+-->
 # ADR 0027: A render with an External Instrument plays in real time through the live device
 
 - **Status:** accepted 2026-10-25 (issue #71, ADR 0020 slice 3)

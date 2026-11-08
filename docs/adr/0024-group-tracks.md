@@ -1,3 +1,6 @@
+<!-- transit-index
+title: A group is a `TrackKind::Folder` track that owns a summing bus (`mixer.input = Bus`); membership is `Track::folder` on the member and members sit contiguously after their group in session order; members on Main route to the group bus and back to the parent on leaving; Ctrl+G is one level deep, drag can nest, ungroup removes the track and an unused bus; each gesture is one undo step
+-->
 # ADR 0024: A group is a routing folder track; members follow it in session order
 
 - **Status:** accepted 2026-10-24 (retroactive; decided 2026-10-23 in #60)

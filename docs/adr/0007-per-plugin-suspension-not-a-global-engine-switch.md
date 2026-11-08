@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Hosted plug-ins are suspended per plug-in by their own signals (CLAP status, VST3 silence flags + tail), never by a global engine switch
+-->
 # ADR 0007: Hosted plug-ins are suspended per plug-in by their own signals, never by a global engine switch
 
 - **Status:** implemented in `transit` and verified 2026-10-18; **filed upstream as PR #765**

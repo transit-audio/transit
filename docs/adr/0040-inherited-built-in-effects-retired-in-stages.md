@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Inherited built-in effects are retired in stages: stage 1 (v0.6.0, Breaking) removes Pitch Shifter, Drum Synth, Channel Strip, Maximizer, De-Esser, Rectifier, Lo-Fi, Time Shift, Mod Delay, Chorus, Flanger and Phaser; stage 2 (Compressor/Limiter, Expander/Gate, EQ 7-Band and 1-Band, Room and Plate Reverb, Saturator, Gain) goes when each replacement lands; a session that carries a retired device opens with the slot emptied, its mappings, lanes and rack macro targets dropped, a load report by track, slot and name, and the status line "N insert(s) used retired built-in effects and were removed"; opens as modified; no other shim
+-->
 # ADR 0040: Inherited built-in effects retired in stages
 
 - **Status:** accepted 2026-10-31 (maintainer decision, #264)

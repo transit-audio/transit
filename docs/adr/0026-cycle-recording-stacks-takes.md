@@ -1,3 +1,6 @@
+<!-- transit-index
+title: With Cycle on, Record always loops the cycle range and stacks a take per lap until Stop; the Loop Record option (`edit.loop_record`, `options.loop_record`, Alt+L) is removed and old files that carry it still load
+-->
 # ADR 0026: With Cycle on, Record always loops and stacks takes; Loop Record is removed
 
 - **Status:** accepted 2026-10-24 (decided by Derek, #18)

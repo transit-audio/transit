@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Disk-backed audio sources: a long take (over a setting, 10 minutes by default, or the decode limit) is one clip on a source played from its file; a streaming thread fills per-clip rings ahead of the playhead, the audio thread only drains them (no allocation, lock or IO), Play and Locate prime them first, a late ring plays silence and counts a "Disk underruns" row; peaks cached in a `.peaks` sidecar; export reads the same file synchronously; PCM at the session rate in slice 1
+-->
 # ADR 0035: Disk-backed audio sources
 
 - **Status:** proposed 2026-10-30 (issue #187, option 2, decided by the maintainer on 2026-10-29 with option 3 first, which landed as #192). Slice 1 is implemented: the source variant, the streamer, placement of long takes, the mix's ring reader, the "Disk underruns" row, the peaks sidecar and offline reads through the same file.

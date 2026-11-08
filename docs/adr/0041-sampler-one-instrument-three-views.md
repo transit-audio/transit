@@ -1,3 +1,6 @@
+<!-- transit-index
+title: One Sampler instrument with three views (Instrument: zones, velocity layers, round robins, loops; Pads: per-pad sample, tune, reverse, envelope, choke groups, mute and solo, one stereo output; Slices: WAV cue point, transient and beat-grid markers mapped to pads and notes, Slice to MIDI in two timing modes); per-pad outputs and inserts through an Expand to rack command (ADR 0034), not inside the instrument; the Macro Oscillator's shaper and matrix reused; long samples through disk-backed sources (ADR 0035); WAV, AIFF, FLAC and SFZ in, no REX or proprietary kits; pitched playback first; the existing sampler is the seed and old sessions load
+-->
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
 - **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted

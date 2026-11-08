@@ -1,3 +1,6 @@
+<!-- transit-index
+title: The inherited file identifiers retire: from v0.7.0 clip group files write `transit.clipgroup` (extension `.tclips`) and track presets `transit-track-preset` (extension `.tpreset`), version 1 unchanged, and the session MIME type is `application/x-transit-session` at its five registration points; v0.7.x also reads `soundcraft.clipgroup` and `soundcraft-track-preset`, telling the caller once per read in the status line and the command result's `note` to write the file again; from the v0.8.0 tag the old tags are refused with one fixed message naming 0.7.0 and its release link (a version-gated test enforces the step), any other tag with a plain refusal naming it, and a version above 1 as saved by a newer transit; the VST3 state magic `SCV3` stays until the session format version changes at beta (the extensions and `SCV3` decided by the maintainer on 2026-11-08; `SCV3` tracked in #376); Ableton and Logic open old files indefinitely, transit differs on purpose while alpha
+-->
 # ADR 0049: The inherited file identifiers retire; v0.7.x reads both, v0.8.0 reads transit's only
 
 - **Status:** accepted 2026-11-08 (the maintainer's direction of 2026-11-08; settled after two judging rounds, every open answer decided by the maintainer)

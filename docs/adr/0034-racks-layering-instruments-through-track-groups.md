@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Racks layer instruments through track groups: a group sums its members, routes its MIDI input to every member and carries macro parameters mapped to member parameters (MIDI Learn range model); serialized as a group and rendered by the existing group sum; zones fade velocity (Ableton), macro curves `x^(4^curve)`, 16 members, slice 1 amendment 2026-10-30 (#197); rack presets are open
+-->
 # ADR 0034: Racks: layering instruments through track groups
 
 - **Status:** proposed 2026-10-29

@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Typography and iconography: Inter (UI, tabular figures frozen as "Inter Tab"), JetBrains Mono (transport and numeric readouts only), Lucide icons
+-->
 # ADR 0010: Typography and iconography: Inter, JetBrains Mono, Lucide
 
 - **Status:** accepted 2026-10-18; decisions 1 to 4 (the fonts) amended by [ADR 0045](0045-design-language-in-code.md) on 2026-11-06: IBM Plex Sans and Plex Mono replace Inter Tab and JetBrains Mono

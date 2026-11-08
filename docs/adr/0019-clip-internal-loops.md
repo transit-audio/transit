@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Loops live inside the clip: an optional loop range plus an arrangement length that may exceed one cycle, rendered modulo the range (audio sample accurate, MIDI notes wrap and end at the seam); linked copies (`clip.loop`) stay as Repeat; the Logic-style header handle sets the arrangement length
+-->
 # ADR 0019: Loops live inside the clip; linked copies stay as Repeat
 
 - **Status:** accepted (2026-10-23) (issue #59)

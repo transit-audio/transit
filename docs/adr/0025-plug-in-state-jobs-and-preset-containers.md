@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Plug-in state jobs (Save As, Copy, preset load, restore after undo) wait for the rendered document (`Player::plays`) with a 10 s give-up and a slot-generation check (E47 gate class); user presets are the formats' own containers (`.vstpreset`, `.clappreset`) under `<settings>/presets/<plug-in id>/`, kept in step with the session by `plugin.preset_*` and `plugin.state_*` commands
+-->
 # ADR 0025: Plug-in state jobs wait for the rendered document; presets are the formats' own containers
 
 - **Status:** accepted 2026-10-24 (retroactive; decided 2026-10-23 in #68 and #73, escape E47)

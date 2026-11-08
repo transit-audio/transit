@@ -1,3 +1,6 @@
+<!-- transit-index
+title: transit gets its own standalone repository (not in storytold's fork network); `derekmwright/soundcraft` stays a plain fork for upstream PRs only; move done on its trigger (an outside tester) and the project owner's go; dual MIT OR Apache-2.0 with SoundCraft credit
+-->
 # ADR 0014: transit gets its own repository; the fork stays for upstream pull requests
 
 - **Status:** accepted 2026-10-19; move done 2026-10-21 (https://github.com/derekmwright/transit, `main` = transit, tag v0.1.0-alpha.1)

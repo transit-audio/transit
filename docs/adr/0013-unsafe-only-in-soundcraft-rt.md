@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Unsafe lives only in `transit-rt` (safe API, per-platform modules with a compiling fallback, tested on every platform, refutation review for every change); `mix` stays unsafe-free
+-->
 # ADR 0013: Unsafe lives only in `transit-rt`, tested, reviewed, cross-platform
 
 - **Status:** accepted 2026-10-18; implemented: transit-rt merged into transit at 23ad6fd (2026-10-18); CI legs all four green on run 39191937448 (2026-10-18), §5 satisfied; local gate `cargo xtask rt-targets`

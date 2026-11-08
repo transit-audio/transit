@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Record arm and input monitor are runtime state: never saved, off on every open, never restored by undo
+-->
 # ADR 0011: Record arm and input monitor are runtime state
 
 - **Status:** accepted 2026-10-18

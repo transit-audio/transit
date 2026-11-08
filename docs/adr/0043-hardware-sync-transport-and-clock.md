@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Hardware sync: one selected MIDI input follows transport and optionally 24-ppqn clock; tick-count phase, filtered tempo and visible lock/freewheel state; per-output Clock, transport and Song Position with device-clock deadlines; runtime beat mapping and device-timestamped recording; per-machine preferences; four gated slices and a hardware loopback diagnostic
+-->
 # ADR 0043: Hardware sync: transit follows and sends MIDI transport and clock
 
 - **Status:** accepted 2026-11-03 (maintainer decision; proposed 2026-11-03, two judging rounds plus one amendment round for the idle clock)

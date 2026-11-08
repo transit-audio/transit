@@ -1,3 +1,6 @@
+<!-- transit-index
+title: MIDI Learn mappings (slices 1 and 2; slice 2 adds plug-in parameters by stable id with normalized range, learn next touched parameter for hosted editors, and the automation write rule): source (port, channel, CC or note) to a mixer or track control with pickup or jump, range and toggle; a per-machine controller profile (strip positions, `ui.json`) and session mappings (track ids, session file) with the session winning; matching on the ingress worker against an Arc snapshot swapped from Main, published to Main through an SPSC ring, learn forwarding the next candidate once; a mapped sweep is one undo step
+-->
 # ADR 0028: MIDI Learn mappings
 
 - **Status:** accepted 2026-10-25 (decided by Derek for v0.3.0, #97); amended by [ADR 0047](0047-device-macro-strip.md): the `selected:` controller-bank targets and the `plugin:midi<n>` target

@@ -1,3 +1,6 @@
+<!-- transit-index
+title: transit does not host video: the decoder crate, the import command, `ClipContent::Video`, `TrackKind::Video`, `VideoSource` and `Session::videos` are removed; an old session that carries any of them opens with the video dropped (a Video track that holds a clip becomes an Audio track; an empty one is deleted) and one load note; `format_version` stays 1
+-->
 # ADR 0031: transit does not host video
 
 - **Status:** accepted 2026-10-28 (decided by Derek, issue #176)

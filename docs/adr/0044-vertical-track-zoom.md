@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Vertical track zoom: session track heights, individual and all-track resize gestures, wheel and keys, proportional automation/take lanes, bounded drawing and undo; retire the machine-wide row height; gestures preview locally and commit once
+-->
 # ADR 0044: Vertical track zoom: per-track heights in the session, resize gestures and lanes that follow
 
 - **Status:** proposed 2026-11-04 (#314)

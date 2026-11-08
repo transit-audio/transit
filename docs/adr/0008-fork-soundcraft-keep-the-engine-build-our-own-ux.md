@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Fork SoundCraft, keep and refine its engine, build our own Logic/Ableton-style UX (one-week UI spike gates it)
+-->
 # ADR 0008: Fork SoundCraft, keep and refine its engine, build our own Logic/Ableton-style UX
 
 - **Status:** accepted 2026-10-18. Supersedes the undecided part of [ADR 0002](0002-evaluate-and-contribute-to-soundcraft-first.md); its mid-November review is resolved early.

@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Export formats: Opus is the only lossy export (no MP3 or AAC), Ogg Opus per RFC 7845 from the reference libopus 1.6.1 vendored and built with `cc` (no cmake or system library), constrained VBR at 96 to 256 kb/s (160 default; mono 96 to 160, 96 default), complexity 10, 48 kHz with a streaming sinc converter, exact length through pre-skip and end trimming, mono and stereo only (surround refused, K112); `transit-opus` joins the unsafe allowlist with its FFI in one module; `.opus` import comes with the decoder; 64 kb/s, a VBR/CBR toggle and an artist tag dropped, the saved preference deferred to #367
+-->
 # ADR 0048: Export formats: Opus, no MP3
 
 - **Status:** accepted 2026-11-08 (#238; the maintainer's format decision of 2026-10-30)

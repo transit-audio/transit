@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Run our side by the stabilization playbook; propose its footprint upstream, led by the escape record
+-->
 # ADR 0006: Run our side by the stabilization playbook; propose its minimum footprint upstream, led by evidence
 
 - **Status:** accepted (supersedes the narrower "record decisions as ADRs" version of this record, same day)

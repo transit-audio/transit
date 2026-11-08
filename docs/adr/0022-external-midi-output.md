@@ -1,3 +1,6 @@
+<!-- transit-index
+title: External MIDI output: `Track::midi_output` is `Internal` or `External { port, channel, offset_ms }`; a dedicated output thread, fed by two SPSC rings and a control channel, owns every port and sends on the output presentation map (`ClockMap::frame_to_host`); note safety on stop, wrap, locate, destination change, disarm, device loss and exit; the ingress worker wakes on data; bare tracks carry the delay compensation A in the stamp, with per-track deadline ordering
+-->
 # ADR 0022: External MIDI output: a per-track destination, sent by a dedicated thread on the output presentation map
 
 - **Status:** accepted 2026-10-24 (retroactive; decided 2026-10-23 in #61, ingress wake in #62; stamp amendment from ADR 0020, issue #71)

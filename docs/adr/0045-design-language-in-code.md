@@ -1,3 +1,6 @@
+<!-- transit-index
+title: The device design language is the UI's source of truth: `crate::tokens` mirrors `docs/design/language/tokens.json` with a drift test both ways; the dark set is the design, the light set derived by one rule (kept pending the maintainer's decision); panel tests assert tokens; a visual migration carries no behavior change; migration order Macro Oscillator, other built-ins, mixer, main window, new panels from the start; IBM Plex Sans and Mono bundled under the OFL (amends ADR 0010); a stateless widget kit; no analog dials
+-->
 # ADR 0045: The device design language is the UI's source of truth, mirrored in code
 
 - **Status:** accepted 2026-11-06 (#326); settled after one judging round (below). v0.7.0 ships dark only (the maintainer's decision); the derived light set stays in code as the baseline for a later designed light theme.

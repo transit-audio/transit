@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Built-in instruments are a Rust port of the Mutable Instruments family (Plaits first, then Rings, Clouds, Warps, Marbles, Grids), ported only from the original MIT repository, without the original branding and with explicit credit, in brand-free transit crates (`transit-macro-osc` for Plaits; see the amendment); polyphony, editor and rack are our own; gated by null tests against the original C++ as a dev-only oracle (residual floor measured first); the crates.io port is evaluated before any work starts
+-->
 # ADR 0033: Built-in instruments: a port of the Mutable Instruments family
 
 - **Status:** proposed 2026-10-29 (maintainer decision)

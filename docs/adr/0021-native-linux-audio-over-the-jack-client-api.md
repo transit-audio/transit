@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Native Linux audio over the JACK client API, for JACK and PipeWire alike (`transit-audio-jack`, runtime-loaded libjack, one code path; MIDI stays on the ALSA sequencer in v1)
+-->
 # ADR 0021: Native Linux audio over the JACK client API, for JACK and PipeWire alike
 
 - **Status:** accepted 2026-10-24 (issue #55); amended 2026-10-25 (slice 2)

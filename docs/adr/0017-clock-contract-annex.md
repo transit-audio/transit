@@ -1,5 +1,9 @@
+<!-- transit-index
+title: Clock domains and timestamp quality: the clock contract annex to ADR 0012 (gates G4 and G6)
+-->
 # ADR 0017: clock domains and timestamp quality
 
+- **Status:** proposed 2026-10-18; component-level G4 passed, hardware timing open
 - Date: 2026-10-18. Status: proposed for joint review.
 - Parent: [ADR 0012](0012-midi-device-layer.md), gates G4 and G6.
 - Implementation status (2026-10-19 09:58 EDT): the original `f9078c7` jitter

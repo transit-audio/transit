@@ -1,3 +1,6 @@
+<!-- transit-index
+title: E62: an autosave test polled the clock for a background write (#189)
+-->
 # E62: an autosave test polled the clock for a background write
 
 1. **Failure.** `recovery_tests::every_change_is_autosaved_within_a_second`

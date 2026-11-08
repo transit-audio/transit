@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Native WASAPI backend (`transit-audio-wasapi`, windows-rs) behind a platform-independent `audio-backend` trait: shared low-latency (`IAudioClient3`) default, exclusive and raw opt-in, device-position clock feeding the ADR 0012 fit, benchmark harness (loopback latency, jitter, xruns vs CPAL-shared and ASIO) before the backend, cpal kept as fallback; native backend feeds two per-stream clock domains; slices (a) to (f)
+-->
 # ADR 0016: Native WASAPI backend behind a platform-independent audio backend trait
 
 - **Status:** accepted 2026-10-21 (direction from the project owner; refutation review round 1 resolved); implementation after ADR 0015 slice (c)

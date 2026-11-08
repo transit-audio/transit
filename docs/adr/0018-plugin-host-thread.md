@@ -1,3 +1,6 @@
+<!-- transit-index
+title: A plug-in host thread per process owns hosted instances (create, state, editor, destroy); the UI sends requests and polls, never waiting more than a frame; 10 s timeout (120 s for a modal dialog) hands new creations to a fresh thread, and a thread that returns serves its plug-ins again; macOS stays on the UI thread
+-->
 # ADR 0018: A plug-in host thread owns hosted instances; the UI only sends requests
 
 - **Status:** accepted 2026-10-24 (shipped 2026-10-23, #36 #56 #66)

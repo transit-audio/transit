@@ -1,3 +1,6 @@
+<!-- transit-index
+title: Session compatibility markers: a top-level `needs` list, written only when a feature is used (`clip_loop` today), makes builds that know the marker warn on load about unknown entries without rejecting the file; `format_version` stays reserved for changes an old reader cannot load; MIDI loop cycles step from the tick grid and a tempo change under the 64-sample minimum cycle is refused; builds before the marker still drop the loop (K40)
+-->
 # ADR 0023: Session compatibility markers: a `needs` list warns, `format_version` refuses
 
 - **Status:** accepted 2026-10-24 (retroactive; decided 2026-10-24 in #70, known issue K40)
