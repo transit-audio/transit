@@ -826,6 +826,40 @@ hide it. Right-click its name for the presets: Drifting Melody, Locked Loop, Spa
 The notes land on exact samples, the same at any buffer size, and every one ends when you stop.
 Every control can be automated and mapped to a MIDI controller.
 
+## Upgrading to 0.7.0
+
+transit 0.7.0 stops writing the names it inherited from the SoundCraft fork into two kinds of file:
+**clip group files** (`file.export_clip_groups` and `file.import_clip_groups`) and **track
+presets** (`track.save_preset` and `track.load_preset`), which you reach through the assistant, MCP,
+the control protocol or the CLI. Your sessions need nothing: a `.transit` file opens and saves as
+before ([ADR 0049](adr/0049-inherited-file-identifiers-retire.md)).
+
+**What converts.** Any 0.7 release opens clip group files and track presets saved by older
+versions, and writes every new one in transit's format. Opening an old file does not change it, so
+the status line says what to do:
+
+- `Clip Group.scgrp: saved before transit 0.7.0; export these clips again to keep the file opening after 0.8.0`
+- `Bass.json: saved before transit 0.7.0; save this preset again to keep it opening after 0.8.0`
+
+To convert a clip group file, import it and export the imported clips again with
+`file.export_clip_groups`. To convert a track preset, load it onto a track and save it again with
+`track.save_preset`. New clip group files are named `.transitclips`; old `.scgrp` files keep opening
+by their contents.
+
+**Later versions refuse unconverted files.** From 0.8.0, transit opens only files in transit's
+format. An older file is refused with:
+
+> This file was saved by a version before transit 0.7.0. Open and save it in transit 0.7.0 first:
+> https://github.com/transit-audio/transit/releases/tag/v0.7.0
+
+**In one line:** before you move past 0.7, open each clip group file and track preset you want to
+keep in transit 0.7 and save it again. If you have already moved on, install any 0.7 release from
+the link, convert the files there, and go back.
+
+**File associations.** Session files register under a new type, `application/x-transit-session`,
+and the installer updates it. On Linux, if you had chosen transit by hand as the app for `.transit`
+files, choose it once more after upgrading.
+
 ## Retired built-in effects
 
 transit retires the effects it inherited from the SoundCraft fork in stages
