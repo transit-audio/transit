@@ -160,9 +160,9 @@ pub(crate) fn add_device_menu(app: &mut StudioApp, resp: &egui::Response, tid: T
     let mut hardware = false;
     let mut filter = std::mem::take(&mut app.mixer.effect_filter);
     let mut filter_rect = app.mixer.filter_rect;
-    egui::Popup::menu(resp).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+    crate::chrome::popup_menu(resp).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         // A hardware insert (ADR 0015 section 5): the signal leaves on one path and returns on another.
-        let b = ui.button("Hardware Insert…").on_hover_text("Send the signal through outboard gear on the audio interface");
+        let b = ui.add(crate::chrome::MenuRow::new("Hardware Insert…")).on_hover_text("Send the signal through outboard gear on the audio interface");
         crate::help::hover(ui, &b, crate::help::Id::DeviceChainHardwareInsert);
         menu.push(MenuItem::at(ui, "Hardware Insert…".into(), "hardware_insert".into(), b.rect));
         if b.clicked() {
@@ -421,8 +421,8 @@ fn card_body(
         // Right-click anywhere on the card: Retry. Made first, so the card's own controls keep
         // their clicks.
         let body = ui.interact(r.intersect(lane), ui.id().with(("card_retry_menu", t.0, salt)), Sense::click());
-        egui::Popup::context_menu(&body).id(body.id.with("ctx")).show(|ui| {
-            let b = ui.button("Retry").on_hover_text(format!("Retry loading {name}"));
+        crate::chrome::context_menu(&body).id(body.id.with("ctx")).show(|ui| {
+            let b = ui.add(crate::chrome::MenuRow::new("Retry")).on_hover_text(format!("Retry loading {name}"));
             menu.push(MenuItem::at(ui, "Retry".into(), "retry".into(), b.rect));
             if b.clicked() {
                 let _ = app.retry_plugin(t, key_slot);
@@ -553,10 +553,11 @@ fn card_body(
         let mut filter_rect = app.mixer.filter_rect;
         let mut picked = None;
         let mut external = false;
-        egui::Popup::menu(&resp).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        crate::chrome::popup_menu(&resp).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             // A hardware synth (ADR 0020): MIDI out to its port, its audio back on an input path.
             let label = crate::external_instrument::MENU_LABEL;
-            let b = crate::menus::check_button(ui, ext.is_some(), label)
+            let b = ui
+                .add(crate::chrome::MenuRow::new(label).checked(ext.is_some()))
                 .on_hover_text("Play a hardware synth: the track's MIDI goes to its port and its audio comes back on an input");
             crate::help::hover(ui, &b, crate::help::Id::DeviceChainHardwareSynth);
             menu.push(MenuItem::at(ui, label.to_string(), transit_model::EXTERNAL_INSTRUMENT_PLUGIN.to_string(), b.rect));
@@ -858,9 +859,9 @@ fn key_control(
     let pre = current.map_or(app.mixer.key_pre, |k| k.tap == Tap::Pre);
     let (tracks, busses) = key_sources(&s, t);
     let mut pick: Option<KeyPick> = None;
-    egui::Popup::menu(&resp).width(200.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+    crate::chrome::popup_menu(&resp).width(200.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let mut item = |ui: &mut Ui, on: bool, label: &str, value: String, to: KeyPick| {
-            let b = crate::menus::check_button(ui, on, label);
+            let b = ui.add(crate::chrome::MenuRow::new(label).checked(on));
             menu.push(MenuItem::at(ui, label.to_string(), value, b.rect));
             if b.clicked() {
                 pick = Some(to);
@@ -873,17 +874,17 @@ fn key_control(
         item(ui, !pre, "Post-fader", "tap:post".into(), KeyPick::Tap(false));
         item(ui, pre, "Pre-fader", "tap:pre".into(), KeyPick::Tap(true));
         ui.separator();
-        ui.label(egui::RichText::new("Tracks").color(TOKENS.text_dim).size(10.5));
+        crate::chrome::menu_note(ui, egui::RichText::new("Tracks").color(TOKENS.text_dim).size(10.5));
         for (id, name) in &tracks {
             let on = current.is_some_and(|k| k.from == KeyFrom::Track(*id));
             item(ui, on, name, format!("track:{}", id.0), KeyPick::Source(KeyFrom::Track(*id)));
         }
         if tracks.is_empty() {
-            ui.weak("No other tracks");
+            crate::chrome::menu_note(ui, egui::RichText::new("No other tracks").weak());
         }
         if !busses.is_empty() {
             ui.separator();
-            ui.label(egui::RichText::new("Busses").color(TOKENS.text_dim).size(10.5));
+            crate::chrome::menu_note(ui, egui::RichText::new("Busses").color(TOKENS.text_dim).size(10.5));
             for (id, name) in &busses {
                 let on = current.is_some_and(|k| k.from == KeyFrom::Bus(*id));
                 item(ui, on, name, format!("bus:{}", id.0), KeyPick::Source(KeyFrom::Bus(*id)));
@@ -1010,10 +1011,10 @@ pub fn plugin_menu(
     let f = filter.trim().to_lowercase();
     let keep = |name: &str, vendor: &str| f.is_empty() || name.to_lowercase().contains(&f) || vendor.to_lowercase().contains(&f);
     let heading = |ui: &mut Ui, text: &str| {
-        ui.label(egui::RichText::new(text).color(TOKENS.text_dim).size(10.5));
+        crate::chrome::menu_note(ui, egui::RichText::new(text).color(TOKENS.text_dim).size(10.5));
     };
     let mut item = |ui: &mut Ui, id: &str, label: &str, picked: &mut Option<String>| {
-        let b = crate::menus::check_button(ui, current == Some(id), label);
+        let b = ui.add(crate::chrome::MenuRow::new(label).checked(current == Some(id)));
         menu.push(MenuItem::at(ui, label.to_string(), id.to_string(), b.rect));
         if b.clicked() {
             *picked = Some(id.to_string());
@@ -1031,15 +1032,15 @@ pub fn plugin_menu(
             match list {
                 None => match crate::plugin_scan::scanning_label() {
                     Some(text) => {
-                        ui.weak(text);
+                        crate::chrome::menu_note(ui, egui::RichText::new(text).weak());
                         ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
                     }
                     None => {
-                        ui.weak("Not scanned yet (Audio › Scan Plug-ins)");
+                        crate::chrome::menu_note(ui, egui::RichText::new("Not scanned yet (Audio › Scan Plug-ins)").weak());
                     }
                 },
                 Some(l) if l.is_empty() => {
-                    ui.weak(format!("No {format} {noun} found"));
+                    crate::chrome::menu_note(ui, egui::RichText::new(format!("No {format} {noun} found")).weak());
                 }
                 Some(l) => {
                     let mut vendor: Option<&str> = None;
@@ -1047,14 +1048,14 @@ pub fn plugin_menu(
                     for e in l.iter().filter(|e| keep(&e.name, &e.vendor)) {
                         let v = if e.vendor.is_empty() { "Other" } else { e.vendor.as_str() };
                         if vendor != Some(v) {
-                            ui.label(egui::RichText::new(v).color(TOKENS.text_dim).size(10.0));
+                            crate::chrome::menu_note(ui, egui::RichText::new(v).color(TOKENS.text_dim).size(10.0));
                             vendor = Some(v);
                         }
                         item(ui, &e.id, &e.name, &mut picked);
                         any = true;
                     }
                     if !any {
-                        ui.weak("No match");
+                        crate::chrome::menu_note(ui, egui::RichText::new("No match").weak());
                     }
                 }
             }

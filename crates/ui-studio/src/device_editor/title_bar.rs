@@ -347,12 +347,11 @@ pub(crate) fn show(
     let menu = sq(x);
     let mresp = button(ui, id("menu"), menu, true);
     paint_glyph(&p, menu.center(), "menu", t.text_muted);
-    egui::Popup::menu(&mresp).show(|ui| {
-        crate::chrome::menu_style(ui.style_mut());
-        if crate::menus::check_button(ui, follow, "Follow Selection").clicked() {
+    crate::chrome::popup_menu(&mresp).show(|ui| {
+        if ui.add(crate::chrome::MenuRow::new("Follow Selection").checked(follow)).clicked() {
             res.toggle_follow = true;
         }
-        if crate::menus::check_button(ui, false, "Close All Editors").clicked() {
+        if ui.add(crate::chrome::MenuRow::new("Close All Editors")).clicked() {
             res.close_all = true;
         }
     });

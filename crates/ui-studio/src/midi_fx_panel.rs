@@ -198,12 +198,12 @@ fn param_control(
         Unit::Choice => {
             let resp = ui.put(field, egui::Button::new(egui::RichText::new(pi.format(stored)).size(10.5)));
             let mut picked = None;
-            egui::Popup::menu(&resp).width(130.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+            crate::chrome::popup_menu(&resp).width(130.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                 egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                     for (k, name) in pi.choices.iter().enumerate() {
                         #[allow(clippy::cast_precision_loss)] // A short list.
                         let value = k as f32;
-                        let b = ui.add(egui::Button::new(*name).selected(stored.to_bits() == value.to_bits()));
+                        let b = ui.add(crate::chrome::MenuRow::new(*name).checked(stored.to_bits() == value.to_bits()));
                         menu.push(MenuItem::at(ui, (*name).to_string(), format!("{}={k}", pi.id), b.rect));
                         if b.clicked() {
                             picked = Some(value);
@@ -285,9 +285,9 @@ pub fn card(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, t: 
     let resp = resp.on_hover_text(if full { "The track holds eight MIDI effects, the most it can" } else { "Add a MIDI effect" });
     if !full {
         let mut picked = None;
-        egui::Popup::menu(&resp).width(180.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        crate::chrome::popup_menu(&resp).width(180.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             for info in transit_dsp::midi_fx::REGISTRY {
-                let b = ui.button(info.name);
+                let b = ui.add(crate::chrome::MenuRow::new(info.name));
                 menu.push(MenuItem::at(ui, info.name.to_string(), info.id.to_string(), b.rect));
                 if b.clicked() {
                     picked = Some(info.id);
@@ -317,9 +317,9 @@ pub fn card(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, t: 
         let body = ui.interact(row.intersect(lane), ui.id().with(("midi_fx_row", tid.0, i)), Sense::click());
         crate::help::hover(ui, &body, crate::help::Id::DeviceChainMidiEffect);
         let presets = crate::presets::factory_for(&fx.plugin);
-        egui::Popup::context_menu(&body).id(body.id.with("ctx")).show(|ui| {
+        crate::chrome::context_menu(&body).id(body.id.with("ctx")).show(|ui| {
             for (label, to, ok) in [("Move Up", i.wrapping_sub(1), i > 0), ("Move Down", i + 1, i + 1 < n)] {
-                let b = ui.add_enabled(ok, egui::Button::new(label));
+                let b = ui.add_enabled(ok, crate::chrome::MenuRow::new(label));
                 menu.push(MenuItem::at(ui, label.into(), to.to_string(), b.rect));
                 if b.clicked() {
                     let _ = app.run("mix.midi_effect_move", json!({"track": tid.0, "from": i, "to": to}));
@@ -331,7 +331,7 @@ pub fn card(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, t: 
             }
             for (name, _) in &presets {
                 let label = format!("Preset: {name}");
-                let b = ui.button(&label);
+                let b = ui.add(crate::chrome::MenuRow::new(&label));
                 menu.push(MenuItem::at(ui, label, (*name).to_string(), b.rect));
                 if b.clicked() {
                     if let Err(e) = app.apply_midi_preset(tid, i, name) {

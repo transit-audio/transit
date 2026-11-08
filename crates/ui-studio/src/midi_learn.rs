@@ -350,7 +350,7 @@ impl StudioApp {
         for entry in entries {
             let text = entry_text(entry, mapped.as_ref());
             let current = entry == Entry::Takeover(self.ui.midi_takeover);
-            let b = ui.add_enabled(entry != Entry::Mapped, egui::Button::new(text.clone()).selected(current));
+            let b = ui.add_enabled(entry != Entry::Mapped, crate::chrome::MenuRow::new(text.clone()).checked(current));
             self.midi_learn.menu.push(MenuItem::at(ui, text, format!("{entry:?}"), b.rect));
             if b.clicked() {
                 let _ = self.learn_choose(entry, track, control.clone(), mapped.as_ref());

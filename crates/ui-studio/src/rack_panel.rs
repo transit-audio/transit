@@ -184,7 +184,7 @@ fn macro_knob(
     if k.response.drag_stopped() || (k.value.is_some() && !k.response.dragged()) {
         app.engine.end_merge();
     }
-    k.response.context_menu(|ui| macro_menu(app, ui, rack, i, control));
+    crate::chrome::context_menu(&k.response).show(|ui| macro_menu(app, ui, rack, i, control));
 }
 
 /// The knob's right-click menu: the mappings with their range and curve, Map, MIDI Learn.
@@ -192,12 +192,12 @@ fn macro_menu(app: &mut StudioApp, ui: &mut Ui, rack: TrackId, i: usize, control
     let s = app.engine.session_arc();
     let Some(t) = s.track(rack) else { return };
     let Some(r) = t.rack.as_ref() else { return };
-    ui.label(egui::RichText::new(r.macro_name(i)).strong());
+    crate::chrome::menu_note(ui, egui::RichText::new(r.macro_name(i)).strong());
     let mappings = r.macros.get(i).map(|m| m.mappings.clone()).unwrap_or_default();
     for m in &mappings {
         let member = s.track(m.track).map_or_else(|| format!("track {}", m.track.0), |x| x.name.clone());
         let slot = if m.slot == AutoParam::INSTRUMENT_SLOT { "Instrument".to_string() } else { format!("Insert {}", slot_letter(m.slot)) };
-        ui.label(format!("{member} > {slot} > {}", m.param));
+        crate::chrome::menu_note(ui, format!("{member} > {slot} > {}", m.param));
         ui.horizontal(|ui| {
             let (mut min, mut max, mut curve) = (m.min, m.max, m.curve);
             let a = ui.add(egui::DragValue::new(&mut min).range(0.0..=1.0).speed(0.005).prefix("min "));
@@ -227,9 +227,9 @@ fn macro_menu(app: &mut StudioApp, ui: &mut Ui, rack: TrackId, i: usize, control
     if !mappings.is_empty() {
         ui.separator();
     }
-    ui.menu_button("Map Parameter", |ui| {
+    ui.menu_button(crate::chrome::submenu_atoms("Map Parameter"), |ui| {
         for (member, _) in s.rack_members(t) {
-            ui.menu_button(&member.name, |ui| {
+            ui.menu_button(crate::chrome::submenu_atoms(&member.name), |ui| {
                 let devices = member
                     .instrument
                     .iter()
@@ -239,10 +239,10 @@ fn macro_menu(app: &mut StudioApp, ui: &mut Ui, rack: TrackId, i: usize, control
                     let Some(info) = crate::automation::device_info(&d.plugin) else { continue };
                     let title =
                         if slot == AutoParam::INSTRUMENT_SLOT { info.name.to_string() } else { format!("{} ({})", info.name, slot_letter(slot)) };
-                    ui.menu_button(title, |ui| {
+                    ui.menu_button(crate::chrome::submenu_atoms(title), |ui| {
                         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                             for p in info.params {
-                                if ui.button(p.name).clicked() {
+                                if ui.add(crate::chrome::MenuRow::new(p.name)).clicked() {
                                     let args =
                                         json!({"track": rack.0, "macro": i + 1, "member": member.id.0, "slot": slot_text(slot), "param": p.id});
                                     let _ = app.run("rack.macro_map", args);

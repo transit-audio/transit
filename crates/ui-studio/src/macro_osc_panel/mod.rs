@@ -360,7 +360,7 @@ pub(crate) fn finish(app: &mut StudioApp, ui: &Ui, dev: Dev, id: &str, resp: &eg
         crate::help::hover(ui, resp, h);
     }
     if let Some(control) = crate::midi_learn::plugin_control(dev.key.1, p.id) {
-        egui::Popup::context_menu(resp).id(resp.id.with("learn_ctx")).show(|ui| app.midi_learn_menu(ui, dev.key.0, control.clone()));
+        crate::chrome::context_menu(resp).id(resp.id.with("learn_ctx")).show(|ui| app.midi_learn_menu(ui, dev.key.0, control.clone()));
         crate::midi_learn::mark(app, ui.painter(), resp.rect, dev.key.0, control);
     }
     if let Some(v) = new {

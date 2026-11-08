@@ -50,7 +50,7 @@ fn button(app: &mut StudioApp, ui: &mut Ui, name: &str, which: Icon, on: bool, o
         crate::help::hover(ui, &resp, id);
     }
     if let Some(target) = transit_model::TransportControl::ALL.into_iter().find(|t| t.key() == name) {
-        resp.context_menu(|ui| app.midi_learn_menu(ui, transit_model::TrackId(0), transit_model::Control::Transport(target)));
+        crate::chrome::context_menu(&resp).show(|ui| app.midi_learn_menu(ui, transit_model::TrackId(0), transit_model::Control::Transport(target)));
     }
     resp.on_hover_text(tooltip)
 }
