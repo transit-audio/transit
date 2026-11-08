@@ -237,3 +237,237 @@ fn open_replaces_the_session_untitled_and_posts_the_report() {
     assert!(is_dawproject("A/B.DAWproject") && !is_dawproject("a.transit"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ─── The refutation review of the first commit (ADR 0009): each finding fails without its fix ───
+
+fn err_of(xml: &str) -> String {
+    read_dawproject(archive(xml), "x").err().map(|e| e.to_string()).unwrap_or_default()
+}
+
+fn notes_track(clips: &str) -> String {
+    project(PIANO, &format!(r#"<Lanes track="t1"><Clips>{clips}</Clips></Lanes>"#))
+}
+
+#[test]
+fn b1_open_respects_the_automation_read_root() {
+    let base = std::env::temp_dir().join(format!("transit-dawproject-root-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("in")).unwrap();
+    std::fs::create_dir_all(base.join("outside")).unwrap();
+    let secret = base.join("outside/secret.dawproject");
+    std::fs::write(&secret, archive(&project(PIANO, "")).into_inner()).unwrap();
+    let roots = crate::file_access::AutomationRoots::new(Some(&base.join("in")), None).unwrap().unwrap();
+    let mut e = Engine::new(Session::new("before", transit_time::SampleRate::default()));
+    let r = crate::file_access::confine(Some(&roots), || e.execute("session.open", &serde_json::json!({"path": secret.to_string_lossy()})));
+    let err = r.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(err.contains("outside the read root"), "{err}");
+    assert_eq!(e.session().name, "before");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn b2_deep_nesting_is_refused_before_it_can_overflow_the_stack() {
+    // Run where the stack is small, as on Windows' 1 MiB main thread.
+    let deep_clips = || {
+        let n = 5_000;
+        let inner = format!("{}<Notes/>{}", r#"<Clip time="0" duration="1"><Clips>"#.repeat(n), "</Clips></Clip>".repeat(n));
+        notes_track(&inner)
+    };
+    let deep_lanes = || project(PIANO, &format!("{}{}", "<Lanes>".repeat(12_000), "</Lanes>".repeat(12_000)));
+    for xml in [deep_clips(), deep_lanes()] {
+        let err = std::thread::Builder::new().stack_size(1 << 20).spawn(move || err_of(&xml)).unwrap().join().unwrap();
+        assert!(err.contains("nested more than"), "{err}");
+    }
+}
+
+#[test]
+fn b3_an_element_with_too_many_attributes_is_refused_quickly() {
+    let attrs: String = (0..80_000).map(|i| format!(" a{i}=\"1\"")).collect();
+    let t = std::time::Instant::now();
+    let err = err_of(&project(&format!("<Track{attrs}/>"), ""));
+    assert!(err.contains("attributes"), "{err}");
+    assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
+}
+
+#[test]
+fn b3_meter_changes_in_any_order_apply_quickly_and_in_time_order() {
+    let points: String =
+        (0..4_000).rev().map(|i| format!(r#"<TimeSignaturePoint time="{}" numerator="{}" denominator="4"/>"#, i * 12, 3 + i % 2)).collect();
+    let xml = project(PIANO, "").replace("<Markers>", &format!("<TimeSignatureAutomation>{points}</TimeSignatureAutomation><Markers>"));
+    let t = std::time::Instant::now();
+    let (s, report) = read(&xml);
+    assert!(t.elapsed() < std::time::Duration::from_secs(5), "{:?}", t.elapsed());
+    assert!(report.is_empty(), "{report:?}");
+    let m = s.tempo.meters();
+    assert_eq!(m.len(), 4_000);
+    assert_eq!((m[1].tick, m[1].numerator), (12 * 960, 4));
+}
+
+#[test]
+fn b3_tracks_clips_and_markers_are_capped() {
+    let tracks: String =
+        (0..MAX_TRACKS + 5).map(|i| format!(r#"<Track contentType="notes" id="t{i}" name="T"><Channel role="regular"/></Track>"#)).collect();
+    let (s, report) = read(&project(&tracks, ""));
+    assert_eq!(s.tracks.len(), MAX_TRACKS);
+    assert!(report.iter().any(|r| r.ends_with("5 tracks past the limit")), "{report:?}");
+    let clips: String = (0..MAX_CLIPS + 3).map(|i| format!(r#"<Clip time="{i}" duration="1"><Notes/></Clip>"#)).collect();
+    let (s, report) = read(&notes_track(&clips));
+    assert_eq!(s.tracks[0].clips().len(), MAX_CLIPS);
+    assert!(report.iter().any(|r| r.ends_with("3 clips past the limit")), "{report:?}");
+    let markers: String = (0..MAX_MARKERS + 2).map(|i| format!(r#"<Marker time="{i}" name="m"/>"#)).collect();
+    let (s, report) = read(&project(PIANO, "").replace(r#"<Marker time="3" name="B section"/>"#, &markers));
+    assert_eq!(s.markers.len(), MAX_MARKERS);
+    assert!(report.iter().any(|r| r.ends_with("2 markers past the limit")), "{report:?}");
+}
+
+#[test]
+fn b3_loop_passes_cost_what_they_play_not_the_whole_content() {
+    // 20,000 notes after a one-tick loop: every pass used to scan all of them.
+    let notes: String = (0..20_000).map(|i| format!(r#"<Note time="{}" duration="0.5" key="60" vel="1"/>"#, 10 + i)).collect();
+    let clip = format!(
+        r#"<Clip time="0" duration="520" loopStart="0" loopEnd="0.001"><Notes><Note time="0" duration="0.001" key="61" vel="1"/>{notes}</Notes></Clip>"#
+    );
+    let t = std::time::Instant::now();
+    let (s, _) = read(&notes_track(&clip));
+    assert!(t.elapsed() < std::time::Duration::from_secs(3), "{:?}", t.elapsed());
+    assert_eq!(seq(only_clip(&s)).notes.len(), 499_200, "one note per one-tick pass");
+}
+
+#[test]
+fn b3_timbre_ownership_is_not_quadratic() {
+    // One long note with `n` timbre points over `n` short notes that each have one: 8 times the
+    // notes must cost about 8 times the time, not 64 (a ratio, so the machine's speed cancels).
+    let run = |n: u32| {
+        let long: String = (0..n).map(|i| format!(r#"<RealPoint time="{}" value="0.5"/>"#, f64::from(i) * 0.5 + 0.25)).collect();
+        let shorts: String = (0..n)
+            .map(|i| format!(r#"<Note time="{}" duration="0.1" key="72" vel="1"><Points><Target expression="timbre"/><RealPoint time="0" value="0.9"/></Points></Note>"#, f64::from(i) * 0.5))
+            .collect();
+        let len = n / 2;
+        let clip = format!(
+            r#"<Clip time="0" duration="{}"><Notes><Note time="0" duration="{len}" key="60" vel="1"><Points><Target expression="timbre"/>{long}</Points></Note>{shorts}</Notes></Clip>"#,
+            len + 1
+        );
+        let xml = notes_track(&clip);
+        let t = std::time::Instant::now();
+        let (s, _) = read(&xml);
+        let took = t.elapsed();
+        // The long note's points fall between the short notes, so all of them are its own.
+        assert_eq!(seq(only_clip(&s)).ctrls.iter().filter(|e| e.kind == CtrlKind::Cc(74)).count(), 2 * n as usize);
+        took
+    };
+    let (small, large) = (run(10_000), run(80_000));
+    assert!(large < small * 24, "8x the notes took {:.1}x the time ({small:?} -> {large:?})", large.as_secs_f64() / small.as_secs_f64());
+}
+
+#[test]
+fn b4_carried_controller_values_count_toward_the_event_cap() {
+    // 2,048 controller lanes (16 channels x 128 CCs) with one point each before 2,000 clips: every
+    // clip carries all of them in, about 4.1 million events from a small file.
+    let points: String = (0..16 * 128)
+        .map(|i| {
+            format!(
+                r#"<Points><Target expression="channelController" channel="{}" controller="{}"/><RealPoint time="0" value="0.5"/></Points>"#,
+                i / 128,
+                i % 128
+            )
+        })
+        .collect();
+    let clips: String = (0..2_000).map(|i| format!(r#"<Clip time="{}" duration="1"><Notes/></Clip>"#, i + 1)).collect();
+    let err = err_of(&project(PIANO, &format!(r#"<Lanes track="t1"><Clips>{clips}</Clips>{points}</Lanes>"#)));
+    assert!(err.contains("more than"), "the carried values were not counted: {err:?}");
+}
+
+#[test]
+fn b5_bitwig_groups_are_groups_not_master_tracks() {
+    // Bitwig 6 writes a group as contentType="tracks" with role="master".
+    let structure = r#"<Track contentType="tracks" id="g" name="Strings"><Channel role="master" id="gc"><Volume unit="linear" value="0.5"/></Channel>
+        <Track contentType="notes" id="v" name="Vln"><Channel role="regular"/></Track></Track>
+      <Track contentType="tracks" id="g2" name="Brass"><Channel role="master" id="gc2"/></Track>"#;
+    let (s, report) = read(&project(structure, ""));
+    let kinds: Vec<_> = s.tracks.iter().map(|t| (t.name.as_str(), t.kind)).collect();
+    assert_eq!(kinds, vec![("Vln", TrackKind::Instrument)]);
+    assert_eq!(report, vec!["Not imported from the DAWproject: 2 group, effect, VCA and other tracks"]);
+}
+
+#[test]
+fn n1_bitwig_pressure_in_linear_units_imports() {
+    let clip = r#"<Clip time="0" duration="4"><Notes><Note time="0" duration="2" key="60" vel="1">
+        <Points unit="linear"><Target expression="pressure"/><RealPoint time="0" value="0"/><RealPoint time="1" value="0.85"/></Points>
+      </Note></Notes></Clip>"#;
+    let (s, report) = read(&notes_track(clip));
+    assert!(report.is_empty(), "{report:?}");
+    let got: Vec<_> = seq(only_clip(&s)).ctrls.iter().map(|e| (e.tick, e.kind, e.value)).collect();
+    assert_eq!(got, vec![(0, CtrlKind::PolyPressure(60), 0), (960, CtrlKind::PolyPressure(60), 108)]);
+}
+
+#[test]
+fn n2_nothing_is_dropped_without_a_count() {
+    // Two expressions on one note, wrapped in Lanes as the schema requires.
+    let wrapped = r#"<Clip time="0" duration="4"><Notes><Note time="0" duration="2" key="60" vel="1"><Lanes>
+        <Points><Target expression="pressure"/><RealPoint time="0" value="1"/></Points>
+        <Points><Target expression="timbre"/><RealPoint time="0" value="1"/></Points></Lanes></Note></Notes></Clip>"#;
+    let (s, _) = read(&notes_track(wrapped));
+    let kinds: Vec<_> = seq(only_clip(&s)).ctrls.iter().map(|e| e.kind).collect();
+    assert_eq!(kinds, vec![CtrlKind::PolyPressure(60), CtrlKind::Cc(74)]);
+    // Scenes, a bare channel, a video clip, integer points and overlapping clips are counted.
+    let lanes = r#"<Lanes track="t1"><Clips>
+        <Clip time="0" duration="4"><Notes><Note time="3" duration="1" key="60" vel="1"/></Notes></Clip>
+        <Clip time="2" duration="4"><Notes><Note time="0" duration="1" key="72" vel="1"/></Notes></Clip>
+        <Clip time="8" duration="4"><Video path="v.mp4"/></Clip></Clips>
+        <Points><Target expression="programChange" channel="0"/><IntegerPoint time="0" value="5"/></Points></Lanes>"#;
+    let xml = project(&format!(r#"{PIANO}<Channel role="effect" id="fx"><Devices><BuiltinDevice deviceName="Reverb"/></Devices></Channel>"#), lanes).replace(
+        "</Arrangement>",
+        r#"</Arrangement><Scenes><Scene name="A"><Lanes><ClipSlot track="t1"><Clip time="0" duration="4"><Notes/></Clip></ClipSlot></Lanes></Scene></Scenes>"#,
+    );
+    let (_, report) = read(&xml);
+    for want in [
+        "1 channels outside tracks",
+        "1 devices (plug-ins and built-in)",
+        "1 clip launcher clips",
+        "1 video clips",
+        "1 controller points of other kinds",
+        "1 overlapping clips (the later one covers the earlier)",
+    ] {
+        assert!(report.iter().any(|r| r.ends_with(want)), "{want:?} missing from {report:?}");
+    }
+}
+
+#[test]
+fn n3_points_timed_in_seconds_are_counted_not_read_as_beats() {
+    let lanes = r#"<Lanes track="t1"><Clips><Clip time="0" duration="8"><Notes>
+        <Note time="0" duration="2" key="60" vel="1"><Points timeUnit="seconds"><Target expression="pressure"/><RealPoint time="1" value="1"/></Points></Note>
+      </Notes></Clip></Clips>
+      <Points timeUnit="seconds"><Target expression="channelController" channel="0" controller="1"/><RealPoint time="3" value="1"/></Points></Lanes>"#;
+    let (s, report) = read(&project(PIANO, lanes));
+    assert!(seq(only_clip(&s)).ctrls.is_empty(), "{:?}", seq(only_clip(&s)).ctrls);
+    assert!(report.iter().any(|r| r.ends_with("2 timelines timed in seconds")), "{report:?}");
+}
+
+#[test]
+fn n4_a_fader_at_minus_infinity_stays_down() {
+    let structure = r#"<Track contentType="notes" id="t1" name="P"><Channel role="regular"><Volume unit="decibel" value="-inf"/></Channel></Track>"#;
+    let (s, report) = read(&project(structure, ""));
+    assert_eq!(s.tracks[0].mixer.volume_db, -144.0);
+    assert!(report.is_empty(), "{report:?}");
+}
+
+#[test]
+fn n5_play_stop_ends_the_window() {
+    let clip = r#"<Clip time="0" duration="8" playStart="0" playStop="4"><Notes>
+        <Note time="1" duration="1" key="60" vel="1"/><Note time="6" duration="1" key="64" vel="1"/></Notes></Clip>"#;
+    let (s, _) = read(&notes_track(clip));
+    let pitches: Vec<_> = seq(only_clip(&s)).notes.iter().map(|n| n.pitch).collect();
+    assert_eq!(pitches, vec![60]);
+}
+
+#[test]
+fn n6_a_clip_before_zero_keeps_its_notes_in_place() {
+    let clip = r#"<Clip time="-4" duration="8"><Notes>
+        <Note time="1" duration="1" key="60" vel="1"/><Note time="4" duration="1" key="64" vel="1"/></Notes></Clip>"#;
+    let (s, report) = read(&notes_track(clip));
+    let c = only_clip(&s);
+    assert_eq!((c.start, c.length), (0, 144_000), "the part after zero: 4 beats at 80 BPM");
+    let got: Vec<_> = seq(c).notes.iter().map(|n| (n.start, n.pitch)).collect();
+    assert_eq!(got, vec![(0, 64)], "the note at absolute beat 0 stays at 0");
+    assert!(report.iter().any(|r| r.ends_with("1 notes before the start of the arrangement")), "{report:?}");
+}

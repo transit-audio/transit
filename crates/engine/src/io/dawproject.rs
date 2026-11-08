@@ -3,13 +3,16 @@
 //! Devices, audio, sends, group tracks and parameter automation are later slices; the open counts
 //! every kind it leaves out and says so, so nothing disappears silently.
 //!
-//! The archive is hostile input, read the way `read_smf` reads a MIDI file: sizes and counts are
-//! capped, and a bad value skips its element (counted) or refuses the file, never panics.
+//! The archive is hostile input, read the way `read_smf` reads a MIDI file: sizes, nesting and
+//! counts are capped, every pass over the content is linear or log-linear, and a bad value skips its
+//! element (counted) or refuses the file, never panics.
 //! Times are in beats (quarter notes, the DAWproject default); scopes timed in seconds are skipped.
+//! Controller ramps become steps at their points (the points are dense in practice).
 
 use super::*;
 use roxmltree::{Document, Node, ParsingOptions};
-use std::collections::BTreeMap;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BinaryHeap};
 use transit_midi::{CtrlEvent, CtrlKind, Note, PPQ, Sequence};
 
 const CMD: &str = "session.open";
@@ -17,12 +20,20 @@ const CMD: &str = "session.open";
 const MAX_XML_BYTES: u64 = 256 << 20;
 /// Most XML nodes parsed.
 const MAX_NODES: u32 = 16_000_000;
+/// Deepest element nesting and most attributes on one element (real projects: 12 and 10). The
+/// parser recurses per level and checks attributes pairwise, so both are refused before it runs.
+const MAX_DEPTH: usize = 64;
+const MAX_ATTRS: usize = 64;
 /// Most notes and controller events in the whole project, loops unrolled.
 const MAX_EVENTS: usize = 4_000_000;
-/// Most tempo and meter changes (each meter is placed by walking the ones before it).
+/// Most tempo and meter changes (each meter is placed by walking the ones before it, in time order).
 const MAX_MAP_POINTS: usize = 10_000;
 /// Latest time read, in beats (24 hours at 999 BPM is under 1.5 million).
 const MAX_BEATS: f64 = 2_000_000.0;
+/// Most tracks, clips and markers made (real projects have tens to hundreds; each add re-sorts).
+const MAX_TRACKS: usize = 1_000;
+const MAX_CLIPS: usize = 10_000;
+const MAX_MARKERS: usize = 1_000;
 
 /// Whether `path` names a DAWproject file.
 pub fn is_dawproject(path: &str) -> bool {
@@ -32,7 +43,7 @@ pub fn is_dawproject(path: &str) -> bool {
 /// Open `path` (a `.dawproject`) as a new, untitled session. Returns what was not imported, one
 /// line per kind, also posted as messages.
 pub fn open_dawproject(e: &mut Engine, path: &str) -> Result<Vec<String>> {
-    let file = std::fs::File::open(path).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
+    let file = super::open_file(path)?;
     let name = Path::new(path).file_stem().map_or_else(|| "Untitled".to_string(), |s| s.to_string_lossy().into_owned());
     let (s, report) = read_dawproject(file, &name)?;
     log::info!(
@@ -61,6 +72,7 @@ pub fn read_dawproject(archive: impl std::io::Read + std::io::Seek, name: &str) 
     let mut xml = String::new();
     // The declared size is hostile too: never read past the cap.
     f.by_ref().take(MAX_XML_BYTES).read_to_string(&mut xml).map_err(|err| EngineError::Io(format!("DAWproject: project.xml: {err}")))?;
+    check_shape(&xml)?;
     let doc = Document::parse_with_options(&xml, ParsingOptions { allow_dtd: false, nodes_limit: MAX_NODES })
         .map_err(|err| crate::cmd::bad(CMD, format!("DAWproject: project.xml: {err}")))?;
     let mut cx = Cx::default();
@@ -69,11 +81,64 @@ pub fn read_dawproject(archive: impl std::io::Read + std::io::Seek, name: &str) 
     Ok((s, report))
 }
 
+/// Refuses XML nested deeper than [`MAX_DEPTH`] or with an element of more than [`MAX_ATTRS`]
+/// attributes, in one linear pass that reads tags the way the parser does (quoted values, comments,
+/// CDATA and processing instructions are skipped); the parser stops at the first malformed tag, so
+/// it never sees deeper than this pass does.
+fn check_shape(xml: &str) -> Result<()> {
+    let b = xml.as_bytes();
+    let find = |from: usize, pat: &[u8]| b.get(from..).and_then(|r| r.windows(pat.len()).position(|w| w == pat)).map(|p| from + p + pat.len());
+    let (mut i, mut depth) = (0, 0usize);
+    while let Some(lt) = b.get(i..).and_then(|r| r.iter().position(|&c| c == b'<')) {
+        i += lt + 1;
+        let rest = b.get(i..).unwrap_or_default();
+        let skip_to = |pat: &[u8]| find(i, pat).unwrap_or(b.len());
+        if rest.starts_with(b"/") {
+            depth = depth.saturating_sub(1);
+        } else if rest.starts_with(b"?") {
+            i = skip_to(b"?>");
+        } else if rest.starts_with(b"!--") {
+            i = skip_to(b"-->");
+        } else if rest.starts_with(b"![CDATA[") {
+            i = skip_to(b"]]>");
+        } else if rest.starts_with(b"!") {
+            i = skip_to(b">");
+        } else {
+            let (mut attrs, mut quote, mut closed) = (0, None, false);
+            while let Some(&c) = b.get(i) {
+                i += 1;
+                match (quote, c) {
+                    (Some(q), c) if c == q => quote = None,
+                    (Some(_), _) => {}
+                    (None, b'"' | b'\'') => quote = Some(c),
+                    (None, b'=') => attrs += 1,
+                    (None, b'>') => {
+                        closed = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            if attrs > MAX_ATTRS {
+                return Err(crate::cmd::bad(CMD, format!("DAWproject: project.xml has an element with more than {MAX_ATTRS} attributes")));
+            }
+            if closed && b.get(i.saturating_sub(2)) != Some(&b'/') {
+                depth += 1;
+                if depth > MAX_DEPTH {
+                    return Err(crate::cmd::bad(CMD, format!("DAWproject: project.xml is nested more than {MAX_DEPTH} levels deep")));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// What the import counts as it goes.
 #[derive(Default)]
 struct Cx {
     skipped: BTreeMap<&'static str, usize>,
     events: usize,
+    clips: usize,
 }
 
 impl Cx {
@@ -146,6 +211,13 @@ fn project(cx: &mut Cx, root: Node, name: &str) -> Result<Session> {
         for t in kids(st, "Track") {
             track(cx, &mut s, t, &mut ids);
         }
+        for c in kids(st, "Channel") {
+            cx.skip("channels outside tracks", 1);
+            channel_extras(cx, c);
+        }
+    }
+    if let Some(sc) = child(root, "Scenes") {
+        cx.skip("clip launcher clips", sc.descendants().filter(|d| d.has_tag_name("Clip")).count());
     }
     let arrangement = child(root, "Arrangement");
     let mut clips: BTreeMap<TrackId, (Vec<ClipIn>, Vec<CtrlEvent>)> = BTreeMap::new();
@@ -157,16 +229,27 @@ fn project(cx: &mut Cx, root: Node, name: &str) -> Result<Session> {
     }
     for (tid, (mut cs, ctrls)) in clips {
         cs.sort_by_key(|c| c.start);
-        distribute(cx, &mut cs, ctrls);
+        distribute(cx, &mut cs, ctrls)?;
+        let mut end = i64::MIN;
         for c in cs {
-            place(&mut s, tid, c)?;
+            let overlaps = c.start < end;
+            end = end.max(c.start.saturating_add(c.len));
+            if overlaps {
+                cx.skip("overlapping clips (the later one covers the earlier)", 1);
+            }
+            place(cx, &mut s, tid, c, overlaps)?;
+        }
+        if let Some(pl) = s.track_mut(tid).and_then(|t| t.playlist_mut()) {
+            pl.sort();
         }
     }
     if let Some(m) = arrangement.and_then(|a| child(a, "Markers")) {
         if seconds(m) {
             cx.skip("markers timed in seconds", kids(m, "Marker").count());
         } else {
-            for mk in kids(m, "Marker") {
+            let all: Vec<_> = kids(m, "Marker").collect();
+            cx.skip("markers past the limit", all.len().saturating_sub(MAX_MARKERS));
+            for mk in all.into_iter().take(MAX_MARKERS) {
                 let Some(t) = beats(mk, "time") else {
                     cx.skip("markers without a valid time", 1);
                     continue;
@@ -193,25 +276,33 @@ fn tempo_map(cx: &mut Cx, s: &mut Session, root: Node) {
     }
     let Some(a) = child(root, "Arrangement") else { return };
     if let Some(p) = child(a, "TempoAutomation") {
-        let points: Vec<_> = kids(p, "RealPoint").collect();
-        cx.skip("tempo changes past the limit", points.len().saturating_sub(MAX_MAP_POINTS));
-        for pt in points.into_iter().take(MAX_MAP_POINTS) {
-            match (beats(pt, "time"), num(pt, "value")) {
-                (Some(t), Some(bpm)) if !seconds(p) => tempo(cx, s, ticks(t), bpm),
-                _ => cx.skip("tempo changes without a valid time or value", 1),
+        for (tick, pt) in map_points(cx, p, "RealPoint", ["tempo changes without a valid time or value", "tempo changes past the limit"]) {
+            match num(pt, "value") {
+                Some(bpm) => tempo(cx, s, tick, bpm),
+                None => cx.skip("tempo changes without a valid time or value", 1),
             }
         }
     }
     if let Some(p) = child(a, "TimeSignatureAutomation") {
-        let points: Vec<_> = kids(p, "TimeSignaturePoint").collect();
-        cx.skip("meter changes past the limit", points.len().saturating_sub(MAX_MAP_POINTS));
-        for pt in points.into_iter().take(MAX_MAP_POINTS) {
-            match beats(pt, "time") {
-                Some(t) if !seconds(p) => meter_at(cx, s, ticks(t), pt),
-                _ => cx.skip("meter changes without a valid time", 1),
-            }
+        for (tick, pt) in map_points(cx, p, "TimeSignaturePoint", ["meter changes without a valid time", "meter changes past the limit"]) {
+            meter_at(cx, s, tick, pt);
         }
     }
+}
+
+/// The points of a tempo or meter timeline in time order (each meter is placed by walking the
+/// ones before it, so out-of-order points would cost the cube), capped.
+fn map_points<'a, 'i: 'a>(cx: &mut Cx, p: Node<'a, 'i>, tag: &'static str, [bad, past]: [&'static str; 2]) -> Vec<(i64, Node<'a, 'i>)> {
+    if seconds(p) {
+        cx.skip("timelines timed in seconds", 1);
+        return Vec::new();
+    }
+    let mut points: Vec<_> = kids(p, tag).filter_map(|pt| beats(pt, "time").map(|t| (ticks(t), pt))).collect();
+    cx.skip(bad, kids(p, tag).count() - points.len());
+    cx.skip(past, points.len().saturating_sub(MAX_MAP_POINTS));
+    points.truncate(MAX_MAP_POINTS);
+    points.sort_by_key(|(t, _)| *t);
+    points
 }
 
 fn tempo(cx: &mut Cx, s: &mut Session, tick: i64, bpm: f64) {
@@ -237,13 +328,18 @@ fn meter_at(cx: &mut Cx, s: &mut Session, tick: i64, m: Node) {
 fn track<'a>(cx: &mut Cx, s: &mut Session, t: Node<'a, '_>, ids: &mut BTreeMap<&'a str, TrackId>) {
     let ch = child(t, "Channel");
     if let Some(c) = ch {
-        cx.skip("devices (plug-ins and built-in)", child(c, "Devices").map_or(0, |d| d.children().filter(Node::is_element).count()));
-        cx.skip("sends", child(c, "Sends").map_or(0, |d| kids(d, "Send").count()));
+        channel_extras(cx, c);
     }
     let types = t.attribute("contentType").unwrap_or("");
     let has = |what: &str| types.split_whitespace().any(|w| w == what);
+    // Bitwig writes a group as contentType="tracks" with role="master": nesting makes it a group.
+    let group = has("tracks") || kids(t, "Track").next().is_some();
     let role = ch.and_then(|c| c.attribute("role")).unwrap_or("regular");
     let kind = match role {
+        _ if group => {
+            cx.skip("group, effect, VCA and other tracks", 1);
+            None
+        }
         "master" if ch.is_some_and(|c| !default_channel(c)) => Some(TrackKind::Master),
         "master" => None,
         "regular" if has("notes") => Some(TrackKind::Instrument),
@@ -253,6 +349,13 @@ fn track<'a>(cx: &mut Cx, s: &mut Session, t: Node<'a, '_>, ids: &mut BTreeMap<&
             None
         }
     };
+    let kind = kind.filter(|_| {
+        let room = s.tracks.len() < MAX_TRACKS;
+        if !room {
+            cx.skip("tracks past the limit", 1);
+        }
+        room
+    });
     if let Some(kind) = kind {
         let format = if kind == TrackKind::Audio && ch.and_then(|c| c.attribute("audioChannels")) == Some("1") {
             ChannelFormat::Mono
@@ -279,6 +382,12 @@ fn track<'a>(cx: &mut Cx, s: &mut Session, t: Node<'a, '_>, ids: &mut BTreeMap<&
     }
 }
 
+/// What a channel holds that slice 1 does not import: its devices and sends, counted.
+fn channel_extras(cx: &mut Cx, c: Node) {
+    cx.skip("devices (plug-ins and built-in)", child(c, "Devices").map_or(0, |d| d.children().filter(Node::is_element).count()));
+    cx.skip("sends", child(c, "Sends").map_or(0, |d| kids(d, "Send").count()));
+}
+
 /// A channel at unity volume, centred and not muted.
 fn default_channel(c: Node) -> bool {
     let at = |tag, want: f64| child(c, tag).and_then(|n| num(n, "value")).is_none_or(|v| (v - want).abs() < 1e-6);
@@ -292,7 +401,9 @@ fn default_channel(c: Node) -> bool {
 /// A channel's volume (linear or dB), pan (normalized, as a balance on stereo tracks), mute and solo.
 fn mixer(cx: &mut Cx, m: &mut transit_model::Mixer, c: Node) {
     if let Some(v) = child(c, "Volume") {
-        match (v.attribute("unit"), num(v, "value")) {
+        // `inf` and `-inf` are how DAWproject writes a fader's ends: clamped, not refused.
+        let value = v.attribute("value").and_then(|x| x.trim().parse::<f64>().ok()).filter(|x| !x.is_nan());
+        match (v.attribute("unit"), value) {
             (Some("decibel"), Some(db)) => m.volume_db = db as f32,
             (Some("linear") | None, Some(lin)) => m.volume_db = if lin > 0.0 { (20.0 * lin.log10()) as f32 } else { -144.0 },
             _ => cx.skip("volumes in other units", 1),
@@ -343,17 +454,23 @@ fn lanes(
                 for k in kids(c, "Clip") {
                     let Some(clip) = clip(cx, k)? else { continue };
                     match here.flatten() {
-                        Some(t) => out.entry(t).or_default().0.push(clip),
+                        Some(_) if cx.clips >= MAX_CLIPS => cx.skip("clips past the limit", 1),
+                        Some(t) => {
+                            cx.clips += 1;
+                            out.entry(t).or_default().0.push(clip);
+                        }
                         None => cx.skip("clips on tracks not imported", 1),
                     }
                 }
             }
+            "Points" if seconds(c) => cx.skip("timelines timed in seconds", 1),
             "Points" => match (midi_points(cx, c, 0, None, 0)?, here.flatten()) {
                 (Some(evs), Some(t)) => out.entry(t).or_default().1.extend(evs),
                 (Some(_), None) => cx.skip("controller lanes on tracks not imported", 1),
                 (None, _) => cx.skip("parameter automation lanes", 1),
             },
             "Audio" | "Warps" => cx.skip("audio clips", 1),
+            "Video" => cx.skip("video clips", 1),
             "Notes" => cx.skip("note timelines outside clips", 1),
             _ => {}
         }
@@ -366,7 +483,9 @@ fn lanes(
 /// inside another clip.
 fn clip(cx: &mut Cx, k: Node) -> Result<Option<ClipIn>> {
     if k.attribute("contentTimeUnit") == Some("seconds") {
-        cx.skip("clips timed in seconds", 1);
+        // Audio clips are timed in seconds: say what they are.
+        let audio = k.descendants().any(|d| d.has_tag_name("Audio") || d.has_tag_name("Warps"));
+        cx.skip(if audio { "audio clips" } else { "clips timed in seconds" }, 1);
         return Ok(None);
     }
     if k.attribute("reference").is_some() {
@@ -381,7 +500,8 @@ fn clip(cx: &mut Cx, k: Node) -> Result<Option<ClipIn>> {
     };
     let Some(content) = content(cx, k)? else { return Ok(None) };
     let lp = beats(k, "loopStart").zip(beats(k, "loopEnd")).map(|(a, b)| (ticks(a), ticks(b)));
-    let seq = window(cx, &content, ticks(play), ticks(len), lp)?;
+    let stop = beats(k, "playStop").map(ticks);
+    let seq = window(cx, content, ticks(play), ticks(len), lp, stop)?;
     let mut name = k.attribute("name").unwrap_or("").to_string();
     transit_model::truncate_chars(&mut name, transit_model::MAX_NAME_CHARS);
     Ok(Some(ClipIn { start: ticks(time), len: ticks(len).max(1), name, muted: k.attribute("enable") == Some("false"), seq }))
@@ -426,6 +546,7 @@ fn content(cx: &mut Cx, n: Node) -> Result<Option<Sequence>> {
                 }
             }
             "Audio" | "Warps" => cx.skip("audio clips", 1),
+            "Video" => cx.skip("video clips", 1),
             _ => {}
         }
     }
@@ -474,7 +595,12 @@ fn notes(cx: &mut Cx, ns: Node, seq: &mut Sequence) -> Result<()> {
             start,
             length,
         });
-        for p in kids(n, "Points") {
+        // One expression is a `Points` child; the schema wraps several in a `Lanes`.
+        for p in kids(n, "Points").chain(kids(n, "Lanes").filter(|l| !seconds(*l)).flat_map(|l| kids(l, "Points"))) {
+            if seconds(p) {
+                cx.skip("timelines timed in seconds", 1);
+                continue;
+            }
             match child(p, "Target").and_then(|t| t.attribute("expression")) {
                 Some("timbre") => {
                     let before = timbre.len();
@@ -492,31 +618,59 @@ fn notes(cx: &mut Cx, ns: Node, seq: &mut Sequence) -> Result<()> {
                 _ => cx.skip("per-note gain, pan, transpose and formant curves", 1),
             }
         }
+        cx.skip("timelines timed in seconds", kids(n, "Lanes").filter(|l| seconds(*l)).count());
     }
-    spans.sort_unstable();
-    for t in timbre {
-        // Owned unless a note that started later (or with it, higher) on its channel still sounds.
-        let later = spans.partition_point(|s| (s.0, s.1) <= t.note);
-        let taken = spans.get(later..).unwrap_or_default().iter().take_while(|s| s.0 <= t.tick).any(|s| s.3 == t.channel && t.tick < s.2);
-        if !taken {
-            seq.ctrls.push(CtrlEvent { tick: t.tick, channel: t.channel, kind: CtrlKind::Cc(74), value: t.value });
-        }
-    }
+    own_timbre(&mut timbre, spans);
+    seq.ctrls.extend(timbre.into_iter().map(|t| CtrlEvent { tick: t.tick, channel: t.channel, kind: CtrlKind::Cc(74), value: t.value }));
     Ok(())
+}
+
+/// Keeps the timbre points their notes own: a point is owned unless a note that started later (or
+/// with it, higher) on its channel is sounding at its tick. One sweep in time order, keeping the
+/// notes that sound in a set, so overlapping notes cost a logarithm each, not a scan.
+fn own_timbre(timbre: &mut Vec<Timbre>, mut spans: Vec<(i64, u8, i64, u8)>) {
+    timbre.sort_by_key(|t| t.tick);
+    spans.sort_unstable();
+    let mut sounding: BTreeMap<(u8, i64, u8), usize> = BTreeMap::new();
+    let mut ends = BinaryHeap::new();
+    let mut next = spans.iter().peekable();
+    timbre.retain(|t| {
+        while let Some(&&(start, pitch, end, ch)) = next.peek().filter(|s| s.0 <= t.tick) {
+            *sounding.entry((ch, start, pitch)).or_default() += 1;
+            ends.push(Reverse((end, ch, start, pitch)));
+            next.next();
+        }
+        while let Some(&Reverse((_, ch, start, pitch))) = ends.peek().filter(|Reverse(e)| e.0 <= t.tick) {
+            ends.pop();
+            if let Some(n) = sounding.get_mut(&(ch, start, pitch)) {
+                *n -= 1;
+                if *n == 0 {
+                    sounding.remove(&(ch, start, pitch));
+                }
+            }
+        }
+        let newest = sounding.range((t.channel, i64::MIN, 0)..=(t.channel, i64::MAX, u8::MAX)).next_back().map(|(k, _)| (k.1, k.2));
+        newest.is_none_or(|n| n <= t.note)
+    });
 }
 
 /// The `(tick, value)` points of a normalized `Points` timeline, `base` ticks added. Non-normalized
 /// units give none (counted).
 fn normalized(cx: &mut Cx, p: Node, base: i64) -> Result<Vec<(i64, f64)>> {
-    if p.attribute("unit").is_some_and(|u| u != "normalized") {
+    // Bitwig writes per-note pressure as "linear" 0..1, the same range as "normalized".
+    if p.attribute("unit").is_some_and(|u| u != "normalized" && u != "linear") {
         cx.skip("controller lanes in other units", 1);
         return Ok(Vec::new());
     }
     let mut out = Vec::new();
-    for pt in kids(p, "RealPoint") {
-        match (beats(pt, "time"), num(pt, "value")) {
-            (Some(t), Some(v)) => out.push((base.saturating_add(ticks(t)), v)),
-            _ => cx.skip("controller points with bad values", 1),
+    for pt in p.children().filter(Node::is_element) {
+        match pt.tag_name().name() {
+            "RealPoint" => match (beats(pt, "time"), num(pt, "value")) {
+                (Some(t), Some(v)) => out.push((base.saturating_add(ticks(t)), v)),
+                _ => cx.skip("controller points with bad values", 1),
+            },
+            "Target" => {}
+            _ => cx.skip("controller points of other kinds", 1),
         }
     }
     cx.count(out.len())?;
@@ -553,34 +707,39 @@ fn midi_points(cx: &mut Cx, p: Node, base: i64, key: Option<u8>, channel: u8) ->
 
 /// The events of `content` seen through a clip: from `play` for `len` ticks, repeating
 /// `loop_start..loop_end` when the clip loops. Notes are cut at the window's and the loop's end.
-fn window(cx: &mut Cx, content: &Sequence, play: i64, len: i64, lp: Option<(i64, i64)>) -> Result<Sequence> {
+/// `stop` (`playStop`) ends an unlooped window early.
+fn window(cx: &mut Cx, mut content: Sequence, play: i64, len: i64, lp: Option<(i64, i64)>, stop: Option<i64>) -> Result<Sequence> {
+    // Sorted once, so each pass finds its range by search instead of scanning the content.
+    content.sort();
     let mut out = Sequence::default();
     let Some((ls, le)) = lp.filter(|(ls, le)| le > ls && play < *le) else {
-        pass(cx, content, &mut out, (play, play.saturating_add(len)), 0, len)?;
+        let to = play.saturating_add(len).min(stop.unwrap_or(i64::MAX));
+        pass(cx, &content, &mut out, (play, to), 0, len)?;
         return Ok(out);
     };
-    pass(cx, content, &mut out, (play, le), 0, len)?;
+    pass(cx, &content, &mut out, (play, le), 0, len)?;
     let mut at = le - play;
     while at < len {
         // Each pass counts, so a tiny loop over a long clip stops at the event cap.
         cx.count(1)?;
-        pass(cx, content, &mut out, (ls, le), at, len)?;
+        pass(cx, &content, &mut out, (ls, le), at, len)?;
         at = at.saturating_add(le - ls);
     }
     Ok(out)
 }
 
-/// The events of `content` in `from..to`, placed from clip tick `at` and cut at `len`.
+/// The events of sorted `content` in `from..to`, placed from clip tick `at` and cut at `len`.
 fn pass(cx: &mut Cx, content: &Sequence, out: &mut Sequence, (from, to): (i64, i64), at: i64, len: i64) -> Result<()> {
-    let span = |t: i64| t >= from && t < to;
-    for n in content.notes.iter().filter(|n| span(n.start)) {
+    let first = content.notes.partition_point(|n| n.start < from);
+    for n in content.notes.get(first..).unwrap_or_default().iter().take_while(|n| n.start < to) {
         let start = at + (n.start - from);
         if start < len {
             cx.count(1)?;
             out.notes.push(Note { start, length: n.length.min(to - n.start).min(len - start).max(1), ..*n });
         }
     }
-    for e in content.ctrls.iter().filter(|e| span(e.tick)) {
+    let first = content.ctrls.partition_point(|e| e.tick < from);
+    for e in content.ctrls.get(first..).unwrap_or_default().iter().take_while(|e| e.tick < to) {
         let tick = at + (e.tick - from);
         if tick < len {
             cx.count(1)?;
@@ -590,45 +749,92 @@ fn pass(cx: &mut Cx, content: &Sequence, out: &mut Sequence, (from, to): (i64, i
     Ok(())
 }
 
-/// Track-level controller events into the clips that cover them, each clip starting from the
-/// value in force at its start. Events no clip covers are counted.
-fn distribute(cx: &mut Cx, clips: &mut [ClipIn], mut evs: Vec<CtrlEvent>) {
+/// An order for controller kinds (the `(channel, kind)` state below is keyed by it).
+fn kind_key(k: CtrlKind) -> (u8, u8) {
+    match k {
+        CtrlKind::Cc(n) => (0, n),
+        CtrlKind::PitchBend => (1, 0),
+        CtrlKind::ChannelPressure => (2, 0),
+        CtrlKind::PolyPressure(p) => (3, p),
+        CtrlKind::Program => (4, 0),
+    }
+}
+
+/// Track-level controller events into the clips (sorted by start) that cover them, each clip
+/// starting from the values in force at its start. One sweep: the values in force are kept as the
+/// clips go by, and every event a clip gets, carried or covered, counts toward the cap. Events no
+/// clip covers or carries are counted.
+fn distribute(cx: &mut Cx, clips: &mut [ClipIn], mut evs: Vec<CtrlEvent>) -> Result<()> {
     evs.sort_by_key(|e| e.tick);
     let mut covered = vec![false; evs.len()];
+    let mut in_force: BTreeMap<(u8, (u8, u8)), usize> = BTreeMap::new();
+    let mut next = 0;
     for c in clips.iter_mut() {
-        let end = c.start.saturating_add(c.len);
-        let first = evs.partition_point(|e| e.tick < c.start);
-        let mut seen: Vec<(u8, CtrlKind)> = Vec::new();
-        for i in (0..first).rev() {
-            let Some(e) = evs.get(i) else { continue };
-            if !seen.contains(&(e.channel, e.kind)) {
-                seen.push((e.channel, e.kind));
+        while let Some(e) = evs.get(next).filter(|e| e.tick < c.start) {
+            in_force.insert((e.channel, kind_key(e.kind)), next);
+            next += 1;
+        }
+        cx.count(in_force.len())?;
+        for &i in in_force.values() {
+            if let Some(e) = evs.get(i) {
                 c.seq.ctrls.push(CtrlEvent { tick: 0, ..*e });
                 covered[i] = true;
             }
         }
-        for (i, e) in evs.iter().enumerate().skip(first).take_while(|(_, e)| e.tick < end) {
+        let end = c.start.saturating_add(c.len);
+        for (i, e) in evs.iter().enumerate().skip(next).take_while(|(_, e)| e.tick < end) {
+            cx.count(1)?;
             c.seq.ctrls.push(CtrlEvent { tick: e.tick - c.start, ..*e });
             covered[i] = true;
         }
     }
     cx.skip("controller points outside clips", covered.iter().filter(|c| !**c).count());
+    Ok(())
 }
 
-/// A clip onto its track, in samples through the tempo map.
-fn place(s: &mut Session, track: TrackId, c: ClipIn) -> Result<()> {
-    let start = s.tempo.tick_to_samples(c.start.max(0), s.sample_rate);
-    let end = s.tempo.tick_to_samples(c.start.max(0).saturating_add(c.len), s.sample_rate);
+/// A clip onto its track, in samples through the tempo map. A clip that starts before zero loses
+/// the part before it (its events keep their times); one that `overlaps` the clip before it covers
+/// that clip's overlapping part. Clips that do not overlap are added as they are and the playlist
+/// is sorted once, by the caller.
+fn place(cx: &mut Cx, s: &mut Session, track: TrackId, c: ClipIn, overlaps: bool) -> Result<()> {
+    let (mut seq, mut start_tick, mut len) = (c.seq, c.start, c.len);
+    if start_tick < 0 {
+        let cut = -start_tick;
+        let notes = seq.notes.len();
+        seq.notes.retain(|n| n.start >= cut);
+        cx.skip("notes before the start of the arrangement", notes - seq.notes.len());
+        let ctrls = seq.ctrls.len();
+        seq.ctrls.retain(|e| e.tick >= cut);
+        cx.skip("controller points before the start of the arrangement", ctrls - seq.ctrls.len());
+        for n in &mut seq.notes {
+            n.start -= cut;
+        }
+        for e in &mut seq.ctrls {
+            e.tick -= cut;
+        }
+        (start_tick, len) = (0, len - cut);
+        if len <= 0 {
+            return Ok(());
+        }
+    }
+    let start = s.tempo.tick_to_samples(start_tick, s.sample_rate);
+    let end = s.tempo.tick_to_samples(start_tick.saturating_add(len), s.sample_rate);
     if end > s.sample_rate.samples(86_400.0) {
         return Err(crate::cmd::bad(CMD, format!("DAWproject: clip {:?} ends after 24 hours", c.name)));
     }
-    let mut seq = c.seq;
     seq.sort();
     let name = if c.name.is_empty() { s.track(track).map(|t| t.name.clone()).unwrap_or_default() } else { c.name };
     let id = s.new_clip_id();
     let mut clip = Clip::midi(id, name, start, (end - start).max(1), seq);
     clip.muted = c.muted;
-    crate::edit::place_clip(s, track, clip);
+    if overlaps {
+        if let Some(pl) = s.track_mut(track).and_then(|t| t.playlist_mut()) {
+            pl.sort();
+        }
+        crate::edit::place_clip(s, track, clip);
+    } else if let Some(pl) = s.track_mut(track).and_then(|t| t.playlist_mut()) {
+        pl.clips.push(clip);
+    }
     Ok(())
 }
 
