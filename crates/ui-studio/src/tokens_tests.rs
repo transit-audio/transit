@@ -210,6 +210,77 @@ fn component_metrics_match_tokens_json() {
     assert_eq!(labels, f::SCALE_LABELS);
 }
 
+/// The fader's construction keys (the Fader construction board: label priority and gap, the
+/// frame, the Channel columns, the tick, the 0 dB grid line) equal their mirrors, and the `fader`
+/// object's keys and `tokens::fader::KEYS` are the same set, both ways.
+#[test]
+fn the_fader_construction_keys_match_tokens_json_both_ways() {
+    use tokens::fader as f;
+    let v = json();
+    let fd = at(&v, "fader");
+    let in_json: BTreeSet<&str> = fd.as_object().unwrap().keys().map(String::as_str).collect();
+    let in_rust: BTreeSet<&str> = f::KEYS.iter().copied().collect();
+    assert_eq!(in_rust.len(), f::KEYS.len(), "a fader key repeats in Rust");
+    assert_eq!(in_json, in_rust, "fader keys differ between tokens.json and Rust");
+    let marks = |path: &str| -> Vec<Option<f32>> { at(fd, path).as_array().unwrap().iter().map(|d| d.as_f64().map(|d| d as f32)).collect() };
+    assert_eq!(marks("labelPriority"), f::LABEL_PRIORITY);
+    let order: Vec<&str> = at(fd, "meterDrawOrder").as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
+    assert_eq!(order, f::METER_DRAW_ORDER, "fader/meterDrawOrder");
+    let pair = |path: &str| [num(fd, &format!("{path}/0")), num(fd, &format!("{path}/1"))];
+    for (path, x) in [
+        ("labelMinGap", f::LABEL_MIN_GAP),
+        ("frame/inset", f::FRAME_INSET),
+        ("frame/clipCellGap", f::FRAME_CLIP_CELL_GAP),
+        ("channelColumns/labelRight", f::COLUMN_LABEL_RIGHT),
+        ("channelColumns/meterX", f::COLUMN_METER_X),
+        ("channelColumns/blockWidth", f::BLOCK_WIDTH),
+        ("channelColumns/mainBlockWidth", f::MAIN_BLOCK_WIDTH),
+        ("tick/length", f::TICK_LENGTH),
+        ("tick/gapAfterLabel", f::TICK_GAP_AFTER_LABEL),
+    ] {
+        assert_eq!(num(fd, path), x, "fader/{path}");
+    }
+    assert_eq!(pair("channelColumns/fader"), f::COLUMN_FADER);
+    assert_eq!(pair("channelColumns/tick"), f::COLUMN_TICK);
+    assert_eq!(at(fd, "frame/sharedAcrossRow").as_bool(), Some(f::FRAME_SHARED_ACROSS_ROW));
+    for (path, name) in [("tick/color", f::TICK_COLOR), ("tick/zeroColor", f::TICK_ZERO_COLOR), ("zeroGridLine", f::ZERO_GRID_LINE)] {
+        assert_eq!(at(fd, path).as_str(), Some(name), "fader/{path}");
+    }
+    // Every number under the new keys has a mirror above (a new leaf in tokens.json fails here).
+    let mut leaves = Vec::new();
+    for key in ["labelMinGap", "frame", "channelColumns", "tick"] {
+        number_leaves(at(fd, key), key, &mut leaves);
+    }
+    let mirrored: BTreeSet<&str> = [
+        "labelMinGap",
+        "frame/inset",
+        "frame/clipCellGap",
+        "channelColumns/fader/0",
+        "channelColumns/fader/1",
+        "channelColumns/labelRight",
+        "channelColumns/tick/0",
+        "channelColumns/tick/1",
+        "channelColumns/meterX",
+        "channelColumns/blockWidth",
+        "channelColumns/mainBlockWidth",
+        "tick/length",
+        "tick/gapAfterLabel",
+    ]
+    .into_iter()
+    .collect();
+    let in_json: BTreeSet<&str> = leaves.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(in_json, mirrored, "fader construction numbers differ between tokens.json and Rust");
+    // The construction agrees with itself: the frame inset is the track inset, the columns are the
+    // Channel variant's width, the tick is its length after the label's gap.
+    assert_eq!(f::FRAME_INSET, f::INSET);
+    assert_eq!(f::BLOCK_WIDTH, f::CHANNEL_WIDTH);
+    assert_eq!(f::COLUMN_TICK, [f::COLUMN_LABEL_RIGHT + f::TICK_GAP_AFTER_LABEL, f::COLUMN_LABEL_RIGHT + f::TICK_GAP_AFTER_LABEL + f::TICK_LENGTH]);
+    let names: BTreeSet<String> = color_names(&v, "color").into_iter().collect();
+    for name in [f::TICK_COLOR, f::TICK_ZERO_COLOR, f::ZERO_GRID_LINE] {
+        assert!(names.contains(name), "{name} is not a color token");
+    }
+}
+
 #[test]
 fn the_old_token_names_read_the_design_values() {
     use tokens::color as c;

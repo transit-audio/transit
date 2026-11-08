@@ -440,6 +440,54 @@ pub mod fader {
     pub const METER_PEAK_ALPHA: f32 = 0.35;
     pub const METER_HOLD: f32 = 2.0;
     pub const METER_CLIP_CELL: f32 = 4.0;
+    /// The order the Channel scale's labels are placed in when the travel is short (Labels by
+    /// travel): each is skipped when its center would fall under [`LABEL_MIN_GAP`] from one placed.
+    pub const LABEL_PRIORITY: [Option<f32>; 8] = [Some(0.0), None, Some(-12.0), Some(-24.0), Some(6.0), Some(-48.0), Some(-6.0), Some(-36.0)];
+    pub const LABEL_MIN_GAP: f32 = 13.0;
+    /// The Frame: the travel's top (Y0) is the level block's top plus this; the clip cells sit
+    /// [`FRAME_CLIP_CELL_GAP`] above Y0; every strip in a row shares Y0 and Y1.
+    pub const FRAME_INSET: f32 = 10.0;
+    pub const FRAME_CLIP_CELL_GAP: f32 = 6.0;
+    pub const FRAME_SHARED_ACROSS_ROW: bool = true;
+    /// The Channel variant's columns, in x from the level block's left edge: the fader column,
+    /// the labels' right edge, the tick, the meter's left edge, and the block widths (a channel's
+    /// and the main bus's).
+    pub const COLUMN_FADER: [f32; 2] = [0.0, 36.0];
+    pub const COLUMN_LABEL_RIGHT: f32 = 60.0;
+    pub const COLUMN_TICK: [f32; 2] = [63.0, 67.0];
+    pub const COLUMN_METER_X: f32 = 72.0;
+    pub const BLOCK_WIDTH: f32 = 116.0;
+    pub const MAIN_BLOCK_WIDTH: f32 = 144.0;
+    /// The Channel tick: 4 long, 3 after its label's right edge; `line.strong`, `text.muted` at 0 dB.
+    pub const TICK_LENGTH: f32 = 4.0;
+    pub const TICK_GAP_AFTER_LABEL: f32 = 3.0;
+    pub const TICK_COLOR: &str = "line.strong";
+    pub const TICK_ZERO_COLOR: &str = "text.muted";
+    /// The meter's 0 dB grid line (the others are `line`).
+    pub const ZERO_GRID_LINE: &str = "line.strong";
+    /// The order a meter well paints its layers in: nothing is drawn over the level.
+    pub const METER_DRAW_ORDER: [&str; 5] = ["well", "grid", "peak", "rms", "hold"];
+    /// The keys of `fader` in tokens.json, all mirrored here (the drift test checks both ways).
+    pub const KEYS: [&str; 18] = [
+        "taper",
+        "taperNote",
+        "scaleLabels",
+        "labelPriority",
+        "labelMinGap",
+        "frame",
+        "channelColumns",
+        "tick",
+        "zeroGridLine",
+        "meterDrawOrder",
+        "inset",
+        "track",
+        "fill",
+        "cap",
+        "capCompact",
+        "capHorizontal",
+        "variants",
+        "meter",
+    ];
 }
 
 /// The application chrome (`chrome` in tokens.json): egui's own widgets outside device panels,
