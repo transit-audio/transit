@@ -68,6 +68,7 @@ Clicking empty grid clears the selection and marks where step entry begins; it n
 **Several clips.** Select several MIDI clips in the arrangement, then double-click one of them (or press Ctrl+Alt+K): they all open together. The one you double-clicked is the foreground clip, named in the header with the count ("2 clips · Piano"). Each clip has a bar in its color at the foot of the ruler and its notes in that color. Click a note of another clip, or its bar, to bring that clip to the foreground.
 - A band selects notes across clips, and a move, resize, velocity drag, delete, transpose or quantize changes them all in one undo step. Notes stay in their own clips.
 - A new note goes to the clip whose span you draw it in, the foreground first. Outside every open clip it is refused, and a status line says so.
+- N toggles Focus Mode, or hold N for momentary focus: the other clips' notes dim, and only the foreground clip is edited. Double-click a note to focus its clip without deleting it. With one clip open, double-click still deletes the note.
 - Step entry, the controller lane and the clip-end handle work on the foreground clip.
 
 ## Cycle

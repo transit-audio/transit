@@ -110,14 +110,61 @@ impl StudioApp {
 
     /// Every open clip's notes in the roll's ticks (#329).
     pub(super) fn keys_all(&self) -> Option<Composite> {
-        Composite::new(self.engine.session(), self.keys.clip?, &self.keys.others)
+        Composite::new(self.engine.session(), self.keys.clip?, if self.keys.focus { &[] } else { &self.keys.others })
+    }
+
+    /// N: a quick press toggles Focus Mode; holding it focuses only until release (Live).
+    pub(super) fn keys_focus_edge(&mut self, down: bool, now: f64) {
+        if self.keys.others.is_empty() {
+            return;
+        }
+        if down {
+            if self.keys.focus_down.is_none() {
+                let was = self.keys.focus;
+                self.keys.focus_down = Some((now, was));
+                self.keys_focus_set(true);
+            }
+        } else if let Some((at, was)) = self.keys.focus_down.take() {
+            // The same 350 ms window as a double-click separates a toggle from a momentary hold.
+            self.keys_focus_set(if now - at < 0.35 { !was } else { was });
+        }
+    }
+
+    /// Window blur cancels a held N and restores the mode it found.
+    pub(super) fn keys_focus_cancel(&mut self) {
+        if let Some((_, was)) = self.keys.focus_down.take() {
+            self.keys_focus_set(was);
+        }
+    }
+
+    /// Focus Mode edits only the foreground; entering it drops every other clip's selection.
+    pub(super) fn keys_focus_set(&mut self, on: bool) {
+        if self.keys.focus == on {
+            return;
+        }
+        if on
+            && let Some(fg) = self.keys.clip
+            && let Some(all) = Composite::new(self.engine.session(), fg, &self.keys.others)
+        {
+            self.keys.selection = resolve(&all.notes, &self.keys.selection)
+                .into_iter()
+                .filter(|i| all.locate(*i).is_some_and(|(part, _)| part.clip == fg))
+                .map(|i| all.notes[i])
+                .collect();
+        }
+        self.keys.focus = on;
+        self.keys.gesture = None;
     }
 
     /// Make `clip`, one of the open clips, the foreground: the roll's ticks become its ticks, so
     /// the selection, the view and the last click move by the difference (#329).
     pub(super) fn keys_foreground(&mut self, clip: ClipId) {
         let Some(fg) = self.keys.clip.filter(|fg| *fg != clip) else { return };
-        let Some(by) = self.keys_all().and_then(|all| all.parts.iter().find(|p| p.clip == clip).map(|p| p.off)) else { return };
+        let Some(by) =
+            Composite::new(self.engine.session(), fg, &self.keys.others).and_then(|all| all.parts.iter().find(|p| p.clip == clip).map(|p| p.off))
+        else {
+            return;
+        };
         for n in &mut self.keys.selection {
             n.start -= by;
         }

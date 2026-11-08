@@ -334,3 +334,184 @@ fn s4_an_empty_click_in_another_clips_span_does_not_start_step_entry_past_the_fo
     t.click(t.at(3840.0 + 1000.0, 62));
     assert!(t.app.keys.click_tick.is_none_or(|at| (0..3840).contains(&at)), "{:?}", t.app.keys.click_tick);
 }
+
+#[test]
+fn n_toggles_focus_mode_and_edits_only_the_foreground_clip() {
+    let (mut t, b) = two();
+    t.key("N", json!({}));
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect.get("focus"), Some(&json!(true)), "N turns Focus Mode on");
+    t.key("A", json!({"cmd": true}));
+    assert_eq!(t.selected(), 1, "Select All takes only the active clip");
+    t.key("ArrowUp", json!({}));
+    assert_eq!(notes_of(&t, t.clip)[0].pitch, 61);
+    assert_eq!(notes_of(&t, b)[0].pitch, 64, "the other clip is unchanged");
+    t.key("N", json!({}));
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect.get("focus"), Some(&json!(false)), "a second N turns Focus Mode off");
+}
+
+#[test]
+fn double_click_a_note_focuses_its_clip_without_deleting_it() {
+    let (mut t, b) = two();
+    t.click_n(mid(t.note_rect(64, 3840)), 2, json!({}));
+    assert_eq!(t.app.keys.layout.clip, Some(b.0), "the note's clip comes forward");
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect.get("focus"), Some(&json!(true)));
+    assert_eq!(notes_of(&t, b).len(), 1, "double-click to focus is not delete");
+    assert_eq!(notes_of(&t, t.clip).len(), 1);
+}
+
+#[test]
+fn focus_mode_dims_notes_from_the_other_clips() {
+    let (mut t, _) = two();
+    t.key("N", json!({}));
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    let notes = inspect["notes"].as_array().unwrap();
+    assert_eq!(notes[0].get("dimmed"), Some(&json!(false)), "the foreground note stays fully drawn");
+    assert_eq!(notes[1].get("dimmed"), Some(&json!(true)), "the other clip's note is dimmed");
+}
+
+#[test]
+fn entering_focus_mode_drops_the_other_clips_from_the_selection() {
+    let (mut t, b) = two();
+    t.key("A", json!({"cmd": true}));
+    assert_eq!(t.selected(), 2);
+    t.key("N", json!({}));
+    assert_eq!(t.selected(), 1, "only the foreground stays selected");
+    t.key("N", json!({}));
+    t.key("ArrowUp", json!({}));
+    assert_eq!(notes_of(&t, t.clip)[0].pitch, 61);
+    assert_eq!(notes_of(&t, b)[0].pitch, 64, "leaving Focus Mode does not resurrect the old selection");
+}
+
+#[test]
+fn holding_n_is_momentary_focus_mode() {
+    let (mut t, _) = two();
+    t.n_edge(true);
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect.get("focus"), Some(&json!(true)), "N focuses while held");
+    t.frames(30);
+    t.n_edge(false);
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect.get("focus"), Some(&json!(false)), "releasing a held N restores the previous mode");
+}
+
+#[test]
+fn a_band_in_focus_mode_selects_only_the_foreground_clip() {
+    let (mut t, b) = two();
+    t.key("N", json!({}));
+    t.drag(t.at(10.0, 66), t.at(4600.0, 58), json!({}));
+    assert_eq!(t.selected(), 1, "the band skips dimmed notes");
+    t.key("ArrowUp", json!({}));
+    assert_eq!(notes_of(&t, t.clip)[0].pitch, 61);
+    assert_eq!(notes_of(&t, b)[0].pitch, 64);
+}
+
+#[test]
+fn focus_mode_refuses_to_draw_outside_the_foreground_clip() {
+    let (mut t, b) = two();
+    t.key("N", json!({}));
+    let before = (notes_of(&t, t.clip), notes_of(&t, b));
+    t.click_n(t.at(3840.0 + 1000.0, 69), 2, json!({}));
+    assert_eq!((notes_of(&t, t.clip), notes_of(&t, b)), before, "neither clip gains a note");
+    assert!(t.app.status.contains("focused clip"), "{}", t.app.status);
+}
+
+#[test]
+fn a_dimmed_note_cannot_start_a_drag() {
+    let (mut t, b) = two();
+    t.key("N", json!({}));
+    let before = (notes_of(&t, t.clip), notes_of(&t, b));
+    let grab = mid(t.note_rect(64, 3840));
+    t.drag(grab, (grab.0 + 100.0, grab.1 - 20.0), json!({}));
+    assert_eq!((notes_of(&t, t.clip), notes_of(&t, b)), before);
+    assert_eq!(t.selected(), 0, "a dimmed note does not become an edit selection");
+}
+
+#[test]
+fn a_dimmed_notes_velocity_stem_cannot_start_an_edit() {
+    let (mut t, b) = two();
+    t.key("N", json!({}));
+    let before = (notes_of(&t, t.clip), notes_of(&t, b));
+    let stem = t.app.keys.layout.notes.iter().find(|n| n.clip == Some(b.0)).unwrap().vel_rect;
+    let at = egui::pos2(mid(stem).0, mid(stem).1);
+    t.app.synthetic.push(egui::Event::PointerMoved(at));
+    t.app.synthetic.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    t.app.synthetic.push(egui::Event::PointerMoved(at + egui::vec2(0.0, -12.0)));
+    t.frames(30);
+    assert!(!t.app.keys.layout.notes.iter().find(|n| n.clip == Some(b.0)).unwrap().selected, "the held stem is not an edit selection");
+    t.app.synthetic.push(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    t.frames(30);
+    assert_eq!((notes_of(&t, t.clip), notes_of(&t, b)), before);
+}
+
+#[test]
+fn losing_window_focus_cancels_a_momentary_n() {
+    let (mut t, _) = two();
+    t.n_edge(true);
+    t.frame_with(Some(false));
+    t.n_edge(false);
+    t.frame_with(Some(true));
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect.get("focus"), Some(&json!(false)), "blur and release do not leave momentary Focus Mode stuck on");
+}
+
+#[test]
+fn closing_and_reopening_the_roll_starts_with_focus_mode_off() {
+    let (mut t, _) = two();
+    t.key("N", json!({}));
+    t.key("Escape", json!({}));
+    assert!(!t.app.keys.layout.visible);
+    t.key("K", json!({"cmd": true, "alt": true}));
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect.get("focus"), Some(&json!(false)));
+}
+
+#[test]
+fn clicking_outside_the_roll_cancels_a_momentary_n() {
+    let (mut t, _) = two();
+    t.n_edge(true);
+    t.click((0.0, 0.0));
+    t.n_edge(false);
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect.get("focus"), Some(&json!(false)), "an inactive pane does not keep a held N");
+}
+
+#[test]
+fn opening_another_clip_set_starts_with_focus_mode_off() {
+    let (mut t, b) = two();
+    t.key("N", json!({}));
+    let r = t.app.run("track.new", json!({"kind": "instrument"})).unwrap();
+    let track = r["tracks"][0].as_u64().unwrap();
+    let c = ClipId(t.app.run("midi.new_clip", json!({"tracks": [track], "start": 192_000, "end": 288_000})).unwrap()["clip"].as_u64().unwrap());
+    t.frames(3);
+    let rect = t.app.arrange.layout.clips.iter().find(|item| item.id == c.0).unwrap().rect;
+    t.click_n(mid(rect), 2, json!({}));
+    assert_eq!(t.app.keys.layout.clip, Some(c.0));
+    t.app.run("edit.select", json!({"clips": [t.clip.0, b.0]})).unwrap();
+    t.frames(2);
+    assert!(t.app.open_keys(t.clip));
+    t.frames(3);
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect.get("focus"), Some(&json!(false)));
+}
+
+#[test]
+fn double_click_on_a_stacked_identical_note_focuses_the_clip_that_was_hit() {
+    let (mut t, b) = doubled();
+    t.click_n(mid(t.note_rect(60, 0)), 2, json!({}));
+    assert_eq!(t.app.keys.layout.clip, Some(b.0), "the topmost note's clip comes forward");
+    assert_eq!(notes_of(&t, t.clip).len(), 1);
+    assert_eq!(notes_of(&t, b).len(), 1);
+}
