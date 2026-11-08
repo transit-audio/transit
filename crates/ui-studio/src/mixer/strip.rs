@@ -158,6 +158,9 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
             layout.fx_divider = Some(r4(divider));
         }
     }
+    // The strips lane's floating scroll bar along its bottom edge, the same one the overflowing
+    // sections use; the main bus and "+ FX Channel" pinned beside the lane stay outside its track.
+    layout.lane_bar = scrollbar::lane_bar(app, ui, lane, content_w, (content_w - lane.width()).max(0.0));
     // "Add FX Channel" after the last strip, or after the main bus when it follows the strips.
     let ax =
         if unpinned { master_rect.max.x + 6.0 } else { lane.min.x + channels.len() as f32 * (STRIP_W + GAP) + block_gap - app.mixer.hscroll + 6.0 };

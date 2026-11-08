@@ -100,19 +100,16 @@ impl Overflow {
             app.mixer.wheel_taken = true;
         }
         // The handle: the view's share of the rows, at least the chrome's minimum.
-        let inset = chrome::SCROLL_INSET;
-        let track_h = view.height() - 2.0 * inset;
-        let handle = (track_h * view.height() / content.max(1.0)).clamp(chrome::SCROLL_MIN_HANDLE.min(track_h), track_h);
+        let (track_h, handle) = scrollbar::handle_len(view.height(), content);
         let bar = Rect::from_min_max(pos2(view.max.x - chrome::SCROLL_HOVER, view.min.y), view.max);
         let drag = ui.interact(bar.intersect(clip), ui.id().with(("overflow_bar", key.0, section as u8)), Sense::drag());
         if drag.dragged() && max > 0.0 {
-            let dy = drag.drag_delta().y;
-            offset = (offset + dy * max / (track_h - handle).max(1.0)).clamp(0.0, max);
+            offset = scrollbar::dragged_offset(offset, drag.drag_delta().y, max, track_h, handle);
         }
         let dragging = drag.dragged();
         app.mixer.overflow.insert(key, offset);
-        let width = if hovered || dragging { chrome::SCROLL_HOVER } else { chrome::SCROLL_REST };
-        let top = view.min.y + inset + if max > 0.0 { (track_h - handle) * offset / max } else { 0.0 };
+        let width = scrollbar::thickness(hovered, dragging);
+        let top = view.min.y + scrollbar::handle_start(track_h, handle, offset, max);
         let thumb = Rect::from_min_max(pos2(view.max.x - width, top), pos2(view.max.x, top + handle));
         Overflow { view, clip, offset, max, hidden: total.saturating_sub(visible), hovered: hovered || dragging, dragging, thumb }
     }
@@ -146,12 +143,9 @@ impl Overflow {
         if let Some(r) = fade_bottom {
             gradient(&p, r, Color32::TRANSPARENT, panel);
         }
-        let (rad, ink) = (chrome::SCROLL_HOVER / 2.0, self.thumb_color());
-        if self.hovered {
-            let track = Rect::from_min_max(pos2(self.view.max.x - chrome::SCROLL_HOVER, self.view.min.y), self.view.max);
-            p.rect_filled(track, rad, TOKENS.surface_panel);
-        }
-        p.rect_filled(self.thumb, rad, ink);
+        let ink = self.thumb_color();
+        let track = Rect::from_min_max(pos2(self.view.max.x - chrome::SCROLL_HOVER, self.view.min.y), self.view.max);
+        scrollbar::paint(&p, self.hovered.then_some(track), self.thumb, ink);
         OverflowLayout {
             view: r4(self.view),
             offset: self.offset,
@@ -168,13 +162,7 @@ impl Overflow {
     }
 
     fn thumb_color(&self) -> Color32 {
-        if self.dragging {
-            TOKENS.text_faint
-        } else if self.hovered {
-            TOKENS.ink_arrow
-        } else {
-            TOKENS.ink_ghost
-        }
+        scrollbar::ink(self.hovered, self.dragging)
     }
 }
 

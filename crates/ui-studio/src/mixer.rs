@@ -33,6 +33,7 @@ mod menus;
 mod meters;
 mod overflow;
 mod routing;
+mod scrollbar;
 mod sends;
 mod short;
 mod strip;
@@ -53,6 +54,7 @@ pub use routing::{
     RoutingChoice, bus_label, feeding_loops, input_choices, input_choices_with, listening_loops, orphan_busses, output_choices, path_choices,
     reaches, route_label, send_targets, takes_sends,
 };
+pub use scrollbar::LaneBar;
 pub use sends::SEND_ROW_H;
 use sends::sends_block;
 pub(crate) use sends::{add_send_row, send_row};
@@ -303,6 +305,8 @@ pub struct MixerLayout {
     pub add_fx: R4,
     /// Divider before the aux block, clipped to the scrolling lane; absent without both blocks.
     pub fx_divider: Option<R4>,
+    /// The strips lane's horizontal scroll bar; absent while the strips fit.
+    pub lane_bar: Option<scrollbar::LaneBar>,
     /// The open dropdown's entries.
     pub menu: Vec<MenuItem>,
     /// The bars above a group's strip and its members' strips (slice 2c).

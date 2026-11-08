@@ -806,6 +806,8 @@ mod loopbar_gesture_tests;
 #[cfg(test)]
 mod mixer_controls_tests;
 #[cfg(test)]
+mod mixer_hscroll_tests;
+#[cfg(test)]
 mod mixer_layout_tests;
 #[cfg(test)]
 mod mixer_meter_tests;
