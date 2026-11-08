@@ -904,10 +904,11 @@ fields are written through, so the file stays self-describing and the validator 
 values: every edit that binds a zone to a slice, sets a slice-bound zone's loop, or changes a
 bound slice's boundaries (a marker add, move or remove, Replace markers, Clear, Start from Auto's
 markers) writes the derived `start`, `end`, `loop_start` and `loop_end` into each affected zone
-in the same undo step. When a loaded file's stored fields disagree with the bound slice, the
-slice is the authority: the validator checks and the compiler plays the derived values, the
-stored fields are rewritten on the next save, and opening alone writes nothing (body: no patch
-is written merely by opening). Loop points inside a slice are deferred (item 12);
+in the same undo step. That set is bounded: at most the patch's 256 zones, and in practice at
+most its 64 slice-bound pads, so one marker edit rewrites a bounded set and its undo snapshot is
+bounded like every other patch edit. When a loaded file's stored fields disagree with the bound
+slice, the slice is the authority: the validator checks and the compiler plays the derived
+values, the stored fields are rewritten on the next save, and opening alone writes nothing. Loop points inside a slice are deferred (item 12);
 the Instrument view's zone waveform shows a slice-bound zone's derived region and loop with
 handles that do not drag, marked with the same lock as a pad-bound zone's key-map edges.
 
@@ -1132,4 +1133,10 @@ serialized patch at their defaults and present otherwise. Gate 3 adds: the fade 
 selection by original velocity (control: scale before selection and a layer case fails); width
 refusals and `fades_used` after a range edit; item 4's per-group start states and draw order
 against an independent reference; counters restarting at stop and at play but not at a locate
-or a cycle wrap; seed 0 stored as 1 by the commands and a loaded 0 left unrewritten.
+or a cycle wrap; seed 0 stored as 1 by the commands and a loaded 0 left unrewritten. As in
+Gate 6, these negative mutations must fail the corresponding tests, and green tests that do not
+reach those paths are no gate: the write-through skipped on a marker move (a stale stored loop);
+the crossfade clamp removed; the per-group start state taken from the patch seed without the
+group term; the counter reset at play start removed; the `at` check removed from Slice to MIDI
+or from Detect; step 2 of Slices to pads skipped (a duplicate trigger note); a "Validator
+changes" case loaded opaque instead of audible; and fades scaled before selection.
