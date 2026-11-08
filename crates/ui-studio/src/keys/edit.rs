@@ -8,17 +8,21 @@ impl StudioApp {
     pub fn keys_edit(&mut self, pairs: &[(Note, Note)]) -> Result<Vec<Note>, String> {
         let Some(all) = self.keys_all() else { return Err("no clip".into()) };
         let olds: Vec<Note> = pairs.iter().map(|(a, _)| *a).collect();
-        self.keys_refuse_frozen(&all.owners(&olds).into_iter().flatten().map(|p| p.clip).collect::<Vec<_>>())?;
+        // Each note's clip is fixed before any edit: after one edit a note of one clip can equal
+        // another clip's old value, so only the search within the clip runs again per edit.
+        let owners: Vec<Option<(ClipId, i64)>> = all.owners(&olds).into_iter().map(|p| p.map(|p| (p.clip, p.off))).collect();
+        self.keys_refuse_frozen(&owners.iter().flatten().map(|(c, _)| *c).collect::<Vec<_>>())?;
         let key = self.keys_merge_key();
         let mut out = Vec::new();
-        for (old, new) in pairs {
+        for ((old, new), owner) in pairs.iter().zip(owners) {
             if old == new {
                 out.push(*new);
                 continue;
             }
-            let Some(all) = self.keys_all() else { break };
-            let Some((part, i)) = resolve(&all.notes, &[*old]).first().and_then(|i| all.locate(*i)) else { continue };
-            let (clip, start) = (part.clip, new.start - part.off);
+            let Some((clip, off)) = owner else { continue };
+            let local = clip_view(self.engine.session(), clip).map(|v| v.notes).unwrap_or_default();
+            let Some(i) = resolve(&local, &[Note { start: old.start - off, ..*old }]).first().copied() else { continue };
+            let start = new.start - off;
             self.keys_exec(
                 "midi.note_edit",
                 json!({"clip": clip.0, "index": i, "pitch": new.pitch, "start_ticks": start, "length_ticks": new.length, "velocity": new.velocity}),
