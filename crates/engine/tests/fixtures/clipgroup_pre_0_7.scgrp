@@ -1,0 +1,37 @@
+{
+  "audio": {
+    "1": "clipgroup_pre_0_7 Audio/k_1.wav"
+  },
+  "format": "soundcraft.clipgroup",
+  "lanes": [
+    [
+      {
+        "content": {
+          "Audio": {
+            "offset": 0,
+            "source": 1
+          }
+        },
+        "id": 1,
+        "length": 480,
+        "name": "k",
+        "start": 0
+      },
+      {
+        "content": {
+          "Audio": {
+            "offset": 0,
+            "source": 1
+          }
+        },
+        "id": 2,
+        "length": 480,
+        "name": "k",
+        "start": 1000
+      }
+    ]
+  ],
+  "length": 1480,
+  "sample_rate": 48000,
+  "version": 1
+}
