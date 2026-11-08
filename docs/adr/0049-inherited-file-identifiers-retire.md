@@ -1,6 +1,6 @@
 # ADR 0049: The inherited file identifiers retire; v0.7.x reads both, v0.8.0 reads transit's only
 
-- **Status:** proposed 2026-11-08 (the maintainer's direction of 2026-11-08)
+- **Status:** accepted 2026-11-08 (the maintainer's direction of 2026-11-08; settled after two judging rounds, every open answer decided by the maintainer)
 - **Date:** 2026-11-08
 - **Implementation:** after this record is settled, on branch `adr/0049-inherited-file-identifiers`: the clip group reader and writer (`crates/engine/src/clip_group_file.rs`), the track preset reader and writer (`crates/engine/src/cmd/track_more.rs`), the session MIME type at its five registration points in `packaging/`, old-tag fixtures in `crates/engine/tests/fixtures/`, and the tests in Evidence. Notes for the implementer: the clip group reader posts the dropped-video note (ADR 0031) before it checks the tag today; the tag and version checks move first, so a refused file posts nothing. The module doc of `clip_group_file.rs` names menus that do not exist ("Clip List › Export Clip Groups", "File › Import › Clip Groups…") and is corrected. The `file.export_clip_groups` help text ("writes a .scgrp clip group file") follows decision 6.
 - **Reopen when:** another inherited identifier is found in a file transit writes, beyond the ones decision 6 lists; the session format commitment of the beta bar ([#228](https://github.com/transit-audio/transit/issues/228), line 1) changes how formats are versioned; or users report pre-0.7 files they cannot convert because they skipped 0.7.x (decision 3 says what they do).
@@ -164,8 +164,8 @@ commitment for transit's own formats.
    (the desktop file declares the new type, so transit is offered). On Windows the MSI upgrade
    rewrites the `.transit` key's `Content Type`. On macOS the UTI, not the MIME type, drives the
    association.
-6. **The other inherited identifiers found while writing this record** (the extensions decided by
-   the maintainer on 2026-11-08; the `SCV3` answer pending the maintainer's confirmation):
+6. **The other inherited identifiers found while writing this record** (each decided by the
+   maintainer on 2026-11-08):
    - *The clip group extension* `scgrp` becomes `tclips` for files written from v0.7.0 (decided by
      the maintainer, 2026-11-08; `EXTENSION`, the command's help text, the module doc and the docs
      that name it). The writer
@@ -176,8 +176,10 @@ commitment for transit's own formats.
      maintainer, 2026-11-08): the writer sets it on the path it is given (`Bass` and `Bass.json`
      both become `Bass.tpreset`), and the result's `path` is the file written. The reader never
      checks the extension, so old presets with any name keep reading under decision 2.
-   - *The VST3 state magic* `SCV3` stays until the session format version changes at beta (pending
-     the maintainer's confirmation), recorded as transit's in-session VST3 state container magic (the comment at `STATE_MAGIC` says so). It
+   - *The VST3 state magic* `SCV3` stays until the session format version changes at beta (decided
+     by the maintainer, 2026-11-08; tracked in [#376](https://github.com/transit-audio/transit/issues/376)
+     for the beta session format commitment, #228 line 1), recorded as transit's in-session VST3
+     state container magic (the comment at `STATE_MAGIC` says so). It
      stays in track presets too. Three reasons. No user sees it. A stored state is kept as it is
      when its plug-in is not installed (the session saves the blob it loaded), so a session saved in
      0.7.x could still carry `SCV3`, and a v0.8.0 refusal would lock the user out of a whole session
