@@ -246,3 +246,78 @@ fn the_strip_meter_draws_the_engines_rms() {
     let (peak, sine_rms) = (m.peaks[0].unwrap(), m.rms[0].unwrap());
     assert!(sine_rms[1] > peak[1] + 1.0, "RMS below peak: {sine_rms:?} {peak:?}");
 }
+
+/// The compact round's rects (the CompactMixer board's proposed row), block-relative (x from the
+/// level block's left, y from its top), at 1.0 and 1.5, for the docked strip, the full mixer and
+/// the main bus (with and without a master fader): stopped (the strip as the mixer paints it), and
+/// with a −6 dB peak over a −12 dB RMS reading and a −6 dB peak-only source, each painted by the
+/// kit meter on that strip's frame (a live reading falls off within a frame in a test, so the
+/// sources are painted at rest). Run with `--nocapture`. The round's rules are asserted along the
+/// way: no fill at unity, the notch on the 0 dB tick's row, the grid on the tick rows, square
+/// fills, an opaque peak-only fill.
+#[test]
+fn the_compact_round_as_rects() {
+    use crate::widgets::level_meter::{Channel, paint_channel};
+    let (mut app, ctx, mut time, a) = mixer_app();
+    for master in [false, true] {
+        if master {
+            app.run("track.new", json!({"kind": "master"})).unwrap();
+        }
+        for full in [false, true] {
+            app.ui.mixer_full = full;
+            app.ui.show_devices = !full;
+            for ppp in [1.0f32, 1.5] {
+                ctx.set_pixels_per_point(ppp);
+                frames(&mut app, &ctx, 4, &mut time);
+                let ch = strip(&app, a);
+                let m = app.mixer.layout.master.clone().unwrap();
+                for source in ["stopped", "peak -6 + rms -12", "peak-only -6"] {
+                    let what = format!("{} master {master} {ppp}x {source}", if full { "full" } else { "docked" });
+                    for (who, s) in [("Inst", &ch), ("Main", &m)] {
+                        let x0 = s.meter_layout.as_ref().unwrap().wells[0][0] - crate::tokens::fader::COLUMN_METER_X;
+                        let y0 = s.fader[1] - crate::tokens::fader::INSET;
+                        let rel = |r: [f32; 4]| [r[0] - x0, r[1] - y0, r[2] - x0, r[3] - y0].map(|v| (v * 100.0).round() / 100.0);
+                        let fl = s.fader_layout.as_ref();
+                        let scale = fl.map(|f| (f.placed.clone(), f.ticks.clone()));
+                        let (placed, ticks) = scale.or_else(|| s.main_scale.as_ref().map(|x| (x.placed.clone(), x.ticks.clone()))).unwrap();
+                        let mut ml = s.meter_layout.clone().unwrap();
+                        if source != "stopped" {
+                            let travel = egui::Rect::from_min_max(egui::pos2(s.fader[0], s.fader[1]), egui::pos2(s.fader[2], s.fader[3]));
+                            let bar = ml.wells[0][2] - ml.wells[0][0];
+                            let rms_db = source.contains("rms").then_some(-12.0);
+                            let one = Channel { peak_db: -6.0, rms_db, hold_db: Some(-6.0), clip: false };
+                            let mut rig = crate::widgets::test_support::Rig::new();
+                            rig.ctx.set_pixels_per_point(ppp);
+                            ml = rig.idle(|ui| paint_channel(ui.painter(), ml.wells[0][0], travel, bar, &placed, &[one, one]));
+                            let want = if rms_db.is_some() { TOKENS.meter_ok.gamma_multiply(0.35) } else { TOKENS.meter_ok };
+                            assert_eq!(ml.peak_inks[0], want, "{what} {who}: the peak fill's ink");
+                        }
+                        assert_eq!(ml.fill_radius, 0.0, "{what} {who}");
+                        let rows = |v: &[[f32; 4]]| v.iter().map(|r| [(r[1] * ppp).round() as i32, (r[3] * ppp).round() as i32]).collect::<Vec<_>>();
+                        assert_eq!(rows(&ml.grid), rows(&ticks), "{what} {who}: the grid on the tick rows");
+                        let fader_part = match fl {
+                            Some(f) => {
+                                let zero = f.marks.iter().position(|(t, _)| t == "0").unwrap();
+                                assert_eq!(rows(&[f.notch]), rows(&[f.ticks[zero]]), "{what} {who}: the notch on the 0 dB row");
+                                assert_eq!(f.fill[3] - f.fill[1], 0.0, "{what} {who}: no fill at unity");
+                                format!("fill {:?} notch {:?} cap {:?} center line {:?}", rel(f.fill), rel(f.notch), rel(f.cap), rel(f.center_line))
+                            }
+                            None => "fader column empty".into(),
+                        };
+                        let opt = |v: &[Option<[f32; 4]>]| v.iter().map(|r| r.map(rel)).collect::<Vec<_>>();
+                        println!(
+                            "{what} {who}: travel {} {fader_part} | wells {:?} grid {:?} peaks {:?} peak over {:?} rms {:?} holds {:?}",
+                            s.fader[3] - s.fader[1],
+                            ml.wells.iter().map(|w| rel(*w)).collect::<Vec<_>>(),
+                            ml.grid.iter().map(|w| rel(*w)).collect::<Vec<_>>(),
+                            opt(&ml.peaks),
+                            opt(&ml.peak_over),
+                            opt(&ml.rms),
+                            opt(&ml.holds),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

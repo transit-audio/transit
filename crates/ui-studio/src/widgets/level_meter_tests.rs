@@ -217,7 +217,8 @@ fn paint_one(
     ch: super::level_meter::Channel,
 ) -> (super::level_meter::ChannelMeterLayout, egui::Rect, Vec<egui::epaint::ClippedShape>) {
     let travel = egui::Rect::from_min_max(egui::pos2(40.0, 40.0), egui::pos2(60.0, 240.0));
-    let (l, shapes) = rig.shapes(|ui| super::level_meter::paint_channel(ui.painter(), 100.0, travel, 10.0, &crate::tokens::fader::SCALE_LABELS, &[ch]));
+    let (l, shapes) =
+        rig.shapes(|ui| super::level_meter::paint_channel(ui.painter(), 100.0, travel, 10.0, &crate::tokens::fader::SCALE_LABELS, &[ch]));
     let well = egui::Rect::from_min_max(egui::pos2(l.wells[0][0], l.wells[0][1]), egui::pos2(l.wells[0][2], l.wells[0][3]));
     (l, well, shapes)
 }
@@ -309,8 +310,19 @@ fn the_meter_grid_rows_are_the_faders_tick_rows() {
             let well = egui::Rect::from_min_max(egui::pos2(m.wells[0][0], m.wells[0][1]), egui::pos2(m.wells[0][2], m.wells[0][3]));
             let inks: Vec<egui::Color32> = shapes
                 .iter()
-                .filter(|s| layer(&s.shape, well) == Some("grid"))
-                .filter_map(|s| if let egui::Shape::Rect(r) = &s.shape { Some(r.fill) } else { None })
+                .filter_map(|s| match &s.shape {
+                    // The grid lines across the first well: one point as whole physical pixel rows.
+                    egui::Shape::Rect(r)
+                        if r.rect.min.x >= well.min.x - 0.01
+                            && r.rect.max.x <= well.max.x + 0.01
+                            && r.rect.height() * ppp <= 2.01
+                            && r.rect.width() > 0.0
+                            && m.grid.iter().any(|g| (g[1] - r.rect.min.y).abs() < 0.01) =>
+                    {
+                        Some(r.fill)
+                    }
+                    _ => None,
+                })
                 .collect();
             assert_eq!(inks.len(), grid.len(), "{what}: {inks:?}");
             assert_eq!(inks.iter().filter(|c| **c == DARK.line_strong).count(), 1, "{what}: the 0 dB line");
@@ -366,7 +378,9 @@ fn the_channel_meter_fills_are_square_inside_the_well() {
         shapes
             .iter()
             .find_map(|s| match &s.shape {
-                egui::Shape::Rect(x) if (x.rect.min.y - r[1]).abs() < 0.01 && (x.rect.max.y - r[3]).abs() < 0.01 && x.rect.width() < 10.0 => Some(x.fill),
+                egui::Shape::Rect(x) if (x.rect.min.y - r[1]).abs() < 0.01 && (x.rect.max.y - r[3]).abs() < 0.01 && x.rect.width() < 10.0 => {
+                    Some(x.fill)
+                }
                 _ => None,
             })
             .unwrap()

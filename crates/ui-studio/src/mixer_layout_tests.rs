@@ -501,13 +501,13 @@ fn the_main_bus_shares_the_channels_frame() {
                     let x0 = m.meter_layout.as_ref().unwrap().wells[0][0] - 72.0;
                     let column = egui::Rect::from_min_max(egui::pos2(x0, c0), egui::pos2(x0 + crate::widgets::fader::CHANNEL_FADER_W, c1));
                     let shapes = mixer_paint(&mut app, &ctx, &mut time);
-                    let inside: Vec<&egui::Shape> =
-                        shapes.iter().filter(|s| column.expand(1.0).contains_rect(s.visual_bounding_rect()) && s.visual_bounding_rect().is_positive()).collect();
-                    assert!(inside.is_empty(), "{what}: the main bus's fader column stays empty: {inside:?}");
-                    let texts: Vec<String> = shapes
+                    let inside: Vec<&egui::Shape> = shapes
                         .iter()
-                        .filter_map(|s| if let egui::Shape::Text(t) = s { Some(t.galley.text().to_string()) } else { None })
+                        .filter(|s| column.expand(1.0).contains_rect(s.visual_bounding_rect()) && s.visual_bounding_rect().is_positive())
                         .collect();
+                    assert!(inside.is_empty(), "{what}: the main bus's fader column stays empty: {inside:?}");
+                    let texts: Vec<String> =
+                        shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = s { Some(t.galley.text().to_string()) } else { None }).collect();
                     assert!(!texts.iter().any(|t| t == "+ Fader"), "{what}: no second + Fader");
                     assert_eq!(texts.iter().filter(|t| *t == "+ Master Fader").count(), 1, "{what}: + Master Fader in the routing rows, once");
                 }
