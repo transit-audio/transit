@@ -1,6 +1,6 @@
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03 and 2026-11-08
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
@@ -874,9 +874,9 @@ explicitly replaces the single-set slicing workflow.
 
 ## Amendment 2026-11-08: Slices and Instrument semantics (#269, #270)
 
-Amended with the maintainer. This amendment decides twelve semantics the record left open for
-the Slices and Instrument views. Items 1 to 12 are decided; only **Load kit…** on the Pads view
-bar is pending the maintainer's decision, written below in its two forms. It changes no earlier
+Amended 2026-11-08, accepted: amended with the maintainer, who also decided **Load kit…** on
+the Pads view bar the same day. This amendment decides twelve semantics the record left open for
+the Slices and Instrument views, plus the Pads view bar's two actions. It changes no earlier
 rule except where it says it replaces one; the validator changes are listed together under
 "Validator changes". The matrix, the core's selection order and ADR 0034 are unchanged. Two
 rules recur and are stated once:
@@ -1068,24 +1068,21 @@ panels are the editor); fades are drawn on the key map but not dragged (the Zone
 fields edit them); no 64-cell slice strip (the flag strip selects, the selection line names the
 slice, and moving a slice between pads is the Pads view's drag); loop points inside a slice
 (item 1); and the open states of the Shaper and Modulation section bars, which stay collapsed
-bars as the Pads view has them. Each reopens on a maintainer request or at the next Sampler
-design round; the zone table also reopens when SFZ import (#271) makes large maps common.
+bars as the Pads view has them. Each is tracked in the issue tracker (v0.7.1) and reopens on a
+maintainer request or at the next Sampler design round; the zone table also reopens when SFZ
+import (#271) makes large maps common.
 
 **Pads view bar: Load kit… and Expand to rack….** **Expand to rack…** is shown disabled at the
 unused-control alpha, with a tooltip saying it is not available yet, until #272 lands; it then
-follows this record's expansion rules, and its preview is a later board. **Load kit… is
-pending the maintainer's decision** (the only pending point in this amendment); one of these two
-forms lands and the other is struck:
-
-- *Form A, a 0.7.0 slice:* `mix.sampler_load_kit {track?, folder, preview?}` applies the body's
-  kit-folder rule: the folder's WAV, AIFF and FLAC files (not recursive) in case-folded filename
-  order with the original spelling breaking ties, assigned to free pads ascending with new-pad
-  defaults, referenced by path (the save model's default); an SFZ in the folder is listed and not
-  executed (#271). It decodes off-thread through the import transaction, previews and refuses
-  over capacity without truncating, refuses whole on an unreadable file (naming it), is one undo
-  step, and on a legacy one-sample patch is disabled behind the Notice's **New Kit**.
-- *Form B, deferred:* the button is shown disabled like Expand to rack, its tooltip saying kits
-  load later and that files can be dropped on pads; it reopens on a maintainer request.
+follows this record's expansion rules, and its preview is a later board. **Load kit…** ships
+in 0.7.0 as its own slice (decided by the maintainer, 2026-11-08): `mix.sampler_load_kit
+{track?, folder, preview?}` applies the body's kit-folder rule: the folder's WAV, AIFF and
+FLAC files (not recursive) in case-folded filename order with the original spelling breaking ties, assigned to free pads ascending with new-pad
+defaults, referenced by path (the save model's default); an SFZ in the folder is listed and not
+executed (#271). It decodes off-thread through the import transaction, refuses through the
+existing admission rules (capacity previewed and refused without truncating, the in-memory and
+aggregate media bounds, an unreadable file refusing the whole load and naming it), is one undo
+step, and on a legacy one-sample patch is disabled behind the Notice's **New Kit**.
 
 **Validator changes.** The body says to reject an invalid new edit and, on load, to preserve an
 invalid patch opaquely (silent). For exactly the following cases that rule is replaced: the
