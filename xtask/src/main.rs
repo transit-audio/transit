@@ -1,10 +1,11 @@
-//! `cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico|help>` — repository gates.
+//! `cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico|help|indexes>` — repository gates.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod file_size;
 mod help;
 mod ico;
+mod indexes;
 mod timing;
 
 use std::path::{Path, PathBuf};
@@ -330,6 +331,7 @@ fn ci() -> Result<(), String> {
         ("layers", Box::new(layers)),
         ("timing", Box::new(|| timing::run(&root()))),
         ("help", Box::new(|| help::run(&root(), &[]))),
+        ("indexes", Box::new(|| indexes::run(&root(), &["--check".to_string()]))),
         ("rt-targets", Box::new(rt_targets)),
         ("audio-bench-fake", Box::new(audio_bench_fake)),
     ];
@@ -353,7 +355,7 @@ fn main() -> ExitCode {
     if let Some(gate) = args
         .first()
         .map(String::as_str)
-        .filter(|g| ["ci", "layers", "file-size", "assets", "timing", "rt-targets", "audio-bench", "ico", "help"].contains(g))
+        .filter(|g| ["ci", "layers", "file-size", "assets", "timing", "rt-targets", "audio-bench", "ico", "help", "indexes"].contains(g))
     {
         announce(gate);
     }
@@ -362,12 +364,13 @@ fn main() -> ExitCode {
         Some("layers") => layers(),
         Some("file-size") => file_size::run(&root()),
         Some("help") => help::run(&root(), args.get(1..).unwrap_or(&[])),
+        Some("indexes") => indexes::run(&root(), args.get(1..).unwrap_or(&[])),
         Some("assets") => assets(),
         Some("timing") => timing::run(&root()),
         Some("rt-targets") => rt_targets(),
         Some("audio-bench") => audio_bench(args.get(1..).unwrap_or(&[])),
         Some("ico") => ico::run(args.get(1..).unwrap_or(&[])),
-        _ => Err("usage: cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico|help>".into()),
+        _ => Err("usage: cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico|help|indexes>".into()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,
