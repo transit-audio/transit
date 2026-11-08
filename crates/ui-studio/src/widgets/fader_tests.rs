@@ -39,14 +39,15 @@ fn each_variant_has_its_geometry_and_tokens() {
                 assert_eq!(size(l.rect).1, 24.0);
                 assert_eq!(size(l.track), (220.0 - 20.0, 4.0), "4 px track, 10 px inset");
                 assert!((mid(l.cap).x - (l.track[2] - unity * (l.track[2] - l.track[0]))).abs() < 0.02);
-                assert_eq!(l.fill[0], l.track[0], "fill from the left");
+                assert_eq!(l.fill[2] - l.fill[0], 0.0, "no fill at unity");
+                assert!((mid(l.notch).x - mid(l.cap).x).abs() < 0.51 && size(l.notch).1 == 12.0, "the notch across the track at 0 dB");
             }
             _ => {
                 assert_eq!(size(l.rect).0, if variant == Variant::Channel { 116.0 } else { 40.0 });
                 assert_eq!(size(l.track), (4.0, 220.0 - 20.0));
                 assert!((mid(l.cap).y - (l.track[1] + unity * (l.track[3] - l.track[1]))).abs() < 0.02, "0 dB sits at 14 percent");
-                assert_eq!(l.fill[3], l.track[3], "fill from the bottom");
-                assert!((l.fill[1] - mid(l.cap).y).abs() < 0.02, "fill up to the cap");
+                assert_eq!(l.fill[3] - l.fill[1], 0.0, "no fill at unity");
+                assert!((mid(l.notch).y - mid(l.cap).y).abs() < 0.51 && size(l.notch).0 == 12.0, "the notch across the track at 0 dB");
                 assert_eq!(l.marks.len(), 8);
             }
         }
@@ -245,4 +246,73 @@ fn the_board_sections_a_and_b_as_rects() {
             println!("B {ppp}x travel {travel}: {}", labels.join("; "));
         }
     }
+}
+
+/// Fill from unity (Fader > Geometry): the fill spans the 0 dB line and the cap's center line
+/// (down for a cut, up for a boost, none at unity), under a 12 by 1 `ink.arrow` notch on the 0 dB
+/// physical pixel row, the row of the 0 dB label and tick; muted dims the fill to `ink.ghost`. At
+/// 1.0 and 1.5, on the docked strip's travel (80) and taller ones.
+#[test]
+fn the_fill_runs_from_unity_under_the_notch_on_the_0_db_row() {
+    for ppp in [1.0f32, 1.5] {
+        let mut rig = Rig::new();
+        rig.ctx.set_pixels_per_point(ppp);
+        for travel in [80.0f32, 100.0, 200.0] {
+            let at = |rig: &mut Rig, db: f32, muted: bool| {
+                rig.idle(|ui| fader::show(ui, egui::Id::new("f"), Variant::Channel, travel + 20.0, db, muted)).layout
+            };
+            let what = format!("{ppp}x travel {travel}");
+            let unity = at(&mut rig, 0.0, false);
+            let zero_y = unity.track[1] + fader::taper(0.0) * travel;
+            let zero = unity.marks.iter().position(|(m, _)| m == "0").unwrap();
+            let rows = |r: [f32; 4]| [(r[1] * ppp).round() as i32, (r[3] * ppp).round() as i32];
+            // The notch: 12 by 1 (one physical pixel row and up), centered on the track, on the 0 dB
+            // tick's row, in `ink.arrow`.
+            assert_eq!(rows(unity.notch), rows(unity.ticks[zero]), "{what}: the notch on the 0 dB tick's row");
+            assert_eq!(size(unity.notch).0, 12.0, "{what}");
+            assert!((mid(unity.notch).x - mid(unity.track).x).abs() < 0.01, "{what}: centered on the track");
+            assert_eq!(unity.notch_color, DARK.ink_arrow, "{what}");
+            // Gain 0: no fill at all.
+            assert_eq!(unity.fill[3] - unity.fill[1], 0.0, "{what}: no fill at unity");
+            // −6: from the 0 dB row down to the cap; +3: from the cap down to the 0 dB row; −∞:
+            // the 0 dB row to Y1.
+            let cap_y = |l: &fader::FaderLayout| mid(l.cap).y;
+            let cut = at(&mut rig, -6.0, false);
+            assert!((cut.fill[1] - zero_y).abs() < 0.01 && (cut.fill[3] - cap_y(&cut)).abs() < 0.01, "{what}: −6 {:?}", cut.fill);
+            let boost = at(&mut rig, 3.0, false);
+            assert!((boost.fill[1] - cap_y(&boost)).abs() < 0.01 && (boost.fill[3] - zero_y).abs() < 0.01, "{what}: +3 {:?}", boost.fill);
+            let off = at(&mut rig, f32::NEG_INFINITY, false);
+            assert!((off.fill[1] - zero_y).abs() < 0.01 && off.fill[3] == off.track[3], "{what}: −∞ to Y1 {:?}", off.fill);
+            for l in [&cut, &boost, &off] {
+                assert_eq!(l.fill_color, DARK.signal, "{what}");
+                assert_eq!(rows(l.notch), rows(unity.notch), "{what}: the notch stays on the 0 dB row");
+                // The notch is drawn over the fill: it lies on the fill's 0 dB end.
+                assert!(l.notch[1] <= zero_y && zero_y <= l.notch[3], "{what}");
+            }
+            let muted = at(&mut rig, -6.0, true);
+            assert_eq!((muted.fill_color, muted.notch_color), (DARK.ink_ghost, DARK.ink_arrow), "{what}: muted dims the fill only");
+            assert_eq!(muted.fill, cut.fill, "{what}");
+            // Negative control: the old fill (from Y1 up to the cap) is not empty at unity.
+            let old = [unity.track[0], cap_y(&unity), unity.track[2], unity.track[3]];
+            assert!(old[3] - old[1] > 10.0, "{what}: the old fill from Y1 at unity is a tall bar");
+        }
+    }
+}
+
+/// The painted order: the track, the fill, then the notch over it, then the cap.
+#[test]
+fn the_notch_is_painted_over_the_fill_and_under_the_cap() {
+    let mut rig = Rig::new();
+    let (l, shapes) = rig.shapes(|ui| fader::show(ui, egui::Id::new("f"), Variant::Channel, 220.0, -6.0, false).layout);
+    let index = |r: [f32; 4], color: egui::Color32| {
+        shapes
+            .iter()
+            .position(|s| matches!(&s.shape, egui::Shape::Rect(x) if x.fill == color && (x.rect.min.y - r[1]).abs() < 0.01 && (x.rect.max.y - r[3]).abs() < 0.01))
+            .unwrap_or_else(|| panic!("{r:?} not painted"))
+    };
+    let (fill, notch, cap) = (index(l.fill, DARK.signal), index(l.notch, DARK.ink_arrow), index(l.cap, DARK.knob_cap_active));
+    assert!(fill < notch && notch < cap, "fill {fill}, notch {notch}, cap {cap}");
+    // At unity nothing is painted in `signal`.
+    let (_, shapes) = rig.shapes(|ui| fader::show(ui, egui::Id::new("f"), Variant::Channel, 220.0, 0.0, false));
+    assert!(!shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(x) if x.fill == DARK.signal)), "no fill at unity");
 }

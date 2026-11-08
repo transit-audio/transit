@@ -2,8 +2,10 @@
 //! fader, its scale and any meter beside it ([`taper`], [`db_at`]) so positions line up. Three
 //! variants: Channel (fader, labeled scale and a meter slot, 116 wide), Compact (fader and ticks,
 //! 40 wide) and Horizontal (sends, crossfades; a 12 by 18 cap). A 4 px `line` track inset 10 at
-//! each end, the fill in `signal` from the bottom (left) up to the cap (`ink.ghost` while muted),
-//! and a `knob.capActive` cap with a 1 px `ink.arrow` rim and a 2 px `text` center line.
+//! each end, the fill in `signal` from the 0 dB line to the cap (Fill from unity: down for a cut,
+//! up for a boost, none at unity; `ink.ghost` while muted), a 12 by 1 `ink.arrow` notch across the
+//! track at 0 dB over the fill, and a `knob.capActive` cap with a 1 px `ink.arrow` rim and a 2 px
+//! `text` center line.
 //!
 //! Interaction: drag (Shift for fine), Alt-click or double-click for unity, scroll to nudge 0.5 dB.
 //! The fader reports the new gain; the caller writes it.
@@ -127,7 +129,11 @@ pub struct FaderLayout {
     pub rect: [f32; 4],
     pub variant: Variant,
     pub track: [f32; 4],
+    /// The signal fill, from the 0 dB line to the cap's center (Fill from unity); zero height (and
+    /// not painted) at unity.
     pub fill: [f32; 4],
+    /// The unity notch across the track on the 0 dB row (`fader.unityNotch`), drawn over the fill.
+    pub notch: [f32; 4],
     pub cap: [f32; 4],
     pub center_line: [f32; 4],
     /// Scale labels (Channel: the placed ones, [`placed_marks`]) or ticks (Compact): text and where
@@ -140,6 +146,8 @@ pub struct FaderLayout {
     pub muted: bool,
     #[serde(skip)]
     pub fill_color: Color32,
+    #[serde(skip)]
+    pub notch_color: Color32,
     #[serde(skip)]
     pub cap_fill: Color32,
     #[serde(skip)]
@@ -261,7 +269,9 @@ pub fn paint_channel_scale(p: &egui::Painter, rect: Rect) -> ChannelScale {
 }
 
 /// Paints a fader in `rect` at `db` without taking any input (the caller owns the gestures, as
-/// the mixer's strips do); [`show`] is this plus the kit's gestures. The cap's center line is
+/// the mixer's strips do); [`show`] is this plus the kit's gestures. The fill runs from the 0 dB
+/// line to the cap (Fill from unity), under the unity notch on the 0 dB physical pixel row (the
+/// row the Channel scale's label, tick and the meter's grid line take). The cap's center line is
 /// snapped to whole physical pixels.
 pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bool) -> FaderLayout {
     let t = &TOKENS;
@@ -269,8 +279,23 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
     let c = at(track, horizontal, db);
     let [cw, ch] = variant.cap();
     let cap = Rect::from_center_size(c, vec2(cw, ch));
-    let fill = if horizontal { Rect::from_min_max(track.min, pos2(c.x, track.max.y)) } else { Rect::from_min_max(pos2(track.min.x, c.y), track.max) };
+    // Fill from unity: gain is bipolar around 0 dB (`fader.fill.fromDb`), so the fill spans the
+    // 0 dB line and the cap's center, whichever is first; none at unity.
+    let zero = at(track, horizontal, spec::FILL_FROM_DB);
+    let fill = if horizontal {
+        Rect::from_min_max(pos2(zero.x.min(c.x), track.min.y), pos2(zero.x.max(c.x), track.max.y))
+    } else {
+        Rect::from_min_max(pos2(track.min.x, zero.y.min(c.y)), pos2(track.max.x, zero.y.max(c.y)))
+    };
     let fill_color = if muted { t.ink_ghost } else { t.signal };
+    let [nw, nh] = spec::UNITY_NOTCH;
+    let notch = if horizontal {
+        let (left, right) = snap_rows(p, zero.x, nh);
+        Rect::from_min_max(pos2(left, zero.y - nw / 2.0), pos2(right, zero.y + nw / 2.0))
+    } else {
+        let (top, bottom) = snap_rows(p, zero.y, nh);
+        Rect::from_min_max(pos2(zero.x - nw / 2.0, top), pos2(zero.x + nw / 2.0, bottom))
+    };
     let center_line = if horizontal {
         Rect::from_center_size(c, vec2(spec::CAP_CENTER_LINE, ch - 6.0))
     } else {
@@ -278,7 +303,10 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
         Rect::from_min_max(pos2(c.x - (cw - 8.0) / 2.0, top), pos2(c.x + (cw - 8.0) / 2.0, bottom))
     };
     p.rect_filled(track, spec::TRACK_RADIUS, t.line);
-    p.rect_filled(fill, spec::TRACK_RADIUS, fill_color);
+    if fill.width() > 0.0 && fill.height() > 0.0 {
+        p.rect_filled(fill, spec::TRACK_RADIUS, fill_color);
+    }
+    p.rect_filled(notch, 0.0, t.ink_arrow);
     // Scale labels (Channel) or ticks (Compact) at the taper's marks.
     let (mut marks, mut mark_inks, mut ticks, mut tick_inks) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if variant == Variant::Channel {
@@ -302,6 +330,7 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
         variant,
         track: r4(track),
         fill: r4(fill),
+        notch: r4(notch),
         cap: r4(cap),
         center_line: r4(center_line),
         marks,
@@ -309,6 +338,7 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
         meter,
         muted,
         fill_color,
+        notch_color: t.ink_arrow,
         cap_fill: t.knob_cap_active,
         cap_rim: t.ink_arrow,
         mark_inks,
