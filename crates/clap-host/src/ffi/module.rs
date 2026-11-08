@@ -26,6 +26,8 @@ pub(crate) struct RawDescriptor {
 pub(crate) struct Bundle {
     entry: *const clap_plugin_entry,
     factory: *const clap_plugin_factory,
+    /// The binary's identity when it was opened (see [`identity`]).
+    identity: Option<Identity>,
     // Dropped last: the library must outlive every pointer above.
     _lib: libloading::Library,
 }
@@ -41,11 +43,35 @@ fn loaded() -> &'static Mutex<HashMap<PathBuf, Arc<Bundle>>> {
     L.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Size, modification time and, on Unix, the device and inode of a binary: a file rewritten in
+/// place or renamed over the one loaded before changes at least one of them (#348).
+type Identity = (u64, std::time::SystemTime, u64, u64);
+
+fn identity(exe: &Path) -> Option<Identity> {
+    let m = std::fs::metadata(exe).ok()?;
+    #[cfg(unix)]
+    let (dev, ino) = {
+        use std::os::unix::fs::MetadataExt as _;
+        (m.dev(), m.ino())
+    };
+    // ponytail: Windows refuses to write a loaded DLL in place; size and time cover a rename-over.
+    #[cfg(not(unix))]
+    let (dev, ino) = (0, 0);
+    Some((m.len(), m.modified().ok()?, dev, ino))
+}
+
 impl Bundle {
     /// Loads (once per path, then cached for the life of the process) and initialises a `.clap`.
+    /// A binary that changed on disk since it loaded is refused, never served from the cache
+    /// (#348): written over in place, the cached code is no longer what the file holds; renamed
+    /// over, the library loader hands back the old code for the same path while it stays loaded.
     pub fn load(path: &Path) -> Result<Arc<Bundle>, ClapError> {
         let mut map = loaded().lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(b) = map.get(path) {
+            if b.identity != scan::bundle_executable(path).as_deref().and_then(identity) {
+                let m = "changed on disk since transit loaded it; restart transit to load the new version";
+                return Err(ClapError::Load(path.display().to_string(), m.into()));
+            }
             return Ok(b.clone());
         }
         let b = Arc::new(Bundle::open(path)?);
@@ -56,6 +82,8 @@ impl Bundle {
     fn open(path: &Path) -> Result<Bundle, ClapError> {
         let err = |m: String| ClapError::Load(path.display().to_string(), m);
         let exe = scan::bundle_executable(path).ok_or_else(|| err("no loadable binary".into()))?;
+        // Read before the library loads: a file that changes meanwhile then reads as changed.
+        let identity = identity(&exe);
         // SAFETY: loading a shared library runs its static initialisers. That is inherent to
         // hosting plugins; we only load files found in CLAP plugin folders or named explicitly.
         let lib = unsafe { libloading::Library::new(&exe) }.map_err(|e| err(e.to_string()))?;
@@ -89,7 +117,7 @@ impl Bundle {
             }
             return Err(err("no plugin factory".into()));
         }
-        Ok(Bundle { entry, factory, _lib: lib })
+        Ok(Bundle { entry, factory, identity, _lib: lib })
     }
 
     fn factory(&self) -> clap_plugin_factory {
@@ -242,5 +270,39 @@ mod tests {
         assert_eq!(HOST_NAME, c"transit");
         assert_eq!(HOST_VENDOR, c"transit contributors");
         assert_eq!(HOST_URL, c"https://github.com/transit-audio/transit");
+    }
+
+    /// #348: a plug-in file rewritten in place after it loaded (an installer, or a new build
+    /// copied over it) is refused, not served from the cache, also once nothing holds the bundle
+    /// loaded before; that bundle is never unloaded (an instance's code stays mapped).
+    #[test]
+    fn a_file_rewritten_after_load_is_not_served_from_the_cache() {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        crate::set_scan_extra_dirs_only(true);
+        let fixture = crate::scan_paths(&[super::super::fixture::unregistered_fixture_dir().to_path_buf()]);
+        let bytes = std::fs::read(scan::bundle_executable(&fixture[0].path).unwrap()).unwrap();
+        // A private copy: the in-place rewrite below must not touch a file other tests map.
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("transit-clap-rewrite-{}-{nanos}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let file = dir.join("Fixture.clap");
+        // Truncate and write (the inode stays), with a modification time the test sets (E60).
+        let write = |at: SystemTime| {
+            std::fs::write(&file, &bytes).unwrap();
+            std::fs::File::options().write(true).open(&file).unwrap().set_modified(at).unwrap();
+        };
+        let t0 = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        write(t0);
+        let first = Bundle::load(&file).unwrap();
+        assert_eq!(first.descriptors().len(), 2);
+        assert!(Arc::ptr_eq(&first, &Bundle::load(&file).unwrap()), "an unchanged file is served from the cache");
+        write(t0 + Duration::from_secs(1));
+        let changed = |b: Result<Arc<Bundle>, ClapError>| matches!(b, Err(ClapError::Load(_, m)) if m.contains("changed on disk"));
+        assert!(changed(Bundle::load(&file)), "served while an instance holds the bundle");
+        let old = Arc::downgrade(&first);
+        drop(first);
+        assert!(changed(Bundle::load(&file)), "served once nothing holds the bundle");
+        assert!(old.upgrade().is_some(), "the bundle loaded before was unloaded");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
