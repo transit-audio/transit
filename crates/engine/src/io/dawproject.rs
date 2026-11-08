@@ -247,13 +247,16 @@ fn project(cx: &mut Cx, root: Node, name: &str) -> Result<Session> {
         cs.sort_by_key(|c| c.start);
         distribute(cx, &mut cs, ctrls)?;
         let mut end = i64::MIN;
+        let mut kept = Vec::with_capacity(cs.len());
         for c in cs {
-            let overlaps = c.start < end;
-            end = end.max(c.start.saturating_add(c.len));
-            if overlaps {
+            if c.start < end {
                 cx.skip("overlapping clips (the later one covers the earlier)", 1);
             }
-            place(cx, &mut s, tid, c, overlaps)?;
+            end = end.max(c.start.saturating_add(c.len));
+            kept.extend(from_zero(cx, &s, c)?);
+        }
+        for c in visible(kept) {
+            place(&mut s, tid, c);
         }
         if let Some(pl) = s.track_mut(tid).and_then(|t| t.playlist_mut()) {
             pl.sort();
@@ -404,7 +407,7 @@ fn channel_extras(cx: &mut Cx, c: Node) {
     cx.skip("sends", child(c, "Sends").map_or(0, |d| kids(d, "Send").count()));
 }
 
-/// A channel at unity volume, centred and not muted.
+/// A channel at unity volume, centered and not muted.
 fn default_channel(c: Node) -> bool {
     let at = |tag, want: f64| child(c, tag).and_then(|n| num(n, "value")).is_none_or(|v| (v - want).abs() < 1e-6);
     let unity = match child(c, "Volume").and_then(|v| v.attribute("unit")) {
@@ -835,51 +838,99 @@ fn distribute(cx: &mut Cx, clips: &mut [ClipIn], mut evs: Vec<CtrlEvent>) -> Res
     Ok(())
 }
 
-/// A clip onto its track, in samples through the tempo map. A clip that starts before zero loses
-/// the part before it (its events keep their times); one that `overlaps` the clip before it covers
-/// that clip's overlapping part. Clips that do not overlap are added as they are and the playlist
-/// is sorted once, by the caller.
-fn place(cx: &mut Cx, s: &mut Session, track: TrackId, c: ClipIn, overlaps: bool) -> Result<()> {
-    let (mut seq, mut start_tick, mut len) = (c.seq, c.start, c.len);
-    if start_tick < 0 {
-        let cut = -start_tick;
-        let notes = seq.notes.len();
-        seq.notes.retain(|n| n.start >= cut);
-        cx.skip("notes before the start of the arrangement", notes - seq.notes.len());
-        let ctrls = seq.ctrls.len();
-        seq.ctrls.retain(|e| e.tick >= cut);
-        cx.skip("controller points before the start of the arrangement", ctrls - seq.ctrls.len());
-        for n in &mut seq.notes {
+/// A clip as it starts at zero: one that starts before loses the part before it (its events keep
+/// their times), and one that ends there is left out. A clip ending after 24 hours is refused.
+fn from_zero(cx: &mut Cx, s: &Session, mut c: ClipIn) -> Result<Option<ClipIn>> {
+    if c.start < 0 {
+        let cut = -c.start;
+        let notes = c.seq.notes.len();
+        c.seq.notes.retain(|n| n.start >= cut);
+        cx.skip("notes before the start of the arrangement", notes - c.seq.notes.len());
+        let ctrls = c.seq.ctrls.len();
+        c.seq.ctrls.retain(|e| e.tick >= cut);
+        cx.skip("controller points before the start of the arrangement", ctrls - c.seq.ctrls.len());
+        for n in &mut c.seq.notes {
             n.start -= cut;
         }
-        for e in &mut seq.ctrls {
+        for e in &mut c.seq.ctrls {
             e.tick -= cut;
         }
-        (start_tick, len) = (0, len - cut);
-        if len <= 0 {
+        (c.start, c.len) = (0, c.len - cut);
+        if c.len <= 0 {
             cx.skip("clips before the start of the arrangement", 1);
-            return Ok(());
+            return Ok(None);
         }
     }
-    let start = s.tempo.tick_to_samples(start_tick, s.sample_rate);
-    let end = s.tempo.tick_to_samples(start_tick.saturating_add(len), s.sample_rate);
-    if end > s.sample_rate.samples(86_400.0) {
+    if s.tempo.tick_to_samples(c.start.saturating_add(c.len), s.sample_rate) > s.sample_rate.samples(86_400.0) {
         return Err(crate::cmd::bad(CMD, format!("DAWproject: clip {:?} ends after 24 hours", c.name)));
     }
-    seq.sort();
+    c.seq.sort();
+    Ok(Some(c))
+}
+
+/// One track's clips, sorted by start, with their overlaps resolved in one sweep the way the
+/// editor's overwrite (`edit::place_clip`) resolves them one clip at a time: a later clip covers
+/// what it overlaps of the earlier ones (of two at one start, the later in the file), which keep
+/// their parts before and after it. An event goes to the part its start falls in, as a split keeps
+/// it on one side, and one under a later clip is dropped. Each event is copied at most once, so a
+/// long dense clip under thousands of short ones costs its events, not their product (#377).
+fn visible(cs: Vec<ClipIn>) -> Vec<ClipIn> {
+    // The visible parts, `(clip, from, to)` in ticks: in order and disjoint, so their starts and
+    // their ends both ascend.
+    let mut parts: Vec<(usize, i64, i64)> = Vec::with_capacity(cs.len());
+    for (i, c) in cs.iter().enumerate() {
+        let (from, to) = (c.start, c.start.saturating_add(c.len));
+        // The parts it overlaps: those ending after its start and starting before its end.
+        let (lo, hi) = (parts.partition_point(|p| p.2 <= from), parts.partition_point(|p| p.1 < to));
+        let mut put = Vec::with_capacity(3);
+        if let Some(&(j, a, _)) = parts.get(lo).filter(|p| lo < hi && p.1 < from) {
+            put.push((j, a, from));
+        }
+        put.push((i, from, to));
+        if let Some(&(j, _, b)) = hi.checked_sub(1).and_then(|k| parts.get(k)).filter(|p| lo < hi && p.2 > to) {
+            put.push((j, to, b));
+        }
+        parts.splice(lo..hi, put);
+    }
+    let mut spans: Vec<Vec<(i64, i64)>> = vec![Vec::new(); cs.len()];
+    for &(i, a, b) in &parts {
+        if let Some(v) = spans.get_mut(i) {
+            v.push((a, b));
+        }
+    }
+    let mut out = Vec::with_capacity(parts.len());
+    for (c, spans) in cs.into_iter().zip(spans) {
+        // Not overlapped at all: as it is, its events moved rather than copied.
+        if spans == [(c.start, c.start.saturating_add(c.len))] {
+            out.push(c);
+            continue;
+        }
+        for (a, b) in spans {
+            // In the clip's own ticks; its events are sorted by start (see `from_zero`).
+            let (lo, hi) = (a - c.start, b - c.start);
+            let notes = &c.seq.notes[c.seq.notes.partition_point(|n| n.start < lo)..c.seq.notes.partition_point(|n| n.start < hi)];
+            let ctrls = &c.seq.ctrls[c.seq.ctrls.partition_point(|e| e.tick < lo)..c.seq.ctrls.partition_point(|e| e.tick < hi)];
+            let seq = Sequence {
+                notes: notes.iter().map(|n| Note { start: n.start - lo, ..*n }).collect(),
+                ctrls: ctrls.iter().map(|e| CtrlEvent { tick: e.tick - lo, ..*e }).collect(),
+            };
+            out.push(ClipIn { start: a, len: b - a, name: c.name.clone(), muted: c.muted, seq });
+        }
+    }
+    out
+}
+
+/// A clip onto its track, in samples through the tempo map (the caller sorts the playlist once).
+fn place(s: &mut Session, track: TrackId, c: ClipIn) {
+    let start = s.tempo.tick_to_samples(c.start, s.sample_rate);
+    let end = s.tempo.tick_to_samples(c.start.saturating_add(c.len), s.sample_rate);
     let name = if c.name.is_empty() { s.track(track).map(|t| t.name.clone()).unwrap_or_default() } else { c.name };
     let id = s.new_clip_id();
-    let mut clip = Clip::midi(id, name, start, (end - start).max(1), seq);
+    let mut clip = Clip::midi(id, name, start, (end - start).max(1), c.seq);
     clip.muted = c.muted;
-    if overlaps {
-        if let Some(pl) = s.track_mut(track).and_then(|t| t.playlist_mut()) {
-            pl.sort();
-        }
-        crate::edit::place_clip(s, track, clip);
-    } else if let Some(pl) = s.track_mut(track).and_then(|t| t.playlist_mut()) {
+    if let Some(pl) = s.track_mut(track).and_then(|t| t.playlist_mut()) {
         pl.clips.push(clip);
     }
-    Ok(())
 }
 
 #[cfg(test)]

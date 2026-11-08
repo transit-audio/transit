@@ -66,7 +66,7 @@ fn tracks_mixer_tempo_meter_markers_and_notes() {
     assert_eq!((t.kind, t.name.as_str()), (TrackKind::Instrument, "Piano"));
     assert_eq!(t.instrument.as_ref().map(|i| i.plugin.as_str()), Some(transit_model::DEFAULT_INSTRUMENT));
     assert!((t.mixer.volume_db - -6.0206).abs() < 1e-3, "{}", t.mixer.volume_db);
-    assert_eq!(t.mixer.pan, vec![-1.0, 0.0], "a quarter-left balance moves the right side to the centre");
+    assert_eq!(t.mixer.pan, vec![-1.0, 0.0], "a quarter-left balance moves the right side to the center");
     assert!(t.mixer.mute && t.mixer.solo);
     // Beat 3 at 80 BPM is 2.25 s.
     let c = only_clip(&s);
@@ -334,9 +334,10 @@ fn b3_loop_passes_cost_what_they_play_not_the_whole_content() {
 }
 
 #[test]
-fn b3_timbre_ownership_is_not_quadratic() {
-    // One long note with `n` timbre points over `n` short notes that each have one: 8 times the
-    // notes must cost about 8 times the time, not 64 (a ratio, so the machine's speed cancels).
+fn b3_timbre_ownership_of_80_000_overlapping_notes_is_one_sweep() {
+    // One long note with `n` timbre points over `n` short notes that each have one. A ratio of two
+    // runs' times measured the growth, but a wall-clock ratio fails on a busy machine (E49), so a
+    // far ceiling stands guard instead.
     let run = |n: u32| {
         let long: String = (0..n).map(|i| format!(r#"<RealPoint time="{}" value="0.5"/>"#, f64::from(i) * 0.5 + 0.25)).collect();
         let shorts: String = (0..n)
@@ -355,8 +356,9 @@ fn b3_timbre_ownership_is_not_quadratic() {
         assert_eq!(seq(only_clip(&s)).ctrls.iter().filter(|e| e.kind == CtrlKind::Cc(74)).count(), 2 * n as usize);
         took
     };
-    let (small, large) = (run(10_000), run(80_000));
-    assert!(large < small * 24, "8x the notes took {:.1}x the time ({small:?} -> {large:?})", large.as_secs_f64() / small.as_secs_f64());
+    let took = run(80_000);
+    // timing: stall-bound a ceiling for a starved runner; this run took 0.13 s on an M-series Mac
+    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
 }
 
 #[test]
@@ -543,4 +545,91 @@ fn k6_an_empty_clip_wholly_before_zero_is_counted() {
     let (s, report) = read(&notes_track(r#"<Clip time="-4" duration="2"><Notes/></Clip>"#));
     assert!(s.tracks[0].clips().is_empty());
     assert_eq!(report, vec!["Not imported from the DAWproject: 1 clips before the start of the arrangement"]);
+}
+
+/// What a track's clips hold, in order: start and length in samples, name, mute, notes and
+/// controller ticks (ids aside).
+fn layout(s: &Session) -> Vec<(i64, i64, String, bool, Vec<(i64, i64, u8)>, Vec<i64>)> {
+    s.tracks
+        .iter()
+        .flat_map(|t| t.clips())
+        .map(|c| {
+            let q = seq(c);
+            (
+                c.start,
+                c.length,
+                c.name.clone(),
+                c.muted,
+                q.notes.iter().map(|n| (n.start, n.length, n.pitch)).collect(),
+                q.ctrls.iter().map(|e| e.tick).collect(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn overlapping_clips_resolve_as_place_clip_does() {
+    // (start, length) in beats, in file order: nested, chained, sharing a start (the later covers),
+    // covering several at once, inside one that was itself split, and one muted.
+    let shapes = [(0, 12), (2, 2), (3, 4), (3, 2), (8, 6), (1, 13), (5, 1), (20, 2), (21, 3)];
+    let notes = |len: i64, key: i64| -> String {
+        (0..len * 2).map(|i| format!(r#"<Note time="{}" duration="1.25" key="{}" vel="1"/>"#, f64::from(i as u32) * 0.5, key + i % 12)).collect()
+    };
+    let clips: String = shapes
+        .iter()
+        .enumerate()
+        .map(|(k, &(at, len))| {
+            let muted = if k == 4 { r#" enable="false""# } else { "" };
+            format!(r#"<Clip time="{at}" duration="{len}" name="c{k}"{muted}><Notes>{}</Notes></Clip>"#, notes(len, 40 + 5 * k as i64))
+        })
+        .collect();
+    let (s, _) = read(&notes_track(&clips));
+    // The oracle: each clip placed by the editor's own overwrite (`place_clip`), in start order
+    // (stable: of two at one start, the later in the file covers).
+    let (mut want, _) = read(&notes_track(""));
+    let tid = want.tracks[0].id;
+    let mut order: Vec<usize> = (0..shapes.len()).collect();
+    order.sort_by_key(|&k| shapes[k].0);
+    for k in order {
+        let (at, len) = shapes[k];
+        let one = format!(r#"<Clip time="0" duration="{len}"><Notes>{}</Notes></Clip>"#, notes(len, 40 + 5 * k as i64));
+        let (alone, _) = read(&notes_track(&one));
+        let mut clip = only_clip(&alone).clone();
+        clip.start = want.tempo.tick_to_samples(ticks(at as f64), want.sample_rate);
+        clip.id = want.new_clip_id();
+        clip.name = format!("c{k}");
+        clip.muted = k == 4;
+        crate::edit::place_clip(&mut want, tid, clip);
+    }
+    let names: Vec<String> = layout(&s).into_iter().map(|c| c.2).collect();
+    assert_eq!(names, ["c0", "c5", "c1", "c3", "c6", "c2", "c5", "c4", "c7", "c8"], "the visible parts, worked by hand");
+    assert_eq!(layout(&s), layout(&want));
+}
+
+#[test]
+fn a_long_dense_clip_under_thousands_of_short_clips_imports_in_one_sweep() {
+    // Maintainer's probe on #377: every short clip inside a long one cloned the rest of the long
+    // clip (twice per edge), outside the event cap. Here: a one-tick loop unrolled over 2,000 beats
+    // (1,920,000 notes) and 8,000 one-tick clips on ticks 1 to 8,000, so the rest stays long.
+    let tick = 1.0 / f64::from(PPQ);
+    let shorts: String = (1..=8_000)
+        .map(|k| {
+            format!(
+                r#"<Clip time="{}" duration="{tick}"><Notes><Note time="0" duration="{tick}" key="72" vel="1"/></Notes></Clip>"#,
+                f64::from(k) * tick
+            )
+        })
+        .collect();
+    let long =
+        r#"<Clip time="0" duration="2000" loopStart="0" loopEnd="0.001"><Notes><Note time="0" duration="0.001" key="60" vel="1"/></Notes></Clip>"#;
+    let xml = notes_track(&format!("{long}{shorts}"));
+    let t = std::time::Instant::now();
+    let (s, report) = read(&xml);
+    // timing: stall-bound a ceiling for a starved runner; the sweep takes well under a second; the per-clip overwrite took 17 s with half the short clips on an M-series Mac
+    assert!(t.elapsed() < std::time::Duration::from_secs(10), "{:?}", t.elapsed());
+    let clips: Vec<_> = s.tracks.iter().flat_map(|t| t.clips()).collect();
+    assert_eq!(clips.len(), 8_002, "the long clip's first tick, 8,000 short clips, the long clip's rest");
+    let notes: usize = clips.iter().map(|c| seq(c).notes.len()).sum();
+    assert_eq!(notes, 1 + (1_920_000 - 8_001) + 8_000, "a loop note on every visible tick, one note per short clip");
+    assert!(report.iter().any(|r| r.ends_with("8000 overlapping clips (the later one covers the earlier)")), "{report:?}");
 }
