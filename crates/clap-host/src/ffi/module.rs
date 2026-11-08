@@ -26,7 +26,8 @@ pub(crate) struct RawDescriptor {
 pub(crate) struct Bundle {
     entry: *const clap_plugin_entry,
     factory: *const clap_plugin_factory,
-    /// The binary's identity when it was opened (see [`identity`]).
+    /// The binary that was opened, and its identity then (see [`identity`]).
+    exe: PathBuf,
     identity: Option<Identity>,
     // Dropped last: the library must outlive every pointer above.
     _lib: libloading::Library,
@@ -54,7 +55,7 @@ fn identity(exe: &Path) -> Option<Identity> {
         use std::os::unix::fs::MetadataExt as _;
         (m.dev(), m.ino())
     };
-    // ponytail: Windows refuses to write a loaded DLL in place; size and time cover a rename-over.
+    // Windows refuses to write a loaded DLL in place; size and time cover a rename-over.
     #[cfg(not(unix))]
     let (dev, ino) = (0, 0);
     Some((m.len(), m.modified().ok()?, dev, ino))
@@ -66,12 +67,18 @@ impl Bundle {
     /// (#348): written over in place, the cached code is no longer what the file holds; renamed
     /// over, the library loader hands back the old code for the same path while it stays loaded.
     pub fn load(path: &Path) -> Result<Arc<Bundle>, ClapError> {
-        let mut map = loaded().lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(b) = map.get(path) {
-            if b.identity != scan::bundle_executable(path).as_deref().and_then(identity) {
-                let m = "changed on disk since transit loaded it; restart transit to load the new version";
+        let cached = loaded().lock().unwrap_or_else(PoisonError::into_inner).get(path).cloned();
+        if let Some(b) = cached {
+            // Read outside the map lock: a stalled file system must not hold up every other load.
+            if b.identity != identity(&b.exe) {
+                let m = "changed on disk or was removed since transit loaded it; restart transit to load it again";
                 return Err(ClapError::Load(path.display().to_string(), m.into()));
             }
+            return Ok(b);
+        }
+        let mut map = loaded().lock().unwrap_or_else(PoisonError::into_inner);
+        // Another thread may have loaded it meanwhile.
+        if let Some(b) = map.get(path) {
             return Ok(b.clone());
         }
         let b = Arc::new(Bundle::open(path)?);
@@ -117,7 +124,7 @@ impl Bundle {
             }
             return Err(err("no plugin factory".into()));
         }
-        Ok(Bundle { entry, factory, identity, _lib: lib })
+        Ok(Bundle { entry, factory, exe, identity, _lib: lib })
     }
 
     fn factory(&self) -> clap_plugin_factory {
@@ -285,7 +292,10 @@ mod tests {
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let dir = std::env::temp_dir().join(format!("transit-clap-rewrite-{}-{nanos}", std::process::id()));
         std::fs::create_dir(&dir).unwrap();
-        let file = dir.join("Fixture.clap");
+        let path = dir.join("Fixture.clap");
+        // The binary, inside a bundle on macOS as installed there.
+        let file = if cfg!(target_os = "macos") { path.join("Contents/MacOS/Fixture") } else { path.clone() };
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         // Truncate and write (the inode stays), with a modification time the test sets (E60).
         let write = |at: SystemTime| {
             std::fs::write(&file, &bytes).unwrap();
@@ -293,15 +303,15 @@ mod tests {
         };
         let t0 = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         write(t0);
-        let first = Bundle::load(&file).unwrap();
+        let first = Bundle::load(&path).unwrap();
         assert_eq!(first.descriptors().len(), 2);
-        assert!(Arc::ptr_eq(&first, &Bundle::load(&file).unwrap()), "an unchanged file is served from the cache");
+        assert!(Arc::ptr_eq(&first, &Bundle::load(&path).unwrap()), "an unchanged file is served from the cache");
         write(t0 + Duration::from_secs(1));
         let changed = |b: Result<Arc<Bundle>, ClapError>| matches!(b, Err(ClapError::Load(_, m)) if m.contains("changed on disk"));
-        assert!(changed(Bundle::load(&file)), "served while an instance holds the bundle");
+        assert!(changed(Bundle::load(&path)), "served while the bundle is held, as an instance holds it");
         let old = Arc::downgrade(&first);
         drop(first);
-        assert!(changed(Bundle::load(&file)), "served once nothing holds the bundle");
+        assert!(changed(Bundle::load(&path)), "served once nothing holds the bundle");
         assert!(old.upgrade().is_some(), "the bundle loaded before was unloaded");
         let _ = std::fs::remove_dir_all(&dir);
     }
