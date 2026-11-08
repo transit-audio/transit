@@ -164,19 +164,20 @@ commitment for transit's own formats.
    (the desktop file declares the new type, so transit is offered). On Windows the MSI upgrade
    rewrites the `.transit` key's `Content Type`. On macOS the UTI, not the MIME type, drives the
    association.
-6. **The other inherited identifiers found while writing this record** (the coordinator's answers,
-   each pending the maintainer's confirmation):
-   - *The clip group extension* `scgrp` becomes `transitclips` for files written from v0.7.0
-     (`EXTENSION`, the command's help text, the module doc and the docs that name it). The writer
+6. **The other inherited identifiers found while writing this record** (the extensions decided by
+   the maintainer on 2026-11-08; the `SCV3` answer pending the maintainer's confirmation):
+   - *The clip group extension* `scgrp` becomes `tclips` for files written from v0.7.0 (decided by
+     the maintainer, 2026-11-08; `EXTENSION`, the command's help text, the module doc and the docs
+     that name it). The writer
      keeps its rule: it adds the extension when the path given has none. No reading rule is needed:
      the reader never checks the extension, so an old `.scgrp` file is read under decision 2 and
      refused under decision 3 by its tag alone.
-   - *Track presets get a fixed extension,* `transitpreset`, for files written from v0.7.0: the
-     writer sets it on the path it is given (`Bass` and `Bass.json` both become
-     `Bass.transitpreset`), and the result's `path` is the file written. The reader never checks the
-     extension, so old presets with any name keep reading under decision 2.
-   - *The VST3 state magic* `SCV3` stays until the session format version changes at beta, recorded
-     as transit's in-session VST3 state container magic (the comment at `STATE_MAGIC` says so). It
+   - *Track presets get a fixed extension,* `tpreset`, for files written from v0.7.0 (decided by the
+     maintainer, 2026-11-08): the writer sets it on the path it is given (`Bass` and `Bass.json`
+     both become `Bass.tpreset`), and the result's `path` is the file written. The reader never
+     checks the extension, so old presets with any name keep reading under decision 2.
+   - *The VST3 state magic* `SCV3` stays until the session format version changes at beta (pending
+     the maintainer's confirmation), recorded as transit's in-session VST3 state container magic (the comment at `STATE_MAGIC` says so). It
      stays in track presets too. Three reasons. No user sees it. A stored state is kept as it is
      when its plug-in is not installed (the session saves the blob it loaded), so a session saved in
      0.7.x could still carry `SCV3`, and a v0.8.0 refusal would lock the user out of a whole session
@@ -222,8 +223,8 @@ The implementation adds, each with a negative control that fails on the code bef
     reads;
   - a file with no `format` keeps the structural error;
   - the version-gated test of decision 3.
-- The clip group export writes `.transitclips` when the path has no extension, and a `.scgrp` name
-  with a new tag imports; the preset writer turns `Bass` and `Bass.json` into `Bass.transitpreset`
+- The clip group export writes `.tclips` when the path has no extension, and a `.scgrp` name
+  with a new tag imports; the preset writer turns `Bass` and `Bass.json` into `Bass.tpreset`
   and reports that path (decision 6).
 - A packaging test (beside the existing check that the `.wxs` `System.AppUserModel.ID` equals
   `APP_USER_MODEL_ID`): each of the five registration points names `application/x-transit-session`

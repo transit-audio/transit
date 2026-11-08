@@ -843,8 +843,8 @@ the status line and the command's result (its `note` field) say what to do:
 
 To convert a clip group file, import it and export the imported clips again with
 `file.export_clip_groups`. To convert a track preset, load it onto a track and save it again with
-`track.save_preset`. New clip group files are named `.transitclips` and new track presets
-`.transitpreset`; older files keep reading whatever their names, because transit goes by their
+`track.save_preset`. New clip group files are named `.tclips` and new track presets
+`.tpreset`; older files keep reading whatever their names, because transit goes by their
 contents.
 
 **0.8.0 and later refuse unconverted files.** From 0.8.0, transit reads only files in transit's

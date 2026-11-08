@@ -172,7 +172,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 )
             }
         ),
-        cmd!(noundo "file.export_clip_groups", "Export Clip Groups...", [], None, "{path, clips?} — writes a .transitclips clip group file with its audio (the extension is added when the path has none)", always, |e, p| {
+        cmd!(noundo "file.export_clip_groups", "Export Clip Groups...", [], None, "{path, clips?} — writes a .tclips clip group file with its audio (the extension is added when the path has none)", always, |e, p| {
             let path = str_param(p, "path").ok_or_else(|| bad("file.export_clip_groups", "`path` required"))?.to_string();
             let ids = clip_ids_param(e, p);
             let n = crate::clip_group_file::export(e, &ids, &path)?;

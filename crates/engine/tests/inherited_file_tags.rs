@@ -140,7 +140,7 @@ fn a_pre_0_7_clip_group_reads_in_0_7_and_is_refused_from_0_8() {
     // Exporting again writes transit's tag and extension.
     let ids: Vec<u64> = r["clips"].as_array().unwrap().iter().filter_map(Value::as_u64).collect();
     e.execute("file.export_clip_groups", &json!({"path": s(&dir.join("again")), "clips": ids})).unwrap();
-    let written = std::fs::read_to_string(dir.join("again.transitclips")).unwrap();
+    let written = std::fs::read_to_string(dir.join("again.tclips")).unwrap();
     let v: Value = serde_json::from_str(&written).unwrap();
     assert_eq!(v["format"], NEW_GROUP);
     assert!(!written.contains(OLD_GROUP));
@@ -181,10 +181,10 @@ fn a_pre_0_7_track_preset_reads_in_0_7_and_is_refused_from_0_8() {
     let lead2 = fresh.session().track_by_name("Lead").unwrap();
     assert_eq!((serde_json::to_value(&lead2.mixer).unwrap(), serde_json::to_value(&lead2.instrument).unwrap()), old);
 
-    // Saving again writes transit's tag, as .transitpreset whatever the path's extension.
+    // Saving again writes transit's tag, as .tpreset whatever the path's extension.
     e.execute("edit.select", &json!({"tracks": ["Lead"]})).unwrap();
     let saved = e.execute("track.save_preset", &json!({"path": s(&dir.join("again.json"))})).unwrap();
-    let path = dir.join("again.transitpreset");
+    let path = dir.join("again.tpreset");
     assert_eq!(saved["path"], s(&path).as_str());
     let written = std::fs::read_to_string(&path).unwrap();
     let v: Value = serde_json::from_str(&written).unwrap();

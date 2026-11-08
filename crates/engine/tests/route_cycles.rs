@@ -209,7 +209,7 @@ fn deleting_a_folder_that_promotes_a_member_into_a_loop_is_refused() {
 fn loading_a_preset_with_a_send_into_the_own_input_is_refused() {
     let dir = std::env::temp_dir().join(format!("route-cycles-preset-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("p.transitpreset");
+    let path = dir.join("p.tpreset");
     let mut e = Engine::default();
     let a = aux(&mut e, "A");
     let b = aux(&mut e, "B");

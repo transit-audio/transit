@@ -17,7 +17,7 @@ pub fn trim_param() -> AutoParam {
 
 const PRESET_FORMAT: &str = "transit-track-preset";
 /// Set on every path a preset is saved to (ADR 0049); the reader never checks it.
-pub const PRESET_EXTENSION: &str = "transitpreset";
+pub const PRESET_EXTENSION: &str = "tpreset";
 /// The fork's tag (ADR 0049): read through v0.7.x; from the v0.8.0 tag it moves to `refused_pre_0_7`.
 const LEGACY_PRESET_FORMAT: &str = "soundcraft-track-preset";
 const PRESET_TAGS: crate::file_tags::Tags =
@@ -70,7 +70,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             extract_midi
         ),
-        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?} — writes the track's type, width, mixer, inserts, sends and instrument as JSON to `path` with the extension .transitpreset; returns the path written", has_selection, save_preset),
+        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?} — writes the track's type, width, mixer, inserts, sends and instrument as JSON to `path` with the extension .tpreset; returns the path written", has_selection, save_preset),
         cmd!(
             "track.load_preset",
             "Load Track Preset",
@@ -630,7 +630,7 @@ mod tests {
         e.execute("edit.select", &json!({"tracks": ["Bass"]})).unwrap();
         let saved = e.execute("track.save_preset", &json!({"path": path})).unwrap();
         // The extension is set on any path (ADR 0049), and the result names the file written.
-        let path = dir.join("bass.transitpreset").to_string_lossy().into_owned();
+        let path = dir.join("bass.tpreset").to_string_lossy().into_owned();
         assert_eq!(saved["path"], path.as_str());
         assert!(!dir.join("bass.json").exists());
         e.execute("edit.select", &json!({"tracks": ["Hats"]})).unwrap();
