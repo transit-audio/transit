@@ -31,36 +31,56 @@ impl QuantizePrefs {
 }
 
 impl StudioApp {
-    fn quantize_indices(&self, notes: &[Note]) -> Vec<usize> {
-        if self.keys.selection.is_empty() { (0..notes.len()).collect() } else { resolve(notes, &self.keys.selection) }
+    /// The notes Quantize works on: the selection, or every open clip's notes when none is
+    /// selected; grouped by clip with their local indices.
+    fn quantize_groups(&self, all: &Composite) -> Vec<(Part, Vec<usize>)> {
+        if self.keys.selection.is_empty() {
+            all.parts.iter().map(|p| (p.clone(), (0..p.count).collect())).collect()
+        } else {
+            all.groups(&self.keys.selection)
+        }
     }
 
+    /// Where the notes would land, in the roll's ticks (each clip quantized in its own ticks).
     pub(super) fn keys_quantize_preview(&self) -> Vec<Note> {
-        let notes = self.keys_notes();
-        let mut selected: Vec<_> = self.quantize_indices(&notes).iter().map(|i| notes[*i]).collect();
-        transit_midi::ops::quantize(&mut selected, &self.ui.keys.quantize.options());
-        selected
+        let Some(all) = self.keys_all() else { return Vec::new() };
+        let mut out = Vec::new();
+        for (part, indices) in self.quantize_groups(&all) {
+            let mut local: Vec<Note> = indices.iter().map(|i| all.notes[part.base + i]).map(|n| Note { start: n.start - part.off, ..n }).collect();
+            transit_midi::ops::quantize(&mut local, &self.ui.keys.quantize.options());
+            out.extend(local.into_iter().map(|n| Note { start: n.start + part.off, ..n }));
+        }
+        out
     }
 
+    /// Quantize, one `event.quantize` per open clip, one undo step.
     pub(super) fn keys_apply_quantize(&mut self, grid: i64) -> Result<(), String> {
         let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
-        let indices = self.quantize_indices(&self.keys_notes());
-        if indices.is_empty() {
+        let Some(all) = self.keys_all() else { return Err("no clip".into()) };
+        let groups: Vec<_> = self.quantize_groups(&all).into_iter().filter(|(_, idx)| !idx.is_empty()).collect();
+        if groups.is_empty() {
             return Ok(());
         }
         let prefs = self.ui.keys.quantize.clone();
         let key = self.keys_merge_key();
         self.ensure_clip_selected(clip);
-        let result = self.keys_exec(
-            "event.quantize",
-            json!({
-                "clip": clip.0, "indices": indices, "grid": grid.clamp(1, PPQ * 16),
-                "strength": prefs.strength.min(100), "swing": prefs.swing.min(100), "quantize_ends": prefs.ends,
-            }),
-            &key,
-        )?;
+        let mut selection = Vec::new();
+        for (part, indices) in groups {
+            let result = self.keys_exec(
+                "event.quantize",
+                json!({
+                    "clip": part.clip.0, "indices": indices, "grid": grid.clamp(1, PPQ * 16),
+                    "strength": prefs.strength.min(100), "swing": prefs.swing.min(100), "quantize_ends": prefs.ends,
+                }),
+                &key,
+            )?;
+            if !self.keys.selection.is_empty() {
+                let notes: Vec<Note> = serde_json::from_value(result["selected_notes"].clone()).map_err(|e| e.to_string())?;
+                selection.extend(notes.into_iter().map(|n| Note { start: n.start + part.off, ..n }));
+            }
+        }
         if !self.keys.selection.is_empty() {
-            self.keys.selection = serde_json::from_value(result["selected_notes"].clone()).map_err(|e| e.to_string())?;
+            self.keys.selection = selection;
         }
         Ok(())
     }
@@ -74,7 +94,11 @@ pub(super) fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let mut apply = false;
     let mut cancel = false;
     crate::theme::modal_window(ctx, "Quantize notes").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
-        ui.label(if app.keys.selection.is_empty() { "All notes in this clip" } else { "Selected notes only" });
+        ui.label(match (app.keys.selection.is_empty(), app.keys.others.is_empty()) {
+            (false, _) => "Selected notes only",
+            (true, true) => "All notes in this clip",
+            (true, false) => "All notes in the open clips",
+        });
         let prefs = &mut app.ui.keys.quantize;
         prefs.strength = prefs.strength.min(100);
         prefs.swing = prefs.swing.min(100);

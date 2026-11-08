@@ -65,6 +65,11 @@ both. The setting is saved in the session.
 Click the ruler above the notes to set the playhead; drag it up or down to zoom.
 Clicking empty grid clears the selection and marks where step entry begins; it never moves the playhead or where Play starts.
 
+**Several clips.** Select several MIDI clips in the arrangement, then double-click one of them (or press Ctrl+Alt+K): they all open together. The one you double-clicked is the foreground clip, named in the header with the count ("2 clips · Piano"). Each clip has a bar in its color at the foot of the ruler and its notes in that color. Click a note of another clip, or its bar, to bring that clip to the foreground.
+- A band selects notes across clips, and a move, resize, velocity drag, delete, transpose or quantize changes them all in one undo step. Notes stay in their own clips.
+- A new note goes to the clip whose span you draw it in, the foreground first. Outside every open clip it is refused, and a status line says so.
+- Step entry, the controller lane and the clip-end handle work on the foreground clip.
+
 ## Cycle
 
 Cycle (C, the transport button or Transport > Cycle On) only turns looping on and off; it never
