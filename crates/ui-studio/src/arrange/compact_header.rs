@@ -85,5 +85,5 @@ pub(super) fn show(app: &mut StudioApp, ui: &mut Ui, t: &Track, r: Rect, list: R
         let triangle = Rect::from_center_size(pos2(x + 15.0, content.center().y), vec2(12.0, content.height().min(14.0)));
         super::tracks::disclosure(app, ui, t, triangle, clip, row);
     }
-    response.context_menu(|ui| super::tracks::track_menu(app, ui, t.id, t.kind, t.instrument.is_some()));
+    crate::chrome::context_menu(&response).show(|ui| super::tracks::track_menu(app, ui, t.id, t.kind, t.instrument.is_some()));
 }

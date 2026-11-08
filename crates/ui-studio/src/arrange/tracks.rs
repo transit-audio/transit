@@ -293,14 +293,14 @@ pub(super) fn track_header(
     let id = t.id;
     let kind = t.kind;
     let has_instrument = t.instrument.is_some();
-    resp.context_menu(|ui| track_menu(app, ui, id, kind, has_instrument));
+    crate::chrome::context_menu(&resp).show(|ui| track_menu(app, ui, id, kind, has_instrument));
     // The inactive tag and the chip cover part of the name area, so they get the same menu on right-click.
     if let Some(tag) = tag_resp {
-        egui::Popup::context_menu(&tag).id(tag.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));
+        crate::chrome::context_menu(&tag).id(tag.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));
     }
     if let Some(chip) = chip {
         // Its own popup id: the chip's response id already keys the destination picker.
-        egui::Popup::context_menu(&chip).id(chip.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));
+        crate::chrome::context_menu(&chip).id(chip.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));
     }
 }
 
@@ -415,7 +415,7 @@ pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: Tr
         // Instrument ▸: the device chain's instrument menu (a click in its filter box keeps it open).
         let config = egui::containers::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
         let mut picked = None;
-        let (button, _) = egui::containers::menu::SubMenuButton::new("Instrument").config(config).ui(ui, |ui| {
+        let (button, _) = egui::containers::menu::SubMenuButton::new(crate::chrome::submenu_atoms("Instrument")).config(config).ui(ui, |ui| {
             let lists = app.instrument_lists();
             let current = app.engine.session().track(id).and_then(|t| t.instrument.as_ref()).map(|i| i.plugin.clone());
             let mut filter = std::mem::take(&mut app.mixer.instrument_filter);
@@ -432,13 +432,13 @@ pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: Tr
             let _ = app.set_instrument(id, &plugin);
             ui.close();
         }
-        if ui.add_enabled(has_instrument && app.player.is_some(), egui::Button::new("Open Instrument Editor")).clicked() {
+        if ui.add_enabled(has_instrument && app.player.is_some(), crate::chrome::MenuRow::new("Open Instrument Editor")).clicked() {
             app.show_editor((id, transit_mix::INSTRUMENT_SLOT));
             ui.close();
         }
         ui.separator();
     }
-    if kind.is_midi() && ui.button("New MIDI Clip at Cursor").clicked() {
+    if kind.is_midi() && ui.add(crate::chrome::MenuRow::new("New MIDI Clip at Cursor")).clicked() {
         let _ = app.new_midi_clip(Some(id));
         ui.close();
     }
@@ -448,7 +448,7 @@ pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: Tr
     // Take lanes (#25): shown while the track has stacked takes.
     if app.has_takes(id) {
         let label = if app.ui.takes_open.contains(&id) { "Hide Take Lanes" } else { "Show Take Lanes" };
-        let b = ui.button(label);
+        let b = ui.add(crate::chrome::MenuRow::new(label));
         app.arrange.menu.push(crate::mixer::MenuItem::at(ui, label.into(), String::new(), b.rect));
         if b.clicked() {
             app.toggle_takes(id);
@@ -460,13 +460,13 @@ pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: Tr
     if matches!(kind, TrackKind::Audio | TrackKind::Instrument) {
         let frozen = app.engine.session().track(id).is_some_and(|t| t.freeze.is_some());
         let label = if frozen { "Unfreeze" } else { "Freeze" };
-        let b = ui.button(label);
+        let b = ui.add(crate::chrome::MenuRow::new(label));
         app.arrange.menu.push(crate::mixer::MenuItem::at(ui, label.into(), String::new(), b.rect));
         if b.clicked() {
             let _ = app.toggle_freeze(id);
             ui.close();
         }
-        let b = ui.button("Flatten");
+        let b = ui.add(crate::chrome::MenuRow::new("Flatten"));
         app.arrange.menu.push(crate::mixer::MenuItem::at(ui, "Flatten".into(), String::new(), b.rect));
         if b.clicked() {
             let _ = app.flatten_track(id);
@@ -477,7 +477,7 @@ pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: Tr
         crate::groups::menu_items(app, ui, Some(id));
         ui.separator();
     }
-    ui.menu_button("Color", |ui| {
+    ui.menu_button(crate::chrome::submenu_atoms("Color"), |ui| {
         for (i, c) in PALETTE.iter().enumerate() {
             let (r, resp) = ui.allocate_exact_size(vec2(120.0, 16.0), Sense::click());
             // The outline carries the 3:1 boundary where a pale swatch meets the light popup.
@@ -493,7 +493,7 @@ pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: Tr
     ui.separator();
     let activity = crate::menus::activity_item(app, ui, Some(id));
     app.arrange.menu.push(activity);
-    let del = ui.button("Delete Track");
+    let del = ui.add(crate::chrome::MenuRow::new("Delete Track"));
     app.arrange.menu.push(crate::mixer::MenuItem::at(ui, "Delete Track".into(), String::new(), del.rect));
     if del.clicked() {
         let _ = app.request_delete_tracks(vec![id]);
@@ -514,7 +514,7 @@ pub(crate) fn width_item(app: &mut StudioApp, ui: &mut Ui, id: TrackId) -> Optio
         .width_change_disabled_reason()
         .map(str::to_string)
         .or_else(|| app.engine.session().track(id).and_then(|track| app.width_input(track, format).err()));
-    let response = ui.add_enabled(reason.is_none(), egui::Button::new(label)).on_disabled_hover_text(reason.unwrap_or_default());
+    let response = ui.add_enabled(reason.is_none(), crate::chrome::MenuRow::new(label)).on_disabled_hover_text(reason.unwrap_or_default());
     if response.clicked() {
         let _ = app.run("track.change_width", json!({"tracks": [id.0], "format": format}));
         ui.close();

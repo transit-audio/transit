@@ -157,10 +157,10 @@ fn lane(
     crate::icons::paint(&lp, menu.center(), crate::icons::Icon::ChevronDown, 12.0, TOKENS.text);
     let can_delete = !active;
     let track = t.id;
-    egui::Popup::menu(&mresp).width(150.0).show(|ui| {
+    crate::chrome::popup_menu(&mresp).width(150.0).show(|ui| {
         flatten_item(app, ui, track, None);
         let label = format!("Delete Take {number}");
-        let b = ui.add_enabled(can_delete, egui::Button::new(&label));
+        let b = ui.add_enabled(can_delete, crate::chrome::MenuRow::new(&label));
         app.arrange.menu.push(crate::mixer::MenuItem::at(ui, label, String::new(), b.rect));
         let b = b.on_disabled_hover_text("This take plays: choose another take first, or flatten");
         if b.clicked() {
@@ -185,7 +185,7 @@ fn lane(
 /// "Flatten Takes" for a track (stack `stack`, or all), as the track menu, the lane menu and the
 /// clip menu offer it. Recorded in the menu layout.
 pub(crate) fn flatten_item(app: &mut StudioApp, ui: &mut Ui, track: TrackId, stack: Option<usize>) {
-    let b = ui.button("Flatten Takes");
+    let b = ui.add(crate::chrome::MenuRow::new("Flatten Takes"));
     app.arrange.menu.push(crate::mixer::MenuItem::at(ui, "Flatten Takes".into(), String::new(), b.rect));
     if b.on_hover_text("Keep what plays and remove the other takes").clicked() {
         let _ = app.flatten_takes(track, stack);

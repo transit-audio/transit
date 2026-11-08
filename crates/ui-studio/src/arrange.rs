@@ -425,12 +425,12 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         if main_resp.clicked() {
             let _ = app.add_audio_track("mono");
         }
-        egui::Popup::menu(&chev_resp).width(110.0).show(|ui| {
-            if ui.button("Mono").clicked() {
+        crate::chrome::popup_menu(&chev_resp).width(110.0).show(|ui| {
+            if ui.add(crate::chrome::MenuRow::new("Mono")).clicked() {
                 let _ = app.add_audio_track("mono");
                 ui.close();
             }
-            if ui.button("Stereo").clicked() {
+            if ui.add(crate::chrome::MenuRow::new("Stereo")).clicked() {
                 let _ = app.add_audio_track("stereo");
                 ui.close();
             }
@@ -457,12 +457,12 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         let resp = ui.interact(add_more.intersect(list), ui.id().with("add_more"), Sense::click());
         clip.rect_filled(add_more, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
         (label_x[4], label_w[4]) = paint_quick_add(&clip, add_more, "…", false);
-        egui::Popup::menu(&resp).width(130.0).show(|ui| {
-            if ui.button("Stereo Audio Track").clicked() {
+        crate::chrome::popup_menu(&resp).width(130.0).show(|ui| {
+            if ui.add(crate::chrome::MenuRow::new("Stereo Audio Track")).clicked() {
                 let _ = app.add_audio_track("stereo");
                 ui.close();
             }
-            if ui.button("FX Channel").clicked() {
+            if ui.add(crate::chrome::MenuRow::new("FX Channel")).clicked() {
                 let _ = app.add_fx_channel();
                 ui.close();
             }
@@ -749,7 +749,7 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
         };
     }
     crate::fades::click_menu(app, ui);
-    resp.context_menu(|ui| {
+    crate::chrome::context_menu(&resp).show(|ui| {
         if let Some((clip, side)) = app.arrange.menu_target.filter(|(c, _)| s.find_clip(*c).is_some()) {
             if let Some(side) = side
                 && crate::fades::shape_items(app, ui, clip, side)
@@ -757,7 +757,7 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
                 ui.close();
             }
             if crate::fades::overlap(s, clip).is_some() {
-                let b = ui.button("Crossfade");
+                let b = ui.add(crate::chrome::MenuRow::new("Crossfade"));
                 app.arrange.menu.retain(|m| m.label != "Crossfade");
                 app.arrange.menu.push(crate::mixer::MenuItem::at(ui, "Crossfade".into(), String::new(), b.rect));
                 if b.clicked() {
@@ -773,32 +773,32 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
             }
             ui.separator();
         }
-        if ui.button("Add Mono Audio Track").clicked() {
+        if ui.add(crate::chrome::MenuRow::new("Add Mono Audio Track")).clicked() {
             let _ = app.add_audio_track("mono");
             ui.close();
         }
-        if ui.button("Add Stereo Audio Track").clicked() {
+        if ui.add(crate::chrome::MenuRow::new("Add Stereo Audio Track")).clicked() {
             let _ = app.add_audio_track("stereo");
             ui.close();
         }
-        if ui.button("Add Instrument Track").clicked() {
+        if ui.add(crate::chrome::MenuRow::new("Add Instrument Track")).clicked() {
             let _ = app.add_track("instrument");
             ui.close();
         }
-        if ui.button("Add MIDI Track").clicked() {
+        if ui.add(crate::chrome::MenuRow::new("Add MIDI Track")).clicked() {
             let _ = app.add_track("midi");
             ui.close();
         }
         ui.separator();
-        if ui.button("Paste at Cursor").clicked() {
+        if ui.add(crate::chrome::MenuRow::new("Paste at Cursor")).clicked() {
             let _ = app.paste_at_cursor();
             ui.close();
         }
-        if ui.button("Split at Cursor").clicked() {
+        if ui.add(crate::chrome::MenuRow::new("Split at Cursor")).clicked() {
             let _ = app.split_at_cursor();
             ui.close();
         }
-        let item = crate::bounce_in_place::clip_menu_item(app, ui, false);
+        let item = crate::bounce_in_place::clip_menu_item(app, ui);
         app.arrange.menu.retain(|m| m.label != item.label);
         app.arrange.menu.push(item);
         ui.separator();

@@ -688,9 +688,9 @@ pub struct Menu {
 pub(crate) fn shape_items(app: &mut StudioApp, ui: &mut Ui, clip: ClipId, side: Side) -> bool {
     let Some(f) = app.engine.session().find_clip(clip).map(|(_, c)| side.of(c)) else { return false };
     let mut picked = false;
-    ui.label(side.label());
+    crate::chrome::menu_note(ui, side.label());
     for shape in FadeShape::ALL {
-        let b = crate::chrome_pick::choice_label(ui, f.shape == shape, shape.label());
+        let b = ui.add(crate::chrome::MenuRow::new(shape.label()).checked(f.shape == shape));
         app.arrange.menu.retain(|m| !(m.label == shape.label() && m.value == side.id()));
         app.arrange.menu.push(crate::mixer::MenuItem::at(ui, shape.label().into(), side.id().into(), b.rect));
         if b.clicked() {
@@ -699,7 +699,7 @@ pub(crate) fn shape_items(app: &mut StudioApp, ui: &mut Ui, clip: ClipId, side: 
         }
     }
     ui.separator();
-    let b = ui.button("Reset Fade");
+    let b = ui.add(crate::chrome::MenuRow::new("Reset Fade"));
     app.arrange.menu.retain(|m| !(m.label == "Reset Fade" && m.value == side.id()));
     app.arrange.menu.push(crate::mixer::MenuItem::at(ui, "Reset Fade".into(), side.id().into(), b.rect));
     if b.clicked() {
@@ -772,12 +772,18 @@ pub fn fade_to_cursor(app: &mut StudioApp, side: Side) {
 pub(crate) fn click_menu(app: &mut StudioApp, ui: &mut Ui) {
     let Some(m) = app.arrange.fade_menu else { return };
     let mut picked = false;
-    let area = egui::Area::new(egui::Id::new("fade_shape_menu")).order(egui::Order::Foreground).fixed_pos(m.at).show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
-            ui.set_min_width(120.0);
-            picked = shape_items(app, ui, m.clip, m.side);
+    let area = egui::Area::new(egui::Id::new("fade_shape_menu"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(m.at)
+        .layout(egui::Layout::top_down_justified(egui::Align::Min))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                // The chrome's popup rows, as the clip context menu that also lists the shapes.
+                crate::chrome::menu_style(ui.style_mut());
+                ui.set_min_width(120.0);
+                picked = shape_items(app, ui, m.clip, m.side);
+            });
         });
-    });
     if picked || (ui.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer()) {
         app.arrange.fade_menu = None;
         app.arrange.menu.retain(|x| !FadeShape::ALL.iter().any(|s| s.label() == x.label) && x.label != "Reset Fade");
