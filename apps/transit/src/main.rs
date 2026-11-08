@@ -262,8 +262,13 @@ fn services(logger: Option<&'static logging::AppLogger>) -> Services {
     }
     Services {
         log: logger.map(|l| Box::new(LoggerControl(l)) as Box<dyn transit_ui_studio::debug_log::LogControl>),
-        pick_open: Some(Box::new(|purpose: &str| {
-            let d = rfd::FileDialog::new();
+        pick_open: Some(Box::new(|purpose: &str, start: Option<&std::path::Path>| {
+            // A session Open starts in the folder the studio resolved (#385); the sample, kit and
+            // plug-in preset dialogs pass none and keep the OS memory.
+            let d = match start.filter(|dir| dir.is_dir()) {
+                Some(dir) => rfd::FileDialog::new().set_directory(dir),
+                None => rfd::FileDialog::new(),
+            };
             if purpose == "folder" {
                 // The browser's Add Folder (slice 4).
                 return d.pick_folder().map(|p| p.to_string_lossy().into_owned());
@@ -277,25 +282,23 @@ fn services(logger: Option<&'static logging::AppLogger>) -> Services {
             d.pick_file().map(|p| p.to_string_lossy().into_owned())
         })),
         pick_save: Some(Box::new(|default: &str| {
-            // A bounce (slice 6) asks with its audio file name; everything else is a session.
-            let ext = std::path::Path::new(default).extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
+            // A bounce (slice 6) asks with its audio file, a hosted plug-in's Save As… (issue #68)
+            // with a preset in its user preset folder; everything else is a session. A full path
+            // starts the dialog in its folder (#385: Save As starts in the session's folder rather
+            // than wherever the last dialog was).
+            let path = std::path::Path::new(default);
+            let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
             let d = match ext.as_str() {
-                "wav" | "aif" | "aiff" | "flac" => rfd::FileDialog::new().add_filter("Audio", &[ext.as_str()]),
-                // A hosted plug-in's Save As… (issue #68): the default is a full path in the
-                // plug-in's user preset folder.
-                "vstpreset" | "clappreset" => {
-                    let path = std::path::Path::new(default);
-                    let d = rfd::FileDialog::new().add_filter("Plug-in preset", &[ext.as_str()]);
-                    let d = match path.parent().filter(|p| p.is_dir()) {
-                        Some(dir) => d.set_directory(dir),
-                        None => d,
-                    };
-                    let name = path.file_name().map_or_else(|| default.to_owned(), |n| n.to_string_lossy().into_owned());
-                    return d.set_file_name(name).save_file().map(|p| p.to_string_lossy().into_owned());
-                }
+                "wav" | "aif" | "aiff" | "flac" | "opus" => rfd::FileDialog::new().add_filter("Audio", &[ext.as_str()]),
+                "vstpreset" | "clappreset" => rfd::FileDialog::new().add_filter("Plug-in preset", &[ext.as_str()]),
                 _ => rfd::FileDialog::new().add_filter("Session", &["transit"]),
             };
-            d.set_file_name(default).save_file().map(|p| p.to_string_lossy().into_owned())
+            let d = match path.parent().filter(|dir| !dir.as_os_str().is_empty() && dir.is_dir()) {
+                Some(dir) => d.set_directory(dir),
+                None => d,
+            };
+            let name = path.file_name().map_or_else(|| default.to_owned(), |n| n.to_string_lossy().into_owned());
+            d.set_file_name(name).save_file().map(|p| p.to_string_lossy().into_owned())
         })),
         confirm: Some(Box::new(|question: &str| {
             rfd::MessageDialog::new()

@@ -56,14 +56,15 @@ impl crate::UiState {
 }
 
 impl StudioApp {
-    /// After a successful open or save: the session's file becomes the most recent. The autosave
-    /// folder's files are never listed.
+    /// After a successful open or save: the session's file becomes the most recent and its folder
+    /// the remembered session folder (#385). The autosave folder's files are never listed.
     pub(crate) fn note_recent(&mut self) {
         let Some(path) = self.engine.path.clone().map(PathBuf::from) else { return };
         let abs = std::path::absolute(&path).unwrap_or_else(|_| path.clone());
         if self.autosave_dir.as_deref().is_some_and(|dir| abs.starts_with(dir)) {
             return;
         }
+        self.ui.last_session_dir = abs.parent().map(Path::to_path_buf);
         self.ui.remember_recent(&path, now());
     }
 

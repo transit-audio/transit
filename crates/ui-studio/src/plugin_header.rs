@@ -291,7 +291,7 @@ impl StudioApp {
                 }
             }
             HeaderAction::Load => {
-                if let Some(path) = self.services.pick_open.as_ref().and_then(|pick| pick("plugin.preset")) {
+                if let Some(path) = self.services.pick_open.as_ref().and_then(|pick| pick("plugin.preset", None)) {
                     self.start_load(key, &plugin, Source::File(PathBuf::from(path)));
                 }
             }

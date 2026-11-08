@@ -800,7 +800,7 @@ fn bounce_to_an_existing_file_asks_and_choose_defaults_to_the_new_extension() {
     t.click(mid(lay.formats.iter().find(|r| r.value == "flac").unwrap().rect));
     let choose = t.app.finish.layout.bounce.clone().unwrap().choose;
     t.click(mid(choose));
-    assert_eq!(*seen.borrow(), "mix.v2.flac", "Choose... starts from the new extension");
+    assert_eq!(*seen.borrow(), dir.0.join("mix.v2.flac").to_string_lossy(), "Choose... starts from the new extension, in the form's folder (#385)");
 }
 
 #[test]
@@ -1018,7 +1018,7 @@ fn an_opus_bounce_follows_the_extension_and_carries_the_bitrate() {
     }
     t.frames(2);
     t.click(mid(t.app.finish.layout.bounce.clone().unwrap().choose));
-    assert_eq!(*seen.borrow(), "mix.opus", "the extension follows the format");
+    assert_eq!(*seen.borrow(), dir.0.join("mix.opus").to_string_lossy(), "the extension follows the format");
     let ok = t.app.finish.layout.bounce.clone().unwrap().ok;
     t.click(mid(ok));
     for _ in 0..50 {

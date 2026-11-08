@@ -23,6 +23,11 @@ pub struct UiState {
     /// File > Open Recent: sessions last opened or saved here, most recent first (at most 10).
     /// A per-machine preference; never part of the document or its undo history.
     pub recent_files: Vec<recent::RecentFile>,
+    /// The folder a session was last saved to or opened from here (#385): where Save As, Open and
+    /// Bounce start for a session that has no file yet. Per machine; `null` until the first save
+    /// or open, and older files without it load as `None`. Written even when `None`: the app's
+    /// loader keeps only fields the default state names (`config::decode_ui`).
+    pub last_session_dir: Option<std::path::PathBuf>,
     /// The user's own VST3 and CLAP folders.
     pub plugin_dirs: plugin_scan::PluginDirs,
     /// Window > Plug-in Windows Follow transit (issue #173): editors hide, return and come to the
@@ -153,6 +158,7 @@ impl Default for UiState {
             audio_devices_section: String::new(),
             io_maps: Vec::new(),
             recent_files: Vec::new(),
+            last_session_dir: None,
             plugin_dirs: plugin_scan::PluginDirs::default(),
             editors_follow: true,
             plugin_windows: Vec::new(),
@@ -324,6 +330,7 @@ mod round_trip_tests {
         ui.plugin_dirs.clap.push("D:/CLAP".into());
         ui.io_maps.push(transit_model::IoMap::for_device("WASAPI", "Speakers", 2, 2));
         ui.recent_files.push(super::recent::RecentFile { path: "C:/a/b.transit".into(), opened_at: 7 });
+        ui.last_session_dir = Some("C:/a".into());
         let mut v = save(&ui);
         v["plugin_windows"] = json!([[3, 1]]);
         v["editor_follow"] = json!([[4, 2]]);

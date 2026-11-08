@@ -380,8 +380,8 @@ impl StudioApp {
         let s = self.engine.session();
         let range = if bounce_range(&s.edit).is_empty() { BounceRange::Whole } else { BounceRange::Selection };
         let name = format!("{}.wav", transit_engine::io::sanitize_name(&s.name));
-        let dir =
-            self.engine.path.as_ref().and_then(|p| std::path::Path::new(p).parent().map(std::path::Path::to_path_buf)).unwrap_or_else(default_dir);
+        // The session rule (#385): its folder, else the remembered session folder, else Music.
+        let dir = self.session_dir_or(&default_dir());
         self.finish.bounce_form = Some(BounceForm {
             range,
             source: "main".into(),
@@ -1017,20 +1017,22 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     app.finish.layout.bounce = Some(lay);
     if choose && f.by_path {
         // The host offers a save dialog only: the folder of the file picked is the folder.
-        let name = format!("{}_stems", transit_engine::io::sanitize_name(&s.name));
+        // The dialog starts in the form's folder (#385).
+        let name = std::path::Path::new(&f.dir).join(format!("{}_stems", transit_engine::io::sanitize_name(&s.name)));
         if let Some(p) = app
             .services
             .pick_save
             .as_ref()
-            .and_then(|pick| pick(&name))
+            .and_then(|pick| pick(&name.to_string_lossy()))
             .and_then(|p| std::path::Path::new(&p).parent().map(|d| d.to_string_lossy().into_owned()))
         {
             f.dir = p;
         }
     } else if choose {
         let named = fit_extension(std::path::Path::new(&f.path), &f.format);
-        let name = named.file_name().map_or_else(|| "bounce.wav".to_string(), |n| n.to_string_lossy().into_owned());
-        if let Some(p) = app.services.pick_save.as_ref().and_then(|pick| pick(&name)) {
+        // The full path: the dialog starts in the form's folder (#385).
+        let name = if named.file_name().is_some() { named } else { named.join("bounce.wav") };
+        if let Some(p) = app.services.pick_save.as_ref().and_then(|pick| pick(&name.to_string_lossy())) {
             f.path = p;
         }
     }

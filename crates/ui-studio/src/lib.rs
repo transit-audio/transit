@@ -79,6 +79,7 @@ pub mod recent;
 pub mod resonator_panel;
 pub mod sampler_panel;
 pub mod scope_strip;
+pub mod session_folder;
 pub mod shortcuts;
 pub mod splash;
 mod status;
@@ -117,7 +118,11 @@ pub use ui_state::UiState;
 /// Host services (file dialogs) injected by the app; absent in tests.
 #[derive(Default)]
 pub struct Services {
-    pub pick_open: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// Pick a file to open for a purpose (`session.open`, `folder`, ...), starting in the given
+    /// folder when there is one (#385); `None`: the dialog's own memory.
+    pub pick_open: Option<Box<dyn Fn(&str, Option<&std::path::Path>) -> Option<String>>>,
+    /// Pick a file to save: the default is a file name, or a full path whose folder the dialog
+    /// starts in (#385).
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
     /// Asks a yes/no question (deleting a plug-in preset, issue #68); `None`: such actions are
     /// refused.
@@ -742,6 +747,8 @@ mod recent_tests;
 mod recovery_tests;
 #[cfg(test)]
 mod resonator_panel_tests;
+#[cfg(test)]
+mod session_folder_tests;
 #[cfg(test)]
 mod slice5_tests;
 #[cfg(test)]

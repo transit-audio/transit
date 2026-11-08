@@ -341,7 +341,7 @@ fn add_folder_by_typing_a_path_then_x_removes_the_location() {
 fn browse_adds_the_folder_the_dialog_picks() {
     let mut t = T::new();
     let picked = t.dir.s();
-    t.app.services.pick_open = Some(Box::new(move |purpose: &str| (purpose == "folder").then(|| picked.clone())));
+    t.app.services.pick_open = Some(Box::new(move |purpose: &str, _: Option<&std::path::Path>| (purpose == "folder").then(|| picked.clone())));
     t.click(mid(t.app.browser.layout.add_folder));
     let browse = t.app.browser.layout.add_browse;
     assert!(browse[2] > browse[0], "Browse… shows when the app has a dialog");

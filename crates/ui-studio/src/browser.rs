@@ -1041,7 +1041,7 @@ fn locations_bar(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, area: Rect
             p.rect_filled(br, crate::theme::RADIUS, if bresp.hovered() { TOKENS.button_hover } else { TOKENS.button });
             p.text(br.center(), Align2::CENTER_CENTER, "Browse…", FontId::proportional(11.5), TOKENS.text);
             if bresp.clicked()
-                && let Some(dir) = app.services.pick_open.as_ref().and_then(|f| f("folder"))
+                && let Some(dir) = app.services.pick_open.as_ref().and_then(|f| f("folder", None))
                 && app.add_location(&dir)
             {
                 done = true;

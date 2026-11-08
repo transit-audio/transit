@@ -33,14 +33,17 @@ impl StudioApp {
         self.save_as()
     }
 
+    /// File > Save As: the dialog starts in the session's folder (#385, `crate::session_folder`).
     pub fn save_as(&mut self) -> bool {
         let name = format!("{}.transit", self.engine.session().name);
-        let Some(path) = self.services.pick_save.as_ref().and_then(|f| f(&name)) else { return false };
+        let start = self.session_start_dir().join(name);
+        let Some(path) = self.services.pick_save.as_ref().and_then(|f| f(&start.to_string_lossy())) else { return false };
         self.run("session.save_as", json!({"path": path, "replace": true})).is_ok()
     }
 
     pub fn open_dialog(&mut self) {
-        let Some(path) = self.services.pick_open.as_ref().and_then(|f| f("session.open")) else { return };
+        let start = self.session_start_dir();
+        let Some(path) = self.services.pick_open.as_ref().and_then(|f| f("session.open", Some(&start))) else { return };
         self.run_or_ask("session.open", json!({"path": path}));
     }
 }

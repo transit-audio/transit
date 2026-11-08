@@ -430,6 +430,28 @@ mod tests {
     }
 
     #[test]
+    fn the_last_session_folder_round_trips_through_ui_json_and_is_null_until_set() {
+        let dir = std::env::temp_dir().join(format!("transit-last-session-dir-{}", std::process::id()));
+        let path = dir.join("ui.json");
+        // Unset by default: written as null, and a file written before the field loads as None (#385).
+        save_ui(&path, &transit_ui_studio::UiState::default()).unwrap();
+        let mut saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(saved["last_session_dir"].is_null(), "an unset folder is null");
+        assert_eq!(load_ui(&path).unwrap().unwrap().last_session_dir, None);
+        saved.as_object_mut().unwrap().remove("last_session_dir");
+        std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(load_ui(&path).unwrap().unwrap().last_session_dir, None, "an older file loads without it");
+        // A set folder is written and read back (negative control: before the field was a known
+        // key of the default state, the loader dropped it here).
+        let ui = transit_ui_studio::UiState { last_session_dir: Some("/music/songs".into()), ..Default::default() };
+        save_ui(&path, &ui).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["last_session_dir"], "/music/songs");
+        assert_eq!(load_ui(&path).unwrap().unwrap().last_session_dir.as_deref(), Some(Path::new("/music/songs")));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn settings_round_trip() {
         let dir = std::env::temp_dir().join(format!("transit-ui-prefs-{}", std::process::id()));
         let path = dir.join("ui.json");

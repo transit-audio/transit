@@ -253,7 +253,8 @@ fn the_sampler_window_has_a_sample_picker_and_names_the_sample() {
     let file = dir.join("hit.wav");
     wav(&file);
     let path = file.to_string_lossy().into_owned();
-    t.app.services.pick_open = Some(Box::new(move |purpose: &str| (purpose == "mix.sampler_load").then(|| path.clone())));
+    t.app.services.pick_open =
+        Some(Box::new(move |purpose: &str, _: Option<&std::path::Path>| (purpose == "mix.sampler_load").then(|| path.clone())));
     t.open_editor(0);
     let w = t.window(tr);
     assert_eq!(w.sample, "No sample");

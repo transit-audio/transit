@@ -345,7 +345,7 @@ pub(crate) fn sample_picker(app: &mut StudioApp, ui: &mut Ui, t: TrackId, ins: &
         lay.picker = rect4(load.rect);
         let load = if can_pick { load } else { load.on_disabled_hover_text("Drop an audio file on this window") };
         if load.clicked()
-            && let Some(path) = app.services.pick_open.as_ref().and_then(|pick| pick("mix.sampler_load"))
+            && let Some(path) = app.services.pick_open.as_ref().and_then(|pick| pick("mix.sampler_load", None))
         {
             load_sample(app, t, &path);
         }
