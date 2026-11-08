@@ -337,7 +337,8 @@ fn b3_loop_passes_cost_what_they_play_not_the_whole_content() {
 fn b3_timbre_ownership_of_80_000_overlapping_notes_is_one_sweep() {
     // One long note with `n` timbre points over `n` short notes that each have one. The sweep's
     // steps are counted (a wall-clock ratio fails on a busy machine, E49): every note comes in and
-    // ends once and every point is checked once, so `4n + 2` at most where a scan takes `n * n`.
+    // ends once and every point is checked once, so `4n + 2` at most. The count shows the sweep's
+    // shape; it bounds a rewrite's cost only if the rewrite counts every step (see `own_timbre`).
     let run = |n: u32| {
         let long: String = (0..n).map(|i| format!(r#"<RealPoint time="{}" value="0.5"/>"#, f64::from(i) * 0.5 + 0.25)).collect();
         let shorts: String = (0..n)
@@ -562,17 +563,29 @@ fn layout(s: &Session) -> Vec<(i64, i64, String, bool, Sequence)> {
 fn overlapping_clips_resolve_as_place_clip_does() {
     // (start, length) in beats, in file order: nested, chained, sharing a start (the later covers),
     // covering several at once, inside one that was itself split, and one muted. Each clip has
-    // notes and a controller point every half beat, so events fall on every cut, and a track lane
-    // has a point every beat, carried into the clips that start after it.
+    // notes and a controller point every half beat and one tick either side of every beat, so
+    // events fall on and next to every cut, and a track lane has a point every beat, carried into
+    // the clips that start after it.
     let shapes = [(0, 12), (2, 2), (3, 4), (3, 2), (8, 6), (1, 13), (5, 1), (20, 2), (21, 3)];
     let clip = |k: usize| -> String {
         let (at, len) = shapes[k];
         let muted = if k == 4 { r#" enable="false""# } else { "" };
-        let half = |i: i64| f64::from(i as i32) * 0.5;
-        let notes: String =
-            (0..len * 2).map(|i| format!(r#"<Note time="{}" duration="1.25" key="{}" vel="1"/>"#, half(i), 40 + 5 * k as i64 + i % 12)).collect();
-        let points: String =
-            (0..len * 2).map(|i| format!(r#"<RealPoint time="{}" value="{}"/>"#, half(i), ((k as i64 * 7 + i) % 100) as f64 / 100.0)).collect();
+        // In ticks: every half beat, and one tick either side of every beat inside the clip.
+        let ppq = i64::from(PPQ);
+        let mut ts: Vec<i64> =
+            (0..len * 2).map(|i| i * ppq / 2).chain((1..=len).flat_map(|b| [b * ppq - 1, b * ppq + 1])).filter(|&t| t < len * ppq).collect();
+        ts.sort_unstable();
+        let beats = |t: i64| t as f64 / ppq as f64;
+        let notes: String = ts
+            .iter()
+            .enumerate()
+            .map(|(i, &t)| format!(r#"<Note time="{}" duration="1.25" key="{}" vel="1"/>"#, beats(t), 40 + 5 * k + i % 12))
+            .collect();
+        let points: String = ts
+            .iter()
+            .enumerate()
+            .map(|(i, &t)| format!(r#"<RealPoint time="{}" value="{}"/>"#, beats(t), ((k * 7 + i) % 100) as f64 / 100.0))
+            .collect();
         format!(
             r#"<Clip time="{at}" duration="{len}" name="c{k}"{muted}><Lanes><Notes>{notes}</Notes><Points><Target expression="channelController" channel="0" controller="1"/>{points}</Points></Lanes></Clip>"#
         )

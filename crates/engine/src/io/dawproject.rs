@@ -676,7 +676,9 @@ thread_local! {
 /// with it, higher) on its channel is sounding at its tick. One sweep in time order, keeping the
 /// notes that sound in a set, so overlapping notes cost a logarithm each, not a scan.
 fn own_timbre(timbre: &mut Vec<Timbre>, mut spans: Vec<(i64, u8, i64, u8)>) {
-    /// One step of the sweep, counted in tests: a deterministic cost instead of a wall clock (#377).
+    /// One step of the sweep, counted in tests in place of a wall clock (#377). Every step this
+    /// function takes is one: a note coming in, a note ending, a point checked. A rewrite that
+    /// scans calls it for every element it scans, or the test's bound means nothing.
     fn step() {
         #[cfg(test)]
         TIMBRE_STEPS.with(|s| s.set(s.get() + 1));
