@@ -4,6 +4,7 @@
 //! The file is JSON: clips per lane with starts relative to the group, plus the audio they play
 //! as 32-bit float WAVs in a `<name> Audio/` folder next to it.
 
+use crate::file_tags::{Refusal, Tags};
 use crate::{Engine, EngineError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -13,7 +14,10 @@ use transit_model::{Clip, ClipContent, ClipId, SourceId, TrackId};
 use transit_time::Samples;
 
 pub const EXTENSION: &str = "scgrp";
-const FORMAT: &str = "soundcraft.clipgroup";
+const FORMAT: &str = "transit.clipgroup";
+/// The fork's tag (ADR 0049): read through v0.7.x; from the v0.8.0 tag it moves to `refused_pre_0_7`.
+const LEGACY_FORMAT: &str = "soundcraft.clipgroup";
+const TAGS: Tags = Tags { current: FORMAT, accepted_legacy: &[LEGACY_FORMAT], refused_pre_0_7: &[], what: "clip group file" };
 /// Refuse files that would place absurd numbers of clips, tracks or audio files.
 const MAX_CLIPS: usize = 10_000;
 
@@ -107,14 +111,20 @@ pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -
     let text = crate::io::read_text(path)?;
     let not_a_group = |err: serde_json::Error| EngineError::BadParams(id.into(), format!("not a clip group file: {err}"));
     let mut value: serde_json::Value = serde_json::from_str(&text).map_err(not_a_group)?;
+    // The tag and version first (ADR 0049), so a refused file posts nothing.
+    match TAGS.check(&value) {
+        Ok(_) => {}
+        Err(Refusal::Message(m)) => return Err(EngineError::BadParams(id.into(), m)),
+        Err(Refusal::Structural) => {
+            let err = serde_json::from_value::<GroupFile>(value).err().map_or_else(|| "no format tag".to_string(), |err| err.to_string());
+            return Err(EngineError::BadParams(id.into(), format!("not a clip group file: {err}")));
+        }
+    }
     // Video is retired (ADR 0031): its clips are dropped, as when a session opens.
     if transit_model::legacy::drop_video_from_lanes(&mut value) {
         e.message(transit_model::legacy::VIDEO_REMOVED_NOTE.to_string());
     }
     let file: GroupFile = serde_json::from_value(value).map_err(not_a_group)?;
-    if file.format != FORMAT {
-        return Err(EngineError::BadParams(id.into(), "not a SoundCraft clip group file".into()));
-    }
     if file.lanes.iter().map(|l| l.len().max(1)).sum::<usize>() > MAX_CLIPS || file.audio.len() > MAX_CLIPS {
         return Err(EngineError::BadParams(id.into(), "clip group file has too many clips".into()));
     }

@@ -15,6 +15,7 @@ pub mod device_pages;
 pub mod edit;
 pub mod emergency;
 pub mod file_access;
+pub mod file_tags;
 pub mod import;
 pub mod inspect;
 pub mod io;

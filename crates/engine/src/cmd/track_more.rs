@@ -15,7 +15,11 @@ pub fn trim_param() -> AutoParam {
     AutoParam::Plugin { slot: u8::MAX, param: "trim".into() }
 }
 
-const PRESET_FORMAT: &str = "soundcraft-track-preset";
+const PRESET_FORMAT: &str = "transit-track-preset";
+/// The fork's tag (ADR 0049): read through v0.7.x; from the v0.8.0 tag it moves to `refused_pre_0_7`.
+const LEGACY_PRESET_FORMAT: &str = "soundcraft-track-preset";
+const PRESET_TAGS: crate::file_tags::Tags =
+    crate::file_tags::Tags { current: PRESET_FORMAT, accepted_legacy: &[LEGACY_PRESET_FORMAT], refused_pre_0_7: &[], what: "track preset" };
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -273,8 +277,11 @@ fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, id, p)?;
     let text = crate::io::read_text(&path)?;
     let v: Value = serde_json::from_str(&text).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
-    if v.get("format").and_then(Value::as_str) != Some(PRESET_FORMAT) {
-        return Err(EngineError::Io(format!("{path}: not a SoundCraft track preset")));
+    // The tag and version first (ADR 0049), so a refused file posts nothing.
+    match PRESET_TAGS.check(&v) {
+        Ok(_) => {}
+        Err(crate::file_tags::Refusal::Message(m)) => return Err(EngineError::Io(format!("{path}: {m}"))),
+        Err(crate::file_tags::Refusal::Structural) => return Err(EngineError::Io(format!("{path}: not a transit track preset"))),
     }
     let mut mixer: transit_model::Mixer =
         serde_json::from_value(v.get("mixer").cloned().unwrap_or(Value::Null)).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
