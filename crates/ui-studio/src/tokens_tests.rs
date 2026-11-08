@@ -553,6 +553,51 @@ fn the_compressor_displays_match_tokens_json_both_ways() {
     assert_eq!(at(cp, "history/gainReduction/fromTop").as_bool(), Some(tokens::compressor::HISTORY_GR_FROM_TOP));
 }
 
+/// The Sampler views (`sampler` in tokens.json): every number and string equals its constant,
+/// neither side has a path the other lacks, and every named color is a token.
+#[test]
+fn the_sampler_views_match_tokens_json_both_ways() {
+    let v = json();
+    let sp = at(&v, "sampler");
+    let mut leaves = Vec::new();
+    number_leaves(sp, "", &mut leaves);
+    let in_json: BTreeSet<&str> = leaves.iter().map(|(p, _)| p.as_str()).collect();
+    let in_rust: BTreeSet<&str> = tokens::sampler::METRICS.iter().map(|(p, _)| *p).collect();
+    assert_eq!(in_json, in_rust, "sampler paths differ between tokens.json and Rust");
+    for (path, x) in tokens::sampler::METRICS {
+        assert_eq!(num(sp, path), *x, "sampler/{path}");
+    }
+    let known: BTreeSet<String> = ["color", "arrangement"].iter().flat_map(|k| color_names(&v, k)).collect();
+    for path in [
+        "keyMap/zoneFill",
+        "keyMap/zoneBorder",
+        "keyMap/selectedBorder",
+        "keyMap/padZoneBorder",
+        "keyMap/whiteKey",
+        "keyMap/padKey",
+        "keyMap/blackKey",
+        "waveform/region",
+        "waveform/outside",
+        "waveform/handle",
+        "waveform/playhead",
+        "bench/wave",
+        "bench/end",
+        "bench/autoLine",
+        "bench/manualLine",
+        "bench/ghost/line",
+        "bench/ghost/refused",
+        "bench/sliceLoop/color",
+    ] {
+        let name = at(sp, path).as_str().unwrap();
+        assert!(known.contains(name), "sampler/{path}: {name} is not a token");
+    }
+    let mut strings = Vec::new();
+    string_leaves(sp, "", &mut strings);
+    let in_json: BTreeSet<(&str, &str)> = strings.iter().map(|(p, s)| (p.as_str(), s.as_str())).collect();
+    let in_rust: BTreeSet<(&str, &str)> = tokens::sampler::STRINGS.iter().copied().collect();
+    assert_eq!(in_json, in_rust, "sampler strings differ between tokens.json and Rust");
+}
+
 /// Every string leaf under `value` by its path (`a/b/0`).
 fn string_leaves(value: &Value, prefix: &str, out: &mut Vec<(String, String)>) {
     let join = |k: &str| if prefix.is_empty() { k.to_string() } else { format!("{prefix}/{k}") };

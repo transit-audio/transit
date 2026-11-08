@@ -961,3 +961,121 @@ pub mod compressor {
         ("history/threshold/dash/1", HISTORY_THRESHOLD_DASH[1]),
     ];
 }
+
+/// The Sampler views (`sampler` in tokens.json): the view bar, the key map, the zone waveform and
+/// the slice bench. The numbers, and the color names, font roles and labels as the design writes
+/// them. Checked both ways by the drift test.
+pub mod sampler {
+    pub const VIEW_BAR_FONT: &str = "sans";
+    pub const VIEW_BAR_VIEWS: [&str; 3] = ["Instrument", "Pads", "Slices"];
+    pub const ZONE_FILL: &str = "surface.raised";
+    pub const ZONE_BORDER: &str = "line.strong";
+    pub const SELECTED_BORDER: &str = "signal";
+    pub const PAD_ZONE_BORDER: &str = "ink.arrow";
+    pub const PAD_ZONE_STYLE: &str = "dashed";
+    pub const WHITE_KEY: &str = "text.muted";
+    pub const PAD_KEY: &str = "text.faint";
+    pub const BLACK_KEY: &str = "bg.titlebar";
+    pub const WAVE_REGION: &str = "signal";
+    pub const WAVE_OUTSIDE: &str = "ink.ghost";
+    pub const WAVE_HANDLE: &str = "signal";
+    pub const WAVE_PLAYHEAD: &str = "text";
+    pub const BENCH_FLAG_FONT: &str = "mono";
+    pub const BENCH_WAVE: &str = "text.faint";
+    pub const BENCH_END: &str = "ink.arrow";
+    pub const BENCH_AUTO_LINE: &str = "ink.arrow";
+    pub const BENCH_MANUAL_LINE: &str = "text.muted";
+    pub const BENCH_GHOST_LINE: &str = "text";
+    pub const BENCH_GHOST_STYLE: &str = "dashed";
+    pub const BENCH_GHOST_REFUSED: &str = "meter.hot";
+    pub const SLICE_LOOP_COLOR: &str = "loop";
+    pub const SLICE_LOOP_GLYPH_FORWARD: &str = "\u{21bb}";
+    pub const SLICE_LOOP_GLYPH_PING_PONG: &str = "\u{21c4}";
+    /// Every string under `sampler` in tokens.json by its path.
+    pub const STRINGS: &[(&str, &str)] = &[
+        ("viewBar/font/font", VIEW_BAR_FONT),
+        ("viewBar/views/0", VIEW_BAR_VIEWS[0]),
+        ("viewBar/views/1", VIEW_BAR_VIEWS[1]),
+        ("viewBar/views/2", VIEW_BAR_VIEWS[2]),
+        ("keyMap/zoneFill", ZONE_FILL),
+        ("keyMap/zoneBorder", ZONE_BORDER),
+        ("keyMap/selectedBorder", SELECTED_BORDER),
+        ("keyMap/padZoneBorder", PAD_ZONE_BORDER),
+        ("keyMap/padZoneStyle", PAD_ZONE_STYLE),
+        ("keyMap/whiteKey", WHITE_KEY),
+        ("keyMap/padKey", PAD_KEY),
+        ("keyMap/blackKey", BLACK_KEY),
+        ("waveform/region", WAVE_REGION),
+        ("waveform/outside", WAVE_OUTSIDE),
+        ("waveform/handle", WAVE_HANDLE),
+        ("waveform/playhead", WAVE_PLAYHEAD),
+        ("bench/flagFont/font", BENCH_FLAG_FONT),
+        ("bench/wave", BENCH_WAVE),
+        ("bench/end", BENCH_END),
+        ("bench/autoLine", BENCH_AUTO_LINE),
+        ("bench/manualLine", BENCH_MANUAL_LINE),
+        ("bench/ghost/line", BENCH_GHOST_LINE),
+        ("bench/ghost/style", BENCH_GHOST_STYLE),
+        ("bench/ghost/refused", BENCH_GHOST_REFUSED),
+        ("bench/sliceLoop/color", SLICE_LOOP_COLOR),
+        ("bench/sliceLoop/glyphForward", SLICE_LOOP_GLYPH_FORWARD),
+        ("bench/sliceLoop/glyphPingPong", SLICE_LOOP_GLYPH_PING_PONG),
+    ];
+    pub const VIEW_BAR_HEIGHT: f32 = 24.0;
+    pub const VIEW_BAR_FONT_WEIGHT: f32 = 500.0;
+    pub const VIEW_BAR_FONT_SIZE: f32 = 12.0;
+    pub const ZONE_RADIUS: f32 = 4.0;
+    pub const SELECTED_BORDER_WIDTH: f32 = 2.0;
+    pub const SELECTED_FILL_ALPHA: f32 = 0.14;
+    pub const ROOT_DOT: f32 = 7.0;
+    pub const HELD_COLUMN_ALPHA: f32 = 0.1;
+    pub const WAVE_REGION_ALPHA: f32 = 0.55;
+    pub const WAVE_HANDLE_WIDTH: f32 = 2.0;
+    pub const WAVE_FLAG_HEIGHT: f32 = 14.0;
+    pub const WAVE_LOOP_BRACE: f32 = 14.0;
+    pub const WAVE_LOOP_BAND_ALPHA: f32 = 0.1;
+    pub const WAVE_CROSSFADE_HATCH_ALPHA: f32 = 0.28;
+    pub const BENCH_FLAG_STRIP: f32 = 18.0;
+    pub const BENCH_FLAG_FONT_WEIGHT: f32 = 500.0;
+    pub const BENCH_FLAG_FONT_SIZE: f32 = 9.0;
+    pub const BENCH_ALT_SLICE_ALPHA: f32 = 0.03;
+    pub const BENCH_SELECTED_ALPHA: f32 = 0.12;
+    pub const BENCH_SELECTED_WAVE_ALPHA: f32 = 0.6;
+    pub const BENCH_WAVE_ALPHA: f32 = 0.45;
+    pub const BENCH_HANDLE: f32 = 13.0;
+    pub const SLICE_LOOP_BAND: f32 = 4.0;
+    pub const SLICE_LOOP_WASH_ALPHA: f32 = 0.07;
+    pub const SLICE_LOOP_HATCH_ALPHA: f32 = 0.28;
+    pub const BENCH_ZOOMS: [f32; 4] = [1.0, 2.0, 4.0, 8.0];
+    pub const METRICS: &[(&str, f32)] = &[
+        ("viewBar/height", VIEW_BAR_HEIGHT),
+        ("viewBar/font/weight", VIEW_BAR_FONT_WEIGHT),
+        ("viewBar/font/size", VIEW_BAR_FONT_SIZE),
+        ("keyMap/zoneRadius", ZONE_RADIUS),
+        ("keyMap/selectedBorderWidth", SELECTED_BORDER_WIDTH),
+        ("keyMap/selectedFillAlpha", SELECTED_FILL_ALPHA),
+        ("keyMap/rootDot", ROOT_DOT),
+        ("keyMap/heldColumnAlpha", HELD_COLUMN_ALPHA),
+        ("waveform/regionAlpha", WAVE_REGION_ALPHA),
+        ("waveform/handleWidth", WAVE_HANDLE_WIDTH),
+        ("waveform/flagHeight", WAVE_FLAG_HEIGHT),
+        ("waveform/loopBrace", WAVE_LOOP_BRACE),
+        ("waveform/loopBandAlpha", WAVE_LOOP_BAND_ALPHA),
+        ("waveform/crossfadeHatchAlpha", WAVE_CROSSFADE_HATCH_ALPHA),
+        ("bench/flagStrip", BENCH_FLAG_STRIP),
+        ("bench/flagFont/weight", BENCH_FLAG_FONT_WEIGHT),
+        ("bench/flagFont/size", BENCH_FLAG_FONT_SIZE),
+        ("bench/altSliceAlpha", BENCH_ALT_SLICE_ALPHA),
+        ("bench/selectedAlpha", BENCH_SELECTED_ALPHA),
+        ("bench/selectedWaveAlpha", BENCH_SELECTED_WAVE_ALPHA),
+        ("bench/waveAlpha", BENCH_WAVE_ALPHA),
+        ("bench/handle", BENCH_HANDLE),
+        ("bench/sliceLoop/band", SLICE_LOOP_BAND),
+        ("bench/sliceLoop/washAlpha", SLICE_LOOP_WASH_ALPHA),
+        ("bench/sliceLoop/crossfadeHatchAlpha", SLICE_LOOP_HATCH_ALPHA),
+        ("bench/zooms/0", BENCH_ZOOMS[0]),
+        ("bench/zooms/1", BENCH_ZOOMS[1]),
+        ("bench/zooms/2", BENCH_ZOOMS[2]),
+        ("bench/zooms/3", BENCH_ZOOMS[3]),
+    ];
+}
