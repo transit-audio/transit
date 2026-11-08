@@ -75,7 +75,7 @@ fn load_from_fontconfig(pattern: &str, lang: Option<&str>) -> Option<FontData> {
 }
 
 fn load(cands: &[(&str, u32)], pattern: &str, lang: Option<&str>) -> Option<FontData> {
-    if std::env::var_os("SOUNDCRAFT_NO_SYSTEM_FONTS").is_some() {
+    if std::env::var_os("TRANSIT_NO_SYSTEM_FONTS").is_some() {
         return None;
     }
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]

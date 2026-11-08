@@ -59,8 +59,8 @@ pub fn start(port: u16, ctx: egui::Context) -> Receiver<ControlRequest> {
     let actual = listener.local_addr().map(|a| a.port()).unwrap_or(port);
     log::info!("control server listening on 127.0.0.1:{actual}; token file {}", token_path.display());
     println!("TRANSIT_CONTROL_PORT={actual}");
-    // The same line as SoundCraft prints, so scripts written for `soundcraft.exe` find the port too.
-    println!("SOUNDCRAFT_CONTROL_PORT={actual}");
+    // Scripts read the chosen port from this line (`--control 0` picks a free one).
+    println!("TRANSIT_CONTROL_PORT={actual}");
     let spawned = std::thread::Builder::new().name("transit-control".into()).spawn(move || accept_loop(listener, tx, ctx, secret));
     if let Err(e) = spawned {
         log::error!("control thread failed: {e}");

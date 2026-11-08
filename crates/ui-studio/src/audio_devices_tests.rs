@@ -629,7 +629,6 @@ fn last_good_audio_persists_in_isolated_config_dir() {
         .env("TRANSIT_CONFIG_DIR", &dir)
         .env("TRANSIT_AUDIO_GOOD_CHILD", "1")
         .env_remove("TRANSIT_NO_PREFS")
-        .env_remove("SOUNDCRAFT_NO_PREFS")
         .output()
         .unwrap();
     std::fs::remove_dir_all(&dir).unwrap();

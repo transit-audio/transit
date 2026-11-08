@@ -6,7 +6,7 @@ input), and every command is reachable from:
 
 | Surface | How |
 |---|---|
-| Desktop app control channel | `transit --control <port>` (`0` = pick a free port; printed as `SOUNDCRAFT_CONTROL_PORT=…`) |
+| Desktop app control channel | `transit --control <port>` (`0` = pick a free port; printed as `TRANSIT_CONTROL_PORT=…`) |
 | CLI against a running app | `transit-cli app --port <port> <method or command id> [JSON]` |
 | Headless CLI | `transit-cli run --demo --cmd 'mix.volume={"track":"Kick","db":-6}' --bounce out.wav` |
 | MCP (headless) | `transit-cli mcp [--demo]` |
@@ -32,7 +32,7 @@ By hand: `printf 'auth %s\n{"id":1,"method":"session.inspect"}\n' "$(cat "$TOKEN
 
 Set `TRANSIT_CONFIG_DIR` to a fresh directory to isolate UI preferences, `Autosave`, `Presets`, and `logs`.
 The nonempty value is used as the complete settings directory. Unset retains the normal platform paths;
-an explicit empty value disables the settings directory instead of falling back to a personal profile. Save synthetic sessions to explicit scratch paths. Do not use `SOUNDCRAFT_NO_PREFS`
+an explicit empty value disables the settings directory instead of falling back to a personal profile. Save synthetic sessions to explicit scratch paths. Do not use `TRANSIT_NO_PREFS`
 when testing preference persistence across restarts.
 
 Run UI acceptance with `--no-audio`. This disables the output player; it does not disable recording
@@ -106,7 +106,7 @@ plus one, when the command runs) or `rack` (a rack card).
 ## Examples
 
 ```sh
-P=$(transit --demo --control 0 | sed -n 's/SOUNDCRAFT_CONTROL_PORT=//p')   # or read stderr
+P=$(transit --demo --control 0 | sed -n 's/TRANSIT_CONTROL_PORT=//p')   # or read stderr
 transit-cli app --port $P mix.solo '{"track":"Bass"}'
 transit-cli app --port $P transport.play
 transit-cli app --port $P ui.screenshot '{"path":"/tmp/shot.png"}'

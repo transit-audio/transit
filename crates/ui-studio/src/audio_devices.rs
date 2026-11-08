@@ -335,7 +335,7 @@ impl StudioApp {
         self.audio_devices.verification = None;
         // The desktop host supplies the settings directory through its Autosave sibling. Tests
         // without that service never write preferences. Honor the host's no-preferences switches.
-        if std::env::var_os("TRANSIT_NO_PREFS").is_some() || std::env::var_os("SOUNDCRAFT_NO_PREFS").is_some() {
+        if std::env::var_os("TRANSIT_NO_PREFS").is_some() {
             return;
         }
         let Some(dir) = self.autosave_dir.as_deref().and_then(std::path::Path::parent) else { return };
@@ -468,7 +468,7 @@ impl StudioApp {
     /// Save `ui.audio` with the preferences now (a calibration was measured): the same file and
     /// switches as the save after a verified reopen. A failure is said on the status line.
     pub(crate) fn save_audio_preferences(&mut self) {
-        if std::env::var_os("TRANSIT_NO_PREFS").is_some() || std::env::var_os("SOUNDCRAFT_NO_PREFS").is_some() {
+        if std::env::var_os("TRANSIT_NO_PREFS").is_some() {
             return;
         }
         let Some(dir) = self.autosave_dir.as_deref().and_then(std::path::Path::parent) else { return };

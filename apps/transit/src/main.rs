@@ -188,10 +188,10 @@ fn prefs_path() -> Option<std::path::PathBuf> {
     config::config_dir().map(|b| b.join("ui.json"))
 }
 
-/// Runs without preferences (`TRANSIT_NO_PREFS` or `SOUNDCRAFT_NO_PREFS`, agents' test runs)
+/// Runs without preferences (`TRANSIT_NO_PREFS`, agents' test runs)
 /// neither read nor write them, keep no scan cache and write no log file.
 fn prefs_enabled() -> bool {
-    std::env::var_os("TRANSIT_NO_PREFS").is_none() && std::env::var_os("SOUNDCRAFT_NO_PREFS").is_none()
+    std::env::var_os("TRANSIT_NO_PREFS").is_none()
 }
 
 fn load_prefs() -> Option<UiState> {

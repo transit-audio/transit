@@ -786,7 +786,7 @@ impl MixEngine {
         if self.pool.is_none() && !on_audio_thread() {
             // The task graph's switch is read here too, once per process (#174).
             crate::graph::init_graph_switch();
-            let promote = !render_pool::env_flag(RENDER_NO_PRIORITY_ENV, "SOUNDCRAFT_RENDER_NO_PRIORITY");
+            let promote = !render_pool::env_flag(RENDER_NO_PRIORITY_ENV);
             // The environment is read here, once per process (never on the audio thread). The
             // device's callback is not known yet: the engine's largest block at its plan's rate
             // stands in until playback hands the device's (`set_device_block`, #172).

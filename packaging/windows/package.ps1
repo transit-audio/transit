@@ -64,7 +64,7 @@ if (-not $SkipBuild) {
   $flagVar = 'CARGO_TARGET_' + ($Target.ToUpper() -replace '-', '_') + '_RUSTFLAGS'
   [Environment]::SetEnvironmentVariable($flagVar, '-C target-feature=+crt-static')
   # Fail the build (rather than warn) if the icon/VERSIONINFO can't be embedded.
-  $env:SOUNDCRAFT_REQUIRE_WINRES = '1'
+  $env:TRANSIT_REQUIRE_WINRES = '1'
   Invoke-Native "cargo build ($Target)" { cargo build --release --locked -p transit -p audio-bench --target $Target }
 }
 

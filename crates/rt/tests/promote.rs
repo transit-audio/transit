@@ -98,7 +98,7 @@ fn forced_fallback_is_unsupported() {
 }
 
 /// Linux without `CAP_SYS_NICE` or an `RLIMIT_RTPRIO` gets `Denied(EPERM)`; with them (CI runs
-/// this suite again under `sudo -E` with `SOUNDCRAFT_RT_EXPECT_PROMOTED=1`) it gets `SCHED_FIFO`.
+/// this suite again under `sudo -E` with `TRANSIT_RT_EXPECT_PROMOTED=1`) it gets `SCHED_FIFO`.
 /// The test asserts the variant set, and success only when the environment says it must succeed.
 #[cfg(all(target_os = "linux", not(feature = "force-fallback")))]
 mod linux {
@@ -118,7 +118,7 @@ mod linux {
         if p.is_promoted() {
             assert!(during.is_some_and(|l| l.realtime), "{p:?} but level {during:?}");
         }
-        if std::env::var("SOUNDCRAFT_RT_EXPECT_PROMOTED").is_ok_and(|v| v == "1") {
+        if std::env::var("TRANSIT_RT_EXPECT_PROMOTED").is_ok_and(|v| v == "1") {
             assert!(matches!(p, Promotion::Priority(_)), "expected SCHED_FIFO under sudo, got {p:?}");
         }
     }

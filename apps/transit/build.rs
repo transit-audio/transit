@@ -2,7 +2,7 @@
 //! in Explorer, the taskbar, the Start menu and Alt-Tab.
 //!
 //! On every other target this does nothing. A missing resource compiler is a warning, so a
-//! cross-compile from macOS or Linux still links, unless `SOUNDCRAFT_REQUIRE_WINRES=1` turns it
+//! cross-compile from macOS or Linux still links, unless `TRANSIT_REQUIRE_WINRES=1` turns it
 //! into an error (for release builds).
 
 /// `<short sha> <commit date>` of the checkout (`TRANSIT_BUILD` overrides it, for a build from a
@@ -36,7 +36,7 @@ fn main() {
     println!("cargo:rustc-env=TRANSIT_BUILD={}", build_id());
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/app-icon/transit.ico");
-    println!("cargo:rerun-if-env-changed=SOUNDCRAFT_REQUIRE_WINRES");
+    println!("cargo:rerun-if-env-changed=TRANSIT_REQUIRE_WINRES");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
@@ -48,7 +48,7 @@ fn main() {
         .set("OriginalFilename", "transit.exe")
         .set("InternalName", "transit");
     if let Err(e) = res.compile() {
-        if std::env::var_os("SOUNDCRAFT_REQUIRE_WINRES").is_some() {
+        if std::env::var_os("TRANSIT_REQUIRE_WINRES").is_some() {
             eprintln!("embedding Windows resources failed: {e}");
             std::process::exit(1);
         }

@@ -357,7 +357,7 @@ fn app_request(method: &str, params: Value) -> (String, Value) {
 }
 
 fn app(args: &[String]) -> ExitCode {
-    let port = arg_value(args, "--port").or_else(|| std::env::var("SOUNDCRAFT_CONTROL_PORT").ok()).unwrap_or_else(|| "7979".into());
+    let port = arg_value(args, "--port").or_else(|| std::env::var("TRANSIT_CONTROL_PORT").ok()).unwrap_or_else(|| "7979".into());
     let positional: Vec<&String> = args
         .iter()
         .enumerate()

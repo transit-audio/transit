@@ -193,16 +193,9 @@ fn clip_fx_with_short_prepared_buffers_renders_every_sample_without_allocating()
 }
 
 #[test]
-fn render_flags_prefer_transit_values_and_accept_legacy_aliases() {
-    for (value, alias, expected) in [
-        (None, None, false),
-        (None, Some("1"), true),
-        (None, Some(" YES "), true),
-        (Some("true"), Some("0"), true),
-        (Some("0"), Some("1"), false),
-        (Some(""), Some("yes"), false),
-    ] {
-        assert_eq!(flag_value(value, alias), expected);
+fn render_flags_read_transit_values_only() {
+    for (value, expected) in [(None, false), (Some("1"), true), (Some(" YES "), true), (Some("true"), true), (Some("0"), false), (Some(""), false)] {
+        assert_eq!(flag_value(value), expected);
     }
     assert_eq!(RENDER_POOL_ENV, "TRANSIT_RENDER_POOL");
     assert_eq!(RENDER_NO_PRIORITY_ENV, "TRANSIT_RENDER_NO_PRIORITY");

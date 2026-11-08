@@ -187,8 +187,8 @@ fn smoke_honors_vst3_path_with_test_hooks() {
         .args(["--exact", "installed_plugins_smoke", "--nocapture"])
         .env_clear()
         .env("SystemRoot", std::env::var_os("SystemRoot").unwrap())
-        .env("SOUNDCRAFT_VST3_SMOKE", "1")
-        .env("SOUNDCRAFT_VST3_SMOKE_ROOT", fixture)
+        .env("TRANSIT_VST3_SMOKE", "1")
+        .env("TRANSIT_VST3_SMOKE_ROOT", fixture)
         .env("VST3_PATH", fixture)
         .env("CommonProgramFiles", &empty)
         .env("LOCALAPPDATA", &empty)
@@ -201,13 +201,13 @@ fn smoke_honors_vst3_path_with_test_hooks() {
 }
 
 /// Smoke test against whatever real VST3 plugins are installed (none are required): scan, then
-/// instantiate, prepare and process each one briefly. Set `SOUNDCRAFT_VST3_SMOKE=1` to run it.
+/// instantiate, prepare and process each one briefly. Set `TRANSIT_VST3_SMOKE=1` to run it.
 #[test]
 fn installed_plugins_smoke() {
-    if std::env::var_os("SOUNDCRAFT_VST3_SMOKE").is_none() {
+    if std::env::var_os("TRANSIT_VST3_SMOKE").is_none() {
         return;
     }
-    if let Some(root) = std::env::var_os("SOUNDCRAFT_VST3_SMOKE_ROOT") {
+    if let Some(root) = std::env::var_os("TRANSIT_VST3_SMOKE_ROOT") {
         let root = std::path::PathBuf::from(root);
         let (defaults, extra) = transit_vst3_host::search_dirs();
         assert!(extra.is_empty());

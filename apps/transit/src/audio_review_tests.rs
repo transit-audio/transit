@@ -17,7 +17,6 @@ fn review_quit_before_verification_keeps_previous_good_audio() {
             .env(CHILD, "1")
             .env("TRANSIT_CONFIG_DIR", &dir)
             .env_remove("TRANSIT_NO_PREFS")
-            .env_remove("SOUNDCRAFT_NO_PREFS")
             .output()
             .unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
@@ -62,7 +61,6 @@ fn desktop_logic_saves_preferences_before_exit_and_keeps_future_audio() {
             .env(CHILD, "1")
             .env("TRANSIT_CONFIG_DIR", dir.path())
             .env_remove("TRANSIT_NO_PREFS")
-            .env_remove("SOUNDCRAFT_NO_PREFS")
             .output()
             .unwrap();
         assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));

@@ -56,14 +56,12 @@ pub const MAX_RENDER_WORKERS: usize = 8;
 /// and the workers stay on ([`render_pool_setting`]). Read once, when the first engine is made.
 ///
 /// The default since 2026-10-29 (ADR 0012 gate G1 measured on the reference hardware, #124 gate
-/// 6, and the #130 eight-hour run). `SOUNDCRAFT_RENDER_POOL` remains an alias when this variable
-/// is unset.
+/// 6, and the #130 eight-hour run).
 pub const RENDER_POOL_ENV: &str = "TRANSIT_RENDER_POOL";
 
 /// Environment variable: `1` leaves the render workers at the OS default priority instead of
 /// promoting them with [`transit_rt::promote_audio_thread`]. Read when the workers start. It does
 /// not affect the audio callback thread: this crate never promotes that.
-/// `SOUNDCRAFT_RENDER_NO_PRIORITY` remains an alias when this variable is unset.
 pub const RENDER_NO_PRIORITY_ENV: &str = "TRANSIT_RENDER_NO_PRIORITY";
 
 /// Environment variable (#172): the strips' deadline as a whole-number percentage of the block
@@ -160,12 +158,12 @@ pub fn strip_deadline_override() -> Option<u32> {
 pub(crate) static FORCE_SERIAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// True when `name` is set to `1` (or `true`/`yes`, any case).
-pub(crate) fn env_flag(name: &str, alias: &str) -> bool {
-    flag_value(std::env::var(name).ok().as_deref(), std::env::var(alias).ok().as_deref())
+pub(crate) fn env_flag(name: &str) -> bool {
+    flag_value(std::env::var(name).ok().as_deref())
 }
 
-pub(crate) fn flag_value(value: Option<&str>, alias: Option<&str>) -> bool {
-    value.or(alias).is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+pub(crate) fn flag_value(value: Option<&str>) -> bool {
+    value.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
 }
 
 /// What a [`RENDER_POOL_ENV`] value asks for ([`render_pool_setting`]).
@@ -189,7 +187,7 @@ pub(crate) fn render_pool_setting(value: Option<&str>) -> RenderPoolSetting {
     }
 }
 
-/// Reads [`RENDER_POOL_ENV`] (or its alias `SOUNDCRAFT_RENDER_POOL` when it is unset) once per
+/// Reads [`RENDER_POOL_ENV`] once per
 /// process (never on the audio thread): `0` sets [`FORCE_SERIAL`], the opt-out; anything but
 /// unset, `1` or `0` is logged once and leaves the render workers on. [`MixEngine::new`] calls
 /// this.
@@ -197,7 +195,7 @@ pub(crate) fn init_render_switch() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     if !on_audio_thread() {
         ONCE.call_once(|| {
-            let value = std::env::var(RENDER_POOL_ENV).ok().or_else(|| std::env::var("SOUNDCRAFT_RENDER_POOL").ok());
+            let value = std::env::var(RENDER_POOL_ENV).ok();
             match render_pool_setting(value.as_deref()) {
                 RenderPoolSetting::Workers => {}
                 RenderPoolSetting::Serial => {
