@@ -180,6 +180,29 @@ fn a_track_header_context_menu_has_the_chrome_rows_and_its_rows_still_act() {
     let new = find(&t.app.arrange.menu, "New Group Track");
     t.click(new.rect, "primary");
     assert_eq!(t.app.engine.session().tracks.len(), n + 1, "{}", t.app.status);
+    // The Instrument submenu keeps the chrome rows (its own MenuConfig carries the style).
+    let keys = t.track("instrument", "Keys");
+    let h = t.header(keys);
+    t.click([h[0] + 50.0, h[1], h[0] + 70.0, h[3]], "secondary");
+    let sub = find(&t.app.arrange.menu, "Instrument");
+    // "Instrument" is also the header's subtitle under the popup: take the text in the row.
+    let frame = Popup::of(&t, &sub).frame;
+    let text = texts(&t.shapes, "Instrument").into_iter().find(|r| rect(sub.rect).contains(r.center())).expect("the submenu button's text");
+    assert!(near(text.min.x - (frame.min.x + EDGE), TEXT_IN), "the Instrument button starts 28 in");
+    t.input("ui.move", json!({"x": (sub.rect[0] + sub.rect[2]) / 2.0, "y": (sub.rect[1] + sub.rect[3]) / 2.0}));
+    t.frames(10);
+    let menu = t.app.arrange.menu.clone();
+    let sampler = menu.iter().find(|m| m.value == "sampler").cloned().expect("the submenu lists the instruments");
+    let current = menu.iter().find(|m| m.value == "macro_oscillator").cloned().expect("the current instrument");
+    let p = Popup::of(&t, &sampler);
+    assert!(!p.frame.contains(rect(sub.rect).center()), "the rows are in the submenu's own popup");
+    p.insets(&sampler.label, None);
+    assert!(near(p.text_in("Built-in"), TEXT_IN), "the submenu's heading starts 28 in");
+    p.row(&sampler);
+    p.row(&current);
+    assert_eq!(p.checks_in(&current), 1, "the current instrument is checked in its gutter");
+    t.click(sampler.rect, "primary");
+    assert_eq!(t.app.engine.session().track(keys).unwrap().instrument.as_ref().unwrap().plugin, "sampler", "{}", t.app.status);
 }
 
 #[test]
