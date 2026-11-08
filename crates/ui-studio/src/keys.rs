@@ -23,6 +23,7 @@ mod view;
 pub use view::{pane, switcher_panel};
 
 mod cc;
+mod edit;
 mod multi;
 use multi::{Composite, Part};
 mod pitch;
@@ -370,6 +371,9 @@ pub struct KeysState {
     pub clip: Option<ClipId>,
     /// The other clips open with it (#329), in selection order.
     pub others: Vec<ClipId>,
+    /// The track of every audition, in order (tests check a note sounds on its own clip's track).
+    #[cfg(test)]
+    pub audition_tracks: Vec<TrackId>,
     /// The selection of several clips that the last click on one of them replaced, and whether
     /// one more click may keep it: a double-click there opens them all ([`crate::StudioApp::click_clip`]).
     pub reopen: Option<(Vec<ClipId>, bool)>,
@@ -413,6 +417,8 @@ impl Default for KeysState {
             quantize_open: false,
             clip: None,
             others: Vec::new(),
+            #[cfg(test)]
+            audition_tracks: Vec::new(),
             reopen: None,
             click_tick: None,
             selection: Vec::new(),
@@ -660,7 +666,10 @@ impl StudioApp {
         }
         let s = self.engine.session();
         let open = self.keys.clip.filter(|c| clip_view(s, *c).is_some());
-        let pick = open.or_else(|| s.edit.selected_clips.iter().copied().find(|c| clip_view(s, *c).is_some()));
+        let selected: Vec<ClipId> = s.edit.selected_clips.iter().copied().filter(|c| clip_view(s, *c).is_some()).collect();
+        // A selection of several MIDI clips opens them (#329), the open clip in front if it is one of them.
+        let several = (selected.len() > 1).then(|| open.filter(|c| selected.contains(c)).or(selected.first().copied())).flatten();
+        let pick = several.or(open).or_else(|| selected.first().copied());
         match pick {
             Some(c) => {
                 self.open_keys(c);
@@ -720,6 +729,8 @@ impl StudioApp {
         if !self.ui.keys.audition {
             return;
         }
+        #[cfg(test)]
+        self.keys.audition_tracks.push(track);
         let velocity = self.ui.keys.velocity.clamp(1, 127);
         self.keys.auditions += 1;
         self.keys.last_audition = Some((pitch, velocity));
@@ -744,117 +755,6 @@ impl StudioApp {
             }
         }
         self.keys.held = keep;
-    }
-
-    /// Change notes (old value, new value) as one undo step, each found again before its edit.
-    pub fn keys_edit(&mut self, pairs: &[(Note, Note)]) -> Result<Vec<Note>, String> {
-        if self.keys.clip.is_none() {
-            return Err("no clip".into());
-        }
-        let key = self.keys_merge_key();
-        let mut out = Vec::new();
-        for (old, new) in pairs {
-            if old == new {
-                out.push(*new);
-                continue;
-            }
-            let Some(all) = self.keys_all() else { break };
-            let Some((part, i)) = resolve(&all.notes, &[*old]).first().and_then(|i| all.locate(*i)) else { continue };
-            let (clip, start) = (part.clip, new.start - part.off);
-            self.keys_exec(
-                "midi.note_edit",
-                json!({"clip": clip.0, "index": i, "pitch": new.pitch, "start_ticks": start, "length_ticks": new.length, "velocity": new.velocity}),
-                &key,
-            )?;
-            out.push(*new);
-        }
-        Ok(out)
-    }
-
-    /// Move the selection by `ticks` and `semitones` (clamped so no note leaves its clip's start or
-    /// the pitch range), one command per clip, one undo step.
-    pub fn keys_move(&mut self, ticks: i64, semitones: i64) -> Result<(), String> {
-        let Some(all) = self.keys_all() else { return Err("no clip".into()) };
-        let sel = self.keys.selection.clone();
-        if self.keys_scale().enabled {
-            let degrees = if matches!(semitones, -12 | 12) { semitones.signum() * 7 } else { semitones };
-            let pairs = self.scale_move(&sel, ticks, degrees, None);
-            self.keys.selection = self.scale_apply_move(&pairs)?;
-            return Ok(());
-        }
-        let (dt, ds) = clamp_move(&sel, all.local_min(&sel), ticks, semitones);
-        let groups = all.groups(&sel);
-        if groups.is_empty() || (dt == 0 && ds == 0) {
-            return Ok(());
-        }
-        let key = self.keys_merge_key();
-        for (part, idx) in groups {
-            self.keys_exec("midi.notes_move", json!({"clip": part.clip.0, "indices": idx, "ticks": dt, "semitones": ds}), &key)?;
-        }
-        self.keys.selection = sel.iter().map(|n| shifted(n, dt, ds)).collect();
-        Ok(())
-    }
-
-    /// Delete the selected notes, one command per clip, one undo step.
-    pub fn keys_delete(&mut self) -> Result<(), String> {
-        let Some(all) = self.keys_all() else { return Err("no clip".into()) };
-        let groups = all.groups(&self.keys.selection);
-        self.keys.selection.clear();
-        if groups.is_empty() {
-            return Ok(());
-        }
-        let key = self.keys_merge_key();
-        for (part, idx) in groups {
-            self.keys_exec("midi.note_delete", json!({"clip": part.clip.0, "indices": idx}), &key)?;
-        }
-        Ok(())
-    }
-
-    /// Ctrl+D: copies of the selection right after it (its span rounded up to the grid), each in
-    /// its source's clip.
-    pub fn keys_duplicate(&mut self) -> Result<(), String> {
-        let sel = self.keys.selection.clone();
-        let (Some(a), Some(b)) = (sel.iter().map(|n| n.start).min(), sel.iter().map(Note::end).max()) else { return Ok(()) };
-        let g = self.keys_step();
-        let by = ((b - a + g - 1) / g).max(1) * g;
-        let pairs: Vec<(Note, Note)> = sel.iter().map(|n| (*n, shifted(n, by, 0))).collect();
-        self.keys.selection = self.keys_add_copies(&pairs)?;
-        Ok(())
-    }
-
-    /// Quick apply with saved strength/swing to the current piano-roll grid.
-    pub fn keys_quantize(&mut self) -> Result<(), String> {
-        self.keys_apply_quantize(self.keys_step())
-    }
-
-    /// Ctrl+Up/Down: transpose the selection (all notes when none or all are selected:
-    /// `event.transpose`; otherwise `midi.notes_transpose`).
-    pub fn keys_transpose(&mut self, semitones: i64) -> Result<(), String> {
-        let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
-        let Some(all) = self.keys_all() else { return Err("no clip".into()) };
-        let notes = all.notes.clone();
-        let sel = self.keys.selection.clone();
-        let whole = sel.is_empty() || resolve(&notes, &sel).len() == notes.len();
-        if self.keys_scale().enabled {
-            let degrees = if matches!(semitones, -12 | 12) { semitones.signum() * 7 } else { semitones };
-            let pairs = self.scale_move(if whole { &notes } else { &sel }, 0, degrees, None);
-            let edited = self.scale_apply_move(&pairs)?;
-            if !sel.is_empty() {
-                self.keys.selection = edited;
-            }
-            return Ok(());
-        }
-        if !whole {
-            return self.keys_pitch_edit("midi.notes_transpose", json!({"semitones": semitones}));
-        }
-        let key = self.keys_merge_key();
-        self.ensure_clip_selected(clip);
-        let clips: Vec<u64> = all.parts.iter().map(|p| p.clip.0).collect();
-        self.keys_exec("event.transpose", json!({"clips": clips, "semitones": semitones}), &key)?;
-        if !sel.is_empty() {
-            self.keys.selection = self.keys_all().map(|a| a.notes).unwrap_or_default();
-        }
-        Ok(())
     }
 
     /// `event.*` commands need a selection to be enabled; the clip being edited is it.
@@ -1076,6 +976,9 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
     }
     let notes = &all.notes;
     let track_of = |i: usize| all.locate(i).map_or(cv.track, |(p, _)| p.track);
+    // Identical notes stacked in two clips: the one the selection resolves to (the first), so the
+    // note grabbed is the note that moves and sounds.
+    let first = |i: usize| notes.iter().position(|x| x == &notes[i]).unwrap_or(i);
     // Our own double-click: egui counts a quick second double-click elsewhere as a triple click.
     let click = resp.clicked().then(|| resp.interact_pointer_pos()).flatten();
     let double = click.is_some_and(|pos| {
@@ -1084,7 +987,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
         d
     });
     if double && let Some(pos) = click {
-        match hit(layout, pos) {
+        match hit(layout, pos).map(|(i, k)| (first(i), k)) {
             // Double-click a note: delete it (Ableton).
             Some((i, _)) => {
                 app.keys.selection = vec![notes[i]];
@@ -1116,7 +1019,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
             }
         }
     } else if let Some(pos) = click {
-        match hit(layout, pos) {
+        match hit(layout, pos).map(|(i, k)| (first(i), k)) {
             Some((i, _)) => {
                 let n = notes[i];
                 if mods.shift {
@@ -1146,7 +1049,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
     if resp.drag_started()
         && let Some(press) = ui.input(|i| i.pointer.press_origin())
     {
-        match hit(layout, press) {
+        match hit(layout, press).map(|(i, k)| (first(i), k)) {
             Some((i, edge)) => {
                 let n = notes[i];
                 if !app.keys.selection.contains(&n) {
@@ -1204,11 +1107,15 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
         }
     }
     if let Some((old, new)) = play {
-        if let (Some(p), Some(t)) = (&app.player, app.keys_track()) {
+        // The dragged note sounds on its own clip's track, which need not be the foreground's.
+        let track = app.keys.held.iter().find(|h| h.1 == old).map(|h| h.0).or_else(|| app.keys_track());
+        if let (Some(p), Some(t)) = (&app.player, track) {
             app.player_requests.result(&mut app.status, p.note(t, old, 0));
         }
-        app.keys.held.retain(|h| h.1 != old);
-        app.audition(new, now);
+        app.keys.held.retain(|h| !(Some(h.0) == track && h.1 == old));
+        if let Some(t) = track {
+            app.audition_on(t, new, now);
+        }
     }
 }
 
@@ -1252,9 +1159,11 @@ fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, all: &Composite, l
             if !additive {
                 app.keys.selection.clear();
             }
-            for n in inside {
-                if !app.keys.selection.contains(&n) {
-                    app.keys.selection.push(n);
+            // As many copies of a value as the band holds: identical notes in two clips are two notes.
+            for n in &inside {
+                let need = inside.iter().filter(|x| *x == n).count();
+                if app.keys.selection.iter().filter(|x| *x == n).count() < need {
+                    app.keys.selection.push(*n);
                 }
             }
         }

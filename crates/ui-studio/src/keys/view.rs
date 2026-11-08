@@ -17,6 +17,11 @@ pub fn pane(app: &mut StudioApp, ui: &mut Ui) -> bool {
             let next = app.keys.others.remove(0);
             app.keys.clip = Some(next);
             app.keys.fit = true;
+            // Nothing of the deleted clip's ticks carries into the next one's.
+            app.keys.click_tick = None;
+            app.keys.step = StepState::default();
+            app.keys.cc.cancel();
+            app.keys.length_edit = None;
         }
     }
     let now = ui.input(|i| i.time);
@@ -123,7 +128,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     header_row(app, ui, header, &cv, &all, &mut layout);
     if narrow {
         let rect = Rect::from_min_size(pos2(area.min.x + 8.0, header.max.y + 4.0), vec2(138.0, HEADER_H - 8.0));
-        note_inspector(app, ui, rect, &cv, &mut layout);
+        note_inspector(app, ui, rect, &mut layout);
     }
     pane_handle(app, ui, handle, &mut layout);
     paint_grid(ui, &s, &map, grid, ruler, &cv, &all, &mut layout);
@@ -514,7 +519,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Co
 
     // Copy only a single, still-existing selection: a stale or mixed selection is ambiguous.
     let selected = match app.keys.selection.as_slice() {
-        [note] if cv.notes.contains(note) => Some(note.velocity),
+        [note] if app.keys_all().is_some_and(|all| all.notes.contains(note)) => Some(note.velocity),
         _ => None,
     };
     let b = Rect::from_min_max(pos2(rx - 24.0, r.min.y + 4.0), pos2(rx, r.max.y - 4.0));
@@ -548,16 +553,16 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Co
     ui.painter().text(pos2(rx, r.center().y), Align2::LEFT_CENTER, "New note velocity", FontId::proportional(11.5), TOKENS.text);
     if r.width() >= 1200.0 {
         rx -= 146.0;
-        note_inspector(app, ui, Rect::from_min_max(pos2(rx, r.min.y + 4.0), pos2(rx + 138.0, r.max.y - 4.0)), cv, layout);
+        note_inspector(app, ui, Rect::from_min_max(pos2(rx, r.min.y + 4.0), pos2(rx + 138.0, r.max.y - 4.0)), layout);
     }
     let title_rect = Rect::from_min_max(pos2(x + 32.0, r.min.y), pos2((rx - 8.0).max(x + 32.0), r.max.y));
     ui.painter().with_clip_rect(title_rect).text(title_rect.left_center(), Align2::LEFT_CENTER, title, FontId::proportional(11.5), TOKENS.text_dim);
 }
 
 /// Commit exact ticks on Enter or focus loss, as one undoable command.
-fn note_inspector(app: &mut StudioApp, ui: &mut Ui, rect: Rect, cv: &ClipView, layout: &mut KeysLayout) {
+fn note_inspector(app: &mut StudioApp, ui: &mut Ui, rect: Rect, layout: &mut KeysLayout) {
     let selected = match app.keys.selection.as_slice() {
-        [note] if cv.notes.contains(note) => Some(*note),
+        [note] if app.keys_all().is_some_and(|all| all.notes.contains(note)) => Some(*note),
         _ => None,
     };
     if app.keys.length_edit.as_ref().map(|(note, _)| *note) != selected {
@@ -951,7 +956,7 @@ fn ruler_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, s: &Ses
         && let Some(pos) = resp.interact_pointer_pos()
     {
         // A clip's bar at the ruler's foot: that clip comes forward (#329); elsewhere the ruler sets the playhead.
-        let on_bar = clips.iter().find(|c| pos.x >= c.bar[0] && pos.x <= c.bar[2] && pos.y >= c.bar[1] && pos.y <= c.bar[3]);
+        let on_bar = clips.iter().rev().find(|c| pos.x >= c.bar[0] && pos.x <= c.bar[2] && pos.y >= c.bar[1] && pos.y <= c.bar[3]);
         if let Some(c) = on_bar {
             app.keys_foreground(ClipId(c.clip));
         } else {

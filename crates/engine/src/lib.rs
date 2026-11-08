@@ -800,7 +800,9 @@ impl Engine {
             let excess = self.undo.len() - limit;
             self.undo.drain(..excess);
         }
-        self.merge_key = Some(key);
+        // The gesture starts with its first step: a first command that changed nothing pushed none,
+        // and continuing from it would fold the next one into the step before the gesture.
+        self.merge_key = (continuing || self.undo_pushes != pushes).then_some(key);
         Ok(r)
     }
 

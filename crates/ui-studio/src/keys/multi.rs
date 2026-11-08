@@ -93,6 +93,21 @@ impl Composite {
 }
 
 impl StudioApp {
+    /// An edit across several clips is all or nothing: a frozen track refuses it before any
+    /// command runs (one clip alone gets the engine's own refusal, as before).
+    pub(super) fn keys_refuse_frozen(&mut self, clips: &[ClipId]) -> Result<(), String> {
+        let s = self.engine.session();
+        let mut distinct: Vec<ClipId> = clips.to_vec();
+        distinct.sort_unstable_by_key(|c| c.0);
+        distinct.dedup();
+        let frozen = distinct.len() > 1 && distinct.iter().any(|c| s.find_clip(*c).and_then(|(t, _)| s.track(t)).is_some_and(|t| t.freeze.is_some()));
+        if frozen {
+            self.status = "Track is frozen; unfreeze to edit".into();
+            return Err(self.status.clone());
+        }
+        Ok(())
+    }
+
     /// Every open clip's notes in the roll's ticks (#329).
     pub(super) fn keys_all(&self) -> Option<Composite> {
         Composite::new(self.engine.session(), self.keys.clip?, &self.keys.others)
@@ -108,6 +123,9 @@ impl StudioApp {
         }
         self.keys.scroll -= by as f64;
         self.keys.click_tick = self.keys.click_tick.map(|t| t - by);
+        if self.keys.step.on {
+            self.status = "Step entry off: another clip came to the front".into();
+        }
         self.keys.step = StepState::default();
         self.keys.cc.cancel();
         self.keys.length_edit = None;
@@ -144,6 +162,7 @@ impl StudioApp {
     }
 
     fn keys_add_to(&mut self, notes: Vec<(Note, Part)>) -> Result<Vec<Note>, String> {
+        self.keys_refuse_frozen(&notes.iter().map(|(_, p)| p.clip).collect::<Vec<_>>())?;
         let key = self.keys_merge_key();
         let mut out = Vec::new();
         for (n, part) in notes {

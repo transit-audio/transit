@@ -10,6 +10,7 @@ impl StudioApp {
         if groups.is_empty() {
             return Ok(());
         }
+        self.keys_refuse_frozen(&groups.iter().map(|(p, _)| p.clip).collect::<Vec<_>>())?;
         let key = self.keys_merge_key();
         let mut selection = Vec::new();
         for (part, indices) in groups {

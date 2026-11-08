@@ -136,3 +136,128 @@ fn an_earlier_clip_cannot_be_moved_before_its_own_start() {
     t.key("ArrowRight", json!({}));
     assert!(notes_of(&t, t.clip)[0].start > 0, "moved later inside A");
 }
+
+// ─── The refutation review of 01fae850 (ADR 0009): each finding fails without its fix ───
+
+/// Like [`two`], but B's clip is at the same bar as A's on its own track, with the same note:
+/// a doubled part.
+fn doubled() -> (T, ClipId) {
+    let mut t = T::new();
+    let r = t.app.run("track.new", json!({"kind": "instrument"})).unwrap();
+    let tb = TrackId(r["tracks"][0].as_u64().unwrap());
+    let c = t.app.run("midi.new_clip", json!({"tracks": [tb.0], "start": 0, "end": 96_000})).unwrap();
+    let b = ClipId(c["clip"].as_u64().unwrap());
+    t.add(60, 0, 480);
+    t.app.run("midi.note_add", json!({"clip": b.0, "pitch": 60, "start_ticks": 0, "length_ticks": 480})).unwrap();
+    t.app.run("edit.select", json!({"clips": [t.clip.0, b.0]})).unwrap();
+    t.frames(3);
+    t.app.toggle_keys();
+    t.frames(3);
+    assert_eq!(t.app.keys.layout.clips.len(), 2);
+    (t, b)
+}
+
+#[test]
+fn r1_a_cross_clip_quantize_with_one_clip_on_the_grid_is_one_step_of_its_own() {
+    let (mut t, b) = two();
+    t.app.run("midi.note_add", json!({"clip": b.0, "pitch": 67, "start_ticks": 100, "length_ticks": 240})).unwrap();
+    t.frames(2);
+    t.click(t.at(2000.0, 62));
+    let before = t.undo_len();
+    t.key("U", json!({"cmd": true}));
+    assert_eq!(t.undo_len(), before + 1, "the quantize is one step of its own");
+    assert!(notes_of(&t, b).iter().all(|n| n.start != 100), "B's off-grid note quantized");
+    t.app.run("edit.undo", json!({})).unwrap();
+    t.frames(2);
+    assert!(notes_of(&t, b).iter().any(|n| n.pitch == 67 && n.start == 100), "one undo reverts only the quantize");
+}
+
+#[test]
+fn r2_identical_notes_in_two_clips_are_both_band_selected_and_both_move() {
+    let (mut t, b) = doubled();
+    t.drag(t.at(10.0, 63), t.at(700.0, 58), json!({}));
+    assert_eq!(t.selected(), 2, "the band took the note of each clip");
+    t.key("ArrowUp", json!({}));
+    assert_eq!((notes_of(&t, t.clip)[0].pitch, notes_of(&t, b)[0].pitch), (61, 61));
+}
+
+#[test]
+fn r2_a_drag_on_stacked_identical_notes_moves_the_one_it_selected() {
+    let (mut t, b) = doubled();
+    let grab = mid(t.note_rect(60, 0));
+    t.app.keys.audition_tracks.clear();
+    t.drag(grab, (grab.0, grab.1 - t.app.keys.layout.key_h * 2.0), json!({}));
+    let moved = (notes_of(&t, t.clip)[0].pitch, notes_of(&t, b)[0].pitch);
+    assert!(moved == (62, 60) || moved == (60, 62), "exactly one note moved: {moved:?}");
+    assert_eq!(t.selected(), 1);
+    let sel_clip = t.app.keys.layout.notes.iter().find(|n| n.selected).and_then(|n| n.clip);
+    let moved_clip = if moved.0 == 62 { t.clip.0 } else { b.0 };
+    assert_eq!(sel_clip, Some(moved_clip), "the selected note is the one that moved");
+    let moved_track = t.app.engine.session().find_clip(ClipId(moved_clip)).unwrap().0;
+    assert!(t.app.keys.audition_tracks.iter().all(|tr| *tr == moved_track), "the grabbed note sounds on the moved note's track");
+}
+
+#[test]
+fn r3_dragging_another_clips_note_auditions_on_its_own_track() {
+    let (mut t, b) = two();
+    let tb = t.app.engine.session().find_clip(b).unwrap().0;
+    let grab = mid(t.note_rect(64, 3840));
+    t.app.keys.audition_tracks.clear();
+    t.drag(grab, (grab.0, grab.1 - t.app.keys.layout.key_h * 2.0), json!({}));
+    assert!(!t.app.keys.audition_tracks.is_empty());
+    assert!(t.app.keys.audition_tracks.iter().all(|tr| *tr == tb), "{:?} (B is {tb:?})", t.app.keys.audition_tracks);
+}
+
+#[test]
+fn r4_a_frozen_clip_refuses_the_whole_cross_clip_edit() {
+    let (mut t, b) = two();
+    let tb = t.app.engine.session().find_clip(b).unwrap().0;
+    t.app.run("track.freeze", json!({"tracks": [tb.0]})).unwrap();
+    t.frames(3);
+    t.click(t.at(2000.0, 62));
+    t.key("A", json!({"cmd": true}));
+    let before = (notes_of(&t, t.clip), notes_of(&t, b));
+    t.key("ArrowUp", json!({}));
+    assert_eq!((notes_of(&t, t.clip), notes_of(&t, b)), before, "all or nothing");
+    assert!(t.app.status.to_lowercase().contains("frozen"), "{}", t.app.status);
+}
+
+#[test]
+fn r5_the_bar_drawn_on_top_is_the_one_a_click_brings_forward() {
+    let (mut t, b) = doubled();
+    let bar = t.app.keys.layout.clips.iter().find(|c| c.clip == b.0).unwrap().bar;
+    t.click(mid(bar));
+    assert_eq!(t.app.keys.layout.clip, Some(b.0));
+}
+
+#[test]
+fn r6_ctrl_alt_k_opens_the_current_selection_of_several_not_the_last_clip() {
+    let (mut t, b) = two();
+    t.key("Escape", json!({}));
+    let r = t.app.run("track.new", json!({"kind": "instrument"})).unwrap();
+    let tc = r["tracks"][0].as_u64().unwrap();
+    let c = ClipId(t.app.run("midi.new_clip", json!({"tracks": [tc], "start": 192_000, "end": 288_000})).unwrap()["clip"].as_u64().unwrap());
+    t.app.run("edit.select", json!({"clips": [b.0, c.0]})).unwrap();
+    t.frames(2);
+    t.app.toggle_keys();
+    t.frames(3);
+    assert_eq!(t.app.keys.layout.clip, Some(b.0), "the first selected clip is the foreground");
+    let open: Vec<u64> = t.app.keys.layout.clips.iter().map(|c| c.clip).collect();
+    assert_eq!(open, vec![b.0, c.0]);
+}
+
+#[test]
+fn r7_when_the_foreground_clip_is_deleted_the_next_one_starts_clean() {
+    let (mut t, b) = two();
+    t.click(t.at(2000.0, 62));
+    assert!(t.app.keys.click_tick.is_some());
+    let a = t.clip;
+    for tr in &mut t.app.engine.session_mut().tracks {
+        if let Some(pl) = tr.playlist_mut() {
+            pl.clips.retain(|c| c.id != a);
+        }
+    }
+    t.frames(3);
+    assert_eq!(t.app.keys.layout.clip, Some(b.0));
+    assert_eq!(t.app.keys.click_tick, None, "A's click position does not carry into B's ticks");
+}

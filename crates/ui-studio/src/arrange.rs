@@ -726,7 +726,8 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
             }
             None => {
                 // Double-clicked inside a selection of several clips: they all open (#329).
-                if let Some((several, _)) = app.keys.reopen.take().filter(|(c, _)| c.contains(&clip)) {
+                let midi = s.find_clip(clip).is_some_and(|(_, c)| matches!(c.content, transit_model::ClipContent::Midi { .. }));
+                if let Some((several, _)) = app.keys.reopen.take().filter(|(c, _)| midi && c.contains(&clip)) {
                     let _ = app.run("edit.select", serde_json::json!({"clips": several.iter().map(|c| c.0).collect::<Vec<_>>()}));
                 }
                 app.open_keys(clip);

@@ -72,3 +72,32 @@ fn squash_undo_at_the_cap_folds_the_right_steps() {
     e.undo();
     assert_eq!(vol(&e, t), 0.0);
 }
+
+/// A merged gesture whose first command changes nothing (a quantize of notes already on the grid)
+/// still adds exactly one step, and leaves the step before it alone (#329: cross-clip edits run one
+/// command per clip under one key).
+#[test]
+fn a_gesture_whose_first_command_changes_nothing_is_still_one_step_of_its_own() {
+    let mut e = Engine::default();
+    let tracks = e.execute("track.new", &json!({"kind": "instrument", "count": 2})).unwrap();
+    let ids: Vec<u64> = tracks["tracks"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+    let clip = |e: &mut Engine, t: u64| e.execute("midi.new_clip", &json!({"tracks": [t], "start": 0, "end": 0})).unwrap()["clip"].as_u64().unwrap();
+    let (a, b) = (clip(&mut e, ids[0]), clip(&mut e, ids[1]));
+    e.execute("midi.note_add", &json!({"clip": a, "pitch": 60, "start_ticks": 0, "length_ticks": 240})).unwrap();
+    // The step before the gesture: an off-grid note in B.
+    e.execute("midi.note_add", &json!({"clip": b, "pitch": 64, "start_ticks": 100, "length_ticks": 240})).unwrap();
+    e.execute("edit.select", &json!({"clips": [a, b]})).unwrap();
+    let steps = e.undo_history().len();
+    let quantize = |clip: u64| json!({"clip": clip, "indices": [0], "grid": 240, "strength": 100, "swing": 0, "quantize_ends": false});
+    e.execute_merged("event.quantize", &quantize(a), "q").unwrap();
+    e.execute_merged("event.quantize", &quantize(b), "q").unwrap();
+    e.end_merge();
+    let b_note = |e: &Engine| match &e.session().find_clip(transit_model::ClipId(b)).unwrap().1.content {
+        transit_model::ClipContent::Midi { sequence } => sequence.notes.iter().map(|n| n.start).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    assert_eq!(b_note(&e), vec![0], "B's note quantized");
+    assert_eq!(e.undo_history().len(), steps + 1, "the gesture is one step of its own");
+    e.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(b_note(&e), vec![100], "one undo reverts only the quantize; B's note is still there");
+}
