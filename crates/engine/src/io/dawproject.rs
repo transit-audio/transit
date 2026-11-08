@@ -666,10 +666,21 @@ fn notes(cx: &mut Cx, ns: Node, out: &mut Content) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The steps [`own_timbre`] took on this thread: notes coming in, notes ending, points checked.
+    pub(super) static TIMBRE_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Keeps the timbre points their notes own: a point is owned unless a note that started later (or
 /// with it, higher) on its channel is sounding at its tick. One sweep in time order, keeping the
 /// notes that sound in a set, so overlapping notes cost a logarithm each, not a scan.
 fn own_timbre(timbre: &mut Vec<Timbre>, mut spans: Vec<(i64, u8, i64, u8)>) {
+    /// One step of the sweep, counted in tests: a deterministic cost instead of a wall clock (#377).
+    fn step() {
+        #[cfg(test)]
+        TIMBRE_STEPS.with(|s| s.set(s.get() + 1));
+    }
     timbre.sort_by_key(|t| t.tick);
     spans.sort_unstable();
     let mut sounding: BTreeMap<(u8, i64, u8), usize> = BTreeMap::new();
@@ -677,11 +688,13 @@ fn own_timbre(timbre: &mut Vec<Timbre>, mut spans: Vec<(i64, u8, i64, u8)>) {
     let mut next = spans.iter().peekable();
     timbre.retain(|t| {
         while let Some(&&(start, pitch, end, ch)) = next.peek().filter(|s| s.0 <= t.tick) {
+            step();
             *sounding.entry((ch, start, pitch)).or_default() += 1;
             ends.push(Reverse((end, ch, start, pitch)));
             next.next();
         }
         while let Some(&Reverse((_, ch, start, pitch))) = ends.peek().filter(|Reverse(e)| e.0 <= t.tick) {
+            step();
             ends.pop();
             if let Some(n) = sounding.get_mut(&(ch, start, pitch)) {
                 *n -= 1;
@@ -690,6 +703,7 @@ fn own_timbre(timbre: &mut Vec<Timbre>, mut spans: Vec<(i64, u8, i64, u8)>) {
                 }
             }
         }
+        step();
         let newest = sounding.range((t.channel, i64::MIN, 0)..=(t.channel, i64::MAX, u8::MAX)).next_back().map(|(k, _)| (k.1, k.2));
         newest.is_none_or(|n| n <= t.note)
     });
@@ -908,8 +922,10 @@ fn visible(cs: Vec<ClipIn>) -> Vec<ClipIn> {
         for (a, b) in spans {
             // In the clip's own ticks; its events are sorted by start (see `from_zero`).
             let (lo, hi) = (a - c.start, b - c.start);
-            let notes = &c.seq.notes[c.seq.notes.partition_point(|n| n.start < lo)..c.seq.notes.partition_point(|n| n.start < hi)];
-            let ctrls = &c.seq.ctrls[c.seq.ctrls.partition_point(|e| e.tick < lo)..c.seq.ctrls.partition_point(|e| e.tick < hi)];
+            let notes =
+                c.seq.notes.get(c.seq.notes.partition_point(|n| n.start < lo)..c.seq.notes.partition_point(|n| n.start < hi)).unwrap_or_default();
+            let ctrls =
+                c.seq.ctrls.get(c.seq.ctrls.partition_point(|e| e.tick < lo)..c.seq.ctrls.partition_point(|e| e.tick < hi)).unwrap_or_default();
             let seq = Sequence {
                 notes: notes.iter().map(|n| Note { start: n.start - lo, ..*n }).collect(),
                 ctrls: ctrls.iter().map(|e| CtrlEvent { tick: e.tick - lo, ..*e }).collect(),

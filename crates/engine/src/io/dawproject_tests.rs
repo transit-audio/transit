@@ -335,9 +335,9 @@ fn b3_loop_passes_cost_what_they_play_not_the_whole_content() {
 
 #[test]
 fn b3_timbre_ownership_of_80_000_overlapping_notes_is_one_sweep() {
-    // One long note with `n` timbre points over `n` short notes that each have one. A ratio of two
-    // runs' times measured the growth, but a wall-clock ratio fails on a busy machine (E49), so a
-    // far ceiling stands guard instead.
+    // One long note with `n` timbre points over `n` short notes that each have one. The sweep's
+    // steps are counted (a wall-clock ratio fails on a busy machine, E49): every note comes in and
+    // ends once and every point is checked once, so `4n + 2` at most where a scan takes `n * n`.
     let run = |n: u32| {
         let long: String = (0..n).map(|i| format!(r#"<RealPoint time="{}" value="0.5"/>"#, f64::from(i) * 0.5 + 0.25)).collect();
         let shorts: String = (0..n)
@@ -356,7 +356,12 @@ fn b3_timbre_ownership_of_80_000_overlapping_notes_is_one_sweep() {
         assert_eq!(seq(only_clip(&s)).ctrls.iter().filter(|e| e.kind == CtrlKind::Cc(74)).count(), 2 * n as usize);
         took
     };
-    let took = run(80_000);
+    let n = 80_000;
+    super::TIMBRE_STEPS.with(|s| s.set(0));
+    let took = run(n);
+    let steps = super::TIMBRE_STEPS.with(std::cell::Cell::get);
+    let n = n as usize;
+    assert!((2 * n..=4 * n + 2).contains(&steps), "{steps} steps for {n} notes and {} points", 2 * n);
     // timing: stall-bound a ceiling for a starved runner; this run took 0.13 s on an M-series Mac
     assert!(took < std::time::Duration::from_secs(5), "{took:?}");
 }
@@ -548,62 +553,55 @@ fn k6_an_empty_clip_wholly_before_zero_is_counted() {
 }
 
 /// What a track's clips hold, in order: start and length in samples, name, mute, notes and
-/// controller ticks (ids aside).
-fn layout(s: &Session) -> Vec<(i64, i64, String, bool, Vec<(i64, i64, u8)>, Vec<i64>)> {
-    s.tracks
-        .iter()
-        .flat_map(|t| t.clips())
-        .map(|c| {
-            let q = seq(c);
-            (
-                c.start,
-                c.length,
-                c.name.clone(),
-                c.muted,
-                q.notes.iter().map(|n| (n.start, n.length, n.pitch)).collect(),
-                q.ctrls.iter().map(|e| e.tick).collect(),
-            )
-        })
-        .collect()
+/// controller events (ids aside).
+fn layout(s: &Session) -> Vec<(i64, i64, String, bool, Sequence)> {
+    s.tracks.iter().flat_map(|t| t.clips()).map(|c| (c.start, c.length, c.name.clone(), c.muted, seq(c).clone())).collect()
 }
 
 #[test]
 fn overlapping_clips_resolve_as_place_clip_does() {
     // (start, length) in beats, in file order: nested, chained, sharing a start (the later covers),
-    // covering several at once, inside one that was itself split, and one muted.
+    // covering several at once, inside one that was itself split, and one muted. Each clip has
+    // notes and a controller point every half beat, so events fall on every cut, and a track lane
+    // has a point every beat, carried into the clips that start after it.
     let shapes = [(0, 12), (2, 2), (3, 4), (3, 2), (8, 6), (1, 13), (5, 1), (20, 2), (21, 3)];
-    let notes = |len: i64, key: i64| -> String {
-        (0..len * 2).map(|i| format!(r#"<Note time="{}" duration="1.25" key="{}" vel="1"/>"#, f64::from(i as u32) * 0.5, key + i % 12)).collect()
+    let clip = |k: usize| -> String {
+        let (at, len) = shapes[k];
+        let muted = if k == 4 { r#" enable="false""# } else { "" };
+        let half = |i: i64| f64::from(i as i32) * 0.5;
+        let notes: String =
+            (0..len * 2).map(|i| format!(r#"<Note time="{}" duration="1.25" key="{}" vel="1"/>"#, half(i), 40 + 5 * k as i64 + i % 12)).collect();
+        let points: String =
+            (0..len * 2).map(|i| format!(r#"<RealPoint time="{}" value="{}"/>"#, half(i), ((k as i64 * 7 + i) % 100) as f64 / 100.0)).collect();
+        format!(
+            r#"<Clip time="{at}" duration="{len}" name="c{k}"{muted}><Lanes><Notes>{notes}</Notes><Points><Target expression="channelController" channel="0" controller="1"/>{points}</Points></Lanes></Clip>"#
+        )
     };
-    let clips: String = shapes
-        .iter()
-        .enumerate()
-        .map(|(k, &(at, len))| {
-            let muted = if k == 4 { r#" enable="false""# } else { "" };
-            format!(r#"<Clip time="{at}" duration="{len}" name="c{k}"{muted}><Notes>{}</Notes></Clip>"#, notes(len, 40 + 5 * k as i64))
-        })
-        .collect();
-    let (s, _) = read(&notes_track(&clips));
-    // The oracle: each clip placed by the editor's own overwrite (`place_clip`), in start order
-    // (stable: of two at one start, the later in the file covers).
-    let (mut want, _) = read(&notes_track(""));
+    let lane: String = format!(
+        r#"<Points><Target expression="channelController" channel="1" controller="64"/>{}</Points>"#,
+        (0..25).map(|b| format!(r#"<RealPoint time="{b}" value="{}"/>"#, f64::from(b % 2))).collect::<String>()
+    );
+    let track = |clips: &str| project(PIANO, &format!(r#"<Lanes track="t1"><Clips>{clips}</Clips>{lane}</Lanes>"#));
+    let (s, _) = read(&track(&(0..shapes.len()).map(clip).collect::<String>()));
+    // The oracle: each clip read alone at its place (its own controllers and the lane's, as the
+    // old importer gave it) and placed by the editor's own overwrite (`place_clip`), in start
+    // order (stable: of two at one start, the later in the file covers).
+    let (mut want, _) = read(&track(""));
     let tid = want.tracks[0].id;
     let mut order: Vec<usize> = (0..shapes.len()).collect();
     order.sort_by_key(|&k| shapes[k].0);
     for k in order {
-        let (at, len) = shapes[k];
-        let one = format!(r#"<Clip time="0" duration="{len}"><Notes>{}</Notes></Clip>"#, notes(len, 40 + 5 * k as i64));
-        let (alone, _) = read(&notes_track(&one));
-        let mut clip = only_clip(&alone).clone();
-        clip.start = want.tempo.tick_to_samples(ticks(at as f64), want.sample_rate);
-        clip.id = want.new_clip_id();
-        clip.name = format!("c{k}");
-        clip.muted = k == 4;
-        crate::edit::place_clip(&mut want, tid, clip);
+        let (alone, _) = read(&track(&clip(k)));
+        let mut c = only_clip(&alone).clone();
+        c.id = want.new_clip_id();
+        crate::edit::place_clip(&mut want, tid, c);
     }
-    let names: Vec<String> = layout(&s).into_iter().map(|c| c.2).collect();
+    let got = layout(&s);
+    let names: Vec<&str> = got.iter().map(|c| c.2.as_str()).collect();
     assert_eq!(names, ["c0", "c5", "c1", "c3", "c6", "c2", "c5", "c4", "c7", "c8"], "the visible parts, worked by hand");
-    assert_eq!(layout(&s), layout(&want));
+    let has = |q: &Sequence, cc: u8| q.ctrls.iter().any(|e| e.kind == CtrlKind::Cc(cc));
+    assert!(got.iter().all(|c| has(&c.4, 1) && has(&c.4, 64)), "every part has both controllers: {got:?}");
+    assert_eq!(got, layout(&want));
 }
 
 #[test]
