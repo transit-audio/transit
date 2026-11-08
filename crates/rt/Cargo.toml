@@ -42,6 +42,11 @@ x11rb = { version = "=0.13.2", default-features = false }
 name = "editor_x11"
 harness = false
 
+# macOS editor windows on the process main thread (the standard harness never runs there).
+[[test]]
+name = "editor_macos"
+harness = false
+
 # ADR 0013: this crate is where new `unsafe` lives. It opts out of the workspace
 # `unsafe_code = "forbid"` for itself only; every block carries a `// SAFETY:` comment and every
 # `unsafe fn` a `# Safety` section. The rest mirrors `[workspace.lints]`, plus clippy pedantic.
