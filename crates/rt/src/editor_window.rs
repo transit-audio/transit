@@ -23,7 +23,8 @@
 //! Contract: every [`EditorWindow`] method and [`resize_content`] act only on a window of the
 //! calling thread (they do nothing otherwise); [`HeaderCell`] may be used from any thread.
 //! Nothing here panics. Linux has the same window on X11 (`x11.rs`, issue #147; Wayland sessions
-//! through `XWayland`), without the strip yet; macOS has none here: [`EditorWindow::new`] says so.
+//! through `XWayland`), without the strip yet; so has macOS (`macos.rs`, an `NSWindow` on the
+//! process main thread).
 //!
 //! **Following the main window** (issue #173, ADR 0030). The windows have no owner (ADR 0018
 //! section 7: a cross-thread owner attaches input queues, so a hung plug-in would hang the UI).

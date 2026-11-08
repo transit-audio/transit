@@ -11,8 +11,15 @@ use objc2::rc::Retained;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSApplication, NSBackingStoreType, NSFloatingWindowLevel, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::Arc;
+
+thread_local! {
+    /// The windows [`EditorWindow::new`] made on this thread (the main thread) that
+    /// [`EditorWindow::close`] has not released: the only ones [`resize_content`] touches.
+    static LIVE: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
 
 /// An `NSWindow` (titled, closable, floating above the app's windows) whose content view is the
 /// plug-in view's parent. Holds one retain of the window; main thread only.
@@ -56,7 +63,9 @@ impl EditorWindow {
         window.setExcludedFromWindowsMenu(true);
         window.setCollectionBehavior(NSWindowCollectionBehavior::Transient | NSWindowCollectionBehavior::IgnoresCycle);
         window.center();
-        Ok(EditorWindow { window: Retained::into_raw(window) })
+        let window = Retained::into_raw(window);
+        LIVE.with(|live| live.borrow_mut().push(window.addr()));
+        Ok(EditorWindow { window })
     }
 
     /// The raw `NSWindow*` (for [`resize_content`]).
@@ -116,19 +125,26 @@ impl EditorWindow {
             w.close();
         }
         if MainThreadMarker::new().is_some() {
-            // SAFETY: balances the retain taken in `new`; nothing uses the pointer after this.
+            LIVE.with(|live| live.borrow_mut().retain(|&w| w != self.window.addr()));
+            // SAFETY: balances the retain taken in `new`; nothing uses the pointer after this
+            // (`resize_content` no longer finds it in `LIVE`).
             drop(unsafe { Retained::from_raw(self.window) });
         }
     }
 }
 
 /// Resizes a window's content (`window` from [`EditorWindow::raw`]) to `w` by `h` points; main
-/// thread only. Returns whether it resized.
+/// thread only. Returns whether it resized: false for any pointer that is not a live window of
+/// this thread (closed, foreign or invalid), which it never dereferences.
 pub fn resize_content(window: *mut c_void, w: f64, h: f64) -> bool {
     if MainThreadMarker::new().is_none() {
         return false;
     }
-    // SAFETY: null or a window the editor link keeps retained while the plug-in is attached.
+    if !LIVE.with(|live| live.borrow().contains(&window.addr())) {
+        return false;
+    }
+    // SAFETY: a window `new` made on this thread and `close` has not released (`LIVE`), so we
+    // still hold its retain: valid and non-null.
     let Some(win) = (unsafe { window.cast::<NSWindow>().as_ref() }) else { return false };
     win.setContentSize(NSSize::new(w, h));
     true
