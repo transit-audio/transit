@@ -12,7 +12,7 @@
   <a href="https://github.com/transit-audio/transit/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/transit-audio/transit/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://transit-audio.com/"><img alt="Website" src="https://img.shields.io/badge/Website-transit--audio.com-1f6feb"></a>
   <a href="https://discord.gg/7PPUBZqA66"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
-  <a href="https://github.com/transit-audio/transit/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/transit-audio/transit"></a>
+  <a href="https://github.com/transit-audio/transit/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/transit-audio/transit?include_prereleases"></a>
   <a href="#license"><img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/github/license/transit-audio/transit"></a>
   <a href="https://github.com/transit-audio/transit/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/transit-audio/transit/total"></a>
 </p>

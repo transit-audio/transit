@@ -1,5 +1,7 @@
 (function () {
-  var REL = "https://github.com/transit-audio/transit/releases/latest";
+  // The releases list: every release is a GitHub pre-release while transit is alpha, and GitHub's
+  // "latest" skips pre-releases, so the newest entry is resolved from the list instead.
+  var REL = "https://github.com/transit-audio/transit/releases";
   var meta = document.getElementById("release-meta");
   function has(n, word) { return n.toLowerCase().indexOf(word) !== -1; }
   function ends(n, ext) { return n.toLowerCase().slice(-ext.length) === ext; }
@@ -72,9 +74,13 @@
     Object.keys(PLATFORMS).forEach(function (os) { fill(os, []); });
   }
   tagMine();
-  fetch("https://api.github.com/repos/transit-audio/transit/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+  fetch("https://api.github.com/repos/transit-audio/transit/releases?per_page=10", { headers: { Accept: "application/vnd.github+json" } })
     .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then(function (rel) {
+    .then(function (list) {
+      // The newest release that is not a draft, pre-releases included.
+      var rel = (Array.isArray(list) ? list : []).filter(function (x) { return x && !x.draft; })[0];
+      if (!rel) { fallback(); return; }
+      if (rel.html_url) REL = rel.html_url;
       var date = rel.published_at ? new Date(rel.published_at).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "";
       meta.textContent = (rel.name || rel.tag_name) + (date ? ", released " + date : "");
       var assets = rel.assets || [];
