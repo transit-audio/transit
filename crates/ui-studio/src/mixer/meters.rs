@@ -2,7 +2,9 @@ use super::*;
 
 /// A strip's stereo meter (Fader > Meter) at `x`, spanning the fader's `travel`: the kit's
 /// vertical channel meter fed with the strip's fall-off reading, peak hold and clip latch. The
-/// engine publishes peaks only, so the RMS layer is left out. The main bus has the wider bars.
+/// engine publishes peaks only, so the RMS layer (solid `meter.ok` over the 35 percent peak, the
+/// Fader construction board's fault 4) waits on a per-channel RMS reading from the engine; the
+/// kit already paints it when given one. The main bus has the wider bars.
 pub(super) fn strip_meter(
     p: &egui::Painter,
     x: f32,

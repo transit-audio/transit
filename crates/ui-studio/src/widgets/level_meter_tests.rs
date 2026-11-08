@@ -180,3 +180,72 @@ fn the_channel_peak_fill_is_hot_only_above_zero_dbfs() {
     // Negative control: a peak at -3 dB or exactly 0 draws no hot.
     assert!(l.peak_over[1].is_none() && l.peak_over[2].is_none(), "meter.hot is never used at or below 0 dBFS");
 }
+
+/// The layer a painted shape in the first well is, by its ink (`None`: not part of the well).
+fn layer(shape: &egui::Shape, well: egui::Rect) -> Option<&'static str> {
+    let egui::Shape::Rect(r) = shape else { return None };
+    if r.rect.min.x < well.min.x - 0.01 || r.rect.max.x > well.max.x + 0.01 || r.rect.max.y <= well.min.y {
+        return None;
+    }
+    let peak = DARK.meter_ok.gamma_multiply(crate::tokens::fader::METER_PEAK_ALPHA);
+    let hot = DARK.meter_hot.gamma_multiply(crate::tokens::fader::METER_PEAK_ALPHA);
+    if (r.stroke.color == DARK.line_inset && r.stroke.width > 0.0) || r.fill == DARK.surface_inset {
+        Some("well")
+    } else if (r.fill == DARK.line || r.fill == DARK.line_strong) && r.rect.height() <= 1.01 {
+        Some("grid")
+    } else if r.fill == peak || r.fill == hot {
+        Some("peak")
+    } else if r.fill == DARK.meter_ok {
+        Some("rms")
+    } else if r.fill == DARK.text {
+        Some("hold")
+    } else {
+        None
+    }
+}
+
+/// Whether `layers` follow `fader.meterDrawOrder` (each layer after every earlier one).
+fn in_draw_order(layers: &[&str]) -> bool {
+    let rank = |l: &str| crate::tokens::fader::METER_DRAW_ORDER.iter().position(|x| *x == l).unwrap();
+    layers.windows(2).all(|w| rank(w[0]) <= rank(w[1]))
+}
+
+/// The first well's rect and the layers painted in it, for one channel `ch`.
+fn paint_one(
+    rig: &mut Rig,
+    ch: super::level_meter::Channel,
+) -> (super::level_meter::ChannelMeterLayout, egui::Rect, Vec<egui::epaint::ClippedShape>) {
+    let travel = egui::Rect::from_min_max(egui::pos2(40.0, 40.0), egui::pos2(60.0, 240.0));
+    let (l, shapes) = rig.shapes(|ui| super::level_meter::paint_channel(ui.painter(), 100.0, travel, 10.0, &[ch]));
+    let well = egui::Rect::from_min_max(egui::pos2(l.wells[0][0], l.wells[0][1]), egui::pos2(l.wells[0][2], l.wells[0][3]));
+    (l, well, shapes)
+}
+
+/// Fault 4 of the Fader construction board: two fills per bar, the peak at 35 percent
+/// (`meter.hot` at 35 percent from 0 dBFS up to a peak above it) and the RMS solid `meter.ok` on
+/// top from Y1 to its level, so a sustained signal reads as a bright bar with a paler cap.
+#[test]
+fn the_channel_meter_draws_the_rms_solid_over_the_35_percent_peak() {
+    use super::level_meter::Channel;
+    let mut rig = Rig::new();
+    let (l, well, shapes) = paint_one(&mut rig, Channel { peak_db: 2.0, rms_db: Some(-12.0), hold_db: Some(2.0), clip: false });
+    let rms = l.rms[0].expect("an RMS fill");
+    let peak = l.peaks[0].expect("a peak fill");
+    assert!(rms[1] > peak[1] && rms[3] == peak[3], "the RMS from Y1 to its level under the peak's: {rms:?} {peak:?}");
+    assert!(l.peak_over[0].is_some(), "meter.hot at 35 percent from 0 dB up to the peak");
+    let ink = |want: &str, y: f32| {
+        shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if (r.rect.min.y - y).abs() < 0.01 && layer(&s.shape, well) == Some(want) => Some(r.fill),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("the {want} rect painted"))
+    };
+    assert_eq!(ink("rms", rms[1]), DARK.meter_ok, "the RMS is solid `meter.ok`");
+    assert_eq!(ink("peak", peak[1]).a(), DARK.meter_ok.gamma_multiply(0.35).a(), "the peak at 35 percent");
+    // Negative control: the old single fill (the peak at 35 percent alone) has no solid core.
+    let (old, _, old_shapes) = paint_one(&mut rig, Channel { peak_db: 2.0, rms_db: None, hold_db: Some(2.0), clip: false });
+    assert!(old.rms[0].is_none());
+    assert!(!old_shapes.iter().any(|s| layer(&s.shape, well) == Some("rms")), "one fill: no solid core");
+}
