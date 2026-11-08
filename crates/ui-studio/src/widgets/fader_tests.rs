@@ -102,26 +102,40 @@ fn drag_shift_drag_unity_and_scroll() {
     assert_eq!(got, Some(0.0), "double-click to unity");
 }
 
+/// Whether a tick `t` sits where the Fader construction board puts it in a block whose left edge
+/// is `x0`: x 63 to 67, right of its label's right edge.
+fn tick_in_place(t: [f32; 4], label: [f32; 4], x0: f32) -> bool {
+    (t[0] - x0 - 63.0).abs() < 0.01 && (t[2] - x0 - 67.0).abs() < 0.01 && t[0] > label[2]
+}
+
+/// Fault 2 of the Fader construction board: the label right-aligned at x 60, then 3 px, then the
+/// 4 px tick (x 63 to 67), then the meter at 72; never a dash on the cap side of `0`.
 #[test]
-fn the_channel_scale_has_a_six_px_tick_beside_the_cap_column_at_every_mark() {
+fn the_channel_tick_sits_after_its_label_toward_the_meter() {
     let mut rig = Rig::new();
     // The cap at +6 and at minus infinity: the ticks stay where the board puts them either way.
     for db in [6.0, f32::NEG_INFINITY] {
         let l = rig.idle(|ui| fader::show(ui, egui::Id::new("f"), Variant::Channel, 220.0, db, false)).layout;
-        assert_eq!(l.ticks.len(), 8, "a tick at each scale mark");
-        for (i, (t, db)) in l.ticks.iter().zip(crate::tokens::fader::SCALE_LABELS).enumerate() {
-            assert_eq!(size(*t).0, 6.0, "6 px long");
+        let x0 = l.rect[0];
+        assert_eq!(l.ticks.len(), 8, "a tick with each placed label");
+        assert_eq!(l.meter.unwrap()[0] - x0, 72.0, "the meter stays at x 72");
+        for (i, (t, (text, label))) in l.ticks.iter().zip(&l.marks).enumerate() {
+            assert_eq!(size(*t).0, 4.0, "{text}: 4 px long");
             assert!((size(*t).1 - 1.0).abs() < 0.01, "one pixel row");
-            let cap_right = mid(l.track).x + 16.0;
-            assert_eq!(t[0], cap_right + 2.0, "2 px right of the cap column");
-            let y = l.track[1] + fader::taper(db.unwrap_or(f32::NEG_INFINITY)) * (l.track[3] - l.track[1]);
-            assert!((mid(*t).y - y).abs() < 0.6, "{db:?} on its mark");
-            assert!(t[2] < l.marks[i].1[0], "{db:?}: left of its label");
-            let ink = if i == 1 { DARK.text_muted } else { DARK.line_strong };
-            assert_eq!(l.tick_inks[i], ink, "{db:?}: `line.strong`, `text.muted` at 0 dB");
+            assert!(tick_in_place(*t, *label, x0), "{text}: x 63 to 67, right of the label: {t:?} {label:?} (block at {x0})");
+            assert!((label[2] - x0 - 60.0).abs() < 0.6, "{text}: right-aligned at x 60: {label:?}");
+            assert!((mid(*t).y - mid(*label).y).abs() < 0.51, "{text}: the label's center on its tick's row");
+            let ink = if text == "0" { DARK.text_muted } else { DARK.line_strong };
+            assert_eq!(l.tick_inks[i], ink, "{text}: `line.strong`, `text.muted` at 0 dB");
+            assert_eq!(l.mark_inks[i], if text == "0" { DARK.text } else { DARK.text_faint }, "{text}");
         }
+        // Negative control: the old tick (6 px, 2 right of the cap column: x 36 to 42) fails.
+        let t = l.ticks[1];
+        let old = [mid(l.track).x + 16.0 + 2.0, t[1], mid(l.track).x + 16.0 + 8.0, t[3]];
+        assert_eq!((old[0] - x0, old[2] - x0), (36.0, 42.0));
+        assert!(!tick_in_place(old, l.marks[1].1, x0), "the old tick is on the cap side of 0");
     }
-    // Negative control: the other variants draw no Channel ticks (Compact keeps its own beside the track).
+    // The other variants draw no Channel ticks (Compact keeps its own beside the track).
     for variant in [Variant::Compact, Variant::Horizontal] {
         let l = rig.idle(|ui| fader::show(ui, egui::Id::new("f"), variant, 220.0, 0.0, false)).layout;
         assert!(l.ticks.is_empty() && l.tick_inks.is_empty(), "{variant:?}");

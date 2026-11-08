@@ -26,6 +26,29 @@ fn the_fader_cap_has_a_line_at_the_value() {
     assert!(cap > s.zero_tick_y.unwrap() + 10.0, "well below the 0 dB line");
 }
 
+/// Fault 2 and 3 of the Fader construction board: at 0 dB the cap's center line, the 0 dB label's
+/// center, its tick and the meter's 0 dB grid line are one physical pixel row, at 1.0 and 1.5.
+#[test]
+fn the_cap_line_zero_label_tick_and_grid_line_share_one_pixel_row() {
+    let (mut app, ctx, mut time, t) = mixer_app();
+    for ppp in [1.0f32, 1.5] {
+        ctx.set_pixels_per_point(ppp);
+        frames(&mut app, &ctx, 3, &mut time);
+        let s = strip(&app, t);
+        let f = s.fader_layout.clone().unwrap();
+        let zero = f.marks.iter().position(|(m, _)| m == "0").unwrap();
+        let rows = |r: [f32; 4]| [(r[1] * ppp).round() as i32, (r[3] * ppp).round() as i32];
+        let tick = rows(f.ticks[zero]);
+        let grid = s.zero_tick_span.unwrap();
+        let [ca, cb] = s.cap_line_span.unwrap();
+        assert_eq!(tick, grid, "{ppp}: the 0 dB tick and the 0 dB grid line are one row");
+        assert!(ca <= tick[0] && tick[1] <= cb, "{ppp}: the cap line covers that row: {ca}..{cb} vs {tick:?}");
+        let label_y = (f.marks[zero].1[1] + f.marks[zero].1[3]) / 2.0 * ppp;
+        assert!(label_y >= tick[0] as f32 - 0.02 && label_y <= tick[1] as f32 + 0.02, "{ppp}: the 0 label's center {label_y} in {tick:?}");
+        assert_eq!(s.meter_layout.as_ref().unwrap().zero_grid_color, crate::theme::DARK.line_strong);
+    }
+}
+
 #[test]
 fn fader_and_balance_laws_round_trip() {
     use crate::mixer::{balance_of, db_to_k, k_to_db, pans_for};

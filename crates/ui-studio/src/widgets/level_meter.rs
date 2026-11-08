@@ -252,9 +252,12 @@ pub struct ChannelMeterLayout {
     pub well_fill: egui::Color32,
     #[serde(skip)]
     pub well_edge: egui::Color32,
-    /// The grid lines' ink (`line`) and the hold line's (`text`).
+    /// The grid lines' ink (`line`), the 0 dB grid line's (`line.strong`, `fader.zeroGridLine`)
+    /// and the hold line's (`text`).
     #[serde(skip)]
     pub grid_color: egui::Color32,
+    #[serde(skip)]
+    pub zero_grid_color: egui::Color32,
     #[serde(skip)]
     pub hold_color: egui::Color32,
     #[serde(skip)]
@@ -290,6 +293,7 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         well_fill: t.surface_inset,
         well_edge: t.line_inset,
         grid_color: t.line,
+        zero_grid_color: t.line_strong,
         hold_color: t.text,
         ..Default::default()
     };
@@ -305,7 +309,7 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         for m in spec::SCALE_LABELS {
             let (top, bottom) = fader::snap_rows(p, y_of(m.unwrap_or(f32::NEG_INFINITY), well), 1.0);
             let line = Rect::from_min_max(pos2(well.min.x, top), pos2(well.max.x, bottom));
-            p.rect_filled(line, 0.0, t.line);
+            p.rect_filled(line, 0.0, if m == Some(0.0) { t.line_strong } else { t.line });
             if i == 0 {
                 out.grid
                     .push(r4(Rect::from_min_max(pos2(x, top), pos2(x + channels.len() as f32 * (bar + spec::METER_GAP) - spec::METER_GAP, bottom))));

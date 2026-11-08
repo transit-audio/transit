@@ -244,7 +244,7 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLay
     }
     // The meter where the main bus fader's meter sits, so it lines up with the strips beside it.
     let travel = crate::widgets::fader::track_rect(crate::widgets::fader::Variant::Channel, a.fader);
-    let x = a.fader.min.x + crate::widgets::fader::CHANNEL_FADER_W + crate::widgets::fader::CHANNEL_SCALE_W + 6.0;
+    let x = a.fader.min.x + crate::widgets::fader::CHANNEL_METER_X;
     let d = app.main_meter;
     let meter = strip_meter(&p, x, travel, &d, true);
     let wells = meter_bounds(&meter);

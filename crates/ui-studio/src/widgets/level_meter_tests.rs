@@ -142,6 +142,7 @@ fn the_channel_meter_draws_a_well_per_channel_on_the_taper() {
     // The well, its edge, grid and hold inks and the board's corner radius.
     assert_eq!((l.well_fill, l.well_edge, l.grid_color, l.hold_color), (DARK.surface_inset, DARK.line_inset, DARK.line, DARK.text));
     assert_eq!(l.well_radius, 1.5);
+    assert_eq!(l.zero_grid_color, DARK.line_strong, "the 0 dB grid line in `line.strong` (`fader.zeroGridLine`)");
     assert!((size(l.holds[0].unwrap()).1 - 2.0).abs() < 0.01, "a 2 px hold line");
     assert!((l.reference_y - y(0.0)).abs() < 0.02);
     // Negative control: an RMS reading draws the solid layer, hot only above 0 dBFS, and a latch

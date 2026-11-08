@@ -18,14 +18,17 @@ pub const FLOOR_DB: f32 = -90.0;
 /// One wheel notch (40 px of smooth scroll) nudges this many dB.
 pub const NUDGE_DB: f32 = 0.5;
 pub const FINE: f32 = 10.0;
-/// The Channel variant's columns: fader, scale (labels right-aligned at its end), meter slot.
-pub const CHANNEL_FADER_W: f32 = 36.0;
-pub const CHANNEL_SCALE_W: f32 = 30.0;
+/// The Channel variant's columns (`fader.channelColumns`, x from the level block's left edge):
+/// the fader column, the labels' right edge, the tick, the meter's left edge.
+pub const CHANNEL_FADER_W: f32 = spec::COLUMN_FADER[1];
+pub const CHANNEL_LABEL_RIGHT: f32 = spec::COLUMN_LABEL_RIGHT;
+pub const CHANNEL_METER_X: f32 = spec::COLUMN_METER_X;
 const TICK: f32 = 4.0;
-/// The Channel variant's tick beside the cap column at each scale mark (the Mixer board: 6 px,
-/// starting 2 px right of the cap; `line.strong`, `text.muted` at 0 dB).
-pub const CHANNEL_TICK: f32 = 6.0;
-pub const CHANNEL_TICK_GAP: f32 = 2.0;
+/// The Channel variant's tick with each placed label (the Fader construction board): 4 px, 3 px
+/// after the label's right edge, toward the meter (x 63 to 67), never on the cap side where a
+/// dash before `0` reads as a minus; `line.strong`, `text.muted` at 0 dB.
+pub const CHANNEL_TICK: f32 = spec::TICK_LENGTH;
+pub const CHANNEL_TICK_GAP: f32 = spec::TICK_GAP_AFTER_LABEL;
 
 /// Fraction of travel from the top (0 at +6 dB, 1 at minus infinity) for `db`.
 pub fn taper(db: f32) -> f32 {
@@ -128,7 +131,7 @@ pub struct FaderLayout {
     /// Scale labels (Channel: the placed ones, [`placed_marks`]) or ticks (Compact): text and where
     /// it sits.
     pub marks: Vec<(String, [f32; 4])>,
-    /// The Channel variant's ticks, one per placed label (empty otherwise).
+    /// The Channel variant's ticks, one per placed label, after it toward the meter (empty otherwise).
     pub ticks: Vec<[f32; 4]>,
     /// Where the caller draws the meter (Channel only).
     pub meter: Option<[f32; 4]>,
@@ -245,19 +248,19 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
         for m in shown {
             let y = track.min.y + taper(m.unwrap_or(f32::NEG_INFINITY)) * track.height();
             let ink = if m == Some(0.0) { t.text } else { t.text_faint };
-            if variant == Variant::Channel {
-                // The tick beside the cap column, on whole physical pixel rows like the meter's grid.
-                let x = track.center().x + cw / 2.0 + CHANNEL_TICK_GAP;
-                let (top, bottom) = snap_rows(p, y, 1.0);
-                let r = Rect::from_min_max(pos2(x, top), pos2(x + CHANNEL_TICK, bottom));
-                let tick_ink = if m == Some(0.0) { t.text_muted } else { t.line_strong };
-                p.rect_filled(r, 0.0, tick_ink);
-                ticks.push(r4(r));
-                tick_inks.push(tick_ink);
-            }
             let r = if variant == Variant::Channel {
+                // The label's center, its tick and the meter's grid line share one physical pixel
+                // row; the tick sits after the label, toward the meter.
+                let (top, bottom) = snap_rows(p, y, 1.0);
+                let row = (top + bottom) / 2.0;
+                let x = rect.min.x + CHANNEL_LABEL_RIGHT + CHANNEL_TICK_GAP;
+                let tick = Rect::from_min_max(pos2(x, top), pos2(x + CHANNEL_TICK, bottom));
+                let tick_ink = if m == Some(0.0) { t.text_muted } else { t.line_strong };
+                p.rect_filled(tick, 0.0, tick_ink);
+                ticks.push(r4(tick));
+                tick_inks.push(tick_ink);
                 let role = tokens::TypeRole { size: 10.0, ..tokens::READOUT_DISPLAY };
-                super::role_text(p, &role, &label(m), ink, Align2::RIGHT_CENTER, pos2(rect.min.x + CHANNEL_FADER_W + CHANNEL_SCALE_W, y))
+                super::role_text(p, &role, &label(m), ink, Align2::RIGHT_CENTER, pos2(rect.min.x + CHANNEL_LABEL_RIGHT, row))
             } else {
                 let r = Rect::from_min_max(pos2(track.max.x + 6.0, y - 0.5), pos2(track.max.x + 6.0 + TICK, y + 0.5));
                 p.rect_filled(r, 0.0, t.line_strong);
@@ -270,8 +273,8 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
     p.rect_filled(cap, spec::CAP_RADIUS, t.knob_cap_active);
     p.rect_stroke(cap, spec::CAP_RADIUS, Stroke::new(1.0, t.ink_arrow), StrokeKind::Inside);
     p.rect_filled(center_line, 0.0, t.text);
-    let meter = (variant == Variant::Channel)
-        .then(|| r4(Rect::from_min_max(pos2(rect.min.x + CHANNEL_FADER_W + CHANNEL_SCALE_W + 6.0, track.min.y), pos2(rect.max.x, track.max.y))));
+    let meter =
+        (variant == Variant::Channel).then(|| r4(Rect::from_min_max(pos2(rect.min.x + CHANNEL_METER_X, track.min.y), pos2(rect.max.x, track.max.y))));
     FaderLayout {
         rect: r4(rect),
         variant,

@@ -348,7 +348,7 @@ fn the_open_fx_list_lies_inside_the_docked_pane() {
 }
 
 #[test]
-fn every_strip_draws_the_scale_ticks_beside_its_cap_column_in_both_variants() {
+fn every_strip_draws_the_scale_ticks_after_its_labels_in_both_variants() {
     let (mut app, ctx, mut time, a) = mixer_app();
     for full in [false, true] {
         if full {
@@ -357,13 +357,17 @@ fn every_strip_draws_the_scale_ticks_beside_its_cap_column_in_both_variants() {
         let s = strip(&app, a);
         let f = s.fader_layout.clone().unwrap();
         let well = s.meter_layout.as_ref().unwrap().wells[0];
-        assert_eq!(f.ticks.len(), 8, "full {full}: a tick per scale mark");
-        for (t, (_, label)) in f.ticks.iter().zip(&f.marks) {
-            assert!(t[0] >= f.cap[2] && t[2] < label[0] && t[2] < well[0], "full {full}: between the cap column and the label: {t:?}");
+        let placed = crate::widgets::fader::placed_marks(f.track[3] - f.track[1]);
+        assert_eq!(f.ticks.len(), placed.len(), "full {full}: a tick with each placed label");
+        let x0 = f.rect[0];
+        for (t, (text, label)) in f.ticks.iter().zip(&f.marks) {
+            assert!(t[0] > label[2] && t[2] < well[0], "full {full}: {text}: between its label and the meter: {t:?}");
+            assert_eq!((t[0] - x0, t[2] - x0), (63.0, 67.0), "full {full}: {text}: x 63 to 67");
         }
-        assert_eq!(f.tick_inks[1], DARK.text_muted, "the 0 dB tick");
+        let zero = f.marks.iter().position(|(t, _)| t == "0").unwrap();
+        assert_eq!(f.tick_inks[zero], DARK.text_muted, "the 0 dB tick");
         // Negative control: every other tick is `line.strong`, never the 0 dB ink.
-        assert!(f.tick_inks.iter().enumerate().all(|(i, c)| (i == 1) == (*c == DARK.text_muted)));
+        assert!(f.tick_inks.iter().enumerate().all(|(i, c)| (i == zero) == (*c == DARK.text_muted)));
     }
 }
 
