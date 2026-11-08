@@ -16,14 +16,17 @@ use std::collections::{BTreeMap, BinaryHeap};
 use transit_midi::{CtrlEvent, CtrlKind, Note, PPQ, Sequence};
 
 const CMD: &str = "session.open";
-/// Largest `project.xml` read, uncompressed (a 30-minute note-only project is about 3 MB).
-const MAX_XML_BYTES: u64 = 256 << 20;
-/// Most XML nodes parsed.
-const MAX_NODES: u32 = 16_000_000;
+/// Largest `project.xml` read, uncompressed (real exports: up to about 5 MB).
+const MAX_XML_BYTES: u64 = 64 << 20;
+/// Most `<` and `=` in the whole text. roxmltree reserves a node per `<` and an attribute per `=`
+/// before it parses anything (`nodes_limit` is checked later), so both are counted first (real
+/// exports: up to 53,000 and 184,000).
+const MAX_NODES: u32 = 1_000_000;
 /// Deepest element nesting and most attributes on one element (real projects: 12 and 10). The
 /// parser recurses per level and checks attributes pairwise, so both are refused before it runs.
 const MAX_DEPTH: usize = 64;
 const MAX_ATTRS: usize = 64;
+const MAX_EQUALS: usize = 3_000_000;
 /// Most notes and controller events in the whole project, loops unrolled.
 const MAX_EVENTS: usize = 4_000_000;
 /// Most tempo and meter changes (each meter is placed by walking the ones before it, in time order).
@@ -87,6 +90,10 @@ pub fn read_dawproject(archive: impl std::io::Read + std::io::Seek, name: &str) 
 /// it never sees deeper than this pass does.
 fn check_shape(xml: &str) -> Result<()> {
     let b = xml.as_bytes();
+    let count = |c: u8| b.iter().filter(|&&x| x == c).count();
+    if count(b'<') > MAX_NODES as usize || count(b'=') > MAX_EQUALS {
+        return Err(crate::cmd::bad(CMD, "DAWproject: project.xml has too many elements or attributes"));
+    }
     let find = |from: usize, pat: &[u8]| b.get(from..).and_then(|r| r.windows(pat.len()).position(|w| w == pat)).map(|p| from + p + pat.len());
     let (mut i, mut depth) = (0, 0usize);
     while let Some(lt) = b.get(i..).and_then(|r| r.iter().position(|&c| c == b'<')) {
@@ -189,6 +196,15 @@ fn beats(n: Node, attr: &str) -> Option<f64> {
 
 fn ticks(beats: f64) -> i64 {
     (beats * f64::from(PPQ)).round() as i64
+}
+
+/// An `xs:boolean`: `true`, `false`, `1` or `0`.
+fn boolean(v: Option<&str>) -> Option<bool> {
+    match v.map(str::trim) {
+        Some("true" | "1") => Some(true),
+        Some("false" | "0") => Some(false),
+        _ => None,
+    }
 }
 
 fn seconds(n: Node) -> bool {
@@ -395,7 +411,7 @@ fn default_channel(c: Node) -> bool {
         Some("decibel") => at("Volume", 0.0),
         _ => at("Volume", 1.0),
     };
-    unity && at("Pan", 0.5) && child(c, "Mute").and_then(|m| m.attribute("value")) != Some("true")
+    unity && at("Pan", 0.5) && boolean(child(c, "Mute").and_then(|m| m.attribute("value"))) != Some(true)
 }
 
 /// A channel's volume (linear or dB), pan (normalized, as a balance on stereo tracks), mute and solo.
@@ -425,8 +441,8 @@ fn mixer(cx: &mut Cx, m: &mut transit_model::Mixer, c: Node) {
             _ => cx.skip("pans in other units", 1),
         }
     }
-    m.mute = child(c, "Mute").and_then(|n| n.attribute("value")) == Some("true");
-    m.solo = c.attribute("solo") == Some("true");
+    m.mute = boolean(child(c, "Mute").and_then(|n| n.attribute("value"))) == Some(true);
+    m.solo = boolean(c.attribute("solo")) == Some(true);
 }
 
 /// A `Lanes` timeline of the arrangement, scoped to `track` (a `track` attribute rescopes it).
@@ -471,6 +487,7 @@ fn lanes(
             },
             "Audio" | "Warps" => cx.skip("audio clips", 1),
             "Video" => cx.skip("video clips", 1),
+            "ClipSlot" => cx.skip("clip launcher clips", c.descendants().filter(|d| d.has_tag_name("Clip")).count()),
             "Notes" => cx.skip("note timelines outside clips", 1),
             _ => {}
         }
@@ -501,16 +518,39 @@ fn clip(cx: &mut Cx, k: Node) -> Result<Option<ClipIn>> {
     let Some(content) = content(cx, k)? else { return Ok(None) };
     let lp = beats(k, "loopStart").zip(beats(k, "loopEnd")).map(|(a, b)| (ticks(a), ticks(b)));
     let stop = beats(k, "playStop").map(ticks);
-    let seq = window(cx, content, ticks(play), ticks(len), lp, stop)?;
+    let seq = window(cx, content.resolved(), ticks(play), ticks(len), lp, stop)?;
     let mut name = k.attribute("name").unwrap_or("").to_string();
     transit_model::truncate_chars(&mut name, transit_model::MAX_NAME_CHARS);
-    Ok(Some(ClipIn { start: ticks(time), len: ticks(len).max(1), name, muted: k.attribute("enable") == Some("false"), seq }))
+    Ok(Some(ClipIn { start: ticks(time), len: ticks(len).max(1), name, muted: boolean(k.attribute("enable")) == Some(false), seq }))
+}
+
+/// A clip's content before its timbre is resolved: the timbre points and the spans of the notes
+/// that carry them are kept until the whole clip is read, so notes in sibling timelines compete.
+#[derive(Default)]
+struct Content {
+    seq: Sequence,
+    timbre: Vec<Timbre>,
+    spans: Vec<(i64, u8, i64, u8)>,
+}
+
+impl Content {
+    /// The events with the timbre points their notes own as channel CC74.
+    fn resolved(mut self) -> Sequence {
+        own_timbre(&mut self.timbre, self.spans);
+        self.seq.ctrls.extend(self.timbre.into_iter().map(|t| CtrlEvent {
+            tick: t.tick,
+            channel: t.channel,
+            kind: CtrlKind::Cc(74),
+            value: t.value,
+        }));
+        self.seq
+    }
 }
 
 /// The note and controller events of a clip's content timeline, in content ticks. None when it
 /// holds none of them.
-fn content(cx: &mut Cx, n: Node) -> Result<Option<Sequence>> {
-    let mut seq = Sequence::default();
+fn content(cx: &mut Cx, n: Node) -> Result<Option<Content>> {
+    let mut out = Content::default();
     let mut any = false;
     for c in n.children().filter(Node::is_element) {
         if seconds(c) {
@@ -519,27 +559,30 @@ fn content(cx: &mut Cx, n: Node) -> Result<Option<Sequence>> {
         }
         match c.tag_name().name() {
             "Notes" => {
-                notes(cx, c, &mut seq)?;
+                notes(cx, c, &mut out)?;
                 any = true;
             }
             "Points" => match midi_points(cx, c, 0, None, 0)? {
                 Some(evs) => {
-                    seq.ctrls.extend(evs);
+                    out.seq.ctrls.extend(evs);
                     any = true;
                 }
                 None => cx.skip("parameter automation lanes", 1),
             },
             "Lanes" => {
                 if let Some(inner) = content(cx, c)? {
-                    merge(&mut seq, inner, 0);
+                    merge(&mut out.seq, inner.seq, 0);
+                    out.timbre.extend(inner.timbre);
+                    out.spans.extend(inner.spans);
                     any = true;
                 }
             }
             "Clips" => {
+                // A nested clip has its own window: its timbre is resolved inside it.
                 for k in kids(c, "Clip") {
                     if let Some(inner) = clip(cx, k)? {
                         if !inner.muted {
-                            merge(&mut seq, inner.seq, inner.start);
+                            merge(&mut out.seq, inner.seq, inner.start);
                         }
                         any = true;
                     }
@@ -550,7 +593,7 @@ fn content(cx: &mut Cx, n: Node) -> Result<Option<Sequence>> {
             _ => {}
         }
     }
-    Ok(any.then_some(seq))
+    Ok(any.then_some(out))
 }
 
 fn merge(into: &mut Sequence, from: Sequence, at: i64) {
@@ -573,11 +616,8 @@ struct Timbre {
 }
 
 /// The notes of a `Notes` timeline with their per-note expression: pressure becomes polyphonic
-/// aftertouch; timbre becomes channel CC74, owned by the most recently started note still sounding
-/// (the highest pitch among notes that start together), so overlapping notes do not fight over it.
-fn notes(cx: &mut Cx, ns: Node, seq: &mut Sequence) -> Result<()> {
-    let mut timbre = Vec::new();
-    let mut spans = Vec::new();
+/// aftertouch; timbre points are kept for the clip to resolve ([`Content::resolved`]).
+fn notes(cx: &mut Cx, ns: Node, out: &mut Content) -> Result<()> {
     for n in kids(ns, "Note") {
         let key = n.attribute("key").and_then(|k| k.trim().parse::<u8>().ok()).filter(|k| *k < 128);
         let channel = n.attribute("channel").map_or(Some(0), |c| c.trim().parse::<u8>().ok()).filter(|c| *c < 16);
@@ -587,7 +627,7 @@ fn notes(cx: &mut Cx, ns: Node, seq: &mut Sequence) -> Result<()> {
         };
         let (start, length) = (ticks(t), ticks(d).max(1));
         cx.count(1)?;
-        seq.notes.push(Note {
+        out.seq.notes.push(Note {
             pitch,
             velocity: num(n, "vel").map_or(100, |v| midi7(v).max(1)) as u8,
             release_velocity: num(n, "rel").map_or(64, midi7) as u8,
@@ -603,16 +643,16 @@ fn notes(cx: &mut Cx, ns: Node, seq: &mut Sequence) -> Result<()> {
             }
             match child(p, "Target").and_then(|t| t.attribute("expression")) {
                 Some("timbre") => {
-                    let before = timbre.len();
-                    for (tick, value) in normalized(cx, p, start)? {
-                        timbre.push(Timbre { tick, note: (start, pitch), channel, value: midi7(value) });
+                    let before = out.timbre.len();
+                    for (tick, value) in normalized(cx, p, start, false)? {
+                        out.timbre.push(Timbre { tick, note: (start, pitch), channel, value: midi7(value) });
                     }
-                    if timbre.len() > before {
-                        spans.push((start, pitch, start.saturating_add(length), channel));
+                    if out.timbre.len() > before {
+                        out.spans.push((start, pitch, start.saturating_add(length), channel));
                     }
                 }
                 Some("pressure") => match midi_points(cx, p, start, Some(pitch), channel)? {
-                    Some(evs) => seq.ctrls.extend(evs),
+                    Some(evs) => out.seq.ctrls.extend(evs),
                     None => cx.skip("per-note gain, pan, transpose and formant curves", 1),
                 },
                 _ => cx.skip("per-note gain, pan, transpose and formant curves", 1),
@@ -620,8 +660,6 @@ fn notes(cx: &mut Cx, ns: Node, seq: &mut Sequence) -> Result<()> {
         }
         cx.skip("timelines timed in seconds", kids(n, "Lanes").filter(|l| seconds(*l)).count());
     }
-    own_timbre(&mut timbre, spans);
-    seq.ctrls.extend(timbre.into_iter().map(|t| CtrlEvent { tick: t.tick, channel: t.channel, kind: CtrlKind::Cc(74), value: t.value }));
     Ok(())
 }
 
@@ -655,8 +693,9 @@ fn own_timbre(timbre: &mut Vec<Timbre>, mut spans: Vec<(i64, u8, i64, u8)>) {
 }
 
 /// The `(tick, value)` points of a normalized `Points` timeline, `base` ticks added. Non-normalized
-/// units give none (counted).
-fn normalized(cx: &mut Cx, p: Node, base: i64) -> Result<Vec<(i64, f64)>> {
+/// units give none (counted). With `ints`, an `IntegerPoint` (a program number, 0..=127) is read
+/// too, as the normalized value that maps back to it.
+fn normalized(cx: &mut Cx, p: Node, base: i64, ints: bool) -> Result<Vec<(i64, f64)>> {
     // Bitwig writes per-note pressure as "linear" 0..1, the same range as "normalized".
     if p.attribute("unit").is_some_and(|u| u != "normalized" && u != "linear") {
         cx.skip("controller lanes in other units", 1);
@@ -667,6 +706,10 @@ fn normalized(cx: &mut Cx, p: Node, base: i64) -> Result<Vec<(i64, f64)>> {
         match pt.tag_name().name() {
             "RealPoint" => match (beats(pt, "time"), num(pt, "value")) {
                 (Some(t), Some(v)) => out.push((base.saturating_add(ticks(t)), v)),
+                _ => cx.skip("controller points with bad values", 1),
+            },
+            "IntegerPoint" if ints => match (beats(pt, "time"), pt.attribute("value").and_then(|v| v.trim().parse::<i64>().ok())) {
+                (Some(t), Some(v)) => out.push((base.saturating_add(ticks(t)), v.clamp(0, 127) as f64 / 127.0)),
                 _ => cx.skip("controller points with bad values", 1),
             },
             "Target" => {}
@@ -695,7 +738,7 @@ fn midi_points(cx: &mut Cx, p: Node, base: i64, key: Option<u8>, channel: u8) ->
     };
     let Some(kind) = kind else { return Ok(None) };
     let mut out: Vec<CtrlEvent> = Vec::new();
-    for (tick, v) in normalized(cx, p, base)? {
+    for (tick, v) in normalized(cx, p, base, kind == CtrlKind::Program)? {
         let value =
             if kind == CtrlKind::PitchBend { ((2.0 * v.clamp(0.0, 1.0) - 1.0) * 8192.0).round().clamp(-8192.0, 8191.0) as i32 } else { midi7(v) };
         if out.last().is_none_or(|e| e.value != value) {
@@ -814,6 +857,7 @@ fn place(cx: &mut Cx, s: &mut Session, track: TrackId, c: ClipIn, overlaps: bool
         }
         (start_tick, len) = (0, len - cut);
         if len <= 0 {
+            cx.skip("clips before the start of the arrangement", 1);
             return Ok(());
         }
     }

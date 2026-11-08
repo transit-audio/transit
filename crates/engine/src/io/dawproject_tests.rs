@@ -409,12 +409,12 @@ fn n2_nothing_is_dropped_without_a_count() {
     let (s, _) = read(&notes_track(wrapped));
     let kinds: Vec<_> = seq(only_clip(&s)).ctrls.iter().map(|e| e.kind).collect();
     assert_eq!(kinds, vec![CtrlKind::PolyPressure(60), CtrlKind::Cc(74)]);
-    // Scenes, a bare channel, a video clip, integer points and overlapping clips are counted.
+    // Scenes, a bare channel, a video clip, boolean points and overlapping clips are counted.
     let lanes = r#"<Lanes track="t1"><Clips>
         <Clip time="0" duration="4"><Notes><Note time="3" duration="1" key="60" vel="1"/></Notes></Clip>
         <Clip time="2" duration="4"><Notes><Note time="0" duration="1" key="72" vel="1"/></Notes></Clip>
         <Clip time="8" duration="4"><Video path="v.mp4"/></Clip></Clips>
-        <Points><Target expression="programChange" channel="0"/><IntegerPoint time="0" value="5"/></Points></Lanes>"#;
+        <Points><Target expression="channelController" channel="0" controller="64"/><BoolPoint time="0" value="true"/></Points></Lanes>"#;
     let xml = project(&format!(r#"{PIANO}<Channel role="effect" id="fx"><Devices><BuiltinDevice deviceName="Reverb"/></Devices></Channel>"#), lanes).replace(
         "</Arrangement>",
         r#"</Arrangement><Scenes><Scene name="A"><Lanes><ClipSlot track="t1"><Clip time="0" duration="4"><Notes/></Clip></ClipSlot></Lanes></Scene></Scenes>"#,
@@ -470,4 +470,77 @@ fn n6_a_clip_before_zero_keeps_its_notes_in_place() {
     let got: Vec<_> = seq(c).notes.iter().map(|n| (n.start, n.pitch)).collect();
     assert_eq!(got, vec![(0, 64)], "the note at absolute beat 0 stays at 0");
     assert!(report.iter().any(|r| r.ends_with("1 notes before the start of the arrangement")), "{report:?}");
+}
+
+// ─── The second refutation review (Kimi, on 9ca2a905): each finding fails without its fix ───
+
+#[test]
+fn k1_the_parser_cannot_be_made_to_reserve_more_than_the_caps() {
+    // roxmltree reserves a node per `<` and an attribute per `=` in the whole text before parsing.
+    let equals = format!("<Project>{}</Project>", "=".repeat(MAX_EQUALS + 1));
+    assert!(err_of(&equals).contains("too many"), "{}", err_of(&equals));
+    let nodes = format!("<Project>{}</Project>", "<a/>".repeat(MAX_NODES as usize));
+    assert!(err_of(&nodes).contains("too many"), "{}", err_of(&nodes));
+}
+
+#[test]
+fn k1_shape_variants_still_hit_the_caps() {
+    let deep = format!("{}{}", "<x>".repeat(70), "</x>".repeat(70));
+    for xml in [
+        format!("\u{feff}<!-- <x> --><Project><![CDATA[<x>]]><?p <x>?><Lanes>{deep}</Lanes></Project>"),
+        format!("<?xml version=\"1.0\"?><Project><Lanes>  {deep}  </Lanes></Project>"),
+    ] {
+        let err = std::thread::Builder::new().stack_size(1 << 20).spawn(move || err_of(&xml)).unwrap().join().unwrap();
+        assert!(err.contains("nested more than"), "{err}");
+    }
+    let attrs: String = (0..65).map(|i| format!(" a{i} = '1 > 0'")).collect();
+    assert!(err_of(&format!("<Project{attrs}/>")).contains("attributes"));
+    for xml in ["<Project><!--", "<Project><![CDATA[x", "<Project><?p", "<Project a='x>", "<Project></Project></x>"] {
+        assert!(!err_of(xml).is_empty(), "{xml}");
+    }
+}
+
+#[test]
+fn k2_xml_booleans_written_as_digits() {
+    let structure = PIANO.replace(r#"solo="true""#, r#"solo="1""#).replace(r#"<Mute value="true""#, r#"<Mute value="1""#);
+    let clip = r#"<Clip time="0" duration="1" enable="0"><Notes><Note time="0" duration="1" key="60"/></Notes></Clip>"#;
+    let (s, _) = read(&project(&structure, &format!(r#"<Lanes track="t1"><Clips>{clip}</Clips></Lanes>"#)));
+    assert_eq!((s.tracks[0].mixer.mute, s.tracks[0].mixer.solo, only_clip(&s).muted), (true, true, true));
+}
+
+#[test]
+fn k3_program_changes_as_integer_points() {
+    let clip =
+        r#"<Clip time="0" duration="1"><Points><Target expression="programChange" channel="0"/><IntegerPoint time="0" value="5"/></Points></Clip>"#;
+    let (s, report) = read(&notes_track(clip));
+    let got: Vec<_> = seq(only_clip(&s)).ctrls.iter().map(|e| (e.tick, e.kind, e.value)).collect();
+    assert_eq!(got, vec![(0, CtrlKind::Program, 5)]);
+    assert!(report.is_empty(), "{report:?}");
+}
+
+#[test]
+fn k4_timbre_ownership_crosses_sibling_notes_timelines() {
+    let clip = r#"<Clip time="0" duration="4"><Lanes>
+      <Notes><Note time="0" duration="2" key="60"><Points><Target expression="timbre"/><RealPoint time="1.25" value="0.2"/></Points></Note></Notes>
+      <Notes><Note time="1" duration="0.5" key="67"><Points><Target expression="timbre"/><RealPoint time="0" value="0.8"/></Points></Note></Notes>
+    </Lanes></Clip>"#;
+    let (s, _) = read(&notes_track(clip));
+    let got: Vec<_> = seq(only_clip(&s)).ctrls.iter().filter(|e| e.kind == CtrlKind::Cc(74)).map(|e| (e.tick, e.value)).collect();
+    assert_eq!(got, vec![(960, 102)], "the older note's point at 1.25 must not fight the newer sounding note");
+}
+
+#[test]
+fn k5_a_clip_slot_in_the_arrangement_is_counted() {
+    let lanes =
+        r#"<Lanes track="t1"><ClipSlot><Clip time="0" duration="1"><Notes><Note time="0" duration="1" key="60"/></Notes></Clip></ClipSlot></Lanes>"#;
+    let (s, report) = read(&project(PIANO, lanes));
+    assert!(s.tracks[0].clips().is_empty());
+    assert_eq!(report, vec!["Not imported from the DAWproject: 1 clip launcher clips"]);
+}
+
+#[test]
+fn k6_an_empty_clip_wholly_before_zero_is_counted() {
+    let (s, report) = read(&notes_track(r#"<Clip time="-4" duration="2"><Notes/></Clip>"#));
+    assert!(s.tracks[0].clips().is_empty());
+    assert_eq!(report, vec!["Not imported from the DAWproject: 1 clips before the start of the arrangement"]);
 }
