@@ -527,8 +527,8 @@ Sampler takes it anywhere in its window). While you drag from the browser, the p
 is outlined. A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
 drop, so nothing behind it is reached. Anywhere else, a browser drag lands on the track lane,
 header, mixer strip or device chain where you let go, and a file from the file manager is imported
-into the arrangement at the cursor (a `.transit` file opens as the session, a MIDI file imports as
-MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
+into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as the session, a MIDI
+file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
 platforms it lands as soon as the pointer moves after you let go (see the known issues).
 
 ## Resonator

@@ -269,7 +269,7 @@ fn services(logger: Option<&'static logging::AppLogger>) -> Services {
                 return d.pick_folder().map(|p| p.to_string_lossy().into_owned());
             }
             let d = match purpose {
-                "session.open" => d.add_filter("Session", &["transit"]),
+                "session.open" => d.add_filter("Session", &["transit", "dawproject"]),
                 // A hosted plug-in's header strip: Load… (issue #68).
                 "plugin.preset" => d.add_filter("Plug-in preset", &["vstpreset", "clappreset"]),
                 _ => d.add_filter("Audio", &["wav", "wave", "aif", "aiff", "flac", "mp3", "ogg"]),

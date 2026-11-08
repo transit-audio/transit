@@ -315,6 +315,8 @@ pub fn load_sampler_bytes(e: &mut Engine, track: TrackId, name: &str, bytes: &[u
 
 mod midi;
 pub use midi::{export_midi, import_midi_bytes};
+mod dawproject;
+pub use dawproject::{is_dawproject, open_dawproject, read_dawproject};
 
 /// Dropped bytes as a Sampler zone's source (ADR 0041), one undo step.
 pub use crate::cmd::sampler_patch::load_zone_bytes;
