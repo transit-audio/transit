@@ -1,6 +1,6 @@
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed)
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03 and 2026-11-08
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
@@ -871,3 +871,224 @@ screenshots replace the mockup after slice 1 lands; the existing #270/#271 scope
 the full Instrument editor and SFZ. The Implementation section and #269 row carry this pointer.
 All earlier decisions and judging responses remain in force except where this amendment
 explicitly replaces the single-set slicing workflow.
+
+## Amendment 2026-11-08: Slices and Instrument semantics (#269, #270)
+
+Amended with the maintainer: the coordinator's decisions, confirmed at landing. The lane briefs
+for the Slices and Instrument views found twelve semantics this record did not state, and each
+brief took a default so that its lane could start. This amendment decides them and replaces
+those defaults; where a brief and this text differ, this text wins. It changes no earlier rule
+except where an item says it replaces one. The matrix, the core's selection order and ADR 0034
+are unchanged. Two rules recur and are stated once:
+
+- **Checked when set, clamped when used.** A value is checked by the edit that sets it, and an
+  over-limit value is refused there, never clamped. A later edit of something else (a marker
+  move, a key-range drag, a loop change) is never refused because of it: the stored value is
+  kept, playback uses the clamped value defined below, and the state queries report both, so
+  the UI can warn. The patch validator accepts a stored value that is only clamped at use, so a
+  file never loads as an invalid (silent) patch because of one.
+- **The engine never guesses UI state.** Where a default depends on the selection or the edit
+  cursor, the UI computes it and passes it explicitly.
+
+`mix.sampler_state {track?}` is a new read-only query reporting the patch as stored plus, per
+zone, the used values named below (`loop_used`, `crossfade_used`, `fades_used`) and the
+normalized seed. `mix.sampler_slice_state` reports the same used values for slice-bound zones.
+
+**1. Per-slice loop.** A slice-bound zone (a zone with a slice binding, normally a pad's) may loop Off,
+Forward or Ping-pong, always over its whole slice. It is stored in that zone's existing
+`loop_mode`; no field is added. For a slice-bound zone the plan compiler derives the region
+from the bound slice in its own set (its start marker to the next boundary, the last slice to
+E) and, when looping, `loop_start` = region start and `loop_end` = region end. Its stored
+`start`, `end`, `loop_start` and `loop_end` are not read for playback while the binding exists,
+so a marker move or remove changes the region and loop of every zone bound to an affected slice
+in the same undo step and nothing can drift. Loop points inside a slice are deferred (item 12);
+the Instrument view's zone waveform shows a slice-bound zone's derived region and loop with
+handles that do not drag, marked with the same lock as a pad-bound zone's key-map edges.
+
+A loop requires Gate, for every new-patch zone and not only slices. An edit that sets a loop
+mode other than Off on a One-shot zone is refused unless the same edit sets Gate; an edit that
+sets One-shot on a looping zone is refused unless the same edit sets the loop Off. The text is
+`A one-shot cannot loop: choose Gate, or turn the loop off.` The Slices view's Loop and
+Ping-pong presses send the loop mode and Gate in one edit, one undo step restoring both; its
+One-shot press on a looping slice sends nothing and shows that refusal as an error banner. On
+load, a One-shot zone whose stored loop mode is not Off is accepted and plays as a one-shot
+without looping (the body: a one-shot disables looping); `loop_used` reports `off`.
+
+The body requires a loop of at least two frames. Setting a loop on a one-frame slice is refused
+(`Slice 4 is one frame long, too short to loop.`). A later marker edit that shortens a looping
+slice to one frame stands; the slice plays unlooped and `loop_used` reports `off`. Ping-pong
+with a nonzero crossfade remains refused (body); the Ping-pong press sends crossfade 0 in the
+same edit, and its undo restores the crossfade. Every per-slice loop change is one undo step.
+
+**2. Crossfade read-back.** The zone gains `crossfade`, the body's X: an integer count of
+native source frames (stored like every source position, unsigned 64-bit), default 0, written
+only when nonzero. Commands take frames. The UI edits milliseconds with one decimal: an entry
+of m ms becomes `X = floor(m * r / 1000 + 1/2)` with r the zone source's native rate (ties
+upward), and the field shows `X * 1000 / r` rounded to one decimal with X in its tooltip. This
+replaces design round 2's "converted at the session rate": X counts source frames, and at
+original pitch a source frame lasts 1/r seconds. With L = `loop_end - loop_start` of the zone's
+effective loop (a slice's length for a slice loop), the edit that sets X refuses
+`X > floor(L/2)` and names the maximum (`Crossfade is at most 4.7 ms (226 frames) for this
+loop.`). When a later edit makes `2X > L`, X is kept and playback uses
+`crossfade_used = min(X, floor(L/2))` in place of X in every equation of "Loop points and
+crossfade reference"; the queries report `crossfade` and `crossfade_used` in frames, and the UI
+shows the used value with the warning line `Slice 7 is 9.4 ms long now: 4.7 ms of crossfade is
+used.` (the Instrument view says `Zone` and its label). `crossfade_used` is 0 whenever the
+effective loop mode is not Forward.
+
+**3. Edge-fade representation.** Each zone gains `fades {key_lo, key_hi, vel_lo, vel_hi}`:
+four widths in steps of the zone's own units (keys or velocities), integers 0 to 127, default
+0, written only when one is nonzero. A width n at the low edge fades the n values `lo` to
+`lo+n-1`; the value k steps from the edge (k = 0 at `lo`) has the factor `(k + 1)/(n + 1)`, and
+`lo+n` is at full level; the high edge mirrors downward from `hi`. These are the body's ADR 0034
+factors, applied as the body says: to the velocity, after selection by the original key and
+velocity, never to voice gain. A fade never moves a note between layers and never extends a
+zone. With `f_key` the key factor (`(k + 1)/(n + 1)` inside a key fade, 1 elsewhere) and
+`f_vel` likewise, the selected zone's voice plays velocity `max(1, round(v * f_key * f_vel))`,
+computed exactly as a ratio of integers and rounded once, ties upward; velocity sensitivity
+applies to that value. The coordinator's phrase "linear gain ramps" means this
+linear ramp of velocity factors; a post-voice gain ramp would contradict the body.
+
+The edit that sets the widths refuses `lo_w + hi_w > hi - lo` on either axis, and any nonzero
+width on a pad-bound zone (one key, one layer). When a later range edit leaves the widths too
+wide, they are kept and playback uses `fades_used`: the low width clamped to the span, then the
+high width clamped to what remains (the high one shrinks first). Conversion to ADR 0034, without
+changing it: a rack zone's absolute edges are `fade_low = low + lo_w` and `fade_high = high -
+hi_w`, and the same `(k + 1)/(n + 1)` factors result on both sides. A pad-bound zone's
+`fades_used` are all 0 whatever it stores (binding is a different edit). Expand to rack creates
+member zones without fades (body), so it never needs this conversion for a pad.
+
+**4. Per-group random state.** One patch seed. With s the normalized seed (item 11) and g the
+group id (0 to 255), the random state of group g starts at
+`s ^ (g + 1).wrapping_mul(0x9E3779B9)` in 32-bit unsigned arithmetic, and at 1 when that is 0
+(zero is xorshift32's fixed point). Each draw is the body's xorshift32 step (13, 17, 5) on that
+state; the alternative is `word % count`. A group draws once per admitted layer trigger; when
+one note admits several layers of the same group, they draw in ascending layer order. Sequential
+counters are kept per group and layer, starting at 0. A group without a stored entry is
+Sequential. This derivation is part of the format: files play the same everywhere, and changing
+it later requires a new schema version or a new `Session::needs` entry. It does not change the
+matrix's seeded note random.
+
+**5. Beat-grid BPM override.** The loop gains `grid_bpm`, optional, finite, 5 to 1000 BPM (the
+tempo map's range), written only when set. The grid's tempo is, in priority: an explicit Bars
+count (the derived BPM, body), else `grid_bpm`, else the file's valid `acid` tempo, else the
+session tempo at the insertion point. The insertion point and its meter come from the `at` tick
+that `mix.sampler_slice_detect` takes, which the UI fills by item 9's rule; absent, it is tick 0.
+Like Bars, `grid_bpm` never changes Slice to MIDI's beat length or timing modes. In the Grid
+controls a BPM field follows Bars: empty, it shows the tempo in use and its origin (`acid 96.00`,
+`session 120.00`); typing sets `grid_bpm`, clearing returns to none; while Bars is explicit it
+shows the derived BPM read-only; it dims with the other Grid controls. A change travels with
+Detect and is stored by Replace markers (item 7). The round-2 board lacks the field; the design
+README gains it in the design landing.
+
+**6. Pad assignment for Slices to pads.** For the showing set of n slices at root r (refused
+when `r + n > 128`), slice i plays trigger note r+i, and pads are chosen as follows, pads
+counted in bank order (A1 to A16, then B1, as numbered above):
+
+1. Pads bound to slices of the showing set count as free for this run: the run replaces its own
+   previous binding.
+2. If the pad holding note r+i (stored or default) is empty or slice-bound (either set), slice i
+   takes it. If it is a loose occupied pad, the run is refused naming it (`Pad B3 already plays
+   E3`), as the body requires.
+3. The remaining slices, ascending, take the lowest free pads not taken in step 2, and each such
+   pad's trigger note becomes r+i. No pad held r+i, so notes stay unique.
+4. Pads bound to the showing set and not taken are unbound (they empty; their notes stay) and
+   reported. A taken pad that was bound to the hidden set is reported as replaced.
+
+The pads available to the run are the free pads (step 1 included) plus the pads step 2 takes.
+When fewer than n are available (occupied pads would exceed 64), the run is refused before any
+change with a notice naming both counts (`Slices to pads needs 9 pads; 6 are free.`); nothing
+is truncated. A taken empty pad gets the new-pad defaults; a taken occupied pad
+keeps its zone identity and settings, as the body's drag does. `preview: true` returns the same
+plan and changes nothing. The whole run is one undo step.
+
+**7. Detection candidate lifecycle.** At most one candidate per track. Detect produces it and a
+newer Detect cancels and replaces it. It is stale after any change to that track's patch,
+including undo and redo; Replace markers on a stale candidate refuses and says why (`The patch
+changed after this detection: detect again.`), and on a pending one says `Still analyzing.`. It
+is discarded by `mix.sampler_slice_discard` (the UI's **Keep current**), by Replace markers, by
+removing or replacing the track's instrument, and by closing or opening a session. It is never
+saved, autosaved or put in the undo history; Detect and discard are not undo steps. The detector
+settings a change in the Detect panel makes travel with Detect and are stored by Replace (one
+undo step), so a settings change never makes its own candidate stale; Keep current returns the
+panel to the stored settings. The bench and every action use the current Auto set until Replace.
+
+**8. Touching S in Auto.** In Auto, a move or remove aimed at the fixed start marker copies
+Auto's markers to Manual and switches to Manual (the body's rule) as one undo step; S itself
+does not change, and the result reports `fixed: true` beside `copied_auto: true`. It is a
+successful edit, not a refusal. In Manual the same gesture is refused and changes nothing (`The
+loop start cannot move.`). An add in Auto that would be refused (too close, outside the loop,
+the 65th slice, missing source data for snap) is refused first and changes nothing: no copy,
+no switch. Any accepted gesture aimed at an Auto marker id applies to that marker's copy, the
+Manual marker at the same frame, because the copy creates new Manual ids (body).
+
+**9. Slice to MIDI placement.** `mix.slice_to_midi` requires `at`, a tick at or after 0, and
+refuses without it (`Slice to MIDI needs a placement.`). The UI always passes it: the start of
+the arrangement selection when it includes the target track (a time-range selection's start;
+with only clips selected, the earliest start among the track's selected clips), else the edit
+cursor, else bar 1. The result
+reports the tick and position it placed at, and the UI's placement line names which of the
+three it used. An overlap becomes a new take per ADR 0039, as the body specifies. This replaces
+the body's engine-side "placement defaults to the selection start, else the edit cursor" with
+the same rule computed by the UI.
+
+**10. Round-robin counters reset.** Every sequential counter and every group's random state
+restart from item 4's values on `reset()`, on prepare, on open and at the start of an export
+(the body), and at each transport transition between playing and stopped, in either direction,
+at the first frame of the first block that reports the new state, before that block's events. A
+locate while playing, a cycle wrap and a patch edit do not restart them. The reason is
+reproducibility: every pass started from a stopped transport plays the same alternatives, and a
+pass started where an export starts plays what the export plays. A pass started mid-song differs
+from a whole-song export at that point, the same history dependence the body keeps for ADR 0033's
+random LFOs. The coordinator's brief also cites Ableton and Logic restarting a phrase from its
+first alternative at stop; this record does not cite either manual for it, and the rule rests on
+reproducibility alone.
+
+**11. Seed range.** Every command that writes the seed (`mix.sampler_seed`,
+`mix.sampler_new_patch`) accepts integers 0 to 4,294,967,295, stores 1 for 0 and reports the
+stored value; anything else is refused (`seed must be an integer 1-4294967295; 0 means 1`). The
+field offers 1 to 4,294,967,295 and writes 1 for 0 (design round 2). A file whose stored seed is
+0 is not rewritten on open; it plays as 1 and the queries report 1.
+
+**12. Deferred by design, named.** In 0.7.0: no zone table (the key map and the Zone and Group
+panels are the editor); fades are drawn on the key map but not dragged (the Zone panel's four
+fields edit them); no 64-cell slice strip (the flag strip selects, the selection line names the
+slice, and moving a slice between pads is the Pads view's drag); loop points inside a slice
+(item 1); and the open states of the Shaper and Modulation section bars, which stay collapsed
+bars as the Pads view has them. Each reopens on a maintainer request or at the next Sampler
+design round; the zone table also reopens when SFZ import (#271) makes large maps common.
+
+**Pads view bar: Load kit… and Expand to rack….** **Expand to rack…** is shown disabled at the
+unused-control alpha, with a tooltip saying it is not available yet, until #272 lands; it then
+follows this record's expansion rules, and its preview is a later board. **Load kit… is
+pending the maintainer's decision;** one of these two forms lands and the other is struck:
+
+- *Form A, a 0.7.0 slice:* `mix.sampler_load_kit {track?, folder, preview?}` applies the body's
+  kit-folder rule: the folder's WAV, AIFF and FLAC files (not recursive) in case-folded filename
+  order with the original spelling breaking ties, assigned to free pads ascending with new-pad
+  defaults, referenced by path (the save model's default); an SFZ in the folder is listed and not
+  executed (#271). It decodes off-thread through the import transaction, previews and refuses
+  over capacity without truncating, refuses whole on an unreadable file (naming it), is one undo
+  step, and on a legacy one-sample patch is disabled behind the Notice's **New Kit**.
+- *Form B, deferred:* the button is shown disabled like Expand to rack, its tooltip saying kits
+  load later and that files can be dropped on pads; it reopens on a maintainer request.
+
+**Design text that changes with this amendment** (carried by the design landing, not this
+branch): the Grid controls gain the BPM field (item 5); the crossfade field converts at the
+zone source's rate, not the session rate (item 2); "loop points inside a slice are the
+Instrument view's zone waveform" becomes "loop points inside a slice come later" (items 1, 12).
+
+**Evidence each item requires** (implementation gates, not claims made here). Gate 2 adds: a
+marker move that moves a looping slice's loop in one undo step; the loop/One-shot refusals both
+ways and their combined edits; a one-frame slice refusing a loop and a later one-frame shrink
+reporting `loop_used: off`; the crossfade ms-to-frames rounding at 44.1 and 48 kHz sources; a
+slice edit leaving `crossfade_used` below `crossfade` with output equal to the reference at the
+used value; the grid priority chain (Bars, `grid_bpm`, `acid`, session) and `grid_bpm`
+round-tripping; Slices to pads at roots 60, 62 and 36 over default and edited notes, a
+re-application at a new root, a hidden-set replacement and the shortage refusal; each stale
+cause refusing Replace; S in Auto and Manual and a refused Auto add leaving the document
+identical; Slice to MIDI refusing without `at`. Gate 3 adds: the fade table at both edges with
+selection by original velocity (control: scale before selection and a layer case fails); width
+refusals and `fades_used` after a range edit; item 4's per-group start states and draw order
+against an independent reference; counters restarting at stop and at play but not at a locate
+or a cycle wrap; seed 0 stored as 1 by the commands and a loaded 0 left unrewritten.
