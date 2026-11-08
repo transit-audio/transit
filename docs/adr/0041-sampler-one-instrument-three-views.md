@@ -874,19 +874,20 @@ explicitly replaces the single-set slicing workflow.
 
 ## Amendment 2026-11-08: Slices and Instrument semantics (#269, #270)
 
-Amended with the maintainer: the coordinator's decisions, confirmed at landing. The lane briefs
-for the Slices and Instrument views found twelve semantics this record did not state, and each
-brief took a default so that its lane could start. This amendment decides them and replaces
-those defaults; where a brief and this text differ, this text wins. It changes no earlier rule
-except where an item says it replaces one. The matrix, the core's selection order and ADR 0034
-are unchanged. Two rules recur and are stated once:
+Amended with the maintainer. This amendment decides twelve semantics the record left open for
+the Slices and Instrument views. Items 1 to 12 are decided; only **Load kit…** on the Pads view
+bar is pending the maintainer's decision, written below in its two forms. It changes no earlier
+rule except where it says it replaces one; the validator changes are listed together under
+"Validator changes". The matrix, the core's selection order and ADR 0034 are unchanged. Two
+rules recur and are stated once:
 
 - **Checked when set, clamped when used.** A value is checked by the edit that sets it, and an
   over-limit value is refused there, never clamped. A later edit of something else (a marker
   move, a key-range drag, a loop change) is never refused because of it: the stored value is
   kept, playback uses the clamped value defined below, and the state queries report both, so
-  the UI can warn. The patch validator accepts a stored value that is only clamped at use, so a
-  file never loads as an invalid (silent) patch because of one.
+  the UI can warn. The patch validator, which runs on load and on every store, accepts a stored
+  value that is only clamped at use (the list under "Validator changes"), so neither a later
+  edit nor a file load produces an invalid (silent) patch because of one.
 - **The engine never guesses UI state.** Where a default depends on the selection or the edit
   cursor, the UI computes it and passes it explicitly.
 
@@ -898,10 +899,15 @@ normalized seed. `mix.sampler_slice_state` reports the same used values for slic
 Forward or Ping-pong, always over its whole slice. It is stored in that zone's existing
 `loop_mode`; no field is added. For a slice-bound zone the plan compiler derives the region
 from the bound slice in its own set (its start marker to the next boundary, the last slice to
-E) and, when looping, `loop_start` = region start and `loop_end` = region end. Its stored
-`start`, `end`, `loop_start` and `loop_end` are not read for playback while the binding exists,
-so a marker move or remove changes the region and loop of every zone bound to an affected slice
-in the same undo step and nothing can drift. Loop points inside a slice are deferred (item 12);
+E) and, when looping, `loop_start` = region start and `loop_end` = region end. The stored
+fields are written through, so the file stays self-describing and the validator checks real
+values: every edit that binds a zone to a slice, sets a slice-bound zone's loop, or changes a
+bound slice's boundaries (a marker add, move or remove, Replace markers, Clear, Start from Auto's
+markers) writes the derived `start`, `end`, `loop_start` and `loop_end` into each affected zone
+in the same undo step. When a loaded file's stored fields disagree with the bound slice, the
+slice is the authority: the validator checks and the compiler plays the derived values, the
+stored fields are rewritten on the next save, and opening alone writes nothing (body: no patch
+is written merely by opening). Loop points inside a slice are deferred (item 12);
 the Instrument view's zone waveform shows a slice-bound zone's derived region and loop with
 handles that do not drag, marked with the same lock as a pad-bound zone's key-map edges.
 
@@ -910,7 +916,11 @@ mode other than Off on a One-shot zone is refused unless the same edit sets Gate
 sets One-shot on a looping zone is refused unless the same edit sets the loop Off. The text is
 `A one-shot cannot loop: choose Gate, or turn the loop off.` The Slices view's Loop and
 Ping-pong presses send the loop mode and Gate in one edit, one undo step restoring both; its
-One-shot press on a looping slice sends nothing and shows that refusal as an error banner. On
+One-shot press on a looping slice sends nothing and shows that refusal as an error banner
+(design round 2). The asymmetry is deliberate: choosing a loop implies sustain, so it carries
+Gate with it as one edit, while leaving a loop is a separate intent the user states by setting
+the loop Off first, as the banner says; a One-shot press that silently turned the loop off would
+lose the loop without warning. On
 load, a One-shot zone whose stored loop mode is not Off is accepted and plays as a one-shot
 without looping (the body: a one-shot disables looping); `loop_used` reports `off`.
 
@@ -946,8 +956,7 @@ velocity, never to voice gain. A fade never moves a note between layers and neve
 zone. With `f_key` the key factor (`(k + 1)/(n + 1)` inside a key fade, 1 elsewhere) and
 `f_vel` likewise, the selected zone's voice plays velocity `max(1, round(v * f_key * f_vel))`,
 computed exactly as a ratio of integers and rounded once, ties upward; velocity sensitivity
-applies to that value. The coordinator's phrase "linear gain ramps" means this
-linear ramp of velocity factors; a post-voice gain ramp would contradict the body.
+applies to that value.
 
 The edit that sets the widths refuses `lo_w + hi_w > hi - lo` on either axis, and any nonzero
 width on a pad-bound zone (one key, one layer). When a later range edit leaves the widths too
@@ -972,8 +981,12 @@ matrix's seeded note random.
 **5. Beat-grid BPM override.** The loop gains `grid_bpm`, optional, finite, 5 to 1000 BPM (the
 tempo map's range), written only when set. The grid's tempo is, in priority: an explicit Bars
 count (the derived BPM, body), else `grid_bpm`, else the file's valid `acid` tempo, else the
-session tempo at the insertion point. The insertion point and its meter come from the `at` tick
-that `mix.sampler_slice_detect` takes, which the UI fills by item 9's rule; absent, it is tick 0.
+session tempo at the insertion point. The insertion point is the `at` tick that
+`mix.sampler_slice_detect` takes, filled by the UI by item 9's rule. `at` is required whenever
+Detect reads the session's tempo map: when the session tempo is the grid's source, and when Bars
+is explicit (the derived BPM uses the insertion meter, body). Without it Detect refuses (`Detect
+needs a placement (at) to read the session tempo.`). With `grid_bpm` or a valid `acid` tempo and
+no explicit Bars, `at` is optional and unused.
 Like Bars, `grid_bpm` never changes Slice to MIDI's beat length or timing modes. In the Grid
 controls a BPM field follows Bars: empty, it shows the tempo in use and its origin (`acid 96.00`,
 `session 120.00`); typing sets `grid_bpm`, clearing returns to none; while Bars is explicit it
@@ -1040,13 +1053,12 @@ locate while playing, a cycle wrap and a patch edit do not restart them. The rea
 reproducibility: every pass started from a stopped transport plays the same alternatives, and a
 pass started where an export starts plays what the export plays. A pass started mid-song differs
 from a whole-song export at that point, the same history dependence the body keeps for ADR 0033's
-random LFOs. The coordinator's brief also cites Ableton and Logic restarting a phrase from its
-first alternative at stop; this record does not cite either manual for it, and the rule rests on
-reproducibility alone.
+random LFOs. No convention is cited; the rule rests on reproducibility.
 
 **11. Seed range.** Every command that writes the seed (`mix.sampler_seed`,
 `mix.sampler_new_patch`) accepts integers 0 to 4,294,967,295, stores 1 for 0 and reports the
-stored value; anything else is refused (`seed must be an integer 1-4294967295; 0 means 1`). The
+stored value; anything else is refused (`seed must be an integer from 0 to 4294967295 (0 is
+stored as 1)`). The
 field offers 1 to 4,294,967,295 and writes 1 for 0 (design round 2). A file whose stored seed is
 0 is not rewritten on open; it plays as 1 and the queries report 1.
 
@@ -1061,7 +1073,8 @@ design round; the zone table also reopens when SFZ import (#271) makes large map
 **Pads view bar: Load kit… and Expand to rack….** **Expand to rack…** is shown disabled at the
 unused-control alpha, with a tooltip saying it is not available yet, until #272 lands; it then
 follows this record's expansion rules, and its preview is a later board. **Load kit… is
-pending the maintainer's decision;** one of these two forms lands and the other is struck:
+pending the maintainer's decision** (the only pending point in this amendment); one of these two
+forms lands and the other is struck:
 
 - *Form A, a 0.7.0 slice:* `mix.sampler_load_kit {track?, folder, preview?}` applies the body's
   kit-folder rule: the folder's WAV, AIFF and FLAC files (not recursive) in case-folded filename
@@ -1073,21 +1086,49 @@ pending the maintainer's decision;** one of these two forms lands and the other 
 - *Form B, deferred:* the button is shown disabled like Expand to rack, its tooltip saying kits
   load later and that files can be dropped on pads; it reopens on a maintainer request.
 
+**Validator changes.** The body says to reject an invalid new edit and, on load, to preserve an
+invalid patch opaquely (silent). For exactly the following cases that rule is replaced: the
+validator accepts the stored value on load and on store, the edit that sets it refuses it, and
+playback clamps it as stated, reported by the state queries:
+
+- a One-shot zone with a loop mode other than Off: plays as a one-shot, `loop_used: off` (item 1);
+- a slice-bound zone's loop of one frame (a slice shortened after its loop was set): plays
+  unlooped, `loop_used: off` (item 1);
+- a slice-bound zone whose stored region or loop fields disagree with its bound slice: the slice
+  wins and the fields are rewritten on the next save (item 1);
+- `crossfade` above half the effective loop: `crossfade_used = min(X, floor(L/2))` (item 2);
+- Ping-pong with a nonzero stored crossfade: `crossfade_used` is 0 (items 1, 2);
+- fade widths too wide for the range, or nonzero on a pad-bound zone: `fades_used` (item 3).
+
+Every other body validation rule stands, including the loop-inside-region and two-frame checks
+for zones without a slice binding.
+
 **Design text that changes with this amendment** (carried by the design landing, not this
 branch): the Grid controls gain the BPM field (item 5); the crossfade field converts at the
 zone source's rate, not the session rate (item 2); "loop points inside a slice are the
-Instrument view's zone waveform" becomes "loop points inside a slice come later" (items 1, 12).
+Instrument view's zone waveform" becomes "loop points inside a slice come later" (items 1, 12);
+and the zone waveform of a slice-bound zone draws its derived start, end and loop handles locked,
+with the 10 px lock mark the key map uses for pad-bound edges (item 1).
 
 **Evidence each item requires** (implementation gates, not claims made here). Gate 2 adds: a
 marker move that moves a looping slice's loop in one undo step; the loop/One-shot refusals both
 ways and their combined edits; a one-frame slice refusing a loop and a later one-frame shrink
-reporting `loop_used: off`; the crossfade ms-to-frames rounding at 44.1 and 48 kHz sources; a
+reporting `loop_used: off`; each bind, loop edit and marker edit writing the derived region
+and loop into every affected stored zone in the same undo step, and a file with disagreeing
+stored fields loading audible with the slice's values, opening unmodified and saving the
+rewritten fields; each case under "Validator changes" loading audible (not opaque) and its
+setting edit refusing; the crossfade ms-to-frames rounding at 44.1 and 48 kHz sources; a
 slice edit leaving `crossfade_used` below `crossfade` with output equal to the reference at the
 used value; the grid priority chain (Bars, `grid_bpm`, `acid`, session) and `grid_bpm`
 round-tripping; Slices to pads at roots 60, 62 and 36 over default and edited notes, a
 re-application at a new root, a hidden-set replacement and the shortage refusal; each stale
 cause refusing Replace; S in Auto and Manual and a refused Auto add leaving the document
-identical; Slice to MIDI refusing without `at`. Gate 3 adds: the fade table at both edges with
+identical; Slice to MIDI refusing without `at`; Detect refusing without `at` when the session
+tempo is the source and when Bars is explicit, and succeeding without it from `grid_bpm` or an
+`acid` tempo; `mix.sampler_state` and `mix.sampler_slice_state` reporting `loop_used`,
+`crossfade_used`, `fades_used` and the normalized seed beside the stored values, for clamped
+and unclamped cases; `crossfade`, `fades` and `grid_bpm` round-tripping, absent from the
+serialized patch at their defaults and present otherwise. Gate 3 adds: the fade table at both edges with
 selection by original velocity (control: scale before selection and a layer case fails); width
 refusals and `fades_used` after a range edit; item 4's per-group start states and draw order
 against an independent reference; counters restarting at stop and at play but not at a locate
