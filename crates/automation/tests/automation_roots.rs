@@ -46,7 +46,7 @@ fn fixture(name: &str) -> Fixture {
         run(&mut e, "file.bounce_mix", json!({"path": s(dir.join("tone.wav")), "start": 0, "end": 4800}));
         run(&mut e, "file.export_midi", json!({"path": s(dir.join("keys.mid")), "tracks": ["Keys"]}));
         run(&mut e, "edit.select", json!({"tracks": ["Bass"]}));
-        run(&mut e, "track.save_preset", json!({"path": s(dir.join("bass.json"))}));
+        run(&mut e, "track.save_preset", json!({"path": s(dir.join("bass.transitpreset"))}));
         run(&mut e, "session.save_as", json!({"path": s(dir.join("song.transit")), "replace": true}));
         let clips = e.session().track_by_name("Kick").unwrap().clips().iter().map(|c| c.id.0).collect::<Vec<_>>();
         run(&mut e, "file.export_clip_groups", json!({"path": s(dir.join("group.scgrp")), "clips": clips}));
@@ -117,7 +117,7 @@ fn reads(dir: &Path, name: &dyn Fn(&str) -> String) -> Vec<(&'static str, Value)
         ("file.import_midi", json!({"path": p("keys.mid")})),
         ("file.import_clip_groups", json!({"path": p("group.scgrp")})),
         ("file.import_session_data", json!({"path": p("song.transit")})),
-        ("track.load_preset", json!({"path": p("bass.json"), "tracks": ["Bass"]})),
+        ("track.load_preset", json!({"path": p("bass.transitpreset"), "tracks": ["Bass"]})),
     ]
 }
 
@@ -142,7 +142,7 @@ fn reads_outside_the_read_root_are_refused_and_nothing_reaches_the_result() {
     ok(&mut srv, "file.import_midi", json!({"path": s(f.read.join("keys.mid"))}));
     ok(&mut srv, "file.import_clip_groups", json!({"path": s(f.read.join("group.scgrp"))}));
     ok(&mut srv, "file.import_session_data", json!({"path": s(f.read.join("song.transit")), "tracks": ["Kick"]}));
-    ok(&mut srv, "track.load_preset", json!({"path": s(f.read.join("bass.json")), "tracks": ["Bass"]}));
+    ok(&mut srv, "track.load_preset", json!({"path": s(f.read.join("bass.transitpreset")), "tracks": ["Bass"]}));
     ok(&mut srv, "mix.sampler_load", json!({"track": "Pads", "path": s(f.read.join("tone.wav"))}));
     ok(&mut srv, "session.open", json!({"path": s(f.read.join("song.transit"))}));
     // The typed tools take the same path through the same checks.
@@ -178,7 +178,7 @@ fn writes(dir: &Path) -> Vec<(&'static str, Value)> {
         ("file.send_to_sibelius", json!({"path": p("j.musicxml")})),
         ("file.print_score", json!({"path": p("k.svg")})),
         ("file.export_clip_groups", json!({"path": p("l.scgrp"), "clips": [clip]})),
-        ("track.save_preset", json!({"path": p("m.json"), "tracks": ["Kick"]})),
+        ("track.save_preset", json!({"path": p("m.transitpreset"), "tracks": ["Kick"]})),
     ]
 }
 

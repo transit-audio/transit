@@ -1,5 +1,6 @@
-//! Clip group files (`.scgrp`): clips exported from a session (Clip List › Export Clip Groups)
-//! and imported into another (File › Import › Clip Groups…).
+//! Clip group files (`.transitclips`; `.scgrp` before transit 0.7.0, ADR 0049): clips exported
+//! from a session (`file.export_clip_groups`) and imported into another (`file.import_clip_groups`).
+//! The reader goes by the file's `format` tag, never its extension.
 //!
 //! The file is JSON: clips per lane with starts relative to the group, plus the audio they play
 //! as 32-bit float WAVs in a `<name> Audio/` folder next to it.
@@ -13,7 +14,8 @@ use transit_audio_io::{EncodeOptions, FileFormat};
 use transit_model::{Clip, ClipContent, ClipId, SourceId, TrackId};
 use transit_time::Samples;
 
-pub const EXTENSION: &str = "scgrp";
+/// Added when the path given has no extension (ADR 0049).
+pub const EXTENSION: &str = "transitclips";
 const FORMAT: &str = "transit.clipgroup";
 /// The fork's tag (ADR 0049): read through v0.7.x; from the v0.8.0 tag it moves to `refused_pre_0_7`.
 const LEGACY_FORMAT: &str = "soundcraft.clipgroup";

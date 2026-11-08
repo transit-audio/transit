@@ -16,6 +16,8 @@ pub fn trim_param() -> AutoParam {
 }
 
 const PRESET_FORMAT: &str = "transit-track-preset";
+/// Set on every path a preset is saved to (ADR 0049); the reader never checks it.
+pub const PRESET_EXTENSION: &str = "transitpreset";
 /// The fork's tag (ADR 0049): read through v0.7.x; from the v0.8.0 tag it moves to `refused_pre_0_7`.
 const LEGACY_PRESET_FORMAT: &str = "soundcraft-track-preset";
 const PRESET_TAGS: crate::file_tags::Tags =
@@ -68,7 +70,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             extract_midi
         ),
-        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?} — writes the track's type, width, mixer, inserts, sends and instrument as JSON", has_selection, save_preset),
+        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?} — writes the track's type, width, mixer, inserts, sends and instrument as JSON to `path` with the extension .transitpreset; returns the path written", has_selection, save_preset),
         cmd!(
             "track.load_preset",
             "Load Track Preset",
@@ -273,6 +275,7 @@ fn save_preset(e: &mut Engine, p: &Value) -> Result<Value> {
         "comments": tr.comments,
     });
     let text = serde_json::to_string_pretty(&preset).map_err(|err| EngineError::Io(err.to_string()))?;
+    let path = std::path::Path::new(&path).with_extension(PRESET_EXTENSION).to_string_lossy().into_owned();
     crate::io::write_file(&path, text.as_bytes())?;
     Ok(json!({"path": path, "track": first}))
 }
@@ -625,7 +628,11 @@ mod tests {
         let path = dir.join("bass.json").to_string_lossy().into_owned();
         let mut e = crate::demo::demo_engine();
         e.execute("edit.select", &json!({"tracks": ["Bass"]})).unwrap();
-        e.execute("track.save_preset", &json!({"path": path})).unwrap();
+        let saved = e.execute("track.save_preset", &json!({"path": path})).unwrap();
+        // The extension is set on any path (ADR 0049), and the result names the file written.
+        let path = dir.join("bass.transitpreset").to_string_lossy().into_owned();
+        assert_eq!(saved["path"], path.as_str());
+        assert!(!dir.join("bass.json").exists());
         e.execute("edit.select", &json!({"tracks": ["Hats"]})).unwrap();
         e.execute("track.load_preset", &json!({"path": path})).unwrap();
         let hats = e.session().track_by_name("Hats").unwrap();
