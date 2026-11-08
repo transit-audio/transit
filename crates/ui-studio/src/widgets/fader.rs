@@ -75,6 +75,22 @@ pub fn label(db: Option<f32>) -> String {
     }
 }
 
+/// Labels by travel: the scale marks whose labels the Channel variant draws on a travel of
+/// `travel` points, top to bottom. Each mark is placed greedily in `fader.labelPriority` order
+/// (0, minus infinity, −12, −24, +6, −48, −6, −36) and skipped when its center would fall closer
+/// than `fader.labelMinGap` (13) to a mark already placed, so labels never collide on a short
+/// strip. A tick goes with each placed label only; the meter's grid lines stay at every mark.
+pub fn placed_marks(travel: f32) -> Vec<Option<f32>> {
+    let y = |m: Option<f32>| taper(m.unwrap_or(f32::NEG_INFINITY)) * travel;
+    let mut placed: Vec<Option<f32>> = Vec::new();
+    for m in spec::LABEL_PRIORITY {
+        if placed.iter().all(|p| (y(*p) - y(m)).abs() >= spec::LABEL_MIN_GAP) {
+            placed.push(m);
+        }
+    }
+    spec::SCALE_LABELS.into_iter().filter(|m| placed.contains(m)).collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum Variant {
     Channel,
@@ -109,9 +125,10 @@ pub struct FaderLayout {
     pub fill: [f32; 4],
     pub cap: [f32; 4],
     pub center_line: [f32; 4],
-    /// Scale labels (Channel) or ticks (Compact): text and where it sits.
+    /// Scale labels (Channel: the placed ones, [`placed_marks`]) or ticks (Compact): text and where
+    /// it sits.
     pub marks: Vec<(String, [f32; 4])>,
-    /// The Channel variant's ticks beside the cap column, one per scale mark (empty otherwise).
+    /// The Channel variant's ticks, one per placed label (empty otherwise).
     pub ticks: Vec<[f32; 4]>,
     /// Where the caller draws the meter (Channel only).
     pub meter: Option<[f32; 4]>,
@@ -223,7 +240,9 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
     let mut mark_inks = Vec::new();
     let (mut ticks, mut tick_inks) = (Vec::new(), Vec::new());
     if !horizontal {
-        for m in spec::SCALE_LABELS {
+        // The Channel scale thins on short travel (Labels by travel); Compact ticks every mark.
+        let shown = if variant == Variant::Channel { placed_marks(track.height()) } else { spec::SCALE_LABELS.to_vec() };
+        for m in shown {
             let y = track.min.y + taper(m.unwrap_or(f32::NEG_INFINITY)) * track.height();
             let ink = if m == Some(0.0) { t.text } else { t.text_faint };
             if variant == Variant::Channel {

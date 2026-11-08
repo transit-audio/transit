@@ -127,3 +127,54 @@ fn the_channel_scale_has_a_six_px_tick_beside_the_cap_column_at_every_mark() {
         assert!(l.ticks.is_empty() && l.tick_inks.is_empty(), "{variant:?}");
     }
 }
+
+/// The labels' centers on a travel (points from the travel's top) for `marks`.
+fn centers(marks: &[Option<f32>], travel: f32) -> Vec<f32> {
+    marks.iter().map(|m| fader::taper(m.unwrap_or(f32::NEG_INFINITY)) * travel).collect()
+}
+
+/// The closest two of `ys`.
+fn closest(ys: &[f32]) -> f32 {
+    let mut min = f32::INFINITY;
+    for (i, a) in ys.iter().enumerate() {
+        for b in &ys[i + 1..] {
+            min = min.min((a - b).abs());
+        }
+    }
+    min
+}
+
+/// Fault 1 of the Fader construction board: on short travel the Channel scale places its labels
+/// greedily by priority, 13 apart, and draws a tick with each placed label only.
+#[test]
+fn the_channel_labels_thin_by_travel_greedily_and_never_collide() {
+    let names = |marks: Vec<Option<f32>>| marks.into_iter().map(fader::label).collect::<Vec<_>>();
+    for travel in [120.0, 150.0, 200.0] {
+        assert_eq!(names(fader::placed_marks(travel)), ["+6", "0", "−6", "−12", "−24", "−36", "−48", "−∞"], "{travel}: all eight");
+    }
+    assert_eq!(names(fader::placed_marks(100.0)), ["+6", "0", "−6", "−12", "−24", "−48", "−∞"], "100: all but −36");
+    for travel in [92.0, 80.0] {
+        assert_eq!(names(fader::placed_marks(travel)), ["0", "−12", "−24", "−∞"], "{travel}");
+    }
+    // A sweep: no two placed label centers are under 13 apart at any travel from 80 to 600.
+    let mut travel = 80.0;
+    while travel <= 600.0 {
+        let placed = fader::placed_marks(travel);
+        assert!(placed.contains(&Some(0.0)) && placed.contains(&None), "{travel}: 0 and −∞ always");
+        assert!(closest(&centers(&placed, travel)) >= crate::tokens::fader::LABEL_MIN_GAP - 1e-4, "{travel}: {placed:?}");
+        travel += 0.25;
+    }
+    // The painted scale follows: at 80 of travel (a 100 tall fader) four labels, four ticks.
+    let mut rig = Rig::new();
+    let l = rig.idle(|ui| fader::show(ui, egui::Id::new("f"), Variant::Channel, 100.0, 0.0, false)).layout;
+    let painted: Vec<&str> = l.marks.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(painted, ["0", "−12", "−24", "−∞"]);
+    assert_eq!(l.ticks.len(), 4, "a tick with each placed label only");
+    let ys: Vec<f32> = l.marks.iter().map(|(_, r)| mid(*r).y).collect();
+    assert!(closest(&ys) >= 13.0 - 0.6, "the painted labels are 13 apart: {ys:?}");
+    // Negative control: the old placement (every mark at every travel) fails the 80 set and
+    // collides there.
+    let old: Vec<Option<f32>> = crate::tokens::fader::SCALE_LABELS.to_vec();
+    assert_ne!(names(old.clone()), ["0", "−12", "−24", "−∞"]);
+    assert!(closest(&centers(&old, 80.0)) < 13.0, "all eight at 80 overlap");
+}
