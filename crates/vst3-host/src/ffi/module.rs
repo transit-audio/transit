@@ -649,6 +649,8 @@ mod tests {
         let dir = root.join(format!("vst3-rewrite-{}-{nanos}", std::process::id()));
         let path = dir.join("Fixture.vst3");
         let file = path.join(shared.strip_prefix(&fixture[0].path).unwrap());
+        // `create_dir` refuses a folder that exists instead of reusing it (E51).
+        std::fs::create_dir(&dir).unwrap();
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         // Modification times the test sets (E60).
         let stamp = |at: SystemTime| std::fs::File::options().write(true).open(&file).unwrap().set_modified(at).unwrap();
