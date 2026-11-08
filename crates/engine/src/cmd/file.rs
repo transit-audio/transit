@@ -183,9 +183,14 @@ pub fn specs() -> Vec<CommandSpec> {
             let path = str_param(p, "path").ok_or_else(|| bad(id, "`path` required"))?.to_string();
             let at = position_param(e, id, p, "at")?.unwrap_or(e.session().edit.selection.start).max(0);
             let first = tracks_param(e, id, p)?.first().copied();
-            let placed = crate::clip_group_file::import(e, &path, first, at)?;
-            e.session_mut().edit.selected_clips.clone_from(&placed);
-            Ok(json!({"clips": placed.iter().map(|c| c.0).collect::<Vec<_>>()}))
+            let imported = crate::clip_group_file::import(e, &path, first, at)?;
+            e.session_mut().edit.selected_clips.clone_from(&imported.clips);
+            let mut out = json!({"clips": imported.clips.iter().map(|c| c.0).collect::<Vec<_>>()});
+            // A file saved before transit 0.7.0 (ADR 0049): the caller is told what to do.
+            if let Some(note) = imported.note {
+                out["note"] = json!(note);
+            }
+            Ok(out)
         }),
         cmd!(query "file.get_info", "Get Info...", ["File"], None, "{}", always, |e, _| Ok(crate::inspect::session(e, false))),
         cmd!(noundo "app.quit", "Quit", [], Some("Cmd+Q"), "{}", always, |_, _| Ok(json!({"quit": true}))),

@@ -4,7 +4,7 @@
 //! The file is JSON: clips per lane with starts relative to the group, plus the audio they play
 //! as 32-bit float WAVs in a `<name> Audio/` folder next to it.
 
-use crate::file_tags::{Refusal, Tags};
+use crate::file_tags::{Refusal, Tag, Tags};
 use crate::{Engine, EngineError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -104,22 +104,39 @@ pub fn export(e: &Engine, ids: &[ClipId], path: &str) -> Result<usize> {
     Ok(n)
 }
 
+/// What an import placed, and the notice for a file written before transit 0.7.0 (ADR 0049).
+#[derive(Debug, Default)]
+pub struct Imported {
+    pub clips: Vec<ClipId>,
+    /// Posted through [`Engine::message`] too; `None` for a file in transit's format.
+    pub note: Option<String>,
+}
+
+/// The notice for reading a clip group file saved before transit 0.7.0 (ADR 0049).
+#[must_use]
+pub fn legacy_note(path: &str) -> String {
+    format!(
+        "{}: saved before transit 0.7.0; import it and export the clips again to keep it opening in 0.8.0 and later",
+        crate::file_tags::file_name(path)
+    )
+}
+
 /// Import a clip group file at `at`, one lane per track starting at `first` (new audio tracks
-/// are made when the session runs out). Returns the ids of the placed clips.
-pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -> Result<Vec<ClipId>> {
+/// are made when the session runs out).
+pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -> Result<Imported> {
     let id = "file.import_clip_groups";
     let text = crate::io::read_text(path)?;
     let not_a_group = |err: serde_json::Error| EngineError::BadParams(id.into(), format!("not a clip group file: {err}"));
     let mut value: serde_json::Value = serde_json::from_str(&text).map_err(not_a_group)?;
     // The tag and version first (ADR 0049), so a refused file posts nothing.
-    match TAGS.check(&value) {
-        Ok(_) => {}
+    let tag = match TAGS.check(&value) {
+        Ok(tag) => tag,
         Err(Refusal::Message(m)) => return Err(EngineError::BadParams(id.into(), m)),
         Err(Refusal::Structural) => {
             let err = serde_json::from_value::<GroupFile>(value).err().map_or_else(|| "no format tag".to_string(), |err| err.to_string());
             return Err(EngineError::BadParams(id.into(), format!("not a clip group file: {err}")));
         }
-    }
+    };
     // Video is retired (ADR 0031): its clips are dropped, as when a session opens.
     if transit_model::legacy::drop_video_from_lanes(&mut value) {
         e.message(transit_model::legacy::VIDEO_REMOVED_NOTE.to_string());
@@ -202,7 +219,12 @@ pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -
             crate::edit::place_clip(s, target, c);
         }
     }
-    Ok(placed)
+    // Last, so a file refused for its contents posts nothing.
+    let note = (tag == Tag::Legacy).then(|| legacy_note(path));
+    if let Some(n) = &note {
+        e.message(n.clone());
+    }
+    Ok(Imported { clips: placed, note })
 }
 
 fn with_extension(path: &str) -> PathBuf {
