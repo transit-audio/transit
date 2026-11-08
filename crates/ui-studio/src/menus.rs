@@ -109,7 +109,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                             ui.close();
                         }
                     }
-                    let item = crate::bounce_in_place::clip_menu_item(app, ui, true);
+                    let item = crate::bounce_in_place::clip_menu_item(app, ui);
                     app.arrange.bar_menu.push(item);
                     ui.separator();
                     crate::edit_tools::edit_menu_items(app, ui);
@@ -466,8 +466,7 @@ pub(crate) fn activity_item(app: &mut StudioApp, ui: &mut egui::Ui, on: Option<T
     let inactive = !tracks.iter().any(|id| app.engine.session().track(*id).is_some_and(|t| t.inactive));
     let (label, help) =
         if inactive { ("Make Inactive", crate::help::Id::TrackMenuMakeInactive) } else { ("Make Active", crate::help::Id::TrackMenuMakeActive) };
-    // The Track menu's row; a context menu keeps egui's plain row.
-    let b = ui.add_enabled(!tracks.is_empty(), crate::chrome::MenuRow::new(label).gutter(on.is_none()));
+    let b = ui.add_enabled(!tracks.is_empty(), crate::chrome::MenuRow::new(label));
     crate::help::hover(ui, &b, help);
     let item = crate::mixer::MenuItem::at(ui, label.into(), String::new(), b.rect);
     if b.clicked() {

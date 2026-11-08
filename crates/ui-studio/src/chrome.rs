@@ -317,6 +317,19 @@ pub fn menu_style(st: &mut egui::Style) {
     row_corners(st);
 }
 
+/// A context menu on `response` (it opens at the pointer on a secondary click) in the chrome's
+/// popup with the row style ([`menu_style`]); its rows are [`MenuRow`]s and its submenus take the
+/// style from it. Chain `.id(..)` for a menu that shares a response with another popup.
+pub fn context_menu(response: &Response) -> egui::Popup<'static> {
+    egui::Popup::context_menu(response).style(menu_style)
+}
+
+/// A popup menu that a click on `response` opens and closes, flush under it, in the chrome's
+/// popup with the row style ([`menu_style`]); its rows are [`MenuRow`]s.
+pub fn popup_menu(response: &Response) -> egui::Popup<'static> {
+    egui::Popup::menu(response).style(menu_style)
+}
+
 /// The atom id of a menu row's check gutter (its rect is where the check is painted).
 pub const MENU_CHECK_ATOM: &str = "menu_check";
 
@@ -324,22 +337,19 @@ pub const MENU_CHECK_ATOM: &str = "menu_check";
 /// 4 px inset, the 16 px check gutter on every row (the 12 px check centered in it when checked,
 /// empty otherwise), 4 px gaps, the text, then the shortcut right-aligned with an 8 px inset. The
 /// height, the corners and the hover fill come from the menu's style ([`menu_style`]), so in the
-/// menu bar's menus the text starts 28 pt and the shortcut ends 12 pt inside the popup's edge.
-///
-/// `gutter(false)` draws egui's plain row instead, for a helper shared with a context menu that
-/// keeps egui's own row style (until context menus take the chrome rows too).
+/// menu bar's menus, the context menus ([`context_menu`]) and the popups ([`popup_menu`]) the text
+/// starts 28 pt and the shortcut ends 12 pt inside the popup's edge.
 #[must_use]
 pub struct MenuRow {
     text: egui::WidgetText,
     shortcut: Option<String>,
     right: Option<egui::WidgetText>,
     checked: bool,
-    gutter: bool,
 }
 
 impl MenuRow {
     pub fn new(text: impl Into<egui::WidgetText>) -> Self {
-        Self { text: text.into(), shortcut: None, right: None, checked: false, gutter: true }
+        Self { text: text.into(), shortcut: None, right: None, checked: false }
     }
 
     /// The row's keyboard shortcut, in the shortcut role ([`shortcut`]).
@@ -359,12 +369,6 @@ impl MenuRow {
         self.checked = on;
         self
     }
-
-    /// False: no gutter and no extra right inset (egui's plain row).
-    pub fn gutter(mut self, on: bool) -> Self {
-        self.gutter = on;
-        self
-    }
 }
 
 impl egui::Widget for MenuRow {
@@ -373,13 +377,6 @@ impl egui::Widget for MenuRow {
             (Some(keys), _) => Some(shortcut(ui.ctx(), keys).into()),
             (None, other) => other,
         };
-        if !self.gutter {
-            let mut b = egui::Button::new(self.text);
-            if let Some(r) = right {
-                b = b.shortcut_text(r);
-            }
-            return ui.add(b);
-        }
         let gutter = egui::Id::new(MENU_CHECK_ATOM);
         let atoms = (egui::Atom::custom(gutter, vec2(c::CHECK_GUTTER, c::CHECK_GLYPH)), self.text);
         // The right inset is the style's left one, a gap and this spacer.

@@ -344,10 +344,9 @@ impl StudioApp {
 }
 
 /// One menu entry for `tool`: disabled with the reason as its hover text when nothing applies.
-/// `bar`: the Edit menu's row (the clip context menu keeps egui's plain row).
-fn entry(app: &mut StudioApp, ui: &mut egui::Ui, tool: Tool, bar: bool) {
+fn entry(app: &mut StudioApp, ui: &mut egui::Ui, tool: Tool) {
     let blocked = app.clip_tool_blocked(tool);
-    let mut button = crate::chrome::MenuRow::new(tool.label()).gutter(bar);
+    let mut button = crate::chrome::MenuRow::new(tool.label());
     if let Some(a) = tool.action() {
         button = button.shortcut(label(a));
     }
@@ -366,30 +365,30 @@ fn entry(app: &mut StudioApp, ui: &mut egui::Ui, tool: Tool, bar: bool) {
 /// The tools as Edit menu entries.
 pub fn edit_menu_items(app: &mut StudioApp, ui: &mut egui::Ui) {
     for tool in Tool::ALL {
-        entry(app, ui, tool, true);
+        entry(app, ui, tool);
     }
 }
 
 /// The tools, Rename and Color as clip context menu entries (the right-clicked clip is selected).
 pub fn context_menu_items(app: &mut StudioApp, ui: &mut egui::Ui) {
     for tool in Tool::ALL {
-        entry(app, ui, tool, false);
+        entry(app, ui, tool);
     }
     let has_clip = !app.selected_clips().is_empty();
-    if ui.add_enabled(has_clip, egui::Button::new("Rename").shortcut_text(crate::chrome::shortcut(ui.ctx(), label(A::Rename)))).clicked() {
+    if ui.add_enabled(has_clip, crate::chrome::MenuRow::new("Rename").shortcut(label(A::Rename))).clicked() {
         // The menu is on a clip: rename it even when tracks were picked by their headers.
         app.tracks_selected_by_header = false;
         app.rename_selected();
         ui.close();
     }
     ui.add_enabled_ui(has_clip, |ui| {
-        ui.menu_button("Color", |ui| {
-            if ui.button("Track color").clicked() {
+        ui.menu_button(crate::chrome::submenu_atoms("Color"), |ui| {
+            if ui.add(crate::chrome::MenuRow::new("Track color")).clicked() {
                 let _ = app.color_selected(None);
                 ui.close();
             }
             for (name, rgb) in CLIP_COLORS {
-                if ui.button(name).clicked() {
+                if ui.add(crate::chrome::MenuRow::new(name)).clicked() {
                     let _ = app.color_selected(Some(rgb));
                     ui.close();
                 }

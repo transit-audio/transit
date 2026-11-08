@@ -59,7 +59,7 @@ pub fn choice_value<T: PartialEq>(ui: &mut Ui, current: &mut T, alternative: T, 
 /// The popup of a list that opens from a field (`response`): the chrome's popup, its top
 /// `chrome.comboPopupGap` below the field. Menu-bar menus do not use this; they stay flush.
 pub fn dropdown(response: &Response) -> egui::Popup<'static> {
-    egui::Popup::menu(response).gap(c::COMBO_POPUP_GAP).style(crate::chrome::menu_style)
+    crate::chrome::popup_menu(response).gap(c::COMBO_POPUP_GAP)
 }
 
 /// [`dropdown`] for a list that holds an editable field (a Save As name): it closes on a click

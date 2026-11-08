@@ -187,11 +187,10 @@ impl StudioApp {
 }
 
 /// "Bounce in Place" for the selected clips, in the Edit menu and the clip context menu. Returns
-/// the item for the menu registry; disabled with no clip selected. `bar`: the Edit menu's row
-/// (the clip context menu keeps egui's plain row).
-pub fn clip_menu_item(app: &mut StudioApp, ui: &mut egui::Ui, bar: bool) -> crate::mixer::MenuItem {
+/// the item for the menu registry; disabled with no clip selected.
+pub fn clip_menu_item(app: &mut StudioApp, ui: &mut egui::Ui) -> crate::mixer::MenuItem {
     let has_clip = !app.engine.session().edit.selected_clips.is_empty();
-    let b = ui.add_enabled(has_clip, crate::chrome::MenuRow::new("Bounce in Place").gutter(bar)).on_disabled_hover_text("Select a clip first");
+    let b = ui.add_enabled(has_clip, crate::chrome::MenuRow::new("Bounce in Place")).on_disabled_hover_text("Select a clip first");
     hover(ui, &b, Id::BouncePlaceClipMenu);
     let item = crate::mixer::MenuItem::at(ui, "Bounce in Place".into(), String::new(), b.rect);
     if b.clicked() {
