@@ -2,6 +2,8 @@
 //! clicks, drags, wheel and keys through the control channel's input queue, one frame at a time.
 //! No player, no plug-ins, no scan.
 
+#[path = "keys/multi_tests.rs"]
+mod multi_tests;
 #[path = "keys/overlay_tests.rs"]
 mod overlay_tests;
 #[path = "keys/step_tests.rs"]

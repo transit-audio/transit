@@ -109,6 +109,18 @@ impl StudioApp {
         if let Some((t, _)) = self.engine.session().find_clip(clip) {
             self.ui.focus_track = Some(t);
         }
+        // A plain click on one of several selected clips selects it alone; the first click of a
+        // double-click does too, so the selection it replaced is kept for the piano roll (#329)
+        // through one more click on the same clip (the double-click's second press), no longer.
+        let before = &self.engine.session().edit.selected_clips;
+        self.keys.reopen = if !additive && before.len() > 1 && before.contains(&clip) {
+            Some((before.clone(), true))
+        } else {
+            match self.keys.reopen.take() {
+                Some((several, true)) if !additive && before.as_slice() == [clip] && several.contains(&clip) => Some((several, false)),
+                _ => None,
+            }
+        };
         let mut clips: Vec<u64> = if additive { self.engine.session().edit.selected_clips.iter().map(|c| c.0).collect() } else { Vec::new() };
         if additive && clips.contains(&clip.0) {
             clips.retain(|c| *c != clip.0);

@@ -10,11 +10,22 @@
 //! selection is kept as note values and resolved to indices again before each command.
 //! Zoom, scroll, snap, pane height, new-note velocity and the audition switch are view state: [`KeysPrefs`] in
 //! [`crate::UiState`] and [`KeysState`] here, never the document.
+//!
+//! Several clips (#329): with more than one MIDI clip selected, opening one opens them all. The one
+//! opened is the foreground clip: the roll's ticks are its ticks (so a single clip is exactly as
+//! before), the others sit at their offsets from it, and a click on another clip's note makes that
+//! clip the foreground. Edits across clips are one command per clip under one undo step; new notes
+//! go to the clip whose span they are drawn in, the foreground first, and outside every clip they are
+//! refused. Step entry, the controller lane, the loop ghosts and the clip-end handle are the
+//! foreground's.
 
 mod view;
 pub use view::{pane, switcher_panel};
 
 mod cc;
+mod edit;
+mod multi;
+use multi::{Composite, Part};
 mod pitch;
 mod quantize;
 pub use quantize::QuantizePrefs;
@@ -206,6 +217,8 @@ pub enum KeysGesture {
         press: Pos2,
         copy: bool,
         sounding: u8,
+        /// The track the dragged note sounds on (its own clip's, #329).
+        track: Option<TrackId>,
     },
     Band {
         press: Pos2,
@@ -243,6 +256,23 @@ pub struct NoteRect {
     pub rect: R4,
     /// The note's stem in the velocity lane.
     pub vel_rect: R4,
+    /// The clip the note is in, when several clips are open (#329).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clip: Option<u64>,
+}
+
+/// One clip open in the roll when several are (#329), as last drawn.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct OpenClip {
+    pub clip: u64,
+    pub track: u64,
+    /// Its start in the roll's ticks (the foreground's start is 0) and the span the roll edits.
+    pub offset_ticks: i64,
+    pub ticks: i64,
+    pub foreground: bool,
+    pub color: [u8; 3],
+    /// Its bar in the ruler: click to make it the foreground.
+    pub bar: R4,
 }
 
 /// One repeat of a looped clip's cycle drawn as a dimmed ghost note (not interactive).
@@ -258,8 +288,12 @@ pub struct GhostNote {
 pub struct KeysLayout {
     pub cc: cc::Layout,
     pub visible: bool,
+    /// The clip being edited: the foreground clip when several are open.
     pub clip: Option<u64>,
     pub track: Option<u64>,
+    /// Every clip open, the foreground first, when there are several (#329).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub clips: Vec<OpenClip>,
     /// The pane takes the keyboard (Delete, arrows, Ctrl+A/D/U, Escape).
     pub active: bool,
     pub pane: R4,
@@ -335,8 +369,16 @@ pub struct KeysLayout {
 pub struct KeysState {
     pub cc: cc::State,
     pub quantize_open: bool,
-    /// The clip being edited.
+    /// The clip being edited: the foreground clip when several are open.
     pub clip: Option<ClipId>,
+    /// The other clips open with it (#329), in selection order.
+    pub others: Vec<ClipId>,
+    /// The track of every audition, in order (tests check a note sounds on its own clip's track).
+    #[cfg(test)]
+    pub audition_tracks: Vec<TrackId>,
+    /// The selection of several clips that the last click on one of them replaced, and whether
+    /// one more click may keep it: a double-click there opens them all ([`crate::StudioApp::click_clip`]).
+    pub reopen: Option<(Vec<ClipId>, bool)>,
     /// Last empty-grid click in clip-relative ticks; the next Step entry start, never the playhead.
     pub click_tick: Option<i64>,
     /// Selected notes, by value (indices shift after every edit).
@@ -376,6 +418,10 @@ impl Default for KeysState {
             cc: cc::State::default(),
             quantize_open: false,
             clip: None,
+            others: Vec::new(),
+            #[cfg(test)]
+            audition_tracks: Vec::new(),
+            reopen: None,
             click_tick: None,
             selection: Vec::new(),
             gesture: None,
@@ -584,12 +630,21 @@ impl StudioApp {
         self.ui.keys.show && self.keys.clip.is_some() && !self.ui.mixer_full
     }
 
-    /// Open `clip` in the piano roll (MIDI clips only). View state only.
+    /// Open `clip` in the piano roll (MIDI clips only). With it among several selected MIDI clips,
+    /// they all open, `clip` in the foreground (#329). View state only.
     pub fn open_keys(&mut self, clip: ClipId) -> bool {
-        if clip_view(self.engine.session(), clip).is_none() {
+        let s = self.engine.session();
+        if clip_view(s, clip).is_none() {
             return false;
         }
-        if self.keys.clip != Some(clip) {
+        let selected = &s.edit.selected_clips;
+        let others: Vec<ClipId> = if selected.contains(&clip) {
+            selected.iter().copied().filter(|c| *c != clip && clip_view(s, *c).is_some()).collect()
+        } else {
+            Vec::new()
+        };
+        if self.keys.clip != Some(clip) || self.keys.others != others {
+            self.keys.others = others;
             self.keys.click_tick = None;
             self.keys.quantize_open = false;
             self.keys.selection.clear();
@@ -613,7 +668,10 @@ impl StudioApp {
         }
         let s = self.engine.session();
         let open = self.keys.clip.filter(|c| clip_view(s, *c).is_some());
-        let pick = open.or_else(|| s.edit.selected_clips.iter().copied().find(|c| clip_view(s, *c).is_some()));
+        let selected: Vec<ClipId> = s.edit.selected_clips.iter().copied().filter(|c| clip_view(s, *c).is_some()).collect();
+        // A selection of several MIDI clips opens them (#329), the open clip in front if it is one of them.
+        let several = (selected.len() > 1).then(|| open.filter(|c| selected.contains(c)).or(selected.first().copied())).flatten();
+        let pick = several.or(open).or_else(|| selected.first().copied());
         match pick {
             Some(c) => {
                 self.open_keys(c);
@@ -656,16 +714,25 @@ impl StudioApp {
         })
     }
 
+    /// The foreground clip's notes (step entry, the controller lane and the clip-end handle are its own).
     fn keys_notes(&self) -> Vec<Note> {
         self.keys.clip.and_then(|c| clip_view(self.engine.session(), c)).map(|v| v.notes).unwrap_or_default()
     }
 
     /// Play `pitch` at the toolbar velocity (when the audition switch is on).
     pub fn audition(&mut self, pitch: u8, now: f64) {
+        if let Some(track) = self.keys_track() {
+            self.audition_on(track, pitch, now);
+        }
+    }
+
+    /// [`StudioApp::audition`] on `track`: a note of another open clip plays on its own track.
+    fn audition_on(&mut self, track: TrackId, pitch: u8, now: f64) {
         if !self.ui.keys.audition {
             return;
         }
-        let Some(track) = self.keys_track() else { return };
+        #[cfg(test)]
+        self.keys.audition_tracks.push(track);
         let velocity = self.ui.keys.velocity.clamp(1, 127);
         self.keys.auditions += 1;
         self.keys.last_audition = Some((pitch, velocity));
@@ -692,121 +759,6 @@ impl StudioApp {
         self.keys.held = keep;
     }
 
-    /// Add notes to the open clip as one undo step; returns them as stored (the new selection).
-    pub fn keys_add(&mut self, notes: &[Note]) -> Result<Vec<Note>, String> {
-        let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
-        let key = self.keys_merge_key();
-        let mut out = Vec::new();
-        for n in notes {
-            let stored = Note { release_velocity: 64, ..*n };
-            self.keys_exec(
-                "midi.note_add",
-                json!({"clip": clip.0, "pitch": n.pitch, "start_ticks": n.start, "length_ticks": n.length, "velocity": n.velocity, "channel": n.channel}),
-                &key,
-            )?;
-            out.push(stored);
-        }
-        Ok(out)
-    }
-
-    /// Change notes (old value, new value) as one undo step, each found again before its edit.
-    pub fn keys_edit(&mut self, pairs: &[(Note, Note)]) -> Result<Vec<Note>, String> {
-        let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
-        let key = self.keys_merge_key();
-        let mut out = Vec::new();
-        for (old, new) in pairs {
-            if old == new {
-                out.push(*new);
-                continue;
-            }
-            let Some(i) = resolve(&self.keys_notes(), &[*old]).first().copied() else { continue };
-            self.keys_exec(
-                "midi.note_edit",
-                json!({"clip": clip.0, "index": i, "pitch": new.pitch, "start_ticks": new.start, "length_ticks": new.length, "velocity": new.velocity}),
-                &key,
-            )?;
-            out.push(*new);
-        }
-        Ok(out)
-    }
-
-    /// Move the selection by `ticks` and `semitones` (clamped so no note leaves the range).
-    pub fn keys_move(&mut self, ticks: i64, semitones: i64) -> Result<(), String> {
-        let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
-        let sel = self.keys.selection.clone();
-        if self.keys_scale().enabled {
-            let degrees = if matches!(semitones, -12 | 12) { semitones.signum() * 7 } else { semitones };
-            let pairs = self.scale_move(&sel, ticks, degrees, None);
-            self.keys.selection = self.scale_apply_move(&pairs)?;
-            return Ok(());
-        }
-        let (dt, ds) = clamp_move(&sel, ticks, semitones);
-        let idx = resolve(&self.keys_notes(), &sel);
-        if idx.is_empty() || (dt == 0 && ds == 0) {
-            return Ok(());
-        }
-        let key = self.keys_merge_key();
-        self.keys_exec("midi.notes_move", json!({"clip": clip.0, "indices": idx, "ticks": dt, "semitones": ds}), &key)?;
-        self.keys.selection = sel.iter().map(|n| shifted(n, dt, ds)).collect();
-        Ok(())
-    }
-
-    /// Delete the selected notes (one undo step).
-    pub fn keys_delete(&mut self) -> Result<(), String> {
-        let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
-        let idx = resolve(&self.keys_notes(), &self.keys.selection);
-        self.keys.selection.clear();
-        if idx.is_empty() {
-            return Ok(());
-        }
-        let key = self.keys_merge_key();
-        self.keys_exec("midi.note_delete", json!({"clip": clip.0, "indices": idx}), &key).map(|_| ())
-    }
-
-    /// Ctrl+D: copies of the selection right after it (its span rounded up to the grid).
-    pub fn keys_duplicate(&mut self) -> Result<(), String> {
-        let sel = self.keys.selection.clone();
-        let (Some(a), Some(b)) = (sel.iter().map(|n| n.start).min(), sel.iter().map(Note::end).max()) else { return Ok(()) };
-        let g = self.keys_step();
-        let by = ((b - a + g - 1) / g).max(1) * g;
-        let copies: Vec<Note> = sel.iter().map(|n| shifted(n, by, 0)).collect();
-        self.keys.selection = self.keys_add(&copies)?;
-        Ok(())
-    }
-
-    /// Quick apply with saved strength/swing to the current piano-roll grid.
-    pub fn keys_quantize(&mut self) -> Result<(), String> {
-        self.keys_apply_quantize(self.keys_step())
-    }
-
-    /// Ctrl+Up/Down: transpose the selection (all notes when none or all are selected:
-    /// `event.transpose`; otherwise `midi.notes_transpose`).
-    pub fn keys_transpose(&mut self, semitones: i64) -> Result<(), String> {
-        let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
-        let notes = self.keys_notes();
-        let sel = self.keys.selection.clone();
-        let whole = sel.is_empty() || resolve(&notes, &sel).len() == notes.len();
-        if self.keys_scale().enabled {
-            let degrees = if matches!(semitones, -12 | 12) { semitones.signum() * 7 } else { semitones };
-            let pairs = self.scale_move(if whole { &notes } else { &sel }, 0, degrees, None);
-            let edited = self.scale_apply_move(&pairs)?;
-            if !sel.is_empty() {
-                self.keys.selection = edited;
-            }
-            return Ok(());
-        }
-        if !whole {
-            return self.keys_pitch_edit("midi.notes_transpose", json!({"semitones": semitones}));
-        }
-        let key = self.keys_merge_key();
-        self.ensure_clip_selected(clip);
-        self.keys_exec("event.transpose", json!({"clips": [clip.0], "semitones": semitones}), &key)?;
-        if !sel.is_empty() {
-            self.keys.selection = self.keys_notes();
-        }
-        Ok(())
-    }
-
     /// `event.*` commands need a selection to be enabled; the clip being edited is it.
     fn ensure_clip_selected(&mut self, clip: ClipId) {
         let s = self.engine.session();
@@ -821,13 +773,15 @@ fn chromatic(m: egui::Modifiers) -> bool {
     m.shift && !m.alt
 }
 
+/// `n` moved; the caller has clamped the move ([`clamp_move`]), so it stays in its clip (the roll's
+/// ticks of another open clip's notes can be negative).
 fn shifted(n: &Note, dt: i64, ds: i64) -> Note {
-    Note { start: (n.start + dt).max(0), pitch: (i64::from(n.pitch) + ds).clamp(0, 127) as u8, ..*n }
+    Note { start: n.start + dt, pitch: (i64::from(n.pitch) + ds).clamp(0, 127) as u8, ..*n }
 }
 
-/// Clamp a move so every note stays at or after the clip start and inside 0..=127.
-fn clamp_move(sel: &[Note], dt: i64, ds: i64) -> (i64, i64) {
-    let min_start = sel.iter().map(|n| n.start).min().unwrap_or(0);
+/// Clamp a move so every note stays at or after its clip's start (`min_start` is the earliest
+/// selected start in its own clip, [`Composite::local_min`]) and inside 0..=127.
+fn clamp_move(sel: &[Note], min_start: i64, dt: i64, ds: i64) -> (i64, i64) {
     let lo = sel.iter().map(|n| i64::from(n.pitch)).min().unwrap_or(0);
     let hi = sel.iter().map(|n| i64::from(n.pitch)).max().unwrap_or(127);
     (dt.max(-min_start), ds.clamp(-lo, 127 - hi))
@@ -907,7 +861,7 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
         }
     }
     if pressed(ctx, A::NotesSelectAll) {
-        app.keys.selection = app.keys_notes();
+        app.keys.selection = app.keys_all().map(|all| all.notes).unwrap_or_default();
     }
     if pressed(ctx, A::NotesDuplicate) {
         let _ = app.keys_duplicate();
@@ -941,9 +895,10 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
 }
 
 /// Where the notes of the gesture in progress would land: (old, new) pairs, and whether they are copies.
-fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note]) -> Option<(Vec<(Note, Note)>, bool)> {
+fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, all: &Composite) -> Option<(Vec<(Note, Note)>, bool)> {
     let Some(KeysGesture::Notes { kind, anchor, press, copy, .. }) = app.keys.gesture.clone() else { return None };
     let pos = ui.input(|i| i.pointer.latest_pos())?;
+    let notes = &all.notes;
     let sel: Vec<Note> = resolve(notes, &app.keys.selection).into_iter().map(|i| notes[i]).collect();
     let raw = f64::from(pos.x - press.x) / map.ppt;
     let mods = ui.input(|i| i.modifiers);
@@ -954,7 +909,7 @@ fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note]) -> Op
         NoteDrag::Move => {
             let dt = round(anchor.start as f64 + raw) - anchor.start;
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
-            let (dt, ds) = clamp_move(&sel, dt, ds);
+            let (dt, ds) = clamp_move(&sel, all.local_min(&sel), dt, ds);
             if map.scale.enabled && !chromatic(mods) {
                 app.scale_move(&sel, dt, ds, Some(anchor.pitch))
             } else {
@@ -969,9 +924,11 @@ fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note]) -> Op
         NoteDrag::ResizeStart => {
             let min = if free { 1 } else { map.grid.unwrap_or(1).max(1) };
             let dt = round(anchor.start as f64 + raw).saturating_sub(anchor.start);
+            // Each note stops at its own clip's start.
             sel.iter()
-                .map(|n| {
-                    let start = n.start.saturating_add(dt).clamp(0, n.end().saturating_sub(min).max(0));
+                .zip(all.offsets(&sel))
+                .map(|(n, off)| {
+                    let start = n.start.saturating_add(dt).clamp(off, n.end().saturating_sub(min).max(off));
                     (*n, Note { start, length: n.end().saturating_sub(start).max(min), ..*n })
                 })
                 .collect()
@@ -1006,7 +963,7 @@ fn hit(layout: &KeysLayout, pos: Pos2) -> Option<(usize, NoteDrag)> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect, cv: &ClipView, now: f64, layout: &mut KeysLayout) {
+fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect, cv: &ClipView, all: &Composite, now: f64, layout: &mut KeysLayout) {
     let resp = ui.interact(grid, ui.id().with("keys_grid"), Sense::click_and_drag());
     let mods = ui.input(|i| i.modifiers);
     if let Some(pos) = resp.hover_pos()
@@ -1019,7 +976,11 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
             None => {}
         }
     }
-    let notes = &cv.notes;
+    let notes = &all.notes;
+    let track_of = |i: usize| all.locate(i).map_or(cv.track, |(p, _)| p.track);
+    // Identical notes stacked in two clips: the one the selection resolves to (the first), so the
+    // note grabbed is the note that moves and sounds.
+    let first = |i: usize| notes.iter().position(|x| x == &notes[i]).unwrap_or(i);
     // Our own double-click: egui counts a quick second double-click elsewhere as a triple click.
     let click = resp.clicked().then(|| resp.interact_pointer_pos()).flatten();
     let double = click.is_some_and(|pos| {
@@ -1028,7 +989,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
         d
     });
     if double && let Some(pos) = click {
-        match hit(layout, pos) {
+        match hit(layout, pos).map(|(i, k)| (first(i), k)) {
             // Double-click a note: delete it (Ableton).
             Some((i, _)) => {
                 app.keys.selection = vec![notes[i]];
@@ -1038,9 +999,11 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
             None => {
                 let pitch = map.pitch(pos.y);
                 let start = map.floor(map.tick(pos.x));
-                if start >= cv.len {
+                if !all.several() && start >= cv.len {
                     app.status = "Outside the clip: drag the clip end to extend".into();
-                } else if (0..=127).contains(&pitch) && start >= 0 {
+                } else if all.several() && all.target(start).is_none() {
+                    app.status = "Outside the open clips: draw inside one of them".into();
+                } else if (0..=127).contains(&pitch) && (start >= 0 || all.several()) {
                     let n = Note {
                         pitch: app.scale_entry(pitch as u8, mods.shift),
                         velocity: app.ui.keys.velocity.clamp(1, 127),
@@ -1049,15 +1012,16 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                         start,
                         length: map.step,
                     };
+                    let track = all.target(start).map_or(cv.track, |p| p.track);
                     if let Ok(sel) = app.keys_add(&[n]) {
                         app.keys.selection = sel;
-                        app.audition(n.pitch, now);
+                        app.audition_on(track, n.pitch, now);
                     }
                 }
             }
         }
     } else if let Some(pos) = click {
-        match hit(layout, pos) {
+        match hit(layout, pos).map(|(i, k)| (first(i), k)) {
             Some((i, _)) => {
                 let n = notes[i];
                 if mods.shift {
@@ -1069,21 +1033,27 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                 } else {
                     app.keys.selection = vec![n];
                 }
-                app.audition(n.pitch, now);
+                app.audition_on(track_of(i), n.pitch, now);
+                // A click on another clip's note brings that clip to the foreground (#329).
+                if let Some((part, _)) = all.locate(i) {
+                    app.keys_foreground(part.clip);
+                }
             }
             None => {
                 if !mods.shift {
                     app.keys.selection.clear();
                 }
-                // Remember the Step entry start without moving the cursor or transport.
-                app.keys.click_tick = Some(map.tick(pos.x).round().max(-(cv.c0 as f64)) as i64);
+                // Remember the Step entry start without moving the cursor or transport. With several
+                // clips open, only inside the foreground's span: step entry never runs into another's.
+                let at = map.tick(pos.x).round().max(-(cv.c0 as f64)) as i64;
+                app.keys.click_tick = (!all.several() || (0..cv.len).contains(&at)).then_some(at);
             }
         }
     }
     if resp.drag_started()
         && let Some(press) = ui.input(|i| i.pointer.press_origin())
     {
-        match hit(layout, press) {
+        match hit(layout, press).map(|(i, k)| (first(i), k)) {
             Some((i, edge)) => {
                 let n = notes[i];
                 if !app.keys.selection.contains(&n) {
@@ -1095,9 +1065,10 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                 }
                 let kind = if mods.alt && !mods.shift && edge == NoteDrag::Move { NoteDrag::Velocity } else { edge };
                 if kind == NoteDrag::Move {
-                    app.audition(n.pitch, now);
+                    app.audition_on(track_of(i), n.pitch, now);
                 }
-                app.keys.gesture = Some(KeysGesture::Notes { kind, anchor: n, press, copy: mods.command, sounding: n.pitch });
+                app.keys.gesture =
+                    Some(KeysGesture::Notes { kind, anchor: n, press, copy: mods.command, sounding: n.pitch, track: Some(track_of(i)) });
             }
             None => app.keys.gesture = Some(KeysGesture::Band { press, additive: mods.shift }),
         }
@@ -1106,7 +1077,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
         drag_update(app, ui, map, now);
     }
     if resp.drag_stopped() {
-        finish(app, ui, map, vel, notes, layout);
+        finish(app, ui, map, vel, all, layout);
     }
     resp.on_hover_text("Drag notes to move (Ctrl: copy), either edge to resize. Alt on an edge: resize without snap. Alt+Shift on the body: move without snap. Shift on the body: off-scale pitch in scale mode. Alt on the body: velocity.");
 }
@@ -1117,12 +1088,14 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
     let pos = ui.input(|i| i.pointer.latest_pos());
     let mut play = None;
     let scale = app.keys_scale();
-    let notes = app.keys_notes();
+    let notes = app.keys_all().map(|a| a.notes).unwrap_or_default();
     let app_sel: Vec<Note> = resolve(&notes, &app.keys.selection).into_iter().map(|i| notes[i]).collect();
-    if let Some(KeysGesture::Notes { kind, anchor, press, copy, sounding }) = &mut app.keys.gesture
+    let mut dragged_track = None;
+    if let Some(KeysGesture::Notes { kind, anchor, press, copy, sounding, track }) = &mut app.keys.gesture
         && *kind == NoteDrag::Move
     {
         *copy = mods.command;
+        dragged_track = *track;
         ui.ctx().set_cursor_icon(if *copy { CursorIcon::Copy } else { CursorIcon::Grabbing });
         if let Some(pos) = pos {
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
@@ -1141,17 +1114,22 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
         }
     }
     if let Some((old, new)) = play {
-        if let (Some(p), Some(t)) = (&app.player, app.keys_track()) {
+        // The dragged note sounds on its own clip's track, which need not be the foreground's.
+        let track = dragged_track.or_else(|| app.keys_track());
+        if let (Some(p), Some(t)) = (&app.player, track) {
             app.player_requests.result(&mut app.status, p.note(t, old, 0));
         }
-        app.keys.held.retain(|h| h.1 != old);
-        app.audition(new, now);
+        app.keys.held.retain(|h| !(Some(h.0) == track && h.1 == old));
+        if let Some(t) = track {
+            app.audition_on(t, new, now);
+        }
     }
 }
 
 /// The end of a drag on notes or a rubber band: one command (or one merged step).
-fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note], layout: &KeysLayout) {
-    let preview = preview(app, ui, map, vel, notes);
+fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, all: &Composite, layout: &KeysLayout) {
+    let preview = preview(app, ui, map, vel, all);
+    let notes = &all.notes;
     let Some(g) = app.keys.gesture.take() else { return };
     match g {
         KeysGesture::Notes { kind, .. } => {
@@ -1162,8 +1140,7 @@ fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note], la
                         return;
                     }
                     if copy {
-                        let new: Vec<Note> = pairs.iter().map(|(_, b)| *b).collect();
-                        if let Ok(sel) = app.keys_add(&new) {
+                        if let Ok(sel) = app.keys_add_copies(&pairs) {
                             app.keys.selection = sel;
                         }
                     } else if let Ok(sel) = app.scale_apply_move(&pairs) {
@@ -1189,9 +1166,13 @@ fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note], la
             if !additive {
                 app.keys.selection.clear();
             }
-            for n in inside {
-                if !app.keys.selection.contains(&n) {
-                    app.keys.selection.push(n);
+            // With several clips open, as many copies of a value as the band holds (identical notes
+            // in two clips are two notes); with one, each value once, as before #329.
+            let several = !app.keys.others.is_empty();
+            for n in &inside {
+                let need = if several { inside.iter().filter(|x| *x == n).count() } else { 1 };
+                if app.keys.selection.iter().filter(|x| *x == n).count() < need {
+                    app.keys.selection.push(*n);
                 }
             }
         }
@@ -1200,9 +1181,9 @@ fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note], la
 }
 
 /// The velocity lane: drag a note's stem (or click at a height) to set its velocity.
-fn lane_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, vel: Rect, cv: &ClipView, layout: &KeysLayout) {
+fn lane_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, vel: Rect, all: &Composite, layout: &KeysLayout) {
     let resp = ui.interact(vel, ui.id().with("keys_vel"), Sense::click_and_drag());
-    let notes = &cv.notes;
+    let notes = &all.notes;
     // The note whose stem is nearest the press (within 6 points).
     let near = |x: f32| -> Option<usize> {
         layout
@@ -1219,7 +1200,7 @@ fn lane_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, vel: Rect, cv: &ClipV
         if !app.keys.selection.contains(&n) {
             app.keys.selection = vec![n];
         }
-        app.keys.gesture = Some(KeysGesture::Notes { kind: NoteDrag::Lane, anchor: n, press, copy: false, sounding: n.pitch });
+        app.keys.gesture = Some(KeysGesture::Notes { kind: NoteDrag::Lane, anchor: n, press, copy: false, sounding: n.pitch, track: None });
         true
     };
     if resp.drag_started()
@@ -1228,13 +1209,13 @@ fn lane_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, vel: Rect, cv: &ClipV
         begin(app, press);
     }
     if resp.drag_stopped() && matches!(app.keys.gesture, Some(KeysGesture::Notes { kind: NoteDrag::Lane, .. })) {
-        finish(app, ui, map, vel, notes, layout);
+        finish(app, ui, map, vel, all, layout);
     }
     if resp.clicked()
         && let Some(pos) = resp.interact_pointer_pos()
         && begin(app, pos)
     {
-        finish(app, ui, map, vel, notes, layout);
+        finish(app, ui, map, vel, all, layout);
     }
 }
 
