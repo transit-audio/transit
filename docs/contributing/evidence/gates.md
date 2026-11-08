@@ -117,8 +117,8 @@ Contributors add one entry file and never commit the generated blocks of `docs/k
 
 ### Maintainer setup, after the first landing
 
-1. Create the ruleset for `main` (pull request required, force pushes blocked). Do not require the indexes check yet.
-2. Create a deploy key with write access (repository settings, deploy keys), store its private half as the repository secret `INDEXES_DEPLOY_KEY`, and add the deploy key to the ruleset's bypass list.
+1. Create the ruleset for `main` with force pushes blocked and the repository-admin role (the identity the landing chain pushes as) on its bypass list. Do not add a pull-request requirement for this record's sake: ADR 0050 does not decide it, and it would reject the chain's direct pushes. Do not require the indexes check yet.
+2. Create a deploy key with write access (repository settings, deploy keys), store its private half as the repository secret `INDEXES_DEPLOY_KEY`, and add the deploy key to the ruleset's bypass list beside the repository-admin role.
 3. Open a pull request that adds one test entry under `docs/known-issues/entries/`. Check that "indexes entries are valid" passes, merge it, and check that the `regenerate` run commits the new table row to `main` and ends green. Delete the test entry the same way.
 4. Turn on the required status check "indexes entries are valid" in the ruleset.
 
