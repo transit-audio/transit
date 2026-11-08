@@ -77,7 +77,7 @@ pub(super) fn paint_bar(p: &egui::Painter, strip: Rect, bar: Rect, color: Color3
     pts.iter().map(|q| [q.x, q.y]).collect()
 }
 
-/// One channel strip in `r` (clipped to `clip`): a track's, or the master's (the main bus).
+/// One channel strip in the row `r` (clipped to `clip`): a track's, or the master's (the main bus).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn strip(
     app: &mut StudioApp,
@@ -97,7 +97,9 @@ pub(super) fn strip(
     // Under Read automation the controls show the lane's value at the playhead (no command, no edit).
     let vol_db = app.followed(t, &crate::automation::Lane::Volume).unwrap_or(m.volume_db);
     let bal = app.followed(t, &crate::automation::Lane::Pan).unwrap_or_else(|| balance_of(&m.pan));
+    // `r` is the strip's row; its panel is the row less the main bus footer's room on a channel.
     let a = anatomy::anatomy(r, short, main);
+    let r = a.panel;
     let p = ui.painter().with_clip_rect(clip);
     p.rect_filled(r, tokens::radius::PANEL, TOKENS.surface_panel);
     let bar = bar_color(Some(t.color));

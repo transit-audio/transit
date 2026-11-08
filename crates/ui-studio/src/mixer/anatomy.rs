@@ -9,6 +9,9 @@ use egui::{Rect, pos2, vec2};
 /// The fixed sections of one strip, as rects.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Anatomy {
+    /// The strip's panel in its row: the main bus fills the row; a channel ends under its
+    /// readouts, the main bus footer's room above the row's bottom ([`panel`]).
+    pub panel: Rect,
     /// The 3 px track color bar, inside the 1 px border.
     pub bar: Rect,
     pub name: Rect,
@@ -64,12 +67,32 @@ const BELOW_FADER: f32 = cs::SECTION_GAP + cs::READOUT_HEIGHT + cs::PADDING[2] +
 /// The space above the fader's own rect (the board's 2 px).
 const FADER_TOP: f32 = 2.0;
 /// The main bus's footer line: one line of Mono 10 (the board's "INT −14.2 LUFS" row, 13 px), a
-/// section gap under the readouts. The main fader gives up this height; channels are unchanged.
+/// section gap under the readouts.
 pub(super) const FOOTER_HEIGHT: f32 = 13.0;
+/// The footer's room under the main bus's readouts. Every strip in a row reserves it under its
+/// level block, so the main bus shares the channels' frame (Fader > Frame: strips align by the
+/// frame, not by their own content) and a channel's panel ends this much above the main bus's,
+/// as the Mixer board draws them.
+pub(super) const FOOTER_ROOM: f32 = cs::SECTION_GAP + FOOTER_HEIGHT;
 
-/// The height of a strip's sections without its fader.
+/// The height of a row of strips without its faders (the main bus's footer room included).
 pub(super) fn fixed_height(short: bool) -> f32 {
-    above_fader(short) + BELOW_FADER
+    above_fader(short) + BELOW_FADER + FOOTER_ROOM
+}
+
+/// The Frame (Components > Fader): the level block's top and bottom, in y, for any strip in a row
+/// that runs from `top` to `bottom`, a channel or the main bus alike. The travel is Y0 (the top
+/// plus the fader's inset) to Y1 (the bottom less it); every strip computes its block here, so a
+/// 0 dB line runs straight across the mixer.
+pub(super) fn frame(top: f32, bottom: f32, short: bool) -> (f32, f32) {
+    let y = top + above_fader(short);
+    (y, (bottom - BELOW_FADER - FOOTER_ROOM).max(y))
+}
+
+/// A strip's panel in its `row`: the main bus fills the row (its footer under the readouts); a
+/// channel ends under its readouts, [`FOOTER_ROOM`] above the row's bottom.
+pub(super) fn panel(row: Rect, main: bool) -> Rect {
+    if main { row } else { Rect::from_min_max(row.min, pos2(row.max.x, (row.max.y - FOOTER_ROOM).max(row.min.y))) }
 }
 
 /// The strip's width: a channel or the main bus.
@@ -77,8 +100,10 @@ pub(super) fn width(main: bool) -> f32 {
     if main { cs::WIDTH_MAIN } else { cs::WIDTH }
 }
 
-/// The sections of a strip in `r` (`short`: the short variant; `main`: the main bus).
-pub(super) fn anatomy(r: Rect, short: bool, main: bool) -> Anatomy {
+/// The sections of a strip in its row `lane` (the lane's height; `short`: the short variant;
+/// `main`: the main bus).
+pub(super) fn anatomy(lane: Rect, short: bool, main: bool) -> Anatomy {
+    let r = panel(lane, main);
     let x0 = r.min.x + cs::PADDING[1];
     let w = r.width() - 2.0 * cs::PADDING[1];
     let row = |y: f32, h: f32| Rect::from_min_size(pos2(x0, y), vec2(w, h));
@@ -117,18 +142,18 @@ pub(super) fn anatomy(r: Rect, short: bool, main: bool) -> Anatomy {
         Rect::from_min_size(pos2(x0 + i as f32 * (half + cs::GAP), y + j as f32 * (toggle::HEIGHT + cs::GAP)), vec2(half, toggle::HEIGHT))
     };
     let toggles = [cell(0, 0), cell(1, 0), cell(0, 1), cell(1, 1)];
-    y += 2.0 * toggle::HEIGHT + cs::GAP + cs::SECTION_GAP + FADER_TOP;
-    let footer_room = if main { cs::SECTION_GAP + FOOTER_HEIGHT } else { 0.0 };
-    let bottom = r.max.y - BELOW_FADER - footer_room;
+    // The level block on the row's frame, the same function for a channel and the main bus.
+    let (y, bottom) = frame(lane.min.y, lane.max.y, short);
     // The Channel fader is 116 wide in a channel; the main bus gives its meters the extra width.
     let fw = if main { w } else { fader::Variant::Channel.size(0.0).x.min(w) };
-    let fader = Rect::from_min_max(pos2(x0 + (w - fw) / 2.0, y), pos2(x0 + (w + fw) / 2.0, bottom.max(y)));
+    let fader = Rect::from_min_max(pos2(x0 + (w - fw) / 2.0, y), pos2(x0 + (w + fw) / 2.0, bottom));
     let ry = bottom + cs::SECTION_GAP;
     let peak_w = if main { cs::PEAK_WIDTH_MAIN } else { cs::PEAK_WIDTH };
     let gain = Rect::from_min_size(pos2(x0, ry), vec2(w - cs::GAP - peak_w, cs::READOUT_HEIGHT));
     let peak = Rect::from_min_size(pos2(x0 + w - peak_w, ry), vec2(peak_w, cs::READOUT_HEIGHT));
     let footer = main.then(|| Rect::from_min_size(pos2(x0, gain.max.y + cs::SECTION_GAP), vec2(w, FOOTER_HEIGHT)));
     Anatomy {
+        panel: r,
         bar,
         name,
         input,

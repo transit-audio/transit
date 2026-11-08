@@ -136,7 +136,7 @@ fn the_channel_meter_draws_a_well_per_channel_on_the_taper() {
     assert_eq!(l.peak_color, DARK.meter_ok.gamma_multiply(0.35));
     assert!(l.rms.iter().all(Option::is_none) && l.over.iter().all(Option::is_none), "peak only: no solid layer");
     assert!((mid(l.holds[0].unwrap()).y - y(-3.0)).abs() < 0.02 && l.holds[1].is_none());
-    assert_eq!(l.clip_cells[0], [100.0, 32.0, 110.0, 36.0], "4 px, 4 above the well");
+    assert_eq!(l.clip_cells[0], [100.0, 30.0, 110.0, 34.0], "4 px, 6 above the well (the Frame)");
     assert_eq!((l.clip, l.clip_colors.clone()), (false, vec![DARK.line, DARK.line]));
     assert_eq!(l.grid.len(), 8, "a line at each scale mark");
     // The well, its edge, grid and hold inks and the board's corner radius.

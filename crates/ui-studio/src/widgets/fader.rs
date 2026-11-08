@@ -23,6 +23,8 @@ pub const FINE: f32 = 10.0;
 pub const CHANNEL_FADER_W: f32 = spec::COLUMN_FADER[1];
 pub const CHANNEL_LABEL_RIGHT: f32 = spec::COLUMN_LABEL_RIGHT;
 pub const CHANNEL_METER_X: f32 = spec::COLUMN_METER_X;
+/// The cap's span in the fader column (x 2 to 34: a 32 wide cap centered on the track at 18).
+pub const COLUMN_FADER_CAP: [f32; 2] = [CHANNEL_FADER_W / 2.0 - spec::CAP[0] / 2.0, CHANNEL_FADER_W / 2.0 + spec::CAP[0] / 2.0];
 const TICK: f32 = 4.0;
 /// The Channel variant's tick with each placed label (the Fader construction board): 4 px, 3 px
 /// after the label's right edge, toward the meter (x 63 to 67), never on the cap side where a
@@ -219,6 +221,45 @@ pub fn snap_rows(p: &egui::Painter, y: f32, thickness: f32) -> (f32, f32) {
     (top / ppp, (top + n) / ppp)
 }
 
+/// The Channel variant's scale as painted: the placed labels and a tick with each.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct ChannelScale {
+    pub marks: Vec<(String, [f32; 4])>,
+    #[serde(skip)]
+    pub mark_inks: Vec<Color32>,
+    pub ticks: Vec<[f32; 4]>,
+    #[serde(skip)]
+    pub tick_inks: Vec<Color32>,
+}
+
+/// Paints the Channel variant's scale for a level block in `rect` (the Frame: the travel runs
+/// from the block's top plus the inset to its bottom less it): the labels [`placed_marks`] places,
+/// right-aligned at x 60, each with its 4 px tick at x 63 to 67, the label's center and the tick
+/// on the mark's whole physical pixel row (the row the meter's grid line takes). A fader paints
+/// it under its cap; the main bus without a master fader paints it alone, so a level can be read.
+pub fn paint_channel_scale(p: &egui::Painter, rect: Rect) -> ChannelScale {
+    let t = &TOKENS;
+    let track = travel(Variant::Channel, rect).0;
+    let mut out = ChannelScale::default();
+    for m in placed_marks(track.height()) {
+        let y = track.min.y + taper(m.unwrap_or(f32::NEG_INFINITY)) * track.height();
+        let ink = if m == Some(0.0) { t.text } else { t.text_faint };
+        let (top, bottom) = snap_rows(p, y, 1.0);
+        let row = (top + bottom) / 2.0;
+        let x = rect.min.x + CHANNEL_LABEL_RIGHT + CHANNEL_TICK_GAP;
+        let tick = Rect::from_min_max(pos2(x, top), pos2(x + CHANNEL_TICK, bottom));
+        let tick_ink = if m == Some(0.0) { t.text_muted } else { t.line_strong };
+        p.rect_filled(tick, 0.0, tick_ink);
+        out.ticks.push(r4(tick));
+        out.tick_inks.push(tick_ink);
+        let role = tokens::TypeRole { size: 10.0, ..tokens::READOUT_DISPLAY };
+        let r = super::role_text(p, &role, &label(m), ink, Align2::RIGHT_CENTER, pos2(rect.min.x + CHANNEL_LABEL_RIGHT, row));
+        out.marks.push((label(m), r4(r)));
+        out.mark_inks.push(ink);
+    }
+    out
+}
+
 /// Paints a fader in `rect` at `db` without taking any input (the caller owns the gestures, as
 /// the mixer's strips do); [`show`] is this plus the kit's gestures. The cap's center line is
 /// snapped to whole physical pixels.
@@ -239,35 +280,16 @@ pub fn paint(p: &egui::Painter, rect: Rect, variant: Variant, db: f32, muted: bo
     p.rect_filled(track, spec::TRACK_RADIUS, t.line);
     p.rect_filled(fill, spec::TRACK_RADIUS, fill_color);
     // Scale labels (Channel) or ticks (Compact) at the taper's marks.
-    let mut marks = Vec::new();
-    let mut mark_inks = Vec::new();
-    let (mut ticks, mut tick_inks) = (Vec::new(), Vec::new());
-    if !horizontal {
-        // The Channel scale thins on short travel (Labels by travel); Compact ticks every mark.
-        let shown = if variant == Variant::Channel { placed_marks(track.height()) } else { spec::SCALE_LABELS.to_vec() };
-        for m in shown {
+    let (mut marks, mut mark_inks, mut ticks, mut tick_inks) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    if variant == Variant::Channel {
+        ChannelScale { marks, mark_inks, ticks, tick_inks } = paint_channel_scale(p, rect);
+    } else if !horizontal {
+        for m in spec::SCALE_LABELS {
             let y = track.min.y + taper(m.unwrap_or(f32::NEG_INFINITY)) * track.height();
-            let ink = if m == Some(0.0) { t.text } else { t.text_faint };
-            let r = if variant == Variant::Channel {
-                // The label's center, its tick and the meter's grid line share one physical pixel
-                // row; the tick sits after the label, toward the meter.
-                let (top, bottom) = snap_rows(p, y, 1.0);
-                let row = (top + bottom) / 2.0;
-                let x = rect.min.x + CHANNEL_LABEL_RIGHT + CHANNEL_TICK_GAP;
-                let tick = Rect::from_min_max(pos2(x, top), pos2(x + CHANNEL_TICK, bottom));
-                let tick_ink = if m == Some(0.0) { t.text_muted } else { t.line_strong };
-                p.rect_filled(tick, 0.0, tick_ink);
-                ticks.push(r4(tick));
-                tick_inks.push(tick_ink);
-                let role = tokens::TypeRole { size: 10.0, ..tokens::READOUT_DISPLAY };
-                super::role_text(p, &role, &label(m), ink, Align2::RIGHT_CENTER, pos2(rect.min.x + CHANNEL_LABEL_RIGHT, row))
-            } else {
-                let r = Rect::from_min_max(pos2(track.max.x + 6.0, y - 0.5), pos2(track.max.x + 6.0 + TICK, y + 0.5));
-                p.rect_filled(r, 0.0, t.line_strong);
-                r
-            };
+            let r = Rect::from_min_max(pos2(track.max.x + 6.0, y - 0.5), pos2(track.max.x + 6.0 + TICK, y + 0.5));
+            p.rect_filled(r, 0.0, t.line_strong);
             marks.push((label(m), r4(r)));
-            mark_inks.push(ink);
+            mark_inks.push(if m == Some(0.0) { t.text } else { t.text_faint });
         }
     }
     p.rect_filled(cap, spec::CAP_RADIUS, t.knob_cap_active);

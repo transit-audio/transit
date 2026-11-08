@@ -472,13 +472,14 @@ fn the_main_bus_follows_the_last_strip_and_is_pinned_only_when_the_strips_overfl
 }
 
 /// #326: the docked pane opens at the height that gives the short strip the Mixer board's 176 of
-/// fader travel (its sections, 270, the travel, the fader's insets and the pane's margins: 475);
+/// fader travel (its sections, 270, the main bus footer's room the row reserves, 19, the travel,
+/// the fader's insets and the pane's margins: 494);
 /// the full window's strips keep filling the window.
 #[test]
 fn the_docked_pane_defaults_to_the_boards_short_travel_and_the_full_window_fills() {
     use crate::mixer::{BOARD_SHORT_TRAVEL, default_pane_height, min_pane_height};
-    assert_eq!(default_pane_height(), 475.0);
-    assert_eq!(min_pane_height(), 379.0, "the minimum stays");
+    assert_eq!(default_pane_height(), 494.0);
+    assert_eq!(min_pane_height(), 398.0, "80 of travel");
     let (mut app, ctx, mut time, a) = mixer_app();
     assert_eq!(app.ui.mixer_height, default_pane_height(), "the default");
     // A window tall enough that the default is not capped (326-T review: an 800 window is).
@@ -494,7 +495,12 @@ fn the_docked_pane_defaults_to_the_boards_short_travel_and_the_full_window_fills
     full_mixer(&mut app, &ctx, &mut time);
     let full = strip(&app, a);
     let area = app.mixer.layout.area;
-    assert!(full.rect[3] >= area[3] - 4.01, "the full strip fills the window: {:?} in {area:?}", full.rect);
+    // The row fills the window: the main bus to the bottom margin, a channel the main bus
+    // footer's room above it (the strips share one frame).
+    let main = app.mixer.layout.master.clone().unwrap();
+    assert!(main.rect[3] >= area[3] - 4.01, "the full row fills the window: {:?} in {area:?}", main.rect);
+    let room = cs::SECTION_GAP + 13.0;
+    assert!((main.rect[3] - full.rect[3] - room).abs() < 0.01, "the channel ends the footer's room above: {:?}", full.rect);
 }
 
 /// #326: the gain, peak and send readouts print the typographic minus the fader's scale prints
@@ -583,11 +589,11 @@ fn pane_h(app: &StudioApp) -> f32 {
     h(app.mixer.layout.area)
 }
 
-/// 326-T review: the default pane is `min(475, available - ARRANGE_MIN)`, so a window 800 tall
+/// 326-T review: the default pane is `min(494, available - ARRANGE_MIN)`, so a window 800 tall
 /// with the device chain open on an instrument keeps the ruler and two full 48 pt track rows; a
-/// window 1080 tall gets the full 475.
+/// window 1080 tall gets the full 494.
 #[test]
-fn the_default_pane_leaves_two_track_rows_at_800_and_is_475_at_1080() {
+fn the_default_pane_leaves_two_track_rows_at_800_and_is_494_at_1080() {
     use crate::mixer::{ARRANGE_MIN, ARRANGE_MIN_ROW, default_pane_height, min_pane_height, pane_height};
     let mut app = app();
     for _ in 0..8 {
@@ -603,10 +609,10 @@ fn the_default_pane_leaves_two_track_rows_at_800_and_is_475_at_1080() {
     let list = h(app.arrange.layout.track_list);
     assert!(list >= 2.0 * ARRANGE_MIN_ROW - 0.01, "two full rows at 1280x800: {list}");
     assert!(pane_h(&app) < default_pane_height() && pane_h(&app) >= min_pane_height() - 0.01, "{}", pane_h(&app));
-    // Negative control: the fixed 475 leaves the 800 window less than two rows.
-    assert!(list - (default_pane_height() - pane_h(&app)) < 2.0 * ARRANGE_MIN_ROW, "a fixed 475 would leave {list}");
+    // Negative control: the fixed 494 leaves the 800 window less than two rows.
+    assert!(list - (default_pane_height() - pane_h(&app)) < 2.0 * ARRANGE_MIN_ROW, "a fixed 494 would leave {list}");
     frames_at(&mut app, &ctx, 4, &mut time, 1920.0, 1080.0);
-    assert!((pane_h(&app) - default_pane_height()).abs() < 1.01, "475 at 1920x1080: {}", pane_h(&app));
+    assert!((pane_h(&app) - default_pane_height()).abs() < 1.01, "494 at 1920x1080: {}", pane_h(&app));
     // A height the user chose is clamped to the pane's range and capped the same way.
     assert_eq!(pane_height(500.0, 2000.0), 500.0);
     assert_eq!(pane_height(500.0, 600.0), 600.0 - ARRANGE_MIN);
@@ -647,7 +653,7 @@ fn strips_that_fit_beside_the_main_bus_do_not_scroll_and_overflowing_strips_stil
 
 /// Both lower panes at the maintainer's short window (200 percent zoom on a 1000 by 544 point
 /// window): the mixer's cap is taken from the room left under the Devices pane, so the arrangement
-/// keeps the ruler and two full 48 pt rows whenever the 379 floor allows. At 544 itself the floor
+/// keeps the ruler and two full 48 pt rows whenever the 398 floor allows. At 544 itself the floor
 /// does not allow it: the mixer sits at its floor, the Devices pane keeps its height, and only
 /// then does the arrangement shrink below two rows. A little taller and the two rows come back.
 #[test]

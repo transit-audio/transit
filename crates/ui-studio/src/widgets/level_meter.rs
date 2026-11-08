@@ -270,8 +270,9 @@ pub struct ChannelMeterLayout {
     pub clip_colors: Vec<egui::Color32>,
 }
 
-/// The gap between the clip cell and the top of the well.
-pub const CHANNEL_CLIP_GAP: f32 = 4.0;
+/// The gap between the clip cell and the top of the well (the Frame: the cells sit 6 above Y0,
+/// `fader.frame.clipCellGap`).
+pub const CHANNEL_CLIP_GAP: f32 = spec::FRAME_CLIP_CELL_GAP;
 /// The corner radius of a channel meter's well and fills, and of its clip cell (the Mixer board:
 /// `rx 1.5` and `rx 1`).
 pub const CHANNEL_WELL_RADIUS: f32 = 1.5;

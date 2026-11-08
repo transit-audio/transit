@@ -197,12 +197,14 @@ impl Default for UiState {
     }
 }
 
-/// The docked pane's default before #326 (a pane height nothing else ever wrote).
-const OLD_PANE_DEFAULT: f32 = 420.0;
+/// The docked pane's earlier defaults (pane heights nothing else ever wrote): 420 before #326,
+/// and 475 before the main bus shared the channels' frame (the Fader construction board), which
+/// gave the row the main bus footer's room.
+const OLD_PANE_DEFAULTS: [f32; 2] = [420.0, 475.0];
 
 fn pane_height<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
     let h = <f32 as serde::Deserialize>::deserialize(d)?;
-    Ok(if h == OLD_PANE_DEFAULT { crate::mixer::default_pane_height() } else { h })
+    Ok(if OLD_PANE_DEFAULTS.contains(&h) { crate::mixer::default_pane_height() } else { h })
 }
 
 #[cfg(test)]
@@ -224,8 +226,10 @@ mod height_tests {
     #[test]
     fn the_old_default_pane_height_reads_as_the_new_one_and_a_chosen_height_stays() {
         let new = crate::mixer::default_pane_height();
-        let old: UiState = serde_json::from_value(json!({"mixer_height": 420.0})).unwrap();
-        assert_eq!(old.mixer_height, new);
+        for h in [420.0, 475.0] {
+            let old: UiState = serde_json::from_value(json!({"mixer_height": h})).unwrap();
+            assert_eq!(old.mixer_height, new, "{h}");
+        }
         // Negative control: any other saved height is the user's and stays.
         let chosen: UiState = serde_json::from_value(json!({"mixer_height": 500.0})).unwrap();
         assert_eq!(chosen.mixer_height, 500.0);

@@ -42,7 +42,8 @@ const ADD_FX_TAIL: f32 = 110.0;
 const PANE_MARGINS: f32 = 9.0;
 
 /// The docked pane's smallest height: the short strip's sections and a fader with
-/// [`MIN_FADER`] of travel, so the readouts never leave the pane (#326; 379 points).
+/// [`MIN_FADER`] of travel, so the readouts never leave the pane (#326; 398 points with the main
+/// bus footer's room the row reserves).
 pub fn min_pane_height() -> f32 {
     PANE_MARGINS + anatomy::fixed_height(true) + MIN_FADER + 2.0 * crate::tokens::fader::INSET
 }
@@ -51,7 +52,7 @@ pub fn min_pane_height() -> f32 {
 pub const BOARD_SHORT_TRAVEL: f32 = 176.0;
 
 /// The docked pane's default height: the short strip's sections and the board's
-/// [`BOARD_SHORT_TRAVEL`] with the fader's insets and the pane's margins (#326; 475 points).
+/// [`BOARD_SHORT_TRAVEL`] with the fader's insets and the pane's margins (#326; 494 points).
 pub fn default_pane_height() -> f32 {
     PANE_MARGINS + anatomy::fixed_height(true) + BOARD_SHORT_TRAVEL + 2.0 * crate::tokens::fader::INSET
 }
@@ -223,13 +224,20 @@ fn group_links(ui: &Ui, s: &Session, channels: &[&Track], lane: Rect, area: Rect
     out
 }
 
+/// The dashed "+ Fader" in a main bus without a master fader: 24 high, at Y0 (the board's).
+const ADD_FADER_H: f32 = 24.0;
+/// Its label: Sans 400 9 (the board's), to fit the 32 wide cap column.
+const ADD_FADER_FONT: crate::tokens::TypeRole = crate::tokens::TypeRole { size: 9.0, weight: 400, ..crate::tokens::TITLE_DEVICE };
+
 /// The main-out strip when the session has no master track: the main bus strip's frame with the
 /// main meter in its meter slot, its peak readout, and an offer to add a master fader. The
 /// monitoring set does not need a master track (#366): M is ghosted (there is no fader to mute),
 /// Mono, Dim and Ref work, and the footer shows the loudness.
 fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLayout, R4) {
     use crate::tokens;
+    use crate::widgets::fader as kit_fader;
     let a = anatomy::anatomy(r, short, true);
+    let r = a.panel;
     let p = ui.painter().clone();
     p.rect_filled(r, tokens::radius::PANEL, TOKENS.surface_panel);
     let bar = channel::bar_color(None);
@@ -242,11 +250,26 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLay
     if resp.on_hover_text("Add a master fader").clicked() {
         let _ = app.run("track.new", json!({"kind": "master"}));
     }
-    // The meter where the main bus fader's meter sits, so it lines up with the strips beside it.
-    let travel = crate::widgets::fader::track_rect(crate::widgets::fader::Variant::Channel, a.fader);
-    let x = a.fader.min.x + crate::widgets::fader::CHANNEL_METER_X;
+    // The level block on the row's frame, as with a master fader (Main bus without a fader): the
+    // scale and the meter where the main bus fader's sit, so a level can be read off it, and the
+    // dashed "+ Fader" in the fader column at Y0.
+    let travel = kit_fader::track_rect(kit_fader::Variant::Channel, a.fader);
+    let scale = kit_fader::paint_channel_scale(&p, a.fader);
+    let x = a.fader.min.x + kit_fader::CHANNEL_METER_X;
     let d = app.main_meter;
     let meter = strip_meter(&p, x, travel, &d, true);
+    let column = kit_fader::COLUMN_FADER_CAP;
+    let add_fader = Rect::from_min_size(pos2(a.fader.min.x + column[0], travel.min.y), vec2(column[1] - column[0], ADD_FADER_H));
+    let resp = ui.interact(add_fader, ui.id().with("add_master_fader"), Sense::click());
+    if resp.hovered() {
+        p.rect_filled(add_fader, crate::tokens::channel_strip::INSERT_SLOT_RADIUS, TOKENS.button_hover);
+    }
+    inserts::dashed(&p, add_fader);
+    let ink = if resp.hovered() { TOKENS.text } else { TOKENS.text_faint };
+    channel::text_in(&p, &ADD_FADER_FONT, "+ Fader", ink, add_fader, Align2::CENTER_CENTER);
+    if resp.on_hover_text("Add a master fader").clicked() {
+        let _ = app.run("track.new", json!({"kind": "master"}));
+    }
     let wells = meter_bounds(&meter);
     let on_meter = ui.interact(wells, ui.id().with("main_meter_click"), Sense::click());
     if on_meter.clicked() {
@@ -266,6 +289,9 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLay
         color_bar_color: bar.to_array(),
         short,
         meter: r4(wells),
+        fader: r4(travel),
+        main_scale: Some(scale),
+        add_fader: r4(add_fader),
         level: app.main_meter.level,
         ..StripLayout::default()
     };

@@ -439,3 +439,71 @@ fn mixer_insert_overflow_counts_hidden_rows_on_the_pinned_add_row() {
         }
     }
 }
+
+/// The level block's frame of a strip: Y0 and Y1 (the travel's top and bottom).
+fn frame_of(s: &crate::mixer::StripLayout) -> (f32, f32) {
+    (s.fader[1], s.fader[3])
+}
+
+/// Fault 3 of the Fader construction board: every strip in a row, the main bus included, places
+/// its level block on the same Y0 and Y1, docked (short) and in the full mixer, with and without a
+/// master fader, at 1.0 and 1.5; each meter well spans exactly Y0 to Y1 with its clip cell 4 high,
+/// 6 above Y0. Without a master fader the main bus keeps the scale on that frame and holds the
+/// dashed "+ Fader" (24 high) in its fader column at Y0.
+#[test]
+fn the_main_bus_shares_the_channels_frame() {
+    let (mut app, ctx, mut time, a) = mixer_app();
+    let footer_room = crate::tokens::channel_strip::SECTION_GAP + 13.0;
+    for master in [false, true] {
+        if master {
+            app.run("track.new", json!({"kind": "master"})).unwrap();
+        }
+        for full in [false, true] {
+            app.ui.mixer_full = full;
+            app.ui.show_devices = !full;
+            for ppp in [1.0f32, 1.5] {
+                ctx.set_pixels_per_point(ppp);
+                frames(&mut app, &ctx, 4, &mut time);
+                let what = format!("master {master}, full {full}, {ppp}x");
+                assert_eq!(app.mixer.layout.short, !full, "{what}");
+                let ch = strip(&app, a);
+                let m = app.mixer.layout.master.clone().unwrap();
+                let (c0, c1) = frame_of(&ch);
+                let (m0, m1) = frame_of(&m);
+                assert!(c1 - c0 >= 80.0 - 0.01, "{what}: travel {}", c1 - c0);
+                assert!((c0 - m0).abs() < 0.01 && (c1 - m1).abs() < 0.01, "{what}: Y0 and Y1 shared: {c0}..{c1} vs {m0}..{m1}");
+                for (who, s) in [("channel", &ch), ("main", &m)] {
+                    let ml = s.meter_layout.as_ref().unwrap();
+                    for (w, cell) in ml.wells.iter().zip(&ml.clip_cells) {
+                        assert!((w[1] - c0).abs() < 0.01 && (w[3] - c1).abs() < 0.01, "{what}: {who}'s well spans Y0 to Y1: {w:?}");
+                        assert!((cell[3] - cell[1] - 4.0).abs() < 0.01 && (c0 - cell[3] - 6.0).abs() < 0.01, "{what}: {who}'s clip cell: {cell:?}");
+                    }
+                }
+                // The main bus's panel fills the row; a channel's ends the footer's room above it.
+                assert!((m.rect[3] - ch.rect[3] - footer_room).abs() < 0.01, "{what}: {:?} vs {:?}", m.rect, ch.rect);
+                assert!(m.lufs_rect[3] <= m.rect[3] && m.lufs_rect[1] > m.peak_rect[3], "{what}: the footer under the readouts");
+                // The scale: the main bus's labels are the channel's, on the same rows.
+                let ch_scale: Vec<(String, f32)> =
+                    ch.fader_layout.as_ref().unwrap().marks.iter().map(|(t, r)| (t.clone(), (r[1] + r[3]) / 2.0)).collect();
+                let m_marks = match (&m.fader_layout, &m.main_scale) {
+                    (Some(f), None) if master => f.marks.clone(),
+                    (None, Some(s)) if !master => s.marks.clone(),
+                    other => panic!("{what}: {other:?}"),
+                };
+                let m_scale: Vec<(String, f32)> = m_marks.iter().map(|(t, r)| (t.clone(), (r[1] + r[3]) / 2.0)).collect();
+                assert_eq!(ch_scale, m_scale, "{what}: one scale across the row");
+                if !master {
+                    let add = m.add_fader;
+                    let x0 = m.meter_layout.as_ref().unwrap().wells[0][0] - 72.0;
+                    assert_eq!((add[0] - x0, add[2] - x0), (2.0, 34.0), "{what}: + Fader in the cap column");
+                    assert!((add[1] - c0).abs() < 0.01 && (add[3] - add[1] - 24.0).abs() < 0.01, "{what}: 24 high at Y0: {add:?}");
+                } else {
+                    assert_eq!(m.add_fader, [0.0; 4], "{what}: no + Fader with a master fader");
+                }
+                // Negative control: the old frame (the main fader giving up the footer's height)
+                // fails the equality.
+                assert!((c1 - (m1 - footer_room)).abs() > 1.0, "{what}: the old main frame would match");
+            }
+        }
+    }
+}
