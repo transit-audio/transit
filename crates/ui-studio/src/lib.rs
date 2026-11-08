@@ -144,7 +144,8 @@ pub struct Services {
 pub struct MeterDisplay {
     pub level: [f32; 2],
     pub hold: [f32; 2],
-    pub hold_age: f32,
+    /// Seconds since each channel's hold line was last set by a peak.
+    pub hold_age: [f32; 2],
     pub clip: bool,
     /// The loudest sample since the last reset (linear), held until the strip's peak readout is
     /// clicked. Fed from the same peaks as `level`.

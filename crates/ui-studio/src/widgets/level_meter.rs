@@ -39,6 +39,10 @@ impl Default for Ballistics {
 
 /// Where 0 VU sits by default, in dBFS.
 pub const VU_REFERENCE_DBFS: f32 = -18.0;
+/// How long the peak-hold line stays at a peak before it falls, in milliseconds.
+pub const PEAK_HOLD_MS: f32 = 2000.0;
+/// The rate the peak-hold line falls at after the hold time, in dB per second.
+pub const PEAK_HOLD_FALL_DB_PER_S: f32 = 20.0;
 /// The tag under the well.
 pub const TAG_H: f32 = 14.0;
 

@@ -139,7 +139,8 @@ impl StudioApp {
     }
 }
 
-/// Instant attack, ~26 dB/s release, 2 s peak hold. Copied from `transit-ui-egui`.
+/// Instant attack, ~26 dB/s release for `level`. The hold line rises instantly, stays
+/// `PEAK_HOLD_MS` per channel, then falls `PEAK_HOLD_FALL_DB_PER_S` until the level meets it.
 pub fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
     let fall = 10f32.powf(-26.0 * dt / 20.0);
     for c in 0..2 {
@@ -153,7 +154,7 @@ pub fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
             if let Some(h) = d.hold.get_mut(c) {
                 *h = v;
             }
-            d.hold_age = 0.0;
+            d.hold_age[c] = 0.0;
         }
         if v >= 1.0 {
             d.clip = true;
@@ -162,16 +163,19 @@ pub fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
             }
         }
         d.peak = d.peak.max(v);
+        d.hold_age[c] += dt;
+        if d.hold_age[c] > crate::widgets::level_meter::PEAK_HOLD_MS / 1000.0 {
+            let (h, l) = (d.hold[c], d.level[c]);
+            let db = |lin: f32| if lin > 0.0 { 20.0 * lin.log10() } else { f32::NEG_INFINITY };
+            let fallen = db(h) - crate::widgets::level_meter::PEAK_HOLD_FALL_DB_PER_S * dt;
+            d.hold[c] = if fallen <= db(l).max(crate::widgets::fader::FLOOR_DB) { l } else { 10f32.powf(fallen / 20.0) };
+        }
         // The channel meter's reading: the kit's peak fall-off, a one-pole step in dB.
         if let Some(x) = d.falloff.get_mut(c) {
             let db = |lin: f32| if lin > 0.0 { 20.0 * lin.log10() } else { f32::NEG_INFINITY };
             let stepped = crate::widgets::level_meter::meter_step(db(*x), db(v), dt, crate::widgets::level_meter::Ballistics::PEAK_FALLOFF);
             *x = if stepped <= crate::widgets::fader::FLOOR_DB { 0.0 } else { 10f32.powf(stepped / 20.0) };
         }
-    }
-    d.hold_age += dt;
-    if d.hold_age > 2.0 {
-        d.hold = d.level;
     }
     d.gr = if gr > d.gr { gr } else { d.gr * fall };
 }

@@ -321,3 +321,66 @@ fn the_compact_round_as_rects() {
         }
     }
 }
+
+fn hold_db(d: &crate::MeterDisplay, c: usize) -> f32 {
+    20.0 * d.hold[c].log10()
+}
+
+/// Steps `n` frames of `dt` with the same peaks.
+fn feed(d: &mut crate::MeterDisplay, peak: [f32; 2], n: usize, dt: f32) {
+    for _ in 0..n {
+        crate::host::feed_meter(d, peak, 0.0, dt);
+    }
+}
+
+#[test]
+fn the_hold_line_holds_two_seconds_then_falls_twenty_db_per_second() {
+    let dt = 0.01;
+    let mut d = crate::MeterDisplay::default();
+    let six = 10f32.powf(-6.0 / 20.0);
+    feed(&mut d, [six, six], 1, dt);
+    assert!((hold_db(&d, 0) + 6.0).abs() < 1e-3, "the rise is instant");
+    // Silence: the line stays for 2 s of stepped time (one frame already counted).
+    feed(&mut d, [0.0, 0.0], 198, dt);
+    assert!((hold_db(&d, 0) + 6.0).abs() < 1e-3, "still holding at 1.99 s: {}", hold_db(&d, 0));
+    // The next second: a steady 20 dB fall, to within a step.
+    feed(&mut d, [0.0, 0.0], 101, dt);
+    let fallen = -6.0 - hold_db(&d, 0);
+    assert!((fallen - 20.0).abs() <= 20.0 * dt + 1e-3, "fell {fallen} dB in the second after the hold");
+    // It keeps falling until it meets the level, then stops there.
+    feed(&mut d, [0.0, 0.0], 1000, dt);
+    assert_eq!(d.hold, d.level, "the line met the level");
+    assert_eq!(d.hold, [0.0, 0.0]);
+    feed(&mut d, [0.0, 0.0], 10, dt);
+    assert_eq!(d.hold, [0.0, 0.0], "and stays");
+}
+
+#[test]
+fn a_higher_peak_during_the_fall_resets_the_hold_and_its_timer() {
+    let dt = 0.01;
+    let mut d = crate::MeterDisplay::default();
+    let six = 10f32.powf(-6.0 / 20.0);
+    feed(&mut d, [six, six], 1, dt);
+    feed(&mut d, [0.0, 0.0], 250, dt);
+    assert!(hold_db(&d, 0) < -6.0 - 5.0, "falling");
+    let new = 10f32.powf(-3.0 / 20.0);
+    feed(&mut d, [new, 0.0], 1, dt);
+    assert!((hold_db(&d, 0) + 3.0).abs() < 1e-3, "the new peak is held at once");
+    assert!(d.hold_age[0] <= dt + 1e-6, "its timer restarted");
+    feed(&mut d, [0.0, 0.0], 150, dt);
+    assert!((hold_db(&d, 0) + 3.0).abs() < 1e-3, "and it holds the full time again");
+}
+
+#[test]
+fn the_channels_hold_independently() {
+    let dt = 0.01;
+    let mut d = crate::MeterDisplay::default();
+    let six = 10f32.powf(-6.0 / 20.0);
+    feed(&mut d, [six, six], 1, dt);
+    feed(&mut d, [0.0, 0.0], 149, dt);
+    // A peak on the right at 1.5 s does not restart the left's timer.
+    feed(&mut d, [0.0, six], 1, dt);
+    feed(&mut d, [0.0, 0.0], 100, dt);
+    assert!(hold_db(&d, 0) < -6.0 - 0.5, "left began to fall at 2 s: {}", hold_db(&d, 0));
+    assert!((hold_db(&d, 1) + 6.0).abs() < 1e-3, "right is still holding");
+}
