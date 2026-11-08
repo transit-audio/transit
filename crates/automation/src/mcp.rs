@@ -198,7 +198,7 @@ impl<B: Backend> Server<B> {
                 Ok(json!({
                     "protocolVersion": ver,
                     "capabilities": {"tools": {}, "resources": {}},
-                    "serverInfo": {"name": "soundcraft", "version": env!("CARGO_PKG_VERSION")},
+                    "serverInfo": {"name": "transit", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": format!("{INSTRUCTIONS}\nBackend: {}.", self.backend.describe()),
                 }))
             }
