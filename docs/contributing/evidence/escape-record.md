@@ -12,8 +12,10 @@ escape with "fixed" alone. The practice comes from the stabilization playbook:
 
 ## Record format
 
-One file per escape under `docs/escapes/` (create the folder with the first entry), named
-`E<n>-<slug>.md`:
+One file per escape under `docs/escapes/`. The numbered records so far are `E<n>-<slug>.md`; a new one is
+named for its issue (`issue-346.md`, or `issue-346-b.md` for a second on the same issue) or a short slug,
+because nobody assigns a sequence (ADR 0050). Its first line is a `# ` heading, which is its line in the list
+in `README.md`; the list is generated, so do not edit it. Then the six items:
 
 1. **Failure.** What happened and what the user saw.
 2. **Mechanism.** The actual cause, with file paths.

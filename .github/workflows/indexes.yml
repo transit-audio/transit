@@ -1,0 +1,83 @@
+# The generated-index checks (ADR 0050). ci.yml skips pull requests that touch only markdown or docs/, which is
+# what an entry-only pull request is, so this small workflow carries the checks for them.
+#
+# - Pull requests (all of them): validate the entry files only. A pull request never touches the generated README blocks,
+#   so it can never conflict in them and never fails because the base moved.
+# - Pushes to main: regenerate the blocks and commit them back when they changed, then check them.
+name: indexes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/known-issues/**'
+      - 'docs/adr/**'
+      - 'docs/escapes/**'
+      - 'xtask/**'
+  # No path filter: this is a required check, and a required check that a path filter skips stays pending
+  # forever. Validation takes seconds and passes when no entry changed.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: indexes-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: indexes entries are valid
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: indexes
+      - run: cargo xtask indexes --validate
+
+  regenerate:
+    name: indexes regenerate on main
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          # A deploy key with write access, which the maintainer adds as a bypass actor on the main ruleset
+          # (GITHUB_TOKEN cannot bypass a required status check). Without it the push step fails with a message.
+          ssh-key: ${{ secrets.INDEXES_DEPLOY_KEY }}
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: indexes
+      - run: cargo xtask indexes --validate
+      - name: Regenerate the indexes
+        run: cargo xtask indexes
+      - name: Commit the regenerated blocks, if they changed
+        run: |
+          if git diff --quiet -- docs/known-issues/README.md docs/adr/README.md docs/escapes/README.md; then
+            echo "The generated indexes are current; nothing to commit."
+          else
+            git config user.name "transit indexes"
+            git config user.email "indexes@users.noreply.github.com"
+            git add docs/known-issues/README.md docs/adr/README.md docs/escapes/README.md
+            git commit -m "Regenerate the known-issues, ADR and escapes indexes"
+            if ! git push origin HEAD:main; then
+              echo "::error::The indexes push to main was rejected or INDEXES_DEPLOY_KEY is not set: add the deploy key and its ruleset bypass (docs/contributing/evidence/gates.md); the next landing regenerates the tables."
+              exit 1
+            fi
+          fi
+      - run: cargo xtask indexes --check

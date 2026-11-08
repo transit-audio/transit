@@ -12,6 +12,7 @@ cargo xtask layers      # crate layering and the no-UI-below-L6 rule (xtask/src/
 cargo xtask assets      # every bundled asset has a row in ATTRIBUTION.md
 cargo xtask timing      # E49-class timing assertions in tests (xtask/src/timing.rs)
 cargo xtask file-size   # no Rust file over 1500 lines; also part of `cargo xtask layers` (xtask/src/file_size.rs)
+cargo xtask indexes --check   # the generated known-issues, ADR and escapes indexes match their entry files (xtask/src/indexes.rs, ADR 0050); `cargo xtask indexes` rewrites them; pull requests run `--validate` only
 cargo xtask help        # the help catalog: every registered help id has an entry, every entry is used, the generated docs sections are current (xtask/src/help.rs)
 ```
 
@@ -104,6 +105,22 @@ or cargo builds were part of the amendment's source survey.
 - a generated section of a docs page (`<!-- help:telemetry -->` and `<!-- help:audio-devices -->` in `docs/troubleshooting.md`) differs from the catalog. `cargo xtask help --write` fills those sections, so the figure definitions of the troubleshooting page and the Info panel come from one source.
 
 It runs in the Windows job of `.github/workflows/ci.yml` next to `layers`, `assets` and `timing`, and as a step of `cargo xtask ci`. Adding a control with a help id means adding its entry in the same commit ([`../../help/README.md`](../../help/README.md)).
+
+## Generated indexes (ADR 0050)
+
+Contributors add one entry file and never commit the generated blocks of `docs/known-issues/README.md`, `docs/adr/README.md` and `docs/escapes/README.md`.
+
+- `cargo xtask indexes --validate` checks the entry files and writes nothing: the hidden `<!-- transit-index` block parses and has its fields, the file name follows the id rule and ids are unique across known issues and escapes, `order` appears only on the converted entries, the body is one paragraph without a table pipe, every relative link resolves. The `validate` job of `.github/workflows/indexes.yml` ("indexes entries are valid") runs it on every pull request, with no path filter so a required check is never left pending, and the Windows job of `ci.yml` runs it too. It never compares the READMEs, so a base that moved cannot fail a pull request.
+- `cargo xtask indexes` validates and rewrites the three blocks; a second run changes nothing. On a push to `main` that touches the entry folders or `xtask/`, the `regenerate` job of `indexes.yml` runs it, commits the READMEs back when they changed (pushing with the deploy key in the repository secret `INDEXES_DEPLOY_KEY`), then runs `--check`. The README on `main` can lag one workflow run.
+- `cargo xtask indexes --check` fails when a committed block differs from the entries. It is the gate in `cargo xtask ci`, in the landing chain (which runs `cargo xtask indexes` before its gates and commits the result on the candidate) and in the `regenerate` job. If the deploy key is missing or the push is rejected, `regenerate` fails with one line naming the fix, and the next landing brings the tables current, so `--check` on `main` may lag by one landing.
+- `cargo xtask indexes --split-legacy` is the one-shot converter that made the entry files; it refuses a README that already has markers. A test splits frozen copies of the old tables (`xtask/tests/fixtures/indexes/`) and proves the regenerated READMEs are identical to them byte for byte (the ADR status column aside, which now derives from each record).
+
+### Maintainer setup, after the first landing
+
+1. Create the ruleset for `main` (pull request required, force pushes blocked). Do not require the indexes check yet.
+2. Create a deploy key with write access (repository settings, deploy keys), store its private half as the repository secret `INDEXES_DEPLOY_KEY`, and add the deploy key to the ruleset's bypass list.
+3. Open a pull request that adds one test entry under `docs/known-issues/entries/`. Check that "indexes entries are valid" passes, merge it, and check that the `regenerate` run commits the new table row to `main` and ends green. Delete the test entry the same way.
+4. Turn on the required status check "indexes entries are valid" in the ruleset.
 
 ## Scheduling-condition equivalence (#210)
 
