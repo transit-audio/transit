@@ -540,8 +540,8 @@ fn main() -> eframe::Result {
                 app.autosave_dir = autosave_dir;
                 app.leftovers = app.autosave_dir.as_deref().map(transit_engine::autosave::leftovers).unwrap_or_default();
                 app.ui = prefs;
-                // The plug-in scan cache is SoundCraft's, shared; runs without preferences keep none.
-                let cache = config::soundcraft_dir().filter(|_| prefs_enabled());
+                // The plug-in scan cache lives in our own settings folder; runs without preferences keep none.
+                let cache = config::plugin_cache_dir().filter(|_| prefs_enabled());
                 transit_ui_studio::plugin_scan::start(&app.ui.plugin_dirs, cache.as_deref(), std::env::current_exe().ok());
                 app.splash.arm();
                 install_update_check(&mut app.services, &cc.egui_ctx);

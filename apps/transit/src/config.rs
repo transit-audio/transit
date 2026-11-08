@@ -1,6 +1,6 @@
 //! Settings folders. Adapted from `apps/soundcraft/src/config.rs` at `transit` 2af868e (file last
-//! changed 0434bb1): our own folder for `ui.json`, `Autosave/` and `logs/` (`TRANSIT_CONFIG_DIR`),
-//! and SoundCraft's folder for the shared plug-in scan cache only (plan 06, section 3).
+//! changed 0434bb1): our own folder for `ui.json`, `Autosave/`, `logs/` and the plug-in scan cache
+//! (`TRANSIT_CONFIG_DIR`).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -109,10 +109,14 @@ pub fn migrate_legacy_config() {
     }
 }
 
-/// SoundCraft's settings folder (`SOUNDCRAFT_CONFIG_DIR` overrides), for the shared plug-in scan
-/// cache, so a large library is scanned once for both apps.
-pub fn soundcraft_dir() -> Option<PathBuf> {
-    dir_with(platform(), "SOUNDCRAFT_CONFIG_DIR", ("SoundCraft", "soundcraft"), |n| std::env::var_os(n))
+/// Where the plug-in scan cache (`plugins-clap.json`, `plugins-vst3.json`) lives: transit's own
+/// settings folder. No other folder is read or written for it.
+pub fn plugin_cache_dir() -> Option<PathBuf> {
+    plugin_cache_dir_with(platform(), |n| std::env::var_os(n))
+}
+
+fn plugin_cache_dir_with(platform: Platform, env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    dir_with(platform, "TRANSIT_CONFIG_DIR", ("transit", "transit"), env)
 }
 
 const MAX_UI_BYTES: u64 = 4 * 1024 * 1024;
@@ -284,21 +288,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn our_folder_and_soundcrafts_are_separate() {
+    fn the_plugin_cache_lives_in_transits_own_folder() {
         let env = |n: &str| match n {
             "APPDATA" => Some(OsString::from("C:/Users/x/AppData/Roaming")),
             _ => None,
         };
-        assert_eq!(
-            dir_with(Platform::Windows, "TRANSIT_CONFIG_DIR", ("transit", "transit"), env),
-            Some(PathBuf::from("C:/Users/x/AppData/Roaming/transit"))
-        );
-        assert_eq!(
-            dir_with(Platform::Windows, "SOUNDCRAFT_CONFIG_DIR", ("SoundCraft", "soundcraft"), env),
-            Some(PathBuf::from("C:/Users/x/AppData/Roaming/SoundCraft"))
-        );
+        assert_eq!(plugin_cache_dir_with(Platform::Windows, env), Some(PathBuf::from("C:/Users/x/AppData/Roaming/transit")));
+        let xdg = |n: &str| (n == "HOME").then(|| OsString::from("/home/x"));
+        assert_eq!(plugin_cache_dir_with(Platform::Other, xdg), Some(PathBuf::from("/home/x/.config/transit")));
+        let over = |n: &str| (n == "TRANSIT_CONFIG_DIR").then(|| OsString::from("D:/x"));
+        assert_eq!(plugin_cache_dir_with(Platform::Windows, over), Some(PathBuf::from("D:/x")));
         let empty = |n: &str| (n == "TRANSIT_CONFIG_DIR").then(OsString::new);
-        assert_eq!(dir_with(Platform::Other, "TRANSIT_CONFIG_DIR", ("transit", "transit"), empty), None);
+        assert_eq!(plugin_cache_dir_with(Platform::Other, empty), None);
+    }
+
+    /// The inherited app's settings folder is gone from the code: nothing in the app or the plug-in
+    /// scan bootstrap names it, so nothing can read, write or create it.
+    #[test]
+    fn no_code_path_names_the_inherited_settings_folder() {
+        // Built at run time so this file does not match itself.
+        let banned = [["SOUNDCRAFT", "_CONFIG_DIR"].concat(), ["soundcraft", "_dir"].concat(), ["\"Sound", "Craft\""].concat()];
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let dirs = [root.join("src"), root.join("../../crates/ui-studio/src")];
+        let mut stack: Vec<PathBuf> = dirs.to_vec();
+        let mut scanned = 0;
+        while let Some(path) = stack.pop() {
+            if path.is_dir() {
+                stack.extend(std::fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                for word in &banned {
+                    assert!(!text.contains(word.as_str()), "{} names {word}", path.display());
+                }
+                scanned += 1;
+            }
+        }
+        assert!(scanned > 20, "the scan found the sources ({scanned} files)");
     }
 
     fn temp_root(name: &str) -> PathBuf {
