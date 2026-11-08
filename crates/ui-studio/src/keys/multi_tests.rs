@@ -261,3 +261,76 @@ fn r7_when_the_foreground_clip_is_deleted_the_next_one_starts_clean() {
     assert_eq!(t.app.keys.layout.clip, Some(b.0));
     assert_eq!(t.app.keys.click_tick, None, "A's click position does not carry into B's ticks");
 }
+
+// ─── The second refutation review (ADR 0009): each finding fails without its fix ───
+
+/// [`doubled`] with B's C4 960 ticks long and at velocity 110 (A's: 480, 100).
+fn doubled_unequal() -> (T, ClipId) {
+    let (mut t, b) = doubled();
+    t.app.run("midi.note_edit", json!({"clip": b.0, "index": 0, "pitch": 60, "start_ticks": 0, "length_ticks": 960, "velocity": 110})).unwrap();
+    t.app.run("midi.note_edit", json!({"clip": t.clip.0, "index": 0, "pitch": 60, "start_ticks": 0, "length_ticks": 480, "velocity": 100})).unwrap();
+    t.frames(3);
+    (t, b)
+}
+
+#[test]
+fn s1_a_resize_across_clips_keeps_each_new_length_in_its_own_clip() {
+    let (mut t, b) = doubled_unequal();
+    // Equal velocities: after A grows to 960 it equals B's old value.
+    t.app.run("midi.note_edit", json!({"clip": b.0, "index": 0, "pitch": 60, "start_ticks": 0, "length_ticks": 960, "velocity": 100})).unwrap();
+    t.frames(2);
+    t.click(t.at(2000.0, 62));
+    t.key("A", json!({"cmd": true}));
+    assert_eq!(t.selected(), 2);
+    let r = t.app.keys.layout.notes.iter().find(|n| n.clip == Some(b.0)).unwrap().rect;
+    let edge = (r[2] - 2.0, (r[1] + r[3]) / 2.0);
+    let dx = (480.0 * t.app.keys.layout.px_per_tick) as f32;
+    t.drag(edge, (edge.0 + dx, edge.1), json!({}));
+    assert_eq!((notes_of(&t, t.clip)[0].length, notes_of(&t, b)[0].length), (960, 1440), "each grew by 480 in its own clip");
+}
+
+#[test]
+fn s1_a_velocity_drag_across_clips_keeps_each_new_velocity_in_its_own_clip() {
+    let (mut t, b) = doubled_unequal();
+    t.app.run("midi.note_edit", json!({"clip": b.0, "index": 0, "pitch": 60, "start_ticks": 0, "length_ticks": 480, "velocity": 110})).unwrap();
+    t.frames(2);
+    t.click(t.at(2000.0, 62));
+    t.key("A", json!({"cmd": true}));
+    let grab = mid(t.app.keys.layout.notes.iter().find(|n| n.clip == Some(t.clip.0)).unwrap().rect);
+    t.drag(grab, (grab.0, grab.1 - 15.0), json!({"alt": true}));
+    let (a, bv) = (i32::from(notes_of(&t, t.clip)[0].velocity), i32::from(notes_of(&t, b)[0].velocity));
+    assert_eq!(bv - a, 10, "the two keep their difference: A {a}, B {bv}");
+    assert!(a > 100, "both went up: A {a}, B {bv}");
+}
+
+#[test]
+fn s2_one_clip_a_band_over_two_identical_notes_selects_one_as_before() {
+    let mut t = T::open();
+    t.add(60, 0, 480);
+    t.add(60, 0, 480);
+    t.drag(t.at(10.0, 63), t.at(700.0, 58), json!({}));
+    assert_eq!(t.selected(), 1, "as before #329: identical notes in one clip select once");
+}
+
+#[test]
+fn s3_a_midi_clip_selected_with_an_audio_clip_double_clicks_to_itself_alone() {
+    let mut t = T::new();
+    let r = t.app.run("track.new", json!({"kind": "audio"})).unwrap();
+    let ta = TrackId(r["tracks"][0].as_u64().unwrap());
+    let x = t.app.engine.session_mut().new_clip_id();
+    let clip = transit_model::Clip::audio(x, "X", transit_model::SourceId(999), 0, 0, 96_000);
+    t.app.engine.session_mut().track_mut(ta).unwrap().playlist_mut().unwrap().clips.push(clip);
+    t.app.run("edit.select", json!({"clips": [t.clip.0, x.0]})).unwrap();
+    t.frames(3);
+    let r = t.app.arrange.layout.clips.iter().find(|c| c.id == t.clip.0).unwrap().rect;
+    t.click_n(mid(r), 2, json!({}));
+    assert!(t.app.keys.layout.visible);
+    assert_eq!(t.app.engine.session().edit.selected_clips, vec![t.clip], "the audio clip is not reselected");
+}
+
+#[test]
+fn s4_an_empty_click_in_another_clips_span_does_not_start_step_entry_past_the_foreground() {
+    let (mut t, _) = two();
+    t.click(t.at(3840.0 + 1000.0, 62));
+    assert!(t.app.keys.click_tick.is_none_or(|at| (0..3840).contains(&at)), "{:?}", t.app.keys.click_tick);
+}

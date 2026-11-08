@@ -217,6 +217,8 @@ pub enum KeysGesture {
         press: Pos2,
         copy: bool,
         sounding: u8,
+        /// The track the dragged note sounds on (its own clip's, #329).
+        track: Option<TrackId>,
     },
     Band {
         press: Pos2,
@@ -1041,8 +1043,10 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                 if !mods.shift {
                     app.keys.selection.clear();
                 }
-                // Remember the Step entry start without moving the cursor or transport.
-                app.keys.click_tick = Some(map.tick(pos.x).round().max(-(cv.c0 as f64)) as i64);
+                // Remember the Step entry start without moving the cursor or transport. With several
+                // clips open, only inside the foreground's span: step entry never runs into another's.
+                let at = map.tick(pos.x).round().max(-(cv.c0 as f64)) as i64;
+                app.keys.click_tick = (!all.several() || (0..cv.len).contains(&at)).then_some(at);
             }
         }
     }
@@ -1063,7 +1067,8 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                 if kind == NoteDrag::Move {
                     app.audition_on(track_of(i), n.pitch, now);
                 }
-                app.keys.gesture = Some(KeysGesture::Notes { kind, anchor: n, press, copy: mods.command, sounding: n.pitch });
+                app.keys.gesture =
+                    Some(KeysGesture::Notes { kind, anchor: n, press, copy: mods.command, sounding: n.pitch, track: Some(track_of(i)) });
             }
             None => app.keys.gesture = Some(KeysGesture::Band { press, additive: mods.shift }),
         }
@@ -1085,10 +1090,12 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
     let scale = app.keys_scale();
     let notes = app.keys_all().map(|a| a.notes).unwrap_or_default();
     let app_sel: Vec<Note> = resolve(&notes, &app.keys.selection).into_iter().map(|i| notes[i]).collect();
-    if let Some(KeysGesture::Notes { kind, anchor, press, copy, sounding }) = &mut app.keys.gesture
+    let mut dragged_track = None;
+    if let Some(KeysGesture::Notes { kind, anchor, press, copy, sounding, track }) = &mut app.keys.gesture
         && *kind == NoteDrag::Move
     {
         *copy = mods.command;
+        dragged_track = *track;
         ui.ctx().set_cursor_icon(if *copy { CursorIcon::Copy } else { CursorIcon::Grabbing });
         if let Some(pos) = pos {
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
@@ -1108,7 +1115,7 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
     }
     if let Some((old, new)) = play {
         // The dragged note sounds on its own clip's track, which need not be the foreground's.
-        let track = app.keys.held.iter().find(|h| h.1 == old).map(|h| h.0).or_else(|| app.keys_track());
+        let track = dragged_track.or_else(|| app.keys_track());
         if let (Some(p), Some(t)) = (&app.player, track) {
             app.player_requests.result(&mut app.status, p.note(t, old, 0));
         }
@@ -1159,9 +1166,11 @@ fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, all: &Composite, l
             if !additive {
                 app.keys.selection.clear();
             }
-            // As many copies of a value as the band holds: identical notes in two clips are two notes.
+            // With several clips open, as many copies of a value as the band holds (identical notes
+            // in two clips are two notes); with one, each value once, as before #329.
+            let several = !app.keys.others.is_empty();
             for n in &inside {
-                let need = inside.iter().filter(|x| *x == n).count();
+                let need = if several { inside.iter().filter(|x| *x == n).count() } else { 1 };
                 if app.keys.selection.iter().filter(|x| *x == n).count() < need {
                     app.keys.selection.push(*n);
                 }
@@ -1191,7 +1200,7 @@ fn lane_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, vel: Rect, all: &Comp
         if !app.keys.selection.contains(&n) {
             app.keys.selection = vec![n];
         }
-        app.keys.gesture = Some(KeysGesture::Notes { kind: NoteDrag::Lane, anchor: n, press, copy: false, sounding: n.pitch });
+        app.keys.gesture = Some(KeysGesture::Notes { kind: NoteDrag::Lane, anchor: n, press, copy: false, sounding: n.pitch, track: None });
         true
     };
     if resp.drag_started()
