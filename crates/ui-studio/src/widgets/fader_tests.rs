@@ -192,3 +192,57 @@ fn the_channel_labels_thin_by_travel_greedily_and_never_collide() {
     assert_ne!(names(old.clone()), ["0", "−12", "−24", "−∞"]);
     assert!(closest(&centers(&old, 80.0)) < 13.0, "all eight at 80 overlap");
 }
+
+/// The rects the Fader construction board's sections A (anatomy, travel 200) and B (labels by
+/// travel 200, 100, 92 and 80) name, block-relative (x from the block's left, y from its top),
+/// at 1.0 and 1.5, beside the board's figures; run with `--nocapture` to read them. The figures
+/// are asserted too: Y0 10, Y1 10 + travel, the cap 2..34 centered on 0 dB, labels ending at 60,
+/// ticks 63..67, the meter at 72 with its wells Y0..Y1 and clip cells 6 above Y0.
+#[test]
+fn the_board_sections_a_and_b_as_rects() {
+    use crate::widgets::level_meter::{Channel, paint_channel};
+    for ppp in [1.0f32, 1.5] {
+        let mut rig = Rig::new();
+        rig.ctx.set_pixels_per_point(ppp);
+        for travel in [200.0f32, 100.0, 92.0, 80.0] {
+            let (l, m) = rig.idle(|ui| {
+                let l = fader::show(ui, egui::Id::new("f"), Variant::Channel, travel + 20.0, 0.0, false).layout;
+                let track = egui::Rect::from_min_max(egui::pos2(l.track[0], l.track[1]), egui::pos2(l.track[2], l.track[3]));
+                let ch = Channel { peak_db: -3.0, rms_db: None, hold_db: Some(-2.0), clip: false };
+                let m = paint_channel(ui.painter(), l.meter.unwrap()[0], track, crate::tokens::fader::METER_BAR, &[ch, ch]);
+                (l, m)
+            });
+            let (x0, y0) = (l.rect[0], l.rect[1]);
+            let rel = |r: [f32; 4]| [r[0] - x0, r[1] - y0, r[2] - x0, r[3] - y0].map(|v| (v * 100.0).round() / 100.0);
+            let yc = |r: [f32; 4]| ((r[1] + r[3]) / 2.0 - y0 * 1.0) * 100.0;
+            assert_eq!((l.track[1] - y0, l.track[3] - y0), (10.0, 10.0 + travel), "Y0 and Y1");
+            assert_eq!((l.cap[0] - x0, l.cap[2] - x0), (2.0, 34.0), "the cap 2..34");
+            assert!(((l.cap[1] + l.cap[3]) / 2.0 - y0 - (10.0 + 0.14 * travel)).abs() < 0.01, "the cap on 0 dB");
+            for w in &m.wells {
+                assert_eq!((w[1] - y0, w[3] - y0), (10.0, 10.0 + travel), "wells Y0..Y1");
+            }
+            for c in &m.clip_cells {
+                assert_eq!((c[1] - y0, c[3] - y0), (0.0, 4.0), "clip cells 4 high, 6 above Y0");
+            }
+            assert_eq!(m.wells[0][0] - x0, 72.0, "the meter at 72");
+            if travel == 200.0 {
+                println!(
+                    "A {ppp}x travel 200: block {:?} track {:?} cap {:?} center line {:?} meter wells {:?} clip cells {:?}",
+                    rel(l.rect),
+                    rel(l.track),
+                    rel(l.cap),
+                    rel(l.center_line),
+                    m.wells.iter().map(|w| rel(*w)).collect::<Vec<_>>(),
+                    m.clip_cells.iter().map(|w| rel(*w)).collect::<Vec<_>>()
+                );
+            }
+            let labels: Vec<String> = l
+                .marks
+                .iter()
+                .zip(&l.ticks)
+                .map(|((t, r), k)| format!("{t} label right {:.2} center y {:.2} tick {:?}", r[2] - x0, yc(*r).round() / 100.0, rel(*k)))
+                .collect();
+            println!("B {ppp}x travel {travel}: {}", labels.join("; "));
+        }
+    }
+}

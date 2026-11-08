@@ -507,3 +507,57 @@ fn the_main_bus_shares_the_channels_frame() {
         }
     }
 }
+
+/// The board's section C as rects: the main bus beside a channel on one frame, with and without a
+/// master fader, block-relative, at 1.0 and 1.5 (run with `--nocapture`). The widths stay as they
+/// are (the board's withdrawn fault: the main's bars are 14 · 3 · 14 in a 144 block, a channel's
+/// 10 · 3 · 10 in 116), and the dump pins them.
+#[test]
+fn the_board_section_c_as_rects() {
+    use crate::tokens::fader as f;
+    let (mut app, ctx, mut time, a) = mixer_app();
+    for master in [false, true] {
+        if master {
+            app.run("track.new", json!({"kind": "master"})).unwrap();
+        }
+        for ppp in [1.0f32, 1.5] {
+            ctx.set_pixels_per_point(ppp);
+            frames(&mut app, &ctx, 4, &mut time);
+            let what = format!("master {master}, {ppp}x");
+            let ch = strip(&app, a);
+            let m = app.mixer.layout.master.clone().unwrap();
+            let bars = |s: &crate::mixer::StripLayout| {
+                let w = &s.meter_layout.as_ref().unwrap().wells;
+                (w[0][2] - w[0][0], w[1][0] - w[0][2], w[1][2] - w[1][0])
+            };
+            assert_eq!(bars(&m), (f::METER_BAR_MAIN, f::METER_GAP, f::METER_BAR_MAIN), "{what}: main 14 · 3 · 14");
+            assert_eq!(bars(&ch), (f::METER_BAR, f::METER_GAP, f::METER_BAR), "{what}: channel 10 · 3 · 10");
+            // Negative control: the channel's bars are not the main bus's.
+            assert_ne!(bars(&ch), bars(&m));
+            let block = |s: &crate::mixer::StripLayout| s.meter_layout.as_ref().unwrap().wells[0][0] - f::COLUMN_METER_X;
+            let (cx, mx) = (block(&ch), block(&m));
+            if let Some(fl) = &m.fader_layout {
+                assert_eq!((fl.rect[0], fl.rect[2] - fl.rect[0]), (mx, f::MAIN_BLOCK_WIDTH), "{what}: the main block is 144 wide");
+            }
+            let cf = ch.fader_layout.as_ref().unwrap();
+            assert_eq!((cf.rect[0], cf.rect[2] - cf.rect[0]), (cx, f::BLOCK_WIDTH), "{what}: the channel block is 116 wide");
+            assert!(mx + f::MAIN_BLOCK_WIDTH <= m.rect[2] - 8.0 + 0.01, "{what}: the main block inside the strip's padding");
+            // The dump: section C, block-relative (x from the block's left, y from its top).
+            for (who, s, x0) in [("Inst", &ch, cx), ("Main", &m, mx)] {
+                let y0 = s.fader[1] - f::INSET;
+                let rel = |r: [f32; 4]| [r[0] - x0, r[1] - y0, r[2] - x0, r[3] - y0].map(|v| (v * 100.0).round() / 100.0);
+                let ml = s.meter_layout.as_ref().unwrap();
+                println!(
+                    "C {what} {who}: Y0 {} Y1 {} (row y {}..{}) wells {:?} clip cells {:?} add_fader {:?}",
+                    s.fader[1] - y0,
+                    s.fader[3] - y0,
+                    s.fader[1],
+                    s.fader[3],
+                    ml.wells.iter().map(|w| rel(*w)).collect::<Vec<_>>(),
+                    ml.clip_cells.iter().map(|w| rel(*w)).collect::<Vec<_>>(),
+                    (s.add_fader != [0.0; 4]).then(|| rel(s.add_fader)),
+                );
+            }
+        }
+    }
+}

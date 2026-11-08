@@ -249,3 +249,26 @@ fn the_channel_meter_draws_the_rms_solid_over_the_35_percent_peak() {
     assert!(old.rms[0].is_none());
     assert!(!old_shapes.iter().any(|s| layer(&s.shape, well) == Some("rms")), "one fill: no solid core");
 }
+
+/// Fault 5 of the Fader construction board: the draw order inside a well is the well and its
+/// edge, the grid lines, the peak fill, the RMS fill, the hold line (`fader.meterDrawOrder`):
+/// nothing is drawn over the level.
+#[test]
+fn the_channel_meter_paints_well_grid_peak_rms_hold_in_that_order() {
+    use super::level_meter::Channel;
+    let mut rig = Rig::new();
+    let (_, well, shapes) = paint_one(&mut rig, Channel { peak_db: 2.0, rms_db: Some(-12.0), hold_db: Some(2.0), clip: false });
+    let layers: Vec<&str> = shapes.iter().filter_map(|s| layer(&s.shape, well)).collect();
+    for want in crate::tokens::fader::METER_DRAW_ORDER {
+        assert!(layers.contains(&want), "{want} painted: {layers:?}");
+    }
+    assert!(in_draw_order(&layers), "well and edge, grid, peak, RMS, hold: {layers:?}");
+    // Negative controls: the grid drawn last, and the edge stroked over the level (the old
+    // order), both fail.
+    let mut grid_last: Vec<&str> = layers.iter().copied().filter(|l| *l != "grid").collect();
+    grid_last.push("grid");
+    assert!(!in_draw_order(&grid_last), "the grid over the level is out of order");
+    let mut edge_last = layers.clone();
+    edge_last.push("well");
+    assert!(!in_draw_order(&edge_last), "the well's edge over the level is out of order");
+}

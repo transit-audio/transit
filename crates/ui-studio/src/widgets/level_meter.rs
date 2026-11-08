@@ -306,7 +306,10 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         let reference_y = y_of(0.0, well);
         out.reference_y = reference_y;
         let rad = CHANNEL_WELL_RADIUS;
+        // The draw order inside a well (`fader.meterDrawOrder`): the well and its edge, the grid
+        // lines, the peak fill, the solid RMS fill, the hold line; nothing over the level.
         p.rect_filled(well, rad, t.surface_inset);
+        p.rect_stroke(well, rad, Stroke::new(1.0, t.line_inset), StrokeKind::Inside);
         for m in spec::SCALE_LABELS {
             let (top, bottom) = fader::snap_rows(p, y_of(m.unwrap_or(f32::NEG_INFINITY), well), 1.0);
             let line = Rect::from_min_max(pos2(well.min.x, top), pos2(well.max.x, bottom));
@@ -340,7 +343,6 @@ pub fn paint_channel(p: &egui::Painter, x: f32, travel: Rect, bar: f32, channels
         if let Some(r) = hold {
             p.rect_filled(r, 0.0, t.text);
         }
-        p.rect_stroke(well, rad, Stroke::new(1.0, t.line_inset), StrokeKind::Inside);
         let cell = Rect::from_min_max(
             pos2(well.min.x, well.min.y - CHANNEL_CLIP_GAP - spec::METER_CLIP_CELL),
             pos2(well.max.x, well.min.y - CHANNEL_CLIP_GAP),
