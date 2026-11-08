@@ -52,6 +52,18 @@ pub fn read_file(path: impl AsRef<Path>) -> Result<Vec<u8>> {
     std::fs::read(path).map_err(err)
 }
 
+/// The file at `path`, opened to be read in pieces, after [`read_file`]'s checks: inside the
+/// automation read root when there is one, and a regular file.
+pub fn open_file(path: impl AsRef<Path>) -> Result<std::fs::File> {
+    let path = path.as_ref();
+    crate::file_access::check_read(path).map_err(EngineError::Io)?;
+    let err = |err: std::io::Error| EngineError::Io(format!("{}: {err}", path.display()));
+    if !std::fs::metadata(path).map_err(err)?.is_file() {
+        return Err(EngineError::Io(format!("{}: not a regular file", path.display())));
+    }
+    std::fs::File::open(path).map_err(err)
+}
+
 #[cfg(test)]
 thread_local! {
     /// Whole-file reads on this thread ([`read_file`]): a test shows a file was refused from its
@@ -315,6 +327,8 @@ pub fn load_sampler_bytes(e: &mut Engine, track: TrackId, name: &str, bytes: &[u
 
 mod midi;
 pub use midi::{export_midi, import_midi_bytes};
+mod dawproject;
+pub use dawproject::{is_dawproject, open_dawproject, read_dawproject};
 
 /// Dropped bytes as a Sampler zone's source (ADR 0041), one undo step.
 pub use crate::cmd::sampler_patch::load_zone_bytes;

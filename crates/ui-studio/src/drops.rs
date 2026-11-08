@@ -117,12 +117,12 @@ pub(crate) fn take(app: &mut StudioApp, key: (TrackId, usize)) -> Option<DropOff
     if r.offer.as_ref().is_some_and(|(k, _)| *k == key) { r.offer.take().map(|(_, o)| o) } else { None }
 }
 
-/// The arrangement's claim: a `.transit` file opens as the session, a MIDI file imports, any other
-/// file imports as audio at the cursor (on the cursor's track). Also used for files named on the
-/// command line.
+/// The arrangement's claim: a `.transit` or `.dawproject` file opens as the session, a MIDI file
+/// imports, any other file imports as audio at the cursor (on the cursor's track). Also used for
+/// files named on the command line.
 pub fn open_path(app: &mut StudioApp, p: &str) {
     let lower = p.to_ascii_lowercase();
-    if lower.ends_with(".transit") {
+    if lower.ends_with(".transit") || lower.ends_with(".dawproject") {
         app.run_or_ask("session.open", serde_json::json!({"path": p}));
         return;
     }

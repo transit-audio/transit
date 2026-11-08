@@ -59,8 +59,12 @@ proptest = "1"
 # audio
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "vorbis", "ogg", "wav", "pcm", "aiff", "isomp4", "aac", "alac", "adpcm", "caf", "mkv"] }
 rustfft = "6"
-# Session bundles (one file holding a session and its audio, for the browser): stored entries only.
-zip = { version = "9", default-features = false }
+# Session bundles (one file holding a session and its audio, for the browser) write stored entries;
+# DAWproject import (#261) reads deflated ones through flate2's pure-Rust backend.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+# DAWproject import (#261): project.xml. Already in the build through usvg.
+roxmltree = "0.20"
 cpal = "=0.16.0"
 # Publication protocol depends on bounded single-element push/pop; review every version bump.
 rtrb = "=0.4.0"

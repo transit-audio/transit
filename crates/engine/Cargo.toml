@@ -23,6 +23,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 log.workspace = true
 zip.workspace = true
+# zip's deflate needs a flate2 backend: the pure-Rust one (DAWproject import, #261).
+flate2.workspace = true
+roxmltree.workspace = true
 craft-docpath.workspace = true
 # Ending the process without exit handlers after an unclean shutdown (issue #104).
 transit-rt.workspace = true
