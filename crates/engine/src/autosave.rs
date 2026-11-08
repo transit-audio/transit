@@ -52,7 +52,7 @@ impl Autosaver {
         let landed = Arc::new(AtomicU64::new(0));
         let writer =
             Writer { root, failure: Arc::clone(&failure), landed: Arc::clone(&landed), folder: None, pending: None, last: None, written: Ok(()) };
-        let thread = std::thread::Builder::new().name("soundcraft-autosave".into()).spawn(move || writer.run(&rx));
+        let thread = std::thread::Builder::new().name("transit-autosave".into()).spawn(move || writer.run(&rx));
         if let Err(e) = &thread {
             report(&failure, format!("{STOPPED}: {e}"));
         }
@@ -580,7 +580,7 @@ mod tests {
     }
 
     fn folder(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("soundcraft-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }

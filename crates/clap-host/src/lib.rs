@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn garbage_files_are_errors_not_crashes() {
         set_scan_extra_dirs_only(true);
-        let d = std::env::temp_dir().join(format!("soundcraft-clap-garbage-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("transit-clap-garbage-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("Bundle.clap/Contents/MacOS")).unwrap();
         std::fs::write(d.join("garbage.clap"), b"\x7fELF this is not a plugin \x00\x01\x02").unwrap();

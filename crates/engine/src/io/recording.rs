@@ -450,7 +450,7 @@ mod record_tests {
     #[test]
     fn an_input_path_by_name_records_its_channel_and_old_labels_keep_their_meaning() {
         use transit_model::{ChannelFormat, IoDirection, IoMap, IoPath};
-        let dir = std::env::temp_dir().join(format!("soundcraft-takes-path-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-takes-path-{}", std::process::id()));
         let mut e = Engine::default();
         let mut io = IoMap::for_device("ASIO", "x", 8, 2);
         io.add_path(IoPath { live: false, name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono })
@@ -478,7 +478,7 @@ mod record_tests {
 
     #[test]
     fn a_system_audio_track_records_the_pair_after_the_device_inputs_or_silence() {
-        let dir = std::env::temp_dir().join(format!("soundcraft-takes-system-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-takes-system-{}", std::process::id()));
         let mut e = Engine::default();
         e.set_io_map(transit_model::IoMap::for_device("WASAPI", "x", 2, 2));
         let browser = armed(&mut e, "Browser", "stereo", "System Audio");
@@ -493,7 +493,7 @@ mod record_tests {
 
     #[test]
     fn armed_tracks_get_new_take_files_used_in_place() {
-        let dir = std::env::temp_dir().join(format!("soundcraft-takes-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-takes-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut e = Engine::default();
         let vox = armed(&mut e, "Vox", "mono", "In 2");
@@ -519,7 +519,7 @@ mod record_tests {
 
     #[test]
     fn a_loop_take_becomes_one_clip_per_pass_and_autosaves_in_place() {
-        let dir = std::env::temp_dir().join(format!("soundcraft-loop-take-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-loop-take-{}", std::process::id()));
         let path = dir.join("Audio Files/Vox_01.wav");
         write_take(&path, 1_050);
         let mut e = Engine::default();
@@ -542,7 +542,7 @@ mod record_tests {
 
     #[test]
     fn three_laps_of_cycle_recording_are_three_audio_takes_each_one_lap_long() {
-        let dir = std::env::temp_dir().join(format!("soundcraft-cycle-take-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-cycle-take-{}", std::process::id()));
         let path = dir.join("Audio Files/Gtr_01.wav");
         write_take(&path, 1_200);
         let mut e = Engine::default();
@@ -599,7 +599,7 @@ mod record_tests {
     }
 
     fn over_a_clip(tag: &str) -> (Engine, TrackId, PathBuf, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("soundcraft-newtake-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-newtake-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (first, second) = (dir.join("Audio Files/Vox_01.wav"), dir.join("Audio Files/Vox_02.wav"));
         write_take(&first, 4_800);

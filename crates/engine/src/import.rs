@@ -225,7 +225,7 @@ impl Imports {
             work(&self.shared);
         } else if spawn {
             let shared = Arc::clone(&self.shared);
-            if let Err(err) = std::thread::Builder::new().name("soundcraft-import".into()).spawn(move || work(&shared)) {
+            if let Err(err) = std::thread::Builder::new().name("transit-import".into()).spawn(move || work(&shared)) {
                 log::warn!("import worker not started ({err}); preparing on this thread");
                 work(&self.shared);
             }

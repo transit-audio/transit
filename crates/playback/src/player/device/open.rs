@@ -619,7 +619,7 @@ impl Player {
         // A timer-driven fallback never claims a physical output clock map.
         *player.clock.get_mut() = None;
         player.initial_error = Some(error);
-        player.start_silent(access, |task| std::thread::Builder::new().name("soundcraft-silent-clock".into()).spawn(task));
+        player.start_silent(access, |task| std::thread::Builder::new().name("transit-silent-clock".into()).spawn(task));
         player
     }
 

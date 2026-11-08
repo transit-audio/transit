@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(e.can_undo(), undo_before, "not undoable");
         assert!(e.journal.iter().all(|(id, _)| id != "mix.insert_state"), "not journaled");
         // Survives save/load.
-        let dir = std::env::temp_dir().join(format!("soundcraft-insert-state-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-insert-state-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("s.transit");

@@ -638,7 +638,7 @@ mod tests {
     #[test]
     fn session_open_reports_missing_media() {
         let mut e = crate::demo::demo_engine();
-        let dir = std::env::temp_dir().join(format!("soundcraft-open-missing-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-open-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("Gone.transit").to_string_lossy().into_owned();
         e.execute("session.save_as", &json!({"path": path})).unwrap();
@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn saving_a_session_without_audio_creates_its_folder() {
-        let dir = std::env::temp_dir().join(format!("soundcraft-new-folder-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-new-folder-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("Song").join("Song.transit");
         Engine::default().execute("session.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
@@ -698,7 +698,7 @@ mod tests {
     #[test]
     fn exports_the_selected_clips_and_refuses_an_empty_selection() {
         let mut e = crate::demo::demo_engine();
-        let dir = std::env::temp_dir().join(format!("soundcraft-clips-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("transit-clips-{}", std::process::id()));
         let p = json!({"dir": dir.to_string_lossy()});
         e.execute("edit.select_none", &json!({})).unwrap();
         assert!(e.execute("file.export_clips", &p).is_err());

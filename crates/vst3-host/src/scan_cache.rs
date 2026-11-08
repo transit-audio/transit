@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn a_missing_scan_program_is_a_load_error() {
-        let r = load_in_child::<String>(Path::new("no-such-soundcraft-scanner.exe"), "--scan", Path::new("x.plug"), || false);
+        let r = load_in_child::<String>(Path::new("no-such-transit-scanner.exe"), "--scan", Path::new("x.plug"), || false);
         assert!(r.is_some_and(|r| r.is_err_and(|e| e.contains("did not start"))));
     }
 

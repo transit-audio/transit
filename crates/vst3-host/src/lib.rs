@@ -433,7 +433,7 @@ mod tests {
     #[test]
     fn garbage_files_are_errors_not_crashes() {
         set_scan_extra_dirs_only(true);
-        let d = std::env::temp_dir().join(format!("soundcraft-vst3-garbage-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("transit-vst3-garbage-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         let arch = if cfg!(target_os = "macos") {
             "MacOS"
@@ -477,7 +477,7 @@ mod tests {
             ["/lib/x86_64-linux-gnu/libz.so.1", "/usr/lib/libz.so.1", "/lib64/libz.so.1"].iter().map(PathBuf::from).find(|p| p.exists())
         };
         let Some(lib) = lib else { return };
-        let d = std::env::temp_dir().join(format!("soundcraft-vst3-nolib-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("transit-vst3-nolib-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         // Point a single-file ".vst3" at it via a symlink (no copying of binaries).

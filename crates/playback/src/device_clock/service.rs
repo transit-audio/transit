@@ -131,7 +131,7 @@ impl ClockService {
         let key = reader.key();
         let (mut pump, ui, audio, placements) = prepare(reader);
         let state = Arc::clone(&pump.state);
-        let worker = std::thread::Builder::new().name("soundcraft-device-clock".into()).spawn(move || {
+        let worker = std::thread::Builder::new().name("transit-device-clock".into()).spawn(move || {
             while pump.step(&mut now) {
                 std::thread::park_timeout(period);
             }
