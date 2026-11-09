@@ -81,33 +81,39 @@ pub(crate) fn shape(z: &Zone) -> Option<Shape> {
 /// Checks every key-map group's shape, `at(i)` being zone `i`'s [`Shape`] when it is a member:
 /// one key range per group, identical velocity ranges among a layer's alternatives, at most
 /// [`LAYERS`] layers and [`ALTERNATIVES`] alternatives per layer, alternatives unique and
-/// contiguous from 0. No allocation.
+/// contiguous from 0. One pass over the zones per group, from the group's first member; no
+/// allocation.
 pub(crate) fn check_groups(at: impl Fn(usize) -> Option<Shape>) -> Result<(), PatchError> {
+    let mut seen = [0u64; GROUPS / 64];
     for i in 0..ZONES {
-        let Some(((g, l, a), keys, velocities)) = at(i) else { continue };
-        if usize::from(l) >= LAYERS || usize::from(a) >= ALTERNATIVES {
-            return Err(PatchError::Range);
+        let Some(((g, ..), keys, _)) = at(i) else { continue };
+        let bit = 1u64 << (g % 64);
+        let Some(word) = seen.get_mut(usize::from(g) / 64) else { continue };
+        if *word & bit != 0 {
+            continue;
         }
-        let mut first_of_layer = true;
-        let mut mask = 1u16 << a;
-        for j in (0..ZONES).filter(|&j| j != i) {
-            let Some(((h, m, b), k2, v2)) = at(j) else { continue };
+        *word |= bit;
+        // The group's layers: each one's velocity range and the alternatives present.
+        let mut velocities = [None::<(u8, u8)>; LAYERS];
+        let mut masks = [0u16; LAYERS];
+        for j in i..ZONES {
+            let Some(((h, l, a), k, v)) = at(j) else { continue };
             if h != g {
                 continue;
             }
-            if k2 != keys {
+            if usize::from(a) >= ALTERNATIVES {
+                return Err(PatchError::Range);
+            }
+            let (Some(range), Some(mask)) = (velocities.get_mut(usize::from(l)), masks.get_mut(usize::from(l))) else {
+                return Err(PatchError::Range);
+            };
+            if k != keys || range.is_some_and(|r| r != v) || *mask & (1 << a) != 0 {
                 return Err(PatchError::GroupShape);
             }
-            if m != l {
-                continue;
-            }
-            if v2 != velocities || b == a || usize::from(b) >= ALTERNATIVES {
-                return Err(PatchError::GroupShape);
-            }
-            first_of_layer &= j > i;
-            mask |= 1 << b;
+            *range = Some(v);
+            *mask |= 1 << a;
         }
-        if first_of_layer && mask & (mask + 1) != 0 {
+        if masks.iter().any(|m| m & (m + 1) != 0) {
             return Err(PatchError::GroupShape);
         }
     }
