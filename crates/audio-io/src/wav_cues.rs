@@ -332,14 +332,15 @@ pub fn wav_cues(bytes: &[u8]) -> CueRead {
 
 /// The tempo in BPM of the first `acid` chunk of a WAV file: the `f32` at byte 20 of the 24-byte
 /// chunk (no other field is read). `None` without an `acid` chunk, when that chunk is shorter
-/// than 24 bytes, or when the tempo is not finite and positive.
+/// than 24 bytes, or when the tempo is not a normal (finite, nonzero, not subnormal), positive
+/// `f32`.
 pub fn wav_tempo(bytes: &[u8]) -> Option<f64> {
     let acid = Chunks::new(bytes).find(|c| &c.id == b"acid")?;
     if acid.body.len() < ACID_LEN {
         return None;
     }
-    let tempo = f64::from(f32::from_bits(le_u32(acid.body, ACID_TEMPO_AT)?));
-    (tempo.is_finite() && tempo > 0.0).then_some(tempo)
+    let tempo = f32::from_bits(le_u32(acid.body, ACID_TEMPO_AT)?);
+    (tempo.is_normal() && tempo > 0.0).then_some(f64::from(tempo))
 }
 
 #[cfg(test)]

@@ -255,6 +255,11 @@ fn wav_tempo_rejects_nan_zero_negative_and_short_chunk() {
     for bits in [f32::NAN.to_bits(), 0f32.to_bits(), (-0f32).to_bits(), (-120f32).to_bits(), f32::INFINITY.to_bits()] {
         assert_eq!(wav_tempo(&place(&base, &acid(bits, 24), &[])), None, "tempo bits {bits:#x}");
     }
+    // Subnormal tempos (the smallest, and one near 6e-39) are not normal values.
+    for bits in [1u32, 6.08e-39f32.to_bits()] {
+        assert!(f32::from_bits(bits) > 0.0 && !f32::from_bits(bits).is_normal());
+        assert_eq!(wav_tempo(&place(&base, &acid(bits, 24), &[])), None, "tempo bits {bits:#x}");
+    }
     assert_eq!(wav_tempo(&place(&base, &acid(120f32.to_bits(), 23), &[])), None);
     assert_eq!(wav_tempo(&base), None);
     // The first `acid` decides: a valid second one is not read.
