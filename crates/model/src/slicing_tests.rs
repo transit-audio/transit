@@ -232,6 +232,40 @@ fn copy_from_creates_new_ids_keeps_labels() {
     refused(&mut manual, MarkerError::Full, |m| m.copy_from(0, 1000, &big));
 }
 
+/// A set as an older file or a migrated single set loads it: ids 1, 2 and 3, no `next_id`.
+fn loaded() -> Markers {
+    let m = |id, frame| Marker { id, frame, ..Marker::default() };
+    Markers { markers: vec![m(1, 0), m(2, 300), m(3, 600)], next_id: 0, ..Markers::default() }
+}
+
+#[test]
+fn removed_ids_never_return_on_a_loaded_set() {
+    let old = [1u32, 2, 3];
+    // Remove the highest, then add: a new id, and again after removing that one.
+    let mut m = loaded();
+    assert_eq!(m.remove(0, 1000, 3), Ok(Removed { id: 3, merged_into: 2 }));
+    let first = m.add(0, 1000, 800).unwrap();
+    assert!(!old.contains(&first), "remove then add reused {first}");
+    assert_eq!(first, 4);
+    m.remove(0, 1000, first).unwrap();
+    assert_eq!(m.add(0, 1000, 900), Ok(5), "a removed new id does not return either");
+    // Clear, then add.
+    let mut m = loaded();
+    assert_eq!(m.clear_to_start(0, 1000), Ok(vec![2, 3]));
+    let id = m.add(0, 1000, 500).unwrap();
+    assert!(!old.contains(&id), "Clear then add reused {id}");
+    assert_eq!(ids(&m), vec![1, 4]);
+    // Start from Auto: every copy is a new Manual identity, none equal to a removed id.
+    let auto = Markers {
+        markers: vec![Marker { id: 1, frame: 0, ..Marker::default() }, Marker { id: 2, frame: 500, ..Marker::default() }],
+        ..Markers::default()
+    };
+    let mut m = loaded();
+    assert_eq!(m.copy_from(0, 1000, &auto), Ok(vec![1, 2, 3]));
+    assert!(ids(&m).iter().all(|id| !old.contains(id)), "the copy reused an old id: {:?}", ids(&m));
+    assert_eq!(ids(&m), vec![4, 5]);
+}
+
 #[test]
 fn markers_next_id_written_only_when_set() {
     let plain = Markers { markers: vec![Marker { id: 1, frame: 0, ..Marker::default() }], ..Markers::default() };

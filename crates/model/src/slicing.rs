@@ -307,6 +307,10 @@ impl Markers {
 
     /// Moves marker `id` toward `frame`, clamped to its legal interval, and says whether and
     /// where it was clamped. The id and the order are kept; S refuses.
+    ///
+    /// With snap on, the caller clamps the request into [`Markers::legal_move`] before it snaps,
+    /// so the snapped frame is already legal and this reports no clamp: the command builds the
+    /// `clamped at marker N` report from its own pre-snap clamp against that interval.
     pub fn move_to(&mut self, start: u64, end: u64, id: u32, frame: u64) -> Result<Moved, MarkerError> {
         let (lo, hi) = self.legal_move(start, end, id)?;
         let i = self.index_of(id)?;
@@ -332,6 +336,7 @@ impl Markers {
             return Err(MarkerError::Fixed);
         }
         let merged_into = self.markers.get(i - 1).map_or(0, |m| m.id);
+        self.retire_ids();
         self.markers.remove(i);
         Ok(Removed { id, merged_into })
     }
@@ -353,6 +358,7 @@ impl Markers {
     pub fn clear_to_start(&mut self, start: u64, end: u64) -> Result<Vec<u32>, MarkerError> {
         self.check(start, end)?;
         let mut next = self.clone();
+        next.retire_ids();
         next.materialize_start(start)?;
         let removed = next.markers.drain(1..).map(|m| m.id).collect();
         *self = next;
@@ -369,6 +375,7 @@ impl Markers {
             return Err(MarkerError::Full);
         }
         let mut next = self.clone();
+        next.retire_ids();
         let removed: Vec<u32> = next.markers.drain(..).map(|m| m.id).collect();
         let frames: Vec<(u64, Option<String>)> =
             if other.markers.is_empty() { vec![(start, None)] } else { other.markers.iter().map(|m| (m.frame, m.label.clone())).collect() };
@@ -410,6 +417,15 @@ impl Markers {
             self.markers.push(Marker { id, frame: start, ..Marker::default() });
         }
         Ok(())
+    }
+
+    /// Raises `next_id` past every id present. Runs before any marker leaves the set, so a set
+    /// loaded without a recorded `next_id` (0) never hands a removed id out again. An id of
+    /// `u32::MAX` is never handed out by [`Markers::allocate`], so saturating here cannot reuse.
+    fn retire_ids(&mut self) {
+        if let Some(top) = self.markers.iter().map(|m| m.id).max() {
+            self.next_id = self.next_id.max(top.saturating_add(1));
+        }
     }
 
     /// The next id: above every id present and every id handed out before (ids start at 1).
