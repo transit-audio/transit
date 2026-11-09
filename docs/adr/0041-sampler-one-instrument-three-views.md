@@ -1184,17 +1184,22 @@ it, and plain-entry pruning never drops a stored note (today `set_pad` drops ent
 `is_plain`, and `is_plain` treats a note equal to the default as plain; the implementation
 changes that; old files round-trip unchanged because pruning runs only on edits). A stored note
 keeps its value when the start note changes; only defaulted pads move. `mix.sampler_pad_set`
-with `note: null` returns a pad to its default note. The start note change is refused, with the
+with `note: null` returns a pad to its default note, refused like any note edit when that
+default is another pad's note (the existing text `note 36 is pad 17's trigger note`) or fails
+check (c). The start note change is refused, with the
 document bit-identical, when:
 
 - (a) `note` is not an integer 0 to 64: `note must be an integer from 0 to 64` (this is also the
   only way a pad could leave 0 to 127);
 - (b) a defaulted pad would take a stored pad's note: `Pad B1 plays C1: a start note of C1 would
   put pad A1 there.`;
-- (c) a moved, bound pad's new note would select more than eight layers (the pad plus unbound
-  key-map layers; the body's "at most 8 layer voices start for one note", which counts any pad
-  triggered by the same note as one layer, and the same check a pad note edit makes): `Pad A5
-  would be a ninth layer on E3.`;
+- (c) for some velocity 1 to 127, a moved, bound pad's new note would start more than eight
+  voices. The pad counts one, and each unbound zone counts one if its key range holds the note,
+  its velocity range holds that velocity, and it has no layer membership or is its layer's
+  alternative 0 (one per round-robin layer, as the core selects); this is the body's "at most 8
+  layer voices start for one note", counting the pad as one layer. A pad note edit
+  (`mix.sampler_pad_set`, including `note: null`) makes the same check and refuses with the same
+  text: `Pad A5 would be a ninth layer on E3.`;
 - (d) the root write-through of item 5 would leave 0 to 127: `Pad A3's root would leave 0 to 127.`
 
 The pad and note names in these texts are examples of the fixed wording. Defaulted pads move
@@ -1234,7 +1239,7 @@ effective note) and `note_stored` (a boolean); and the loop's `root` and `root_s
 core receives effective notes: the link in `crates/mix/src/sampler_link.rs` computes
 `start + index` for defaulted pads and the core has no start note (its own `60 + index` only
 fills an empty spec, where no pad sounds). `mix.sampler_pad_set` setting a pad's note is
-unchanged.
+unchanged apart from `note: null` (item 3).
 
 **7. Everything downstream uses the effective note:** the Pads view labels, the
 computer-keyboard audition, Slices to pads, Slice to MIDI (each pad's effective note at the
@@ -1251,7 +1256,9 @@ written too), and is cleared with `null` (back to following the start note). The
 range stays 0 to 128 minus the count. Old patches read start 60 and so root 60, unchanged: no
 migration. The error example "Pad B3 already plays E3" is corrected to "Pad B13 already plays
 E3" for the default start note 36 (E3 is note 64, index 28, bank B slot 13). Expand to rack
-(#272) maps pads by effective note at expansion.
+(#272) maps pads by effective note at expansion: each member's one-note key zone is the pad's
+effective note, and the member Sampler stores that note explicitly on the pad, so the member's
+own start note never moves it.
 
 **8. UI.** A **Start note** control in the Pads view's bar shows the note name (C1) and sets
 it by drag or typing. Its placement and look come from the design board; until that lands the
@@ -1263,7 +1270,8 @@ only defaulted pads; refusals (a) to (d) leave the document identical and name p
 loaded `pad_start_note` of 65 loads opaque; no clip, take or automation lane is touched; the
 status notice reports the semitone distance; a key-tracked defaulted pad with a user root a
 fifth below its note plays the same pitch before and after a start change, and a stored root on
-a stored-note pad stays; a stored note equal to its current default survives a later mute edit
+a stored-note pad stays; `note: null` returns a pad to `start + index`, and is refused when another pad owns that note; a
+stored note equal to its current default survives a later mute edit
 and a start change; a default slice run at starts 36 and 12 puts slice 1 on A1; an explicit loop
 root stays put across a start change and `null` clears it; `mix.sampler_state` reports
 `pad_start_note`, per-pad `note` and `note_stored`, and the loop's `root` and `root_stored`;
