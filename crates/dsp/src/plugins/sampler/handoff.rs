@@ -33,8 +33,8 @@ use std::sync::Arc;
 use rtrb::{Consumer, Producer, PushError, RingBuffer};
 use transit_instrument_core::matrix::Matrix;
 use transit_instrument_core::shaper::Settings;
-use transit_sampler_core::patch::{Pad, PatchError, Zone, check_patch};
-use transit_sampler_core::{PADS, ZONES};
+use transit_sampler_core::patch::{GroupMode, Pad, PatchError, Zone, check_patch};
+use transit_sampler_core::{GROUPS, PADS, ZONES};
 
 use super::bank::{CREDITS, PreparedBank, SOURCE_IDS, readable_frames};
 use super::params::resolve;
@@ -61,11 +61,13 @@ pub struct PatchSpec {
     /// parameters set them (`zoneNNN_level`, `zoneNNN_pan`, the shaper and `mod` ids).
     pub zones: Vec<Option<Zone>>,
     pub pads: [Pad; PADS],
+    /// Each key-map group's round-robin mode, by group id (default: every group Sequential).
+    pub groups: [GroupMode; GROUPS],
 }
 
 impl Default for PatchSpec {
     fn default() -> Self {
-        PatchSpec { sources: Vec::new(), zones: Vec::new(), pads: core::array::from_fn(Pad::new) }
+        PatchSpec { sources: Vec::new(), zones: Vec::new(), pads: core::array::from_fn(Pad::new), groups: [GroupMode::Sequential; GROUPS] }
     }
 }
 
@@ -95,6 +97,7 @@ pub(super) struct Generation {
     /// [`ZONES`] entries, sources by id.
     pub(super) zones: Vec<Option<Zone>>,
     pub(super) pads: [Pad; PADS],
+    pub(super) groups: [GroupMode; GROUPS],
 }
 
 impl Generation {
@@ -171,7 +174,7 @@ impl Publisher {
         // A waiting generation is replaced: its credit and its ids go to the new one first, so the
         // ids of at most four generations are ever held.
         let reused = self.waiting.take().map(|old| self.release(old)).is_some();
-        let mut g = Box::new(Generation { bank: PreparedBank::new(), zones, pads: spec.pads });
+        let mut g = Box::new(Generation { bank: PreparedBank::new(), zones, pads: spec.pads, groups: spec.groups });
         let mut local: Vec<Option<u16>> = vec![None; spec.sources.len()];
         let mut failed = false;
         for z in g.zones.iter_mut().flatten() {

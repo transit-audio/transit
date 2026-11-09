@@ -68,9 +68,9 @@ pub use bank::{CREDITS, PreparedBank, SOURCE_IDS, Source};
 pub use handoff::{CONTROL_RING, PatchSpec, PublishError, Publisher};
 use legacy::{Derived, RELEASE, SAMPLER_PARAMS, VOICES, Voice};
 pub use params::{FIELD_LEVEL, FIELD_PAN, ZONE_FIELDS, field_info, resolve, slot_id};
-pub use transit_sampler_core::patch::{Membership, Pad, PatchError, PlayMode, Playback, Zone};
+pub use transit_sampler_core::patch::{GroupMode, Membership, Pad, PatchError, PlayMode, Playback, Zone};
 pub use transit_sampler_core::playhead::{LoopMode, Region};
-pub use transit_sampler_core::{PADS, ZONES};
+pub use transit_sampler_core::{GROUPS, PADS, ZONES};
 
 /// Checks a spec as [`Publisher::publish`] will before it prepares anything (counts, sources,
 /// regions, the zones and pads as the core checks them), without publishing: a command validates

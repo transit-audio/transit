@@ -278,3 +278,30 @@ fn a_slot_level_or_pan_edit_holds_after_a_reset() {
         assert_eq!(r.to_bits(), to.to_bits(), "right, frame {n} after the reset");
     }
 }
+
+/// Each key-map group's round-robin mode travels with the patch: a Random group plays the seeded
+/// xorshift32 sequence of the instance's seed (ADR 0041 amendment 2026-11-08, item 4), computed
+/// here independently.
+#[test]
+fn a_random_group_mode_reaches_the_core() {
+    let (mut s, mut p) = instance();
+    let sources: Vec<Arc<dyn SampleSource>> = (0..4).map(|k| mono(vec![k as f32 + 1.0; 4])).collect();
+    let zones = (0..4u8)
+        .map(|a| {
+            let membership = Some(Membership { group: 3, layer: 0, alternative: a });
+            Some(Zone { membership, ..zone(u16::from(a), 4, unity(PlayMode::OneShot, 60, 0)) })
+        })
+        .collect();
+    let mut groups = [GroupMode::Sequential; GROUPS];
+    groups[3] = GroupMode::Random;
+    p.publish(PatchSpec { sources, zones, groups, ..PatchSpec::default() }).unwrap();
+    let mut x = 7u32 ^ 4u32.wrapping_mul(0x9E37_79B9);
+    for _ in 0..16 {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        on(&mut s, 0, 60);
+        let out = block(&mut s, 8);
+        assert_eq!(out[0], (x % 4) as f32 + 1.0);
+    }
+}

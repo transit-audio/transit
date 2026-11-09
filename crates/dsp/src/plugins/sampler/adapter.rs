@@ -199,7 +199,10 @@ impl CorePath {
         // Every zone of the new patch carries its slot values now.
         let _ = self.params.take_dirty();
         let outgoing = match self.core.set_patch(&g.zones, &g.pads) {
-            Ok(()) => self.current.replace(g),
+            Ok(()) => {
+                self.core.set_group_modes(&g.groups);
+                self.current.replace(g)
+            }
             // Checked before publication, so not expected: the old patch keeps playing and the
             // refused generation goes back.
             Err(_) => Some(g),
