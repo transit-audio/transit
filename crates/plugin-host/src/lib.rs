@@ -178,7 +178,10 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub(crate) struct Worker {
     /// The thread's name (`plugin-host-0`), for the log.
     name: String,
-    tx: mpsc::Sender<Arc<JobCell>>,
+    /// The job gate: `None` once the thread has closed it ([`Worker::close`]). Sending holds
+    /// this lock, so a send either lands before the close (and the thread drains it) or is
+    /// refused (issue #420).
+    tx: Mutex<Option<mpsc::Sender<Arc<JobCell>>>>,
     waker: QueueWaker,
     epoch: Instant,
     /// Milliseconds since `epoch` plus one when the current job, tick or dispatch began. Valid
@@ -196,7 +199,7 @@ pub(crate) struct Worker {
     /// only while that section still runs ([`Worker::is_wedged`]), so a mark that lands just
     /// after the call returned never reads as wedged.
     wedged: AtomicU64,
-    /// The thread's loop runs (false once it has shut down).
+    /// The thread accepts jobs (false once it has closed its gate or been parked).
     running: AtomicBool,
     /// Jobs that may move to a fresh thread if this one wedges (creation jobs).
     movable: Mutex<Vec<Arc<JobCell>>>,
@@ -316,14 +319,28 @@ impl Worker {
         self.creating.load(Ordering::Acquire) && self.busy_for().is_some_and(|d| d >= limit)
     }
 
-    /// Queues a job; `Err` gives it back when the thread is gone.
+    /// Queues a job; `Err` gives it back when the thread is gone or has closed its gate. The
+    /// check and the queueing happen under the gate's lock, so they are one step against
+    /// [`Worker::close`] (issue #420).
     fn send(&self, cell: Arc<JobCell>) -> Result<(), Arc<JobCell>> {
+        let gate = lock(&self.tx);
+        let Some(tx) = gate.as_ref() else { return Err(cell) };
         if !self.running.load(Ordering::Acquire) || self.is_abandoned() {
             return Err(cell);
         }
-        self.tx.send(cell).map_err(|e| e.0)?;
+        tx.send(cell).map_err(|e| e.0)?;
+        drop(gate);
         self.waker.wake();
         Ok(())
+    }
+
+    /// Closes the job gate, on the host thread at shutdown: every later send is refused and its
+    /// sender leaks the job (and the plug-in it owns, issue #56 (b)); a job sent before it is
+    /// queued and the thread drains it. Idempotent.
+    fn close(&self) {
+        let mut gate = lock(&self.tx);
+        *gate = None;
+        self.running.store(false, Ordering::Release);
     }
 
     /// Queues `job` (labeled `busy`), or leaks it (and whatever it owns) when the thread is gone:
@@ -730,7 +747,7 @@ impl Host {
         let waker = ready_rx.recv().ok()?;
         let worker = Arc::new(Worker {
             name: format!("plugin-host-{n}"),
-            tx,
+            tx: Mutex::new(Some(tx)),
             waker,
             epoch: Instant::now(),
             busy_since: AtomicU64::new(0),
@@ -917,9 +934,13 @@ impl Host {
         lock(&self.inner.workers).iter().filter_map(|w| w.stuck()).collect()
     }
 
-    /// Ends hosting: no new jobs; each live, responsive host thread drops its instances'
-    /// handles, runs the shutdown hook and ends. Waits at most `timeout` in all; a thread still
-    /// inside a plug-in is left behind. True when every thread finished in time.
+    /// Ends hosting: no new jobs; each live, responsive host thread closes its job gate, drops
+    /// its instances' handles, runs the shutdown hook and ends. Waits at most `timeout` in all; a
+    /// thread still inside a plug-in is left behind. True when every thread finished in time.
+    ///
+    /// True promises that every thread it waited for has closed its gate (issue #420): a job
+    /// sent to such a thread afterwards (an instance dropped late) is refused and leaked by its
+    /// sender, never run and never dropped on the thread, whose plug-in modules have exited.
     pub fn shutdown(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         let workers: Vec<_> = lock(&self.inner.workers).clone();
@@ -927,6 +948,10 @@ impl Host {
         for w in workers.iter().filter(|w| w.responsive()) {
             let hook = self.inner.config.hooks.shutdown.clone();
             pending.push(self.submit_to(w, Busy::any(call::SHUTDOWN), move |ctx| {
+                // First, so the gate is closed before this job can report done (issue #420).
+                if let Some(worker) = &ctx.worker {
+                    worker.close();
+                }
                 ctx.entries.clear();
                 ctx.count_hosted();
                 if let Some(h) = hook {
@@ -944,10 +969,12 @@ impl Host {
     }
 }
 
-/// A host thread's loop: jobs, OS messages, ticks. It takes the job receiver by value and drops
-/// it before returning, while the thread's message queue (its COM apartment) still exists: a job
-/// sent after that fails to send and is leaked by its sender, so no plug-in object is destroyed
-/// on this thread after the apartment ends (issue #56).
+/// A host thread's loop: jobs, OS messages, ticks. The shutdown job closes the job gate
+/// ([`Worker::close`]) before it reports done; a job sent after that is refused and leaked by
+/// its sender (issue #420). The loop then drains (leaks) what was queued before the close and
+/// drops the receiver, while the thread's message queue (its COM apartment) still exists, so no
+/// plug-in object is destroyed on this thread after its module exits or the apartment ends
+/// (issue #56).
 fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQueue, config: &Config, host: Weak<Inner>) {
     if let Some(start) = &config.hooks.start {
         worker.busy_as(Section::Job, Busy::any(call::START), || catch_unwind(AssertUnwindSafe(|| start())).is_ok());
@@ -1004,14 +1031,15 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
         }
         queue.wait(config.tick.saturating_sub(last_tick.elapsed()).max(Duration::from_millis(1)));
     }
-    worker.running.store(false, Ordering::Release);
+    // The shutdown job closed the gate already; closing again keeps the drain below complete
+    // for any way out of the loop.
+    worker.close();
     // Jobs queued behind the shutdown (an instance dropped late) are leaked: their plug-ins'
-    // modules have exited, and the apartment ends with this thread.
+    // modules have exited, and the apartment ends with this thread. The gate is closed, so no
+    // job can arrive after the drain: the receiver drops nothing (issue #420).
     while let Ok(cell) = rx.try_recv() {
         std::mem::forget(cell.take());
     }
-    // A job sent between the drain and this drop is dropped here, on this thread, with the
-    // apartment still alive; after it every send fails and the sender leaks the job.
     drop(rx);
     drop(ctx);
 }
@@ -1059,7 +1087,7 @@ mod tests {
         let (tx, _) = mpsc::channel();
         Worker {
             name: "plugin-host-test".into(),
-            tx,
+            tx: Mutex::new(Some(tx)),
             waker: queue.waker(),
             epoch: Instant::now(),
             busy_since: AtomicU64::new(0),
@@ -1175,5 +1203,46 @@ mod tests {
         w.wedged.store(section, Ordering::SeqCst);
         assert!(!w.is_wedged(), "a mark on a section that ended never reads wedged");
         assert_eq!(w.busy_section(), None);
+    }
+
+    fn probe() -> Arc<JobCell> {
+        Arc::new(JobCell { job: Mutex::new(Some(Box::new(|_: &mut Ctx| ()))), creation: false, busy: Busy::any(call::START) })
+    }
+
+    /// Issue #420: the shutdown job closes the job gate before it runs the shutdown hook (the
+    /// module exits) and before it reports done, so once `shutdown` returns true a job sent to
+    /// the thread is refused and leaked by its sender; it never reaches a receiver that would
+    /// drop it, and the plug-in it owns, on the thread after the modules exited. The hook runs
+    /// inside the shutdown job, so its probe sees the gate as the job leaves it: no timing.
+    #[test]
+    fn the_shutdown_job_closes_the_gate_before_it_reports_done() {
+        let current: Arc<OnceLock<Arc<Worker>>> = Arc::default();
+        let in_hook: Arc<Mutex<Option<bool>>> = Arc::default();
+        let (c, h) = (Arc::clone(&current), Arc::clone(&in_hook));
+        let hook = move || *lock(&h) = Some(c.get().is_some_and(|w| w.send(probe()).is_ok()));
+        let hooks = Hooks { shutdown: Some(Arc::new(hook)), ..Hooks::default() };
+        let host = Host::new(Config { inline: false, hooks, ..Config::default() });
+        let worker = lock(&host.inner.current).clone().unwrap();
+        assert!(current.set(Arc::clone(&worker)).is_ok());
+        assert!(host.shutdown(Duration::from_secs(5)));
+        assert_eq!(*lock(&in_hook), Some(false), "the gate was open while the shutdown hook ran");
+        assert!(worker.send(probe()).is_err(), "a job sent after shutdown returned was accepted");
+        assert!(!worker.responsive());
+    }
+
+    /// The gate's check and its queueing are one step against `close`: a send either lands
+    /// before the close (in the receiver, for the drain) or is refused; none lands after it.
+    #[test]
+    fn a_send_after_the_close_is_refused_and_one_before_it_is_queued() {
+        let queue = MessageQueue::attach();
+        let (tx, rx) = mpsc::channel();
+        let w = Worker { tx: Mutex::new(Some(tx)), ..worker(&queue) };
+        assert!(w.send(probe()).is_ok());
+        w.close();
+        assert!(w.send(probe()).is_err());
+        assert!(rx.try_recv().is_ok(), "the job sent before the close is there to drain");
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Disconnected)), "nothing after it, and the gate let go of its sender");
+        w.close();
+        assert!(w.send(probe()).is_err(), "closing twice keeps it closed");
     }
 }

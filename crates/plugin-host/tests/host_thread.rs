@@ -556,9 +556,10 @@ fn an_open_queued_on_a_thread_that_wedges_is_not_reported_open_until_it_runs() {
     assert!(host.shutdown(Duration::from_secs(5)));
 }
 
-/// Issue #56 (b): the host thread drops its job receiver before its message queue (the COM
-/// apartment) ends, so a destroy job sent after shutdown is never run: the instance is leaked by
-/// its sender and the drop returns at once.
+/// Issue #56 (b) and #420: a destroy job sent after `shutdown` returned true is refused by the
+/// host thread's closed gate, so the instance is leaked by its sender, inside the drop, and is
+/// never destroyed later on the host thread (whose plug-in modules have exited). The refusal is
+/// synchronous, so the check needs no wait.
 #[test]
 fn a_job_sent_after_shutdown_is_never_run() {
     let host = host(Duration::from_secs(10));
@@ -566,11 +567,9 @@ fn a_job_sent_after_shutdown_is_never_run() {
     let l = Arc::clone(&log);
     let plugin = host.submit(move |ctx| ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))).wait(Duration::from_secs(5)).unwrap();
     assert!(host.shutdown(Duration::from_secs(5)));
-    let t = Instant::now();
     drop(plugin);
-    assert!(t.elapsed() < FRAME_BUDGET, "the drop waited {:?}", t.elapsed());
-    std::thread::sleep(Duration::from_millis(100));
     assert_eq!(log.thread_of("destroy"), None, "the destroy job sent after shutdown never ran");
+    assert_eq!(Arc::strong_count(&log), 2, "the leaked instance still holds the log: nothing will destroy it");
     assert!(matches!(host.submit(|_| ()).poll(), Status::Failed), "no job runs after shutdown");
 }
 
