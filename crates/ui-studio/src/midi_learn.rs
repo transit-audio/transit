@@ -327,6 +327,29 @@ fn norm_value(s: &Session, track: TrackId, control: &Control) -> f32 {
     }
 }
 
+/// Whether the learn rows differ from when this popup (its layer) opened. The rows at opening are
+/// kept as a hash in egui's temp data only while the popup is drawn on consecutive passes.
+fn learn_menu_changed(ui: &egui::Ui, rows: &[Entry]) -> bool {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    format!("{rows:?}").hash(&mut h);
+    let now = h.finish();
+    let ctx = ui.ctx();
+    let key = egui::Id::new(("learn_menu_rows", ui.layer_id()));
+    let pass = ctx.cumulative_pass_nr();
+    let seen: Option<(u64, u64)> = ctx.data(|d| d.get_temp(key));
+    let at_open = match seen {
+        Some((last, was)) if pass.saturating_sub(last) <= 2 => was,
+        _ => now,
+    };
+    if at_open != now {
+        ctx.data_mut(|d| d.remove::<(u64, u64)>(key));
+        return true;
+    }
+    ctx.data_mut(|d| d.insert_temp(key, (pass, at_open)));
+    false
+}
+
 /// The rows of a control's learn menu in this state.
 fn learn_entry_list(control: &Control, mapped: Option<&Info>, learning: bool) -> Vec<Entry> {
     if matches!(control, Control::Transport(_)) {
@@ -344,9 +367,17 @@ fn learn_entry_list(control: &Control, mapped: Option<&Info>, learning: bool) ->
 
 impl StudioApp {
     /// Right-click menu entries of a mixer control (call inside its context menu).
+    ///
+    /// The menu closes when the state its rows depend on changes under it (a learn starts, ends or
+    /// is canceled, a mapping is made or forgotten), so a popup never changes its rows or whether it
+    /// has the check gutter while it is shown: the one mechanism for every menu that embeds these rows.
     pub(crate) fn midi_learn_menu(&mut self, ui: &mut egui::Ui, track: TrackId, control: Control) {
         let mapped = info(self, track, &control);
         let learning = learning(self, track, &control);
+        if learn_menu_changed(ui, &learn_entry_list(&control, mapped.as_ref(), learning)) {
+            ui.close();
+            return;
+        }
         self.learn_entries(ui, track, control, mapped, learning);
     }
 

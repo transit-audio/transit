@@ -190,3 +190,68 @@ fn the_transport_learn_menu_never_has_a_check_so_it_has_no_gutter() {
     let learn = find(&menu, "MIDI Learn for this controller (all sessions)");
     Popup::of(&t, &learn).insets_plain("MIDI Learn for this controller (all sessions)", None);
 }
+
+fn learn_on_pan(t: &mut T, gtr: transit_model::TrackId) {
+    t.app.run("midi.learn", json!({"target": format!("track:{}:pan", gtr.0)})).unwrap();
+    t.frames(2);
+}
+
+fn map_pan(t: &mut T) {
+    t.app.midi_learn_apply(
+        (0, vec![transit_playback::MapMsg::Candidate { port: "KeyStep".into(), channel: 0, kind: transit_model::SourceKind::Cc, number: 74 }]),
+        0.0,
+    );
+    t.frames(2);
+}
+
+#[test]
+fn an_open_learn_menu_closes_when_learning_completes_under_it_and_reopens_with_the_mapped_rows() {
+    let mut t = T::new();
+    let gtr = t.track("audio", "Gtr");
+    learn_on_pan(&mut t, gtr);
+    // Open the menu while learning: Cancel, no gutter.
+    let menu = strip_learn_menu(&mut t, gtr);
+    let cancel = find(&menu, "Cancel MIDI Learn (Esc)");
+    Popup::of(&t, &cancel).insets_plain("Cancel MIDI Learn (Esc)", None);
+    // The controller moves: the mapping completes under the open menu. It closes (it does not
+    // turn into the six mapped rows at 28 in the same popup).
+    map_pan(&mut t);
+    t.frames(2);
+    assert!(texts(&t.shapes, "Cancel MIDI Learn (Esc)").is_empty(), "the Cancel row is gone");
+    assert!(texts(&t.shapes, "Takeover: Scaled").is_empty(), "and the menu did not become the mapped one in place");
+    // Reopening shows the mapped rows with the gutter.
+    let strip = t.app.mixer.layout.strips.iter().find(|s| s.track == gtr.0).cloned().unwrap();
+    t.click(strip.knob, "secondary");
+    let scaled = find(&t.app.midi_learn.menu.clone(), "Takeover: Scaled");
+    Popup::of(&t, &scaled).insets("Takeover: Scaled", None);
+}
+
+#[test]
+fn an_open_unmapped_learn_menu_closes_when_learning_is_armed_elsewhere() {
+    let mut t = T::new();
+    let gtr = t.track("audio", "Gtr");
+    let menu = strip_learn_menu(&mut t, gtr);
+    Popup::of(&t, &find(&menu, "MIDI Learn")).insets_plain("MIDI Learn", None);
+    learn_on_pan(&mut t, gtr);
+    t.frames(2);
+    assert!(texts(&t.shapes, "MIDI Learn for this controller (all sessions)").is_empty(), "the menu closed");
+    assert!(texts(&t.shapes, "Cancel MIDI Learn (Esc)").is_empty(), "and did not turn into the Cancel menu");
+}
+
+#[test]
+fn the_instrument_submenu_is_12_without_an_instrument_and_28_with_the_mark_when_it_has_one() {
+    let mut t = T::new();
+    let keys = t.track("instrument", "Keys");
+    t.app.engine.session_mut().track_mut(keys).unwrap().instrument = None;
+    t.frames(3);
+    let h = t.header(keys);
+    t.click([h[0] + 50.0, h[1], h[0] + 70.0, h[3]], "secondary");
+    let sub = find(&t.app.arrange.menu.clone(), "Instrument");
+    t.input("ui.move", json!({"x": (sub.rect[0] + sub.rect[2]) / 2.0, "y": (sub.rect[1] + sub.rect[3]) / 2.0}));
+    t.frames(10);
+    let menu = t.app.arrange.menu.clone();
+    let sampler = menu.iter().find(|m| m.value == "sampler").cloned().expect("the submenu lists the instruments");
+    let p = Popup::of(&t, &sampler);
+    p.insets_plain(&sampler.label, None);
+    assert_eq!(p.checks_in(&sampler), 0, "no instrument, no mark");
+}

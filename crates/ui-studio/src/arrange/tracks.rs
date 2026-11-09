@@ -414,11 +414,12 @@ pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: Tr
     if kind == TrackKind::Instrument {
         // Instrument ▸: the device chain's instrument menu (a click in its filter box keeps it open).
         // The list carries checks (a gutter) only when the track has an instrument to mark.
-        let config = crate::chrome::submenu_config(ui, has_instrument).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        // Read once: the declaration and the rows use the same value.
+        let current = app.engine.session().track(id).and_then(|t| t.instrument.as_ref()).map(|i| i.plugin.clone());
+        let config = crate::chrome::submenu_config(ui, current.is_some()).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
         let mut picked = None;
         let (button, _) = egui::containers::menu::SubMenuButton::new(crate::chrome::submenu_atoms(ui, "Instrument")).config(config).ui(ui, |ui| {
             let lists = app.instrument_lists();
-            let current = app.engine.session().track(id).and_then(|t| t.instrument.as_ref()).map(|i| i.plugin.clone());
             let mut filter = std::mem::take(&mut app.mixer.instrument_filter);
             let mut filter_rect = app.mixer.filter_rect;
             let mut items = Vec::new();
