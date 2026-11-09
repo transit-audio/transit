@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pads bar start note</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+.seg{height:24px;box-sizing:border-box;background:#0D0F11;border:1px solid #2B3036;border-radius:6px;padding:2px;display:flex}
+.seg span{padding:0 12px;display:flex;align-items:center;font:500 12px 'IBM Plex Sans',sans-serif;color:#8C939D;border-radius:4px}
+.seg span.on{background:#2A2F35;color:#E7E9EC}
+.btn{height:24px;padding:0 10px;display:flex;align-items:center;background:#22262B;border-radius:4px;font:500 12px 'IBM Plex Sans',sans-serif;color:#E7E9EC;white-space:nowrap}
+.lbl{font:400 12px 'IBM Plex Sans',sans-serif;color:#A7ADB6;white-space:nowrap}
+.note{width:48px;height:24px;box-sizing:border-box;background:#0D0F11;border:1px solid #2B3036;border-radius:5px;display:flex;align-items:center;justify-content:center;font:500 11px 'IBM Plex Mono',monospace;color:#E7E9EC;position:relative}
+.cap{font:500 11px 'IBM Plex Mono',monospace;color:#A7ADB6}
+.sub{font:400 11px 'IBM Plex Mono',monospace;color:#8C939D;line-height:1.5}
+.card{background:#1A1D21;border:1px solid #2B3036;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.h{font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#A7ADB6}
+</style>
+</helmet>
+<div style="position: relative; width: 1460px; height: 760px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; overflow: hidden; padding: 36px 56px">
+
+<div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 26px">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #8C939D; letter-spacing: 0.08em">TRANSIT · SAMPLER · PADS VIEW BAR</span>
+<span style="font-size: 26px; font-weight: 600">One value matches a controller's template</span>
+<span style="font-size: 13px; color: #A7ADB6; max-width: 1100px; line-height: 1.5">The kit's start note sits in the Pads view bar between the summary and the actions. Pad A1 plays it and every pad without its own note follows, so matching a pad controller is one field: C1 by default, C-2 for a controller that starts at note 0 (ADR 0041 amendment, 2026-11-09).</span>
+</div>
+
+<!-- the bar at the panel's design width, 976 -->
+<span class="h">The bar, 976 wide</span>
+<div style="margin-top: 10px; width: 976px; background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 8px 12px; box-sizing: border-box; display: flex; align-items: center; gap: 12px">
+<div class="seg"><span>Instrument</span><span class="on">Pads</span><span>Slices</span></div>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #A7ADB6; white-space: nowrap">Bank A · 12 of 16 loaded · 3 choke groups</span>
+<span style="flex: 1"></span>
+<span class="lbl">Start note</span>
+<div class="note" style="margin-left: -6px">C1</div>
+<div class="btn" style="margin-left: 4px">Load kit…</div>
+<div class="btn" style="margin-left: -6px">Expand to rack…</div>
+</div>
+<span class="sub" style="display: block; margin-top: 8px">label · 6 · field 48 · 16 · Load kit… · 6 · Expand to rack…   (the actions keep the view bar's right edge)</span>
+
+<div style="display: flex; gap: 24px; margin-top: 14px">
+
+<!-- states -->
+<div style="flex: 1; display: flex; flex-direction: column; gap: 10px">
+<span class="h">States</span>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px">
+
+<div class="card" style="height: 150px">
+<span class="cap">rest</span>
+<div style="display: flex; align-items: center; gap: 6px"><span class="lbl">Start note</span><div class="note">C1</div></div>
+<span class="sub">surface.inset · 1 px line<br>Mono 500 11 text, centred</span>
+</div>
+
+<div class="card" style="height: 150px">
+<span class="cap">hover</span>
+<div style="display: flex; align-items: center; gap: 6px"><span class="lbl">Start note</span><div class="note" style="border-color: #383E46; cursor: ns-resize">C1</div></div>
+<span class="sub">line.strong edge<br>pointer: up-down resize</span>
+</div>
+
+<div class="card" style="height: 150px; overflow: visible; position: relative">
+<span class="cap">dragging</span>
+<div style="display: flex; align-items: center; gap: 6px"><span class="lbl">Start note</span><div class="note" style="border: 1.5px solid #4C9EFF">D#1</div></div>
+<span class="sub">1.5 px signal ring<br>6 px a semitone · Shift octaves</span>
+<div style="position: absolute; left: 14px; top: 84px; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 5px 8px; font-size: 12px; white-space: nowrap; z-index: 2; display: none">Bank A: D#1–F#2</div>
+</div>
+
+<div class="card" style="height: 150px">
+<span class="cap">typing</span>
+<div style="display: flex; align-items: center; gap: 6px"><span class="lbl">Start note</span><div class="note" style="border: 1.5px solid #4C9EFF; justify-content: flex-start; padding-left: 7px">c#-2<span style="display: inline-block; width: 1px; height: 13px; background: #E7E9EC; margin-left: 1px"></span></div></div>
+<span class="sub">double-click · a name or 0–127<br>Enter commits · Esc cancels</span>
+</div>
+
+<div class="card" style="height: 150px">
+<span class="cap">refused</span>
+<div style="display: flex; align-items: center; gap: 6px"><span class="lbl">Start note</span><div class="note" style="border: 1.5px solid #FF6B5B">C9</div></div>
+<span class="sub" style="color: #E7E9EC">No note C9: the range is C-2 to G8</span>
+</div>
+
+</div>
+
+<span class="h" style="margin-top: 10px">Widest names in 48 (8 a side)</span>
+<div style="display: flex; gap: 16px; align-items: center">
+<div class="note">C1</div><div class="note">C-2</div><div class="note">C#-2</div><div class="note">G#4</div><div class="note">G8</div>
+<span class="sub" style="margin-left: 8px">C#-2 is the widest name: 4 Mono glyphs, about 27 px at 11</span>
+</div>
+
+<span class="h" style="margin-top: 10px">Tooltip</span>
+<div style="display: flex; align-items: flex-start; gap: 6px; position: relative; height: 70px">
+<span class="lbl" style="line-height: 24px">Start note</span><div class="note">C1</div>
+<div style="position: absolute; left: 70px; top: 28px; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 5px 8px; font-size: 12px; white-space: nowrap">Pad A1 plays this note; pads without their own note follow it · <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px">Bank A: C1–D#2</span></div>
+</div>
+</div>
+
+<!-- spec -->
+<div style="width: 330px; flex: none; display: flex; flex-direction: column; gap: 12px">
+<div class="card">
+<span class="h">Spec</span>
+<span class="sub" style="line-height: 1.7">label "Start note" · label.control<br>6 · field 48 × 24 · radius 5<br>surface.inset · 1 px line (line.strong hover)<br>note name Mono 500 11 text, centred<br>16 before the first action<br>focus / drag: 1.5 px signal<br>refused: 1.5 px meter.hot + message<br>right-click: Reset to C1</span>
+</div>
+<div class="card">
+<span class="h">Why here</span>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">It's a kit setting you change once per controller, so it sits with the kit's actions (Load kit, Expand to rack), not with the selected pad. The Selected pad panel keeps a pad's own note; this one moves every pad that has none.</span>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1460,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

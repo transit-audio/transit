@@ -48,7 +48,7 @@ body{margin:0;background:#0B0C0E}
 </div>
 
 <!-- View menu -->
-<div style="position: absolute; left: 262px; top: 33px; width: 248px; box-sizing: border-box; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 4px; display: flex; flex-direction: column">
+<div style="position: absolute; left: 262px; top: 37px; width: 248px; box-sizing: border-box; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 4px; display: flex; flex-direction: column">
 <div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px; display: flex; justify-content: center"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span><span style="flex: 1">Browser</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Ctrl+Alt+B</span></div>
 <div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px; display: flex; justify-content: center"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span><span style="flex: 1">Mixer</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Ctrl+Alt+M</span></div>
 <div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px"></span><span style="flex: 1">Devices</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Ctrl+Alt+L</span></div>
@@ -60,13 +60,17 @@ body{margin:0;background:#0B0C0E}
 </div>
 
 <!-- Appearance submenu -->
-<div style="position: absolute; left: 506px; top: 197px; width: 232px; box-sizing: border-box; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 4px; display: flex; flex-direction: column">
+<div style="position: absolute; left: 506px; top: 201px; width: 232px; box-sizing: border-box; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 4px; display: flex; flex-direction: column">
 <div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px"></span><span style="flex: 1">System</span></div>
 <div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px; display: flex; justify-content: center"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#E7E9EC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span><span style="flex: 1">Dark</span></div>
 <div style="height: 24px; display: flex; align-items: center; padding: 0 8px 0 4px; gap: 4px; font-size: 12px; color: #585F69"><span style="width: 16px"></span><span style="flex: 1">Light</span><span style="font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">returns later</span></div>
 <div style="height: 1px; background: #2B3036; margin: 4px 0"></div>
 <div style="height: 24px; display: flex; align-items: center; padding: 0 6px 0 4px; gap: 4px; font-size: 12px"><span style="width: 16px"></span><span style="flex: 1">Interface zoom: 100%</span><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8C939D" stroke-width="2.2" stroke-linecap="round"><path d="m9 6 6 6-6 6"></path></svg></div>
 </div>
+
+<!-- gap marker -->
+<div style="position: absolute; left: 252px; top: 33px; width: 6px; height: 4px; border-top: 1px solid #4C9EFF; border-bottom: 1px solid #4C9EFF; box-sizing: border-box"></div>
+<span style="position: absolute; left: 226px; top: 29px; font: 500 10px 'IBM Plex Mono', monospace; color: #4C9EFF">4</span>
 
 <!-- Context menu on the selected clip -->
 <div style="position: absolute; left: 700px; top: 250px; width: 220px; box-sizing: border-box; background: #22262B; border: 1px solid #383E46; border-radius: 5px; padding: 4px; display: flex; flex-direction: column">
@@ -89,11 +93,11 @@ body{margin:0;background:#0B0C0E}
 </div>
 <div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
 <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Popup</span>
-<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7">surface.raised · 1 px line.strong · r 5 · pad 4<br>no shadow · opens flush under its item<br>submenu overlaps its parent by 4</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7">surface.raised · 1 px line.strong · r 5 · pad 4<br>no shadow<br>menu-bar menu: 4 px under the bar (comboPopupGap)<br>context menu: at the pointer<br>submenu overlaps its parent by 4</span>
 </div>
 <div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
 <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Row</span>
-<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7">h 24 · r 4 · Sans 400 12 text<br>16 px check gutter when any row checks<br>check ✓ in text, never signal<br>shortcut Mono 400 11 text.faint, right<br>submenu chevron 12 text.faint<br>hover button.hover · disabled ink.arrow<br>separator 1 px line, 4 above and below</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.7">h 24 · r 4 · Sans 400 12 text<br>16 px check gutter only in a popup with a checkable row<br>text 28 in with the gutter (View, Appearance)<br>text 12 in without it, as the shortcut (clip menu)<br>check ✓ in text, never signal<br>shortcut Mono 400 11 text.faint, right<br>submenu chevron 12 text.faint<br>hover button.hover · disabled ink.arrow<br>separator 1 px line, 4 above and below</span>
 </div>
 <div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px">
 <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Why the check is not blue</span>
