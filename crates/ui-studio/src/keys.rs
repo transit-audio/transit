@@ -720,6 +720,9 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     if pressed(ctx, A::NotesGridTriplet) {
         app.ui.keys.grid.triplet = !app.ui.keys.grid.triplet;
     }
+    if pressed(ctx, A::NotesFold) {
+        app.keys_fold_toggle();
+    }
     if pressed(ctx, A::NotesGridSnap) {
         app.ui.keys.grid.snap_enabled = !app.ui.keys.grid.snap_enabled;
     }

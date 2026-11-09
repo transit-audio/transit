@@ -147,6 +147,7 @@ pub enum Action {
     NotesGridWiden,
     NotesGridTriplet,
     NotesGridSnap,
+    NotesFold,
     StepToggle,
     StepRest,
     StepTieRest,
@@ -432,6 +433,14 @@ pub const TABLE: &[Shortcut] = &[
     row(A::NotesGridWiden, "Widen Grid", CMD, Key::Num2, S::PianoRoll, "Ableton. Pins the grid one division coarser."),
     row(A::NotesGridTriplet, "Triplet Grid", CMD, Key::Num3, S::PianoRoll, "Ableton. A 1/8 triplet grid is a third of a beat."),
     row(A::NotesGridSnap, "Snap to Grid On / Off", CMD, Key::Num4, S::PianoRoll, "Ableton. Notes then land where they are dropped."),
+    row(
+        A::NotesFold,
+        "Fold to Scale On / Off",
+        NONE,
+        Key::F,
+        S::PianoRoll,
+        "Ableton Live (Fold). The Pitch menu's Fold to scale; it shows once Scale mode is on.",
+    ),
     row(
         A::StepToggle,
         "Step Entry",

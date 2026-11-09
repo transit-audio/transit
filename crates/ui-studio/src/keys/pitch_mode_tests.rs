@@ -258,6 +258,10 @@ fn a_scripted_session_dispatches_the_same_commands_as_before() {
     assert_eq!(rig.app.keys.selection.len(), 3, "the band selects every note");
 }
 
+fn key_f() -> egui::Event {
+    egui::Event::Key { key: egui::Key::F, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }
+}
+
 /// Decision 2: from the press to the release of a drag the rows hold still, even when a held MIDI
 /// key would show a folded-away row and the dragged accidental leaves its row; after the release
 /// the layout settles.
@@ -445,4 +449,67 @@ fn entry_creates_the_note_on_the_row_clicked() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The F key toggles Fold to scale with the piano roll focused, through the Pitch menu's command,
+/// and the rows change on the next frame.
+#[test]
+fn f_toggles_fold_and_the_rows_change_on_the_next_frame() {
+    let mut rig = Rig::new();
+    rig.add(60, 0);
+    rig.mode(true, false);
+    let before = rig.row_tops();
+    let undo = rig.app.engine.undo_history().len();
+    rig.frame_with(vec![key_f()]);
+    assert!(rig.app.keys_scale().fold, "F turned Fold on");
+    rig.frames(1);
+    assert_ne!(rig.row_tops(), before, "the rows folded on the next frame");
+    assert_eq!(rig.app.engine.undo_history().len(), undo + 1, "one undo step, as the menu's option");
+    rig.frame_with(vec![key_f()]);
+    rig.frames(1);
+    assert!(!rig.app.keys_scale().fold);
+    assert_eq!(rig.row_tops(), before);
+    // Scale mode off: the setting is stored and a status line says when it applies.
+    rig.mode(false, false);
+    rig.frame_with(vec![key_f()]);
+    assert!(rig.app.keys_scale().fold);
+    assert_eq!(rig.app.status, "Fold to scale applies when Scale mode is on");
+}
+
+/// F typed into a header text field is text, never the Fold shortcut.
+#[test]
+fn f_in_a_header_text_field_does_not_fold() {
+    let mut rig = Rig::new();
+    rig.add(60, 0);
+    rig.mode(true, false);
+    let (x, y) = rig.note_mid(60);
+    rig.send("ui.click", json!({"x": x, "y": y}));
+    rig.frames(10);
+    let field = rig.app.keys.layout.note_length;
+    rig.send("ui.click", json!({"x": (field[0] + field[2]) / 2.0, "y": (field[1] + field[3]) / 2.0}));
+    rig.frames(10);
+    assert!(rig.ctx.egui_wants_keyboard_input(), "the Length field has the keyboard");
+    rig.frame_with(vec![key_f(), egui::Event::Text("f".into())]);
+    rig.frames(2);
+    assert!(!rig.app.keys_scale().fold, "F in the Length field leaves Fold alone");
+}
+
+/// F during a pointer gesture changes the setting, but the rows wait for the release (decision 2).
+#[test]
+fn f_during_a_drag_relayouts_only_after_the_release() {
+    let mut rig = Rig::new();
+    rig.add(60, 0);
+    rig.mode(true, false);
+    let before = rig.row_tops();
+    let grab = rig.note_mid(60);
+    rig.send("ui.drag", json!({"x": grab.0, "y": grab.1, "to_x": grab.0 + 30.0, "to_y": grab.1, "steps": 6}));
+    let mut held = Vec::new();
+    for frame in 0..9 {
+        rig.frame_with(if frame == 3 { vec![key_f()] } else { Vec::new() });
+        held.push(rig.row_tops() == before);
+    }
+    assert!(rig.app.keys_scale().fold, "F took effect on the setting");
+    assert!(held.iter().all(|h| *h), "rows unchanged from press to release: {held:?}");
+    rig.frames(2);
+    assert_ne!(rig.row_tops(), before, "the layout settles after the release");
 }

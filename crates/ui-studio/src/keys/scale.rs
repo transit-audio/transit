@@ -52,6 +52,14 @@ impl StudioApp {
         if mode.enabled { mode.key.nearest(pitch) } else { pitch }
     }
 
+    /// The F key and the Pitch menu's "Fold to scale": the same command, so they always agree (#421).
+    pub(super) fn keys_fold_toggle(&mut self) {
+        let mode = self.keys_scale();
+        if self.keys_scale_set(json!({"fold": !mode.fold})).is_ok() && !mode.enabled && !mode.fold {
+            self.status = "Fold to scale applies when Scale mode is on".into();
+        }
+    }
+
     /// Scale-mode move of a selection: one shared degree step for the whole group (see
     /// `KeyScale::transpose_group`), clamped or refused as a group. `anchor` is the grabbed
     /// note; keyboard moves pass `None` and the lowest note leads.
@@ -77,10 +85,16 @@ pub(super) fn controls(app: &mut StudioApp, ui: &mut Ui, layout: &mut KeysLayout
         let _ = app.keys_scale_set(json!({"enabled": enabled}));
     }
     let mut fold = mode.fold;
-    let response = crate::chrome::checkbox(ui, &mut fold, "Fold to scale");
+    let response = ui
+        .horizontal(|ui| {
+            let response = crate::chrome::checkbox(ui, &mut fold, "Fold to scale");
+            ui.weak(crate::shortcuts::label(crate::shortcuts::Action::NotesFold));
+            response
+        })
+        .inner;
     layout.pitch_menu.push(MenuItem::at(ui, "scale_fold".into(), "Fold to scale".into(), response.rect));
     if response.changed() {
-        let _ = app.keys_scale_set(json!({"fold": fold}));
+        app.keys_fold_toggle();
     }
     let mut key = mode.key;
     key.root %= 12;
