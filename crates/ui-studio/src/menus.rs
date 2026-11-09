@@ -274,6 +274,18 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let _ = app.run("options.low_latency", json!({}));
                         ui.close();
                     }
+                    // ADR 0051: a radio pair, the current convention checked.
+                    ui.separator();
+                    for mc in transit_midi::MiddleC::ALL {
+                        let name = format!("Middle C as {}", mc.label());
+                        let b = ui.add(crate::chrome::MenuRow::new(&name).checked(app.ui.middle_c == mc));
+                        crate::help::hover(ui, &b, crate::help::Id::OptionsMiddleC);
+                        app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, name, "options.middle_c".into(), b.rect));
+                        if b.clicked() {
+                            let _ = app.run("options.middle_c", json!({"value": mc.label()}));
+                            ui.close();
+                        }
+                    }
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Options".into(), String::new(), options.response.rect));
                 let mut window_items = Vec::new();

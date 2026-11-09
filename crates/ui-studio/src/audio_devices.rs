@@ -347,45 +347,17 @@ impl StudioApp {
 
 /// Preserve the other saved preferences and atomically replace only the known-good audio block.
 fn persist_audio(path: &std::path::Path, ui: &crate::UiState) -> Result<(), String> {
-    use std::io::{Read, Write};
-    let mut value = match std::fs::File::open(path) {
-        Ok(f) => {
-            let mut bytes = Vec::new();
-            f.take(4 * 1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-            if bytes.len() > 4 * 1024 * 1024 {
-                return Err("Settings file exceeds the 4 MiB limit".into());
-            }
-            serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| e.to_string())?
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let mut saved = ui.clone();
-            saved.plugin_windows.clear();
-            serde_json::to_value(saved).map_err(|e| e.to_string())?
-        }
-        Err(e) => return Err(e.to_string()),
-    };
-    let obj = value.as_object_mut().ok_or("Settings must be an object")?;
-    obj.insert("low_latency".into(), serde_json::json!(ui.low_latency));
-    obj.insert("low_latency_limit_ms".into(), serde_json::json!(ui.low_latency_limit_ms));
-    obj.insert("audio".into(), serde_json::to_value(&ui.audio).map_err(|e| e.to_string())?);
-    obj.insert("io_maps".into(), serde_json::to_value(&ui.io_maps).map_err(|e| e.to_string())?);
-    let bytes = serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
-    let tmp = path.with_extension(format!("audio.{}.{nonce}.tmp", std::process::id()));
-    let result = (|| -> std::io::Result<()> {
-        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-        f.write_all(&bytes)?;
-        f.sync_all()?;
-        drop(f);
-        std::fs::rename(&tmp, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result.map_err(|e| e.to_string())
+    crate::prefs_file::merge_keys(
+        path,
+        ui,
+        "audio",
+        vec![
+            ("low_latency", serde_json::json!(ui.low_latency)),
+            ("low_latency_limit_ms", serde_json::json!(ui.low_latency_limit_ms)),
+            ("audio", serde_json::to_value(&ui.audio).map_err(|e| e.to_string())?),
+            ("io_maps", serde_json::to_value(&ui.io_maps).map_err(|e| e.to_string())?),
+        ],
+    )
 }
 
 /// The chosen system in `systems`, else the default one.

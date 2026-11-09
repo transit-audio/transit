@@ -59,6 +59,7 @@ pub mod macro_osc_panel;
 pub mod main_monitor;
 pub mod menus;
 pub mod metronome;
+mod middle_c;
 pub mod midi_fx_panel;
 mod midi_input;
 pub mod midi_learn;
@@ -72,6 +73,7 @@ pub mod panel;
 pub mod panel_matrix;
 pub mod plugin_header;
 pub mod plugin_scan;
+mod prefs_file;
 pub mod presets;
 pub mod rack_panel;
 pub mod random_sequencer_panel;
@@ -682,6 +684,7 @@ impl StudioApp {
         v["editor_windows"] = editor_group::inspect(self);
         v["recording_pass"] = self.recording_pass_inspect();
         v["monitor"] = self.monitor_state();
+        v["middle_c"] = json!(self.ui.middle_c);
         v
     }
 }
@@ -722,6 +725,8 @@ mod main_monitor_tests;
 mod menu_gutter_tests;
 #[cfg(test)]
 mod menu_padding_tests;
+#[cfg(test)]
+mod middle_c_tests;
 #[cfg(test)]
 mod midi_fx_panel_tests;
 #[cfg(test)]

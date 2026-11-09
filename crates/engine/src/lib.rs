@@ -219,6 +219,11 @@ pub struct Engine {
     /// Slots the command running now loaded a state into ([`Engine::mark_state_load`]); its undo
     /// step takes them.
     state_marks: Vec<(TrackId, usize)>,
+    /// The machine's Middle C setting for text a command writes for a person (ADR 0051 decision
+    /// 5): the app sets it from `ui.json` at startup and on every `options.middle_c`. Only
+    /// `note_name` calls that build message text read it; no parser does, and no result field
+    /// carries a name. Not in the session, not in undo.
+    message_middle_c: transit_midi::MiddleC,
 }
 
 /// Logs the routing loops a document holds as it is opened (an older file: the mix renders it
@@ -276,6 +281,7 @@ impl Engine {
             plugin_discovery: cmd::PluginDiscovery::default(),
             state_restores: Vec::new(),
             state_marks: Vec::new(),
+            message_middle_c: transit_midi::MiddleC::C3,
         }
     }
 
@@ -302,6 +308,17 @@ impl Engine {
     pub fn set_io_map(&mut self, io: transit_model::IoMap) {
         self.io = io;
         self.io_revision = self.io_revision.wrapping_add(1);
+    }
+
+    /// The convention message text names notes in (ADR 0051 decision 5); C3 until the app sets it.
+    pub fn message_middle_c(&self) -> transit_midi::MiddleC {
+        self.message_middle_c
+    }
+
+    /// Sets the message convention: the app's `options.middle_c` adapter and its startup.
+    /// Changes no document, no undo step, and nothing any command accepts or returns.
+    pub fn set_message_middle_c(&mut self, convention: transit_midi::MiddleC) {
+        self.message_middle_c = convention;
     }
 
     /// The controller profile (per machine MIDI Learn mappings).

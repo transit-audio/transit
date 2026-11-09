@@ -106,6 +106,10 @@ pub struct UiState {
     /// Whole-interface zoom, composed with the OS display scale and saved per machine.
     #[serde(deserialize_with = "interface_zoom::deserialize")]
     pub ui_zoom: f32,
+    /// Options > Middle C (ADR 0051): the name MIDI 60 carries in every transit window, `"C3"`
+    /// (the default; a missing key reads it) or `"C4"`. Per machine; never in the session or its
+    /// undo history, and never read by a command's parser.
+    pub middle_c: transit_midi::MiddleC,
     /// Help > Keyboard Shortcuts is open, and its filter (view state, not saved).
     #[serde(skip)]
     pub show_shortcuts: bool,
@@ -186,6 +190,7 @@ impl Default for UiState {
             browser: browser::BrowserPrefs::default(),
             appearance: theme::Appearance::System,
             ui_zoom: 1.0,
+            middle_c: transit_midi::MiddleC::C3,
             show_shortcuts: false,
             shortcuts_filter: String::new(),
             count_in: false,
@@ -306,7 +311,7 @@ mod round_trip_tests {
                 let f = n.as_f64().unwrap();
                 vec![json!(f + 1.0), json!(f * 0.75), json!(1.5)]
             }
-            Value::String(_) => ["x", "dark", "light", "jump", "pickup"].iter().map(|s| json!(s)).collect(),
+            Value::String(_) => ["x", "dark", "light", "jump", "pickup", "C4"].iter().map(|s| json!(s)).collect(),
             Value::Null => vec![json!(1), json!("x")],
             Value::Array(_) | Value::Object(_) => Vec::new(),
         }
@@ -388,5 +393,15 @@ mod round_trip_tests {
         let mut missing = base.clone();
         missing.as_object_mut().unwrap().remove("check_for_updates");
         assert_eq!(save(&load(&missing).unwrap()), base);
+        // ADR 0051: a file without `middle_c` reads C3, and the key is saved as its label.
+        let mut older = base.clone();
+        older.as_object_mut().unwrap().remove("middle_c");
+        assert_eq!(load(&older).unwrap().middle_c, transit_midi::MiddleC::C3);
+        assert_eq!(base["middle_c"], json!("C3"));
+        let mut c4 = base.clone();
+        c4["middle_c"] = json!("C4");
+        assert_eq!(load(&c4).unwrap().middle_c, transit_midi::MiddleC::C4);
+        c4["middle_c"] = json!("C5");
+        assert!(load(&c4).is_err(), "a third convention does not load");
     }
 }

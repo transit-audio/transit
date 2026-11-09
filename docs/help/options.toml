@@ -5,3 +5,8 @@ link = "user-guide.md#low-latency-mode"
 id = "options.low_latency"
 name = "Low Latency"
 text = "The same per-machine Low Latency switch as the transport button. It does not change session bypass settings."
+
+[[entry]]
+id = "options.middle_c"
+name = "Middle C"
+text = "The name MIDI note 60 carries in every transit window: C3 (the default) or C4 (scientific pitch). Display only: sessions and presets keep MIDI numbers, and commands read note names as C3 = 60 whatever this setting."

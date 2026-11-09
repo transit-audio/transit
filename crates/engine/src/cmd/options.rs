@@ -79,6 +79,7 @@ fn four_bars(tempo: &transit_time::TempoMap, sr: transit_time::SampleRate, at: i
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        cmd!(view "options.middle_c", "Middle C", ["Options"], None, "{value?: \"C3\" | \"C4\"} (display only; commands always read C3 = 60)", always, |_, _| Err(bad("options.middle_c", "unavailable: requires the app machine-preference adapter"))),
         cmd!(view "options.low_latency", "Low Latency", ["Options"], None, "{value?: bool, limit_ms?: number}", always, |_, _| Err(bad("options.low_latency", "unavailable: requires the app machine-preference adapter"))),
         toggle!("options.quickpunch", "QuickPunch", ["Options"], Some("Cmd+Shift+P"), quickpunch),
         toggle!("options.pre_post_roll", "Pre/Post-Roll", ["Options"], Some("Cmd+K"), pre_post_roll),

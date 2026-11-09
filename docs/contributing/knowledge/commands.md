@@ -43,3 +43,5 @@ The commands and format are implemented. UI gestures, shortcuts, menu entries an
 drawing remain slice 2; the arrangement still draws uniform 46-point rows.
 
 Low Latency adds UI-owned options.low_latency {value?: bool, limit_ms?: number}, returning {value, limit_ms}. Omitting value toggles unless only limit_ms is supplied. Invalid limits are refused, and an engine-only host reports unavailable rather than editing the session. query.path_latency {} is a read-only runtime query with adopted plan/device generations and shared/Main latency components; see routing.md.
+
+Middle C (ADR 0051) adds UI-owned options.middle_c {value?: "C3" | "C4"}, returning {value}; without value it answers the setting. The app saves `middle_c` in ui.json and sets the engine's message convention (`Engine::set_message_middle_c`) in the same step; an engine-only host reports unavailable. No parser reads either: commands that take note names parse them with the fixed C3 = 60 (`transit_midi::parse_note(text, MiddleC::C3, ..)`).

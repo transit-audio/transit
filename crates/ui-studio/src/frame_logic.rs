@@ -87,6 +87,9 @@ impl StudioApp {
         if id == "options.low_latency" {
             return self.set_low_latency(&params);
         }
+        if id == "options.middle_c" {
+            return self.set_middle_c(&params);
+        }
         if id == "query.path_latency" {
             self.poll_low_latency();
         }
@@ -227,6 +230,9 @@ impl StudioApp {
         ns.auto_shown = std::mem::take(&mut self.ui.auto_shown);
         ns.auto_lanes = std::mem::take(&mut self.ui.auto_lanes);
         let before = std::mem::replace(&mut self.ui, ns);
+        if before.middle_c != self.ui.middle_c {
+            self.apply_middle_c();
+        }
         if before.midi_transport != self.ui.midi_transport {
             self.engine.set_midi_transport(self.ui.midi_transport.clone());
             if let Some(player) = &self.player {
