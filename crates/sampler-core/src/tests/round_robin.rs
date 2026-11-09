@@ -514,6 +514,7 @@ fn block_sizes_render_a_group_the_same() {
     let (a, fa) = run(64);
     let (b, fb) = run(512);
     assert!(a.iter().filter(|x| **x != 0.0).count() > 1000, "the schedule sounds");
-    assert_eq!(a.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), b.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+    let first = a.iter().zip(&b).position(|(x, y)| x.to_bits() != y.to_bits());
+    assert_eq!(first, None, "the first frame where blocks of 64 and 512 differ");
     assert_eq!(fa, fb, "the state fingerprints differ");
 }
