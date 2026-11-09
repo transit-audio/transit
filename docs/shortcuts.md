@@ -41,3 +41,13 @@ zoom changes the timeline scale, while interface zoom changes all widgets and pa
 
 Preset sizes and the current value are in **View > Appearance > Interface zoom**.
 See the [user guide](user-guide.md) for display scaling and plug-in editor behavior.
+
+## Piano roll
+
+| Scope | Action | Keys |
+|---|---|---|
+| Piano roll | Fold to Scale On / Off | F |
+
+F is Ableton Live's key for Fold in the MIDI editor. It runs the same command as **Fold to scale** in the
+piano roll's Pitch menu, so the menu, the command and the key always agree; with Scale mode off the
+setting is kept and a status line says it applies once Scale mode is on. A typed field keeps F for itself.
