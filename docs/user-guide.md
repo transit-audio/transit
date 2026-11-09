@@ -73,6 +73,23 @@ Clicking empty grid clears the selection and marks where step entry begins; it n
 - N toggles Focus Mode, or hold N for momentary focus: the other clips' notes dim, and only the foreground clip is edited. Double-click a note to focus its clip without deleting it. With one clip open, double-click still deletes the note.
 - Step entry, the controller lane and the clip-end handle work on the foreground clip.
 
+## Note names: Middle C
+
+**Options > Middle C** sets the name MIDI note 60 carries in every transit window: **C3** (the
+default, as Logic and Live show it) or **C4** (scientific pitch, as a hardware tuner and most
+notation show it). One key has one name everywhere: the piano roll's keys, the MIDI Monitor, the
+MIDI Mappings table, the Sampler's note rows, the Macro Oscillator's wave readout, the Tuner (its
+note and its Reference caption, the A above middle C) and every note-named choice, such as the
+Resonator's Tonic. A flip renames them in the next frame, including the MIDI Monitor's earlier
+lines, so Copy gives one convention.
+
+The setting is saved per computer and only changes names on screen. Sessions, presets, automation
+and MIDI mappings keep MIDI numbers and sound the same. Commands from the assistant, MCP, the CLI or
+the control protocol read note names as C3 = 60 whatever the setting, and MusicXML export keeps its
+own convention (middle C is C4 there). The Random Sequencer's Octave numbers octaves the same way
+as the rest of transit now: its default reads 2 under C3 (it read 3 before) and plays the same
+notes.
+
 ## Cycle
 
 Cycle (C, the transport button or Transport > Cycle On) only turns looping on and off; it never
