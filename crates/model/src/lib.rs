@@ -34,6 +34,7 @@ mod route_graph;
 pub mod sampler_patch;
 pub use sampler_patch::SamplerPatch;
 mod session;
+pub mod slicing;
 mod source;
 mod takes;
 mod track;
