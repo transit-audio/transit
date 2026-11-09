@@ -41,7 +41,13 @@ pub(crate) const fn choice(id: &'static str, name: &'static str, choices: &'stat
 
 /// A choice of notes or octaves (ADR 0051): `choices` are the fixed C3 = 60 names, and `labels`
 /// lets the UI name each entry in its Middle C setting.
-pub(crate) const fn note_choice(id: &'static str, name: &'static str, choices: &'static [&'static str], default: usize, labels: crate::NoteLabels) -> ParamInfo {
+pub(crate) const fn note_choice(
+    id: &'static str,
+    name: &'static str,
+    choices: &'static [&'static str],
+    default: usize,
+    labels: crate::NoteLabels,
+) -> ParamInfo {
     ParamInfo { note_labels: Some(labels), ..choice(id, name, choices, default) }
 }
 

@@ -502,7 +502,8 @@ pub(crate) fn choice(
     let mut idx = (v.round().max(0.0) as usize).min(names.len().saturating_sub(1));
     let r = ui
         .vertical(|ui| {
-            let combo = crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), names.get(idx).map_or("", String::as_str)).width(width);
+            let combo =
+                crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), names.get(idx).map_or("", String::as_str)).width(width);
             let c = if let Some(h) = row { combo.row(h) } else { combo.dense() }.show(ui, |ui| {
                 for (i, name) in names.iter().enumerate() {
                     crate::chrome_pick::choice_value(ui, &mut idx, i, name);

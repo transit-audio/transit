@@ -223,9 +223,13 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     lp.rect_filled(corner, 0.0, TOKENS.ruler);
     let cp = lp.with_clip_rect(corner);
     match layout.live.last() {
-        Some((pitch, _)) => {
-            cp.text(corner.center(), Align2::CENTER_CENTER, transit_midi::note_name(*pitch, app.ui.middle_c), FontId::proportional(12.0), TOKENS.accent)
-        }
+        Some((pitch, _)) => cp.text(
+            corner.center(),
+            Align2::CENTER_CENTER,
+            transit_midi::note_name(*pitch, app.ui.middle_c),
+            FontId::proportional(12.0),
+            TOKENS.accent,
+        ),
         None => cp.text(corner.center(), Align2::CENTER_CENTER, &grid_text, FontId::proportional(9.5), TOKENS.text_dim),
     };
     lp.rect_filled(vel_label, 0.0, TOKENS.panel);

@@ -41,8 +41,18 @@ pub struct RackLayout {
     pub members: Vec<(u64, crate::arrange::R4, crate::arrange::R4)>,
 }
 
-static MACRO_INFO: ParamInfo =
-    ParamInfo { id: "macro", name: "Macro", min: 0.0, max: 1.0, default: 0.0, unit: Unit::Percent, taper: Taper::Linear, choices: &[], group: "", note_labels: None };
+static MACRO_INFO: ParamInfo = ParamInfo {
+    id: "macro",
+    name: "Macro",
+    min: 0.0,
+    max: 1.0,
+    default: 0.0,
+    unit: Unit::Percent,
+    taper: Taper::Linear,
+    choices: &[],
+    group: "",
+    note_labels: None,
+};
 
 /// The card's height for rack `t`: the knobs or the member rows, whichever is taller.
 pub fn card_height(s: &transit_model::Session, t: &Track) -> f32 {

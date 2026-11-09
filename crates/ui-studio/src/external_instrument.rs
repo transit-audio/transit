@@ -439,10 +439,9 @@ fn measure_button(
     let blocked = if set { app.external_measure_blocker(t) } else { Some(CHOOSE_FIRST.to_string()) };
     let label = if app.external_measure.outcome.as_ref().is_some_and(|o| o.track == t) { "Measure again" } else { "Measure" };
     let resp = button(ui, rb, "ext_measure", label, blocked.is_none());
-    let resp =
-        resp.on_hover_text(blocked.clone().unwrap_or_else(|| {
-            "Play a warm-up note and 8 notes (MIDI note 60, velocity 100) to the synth and time their sound on the return: about 13 s".into()
-        }));
+    let resp = resp.on_hover_text(blocked.clone().unwrap_or_else(|| {
+        "Play a warm-up note and 8 notes (MIDI note 60, velocity 100) to the synth and time their sound on the return: about 13 s".into()
+    }));
     c.external_measure = crate::arrange::r4(rb);
     c.external_measure_text = label.into();
     c.external_measure_blocked = blocked.clone().unwrap_or_default();

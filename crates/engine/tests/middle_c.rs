@@ -14,7 +14,10 @@ fn run(convention: MiddleC) -> (Vec<Result<Value, String>>, Value) {
     let clip = e.execute("midi.new_clip", &json!({"track": "Keys", "start": "1|1", "length": "5|1"})).unwrap()["clip"].clone();
     let mut out = Vec::new();
     for root in [json!("C3"), json!("G"), json!("Bb2"), json!(" F#3 "), json!("C\u{266F}3"), json!(60), json!("C+3"), json!("60"), json!("C4")] {
-        out.push(e.execute("midi.chord_add", &json!({"clip": clip, "root": root, "quality": "maj", "start": "1|1", "length": "1|2"})).map_err(|x| x.to_string()));
+        out.push(
+            e.execute("midi.chord_add", &json!({"clip": clip, "root": root, "quality": "maj", "start": "1|1", "length": "1|2"}))
+                .map_err(|x| x.to_string()),
+        );
     }
     out.push(e.execute("midi.notes", &json!({"clip": clip})).map_err(|x| x.to_string()));
     (out, serde_json::to_value(e.session()).unwrap())

@@ -7,11 +7,9 @@ pub(super) fn pitches(p: &Value) -> Result<Vec<u8>> {
     let root = p.get("root").ok_or_else(|| bad(cmd, "root is required (MIDI number or note name, e.g. G3)"))?;
     let root = match (root.as_i64(), root.as_str()) {
         (Some(n), _) if (0..=127).contains(&n) => n,
-        (_, Some(name)) => {
-            note_number(name).ok_or_else(|| {
-                bad(cmd, "invalid root; use MIDI 0..127 or a note name (C3 = 60 regardless of the Middle C setting, bare names use octave 3)")
-            })?
-        }
+        (_, Some(name)) => note_number(name).ok_or_else(|| {
+            bad(cmd, "invalid root; use MIDI 0..127 or a note name (C3 = 60 regardless of the Middle C setting, bare names use octave 3)")
+        })?,
         _ => return Err(bad(cmd, "root must be a MIDI number 0..127 or note name")),
     };
     let mut intervals: Vec<i64> = match (p.get("quality"), p.get("notes")) {
