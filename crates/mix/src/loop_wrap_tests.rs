@@ -181,6 +181,42 @@ fn a_right_half_whose_loop_ends_at_its_grid_origin_repeats_on_its_ticks() {
     }
 }
 
+/// A tempo change inside a looped clip: 48 kHz, 4/4, 102.5 BPM from tick 0 and 140 BPM from bar 3
+/// (tick 7,680). The one-bar kick clip at sample 0 loops over its first bar (112,390) and is
+/// dragged to eight bars (the eight-bar tick under the two-tempo map); the arrangement loop is 0 to
+/// the clip length. A cycle is a whole bar of ticks, so the repeats after the change are 3,840 ticks
+/// apart at 140 BPM, not 112,390 samples apart: over two passes at block sizes 1 and 512 every kick
+/// is on its tick, 32 per pass, none at or after the loop end.
+#[test]
+fn a_tempo_change_inside_a_looped_clip_keeps_later_repeats_on_their_ticks() {
+    let mut s = Session { sample_rate: SampleRate::new(48_000).unwrap(), tempo: TempoMap::new(102.5, 4, 4).unwrap(), ..Session::default() };
+    s.tempo.set_tempo(2 * BAR, 140.0).unwrap();
+    let sr = s.sample_rate;
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+    let mut seq = Sequence::default();
+    for beat in 0..4 {
+        seq.notes.push(Note { pitch: KICK, velocity: 127, release_velocity: 64, channel: 0, start: beat * TICKS_PER_QUARTER, length: 240 });
+    }
+    let end = s.tempo.tick_to_samples(8 * BAR, sr);
+    let mut c = Clip::midi(ClipId(1), "kick", 0, end, seq);
+    c.set_loop(Some(ClipLoop { start: 0, end: s.tempo.tick_to_samples(BAR, sr) }));
+    assert_eq!(c.looping, Some(ClipLoop { start: 0, end: 112_390 }));
+    let tr = s.track_mut(t).unwrap();
+    tr.playlist_mut().unwrap().clips.push(c);
+    tr.instrument = Some(Insert::new("clap:test.counter"));
+    s.edit.loop_playback = true;
+    s.edit.loop_range = Range::new(0, end);
+    let pass = grid_kicks(&s, 8);
+    assert_eq!(pass.len(), 32);
+    let want: Vec<u64> = (0..2u64).flat_map(|p| pass.iter().map(move |k| p * end as u64 + *k as u64)).collect();
+    for block in [1, 512] {
+        assert_eq!(pass_ons(&s, t, end, block), pass, "visit, block {block}");
+        let heard = engine_passes(&s, t, end, block, 2);
+        let ons: Vec<u64> = heard.iter().filter_map(|h| if let Heard::On(at, KICK) = h { Some(*at) } else { None }).collect();
+        assert_eq!(ons, want, "engine, block {block}");
+    }
+}
+
 /// Block size does not matter: the same pass at block sizes 1, 32, 128 and 512, and through the
 /// engine at a size that does not divide the loop (the last block of every pass is cut at the wrap).
 #[test]
