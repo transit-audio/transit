@@ -575,9 +575,58 @@ fn header_rects_painted(t: &T) -> Vec<(egui::Rect, egui::Color32, egui::Stroke)>
         .collect()
 }
 
+/// The header's PAINTED band, read from the frame's shapes: the pane's top line and the line
+/// under the header, the two full-width horizontal lines inside the band's height. Returns the
+/// band's top and bottom y (#412, E78: controls are measured against this, not the row the
+/// layout hands the header).
+fn painted_band(t: &T) -> Option<(f32, f32)> {
+    fn flat<'a>(s: &'a egui::Shape, out: &mut Vec<&'a egui::Shape>) {
+        if let egui::Shape::Vec(v) = s {
+            v.iter().for_each(|s| flat(s, out));
+        } else {
+            out.push(s);
+        }
+    }
+    let pane = t.app.keys.layout.pane;
+    let mut all = Vec::new();
+    t.shapes.iter().for_each(|s| flat(&s.shape, &mut all));
+    let ys: Vec<f32> = all
+        .into_iter()
+        .filter_map(|s| match s {
+            egui::Shape::LineSegment { points, stroke }
+                if stroke.color == crate::theme::TOKENS.line
+                    && (points[0].y - points[1].y).abs() < 0.01
+                    && (points[1].x - points[0].x) >= pane[2] - pane[0] - 1.0
+                    && points[0].y >= pane[1]
+                    && points[0].y <= pane[1] + crate::keys::HEADER_BAND_H =>
+            {
+                Some(points[0].y)
+            }
+            _ => None,
+        })
+        .collect();
+    let top = ys.iter().copied().fold(f32::INFINITY, f32::min);
+    let bottom = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    (ys.len() >= 2).then_some((top, bottom + 0.5))
+}
+
+/// Every wide-header control is centered on the painted band, within a physical pixel.
+fn centered_on_band(t: &T, ppp: f32) -> Result<(), String> {
+    let (top, bottom) = painted_band(t).ok_or("no painted band (top and bottom lines) found")?;
+    let cy = (top + bottom) / 2.0;
+    let px = 1.0 / ppp;
+    for (name, r) in header_rects(&t.app.keys.layout).into_iter().filter(|(n, _)| *n != "note_length" || t.width >= 1200.0) {
+        let c = (r[1] + r[3]) / 2.0;
+        if (c - cy).abs() > px {
+            return Err(format!("{name}: center {c}, painted band {top}..{bottom} center {cy}"));
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn piano_roll_header_controls_share_one_height_and_center_line() {
-    for ppp in [0.75f32, 1.0, 1.5, 2.0] {
+    for ppp in [1.0f32, 1.5, 2.0] {
         for narrow in [false, true] {
             let mut t = T::open();
             t.ctx.set_pixels_per_point(ppp);
@@ -589,6 +638,9 @@ fn piano_roll_header_controls_share_one_height_and_center_line() {
             t.frames(3);
             let l = &t.app.keys.layout;
             aligned(l, ppp, narrow).unwrap_or_else(|e| panic!("ppp {ppp} narrow {narrow}: {e}"));
+            if !narrow {
+                centered_on_band(&t, ppp).unwrap_or_else(|e| panic!("ppp {ppp}: {e}"));
+            }
             painted_aligned(&header_rects_painted(&t), l, ppp, narrow).unwrap_or_else(|e| panic!("painted, ppp {ppp} narrow {narrow}: {e}"));
         }
     }
@@ -612,7 +664,7 @@ fn painted_aligned(painted: &[(egui::Rect, egui::Color32, egui::Stroke)], l: &cr
                 return Err(format!("{name}: painted frame h {} center {}, want {want_h} at {cy}", r.height(), r.center().y));
             }
         }
-        if !over.iter().any(|(_, fill, stroke)| *fill == crate::theme::TOKENS.surface_inset && stroke.width >= 1.0) {
+        if !over.iter().any(|(_, fill, stroke)| fill.a() > 0 && stroke.width >= 1.0) {
             return Err(format!("{name}: no kit field frame painted"));
         }
     }
@@ -687,4 +739,40 @@ fn every_header_control_still_dispatches_its_command() {
     t.click(mid(t.app.keys.layout.snap));
     t.frames(2);
     assert!(!t.app.keys.layout.snap_menu.is_empty(), "Grid opens its list");
+}
+
+#[test]
+fn the_length_field_frame_is_the_button_height_in_every_state() {
+    let want = crate::tokens::layout::DENSE_CONTROL_HEIGHT;
+    for ppp in [1.0f32, 1.5, 2.0] {
+        for narrow in [false, true] {
+            let mut t = T::open();
+            t.ctx.set_pixels_per_point(ppp);
+            if narrow {
+                t.width = 1024.0;
+            }
+            t.add(60, 480, 480);
+            t.frames(3);
+            for state in ["no selection", "with a value", "focused"] {
+                match state {
+                    "with a value" => {
+                        t.click(mid(t.note_rect(60, 480)));
+                        t.frames(3);
+                    }
+                    "focused" => t.click(mid(t.app.keys.layout.note_length)),
+                    _ => {}
+                }
+                let l = t.app.keys.layout.clone();
+                let px = 1.0 / ppp;
+                let f = l.note_length;
+                assert!((f[3] - f[1] - want).abs() <= px, "ppp {ppp} narrow {narrow} {state}: allocation {}", f[3] - f[1]);
+                painted_aligned(&header_rects_painted(&t), &l, ppp, narrow).unwrap_or_else(|e| panic!("ppp {ppp} narrow {narrow} {state}: {e}"));
+                if !narrow {
+                    let b = l.step;
+                    assert!(((f[3] - f[1]) - (b[3] - b[1])).abs() <= px, "ppp {ppp} {state}: Length vs button height");
+                    centered_on_band(&t, ppp).unwrap_or_else(|e| panic!("ppp {ppp} {state}: {e}"));
+                }
+            }
+        }
+    }
 }

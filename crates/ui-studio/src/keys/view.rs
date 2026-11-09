@@ -76,7 +76,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
         ..KeysLayout::default()
     };
     let handle = Rect::from_min_max(area.min, pos2(area.max.x, area.min.y + HANDLE_H));
-    let header = Rect::from_min_max(pos2(area.min.x, handle.max.y), pos2(area.max.x, handle.max.y + HEADER_H));
+    let header = Rect::from_min_max(area.min, pos2(area.max.x, area.min.y + HEADER_BAND_H));
     let narrow = area.width() < 1200.0;
     let body_top = header.max.y + if narrow { HEADER_H } else { 0.0 };
     let ruler = Rect::from_min_max(pos2(area.min.x + KEY_W, body_top), pos2(area.max.x, body_top + RULER_H));
@@ -381,7 +381,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Co
     let p = ui.painter();
     p.rect_filled(r, 0.0, TOKENS.panel);
     p.line_segment([pos2(r.min.x, r.max.y - 0.5), pos2(r.max.x, r.max.y - 0.5)], Stroke::new(1.0, TOKENS.line));
-    let (x, rects, clicked) = switcher(ui, r, [true, false, false]);
+    let (x, rects, clicked) = switcher(ui, Rect::from_center_size(r.center(), vec2(r.width(), HEADER_H)), [true, false, false]);
     layout.tab_keys = rects[0];
     layout.tab_mixer = rects[1];
     layout.tab_devices = rects[2];

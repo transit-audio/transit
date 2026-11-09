@@ -1,35 +1,37 @@
-# E78: a header test measured the allocated rect, not the painted frame (#412)
+# E78: a header test measured its controls against the row, not the painted band (#412)
 
-1. **Failure.** The piano roll header's Length field still looked shorter than the row after
-   the first #412 fix landed (2026-11-09, the maintainer's screenshot of the installed build):
-   the velocity box matched the buttons, the Length frame did not. Issue #412 was reopened.
-2. **Mechanism.** The first fix sized every control's allocated rectangle to the dense control
-   height (24) and the test measured those rectangles. egui's `TextEdit` and `DragValue` paint
-   their own frames, from their content and their margins, and the frame was never part of what
-   the test looked at. The headless rig, run at 1.0, 1.25, 1.5 and 2.0 scale and in the
-   unselected, selected, hovered and focused states, painted both field frames 24 high on the
-   buttons' center line before and after this fix, so the rig does not reproduce the short frame
-   on that screenshot. What the fix removes is the dependency: both fields now get the kit's
-   frame from one helper (`header_field` in `crates/ui-studio/src/keys/view.rs`), painted by us
-   on the control band, with egui's widget bare inside it, so the painted height is the band's
-   whatever the widget measures.
-3. **Why checks missed it.** The layout test asserted allocation (`Response::rect`) and
-   `layout` rectangles. A painted control has two sizes, the one it asks for and the one it
-   paints, and a test that reads only the first cannot see the second drift.
-4. **Regression test.** `piano_roll_header_controls_share_one_height_and_center_line` keeps the
-   allocation assertion and adds a paint assertion (`painted_aligned`): every visible rectangle
-   over the Length field and the velocity field, taken from the frame's shapes, is the control
-   height high within one physical pixel on the buttons' center line, and each field has the kit
-   inset frame with its 1 px line, at 0.75, 1.0, 1.5 and 2.0 scale, wide and narrow.
-   `the_painted_check_fails_on_a_frame_shorter_than_its_allocation` feeds the check an 18 high
-   frame in a 24 high allocation (the reported symptom): the allocation check passes it, the
-   painted check fails it. Control, run and reverted: the pre-fix header code passes the new
-   paint assertion in the rig, which agrees with item 2; the control that proves the assertion
-   can see the escape is the synthetic short frame.
-5. **Gate class.** A layout test for a painted control asserts the painted frame shape, not only
-   the allocated rectangle. The rule is in `docs/contributing/evidence/gates.md`.
-6. **Protocol change, owner, blind spot.** Review rule plus the shared paint helper
-   (`painted_aligned`). Owner: the maintainer. Blind spot: the rig draws without the GPU, so a
-   defect that appears only in rasterization (pixel snapping, a driver) is outside this check;
-   if the Length frame still looks short on screen after this change, the next step is a
-   screenshot through the control channel on the installed build.
+1. **Failure.** The piano roll header's controls did not look centered or equal in height, in
+   two rounds of the same issue (2026-11-08 and 2026-11-09). The maintainer's screenshots of
+   the installed build, at a 1.5 display scale, showed a painted band about 33 pt tall with the
+   24 pt controls in its lower 28 pt: about 7 pt of band above them and 2 below. The Length
+   field's frame also read as a different height from the buttons in two shots.
+2. **Mechanism.** The header band is the pane's top drag strip (`HANDLE_H`, 5 pt) plus the
+   header row (`HEADER_H`, 28 pt), all in the panel color with a line at each edge. The layout
+   handed `header_row` only the 28 pt row under the strip, so the controls were centered on
+   the row, not on the band the eye sees. Round one sized every control's allocated rectangle to
+   the dense control height and measured the allocations against the row. Round two painted the
+   field frames ourselves (`header_field`) and measured the painted frames, again against the
+   row. Both measured the right thing against the wrong reference; the headless rig was
+   correct about every number it was asked for.
+3. **Why checks missed it.** A test that compares controls with the rectangle the layout hands
+   in can only find controls that disagree with each other. Here they agreed and all sat 2.5 pt
+   low in the band that the user sees. The painted band is not a layout rectangle: it is two
+   lines and a fill, and only the painted shapes say where it is.
+4. **Fix and regression tests.** The header band is one rectangle (`HEADER_BAND_H`, 33 pt, the
+   old strip plus row so nothing below moves); the drag strip (4 pt) overlays its top edge above
+   the controls, and the tabs, swatch, separator, title and every control are centered on the
+   band. `piano_roll_header_controls_share_one_height_and_center_line` reads the band from the
+   painted shapes (`painted_band`: the pane's top line and the line under the header) and
+   asserts every control's center is the band's center, within a physical pixel, at 1.0, 1.5
+   and 2.0 scale, and keeps the allocation and painted-frame assertions.
+   `the_length_field_frame_is_the_button_height_in_every_state` asserts the Length frame is the
+   buttons' height with no selection, with a value and focused, wide and narrow.
+   Control, run and reverted: with the controls centered on the bottom row again (the pre-fix
+   layout), both tests fail on the band-center assertion (`step: center 458, painted band
+   439..472 center 455.5`).
+5. **Gate class.** A header or toolbar test measures its controls against the painted band
+   behind them, not against the row rectangle the layout hands in. The rule is in
+   `docs/contributing/evidence/gates.md`.
+6. **Protocol change, owner, blind spot.** Review rule plus the shared band reader
+   (`painted_band`). Owner: the maintainer. Blind spot: the band is read from its two edge
+   lines, so a band that changes how it is painted needs the reader updated with it.

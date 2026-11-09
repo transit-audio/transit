@@ -50,7 +50,11 @@ use transit_time::{Samples, TICKS_PER_QUARTER as PPQ};
 
 /// Width of the keyboard column, heights of the pane's rows (points).
 pub const KEY_W: f32 = 52.0;
-const HANDLE_H: f32 = 5.0;
+/// The drag strip on the pane's top edge: it overlays the header band, above its controls.
+const HANDLE_H: f32 = 4.0;
+/// The header's painted band, from the pane's top line to the line under it. Every control in it
+/// is centered on this band (#412); the drag strip sits over its top [`HANDLE_H`].
+pub(crate) const HEADER_BAND_H: f32 = 33.0;
 pub(crate) const HEADER_H: f32 = 28.0;
 const RULER_H: f32 = 20.0;
 const VEL_H: f32 = 52.0;
