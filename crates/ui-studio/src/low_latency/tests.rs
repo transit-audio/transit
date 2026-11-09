@@ -124,32 +124,35 @@ fn invalid_preferences_commands_and_engine_only_host_cannot_edit_the_session() {
     assert_eq!(app.run("query.path_latency", json!({})).unwrap()["total"], Value::Null);
 }
 
-/// The transport button's rect with `pending` and the preference as given. Without a player the
-/// poll clears `pending` every frame, so the button is drawn directly.
-fn button_rect(on: bool, pending: bool) -> [f32; 4] {
+/// The zap's and the metronome's rects with `pending` and the preference as given. Without a
+/// player the poll clears `pending` every frame, so the buttons are drawn directly.
+fn rects(on: bool, pending: bool) -> ([f32; 4], [f32; 4]) {
     let mut app = crate::tests::app();
     app.ui.low_latency = on;
     app.low_latency.pending = pending;
     let ctx = egui::Context::default();
     let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))), ..Default::default() };
     let mut out = ctx.run_ui(raw, |ui| {
-        ui.horizontal(|ui| app.low_latency_button(ui));
+        ui.horizontal(|ui| {
+            crate::metronome::button(&mut app, ui);
+            app.low_latency_button(ui);
+        });
     });
     out.textures_delta.clear();
-    app.arrange.layout.transport["low_latency"]
+    (app.arrange.layout.transport["low_latency"], app.arrange.layout.transport["metronome"])
 }
 
+/// The control is the size of the transport's other buttons and the same in every state. (Mutation
+/// check: the old label swap without `min_size` fails the equal-width line.)
 #[test]
-fn the_low_latency_button_is_one_square_in_off_on_and_pending() {
-    let width = |r: [f32; 4]| r[2] - r[0];
-    let off = button_rect(false, false);
-    let on = button_rect(true, false);
-    let pending = button_rect(true, true);
-    assert_eq!(width(off), width(on));
-    assert_eq!(width(off), width(pending));
-    assert_eq!(width(off), off[3] - off[1], "square");
-    assert_eq!(off[3] - off[1], 28.0, "as tall as the other transport buttons");
-    assert_eq!(off[0], pending[0]);
+fn the_low_latency_button_matches_the_metronome_in_off_on_and_pending() {
+    let size = |r: [f32; 4]| (r[2] - r[0], r[3] - r[1]);
+    for (on, pending) in [(false, false), (true, false), (true, true)] {
+        let (zap, metronome) = rects(on, pending);
+        assert_eq!(size(zap), size(metronome), "on {on} pending {pending}");
+    }
+    let (off, _) = rects(false, false);
+    assert_eq!(off[0], rects(true, true).0[0]);
 }
 
 #[test]
@@ -162,10 +165,11 @@ fn the_title_says_pending_only_while_pending() {
 
 #[test]
 fn the_button_is_text_off_lit_on_and_dimmed_lit_while_pending() {
-    use crate::theme::{DISABLED_ALPHA, TOKENS};
+    use crate::theme::TOKENS;
+    use crate::tokens::alpha::VOICE_RELEASING;
     assert_eq!(look(false, false, false).1, TOKENS.text);
     assert_eq!(look(true, false, false).1, TOKENS.signal);
-    assert_eq!(look(true, true, false).1, TOKENS.signal.gamma_multiply(DISABLED_ALPHA));
+    assert_eq!(look(true, true, false).1, TOKENS.signal.gamma_multiply(VOICE_RELEASING));
     assert_ne!(look(true, true, false).1, look(true, false, false).1);
 }
 
@@ -180,17 +184,4 @@ fn the_button_carries_the_zap_icon_and_a_click_toggles() {
     crate::tests::click(&mut app, at);
     crate::tests::frames(&mut app, &ctx, 3, &mut now);
     assert!(app.ui.low_latency);
-}
-
-/// Negative control: the old text button swapped its label and, without the `min_size` the old
-/// code gave it, changed width, which is the jump the fixed square removes.
-#[test]
-fn control_a_text_label_swap_without_min_size_changes_width() {
-    let ctx = egui::Context::default();
-    let mut widths = Vec::new();
-    for label in [LABEL, LABEL_PENDING] {
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| widths.push(ui.add(egui::Button::new(label)).rect.width()));
-        out.textures_delta.clear();
-    }
-    assert_ne!(widths[0], widths[1], "the old control moved its neighbors");
 }

@@ -97,9 +97,9 @@ impl StudioApp {
 
     pub(crate) fn low_latency_button(&mut self, ui: &mut egui::Ui) {
         use crate::icons::{self, Icon};
-        // An icon button the height of its neighbors and square, so it is the same width in every
+        // An icon button the size of its neighbors, so it is the same width in every
         // state and never moves what sits to its right (#417).
-        let (r, b) = ui.allocate_exact_size(egui::vec2(TRANSPORT_BUTTON_H, TRANSPORT_BUTTON_H), egui::Sense::click());
+        let (r, b) = ui.allocate_exact_size(crate::transport::BUTTON_SIZE, egui::Sense::click());
         let (fill, glyph) = look(self.ui.low_latency, self.low_latency.pending, b.hovered());
         ui.painter().rect_filled(r, crate::theme::RADIUS, fill);
         icons::paint_in(ui.painter(), r, Icon::Zap, glyph);
@@ -136,16 +136,14 @@ Shared/Main path, including device output latency",
 const LABEL: &str = "Low Latency";
 const LABEL_PENDING: &str = "Low Latency (pending)";
 
-/// The button's side: the height of the other transport buttons.
-const TRANSPORT_BUTTON_H: f32 = 28.0;
-
 /// The button's fill and glyph. Off: the standard transport button with a `text` glyph. On: the
-/// metronome's lit look, `signal` glyph on a 35 percent `signal` fill. Pending: the lit look at the
-/// kit's disabled alpha (`theme::DISABLED_ALPHA`, 0.3), since the kit has no other dimmed lit state.
+/// metronome's lit look, `signal` glyph on a 35 percent `signal` fill. Pending: the lit look "half lit"
+/// (`tokens::alpha::VOICE_RELEASING`, 45 percent, as a voice light whose release fades): in progress, not unavailable.
 pub(crate) fn look(on: bool, pending: bool, hovered: bool) -> (egui::Color32, egui::Color32) {
-    use crate::theme::{DISABLED_ALPHA, TOKENS};
+    use crate::theme::TOKENS;
+    use crate::tokens::alpha::VOICE_RELEASING as HALF_LIT;
     if pending {
-        (TOKENS.signal.gamma_multiply(0.35 * DISABLED_ALPHA), TOKENS.signal.gamma_multiply(DISABLED_ALPHA))
+        (TOKENS.signal.gamma_multiply(0.35 * HALF_LIT), TOKENS.signal.gamma_multiply(HALF_LIT))
     } else if on {
         (TOKENS.signal.gamma_multiply(0.35), TOKENS.signal)
     } else {

@@ -294,7 +294,7 @@ Every icon the app draws is a Lucide glyph (lucide-static 1.50.0, ISC, unmodifie
 | Stop, Play, Record | `square`, `play`, `circle` | Transport, browser preview | 16, filled | `text`; Record `record` when armed |
 | Loop | `repeat` | Transport cycle | 16 | `text`; `loop` when on |
 | Metronome | `metronome` | Click toggle and its popup | 16 | `text` |
-| Low Latency | `zap` | Transport | 16 | `text`; `signal` when on, `signal` at 30% (the disabled alpha) while pending |
+| Low Latency | `zap` | Transport | 16 | `text`; `signal` when on, half lit while pending (`signal` at 45%, `alpha.voiceReleasing`) |
 | ChevronRight, ChevronDown | `chevron-right`, `chevron-down` | Disclosure, combo chevron, menu bars | 12-16 | `text.faint`, `text.muted` hot |
 | ArrowRight | `arrow-right` | Mixer strip output dropdown (leads the label) | 10 | `ink.arrow` |
 | Plus | `plus` | Add lane, device, effect, send, folder, tempo | 11-24 | `text`, `text.dim` |

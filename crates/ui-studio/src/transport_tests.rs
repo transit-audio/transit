@@ -323,7 +323,7 @@ fn play_returns_to_normal_once_the_request_clears() {
 }
 
 #[test]
-fn the_low_latency_button_is_a_square_that_keeps_its_place_in_off_on_and_pending() {
+fn the_low_latency_button_matches_the_transport_buttons_and_keeps_its_place_in_off_on_and_pending() {
     // Without a player the poll clears `pending` every frame, so draw the button directly.
     let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let ctx = egui::Context::default();
@@ -347,5 +347,14 @@ fn the_low_latency_button_is_a_square_that_keeps_its_place_in_off_on_and_pending
     let pending = draw(true, true);
     assert_eq!(idle, on, "the button and the item to its right do not move");
     assert_eq!(idle, pending, "the button and the item to its right do not move");
-    assert_eq!(idle.0[2] - idle.0[0], idle.0[3] - idle.0[1], "square: {:?}", idle.0);
+}
+
+#[test]
+fn the_low_latency_button_is_the_size_of_the_cycle_and_metronome_buttons() {
+    let mut t = T::new();
+    t.frames(3);
+    let size = |r: [f32; 4]| (r[2] - r[0], r[3] - r[1]);
+    let tr = &t.app.arrange.layout.transport;
+    assert_eq!(size(tr["low_latency"]), size(tr["cycle"]));
+    assert_eq!(size(tr["low_latency"]), size(tr["metronome"]));
 }
