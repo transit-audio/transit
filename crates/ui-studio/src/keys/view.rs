@@ -224,7 +224,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     let cp = lp.with_clip_rect(corner);
     match layout.live.last() {
         Some((pitch, _)) => {
-            cp.text(corner.center(), Align2::CENTER_CENTER, transit_midi::note_name(*pitch), FontId::proportional(12.0), TOKENS.accent)
+            cp.text(corner.center(), Align2::CENTER_CENTER, transit_midi::note_name(*pitch, transit_midi::MiddleC::C3), FontId::proportional(12.0), TOKENS.accent)
         }
         None => cp.text(corner.center(), Align2::CENTER_CENTER, &grid_text, FontId::proportional(9.5), TOKENS.text_dim),
     };
@@ -1018,7 +1018,7 @@ fn paint_keyboard(app: &StudioApp, ui: &Ui, map: &Map, kb: Rect) {
             p.text(
                 pos2(kb.max.x - 6.0, row.center().y),
                 Align2::RIGHT_CENTER,
-                transit_midi::note_name(pitch),
+                transit_midi::note_name(pitch, transit_midi::MiddleC::C3),
                 FontId::proportional((map.kh - 4.0).clamp(8.0, 11.0)),
                 color,
             );

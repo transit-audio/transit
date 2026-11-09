@@ -236,7 +236,7 @@ pub fn cc_name(cc: u8) -> Option<&'static str> {
 }
 
 fn note(n: u8) -> String {
-    format!("{} ({n})", transit_midi::note_name(n))
+    format!("{} ({n})", transit_midi::note_name(n, transit_midi::MiddleC::C3))
 }
 
 /// The class and the decoded text of one ring element. A note-on with velocity 0 is a note-off.

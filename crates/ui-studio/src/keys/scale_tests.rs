@@ -302,8 +302,8 @@ fn out_of_scale_rows_and_labels_take_the_loop_hue() {
             _ => None,
         })
     };
-    let e = transit_midi::note_name(64);
-    let d = transit_midi::note_name(62);
+    let e = transit_midi::note_name(64, transit_midi::MiddleC::C3);
+    let d = transit_midi::note_name(62, transit_midi::MiddleC::C3);
     assert_eq!(label_ink(&h, &e), Some(TOKENS.loop_region), "{e}'s key label");
     assert_eq!(label_ink(&h, &d), Some(TOKENS.text_dim), "{d}'s label stays dim");
 }

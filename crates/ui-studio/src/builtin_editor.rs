@@ -102,7 +102,7 @@ fn whole_number(plugin: &str, param: &str) -> bool {
 fn format_param(plugin: &str, p: &ParamInfo, value: f32) -> String {
     if plugin == SAMPLER && NOTE_PARAMS.contains(&p.id) {
         let n = value.round().clamp(0.0, 127.0) as u8;
-        return format!("{} ({n})", transit_midi::note_name(n));
+        return format!("{} ({n})", transit_midi::note_name(n, transit_midi::MiddleC::C3));
     }
     if whole_number(plugin, p.id) {
         return format!("{:.0}", value.round());

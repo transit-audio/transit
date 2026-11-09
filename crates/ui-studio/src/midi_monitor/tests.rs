@@ -227,8 +227,8 @@ fn copy_text_is_plain_aligned_lines_of_the_last_hundred_visible_rows() {
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 100);
     let sp = |n: usize| " ".repeat(n);
-    assert_eq!(lines[0], format!("  0:00.050  In   Keys{}1  Note On {} (50) vel 100", sp(17), transit_midi::note_name(50)));
-    assert_eq!(lines[99], format!("  0:00.149  In   Keys{}1  Note On {} (49) vel 100", sp(17), transit_midi::note_name(49)));
+    assert_eq!(lines[0], format!("  0:00.050  In   Keys{}1  Note On {} (50) vel 100", sp(17), transit_midi::note_name(50, transit_midi::MiddleC::C3)));
+    assert_eq!(lines[99], format!("  0:00.149  In   Keys{}1  Note On {} (49) vel 100", sp(17), transit_midi::note_name(49, transit_midi::MiddleC::C3)));
     assert!(!text.ends_with('\n'));
     let s = state_with(&[ev(Dir::Out, 0x90, 60, 1), ev(Dir::In, 0xFA, 0, 0), ev(Dir::In, 0xFC, 0, 0)]);
     let all = copy_text(&s.rows, &Filters::default(), None, 100);
