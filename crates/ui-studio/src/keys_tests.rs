@@ -23,6 +23,7 @@ struct T {
     time: f64,
     width: f32,
     painted_text: Vec<String>,
+    shapes: Vec<egui::epaint::ClippedShape>,
     track: TrackId,
     clip: ClipId,
 }
@@ -37,7 +38,7 @@ impl T {
         let clip = ClipId(c["clip"].as_u64().unwrap());
         app.ui.show_mixer = true;
         app.ui.show_devices = false;
-        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, width: 1400.0, painted_text: Vec::new(), track, clip };
+        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, width: 1400.0, painted_text: Vec::new(), shapes: Vec::new(), track, clip };
         t.frames(3);
         t
     }
@@ -76,6 +77,7 @@ impl T {
                 })
                 .collect();
             out.textures_delta.clear();
+            self.shapes = out.shapes;
         }
     }
 
@@ -769,7 +771,8 @@ fn an_empty_instrument_lane_shows_the_create_clip_hint_until_a_clip_exists() {
     let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let r = app.run("track.new", json!({"kind": "instrument"})).unwrap();
     let track = TrackId(r["tracks"][0].as_u64().unwrap());
-    let mut t = T { app, ctx: egui::Context::default(), time: 0.0, width: 1400.0, painted_text: Vec::new(), track, clip: ClipId(0) };
+    let mut t =
+        T { app, ctx: egui::Context::default(), time: 0.0, width: 1400.0, painted_text: Vec::new(), shapes: Vec::new(), track, clip: ClipId(0) };
     t.frames(3);
     assert_eq!(t.app.keys.layout.hint_tracks, vec![track.0], "hint on the empty instrument lane");
     let lane = t.app.arrange.layout.tracks[0].lane;

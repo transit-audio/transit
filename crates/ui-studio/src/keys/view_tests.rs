@@ -551,9 +551,33 @@ fn aligned(l: &crate::keys::KeysLayout, ppp: f32, narrow: bool) -> Result<(), St
     Ok(())
 }
 
+/// Every rectangle painted in the header row (the frames and fills of the controls), flattened in
+/// paint order: its rect, fill and stroke. The row's own background and the tabs are left out.
+fn header_rects_painted(t: &T) -> Vec<(egui::Rect, egui::Color32, egui::Stroke)> {
+    fn flat<'a>(s: &'a egui::Shape, out: &mut Vec<&'a egui::Shape>) {
+        if let egui::Shape::Vec(v) = s {
+            v.iter().for_each(|s| flat(s, out));
+        } else {
+            out.push(s);
+        }
+    }
+    let l = &t.app.keys.layout;
+    let cy = (l.note_length[1] + l.note_length[3]) / 2.0;
+    let mut all = Vec::new();
+    t.shapes.iter().for_each(|s| flat(&s.shape, &mut all));
+    all.into_iter()
+        .filter_map(|s| match s {
+            egui::Shape::Rect(r) if r.rect.height() < 40.0 && r.rect.width() < 300.0 && (r.rect.center().y - cy).abs() < 16.0 => {
+                Some((r.rect, r.fill, r.stroke))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn piano_roll_header_controls_share_one_height_and_center_line() {
-    for ppp in [1.0f32, 1.5] {
+    for ppp in [0.75f32, 1.0, 1.5, 2.0] {
         for narrow in [false, true] {
             let mut t = T::open();
             t.ctx.set_pixels_per_point(ppp);
@@ -565,8 +589,52 @@ fn piano_roll_header_controls_share_one_height_and_center_line() {
             t.frames(3);
             let l = &t.app.keys.layout;
             aligned(l, ppp, narrow).unwrap_or_else(|e| panic!("ppp {ppp} narrow {narrow}: {e}"));
+            painted_aligned(&header_rects_painted(&t), l, ppp, narrow).unwrap_or_else(|e| panic!("painted, ppp {ppp} narrow {narrow}: {e}"));
         }
     }
+}
+
+/// The PAINTED frames of the header's two fields, not their allocations (#412, E78): every
+/// visible rectangle over a field is [`HEADER_CONTROL_H`](crate::tokens::layout::DENSE_CONTROL_HEIGHT)
+/// high on the field's center line, and each field has the kit's inset frame with its 1 px line.
+fn painted_aligned(painted: &[(egui::Rect, egui::Color32, egui::Stroke)], l: &crate::keys::KeysLayout, ppp: f32, narrow: bool) -> Result<(), String> {
+    let px = 1.0 / ppp;
+    let want_h = crate::tokens::layout::DENSE_CONTROL_HEIGHT;
+    let fields = [("note_length", l.note_length), ("new_note_velocity", l.new_note_velocity)];
+    for (name, f) in fields.into_iter().filter(|(n, _)| !narrow || *n == "note_length") {
+        let cy = (f[1] + f[3]) / 2.0;
+        let over: Vec<_> = painted
+            .iter()
+            .filter(|(r, fill, stroke)| (fill.a() > 0 || stroke.width > 0.0) && r.min.x >= f[0] - 2.0 && r.max.x <= f[2] + 2.0 && r.width() > 20.0)
+            .collect();
+        for (r, _, _) in &over {
+            if (r.height() - want_h).abs() > px || (r.center().y - cy).abs() > px {
+                return Err(format!("{name}: painted frame h {} center {}, want {want_h} at {cy}", r.height(), r.center().y));
+            }
+        }
+        if !over.iter().any(|(_, fill, stroke)| *fill == crate::theme::TOKENS.surface_inset && stroke.width >= 1.0) {
+            return Err(format!("{name}: no kit field frame painted"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_painted_check_fails_on_a_frame_shorter_than_its_allocation() {
+    // The reported symptom: the allocation is 24 high, the painted frame about three quarters.
+    let l =
+        crate::keys::KeysLayout { note_length: [560.0, 446.0, 654.0, 470.0], new_note_velocity: [768.0, 446.0, 812.0, 470.0], ..Default::default() };
+    let frame = |r: egui::Rect| (r, crate::theme::TOKENS.surface_inset, egui::Stroke::new(1.0, crate::theme::TOKENS.line));
+    let rect = |x0: f32, x1: f32, h: f32| egui::Rect::from_center_size(egui::pos2((x0 + x1) / 2.0, 458.0), egui::vec2(x1 - x0, h));
+    let good = [frame(rect(560.0, 654.0, 24.0)), frame(rect(768.0, 812.0, 24.0))];
+    assert!(aligned_alloc_ok(&l) && painted_aligned(&good, &l, 1.0, false).is_ok());
+    let short = [frame(rect(560.0, 654.0, 18.0)), frame(rect(768.0, 812.0, 24.0))];
+    assert!(aligned_alloc_ok(&l), "the allocation check passes on it, which is the escape");
+    assert!(painted_aligned(&short, &l, 1.0, false).is_err());
+}
+
+fn aligned_alloc_ok(l: &crate::keys::KeysLayout) -> bool {
+    [l.note_length, l.new_note_velocity].iter().all(|r| (r[3] - r[1] - crate::tokens::layout::DENSE_CONTROL_HEIGHT).abs() < 0.01)
 }
 
 #[test]
