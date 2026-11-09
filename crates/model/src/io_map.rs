@@ -543,6 +543,27 @@ impl IoMap {
         true
     }
 
+    /// Adopt the channel count of an input that opened as its own device (cpal: ALSA, CoreAudio),
+    /// which the output's open cannot know (#429): paths beyond it are dropped as in
+    /// [`Self::reconcile`], and a table that had no inputs gets the default input paths. The same
+    /// count changes nothing, so input paths the user removed stay removed. Returns whether
+    /// anything changed.
+    pub fn adopt_inputs(&mut self, inputs: u16) -> bool {
+        let had = self.inputs;
+        if !self.reconcile(inputs, self.outputs) {
+            return false;
+        }
+        if had == 0 {
+            let fresh = Self::for_device(&self.system, &self.device, self.inputs, self.outputs);
+            for p in fresh.paths.into_iter().filter(|p| p.direction == IoDirection::Input) {
+                if self.path(&p.name).is_none() {
+                    self.paths.push(p);
+                }
+            }
+        }
+        true
+    }
+
     /// Pairs of output paths that share a device channel (they sum there), with the first shared
     /// channel (0-based): "Out 3-4 shares channel 3 with Headphones". Inputs may overlap freely
     /// ("In 1" and "In 1-2" read the same channel), so they are not reported.
@@ -817,6 +838,27 @@ mod tests {
         t.midi_output = MidiOutput::Internal;
         t.instrument = Some(Insert::external("In 1"));
         assert_eq!(m.external_latency_of(&t, 48_000), None, "no port, no measurement");
+    }
+
+    /// #429: an ALSA output opens its table with no inputs; the separate input's count arrives
+    /// later and must give the table its inputs and their default paths, keeping the outputs.
+    #[test]
+    fn a_separate_input_count_gives_the_table_its_inputs_and_default_paths() {
+        let mut m = IoMap::for_device("ALSA", "pipewire", 0, 2);
+        m.add_path(out("Cue", vec![1])).unwrap();
+        assert!(m.adopt_inputs(2));
+        assert_eq!(m.inputs, 2);
+        assert_eq!(names(&m, IoDirection::Input), ["In 1", "In 2", "In 1-2"]);
+        assert!(m.path("Cue").is_some(), "the output paths stay");
+        m.remove_path("In 1").unwrap();
+        m.remove_path("In 1-2").unwrap();
+        m.remove_path("In 2").unwrap();
+        assert!(!m.adopt_inputs(2), "the same count changes nothing: removed input paths stay removed");
+        assert_eq!(names(&m, IoDirection::Input), Vec::<&str>::new());
+        m.add_path(IoPath { direction: IoDirection::Input, format: ChannelFormat::Mono, ..out("In 1", vec![0]) }).unwrap();
+        m.add_path(IoPath { direction: IoDirection::Input, format: ChannelFormat::Stereo, ..out("In 1-2", vec![0, 1]) }).unwrap();
+        assert!(m.adopt_inputs(1));
+        assert_eq!(names(&m, IoDirection::Input), ["In 1"], "a narrower input drops the paths beyond it and adds none back");
     }
 
     #[test]

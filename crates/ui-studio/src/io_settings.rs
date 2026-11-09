@@ -22,6 +22,14 @@ pub fn adopt(saved: &[IoMap], opened: IoMap) -> IoMap {
     map
 }
 
+/// The table with the open input's own channel count (`input`, without the System Audio pair), or
+/// `None` when there is no open input or the table already has that count and its input paths.
+pub fn with_input_count(map: &IoMap, input: Option<usize>) -> Option<IoMap> {
+    let inputs = u16::try_from(input?).unwrap_or(u16::MAX);
+    let mut next = map.clone();
+    next.adopt_inputs(inputs).then_some(next)
+}
+
 /// Keep `map` as its device's table (most recent last).
 pub fn remember(saved: &mut Vec<IoMap>, map: &IoMap) {
     saved.retain(|m| m.key() != map.key());
@@ -41,7 +49,13 @@ impl StudioApp {
             let map = adopt(&self.ui.io_maps, (*player.io_map()).clone());
             self.engine.set_io_map(map);
             self.io_adopt = false;
-        } else if self.io_pushed == self.engine.io_revision() {
+        }
+        // An input that opened as its own device (cpal: ALSA, CoreAudio) has a count the output's
+        // open could not know (#429): the table takes it, so its input paths can be made.
+        if let Some(map) = with_input_count(self.engine.io_map(), self.recorder.as_ref().map(|r| r.device_channels())) {
+            self.engine.set_io_map(map);
+        }
+        if self.io_pushed == self.engine.io_revision() {
             return;
         }
         let map = self.engine.io_map().clone();
@@ -110,6 +124,18 @@ mod tests {
         // The stream knows no input count for a separate input device: the saved one stays.
         let separate = adopt(&saved, IoMap::for_device("ASIO", "TASCAM Model 12", 0, 10));
         assert_eq!((separate.inputs, separate.outputs), (12, 10));
+    }
+
+    /// #429: on ALSA the output opens the table with 0 inputs and the input opens as its own device;
+    /// its count reaches the table, so the I/O page reads it and input paths can be made.
+    #[test]
+    fn the_open_inputs_count_reaches_a_table_opened_without_inputs() {
+        let alsa = IoMap::for_device("ALSA", "pipewire", 0, 2);
+        let map = with_input_count(&alsa, Some(2)).expect("the input's count is adopted");
+        assert_eq!((map.inputs, map.outputs), (2, 2));
+        assert!(map.path("In 1-2").is_some_and(|p| p.direction == IoDirection::Input));
+        assert!(with_input_count(&map, Some(2)).is_none(), "nothing to change");
+        assert!(with_input_count(&alsa, None).is_none(), "no open input: the table stays");
     }
 
     #[test]

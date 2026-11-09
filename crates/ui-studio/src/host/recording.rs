@@ -242,8 +242,8 @@ impl StudioApp {
     }
 
     fn arm_audio_takes(&mut self) -> Result<Vec<transit_engine::io::Take>, String> {
-        if self.recorder_failed {
-            return Err(self.status.clone());
+        if let Some(failure) = &self.input_failure {
+            return Err(format!("No audio input: {failure}"));
         }
         let name = transit_engine::io::sanitize_name(&self.engine.session().name);
         let unsaved_dir = self.autosave_dir.as_ref().map_or_else(std::env::temp_dir, |d| d.join(name));

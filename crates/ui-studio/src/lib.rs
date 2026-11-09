@@ -238,7 +238,9 @@ pub struct StudioApp {
     test_approximate_start: bool,
     /// Punch range to trim the take to (loop recording only in this UI).
     punch: Option<Range>,
-    recorder_failed: bool,
+    /// Why the audio input did not open or stopped (the open error, or the device trouble), until
+    /// the device is reopened or the document replaced. The Audio Devices card and the I/O page say it.
+    pub(crate) input_failure: Option<String>,
     /// When to reopen the device after its driver asked for it (ASIO reset), and what to say.
     pub(crate) reopen: transit_playback::reopen::Reopener,
     /// Opens the replacement Player of an automatic reopen in tests (a scripted driver); the app
@@ -392,7 +394,7 @@ impl StudioApp {
             #[cfg(test)]
             test_approximate_start: false,
             punch: None,
-            recorder_failed: false,
+            input_failure: None,
             reopen: transit_playback::reopen::Reopener::default(),
             #[cfg(test)]
             reopen_with: None,

@@ -179,7 +179,7 @@ impl StudioApp {
                     self.sim = None;
                     // The old capture belongs to the replaced document, never to the new one.
                     self.close_input();
-                    self.recorder_failed = false;
+                    self.input_failure = None;
                     self.punch = None;
                     self.arrange.gesture = None;
                     self.copied.clear();

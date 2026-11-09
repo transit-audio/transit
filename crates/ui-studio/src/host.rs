@@ -123,7 +123,7 @@ impl StudioApp {
             }
             return;
         }
-        if self.recorder.is_some() || self.recorder_failed {
+        if self.recorder.is_some() || self.input_failure.is_some() {
             return;
         }
         let Some(p) = &self.player else { return };
@@ -132,8 +132,8 @@ impl StudioApp {
                 self.recorder = Some(r);
             }
             Err(e) => {
-                self.recorder_failed = true;
                 self.player_requests.fail(&mut self.status, format!("No audio input: {e}"));
+                self.input_failure = Some(e);
             }
         }
     }

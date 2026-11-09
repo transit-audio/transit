@@ -61,6 +61,8 @@ pub(crate) struct AsioListing {
 /// Said under the buffer list on the JACK system: Apply asks the server.
 pub const JACK_BUFFER_NOTE: &str = "Changes the JACK server's buffer size for all clients.";
 pub const STALE_NOTE: &str = "updates after Apply";
+/// The "Input open:" line before any input opened (and after none failed).
+pub const INPUT_NOT_YET: &str = "Input open: none yet (it opens when a track is armed or monitored)";
 const CHOOSE_ANOTHER: &str = "Choose another in Audio › Audio Devices.";
 
 /// Where the window and its controls were last drawn, for `ui.inspect` and tests.
@@ -320,7 +322,7 @@ impl StudioApp {
         let (rate, telemetry, failed) = if let Some(p) = self.audio_devices.fake.as_ref().and_then(|f| f.connection.as_ref()) {
             (p.config.sample_rate.unwrap_or(48_000), p.telemetry, p.failed)
         } else if let Some(p) = &self.player {
-            (p.device_rate, p.callback_telemetry(), p.silent || p.trouble().is_some() || self.recorder_failed)
+            (p.device_rate, p.callback_telemetry(), p.silent || p.trouble().is_some() || self.input_failure.is_some())
         } else {
             return;
         };
@@ -1169,7 +1171,11 @@ pub(crate) fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
     lines.push(match (&app.recorder, &held) {
         (Some(r), _) => input_line(r, native),
         (None, Some((line, _))) => line.clone(),
-        (None, None) => "Input open: none yet (it opens when a track is armed or monitored)".into(),
+        // A failed open says why (#429), here and in Copy diagnostics, instead of reading as not opened yet.
+        (None, None) => match &app.input_failure {
+            Some(why) => format!("Input open: failed: {why}"),
+            None => INPUT_NOT_YET.into(),
+        },
     });
     lines.extend(input.filter(|_| shared.is_none()).map(|s| crate::telemetry::backend_line(&s, true, input_rate, kind)));
     // After a driver reset: what the automatic reopen did and does next, with its counts.

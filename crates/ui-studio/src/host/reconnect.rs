@@ -55,7 +55,7 @@ impl StudioApp {
         let (what, then) = match trouble {
             Trouble::Device(what) => {
                 self.close_input();
-                self.recorder_failed = true;
+                self.input_failure = Some(what.clone());
                 // The input's half of a driver reset: the device reopens with both directions.
                 if let Some(cause) = self.player.as_ref().and_then(Player::reopen_cause) {
                     self.stop_for_reopen();
@@ -209,7 +209,7 @@ impl StudioApp {
         for key in self.ui.plugin_windows.clone() {
             self.want_editor(key);
         }
-        self.recorder_failed = false;
+        self.input_failure = None;
         let cfg = self.ui.audio.clone();
         if let Some(f) = &mut self.audio_devices.fake {
             let trace = std::rc::Rc::clone(&f.trace);

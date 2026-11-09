@@ -329,7 +329,7 @@ impl StudioApp {
         }
         self.autosave_changes();
         self.autosave();
-        if self.recorder.is_none() && !self.recorder_failed && self.engine.session().needs_live_input() {
+        if self.recorder.is_none() && self.input_failure.is_none() && self.engine.session().needs_live_input() {
             self.ensure_input();
         }
         // Autosave only runs on frames, and plugin editors are native windows egui never hears from.

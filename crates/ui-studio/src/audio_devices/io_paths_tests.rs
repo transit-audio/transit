@@ -98,3 +98,52 @@ fn choosing_main_is_one_command_and_a_wasapi_host_is_noted() {
     t.section("section_io");
     item(&t, "io_wasapi_note", crate::audio_devices_io::WASAPI_NOTE);
 }
+
+/// An ALSA-like system (#429): the output opens the table without inputs, and the input opens as a
+/// device of its own (not with the output), `inputs` wide. No device is listed or opened.
+fn separate_input_rig(inputs: u16) -> (T, transit_audio_backend::fake::FakeBackend) {
+    use transit_audio_backend as ab;
+    let driver = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32)).named("ALSA", "pipewire").with_capture(inputs, false);
+    let cfg = AudioConfig { system: Some("ALSA".into()), output: Some("pipewire".into()), ..Default::default() };
+    let mut t = T::new();
+    t.app.player = Some(transit_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap());
+    t.app.ui.audio = cfg;
+    t.app.audio_devices.fake = None;
+    t.app.add_track("audio").unwrap();
+    t.frames(2);
+    assert_eq!(t.app.engine.io_map().inputs, 0, "the output's open knows no input count");
+    (t, driver)
+}
+
+/// Arms the first track, so the app opens the input on its next frames.
+fn arm(t: &mut T) {
+    t.app.engine.session_mut().tracks[0].mixer.record_arm = true;
+    t.frames(3);
+}
+
+/// #429: the page read "0 in" with Add disabled while the separate input ran 32 channels. The
+/// input's count now reaches the table, with its default input paths.
+#[test]
+fn a_separate_input_gives_the_page_its_channel_count_and_input_paths() {
+    let (mut t, _driver) = separate_input_rig(32);
+    arm(&mut t);
+    assert!(t.app.recorder.as_ref().is_some_and(|r| r.device_channels() == 32), "the input opened");
+    assert_eq!(t.app.engine.io_map().inputs, 32);
+    assert!(t.app.engine.io_map().path("In 1-2").is_some());
+    t.open_window();
+    t.section("section_io");
+    assert_eq!(t.layout()["io"]["inputs"], json!(32));
+}
+
+/// #429: a failed input open read "Input open: none yet"; it now says why, on the Audio Devices
+/// card and so in Copy diagnostics, which copies the card's lines.
+#[test]
+fn a_failed_input_open_says_why_on_the_card() {
+    let (mut t, driver) = separate_input_rig(32);
+    driver.fail_next_open(transit_audio_backend::OpenError::Other("snd_pcm_open: Device or resource busy".into()));
+    arm(&mut t);
+    assert!(t.app.recorder.is_none());
+    let lines = crate::audio_devices::opened_lines(&mut t.app, 0.0);
+    assert!(lines.contains(&"Input open: failed: snd_pcm_open: Device or resource busy".to_string()), "{lines:?}");
+    assert!(!lines.iter().any(|l| l == crate::audio_devices::INPUT_NOT_YET), "{lines:?}");
+}
