@@ -2,8 +2,8 @@
 //! and [`PADS`] pads.
 //!
 //! A **zone** is one sample region with its key and velocity ranges, root, playback settings,
-//! optional layer/round-robin membership (#270 selects among them; this core plays the first
-//! alternative), and its shaper and matrix settings. A **pad** binds one zone to one unique trigger
+//! optional layer/round-robin membership (the key-map group's selection is `selection.rs`), and its
+//! shaper and matrix settings. Each group's round-robin mode ([`GroupMode`]) comes with the patch. A **pad** binds one zone to one unique trigger
 //! note, with mute, solo and a choke group. A pad-bound zone is selected only through its pad, never a
 //! second time by the unbound-zone key scan; it has no membership. A pad's tune, reverse and amp
 //! envelope are its zone's playback settings (one settings block per zone).
@@ -13,7 +13,7 @@ use transit_instrument_core::shaper::Settings as ShaperSettings;
 
 use crate::envelope::EnvelopeFrames;
 use crate::playhead::Region;
-use crate::{CHOKE_GROUPS, PADS, ZONES, math};
+use crate::{CHOKE_GROUPS, PADS, ZONES, math, selection};
 
 /// How a zone plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -84,8 +84,9 @@ impl Playback {
     }
 }
 
-/// A zone's place in a multisample key-map group (#270): which velocity layer and which round-robin
-/// alternative it is. The fields exist from the start; this core plays alternative 0 only.
+/// A zone's place in a multisample key-map group: which velocity layer and which round-robin
+/// alternative it is. A group has one key range, up to eight velocity layers and up to eight
+/// alternatives per layer with identical ranges, numbered contiguously from 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Membership {
     pub group: u8,
@@ -93,6 +94,16 @@ pub struct Membership {
     pub layer: u8,
     /// 0..8.
     pub alternative: u8,
+}
+
+/// How a key-map group picks among the alternatives of a velocity layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum GroupMode {
+    /// Each (group, layer) counter from 0, `counter % count`, advancing once per admitted trigger.
+    #[default]
+    Sequential,
+    /// The group's seeded xorshift32 state (13, 17, 5), `word % count`, one draw per admitted trigger.
+    Random,
 }
 
 /// One sample-bearing zone.
@@ -167,6 +178,9 @@ pub enum PatchError {
     BoundMembership,
     /// Another pad already binds this zone (one zone per pad).
     ZoneTaken,
+    /// A key-map group's shape does not hold: members with different key ranges, alternatives of
+    /// a layer with different velocity ranges, or alternatives repeated or not contiguous from 0.
+    GroupShape,
 }
 
 /// A level and pan change gliding linearly over `len` output frames from absolute frame `start`
@@ -280,8 +294,8 @@ pub(crate) fn check_pad(index: usize, pad: &Pad, pads: &[Pad; PADS], zone: impl 
     Ok(())
 }
 
-/// Checks a whole patch at once: every zone's settings, and every pad against the other pads of
-/// `pads` and the zones of `zones` (`zones` is [`ZONES`] long). The control side checks a patch with
+/// Checks a whole patch at once: every zone's settings, every key-map group's shape, and every pad
+/// against the other pads of `pads` and the zones of `zones` (`zones` is [`ZONES`] long). The control side checks a patch with
 /// this before it publishes it; [`crate::SamplerCore::set_patch`] checks again before adopting it.
 pub fn check_patch(zones: &[Option<Zone>], pads: &[Pad; PADS]) -> Result<(), PatchError> {
     if zones.len() != ZONES {
@@ -290,6 +304,7 @@ pub fn check_patch(zones: &[Option<Zone>], pads: &[Pad; PADS]) -> Result<(), Pat
     for z in zones.iter().flatten() {
         check_zone(z)?;
     }
+    selection::check_groups(|i| zones.get(i).and_then(Option::as_ref).and_then(selection::shape))?;
     for (i, pad) in pads.iter().enumerate() {
         check_pad(i, pad, pads, |z| zones.get(z).copied().flatten())?;
     }

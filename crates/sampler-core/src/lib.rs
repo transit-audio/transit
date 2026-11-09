@@ -54,6 +54,12 @@ pub const CHOKE_GROUPS: u8 = 16;
 pub const CHOKE_FRAMES: u32 = 32;
 /// Most voices one note starts (a pad triggered by the note counts as one).
 pub const LAYERS_PER_NOTE: usize = 8;
+/// Key-map group ids (a group id is a `u8`).
+pub const GROUPS: usize = 256;
+/// Velocity layers in a key-map group.
+pub const LAYERS: usize = 8;
+/// Round-robin alternatives in a velocity layer.
+pub const ALTERNATIVES: usize = 8;
 /// Fastest playback step in source frames per output frame.
 pub const MAX_STEP: f64 = 256.0;
 /// The modulation grid in output frames (the shaper's block).

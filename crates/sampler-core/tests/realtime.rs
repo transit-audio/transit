@@ -1,7 +1,8 @@
 //! Gate 6 allocation probe (ADR 0041, ADR 0012 G5): after `prepare`, the core's processing neither
 //! allocates nor frees, through the first block, a maximal 1024-event span, 64 voices with every
 //! matrix row active on shaped stereo and mono voices, steals, chokes, loops, control changes, All
-//! Notes Off, Stop, All Sound Off, the Reset event and `reset()`.
+//! Notes Off, Stop, All Sound Off, the Reset event and `reset()`; and with key-map groups playing
+//! their round robins (sequential and random), transport changes, patch and mode edits.
 //!
 //! The binary installs `transit_rt::testing::CountingAlloc` and counts the test thread only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -11,10 +12,10 @@ use transit_instrument_core::matrix::{Matrix, ROWS, Row, dst, src};
 use transit_instrument_core::shaper::{LfoSettings, Settings, filter_mode};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 use transit_sampler_core::event::{Context, Control, Event, EventKind};
-use transit_sampler_core::patch::{Pad, PlayMode, Playback, Zone};
+use transit_sampler_core::patch::{GroupMode, Membership, Pad, PlayMode, Playback, Zone};
 use transit_sampler_core::playhead::{LoopMode, Region};
 use transit_sampler_core::reader::SliceSource;
-use transit_sampler_core::{PADS, SamplerCore, VOICES, ZONES};
+use transit_sampler_core::{GROUPS, PADS, SamplerCore, VOICES, ZONES};
 
 #[global_allocator]
 static ALLOC: CountingAlloc = CountingAlloc;
@@ -159,5 +160,72 @@ fn processing_events_controls_and_reset_neither_allocate_nor_free() {
     let d = c.diagnostics();
     assert_eq!(peak, VOICES);
     assert!(d.steals > 0 && d.chokes > 0, "{d:?}");
+    assert!(total.is_zero(), "{total:?}");
+}
+
+#[test]
+fn round_robin_selection_neither_allocates_nor_frees() {
+    let mono: Vec<f32> = (0..4000).map(|i| (i as f32 * 0.013).sin()).collect();
+    let sources = [SliceSource::mono(&mono, 44_100.0)];
+    // Groups 0 to 3 over their own keys, each two velocity layers of eight alternatives; group 4's
+    // second alternative names a missing source.
+    let mut zones: Vec<Option<Zone>> = vec![None; ZONES];
+    let mut i = 0;
+    for g in 0..4u8 {
+        for layer in 0..2u8 {
+            for alternative in 0..8u8 {
+                let z = Zone {
+                    keys: (g * 16, g * 16 + 15),
+                    velocities: if layer == 0 { (1, 80) } else { (60, 127) },
+                    membership: Some(Membership { group: g, layer, alternative }),
+                    ..Zone::new(Region::whole(0, 4000).looped(LoopMode::Forward, 100, 3000))
+                };
+                zones[i] = Some(z);
+                i += 1;
+            }
+        }
+    }
+    for alternative in 0..2u8 {
+        let z = Zone {
+            keys: (64, 70),
+            membership: Some(Membership { group: 4, layer: 0, alternative }),
+            ..Zone::new(Region::whole(alternative.into(), 4000))
+        };
+        zones[i] = Some(z);
+        i += 1;
+    }
+    let pads: [Pad; PADS] = core::array::from_fn(Pad::new);
+    let mut modes = [GroupMode::Sequential; GROUPS];
+    modes[1] = GroupMode::Random;
+    modes[3] = GroupMode::Random;
+    modes[4] = GroupMode::Random;
+    let mut c = SamplerCore::new();
+    c.prepare(RATE, 0);
+    c.set_patch(&zones, &pads).unwrap();
+    let events: Vec<Event> = (0..200u32)
+        .map(|k| Event::new(k * 2, EventKind::NoteOn { channel: 0, key: (k * 7 % 71) as u8, velocity: 1 + (k * 37 % 127) as u8, id: k as i32 }))
+        .collect();
+    let mut l = vec![0.0f32; 512];
+    let mut r = vec![0.0f32; 512];
+    let mut total = AllocStats::default();
+    for round in 0..8usize {
+        let ctx = Context { frame: round as u64 * 512, tempo: 120.0, quarters: if round % 3 == 1 { Some(round as f64) } else { None } };
+        let ((), stats) = measure(|| {
+            if round == 2 {
+                c.set_group_modes(&modes);
+            }
+            if round == 4 {
+                c.set_patch(&zones, &pads).unwrap();
+            }
+            c.process(&ctx, &sources[..], &events, &mut [&mut l[..], &mut r[..]]);
+            if round == 6 {
+                c.reset();
+            }
+        });
+        total.allocs += stats.allocs;
+        total.frees += stats.frees;
+        assert!(l.iter().chain(&r).all(|x| x.is_finite()), "round {round}");
+    }
+    assert!(c.diagnostics().refused_starts > 0, "the missing alternative was selected");
     assert!(total.is_zero(), "{total:?}");
 }

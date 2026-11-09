@@ -1,10 +1,12 @@
 //! The core's behavior tests: ADR 0041 Gate 1 at the core level (`gate1`), the reader and loops
 //! against independent scalar references (`loops`), and Gate 6's block-size invariance with state
-//! fingerprints (`blocks`). The allocation probe is the integration test `tests/realtime.rs`.
+//! fingerprints (`blocks`), and the key-map groups' round robin (`round_robin`). The allocation probe
+//! is the integration test `tests/realtime.rs`.
 
 mod blocks;
 mod gate1;
 mod loops;
+mod round_robin;
 mod seams;
 mod seams_c2;
 mod shaped;

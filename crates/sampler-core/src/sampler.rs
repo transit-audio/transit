@@ -2,7 +2,8 @@
 //!
 //! **Admission.** A note-on triggers the pad whose trigger note it is and then the unbound zones whose
 //! inclusive key and velocity ranges hold it, in zone order, at most [`crate::LAYERS_PER_NOTE`] voices (the
-//! pad counts as one; of a round-robin group only alternative 0 plays until #270). A muted pad, or a
+//! pad counts as one; a key-map group plays one alternative per admitted velocity layer, chosen as
+//! `selection.rs` describes, at the place of its first zone in the order). A muted pad, or a
 //! pad that is not solo while any pad is, admits nothing and chokes nothing. An admitted pad trigger
 //! first fades every other sounding pad of its choke group over [`crate::CHOKE_FRAMES`], then starts its
 //! voice: a pad has one voice, and a retrigger cuts the previous one at the event frame and starts
@@ -18,11 +19,11 @@
 use alloc::vec::Vec;
 
 use crate::event::{Context, Control, Event, EventKind};
-use crate::patch::{self, Derived, Glide, Pad, PatchError, Zone};
+use crate::patch::{self, Derived, Glide, GroupMode, Pad, PatchError, Zone};
 use crate::reader::SourceBank;
-use crate::selection;
+use crate::selection::{self, RoundRobin};
 use crate::voice::{Controls, Owner, Start, Transport, Voice};
-use crate::{LAYERS_PER_NOTE, PADS, VOICES, ZONES, math};
+use crate::{ALTERNATIVES, GROUPS, LAYERS, LAYERS_PER_NOTE, PADS, VOICES, ZONES, math};
 
 /// Counters the adapter reads (they only grow; [`SamplerCore::reset`] keeps them).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -65,6 +66,13 @@ pub struct SamplerCore {
     controls: Controls,
     any_solo: bool,
     diag: Diagnostics,
+    /// The round-robin modes, counters and random states.
+    rr: RoundRobin,
+    /// Each (group, layer)'s alternatives by zone index (`GROUPS * LAYERS` entries, allocated by
+    /// [`SamplerCore::prepare`]).
+    members: Vec<[u16; ALTERNATIVES]>,
+    /// Whether the last block reported a playing transport (`None`: no block yet).
+    was_playing: Option<bool>,
 }
 
 impl Default for SamplerCore {
@@ -93,11 +101,15 @@ impl SamplerCore {
             controls: Controls::new(),
             any_solo: false,
             diag: Diagnostics::default(),
+            rr: RoundRobin::new(1),
+            members: Vec::new(),
+            was_playing: None,
         }
     }
 
     /// Prepares for `sample_rate` (Hz): allocates the voices and the zone settings (once), works the
-    /// zones' durations out at the rate, seeds the voices' random state from `seed`, and resets. The
+    /// zones' durations out at the rate, seeds the voices' random state and the key-map groups'
+    /// random round robin from `seed` (the patch seed; 0 is 1 for the round robin), and resets. The
     /// zones' shaper settings must be built at this rate.
     pub fn prepare(&mut self, sample_rate: f32, seed: u32) {
         self.rate = if sample_rate.is_finite() && sample_rate > 0.0 { sample_rate } else { 48_000.0 };
@@ -107,6 +119,11 @@ impl SamplerCore {
         if self.ghosts.len() != ZONES {
             self.ghosts = (0..ZONES).map(|_| None).collect();
         }
+        if self.members.len() != GROUPS * LAYERS {
+            self.members = alloc::vec![[selection::NONE; ALTERNATIVES]; GROUPS * LAYERS];
+            selection::rebuild(&mut self.members, self.zones.iter().map(|s| s.as_ref().map(|s| &s.zone)));
+        }
+        self.rr.set_seed(seed);
         if self.voices.len() != VOICES || self.seed != seed {
             self.voices =
                 (0..VOICES as u32).map(|i| Voice::new(seed.wrapping_mul(0x9E37_79B9) ^ i.wrapping_add(1).wrapping_mul(0x85EB_CA6B))).collect();
@@ -128,7 +145,7 @@ impl SamplerCore {
     /// Sets (or with `None` clears) zone `index`. Voices playing it fade over [`crate::CHOKE_FRAMES`] when its
     /// region changes or it is cleared (ADR 0041's structural-edit rule; a cleared zone's voices
     /// read its last settings while they fade). A zone bound to a pad cannot be cleared or given
-    /// membership.
+    /// membership, and the key-map groups must keep their shape ([`PatchError::GroupShape`]).
     pub fn set_zone(&mut self, index: usize, zone: Option<Zone>) -> Result<(), PatchError> {
         if index >= ZONES || self.zones.len() != ZONES {
             return Err(PatchError::Zone);
@@ -142,9 +159,25 @@ impl SamplerCore {
         } else if bound {
             return Err(PatchError::ZoneTaken);
         }
+        let shape = zone.as_ref().and_then(selection::shape);
+        let old_member = self.zone(index).and_then(|z| z.membership);
+        if shape.is_some() || old_member.is_some() {
+            selection::check_groups(|i| if i == index { shape } else { self.zone(i).and_then(selection::shape) })?;
+        }
         let old = self.zones.get(index).and_then(|s| s.as_ref().map(|s| s.zone.region));
         if old != zone.map(|z| z.region) {
             self.fade_where(|v| usize::from(v.zone) == index);
+        }
+        if let Some(m) = old_member
+            && let Some(slot) = self.members.get_mut(selection::entry(m.group, m.layer)).and_then(|e| e.get_mut(usize::from(m.alternative)))
+            && usize::from(*slot) == index
+        {
+            *slot = selection::NONE;
+        }
+        if let Some(m) = zone.and_then(|z| z.membership)
+            && let Some(slot) = self.members.get_mut(selection::entry(m.group, m.layer)).and_then(|e| e.get_mut(usize::from(m.alternative)))
+        {
+            *slot = index as u16;
         }
         self.replace_slot(index, zone);
         Ok(())
@@ -200,6 +233,7 @@ impl SamplerCore {
             }
             self.replace_slot(index, *zone);
         }
+        selection::rebuild(&mut self.members, zones.iter().map(Option::as_ref));
         for (index, pad) in pads.iter().enumerate() {
             let changed = self.pads.get(index).is_some_and(|o| o.zone != pad.zone);
             if changed && let Some(vi) = self.live_pad_voice(index) {
@@ -222,6 +256,13 @@ impl SamplerCore {
             }
         }
         Ok(())
+    }
+
+    /// Sets every key-map group's round-robin mode (by group id; a group the caller has no entry for
+    /// is [`GroupMode::Sequential`]). A patch edit: counters and random states carry on. Neither
+    /// allocates nor frees.
+    pub fn set_group_modes(&mut self, modes: &[GroupMode; GROUPS]) {
+        self.rr.set_modes(modes);
     }
 
     /// The source index of every sounding voice (tails included), in voice-slot order: an adapter
@@ -284,7 +325,8 @@ impl SamplerCore {
         self.voices.iter().filter(|v| v.active).count()
     }
 
-    /// Every voice cut, controllers cleared, the voices' random state back to its seed, and every
+    /// Every voice cut, controllers cleared, the voices' random state back to its seed, every
+    /// round-robin counter and group random state restarted, and every
     /// zone's level and pan glide completed: the new value is the current one. A glide is keyed to
     /// the caller's absolute frame, which a reset sets back to zero, so a glide left in place would
     /// replay the old value until the frame climbed back to it.
@@ -299,11 +341,20 @@ impl SamplerCore {
         self.pad_voice = [None; PADS];
         self.order_len = 0;
         self.serial = 0;
+        self.rr.restart();
     }
 
     /// Renders one block into `out` (1 or 2 channels; the shortest sets the block's length; a mono
-    /// output takes the average of left and right), acting on `events` at their frames.
+    /// output takes the average of left and right), acting on `events` at their frames. The first
+    /// block whose context reports a transport state (playing: [`Context::quarters`] is some) other
+    /// than the previous block's restarts every round-robin counter and group random state, at its
+    /// first frame, before its events.
     pub fn process<B: SourceBank + ?Sized>(&mut self, ctx: &Context, sources: &B, events: &[Event], out: &mut [&mut [f32]]) {
+        let playing = ctx.quarters.is_some();
+        if self.was_playing.is_some_and(|was| was != playing) {
+            self.rr.restart();
+        }
+        self.was_playing = Some(playing);
         let frames = out.iter().map(|c| c.len()).min().unwrap_or(0);
         for c in out.iter_mut() {
             c.iter_mut().take(frames).for_each(|x| *x = 0.0);
@@ -584,14 +635,64 @@ impl SamplerCore {
             started |= self.trigger_pad(p, owner, key, velocity, ctx, n, sources);
             layers += 1;
         }
+        // The groups already admitted for this note (one bit per group id).
+        let mut done = [0u64; GROUPS / 64];
         for z in 0..ZONES {
             if layers >= LAYERS_PER_NOTE {
                 break;
             }
-            let selected = selection::unbound_selected(self.bound.get(z), self.zones.get(z).and_then(Option::as_ref).map(|s| &s.zone), key, velocity);
+            let zone = self.zones.get(z).and_then(Option::as_ref).map(|s| &s.zone);
+            if let Some(m) = zone.and_then(|z| z.membership) {
+                let bit = 1u64 << (m.group % 64);
+                if self.bound.get(z).is_some_and(Option::is_none)
+                    && zone.is_some_and(|z| (z.keys.0..=z.keys.1).contains(&key))
+                    && let Some(word) = done.get_mut(usize::from(m.group) / 64)
+                    && *word & bit == 0
+                {
+                    *word |= bit;
+                    started |= self.trigger_group(m.group, &mut layers, owner, key, velocity, ctx, n, sources);
+                }
+                continue;
+            }
+            let selected = selection::unbound_selected(self.bound.get(z), zone, key, velocity);
             if selected && self.start_zone(z, None, owner, key, velocity, ctx, n, sources) {
                 started = true;
                 layers += 1;
+            }
+        }
+        started
+    }
+
+    /// Admits key-map group `group`'s velocity layers that hold `velocity`, in ascending layer order
+    /// while the note's layer bound allows, each choosing and starting one alternative (the choice
+    /// advances even when the start is refused).
+    fn trigger_group<B: SourceBank + ?Sized>(
+        &mut self,
+        group: u8,
+        layers: &mut usize,
+        owner: Owner,
+        key: u8,
+        velocity: u8,
+        ctx: &Context,
+        n: usize,
+        sources: &B,
+    ) -> bool {
+        let mut started = false;
+        for layer in 0..LAYERS as u8 {
+            if *layers >= LAYERS_PER_NOTE {
+                break;
+            }
+            let Some(&alternatives) = self.members.get(selection::entry(group, layer)) else { continue };
+            let count = selection::count(&alternatives);
+            let first = alternatives.first().and_then(|&z| self.zone(usize::from(z)));
+            if count == 0 || !first.is_some_and(|z| selection::holds(z, key, velocity)) {
+                continue;
+            }
+            let alt = self.rr.choose(group, layer, count);
+            let Some(&z) = alternatives.get(usize::from(alt)) else { continue };
+            if self.start_zone(usize::from(z), None, owner, key, velocity, ctx, n, sources) {
+                started = true;
+                *layers += 1;
             }
         }
         started
@@ -708,5 +809,8 @@ impl SamplerCore {
             h.write_u8(*o);
         }
         h.write_u64(self.serial);
+        // The round robin's counters and random states (not the last block's transport state, which
+        // the caller's context sets again each block).
+        self.rr.fingerprint(h);
     }
 }
