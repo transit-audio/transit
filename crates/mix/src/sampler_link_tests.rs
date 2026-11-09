@@ -10,7 +10,7 @@ use std::sync::Weak;
 use std::sync::atomic::Ordering;
 use transit_audio_io::AudioBuffer;
 use transit_midi::{Note, Sequence};
-use transit_model::sampler_patch::{Membership, PadEntry, PatchState, PatchV1, SourceRef, ZoneEntry};
+use transit_model::sampler_patch::{GroupEntry, Membership, PadEntry, PatchState, PatchV1, RoundRobin, SourceRef, ZoneEntry};
 use transit_model::{Insert, SamplerPatch, SourceId};
 
 fn audio(v: f32) -> Arc<SourceAudio> {
@@ -146,7 +146,7 @@ fn the_instruments_tap_carries_the_pads_its_instance_published() {
 
 // Round robin through the plan compiler (ADR 0041 and its amendment of 2026-11-08, item 4): a
 // group member whose media is missing is published as a silent placeholder, so it keeps its turn
-// and relinking it does not reorder the others.
+// and relinking it does not reorder the others; each group's stored mode reaches the instance.
 
 /// Ticks between the notes (6400 frames at 120 BPM: 25 blocks), each note 40 ticks long.
 const STEP: i64 = 256;
@@ -247,4 +247,48 @@ fn a_missing_middle_alternative_keeps_its_turn_and_relinking_keeps_the_order() {
 #[test]
 fn a_missing_last_alternative_keeps_its_turn_and_relinking_keeps_the_order() {
     missing_member_keeps_its_turn(2);
+}
+
+#[test]
+fn a_stored_random_mode_plays_random_and_a_mode_change_republishes() {
+    let reference = |seed: u32, n: usize| -> Vec<usize> {
+        let mut x = seed ^ 0x9E37_79B9;
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                (x % 4) as usize
+            })
+            .collect()
+    };
+    let random = |p: &mut PatchV1| {
+        p.groups = vec![GroupEntry { id: 0, round_robin: RoundRobin::Random, ..GroupEntry::default() }];
+    };
+    let mut p = rr_patch(4, None);
+    p.seed = 12345;
+    random(&mut p);
+    let (s, _) = rr_session(p, 8);
+    let mut rig = Rig::new();
+    rig.publish(&s);
+    let got = levels(&rig.render(8 * STEP_BLOCKS), 8);
+    let want: Vec<f32> = reference(12345, 8).into_iter().map(|a| 0.5 + ALT[a]).collect();
+    assert_eq!(got, want, "a stored Random group plays the seeded sequence");
+
+    // Sequential first, then the stored mode changes to Random: a new publication to the same
+    // instance, which draws from the group's untouched start state.
+    let mut p = rr_patch(4, None);
+    p.seed = 12345;
+    let (mut s, t) = rr_session(p.clone(), 8);
+    let mut rig = Rig::new();
+    rig.publish(&s);
+    let made = rig.log.made.load(Ordering::Relaxed);
+    assert_eq!(levels(&rig.render(4 * STEP_BLOCKS), 4), expected(0..4, 4, None));
+    random(&mut p);
+    set_patch(&mut s, t, Some(p));
+    assert_eq!(rig.publish(&s), Adoption::Adopted);
+    assert_eq!(rig.log.made.load(Ordering::Relaxed), made, "the same instance");
+    let got = levels(&rig.render(4 * STEP_BLOCKS), 4);
+    let want: Vec<f32> = reference(12345, 4).into_iter().map(|a| 0.5 + ALT[a]).collect();
+    assert_eq!(got, want, "the mode change reached the instance");
 }

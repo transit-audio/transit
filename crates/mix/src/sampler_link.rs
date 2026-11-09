@@ -21,8 +21,9 @@
 //! region runs past its source, is left out of the publication (its pad unbound there), so it plays
 //! silence while the patch keeps its reference. A key-map group member in that state is published
 //! instead as a silent placeholder ([`sampler::SILENT_SOURCE`]): ADR 0041 selects it like the other
-//! alternatives, so the round robin keeps its order and relinking does not reorder it. An opaque
-//! patch publishes nothing and plays silence.
+//! alternatives, so the round robin keeps its order and relinking does not reorder it. Each group's
+//! stored round-robin mode goes with the publication. An opaque patch publishes nothing and plays
+//! silence.
 
 use super::*;
 use crate::compile::PoolSample;
@@ -31,15 +32,16 @@ use transit_dsp::plugins::sampler::{
     self as sampler, LoopMode as CoreLoop, Membership as CoreMembership, Pad, PatchSpec, PlayMode as CorePlay, PublishError, Publisher, Region, Zone,
 };
 use transit_model::Insert;
-use transit_model::sampler_patch::{LoopMode, PadEntry, PatchV1, PlayMode, ZoneEntry};
+use transit_model::sampler_patch::{GroupEntry, LoopMode, PadEntry, PatchV1, PlayMode, RoundRobin, ZoneEntry};
 
 /// What a publication carries, compared to decide whether a running instance needs a new one: the
-/// identity of each source's audio (0: unusable), the zones and the pads.
+/// identity of each source's audio (0: unusable), the zones, the pads and the groups' modes.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Structure {
     sources: Vec<usize>,
     zones: Vec<ZoneEntry>,
     pads: Vec<PadEntry>,
+    groups: Vec<GroupEntry>,
 }
 
 /// One core-mode instance's control side.
@@ -85,6 +87,7 @@ pub(crate) fn structure(p: &PatchV1, s: &Session) -> Structure {
         sources: p.sources.iter().map(|r| usable(s, r.source).map_or(0, audio_id)).collect(),
         zones: p.zones.clone(),
         pads: p.pads.clone(),
+        groups: p.groups.clone(),
     }
 }
 
@@ -116,7 +119,7 @@ fn core_zone(z: &ZoneEntry, source: u16) -> Zone {
 
 /// The publication of `p` in `s`: its usable sources (wrapped through `wrappers`), the zones that
 /// can play and the group members that cannot as silent placeholders, the 64 pads (a pad of a zone
-/// left out is unbound here). Also the ids of the silent zones
+/// left out is unbound here) and each group's round-robin mode. Also the ids of the silent zones
 /// (missing, disk-backed or unusable media, or a region past the source).
 pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Arc<dyn SampleSource>>) -> (PatchSpec, Vec<u16>) {
     let mut spec = PatchSpec::default();
@@ -160,6 +163,14 @@ pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Ar
         let zone = e.zone.filter(playable);
         Pad { zone, note: e.trigger(), mute: e.mute, solo: e.solo, choke: e.choke }
     });
+    for g in &p.groups {
+        if let Some(mode) = spec.groups.get_mut(usize::from(g.id)) {
+            *mode = match g.round_robin {
+                RoundRobin::Sequential => sampler::GroupMode::Sequential,
+                RoundRobin::Random => sampler::GroupMode::Random,
+            };
+        }
+    }
     (spec, silent)
 }
 
