@@ -45,3 +45,82 @@ fn the_field_is_not_in_the_session_or_undo() {
     assert!(!e.is_dirty());
     assert!(!serde_json::to_string(&doc).unwrap().contains("middle_c"));
 }
+
+/// The parser `midi.chord_add` used before ADR 0051, kept here as the measuring stick.
+fn before(name: &str) -> Option<i64> {
+    let mut chars = name.chars();
+    let pitch = match chars.next()?.to_ascii_uppercase() {
+        'C' => 0,
+        'D' => 2,
+        'E' => 4,
+        'F' => 5,
+        'G' => 7,
+        'A' => 9,
+        'B' => 11,
+        _ => return None,
+    };
+    let rest = chars.as_str();
+    let (accidental, octave) = if let Some(s) = rest.strip_prefix('#') {
+        (1, s)
+    } else if let Some(s) = rest.strip_prefix('b') {
+        (-1, s)
+    } else {
+        (0, rest)
+    };
+    let octave = if octave.is_empty() { 3 } else { octave.parse::<i64>().ok()? };
+    let number = octave.checked_add(2)?.checked_mul(12)?.checked_add(pitch + accidental)?;
+    (0..=127).contains(&number).then_some(number)
+}
+
+/// ADR 0051 decision 5's table: through the shared grammar `midi.chord_add` now trims surrounding
+/// whitespace, accepts U+266F and U+266D, and refuses an octave written with `+`; every other
+/// string reads as before, the bare-letter rule (octave 3) included.
+#[test]
+fn chord_add_reads_roots_through_the_shared_parser_with_exactly_three_differences() {
+    let mut e = Engine::default();
+    e.execute("track.new", &json!({"kind": "instrument", "name": "Keys"})).unwrap();
+    let clip = e.execute("midi.new_clip", &json!({"track": "Keys", "start": "1|1", "length": "5|1"})).unwrap()["clip"].clone();
+    let mut after = |root: &str| -> Option<i64> {
+        let r = e.execute("midi.chord_add", &json!({"clip": clip, "root": root, "notes": [0], "start": "1|1", "length": "1|2"})).ok()?;
+        let pitch = r["notes"][0]["pitch"].as_i64();
+        e.execute("edit.undo", &json!({})).unwrap();
+        pitch
+    };
+    let (mut whitespace, mut unicode, mut plus, mut same) = (0, 0, 0, 0);
+    for letter in ["C", "c", "G", "a", "B", "b", "H", "6"] {
+        for accidental in ["", "#", "b", "B", "\u{266F}", "\u{266D}", "x"] {
+            for octave in ["", "3", "-2", "+3", "03", "-0", "8", "10", " 3", "99999999999999999999"] {
+                for (pre, post) in [("", ""), (" ", ""), ("", "\t")] {
+                    let text = format!("{pre}{letter}{accidental}{octave}{post}");
+                    let (old, new) = (before(&text), after(&text));
+                    if old == new {
+                        same += 1;
+                        continue;
+                    }
+                    // Each difference is one of the three the table states.
+                    let core = text.trim().replace('\u{266F}', "#").replace('\u{266D}', "b");
+                    if text.contains('+') {
+                        assert!(old.is_some() && new.is_none(), "{text:?}: + is refused now ({old:?} before)");
+                        plus += 1;
+                    } else if text.contains(['\u{266F}', '\u{266D}']) {
+                        assert_eq!(new, before(&core), "{text:?}: a Unicode sign reads as its ASCII spelling");
+                        unicode += 1;
+                    } else if text != text.trim() {
+                        assert_eq!((old, new), (None, before(&core)), "{text:?}: surrounding whitespace is trimmed");
+                        whitespace += 1;
+                    } else {
+                        panic!("{text:?} reads {new:?}, {old:?} before: not one of the three differences");
+                    }
+                }
+            }
+        }
+    }
+    println!("chord_add roots: {same} read as before; differences: whitespace {whitespace}, Unicode {unicode}, plus {plus}");
+    assert!(whitespace > 0 && unicode > 0 && plus > 0 && same > 0, "{whitespace} {unicode} {plus} {same}");
+    // The documented examples and the bare-letter rule, named exactly.
+    for (root, pitch) in [("G3", Some(67)), ("Bb2", Some(58)), ("F#3", Some(66)), ("C-2", Some(0)), ("G", Some(67)), ("bb", Some(70))] {
+        assert_eq!(after(root), pitch, "{root}");
+    }
+    assert_eq!((after("C+3"), before("C+3")), (None, Some(60)));
+    assert_eq!(after("60"), None, "a numeric string stays an error");
+}

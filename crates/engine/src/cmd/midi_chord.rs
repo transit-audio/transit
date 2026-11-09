@@ -8,7 +8,9 @@ pub(super) fn pitches(p: &Value) -> Result<Vec<u8>> {
     let root = match (root.as_i64(), root.as_str()) {
         (Some(n), _) if (0..=127).contains(&n) => n,
         (_, Some(name)) => {
-            note_number(name).ok_or_else(|| bad(cmd, "invalid root; use MIDI 0..127 or a note name (C3 = 60, bare names use octave 3)"))?
+            note_number(name).ok_or_else(|| {
+                bad(cmd, "invalid root; use MIDI 0..127 or a note name (C3 = 60 regardless of the Middle C setting, bare names use octave 3)")
+            })?
         }
         _ => return Err(bad(cmd, "root must be a MIDI number 0..127 or note name")),
     };
@@ -59,28 +61,8 @@ pub(super) fn pitches(p: &Value) -> Result<Vec<u8>> {
     Ok(pitches)
 }
 
+/// A root's note name through the shared parser (ADR 0051 decision 5): the fixed convention
+/// C3 = 60, whatever the Middle C setting, and a bare letter is octave 3.
 fn note_number(name: &str) -> Option<i64> {
-    let mut chars = name.chars();
-    let pitch = match chars.next()?.to_ascii_uppercase() {
-        'C' => 0,
-        'D' => 2,
-        'E' => 4,
-        'F' => 5,
-        'G' => 7,
-        'A' => 9,
-        'B' => 11,
-        _ => return None,
-    };
-    let rest = chars.as_str();
-    let (accidental, octave) = if let Some(s) = rest.strip_prefix('#') {
-        (1, s)
-    } else if let Some(s) = rest.strip_prefix('b') {
-        (-1, s)
-    } else {
-        (0, rest)
-    };
-    // Match transit's existing MIDI display convention: middle C is C3.
-    let octave = if octave.is_empty() { 3 } else { octave.parse::<i64>().ok()? };
-    let number = octave.checked_add(2)?.checked_mul(12)?.checked_add(pitch + accidental)?;
-    (0..=127).contains(&number).then_some(number)
+    transit_midi::parse_note(name, transit_midi::MiddleC::C3, Some(3)).map(i64::from)
 }

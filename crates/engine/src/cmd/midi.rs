@@ -57,7 +57,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add Chord",
             [],
             None,
-            "{clip, root: MIDI number or note name (C3=60, bare G=G3), quality: maj|min|dim|aug|maj7|min7|dom7|sus2|sus4 OR notes: [1..32 semitone intervals], inversion?: 0, start?|start_ticks?, length?|length_ticks?: 480, velocity?: 100}; start/length: bar|beat[|tick] strings only, 1-based, start relative to clip, length 1|2 = 1 beat and 2|1 = 1 bar at note start; numeric values require start_ticks/length_ticks; aliases exclusive; inversion raises lowest N tones one octave",
+            "{clip, root: MIDI number or note name (C3=60 regardless of the Middle C setting, bare G=G3), quality: maj|min|dim|aug|maj7|min7|dom7|sus2|sus4 OR notes: [1..32 semitone intervals], inversion?: 0, start?|start_ticks?, length?|length_ticks?: 480, velocity?: 100}; start/length: bar|beat[|tick] strings only, 1-based, start relative to clip, length 1|2 = 1 beat and 2|1 = 1 bar at note start; numeric values require start_ticks/length_ticks; aliases exclusive; inversion raises lowest N tones one octave",
             always,
             chord_add
         ),
