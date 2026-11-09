@@ -199,7 +199,7 @@ fn presets_and_automation_written_before_read_the_same_values_after() {
     app.run("mix.instrument_param", json!({"track": t.0, "param": "tonic", "value": 30.0})).unwrap();
     app.add_point(t, "plugin:instrument:tonic", 0, 24.0).unwrap();
     app.add_point(t, "plugin:instrument:tonic", 48_000, 36.0).unwrap();
-    let written = serde_json::to_string(&*app.engine.session()).unwrap();
+    let written = serde_json::to_string(app.engine.session()).unwrap();
     for mc in ["C3", "C4"] {
         app.run("options.middle_c", json!({"value": mc})).unwrap();
         let read: transit_model::Session = serde_json::from_str(&written).unwrap();
@@ -209,5 +209,5 @@ fn presets_and_automation_written_before_read_the_same_values_after() {
         let lane = track.lane(&transit_model::AutoParam::parse("plugin:instrument:tonic").unwrap()).unwrap();
         assert_eq!(lane.points.iter().map(|p| p.value).collect::<Vec<_>>(), [24.0, 36.0]);
     }
-    assert_eq!(serde_json::to_string(&*app.engine.session()).unwrap(), written, "the flips wrote nothing into the session");
+    assert_eq!(serde_json::to_string(app.engine.session()).unwrap(), written, "the flips wrote nothing into the session");
 }

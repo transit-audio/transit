@@ -376,11 +376,11 @@ mod tests {
     /// C3 = 60 octave numbers (index 4, the default, is "2": its root is MIDI 48).
     #[test]
     fn each_octave_index_keeps_its_root_and_the_labels_are_c3_octaves() {
-        for i in 0..OCTAVES_C3.len() {
+        for (i, label) in OCTAVES_C3.iter().enumerate() {
             let mut fx = RandomSequencer::new();
             assert!(fx.set_param("octave", i as f32));
             assert_eq!(fx.settings().base_note, 12 * i as i32, "index {i}");
-            assert_eq!(OCTAVES_C3[i], (i as i32 - 2).to_string());
+            assert_eq!(*label, (i as i32 - 2).to_string());
         }
         let p = RANDOM_SEQUENCER_INFO.param("octave").unwrap();
         assert_eq!((p.default, p.format(4.0).as_str()), (4.0, "2"));
