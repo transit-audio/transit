@@ -90,15 +90,30 @@ impl StudioApp {
         self.mode_bypassed(uid).then_some("bypassed by Low Latency")
     }
 
+    /// The tooltip's first line: the control's name, with "(pending)" while the request waits.
+    pub(crate) fn low_latency_title(&self) -> &'static str {
+        if self.low_latency.pending { LABEL_PENDING } else { LABEL }
+    }
+
     pub(crate) fn low_latency_button(&mut self, ui: &mut egui::Ui) {
-        let label = if self.low_latency.pending { LABEL_PENDING } else { LABEL };
-        // The button is as wide as its longer label in the current font, so "(pending)" appearing
-        // never moves what sits to its right.
-        let width = low_latency_width(ui, LABEL_PENDING);
-        let b = ui.add(egui::Button::new(label).selected(self.ui.low_latency).min_size(egui::vec2(width, 0.0)));
-        self.arrange.layout.transport.insert("low_latency".into(), [b.rect.min.x, b.rect.min.y, b.rect.max.x, b.rect.max.y]);
+        use crate::icons::{self, Icon};
+        // An icon button the height of its neighbors and square, so it is the same width in every
+        // state and never moves what sits to its right (#417).
+        let (r, b) = ui.allocate_exact_size(egui::vec2(TRANSPORT_BUTTON_H, TRANSPORT_BUTTON_H), egui::Sense::click());
+        let (fill, glyph) = look(self.ui.low_latency, self.low_latency.pending, b.hovered());
+        ui.painter().rect_filled(r, crate::theme::RADIUS, fill);
+        icons::paint_in(ui.painter(), r, Icon::Zap, glyph);
+        self.arrange.layout.transport.insert("low_latency".into(), [r.min.x, r.min.y, r.max.x, r.max.y]);
+        self.arrange.layout.transport_icons.insert("low_latency".into(), Icon::Zap.name().into());
         crate::help::hover(ui, &b, crate::help::Id::TransportLowLatency);
-        if b.on_hover_text(format!("{}\nShared/Main path, including device output latency", self.engine.path_latency.text())).clicked() {
+        let tip = format!(
+            "{}
+{}
+Shared/Main path, including device output latency",
+            self.low_latency_title(),
+            self.engine.path_latency.text()
+        );
+        if b.on_hover_text(tip).clicked() {
             let _ = self.run("options.low_latency", json!({}));
         }
     }
@@ -121,10 +136,21 @@ impl StudioApp {
 const LABEL: &str = "Low Latency";
 const LABEL_PENDING: &str = "Low Latency (pending)";
 
-/// A button's width for `label` in the current button font and padding.
-pub(crate) fn low_latency_width(ui: &egui::Ui, label: &str) -> f32 {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    ui.painter().layout_no_wrap(label.into(), font, egui::Color32::WHITE).size().x + 2.0 * ui.spacing().button_padding.x
+/// The button's side: the height of the other transport buttons.
+const TRANSPORT_BUTTON_H: f32 = 28.0;
+
+/// The button's fill and glyph. Off: the standard transport button with a `text` glyph. On: the
+/// metronome's lit look, `signal` glyph on a 35 percent `signal` fill. Pending: the lit look at the
+/// kit's disabled alpha (`theme::DISABLED_ALPHA`, 0.3), since the kit has no other dimmed lit state.
+pub(crate) fn look(on: bool, pending: bool, hovered: bool) -> (egui::Color32, egui::Color32) {
+    use crate::theme::{DISABLED_ALPHA, TOKENS};
+    if pending {
+        (TOKENS.signal.gamma_multiply(0.35 * DISABLED_ALPHA), TOKENS.signal.gamma_multiply(DISABLED_ALPHA))
+    } else if on {
+        (TOKENS.signal.gamma_multiply(0.35), TOKENS.signal)
+    } else {
+        (if hovered { TOKENS.button_hover } else { TOKENS.button }, TOKENS.text)
+    }
 }
 
 fn notice(on: bool, count: usize, saved: f64) -> String {
