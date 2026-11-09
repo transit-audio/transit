@@ -25,7 +25,7 @@ That leaves a gap for a feature an older build would drop without a word. [ADR 0
    - Builds that know the entry load it with no note.
 6. **Two clip-loop rules shipped with the marker (#70), recorded here because they decide what a looped file means.**
    - A MIDI loop cycle steps from the tick grid origin, so a clip that starts between ticks keeps every cycle on the first cycle's offset.
-   - A tempo change that would squeeze a MIDI loop under the minimum cycle (`MIN_CYCLE`, 64 samples, `crates/model/src/clip.rs`) is refused, naming the clip, instead of dropping the loop silently. A MIDI cycle is a fixed span of samples, so a tempo change inside a looped clip otherwise drifts later cycles off the bar grid (K40, open).
+   - A tempo change that would squeeze a MIDI loop under the minimum cycle (`MIN_CYCLE`, 64 samples, `crates/model/src/clip.rs`) is refused, naming the clip, instead of dropping the loop silently. A MIDI cycle is a fixed span of samples, so a tempo change inside a looped clip otherwise drifts later cycles off the bar grid (K40, open) (withdrawn for MIDI by ADR 0019's Amendment 2026-11-09: a MIDI cycle is a whole number of ticks).
 7. **Tests.** `a_session_with_a_loop_lists_it_under_needs_and_one_without_stays_as_before` (the marker appears, is absent otherwise, and a file with the marker removed still loads the loop), `a_session_that_needs_an_unknown_feature_warns_on_load_and_is_not_rejected`, and `rejects_garbage_and_future_versions` (`crates/model/src/session.rs`). A format change is reviewed like an engine change; the refutation attack list includes "old loads, new loads on previous build" (`docs/contributing/evidence/refutation-review.md`).
 
 ## Consequences
