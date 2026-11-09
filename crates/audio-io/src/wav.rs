@@ -11,6 +11,8 @@ const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE;
 /// Tail of the KSDATAFORMAT_SUBTYPE_* GUIDs (bytes 2..16); bytes 0..2 hold the format tag.
 const GUID_TAIL: [u8; 14] = [0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71];
 const BEXT_MIN_LEN: usize = 602;
+/// The most chunks a reader walks, so a file of tiny chunks can't spin forever.
+pub(crate) const MAX_CHUNKS: usize = 100_000;
 
 /// Parsed WAV layout (no sample data decoded yet).
 pub(crate) struct WavLayout {
@@ -161,7 +163,7 @@ pub(crate) fn parse_sized(b: &[u8], total: usize) -> Result<WavParse> {
     let mut chunks = 0usize;
     while let (Some(id), Some(size32)) = (tag(b, pos), le_u32(b, pos + 4)) {
         chunks += 1;
-        if chunks > 100_000 {
+        if chunks > MAX_CHUNKS {
             break;
         }
         let body = pos.checked_add(8).ok_or_else(|| AudioError::Malformed("chunk offset overflow".into()))?;
