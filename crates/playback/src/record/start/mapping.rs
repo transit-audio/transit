@@ -46,6 +46,14 @@ impl Mapping {
                 return true;
             }
         };
+        // A start the input clock has not observed up to yet (the output's latency puts it ahead of
+        // the input's last block) waits for a later map; a map that goes away ends the wait below.
+        if point.host_ns != 0
+            && let (Some(map), Some(now)) = (map, now)
+            && map.is_ahead(self.input, point.host_ns, now)
+        {
+            return false;
+        }
         // A zero host time means the output had no validated map at the latch.
         let mapped =
             (point.host_ns != 0).then(|| map.zip(now)).flatten().and_then(|(map, now)| map.host_to_frame(self.input, point.host_ns, now).ok());

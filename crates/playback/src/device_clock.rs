@@ -239,13 +239,23 @@ impl ClockMap {
     /// Nearest device sample; retain the original host time separately for recording.
     pub fn host_to_frame(&self, key: ClockKey, host_ns: u64, now: u64) -> Result<u64, Unavailable> {
         self.valid(key, now)?;
+        let frame = self.frame_at(host_ns)?;
+        self.frame_window(frame)?;
+        Ok(frame)
+    }
+    fn frame_at(&self, host_ns: u64) -> Result<u64, Unavailable> {
         let delta = i128::from(host_ns) - i128::from(self.host_origin);
         if delta.abs() > MAX_LOCAL_SPAN {
             return Err(Unavailable::Arithmetic);
         }
-        let frame = checked_round(self.frame_origin, (delta as f64 - self.offset) / self.ns_per_frame)?;
-        self.frame_window(frame)?;
-        Ok(frame)
+        checked_round(self.frame_origin, (delta as f64 - self.offset) / self.ns_per_frame)
+    }
+    /// Whether `host_ns` falls after the frames this valid map covers, its bounded projection
+    /// included: a stream that keeps running will observe it, so a placement waits for a later map
+    /// rather than projecting further (#429: at a 2048-frame period a recording start lies more than
+    /// the 100 ms projection past the input's last observation).
+    pub fn is_ahead(&self, key: ClockKey, host_ns: u64, now: u64) -> bool {
+        self.valid(key, now).is_ok() && self.frame_at(host_ns).is_ok_and(|frame| frame > self.last_frame)
     }
     /// The supported device-frame range, including the bounded future projection.
     /// Historical coverage follows the retained observation span (normally at least

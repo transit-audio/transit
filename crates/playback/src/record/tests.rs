@@ -621,3 +621,74 @@ fn a_take_sums_itself_up_for_drawing_while_it_records() {
     assert_eq!(live, [[(-127.0, 0.0), (-255.0, -128.0), (-299.0, -256.0)], [(0.0, 127.0), (128.0, 255.0), (256.0, 299.0)]]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #429, at a 2048-frame period with a 32-channel input on a separate device (cpal ALSA). The start
+/// is the output's playback position: the next output frame plus the output's latency, 115 ms past
+/// the input's last callback here (a callback 30 ms after it and two periods queued). The input map
+/// projects only 100 ms past its last block, so the placement must wait for the next input block
+/// rather than fail; the take then starts exactly at the start's input frame.
+#[test]
+fn a_start_past_the_input_maps_projection_waits_for_the_next_input_block() {
+    use crate::device_clock::{self, ClockFitter, Direction, Observation, Quality, Stamp};
+    const RATE: u64 = 48_000;
+    const BLOCK: u64 = 2048;
+    const CHANNELS: usize = 32;
+    let (_, clock) = device_clock::stream_clock(Direction::Input, RATE as u32).unwrap();
+    let key = clock.key();
+    drop(clock);
+    let ns = |frames: u64| (u128::from(frames) * 1_000_000_000 / u128::from(RATE)) as u64;
+    // Input block k holds frames [k*BLOCK, (k+1)*BLOCK), delivered at its end: its first frame was
+    // captured one period before the callback.
+    let block = |k: u64| Observation {
+        key,
+        first_frame: k * BLOCK,
+        frames: BLOCK as u32,
+        nominal_rate: RATE as u32,
+        stamp: Stamp {
+            host_callback_ns: 1_000_000_000 + ns((k + 1) * BLOCK),
+            backend_callback_ns: ns((k + 1) * BLOCK) as i64,
+            backend_frame_ns: ns(k * BLOCK) as i64,
+            quality: Quality::BackendEstimate,
+            offset_uncertainty_ns: None,
+        },
+    };
+    let mut fitter = ClockFitter::new(key);
+    let last = 20;
+    for k in 0..=last {
+        let _ = fitter.observe(block(k));
+    }
+    let callback = block(last).stamp.host_callback_ns;
+    let (mut latch, mut publisher) = start::pair(transit_mix::EngineEpoch(429));
+    let reader = latch.prepare().unwrap();
+    let (mut mapping, input_start) = start::mapping::pair(reader.clone(), key);
+    let point = start::Point {
+        host_ns: callback + 115_000_000,
+        output_frame: 7_000,
+        position: crate::timeline_map::Position { sample: 0, fraction: 0, denominator: 1 },
+    };
+    assert!(publisher.start(reader.ticket(), point));
+    // The start's input frame: 115 ms (5520 frames) after the last block's end.
+    let expected = (last + 1) * BLOCK + 5_520;
+    let map = fitter.map().unwrap();
+    assert!(!map.frame_range().contains(&expected), "the start lies past this map's projection");
+    let done = mapping.service(Some(map), Some(callback + 5_000_000));
+    assert!(!done, "the placement waits for the input to observe the start");
+    assert_eq!(input_start.frame(), Ok(None));
+    let _ = fitter.observe(block(last + 1));
+    let next = block(last + 1).stamp.host_callback_ns;
+    assert!(mapping.service(fitter.map(), Some(next + 5_000_000)));
+    assert_eq!(input_start.frame(), Ok(Some(expected)));
+    // The history (4 s at 48 kHz, 32 channels) holds every block since arm; the take starts there.
+    let mut history = start::History::new(CHANNELS, 48_000 * 4);
+    let frame = |f: u64| (0..CHANNELS).map(move |c| (f * 100 + c as u64) as f32);
+    let mut written = Vec::new();
+    for k in last - 2..=last + 4 {
+        if k == last + 2 {
+            history.set_start(expected);
+        }
+        let data: Vec<f32> = (k * BLOCK..(k + 1) * BLOCK).flat_map(frame).collect();
+        history.push(k * BLOCK, &data, |d| written.extend_from_slice(d)).unwrap();
+    }
+    assert_eq!(written.len(), ((last + 5) * BLOCK - expected) as usize * CHANNELS);
+    assert_eq!(written[..CHANNELS], frame(expected).collect::<Vec<_>>()[..]);
+}
