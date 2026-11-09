@@ -94,7 +94,7 @@ impl StudioApp {
 /// flashes on every beat while playing and counting in.
 pub fn button(app: &mut StudioApp, ui: &mut Ui) {
     let on = app.engine.session().edit.click;
-    let (r, resp) = ui.allocate_exact_size(vec2(34.0, 28.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(crate::transport::BUTTON_SIZE, Sense::click());
     let bg = if on {
         TOKENS.accent.gamma_multiply(0.35)
     } else if resp.hovered() {

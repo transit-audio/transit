@@ -12,9 +12,12 @@ use egui::{Align2, Color32, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
 use transit_time::Samples;
 
-/// A square transport button, including its click count.
+/// The size of every transport button.
+pub(crate) const BUTTON_SIZE: egui::Vec2 = vec2(34.0, 28.0);
+
+/// A transport button, including its click count.
 fn button(app: &mut StudioApp, ui: &mut Ui, name: &str, which: Icon, on: bool, on_color: Color32) -> egui::Response {
-    let (r, resp) = ui.allocate_exact_size(vec2(34.0, 28.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(BUTTON_SIZE, Sense::click());
     let p = ui.painter();
     if name == "cycle" {
         // Cycle is a role toggle (#326): filled in the loop hue with an `ink.dark` glyph when on;
@@ -131,7 +134,7 @@ fn play_button(app: &mut StudioApp, ui: &mut Ui, on: bool) -> egui::Response {
     let Some((reason, pulsing)) = app.transport_wait() else {
         return button(app, ui, "play", Icon::Play, on, TOKENS.accent);
     };
-    let (r, resp) = ui.allocate_exact_size(vec2(34.0, 28.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(BUTTON_SIZE, Sense::click());
     let t = ui.input(|i| i.time) as f32;
     let pulse = if pulsing { 0.5 + 0.5 * (t * std::f32::consts::TAU / 1.6).sin() } else { 0.0 };
     let p = ui.painter();
