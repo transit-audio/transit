@@ -323,11 +323,12 @@ fn play_returns_to_normal_once_the_request_clears() {
 }
 
 #[test]
-fn the_low_latency_button_keeps_its_width_and_the_next_item_still_while_pending() {
+fn the_low_latency_button_is_a_square_that_keeps_its_place_in_off_on_and_pending() {
     // Without a player the poll clears `pending` every frame, so draw the button directly.
     let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let ctx = egui::Context::default();
-    let mut draw = |pending: bool| {
+    let mut draw = |on: bool, pending: bool| {
+        app.ui.low_latency = on;
         app.low_latency.pending = pending;
         let mut next = egui::Rect::NOTHING;
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))), ..Default::default() };
@@ -340,9 +341,11 @@ fn the_low_latency_button_keeps_its_width_and_the_next_item_still_while_pending(
         out.textures_delta.clear();
         (app.arrange.layout.transport["low_latency"], next)
     };
-    draw(false); // the first frame sizes the fonts
-    let idle = draw(false);
-    let pending = draw(true);
+    draw(false, false); // the first frame sizes the fonts
+    let idle = draw(false, false);
+    let on = draw(true, false);
+    let pending = draw(true, true);
+    assert_eq!(idle, on, "the button and the item to its right do not move");
     assert_eq!(idle, pending, "the button and the item to its right do not move");
-    assert!(idle.0[2] - idle.0[0] > 100.0, "the button holds the longer label: {:?}", idle.0);
+    assert_eq!(idle.0[2] - idle.0[0], idle.0[3] - idle.0[1], "square: {:?}", idle.0);
 }
