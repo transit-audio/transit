@@ -182,6 +182,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         .map(|p| crate::audio_devices_io::ChannelNames { outputs: p.output_channel_names.clone(), inputs: p.input_channel_names.clone() })
         .or_else(|| app.audio_devices.fake_channel_names.clone())
         .unwrap_or_default();
+    // Why the input has no channels, beside its disabled Add (#429).
+    let input_note = crate::audio_devices_io::input_note(io.inputs, app.input_failure.as_deref());
     let mut editor = std::mem::take(&mut app.audio_devices.io_editor);
     let mut io_edit = None;
     let mut io_items = Vec::new();
@@ -653,7 +655,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                             });
                                         }
                                         Section::IoPaths => {
-                                            io_edit = crate::audio_devices_io::section(ui, &io, wasapi, &channel_names, &mut editor, &mut io_items);
+                                            io_edit = crate::audio_devices_io::section(ui, &io, wasapi, &channel_names, input_note.as_deref(), &mut editor, &mut io_items);
                                             crate::audio_devices_system::section(
                                                 ui,
                                                 &mut draft,
@@ -697,7 +699,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     if let Some(edit) = io_edit {
         match app.run("setup.io_map", edit.params()) {
             Ok(_) => editor.done(&edit),
-            Err(error) => app.status = error,
+            Err(error) => {
+                // On the page in the engine's words, and on the status line as before (#429).
+                editor.refusal.clone_from(&error);
+                app.status = error;
+            }
         }
     }
     (app.audio_devices.calibration_send, app.audio_devices.calibration_return) = (cal_send, cal_ret);

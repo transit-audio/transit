@@ -43,17 +43,56 @@ fn a_channel_edit_is_exactly_one_setup_io_map_command_without_an_undo_step() {
 }
 
 #[test]
-fn a_refused_edit_reaches_the_status_line_and_changes_nothing() {
+fn a_refused_edit_is_said_on_the_page_and_changes_nothing() {
+    let mut t = with_window();
+    let revision = t.app.engine.io_revision();
+    // An empty name: the engine refuses the path, in its words, on the page and the status line.
+    t.click(mid(item(&t, "io_add:output", "Add")));
+    assert_eq!(t.app.engine.io_revision(), revision, "nothing changed");
+    assert!(t.app.status.contains("`name` required"), "{}", t.app.status);
+    let refusal = item(&t, "io_refusal", &t.app.status.clone());
+    assert!(refusal[2] > refusal[0], "the refusal is drawn on the page");
+    // The next accepted edit clears it.
+    t.click(mid(item(&t, "io_channels:Out 3-4", "Channels")));
+    t.click(mid(item(&t, "io_channel:Out 3-4", "1")));
+    assert_eq!(t.app.engine.io_revision(), revision + 1);
+    assert!(t.layout()["controls"].as_array().unwrap().iter().all(|c| c["value"] != "io_refusal"), "an accepted edit clears the refusal");
+}
+
+/// #429: unticking a path's only channel sent a path 0 channels wide, which the engine refused (eight
+/// times in a tester's log). The picker no longer sends it, and its hover says why.
+#[test]
+fn the_picker_never_sends_a_path_without_channels() {
     let mut t = with_window();
     let revision = t.app.engine.io_revision();
     t.click(mid(item(&t, "io_channels:Out 3-4", "Channels")));
     t.click(mid(item(&t, "io_channel:Out 3-4", "3")));
-    t.click(mid(item(&t, "io_channel:Out 3-4", "4")));
-    assert_eq!(t.app.engine.io_revision(), revision + 1, "the first removal is fine, the last channel is refused");
     assert_eq!(t.app.engine.io_map().path("Out 3-4").unwrap().channels, [3]);
+    let status = t.app.status.clone();
     t.click(mid(item(&t, "io_channel:Out 3-4", "4")));
-    assert_eq!(t.app.engine.io_revision(), revision + 1);
-    assert!(t.app.status.contains("1 to 16"), "{}", t.app.status);
+    assert_eq!(t.app.engine.io_revision(), revision + 1, "the last channel's click sends no command");
+    assert_eq!(t.app.engine.io_map().path("Out 3-4").unwrap().channels, [3]);
+    assert_eq!(t.app.status, status, "and nothing is refused");
+    let path = t.app.engine.io_map().path("Out 3-4").unwrap().clone();
+    assert_eq!(crate::audio_devices_io::channel_edit(&path, 3), None);
+    assert!(crate::audio_devices_io::channel_edit(&path, 0).is_some());
+}
+
+/// #429: with no input channels the inputs' Add was disabled with no reason. It now says why beside
+/// it: that the input opens on demand, or the input's open error.
+#[test]
+fn a_disabled_add_says_why_beside_it() {
+    use crate::audio_devices_io::{INPUT_NOT_OPEN, input_note};
+    let mut t = T::new();
+    t.app.engine.set_io_map(IoMap::for_device("ALSA", "pipewire", 0, 2));
+    t.open_window();
+    t.section("section_io");
+    item(&t, "io_add_reason:input", INPUT_NOT_OPEN);
+    assert!(t.layout()["controls"].as_array().unwrap().iter().all(|c| c["value"] != "io_add_reason:output"), "outputs are open");
+    t.app.input_failure = Some("snd_pcm_open: No such device".into());
+    t.frames(2);
+    item(&t, "io_add_reason:input", "The input device did not open: snd_pcm_open: No such device");
+    assert_eq!(input_note(2, Some("x")), None, "channels open: no note");
 }
 
 #[test]

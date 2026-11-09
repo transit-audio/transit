@@ -106,6 +106,26 @@ pub fn is_wasapi(system: &str) -> bool {
     system.eq_ignore_ascii_case("WASAPI")
 }
 
+/// Why the input has no channels to make a path on, said beside its disabled Add (#429).
+pub const INPUT_NOT_OPEN: &str = "No input channels yet: the input device opens when a track is armed or monitored.";
+/// Why the output has no channels to make a path on.
+pub const OUTPUT_NOT_OPEN: &str = "No output channels: the output device is not open.";
+/// The hover of a path's only channel in the picker: a path keeps at least one.
+pub const LAST_CHANNEL: &str = "A path keeps at least one channel; Remove deletes the path.";
+
+/// The note beside the inputs' Add when the device has no input channels open: the input's open
+/// error when it failed (`failure`), else that it opens on demand. `None` while channels are open.
+pub fn input_note(inputs: u16, failure: Option<&str>) -> Option<String> {
+    (inputs == 0).then(|| failure.map_or_else(|| INPUT_NOT_OPEN.to_string(), |why| format!("The input device did not open: {why}")))
+}
+
+/// The edit a click on channel `c` of `p`'s picker makes, or `None` when it would leave the path
+/// without channels (the engine refuses a path 0 channels wide; #429 sent it eight times).
+pub fn channel_edit(p: &IoPath, c: u16) -> Option<IoEdit> {
+    let channels = toggled(&p.channels, c);
+    (!channels.is_empty()).then(|| IoEdit::SetChannels { name: p.name.clone(), channels })
+}
+
 /// What the Hardware inserts subsection asks for this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HardwareAction {
@@ -146,11 +166,15 @@ pub struct IoEditor {
     editing: Option<String>,
     new_output: String,
     new_input: String,
+    /// The engine's refusal of the last edit, shown on the page in its words until an edit is
+    /// accepted (#429: it reached only the status line under this window).
+    pub refusal: String,
 }
 
 impl IoEditor {
     /// An edit was accepted: drop the text it came from.
     pub fn done(&mut self, edit: &IoEdit) {
+        self.refusal.clear();
         match edit {
             IoEdit::Add { direction: IoDirection::Output, .. } => self.new_output.clear(),
             IoEdit::Add { direction: IoDirection::Input, .. } => self.new_input.clear(),
@@ -195,11 +219,25 @@ pub fn channel_text(c: u16, names: &[String]) -> String {
 }
 
 /// The section. Returns the edit the user made this frame, if any; controls are listed in `items`
-/// (label shown, value the control) for `ui.inspect` and tests. `names` labels the channels.
-pub fn section(ui: &mut egui::Ui, io: &IoMap, wasapi: bool, names: &ChannelNames, ed: &mut IoEditor, items: &mut Vec<MenuItem>) -> Option<IoEdit> {
+/// (label shown, value the control) for `ui.inspect` and tests. `names` labels the channels;
+/// `input_note` says why there are no input channels ([`input_note`]).
+#[allow(clippy::too_many_arguments)]
+pub fn section(
+    ui: &mut egui::Ui,
+    io: &IoMap,
+    wasapi: bool,
+    names: &ChannelNames,
+    input_note: Option<&str>,
+    ed: &mut IoEditor,
+    items: &mut Vec<MenuItem>,
+) -> Option<IoEdit> {
     let mut edit = None;
     ui.label(egui::RichText::new("I/O paths").strong());
     dim(ui, format!("Channels open on this device: {} in, {} out.", io.inputs, io.outputs));
+    if !ed.refusal.is_empty() {
+        let r = crate::chrome::status_label(ui, ed.refusal.clone(), 11.5, crate::chrome::Severity::Error);
+        items.push(MenuItem::at(ui, ed.refusal.clone(), "io_refusal".into(), r.rect));
+    }
     if wasapi {
         let r = ui.label(egui::RichText::new(WASAPI_NOTE).color(TOKENS.text_dim).size(11.5));
         items.push(MenuItem::at(ui, WASAPI_NOTE.into(), "io_wasapi_note".into(), r.rect));
@@ -248,22 +286,36 @@ pub fn section(ui: &mut egui::Ui, io: &IoMap, wasapi: bool, names: &ChannelNames
                     let text = channel_text(c, names.of(direction));
                     let b = crate::chrome_pick::option_label(ui, p.channels.contains(&c), &text);
                     items.push(MenuItem::at(ui, text, format!("io_channel:{}", p.name), b.rect));
-                    if b.clicked() {
-                        edit = Some(IoEdit::SetChannels { name: p.name.clone(), channels: toggled(&p.channels, c) });
+                    let next = channel_edit(p, c);
+                    let b = if next.is_none() { b.on_hover_text(LAST_CHANNEL) } else { b };
+                    if b.clicked() && next.is_some() {
+                        edit = next;
                     }
                 }
             });
         }
+        // A disabled Add says why, beside it and on its hover, never silently (#429).
+        let why = (opened == 0).then(|| if direction == IoDirection::Input { input_note.unwrap_or(INPUT_NOT_OPEN) } else { OUTPUT_NOT_OPEN });
         ui.horizontal(|ui| {
             let buf = if direction == IoDirection::Input { &mut ed.new_input } else { &mut ed.new_output };
             crate::chrome::text_field(ui, egui::TextEdit::singleline(buf).hint_text("New path name").desired_width(160.0));
             let b = ui.add_enabled(opened > 0, egui::Button::new("Add"));
             let key = if direction == IoDirection::Input { "io_add:input" } else { "io_add:output" };
             items.push(MenuItem::at(ui, "Add".into(), key.into(), b.rect));
-            if b.on_hover_text("A path on the first free channel; pick its channels with Channels.").clicked() {
+            let b = b.on_hover_text("A path on the first free channel; pick its channels with Channels.");
+            let b = match why {
+                Some(why) => b.on_disabled_hover_text(why),
+                None => b,
+            };
+            if b.clicked() && opened > 0 {
                 edit = Some(IoEdit::Add { direction, name: buf.clone(), channels: vec![first_free(io, direction)] });
             }
         });
+        if let Some(why) = why {
+            let r = crate::chrome::status_label(ui, why, 11.5, crate::chrome::Severity::Warning);
+            let key = if direction == IoDirection::Input { "io_add_reason:input" } else { "io_add_reason:output" };
+            items.push(MenuItem::at(ui, why.to_string(), key.into(), r.rect));
+        }
     }
     edit
 }
