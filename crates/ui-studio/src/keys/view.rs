@@ -327,6 +327,55 @@ fn exact_height(ui: &mut Ui) {
     ui.spacing_mut().button_padding.y = 0.0;
 }
 
+/// A header field (the velocity drag value, the Length text field): the kit's field frame (the
+/// inset well, a 1 px `line`, `line.strong` on hover, the focus ring) painted by us on `band`,
+/// [`HEADER_CONTROL_H`] high, with egui's widget drawn bare inside it. egui sizes the frame it
+/// paints from the widget's own content, so a frame left to the widget can come out shorter than
+/// the allocation (#412); this one is the band, whatever the widget measures.
+fn header_field(ui: &mut Ui, band: Rect, enabled: bool, add: impl FnOnce(&mut Ui, Rect) -> egui::Response) -> egui::Response {
+    let ring = ui.visuals().selection.stroke;
+    let faded = if enabled { 1.0 } else { ui.visuals().disabled_alpha() };
+    // The frame goes under the widget: reserve its place in paint order, fill it once the
+    // widget's response (hover, focus) is known.
+    let slot = ui.painter().add(egui::Shape::Noop);
+    let resp = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(band).sense(Sense::hover()), |ui| {
+            if !enabled {
+                ui.disable();
+            }
+            exact_height(ui);
+            let v = ui.visuals_mut();
+            for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+                w.bg_fill = egui::Color32::TRANSPARENT;
+                w.weak_bg_fill = egui::Color32::TRANSPARENT;
+                w.bg_stroke = Stroke::NONE;
+            }
+            v.text_edit_bg_color = Some(egui::Color32::TRANSPARENT);
+            v.selection.stroke = Stroke::NONE;
+            add(ui, band)
+        })
+        .inner;
+    let edge = if resp.has_focus() {
+        ring.color
+    } else if resp.hovered() || resp.dragged() {
+        TOKENS.line_strong
+    } else {
+        TOKENS.line
+    };
+    let width = if resp.has_focus() { ring.width } else { 1.0 };
+    ui.painter().set(
+        slot,
+        egui::Shape::Rect(egui::epaint::RectShape::new(
+            band,
+            crate::theme::RADIUS,
+            TOKENS.surface_inset.gamma_multiply(faded),
+            Stroke::new(width, edge.gamma_multiply(faded)),
+            egui::StrokeKind::Inside,
+        )),
+    );
+    resp
+}
+
 /// Tabs (Piano Roll, Mixer, Devices), the clip's name, grid, Quantize and the audition switch.
 fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Composite, layout: &mut KeysLayout) {
     let p = ui.painter();
@@ -570,10 +619,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, all: &Co
 
     let field = control_band(r, rx - 44.0, rx);
     ui.push_id("keys_new_note_velocity", |ui| {
-        let resp = crate::chrome::field(ui, |ui| {
-            exact_height(ui);
-            ui.put(field, egui::DragValue::new(&mut app.ui.keys.velocity).range(1..=127).speed(1))
-        });
+        let resp = header_field(ui, field, true, |ui, band| ui.put(band, egui::DragValue::new(&mut app.ui.keys.velocity).range(1..=127).speed(1)));
         layout.new_note_velocity = r4(resp.rect);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "New note velocity"));
         resp.on_hover_text("New note velocity (1–127): used for drawing and audition. Drag or click to type.");
@@ -603,15 +649,13 @@ fn note_inspector(app: &mut StudioApp, ui: &mut Ui, rect: Rect, layout: &mut Key
     let field = control_band(rect, rect.min.x + 44.0, rect.max.x);
     let mut empty = String::new();
     let text = app.keys.length_edit.as_mut().map_or(&mut empty, |(_, text)| text);
-    let resp = ui
-        .add_enabled_ui(selected.is_some(), |ui| {
-            crate::chrome::field(ui, |ui| {
-                exact_height(ui);
-                let edit = egui::TextEdit::singleline(text).id_salt("keys_note_length").font(egui::TextStyle::Monospace);
-                ui.put(field, edit.min_size(vec2(0.0, HEADER_CONTROL_H)).vertical_align(egui::Align::Center))
-            })
-        })
-        .inner;
+    let resp = header_field(ui, field, selected.is_some(), |ui, band| {
+        let edit = egui::TextEdit::singleline(text)
+            .id_salt("keys_note_length")
+            .font(egui::TextStyle::Monospace)
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(6, 0)));
+        ui.put(band, edit.min_size(vec2(0.0, HEADER_CONTROL_H)).vertical_align(egui::Align::Center))
+    });
     layout.note_length = r4(resp.rect);
     let commit = resp.lost_focus();
     resp.on_hover_text("Selected note length in ticks (minimum 1). Type an exact value, then Enter.");
