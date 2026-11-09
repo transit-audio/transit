@@ -232,7 +232,7 @@ create the 65th slice leaves the set unchanged and says **Cannot add slice: 64 s
 in the status line. Auto regeneration and copy-from-Auto obey the same bound; no truncation.
 The loop may coexist with loose sample pads,
 but total occupied pads cannot exceed 64. Slicing previews any shortage before applying and
-refuses excess instead of truncating. Defaults map chronological slice i to root+i, root 60;
+refuses excess instead of truncating. Defaults map chronological slice i to root+i, the root being the patch's pad start note unless a root is stored (replaced by Amendment 2026-11-09: it was 60);
 root is selectable in 0..(128-count). A mapping edit may relocate the entire ascending run,
 but refuses collisions with loose pads. Moving a slice between pads can break ascending order.
 Slice to MIDI then refuses and offers the separate **Map slices to keys** edit: it does not
@@ -439,7 +439,7 @@ and Manual slice ids/markers/labels, selected slicing mode, snap toggle, detecto
 grid division/bar override, root and beat length. Both sets persist with the same source and
 loop region, including the hidden set, through Save, Save As and autosave. Physically serialize
 only populated entries and nondefault controls. Every field has `serde(default)` (optionals default None, arrays/maps
-empty, seed 1, root 60, controls as above); unknown fields are accepted and retained by the new
+empty, seed 1, zone root 60, no loop root (it reads the pad start note; replaced by Amendment 2026-11-09), controls as above); unknown fields are accepted and retained by the new
 patch codec. Unknown schema versions retain their raw object and media references, report
 unavailable and play silence; never rewrite them into an empty patch. Missing/invalid source
 references stay in the patch, report silence per zone and can be relinked. Validate all counts,
@@ -1172,15 +1172,38 @@ fresh `PatchV1`); the implementation lists any other. A patch saved without the 
 unchanged. That is the field's stored default, not a migration: there is no compatibility code
 and no known-issue entry. The serialization rule holds: the field is written only when it
 differs from 60, so a new patch's 36 is written and an old patch round-trips byte for byte.
+The field has its own serde default of 60, apart from the patch struct's default: the
+empty-patch constructor (`PatchV1::default()`, `SamplerPatch::new()`) yields 36, so every
+present or later patch-creating path gets 36, and only reading a saved patch without the field
+yields 60. Like the 2026-11-08 fields, the field lives inside the unreleased `sampler_patch`
+format and adds no new `Session::needs` entry.
 
-**3. Stored pad notes are absolute.** A pad whose trigger note was set explicitly keeps it when
-the start note changes; only defaulted pads move. The unique-trigger-note rule is checked when
-the start note is set: a change is refused, with the document bit-identical, when it would put
-a defaulted pad on a note a stored pad owns, or would push any pad outside 0 to 127 (defaulted
-pads move together, so they never collide with one another). The refusal names the first colliding pad (in
-bank order) and note. This rests on the "Checked when set, clamped when used" rule of the
-2026-11-08 amendment: a later edit of something else is never refused because of an earlier
-start note, and the patch validator on load checks only the existing unique-note rule.
+**3. Stored pad notes are absolute.** A pad's note is stored when the patch holds a note for it
+(`note` present), whatever its value: setting a note equal to the pad's current default stores
+it, and plain-entry pruning never drops a stored note (today `set_pad` drops entries that
+`is_plain`, and `is_plain` treats a note equal to the default as plain; the implementation
+changes that; old files round-trip unchanged because pruning runs only on edits). A stored note
+keeps its value when the start note changes; only defaulted pads move. `mix.sampler_pad_set`
+with `note: null` returns a pad to its default note. The start note change is refused, with the
+document bit-identical, when:
+
+- (a) `note` is not an integer 0 to 64: `note must be an integer from 0 to 64` (this is also the
+  only way a pad could leave 0 to 127);
+- (b) a defaulted pad would take a stored pad's note: `Pad B1 plays C1: a start note of C1 would
+  put pad A1 there.`;
+- (c) a moved, bound pad's new note would select more than eight layers (the pad plus unbound
+  key-map layers; the body's "at most 8 layer voices start for one note", which counts any pad
+  triggered by the same note as one layer, and the same check a pad note edit makes): `Pad A5
+  would be a ninth layer on E3.`;
+- (d) the root write-through of item 5 would leave 0 to 127: `Pad A3's root would leave 0 to 127.`
+
+The pad and note names in these texts are examples of the fixed wording. Defaulted pads move
+together, so they never collide with one another; choke and retrigger match by pad, not note,
+and a start change creates no zones and no layers by itself, so choke, retrigger and the
+256-zone limit cannot be broken by one. This rests on the "Checked when set, clamped when used"
+rule of the 2026-11-08 amendment: a later edit of something else is never refused because of an
+earlier start note. The patch validator on load checks the unique-note rule on effective notes
+and refuses a `pad_start_note` above 64 (opaque, as the body says).
 
 **4. No MIDI is rewritten.** Clips, patterns, takes and automation are untouched by a start
 note change, the same principle as "Dragging slices" ("no change to existing MIDI"). Notes
@@ -1192,29 +1215,43 @@ user knows what to transpose by.
 trigger note" ("Playback, controls and modulation") means, today, that the root is written
 into the pad's zone when the pad is bound (`ZoneEntry::pad_defaults`, called from the bind
 path), so it is stored, not derived. With key tracking on, moving a defaulted pad's note
-without its root would repitch it. The rule the implementation follows: when the start note
-changes by d, the same undo step adds d to the stored root of every zone bound to a defaulted
-pad whose root still equals that pad's old effective note (clamped to 0 to 127, and the
-refusal of item 3 also covers a root that would leave that range); a pad with another root (a
-user set one) and every pad with a stored note keep their roots. A new binding after the change
-takes root equal to the effective note, as now. No schema field is added, and no sample
-changes pitch because of a start note change.
+without its root would repitch it. The rule the implementation follows: when the start note changes by d, the same undo step adds
+d to the stored root of every zone bound to a defaulted pad, whatever its root value and key
+tracking, so each moved pad keeps the distance between its note and its root (a change that
+would put such a root outside 0 to 127 is refused, item 3d); zones bound to pads with stored
+notes, and unbound zones, keep their roots. A key-tracked defaulted pad with a user-set root
+would otherwise repitch, so no "root equals note" test is used. A new binding after the change
+takes root equal to the effective note, as now. The write-through does not interact with the
+2026-11-08 write-through, which derives region and loop fields from slices and never touches the
+root. No schema field is added; one rule serves old and new patches, because every existing pad
+zone stores its root explicitly. Undo restores the whole patch snapshot bit-identically.
 
 **6. Command and state.** One engine command, `mix.sampler_pad_start {track, note}`, sets the
-start note, beside `mix.sampler_pad_set`: one undo step, refusals as in items 3 and 5, an
-out-of-range `note` refused as invalid. `mix.sampler_pad_set` setting a pad's note is
-unchanged. `mix.sampler_state` reports `pad_start_note` and, per pad, the effective note and
-whether it is stored.
+start note, beside `mix.sampler_pad_set`: one undo step, refusals as in item 3. Its status notice
+reads, for example, `Pad start note C1 (down 24 semitones): transpose pad clips by -24 to keep
+them on the same pads.` `mix.sampler_state` reports `pad_start_note`; per pad `note` (the
+effective note) and `note_stored` (a boolean); and the loop's `root` and `root_stored`. The
+core receives effective notes: the link in `crates/mix/src/sampler_link.rs` computes
+`start + index` for defaulted pads and the core has no start note (its own `60 + index` only
+fills an empty spec, where no pad sounds). `mix.sampler_pad_set` setting a pad's note is
+unchanged.
 
 **7. Everything downstream uses the effective note:** the Pads view labels, the
 computer-keyboard audition, Slices to pads, Slice to MIDI (each pad's effective note at the
 time of the command), Load kit (the loaded pads take the patch's start note, and a kit's
 stored notes stay as stored), choke matching and retrigger matching. No rule changes there.
-Two literals in the 2026-11-08 amendment are checked and stand: the slice mapping root
-(default 60, selectable 0 to 128 minus the count) is a keyboard root for a slice run, not a pad
-default; with a start note of 36 a run at root 36 meets bank A and a run at root 60 meets the
-pads from index 24. And the error example "Pad B3 already plays E3" is corrected to "Pad B13
-already plays E3" for the default start note 36 (E3 is note 64, index 28, bank B slot 13).
+The slice mapping root's default is replaced: a loop without a stored root uses the patch's pad
+start note as its root, so a default Slices to pads run puts slice 1 on pad A1 at any start note
+and `r + n <= 128` always holds (start at most 64, n at most 64). This replaces "root 60" in the
+body's Slices paragraph (the defaults sentence) and in the session format's defaults, and
+reconciles item 6 of the 2026-11-08 amendment: its "root r" is the stored root when there is one,
+else the start note, and every other step of that item is unchanged. A root the user selects is
+stored and absolute, like a stored pad note, is written only when stored (an explicit 60 is
+written too), and is cleared with `null` (back to following the start note). The selectable
+range stays 0 to 128 minus the count. Old patches read start 60 and so root 60, unchanged: no
+migration. The error example "Pad B3 already plays E3" is corrected to "Pad B13 already plays
+E3" for the default start note 36 (E3 is note 64, index 28, bank B slot 13). Expand to rack
+(#272) maps pads by effective note at expansion.
 
 **8. UI.** A **Start note** control in the Pads view's bar shows the note name (C1) and sets
 it by drag or typing. Its placement and look come from the design board; until that lands the
@@ -1222,9 +1259,15 @@ control is not built, and the command is reachable from the control channel.
 
 **Evidence for the implementation slice** (not built by this amendment): a new patch stores 36
 and an absent field reads 60; an old patch round-trips byte-identically; a start change moves
-only defaulted pads; the collision refusal (a stored pad on the target note, a range
-overflow) leaves the document identical and names pad and note; no clip, take or automation
-lane is touched; no pad repitches (a key-tracked default pad plays the same sample pitch before
-and after, and a stored root stays); the status notice reports the semitone distance;
-`mix.sampler_state` reports the start note and per-pad effective and stored; Slices to pads,
-Slice to MIDI and Load kit follow the start note.
+only defaulted pads; refusals (a) to (d) leave the document identical and name pad and note; a
+loaded `pad_start_note` of 65 loads opaque; no clip, take or automation lane is touched; the
+status notice reports the semitone distance; a key-tracked defaulted pad with a user root a
+fifth below its note plays the same pitch before and after a start change, and a stored root on
+a stored-note pad stays; a stored note equal to its current default survives a later mute edit
+and a start change; a default slice run at starts 36 and 12 puts slice 1 on A1; an explicit loop
+root stays put across a start change and `null` clears it; `mix.sampler_state` reports
+`pad_start_note`, per-pad `note` and `note_stored`, and the loop's `root` and `root_stored`;
+Slices to pads, Slice to MIDI and Load kit follow the start note. As in the 2026-11-08 gates,
+these negative mutations must fail the corresponding tests: the root write-through skipped for
+a root that is not equal to the old note; the loop root read as a literal 60; `is_plain`
+pruning a stored note equal to its default.
