@@ -10,7 +10,7 @@ use std::sync::Weak;
 use std::sync::atomic::Ordering;
 use transit_audio_io::AudioBuffer;
 use transit_midi::{Note, Sequence};
-use transit_model::sampler_patch::{PadEntry, PatchState, PatchV1, SourceRef, ZoneEntry};
+use transit_model::sampler_patch::{Membership, PadEntry, PatchState, PatchV1, SourceRef, ZoneEntry};
 use transit_model::{Insert, SamplerPatch, SourceId};
 
 fn audio(v: f32) -> Arc<SourceAudio> {
@@ -142,4 +142,109 @@ fn the_instruments_tap_carries_the_pads_its_instance_published() {
     let out = rig.render(4);
     assert!(out.iter().any(|x| *x != 0.0), "the legacy renderer plays the note");
     assert_eq!(hub.pad_activity(lt, crate::INSTRUMENT_UID), Some([0; transit_dsp::PAD_SLOTS]));
+}
+
+// Round robin through the plan compiler (ADR 0041 and its amendment of 2026-11-08, item 4): a
+// group member whose media is missing is published as a silent placeholder, so it keeps its turn
+// and relinking it does not reorder the others.
+
+/// Ticks between the notes (6400 frames at 120 BPM: 25 blocks), each note 40 ticks long.
+const STEP: i64 = 256;
+const STEP_FRAMES: usize = 6400;
+const STEP_BLOCKS: usize = STEP_FRAMES / BLOCK;
+/// The value of each alternative's source (source ids 3, 4, 5, 6); the pad's source 1 holds 0.5.
+const ALT: [f32; 4] = [0.031_25, 0.0625, 0.125, 0.25];
+
+/// A Sampler track playing `notes` note-60s, one every [`STEP`], with sources 1 and 3 to 6.
+fn rr_session(p: PatchV1, notes: usize) -> (Session, TrackId) {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+    s.pool.insert(SourceId(1), audio(0.5));
+    for (i, v) in ALT.iter().enumerate() {
+        s.pool.insert(SourceId(3 + i as u64), audio(*v));
+    }
+    let mut seq = Sequence::default();
+    for k in 0..notes as i64 {
+        seq.notes.push(Note { pitch: 60, velocity: 127, release_velocity: 64, channel: 0, start: k * STEP, length: 40 });
+    }
+    let cid = s.new_clip_id();
+    let tr = s.track_mut(t).unwrap();
+    tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, (notes * STEP_FRAMES) as i64, seq));
+    let mut ins = Insert::new("sampler");
+    ins.sampler_patch = Some(SamplerPatch { state: PatchState::Ready(Box::new(p)) });
+    tr.instrument = Some(ins);
+    (s, t)
+}
+
+fn gate(z: &mut ZoneEntry) {
+    z.mode = transit_model::sampler_patch::PlayMode::Gate;
+    z.attack_ms = 0.0;
+    z.release_ms = 0.0;
+    z.key_tracking = false;
+    z.root = 60;
+}
+
+/// Pad A1 (note 60) on a plain zone over source 1, and group 0's `count` alternatives on sources
+/// 3, 4, ...; alternative `missing` names source 99, which is not in the pool.
+fn rr_patch(count: u8, missing: Option<u8>) -> PatchV1 {
+    let mut p = PatchV1 { sources: vec![SourceRef { source: SourceId(1), ..SourceRef::default() }], ..PatchV1::default() };
+    let mut pad = ZoneEntry::whole(0, 0, 48_000);
+    pad.pad_defaults(60);
+    gate(&mut pad);
+    p.zones.push(pad);
+    p.set_pad(PadEntry { index: 0, zone: Some(0), ..PadEntry::default() });
+    for a in 0..count {
+        let source = if missing == Some(a) { 99 } else { 3 + u64::from(a) };
+        p.sources.push(SourceRef { source: SourceId(source), ..SourceRef::default() });
+        let mut z = ZoneEntry::whole(1 + u16::from(a), 1 + u16::from(a), 48_000);
+        gate(&mut z);
+        z.membership = Some(Membership { group: 0, layer: 0, alternative: a, ..Membership::default() });
+        p.zones.push(z);
+    }
+    p
+}
+
+/// The level each of `notes` notes played, sampled 500 frames into it; `out` starts at the first
+/// note's start.
+fn levels(out: &[f32], notes: usize) -> Vec<f32> {
+    (0..notes).map(|k| out[k * STEP_FRAMES + 500]).collect()
+}
+
+/// What notes `range` should play: the pad's 0.5 plus alternative `k % count`, silent when it is
+/// `silent`.
+fn expected(range: std::ops::Range<usize>, count: usize, silent: Option<usize>) -> Vec<f32> {
+    range.map(|k| 0.5 + if Some(k % count) == silent { 0.0 } else { ALT[k % count] }).collect()
+}
+
+/// Alternative `missing` of three has no media: the patch stands, the pad plays beside the group,
+/// the gap keeps its turn; after relinking the order is unchanged and the alternative sounds.
+fn missing_member_keeps_its_turn(missing: u8) {
+    let p = rr_patch(3, Some(missing));
+    let (mut s, _) = rr_session(p.clone(), 9);
+    assert_eq!(check_sampler_patch(&p, &s), Ok(()), "alternative {missing} missing: the patch stands");
+    let mut rig = Rig::new();
+    assert_eq!(rig.publish(&s), Adoption::Adopted);
+    let before = levels(&rig.render(6 * STEP_BLOCKS), 6);
+    assert_eq!(before, expected(0..6, 3, Some(usize::from(missing))), "alternative {missing} missing: the pad plays, the gap keeps its turn");
+    // Relink: the missing source appears; the next publication reaches the same instance and
+    // the counter carries on, so the order is unchanged and the relinked alternative sounds.
+    s.pool.insert(SourceId(99), audio(ALT[usize::from(missing)]));
+    assert_eq!(rig.publish(&s), Adoption::Adopted);
+    let after = levels(&rig.render(3 * STEP_BLOCKS), 3);
+    assert_eq!(after, expected(6..9, 3, None), "alternative {missing} relinked: the same order");
+}
+
+#[test]
+fn a_missing_first_alternative_keeps_its_turn_and_relinking_keeps_the_order() {
+    missing_member_keeps_its_turn(0);
+}
+
+#[test]
+fn a_missing_middle_alternative_keeps_its_turn_and_relinking_keeps_the_order() {
+    missing_member_keeps_its_turn(1);
+}
+
+#[test]
+fn a_missing_last_alternative_keeps_its_turn_and_relinking_keeps_the_order() {
+    missing_member_keeps_its_turn(2);
 }

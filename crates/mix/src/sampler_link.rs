@@ -19,7 +19,10 @@
 //!
 //! A zone whose source is missing from the pool, disk-backed, or not mono or stereo, or whose
 //! region runs past its source, is left out of the publication (its pad unbound there), so it plays
-//! silence while the patch keeps its reference. An opaque patch publishes nothing and plays silence.
+//! silence while the patch keeps its reference. A key-map group member in that state is published
+//! instead as a silent placeholder ([`sampler::SILENT_SOURCE`]): ADR 0041 selects it like the other
+//! alternatives, so the round robin keeps its order and relinking does not reorder it. An opaque
+//! patch publishes nothing and plays silence.
 
 use super::*;
 use crate::compile::PoolSample;
@@ -78,7 +81,11 @@ fn readable(a: &SourceAudio) -> u64 {
 
 /// The structure of `p` in `s`.
 pub(crate) fn structure(p: &PatchV1, s: &Session) -> Structure {
-    Structure { sources: p.sources.iter().map(|r| usable(s, r.source).map_or(0, audio_id)).collect(), zones: p.zones.clone(), pads: p.pads.clone() }
+    Structure {
+        sources: p.sources.iter().map(|r| usable(s, r.source).map_or(0, audio_id)).collect(),
+        zones: p.zones.clone(),
+        pads: p.pads.clone(),
+    }
 }
 
 fn core_zone(z: &ZoneEntry, source: u16) -> Zone {
@@ -108,8 +115,9 @@ fn core_zone(z: &ZoneEntry, source: u16) -> Zone {
 }
 
 /// The publication of `p` in `s`: its usable sources (wrapped through `wrappers`), the zones that
-/// can play, the 64 pads (a pad of a zone left out is unbound here). Also the ids of the zones left
-/// out (silent: missing, disk-backed or unusable media, or a region past the source).
+/// can play and the group members that cannot as silent placeholders, the 64 pads (a pad of a zone
+/// left out is unbound here). Also the ids of the silent zones
+/// (missing, disk-backed or unusable media, or a region past the source).
 pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Arc<dyn SampleSource>>) -> (PatchSpec, Vec<u16>) {
     let mut spec = PatchSpec::default();
     let mut local: Vec<Option<(u16, u64)>> = Vec::with_capacity(p.sources.len());
@@ -136,12 +144,20 @@ pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Ar
                     *slot = Some(core_zone(z, index));
                 }
             }
-            _ => silent.push(z.id),
+            _ => {
+                silent.push(z.id);
+                if z.membership.is_some()
+                    && let Some(slot) = spec.zones.get_mut(usize::from(z.id))
+                {
+                    *slot = Some(core_zone(z, sampler::SILENT_SOURCE));
+                }
+            }
         }
     }
     spec.pads = core::array::from_fn(|i| {
         let e = p.pad(i as u8);
-        let zone = e.zone.filter(|z| spec.zones.get(usize::from(*z)).is_some_and(Option::is_some));
+        let playable = |z: &u16| spec.zones.get(usize::from(*z)).and_then(Option::as_ref).is_some_and(|z| z.region.source != sampler::SILENT_SOURCE);
+        let zone = e.zone.filter(playable);
         Pad { zone, note: e.trigger(), mute: e.mute, solo: e.solo, choke: e.choke }
     });
     (spec, silent)

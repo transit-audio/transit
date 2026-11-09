@@ -51,10 +51,17 @@ pub(super) struct ControlEdit {
     pub(super) value: f32,
 }
 
+/// The source index of a silent placeholder zone: a zone whose media is missing or unusable but
+/// which keeps its place in the patch (a round-robin alternative, which ADR 0041 selects even
+/// while its media is missing, so relinking does not reorder the others). The handoff publishes it
+/// without a source; the core selects it like any zone, refuses its start (counted in
+/// `refused_starts`) and plays nothing.
+pub const SILENT_SOURCE: u16 = u16::MAX;
+
 /// What the control side asks the core path to play.
 pub struct PatchSpec {
     /// The samples the zones play; a zone's `region.source` indexes this list (at most [`ZONES`]
-    /// entries; an entry no zone uses takes no source id).
+    /// entries; an entry no zone uses takes no source id), or is [`SILENT_SOURCE`].
     pub sources: Vec<Arc<dyn SampleSource>>,
     /// Zone slots from slot 0 (at most [`ZONES`]; missing slots are empty). A zone's
     /// `playback.level_db`, `playback.pan`, `shaper` and `matrix` are not read: the zone slot's
@@ -177,7 +184,7 @@ impl Publisher {
         let mut g = Box::new(Generation { bank: PreparedBank::new(), zones, pads: spec.pads, groups: spec.groups });
         let mut local: Vec<Option<u16>> = vec![None; spec.sources.len()];
         let mut failed = false;
-        for z in g.zones.iter_mut().flatten() {
+        for z in g.zones.iter_mut().flatten().filter(|z| z.region.source != SILENT_SOURCE) {
             let li = usize::from(z.region.source);
             let id = match (local.get(li).copied().flatten(), spec.sources.get(li)) {
                 (Some(id), _) => Some(id),
@@ -329,7 +336,8 @@ impl Publisher {
 
 /// Checks a spec before anything is prepared and returns its [`ZONES`] zones, sources still by the
 /// spec's indices: counts, each zone's source (present, mono or stereo, long enough for its
-/// region), then the zones and pads whole as the core will check them on adoption.
+/// region; a [`SILENT_SOURCE`] placeholder has none to check), then the zones and pads whole as
+/// the core will check them on adoption.
 pub(super) fn check(spec: &PatchSpec) -> Result<Vec<Option<Zone>>, PublishError> {
     if spec.sources.len() > ZONES || spec.zones.len() > ZONES {
         return Err(PublishError::TooMany);
@@ -337,14 +345,20 @@ pub(super) fn check(spec: &PatchSpec) -> Result<Vec<Option<Zone>>, PublishError>
     let mut zones: Vec<Option<Zone>> = spec.zones.iter().copied().chain(std::iter::repeat(None)).take(ZONES).collect();
     for (i, z) in zones.iter_mut().enumerate() {
         let Some(z) = z else { continue };
-        let s = spec.sources.get(usize::from(z.region.source)).ok_or(PublishError::Source { zone: i })?;
-        if !(1..=2).contains(&s.num_channels()) {
-            return Err(PublishError::Channels { zone: i });
-        }
-        if readable_frames(s.as_ref()) < z.region.end {
-            // The shorter channel of a stereo source is what plays: a region past it is refused,
-            // and named as such when the source's own length would have held it.
-            return Err(if (s.frames() as u64) < z.region.end { PublishError::Region { zone: i } } else { PublishError::ShortChannel { zone: i } });
+        if z.region.source != SILENT_SOURCE {
+            let s = spec.sources.get(usize::from(z.region.source)).ok_or(PublishError::Source { zone: i })?;
+            if !(1..=2).contains(&s.num_channels()) {
+                return Err(PublishError::Channels { zone: i });
+            }
+            if readable_frames(s.as_ref()) < z.region.end {
+                // The shorter channel of a stereo source is what plays: a region past it is
+                // refused, and named as such when the source's own length would have held it.
+                return Err(if (s.frames() as u64) < z.region.end {
+                    PublishError::Region { zone: i }
+                } else {
+                    PublishError::ShortChannel { zone: i }
+                });
+            }
         }
         // The controls are the slot parameters', always in range: check the structure.
         z.playback.level_db = 0.0;

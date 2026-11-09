@@ -65,7 +65,7 @@ mod params;
 
 use adapter::CorePath;
 pub use bank::{CREDITS, PreparedBank, SOURCE_IDS, Source};
-pub use handoff::{CONTROL_RING, PatchSpec, PublishError, Publisher};
+pub use handoff::{CONTROL_RING, PatchSpec, PublishError, Publisher, SILENT_SOURCE};
 use legacy::{Derived, RELEASE, SAMPLER_PARAMS, VOICES, Voice};
 pub use params::{FIELD_LEVEL, FIELD_PAN, ZONE_FIELDS, field_info, resolve, slot_id};
 pub use transit_sampler_core::patch::{GroupMode, Membership, Pad, PatchError, PlayMode, Playback, Zone};
