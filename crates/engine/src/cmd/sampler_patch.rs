@@ -110,7 +110,7 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// The ready patch of track `t`'s Sampler, cloned for an edit.
-fn patch_of(s: &Session, id: &str, t: TrackId) -> Result<PatchV1> {
+pub(super) fn patch_of(s: &Session, id: &str, t: TrackId) -> Result<PatchV1> {
     let ins = s.track(t).and_then(|tr| tr.instrument.as_ref()).filter(|i| i.plugin == SAMPLER);
     let patch =
         ins.and_then(|i| i.sampler_patch.as_ref()).ok_or_else(|| bad(id, "the track's Sampler has no patch: make one with mix.sampler_new_patch"))?;
@@ -118,7 +118,7 @@ fn patch_of(s: &Session, id: &str, t: TrackId) -> Result<PatchV1> {
 }
 
 /// Checks `p` as the instance will, then stores it on track `t`.
-fn store(e: &mut Engine, id: &str, t: TrackId, p: PatchV1) -> Result<()> {
+pub(super) fn store(e: &mut Engine, id: &str, t: TrackId, p: PatchV1) -> Result<()> {
     transit_mix::check_sampler_patch(&p, e.session()).map_err(|m| bad(id, m))?;
     let ins = e.session_mut().track_mut(t).and_then(|tr| tr.instrument.as_mut()).ok_or_else(|| bad(id, "no track"))?;
     ins.sampler_patch = Some(SamplerPatch { state: transit_model::sampler_patch::PatchState::Ready(Box::new(p)) });
@@ -252,7 +252,7 @@ fn patch_bytes(p: &PatchV1, s: &Session) -> u64 {
 }
 
 /// Refuses a patch whose distinct decoded audio would pass 128 MiB with `adding` more bytes.
-fn admit_patch(p: &PatchV1, s: &Session, adding: u64) -> std::result::Result<(), String> {
+pub(super) fn admit_patch(p: &PatchV1, s: &Session, adding: u64) -> std::result::Result<(), String> {
     let total = patch_bytes(p, s).saturating_add(adding);
     if total > MAX_PATCH_BYTES {
         return Err(format!("the patch would hold {} MiB of audio, more than the 128 MiB a Sampler holds in memory", total >> 20));

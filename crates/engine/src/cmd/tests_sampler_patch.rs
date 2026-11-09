@@ -10,7 +10,7 @@ use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
 use transit_dsp::Plugin;
 use transit_dsp::plugins::sampler as dsp;
 use transit_midi::{Note, Sequence};
-use transit_model::sampler_patch::{Marker, Markers, Ownership, PatchV1, PlayMode, SliceLoop, SliceMode};
+use transit_model::sampler_patch::{AutoSource, Detector, Division, Marker, Markers, Ownership, PatchV1, PlayMode, SliceLoop, SliceMode};
 use transit_model::{Clip, SourceId, TrackId};
 use transit_time::{Range, TICKS_PER_QUARTER};
 
@@ -344,7 +344,8 @@ fn save_save_as_and_autosave_carry_the_patch_slicing_and_media() {
     let d = Dir::new("save");
     let mut e = Engine::default();
     let t = kit(&mut e, &d);
-    // A managed source too, and both slice sets with the mode, as job D will write them.
+    // A managed source too, both slice sets with the mode and every loop setting off its
+    // default, as Detect and Replace markers will write them.
     let bytes = std::fs::read(d.path("tone.wav")).unwrap();
     super::load_zone_bytes(&mut e, t, 2, "managed.wav", &bytes).unwrap();
     {
@@ -358,6 +359,13 @@ fn save_save_as_and_autosave_carry_the_patch_slicing_and_media() {
             source: 0,
             end: 20_000,
             mode: SliceMode::Manual,
+            snap: false,
+            detector: Detector { source: AutoSource::Grid, sensitivity: 0.25, ..Detector::default() },
+            division: Division::Eighth,
+            bars: Some(4),
+            grid_bpm: Some(92.5),
+            root: 36,
+            beat_length: Some(8.0),
             auto: Some(set(&[(1, 0), (2, 10_000)])),
             manual: Some(set(&[(7, 0), (8, 5_000), (9, 15_000)])),
             ..SliceLoop::default()

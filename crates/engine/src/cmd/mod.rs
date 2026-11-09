@@ -42,6 +42,7 @@ mod rack;
 mod realtime_render;
 pub(crate) mod sampler;
 pub(crate) mod sampler_patch;
+mod sampler_slices;
 mod setup_more;
 mod surround;
 mod tab;
@@ -186,6 +187,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(instrument::specs());
         v.extend(external_instrument::specs());
         v.extend(sampler::specs());
+        v.extend(sampler_slices::specs());
         v.extend(zoom_toggle::specs());
         v.extend(rack::specs());
         v.extend(takes::specs());
