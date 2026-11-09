@@ -3,7 +3,7 @@ title: One Sampler instrument with three views (Instrument: zones, velocity laye
 -->
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, pad start note
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, accepted, pad start note
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
@@ -1202,7 +1202,10 @@ document bit-identical, when:
   text: `Pad A5 would be a ninth layer on E3.`;
 - (d) the root write-through of item 5 would leave 0 to 127: `Pad A3's root would leave 0 to 127.`
 
-The pad and note names in these texts are examples of the fixed wording. Defaulted pads move
+The pad and note names in these texts are examples of the fixed wording. Note names in these
+texts and in item 6's status notice come from the shared note namer (ADR 0051) and follow its
+Middle C preference (the examples name 60 as C3); the command takes and `mix.sampler_state`
+reports MIDI numbers. Defaulted pads move
 together, so they never collide with one another; choke and retrigger match by pad, not note,
 and a start change creates no zones and no layers by itself, so choke, retrigger and the
 256-zone limit cannot be broken by one. This rests on the "Checked when set, clamped when used"
@@ -1260,8 +1263,9 @@ E3" for the default start note 36 (E3 is note 64, index 28, bank B slot 13). Exp
 effective note, and the member Sampler stores that note explicitly on the pad, so the member's
 own start note never moves it.
 
-**8. UI.** A **Start note** control in the Pads view's bar shows the note name (C1) and sets
-it by drag or typing. Its placement and look come from the design board; until that lands the
+**8. UI.** A **Start note** control in the Pads view's bar shows the start note as a note name
+from the shared note namer (36 shows as C1 when middle C is named C3, C2 when it is named C4)
+and sets it by drag or by typing a name; the stored value is the MIDI number. Its placement and look come from the design board; until that lands the
 control is not built, and the command is reachable from the control channel.
 
 **Evidence for the implementation slice** (not built by this amendment): a new patch stores 36
