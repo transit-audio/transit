@@ -31,6 +31,9 @@ use multi::{Composite, Part};
 mod pitch;
 mod quantize;
 pub use quantize::QuantizePrefs;
+#[cfg(test)]
+mod pitch_mode_tests;
+mod rows;
 mod scale;
 #[cfg(test)]
 mod scale_tests;
@@ -274,6 +277,8 @@ pub struct KeysState {
     /// Selected notes, by value (indices shift after every edit).
     pub selection: Vec<Note>,
     pub gesture: Option<KeysGesture>,
+    /// The row map held from a press in the pane's body to its release (#421).
+    rows_held: Option<scale::Rows>,
     /// Left edge of the grid in ticks from the clip start.
     pub scroll: f64,
     /// The pitch whose row is at the grid's top edge (fractional when scrolled).
@@ -317,6 +322,7 @@ impl Default for KeysState {
             click_tick: None,
             selection: Vec::new(),
             gesture: None,
+            rows_held: None,
             scroll: 0.0,
             top: 0.0,
             fit: false,
@@ -664,11 +670,6 @@ impl StudioApp {
     }
 }
 
-/// Shift alone is the scale-mode chromatic override; with Alt it means free move instead.
-fn chromatic(m: egui::Modifiers) -> bool {
-    m.shift && !m.alt
-}
-
 /// `n` moved; the caller has clamped the move ([`clamp_move`]), so it stays in its clip (the roll's
 /// ticks of another open clip's notes can be negative).
 fn shifted(n: &Note, dt: i64, ds: i64) -> Note {
@@ -809,13 +810,10 @@ fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, all: &Composite) -> O
     let pairs = match kind {
         NoteDrag::Move => {
             let dt = round(anchor.start as f64 + raw) - anchor.start;
-            let ds = ((press.y - pos.y) / map.kh).round() as i64;
-            let (dt, ds) = clamp_move(&sel, all.local_min(&sel), dt, ds);
-            if map.scale.enabled && !chromatic(mods) {
-                app.scale_move(&sel, dt, ds, Some(anchor.pitch))
-            } else {
-                sel.iter().map(|n| (*n, shifted(n, dt, ds))).collect()
-            }
+            let (dt, _) = clamp_move(&sel, all.local_min(&sel), dt, 0);
+            let pitches: Vec<u8> = sel.iter().map(|n| n.pitch).collect();
+            let moved = rows::drag_pitches(map, &pitches, anchor.pitch, pos.y);
+            sel.iter().zip(moved).map(|(n, pitch)| (*n, Note { pitch, ..shifted(n, dt, 0) })).collect()
         }
         NoteDrag::Resize => {
             let min = if free { 1 } else { map.grid.unwrap_or(1).max(1) };
@@ -921,7 +919,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                     app.status = "Outside the open clips: draw inside one of them".into();
                 } else if (0..=127).contains(&pitch) && (start >= 0 || all.several()) {
                     let n = Note {
-                        pitch: app.scale_entry(pitch as u8, mods.shift),
+                        pitch: rows::entry_pitch(map, pitch as u8),
                         velocity: app.ui.keys.velocity.clamp(1, 127),
                         release_velocity: 64,
                         channel: 0,
@@ -995,7 +993,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
     if resp.drag_stopped() {
         finish(app, ui, map, vel, all, layout);
     }
-    resp.on_hover_text("Drag notes to move (Ctrl: copy), either edge to resize. Alt on an edge: resize without snap. Alt+Shift on the body: move without snap. Shift on the body: off-scale pitch in scale mode. Alt on the body: velocity.");
+    resp.on_hover_text("Drag notes to move (Ctrl: copy), either edge to resize. Alt on an edge: resize without snap. Alt+Shift on the body: move without snap. Alt on the body: velocity.");
 }
 
 /// While dragging notes: Ctrl makes a copy; a pitch change auditions the new pitch.
@@ -1003,26 +1001,20 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
     let mods = ui.input(|i| i.modifiers);
     let pos = ui.input(|i| i.pointer.latest_pos());
     let mut play = None;
-    let scale = app.keys_scale();
     let notes = app.keys_all().map(|a| a.notes).unwrap_or_default();
     let app_sel: Vec<Note> = resolve(&notes, &app.keys.selection).into_iter().map(|i| notes[i]).collect();
     let mut dragged_track = None;
-    if let Some(KeysGesture::Notes { kind, anchor, press, copy, sounding, track }) = &mut app.keys.gesture
+    if let Some(KeysGesture::Notes { kind, anchor, copy, sounding, track, .. }) = &mut app.keys.gesture
         && *kind == NoteDrag::Move
     {
         *copy = mods.command;
         dragged_track = *track;
         ui.ctx().set_cursor_icon(if *copy { CursorIcon::Copy } else { CursorIcon::Grabbing });
         if let Some(pos) = pos {
-            let ds = ((press.y - pos.y) / map.kh).round() as i64;
-            let pitch = if scale.enabled && !chromatic(mods) && ds != 0 {
-                // Same group rule as the applied move, so the audition matches the result.
-                let sel: Vec<u8> = app_sel.iter().map(|n| n.pitch).collect();
-                let at = sel.iter().position(|&p| p == anchor.pitch).unwrap_or(0);
-                scale.key.transpose_group(&sel, anchor.pitch, ds).get(at).copied().unwrap_or(anchor.pitch)
-            } else {
-                (i64::from(anchor.pitch) + ds).clamp(0, 127) as u8
-            };
+            // Same rule as the applied move, so the audition matches the result.
+            let sel: Vec<u8> = app_sel.iter().map(|n| n.pitch).collect();
+            let at = sel.iter().position(|&p| p == anchor.pitch);
+            let pitch = at.and_then(|at| rows::drag_pitches(map, &sel, anchor.pitch, pos.y).get(at).copied()).unwrap_or(anchor.pitch);
             if pitch != *sounding {
                 play = Some((*sounding, pitch));
                 *sounding = pitch;

@@ -90,29 +90,39 @@ fn scale_controls_toggle_through_ui_and_undo_without_changing_notes() {
     assert_eq!(h.app.keys_scale().key.root, 255, "display normalization must not rewrite saved data merely by opening the menu");
 }
 
+/// Replaces `scale_draw_drag_override_and_transpose_use_real_handlers` (#421): that test pinned a
+/// one-row drag moving one scale degree (the note ran ahead of the pointer) and Shift as the
+/// chromatic override, both removed. The note now sits on the scale row nearest the pointer, Shift
+/// changes nothing about pitch, and accidentals are entered with Scale mode off.
 #[test]
-fn scale_draw_drag_override_and_transpose_use_real_handlers() {
+fn scale_draw_drag_and_transpose_follow_the_pointer_and_shift_is_not_chromatic() {
     let mut h = Harness::new();
     h.minor(false);
     let (x, y) = h.at(64, 0.0);
     h.input("ui.click", json!({"x": x+4.0, "y": y, "count": 2}));
-    assert_eq!(h.app.keys_notes()[0].pitch, 63);
+    assert_eq!(h.app.keys_notes()[0].pitch, 63, "an out-of-scale row enters the nearest scale tone");
+    let kh = h.app.ui.keys.key_h;
     let n = h.app.keys.layout.notes[0].rect;
     let (x, y) = ((n[0] + n[2]) / 2.0, (n[1] + n[3]) / 2.0);
-    h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-h.app.ui.keys.key_h}));
-    assert_eq!(h.app.keys_notes()[0].pitch, 65, "one row moves one scale degree");
+    h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-2.0*kh}));
+    assert_eq!(h.app.keys_notes()[0].pitch, 65, "two rows up is the scale row under the pointer");
     h.app.run("edit.undo", json!({})).unwrap();
     h.frames(2);
-    let n = h.app.keys.layout.notes[0].rect;
-    let (x, y) = ((n[0] + n[2]) / 2.0, (n[1] + n[3]) / 2.0);
-    h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-h.app.ui.keys.key_h, "shift": true, "alt": true}));
-    assert_eq!(h.app.keys_notes()[0].pitch, 65, "Alt+Shift is a free move only: it keeps the scale rule, not the chromatic override");
+    h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-2.0*kh, "shift": true, "alt": true}));
+    assert_eq!(h.app.keys_notes()[0].pitch, 65, "Alt+Shift is a free move only: it keeps the scale rule");
     h.app.run("edit.undo", json!({})).unwrap();
     h.frames(2);
-    let n = h.app.keys.layout.notes[0].rect;
-    let (x, y) = ((n[0] + n[2]) / 2.0, (n[1] + n[3]) / 2.0);
-    h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-h.app.ui.keys.key_h, "shift": true}));
-    assert_eq!(h.app.keys_notes()[0].pitch, 64, "Shift permits the accidental");
+    // Past the middle of E's row, toward F: Shift does not keep the E.
+    h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-1.3*kh, "shift": true}));
+    assert_eq!(h.app.keys_notes()[0].pitch, 65, "Shift is not a chromatic override");
+    h.app.run("edit.undo", json!({})).unwrap();
+    // Scale mode off: the accidental is reachable; back on, a transpose keeps its offset.
+    h.app.keys_scale_set(json!({"enabled": false})).unwrap();
+    h.frames(2);
+    h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-kh}));
+    assert_eq!(h.app.keys_notes()[0].pitch, 64, "Scale mode off: chromatic drag");
+    h.app.keys_scale_set(json!({"enabled": true})).unwrap();
+    h.frames(2);
     h.app.keys_transpose(1).unwrap();
     assert_eq!(h.app.keys_notes()[0].pitch, 66, "an accidental keeps its offset above the tone: E to F# in C minor");
 }
@@ -128,7 +138,7 @@ fn folded_scale_keeps_accidentals_and_live_input_inline() {
     assert!((row(&h.app, 60) - row(&h.app, 61) - h.app.ui.keys.key_h).abs() < 0.1);
     assert!((row(&h.app, 61) - row(&h.app, 63) - h.app.ui.keys.key_h * 2.0).abs() < 0.1);
     let mode = h.app.keys_scale();
-    let rows = scale::Rows::new(mode, &h.app.keys_notes(), &h.app.keys.live, false);
+    let rows = scale::Rows::new(mode, &h.app.keys_notes(), &h.app.keys.live);
     assert!(!rows.contains(64));
     h.app.live_midi(transit_playback::PlayedNote { pitch: 64, velocity: 97, on: true });
     assert_eq!(h.app.live_keys(), [(64, 97)]);
@@ -140,13 +150,13 @@ fn folded_scale_keeps_accidentals_and_live_input_inline() {
         h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect.contains(center) && r.fill == color)),
         "a held accidental keeps its distinct color in the painted keyboard"
     );
-    let rows = scale::Rows::new(mode, &h.app.keys_notes(), &h.app.keys.live, false);
+    let rows = scale::Rows::new(mode, &h.app.keys_notes(), &h.app.keys.live);
     assert!(rows.contains(64));
     assert_eq!(rows.pitch(rows.rank(64.0)), 64.0);
     h.app.live_midi(transit_playback::PlayedNote { pitch: 64, velocity: 0, on: false });
     assert!(h.app.live_keys().is_empty());
     assert_eq!(h.app.keys_notes().len(), 3);
-    let empty = scale::Rows::new(mode, &[], &[0; 128], false);
+    let empty = scale::Rows::new(mode, &[], &[0; 128]);
     assert_eq!((60..72).filter(|&p| empty.contains(p)).collect::<Vec<_>>(), [60, 62, 63, 65, 67, 68, 70]);
 }
 
@@ -157,14 +167,17 @@ fn scale_degrees_are_bounded_and_chromatic_defaults_are_unchanged() {
     assert_eq!(key.transpose(60, 7), 72);
     assert_eq!(key.transpose(60, i64::MAX), 127);
     assert_eq!(key.transpose(60, i64::MIN), 0);
-    let rows = scale::Rows::new(ScaleMode::default(), &[], &[0; 128], false);
+    let rows = scale::Rows::new(ScaleMode::default(), &[], &[0; 128]);
     for p in 0u8..=127 {
         assert_eq!(rows.pitch(rows.rank(f32::from(p))), f32::from(p));
     }
 }
 
+/// Replaces `step_entry_snaps_only_the_edit_and_chromatic_override_keeps_accidentals` (#421): Shift
+/// no longer lifts the scale constraint anywhere, step entry included; Scale mode off enters the
+/// accidental.
 #[test]
-fn step_entry_snaps_only_the_edit_and_chromatic_override_keeps_accidentals() {
+fn step_entry_snaps_only_the_edit_and_shift_does_not_lift_the_scale() {
     let mut h = Harness::new();
     h.minor(false);
     h.app.step_toggle();
@@ -184,7 +197,6 @@ fn step_entry_snaps_only_the_edit_and_chromatic_override_keeps_accidentals() {
         |ui| {
             h.app.logic(ui.ctx());
             if ui.ctx().current_pass_index() == 0 {
-                assert!(h.app.keys.step.chromatic, "current-frame Shift reaches step entry before MIDI drains");
                 h.app.live_midi(note(true));
                 h.app.live_midi(note(false));
             }
@@ -192,9 +204,14 @@ fn step_entry_snaps_only_the_edit_and_chromatic_override_keeps_accidentals() {
         },
     );
     output.textures_delta.clear();
-    assert_eq!(h.app.keys_notes()[1].pitch, 64);
+    assert_eq!(h.app.keys_notes()[1].pitch, 63, "Shift held: still the scale tone");
+    h.app.keys_scale_set(json!({"enabled": false})).unwrap();
+    h.app.live_midi(note(true));
+    h.app.live_midi(note(false));
+    assert_eq!(h.app.keys_notes()[2].pitch, 64, "Scale mode off: the accidental as struck");
     h.app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(h.app.keys_notes().len(), 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.keys_notes().len(), 2);
 }
 
 #[test]

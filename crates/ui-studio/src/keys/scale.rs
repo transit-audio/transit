@@ -46,9 +46,10 @@ impl StudioApp {
         Ok(())
     }
 
-    pub(super) fn scale_entry(&self, pitch: u8, chromatic: bool) -> u8 {
+    /// A pitch entered by step entry: the nearest scale tone while Scale mode is on.
+    pub(super) fn scale_entry(&self, pitch: u8) -> u8 {
         let mode = self.keys_scale();
-        if mode.enabled && !chromatic { mode.key.nearest(pitch) } else { pitch }
+        if mode.enabled { mode.key.nearest(pitch) } else { pitch }
     }
 
     /// Scale-mode move of a selection: one shared degree step for the whole group (see
@@ -127,23 +128,27 @@ pub(super) fn controls(app: &mut StudioApp, ui: &mut Ui, layout: &mut KeysLayout
     if key != before {
         let _ = app.keys_scale_set(json!({"root": key.root, "scale": key.scale}));
     }
-    ui.small("Shift: chromatic entry and dragging (temporarily unfolds).");
+    ui.small("Notes outside the scale: turn Scale mode off.");
     ui.small("Live MIDI always plays and records exactly as struck.");
 }
 
-/// Reusable row visibility mapping: folding hides empty rows, never existing notes.
-#[derive(Clone, Copy)]
+/// Reusable row visibility mapping: folding hides empty rows, never existing notes. No modifier
+/// changes it (#421): only the scale mode, the fold setting, the key and the notes and held keys
+/// folding keeps visible.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Rows {
     visible: [bool; 128],
     ranks: [u8; 128],
     pitches: [u8; 128],
     count: u8,
+    folded: bool,
 }
 
 impl Rows {
-    pub(super) fn new(mode: ScaleMode, notes: &[Note], live: &[u8; 128], chromatic: bool) -> Self {
+    pub(super) fn new(mode: ScaleMode, notes: &[Note], live: &[u8; 128]) -> Self {
         let mut visible = [true; 128];
-        if mode.enabled && mode.fold && !chromatic {
+        let folded = mode.enabled && mode.fold;
+        if folded {
             for (pitch, show) in visible.iter_mut().enumerate() {
                 *show = mode.key.contains(pitch as u8) || live[pitch] > 0;
             }
@@ -161,7 +166,17 @@ impl Rows {
                 count += 1;
             }
         }
-        Self { visible, ranks, pitches, count }
+        Self { visible, ranks, pitches, count, folded }
+    }
+
+    /// The rows are the scale's (and the kept notes'), not the semitones.
+    pub(super) fn folded(&self) -> bool {
+        self.folded
+    }
+
+    /// How many rows are visible.
+    pub(super) fn count(&self) -> i32 {
+        i32::from(self.count)
     }
 
     pub(super) fn contains(&self, pitch: u8) -> bool {

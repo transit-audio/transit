@@ -93,7 +93,8 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     // The corner has room for little: "Auto 1/16", "Grid: 1/8T", "Snap off".
     let grid_text = grid::label_at(ppt, grid::bar_ticks(&s), &prefs.grid).replace("Adaptive", "Auto");
     let rows = grid.height() / kh;
-    let row_map = scale::Rows::new(app.keys_scale(), &all.notes, &app.keys.live, ui.input(|i| chromatic(i.modifiers)));
+    let body = Rect::from_min_max(pos2(area.min.x, ruler.max.y), area.max);
+    let row_map = app.keys_rows(ui, body, scale::Rows::new(app.keys_scale(), &all.notes, &app.keys.live));
     if app.keys.fit {
         app.keys.fit = false;
         let (lo, hi) = (all.notes.iter().map(|n| n.pitch).min(), all.notes.iter().map(|n| n.pitch).max());
@@ -739,8 +740,8 @@ fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &Cli
         for inside in insides.iter().filter(|r| r.width() > 0.0) {
             p.rect_filled(row.intersect(*inside), 0.0, fill);
         }
-        if pitch.is_multiple_of(12) {
-            p.line_segment([pos2(grid.min.x, y + map.kh), pos2(grid.max.x, y + map.kh)], Stroke::new(1.0, TOKENS.grid_bar));
+        if let Some(line) = rows::row_line(&map.rows, pitch) {
+            p.line_segment([pos2(grid.min.x, y + map.kh), pos2(grid.max.x, y + map.kh)], line);
         }
     }
     let rp = ui.painter().with_clip_rect(ruler);

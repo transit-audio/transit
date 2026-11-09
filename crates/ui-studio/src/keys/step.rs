@@ -22,8 +22,6 @@ struct Entered {
 #[derive(Debug, Default)]
 pub struct StepState {
     pub on: bool,
-    /// Shift held in the current UI frame: step entry may keep accidentals.
-    pub chromatic: bool,
     /// The insertion point in ticks from the clip start.
     pub cursor: i64,
     /// Step length in ticks; the piano roll's grid when `None`.
@@ -250,7 +248,7 @@ impl StudioApp {
             StepAction::Tie => self.step_tie(&[], 1),
             StepAction::TieChord(mut chord) => {
                 for (pitch, _) in &mut chord.notes {
-                    *pitch = self.scale_entry(*pitch, self.keys.step.chromatic);
+                    *pitch = self.scale_entry(*pitch);
                 }
                 chord.notes.sort_unstable_by_key(|n| n.0);
                 chord.notes.dedup_by_key(|n| n.0);
@@ -309,7 +307,7 @@ impl StudioApp {
         let now = self.step_now_ms();
         let mut chord = self.keys.step.input.preview(now, self.ui.keys.step_hold)?;
         for (pitch, _) in &mut chord.notes {
-            *pitch = self.scale_entry(*pitch, self.keys.step.chromatic);
+            *pitch = self.scale_entry(*pitch);
         }
         Some(chord)
     }
@@ -348,8 +346,7 @@ impl StudioApp {
             return;
         }
         let fixed = self.ui.keys.step_fixed.then_some(self.ui.keys.step_velocity.clamp(1, 127));
-        let mut notes: Vec<(u8, u8)> =
-            notes.iter().map(|(pitch, played)| (self.scale_entry(*pitch, self.keys.step.chromatic), fixed.unwrap_or(*played))).collect();
+        let mut notes: Vec<(u8, u8)> = notes.iter().map(|(pitch, played)| (self.scale_entry(*pitch), fixed.unwrap_or(*played))).collect();
         notes.sort_unstable_by_key(|n| n.0);
         notes.dedup_by_key(|n| n.0);
         let pitches: Vec<u8> = notes.iter().map(|n| n.0).collect();
