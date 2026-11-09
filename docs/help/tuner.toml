@@ -11,7 +11,7 @@ text = "A chromatic tuner for the audio that reaches this slot. The sound passes
 [[entry]]
 id = "tuner.note"
 name = "Note"
-text = "The note nearest the pitch it hears, with its octave (C4 is middle C, A4 is the reference). It turns green when the pitch is within 3 cents of the note."
+text = "The note nearest the pitch it hears, with its octave as Options > Middle C names it (the reference is the A above middle C). It turns green when the pitch is within 3 cents of the note."
 
 [[entry]]
 id = "tuner.meter"
@@ -31,7 +31,7 @@ text = "Shown when the input is quieter than -50 dBFS or has no clear pitch (noi
 [[entry]]
 id = "tuner.reference"
 name = "Reference"
-text = "The frequency of A4, 415 to 466 Hz (440 Hz is standard). Everything else is tuned from it; the Macro Oscillator's concert pitch uses the same range."
+text = "The frequency of the A above middle C (MIDI 69), 415 to 466 Hz (440 Hz is standard). Everything else is tuned from it; the Macro Oscillator's concert pitch uses the same range."
 
 [[entry]]
 id = "tuner.hold"

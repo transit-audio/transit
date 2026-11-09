@@ -89,7 +89,7 @@ other non-string aliases (including null) are rejected with an error directing y
 default 100). Start defaults to the clip beginning; length defaults to 480 ticks.
 
 Roots may be MIDI numbers 0–127 or note names with an optional sharp/flat and octave:
-`G3`, `Bb2`, `F#3`. Names use transit's display convention: **C3 = MIDI 60**. A bare name
+`G3`, `Bb2`, `F#3`. Names use a fixed convention, **C3 = MIDI 60**, whatever the Middle C setting. A bare name
 uses octave 3 (`G` means `G3`). Qualities are `maj`, `min`, `dim`, `aug`, `maj7`, `min7`,
 `dom7`, `sus2`, and `sus4`. Alternatively, `notes: [0, 3, 7]` supplies semitone intervals
 from the root (1–32 entries, each between -127 and 127).

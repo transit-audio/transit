@@ -41,7 +41,7 @@ text = "How much velocity matters: each strike darkens Brightness by Accent time
 [[entry]]
 id = "resonator.tonic"
 name = "Tonic"
-text = "The note the sympathetic strings drone on at low Structure (the module's frequency knob). It does not move the pitch of a new note: a note plays its own pitch, A4 (MIDI 69) at 440 Hz. Voices still ringing shift with Tonic until they are struck again."
+text = "The note the sympathetic strings drone on at low Structure (the module's frequency knob). It does not move the pitch of a new note: a note plays its own pitch, MIDI 69 at 440 Hz. Voices still ringing shift with Tonic until they are struck again."
 
 [[entry]]
 id = "resonator.spread"

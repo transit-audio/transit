@@ -66,7 +66,7 @@ text = "The scale's root note."
 [[entry]]
 id = "random_sequencer.octave"
 name = "Octave"
-text = "The octave of the root at the bottom of the range (3: C3, MIDI note 48)."
+text = "The octave of the root at the bottom of the range, numbered as Options > Middle C names octaves. The default puts a C root at MIDI 48, an octave below middle C."
 
 [[entry]]
 id = "random_sequencer.range"

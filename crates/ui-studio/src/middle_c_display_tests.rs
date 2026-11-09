@@ -141,3 +141,28 @@ fn the_built_in_editors_note_parameters_follow_the_setting() {
     }
     assert_eq!((gone, new), (want_gone, want_new), "nothing else in the frame changed");
 }
+
+/// ADR 0051 decision 6: MusicXML keeps its own convention (scientific pitch, C4 = 60) and never
+/// reads the setting: the export of one clip is byte-identical under both.
+#[test]
+fn musicxml_export_is_byte_identical_under_both_settings() {
+    let mut app = crate::tests::app();
+    let (t, clip, _) = crate::tests::track_with_clip(&mut app);
+    for (pitch, start) in [(60, 0), (69, 960), (61, 1920), (48, 2880)] {
+        app.run("midi.note_add", json!({"clip": clip.0, "pitch": pitch, "start_ticks": start, "length_ticks": 960})).unwrap();
+    }
+    let dir = std::env::temp_dir().join(format!("transit-middle-c-xml-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut out = Vec::new();
+    for mc in ["C3", "C4"] {
+        app.run("options.middle_c", json!({"value": mc})).unwrap();
+        let path = dir.join(format!("score-{mc}.musicxml"));
+        app.run("file.export_sibelius", json!({"path": path.to_string_lossy(), "tracks": [t.0]})).unwrap();
+        out.push(std::fs::read(&path).unwrap());
+    }
+    assert_eq!(out[0], out[1], "the setting does not reach the file");
+    let text = String::from_utf8(out[0].clone()).unwrap();
+    assert!(text.contains("<step>C</step><octave>4</octave>"), "MIDI 60 is C4 in MusicXML: {text}");
+    assert!(text.contains("<step>A</step><octave>4</octave>"), "MIDI 69 is A4 in MusicXML");
+    let _ = std::fs::remove_dir_all(dir);
+}

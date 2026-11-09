@@ -417,7 +417,7 @@ analog stages. Their license notices are in **Help > About transit**.
 - **Aux Mix** crossfades to the model's auxiliary output, a variation of the sound. **Level** is
   the output level; at 0 dB the instrument peaks at full scale (one LSB, 0.0003 dB, under 0 dBFS),
   and the -6 dB default leaves headroom on the track.
-- **Tuning**: the port plays at concert pitch, A4 = 440 Hz. The original firmware's arithmetic is
+- **Tuning**: the port plays at concert pitch, the A above middle C (MIDI 69) at 440 Hz. The original firmware's arithmetic is
   kept bit-exact in transit's code for its tests; the module itself plays in tune because its audio
   clock runs at the rate that arithmetic assumes.
 - The voices run at 44.1, 48, 88.2 or 96 kHz. At other project rates they run at the nearest of
@@ -494,7 +494,7 @@ and off, and a disabled Shaper that is shown dims and stays editable.
   a route draws an amber ring from its value to its reach, and the x at a row's end clears it. Each
   row has a **Source**, a **Destination**, a **Via**, a **Curve** and an **Amount** (-100% to +100%): every 12 frames, for every voice,
   it adds amount × curve(source) × via to its destination. Sources: LFO 1 and 2, the amp and filter
-  envelopes, velocity, the key (centered on middle C, C3), release velocity, aftertouch, poly
+  envelopes, velocity, the key (centered on middle C, MIDI 60), release velocity, aftertouch, poly
   aftertouch, the mod wheel, pitch bend, a random value per note, and the rack's eight macros when
   the track is in a rack. Destinations, at 100% and a full source: Pitch (24 semitones), Harmonics,
   Timbre, Morph and Decay (their whole travel), Level (silence to double), Cutoff (six octaves),
@@ -557,7 +557,7 @@ open-source resonator firmware (MIT license), checked sample by sample against h
   sustain pedal does not stop a ringing voice; **Damping** decides how long it rings.
 - **Accent** is how much velocity matters: a soft note darkens **Brightness** from that note on (one
   control for every voice, as on the module). **Tonic** is the note the sympathetic strings drone on
-  at low Structure; a new note keeps its own pitch (A4, MIDI 69, at 440 Hz), while voices still ringing shift with Tonic until they are struck again.
+  at low Structure; a new note keeps its own pitch (MIDI 69 at 440 Hz), while voices still ringing shift with Tonic until they are struck again.
 - **Tune**, **Bend Range** and the matrix's Pitch move every voice at once. The mod wheel and
   aftertouch work through the matrix.
 - **Spread**: at polyphony 2 and 4 the module puts odd voices on one output and even voices on the
@@ -907,7 +907,7 @@ sharp that turns green within 3 cents, and the frequency in hertz. Tune the synt
 sits in the green zone.
 
 The audio passes through the Tuner unchanged and with no delay, so it can stay on the track while
-you play. **Reference** sets the pitch of A4 (415 to 466 Hz, 440 Hz by default; the Macro
+you play. **Reference** sets the pitch of the A above middle C (415 to 466 Hz, 440 Hz by default; the Macro
 Oscillator's concert pitch uses the same range) and **Hold** freezes the display on the last
 reading. The Tuner hears the track's channels summed to one, so a synth on one side of a stereo
 return reads at its full level, while a stereo pair in opposite phase cancels, as in any mono sum.

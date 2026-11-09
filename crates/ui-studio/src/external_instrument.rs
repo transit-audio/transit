@@ -441,7 +441,7 @@ fn measure_button(
     let resp = button(ui, rb, "ext_measure", label, blocked.is_none());
     let resp =
         resp.on_hover_text(blocked.clone().unwrap_or_else(|| {
-            "Play a warm-up note and 8 notes (C4, velocity 100) to the synth and time their sound on the return: about 13 s".into()
+            "Play a warm-up note and 8 notes (MIDI note 60, velocity 100) to the synth and time their sound on the return: about 13 s".into()
         }));
     c.external_measure = crate::arrange::r4(rb);
     c.external_measure_text = label.into();

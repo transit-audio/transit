@@ -11,7 +11,7 @@
 //!   audio input for the instrument is out of scope here (#274 covers instrument audio inputs).
 //! - **Notes.** The module is one voice with grain polyphony inside (up to 32 grains), so the
 //!   instrument is monophonic in pitch, with no voice allocator. A note-on sets the module's PITCH
-//!   CV to the key (`key − 48` semitones over the oscillator's root, C3 = 130.81 Hz, so MIDI 69
+//!   CV to the key (`key − 48` semitones over the oscillator's root, MIDI 48 = 130.81 Hz, so MIDI 69
 //!   plays 440 Hz) and raises the SEED input's gate; the gate stays high while any key is held. The
 //!   SEED gate is the firmware's own gate semantic: below Density 48% a regular train of grains
 //!   runs while the gate is high (the rising edge fires the first at once), between 48% and 52% each
@@ -81,7 +81,7 @@ pub const BLOCK: usize = crate::plugins::macro_osc::BLOCK;
 /// resolution's index), named as the Texture insert names them.
 pub const QUALITIES: [&str; 4] = super::texture::QUALITIES;
 
-/// The key whose pitch is the oscillator's root (C3, 130.81 Hz): a note's PITCH CV is its key
+/// The key whose pitch is the oscillator's root (MIDI 48, 130.81 Hz): a note's PITCH CV is its key
 /// minus this, in semitones.
 pub const ROOT_KEY: f32 = 48.0;
 

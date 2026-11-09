@@ -36,7 +36,7 @@ text = "The internal oscillator's waveform: Sine, Triangle or Saw for the algori
 [[entry]]
 id = "cross_modulator.frequency"
 name = "Osc Frequency"
-text = "The internal oscillator's pitch, 65 Hz (C2) to 2.09 kHz (C7), the same at every session rate."
+text = "The internal oscillator's pitch, 65 Hz (MIDI 36) to 2.09 kHz (MIDI 96), the same at every session rate."
 
 [[entry]]
 id = "cross_modulator.swap"
