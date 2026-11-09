@@ -41,7 +41,7 @@ pub use opus::{
 };
 pub use pcm::MAX_DECODE_SAMPLES;
 use std::io::{Seek, Write};
-pub use wav_cues::{BadChunk, BadChunkReason, Cue, CueDiscard, CueDiscardReason, CueRead, MAX_CUE_LABEL_BYTES, wav_cues, wav_tempo};
+pub use wav_cues::{BadChunk, BadChunkReason, Cue, CueDiscard, CueDiscardReason, CueRead, MAX_CUE_LABEL_BYTES, MAX_CUE_POINTS, wav_cues, wav_tempo};
 
 /// Errors from probing, decoding and encoding.
 #[derive(Debug, thiserror::Error)]

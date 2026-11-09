@@ -5,8 +5,8 @@
 //! The input is untrusted: every chunk size and count is bounded by the bytes that hold it before
 //! it is used, offsets use checked arithmetic, and the walk stops after
 //! [`MAX_CHUNKS`](crate::wav::MAX_CHUNKS) chunks and sub-chunks. Nothing here panics. What is
-//! returned is bounded: cue points by the 24 bytes each takes in the file, each `labl` is given
-//! to at most one cue, and a label's text is at most three bytes per `labl` byte in the file (an
+//! returned is bounded: at most [`MAX_CUE_POINTS`] cue points are read, each `labl` is given to
+//! at most one cue, and a label's text is at most three bytes per `labl` byte in the file (an
 //! invalid UTF-8 byte reads as the three-byte U+FFFD) and at most [`MAX_CUE_LABEL_BYTES`]. The
 //! bad-chunk list holds at most two entries per chunk walked.
 
@@ -16,6 +16,11 @@ use std::collections::HashMap;
 
 /// The longest label kept, in bytes of UTF-8; a longer one is cut at a char boundary.
 pub const MAX_CUE_LABEL_BYTES: usize = 4096;
+
+/// The most cue points read from a file, over all its `cue ` chunks; the rest are reported as
+/// [`BadChunkReason::TooMany`]. A slice set holds far fewer, and the caller refuses an
+/// over-capacity set from the true count of points kept, so this cap is never reached in use.
+pub const MAX_CUE_POINTS: usize = 65_536;
 
 /// Bytes of one cue point in a `cue ` chunk.
 const CUE_POINT_LEN: usize = 24;
@@ -64,6 +69,9 @@ pub enum BadChunkReason {
     /// The chunk is too short to hold its fixed fields (a `cue ` without a count, a `labl`
     /// without a cue id); it was ignored.
     TooShort,
+    /// The file holds more than [`MAX_CUE_POINTS`] cue points; this chunk's points past the cap
+    /// were not read.
+    TooMany,
 }
 
 /// A malformed `cue `, `LIST` or `labl` chunk met while reading cues.
@@ -196,7 +204,11 @@ fn read_cue_chunk(c: &Chunk<'_>, out: &mut Vec<RawCue>, bad: &mut Vec<BadChunk>)
     if !c.truncated && sized != Some(c.body.len()) {
         report(BadChunkReason::CountMismatch);
     }
-    let n = count.min(fit);
+    let present = count.min(fit);
+    let n = present.min(MAX_CUE_POINTS.saturating_sub(out.len()));
+    if n < present {
+        report(BadChunkReason::TooMany);
+    }
     out.reserve(n);
     for i in 0..n {
         let at = 4 + i * CUE_POINT_LEN;

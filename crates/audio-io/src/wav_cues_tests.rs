@@ -290,3 +290,19 @@ fn wav_cues_label_goes_to_first_cue_with_its_id() {
     assert_eq!((labelled[0].id, labelled[0].frame), (1, 0));
     assert_eq!(read.discarded, vec![]);
 }
+
+#[test]
+fn wav_cues_caps_points_read() {
+    let over = MAX_CUE_POINTS + 10;
+    let base = base_wav(over + 100, false);
+    let points: Vec<(u32, u32)> = (0..over as u32).map(|f| (f, f)).collect();
+    let first = cue_chunk(&points);
+    let mut after = first.clone();
+    after.extend_from_slice(&cue_chunk(&[(9_999_999, 5)]));
+    let read = wav_cues(&place(&base, &[], &after));
+    assert_eq!(read.cues.len(), MAX_CUE_POINTS);
+    assert_eq!(read.cues.last().map(|c| c.frame), Some(MAX_CUE_POINTS as u64 - 1));
+    assert_eq!(read.discarded, vec![]);
+    let too_many = |offset| BadChunk { chunk: *b"cue ", offset, reason: BadChunkReason::TooMany };
+    assert_eq!(read.bad_chunks, vec![too_many(base.len()), too_many(base.len() + first.len())]);
+}
