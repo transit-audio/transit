@@ -59,7 +59,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             let config = egui::containers::menu::MenuConfig::new().style(crate::chrome::menu_style);
             egui::MenuBar::new().style(crate::chrome::menu_bar_style).config(config).ui(ui, |ui| {
-                let file_menu = ui.menu_button("File", |ui| {
+                let file_menu = crate::chrome::bar_menu(ui, "File", false, |ui| {
                     if ui.add(crate::chrome::MenuRow::new("New")).clicked() {
                         app.run_or_ask("session.new", json!({}));
                         ui.close();
@@ -92,7 +92,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                     }
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "File".into(), String::new(), file_menu.response.rect));
-                let edit_menu = ui.menu_button("Edit", |ui| {
+                let edit_menu = crate::chrome::bar_menu(ui, "Edit", false, |ui| {
                     history_item(app, ui, false);
                     history_item(app, ui, true);
                     let items: [(&str, A, fn(&mut StudioApp)); 6] = [
@@ -122,7 +122,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                     }
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Edit".into(), String::new(), edit_menu.response.rect));
-                let track_menu = ui.menu_button("Track", |ui| {
+                let track_menu = crate::chrome::bar_menu(ui, "Track", false, |ui| {
                     if ui.add(crate::chrome::MenuRow::new("Add Mono Audio Track").shortcut(label(A::NewAudioTrack))).clicked() {
                         let _ = app.add_audio_track("mono");
                         ui.close();
@@ -182,7 +182,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 app.arrange.bar_menu.retain(|m| m.label != "Track");
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Track".into(), String::new(), track_menu.response.rect));
                 let mut view_items = Vec::new();
-                let auto_menu = ui.menu_button("Automation", |ui| {
+                let auto_menu = crate::chrome::bar_menu(ui, "Automation", true, |ui| {
                     // Follow-ups: a preference, not the document.
                     let on = app.ui.thin_after_write;
                     let b = ui.add(crate::chrome::MenuRow::new("Thin after write").checked(on));
@@ -199,7 +199,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                     }
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Automation".into(), String::new(), auto_menu.response.rect));
-                let view_menu = ui.menu_button("View", |ui| {
+                let view_menu = crate::chrome::bar_menu(ui, "View", true, |ui| {
                     let u = &mut app.ui;
                     for (name, action, flag) in [
                         ("Browser", A::ToggleBrowser, u.browser.show),
@@ -231,7 +231,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                     }
                     // Appearance: System follows the OS; kept in `UiState` (slice 5). v0.7.0 ships
                     // dark only: System and Light show unavailable (ADR 0045).
-                    let sub = ui.menu_button(crate::chrome::submenu_atoms("Appearance"), |ui| {
+                    let sub = crate::chrome::submenu(ui, "Appearance", true, |ui| {
                         for a in crate::theme::Appearance::ALL {
                             let on = app.ui.appearance.effective() == a;
                             let available = a.available();
@@ -246,7 +246,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         }
                         ui.separator();
                         let zoom_label = format!("Interface zoom: {:.0}%", app.ui.ui_zoom * 100.0);
-                        let zoom = ui.menu_button(crate::chrome::submenu_atoms(&zoom_label), |ui| {
+                        let zoom = crate::chrome::submenu(ui, &zoom_label, true, |ui| {
                             for percent in [100, 125, 150, 175, 200] {
                                 let factor = percent as f32 / 100.0;
                                 let name = format!("{percent}%");
@@ -266,7 +266,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 // Where the View menu and its entries sit, for `ui.inspect` and tests (slice 4).
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "View".into(), String::new(), view_menu.response.rect));
                 app.arrange.bar_menu.extend(view_items);
-                let options = ui.menu_button("Options", |ui| {
+                let options = crate::chrome::bar_menu(ui, "Options", true, |ui| {
                     let b = ui.add(crate::chrome::MenuRow::new("Low Latency").checked(app.ui.low_latency));
                     crate::help::hover(ui, &b, crate::help::Id::OptionsLowLatency);
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Low Latency".into(), "options.low_latency".into(), b.rect));
@@ -277,7 +277,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Options".into(), String::new(), options.response.rect));
                 let mut window_items = Vec::new();
-                let window_menu = ui.menu_button("Window", |ui| {
+                let window_menu = crate::chrome::bar_menu(ui, "Window", true, |ui| {
                     let on = app.ui.midi_monitor.open;
                     let b = ui.add(crate::chrome::MenuRow::new("MIDI Monitor").checked(on));
                     window_items.push(crate::mixer::MenuItem::at(ui, "MIDI Monitor".into(), String::new(), b.rect));
@@ -327,7 +327,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Window".into(), String::new(), window_menu.response.rect));
                 app.arrange.bar_menu.extend(window_items);
-                let transport_menu = ui.menu_button("Transport", |ui| {
+                let transport_menu = crate::chrome::bar_menu(ui, "Transport", true, |ui| {
                     let cycle = app.engine.session().edit.loop_playback;
                     let items: [(&str, A, &str, Value); 5] = [
                         ("Play / Stop", A::PlayStop, "transport.toggle", json!({})),
@@ -363,7 +363,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Transport".into(), String::new(), transport_menu.response.rect));
                 let mut audio_items = Vec::new();
-                let audio_menu = ui.menu_button("Audio", |ui| {
+                let audio_menu = crate::chrome::bar_menu(ui, "Audio", false, |ui| {
                     let name = app.player.as_ref().map_or("No audio device (--no-audio)".to_string(), |p| p.device_name.clone());
                     crate::chrome::menu_note(ui, egui::RichText::new(name).color(TOKENS.text_dim));
                     let b = ui.add(crate::chrome::MenuRow::new("Audio Devices…"));
@@ -388,7 +388,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Audio".into(), String::new(), audio_menu.response.rect));
                 app.arrange.bar_menu.extend(audio_items);
-                let help = ui.menu_button("Help", |ui| {
+                let help = crate::chrome::bar_menu(ui, "Help", true, |ui| {
                     let b = ui.add(crate::chrome::MenuRow::new("Keyboard Shortcuts"));
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Keyboard Shortcuts".into(), String::new(), b.rect));
                     if b.clicked() {

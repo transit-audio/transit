@@ -293,14 +293,14 @@ pub(super) fn track_header(
     let id = t.id;
     let kind = t.kind;
     let has_instrument = t.instrument.is_some();
-    crate::chrome::context_menu(&resp).show(|ui| track_menu(app, ui, id, kind, has_instrument));
+    crate::chrome::context_menu(&resp, false).show(|ui| track_menu(app, ui, id, kind, has_instrument));
     // The inactive tag and the chip cover part of the name area, so they get the same menu on right-click.
     if let Some(tag) = tag_resp {
-        crate::chrome::context_menu(&tag).id(tag.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));
+        crate::chrome::context_menu(&tag, false).id(tag.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));
     }
     if let Some(chip) = chip {
         // Its own popup id: the chip's response id already keys the destination picker.
-        crate::chrome::context_menu(&chip).id(chip.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));
+        crate::chrome::context_menu(&chip, false).id(chip.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));
     }
 }
 
@@ -413,10 +413,9 @@ pub(super) fn header_drag(app: &mut StudioApp, ui: &Ui, s: &Session, layout: &mu
 pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: TrackKind, has_instrument: bool) {
     if kind == TrackKind::Instrument {
         // Instrument ▸: the device chain's instrument menu (a click in its filter box keeps it open).
-        let config =
-            egui::containers::menu::MenuConfig::new().style(crate::chrome::menu_style).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        let config = crate::chrome::submenu_config(ui, true).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
         let mut picked = None;
-        let (button, _) = egui::containers::menu::SubMenuButton::new(crate::chrome::submenu_atoms("Instrument")).config(config).ui(ui, |ui| {
+        let (button, _) = egui::containers::menu::SubMenuButton::new(crate::chrome::submenu_atoms(ui, "Instrument")).config(config).ui(ui, |ui| {
             let lists = app.instrument_lists();
             let current = app.engine.session().track(id).and_then(|t| t.instrument.as_ref()).map(|i| i.plugin.clone());
             let mut filter = std::mem::take(&mut app.mixer.instrument_filter);
@@ -478,7 +477,7 @@ pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: Tr
         crate::groups::menu_items(app, ui, Some(id));
         ui.separator();
     }
-    ui.menu_button(crate::chrome::submenu_atoms("Color"), |ui| {
+    crate::chrome::submenu(ui, "Color", false, |ui| {
         for (i, c) in PALETTE.iter().enumerate() {
             let (r, resp) = ui.allocate_exact_size(vec2(120.0, 16.0), Sense::click());
             // The outline carries the 3:1 boundary where a pale swatch meets the light popup.

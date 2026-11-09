@@ -49,7 +49,7 @@ pub(super) fn row_menu(app: &mut StudioApp, resp: &Response, row: &Row) -> Optio
         return None;
     }
     let mut act = None;
-    crate::chrome::context_menu(resp).show(|ui| {
+    crate::chrome::context_menu(resp, false).show(|ui| {
         if let Some(Some(li)) = row.root {
             let b = ui.add(crate::chrome::MenuRow::new("Remove from Locations"));
             publish(app, ui, &b, "Remove from Locations", "remove");

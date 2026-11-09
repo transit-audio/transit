@@ -347,7 +347,7 @@ pub(crate) fn show(
     let menu = sq(x);
     let mresp = button(ui, id("menu"), menu, true);
     paint_glyph(&p, menu.center(), "menu", t.text_muted);
-    crate::chrome::popup_menu(&mresp).show(|ui| {
+    crate::chrome::popup_menu(&mresp, true).show(|ui| {
         if ui.add(crate::chrome::MenuRow::new("Follow Selection").checked(follow)).clicked() {
             res.toggle_follow = true;
         }

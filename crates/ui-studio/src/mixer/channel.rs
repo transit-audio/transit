@@ -216,10 +216,10 @@ fn name_row(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, t: 
         }
         menu.push(crate::menus::activity_item(app, ui, Some(id)));
     };
-    crate::chrome::context_menu(&resp).show(&mut track_menu);
+    crate::chrome::context_menu(&resp, false).show(&mut track_menu);
     // The tag covers part of the name, so it gets the same menu on right-click.
     if let Some(tag_resp) = &tag_resp {
-        crate::chrome::context_menu(tag_resp).id(tag_resp.id.with("strip-menu")).show(&mut track_menu);
+        crate::chrome::context_menu(tag_resp, false).id(tag_resp.id.with("strip-menu")).show(&mut track_menu);
     }
 }
 
@@ -362,7 +362,7 @@ fn pan(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, t: &Trac
             ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
         }
         control(app, ui, &resp, me, 1.0, true, true);
-        crate::chrome::context_menu(&resp).show(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Pan));
+        crate::chrome::context_menu(&resp, true).show(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Pan));
         crate::midi_learn::mark(app, p, a.dial, id, transit_model::Control::Pan);
     }
     let pan_text = fine::pan_text(bal);
@@ -436,7 +436,7 @@ fn toggles(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, t: &
             _ => None,
         };
         if let Some(control) = learnable.filter(|_| enabled) {
-            crate::chrome::context_menu(&resp).show(|ui| app.midi_learn_menu(ui, id, control.clone()));
+            crate::chrome::context_menu(&resp, true).show(|ui| app.midi_learn_menu(ui, id, control.clone()));
             crate::midi_learn::mark(app, p, br, id, control);
         }
         match label {
@@ -468,7 +468,7 @@ fn fader_and_meter(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Re
         ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
     }
     control(app, ui, &resp, me, travel.height().max(1.0), true, true);
-    crate::chrome::context_menu(&resp).show(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Volume));
+    crate::chrome::context_menu(&resp, true).show(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Volume));
     crate::midi_learn::mark(app, p, column, id, transit_model::Control::Volume);
     // The meter, in the fader's meter slot.
     let d = app.meters.get(&id).copied().unwrap_or_default();

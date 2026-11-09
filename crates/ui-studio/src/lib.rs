@@ -719,6 +719,8 @@ mod loop_hue_tests;
 #[cfg(test)]
 mod main_monitor_tests;
 #[cfg(test)]
+mod menu_gutter_tests;
+#[cfg(test)]
 mod menu_padding_tests;
 #[cfg(test)]
 mod midi_fx_panel_tests;

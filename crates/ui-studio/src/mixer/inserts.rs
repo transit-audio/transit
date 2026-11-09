@@ -148,7 +148,7 @@ fn insert_slot(
     let bypass = ins.bypass;
     let editor_open = app.ui.plugin_windows.contains(&(id, slot));
     let retry_name = name.clone();
-    crate::chrome::context_menu(&resp).id(resp.id.with("insert_ctx")).show(|ui| {
+    crate::chrome::context_menu(&resp, false).id(resp.id.with("insert_ctx")).show(|ui| {
         let label = if editor_open { "Close editor" } else { "Open editor" };
         let b = ui.add_enabled(enabled, crate::chrome::MenuRow::new(label));
         menu.push(MenuItem::at(ui, label.into(), "editor".into(), b.rect));

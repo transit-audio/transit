@@ -138,7 +138,7 @@ pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, str
     let region = s.edit.loop_range;
     let enabled = s.edit.loop_playback;
     gesture(app, ui, &resp, s, map, strip, true);
-    crate::chrome::context_menu(&resp).show(|ui| {
+    crate::chrome::context_menu(&resp, false).show(|ui| {
         let item = ui.add_enabled(!region.is_empty(), crate::chrome::MenuRow::new("Clear loop"));
         app.arrange.menu.push(crate::mixer::MenuItem::at(ui, "Clear loop".into(), String::new(), item.rect));
         if item.clicked() {

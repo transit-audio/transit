@@ -157,7 +157,7 @@ fn lane(
     crate::icons::paint(&lp, menu.center(), crate::icons::Icon::ChevronDown, 12.0, TOKENS.text);
     let can_delete = !active;
     let track = t.id;
-    crate::chrome::popup_menu(&mresp).width(150.0).show(|ui| {
+    crate::chrome::popup_menu(&mresp, false).width(150.0).show(|ui| {
         flatten_item(app, ui, track, None);
         let label = format!("Delete Take {number}");
         let b = ui.add_enabled(can_delete, crate::chrome::MenuRow::new(&label));

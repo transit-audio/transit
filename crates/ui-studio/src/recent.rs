@@ -108,7 +108,7 @@ impl ExistenceCache {
 pub fn menu(app: &mut StudioApp, ui: &mut egui::Ui) {
     let empty = app.ui.recent_files.is_empty();
     let sub = ui.add_enabled_ui(!empty, |ui| {
-        ui.menu_button(crate::chrome::submenu_atoms("Open Recent"), |ui| {
+        crate::chrome::submenu(ui, "Open Recent", false, |ui| {
             let mut picked = None;
             let entries: Vec<PathBuf> = app.ui.recent_files.iter().map(|r| r.path.clone()).collect();
             let cache_id = egui::Id::new("recent_file_existence");

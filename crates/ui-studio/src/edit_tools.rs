@@ -382,7 +382,7 @@ pub fn context_menu_items(app: &mut StudioApp, ui: &mut egui::Ui) {
         ui.close();
     }
     ui.add_enabled_ui(has_clip, |ui| {
-        ui.menu_button(crate::chrome::submenu_atoms("Color"), |ui| {
+        crate::chrome::submenu(ui, "Color", false, |ui| {
             if ui.add(crate::chrome::MenuRow::new("Track color")).clicked() {
                 let _ = app.color_selected(None);
                 ui.close();

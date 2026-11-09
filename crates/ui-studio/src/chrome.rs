@@ -308,8 +308,9 @@ pub fn menu_bar_style(st: &mut egui::Style) {
     row_corners(st);
 }
 
-/// Menu rows (`MenuConfig::style`): 24 high, radius 4, no border, hover `button.hover`; a row's
-/// left inset is `button_padding.x` ([`MenuRow`] adds the rest of the right inset).
+/// Menu rows (`MenuConfig::style`) in a menu that has checks: 24 high, radius 4, no border, hover
+/// `button.hover`; a row's left inset is `button_padding.x` ([`MenuRow`] adds the rest of the right
+/// inset) and every row keeps the 16 px check gutter ([`row_has_gutter`]).
 pub fn menu_style(st: &mut egui::Style) {
     egui::containers::menu::menu_style(st);
     st.spacing.interact_size.y = c::ROW_HEIGHT;
@@ -317,39 +318,107 @@ pub fn menu_style(st: &mut egui::Style) {
     row_corners(st);
 }
 
+/// [`menu_style`] for a menu with no checkable row: no gutter, the text 12 inside the popup's edge.
+/// The declaration rides in the style (`spacing.menu_spacing`, which egui lays nothing out with):
+/// zero means no gutter, so every row knows it before the first one paints.
+pub fn menu_style_plain(st: &mut egui::Style) {
+    menu_style(st);
+    st.spacing.menu_spacing = 0.0;
+}
+
+/// The row style of a menu that has checks (`true`) or none (`false`).
+pub fn menu_style_for(checks: bool) -> fn(&mut egui::Style) {
+    if checks { menu_style } else { menu_style_plain }
+}
+
+/// Whether the menu `ui` is in reserves the check gutter (it has a checkable row).
+pub fn row_has_gutter(ui: &Ui) -> bool {
+    ui.style().spacing.menu_spacing != 0.0
+}
+
 /// A context menu on `response` (it opens at the pointer on a secondary click) in the chrome's
-/// popup with the row style ([`menu_style`]); its rows are [`MenuRow`]s and its submenus take the
-/// style from it. Chain `.id(..)` for a menu that shares a response with another popup.
-pub fn context_menu(response: &Response) -> egui::Popup<'static> {
-    egui::Popup::context_menu(response).style(menu_style)
+/// popup with the row style ([`menu_style_for`]); its rows are [`MenuRow`]s and `checks` says
+/// whether any of them can carry a check (the gutter is reserved only then). Its submenus decide
+/// for themselves ([`submenu`]). Chain `.id(..)` for a menu that shares a response with another popup.
+pub fn context_menu(response: &Response, checks: bool) -> egui::Popup<'static> {
+    egui::Popup::context_menu(response).style(menu_style_for(checks))
 }
 
 /// A popup menu that a click on `response` opens and closes, flush under it, in the chrome's
-/// popup with the row style ([`menu_style`]); its rows are [`MenuRow`]s.
-pub fn popup_menu(response: &Response) -> egui::Popup<'static> {
-    egui::Popup::menu(response).style(menu_style)
+/// popup with the row style ([`menu_style_for`]); its rows are [`MenuRow`]s and `checks` is as for
+/// [`context_menu`].
+pub fn popup_menu(response: &Response, checks: bool) -> egui::Popup<'static> {
+    egui::Popup::menu(response).style(menu_style_for(checks))
+}
+
+/// A menu-bar popup's gap under the bar's bottom line (the design's `chrome.popup.menuBarGap`, the
+/// value of `chrome.comboPopupGap`; a local constant until the token mirror lands).
+pub const POPUP_MENU_BAR_GAP: f32 = 4.0;
+
+/// A menu-bar menu: the item's button and its popup, whose top edge sits [`POPUP_MENU_BAR_GAP`]
+/// below the bar's bottom line, its left edge on the item's (the item is centered in the bar, so the gap is measured from the
+/// item's bottom edge plus the bar's padding). `checks` is as for [`context_menu`].
+pub fn bar_menu<R>(ui: &mut Ui, text: &str, checks: bool, content: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
+    let response = ui.add(egui::Button::new(text));
+    let config = submenu_config(ui, checks);
+    let below_item = (c::MENU_BAR_HEIGHT - c::MENU_BAR_ITEM_HEIGHT) / 2.0;
+    let inner = egui::Popup::menu(&response)
+        .close_behavior(config.close_behavior)
+        .style(config.style.clone())
+        .info(egui::UiStackInfo::new(egui::UiKind::Menu).with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config))
+        .gap(below_item + POPUP_MENU_BAR_GAP)
+        .show(content);
+    egui::InnerResponse::new(inner.map(|i| i.inner), response)
+}
+
+/// A submenu button in the menu `ui` and its popup, which decides for itself whether it has
+/// `checks` (a parent with checks does not force a gutter on a checkless submenu, nor the reverse).
+/// The button's own text lines up with its siblings' (the parent's gutter state).
+pub fn submenu<R>(
+    ui: &mut Ui,
+    text: impl Into<egui::WidgetText>,
+    checks: bool,
+    content: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let config = submenu_config(ui, checks);
+    let (response, inner) = egui::containers::menu::SubMenuButton::new(submenu_atoms(ui, text)).config(config).ui(ui, content);
+    egui::InnerResponse::new(inner.map(|i| i.inner), response)
+}
+
+/// The config of a menu or submenu with or without `checks`, keeping the enclosing menu's (or the
+/// bar's) close behavior.
+pub fn submenu_config(ui: &Ui, checks: bool) -> egui::containers::menu::MenuConfig {
+    egui::containers::menu::MenuConfig::new()
+        .close_behavior(egui::containers::menu::MenuConfig::find(ui).close_behavior)
+        .style(menu_style_for(checks))
 }
 
 /// The atom id of a menu row's check gutter (its rect is where the check is painted).
 pub const MENU_CHECK_ATOM: &str = "menu_check";
 
+/// The atom that stands where the gutter would in a menu without one: no width, so the row's gap
+/// after it puts the text 12 inside the popup's edge.
+const MENU_INSET_ATOM: &str = "menu_inset";
+
 /// A menu row as the chrome's Menus artboard draws it (#386; README "Menus and popups", Row):
-/// 4 px inset, the 16 px check gutter on every row (the 12 px check centered in it when checked,
-/// empty otherwise), 4 px gaps, the text, then the shortcut right-aligned with an 8 px inset. The
-/// height, the corners and the hover fill come from the menu's style ([`menu_style`]), so in the
-/// menu bar's menus, the context menus ([`context_menu`]) and the popups ([`popup_menu`]) the text
-/// starts 28 pt and the shortcut ends 12 pt inside the popup's edge.
+/// 4 px inset, the 16 px check gutter (only in a menu that has a checkable row, [`row_has_gutter`]),
+/// the 12 px check centered in it when checked, 4 px gaps, the text, then the shortcut
+/// right-aligned with an 8 px inset. The height, the corners and the hover fill come from the
+/// menu's style ([`menu_style_for`]), so in the menu bar's menus, the context menus
+/// ([`context_menu`]) and the popups ([`popup_menu`]) the text starts 28 pt inside the popup's
+/// edge (12 without the gutter) and the shortcut ends 12 pt inside it. A row built with
+/// [`MenuRow::checked`] in a menu declared without checks is a bug (debug assertion).
 #[must_use]
 pub struct MenuRow {
     text: egui::WidgetText,
     shortcut: Option<String>,
     right: Option<egui::WidgetText>,
-    checked: bool,
+    checked: Option<bool>,
 }
 
 impl MenuRow {
     pub fn new(text: impl Into<egui::WidgetText>) -> Self {
-        Self { text: text.into(), shortcut: None, right: None, checked: false }
+        Self { text: text.into(), shortcut: None, right: None, checked: None }
     }
 
     /// The row's keyboard shortcut, in the shortcut role ([`shortcut`]).
@@ -364,9 +433,10 @@ impl MenuRow {
         self
     }
 
-    /// Show the check mark in the gutter.
+    /// The row can carry a check: show the mark in the gutter when `on`. The menu must have been
+    /// declared with checks.
     pub fn checked(mut self, on: bool) -> Self {
-        self.checked = on;
+        self.checked = Some(on);
         self
     }
 }
@@ -377,8 +447,10 @@ impl egui::Widget for MenuRow {
             (Some(keys), _) => Some(shortcut(ui.ctx(), keys).into()),
             (None, other) => other,
         };
+        let has_gutter = row_has_gutter(ui);
+        debug_assert!(has_gutter || self.checked.is_none(), "a checkable row ({:?}) in a menu declared without checks", self.text.text());
         let gutter = egui::Id::new(MENU_CHECK_ATOM);
-        let atoms = (egui::Atom::custom(gutter, vec2(c::CHECK_GUTTER, c::CHECK_GLYPH)), self.text);
+        let atoms = (gutter_atom(has_gutter), self.text);
         // The right inset is the style's left one, a gap and this spacer.
         let end = egui::Atom::custom(egui::Id::new("menu_row_end"), vec2(c::ROW_PADDING[1] - c::ROW_PADDING[0] - c::ROW_GAP, 0.0));
         let b = egui::Button::new(atoms).gap(c::ROW_GAP);
@@ -387,7 +459,7 @@ impl egui::Widget for MenuRow {
             None => b.shortcut_text(end),
         };
         let resp = b.atom_ui(ui);
-        if self.checked
+        if self.checked == Some(true)
             && let Some(r) = resp.rect(gutter)
         {
             crate::icons::paint(ui.painter(), r.center(), crate::icons::Icon::Check, c::CHECK_GLYPH, TOKENS.text);
@@ -396,19 +468,29 @@ impl egui::Widget for MenuRow {
     }
 }
 
+/// The first atom of a row: the check gutter, or the empty inset in a menu without one.
+fn gutter_atom(has_gutter: bool) -> egui::Atom<'static> {
+    if has_gutter {
+        egui::Atom::custom(egui::Id::new(MENU_CHECK_ATOM), vec2(c::CHECK_GUTTER, c::CHECK_GLYPH))
+    } else {
+        egui::Atom::custom(egui::Id::new(MENU_INSET_ATOM), vec2(0.0, c::CHECK_GLYPH))
+    }
+}
+
 /// A line of text in a menu (Audio's device name) set where the rows' text starts.
 pub fn menu_note(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
+    let gutter = if row_has_gutter(ui) { c::CHECK_GUTTER } else { 0.0 };
     ui.horizontal(|ui| {
-        ui.add_space(ui.spacing().button_padding.x + c::CHECK_GUTTER + c::ROW_GAP);
+        ui.add_space(ui.spacing().button_padding.x + gutter + c::ROW_GAP);
         ui.label(text)
     })
     .inner
 }
 
-/// The atoms of a submenu's button: the empty check gutter, then the text, so its text lines up
-/// with the rows' ([`MenuRow`]).
-pub fn submenu_atoms(text: impl Into<egui::WidgetText>) -> (egui::Atom<'static>, egui::WidgetText) {
-    (egui::Atom::custom(egui::Id::new(MENU_CHECK_ATOM), vec2(c::CHECK_GUTTER, c::CHECK_GLYPH)), text.into())
+/// The atoms of a submenu's button: the gutter (empty) when the parent menu has one, then the
+/// text, so its text lines up with the rows' ([`MenuRow`]).
+pub fn submenu_atoms(ui: &Ui, text: impl Into<egui::WidgetText>) -> (egui::Atom<'static>, egui::WidgetText) {
+    (gutter_atom(row_has_gutter(ui)), text.into())
 }
 
 fn row_corners(st: &mut egui::Style) {

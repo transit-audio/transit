@@ -160,7 +160,7 @@ pub(crate) fn add_device_menu(app: &mut StudioApp, resp: &egui::Response, tid: T
     let mut hardware = false;
     let mut filter = std::mem::take(&mut app.mixer.effect_filter);
     let mut filter_rect = app.mixer.filter_rect;
-    crate::chrome::popup_menu(resp).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+    crate::chrome::popup_menu(resp, true).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         // A hardware insert (ADR 0015 section 5): the signal leaves on one path and returns on another.
         let b = ui.add(crate::chrome::MenuRow::new("Hardware Insert…")).on_hover_text("Send the signal through outboard gear on the audio interface");
         crate::help::hover(ui, &b, crate::help::Id::DeviceChainHardwareInsert);
@@ -421,7 +421,7 @@ fn card_body(
         // Right-click anywhere on the card: Retry. Made first, so the card's own controls keep
         // their clicks.
         let body = ui.interact(r.intersect(lane), ui.id().with(("card_retry_menu", t.0, salt)), Sense::click());
-        crate::chrome::context_menu(&body).id(body.id.with("ctx")).show(|ui| {
+        crate::chrome::context_menu(&body, false).id(body.id.with("ctx")).show(|ui| {
             let b = ui.add(crate::chrome::MenuRow::new("Retry")).on_hover_text(format!("Retry loading {name}"));
             menu.push(MenuItem::at(ui, "Retry".into(), "retry".into(), b.rect));
             if b.clicked() {
@@ -553,7 +553,7 @@ fn card_body(
         let mut filter_rect = app.mixer.filter_rect;
         let mut picked = None;
         let mut external = false;
-        crate::chrome::popup_menu(&resp).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        crate::chrome::popup_menu(&resp, true).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             // A hardware synth (ADR 0020): MIDI out to its port, its audio back on an input path.
             let label = crate::external_instrument::MENU_LABEL;
             let b = ui
@@ -859,7 +859,7 @@ fn key_control(
     let pre = current.map_or(app.mixer.key_pre, |k| k.tap == Tap::Pre);
     let (tracks, busses) = key_sources(&s, t);
     let mut pick: Option<KeyPick> = None;
-    crate::chrome::popup_menu(&resp).width(200.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+    crate::chrome::popup_menu(&resp, true).width(200.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         let mut item = |ui: &mut Ui, on: bool, label: &str, value: String, to: KeyPick| {
             let b = ui.add(crate::chrome::MenuRow::new(label).checked(on));
             menu.push(MenuItem::at(ui, label.to_string(), value, b.rect));

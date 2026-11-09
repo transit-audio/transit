@@ -184,7 +184,7 @@ fn macro_knob(
     if k.response.drag_stopped() || (k.value.is_some() && !k.response.dragged()) {
         app.engine.end_merge();
     }
-    crate::chrome::context_menu(&k.response).show(|ui| macro_menu(app, ui, rack, i, control));
+    crate::chrome::context_menu(&k.response, true).show(|ui| macro_menu(app, ui, rack, i, control));
 }
 
 /// The knob's right-click menu: the mappings with their range and curve, Map, MIDI Learn.
@@ -227,9 +227,9 @@ fn macro_menu(app: &mut StudioApp, ui: &mut Ui, rack: TrackId, i: usize, control
     if !mappings.is_empty() {
         ui.separator();
     }
-    ui.menu_button(crate::chrome::submenu_atoms("Map Parameter"), |ui| {
+    crate::chrome::submenu(ui, "Map Parameter", false, |ui| {
         for (member, _) in s.rack_members(t) {
-            ui.menu_button(crate::chrome::submenu_atoms(&member.name), |ui| {
+            crate::chrome::submenu(ui, &member.name, false, |ui| {
                 let devices = member
                     .instrument
                     .iter()
@@ -239,7 +239,7 @@ fn macro_menu(app: &mut StudioApp, ui: &mut Ui, rack: TrackId, i: usize, control
                     let Some(info) = crate::automation::device_info(&d.plugin) else { continue };
                     let title =
                         if slot == AutoParam::INSTRUMENT_SLOT { info.name.to_string() } else { format!("{} ({})", info.name, slot_letter(slot)) };
-                    ui.menu_button(crate::chrome::submenu_atoms(title), |ui| {
+                    crate::chrome::submenu(ui, title, false, |ui| {
                         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                             for p in info.params {
                                 if ui.add(crate::chrome::MenuRow::new(p.name)).clicked() {

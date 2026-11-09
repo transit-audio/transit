@@ -198,7 +198,7 @@ fn param_control(
         Unit::Choice => {
             let resp = ui.put(field, egui::Button::new(egui::RichText::new(pi.format(stored)).size(10.5)));
             let mut picked = None;
-            crate::chrome::popup_menu(&resp).width(130.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+            crate::chrome::popup_menu(&resp, true).width(130.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                 egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                     for (k, name) in pi.choices.iter().enumerate() {
                         #[allow(clippy::cast_precision_loss)] // A short list.
@@ -285,7 +285,7 @@ pub fn card(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, t: 
     let resp = resp.on_hover_text(if full { "The track holds eight MIDI effects, the most it can" } else { "Add a MIDI effect" });
     if !full {
         let mut picked = None;
-        crate::chrome::popup_menu(&resp).width(180.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        crate::chrome::popup_menu(&resp, false).width(180.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             for info in transit_dsp::midi_fx::REGISTRY {
                 let b = ui.add(crate::chrome::MenuRow::new(info.name));
                 menu.push(MenuItem::at(ui, info.name.to_string(), info.id.to_string(), b.rect));
@@ -317,7 +317,7 @@ pub fn card(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, t: 
         let body = ui.interact(row.intersect(lane), ui.id().with(("midi_fx_row", tid.0, i)), Sense::click());
         crate::help::hover(ui, &body, crate::help::Id::DeviceChainMidiEffect);
         let presets = crate::presets::factory_for(&fx.plugin);
-        crate::chrome::context_menu(&body).id(body.id.with("ctx")).show(|ui| {
+        crate::chrome::context_menu(&body, false).id(body.id.with("ctx")).show(|ui| {
             for (label, to, ok) in [("Move Up", i.wrapping_sub(1), i > 0), ("Move Down", i + 1, i + 1 < n)] {
                 let b = ui.add_enabled(ok, crate::chrome::MenuRow::new(label));
                 menu.push(MenuItem::at(ui, label.into(), to.to_string(), b.rect));

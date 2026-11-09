@@ -425,7 +425,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         if main_resp.clicked() {
             let _ = app.add_audio_track("mono");
         }
-        crate::chrome::popup_menu(&chev_resp).width(110.0).show(|ui| {
+        crate::chrome::popup_menu(&chev_resp, false).width(110.0).show(|ui| {
             if ui.add(crate::chrome::MenuRow::new("Mono")).clicked() {
                 let _ = app.add_audio_track("mono");
                 ui.close();
@@ -457,7 +457,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         let resp = ui.interact(add_more.intersect(list), ui.id().with("add_more"), Sense::click());
         clip.rect_filled(add_more, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
         (label_x[4], label_w[4]) = paint_quick_add(&clip, add_more, "…", false);
-        crate::chrome::popup_menu(&resp).width(130.0).show(|ui| {
+        crate::chrome::popup_menu(&resp, false).width(130.0).show(|ui| {
             if ui.add(crate::chrome::MenuRow::new("Stereo Audio Track")).clicked() {
                 let _ = app.add_audio_track("stereo");
                 ui.close();
@@ -749,7 +749,9 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
         };
     }
     crate::fades::click_menu(app, ui);
-    crate::chrome::context_menu(&resp).show(|ui| {
+    // The fade shapes are checkable rows: the menu has checks when the click was on a fade.
+    let on_fade = app.arrange.menu_target.is_some_and(|(c, side)| side.is_some() && s.find_clip(c).is_some());
+    crate::chrome::context_menu(&resp, on_fade).show(|ui| {
         if let Some((clip, side)) = app.arrange.menu_target.filter(|(c, _)| s.find_clip(*c).is_some()) {
             if let Some(side) = side
                 && crate::fades::shape_items(app, ui, clip, side)
