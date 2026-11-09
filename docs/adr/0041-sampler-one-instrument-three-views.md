@@ -3,7 +3,7 @@ title: One Sampler instrument with three views (Instrument: zones, velocity laye
 -->
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, pad notes from 36
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, pad start note
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
@@ -55,7 +55,7 @@ The maintainer made the Sampler mandatory for the composition release before the
 | Question | Decision and reason |
 |---|---|
 | Pad count and layout | 64 pads, banks A–D, 16 visible in a 4×4 grid. Number from bottom left across each row, then upward (the MPC and Maschine 4×4 convention). Four banks fit a useful loop without a crowded panel; they do not enlarge ADR 0034's rack limit. |
-| Controller mapping | A 16-pad controller addresses visible slots 1–16 of the selected bank, one to one. Default trigger notes are `36 + index` (36–99; replaces the earlier 60–123, see "Amendment 2026-11-09"); bank changes do not rewrite stored notes. A press captures its destination and note identity until release, even across bank changes. Ordinary MIDI notes always address the stored trigger notes directly. |
+| Controller mapping | A 16-pad controller addresses visible slots 1–16 of the selected bank, one to one. A pad without a stored trigger note plays the patch's pad start note plus its index (see "Amendment 2026-11-09: the pad start note", which replaces the earlier fixed 60–123); bank changes do not rewrite stored notes. A press captures its destination and note identity until release, even across bank changes. Ordinary MIDI notes always address the stored trigger notes directly. |
 | Choke groups | Off plus groups 1–16, labeled numerically; color is supplementary. Groups cross banks. An admitted trigger fades every other sounding pad in its group over exactly 32 output frames. This allows independent hi-hat and percussion groups without dependence on UI colors. |
 | Pad voice model | Monophonic per pad; retrigger cuts the previous voice at the event frame and starts at the region entry with a fresh envelope. No layered retrigger option in #269. This keeps drums predictable and expansion reproducible. The short attack/declick can soften the new attack but does not promise a click-free hard cut. |
 | Dragging slices | Allowed between pads, including banks. Move source/region/slice-id/name into an empty pad's zone; swap those contents for an occupied target. Pad identity, zone identity, trigger note, automation address and all playback/mixer settings stay at the destination. This is an explicit remap, one undo step, with no change to existing MIDI. Marker order stays chronological. No silent overwrite and no two sources on a pad. |
@@ -1143,57 +1143,88 @@ group term; the counter reset at play start removed; the `at` check removed from
 or from Detect; step 2 of Slices to pads skipped (a duplicate trigger note); a "Validator
 changes" case loaded opaque instead of audible; and fades scaled before selection.
 
-## Amendment 2026-11-09: default pad trigger notes start at 36
+## Amendment 2026-11-09: the pad start note
 
-Amended 2026-11-09: the maintainer mapped a 16-pad controller to the Pads view and found the
-default pad notes (60 to 123, "Controller mapping" above) at odds with the drum machine
-convention; his decision was to follow it. Pad numbering already follows the convention (bottom
-left, across each row, then upward; see "Pad count and layout"). Only the default note base
-changes.
+Amended 2026-11-09, accepted: the maintainer mapped a 16-pad controller to the Pads view and
+found the fixed default pad notes (60 to 123, "Controller mapping" above) at odds with the drum
+machine convention. He decided that the Sampler gets a setting for the pad start note, with the
+pads following it, and that new kits start at the convention's note. Pad numbering is unchanged
+(bottom left, across each row, then upward; "Pad count and layout"). This amendment replaces
+the fixed base and nothing else in that row: bank changes do not rewrite stored notes, a press
+captures its destination and note identity until release, ordinary MIDI notes address the
+stored trigger notes directly, and the per-machine controller mapping the row leaves unbuilt is a
+separate thing that may coexist with this setting.
 
-**Decision.** A pad's default trigger note is `36 + index`, index 0 to 63: bank A is 36 to 51,
-B 52 to 67, C 68 to 83, D 84 to 99. This replaces "Default trigger notes are 60-123" in the
-"Controller mapping" row. Everything else in that row stands: bank changes do not rewrite
-stored notes; a press captures its destination and note identity until release; ordinary MIDI
-notes address the stored trigger notes directly.
+**1. A start note per Sampler patch.** The patch stores one value, `pad_start_note`, a MIDI
+note 0 to 64, so that the start note plus 63 stays within 127. A pad with no stored trigger
+note has the effective note `pad_start_note + index`, index 0 to 63: bank A is start to
+start+15, bank B starts 16 above A, C 32 and D 48.
 
-**Why.** Note 36 (C1, where 60 is C3) is where a drum kit starts in the General MIDI percussion
-map (36 is the bass drum) and where both reference DAWs put the first pad of their drum
-instruments (the bottom-left pad of Ableton's Drum Rack view and the first pad of Logic's Drum
-Machine Designer). Drum MIDI files, clips made in other DAWs and the common "start at C1"
-controller templates therefore land on bank A. A controller whose template starts elsewhere is
-set to C1 once. The earlier base, 60, was chosen to sit mid-keyboard. The trade: a 61-key
-keyboard in its default octave now plays above bank A's first pads, and banks B to D are reached
-by octave shift or by clips.
+**2. Defaults.** Every command that creates a patch stores start note 36 (C1 where 60 is C3),
+the drum convention: 36 is where the General MIDI percussion map starts (the bass drum) and
+where the reference DAWs put the first pad of their drum instruments (the bottom-left pad of
+Ableton's Drum Rack view, the first pad of Logic's Drum Machine Designer), so drum MIDI files
+and clips made in other DAWs land on bank A, and a controller whose template starts elsewhere
+is set once with the start note instead of remapping the controller. Today that command is
+`mix.sampler_new_patch` (`crates/engine/src/cmd/sampler_patch.rs`, the one place that builds a
+fresh `PatchV1`); the implementation lists any other. A patch saved without the field reads
+60, which is what such a patch meant, so sessions and kits saved before this amendment open
+unchanged. That is the field's stored default, not a migration: there is no compatibility code
+and no known-issue entry. The serialization rule holds: the field is written only when it
+differs from 60, so a new patch's 36 is written and an old patch round-trips byte for byte.
 
-**What follows.**
+**3. Stored pad notes are absolute.** A pad whose trigger note was set explicitly keeps it when
+the start note changes; only defaulted pads move. The unique-trigger-note rule is checked when
+the start note is set: a change is refused, with the document bit-identical, when it would put
+a defaulted pad on a note a stored pad owns, or would push any pad outside 0 to 127 (defaulted
+pads move together, so they never collide with one another). The refusal names the first colliding pad (in
+bank order) and note. This rests on the "Checked when set, clamped when used" rule of the
+2026-11-08 amendment: a later edit of something else is never refused because of an earlier
+start note, and the patch validator on load checks only the existing unique-note rule.
 
-1. **Default pad playback is unchanged.** "New pads default to ... root equal to their trigger
-   note" (see "Playback, controls and modulation") stands, so a default pad still plays its
-   sample at its original pitch.
-2. **Old sessions and kits change.** A pad whose note was never set is stored as default (no
-   note field), so a session or kit saved by an earlier build reads its default pads as
-   `36 + i` instead of `60 + i` when opened. Clips and patterns written against 60 to 123 no
-   longer hit those pads. Pads with an explicitly stored note are unaffected. Per the project's
-   alpha rule there is no migration and no compatibility switch: the release notes say so, and
-   a known-issue entry records it. The fix for an old session is to transpose its pad clips down
-   24 semitones.
-3. **Validation is unchanged.** The unique-trigger-note rule and every refusal text stand.
-4. **Slices to pads and Slice to MIDI** use each pad's stored or default note, so they follow
-   the new base with no rule change. The slice mapping root (default 60, selectable
-   0 to 128 minus the count) is a keyboard root for a slice run, not a pad default, and is
-   unchanged; with default notes a run at root 60 now meets pads 25 and up (banks B and C)
-   first, and a run at root 36 meets bank A. The "Pad B13 already plays E3" example above names
-   the pad that holds note 64 under the new base.
-5. **Reporting follows.** The Pads view labels, the audition from the computer keyboard and
-   `mix.sampler_state` report a note as stored or defaulted, so they show the new values.
-6. **Not affected.** The Instrument view's key map (zone root 60 by default) and a one-sample
-   (legacy) Sampler.
+**4. No MIDI is rewritten.** Clips, patterns, takes and automation are untouched by a start
+note change, the same principle as "Dragging slices" ("no change to existing MIDI"). Notes
+written against the old pad notes no longer hit those pads, and the user transposes the clips.
+The command's status notice reports the distance the start note moved in semitones, so the
+user knows what to transpose by.
 
-**Evidence for the implementation slice** (not built by this amendment). The default is
-`Pad::default_for` in `sampler-core`'s `patch.rs` (`60 + index.min(67)`) and its mirror,
-`PadEntry::default_note` and two doc comments, in the model's `sampler_patch.rs`. Tests that
-assume a 60 base are listed by search and updated by the slice. The user guide's pads paragraph
-gains the note range. New tests: pad 1's default is 36 and pad 64's is 99; an explicit stored
-note survives; an old-format pad with no note reads as `36 + i` (the break is intended and
-pinned).
+**5. Pitch never changes with the start note.** "New pads default to ... root equal to their
+trigger note" ("Playback, controls and modulation") means, today, that the root is written
+into the pad's zone when the pad is bound (`ZoneEntry::pad_defaults`, called from the bind
+path), so it is stored, not derived. With key tracking on, moving a defaulted pad's note
+without its root would repitch it. The rule the implementation follows: when the start note
+changes by d, the same undo step adds d to the stored root of every zone bound to a defaulted
+pad whose root still equals that pad's old effective note (clamped to 0 to 127, and the
+refusal of item 3 also covers a root that would leave that range); a pad with another root (a
+user set one) and every pad with a stored note keep their roots. A new binding after the change
+takes root equal to the effective note, as now. No schema field is added, and no sample
+changes pitch because of a start note change.
+
+**6. Command and state.** One engine command, `mix.sampler_pad_start {track, note}`, sets the
+start note, beside `mix.sampler_pad_set`: one undo step, refusals as in items 3 and 5, an
+out-of-range `note` refused as invalid. `mix.sampler_pad_set` setting a pad's note is
+unchanged. `mix.sampler_state` reports `pad_start_note` and, per pad, the effective note and
+whether it is stored.
+
+**7. Everything downstream uses the effective note:** the Pads view labels, the
+computer-keyboard audition, Slices to pads, Slice to MIDI (each pad's effective note at the
+time of the command), Load kit (the loaded pads take the patch's start note, and a kit's
+stored notes stay as stored), choke matching and retrigger matching. No rule changes there.
+Two literals in the 2026-11-08 amendment are checked and stand: the slice mapping root
+(default 60, selectable 0 to 128 minus the count) is a keyboard root for a slice run, not a pad
+default; with a start note of 36 a run at root 36 meets bank A and a run at root 60 meets the
+pads from index 24. And the error example "Pad B3 already plays E3" is corrected to "Pad B13
+already plays E3" for the default start note 36 (E3 is note 64, index 28, bank B slot 13).
+
+**8. UI.** A **Start note** control in the Pads view's bar shows the note name (C1) and sets
+it by drag or typing. Its placement and look come from the design board; until that lands the
+control is not built, and the command is reachable from the control channel.
+
+**Evidence for the implementation slice** (not built by this amendment): a new patch stores 36
+and an absent field reads 60; an old patch round-trips byte-identically; a start change moves
+only defaulted pads; the collision refusal (a stored pad on the target note, a range
+overflow) leaves the document identical and names pad and note; no clip, take or automation
+lane is touched; no pad repitches (a key-tracked default pad plays the same sample pitch before
+and after, and a stored root stays); the status notice reports the semitone distance;
+`mix.sampler_state` reports the start note and per-pad effective and stored; Slices to pads,
+Slice to MIDI and Load kit follow the start note.
