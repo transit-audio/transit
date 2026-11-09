@@ -376,6 +376,10 @@ impl StudioApp {
         let learning = learning(self, track, &control);
         if learn_menu_changed(ui, &learn_entry_list(&control, mapped.as_ref(), learning)) {
             ui.close();
+            // The caller's own rows (a send's Pre-fader, the macro's mappings) were already laid
+            // out in this pass: rerun it with the popup closed so nothing shortened is painted.
+            // The closed popup never reaches this code again, so this cannot repeat.
+            ui.ctx().request_discard("learn menu rows changed");
             return;
         }
         self.learn_entries(ui, track, control, mapped, learning);

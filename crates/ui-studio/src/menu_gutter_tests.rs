@@ -255,3 +255,67 @@ fn the_instrument_submenu_is_12_without_an_instrument_and_28_with_the_mark_when_
     p.insets_plain(&sampler.label, None);
     assert_eq!(p.checks_in(&sampler), 0, "no instrument, no mark");
 }
+
+/// Whether any rect shape (a popup's frame) sits with its top left at `at` in `shapes`.
+fn has_rect_at(shapes: &[egui::epaint::ClippedShape], at: egui::Pos2) -> bool {
+    fn visit(s: &egui::Shape, at: egui::Pos2) -> bool {
+        match s {
+            egui::Shape::Rect(r) => (r.rect.min - at).abs().max_elem() < 2.0 && r.rect.width() > 50.0,
+            egui::Shape::Vec(v) => v.iter().any(|x| visit(x, at)),
+            _ => false,
+        }
+    }
+    shapes.iter().any(|c| visit(&c.shape, at))
+}
+
+#[test]
+fn a_send_context_menu_is_gone_on_the_frame_learning_is_armed_never_shortened() {
+    let mut t = T::new();
+    let gtr = t.track("audio", "Gtr");
+    t.app.new_fx_channel(Some(gtr), 0.0).unwrap();
+    t.app.focus(gtr);
+    t.app.ui.show_devices = true;
+    t.frames(4);
+    let row = t.app.mixer.devices.sends[0].target_rect;
+    t.click(row, "secondary");
+    assert!(!texts(&t.shapes, "Remove Send").is_empty() && !texts(&t.shapes, "Pre-fader").is_empty(), "the menu is open");
+    t.app.run("midi.learn", json!({"target": format!("track:{}:send:0", gtr.0)})).unwrap();
+    t.frames(1);
+    assert!(texts(&t.shapes, "Pre-fader").is_empty(), "no Pre-fader on the next painted frame");
+    assert!(texts(&t.shapes, "Remove Send").is_empty(), "no Remove Send: the popup is gone, not shortened");
+}
+
+#[test]
+fn the_rack_macro_menu_is_gone_on_the_frame_learning_is_armed_never_shortened() {
+    let mut t = T::new();
+    let a = t.track("instrument", "A");
+    let b = t.track("instrument", "B");
+    let rack = t.app.group_into_rack(&[a, b]).unwrap();
+    t.app.focus(rack);
+    t.app.ui.show_devices = true;
+    t.frames(4);
+    let k = t.app.mixer.devices.rack.clone().expect("the rack card").macros[0];
+    t.click(k, "secondary");
+    assert!(!texts(&t.shapes, "Map Parameter").is_empty(), "the macro menu is open");
+    t.app.run("midi.learn", json!({"target": format!("track:{}:macro:1", rack.0)})).unwrap();
+    t.frames(1);
+    assert!(texts(&t.shapes, "Map Parameter").is_empty(), "the macro menu's own rows are not painted shortened");
+    assert!(texts(&t.shapes, "Cancel MIDI Learn (Esc)").is_empty());
+}
+
+#[test]
+fn a_learn_only_menu_leaves_no_empty_popup_frame_on_the_frame_learning_is_armed() {
+    let mut t = T::new();
+    let gtr = t.track("audio", "Gtr");
+    let menu = strip_learn_menu(&mut t, gtr);
+    let learn = find(&menu, "MIDI Learn");
+    let frame = Popup::of(&t, &learn).frame;
+    assert!(has_rect_at(&t.shapes, frame.min), "the popup's frame is painted while open");
+    learn_on_pan_one_frame(&mut t, gtr);
+    assert!(!has_rect_at(&t.shapes, frame.min), "no empty popup box on the next painted frame");
+}
+
+fn learn_on_pan_one_frame(t: &mut T, gtr: transit_model::TrackId) {
+    t.app.run("midi.learn", json!({"target": format!("track:{}:pan", gtr.0)})).unwrap();
+    t.frames(1);
+}
