@@ -10,6 +10,7 @@
 //!   encoder), with optional TPDF dither, and Ogg Opus (RFC 7845, libopus from transit-opus, #238),
 //!   transit's only lossy export. Ogg Opus also reads back through the same libopus decoder.
 //! * [`wav_float_header`] heads a float WAV written while it grows (recording).
+//! * [`wav_cues`] / [`wav_tempo`] read a WAV's cue points with labels and its `acid` tempo.
 //! * [`peaks`] builds multi-resolution min/max overviews for waveform drawing.
 //! * [`FileEncoder`] writes the same formats block by block into any `Write + Seek`, so a file
 //!   of any length never has to fit in memory.
@@ -30,6 +31,7 @@ pub mod peaks;
 mod resample;
 mod symph;
 mod wav;
+mod wav_cues;
 
 pub use blocks::{BlockReader, MAX_HELD_BYTES, ReadSeek};
 pub use buffer::AudioBuffer;
@@ -39,6 +41,7 @@ pub use opus::{
 };
 pub use pcm::MAX_DECODE_SAMPLES;
 use std::io::{Seek, Write};
+pub use wav_cues::{BadChunk, BadChunkReason, Cue, CueDiscard, CueDiscardReason, CueRead, MAX_CUE_LABEL_BYTES, wav_cues, wav_tempo};
 
 /// Errors from probing, decoding and encoding.
 #[derive(Debug, thiserror::Error)]
