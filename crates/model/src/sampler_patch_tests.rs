@@ -187,6 +187,25 @@ fn an_invalid_patch_is_kept_opaque_with_a_note() {
 }
 
 #[test]
+fn a_first_marker_off_the_loop_start_is_kept_opaque() {
+    // S is the first marker, fixed at the loop start: a set that starts elsewhere is invalid. The
+    // text is in the writer's (sorted) key order, so a byte-identical save is checkable.
+    let set = r#"{"markers":[{"frame":10,"id":1},{"frame":50,"id":2}]}"#;
+    let auto = format!(r#"{{"loop":{{"auto":{set},"end":100}},"schema":1,"sources":[{{"source":1}}]}}"#);
+    let manual = format!(r#"{{"loop":{{"end":100,"manual":{set}}},"schema":1,"sources":[{{"source":1}}]}}"#);
+    for text in [auto, manual] {
+        let p: SamplerPatch = serde_json::from_str(&text).unwrap();
+        let PatchState::Invalid { reason, .. } = &p.state else { panic!("{text} should load opaque: {p:?}") };
+        assert!(reason.contains("first marker is not at the loop start"), "{reason}");
+        assert!(p.note("T").unwrap().contains("not valid"));
+        assert_eq!(serde_json::to_string(&p).unwrap(), text, "kept byte for byte");
+        // The same set with the loop starting at its first marker loads ready.
+        let at_start = text.replace(r#""end":100"#, r#""end":100,"start":10"#);
+        assert!(serde_json::from_str::<SamplerPatch>(&at_start).unwrap().ready().is_some(), "{at_start}");
+    }
+}
+
+#[test]
 fn only_populated_zones_nondefault_pads_and_nondefault_controls_are_written() {
     let mut p = PatchV1::default();
     p.set_pad(PadEntry { index: 3, note: Some(PadEntry::default_note(3)), ..PadEntry::default() });

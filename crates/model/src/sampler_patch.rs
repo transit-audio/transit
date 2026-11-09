@@ -793,6 +793,9 @@ impl PatchV1 {
         }
         for (name, set) in [("Auto", l.auto.as_ref()), ("Manual", l.manual.as_ref())] {
             let Some(set) = set else { continue };
+            if set.markers.first().is_some_and(|m| m.frame != l.start) {
+                return Err(bad(format!("{name}'s first marker is not at the loop start")));
+            }
             if set.markers.len() > MAX_SLICES {
                 return Err(bad(format!("{name} has {} slices (at most {MAX_SLICES} per loop)", set.markers.len())));
             }
