@@ -103,6 +103,23 @@ plus one, when the command runs) or `rack` (a rack card).
 | `mix.device_pages` | `{track?, device, pages: [{name, slots: [id \| null, ...]}]}` | Replaces the device's user pages, one undo step. At most 16 pages; each page is read by the session file's rules (name trimmed and cut to 32 characters, eight slots, empty, non-string and over-long ids read empty, a repeated id keeps its first slot). `[]` clears them. A rack card, a hardware insert, an External Instrument and a device without parameters refuse it. |
 | `mix.device_pages_list` | `{track?, device}` | The device's pages: the factory tier, then the user tier. Each page has `tier` (`factory` or `user`), `name` and eight `slots`, each `{id, name, state}` with `state` one of `ok`, `empty`, `missing` (the id is not in the device's table, or the plug-in is not installed) or `pending` (a hosted plug-in's table is still loading), and `enable` on a factory slot that dims while that toggle is off. |
 
+## Sampler slicing
+
+The Sampler's one slice loop per patch ([ADR 0041](adr/0041-sampler-one-instrument-three-views.md),
+#269) is edited through these commands (run them with `engine.execute`). Each edit is one undo
+step and a refused edit changes nothing. Frames are the loop source's frames; marker `id`s are
+the stable slice ids of the showing set. `track` defaults to the selected instrument track.
+
+| Command | Params | What it does |
+|---|---|---|
+| `mix.sampler_slice_loop` | `{track?, source, start?, end?, root?}` | Makes the patch's slice loop over the source region (the whole source by default), mode Auto, both sets at the loop start only. `root` (0 to 127) defaults to the pad start note. Refuses a second loop, an unknown source and `end <= start`. |
+| `mix.sampler_slice_mode` | `{track?, mode: auto\|manual}` | Shows that mode's own marker set; neither set changes. |
+| `mix.sampler_slice_marker` | `{track?, op: add\|move\|remove\|label, frame?, id?, label?, snap?}` | Edits the showing set. `snap` defaults to the loop's setting; a snapped add or move uses the nearest zero crossing within 5 ms (a move is clamped to its neighbors first) and refuses when the source audio is missing. In Auto an accepted edit first copies Auto into Manual (new ids, labels kept, the previous Manual set replaced) and switches to Manual, all one step; an Auto id names its copy. A move or remove of the loop start in Auto copies and switches and reports `fixed: true`; in Manual it is refused. The 65th slice is refused with `Cannot add slice: 64 slices per loop`. A remove frees the zones and pads bound to that slice in that set (`freed_pads`, `freed_zones`). Answers `{id, frame, requested, snapped, clamped, set, mode, copied_auto, fixed, freed_pads, freed_zones}`. |
+| `mix.sampler_slice_manual_from_auto` | `{track?}` | Start from Auto's markers: Manual becomes a copy of Auto (labels kept, new ids) and shows. |
+| `mix.sampler_slice_manual_clear` | `{track?}` | Clear: Manual keeps only the loop start; Auto is unchanged. |
+| `mix.sampler_slice_set` | `{track?, snap?, root?, beat_length?}` | The shared settings (`beat_length` in quarter notes, `null` for the default). The detector settings travel with Detect and are refused here. |
+| `mix.sampler_slice_state` | `{track?, at?}` | Read-only: the loop, both sets (per slice its id, frame, end, label, pad, key and zones), the settings, `grid_bpm`, the grid tempo and its origin and the default beat length (both read the session tempo at the placement `at`, and are `null` without it when they need it), and `mapping` (`ascending`, `stale` with the first two `out_of_order` slices, or `none`). |
+
 ## Examples
 
 ```sh
