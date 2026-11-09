@@ -744,7 +744,10 @@ fn menu_ink(t: &T, label: &str) -> (egui::Rect, Vec<egui::Rect>) {
             egui::Shape::Text(s) if s.galley.text() == label && row.contains(s.pos) => {
                 *text = Some(s.galley.rect.translate(s.pos.to_vec2()));
             }
-            egui::Shape::Mesh(m) if row.contains_rect(m.calc_bounds()) => icons.push(m.calc_bounds()),
+            // The check is 12 pt: the 16 pt toolbar icons the popup now covers (it opens below the bar) are not it.
+            egui::Shape::Mesh(m) if row.contains_rect(m.calc_bounds()) && m.calc_bounds().width() <= crate::tokens::chrome::CHECK_GLYPH + 0.5 => {
+                icons.push(m.calc_bounds());
+            }
             _ => {}
         }
     }

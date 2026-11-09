@@ -10,6 +10,8 @@ use transit_model::TrackId;
 
 /// Text start inside the edge's inner side: padding, row inset, gutter, gap.
 pub(crate) const TEXT_IN: f32 = c::POPUP_PADDING + c::ROW_PADDING[0] + c::CHECK_GUTTER + c::ROW_GAP;
+/// Text start in a menu with no checkable row (#418): padding, row inset, gap (no gutter).
+pub(crate) const TEXT_IN_PLAIN: f32 = c::POPUP_PADDING + c::ROW_PADDING[0] + c::ROW_GAP;
 /// Shortcut end inside the edge's inner side: padding and the row's right inset.
 pub(crate) const SHORTCUT_IN: f32 = c::POPUP_PADDING + c::ROW_PADDING[1];
 /// The popup's edge (`window_stroke`, 1 px `line.strong`).
@@ -199,13 +201,13 @@ impl T {
 }
 
 #[test]
-fn the_edit_menu_text_starts_28_and_its_shortcut_ends_12_inside_the_popup_edge() {
+fn the_edit_menu_has_no_checks_so_its_text_starts_12_and_its_shortcut_ends_12_inside_the_popup_edge() {
     let mut t = T::new();
     t.menu("Edit");
     let (undo, z) = (t.text("Undo"), t.text(&label(A::Undo)));
     let frame = popup_at(&t.ctx, undo.center());
     let (text_in, shortcut_in) = insets(frame, undo, z);
-    assert!(near(text_in, TEXT_IN), "Undo starts {text_in} inside the edge, want 28");
+    assert!(near(text_in, TEXT_IN_PLAIN), "Undo starts {text_in} inside the edge, want 12 (no checkable row in Edit)");
     assert!(near(shortcut_in, SHORTCUT_IN), "{} ends {shortcut_in} inside the edge, want 12", label(A::Undo));
     // Every row, from menus.rs and the helpers it calls, shares the text x.
     let tool = crate::edit_tools::Tool::ALL[0].label();
@@ -245,9 +247,9 @@ fn a_track_header_context_menu_keeps_the_popup_padding_and_the_chrome_rows() {
     assert!(near(freeze[0] - frame.min.x, EDGE + c::POPUP_PADDING), "the row sits 4 inside the edge on the left");
     assert!(near(frame.max.x - freeze[2], EDGE + c::POPUP_PADDING), "and on the right");
     // The helpers shared with the Track menu draw the same chrome rows here (#409), so the group
-    // and activity rows start where Freeze does, 28 inside the edge.
+    // and activity rows start where Freeze does, 12 inside the edge (the menu has no checks, #418).
     let freeze_x = t.text("Freeze").min.x;
-    assert!(near(freeze_x - (frame.min.x + EDGE), TEXT_IN), "Freeze starts {} inside the edge", freeze_x - frame.min.x - EDGE);
+    assert!(near(freeze_x - (frame.min.x + EDGE), TEXT_IN_PLAIN), "Freeze starts {} inside the edge", freeze_x - frame.min.x - EDGE);
     assert!(near(t.text("New Group Track").min.x, freeze_x));
     assert!(near(t.text("Make Inactive").min.x, freeze_x));
 }

@@ -3,7 +3,7 @@
 //! a context menu's text starts 28 pt and its shortcut ends 12 pt inside the popup's edge, its
 //! rows are 24 high and 4 inside the edge, and a row with a state shows the check centered in its
 //! gutter. One test per surface family, each also clicking a row to show the action is the same.
-use crate::menu_padding_tests::{EDGE, SHORTCUT_IN, Shapes, TEXT_IN, insets, near, popup_at, texts};
+use crate::menu_padding_tests::{EDGE, SHORTCUT_IN, Shapes, TEXT_IN, TEXT_IN_PLAIN, insets, near, popup_at, texts};
 use crate::mixer::MenuItem;
 use crate::shortcuts::{Action as A, label};
 use crate::tokens::chrome as c;
@@ -12,15 +12,15 @@ use egui::{Pos2, Rect};
 use serde_json::{Value, json};
 use transit_model::TrackId;
 
-struct T {
-    app: StudioApp,
-    ctx: egui::Context,
-    time: f64,
-    shapes: Shapes,
+pub(crate) struct T {
+    pub(crate) app: StudioApp,
+    pub(crate) ctx: egui::Context,
+    pub(crate) time: f64,
+    pub(crate) shapes: Shapes,
 }
 
 impl T {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         app.ui.show_mixer = false;
         app.ui.show_devices = false;
@@ -28,7 +28,7 @@ impl T {
         t.frames(3);
         t
     }
-    fn frames(&mut self, n: usize) {
+    pub(crate) fn frames(&mut self, n: usize) {
         for _ in 0..n {
             self.time += 1.0 / 60.0;
             let mut raw = egui::RawInput {
@@ -46,72 +46,79 @@ impl T {
             self.shapes = output.shapes;
         }
     }
-    fn input(&mut self, method: &str, params: Value) {
+    pub(crate) fn input(&mut self, method: &str, params: Value) {
         let (req, _rx) = crate::ControlRequest::new(method, params);
         let _ = crate::control::handle_for_test(&mut self.app, &self.ctx, &req);
         self.frames(6);
     }
-    fn click(&mut self, r: [f32; 4], button: &str) {
+    pub(crate) fn click(&mut self, r: [f32; 4], button: &str) {
         self.input("ui.click", json!({"x": (r[0] + r[2]) / 2.0, "y": (r[1] + r[3]) / 2.0, "button": button}));
     }
-    fn track(&mut self, kind: &str, name: &str) -> TrackId {
+    pub(crate) fn track(&mut self, kind: &str, name: &str) -> TrackId {
         let r = self.app.run("track.new", json!({"kind": kind, "name": name})).unwrap();
         self.frames(2);
         TrackId(r["tracks"][0].as_u64().unwrap())
     }
-    fn header(&self, id: TrackId) -> [f32; 4] {
+    pub(crate) fn header(&self, id: TrackId) -> [f32; 4] {
         self.app.arrange.layout.tracks.iter().find(|r| r.id == id.0).unwrap().header
     }
 }
 
-fn find(menu: &[MenuItem], label: &str) -> MenuItem {
+pub(crate) fn find(menu: &[MenuItem], label: &str) -> MenuItem {
     menu.iter()
         .find(|m| m.label == label)
         .cloned()
         .unwrap_or_else(|| panic!("no row {label:?}: {:?}", menu.iter().map(|m| &m.label).collect::<Vec<_>>()))
 }
 
-fn rect(r: [f32; 4]) -> Rect {
+pub(crate) fn rect(r: [f32; 4]) -> Rect {
     Rect::from_min_max(egui::pos2(r[0], r[1]), egui::pos2(r[2], r[3]))
 }
 
 /// What one open popup measures: its frame, and the text `row` drawn inside it.
-struct Popup<'a> {
-    frame: Rect,
+pub(crate) struct Popup<'a> {
+    pub(crate) frame: Rect,
     shapes: &'a Shapes,
 }
 
 impl<'a> Popup<'a> {
     /// The popup that holds the row `item`.
-    fn of(t: &'a T, item: &MenuItem) -> Self {
+    pub(crate) fn of(t: &'a T, item: &MenuItem) -> Self {
         Popup { frame: popup_at(&t.ctx, rect(item.rect).center()), shapes: &t.shapes }
     }
     /// The text `s` as drawn inside this popup.
-    fn text(&self, s: &str) -> Rect {
+    pub(crate) fn text(&self, s: &str) -> Rect {
         texts(self.shapes, s).into_iter().find(|r| self.frame.contains(r.center())).unwrap_or_else(|| panic!("no text {s:?} in the popup"))
     }
     /// Where `s` starts, inside the edge's inner side.
-    fn text_in(&self, s: &str) -> f32 {
+    pub(crate) fn text_in(&self, s: &str) -> f32 {
         self.text(s).min.x - (self.frame.min.x + EDGE)
     }
     /// The row's checks: 24 high, 4 inside the edge on both sides.
-    fn row(&self, item: &MenuItem) {
+    pub(crate) fn row(&self, item: &MenuItem) {
         let r = rect(item.rect);
         assert_eq!(r.height(), c::ROW_HEIGHT, "{} is 24 high", item.label);
         assert!(near(r.min.x - self.frame.min.x, EDGE + c::POPUP_PADDING), "{} sits 4 inside the edge: {r:?} in {:?}", item.label, self.frame);
         assert!(near(self.frame.max.x - r.max.x, EDGE + c::POPUP_PADDING), "{} on the right too", item.label);
     }
     /// The first row's text 28 inside the edge and, given, its shortcut or trailing text 12.
-    fn insets(&self, text: &str, trailing: Option<&str>) {
+    pub(crate) fn insets(&self, text: &str, trailing: Option<&str>) {
+        self.insets_at(text, trailing, TEXT_IN);
+    }
+    /// [`Self::insets`] for a menu with no checkable row: the text 12 inside the edge.
+    pub(crate) fn insets_plain(&self, text: &str, trailing: Option<&str>) {
+        self.insets_at(text, trailing, TEXT_IN_PLAIN);
+    }
+    fn insets_at(&self, text: &str, trailing: Option<&str>, want: f32) {
         let at = self.text_in(text);
-        assert!(near(at, TEXT_IN), "{text:?} starts {at} inside the edge, want {TEXT_IN}");
+        assert!(near(at, want), "{text:?} starts {at} inside the edge, want {want}");
         if let Some(s) = trailing {
             let (_, end) = insets(self.frame, self.text(text), self.text(s));
             assert!(near(end, SHORTCUT_IN), "{s:?} ends {end} inside the edge, want {SHORTCUT_IN}");
         }
     }
     /// The check marks (12 px meshes) centered in `item`'s gutter.
-    fn checks_in(&self, item: &MenuItem) -> usize {
+    pub(crate) fn checks_in(&self, item: &MenuItem) -> usize {
         let r = rect(item.rect);
         let gutter_x = r.min.x + c::ROW_PADDING[0] + c::CHECK_GUTTER / 2.0;
         self.shapes
@@ -141,7 +148,7 @@ fn a_plain_row_in_the_chrome_context_popup_fails_the_inset_check() {
         };
         let mut o = ctx.run_ui(raw, |ui| {
             let anchor = ui.button("Track");
-            crate::chrome::popup_menu(&anchor).open(true).show(|ui| {
+            crate::chrome::popup_menu(&anchor, true).open(true).show(|ui| {
                 rows = vec![ui.add(egui::Button::new("Freeze")).rect, ui.add(crate::chrome::MenuRow::new("Flatten")).rect];
             });
         });
@@ -164,10 +171,11 @@ fn a_track_header_context_menu_has_the_chrome_rows_and_its_rows_still_act() {
     let menu = t.app.arrange.menu.clone();
     let freeze = find(&menu, "Freeze");
     let p = Popup::of(&t, &freeze);
-    p.insets("Freeze", None);
-    p.insets("Group Tracks", Some(&label(A::Group)));
+    // The track menu has no checkable row (#418): no gutter, the text 12 inside the edge.
+    p.insets_plain("Freeze", None);
+    p.insets_plain("Group Tracks", Some(&label(A::Group)));
     for row in ["Flatten", "New Group Track", "Color", "Make Inactive", "Delete Track"] {
-        assert!(near(p.text_in(row), TEXT_IN), "{row} starts where Freeze does");
+        assert!(near(p.text_in(row), TEXT_IN_PLAIN), "{row} starts where Freeze does");
     }
     for row in ["Freeze", "Flatten", "New Group Track", "Group Tracks", "Make Inactive", "Delete Track"] {
         p.row(&find(&menu, row));
@@ -180,7 +188,7 @@ fn a_track_header_context_menu_has_the_chrome_rows_and_its_rows_still_act() {
     let new = find(&t.app.arrange.menu, "New Group Track");
     t.click(new.rect, "primary");
     assert_eq!(t.app.engine.session().tracks.len(), n + 1, "{}", t.app.status);
-    // The Instrument submenu keeps the chrome rows (its own MenuConfig carries the style).
+    // The Instrument submenu keeps the chrome rows and has checks of its own (its MenuConfig carries the style).
     let keys = t.track("instrument", "Keys");
     let h = t.header(keys);
     t.click([h[0] + 50.0, h[1], h[0] + 70.0, h[3]], "secondary");
@@ -188,7 +196,7 @@ fn a_track_header_context_menu_has_the_chrome_rows_and_its_rows_still_act() {
     // "Instrument" is also the header's subtitle under the popup: take the text in the row.
     let frame = Popup::of(&t, &sub).frame;
     let text = texts(&t.shapes, "Instrument").into_iter().find(|r| rect(sub.rect).contains(r.center())).expect("the submenu button's text");
-    assert!(near(text.min.x - (frame.min.x + EDGE), TEXT_IN), "the Instrument button starts 28 in");
+    assert!(near(text.min.x - (frame.min.x + EDGE), TEXT_IN_PLAIN), "the Instrument button starts 12 in (its parent has no checks)");
     t.input("ui.move", json!({"x": (sub.rect[0] + sub.rect[2]) / 2.0, "y": (sub.rect[1] + sub.rect[3]) / 2.0}));
     t.frames(10);
     let menu = t.app.arrange.menu.clone();
@@ -219,10 +227,11 @@ fn a_clip_context_menu_has_the_chrome_rows_and_bounce_in_place_still_opens_its_f
     let bounce = find(&menu, "Bounce in Place");
     let p = Popup::of(&t, &bounce);
     let tool = crate::edit_tools::Tool::ALL.into_iter().find(|x| x.action().is_some()).unwrap();
-    p.insets(tool.label(), Some(&label(tool.action().unwrap())));
-    p.insets("Rename", Some(&label(A::Rename)));
+    // No fade was clicked, so the clip menu has no checkable row (#418): the text starts 12 in.
+    p.insets_plain(tool.label(), Some(&label(tool.action().unwrap())));
+    p.insets_plain("Rename", Some(&label(A::Rename)));
     for row in ["Add Mono Audio Track", "Paste at Cursor", "Split at Cursor", "Bounce in Place", "Color"] {
-        assert!(near(p.text_in(row), TEXT_IN), "{row} starts 28 inside the edge");
+        assert!(near(p.text_in(row), TEXT_IN_PLAIN), "{row} starts 12 inside the edge");
     }
     p.row(&bounce);
     t.click(bounce.rect, "primary");
@@ -310,7 +319,7 @@ fn the_browser_location_menu_has_the_chrome_rows_and_add_to_locations_still_adds
     t.click(row(&t, &kicks, false).expect("the Kicks row"), "secondary");
     let add = find(&t.app.browser.menu, "Add to Locations");
     let p = Popup::of(&t, &add);
-    p.insets("Add to Locations", None);
+    p.insets_plain("Add to Locations", None);
     p.row(&add);
     t.click(add.rect, "primary");
     assert_eq!(t.app.ui.browser.locations, vec![root, kicks], "{}", t.app.status);

@@ -106,7 +106,7 @@ fn a_combo_list_opens_four_px_below_its_field() {
 }
 
 #[test]
-fn a_menu_bar_menu_still_opens_flush_under_its_item() {
+fn egui_menu_bar_menus_are_flush_and_the_chrome_bar_menu_is_clear_of_the_bar() {
     let (top, bottom) = popup_top_and_face_bottom(|ui| {
         egui::MenuBar::new()
             .ui(ui, |ui| {
@@ -117,7 +117,14 @@ fn a_menu_bar_menu_still_opens_flush_under_its_item() {
             })
             .inner
     });
-    assert_eq!(top, bottom, "menus from the bar are flush");
+    // Negative control (#418): egui's own bar menu sits flush under its item.
+    assert_eq!(top, bottom, "egui's menus from the bar are flush");
+    // The chrome's bar menu: the bar's padding under the item plus `chrome.comboPopupGap`.
+    let (top, bottom) = popup_top_and_face_bottom(|ui| {
+        egui::MenuBar::new().ui(ui, |ui| crate::chrome::bar_menu(ui, "File", false, |ui| ui.label("Open")).response).inner
+    });
+    let below_item = (c::MENU_BAR_HEIGHT - c::MENU_BAR_ITEM_HEIGHT) / 2.0;
+    assert_eq!(top, bottom + below_item + crate::chrome::POPUP_MENU_BAR_GAP, "the bar's menus clear the bar by 4");
 }
 
 #[test]
