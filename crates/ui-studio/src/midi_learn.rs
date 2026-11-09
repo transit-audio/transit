@@ -327,6 +327,21 @@ fn norm_value(s: &Session, track: TrackId, control: &Control) -> f32 {
     }
 }
 
+/// The rows of a control's learn menu in this state.
+fn learn_entry_list(control: &Control, mapped: Option<&Info>, learning: bool) -> Vec<Entry> {
+    if matches!(control, Control::Transport(_)) {
+        if learning {
+            vec![Entry::Cancel]
+        } else if mapped.is_some() {
+            vec![Entry::Mapped, Entry::LearnProfile, Entry::Forget]
+        } else {
+            vec![Entry::LearnProfile]
+        }
+    } else {
+        menu_entries(mapped, learning)
+    }
+}
+
 impl StudioApp {
     /// Right-click menu entries of a mixer control (call inside its context menu).
     pub(crate) fn midi_learn_menu(&mut self, ui: &mut egui::Ui, track: TrackId, control: Control) {
@@ -335,22 +350,21 @@ impl StudioApp {
         self.learn_entries(ui, track, control, mapped, learning);
     }
 
+    /// Whether the learn menu for `control` has a check row now (the takeover choices, which a
+    /// mapped control offers): the menu that holds it declares its checks from this, before its
+    /// first row paints.
+    pub(crate) fn learn_checks(&self, track: TrackId, control: &Control) -> bool {
+        let (mapped, learning) = (info(self, track, control), learning(self, track, control));
+        learn_entry_list(control, mapped.as_ref(), learning).iter().any(|e| matches!(e, Entry::Takeover(_)))
+    }
+
     fn learn_entries(&mut self, ui: &mut egui::Ui, track: TrackId, control: Control, mapped: Option<Info>, learning: bool) {
-        let entries = if matches!(control, Control::Transport(_)) {
-            if learning {
-                vec![Entry::Cancel]
-            } else if mapped.is_some() {
-                vec![Entry::Mapped, Entry::LearnProfile, Entry::Forget]
-            } else {
-                vec![Entry::LearnProfile]
-            }
-        } else {
-            menu_entries(mapped.as_ref(), learning)
-        };
-        for entry in entries {
+        for entry in learn_entry_list(&control, mapped.as_ref(), learning) {
             let text = entry_text(entry, mapped.as_ref());
-            let current = entry == Entry::Takeover(self.ui.midi_takeover);
-            let b = ui.add_enabled(entry != Entry::Mapped, crate::chrome::MenuRow::new(text.clone()).checked(current));
+            let row = crate::chrome::MenuRow::new(text.clone());
+            // Only the takeover choices carry a check; the other rows are plain.
+            let row = if let Entry::Takeover(m) = entry { row.checked(m == self.ui.midi_takeover) } else { row };
+            let b = ui.add_enabled(entry != Entry::Mapped, row);
             self.midi_learn.menu.push(MenuItem::at(ui, text, format!("{entry:?}"), b.rect));
             if b.clicked() {
                 let _ = self.learn_choose(entry, track, control.clone(), mapped.as_ref());

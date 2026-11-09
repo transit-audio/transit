@@ -470,7 +470,9 @@ pub(crate) fn finish(
     if let Some(control) = crate::midi_learn::plugin_control(key.1, id) {
         // Its own popup id: `Popup::context_menu` closes whatever popup shares the response's id on
         // a primary click, which was the dropdown's own list (a combo's popup uses its button's id).
-        crate::chrome::context_menu(&resp, true).id(resp.id.with("learn_ctx")).show(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
+        crate::chrome::context_menu(&resp, app.learn_checks(key.0, &control))
+            .id(resp.id.with("learn_ctx"))
+            .show(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
         crate::midi_learn::mark(app, ui.painter(), rect, key.0, control);
     }
     if let Some(x) = new.filter(|x| (x - v).abs() > f32::EPSILON) {

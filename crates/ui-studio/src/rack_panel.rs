@@ -184,7 +184,7 @@ fn macro_knob(
     if k.response.drag_stopped() || (k.value.is_some() && !k.response.dragged()) {
         app.engine.end_merge();
     }
-    crate::chrome::context_menu(&k.response, true).show(|ui| macro_menu(app, ui, rack, i, control));
+    crate::chrome::context_menu(&k.response, app.learn_checks(rack, &control)).show(|ui| macro_menu(app, ui, rack, i, control));
 }
 
 /// The knob's right-click menu: the mappings with their range and curve, Map, MIDI Learn.

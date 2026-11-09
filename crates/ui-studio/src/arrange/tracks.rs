@@ -413,7 +413,8 @@ pub(super) fn header_drag(app: &mut StudioApp, ui: &Ui, s: &Session, layout: &mu
 pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: TrackKind, has_instrument: bool) {
     if kind == TrackKind::Instrument {
         // Instrument ▸: the device chain's instrument menu (a click in its filter box keeps it open).
-        let config = crate::chrome::submenu_config(ui, true).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        // The list carries checks (a gutter) only when the track has an instrument to mark.
+        let config = crate::chrome::submenu_config(ui, has_instrument).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
         let mut picked = None;
         let (button, _) = egui::containers::menu::SubMenuButton::new(crate::chrome::submenu_atoms(ui, "Instrument")).config(config).ui(ui, |ui| {
             let lists = app.instrument_lists();

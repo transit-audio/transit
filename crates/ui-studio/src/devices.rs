@@ -160,7 +160,8 @@ pub(crate) fn add_device_menu(app: &mut StudioApp, resp: &egui::Response, tid: T
     let mut hardware = false;
     let mut filter = std::mem::take(&mut app.mixer.effect_filter);
     let mut filter_rect = app.mixer.filter_rect;
-    crate::chrome::popup_menu(resp, true).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+    // No device is current in an add menu: its rows carry no check, so no gutter.
+    crate::chrome::popup_menu(resp, false).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         // A hardware insert (ADR 0015 section 5): the signal leaves on one path and returns on another.
         let b = ui.add(crate::chrome::MenuRow::new("Hardware Insert…")).on_hover_text("Send the signal through outboard gear on the audio interface");
         crate::help::hover(ui, &b, crate::help::Id::DeviceChainHardwareInsert);
@@ -1014,7 +1015,9 @@ pub fn plugin_menu(
         crate::chrome::menu_note(ui, egui::RichText::new(text).color(TOKENS.text_dim).size(10.5));
     };
     let mut item = |ui: &mut Ui, id: &str, label: &str, picked: &mut Option<String>| {
-        let b = ui.add(crate::chrome::MenuRow::new(label).checked(current == Some(id)));
+        // Only a menu with a current device carries checks (the caller declares the same).
+        let row = crate::chrome::MenuRow::new(label);
+        let b = ui.add(if current.is_some() { row.checked(current == Some(id)) } else { row });
         menu.push(MenuItem::at(ui, label.to_string(), id.to_string(), b.rect));
         if b.clicked() {
             *picked = Some(id.to_string());

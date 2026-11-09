@@ -322,7 +322,7 @@ pub(crate) fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize),
     if let Some(control) = crate::midi_learn::plugin_control(key.1, p.id) {
         // A slider senses drags only; a click-only layer over it takes the right-click.
         let menu = ui.interact(resp.rect, egui::Id::new(("learn_menu", ins.uid.get(), p.id)), egui::Sense::click());
-        crate::chrome::context_menu(&menu, true).show(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
+        crate::chrome::context_menu(&menu, app.learn_checks(key.0, &control)).show(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
         crate::midi_learn::mark(app, ui.painter(), resp.rect, key.0, control);
     }
     let shown = format_param(&ins.plugin, p, x);

@@ -195,7 +195,9 @@ pub(crate) fn finish(
 ) {
     let Some(p) = dev.param(id) else { return };
     if let Some(c) = crate::midi_learn::plugin_control(dev.key.1, p.id) {
-        crate::chrome::context_menu(resp, true).id(resp.id.with("learn_ctx")).show(|ui| app.midi_learn_menu(ui, dev.key.0, c.clone()));
+        crate::chrome::context_menu(resp, app.learn_checks(dev.key.0, &c))
+            .id(resp.id.with("learn_ctx"))
+            .show(|ui| app.midi_learn_menu(ui, dev.key.0, c.clone()));
         crate::midi_learn::mark(app, ui.painter(), resp.rect, dev.key.0, c);
     }
     if let Some(v) = new {

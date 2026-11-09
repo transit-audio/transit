@@ -115,7 +115,7 @@ pub(crate) fn send_row(
     }
     // Its own popup id: `Popup::context_menu` closes the popup on a primary click, which would
     // otherwise be the retarget menu's (both default to the response's id).
-    crate::chrome::context_menu(&resp, true).id(resp.id.with("send_ctx")).show(|ui| {
+    crate::chrome::context_menu(&resp, send_checks(app, id, slot)).id(resp.id.with("send_ctx")).show(|ui| {
         let label = if snd.pre_fader { "Post-fader" } else { "Pre-fader" };
         let b = ui.add(crate::chrome::MenuRow::new(label));
         menu.push(MenuItem::at(ui, label.into(), "pre".into(), b.rect));
@@ -305,7 +305,7 @@ fn send_menus(
     }
     // Its own popup id: `Popup::context_menu` closes the popup on a primary click, which would
     // otherwise be the retarget menu's (both default to the response's id).
-    crate::chrome::context_menu(resp, true).id(resp.id.with("send_ctx")).show(|ui| {
+    crate::chrome::context_menu(resp, send_checks(app, id, slot)).id(resp.id.with("send_ctx")).show(|ui| {
         let label = if snd.pre_fader { "Post-fader" } else { "Pre-fader" };
         let b = ui.add(crate::chrome::MenuRow::new(label));
         menu.push(MenuItem::at(ui, label.into(), "pre".into(), b.rect));
@@ -333,6 +333,11 @@ fn send_menus(
             app.midi_learn_menu(ui, id, transit_model::Control::Send(n));
         }
     });
+}
+
+/// Whether a send's context menu has a check: only through the MIDI Learn rows it embeds.
+fn send_checks(app: &StudioApp, id: transit_model::TrackId, slot: usize) -> bool {
+    u8::try_from(slot).is_ok_and(|n| app.learn_checks(id, &transit_model::Control::Send(n)))
 }
 
 /// The strip's send row (Channel strip, sends): 22 high on `bg.titlebar` with a 1 px `line` and

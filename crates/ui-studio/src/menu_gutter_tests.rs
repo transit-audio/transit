@@ -78,30 +78,6 @@ fn a_menu_with_checks_keeps_the_gutter_on_every_row_and_a_submenu_decides_for_it
     assert_eq!(sub.checks_in(&dark), 1, "the current appearance is checked");
 }
 
-#[test]
-fn a_context_menu_with_checks_keeps_the_gutter_and_one_without_does_not() {
-    let mut t = T::new();
-    let gtr = t.track("audio", "Gtr");
-    t.app.ui.show_mixer = true;
-    t.frames(3);
-    // With checks: the pan knob's MIDI Learn menu (its rows carry the takeover mode's check).
-    let strip = t.app.mixer.layout.strips.iter().find(|s| s.track == gtr.0).cloned().unwrap();
-    t.click(strip.knob, "secondary");
-    let menu = t.app.midi_learn.menu.clone();
-    let learn = find(&menu, "MIDI Learn");
-    let p = Popup::of(&t, &learn);
-    p.insets("MIDI Learn", None);
-    p.row(&learn);
-    assert_eq!(p.checks_in(&learn), 0, "an unchecked row's gutter stays empty");
-    // Without: the track header's menu (the context test measures its rows at 12 too).
-    t.app.ui.show_mixer = false;
-    t.frames(3);
-    let h = t.header(gtr);
-    t.click([h[0] + 50.0, h[1], h[0] + 70.0, h[3]], "secondary");
-    let freeze = find(&t.app.arrange.menu.clone(), "Freeze");
-    Popup::of(&t, &freeze).insets_plain("Freeze", None);
-}
-
 /// A scalar of where the popup's `text` row is each frame after the click, and the popup's frame.
 fn first_frames(t: &mut T, menu: &str, text: &str) -> Vec<(Rect, Rect)> {
     let r = bar_item(t, menu);
@@ -149,4 +125,68 @@ fn a_menu_bar_popup_opens_4_below_the_bar_and_does_not_jump_between_frames() {
             t.frames(4);
         }
     }
+}
+
+#[test]
+fn the_add_device_popup_has_no_current_device_so_it_has_no_gutter() {
+    let mut t = T::new();
+    let fx = t.track("audio", "Gtr");
+    t.app.ui.show_devices = true;
+    t.app.focus(fx);
+    t.frames(3);
+    let add = t.app.mixer.devices.add;
+    t.click(add, "primary");
+    let menu = t.app.mixer.devices.menu.clone();
+    let hardware = find(&menu, "Hardware Insert…");
+    let p = Popup::of(&t, &hardware);
+    p.insets_plain("Hardware Insert…", None);
+    assert!(near(p.text_in("Built-in"), TEXT_IN_PLAIN), "the heading lines up with the rows");
+    for row in menu.iter().filter(|m| m.visible && m.value == "gain") {
+        assert!(near(p.text_in(&row.label), TEXT_IN_PLAIN), "{} starts at 12", row.label);
+    }
+    assert_eq!(p.checks_in(&hardware), 0);
+}
+
+/// Opens the volume fader's learn menu on `gtr`'s strip and returns its popup measure helpers' rows.
+fn strip_learn_menu(t: &mut T, gtr: transit_model::TrackId) -> Vec<crate::mixer::MenuItem> {
+    t.app.ui.show_mixer = true;
+    t.frames(3);
+    let strip = t.app.mixer.layout.strips.iter().find(|s| s.track == gtr.0).cloned().unwrap();
+    t.click(strip.knob, "secondary");
+    t.app.midi_learn.menu.clone()
+}
+
+#[test]
+fn an_unmapped_controls_learn_menu_has_no_gutter_and_a_mapped_ones_keeps_it_with_the_takeover_mark() {
+    let mut t = T::new();
+    let gtr = t.track("audio", "Gtr");
+    let menu = strip_learn_menu(&mut t, gtr);
+    let learn = find(&menu, "MIDI Learn");
+    Popup::of(&t, &learn).insets_plain("MIDI Learn", None);
+    // Map the pan knob, then open the menu again: the takeover choices carry the check.
+    t.app.run("midi.learn", json!({"target": format!("track:{}:pan", gtr.0)})).unwrap();
+    t.frames(2);
+    t.app.midi_learn_apply(
+        (0, vec![transit_playback::MapMsg::Candidate { port: "KeyStep".into(), channel: 0, kind: transit_model::SourceKind::Cc, number: 74 }]),
+        0.0,
+    );
+    t.frames(2);
+    t.input("ui.key", json!({"key": "Escape"}));
+    t.frames(4);
+    let menu = strip_learn_menu(&mut t, gtr);
+    let scaled = find(&menu, "Takeover: Scaled");
+    let p = Popup::of(&t, &scaled);
+    p.insets("Takeover: Scaled", None);
+    assert!(near(p.text_in("MIDI Learn"), TEXT_IN), "the plain rows share the gutter");
+    assert_eq!(p.checks_in(&scaled), 1, "the current takeover mode carries the mark");
+}
+
+#[test]
+fn the_transport_learn_menu_never_has_a_check_so_it_has_no_gutter() {
+    let mut t = T::new();
+    let play = t.app.arrange.layout.transport["play"];
+    t.click(play, "secondary");
+    let menu = t.app.midi_learn.menu.clone();
+    let learn = find(&menu, "MIDI Learn for this controller (all sessions)");
+    Popup::of(&t, &learn).insets_plain("MIDI Learn for this controller (all sessions)", None);
 }
