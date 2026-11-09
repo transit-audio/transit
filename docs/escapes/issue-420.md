@@ -4,7 +4,8 @@
    failed in the Linux CI job on `main` 085c0438 (`cargo test --locked --workspace`): the Fake
    instance's destroy was logged on another thread (`left: Some(ThreadId(11))`) after
    `shutdown` had returned true. The commit did not touch the plug-in host. The same commit
-   passed the local Windows and WSL Linux gates and the macOS CI job. The CI job was not rerun.
+   passed the local Windows and WSL Linux gates and the macOS and Windows CI jobs; only the Linux
+   CI job failed. It was not rerun.
 2. **Mechanism.** `Host::shutdown` (`crates/plugin-host/src/lib.rs`) returned once each host
    thread's shutdown job had run (its slot read DONE). Only after that did `run` store
    `running = false`, drain the queue (leaking it) and drop the receiver. `Worker::send` checked
@@ -17,7 +18,7 @@
    The order is in the shared `run`, the same on every platform.
 3. **Why checks missed it.** The host thread goes straight from reporting DONE to the close,
    while the test thread first has to wake from a condition variable, so the close almost always
-   won. Only a host thread preempted in that span on the loaded two-core Linux runner lost. The
+   won. Only a host thread preempted in that span on a loaded Linux CI runner lost. The
    test then slept 100 ms and asserted no destroy, which detects the race only when the
    scheduler produces it. No test checked the gate at the moment `shutdown` reports done.
 4. **Regression test.** The gate is now a lock-protected `Option<Sender>`. `Worker::close`
