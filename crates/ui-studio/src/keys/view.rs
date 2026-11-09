@@ -334,6 +334,8 @@ fn exact_height(ui: &mut Ui) {
 /// the allocation (#412); this one is the band, whatever the widget measures.
 fn header_field(ui: &mut Ui, band: Rect, enabled: bool, add: impl FnOnce(&mut Ui, Rect) -> egui::Response) -> egui::Response {
     let ring = ui.visuals().selection.stroke;
+    // The corner the kit's fields take (`chrome::field_visuals` leaves the widget corner as is).
+    let radius = ui.visuals().widgets.inactive.corner_radius;
     let faded = if enabled { 1.0 } else { ui.visuals().disabled_alpha() };
     // The frame goes under the widget: reserve its place in paint order, fill it once the
     // widget's response (hover, focus) is known.
@@ -367,7 +369,7 @@ fn header_field(ui: &mut Ui, band: Rect, enabled: bool, add: impl FnOnce(&mut Ui
         slot,
         egui::Shape::Rect(egui::epaint::RectShape::new(
             band,
-            crate::theme::RADIUS,
+            radius,
             TOKENS.surface_inset.gamma_multiply(faded),
             Stroke::new(width, edge.gamma_multiply(faded)),
             egui::StrokeKind::Inside,

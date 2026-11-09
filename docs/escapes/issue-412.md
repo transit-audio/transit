@@ -13,6 +13,11 @@
    field frames ourselves (`header_field`) and measured the painted frames, again against the
    row. Both measured the right thing against the wrong reference; the headless rig was
    correct about every number it was asked for.
+   Two further facts from review. In the old code the Length frame's height was the larger of
+   the text row height plus margin and 24, so with the application's own fonts it could come out
+   taller than the buttons; the test rig installs egui's default fonts, not the application's,
+   and could not see that. The "shorter" Length frame in the maintainer's first screenshot was
+   never reproduced or explained by any code path.
 3. **Why checks missed it.** A test that compares controls with the rectangle the layout hands
    in can only find controls that disagree with each other. Here they agreed and all sat 2.5 pt
    low in the band that the user sees. The painted band is not a layout rectangle: it is two
@@ -30,7 +35,9 @@
    layout), both tests fail on the band-center assertion (`step: center 458, painted band
    439..472 center 455.5`).
 5. **Gate class.** A header or toolbar test measures its controls against the painted band
-   behind them, not against the row rectangle the layout hands in. The rule is in
+   behind them, not against the row rectangle the layout hands in. A size that depends on a font
+   is only tested truthfully when the rig installs the application's fonts (a follow-up issue
+   tracks it). The rule is in
    `docs/contributing/evidence/gates.md`.
 6. **Protocol change, owner, blind spot.** Review rule plus the shared band reader
    (`painted_band`). Owner: the maintainer. Blind spot: the band is read from its two edge
