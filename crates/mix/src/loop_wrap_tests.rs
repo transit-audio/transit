@@ -153,6 +153,34 @@ fn the_kick_at_the_loop_start_fires_once_per_pass_with_the_sessions_numbers() {
     }
 }
 
+/// The right half of a split saved by a build that took the cut's cycle phase as a sample modulo of
+/// the stored range: 44.1 kHz, 102.5 BPM (a bar is 103,258.54 samples, stored 103,259), the one-bar
+/// kick loop dragged to eight bars and split at the start of bar 3 (sample 206,517). The phase was
+/// 206,517 mod 103,259 = 103,258, so the right half's loop is `{-103,258, 1}` and its notes moved
+/// 3,840 ticks earlier. The loop end snaps to the right half's grid origin (an empty first pass),
+/// but its cycle is a whole bar of ticks: the frame stays on the grid and every repeat of the
+/// right half sits on its tick.
+#[test]
+fn a_right_half_whose_loop_ends_at_its_grid_origin_repeats_on_its_ticks() {
+    let (mut s, t, end) = kick_session(44_100, 102.5, 8, 8);
+    let sr = s.sample_rate;
+    let cut = s.tempo.tick_to_samples(2 * BAR, sr);
+    assert_eq!((s.tempo.tick_to_samples(BAR, sr), cut), (103_259, 206_517));
+    let phase = cut % 103_259;
+    let shift = s.tempo.samples_to_ticks(phase, sr);
+    assert_eq!((phase, shift), (103_258, BAR));
+    let clip = &mut s.track_mut(t).unwrap().playlist_mut().unwrap().clips[0];
+    clip.start = cut;
+    clip.length = end - cut;
+    clip.looping = Some(ClipLoop { start: -phase, end: 1 });
+    let ClipContent::Midi { sequence } = &mut clip.content else { panic!("a MIDI clip") };
+    sequence.notes.iter_mut().for_each(|n| n.start -= shift);
+    let want: Vec<Samples> = grid_kicks(&s, 8).split_off(8);
+    for block in [512, 1 << 20] {
+        assert_eq!(pass_ons(&s, t, end, block), want, "block {block}");
+    }
+}
+
 /// Block size does not matter: the same pass at block sizes 1, 32, 128 and 512, and through the
 /// engine at a size that does not divide the loop (the last block of every pass is cut at the wrap).
 #[test]

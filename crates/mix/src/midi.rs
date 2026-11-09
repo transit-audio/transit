@@ -560,8 +560,11 @@ pub fn loop_frame(s: &Session, start: Samples, l: ClipLoop) -> LoopFrame {
     let tick = |x: Samples| s.tempo.samples_to_ticks(start.saturating_add(x), sr);
     let snap = |x: Samples| s.tempo.tick_to_samples(tick(x), sr).saturating_sub(origin);
     let snapped = ClipLoop { start: snap(l.start), end: snap(l.end) };
-    // A range that rounds to under the minimum cycle keeps the sample frame.
-    if snapped.is_valid() {
+    // Only a cycle that rounds to under the minimum keeps the sample frame. A snapped end at or
+    // before the grid origin is still a grid frame (an empty first pass, then the cycles): a start
+    // trim at the stored range's sample phase leaves such a loop, `{-103,258, 1}` for a split on a
+    // bar line at 44.1 kHz and 102.5 BPM.
+    if snapped.cycle() >= transit_model::MIN_CYCLE {
         LoopFrame { origin, range: snapped, cycle_ticks: Some(tick(l.end) - tick(l.start)) }
     } else {
         LoopFrame { origin: start, range: l, cycle_ticks: None }
