@@ -72,15 +72,22 @@ pub fn split_clip(clip: &Clip, at: Samples, new_id: ClipId, t: TimeCtx<'_>) -> O
 /// advance into the file at the cycle phase (the model does that). A MIDI clip re-anchors its
 /// notes and controllers by the phase's ticks and moves its loop with them; an unlooped clip drops
 /// what the trim cut off, a looped one keeps it at negative ticks because later cycles play it
-/// (ADR 0019).
+/// (ADR 0019). A looped MIDI clip on the tick grid takes the cut's cycle phase in ticks, from the
+/// frame playback uses ([`transit_mix::LoopFrame::trim_to`]), never as a sample modulo of the stored
+/// range: a stored cycle is a rounded sample count, so that phase drifted a tick per few dozen
+/// cycles and ignored tempo changes inside the clip.
 pub(crate) fn trim_start(clip: &mut Clip, to: Samples, t: TimeCtx<'_>) {
     let old = clip.start;
     let delta = to.min(clip.end() - 1) - old;
+    let grid = match (&clip.content, clip.looping.filter(|l| l.is_valid())) {
+        (ClipContent::Midi { .. }, Some(l)) if delta != 0 => transit_mix::loop_frame_in(t.tempo, t.sr, old, l).trim_to(t.tempo, t.sr, old + delta),
+        _ => None,
+    };
     let phase = if delta > 0 { clip.content_pos(delta) } else { delta };
     clip.trim_start_to(to);
     let looped = clip.looping.is_some();
     if let ClipContent::Midi { sequence } = &mut clip.content {
-        let shift = t.ticks(old.saturating_add(phase)) - t.ticks(old);
+        let shift = grid.map_or_else(|| t.ticks(old.saturating_add(phase)) - t.ticks(old), |(ticks, _)| ticks);
         if shift != 0 {
             if !looped {
                 sequence.notes.retain(|n| n.start >= shift);
@@ -89,7 +96,10 @@ pub(crate) fn trim_start(clip: &mut Clip, to: Samples, t: TimeCtx<'_>) {
             sequence.notes.iter_mut().for_each(|n| n.start -= shift);
             sequence.ctrls.iter_mut().for_each(|c| c.tick -= shift);
         }
-        clip.shift_loop(phase);
+        match grid {
+            Some((_, l)) => clip.looping = Some(l).filter(|l| l.is_valid()),
+            None => clip.shift_loop(phase),
+        }
     }
 }
 

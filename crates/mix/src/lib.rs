@@ -176,7 +176,7 @@ pub use matrix::{fold_down_stereo, itu_stereo_fold};
 use midi::{
     ClipEvent, Rtp, chase_controllers, grid_start, midi_loop_frame, midi_offset, note_spans, played_note, schedule_notes, sorted_clip_events,
 };
-pub use midi::{LoopFrame, clip_note_ons, loop_frame, unroll_midi_loop};
+pub use midi::{LoopFrame, clip_note_ons, loop_frame, loop_frame_in, unroll_midi_loop};
 #[cfg(test)]
 use midi::{PEDAL_SCANS, visit_clip_events};
 pub use midi_fx::{MIDI_FX_BLOCK, MIDI_FX_CARRY, MIDI_FX_NOTES, MIDI_FX_RETRY, MidiFxCounts, note_view_dropped_total};

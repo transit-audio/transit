@@ -482,15 +482,47 @@ pub struct LoopFrame {
     pub origin: Samples,
     /// The loop range from `origin`, in samples (edges on ticks when the frame is on the grid).
     pub range: ClipLoop,
-    /// One cycle in ticks, when the frame is on the tick grid.
-    cycle_ticks: Option<i64>,
+    /// The frame in session ticks, when it is on the tick grid.
+    grid: Option<GridTicks>,
+}
+
+/// A grid frame's ticks: its origin (the clip start rounded to a tick) and its loop edges, each
+/// the stored edge converted once at its absolute position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GridTicks {
+    origin: i64,
+    start: i64,
+    end: i64,
 }
 
 impl LoopFrame {
     /// A frame of whole-sample cycles (`range` from `origin`), as a loop off the tick grid repeats.
     #[cfg(test)]
     pub(crate) fn of_samples(origin: Samples, range: ClipLoop) -> Self {
-        LoopFrame { origin, range, cycle_ticks: None }
+        LoopFrame { origin, range, grid: None }
+    }
+
+    /// A start trim of the clip this frame belongs to, to `to` (`tempo` and `sr` are the session's),
+    /// on the grid: the cut's cycle phase in ticks, which the clip's notes and controllers move
+    /// earlier by, and the new loop range from `to`. The phase is the cut's tick from the grid
+    /// origin, reduced into the loop range by whole cycles once it is at or past the loop end, and
+    /// the new edges are that cycle's edges in ticks, converted once, so the trimmed clip's frame
+    /// comes back to the same ticks: what remains sounds exactly what the untrimmed clip sounded
+    /// there, at a constant tempo and across tempo changes. `None` off the grid (the caller keeps
+    /// the sample phase of the stored range).
+    pub fn trim_to(&self, tempo: &transit_time::TempoMap, sr: transit_time::SampleRate, to: Samples) -> Option<(i64, ClipLoop)> {
+        let g = self.grid?;
+        let cycle = g.end.saturating_sub(g.start).max(1);
+        let cut = tempo.samples_to_ticks(to, sr);
+        let phase = if cut < g.end {
+            cut.saturating_sub(g.origin)
+        } else {
+            g.start.saturating_sub(g.origin).saturating_add(cut.saturating_sub(g.start).rem_euclid(cycle))
+        };
+        // The cut's tick is the trimmed clip's grid origin; its cycle's edges, as ticks from there.
+        let start = cut.saturating_sub(phase).saturating_add(g.start.saturating_sub(g.origin));
+        let edge = |tick: i64| tempo.tick_to_samples(tick, sr).saturating_sub(to);
+        Some((phase, ClipLoop { start: edge(start), end: edge(start.saturating_add(cycle)) }))
     }
 
     /// Where cycle `k` (1 is the first repeat) of a content point `rel` samples from `origin` lands:
@@ -498,7 +530,7 @@ impl LoopFrame {
     /// ticks and is converted once; a point on a tick (a note, a controller, a loop edge) comes back
     /// to its own tick from `rel`, as long as a tick is longer than a sample.
     pub fn cycle_at(&self, s: &Session, rel: Samples, k: i64) -> Samples {
-        match self.cycle_ticks {
+        match self.grid.map(|g| g.end - g.start) {
             Some(cycle) => {
                 let sr = s.sample_rate;
                 let tick = s.tempo.samples_to_ticks(self.origin.saturating_add(rel), sr);
@@ -513,7 +545,7 @@ impl LoopFrame {
     /// A handful at most; capped against a degenerate loop. On the grid the range is found in
     /// fractional ticks and may hold one cycle more at either end: callers test each position.
     pub fn cycles_touching(&self, s: &Session, rel: Samples, till: Samples, pos: Samples, end: Samples) -> std::ops::RangeInclusive<i64> {
-        let (k_min, last) = match self.cycle_ticks {
+        let (k_min, last) = match self.grid.map(|g| g.end - g.start) {
             Some(cycle) => {
                 let sr = s.sample_rate;
                 let ticks = |at: Samples| s.tempo.samples_to_ticks_f(at, sr);
@@ -555,19 +587,25 @@ pub(crate) fn midi_loop_frame(s: &Session, clip: &Clip) -> Option<LoopFrame> {
 /// The [`LoopFrame`] of a clip starting at `start` with loop `l`: playback, consolidate and the
 /// arranger's drawing all take their cycles from this one function, so what is drawn is what is heard.
 pub fn loop_frame(s: &Session, start: Samples, l: ClipLoop) -> LoopFrame {
-    let sr = s.sample_rate;
-    let origin = s.tempo.tick_to_samples(s.tempo.samples_to_ticks(start, sr), sr);
-    let tick = |x: Samples| s.tempo.samples_to_ticks(start.saturating_add(x), sr);
-    let snap = |x: Samples| s.tempo.tick_to_samples(tick(x), sr).saturating_sub(origin);
+    loop_frame_in(&s.tempo, s.sample_rate, start, l)
+}
+
+/// [`loop_frame`] under a tempo map and rate, for edits that hold those rather than a session.
+pub fn loop_frame_in(tempo: &transit_time::TempoMap, sr: transit_time::SampleRate, start: Samples, l: ClipLoop) -> LoopFrame {
+    let base = tempo.samples_to_ticks(start, sr);
+    let origin = tempo.tick_to_samples(base, sr);
+    let tick = |x: Samples| tempo.samples_to_ticks(start.saturating_add(x), sr);
+    let snap = |x: Samples| tempo.tick_to_samples(tick(x), sr).saturating_sub(origin);
     let snapped = ClipLoop { start: snap(l.start), end: snap(l.end) };
     // Only a cycle that rounds to under the minimum keeps the sample frame. A snapped end at or
     // before the grid origin is still a grid frame (an empty first pass, then the cycles): a start
     // trim at the stored range's sample phase leaves such a loop, `{-103,258, 1}` for a split on a
     // bar line at 44.1 kHz and 102.5 BPM.
     if snapped.cycle() >= transit_model::MIN_CYCLE {
-        LoopFrame { origin, range: snapped, cycle_ticks: Some(tick(l.end) - tick(l.start)) }
+        let grid = GridTicks { origin: base, start: tick(l.start), end: tick(l.end) };
+        LoopFrame { origin, range: snapped, grid: Some(grid) }
     } else {
-        LoopFrame { origin: start, range: l, cycle_ticks: None }
+        LoopFrame { origin: start, range: l, grid: None }
     }
 }
 

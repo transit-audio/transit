@@ -89,6 +89,77 @@ fn split_keeps_both_halves_on_the_old_grid() {
     assert_eq!(ons(&e, t, beat), full());
 }
 
+/// A one-bar kick loop (ticks 0, 960, 1,920, 2,880) dragged to `bars` bars at `hz`, `bpm` and an
+/// optional tempo change `(tick, bpm)`, each edge stored as the editor stores it (a tick converted).
+fn kick_loop(hz: u32, bpm: f64, change: Option<(i64, f64)>, bars: i64) -> (Session, TrackId) {
+    let mut s = Session {
+        sample_rate: transit_time::SampleRate::new(hz).unwrap(),
+        tempo: transit_time::TempoMap::new(bpm, 4, 4).unwrap(),
+        ..Session::default()
+    };
+    if let Some((tick, bpm)) = change {
+        s.tempo.set_tempo(tick, bpm).unwrap();
+    }
+    let sr = s.sample_rate;
+    let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
+    let mut seq = Sequence::default();
+    for beat in 0..4 {
+        seq.notes.push(Note { pitch: 36, velocity: 127, release_velocity: 64, channel: 0, start: beat * Q, length: 240 });
+    }
+    let id = s.new_clip_id();
+    let mut c = Clip::midi(id, "kick", 0, s.tempo.tick_to_samples(bars * 4 * Q, sr), seq);
+    c.set_loop(Some(transit_model::ClipLoop { start: 0, end: s.tempo.tick_to_samples(4 * Q, sr) }));
+    crate::edit::place_clip(&mut s, t, c);
+    (s, t)
+}
+
+/// A split of a looped MIDI clip takes the cut's cycle phase in ticks (ADR 0019): the two halves
+/// together play every kick of the unsplit clip, each at its tick's sample, none dropped, none
+/// doubled. Split on every bar line of a 64-bar clip and a beat and a half after it, at 44.1 and
+/// 48 kHz and four tempos whose bar is not a whole number of samples (a phase counted in samples
+/// drifts by the bar's rounding per cycle: at 48 kHz and 102.5 BPM a split at bar 61 moved the right
+/// half a tick early and dropped its downbeat), and under a tempo change at bar 3 (120 BPM to 90: a
+/// sample phase of a split at bar 4 was 32,000 samples where the true phase is 0).
+#[test]
+fn splitting_a_looped_kick_on_any_bar_keeps_every_kick_on_its_tick() {
+    const BARS: i64 = 64;
+    let mut cases: Vec<(u32, f64, Option<(i64, f64)>)> = Vec::new();
+    for hz in [44_100, 48_000] {
+        for bpm in [93.7, 102.5, 127.3, 174.0] {
+            cases.push((hz, bpm, None));
+        }
+    }
+    cases.push((48_000, 120.0, Some((8 * Q, 90.0))));
+    cases.push((44_100, 102.5, Some((8 * Q, 140.0))));
+    let mut bad = Vec::new();
+    for (hz, bpm, change) in cases {
+        let (s0, t) = kick_loop(hz, bpm, change, BARS);
+        let sr = s0.sample_rate;
+        let at = |tick: i64| s0.tempo.tick_to_samples(tick, sr);
+        let len = at(BARS * 4 * Q);
+        let want: Vec<(Samples, u8)> = (0..BARS * 4).map(|b| (at(b * Q), 36)).collect();
+        assert_eq!(transit_mix::clip_note_ons(&s0, t, 0, len as usize), want, "{hz} Hz {bpm} BPM {change:?}: the unsplit clip");
+        for bar in 1..BARS {
+            for past in [0, 6 * Q / 4] {
+                let cut = at(bar * 4 * Q + past);
+                let mut s = s0.clone();
+                assert_eq!(crate::edit::separate_at(&mut s, t, cut), 1);
+                let got = transit_mix::clip_note_ons(&s, t, 0, len as usize);
+                if got != want {
+                    let missing: Vec<Samples> = want.iter().filter(|w| !got.contains(w)).map(|w| w.0).collect();
+                    let extra: Vec<Samples> = got.iter().filter(|g| !want.contains(g)).map(|g| g.0).collect();
+                    bad.push(format!(
+                        "{hz} Hz {bpm} BPM {change:?}, split at bar {} (+{past} ticks, sample {cut}): {} kicks, missing {missing:?}, off-tick {extra:?}",
+                        bar + 1,
+                        got.len()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{} splits:\n{}", bad.len(), bad.join("\n"));
+}
+
 #[test]
 fn consolidate_writes_the_cycles_out_as_they_sound() {
     let (mut e, t, _, beat) = midi();
