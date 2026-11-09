@@ -124,7 +124,7 @@ fn egui_menu_bar_menus_are_flush_and_the_chrome_bar_menu_is_clear_of_the_bar() {
         egui::MenuBar::new().ui(ui, |ui| crate::chrome::bar_menu(ui, "File", false, |ui| ui.label("Open")).response).inner
     });
     let below_item = (c::MENU_BAR_HEIGHT - c::MENU_BAR_ITEM_HEIGHT) / 2.0;
-    assert_eq!(top, bottom + below_item + crate::chrome::POPUP_MENU_BAR_GAP, "the bar's menus clear the bar by 4");
+    assert_eq!(top, bottom + below_item + c::MENU_BAR_GAP, "the bar's menus clear the bar by 4");
 }
 
 #[test]

@@ -9,9 +9,9 @@ use serde_json::{Value, json};
 use transit_model::TrackId;
 
 /// Text start inside the edge's inner side: padding, row inset, gutter, gap.
-pub(crate) const TEXT_IN: f32 = c::POPUP_PADDING + c::ROW_PADDING[0] + c::CHECK_GUTTER + c::ROW_GAP;
+pub(crate) const TEXT_IN: f32 = c::TEXT_INSET_GUTTER;
 /// Text start in a menu with no checkable row (#418): padding, row inset, gap (no gutter).
-pub(crate) const TEXT_IN_PLAIN: f32 = c::POPUP_PADDING + c::ROW_PADDING[0] + c::ROW_GAP;
+pub(crate) const TEXT_IN_PLAIN: f32 = c::TEXT_INSET_NO_GUTTER;
 /// Shortcut end inside the edge's inner side: padding and the row's right inset.
 pub(crate) const SHORTCUT_IN: f32 = c::POPUP_PADDING + c::ROW_PADDING[1];
 /// The popup's edge (`window_stroke`, 1 px `line.strong`).

@@ -131,7 +131,7 @@ fn a_menu_bar_popup_opens_4_below_the_bar_and_does_not_jump_between_frames() {
             let bar_bottom = c::MENU_BAR_HEIGHT;
             for (frame, text_rect) in &seen {
                 assert!(
-                    near(frame.min.y, bar_bottom + crate::chrome::POPUP_MENU_BAR_GAP),
+                    near(frame.min.y, bar_bottom + c::MENU_BAR_GAP),
                     "{menu} at {zoom}: the popup's top {} want {}",
                     frame.min.y,
                     bar_bottom + 4.0

@@ -351,11 +351,7 @@ pub fn popup_menu(response: &Response, checks: bool) -> egui::Popup<'static> {
     egui::Popup::menu(response).style(menu_style_for(checks))
 }
 
-/// A menu-bar popup's gap under the bar's bottom line (the design's `chrome.popup.menuBarGap`, the
-/// value of `chrome.comboPopupGap`; a local constant until the token mirror lands).
-pub const POPUP_MENU_BAR_GAP: f32 = 4.0;
-
-/// A menu-bar menu: the item's button and its popup, whose top edge sits [`POPUP_MENU_BAR_GAP`]
+/// A menu-bar menu: the item's button and its popup, whose top edge sits `chrome.popup.menuBarGap`
 /// below the bar's bottom line, its left edge on the item's (the item is centered in the bar, so the gap is measured from the
 /// item's bottom edge plus the bar's padding). `checks` is as for [`context_menu`].
 pub fn bar_menu<R>(ui: &mut Ui, text: &str, checks: bool, content: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
@@ -366,7 +362,7 @@ pub fn bar_menu<R>(ui: &mut Ui, text: &str, checks: bool, content: impl FnOnce(&
         .close_behavior(config.close_behavior)
         .style(config.style.clone())
         .info(egui::UiStackInfo::new(egui::UiKind::Menu).with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config))
-        .gap(below_item + POPUP_MENU_BAR_GAP)
+        .gap(below_item + c::MENU_BAR_GAP)
         .show(content);
     egui::InnerResponse::new(inner.map(|i| i.inner), response)
 }
@@ -473,7 +469,7 @@ fn gutter_atom(has_gutter: bool) -> egui::Atom<'static> {
     if has_gutter {
         egui::Atom::custom(egui::Id::new(MENU_CHECK_ATOM), vec2(c::CHECK_GUTTER, c::CHECK_GLYPH))
     } else {
-        egui::Atom::custom(egui::Id::new(MENU_INSET_ATOM), vec2(0.0, c::CHECK_GLYPH))
+        egui::Atom::custom(egui::Id::new(MENU_INSET_ATOM), vec2(c::ROW_PADDING_NO_GUTTER[0] - c::ROW_PADDING[0] - c::ROW_GAP, c::CHECK_GLYPH))
     }
 }
 
