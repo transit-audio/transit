@@ -4,8 +4,11 @@
 //!
 //! The input is untrusted: every chunk size and count is bounded by the bytes that hold it before
 //! it is used, offsets use checked arithmetic, and the walk stops after
-//! [`MAX_CHUNKS`](crate::wav::MAX_CHUNKS) chunks and sub-chunks. Nothing here panics or allocates
-//! more than a small multiple of the input's length.
+//! [`MAX_CHUNKS`](crate::wav::MAX_CHUNKS) chunks and sub-chunks. Nothing here panics. What is
+//! returned is bounded: cue points by the 24 bytes each takes in the file, each `labl` is given
+//! to at most one cue, and a label's text is at most three bytes per `labl` byte in the file (an
+//! invalid UTF-8 byte reads as the three-byte U+FFFD) and at most [`MAX_CUE_LABEL_BYTES`]. The
+//! bad-chunk list holds at most two entries per chunk walked.
 
 use crate::pcm::{le_u16, le_u32, le_u64, tag};
 use crate::wav::{self, MAX_CHUNKS, WavParse};
@@ -28,7 +31,9 @@ pub struct Cue {
     pub id: u32,
     /// The source frame the cue marks, at the file's native rate.
     pub frame: u64,
-    /// The text of the first `labl` with this id, if any (empty text reads as `None`).
+    /// The text of the first `labl` with this id, if any (empty text reads as `None`). Only the
+    /// first kept cue (lowest frame) with an id carries its label; later ones with that id carry
+    /// `None`, so one `labl` is never copied into many cues.
     pub label: Option<String>,
 }
 
@@ -304,7 +309,8 @@ pub fn wav_cues(bytes: &[u8]) -> CueRead {
         match reason {
             Some(reason) => discarded.push(CueDiscard { id: c.id, frame: c.frame, reason }),
             None => {
-                let label = by_id.get(&c.id).and_then(|text| label_text(text));
+                // Taken, not copied: the label goes to the first kept cue with this id only.
+                let label = by_id.remove(&c.id).and_then(label_text);
                 cues.push(Cue { id: c.id, frame: c.frame, label });
             }
         }

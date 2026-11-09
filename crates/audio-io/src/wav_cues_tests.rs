@@ -273,3 +273,20 @@ fn probe_ignores_cue_list_and_acid_chunks() {
         assert_eq!(probe(&with, Some("wav")).unwrap(), probe(&base, Some("wav")).unwrap());
     }
 }
+
+#[test]
+fn wav_cues_label_goes_to_first_cue_with_its_id() {
+    // Many cues on one id and one large label: the label is given once, never copied per cue.
+    let frames = 20_000u32;
+    let text = vec![b'x'; MAX_CUE_LABEL_BYTES];
+    let labels = list(b"adtl", &[labl(1, &text)]);
+    let points: Vec<(u32, u32)> = (0..frames).map(|f| (1, f)).collect();
+    let read = wav_cues(&place(&base_wav(frames as usize, false), &labels, &cue_chunk(&points)));
+    assert_eq!(read.cues.len(), frames as usize);
+    let labelled: Vec<&Cue> = read.cues.iter().filter(|c| c.label.is_some()).collect();
+    let label_bytes: usize = read.cues.iter().filter_map(|c| c.label.as_ref()).map(String::len).sum();
+    assert!(label_bytes <= text.len(), "{label_bytes} label bytes returned from {} labl bytes", text.len());
+    assert_eq!(labelled.len(), 1);
+    assert_eq!((labelled[0].id, labelled[0].frame), (1, 0));
+    assert_eq!(read.discarded, vec![]);
+}
