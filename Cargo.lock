@@ -4383,6 +4383,7 @@ dependencies = [
  "transit-audio-wasapi",
  "transit-clap-host",
  "transit-dsp",
+ "transit-midi",
  "transit-midi-io",
  "transit-mix",
  "transit-model",
