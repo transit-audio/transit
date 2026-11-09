@@ -386,6 +386,10 @@ pub struct Marker {
 pub struct Markers {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<Marker>,
+    /// The lowest id this set never handed out (0: none recorded, the next id is one past the
+    /// highest), so a removed id is never reused. Edits are in [`crate::slicing`].
+    #[serde(skip_serializing_if = "is_default")]
+    pub next_id: u32,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -625,7 +629,7 @@ impl PatchV1 {
             && l.auto.is_none()
             && l.manual.is_none()
         {
-            l.manual = Some(Markers { markers: old, extra: Extra::new() });
+            l.manual = Some(Markers { markers: old, ..Markers::default() });
             l.mode = SliceMode::Manual;
         }
     }
