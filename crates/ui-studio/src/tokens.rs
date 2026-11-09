@@ -578,8 +578,21 @@ pub mod chrome {
     pub const ROW_GAP: f32 = 4.0;
     pub const CHECK_GLYPH: f32 = 12.0;
     pub const CHEVRON: f32 = 12.0;
-    /// A list that opens from a field starts this far below it; menu-bar menus open flush.
+    /// A list that opens from a field starts this far below it; a menu-bar popup opens the same
+    /// distance below the bar ([`MENU_BAR_GAP`]).
     pub const COMBO_POPUP_GAP: f32 = 4.0;
+    /// A menu-bar popup opens this far below the bar (`popup.menuBarGap`), aligned to the item's left
+    /// edge. Mirrored ahead of its behavior (#418): no caller reads it yet.
+    pub const MENU_BAR_GAP: f32 = 4.0;
+    /// Which popups carry the check gutter (`popup.checkGutterWhen`): only one with at least one
+    /// checkable row (check or radio); each popup decides for itself. Mirrored ahead of #418.
+    pub const CHECK_GUTTER_WHEN: &str = "anyCheckableRow";
+    /// A row's left and right padding in a popup without the gutter (`popup.rowPaddingNoGutter`).
+    pub const ROW_PADDING_NO_GUTTER: [f32; 2] = [8.0, 8.0];
+    /// Where a row's text starts, from the popup's edge: with the gutter, and without it
+    /// (`popup.textInset`: 4 popup padding + 8 row padding).
+    pub const TEXT_INSET_GUTTER: f32 = 28.0;
+    pub const TEXT_INSET_NO_GUTTER: f32 = 12.0;
     pub const SEPARATOR_GAP: f32 = 4.0;
     pub const MODAL_WIDTH: f32 = 380.0;
     /// Top, sides, bottom.
@@ -668,6 +681,11 @@ pub mod chrome {
         ("popup/checkGlyph", CHECK_GLYPH),
         ("popup/chevron", CHEVRON),
         ("comboPopupGap", COMBO_POPUP_GAP),
+        ("popup/menuBarGap", MENU_BAR_GAP),
+        ("popup/rowPaddingNoGutter/0", ROW_PADDING_NO_GUTTER[0]),
+        ("popup/rowPaddingNoGutter/1", ROW_PADDING_NO_GUTTER[1]),
+        ("popup/textInset/gutter", TEXT_INSET_GUTTER),
+        ("popup/textInset/noGutter", TEXT_INSET_NO_GUTTER),
         ("popup/separatorGap", SEPARATOR_GAP),
         ("modal/width", MODAL_WIDTH),
         ("modal/padding/0", MODAL_PADDING[0]),
@@ -952,6 +970,9 @@ pub mod channel_strip {
     pub const PAN_VALUE_WIDTH: f32 = 30.0;
     /// The MIDI OUT button beside the input.
     pub const MIDI_OUT_WIDTH: f32 = 32.0;
+    /// A send row's bar fills from the left (`sendBarAnchor`): a send's rest is off, so the bar
+    /// reads as how much is sent. No notch. No code change; the constant records the decision.
+    pub const SEND_BAR_ANCHOR: &str = "left";
     pub const READOUT_HEIGHT: f32 = 26.0;
     pub const PEAK_WIDTH: f32 = 46.0;
     pub const PEAK_WIDTH_MAIN: f32 = 56.0;
@@ -1117,6 +1138,21 @@ pub mod sampler {
     pub const SEED_REROLL_ICON: &str = "dices";
     pub const SEED_SEQUENTIAL: &str = "ink.arrow";
     pub const VIEW_SWITCH_FONT: &str = "sans";
+    /// The Pads bar's Start note field (`startNote`), mirrored ahead of the control: it waits for
+    /// the ADR 0041 start-note amendment and the Pads bar UI pass, so no caller reads these yet.
+    pub const START_NOTE_LABEL: &str = "Start note";
+    pub const START_NOTE_FONT: &str = "mono";
+    pub const START_NOTE_DEFAULT: &str = "C1";
+    /// The refused-outside range, lowest and highest note name.
+    pub const START_NOTE_RANGE: [&str; 2] = ["C-2", "G8"];
+    pub const START_NOTE_LABEL_GAP: f32 = 6.0;
+    pub const START_NOTE_WIDTH: f32 = 48.0;
+    pub const START_NOTE_HEIGHT: f32 = 24.0;
+    pub const START_NOTE_FONT_WEIGHT: f32 = 500.0;
+    pub const START_NOTE_FONT_SIZE: f32 = 11.0;
+    /// Space between the field and the actions (Load kit...) that follow it.
+    pub const START_NOTE_GAP_BEFORE_ACTIONS: f32 = 16.0;
+    pub const START_NOTE_DRAG_PX_PER_SEMITONE: f32 = 6.0;
     /// Every string under `sampler` in tokens.json by its path.
     pub const STRINGS: &[(&str, &str)] = &[
         ("viewBar/font/font", VIEW_BAR_FONT),
@@ -1159,6 +1195,11 @@ pub mod sampler {
         ("seed/rerollIcon", SEED_REROLL_ICON),
         ("seed/sequential", SEED_SEQUENTIAL),
         ("viewSwitch/font/font", VIEW_SWITCH_FONT),
+        ("startNote/label", START_NOTE_LABEL),
+        ("startNote/font/font", START_NOTE_FONT),
+        ("startNote/default", START_NOTE_DEFAULT),
+        ("startNote/range/0", START_NOTE_RANGE[0]),
+        ("startNote/range/1", START_NOTE_RANGE[1]),
     ];
     pub const VIEW_BAR_HEIGHT: f32 = 24.0;
     pub const VIEW_BAR_FONT_WEIGHT: f32 = 500.0;
@@ -1258,5 +1299,12 @@ pub mod sampler {
         ("viewSwitch/font/weight", VIEW_SWITCH_FONT_WEIGHT),
         ("viewSwitch/font/size", VIEW_SWITCH_FONT_SIZE),
         ("viewSwitch/paddingX", VIEW_SWITCH_PADDING_X),
+        ("startNote/labelGap", START_NOTE_LABEL_GAP),
+        ("startNote/width", START_NOTE_WIDTH),
+        ("startNote/height", START_NOTE_HEIGHT),
+        ("startNote/font/weight", START_NOTE_FONT_WEIGHT),
+        ("startNote/font/size", START_NOTE_FONT_SIZE),
+        ("startNote/gapBeforeActions", START_NOTE_GAP_BEFORE_ACTIONS),
+        ("startNote/dragPxPerSemitone", START_NOTE_DRAG_PX_PER_SEMITONE),
     ];
 }

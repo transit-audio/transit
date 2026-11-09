@@ -451,7 +451,12 @@ fn the_chrome_matches_tokens_json_both_ways() {
     for (path, name) in tokens::chrome::PATTERN_COLORS {
         assert_eq!(at(chrome, path).as_str(), Some(*name), "chrome/{path}");
     }
-    for (path, s) in named.iter().filter(|(p, _)| p != "chrome.note" && !p.starts_with("chrome.type.") && !p.ends_with(".icon")) {
+    // A behavior rule written as a word, not a color: mirrored, checked here.
+    assert_eq!(at(chrome, "popup/checkGutterWhen").as_str(), Some(tokens::chrome::CHECK_GUTTER_WHEN));
+    for (path, s) in named
+        .iter()
+        .filter(|(p, _)| p != "chrome.note" && p != "chrome.popup.checkGutterWhen" && !p.starts_with("chrome.type.") && !p.ends_with(".icon"))
+    {
         if s.starts_with('#') {
             let c = tokens::component::ALL.iter().find(|(n, _)| n == path).unwrap_or_else(|| panic!("{path}: literal {s} without a component path"));
             assert_eq!(parse(s), c.1, "{path}");
@@ -593,6 +598,7 @@ fn the_channel_strip_matches_tokens_json_both_ways() {
     for (path, x) in tokens::channel_strip::METRICS {
         assert_eq!(num(cs, path), *x, "channelStrip/{path}");
     }
+    assert_eq!(at(cs, "sendBarAnchor").as_str(), Some(tokens::channel_strip::SEND_BAR_ANCHOR));
     let known: BTreeSet<String> = ["color", "arrangement"].iter().flat_map(|k| color_names(&v, k)).collect();
     for path in [
         "selectedBorder",
