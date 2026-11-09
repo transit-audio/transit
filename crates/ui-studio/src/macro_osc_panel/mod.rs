@@ -368,7 +368,7 @@ pub(crate) fn finish(app: &mut StudioApp, ui: &Ui, dev: Dev, id: &str, resp: &eg
     if let Some(v) = new {
         set(app, dev, p.id, v);
     }
-    let shown = p.format(new.map_or_else(|| dev.value(app, p.id), |v| p.clamp(v)));
+    let shown = crate::middle_c::param_text(p, new.map_or_else(|| dev.value(app, p.id), |v| p.clamp(v)), app.ui.middle_c);
     lay.rows.push(RowLayout { param: p.id.to_string(), control: r4(resp.rect), value: shown });
 }
 
@@ -432,7 +432,7 @@ pub(crate) fn knob_at(
     let cell = Rect::from_min_size(at, knob::cell(size));
     let Some(p) = dev.param(id) else { return cell };
     let v = dev.value(app, id);
-    let text = p.format(v);
+    let text = crate::middle_c::param_text(p, v, app.ui.middle_c);
     let dest = destination_of(id);
     let synced = division_param(id);
     let k = knob::Knob {
@@ -450,7 +450,7 @@ pub(crate) fn knob_at(
     let new = match shown.value {
         // A sync division's knob travels the divisions in duration order, not table order.
         Some(n) if synced && !shown.reset => Some(division_at(n)),
-        _ => crate::device_editor::knob_value(p, &shown),
+        _ => crate::device_editor::knob_value(p, &shown, app.ui.middle_c),
     };
     if shown.wheeled {
         // A wheel gesture's nudges merge into one undo step while the wheel keeps coming.

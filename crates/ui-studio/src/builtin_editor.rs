@@ -107,7 +107,7 @@ fn format_param(plugin: &str, p: &ParamInfo, value: f32, middle_c: transit_midi:
     if whole_number(plugin, p.id) {
         return format!("{:.0}", value.round());
     }
-    p.format(value)
+    crate::middle_c::param_text(p, value, middle_c)
 }
 
 pub(crate) fn is_audio_name(name: &str) -> bool {
@@ -285,10 +285,11 @@ pub(crate) fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize),
     ui.label(RichText::new(p.name).color(TOKENS.text_dim));
     let mut x = v;
     let (resp, reset) = if p.unit == Unit::Choice && !p.choices.is_empty() {
-        let mut idx = (x.round().max(0.0) as usize).min(p.choices.len() - 1);
-        let r = crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), p.choices[idx]).dense().show(ui, |ui| {
-            for (i, c) in p.choices.iter().enumerate() {
-                crate::chrome_pick::choice_value(ui, &mut idx, i, *c);
+        let names = crate::middle_c::choice_texts(p, app.ui.middle_c);
+        let mut idx = (x.round().max(0.0) as usize).min(names.len() - 1);
+        let r = crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), &names[idx]).dense().show(ui, |ui| {
+            for (i, c) in names.iter().enumerate() {
+                crate::chrome_pick::choice_value(ui, &mut idx, i, c);
             }
         });
         x = idx as f32;

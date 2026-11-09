@@ -42,7 +42,7 @@ pub struct RackLayout {
 }
 
 static MACRO_INFO: ParamInfo =
-    ParamInfo { id: "macro", name: "Macro", min: 0.0, max: 1.0, default: 0.0, unit: Unit::Percent, taper: Taper::Linear, choices: &[], group: "" };
+    ParamInfo { id: "macro", name: "Macro", min: 0.0, max: 1.0, default: 0.0, unit: Unit::Percent, taper: Taper::Linear, choices: &[], group: "", note_labels: None };
 
 /// The card's height for rack `t`: the knobs or the member rows, whichever is taller.
 pub fn card_height(s: &transit_model::Session, t: &Track) -> f32 {
@@ -167,7 +167,7 @@ fn macro_knob(
 ) {
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cell.intersect(lane)));
     child.spacing_mut().item_spacing = vec2(0.0, 0.0);
-    let k = crate::widgets::param_knob::show(&mut child, egui::Id::new(("rack_macro", rack.0, i)), name, &MACRO_INFO, value);
+    let k = crate::widgets::param_knob::show(&mut child, egui::Id::new(("rack_macro", rack.0, i)), name, &MACRO_INFO, value, app.ui.middle_c);
     crate::help::hover(ui, &k.response, crate::help::Id::DeviceChainRackMacro);
     if mapped {
         p.circle_filled(pos2(cell.max.x - 8.0, cell.min.y + 4.0), 2.5, TOKENS.accent);

@@ -255,8 +255,8 @@ fn pad(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, out: &mut MacroLa
     lbl(&out.hero.pad_labels[0], Align2::LEFT_BOTTOM, pos2(rect.min.x + 8.0, rect.max.y - 6.0));
     lbl(&out.hero.pad_labels[1], Align2::LEFT_TOP, pos2(rect.min.x + 8.0, rect.min.y + 6.0));
     let ry = rect.max.y + 6.0 + PAD_READOUT / 2.0;
-    out.hero.timbre_text = tp.format(super::value_at(tp, shown[0]));
-    out.hero.morph_text = mp.format(super::value_at(mp, shown[1]));
+    out.hero.timbre_text = crate::middle_c::param_text(tp, super::value_at(tp, shown[0]), app.ui.middle_c);
+    out.hero.morph_text = crate::middle_c::param_text(mp, super::value_at(mp, shown[1]), app.ui.middle_c);
     for (letter, text, anchor, x) in
         [("T", &out.hero.timbre_text, Align2::LEFT_CENTER, rect.min.x), ("M", &out.hero.morph_text, Align2::RIGHT_CENTER, rect.max.x)]
     {

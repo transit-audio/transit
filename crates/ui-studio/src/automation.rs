@@ -762,7 +762,7 @@ fn lane_area(app: &mut StudioApp, ui: &mut Ui, s: &Session, t: &Track, lane: &La
     let v = lane.value_at(t, pos);
     let m = pos2(map.x(pos), ys.y(lane.norm(t, v)));
     row.value = v;
-    row.readout = lane.text(t, v);
+    row.readout = lane.text(t, v, app.ui.middle_c);
     row.marker = [m.x, m.y];
     if m.x >= x0 && m.x <= x1 {
         p.circle_stroke(m, 5.0, Stroke::new(1.5, TOKENS.accent));
@@ -876,7 +876,7 @@ fn lane_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, t: &Track, lane: &L
         }
         // The value as the drag sets it, beside the point.
         let c = pos2(map.x(at), ys.y(lane.norm(t, v)));
-        let text = format!("{} · {}", lane.text(t, v), s.format_position(at, s.edit.main_counter));
+        let text = format!("{} · {}", lane.text(t, v, app.ui.middle_c), s.format_position(at, s.edit.main_counter));
         let p = ui.painter().with_clip_rect(tl);
         let g = p.layout_no_wrap(text, FontId::proportional(10.5), TOKENS.text);
         let tag = Rect::from_min_size(pos2(c.x + 8.0, (c.y - 18.0).max(area.min.y)), g.size() + vec2(8.0, 4.0));

@@ -43,7 +43,7 @@ pub const ROW_GAP: f32 = 8.0;
 pub const MODES: [&str; 2] = ["One-shot", "Gate"];
 
 const fn param(id: &'static str, name: &'static str, min: f32, max: f32, default: f32, unit: Unit, taper: Taper) -> ParamInfo {
-    ParamInfo { id, name, min, max, default, unit, taper, choices: &[], group: "" }
+    ParamInfo { id, name, min, max, default, unit, taper, choices: &[], group: "", note_labels: None }
 }
 
 /// The zone fields the knobs edit (ADR 0041's ranges and new-pad defaults).
@@ -228,7 +228,7 @@ fn knob_at(
     let cell = Rect::from_min_size(pos2(at.x + (slot - cw) / 2.0, at.y), knob::cell(size));
     let p = f.info;
     let v = read(patch, zone, f);
-    let text = p.format(v);
+    let text = crate::middle_c::param_text(p, v, app.ui.middle_c);
     let k = knob::Knob {
         size,
         label: f.label,
@@ -241,7 +241,7 @@ fn knob_at(
     };
     let mut c = child(ui, cell);
     let shown = knob::show(&mut c, knob_id(dev.uid(), p.id), &k);
-    let new = if live { knob_value(p, &shown) } else { None };
+    let new = if live { knob_value(p, &shown, app.ui.middle_c) } else { None };
     if shown.wheeled {
         app.builtin_editor.devices.wheel_now = true;
     }
@@ -260,7 +260,7 @@ fn knob_at(
                 behavior::zone_merged(app, dev, zone.id, p.id, serde_json::json!({ "playback": fields }));
             }
         }
-        value = p.format(n);
+        value = crate::middle_c::param_text(p, n, app.ui.middle_c);
     }
     lay.rows.push(crate::builtin_editor::RowLayout { param: format!("zone{:03}_{}", zone.id + 1, p.id), control: r4(cell), value: value.clone() });
     out.knobs.push(KnobRecord { field: p.id.to_string(), label: f.label.to_string(), value, knob: shown.layout });

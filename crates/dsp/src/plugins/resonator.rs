@@ -105,12 +105,16 @@ const D_POSITION: usize = dst::DECAY;
 /// The lowest tonic (`tonic` choice 0), MIDI: the module's `12 + transpose`.
 const TONIC_LOW: f32 = 12.0;
 
-/// `tonic` choices: MIDI 12 to 72, named with middle C (MIDI 60) as C3, as Live and Logic name it.
+/// `tonic` choices: MIDI 12 to 72, the fixed names with middle C (MIDI 60) as C3 (what the
+/// control channel lists; the UI names them in its Middle C setting through [`TONIC_LABELS`]).
 pub const TONICS: [&str; 61] = [
     "C-1", "C#-1", "D-1", "D#-1", "E-1", "F-1", "F#-1", "G-1", "G#-1", "A-1", "A#-1", "B-1", "C0", "C#0", "D0", "D#0", "E0", "F0", "F#0", "G0",
     "G#0", "A0", "A#0", "B0", "C1", "C#1", "D1", "D#1", "E1", "F1", "F#1", "G1", "G#1", "A1", "A#1", "B1", "C2", "C#2", "D2", "D#2", "E2", "F2",
     "F#2", "G2", "G#2", "A2", "A#2", "B2", "C3", "C#3", "D3", "D#3", "E3", "F3", "F#3", "G3", "G#3", "A3", "A#3", "B3", "C4",
 ];
+
+/// The Tonic's note labels (ADR 0051): entry `i` is MIDI `12 + i`.
+pub const TONIC_LABELS: crate::NoteLabels = crate::NoteLabels { first_note: 12, step: 1, octave_only: false };
 
 /// The module's structure ceiling (its CV scaler stops the knob at 0.9995).
 pub const STRUCTURE_MAX: f32 = 0.9995;

@@ -427,15 +427,16 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     // The Tuner's Reference names the A it means in the Middle C setting (ADR 0051).
     let caption = (info.id == crate::tuner_panel::TUNER && id == "reference_hz").then(|| crate::tuner_panel::reference_label(app.ui.middle_c));
     let label = caption.as_deref().unwrap_or(label);
+    let mc = app.ui.middle_c;
     let (resp, new, shown) = match item {
         Knob(..) => {
-            let k = knob::show(ui, egui::Id::new(("knob", ins.uid.get(), id)), label, p, v);
-            (k.response, k.value, p.format(k.value.unwrap_or(v)))
+            let k = knob::show(ui, egui::Id::new(("knob", ins.uid.get(), id)), label, p, v, mc);
+            (k.response, k.value, crate::middle_c::param_text(p, k.value.unwrap_or(v), mc))
         }
         Toggle(..) => {
             let r = crate::chrome_pick::option_label(ui, v >= 0.5, label);
             let clicked = r.clicked().then_some(if v >= 0.5 { 0.0 } else { 1.0 });
-            (r, clicked, p.format(v))
+            (r, clicked, crate::middle_c::param_text(p, v, mc))
         }
         Item::Hold(..) => {
             // On while the pointer holds it down, off when it lets go (wherever it is then). It
@@ -444,10 +445,10 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
             let r = crate::chrome_pick::option_label(ui, v >= 0.5, label).interact(egui::Sense::click_and_drag());
             let down = r.is_pointer_button_down_on();
             let changed = (down != (v >= 0.5)).then_some(if down { 1.0 } else { 0.0 });
-            (r, changed, p.format(v))
+            (r, changed, crate::middle_c::param_text(p, v, mc))
         }
-        Menu(..) => choice(ui, ins, p, label, v, MENU_W, None),
-        _ => choice(ui, ins, p, label, v, knob::CELL_W - 10.0, None),
+        Menu(..) => choice(ui, ins, p, label, v, MENU_W, None, mc),
+        _ => choice(ui, ins, p, label, v, knob::CELL_W - 10.0, None, mc),
     };
     finish(app, ui, key, info, id, (resp, new, shown), v, lay);
 }
@@ -495,15 +496,16 @@ pub(crate) fn choice(
     v: f32,
     width: f32,
     row: Option<f32>,
+    middle_c: transit_midi::MiddleC,
 ) -> (egui::Response, Option<f32>, String) {
-    let mut idx = (v.round().max(0.0) as usize).min(p.choices.len().saturating_sub(1));
+    let names = crate::middle_c::choice_texts(p, middle_c);
+    let mut idx = (v.round().max(0.0) as usize).min(names.len().saturating_sub(1));
     let r = ui
         .vertical(|ui| {
-            let combo =
-                crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), p.choices.get(idx).copied().unwrap_or("")).width(width);
+            let combo = crate::chrome_pick::Combo::new(("builtin_choice", ins.uid.get(), p.id), names.get(idx).map_or("", String::as_str)).width(width);
             let c = if let Some(h) = row { combo.row(h) } else { combo.dense() }.show(ui, |ui| {
-                for (i, name) in p.choices.iter().enumerate() {
-                    crate::chrome_pick::choice_value(ui, &mut idx, i, *name);
+                for (i, name) in names.iter().enumerate() {
+                    crate::chrome_pick::choice_value(ui, &mut idx, i, name);
                 }
             });
             if !label.is_empty() {
@@ -512,7 +514,7 @@ pub(crate) fn choice(
             c.response
         })
         .inner;
-    (r, (idx as f32 != v).then_some(idx as f32), p.format(idx as f32))
+    (r, (idx as f32 != v).then_some(idx as f32), crate::middle_c::param_text(p, idx as f32, middle_c))
 }
 
 /// The sidechain key: None, or another track (or a bus), at the tap the device card last used.

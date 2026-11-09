@@ -90,8 +90,9 @@ fn output(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut Edit
         let r = Rect::from_min_size(pos2(col.max.x - DROPDOWN_W, y), vec2(DROPDOWN_W, DROPDOWN_H));
         let sel = dev.index(app, id);
         let text = dev.text(app, id);
-        let (resp, pick) =
-            dropdown(ui, egui::Id::new(("macro_osc_drop", dev.uid(), id)), r, t.surface_inset, Lead::None, &text, mono, p.choices, sel);
+        let names = crate::middle_c::choice_texts(p, app.ui.middle_c);
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let (resp, pick) = dropdown(ui, egui::Id::new(("macro_osc_drop", dev.uid(), id)), r, t.surface_inset, Lead::None, &text, mono, &names, sel);
         finish(app, ui, dev, id, &resp, pick.map(|i| i as f32), lay);
         out.dropdowns.push((id.to_string(), r4(r), text));
         y += DROPDOWN_H + 8.0;

@@ -34,9 +34,9 @@ impl Dev<'_> {
         p.clamp(app.followed_param(self.key, id).or_else(|| self.ins.params.get(id).copied()).unwrap_or(p.default))
     }
 
-    /// The value as its control prints it.
+    /// The value as its control prints it (note labels in the Middle C setting).
     pub fn text(&self, app: &StudioApp, id: &str) -> String {
-        self.param(id).map(|p| p.format(self.value(app, id))).unwrap_or_default()
+        self.param(id).map(|p| crate::middle_c::param_text(p, self.value(app, id), app.ui.middle_c)).unwrap_or_default()
     }
 
     pub fn on(&self, app: &StudioApp, id: &str) -> bool {
@@ -61,22 +61,27 @@ pub fn value_at(p: &ParamInfo, norm: f32) -> f32 {
 /// The value a knob's gesture sets: a reset is the parameter's default itself (never the value at
 /// the default's position, which a log taper's round trip leaves an ulp off: 3.9999998 for a ratio
 /// of 4), a turn or nudge the value at the new position, typing the value it reads as.
-pub fn knob_value(p: &ParamInfo, shown: &widgets::knob::KnobOut) -> Option<f32> {
-    gesture_value(p, shown.value, shown.reset, shown.typed.as_deref())
+pub fn knob_value(p: &ParamInfo, shown: &widgets::knob::KnobOut, middle_c: transit_midi::MiddleC) -> Option<f32> {
+    gesture_value(p, shown.value, shown.reset, shown.typed.as_deref(), middle_c)
 }
 
 /// [`knob_value`] from the gesture's parts: the new position, whether it is a reset, the text typed.
-pub fn gesture_value(p: &ParamInfo, position: Option<f32>, reset: bool, typed: Option<&str>) -> Option<f32> {
+pub fn gesture_value(p: &ParamInfo, position: Option<f32>, reset: bool, typed: Option<&str>, middle_c: transit_midi::MiddleC) -> Option<f32> {
     if reset {
         return Some(p.default);
     }
-    position.map(|n| value_at(p, n)).or_else(|| typed.and_then(|t| parse(p, t)))
+    position.map(|n| value_at(p, n)).or_else(|| typed.and_then(|t| parse(p, t, middle_c)))
 }
 
 /// A value typed into a knob's field: a number in the parameter's unit (`1.2k` and `1.2 kHz` for
 /// kilohertz; for a time, a bare number or `ms` is milliseconds and a trailing `s` seconds), or a
-/// choice by name. `None` when it does not read.
-pub fn parse(p: &ParamInfo, text: &str) -> Option<f32> {
+/// choice by name. A note-labelled choice reads its note or octave in the Middle C setting first
+/// (ADR 0051), so a typed C1 under C4 is never matched against a C3 name. `None` when it does not
+/// read.
+pub fn parse(p: &ParamInfo, text: &str, middle_c: transit_midi::MiddleC) -> Option<f32> {
+    if p.note_labels.is_some() {
+        return crate::middle_c::parse_note_entry(p, text, middle_c);
+    }
     let t = text.trim().to_lowercase();
     if !p.choices.is_empty() {
         return p.choices.iter().position(|c| c.to_lowercase() == t).map(|i| i as f32);
@@ -190,15 +195,15 @@ mod tests {
         for p in [ratio, cutoff] {
             assert_eq!(p.taper, transit_dsp::Taper::Log, "{}", p.id);
             let at_default = p.to_normalized(p.default);
-            assert_eq!(gesture_value(p, Some(at_default), true, None), Some(p.default), "{}", p.id);
+            assert_eq!(gesture_value(p, Some(at_default), true, None, transit_midi::MiddleC::C3), Some(p.default), "{}", p.id);
         }
         // Negative control: the position's round trip through the taper misses the default (the
         // ratio's 4 comes back as 3.9999998), which is why a reset never takes that path.
         let round = value_at(ratio, ratio.to_normalized(ratio.default));
         assert_ne!(round, ratio.default, "{round}");
-        assert_eq!(gesture_value(ratio, Some(ratio.to_normalized(ratio.default)), false, None), Some(round));
+        assert_eq!(gesture_value(ratio, Some(ratio.to_normalized(ratio.default)), false, None, transit_midi::MiddleC::C3), Some(round));
         // A turn and typing still map as before.
-        assert_eq!(gesture_value(ratio, Some(1.0), false, None), Some(ratio.max));
-        assert_eq!(gesture_value(ratio, None, false, Some("8")), Some(8.0));
+        assert_eq!(gesture_value(ratio, Some(1.0), false, None, transit_midi::MiddleC::C3), Some(ratio.max));
+        assert_eq!(gesture_value(ratio, None, false, Some("8"), transit_midi::MiddleC::C3), Some(8.0));
     }
 }

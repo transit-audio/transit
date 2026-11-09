@@ -196,15 +196,16 @@ fn param_control(
 ) -> egui::Response {
     match pi.unit {
         Unit::Choice => {
-            let resp = ui.put(field, egui::Button::new(egui::RichText::new(pi.format(stored)).size(10.5)));
+            let resp = ui.put(field, egui::Button::new(egui::RichText::new(crate::middle_c::param_text(pi, stored, app.ui.middle_c)).size(10.5)));
+            let names = crate::middle_c::choice_texts(pi, app.ui.middle_c);
             let mut picked = None;
             crate::chrome::popup_menu(&resp, true).width(130.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                 egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                    for (k, name) in pi.choices.iter().enumerate() {
+                    for (k, name) in names.iter().enumerate() {
                         #[allow(clippy::cast_precision_loss)] // A short list.
                         let value = k as f32;
-                        let b = ui.add(crate::chrome::MenuRow::new(*name).checked(stored.to_bits() == value.to_bits()));
-                        menu.push(MenuItem::at(ui, (*name).to_string(), format!("{}={k}", pi.id), b.rect));
+                        let b = ui.add(crate::chrome::MenuRow::new(name).checked(stored.to_bits() == value.to_bits()));
+                        menu.push(MenuItem::at(ui, name.clone(), format!("{}={k}", pi.id), b.rect));
                         if b.clicked() {
                             picked = Some(value);
                             ui.close();

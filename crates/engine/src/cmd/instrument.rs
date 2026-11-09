@@ -118,6 +118,7 @@ mod tests {
             taper: Taper::Linear,
             choices: &[],
             group: "",
+            note_labels: None,
         }];
         let hosted = PluginInfo {
             id: "vst3:00000000000000000000000000000003",

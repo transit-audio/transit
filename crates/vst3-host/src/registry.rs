@@ -383,6 +383,7 @@ fn param_info(inst: &Instance, p: &RawParam, units: &std::collections::HashMap<i
         taper: Taper::Linear,
         choices: &[],
         group: units.get(&p.unit_id).map_or("", |g| leak(g.clone())),
+        note_labels: None,
     };
     if p.step_count == 1 {
         return ParamInfo { unit: Unit::Toggle, default: p.default_normalized.round() as f32, ..base };

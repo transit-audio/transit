@@ -43,3 +43,46 @@ impl StudioApp {
         }
     }
 }
+
+/// A parameter's value as the screen shows it (ADR 0051 decision 4): a note-labelled choice
+/// (`ParamInfo::note_labels`) names entry `i` as MIDI `first_note + step * i` in the Middle C
+/// setting (its octave number alone when `octave_only`); every other parameter reads
+/// `ParamInfo::format`. Every UI site that shows a parameter's value text calls this; the
+/// control channel's listing keeps the fixed C3 strings in `choices`.
+pub(crate) fn param_text(p: &transit_dsp::ParamInfo, value: f32, middle_c: MiddleC) -> String {
+    match entry_pitch(p, value) {
+        Some((pitch, true)) => transit_midi::octave(pitch, middle_c).to_string(),
+        Some((pitch, false)) => transit_midi::note_name(pitch, middle_c),
+        None => p.format(value),
+    }
+}
+
+/// Every entry of a choice as [`param_text`] names it, in order (a dropdown's list).
+pub(crate) fn choice_texts(p: &transit_dsp::ParamInfo, middle_c: MiddleC) -> Vec<String> {
+    (0..p.choices.len()).map(|i| param_text(p, i as f32, middle_c)).collect()
+}
+
+/// A typed value for a note-labelled choice: the entry whose note (or octave number, when
+/// `octave_only`) the text names in the Middle C setting. `None` for any other parameter, or
+/// when no entry matches.
+pub(crate) fn parse_note_entry(p: &transit_dsp::ParamInfo, text: &str, middle_c: MiddleC) -> Option<f32> {
+    let labels = p.note_labels?;
+    let entries = (0..p.choices.len()).filter_map(|i| entry_pitch(p, i as f32).map(|(pitch, _)| (i, pitch)));
+    let found = if labels.octave_only {
+        let n: i32 = text.trim().parse().ok()?;
+        entries.clone().find(|(_, pitch)| transit_midi::octave(*pitch, middle_c) == n)
+    } else {
+        let want = transit_midi::parse_note(text, middle_c, None)?;
+        entries.clone().find(|(_, pitch)| *pitch == want)
+    };
+    found.map(|(i, _)| i as f32)
+}
+
+/// The MIDI pitch entry `value` of a note-labelled choice stands for, and whether it shows its
+/// octave alone.
+fn entry_pitch(p: &transit_dsp::ParamInfo, value: f32) -> Option<(u8, bool)> {
+    let labels = p.note_labels.filter(|_| p.unit == transit_dsp::Unit::Choice)?;
+    let index = p.clamp(value) as u32;
+    let pitch = u32::from(labels.first_note) + u32::from(labels.step) * index;
+    u8::try_from(pitch).ok().filter(|n| *n <= 127).map(|n| (n, labels.octave_only))
+}

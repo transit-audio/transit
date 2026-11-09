@@ -65,8 +65,9 @@ pub struct KnobOut {
     pub text: String,
 }
 
-/// Draws the knob for `p` at `value` with `label` under it.
-pub fn show(ui: &mut Ui, id: egui::Id, label: &str, p: &ParamInfo, value: f32) -> KnobOut {
+/// Draws the knob for `p` at `value` with `label` under it; its value text names a note-labelled
+/// choice in `middle_c` (ADR 0051).
+pub fn show(ui: &mut Ui, id: egui::Id, label: &str, p: &ParamInfo, value: f32, middle_c: transit_midi::MiddleC) -> KnobOut {
     let (rect, _) = ui.allocate_exact_size(vec2(CELL_W, CELL_H), Sense::hover());
     let dial = egui::Rect::from_center_size(rect.center_top() + vec2(0.0, DIAL / 2.0), vec2(DIAL, DIAL));
     let r = ui.interact(dial, id, Sense::click_and_drag());
@@ -106,7 +107,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, label: &str, p: &ParamInfo, value: f32) -
     let a = angle(norm);
     let dir = vec2(a.cos(), a.sin());
     painter.line_segment([c + dir * (rad - 12.0), c + dir * (rad - 5.0)], Stroke::new(2.0, TOKENS.text));
-    let text = if active { p.format(shown) } else { label.to_string() };
+    let text = if active { crate::middle_c::param_text(p, shown, middle_c) } else { label.to_string() };
     if active {
         let slot = egui::Rect::from_min_max(egui::pos2(rect.min.x, dial.max.y + 2.0), rect.max);
         painter.rect_filled(slot, RADIUS_SM, TOKENS.panel);

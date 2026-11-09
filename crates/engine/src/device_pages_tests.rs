@@ -36,6 +36,7 @@ fn hosted(n: usize) -> &'static PluginInfo {
             taper: Taper::Linear,
             choices: &[],
             group: "",
+            note_labels: None,
         })
         .collect();
     Box::leak(Box::new(PluginInfo {

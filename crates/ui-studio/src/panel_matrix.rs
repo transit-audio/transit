@@ -100,9 +100,9 @@ fn cell(
         let r = ui.add_sized([width, LINE_H], egui::DragValue::new(&mut x).range(p.min..=p.max).speed(0.5).fixed_decimals(0).suffix("%"));
         let reset = crate::builtin_editor::double_clicked(ui, &r);
         let new = if reset { Some(p.default) } else { (x != v).then_some(x) };
-        (r, new, p.format(new.unwrap_or(v)))
+        (r, new, crate::middle_c::param_text(p, new.unwrap_or(v), app.ui.middle_c))
     } else {
-        choice(ui, ins, p, "", v, width - 8.0, Some(LINE_H))
+        choice(ui, ins, p, "", v, width - 8.0, Some(LINE_H), app.ui.middle_c)
     };
     finish(app, ui, key, info, id, drawn, v, lay);
 }

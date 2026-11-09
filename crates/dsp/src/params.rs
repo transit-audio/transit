@@ -4,7 +4,7 @@ use crate::{ParamInfo, Taper, Unit};
 
 /// A continuous parameter.
 pub(crate) const fn p(id: &'static str, name: &'static str, min: f32, max: f32, default: f32, unit: Unit, taper: Taper) -> ParamInfo {
-    ParamInfo { id, name, min, max, default, unit, taper, choices: &[], group: "" }
+    ParamInfo { id, name, min, max, default, unit, taper, choices: &[], group: "", note_labels: None }
 }
 
 /// A linear-taper parameter.
@@ -29,13 +29,20 @@ pub(crate) const fn toggle(id: &'static str, name: &'static str, default_on: boo
         taper: Taper::Linear,
         choices: &[],
         group: "",
+        note_labels: None,
     }
 }
 
 /// A list choice; the value is the index.
 pub(crate) const fn choice(id: &'static str, name: &'static str, choices: &'static [&'static str], default: usize) -> ParamInfo {
     let max = if choices.is_empty() { 0.0 } else { (choices.len() - 1) as f32 };
-    ParamInfo { id, name, min: 0.0, max, default: default as f32, unit: Unit::Choice, taper: Taper::Linear, choices, group: "" }
+    ParamInfo { id, name, min: 0.0, max, default: default as f32, unit: Unit::Choice, taper: Taper::Linear, choices, group: "", note_labels: None }
+}
+
+/// A choice of notes or octaves (ADR 0051): `choices` are the fixed C3 = 60 names, and `labels`
+/// lets the UI name each entry in its Middle C setting.
+pub(crate) const fn note_choice(id: &'static str, name: &'static str, choices: &'static [&'static str], default: usize, labels: crate::NoteLabels) -> ParamInfo {
+    ParamInfo { note_labels: Some(labels), ..choice(id, name, choices, default) }
 }
 
 /// Current values for a plugin's parameter table (allocated once at construction).

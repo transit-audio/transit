@@ -97,6 +97,19 @@ pub struct ParamInfo {
     /// The module (CLAP) or unit (VST3) path the parameter sits under, parts joined by `/`; empty
     /// for built-in devices and plug-ins without groups.
     pub group: &'static str,
+    /// A `Unit::Choice` whose entries are notes or octaves (ADR 0051): the UI names entry `i` in
+    /// its Middle C setting; `choices` keeps the fixed C3 = 60 names for everything else.
+    pub note_labels: Option<NoteLabels>,
+}
+
+/// What a note-labelled choice's entries are: entry `i` is MIDI `first_note + step * i`, shown as
+/// that note's name, or as its octave number alone when `octave_only`. The stored value stays the
+/// index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct NoteLabels {
+    pub first_note: u8,
+    pub step: u8,
+    pub octave_only: bool,
 }
 
 impl ParamInfo {

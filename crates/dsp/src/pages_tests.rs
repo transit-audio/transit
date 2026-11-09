@@ -128,7 +128,7 @@ fn the_macro_oscillators_main_page_is_the_adr_list() {
 }
 
 const TOGGLE: ParamInfo =
-    ParamInfo { id: "on", name: "On", min: 0.0, max: 1.0, default: 0.0, unit: Unit::Toggle, taper: crate::Taper::Linear, choices: &[], group: "" };
+    ParamInfo { id: "on", name: "On", min: 0.0, max: 1.0, default: 0.0, unit: Unit::Toggle, taper: crate::Taper::Linear, choices: &[], group: "", note_labels: None };
 const KNOB: ParamInfo = ParamInfo { id: "knob", unit: Unit::Percent, max: 100.0, ..TOGGLE };
 static TABLE: [ParamInfo; 2] = [TOGGLE, KNOB];
 

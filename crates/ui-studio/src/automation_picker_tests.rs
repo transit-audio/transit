@@ -65,7 +65,7 @@ fn a_hosted_plug_in_lists_every_parameter_by_name_with_none_stored() {
     // Value formatting comes from the same table.
     let s = app.engine.session_arc();
     let lane = Lane::parse("plugin:a:7").unwrap();
-    assert!(lane.text(s.track(t).unwrap(), 1.0).contains('1'));
+    assert!(lane.text(s.track(t).unwrap(), 1.0, transit_midi::MiddleC::C3).contains('1'));
 }
 
 #[test]
@@ -198,6 +198,7 @@ mod grouping {
                 taper: Taper::Linear,
                 choices: &[],
                 group: Box::leak(format!("Cell/A{}", i % 100).into_boxed_str()),
+                note_labels: None,
             })
             .collect();
         Box::leak(Box::new(PluginInfo {

@@ -199,13 +199,14 @@ impl Lane {
         }
     }
 
-    /// A value in the parameter's unit: dB, L/C/R, Muted, the device's own format.
-    pub fn text(&self, t: &Track, v: f32) -> String {
+    /// A value in the parameter's unit: dB, L/C/R, Muted, the device's own format (note labels in
+    /// the Middle C setting, ADR 0051).
+    pub fn text(&self, t: &Track, v: f32, middle_c: transit_midi::MiddleC) -> String {
         match self {
             Lane::Volume | Lane::SendLevel(_) => format!("{} dB", fine::db_text(v)),
             Lane::Pan | Lane::SendPan(_) => fine::pan_text(v),
             Lane::Mute | Lane::SendMute(_) => if v >= 0.5 { "Muted" } else { "On" }.into(),
-            Lane::Plugin { .. } => self.info(t).map_or_else(|| format!("{:.0} %", v * 100.0), |i| i.format(v)),
+            Lane::Plugin { .. } => self.info(t).map_or_else(|| format!("{:.0} %", v * 100.0), |i| crate::middle_c::param_text(i, v, middle_c)),
         }
     }
 

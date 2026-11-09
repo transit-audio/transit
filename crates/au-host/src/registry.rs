@@ -134,6 +134,7 @@ pub(crate) fn param_info(p: &RawParam) -> Option<ParamInfo> {
         taper: Taper::Linear,
         choices: &[],
         group: "",
+        note_labels: None,
     };
     if p.unit == U_BOOLEAN && p.min == 0.0 && p.max == 1.0 {
         return Some(ParamInfo { unit: Unit::Toggle, default: default.round(), ..base });

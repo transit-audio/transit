@@ -3,8 +3,8 @@
 //! Macro Oscillator (#243), under the same ids. Sessions, presets and automation lanes store the
 //! ids: never rename one.
 
-use super::{DESTINATIONS, MODELS, POLYPHONIES, TONICS};
-use crate::params::{choice, lin, log, toggle};
+use super::{DESTINATIONS, MODELS, POLYPHONIES, TONIC_LABELS, TONICS};
+use crate::params::{choice, lin, log, note_choice, toggle};
 use crate::plugins::lfo::DIVISIONS;
 use crate::plugins::macro_osc::matrix::{CURVES, ROWS, SOURCES};
 use crate::plugins::macro_osc::shaper::{FILTER_MODES, LFO_SHAPES};
@@ -97,7 +97,7 @@ pub(super) static PARAMS: [ParamInfo; COUNT] = table!(
         lin("damping", "Damping", 0.0, 100.0, 50.0, Unit::Percent),
         lin("position", "Position", 0.0, 100.0, 50.0, Unit::Percent),
         lin("accent", "Accent", 0.0, 100.0, 50.0, Unit::Percent),
-        choice("tonic", "Tonic", &TONICS, 24),
+        note_choice("tonic", "Tonic", &TONICS, 24, TONIC_LABELS),
         lin("spread", "Spread", 0.0, 100.0, 50.0, Unit::Percent),
         lin("level", "Level", -48.0, 6.0, -6.0, Unit::Db),
         lin("tune", "Tune", -24.0, 24.0, 0.0, Unit::Semitones),

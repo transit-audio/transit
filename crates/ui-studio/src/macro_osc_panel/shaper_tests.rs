@@ -289,16 +289,16 @@ fn env_amt_alone_shades_one_side_and_nothing_shades_without_modulation() {
 #[test]
 fn a_typed_time_reads_bare_and_ms_as_milliseconds_and_s_as_seconds() {
     let p = super::test_rig::info().param("amp_release").unwrap();
-    assert_eq!(super::parse(p, "250"), Some(250.0));
-    assert_eq!(super::parse(p, "250 ms"), Some(250.0));
-    assert_eq!(super::parse(p, "1.5 s"), Some(1500.0));
-    assert_eq!(super::parse(p, "1.5s"), Some(1500.0));
+    assert_eq!(super::parse(p, "250", transit_midi::MiddleC::C3), Some(250.0));
+    assert_eq!(super::parse(p, "250 ms", transit_midi::MiddleC::C3), Some(250.0));
+    assert_eq!(super::parse(p, "1.5 s", transit_midi::MiddleC::C3), Some(1500.0));
+    assert_eq!(super::parse(p, "1.5s", transit_midi::MiddleC::C3), Some(1500.0));
     // What a readout prints types back to the same value.
-    assert_eq!(super::parse(p, &p.format(1500.0)), Some(1500.0));
+    assert_eq!(super::parse(p, &p.format(1500.0), transit_midi::MiddleC::C3), Some(1500.0));
     // Negative control: a time is never kilohertz-scaled, and `ms` is not seconds.
-    assert_eq!(super::parse(p, "2 ms"), Some(2.0));
+    assert_eq!(super::parse(p, "2 ms", transit_midi::MiddleC::C3), Some(2.0));
     assert_eq!(
-        super::parse(super::test_rig::info().param("cutoff").unwrap(), "1.5 s"),
+        super::parse(super::test_rig::info().param("cutoff").unwrap(), "1.5 s", transit_midi::MiddleC::C3),
         Some(20.0),
         "a frequency takes no seconds suffix (clamped to its 20 Hz floor)"
     );

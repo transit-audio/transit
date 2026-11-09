@@ -728,6 +728,8 @@ mod menu_padding_tests;
 #[cfg(test)]
 mod middle_c_display_tests;
 #[cfg(test)]
+mod middle_c_param_tests;
+#[cfg(test)]
 mod middle_c_tests;
 #[cfg(test)]
 mod midi_fx_panel_tests;

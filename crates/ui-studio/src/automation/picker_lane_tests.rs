@@ -114,7 +114,7 @@ fn every_registered_effect_and_all_eight_slots_use_the_effect_parameter_model() 
             assert_eq!(lane.denorm(tr, 0.0), param.from_normalized(0.0));
             assert_eq!(lane.denorm(tr, 1.0), param.from_normalized(1.0));
             assert_eq!(lane.norm(tr, param.default), param.to_normalized(param.default));
-            assert_eq!(lane.text(tr, param.default), param.format(param.default));
+            assert_eq!(lane.text(tr, param.default, transit_midi::MiddleC::C3), param.format(param.default));
         }
     }
     // Distinct slots never collapse to the generic insert-letter fallback.

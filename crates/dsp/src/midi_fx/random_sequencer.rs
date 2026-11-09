@@ -34,7 +34,7 @@
 
 use super::{MidiEffect, MidiOut, TimedEvent};
 use crate::event::{Message, NoteId, PluginEvent};
-use crate::params::{choice, lin, toggle};
+use crate::params::{choice, lin, note_choice, toggle};
 use crate::{Category, ParamInfo, PluginInfo, Transport, Unit};
 use transit_random_sequencer::{Block, ControlMode, EventKind, Model, RATES, Sequencer, Settings, Voices, VoltageRange};
 
@@ -59,8 +59,12 @@ pub static PLAY_NAMES: [&str; 5] = ["Both Gates", "Gate 1", "Gate 2", "Clock", "
 pub static SCALE_NAMES: [&str; 7] = ["Major", "Minor", "Pentatonic", "Pelog", "Bhairav", "Shri", "Chromatic"];
 /// `Root` choices.
 pub static ROOT_NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-/// `Octave` choices (the octave of the root at 0 V; C3 is MIDI 48).
-pub static OCTAVE_NAMES: [&str; 9] = ["-1", "0", "1", "2", "3", "4", "5", "6", "7"];
+/// `Octave` choices: the octave of the root at 0 V, index `i` putting a C root at MIDI `12 * i`.
+/// These are the fixed C3 = 60 numbers (what the control channel lists); the UI shows the octave
+/// in its Middle C setting through [`OCTAVE_LABELS`] (ADR 0051).
+pub static OCTAVES_C3: [&str; 9] = ["-2", "-1", "0", "1", "2", "3", "4", "5", "6"];
+/// The Octave's labels: the octave number of MIDI `12 * i` alone.
+pub const OCTAVE_LABELS: crate::NoteLabels = crate::NoteLabels { first_note: 0, step: 12, octave_only: true };
 /// `Range` choices: the firmware's voltage ranges (0 to 2 V, 0 to 5 V, -5 to 5 V).
 pub static RANGE_NAMES: [&str; 3] = ["2 Octaves", "5 Octaves", "10 Octaves"];
 /// `Pitch Mode` choices: how the three pitch channels share spread, bias and steps.
@@ -111,7 +115,7 @@ pub static RANDOM_SEQUENCER_PARAMS: [ParamInfo; PARAMS] = [
     grouped("Pitch", lin("steps", "Steps", 0.0, 100.0, 50.0, Unit::Percent)),
     grouped("Pitch", choice("scale", "Scale", &SCALE_NAMES, 0)),
     grouped("Pitch", choice("root", "Root", &ROOT_NAMES, 0)),
-    grouped("Pitch", choice("octave", "Octave", &OCTAVE_NAMES, 4)),
+    grouped("Pitch", note_choice("octave", "Octave", &OCTAVES_C3, 4, OCTAVE_LABELS)),
     grouped("Pitch", choice("range", "Range", &RANGE_NAMES, 0)),
     grouped("Pitch", choice("pitch_mode", "Pitch Mode", &PITCH_MODE_NAMES, 0)),
     grouped("Loop", lin("deja_vu", "Deja Vu", 0.0, 100.0, 0.0, Unit::Percent)),
@@ -184,7 +188,7 @@ impl RandomSequencer {
     #[must_use]
     pub fn settings(&self) -> Settings {
         let pct = |i: usize| (self.v(i) / 100.0).clamp(0.0, 1.0);
-        let octave = i32::try_from(self.index(P_OCTAVE, OCTAVE_NAMES.len())).unwrap_or(4) - 1;
+        let octave = i32::try_from(self.index(P_OCTAVE, OCTAVES_C3.len())).unwrap_or(4) - 1;
         let root = i32::try_from(self.index(P_ROOT, ROOT_NAMES.len())).unwrap_or(0);
         let deja_vu_on = self.index(P_DEJA_VU_ON, DEJA_VU_ON_NAMES.len());
         Settings {
@@ -328,7 +332,7 @@ mod tests {
         let fx = RandomSequencer::new();
         let s = fx.settings();
         assert_eq!(RATE_NAMES[s.rate], "1/16");
-        assert_eq!(s.base_note, 48, "C3");
+        assert_eq!(s.base_note, 48, "an octave below middle C");
         assert_eq!((s.length, s.voices, s.scale), (8, Voices::BothGates, 0));
         assert!(s.deja_vu_rhythm && s.deja_vu_pitch && !s.freeze);
         for (i, name) in RATE_NAMES.iter().enumerate() {
@@ -366,6 +370,21 @@ mod tests {
         let mut out = MidiOut::new(&mut buf);
         fx.process(&input, &mut out, 64);
         assert_eq!(out.events(), &input);
+    }
+
+    /// ADR 0051: the stored index and its sound are unchanged; only the fixed labels moved to the
+    /// C3 = 60 octave numbers (index 4, the default, is "2": its root is MIDI 48).
+    #[test]
+    fn each_octave_index_keeps_its_root_and_the_labels_are_c3_octaves() {
+        for i in 0..OCTAVES_C3.len() {
+            let mut fx = RandomSequencer::new();
+            assert!(fx.set_param("octave", i as f32));
+            assert_eq!(fx.settings().base_note, 12 * i as i32, "index {i}");
+            assert_eq!(OCTAVES_C3[i], (i as i32 - 2).to_string());
+        }
+        let p = RANDOM_SEQUENCER_INFO.param("octave").unwrap();
+        assert_eq!((p.default, p.format(4.0).as_str()), (4.0, "2"));
+        assert_eq!(p.note_labels, Some(crate::NoteLabels { first_note: 0, step: 12, octave_only: true }));
     }
 
     #[test]
