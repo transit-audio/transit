@@ -67,6 +67,7 @@ fn full() -> PatchV1 {
             detector: Detector { source: AutoSource::Transients, sensitivity: 0.8, extra: extra.clone() },
             division: Division::ThirtySecond,
             bars: Some(2),
+            grid_bpm: Some(120.5),
             root: 36,
             beat_length: Some(8.0),
             auto: Some(Markers { markers: vec![marker(1, 0, Some("one")), marker(2, 2000, None)], next_id: 0, extra: extra.clone() }),

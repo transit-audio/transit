@@ -413,6 +413,9 @@ pub struct SliceLoop {
     /// An explicit bar count 1..=16 (`None`: From tempo).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bars: Option<u8>,
+    /// The beat grid's tempo override, 5 to 1000 BPM (`None`: the file's or the session's tempo).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grid_bpm: Option<f64>,
     #[serde(default = "sixty", skip_serializing_if = "is_sixty")]
     pub root: u8,
     /// Slice to MIDI's beat length in quarter notes (`None`: derived from the tempo).
@@ -447,6 +450,7 @@ impl Default for SliceLoop {
             detector: Detector::default(),
             division: Division::Sixteenth,
             bars: None,
+            grid_bpm: None,
             root: 60,
             beat_length: None,
             auto: None,
@@ -790,6 +794,9 @@ impl PatchV1 {
         }
         if l.bars.is_some_and(|b| !(1..=16).contains(&b)) || l.root > 127 || l.beat_length.is_some_and(|b| !(b.is_finite() && b > 0.0)) {
             return Err(bad("the loop's bars, root or beat length is out of range"));
+        }
+        if l.grid_bpm.is_some_and(|b| !(b.is_finite() && (5.0..=1000.0).contains(&b))) {
+            return Err(bad("the loop's grid tempo is not from 5 to 1000 BPM"));
         }
         for (name, set) in [("Auto", l.auto.as_ref()), ("Manual", l.manual.as_ref())] {
             let Some(set) = set else { continue };
