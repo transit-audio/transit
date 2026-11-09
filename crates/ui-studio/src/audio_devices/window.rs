@@ -655,7 +655,15 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                             });
                                         }
                                         Section::IoPaths => {
-                                            io_edit = crate::audio_devices_io::section(ui, &io, wasapi, &channel_names, input_note.as_deref(), &mut editor, &mut io_items);
+                                            io_edit = crate::audio_devices_io::section(
+                                                ui,
+                                                &io,
+                                                wasapi,
+                                                &channel_names,
+                                                input_note.as_deref(),
+                                                &mut editor,
+                                                &mut io_items,
+                                            );
                                             crate::audio_devices_system::section(
                                                 ui,
                                                 &mut draft,
