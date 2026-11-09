@@ -125,16 +125,16 @@ fn midi_notes_wrap_cycle_by_cycle_and_a_note_over_the_seam_ends_at_it() {
 
 #[test]
 fn the_latest_cycle_before_a_position_is_found_for_chase() {
-    let beat = 1000;
-    let l = ClipLoop { start: 0, end: 4 * beat };
+    let (s, beat) = (Session::default(), 1000);
+    let frame = LoopFrame::of_samples(0, ClipLoop { start: 0, end: 4 * beat });
     // A controller 2 beats in: cycle 1 lands at beat 6, cycle 2 at beat 10.
-    let first = cycle_at(0, l, 2 * beat, 1);
-    assert_eq!(first, 6 * beat);
-    assert_eq!(cycle_at(0, l, 2 * beat, 2), 10 * beat);
-    // Seeking to beat 9 the latest one before it is cycle 1; to beat 11, cycle 2.
-    let latest = |until: i64| cycle_at(0, l, 2 * beat, (until - 1 - first).div_euclid(l.cycle()) + 1);
-    assert_eq!(latest(9 * beat), 6 * beat);
-    assert_eq!(latest(11 * beat), 10 * beat);
+    assert_eq!(frame.cycle_at(&s, 2 * beat, 1), 6 * beat);
+    assert_eq!(frame.cycle_at(&s, 2 * beat, 2), 10 * beat);
+    // Seeking to beat 9 the latest one before it is cycle 1; to beat 11, cycle 2; to beat 6, none.
+    let latest = |until: i64| frame.latest_before(&s, 2 * beat, until);
+    assert_eq!(latest(9 * beat), Some(6 * beat));
+    assert_eq!(latest(11 * beat), Some(10 * beat));
+    assert_eq!(latest(6 * beat), None);
 }
 
 /// A clip that starts between two ticks (7 samples, 25 per tick at 120 bpm and 48 kHz) whose loop

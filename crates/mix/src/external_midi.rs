@@ -80,7 +80,7 @@ fn sounding_notes(s: &Session, t: &Track, pos: Samples, mut visit: impl FnMut(u8
             let Some((n, on, off)) = played_note(s, clip, base, rtp, n0, looping.is_some()) else { continue };
             // The same spans playback plays (loop cycles, seam cuts, negative-tick rule), looked up
             // for the one sample `pos`.
-            note_spans(clip, looping, on, off, pos, pos.saturating_add(1), |on, off| {
+            note_spans(s, clip, looping, on, off, pos, pos.saturating_add(1), |on, off| {
                 if on < pos && off > pos {
                     visit(n.pitch, n.velocity, n.channel);
                 }

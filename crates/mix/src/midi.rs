@@ -176,9 +176,11 @@ pub(crate) fn played_note(
 /// A looped clip (ADR 0019): the first pass plays what starts before the loop end; later cycles
 /// play what starts inside the range. A note crossing the seam ends at it and sounds again at its
 /// own position in the next cycle. One implementation, so playback and the chase cannot drift.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn note_spans(
+    s: &Session,
     clip: &Clip,
-    looping: Option<(Samples, ClipLoop)>,
+    looping: Option<LoopFrame>,
     on: Samples,
     off: Samples,
     pos: Samples,
@@ -191,10 +193,11 @@ pub(crate) fn note_spans(
             f(on, off);
         }
     };
-    let Some((origin, l)) = looping else {
+    let Some(frame) = looping else {
         emit(on, off);
         return;
     };
+    let (origin, l) = (frame.origin, frame.range);
     let (rel_on, seam) = (on.saturating_sub(origin), origin.saturating_add(l.end));
     if rel_on >= l.end {
         return;
@@ -204,10 +207,10 @@ pub(crate) fn note_spans(
         emit(on, off.min(seam));
     }
     if rel_on >= l.start {
-        let span = off.min(seam).saturating_sub(on).max(0);
-        for k in cycles_touching(origin, l, rel_on, span, pos, end) {
-            let at = cycle_at(origin, l, rel_on, k);
-            emit(at, at.saturating_add(span));
+        // The off as a content point too, so each cycle's off is placed the way its on is.
+        let rel_off = off.min(seam).saturating_sub(origin).max(rel_on);
+        for k in frame.cycles_touching(s, rel_on, rel_off, pos, end) {
+            emit(frame.cycle_at(s, rel_on, k), frame.cycle_at(s, rel_off, k));
         }
     }
 }
@@ -242,7 +245,7 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
             let looping = midi_loop_frame(s, clip);
             for n0 in &sequence.notes {
                 let Some((n, on, off)) = played_note(s, clip, base, rtp, n0, looping.is_some()) else { continue };
-                note_spans(clip, looping, on, off, pos, end, |on, off| {
+                note_spans(s, clip, looping, on, off, pos, end, |on, off| {
                     if ons && on >= pos && on < end {
                         let at = usize::try_from(on - pos).unwrap_or(0);
                         visit(at, ClipEvent::On(n.pitch, n.velocity, n.channel));
@@ -289,19 +292,19 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
             for c in sequence.ctrls.iter().filter(|c| c.tick >= 0 || looping.is_some()) {
                 let tick = c.tick.saturating_add(delay);
                 let tick = if looping.is_some() { tick } else { tick.max(0) };
-                if let Some((origin, l)) = looping {
+                if let Some(frame) = looping {
                     let at = s.tempo.tick_to_samples(base.saturating_add(tick), sr);
-                    let rel = at.saturating_sub(origin);
-                    if rel >= l.end {
+                    let rel = at.saturating_sub(frame.origin);
+                    if rel >= frame.range.end {
                         continue;
                     }
                     let msg = ctrl_message(c.kind, c.value, dp);
                     if rel >= 0 && at >= pos && at < end && at < clip.end() {
                         visit(usize::try_from(at - pos).unwrap_or(0), ClipEvent::Control(msg, c.channel));
                     }
-                    if rel >= l.start {
-                        for k in cycles_touching(origin, l, rel, 0, pos, end) {
-                            let at = cycle_at(origin, l, rel, k);
+                    if rel >= frame.range.start {
+                        for k in frame.cycles_touching(s, rel, rel, pos, end) {
+                            let at = frame.cycle_at(s, rel, k);
                             if at >= pos && at < end && at < clip.end() {
                                 visit(usize::try_from(at - pos).unwrap_or(0), ClipEvent::Control(msg, c.channel));
                             }
@@ -374,16 +377,14 @@ fn pedal_state_before(s: &Session, clip: &Clip, rtp: Rtp, until: Samples) -> [Op
         let mut latest: Option<Samples> = None;
         match looping {
             None => latest = (first < until).then_some(first),
-            Some((origin, l)) => {
-                let rel = first.saturating_sub(origin);
-                if rel < l.end {
+            Some(frame) => {
+                let rel = first.saturating_sub(frame.origin);
+                if rel < frame.range.end {
                     if rel >= 0 && first < until {
                         latest = Some(first);
                     }
-                    let repeat = cycle_at(origin, l, rel, 1);
-                    if rel >= l.start && repeat < until {
-                        let k = until.saturating_sub(1).saturating_sub(repeat).div_euclid(l.cycle().max(1));
-                        latest = latest.max(Some(repeat.saturating_add(k.saturating_mul(l.cycle().max(1)))));
+                    if rel >= frame.range.start {
+                        latest = latest.max(frame.latest_before(s, rel, until));
                     }
                 }
             }
@@ -416,7 +417,8 @@ pub fn clip_note_ons(s: &Session, track: TrackId, pos: Samples, frames: usize) -
 /// events, ticks from the clip start, cut at the clip end (ADR 0019). `None` for an unlooped or
 /// non-MIDI clip, or when the result would be unreasonably large.
 pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<transit_midi::Sequence> {
-    let (origin, l) = midi_loop_frame(s, clip)?;
+    let frame = midi_loop_frame(s, clip)?;
+    let (origin, l) = (frame.origin, frame.range);
     let ClipContent::Midi { sequence } = &clip.content else { return None };
     let sr = s.sample_rate;
     let base = s.tempo.samples_to_ticks(clip.start, sr);
@@ -427,19 +429,21 @@ pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<transit_midi::Sequen
     }
     let tick = |at: Samples| s.tempo.samples_to_ticks(at, sr) - base;
     let mut out = transit_midi::Sequence::default();
-    // Every sounding position of a content point `rel` samples in: the first pass, then each cycle.
-    let places = |rel: Samples| {
-        let first = (0..l.end).contains(&rel).then_some(origin + rel);
-        let later = (rel >= l.start && rel < l.end).then(|| (1..).map(move |k| cycle_at(origin, l, rel, k)).take_while(|at| *at < end));
-        first.into_iter().chain(later.into_iter().flatten()).filter(|at| *at >= origin).collect::<Vec<_>>()
+    // Every sounding position of a content point `rel` samples in, with that of a point `till`
+    // carried along the same cycles (a note's off): the first pass, then each cycle.
+    let places = |rel: Samples, till: Samples| {
+        let first = (0..l.end).contains(&rel).then_some((origin + rel, origin + till));
+        let later = (rel >= l.start && rel < l.end)
+            .then(|| (1..).map(move |k| (frame.cycle_at(s, rel, k), frame.cycle_at(s, till, k))).take_while(|(at, _)| *at < end));
+        first.into_iter().chain(later.into_iter().flatten()).filter(|(at, _)| *at >= origin).collect::<Vec<_>>()
     };
     for n in &sequence.notes {
         let on = s.tempo.tick_to_samples(base.saturating_add(n.start), sr);
         let off = s.tempo.tick_to_samples(base.saturating_add(n.start).saturating_add(n.length), sr);
         let rel = on - origin;
-        let span = off.min(origin + l.end) - on;
-        for at in places(rel) {
-            let to = at.saturating_add(span.max(0)).min(end);
+        let till = (off.min(origin + l.end) - origin).max(rel);
+        for (at, to) in places(rel, till) {
+            let to = to.min(end);
             let mut m = *n;
             m.start = tick(at);
             m.length = (tick(to) - m.start).max(1);
@@ -448,7 +452,7 @@ pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<transit_midi::Sequen
     }
     for c in &sequence.ctrls {
         let at = s.tempo.tick_to_samples(base.saturating_add(c.tick), sr);
-        for at in places(at - origin) {
+        for (at, _) in places(at - origin, at - origin) {
             let mut m = *c;
             m.tick = tick(at);
             out.ctrls.push(m);
@@ -458,45 +462,110 @@ pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<transit_midi::Sequen
     Some(out)
 }
 
-/// Where cycle `k` (1 is the first repeat) of a content point `rel` samples into a looped clip
-/// lands: the point must lie inside the loop range.
-pub fn cycle_at(clip_start: Samples, l: ClipLoop, rel: Samples, k: i64) -> Samples {
-    clip_start.saturating_add(l.end).saturating_add(rel - l.start).saturating_add((k - 1).saturating_mul(l.cycle()))
+/// A looped MIDI clip's frame (ADR 0019): the sample its tick grid starts at, the loop range
+/// measured from there, and how its cycles repeat. Notes sound on the tick grid
+/// (`tick_to_samples(base + tick)`), and `base` is `clip.start` rounded to a tick, so a clip that
+/// starts between ticks has its grid origin up to half a tick away from `clip.start`. Cycles stepped
+/// from `clip.start` with the cycle measured there let every cycle slip by that gap against the
+/// grid; stepping from the grid origin with the loop edges rounded to ticks keeps every cycle on the
+/// first cycle's grid offset.
+///
+/// On the grid a cycle is a whole number of ticks, and a cycle's position is its tick converted
+/// once: the conversion every note, the clip length and the arrangement loop end come from. A cycle
+/// is never a rounded sample count added `k` times, which let repeat `k` slip `k` times the rounding
+/// against its tick, so a repeat due exactly at the clip end or the loop end sounded inside the
+/// range, right before the wrap played the same note again (#422).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoopFrame {
+    /// The sample the cycles are measured from: the clip's tick-grid origin, or `clip.start` when
+    /// the range rounds under the minimum cycle on the grid.
+    pub origin: Samples,
+    /// The loop range from `origin`, in samples (edges on ticks when the frame is on the grid).
+    pub range: ClipLoop,
+    /// One cycle in ticks, when the frame is on the tick grid.
+    cycle_ticks: Option<i64>,
 }
 
-/// A looped MIDI clip's frame (ADR 0019): the sample its tick grid starts at and the loop range
-/// measured from there. Notes sound on the tick grid (`tick_to_samples(base + tick)`), and `base`
-/// is `clip.start` rounded to a tick, so a clip that starts between ticks has its grid origin up to
-/// half a tick away from `clip.start`. Cycles stepped from `clip.start` with the cycle measured
-/// there let every cycle slip by that gap against the grid; stepping from the grid origin with the
-/// loop edges rounded to ticks keeps every cycle on the first cycle's grid offset. For a clip that
-/// starts on a tick with a loop on ticks the frame is `(clip.start, loop)` unchanged.
-pub(crate) fn midi_loop_frame(s: &Session, clip: &Clip) -> Option<(Samples, ClipLoop)> {
+impl LoopFrame {
+    /// A frame of whole-sample cycles (`range` from `origin`), as a loop off the tick grid repeats.
+    #[cfg(test)]
+    pub(crate) fn of_samples(origin: Samples, range: ClipLoop) -> Self {
+        LoopFrame { origin, range, cycle_ticks: None }
+    }
+
+    /// Where cycle `k` (1 is the first repeat) of a content point `rel` samples from `origin` lands:
+    /// the point must lie inside the loop range. On the grid the point's tick moves by `k` cycles of
+    /// ticks and is converted once; a point on a tick (a note, a controller, a loop edge) comes back
+    /// to its own tick from `rel`, as long as a tick is longer than a sample.
+    pub fn cycle_at(&self, s: &Session, rel: Samples, k: i64) -> Samples {
+        match self.cycle_ticks {
+            Some(cycle) => {
+                let sr = s.sample_rate;
+                let tick = s.tempo.samples_to_ticks(self.origin.saturating_add(rel), sr);
+                s.tempo.tick_to_samples(tick.saturating_add(k.saturating_mul(cycle)), sr)
+            }
+            None => self.origin.saturating_add(rel).saturating_add(k.saturating_mul(self.range.cycle())),
+        }
+    }
+
+    /// The repeat cycles (`k >= 1`) in which a point `rel` samples into the clip, sounding until a
+    /// point `till` (`till >= rel`, carried along the same cycles), touches the block `pos..end`.
+    /// A handful at most; capped against a degenerate loop. On the grid the range is found in
+    /// fractional ticks and may hold one cycle more at either end: callers test each position.
+    pub fn cycles_touching(&self, s: &Session, rel: Samples, till: Samples, pos: Samples, end: Samples) -> std::ops::RangeInclusive<i64> {
+        let (k_min, last) = match self.cycle_ticks {
+            Some(cycle) => {
+                let sr = s.sample_rate;
+                let ticks = |at: Samples| s.tempo.samples_to_ticks_f(at, sr);
+                let cycle = cycle.max(1) as f64;
+                let (on, off) = (ticks(self.origin.saturating_add(rel)), ticks(self.origin.saturating_add(till)));
+                // A position rounds to the nearest sample and a tick is longer than a sample: one
+                // tick of margin on each side covers the rounding.
+                let last = ((ticks(end) + 1.0 - on) / cycle).floor();
+                let k_min = ((ticks(pos) - 1.0 - off) / cycle).ceil();
+                (transit_time::to_samples(k_min).max(1), transit_time::to_samples(last))
+            }
+            None => {
+                let cycle = self.range.cycle().max(1);
+                let first = self.cycle_at(s, rel, 1);
+                // The last cycle that starts before `end`, and the first still sounding at `pos`.
+                let last = end.saturating_sub(1).saturating_sub(first).div_euclid(cycle) + 1;
+                let ahead = first.saturating_add(till.saturating_sub(rel)).saturating_sub(pos);
+                ((1 - ahead.div_euclid(cycle)).max(1), last)
+            }
+        };
+        k_min..=last.min(k_min.saturating_add(4096))
+    }
+
+    /// The latest repeat (`k >= 1`) of a point `rel` samples into the clip that sounds before
+    /// `until`, for chase; `None` when the first repeat is not before it.
+    pub fn latest_before(&self, s: &Session, rel: Samples, until: Samples) -> Option<Samples> {
+        // The top of the range is the answer or at most a cycle past it on the grid.
+        let last = *self.cycles_touching(s, rel, rel, until, until).end();
+        (1..=last).rev().take(3).map(|k| self.cycle_at(s, rel, k)).find(|at| *at < until)
+    }
+}
+
+/// [`loop_frame`] of a validly looped clip; `None` for an unlooped one.
+pub(crate) fn midi_loop_frame(s: &Session, clip: &Clip) -> Option<LoopFrame> {
     let l = clip.looping.filter(|l| l.is_valid())?;
     Some(loop_frame(s, clip.start, l))
 }
 
-/// [`midi_loop_frame`] for a clip starting at `start` with loop `l`: playback, consolidate and the
+/// The [`LoopFrame`] of a clip starting at `start` with loop `l`: playback, consolidate and the
 /// arranger's drawing all take their cycles from this one function, so what is drawn is what is heard.
-pub fn loop_frame(s: &Session, start: Samples, l: ClipLoop) -> (Samples, ClipLoop) {
+pub fn loop_frame(s: &Session, start: Samples, l: ClipLoop) -> LoopFrame {
     let sr = s.sample_rate;
     let origin = s.tempo.tick_to_samples(s.tempo.samples_to_ticks(start, sr), sr);
-    let snap = |x: Samples| s.tempo.tick_to_samples(s.tempo.samples_to_ticks(start.saturating_add(x), sr), sr).saturating_sub(origin);
+    let tick = |x: Samples| s.tempo.samples_to_ticks(start.saturating_add(x), sr);
+    let snap = |x: Samples| s.tempo.tick_to_samples(tick(x), sr).saturating_sub(origin);
     let snapped = ClipLoop { start: snap(l.start), end: snap(l.end) };
     // A range that rounds to under the minimum cycle keeps the sample frame.
-    if snapped.is_valid() { (origin, snapped) } else { (start, l) }
-}
-
-/// The repeat cycles (`k >= 1`) in which a point `rel` samples into a looped clip, sounding for
-/// `span` samples, touches the block `pos..end`. A handful at most; capped against a degenerate loop.
-fn cycles_touching(clip_start: Samples, l: ClipLoop, rel: Samples, span: Samples, pos: Samples, end: Samples) -> std::ops::RangeInclusive<i64> {
-    let cycle = l.cycle().max(1);
-    let first = cycle_at(clip_start, l, rel, 1);
-    // The last cycle that starts before `end`, and the first still sounding at `pos`.
-    let last = end.saturating_sub(1).saturating_sub(first).div_euclid(cycle) + 1;
-    let ahead = first.saturating_add(span).saturating_sub(pos);
-    let k_min = (1 - ahead.div_euclid(cycle)).max(1);
-    k_min..=last.min(k_min.saturating_add(4096))
+    if snapped.is_valid() {
+        LoopFrame { origin, range: snapped, cycle_ticks: Some(tick(l.end) - tick(l.start)) }
+    } else {
+        LoopFrame { origin: start, range: l, cycle_ticks: None }
+    }
 }
 
 /// A controller event as a MIDI 1.0 message on channel 1 (where the notes go), with `transpose`
@@ -544,21 +613,20 @@ pub(crate) fn chase_controllers(s: &Session, t: &Track, pos: Samples, inst: &mut
                 CtrlKind::PolyPressure(_) => continue,
             };
             let mut at = Some(s.tempo.tick_to_samples(base.saturating_add(c.tick), sr));
-            if let (Some((origin, l)), Some(first_pass)) = (looping, at) {
+            if let (Some(frame), Some(first_pass)) = (looping, at) {
                 // The latest cycle that sounds before `until` (ADR 0019); a controller a start trim
                 // moved before the clip start only sounds in the cycles.
-                let rel = first_pass.saturating_sub(origin);
-                if rel >= l.end {
+                let rel = first_pass.saturating_sub(frame.origin);
+                if rel >= frame.range.end {
                     continue;
                 }
                 if rel < 0 {
                     at = None;
                 }
-                if rel >= l.start {
-                    let first = cycle_at(origin, l, rel, 1);
-                    if until > first {
-                        at = Some(cycle_at(origin, l, rel, (until - 1 - first).div_euclid(l.cycle().max(1)) + 1));
-                    }
+                if rel >= frame.range.start
+                    && let Some(repeat) = frame.latest_before(s, rel, until)
+                {
+                    at = Some(repeat);
                 }
             }
             if let Some(at) = at

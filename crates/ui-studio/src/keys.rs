@@ -376,7 +376,8 @@ fn clip_view(s: &Session, clip: ClipId) -> Option<ClipView> {
         .looping
         .filter(|l| l.is_valid())
         .map(|l| {
-            let (origin, f) = transit_mix::loop_frame(s, c.start, l);
+            let frame = transit_mix::loop_frame(s, c.start, l);
+            let (origin, f) = (frame.origin, frame.range);
             let o = s.tempo.samples_to_ticks(origin, s.sample_rate);
             let tick = |x: i64| s.tempo.samples_to_ticks(origin.saturating_add(x), s.sample_rate) - o;
             (tick(f.start), tick(f.end))

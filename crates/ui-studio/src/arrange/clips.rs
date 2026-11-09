@@ -283,8 +283,8 @@ fn draw_cycles(
     let sx = |rel: Samples| rect.min.x + (rel as f64 / map.spp) as f32;
     // A MIDI clip's seams sit where playback puts them: on the tick-rounded frame.
     let seams = if matches!(c.content, ClipContent::Midi { .. }) {
-        let (origin, f) = transit_mix::loop_frame(s, c.start, l);
-        let gap = origin - c.start;
+        let frame = transit_mix::loop_frame(s, c.start, l);
+        let (gap, f) = (frame.origin - c.start, frame.range);
         ClipLoop { start: f.start + gap, end: f.end + gap }
     } else {
         l
@@ -356,7 +356,8 @@ fn pitch_span(notes: &[transit_midi::Note]) -> Option<(u8, f32)> {
 /// loop edge draws where it is heard.
 pub(crate) fn loop_note_spans(s: &Session, c: &Clip, l: ClipLoop, later: bool, a: Samples) -> Vec<(Samples, Samples, u8)> {
     let ClipContent::Midi { sequence } = &c.content else { return Vec::new() };
-    let (origin, fl) = transit_mix::loop_frame(s, c.start, l);
+    let frame = transit_mix::loop_frame(s, c.start, l);
+    let (origin, fl) = (frame.origin, frame.range);
     let clip_tick = s.tempo.samples_to_ticks(c.start, s.sample_rate);
     // Cycle `k >= 1` of the stepped frame that holds `a`.
     let k = (a - (origin - c.start) - fl.end).div_euclid(fl.cycle().max(1)) + 1;
@@ -369,8 +370,9 @@ pub(crate) fn loop_note_spans(s: &Session, c: &Clip, l: ClipLoop, later: bool, a
             continue;
         }
         let span = (off.min(origin + fl.end) - on).max(0);
-        let at = if later { transit_mix::cycle_at(origin, fl, rel, k.max(1)) } else { on };
-        out.push((at - c.start, at + span - c.start, n.pitch));
+        // A cycle's on and off are placed the way playback places them (on the tick grid).
+        let (at, to) = if later { (frame.cycle_at(s, rel, k.max(1)), frame.cycle_at(s, rel + span, k.max(1))) } else { (on, on + span) };
+        out.push((at - c.start, to - c.start, n.pitch));
     }
     out
 }
