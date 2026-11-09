@@ -3,7 +3,7 @@ title: One Sampler instrument with three views (Instrument: zones, velocity laye
 -->
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, pad notes from 36
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
@@ -55,7 +55,7 @@ The maintainer made the Sampler mandatory for the composition release before the
 | Question | Decision and reason |
 |---|---|
 | Pad count and layout | 64 pads, banks A–D, 16 visible in a 4×4 grid. Number from bottom left across each row, then upward (the MPC and Maschine 4×4 convention). Four banks fit a useful loop without a crowded panel; they do not enlarge ADR 0034's rack limit. |
-| Controller mapping | A 16-pad controller addresses visible slots 1–16 of the selected bank, one to one. Default trigger notes are 60–123; bank changes do not rewrite stored notes. A press captures its destination and note identity until release, even across bank changes. Ordinary MIDI notes always address the stored trigger notes directly. |
+| Controller mapping | A 16-pad controller addresses visible slots 1–16 of the selected bank, one to one. Default trigger notes are `36 + index` (36–99; replaces the earlier 60–123, see "Amendment 2026-11-09"); bank changes do not rewrite stored notes. A press captures its destination and note identity until release, even across bank changes. Ordinary MIDI notes always address the stored trigger notes directly. |
 | Choke groups | Off plus groups 1–16, labeled numerically; color is supplementary. Groups cross banks. An admitted trigger fades every other sounding pad in its group over exactly 32 output frames. This allows independent hi-hat and percussion groups without dependence on UI colors. |
 | Pad voice model | Monophonic per pad; retrigger cuts the previous voice at the event frame and starts at the region entry with a fresh envelope. No layered retrigger option in #269. This keeps drums predictable and expansion reproducible. The short attack/declick can soften the new attack but does not promise a click-free hard cut. |
 | Dragging slices | Allowed between pads, including banks. Move source/region/slice-id/name into an empty pad's zone; swap those contents for an occupied target. Pad identity, zone identity, trigger note, automation address and all playback/mixer settings stay at the destination. This is an explicit remap, one undo step, with no change to existing MIDI. Marker order stays chronological. No silent overwrite and no two sources on a pad. |
@@ -1005,7 +1005,7 @@ counted in bank order (A1 to A16, then B1, as numbered above):
 1. Pads bound to slices of the showing set count as free for this run: the run replaces its own
    previous binding.
 2. If the pad holding note r+i (stored or default) is empty or slice-bound (either set), slice i
-   takes it. If it is a loose occupied pad, the run is refused naming it (`Pad B3 already plays
+   takes it. If it is a loose occupied pad, the run is refused naming it (`Pad B13 already plays
    E3`), as the body requires.
 3. The remaining slices, ascending, take the lowest free pads not taken in step 2, and each such
    pad's trigger note becomes r+i. No pad held r+i, so notes stay unique.
@@ -1142,3 +1142,58 @@ the crossfade clamp removed; the per-group start state taken from the patch seed
 group term; the counter reset at play start removed; the `at` check removed from Slice to MIDI
 or from Detect; step 2 of Slices to pads skipped (a duplicate trigger note); a "Validator
 changes" case loaded opaque instead of audible; and fades scaled before selection.
+
+## Amendment 2026-11-09: default pad trigger notes start at 36
+
+Amended 2026-11-09: the maintainer mapped a 16-pad controller to the Pads view and found the
+default pad notes (60 to 123, "Controller mapping" above) at odds with the drum machine
+convention; his decision was to follow it. Pad numbering already follows the convention (bottom
+left, across each row, then upward; see "Pad count and layout"). Only the default note base
+changes.
+
+**Decision.** A pad's default trigger note is `36 + index`, index 0 to 63: bank A is 36 to 51,
+B 52 to 67, C 68 to 83, D 84 to 99. This replaces "Default trigger notes are 60-123" in the
+"Controller mapping" row. Everything else in that row stands: bank changes do not rewrite
+stored notes; a press captures its destination and note identity until release; ordinary MIDI
+notes address the stored trigger notes directly.
+
+**Why.** Note 36 (C1, where 60 is C3) is where a drum kit starts in the General MIDI percussion
+map (36 is the bass drum) and where both reference DAWs put the first pad of their drum
+instruments (the bottom-left pad of Ableton's Drum Rack view and the first pad of Logic's Drum
+Machine Designer). Drum MIDI files, clips made in other DAWs and the common "start at C1"
+controller templates therefore land on bank A. A controller whose template starts elsewhere is
+set to C1 once. The earlier base, 60, was chosen to sit mid-keyboard. The trade: a 61-key
+keyboard in its default octave now plays above bank A's first pads, and banks B to D are reached
+by octave shift or by clips.
+
+**What follows.**
+
+1. **Default pad playback is unchanged.** "New pads default to ... root equal to their trigger
+   note" (see "Playback, controls and modulation") stands, so a default pad still plays its
+   sample at its original pitch.
+2. **Old sessions and kits change.** A pad whose note was never set is stored as default (no
+   note field), so a session or kit saved by an earlier build reads its default pads as
+   `36 + i` instead of `60 + i` when opened. Clips and patterns written against 60 to 123 no
+   longer hit those pads. Pads with an explicitly stored note are unaffected. Per the project's
+   alpha rule there is no migration and no compatibility switch: the release notes say so, and
+   a known-issue entry records it. The fix for an old session is to transpose its pad clips down
+   24 semitones.
+3. **Validation is unchanged.** The unique-trigger-note rule and every refusal text stand.
+4. **Slices to pads and Slice to MIDI** use each pad's stored or default note, so they follow
+   the new base with no rule change. The slice mapping root (default 60, selectable
+   0 to 128 minus the count) is a keyboard root for a slice run, not a pad default, and is
+   unchanged; with default notes a run at root 60 now meets pads 25 and up (banks B and C)
+   first, and a run at root 36 meets bank A. The "Pad B13 already plays E3" example above names
+   the pad that holds note 64 under the new base.
+5. **Reporting follows.** The Pads view labels, the audition from the computer keyboard and
+   `mix.sampler_state` report a note as stored or defaulted, so they show the new values.
+6. **Not affected.** The Instrument view's key map (zone root 60 by default) and a one-sample
+   (legacy) Sampler.
+
+**Evidence for the implementation slice** (not built by this amendment). The default is
+`Pad::default_for` in `sampler-core`'s `patch.rs` (`60 + index.min(67)`) and its mirror,
+`PadEntry::default_note` and two doc comments, in the model's `sampler_patch.rs`. Tests that
+assume a 60 base are listed by search and updated by the slice. The user guide's pads paragraph
+gains the note range. New tests: pad 1's default is 36 and pad 64's is 99; an explicit stored
+note survives; an old-format pad with no note reads as `36 + i` (the break is intended and
+pinned).
