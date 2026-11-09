@@ -38,4 +38,5 @@ The list is generated from each record's `#` heading by `cargo xtask indexes`: a
 - [E75: an input open looked up the native factory off Windows (#354)](E75-an-input-open-looked-up-the-native-factory-off-windows.md)
 - [E76: a shutdown test let the bound decide an idle worker's fate (#346)](E76-a-shutdown-test-let-the-bound-decide-an-idle-worker.md)
 - [E77: a diagnostics test assumed the output thread's poll had run (#410)](E77-a-diagnostics-test-assumed-the-output-poll-had-run.md)
+- [E78: a header test measured the allocated rect, not the painted frame (#412)](issue-412.md)
 <!-- indexes:end -->
