@@ -33,6 +33,7 @@ pub mod patch;
 pub mod playhead;
 pub mod reader;
 mod sampler;
+mod selection;
 mod voice;
 
 pub use sampler::{Diagnostics, SamplerCore};

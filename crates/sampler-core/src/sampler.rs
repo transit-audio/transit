@@ -20,6 +20,7 @@ use alloc::vec::Vec;
 use crate::event::{Context, Control, Event, EventKind};
 use crate::patch::{self, Derived, Glide, Pad, PatchError, Zone};
 use crate::reader::SourceBank;
+use crate::selection;
 use crate::voice::{Controls, Owner, Start, Transport, Voice};
 use crate::{LAYERS_PER_NOTE, PADS, VOICES, ZONES, math};
 
@@ -587,13 +588,7 @@ impl SamplerCore {
             if layers >= LAYERS_PER_NOTE {
                 break;
             }
-            let selected = self.bound.get(z).is_some_and(Option::is_none)
-                && self.zones.get(z).and_then(Option::as_ref).is_some_and(|s| {
-                    let zone = &s.zone;
-                    (zone.keys.0..=zone.keys.1).contains(&key)
-                        && (zone.velocities.0..=zone.velocities.1).contains(&velocity)
-                        && zone.membership.is_none_or(|m| m.alternative == 0)
-                });
+            let selected = selection::unbound_selected(self.bound.get(z), self.zones.get(z).and_then(Option::as_ref).map(|s| &s.zone), key, velocity);
             if selected && self.start_zone(z, None, owner, key, velocity, ctx, n, sources) {
                 started = true;
                 layers += 1;
