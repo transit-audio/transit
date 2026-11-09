@@ -72,8 +72,7 @@ fn a_440_hz_tone_reads_a4_in_tune() {
     m.window_mut().copy_from_slice(&sine(440.0, sr, n, 0.5));
     m.analyze(440.0, false);
     let r = m.reading().expect("a reading");
-    assert_eq!(r.text(), "A4 +0.0 cents");
-    assert_eq!(r.note, 69);
+    assert_eq!((r.note, signed_tenths(r.cents)), (69, "+0.0".to_string()));
 }
 
 #[test]
@@ -85,7 +84,7 @@ fn a_flat_tone_reads_its_cents_and_the_reference_moves_the_reading() {
     m.window_mut().copy_from_slice(&sine(hz, sr, n, 0.5));
     m.analyze(440.0, false);
     let r = m.reading().unwrap();
-    assert_eq!(r.name(), "A4");
+    assert_eq!(r.note, 69);
     assert!((r.cents + 20.0).abs() < 0.5, "{}", r.cents);
     // Against a reference of 432 Hz the same tone is sharp.
     let mut m2 = TunerModel::new(sr);
@@ -129,7 +128,7 @@ fn hold_freezes_the_reading() {
     }
     assert_eq!(m.reading(), held);
     m.analyze(440.0, false);
-    assert_eq!(m.reading().unwrap().name(), "A3");
+    assert_eq!(m.reading().unwrap().note, 57);
 }
 
 #[test]
@@ -143,16 +142,11 @@ fn a_new_note_replaces_the_median_at_once() {
     }
     m.window_mut().copy_from_slice(&sine(329.63, sr, n, 0.5));
     m.analyze(440.0, false);
-    assert_eq!(m.reading().unwrap().name(), "E4", "no averaging with the old note");
+    assert_eq!(m.reading().unwrap().note, 64, "no averaging with the old note");
 }
 
 #[test]
-fn note_names_count_octaves_from_c4_at_60() {
-    assert_eq!(note_label(60), "C4");
-    assert_eq!(note_label(69), "A4");
-    assert_eq!(note_label(61), "C#4");
-    assert_eq!(note_label(0), "C-1");
-    assert_eq!(note_label(-1), "B-2");
+fn cents_read_to_one_decimal_with_no_negative_zero() {
     assert_eq!(signed_tenths(-0.04), "+0.0");
     assert_eq!(signed_tenths(12.34), "+12.3");
     assert_eq!(signed_tenths(-7.86), "-7.9");
@@ -173,7 +167,7 @@ fn rounds_with_no_new_frames_are_misses_and_three_let_go_of_the_note() {
     let w = sine(440.0, 48_000.0, m.window_mut().len(), 0.5);
     m.window_mut().copy_from_slice(&w);
     m.analyze(440.0, false);
-    assert_eq!(m.reading().map(|r| r.text()), Some("A4 +0.0 cents".to_string()));
+    assert_eq!(m.reading().map(|r| (r.note, signed_tenths(r.cents))), Some((69, "+0.0".to_string())));
     m.miss();
     m.miss();
     assert!(m.reading().is_some(), "two misses keep the note");
@@ -181,5 +175,5 @@ fn rounds_with_no_new_frames_are_misses_and_three_let_go_of_the_note() {
     assert!(m.reading().is_none(), "the third lets go");
     // A new tone starts the median over from nothing.
     m.analyze(440.0, false);
-    assert_eq!(m.reading().map(|r| r.text()), Some("A4 +0.0 cents".to_string()));
+    assert_eq!(m.reading().map(|r| (r.note, signed_tenths(r.cents))), Some((69, "+0.0".to_string())));
 }

@@ -36,6 +36,18 @@ const fn sec(title: &'static str, cols: usize, items: &'static [crate::panel::It
 
 pub static LAYOUT: [Row; 1] = [&[sec("Tuning", 2, &[Knob("reference_hz", "Reference"), Toggle("hold", "Hold")])]];
 
+/// The Reference knob's label on the panel: the name of MIDI 69 in the Middle C setting
+/// (`Reference A3` under C3, `Reference A4` under C4; ADR 0051). Its `ParamInfo` name stays
+/// `Reference` and its value text the frequency.
+pub fn reference_label(middle_c: transit_midi::MiddleC) -> String {
+    format!("Reference {}", transit_midi::note_name(69, middle_c))
+}
+
+/// A reading's note in the Middle C setting; "--" past the MIDI range.
+fn note_text(note: i32, middle_c: transit_midi::MiddleC) -> String {
+    u8::try_from(note).ok().filter(|n| *n <= 127).map_or_else(|| "--".to_string(), |n| transit_midi::note_name(n, middle_c))
+}
+
 /// The help entry of a Tuner control.
 pub fn help(param: &str) -> Option<Id> {
     Some(match param {
@@ -48,13 +60,13 @@ pub fn help(param: &str) -> Option<Id> {
 /// What the display showed as last drawn, for `ui.inspect`-style checks and tests.
 #[derive(Debug, Clone, Default)]
 pub struct TunerLayout {
-    /// The note with its octave ("A4"), or "--" with no signal.
+    /// The note with its octave in the Middle C setting ("A3" under C3), or "--" with no signal.
     pub note: String,
     /// The cents offset ("+0.0"), empty with no signal.
     pub cents: String,
     /// The frequency ("440.0 Hz"), or "No signal".
     pub freq: String,
-    /// The reading as one line ("A4 +0.0 cents"), or "no signal".
+    /// The reading as one line ("A3 +0.0 cents" under C3), or "no signal".
     pub text: String,
     pub note_rect: [f32; 4],
     pub meter: [f32; 4],
@@ -129,10 +141,10 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
     let t = &mut lay.tuner;
     match reading {
         Some(r) => {
-            t.note = r.name();
+            t.note = note_text(r.note, app.ui.middle_c);
             t.cents = signed_tenths(r.cents);
             t.freq = format!("{:.1} Hz", r.hz);
-            t.text = r.text();
+            t.text = format!("{} {} cents", t.note, t.cents);
             t.in_tune = r.cents.abs() <= IN_TUNE_CENTS;
         }
         None => {

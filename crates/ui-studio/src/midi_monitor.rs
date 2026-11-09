@@ -210,6 +210,8 @@ pub struct State {
     pub led_rect: crate::arrange::R4,
     /// Where the filter bar's controls were last drawn.
     pub filter_bar: Option<FilterBar>,
+    /// The Middle C setting the rows' text is in (ADR 0051); see [`State::set_convention`].
+    convention: transit_midi::MiddleC,
 }
 
 const CC_NAMES: [(u8, &str); 15] = [
@@ -235,18 +237,29 @@ pub fn cc_name(cc: u8) -> Option<&'static str> {
     CC_NAMES.iter().find(|(n, _)| *n == cc).map(|(_, name)| *name)
 }
 
-fn note(n: u8) -> String {
-    format!("{} ({n})", transit_midi::note_name(n, transit_midi::MiddleC::C3))
+fn note(n: u8, middle_c: transit_midi::MiddleC) -> String {
+    format!("{} ({n})", transit_midi::note_name(n, middle_c))
 }
 
-/// The class and the decoded text of one ring element. A note-on with velocity 0 is a note-off.
-pub fn describe(e: &MonitorEvent) -> (Class, String) {
+/// The text of a message that names a note (note-on, note-off, polyphonic aftertouch), in the
+/// Middle C setting; `None` for every other status. A note-on with velocity 0 is a note-off.
+fn note_text(status: u8, d1: u8, d2: u8, middle_c: transit_midi::MiddleC) -> Option<String> {
+    Some(match status {
+        0x80..=0x8F => format!("Note Off {} vel {d2}", note(d1, middle_c)),
+        0x90..=0x9F if d2 == 0 => format!("Note Off {} vel 0", note(d1, middle_c)),
+        0x90..=0x9F => format!("Note On {} vel {d2}", note(d1, middle_c)),
+        0xA0..=0xAF => format!("Poly Aftertouch {} {d2}", note(d1, middle_c)),
+        _ => return None,
+    })
+}
+
+/// The class and the decoded text of one ring element, notes named in the Middle C setting.
+pub fn describe(e: &MonitorEvent, middle_c: transit_midi::MiddleC) -> (Class, String) {
     let (d1, d2) = (e.data1, e.data2);
+    if let Some(text) = note_text(e.status, d1, d2, middle_c) {
+        return (if e.status >= 0xA0 { Class::Touch } else { Class::Note }, text);
+    }
     match e.status {
-        0x80..=0x8F => (Class::Note, format!("Note Off {} vel {d2}", note(d1))),
-        0x90..=0x9F if d2 == 0 => (Class::Note, format!("Note Off {} vel 0", note(d1))),
-        0x90..=0x9F => (Class::Note, format!("Note On {} vel {d2}", note(d1))),
-        0xA0..=0xAF => (Class::Touch, format!("Poly Aftertouch {} {d2}", note(d1))),
         0xB0..=0xBF => (
             Class::Cc,
             match cc_name(d1) {
@@ -426,7 +439,7 @@ impl State {
     }
 
     fn push_captured(&mut self, e: &MonitorEvent, transport: Option<f64>, payload: Option<&transit_playback::player::monitor::SysEx>) {
-        let (class, mut text) = describe(e);
+        let (class, mut text) = describe(e, self.convention);
         let raw_len = match e.status {
             0x80..=0xBF | 0xE0..=0xEF | 0xF2 => 3,
             0xC0..=0xDF | 0xF1 | 0xF3 => 2,
@@ -469,6 +482,34 @@ impl State {
             self.rows.pop_front();
         }
         self.rows.push_back(row);
+    }
+
+    /// Puts every retained row in `middle_c` (ADR 0051 decision 7): a row whose status names a
+    /// note (note-on, note-off, polyphonic aftertouch) has its text and filter text re-derived
+    /// from the raw bytes it holds, so the screen, Copy and the report are in one convention. No
+    /// other row changes. The row MIDI Learn caught follows too.
+    pub fn set_convention(&mut self, middle_c: transit_midi::MiddleC) {
+        if self.convention == middle_c {
+            return;
+        }
+        self.convention = middle_c;
+        let caught = match &mut self.learn {
+            Learn::Caught(row) => Some(row.as_mut()),
+            _ => None,
+        };
+        for row in self.rows.iter_mut().chain(caught) {
+            if row.raw_len == 3
+                && let Some(text) = note_text(row.raw[0], row.raw[1], row.raw[2], middle_c)
+            {
+                row.text = text;
+                row.search = format!("{} {}", row.text.to_lowercase(), row.hex().to_lowercase());
+            }
+        }
+    }
+
+    /// The convention the rows are in.
+    pub fn convention(&self) -> transit_midi::MiddleC {
+        self.convention
     }
 
     /// Starts the spotlight once, using the injected UI frame clock.
@@ -553,12 +594,12 @@ impl Led {
 }
 
 /// The tooltip line for the last message: `Keys: Note On C3 (60) vel 100`.
-pub fn led_tip(a: &Activity, port: &str) -> String {
+pub fn led_tip(a: &Activity, port: &str, middle_c: transit_midi::MiddleC) -> String {
     if a.count == 0 {
         return "No MIDI input yet. Click to open the MIDI Monitor.".into();
     }
     let e = MonitorEvent::message(Dir::In, a.port, 0, &a.bytes);
-    let (_, text) = describe(&e);
+    let (_, text) = describe(&e, middle_c);
     format!("{}: {text}. Click to open the MIDI Monitor.", if port.is_empty() { "input" } else { port })
 }
 
@@ -588,7 +629,7 @@ pub fn led(app: &mut StudioApp, ui: &mut egui::Ui) {
     p.circle_stroke(c, 5.0, egui::Stroke::new(1.0, if level > 0.0 { lit } else { TOKENS.line }));
     p.text(pos2(c.x + 11.0, r.center().y), Align2::LEFT_CENTER, "MIDI", font, TOKENS.text_dim);
     app.midi_monitor.led_rect = crate::arrange::r4(r);
-    let tip = led_tip(&app.midi_monitor.led.tip.0, &app.midi_monitor.led.tip.1);
+    let tip = led_tip(&app.midi_monitor.led.tip.0, &app.midi_monitor.led.tip.1, app.ui.middle_c);
     crate::help::hover(ui, &resp, crate::help::Id::TransportMidiLed);
     if resp.on_hover_text(tip).clicked() {
         let _ = app.run("window.midi_monitor", json!({"value": true}));
@@ -622,6 +663,7 @@ impl StudioApp {
 
     /// Once a frame: switch the taps with the window and take what they hold.
     fn midi_monitor_feed(&mut self, now: f64) {
+        self.midi_monitor.set_convention(self.ui.middle_c);
         let open = self.ui.midi_monitor.open;
         let clock = self.ui.midi_monitor.show_clock;
         let Some(player) = &self.player else {

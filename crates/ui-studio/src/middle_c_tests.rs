@@ -28,15 +28,7 @@ impl Rig {
 
     /// Every text one frame paints, sorted.
     pub fn texts(&mut self) -> Vec<String> {
-        let mut v: Vec<String> = crate::tests::frame_shapes(&mut self.app, &self.ctx, &mut self.t)
-            .iter()
-            .filter_map(|s| match &s.shape {
-                egui::Shape::Text(t) => Some(t.galley.job.text.clone()),
-                _ => None,
-            })
-            .collect();
-        v.sort();
-        v
+        shape_texts(&crate::tests::frame_shapes(&mut self.app, &self.ctx, &mut self.t))
     }
 
     /// A control-channel request, as an agent sends it.
@@ -54,13 +46,33 @@ impl Rig {
     /// Settles the frame under the current setting (two equal frames), runs `options.middle_c` to
     /// `to` and draws exactly one more frame. Returns the texts that frame lost and gained.
     pub fn flip(&mut self, to: MiddleC) -> (Vec<String>, Vec<String>) {
+        let (before, after) = self.flip_frames(to);
+        (minus(&before, &after), minus(&after, &before))
+    }
+
+    /// [`Rig::flip`]'s two whole frames: the settled one before and the next one after.
+    pub fn flip_frames(&mut self, to: MiddleC) -> (Vec<String>, Vec<String>) {
         self.frames(2);
         let before = self.texts();
         assert_eq!(before, self.texts(), "the frame is settled before the flip");
         self.control("options.middle_c", json!({"value": to.label()}));
-        let after = self.texts();
-        (minus(&before, &after), minus(&after, &before))
+        (before, self.texts())
     }
+}
+
+/// Every text in `shapes` (nested ones included), sorted.
+pub(crate) fn shape_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+    out.sort();
+    out
 }
 
 /// The items of `a` not matched one for one in `b`.

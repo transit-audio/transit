@@ -66,28 +66,15 @@ const MISSES_TO_LOSE: u32 = 3;
 /// A new estimate this far (in semitones) from the median starts the median over: a new note.
 const JUMP_SEMITONES: f32 = 0.8;
 
-/// One reading as the panel shows it.
+/// One reading. The panel names the note through the UI's note namer in the Middle C setting
+/// (ADR 0051): this crate keeps the number and the cents, never a name.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Reading {
-    /// MIDI note number of the nearest note (A4 = 69).
+    /// MIDI note number of the nearest note (69 is the A above middle C).
     pub note: i32,
     /// How far the pitch is from that note, -50 to +50 cents.
     pub cents: f32,
     pub hz: f32,
-}
-
-impl Reading {
-    /// The note's name with its octave, C4 = 60 ("A4", "C#3").
-    #[must_use]
-    pub fn name(&self) -> String {
-        note_label(self.note)
-    }
-
-    /// "A4 +0.0 cents".
-    #[must_use]
-    pub fn text(&self) -> String {
-        format!("{} {} cents", self.name(), signed_tenths(self.cents))
-    }
 }
 
 /// "+0.0", "-12.3": one decimal, never a negative zero.
@@ -95,14 +82,6 @@ impl Reading {
 pub fn signed_tenths(v: f32) -> String {
     let t = (v * 10.0).round() / 10.0;
     if t == 0.0 { "+0.0".to_string() } else { format!("{t:+.1}") }
-}
-
-/// The name of a MIDI note with its octave, C4 = 60 (sharps).
-#[must_use]
-pub fn note_label(note: i32) -> String {
-    const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-    let class = usize::try_from(note.rem_euclid(12)).ok().and_then(|i| NAMES.get(i)).copied().unwrap_or("?");
-    format!("{class}{}", note.div_euclid(12) - 1)
 }
 
 /// What the Tuner's panel keeps between frames: the detector, the window it reads, the recent

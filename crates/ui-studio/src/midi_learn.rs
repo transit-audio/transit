@@ -478,12 +478,6 @@ pub fn keys(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
-/// The note name of a MIDI key (C3 = 60), as the Monitor writes it.
-fn note_name(n: u8) -> String {
-    const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-    format!("{}{}", NAMES[usize::from(n % 12)], i32::from(n / 12) - 2)
-}
-
 /// A row of the Window > MIDI Mappings table.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Row {
@@ -538,7 +532,7 @@ pub fn rows(app: &StudioApp) -> Vec<Row> {
             };
             let source = match m.source.kind {
                 SourceKind::Cc => format!("CC {}", m.source.number),
-                SourceKind::Note => format!("Note {} ({})", note_name(m.source.number), m.source.number),
+                SourceKind::Note => format!("Note {} ({})", transit_midi::note_name(m.source.number, app.ui.middle_c), m.source.number),
             };
             out.push(Row {
                 scope,

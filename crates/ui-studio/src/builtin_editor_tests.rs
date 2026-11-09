@@ -980,18 +980,19 @@ fn the_tuner_panel_reads_a_tone_from_its_tap_and_switches_the_tap_with_the_windo
     // A 440 Hz tone at the session rate.
     let mut tone = Tone::new();
     tone.run(&mut t, &tap, 440.0, 8);
+    // A 440 is the A above middle C: A3 at the default Middle C setting (ADR 0051).
     let w = t.window(tr);
-    assert_eq!(w.tuner.text, "A4 +0.0 cents");
+    assert_eq!(w.tuner.text, "A3 +0.0 cents");
     assert_eq!(w.tuner.freq, "440.0 Hz");
     assert!(w.tuner.in_tune);
     let needle = w.tuner.needle_x.expect("a needle");
     let center = (w.tuner.meter[0] + w.tuner.meter[2]) / 2.0;
     assert!((needle - center).abs() < 1.0, "centered: {needle} vs {center}");
-    assert_eq!(t.painted("A4").0, 1, "the note is drawn once");
+    assert_eq!(t.painted("A3").0, 1, "the note is drawn once");
     // A flat note moves the needle left and is not in tune.
     tone.run(&mut t, &tap, 440.0 * 2.0f32.powf(-25.0 / 1200.0), 20);
     let w = t.window(tr);
-    assert_eq!(w.tuner.note, "A4");
+    assert_eq!(w.tuner.note, "A3");
     assert!(!w.tuner.in_tune && w.tuner.needle_x.unwrap() < center - 10.0, "{:?}", w.tuner);
     // The source stops (a bypassed Tuner writes nothing): no new frames are a miss, so the note
     // is let go instead of the last ring contents being read again.
@@ -1014,7 +1015,7 @@ fn the_tuner_reference_moves_the_reading_and_hold_freezes_the_display() {
     t.open_editor(0);
     let mut tone = Tone::new();
     tone.run(&mut t, &tap, 440.0, 8);
-    assert_eq!(t.window(tr).tuner.text, "A4 +0.0 cents");
+    assert_eq!(t.window(tr).tuner.text, "A3 +0.0 cents");
     // Reference 432 Hz: the same 440 Hz is about 31 cents sharp (a hair under 32 for the A in 432).
     t.app.run("mix.insert_param", json!({"track": tr.0, "slot": 0, "param": "reference_hz", "value": 432.0})).unwrap();
     tone.run(&mut t, &tap, 440.0, 6);
@@ -1029,7 +1030,38 @@ fn the_tuner_reference_moves_the_reading_and_hold_freezes_the_display() {
     assert_eq!(t.window(tr).tuner.text, held, "held");
     t.app.run("mix.insert_param", json!({"track": tr.0, "slot": 0, "param": "hold", "value": 0.0})).unwrap();
     tone.run(&mut t, &tap, 220.0, 12);
-    assert_eq!(t.window(tr).tuner.note, "A3", "released");
+    assert_eq!(t.window(tr).tuner.note, "A2", "released");
+}
+
+/// ADR 0051: the Tuner names its note and the Reference caption in the Middle C setting. A 440
+/// reads A3 under C3 and A4 under C4, in the next frame; the frequency, the cents and the
+/// Reference value text do not change.
+#[test]
+fn the_tuner_note_and_reference_caption_follow_the_middle_c_setting() {
+    let mut t = T::new();
+    let tr = t.track("audio");
+    t.app.add_device(tr, "tuner").unwrap();
+    t.frames(4);
+    let tap = tuner_taps(&mut t, tr);
+    t.open_editor(0);
+    let mut tone = Tone::new();
+    tone.run(&mut t, &tap, 440.0, 8);
+    let w = t.window(tr);
+    assert_eq!((w.tuner.note.as_str(), w.tuner.text.as_str()), ("A3", "A3 +0.0 cents"));
+    assert_eq!((t.painted("A3").0, t.painted("Reference A3").0, t.painted("A4").0), (1, 1, 0));
+    let reference = w.rows.iter().find(|r| r.param == "reference_hz").unwrap().value.clone();
+    t.app.run("options.middle_c", json!({"value": "C4"})).unwrap();
+    tone.run(&mut t, &tap, 440.0, 1);
+    let after = t.window(tr);
+    assert_eq!((after.tuner.note.as_str(), after.tuner.text.as_str()), ("A4", "A4 +0.0 cents"), "the next frame");
+    assert_eq!((t.painted("A4").0, t.painted("Reference A4").0, t.painted("A3").0, t.painted("Reference A3").0), (1, 1, 0, 0));
+    assert_eq!((after.tuner.freq.as_str(), after.tuner.cents.as_str()), ("440.0 Hz", "+0.0"), "the frequency and cents stay");
+    assert_eq!(after.rows.iter().find(|r| r.param == "reference_hz").unwrap().value, reference, "the value text stays the frequency");
+    assert_eq!(transit_dsp::plugin_info("tuner").unwrap().param("reference_hz").unwrap().name, "Reference", "the parameter's own name stays");
+    // Control: back to C3 restores both.
+    t.app.run("options.middle_c", json!({"value": "C3"})).unwrap();
+    tone.run(&mut t, &tap, 440.0, 1);
+    assert_eq!((t.painted("A3").0, t.painted("Reference A3").0), (1, 1));
 }
 
 #[test]

@@ -42,7 +42,7 @@ fn every_message_class_decodes() {
         (ev(Dir::In, 0xFF, 0, 0), Class::RealTime, "System Reset"),
     ];
     for (e, class, text) in table {
-        assert_eq!(describe(e), (*class, (*text).to_string()), "{e:?}");
+        assert_eq!(describe(e, transit_midi::MiddleC::C3), (*class, (*text).to_string()), "{e:?}");
     }
 }
 
@@ -313,11 +313,11 @@ fn led_lights_on_a_new_count_then_decays() {
 #[test]
 fn led_tooltip_names_the_last_port_and_message() {
     let none = Activity::default();
-    assert!(led_tip(&none, "").starts_with("No MIDI input yet"));
+    assert!(led_tip(&none, "", transit_midi::MiddleC::C3).starts_with("No MIDI input yet"));
     let a = Activity { count: 4, port: 1, bytes: [0xB0, 74, 12] };
-    assert_eq!(led_tip(&a, "Keys"), "Keys: CC 74 Brightness 12. Click to open the MIDI Monitor.");
+    assert_eq!(led_tip(&a, "Keys", transit_midi::MiddleC::C3), "Keys: CC 74 Brightness 12. Click to open the MIDI Monitor.");
     let start = Activity { count: 1, port: 1, bytes: [0xFA, 0, 0] };
-    assert_eq!(led_tip(&start, "Keys"), "Keys: Start. Click to open the MIDI Monitor.");
+    assert_eq!(led_tip(&start, "Keys", transit_midi::MiddleC::C3), "Keys: Start. Click to open the MIDI Monitor.");
 }
 
 #[test]

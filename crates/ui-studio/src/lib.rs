@@ -726,6 +726,8 @@ mod menu_gutter_tests;
 #[cfg(test)]
 mod menu_padding_tests;
 #[cfg(test)]
+mod middle_c_display_tests;
+#[cfg(test)]
 mod middle_c_tests;
 #[cfg(test)]
 mod midi_fx_panel_tests;

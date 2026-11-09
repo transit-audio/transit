@@ -304,3 +304,20 @@ fn the_worker_renders_only_the_newest_request_per_instance() {
     assert_ne!(held, wave::request(k, None));
     assert_eq!(held, at(72.0));
 }
+
+/// ADR 0051: the wave well's note follows the Middle C setting in the next frame, and nothing else
+/// the window paints changes.
+#[test]
+fn the_wave_note_follows_the_middle_c_setting() {
+    let (mut t, tr) = T::open();
+    t.frames(2);
+    let before = crate::middle_c_tests::shape_texts(&t.shapes);
+    assert_eq!(t.panel(tr).hero.wave_note, "C3");
+    t.app.run("options.middle_c", serde_json::json!({"value": "C4"})).unwrap();
+    t.frames(1);
+    let after = crate::middle_c_tests::shape_texts(&t.shapes);
+    assert_eq!(t.panel(tr).hero.wave_note, "C4");
+    let gone = crate::middle_c_tests::minus(&before, &after);
+    let new = crate::middle_c_tests::minus(&after, &before);
+    assert_eq!((gone, new), (vec!["0 voices · C3".to_string()], vec!["0 voices · C4".to_string()]));
+}

@@ -166,7 +166,7 @@ fn scope(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, o
     out.hero.readout = format!("{label} · {}", MODELS[model]);
     out.hero.voices = voices_text(&states);
     let note = shown.as_ref().map_or(req.note, |r| r.0.note);
-    out.hero.wave_note = transit_midi::note_name(note.clamp(0.0, 127.0) as u8, transit_midi::MiddleC::C3);
+    out.hero.wave_note = transit_midi::note_name(note.clamp(0.0, 127.0) as u8, app.ui.middle_c);
     out.hero.wave_kind = shown.as_ref().map(|r| r.1);
     let top = rect.min.y + display_well::PADDING + display_well::READOUT_H / 2.0;
     let right = format!("{} · {}", out.hero.voices, out.hero.wave_note);

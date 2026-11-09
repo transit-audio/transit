@@ -98,11 +98,11 @@ fn whole_number(plugin: &str, param: &str) -> bool {
     plugin == SAMPLER && (NOTE_PARAMS.contains(&param) || WHOLE_PARAMS.contains(&param))
 }
 
-/// A parameter's value as its row shows it: the Sampler's notes by name.
-fn format_param(plugin: &str, p: &ParamInfo, value: f32) -> String {
+/// A parameter's value as its row shows it: the Sampler's notes by name, in the Middle C setting.
+fn format_param(plugin: &str, p: &ParamInfo, value: f32, middle_c: transit_midi::MiddleC) -> String {
     if plugin == SAMPLER && NOTE_PARAMS.contains(&p.id) {
         let n = value.round().clamp(0.0, 127.0) as u8;
-        return format!("{} ({n})", transit_midi::note_name(n, transit_midi::MiddleC::C3));
+        return format!("{} ({n})", transit_midi::note_name(n, middle_c));
     }
     if whole_number(plugin, p.id) {
         return format!("{:.0}", value.round());
@@ -325,7 +325,7 @@ pub(crate) fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize),
         crate::chrome::context_menu(&menu, app.learn_checks(key.0, &control)).show(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
         crate::midi_learn::mark(app, ui.painter(), resp.rect, key.0, control);
     }
-    let shown = format_param(&ins.plugin, p, x);
+    let shown = format_param(&ins.plugin, p, x, app.ui.middle_c);
     ui.label(RichText::new(&shown).monospace().color(TOKENS.text_dim));
     lay.rows.push(RowLayout { param: p.id.to_string(), control: rect4(resp.rect), value: shown });
 }

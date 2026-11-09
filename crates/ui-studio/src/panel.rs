@@ -424,6 +424,9 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     };
     let Some(p) = info.param(id) else { return };
     let v = p.clamp(app.followed_param(key, id).or_else(|| ins.params.get(id).copied()).unwrap_or(p.default));
+    // The Tuner's Reference names the A it means in the Middle C setting (ADR 0051).
+    let caption = (info.id == crate::tuner_panel::TUNER && id == "reference_hz").then(|| crate::tuner_panel::reference_label(app.ui.middle_c));
+    let label = caption.as_deref().unwrap_or(label);
     let (resp, new, shown) = match item {
         Knob(..) => {
             let k = knob::show(ui, egui::Id::new(("knob", ins.uid.get(), id)), label, p, v);

@@ -25,9 +25,11 @@ impl StudioApp {
     }
 
     /// Hands the UI's setting to what names notes outside the frame: the engine's message
-    /// convention. The host calls it once at startup, after loading `ui.json`.
+    /// convention and the MIDI Monitor's retained rows. The host calls it once at startup, after
+    /// loading `ui.json`.
     pub fn apply_middle_c(&mut self) {
         self.engine.set_message_middle_c(self.ui.middle_c);
+        self.midi_monitor.set_convention(self.ui.middle_c);
     }
 
     /// Writes `middle_c` into `ui.json` now, keeping every other saved key.
