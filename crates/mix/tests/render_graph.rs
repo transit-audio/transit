@@ -39,6 +39,7 @@ use transit_mix::{
 };
 use transit_model::{Bus, BusId, ChannelFormat, Clip, Insert, KeyFrom, KeySource, Route, Session, SourceAudio, SourceId, Tap, TrackId, TrackKind};
 use transit_rt::testing::measure;
+use transit_rt::worker_set::{Outcome, OverrunCause};
 
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
@@ -510,9 +511,13 @@ fn graph_off() {
 /// Gate 4 through the graph: live notes and pedals on six instruments, worker stalls on the key
 /// sources and elsewhere. No note or pedal is left stuck; every hole in an instrument's time is a
 /// counted busy or unstarted overrun or an upstream-missed skip; the take journal counts only the
-/// strips' own overruns.
-// timing: explicit-deadline injected 2-8 ms stalls against an explicit 1.5 ms deadline decide the overruns and skips;
-// the assertions are accounting identities and liveness over 1500 blocks, and the closing blocks run at a far deadline
+/// strips' own overruns. Which strips the free stalls make miss is the host's: a stall is taken only
+/// by a worker render, and a loaded host's callback renders the sources inline. So the skip paths
+/// are also forced (`FORCED_MISSES`): a key source held on a worker under the deterministic
+/// deadline is late and its dependents skip, whatever the host's speed (#436, E72).
+// timing: explicit-deadline injected 2-8 ms stalls against an explicit 1.5 ms deadline make the free overruns and skips;
+// the assertions are accounting identities over 1500 blocks, the forced misses are held workers under the
+// deterministic deadline, and the closing blocks run at a far deadline
 #[test]
 fn continuity_across_upstream_missed_skips() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -541,7 +546,10 @@ fn continuity_across_upstream_missed_skips() {
                 let k = [0, 3, 0, 3, 1, 2, 4, 5][usize::try_from(rng.below(8)).unwrap()];
                 rig.shared[k].stall_ns.store(2_000_000 + rng.below(6_000_000), Ordering::Relaxed);
             }
-            rig.block();
+            match FORCED_MISSES.iter().find(|m| m.0 == b) {
+                Some(&(_, source, dependents)) => forced_miss(&mut rig, b, source, dependents),
+                None => rig.block(),
+            }
         }
         for s in &rig.shared {
             s.stall_ns.store(0, Ordering::Relaxed);
@@ -568,9 +576,9 @@ fn continuity_across_upstream_missed_skips() {
         assert_eq!(s.reentries.load(Ordering::Relaxed), 0, "instrument {k}");
     }
     assert_eq!(f.conflicts, 0, "{f:?}");
-    // Liveness, not an outcome under test: the injected stalls (2-8 ms against a 1.5 ms deadline,
-    // taken only by a worker render) exist to make the skip paths run at all.
-    assert!(f.overruns_late > 0 && f.upstream_missed > 0, "the stalls overran and skipped dependents: {f:?}");
+    // The skip paths ran: by construction on the forced blocks (each checked where it is rendered),
+    // whatever the free stalls did.
+    assert!(f.overruns_late > 0 && f.upstream_missed > 0, "the forced misses overran and skipped dependents: {f:?}");
     let hole_samples: u64 = reports.iter().map(|r| r.hole_samples).sum();
     assert_eq!(
         hole_samples,
@@ -589,6 +597,46 @@ fn continuity_across_upstream_missed_skips() {
     );
     let retired = rig.mix.into_retired();
     assert_eq!(retired.instances().len(), INSTRUMENTS + 3, "every strip came home (the instruments and the three compressors)");
+}
+
+/// The blocks of `continuity_across_upstream_missed_skips` where a key source misses by
+/// construction: (block, the source's instrument, the instruments keyed from it).
+const FORCED_MISSES: [(u64, usize, &[usize]); 4] = [(300, 0, &[1, 2]), (600, 3, &[4]), (900, 0, &[1, 2]), (1200, 3, &[4])];
+
+/// Waits until no worker holds a strip (between blocks; a hang guard only).
+fn wait_all_home(rig: &Rig) {
+    let phase1 = rig.mix.strip_phases().0;
+    let t0 = Instant::now();
+    while (0..phase1).any(|i| rig.mix.strip_claimed(i)) {
+        assert!(t0.elapsed() < common::stall::HANG, "a worker never returned");
+        std::thread::yield_now();
+    }
+}
+
+/// Renders block `b` with instrument `source`'s strip held on a worker under the deterministic
+/// deadline (no clock ends the block; it ends once the held strip is the only one left and a worker
+/// has claimed it): the source is late and each of `dependents` skips for its missed key. Every
+/// strip is home first, so no dependent is busy instead. Then the hold ends, the strip comes home
+/// and the clock deadline is back.
+fn forced_miss(rig: &mut Rig, b: u64, source: usize, dependents: &[usize]) {
+    let strip = |rig: &Rig, k: usize| rig.mix.strip_index(rig.bindings[k].0).expect("an instrument strip");
+    let s = strip(rig, source);
+    wait_all_home(rig);
+    rig.shared[source].hold.store(true, Ordering::Release);
+    // A cost history no deadline fits: the callback never renders the held strip inline.
+    rig.mix.set_strip_cost(s, Duration::MAX);
+    rig.mix.hold_until_alone(&[s]);
+    rig.block();
+    let outcomes = rig.mix.strip_outcomes();
+    assert_eq!(outcomes[s], Some(Outcome::Overrun(OverrunCause::Late)), "block {b}: the held source {source}: {outcomes:?}");
+    for &d in dependents {
+        let i = strip(rig, d);
+        assert_eq!(outcomes[i], Some(Outcome::Overrun(OverrunCause::UpstreamMissed)), "block {b}: instrument {d} keyed from {source}: {outcomes:?}");
+    }
+    rig.shared[source].hold.store(false, Ordering::Release);
+    wait_all_home(rig);
+    rig.mix.set_strip_cost(s, Duration::from_nanos(1));
+    rig.mix.clock_deadline();
 }
 
 /// The continuity accounting from the first block on the graph (E49 recurrence 2026-10-31, the
