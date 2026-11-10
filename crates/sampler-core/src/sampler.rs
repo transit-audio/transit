@@ -26,6 +26,10 @@ use crate::selection::{self, RoundRobin};
 use crate::voice::{Controls, Owner, Start, Transport, Voice};
 use crate::{ALTERNATIVES, GROUPS, LAYERS, LAYERS_PER_NOTE, PADS, VOICES, ZONES, math};
 
+#[cfg(test)]
+#[path = "tests/steal_ties.rs"]
+mod steal_ties;
+
 /// Counters the adapter reads (they only grow; [`SamplerCore::reset`] keeps them).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Diagnostics {
