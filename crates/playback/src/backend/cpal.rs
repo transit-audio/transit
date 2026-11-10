@@ -187,16 +187,26 @@ fn input_usable(config: &cpal::SupportedStreamConfig) -> bool {
     config.channels() > 0
 }
 
-/// The input config at `rate`, or `None` when the device offers none we read there. The width
-/// first, then the best format at that width. A device that offers one width opens it, and on the
-/// hosts with a physical channel order ([`physical_channel_order`]) the widest opens. A device that
-/// offers several widths elsewhere is a converting plug (PipeWire's or PulseAudio's ALSA PCM,
-/// `plughw`): its widths are an up- or downmix of the real source, not that many inputs (#429:
-/// PipeWire's "default" and "pipewire" accept 1 to 32 and more), so it opens stereo, else mono,
-/// else its narrowest, the order cpal's own default config prefers. A multichannel interface opened
-/// as `hw:` offers one width and keeps all its channels.
+/// The ALSA server and default PCMs, whose input converts one source to whatever width is asked
+/// (cpal lists them under these names; a card is listed under its card name as `plughw:N`).
 #[cfg(any(test, not(target_os = "freebsd")))]
-fn choose_input(configs: &[cpal::SupportedStreamConfigRange], rate: u32, host: &str) -> Option<cpal::SupportedStreamConfig> {
+fn server_pcm(device: &str) -> bool {
+    matches!(device, "default" | "pipewire" | "pulse") || device.starts_with("sysdefault")
+}
+
+/// The input config at `rate`, or `None` when the device offers none we read there.
+///
+/// The rule (#429): a server or default PCM that converts opens stereo (else mono), and only one
+/// identified by BOTH its name ([`server_pcm`]: "default", "pipewire", "pulse", `sysdefault*`) and
+/// its widths, a contiguous run from 1 (the signature of a converting plug-in: PipeWire's PCMs
+/// list 1 to 32 there, an upmix of one source, not 32 inputs). Every other device, every `hw:` and
+/// `plughw:` device and every sparse width list, keeps the rule from before: the best format, then
+/// the widest width. cpal's ALSA host lists widths from the unconstrained hardware space crossed
+/// with every rate, so an interface with one width per rate band lists them all "at" each rate;
+/// the widest is kept for it (a band whose widest width does not exist at the rate is an older,
+/// separate limit).
+#[cfg(any(test, not(target_os = "freebsd")))]
+fn choose_input(configs: &[cpal::SupportedStreamConfigRange], rate: u32, host: &str, device: &str) -> Option<cpal::SupportedStreamConfig> {
     let usable: Vec<&cpal::SupportedStreamConfigRange> = configs
         .iter()
         .filter(|c| {
@@ -207,29 +217,26 @@ fn choose_input(configs: &[cpal::SupportedStreamConfigRange], rate: u32, host: &
                 && c.max_sample_rate().0 >= rate
         })
         .collect();
-    let widest = usable.iter().map(|c| c.channels()).max()?;
-    let narrowest = usable.iter().map(|c| c.channels()).min()?;
-    let width = if widest == narrowest || physical_channel_order(host) {
-        widest
-    } else if usable.iter().any(|c| c.channels() == 2) {
-        2
-    } else if usable.iter().any(|c| c.channels() == 1) {
-        1
+    let mut widths: Vec<u16> = usable.iter().map(|c| c.channels()).collect();
+    widths.sort_unstable();
+    widths.dedup();
+    let contiguous_from_one = widths.iter().zip(1u16..).all(|(&w, n)| w == n);
+    let converting = !physical_channel_order(host) && server_pcm(device) && contiguous_from_one && widths.len() > 1;
+    let chosen = if converting {
+        let width = if widths.contains(&2) { 2 } else { 1 };
+        usable.into_iter().filter(|c| c.channels() == width).min_by_key(|c| format_rank(c.sample_format()))
     } else {
-        narrowest
+        usable.into_iter().min_by_key(|c| (format_rank(c.sample_format()), std::cmp::Reverse(c.channels())))
     };
-    usable
-        .into_iter()
-        .filter(|c| c.channels() == width)
-        .min_by_key(|c| format_rank(c.sample_format()))
-        .map(|c| c.with_sample_rate(cpal::SampleRate(rate)))
+    chosen.map(|c| c.with_sample_rate(cpal::SampleRate(rate)))
 }
 
 /// The input config at `rate` when the device offers it (so input and output run together; the
 /// width by [`choose_input`]), else the device default, in a format we read.
 #[cfg(not(target_os = "freebsd"))]
 fn input_config(device: &cpal::Device, rate: Option<u32>, host: &str) -> Result<cpal::SupportedStreamConfig, String> {
-    let at_rate = rate.and_then(|r| choose_input(&device.supported_input_configs().ok()?.collect::<Vec<_>>(), r, host));
+    let name = name_of(device).unwrap_or_default();
+    let at_rate = rate.and_then(|r| choose_input(&device.supported_input_configs().ok()?.collect::<Vec<_>>(), r, host, &name));
     let cfg = match at_rate {
         Some(c) => c,
         None => device.default_input_config().map_err(|e| e.to_string())?,
@@ -803,23 +810,46 @@ mod tests {
         assert_eq!(output_attempts(&stereo, 2).len(), 1);
     }
 
-    /// #429: PipeWire's ALSA "default" and "pipewire" PCMs accept every width from 1 to 32 (cpal
-    /// lists each); the input opens stereo there, not 32 upmixed channels. A device that offers one
-    /// width (a `hw:` interface) and a physical-order host keep the widest.
+    /// #429: the input's width per device as cpal lists it. Only a server or default PCM named so
+    /// whose widths run contiguously from 1 (PipeWire's "default" and "pipewire": 1 to 32, an upmix
+    /// of one source) opens stereo; everything else keeps the rule from before, best format then
+    /// widest, including `plughw:` and a `hw:` interface whose widths change per rate band (cpal
+    /// lists {10, 14, 18} at every rate for one with three USB altsettings).
     #[test]
-    fn a_converting_input_opens_stereo_and_a_fixed_width_device_all_its_channels() {
-        let plug: Vec<_> = (1..=32).flat_map(|ch| [range(ch, SampleFormat::I16), range(ch, SampleFormat::F32)]).collect();
-        let pick = |configs: &[SupportedStreamConfigRange], host| choose_input(configs, 48_000, host).map(|c| (c.channels(), c.sample_format()));
-        assert_eq!(pick(&plug, "ALSA"), Some((2, SampleFormat::F32)), "a range opens stereo, best format at that width");
-        let mono_up: Vec<_> = [1, 4, 6].map(|ch| range(ch, SampleFormat::F32)).to_vec();
-        assert_eq!(pick(&mono_up, "ALSA"), Some((1, SampleFormat::F32)), "no stereo: mono");
-        let wide_only: Vec<_> = [4, 6].map(|ch| range(ch, SampleFormat::F32)).to_vec();
-        assert_eq!(pick(&wide_only, "ALSA"), Some((4, SampleFormat::F32)), "neither: the narrowest");
-        let interface = [range(18, SampleFormat::I32)];
-        assert_eq!(pick(&interface, "ALSA"), Some((18, SampleFormat::I32)), "one width: every channel");
-        assert_eq!(pick(&plug, "ASIO"), Some((32, SampleFormat::F32)), "a physical-order host keeps the widest");
-        assert_eq!(choose_input(&plug, 192_000, "ALSA").map(|c| c.channels()), None, "no config at the rate");
-        assert_eq!(choose_input(&plug, 48_000, "ALSA").map(|c| c.sample_rate().0), Some(48_000));
+    fn only_a_converting_server_pcm_opens_stereo_and_every_other_input_keeps_its_widest() {
+        let run = |widths: &[u16]| -> Vec<SupportedStreamConfigRange> {
+            widths.iter().flat_map(|&ch| [range(ch, SampleFormat::I16), range(ch, SampleFormat::F32)]).collect()
+        };
+        let all: Vec<u16> = (1..=32).collect();
+        let rows: &[(&[u16], &str, &str, u16)] = &[
+            (&all, "ALSA", "default", 2),
+            (&all, "ALSA", "pipewire", 2),
+            (&all, "ALSA", "pulse", 2),
+            (&all, "ALSA", "sysdefault:CARD=X", 2),
+            (&[1, 2], "ALSA", "default", 2),
+            (&[1, 4, 6], "ALSA", "default", 6),
+            (&all, "ALSA", "plughw:CARD=X", 32),
+            (&all, "ALSA", "Scarlett 18i20 USB", 32),
+            (&[10, 14, 18], "ALSA", "hw:CARD=X", 18),
+            (&[10, 14, 18], "ALSA", "default", 18),
+            (&[2, 18], "ALSA", "hw:CARD=X,DEV=0", 18),
+            (&[18], "ALSA", "hw:CARD=X", 18),
+            (&[1], "ALSA", "default", 1),
+            (&all, "ASIO", "Focusrite USB ASIO", 32),
+            (&all, "ASIO", "default", 32),
+            (&[2], "WASAPI", "Microphone (USB)", 2),
+        ];
+        // Every row is checked before the assertion, so a wrong rule names every row it breaks.
+        let wrong: Vec<String> = rows
+            .iter()
+            .filter_map(|&(widths, host, device, want)| {
+                let got = choose_input(&run(widths), 48_000, host, device).map(|c| (c.channels(), c.sample_format()));
+                (got != Some((want, SampleFormat::F32))).then(|| format!("{device} on {host} listing {widths:?}: {got:?}, want {want}"))
+            })
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
+        assert_eq!(choose_input(&run(&all), 192_000, "ALSA", "default").map(|c| c.channels()), None, "no config at the rate");
+        assert_eq!(choose_input(&run(&all), 48_000, "ALSA", "default").map(|c| c.sample_rate().0), Some(48_000));
     }
 
     /// A device whose input reports no channels is not an input (asio-sys would hit `unreachable!`).
