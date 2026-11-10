@@ -2,6 +2,7 @@
 //! holds, and the editor and state proxies the UI holds.
 
 use crate::{Busy, Clock, Host, Inner, Status, Worker, call, lock};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -101,17 +102,27 @@ impl Token {
 
     /// Runs `f` (the call `call`) with this instance's editor on its host thread (fire and forget).
     fn with_editor(&self, call: &'static str, f: impl FnOnce(Option<&mut Box<dyn PluginEditor>>, &EditorShared) + Send + 'static) {
-        let (key, shared) = (self.key, Arc::clone(&self.shared));
-        self.worker.send_or_leak(self.busy(call), move |ctx| f(ctx.local(key).and_then(|l| l.editor.as_mut()), &shared));
+        let (key, shared, name) = (self.key, Arc::clone(&self.shared), Arc::clone(&self.name));
+        self.worker.send_or_leak(self.busy(call), move |ctx| {
+            // A panic in the editor's code is recorded for this instance and ends here (issue #425).
+            if catch_unwind(AssertUnwindSafe(|| f(ctx.local(key).and_then(|l| l.editor.as_mut()), &shared))).is_err() {
+                log::error!("plug-in host: {name} panicked in its editor ({call})");
+            }
+        });
     }
 }
 
 impl Drop for Token {
     fn drop(&mut self) {
-        let key = self.key;
+        let (key, name) = (self.key, Arc::clone(&self.name));
         self.worker.send_or_leak(self.busy(call::RELEASE), move |ctx| {
-            ctx.entries.remove(&key);
+            // Removed and counted before the value drops, so a panicking destructor leaves `ctx`
+            // consistent; the drop itself is caught for this instance (issue #425).
+            let removed = ctx.entries.remove(&key);
             ctx.count_hosted();
+            if catch_unwind(AssertUnwindSafe(|| drop(removed))).is_err() {
+                log::error!("plug-in host: {name} panicked while it was released");
+            }
         });
     }
 }
@@ -140,7 +151,13 @@ impl Drop for Hosted {
         if let Some(plugin) = self.inner.take() {
             // Destroyed on its own thread, after any request queued before; leaked if that
             // thread is gone. `token` drops after this, so the handles go after the instance.
-            self.token.worker.send_or_leak(self.token.busy(call::DESTROY), move |_| drop(plugin));
+            let name = Arc::clone(&self.token.name);
+            self.token.worker.send_or_leak(self.token.busy(call::DESTROY), move |_| {
+                // A destructor that panics is recorded for this instance and ends here (issue #425).
+                if catch_unwind(AssertUnwindSafe(|| drop(plugin))).is_err() {
+                    log::error!("plug-in host: {name} panicked while it was destroyed");
+                }
+            });
         }
     }
 }

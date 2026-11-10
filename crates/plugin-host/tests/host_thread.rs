@@ -9,6 +9,7 @@ use common::{Fake, Log};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use transit_dsp::{Plugin, PluginInfo};
 use transit_plugin_host::{Config, Host, Status};
 
 /// A frame may take this long at most. Load-tolerant: a starved runner can stall a poll for a
@@ -571,6 +572,56 @@ fn a_job_sent_after_shutdown_is_never_run() {
     assert_eq!(log.thread_of("destroy"), None, "the destroy job sent after shutdown never ran");
     assert_eq!(Arc::strong_count(&log), 2, "the leaked instance still holds the log: nothing will destroy it");
     assert!(matches!(host.submit(|_| ()).poll(), Status::Failed), "no job runs after shutdown");
+}
+
+/// A plug-in whose destructor panics (issue #425). Its processing is a no-op, as far as the host
+/// thread is concerned.
+struct PanicOnDrop;
+
+impl Plugin for PanicOnDrop {
+    fn info(&self) -> &'static PluginInfo {
+        &common::INFO
+    }
+    fn prepare(&mut self, _: f32, _: usize, _: usize) {}
+    fn reset(&mut self) {}
+    fn set_param(&mut self, _: &str, _: f32) -> bool {
+        true
+    }
+    fn param(&self, _: &str) -> Option<f32> {
+        None
+    }
+    fn process(&mut self, _: &mut [Vec<f32>], _: usize) {}
+}
+
+impl Drop for PanicOnDrop {
+    fn drop(&mut self) {
+        panic!("the destructor panics");
+    }
+}
+
+/// Issue #425: a plug-in destructor that panics on the host thread ends at its job boundary. The
+/// thread keeps serving, so a job queued behind the panicking destroy still runs. Before the fix
+/// the panic unwound out of the thread's loop and the receiver's drop destroyed the queued plug-ins.
+#[test]
+fn a_panicking_destruction_does_not_end_the_host_thread() {
+    let host = host(Duration::from_secs(10));
+    let good = Arc::new(Log::default());
+    let bad_plugin = host.submit(|ctx| ctx.adopt(Box::new(PanicOnDrop))).wait(Duration::from_secs(5)).unwrap();
+    let g = Arc::clone(&good);
+    let good_plugin = host.submit(move |ctx| ctx.adopt(Fake::make(&g, Duration::ZERO, Duration::ZERO))).wait(Duration::from_secs(5)).unwrap();
+    // Holds the thread until the two destroys are queued behind it.
+    let (release, gate) = mpsc::channel::<()>();
+    let _held = host.submit(move |_| {
+        let _ = gate.recv();
+    });
+    drop(bad_plugin);
+    drop(good_plugin);
+    drop(release);
+    let later = host.submit(|_| 7).wait(Duration::from_secs(5));
+    assert_eq!(later, Some(7), "a job queued after a panicking destructor still runs");
+    // The job queued before `later` destroyed the good plug-in, on the thread that made it.
+    assert_eq!(good.thread_of("destroy"), good.thread_of("create"), "the queued plug-in is destroyed on its own thread");
+    assert!(host.shutdown(Duration::from_secs(5)));
 }
 
 /// Issue #68: the header strip's model goes to the editor on the host thread, only when it
