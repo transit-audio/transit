@@ -3,7 +3,7 @@ title: Native Linux audio over the JACK client API, for JACK and PipeWire alike 
 -->
 # ADR 0021: Native Linux audio over the JACK client API, for JACK and PipeWire alike
 
-- **Status:** accepted 2026-10-24 (issue #55); amended 2026-10-25 (slice 2)
+- **Status:** accepted 2026-10-24 (issue #55); amended 2026-10-25 (slice 2); amendment proposed 2026-11-09 (#430, decision 2: transit's own function table)
 - **Date:** 2026-10-24
 - **Reopen when:** PipeWire's JACK library on the tester's system gives cycle times or port latencies that the loopback Measure cannot reconcile (then the native PipeWire API is the next step); the slice 2 bench shows cpal's ALSA path within the gate margin of this backend at 64 and 128 frames; a contributor needs JACK MIDI ports (decision 6); or the main distributions stop shipping `pipewire-jack`.
 
@@ -145,6 +145,54 @@ cannot run, and no way to change it without leaving the app. The decision change
   hint for pinning a quantum.
 - **Precedent.** Bitwig Studio and REAPER both offer a buffer size under JACK and request it from
   the server; users of a shared server expect the host that opens a session to set its size.
+
+### Amendment 2026-11-09 (proposed): decision 2, transit's own function table (#430)
+
+Decision 2 bound libjack through `jack-sys`'s run-time loading. `jack-sys` 0.5.1 resolves every
+function from one `dlopen("libjack.so.0")`, and the dynamic loader answers a bare soname with the
+first object of that soname already mapped in the process. A tester on Ubuntu 26.04 with `jackd2`
+and `pipewire-jack` installed and PipeWire running got "connected, but another libjack was already
+loaded in this process; start transit with pw-jack": PipeWire's library connected through our own
+probe, and `jack-sys` was bound to jackd2's, mapped earlier by something other than that probe
+(the #230 probe order cannot prevent that). Decision 2 changes:
+
+1. **Own declarations, own table.** `crates/audio-jack` declares the libjack types, constants and
+   function prototypes it uses (`src/sys.rs`, quoted from jack.h and types.h) and drops `jack-sys`.
+   Every function is resolved with `dlsym` on the handle of the chosen library (`libloading`, pinned
+   with `=`), into one table (`JackFns`). No JACK function is ever resolved by soname. A library
+   lacking a required function is not usable and the probe goes on to the next candidate;
+   `jack_get_cycle_times` and `jack_get_version_string` (`JACK_OPTIONAL_WEAK_EXPORT`) are optional.
+2. **The choice.** Candidates in order: `TRANSIT_JACK_LIBRARY` when set; PipeWire's library found
+   the way `pw-jack` finds it (the absolute paths in the first `pw-jack` on `PATH`, the loader's
+   `$LIB` expanded, then `pipewire-0.3/jack/libjack.so.0` under each loader directory:
+   `LD_LIBRARY_PATH`, the directories of the objects mapped in the process, `/etc/ld.so.conf` and
+   its includes, `/lib64`, `/usr/lib64`, `/lib`, `/usr/lib`), only files that exist, one file once;
+   and the loader's `libjack.so.0`. PipeWire's go before `libjack.so.0` when a PipeWire socket exists
+   and no library is named, after it otherwise. No distribution path is written into transit. The
+   first candidate whose probe client (`JackNoStartServer`) connects through its own table is chosen.
+3. **Once per process, never unloaded.** The chosen table is bound once (`OnceLock`) and never
+   replaced, so two libjacks are never both bound; after binding no library is loaded or probed
+   again. No library the backend loads is ever unloaded, the chosen one or a probed one: a library
+   whose code may still run (a callback, a thread a failed open left behind) must not be unmapped. A
+   failed selection binds nothing, and the next open probes again.
+4. **Real time.** The process callback reaches `jack_port_get_buffer`, `jack_get_cycle_times` and
+   `jack_get_time` through a `&'static JackFns` held by its callback state: a load and an indirect
+   call, with no lock, allocation or lazy-initialization check (the `jack-sys` table had a `Once`
+   check per call).
+5. **The fallback note.** The "another libjack was already loaded" refusal is removed. When no
+   candidate connects, Audio Devices lists every library tried and why and, when no PipeWire library
+   was found to try, "PipeWire's JACK library was not found: install pipewire-jack, or start transit
+   with pw-jack".
+6. **Build.** No JACK package is needed to build (`jack-sys`'s build script asked pkg-config for
+   `jack`); CI and the release job drop `libjack-jackd2-dev`. Decision 8's runtime loading is
+   unchanged.
+7. **Tests.** The candidate search runs as pure functions over a scripted machine (any platform).
+   On Linux the binding is tested with fake libjacks the test compiles with the system C compiler,
+   sharing one soname, in probe order: the table must call the library that connected while a soname
+   `dlopen` returns the first mapped. No test starts, stops or connects to a server.
+
+The ADR 0013 amendment of decision 2 is unchanged: `unsafe` stays in `src/ffi.rs` (the table's
+resolution and every call) and `src/callback.rs`; `src/sys.rs` holds declarations only.
 
 ## Consequences
 
