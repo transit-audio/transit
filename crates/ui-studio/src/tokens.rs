@@ -1142,8 +1142,6 @@ pub mod sampler {
     pub const START_NOTE_LABEL: &str = "Start note";
     pub const START_NOTE_FONT: &str = "mono";
     pub const START_NOTE_DEFAULT: &str = "C1";
-    /// The refused-outside range, lowest and highest note name.
-    pub const START_NOTE_RANGE: [&str; 2] = ["C-2", "G8"];
     pub const START_NOTE_LABEL_GAP: f32 = 6.0;
     pub const START_NOTE_WIDTH: f32 = 48.0;
     pub const START_NOTE_HEIGHT: f32 = 24.0;
@@ -1197,8 +1195,6 @@ pub mod sampler {
         ("startNote/label", START_NOTE_LABEL),
         ("startNote/font/font", START_NOTE_FONT),
         ("startNote/default", START_NOTE_DEFAULT),
-        ("startNote/range/0", START_NOTE_RANGE[0]),
-        ("startNote/range/1", START_NOTE_RANGE[1]),
     ];
     pub const VIEW_BAR_HEIGHT: f32 = 24.0;
     pub const VIEW_BAR_FONT_WEIGHT: f32 = 500.0;
