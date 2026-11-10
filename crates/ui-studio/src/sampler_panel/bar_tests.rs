@@ -198,7 +198,7 @@ fn the_bar_sits_under_the_title_bar_at_the_readmes_sizes_at_both_zooms() {
         // The field: 48 by 24, centred in the bar, at its right edge; the label 6 before it.
         assert!((field[2] - field[0] - tk::START_NOTE_WIDTH).abs() < EPS && (field[3] - field[1] - tk::START_NOTE_HEIGHT).abs() < EPS);
         assert!((field[2] - bar[2]).abs() < EPS && ((field[1] + field[3]) / 2.0 - (bar[1] + bar[3]) / 2.0).abs() < EPS);
-        assert!((field[0] - label[2] - tk::START_NOTE_LABEL_GAP).abs() < 0.5, "{ppp}: {label:?} {field:?}");
+        assert!((field[0] - label[2] - tk::START_NOTE_LABEL_GAP).abs() < EPS, "{ppp}: {label:?} {field:?}");
         // The summary at the left, clear of the label.
         assert!((summary[0] - bar[0]).abs() < EPS && summary[1] >= bar[1] - EPS && summary[3] <= bar[3] + EPS);
         assert!(summary[2] + tokens::SPACE[2] <= label[0], "{summary:?} {label:?}");
