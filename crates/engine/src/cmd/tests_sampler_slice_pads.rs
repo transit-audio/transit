@@ -287,6 +287,34 @@ fn loose_pad_collision_refused() {
     assert_eq!((p.zone(0), p.zone(1)), (before.zone(0), before.zone(1)));
 }
 
+/// ADR 0051 decision 5: the refusal names the note in the engine's message convention, while the
+/// parameters, the result fields and the document are the same under both settings.
+#[test]
+fn collision_note_names_follow_the_message_middle_c() {
+    let run = |convention: transit_midi::MiddleC| {
+        let (mut e, t) = setup();
+        e.set_message_middle_c(convention);
+        manual(&mut e, t, 8);
+        zone_on_pad(&mut e, t, 0, 4, None);
+        zone_on_pad(&mut e, t, 1, 9, None);
+        let pads = refused(&mut e, "mix.sampler_slices_to_pads", json!({"track": t, "root": 60}));
+        let mut plan = e.execute("mix.sampler_slices_to_pads", &json!({"track": t, "root": 60, "preview": true})).unwrap();
+        let reason = plan.as_object_mut().unwrap().remove("reason").unwrap();
+        to_pads(&mut e, t, Some(70));
+        let map = refused(&mut e, "mix.sampler_map_slices", json!({"track": t, "root": 69}));
+        (pads, reason, map, plan, serde_json::to_value(e.session()).unwrap())
+    };
+    let (c3, c4) = (run(transit_midi::MiddleC::C3), run(transit_midi::MiddleC::C4));
+    assert!(c3.0.ends_with("Pad A5 already plays E3"), "{}", c3.0);
+    assert!(c4.0.ends_with("Pad A5 already plays E4"), "{}", c4.0);
+    assert_eq!((c3.1.clone(), c4.1.clone()), (json!("Pad A5 already plays E3"), json!("Pad A5 already plays E4")));
+    assert!(c3.2.ends_with("Pad A10 already plays A3"), "{}", c3.2);
+    assert!(c4.2.ends_with("Pad A10 already plays A4"), "{}", c4.2);
+    assert_eq!(c3.3, c4.3, "the plan's fields are MIDI numbers under either setting");
+    assert_eq!(c3.3["loose_collisions"], json!([{"pad": 5, "note": 64}]));
+    assert_eq!(c3.4, c4.4, "the document is the same under either setting");
+}
+
 #[test]
 fn root_overflow_refused() {
     let (mut e, t) = setup();
