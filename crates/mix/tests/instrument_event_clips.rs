@@ -372,6 +372,20 @@ fn an_off_tick_clip_starting_at_the_end_of_a_clip_keeps_the_pedal_down() {
     assert_eq!(pedal_at_session_samples(&mut rig, 24), vec![(100, 127), (3550, 0)]);
 }
 
+/// A clip's end releases the pedal it holds unless another clip wrote the pedal later: the other
+/// clip counts only with what it sounds, its points before its grid end. A presses at 100 and holds
+/// to 3000; B (1000..2010, its end at tick 80.4 rounds down: grid end 2000) has a pedal-up on its
+/// tick 40 = sample 2000, which it does not sound. So nothing wrote the pedal after A's press and A's
+/// end lifts it.
+#[test]
+fn a_pedal_event_another_clip_does_not_sound_does_not_cancel_the_release() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 3000, None, pedal_seq(&[(4, 127)]));
+    add_pedal_clip(&mut rig, 1000, 1010, None, pedal_seq(&[(40, 0)]));
+    assert_eq!(pedal_at_session_samples(&mut rig, 32), vec![(100, 127), (3000, 0)]);
+}
+
 // #95: a clip whose tick grid starts before its start sample.
 
 /// A clip with a note-on and a CC64 press at tick 0.

@@ -275,9 +275,10 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
                             let other_midi = matches!(other.content, ClipContent::Midi { .. });
                             // A clip whose tick grid starts at or after this end (its events sit on the grid, up to half a
                             // tick before `start`), or that ended before the press, cannot
-                            // have written the pedal after it: not scanned.
+                            // have written the pedal after it: not scanned. A scanned clip counts
+                            // with what it sounds: its points before its grid end.
                             !std::ptr::eq(other, clip) && !other.muted && other_midi && grid_start(s, other) < t_end && other.end() > at && {
-                                let theirs = pedal_state_before(s, other, rtp, t_end.min(other.end()));
+                                let theirs = pedal_state_before(s, other, rtp, t_end.min(grid_end(s, other)));
                                 matches!(theirs.get(slot), Some(Some((a, _))) if *a > at)
                             }
                         });
