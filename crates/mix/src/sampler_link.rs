@@ -34,14 +34,17 @@ use transit_dsp::plugins::sampler::{
 };
 use transit_model::Insert;
 use transit_model::sampler_fades::fades_used;
+use transit_model::sampler_loops::{DerivedRegion, crossfade_used, derived_region, effective_region};
 use transit_model::sampler_patch::{GroupEntry, LoopMode, PadEntry, PatchV1, PlayMode, RoundRobin, ZoneEntry};
 
 /// What a publication carries, compared to decide whether a running instance needs a new one: the
-/// identity of each source's audio (0: unusable), the zones, the pads and the groups' modes.
+/// identity of each source's audio (0: unusable), the zones, the regions slice-bound zones derive
+/// from their slices (a marker edit moves them), the pads and the groups' modes.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Structure {
     sources: Vec<usize>,
     zones: Vec<ZoneEntry>,
+    derived: Vec<Option<DerivedRegion>>,
     pads: Vec<PadEntry>,
     groups: Vec<GroupEntry>,
 }
@@ -88,19 +91,26 @@ pub(crate) fn structure(p: &PatchV1, s: &Session) -> Structure {
     Structure {
         sources: p.sources.iter().map(|r| usable(s, r.source).map_or(0, audio_id)).collect(),
         zones: p.zones.clone(),
+        derived: p.zones.iter().map(|z| derived_region(z, p)).collect(),
         pads: p.pads.clone(),
         groups: p.groups.clone(),
     }
 }
 
-/// The core zone of `z` on core source `source`; `bound`: a pad binds it (its fades are not used).
-fn core_zone(z: &ZoneEntry, source: u16, bound: bool) -> Zone {
+/// The core zone of `z` of `p` on core source `source`; `bound`: a pad binds it (its fades are not
+/// used). A slice-bound zone plays the region its slice derives (ADR 0041 amendment 2026-11-08,
+/// item 1), unlooped when that loop is shorter than two frames; the crossfade is the used one.
+fn core_zone(z: &ZoneEntry, p: &PatchV1, source: u16, bound: bool) -> Zone {
+    let r = effective_region(z, p);
     let loop_mode = match z.loop_mode {
         LoopMode::Off => CoreLoop::Off,
-        LoopMode::Forward => CoreLoop::Forward,
-        LoopMode::PingPong => CoreLoop::PingPong,
+        LoopMode::Forward if r.loop_len() >= 2 => CoreLoop::Forward,
+        LoopMode::PingPong if r.loop_len() >= 2 => CoreLoop::PingPong,
+        _ => CoreLoop::Off,
     };
-    let mut zone = Zone::new(Region { source, start: z.start, end: z.end, loop_mode, loop_start: z.loop_start, loop_end: z.loop_end, crossfade: 0 });
+    let region =
+        Region { source, start: r.start, end: r.end, loop_mode, loop_start: r.loop_start, loop_end: r.loop_end, crossfade: crossfade_used(z, p) };
+    let mut zone = Zone::new(region);
     zone.keys = (z.keys[0], z.keys[1]);
     zone.velocities = (z.velocities[0], z.velocities[1]);
     zone.membership = z.membership.as_ref().map(|m| CoreMembership { group: m.group, layer: m.layer, alternative: m.alternative });
@@ -146,10 +156,11 @@ pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Ar
     spec.zones = vec![None; sampler::ZONES];
     let mut silent = Vec::new();
     for z in &p.zones {
-        match local.get(usize::from(z.source)).copied().flatten() {
-            Some((index, frames)) if z.end <= frames => {
+        let r = effective_region(z, p);
+        match local.get(usize::from(r.source)).copied().flatten() {
+            Some((index, frames)) if r.end <= frames => {
                 if let Some(slot) = spec.zones.get_mut(usize::from(z.id)) {
-                    *slot = Some(core_zone(z, index, p.pad_of(z.id).is_some()));
+                    *slot = Some(core_zone(z, p, index, p.pad_of(z.id).is_some()));
                 }
             }
             _ => {
@@ -157,7 +168,7 @@ pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Ar
                 if z.membership.is_some()
                     && let Some(slot) = spec.zones.get_mut(usize::from(z.id))
                 {
-                    *slot = Some(core_zone(z, sampler::SILENT_SOURCE, p.pad_of(z.id).is_some()));
+                    *slot = Some(core_zone(z, p, sampler::SILENT_SOURCE, p.pad_of(z.id).is_some()));
                 }
             }
         }
@@ -186,8 +197,9 @@ pub fn check_sampler_patch(p: &PatchV1, s: &Session) -> Result<(), String> {
     // A zone whose audio is there must fit in it; missing audio is allowed (it plays silence until
     // relinked).
     for z in &p.zones {
-        let audio = p.sources.get(usize::from(z.source)).and_then(|r| usable(s, r.source));
-        if audio.is_some_and(|a| z.end > readable(a)) {
+        let r = effective_region(z, p);
+        let audio = p.sources.get(usize::from(r.source)).and_then(|r| usable(s, r.source));
+        if audio.is_some_and(|a| r.end > readable(a)) {
             return Err(format!("zone {}: its region ends past its audio ({} frames)", z.id + 1, audio.map_or(0, |a| readable(a))));
         }
     }

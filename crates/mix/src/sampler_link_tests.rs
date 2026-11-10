@@ -310,3 +310,114 @@ fn the_publication_carries_the_used_fades() {
     assert_eq!(fades(0), transit_dsp::plugins::sampler::Fades::NONE, "a pad-bound zone plays no fades");
     assert_eq!(fades(1), transit_dsp::plugins::sampler::Fades { key_lo: 2, key_hi: 0, vel_lo: 0, vel_hi: 9 });
 }
+
+/// The zone fields a publication carries that existed before the crossfade (the golden below), as
+/// one FNV-1a hash.
+fn published_bits(spec: &transit_dsp::plugins::sampler::PatchSpec) -> u64 {
+    let mut text = String::new();
+    for (i, z) in spec.zones.iter().enumerate() {
+        if let Some(z) = z {
+            let r = &z.region;
+            text += &format!(
+                "{i} {} {} {} {:?} {} {} {:?} {:?} {:?} {:?} {:?};",
+                r.source, r.start, r.end, r.loop_mode, r.loop_start, r.loop_end, z.keys, z.velocities, z.playback, z.membership, z.fades
+            );
+        }
+    }
+    text += &format!("{:?}", spec.pads);
+    text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+}
+
+/// A session saved before the crossfade: plain, looping, reverse ping-pong and one-shot looping
+/// zones, a key-map group, and a pad-bound slice zone whose stored fields agree with its slice.
+fn old_patch() -> PatchV1 {
+    use transit_model::sampler_patch::{LoopMode, Marker, Markers, PlayMode, SliceBinding, SliceLoop, SliceMode, SliceSet};
+    let mut p = PatchV1 {
+        sources: vec![SourceRef { source: SourceId(1), ..SourceRef::default() }, SourceRef { source: SourceId(2), ..SourceRef::default() }],
+        ..PatchV1::default()
+    };
+    let marker = |id, frame| Marker { id, frame, ..Marker::default() };
+    p.slicing = Some(SliceLoop {
+        source: 0,
+        start: 0,
+        end: 40_000,
+        mode: SliceMode::Manual,
+        manual: Some(Markers { markers: vec![marker(1, 0), marker(2, 10_000)], next_id: 3, ..Markers::default() }),
+        ..SliceLoop::default()
+    });
+    let mut z = ZoneEntry::whole(0, 0, 48_000);
+    (z.loop_mode, z.loop_start, z.loop_end, z.keys) = (LoopMode::Forward, 100, 30_000, [0, 40]);
+    p.zones.push(z);
+    let mut z = ZoneEntry::whole(1, 1, 48_000);
+    (z.loop_mode, z.loop_start, z.loop_end, z.reverse, z.keys, z.transpose) = (LoopMode::PingPong, 500, 9000, true, [41, 50], 3.5);
+    p.zones.push(z);
+    let mut z = ZoneEntry::whole(2, 0, 20_000);
+    (z.mode, z.loop_mode, z.loop_start, z.loop_end, z.keys) = (PlayMode::OneShot, LoopMode::Forward, 10, 12, [51, 52]);
+    p.zones.push(z);
+    for alternative in 0..2u8 {
+        let mut z = ZoneEntry::whole(3 + u16::from(alternative), alternative.into(), 30_000);
+        z.keys = [53, 59];
+        z.membership = Some(Membership { group: 1, layer: 0, alternative, ..Membership::default() });
+        p.zones.push(z);
+    }
+    let mut z = ZoneEntry::whole(9, 0, 48_000);
+    (z.start, z.end, z.loop_start, z.loop_end, z.loop_mode) = (10_000, 40_000, 10_000, 40_000, LoopMode::Forward);
+    z.slice = Some(SliceBinding { set: SliceSet::Manual, id: 2, ..SliceBinding::default() });
+    p.zones.push(z);
+    p.set_pad(PadEntry { index: 4, zone: Some(9), ..PadEntry::default() });
+    p.validate().unwrap();
+    p
+}
+
+#[test]
+fn old_sessions_publish_bit_identical_zones() {
+    let p = old_patch();
+    let (s, _) = session(Some(p.clone()));
+    let (spec, silent) = crate::sampler_link::spec_of(&p, &s, &mut std::collections::HashMap::new());
+    assert!(silent.is_empty());
+    assert_eq!(published_bits(&spec), OLD_PUBLICATION, "a session from before the crossfade publishes other zones");
+    assert!(spec.zones.iter().flatten().all(|z| z.region.crossfade == 0), "no zone gains a crossfade");
+}
+
+/// [`published_bits`] of [`old_patch`] on the base tree (captured on a fresh copy of it, in its own
+/// target).
+const OLD_PUBLICATION: u64 = 0x08ed_09e7_cf10_647f;
+
+#[test]
+fn the_publication_plays_the_used_loop_and_follows_the_slice() {
+    use transit_dsp::plugins::sampler::LoopMode as CoreLoop;
+    use transit_model::sampler_patch::LoopMode;
+    let mut p = old_patch();
+    // Zone 9 (slice 2, 10,000..40,000) stores a crossfade, zone 0 one past half its loop, and the
+    // ping-pong zone 1 one it never plays.
+    p.zone_mut(9).unwrap().crossfade = 2000;
+    p.zone_mut(0).unwrap().crossfade = 20_000;
+    p.zone_mut(1).unwrap().crossfade = 50;
+    p.zone_mut(2).unwrap().crossfade = 1;
+    let (s, _) = session(Some(p.clone()));
+    let spec = |p: &PatchV1| crate::sampler_link::spec_of(p, &s, &mut std::collections::HashMap::new()).0;
+    let region = |p: &PatchV1, id: usize| spec(p).zones[id].unwrap().region;
+    assert_eq!(region(&p, 9).crossfade, 2000);
+    assert_eq!(region(&p, 0).crossfade, 14_950, "floor((30,000 - 100) / 2)");
+    assert_eq!(region(&p, 1).crossfade, 0, "ping-pong");
+    assert_eq!(region(&p, 2).crossfade, 0, "a one-shot");
+    // A marker move: the slice is the authority over the stored fields, and the structure changes
+    // with it, so a running instance gets a new publication.
+    let before = crate::sampler_link::structure(&p, &s);
+    let mut q = p.clone();
+    q.slicing.as_mut().unwrap().manual.as_mut().unwrap().markers[1].frame = 39_999;
+    assert_ne!(crate::sampler_link::structure(&q, &s), before);
+    let r = region(&q, 9);
+    assert_eq!(
+        (r.start, r.end, r.loop_start, r.loop_end, r.loop_mode),
+        (39_999, 40_000, 39_999, 40_000, CoreLoop::Off),
+        "a one-frame slice plays unlooped"
+    );
+    assert_eq!(r.crossfade, 0);
+    assert_eq!(q.zone(9).unwrap().start, 10_000, "the stored fields stay as they are");
+    q.slicing.as_mut().unwrap().manual.as_mut().unwrap().markers[1].frame = 30_000;
+    let r = region(&q, 9);
+    assert_eq!((r.start, r.end, r.loop_mode, r.crossfade), (30_000, 40_000, CoreLoop::Forward, 2000));
+    assert_eq!(q.zone(9).unwrap().loop_mode, LoopMode::Forward);
+    crate::sampler_link::check_sampler_patch(&q, &s).unwrap();
+}
