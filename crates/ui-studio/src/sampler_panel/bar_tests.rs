@@ -74,14 +74,20 @@ fn a_drag_steps_the_start_note_in_one_undo_step_within_the_bounds() {
 #[test]
 fn ctrl_wheel_steps_a_semitone_a_notch_and_an_octave_with_shift() {
     let (mut t, tr) = T::kit();
+    let before = t.undo_len();
     let at = mid(start(&t, tr).field);
-    t.send("ui.scroll", json!({"x": at.0, "y": at.1, "dy": 2.0, "unit": "line", "steps": 2, "ctrl": true}));
-    assert_eq!(t.patch(tr).pad_start_note, 38);
+    // Three notches in consecutive frames (the rig feeds one event a frame): one turn, one step.
+    t.send("ui.scroll", json!({"x": at.0, "y": at.1, "dy": 3.0, "unit": "line", "steps": 3, "ctrl": true}));
+    assert_eq!(t.patch(tr).pad_start_note, 39);
+    assert_eq!(t.undo_len(), before + 1, "one undo step for the turn");
+    // A later turn (frames without a notch between) is its own step; Shift moves by octaves.
     t.send("ui.scroll", json!({"x": at.0, "y": at.1, "dy": -1.0, "unit": "line", "steps": 1, "ctrl": true, "shift": true}));
-    assert_eq!(t.patch(tr).pad_start_note, 26);
+    assert_eq!(t.patch(tr).pad_start_note, 27);
+    assert_eq!(t.undo_len(), before + 2);
     // A plain wheel is the window's, not the field's.
     t.send("ui.scroll", json!({"x": at.0, "y": at.1, "dy": 1.0, "unit": "line", "steps": 1}));
-    assert_eq!(t.patch(tr).pad_start_note, 26);
+    assert_eq!(t.patch(tr).pad_start_note, 27);
+    assert_eq!(t.undo_len(), before + 2);
 }
 
 #[test]

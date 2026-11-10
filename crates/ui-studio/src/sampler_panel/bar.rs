@@ -198,6 +198,9 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
         let n = acc.trunc() as i32;
         ui.data_mut(|d| d.insert_temp(wheel_id, acc - n as f32));
         if n != 0 {
+            // Holds the frame-level merge end off while the wheel turns, as the knobs do: the
+            // notches of one turn are one undo step.
+            app.builtin_editor.devices.wheel_now = true;
             let target = stepped(value, n, if shift { 12 } else { 1 });
             if target != value {
                 send_merged(app, dev, target);
