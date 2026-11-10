@@ -262,7 +262,7 @@ pub(super) fn admit_patch(p: &PatchV1, s: &Session, adding: u64) -> std::result:
 
 /// A file param resolved: relative paths are taken from the session's folder (never the process's
 /// working directory).
-fn resolve_path(e: &Engine, id: &str, given: &str) -> Result<PathBuf> {
+pub(super) fn resolve_path(e: &Engine, id: &str, given: &str) -> Result<PathBuf> {
     let p = Path::new(given);
     if p.is_absolute() {
         return Ok(p.to_path_buf());
@@ -274,7 +274,7 @@ fn resolve_path(e: &Engine, id: &str, given: &str) -> Result<PathBuf> {
 }
 
 /// Frames of a file of `frames` at `from` once converted to `to` (rounded up), `None` on overflow.
-fn frames_at(frames: u64, from: u32, to: u32) -> Option<u64> {
+pub(crate) fn frames_at(frames: u64, from: u32, to: u32) -> Option<u64> {
     if from == to || from == 0 {
         return Some(frames);
     }

@@ -123,7 +123,7 @@ pub(crate) fn default_slice_root(_patch: &PatchV1) -> u8 {
 /// Empty in this build: the derivation is slice J's `derived_region`, and this body is filled
 /// with it (slice C2). Until then a marker edit leaves the stored regions of slice-bound zones as
 /// they were.
-fn write_through_slice_zones(_patch: &mut PatchV1, _set: SliceSet) {}
+pub(super) fn write_through_slice_zones(_patch: &mut PatchV1, _set: SliceSet) {}
 
 fn loop_of<'a>(id: &str, p: &'a PatchV1) -> Result<&'a SliceLoop> {
     p.slicing.as_ref().ok_or_else(|| bad(id, "the patch has no slice loop: make one with mix.sampler_slice_loop"))
@@ -149,7 +149,7 @@ fn set_of(l: &SliceLoop, set: SliceSet) -> Option<&Markers> {
 
 /// Empties every zone bound to one of `ids` in `set` and unbinds its pad (the note stays):
 /// the (1-based) pads and zones freed. Bindings to the other set are never touched.
-fn free_bindings(p: &mut PatchV1, set: SliceSet, ids: &[u32]) -> (Vec<u8>, Vec<u16>) {
+pub(super) fn free_bindings(p: &mut PatchV1, set: SliceSet, ids: &[u32]) -> (Vec<u8>, Vec<u16>) {
     let gone: Vec<u16> = p.zones.iter().filter(|z| z.slice.as_ref().is_some_and(|b| b.set == set && ids.contains(&b.id))).map(|z| z.id).collect();
     if gone.is_empty() {
         return (Vec::new(), Vec::new());
