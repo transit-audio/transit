@@ -558,6 +558,10 @@ struct Worker {
     track_releases: Vec<u64>,
     /// The MIDI Monitor's output ring (#91): every successful send is copied here.
     monitor: Option<Tap>,
+    /// Tests: the scheduler's clock in host nanoseconds, set by hand (`None`: the host clock), so
+    /// a test of what is due when drives the scheduler without the wall clock (#423, E49).
+    #[cfg(test)]
+    clock: Option<u64>,
 }
 
 fn origin_index(origin: Origin) -> usize {
@@ -600,10 +604,16 @@ impl Worker {
             releases: Vec::with_capacity(MAX_DESTINATIONS),
             track_releases: Vec::with_capacity(MAX_DESTINATIONS),
             monitor: None,
+            #[cfg(test)]
+            clock: None,
         }
     }
 
     fn now(&self) -> u64 {
+        #[cfg(test)]
+        if let Some(now) = self.clock {
+            return now;
+        }
         self.origin.now_ns().unwrap_or(0)
     }
 

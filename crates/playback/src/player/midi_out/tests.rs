@@ -122,30 +122,91 @@ fn stop_drops_scheduled_playback_and_releases_held_notes_and_pedals() {
     assert!(!rig.sent().contains(&vec![0x93, 72, 100]), "a note scheduled past Stop was sent");
 }
 
+/// The output thread's scheduler without its thread, on a fake port, at a clock the test sets:
+/// what goes out when is decided by the stamps and the instants the test steps through, never by
+/// the host's scheduling or the wall clock (#423, E49).
+struct Scheduler {
+    fake: Fake,
+    key: PortKey,
+    worker: Worker,
+    playback: Producer,
+}
+
+impl Scheduler {
+    fn new(destinations: impl FnOnce(&PortKey) -> Vec<Destination>) -> Self {
+        let fake = Fake::default();
+        let key = fake.add_output("Synth OUT");
+        let (playback, receive_playback) = test_ring(QUEUE);
+        let (_echo, receive_echo) = test_ring(QUEUE);
+        let (_control, receive) = mpsc::sync_channel(1);
+        let mut worker = Worker::new(fake.io(), HostOrigin::default(), receive, receive_playback, receive_echo, Arc::default(), Arc::default());
+        worker.set_destinations(destinations(&key));
+        Self { fake, key, worker, playback }
+    }
+
+    /// One pass of the thread's loop at host time `now`: drain the ring, send what is due. What
+    /// the port has received so far.
+    fn at(&mut self, now: u64) -> Vec<Vec<u8>> {
+        self.worker.clock = Some(now);
+        self.worker.drain();
+        self.worker.send_due();
+        self.fake.sent(&self.key)
+    }
+}
+
+/// A wrap ends the held note exactly at its instant, the next lap's restart follows the release,
+/// and a note rendered ahead past the wrap and discarded by it never sounds, wherever the output
+/// thread's drains fall between the audio thread's pushes. The scheduler runs on a clock the test
+/// steps, so nothing here waits on a thread or a deadline: the earlier end-to-end form waited for a
+/// wrap 300 ms ahead of the real clock, and a starved output thread drained the held note only after
+/// that wrap (the third case below), so the four sends it waited for never came (#423). That sends
+/// leave from the output thread, never the audio thread, is
+/// `events_go_out_in_order_at_their_instant_plus_the_offset_and_never_from_the_audio_thread`.
 #[test]
 fn a_wrap_ends_held_notes_at_the_wrap_instant_and_drops_discarded_playback() {
-    let mut rig = Rig::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
-    // The wrap lies far enough ahead that a loaded host cannot reach it before all four events are
-    // queued; a late discard would otherwise let the "discarded" note fall due first (E49, #110).
-    let wrap = rig.now() + 300_000_000;
-    assert!(rig.playback.push(message(1, 0, [0x90, 60, 100])));
-    // Rendered ahead past the wrap, then discarded by a locate: must never sound.
-    assert!(rig.playback.push(message(1, wrap + 5_000_000, [0x90, 61, 100])));
-    assert!(rig.playback.push(OutEvent { kind: Kind::Release, at_ns: wrap, ..OutEvent::default() }));
-    // The next lap restarts the note (the mix side chases it) at the wrap instant.
-    assert!(rig.playback.push(message(1, wrap, [0x90, 60, 100])));
-    // A later sentinel: once it is sent, everything due before it was either sent or dropped, so
-    // the absence check below needs no sleep.
-    assert!(rig.playback.push(message(1, wrap + 50_000_000, [0x90, 62, 100])));
-    let sends = rig.wait_sent(4);
-    assert_eq!(
-        sends.iter().map(|s| s.message.clone()).collect::<Vec<_>>(),
-        [vec![0x90, 60, 100], vec![0x80, 60, 64], vec![0x90, 60, 100], vec![0x90, 62, 100]]
-    );
-    let due = rig.origin.instant() + Duration::from_nanos(wrap);
-    assert!(sends[1].at >= due, "the release went out before the wrap");
-    assert!(sends[1].at <= sends[2].at);
-    assert!(!rig.sent().contains(&vec![0x90, 61, 100]), "a discarded note sounded");
+    const T0: u64 = 1_000_000_000;
+    const WRAP: u64 = T0 + 300_000_000;
+    const NEXT: u64 = WRAP + 50_000_000;
+    let events = [
+        // Held across the wrap; stamped "now".
+        message(1, 0, [0x90, 60, 100]),
+        // Rendered ahead past the wrap, then discarded by it: must never sound.
+        message(1, WRAP + 5_000_000, [0x90, 61, 100]),
+        OutEvent { kind: Kind::Release, at_ns: WRAP, ..OutEvent::default() },
+        // The next lap restarts the note (the mix side chases it) at the wrap instant.
+        message(1, WRAP, [0x90, 60, 100]),
+        // A later note of the next lap.
+        message(1, NEXT, [0x90, 62, 100]),
+    ];
+    let (on, off, next) = (vec![0x90, 60, 100], vec![0x80, 60, 64], vec![0x90, 62, 100]);
+    // The thread drains after every push, or once after all of them (late, but before the wrap).
+    for drain_each in [true, false] {
+        let mut s = Scheduler::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
+        for e in events {
+            assert!(s.playback.push(e));
+            if drain_each {
+                s.at(T0);
+            }
+        }
+        assert_eq!(s.at(T0), [on.clone()], "drained per push {drain_each}: only the held note before the wrap");
+        assert_eq!(s.at(WRAP - 1), [on.clone()], "drained per push {drain_each}: nothing ends before the wrap");
+        let wrapped = [on.clone(), off.clone(), on.clone()];
+        assert_eq!(s.at(WRAP), wrapped, "drained per push {drain_each}: the release at the wrap instant, then the restart");
+        assert_eq!(s.at(NEXT - 1), wrapped, "drained per push {drain_each}: the discarded note is not sent");
+        assert_eq!(s.at(NEXT), [on.clone(), off.clone(), on.clone(), next.clone()], "drained per push {drain_each}");
+        assert!(s.worker.pending.is_empty(), "drained per push {drain_each}: the discarded note was dropped, not left due");
+        assert_eq!(s.at(u64::MAX).len(), 4, "drained per push {drain_each}: the discarded note never sounds");
+    }
+    // A thread starved past the wrap drains everything at once: the held note, stamped "now", now
+    // falls after its lap's release, so it is dropped with the discarded playback rather than sent
+    // after the release, where it would hang; the restart sounds the note of the next lap.
+    let mut s = Scheduler::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
+    for e in events {
+        assert!(s.playback.push(e));
+    }
+    assert_eq!(s.at(WRAP + 10_000_000), [on.clone()], "starved: the release ends nothing it never sent, then the restart");
+    assert_eq!(s.at(NEXT), [on, next], "starved: no note-off for a note never sent, the discarded note never sounds");
+    assert!(s.worker.pending.is_empty());
 }
 
 #[test]
