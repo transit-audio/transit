@@ -175,13 +175,6 @@ fn shortage_refused_not_truncated() {
 
 #[test]
 fn pad_assignment_follows_the_amendment_steps() {
-    // Default notes, root 60: every slice finds its note on an empty pad (step 2).
-    let (mut e, t) = setup();
-    manual(&mut e, t, 4);
-    to_pads(&mut e, t, Some(60));
-    assert_eq!(bound(&e, t), run(60, &[1, 2, 3, 4], SliceSet::Manual));
-    assert!((0..4u8).all(|q| patch(&e, t).pad(q).note.is_none()), "step 2 leaves the pad's note as it was");
-
     // Edited notes: pad A3 plays 40, pad A5 (note 64) is bound to Manual slice 1.
     let edited = || {
         let (mut e, t) = setup();
@@ -212,6 +205,12 @@ fn pad_assignment_follows_the_amendment_steps() {
     assert!(notes_unique(&p));
     assert_eq!((p.pad(4).zone, p.pad(4).trigger(), p.zone(10)), (None, 64, None), "unbound: the pad empties, its note stays");
     assert_eq!(out["unbound"], json!([{"pad": 5, "note": 64, "slice": 1, "id": 1, "zone": 11}]));
+    // Default notes, root 60: every slice finds its note on an empty pad (step 2).
+    let (mut e, t) = setup();
+    manual(&mut e, t, 4);
+    to_pads(&mut e, t, Some(60));
+    assert_eq!(bound(&e, t), run(60, &[1, 2, 3, 4], SliceSet::Manual));
+    assert!((0..4u8).all(|q| patch(&e, t).pad(q).note.is_none()), "step 2 leaves the pad's note as it was");
 }
 
 #[test]
