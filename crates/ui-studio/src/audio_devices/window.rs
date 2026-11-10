@@ -185,6 +185,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     // Why the input has no channels, beside its disabled Add (#429).
     let input_note = crate::audio_devices_io::input_note(io.inputs, app.input_failure.as_deref());
     let mut editor = std::mem::take(&mut app.audio_devices.io_editor);
+    editor.follow(&io);
     let mut io_edit = None;
     let mut io_items = Vec::new();
     let mut hw_action = None;
@@ -709,7 +710,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             Ok(_) => editor.done(&edit),
             Err(error) => {
                 // On the page in the engine's words, and on the status line as before (#429).
-                editor.refusal.clone_from(&error);
+                editor.refuse(&error, app.engine.io_map());
                 app.status = error;
             }
         }

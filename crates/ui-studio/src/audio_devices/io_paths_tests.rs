@@ -59,6 +59,17 @@ fn a_refused_edit_is_said_on_the_page_and_changes_nothing() {
     assert!(t.layout()["controls"].as_array().unwrap().iter().all(|c| c["value"] != "io_refusal"), "an accepted edit clears the refusal");
 }
 
+/// #429 review: a refusal is about one device's table; after a device change the page drops it.
+#[test]
+fn a_refusal_is_dropped_when_the_device_changes() {
+    let mut t = with_window();
+    t.click(mid(item(&t, "io_add:output", "Add")));
+    item(&t, "io_refusal", &t.app.status.clone());
+    t.app.engine.set_io_map(IoMap::for_device("ASIO", "Another Interface", 2, 2));
+    t.frames(2);
+    assert!(t.layout()["controls"].as_array().unwrap().iter().all(|c| c["value"] != "io_refusal"), "another device's page has no refusal");
+}
+
 /// #429: unticking a path's only channel sent a path 0 channels wide, which the engine refused (eight
 /// times in a tester's log). The picker no longer sends it, and its hover says why.
 #[test]

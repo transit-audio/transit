@@ -169,10 +169,25 @@ pub struct IoEditor {
     /// The engine's refusal of the last edit, shown on the page in its words until an edit is
     /// accepted (#429: it reached only the status line under this window).
     pub refusal: String,
+    /// The table (system, device) the refusal was about: another device's page drops it.
+    refused_on: (String, String),
 }
 
 impl IoEditor {
     /// An edit was accepted: drop the text it came from.
+    /// The engine refused an edit of `io`: say it on the page.
+    pub fn refuse(&mut self, error: &str, io: &IoMap) {
+        self.refusal = error.to_string();
+        self.refused_on = (io.system.clone(), io.device.clone());
+    }
+
+    /// A refusal about another device's table (the device changed) is dropped.
+    pub fn follow(&mut self, io: &IoMap) {
+        if (self.refused_on.0.as_str(), self.refused_on.1.as_str()) != io.key() {
+            self.refusal.clear();
+        }
+    }
+
     pub fn done(&mut self, edit: &IoEdit) {
         self.refusal.clear();
         match edit {
