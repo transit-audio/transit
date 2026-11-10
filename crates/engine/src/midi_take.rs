@@ -119,6 +119,77 @@ fn pickup(events: &[&RecEvent], cut: &Cut) -> Samples {
     events.iter().filter(|e| e.offset < 0 && matches!(e.msg, Msg::NoteOn { .. })).map(|e| e.offset).min().unwrap_or(0)
 }
 
+/// One track's events as the take uses them.
+struct Taken {
+    /// Where the first stretch starts, in samples since the latch (0, or a pickup's offset).
+    lead: Samples,
+    /// The events kept, sorted by offset, none before `lead`.
+    events: Vec<RecEvent>,
+    /// Notes left out because they ended at or before the session start (#440).
+    left_out: usize,
+}
+
+/// One track's events (`mine`) with the pickups placed. Pickups (#327): the first stretch starts
+/// at the earliest note-on before the latch, and takes what was played from it on. Without a
+/// pickup, nothing before the latch is kept. Nothing is placed before the session start: an
+/// event that came earlier is clamped there, so a note still held across it starts there and
+/// keeps the rest of its length. A note that ended at or before the session start is left out
+/// whole (#440): clamped, it would be a note of minimum length on the first tick. This is a
+/// stopgap until the session has room before bar 1 (#441).
+fn taken(mine: Vec<&RecEvent>, cut: &Cut) -> Taken {
+    let earliest = pickup(&mine, cut);
+    let floor = -cut.start.max(0);
+    let lead = earliest.max(floor).min(0);
+    let mut events: Vec<RecEvent> =
+        mine.into_iter().filter(|e| e.offset >= earliest).map(|e| RecEvent { offset: e.offset.max(lead), ..*e }).collect();
+    events.sort_by_key(|e| e.offset);
+    let gone = ended_before_start(&events, floor);
+    let left_out = gone.len() / 2;
+    if !gone.is_empty() {
+        let mut k = 0;
+        events.retain(|_| {
+            k += 1;
+            !gone.contains(&(k - 1))
+        });
+    }
+    Taken { lead, events, left_out }
+}
+
+/// The indices of both events of every note in `events` (sorted by offset) whose note-on and
+/// note-off are both at or before `floor`, the session start in samples since the latch. The
+/// capture clamps what came before the session start to it, so "at" counts: a note played and
+/// released over the count-in arrives with both events there. Note-ons pair with the earliest
+/// matching note-on still held, as the take pairs them.
+fn ended_before_start(events: &[RecEvent], floor: Samples) -> Vec<usize> {
+    let mut held: Vec<(u8, u8, usize)> = Vec::new();
+    let mut gone = Vec::new();
+    for (i, e) in events.iter().enumerate().take_while(|(_, e)| e.offset <= floor) {
+        match e.msg {
+            Msg::NoteOn { pitch, .. } => held.push((e.channel, pitch, i)),
+            Msg::NoteOff { pitch, .. } => {
+                if let Some(k) = held.iter().position(|h| h.0 == e.channel && h.1 == pitch) {
+                    gone.extend([held.remove(k).2, i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    gone
+}
+
+/// How many notes a take of `events` recorded with `plan` leaves out because they ended at or
+/// before the session start (#440), for the status line.
+pub fn left_out_before_start(plan: &Recording, events: &[RecEvent]) -> usize {
+    let cut = Cut { start: plan.start, pass: plan.pass, punch: plan.punch, stop: 0 };
+    let mut tracks: Vec<TrackId> = Vec::new();
+    for e in events {
+        if !tracks.contains(&e.track) {
+            tracks.push(e.track);
+        }
+    }
+    tracks.into_iter().map(|t| taken(events.iter().filter(|e| e.track == t).collect(), &cut).left_out).sum()
+}
+
 /// Does a recording that started at or before the loop end of `wrap` (the loop region the
 /// transport cycles over) run past it, so the transport wrapped while recording? The player wraps
 /// at the loop end from any position before it, so a start ahead of the loop counts too.
@@ -140,16 +211,8 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
     }
     let mut out = Vec::new();
     for track in tracks {
-        let mine: Vec<&RecEvent> = events.iter().filter(|e| e.track == track).collect();
-        // Pickups (#327): the first stretch starts at the earliest note-on before the latch, and
-        // takes what was played from it on. Nothing is placed before the session start: what
-        // came earlier is clamped there. Without a pickup, nothing before the latch is kept.
-        let earliest = pickup(&mine, cut);
-        let floor = -cut.start.max(0);
-        let lead = earliest.max(floor).min(0);
-        let mine: Vec<RecEvent> = mine.into_iter().filter(|e| e.offset >= earliest).map(|e| RecEvent { offset: e.offset.max(lead), ..*e }).collect();
-        let mut mine: Vec<&RecEvent> = mine.iter().collect();
-        mine.sort_by_key(|e| e.offset);
+        let Taken { lead, events: mine, .. } = taken(events.iter().filter(|e| e.track == track).collect(), cut);
+        let mine: Vec<&RecEvent> = mine.iter().collect();
         let last = mine.last().map_or(0, |e| e.offset);
         let pass_len = cut.pass.filter(|p| *p > 0);
         let segments: Vec<Segment> = if let Some(len) = pass_len {
@@ -828,6 +891,110 @@ mod tests {
         assert_eq!(built[0].range.start, 0, "never before the session start");
         let first = built[0].sequence.notes[0];
         assert_eq!((first.pitch, first.start, first.length), (59, 0, tempo.samples_to_ticks(1_500, sr)));
+    }
+
+    /// The count-in of a take recorded from the session start (the latch at sample 0), as the
+    /// capture delivers it: everything before the session start clamped to it (#440). Two notes
+    /// played and released in the count-in, one held across the start (released half a beat in),
+    /// two after.
+    fn count_in_at_the_session_start(t: TrackId) -> Vec<RecEvent> {
+        on_track(
+            t,
+            vec![
+                on(0, 55),
+                off(0, 55),
+                on(0, 57),
+                off(0, 57),
+                on(0, 59),
+                off(12_000, 59),
+                on(24_000, 60),
+                off(48_000, 60),
+                on(48_000, 62),
+                off(60_000, 62),
+            ],
+        )
+    }
+
+    /// #440: a count-in note that ended at or before the session start is left out whole; the
+    /// note held across it starts there with the rest of its length; nothing of minimum length
+    /// sits on the first tick.
+    #[test]
+    fn count_in_notes_that_ended_before_the_session_start_are_left_out() {
+        let (tempo, sr) = tempo();
+        let q = TICKS_PER_QUARTER;
+        let events = count_in_at_the_session_start(T);
+        let built = build(&tempo, sr, &events, &cut(0, 72_000));
+        assert_eq!(built.len(), 1);
+        assert_eq!(built[0].range, Range::new(0, 72_000));
+        let notes: Vec<_> = built[0].sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect();
+        assert_eq!(notes, vec![(59, 0, q / 2), (60, q, q), (62, 2 * q, q / 2)]);
+        assert!(built[0].sequence.notes.iter().all(|n| n.length > 1), "no sliver: {notes:?}");
+        assert_eq!(left_out_before_start(&plan(0, None), &events), 2);
+        // The same count-in before the capture clamps it (offsets before the session start).
+        let raw =
+            [on(-90_000, 55), off(-80_000, 55), on(-60_000, 57), off(-50_000, 57), on(-30_000, 59), off(12_000, 59), on(24_000, 60), off(48_000, 60)];
+        let raw_notes: Vec<_> = build(&tempo, sr, &raw, &cut(0, 72_000))[0].sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect();
+        assert_eq!(raw_notes, vec![(59, 0, q / 2), (60, q, q)]);
+        // Recording from later in the session, the count-in notes are pickups where they were played.
+        assert_eq!(left_out_before_start(&plan(96_000, None), &raw), 0);
+        // A release before the session start of a note held from before the count-in is no note.
+        assert_eq!(left_out_before_start(&plan(0, None), &[off(0, 50), on(24_000, 60), off(48_000, 60)]), 0);
+    }
+
+    /// #440 with loop recording from the session start: the held note joins the first lap only;
+    /// the notes that ended before the session start are in no lap.
+    #[test]
+    fn loop_recording_from_the_session_start_leaves_the_ended_count_in_notes_out_of_every_lap() {
+        let (tempo, sr) = tempo();
+        let q = TICKS_PER_QUARTER;
+        let mut events = count_in_at_the_session_start(T);
+        events.extend([on(48_000 + 24_000, 64), off(48_000 + 36_000, 64)]);
+        let c = Cut { start: 0, pass: Some(48_000), punch: None, stop: 0 };
+        let built = build(&tempo, sr, &events, &c);
+        let laps: Vec<_> =
+            built.iter().map(|b| (b.pass, b.range, b.sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect::<Vec<_>>())).collect();
+        let lap = Range::new(0, 48_000);
+        assert_eq!(laps, vec![(0, lap, vec![(59, 0, q / 2), (60, q, q)]), (1, lap, vec![(62, 0, q / 2), (64, q, q / 2)])]);
+    }
+
+    /// #440: journal recovery of the same count-in gives the clip the live take gives.
+    #[test]
+    fn journal_recovery_leaves_out_the_same_count_in_notes_as_the_live_take() {
+        use crate::midi_journal::{Header, Latch, Record, Writer, recover};
+        let (mut live, t) = midi_engine();
+        let ids = place_midi_recording(&mut live, &plan(0, None), &count_in_at_the_session_start(t), 72_000);
+        let (mut e, t2) = midi_engine();
+        assert_eq!(t, t2);
+        // The latch at device frame 100,000 is the session start; the count-in is the two beats before it.
+        let latch = Latch { output_frame: 100_000, position: 0, device_rate: 48_000, session_rate: 48_000 };
+        let header = Header::new(latch, &plan(0, None), None, vec![t]);
+        let path = std::env::temp_dir().join(format!("transit-midi-440-{}.midijournal", std::process::id()));
+        let mut writer = Writer::new(path.clone());
+        let at = |offset: i64| u64::try_from(100_000 + offset).unwrap();
+        let msgs = [
+            (at(-45_000), Msg::NoteOn { pitch: 55, velocity: 90 }),
+            (at(-40_000), Msg::NoteOff { pitch: 55, velocity: 0 }),
+            (at(-30_000), Msg::NoteOn { pitch: 57, velocity: 90 }),
+            (at(-25_000), Msg::NoteOff { pitch: 57, velocity: 0 }),
+            (at(-12_000), Msg::NoteOn { pitch: 59, velocity: 90 }),
+            (at(12_000), Msg::NoteOff { pitch: 59, velocity: 0 }),
+            (at(24_000), Msg::NoteOn { pitch: 60, velocity: 90 }),
+            (at(48_000), Msg::NoteOff { pitch: 60, velocity: 0 }),
+            (at(48_000), Msg::NoteOn { pitch: 62, velocity: 90 }),
+            (at(60_000), Msg::NoteOff { pitch: 62, velocity: 0 }),
+        ];
+        let records: Vec<Record> = msgs.iter().map(|&(frame, msg)| Record { frame, track: t, channel: 0, approximate: false, msg }).collect();
+        writer.append(&header, &records, records.len()).unwrap();
+        writer.flush().unwrap();
+        let recovered = recover(&mut e, &path).unwrap();
+        writer.discard();
+        assert_eq!((ids.len(), recovered.len()), (1, 1));
+        let content = |e: &Engine, id: ClipId| {
+            let (_, c) = e.session().find_clip(id).unwrap();
+            (c.start, c.content.clone())
+        };
+        assert_eq!(content(&e, recovered[0]), content(&live, ids[0]), "the recovered clip is the live one");
+        assert_eq!(notes_of(&e, recovered[0]).len(), 3);
     }
 
     #[test]

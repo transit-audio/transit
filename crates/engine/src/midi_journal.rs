@@ -263,7 +263,8 @@ impl Journal {
     /// The events of the pass's tracks, each with the session samples since the latch (device
     /// frames converted at the session rate, as the live take is). A pickup played during the
     /// count-in (#327) has a frame before the latch and comes out negative; nothing lands before
-    /// the session start (clamped at sample 0, as the live take is). A journal written before
+    /// the session start (clamped at sample 0, as the live capture is; the take then leaves out a
+    /// note that ended there, #440, through the same path as the live take). A journal written before
     /// #327 has no frame before its latch, so it reads back exactly as it did.
     pub fn events(&self) -> Vec<RecEvent> {
         let h = &self.header;

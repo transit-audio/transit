@@ -147,6 +147,35 @@ fn a_pickup_before_the_session_start_is_clamped_at_sample_zero() {
     assert_eq!(notes(&app, id)[0], (59, 0, TICKS / 4), "starts at sample 0, ends where it was released");
 }
 
+/// #440: recorded from the session start, count-in notes released before it are left out of the
+/// take and the status line says so once; a recording with none left out says nothing about it.
+#[test]
+fn count_in_notes_left_out_at_the_session_start_are_reported_on_the_status_line() {
+    let (mut app, t) = app();
+    let events = vec![
+        on(LATCH - 3 * B, t, 55),
+        off(LATCH - 2 * B, t, 55),
+        on(LATCH - 2 * B, t, 57),
+        off(LATCH - B, t, 57),
+        on(LATCH - B / 2, t, 59),
+        off(LATCH + B / 2, t, 59),
+        on(LATCH + B, t, 60),
+        off(LATCH + 2 * B, t, 60),
+    ];
+    record(&mut app, 0, None, 3 * BEAT, pass(t, 0, events));
+    let id = app.engine.session().track(t).unwrap().clips()[0].id;
+    assert_eq!(notes(&app, id), [(59, 0, TICKS / 2), (60, TICKS, TICKS)], "the held note from the session start, then the played one");
+    assert!(app.status.starts_with("Recorded 1 MIDI clip (2 notes) on "), "{}", app.status);
+    assert!(app.status.ends_with("; 2 count-in notes before the session start were left out"), "{}", app.status);
+    assert_eq!(app.status.matches("left out").count(), 1, "said once: {}", app.status);
+    // The same count-in from bar 2: every note is a pickup and nothing is left out.
+    let (mut later, t) = self::app();
+    let events = vec![on(LATCH - 3 * B, t, 55), off(LATCH - 2 * B, t, 55), on(LATCH + B, t, 60), off(LATCH + 2 * B, t, 60)];
+    record(&mut later, 4 * BEAT, None, 7 * BEAT, pass(t, 4 * BEAT, events));
+    assert!(later.status.starts_with("Recorded 1 MIDI clip (2 notes) on "), "{}", later.status);
+    assert!(!later.status.contains("left out"), "{}", later.status);
+}
+
 #[test]
 fn the_inspected_pass_reports_where_capture_began() {
     let (mut app, _) = app();

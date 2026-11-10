@@ -445,6 +445,22 @@ impl StudioApp {
         if midi.dropped > 0 {
             self.status = format!("{} MIDI events were lost: the capture queue was full", midi.dropped);
         }
+        self.report_midi_take(midi, &ids);
+        // #440: count-in notes that ended before the session start are not in the take; the
+        // status line says so, once per recording.
+        let left_out = transit_engine::midi_take::left_out_before_start(plan, &events);
+        if left_out > 0 {
+            let what = if left_out == 1 {
+                "1 count-in note before the session start was".to_string()
+            } else {
+                format!("{left_out} count-in notes before the session start were")
+            };
+            self.status = format!("{}; {what} left out", self.status.trim_end_matches('.'));
+        }
+    }
+
+    /// The status line, selection and take lanes after a MIDI pass placed `ids` (none: nothing played).
+    fn report_midi_take(&mut self, midi: &transit_playback::MidiTake, ids: &[transit_model::ClipId]) {
         if ids.is_empty() {
             if midi.dropped == 0 && midi.start.is_some() && !midi.tracks.is_empty() {
                 self.status = "Recorded no MIDI notes".into();
@@ -471,7 +487,7 @@ impl StudioApp {
             placed.iter().map(|(_, c)| if let transit_model::ClipContent::Midi { sequence } = &c.content { sequence.notes.len() } else { 0 }).sum();
         let passes = ids.len() / lanes.len().max(1);
         if passes > 1 {
-            self.show_new_takes(&ids);
+            self.show_new_takes(ids);
         }
         let status = if passes > 1 {
             format!("Recorded {passes} takes ({notes} notes) on {}", names.join(", "))
