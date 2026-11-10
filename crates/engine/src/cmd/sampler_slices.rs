@@ -24,6 +24,7 @@
 
 use super::sampler::instrument_track;
 use super::sampler_patch::{admit_patch, admit_source, patch_of, store};
+use super::sampler_slice_pads::{MappingStatus, StaleSlice, mapping_status};
 use super::*;
 use crate::cmd;
 use serde_json::json;
@@ -125,7 +126,7 @@ pub(crate) fn default_slice_root(_patch: &PatchV1) -> u8 {
 /// they were.
 pub(super) fn write_through_slice_zones(_patch: &mut PatchV1, _set: SliceSet) {}
 
-fn loop_of<'a>(id: &str, p: &'a PatchV1) -> Result<&'a SliceLoop> {
+pub(super) fn loop_of<'a>(id: &str, p: &'a PatchV1) -> Result<&'a SliceLoop> {
     p.slicing.as_ref().ok_or_else(|| bad(id, "the patch has no slice loop: make one with mix.sampler_slice_loop"))
 }
 
@@ -140,7 +141,7 @@ fn mode_name(m: SliceMode) -> &'static str {
     }
 }
 
-fn set_of(l: &SliceLoop, set: SliceSet) -> Option<&Markers> {
+pub(super) fn set_of(l: &SliceLoop, set: SliceSet) -> Option<&Markers> {
     match set {
         SliceSet::Auto => l.auto.as_ref(),
         SliceSet::Manual => l.manual.as_ref(),
@@ -523,18 +524,18 @@ pub(crate) fn default_beat_length(l: &SliceLoop, rate: u32, acid: Option<f64>, a
 }
 
 /// One slice of a set as the state reports it.
-struct SliceView {
-    id: Option<u32>,
-    frame: u64,
-    end: u64,
-    label: Option<String>,
-    pad: Option<u8>,
-    key: Option<u8>,
-    zones: Vec<u16>,
+pub(super) struct SliceView {
+    pub(super) id: Option<u32>,
+    pub(super) frame: u64,
+    pub(super) end: u64,
+    pub(super) label: Option<String>,
+    pub(super) pad: Option<u8>,
+    pub(super) key: Option<u8>,
+    pub(super) zones: Vec<u16>,
 }
 
 /// The slices of `set` in order (an absent or empty set is S alone, without an id).
-fn slices(p: &PatchV1, set: SliceSet) -> Vec<SliceView> {
+pub(super) fn slices(p: &PatchV1, set: SliceSet) -> Vec<SliceView> {
     let Some(l) = &p.slicing else { return Vec::new() };
     let starts: Vec<(Option<u32>, u64, Option<String>)> = match set_of(l, set).filter(|m| !m.markers.is_empty()) {
         Some(m) => m.markers.iter().map(|x| (Some(x.id), x.frame, x.label.clone())).collect(),
@@ -564,22 +565,16 @@ fn markers_json(p: &PatchV1, set: SliceSet) -> Value {
     Value::Array(slices(p, set).iter().map(slice_json).collect())
 }
 
-/// The showing set's pad mapping: `ascending` when every slice has a pad and slice i plays the
-/// first slice's key plus i, `none` when no slice has a pad, else `stale` with the first two
-/// slices out of that order.
+/// The showing set's pad mapping as the state reports it ([`mapping_status`]): `ascending` with
+/// `mapping_root`, `stale` with the first two `out_of_order` slices, or `none`.
 fn mapping(p: &PatchV1, set: SliceSet) -> Value {
-    let v = slices(p, set);
-    if v.iter().all(|s| s.key.is_none()) {
-        return json!({"mapping": "none"});
-    }
-    let first = v.iter().enumerate().skip(1).find(|(i, s)| !matches!((v[i - 1].key, s.key), (Some(a), Some(b)) if u16::from(b) == u16::from(a) + 1));
-    match first {
-        None if v.first().is_some_and(|s| s.key.is_some()) => json!({"mapping": "ascending", "mapping_root": v.first().and_then(|s| s.key)}),
-        Some((i, s)) => {
-            let pair = |n: usize, s: &SliceView| json!({"slice": n + 1, "id": s.id, "pad": s.pad.map(|x| x + 1), "key": s.key});
-            json!({"mapping": "stale", "out_of_order": [pair(i - 1, &v[i - 1]), pair(i, s)]})
+    match mapping_status(p, set) {
+        MappingStatus::None => json!({"mapping": "none"}),
+        MappingStatus::Ascending { root } => json!({"mapping": "ascending", "mapping_root": root}),
+        MappingStatus::Stale { first_two } => {
+            let pair = |s: &StaleSlice| json!({"slice": s.slice, "id": s.id, "pad": s.pad.map(|x| x + 1), "key": s.key});
+            json!({"mapping": "stale", "out_of_order": [pair(&first_two[0]), pair(&first_two[1])]})
         }
-        None => json!({"mapping": "stale", "out_of_order": []}),
     }
 }
 
