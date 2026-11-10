@@ -692,3 +692,17 @@ fn a_start_past_the_input_maps_projection_waits_for_the_next_input_block() {
     assert_eq!(written.len(), ((last + 5) * BLOCK - expected) as usize * CHANNELS);
     assert_eq!(written[..CHANNELS], frame(expected).collect::<Vec<_>>()[..]);
 }
+
+/// #429 review: the refused start is logged with both clocks' figures and both latencies; a
+/// recorder without an applied start or a fitted map says so instead of inventing figures.
+#[test]
+fn a_refused_start_logs_both_clocks_and_latencies() {
+    let mut r = Recorder::detached("pipewire");
+    r.latency = Some(Duration::from_millis(43));
+    let (_, map, _) = recording_map();
+    let output = crate::device_clock::ClockReport { map: Some(map), publication: Default::default(), fitting: Default::default() };
+    let line = r.start_figures(Some(output), Some(Duration::from_millis(85)));
+    assert!(line.starts_with("recording start not applied; output clock: BackendEstimate, residual "), "{line}");
+    assert!(line.contains(&format!("revision {}", map.revision)) && line.contains("offset "), "{line}");
+    assert!(line.contains("latency Some(85ms); input clock: no map, latency Some(43ms)"), "{line}");
+}

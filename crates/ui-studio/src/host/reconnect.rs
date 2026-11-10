@@ -49,6 +49,14 @@ impl StudioApp {
             }
             return;
         };
+        // A start before the retained input (#429): log both clocks' figures before Stop clears the
+        // applied start, so a tester's log tells which clock disagrees.
+        if let Trouble::Disk(what) = &trouble
+            && what.contains(transit_playback::record::start::OUTSIDE_HISTORY)
+        {
+            let output = self.player.as_ref().map(|p| (p.clock_report(), p.output_latency));
+            log::warn!("{}", r.start_figures(output.and_then(|o| o.0), output.and_then(|o| o.1)));
+        }
         if recording {
             self.stop_play();
         }

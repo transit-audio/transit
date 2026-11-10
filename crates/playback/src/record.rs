@@ -632,6 +632,26 @@ impl Recorder {
         (frames as u64).saturating_mul(1000) / u64::from(self.sample_rate.max(1))
     }
 
+    /// What a refused recording start is logged with (#429), on the control thread: the applied
+    /// start's host time and output frame, both clock maps' quality, residual, offset and revision,
+    /// and both streams' reported latencies (`output` and `output_latency` are the Player's).
+    pub fn start_figures(&mut self, output: Option<crate::device_clock::ClockReport>, output_latency: Option<Duration>) -> String {
+        let map = |m: Option<crate::device_clock::ClockMap>| {
+            m.map_or_else(
+                || "no map".to_string(),
+                |m| format!("{:?}, residual {:.0} ns, offset {:.0} ns, revision {}", m.quality, m.residual_ns, m.offset_ns(), m.revision),
+            )
+        };
+        let start = self.applied_start().map_or_else(|| "not applied".to_string(), |p| format!("at host {} ns, output frame {}", p.host_ns, p.output_frame));
+        let input = self.clock_report().and_then(|r| r.map);
+        format!(
+            "recording start {start}; output clock: {}, latency {output_latency:?}; input clock: {}, latency {:?}",
+            map(output.and_then(|r| r.map)),
+            map(input),
+            self.latency
+        )
+    }
+
     /// Independently maintained input clock snapshot; separate from output at every rate.
     pub fn clock_report(&mut self) -> Option<crate::device_clock::ClockReport> {
         self.clock.as_mut().map(crate::device_clock::MaintainedClock::report)

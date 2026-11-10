@@ -250,6 +250,9 @@ impl Reader {
     }
 }
 
+/// The take writer's refusal of a start before the first retained input frame.
+pub const OUTSIDE_HISTORY: &str = "recording start fell outside retained input history";
+
 /// Writer-only bounded pre-start history. Device ordinals, never callback counts,
 /// decide which samples precede the applied output boundary.
 pub(super) struct History {
@@ -287,7 +290,7 @@ impl History {
                 // Writer thread, once per failed take. The figures tell a clock disagreement (the
                 // start mapped before the first frame captured after arm) from a late writer (#429).
                 log::warn!("recording start at input frame {start} is {} frames before the first retained frame {oldest}", oldest - start);
-                return Err("recording start fell outside retained input history");
+                return Err(OUTSIDE_HISTORY);
             }
             let skip = usize::try_from(start.saturating_sub(oldest)).unwrap_or(usize::MAX).saturating_mul(self.channels).min(self.data.len());
             self.data.drain(..skip);

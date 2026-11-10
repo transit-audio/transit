@@ -265,6 +265,10 @@ impl ClockMap {
     pub fn frame_range(&self) -> std::ops::RangeInclusive<u64> {
         self.first_frame..=self.last_frame
     }
+    /// The fitted offset between the frame line and the host line, in nanoseconds (for logs).
+    pub fn offset_ns(&self) -> f64 {
+        self.offset
+    }
     pub fn estimated_rate(&self) -> f64 {
         1e9 / self.ns_per_frame
     }
