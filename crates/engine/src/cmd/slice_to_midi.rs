@@ -185,14 +185,20 @@ fn boundaries(s: &Session, l: &SliceLoop, views: &[SliceView], at: i64, timing: 
             let sr = s.sample_rate;
             let p = s.tempo.tick_to_samples(at, sr);
             let (num, den) = (u128::from(sr.hz()), u128::from(rate.max(1)));
-            frames
+            let mut ticks: Vec<i64> = frames
                 .iter()
                 .map(|m| {
                     let offset = (u128::from(m.saturating_sub(l.start)) * num * 2 + den) / (den * 2);
                     let sample = p.saturating_add(i64::try_from(offset).unwrap_or(i64::MAX));
                     nearest(s.tempo.render_ticks(sample, sr))
                 })
-                .collect()
+                .collect();
+            // The first boundary is S, offset 0, sample P: the placement itself. Converting P back
+            // can round a tick below `at` (a coarse sample grid at a fast tempo), so it is pinned.
+            if let Some(first) = ticks.first_mut() {
+                *first = at;
+            }
+            ticks
         }
     }
 }

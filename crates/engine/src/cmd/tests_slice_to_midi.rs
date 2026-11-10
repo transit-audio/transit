@@ -501,3 +501,24 @@ fn stale_text_names_the_swapped_pair_or_the_first_break() {
     let text = refused(&mut e, json!({"track": t, "timing": "fit", "at": 0}));
     assert!(text.ends_with("The slices' keys no longer run in order: slice 3 on pad A1 plays key 60, not 63 after slice 2."), "{text}");
 }
+
+#[test]
+fn keep_first_boundary_is_the_placement() {
+    // An 11,025 Hz session at 1000 BPM has 0.689 samples a tick: tick 2 is sample 1, and sample 1
+    // converts back to tick 1.45, which rounds to 1. The first boundary is the placement itself.
+    let mut e = Engine::default();
+    e.session_mut().sample_rate = transit_time::SampleRate::new(11_025).unwrap();
+    set_tempo(&mut e, &[(0, 1000.0)]);
+    e.execute("track.new", &json!({"kind": "instrument", "format": "stereo"})).unwrap();
+    let t = e.session().tracks.last().unwrap().id;
+    e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
+    let buf = AudioBuffer { sample_rate: 11_025, channels: vec![(0..11_025).map(|i| (i as f32 * 0.01).sin() * 0.5).collect()] };
+    let sid = crate::io::add_source(e.session_mut(), "loop", buf, None, FileFormat::Wav);
+    e.execute("mix.sampler_slice_loop", &json!({"track": t, "source": sid})).unwrap();
+    sliced(&mut e, t, &[0, 2_756, 8_269], 60);
+    let s = e.session();
+    assert_eq!(s.tempo.samples_to_ticks(s.tempo.tick_to_samples(2, s.sample_rate), s.sample_rate), 1, "the coarse grid rounds tick 2 down");
+    let out = one_step(&mut e, json!({"track": t, "timing": "keep", "at": 2}));
+    assert_eq!(ticks(&out)[0], 2, "the first boundary is the placement");
+    assert_eq!(notes_of(&clip_of(&e, &out))[0].start, 0, "the first note starts with the clip");
+}
