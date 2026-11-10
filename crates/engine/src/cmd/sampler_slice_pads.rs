@@ -433,6 +433,9 @@ fn map_slices(e: &mut Engine, p: &Value) -> Result<Value> {
     let run_notes = usize::from(root)..usize::from(root) + n;
     let mut vacated: Vec<u8> = run.iter().map(|q| pad_note(&patch, *q)).filter(|k| !run_notes.contains(&usize::from(*k))).collect();
     vacated.sort_unstable();
+    // Unreachable while notes are unique: if v run pads vacate, at most n - v of them sit on the
+    // run's n notes, so at most v other pads can. The refusal stays for a patch that breaks that.
+    debug_assert!(empty.len() <= vacated.len(), "more empty pads on run notes than vacated notes");
     if let Some(&(q, note)) = empty.get(vacated.len()) {
         return Err(collision(q, note));
     }
