@@ -1,17 +1,20 @@
 //! The Pads view's view bar (README, Sampler views: View bar, and the round 2 "Pads view bar"):
-//! a row `VIEW_BAR_HEIGHT` high under the title bar, before the hero row. Built so far: the
-//! one-line summary at the left in `readout.display` (`Bank A · 3 of 16 loaded · 2 choke
-//! groups`: the shown bank, the choke groups in use across banks) and, at the right, the kit's
-//! Start note field (ADR 0041 amendment of 2026-11-09; ADR 0051 decision 9). The view switch
-//! and the actions (`Load kit…`, `Expand to rack…`) wait for their slice: the switch goes before
-//! the summary and the actions after the field, `START_NOTE_GAP_BEFORE_ACTIONS` from it, and
-//! until then the field keeps the bar's right edge.
+//! a row `VIEW_BAR_HEIGHT` (28) high under the title bar, before the hero row, its controls at the
+//! dense `VIEW_BAR_CONTROL_HEIGHT` (24) centred in it, its items `VIEW_BAR_GAP` (12) apart (a label
+//! and its field count as one item). Built so far: the one-line summary at the left in
+//! `readout.display` (`Bank A · 3 of 16 loaded · 2 choke groups`: the shown bank, the choke
+//! groups in use across banks) and, at the right, the kit's Start note field (ADR 0041 amendment
+//! of 2026-11-09; ADR 0051 decision 9). The view switch and the actions (`Load kit…`, `Expand to
+//! rack…`) wait for their slice: the switch goes before the summary and the actions after the
+//! field, one bar gap from it, and until then the field keeps the bar's right edge.
 //!
 //! The Start note field: `Start note` in `label.control`, `START_NOTE_LABEL_GAP`, then a
-//! `START_NOTE_WIDTH` by `START_NOTE_HEIGHT` field (`surface.inset`, 1 px `line`, `line.strong` on
-//! hover, the control radius) with the note name centred in `value` (Mono 500 11), named by the
-//! one namer in the Middle C setting. Its value is the patch's `pad_start_note` (what
-//! `mix.sampler_state` reports; a kit saved before the field reads 60).
+//! `START_NOTE_WIDTH` by `START_NOTE_HEIGHT` Text field (`surface.inset`, the control radius) with
+//! the note name centred in `value` (Mono 500 11) inside `chrome.field.padding`, named by the one
+//! namer in the Middle C setting. Its edge per state is [`field_stroke`]: rest 1 px `line`, hover
+//! 1 px `line.strong`, dragging and typing a 1.5 px `signal` ring, error a 1.5 px `meter.hot`
+//! ring, each on the field's own edge, inside its bounds. Its value is the patch's
+//! `pad_start_note` (what `mix.sampler_state` reports; a kit saved before the field reads 60).
 //!
 //! - **Drag** up or down: a semitone per `START_NOTE_DRAG_PX_PER_SEMITONE` (an octave with Shift),
 //!   from the value at the press, kept within 0 to `MAX_PAD_START`.
@@ -33,14 +36,64 @@ use crate::device_editor::Dev;
 use crate::theme::TOKENS;
 use crate::tokens::{self, layout as space, radius, sampler as tk};
 use crate::widgets::{self, r4};
-use egui::{Align2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Rect, Sense, Stroke, StrokeKind, Ui, epaint::RectShape, pos2, vec2};
 use serde_json::json;
 use transit_midi::{MiddleC, note_name, parse_note_or_number};
 use transit_model::pad_notes::{MAX_PAD_START, NEW_PAD_START};
 use transit_model::sampler_patch::{PadEntry, PatchV1};
 
-/// The bar's height: the view switch's (README: a 24 px segmented control).
+/// The bar's height (its controls take the dense height, centred).
 pub const HEIGHT: f32 = tk::VIEW_BAR_HEIGHT;
+
+/// What the Start note field shows, as the Text field's states (README, Fields and controls).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FieldState {
+    #[default]
+    Rest,
+    Hover,
+    Dragging,
+    Typing,
+    /// Typed text that is not a start note, focused or not.
+    Error,
+}
+
+impl FieldState {
+    /// The error first, then dragging, then typing, then hover.
+    pub(crate) fn of(hovered: bool, dragging: bool, typing: bool, error: bool) -> Self {
+        if error {
+            Self::Error
+        } else if dragging {
+            Self::Dragging
+        } else if typing {
+            Self::Typing
+        } else if hovered {
+            Self::Hover
+        } else {
+            Self::Rest
+        }
+    }
+}
+
+/// The field's edge in `state`: rest and hover a `chrome.field.edgeWidth` edge, the others a ring
+/// of `chrome.focusRing.width`. Both are drawn on the field's own edge, inside its bounds
+/// (`chrome.field.ringOffset` 0), so the field never grows when it rings.
+pub(crate) fn field_stroke(state: FieldState) -> Stroke {
+    let t = &TOKENS;
+    let (edge, ring) = (tokens::chrome::FIELD_EDGE_WIDTH, tokens::chrome::FOCUS_RING_WIDTH);
+    match state {
+        FieldState::Rest => Stroke::new(edge, t.line),
+        FieldState::Hover => Stroke::new(edge, t.line_strong),
+        FieldState::Dragging | FieldState::Typing => Stroke::new(ring, t.signal),
+        FieldState::Error => Stroke::new(ring, t.meter_hot),
+    }
+}
+
+/// Where a field's text may sit: `chrome.field.padding` inside its edge (0 vertical, so the text
+/// is centred on the field's height; 8 horizontal).
+pub(crate) fn text_area(field: Rect) -> Rect {
+    let [v, h] = tokens::chrome::FIELD_PADDING;
+    field.shrink2(vec2(h, v))
+}
 
 /// The Start note field as last drawn.
 #[derive(Debug, Clone, Default)]
@@ -57,6 +110,10 @@ pub struct StartNoteLayout {
     pub editing: bool,
     /// Typed text that is not a start note: the 1.5 px `meter.hot` ring.
     pub error: bool,
+    /// The state the field drew (its edge is [`field_stroke`] of it).
+    pub state: FieldState,
+    /// The name as drawn, or the typing's box while typing: inside [`text_area`].
+    pub text_rect: [f32; 4],
     pub tooltip: String,
     /// The right-click menu's Reset row while the menu is open, and its text (`Reset to C1`).
     pub reset_row: Option<[f32; 4]>,
@@ -151,7 +208,8 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
     // The summary, left.
     bar.summary = summary(pads, bank);
     bar.summary_rect = r4(widgets::role_text(&p, &tokens::READOUT_DISPLAY, &bar.summary, t.text_faint, Align2::LEFT_CENTER, rect.left_center()));
-    // The Start note field, right (where the actions will follow it).
+    // The Start note field, right (where the actions will follow it), at the dense height,
+    // centred in the bar.
     let field = Rect::from_min_size(
         pos2(rect.max.x - tk::START_NOTE_WIDTH, rect.center().y - tk::START_NOTE_HEIGHT / 2.0),
         vec2(tk::START_NOTE_WIDTH, tk::START_NOTE_HEIGHT),
@@ -214,19 +272,21 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
         editing = Some(note_name(value, mc));
         error = false;
     }
-    // The field's face, under the typing.
+    // The field's face, under the typing: its slot is kept here and filled once this frame's
+    // state is known (Enter can turn the typing into the error below).
     let hovered = resp.hovered();
-    let edge = if hovered || resp.dragged() || editing.is_some() { t.line_strong } else { t.line };
-    p.rect(field, radius::CONTROL, t.surface_inset, Stroke::new(1.0, edge), StrokeKind::Inside);
+    let face = p.add(egui::Shape::Noop);
+    let inner = text_area(field);
+    let mut text_rect = inner;
     if let Some(text) = editing.as_mut() {
         let edit = egui::TextEdit::singleline(text)
             .font(tokens::VALUE.font_id(ui.ctx()))
             .horizontal_align(egui::Align::Center)
+            .vertical_align(egui::Align::Center)
             .frame(egui::Frame::NONE)
             .margin(egui::Margin::ZERO);
-        // Token gap: no token names a field's text inset; 2 keeps the typed text inside the 1.5 px
-        // ring (reported with the job, not invented as a token).
-        let r = ui.put(field.shrink(2.0), edit);
+        let r = ui.put(inner, edit);
+        text_rect = r.rect;
         r.request_focus();
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
         if enter {
@@ -258,17 +318,14 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
         }
         d.insert_temp(error_id, error);
     });
-    // The ring: the error's, else dragging's or typing's (the focus ring's width).
+    // The face and its edge or ring, on the field's own edge (`chrome.field.ringOffset` 0).
     let active = resp.dragged() || editing.is_some();
-    let ring = tokens::chrome::FOCUS_RING_WIDTH;
-    if error {
-        p.rect_stroke(field, radius::CONTROL, Stroke::new(ring, t.meter_hot), StrokeKind::Inside);
-    } else if active {
-        p.rect_stroke(field, radius::CONTROL, Stroke::new(ring, t.signal), StrokeKind::Inside);
-    }
+    let state = FieldState::of(hovered, resp.dragged(), editing.is_some(), error);
+    let edge_rect = field.expand(tokens::chrome::FIELD_RING_OFFSET);
+    p.set(face, RectShape::new(edge_rect, radius::CONTROL, t.surface_inset, field_stroke(state), StrokeKind::Inside));
     let text = note_name(value, mc);
     if editing.is_none() {
-        widgets::role_text(&p, &tokens::VALUE, &text, tokens::VALUE.color(), Align2::CENTER_CENTER, field.center());
+        text_rect = widgets::role_text(&p, &tokens::VALUE, &text, tokens::VALUE.color(), Align2::CENTER_CENTER, inner.center());
     }
     // Right-click: Reset to the new-kit start note (C1 under C3), one step.
     let mut reset_row = None;
@@ -295,6 +352,8 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
         active,
         editing: editing.is_some(),
         error,
+        state,
+        text_rect: r4(text_rect),
         tooltip: tip,
         reset_row,
         reset_text,

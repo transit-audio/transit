@@ -25,6 +25,8 @@ pub struct T {
     point: Option<egui::Pos2>,
     /// The next frame reports the pointer gone (egui-winit's `CursorLeft`).
     gone: bool,
+    /// Raw events the next frame receives (a press held across frames, say).
+    events: Vec<egui::Event>,
     /// The folder of the test's generated files.
     pub dir: PathBuf,
 }
@@ -95,6 +97,7 @@ impl T {
             drop: None,
             point: None,
             gone: false,
+            events: Vec::new(),
             dir,
         };
         t.frames(3);
@@ -116,6 +119,7 @@ impl T {
                 raw.events.extend(at.map(egui::Event::PointerMoved));
                 raw.dropped_files = files.into_iter().map(|p| Arc::new(Dropped(p)) as egui::DroppedFileHandle).collect();
             }
+            raw.events.extend(std::mem::take(&mut self.events));
             if std::mem::take(&mut self.gone) {
                 raw.events.push(egui::Event::PointerGone);
             }
@@ -178,6 +182,12 @@ impl T {
     /// Moves the pointer to `at` in the next frame, then runs a few frames.
     pub fn point(&mut self, at: (f32, f32)) {
         self.point = Some(egui::pos2(at.0, at.1));
+        self.frames(3);
+    }
+
+    /// Sends `events` in the next frame, then runs a few frames.
+    pub fn input(&mut self, events: Vec<egui::Event>) {
+        self.events = events;
         self.frames(3);
     }
 
