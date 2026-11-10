@@ -41,4 +41,5 @@ The list is generated from each record's `#` heading by `cargo xtask indexes`: a
 - [E78: a header test measured its controls against the row, not the painted band (#412)](issue-412.md)
 - [E79: a plug-in destroy sent after host shutdown could still be accepted (#420)](issue-420.md)
 - [E80: a separate input's channel count never reached the I/O table, and a test encoded a refusal the page should not send (#429)](issue-429-b.md)
+- [E81: four tests counted on a race's outcome or a real-clock instant under load (#423, #381, #436)](issue-436.md)
 <!-- indexes:end -->
