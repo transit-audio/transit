@@ -35,8 +35,9 @@ fn session(patch: Option<PatchV1>) -> (Session, TrackId) {
     (s, t)
 }
 
+/// Pad A1 on note 60 (pad start note 60, stated), bound to zone 1 over source `source`.
 fn kit(source: u64) -> PatchV1 {
-    let mut p = PatchV1 { sources: vec![SourceRef { source: SourceId(source), ..SourceRef::default() }], ..PatchV1::default() };
+    let mut p = PatchV1 { sources: vec![SourceRef { source: SourceId(source), ..SourceRef::default() }], pad_start_note: 60, ..PatchV1::default() };
     let mut z = ZoneEntry::whole(0, 0, 48_000);
     z.pad_defaults(60);
     z.mode = transit_model::sampler_patch::PlayMode::Gate;
@@ -187,7 +188,7 @@ fn gate(z: &mut ZoneEntry) {
 /// Pad A1 (note 60) on a plain zone over source 1, and group 0's `count` alternatives on sources
 /// 3, 4, ...; alternative `missing` names source 99, which is not in the pool.
 fn rr_patch(count: u8, missing: Option<u8>) -> PatchV1 {
-    let mut p = PatchV1 { sources: vec![SourceRef { source: SourceId(1), ..SourceRef::default() }], ..PatchV1::default() };
+    let mut p = PatchV1 { sources: vec![SourceRef { source: SourceId(1), ..SourceRef::default() }], pad_start_note: 60, ..PatchV1::default() };
     let mut pad = ZoneEntry::whole(0, 0, 48_000);
     pad.pad_defaults(60);
     gate(&mut pad);
@@ -329,11 +330,13 @@ fn published_bits(spec: &transit_dsp::plugins::sampler::PatchSpec) -> u64 {
 }
 
 /// A session saved before the crossfade: plain, looping, reverse ping-pong and one-shot looping
-/// zones, a key-map group, and a pad-bound slice zone whose stored fields agree with its slice.
+/// zones, a key-map group, and a pad-bound slice zone whose stored fields agree with its slice. Its
+/// pad start note is 60, what such a session reads (it was saved without the field).
 fn old_patch() -> PatchV1 {
     use transit_model::sampler_patch::{LoopMode, Marker, Markers, PlayMode, SliceBinding, SliceLoop, SliceMode, SliceSet};
     let mut p = PatchV1 {
         sources: vec![SourceRef { source: SourceId(1), ..SourceRef::default() }, SourceRef { source: SourceId(2), ..SourceRef::default() }],
+        pad_start_note: 60,
         ..PatchV1::default()
     };
     let marker = |id, frame| Marker { id, frame, ..Marker::default() };
@@ -421,3 +424,95 @@ fn the_publication_plays_the_used_loop_and_follows_the_slice() {
     assert_eq!(q.zone(9).unwrap().loop_mode, LoopMode::Forward);
     crate::sampler_link::check_sampler_patch(&q, &s).unwrap();
 }
+
+// The pad start note (ADR 0041 amendment 2026-11-09): the core receives effective notes, a start
+// change is a new publication, a key-tracked defaulted pad keeps its pitch, and a patch saved
+// before the field publishes what it did.
+
+#[test]
+fn the_core_receives_effective_notes_and_a_start_change_is_a_new_publication() {
+    let mut p = kit(1);
+    p.pad_start_note = 36;
+    p.zones[0].root = 36;
+    p.set_pad(PadEntry { index: 9, note: Some(100), ..PadEntry::default() });
+    let (s, _) = session(Some(p.clone()));
+    let (spec, _) = crate::sampler_link::spec_of(&p, &s, &mut std::collections::HashMap::new());
+    let notes: Vec<u8> = spec.pads.iter().map(|pad| pad.note).collect();
+    let want: Vec<u8> = (0..64u8).map(|i| if i == 9 { 100 } else { 36 + i }).collect();
+    assert_eq!(notes, want, "stored notes as stored, the others start + index");
+    let before = crate::sampler_link::structure(&p, &s);
+    let mut q = p.clone();
+    q.pad_start_note = 12;
+    assert_ne!(crate::sampler_link::structure(&q, &s), before, "a start change alone republishes");
+}
+
+/// A ramp the resampler cannot hide: any pitch change alters the samples.
+fn ramp() -> Arc<SourceAudio> {
+    Arc::new(SourceAudio::new(AudioBuffer { sample_rate: SR, channels: vec![(0..48_000).map(|i| ((i % 480) as f32 / 480.0) - 0.5).collect()] }))
+}
+
+/// A Sampler track whose clip holds one long note `pitch`, playing patch `p` (source 7 is the ramp).
+fn pitched_session(p: PatchV1, pitch: u8) -> Session {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+    s.pool.insert(SourceId(7), ramp());
+    let mut seq = Sequence::default();
+    seq.notes.push(Note { pitch, velocity: 127, release_velocity: 64, channel: 0, start: 0, length: 40_000 });
+    let cid = s.new_clip_id();
+    let tr = s.track_mut(t).unwrap();
+    tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 96_000, seq));
+    let mut ins = Insert::new("sampler");
+    ins.sampler_patch = Some(SamplerPatch { state: PatchState::Ready(Box::new(p)) });
+    tr.instrument = Some(ins);
+    s
+}
+
+#[test]
+fn a_key_tracked_defaulted_pad_plays_the_same_samples_after_a_start_change() {
+    // Pad A1 (start 60: note 60) key-tracked with a user root a fifth below its note.
+    let mut p = kit(7);
+    let z = &mut p.zones[0];
+    z.key_tracking = true;
+    z.root = 53;
+    let render = |p: &PatchV1, pitch: u8| {
+        let s = pitched_session(p.clone(), pitch);
+        let mut rig = Rig::new();
+        assert_eq!(rig.publish(&s), Adoption::Adopted);
+        rig.render(8)
+    };
+    let before = render(&p, 60);
+    assert!(before.iter().any(|x| *x != 0.0), "the pad plays");
+    p.set_pad_start(36).unwrap();
+    // The clip is transposed by the notice's -24 to reach the moved pad.
+    let after = render(&p, 36);
+    assert!(after == before, "the same pitch, sample for sample");
+    assert_eq!((p.pad_note(0), p.zones[0].root), (36, 29));
+}
+
+/// The zones and pads a publication carries, as one FNV-1a hash of their debug text.
+fn publication_digest(spec: &transit_dsp::plugins::sampler::PatchSpec, silent: &[u16]) -> u64 {
+    let zones: Vec<_> = spec.zones.iter().enumerate().filter(|(_, z)| z.is_some()).collect();
+    let text = format!("{zones:?}|{:?}|{silent:?}", spec.pads);
+    text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+}
+
+#[test]
+fn a_patch_saved_before_the_pad_start_note_publishes_the_same_zones_and_pads() {
+    let raw: serde_json::Value = serde_json::from_str(OLD_SAVED_PATCH).unwrap();
+    let p = SamplerPatch::from_value(raw);
+    let p = p.ready().unwrap();
+    assert_eq!(p.pad_start_note, 60, "read without the field");
+    let (s, _) = session(None);
+    let (spec, silent) = crate::sampler_link::spec_of(p, &s, &mut std::collections::HashMap::new());
+    let notes: Vec<u8> = spec.pads.iter().map(|pad| pad.note).collect();
+    let want: Vec<u8> = (0..64u8).map(|i| if i == 5 { 20 } else { 60 + i }).collect();
+    assert_eq!(notes, want);
+    assert_eq!(publication_digest(&spec, &silent), OLD_SAVED_PUBLICATION, "the base published these zones and pads");
+}
+
+/// A patch as a build before the pad start note saved it (no `pad_start_note`).
+const OLD_SAVED_PATCH: &str = r#"{"schema":1,"seed":7,"sources":[{"source":1},{"source":2}],"zones":[{"id":0,"source":0,"end":48000,"loop_end":48000,"mode":"one_shot","key_tracking":false,"root":60},{"id":1,"source":1,"start":100,"end":30000,"loop_mode":"forward","loop_start":200,"loop_end":20000,"keys":[40,72],"root":64,"transpose":2.0},{"id":2,"source":0,"end":1000,"root":61,"key_tracking":false,"mode":"one_shot"},{"id":3,"source":1,"end":2000,"keys":[0,50]}],"pads":[{"index":0,"zone":0},{"index":5,"zone":2,"note":20,"choke":3},{"index":9,"mute":true}],"loop":{"source":1,"end":40000,"root":62,"manual":{"markers":[{"id":1,"frame":0},{"id":2,"frame":20000}]}}}"#;
+
+/// [`publication_digest`] of [`OLD_SAVED_PATCH`] on the base tree (captured on a fresh copy of it,
+/// in its own target).
+const OLD_SAVED_PUBLICATION: u64 = 0x3373_9f8f_5fdf_cb64;

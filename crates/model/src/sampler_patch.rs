@@ -5,7 +5,8 @@
 //!   of their controls), each one region of a source reference with its key and velocity ranges,
 //!   root and playback settings, optional layer/round-robin membership and an optional slice
 //!   binding; 64 pads (banks A to D) binding a zone to a unique trigger note, with mute, solo,
-//!   choke group (Off or 1..16) and name; the key-map groups' round-robin modes; the seed; and
+//!   choke group (Off or 1..16) and name, and the pad start note the pads without a stored note
+//!   follow ([`crate::pad_notes`]); the key-map groups' round-robin modes; the seed; and
 //!   one loop's slicing state (its region, the Auto and Manual marker sets with ids and labels,
 //!   the selected mode, snap, detector settings, grid division and bar override, root and beat
 //!   length). Sources are references to session sources ([`crate::Source`]) with an ownership
@@ -15,8 +16,9 @@
 //!   parameters' (`zone001_level`, ...), stored as a sparse map of slot id to value. Only the
 //!   nondefault ones are present; the engine applies them through the plug-in's parameters.
 //! - **Serialized form:** only populated zones and nondefault pads are written; every field has a
-//!   default (seed 1, root 60, mode Auto, snap on, division 1/16, no bar override), so an absent
-//!   field loads as its default. Unknown fields, at the top and in every entry, are kept and
+//!   default (seed 1, root 60, pad start note 60, mode Auto, snap on, division 1/16, no bar
+//!   override), so an absent field loads as its default. A new patch ([`PatchV1::default`]) has
+//!   pad start note 36, which is written. Unknown fields, at the top and in every entry, are kept and
 //!   written back ([`Extra`]).
 //! - **Opaque patches:** a schema version this build does not know keeps its raw object (and
 //!   so its media references), plays silence and reports itself unavailable; a patch that does
@@ -254,7 +256,8 @@ impl ZoneEntry {
     }
 }
 
-/// A pad that differs from its default (empty, trigger note `60 + index`, nothing set).
+/// A pad that differs from its default (empty, trigger note `start + index` with the patch's pad
+/// start note, nothing set).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PadEntry {
@@ -263,7 +266,8 @@ pub struct PadEntry {
     /// The bound zone's id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zone: Option<u16>,
-    /// The trigger note (`None`: the default, `60 + index`).
+    /// The stored trigger note, absolute (`None`: the default, the patch's pad start note plus the
+    /// index, which moves with the start note).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<u8>,
     #[serde(skip_serializing_if = "is_default")]
@@ -280,28 +284,24 @@ pub struct PadEntry {
 }
 
 impl PadEntry {
-    /// Pad `index`'s default trigger note.
+    /// Pad `index`'s default trigger note under pad start note `start`: `start + index`.
     #[must_use]
-    pub fn default_note(index: u8) -> u8 {
-        60u8.saturating_add(index.min(67))
+    pub fn default_note(index: u8, start: u8) -> u8 {
+        start.saturating_add(index)
     }
 
-    /// The trigger note.
+    /// The trigger note under pad start note `start` (the patch's effective note for this pad is
+    /// [`PatchV1::pad_note`]).
     #[must_use]
-    pub fn trigger(&self) -> u8 {
-        self.note.unwrap_or_else(|| Self::default_note(self.index))
+    pub fn trigger(&self, start: u8) -> u8 {
+        self.note.unwrap_or_else(|| Self::default_note(self.index, start))
     }
 
-    /// Whether the entry says nothing its default does not (it is then not serialized).
+    /// Whether the entry says nothing its default does not (it is then not serialized). A stored
+    /// note is never plain, whatever its value: stored notes are absolute.
     #[must_use]
     pub fn is_plain(&self) -> bool {
-        self.zone.is_none()
-            && self.note.is_none_or(|n| n == Self::default_note(self.index))
-            && !self.mute
-            && !self.solo
-            && self.choke == 0
-            && self.name.is_none()
-            && self.extra.is_empty()
+        self.zone.is_none() && self.note.is_none() && !self.mute && !self.solo && self.choke == 0 && self.name.is_none() && self.extra.is_empty()
     }
 }
 
@@ -427,8 +427,10 @@ pub struct SliceLoop {
     /// The beat grid's tempo override, 5 to 1000 BPM (`None`: the file's or the session's tempo).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grid_bpm: Option<f64>,
-    #[serde(default = "sixty", skip_serializing_if = "is_sixty")]
-    pub root: u8,
+    /// The slice mapping root as the user stored it, absolute (`None`: it follows the patch's pad
+    /// start note, [`PatchV1::slice_root`]); written whenever stored, 60 included.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root: Option<u8>,
     /// Slice to MIDI's beat length in quarter notes (`None`: derived from the tempo).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub beat_length: Option<f64>,
@@ -462,7 +464,7 @@ impl Default for SliceLoop {
             division: Division::Sixteenth,
             bars: None,
             grid_bpm: None,
-            root: 60,
+            root: None,
             beat_length: None,
             auto: None,
             manual: None,
@@ -486,6 +488,11 @@ pub struct PatchV1 {
     /// Populated zones, by id.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub zones: Vec<ZoneEntry>,
+    /// The note of pad A1 when it has no stored note, 0..=64; every pad without a stored note
+    /// plays `pad_start_note + index` ([`crate::pad_notes`]). A patch saved without it reads 60;
+    /// a new patch has 36. Written only when not 60.
+    #[serde(default = "sixty", skip_serializing_if = "is_sixty")]
+    pub pad_start_note: u8,
     /// Pads that differ from their defaults, by index.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub pads: Vec<PadEntry>,
@@ -507,6 +514,7 @@ impl Default for PatchV1 {
             seed: 1,
             sources: Vec::new(),
             zones: Vec::new(),
+            pad_start_note: crate::pad_notes::NEW_PAD_START,
             pads: Vec::new(),
             groups: Vec::new(),
             slicing: None,
@@ -652,7 +660,7 @@ impl Default for SamplerPatch {
 }
 
 impl SamplerPatch {
-    /// An empty patch: no zones, default pads, seed 1.
+    /// An empty patch: no zones, default pads from pad start note 36, seed 1.
     #[must_use]
     pub fn new() -> SamplerPatch {
         SamplerPatch { state: PatchState::Ready(Box::default()) }

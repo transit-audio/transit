@@ -50,6 +50,7 @@ fn full() -> PatchV1 {
             SourceRef { source: SourceId(12), ownership: Ownership::Referenced, extra: extra.clone() },
         ],
         zones: vec![zone, layered],
+        pad_start_note: 50,
         pads: vec![PadEntry {
             index: 5,
             zone: Some(7),
@@ -71,7 +72,7 @@ fn full() -> PatchV1 {
             division: Division::ThirtySecond,
             bars: Some(2),
             grid_bpm: Some(120.5),
-            root: 36,
+            root: Some(36),
             beat_length: Some(8.0),
             auto: Some(Markers { markers: vec![marker(1, 0, Some("one")), marker(2, 2000, None)], next_id: 0, extra: extra.clone() }),
             manual: Some(Markers { markers: vec![marker(8, 0, None), marker(9, 1000, Some("ghost"))], next_id: 0, extra: extra.clone() }),
@@ -88,7 +89,7 @@ fn every_field_populated_round_trips_and_every_key_is_written() {
     let p = full();
     assert_eq!(p.validate(), Ok(()));
     let v = serde_json::to_value(SamplerPatch { state: PatchState::Ready(Box::new(p.clone())) }).unwrap();
-    for key in ["schema", "seed", "sources", "zones", "pads", "groups", "loop", "controls", "future"] {
+    for key in ["schema", "seed", "sources", "zones", "pad_start_note", "pads", "groups", "loop", "controls", "future"] {
         assert!(v.get(key).is_some(), "{key} missing: {v}");
     }
     let l = &v["loop"];
@@ -104,21 +105,22 @@ fn every_field_populated_round_trips_and_every_key_is_written() {
 
 #[test]
 fn every_field_defaulted_loads_as_the_defaults_and_writes_only_the_schema() {
+    // A saved patch without the pad start note reads 60 (a new patch's 36 is in pad_notes_tests).
     let empty = SamplerPatch::from_value(json!({}));
-    assert_eq!(empty.ready(), Some(&PatchV1::default()));
+    assert_eq!(empty.ready(), Some(&PatchV1 { pad_start_note: 60, ..PatchV1::default() }));
     let p = PatchV1::default();
     assert_eq!((p.seed, p.schema), (1, 1));
-    assert_eq!(serde_json::to_value(SamplerPatch::new()).unwrap(), json!({"schema": 1}));
+    assert_eq!(serde_json::to_value(&empty).unwrap(), json!({"schema": 1}));
     // A zone with only its id, source and region loads with the Instrument view's defaults.
     let v = json!({"sources": [{"source": 4}], "zones": [{"id": 3, "end": 100}]});
     let z = SamplerPatch::from_value(v).ready().unwrap().zones[0].clone();
     assert_eq!(z, ZoneEntry { id: 3, end: 100, ..ZoneEntry::default() });
     assert_eq!((z.root, z.mode, z.key_tracking, z.keys, z.velocities), (60, PlayMode::Gate, true, [0, 127], [1, 127]));
-    // A loop with no fields set: Auto, snap on, 1/16, From tempo, root 60, no sets.
+    // A loop with no fields set: Auto, snap on, 1/16, From tempo, no stored root (the start note), no sets.
     let v = json!({"sources": [{"source": 4}], "loop": {"end": 10}});
     let l = SamplerPatch::from_value(v).ready().unwrap().slicing.clone().unwrap();
     assert_eq!(l, SliceLoop { end: 10, ..SliceLoop::default() });
-    assert!(l.snap && l.mode == SliceMode::Auto && l.division == Division::Sixteenth && l.bars.is_none() && l.root == 60);
+    assert!(l.snap && l.mode == SliceMode::Auto && l.division == Division::Sixteenth && l.bars.is_none() && l.root.is_none());
 }
 
 #[test]
@@ -211,8 +213,9 @@ fn a_first_marker_off_the_loop_start_is_kept_opaque() {
 
 #[test]
 fn only_populated_zones_nondefault_pads_and_nondefault_controls_are_written() {
-    let mut p = PatchV1::default();
-    p.set_pad(PadEntry { index: 3, note: Some(PadEntry::default_note(3)), ..PadEntry::default() });
+    // Start note 60 stated (not written); a stored note is never plain (pad_notes_tests).
+    let mut p = PatchV1 { pad_start_note: 60, ..PatchV1::default() };
+    p.set_pad(PadEntry { index: 3, ..PadEntry::default() });
     assert!(p.pads.is_empty(), "a pad at its defaults is not stored");
     p.set_pad(PadEntry { index: 3, choke: 2, ..PadEntry::default() });
     p.set_control("zone001_level", -3.0, 0.0);

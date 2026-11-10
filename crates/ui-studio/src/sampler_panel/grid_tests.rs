@@ -103,7 +103,8 @@ fn the_strip_names_the_pad_and_lays_out_the_picker_and_toggles() {
     let s = &p.strip;
     let panel = p.panel("strip").unwrap();
     assert_eq!(s.name, "OH Hat");
-    assert_eq!(s.id_line, "Pad A3 · note 62");
+    // A new kit's pad start note is 36: A3 plays 38.
+    assert_eq!(s.id_line, "Pad A3 · note 38");
     assert_eq!(s.choke_value, "Off");
     assert!(s.peers.starts_with("Not in a choke group."));
     // The picker: Off and 1 to 16 in nine columns, two rows, inside the panel.
@@ -125,7 +126,7 @@ fn the_strip_names_the_pad_and_lays_out_the_picker_and_toggles() {
     // Negative control: an empty pad reads "Empty pad".
     t.click(t.pad_at(tr, 7), 1);
     assert_eq!(t.panel(tr).strip.name, "Empty pad");
-    assert_eq!(t.panel(tr).strip.id_line, "Pad A8 · note 67");
+    assert_eq!(t.panel(tr).strip.id_line, "Pad A8 · note 43");
 }
 
 #[test]

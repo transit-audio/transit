@@ -229,7 +229,7 @@ pub(crate) fn pad_input(app: &mut StudioApp, ui: &egui::Ui, dev: Dev, index: u8,
     if pressed {
         view(app, dev.uid()).selected = index;
         if d.zone.is_some() {
-            audition(app, dev, d.entry.trigger());
+            audition(app, dev, d.note);
         }
     }
     if resp.drag_started() && d.zone.is_some() {

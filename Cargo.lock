@@ -4304,6 +4304,7 @@ version = "0.6.2"
 dependencies = [
  "log",
  "rayon",
+ "serde_json",
  "transit-au-host",
  "transit-audio-io",
  "transit-clap-host",

@@ -67,7 +67,7 @@ fn a_press_selects_a_pad_and_auditions_it_at_the_audition_velocity() {
     let before = t.undo_len();
     t.click(t.pad_at(tr, 2), 1);
     assert_eq!(t.panel(tr).selected, 2);
-    assert_eq!((view(&t).auditions, view(&t).last_audition), (1, Some((62, 90))), "A3's trigger note");
+    assert_eq!((view(&t).auditions, view(&t).last_audition), (1, Some((38, 90))), "A3's trigger note (a new kit's start note 36, plus 2)");
     assert_eq!(t.undo_len(), before, "selecting is not an edit");
     // Negative control: an empty pad is selected without an audition.
     t.click(t.pad_at(tr, 9), 1);

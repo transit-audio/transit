@@ -81,13 +81,15 @@ fn peak(x: &[f32]) -> f32 {
     x.iter().fold(0.0f32, |m, v| m.max(v.abs()))
 }
 
-/// A two-zone patch from a file: zone 1 on pad 1 (note 60, one-shot), zone 2 unbound over keys
-/// 70..80 (Gate), with controls on both, and two notes to play them.
+/// A two-zone patch from a file: zone 1 on pad 1 (note 60 at the stated pad start note 60,
+/// one-shot), zone 2 unbound over keys 70..80 (Gate), with controls on both, and two notes to play
+/// them.
 fn kit(e: &mut Engine, d: &Dir) -> TrackId {
     let wav = d.path("tone.wav");
     tone(&wav, 220.0, 48_000, 0.5, 2);
     let t = instrument(e);
     e.execute("mix.sampler_new_patch", &json!({"track": t, "seed": 9})).unwrap();
+    e.execute("mix.sampler_pad_start", &json!({"track": t, "note": 60})).unwrap();
     e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 1, "pad": 1, "path": s(&wav)})).unwrap();
     let src = patch(e, t).sources[0].source.0;
     e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 2, "source": src, "playback": {"keys": [70, 80], "root": 72}})).unwrap();
@@ -364,7 +366,7 @@ fn save_save_as_and_autosave_carry_the_patch_slicing_and_media() {
             division: Division::Eighth,
             bars: Some(4),
             grid_bpm: Some(92.5),
-            root: 36,
+            root: Some(36),
             beat_length: Some(8.0),
             auto: Some(set(&[(1, 0), (2, 10_000)])),
             manual: Some(set(&[(7, 0), (8, 5_000), (9, 15_000)])),

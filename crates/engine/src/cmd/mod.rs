@@ -45,6 +45,7 @@ pub(crate) mod sampler_patch;
 mod sampler_slice_detect;
 mod sampler_slice_pads;
 mod sampler_slices;
+mod sampler_state;
 mod setup_more;
 mod slice_to_midi;
 mod surround;
@@ -197,6 +198,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(sampler_slice_detect::specs());
         v.extend(sampler_slice_pads::specs());
         v.extend(slice_to_midi::specs());
+        v.extend(sampler_state::specs());
         v.extend(zoom_toggle::specs());
         v.extend(rack::specs());
         v.extend(takes::specs());

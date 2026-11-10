@@ -32,7 +32,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Slices to Pads",
             [],
             None,
-            "{track?, root?: 0-(128 minus the slice count) (default: the loop's root), preview?: false}: the showing set's slice i plays on trigger note root+i, one pad-bound zone per slice (ADR 0041 amendment 2026-11-08 item 6); the loop stores root; preview returns the plan and edits nothing → {track, set, root, count, cells: [{pad, note, slice, id, replaces: null|{set, slice, id}}], loose_collisions: [{pad, note}], unbound: [{pad, note, slice, id, zone}], pads_after, ok, reason?}",
+            "{track?, root?: 0-(128 minus the slice count) (default: the loop's stored root, else the pad start note), preview?: false}: the showing set's slice i plays on trigger note root+i, one pad-bound zone per slice (ADR 0041 amendment 2026-11-08 item 6); a given root is stored with every run pad's note, a run without one stores neither for pads on their default notes; preview returns the plan and edits nothing → {track, set, root, count, cells: [{pad, note, slice, id, replaces: null|{set, slice, id}}], loose_collisions: [{pad, note}], unbound: [{pad, note, slice, id, zone}], pads_after, ok, reason?}",
             has_selection,
             slices_to_pads
         ),
@@ -41,7 +41,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Map Slices to Keys",
             [],
             None,
-            "{track?, root: 0-(128 minus the slice count)}: re-notes only the showing set's slice pads so slice i plays root+i; an empty pad on one of the run's notes takes a note the run vacates, a sounding one refuses; every other pad is untouched; the loop stores root → {track, set, root, count, pads: [{pad, note, slice, id}], moved: [{pad, from, to}]}",
+            "{track?, root: 0-(128 minus the slice count)}: re-notes only the showing set's slice pads so slice i plays root+i; an empty pad on one of the run's notes takes a note the run vacates, a sounding one refuses; every other pad is untouched; the loop stores root and every run pad stores its note → {track, set, root, count, pads: [{pad, note, slice, id}], moved: [{pad, from, to}]}",
             has_selection,
             map_slices
         ),
@@ -60,17 +60,10 @@ fn note_text(note: u8, convention: transit_midi::MiddleC) -> String {
     transit_midi::note_name(note, convention)
 }
 
-/// Pad `index`'s effective trigger note: its stored note, else its default. The pad start note
-/// (ADR 0041 amendment 2026-11-09) changes the default inside `PadEntry::trigger`.
+/// Pad `index`'s effective trigger note: its stored note, else the pad start note plus its index
+/// (ADR 0041 amendment 2026-11-09).
 fn pad_note(p: &PatchV1, index: u8) -> u8 {
-    p.pad(index).trigger()
-}
-
-/// The root a run uses when the caller gives none: the loop's root. The loop stores one today
-/// (a new loop takes the pad start note); when a loop may hold no root (ADR 0041 amendment
-/// 2026-11-09 item 7, `root_stored`), an absent root reads the patch's pad start note here.
-fn default_run_root(l: &SliceLoop) -> u8 {
-    l.root
+    p.pad_note(index)
 }
 
 /// The set the mode showing reads.
@@ -295,8 +288,11 @@ fn plan_json(p: &PatchV1, plan: &Plan, names: transit_midi::MiddleC) -> Value {
     out
 }
 
-/// Applies an accepted plan to `p` (the loop's source and slice bounds from `views`).
-fn apply(p: &mut PatchV1, plan: &Plan, views: &[SliceView]) {
+/// Applies an accepted plan to `p` (the loop's source and slice bounds from `views`). With `absolute`
+/// (the run stores its root) every run pad stores its note, so the run is absolute like its root
+/// and a later start-note change cannot split it; otherwise only the pads step 3 re-notes store
+/// one, and pads on their default notes keep following the pad start note.
+fn apply(p: &mut PatchV1, plan: &Plan, views: &[SliceView], absolute: bool) {
     // Step 4 first, so their zone slots are free for the new zones.
     for (q, _) in &plan.unbound {
         let pad = p.pad(*q);
@@ -337,7 +333,7 @@ fn apply(p: &mut PatchV1, plan: &Plan, views: &[SliceView]) {
             }
         };
         pad.zone = Some(zone);
-        if !c.on_note {
+        if absolute || !c.on_note {
             pad.note = Some(c.note);
         }
         p.set_pad(pad);
@@ -373,9 +369,13 @@ fn slices_to_pads(e: &mut Engine, p: &Value) -> Result<Value> {
         Some(v) => v.as_bool().ok_or_else(|| bad(id, "`preview` must be true or false"))?,
     };
     let (set, views, ids) = showing_slices(id, &patch)?;
-    let root = match p.get("root") {
-        None => default_run_root(loop_of(id, &patch)?),
-        Some(v) => root_param(id, v)?,
+    let chosen = p.get("root").map(|v| root_param(id, v)).transpose()?;
+    let root = match chosen {
+        None => {
+            loop_of(id, &patch)?;
+            patch.slice_root()
+        }
+        Some(r) => r,
     };
     let plan = plan(&patch, set, &ids, root);
     let names = e.message_middle_c();
@@ -388,9 +388,11 @@ fn slices_to_pads(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, r));
     }
     let before = patch.clone();
-    apply(&mut patch, &plan, &views);
-    if let Some(l) = patch.slicing.as_mut() {
-        l.root = root;
+    apply(&mut patch, &plan, &views, chosen.is_some());
+    // A root the user selects is stored and absolute; a run without one stores none, so the loop
+    // keeps following the pad start note (ADR 0041 amendment 2026-11-09 item 7).
+    if let (Some(l), Some(r)) = (patch.slicing.as_mut(), chosen) {
+        l.root = Some(r);
     }
     write_through_slice_zones(&mut patch, set);
     if patch != before {
@@ -449,14 +451,14 @@ fn map_slices(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut pads = Vec::with_capacity(n);
     for (i, q) in run.iter().enumerate() {
         let note = root + i as u8;
+        // Every run pad stores its note: Map's root is always stored, so the run is absolute like
+        // its root and a later start-note change cannot split it.
         let entry = patch.pad(*q);
-        if entry.trigger() != note {
-            patch.set_pad(PadEntry { note: Some(note), ..entry });
-        }
+        patch.set_pad(PadEntry { note: Some(note), ..entry });
         pads.push(json!({"pad": q + 1, "note": note, "slice": i + 1, "id": ids[i]}));
     }
     if let Some(l) = patch.slicing.as_mut() {
-        l.root = root;
+        l.root = Some(root);
     }
     if patch != before {
         store(e, id, t, patch)?;

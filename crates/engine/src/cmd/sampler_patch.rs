@@ -6,6 +6,11 @@
 //!
 //! - **Zones and pads** are numbered as the panel shows them: `zone` 1..=256 (the slot of the
 //!   `zoneNNN_*` controls), `pad` 1..=64 (A1 is 1, bank B starts at 17).
+//! - **Pad notes** (ADR 0041 amendment 2026-11-09): a new patch has pad start note 36; a pad
+//!   without a stored note plays the start note plus its index, a stored note is absolute.
+//!   `mix.sampler_pad_start` moves the defaulted pads and the roots of their zones in one step.
+//!   Refusals and notices that name a note use the engine's message Middle C (ADR 0051); every
+//!   parameter and result is a MIDI number.
 //! - **Sources.** `source` names a session source; `path` decodes a file (a relative path is taken
 //!   from the session's folder; every path goes through the checked file access); `import` takes a
 //!   prepared asynchronous import (`file.prepare_import`). A file is referenced where it is by
@@ -27,6 +32,7 @@ use crate::cmd;
 use serde_json::{Map, json};
 use std::path::{Path, PathBuf};
 use transit_dsp::plugins::sampler as dsp_sampler;
+use transit_model::pad_notes::PadRefusal;
 use transit_model::sampler_patch::{Ownership, PadEntry, PatchV1, ZoneEntry};
 use transit_model::{Insert, SamplerPatch, Session, SourceId, TrackId};
 
@@ -92,9 +98,18 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set Sampler Pad",
             [],
             None,
-            "{track?, pad: 1-64, note?: 0-127 (unique among pads), choke?: 0 (Off)-16, mute?, solo?, name?} → {track, pad, note}",
+            "{track?, pad: 1-64, note?: 0-127 (unique among pads; stored and absolute) | null (back to the default, the pad start note + index), choke?: 0 (Off)-16, mute?, solo?, name?} → {track, pad, note (the effective note)}",
             has_selection,
             pad_set
+        ),
+        cmd!(
+            "mix.sampler_pad_start",
+            "Set Sampler Pad Start Note",
+            [],
+            None,
+            "{track?, note: 0-64 (MIDI number)}: the pad start note; pads without a stored note play note + index and move with it, stored notes stay; zones bound to moved pads keep their pitch (their roots move too); clips are not changed → {track, note, from, semitones, notice}",
+            has_selection,
+            pad_start
         ),
         cmd!("mix.sampler_seed", "Set Sampler Seed", [], None, "{track?, seed: 0-4294967295 (0 acts as 1)} → {track, seed}", has_selection, seed),
         cmd!(
@@ -392,7 +407,7 @@ fn zone_source(e: &mut Engine, p: &Value) -> Result<Value> {
     );
     let fresh = patch.zone(zone).is_none();
     if let (Some(pad), true) = (pad, fresh) {
-        entry.pad_defaults(patch.pad(pad).trigger());
+        entry.pad_defaults(patch.pad_note(pad));
     }
     let entry = apply_settings(id, &entry, p)?;
     patch.zones.retain(|z| z.id != zone);
@@ -470,11 +485,19 @@ fn pad_set(e: &mut Engine, p: &Value) -> Result<Value> {
     let pad = pad_param(id, p)?;
     let mut entry = patch.pad(pad);
     if let Some(v) = p.get("note") {
-        let note = v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n <= 127).ok_or_else(|| bad(id, "`note` must be 0-127"))?;
-        if let Some(other) = (0..transit_model::sampler_patch::PADS as u8).find(|q| *q != pad && patch.pad(*q).trigger() == note) {
+        // `null` returns the pad to its default note, checked like any note edit.
+        let stored = match v {
+            Value::Null => None,
+            _ => Some(v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n <= 127).ok_or_else(|| bad(id, "`note` must be 0-127"))?),
+        };
+        let note = stored.unwrap_or_else(|| PadEntry::default_note(pad, patch.pad_start_note));
+        if let Some(other) = (0..transit_model::sampler_patch::PADS as u8).find(|q| *q != pad && patch.pad_note(*q) == note) {
             return Err(bad(id, format!("note {note} is pad {}'s trigger note", other + 1)));
         }
-        entry.note = Some(note);
+        if entry.zone.is_some() {
+            patch.check_pad_layers(pad, note).map_err(|r| bad(id, r.text(e.message_middle_c())))?;
+        }
+        entry.note = stored;
     }
     if let Some(v) = p.get("choke") {
         entry.choke = v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n <= 16).ok_or_else(|| bad(id, "`choke` must be 0 (Off) to 16"))?;
@@ -492,10 +515,26 @@ fn pad_set(e: &mut Engine, p: &Value) -> Result<Value> {
             _ => return Err(bad(id, "`name` must be text")),
         };
     }
-    let note = entry.trigger();
+    let note = entry.trigger(patch.pad_start_note);
     patch.set_pad(entry);
     store(e, id, t, patch)?;
     Ok(json!({"track": t, "pad": pad + 1, "note": note}))
+}
+
+/// `mix.sampler_pad_start`: one step that moves the defaulted pads and their zones' roots, refused
+/// whole (ADR 0041 amendment 2026-11-09, item 3); an unchanged start note records no step.
+fn pad_start(e: &mut Engine, p: &Value) -> Result<Value> {
+    let id = "mix.sampler_pad_start";
+    let t = instrument_track(e, id, p)?;
+    let mut patch = patch_of(e.session(), id, t)?;
+    let names = e.message_middle_c();
+    let refused = |r: PadRefusal| bad(id, r.text(names));
+    let note = p.get("note").and_then(Value::as_u64).and_then(|n| u8::try_from(n).ok()).ok_or_else(|| refused(PadRefusal::StartRange))?;
+    let change = patch.set_pad_start(note).map_err(refused)?;
+    if change.semitones() != 0 {
+        store(e, id, t, patch)?;
+    }
+    Ok(json!({"track": t, "note": change.to, "from": change.from, "semitones": change.semitones(), "notice": change.notice(names)}))
 }
 
 fn seed(e: &mut Engine, p: &Value) -> Result<Value> {

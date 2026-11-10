@@ -15,12 +15,14 @@ fn step(i: usize) -> f32 {
     if i < 12_000 { 0.5 } else { -0.5 }
 }
 
-/// An instrument track with an empty patch and a 48,000-frame source (`None`: no loop yet).
+/// An instrument track with an empty patch at pad start note 60 (stated: these tests were written
+/// for pads on 60 and up) and a 48,000-frame source (`None`: no loop yet).
 fn bare() -> (Engine, TrackId, SourceId) {
     let mut e = Engine::default();
     e.execute("track.new", &json!({"kind": "instrument", "format": "stereo"})).unwrap();
     let t = e.session().tracks.last().unwrap().id;
     e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
+    e.execute("mix.sampler_pad_start", &json!({"track": t, "note": 60})).unwrap();
     let rate = e.session().sample_rate.hz();
     let buf = AudioBuffer { sample_rate: rate, channels: vec![(0..48_000).map(step).collect()] };
     let sid = crate::io::add_source(e.session_mut(), "loop", buf, None, FileFormat::Wav);

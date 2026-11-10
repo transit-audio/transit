@@ -149,7 +149,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, pads: &[PadData],
     }
     let s = &mut out.strip;
     y = name_r.max.y + TITLE_GAP;
-    s.id_line = format!("Pad {} · note {}", super::pad_id(selected), sel.entry.trigger());
+    s.id_line = format!("Pad {} · note {}", super::pad_id(selected), sel.note);
     s.id_line_rect = r4(widgets::role_text(&p, &tokens::READOUT_DISPLAY, &s.id_line, t.text_faint, Align2::LEFT_TOP, pos2(inner.min.x, y)));
     y += super::line_h(&p, &tokens::READOUT_DISPLAY) + GROUP_GAP;
     // The choke row and the picker.

@@ -20,6 +20,8 @@ fn setup_at(rate: u32, frames: usize) -> (Engine, TrackId) {
     e.execute("track.new", &json!({"kind": "instrument", "format": "stereo"})).unwrap();
     let t = e.session().tracks.last().unwrap().id;
     e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
+    // A new patch starts its pads at 36; these tests were written for pads from 60.
+    e.execute("mix.sampler_pad_start", &json!({"track": t, "note": 60})).unwrap();
     let buf = AudioBuffer { sample_rate: rate, channels: vec![(0..frames).map(|i| (i as f32 * 0.01).sin() * 0.5).collect()] };
     let sid = crate::io::add_source(e.session_mut(), "loop", buf, None, FileFormat::Wav);
     e.execute("mix.sampler_slice_loop", &json!({"track": t, "source": sid})).unwrap();

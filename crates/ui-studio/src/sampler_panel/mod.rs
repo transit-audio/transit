@@ -253,6 +253,8 @@ impl SamplerLayout {
 #[derive(Debug, Clone)]
 pub(crate) struct PadData {
     pub entry: PadEntry,
+    /// The note the pad plays: its stored note, else the pad start note plus its index.
+    pub note: u8,
     pub zone: Option<ZoneEntry>,
     pub name: String,
 }
@@ -277,7 +279,7 @@ pub(crate) fn pads_of(s: &Session, patch: &PatchV1) -> Vec<PadData> {
             let entry = patch.pad(i);
             let zone = entry.zone.and_then(|z| patch.zone(z)).cloned();
             let name = pad_name(s, patch, &entry, zone.as_ref());
-            PadData { entry, zone, name }
+            PadData { entry, note: patch.pad_note(i), zone, name }
         })
         .collect()
 }

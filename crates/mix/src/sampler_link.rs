@@ -39,13 +39,15 @@ use transit_model::sampler_patch::{GroupEntry, LoopMode, PadEntry, PatchV1, Play
 
 /// What a publication carries, compared to decide whether a running instance needs a new one: the
 /// identity of each source's audio (0: unusable), the zones, the regions slice-bound zones derive
-/// from their slices (a marker edit moves them), the pads and the groups' modes.
+/// from their slices (a marker edit moves them), the pads with the pad start note their defaulted
+/// notes follow, and the groups' modes.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Structure {
     sources: Vec<usize>,
     zones: Vec<ZoneEntry>,
     derived: Vec<Option<DerivedRegion>>,
     pads: Vec<PadEntry>,
+    pad_start_note: u8,
     groups: Vec<GroupEntry>,
 }
 
@@ -93,6 +95,7 @@ pub(crate) fn structure(p: &PatchV1, s: &Session) -> Structure {
         zones: p.zones.clone(),
         derived: p.zones.iter().map(|z| derived_region(z, p)).collect(),
         pads: p.pads.clone(),
+        pad_start_note: p.pad_start_note,
         groups: p.groups.clone(),
     }
 }
@@ -133,8 +136,10 @@ fn core_zone(z: &ZoneEntry, p: &PatchV1, source: u16, bound: bool) -> Zone {
 }
 
 /// The publication of `p` in `s`: its usable sources (wrapped through `wrappers`), the zones that
-/// can play and the group members that cannot as silent placeholders, the 64 pads (a pad of a zone
-/// left out is unbound here) and each group's round-robin mode. Also the ids of the silent zones
+/// can play and the group members that cannot as silent placeholders, the 64 pads on their effective
+/// notes (ADR 0041 amendment 2026-11-09: a stored note, else the pad start note plus the index; the
+/// core has no start note) with a pad of a zone left out unbound here, and each group's round-robin
+/// mode. Also the ids of the silent zones
 /// (missing, disk-backed or unusable media, or a region past the source).
 pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Arc<dyn SampleSource>>) -> (PatchSpec, Vec<u16>) {
     let mut spec = PatchSpec::default();
@@ -177,7 +182,7 @@ pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Ar
         let e = p.pad(i as u8);
         let playable = |z: &u16| spec.zones.get(usize::from(*z)).and_then(Option::as_ref).is_some_and(|z| z.region.source != sampler::SILENT_SOURCE);
         let zone = e.zone.filter(playable);
-        Pad { zone, note: e.trigger(), mute: e.mute, solo: e.solo, choke: e.choke }
+        Pad { zone, note: p.pad_note(i as u8), mute: e.mute, solo: e.solo, choke: e.choke }
     });
     for g in &p.groups {
         if let Some(mode) = spec.groups.get_mut(usize::from(g.id)) {

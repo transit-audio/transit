@@ -127,7 +127,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, pads: &[PadData],
         };
         let o = pad::show(ui, egui::Id::new(("sampler_pad", dev.uid(), index)), slot_pos(origin, slot), &shown);
         behavior::pad_input(app, ui, dev, index, d, &o.response);
-        out.pads.push(PadRecord { index, pad: o.layout, note: d.entry.trigger(), zone: d.entry.zone });
+        out.pads.push(PadRecord { index, pad: o.layout, note: d.note, zone: d.entry.zone });
     }
     // The status line.
     let at = pos2(inner.min.x, origin.y + GRID + GAP);

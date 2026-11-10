@@ -29,6 +29,7 @@ pub mod midi_transport;
 pub use midi_transport::{TransportControl, TransportPrefs, TransportProfiles};
 mod midi_output;
 mod mixer;
+pub mod pad_notes;
 mod rack;
 mod route_graph;
 pub mod sampler_fades;

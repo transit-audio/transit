@@ -46,7 +46,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Make Slice Loop",
             [],
             None,
-            "{track?, source: id, start?: 0, end?: the source's length, root?: 0-127 (default: the pad start note)}: the patch's one slice loop over the source region, mode Auto, both sets at the loop start only → {track, source, start, end, mode, root}",
+            "{track?, source: id, start?: 0, end?: the source's length, root?: 0-127 (stored, absolute) | null (default: none stored, it follows the pad start note)}: the patch's one slice loop over the source region, mode Auto, both sets at the loop start only → {track, source, start, end, mode, root (in use), root_stored}",
             has_selection,
             slice_loop
         ),
@@ -91,7 +91,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set Slice Settings",
             [],
             None,
-            "{track?, snap?: bool, root?: 0-127, beat_length?: quarter notes > 0 | null}: the shared slicing settings; no marker changes (the detector settings source, sensitivity, division, bars and grid_bpm travel with Detect) → {track, snap, root, beat_length}",
+            "{track?, snap?: bool, root?: 0-127 (stored, absolute) | null (follow the pad start note), beat_length?: quarter notes > 0 | null}: the shared slicing settings; no marker changes (the detector settings source, sensitivity, division, bars and grid_bpm travel with Detect) → {track, snap, root (in use), root_stored, beat_length}",
             has_selection,
             slice_set
         ),
@@ -100,19 +100,21 @@ pub fn specs() -> Vec<CommandSpec> {
             "Slice State",
             [],
             None,
-            "{track?, at?: tick (the placement; the session tempo and meter are read there)}: the loop, both sets (per slice: id, frame, end, label, pad, key, zones), mode, snap, root, beat length and its default, detector, division, bars, grid_bpm, the grid tempo and its origin, and mapping: ascending|stale|none (stale: the first two out-of-order slices) → {track, loop: null | {..}}",
+            "{track?, at?: tick (the placement; the session tempo and meter are read there)}: the loop, both sets (per slice: id, frame, end, label, pad, key, zones), mode, snap, root (in use) and root_stored, beat length and its default, detector, division, bars, grid_bpm, the grid tempo and its origin, and mapping: ascending|stale|none (stale: the first two out-of-order slices) → {track, loop: null | {..}}",
             has_selection,
             state
         ),
     ]
 }
 
-/// The slice-mapping root a new loop starts with when the caller gives none. ADR 0041's
-/// "Amendment 2026-11-09: the pad start note" makes it the patch's pad start note; until that
-/// field exists the pad start note is pad A1's default trigger note. The one place this default
-/// is read, so the pad start note replaces it here.
-pub(crate) fn default_slice_root(_patch: &PatchV1) -> u8 {
-    PadEntry::default_note(0)
+/// A `root` parameter: 0-127 stores it (absolute), `null` clears it (the loop then follows the pad
+/// start note, ADR 0041 amendment 2026-11-09 item 7). The root a run reads is
+/// [`PatchV1::slice_root`].
+fn root_param(id: &str, v: &Value) -> Result<Option<u8>> {
+    match v {
+        Value::Null => Ok(None),
+        v => v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n <= 127).map(Some).ok_or_else(|| bad(id, "`root` must be 0-127, or null")),
+    }
 }
 
 /// Rewrites the derived `start`, `end`, `loop_start` and `loop_end` of every zone bound to a
@@ -240,14 +242,12 @@ fn slice_loop(e: &mut Engine, p: &Value) -> Result<Value> {
     if end > frames {
         return Err(bad(id, format!("`end` is past the source's {frames} frames")));
     }
-    let root = match p.get("root") {
-        None => default_slice_root(&patch),
-        Some(v) => v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n <= 127).ok_or_else(|| bad(id, "`root` must be 0-127"))?,
-    };
+    let root = p.get("root").map(|v| root_param(id, v)).transpose()?.flatten();
     let index = u16::try_from(patch.source_index(sid, Ownership::Managed)).map_err(|_| bad(id, "too many sources"))?;
     patch.slicing = Some(SliceLoop { source: index, start, end, root, ..SliceLoop::default() });
+    let used = patch.slice_root();
     store(e, id, t, patch)?;
-    Ok(json!({"track": t, "source": sid, "start": start, "end": end, "mode": "auto", "root": root}))
+    Ok(json!({"track": t, "source": sid, "start": start, "end": end, "mode": "auto", "root": used, "root_stored": root.is_some()}))
 }
 
 fn slice_mode(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -437,7 +437,7 @@ fn slice_set(e: &mut Engine, p: &Value) -> Result<Value> {
         l.snap = v.as_bool().ok_or_else(|| bad(id, "`snap` must be true or false"))?;
     }
     if let Some(v) = p.get("root") {
-        l.root = v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n <= 127).ok_or_else(|| bad(id, "`root` must be 0-127"))?;
+        l.root = root_param(id, v)?;
     }
     if let Some(v) = p.get("beat_length") {
         l.beat_length = match v {
@@ -449,7 +449,8 @@ fn slice_set(e: &mut Engine, p: &Value) -> Result<Value> {
             ),
         };
     }
-    let out = json!({"track": t, "snap": l.snap, "root": l.root, "beat_length": l.beat_length});
+    let (snap, stored, beat_length) = (l.snap, l.root.is_some(), l.beat_length);
+    let out = json!({"track": t, "snap": snap, "root": patch.slice_root(), "root_stored": stored, "beat_length": beat_length});
     if patch_of(e.session(), id, t)? != patch {
         store(e, id, t, patch)?;
     }
@@ -549,7 +550,7 @@ pub(super) fn slices(p: &PatchV1, set: SliceSet) -> Vec<SliceView> {
             let zones: Vec<u16> =
                 p.zones.iter().filter(|z| id.is_some() && z.slice.as_ref().is_some_and(|b| b.set == set && Some(b.id) == id)).map(|z| z.id).collect();
             let pad = zones.iter().find_map(|z| p.pad_of(*z));
-            SliceView { id, frame, end, label, pad, key: pad.map(|x| p.pad(x).trigger()), zones }
+            SliceView { id, frame, end, label, pad, key: pad.map(|x| p.pad_note(x)), zones }
         })
         .collect()
 }
@@ -599,7 +600,8 @@ fn state(e: &mut Engine, p: &Value) -> Result<Value> {
         SliceMode::Manual => SliceSet::Manual,
     };
     let mut out = json!({
-        "source": source, "start": l.start, "end": l.end, "rate": rate, "mode": mode_name(l.mode), "snap": l.snap, "root": l.root,
+        "source": source, "start": l.start, "end": l.end, "rate": rate, "mode": mode_name(l.mode), "snap": l.snap,
+        "root": patch.slice_root(), "root_stored": l.root.is_some(),
         "detector": {"source": l.detector.source, "sensitivity": l.detector.sensitivity},
         "division": l.division, "bars": l.bars, "grid_bpm": l.grid_bpm, "grid_tempo": grid,
         "beat_length": l.beat_length, "default_beat_length": default_beat_length(l, rate, acid, at_tempo),

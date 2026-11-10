@@ -23,6 +23,8 @@ fn setup() -> (Engine, TrackId) {
     e.execute("track.new", &json!({"kind": "instrument", "format": "stereo"})).unwrap();
     let t = e.session().tracks.last().unwrap().id;
     e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
+    // A new patch starts its pads at 36; these tests were written for pads from 60.
+    e.execute("mix.sampler_pad_start", &json!({"track": t, "note": 60})).unwrap();
     let rate = e.session().sample_rate.hz();
     let buf = AudioBuffer { sample_rate: rate, channels: vec![(0..LEN).map(wave).collect()] };
     let sid = crate::io::add_source(e.session_mut(), "loop", buf, None, FileFormat::Wav);
@@ -113,7 +115,7 @@ fn bound(e: &Engine, t: TrackId) -> Vec<(u8, u8, SliceSet, u32)> {
         .filter_map(|q| {
             let pad = p.pad(q);
             let b = pad.zone.and_then(|z| p.zone(z)).and_then(|z| z.slice.clone())?;
-            Some((q + 1, pad.trigger(), b.set, b.id))
+            Some((q + 1, p.pad_note(q), b.set, b.id))
         })
         .collect()
 }
@@ -124,7 +126,7 @@ fn run(root: u8, pads: &[u8], set: SliceSet) -> Vec<(u8, u8, SliceSet, u32)> {
 
 fn notes_unique(p: &PatchV1) -> bool {
     let mut seen = [false; 128];
-    (0..64u8).all(|q| !std::mem::replace(&mut seen[usize::from(p.pad(q).trigger())], true))
+    (0..64u8).all(|q| !std::mem::replace(&mut seen[usize::from(p.pad_note(q))], true))
 }
 
 fn cell_replaces(out: &Value) -> Vec<Value> {
@@ -140,7 +142,7 @@ fn slices_map_ascending_from_root() {
         assert_eq!(bound(&e, t), run(root, &[1, 2, 3, 4, 5, 6, 7, 8], SliceSet::Manual), "root {root}");
         assert_eq!((out["ok"].clone(), out["count"].clone(), out["root"].clone()), (json!(true), json!(8), json!(root)));
         let p = patch(&e, t);
-        assert_eq!(p.slicing.as_ref().unwrap().root, root, "the run stores its root");
+        assert_eq!(p.slicing.as_ref().unwrap().root, Some(root), "the run stores its root");
         for k in 0..8u8 {
             let z = p.zone(p.pad(k).zone.unwrap()).unwrap();
             let (start, end) = (u64::from(k) * 6_000, u64::from(k) * 6_000 + 6_000);
@@ -203,14 +205,21 @@ fn pad_assignment_follows_the_amendment_steps() {
     assert_eq!(bound(&e, t), run(36, &[1, 2, 3, 4], SliceSet::Manual));
     let p = patch(&e, t);
     assert!(notes_unique(&p));
-    assert_eq!((p.pad(4).zone, p.pad(4).trigger(), p.zone(10)), (None, 64, None), "unbound: the pad empties, its note stays");
+    assert_eq!((p.pad(4).zone, p.pad_note(4), p.zone(10)), (None, 64, None), "unbound: the pad empties, its note stays");
     assert_eq!(out["unbound"], json!([{"pad": 5, "note": 64, "slice": 1, "id": 1, "zone": 11}]));
-    // Default notes, root 60: every slice finds its note on an empty pad (step 2).
+    // Default notes, a run without a root (it follows the start note, 60 here): every slice finds
+    // its note on an empty pad (step 2), and step 2 leaves the pad's note as it was.
+    let (mut e, t) = setup();
+    manual(&mut e, t, 4);
+    to_pads(&mut e, t, None);
+    assert_eq!(bound(&e, t), run(60, &[1, 2, 3, 4], SliceSet::Manual));
+    assert!((0..4u8).all(|q| patch(&e, t).pad(q).note.is_none()), "step 2 leaves the pad's note as it was");
+    // The same run with root 60 stores its root, so every run pad stores its note (absolute).
     let (mut e, t) = setup();
     manual(&mut e, t, 4);
     to_pads(&mut e, t, Some(60));
     assert_eq!(bound(&e, t), run(60, &[1, 2, 3, 4], SliceSet::Manual));
-    assert!((0..4u8).all(|q| patch(&e, t).pad(q).note.is_none()), "step 2 leaves the pad's note as it was");
+    assert!((0..4u8).all(|q| patch(&e, t).pad(q).note == Some(60 + q)), "a run with a root stores every run pad's note");
 }
 
 #[test]
@@ -226,7 +235,7 @@ fn reapplication_at_a_new_root_unbinds_unused_pads_and_reports_them() {
         json!([{"pad": 1, "note": 60, "slice": 1, "id": 1, "zone": zones[0] + 1}, {"pad": 2, "note": 61, "slice": 2, "id": 2, "zone": zones[1] + 1}])
     );
     let p = patch(&e, t);
-    assert_eq!((p.pad(0).zone, p.pad(0).trigger(), p.pad(1).zone, p.pad(1).trigger()), (None, 60, None, 61));
+    assert_eq!((p.pad(0).zone, p.pad_note(0), p.pad(1).zone, p.pad_note(1)), (None, 60, None, 61));
     // Their zones are emptied first, so the two new pads' zones take those lowest free slots.
     assert_eq!(zones.iter().map(|z| p.pad_of(*z)).collect::<Vec<_>>(), [Some(4), Some(5)], "freed zone slots are reused by the new pads");
     assert_eq!(p.zones.len(), 4);
@@ -345,7 +354,7 @@ fn root_overflow_refused() {
     // The highest root fits: 120..123 are pads A61..A64, 124..127 go to A1..A4.
     to_pads(&mut e, t, Some(120));
     let p = patch(&e, t);
-    let keys: Vec<(u8, u8)> = (0..64u8).filter_map(|q| p.pad(q).zone.map(|_| (q + 1, p.pad(q).trigger()))).collect();
+    let keys: Vec<(u8, u8)> = (0..64u8).filter_map(|q| p.pad(q).zone.map(|_| (q + 1, p.pad_note(q)))).collect();
     assert_eq!(keys, [(1, 124), (2, 125), (3, 126), (4, 127), (61, 120), (62, 121), (63, 122), (64, 123)]);
     assert!(notes_unique(&p));
 }
@@ -471,7 +480,7 @@ fn map_slices_rewrites_only_the_run() {
     assert_eq!((state["loop"]["mapping"].clone(), state["loop"]["mapping_root"].clone()), (json!("ascending"), json!(60)));
     // The whole run moves to a new root in one step; a loose pad on one of its notes refuses.
     one_step(&mut e, "mix.sampler_map_slices", json!({"track": t, "root": 36}));
-    assert_eq!(patch(&e, t).slicing.unwrap().root, 36, "the loop stores the root");
+    assert_eq!(patch(&e, t).slicing.unwrap().root, Some(36), "the loop stores the root");
     let text = refused(&mut e, "mix.sampler_map_slices", json!({"track": t, "root": 69}));
     assert!(text.ends_with("Pad A10 already plays A3"), "{text}");
     // A slice without a pad cannot be mapped.
@@ -507,7 +516,7 @@ fn map_slices_moves_an_empty_pad_off_the_run() {
         vec![(1, 60, SliceSet::Manual, 1), (3, 62, SliceSet::Manual, 3), (4, 63, SliceSet::Manual, 4), (9, 61, SliceSet::Manual, 2)]
     );
     let p = patch(&e, t);
-    assert_eq!((p.pad(1).zone, p.pad(1).trigger()), (None, 68), "the empty pad stays empty on the vacated note");
+    assert_eq!((p.pad(1).zone, p.pad_note(1)), (None, 68), "the empty pad stays empty on the vacated note");
     assert!(notes_unique(&p), "no two pads share a note");
     assert_eq!(p.zones, before.zones, "no zone changes");
     let others = |p: &PatchV1| (0..64u8).filter(|q| ![0, 1, 2, 3, 8].contains(q)).map(|q| p.pad(q)).collect::<Vec<_>>();
@@ -631,6 +640,9 @@ fn old_sessions_open_and_render_with_unchanged_hashes() {
     let sid = crate::io::add_source(e.session_mut(), "loop", AudioBuffer { sample_rate: rate, channels: vec![noise(LEN)] }, None, FileFormat::Wav);
     e.execute("mix.sampler_slice_loop", &json!({"track": t, "source": sid})).unwrap();
     edit(&mut e, t, |p| {
+        // A patch saved before the pad start note reads 60 (the field is written only when it is not
+        // 60, so the saved bytes are those an older build wrote).
+        p.pad_start_note = 60;
         let l = p.slicing.as_mut().unwrap();
         l.manual = Some(even(3));
         l.mode = SliceMode::Manual;
@@ -651,4 +663,88 @@ fn old_sessions_open_and_render_with_unchanged_hashes() {
     let h = hash(&transit_mix::render_range(back.session(), Range::new(0, 72_000), 512));
     assert_eq!(h, OLD_SESSION_GOLDEN, "an old session renders as it did");
     assert_eq!(serde_json::to_value(patch(&back, t)).unwrap(), serde_json::to_value(patch(&e, t)).unwrap(), "and opens with its patch as saved");
+}
+
+// The pad start note (ADR 0041 amendment 2026-11-09 item 7) through the slice commands.
+
+/// Sets the pad start note by the command.
+fn start(e: &mut Engine, t: TrackId, note: u8) {
+    e.execute("mix.sampler_pad_start", &json!({"track": t, "note": note})).unwrap();
+}
+
+/// Slice to MIDI's first and last key for the showing set, from a preview (nothing is edited).
+fn midi_keys(e: &mut Engine, t: TrackId) -> (Value, Value) {
+    let out = e.execute("mix.slice_to_midi", &json!({"track": t, "timing": "fit", "at": 0, "preview": true})).unwrap();
+    (out["first_key"].clone(), out["last_key"].clone())
+}
+
+#[test]
+fn a_default_run_starts_at_the_pad_start_note_and_stores_no_root() {
+    for s in [36u8, 12] {
+        let (mut e, t) = setup();
+        start(&mut e, t, s);
+        manual(&mut e, t, 8);
+        let out = to_pads(&mut e, t, None);
+        assert_eq!(out["root"], json!(s), "start {s}: the run's root is the start note");
+        assert_eq!(bound(&e, t), run(s, &[1, 2, 3, 4, 5, 6, 7, 8], SliceSet::Manual), "start {s}: slice 1 on pad A1");
+        let p = patch(&e, t);
+        assert_eq!(p.slicing.as_ref().unwrap().root, None, "start {s}: a run without a root stores none");
+        assert!((0..8u8).all(|q| !p.pad_note_stored(q)), "start {s}: pads on their default notes store no note");
+        assert_eq!(p.slice_root(), s);
+    }
+}
+
+#[test]
+fn slice_to_midi_keys_follow_the_start_note_after_a_default_run() {
+    let (mut e, t) = setup();
+    start(&mut e, t, 36);
+    manual(&mut e, t, 4);
+    to_pads(&mut e, t, None);
+    assert_eq!(midi_keys(&mut e, t), (json!(36), json!(39)), "keys from the start note");
+    // The run follows a start change as a whole, and Slice to MIDI follows it.
+    start(&mut e, t, 12);
+    assert_eq!(bound(&e, t), run(12, &[1, 2, 3, 4], SliceSet::Manual), "the run moved with the start note");
+    assert_eq!(midi_keys(&mut e, t), (json!(12), json!(15)), "keys follow the start note");
+}
+
+#[test]
+fn an_explicit_map_root_survives_a_start_change() {
+    let (mut e, t) = setup();
+    manual(&mut e, t, 4);
+    to_pads(&mut e, t, None);
+    // Map at the run's own root: every run pad sits on its default note before it.
+    one_step(&mut e, "mix.sampler_map_slices", json!({"track": t, "root": 60}));
+    let p = patch(&e, t);
+    assert_eq!(p.slicing.as_ref().unwrap().root, Some(60), "Map stores its root");
+    assert!((0..4u8).all(|q| p.pad_note_stored(q)), "every run pad stores its note");
+    start(&mut e, t, 64);
+    assert_eq!(bound(&e, t), run(60, &[1, 2, 3, 4], SliceSet::Manual), "the run stays where Map put it");
+    assert_eq!(patch(&e, t).slice_root(), 60);
+    assert_eq!(midi_keys(&mut e, t), (json!(60), json!(63)));
+}
+
+#[test]
+fn a_run_with_a_root_stores_every_run_pad_note_and_survives_a_start_change() {
+    let (mut e, t) = setup();
+    manual(&mut e, t, 4);
+    to_pads(&mut e, t, Some(60));
+    assert!((0..4u8).all(|q| patch(&e, t).pad_note_stored(q)), "every run pad stores its note");
+    start(&mut e, t, 64);
+    assert_eq!(bound(&e, t), run(60, &[1, 2, 3, 4], SliceSet::Manual), "the run is absolute like its root");
+    assert_eq!(midi_keys(&mut e, t), (json!(60), json!(63)));
+}
+
+#[test]
+fn a_stored_note_on_an_empty_pad_refuses_a_start_change_truthfully() {
+    // Map moves the empty A2 to note 68 (stored); a start note of 64 would put the defaulted A5
+    // on 68.
+    let (mut e, t) = slice_two_moved_to_a9();
+    one_step(&mut e, "mix.sampler_map_slices", json!({"track": t, "root": 60}));
+    let state = e.execute("mix.sampler_state", &json!({"track": t})).unwrap();
+    let a2 = &state["pads"][1];
+    assert_eq!((a2["note"].clone(), a2["note_stored"].clone(), a2["zone"].clone()), (json!(68), json!(true), Value::Null), "A2 is empty on 68");
+    let a5 = &state["pads"][4];
+    assert_eq!((a5["note"].clone(), a5["note_stored"].clone()), (json!(64), json!(false)), "A5 is defaulted: start 60 plus 4");
+    let text = refused(&mut e, "mix.sampler_pad_start", json!({"track": t, "note": 64}));
+    assert!(text.ends_with("Pad A2 plays G#3: a start note of E3 would put pad A5 there."), "{text}");
 }

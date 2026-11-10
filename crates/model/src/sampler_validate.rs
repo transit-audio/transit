@@ -141,6 +141,9 @@ impl PatchV1 {
     }
 
     fn check_pads(&self) -> Result<(), Invalid> {
+        if self.pad_start_note > crate::pad_notes::MAX_PAD_START {
+            return Err(bad(format!("the pad start note {} is past {}", self.pad_start_note, crate::pad_notes::MAX_PAD_START)));
+        }
         if self.pads.len() > PADS {
             return Err(bad(format!("{} pads (at most {PADS})", self.pads.len())));
         }
@@ -171,9 +174,10 @@ impl PatchV1 {
                 }
             }
         }
+        // Unique among the pads' effective notes (stored, or the start note plus the index).
         let mut notes = [false; 128];
         for i in 0..PADS as u8 {
-            let note = self.pad(i).trigger();
+            let note = self.pad_note(i);
             match notes.get_mut(usize::from(note)) {
                 Some(s) if !*s => *s = true,
                 _ => return Err(bad(format!("pad {}: note {note} is another pad's trigger note", i + 1))),
@@ -192,7 +196,10 @@ impl PatchV1 {
         if !in_range(l.detector.sensitivity, 0.0, 1.0) {
             return Err(bad("the detector sensitivity is out of range"));
         }
-        if l.bars.is_some_and(|b| !(1..=16).contains(&b)) || l.root > 127 || l.beat_length.is_some_and(|b| !(b.is_finite() && b > 0.0)) {
+        if l.bars.is_some_and(|b| !(1..=16).contains(&b))
+            || l.root.is_some_and(|r| r > 127)
+            || l.beat_length.is_some_and(|b| !(b.is_finite() && b > 0.0))
+        {
             return Err(bad("the loop's bars, root or beat length is out of range"));
         }
         if l.grid_bpm.is_some_and(|b| !(b.is_finite() && (5.0..=1000.0).contains(&b))) {
