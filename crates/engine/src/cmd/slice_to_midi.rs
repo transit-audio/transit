@@ -20,7 +20,7 @@
 
 use super::sampler::instrument_track;
 use super::sampler_patch::patch_of;
-use super::sampler_slice_pads::{MappingStatus, mapping_status, root_param, showing, too_high};
+use super::sampler_slice_pads::{MappingStatus, StaleSlice, mapping_status, pad_name, root_param, showing, too_high};
 use super::sampler_slices::{AtTempo, SliceView, default_beat_length, loop_of, slices};
 use super::*;
 use crate::cmd;
@@ -121,9 +121,32 @@ fn showing_slices(p: &PatchV1, l: &SliceLoop) -> Result<(SliceSet, Vec<SliceView
     Ok((set, views))
 }
 
+/// The stale refusal. When the keys are the run's keys with exactly two slices exchanged (one swap
+/// of two pads, neighbors or not), it names those two; otherwise (several swaps, a rotation, keys
+/// outside one run) it names the first break in the order, `b` after `a`, which is always true.
+fn stale_text(views: &[SliceView], a: &StaleSlice, b: &StaleSlice) -> String {
+    let head = "The slices' keys no longer run in order";
+    let keys: Option<Vec<u8>> = views.iter().map(|v| v.key).collect();
+    if let Some(keys) = keys
+        && let Some(&root) = keys.iter().min()
+    {
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        let run = sorted.iter().enumerate().all(|(i, k)| usize::from(*k) == usize::from(root) + i);
+        let off: Vec<usize> = (0..keys.len()).filter(|i| usize::from(keys[*i]) != usize::from(root) + i).collect();
+        if run && let [x, y] = off[..] {
+            return format!("{head}: slices {} and {} swapped pads.", x + 1, y + 1);
+        }
+    }
+    let pad = b.pad.map_or_else(|| "no pad".to_string(), |q| format!("pad {}", pad_name(q)));
+    let (kb, after) = (b.key.map_or(0, u16::from), a.key.map_or(0, |k| u16::from(k) + 1));
+    format!("{head}: slice {} on {pad} plays key {kb}, not {after} after slice {}.", b.slice, a.slice)
+}
+
 /// The root the notes start at: the showing set's ascending mapping, which a chosen root must
 /// match. A stale or missing mapping refuses and is never repaired here.
-fn mapping_root(p: &PatchV1, set: SliceSet, n: usize, chosen: Option<u8>) -> Result<u8> {
+fn mapping_root(p: &PatchV1, set: SliceSet, views: &[SliceView], chosen: Option<u8>) -> Result<u8> {
+    let n = views.len();
     if let Some(r) = chosen
         && let Some(text) = too_high(r, n)
     {
@@ -136,7 +159,7 @@ fn mapping_root(p: &PatchV1, set: SliceSet, n: usize, chosen: Option<u8>) -> Res
             if let Some(s) = [&a, &b].into_iter().find(|s| s.key.is_none()) {
                 return Err(bad(ID, format!("Slice {} has no pad: use Slices to pads.", s.slice)));
             }
-            return Err(bad(ID, format!("The slices' keys no longer run in order: slices {} and {} swapped pads.", a.slice, b.slice)));
+            return Err(bad(ID, stale_text(views, &a, &b)));
         }
     };
     if let Some(r) = chosen.filter(|r| *r != root) {
@@ -199,7 +222,7 @@ fn plan(e: &Engine, t: TrackId, prm: &Params) -> Result<Plan> {
     }
     let (set, views) = showing_slices(&patch, l)?;
     let n = views.len();
-    let root = mapping_root(&patch, set, n, prm.root)?;
+    let root = mapping_root(&patch, set, &views, prm.root)?;
     let rate = source_rate(s, &patch, l);
     let beat = match prm.timing {
         Timing::Keep => None,

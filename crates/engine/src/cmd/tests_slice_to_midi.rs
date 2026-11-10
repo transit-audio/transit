@@ -472,3 +472,32 @@ fn refuses_a_placement_past_the_timeline() {
         }
     }
 }
+
+/// Moves zones between pads with the pad commands: every named pad is unbound, then each takes
+/// the zone that pad `from` held (1-based pads).
+fn rebind(e: &mut Engine, t: TrackId, moves: &[(u8, u8)]) {
+    let held: Vec<u16> = moves.iter().map(|(_, from)| patch(e, t).pad(from - 1).zone.unwrap()).collect();
+    for (pad, _) in moves {
+        e.execute("mix.sampler_pad_unbind", &json!({"track": t, "pad": pad})).unwrap();
+    }
+    for ((pad, _), z) in moves.iter().zip(held) {
+        e.execute("mix.sampler_pad_bind", &json!({"track": t, "pad": pad, "zone": z + 1})).unwrap();
+    }
+}
+
+#[test]
+fn stale_text_names_the_swapped_pair_or_the_first_break() {
+    // Slices 3 and 5 swap pads (keys 60, 61, 64, 63, 62): the text names exactly those two.
+    let (mut e, t) = setup();
+    sliced(&mut e, t, &[0, 9_600, 19_200, 28_800, 38_400], 60);
+    rebind(&mut e, t, &[(3, 5), (5, 3)]);
+    let text = refused(&mut e, json!({"track": t, "timing": "fit", "at": 0}));
+    assert!(text.ends_with("The slices' keys no longer run in order: slices 3 and 5 swapped pads."), "{text}");
+    // A rotation (slice 1 on A2, 2 on A3, 3 on A1: keys 61, 62, 60) is no single swap: the text
+    // names the first break, which is true for any order.
+    let (mut e, t) = setup();
+    sliced(&mut e, t, &[0, 16_000, 32_000], 60);
+    rebind(&mut e, t, &[(2, 1), (3, 2), (1, 3)]);
+    let text = refused(&mut e, json!({"track": t, "timing": "fit", "at": 0}));
+    assert!(text.ends_with("The slices' keys no longer run in order: slice 3 on pad A1 plays key 60, not 63 after slice 2."), "{text}");
+}
