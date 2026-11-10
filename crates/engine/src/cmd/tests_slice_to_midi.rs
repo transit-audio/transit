@@ -454,3 +454,21 @@ fn refuses_without_at() {
     let text = refused(&mut e, json!({"track": t, "timing": "fit", "at": -1}));
     assert!(text.ends_with("`at` must be a tick at or after 0"), "{text}");
 }
+
+#[test]
+fn refuses_a_placement_past_the_timeline() {
+    // The first tick past the timeline's end, and one near the largest tick: refused before any
+    // arithmetic on `at`, in both timings, the preview too.
+    let (mut e, t) = gate_loop();
+    let s = e.session();
+    let first_past = (0..)
+        .map(|k: i64| s.tempo.samples_to_ticks(transit_time::MAX_POSITION, s.sample_rate) + k)
+        .find(|tick| s.tempo.tick_to_samples(*tick, s.sample_rate) > transit_time::MAX_POSITION)
+        .unwrap();
+    for at in [i64::MAX - 10, first_past] {
+        for timing in ["fit", "keep"] {
+            let text = refused(&mut e, json!({"track": t, "timing": timing, "beat_length": null, "at": at}));
+            assert!(text.ends_with("The placement is past the end of the session's timeline."), "{timing} at {at}: {text}");
+        }
+    }
+}

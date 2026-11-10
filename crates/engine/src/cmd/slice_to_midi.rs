@@ -50,6 +50,9 @@ const CHANNEL: u8 = 0;
 /// The refusal without a placement (ADR 0041 amendment 2026-11-08, item 9).
 pub(crate) const NEEDS_PLACEMENT: &str = "Slice to MIDI needs a placement.";
 
+/// The refusal for a placement whose sample is past the timeline's end.
+const PLACEMENT_PAST_END: &str = "The placement is past the end of the session's timeline.";
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Timing {
     /// Fit length: the loop spans `beat_length` quarter notes.
@@ -183,6 +186,11 @@ struct Plan {
 
 fn plan(e: &Engine, t: TrackId, prm: &Params) -> Result<Plan> {
     let s = e.session();
+    // Before any arithmetic on `at`: a placement past the timeline is refused, so the boundary
+    // ticks below cannot overflow.
+    if s.tempo.tick_to_samples(prm.at, s.sample_rate) > MAX_POSITION {
+        return Err(bad(ID, PLACEMENT_PAST_END));
+    }
     let tr = s.track(t).ok_or_else(|| bad(ID, "no track"))?;
     let patch = patch_of(s, ID, t)?;
     let l = loop_of(ID, &patch)?;
