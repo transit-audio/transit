@@ -748,3 +748,20 @@ fn a_stored_note_on_an_empty_pad_refuses_a_start_change_truthfully() {
     let text = refused(&mut e, "mix.sampler_pad_start", json!({"track": t, "note": 64}));
     assert!(text.ends_with("Pad A2 plays G#3: a start note of E3 would put pad A5 there."), "{text}");
 }
+
+#[test]
+fn a_run_that_would_start_a_ninth_voice_on_a_note_is_refused() {
+    // Eight unbound zones over notes 60 to 63: a pad bound on any of them starts a ninth voice.
+    let (mut e, t) = setup();
+    manual(&mut e, t, 4);
+    edit(&mut e, t, |p| {
+        for z in 20..28u16 {
+            let mut zone = ZoneEntry::whole(z, 0, LEN as u64);
+            zone.keys = [60, 63];
+            p.zones.push(zone);
+        }
+        p.zones.sort_by_key(|z| z.id);
+    });
+    let text = refused(&mut e, "mix.sampler_slices_to_pads", json!({"track": t}));
+    assert!(text.ends_with("Pad A1 would be a ninth layer on C3."), "{text}");
+}

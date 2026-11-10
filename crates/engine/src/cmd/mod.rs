@@ -41,6 +41,7 @@ mod query;
 mod rack;
 mod realtime_render;
 pub(crate) mod sampler;
+mod sampler_groups;
 pub(crate) mod sampler_patch;
 mod sampler_slice_detect;
 mod sampler_slice_pads;
@@ -199,6 +200,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(sampler_slice_pads::specs());
         v.extend(slice_to_midi::specs());
         v.extend(sampler_state::specs());
+        v.extend(sampler_groups::specs());
         v.extend(zoom_toggle::specs());
         v.extend(rack::specs());
         v.extend(takes::specs());

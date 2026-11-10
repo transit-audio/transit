@@ -27,6 +27,7 @@
 //!   `Insert::sample` is never checked against these bounds.
 
 use super::sampler::instrument_track;
+use super::sampler_groups::{self, Binding};
 use super::*;
 use crate::cmd;
 use serde_json::{Map, json};
@@ -52,7 +53,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "New Sampler Patch",
             [],
             None,
-            "{track?, seed?: 1}: the track's instrument becomes a Sampler with an empty patch (zones, pads, slicing); its one-sample `sample` is left unset → {track}",
+            "{track?, seed?: 0-4294967295 (default 1; 0 is stored as 1)}: the track's instrument becomes a Sampler with an empty patch (zones, pads, slicing); its one-sample `sample` is left unset → {track, seed (as stored)}",
             has_selection,
             new_patch
         ),
@@ -61,7 +62,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set Sampler Zone Source",
             [],
             None,
-            "{track?, zone: 1-256, source: id | path | import: id, copy?: false, pad?: 1-64, region?: {start, end, loop_mode: off|forward|ping_pong, loop_start, loop_end}, playback?: {root, transpose, cents, reverse, mode: one_shot|gate, key_tracking, attack_ms, decay_ms, sustain, release_ms, declick_ms, velocity_sensitivity, keys: [lo, hi], velocities: [lo, hi], label}} → {track, zone, source, frames, channels}",
+            "{track?, zone: 1-256, source: id | path | import: id, copy?: false, pad?: 1-64, region?: {start, end, loop_mode: off|forward|ping_pong, loop_start, loop_end, crossfade}, playback?: {root, transpose, cents, reverse, mode: one_shot|gate, key_tracking, attack_ms, decay_ms, sustain, release_ms, declick_ms, velocity_sensitivity, keys: [lo, hi], velocities: [lo, hi], label, membership, fades}} → {track, zone, source, frames, channels}",
             has_selection,
             zone_source
         ),
@@ -70,7 +71,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit Sampler Zone",
             [],
             None,
-            "{track?, zone: 1-256, region?: {..}, playback?: {..}} (as mix.sampler_zone_source) → {track, zone}",
+            "{track?, zone: 1-256, region?: {.., crossfade (source frames)}, playback?: {.., membership: {group, layer, alternative} | null, fades: {key_lo, key_hi, vel_lo, vel_hi}}, pad?: null (unbind the zone's pad)} (as mix.sampler_zone_source; checked when set) → {track, the zone's state as mix.sampler_state reports it}",
             has_selection,
             zone_edit
         ),
@@ -111,7 +112,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             pad_start
         ),
-        cmd!("mix.sampler_seed", "Set Sampler Seed", [], None, "{track?, seed: 0-4294967295 (0 acts as 1)} → {track, seed}", has_selection, seed),
+        cmd!(
+            "mix.sampler_seed",
+            "Set Sampler Seed",
+            [],
+            None,
+            "{track?, seed: 0-4294967295 (0 is stored as 1)} → {track, seed (as stored)}",
+            has_selection,
+            seed
+        ),
         cmd!(
             "mix.sampler_control",
             "Set Sampler Control",
@@ -135,6 +144,12 @@ pub(super) fn patch_of(s: &Session, id: &str, t: TrackId) -> Result<PatchV1> {
 /// Checks `p` as the instance will, then stores it on track `t`.
 pub(super) fn store(e: &mut Engine, id: &str, t: TrackId, p: PatchV1) -> Result<()> {
     transit_mix::check_sampler_patch(&p, e.session()).map_err(|m| bad(id, m))?;
+    // At most eight voices start for one note (ADR 0041), before publication: refused when this
+    // edit adds a voice past the bound (a map loaded over it is never refused for another edit).
+    let before = patch_of(e.session(), id, t).unwrap_or_default();
+    if let Some(o) = p.layer_overload(&before) {
+        return Err(bad(id, o.text(e.message_middle_c())));
+    }
     let ins = e.session_mut().track_mut(t).and_then(|tr| tr.instrument.as_mut()).ok_or_else(|| bad(id, "no track"))?;
     ins.sampler_patch = Some(SamplerPatch { state: transit_model::sampler_patch::PatchState::Ready(Box::new(p)) });
     Ok(())
@@ -154,8 +169,8 @@ fn pad_param(id: &str, p: &Value) -> Result<u8> {
     index_param(id, p, "pad", transit_model::sampler_patch::PADS).map(|z| z as u8)
 }
 
-const REGION_KEYS: [&str; 5] = ["start", "end", "loop_mode", "loop_start", "loop_end"];
-const PLAYBACK_KEYS: [&str; 15] = [
+const REGION_KEYS: [&str; 6] = ["start", "end", "loop_mode", "loop_start", "loop_end", "crossfade"];
+const PLAYBACK_KEYS: [&str; 17] = [
     "root",
     "transpose",
     "cents",
@@ -171,6 +186,8 @@ const PLAYBACK_KEYS: [&str; 15] = [
     "keys",
     "velocities",
     "label",
+    "membership",
+    "fades",
 ];
 
 /// `zone` with the `region` and `playback` objects of `p` applied (unknown keys refused).
@@ -179,10 +196,13 @@ fn apply_settings(id: &str, zone: &ZoneEntry, p: &Value) -> Result<ZoneEntry> {
     for (group, keys) in [("region", &REGION_KEYS[..]), ("playback", &PLAYBACK_KEYS[..])] {
         let Some(given) = p.get(group) else { continue };
         let given: &Map<String, Value> = given.as_object().ok_or_else(|| bad(id, format!("`{group}` must be an object")))?;
-        for (k, x) in given {
+        for k in given.keys() {
             if !keys.contains(&k.as_str()) {
                 return Err(bad(id, format!("`{group}` has no `{k}` (it takes {})", keys.join(", "))));
             }
+        }
+        sampler_groups::check_new_keys(id, given)?;
+        for (k, x) in given {
             if let Some(o) = v.as_object_mut() {
                 o.insert(k.clone(), x.clone());
             }
@@ -194,10 +214,7 @@ fn apply_settings(id: &str, zone: &ZoneEntry, p: &Value) -> Result<ZoneEntry> {
 fn new_patch(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "mix.sampler_new_patch";
     let t = instrument_track(e, id, p)?;
-    let seed = match p.get("seed") {
-        None => 1,
-        Some(v) => v.as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| bad(id, "`seed` must be 0-4294967295"))?,
-    };
+    let seed = p.get("seed").map_or(Ok(1), |v| sampler_groups::seed_param(id, v))?;
     let info = transit_dsp::plugin_info(SAMPLER).ok_or_else(|| bad(id, "the sampler is not available"))?;
     let tr = e.session_mut().track_mut(t).ok_or_else(|| bad(id, "no track"))?;
     if tr.instrument.as_ref().is_some_and(|i| i.plugin == SAMPLER && i.sampler_patch.is_some()) {
@@ -215,7 +232,7 @@ fn new_patch(e: &mut Engine, p: &Value) -> Result<Value> {
         ins.sampler_patch =
             Some(SamplerPatch { state: transit_model::sampler_patch::PatchState::Ready(Box::new(PatchV1 { seed, ..PatchV1::default() })) });
     }
-    Ok(json!({"track": t}))
+    Ok(json!({"track": t, "seed": seed}))
 }
 
 /// The size of decoded audio: frames × channels × 4 bytes, `None` on overflow.
@@ -410,9 +427,9 @@ fn zone_source(e: &mut Engine, p: &Value) -> Result<Value> {
         entry.pad_defaults(patch.pad_note(pad));
     }
     let entry = apply_settings(id, &entry, p)?;
-    patch.zones.retain(|z| z.id != zone);
-    patch.zones.push(entry);
-    patch.zones.sort_by_key(|z| z.id);
+    let before = patch.zone(zone).cloned();
+    let binding = if pad.is_some() { Binding::Bind } else { Binding::Keep };
+    sampler_groups::admit_zone(e.session(), id, &mut patch, before.as_ref(), entry, &sampler_groups::given_keys(p), binding)?;
     if let Some(pad) = pad {
         patch.set_pad(PadEntry { zone: Some(zone), ..patch.pad(pad) });
     }
@@ -428,11 +445,20 @@ fn zone_edit(e: &mut Engine, p: &Value) -> Result<Value> {
     let zone = zone_param(id, p)?;
     let current = patch.zone(zone).cloned().ok_or_else(|| bad(id, format!("zone {} is empty", zone + 1)))?;
     let next = apply_settings(id, &current, p)?;
-    if let Some(z) = patch.zone_mut(zone) {
-        *z = next;
-    }
+    let binding = match p.get("pad") {
+        None => Binding::Keep,
+        Some(Value::Null) => Binding::Unbind,
+        Some(_) => return Err(bad(id, "`pad` takes only null here (unbind the zone's pad in the same edit)")),
+    };
+    sampler_groups::admit_zone(e.session(), id, &mut patch, Some(&current), next, &sampler_groups::given_keys(p), binding)?;
+    patch.check_groups().map_err(|r| bad(id, r.to_string()))?;
     store(e, id, t, patch)?;
-    Ok(json!({"track": t, "zone": zone + 1}))
+    let stored = patch_of(e.session(), id, t)?;
+    let mut out = stored.zone(zone).map_or(json!({}), |z| sampler_groups::zone_json(e.session(), &stored, z));
+    if let Some(o) = out.as_object_mut() {
+        o.insert("track".into(), json!(t));
+    }
+    Ok(out)
 }
 
 fn zone_clear(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -541,7 +567,7 @@ fn seed(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "mix.sampler_seed";
     let t = instrument_track(e, id, p)?;
     let mut patch = patch_of(e.session(), id, t)?;
-    patch.seed = p.get("seed").and_then(Value::as_u64).and_then(|x| u32::try_from(x).ok()).ok_or_else(|| bad(id, "`seed` must be 0-4294967295"))?;
+    patch.seed = sampler_groups::seed_param(id, p.get("seed").unwrap_or(&Value::Null))?;
     let seed = patch.seed;
     store(e, id, t, patch)?;
     Ok(json!({"track": t, "seed": seed}))

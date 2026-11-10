@@ -1,11 +1,14 @@
 //! `mix.sampler_state` (ADR 0041 amendment 2026-11-08): the read-only query of a Sampler patch as
 //! stored, with what playback uses beside it. This build reports the pad start note, each pad's
 //! effective note and whether it is stored, and the loop's root in use and whether it is stored
-//! (amendment 2026-11-09, item 6); every value is a MIDI number. The per-zone used values of the
-//! 2026-11-08 amendment (`loop_used`, `crossfade_used`, `fades_used`) join it with the group
-//! commands.
+//! (amendment 2026-11-09, item 6); every value is a MIDI number. Per zone it reports the stored
+//! loop mode, crossfade and fades beside the values playback uses (`loop_used`, `crossfade_used`,
+//! `fades_used`; the 2026-11-08 amendment's "checked when set, clamped when used"), the zone's
+//! pad, membership and slice, the region a slice-bound zone derives, and its source's native rate
+//! (the crossfade field's millisecond conversion); per group its round-robin mode and members.
 
 use super::sampler::instrument_track;
+use super::sampler_groups::{groups_json, zone_json};
 use super::sampler_patch::patch_of;
 use super::*;
 use crate::cmd;
@@ -18,7 +21,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Sampler State",
         [],
         None,
-        "{track?}: the Sampler patch as stored (`patch`), the normalized seed, `pad_start_note`, per pad {pad, note (effective: stored, else the start note + index), note_stored, zone, mute, solo, choke, name}, and the loop's root in use with root_stored (null without a loop); MIDI numbers throughout → {track, patch, seed, pad_start_note, pads, loop}",
+        "{track?}: the Sampler patch as stored (`patch`), the normalized seed, `pad_start_note`, per pad {pad, note (effective: stored, else the start note + index), note_stored, zone, mute, solo, choke, name}, the loop's root in use with root_stored (null without a loop), per zone {zone, pad, keys, velocities, root, mode, membership, loop_mode, loop_used, crossfade, crossfade_used (source frames), fades, fades_used, slice, region (derived, slice-bound zones), rate}, per group {group, round_robin, zones}; MIDI numbers throughout → {track, patch, seed, pad_start_note, pads, loop, zones, groups}",
         has_selection,
         state
     )]
@@ -45,6 +48,8 @@ fn state(e: &mut Engine, p: &Value) -> Result<Value> {
     Ok(json!({
         "track": t, "patch": stored, "seed": patch.seed.max(1), "pad_start_note": patch.pad_start_note,
         "pads": pads_json(&patch), "loop": lp,
+        "zones": patch.zones.iter().map(|z| zone_json(e.session(), &patch, z)).collect::<Vec<_>>(),
+        "groups": groups_json(&patch),
     }))
 }
 

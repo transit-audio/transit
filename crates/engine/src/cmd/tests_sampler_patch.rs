@@ -302,15 +302,16 @@ fn the_patch_bound_counts_distinct_audio_once() {
         let buf = AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.0; frames]; 2] };
         ids.push(crate::io::add_source(e.session_mut(), &format!("s{i}"), buf, None, FileFormat::Wav));
     }
+    // One key each: at most eight zones may sound on one note (ADR 0041).
     for (z, sid) in ids.iter().take(11).enumerate() {
-        e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": z + 1, "source": sid.0})).unwrap();
+        e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": z + 1, "source": sid.0, "playback": {"keys": [z, z]}})).unwrap();
     }
     let before = e.session_arc();
     let err = e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 12, "source": ids[11].0})).unwrap_err().to_string();
     assert!(err.contains("128 MiB"), "{err}");
     assert!(Arc::ptr_eq(&before, &e.session_arc()));
     // A sample already in the patch adds nothing: another zone on it is admitted.
-    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 12, "source": ids[0].0})).unwrap();
+    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 12, "source": ids[0].0, "playback": {"keys": [11, 11]}})).unwrap();
 }
 
 #[test]
