@@ -3,8 +3,8 @@
 //! that fails is kept opaque ([`crate::sampler_patch`]'s module doc).
 
 use crate::sampler_patch::{
-    ALTERNATIVES, CHOKE_GROUPS, LAYERS, LoopMode, MAX_CONTROL_ID, MAX_CONTROLS, MAX_LABEL_BYTES, MAX_SLICES, MAX_SOURCES, PADS, PatchV1, SCHEMA,
-    SliceLoop, SliceSet, ZONES, ZoneEntry, is_control_id,
+    CHOKE_GROUPS, LoopMode, MAX_CONTROL_ID, MAX_CONTROLS, MAX_LABEL_BYTES, MAX_SLICES, MAX_SOURCES, PADS, PatchV1, SCHEMA, SliceLoop, SliceSet,
+    ZONES, ZoneEntry, is_control_id,
 };
 
 /// Why a patch is refused (an edit) or kept opaque (a load).
@@ -43,7 +43,6 @@ impl PatchV1 {
             return Err(bad(format!("{} zones (at most {ZONES})", self.zones.len())));
         }
         let mut seen = [false; ZONES];
-        let mut members: Vec<(u8, u8, u8)> = Vec::new();
         for z in &self.zones {
             let n = z.id + 1;
             match seen.get_mut(usize::from(z.id)) {
@@ -52,14 +51,9 @@ impl PatchV1 {
                 None => return Err(bad(format!("zone id {} is past {ZONES}", z.id))),
             }
             self.check_zone(z).map_err(|why| bad(format!("zone {n}: {why}")))?;
-            if let Some(m) = &z.membership {
-                let key = (m.group, m.layer, m.alternative);
-                if members.contains(&key) {
-                    return Err(bad(format!("zone {n}: another zone is layer {} alternative {} of group {}", m.layer, m.alternative, m.group)));
-                }
-                members.push(key);
-            }
         }
+        // The key-map groups' shape (the core refuses a badly shaped one, so it loads opaque).
+        self.check_groups().map_err(|r| bad(r.to_string()))?;
         self.check_pads()?;
         if self.groups.len() > ZONES {
             return Err(bad("too many groups"));
@@ -121,9 +115,6 @@ impl PatchV1 {
         // Widths too wide for the ranges, or set on a pad-bound zone, are kept and clamped at use.
         if z.fades.widths().iter().any(|&w| w > crate::sampler_fades::MAX_WIDTH) {
             return Err("a fade width is past 127");
-        }
-        if z.membership.as_ref().is_some_and(|m| m.layer >= LAYERS || m.alternative >= ALTERNATIVES) {
-            return Err("its layer or alternative is past 8");
         }
         if !label_ok(z.label.as_ref()) {
             return Err("its label is too long");

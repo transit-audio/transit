@@ -37,7 +37,7 @@ fn full() -> PatchV1 {
     };
     let layered = ZoneEntry {
         id: 200,
-        membership: Some(Membership { group: 3, layer: 2, alternative: 1, extra: extra.clone() }),
+        membership: Some(Membership { group: 3, layer: 2, alternative: 0, extra: extra.clone() }),
         fades: Fades { key_lo: 3, key_hi: 4, vel_lo: 5, vel_hi: 6, extra: extra.clone() },
         ..ZoneEntry::whole(200, 0, 512)
     };

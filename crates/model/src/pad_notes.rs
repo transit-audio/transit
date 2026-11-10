@@ -14,6 +14,7 @@
 //!   convention its caller passes (the engine's message Middle C, ADR 0051); the values stay MIDI
 //!   numbers.
 
+use crate::sampler_groups::{LayerOverload, Voice};
 use crate::sampler_patch::{PADS, PatchV1};
 use transit_midi::{MiddleC, note_name};
 
@@ -94,6 +95,16 @@ impl StartChange {
     }
 }
 
+/// Refusal (c) for an overload a pad note change made: the pad named, else the bound pad on the
+/// note (only a moved pad adds a voice to a note there, so the first is what happens).
+fn ninth_layer(o: &LayerOverload, moved: &PatchV1) -> PadRefusal {
+    let pad = match o.by {
+        Voice::Pad(p) => p,
+        Voice::Zone(_) => (0..PADS as u8).find(|i| moved.pad(*i).zone.is_some() && moved.pad_note(*i) == o.note).unwrap_or(0),
+    };
+    PadRefusal::NinthLayer { pad, note: o.note }
+}
+
 impl PatchV1 {
     /// The note pad `index` plays: its stored note, else the pad start note plus the index.
     #[must_use]
@@ -117,26 +128,14 @@ impl PatchV1 {
         self.slicing.as_ref().and_then(|l| l.root).unwrap_or(self.pad_start_note)
     }
 
-    /// The voices note `note` at velocity `velocity` starts in the unbound zones, as the core
-    /// selects them: each zone that no pad binds, whose key and velocity ranges hold the note and
-    /// the velocity, and that has no layer membership or is its layer's alternative 0.
-    #[must_use]
-    pub fn unbound_layers(&self, note: u8, velocity: u8) -> usize {
-        self.zones
-            .iter()
-            .filter(|z| self.pad_of(z.id).is_none())
-            .filter(|z| (z.keys[0]..=z.keys[1]).contains(&note) && (z.velocities[0]..=z.velocities[1]).contains(&velocity))
-            .filter(|z| z.membership.as_ref().is_none_or(|m| m.alternative == 0))
-            .count()
-    }
-
-    /// Refuses pad `pad` (bound to a zone) on note `note` when, for some velocity 1 to 127, the pad
-    /// and the unbound zones would start more than [`LAYERS_PER_NOTE`] voices.
+    /// Refuses pad `pad` (bound to a zone) moving to note `note` when, for some velocity 1 to 127,
+    /// the note would start more than [`LAYERS_PER_NOTE`] voices: the shared count
+    /// ([`PatchV1::layer_overload`], the pad counting one), made on the patch with the move.
     pub fn check_pad_layers(&self, pad: u8, note: u8) -> Result<(), PadRefusal> {
-        if (1..=127u8).any(|v| 1 + self.unbound_layers(note, v) > LAYERS_PER_NOTE) {
-            return Err(PadRefusal::NinthLayer { pad, note });
-        }
-        Ok(())
+        let mut moved = self.clone();
+        let entry = moved.pad(pad);
+        moved.set_pad(crate::sampler_patch::PadEntry { note: Some(note), ..entry });
+        moved.layer_overload(self).map_or(Ok(()), |o| Err(ninth_layer(&o, &moved)))
     }
 
     /// Sets the pad start note to `start`: every pad without a stored note moves with it and the
@@ -160,8 +159,10 @@ impl PatchV1 {
             }
         }
         let bound: Vec<(u8, u16)> = defaulted.iter().filter_map(|&i| self.pad(i).zone.map(|z| (i, z))).collect();
-        for &(i, _) in &bound {
-            self.check_pad_layers(i, start.saturating_add(i))?;
+        // (c) on the patch with every defaulted pad moved (they move together).
+        let moved = PatchV1 { pad_start_note: start, ..self.clone() };
+        if let Some(o) = moved.layer_overload(self) {
+            return Err(ninth_layer(&o, &moved));
         }
         let mut roots = Vec::with_capacity(bound.len());
         for &(i, z) in &bound {

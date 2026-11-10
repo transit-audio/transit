@@ -33,6 +33,7 @@ pub mod pad_notes;
 mod rack;
 mod route_graph;
 pub mod sampler_fades;
+pub mod sampler_groups;
 pub mod sampler_loops;
 pub mod sampler_patch;
 mod sampler_validate;
