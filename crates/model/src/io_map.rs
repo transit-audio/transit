@@ -640,6 +640,15 @@ mod tests {
         assert_eq!(names(&m, IoDirection::Output), ["Out 1-2", "Out 3-4", "Out 5"]);
     }
 
+    /// #429 review: the engine refuses a path left without channels through `set_channels` too,
+    /// and keeps the path as it was.
+    #[test]
+    fn set_channels_refuses_an_empty_list_and_keeps_the_path() {
+        let mut m = IoMap::for_device("ASIO", "x", 4, 4);
+        assert_eq!(m.set_channels("Out 3-4", Vec::new()), Err(IoError::Width(0)));
+        assert_eq!(m.path("Out 3-4").map(|p| p.channels.clone()), Some(vec![2, 3]));
+    }
+
     #[test]
     fn validation_refuses_width_range_and_duplicate_names() {
         let mut m = IoMap::for_device("ASIO", "x", 4, 4);
