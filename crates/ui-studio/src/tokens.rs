@@ -617,6 +617,13 @@ pub mod chrome {
     pub const TOOLTIP_OFFSET: f32 = 4.0;
     pub const FOCUS_RING_WIDTH: f32 = 1.5;
     pub const FOCUS_RING_OFFSET: f32 = 2.0;
+    /// A text field (`field`): its rest and hover edge is this wide; its rings (dragging, typing,
+    /// error) take [`FOCUS_RING_WIDTH`] on the field's own edge, inside its bounds, at this offset
+    /// (buttons keep [`FOCUS_RING_OFFSET`]); its text sits this far in (vertical, horizontal), on
+    /// both the 26 px chrome field and the 24 px value fields of device panels and strips.
+    pub const FIELD_EDGE_WIDTH: f32 = 1.0;
+    pub const FIELD_RING_OFFSET: f32 = 0.0;
+    pub const FIELD_PADDING: [f32; 2] = [0.0, 8.0];
     /// Text selection: `signal` at this alpha.
     pub const SELECTION_ALPHA_DARK: f32 = 0.6;
     pub const SELECTION_ALPHA_LIGHT: f32 = 0.35;
@@ -711,6 +718,10 @@ pub mod chrome {
         ("tooltip/offset", TOOLTIP_OFFSET),
         ("focusRing/width", FOCUS_RING_WIDTH),
         ("focusRing/offset", FOCUS_RING_OFFSET),
+        ("field/edgeWidth", FIELD_EDGE_WIDTH),
+        ("field/ringOffset", FIELD_RING_OFFSET),
+        ("field/padding/0", FIELD_PADDING[0]),
+        ("field/padding/1", FIELD_PADDING[1]),
         ("selectionAlpha/dark", SELECTION_ALPHA_DARK),
         ("selectionAlpha/light", SELECTION_ALPHA_LIGHT),
     ];
@@ -1147,8 +1158,9 @@ pub mod sampler {
     pub const START_NOTE_HEIGHT: f32 = 24.0;
     pub const START_NOTE_FONT_WEIGHT: f32 = 500.0;
     pub const START_NOTE_FONT_SIZE: f32 = 11.0;
-    /// Space between the field and the actions (Load kit...) that follow it.
-    pub const START_NOTE_GAP_BEFORE_ACTIONS: f32 = 16.0;
+    /// The start notes the field shows (`startNote.range`, MIDI numbers, inclusive): display only.
+    /// The model's `MAX_PAD_START` is the authority for behavior; a test keeps the two equal.
+    pub const START_NOTE_RANGE: [u8; 2] = [0, 64];
     pub const START_NOTE_DRAG_PX_PER_SEMITONE: f32 = 6.0;
     /// Every string under `sampler` in tokens.json by its path.
     pub const STRINGS: &[(&str, &str)] = &[
@@ -1196,7 +1208,11 @@ pub mod sampler {
         ("startNote/font/font", START_NOTE_FONT),
         ("startNote/default", START_NOTE_DEFAULT),
     ];
-    pub const VIEW_BAR_HEIGHT: f32 = 24.0;
+    /// The view bar's row; its controls take the dense `VIEW_BAR_CONTROL_HEIGHT`, centred, and its
+    /// items (a label and its field are one) stand `VIEW_BAR_GAP` apart.
+    pub const VIEW_BAR_HEIGHT: f32 = 28.0;
+    pub const VIEW_BAR_CONTROL_HEIGHT: f32 = 24.0;
+    pub const VIEW_BAR_GAP: f32 = 12.0;
     pub const VIEW_BAR_FONT_WEIGHT: f32 = 500.0;
     pub const VIEW_BAR_FONT_SIZE: f32 = 12.0;
     pub const ZONE_RADIUS: f32 = 4.0;
@@ -1238,6 +1254,8 @@ pub mod sampler {
     pub const VIEW_SWITCH_PADDING_X: f32 = 12.0;
     pub const METRICS: &[(&str, f32)] = &[
         ("viewBar/height", VIEW_BAR_HEIGHT),
+        ("viewBar/controlHeight", VIEW_BAR_CONTROL_HEIGHT),
+        ("viewBar/gap", VIEW_BAR_GAP),
         ("viewBar/font/weight", VIEW_BAR_FONT_WEIGHT),
         ("viewBar/font/size", VIEW_BAR_FONT_SIZE),
         ("keyMap/zoneRadius", ZONE_RADIUS),
@@ -1299,7 +1317,8 @@ pub mod sampler {
         ("startNote/height", START_NOTE_HEIGHT),
         ("startNote/font/weight", START_NOTE_FONT_WEIGHT),
         ("startNote/font/size", START_NOTE_FONT_SIZE),
-        ("startNote/gapBeforeActions", START_NOTE_GAP_BEFORE_ACTIONS),
         ("startNote/dragPxPerSemitone", START_NOTE_DRAG_PX_PER_SEMITONE),
+        ("startNote/range/0", START_NOTE_RANGE[0] as f32),
+        ("startNote/range/1", START_NOTE_RANGE[1] as f32),
     ];
 }

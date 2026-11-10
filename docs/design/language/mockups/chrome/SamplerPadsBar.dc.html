@@ -33,16 +33,18 @@ body{margin:0;background:#0B0C0E}
 
 <!-- the bar at the panel's design width, 976 -->
 <span class="h">The bar, 976 wide</span>
-<div style="margin-top: 10px; width: 976px; background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 8px 12px; box-sizing: border-box; display: flex; align-items: center; gap: 12px">
+<div style="margin-top: 10px; width: 976px; box-sizing: border-box; padding: 12px 16px; background: #131518; border: 1px solid #2B3036; border-radius: 8px">
+<div style="height: 28px; box-sizing: border-box; outline: 1px dashed #2B3036; outline-offset: 0; display: flex; align-items: center; gap: 12px">
 <div class="seg"><span>Instrument</span><span class="on">Pads</span><span>Slices</span></div>
 <span style="font: 400 11px 'IBM Plex Mono', monospace; color: #A7ADB6; white-space: nowrap">Bank A · 12 of 16 loaded · 3 choke groups</span>
 <span style="flex: 1"></span>
 <span class="lbl">Start note</span>
 <div class="note" style="margin-left: -6px">C1</div>
-<div class="btn" style="margin-left: 4px">Load kit…</div>
-<div class="btn" style="margin-left: -6px">Expand to rack…</div>
+<div class="btn">Load kit…</div>
+<div class="btn">Expand to rack…</div>
 </div>
-<span class="sub" style="display: block; margin-top: 8px">label · 6 · field 48 · 16 · Load kit… · 6 · Expand to rack…   (the actions keep the view bar's right edge)</span>
+</div>
+<span class="sub" style="display: block; margin-top: 8px">bar sampler.viewBar.height 28 (dashed) on every view · controls 24, centred · items sampler.viewBar.gap 12 apart · label · labelGap 6 · field 48 · 12 · Load kit… · 12 · Expand to rack…</span>
 
 <div style="display: flex; gap: 24px; margin-top: 14px">
 
@@ -73,21 +75,21 @@ body{margin:0;background:#0B0C0E}
 <div class="card" style="height: 150px">
 <span class="cap">typing</span>
 <div style="display: flex; align-items: center; gap: 6px"><span class="lbl">Start note</span><div class="note" style="border: 1.5px solid #4C9EFF; justify-content: flex-start; padding-left: 7px">c#-2<span style="display: inline-block; width: 1px; height: 13px; background: #E7E9EC; margin-left: 1px"></span></div></div>
-<span class="sub">double-click · a name or 0–127<br>Enter commits · Esc cancels</span>
+<span class="sub">double-click · a name or 0–64<br>Enter commits · Esc cancels</span>
 </div>
 
 <div class="card" style="height: 150px">
 <span class="cap">refused</span>
-<div style="display: flex; align-items: center; gap: 6px"><span class="lbl">Start note</span><div class="note" style="border: 1.5px solid #FF6B5B">C9</div></div>
-<span class="sub" style="color: #E7E9EC">No note C9: the range is C-2 to G8</span>
+<div style="display: flex; align-items: center; gap: 6px"><span class="lbl">Start note</span><div class="note" style="border: 1.5px solid #FF6B5B">F3</div></div>
+<span class="sub" style="color: #E7E9EC">No start note F3: the range is C-2 to E3</span>
 </div>
 
 </div>
 
-<span class="h" style="margin-top: 10px">Widest names in 48 (8 a side)</span>
+<span class="h" style="margin-top: 10px">The range in 48 (chrome.field.padding 8 a side)</span>
 <div style="display: flex; gap: 16px; align-items: center">
-<div class="note">C1</div><div class="note">C-2</div><div class="note">C#-2</div><div class="note">G#4</div><div class="note">G8</div>
-<span class="sub" style="margin-left: 8px">C#-2 is the widest name: 4 Mono glyphs, about 27 px at 11</span>
+<div class="note">C1</div><div class="note">C-2</div><div class="note">C#-2</div><div class="note">D#3</div><div class="note">E3</div>
+<span class="sub" style="margin-left: 8px">0 to 64 reads C-2 to E3 (Middle C = C3); C#-2 is the widest: 4 Mono glyphs, about 27 px at 11</span>
 </div>
 
 <span class="h" style="margin-top: 10px">Tooltip</span>
@@ -101,7 +103,7 @@ body{margin:0;background:#0B0C0E}
 <div style="width: 330px; flex: none; display: flex; flex-direction: column; gap: 12px">
 <div class="card">
 <span class="h">Spec</span>
-<span class="sub" style="line-height: 1.7">label "Start note" · label.control<br>6 · field 48 × 24 · radius 5<br>surface.inset · 1 px line (line.strong hover)<br>note name Mono 500 11 text, centred<br>16 before the first action<br>focus / drag: 1.5 px signal<br>refused: 1.5 px meter.hot + message<br>right-click: Reset to C1</span>
+<span class="sub" style="line-height: 1.7">label "Start note" · label.control<br>6 · field 48 × 24 · radius 5<br>surface.inset · 1 px line (line.strong hover)<br>note name Mono 500 11 text, centred<br>text inset chrome.field.padding 0 · 8<br>12 (bar gap) before the first action<br>rest 1 px line · hover 1 px line.strong<br>drag / typing: 1.5 px signal (focusRing.width)<br>error: 1.5 px meter.hot + message<br>rings inside the edge (ringOffset 0)<br>range 0–64 (C-2 to E3)<br>right-click: Reset to C1</span>
 </div>
 <div class="card">
 <span class="h">Why here</span>
