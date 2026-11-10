@@ -465,6 +465,52 @@ fn map_slices_rewrites_only_the_run() {
     assert!(text.ends_with("Slice 3 has no pad: use Slices to pads."), "{text}");
 }
 
+/// Slice 2 moved from pad A2 to the empty pad A9 by the pad commands: the mapping is stale and
+/// the empty A2 still holds note 61, one of the run's notes at root 60.
+fn slice_two_moved_to_a9() -> (Engine, TrackId) {
+    let (mut e, t) = setup();
+    manual(&mut e, t, 4);
+    to_pads(&mut e, t, Some(60));
+    let z = patch(&e, t).pad(1).zone.unwrap();
+    e.execute("mix.sampler_pad_unbind", &json!({"track": t, "pad": 2})).unwrap();
+    e.execute("mix.sampler_pad_bind", &json!({"track": t, "pad": 9, "zone": z + 1})).unwrap();
+    let state = e.execute("mix.sampler_slice_state", &json!({"track": t})).unwrap();
+    assert_eq!(state["loop"]["mapping"], json!("stale"));
+    (e, t)
+}
+
+#[test]
+fn map_slices_moves_an_empty_pad_off_the_run() {
+    let (mut e, t) = slice_two_moved_to_a9();
+    let before = patch(&e, t);
+    let out = one_step(&mut e, "mix.sampler_map_slices", json!({"track": t, "root": 60}));
+    // A9 takes 61; the empty A2 takes the note A9 vacated (68); nothing else moves.
+    assert_eq!(out["moved"], json!([{"pad": 2, "from": 61, "to": 68}]));
+    assert_eq!(out["pads"].as_array().unwrap().iter().map(|x| x["pad"].as_u64().unwrap()).collect::<Vec<_>>(), [1, 9, 3, 4]);
+    assert_eq!(
+        bound(&e, t),
+        vec![(1, 60, SliceSet::Manual, 1), (3, 62, SliceSet::Manual, 3), (4, 63, SliceSet::Manual, 4), (9, 61, SliceSet::Manual, 2)]
+    );
+    let p = patch(&e, t);
+    assert_eq!((p.pad(1).zone, p.pad(1).trigger()), (None, 68), "the empty pad stays empty on the vacated note");
+    assert!(notes_unique(&p), "no two pads share a note");
+    assert_eq!(p.zones, before.zones, "no zone changes");
+    let others = |p: &PatchV1| (0..64u8).filter(|q| ![0, 1, 2, 3, 8].contains(q)).map(|q| p.pad(q)).collect::<Vec<_>>();
+    assert_eq!(others(&p), others(&before), "every other pad is untouched");
+    let state = e.execute("mix.sampler_slice_state", &json!({"track": t})).unwrap();
+    assert_eq!((state["loop"]["mapping"].clone(), state["loop"]["mapping_root"].clone()), (json!("ascending"), json!(60)));
+}
+
+#[test]
+fn map_slices_still_refuses_a_sounding_pad_on_a_run_note() {
+    // As above, but the pad A2 left holds a zone bound to the hidden Auto set: it sounds.
+    let (mut e, t) = slice_two_moved_to_a9();
+    auto(&mut e, t, 2);
+    zone_on_pad(&mut e, t, 30, 1, Some((SliceSet::Auto, 1)));
+    let text = refused(&mut e, "mix.sampler_map_slices", json!({"track": t, "root": 60}));
+    assert!(text.ends_with("Pad A2 already plays C#3"), "{text}");
+}
+
 #[test]
 fn a_set_without_markers_is_refused() {
     let (mut e, t) = setup();

@@ -41,7 +41,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Map Slices to Keys",
             [],
             None,
-            "{track?, root: 0-(128 minus the slice count)}: re-notes only the showing set's slice pads so slice i plays root+i; every other pad is untouched; the loop stores root → {track, set, root, count, pads: [{pad, note, slice, id}]}",
+            "{track?, root: 0-(128 minus the slice count)}: re-notes only the showing set's slice pads so slice i plays root+i; an empty pad on one of the run's notes takes a note the run vacates, a sounding one refuses; every other pad is untouched; the loop stores root → {track, set, root, count, pads: [{pad, note, slice, id}], moved: [{pad, from, to}]}",
             has_selection,
             map_slices
         ),
@@ -411,14 +411,35 @@ fn map_slices(e: &mut Engine, p: &Value) -> Result<Value> {
         let pad = v.pad.ok_or_else(|| bad(id, format!("Slice {} has no pad: use Slices to pads.", i + 1)))?;
         run.push(pad);
     }
-    // A pad outside the run on one of the run's notes would collide: refused, never moved.
+    // A pad outside the run on one of the run's notes: a sounding one (loose or bound to the hidden
+    // set) refuses; an empty one, which sounds nothing, takes a note the run vacates.
+    let collision = |q: u8, note: u8| bad(id, format!("Pad {} already plays {}", pad_name(q), note_text(note, e.message_middle_c())));
+    let mut empty = Vec::new();
     for i in 0..n {
         let note = root + i as u8;
         if let Some(q) = (0..PADS as u8).find(|q| !run.contains(q) && pad_note(&patch, *q) == note) {
-            return Err(bad(id, format!("Pad {} already plays {}", pad_name(q), note_text(note, e.message_middle_c()))));
+            if held(&patch, q) != Held::Empty {
+                return Err(collision(q, note));
+            }
+            empty.push((q, note));
         }
     }
+    // Empty pads in ascending pad order take the vacated notes (the run's old notes outside the new
+    // run) in ascending order. Notes are unique, so there are always enough; refused otherwise.
+    empty.sort_unstable();
+    let run_notes = usize::from(root)..usize::from(root) + n;
+    let mut vacated: Vec<u8> = run.iter().map(|q| pad_note(&patch, *q)).filter(|k| !run_notes.contains(&usize::from(*k))).collect();
+    vacated.sort_unstable();
+    if let Some(&(q, note)) = empty.get(vacated.len()) {
+        return Err(collision(q, note));
+    }
     let before = patch.clone();
+    let mut moved = Vec::with_capacity(empty.len());
+    for (&(q, from), &to) in empty.iter().zip(&vacated) {
+        let entry = patch.pad(q);
+        patch.set_pad(PadEntry { note: Some(to), ..entry });
+        moved.push(json!({"pad": q + 1, "from": from, "to": to}));
+    }
     let mut pads = Vec::with_capacity(n);
     for (i, q) in run.iter().enumerate() {
         let note = root + i as u8;
@@ -434,7 +455,7 @@ fn map_slices(e: &mut Engine, p: &Value) -> Result<Value> {
     if patch != before {
         store(e, id, t, patch)?;
     }
-    Ok(json!({"track": t, "set": set_name(set), "root": root, "count": n, "pads": pads}))
+    Ok(json!({"track": t, "set": set_name(set), "root": root, "count": n, "pads": pads, "moved": moved}))
 }
 
 #[cfg(test)]
