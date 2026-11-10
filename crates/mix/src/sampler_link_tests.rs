@@ -516,3 +516,101 @@ const OLD_SAVED_PATCH: &str = r#"{"schema":1,"seed":7,"sources":[{"source":1},{"
 /// [`publication_digest`] of [`OLD_SAVED_PATCH`] on the base tree (captured on a fresh copy of it,
 /// in its own target).
 const OLD_SAVED_PUBLICATION: u64 = 0x3373_9f8f_5fdf_cb64;
+
+// Group, fade and crossfade edits through the plan compiler (ADR 0041 amendment 2026-11-08, items
+// 2, 3, 4 and 10): structural patch edits published to the running instance, which is kept, and a
+// republish never restarts the round-robin counters or random state.
+
+/// Item 4's draws for group `group` from patch seed `seed` over `count` alternatives, written out
+/// here rather than taken from the core.
+fn draws(seed: u32, group: u32, count: u32, n: usize) -> Vec<usize> {
+    let mut x = seed.max(1) ^ (group + 1).wrapping_mul(0x9E37_79B9);
+    if x == 0 {
+        x = 1;
+    }
+    (0..n)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            (x % count) as usize
+        })
+        .collect()
+}
+
+#[test]
+fn a_mode_change_republish_continues_the_random_sequence_and_the_sequential_order() {
+    let random = |id: u8| GroupEntry { id, round_robin: RoundRobin::Random, ..GroupEntry::default() };
+    // Random group 0 of four (seed 12345): four notes, then group 1's stored mode changes, a new
+    // publication to the same instance, and the next four notes continue group 0's draws.
+    let mut p = rr_patch(4, None);
+    p.seed = 12345;
+    p.groups = vec![random(0)];
+    let (mut s, t) = rr_session(p.clone(), 8);
+    let mut rig = Rig::new();
+    rig.publish(&s);
+    let made = rig.log.made.load(Ordering::Relaxed);
+    let want: Vec<f32> = draws(12345, 0, 4, 8).into_iter().map(|a| 0.5 + ALT[a]).collect();
+    assert_eq!(levels(&rig.render(4 * STEP_BLOCKS), 4), want[..4], "the first four draws");
+    p.groups.push(random(1));
+    set_patch(&mut s, t, Some(p));
+    assert_eq!(rig.publish(&s), Adoption::Adopted);
+    assert_eq!(levels(&rig.render(4 * STEP_BLOCKS), 4), want[4..], "a Random group continues its sequence after the republish");
+    assert_eq!(rig.log.made.load(Ordering::Relaxed), made, "the same instance");
+    // Sequential group 0 of three: 0, 1, 2, 0, then the republish, then 1, 2, 0.
+    let mut p = rr_patch(3, None);
+    let (mut s, t) = rr_session(p.clone(), 7);
+    let mut rig = Rig::new();
+    rig.publish(&s);
+    assert_eq!(levels(&rig.render(4 * STEP_BLOCKS), 4), expected(0..4, 3, None));
+    p.groups = vec![random(1)];
+    set_patch(&mut s, t, Some(p));
+    assert_eq!(rig.publish(&s), Adoption::Adopted);
+    assert_eq!(levels(&rig.render(3 * STEP_BLOCKS), 3), expected(4..7, 3, None), "a Sequential group continues its order after the republish");
+}
+
+#[test]
+fn a_group_mode_edit_keeps_the_instance_and_prepares_no_more_than_a_zone_edit() {
+    let p = rr_patch(3, None);
+    let (mut s, t) = rr_session(p.clone(), 4);
+    let uid = |s: &Session| s.track(t).unwrap().instrument.as_ref().unwrap().uid.get();
+    let first = uid(&s);
+    let mut rig = Rig::new();
+    rig.publish(&s);
+    rig.render(2);
+    let counts = |rig: &Rig| (rig.log.made.load(Ordering::Relaxed), rig.log.prepared.load(Ordering::Relaxed));
+    let start = counts(&rig);
+    let edit = |rig: &mut Rig, s: &mut Session, f: &dyn Fn(&mut PatchV1), q: &mut PatchV1| {
+        f(q);
+        set_patch(s, t, Some(q.clone()));
+        assert_eq!(rig.publish(s), Adoption::Adopted);
+        rig.render(2);
+        counts(rig)
+    };
+    let mut q = p.clone();
+    // Today's structural edit: a zone's release.
+    let zone = edit(&mut rig, &mut s, &|q| q.zones[1].release_ms = 20.0, &mut q);
+    // A group's mode, a fade and a crossfade: each a publication to the same instance.
+    let group = edit(&mut rig, &mut s, &|q| q.groups = vec![GroupEntry { id: 0, round_robin: RoundRobin::Random, ..GroupEntry::default() }], &mut q);
+    let fade = edit(&mut rig, &mut s, &|q| q.zones[2].fades = transit_model::sampler_fades::Fades::of([0, 0, 3, 0]), &mut q);
+    let crossfade = edit(
+        &mut rig,
+        &mut s,
+        &|q| {
+            let z = &mut q.zones[3];
+            (z.loop_mode, z.loop_start, z.loop_end, z.crossfade) = (transit_model::sampler_patch::LoopMode::Forward, 0, 1000, 100);
+        },
+        &mut q,
+    );
+    assert_eq!(start.0, zone.0, "a zone edit keeps the instance");
+    for (what, c) in [("a group mode edit", group), ("a fade edit", fade), ("a crossfade edit", crossfade)] {
+        assert_eq!(c.0, start.0, "{what} keeps the instance");
+    }
+    let zone_prepares = zone.1 - start.1;
+    for (what, before, after) in [("a group mode edit", zone, group), ("a fade edit", group, fade), ("a crossfade edit", fade, crossfade)] {
+        assert!(after.1 - before.1 <= zone_prepares, "{what} prepares no more than a zone edit ({} > {zone_prepares})", after.1 - before.1);
+    }
+    assert_eq!(uid(&s), first, "the same uid");
+    assert_eq!(rig.comp.samplers.len(), 1);
+    assert_eq!(rig.drops(), 0);
+}
