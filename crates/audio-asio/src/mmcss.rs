@@ -353,7 +353,8 @@ mod tests {
 
     #[test]
     fn a_thread_the_driver_registered_itself_is_left_to_it_and_not_reported_as_refused() {
-        let m = Mmcss::new(Hooks { register: || Err(ALREADY_REGISTERED), revert: |_| panic!("not ours to revert"), thread_id: || 9, now: Instant::now });
+        let m =
+            Mmcss::new(Hooks { register: || Err(ALREADY_REGISTERED), revert: |_| panic!("not ours to revert"), thread_id: || 9, now: Instant::now });
         let m = Mmcss { host_thread: 1, ..m };
         m.arm();
         m.tend();
