@@ -72,8 +72,12 @@ target/release/audio-bench --backend jack --list-devices
 
 - **libjack is loaded at run time**, so the binary builds and starts on a system without JACK; the
   JACK system then says "JACK library not found". transit declares the JACK functions itself and
-  resolves them from the one library it chose (#430), so it does not matter which other libjack is
-  in the process. The libraries it tries, in order (#230):
+  resolves them from the one library it chose (#430), so another libjack already mapped in the
+  process (by an earlier probe, or by another component such as, plausibly, ALSA's JACK plug-in)
+  no longer decides which library serves transit. Not covered: a libjack in the process's global
+  scope could still receive calls the chosen library makes to its own exported functions; no such
+  component is known in transit's process (ADR 0021, Amendment 2026-11-10, Open). The libraries it
+  tries, in order (#230):
   1. the library `TRANSIT_JACK_LIBRARY` names (a path or a soname), when set;
   2. PipeWire's library, found the way `pw-jack` finds it: the directories the first `pw-jack` on
      `PATH` names (the loader's `$LIB` expanded), then `pipewire-0.3/jack/libjack.so.0` under each of

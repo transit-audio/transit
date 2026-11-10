@@ -26,9 +26,12 @@ and the duplex process engine (audio plays and records).
   table and probes through it. The winner's table is bound once for the process (`OnceLock`, never
   replaced); no library loaded is ever unloaded (a library whose code may still run must not be
   unmapped). Why the handle and not the soname: the loader answers `dlopen("libjack.so.0")` with the
-  first object of that soname already mapped, jackd2's whenever anything loaded it first (our own
-  probe, or ALSA's JACK plug-in during ALSA enumeration), which is what blocked PipeWire's library
-  before. Audio Devices shows `JackBackend::library_note`; `pw-jack` is offered there only when no
+  first object of that soname already mapped, jackd2's whenever anything loaded it first (an
+  earlier probe, or another component such as, plausibly, ALSA's JACK plug-in; which one mapped it
+  on the tester's machine was not established), which is what blocked PipeWire's library before.
+  Not covered: a libjack in the process's global scope could still receive calls the chosen
+  library makes to its own exported functions; no such component is known (ADR 0021, Amendment
+  2026-11-10, Open). Audio Devices shows `JackBackend::library_note`; `pw-jack` is offered there only when no
   PipeWire library was found to try.
 
 ## Shape
