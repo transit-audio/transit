@@ -299,25 +299,23 @@ fn overlap_makes_a_take_stack() {
     let new: ClipId = serde_json::from_value(out["clip"].clone()).unwrap();
     let tr = e.session().track(t).unwrap();
     assert_eq!(tr.playlists.len(), 2, "the active playlist was duplicated");
-    let previous = &tr.playlists[0];
+    assert_eq!(tr.active_playlist, 0, "the original playlist stays active (ADR 0041)");
     let active = tr.clips();
-    assert_eq!(tr.active_playlist, 1, "the track plays the duplicate, as after a recording over clips");
-    // The playlist that played before keeps the old take whole, numbered take 1.
-    let kept: Vec<(i64, i64, Option<u32>)> = previous.clips.iter().map(|c| (c.start, c.end(), c.take)).collect();
+    let alternate = &tr.playlists[1];
+    // The alternate playlist (the duplicate) keeps the old take whole, numbered take 1.
+    let kept: Vec<(i64, i64, Option<u32>)> = alternate.clips.iter().map(|c| (c.start, c.end(), c.take)).collect();
     assert_eq!(kept, [(0, 24_000, None), (48_000, 240_000, Some(1)), (288_000, 312_000, None)]);
-    let old = previous.clips.iter().find(|c| c.id == take).expect("the old take keeps its clip");
+    let old = alternate.clips.iter().find(|c| c.range() == Range::new(48_000, 240_000)).unwrap();
     assert_eq!(notes_of(old), notes_of(&whole), "the old take is whole, notes and all");
-    // The active playlist: the material outside the range is kept, the old take is cut around the
-    // new one (take 2), which plays over its range.
+    // The original playlist: the material outside the range keeps its clips and ids, the old take
+    // is cut around the new one (take 2), which plays over its range.
     let playing: Vec<(i64, i64, Option<u32>)> = active.iter().map(|c| (c.start, c.end(), c.take)).collect();
     assert_eq!(
         playing,
         [(0, 24_000, None), (48_000, 96_000, Some(1)), (96_000, 192_000, Some(2)), (192_000, 240_000, Some(1)), (288_000, 312_000, None)]
     );
-    assert!(
-        active.iter().any(|c| c.id == new) && active.iter().all(|c| c.id != earlier && c.id != later),
-        "outside material is the duplicate's copy"
-    );
+    let id_at = |start: i64| active.iter().find(|c| c.start == start).map(|c| c.id);
+    assert_eq!((id_at(0), id_at(96_000), id_at(288_000)), (Some(earlier), Some(new), Some(later)), "outside clips keep their ids");
     let stacks = tr.take_stacks();
     assert_eq!(stacks.len(), 1, "one take stack");
     assert_eq!(stacks[0].active(), Some(2), "the new take plays");
@@ -330,7 +328,7 @@ fn overlap_makes_a_take_stack() {
     assert_eq!(back, [(0, 24_000, None), (48_000, 240_000, Some(1)), (288_000, 312_000, None)]);
     let joined = tr.clips().iter().find(|c| c.range() == Range::new(48_000, 240_000)).unwrap();
     assert_eq!(notes_of(joined), notes_of(&whole), "the old take plays whole again");
-    assert!(tr.playlists[0].clips.iter().any(|c| c.id == new), "the new take waits on the other playlist");
+    assert!(tr.playlists[1].clips.iter().any(|c| c.id == new), "the new take waits on the alternate playlist");
     e.execute("takes.set_active", &json!({"track": t, "take": 2, "stack": 0})).unwrap();
     assert_eq!(e.session().track(t).unwrap().take_stacks()[0].active(), Some(2));
     e.execute("edit.undo", &json!({})).unwrap();

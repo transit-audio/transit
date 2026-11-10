@@ -256,10 +256,12 @@ fn answer(e: &Engine, t: TrackId, prm: &Params, plan: &Plan) -> Value {
 
 /// Places the planned clip on the track's active playlist; an overlap becomes a new take by
 /// ADR 0039's path (the active playlist duplicated, the covered material numbered, the clip
-/// placed and settled), the path recording takes.
+/// placed and settled). The settling makes the original playlist play again (ADR 0041: "keep the
+/// original playlist active"), so its clips keep their ids and the old clips stay whole on the
+/// duplicate, the alternate playlist.
 fn place(s: &mut Session, t: TrackId, plan: &Plan) -> transit_model::ClipId {
+    let previous = s.track(t).map_or(0, |tr| tr.active_playlist);
     if plan.overlap {
-        let previous = s.track(t).map_or(0, |tr| tr.active_playlist);
         // Duplicate Playlist (`track.playlist_duplicate`), inside this command's one step.
         let mut clips = s.track(t).map(|tr| tr.clips().to_vec()).unwrap_or_default();
         for c in &mut clips {
@@ -272,14 +274,13 @@ fn place(s: &mut Session, t: TrackId, plan: &Plan) -> transit_model::ClipId {
         }
         crate::takes::number_covered(s, t, plan.range, previous);
     }
-    let base = s.track(t).map_or(0, |tr| tr.active_playlist);
     let id = s.new_clip_id();
     let name = s.track(t).map(|tr| tr.name.clone()).unwrap_or_default();
     let mut sequence = Sequence { notes: plan.notes.clone(), ..Sequence::default() };
     sequence.sort();
     crate::edit::place_clip(s, t, Clip::midi(id, name, plan.range.start, plan.range.len(), sequence));
     if plan.overlap {
-        crate::takes::settle_new_takes(s, t, base, &[id]);
+        crate::takes::settle_new_takes(s, t, previous, &[id]);
     }
     id
 }
