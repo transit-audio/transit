@@ -199,7 +199,6 @@ fn pads(p: &PatchV1) -> Vec<(u8, Held, u8)> {
 fn plan(p: &PatchV1, set: SliceSet, ids: &[u32], root: u8) -> Plan {
     let n = ids.len();
     let all = pads(p);
-    let occupied_kept = all.iter().filter(|(_, h, _)| matches!(h, Held::Loose) || matches!(h, Held::Slice(s, _) if *s != set)).count();
     let mut out = Plan { set, root, count: n, cells: Vec::new(), loose: Vec::new(), unbound: Vec::new(), pads_after: 0, refusal: None };
     if let Some(text) = too_high(root, n) {
         out.pads_after = all.iter().filter(|(_, h, _)| *h != Held::Empty).count();
@@ -239,7 +238,11 @@ fn plan(p: &PatchV1, set: SliceSet, ids: &[u32], root: u8) -> Plan {
             _ => None,
         })
         .collect();
-    out.pads_after = n + occupied_kept;
+    // Occupied after the run: its n pads, the loose pads, and the hidden-set pads it does not take
+    // (a hidden-set pad step 2 takes is one of the n).
+    let kept =
+        all.iter().filter(|(q, h, _)| matches!(h, Held::Loose) || (matches!(h, Held::Slice(s, _) if *s != set) && !taken[usize::from(*q)])).count();
+    out.pads_after = n + kept;
     if !out.loose.is_empty() {
         // Refused by the first loose collision; `Plan::reason` words it.
         return out;

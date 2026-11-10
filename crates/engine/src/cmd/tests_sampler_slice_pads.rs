@@ -254,6 +254,21 @@ fn hidden_set_pad_taken_is_reported_as_replaced() {
 }
 
 #[test]
+fn pads_after_counts_a_taken_hidden_set_pad_once() {
+    // An Auto-bound pad on note 60 is taken by step 2 of a four-slice Manual run: four pads are
+    // occupied after the run, as the preview and the answer say.
+    let (mut e, t) = setup();
+    auto(&mut e, t, 2);
+    manual(&mut e, t, 4);
+    zone_on_pad(&mut e, t, 20, 0, Some((SliceSet::Auto, 2)));
+    let plan = e.execute("mix.sampler_slices_to_pads", &json!({"track": t, "root": 60, "preview": true})).unwrap();
+    assert_eq!(plan["pads_after"], json!(4));
+    let out = to_pads(&mut e, t, Some(60));
+    assert_eq!(out["pads_after"], json!(4));
+    assert_eq!((0..64u8).filter(|q| patch(&e, t).pad(*q).zone.is_some()).count(), 4);
+}
+
+#[test]
 fn the_whole_run_is_one_undo_step() {
     // A run that unbinds two pads, rebinds two and makes two zones with new notes.
     let (mut e, t) = setup();
