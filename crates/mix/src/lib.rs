@@ -96,6 +96,8 @@ mod hardware;
 mod instance;
 mod key;
 #[cfg(test)]
+mod grid_end_tests;
+#[cfg(test)]
 mod loop_wrap_tests;
 mod low_latency;
 pub use low_latency::{SlotLatencies, low_latency_bypass, low_latency_frames};
@@ -174,11 +176,11 @@ use key::{KeyBank, KeyEnd, KeyIn, KeySpec};
 use matrix::{PanSpec, apply_matrix, apply_matrix_span, build_matrix, identity_matrix};
 pub use matrix::{fold_down_stereo, itu_stereo_fold};
 use midi::{
-    ClipEvent, Rtp, chase_controllers, grid_start, midi_loop_frame, midi_offset, note_spans, played_note, schedule_notes, sorted_clip_events,
+    ClipEvent, Rtp, chase_controllers, grid_end, grid_start, midi_loop_frame, midi_offset, note_spans, played_note, schedule_notes, sorted_clip_events,
 };
 pub use midi::{LoopFrame, clip_note_ons, loop_frame, loop_frame_in, unroll_midi_loop};
 #[cfg(test)]
-use midi::{PEDAL_SCANS, visit_clip_events};
+use midi::{GRID_ENDS, PEDAL_SCANS, visit_clip_events};
 pub use midi_fx::{MIDI_FX_BLOCK, MIDI_FX_CARRY, MIDI_FX_NOTES, MIDI_FX_RETRY, MidiFxCounts, note_view_dropped_total};
 pub use offline::{
     MAX_RENDER_SAMPLES, RUN_IN_SECONDS, RangeRender, render_bus, render_range, render_track_pre_fader, render_track_pre_fader_timed, source_channels,
