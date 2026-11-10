@@ -188,8 +188,8 @@ fn a_wrap_ends_held_notes_at_the_wrap_instant_and_drops_discarded_playback() {
                 s.at(T0);
             }
         }
-        assert_eq!(s.at(T0), [on.clone()], "drained per push {drain_each}: only the held note before the wrap");
-        assert_eq!(s.at(WRAP - 1), [on.clone()], "drained per push {drain_each}: nothing ends before the wrap");
+        assert_eq!(s.at(T0), std::slice::from_ref(&on), "drained per push {drain_each}: only the held note before the wrap");
+        assert_eq!(s.at(WRAP - 1), std::slice::from_ref(&on), "drained per push {drain_each}: nothing ends before the wrap");
         let wrapped = [on.clone(), off.clone(), on.clone()];
         assert_eq!(s.at(WRAP), wrapped, "drained per push {drain_each}: the release at the wrap instant, then the restart");
         assert_eq!(s.at(NEXT - 1), wrapped, "drained per push {drain_each}: the discarded note is not sent");
@@ -204,7 +204,7 @@ fn a_wrap_ends_held_notes_at_the_wrap_instant_and_drops_discarded_playback() {
     for e in events {
         assert!(s.playback.push(e));
     }
-    assert_eq!(s.at(WRAP + 10_000_000), [on.clone()], "starved: the release ends nothing it never sent, then the restart");
+    assert_eq!(s.at(WRAP + 10_000_000), std::slice::from_ref(&on), "starved: the release ends nothing it never sent, then the restart");
     assert_eq!(s.at(NEXT), [on, next], "starved: no note-off for a note never sent, the discarded note never sounds");
     assert!(s.worker.pending.is_empty());
 }
