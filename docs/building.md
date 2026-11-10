@@ -5,7 +5,7 @@
 - Rust 1.90 or newer (`rust-version` in `Cargo.toml`), from <https://rustup.rs>.
 - Windows: the Visual Studio 2019+ Build Tools with the "Desktop development with C++" workload. The app runs on Windows 10 version 1607 or later (the plug-in editor window uses the per-monitor DPI functions that version added).
 - Linux: `libasound2-dev` and `pkg-config` (for example `sudo apt install libasound2-dev pkg-config`).
-- Linux, the native JACK backend (`--features native-jack`, below): also `libjack-jackd2-dev`, for the build only.
+- Linux, the native JACK backend (`--features native-jack`, below): nothing more to build (libjack is loaded at run time).
 - Linux, headless test runs (CI, containers, WSL2): the egui tests render with wgpu and need a Vulkan adapter. Install `mesa-vulkan-drivers libvulkan1` (Mesa's CPU driver, lavapipe) and run with `WGPU_BACKEND=vulkan VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json` (`VK_DRIVER_FILES` is the newer name for the same setting). CI sets both. On WSL2 the default GL path can segfault, so set these there too.
 - macOS: the Xcode Command Line Tools (`xcode-select --install`).
 - A C++ compiler for workspace-wide builds and tests (`cargo build`/`cargo test` at the root or `--workspace`): the dev-only null-test oracle `crates/macro-osc-oracle` compiles vendored C++ (ADR 0033). MSVC on Windows (the Build Tools above), `g++` on Linux (`sudo apt install g++`), the Xcode Command Line Tools on macOS. The app itself (`-p transit`) never builds or links it.
@@ -65,25 +65,29 @@ talks to JACK 2, or to PipeWire through its JACK library, over the JACK client A
 `native-jack` feature and compiled only on Linux (the crate is empty elsewhere):
 
 ```sh
-sudo apt install libjack-jackd2-dev   # jack.pc for jack-sys's build script; nothing links against libjack
 cargo build --release -p transit --features native-jack
 cargo build --release -p audio-bench --features audio-bench/native-jack
 target/release/audio-bench --backend jack --list-devices
 ```
 
-- **libjack is loaded at run time** (`libjack.so.0`, through `jack-sys`'s `dynamic_loading`), so the
-  binary starts on a system without JACK; the JACK system then says "JACK library not found". transit
-  tries the library `TRANSIT_JACK_LIBRARY` names (a path) first, then the loader's `libjack.so.0` and
-  PipeWire's library at `/usr/lib/x86_64-linux-gnu/pipewire-0.3/jack/`,
-  `/usr/lib/aarch64-linux-gnu/pipewire-0.3/jack/`, `/usr/lib64/pipewire-0.3/jack/` and
-  `/usr/lib/pipewire-0.3/jack/`, and uses the first whose probe connects (#230). When a PipeWire
-  server's socket exists (and no library is named), PipeWire's library goes before `libjack.so.0`:
-  JACK 2's libjack stays mapped after a failed probe, and once loaded it would be the one `jack-sys`
-  binds, so it must not be loaded first. So on Debian and Ubuntu with both `jackd2` and
-  `pipewire-jack` installed and PipeWire running, PipeWire answers without `pw-jack` (to be
-  confirmed by a tester, known issue KC5). With no PipeWire socket the default goes first. Audio
-  Devices shows the library in use ("JACK library: ...") or every library tried and why. PipeWire documents no variable for its library path (`pw-jack` sets
-  `LD_LIBRARY_PATH`), hence transit's own `TRANSIT_JACK_LIBRARY`.
+- **libjack is loaded at run time**, so the binary builds and starts on a system without JACK; the
+  JACK system then says "JACK library not found". transit declares the JACK functions itself and
+  resolves them from the one library it chose (#430), so it does not matter which other libjack is
+  in the process. The libraries it tries, in order (#230):
+  1. the library `TRANSIT_JACK_LIBRARY` names (a path or a soname), when set;
+  2. PipeWire's library, found the way `pw-jack` finds it: the directories the first `pw-jack` on
+     `PATH` names (the loader's `$LIB` expanded), then `pipewire-0.3/jack/libjack.so.0` under each of
+     the loader's directories (`LD_LIBRARY_PATH`, the directories of the libraries already loaded,
+     `/etc/ld.so.conf` and its includes, `/lib64`, `/usr/lib64`, `/lib`, `/usr/lib`);
+  3. the loader's `libjack.so.0` (JACK 2's where `jackd2` is installed).
+
+  2 goes before 3 when a PipeWire server's socket exists and no library is named; with no socket the
+  loader's `libjack.so.0` goes first. The first library whose probe client connects serves the
+  process for its whole life: with `jackd2` and `pipewire-jack` both installed and PipeWire running,
+  PipeWire answers without `pw-jack`; with only `jackd2`, JACK 2 answers when `jackd` runs; with
+  neither, the system says the library was not found. Audio Devices shows the library in use
+  ("JACK library: ...") or every library tried and why. PipeWire documents no variable for its
+  library path (`pw-jack` sets `LD_LIBRARY_PATH`), hence transit's own `TRANSIT_JACK_LIBRARY`.
 - **The server must be running.** transit never starts one (`JackNoStartServer`); with none it says
   "JACK/PipeWire server not running". The server sets the rate and the quantum; under PipeWire pin
   the quantum (`pw-metadata -n settings 0 clock.force-quantum 128`) or start transit with
@@ -99,15 +103,15 @@ target/release/audio-bench --backend jack --list-devices
   the buffer plus the quantum. ALSA's `default` counts as PipeWire's only where pipewire-alsa's
   `99-pipewire-default.conf` is installed (`/etc/alsa/conf.d` or `/usr/share/alsa/alsa.conf.d`).
 - **Runtime:** a running JACK 2 or PipeWire server (with PipeWire's JACK library, `pipewire-jack`).
-  `pw-jack transit` still works, and is the way out when the window says "another libjack was
-  already loaded in this process" (JACK 2's library was loaded first, for example with no PipeWire
-  socket at the first probe). In Audio Devices choose the
+  `pw-jack transit` still works, and is the fallback the window offers when it found no PipeWire
+  JACK library to try. In Audio Devices choose the
   JACK system and Backend > Native JACK (or leave Auto: with a server answering, Auto opens Native
   JACK on the JACK system and on the untouched default; with none it opens cpal's ALSA host). The
   buffer size and rate are the server's; the panel shows them and where to change them. Set
   `TRANSIT_JACK_AUTOCONNECT=0` to leave transit's ports unconnected for a patchbay.
 - Tests use a fake server and need no JACK: `cargo test -p transit-audio-jack` (any platform). On
-  Linux `cargo test -p transit-audio-jack --features libjack` also runs the real-server tests, which
+  Linux `cargo test -p transit-audio-jack --features libjack` also runs the library-binding tests
+  (they compile small fake libjacks with the system C compiler, `cc`) and the real-server tests, which
   skip when no server answers; start a dummy server first to run them:
   `jackd -r -d dummy -r 48000 -p 128 &` (`jackd2` package). The tests that kill or re-quantize a
   server are ignored and start their own (see the knowledge note).

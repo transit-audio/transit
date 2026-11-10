@@ -11,17 +11,25 @@ and the duplex process engine (audio plays and records).
 - Feature `native-jack` on `transit`, `transit-playback` and `audio-bench`; the crate's own
   feature `libjack` turns on the backend. Without it the crate is empty; its tests (the safe core over
   the fake server) build on any platform.
-- `jack-sys` `=0.5.1` with `dynamic_loading`: `libjack.so.0` is dlopened at first use, nothing links
-  against it. Its build script still asks pkg-config for `jack` on Linux, so the build needs
-  `libjack-jackd2-dev` (CI installs it); the binary does not need libjack to start. 0.5.1's manifest
-  misspells its default feature list, so `dynamic_loading` is named explicitly.
+- Our own declarations (`src/sys.rs`, from jack.h and types.h) and function table (`JackFns`), no
+  `jack-sys` (#430). The table is resolved with `dlsym` on the handle of the library the selection
+  chose (`libloading` `=0.7.4`), nothing links against libjack and the build needs no JACK package;
+  the binary does not need libjack to start. A library lacking a required function is skipped like
+  one that did not load; `jack_get_cycle_times` and `jack_get_version_string` are optional (weak in
+  jack.h).
 - Building, `pw-jack` and the quantum: [docs/building.md](../../building.md#native-jack-backend-linux).
-- Which libjack (#230): `src/library.rs` lists the candidates (`TRANSIT_JACK_LIBRARY`, the loader's
-  `libjack.so.0`, PipeWire's library at the distributions' paths; PipeWire's before the default
-  when its socket exists, because JACK 2's libjack stays mapped after `dlclose`) and picks the first
-  whose probe connects; `src/ffi.rs` probes each through its own `dlopen` before `jack-sys` loads anything,
-  keeps the winner loaded so `jack-sys`'s soname `dlopen` resolves to it, and checks by the address
-  of `jack_client_open` that it did. Audio Devices shows `JackBackend::library_note`.
+- Which libjack (#230, #430): `src/search.rs` finds PipeWire's library the way `pw-jack` does (the
+  paths in the `pw-jack` script, `$LIB` expanded, then `pipewire-0.3/jack` under the loader's
+  directories; no distribution path is written in), `src/library.rs` orders the candidates
+  (`TRANSIT_JACK_LIBRARY`, then PipeWire's before the loader's `libjack.so.0` when its socket exists,
+  else after) and picks the first whose probe connects, and `src/ffi.rs` loads each, resolves its
+  table and probes through it. The winner's table is bound once for the process (`OnceLock`, never
+  replaced); no library loaded is ever unloaded (a library whose code may still run must not be
+  unmapped). Why the handle and not the soname: the loader answers `dlopen("libjack.so.0")` with the
+  first object of that soname already mapped, jackd2's whenever anything loaded it first (our own
+  probe, or ALSA's JACK plug-in during ALSA enumeration), which is what blocked PipeWire's library
+  before. Audio Devices shows `JackBackend::library_note`; `pw-jack` is offered there only when no
+  PipeWire library was found to try.
 
 ## Shape
 
@@ -30,8 +38,9 @@ and the duplex process engine (audio plays and records).
 - `unsafe` only in `src/ffi.rs` (every libjack call) and `src/callback.rs` (the `extern "C"`
   trampolines, each under `catch_unwind`); `lib.rs` denies it elsewhere. Every block quotes jack.h.
   The callbacks' `arg` is a leaked `Box<CallbackState>`, freed after `jack_client_close` returns.
-- `jack-sys` resolves all its functions at first use and panics on a missing one: `open_client`
-  makes that first use under `catch_unwind` and reports it as a missing library.
+- The process callback calls `jack_port_get_buffer`, `jack_get_cycle_times` and `jack_get_time`
+  through the `&'static JackFns` its `CallbackState` holds: one load and an indirect call each, no
+  lock, no allocation, no lazy initialization check.
 
 ## Devices and enumeration
 

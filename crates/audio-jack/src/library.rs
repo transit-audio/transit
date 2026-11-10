@@ -116,7 +116,8 @@ impl Selection {
     }
 
     /// The Audio Devices line: "JACK library: <path>" when one connected, else every library tried
-    /// with its result, and a hint when PipeWire's library is not installed.
+    /// with its result and, when no PipeWire library was found to try, the fallback: install
+    /// `pipewire-jack`, or start transit with `pw-jack` (#430: the only place `pw-jack` is offered).
     pub fn summary(&self) -> String {
         if let Some(library) = self.connected() {
             return format!("JACK library: {library}");
@@ -136,7 +137,7 @@ impl Selection {
             .collect();
         let mut line = format!("JACK libraries tried: {}", tried.join(", "));
         if !self.pipewire_found {
-            line.push_str("; PipeWire's JACK library is not installed (pipewire-jack)");
+            line.push_str("; PipeWire's JACK library was not found: install pipewire-jack, or start transit with pw-jack");
         }
         line
     }
@@ -235,7 +236,10 @@ mod tests {
         let mut nothing = Script { answers: Vec::new(), asked: Vec::new() };
         let selection = select(&candidates(None, false, &[]), &mut nothing);
         assert_eq!(selection.error(), Some(ClientError::LibraryMissing("no such file".into())));
-        assert_eq!(selection.summary(), "JACK libraries tried: libjack.so.0 (not loaded); PipeWire's JACK library is not installed (pipewire-jack)");
+        assert_eq!(
+            selection.summary(),
+            "JACK libraries tried: libjack.so.0 (not loaded); PipeWire's JACK library was not found: install pipewire-jack, or start transit with pw-jack"
+        );
 
         let mut refused = Script { answers: vec![(DEFAULT_LIBRARY, Outcome::Failed("status 0x21".into()))], asked: Vec::new() };
         let selection = select(&candidates(None, false, &[]), &mut refused);

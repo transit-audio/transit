@@ -46,8 +46,8 @@ transit-audio-jack = { workspace = true, optional = true }
 test-hooks = []
 # The native JACK backend (ADR 0021; JACK 2 or PipeWire's libjack, loaded at run time): the
 # "Native JACK" choice in Audio Devices on the JACK system. Linux only; off by default; without it
-# the JACK system is not listed and `Backend::NativeJack` opens cpal. The build needs jack.pc
-# (libjack-jackd2-dev) for jack-sys's build script, not libjack itself.
+# the JACK system is not listed and `Backend::NativeJack` opens cpal. The build needs no JACK
+# package: transit-audio-jack declares and loads libjack itself (#430).
 native-jack = ["dep:transit-audio-jack", "transit-audio-jack/libjack"]
 
 [dev-dependencies]

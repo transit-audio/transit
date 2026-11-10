@@ -72,7 +72,7 @@ The builds are unsigned. On Windows, SmartScreen shows "More info", then "Run an
 
 Each release has an `.AppImage` (any recent distribution: `chmod +x` it and run it), a `.deb` (Debian, Ubuntu, Mint) and an `.rpm` (Fedora, openSUSE), next to the tarball. They are unsigned.
 
-To build, install `libasound2-dev pkg-config`, plus `libjack-jackd2-dev` to build with `--features native-jack` ([docs/building.md](docs/building.md#native-jack-backend-linux)).
+To build, install `libasound2-dev pkg-config`; `--features native-jack` needs nothing more ([docs/building.md](docs/building.md#native-jack-backend-linux)).
 
 **PipeWire.** Through ALSA the buffer size is not the latency: transit's buffer is split into periods (4), PipeWire runs transit at the period, and the graph runs at the server's quantum. Quantum and buffer size are the same thing only under JACK. Audio Devices shows the three ("Buffer 128 · period 64: period set by the server (PipeWire quantum 2048, forced ...)") and offers only the buffers whose periods the server allows. You hear about the buffer plus the quantum. To change the quantum, set it, for example `pw-metadata -n settings 0 clock.force-quantum 128` (`0` puts it back), then Reconnect, or use the JACK system.
 

@@ -69,9 +69,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Linux system libraries
-        # libjack-jackd2-dev: jack.pc for jack-sys's build script (native-jack); libjack is loaded at run time.
+        # native-jack needs no JACK package to build (#430: libjack is declared and loaded at run time).
         # xvfb: an X server for the plug-in editor window tests (#147).
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libjack-jackd2-dev pkg-config mesa-vulkan-drivers libvulkan1 xvfb
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config mesa-vulkan-drivers libvulkan1 xvfb
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update && rustup default stable
         shell: bash
