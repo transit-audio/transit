@@ -261,7 +261,7 @@ pub struct KeysState {
     pub quantize_open: bool,
     /// The clip being edited: the foreground clip when several are open.
     pub clip: Option<ClipId>,
-    /// The other clips open with it (#329), in selection order.
+    /// The other clips open with it (#329), in track-then-time order.
     pub others: Vec<ClipId>,
     /// Focus Mode: edits are scoped to the foreground clip (#329 slice 2).
     pub focus: bool,
