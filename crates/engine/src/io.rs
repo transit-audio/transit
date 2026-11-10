@@ -9,6 +9,7 @@ use transit_model::{BusId, ChannelFormat, Clip, ClipContent, Session, Source, So
 use transit_time::{Range, Samples};
 
 pub(crate) mod frozen_recording;
+pub(crate) mod sampler_kit;
 
 /// Largest import we accept (samples per channel × channels), ~4 GiB of f32.
 pub(crate) const MAX_IMPORT_SAMPLES: usize = 1 << 30;

@@ -558,6 +558,17 @@ into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as 
 file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
 platforms it lands as soon as the pointer moves after you let go (see the known issues).
 
+To fill a kit from a folder through the control channel, use `mix.sampler_load_kit` with the
+track and `folder`. Set `preview: true` first to see the assignments. WAV, AIFF and FLAC files
+are ordered by filename without regard to case and placed on the first free pads, A1 through
+D16. Occupied pads, including slices, stay as they are. Subfolders, hidden files, links and
+other files are ignored; SFZ mappings are listed but never executed. Files stay where they are,
+referenced by path. The whole kit loads in one undo step. If it cannot fit, a file cannot be
+read, or an audio limit is exceeded, nothing loads and the result names the reason and counts.
+A one-sample Sampler needs **New Kit** first. Folder loading currently accepts PCM WAV/AIFF and
+FLAC files whose headers declare their length; preview checks headers, while loading also
+checks the audio data.
+
 Each Sampler kit has a **pad start note**: the note of pad A1, with every other pad on the next
 note up (bank B starts 16 notes above A, C 32 and D 48). A new kit starts at MIDI note 36, where
 General MIDI drums start and where other DAWs put the first pad of their drum instruments, so drum

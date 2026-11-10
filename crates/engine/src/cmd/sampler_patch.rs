@@ -315,14 +315,14 @@ pub(crate) fn frames_at(frames: u64, from: u32, to: u32) -> Option<u64> {
 }
 
 /// Where a zone's new source comes from.
-enum NewSource {
+pub(super) enum NewSource {
     /// An existing session source.
     Session(SourceId),
     /// Decoded audio to add, with the path it keeps (`None`: managed `Audio Files/` audio).
     Audio(crate::io::PreparedAudio, Ownership),
 }
 
-fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &PatchV1) -> Result<NewSource> {
+pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &PatchV1) -> Result<NewSource> {
     let copy = bool_or(p, "copy", false);
     let ownership = if copy { Ownership::Managed } else { Ownership::Referenced };
     let rate = e.session().sample_rate.hz();
@@ -383,7 +383,7 @@ fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &PatchV1) -> Resu
 
 /// Adds decoded audio as a session source: a referenced file keeps its path (and is not written
 /// on save); managed audio is written into `Audio Files/` on the next save.
-fn add_audio(e: &mut Engine, prepared: crate::io::PreparedAudio, ownership: Ownership) -> SourceId {
+pub(super) fn add_audio(e: &mut Engine, prepared: crate::io::PreparedAudio, ownership: Ownership) -> SourceId {
     let path = if ownership == Ownership::Referenced { prepared.path.clone() } else { None };
     let s = e.session_mut();
     let sid = crate::io::add_source_audio(s, &prepared.name, prepared.audio, path.as_deref(), prepared.format);

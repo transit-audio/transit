@@ -135,6 +135,18 @@ removed is freed, as each row says.
 
 ## Sampler pads
 
+| Command | Params | What it does |
+|---|---|---|
+| `mix.sampler_load_kit` | `{track?, folder: path, preview?: false}` | Loads the folder's immediate WAV, AIFF and FLAC files into free pads in bank order, without overwriting loose or slice-bound pads. Filenames sort case-insensitively, with original spelling breaking ties. Each new zone takes the pad's effective note as its root and the new-pad defaults. Files remain referenced by path. The entire load is one undo step. Success answers `{track, loaded, pads: [{pad, zone, file, frames, channels}], ignored, first_pad, last_pad}`; pad and zone numbers start at 1. Admission refusal answers data `{loaded: 0, skipped, needed, free, offender?, notice, files, ignored}`, with no document or undo change. `preview: true` returns the same proposed assignment or admission refusal using headers only; it never decodes audio or edits the document. Full loading additionally verifies decodability. |
+
+Relative folders resolve against the saved session's folder. Hidden entries, directories,
+symbolic links and other files (including SFZ mappings) are listed under `ignored` and never
+opened. An empty kit, insufficient pads, zones or sources, an unreadable file, more than two
+channels, or any source/patch memory limit refuses the whole kit. Legacy one-sample instruments
+require **New Kit** first. PCM WAV/AIFF and FLAC with a declared frame count support header-only
+admission; a codec without such a header is refused with its reason. Preview cannot certify a
+compressed audio body without decoding it, so a later decode error still refuses the whole load.
+
 Pad notes ([ADR 0041](adr/0041-sampler-one-instrument-three-views.md), amendment of 2026-11-09).
 A pad without a stored trigger note plays the patch's pad start note plus its index (A1 is the
 start note, bank B starts 16 above it); a stored note is absolute and never moves. A new patch's

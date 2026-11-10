@@ -23,6 +23,7 @@ mod blocks;
 mod buffer;
 mod caf;
 mod flac;
+mod metadata;
 mod mp4;
 mod ogg;
 mod opus;
@@ -35,6 +36,7 @@ mod wav_cues;
 
 pub use blocks::{BlockReader, MAX_HELD_BYTES, ReadSeek};
 pub use buffer::AudioBuffer;
+pub use metadata::probe_metadata;
 pub use opus::{
     DEFAULT_OPUS_KBPS, DEFAULT_OPUS_MONO_KBPS, OPUS_BITRATES_KBPS, OPUS_MONO_BITRATES_KBPS, default_opus_kbps, opus_bitrates_kbps, opus_granules,
     opus_tags,
