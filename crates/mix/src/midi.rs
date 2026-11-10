@@ -145,7 +145,7 @@ impl Rtp {
 }
 
 /// A clip note as it plays: real-time properties applied, its on and off in session samples (the
-/// off clamped to the clip end). `None` when it starts at or after the clip end.
+/// off clamped to the clip's grid end). `None` when it starts at or after the grid end.
 pub(crate) fn played_note(
     s: &Session,
     clip: &Clip,
@@ -165,13 +165,14 @@ pub(crate) fn played_note(
         n.start = n.start.max(0);
     }
     let on = s.tempo.tick_to_samples(base.saturating_add(n.start), sr);
-    let off = s.tempo.tick_to_samples(base.saturating_add(n.start).saturating_add(n.length), sr).min(clip.end());
-    (on < clip.end()).then_some((n, on, off))
+    let last = grid_end(s, clip);
+    let off = s.tempo.tick_to_samples(base.saturating_add(n.start).saturating_add(n.length), sr).min(last);
+    (on < last).then_some((n, on, off))
 }
 
 /// Every span `(on, off)` a note sounds in a clip, as playback and the external chase both need it,
 /// for the cycles that touch `pos..end` (the first pass is always visited). `on`/`off` are the
-/// note's first-pass times from [`played_note`]; each span is cut at the clip end.
+/// note's first-pass times from [`played_note`]; each span is cut at the clip's grid end.
 ///
 /// A looped clip (ADR 0019): the first pass plays what starts before the loop end; later cycles
 /// play what starts inside the range. A note crossing the seam ends at it and sounds again at its
@@ -187,9 +188,10 @@ pub(crate) fn note_spans(
     end: Samples,
     mut f: impl FnMut(Samples, Samples),
 ) {
+    let last = grid_end(s, clip);
     let mut emit = |on: Samples, off: Samples| {
-        let off = off.min(clip.end());
-        if on < clip.end() {
+        let off = off.min(last);
+        if on < last {
             f(on, off);
         }
     };
@@ -233,8 +235,8 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
                 continue;
             }
             let ClipContent::Midi { sequence } = &clip.content else { continue };
-            // A note-off is clamped to `clip.end()`, which the half-open range excludes: when that
-            // sample is the first of this block (`pos == clip.end()`) the clip still has to be visited
+            // A note-off is clamped to the grid end (at most `clip.end()`), which the half-open
+            // range excludes: when that sample is the first of this block the clip still has to be visited
             // or the off is never sent and the note holds forever.
             if clip.end() < pos || clip.start.min(grid_start(s, clip)) >= end {
                 continue;
@@ -258,10 +260,11 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
             }
             if !ons {
                 // A pedal the clip leaves held is released at its end, in the off pass with the
-                // note-offs, so a pedal-down at the same sample (the next clip's) follows it.
+                // note-offs, so a pedal-down at the same sample (the next clip's) follows it. Its
+                // own state is what it sounded: its points before its grid end.
                 let t_end = clip.end();
                 if t_end >= pos && t_end < end {
-                    let mine = pedal_state_before(s, clip, rtp, t_end);
+                    let mine = pedal_state_before(s, clip, rtp, grid_end(s, clip));
                     for (slot, held) in mine.iter().enumerate() {
                         let Some((at, true)) = *held else { continue };
                         // The track's pedal belongs to whichever clip wrote it last: only that
@@ -285,6 +288,7 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
                 }
                 continue;
             }
+            let last = grid_end(s, clip);
             let near = s.tempo.samples_to_ticks(pos, sr).saturating_sub(base).saturating_sub(1)
                 ..=s.tempo.samples_to_ticks(end, sr).saturating_sub(base).saturating_add(1);
             // Events before tick 0 are what a start trim hid: they don't play, except in a looped
@@ -299,13 +303,13 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
                         continue;
                     }
                     let msg = ctrl_message(c.kind, c.value, dp);
-                    if rel >= 0 && at >= pos && at < end && at < clip.end() {
+                    if rel >= 0 && at >= pos && at < end && at < last {
                         visit(usize::try_from(at - pos).unwrap_or(0), ClipEvent::Control(msg, c.channel));
                     }
                     if rel >= frame.range.start {
                         for k in frame.cycles_touching(s, rel, rel, pos, end) {
                             let at = frame.cycle_at(s, rel, k);
-                            if at >= pos && at < end && at < clip.end() {
+                            if at >= pos && at < end && at < last {
                                 visit(usize::try_from(at - pos).unwrap_or(0), ClipEvent::Control(msg, c.channel));
                             }
                         }
@@ -316,7 +320,7 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
                     continue;
                 }
                 let at = s.tempo.tick_to_samples(base.saturating_add(tick), sr);
-                if at >= pos && at < end && at < clip.end() {
+                if at >= pos && at < end && at < last {
                     visit(usize::try_from(at - pos).unwrap_or(0), ClipEvent::Control(ctrl_message(c.kind, c.value, dp), c.channel));
                 }
             }
@@ -334,6 +338,16 @@ thread_local! {
 pub(crate) fn grid_start(s: &Session, clip: &Clip) -> Samples {
     let sr = s.sample_rate;
     s.tempo.tick_to_samples(s.tempo.samples_to_ticks(clip.start, sr), sr)
+}
+
+/// The sample a clip's tick grid ends at: its end rounded to a tick, never past the end. A clip
+/// sounds the points of its grid in `grid_start..grid_end` (half-open, in samples): a tick belongs
+/// to the clip whose start and end round around it, so two clips butted at a sample between ticks
+/// (the halves of a split) split the ticks between them, and a point on the tick the shared edge
+/// rounds down to sounds once, in the later clip (#422).
+pub(crate) fn grid_end(s: &Session, clip: &Clip) -> Samples {
+    let (sr, end) = (s.sample_rate, clip.end());
+    s.tempo.tick_to_samples(s.tempo.samples_to_ticks(end, sr), sr).min(end)
 }
 
 /// Pedal controllers the clip-end release covers: 16 channels times sustain, sostenuto, soft, hold 2.
@@ -422,7 +436,7 @@ pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<transit_midi::Sequen
     let ClipContent::Midi { sequence } = &clip.content else { return None };
     let sr = s.sample_rate;
     let base = s.tempo.samples_to_ticks(clip.start, sr);
-    let end = clip.end();
+    let end = grid_end(s, clip);
     let cycles = clip.length / l.cycle().max(1) + 2;
     if cycles.saturating_mul((sequence.notes.len() + sequence.ctrls.len()) as i64) > 2_000_000 {
         return None;
@@ -643,7 +657,7 @@ pub(crate) fn chase_controllers(s: &Session, t: &Track, pos: Samples, inst: &mut
             continue;
         }
         let base = s.tempo.samples_to_ticks(clip.start, sr);
-        let until = pos.min(clip.end());
+        let until = pos.min(grid_end(s, clip));
         let looping = midi_loop_frame(s, clip);
         for c in sequence.ctrls.iter().filter(|c| c.tick >= 0 || looping.is_some()) {
             let slot = match c.kind {

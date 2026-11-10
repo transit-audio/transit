@@ -160,6 +160,85 @@ fn splitting_a_looped_kick_on_any_bar_keeps_every_kick_on_its_tick() {
     assert!(bad.is_empty(), "{} splits:\n{}", bad.len(), bad.join("\n"));
 }
 
+/// Every clip event of track `t` over `0..len` as (sample, message), through the external output
+/// (the same visit playback uses): note-ons, note-offs and controllers.
+fn clip_messages(s: &Session, t: TrackId, len: Samples) -> Vec<(Samples, Vec<u8>)> {
+    let mut out = Vec::new();
+    transit_mix::external_midi_events(s, s.track(t).unwrap(), 0, len as usize, false, |e| out.push((e.offset as Samples, e.message().to_vec())));
+    out
+}
+
+/// A split of a looped MIDI clip at a sample between two ticks: a point on the tick the cut rounds
+/// to belongs to the right half (whose grid starts there, up to half a tick before its start
+/// sample), a point on an earlier tick to the left half, so the two halves together play every
+/// note-on and controller of the unsplit clip once: none doubled on the cut's tick (48 kHz,
+/// 102.5 BPM, a cut at 112,400 played the kick at 112,390 in both halves), none dropped. Cuts at
+/// every off-tick sample after a kick, on both sides of the rounding midpoint, at 44.1 and 48 kHz,
+/// four tempos and a tempo change inside the clip. A note sounding across the cut ends at it in
+/// the left half; every note-on still gets exactly one note-off at or after it.
+#[test]
+fn splitting_a_looped_kick_between_ticks_plays_each_kick_once() {
+    const BARS: i64 = 16;
+    let mut cases: Vec<(u32, f64, Option<(i64, f64)>)> = Vec::new();
+    for hz in [44_100, 48_000] {
+        for bpm in [93.7, 102.5, 127.3, 174.0] {
+            cases.push((hz, bpm, None));
+        }
+    }
+    cases.push((48_000, 120.0, Some((8 * Q, 90.0))));
+    cases.push((44_100, 102.5, Some((8 * Q, 140.0))));
+    let mut bad = Vec::new();
+    let mut cuts = 0;
+    for (hz, bpm, change) in cases {
+        let (mut s0, t) = kick_loop(hz, bpm, change, BARS);
+        let tr = s0.track_mut(t).unwrap();
+        tr.midi_output = transit_model::MidiOutput::External {
+            port: transit_model::MidiOutPort::default(),
+            channel: transit_model::MidiOutChannel::AsRecorded,
+            offset_ms: 0.0,
+        };
+        let c = &mut tr.playlist_mut().unwrap().clips[0];
+        let transit_model::ClipContent::Midi { sequence } = &mut c.content else { panic!() };
+        sequence.ctrls.push(CtrlEvent { tick: 0, channel: 0, kind: CtrlKind::Cc(1), value: 90 });
+        let sr = s0.sample_rate;
+        let at = |tick: i64| s0.tempo.tick_to_samples(tick, sr);
+        let len = at(BARS * 4 * Q);
+        let split = |m: &[(Samples, Vec<u8>)]| -> (Vec<(Samples, Vec<u8>)>, Vec<(Samples, Vec<u8>)>) {
+            let mut ons: Vec<_> = m.iter().filter(|(_, b)| b[0] & 0xF0 != 0x80).cloned().collect();
+            ons.sort();
+            let offs = m.iter().filter(|(_, b)| b[0] & 0xF0 == 0x80).cloned().collect();
+            (ons, offs)
+        };
+        let (want, _) = split(&clip_messages(&s0, t, len));
+        assert_eq!(want.iter().filter(|(_, b)| b[0] & 0xF0 == 0x90).count() as i64, BARS * 4, "{hz} Hz {bpm} BPM: the unsplit clip");
+        for beat in (1..BARS * 4).step_by(3) {
+            let (k, next) = (at(beat * Q), at(beat * Q + 1));
+            for cut in k + 1..next {
+                cuts += 1;
+                let mut s = s0.clone();
+                assert_eq!(crate::edit::separate_at(&mut s, t, cut), 1);
+                let (got, offs) = split(&clip_messages(&s, t, len));
+                let note_ons = got.iter().filter(|(_, b)| b[0] & 0xF0 == 0x90).count();
+                let paired =
+                    offs.len() == note_ons && got.iter().filter(|(_, b)| b[0] & 0xF0 == 0x90).zip(offs.iter()).all(|((on, _), (off, _))| off >= on);
+                if got != want || !paired {
+                    let missing: Vec<Samples> = want.iter().filter(|w| !got.contains(w)).map(|w| w.0).collect();
+                    let extra: Vec<Samples> = got.iter().filter(|g| !want.contains(g)).map(|g| g.0).collect();
+                    let doubled: Vec<Samples> = got.windows(2).filter(|w| w[0] == w[1]).map(|w| w[0].0).collect();
+                    bad.push(format!(
+                        "{hz} Hz {bpm} BPM {change:?}, cut at {cut} ({} after the kick at {k}, next tick {next}): {} events, doubled {doubled:?}, missing {missing:?}, off-tick {extra:?}, {} offs for {note_ons} ons",
+                        cut - k,
+                        got.len(),
+                        offs.len()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(cuts > 3000, "{cuts} cuts");
+    assert!(bad.is_empty(), "{} of {cuts} cuts:\n{}", bad.len(), bad.join("\n"));
+}
+
 #[test]
 fn consolidate_writes_the_cycles_out_as_they_sound() {
     let (mut e, t, _, beat) = midi();
