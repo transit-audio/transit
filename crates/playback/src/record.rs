@@ -642,7 +642,8 @@ impl Recorder {
                 |m| format!("{:?}, residual {:.0} ns, offset {:.0} ns, revision {}", m.quality, m.residual_ns, m.offset_ns(), m.revision),
             )
         };
-        let start = self.applied_start().map_or_else(|| "not applied".to_string(), |p| format!("at host {} ns, output frame {}", p.host_ns, p.output_frame));
+        let start =
+            self.applied_start().map_or_else(|| "not applied".to_string(), |p| format!("at host {} ns, output frame {}", p.host_ns, p.output_frame));
         let input = self.clock_report().and_then(|r| r.map);
         format!(
             "recording start {start}; output clock: {}, latency {output_latency:?}; input clock: {}, latency {:?}",
