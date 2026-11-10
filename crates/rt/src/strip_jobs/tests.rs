@@ -505,6 +505,57 @@ fn free_worker(shared: &Shared, k: usize) {
     }
 }
 
+/// A forced block's setup before its publish.
+fn force_before_publish(shared: &Shared, forced: Path, b: u64) {
+    let failed = || shared.failed.load(Ordering::Acquire);
+    match forced {
+        Path::Inline => {
+            // Every worker parks under this block's epoch before anything is published, so none
+            // is inside a claim and none can claim until the pass is over.
+            shared.pause.store(b, Ordering::Release);
+            wait_until("the workers park", || shared.parked.iter().all(|p| p.load(Ordering::Acquire) == b) || failed());
+        }
+        Path::Overrun => {
+            // The strip held by this block must be published: wait out a claim of an earlier
+            // block's overrun (a free block may leave one).
+            let slot = shared.set.slot(HELD).expect("in range");
+            wait_until("the held strip's earlier claim", || slot.state() != State::Claimed || failed());
+            shared.hold.store(b, Ordering::Release);
+        }
+        Path::Mixed | Path::Free => {}
+    }
+}
+
+/// A forced block's wait between its publish and the publisher's pass.
+fn force_before_pass(shared: &Shared, forced: Path, b: u64, was_published: [bool; FREE_STRIPS]) {
+    let failed = || shared.failed.load(Ordering::Acquire);
+    match forced {
+        Path::Mixed => {
+            let done = |i: usize| shared.set.slot(i).is_some_and(|s| s.state() == State::Done);
+            let all_done = || was_published.iter().enumerate().all(|(i, &p)| !p || done(i));
+            wait_until("the workers finish every published strip", || all_done() || failed());
+        }
+        Path::Overrun => wait_until("a worker holds the held strip", || shared.holding.load(Ordering::Acquire) == b || failed()),
+        Path::Inline | Path::Free => {}
+    }
+}
+
+/// A forced block's outcome, then the workers or the held strip let go.
+fn force_after_pass(shared: &Shared, forced: Path, b: u64, ends: [Option<End>; FREE_STRIPS]) {
+    match forced {
+        Path::Inline => {
+            assert_eq!(ends, [Some(End::Inline); FREE_STRIPS], "block {b}: forced inline, every strip published and reclaimed");
+            shared.pause.store(0, Ordering::Release);
+        }
+        Path::Mixed => assert_eq!(ends, [Some(End::Mixed); FREE_STRIPS], "block {b}: forced mixed, every strip published and done"),
+        Path::Overrun => {
+            assert_eq!(ends[HELD], Some(End::Overrun), "block {b}: forced overrun of the held strip: {ends:?}");
+            shared.hold.store(0, Ordering::Release);
+        }
+        Path::Free => {}
+    }
+}
+
 /// The per-block rule end to end on a set, free-running: workers claim whatever is published
 /// with random delays inside the strip; the publisher reads each slot first (idle: publish; done:
 /// retire unread, then publish; claimed: skip as an overrun), lets a random amount of work pass
@@ -540,22 +591,7 @@ fn every_publish_ends_mixed_inline_or_overrun_under_free_running_workers() {
     for b in 1..=FREE_BLOCKS {
         let forced = path(b);
         assert!(shared.set.begin(b));
-        match forced {
-            Path::Inline => {
-                // Every worker parks under this block's epoch before anything is published, so
-                // none is inside a claim and none can claim until the pass is over.
-                shared.pause.store(b, Ordering::Release);
-                wait_until("the workers park", || shared.parked.iter().all(|p| p.load(Ordering::Acquire) == b) || failed());
-            }
-            Path::Overrun => {
-                // The strip held by this block must be published: wait out a claim of an earlier
-                // block's overrun (a free block may leave one).
-                let slot = shared.set.slot(HELD).expect("in range");
-                wait_until("the held strip's earlier claim", || slot.state() != State::Claimed || failed());
-                shared.hold.store(b, Ordering::Release);
-            }
-            Path::Mixed | Path::Free => {}
-        }
+        force_before_publish(&shared, forced, b);
         for (i, flag) in was_published.iter_mut().enumerate() {
             let slot = shared.set.slot(i).expect("in range");
             *flag = false;
@@ -579,15 +615,7 @@ fn every_publish_ends_mixed_inline_or_overrun_under_free_running_workers() {
         // The callback's own work until its deadline: a random amount, never a clock.
         rng.jitter();
         rng.jitter();
-        match forced {
-            Path::Mixed => {
-                let done = |i: usize| shared.set.slot(i).is_some_and(|s| s.state() == State::Done);
-                let all_done = || was_published.iter().enumerate().all(|(i, &p)| !p || done(i));
-                wait_until("the workers finish every published strip", || all_done() || failed());
-            }
-            Path::Overrun => wait_until("a worker holds the held strip", || shared.holding.load(Ordering::Acquire) == b || failed()),
-            Path::Inline | Path::Free => {}
-        }
+        force_before_pass(&shared, forced, b, was_published);
         assert!(!failed(), "block {b}: a worker failed (its panic is above)");
         let mut ends = [None; FREE_STRIPS];
         for (i, &flag) in was_published.iter().enumerate() {
@@ -614,18 +642,7 @@ fn every_publish_ends_mixed_inline_or_overrun_under_free_running_workers() {
                 Consume::Stale => panic!("strip {i} published at {b} cannot be stale at {b}"),
             });
         }
-        match forced {
-            Path::Inline => {
-                assert_eq!(ends, [Some(End::Inline); FREE_STRIPS], "block {b}: forced inline, every strip published and reclaimed");
-                shared.pause.store(0, Ordering::Release);
-            }
-            Path::Mixed => assert_eq!(ends, [Some(End::Mixed); FREE_STRIPS], "block {b}: forced mixed, every strip published and done"),
-            Path::Overrun => {
-                assert_eq!(ends[HELD], Some(End::Overrun), "block {b}: forced overrun of the held strip: {ends:?}");
-                shared.hold.store(0, Ordering::Release);
-            }
-            Path::Free => {}
-        }
+        force_after_pass(&shared, forced, b, ends);
     }
     // Drain: wait for the overrun workers, then retire their late results unread.
     wait_until("the last claims", || shared.set.counts().claimed == 0 || failed());
