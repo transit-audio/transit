@@ -15,7 +15,7 @@
 //! - **Refused whole.** Every refusal comes before any change and nothing is truncated; `preview`
 //!   returns the same plan and the same refusal as data. An accepted run is one undo step.
 //! - **Write-through.** A run calls [`write_through_slice_zones`] for the showing set inside its
-//!   step, so a rebound zone's stored region follows its new slice once that hook is filled.
+//!   step, so a rebound zone's stored source, region and loop follow its new slice.
 
 use super::sampler::instrument_track;
 use super::sampler_patch::{patch_of, store};

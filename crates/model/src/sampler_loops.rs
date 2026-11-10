@@ -58,6 +58,15 @@ pub fn derived_region(zone: &ZoneEntry, patch: &PatchV1) -> Option<DerivedRegion
     Some(DerivedRegion { source: l.source, start, end, loop_start: start, loop_end: end })
 }
 
+/// Writes `d` into `zone`'s stored source, region and loop fields: the write-through of a
+/// slice-bound zone (amendment 2026-11-08, item 1), so the stored zone describes what plays.
+/// Whether any field changed.
+pub fn write_region(zone: &mut ZoneEntry, d: DerivedRegion) -> bool {
+    let before = (zone.source, zone.start, zone.end, zone.loop_start, zone.loop_end);
+    (zone.source, zone.start, zone.end, zone.loop_start, zone.loop_end) = (d.source, d.start, d.end, d.loop_start, d.loop_end);
+    before != (d.source, d.start, d.end, d.loop_start, d.loop_end)
+}
+
 /// The region `zone` plays: [`derived_region`] for a slice-bound zone, its stored fields otherwise.
 #[must_use]
 pub fn effective_region(zone: &ZoneEntry, patch: &PatchV1) -> DerivedRegion {

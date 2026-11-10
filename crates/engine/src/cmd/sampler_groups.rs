@@ -29,7 +29,7 @@ use crate::cmd;
 use serde_json::{Map, json};
 use transit_model::Session;
 use transit_model::sampler_fades::{FadeRefusal, Fades, check_fades, fades_used};
-use transit_model::sampler_loops::{crossfade_max, crossfade_ms_text, crossfade_used, derived_region, effective_region, loop_used};
+use transit_model::sampler_loops::{crossfade_max, crossfade_ms_text, crossfade_used, derived_region, effective_region, loop_used, write_region};
 use transit_model::sampler_patch::{GroupEntry, LoopMode, Membership, PadEntry, PatchV1, PlayMode, RoundRobin, SliceSet, ZONES, ZoneEntry};
 
 /// The refusal of a loop on a one-shot, and of One-shot on a looping zone (item 1).
@@ -206,7 +206,7 @@ pub(crate) fn admit_zone(
                 return Err(bad(id, format!("Slice {} is one frame long, too short to loop.", slice_number(p, &next))));
             }
             // Write-through (item 1): the stored zone describes what plays.
-            (next.source, next.start, next.end, next.loop_start, next.loop_end) = (d.source, d.start, d.end, d.loop_start, d.loop_end);
+            write_region(&mut next, d);
         }
     }
     if (sets("mode") || sets("loop_mode")) && next.mode == PlayMode::OneShot && next.loop_mode != LoopMode::Off {

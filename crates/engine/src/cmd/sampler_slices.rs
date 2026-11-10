@@ -17,17 +17,19 @@
 //!   Manual) frees the zones bound to its slice in that set only: each such zone is emptied and
 //!   its pad unbound (the pad's note stays), reported as `freed_pads` and `freed_zones`.
 //! - **Write-through.** Every edit that changes a set's boundaries calls
-//!   [`write_through_slice_zones`] inside its step; it is empty until the derived slice region
-//!   exists (see its doc).
+//!   [`write_through_slice_zones`] inside its step: each zone bound to the set stores its slice's
+//!   derived source, region and loop, so the saved file describes what plays.
 //! - **The engine never guesses UI state.** The grid's and the beat length's session tempo is
 //!   read at the placement `at` the caller passes; without it they are not reported.
 
 use super::sampler::instrument_track;
+use super::sampler_groups::zone_json;
 use super::sampler_patch::{admit_patch, admit_source, patch_of, store};
 use super::sampler_slice_pads::{MappingStatus, StaleSlice, mapping_status};
 use super::*;
 use crate::cmd;
 use serde_json::json;
+use transit_model::sampler_loops::{DerivedRegion, derived_region, write_region};
 use transit_model::sampler_patch::{MAX_SLICES, Markers, Ownership, PadEntry, PatchV1, SliceLoop, SliceMode, SliceSet};
 use transit_model::slicing::{self, ClampedAt, FULL_TEXT, MarkerError, SnapError};
 use transit_model::{Session, SourceId};
@@ -100,7 +102,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Slice State",
             [],
             None,
-            "{track?, at?: tick (the placement; the session tempo and meter are read there)}: the loop, both sets (per slice: id, frame, end, label, pad, key, zones), mode, snap, root (in use) and root_stored, beat length and its default, detector, division, bars, grid_bpm, the grid tempo and its origin, and mapping: ascending|stale|none (stale: the first two out-of-order slices) → {track, loop: null | {..}}",
+            "{track?, at?: tick (the placement; the session tempo and meter are read there)}: the loop, both sets (per slice: id, frame, end, label, pad, key, zones), mode, snap, root (in use) and root_stored, beat length and its default, detector, division, bars, grid_bpm, the grid tempo and its origin, and mapping: ascending|stale|none (stale: the first two out-of-order slices), and every slice-bound zone as mix.sampler_state reports it (loop_mode, loop_used, crossfade, crossfade_used, fades, fades_used, slice, region, ...) → {track, loop: null | {.., zones}}",
             has_selection,
             state
         ),
@@ -117,16 +119,33 @@ fn root_param(id: &str, v: &Value) -> Result<Option<u8>> {
     }
 }
 
-/// Rewrites the derived `start`, `end`, `loop_start` and `loop_end` of every zone bound to a
-/// slice of `set` (ADR 0041 amendment 2026-11-08, item 1), inside the calling command's one undo
-/// step. Called by every marker add, move and remove, Clear and Start from Auto's markers (and a
-/// gesture in Auto, which replaces Manual with the copy), after the set is edited and before the
-/// patch is stored.
-///
-/// Empty in this build: the derivation is slice J's `derived_region`, and this body is filled
-/// with it (slice C2). Until then a marker edit leaves the stored regions of slice-bound zones as
-/// they were.
-pub(super) fn write_through_slice_zones(_patch: &mut PatchV1, _set: SliceSet) {}
+/// Rewrites the stored `source`, `start`, `end`, `loop_start` and `loop_end` of every zone bound
+/// to a slice of `set` with the slice's derived region ([`derived_region`]; ADR 0041 amendment
+/// 2026-11-08, item 1), inside the calling command's one undo step. Called by every marker add,
+/// move and remove, Clear and Start from Auto's markers (and a gesture in Auto, which replaces
+/// Manual with the copy), Replace markers and Slices to pads, after the set and the bindings are
+/// edited and before the patch is stored. A zone whose slice was removed has already been freed,
+/// so every zone it meets derives a region. A source reference that no zone uses any more after
+/// the rewrite is dropped, as every zone edit does.
+pub(super) fn write_through_slice_zones(patch: &mut PatchV1, set: SliceSet) {
+    let derived: Vec<(u16, DerivedRegion)> = patch
+        .zones
+        .iter()
+        .filter(|z| z.slice.as_ref().is_some_and(|b| b.set == set))
+        .filter_map(|z| derived_region(z, patch).map(|d| (z.id, d)))
+        .collect();
+    let mut source_changed = false;
+    for (id, d) in derived {
+        if let Some(z) = patch.zone_mut(id) {
+            let old = z.source;
+            write_region(z, d);
+            source_changed |= old != d.source;
+        }
+    }
+    if source_changed {
+        patch.drop_unused_sources();
+    }
+}
 
 pub(super) fn loop_of<'a>(id: &str, p: &'a PatchV1) -> Result<&'a SliceLoop> {
     p.slicing.as_ref().ok_or_else(|| bad(id, "the patch has no slice loop: make one with mix.sampler_slice_loop"))
@@ -606,6 +625,9 @@ fn state(e: &mut Engine, p: &Value) -> Result<Value> {
         "division": l.division, "bars": l.bars, "grid_bpm": l.grid_bpm, "grid_tempo": grid,
         "beat_length": l.beat_length, "default_beat_length": default_beat_length(l, rate, acid, at_tempo),
         "auto": markers_json(&patch, SliceSet::Auto), "manual": markers_json(&patch, SliceSet::Manual),
+        // Every slice-bound zone (either set) as `mix.sampler_state` reports it: the stored loop
+        // mode, crossfade and fades beside the values playback uses.
+        "zones": patch.zones.iter().filter(|z| z.slice.is_some()).map(|z| zone_json(s, &patch, z)).collect::<Vec<_>>(),
     });
     if let (Some(o), Value::Object(m)) = (out.as_object_mut(), mapping(&patch, showing)) {
         o.extend(m);
@@ -616,3 +638,7 @@ fn state(e: &mut Engine, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "tests_sampler_slices.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests_sampler_slice_write_through.rs"]
+mod write_through_tests;
