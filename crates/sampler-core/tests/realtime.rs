@@ -3,7 +3,7 @@
 //! matrix row active on shaped stereo and mono voices, steals, chokes, loops, control changes, All
 //! Notes Off, Stop, All Sound Off, the Reset event and `reset()`; and with key-map groups playing
 //! their round robins (sequential and random), transport changes, patch and mode edits; and with
-//! edge fades scaling unbound zones' velocities.
+//! edge fades scaling unbound zones' velocities; and with crossfaded forward loops (forward and reverse).
 //!
 //! The binary installs `transit_rt::testing::CountingAlloc` and counts the test thread only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -274,5 +274,50 @@ fn edge_fades_neither_allocate_nor_free() {
         assert!(l.iter().chain(&r).all(|x| x.is_finite()), "round {round}");
     }
     assert!(sounded, "the faded zones played");
+    assert!(total.is_zero(), "{total:?}");
+}
+
+#[test]
+fn crossfaded_loops_neither_allocate_nor_free() {
+    let mono: Vec<f32> = (0..4000).map(|i| (i as f32 * 0.013).sin()).collect();
+    let sources = [SliceSource::mono(&mono, 44_100.0)];
+    // Forward and reverse crossfaded loops (one stored past half its loop, one from frame 0 in
+    // reverse) and a ping-pong loop with a stored crossfade it never plays.
+    let mut zones: Vec<Option<Zone>> = vec![None; ZONES];
+    let loops = [
+        (LoopMode::Forward, 100, 3000, 400, false),
+        (LoopMode::Forward, 0, 7, 50, true),
+        (LoopMode::Forward, 10, 900, 300, true),
+        (LoopMode::PingPong, 5, 600, 90, false),
+    ];
+    for (i, (mode, lo, hi, x, reverse)) in loops.into_iter().enumerate() {
+        let region = Region::whole(0, 4000).looped(mode, lo, hi).crossfaded(x);
+        let playback = Playback { reverse, ..Playback::zone() };
+        zones[i] = Some(Zone { keys: (i as u8 * 30, i as u8 * 30 + 29), playback, ..Zone::new(region) });
+    }
+    let pads: [Pad; PADS] = core::array::from_fn(Pad::new);
+    let mut c = SamplerCore::new();
+    c.prepare(RATE, 5);
+    c.set_patch(&zones, &pads).unwrap();
+    let events: Vec<Event> =
+        (0..120u32).map(|k| Event::new(k * 4, EventKind::NoteOn { channel: 0, key: (k * 11 % 120) as u8, velocity: 100, id: k as i32 })).collect();
+    let mut l = vec![0.0f32; 512];
+    let mut r = vec![0.0f32; 512];
+    let mut total = AllocStats::default();
+    let mut sounded = false;
+    for round in 0..8usize {
+        let ctx = Context { frame: round as u64 * 512, tempo: 120.0, quarters: None };
+        let ((), stats) = measure(|| {
+            if round == 4 {
+                c.set_patch(&zones, &pads).unwrap();
+            }
+            c.process(&ctx, &sources[..], if round < 2 { &events } else { &[] }, &mut [&mut l[..], &mut r[..]]);
+        });
+        total.allocs += stats.allocs;
+        total.frees += stats.frees;
+        sounded |= l.iter().any(|x| *x != 0.0);
+        assert!(l.iter().chain(&r).all(|x| x.is_finite()), "round {round}");
+    }
+    assert!(sounded, "the crossfaded loops played");
     assert!(total.is_zero(), "{total:?}");
 }

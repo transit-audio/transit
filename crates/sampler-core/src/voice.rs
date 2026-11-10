@@ -130,6 +130,22 @@ fn balance(pan: f32) -> (f32, f32) {
     }
 }
 
+/// The cubic read of channel `ch` through `taps` at fraction `frac` (a tap outside the region reads
+/// zero; a tap the source does not have now reads zero and sets `missed`).
+#[inline]
+fn read(source: Option<&dyn RegionReader>, ch: usize, taps: [Option<u64>; 4], frac: f32, missed: &mut bool) -> f32 {
+    let mut at = [0.0f32; 4];
+    for (a, tap) in at.iter_mut().zip(taps) {
+        if let Some(f) = tap {
+            match source.and_then(|s| s.sample(ch, f)) {
+                Some(v) => *a = v,
+                None => *missed = true,
+            }
+        }
+    }
+    cubic(at[0], at[1], at[2], at[3], frac)
+}
+
 impl Voice {
     /// An idle voice whose shapers draw from `seed`.
     pub(crate) fn new(seed: u32) -> Voice {
@@ -146,7 +162,7 @@ impl Voice {
             held: false,
             sustained: false,
             one_shot: false,
-            head: Playhead { pos: 0.0, reverse: false, up: true, looping: false, wrapped: false, done: true },
+            head: Playhead { pos: 0.0, reverse: false, up: true, looping: false, wrapped: false, done: true, crossfade: 0 },
             region: Region::whole(0, 0),
             ratio: 1.0,
             semis: 0.0,
@@ -395,19 +411,19 @@ impl Voice {
         self.grid -= 1;
         let amp = self.env.next(&d.env);
         let (taps, frac) = self.head.taps(&self.region);
+        // A crossfaded loop's final X frames: the incoming read and its weight.
+        let blend = self.head.crossfade_at(&self.region).map(|(incoming, w)| (self.head.incoming_taps(&self.region, incoming), w));
         let mut x = [0.0f32; 2];
         let channels = usize::from(self.channels).clamp(1, 2);
         for (ch, xc) in x.iter_mut().enumerate().take(channels) {
-            let mut at = [0.0f32; 4];
-            for (a, tap) in at.iter_mut().zip(taps) {
-                if let Some(f) = tap {
-                    match source.and_then(|s| s.sample(ch, f)) {
-                        Some(v) => *a = v,
-                        None => self.missed = true,
-                    }
+            let a = read(source, ch, taps, frac, &mut self.missed);
+            *xc = match blend {
+                Some(((taps, frac), w)) => {
+                    let b = read(source, ch, taps, frac, &mut self.missed);
+                    a + (b - a) * w
                 }
-            }
-            *xc = cubic(at[0], at[1], at[2], at[3], frac);
+                None => a,
+            };
         }
         let filtered = self.shaped || self.switch != Fade::None;
         let w = (self.switch_k + 1) as f32 / MOD_BLOCK as f32;

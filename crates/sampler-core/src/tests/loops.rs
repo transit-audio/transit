@@ -56,7 +56,7 @@ fn taps_outside_the_region_read_zero() {
 }
 
 /// The independent reference: the phase recurrence and the tap rules with while-loops.
-fn reference(data: &[f32], r: &Region, reverse: bool, looping: bool, step: f64, frames: usize) -> Vec<f32> {
+pub(super) fn reference(data: &[f32], r: &Region, reverse: bool, looping: bool, step: f64, frames: usize) -> Vec<f32> {
     let looping = looping && r.loop_mode != LoopMode::Off;
     let (start, end) = (r.start as i64, r.end as i64);
     let (lo, hi) = (r.loop_start as i64, r.loop_end as i64 - 1);

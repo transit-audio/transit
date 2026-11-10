@@ -17,7 +17,20 @@
 //!   `loop_end - 1`, or below `loop_start` in reverse) taps always wrap or reflect; on the entry side
 //!   they read the original region (the intro) until the first wrap or reflection, and wrap or
 //!   reflect after it.
-//! - **Crossfades** (forward-loop overlap) belong to the Instrument view (#270); this module has none.
+//! - **Crossfade** (forward loops only). With X the used crossfade ([`Region::crossfade_used`]:
+//!   the stored count clamped to `floor(L / 2)`, 0 unless the loop is Forward), the final X frames
+//!   before the exit blend two reads of the same cubic reader, outgoing `a` at the phase p and
+//!   incoming `b`, as `a + (b - a) * w` in that order ([`Playhead::crossfade_at`]). Forward:
+//!   `d = p - (loop_end - X)` on `[loop_end - X, loop_end)`, `w = d / X`, incoming phase
+//!   `loop_start + d`, and past `loop_end` the phase continues at `loop_start + X` with its
+//!   fractional overshoot, so the period is `L - X`. Reverse is the same arithmetic in the mirrored
+//!   coordinate `u = (loop_start + loop_end - 1) - p` (the mirror that maps reverse's entry
+//!   `end - 1` and its wrap below `loop_start` to `loop_end - 1` onto the forward ones):
+//!   `d = (loop_start + X - 1) - p` on `(loop_start - 1, loop_start + X - 1]`, incoming phase
+//!   `(loop_end - 1) - d`, and at or below `loop_start - 1` the phase continues at
+//!   `loop_end - 1 - X` with its overshoot. The incoming read's taps always map through the loop
+//!   rule (they are loop taps, never intro taps). X = 0 takes none of these paths: the arithmetic
+//!   is the plain loop's, bit for bit.
 
 /// How a zone loops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -40,19 +53,38 @@ pub struct Region {
     pub loop_start: u64,
     /// Exclusive.
     pub loop_end: u64,
+    /// The forward-loop crossfade X in native source frames as stored (0: none). Any value is
+    /// accepted; playback uses [`Region::crossfade_used`].
+    pub crossfade: u64,
 }
 
 impl Region {
     /// The whole of source `source`, `frames` long, without a loop.
     #[must_use]
     pub fn whole(source: u16, frames: u64) -> Region {
-        Region { source, start: 0, end: frames, loop_mode: LoopMode::Off, loop_start: 0, loop_end: frames }
+        Region { source, start: 0, end: frames, loop_mode: LoopMode::Off, loop_start: 0, loop_end: frames, crossfade: 0 }
     }
 
     /// The region with a loop over `loop_start..loop_end`.
     #[must_use]
     pub fn looped(self, mode: LoopMode, loop_start: u64, loop_end: u64) -> Region {
         Region { loop_mode: mode, loop_start, loop_end, ..self }
+    }
+
+    /// The region with a stored crossfade of `frames` source frames.
+    #[must_use]
+    pub fn crossfaded(self, frames: u64) -> Region {
+        Region { crossfade: frames, ..self }
+    }
+
+    /// The crossfade playback uses: `min(crossfade, floor(L / 2))` with L the loop's length on a
+    /// Forward loop, 0 for any other loop mode.
+    #[must_use]
+    pub fn crossfade_used(&self) -> u64 {
+        if self.loop_mode != LoopMode::Forward {
+            return 0;
+        }
+        self.crossfade.min(self.loop_end.saturating_sub(self.loop_start) / 2)
     }
 
     /// Whether the bounds hold: a non-empty region and, when it loops, a loop of at least two frames
@@ -72,7 +104,8 @@ impl Region {
 /// A voice's read position and its loop state.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Playhead {
-    /// The phase in native source frames (never negative while playing).
+    /// The phase in native source frames (above -1 while playing: only a crossfaded reverse loop
+    /// starting at frame 0 reaches below 0, mirroring the forward loop's last frame).
     pub pos: f64,
     /// Playback runs from the end down.
     pub reverse: bool,
@@ -84,6 +117,8 @@ pub struct Playhead {
     pub wrapped: bool,
     /// The phase left the region: the voice ends.
     pub done: bool,
+    /// The crossfade in use, X (0: none; nonzero only while looping a Forward loop).
+    pub crossfade: u64,
 }
 
 impl Playhead {
@@ -93,7 +128,39 @@ impl Playhead {
     pub fn start(region: &Region, reverse: bool, looping: bool) -> Playhead {
         let pos = if reverse { region.end.saturating_sub(1) } else { region.start } as f64;
         let looping = looping && region.loop_mode != LoopMode::Off;
-        Playhead { pos, reverse, up: !reverse, looping, wrapped: false, done: false }
+        let crossfade = if looping { region.crossfade_used() } else { 0 };
+        Playhead { pos, reverse, up: !reverse, looping, wrapped: false, done: false, crossfade }
+    }
+
+    /// The blend at the phase while it is in the final X frames of a crossfaded forward loop: the
+    /// incoming phase and the incoming weight `w` (`None`: no blend here).
+    #[must_use]
+    pub fn crossfade_at(&self, r: &Region) -> Option<(f64, f32)> {
+        if self.crossfade == 0 || !self.looping {
+            return None;
+        }
+        let x = self.crossfade as f64;
+        let (ls, le) = (r.loop_start as f64, r.loop_end as f64);
+        // Reverse reads the forward equations in the mirrored coordinate u = (ls + le - 1) - p.
+        let (d, inside) = if self.reverse {
+            let d = (ls + x - 1.0) - self.pos;
+            (d, d >= 0.0 && self.pos > ls - 1.0)
+        } else {
+            let d = self.pos - (le - x);
+            (d, d >= 0.0 && self.pos < le)
+        };
+        if !inside {
+            return None;
+        }
+        let incoming = if self.reverse { (le - 1.0) - d } else { ls + d };
+        Some((incoming, (d / x) as f32))
+    }
+
+    /// The four cubic taps of the incoming read at phase `incoming` ([`Playhead::crossfade_at`]):
+    /// loop taps, mapped through the loop rule on both sides.
+    #[must_use]
+    pub fn incoming_taps(&self, r: &Region, incoming: f64) -> ([Option<u64>; 4], f32) {
+        Playhead { pos: incoming, wrapped: true, ..*self }.taps(r)
     }
 
     /// The source frame tap `j` reads (`None`: zero, outside the region or the loop's reach).
@@ -118,8 +185,13 @@ impl Playhead {
     /// The four cubic taps around the phase (frames `i - 1 ..= i + 2`, mapped) and the fraction.
     #[must_use]
     pub fn taps(&self, r: &Region) -> ([Option<u64>; 4], f32) {
-        let (i, t) = crate::reader::split(self.pos);
-        let i = i as i64;
+        let (i, t) = if self.pos < 0.0 {
+            let i = crate::math::floor(self.pos);
+            (i as i64, (self.pos - i) as f32)
+        } else {
+            let (i, t) = crate::reader::split(self.pos);
+            (i as i64, t)
+        };
         ([self.tap(r, i - 1), self.tap(r, i), self.tap(r, i + 1), self.tap(r, i + 2)], t)
     }
 
@@ -156,24 +228,34 @@ impl Playhead {
                 }
             }
             _ => {
-                let len = hi + 1.0 - lo;
-                if self.reverse {
+                // After a wrap the phase stays in [lo + X, hi + 1) (reverse, mirrored:
+                // (lo - 1, hi - X]), the period L - X; with X = 0 every term is the plain loop's.
+                let x = self.crossfade as f64;
+                let len = hi + 1.0 - lo - x;
+                if self.reverse && self.crossfade > 0 {
+                    self.pos -= step;
+                    if self.pos <= lo - 1.0 {
+                        self.pos = (hi - x) - (lo - 1.0 - self.pos) % len;
+                        self.wrapped = true;
+                    }
+                } else if self.reverse {
                     self.pos -= step;
                     if self.pos < lo {
                         let q = (lo - self.pos) % len;
-                        self.pos = if q == 0.0 { lo } else { hi + 1.0 - q };
+                        self.pos = if q == 0.0 { lo } else { hi + 1.0 - x - q };
                         self.wrapped = true;
                     }
                 } else {
                     self.pos += step;
                     if self.pos >= hi + 1.0 {
+                        let lo = lo + x;
                         self.pos = lo + (self.pos - lo) % len;
                         self.wrapped = true;
                     }
                 }
             }
         }
-        self.done = !self.pos.is_finite() || self.pos < 0.0;
+        self.done = !self.pos.is_finite() || self.pos <= -1.0;
     }
 
     /// Output frames left before the phase leaves a non-looping region at `step` (this one

@@ -100,7 +100,7 @@ fn core_zone(z: &ZoneEntry, source: u16, bound: bool) -> Zone {
         LoopMode::Forward => CoreLoop::Forward,
         LoopMode::PingPong => CoreLoop::PingPong,
     };
-    let mut zone = Zone::new(Region { source, start: z.start, end: z.end, loop_mode, loop_start: z.loop_start, loop_end: z.loop_end });
+    let mut zone = Zone::new(Region { source, start: z.start, end: z.end, loop_mode, loop_start: z.loop_start, loop_end: z.loop_end, crossfade: 0 });
     zone.keys = (z.keys[0], z.keys[1]);
     zone.velocities = (z.velocities[0], z.velocities[1]);
     zone.membership = z.membership.as_ref().map(|m| CoreMembership { group: m.group, layer: m.layer, alternative: m.alternative });
