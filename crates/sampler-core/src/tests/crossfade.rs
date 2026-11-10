@@ -5,7 +5,7 @@
 //! the session's, and release; plus the mirror, the effective period, the seam, the clamp, the
 //! intro, block sizes and the X = 0 bypass.
 
-use super::blocks::{rich_core, run, source_data};
+use super::blocks::{run, source_data};
 use super::{SR, core, render};
 use crate::event::{Event, EventKind};
 use crate::patch::{Pad, PlayMode, Playback, Zone};
@@ -187,20 +187,57 @@ fn crossfade_matches_reference_equations_sample_for_sample() {
     }
 }
 
-/// The golden render of a rich patch with forward (also reverse) and ping-pong loops, captured on
-/// the tree before crossfades existed (`old_loops_render_bits_unchanged`).
+/// The golden render of a patch with every kind of loop (forward and reverse forward loops, a
+/// three-frame loop, ping-pong) and plain regions, one-shot and Gate, envelopes, declick, pan and
+/// choke, over integer-noise sources at 44.1 and 48 kHz (fractional steps). Every value on its path
+/// is IEEE arithmetic: no shaper, no matrix, key tracking off with no transpose (the step is
+/// `pow(2, 0) = 1` times an exact rate ratio), 0 dB, so the bits are the same on every platform.
+/// Captured on the tree before crossfades existed.
 fn golden_render() -> u64 {
-    let (mono, left, right) = source_data();
+    let mut x = 0x1357_9BDFu32;
+    let mut noise = move || {
+        x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (x >> 8) as f32 / (1u32 << 23) as f32 - 1.0
+    };
+    let mono: Vec<f32> = (0..3000).map(|_| noise()).collect();
+    let left: Vec<f32> = (0..3000).map(|_| noise() * 0.5).collect();
+    let right: Vec<f32> = (0..3000).map(|_| noise() * 0.25).collect();
     let sources = [SliceSource::mono(&mono, 44_100.0), SliceSource::stereo(&left, &right, 48_000.0)];
+    let mut c = crate::SamplerCore::new();
+    c.prepare(SR, 99);
+    for p in 0..24usize {
+        // Each kind of region on both sources, so every loop runs at a whole and a fractional step.
+        let source = ((p / 4) % 2) as u16;
+        let region = match p % 4 {
+            0 => Region::whole(source, 3000),
+            1 => Region { start: 100, end: 2900, ..Region::whole(source, 3000) }.looped(LoopMode::Forward, 400, 1400),
+            2 => Region::whole(source, 3000).looped(LoopMode::PingPong, 50, 300),
+            _ => Region { start: 7, end: 900, ..Region::whole(source, 3000) }.looped(LoopMode::Forward, 8, 11),
+        };
+        let playback = Playback {
+            mode: if p.is_multiple_of(3) { PlayMode::OneShot } else { PlayMode::Gate },
+            reverse: p.is_multiple_of(5) || (p % 4 == 1 && p > 12),
+            pan: (p % 9) as f32 / 4.0 - 1.0,
+            attack_ms: (p % 4) as f32,
+            decay_ms: 5.0 + (p % 3) as f32,
+            sustain: 0.6,
+            release_ms: 2.0 + (p % 5) as f32,
+            declick_ms: (p % 3) as f32,
+            velocity_sensitivity: 0.5,
+            ..Playback::pad(60 + p as u8)
+        };
+        c.set_zone(p, Some(Zone { playback, ..Zone::new(region) })).unwrap();
+        c.set_pad(p, Pad { zone: Some(p as u16), choke: (p % 4) as u8, ..Pad::new(p) }).unwrap();
+    }
     let mut sched = Vec::new();
     for i in 0..64u64 {
-        let key = 60 + (i * 5 % 64) as u8;
-        sched.push((i * 37, EventKind::NoteOn { channel: 0, key, velocity: 100, id: i as i32 }));
+        let key = 60 + (i * 5 % 24) as u8;
+        sched.push((i * 37, EventKind::NoteOn { channel: 0, key, velocity: 30 + (i * 13 % 98) as u8, id: i as i32 }));
         sched.push((i * 37 + 700, EventKind::NoteOff { channel: 0, key, velocity: 64, id: i as i32 }));
     }
     sched.sort_by_key(|e| e.0);
-    let mut c = rich_core(SR);
     let (l, r, _) = run(&mut c, &sources[..], &sched, &[64], 4000);
+    assert!(l.iter().filter(|v| **v != 0.0).count() > 3000, "the golden schedule sounds");
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     for v in l.iter().chain(&r) {
         for byte in v.to_bits().to_le_bytes() {
@@ -212,9 +249,9 @@ fn golden_render() -> u64 {
 
 #[test]
 fn x_zero_bypasses() {
-    // A rich patch's loops (forward, reverse, ping-pong, a three-frame loop) render the bits they
-    // rendered before the crossfade existed.
-    assert_eq!(golden_render(), GOLDEN, "the rich patch's loops changed");
+    // A patch with every kind of loop renders the bits it rendered before the crossfade existed
+    // (a platform-independent render: see `golden_render`).
+    assert_eq!(golden_render(), GOLDEN, "the loops' render changed");
     // Every forward loop with X = 0 matches the plain loop's own reference from `loops`, and its
     // phase walks the plain loop's recurrence bit for bit (reverse wraps below loop_start).
     let data = data();
@@ -249,7 +286,7 @@ fn x_zero_bypasses() {
 }
 
 /// [`golden_render`] on the base tree (captured on a fresh copy of it, in its own target).
-const GOLDEN: u64 = 0xeaf7_fa42_6aba_3958;
+const GOLDEN: u64 = 0xa714_8932_472b_8b4f;
 
 #[test]
 fn reverse_mirrors() {
