@@ -12,8 +12,9 @@
 //! Zoom, scroll, snap, pane height, new-note velocity and the audition switch are view state: [`KeysPrefs`] in
 //! [`crate::UiState`] and [`KeysState`] here, never the document.
 //!
-//! Several clips (#329): with more than one MIDI clip selected, opening one opens them all. The one
-//! opened is the foreground clip: the roll's ticks are its ticks (so a single clip is exactly as
+//! Several clips (#329): with more than one MIDI clip selected, opening one opens the first 16 in
+//! track then time order; the status line reports any left out. The one opened is the foreground
+//! clip when admitted: the roll's ticks are its ticks (so a single clip is exactly as
 //! before), the others sit at their offsets from it, and a click on another clip's note makes that
 //! clip the foreground. Edits across clips are one command per clip under one undo step; new notes
 //! go to the clip whose span they are drawn in, the foreground first, and outside every clip they are
@@ -530,18 +531,13 @@ impl StudioApp {
     }
 
     /// Open `clip` in the piano roll (MIDI clips only). With it among several selected MIDI clips,
-    /// they all open, `clip` in the foreground (#329). View state only.
+    /// up to 16 open in track/time order, `clip` in the foreground when admitted (#329). View state only.
     pub fn open_keys(&mut self, clip: ClipId) -> bool {
         let s = self.engine.session();
         if clip_view(s, clip).is_none() {
             return false;
         }
-        let selected = &s.edit.selected_clips;
-        let others: Vec<ClipId> = if selected.contains(&clip) {
-            selected.iter().copied().filter(|c| *c != clip && clip_view(s, *c).is_some()).collect()
-        } else {
-            Vec::new()
-        };
+        let (clip, others, omitted) = multi::open_set(s, clip);
         if self.keys.clip != Some(clip) || self.keys.others != others {
             self.keys.others = others;
             self.keys.click_tick = None;
@@ -558,6 +554,9 @@ impl StudioApp {
         self.keys.gesture = None;
         self.keys.active = true;
         self.ui.keys.show = true;
+        if omitted > 0 {
+            self.status = format!("Piano roll: 16-clip limit; {omitted} {} left out.", if omitted == 1 { "clip" } else { "clips" });
+        }
         true
     }
 
@@ -570,7 +569,7 @@ impl StudioApp {
         let s = self.engine.session();
         let open = self.keys.clip.filter(|c| clip_view(s, *c).is_some());
         let selected: Vec<ClipId> = s.edit.selected_clips.iter().copied().filter(|c| clip_view(s, *c).is_some()).collect();
-        // A selection of several MIDI clips opens them (#329), the open clip in front if it is one of them.
+        // A selection opens up to 16 (#329), the open clip in front when it is admitted.
         let several = (selected.len() > 1).then(|| open.filter(|c| selected.contains(c)).or(selected.first().copied())).flatten();
         let pick = several.or(open).or_else(|| selected.first().copied());
         match pick {

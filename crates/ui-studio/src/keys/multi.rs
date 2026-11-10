@@ -3,6 +3,35 @@
 
 use super::*;
 
+const MAX_OPEN_CLIPS: usize = 16;
+
+/// The selected MIDI clips that may open, in track order then clip time, with `clip` in the
+/// foreground when it is admitted. Returns the foreground, the other clips and the omitted count.
+pub(super) fn open_set(s: &Session, clip: ClipId) -> (ClipId, Vec<ClipId>, usize) {
+    if !s.edit.selected_clips.contains(&clip) {
+        return (clip, Vec::new(), 0);
+    }
+    let mut clips = s
+        .edit
+        .selected_clips
+        .iter()
+        .filter_map(|id| {
+            let (track, c) = s.find_clip(*id)?;
+            if !matches!(c.content, ClipContent::Midi { .. }) {
+                return None;
+            }
+            let track_order = s.tracks.iter().position(|t| t.id == track)?;
+            Some((track_order, c.start, *id))
+        })
+        .collect::<Vec<_>>();
+    clips.sort_unstable_by_key(|(track, start, id)| (*track, *start, id.0));
+    let omitted = clips.len().saturating_sub(MAX_OPEN_CLIPS);
+    clips.truncate(MAX_OPEN_CLIPS);
+    let foreground = if clips.iter().any(|(_, _, id)| *id == clip) { clip } else { clips.first().map_or(clip, |(_, _, id)| *id) };
+    let others = clips.into_iter().filter_map(|(_, _, id)| (id != foreground).then_some(id)).collect();
+    (foreground, others, omitted)
+}
+
 /// One clip open in the roll, at `off` ticks from the foreground's start; its notes are
 /// `notes[base..base + count]` of the [`Composite`].
 #[derive(Debug, Clone)]
