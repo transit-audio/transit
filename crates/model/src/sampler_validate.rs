@@ -90,10 +90,14 @@ impl PatchV1 {
         if usize::from(z.source) >= self.sources.len() {
             return Err("its source is not in the patch");
         }
-        if z.start >= z.end {
+        // A slice-bound zone plays the region and loop its slice derives (checked with the slice
+        // below); its stored fields may disagree or be a one-frame loop, and are rewritten on the
+        // next edit that writes them through (ADR 0041 amendment 2026-11-08, "Validator changes").
+        if z.slice.is_none() && z.start >= z.end {
             return Err("its region is empty");
         }
-        if z.loop_mode != LoopMode::Off
+        if z.slice.is_none()
+            && z.loop_mode != LoopMode::Off
             && !(z.start <= z.loop_start && z.loop_start < z.loop_end && z.loop_end <= z.end && z.loop_end - z.loop_start >= 2)
         {
             return Err("its loop is not inside its region (or shorter than two frames)");

@@ -170,6 +170,10 @@ pub struct ZoneEntry {
     pub loop_mode: LoopMode,
     pub loop_start: u64,
     pub loop_end: u64,
+    /// The forward-loop crossfade X in native source frames ([`crate::sampler_loops`]); written
+    /// only when nonzero.
+    #[serde(skip_serializing_if = "is_default")]
+    pub crossfade: u64,
     /// Inclusive.
     pub keys: [u8; 2],
     /// Inclusive, 1..=127.
@@ -211,6 +215,7 @@ impl Default for ZoneEntry {
             loop_mode: LoopMode::Off,
             loop_start: 0,
             loop_end: 0,
+            crossfade: 0,
             keys: [0, 127],
             velocities: [1, 127],
             root: 60,

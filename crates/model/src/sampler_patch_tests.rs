@@ -14,6 +14,7 @@ fn full() -> PatchV1 {
         loop_mode: LoopMode::PingPong,
         loop_start: 100,
         loop_end: 3000,
+        crossfade: 450,
         keys: [36, 72],
         velocities: [20, 110],
         root: 48,
