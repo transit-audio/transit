@@ -556,6 +556,18 @@ into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as 
 file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
 platforms it lands as soon as the pointer moves after you let go (see the known issues).
 
+Each Sampler kit has a **pad start note**: the note of pad A1, with every other pad on the next
+note up (bank B starts 16 notes above A, C 32 and D 48). A new kit starts at MIDI note 36, where
+General MIDI drums start and where other DAWs put the first pad of their drum instruments, so drum
+clips made elsewhere land on bank A; a kit saved before this setting existed keeps its pads on
+MIDI note 60 and up. To match a pad controller whose first pad sends another note, set the start
+note to that note instead of remapping the controller (for now with the `mix.sampler_pad_start`
+command; a Start note field on the Pads view comes later). A pad whose note you set yourself keeps
+that note when the start note changes; the others move, and keep their pitch. Clips are never
+changed: the notes they hold no longer reach the moved pads, so transpose the pad clips by the
+distance the message gives (select their notes in the piano roll and move them by that many
+semitones).
+
 ## Resonator
 
 The Resonator is a built-in instrument (choose it from a track's instrument slot, beside the Macro
