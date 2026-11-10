@@ -224,6 +224,8 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
             .horizontal_align(egui::Align::Center)
             .frame(egui::Frame::NONE)
             .margin(egui::Margin::ZERO);
+        // Token gap: no token names a field's text inset; 2 keeps the typed text inside the 1.5 px
+        // ring (reported with the job, not invented as a token).
         let r = ui.put(field.shrink(2.0), edit);
         r.request_focus();
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
