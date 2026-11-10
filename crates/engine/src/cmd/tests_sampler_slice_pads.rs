@@ -735,6 +735,24 @@ fn a_run_with_a_root_stores_every_run_pad_note_and_survives_a_start_change() {
 }
 
 #[test]
+fn a_run_without_a_root_on_a_loop_with_a_stored_root_stays_whole_across_a_start_change() {
+    let (mut e, t) = setup();
+    manual(&mut e, t, 4);
+    to_pads(&mut e, t, Some(60));
+    // A fifth slice, then a run without a root: it uses the stored root 60, and slice 5 lands on
+    // A5, which already plays 64 by default.
+    one_step(&mut e, "mix.sampler_slice_marker", json!({"track": t, "op": "add", "frame": 42_000, "snap": false}));
+    let out = to_pads(&mut e, t, None);
+    assert_eq!(out["root"], json!(60), "the run uses the stored root");
+    let p = patch(&e, t);
+    assert_eq!(p.slicing.as_ref().unwrap().root, Some(60), "the root stays stored");
+    assert!((0..5u8).all(|q| p.pad_note_stored(q)), "every run pad stores its note, A5 included");
+    start(&mut e, t, 64);
+    assert_eq!(bound(&e, t), run(60, &[1, 2, 3, 4, 5], SliceSet::Manual), "the run is still contiguous at 60");
+    assert_eq!(midi_keys(&mut e, t), (json!(60), json!(64)), "Slice to MIDI still works");
+}
+
+#[test]
 fn a_stored_note_on_an_empty_pad_refuses_a_start_change_truthfully() {
     // Map moves the empty A2 to note 68 (stored); a start note of 64 would put the defaulted A5
     // on 68.

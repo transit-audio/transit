@@ -32,7 +32,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Slices to Pads",
             [],
             None,
-            "{track?, root?: 0-(128 minus the slice count) (default: the loop's stored root, else the pad start note), preview?: false}: the showing set's slice i plays on trigger note root+i, one pad-bound zone per slice (ADR 0041 amendment 2026-11-08 item 6); a given root is stored with every run pad's note, a run without one stores neither for pads on their default notes; preview returns the plan and edits nothing → {track, set, root, count, cells: [{pad, note, slice, id, replaces: null|{set, slice, id}}], loose_collisions: [{pad, note}], unbound: [{pad, note, slice, id, zone}], pads_after, ok, reason?}",
+            "{track?, root?: 0-(128 minus the slice count) (default: the loop's stored root, else the pad start note), preview?: false}: the showing set's slice i plays on trigger note root+i, one pad-bound zone per slice (ADR 0041 amendment 2026-11-08 item 6); a given root is stored with every run pad's note; a run without one leaves the loop's root as it is, stores every run pad's note when the loop stores a root, and otherwise stores none for pads on their default notes; preview returns the plan and edits nothing → {track, set, root, count, cells: [{pad, note, slice, id, replaces: null|{set, slice, id}}], loose_collisions: [{pad, note}], unbound: [{pad, note, slice, id, zone}], pads_after, ok, reason?}",
             has_selection,
             slices_to_pads
         ),
@@ -289,9 +289,10 @@ fn plan_json(p: &PatchV1, plan: &Plan, names: transit_midi::MiddleC) -> Value {
 }
 
 /// Applies an accepted plan to `p` (the loop's source and slice bounds from `views`). With `absolute`
-/// (the run stores its root) every run pad stores its note, so the run is absolute like its root
-/// and a later start-note change cannot split it; otherwise only the pads step 3 re-notes store
-/// one, and pads on their default notes keep following the pad start note.
+/// (the loop's root is stored, by this run or before it) every run pad stores its note, so the run
+/// is absolute like its root and a later start-note change cannot split it; otherwise only the
+/// pads step 3 re-notes store one, and pads on their default notes keep following the pad start
+/// note.
 fn apply(p: &mut PatchV1, plan: &Plan, views: &[SliceView], absolute: bool) {
     // Step 4 first, so their zone slots are free for the new zones.
     for (q, _) in &plan.unbound {
@@ -388,9 +389,13 @@ fn slices_to_pads(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, r));
     }
     let before = patch.clone();
-    apply(&mut patch, &plan, &views, chosen.is_some());
-    // A root the user selects is stored and absolute; a run without one stores none, so the loop
-    // keeps following the pad start note (ADR 0041 amendment 2026-11-09 item 7).
+    // A stored root means a fixed run: a run given a root, or one without a root on a loop that
+    // already stores one (it uses that root, ADR 0041 amendment 2026-11-09 item 7), stores every
+    // run pad's note.
+    let absolute = chosen.is_some() || patch.slicing.as_ref().is_some_and(|l| l.root.is_some());
+    apply(&mut patch, &plan, &views, absolute);
+    // A root the user selects is stored and absolute; a run without one leaves the loop's root as
+    // it is, so a loop without one keeps following the pad start note (item 7).
     if let (Some(l), Some(r)) = (patch.slicing.as_mut(), chosen) {
         l.root = Some(r);
     }
