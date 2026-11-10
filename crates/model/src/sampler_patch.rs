@@ -24,6 +24,7 @@
 //!   ever rewritten into an empty patch.
 
 use crate::SourceId;
+pub use crate::sampler_fades::Fades;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -186,6 +187,9 @@ pub struct ZoneEntry {
     pub release_ms: f32,
     pub declick_ms: f32,
     pub velocity_sensitivity: f32,
+    /// Edge-fade widths ([`crate::sampler_fades`]); written only when one is nonzero.
+    #[serde(skip_serializing_if = "Fades::is_none")]
+    pub fades: Fades,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub membership: Option<Membership>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -220,6 +224,7 @@ impl Default for ZoneEntry {
             release_ms: 150.0,
             declick_ms: 0.0,
             velocity_sensitivity: 0.7,
+            fades: Fades::default(),
             membership: None,
             slice: None,
             label: None,
@@ -721,6 +726,10 @@ impl PatchV1 {
             && in_range(z.velocity_sensitivity, 0.0, 1.0);
         if !ranges {
             return Err("a playback setting is out of range or not finite");
+        }
+        // Widths too wide for the ranges, or set on a pad-bound zone, are kept and clamped at use.
+        if z.fades.widths().iter().any(|&w| w > crate::sampler_fades::MAX_WIDTH) {
+            return Err("a fade width is past 127");
         }
         if z.membership.as_ref().is_some_and(|m| m.layer >= LAYERS || m.alternative >= ALTERNATIVES) {
             return Err("its layer or alternative is past 8");

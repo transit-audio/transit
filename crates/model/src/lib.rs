@@ -31,6 +31,7 @@ mod midi_output;
 mod mixer;
 mod rack;
 mod route_graph;
+pub mod sampler_fades;
 pub mod sampler_patch;
 pub use sampler_patch::SamplerPatch;
 mod session;

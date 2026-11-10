@@ -28,6 +28,7 @@ fn full() -> PatchV1 {
         release_ms: 80.0,
         declick_ms: 2.0,
         velocity_sensitivity: 0.25,
+        fades: Fades::default(),
         membership: None,
         slice: Some(SliceBinding { set: SliceSet::Manual, id: 9, extra: extra.clone() }),
         label: Some("snare".into()),
@@ -36,6 +37,7 @@ fn full() -> PatchV1 {
     let layered = ZoneEntry {
         id: 200,
         membership: Some(Membership { group: 3, layer: 2, alternative: 1, extra: extra.clone() }),
+        fades: Fades { key_lo: 3, key_hi: 4, vel_lo: 5, vel_hi: 6, extra: extra.clone() },
         ..ZoneEntry::whole(200, 0, 512)
     };
     let marker = |id, frame, label: Option<&str>| Marker { id, frame, label: label.map(str::to_string), extra: extra.clone() };
