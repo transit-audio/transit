@@ -49,6 +49,7 @@ mod fake;
 #[allow(unsafe_code)]
 mod ffi;
 pub mod library;
+pub mod search;
 #[cfg(all(test, target_os = "linux", feature = "libjack"))]
 mod server_tests;
 mod session;

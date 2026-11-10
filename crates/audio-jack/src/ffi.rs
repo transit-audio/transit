@@ -20,6 +20,7 @@ use crate::api::{ClientError, JackApi, JackClient, PhysicalPort};
 use crate::callback::{self, CallbackState};
 use crate::engine::{Engine, Shared};
 use crate::library;
+use crate::search;
 use crate::sys::{self, JackFns};
 use std::ffi::{CStr, CString, c_char, c_int, c_ulong, c_void};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -118,7 +119,8 @@ fn choose_library() -> Result<&'static JackFns, ClientError> {
         return Ok(bound);
     }
     let named = std::env::var(library::LIBRARY_ENV).ok();
-    let candidates = library::candidates(named.as_deref(), library::pipewire_socket(), |path| std::path::Path::new(path).exists());
+    let installed = search::pipewire_libraries(&search::RealMachine);
+    let candidates = library::candidates(named.as_deref(), library::pipewire_socket(), &installed);
     let mut loader = DlLoader::default();
     let selection = library::select(&candidates, &mut loader);
     let result = match loader.connected.take() {
