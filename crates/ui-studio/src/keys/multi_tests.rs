@@ -515,3 +515,85 @@ fn double_click_on_a_stacked_identical_note_focuses_the_clip_that_was_hit() {
     assert_eq!(notes_of(&t, t.clip).len(), 1);
     assert_eq!(notes_of(&t, b).len(), 1);
 }
+
+/// Seventeen clips over four tracks, created and selected out of track/time order. The returned
+/// list is the sixteen that must open; the separate id is the seventeenth by track then time.
+fn seventeen_clips() -> (T, Vec<ClipId>, ClipId) {
+    let mut t = T::new();
+    let mut tracks = vec![t.track];
+    for _ in 0..3 {
+        let r = t.app.run("track.new", json!({"kind": "instrument"})).unwrap();
+        tracks.push(TrackId(r["tracks"][0].as_u64().unwrap()));
+    }
+    t.app.run("midi.note_add", json!({"clip": t.clip.0, "pitch": 40, "start_ticks": 0, "length_ticks": 480})).unwrap();
+    let mut by_track = vec![vec![(0, t.clip)]];
+    by_track.extend((0..3).map(|_| Vec::new()));
+    let mut created = 1;
+    for (track, clips) in by_track.iter_mut().enumerate() {
+        let starts: &[i64] = if track == 0 { &[4 * 96_000] } else { &[3 * 96_000, 0, 4 * 96_000, 96_000, 2 * 96_000] };
+        for start in starts {
+            let c = t.app.run("midi.new_clip", json!({"tracks": [tracks[track].0], "start": start, "end": start + 96_000})).unwrap();
+            let clip = ClipId(c["clip"].as_u64().unwrap());
+            t.app.run("midi.note_add", json!({"clip": clip.0, "pitch": 40 + created, "start_ticks": 0, "length_ticks": 480})).unwrap();
+            clips.push((*start, clip));
+            created += 1;
+        }
+    }
+    for clips in &mut by_track {
+        clips.sort_by_key(|(start, clip)| (*start, clip.0));
+    }
+    let ordered = by_track.into_iter().flatten().map(|(_, clip)| clip).collect::<Vec<_>>();
+    let omitted = ordered[16];
+    let admitted = ordered[..16].to_vec();
+    let mut selection = vec![omitted];
+    selection.extend(admitted.iter().rev().copied());
+    t.app.run("edit.select", json!({"clips": selection.iter().map(|c| c.0).collect::<Vec<_>>()})).unwrap();
+    t.frames(3);
+    (t, admitted, omitted)
+}
+
+#[test]
+fn the_seventeenth_clip_is_left_out_in_track_then_time_order_with_a_status_line() {
+    let (mut t, admitted, omitted) = seventeen_clips();
+    t.key("K", json!({"cmd": true, "alt": true}));
+    let open = t.app.keys.layout.clips.iter().map(|c| c.clip).collect::<Vec<_>>();
+    assert_eq!(open, admitted.iter().map(|c| c.0).collect::<Vec<_>>());
+    assert!(!open.contains(&omitted.0), "the seventeenth clip is absent");
+    assert_eq!(t.app.keys.layout.notes.len(), 16, "only the admitted clips' notes are shown");
+    assert_eq!(t.app.status, "Piano roll: 16-clip limit; 1 clip left out.");
+}
+
+#[test]
+fn exactly_sixteen_clips_open_without_a_limit_status() {
+    let (mut t, admitted, _) = seventeen_clips();
+    t.app.run("edit.select", json!({"clips": admitted.iter().rev().map(|c| c.0).collect::<Vec<_>>()})).unwrap();
+    t.app.status = "Ready".into();
+    t.key("K", json!({"cmd": true, "alt": true}));
+    let inspect = serde_json::to_value(&t.app.keys.layout).unwrap();
+    assert_eq!(inspect["clips"].as_array().unwrap().len(), 16);
+    assert_eq!(inspect["notes"].as_array().unwrap().len(), 16);
+    assert!(inspect["notes"].as_array().unwrap().iter().all(|note| note.get("clip").is_some()));
+    assert_eq!(inspect.get("focus"), Some(&json!(false)), "the existing multi-clip inspect shape is unchanged");
+    assert_eq!(t.app.status, "Ready", "the cap does not report anything at its boundary");
+}
+
+#[test]
+fn focus_mode_and_foreground_edits_stay_on_an_admitted_clip_at_the_cap() {
+    let (mut t, admitted, omitted) = seventeen_clips();
+    t.key("K", json!({"cmd": true, "alt": true}));
+    let active = admitted[15];
+    let note = t.app.keys.layout.notes.iter().find(|note| note.clip == Some(active.0)).unwrap().rect;
+    t.click(mid(note));
+    assert_eq!(t.app.keys.layout.clip, Some(active.0), "the late admitted clip comes forward");
+    let before = admitted.iter().copied().chain(std::iter::once(omitted)).map(|clip| (clip, notes_of(&t, clip))).collect::<Vec<_>>();
+    t.key("N", json!({}));
+    t.key("A", json!({"cmd": true}));
+    assert_eq!(t.selected(), 1, "Focus Mode selects only the foreground clip");
+    t.key("ArrowUp", json!({}));
+    for (clip, old) in before {
+        let new = notes_of(&t, clip);
+        assert_eq!(new.len(), 1);
+        assert_eq!(new[0].pitch, old[0].pitch + u8::from(clip == active), "{clip:?}");
+        assert_eq!(new[0].start, old[0].start, "{clip:?}");
+    }
+}
