@@ -185,7 +185,7 @@ impl Plan {
     }
 }
 
-fn too_high(root: u8, n: usize) -> Option<String> {
+pub(super) fn too_high(root: u8, n: usize) -> Option<String> {
     (usize::from(root) + n > 128).then(|| format!("Root {root} is too high for {n} slices: the highest root is {}.", 128usize.saturating_sub(n)))
 }
 
@@ -360,7 +360,7 @@ fn showing_slices(id: &str, p: &PatchV1) -> Result<(SliceSet, Vec<SliceView>, Ve
     }
 }
 
-fn root_param(id: &str, v: &Value) -> Result<u8> {
+pub(super) fn root_param(id: &str, v: &Value) -> Result<u8> {
     v.as_u64().and_then(|n| u8::try_from(n).ok()).filter(|n| *n <= 127).ok_or_else(|| bad(id, "`root` must be an integer from 0 to 127"))
 }
 
