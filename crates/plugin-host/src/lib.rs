@@ -952,12 +952,13 @@ impl Host {
                 if let Some(worker) = &ctx.worker {
                     worker.close();
                 }
+                // Before the clear: a destructor that panics there still ends the loop (issue #425).
+                ctx.exit = true;
                 ctx.entries.clear();
                 ctx.count_hosted();
                 if let Some(h) = hook {
                     h();
                 }
-                ctx.exit = true;
             }));
         }
         self.inner.closed.store(true, Ordering::Release);
@@ -1000,7 +1001,12 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
             if let Some(job) = cell.take() {
                 worker.busy_as(if cell.creation { Section::Creation } else { Section::Job }, cell.busy.clone(), || {
                     let _call = transit_dsp::host_call::enter();
-                    job(&mut ctx);
+                    // A job with no instance to name (the editor-windows apply) runs plug-in code
+                    // unwrapped: a panic ends here, not the loop, which would drop the queued
+                    // plug-ins (issue #425). Instance jobs record their own panics.
+                    if catch_unwind(AssertUnwindSafe(|| job(&mut ctx))).is_err() {
+                        log::error!("plug-in host: a job panicked on the host thread");
+                    }
                 });
             }
             if ctx.exit {
