@@ -128,7 +128,9 @@ Notes you play on an armed MIDI or instrument track during the count-in are kept
 the clip starts at the first of them instead of at the record start, and every note stays where
 you played it. Recording already starts at the pre-roll start, so notes in the pre-roll are kept
 too. Nothing lands before the start of the session, and with Cycle on the count-in notes belong to
-the first take.
+the first take. Count-in notes need room before the record start: recording from the very start
+of the session, a note you released during the count-in is left out of the take (the status line
+says how many), and a note still held when recording starts begins at the session start.
 
 ## Takes and comping
 
