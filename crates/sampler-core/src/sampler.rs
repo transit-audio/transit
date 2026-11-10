@@ -19,6 +19,7 @@
 use alloc::vec::Vec;
 
 use crate::event::{Context, Control, Event, EventKind};
+use crate::fades;
 use crate::patch::{self, Derived, Glide, GroupMode, Pad, PatchError, Zone};
 use crate::reader::SourceBank;
 use crate::selection::{self, RoundRobin};
@@ -750,6 +751,8 @@ impl SamplerCore {
         };
         let Some(Some(slot)) = self.zones.get(z) else { return false };
         let (zone, derived) = (slot.zone, slot.derived);
+        // Edge fades scale an unbound zone's velocity after selection (`fades.rs`); a pad plays none.
+        let velocity = if pad.is_some() { velocity } else { fades::scaled_velocity(zone.fades, zone.keys, zone.velocities, key, velocity) };
         let vi = match pad.and_then(|p| self.live_pad_voice(p)) {
             Some(vi) => vi,
             None => self.allocate(),

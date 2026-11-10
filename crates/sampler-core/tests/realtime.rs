@@ -2,7 +2,8 @@
 //! allocates nor frees, through the first block, a maximal 1024-event span, 64 voices with every
 //! matrix row active on shaped stereo and mono voices, steals, chokes, loops, control changes, All
 //! Notes Off, Stop, All Sound Off, the Reset event and `reset()`; and with key-map groups playing
-//! their round robins (sequential and random), transport changes, patch and mode edits.
+//! their round robins (sequential and random), transport changes, patch and mode edits; and with
+//! edge fades scaling unbound zones' velocities.
 //!
 //! The binary installs `transit_rt::testing::CountingAlloc` and counts the test thread only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -12,7 +13,7 @@ use transit_instrument_core::matrix::{Matrix, ROWS, Row, dst, src};
 use transit_instrument_core::shaper::{LfoSettings, Settings, filter_mode};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 use transit_sampler_core::event::{Context, Control, Event, EventKind};
-use transit_sampler_core::patch::{GroupMode, Membership, Pad, PlayMode, Playback, Zone};
+use transit_sampler_core::patch::{Fades, GroupMode, Membership, Pad, PlayMode, Playback, Zone};
 use transit_sampler_core::playhead::{LoopMode, Region};
 use transit_sampler_core::reader::SliceSource;
 use transit_sampler_core::{GROUPS, PADS, SamplerCore, VOICES, ZONES};
@@ -227,5 +228,51 @@ fn round_robin_selection_neither_allocates_nor_frees() {
         assert!(l.iter().chain(&r).all(|x| x.is_finite()), "round {round}");
     }
     assert!(c.diagnostics().refused_starts > 0, "the missing alternative was selected");
+    assert!(total.is_zero(), "{total:?}");
+}
+
+#[test]
+fn edge_fades_neither_allocate_nor_free() {
+    let mono: Vec<f32> = (0..4000).map(|i| (i as f32 * 0.013).sin()).collect();
+    let sources = [SliceSource::mono(&mono, 44_100.0)];
+    // Plain zones and a key-map group with key and velocity fades (one set too wide for its
+    // ranges), and a pad-bound zone with widths it never plays.
+    let mut zones: Vec<Option<Zone>> = vec![None; ZONES];
+    for (i, (keys, velocities)) in [((0u8, 40u8), (1u8, 127u8)), ((20, 90), (30, 100)), ((60, 62), (1, 10))].into_iter().enumerate() {
+        let fades = Fades { key_lo: 5 + i as u8, key_hi: 3, vel_lo: 9, vel_hi: 4 + 10 * i as u8 };
+        zones[i] = Some(Zone { keys, velocities, fades, ..Zone::new(Region::whole(0, 4000)) });
+    }
+    for alternative in 0..3u8 {
+        let fades = Fades { key_lo: 4, key_hi: 4, vel_lo: 20, vel_hi: 0 };
+        let membership = Some(Membership { group: 2, layer: 0, alternative });
+        zones[3 + usize::from(alternative)] = Some(Zone { keys: (30, 80), fades, membership, ..Zone::new(Region::whole(0, 4000)) });
+    }
+    zones[10] = Some(Zone { keys: (64, 64), fades: Fades { key_lo: 3, key_hi: 3, vel_lo: 3, vel_hi: 3 }, ..Zone::new(Region::whole(0, 4000)) });
+    let mut pads: [Pad; PADS] = core::array::from_fn(Pad::new);
+    pads[0] = Pad { zone: Some(10), ..Pad::new(0) };
+    let mut c = SamplerCore::new();
+    c.prepare(RATE, 9);
+    c.set_patch(&zones, &pads).unwrap();
+    let events: Vec<Event> = (0..200u32)
+        .map(|k| Event::new(k * 2, EventKind::NoteOn { channel: 0, key: (k * 7 % 100) as u8, velocity: 1 + (k * 37 % 127) as u8, id: k as i32 }))
+        .collect();
+    let mut l = vec![0.0f32; 512];
+    let mut r = vec![0.0f32; 512];
+    let mut total = AllocStats::default();
+    let mut sounded = false;
+    for round in 0..6usize {
+        let ctx = Context { frame: round as u64 * 512, tempo: 120.0, quarters: None };
+        let ((), stats) = measure(|| {
+            if round == 3 {
+                c.set_patch(&zones, &pads).unwrap();
+            }
+            c.process(&ctx, &sources[..], &events, &mut [&mut l[..], &mut r[..]]);
+        });
+        total.allocs += stats.allocs;
+        total.frees += stats.frees;
+        sounded |= l.iter().any(|x| *x != 0.0);
+        assert!(l.iter().chain(&r).all(|x| x.is_finite()), "round {round}");
+    }
+    assert!(sounded, "the faded zones played");
     assert!(total.is_zero(), "{total:?}");
 }

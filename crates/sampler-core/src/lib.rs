@@ -28,6 +28,7 @@ extern crate alloc;
 
 pub mod envelope;
 pub mod event;
+pub mod fades;
 mod math;
 pub mod patch;
 pub mod playhead;

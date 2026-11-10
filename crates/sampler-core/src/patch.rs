@@ -12,6 +12,7 @@ use transit_instrument_core::matrix::Matrix;
 use transit_instrument_core::shaper::Settings as ShaperSettings;
 
 use crate::envelope::EnvelopeFrames;
+pub use crate::fades::Fades;
 use crate::playhead::Region;
 use crate::{CHOKE_GROUPS, PADS, ZONES, math, selection};
 
@@ -116,6 +117,9 @@ pub struct Zone {
     pub velocities: (u8, u8),
     pub playback: Playback,
     pub membership: Option<Membership>,
+    /// Edge-fade widths (`fades.rs`): they scale an unbound zone's voice velocity after selection;
+    /// clamped to the ranges when used, and ignored on a pad-bound zone.
+    pub fades: Fades,
     /// The per-voice shaper's settings at the session rate (`on` false: the audio passes unshaped).
     pub shaper: ShaperSettings,
     /// The zone's 16-row modulation matrix.
@@ -132,6 +136,7 @@ impl Zone {
             velocities: (1, 127),
             playback: Playback::zone(),
             membership: None,
+            fades: Fades::NONE,
             shaper: ShaperSettings::default(),
             matrix: Matrix::default(),
         }

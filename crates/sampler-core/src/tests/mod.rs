@@ -4,6 +4,7 @@
 //! is the integration test `tests/realtime.rs`.
 
 mod blocks;
+mod fades;
 mod gate1;
 mod loops;
 mod round_robin;
