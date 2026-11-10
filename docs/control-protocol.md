@@ -141,7 +141,27 @@ them.
 |---|---|---|
 | `mix.sampler_pad_start` | `{track?, note: 0-64}` | Sets the pad start note, one undo step. Pads without a stored note move with it and the root of each zone bound to such a pad moves by the same distance, so no pad changes pitch; stored notes, their zones and unbound zones stay. No clip, take or automation changes. Answers `{track, note, from, semitones, notice}`, the notice naming how far to transpose pad clips (`Pad start note C1 (down 24 semitones): transpose pad clips by -24 to keep them on the same pads.`). An unchanged note records no step. Refused with nothing changed: `note must be an integer from 0 to 64`; a moved pad onto a stored pad's note (`Pad B1 plays C1: a start note of C1 would put pad A1 there.`); a moved bound pad that would start more than eight voices for one note with the unbound zones over it (`Pad A5 would be a ninth layer on E3.`); a moved pad's zone root outside 0 to 127 (`Pad A3's root would leave 0 to 127.`). |
 | `mix.sampler_pad_set` | `{track?, pad: 1-64, note?, choke?, mute?, solo?, name?}` | A `note` (0 to 127, unique among the pads' notes) is stored and absolute, even when it equals the pad's default; `note: null` returns the pad to its default. A note edit on a bound pad is refused like the start note when it would be a ninth layer. Answers the pad's effective `note`. |
-| `mix.sampler_state` | `{track?}` | Read-only: the patch as stored (`patch`), the normalized `seed`, `pad_start_note`, per pad `{pad, note, note_stored, zone, mute, solo, choke, name}` (`note` is the effective note) and the loop's `root` and `root_stored` (`loop` is `null` without one). |
+| `mix.sampler_state` | `{track?}` | Read-only: the patch as stored (`patch`), the normalized `seed`, `pad_start_note`, per pad `{pad, note, note_stored, zone, mute, solo, choke, name}` (`note` is the effective note), the loop's `root` and `root_stored` (`loop` is `null` without one), per zone `{zone, pad, keys, velocities, root, mode, membership, loop_mode, loop_used, crossfade, crossfade_used, fades, fades_used, slice, region, rate}` (stored values beside the ones playback uses; `region` is the region a slice-bound zone derives, `null` otherwise; `rate` is the zone source's native rate, for the crossfade in milliseconds) and per group `{group, round_robin, zones}`. |
+
+## Sampler zones and groups
+
+The Instrument view's commands ([ADR 0041](adr/0041-sampler-one-instrument-three-views.md),
+amendments of 2026-11-08 and 2026-11-09). Each is one undo step, refused whole with the document
+unchanged. Values are **checked when set, clamped when used**: an edit refuses an over-limit value
+it sets, a later edit of something else is never refused because of it, and `mix.sampler_state`
+reports the stored and the used value. Zones are numbered 1 to 256; groups, layers and
+alternatives from 0. Refusals that name a note follow the Middle C setting (ADR 0051).
+
+| Command | Params | What it does |
+|---|---|---|
+| `mix.sampler_zone_edit` | `{track?, zone, region?, playback?, pad?: null}` | As before, plus `region.crossfade` (source frames), `playback.membership` (`{group, layer, alternative}` or `null`) and `playback.fades` (`{key_lo, key_hi, vel_lo, vel_hi}`, widths 0 to 127). `pad: null` unbinds the zone's pad in the same step (Make group). Refuses: a loop on a one-shot, or One-shot on a looping zone, unless the same edit sets Gate or turns the loop off (`A one-shot cannot loop: choose Gate, or turn the loop off.`); a crossfade over half the effective loop (`Crossfade is at most 4.7 ms (226 frames) for this loop.`, milliseconds at the zone source's rate); a crossfade on a ping-pong loop; fade widths wider than the range on either axis, or any on a pad's zone; membership on a pad's zone without `pad: null`; a loop on a one-frame slice (`Slice 4 is one frame long, too short to loop.`); region or loop points on a slice-bound zone (its loop spans its slice, and setting its loop mode writes the slice's region and loop into the zone); an unbound zone's loop outside its region (a trim moves the loop in the same edit or is refused); a group shape fault; a ninth voice on a note. Answers the zone's state as `mix.sampler_state` reports it, with `track`. |
+| `mix.sampler_zone_map` | `{track?, zones: [{zone, keys, velocities, root, membership, fades?, pad?: null}]}` | The key map's range edits and Make group in one step, admitted whole before anything is stored: a group has one key range, at most 8 layers, each layer 1 to 8 alternatives numbered from 0 without a gap and with one velocity range, no duplicate place, no pad's zone (`group 3 would have 9 layers (at most 8)`); at most eight voices start for one note, a bound pad counting one and a group layer one whatever its alternatives (`Zone 9 would be a ninth layer on C3.`). Answers the zones' states. |
+| `mix.sampler_group_set` | `{track?, group: 0-255, round_robin: sequential\|random}` | The group's round-robin mode (Sequential is the default and is not stored). An unchanged mode records no step. A mode change reaches the playing instance without restarting its counters. |
+| `mix.sampler_seed` | `{track?, seed}` | `seed` 0 to 4294967295; 0 is stored as 1 and the stored value is answered (`seed must be an integer from 0 to 4294967295 (0 is stored as 1)`). `mix.sampler_new_patch` takes `seed` the same way and answers it. A file whose seed is 0 opens unchanged and plays as 1. |
+
+Every command that stores a patch refuses an edit that would start more than eight voices for one
+note at some velocity where the patch did not already, so a loaded map over the bound still plays
+and still takes other edits.
 
 ## Examples
 
