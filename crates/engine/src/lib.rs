@@ -25,6 +25,7 @@ pub mod path_latency;
 pub mod presets;
 pub mod retime;
 pub mod score;
+pub mod slice_detect;
 pub mod step_input;
 pub mod takes;
 
@@ -213,6 +214,8 @@ pub struct Engine {
     command_targets: cmd::CommandTargets,
     transient_cache: cmd::TransientCache,
     plugin_discovery: cmd::PluginDiscovery,
+    /// Sampler slice detection candidates (one per track); never part of the document.
+    pub(crate) slice_candidates: slice_detect::Candidates,
     /// Hosted plug-in slots whose stored state an undo or redo changed (issue #68: a preset load
     /// undone), for the UI to load into the live instances ([`Engine::take_state_restores`]).
     state_restores: Vec<(TrackId, usize)>,
@@ -279,6 +282,7 @@ impl Engine {
             command_targets: cmd::CommandTargets::default(),
             transient_cache: cmd::TransientCache::default(),
             plugin_discovery: cmd::PluginDiscovery::default(),
+            slice_candidates: slice_detect::Candidates::default(),
             state_restores: Vec::new(),
             state_marks: Vec::new(),
             message_middle_c: transit_midi::MiddleC::C3,
@@ -455,6 +459,7 @@ impl Engine {
         self.state_restores.clear();
         self.last_selection = None;
         self.imports.clear();
+        self.slice_candidates.clear();
         // An armed MIDI Learn names a control of the old session; the host disarms the worker.
         if self.learn.take().is_some() {
             self.midi_profile_revision = self.midi_profile_revision.wrapping_add(1);
@@ -509,6 +514,7 @@ impl Engine {
         self.keep_runtime_state(&cur);
         self.note_state_restores(&h.states);
         self.redo.push(HistoryEntry { label: h.label, doc: cur, states: h.states });
+        self.slice_candidates.observe(&self.doc);
         self.revision = self.revision.wrapping_add(1);
         self.dirty = true;
         true
@@ -521,6 +527,7 @@ impl Engine {
         self.keep_runtime_state(&cur);
         self.note_state_restores(&h.states);
         self.undo.push(HistoryEntry { label: h.label, doc: cur, states: h.states });
+        self.slice_candidates.observe(&self.doc);
         self.revision = self.revision.wrapping_add(1);
         self.dirty = true;
         true
@@ -699,6 +706,8 @@ impl Engine {
                     // it ends. A refused command is rolled back below and ends nothing.
                     self.merge_key = None;
                     self.tempo_gesture = None;
+                    // A changed patch makes its track's detection candidate stale (ADR 0041).
+                    self.slice_candidates.observe(&self.doc);
                 }
                 cmd::remember_selection(self, &before);
                 if spec.undoable && !Arc::ptr_eq(&before, &self.doc) {

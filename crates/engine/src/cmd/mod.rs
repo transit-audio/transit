@@ -42,6 +42,7 @@ mod rack;
 mod realtime_render;
 pub(crate) mod sampler;
 pub(crate) mod sampler_patch;
+mod sampler_slice_detect;
 mod sampler_slices;
 mod setup_more;
 mod surround;
@@ -62,6 +63,9 @@ pub use realtime_render::{RealtimePlan, RealtimeStem, RenderMode, realtime_plan,
 
 pub(crate) use edit::remember_selection;
 pub(crate) use plugin_scan::PluginDiscovery;
+pub(crate) use sampler_patch::frames_at;
+pub(crate) use sampler_slice_detect::ready_sampler_patch;
+pub(crate) use sampler_slices::{AtTempo, TempoOrigin, grid_tempo, usable_acid};
 pub(crate) use tab::TransientCache;
 
 /// Explicit targets satisfy selection predicates only; command handlers validate their values.
@@ -188,6 +192,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(external_instrument::specs());
         v.extend(sampler::specs());
         v.extend(sampler_slices::specs());
+        v.extend(sampler_slice_detect::specs());
         v.extend(zoom_toggle::specs());
         v.extend(rack::specs());
         v.extend(takes::specs());
