@@ -1,6 +1,6 @@
 [package]
 name = "transit-audio-jack"
-description = "transit native JACK backend (ADR 0021): the JACK client API, for JACK 2 and PipeWire's libjack alike, with libjack loaded at run time; Linux only, empty elsewhere"
+description = "transit native JACK backend (ADR 0021): the JACK client API, for JACK 2 and PipeWire's libjack alike, with the chosen libjack loaded at run time; Linux only, empty elsewhere"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,20 +8,17 @@ rust-version.workspace = true
 repository.workspace = true
 
 [features]
-# The backend over the real libjack through `jack-sys`, loaded at run time (dlopen of libjack.so.0;
-# nothing links against it). Without this feature the crate is empty (its tests still build the safe
-# core over the fake server, on any platform, with no system package). jack-sys's build script asks pkg-config for `jack` on Linux, so a build with the
-# feature needs jack.pc (Debian and Ubuntu: libjack-jackd2-dev) even though libjack is not linked.
-libjack = ["dep:jack-sys", "dep:libloading"]
+# The backend over the real libjack, loaded at run time: our own declarations (`src/sys.rs`) and a
+# function table resolved from the chosen library's handle (#430); nothing links against libjack and
+# the build needs no JACK package. Without this feature the crate is empty (its tests still build the
+# safe core over the fake server, on any platform, with no system package).
+libjack = ["dep:libloading"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 transit-audio-backend.workspace = true
 log.workspace = true
-# Pinned: every bump is reviewed against the quoted `// SAFETY:` comments. `dynamic_loading` must be
-# named: 0.5.1's manifest spells its default list `default_features`, so it is not on by default.
-jack-sys = { version = "=0.5.1", features = ["dynamic_loading"], optional = true }
-# The library selection (#230) probes each candidate libjack through its own dlopen before jack-sys
-# loads one: the same libloading jack-sys uses.
+# dlopen and dlsym of the chosen libjack (#230, #430). Pinned: every bump is reviewed against the
+# quoted `// SAFETY:` comments of `src/ffi.rs`.
 libloading = { version = "=0.7.4", optional = true }
 
 [dev-dependencies]

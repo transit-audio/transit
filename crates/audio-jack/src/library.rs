@@ -3,12 +3,12 @@
 //! replacement library lives off the loader path on Debian and Ubuntu (`pw-jack` puts it on
 //! `LD_LIBRARY_PATH`). So the backend tries the library `TRANSIT_JACK_LIBRARY` names, the loader's
 //! default and PipeWire's library at the distributions' paths, and uses the first one whose probe
-//! client connects. When a PipeWire server runs (its socket exists) and no library is named,
-//! PipeWire's library goes first: JACK 2's libjack stays mapped after `dlclose` (measured with
-//! libjack-jackd2 1.9.20), so once it was loaded, `jack-sys`'s `dlopen("libjack.so.0")` binds it
-//! again and PipeWire's library could not serve the process. Without a PipeWire socket the default
-//! goes first. Safe code over a [`Loader`]: `crate::ffi` implements it over `dlopen`, the tests over
-//! a script, so the order is tested without a server.
+//! client connects; `crate::ffi` binds its function table from that library's own handle (#430),
+//! so whichever other libjack is mapped in the process does not matter. When a PipeWire server runs
+//! (its socket exists) and no library is named, PipeWire's library goes first, so JACK 2's (which
+//! stays mapped after `dlclose`, measured with libjack-jackd2 1.9.20) is not even loaded. Without a
+//! PipeWire socket the default goes first. Safe code over a [`Loader`]: `crate::ffi` implements it
+//! over `dlopen`, the tests over a script, so the order is tested without a server.
 
 /// The environment variable that names a libjack to try first (a path, or a soname the loader
 /// resolves). PipeWire documents no such variable (`pw-jack` sets `LD_LIBRARY_PATH`), so this one is
@@ -46,8 +46,8 @@ pub struct Attempt {
     pub outcome: Outcome,
 }
 
-/// Loads a library and opens (then closes) a probe client through it, never starting a server. A
-/// library that connected stays loaded; one that did not is unloaded.
+/// Loads a library and opens (then closes) a probe client through it, never starting a server.
+/// `crate::ffi`'s loader keeps every library it loaded mapped for the life of the process.
 pub(crate) trait Loader {
     fn probe(&mut self, library: &str) -> Outcome;
 }
@@ -88,12 +88,6 @@ const SERVER_FAILED: u32 = 0x10;
 /// 1.9.20 with no jackd returns 0x11, `JackFailure | JackServerFailed`), else a refusal.
 pub fn outcome_of_status(status: u32) -> Outcome {
     if status & SERVER_FAILED != 0 { Outcome::NotRunning } else { Outcome::Failed(format!("jack_client_open failed (status 0x{status:x})")) }
-}
-
-/// Whether `jack-sys` is bound to the object the probe kept: both handles resolve
-/// `jack_client_open` to the same address (`dlsym` on a handle resolves in that object first).
-pub fn same_object(kept: Option<usize>, bound: Option<usize>) -> bool {
-    kept.is_some() && kept == bound
 }
 
 /// What the selection found: every library tried, in order, and the one that connected.
@@ -215,57 +209,10 @@ mod tests {
         assert_eq!(outcome_of_status(0x21), Outcome::Failed("jack_client_open failed (status 0x21)".into()));
     }
 
-    /// The loader as glibc behaves (#230 review): a library stays mapped after a failed probe when
-    /// it is sticky (JACK 2's), and `jack-sys`'s `dlopen("libjack.so.0")` binds the first mapped
-    /// object with that soname. Each library's `jack_client_open` has its own address.
-    struct Glibc {
-        answers: Vec<(&'static str, Outcome, usize, bool)>,
-        mapped: Vec<String>,
-    }
-
-    impl Loader for Glibc {
-        fn probe(&mut self, library: &str) -> Outcome {
-            let (_, outcome, _, sticky) = self.answers.iter().find(|a| a.0 == library).cloned().unwrap();
-            if outcome == Outcome::Connected || sticky {
-                self.mapped.push(library.to_owned());
-            }
-            outcome
-        }
-    }
-
-    impl Glibc {
-        fn address(&self, library: &str) -> Option<usize> {
-            self.answers.iter().find(|a| a.0 == library).map(|a| a.2)
-        }
-        /// jack-sys's soname open: the first mapped object (all carry `libjack.so.0`), else the default.
-        fn soname_binds(&self) -> Option<usize> {
-            self.address(self.mapped.first().map_or(DEFAULT_LIBRARY, String::as_str))
-        }
-    }
-
-    #[test]
-    fn the_already_loaded_check_refuses_the_default_first_order_and_passes_pipewire_first() {
-        let tester = || Glibc {
-            answers: vec![(DEFAULT_LIBRARY, outcome_of_status(0x11), 0x1000, true), (UBUNTU, Outcome::Connected, 0x2000, false)],
-            mapped: Vec::new(),
-        };
-        // The old order: JACK 2's library is probed first and stays mapped; jack-sys binds it again.
-        let mut old = tester();
-        let selection = select(&candidates(None, false, |p| p == UBUNTU), &mut old);
-        assert_eq!(selection.connected(), Some(UBUNTU));
-        assert!(!same_object(old.address(UBUNTU), old.soname_binds()), "bound to JACK 2's object: refused");
-        // PipeWire first: JACK 2's library is never loaded, jack-sys binds PipeWire's.
-        let mut new = tester();
-        let selection = select(&candidates(None, true, |p| p == UBUNTU), &mut new);
-        assert_eq!(selection.attempts.len(), 1, "the default is not loaded");
-        assert!(same_object(new.address(UBUNTU), new.soname_binds()));
-        assert!(!same_object(None, None), "nothing kept is never the same object");
-    }
-
     #[test]
     fn jack2s_library_without_jackd_falls_back_to_pipewires() {
         // No PipeWire socket seen, the default first: jackd2's libjack finds no jackd (status 0x11),
-        // then PipeWire's library connects (the window then checks the binding, see the next test).
+        // then PipeWire's library connects; its own table serves the process (#430).
         let mut loader = Script { answers: vec![(DEFAULT_LIBRARY, outcome_of_status(0x11)), (UBUNTU, Outcome::Connected)], asked: Vec::new() };
         let list = candidates(None, false, |p| p == UBUNTU);
         let selection = select(&list, &mut loader);

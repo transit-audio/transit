@@ -4,7 +4,7 @@
 #![deny(clippy::disallowed_macros, clippy::disallowed_methods)]
 
 use crate::engine::{BusyFlag, Clock, Cycle, Engine, InputPlanes, OutputPlanes, Shared};
-use jack_sys as j;
+use crate::sys::{self, JackFns};
 use std::cell::UnsafeCell;
 use std::ffi::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -19,11 +19,14 @@ use std::time::Instant;
 /// callback, under the `busy` flag.
 pub(crate) struct CallbackState {
     shared: Arc<Shared>,
-    client: *mut j::jack_client_t,
+    /// The bound library's functions (#430): never unloaded, so a plain reference; the process
+    /// callback calls `port_get_buffer`, `get_cycle_times` and `get_time` through it.
+    fns: &'static JackFns,
+    client: *mut sys::jack_client_t,
     /// The client's output ports, `out_1` first, registered before activation.
-    outputs: Box<[*mut j::jack_port_t]>,
+    outputs: Box<[*mut sys::jack_port_t]>,
     /// The client's input ports, `in_1` first, registered before activation.
-    inputs: Box<[*mut j::jack_port_t]>,
+    inputs: Box<[*mut sys::jack_port_t]>,
     /// Taken (acquire compare-exchange) by the process callback for the engine; released after.
     busy: BusyFlag,
     engine: UnsafeCell<Engine>,
@@ -43,7 +46,8 @@ impl Drop for CallbackState {
 
 // SAFETY: the raw pointers are libjack handles of one open client: jack.h ties none of the calls
 // made through them (jack_port_get_buffer, jack_get_cycle_times) to a thread, and they stay valid
-// until jack_client_close, after which this state is freed. The `UnsafeCell` is reached only by
+// until jack_client_close, after which this state is freed. `fns` is a shared reference to plain
+// function pointers of a library that is never unloaded. The `UnsafeCell` is reached only by
 // the process callback under `busy` (acquire to take, release to give back), so no two references
 // to the engine exist at once; the engine's user callbacks are `Send`.
 unsafe impl Sync for CallbackState {}
@@ -53,13 +57,15 @@ unsafe impl Send for CallbackState {}
 impl CallbackState {
     pub(crate) fn new(
         shared: Arc<Shared>,
-        client: *mut j::jack_client_t,
-        outputs: Box<[*mut j::jack_port_t]>,
-        inputs: Box<[*mut j::jack_port_t]>,
+        fns: &'static JackFns,
+        client: *mut sys::jack_client_t,
+        outputs: Box<[*mut sys::jack_port_t]>,
+        inputs: Box<[*mut sys::jack_port_t]>,
         engine: Engine,
     ) -> Self {
         Self {
             shared,
+            fns,
             client,
             outputs,
             inputs,
@@ -87,8 +93,9 @@ unsafe fn state<'a>(arg: *mut c_void) -> &'a CallbackState {
 
 /// The port buffers of one process callback.
 struct PortPlanes<'a> {
-    ports: &'a [*mut j::jack_port_t],
-    frames: j::jack_nframes_t,
+    fns: &'static JackFns,
+    ports: &'a [*mut sys::jack_port_t],
+    frames: sys::jack_nframes_t,
 }
 
 impl PortPlanes<'_> {
@@ -103,7 +110,7 @@ impl PortPlanes<'_> {
         // functioning." `port` is a port this client registered (alive until jack_client_close), the
         // call is made inside the process callback that received `frames`, and nothing caches the
         // address past it.
-        let buffer = unsafe { j::jack_port_get_buffer(port, self.frames) }.cast::<f32>();
+        let buffer = unsafe { (self.fns.port_get_buffer)(port, self.frames) }.cast::<f32>();
         (!buffer.is_null()).then_some(buffer)
     }
 }
@@ -144,20 +151,21 @@ impl InputPlanes for InPlanes<'_> {
 }
 
 /// The cycle's times: `jack_get_cycle_times` and `jack_get_time`.
-fn clock(client: *mut j::jack_client_t) -> Option<Clock> {
+fn clock(fns: &JackFns, client: *mut sys::jack_client_t) -> Option<Clock> {
     let (mut current_frames, mut current_usecs, mut next_usecs, mut period_usecs) = (0, 0, 0, 0.0f32);
     // SAFETY: jack.h, jack_get_cycle_times: "This function may only be used from the process
     // callback." (`process` alone calls this); "If the return value is zero, the following
     // information is provided in the variables pointed to by the arguments" (four live locals of
-    // the declared types; read only when it returned zero). jack-sys binds it weak (`None` when the
-    // library lacks it). `client` is open while its callbacks run.
-    let code = unsafe { j::jack_get_cycle_times(client, &mut current_frames, &mut current_usecs, &mut next_usecs, &mut period_usecs) };
-    if code != Some(0) {
+    // the declared types; read only when it returned zero). jack.h declares it
+    // JACK_OPTIONAL_WEAK_EXPORT, so the table holds `None` when the library lacks it. `client` is
+    // open while its callbacks run.
+    let code = unsafe { (fns.get_cycle_times?)(client, &mut current_frames, &mut current_usecs, &mut next_usecs, &mut period_usecs) };
+    if code != 0 {
         return None;
     }
     // SAFETY: jack.h, jack_get_time: "@return return JACK's current system time in microseconds,
     // using the JACK clock source." No arguments and no client state.
-    let now_usecs = unsafe { j::jack_get_time() };
+    let now_usecs = unsafe { (fns.get_time)() };
     Some(Clock { current_frames, current_usecs, now_usecs })
 }
 
@@ -166,20 +174,20 @@ fn clock(client: *mut j::jack_client_t) -> Option<Clock> {
 /// # Safety
 ///
 /// Called by libjack only, with the `arg` registered by `crate::ffi` (see [`state`]).
-pub(crate) unsafe extern "C" fn process(frames: j::jack_nframes_t, arg: *mut c_void) -> c_int {
+pub(crate) unsafe extern "C" fn process(frames: sys::jack_nframes_t, arg: *mut c_void) -> c_int {
     let arrival = Instant::now();
     let _ = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: libjack passes the `arg` registered with jack_set_process_callback.
         let state = unsafe { state(arg) };
-        let mut outputs = PortPlanes { ports: &state.outputs, frames };
+        let mut outputs = PortPlanes { fns: state.fns, ports: &state.outputs, frames };
         // Released when `_busy` drops, also if the engine panics (it unwinds to the catch below).
         let Some(_busy) = state.busy.try_take() else {
             state.shared.busy_skip();
             crate::engine::silence(&mut outputs, frames as usize);
             return;
         };
-        let inputs = InPlanes(PortPlanes { ports: &state.inputs, frames });
-        let cycle = Cycle { frames, arrival, clock: clock(state.client) };
+        let inputs = InPlanes(PortPlanes { fns: state.fns, ports: &state.inputs, frames });
+        let cycle = Cycle { frames, arrival, clock: clock(state.fns, state.client) };
         // SAFETY: `busy` was taken above and `_busy` holds it to the end of this closure, so this is
         // the only reference to the engine until then (see `CallbackState`).
         let engine = unsafe { &mut *state.engine.get() };
@@ -196,7 +204,7 @@ pub(crate) unsafe extern "C" fn process(frames: j::jack_nframes_t, arg: *mut c_v
 /// # Safety
 ///
 /// Called by libjack only, with the `arg` registered by `crate::ffi` (see [`state`]).
-pub(crate) unsafe extern "C" fn buffer_size(frames: j::jack_nframes_t, arg: *mut c_void) -> c_int {
+pub(crate) unsafe extern "C" fn buffer_size(frames: sys::jack_nframes_t, arg: *mut c_void) -> c_int {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: libjack passes the `arg` registered with jack_set_buffer_size_callback.
         unsafe { state(arg) }.shared.on_buffer_size(frames);
@@ -209,7 +217,7 @@ pub(crate) unsafe extern "C" fn buffer_size(frames: j::jack_nframes_t, arg: *mut
 /// # Safety
 ///
 /// Called by libjack only, with the `arg` registered by `crate::ffi` (see [`state`]).
-pub(crate) unsafe extern "C" fn sample_rate(rate: j::jack_nframes_t, arg: *mut c_void) -> c_int {
+pub(crate) unsafe extern "C" fn sample_rate(rate: sys::jack_nframes_t, arg: *mut c_void) -> c_int {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: libjack passes the `arg` registered with jack_set_sample_rate_callback.
         unsafe { state(arg) }.shared.on_sample_rate(rate);
@@ -236,7 +244,7 @@ pub(crate) unsafe extern "C" fn xrun(arg: *mut c_void) -> c_int {
 /// # Safety
 ///
 /// Called by libjack only, with the `arg` registered by `crate::ffi` (see [`state`]).
-pub(crate) unsafe extern "C" fn shutdown(_code: j::jack_status_t, _reason: *const c_char, arg: *mut c_void) {
+pub(crate) unsafe extern "C" fn shutdown(_code: sys::jack_status_t, _reason: *const c_char, arg: *mut c_void) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: libjack passes the `arg` registered with jack_on_info_shutdown.
         unsafe { state(arg) }.shared.on_shutdown();

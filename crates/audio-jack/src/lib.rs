@@ -4,8 +4,9 @@
 //! without the feature, the crate is empty, except that its tests build everywhere (the safe core
 //! runs over a fake server).
 //!
-//! - **Bindings.** The raw `jack-sys` declarations with run-time loading (dlopen of `libjack.so.0`,
-//!   nothing links against it), behind this crate's `libjack` feature. All calls are in `ffi`
+//! - **Bindings.** Our own declarations (`sys`) and function table, resolved at run time from the
+//!   one libjack the backend chose (#430: `dlopen` of that library, `dlsym` on its handle; nothing
+//!   links against libjack), behind this crate's `libjack` feature. All calls are in `ffi`
 //!   and the `extern "C"` trampolines libjack calls are in `callback`; those two modules are the
 //!   only ones that may contain `unsafe`. The rest is safe code over the `JackApi` and
 //!   `JackClient` traits, so enumeration, the client lifecycle and the process engine run against
@@ -51,6 +52,8 @@ pub mod library;
 #[cfg(all(test, target_os = "linux", feature = "libjack"))]
 mod server_tests;
 mod session;
+#[cfg(all(target_os = "linux", feature = "libjack"))]
+mod sys;
 #[cfg(test)]
 mod tests;
 

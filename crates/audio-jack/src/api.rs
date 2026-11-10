@@ -24,7 +24,7 @@ impl PhysicalPort {
 /// Why a client did not open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientError {
-    /// `libjack.so.0` (or a function `jack-sys` binds) did not load; the loader's text.
+    /// No libjack loaded with every function the table needs; the loader's text.
     LibraryMissing(String),
     /// No server answered, and none is started (`JackNoStartServer`; status `JackServerFailed`).
     ServerNotRunning,
