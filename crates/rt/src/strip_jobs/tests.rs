@@ -408,6 +408,39 @@ fn exactly_one_of_claim_and_reclaim_wins_every_publish_under_injected_delays() {
 const FREE_STRIPS: usize = 8;
 const FREE_BLOCKS: u64 = 2_000;
 const FREE_WORKERS: usize = 3;
+/// The strip a forced-overrun block holds inside its worker.
+const HELD: usize = 3;
+
+/// How one publish of the free-running test ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum End {
+    Mixed,
+    Inline,
+    Overrun,
+}
+
+/// What a block of the free-running test forces, so each way a publish can end is taken by
+/// construction whatever the scheduler does (#381, E49); the other blocks are free races.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Path {
+    /// Every worker is parked before the publish: no claim can happen, every reclaim wins.
+    Inline,
+    /// The publisher waits until every published strip is done before its pass: every consume
+    /// is ready.
+    Mixed,
+    /// A worker holds strip [`HELD`] inside its render until the publisher has consumed it.
+    Overrun,
+    Free,
+}
+
+fn path(block: u64) -> Path {
+    match block % 8 {
+        1 => Path::Inline,
+        2 => Path::Mixed,
+        3 => Path::Overrun,
+        _ => Path::Free,
+    }
+}
 
 /// What the free-running test's publisher and workers share.
 struct Shared {
@@ -418,27 +451,51 @@ struct Shared {
     completions: AtomicU64,
     stop: AtomicBool,
     failed: AtomicBool,
+    /// Nonzero: the workers stay out of the set until it changes (an epoch: the forced-inline
+    /// block's generation).
+    pause: AtomicU64,
+    /// Per worker, the last pause epoch it parked under: the publisher publishes a forced-inline
+    /// block only once every worker parked under its epoch.
+    parked: [AtomicU64; FREE_WORKERS],
+    /// Nonzero: the worker that renders strip [`HELD`] for this generation waits inside the render
+    /// until it changes.
+    hold: AtomicU64,
+    /// The generation a worker is holding strip [`HELD`] for, set inside the render.
+    holding: AtomicU64,
 }
 
 /// A strip's render, by a worker or inline: entered by one thread at a time, each generation once.
-fn execute(shared: &Shared, strip: usize, generation: u64, rng: &mut Rng) {
+fn execute(shared: &Shared, strip: usize, generation: u64, rng: &mut Rng, on_worker: bool) {
     shared.inside[strip].enter();
     let before = shared.last_run[strip].swap(generation, Ordering::AcqRel);
     assert!(before < generation, "strip {strip}: generation {generation} after {before}");
     rng.jitter();
     rng.jitter();
+    if on_worker && strip == HELD && shared.hold.load(Ordering::Acquire) == generation {
+        shared.holding.store(generation, Ordering::Release);
+        wait_until("the held strip's release", || shared.hold.load(Ordering::Acquire) != generation);
+    }
     shared.inside[strip].leave();
 }
 
-/// A worker of the free-running test: claims whatever is published until told to stop.
+/// A worker of the free-running test: claims whatever is published until told to stop, and stays
+/// out of the set while the publisher pauses it.
 fn free_worker(shared: &Shared, k: usize) {
     let _flag = FailFlag(&shared.failed);
     let mut rng = Rng::new(100 + k as u64);
     let mut start = k;
     while !shared.stop.load(Ordering::Acquire) {
+        let epoch = shared.pause.load(Ordering::Acquire);
+        if epoch != 0 {
+            shared.parked[k].store(epoch, Ordering::Release);
+            while shared.pause.load(Ordering::Acquire) == epoch && !shared.stop.load(Ordering::Acquire) {
+                std::thread::yield_now();
+            }
+            continue;
+        }
         rng.jitter();
         if let Some((i, token)) = shared.set.try_claim_next(start) {
-            execute(shared, i, token.generation(), &mut rng);
+            execute(shared, i, token.generation(), &mut rng, true);
             shared.completions.fetch_add(1, Ordering::AcqRel);
             token.complete();
             start = i + 1;
@@ -452,7 +509,9 @@ fn free_worker(shared: &Shared, k: usize) {
 /// with random delays inside the strip; the publisher reads each slot first (idle: publish; done:
 /// retire unread, then publish; claimed: skip as an overrun), lets a random amount of work pass
 /// as its deadline, reclaims the unstarted and consumes the rest. Every publish ends exactly one
-/// of {mixed from a worker, rendered inline, overrun}; no publish executes twice.
+/// of {mixed from a worker, rendered inline, overrun}; no publish executes twice. Which of the
+/// three a free block's publish takes is the scheduler's; one block in eight forces each of them
+/// (`path`), so all three are covered by construction, never by a race's outcome (#381).
 #[test]
 fn every_publish_ends_mixed_inline_or_overrun_under_free_running_workers() {
     let shared = Arc::new(Shared {
@@ -462,6 +521,10 @@ fn every_publish_ends_mixed_inline_or_overrun_under_free_running_workers() {
         completions: AtomicU64::new(0),
         stop: AtomicBool::new(false),
         failed: AtomicBool::new(false),
+        pause: AtomicU64::new(0),
+        parked: Default::default(),
+        hold: AtomicU64::new(0),
+        holding: AtomicU64::new(0),
     });
     let workers: Vec<_> = (0..FREE_WORKERS)
         .map(|k| {
@@ -469,12 +532,30 @@ fn every_publish_ends_mixed_inline_or_overrun_under_free_running_workers() {
             std::thread::spawn(move || free_worker(&shared, k))
         })
         .collect();
+    let failed = || shared.failed.load(Ordering::Acquire);
 
     let mut rng = Rng::new(7);
     let (mut published, mut mixed, mut inline, mut overrun, mut skipped, mut retired_unread) = (0_u64, 0, 0, 0, 0, 0);
     let mut was_published = [false; FREE_STRIPS];
     for b in 1..=FREE_BLOCKS {
+        let forced = path(b);
         assert!(shared.set.begin(b));
+        match forced {
+            Path::Inline => {
+                // Every worker parks under this block's epoch before anything is published, so
+                // none is inside a claim and none can claim until the pass is over.
+                shared.pause.store(b, Ordering::Release);
+                wait_until("the workers park", || shared.parked.iter().all(|p| p.load(Ordering::Acquire) == b) || failed());
+            }
+            Path::Overrun => {
+                // The strip held by this block must be published: wait out a claim of an earlier
+                // block's overrun (a free block may leave one).
+                let slot = shared.set.slot(HELD).expect("in range");
+                wait_until("the held strip's earlier claim", || slot.state() != State::Claimed || failed());
+                shared.hold.store(b, Ordering::Release);
+            }
+            Path::Mixed | Path::Free => {}
+        }
         for (i, flag) in was_published.iter_mut().enumerate() {
             let slot = shared.set.slot(i).expect("in range");
             *flag = false;
@@ -498,27 +579,57 @@ fn every_publish_ends_mixed_inline_or_overrun_under_free_running_workers() {
         // The callback's own work until its deadline: a random amount, never a clock.
         rng.jitter();
         rng.jitter();
+        match forced {
+            Path::Mixed => {
+                let done = |i: usize| shared.set.slot(i).is_some_and(|s| s.state() == State::Done);
+                let all_done = || was_published.iter().enumerate().all(|(i, &p)| !p || done(i));
+                wait_until("the workers finish every published strip", || all_done() || failed());
+            }
+            Path::Overrun => wait_until("a worker holds the held strip", || shared.holding.load(Ordering::Acquire) == b || failed()),
+            Path::Inline | Path::Free => {}
+        }
+        assert!(!failed(), "block {b}: a worker failed (its panic is above)");
+        let mut ends = [None; FREE_STRIPS];
         for (i, &flag) in was_published.iter().enumerate() {
             if !flag {
                 continue;
             }
             let slot = shared.set.slot(i).expect("in range");
             if slot.reclaim() {
-                execute(&shared, i, b, &mut rng);
+                execute(&shared, i, b, &mut rng, false);
                 assert!(slot.retire());
                 inline += 1;
+                ends[i] = Some(End::Inline);
                 continue;
             }
-            match shared.set.consume(i) {
-                Consume::Ready => mixed += 1,
-                Consume::Pending => overrun += 1,
+            ends[i] = Some(match shared.set.consume(i) {
+                Consume::Ready => {
+                    mixed += 1;
+                    End::Mixed
+                }
+                Consume::Pending => {
+                    overrun += 1;
+                    End::Overrun
+                }
                 Consume::Stale => panic!("strip {i} published at {b} cannot be stale at {b}"),
+            });
+        }
+        match forced {
+            Path::Inline => {
+                assert_eq!(ends, [Some(End::Inline); FREE_STRIPS], "block {b}: forced inline, every strip published and reclaimed");
+                shared.pause.store(0, Ordering::Release);
             }
+            Path::Mixed => assert_eq!(ends, [Some(End::Mixed); FREE_STRIPS], "block {b}: forced mixed, every strip published and done"),
+            Path::Overrun => {
+                assert_eq!(ends[HELD], Some(End::Overrun), "block {b}: forced overrun of the held strip: {ends:?}");
+                shared.hold.store(0, Ordering::Release);
+            }
+            Path::Free => {}
         }
     }
     // Drain: wait for the overrun workers, then retire their late results unread.
-    wait_until("the last claims", || shared.set.counts().claimed == 0 || shared.failed.load(Ordering::Acquire));
-    assert!(!shared.failed.load(Ordering::Acquire), "a worker failed (its panic is above)");
+    wait_until("the last claims", || shared.set.counts().claimed == 0 || failed());
+    assert!(!failed(), "a worker failed (its panic is above)");
     shared.stop.store(true, Ordering::Release);
     for w in workers {
         w.join().expect("worker");
@@ -535,7 +646,6 @@ fn every_publish_ends_mixed_inline_or_overrun_under_free_running_workers() {
     assert_eq!(published, mixed + inline + overrun, "every publish ends exactly one way");
     assert_eq!(shared.completions.load(Ordering::Acquire), mixed + overrun, "workers ran exactly the claimed publishes");
     assert_eq!(retired_unread, overrun, "every overrun's late result was retired unread");
-    assert!(mixed > 0 && inline > 0, "both paths covered: {mixed} mixed, {inline} inline, {overrun} overrun");
     assert_eq!(shared.set.faults(), 0);
     assert_eq!(shared.set.counts().idle, FREE_STRIPS);
 }
