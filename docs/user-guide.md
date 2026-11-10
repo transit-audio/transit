@@ -563,12 +563,15 @@ note up (bank B starts 16 notes above A, C 32 and D 48). A new kit starts at MID
 General MIDI drums start and where other DAWs put the first pad of their drum instruments, so drum
 clips made elsewhere land on bank A; a kit saved before this setting existed keeps its pads on
 MIDI note 60 and up. To match a pad controller whose first pad sends another note, set the start
-note to that note instead of remapping the controller (for now with the `mix.sampler_pad_start`
-command; a Start note field on the Pads view comes later). A pad whose note you set yourself keeps
-that note when the start note changes; the others move, and keep their pitch. Clips are never
-changed: the notes they hold no longer reach the moved pads, so transpose the pad clips by the
-distance the message gives (select their notes in the piano roll and move them by that many
-semitones).
+note to that note instead of remapping the controller: use the **Start note** field at the right
+of the bar above the pads (drag it up or down a semitone at a time, with Shift by octaves, or turn
+Ctrl+wheel over it; double-click it to type a note name such as `C1` or `c#1`, or a MIDI number
+from 0 to 64), or the `mix.sampler_pad_start` command. A change the kit cannot take, such as one
+that would put a pad on a note another pad keeps, is refused, and the reason shows under the pads.
+A pad whose note you set yourself keeps that note when the start note changes; the others move,
+and keep their pitch. Clips are never changed: the notes they hold no longer reach the moved pads,
+so transpose the pad clips by the distance you moved the start note (select their notes in the
+piano roll and move them by that many semitones).
 
 ## Resonator
 
