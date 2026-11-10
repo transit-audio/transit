@@ -688,7 +688,8 @@ pub(crate) fn current_thread_id() -> u32 {
 }
 
 /// The real MMCSS calls.
-pub(crate) const MMCSS: crate::mmcss::Hooks = crate::mmcss::Hooks { register: mmcss_register, revert: mmcss_revert, thread_id: current_thread_id };
+pub(crate) const MMCSS: crate::mmcss::Hooks =
+    crate::mmcss::Hooks { register: mmcss_register, revert: mmcss_revert, thread_id: current_thread_id, now: std::time::Instant::now };
 
 /// Raises the calling thread (the host thread, at its start) to `THREAD_PRIORITY_ABOVE_NORMAL`:
 /// it serves the driver's messages, the watchdog and the stream requests, but never runs audio

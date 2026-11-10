@@ -25,6 +25,9 @@ pub(crate) struct Hooks {
     pub(crate) revert: fn(usize) -> Result<(), u32>,
     /// The calling thread's id.
     pub(crate) thread_id: fn() -> u32,
+    /// The clock of [`Mmcss::release`]'s wait (`Instant::now`; a test can stop it, so the release
+    /// waits for the registered thread's next switch however late that comes).
+    pub(crate) now: fn() -> Instant,
 }
 
 /// Not started, or stopped and nothing registered.
@@ -153,7 +156,8 @@ impl Mmcss {
     /// Host thread, before the driver's `stop`: asks the registered thread to revert at its next
     /// buffer switch and waits up to `wait` for it, then reverts from here.
     pub(crate) fn release(&self, wait: Duration) -> Released {
-        let deadline = Instant::now() + wait;
+        let now = self.hooks.now;
+        let deadline = now() + wait;
         loop {
             match self.state.load(Ordering::Acquire) {
                 REGISTERED => {
@@ -164,14 +168,14 @@ impl Mmcss {
                         return Released::Nothing;
                     }
                 }
-                RELEASE if Instant::now() >= deadline => {
+                RELEASE if now() >= deadline => {
                     if self.state.compare_exchange(RELEASE, BUSY, Ordering::AcqRel, Ordering::Acquire).is_ok() {
                         let next = self.revert();
                         self.state.store(next, Ordering::Release);
                         return if next == RELEASED { Released::FromHost } else { Released::Failed(self.error.load(Ordering::Relaxed)) };
                     }
                 }
-                BUSY if Instant::now() >= deadline => return Released::Abandoned,
+                BUSY if now() >= deadline => return Released::Abandoned,
                 RELEASE | BUSY => std::thread::sleep(Duration::from_millis(1)),
                 RELEASED => return Released::OnItsThread,
                 RELEASE_FAILED => return Released::Failed(self.error.load(Ordering::Relaxed)),
@@ -206,7 +210,9 @@ impl Mmcss {
 pub(crate) mod testing {
     //! Counting hooks, process-wide (the tests that stream hold one lock).
     use super::Hooks;
+    use std::sync::OnceLock;
     use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+    use std::time::Instant;
 
     pub(crate) static REGISTERS: AtomicUsize = AtomicUsize::new(0);
     pub(crate) static REVERTS: AtomicUsize = AtomicUsize::new(0);
@@ -217,6 +223,30 @@ pub(crate) mod testing {
     pub(crate) static FAIL: AtomicBool = AtomicBool::new(false);
     /// The next registration finds the thread already registered (error 1552, the driver's own).
     pub(crate) static DRIVER_HOLDS: AtomicBool = AtomicBool::new(false);
+    /// While set, the release's clock stands still: a release waits for the registered thread's
+    /// next buffer switch however late it comes, so no clock decides which thread reverts (#436).
+    pub(crate) static CLOCK_STOPPED: AtomicBool = AtomicBool::new(false);
+
+    /// Stops the release's clock until the guard drops (on a failing test's unwind too, so the
+    /// tests after it see a running clock).
+    pub(crate) fn stop_clock() -> ClockStopped {
+        CLOCK_STOPPED.store(true, Ordering::SeqCst);
+        ClockStopped
+    }
+
+    pub(crate) struct ClockStopped;
+
+    impl Drop for ClockStopped {
+        fn drop(&mut self) {
+            CLOCK_STOPPED.store(false, Ordering::SeqCst);
+        }
+    }
+
+    fn now() -> Instant {
+        static STOPPED_AT: OnceLock<Instant> = OnceLock::new();
+        let stopped = *STOPPED_AT.get_or_init(Instant::now);
+        if CLOCK_STOPPED.load(Ordering::SeqCst) { stopped } else { Instant::now() }
+    }
 
     fn register() -> Result<usize, u32> {
         if FAIL.swap(false, Ordering::SeqCst) {
@@ -236,7 +266,7 @@ pub(crate) mod testing {
         Ok(())
     }
 
-    pub(crate) const HOOKS: Hooks = Hooks { register, revert, thread_id: crate::com::current_thread_id };
+    pub(crate) const HOOKS: Hooks = Hooks { register, revert, thread_id: crate::com::current_thread_id, now };
 
     /// Zeroes the counters.
     pub(crate) fn reset() {
@@ -248,6 +278,7 @@ pub(crate) mod testing {
         }
         FAIL.store(false, Ordering::SeqCst);
         DRIVER_HOLDS.store(false, Ordering::SeqCst);
+        CLOCK_STOPPED.store(false, Ordering::SeqCst);
     }
 }
 
@@ -272,6 +303,7 @@ mod tests {
                 Ok(())
             },
             thread_id: || THREAD.load(Ordering::SeqCst),
+            now: Instant::now,
         }
     }
 
@@ -321,7 +353,7 @@ mod tests {
 
     #[test]
     fn a_thread_the_driver_registered_itself_is_left_to_it_and_not_reported_as_refused() {
-        let m = Mmcss::new(Hooks { register: || Err(ALREADY_REGISTERED), revert: |_| panic!("not ours to revert"), thread_id: || 9 });
+        let m = Mmcss::new(Hooks { register: || Err(ALREADY_REGISTERED), revert: |_| panic!("not ours to revert"), thread_id: || 9, now: Instant::now });
         let m = Mmcss { host_thread: 1, ..m };
         m.arm();
         m.tend();
@@ -343,6 +375,7 @@ mod tests {
             },
             revert: |_| panic!("nothing to revert"),
             thread_id: || 9,
+            now: Instant::now,
         });
         let m = Mmcss { host_thread: 1, ..m };
         m.arm();

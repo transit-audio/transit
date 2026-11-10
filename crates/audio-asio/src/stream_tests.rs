@@ -589,11 +589,18 @@ fn driver_thread<'s>(
     })
 }
 
+/// The driver's thread registers itself at its first switch and reverts itself at the stop. The
+/// release's clock is stopped (`mmcss::testing::CLOCK_STOPPED`), so the host waits for the driver
+/// thread's next switch however late a loaded host runs it: the 20 ms wait the session gives a
+/// 64-frame driver does not decide which thread reverts (#436, E49). The host's revert after that
+/// wait, for a driver that does not call again, is
+/// `a_driver_that_does_not_call_at_the_stop_is_reverted_from_the_host_and_a_restart_registers_again`.
 #[test]
 fn the_buffer_switch_thread_joins_mmcss_at_its_first_switch_and_leaves_it_at_the_stop() {
     use crate::mmcss::testing as mmcss;
     let _guard = lock();
     mmcss::reset();
+    let _clock = mmcss::stop_clock();
     let rig = rig(scarlett());
     let seen = seen();
     let (capture, render, _, _) = duplex(&rig, 48_000, Some(64), &seen, vec![0.0; 2]);
@@ -601,10 +608,11 @@ fn the_buffer_switch_thread_joins_mmcss_at_its_first_switch_and_leaves_it_at_the
     let stop = std::sync::atomic::AtomicBool::new(false);
     let driver = std::thread::scope(|s| {
         let driver = driver_thread(s, &rig, &stop);
-        while mmcss::REGISTERS.load(Ordering::SeqCst) == 0 {
+        // The registration's own state, stored after the OS call returns (the counter is bumped
+        // inside it, before the state is): no sleep stands in for the store.
+        while render.thread_priority() == ab::WorkerPriority::Pending {
             std::thread::yield_now();
         }
-        std::thread::sleep(Duration::from_millis(20));
         assert_eq!((render.thread_priority(), capture.thread_priority()), (ab::WorkerPriority::MmcssProAudio, ab::WorkerPriority::MmcssProAudio));
         assert_eq!(mmcss::REGISTERS.load(Ordering::SeqCst), 1, "once per start, not per buffer");
         render.stop().expect("stop render");
