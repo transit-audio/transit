@@ -29,9 +29,11 @@ use super::*;
 use crate::compile::PoolSample;
 use std::collections::{BTreeMap, HashMap};
 use transit_dsp::plugins::sampler::{
-    self as sampler, LoopMode as CoreLoop, Membership as CoreMembership, Pad, PatchSpec, PlayMode as CorePlay, PublishError, Publisher, Region, Zone,
+    self as sampler, Fades, LoopMode as CoreLoop, Membership as CoreMembership, Pad, PatchSpec, PlayMode as CorePlay, PublishError, Publisher,
+    Region, Zone,
 };
 use transit_model::Insert;
+use transit_model::sampler_fades::fades_used;
 use transit_model::sampler_patch::{GroupEntry, LoopMode, PadEntry, PatchV1, PlayMode, RoundRobin, ZoneEntry};
 
 /// What a publication carries, compared to decide whether a running instance needs a new one: the
@@ -91,7 +93,8 @@ pub(crate) fn structure(p: &PatchV1, s: &Session) -> Structure {
     }
 }
 
-fn core_zone(z: &ZoneEntry, source: u16) -> Zone {
+/// The core zone of `z` on core source `source`; `bound`: a pad binds it (its fades are not used).
+fn core_zone(z: &ZoneEntry, source: u16, bound: bool) -> Zone {
     let loop_mode = match z.loop_mode {
         LoopMode::Off => CoreLoop::Off,
         LoopMode::Forward => CoreLoop::Forward,
@@ -101,6 +104,8 @@ fn core_zone(z: &ZoneEntry, source: u16) -> Zone {
     zone.keys = (z.keys[0], z.keys[1]);
     zone.velocities = (z.velocities[0], z.velocities[1]);
     zone.membership = z.membership.as_ref().map(|m| CoreMembership { group: m.group, layer: m.layer, alternative: m.alternative });
+    let [key_lo, key_hi, vel_lo, vel_hi] = fades_used(z, bound);
+    zone.fades = Fades { key_lo, key_hi, vel_lo, vel_hi };
     let p = &mut zone.playback;
     p.transpose = z.transpose;
     p.cents = z.cents;
@@ -144,7 +149,7 @@ pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Ar
         match local.get(usize::from(z.source)).copied().flatten() {
             Some((index, frames)) if z.end <= frames => {
                 if let Some(slot) = spec.zones.get_mut(usize::from(z.id)) {
-                    *slot = Some(core_zone(z, index));
+                    *slot = Some(core_zone(z, index, p.pad_of(z.id).is_some()));
                 }
             }
             _ => {
@@ -152,7 +157,7 @@ pub(crate) fn spec_of(p: &PatchV1, s: &Session, wrappers: &mut HashMap<usize, Ar
                 if z.membership.is_some()
                     && let Some(slot) = spec.zones.get_mut(usize::from(z.id))
                 {
-                    *slot = Some(core_zone(z, sampler::SILENT_SOURCE));
+                    *slot = Some(core_zone(z, sampler::SILENT_SOURCE, p.pad_of(z.id).is_some()));
                 }
             }
         }

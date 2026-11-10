@@ -292,3 +292,21 @@ fn a_stored_random_mode_plays_random_and_a_mode_change_republishes() {
     let want: Vec<f32> = reference(12345, 4).into_iter().map(|a| 0.5 + ALT[a]).collect();
     assert_eq!(got, want, "the mode change reached the instance");
 }
+
+#[test]
+fn the_publication_carries_the_used_fades() {
+    // Zone 1 is bound to pad 1 and stores widths it never plays; zone 2 (keys 60..62) stores key
+    // widths too wide for its span of 2: the core receives the used widths.
+    let mut p = kit(1);
+    p.zones[0].fades = transit_model::sampler_fades::Fades::of([1, 2, 3, 4]);
+    let mut z = ZoneEntry::whole(1, 0, 48_000);
+    z.keys = [60, 62];
+    z.fades = transit_model::sampler_fades::Fades::of([5, 5, 0, 9]);
+    p.zones.push(z);
+    let (s, _) = session(Some(p.clone()));
+    let (spec, silent) = crate::sampler_link::spec_of(&p, &s, &mut std::collections::HashMap::new());
+    assert!(silent.is_empty());
+    let fades = |i: usize| spec.zones[i].unwrap().fades;
+    assert_eq!(fades(0), transit_dsp::plugins::sampler::Fades::NONE, "a pad-bound zone plays no fades");
+    assert_eq!(fades(1), transit_dsp::plugins::sampler::Fades { key_lo: 2, key_hi: 0, vel_lo: 0, vel_hi: 9 });
+}
