@@ -1138,8 +1138,7 @@ pub mod sampler {
     pub const SEED_REROLL_ICON: &str = "dices";
     pub const SEED_SEQUENTIAL: &str = "ink.arrow";
     pub const VIEW_SWITCH_FONT: &str = "sans";
-    /// The Pads bar's Start note field (`startNote`), mirrored ahead of the control: it waits for
-    /// the ADR 0041 start-note amendment and the Pads bar UI pass, so no caller reads these yet.
+    /// The Pads bar's Start note field (`startNote`; `sampler_panel::bar` draws it).
     pub const START_NOTE_LABEL: &str = "Start note";
     pub const START_NOTE_FONT: &str = "mono";
     pub const START_NOTE_DEFAULT: &str = "C1";

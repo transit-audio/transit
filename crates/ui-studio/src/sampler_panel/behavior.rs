@@ -15,6 +15,8 @@
 //!   steps run under one merge key: one undo step.
 //! - **Choke picker, M, S:** one `mix.sampler_pad_set` each. **Rename:** the strip's name, in place
 //!   (`mix.sampler_pad_set` name, through the app's rename field).
+//! - **Start note** (the view bar, [`super::bar`]): `mix.sampler_pad_start`, merged while the
+//!   pointer is held or the wheel turns; a typed value one step.
 //! - **Zone knobs:** `mix.sampler_zone_edit` (a playback field) or `mix.sampler_control` (level,
 //!   pan), merged while the pointer is held or the wheel turns; the trigger mode, Reverse and Key
 //!   track one `mix.sampler_zone_edit` each.
@@ -64,7 +66,7 @@ fn track(dev: Dev) -> TrackId {
 }
 
 /// A one-off command (its own undo step).
-fn run(app: &mut StudioApp, dev: Dev, id: &str, mut p: Value) -> bool {
+pub(crate) fn run(app: &mut StudioApp, dev: Dev, id: &str, mut p: Value) -> bool {
     if let Some(o) = p.as_object_mut() {
         o.insert("track".into(), json!(track(dev).0));
     }
@@ -73,7 +75,7 @@ fn run(app: &mut StudioApp, dev: Dev, id: &str, mut p: Value) -> bool {
 }
 
 /// A command merged into the gesture in progress under `key`.
-fn merged(app: &mut StudioApp, dev: Dev, id: &str, mut p: Value, key: &str) -> bool {
+pub(crate) fn merged(app: &mut StudioApp, dev: Dev, id: &str, mut p: Value, key: &str) -> bool {
     if let Some(o) = p.as_object_mut() {
         o.insert("track".into(), json!(track(dev).0));
     }

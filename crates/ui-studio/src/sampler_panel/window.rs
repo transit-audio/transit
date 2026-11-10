@@ -59,6 +59,9 @@ impl shared::Panel for Panel {
     }
 
     fn typing(rec: &SamplerLayout, uid: u64) -> Option<egui::Id> {
+        if rec.bar.start.editing {
+            return Some(super::bar::field_id(uid));
+        }
         rec.knobs.iter().find(|k| k.knob.editing).map(|k| super::zone::knob_id(uid, &k.field))
     }
 

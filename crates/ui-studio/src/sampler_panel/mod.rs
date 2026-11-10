@@ -4,7 +4,8 @@
 //! views wait for their boards.
 //!
 //! Anatomy (README, Device anatomy; the Pad component and the board "Pads with choke groups"):
-//! A, the shared 52 px title bar; B, the hero row: the Pads panel ([`grid`]: the `PADS` label, the
+//! A, the shared 52 px title bar; the view bar ([`bar`]: the summary and the kit's Start note
+//! field); B, the hero row: the Pads panel ([`grid`]: the `PADS` label, the
 //! bank buttons for the four banks the patch has, the 4 by 4 grid of 56 px pads with 4 px gaps,
 //! pad 1 bottom-left, and the bank's status line) and beside it the Selected pad panel
 //! ([`strip`]: the pad's name, id and trigger note, the choke picker as a segmented grid of Off and
@@ -21,6 +22,7 @@
 //! state (the hit fill, the cut) comes from what the instrument publishes through its tap
 //! ([`live`]). The bank, the selection and the view are UI state, never playback switches.
 
+pub mod bar;
 mod behavior;
 mod grid;
 mod legacy;
@@ -29,6 +31,8 @@ mod strip;
 pub mod window;
 mod zone;
 
+#[cfg(test)]
+mod bar_tests;
 #[cfg(test)]
 mod behavior_tests;
 #[cfg(test)]
@@ -203,6 +207,11 @@ pub struct SamplerLayout {
     pub title: TitleLayout,
     /// The legacy one-sample body (`None` on the pads).
     pub legacy: Option<LegacyLayout>,
+    /// The view bar (`Default` on the legacy body).
+    pub bar: bar::BarLayout,
+    /// The body's top left as egui placed it (on the physical pixel grid, so at a fractional
+    /// scale it can sit a fraction of a point below the title bar's bottom).
+    pub body_origin: [f32; 2],
     /// Every panel card: its name (`pads`, `strip`, `playback`, `amp`) and rect.
     pub panels: Vec<(String, [f32; 4])>,
     pub banks: Option<segmented::SegmentedLayout>,
@@ -356,7 +365,7 @@ pub fn content_height(app: &StudioApp, ctx: &egui::Context, key: (TrackId, usize
     let peers = patch_at(s, key).map(|patch| strip::peers_line(&pads_of(s, &patch), selected)).unwrap_or_default();
     let hero = grid::height(&p).max(strip::height(&p, w - grid::WIDTH - space::PANEL_GAP, &peers));
     let note = v.and_then(|v| v.note.as_deref()).map_or(0.0, |n| space::PANEL_GAP + note_height(&p, w, n));
-    2.0 * space::WINDOW_PADDING + hero + note + space::PANEL_GAP + zone::height(&p)
+    2.0 * space::WINDOW_PADDING + bar::HEIGHT_WITH_GAP + hero + note + space::PANEL_GAP + zone::height(&p)
 }
 
 /// The refused edit's note: Lucide's circle-alert in `meter.hot` and the message in `text`
@@ -388,6 +397,8 @@ fn draw_note(ui: &Ui, rect: Rect, text: &str) -> Rect {
 pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorLayout, out: &mut SamplerLayout) {
     let width = inside_width(app, ui.available_width());
     let origin = ui.cursor().min;
+    let o = r4(Rect::from_min_size(origin, egui::Vec2::ZERO));
+    out.body_origin = [o[0], o[1]];
     if !has_patch(app.engine.session(), dev.key) {
         let h = legacy::show(app, ui, dev, Rect::from_min_size(origin, vec2(width, 0.0)), lay, out);
         view(app, dev.uid()).legacy_h = Some(h);
@@ -412,6 +423,8 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     let w = width - 2.0 * space::WINDOW_PADDING;
     let x = origin.x + space::WINDOW_PADDING;
     let mut y = origin.y + space::WINDOW_PADDING;
+    bar::show(app, ui, dev, &patch, &pads, Rect::from_min_size(pos2(x, y), vec2(w, bar::HEIGHT)), out);
+    y += bar::HEIGHT_WITH_GAP;
     let selected = view(app, dev.uid()).selected;
     let peers = strip::peers_line(&pads, selected);
     let strip_w = w - grid::WIDTH - space::PANEL_GAP;
