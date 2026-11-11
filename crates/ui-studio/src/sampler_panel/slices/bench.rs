@@ -666,7 +666,19 @@ fn draw_loop(
             out.drag = Some((r4(line), tip.clone(), r4(r)));
         }
         if vis {
-            out.flags.push(FlagRecord { index: i, frame: s.frame, line: r4(line), line_color, flag: r4(flag), crowded, text, fill, ink, edge, handle });
+            out.flags.push(FlagRecord {
+                index: i,
+                frame: s.frame,
+                line: r4(line),
+                line_color,
+                flag: r4(flag),
+                crowded,
+                text,
+                fill,
+                ink,
+                edge,
+                handle,
+            });
         }
     }
     // A drag whose release was not seen (no button is down any more) is over: nothing is sent.
