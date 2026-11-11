@@ -76,6 +76,37 @@ pub struct WaveLayout {
     pub inside: usize,
 }
 
+/// The handles' hit areas: each line with a band of [`super::key_map::EDGE`] either side, and its
+/// flag.
+pub struct Grabs {
+    pub s_line: Rect,
+    pub s_flag: Rect,
+    pub e_line: Rect,
+    pub e_flag: Rect,
+}
+
+impl Grabs {
+    /// The handle a press at `at` holds. The flags, which are what shows, come first, E's before
+    /// S's (E draws over S where they meet); then the bands around the lines, the nearer line
+    /// where both reach. One answer per point, so neither handle takes the other's presses.
+    pub fn handle_at(&self, at: egui::Pos2) -> Option<Handle> {
+        if self.e_flag.contains(at) {
+            return Some(Handle::End);
+        }
+        if self.s_flag.contains(at) {
+            return Some(Handle::Start);
+        }
+        let band = |line: Rect| line.expand2(vec2(super::key_map::EDGE, 0.0));
+        let dist = |line: Rect| (at.x - line.center().x).abs();
+        match (band(self.s_line).contains(at), band(self.e_line).contains(at)) {
+            (true, true) if dist(self.e_line) < dist(self.s_line) => Some(Handle::End),
+            (true, _) => Some(Handle::Start),
+            (false, true) => Some(Handle::End),
+            (false, false) => None,
+        }
+    }
+}
+
 fn seconds(frame: u64, rate: u32) -> f64 {
     frame as f64 / f64::from(rate.max(1))
 }
@@ -192,34 +223,40 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, w: &WaveInputs, drag: &mut Option<Wave
         pos2(area.max.x - tk::TAG_INSET, area.min.y + tk::READOUT_TOP),
     );
     out.readout = (text, r4(r));
-    // Dragging: the flag or a band around the line holds the handle.
+    // Dragging: one widget over the well, so the two handles' hit areas never overlap and the
+    // release is seen wherever it happens. A press holds the handle under it (see `handle_at`).
+    let grabs = Grabs { s_line, s_flag, e_line, e_flag };
     let mut moved = None;
-    for (handle, line, flag, now) in [(Handle::Start, s_line, s_flag, w.span.start), (Handle::End, e_line, e_flag, w.span.end)] {
-        let grab = line.expand2(vec2(super::key_map::EDGE, 0.0)).union(flag);
-        let id = egui::Id::new(("sampler_zone_handle", uid, handle == Handle::Start));
-        let resp = ui.interact(grab.intersect(area), id, if w.locked { Sense::hover() } else { Sense::drag() }).on_hover_text(w.handle_tip);
-        if w.locked {
-            continue;
-        }
-        if resp.hovered() || resp.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-        }
-        if resp.drag_started() {
-            *drag = Some(WaveDrag { zone: w.zone, handle, frame: now, cancelled: false });
-        }
-        if resp.dragged()
-            && let (Some(d), Some(at)) = (drag.as_mut(), resp.interact_pointer_pos())
-            && d.handle == handle
-        {
-            d.frame = frame_at(at.x);
-        }
-        if resp.drag_stopped()
-            && let Some(d) = drag.take()
-            && !d.cancelled
-            && d.handle == handle
-            && d.frame != now
-        {
-            moved = Some((handle, d.frame));
+    let id = egui::Id::new(("sampler_zone_handles", uid));
+    let resp = ui.interact(area, id, if w.locked { Sense::hover() } else { Sense::drag() });
+    let over = resp.hover_pos().and_then(|at| grabs.handle_at(at));
+    let resp = if over.is_some() { resp.on_hover_text(w.handle_tip) } else { resp };
+    if w.locked {
+        return (out, None);
+    }
+    if over.is_some() || drag.as_ref().is_some_and(|d| d.zone == w.zone) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if resp.drag_started()
+        && let Some(handle) = ui.input(|i| i.pointer.press_origin()).and_then(|at| grabs.handle_at(at))
+    {
+        let now = if handle == Handle::Start { w.span.start } else { w.span.end };
+        *drag = Some(WaveDrag { zone: w.zone, handle, frame: now, cancelled: false });
+    }
+    if resp.dragged()
+        && let (Some(d), Some(at)) = (drag.as_mut(), resp.interact_pointer_pos())
+        && d.zone == w.zone
+    {
+        d.frame = frame_at(at.x);
+    }
+    if resp.drag_stopped()
+        && let Some(d) = drag.take()
+        && !d.cancelled
+        && d.zone == w.zone
+    {
+        let now = if d.handle == Handle::Start { w.span.start } else { w.span.end };
+        if d.frame != now {
+            moved = Some((d.handle, d.frame));
         }
     }
     (out, moved)

@@ -20,6 +20,8 @@ pub mod zone_panel;
 pub mod zone_wave;
 
 #[cfg(test)]
+mod hardening_tests;
+#[cfg(test)]
 mod key_map_tests;
 #[cfg(test)]
 mod rig;
@@ -339,7 +341,9 @@ pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
         return;
     }
     let iv = &mut v.instrument;
-    if (iv.drag.is_some() || iv.wave_drag.is_some()) && shortcuts::pressed(ctx, Action::SamplerCancelZoneDrag) {
+    // A drag is live only while a button is down (a stale one never takes Escape from the window).
+    let down = ctx.input(|i| i.pointer.any_down());
+    if down && (iv.drag.is_some() || iv.wave_drag.is_some()) && shortcuts::pressed(ctx, Action::SamplerCancelZoneDrag) {
         if let Some(d) = iv.drag.as_mut() {
             d.cancelled = true;
         }
