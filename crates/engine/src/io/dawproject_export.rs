@@ -144,6 +144,8 @@ fn write_archive(part: &Path, xml: &str, stems: &[Stem]) -> Result<()> {
     let written = (|| {
         let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(file));
         let deflated = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("metadata.xml", deflated).map_err(zerr)?;
+        zip.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<MetaData/>\n").map_err(ioerr)?;
         zip.start_file("project.xml", deflated).map_err(zerr)?;
         zip.write_all(xml.as_bytes()).map_err(ioerr)?;
         let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored).large_file(true);
@@ -380,14 +382,14 @@ fn project_xml(s: &Session, stems: &[Stem]) -> String {
     }
     if s.tempo.tempos().len() > 1 {
         out.push_str("    <TempoAutomation timeUnit=\"beats\" unit=\"bpm\">\n      <Target/>\n");
-        for t in s.tempo.tempos().iter().filter(|t| t.tick != 0) {
+        for t in s.tempo.tempos().iter() {
             line!("      <RealPoint time=\"{}\" value=\"{}\" interpolation=\"hold\"/>", number(t.tick as f64 / f64::from(PPQ)), number(t.bpm));
         }
         out.push_str("    </TempoAutomation>\n");
     }
     if s.tempo.meters().len() > 1 {
         out.push_str("    <TimeSignatureAutomation timeUnit=\"beats\">\n      <Target/>\n");
-        for m in s.tempo.meters().iter().filter(|m| m.tick != 0) {
+        for m in s.tempo.meters().iter() {
             line!(
                 "      <TimeSignaturePoint time=\"{}\" numerator=\"{}\" denominator=\"{}\"/>",
                 number(m.tick as f64 / f64::from(PPQ)),

@@ -46,7 +46,7 @@ works across the suite) keep the agent to the folders you give it:
 - Every file a command writes must lie inside the **write root**: `save_session`, `session.save`,
   `session.save_as`, `session.save_copy`, `session.save_template`, `bounce_mix` and
   `file.bounce_mix`, `file.bounce_stems`, `file.export_clips`, `file.export_midi`,
-  `file.export_session_text`, `file.export_selected_tracks_as_session`, `file.export_sibelius`,
+  `file.export_dawproject`, `file.export_session_text`, `file.export_selected_tracks_as_session`, `file.export_sibelius`,
   `file.send_to_sibelius`, `file.print_score`, `file.export_clip_groups` and
   `track.save_preset`, together with what a session save writes beside the session file
   (`Audio Files/`, `Backups/`) and its temporary file. A score command given no `path` writes to

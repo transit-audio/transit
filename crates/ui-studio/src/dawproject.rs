@@ -16,8 +16,8 @@ impl StudioApp {
         if let Ok(v) = self.run("file.export_dawproject", json!({"path": path, "replace": true})) {
             let path = v["path"].as_str().unwrap_or(&path).to_string();
             let stems = v["stems"].as_u64().unwrap_or(0);
-            let external = v["left_out"].as_array().map_or(0, Vec::len);
-            let note = if external == 0 { String::new() } else { format!("; External Instrument audio left out on {external} tracks") };
+            let external: Vec<_> = v["left_out"].as_array().into_iter().flatten().filter_map(serde_json::Value::as_str).collect();
+            let note = if external.is_empty() { String::new() } else { format!("; External Instrument audio left out: {}", external.join(", ")) };
             self.status = format!("Exported DAWproject to {path} ({stems} stems{note})");
         }
     }
@@ -85,6 +85,20 @@ mod tests {
         assert_eq!(Path::new(offered.borrow().as_str()).extension().and_then(|e| e.to_str()), Some("dawproject"));
         assert!(app.status.starts_with("Exported DAWproject to "), "{}", app.status);
         assert!(app.dialog.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn external_instrument_names_reach_the_status_line() {
+        let dir = temp_dir();
+        let path = dir.join("hardware.dawproject");
+        let answer = path.clone();
+        let mut app = crate::tests::app();
+        let track = app.engine.session_mut().add_track(transit_model::TrackKind::Instrument, transit_model::ChannelFormat::Stereo, Some("Model D"));
+        app.engine.session_mut().track_mut(track).unwrap().instrument = Some(transit_model::Insert::external("In 1"));
+        app.services.pick_save = Some(Box::new(move |_| Some(answer.to_string_lossy().into_owned())));
+        app.pick_dawproject_export();
+        assert!(app.status.contains("External Instrument audio left out: Model D"), "{}", app.status);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

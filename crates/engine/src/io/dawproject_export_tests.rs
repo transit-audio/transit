@@ -75,8 +75,13 @@ fn tracks_maps_markers_notes_expression_and_stem_clips_round_trip() {
     assert_eq!(children, ["Lanes"], "Project.xsd gives Clip one timeline child; Notes and Points share a Lanes");
     for tag in ["TempoAutomation", "TimeSignatureAutomation"] {
         let points = doc.descendants().find(|n| n.has_tag_name(tag)).unwrap();
-        let first = points.children().find(roxmltree::Node::is_element).map(|n| n.tag_name().name());
-        assert_eq!(first, Some("Target"), "Project.xsd requires every Points timeline to start with Target: {tag}");
+        let elements: Vec<_> = points.children().filter(roxmltree::Node::is_element).collect();
+        assert_eq!(
+            elements.first().map(|n| n.tag_name().name()),
+            Some("Target"),
+            "Project.xsd requires every Points timeline to start with Target: {tag}"
+        );
+        assert_eq!(elements.get(1).and_then(|n| n.attribute("time")), Some("0.000000000"), "the lane defines the conversion from the start: {tag}");
     }
     let (got, report) = read(&xml);
     assert_eq!(report, vec!["Not imported from the DAWproject: 1 audio clips"]);
@@ -180,7 +185,9 @@ fn the_command_writes_a_complete_archive_and_replaces_it_only_when_asked() {
     assert!(result["notes"].as_array().unwrap().iter().any(|n| n.as_str().unwrap().contains("volume/pan automation is omitted")));
     assert!(!e.is_dirty(), "export does not edit the session");
     let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
-    assert_eq!(archive.len(), 3);
+    assert_eq!(archive.len(), 4);
+    let metadata = String::from_utf8(zip_entry(&mut archive, "metadata.xml")).unwrap();
+    assert!(metadata.contains("<MetaData/>"), "the reference container always includes metadata.xml");
     let xml = String::from_utf8(zip_entry(&mut archive, "project.xml")).unwrap();
     assert!(xml.contains("<File path=\"audio/track-0.wav\"/>"), "{xml}");
     let wav = zip_entry(&mut archive, "audio/track-0.wav");
