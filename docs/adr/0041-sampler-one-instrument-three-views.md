@@ -1932,7 +1932,10 @@ short "kit preset file" section pointing here.
 a newer transit (Sampler kit schema 2)"; the file is never rewritten, and Save over it is refused
 (item 3). Installing it as an opaque, silent patch would replace a playing kit with silence, so
 the recall refuses instead. A schema 1 kit with fields this build does not know recalls; the
-fields are kept in the session's patch (`extra`), and a later Save writes them back. An invalid
+fields are kept in the session's patch (`extra`), and a later Save writes them back. Unknown fields
+inside a source's `file` object are the exception: the session's source has nowhere to keep them, so
+they are not preserved on recall, and a later Save writes the `file` object without them
+(added 2026-11-11, a correction). An invalid
 kit (fails `PatchV1::validate` after `from_portable`) is refused with the reason, nothing changed.
 Builds before this amendment do not list `.tkit` files and do not report them. `track.load_preset`
 in those builds reads a new track preset's Sampler patch as a ready patch whose sources all name
@@ -2006,7 +2009,9 @@ compares documents, JSON and file bytes, or renders in-process.
   nothing; on an empty kit it needs no `replace`.
 - Refusal on budget: a kit over 128 MiB (generated audio) is refused from headers with nothing
   decoded and the document unchanged; a kit with nine voices on one note is refused naming the
-  note; a changed file is refused naming it.
+  note; a changed file takes the missing state, named in the notice, and the rest of the kit loads
+  (corrected 2026-11-11: this bullet read "a changed file is refused naming it", against items 4
+  and 11.4).
 - Save refusals: an unsaved managed source names its pad and writes nothing; an opaque patch is
   refused; an existing newer kit file is not replaced. A missing source at save time is written
   and listed.
