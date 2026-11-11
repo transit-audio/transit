@@ -11,6 +11,10 @@
 //!
 //! The third step is the coordinator's ruling of 2026-11-10 for the ADR's clarifying amendment
 //! (the amendment's draft said "bar 1"). The placement line names which one was used.
+//!
+//! While the transport runs, a playhead placement moves on in whole sixteenths (the placement
+//! line's own unit, floored), so the state query and the previews that read it are asked again at
+//! most once a sixteenth, never every frame.
 
 use crate::StudioApp;
 use transit_model::TrackId;
@@ -56,7 +60,12 @@ pub fn of(app: &StudioApp, track: TrackId) -> Placement {
     } else {
         (app.position(), Origin::Playhead)
     };
-    Placement { tick: s.tempo.samples_to_ticks(at.max(0), s.sample_rate).max(0), origin }
+    let mut tick = s.tempo.samples_to_ticks(at.max(0), s.sample_rate).max(0);
+    if origin == Origin::Playhead && app.is_playing() {
+        let sixteenth = transit_time::TICKS_PER_QUARTER / 4;
+        tick -= tick.rem_euclid(sixteenth);
+    }
+    Placement { tick, origin }
 }
 
 /// The placement line: `at 5.1.1 · selection start · active playlist` (bar, beat, sixteenth).

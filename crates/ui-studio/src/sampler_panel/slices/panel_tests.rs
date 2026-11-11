@@ -246,8 +246,21 @@ fn states_render() {
 
 #[test]
 fn over_capacity_reads_64_of_64_and_every_cell_stays_clickable() {
+    // At the rig's width and at the panel's minimum width.
+    for narrow in [false, true] {
+        over_capacity_at(narrow);
+    }
+}
+
+fn over_capacity_at(narrow: bool) {
     // Manual from scratch on a loop without pads (no mapping to go stale).
     let (mut t, tr) = auto();
+    if narrow {
+        t.screen = egui::vec2(super::super::MIN_WIDTH + 2.0 * crate::device_window::SCREEN_MARGIN, 1600.0);
+        t.frames(3);
+        let w = t.panel(tr).window;
+        assert!(w[2] - w[0] <= super::super::MIN_WIDTH + 2.0, "the window at its minimum width: {w:?}");
+    }
     t.run("mix.sampler_slice_mode", json!({"track": tr.0, "mode": "manual"}));
     for i in 1..64u64 {
         t.app.engine.execute("mix.sampler_slice_marker", &json!({"track": tr.0, "op": "add", "frame": i * 689, "snap": false})).unwrap();
@@ -382,4 +395,26 @@ fn banners_lines_and_a_picked_root_go_when_the_document_changes_underneath() {
     assert_eq!(view(&t).usage.root, Some(72));
     t.run("mix.sampler_slice_set", json!({"track": tr.0, "snap": true}));
     assert_eq!(view(&t).usage.root, None);
+}
+
+#[test]
+fn a_running_playhead_placement_reads_the_state_at_most_once_a_sixteenth() {
+    let (mut t, tr) = sliced();
+    let sr = t.app.engine.session().sample_rate.hz() as i64;
+    // A range that leaves the track out: the placement is the playhead.
+    let s = t.app.engine.session_mut();
+    s.edit.selection = transit_time::Range::new(sr, sr * 3);
+    s.edit.selected_tracks.clear();
+    t.app.engine.transport.playing = true;
+    t.app.engine.transport.position = 0;
+    t.frames(3);
+    assert_eq!(super::placement::of(&t.app, tr).origin, super::placement::Origin::Playhead);
+    let reads = view(&t).snapshot.reads;
+    // Sixty frames of playback, 100 samples each: 6000 samples, one sixteenth at 120 BPM.
+    for _ in 0..60 {
+        t.app.engine.transport.position += 100;
+        t.frames(1);
+    }
+    let n = view(&t).snapshot.reads - reads;
+    assert!(n <= 2, "the state was read {n} times in one sixteenth of playback");
 }
