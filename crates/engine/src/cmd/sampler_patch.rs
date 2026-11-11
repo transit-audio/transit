@@ -215,15 +215,12 @@ fn new_patch(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "mix.sampler_new_patch";
     let t = instrument_track(e, id, p)?;
     let seed = p.get("seed").map_or(Ok(1), |v| sampler_groups::seed_param(id, v))?;
-    let info = transit_dsp::plugin_info(SAMPLER).ok_or_else(|| bad(id, "the sampler is not available"))?;
     let tr = e.session_mut().track_mut(t).ok_or_else(|| bad(id, "no track"))?;
     if tr.instrument.as_ref().is_some_and(|i| i.plugin == SAMPLER && i.sampler_patch.is_some()) {
         return Err(bad(id, "the track's Sampler already has a patch"));
     }
     if !tr.instrument.as_ref().is_some_and(|i| i.plugin == SAMPLER) {
-        let mut ins = Insert::new(SAMPLER);
-        fill_default_params(&mut ins, info);
-        tr.instrument = Some(ins);
+        tr.instrument = Some(Insert::new(SAMPLER));
     }
     if let Some(ins) = tr.instrument.as_mut() {
         empty_kit(ins, seed);
@@ -240,11 +237,10 @@ fn empty_kit(ins: &mut Insert, seed: u32) {
 }
 
 /// A Sampler created by a command (`mix.instrument`, `track.new`) starts as an empty kit, in the
-/// same step as its creation (#454). Only new instances: a Sampler loaded from a session, a
-/// template or a track preset keeps what it was saved with (ADR 0041 never converts a one-sample
-/// instrument on open), and `mix.sampler_load` still makes the one-sample instrument it names.
+/// same step as its creation (#454): every Sampler has a patch (ADR 0041 amendment 2026-11-11,
+/// #455; one loaded from a session or a track preset gets its kit on load).
 pub(crate) fn new_instance(ins: &mut Insert) {
-    if ins.plugin == SAMPLER && ins.sampler_patch.is_none() && ins.sample.is_none() {
+    if ins.plugin == SAMPLER && ins.sampler_patch.is_none() {
         empty_kit(ins, 1);
     }
 }

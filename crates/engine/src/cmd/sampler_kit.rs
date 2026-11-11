@@ -92,10 +92,7 @@ fn prepare(e: &mut Engine, t: TrackId, folder: &std::path::Path, preview: bool) 
     let listing = files::folder(folder).map_err(|err| plan.refusal(err, None))?;
     plan.paths = listing.files;
     plan.ignored = listing.ignored;
-    let mut patch = patch_of(e.session(), ID, t).map_err(|err| {
-        let legacy = e.session().track(t).and_then(|tr| tr.instrument.as_ref()).is_some_and(|i| i.sampler_patch.is_none());
-        plan.refusal(if legacy { "New Kit first.".to_string() } else { err.to_string() }, None)
-    })?;
+    let mut patch = patch_of(e.session(), ID, t).map_err(|err| plan.refusal(err.to_string(), None))?;
     plan.pads = (0..PADS as u8).filter(|pad| patch.pad(*pad).zone.is_none()).collect();
     plan.zones = (0..ZONES as u16).filter(|zone| patch.zone(*zone).is_none()).collect();
     let needed = plan.paths.len();

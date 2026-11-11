@@ -46,9 +46,7 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
     }
     let mut needed: Vec<SourceId> =
         picked.iter().flat_map(|t| t.playlists.iter().flat_map(|pl| pl.clips.iter().filter_map(|c| c.source()))).collect();
-    // A Sampler's sample is session audio too.
-    needed.extend(picked.iter().filter_map(|t| t.instrument.as_ref().and_then(|i| i.sample)));
-    // And a Sampler patch's sources (ADR 0041), an opaque patch's included.
+    // A Sampler patch's sources are session audio too (ADR 0041), an opaque patch's included.
     needed.extend(
         picked.iter().filter_map(|t| t.instrument.as_ref().and_then(|i| i.sampler_patch.as_ref())).flat_map(transit_model::SamplerPatch::media),
     );
@@ -106,9 +104,8 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
                 }
             }
         }
-        // The donor's source ids mean nothing here: remap the sample, or drop it when it didn't come along.
+        // The donor's source ids mean nothing here.
         if let Some(ins) = tr.instrument.as_mut() {
-            ins.sample = ins.sample.and_then(|sid| map.get(&sid.0).copied());
             // A patch keeps every reference: one that did not come along gets an id of its own that
             // names nothing here (silent, reported), never another source of this session.
             if let Some(patch) = ins.sampler_patch.as_mut() {

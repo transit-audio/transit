@@ -102,21 +102,16 @@ fn kit(e: &mut Engine, d: &Dir) -> TrackId {
 
 #[test]
 fn a_new_patch_leaves_the_one_sample_field_unset() {
-    let d = Dir::new("new");
-    let wav = d.path("tone.wav");
-    tone(&wav, 440.0, 48_000, 0.25, 1);
     let mut e = Engine::default();
     let t = instrument(&mut e);
-    e.execute("mix.sampler_load", &json!({"track": t, "path": s(&wav)})).unwrap();
-    // A new patch clears the one-sample field (an older build plays nothing rather than an
-    // arbitrary first sample); undo brings the one-sample Sampler back.
+    // A new patch on another instrument's track: a Sampler with an empty kit, no one-sample field
+    // and no parameter values (the 19 legacy ids are retired, #455); undo brings the instrument back.
     e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
     let ins = e.session().track(t).unwrap().instrument.clone().unwrap();
-    assert!(ins.sample.is_none() && ins.sampler_patch.is_some());
+    assert!(ins.plugin == "sampler" && ins.sample.is_none() && ins.sampler_patch.is_some() && ins.params.is_empty(), "{ins:?}");
     assert!(e.execute("mix.sampler_new_patch", &json!({"track": t})).is_err(), "one patch per Sampler");
     e.execute("edit.undo", &json!({})).unwrap();
-    let ins = e.session().track(t).unwrap().instrument.clone().unwrap();
-    assert!(ins.sample.is_some() && ins.sampler_patch.is_none());
+    assert_eq!(e.session().track(t).unwrap().instrument.as_ref().unwrap().plugin, "macro_oscillator");
 }
 
 #[test]
@@ -426,21 +421,6 @@ fn importing_a_track_brings_its_patch_media_and_never_aliases_a_source() {
     let sid: SourceId = patch(&e, nt).sources[0].source;
     assert_eq!(e.session().source(sid).unwrap().name, "tone", "the patch names the imported copy, not a source of this session");
     assert!(e.session().pool.get(sid).is_some());
-}
-
-#[test]
-fn a_sampler_with_a_patch_refuses_the_one_sample_load() {
-    let d = Dir::new("legacy-load");
-    let mut e = Engine::default();
-    let t = kit(&mut e, &d);
-    let before = e.session_arc();
-    let err = e.execute("mix.sampler_load", &json!({"track": t, "path": s(&d.path("tone.wav"))})).unwrap_err().to_string();
-    assert!(err.contains("mix.sampler_zone_source"), "{err}");
-    let bytes = std::fs::read(d.path("tone.wav")).unwrap();
-    assert!(crate::io::load_sampler_bytes(&mut e, t, "drop.wav", &bytes).is_err(), "dropped bytes too");
-    assert!(e.execute("mix.sampler_clear", &json!({"track": t})).is_err());
-    assert!(Arc::ptr_eq(&before, &e.session_arc()), "no one-sample field beside the patch");
-    assert!(e.session().track(t).unwrap().instrument.as_ref().unwrap().sample.is_none());
 }
 
 #[test]

@@ -408,11 +408,7 @@ pub fn session_open_line(path: &str, s: &Session, missing_media: usize, took: st
 
 /// Sources whose frame coordinates are independent of the current session rate.
 pub(crate) fn sampler_sources(s: &Session) -> std::collections::HashSet<SourceId> {
-    s.tracks
-        .iter()
-        .filter_map(|t| t.instrument.as_ref())
-        .flat_map(|i| i.sample.into_iter().chain(i.sampler_patch.iter().flat_map(transit_model::SamplerPatch::media)))
-        .collect()
+    s.tracks.iter().filter_map(|t| t.instrument.as_ref()).flat_map(|i| i.sampler_patch.iter().flat_map(transit_model::SamplerPatch::media)).collect()
 }
 
 /// Decode one source's audio file at its requested stored or timeline rate.

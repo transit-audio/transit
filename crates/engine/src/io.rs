@@ -334,16 +334,6 @@ pub fn import_audio_bytes(e: &mut Engine, name: &str, bytes: &[u8], path: Option
     place_prepared(e, prepared, target, at, None)
 }
 
-/// Loads an audio file's bytes into an instrument track's Sampler as one undo step ("Load
-/// Sampler Sample"): for files that have no path, such as one dropped onto the window. The same
-/// checks as `mix.sampler_load`; not journaled, since the bytes can be large.
-pub fn load_sampler_bytes(e: &mut Engine, track: TrackId, name: &str, bytes: &[u8]) -> Result<Value> {
-    let before = e.session_arc();
-    let r = crate::cmd::sampler::attach(e, track, name, bytes, None, Vec::new())?;
-    e.push_undo("Load Sampler Sample", before);
-    Ok(r)
-}
-
 mod midi;
 pub use midi::{export_midi, import_midi_bytes};
 mod dawproject;

@@ -127,14 +127,19 @@ fn reads_outside_the_read_root_are_refused_and_nothing_reaches_the_result() {
     let mut srv = server(Some(&f.read), Some(&f.write));
     ok(&mut srv, "session.new", json!({"name": "Work"}));
     ok(&mut srv, "track.new", json!({"name": "Bass", "count": 1}));
-    ok(&mut srv, "track.new", json!({"name": "Pads", "count": 1, "kind": "instrument"}));
+    ok(&mut srv, "track.new", json!({"name": "Pads", "count": 1, "kind": "instrument", "instrument": "sampler"}));
     let before = inspect(&mut srv);
     // The secret files hold the marker under the names the commands read, so a read would show.
     let secret_name = |f: &str| format!("secret.{}", f.rsplit('.').next().unwrap());
     for (command, params) in reads(&f.outside, &secret_name) {
         refused(&mut srv, command, params, "outside the read root");
     }
-    refused(&mut srv, "mix.sampler_load", json!({"track": "Pads", "path": s(f.outside.join("secret.wav"))}), "outside the read root");
+    refused(
+        &mut srv,
+        "mix.sampler_zone_source",
+        json!({"track": "Pads", "zone": 1, "path": s(f.outside.join("secret.wav"))}),
+        "outside the read root",
+    );
     // The open session is exactly as it was: nothing was imported or opened.
     assert_eq!(inspect(&mut srv), before);
     // The same commands work on files inside the root.
@@ -143,7 +148,7 @@ fn reads_outside_the_read_root_are_refused_and_nothing_reaches_the_result() {
     ok(&mut srv, "file.import_clip_groups", json!({"path": s(f.read.join("group.scgrp"))}));
     ok(&mut srv, "file.import_session_data", json!({"path": s(f.read.join("song.transit")), "tracks": ["Kick"]}));
     ok(&mut srv, "track.load_preset", json!({"path": s(f.read.join("bass.tpreset")), "tracks": ["Bass"]}));
-    ok(&mut srv, "mix.sampler_load", json!({"track": "Pads", "path": s(f.read.join("tone.wav"))}));
+    ok(&mut srv, "mix.sampler_zone_source", json!({"track": "Pads", "zone": 1, "path": s(f.read.join("tone.wav"))}));
     ok(&mut srv, "session.open", json!({"path": s(f.read.join("song.transit"))}));
     // The typed tools take the same path through the same checks.
     let r = srv

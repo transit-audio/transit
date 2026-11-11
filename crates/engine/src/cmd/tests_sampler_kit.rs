@@ -254,15 +254,6 @@ fn kit_references_files_by_path_and_saves_and_reloads() {
 }
 
 #[test]
-fn legacy_one_sample_patch_refused() {
-    let d = Dir::new();
-    d.audio("hit.wav", 128, 48_000, 1);
-    let (mut e, t) = setup();
-    e.session_mut().track_mut(t).unwrap().instrument.as_mut().unwrap().sampler_patch = None;
-    refused(&mut e, t, &d, 1, "New Kit first.");
-}
-
-#[test]
 fn kit_uses_checked_store_and_refuses_a_ninth_layer() {
     let d = Dir::new();
     let path = d.audio("hit.wav", 128, 48_000, 1);
