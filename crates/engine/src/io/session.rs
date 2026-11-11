@@ -281,10 +281,12 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     let mut missing = Vec::new();
     let mut files = DecodedFiles::new();
     missing.extend(super::frozen_recording::load(&mut s, links));
+    let sampler_sources = sampler_sources(&s);
     for src in &s.sources {
+        let rate = if sampler_sources.contains(&src.id) { src.sample_rate } else { s.sample_rate.hz() };
         let decoded = stored_path(&src.path, links)
             .map_err(|why| format!("{}: {why}", src.path))
-            .and_then(|p| decode_file_streamed(&mut files, &p, s.sample_rate.hz(), src.disk));
+            .and_then(|p| decode_file_streamed(&mut files, &p, rate, src.disk));
         match decoded {
             Ok(audio) => s.pool.insert(src.id, audio),
             Err(err) => missing.push(err),
@@ -404,7 +406,16 @@ pub fn session_open_line(path: &str, s: &Session, missing_media: usize, took: st
     )
 }
 
-/// Decode one source's audio file at the session rate.
+/// Sources whose frame coordinates are independent of the current session rate.
+pub(crate) fn sampler_sources(s: &Session) -> std::collections::HashSet<SourceId> {
+    s.tracks
+        .iter()
+        .filter_map(|t| t.instrument.as_ref())
+        .flat_map(|i| i.sample.into_iter().chain(i.sampler_patch.iter().flat_map(transit_model::SamplerPatch::media)))
+        .collect()
+}
+
+/// Decode one source's audio file at its requested stored or timeline rate.
 fn decode_source(bytes: &[u8], ext: Option<&str>, rate: u32) -> std::result::Result<Arc<SourceAudio>, String> {
     let (_, buf) = transit_audio_io::decode(bytes, ext).map_err(|err| err.to_string())?;
     let buf = at_rate(buf, rate, MAX_IMPORT_SAMPLES).ok_or("too large to load")?;
@@ -417,7 +428,7 @@ pub(crate) fn file_key(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
-pub(crate) type DecodedFiles = std::collections::HashMap<PathBuf, std::result::Result<Arc<SourceAudio>, String>>;
+pub(crate) type DecodedFiles = std::collections::HashMap<(PathBuf, u32, bool), std::result::Result<Arc<SourceAudio>, String>>;
 
 /// The audio of the file at `p` at `rate`, decoded the first time it is asked for. The error
 /// names the file.
@@ -426,7 +437,7 @@ pub(crate) type DecodedFiles = std::collections::HashMap<PathBuf, std::result::R
 pub(crate) fn decode_file_streamed(files: &mut DecodedFiles, p: &Path, rate: u32, stream: bool) -> std::result::Result<Arc<SourceAudio>, String> {
     crate::file_access::check_read(p)?;
     files
-        .entry(file_key(p))
+        .entry((file_key(p), rate, stream))
         .or_insert_with(|| {
             if let Some((info, len)) = super::disk::probe(p).filter(|(info, _)| stream || super::disk::over_decode_limit(info)) {
                 match super::disk::open_disk_audio(p, len, rate) {
@@ -528,16 +539,18 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
 /// `.transit`, whose audio is then reported missing. Returns the missing media, like
 /// [`open_session`].
 pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Vec<String>> {
-    let (text, mut files) = if bytes.starts_with(b"PK\x03\x04") {
+    let (text, files) = if bytes.starts_with(b"PK\x03\x04") {
         read_bundle(bytes)?
     } else {
         (String::from_utf8(bytes.to_vec()).map_err(|_| EngineError::Io(format!("{name}: not a transit session")))?, std::collections::HashMap::new())
     };
     let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
     let mut missing = Vec::new();
+    let sampler_sources = sampler_sources(&s);
     for src in &s.sources {
-        match files.remove(&src.path) {
-            Some(audio) => match decode_source(&audio, Path::new(&src.path).extension().and_then(|x| x.to_str()), s.sample_rate.hz()) {
+        let rate = if sampler_sources.contains(&src.id) { src.sample_rate } else { s.sample_rate.hz() };
+        match files.get(&src.path) {
+            Some(audio) => match decode_source(audio, Path::new(&src.path).extension().and_then(|x| x.to_str()), rate) {
                 Ok(audio) => s.pool.insert(src.id, audio),
                 Err(err) => missing.push(format!("{}: {err}", src.path)),
             },

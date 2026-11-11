@@ -325,7 +325,6 @@ pub(super) enum NewSource {
 pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &PatchV1) -> Result<NewSource> {
     let copy = bool_or(p, "copy", false);
     let ownership = if copy { Ownership::Managed } else { Ownership::Referenced };
-    let rate = e.session().sample_rate.hz();
     let given = ["source", "path", "import"].iter().filter(|k| p.get(**k).is_some()).count();
     if given != 1 {
         return Err(bad(id, "give exactly one of `source`, `path` or `import`"));
@@ -338,7 +337,8 @@ pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &Patch
         if audio.is_disk() {
             return Err(bad(id, format!("{}: it plays from disk, which a Sampler zone cannot yet", src.name)));
         }
-        let bytes = admit_source(s, &src.name, audio.frames() as u64, audio.buffer.num_channels() as u64, rate).map_err(|m| bad(id, m))?;
+        let bytes = admit_source(s, &src.name, audio.frames() as u64, audio.buffer.num_channels() as u64, audio.buffer.sample_rate)
+            .map_err(|m| bad(id, m))?;
         let adding = if admitted.sources.iter().any(|r| r.source == sid) { 0 } else { bytes };
         admit_patch(admitted, s, adding).map_err(|m| bad(id, m))?;
         return Ok(NewSource::Session(sid));
@@ -349,26 +349,27 @@ pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &Patch
         // Admission from the header alone, before the body is read, for a file sized by its header
         // (WAV/RF64); any other file is checked from its bytes below, still before decoding.
         if let Some(info) = crate::io::probe_header(&abs) {
-            let frames = frames_at(info.frames, info.sample_rate, rate).unwrap_or(u64::MAX);
-            let pcm = admit_source(e.session(), &name, frames, u64::from(info.channels), rate).map_err(|m| bad(id, m))?;
+            let frames = info.frames;
+            let pcm = admit_source(e.session(), &name, frames, u64::from(info.channels), info.sample_rate).map_err(|m| bad(id, m))?;
             admit_patch(admitted, e.session(), pcm).map_err(|m| bad(id, m))?;
         }
         let bytes = crate::io::read_file(&abs)?;
         let ext = abs.extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase);
         // Admission from the header, before anything is decoded.
         let info = transit_audio_io::probe(&bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
-        let frames = frames_at(info.frames, info.sample_rate, rate).unwrap_or(u64::MAX);
-        let pcm = admit_source(e.session(), &name, frames, u64::from(info.channels), rate).map_err(|m| bad(id, m))?;
+        let frames = info.frames;
+        let pcm = admit_source(e.session(), &name, frames, u64::from(info.channels), info.sample_rate).map_err(|m| bad(id, m))?;
         admit_patch(admitted, e.session(), pcm).map_err(|m| bad(id, m))?;
         let stored = abs.to_string_lossy().into_owned();
-        let prepared = crate::io::prepare_audio_bytes(&name, &bytes, Some(&stored), rate, &mut |_| true)?;
+        let prepared = crate::io::prepare_audio_bytes(&name, &bytes, Some(&stored), crate::io::ImportRate::Native, &mut |_| true)?;
         return Ok(NewSource::Audio(prepared, ownership));
     }
     let job = p.get("import").and_then(Value::as_u64).ok_or_else(|| bad(id, "`import` must be an import id (file.prepare_import)"))?;
     e.imports.ready(job)?;
-    if let Some(r) = e.imports.prepared_rate(job).filter(|r| *r != rate) {
-        return Err(bad(id, format!("prepared at {r} Hz; the session is now {rate} Hz: re-import")));
+    if !e.imports.is_native(job) {
+        return Err(bad(id, "Sampler imports need file.prepare_import with rate: native; re-import"));
     }
+    let rate = e.imports.prepared_rate(job).unwrap_or(0);
     let report = e.imports.progress(job).unwrap_or_default();
     let (frames, channels) = (report["frames"].as_u64().unwrap_or(0), report["channels"].as_u64().unwrap_or(0));
     let name = report["name"].as_str().unwrap_or("Sample").to_string();
@@ -595,13 +596,12 @@ pub fn load_zone_bytes(e: &mut Engine, t: TrackId, zone: u16, name: &str, bytes:
     let before = e.session_arc();
     let r = (|| {
         let patch = patch_of(e.session(), id, t)?;
-        let rate = e.session().sample_rate.hz();
         let ext = Path::new(name).extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase);
         let info = transit_audio_io::probe(bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
-        let frames = frames_at(info.frames, info.sample_rate, rate).unwrap_or(u64::MAX);
-        let pcm = admit_source(e.session(), name, frames, u64::from(info.channels), rate).map_err(|m| bad(id, m))?;
+        let frames = info.frames;
+        let pcm = admit_source(e.session(), name, frames, u64::from(info.channels), info.sample_rate).map_err(|m| bad(id, m))?;
         admit_patch(&patch, e.session(), pcm).map_err(|m| bad(id, m))?;
-        let prepared = crate::io::prepare_audio_bytes(name, bytes, None, rate, &mut |_| true)?;
+        let prepared = crate::io::prepare_audio_bytes(name, bytes, None, crate::io::ImportRate::Native, &mut |_| true)?;
         let sid = add_audio(e, prepared, Ownership::Managed);
         zone_source(e, &json!({"track": t, "zone": zone + 1, "source": sid})).inspect_err(|_| {
             // Refused after the audio was added: it goes again, so the document is as it was.

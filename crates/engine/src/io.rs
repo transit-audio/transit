@@ -174,9 +174,8 @@ pub fn add_source(s: &mut Session, name: &str, mut buf: AudioBuffer, path: Optio
     add_source_audio(s, name, Arc::new(SourceAudio::new(buf)), path, format)
 }
 
-/// Register audio already at the session rate, with its peaks built (see [`prepare_audio_bytes`]).
+/// Register prepared audio at its admitted rate, with its peaks built.
 pub fn add_source_audio(s: &mut Session, name: &str, audio: Arc<SourceAudio>, path: Option<&str>, format: FileFormat) -> SourceId {
-    let sr = s.sample_rate.hz();
     let buf = &audio.buffer;
     let id = SourceId(s.alloc());
     let stem = Path::new(name).file_stem().and_then(|x| x.to_str()).unwrap_or(name).to_string();
@@ -190,7 +189,7 @@ pub fn add_source_audio(s: &mut Session, name: &str, audio: Arc<SourceAudio>, pa
         path: stored,
         channels: u16::try_from(buf.num_channels()).unwrap_or(u16::MAX),
         frames: buf.frames() as u64,
-        sample_rate: sr,
+        sample_rate: buf.sample_rate,
         format,
         time_reference: 0,
         unsaved: true,
@@ -209,7 +208,7 @@ fn stamp_at_rate(stamp: u64, file_rate: u32, session_rate: u32) -> u64 {
     u64::try_from((u128::from(stamp) * to + from / 2) / from).unwrap_or(u64::MAX)
 }
 
-/// An audio file decoded, resampled to the session rate and with its peaks built, ready to place:
+/// An audio file decoded at the requested rate policy with its peaks built, ready to place:
 /// the slow part of an import, done by [`prepare_audio_bytes`] on any thread.
 pub struct PreparedAudio {
     /// The file name, `Kick 01.wav`.
@@ -234,10 +233,25 @@ impl PreparedAudio {
     }
 }
 
-/// Decode `bytes` and resample them to `rate`, building the waveform peaks: everything an import
+/// The rate policy of the shared import preparation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportRate {
+    /// Timeline audio retains its conversion policy.
+    Session(u32),
+    /// Sampler audio retains its decoded PCM and source-frame positions.
+    Native,
+}
+
+/// Decode `bytes` with `policy`, building the waveform peaks: everything an import
 /// does but touch the session. `progress(fraction)` (0 to 1 for this step) runs between stages
 /// and after each resampled channel; when it returns `false` the work stops with an error.
-pub fn prepare_audio_bytes(name: &str, bytes: &[u8], path: Option<&str>, rate: u32, progress: &mut dyn FnMut(f32) -> bool) -> Result<PreparedAudio> {
+pub fn prepare_audio_bytes(
+    name: &str,
+    bytes: &[u8],
+    path: Option<&str>,
+    policy: ImportRate,
+    progress: &mut dyn FnMut(f32) -> bool,
+) -> Result<PreparedAudio> {
     let canceled = || EngineError::Io(format!("{name}: canceled"));
     let too_large = || crate::cmd::bad("file.import_audio", format!("{name}: file is too large to import"));
     let ext = Path::new(name).extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase);
@@ -246,6 +260,10 @@ pub fn prepare_audio_bytes(name: &str, bytes: &[u8], path: Option<&str>, rate: u
         return Err(canceled());
     }
     let from = buf.sample_rate.max(1);
+    let rate = match policy {
+        ImportRate::Session(rate) => rate,
+        ImportRate::Native => from,
+    };
     let n = buf.num_channels();
     // The same limit as `at_rate`: a file with a tiny sample rate grows by orders of magnitude.
     if buf.frames() as f64 * n as f64 * f64::from(rate) / f64::from(from) > MAX_IMPORT_SAMPLES as f64 {
@@ -312,7 +330,7 @@ pub fn place_prepared(e: &mut Engine, prepared: PreparedAudio, target: Option<Tr
 /// Decode and place an audio file. With no target track, a new track of matching width is made.
 /// The synchronous import: [`prepare_audio_bytes`], then [`place_prepared`].
 pub fn import_audio_bytes(e: &mut Engine, name: &str, bytes: &[u8], path: Option<&str>, target: Option<TrackId>, at: Samples) -> Result<Value> {
-    let prepared = prepare_audio_bytes(name, bytes, path, e.session().sample_rate.hz(), &mut |_| true)?;
+    let prepared = prepare_audio_bytes(name, bytes, path, ImportRate::Session(e.session().sample_rate.hz()), &mut |_| true)?;
     place_prepared(e, prepared, target, at, None)
 }
 

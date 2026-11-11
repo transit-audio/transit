@@ -48,17 +48,19 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
     let mut files = crate::io::DecodedFiles::new();
     let mut map: std::collections::BTreeMap<u64, SourceId> = Default::default();
     let mut missing = frozen_notes;
+    let sampler_sources = super::session::sampler_sources(&other);
     for src in needed.iter().filter_map(|sid| other.source(*sid)) {
+        let rate = if sampler_sources.contains(&src.id) { src.sample_rate } else { sr };
         let mut ns = src.clone();
         ns.id = SourceId(s.alloc());
         match crate::io::stored_path(&src.path, Path::new(&path)) {
             Ok(abs) => {
                 ns.path = abs.to_string_lossy().into_owned();
-                match crate::io::decode_file_streamed(&mut files, &abs, sr, src.disk) {
+                match crate::io::decode_file_streamed(&mut files, &abs, rate, src.disk) {
                     Ok(audio) => {
                         ns.frames = audio.frames() as u64;
                         ns.disk = audio.is_disk();
-                        ns.sample_rate = sr;
+                        ns.sample_rate = rate;
                         // A disk-backed source plays its file where it is; anything else is copied on save.
                         ns.unsaved = !ns.disk;
                         s.pool.insert(ns.id, audio);

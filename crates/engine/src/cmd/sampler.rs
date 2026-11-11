@@ -1,5 +1,5 @@
 //! The built-in Sampler's sample: `mix.sampler_load` decodes an audio file (WAV, AIFF, FLAC, MP3,
-//! OGG, anything `file.import_audio` reads) into a session source, resampled to the session rate,
+//! OGG, anything `file.import_audio` reads) into a session source at its native rate,
 //! and makes it the sample an instrument track's Sampler plays; `mix.sampler_clear` removes it.
 //! The source is saved in `Audio Files/` with the session like any other audio, so a session that
 //! uses a sample reopens with it. Sampler parameters (root note, key range, ADSR, loop…) are set
@@ -77,16 +77,13 @@ pub(crate) fn attach(e: &mut Engine, t: TrackId, name: &str, bytes: &[u8], path:
     }
     let info = transit_dsp::plugin_info(SAMPLER).ok_or_else(|| bad(id, "the sampler is not available"))?;
     refuse_patched(e, id, t)?;
-    let ext = Path::new(name).extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase);
-    let (format, buf) = transit_audio_io::decode(bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
-    if buf.frames() == 0 || buf.num_channels() == 0 {
-        return Err(EngineError::Io(format!("{name}: no audio")));
+    let prepared = crate::io::prepare_audio_bytes(name, bytes, path, crate::io::ImportRate::Native, &mut |_| true)?;
+    if prepared.frames().saturating_mul(prepared.channels()) > MAX_SAMPLE_VALUES {
+        return Err(EngineError::Io(format!("{name}: too long for a sample (ten minutes of 192 kHz stereo at most)")));
     }
-    let buf = crate::io::at_rate(buf, e.session().sample_rate.hz(), MAX_SAMPLE_VALUES)
-        .ok_or_else(|| EngineError::Io(format!("{name}: too long for a sample (ten minutes of 192 kHz stereo at most)")))?;
-    let channels = buf.num_channels();
+    let channels = prepared.channels();
     let s = e.session_mut();
-    let src = crate::io::add_source(s, name, buf, path, format.format);
+    let src = crate::io::add_source_audio(s, name, prepared.audio, path, prepared.format);
     let (frames, rate, stem) = s.source(src).map_or((0, 0, String::new()), |x| (x.frames, x.sample_rate, x.name.clone()));
     let tr = s.track_mut(t).ok_or_else(|| bad(id, "no track"))?;
     let keep = tr.instrument.as_ref().is_some_and(|i| i.plugin == SAMPLER);
@@ -191,8 +188,8 @@ mod tests {
         add_notes(&mut e, t, &[(60, 0, 1), (72, 2, 1)]);
         assert!(peak(&render(&e, 2)[0]) > 0.0, "the default synth plays the notes first");
         let r = e.execute("mix.sampler_load", &json!({"track": t.0, "path": wav.to_string_lossy()})).unwrap();
-        assert_eq!(r["frames"], 96_000, "resampled to the 48 kHz session: {r}");
-        assert_eq!(r["sample_rate"], 48_000);
+        assert_eq!(r["frames"], 88_200, "native frames retained: {r}");
+        assert_eq!(r["sample_rate"], 44_100);
         assert_eq!(r["channels"], 1);
         assert_eq!(r["name"], "tone");
         let ins = e.session().track(t).unwrap().instrument.clone().unwrap();
@@ -256,7 +253,7 @@ mod tests {
             std::fs::write(&path, transit_audio_io::encode(&buf, &opts).unwrap()).unwrap();
             let r = e.execute("mix.sampler_load", &json!({"track": t.0, "path": path.to_string_lossy()})).unwrap();
             assert_eq!(r["channels"], 2, "{ext}");
-            assert_eq!(r["frames"], 2400, "{ext}: 96 kHz resampled to the 48 kHz session");
+            assert_eq!(r["frames"], 4800, "{ext}: native 96 kHz frames retained");
         }
         let _ = std::fs::remove_dir_all(d);
     }

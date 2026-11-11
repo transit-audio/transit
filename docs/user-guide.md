@@ -558,6 +558,14 @@ into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as 
 file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
 platforms it lands as soon as the pointer moves after you let go (see the known issues).
 
+Newly imported Sampler samples keep their native sample rate and PCM. Playback converts the
+rate and pitch together; start, end, slice, cue and loop positions count the source's own frames.
+A 44.1 kHz sample therefore keeps 44,100 frames per second in a 48 kHz session. Envelope times
+still follow the session rate. Older kits are unchanged: audio converted by an earlier alpha
+build keeps that stored PCM and rate and plays as before. There is no migration or restoration
+of the original unconverted audio; reimport a file to use its native PCM. Timeline audio imports
+keep their existing conversion to the session rate.
+
 To fill a kit from a folder through the control channel, use `mix.sampler_load_kit` with the
 track and `folder`. Set `preview: true` first to see the assignments. WAV, AIFF and FLAC files
 are ordered by filename without regard to case and placed on the first free pads, A1 through

@@ -66,7 +66,7 @@ pub fn specs() -> Vec<CommandSpec> {
         // they are not journaled; the commit is one undo step, "Import <name>".
         // `rate` is for tests: an item prepared at a rate other than the session's can never be
         // committed (the commit asks for a re-import), so the session rate is the only useful one.
-        cmd!(query "file.prepare_import", "Prepare Audio Import", [], None, "{path, rate?: session rate} -> {id}: decode and resample on a worker thread", always, prepare_import),
+        cmd!(query "file.prepare_import", "Prepare Audio Import", [], None, "{path, rate?: session rate | native (Sampler)} -> {id}: decode with the chosen rate policy on a worker thread", always, prepare_import),
         cmd!(query "file.import_progress", "Audio Import Progress", [], None, "{id?} -> {id, name, state: queued|running|done|failed|expired, progress: 0-100, error?, frames?, channels?, duration?} (no id: {imports: [..]})", always, import_progress),
         cmd!(query "file.import_cancel", "Cancel Audio Import", [], None, "{id} -> {canceled}", always, |e, p| {
             let id = p.get("id").and_then(Value::as_u64).ok_or_else(|| bad("file.import_cancel", "`id` required"))?;
@@ -248,7 +248,13 @@ fn import_audio(e: &mut Engine, p: &Value) -> Result<Value> {
     for path in &paths {
         let bytes = crate::io::read_file(path)?;
         let file = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("Audio").to_string();
-        let prepared = crate::io::prepare_audio_bytes(&file, &bytes, Some(path.as_str()), e.session().sample_rate.hz(), &mut |_| true)?;
+        let prepared = crate::io::prepare_audio_bytes(
+            &file,
+            &bytes,
+            Some(path.as_str()),
+            crate::io::ImportRate::Session(e.session().sample_rate.hz()),
+            &mut |_| true,
+        )?;
         out.push(crate::io::place_prepared(e, prepared, target, at, name)?);
     }
     Ok(json!({"imported": out}))
@@ -258,16 +264,18 @@ fn prepare_import(e: &mut Engine, p: &Value) -> Result<Value> {
     const CMD: &str = "file.prepare_import";
     let path = str_param(p, "path").filter(|x| !x.is_empty()).ok_or_else(|| bad(CMD, "`path` required"))?;
     let rate = match p.get("rate") {
-        None => e.session().sample_rate.hz(),
+        None => crate::io::ImportRate::Session(e.session().sample_rate.hz()),
+        Some(Value::String(v)) if v == "native" => crate::io::ImportRate::Native,
         Some(v) => v
             .as_u64()
             .and_then(|r| u32::try_from(r).ok())
             .filter(|r| (1_000..=768_000).contains(r))
-            .ok_or_else(|| bad(CMD, "`rate` must be 1000-768000 Hz"))?,
+            .map(crate::io::ImportRate::Session)
+            .ok_or_else(|| bad(CMD, "`rate` must be native or 1000-768000 Hz"))?,
     };
     // The roots are checked here too, so a refusal comes back now rather than as a failed job.
     crate::file_access::check_read(path).map_err(EngineError::Io)?;
-    let id = e.imports.prepare(path, rate);
+    let id = e.imports.prepare_with_rate(path, rate);
     Ok(json!({"id": id}))
 }
 

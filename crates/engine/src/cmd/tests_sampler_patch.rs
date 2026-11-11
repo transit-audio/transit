@@ -322,10 +322,10 @@ fn a_zone_source_comes_through_the_import_transaction_and_dropped_bytes_are_mana
     let mut e = Engine::default();
     let t = instrument(&mut e);
     e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
-    let rate = e.session().sample_rate.hz();
-    let job = e.imports.prepare_here_for_testing(&s(&wav), rate);
+    let job = e.imports.prepare_here_for_testing(&s(&wav), crate::io::ImportRate::Native);
     let r = e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 1, "pad": 1, "import": job, "copy": true})).unwrap();
-    assert_eq!(r["frames"], 9_600, "converted to the session rate by the import");
+    assert_eq!(r["frames"], 8_820, "native frames retained by the import (ADR 0041)");
+    assert_eq!(e.session().sources.last().unwrap().sample_rate, 44_100);
     assert_eq!(patch(&e, t).sources[0].ownership, Ownership::Managed, "copy: the session's own audio");
     assert!(e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 2, "import": job})).is_err(), "an import is taken once");
     // Dropped bytes have no path: always managed, written into Audio Files on save.
@@ -497,3 +497,6 @@ fn a_pad_or_zone_holding_only_unknown_fields_survives_load_edit_and_save() {
     assert_eq!(p.zone(0).unwrap().extra.get("lfo3"), Some(&json!({"rate": 2})));
     assert_eq!(p.zone(0).unwrap().transpose, 1.0);
 }
+
+#[path = "tests_sampler_native.rs"]
+mod native;

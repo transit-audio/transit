@@ -228,7 +228,7 @@ fn preview_matches_the_applied_plan_and_changes_nothing() {
     assert!(Arc::ptr_eq(&before, &e.session_arc()));
     assert_eq!(e.undo_history().len(), steps);
     assert_eq!(load(&mut e, t, &d.0, false), preview);
-    assert_eq!(preview["pads"][0]["frames"], 480);
+    assert_eq!(preview["pads"][0]["frames"], 441, "native frames retained (ADR 0041)");
 }
 
 #[test]
@@ -365,7 +365,7 @@ fn kit_refuses_zone_capacity_and_streaming_threshold() {
 }
 
 #[test]
-fn preview_rounds_nonintegral_converted_lengths_like_pad_import() {
+fn preview_keeps_native_lengths_like_pad_import() {
     let d = Dir::new();
     d.audio("hit.wav", 3, 44_100, 1);
     let (mut e, t) = setup();

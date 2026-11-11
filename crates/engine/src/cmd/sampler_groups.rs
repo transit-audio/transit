@@ -129,10 +129,13 @@ pub(crate) fn check_new_keys(id: &str, given: &Map<String, Value>) -> Result<()>
     Ok(())
 }
 
-/// The native rate of the source zone `z` of `p` plays (the session's when its audio is missing).
+/// The admitted rate of the source, using stored metadata when its audio is missing.
 fn source_rate(s: &Session, p: &PatchV1, z: &ZoneEntry) -> u32 {
     let r = effective_region(z, p);
-    p.sources.get(usize::from(r.source)).and_then(|x| s.pool.get(x.source)).map_or(s.sample_rate.hz(), |a| a.buffer.sample_rate)
+    p.sources
+        .get(usize::from(r.source))
+        .and_then(|x| s.pool.get(x.source).map(|a| a.buffer.sample_rate).or_else(|| s.source(x.source).map(|a| a.sample_rate)))
+        .unwrap_or(s.sample_rate.hz())
 }
 
 /// The 1-based number of slice-bound zone `z`'s slice in its set.

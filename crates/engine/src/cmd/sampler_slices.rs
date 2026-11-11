@@ -24,15 +24,15 @@
 
 use super::sampler::instrument_track;
 use super::sampler_groups::zone_json;
-use super::sampler_patch::{admit_patch, admit_source, patch_of, store};
+use super::sampler_patch::{NewSource, add_audio, patch_of, source_param, store};
 use super::sampler_slice_pads::{MappingStatus, StaleSlice, mapping_status};
 use super::*;
 use crate::cmd;
 use serde_json::json;
+use transit_model::Session;
 use transit_model::sampler_loops::{DerivedRegion, derived_region, write_region};
 use transit_model::sampler_patch::{MAX_SLICES, Markers, Ownership, PadEntry, PatchV1, SliceLoop, SliceMode, SliceSet};
 use transit_model::slicing::{self, ClampedAt, FULL_TEXT, MarkerError, SnapError};
-use transit_model::{Session, SourceId};
 
 /// The longest marker label, in characters (after trimming).
 const MAX_MARKER_LABEL: usize = 64;
@@ -48,7 +48,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Make Slice Loop",
             [],
             None,
-            "{track?, source: id, start?: 0, end?: the source's length, root?: 0-127 (stored, absolute) | null (default: none stored, it follows the pad start note)}: the patch's one slice loop over the source region, mode Auto, both sets at the loop start only → {track, source, start, end, mode, root (in use), root_stored}",
+            "{track?, source: id | path | import: id, copy?: false, start?: 0, end?: the source's length, root?: 0-127 (stored, absolute) | null (default: none stored, it follows the pad start note)}: the patch's one slice loop over the native-source-frame region, mode Auto, both sets at the loop start only → {track, source, start, end, mode, root (in use), root_stored}",
             has_selection,
             slice_loop
         ),
@@ -236,17 +236,11 @@ fn slice_loop(e: &mut Engine, p: &Value) -> Result<Value> {
     if patch.slicing.is_some() {
         return Err(bad(id, "the patch already has a slice loop (one loop per patch)"));
     }
-    let sid = SourceId(p.get("source").and_then(Value::as_u64).ok_or_else(|| bad(id, "`source` required (a source id)"))?);
-    let s = e.session();
-    let src = s.source(sid).ok_or_else(|| bad(id, format!("no source {sid}")))?;
-    let audio = s.pool.get(sid).ok_or_else(|| bad(id, format!("{}: its audio is missing", src.name)))?;
-    if audio.is_disk() {
-        return Err(bad(id, format!("{}: it plays from disk, which a Sampler loop cannot yet", src.name)));
-    }
-    let frames = audio.frames() as u64;
-    let bytes = admit_source(s, &src.name, frames, audio.buffer.num_channels() as u64, s.sample_rate.hz()).map_err(|m| bad(id, m))?;
-    let adding = if patch.sources.iter().any(|r| r.source == sid) { 0 } else { bytes };
-    admit_patch(&patch, s, adding).map_err(|m| bad(id, m))?;
+    let (sid, ownership) = match source_param(e, id, p, &patch)? {
+        NewSource::Session(sid) => (sid, Ownership::Managed),
+        NewSource::Audio(audio, ownership) => (add_audio(e, audio, ownership), ownership),
+    };
+    let frames = e.session().pool.get(sid).map_or(0, |a| a.frames() as u64);
     let start = match p.get("start") {
         None => 0,
         Some(v) => v.as_u64().ok_or_else(|| bad(id, "`start` must be a source frame"))?,
@@ -262,7 +256,7 @@ fn slice_loop(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, format!("`end` is past the source's {frames} frames")));
     }
     let root = p.get("root").map(|v| root_param(id, v)).transpose()?.flatten();
-    let index = u16::try_from(patch.source_index(sid, Ownership::Managed)).map_err(|_| bad(id, "too many sources"))?;
+    let index = u16::try_from(patch.source_index(sid, ownership)).map_err(|_| bad(id, "too many sources"))?;
     patch.slicing = Some(SliceLoop { source: index, start, end, root, ..SliceLoop::default() });
     let used = patch.slice_root();
     store(e, id, t, patch)?;
@@ -609,7 +603,8 @@ fn state(e: &mut Engine, p: &Value) -> Result<Value> {
     let Some(l) = &patch.slicing else { return Ok(json!({"track": t, "loop": null})) };
     let s = e.session();
     let source = patch.sources.get(usize::from(l.source)).map(|r| r.source);
-    let rate = source.and_then(|x| s.pool.get(x)).map_or(s.sample_rate.hz(), |a| a.buffer.sample_rate);
+    let rate =
+        source.and_then(|x| s.pool.get(x).map(|a| a.buffer.sample_rate).or_else(|| s.source(x).map(|a| a.sample_rate))).unwrap_or(s.sample_rate.hz());
     let at_tempo = at.map(|x| AtTempo::read(s, x));
     // The file's `acid` tempo comes with the WAV reader (slice A); none is read here yet.
     let acid = None;

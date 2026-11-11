@@ -741,3 +741,20 @@ fn detect_runs_on_a_worker_thread() {
     assert_eq!(e.slice_candidates.join_for_testing(), [Some(crate::slice_detect::WORKER.to_string())]);
     assert_eq!(frames(&cand(&mut e, t)), grid(6_000, 48_000));
 }
+
+#[test]
+fn native_cues_stay_in_source_frames_through_the_shared_import() {
+    let d = Dir::new("native-cues");
+    let path = d.path("native.wav");
+    write_wav(&path, &silence(44_100), 44_100, &[cue_chunk(&[(1, 1_000), (2, 20_000)]), labels(&[(1, "attack")])]);
+    let (mut e, t) = engine();
+    e.execute("mix.sampler_slice_loop", &json!({"track":t,"path":path})).unwrap();
+    assert_eq!(lp(&e, t).end, 44_100);
+    detect(&mut e, t, json!({"source":"cues"}));
+    assert_eq!(
+        cand(&mut e, t)["markers"],
+        json!([
+            {"frame":0},{"frame":1_000,"label":"attack"},{"frame":20_000}
+        ])
+    );
+}

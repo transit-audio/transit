@@ -2,7 +2,7 @@
 //! helper as pad drops. Only an admitted candidate reaches the live document, as one undo step.
 
 use super::sampler::instrument_track;
-use super::sampler_patch::{NewSource, add_audio, admit_patch, admit_source, frames_at, patch_of, resolve_path, source_param, store};
+use super::sampler_patch::{NewSource, add_audio, admit_patch, admit_source, patch_of, resolve_path, source_param, store};
 use super::*;
 use crate::cmd;
 use crate::io::sampler_kit as files;
@@ -113,14 +113,14 @@ fn prepare(e: &mut Engine, t: TrackId, folder: &std::path::Path, preview: bool) 
     if e.session().track(t).is_some_and(|tr| tr.freeze.is_some()) {
         return Err(plan.refusal(EngineError::TrackFrozen, None));
     }
-    let rate = e.session().sample_rate.hz();
     let mut rows = Vec::new();
     let mut total = 0u64;
     for (i, path) in plan.paths.iter().enumerate() {
         let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let refused = |reason| plan.refusal(reason, Some(&name));
         let info = files::probe(path).map_err(|err| refused(err.to_string()))?;
-        let frames = frames_at(info.frames, info.sample_rate, rate).unwrap_or(u64::MAX);
+        let rate = info.sample_rate;
+        let frames = info.frames;
         if frames == 0 {
             return Err(refused(format!("{name}: no audio")));
         }
@@ -133,12 +133,7 @@ fn prepare(e: &mut Engine, t: TrackId, folder: &std::path::Path, preview: bool) 
         })?;
         total = total.saturating_add(bytes);
         admit_patch(&patch, e.session(), total).map_err(refused)?;
-        // Admission rounds up; the shared offline resampler rounds its output length to nearest.
-        let prepared_frames = (info.frames as f64 * (f64::from(rate) / f64::from(info.sample_rate.max(1)))).round() as u64;
-        if prepared_frames == 0 {
-            return Err(refused(format!("{name}: no audio")));
-        }
-        rows.push(json!({"pad": plan.pads[i] + 1, "zone": plan.zones[i] + 1, "file": name, "frames": prepared_frames, "channels": info.channels}));
+        rows.push(json!({"pad": plan.pads[i] + 1, "zone": plan.zones[i] + 1, "file": name, "frames": frames, "channels": info.channels}));
     }
     // Build the same bindings for preview, using missing source handles: checked store accepts
     // missing media, and still validates all structure and the eight-voice admission rule.

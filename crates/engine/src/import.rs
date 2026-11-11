@@ -11,7 +11,7 @@
 //! one mutex, which the audio thread never sees. The map is emptied when the session is replaced
 //! (new, open, close, revert), so a commit can never place audio prepared for another session.
 
-use crate::io::PreparedAudio;
+use crate::io::{ImportRate, PreparedAudio};
 use crate::{EngineError, Result};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
@@ -60,7 +60,7 @@ impl JobState {
 struct Job {
     path: String,
     name: String,
-    rate: u32,
+    rate: ImportRate,
     roots: Option<Arc<crate::file_access::AutomationRoots>>,
     cancel: Arc<AtomicBool>,
     state: JobState,
@@ -183,17 +183,22 @@ impl Imports {
     /// Queue `path` to be prepared at `rate`; returns its id. The automation roots in force on
     /// this thread apply on the worker too.
     pub fn prepare(&mut self, path: &str, rate: u32) -> u64 {
+        self.prepare_with_rate(path, ImportRate::Session(rate))
+    }
+
+    /// Queue a shared import with an explicit rate policy.
+    pub fn prepare_with_rate(&mut self, path: &str, rate: ImportRate) -> u64 {
         self.prepare_on(path, rate, false)
     }
 
     /// [`Imports::prepare`] on the calling thread, finished when it returns: crate tests drive the
     /// import transaction without waiting on a worker.
     #[cfg(test)]
-    pub(crate) fn prepare_here_for_testing(&mut self, path: &str, rate: u32) -> u64 {
+    pub(crate) fn prepare_here_for_testing(&mut self, path: &str, rate: ImportRate) -> u64 {
         self.prepare_on(path, rate, true)
     }
 
-    fn prepare_on(&mut self, path: &str, rate: u32, here: bool) -> u64 {
+    fn prepare_on(&mut self, path: &str, rate: ImportRate, here: bool) -> u64 {
         let id = self.next;
         self.next += 1;
         let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("Audio").to_string();
@@ -298,6 +303,11 @@ impl Imports {
         lock(&self.shared).jobs.get(&id).and_then(|j| j.prepared.as_ref()).map(PreparedAudio::rate)
     }
 
+    /// Whether the job was prepared without rate conversion.
+    pub fn is_native(&self, id: u64) -> bool {
+        lock(&self.shared).jobs.get(&id).is_some_and(|j| j.rate == ImportRate::Native)
+    }
+
     /// Inject the polling clock for deterministic expiry tests. Set before the first poll;
     /// the clock must be monotonic and must not reenter the staging map.
     #[doc(hidden)]
@@ -350,6 +360,7 @@ fn describe(id: u64, j: &Job) -> Value {
     }
     if let Some(p) = &j.prepared {
         let rate = p.rate().max(1);
+        v["sample_rate"] = json!(rate);
         v["frames"] = json!(p.frames());
         v["channels"] = json!(p.channels());
         v["duration"] = json!(p.frames() as f64 / f64::from(rate));

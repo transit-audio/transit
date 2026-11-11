@@ -69,7 +69,7 @@ pub(crate) struct Job {
     /// The loop region `[start, end)` in frames of the decoded audio.
     pub start: u64,
     pub end: u64,
-    /// The source's decoded audio (at the session rate the source was loaded at).
+    /// The source's decoded audio at its admitted rate (native for new Sampler imports).
     pub audio: Arc<SourceAudio>,
     /// The source's WAV file; `None` for audio without one (in memory, not a WAV file).
     pub file: Option<FileRef>,
