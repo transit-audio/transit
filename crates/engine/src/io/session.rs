@@ -170,7 +170,7 @@ fn sync_dir(dir: &Path) {
     let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
 }
 
-fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(super) fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut f = std::fs::File::create(path)?;
     f.write_all(bytes)?;

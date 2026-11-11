@@ -46,21 +46,29 @@ fn is_kit_file(path: &Path) -> bool {
 /// when there are none or the folder may not be read.
 #[must_use]
 pub fn list(root: &Path) -> Vec<String> {
+    entries(root).into_iter().map(|(name, _)| name).collect()
+}
+
+/// The user's kits under `root` as [`list`] orders them, each with its file as it is on disk (the
+/// extension in its own case), so a listed kit is recalled, saved over or deleted at that file.
+#[must_use]
+pub fn entries(root: &Path) -> Vec<(String, PathBuf)> {
     let dir = folder(root);
     if crate::file_access::check_read(&dir).is_err() {
         return Vec::new();
     }
-    let mut v: Vec<String> = std::fs::read_dir(&dir)
+    let mut v: Vec<(String, PathBuf)> = std::fs::read_dir(&dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
             let p = e.path();
             let ok = is_kit_file(&p) && e.file_type().is_ok_and(|t| t.is_file());
-            ok.then(|| p.file_stem().map(|s| s.to_string_lossy().into_owned())).flatten()
+            let name = p.file_stem().map(|s| s.to_string_lossy().into_owned());
+            ok.then_some(name).flatten().map(|n| (n, p))
         })
         .collect();
-    v.sort_by_key(|s| s.to_lowercase());
+    v.sort_by_key(|(s, _)| s.to_lowercase());
     v
 }
 
@@ -114,13 +122,19 @@ fn kept(path: &Path) -> Option<String> {
     }
 }
 
-/// Writes the kit file JSON `file` to `path`, creating the folder: to a temporary file beside it,
-/// then moved into place.
+/// Writes the kit file JSON `file` to `path`, creating the folder, as a session file is written:
+/// to the temporary file `<name>.tkit.tmp` beside it, flushed to disk, then renamed over it and the
+/// folder flushed (`io::replace_file`); a failed write or rename removes the temporary file.
 ///
 /// # Errors
 /// An existing file this build does not read (named), a path outside the automation write root,
 /// or a failed write.
 pub fn write(path: &Path, file: &Value) -> Result<(), String> {
+    write_with(path, file, super::write_synced)
+}
+
+/// [`write`] with the step that writes the temporary file given (a test fails it halfway).
+fn write_with(path: &Path, file: &Value, put: impl FnOnce(&Path, &[u8]) -> std::io::Result<()>) -> Result<(), String> {
     crate::file_access::check_write(path)?;
     if let Some(why) = kept(path) {
         return Err(why);
@@ -130,14 +144,11 @@ pub fn write(path: &Path, file: &Value) -> Result<(), String> {
         crate::file_access::check_write(dir)?;
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     }
-    let mut tmp = path.as_os_str().to_os_string();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
+    let tmp = path.with_extension(format!("{EXTENSION}.tmp"));
     crate::file_access::check_write(&tmp)?;
-    std::fs::write(&tmp, text.as_bytes()).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("cannot write {}: {e}", path.display())
+    super::replace_with(&tmp, path, put(&tmp, text.as_bytes())).map_err(|e| match e {
+        crate::EngineError::Io(m) => format!("cannot write {m}"),
+        other => other.to_string(),
     })
 }
 
@@ -160,6 +171,9 @@ pub fn delete(path: &Path) -> Result<(), String> {
 /// # Errors
 /// Why it is not opened: the path check, the read root, no such file, or not a regular file.
 pub(crate) fn sample(stored: &str, kit: &Path) -> Result<PathBuf, (Option<PathBuf>, String)> {
+    if cfg!(windows) && rooted_without_drive(stored) {
+        return Err((None, "not opened: a path with no drive is another system's path".into()));
+    }
     let path = super::stored_path(stored, kit).map_err(|why| (None, why))?;
     let found = Some(path.clone());
     crate::file_access::check_read(&path).map_err(|why| (found.clone(), why))?;
@@ -168,6 +182,17 @@ pub(crate) fn sample(stored: &str, kit: &Path) -> Result<PathBuf, (Option<PathBu
         Ok(_) => Err((found, "not a regular file".into())),
         Err(e) => Err((found, e.to_string())),
     }
+}
+
+/// Whether `stored` starts at a root with no drive or share (`/Users/me/Kick.wav`, `\Kick.wav`): a
+/// macOS or Linux absolute path. On Windows the path check would take it onto the kit file's own
+/// drive, which the kit's path rules rule out (no drive letter mapping, ADR 0041 amendment
+/// 2026-11-11 item 2), so recall treats it as missing there. A drive path read on macOS or Linux
+/// is refused by the path check itself (it stays relative there).
+fn rooted_without_drive(stored: &str) -> bool {
+    let mut c = stored.chars();
+    let sep = |c: Option<char>| matches!(c, Some('/' | '\\'));
+    sep(c.next()) && !sep(c.next())
 }
 
 #[cfg(test)]
@@ -227,6 +252,40 @@ mod tests {
         write(&p, &kit).unwrap();
         assert_eq!(read(&p).unwrap(), kit);
         assert!(!dir.join("mine.tkit.tmp").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_write_removes_its_partial_temporary_file_and_keeps_the_old_kit() {
+        let root = scratch("partial");
+        let p = path(&root, "Mine").unwrap();
+        let old = portable::file(json!({"schema": 1, "seed": 5}));
+        write(&p, &old).unwrap();
+        let before = std::fs::read(&p).unwrap();
+        let tmp = folder(&root).join("Mine.tkit.tmp");
+        // The disk fills halfway through the temporary file.
+        let err = write_with(&p, &portable::file(json!({"schema": 1})), |t, bytes| {
+            assert_eq!(t, tmp, "the session writer's temporary name: <name>.tkit.tmp");
+            std::fs::write(t, &bytes[..bytes.len() / 2])?;
+            Err(std::io::Error::other("no space left"))
+        })
+        .unwrap_err();
+        assert!(err.starts_with("cannot write ") && err.contains("no space left"), "{err}");
+        assert!(!tmp.exists(), "the partial temporary file is removed");
+        assert_eq!(std::fs::read(&p).unwrap(), before, "the old kit is untouched");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn entries_name_each_listed_kit_with_its_file_on_disk() {
+        let root = scratch("entries");
+        let dir = folder(&root);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Loud.TKIT"), "{}").unwrap();
+        std::fs::write(dir.join("a quiet one.tkit"), "{}").unwrap();
+        std::fs::write(dir.join("Old.json"), "{}").unwrap();
+        assert_eq!(entries(&root), [("a quiet one".to_string(), dir.join("a quiet one.tkit")), ("Loud".to_string(), dir.join("Loud.TKIT"))]);
+        assert_eq!(list(&root), ["a quiet one", "Loud"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

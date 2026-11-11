@@ -36,6 +36,8 @@ use transit_model::{Session, Source, SourceId};
 const SAVE: &str = "mix.sampler_kit_save";
 const LOAD: &str = "mix.sampler_kit_load";
 const SAMPLER: &str = "sampler";
+/// The recall's undo label (and the staging worker's name for it).
+const LABEL: &str = "Load Sampler Kit";
 /// Files a notice names before "and N more".
 const NAMED: usize = 16;
 
@@ -211,9 +213,16 @@ fn load(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     let staged_file = file.clone();
-    let candidate = match stage(e, "Load Sampler Kit", move |staged| prepare(staged, t, &staged_file, kit, &refs))? {
-        Ok(c) => c,
-        Err(why) => return Ok(refuse(why)),
+    // A worker that cannot start or fails is a refusal like any other (item 4): data, nothing
+    // changed.
+    let candidate = match stage(e, LABEL, move |staged| prepare(staged, t, &staged_file, kit, &refs)) {
+        Ok(Ok(c)) => c,
+        Ok(Err(why)) => return Ok(refuse(why)),
+        Err(err) => {
+            let why = reason(err);
+            let why = why.strip_prefix(&format!("{LABEL}: ")).unwrap_or(&why);
+            return Ok(refuse(why.strip_suffix("; nothing was loaded").unwrap_or(why).to_string()));
+        }
     };
     // Admitted: the staged session (with every added source) replaces the live one in this one
     // step, and the checked store writes the kit whole.
@@ -370,6 +379,8 @@ fn decode(
 /// Stages the recall on `e` (a clone of the session): every sample resolved, admitted and decoded
 /// or sent to the missing state, then the checked store. `Err`: the refusal's reason.
 fn prepare(e: &mut Engine, t: TrackId, file: &Path, kit: Value, refs: &[FileRef]) -> std::result::Result<Recalled, String> {
+    #[cfg(test)]
+    evidence::fail_worker_for(file);
     let folder = file.parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
     let empty = PatchV1::default();
     let mut total = 0u64;
@@ -464,6 +475,9 @@ fn prune(e: &mut Engine, old: &[SourceId]) {
     s.edit.selected_sources.retain(|x| !gone.contains(x));
 }
 
+#[cfg(test)]
+#[path = "tests_sampler_kit_presets_evidence.rs"]
+mod evidence;
 #[cfg(test)]
 #[path = "tests_sampler_kit_presets.rs"]
 mod tests;

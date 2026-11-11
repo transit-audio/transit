@@ -749,12 +749,12 @@ pub fn sanitize_name(n: &str) -> String {
 }
 
 mod session;
-use session::replace_with;
 pub use session::{
     BUNDLE_EXTENSION, open_session, open_session_bytes, replace_file, replaces, save_copy, save_session, save_session_copy, session_bundle,
     session_file, session_open_line, unknown_param_lines, write_file,
 };
 pub(crate) use session::{DecodedFiles, decode_file_streamed, file_key, open_session_linked};
+use session::{replace_with, write_synced};
 
 pub(crate) mod disk;
 pub use disk::{add_disk_source, copy_path};

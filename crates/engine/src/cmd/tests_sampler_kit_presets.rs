@@ -7,10 +7,10 @@ use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
 use transit_model::sampler_patch::ZoneEntry;
 use transit_model::{ChannelFormat, Clip, Frozen, TrackId, TrackKind};
 
-struct Dir(PathBuf);
+pub(super) struct Dir(pub(super) PathBuf);
 
 impl Dir {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // The stamp only names fresh storage; no test outcome depends on elapsed time.
@@ -20,7 +20,7 @@ impl Dir {
         Self(path)
     }
 
-    fn audio(&self, name: &str, frames: usize, rate: u32) -> PathBuf {
+    pub(super) fn audio(&self, name: &str, frames: usize, rate: u32) -> PathBuf {
         let path = self.0.join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let format = if name.ends_with(".flac") { FileFormat::Flac } else { FileFormat::Wav };
@@ -38,7 +38,7 @@ impl Drop for Dir {
     }
 }
 
-fn setup() -> (Engine, TrackId) {
+pub(super) fn setup() -> (Engine, TrackId) {
     let mut e = Engine::default();
     e.execute("track.new", &json!({"kind": "instrument", "format": "stereo"})).unwrap();
     let t = e.session().tracks.last().unwrap().id;
@@ -46,15 +46,15 @@ fn setup() -> (Engine, TrackId) {
     (e, t)
 }
 
-fn kit(e: &Engine, t: TrackId) -> PatchV1 {
+pub(super) fn kit(e: &Engine, t: TrackId) -> PatchV1 {
     patch_of(e.session(), LOAD, t).unwrap()
 }
 
-fn save_kit(e: &mut Engine, t: TrackId, path: &Path) -> Value {
+pub(super) fn save_kit(e: &mut Engine, t: TrackId, path: &Path) -> Value {
     e.execute(SAVE, &json!({"track": t, "path": path})).unwrap()
 }
 
-fn recall(e: &mut Engine, t: TrackId, path: &Path, replace: bool) -> Value {
+pub(super) fn recall(e: &mut Engine, t: TrackId, path: &Path, replace: bool) -> Value {
     e.execute(LOAD, &json!({"track": t, "path": path, "replace": replace})).unwrap()
 }
 
