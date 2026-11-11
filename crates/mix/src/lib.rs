@@ -433,6 +433,8 @@ impl Applied {
 
 struct PluginSlot {
     raw_latency: Arc<std::sync::atomic::AtomicUsize>,
+    /// Read only by the fingerprint test seam.
+    #[cfg(feature = "testing")]
     id: String,
     /// Channel count the plugin was prepared for.
     ch: usize,
@@ -482,6 +484,7 @@ impl PluginSlot {
         let note_delay = (slot != INSTRUMENT_SLOT && plugin.reads_track_notes()).then(note_delay::NoteDelay::new);
         PluginSlot {
             raw_latency: Arc::new(std::sync::atomic::AtomicUsize::new(plugin.latency())),
+            #[cfg(feature = "testing")]
             id,
             ch,
             plugin,
