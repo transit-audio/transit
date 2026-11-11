@@ -9,7 +9,7 @@ title: Inherited built-in effects are retired in stages: stage 1 (v0.6.0, Breaki
 
 ## Context
 
-transit inherited its built-in devices from the SoundCraft fork. They were written to fill a registry, not to a transit design: a Drum Synth, a two-tap Pitch Shifter, a Channel Strip, several modulation effects, small utilities. The instruments and effects transit is porting or writing for itself (the Macro Oscillator, the Filter and Texture inserts, the Time Stretcher of #199, a Pro EQ in #233) replace them one by one.
+transit inherited its built-in devices from the SoundCraft fork. They were written to fill a registry, not to a transit design: a Drum Synth, a two-tap Pitch Shifter, a Channel Strip, several modulation effects, small utilities. The instruments and effects transit is porting or writing for itself (the Macro Oscillator, the Filter and Texture inserts, the Time Stretcher of #199, the Parametric EQ of #233 (ADR 0054)) replace them one by one.
 
 Each month a device stays, sessions that use it accumulate, and removing it later breaks more of them. The maintainer decided on 2026-10-31 to break now, while transit is alpha: "Better to break now in alpha than to keep gaining a user base on old plugins that we scrap."
 
@@ -22,7 +22,7 @@ Each month a device stays, sessions that use it accumulate, and removing it late
 | Stays for now | Goes when |
 | --- | --- |
 | Compressor/Limiter, Expander/Gate | a transit dynamics section replaces them (the mixer sidechain route and the racks depend on them) |
-| EQ 7-Band, EQ 1-Band | the Pro EQ (#233) lands |
+| EQ 7-Band, EQ 1-Band | the Parametric EQ (#233, ADR 0054) lands |
 | Room Reverb, Plate Reverb | a transit or ported reverb lands |
 | Saturator, Gain | a replacement lands (Gain is the pass-through the tests use until then) |
 
