@@ -24,6 +24,8 @@ mod hardening_tests;
 #[cfg(test)]
 mod key_map_tests;
 #[cfg(test)]
+mod reach_tests;
+#[cfg(test)]
 mod rig;
 #[cfg(test)]
 mod typing_tests;
