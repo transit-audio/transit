@@ -1593,7 +1593,7 @@ Sampler presets, Logic's Drum Machine Designer and Sampler patches). This record
 "checked when set, clamped when used"; "the engine never guesses UI state"; sources keep their
 native rate; no proprietary sample-library format is parsed or vendored; no migration shims while
 alpha. Where these leave a gap, the items below choose the narrowest rule, marked **proposed**,
-and "Open for the maintainer" lists each with a recommendation. "Later, not in this issue" (#467):
+and item 11 records how the open points were decided. "Later, not in this issue" (#467):
 saving a kit together with copies of its samples.
 
 **What exists today** (on the branch that retires the one-sample instrument, #455).
