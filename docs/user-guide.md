@@ -608,8 +608,18 @@ makes the zone a group of its own; on a pad's zone it first asks, because the zo
 on the key map asks the same. **Round robin** picks Sequential or Random; while Random, the
 **Seed** field and its dice button set the kit's random seed (0 is stored as 1); while Sequential
 it shows a dash and the stored seed is kept. **Vel. sens.** sets the selected zone's velocity
-sensitivity. Adding zones from the view bar, SFZ import, and the Shaper and Modulation sections are
-not available yet.
+sensitivity. While the panel asks about a pad's zone, Enter answers **Make group** and Escape
+cancels. A layer with more alternatives than fit on one line continues on the next. Adding zones
+from the view bar, SFZ import, and the Shaper and Modulation sections are not available yet.
+
+With no zone, the key map is a drop target: drop an audio file anywhere on the view or choose
+**Load…** to load it into the first empty zone (one undo step); a file the Sampler cannot take
+shows the reason under the key map and nothing changes. While a sample's waveform is still being
+read, the zone waveform says `Analyzing…` and everything stays editable. When a zone's audio file
+is missing, its waveform is hatched with a card naming the file; the zone keeps its place on the
+map and in its group (relinking is not available yet). When the kit is full (256 zones, or eight
+alternatives in a layer), the **+** chip still asks for a sample and the reason shows under the
+key map.
 
 The **Slices** view shows the kit's slice loop on the bench: the loop's waveform under a strip of
 numbered flags, one per slice start (`S 1` is the loop start, `E` the loop's end), the set in use

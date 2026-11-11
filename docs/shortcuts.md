@@ -40,6 +40,8 @@ list or a dialog keeps Escape for itself. **Window > Close All Editors** closes 
 | Sampler instrument | Nudge handle earlier / later | Alt+Left / Alt+Right |
 | Sampler instrument | Nudge handle earlier / later ×10 | Alt+Shift+Left / Alt+Shift+Right |
 | Sampler instrument | Remove zone | Delete |
+| Sampler instrument | Make group | Enter |
+| Sampler instrument | Cancel make group | Escape |
 
 The focused Sampler's selected pad is cleared in one undo step. A text field, open menu, or
 dialog keeps the keys for itself. Right-click a pad for **Clear pad** and, when it stores its
@@ -60,7 +62,10 @@ and sends nothing; otherwise it closes the window as usual. Left and Right selec
 the selected one on the key map, Up and Down the next velocity layer over the same keys. The
 nudges move the zone waveform's handle you last pressed (S until then) by one frame (ten with
 Shift), one undo step each; a slice's handles stay locked. Delete asks before it removes the
-selected zone (Undo brings it back). A text field, a dialog, or another window having the keyboard
+selected zone (Undo brings it back); when the kit cannot lose that zone (a lower round-robin
+alternative while a higher one exists), the question says so first. While the Group panel asks
+about making a pad's zone a group, Enter answers Make group and Escape cancels without closing
+the window. A text field, a dialog, or another window having the keyboard
 keeps these keys; while a menu or other popup is open they do nothing, and they never reach the
 arrangement while the Instrument view has the keyboard.
 
