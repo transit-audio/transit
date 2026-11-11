@@ -3,7 +3,7 @@ title: One Sampler instrument with three views (Instrument: zones, velocity laye
 -->
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, accepted, pad start note; amended 2026-11-11, accepted, the one-sample instrument retired (#455); amended 2026-11-11, proposed, kit presets (#467)
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, accepted, pad start note; amended 2026-11-11, accepted, the one-sample instrument retired (#455); amended 2026-11-11, accepted, kit presets (#467)
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
@@ -1580,7 +1580,8 @@ ends the drop code.
 
 ## Amendment 2026-11-11: kit presets (#467)
 
-Amended 2026-11-11, proposed. The maintainer decided (#467), and these points are fixed: for
+Amended 2026-11-11, accepted: settled in one judging round with edits; the maintainer decided
+kit presets for v0.7.0. The maintainer decided (#467), and these points are fixed: for
 v0.7.0 the Sampler's preset menu saves and recalls the whole kit (pads, zones, slices and both
 marker sets, groups and round robin, every zone and pad setting, the pad start note), each sample
 referenced by its file path, no audio copied; a recall replaces the instrument's kit in one undo
@@ -1680,20 +1681,33 @@ recall, item 9). A `source` id alone is a pre-amendment track preset (item 7).
 
 - *The sample's absolute path* at save: a referenced source's `path` as stored; a managed source's
   `path` joined to the session folder. The Windows extended-length prefix (`\\?\`, `\\?\UNC\`) is
-  removed before anything is written (#450 asks the same of stored source paths).
+  removed first, before the relative test below and before anything is written (#450 asks the
+  same of stored source paths; Load kit stores `\\?\` paths today, from canonicalization).
 - *Relative* when the sample is the preset file's folder or below it: compared by whole components
   after `std::path::absolute` (no link following, no file access), without regard to case on
   Windows. Written with `/` separators, never `..`, never a drive or root. So a kit saved into its
   sample folder (`Kits/808/808.tkit` beside `Kits/808/Kick.wav`) moves, copies and backs up as one
   folder.
 - *Absolute* otherwise, in the platform's own form, as the session writes referenced media
-  (`D:\Library\Kick\Kick 01.wav`, `/Users/me/Library/Kick 01.wav`). A path that is not valid
-  UTF-8 cannot be written: Save is refused naming the pad (item 3).
+  (`D:\Library\Kick\Kick 01.wav`, `/Users/me/Library/Kick 01.wav`). The session already holds
+  every path as UTF-8 text (a file picked with a name that is not valid UTF-8 is stored lossily
+  today, `source_param`'s `to_string_lossy`), so Save writes what the session holds; such a
+  sample is missing on recall like any path that does not resolve. Fixing the lossy store is
+  outside this amendment.
 - *Reading.* Each `path` goes through `io::stored_path(path, preset_file)` and then
   `file_access::check_read`: a relative path is taken from the preset file's folder (both
-  separators accepted), an absolute one as written, and a path to another computer, a device or a
-  URL is refused and treated as missing. Nothing is guessed: no search by file name, no drive
-  letter mapping, no fallback to the session folder.
+  separators accepted; a hand-written `..` is folded lexically and accepted while it stays below
+  the drive or root, since an absolute path may name the same files), an absolute one as written,
+  and a path to another computer, a device or a URL is refused and treated as missing. A network
+  share counts as another computer unless the preset file is on that same share
+  (`craft_docpath`'s rule, the same as a session's): a kit kept in the config folder whose samples
+  sit on `\\nas\samples` finds none of them; a kit saved on that share beside them does, and so do
+  mapped drive letters, which the lexical check cannot see. The file is accepted when it is a
+  regular file with links followed, as `io::read_file` reads a session's referenced media (not
+  Load kit's no-links rule, which guards a folder listing). The read root bounds what is opened
+  only under automation; in the app a shared kit can name any local file, which is opened only to
+  be decoded as audio, never shown or sent anywhere. Nothing is guessed: no search by file name,
+  no drive letter mapping, no fallback to the session folder.
 - *Another machine or drive.* Relative paths follow the kit folder. Absolute paths resolve only
   where the same path exists; otherwise the zone is missing and the note names the path it looked
   for (item 5). A Windows path read on macOS or Linux (and the reverse) does not exist there and is
@@ -1703,8 +1717,10 @@ recall, item 9). A `source` id alone is a pre-amendment track preset (item 7).
 
 **3. Save.** **Proposed** engine command `mix.sampler_kit_save {track?, path}`, not undoable and
 not journaled (like `track.save_preset`). The caller passes the full path (the UI builds it from
-the config folder, item 6); the engine adds the extension `.tkit` when the path has another or
-none, as `track.save_preset` adds `.tpreset`. It writes through `file_access::check_write`, to a
+the config folder, item 6, with the name cleaned as `presets::file_name` cleans preset names);
+the engine appends `.tkit` unless the path already ends in `.tkit` (any case). It never replaces
+another extension: `track.save_preset`'s `with_extension` would turn `808 v1.5` into `808 v1.tkit`
+and let two kit names write the same file. It writes through `file_access::check_write`, to a
 temporary file beside the target and then a rename, as `io::presets::write` does, so a failed
 write never leaves half a kit.
 
@@ -1725,12 +1741,16 @@ write never leaves half a kit.
   stored path and recorded facts, and the result lists it under `missing`, so a kit with a lost
   file can still be kept.
 - *A source with no file of its own* (managed audio still `unsaved`: recorded, captured or dropped
-  bytes before the session is saved): Save is refused, nothing written, with a reason that names
-  the pad (or zone): `Pad A3's sample "Hit.wav" has no file yet: save the session, or load the
+  bytes before the session is saved; or a source id with no session record, such as the source 0
+  an older build gives a portable entry): Save is refused before the temporary file is created,
+  nothing written, with a reason that names the pad, else the zone, else the slice loop:
+  `Pad A3's sample "Hit.wav" has no file yet: save the session, or load the
   sample onto the pad from a file.` (proposed text). Writing the audio beside the preset is the
   later feature #467 names, not this one.
 - *A managed source with a file* (in the session's `Audio Files/`) is saved by its absolute path,
-  and the result's `notes` say that the kit depends on that session folder.
+  and the result's `notes` say that the kit depends on that session folder. A sample on a network
+  share other than the one the kit file is written to is saved, and `notes` say it will be missing
+  on recall (item 2).
 - *An opaque patch* (unknown schema or invalid) is not saved as a kit: "this version cannot save
   the track's Sampler kit (it is kept as saved)".
 - *Writing over a file:* Save refuses to replace an existing file whose tag, version or kit
@@ -1740,7 +1760,11 @@ write never leaves half a kit.
   notes}`.
 
 **4. Recall.** **Proposed** engine command `mix.sampler_kit_load {track?, path, replace?: false}`,
-one undo step ("Load Sampler Kit"), journaled.
+one undo step ("Load Sampler Kit"), not journaled (as `mix.sampler_load_kit` and every Sampler
+command that reads a file: `cmd!(@spec false, true, false; ..)`). The track's instrument must be
+a Sampler with a ready patch: a patch this build keeps opaque (unknown schema or invalid) is never
+replaced, with `patch_of`'s refusal ("this version cannot edit the track's Sampler patch (it is
+kept as saved)"), because it is a newer build's kit; a frozen track is refused as every edit is.
 
 - *The user's choice is explicit.* When the current patch has any zone or a loop, the command
   without `replace: true` changes nothing and answers data `{loaded: 0, replace_needed: true,
@@ -1749,32 +1773,53 @@ one undo step ("Load Sampler Kit"), journaled.
 - *Staging.* As `mix.sampler_load_kit` does: the file is read and checked (size at most 8 MiB,
   proposed; tag and version; kit schema; `from_portable`) before any audio is touched, then a
   worker prepares the whole candidate over a clone of the session inside
-  `file_access::confine`. For each referenced file: resolve (item 2); if it is a plain readable
-  file, check `admit_source` from its header and `admit_patch` for the running total (against the
-  new kit, not the old one), decode once through the shared native-rate preparation
-  (`ImportRate::Native`) and add it with `add_audio` as `Referenced`. A file the session already
-  holds as a Sampler source (same resolved path, pool audio at its stored rate) is reused rather
-  than decoded again (proposed).
-- *A changed file.* When a file is found but its `sample_rate` or `frames` differ from what the
-  kit recorded, the zones' native-frame regions no longer describe it. **Proposed:** the recall
-  is refused whole, naming the file and both lengths; open for the maintainer (item 11).
+  `file_access::confine`. For each referenced file: resolve (item 2); if it is a regular readable
+  file, check `admit_source` and `admit_patch` for the running total (against the new kit, not
+  the old one) from its header, or from its bytes before decoding where the header gives no
+  length (as `source_param` does), decode once through the shared native-rate preparation
+  (`ImportRate::Native`), check the decoded rate and frames against the kit's record (next
+  bullet) and add it with `add_audio` as `Referenced`. A file the session already holds as a
+  referenced Sampler source is reused rather than decoded again (proposed) only when the stored
+  path equals the resolved one (prefix stripped, compared as item 2 compares) and its pool audio
+  is present, at its stored rate, with the kit's recorded rate and frames; otherwise it is read
+  as a new source.
+- *A changed or unreadable file.* When a file is found but its decoded `sample_rate` or `frames`
+  differ from what the kit recorded, the zones' native-frame regions no longer describe it; when
+  it cannot be opened or decoded, it has no audio. Either way that source takes the missing state
+  of item 5 (no pool audio; the kit's recorded facts; its zones and pads as saved) and the rest of
+  the kit loads, as #467 asks for a sample that moved: the notice names the file and why
+  (`Kick 01.wav changed since the kit was saved: 48000 Hz, 21000 frames; the kit expects
+  44100 Hz, 19845 frames`, proposed text). Loading the new audio is not an option: `store`
+  refuses a region past present audio, and rescaling or clamping the regions would rewrite the
+  kit by guess. The user reloads the pad (Load…, drop), which keeps its settings, or restores the
+  file and recalls again. Once the session is saved and reopened, the file is read under the
+  session's own rules for referenced media.
 - *One check, nothing partial.* The candidate patch goes through `store` with two differences
   from an edit: the eight voices per note rule is checked against an empty patch (the kit is a
-  new map, so its own overloads count), and the new patch replaces the old one whole. Any refusal
-  (budget, layers, the core's spec check, a changed file, a bad kit) answers data with a `notice`,
-  as Load kit does, and leaves the document, the undo history and the session's sources as they
-  were.
+  new map, so its own overloads count), and the new patch replaces the old one whole (`store`
+  gains this as an explicit "replacing" argument; edits keep comparing with the patch before
+  them). Any refusal (budget, layers, the core's spec check, a bad kit, an opaque or frozen
+  target, a failed worker) answers data with a `notice`, as Load kit does, and leaves the
+  document, the undo history and the session's sources and pool as they were: the candidate is a
+  staged clone and only an admitted one replaces the session.
 - *What changes.* The track's whole `sampler_patch` is the kit's: seed, pad start note, stored pad
   notes as stored (never rebased onto the old start note), pads, zones, groups, loop and controls.
   The slot's preset label becomes the kit's file stem. `bypass`, `active`, the track's clips,
   takes, automation and mappings are untouched: no MIDI is rewritten (the 2026-11-09 amendment's
-  item 4); when the new start note differs from the old one, the notice says so as
+  item 4), and lanes or mappings of zone controls (`zone003_level`) now drive the new kit's zone
+  of that id; when the new start note differs from the old one, the notice says so as
   `mix.sampler_pad_start` does.
-- *The old kit's sources.* **Proposed:** a referenced source that the replaced kit named and
-  nothing else in the session uses (no other Sampler, no clip) leaves `Session::sources` and the
-  pool in the same step; the file on disk is never touched, and undo brings the entry back. Managed
-  sources stay, since they may be the only copy. Without this, stepping through kits keeps every
-  kit's audio in memory until the session is reopened. Open for the maintainer (item 11).
+- *The old kit's sources.* A source that the replaced patch named as `referenced` leaves
+  `Session::sources` and the pool in the same step when, in the candidate session after the new
+  patch is in place, nothing else names it: no clip in any playlist of any track
+  (`Session::clips_using`), no track's freeze (`Frozen::source`), no Sampler patch on any track,
+  the new one included and opaque ones by their raw `sources` (`SamplerPatch::media`), and no clip
+  on the engine's clipboard. It is also dropped from `edit.selected_sources`. The file on disk is
+  never touched, and undo restores the whole previous document, entry and pool audio included.
+  Managed sources stay, since they may be the only copy. This keeps the session (and its next
+  save) to the kits in use; it does not by itself bound memory while stepping, because each undo
+  step keeps the document before it, pool audio included, up to the 200-step history: see
+  *previous and next* in item 6.
 - *A pending Detect candidate* turns stale under the existing rule (the patch differs), so its
   Replace markers is refused as stale and the Slices view drops the preview; no new code.
 - *Result:* `{track, kit, loaded, pads, zones, sources, missing: [{zone, pad?, path}], notice}`.
@@ -1782,8 +1827,11 @@ one undo step ("Load Sampler Kit"), journaled.
   admission run off the audio thread, as for every Sampler edit.
 
 **5. Missing files on recall.** A file that does not resolve, is refused by the path check or the
-read root, or is not a plain file is not an error: the recall adds a session source with the
-resolved path it looked for (absolute, so a later session save keeps it as referenced media),
+read root, is not a regular file, or is changed or unreadable (item 4) is not an error: the recall
+adds a session source with the resolved path it looked for (absolute, so a later session save
+keeps it as referenced media; a path the lexical check refused is recorded as the kit wrote it
+when that is absolute, and joined to the preset's folder as text otherwise, never as a bare
+relative path, which a session would read against its own folder),
 the kit's recorded `name`, `frames`, `channels`, `sample_rate` and `format`, `unsaved: false` and
 no pool audio. Its zones and pads are created as saved. That is exactly the existing missing state:
 the Instrument view and the Slices bench show the card naming the file, the zone plays silence,
@@ -1792,9 +1840,12 @@ it counts nothing toward the 128 MiB budget, and `check_sampler_patch` accepts i
 samples were not found and play silence: Kick 01.wav (D:\Library\Kick\Kick 01.wav), ...`
 (proposed text). Relink does not exist yet. Until it does, the user puts the file back where the
 note says, or moves the kit folder so relative paths resolve, and recalls the kit again; or loads
-a sample onto the pad (drop, Load…), which keeps the pad's settings. The Pads view's missing state
-is not part of this amendment: a pad over a missing zone looks loaded and is silent; the load note
-names it.
+a sample onto the pad (drop, Load…), which keeps the pad's settings. The Pads view gains the
+smallest missing state, in slice 3: a pad whose zone's source is in the session with no pool
+audio draws the shared hatch (`widgets::hatch`) over its cell and its hover text reads
+`Kick 01.wav is missing` (the card's words); nothing else on the pad changes. Without it a
+recalled drum kit, whose main view is Pads, would show silent pads as loaded, against #467's
+"shows the views' existing missing-file state and names the file".
 
 **6. Where kits live, and the UI.** **Proposed:**
 
@@ -1806,23 +1857,37 @@ names it.
   through a new engine helper beside `io::presets::list` that reads with the checked access. The
   #455 rule "the Sampler shows no preset list until a patch preset exists" is met by this.
 - *Factory kits:* none ship (body: no sample-dependent presets under `assets/presets/sampler/`).
-  The factory default is the empty kit a new Sampler starts with (#454), labeled
-  `<factory default>`; the list has no Factory section and no "empty kit" entry.
+  The factory default is the empty kit a new Sampler starts with (#454). `<factory default>` is
+  only the field's label for a kit not recalled from or saved to a file (the header's `NO_PRESET`);
+  it is not a list entry, and the list has no Factory section and no "Empty kit" entry in v0.7.0.
 - *The list* (title bar field and editor dropdown) shows the user kits, Save As, Delete, and two
   file entries: **Open kit file…** (any `.tkit` through the file dialog, recalled by the same
   command; the field then shows its name, and next from a kit that is not in the list goes to the
   first, as `stepped` does) and **Save kit file…** (Save As to any folder, for a kit stored with
   its samples). Delete removes the `.tkit` file through the engine helper, which refuses any other
   extension.
-- *Save* writes over the current user kit (as `save_current` does now) or opens the list.
+- *Save* writes over the current user kit only when the window's last recall or save was that
+  list file (the kit file kept above); a kit opened from elsewhere, or built by hand under a label
+  that happens to match a list name, opens the list for Save As instead, so Save never replaces a
+  kit the user did not open. The Sampler's list never calls the parameter preset code
+  (`presets::save_user`, `load_user`, `delete_user`, `StudioApp::apply_preset`): on the #455
+  branch its Save As still writes an empty `.json` parameter preset into `presets/sampler/`, which
+  the next launch would report as a retired one-sample preset.
 - *Ask before replace.* When the current kit has a zone or a loop, the UI asks before it sends
   `replace: true`: `Replace the kit? 12 loaded pads will be replaced by "808".` with **Replace** and
   **Cancel** (proposed text; the dialog component is the one #465 adds when it lands first). There
   is no "fill free pads" here: a kit preset is the whole kit.
-- *Previous and next.* Each step is a replace. **Proposed:** a step asks only when the kit has
-  changed since the last recall or save (the UI keeps, per device window, the patch as it stood
-  after its last kit recall or save, and compares); stepping through unchanged kits asks once, at
-  the first step away from edited work. Nothing a step replaces is then lost: it is in a file.
+- *Previous and next.* Each step is a replace. A step, a pick from the list and Open kit file…
+  ask only when the kit has changed since the last recall or save (the UI keeps, per device
+  window, the patch and the kit file as they stood after its last kit recall or save, and
+  compares patches); with no such record (a kit built by hand, a reopened session, a track
+  preset, an undo past the recall) any zone or loop counts as changed and the question is asked.
+  Stepping through unchanged kits asks once, at the first step away from edited work. Nothing a
+  step replaces without asking is lost: it is in a file, and undo restores it. Consecutive
+  previous and next steps on one Sampler with nothing else between them are sent with
+  `Engine::execute_merged` under one key per track, so a run of steps is one undo step back to the
+  kit before the run, and the history keeps two kits' audio, not one per step (200 steps of a
+  100 MiB kit would otherwise hold 20 GB).
   Convention: in both reference workstations, stepping or hot-swapping a drum rack or sampler
   preset replaces without a question and relies on undo; this record keeps the maintainer's
   question for unsaved work. That behavior is from the record's sources and general knowledge of
@@ -1841,10 +1906,13 @@ between targets (the same resolved file is decoded once), and any refusal refuse
 load, nothing applied. The track preset load is already one undo step and keeps its other rules
 (routing kept, #455's slot drop). It does not ask before replacing: loading a track preset already
 replaces the track's instrument, and that command never asked. A track preset written before this
-amendment has `source` ids and no `file`: alpha, no migration. **Proposed:** those sources load as
-missing with no path (zones silent, the card names the source's former name when known) and the
-status line says: `track preset "Bass": its Sampler samples were saved by session id and cannot
-be found: load them again.` That ends the wrong-sample bug without guessing. The other half of
+amendment has `source` ids and no `file`: alpha, no migration. Each such entry becomes a new
+session source in the missing state with an empty path and the name `source <id>` (the preset
+holds nothing else about it), so it can never resolve to a sample of the loading session, and
+the status line says: `track preset "Bass": its Sampler samples were saved by session id and
+cannot be found: load them again.` That ends the wrong-sample bug without guessing. A track
+preset whose Sampler patch this build cannot read (unknown schema or invalid) is refused whole,
+naming the file, as a kit with an unknown schema is (item 9). The other half of
 #458 (an instrument retired before #455 loaded from a track preset) stays in #458.
 
 **8. Control channel and help.** `docs/control-protocol.md` gains a "Sampler kit presets" section
@@ -1882,26 +1950,38 @@ reports progress and can be canceled, and committing it applies the candidate as
 (cancel leaves nothing). The staging function is written once for both commands so #450 changes
 one place. The same holds for `track.load_preset` with a Sampler.
 
-**11. Open for the maintainer.**
+**11. Decided with the coordinator (2026-11-11).** The items marked **proposed** above are
+decided as written, and these were open:
 
-1. *The extension `.tkit`* and the tag `transit-sampler-kit`. Recommendation: accept; ADR 0049
-   gave the other side files `t`-prefixed extensions, and the extension is what keeps kits out of
-   the retired-preset report.
-2. *Previous and next ask only when the kit changed since its last recall or save* (item 6).
-   Recommendation: accept, and use the same rule for picks from the list and Open kit file…, so
-   one rule covers every recall: the question appears only when unsaved work would be lost.
-3. *What counts as "loaded" for the question:* any zone or the loop, not only pad-bound zones.
-   Recommendation: accept; an Instrument-only kit is work too.
-4. *A changed file* (found, but its rate or length differs from the kit's record): refuse the
-   recall whole (proposed) or load the rest and mark those zones missing. Recommendation: refuse
-   whole for v0.7.0, naming the file; the user gets a clear reason and nothing partial.
-5. *The replaced kit's unused referenced sources leave the session* (item 4). Recommendation:
-   accept; it bounds memory while stepping, deletes no file, and undo restores it.
-6. *Track presets in the same slice series* (item 7, #458 is on v0.7.1). Recommendation: build it
-   as slice 4 right after the kit preset slices, because it is the same code; ship it in v0.7.0 if
-   it is ready, else v0.7.1.
-7. *An "Empty kit" entry in the list* (a replace with an empty patch, asked like any replace).
-   Recommendation: not in v0.7.0; a new Sampler, or clearing the zones, covers it.
+1. *The extension `.tkit`* and the tag `transit-sampler-kit`: accepted; ADR 0049 gave the other
+   side files `t`-prefixed extensions, and the extension keeps kits out of the retired-preset
+   report.
+2. *The question* is asked only when the kit changed since its last recall or save, for previous
+   and next, picks from the list and Open kit file… alike (item 6). This narrows #467's "when the
+   current kit has loaded pads, ask before replacing"; the maintainer confirms it by accepting
+   this record.
+3. *"Loaded"* means any zone or the loop, not only pad-bound zones: an Instrument-only kit is work
+   too.
+4. *A changed file* (found, but its rate or length differs from the kit's record) takes the
+   missing state and the rest of the kit loads (item 4), as #467 asks for a moved sample.
+5. *The replaced kit's unused referenced sources leave the session* (item 4), and a run of
+   previous and next steps is one undo step (item 6), which is what bounds memory while stepping.
+6. *Track presets* (#458) are slice 4, right after the kit preset slices, because they are the
+   same code; they ship in v0.7.0 if ready, else v0.7.1.
+7. *No "Empty kit" entry* in v0.7.0; a new Sampler, or clearing the zones, covers it.
+
+**Decided by the coordinator, to be confirmed by the maintainer (2026-11-11).**
+
+1. *The question is asked only when the kit changed since its last recall or save* (item 6 and
+   11.2), not on every replace of a kit with loaded pads: asking on every previous or next step
+   would make stepping unusable, and the replaced kit is in a file and undo restores it.
+2. *No modified mark* in the title bar (`808 *`) after editing a recalled kit in v0.7.0. No device
+   shows one today; the window already keeps the baseline, so it is a small later addition.
+3. *A run of previous or next steps is one undo step* (item 6): undo after browsing five kits
+   returns to the kit before browsing, not the fourth. This keeps memory bounded, and the browsed
+   kits are files.
+4. *Samples on a network share load only when the kit file is on that share* (item 2), the
+   session's rule: a shared kit never makes the app contact another computer.
 
 **12. Evidence** (implementation gates, not claims made here). No pinned hash: every test
 compares documents, JSON and file bytes, or renders in-process.
@@ -1936,20 +2016,34 @@ compares documents, JSON and file bytes, or renders in-process.
 - Track presets through the same path: a `.tpreset` with a Sampler carries no `source` id; loaded
   into another session it finds its samples by path; a pre-amendment `.tpreset` loads its zones as
   missing with the status line; a refused kit refuses the whole preset load.
-- The retired-preset report still lists the old `.json` Sampler presets and never a `.tkit`.
+- The retired-preset report still lists the old `.json` Sampler presets and never a `.tkit`, and
+  Save As on a Sampler writes no `.json`.
+- Names: `808 v1.5` saves as `808 v1.5.tkit`, and `Kit.1` and `Kit.2` are two files.
+- A changed file (another frame count; another rate) and an undecodable file take the missing
+  state, named in the notice, and the rest of the kit plays.
+- Targets: a recall onto an opaque patch and onto a frozen track is refused, nothing changed.
+- Sources: after a recall, a source of the old kit that a clip, a freeze, another Sampler or the
+  new kit also names stays; one nothing names is gone from the session and the pool, the file is
+  untouched, and undo brings both back.
+- Stepping: three merged steps are one undo step back to the first kit, and the undo history
+  holds no pool audio of the middle kit.
+- Paths: a sample reached through a link loads; a network path outside the kit's share is missing
+  and is stored absolute, never relative.
+- The Pads view hatches a pad over a missing zone (in-process render).
 
 These negative mutations must fail them: `to_portable` writing a session id; a relative path
 resolved against the session folder; the layer check run against the old kit instead of an empty
 one; a refused recall leaving an added source behind; `replace` ignored; the `\\?\` prefix kept;
-a newer kit file overwritten by Save.
+a newer kit file overwritten by Save; the extension replaced instead of appended; a removed source
+still used by a clip; a changed file decoded into the kit.
 
 **13. Slices.** Each builds and passes on its own; #455 lands first.
 
 | Slice | Content | Rough size (non-test lines) |
 |---|---|---|
 | 1 | Model: `sampler_portable.rs` (`to_portable`, `from_portable`, the path rules of item 2 as pure functions) and its tests. | +200 |
-| 2 | Engine: `mix.sampler_kit_save` and `mix.sampler_kit_load` (staging shared with Load kit, missing state, admission, the replace flag, the old kit's unused sources), the `.tkit` list, read, write and delete helper, and tests. | +350 |
-| 3 | UI: the Sampler's preset list on kits (list, Save, Save As, Delete, previous and next, Open and Save kit file…), the ask dialog, selection after recall, help entries, and tests. | +300 |
+| 2 | Engine: `mix.sampler_kit_save` and `mix.sampler_kit_load` in a new command file (staging shared with Load kit, missing and changed files, admission, the replace flag, the opaque and frozen refusals, the old kit's unused sources), `store`'s replacing argument, the `.tkit` list, read, write and delete helper, and tests. | +450 |
+| 3 | UI: the Sampler's preset list on kits (list, Save, Save As, Delete, previous and next as merged steps, Open and Save kit file…), the ask dialog, selection after recall, the Pads view's missing hatch, help entries, and tests. | +350 |
 | 4 | Track presets (#458): `track.save_preset` and `track.load_preset` through the portable form and the staging, the pre-amendment note, and tests. | +120 |
 | 5 | Docs: control protocol, `docs/mcp.md`, the user guide's Sampler section, the session-format note, the release note. | docs only |
 | 6 | With #450: kit recall (and a track preset with a Sampler) as a staged job with progress and cancel. | with #450 |
