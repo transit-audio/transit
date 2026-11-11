@@ -243,7 +243,7 @@ pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
     release_stale(app, ctx);
     let Some(uid) = app.builtin_editor.devices.focused else { return };
     let modal = ctx.memory(|m| m.top_modal_layer().is_some());
-    if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || modal || egui::Popup::is_any_open(ctx) {
+    if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || modal {
         return;
     }
     let Some(key) =
@@ -275,6 +275,11 @@ pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
     .into_iter()
     .fold(0, |n, (a, step)| if shortcuts::pressed(ctx, a) { n + step } else { n });
     let delete = shortcuts::pressed(ctx, Action::SamplerRemoveMarker);
+    // An open menu or list (a panel's dropdown, any popup) holds the keyboard, as system menus
+    // do: the keys above are taken and do nothing, so they never reach the arrangement.
+    if egui::Popup::is_any_open(ctx) {
+        return;
+    }
     refresh(app, dev);
     let mut v = std::mem::take(&mut view(app, uid).slices);
     if let Some(l) = v.snapshot.data.clone() {

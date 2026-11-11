@@ -111,3 +111,39 @@ fn a_modal_holds_the_slices_keys() {
     }
     assert_eq!(auditions(&t), before, "Space does not audition under a modal");
 }
+
+/// The sliced fixture with a MIDI clip selected in the arrangement, slice 2 selected on the bench
+/// and the Use slices Root dropdown open (the Sampler window has the keyboard).
+fn root_open() -> (T, transit_model::TrackId) {
+    let (mut t, tr) = sliced();
+    let c = t.app.run("midi.new_clip", serde_json::json!({"tracks": [tr.0], "start": 0, "end": 3840})).unwrap();
+    t.run("edit.select", serde_json::json!({"clips": [c["clip"]]}));
+    let cell = bench(&t, tr).cells.iter().find(|c| c.0 == 1).unwrap().1;
+    t.click(mid(cell), 1);
+    t.click(mid(panels(&t, tr).uses.root), 1);
+    assert!(egui::Popup::is_any_open(&t.ctx), "the Root dropdown is open");
+    assert_eq!(t.app.builtin_editor.devices.focused, t.app.builtin_editor.devices.sampler.views.keys().next().copied());
+    (t, tr)
+}
+
+#[test]
+fn an_open_dropdown_holds_delete() {
+    let (mut t, tr) = root_open();
+    let (clips, markers, undo) = (t.clip_count(), frames(&t, tr), t.undo_len());
+    tap(&mut t, Key::Delete, Modifiers::NONE);
+    assert_eq!(t.clip_count(), clips, "the arrangement's clip stays");
+    assert_eq!(frames(&t, tr), markers, "the marker stays");
+    assert_eq!(t.undo_len(), undo);
+}
+
+#[test]
+fn an_open_dropdown_holds_the_nudges() {
+    let (mut t, tr) = root_open();
+    let clip = |t: &T| t.app.engine.session().tracks.iter().flat_map(|x| x.clips().iter().map(|c| c.start)).collect::<Vec<_>>();
+    let (starts, markers, undo) = (clip(&t), frames(&t, tr), t.undo_len());
+    tap(&mut t, Key::ArrowRight, ALT);
+    tap(&mut t, Key::ArrowLeft, ALT);
+    assert_eq!(clip(&t), starts, "the arrangement's clip does not nudge");
+    assert_eq!(frames(&t, tr), markers, "the marker does not nudge");
+    assert_eq!(t.undo_len(), undo);
+}
