@@ -239,8 +239,19 @@ fn knob_at(
         modulation: None,
         disabled: !live,
     };
+    let id = knob_id(dev.uid(), p.id);
+    // A value typed for another zone (the selected pad or slice changed while it was typed) is
+    // dropped: a knob's value field commits only on Enter, and never to a zone it was not typed for.
+    let typed_for = id.with("zone");
+    let now = live.then_some(zone.id);
+    ui.data_mut(|d| {
+        if d.get_temp::<Option<u16>>(typed_for) != Some(now) {
+            d.remove::<String>(id.with("editing"));
+        }
+        d.insert_temp(typed_for, now);
+    });
     let mut c = child(ui, cell);
-    let shown = knob::show(&mut c, knob_id(dev.uid(), p.id), &k);
+    let shown = knob::show(&mut c, id, &k);
     let new = if live { knob_value(p, &shown, app.ui.middle_c) } else { None };
     if shown.wheeled {
         app.builtin_editor.devices.wheel_now = true;

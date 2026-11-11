@@ -13,7 +13,8 @@
 //!   otherwise): the stored crossfade in milliseconds with one decimal at the zone source's native
 //!   rate (the model's conversion, `X = floor(m * r / 1000 + 1/2)` frames, shown as `X * 1000 / r`),
 //!   the frame count in its tooltip. Typing takes a bare number or `ms` as milliseconds and a
-//!   trailing `s` as seconds; Enter or a click elsewhere commits, Escape cancels.
+//!   trailing `s` as seconds; Enter or a click elsewhere commits, Escape cancels. The typed value
+//!   belongs to the slice it was typed for: a click that selects another slice commits it there.
 //! - **A warning line** (triangle, no color) when the crossfade playback uses is below the stored
 //!   one on a loop in use: `Slice 7 is 9.4 ms long now: 4.7 ms of crossfade is used.`
 //! - **An error banner** with a refusal in the engine's words (`Slice 4 is one frame long, too
@@ -51,10 +52,16 @@ pub const XF_FORWARD_ONLY: &str = "Crossfade: forward loops only";
 /// The widest text the crossfade field holds at its natural width.
 const XF_WIDEST: &str = "xf 000.0 ms";
 
-/// What the row keeps between frames: the crossfade being typed.
+/// What the row keeps between frames: the crossfade being typed and the zone (1-based) it was
+/// typed for.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PlayState {
-    pub typing: Option<String>,
+    pub typing: Option<(u16, String)>,
+}
+
+/// The crossfade field's id on the insert `uid`.
+pub fn crossfade_id(uid: u64) -> egui::Id {
+    egui::Id::new(("sampler_slice_crossfade", uid))
 }
 
 /// The loop row as drawn.
@@ -195,7 +202,7 @@ pub(crate) fn show(
         };
         edit::zone(app, dev, v, z.zone, fields);
     }
-    crossfade(app, &mut body, dev, v, zs.as_ref(), pos2(row.track[2] + tokens::SPACE[1], y), &mut row);
+    crossfade(app, &mut body, dev, v, l, zs.as_ref(), pos2(row.track[2] + tokens::SPACE[1], y), &mut row);
     y += segmented::HEIGHT;
     if let Some(w) = warn {
         y += sections::ROW_GAP;
@@ -250,13 +257,51 @@ fn segments(ui: &mut Ui, uid: u64, at: egui::Pos2, selected: usize, out: &mut Lo
     picked
 }
 
+/// The crossfade field's text for zone `z`'s stored crossfade.
+fn stored_text(z: &Zone) -> String {
+    format!("xf {} ms", crossfade_ms_text(z.crossfade, z.rate))
+}
+
+/// Commits `text` typed for zone `z` (at its own rate): one edit, nothing when the text is the
+/// stored value (rounded to a tenth, it need not convert back to the same frames) or reads as the
+/// stored frames.
+fn commit(app: &mut StudioApp, dev: Dev, v: &mut SlicesView, z: &Zone, text: &str) {
+    if text.trim() == stored_text(z) {
+        return;
+    }
+    if let Some(frames) = typed_tenths(text).map(|tenths| crossfade_frames(tenths, z.rate)).filter(|f| *f != z.crossfade) {
+        edit::zone(app, dev, v, z.zone, json!({"region": {"crossfade": frames}}));
+    }
+}
+
 /// The crossfade field at `at`: live on a stored forward loop, `xf —` in `ink.arrow` otherwise.
-fn crossfade(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, z: Option<&Zone>, at: egui::Pos2, out: &mut LoopRowLayout) {
+/// The typed text belongs to the zone it was typed for: it shows only while that zone is shown,
+/// and when the field shows another zone or none (the selection moved on: the bench's click
+/// selects on the frame the field gives up its focus) it commits to that zone.
+#[allow(clippy::too_many_arguments)]
+fn crossfade(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    dev: Dev,
+    v: &mut SlicesView,
+    l: Option<&Loop>,
+    z: Option<&Zone>,
+    at: egui::Pos2,
+    out: &mut LoopRowLayout,
+) {
     let t = &TOKENS;
     let p = ui.painter().clone();
     let live = z.filter(|z| z.loop_mode == LoopMode::Forward);
+    if let Some((typed_for, text)) = v.play.typing.clone()
+        && live.is_none_or(|z| z.zone != typed_for)
+    {
+        v.play.typing = None;
+        if let Some(owner) = l.and_then(|l| l.zones.iter().find(|z| z.zone == typed_for)).cloned() {
+            commit(app, dev, v, &owner, &text);
+        }
+    }
     let shown = match live {
-        Some(z) => v.play.typing.clone().unwrap_or_else(|| format!("xf {} ms", crossfade_ms_text(z.crossfade, z.rate))),
+        Some(z) => v.play.typing.as_ref().map_or_else(|| stored_text(z), |t| t.1.clone()),
         None => XF_NONE.to_string(),
     };
     let text_w = widgets::role_size(&p, &tokens::VALUE, XF_WIDEST).x.max(widgets::role_size(&p, &tokens::VALUE, &shown).x);
@@ -280,25 +325,24 @@ fn crossfade(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, z: 
                 .desired_width(r.width())
                 .min_size(r.size())
                 .vertical_align(egui::Align::Center)
-                .id(egui::Id::new(("sampler_slice_crossfade", dev.uid())));
+                .id(crossfade_id(dev.uid()));
             crate::chrome::text_field_enabled(ui, true, edit)
         })
         .inner
         .on_hover_text(&tip);
     (out.crossfade_text, out.crossfade_ink, out.crossfade_tip) = (text.clone(), t.text, tip);
     if resp.has_focus() || resp.changed() {
-        v.play.typing = Some(text.clone());
+        v.play.typing = Some((z.zone, text.clone()));
     }
     if resp.lost_focus() {
         v.play.typing = None;
-        // Escape cancels; a field left without a change sends nothing (its text is the stored
-        // value rounded to a tenth, which need not convert back to the same frames).
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) || text.trim() == format!("xf {} ms", crossfade_ms_text(z.crossfade, z.rate)) {
-            return;
+        // Escape cancels.
+        if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            commit(app, dev, v, z, &text);
         }
-        if let Some(frames) = typed_tenths(&text).map(|tenths| crossfade_frames(tenths, z.rate)).filter(|f| *f != z.crossfade) {
-            edit::zone(app, dev, v, z.zone, json!({"region": {"crossfade": frames}}));
-        }
+    } else if !resp.has_focus() {
+        // Not being typed (the field went away without giving up its focus here): no text is kept.
+        v.play.typing = None;
     }
 }
 

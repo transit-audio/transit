@@ -253,3 +253,74 @@ fn leaving_the_crossfade_field_unchanged_sends_nothing() {
     assert_eq!(sent(&t, log), Vec::<String>::new(), "focus and Enter without typing change nothing");
     assert_eq!(t.patch(tr).zone(z).unwrap().crossfade, 223);
 }
+
+/// Focuses the crossfade field and replaces its text with `text` (no Enter).
+fn type_only(t: &mut T, tr: TrackId, text: &str) {
+    t.click(mid(row(t, tr).crossfade), 1);
+    steps(t, vec![key(egui::Key::A, true, egui::Modifiers::COMMAND), egui::Event::Text(text.to_string())]);
+}
+
+/// Clicks slice `index`'s cell on the bench (the natural next click after typing).
+fn click_cell(t: &mut T, tr: TrackId, index: usize) {
+    let cell = bench(t, tr).cells.iter().find(|c| c.0 == index).map(|c| c.1).expect("the slice's cell");
+    t.click(mid(cell), 1);
+    assert_eq!(view(t).selected, index);
+}
+
+#[test]
+fn a_crossfade_typed_for_one_slice_commits_to_it_when_another_slice_is_clicked() {
+    // Slice 2 loops forward with 221 frames, slice 3 forward with none; slice 2 is selected.
+    let (mut t, tr, z2) = looping(221);
+    let z3 = zone_of(&t, tr, 2);
+    zone_edit(&mut t, tr, z3, json!({"region": {"loop_mode": "forward", "crossfade": 0}, "playback": {"mode": "gate"}}));
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    type_only(&mut t, tr, "7");
+    click_cell(&mut t, tr, 2);
+    // 7 ms at 44 100 Hz is 308.7 frames: 309, on slice 2's zone, the one it was typed for.
+    assert_eq!(sent(&t, log), [format!("mix.sampler_zone_edit {{\"region\":{{\"crossfade\":309}},\"zone\":{}}}", z2 + 1)]);
+    assert_eq!(t.undo_len(), undo + 1);
+    assert_eq!((t.patch(tr).zone(z2).unwrap().crossfade, t.patch(tr).zone(z3).unwrap().crossfade), (309, 0), "slice 3 keeps its own");
+    let r = row(&t, tr);
+    assert_eq!((r.zone, r.crossfade_text.as_str()), (Some(z3 + 1), "xf 0.0 ms"), "the field shows slice 3's stored value");
+    assert_eq!(view(&t).play.typing, None);
+}
+
+#[test]
+fn a_crossfade_typed_for_a_slice_is_not_left_on_screen_when_the_next_slice_does_not_loop() {
+    let (mut t, tr, z2) = looping(0);
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    type_only(&mut t, tr, "7");
+    // Slice 3 does not loop: its field is `xf —`, and the typing commits to slice 2.
+    click_cell(&mut t, tr, 2);
+    assert_eq!(sent(&t, log), [format!("mix.sampler_zone_edit {{\"region\":{{\"crossfade\":309}},\"zone\":{}}}", z2 + 1)]);
+    assert_eq!(t.undo_len(), undo + 1);
+    let r = row(&t, tr);
+    assert_eq!((r.crossfade_text.as_str(), r.crossfade_live), (XF_NONE, false));
+    assert_eq!(view(&t).play.typing, None, "no typed text is kept");
+    // Back on slice 2 the field reads the stored value, and a click in and out sends nothing.
+    click_cell(&mut t, tr, 1);
+    assert_eq!(row(&t, tr).crossfade_text, "xf 7.0 ms");
+    let log = view(&t).sent.len();
+    t.click(mid(row(&t, tr).crossfade), 1);
+    t.click(mid(bench(&t, tr).hint_rect), 1);
+    assert_eq!(sent(&t, log), Vec::<String>::new());
+    assert_eq!(t.patch(tr).zone(z2).unwrap().crossfade, 309);
+}
+
+#[test]
+fn a_knob_value_typed_for_one_slice_never_lands_on_the_next() {
+    let (mut t, tr) = sliced();
+    select(&mut t, tr, 1);
+    let (z2, z3) = (zone_of(&t, tr, 1), zone_of(&t, tr, 2));
+    let attack = |t: &T, z: u16| t.patch(tr).zone(z).unwrap().attack_ms;
+    let (a2, a3) = (attack(&t, z2), attack(&t, z3));
+    t.click(mid(t.panel(tr).knob("attack_ms").unwrap().knob.value), 1);
+    assert!(t.panel(tr).knob("attack_ms").unwrap().knob.editing, "a click on the value types it");
+    steps(&mut t, vec![key(egui::Key::A, true, egui::Modifiers::COMMAND), egui::Event::Text("50".to_string())]);
+    click_cell(&mut t, tr, 2);
+    assert!(!t.panel(tr).knob("attack_ms").unwrap().knob.editing, "the value typed for slice 2 is dropped");
+    let undo = t.undo_len();
+    steps(&mut t, vec![key(egui::Key::Enter, true, egui::Modifiers::NONE), key(egui::Key::Enter, false, egui::Modifiers::NONE)]);
+    assert_eq!(t.undo_len(), undo, "Enter commits nothing");
+    assert_eq!((attack(&t, z2), attack(&t, z3)), (a2, a3), "neither zone changed");
+}

@@ -219,3 +219,20 @@ fn the_trigger_mode_reverse_and_key_track_write_the_zone() {
     t.drag(mid(k), (mid(k).0, mid(k).1 - 60.0), false);
     assert_eq!(t.undo_len(), n);
 }
+
+#[test]
+fn a_knob_value_typed_for_one_pad_never_lands_on_the_next() {
+    let (mut t, tr) = T::kit();
+    t.click(t.pad_at(tr, 0), 1);
+    t.click(mid(t.panel(tr).knob("attack_ms").unwrap().knob.value), 1);
+    assert!(t.panel(tr).knob("attack_ms").unwrap().knob.editing, "a click on the value types it");
+    t.input(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    t.input(vec![egui::Event::Text("50".to_string())]);
+    t.click(t.pad_at(tr, 1), 1);
+    assert_eq!(t.panel(tr).selected, 1);
+    assert!(!t.panel(tr).knob("attack_ms").unwrap().knob.editing, "the value typed for A1 is dropped");
+    let before = t.undo_len();
+    t.key("Enter");
+    assert_eq!(t.undo_len(), before, "Enter commits nothing");
+    assert_eq!((t.patch(tr).zone(0).unwrap().attack_ms, t.patch(tr).zone(1).unwrap().attack_ms), (1.0, 1.0), "neither zone changed");
+}
