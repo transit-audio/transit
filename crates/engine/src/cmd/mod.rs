@@ -41,6 +41,7 @@ mod query;
 mod rack;
 mod realtime_render;
 pub(crate) mod sampler;
+mod sampler_acid;
 mod sampler_groups;
 mod sampler_kit;
 pub(crate) mod sampler_patch;
@@ -68,6 +69,7 @@ pub use realtime_render::{RealtimePlan, RealtimeStem, RenderMode, realtime_plan,
 
 pub(crate) use edit::remember_selection;
 pub(crate) use plugin_scan::PluginDiscovery;
+pub(crate) use sampler_acid::AcidCache;
 pub(crate) use sampler_patch::frames_at;
 pub(crate) use sampler_slice_detect::ready_sampler_patch;
 pub(crate) use sampler_slices::{AtTempo, TempoOrigin, grid_tempo, usable_acid};

@@ -758,3 +758,42 @@ fn native_cues_stay_in_source_frames_through_the_shared_import() {
         ])
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Decided by the maintainer 2026-11-10
+
+#[test]
+fn detect_in_auto_over_capacity_refuses_and_does_not_fall_through() {
+    // Seventy cue points make 71 slices: Auto refuses with the count, never trying transients or
+    // the grid instead.
+    let d = Dir::new("auto-full");
+    let points: Vec<(u32, u32)> = (1..=70).map(|i| (i, i * 600)).collect();
+    let (mut e, t) = file_loop(&d, "full.wav", silence(48_000), SR, &[cue_chunk(&points)]);
+    detect(&mut e, t, json!({"source": "auto"}));
+    let c = cand(&mut e, t);
+    assert_eq!((c["state"].clone(), c["error"].clone()), (json!("refused"), json!("over capacity: 71 slices, at most 64")), "{c}");
+}
+
+#[test]
+fn the_files_acid_tempo_is_the_default_beat_length_and_the_grid_tempo() {
+    let d = Dir::new("acid-default");
+    // A 1 s loop whose file states 100 BPM; the session runs 120 BPM.
+    let (mut e, t) = file_loop(&d, "acid.wav", silence(48_000), SR, &[acid(100.0)]);
+    let state = |e: &mut Engine, t: TrackId| e.execute("mix.sampler_slice_state", &json!({"track": t, "at": 0})).unwrap()["loop"].clone();
+    let st = state(&mut e, t);
+    assert_eq!(st["grid_tempo"], json!({"bpm": 100.0, "origin": "acid"}));
+    assert_eq!(st["default_beat_length"], json!(100.0 / 60.0), "one second at 100 BPM");
+    // Slice to MIDI's Fit length uses it when no beat length is given or stored.
+    e.execute("mix.sampler_slice_marker", &json!({"track": t, "op": "add", "frame": 24_000, "snap": false})).unwrap();
+    e.execute("mix.sampler_slices_to_pads", &json!({"track": t})).unwrap();
+    let fit = |e: &mut Engine, t: TrackId| e.execute("mix.slice_to_midi", &json!({"track": t, "timing": "fit", "at": 0, "preview": true})).unwrap();
+    assert_eq!(fit(&mut e, t)["beat_length"], json!(100.0 / 60.0));
+    // A file without an `acid` chunk keeps the session tempo, as before.
+    let (mut m, mt) = file_loop(&d, "plain.wav", silence(48_000), SR, &[]);
+    let st = state(&mut m, mt);
+    assert_eq!(st["grid_tempo"], json!({"bpm": 120.0, "origin": "session"}));
+    assert_eq!(st["default_beat_length"], json!(2.0));
+    m.execute("mix.sampler_slice_marker", &json!({"track": mt, "op": "add", "frame": 24_000, "snap": false})).unwrap();
+    m.execute("mix.sampler_slices_to_pads", &json!({"track": mt})).unwrap();
+    assert_eq!(fit(&mut m, mt)["beat_length"], json!(2.0));
+}

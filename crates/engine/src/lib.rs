@@ -213,6 +213,8 @@ pub struct Engine {
     learn: Option<LearnArm>,
     command_targets: cmd::CommandTargets,
     transient_cache: cmd::TransientCache,
+    /// The `acid` tempo of each slice loop file read so far (not part of the document).
+    acid_cache: cmd::AcidCache,
     plugin_discovery: cmd::PluginDiscovery,
     /// Sampler slice detection candidates (one per track); never part of the document.
     pub(crate) slice_candidates: slice_detect::Candidates,
@@ -281,6 +283,7 @@ impl Engine {
             learn: None,
             command_targets: cmd::CommandTargets::default(),
             transient_cache: cmd::TransientCache::default(),
+            acid_cache: cmd::AcidCache::default(),
             plugin_discovery: cmd::PluginDiscovery::default(),
             slice_candidates: slice_detect::Candidates::default(),
             state_restores: Vec::new(),
@@ -443,6 +446,7 @@ impl Engine {
     /// Replace the whole document (open / new); clears history.
     pub fn replace_session(&mut self, s: Session) {
         self.transient_cache = cmd::TransientCache::default();
+        self.acid_cache = cmd::AcidCache::default();
         log_route_loops(&s);
         self.transport = TransportStatus { position: s.edit.selection.start.max(0), ..TransportStatus::default() };
         self.transport_requests.clear();

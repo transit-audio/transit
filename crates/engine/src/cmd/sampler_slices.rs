@@ -601,13 +601,13 @@ fn state(e: &mut Engine, p: &Value) -> Result<Value> {
         Some(v) => Some(v.as_i64().filter(|x| *x >= 0).ok_or_else(|| bad(id, "`at` must be a tick at or after 0"))?),
     };
     let Some(l) = &patch.slicing else { return Ok(json!({"track": t, "loop": null})) };
+    // The file's `acid` tempo: the grid's tempo before the session's, and the default beat length.
+    let acid = super::sampler_acid::loop_acid(e, id, &patch, l);
     let s = e.session();
     let source = patch.sources.get(usize::from(l.source)).map(|r| r.source);
     let rate =
         source.and_then(|x| s.pool.get(x).map(|a| a.buffer.sample_rate).or_else(|| s.source(x).map(|a| a.sample_rate))).unwrap_or(s.sample_rate.hz());
     let at_tempo = at.map(|x| AtTempo::read(s, x));
-    // The file's `acid` tempo comes with the WAV reader (slice A); none is read here yet.
-    let acid = None;
     let grid = grid_tempo(l, rate, acid, at_tempo).ok().map(|(bpm, origin)| json!({"bpm": bpm, "origin": origin.name()}));
     let showing = match l.mode {
         SliceMode::Auto => SliceSet::Auto,

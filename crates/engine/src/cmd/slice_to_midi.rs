@@ -36,7 +36,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Slice to MIDI",
         [],
         None,
-        "{track?, timing: fit|keep, at: tick (required: the placement, computed by the UI), beat_length?: quarter notes (fit; default: the loop's stored beat length, else its duration at the session tempo at `at`), root?: must match the slices' ascending mapping, preview?: false}: one note per slice of the showing set (key root+i, velocity 100, channel 1, to the next boundary) as a MIDI clip at `at`; an overlap becomes a new take (ADR 0039); preview answers and edits nothing → {track, clip, notes, first_key, last_key, velocity: 100, channel: 1, at_tick, position, start, end, ticks, timing, beat_length, placement: explicit, takes, overlap?}",
+        "{track?, timing: fit|keep, at: tick (required: the placement, computed by the UI), beat_length?: quarter notes (fit; default: the loop's stored beat length, else its duration at the WAV file's acid tempo, else at the session tempo at `at`), root?: must match the slices' ascending mapping, preview?: false}: one note per slice of the showing set (key root+i, velocity 100, channel 1, to the next boundary) as a MIDI clip at `at`; an overlap becomes a new take (ADR 0039); preview answers and edits nothing → {track, clip, notes, first_key, last_key, velocity: 100, channel: 1, at_tick, position, start, end, ticks, timing, beat_length, placement: explicit, takes, overlap?}",
         has_selection,
         slice_to_midi
     )]
@@ -233,9 +233,10 @@ fn plan(e: &Engine, t: TrackId, prm: &Params) -> Result<Plan> {
     let beat = match prm.timing {
         Timing::Keep => None,
         Timing::Fit => {
-            // The acid tempo is read with the file (detection); the state query reports this same
-            // default, so the panel shows the value used.
-            let default = rate.and_then(|r| default_beat_length(l, r, None, Some(AtTempo::read(s, prm.at))));
+            // The file's `acid` tempo, else the session tempo at `at`; the state query reports this
+            // same default, so the panel shows the value used.
+            let acid = super::sampler_acid::loop_acid(e, ID, &patch, l);
+            let default = rate.and_then(|r| default_beat_length(l, r, acid, Some(AtTempo::read(s, prm.at))));
             Some(
                 prm.beat_length
                     .or(l.beat_length)
