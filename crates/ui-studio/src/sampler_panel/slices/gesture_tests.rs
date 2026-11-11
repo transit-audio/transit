@@ -187,3 +187,69 @@ fn a_flag_click_removes_and_s_refuses_in_the_engines_words() {
     assert!(line.check);
     assert_eq!(line.text, "Removed marker 3; slice 2 now runs to 0.750 s");
 }
+
+/// Selects slice `index` by its cell, then picks zoom level `zoom` (the selected slice centered).
+fn zoomed(t: &mut super::super::test_rig::T, tr: transit_model::TrackId, index: usize, zoom: usize) {
+    let cell = bench(t, tr).cells.iter().find(|c| c.0 == index).unwrap().1;
+    t.click(mid(cell), 1);
+    let z = bench(t, tr).zoom.unwrap();
+    t.click(mid(z.segments[zoom]), 1);
+}
+
+#[test]
+fn a_drag_released_past_the_well_edge_sends_one_move_and_ends() {
+    let (mut t, tr) = sliced();
+    zoomed(&mut t, tr, 2, 3);
+    // Scroll so that marker 3 (22 050) sits in the middle of the 8× view (the scroll bar's job).
+    {
+        let v = &mut t.app.builtin_editor.devices.sampler.views.values_mut().next().unwrap().slices;
+        let l = v.snapshot.data.clone().unwrap();
+        v.viewport.scroll_to(&l, 22_050.0 - v.viewport.span(&l) / 2.0);
+    }
+    t.frames(3);
+    let b = bench(&t, tr);
+    let f = b.flags.iter().find(|f| f.index == 2).expect("marker 3 in view at 8×");
+    let hd = mid(f.handle.unwrap());
+    let past = (b.well[0] - 40.0, hd.1);
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    steps(&mut t, vec![moved(hd), press(hd, true), moved((hd.0 - 30.0, hd.1)), moved(((hd.0 + past.0) / 2.0, hd.1)), moved(past)]);
+    assert!(view(&t).gesture.drag.is_some(), "the drag is held past the edge");
+    t.input(vec![press(past, false)]);
+    let s = sent(&t, log);
+    assert_eq!(s.len(), 1, "the release commits one move: {s:?}");
+    assert!(s[0].contains("\"op\":\"move\""), "{s:?}");
+    assert_eq!(t.undo_len(), undo + 1);
+    assert!(frames(&t, tr)[2] < 22_050, "the marker moved toward the pointer, as the move rule clamps it");
+    assert!(view(&t).gesture.drag.is_none(), "no drag is left behind");
+    // Escape closes the window as usual.
+    steps(&mut t, vec![key(egui::Key::Escape, true, egui::Modifiers::NONE), key(egui::Key::Escape, false, egui::Modifiers::NONE)]);
+    assert!(!t.app.ui.plugin_windows.iter().any(|k| k.0 == tr), "Escape closed the window");
+}
+
+#[test]
+fn a_press_on_a_handle_past_1x_starts_a_drag_not_a_scroll() {
+    let (mut t, tr) = sliced();
+    zoomed(&mut t, tr, 1, 1);
+    let b = bench(&t, tr);
+    assert!(b.scroll.is_some(), "the scroll bar shows at 2×");
+    let range = b.view;
+    let hd = mid(b.flags.iter().find(|f| f.index == 1).expect("marker 2 in view").handle.unwrap());
+    steps(&mut t, vec![moved(hd), press(hd, true), moved((hd.0 + 10.0, hd.1)), moved((hd.0 + 20.0, hd.1))]);
+    assert!(view(&t).gesture.drag.is_some_and(|d| d.index == 1), "the press at the handle's center starts a marker drag");
+    assert_eq!(bench(&t, tr).view, range, "the view does not scroll");
+    t.input(vec![press((hd.0 + 20.0, hd.1), false)]);
+}
+
+#[test]
+fn a_drag_whose_release_was_not_seen_ends_with_no_button_down() {
+    let (mut t, tr) = sliced();
+    let log = view(&t).sent.len();
+    // A drag left over with no button down (its release went to no frame of the bench).
+    let id = t.patch(tr).slicing.unwrap().manual.unwrap().markers[1].id;
+    t.app.builtin_editor.devices.sampler.views.values_mut().next().unwrap().slices.gesture.drag =
+        Some(super::bench_gestures::Drag { index: 1, id, requested: 15_000, cancelled: false });
+    t.frames(2);
+    assert!(view(&t).gesture.drag.is_none(), "the bench drops it");
+    assert_eq!(sent(&t, log), Vec::<String>::new(), "and sends nothing");
+    assert_eq!(frames(&t, tr), [0, 11_025, 22_050, 33_075]);
+}

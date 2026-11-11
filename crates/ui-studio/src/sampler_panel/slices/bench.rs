@@ -558,6 +558,9 @@ fn draw_loop(
     // before the handles, which sit over it and take their own presses.
     let sense = if inputs.missing.is_some() { Sense::hover() } else { Sense::click() };
     let body_resp = ui.interact(body, egui::Id::new(("sampler_slice_well", uid)), sense);
+    // Past 1× the scroll bar sits in the well's foot under the handles (the board draws the two
+    // overlapping): registered before them, so a handle takes its own presses where they overlap.
+    scroll(ui, wp, uid, view, l, area, out);
     // The markers: lines, then flags over them (a flag that would run into the next boundary is
     // left out, so the cell between the two boundaries stays clickable), then the Manual handles.
     let dragging = view.gesture.drag.clone();
@@ -585,11 +588,17 @@ fn draw_loop(
         let flag = Rect::from_min_size(pos2(lx, strip.min.y + tk::BENCH_FLAG_INSET), vec2(w, tk::BENCH_FLAG_HEIGHT));
         let crowded = flag.max.x > next;
         flag_rights.push(if crowded { lx + 1.0 } else { flag.max.x });
-        if !visible(lx, flag.max.x) {
+        // The dragged marker keeps its handle's interaction while its line is off the view (a drag
+        // past the well's edge), so its release is seen; it is drawn only when visible.
+        let vis = visible(lx, flag.max.x);
+        let held_here = dragging.as_ref().is_some_and(|d| d.index == i);
+        if !vis && !held_here {
             continue;
         }
         let line = Rect::from_min_max(pos2(lx, area.min.y), pos2(lx + 1.0, area.max.y));
-        wp.rect_filled(line, 0.0, line_color);
+        if vis {
+            wp.rect_filled(line, 0.0, line_color);
+        }
         let names = if is_sel {
             tk::BENCH_SELECTED_FLAG
         } else if manual {
@@ -598,7 +607,7 @@ fn draw_loop(
             tk::BENCH_AUTO_FLAG
         };
         let (fill, ink, edge) = (named(names[0]), named(names[1]), named(names[2]));
-        if !crowded {
+        if vis && !crowded {
             let r = tk::BENCH_FLAG_RADIUS.map(|v| v as u8);
             wp.rect(
                 flag,
@@ -624,7 +633,9 @@ fn draw_loop(
             let held = preview.is_some();
             let ring = if held { t.signal } else { named(tk::BENCH_HANDLE_LINE) };
             let fill = if held { t.signal } else { named(tk::BENCH_HANDLE_FILL) };
-            wp.circle(h.center(), (d - tk::BENCH_HANDLE_STROKE) / 2.0, fill, Stroke::new(tk::BENCH_HANDLE_STROKE, ring));
+            if vis {
+                wp.circle(h.center(), (d - tk::BENCH_HANDLE_STROKE) / 2.0, fill, Stroke::new(tk::BENCH_HANDLE_STROKE, ring));
+            }
             if let Some(id) = s.id {
                 let resp = ui.interact(h, egui::Id::new(("sampler_slice_handle", uid, i)), Sense::drag()).on_hover_text(&inputs.handle_tip);
                 let pointer = resp.interact_pointer_pos().map(|p| view.viewport.frame_at(l, p.x, area.min.x, area.width()));
@@ -646,7 +657,7 @@ fn draw_loop(
             }
             r4(h)
         });
-        if let Some((_, tip)) = &preview {
+        if let Some((_, tip)) = preview.as_ref().filter(|_| vis) {
             let size = widgets::role_size(wp, &TAG_FONT, tip) + vec2(2.0 * tk::TAG_PADDING_X, 0.0);
             let bottom = area.max.y - tk::BENCH_HANDLE_INSET - tk::BENCH_HANDLE - tk::TAG_INSET;
             let r = Rect::from_min_size(pos2(lx + tk::TAG_INSET, bottom - size.y), size);
@@ -654,7 +665,13 @@ fn draw_loop(
             widgets::role_text(wp, &TAG_FONT, tip, t.text, Align2::CENTER_CENTER, r.center());
             out.drag = Some((r4(line), tip.clone(), r4(r)));
         }
-        out.flags.push(FlagRecord { index: i, frame: s.frame, line: r4(line), line_color, flag: r4(flag), crowded, text, fill, ink, edge, handle });
+        if vis {
+            out.flags.push(FlagRecord { index: i, frame: s.frame, line: r4(line), line_color, flag: r4(flag), crowded, text, fill, ink, edge, handle });
+        }
+    }
+    // A drag whose release was not seen (no button is down any more) is over: nothing is sent.
+    if view.gesture.drag.is_some() && !ui.input(|i| i.pointer.any_down()) {
+        view.gesture.drag = None;
     }
     // The cells: from a slice's flag (its line where the flag is left out) to the next boundary;
     // a click selects the slice, a double-click on the same cell renames it in place.
@@ -701,7 +718,6 @@ fn draw_loop(
         }
         body_resp.on_hover_text(format!("{ms:.1} ms"));
     }
-    scroll(ui, wp, uid, view, l, area, out);
     intent
 }
 
