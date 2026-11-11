@@ -83,3 +83,15 @@ fn a_drag_whose_widget_went_away_is_dropped_and_escape_closes_the_window_again()
     t.key("Escape");
     assert!(t.app.builtin_editor.windows.is_empty(), "Escape is the window's again");
 }
+
+#[test]
+fn a_press_on_a_handles_flag_that_does_not_move_moves_nothing() {
+    let (mut t, tr) = region(1000, 20_000);
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    for flag in [layout(&t, tr).zone.unwrap().wave.end_flag, layout(&t, tr).zone.unwrap().wave.start_flag] {
+        t.click(mid(flag), 1);
+    }
+    assert_eq!((t.undo_len(), sent(&t, log).len()), (undo, 0), "the flags' centers are off their lines; a click moves nothing");
+    let z = t.patch(tr).zone(0).unwrap().clone();
+    assert_eq!((z.start, z.end), (1000, 20_000));
+}

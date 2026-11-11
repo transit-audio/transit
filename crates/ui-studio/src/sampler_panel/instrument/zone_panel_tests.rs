@@ -197,7 +197,8 @@ fn a_handle_drag_sends_one_zone_edit_with_only_its_end() {
     let to = (from.0 + 100.0, from.1);
     drag(&mut t, from, to);
     let (left, right) = (w.well[0] + 1.0, w.well[2] - 1.0);
-    let frame = (((to.0 - left) / (right - left)) as f64 * 48_000.0).round() as u64;
+    // The handle keeps the distance the press held it at: its line moves by the pointer's 100.
+    let frame = (((w.start_line[0] + 100.0 - left) / (right - left)) as f64 * 48_000.0).round() as u64;
     assert_eq!(t.patch(tr).zone(0).unwrap().start, frame);
     assert_eq!(sent(&t, log), vec![format!("mix.sampler_zone_edit {{\"region\":{{\"start\":{frame}}},\"zone\":1}}")]);
     assert_eq!(t.undo_len(), undo + 1);

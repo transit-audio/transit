@@ -38,6 +38,9 @@ pub struct WaveDrag {
     pub handle: Handle,
     pub frame: u64,
     pub cancelled: bool,
+    /// Where the press held the handle, in points from its position: the handle keeps that
+    /// distance from the pointer, so a press that does not move moves nothing.
+    pub grab: f32,
 }
 
 /// What the well shows beside the zone's span.
@@ -238,16 +241,17 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, w: &WaveInputs, drag: &mut Option<Wave
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
     if resp.drag_started()
-        && let Some(handle) = ui.input(|i| i.pointer.press_origin()).and_then(|at| grabs.handle_at(at))
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        && let Some(handle) = grabs.handle_at(origin)
     {
         let now = if handle == Handle::Start { w.span.start } else { w.span.end };
-        *drag = Some(WaveDrag { zone: w.zone, handle, frame: now, cancelled: false });
+        *drag = Some(WaveDrag { zone: w.zone, handle, frame: now, cancelled: false, grab: origin.x - x_of(now) });
     }
     if resp.dragged()
         && let (Some(d), Some(at)) = (drag.as_mut(), resp.interact_pointer_pos())
         && d.zone == w.zone
     {
-        d.frame = frame_at(at.x);
+        d.frame = frame_at(at.x - d.grab);
     }
     if resp.drag_stopped()
         && let Some(d) = drag.take()
