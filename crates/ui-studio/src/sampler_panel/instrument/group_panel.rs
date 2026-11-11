@@ -196,7 +196,42 @@ fn foot_h(p: &egui::Painter, width: f32, ask: Option<&str>) -> f32 {
     }
 }
 
-/// The panel's height for `layers` rows across `width` (the Notice's text when asking).
+/// Chip `a`'s width (`rr1`, …).
+fn chip_w(p: &egui::Painter, a: usize) -> f32 {
+    (widgets::role_size(p, &CHIP_FONT, &format!("rr{}", a + 1)).x + 2.0 * tk::CHIP_PADDING_X).max(tk::CHIP_MIN_WIDTH)
+}
+
+fn add_w(p: &egui::Painter) -> f32 {
+    widgets::role_size(p, &CAPTION, "+").x + 2.0 * tk::ADD_CHIP_PADDING_X + 2.0 * chrome::FIELD_EDGE_WIDTH
+}
+
+/// Where a layer's `n` chips and its add chip go: each one's line (from 0) and x, from `x0`,
+/// wrapping onto the next line where one would run past `right` (eight alternatives do not fit
+/// one line of the card, and the add chip must stay reachable to say so).
+fn place(p: &egui::Painter, x0: f32, right: f32, n: usize) -> (Vec<(usize, f32)>, (usize, f32)) {
+    let (mut line, mut x) = (0, x0);
+    let mut next = |w: f32| {
+        if x + w > right && x > x0 {
+            line += 1;
+            x = x0;
+        }
+        let at = (line, x);
+        x += w + tk::LAYER_ITEM_GAP;
+        at
+    };
+    let chips = (0..n).map(|a| next(chip_w(p, a))).collect();
+    let add = next(add_w(p));
+    (chips, add)
+}
+
+/// The lines `layers` take across a panel `width` wide (one per layer unless its chips wrap).
+pub fn lines(p: &egui::Painter, width: f32, layers: &[Layer]) -> usize {
+    let inner = width - 2.0 * layout::PANEL_PADDING[1];
+    let x0 = tk::LAYER_LABEL_WIDTH + tk::LAYER_ITEM_GAP;
+    layers.iter().map(|l| place(p, x0, inner, l.zones.len()).1.0 + 1).sum::<usize>().max(1)
+}
+
+/// The panel's height for `layers` lines of layers across `width` (the Notice's text when asking).
 pub fn height(p: &egui::Painter, width: f32, layers: usize, ask: Option<&str>) -> f32 {
     let inner = width - 2.0 * layout::PANEL_PADDING[1];
     let n = layers.max(1) as f32;
@@ -240,8 +275,12 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, state: &State, z: &Zone, inputs: Group
         if i > 0 {
             y += tk::LAYER_GAP;
         }
-        let row = Rect::from_min_size(pos2(inner.min.x, y), vec2(inner.width(), tk::LAYER_HEIGHT));
-        let rcy = row.center().y;
+        let x0 = inner.min.x + tk::LAYER_LABEL_WIDTH + tk::LAYER_ITEM_GAP;
+        let (spots, add_at) = place(&p, x0, inner.max.x, l.zones.len());
+        let more = add_at.0 as f32;
+        let row = Rect::from_min_size(pos2(inner.min.x, y), vec2(inner.width(), tk::LAYER_HEIGHT + more * (tk::LAYER_HEIGHT + tk::LAYER_GAP)));
+        let rcy = y + tk::LAYER_HEIGHT / 2.0;
+        let line_cy = |line: usize| rcy + line as f32 * (tk::LAYER_HEIGHT + tk::LAYER_GAP);
         let mine = l.layer == selected_layer;
         let ink = if mine { t.text } else { t.text_muted };
         let text = match &l.label {
@@ -249,12 +288,11 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, state: &State, z: &Zone, inputs: Group
             None => format!("{}–{}", l.velocities[0], l.velocities[1]),
         };
         let label_r = widgets::role_text(&p, &tokens::VALUE, &text, ink, Align2::LEFT_CENTER, pos2(row.min.x, rcy));
-        let mut x = row.min.x + tk::LAYER_LABEL_WIDTH + tk::LAYER_ITEM_GAP;
         let mut chips = Vec::new();
         for (a, zone) in l.zones.iter().enumerate() {
             let ctext = format!("rr{}", a + 1);
-            let w = (widgets::role_size(&p, &CHIP_FONT, &ctext).x + 2.0 * tk::CHIP_PADDING_X).max(tk::CHIP_MIN_WIDTH);
-            let cr = Rect::from_min_size(pos2(x, rcy - tk::CHIP / 2.0), vec2(w, tk::CHIP));
+            let (line, x) = spots[a];
+            let cr = Rect::from_min_size(pos2(x, line_cy(line) - tk::CHIP / 2.0), vec2(chip_w(&p, a), tk::CHIP));
             let selected = *zone == z.zone;
             let (edge, ew, cink) =
                 if selected { (t.signal, tk::SELECTED_BORDER_WIDTH, t.text) } else { (color(tk::CHIP_EDGE), chrome::FIELD_EDGE_WIDTH, t.text_muted) };
@@ -264,10 +302,8 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, state: &State, z: &Zone, inputs: Group
                 intent = Some(Intent::Select(*zone));
             }
             chips.push(ChipRecord { zone: *zone, text: ctext, rect: r4(cr), selected, edge_width: ew });
-            x = cr.max.x + tk::LAYER_ITEM_GAP;
         }
-        let aw = widgets::role_size(&p, &CAPTION, "+").x + 2.0 * tk::ADD_CHIP_PADDING_X + 2.0 * chrome::FIELD_EDGE_WIDTH;
-        let ar = Rect::from_min_size(pos2(x, rcy - tk::CHIP / 2.0), vec2(aw, tk::CHIP));
+        let ar = Rect::from_min_size(pos2(add_at.1, line_cy(add_at.0) - tk::CHIP / 2.0), vec2(add_w(&p), tk::CHIP));
         dashed(&p, ar, Stroke::new(chrome::FIELD_EDGE_WIDTH, color(tk::ADD_CHIP_EDGE)));
         widgets::role_text(&p, &CAPTION, "+", color(tk::ADD_CHIP_INK), Align2::CENTER_CENTER, ar.center());
         let tip = if l.layer.is_some() { "Add an alternative to this layer: choose a sample" } else { "Make this zone a group" };
@@ -275,7 +311,7 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, state: &State, z: &Zone, inputs: Group
             intent = Some(Intent::Add(l.layer));
         }
         out.layers.push(LayerRecord { layer: l.layer, row: r4(row), label: (text, r4(label_r)), chips, add: r4(ar) });
-        y += tk::LAYER_HEIGHT;
+        y = row.max.y;
     }
     // The divider, then Round robin.
     y += gap;

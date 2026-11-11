@@ -12,6 +12,14 @@
 //! the engine decides, and a refusal is its text in the note row. The keyboard: Escape cancels a
 //! zone or handle drag (nothing is sent), never while typing, a menu or a modal is open, or another
 //! window has the keyboard, and it never falls through to the arrangement.
+//!
+//! States (README, Sampler views, States): with no zone the key map's well is the drop target
+//! (`+ Drop a sample` and Load…, or a file dropped anywhere on the view: one
+//! `mix.sampler_zone_source` into the lowest empty zone), the Zone and Group cards ghosted and the
+//! sections at 40 percent; a refused file is the engine's text in the note row, nothing loaded;
+//! the zone waveform reads `Analyzing…` while its source's peaks are not there, and hatches with
+//! a card naming the file when its audio is missing (the zone, its id and its round-robin place
+//! kept). A legacy one-sample patch shows the shared New Kit notice ([`super::legacy`]).
 
 pub mod fade_fields;
 pub mod group_actions;
@@ -26,6 +34,8 @@ pub mod zone_wave;
 #[cfg(test)]
 mod fades_tests;
 #[cfg(test)]
+mod followup_tests;
+#[cfg(test)]
 mod group_panel_tests;
 #[cfg(test)]
 mod hardening_tests;
@@ -37,6 +47,8 @@ mod keyboard_tests;
 mod reach_tests;
 #[cfg(test)]
 mod rig;
+#[cfg(test)]
+mod states_tests;
 #[cfg(test)]
 mod typing_tests;
 #[cfg(test)]
@@ -91,6 +103,9 @@ pub struct InstrumentView {
     pub handle: Option<Handle>,
     /// The zone Delete asked to remove (the question shows until it is answered).
     pub confirm: Option<u16>,
+    /// The seed reroll's entropy in tests (empty: the UI's own).
+    #[cfg(test)]
+    pub entropy: Vec<u32>,
 }
 
 /// The view as last drawn.
@@ -106,6 +121,8 @@ pub struct InstrumentLayout {
     pub sections: [f32; 4],
     pub bars: Vec<section_bar::SectionBarLayout>,
     pub bar_opacity: f32,
+    /// The Zone and Group cards' opacity (ghosted with no zone).
+    pub cards_opacity: f32,
 }
 
 /// A color the view names by its token.
@@ -233,7 +250,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let mc = app.ui.middle_c;
     let now = ui.input(|i| i.time);
     let mut v = std::mem::take(&mut view(app, uid).instrument);
-    let mut lo = InstrumentLayout { bar_opacity: tk::UNUSED_CONTROL_ALPHA, ..InstrumentLayout::default() };
+    let mut lo = InstrumentLayout { bar_opacity: tk::UNUSED_CONTROL_ALPHA, cards_opacity: 1.0, ..InstrumentLayout::default() };
     let data = v.snapshot.data.clone();
     let s = app.engine.session_arc();
     let p = ui.painter().clone();
@@ -260,7 +277,19 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
             Some(key_map::Intent::Map(edits)) => {
                 send(app, dev, &mut v, "mix.sampler_zone_map", key_map_gestures::params(&edits));
             }
+            Some(key_map::Intent::Load) => {
+                if let Some(path) = app.services.pick_open.as_ref().and_then(|pick| pick("mix.sampler_zone_source", None)) {
+                    load(app, dev, &mut v, st, &path);
+                }
+            }
             None => {}
+        }
+        // The empty view is the drop target: a file dropped anywhere on it loads as a new zone.
+        if st.zones.is_empty()
+            && let Some(offer) = crate::drops::take(app, dev.key)
+            && let Some(path) = offer.paths.iter().find(|p| p.is_absolute() && crate::builtin_editor::is_audio_name(&p.to_string_lossy()))
+        {
+            load(app, dev, &mut v, st, &path.to_string_lossy());
         }
     }
     y += kh;
@@ -285,7 +314,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     }
     let ask_text = selected.as_ref().and_then(|z| z.pad.filter(|_| asking)).map(|pad| group_panel::ask_text(&super::pad_id(pad - 1)));
     let rows = match (&data, &selected) {
-        (Some(st), Some(z)) => group_panel::layers(st, z).len(),
+        (Some(st), Some(z)) => group_panel::lines(&p, group_w, &group_panel::layers(st, z)),
         _ => 1,
     };
     let zh = zone_panel::height(&p, warn).max(group_panel::height(&p, group_w, rows, ask_text.as_deref()));
@@ -299,8 +328,8 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let mut focused = false;
     match (&data, &selected) {
         (Some(st), Some(z)) => {
-            let (file, frames, audio) = source_of(&s, st, z);
-            let inputs = zone_panel::PanelInputs { file, frames, audio: audio.as_deref(), names: mc };
+            let (file, frames, audio, missing) = source_of(&s, st, z);
+            let inputs = zone_panel::PanelInputs { file, frames, audio: audio.as_deref(), names: mc, missing };
             let (zl, intent) = zone_panel::show(ui, uid, st, z, &inputs, &mut v.wave_drag, &mut v.typed, kept, zone_rect);
             focused |= zl.focused;
             if let Some(h) = zl.wave.touched {
@@ -322,10 +351,14 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
             }
         }
         _ => {
+            // No zone to edit: the cards ghosted (README, States, "empty": controls ghosted).
+            lo.cards_opacity = tk::UNUSED_CONTROL_ALPHA;
+            let mut gp = p.clone();
+            gp.multiply_opacity(lo.cards_opacity);
             for (r, name) in [(zone_rect, "Zone"), (group, "Group")] {
-                p.rect(r, radius::PANEL, TOKENS.surface_panel, Stroke::new(1.0, TOKENS.line), StrokeKind::Inside);
+                gp.rect(r, radius::PANEL, TOKENS.surface_panel, Stroke::new(1.0, TOKENS.line), StrokeKind::Inside);
                 let inner = r.shrink2(vec2(space::PANEL_PADDING[1], space::PANEL_PADDING[0]));
-                super::section_label(&p, inner.min, name);
+                super::section_label(&gp, inner.min, name);
             }
         }
     }
@@ -373,16 +406,30 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     y - rect.min.y
 }
 
-/// The zone's file name, its source's length in frames and its audio.
-fn source_of(s: &transit_model::Session, st: &state::State, z: &state::Zone) -> (String, u64, Option<std::sync::Arc<transit_model::SourceAudio>>) {
-    let Some(id) = st.span(z).and_then(|sp| sp.source) else { return (String::new(), 0, None) };
+/// The empty view's Load… or a dropped file: one `mix.sampler_zone_source` with the file's path
+/// into the lowest empty zone (the UI's default, ADR 0041 amendment 2026-11-08); the engine sets
+/// the rest. The new zone is selected; a refusal is the note row and nothing is loaded.
+fn load(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, st: &state::State, path: &str) {
+    let zone = group_actions::free_zone(st).unwrap_or(transit_model::sampler_patch::ZONES as u16 + 1);
+    if send(app, dev, v, "mix.sampler_zone_source", json!({"zone": zone, "path": path})) {
+        v.selected = Some(zone);
+    }
+}
+
+/// The zone's file name, its source's length in frames, its audio and whether its audio is
+/// missing from the session (a source the session lists with no audio in its pool).
+type SourceOf = (String, u64, Option<std::sync::Arc<transit_model::SourceAudio>>, bool);
+
+fn source_of(s: &transit_model::Session, st: &state::State, z: &state::Zone) -> SourceOf {
+    let Some(id) = st.span(z).and_then(|sp| sp.source) else { return (String::new(), 0, None, false) };
     let audio = s.pool.get(id).cloned();
     let src = s.source(id);
     let name = src
         .map(|x| std::path::Path::new(&x.path).file_name().and_then(|n| n.to_str()).map_or_else(|| x.name.clone(), str::to_string))
         .unwrap_or_default();
     let frames = audio.as_ref().map(|a| a.frames() as u64).or_else(|| src.map(|x| x.frames)).unwrap_or(0);
-    (name, frames, audio)
+    let missing = !s.pool.contains(id);
+    (name, frames, audio, missing)
 }
 
 /// Sends what a completed Zone panel gesture asks for (one `mix.sampler_zone_edit`, only its field).

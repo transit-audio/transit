@@ -32,6 +32,8 @@ pub struct PanelInputs<'a> {
     pub frames: u64,
     pub audio: Option<&'a transit_model::SourceAudio>,
     pub names: transit_midi::MiddleC,
+    /// The source's audio is missing from the session (missing media).
+    pub missing: bool,
 }
 
 /// What the panel asks for this frame.
@@ -283,6 +285,7 @@ pub(crate) fn show(
         locked: z.slice.is_some(),
         audio: inputs.audio,
         handle_tip: &tip,
+        missing: inputs.missing.then_some(inputs.file.as_str()),
     };
     let (wave, moved) = zone_wave::show(ui, uid, &w, wave_drag, well);
     out.wave = wave;

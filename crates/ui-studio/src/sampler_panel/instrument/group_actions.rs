@@ -18,6 +18,8 @@
 //!
 //! The UI picks the defaults the engine never guesses (ADR 0041 amendment 2026-11-08): the new
 //! group's id (the lowest with no member and no stored mode) and the new zone (the lowest empty).
+//! Over capacity the UI never decides: with every zone in use the add still sends (zone 257, one
+//! past the last) and a ninth alternative is sent as such, so the engine's refusal is the note.
 
 use super::group_panel::Intent;
 use super::state::{State, Zone};
@@ -37,11 +39,16 @@ pub fn free_zone(state: &State) -> Option<u16> {
     (1..=ZONES as u16).find(|n| state.zone(*n).is_none())
 }
 
-/// A seed from the UI's own entropy: 1 to 4,294,967,295 and never `now`.
-pub fn fresh_seed(now: u32) -> u32 {
+/// The UI's own entropy (never the audio path): a stream of values from `std`'s random hasher keys.
+pub fn ui_entropy() -> impl Iterator<Item = u32> {
     use std::hash::BuildHasher;
     let s = std::collections::hash_map::RandomState::new();
-    (0u64..).map(|i| s.hash_one(i) as u32).find(|x| *x != 0 && *x != now).unwrap_or(1)
+    (0u64..).map(move |i| s.hash_one(i) as u32)
+}
+
+/// A seed from `entropy`: its first value from 1 to 4,294,967,295 that is not `now`.
+pub fn fresh_seed(now: u32, entropy: impl IntoIterator<Item = u32>) -> u32 {
+    entropy.into_iter().find(|x| *x != 0 && *x != now).unwrap_or(1)
 }
 
 fn place(group: u8, layer: u8, alternative: u8) -> serde_json::Value {
@@ -62,7 +69,8 @@ pub(crate) fn apply(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, state
             send(app, dev, v, "mix.sampler_zone_map", json!({ "zones": [zone] }));
         }
         Intent::Add(Some(layer)) => {
-            let (Some(m), Some(n)) = (z.membership, free_zone(state)) else { return };
+            let Some(m) = z.membership else { return };
+            let n = free_zone(state).unwrap_or(ZONES as u16 + 1);
             let alts: Vec<&Zone> = state.zones.iter().filter(|o| o.membership.is_some_and(|p| p.group == m.group && p.layer == layer)).collect();
             let Some(first) = alts.first() else { return };
             let next = alts.iter().filter_map(|o| o.membership.map(|p| p.alternative)).max().map_or(0, |a| a.saturating_add(1));
@@ -89,7 +97,13 @@ pub(crate) fn apply(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, state
             send(app, dev, v, "mix.sampler_seed", json!({ "seed": seed }));
         }
         Intent::Reroll => {
-            send(app, dev, v, "mix.sampler_seed", json!({"seed": fresh_seed(state.seed)}));
+            // A test gives the entropy (so the value sent is known); the app uses its own.
+            #[cfg(test)]
+            let seed =
+                if v.entropy.is_empty() { fresh_seed(state.seed, ui_entropy()) } else { fresh_seed(state.seed, std::mem::take(&mut v.entropy)) };
+            #[cfg(not(test))]
+            let seed = fresh_seed(state.seed, ui_entropy());
+            send(app, dev, v, "mix.sampler_seed", json!({ "seed": seed }));
         }
         Intent::Sensitivity(x) => {
             // The fader steps by hundredths; sent as that decimal, not the f32's widening.

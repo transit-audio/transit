@@ -7,6 +7,11 @@
 //! as a hatch at the loop's end. A slice-bound zone shows its slice's derived region and loop, its
 //! handles locked (the key map's lock beside each flag); they do not drag.
 //!
+//! States (README, Sampler views, States): while the source's peaks are not there yet the well
+//! reads `Analyzing…` in a status tag in its corner and stays editable; a source whose audio is
+//! missing hatches the well with a card naming the file and Relink… (unavailable until a relink
+//! command exists), the handles kept as stored.
+//!
 //! Positions are the source's own frames at its native rate; the waveform comes from the source's
 //! existing peaks ([`super::super::slices::wave`]).
 
@@ -56,6 +61,8 @@ pub struct WaveInputs<'a> {
     pub locked: bool,
     pub audio: Option<&'a transit_model::SourceAudio>,
     pub handle_tip: &'a str,
+    /// The source's file name when its audio is missing (missing media).
+    pub missing: Option<&'a str>,
 }
 
 /// The well as last drawn.
@@ -79,6 +86,10 @@ pub struct WaveLayout {
     pub inside: usize,
     /// The handle a press took this frame (the keyboard's nudges move it).
     pub touched: Option<Handle>,
+    /// The status tag (`Analyzing…`) and where it sits.
+    pub tag: Option<(String, [f32; 4])>,
+    /// Missing media: the card, its text and its Relink… button.
+    pub missing: Option<([f32; 4], String, [f32; 4])>,
 }
 
 /// The handles' hit areas: each line with a band of [`super::key_map::EDGE`] either side, and its
@@ -172,10 +183,24 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, w: &WaveInputs, drag: &mut Option<Wave
             out.hatch = Some(r4(hatch));
         }
     }
+    // Missing media: the hatch and the card naming the file, under the handles.
+    if let Some(name) = w.missing {
+        out.missing = Some(super::super::slices::bench::missing_card(ui, &wp, egui::Id::new(("sampler_zone_relink", uid)), body, name));
+    }
     // The waveform: one column per physical pixel, the region in `signal`.
     let ppp = ui.ctx().pixels_per_point();
     let cols = (area.width() * ppp).floor().max(1.0) as usize;
-    if let Some(spans) = super::super::slices::wave::columns(w.audio, 0.0, len as f64, cols) {
+    let spans = if w.missing.is_some() { None } else { super::super::slices::wave::columns(w.audio, 0.0, len as f64, cols) };
+    // Loading: the source is there but its peaks are not yet (never for a missing source).
+    let mut readout_top = area.min.y + tk::READOUT_TOP;
+    if spans.is_none() && w.missing.is_none() && w.span.source.is_some() {
+        let text = super::super::slices::bench::ANALYZING;
+        let r = super::super::slices::bench::tag(&wp, body, text);
+        out.tag = Some((text.to_string(), r4(r)));
+        // The region readout shares the corner: it moves under the tag.
+        readout_top = readout_top.max(r.max.y + SPACE[0]);
+    }
+    if let Some(spans) = spans {
         let mid = body.center().y;
         let half = body.height() / 2.0;
         let inside_ink = color(tk::WAVE_REGION).gamma_multiply(tk::WAVE_REGION_ALPHA);
@@ -219,14 +244,7 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, w: &WaveInputs, drag: &mut Option<Wave
         }
     }
     let text = format!("{:.3} – {:.3} s", seconds(start, w.rate), seconds(end, w.rate));
-    let r = widgets::role_text(
-        &wp,
-        &super::key_map::AXIS,
-        &text,
-        t.text_faint,
-        Align2::RIGHT_TOP,
-        pos2(area.max.x - tk::TAG_INSET, area.min.y + tk::READOUT_TOP),
-    );
+    let r = widgets::role_text(&wp, &super::key_map::AXIS, &text, t.text_faint, Align2::RIGHT_TOP, pos2(area.max.x - tk::TAG_INSET, readout_top));
     out.readout = (text, r4(r));
     // Dragging: one widget over the well, so the two handles' hit areas never overlap and the
     // release is seen wherever it happens. A press holds the handle under it (see `handle_at`).

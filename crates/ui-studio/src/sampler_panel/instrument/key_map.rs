@@ -12,6 +12,9 @@
 //! alternatives share one rectangle: the map draws the selected alternative, else the layer's
 //! lowest. Everything comes from `mix.sampler_state` ([`super::state`]); the gestures are
 //! [`super::key_map_gestures`].
+//!
+//! With no zone the well is the view's drop target (README, Sampler views, States, "empty"): a
+//! dashed `line.strong` edge with `+ Drop a sample` and Load…, the axis and the keyboard kept.
 
 use super::color;
 use super::key_map_gestures::{self as g, Drag, Part, ZoneEdit};
@@ -28,6 +31,9 @@ const ROW_GAP: f32 = SPACE[1];
 pub const EDGE: f32 = SPACE[0];
 /// The fewest keys the map shows.
 const MIN_KEYS: u8 = 24;
+
+/// The empty well's words.
+pub const DROP: &str = "+ Drop a sample";
 
 pub const HINT: &str = "drag an edge for the key range · the top for the velocity split · the dot for the root";
 
@@ -178,6 +184,8 @@ pub struct KeyMapLayout {
     pub held: Vec<[f32; 4]>,
     /// A drag's preview: the dragged zone's rect, whether it conflicts and why.
     pub preview: Option<([f32; 4], Option<String>)>,
+    /// No zone: the well as the drop target and its Load… button.
+    pub empty: Option<([f32; 4], [f32; 4])>,
 }
 
 impl KeyMapLayout {
@@ -216,6 +224,8 @@ pub enum Intent {
     /// An Alt-drag on a pad's zone: select it and ask about making it a group (the Group panel's
     /// Notice; nothing changes until Make group).
     Ask(u16),
+    /// The empty well's Load…: pick a sample for a new zone.
+    Load,
 }
 
 /// The zone's label: its root key's name, then its stored label (`E2 ff`); the pad id on a pad
@@ -401,7 +411,16 @@ pub(crate) fn show(
     out.axis = r4(axis);
     let well = Rect::from_min_max(pos2(axis.max.x + tk::AXIS_GAP, top), pos2(inner.max.x, top + tk::KEY_MAP_WELL_HEIGHT));
     out.well = r4(well);
-    p.rect(well, radius::DISPLAY, t.surface_inset, Stroke::new(chrome::FIELD_EDGE_WIDTH, t.line_inset), StrokeKind::Inside);
+    let empty = state.zones.is_empty();
+    let mut load = false;
+    if empty {
+        let id = egui::Id::new(("sampler_zone_load", uid));
+        let (b, clicked) = super::super::slices::bench::drop_target(ui, &p, id, well, DROP);
+        out.empty = Some((r4(well), r4(b)));
+        load = clicked;
+    } else {
+        p.rect(well, radius::DISPLAY, t.surface_inset, Stroke::new(chrome::FIELD_EDGE_WIDTH, t.line_inset), StrokeKind::Inside);
+    }
     let area = well.shrink(chrome::FIELD_EDGE_WIDTH);
     let (lo, hi) = range(state);
     (out.lo, out.hi) = (lo, hi);
@@ -414,14 +433,17 @@ pub(crate) fn show(
         out.axis_labels.push((text.to_string(), r4(r)));
     }
     let wp = p.with_clip_rect(area);
-    let mid = Rect::from_min_size(pos2(area.min.x, f.y(64.0).round()), vec2(area.width(), 1.0));
-    wp.rect_filled(mid, 0.0, t.grid);
-    out.mid_line = r4(mid);
-    for n in (lo..=hi).filter(|n| n % 12 == 0) {
-        let x = f.keys.span(n).0;
-        if x > area.min.x {
-            wp.rect_filled(Rect::from_min_size(pos2(x, area.min.y), vec2(1.0, area.height())), 0.0, t.grid);
-            out.octave_lines.push(x);
+    // The grid lines belong to the display well; the drop target has none.
+    if !empty {
+        let mid = Rect::from_min_size(pos2(area.min.x, f.y(64.0).round()), vec2(area.width(), 1.0));
+        wp.rect_filled(mid, 0.0, t.grid);
+        out.mid_line = r4(mid);
+        for n in (lo..=hi).filter(|n| n % 12 == 0) {
+            let x = f.keys.span(n).0;
+            if x > area.min.x {
+                wp.rect_filled(Rect::from_min_size(pos2(x, area.min.y), vec2(1.0, area.height())), 0.0, t.grid);
+                out.octave_lines.push(x);
+            }
         }
     }
     // The drag's preview values and their check (made again only when the edits change).
@@ -459,7 +481,8 @@ pub(crate) fn show(
         Rect::from_min_max(pos2(area.min.x, well.max.y + tk::KEYBOARD_GAP), pos2(area.max.x, well.max.y + tk::KEYBOARD_GAP + tk::KEYBOARD_HEIGHT));
     out.keyboard = r4(keyboard);
     keys(&p, state, &f, keyboard, inputs, &mut out);
-    let intent = input(ui, uid, state, &f, drag, inputs.names, &out);
+    // The empty well takes no map input, so Load… keeps its own presses.
+    let intent = if empty { load.then_some(Intent::Load) } else { input(ui, uid, state, &f, drag, inputs.names, &out) };
     (out, intent)
 }
 

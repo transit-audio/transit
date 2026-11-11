@@ -98,11 +98,33 @@ pub fn conflict(state: &State, edits: &[ZoneEdit], session: &transit_model::Sess
             z.root = e.root;
         }
     }
+    refusal(state, &p, session, names)
+}
+
+/// Whether storing `p` (the stored patch with a change applied) would be refused by the checks
+/// the commands' store runs: the reason.
+fn refusal(
+    state: &State,
+    p: &transit_model::sampler_patch::PatchV1,
+    session: &transit_model::Session,
+    names: transit_midi::MiddleC,
+) -> Option<String> {
     if let Err(r) = p.check_groups() {
         return Some(r.to_string());
     }
-    if let Err(m) = transit_mix::check_sampler_patch(&p, session) {
+    if let Err(m) = transit_mix::check_sampler_patch(p, session) {
         return Some(m);
     }
     p.layer_overload(&state.patch).map(|o| o.text(names))
+}
+
+/// Whether removing zone `zone` (from 1) would be refused, by the same checks (for the remove
+/// question's words; the command is still sent and the engine decides).
+pub fn removal(state: &State, zone: u16, session: &transit_model::Session, names: transit_midi::MiddleC) -> Option<String> {
+    let mut p = state.patch.clone();
+    p.zones.retain(|z| z.id + 1 != zone);
+    if let Some(pad) = p.pad_of(zone - 1) {
+        p.set_pad(transit_model::sampler_patch::PadEntry { zone: None, ..p.pad(pad) });
+    }
+    refusal(state, &p, session, names)
 }

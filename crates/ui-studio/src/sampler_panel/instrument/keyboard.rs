@@ -10,12 +10,15 @@
 //! - **Delete** asks to remove the selected zone (the destructive-action question: the default
 //!   button names the loss, Escape cancels, Undo brings it back); the answer sends one
 //!   `mix.sampler_zone_clear`.
+//! - **Enter, Escape** answer the Group panel's Notice while it asks about a pad's zone: Make
+//!   group (one step) and Cancel (nothing sent); Escape is then the Notice's, so the window stays.
 //!
 //! Never while typing, a modal or `app.dialog` is open, or another window has the keyboard. While
 //! a menu or other popup is open the view's keys are taken and do nothing, so they never reach the
 //! arrangement (Delete deleting clips, Alt+arrows nudging them); Escape stays the popup's. During a
 //! drag only Escape acts.
 
+use super::group_panel::Intent;
 use super::key_map::{self, Toward};
 use super::zone_wave::Handle;
 use super::{refresh, send};
@@ -30,6 +33,11 @@ pub const DELETE_LABEL: &str = "Delete Zone";
 /// The question's id for instance `uid` (its layout is read by `chrome::modal_layout`).
 pub fn confirm_id(uid: u64) -> egui::Id {
     egui::Id::new(("sampler_delete_zone", uid))
+}
+
+/// The remove question's words when the removal will be refused.
+pub fn refusal_detail(reason: &str) -> String {
+    format!("This will be refused: {reason}.")
 }
 
 /// The Sampler window of instance `uid`, when it is shown.
@@ -56,18 +64,17 @@ fn confirm(app: &mut StudioApp, ctx: &egui::Context) {
         return;
     };
     let mc = app.ui.middle_c;
-    let label = super::super::view(app, uid).instrument.snapshot.data.as_ref().and_then(|s| s.zone(zone).map(|z| key_map::label(s, z, mc)));
+    let data = super::super::view(app, uid).instrument.snapshot.data.clone();
+    let label = data.as_ref().and_then(|s| s.zone(zone).map(|z| key_map::label(s, z, mc)));
     let question = match label {
         Some(l) => format!("Delete zone {l}?"),
         None => format!("Delete zone {zone}?"),
     };
-    let ask = crate::chrome::Ask {
-        question,
-        detail: Some(crate::menus::undo_detail(false).to_string()),
-        default: DELETE_LABEL,
-        cancel: "Cancel",
-        third: None,
-    };
+    // What will happen, in the words of the checks the command's store runs: a removal they
+    // refuse says so before the answer (the command is still sent; the engine decides).
+    let refused = data.as_ref().and_then(|s| super::key_map_gestures::removal(s, zone, app.engine.session(), mc));
+    let detail = refused.map_or_else(|| crate::menus::undo_detail(false).to_string(), |r| refusal_detail(&r));
+    let ask = crate::chrome::Ask { question, detail: Some(detail), default: DELETE_LABEL, cancel: "Cancel", third: None };
     let Some(choice) = crate::chrome::modal(ctx, confirm_id(uid), &ask) else { return };
     super::super::view(app, uid).instrument.confirm = None;
     if choice == crate::chrome::Choice::Default {
@@ -104,6 +111,11 @@ pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
             d.cancelled = true;
         }
     }
+    // The Group panel's Notice answers Enter and Escape while it asks (and only then, so Escape
+    // otherwise stays the window's); under a popup the keys stay the popup's.
+    let asking = iv.ask.is_some() && iv.ask == iv.selected && !egui::Popup::is_any_open(ctx) && !dragging;
+    let make = asking && shortcuts::pressed(ctx, Action::SamplerMakeGroup);
+    let cancel = asking && shortcuts::pressed(ctx, Action::SamplerCancelMakeGroup);
     // The view's keys are taken here, so they never reach the arrangement; they act only when no
     // menu or popup holds the keyboard and no drag is in progress.
     let to = [
@@ -130,6 +142,12 @@ pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
         refresh(app, dev);
         let mut v = std::mem::take(&mut super::super::view(app, uid).instrument);
         if let (Some(state), Some(sel)) = (v.snapshot.data.clone(), v.selected) {
+            if (make || cancel)
+                && let Some(z) = state.zone(sel).cloned()
+            {
+                let answer = if make { Intent::MakeGroup } else { Intent::Cancel };
+                super::group_actions::apply(app, dev, &mut v, &state, &z, answer);
+            }
             if let Some(to) = to
                 && let Some(n) = key_map::neighbor(&state, sel, to)
             {
