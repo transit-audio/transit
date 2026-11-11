@@ -87,9 +87,10 @@ pub const DESIGN_WIDTH: f32 = 976.0;
 /// content (`width_tests`, the 326-X method): the narrowest multiple of 8 at which, with every
 /// knob at the widest value it prints, no label, readout or dial meets its neighbor or leaves its
 /// panel, every choke and trigger segment's text fits, the strip's hint clears the toggles, and the
-/// title bar's preset browser keeps clear of the brand and the track. The title bar sets it (the
-/// knob readouts alone last fit at 616).
-pub const MIN_WIDTH: f32 = 832.0;
+/// title bar's preset browser keeps clear of the brand and the track, and the view bar's widest
+/// summary keeps a bar gap before the Start note label. The view bar sets it since Expand to
+/// rack… joined its actions (the title bar alone last fit at 832, the knob readouts at 616).
+pub const MIN_WIDTH: f32 = 856.0;
 /// The footer under the content.
 pub const FOOTER_H: f32 = 32.0;
 /// Banks of sixteen pads.

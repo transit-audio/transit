@@ -74,6 +74,29 @@ fn switch(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect) -> segmented::
     }
 }
 
+/// The Pads bar's unavailable action and its tooltip.
+pub(crate) const EXPAND_TO_RACK: &str = "Expand to rack…";
+pub(crate) const EXPAND_TO_RACK_TIP: &str = "Not available yet";
+
+/// A standard button at the dense height, centred in the bar, its right edge at `right`. An
+/// unavailable one takes no input and is drawn at `sampler.unusedControlAlpha`.
+/// Returns its response and the factor its own state applies to the window's opacity.
+fn action_button(ui: &mut Ui, p: &egui::Painter, text: &str, right: f32, enabled: bool, bar: Rect) -> (egui::Response, f32) {
+    let w = (widgets::role_size(p, &chrome::BUTTON_FONT, text).x + 2.0 * chrome::BUTTON_PADDING[1]).ceil();
+    let r = Rect::from_min_size(pos2(right - w, bar.center().y - tk::VIEW_BAR_CONTROL_HEIGHT / 2.0), vec2(w, tk::VIEW_BAR_CONTROL_HEIGHT));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
+        if !enabled {
+            ui.visuals_mut().disabled_alpha = tk::UNUSED_CONTROL_ALPHA;
+            ui.disable();
+        }
+        ui.spacing_mut().button_padding = vec2(chrome::BUTTON_PADDING[1], chrome::BUTTON_PADDING[0]);
+        // `Ui::disable` multiplies the painter's opacity by exactly this.
+        let opacity = if ui.is_enabled() { 1.0 } else { ui.visuals().disabled_alpha() };
+        (ui.put(r, egui::Button::new(egui::RichText::new(text).font(chrome::BUTTON_FONT.font_id(ui.ctx())))), opacity)
+    })
+    .inner
+}
+
 /// Draw navigation and actions; return the Start note field's slot on a ready Pads view.
 pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, ready: bool, rect: Rect, out: &mut SamplerLayout) -> Option<Rect> {
     out.bar.rect = r4(rect);
@@ -84,21 +107,15 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, re
         return None;
     }
     let p = ui.painter().clone();
-    let button_w = (widgets::role_size(&p, &chrome::BUTTON_FONT, "Load kit…").x + 2.0 * chrome::BUTTON_PADDING[1]).ceil();
-    let action = Rect::from_min_size(
-        pos2(rect.max.x - button_w, rect.center().y - tk::VIEW_BAR_CONTROL_HEIGHT / 2.0),
-        vec2(button_w, tk::VIEW_BAR_CONTROL_HEIGHT),
-    );
-    let response = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(action), |ui| {
-            if !ready {
-                ui.disable();
-            }
-            ui.spacing_mut().button_padding = vec2(chrome::BUTTON_PADDING[1], chrome::BUTTON_PADDING[0]);
-            ui.put(action, egui::Button::new(egui::RichText::new("Load kit…").font(chrome::BUTTON_FONT.font_id(ui.ctx()))))
-        })
-        .inner;
-    out.bar.load_kit = Some(r4(response.rect));
+    // Expand to rack… is the last action, shown unavailable until its engine command exists
+    // (ADR 0041 amendment 2026-11-08, Pads view bar); Load kit… sits one bar gap before it.
+    let (expand, expand_opacity) = action_button(ui, &p, EXPAND_TO_RACK, rect.max.x, false, rect);
+    let expand = expand.on_disabled_hover_text(EXPAND_TO_RACK_TIP);
+    out.bar.expand = Some(r4(expand.rect));
+    let (response, load_opacity) = action_button(ui, &p, "Load kit…", expand.rect.min.x - tk::VIEW_BAR_GAP, ready, rect);
+    out.bar.opacity = [load_opacity, expand_opacity];
+    let action = response.rect;
+    out.bar.load_kit = Some(r4(action));
     out.bar.load_enabled = ready;
     let response = response.on_disabled_hover_text("Choose New Kit first");
     if response.clicked() {

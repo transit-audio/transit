@@ -579,7 +579,7 @@ Instrument and Slices currently show a line saying the view is not built yet. Pa
 selected pad and bank when you return.
 
 To fill a kit from a folder, choose **Load kit…** in the Pads bar. Pick a folder, review the
-file count and pad range, then choose **Load kit**. Cancel leaves the kit unchanged. A refusal
+file count and pad range, then choose **Load kit**. Cancel leaves the kit unchanged. **Expand to rack…** beside it is not available yet. A refusal
 appears under the pads in the engine's words. Loading currently waits for the folder to finish
 decoding. Through the control channel, use `mix.sampler_load_kit` with the track and `folder`,
 and `preview: true` to see the assignments. WAV, AIFF and FLAC files

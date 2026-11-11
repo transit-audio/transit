@@ -130,6 +130,10 @@ pub struct BarLayout {
     pub summary_slot: [f32; 4],
     pub load_kit: Option<[f32; 4]>,
     pub load_enabled: bool,
+    /// `Expand to rack…`, the last action, unavailable until its engine command exists.
+    pub expand: Option<[f32; 4]>,
+    /// The factor Load kit… and Expand to rack… apply to the window's opacity (1 when available).
+    pub opacity: [f32; 2],
 }
 
 /// The id of the Start note field of instance `uid` (its typing state lives under `editing`).

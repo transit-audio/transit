@@ -183,6 +183,14 @@ pub fn faults(t: &T, tr: TrackId) -> Vec<String> {
     if !inside(s.hint_rect, strip) {
         out.push("the hint leaves the strip".to_string());
     }
+    // The view bar's widest summary keeps a bar gap before the Start note label (the actions,
+    // Load kit… and Expand to rack…, are right-aligned and never give way).
+    let b = &panel.bar;
+    let widest = text_w(&p, &tokens::READOUT_DISPLAY, "Bank D · 16 of 16 loaded · 16 choke groups");
+    let over = b.summary_slot[0] + widest + crate::tokens::sampler::VIEW_BAR_GAP - b.start.label_rect[0];
+    if over > 0.01 {
+        out.push(format!("the widest summary meets the Start note label ({over:.1} px)"));
+    }
     out
 }
 
