@@ -1286,18 +1286,15 @@ pruning a stored note equal to its default.
 
 ## Amendment 2026-11-11: the one-sample instrument is retired (#455)
 
-Proposed 2026-11-11. The maintainer decided five things (#455), fixed here: the old one-sample
-Sampler panel has no place in the application and is retired with the legacy playback path this
-record kept for it, and nothing shows that panel or its New Kit notice again; an old session's
-one-sample Sampler is converted on open into one zone mapped across its key and velocity range,
-shown in the Instrument view, carrying its sample and settings, and it then plays through the
-current engine, one way; differences in sound (the release tail's shape, 64 voices instead of 32)
-are accepted and stated plainly in the release notes as an alpha break, with no migration shim
-beyond this one conversion; a new Sampler is an empty kit on the Pads view (#454); and this
-record's general rules stay ("checked when set, clamped when used", "the engine never guesses
-UI state", sources keep their native rate). Where those leave a gap, the items below choose the
-narrowest rule, marked **proposed**, and "Open for the maintainer" lists it with a
-recommendation.
+Proposed 2026-11-11. The maintainer decided (#455), and these points are fixed: the old one-sample
+Sampler panel and the legacy playback path this record kept for it are retired and deleted, and
+nothing shows that panel or its New Kit notice again; an old session's one-sample Sampler opens
+as an empty kit, its sample assignment and its 19 parameters dropped, with no conversion, no
+migration shim and a load note; this is stated plainly as an alpha break in the release notes;
+and a new Sampler is an empty kit on the Pads view (#454). This record's general rules stay
+("checked when set, clamped when used", "the engine never guesses UI state", sources keep their
+native rate). Where these leave a gap, the items below choose the narrowest rule, marked
+**proposed**, and "Open for the maintainer" lists it with a recommendation.
 
 **What exists today.** A Sampler is one-sample when its instrument slot names `sampler` and
 `Insert::sampler_patch` is absent (`crates/model/src/mixer.rs`, `Insert`; the UI's test is
@@ -1306,324 +1303,221 @@ recommendation.
 source in `Insert::sample`. The plan compiler hands that source to the instance through
 `Plugin::set_sample` (`crates/mix/src/compile.rs`, with the swap on a running instance in
 `crates/mix/src/active.rs` and `crates/mix/src/plan.rs`), and the legacy renderer plays it
-(`Sampler::start_note`, `render_frame` and `advance` in `legacy.rs`: 32 voices, the exponential
-`Adsr` of `crates/instrument-core/src/adsr.rs`, the `hermite` reader, fractional loop
-boundaries). The window draws the legacy body (`crates/ui-studio/src/sampler_panel/legacy.rs`:
-the sample line and Load Sample and Clear from `builtin_editor::sample_picker`, the parameter
-rows, the notice "This one-sample patch stays unchanged until New Kit." and its New Kit button,
-which runs `behavior::new_kit`, that is `mix.sampler_new_patch`). Three paths make or feed
-one-sample Samplers: `mix.sampler_load` and `mix.sampler_clear` (`crates/engine/src/cmd/sampler.rs`,
-`attach`), `io::load_sampler_bytes` (dropped bytes) and the browser's `Target::SamplerWindow`
-drop (`crates/ui-studio/src/browser.rs`, `editor_target`). Until #454 lands, a Sampler picked from
-the browser is one-sample too. The load path reads a session in `Session::from_json_as_saved`
-(`crates/model/src/session.rs`), which already converts retired devices there
-(`legacy_synth::retire_subtractive_synth`, `legacy_effects::retire_inherited_effects`) and
-reports through `Session::load_notes`.
+(`legacy.rs`: 32 voices, the exponential ADSR, the `hermite` reader). The window draws the
+legacy body (`crates/ui-studio/src/sampler_panel/legacy.rs`: the sample line, Load Sample and
+Clear from `builtin_editor::sample_picker`, the parameter rows, and the notice "This one-sample
+patch stays unchanged until New Kit." with its New Kit button, `behavior::new_kit`, which runs
+`mix.sampler_new_patch`). Three paths make or feed one-sample Samplers: `mix.sampler_load` and
+`mix.sampler_clear` (`crates/engine/src/cmd/sampler.rs`, `attach`), `io::load_sampler_bytes`
+(dropped bytes), and the browser's `Target::SamplerWindow` drop (`crates/ui-studio/src/browser.rs`,
+`editor_target`). Until #454 lands, a Sampler picked from the browser is one-sample too. Sessions
+are read by `Session::from_json_as_saved` (`crates/model/src/session.rs`), which already replaces
+retired devices there (`legacy_synth::retire_subtractive_synth`,
+`legacy_effects::retire_inherited_effects`) and reports through `Session::load_notes`.
 
 **Clauses this amendment replaces.** Each is quoted with its line in this record as amended
 through 2026-11-09:
 
 | Line | Clause | Now |
 |---|---|---|
-| 48–51 | "**Old work keeps its sound.** Keep the existing `sampler` registry entry, parameter ids, automation addresses and `Insert::sample`. An old one-sample instrument is presented as one Instrument zone but retains its legacy renderer until explicitly converted by a structural patch edit. Opening, saving or switching views never performs that conversion." | The registry entry `sampler` stays. The 19 parameter ids, their automation addresses and the renderer retire; opening converts (items 1 and 2). |
-| 65 | "Already converted legacy sources keep their stored PCM." | Stands, and covers the converted zone's source (item 5). |
-| 92–94 | "The legacy ADSR, exponential release threshold, interpolation boundaries and 32-voice selection remain unchanged in legacy mode; a pure move must not replace them with these new envelope rules." | Retired with the renderer (item 4 states the differences). |
-| 286 | "Legacy loop arithmetic remains in the legacy path." | Retired; the converted zone uses the loop reference above (item 3). |
+| 48–51 | "**Old work keeps its sound.** Keep the existing `sampler` registry entry, parameter ids, automation addresses and `Insert::sample`. An old one-sample instrument is presented as one Instrument zone but retains its legacy renderer until explicitly converted by a structural patch edit. Opening, saving or switching views never performs that conversion." | The registry entry `sampler` stays. The 19 parameter ids, their automation addresses, `Insert::sample` and the renderer retire; opening drops the old instrument's state and leaves an empty kit (items 1 and 2). |
+| 65 | "Already converted legacy sources keep their stored PCM." | Moot for the Sampler: the old source is no longer a Sampler source (item 3). |
+| 92–94 | "The legacy ADSR, exponential release threshold, interpolation boundaries and 32-voice selection remain unchanged in legacy mode; a pure move must not replace them with these new envelope rules." | Retired with the renderer. |
+| 286 | "Legacy loop arithmetic remains in the legacy path." | Retired with the renderer. |
 | 316 | "... rack macros, legacy compatibility and prepared sample-bank handoff." | No legacy compatibility in the adapter. |
-| 327–328 | "Preserve `Plugin::set_sample` for legacy instances; add a prepared multi-source bank seam rather than squeezing zones through its single-source API." | `Plugin::set_sample` is deleted (item 12). |
+| 327–328 | "Preserve `Plugin::set_sample` for legacy instances; add a prepared multi-source bank seam rather than squeezing zones through its single-source API." | `Plugin::set_sample` is deleted (item 7). |
 | 338 | "new Instrument patches use up to 64, legacy remains 32." | Every Sampler has 64 voices. |
-| 347 | "Legacy multichannel behavior stays unchanged." | Item 5 (a source over two channels converts to a silent zone). |
-| 352–354 | "Existing large legacy samples are grandfathered under the old loader limit until #271 can stream them equivalently; do not refuse an old session merely because new-kit limits are smaller." | Stands for the converted source (item 5). |
-| 372 | "Existing unprefixed ids keep their legacy meanings and mappings." | The unprefixed ids retire; item 6 says what happens to what addressed them. |
-| 459–460 | "Neither this migration nor these defaults create a patch for a legacy `Insert::sample` instrument." | The conversion creates one (item 2). |
-| 462–463 | "No patch field means legacy behavior from `Insert::sample` and the existing 19 parameter ids. Do not write a new patch merely by opening an old session." | Opening converts, and the next save writes the patch (item 2). The rest of that paragraph stands. |
-| 653–654 | "Use the old release build's stored fixtures/golden hashes for legacy defaults, loops, off-rate PCM, automation and steals; never regenerate the goldens from the new core." | Those goldens are removed, not regenerated (item 13). |
-| 758–759 | "... old-reader warnings and unchanged old sampler ids/mappings." | Item 13's conversion evidence replaces "unchanged old sampler ids/mappings". |
+| 347 | "Legacy multichannel behavior stays unchanged." | No legacy behavior remains; zones take mono or stereo. |
+| 352–354 | "Existing large legacy samples are grandfathered under the old loader limit until #271 can stream them equivalently; do not refuse an old session merely because new-kit limits are smaller." | Retired: no old sample plays in a Sampler, so nothing is grandfathered; an old session still opens. |
+| 372 | "Existing unprefixed ids keep their legacy meanings and mappings." | The unprefixed ids retire; what addressed them is dropped (item 4). |
+| 459–460 | "Neither this migration nor these defaults create a patch for a legacy `Insert::sample` instrument." | Opening gives such an instrument an empty kit patch (item 2). |
+| 462–463 | "No patch field means legacy behavior from `Insert::sample` and the existing 19 parameter ids. Do not write a new patch merely by opening an old session." | No patch field on load means an old instrument, which opens as an empty kit, and the next save writes that kit (item 2). The rest of that paragraph stands. |
+| 653–654 | "Use the old release build's stored fixtures/golden hashes for legacy defaults, loops, off-rate PCM, automation and steals; never regenerate the goldens from the new core." | Those goldens are removed, not regenerated (item 8). |
+| 758–759 | "... old-reader warnings and unchanged old sampler ids/mappings." | Item 8's drop evidence replaces "unchanged old sampler ids/mappings". |
 | 794 | "... compatibility path ..." and "Basic one-zone Instrument panel remains usable." | No compatibility path and no one-zone panel. |
-| 795 | "Legacy migration is already in #269; this slice extends its tests." | The conversion is this amendment's slices (item 14). |
-| 808 | "old patches retain their exact legacy sound." | Old instruments sound close, with the stated differences (item 4). |
+| 795 | "Legacy migration is already in #269; this slice extends its tests." | There is no migration; this amendment's slices drop the old state (item 9). |
+| 808 | "old patches retain their exact legacy sound." | Old one-sample instruments do not sound; they open as empty kits (item 2). |
 | 1087–1088 | "... and on a legacy one-sample patch is disabled behind the Notice's **New Kit**." | Load kit… has no legacy state to wait for. |
 
 **1. The one-sample instrument is retired.** After this amendment's slices every Sampler has a
-patch and plays through `transit-sampler-core`. The legacy renderer, `Plugin::set_sample`, the
-legacy panel, its notice, New Kit, `mix.sampler_load`, `mix.sampler_clear`,
-`io::load_sampler_bytes` and the Sampler-window drop target are deleted (item 12). `SAMPLER_INFO`
-keeps its id, name and category; its parameter table becomes empty, since the 19 ids were the
-legacy renderer's and the zone slot ids stay outside it (body, "Capacities and admission").
-`mix.sampler_new_patch` stays for the patch-making paths (#454 uses it); nothing else makes a
-Sampler without a patch. **Proposed:** an instance that still meets a Sampler without a patch (a
-hand-edited file the conversion could not read) plays silence through the core with no
-publication; there is no third path.
+patch and plays through `transit-sampler-core`. The legacy renderer, the legacy panel, its notice
+and New Kit, and every command that made or fed a one-sample Sampler are deleted (item 7).
+`SAMPLER_INFO` keeps its id, name and category, and its parameter table becomes empty: the 19
+ids were the legacy renderer's, and the zone slot ids stay outside it (body, "Capacities and
+admission"). `mix.sampler_new_patch` stays, since #454's new Sampler uses it. **Proposed:** an
+instance that still meets a Sampler without a patch (none should exist after item 2) plays
+silence through the core with nothing published; there is no third path.
 
-**2. When and where the conversion runs.** On parse, in the model:
-`Session::from_json_as_saved` calls a new `legacy_sampler::retire_one_sample_sampler` (proposed
-file `crates/model/src/legacy_sampler.rs`, beside `legacy_synth.rs`) after the two existing
-retirements and before `legacy_mapping::migrate_session`, and its test
-(`uses_one_sample_sampler`) joins the `changes` expression, so the caller receives the session
-as stored and the opened session reads as modified, as for the retired synth. It runs exactly
-once per load, on the control thread, before the session reaches the engine
-(`Engine::replace_session`) or the plan compiler, so nothing on the real-time side ever sees a
-one-sample instrument. It converts every slot that names `sampler` without a patch, with or
-without `Insert::sample`. A second pass finds nothing. `replace_session` clears the undo and
-redo stacks, so the conversion is not an undo step and no undo returns to the old state. The
-next save (and autosave) writes the patch, writes no `Insert::sample` and none of the 19 ids in
-`Insert::params`; the instrument's `bypass`, `active` and `preset` label are kept. Every path that
-parses a session gets it: open, open from bytes, crash recovery, and
-`file.import_session_data` (item 8). The model has no audio at parse time; the conversion reads
-the source's stored metadata (item 5).
+**2. Old instruments open as empty kits.** The drop happens on parse, in the model. A new
+`legacy_sampler::retire_one_sample_sampler` (proposed file `crates/model/src/legacy_sampler.rs`,
+beside `legacy_synth.rs`) is called in `Session::from_json_as_saved` after the two existing
+retirements and before `legacy_mapping::migrate_session`. Its test (`uses_one_sample_sampler`)
+joins the `changes` expression, so the caller gets the session as stored and the opened session
+reads as modified, as with the retired synth. It runs once per load, on the control thread,
+before the session reaches the engine (`Engine::replace_session`) or the plan compiler.
+`replace_session` clears undo and redo, so the drop is not an undo step and no undo brings the
+old state back. A second pass finds nothing.
 
-**3. The zone.** The patch is `PatchV1::default()` (seed 1, pad start note 36, no pads stored,
-no groups, no loop) with one source reference and one zone, id 0 (slot `zone001`). Old values
-are read as the legacy instance read them: a missing id takes its default, a stored value is
-clamped to its range (`set_param` clamped through `ParamInfo::clamp`), a toggle is on at 0.5 and
-above, a choice is its rounded index. The converter keeps the 19 ids' ranges and defaults as its
-own constants, since the dsp table is deleted and the model does not depend on dsp. With L the
-source's stored frame count (`Source::frames`, native frames at its stored rate) and
-`pct(v) = f64::from(v / 100.0)` clamped to 0..1 (the legacy `update` arithmetic):
+- **Detection.** A slot is one-sample exactly when its `plugin` is `sampler` and its
+  `sampler_patch` is `None`, with or without `Insert::sample`. A patch that is present in any
+  state is never touched: a ready patch, a patch of a schema this version does not know, and a
+  patch kept opaque because it did not parse or validate (`PatchState::Unknown` and
+  `PatchState::Invalid` in `crates/model/src/sampler_patch.rs`, "kept as saved") are all `Some`,
+  because the field's deserializer turns any present value into a `SamplerPatch`. Only an absent
+  field (or an explicit `null`) is `None`.
+- **What the slot becomes.** `sampler_patch` is set to `SamplerPatch::new()`, that is
+  `PatchV1::default()`: schema 1, seed 1 (not written, its default), no sources, zones, pads,
+  groups, loop or controls, and pad start note 36. This is a new kit made at load, so the
+  2026-11-09 amendment's new-kit default applies (`PatchV1::default()` and `SamplerPatch::new()`
+  yield 36 in the code; only reading a saved patch without the field yields 60). Because 36 is
+  not 60, the next save writes `pad_start_note: 36`, exactly as #454's new kit does. The 19 ids
+  are removed from `Insert::params`, `Insert::sample` is cleared, and the instrument's user pages
+  are removed (item 4). `bypass`, `active` and the `preset` label are kept.
+- **What is written.** The next save (and autosave) writes the empty patch, no `sample` and none
+  of the 19 ids; `Session::needs` then lists `sampler_patch` (item 6).
 
-| Old parameter (range, default) | Carried by | Conversion | Verdict |
-|---|---|---|---|
-| `root_note` (0–127, 60) | zone `root` | round to nearest, clamp 0..127 (legacy `whole`) | exact |
-| `transpose` (−48–48 semitones, 0) | zone `transpose` | copy | exact |
-| `fine_tune` (−100–100 cents, 0) | zone `cents` | copy | exact (same `source_rate / session_rate * 2^(semitones/12)` step, same 256 bound) |
-| `key_track` (on) | zone `key_tracking` | toggle reading | exact |
-| `key_low`, `key_high` (0, 127) | zone `keys` | each rounded and clamped 0..127, then ordered low, high | exact |
-| `vel_low`, `vel_high` (1, 127) | zone `velocities` | each rounded and clamped 1..127, then ordered | exact |
-| `velocity` (0–100 %, 70) | zone `velocity_sensitivity` | `v / 100` | exact (same gain rule) |
-| `attack` (0.1–5000 ms, 1) | zone `attack_ms` | copy | approximate: both linear; the frame count is rounded (under half a frame) |
-| `decay` (1–10000 ms, 300) | zone `decay_ms` | copy | approximate: item 4 |
-| `sustain` (0–100 %, 100) | zone `sustain` | `v / 100` | exact |
-| `release` (1–10000 ms, 150) | zone `release_ms` | copy | approximate: item 4 |
-| `play_mode` (Gate, One Shot) | zone `mode` | `gate`, `one_shot` | exact, apart from item 4's one-shot notes |
-| `start` (0–100 %, 0) | zone `start` | `floor(pct * (L - 1) + 1/2)` | approximate: legacy started at the fractional frame `pct * (L - 1)`; under half a source frame |
-| `loop_mode` (Off, Forward, Ping-Pong) | zone `loop_mode` | `off`, `forward`, `ping_pong`, then the loop rules below | exact mode; approximate arithmetic (item 4) |
-| `loop_start`, `loop_end` (0–100 %, 0 and 100) | zone `loop_start`, `loop_end` | with a, b the two percents ordered: `floor(pct(a) * L + 1/2)`, `floor(pct(b) * L + 1/2)` | approximate: each under half a source frame |
-| `level` (−48–12 dB, 0) | control `zone001_level` | copy; not stored at 0 dB (`set_control`) | exact for a fixed value (same dB-to-gain); the legacy 20 ms smoother mattered only to automation, which item 6 drops |
-| none (the sample's end) | zone `end` | L | exact: legacy voices stopped at the sample's end |
-| none | `pan` 0, `reverse` off, `declick_ms` 0, `crossfade` 0, no fades, membership, slice or label; shaper off, empty matrix | defaults | exact: legacy had none of these, and a centered pan plays mono on both sides and stereo side for side at unity |
+**3. The old sample's file and pool entry.** Nothing deletes or rewrites it. The session source
+that `Insert::sample` named stays in `Session::sources` (it shows in the Clip List), and the open
+path still decodes it into the pool, because the open path decodes every entry of
+`Session::sources` (`open_session_linked` in `crates/engine/src/io/session.rs`). No instrument
+references it any more, so it becomes unreferenced unless a timeline clip also uses it. One
+change follows: the drop runs before decoding, so it is no longer in `sampler_sources`, and it
+is decoded at the session rate like timeline audio rather than at its stored rate; the file on
+disk is unchanged. Save keeps it like every other source (`write_session` writes or keeps every
+entry of `Session::sources`), so a saved session still carries the file. The user removes it
+with the Clip List's clear, as for any unused file, or loads it onto a pad again (from its file;
+through `mix.sampler_zone_source` with the source id it would enter at its decoded, session-rate
+PCM). `file.import_session_data` no longer brings the file along with a dropped instrument, since
+the donor is parsed first and the instrument names no source (`session_data.rs`, `needed`).
 
-**Loop rules (proposed).** The zone stores its two loop frames whatever its mode, so a later
-loop edit starts from them. The loop mode is stored as `off` when: the rounded loop is shorter
-than two frames (legacy looped from one frame up); the start is at or past the loop end (legacy
-did not loop then either: exact); or the play mode is One Shot (legacy looped a one-shot until
-All Notes Off or a steal; the current engine never loops a one-shot, and a fresh patch does not
-store a combination its own edits refuse, amendment 2026-11-08 item 1). When the start falls
-inside the loop (loop start below start, start below loop end) the stored loop start becomes the
-start: the first pass sounds as before and later passes repeat the shorter loop; the mode is
-`off` if that leaves under two frames. The validator's rule `start <= loop_start < loop_end <=
-end` then holds for every converted zone.
+**4. What addressed the old parameters.** The drop removes, on that track: automation lanes on
+the instrument slot whose parameter is one of the 19 ids; session MIDI mappings to those ids on
+that slot; rack macro targets (`MacroMapping` naming that track, the instrument slot and one of
+the ids); and the instrument's user pages (ADR 0047), whose slots can hold only those ids. This
+follows `retire_subtractive_synth`. Controller profile mappings live outside the session and are
+not edited; one that names a retired id finds no parameter and does nothing. No modulation
+matrix addresses the old ids.
 
-**4. What sounds different, and by how much.** These are the alpha break the release notes state
-(decided):
+**5. Load notes.** One line per track and one summary, through `Session::load_notes`, shown once
+on open; a save leaves nothing to drop, so the next open has no note. Proposed texts:
+`track "Keys": the old one-sample Sampler was removed and is now an empty kit; its sample
+"Hit.wav" stays in the session's files and can be loaded onto a pad again; dropped 2 automation
+lane(s), 1 MIDI mapping(s)` (the sample clause only when the instrument had a sample that the
+session still lists, and the drop clause only when something was dropped), and the summary `N
+track(s) had the old one-sample Sampler and now have an empty Sampler kit`.
 
-- **Decay and release.** Legacy decay and release are exponential, timed "to -60 dB", and a
-  release ends the voice only below -100 dB, about 1.67 times the release time. The current
-  envelope is linear: decay reaches sustain on its last frame, release reaches zero on its last
-  frame and retires. The times are copied (proposed): the number keeps meaning "done by then".
-  Halfway through a release the linear tail is 6 dB down where the legacy tail was 30 dB down,
-  and the legacy tail's last two thirds of a release time (below -60 dB) is gone.
-- **Voices.** 64 instead of 32, and the steal order is the body's (free, then oldest release,
-  then oldest sounding) where legacy stole the quietest released voice.
-- **Loops.** Loop points become whole frames (each moves under half a frame); ping-pong reflects
-  without repeating an endpoint, so its round trip is two frames shorter; cubic taps across the
-  loop seam read through the loop rule instead of the raw sample past the loop end.
-- **Start point.** A start inside the sample reads zero below its region, where legacy read
-  the sample: only the interpolation of the first fractional frame differs.
-- **Notes.** A held key retriggered without a note id no longer releases the earlier voice;
-  both sound until the key's note-off. The sustain pedal now holds Gate voices (legacy ignored
-  controller 64). All Notes Off fades one-shots over 32 frames, and stop or seek ends them, where
-  legacy ran its release envelope.
-- **Not carried:** a one-shot's looping, a loop under two frames, and the sound of a source over
-  two channels (item 5).
+**6. Other ways in, and older readers.** Every path that parses a session drops the same way:
+open, open from bytes, crash recovery, session templates (saved sessions) and
+`file.import_session_data` (import of tracks; the donor is parsed with `Session::from_json`).
+Copying, duplicating or pasting a track inside a session meets only instruments that already
+have a patch. **Proposed:** `track.load_preset` (`crates/engine/src/cmd/track_more.rs`), which
+deserializes an `Insert` without parsing a session, applies the same drop to a one-sample
+instrument before it is applied and posts the same note in its status line. Built-in Sampler
+user presets (`crates/ui-studio/src/presets.rs`) hold only the 19 retired values: **proposed**,
+they are reported once like presets of retired devices (`retired_user_preset_lines`) and never
+deleted, and the Sampler shows no preset list until a patch preset exists. No factory Sampler
+preset ships (body). No new compatibility marker: the empty kit is an ordinary schema 1 patch,
+so `Session::needs` emits `sampler_patch` (ADR 0023). A previous release, which lacks that
+entry, warns that the session needs `sampler_patch`, has a Sampler with no sample (silent, as
+the kit is), and loses the empty patch if it saves; a development build that knows
+`sampler_patch` shows the empty kit.
 
-Release-note text (proposed): "Alpha break: the one-sample Sampler is gone. Opening an older
-session turns each one-sample Sampler into one zone of a Sampler kit with the same sample, keys,
-tuning, envelope, start, loop and level, shown in the Instrument view. It plays through the
-current Sampler engine, so tails are linear (a release ends at its set time instead of fading
-on), it has 64 voices, the sustain pedal works, and a looping one-shot no longer loops.
-Automation, MIDI mappings and rack macros that pointed at the old Sampler's controls are
-removed, and the load notes count them. Save the session to keep the conversion."
+**7. What is deleted.** Each item, with what still needs it: nothing.
 
-**5. The sample.** The zone's one source reference names the same session source as
-`Insert::sample`, with ownership absent (managed: the source was added by `attach` and is saved
-into `Audio Files/` like other session audio). Nothing is decoded, converted or rewritten: the
-source keeps its stored rate, including PCM an earlier build stored at the session rate (body,
-"Pitch and different sample rates"), and the open path already decodes Sampler sources at their
-stored rate (`sampler_sources` in `crates/engine/src/io/session.rs`). The frames come from the
-source's stored metadata; if the file on disk no longer matches, the plan compiler's existing
-check (`spec_of` in `crates/mix/src/sampler_link.rs`: a region past its audio) leaves the zone
-silent and `sampler_silence_notes` reports it. A missing file keeps the zone and its reference;
-it plays silence, is reported the same way, and takes a new sample through
-`mix.sampler_zone_source`. A disk-backed source (`Source::disk`) converts the same way and stays
-silent until #271, as the legacy path already was (it read the empty buffer, ADR 0035's Sampler
-limitation). **Proposed:** a source over two channels converts to a zone whose audio the core
-refuses (`usable` in `sampler_link.rs` takes mono or stereo), so it is silent and reported; the
-note asks for the file converted to stereo and given to the zone. An `Insert::sample` that names
-no session source, or a source with zero frames or rate, makes no zone: the instrument opens as
-an empty kit and the load note says so. A Sampler without a sample opens as an empty kit with no
-note. The converted source is not admitted again: the per-source and per-patch memory bounds
-apply only to edits that add a source (`admit_source`, `admit_patch` in
-`crates/engine/src/cmd/sampler_patch.rs`), so an old long sample keeps playing (body, line 352),
-and it counts toward the 128 MiB a later addition is checked against.
+- **The control-channel commands `mix.sampler_load` and `mix.sampler_clear` are removed.** They
+  are documented (`docs/control-protocol.md`), so the removal is stated in the release notes and
+  the protocol document. Today their callers are the legacy panel's sample picker, the
+  Sampler-window drop, `builtin_editor::load_sample`, and two tests that are rewritten (item 8).
+  The Slices view's file picker passes the string `"mix.sampler_load"` only as its purpose key;
+  it never runs the command and takes a key of its own.
+- `io::load_sampler_bytes` and `cmd::sampler::attach` and `refuse_patched`: their callers are
+  each other and tests.
+- `Target::SamplerWindow` in `browser.rs`: `editor_target` returns it only for a legacy body.
+- `builtin_editor::sample_picker` and `load_sample`: their callers are the legacy panel and the
+  window drop.
+- The legacy renderer (`legacy.rs`; `Sampler::new` moves into `mod.rs`) and every legacy branch
+  of `mod.rs`. The core path no longer needs to be optional.
+- `Plugin::set_sample`, with its forwarder in `crates/plugin-host/src/hosted.rs`. Only the plan
+  compiler calls it.
+- The mix sample plumbing: the `sample_audio` and `sample_wrapper` slot fields, the sample
+  action and its audio-thread swap (`plan.rs`, `active.rs`), and the sample parts of
+  `compile.rs` and `compile/build.rs`. They exist only to call `set_sample`.
+- The legacy panel (`sampler_panel/legacy.rs`, `LegacyLayout`, `view_bar::legacy_bar`, the legacy
+  branch of `body`), its notice and New Kit (`behavior::new_kit`).
+- The 19-parameter table. Its readers are the legacy renderer, the legacy rows, built-in Sampler
+  user presets (item 6), and `fill_default_params` in `mix.sampler_new_patch`, which writes those
+  19 defaults into every new patch's `Insert::params` today and writes nothing once the table
+  is empty (the call is removed).
+- The `Insert::sample` reads in `sampler_sources` and `session_data.rs`. In the model,
+  `Insert::sample` stays only as the drop's input (it names the file in the load note). It is
+  read on parse and never written.
 
-**6. What addressed the old parameters.** No old id has a counterpart a lane or mapping can
-reach: the zone fields are patch structure, not parameters, and the one control that matches
-(`zone001_level`) is outside `SAMPLER_INFO.params`, so lanes do not play it (the module doc of
-`crates/dsp/src/plugins/sampler/mod.rs`) and MIDI learn refuses it (`check_device` in
-`crates/engine/src/cmd/midi_map.rs`). **Proposed:** the conversion drops, on the converted
-track: automation lanes on the instrument slot whose parameter is one of the 19 ids; session MIDI
-mappings to those ids on that slot; rack macro targets (`MacroMapping` with that track, the
-instrument slot and one of the ids); and the instrument's user pages (ADR 0047), whose slots can
-only hold those ids. This follows `retire_subtractive_synth`. Kept inert, they would linger as
-data no build plays, which the alpha rule refuses. Controller profile mappings live outside the
-session and are not edited; one that names a retired id finds no parameter and does nothing.
-No modulation matrix addresses the old ids: the legacy renderer had none, and the zone matrix's
-destinations are fixed inside the device.
+Real time: the drop runs on the control thread during parse. Deleting `set_sample` removes the
+audio-thread sample swap, so this change removes real-time work and adds none.
 
-**7. Load notes.** One line per converted track and one summary, through `Session::load_notes`,
-shown once on open; after a save there is nothing left to convert. Proposed texts:
-`track "Keys": its one-sample Sampler is now one zone of a Sampler kit (it can sound slightly
-different); dropped 2 automation lane(s), 1 MIDI mapping(s)` (the drop clause only when something
-was dropped), `track "Keys": its one-sample Sampler's sample has 4 channels; a Sampler zone plays
-mono or stereo, so the zone is silent: convert the file to stereo and give it to the zone`,
-`track "Keys": its one-sample Sampler had no sample in this session; it is now an empty kit`,
-and the summary `N track(s) used the one-sample Sampler and now carry one Sampler zone each`.
-
-**8. Other ways in.** `file.import_session_data` parses the donor with `Session::from_json`, so
-its tracks arrive converted, and the existing remap (`crates/engine/src/io/session_data.rs`)
-then renames the patch's source like any patch reference. Duplicating a track or copying it in
-the same session meets only converted instruments. A frozen track keeps its frozen audio; the
-next unfreeze renders through the current engine. **Proposed:** a track preset
-(`track.load_preset`, `crates/engine/src/cmd/track_more.rs`) whose instrument is a one-sample
-Sampler runs the same conversion before it is applied, with its source reference given a fresh
-id that names nothing in this session, the rule `import_session_data` uses for a patch reference
-that did not come along: the preset's source id belongs to the session that saved it, so it
-plays silence and is reported rather than playing another source of this session. Built-in user
-presets of the Sampler (`crates/ui-studio/src/presets.rs`) hold only the 19 retired values and no
-sample, so they cannot become a zone; **proposed:** they are reported once like presets of
-retired devices (`retired_user_preset_lines`) and never deleted, and the Sampler shows no preset
-list until a patch preset exists. No factory Sampler preset ships (body), and the
-"<factory default>" label is only a label.
-
-**9. Compatibility marker.** None new (proposed). The converted patch is an ordinary schema 1
-patch that uses only fields this record already defines, so `Session::needs` emits
-`sampler_patch` as for any patch (ADR 0023). A previous release, which lacks that entry,
-warns that the session needs `sampler_patch`, plays the Sampler as silence (it finds no
-`Insert::sample`) and loses the patch if it saves; this is the session-format paragraph's
-existing consequence, now reached by every converted instrument. A development build that knows
-`sampler_patch` plays the converted patch through its core.
-
-**10. The views.** **Proposed:** the UI picks the view it first shows for an instance, the first
-time in a session that the instance has no remembered view: Instrument when the patch has at
-least one unbound zone and no pad-bound zone, else Pads. It computes this from the patch; the
-engine stores no view and no conversion flag. A converted instrument therefore opens on the
-Instrument view with zone 1 selected. Nothing is a pad. The Pads view shows the empty kit's pads
-from start note 36 and, by decision 2, that an unbound zone sounds. Slices shows its empty state
-(no loop). Changing views never rebinds anything (decision 1). Load kit… is available at once;
-loaded pads layer with the zone on shared keys within the eight-layer bound, as for any patch.
-
-**11. Real time.** The conversion runs on the control thread during parse and allocates there.
-The patch reaches the instance through the existing handoff. Deleting `Plugin::set_sample` also
-deletes the audio-thread swap of a running instance's sample (`active.rs`), so this change
-removes real-time work and adds none: no new allocation, lock or wait in process, events,
-parameters or reset.
-
-**12. What is deleted.** In dsp: `legacy.rs` (its `Sampler::new` construction moves to
-`mod.rs`), every legacy branch of `mod.rs` (`set_sample`, the 19-parameter `set_param` and
-`param` path, `tail_samples`, the note and event paths), the `Option` around the core path, and
-`Plugin::set_sample` with its forwarder in `crates/plugin-host/src/hosted.rs`. In mix: the
-`sample_audio` and `sample_wrapper` slot fields, the sample action and swap (`plan.rs`,
-`active.rs`), and the sample plumbing in `compile.rs` and `compile/build.rs`. In engine:
-`mix.sampler_load`, `mix.sampler_clear`, `attach`, `refuse_patched`, `io::load_sampler_bytes`, the
-`Insert::sample` reads in `session_data.rs` and `sampler_sources`. In the UI: `sampler_panel/legacy.rs`,
-`LegacyLayout`, `view_bar::legacy_bar`, `behavior::new_kit`, the legacy branch of `body`,
-`builtin_editor::sample_picker` and `load_sample`, and `Target::SamplerWindow`. In the model,
-`Insert::sample` stays as the conversion's input only: it is read on parse and is never written.
-The Slices view's file picker keeps its purpose key or takes a new one; it never ran the command.
-
-**13. Evidence** (implementation gates, not claims made here). Removed, not regenerated: the
-legacy goldens (`crates/dsp/tests/sampler_legacy_golden.rs`), the legacy renderer's unit tests
-(`crates/dsp/src/plugins/sampler/tests.rs`), the legacy halves of
-`a_legacy_instance_never_touches_the_core_and_a_core_instance_ignores_the_legacy_sample` and
+**8. Evidence** (implementation gates, not claims made here). Removed, not regenerated: the
+legacy goldens (`crates/dsp/tests/sampler_legacy_golden.rs`, the old-session renderer hashes),
+the legacy renderer's unit tests (`crates/dsp/src/plugins/sampler/tests.rs`), the legacy halves
+of `a_legacy_instance_never_touches_the_core_and_a_core_instance_ignores_the_legacy_sample` and
 `slot_ids_are_stable_and_unprefixed_ids_keep_their_legacy_meaning` (`core_tests.rs`; the slot id
 half stays), the `set_sample` assertion in `crates/dsp/src/lib.rs`,
 `a_sampler_sample_swap_allocates_and_frees_nothing` and the test wrappers' `set_sample`
 forwarders (`crates/mix/tests/plan_alloc_probe.rs`, `crates/mix/src/plan_tests.rs`,
 `crates/playback/src/plan_bridge/tests.rs`), the tests in `cmd/sampler.rs`, the one-sample
-refusals in `tests_sampler_patch.rs`, `sampler_panel/legacy_tests.rs`, and the legacy cases of the
-builtin editor, Middle C display, view bar and browser drop tests. Rewritten on the current path:
-the read-root check in `crates/automation/tests/automation_roots.rs` (through
+refusals in `tests_sampler_patch.rs`, `sampler_panel/legacy_tests.rs`, and the legacy cases of
+the builtin editor, Middle C display, view bar and browser drop tests. Rewritten on the current
+path: the read-root check in `crates/automation/tests/automation_roots.rs` (through
 `mix.sampler_zone_source`) and the donor in `setup_more.rs`'s session data test. Added:
 
-- a model fixture of a one-sample Sampler with all 19 ids at nondefault values: the zone's
-  fields and `zone001_level` equal the table above exactly, from independently written
-  expectations, including the half-frame rounding at a tie;
-- each loop rule (a two-frame and a one-frame loop, start at and past the loop end, start
-  inside the loop, One Shot with a loop), swapped key and velocity ranges, out-of-range and
-  missing values, no sample, a missing source record, zero frames, a disk-backed source and a
-  four-channel source, each with its load note;
-- the lanes, session mappings, macro targets and user pages of the converted track dropped and
-  counted, those of other tracks and other slots untouched;
-- `from_json_as_saved` returning the stored session (the open reads modified), a second pass
-  changing nothing, the save writing the patch with no `sample` and no legacy ids and `needs`
-  holding `sampler_patch`, and the previous release's `KNOWN_NEEDS` (as in
-  `sampler_patch_tests.rs`) reporting it;
-- `file.import_session_data` and a track preset converting, with the remapped and the fresh
-  source ids;
-- in-process render equality: a converted session renders bit for bit like a hand-built patch
-  with the table's fields, and twice the same; no pinned hash, since the path calls `pow` and
-  the envelope arithmetic (#437);
-- the UI opening a converted instrument on Instrument with zone 1 selected, a new kit on Pads,
-  and no view change rebinding a zone.
+- an old one-sample session (a fixture with a sample and nondefault values for the 19 ids)
+  opens with an empty kit (seed 1, pad start note 36, no zones), no `sample`, none of the 19
+  ids, and the load note naming the track and the file;
+- the source entry still in `Session::sources` and its audio in the pool, with the file
+  byte-identical after open and after save;
+- the lanes, session mappings, macro targets and user pages on the old ids of that track gone
+  and counted in the note, and those of other tracks and slots untouched;
+- `from_json_as_saved` returning the stored session (the open reads modified), the saved
+  result listing `sampler_patch` under `needs`, and a second open of it with no note;
+- a ready patch, an unknown-schema patch and an invalid (opaque) patch each left byte-identical
+  and not reported as one-sample;
+- a one-sample Sampler without a sample (the note without the sample clause), a track preset
+  and `file.import_session_data` taking the same drop;
+- no pinned hash anywhere in these tests.
 
-These negative mutations must fail those tests: the start computed from L instead of L − 1;
-loop frames truncated instead of rounded; the level not carried; the key range not ordered; the
-start-inside-loop rule skipped (an invalid, opaque patch); lanes kept; the conversion running a
-second time and adding a zone.
+These negative mutations must fail them: an opaque patch treated as one-sample; the lanes kept;
+the pool entry removed; the drop missing from `changes` (the open reads clean).
 
-**14. Slices.** In this order, each building and passing on its own; no step leaves an
-instrument that neither path plays. #454 lands first.
+**9. Slices.** In this order, each building and passing on its own. #454 lands first.
 
 | Slice | Content | Rough size (non-test lines) |
 |---|---|---|
-| 1 | The conversion in the model with its tests, called by nothing yet. | +200 |
-| 2 | `from_json_as_saved` and `track.load_preset` call it, with the load notes; `mix.sampler_load`, `mix.sampler_clear`, `io::load_sampler_bytes`, the Sampler-window drop and the sample picker are retired, so no path makes a one-sample Sampler and the legacy panel is unreachable. The legacy renderer still exists, unused. | +30, −160 |
-| 3 | Delete the renderer, `set_sample`, the mix plumbing, the legacy panel, notice and New Kit, the 19-parameter table, and the tests of item 13; the UI's first-view rule. | +60, −650 |
-| 4 | Docs: the user guide, `docs/control-protocol.md`, the design language README's Sampler rows and legacy notice, the session-format knowledge note, and the release-note text of item 4. | docs only |
+| 1 | The drop on parse and in `track.load_preset`, with its load note and tests. With every old instrument opening as a kit, and the legacy panel shown only for a Sampler without a patch, the panel becomes unreachable. | +120 |
+| 2 | Delete the legacy renderer, `set_sample`, the mix plumbing, the panel, notice and New Kit, the commands, the dropped-bytes loader, the window drop, the sample picker and the parameter table, with item 8's test removals and rewrites. | +40, −800 |
+| 3 | Docs: the user guide, `docs/control-protocol.md` (the two commands removed), the design language README's Sampler rows and legacy notice, the session-format knowledge note, and the release-note text below. | docs only |
+
+Release-note text (proposed): "Alpha break: the old one-sample Sampler is gone. Opening an older
+session gives each one-sample Sampler an empty Sampler kit: its sample assignment and settings
+are dropped, and so are the automation, MIDI mappings and rack macros that pointed at them. The
+sample file stays in the session (it is in the Clip List) and can be dropped onto a pad again.
+The load notes name every affected track. The control-channel commands `mix.sampler_load` and
+`mix.sampler_clear` are removed: use `mix.sampler_zone_source` or `mix.sampler_load_kit`."
 
 **Alternatives rejected.** Keep the legacy path: two renderers and a panel the maintainer decided
-has no place. Open as an empty kit and drop the sample: silent loss of work. Convert to a pad: a
-pad is one trigger note, one-shot and untracked by default, so a sample played across the
-keyboard would collapse to one key. Convert in the UI when the window opens: the document would
-stay legacy for export and every headless path, and the UI would own a document change.
-Convert on the first structural edit (the replaced decision 8): keeps the renderer alive. Keep
-`Insert::sample` beside the patch so a previous release still plays it: a shim, and the body
-already forbids it ("New patches leave `Insert::sample` unset"). Downmix a multichannel source
-on open: it writes new media during a load.
+has no place. Convert the old instrument into one zone (the draft first proposed for #455): the
+maintainer chose the empty kit because the one-sample instrument had no users, and a conversion
+would bring a mapping table and loop rules of its own. Drop the old source from the session too:
+it would delete a user's file reference without being asked. Keep `Insert::sample` beside the
+patch so a previous release still plays it: a shim, which the body already forbids ("New patches
+leave `Insert::sample` unset").
 
-**Reopen when** converted instruments sound wrong beyond item 4's list often enough to need a
-closer envelope or loop match, or when a release decides that sessions saved before this change
-no longer open, which ends the conversion code.
+**Reopen when** a release decides that sessions saved before this change no longer open; that
+ends the drop code.
 
-**Open for the maintainer.** Each has a recommendation; the proposed rule above follows it.
+**Open for the maintainer.**
 
-1. Envelope times: copy the milliseconds (recommended), or scale decay and release so the
-   linear tail matches the exponential one's loudness at some point (it then ends sooner than
-   the number says).
-2. Start inside the loop: move the loop start up to the start (recommended: the attack and first
-   pass stay as they were), or move the start down to the loop start.
-3. One Shot with a loop: One Shot with the loop off and its points kept (recommended), or Gate
-   with the loop on (keeps the drone, but key-up now releases it).
-4. A source over two channels: a silent zone with a note (recommended), or a downmix written as
-   new media (rejected above).
-5. Lanes and mappings to the old ids: drop with a load note (recommended), or keep the `level`
-   lanes as `zone001_level` lanes that play once slot controls become automatable.
-6. Track presets holding a one-sample Sampler: convert with a reference that names nothing
-   (recommended), or open as an empty kit.
-7. Built-in Sampler user presets: report as retired and hide the Sampler's preset list
-   (recommended), or leave the list showing presets that change nothing.
-8. Order: slice 2 waits until the Instrument view (or the Pads view's line for unbound zones,
-   decision 2) shows a converted zone (recommended: until then a converted sound is audible but
-   nowhere visible), or lands as soon as #454 does.
-9. Lifetime: the conversion stays until a release stops opening sessions saved before it
-   (recommended: decide at 0.8.0, beside ADR 0049's file tags).
+1. Built-in Sampler user presets: report them once as retired and hide the Sampler's preset list
+   until a patch preset exists (recommended), or leave the list showing presets that change
+   nothing.
+2. How long the drop code lives: until a release stops opening sessions saved before this change
+   (recommended: decide at 0.8.0, beside ADR 0049's file tags), or remove it at the next minor
+   release.
