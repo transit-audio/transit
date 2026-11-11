@@ -310,6 +310,7 @@ impl StudioApp {
             && !ctx.input(|i| i.pointer.any_down())
             && !ctx.egui_wants_keyboard_input()
             && !self.builtin_editor.devices.wheeling
+            && !crate::sampler_panel::kit_presets::stepping(self)
         {
             self.engine.end_merge();
         }

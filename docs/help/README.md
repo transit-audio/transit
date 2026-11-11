@@ -28,6 +28,7 @@ optional `key` (spelled as the shortcut table spells it) and an optional `link` 
 | [`resonator.toml`](resonator.toml) | The Resonator's panel. |
 | [`texture-synth.toml`](texture-synth.toml) | The Texture Synth's panel. |
 | [`modal-voice.toml`](modal-voice.toml) | The Modal Voice's panel. |
+| [`sampler-kits.toml`](sampler-kits.toml) | The Sampler's kit presets in its title bar. |
 | [`telemetry.toml`](telemetry.toml) | The load readout and every figure of Callback Telemetry. |
 | [`audio-devices.toml`](audio-devices.toml) | The Audio Devices status card and its buttons. |
 | [`window.toml`](window.toml) | The Window menu's Collapse All Editors and Expand All Editors. |

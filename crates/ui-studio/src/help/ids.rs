@@ -212,6 +212,13 @@ ids! {
     ResonatorStrums => "resonator.strums",
     ResonatorRate => "resonator.rate",
     ResonatorCredits => "resonator.credits",
+    // help\sampler-kits.toml
+    SamplerKitsField => "sampler_kits.field",
+    SamplerKitsPrevious => "sampler_kits.previous",
+    SamplerKitsNext => "sampler_kits.next",
+    SamplerKitsSave => "sampler_kits.save",
+    SamplerKitsSaveAs => "sampler_kits.save_as",
+    SamplerKitsDelete => "sampler_kits.delete",
     // help\texture-synth.toml
     TextureSynthTime => "texture_synth.time",
     TextureSynthSize => "texture_synth.size",

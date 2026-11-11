@@ -6,6 +6,11 @@
 //!
 //! A press on a pad selects it and auditions it; a drag from one pad released on another swaps
 //! them; an audio file dropped on a pad becomes its sample ([`super::behavior`]).
+//!
+//! A pad whose zone's source is in the session with no audio (a missing sample, as a recalled kit
+//! leaves it, ADR 0041 amendment 2026-11-11 item 5) draws the shared hatch over its cell and its
+//! hover text names the file (`Kick 01.wav is missing`, the missing card's words); nothing else on
+//! the pad changes.
 
 use super::{BANKS, PadData, PadRecord, SamplerLayout, behavior, panel, section_label, view};
 use crate::StudioApp;
@@ -14,6 +19,8 @@ use crate::theme::TOKENS;
 use crate::tokens::{self, layout as space};
 use crate::widgets::{self, pad, r4, segmented};
 use egui::{Align2, Rect, Ui, pos2, vec2};
+use transit_model::Session;
+use transit_model::sampler_patch::PatchV1;
 
 /// Pads across and up.
 pub const COLUMNS: usize = 4;
@@ -61,8 +68,18 @@ pub(crate) fn peer_banks(pads: &[PadData], selected: u8) -> [bool; BANKS] {
     out
 }
 
+/// The file name of `zone`'s sample when it is missing: its source is in the session with no audio
+/// in the pool (the name the Instrument view's missing card shows).
+pub(crate) fn missing_file(s: &Session, patch: &PatchV1, zone: u16) -> Option<String> {
+    let index = usize::from(patch.zone(zone)?.source);
+    let sid = patch.sources.get(index)?.source;
+    let src = s.source(sid).filter(|_| !s.pool.contains(sid))?;
+    let name = std::path::Path::new(&src.path).file_name().and_then(|n| n.to_str());
+    Some(name.map_or_else(|| src.name.clone(), str::to_string))
+}
+
 /// Draws the panel into `rect` (its height is the hero row's).
-pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, pads: &[PadData], rect: Rect, now: f64, out: &mut SamplerLayout) {
+pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, (patch, pads): (&PatchV1, &[PadData]), rect: Rect, now: f64, out: &mut SamplerLayout) {
     let t = &TOKENS;
     let inner = panel(ui, rect, "pads", out);
     let (bank, selected) = {
@@ -126,9 +143,15 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, pads: &[PadData],
             choked,
         };
         let o = pad::show(ui, egui::Id::new(("sampler_pad", dev.uid(), index)), slot_pos(origin, slot), &shown);
+        let missing = d.entry.zone.and_then(|z| missing_file(app.engine.session(), patch, z)).and_then(|name| {
+            let hatch = widgets::hatch::paint(ui.painter(), o.response.rect)?;
+            let text = format!("{name} is missing");
+            o.response.clone().on_hover_text(&text);
+            Some((text, hatch))
+        });
         behavior::pad_input(app, ui, dev, index, d, &o.response);
         super::pad_actions::menu(app, &o.response, dev, index, d.entry.note.is_some(), out);
-        out.pads.push(PadRecord { index, pad: o.layout, note: d.note, zone: d.entry.zone });
+        out.pads.push(PadRecord { index, pad: o.layout, note: d.note, zone: d.entry.zone, missing });
     }
     // The status line.
     let at = pos2(inner.min.x, origin.y + GRID + GAP);

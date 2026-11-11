@@ -16,7 +16,7 @@ const ID: &str = "mix.sampler_load_kit";
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(@spec false, true, false;
-        "mix.sampler_load_kit", "Load Sampler Kit", [], None,
+        "mix.sampler_load_kit", "Load Kit Folder", [], None,
         "{track?, folder: path, preview?: false}: immediate WAV/AIFF/FLAC files, case-folded name order, free pads ascending, referenced by path, one undo step; preview probes headers only → {track, loaded, pads: [{pad, zone, file, frames, channels}], ignored, first_pad, last_pad}; refusal → {loaded: 0, skipped, needed, free, offender?, notice, files}",
         has_selection, load
     )]

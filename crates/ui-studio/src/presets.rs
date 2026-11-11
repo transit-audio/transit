@@ -293,8 +293,9 @@ pub(crate) fn list(ui: &mut Ui, ins: &Insert, info: &'static PluginInfo, root: O
 }
 
 /// Carries out what the user chose in a preset list: recall, Save As (and clear the field), Delete.
-/// Whether `info`'s device has presets: a built-in preset holds parameter values, so a device with
-/// none (the Sampler, whose kit presets come later) has nothing to save, recall or list.
+/// Whether `info`'s device has parameter presets: a built-in preset holds parameter values, so a
+/// device with none has nothing to save, recall or list here (the Sampler's presets are kit files:
+/// `sampler_panel::kit_presets`).
 pub fn available(info: &PluginInfo) -> bool {
     !info.params.is_empty()
 }

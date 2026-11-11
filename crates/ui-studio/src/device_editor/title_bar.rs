@@ -24,7 +24,7 @@ use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec
 
 /// The bar's buttons and the preset field.
 pub const BUTTON: f32 = space::CONTROL_HEIGHT[1];
-const BUTTON_RADIUS: f32 = radius::DISPLAY;
+pub(crate) const BUTTON_RADIUS: f32 = radius::DISPLAY;
 const GLYPH: f32 = tokens::chrome::ICON_GLYPH;
 pub const FIELD_W: f32 = 300.0;
 /// The narrowest the preset field gets before the device title gives way (326-X).
@@ -119,7 +119,7 @@ fn recall(app: &mut StudioApp, dev: Dev, names: &[(bool, String)], at: usize) {
 }
 
 /// A title bar button at `r`: hovered `button.hover`, else `surface.panel`, 1 px `line`.
-fn button(ui: &mut Ui, id: egui::Id, r: Rect, enabled: bool) -> egui::Response {
+pub(crate) fn button(ui: &mut Ui, id: egui::Id, r: Rect, enabled: bool) -> egui::Response {
     let t = &TOKENS;
     let resp = ui.interact(r, id, if enabled { Sense::click() } else { Sense::hover() });
     let fill = if enabled && resp.hovered() { t.button_hover } else { t.surface_panel };
@@ -141,7 +141,7 @@ fn stroke_glyph(p: &egui::Painter, c: Pos2, paths: &[&[[f32; 2]]], color: Color3
 
 /// The board's previous and next chevrons, save, the device menu's dots, and the link of the
 /// follow toggle (not on the board: two interlocked links at 45 degrees).
-fn paint_glyph(p: &egui::Painter, c: Pos2, which: &str, color: Color32) {
+pub(crate) fn paint_glyph(p: &egui::Painter, c: Pos2, which: &str, color: Color32) {
     match which {
         "prev" => stroke_glyph(p, c, &[&[[10.0, 3.0], [5.0, 8.0], [10.0, 13.0]]], color),
         "next" => stroke_glyph(p, c, &[&[[6.0, 3.0], [11.0, 8.0], [6.0, 13.0]]], color),
@@ -309,7 +309,10 @@ pub(crate) fn show(
     let field = Rect::from_min_size(pos2(prev.max.x + 4.0, cy - BUTTON / 2.0), vec2(field_w, BUTTON));
     let next = sq(field.max.x + 4.0);
     let save = sq(next.max.x + 8.0);
-    if presets::available(dev.info) {
+    if crate::sampler_panel::handles(dev.info.id) {
+        // The Sampler's presets are kit files, never parameter presets (ADR 0041, #467).
+        crate::sampler_panel::kit_presets::browser(app, ui, dev, [prev, field, next, save], &mut tl);
+    } else if presets::available(dev.info) {
         preset_browser(app, ui, dev, [prev, field, next, save], &mut tl);
     } else {
         unavailable_presets(ui, dev, [prev, field, next, save], &mut tl);
@@ -469,7 +472,7 @@ fn preset_browser(app: &mut StudioApp, ui: &mut Ui, dev: Dev, [prev, field, next
     paint_glyph(&p, save.center(), "save", t.text_muted);
 }
 
-/// A device whose presets are not available yet (the Sampler, whose kit presets come later): the
+/// A device without presets (no parameters to save and no kits): the
 /// browser at the unused-control alpha, `<factory default>` in the field, every part taking no
 /// click and saying "Not available yet". Nothing is listed, recalled or written.
 fn unavailable_presets(ui: &mut Ui, dev: Dev, [prev, field, next, save]: [Rect; 4], tl: &mut TitleLayout) {
@@ -492,7 +495,7 @@ fn unavailable_presets(ui: &mut Ui, dev: Dev, [prev, field, next, save]: [Rect; 
 /// The tooltip of a preset control that is not available yet.
 pub const UNAVAILABLE: &str = "Not available yet";
 /// What the field of a device without presets reads.
-const FACTORY_DEFAULT: &str = "<factory default>";
+pub(crate) const FACTORY_DEFAULT: &str = "<factory default>";
 
 /// Save: a user preset is written over with the current values (what Save As with its own name
 /// did); a factory preset or none opens the list, where Save As names a new one.

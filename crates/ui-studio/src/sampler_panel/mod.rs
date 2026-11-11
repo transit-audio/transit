@@ -27,6 +27,7 @@ mod behavior;
 mod grid;
 pub mod instrument;
 mod kit_load;
+pub mod kit_presets;
 mod live;
 pub(crate) mod pad_actions;
 pub mod slices;
@@ -45,6 +46,8 @@ mod drop_routing_tests;
 mod grid_tests;
 #[cfg(test)]
 mod kit_load_tests;
+#[cfg(test)]
+mod kit_presets_tests;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]
@@ -113,6 +116,8 @@ pub fn pad_id(index: u8) -> String {
 pub struct PadsView {
     pub view: View,
     pub kit_preview: Option<kit_load::Preview>,
+    /// The kit presets: the last recall or save and a recall waiting for its question.
+    pub kit: kit_presets::KitState,
     pub bank: usize,
     pub selected: u8,
     pub live: [Live; PADS],
@@ -138,6 +143,7 @@ impl Default for PadsView {
         PadsView {
             view: View::Pads,
             kit_preview: None,
+            kit: kit_presets::KitState::default(),
             bank: 0,
             selected: 0,
             live: [Live::default(); PADS],
@@ -157,6 +163,8 @@ impl Default for PadsView {
 #[derive(Debug, Default)]
 pub struct ViewState {
     pub views: HashMap<u64, PadsView>,
+    /// The document a run of kit preset steps left ([`kit_presets::stepping`]).
+    pub step_run: Option<std::sync::Weak<Session>>,
 }
 
 /// One pad as last drawn: its index, the kit's record, its trigger note and bound zone.
@@ -166,6 +174,8 @@ pub struct PadRecord {
     pub pad: pad::PadLayout,
     pub note: u8,
     pub zone: Option<u16>,
+    /// A pad whose sample is missing: its hover text (`Kick 01.wav is missing`) and the hatch over it.
+    pub missing: Option<(String, widgets::hatch::HatchLayout)>,
 }
 
 /// One knob of the sections row as last drawn.
@@ -474,7 +484,7 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     let peers = strip::peers_line(&pads, selected);
     let strip_w = w - grid::WIDTH - space::PANEL_GAP;
     let hero_h = grid::height(&p).max(strip::height(&p, strip_w, &peers));
-    grid::show(app, ui, dev, &pads, Rect::from_min_size(pos2(x, y), vec2(grid::WIDTH, hero_h)), now, out);
+    grid::show(app, ui, dev, (&patch, &pads), Rect::from_min_size(pos2(x, y), vec2(grid::WIDTH, hero_h)), now, out);
     strip::show(app, ui, dev, &pads, Rect::from_min_size(pos2(x + grid::WIDTH + space::PANEL_GAP, y), vec2(strip_w, hero_h)), out);
     y += hero_h;
     if let Some(n) = view(app, dev.uid()).note.clone() {

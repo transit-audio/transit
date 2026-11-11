@@ -44,8 +44,9 @@ fn the_factory_default_on_a_kit_leaves_the_kit() {
 }
 
 #[test]
-fn the_sampler_preset_controls_are_not_available_and_save_nothing() {
-    // Kit presets come later: a Sampler preset holds only parameter values, and the Sampler has none.
+fn the_sampler_with_no_kit_files_saves_nothing_and_never_writes_a_parameter_preset() {
+    // The Sampler's presets are kit files (#467): with none listed, previous and next do nothing,
+    // and Save opens the list for Save As; the parameter preset path writes nothing for it.
     let dir = std::env::temp_dir().join(format!("transit-sampler-presets-off-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -56,9 +57,10 @@ fn the_sampler_preset_controls_are_not_available_and_save_nothing() {
     assert_eq!((title.preset_group.as_str(), title.preset_name.as_str()), ("", "<factory default>"));
     let before = serde_json::to_value(t.app.engine.session()).unwrap();
     let undo = t.undo_len();
-    for r in [title.save, title.field, title.prev, title.next, title.save] {
+    for r in [title.prev, title.next, title.save] {
         t.click(super::test_rig::mid(r), 1);
     }
+    t.key("escape");
     t.frames(2);
     assert!(!dir.join("presets").exists(), "no preset file is written");
     assert_eq!(serde_json::to_value(t.app.engine.session()).unwrap(), before, "nothing changes");
