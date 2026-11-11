@@ -2,7 +2,8 @@
 
 **Help > Keyboard Shortcuts** lists every binding, grouped by scope, with a search field.
 The keymap is defined in `crates/ui-studio/src/shortcuts.rs`. Ctrl means Cmd on macOS.
-Global shortcuts apply anywhere unless a text field or dialog has the keyboard.
+Global shortcuts apply anywhere unless a text field or dialog has the keyboard. An open menu or dropdown list
+holds the keyboard as system menus do: no other shortcut acts until it closes (Escape closes it).
 
 ## Info panel
 

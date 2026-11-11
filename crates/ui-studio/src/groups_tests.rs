@@ -781,3 +781,22 @@ fn narrow_quick_add_labels_use_the_empty_slot_but_audio_keeps_its_chevron_clear(
     assert!(l.add_label_x[0] + audio_vis <= l.add_slot[0][0] + 0.5, "Audio ends before its chevron");
     assert!((l.add_label_x[1] - l.add_label_x[0] + l.add_audio[0] - l.add_instrument[0]).abs() < 0.5, "alignment kept");
 }
+
+#[test]
+fn an_open_dropdown_holds_the_arrangement_shortcuts() {
+    let mut t = T::new();
+    t.app.ui.show_mixer = false;
+    t.app.ui.show_devices = false;
+    t.frames(4);
+    t.click(t.header(t.a, 0.5), json!({}));
+    let u0 = t.undo_len();
+    // The header area's Audio chevron opens its format list, a popup in another panel than the
+    // track list's selection.
+    let slot = t.app.arrange.layout.add_slot[0];
+    t.click(mid(slot), json!({}));
+    t.frames(3);
+    assert!(egui::Popup::is_any_open(&t.ctx), "the Audio dropdown is open");
+    t.key("ArrowDown", json!({"alt": true}));
+    assert_eq!(t.order(), ["A", "B", "C"], "Move Track Down waits while the list is open");
+    assert_eq!(t.undo_len(), u0);
+}

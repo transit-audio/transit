@@ -612,6 +612,12 @@ pub fn pressed(ctx: &egui::Context, action: Action) -> bool {
     if ctx.memory(|m| m.top_modal_layer().is_some()) && rows(action).all(|s| s.scope != Scope::Dialog) {
         return false;
     }
+    // An open popup (a menu, a dropdown's list) owns the keyboard, as system menus do: the
+    // arrangement's, the editors' and the app's shortcuts wait until it closes, and the keys stay
+    // for the popup. A device editor's and the Sampler's scopes take theirs and drop them.
+    if egui::Popup::is_any_open(ctx) && rows(action).all(|s| popup_holds(s.scope)) {
+        return false;
+    }
     if matches!(action, Action::TrackHeightIn | Action::TrackHeightOut) {
         return ctx.input_mut(|i| {
             let mut hit = false;
@@ -634,6 +640,13 @@ pub fn pressed(ctx: &egui::Context, action: Action) -> bool {
         return false;
     }
     ctx.input_mut(|i| rows(action).fold(false, |hit, s| hit | (i.modifiers.matches_exact(s.mods) && i.consume_key(s.mods, s.key))))
+}
+
+/// Whether an open popup holds `scope`'s keys: every scope but a modal's, a name being typed, the
+/// device editor window's and the Sampler's (those consume their keys under a popup and do
+/// nothing with them, so the keys never fall through).
+fn popup_holds(scope: Scope) -> bool {
+    !matches!(scope, Scope::Dialog | Scope::Rename | Scope::Editor | Scope::Sampler | Scope::SamplerSlices)
 }
 
 /// The only opt-in override: click the key cell to switch between Enter and Space.
