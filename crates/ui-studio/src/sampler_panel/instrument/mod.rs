@@ -62,7 +62,8 @@ pub struct InstrumentView {
     pub crossfade_text: Option<zone_panel::Draft>,
     /// The last refused edit, in the engine's words (until the next edit that lands).
     pub note: Option<String>,
-    /// Every command this view sent, latest last (bounded): `id {params}`.
+    /// Every command this view sent, latest last (bounded): `id {params}` (the tests read it).
+    #[cfg(test)]
     pub sent: Vec<String>,
     /// The body's height as last drawn.
     pub height: Option<f32>,
@@ -116,6 +117,7 @@ pub(crate) fn tip(what: &str, actions: &[Action]) -> String {
     format!("{what}: {}", keys.join(" / "))
 }
 
+#[cfg(test)]
 const SENT_KEPT: usize = 32;
 
 fn refresh(app: &mut StudioApp, dev: Dev) {
@@ -129,13 +131,16 @@ fn send(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, id: &str, mut par
     if let Some(o) = params.as_object_mut() {
         o.insert("track".into(), json!(dev.key.0.0));
     }
-    let mut logged = params.clone();
-    if let Some(o) = logged.as_object_mut() {
-        o.remove("track");
-    }
-    v.sent.push(format!("{id} {logged}"));
-    if v.sent.len() > SENT_KEPT {
-        v.sent.remove(0);
+    #[cfg(test)]
+    {
+        let mut logged = params.clone();
+        if let Some(o) = logged.as_object_mut() {
+            o.remove("track");
+        }
+        v.sent.push(format!("{id} {logged}"));
+        if v.sent.len() > SENT_KEPT {
+            v.sent.remove(0);
+        }
     }
     match app.execute_ui(id, &params) {
         Ok(_) => {
