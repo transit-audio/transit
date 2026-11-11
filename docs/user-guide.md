@@ -584,17 +584,32 @@ its edges do not drag. Click a zone to select it. Drag a side edge to change its
 top edge to change its highest velocity, or the dot to move its root; letting go is one undo step,
 and Escape cancels the drag. A drag that the kit cannot take is outlined in red before you let go,
 then snaps back with the reason under the key map. A group member's edge moves the whole group's
-key range, and a round-robin layer's top edge moves all of its alternatives.
+key range, and a round-robin layer's top edge moves all of its alternatives. A zone's edge fades
+show as its fill fading toward the edge. With the Sampler window focused, the arrow keys select the
+neighboring zone, Alt with the arrows nudges the waveform handle you last pressed (Shift for ten
+frames), and Delete asks before removing the selected zone.
 
 The **Zone** panel under the key map names the selected zone, its file, sample rate and length,
-and its keys, velocities, root and edge fades. Its waveform shows the region between **S** and
+and its keys, velocities, root and edge fades: click `none` (or a width) to type the four fade
+widths, key low, key high, velocity low and velocity high; Enter sends them as one undo step and
+Escape gives the typing up. Its waveform shows the region between **S** and
 **E** (drag either to move it, one undo step) and the loop in magenta. **Loop** sets Off, Forward
 or Ping-pong, and **Crossfade** takes milliseconds at the sample's own rate (the tooltip shows the
 frames); a crossfade works on forward loops only. When a shorter loop leaves less room than the
 stored crossfade, a warning line says how much is used. A zone that plays a slice follows its
 slice: its handles are locked and edited in the Slices view. Playback and Amp Envelope edit the
-selected zone. Groups, adding zones, SFZ import, and the Shaper and Modulation sections are not
-available yet.
+selected zone.
+
+The **Group** panel beside it shows the selected zone's group: one row per velocity layer with its
+round-robin alternatives as chips (click one to select that zone) and a **+** chip. On a layer the
+**+** chip loads a sample you choose as the layer's next alternative; on a zone in no group it
+makes the zone a group of its own; on a pad's zone it first asks, because the zone leaves its pad
+(its notes still play the group): nothing changes until **Make group**. Alt-dragging a pad's zone
+on the key map asks the same. **Round robin** picks Sequential or Random; while Random, the
+**Seed** field and its dice button set the kit's random seed (0 is stored as 1); while Sequential
+it shows a dash and the stored seed is kept. **Vel. sens.** sets the selected zone's velocity
+sensitivity. Adding zones from the view bar, SFZ import, and the Shaper and Modulation sections are
+not available yet.
 
 The **Slices** view shows the kit's slice loop on the bench: the loop's waveform under a strip of
 numbered flags, one per slice start (`S 1` is the loop start, `E` the loop's end), the set in use
