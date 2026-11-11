@@ -256,11 +256,8 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, state: &State, z: &Zone, inputs: Group
             let w = (widgets::role_size(&p, &CHIP_FONT, &ctext).x + 2.0 * tk::CHIP_PADDING_X).max(tk::CHIP_MIN_WIDTH);
             let cr = Rect::from_min_size(pos2(x, rcy - tk::CHIP / 2.0), vec2(w, tk::CHIP));
             let selected = *zone == z.zone;
-            let (edge, ew, cink) = if selected {
-                (t.signal, tk::SELECTED_BORDER_WIDTH, t.text)
-            } else {
-                (color(tk::CHIP_EDGE), chrome::FIELD_EDGE_WIDTH, t.text_muted)
-            };
+            let (edge, ew, cink) =
+                if selected { (t.signal, tk::SELECTED_BORDER_WIDTH, t.text) } else { (color(tk::CHIP_EDGE), chrome::FIELD_EDGE_WIDTH, t.text_muted) };
             p.rect(cr, tk::CHIP_RADIUS, color(tk::CHIP_FILL), Stroke::new(ew, edge), StrokeKind::Inside);
             widgets::role_text(&p, &CHIP_FONT, &ctext, cink, Align2::CENTER_CENTER, cr.center());
             if ui.interact(cr, egui::Id::new(("sampler_group_chip", uid, *zone)), Sense::click()).clicked() {
@@ -383,7 +380,9 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, state: &State, z: &Zone, inputs: Group
     let hit = Rect::from_min_max(pos2(track.min.x - cw / 2.0, r.min.y), pos2(track.max.x + cw / 2.0, r.max.y));
     out.fader = r4(track);
     let stored = state.entry(z.zone).map_or(0.7, |e| e.velocity_sensitivity);
-    let resp = ui.interact(hit, egui::Id::new(("sampler_group_vel", uid)), Sense::click_and_drag()).on_hover_text("Velocity sensitivity of the selected zone");
+    let resp = ui
+        .interact(hit, egui::Id::new(("sampler_group_vel", uid)), Sense::click_and_drag())
+        .on_hover_text("Velocity sensitivity of the selected zone");
     if let Some(at) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked() || resp.drag_stopped()) {
         *inputs.fader = Some((((at.x - track.min.x) / track.width()).clamp(0.0, 1.0) * 100.0).round() / 100.0);
     }

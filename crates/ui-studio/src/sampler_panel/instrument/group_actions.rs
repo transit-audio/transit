@@ -77,7 +77,8 @@ pub(crate) fn apply(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, state
             v.ask = None;
             let (Some(pad), Some(g)) = (z.pad, free_group(state)) else { return };
             let Some(note) = state.pad_note(pad) else { return };
-            let zone = json!({"zone": z.zone, "keys": [note, note], "velocities": [1, 127], "root": z.root, "membership": place(g, 0, 0), "pad": null});
+            let zone =
+                json!({"zone": z.zone, "keys": [note, note], "velocities": [1, 127], "root": z.root, "membership": place(g, 0, 0), "pad": null});
             send(app, dev, v, "mix.sampler_zone_map", json!({ "zones": [zone] }));
         }
         Intent::RoundRobin(g, mode) => {
