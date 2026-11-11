@@ -216,6 +216,7 @@ pub const BEAT_WIDTH: f32 = 84.0;
 pub const FADER_LENGTH: f32 = 150.0;
 pub const PREVIEW_COLUMNS: f32 = 8.0;
 pub const PREVIEW_GAP: f32 = 2.0;
+pub const PREVIEW_RADIUS: f32 = 2.0;
 pub const METRICS: &[(&str, f32)] = &[
     ("viewBar/height", VIEW_BAR_HEIGHT),
     ("viewBar/controlHeight", VIEW_BAR_CONTROL_HEIGHT),
@@ -317,4 +318,5 @@ pub const METRICS: &[(&str, f32)] = &[
     ("slicePanels/faderLength", FADER_LENGTH),
     ("slicePanels/previewColumns", PREVIEW_COLUMNS),
     ("slicePanels/previewGap", PREVIEW_GAP),
+    ("slicePanels/previewRadius", PREVIEW_RADIUS),
 ];
