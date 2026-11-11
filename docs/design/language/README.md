@@ -411,6 +411,13 @@ In code (326-U): the engine's half is `Plugin::detector_level_db` (the Compresso
 
 ### Sampler views
 
+The Pads grid's context menu uses the standard plain menu rows: **Clear pad** with the shortcut
+`Delete / Backspace`, followed by **Reset note** only for a pad with a stored note. Right-click
+selects that pad. Clear resets the binding, unused zone, name, choke, mute and solo in one undo
+step, keeping its trigger note; Reset note clears only the stored note, also in one step. The
+keyboard action belongs to the focused Pads view; typing and popups keep their keys. Refusals
+use the existing error note below the hero row. In code: `sampler_panel/pad_actions.rs`.
+
 The Instrument and Slices views (ADR 0041), drawn at the built panel's design width, 976, with the same title bar, sections row and footer as the Pads view. Mockups: `chrome/SamplerInstrument.dc.html`, `chrome/SamplerSlices.dc.html` (the chrome canvas, Sampler views page).
 
 - **View bar** (every view, the Pads view included): a row `sampler.viewBar.height` (28) tall under the title bar, the same height on all three views. Its controls take the dense height, `sampler.viewBar.controlHeight` (24, equal to `layout.denseControlHeight`), centred in the row, and its items sit `sampler.viewBar.gap` (12, the `space` step 12) apart; a label and its field count as one item. In it: the segmented control `Instrument · Pads · Slices`, Sans 500 12; beside it a one-line summary in `readout.display` (zones, groups, layers and range; the loop's file, length, rate and cue points); right-aligned, the view's actions as standard buttons (`Add zone…`, `Import SFZ…`; `Load loop…`). Switching views changes no routing, parameters or notes.

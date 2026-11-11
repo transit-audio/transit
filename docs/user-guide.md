@@ -558,6 +558,13 @@ into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as 
 file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
 platforms it lands as soon as the pointer moves after you let go (see the known issues).
 
+Right-click a pad and choose **Clear pad** to empty it and reset its name, choke group, mute,
+and solo. Delete or Backspace does the same for the selected pad while the Sampler window has
+the keyboard. Its unused zone is removed; audio files and other pads stay intact. One Undo
+restores the whole edit. The trigger note stays as it was. **Reset note** appears in the same
+menu only when the pad stores its own note; it returns that pad to the kit's start note plus
+its position. A refused reset shows the engine's reason under the pads and changes nothing.
+
 Newly imported Sampler samples keep their native sample rate and PCM. Playback converts the
 rate and pitch together; start, end, slice, cue and loop positions count the source's own frames.
 A 44.1 kHz sample therefore keeps 44,100 frames per second in a 48 kHz session. Envelope times

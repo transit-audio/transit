@@ -431,6 +431,7 @@ impl StudioApp {
         tempo_edit::keys(self, &ctx); // the tempo and meter fields own Escape and Enter
         clip_inspector::keys(self, &ctx); // Escape in a fade field gives its draft up
         crate::device_editor::window::keys(self, &ctx); // 326-M: Escape closes the focused device editor
+        crate::sampler_panel::pad_actions::keys(self, &ctx);
         keys::shortcuts(self, &ctx); // slice 3: before the arrangement's keys
         automation::shortcuts(self, &ctx); // slice 7: selected points take Delete before clips
         groups::shortcuts(self, &ctx);

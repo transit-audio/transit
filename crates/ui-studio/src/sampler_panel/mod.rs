@@ -27,6 +27,7 @@ mod behavior;
 mod grid;
 mod legacy;
 mod live;
+pub(crate) mod pad_actions;
 mod strip;
 pub mod window;
 mod zone;
@@ -43,6 +44,8 @@ mod grid_tests;
 mod legacy_tests;
 #[cfg(test)]
 mod live_tests;
+#[cfg(test)]
+mod pad_actions_tests;
 #[cfg(test)]
 mod test_rig;
 #[cfg(test)]
@@ -221,6 +224,8 @@ pub struct SamplerLayout {
     pub selected: u8,
     /// The shown bank's sixteen pads.
     pub pads: Vec<PadRecord>,
+    /// Rows in the open pad context menu.
+    pub pad_menu: Vec<(String, [f32; 4])>,
     pub grid: [f32; 4],
     /// `Bank A · 3 of 16 loaded`.
     pub status: String,

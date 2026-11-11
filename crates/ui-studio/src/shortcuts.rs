@@ -36,10 +36,12 @@ pub enum Scope {
     Automation,
     /// A device editor window: the one last clicked or opened (326-M).
     Editor,
+    /// The focused Sampler's Pads view.
+    Sampler,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 10] = [
+    pub const ALL: [Scope; 11] = [
         Scope::Global,
         Scope::Arrangement,
         Scope::PianoRoll,
@@ -50,6 +52,7 @@ impl Scope {
         Scope::Dialog,
         Scope::Rename,
         Scope::Editor,
+        Scope::Sampler,
     ];
 
     pub fn label(self) -> &'static str {
@@ -64,6 +67,7 @@ impl Scope {
             Scope::Rename => "Name field",
             Scope::Automation => "Automation",
             Scope::Editor => "Device editor",
+            Scope::Sampler => "Sampler",
         }
     }
 }
@@ -168,6 +172,7 @@ pub enum Action {
     DialogConfirm,
     DialogCancel,
     CloseEditor,
+    SamplerClearPad,
     ToggleAutomation,
     GridNarrow,
     GridWiden,
@@ -207,6 +212,8 @@ use Scope as S;
 
 /// The table. The first row of an action is the one its menu shows.
 pub const TABLE: &[Shortcut] = &[
+    row(A::SamplerClearPad, "Clear pad", NONE, Key::Delete, S::Sampler, "The selected pad; one undo step."),
+    row(A::SamplerClearPad, "Clear pad", NONE, Key::Backspace, S::Sampler, "Same as Delete."),
     // Transport.
     row(A::PlayStop, "Play / Stop", NONE, Key::Space, S::Global, "All DAWs."),
     row(

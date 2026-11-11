@@ -22,6 +22,16 @@ Escape closes the device editor window you last clicked in or opened; a click ou
 editor window hands the keyboard back to the views. A value being typed in a knob's field, an open
 list or a dialog keeps Escape for itself. **Window > Close All Editors** closes every editor.
 
+## Sampler
+
+| Scope | Action | Keys |
+|---|---|---|
+| Sampler | Clear pad | Delete, Backspace |
+
+The focused Sampler's selected pad is cleared in one undo step. A text field, open menu, or
+dialog keeps the keys for itself. Right-click a pad for **Clear pad** and, when it stores its
+own note, **Reset note**.
+
 ## Interface and arrangement zoom
 
 | Scope | Action | Keys |
