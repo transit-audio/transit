@@ -706,7 +706,8 @@ impl Session {
 
     /// [`Session::from_json`], also returning the session as the file stored it when loading had to
     /// change it (the retired Subtractive Synth became a Macro Oscillator, #234; the inherited
-    /// effects retired in stage 1 were removed, #264; the Macro
+    /// effects retired in stage 1 were removed, #264; the one-sample Sampler became an empty kit,
+    /// #455; the Macro
     /// Oscillator's note-to-macro mapping became matrix rows, #243): a caller that
     /// tracks "modified" takes it as the saved state, so the open session reads as modified.
     pub fn from_json_as_saved(text: &str) -> Result<(Session, Option<Session>), SessionError> {
@@ -739,10 +740,12 @@ impl Session {
         s.load_notes.extend(dropped_pages);
         let changes = crate::legacy_synth::uses_retired_synth(&s)
             || crate::legacy_effects::uses_retired_effects(&s)
+            || crate::legacy_sampler::uses_one_sample_sampler(&s)
             || crate::legacy_mapping::migration_changes(&s);
         let as_stored = changes.then(|| s.clone());
         crate::legacy_synth::retire_subtractive_synth(&mut s);
         crate::legacy_effects::retire_inherited_effects(&mut s);
+        crate::legacy_sampler::retire_one_sample_sampler(&mut s);
         crate::legacy_mapping::migrate_session(&mut s);
         Ok((s, as_stored))
     }

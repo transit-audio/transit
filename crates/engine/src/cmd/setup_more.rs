@@ -714,13 +714,14 @@ mod tests {
         let buf = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.5; 4_800]] };
         std::fs::write(&wav, transit_audio_io::encode(&buf, &transit_audio_io::EncodeOptions::default()).unwrap()).unwrap();
         let mut donor = Engine::default();
-        donor.execute("track.new", &json!({"count": 1, "name": "Pads", "kind": "instrument"})).unwrap();
-        donor.execute("mix.sampler_load", &json!({"track": "Pads", "path": wav.to_string_lossy()})).unwrap();
+        donor.execute("track.new", &json!({"count": 1, "name": "Pads", "kind": "instrument", "instrument": "sampler"})).unwrap();
+        donor.execute("mix.sampler_zone_source", &json!({"track": "Pads", "zone": 1, "path": wav.to_string_lossy()})).unwrap();
         let path = dir.join("donor.transit").to_string_lossy().into_owned();
         crate::io::save_session(&mut donor, &path).unwrap();
         let mut e = crate::demo::demo_engine();
         e.execute("file.import_session_data", &json!({"path": path, "tracks": ["Pads"]})).unwrap();
-        let sample = e.session().track_by_name("Pads").and_then(|t| t.instrument.as_ref()).and_then(|i| i.sample).unwrap();
+        let patch = e.session().track_by_name("Pads").and_then(|t| t.instrument.as_ref()).and_then(|i| i.sampler_patch.clone()).unwrap();
+        let sample = patch.media()[0];
         let src = e.session().source(sample).unwrap();
         assert_eq!(src.name, "hit");
         assert!(e.session().pool.get(sample).is_some());

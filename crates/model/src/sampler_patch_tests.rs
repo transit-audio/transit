@@ -287,7 +287,9 @@ fn a_patch_registers_its_needs_and_older_readers_warn() {
             i.remove("sampler_patch");
         }
     }
-    let old_view = Session::from_json(&resaved.to_string()).unwrap();
+    // Read with the plain field rules: this build's load would give the patch-less Sampler an
+    // empty kit (the one-sample drop, #455), which the previous release does not do.
+    let old_view: Session = serde_json::from_value(resaved).unwrap();
     let ins = old_view.tracks[0].instrument.as_ref().unwrap();
     assert!(ins.sampler_patch.is_none() && ins.sample.is_none() && ins.plugin == "sampler");
 }

@@ -351,6 +351,15 @@ pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &Patch
         if audio.is_disk() {
             return Err(bad(id, format!("{}: it plays from disk, which a Sampler zone cannot yet", src.name)));
         }
+        // Decoded at the session rate rather than its stored one (the retired one-sample Sampler's
+        // source, #455): the zone's bounds would come from resampled audio, and the next open
+        // decodes a Sampler source at its stored rate.
+        if audio.buffer.sample_rate != src.sample_rate {
+            return Err(bad(
+                id,
+                format!("{}: it is held at {} Hz, not its own {} Hz: load it from its file", src.name, audio.buffer.sample_rate, src.sample_rate),
+            ));
+        }
         let bytes = admit_source(s, &src.name, audio.frames() as u64, audio.buffer.num_channels() as u64, audio.buffer.sample_rate)
             .map_err(|m| bad(id, m))?;
         let adding = if admitted.sources.iter().any(|r| r.source == sid) { 0 } else { bytes };

@@ -33,6 +33,17 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
     if picked.is_empty() {
         return Err(bad(id, "nothing to import"));
     }
+    // A donor track that had the retired one-sample Sampler came in as an empty kit on parse
+    // (#455): the donor's own line for it, under the donor's name, and the summary.
+    let dropped: Vec<String> =
+        picked.iter().filter_map(|t| other.load_notes.iter().find(|n| transit_model::legacy_sampler::is_track_line(n, &t.name))).cloned().collect();
+    if !dropped.is_empty() {
+        let n = dropped.len();
+        for line in dropped {
+            e.message(line);
+        }
+        e.message(transit_model::legacy_sampler::summary(n));
+    }
     let mut needed: Vec<SourceId> =
         picked.iter().flat_map(|t| t.playlists.iter().flat_map(|pl| pl.clips.iter().filter_map(|c| c.source()))).collect();
     // A Sampler's sample is session audio too.

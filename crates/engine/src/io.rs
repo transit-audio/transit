@@ -770,6 +770,9 @@ pub use recording::{
 };
 
 #[cfg(test)]
+mod one_sample_tests;
+
+#[cfg(test)]
 mod rate_tests {
     use super::*;
 

@@ -304,31 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn a_sampled_session_saves_and_reopens_with_its_sample() {
-        let d = dir("save");
-        let wav = d.join("pluck.wav");
-        tone_wav(&wav, 330.0, 22_050, 1.0, 1);
-        let mut e = Engine::default();
-        let t = instrument_track(&mut e);
-        add_notes(&mut e, t, &[(64, 0, 1)]);
-        e.execute("mix.sampler_load", &json!({"track": t.0, "path": wav.to_string_lossy(), "params": {"root_note": 64, "loop_mode": 1}})).unwrap();
-        let before = render(&e, 1);
-        let path = d.join("song.transit");
-        e.execute("session.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
-        std::fs::remove_file(&wav).unwrap();
-        let mut e2 = Engine::default();
-        e2.execute("session.open", &json!({"path": path.to_string_lossy()})).unwrap();
-        let ins = e2.session().track(t).unwrap().instrument.clone().unwrap();
-        assert_eq!(ins.plugin, "sampler");
-        assert_eq!(ins.params.get("loop_mode"), Some(&1.0));
-        let after = render(&e2, 1);
-        assert!(peak(&after[0]) > 0.05, "the saved copy in Audio Files plays");
-        let diff = before[0].iter().zip(&after[0]).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
-        assert!(diff < 1e-5, "same audio after reopening: {diff}");
-        let _ = std::fs::remove_dir_all(d);
-    }
-
-    #[test]
     fn refuses_bad_input() {
         let d = dir("bad");
         let junk = d.join("junk.wav");

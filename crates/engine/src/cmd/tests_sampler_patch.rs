@@ -101,22 +101,13 @@ fn kit(e: &mut Engine, d: &Dir) -> TrackId {
 }
 
 #[test]
-fn a_new_patch_leaves_the_one_sample_field_unset_and_an_old_session_gets_no_patch() {
+fn a_new_patch_leaves_the_one_sample_field_unset() {
     let d = Dir::new("new");
     let wav = d.path("tone.wav");
     tone(&wav, 440.0, 48_000, 0.25, 1);
     let mut e = Engine::default();
     let t = instrument(&mut e);
     e.execute("mix.sampler_load", &json!({"track": t, "path": s(&wav)})).unwrap();
-    // An old one-sample session: saving and reopening it makes no patch and needs nothing.
-    let old = d.path("old.transit");
-    e.execute("session.save_as", &json!({"path": s(&old)})).unwrap();
-    let text = std::fs::read_to_string(&old).unwrap();
-    assert!(!text.contains("sampler_patch") && !text.contains("\"needs\""), "{text}");
-    let mut reopened = Engine::default();
-    reopened.execute("session.open", &json!({"path": s(&old)})).unwrap();
-    let ins = reopened.session().track(t).unwrap().instrument.clone().unwrap();
-    assert!(ins.sampler_patch.is_none() && ins.sample.is_some());
     // A new patch clears the one-sample field (an older build plays nothing rather than an
     // arbitrary first sample); undo brings the one-sample Sampler back.
     e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();

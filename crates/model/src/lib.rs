@@ -19,6 +19,7 @@ mod io_map;
 pub mod legacy;
 pub mod legacy_effects;
 pub mod legacy_mapping;
+pub mod legacy_sampler;
 pub mod legacy_synth;
 pub use legacy_synth::DEFAULT_INSTRUMENT;
 mod markers;

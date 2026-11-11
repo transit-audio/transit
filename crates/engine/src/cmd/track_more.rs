@@ -295,8 +295,12 @@ fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut mixer: transit_model::Mixer =
         serde_json::from_value(v.get("mixer").cloned().unwrap_or(Value::Null)).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
     mixer.sanitize();
-    let instrument: Option<Insert> = v.get("instrument").cloned().and_then(|x| serde_json::from_value(x).ok());
+    let mut instrument: Option<Insert> = v.get("instrument").cloned().and_then(|x| serde_json::from_value(x).ok());
+    // The retired one-sample Sampler (#455): the slot part of the load drop, an empty kit; the
+    // target track's lanes and mappings stay, as for any preset.
+    let one_sample = instrument.as_mut().and_then(transit_model::legacy_sampler::retire_slot).is_some();
     let s = e.session_mut();
+    let mut lines = Vec::new();
     for t in &tracks {
         if let Some(tr) = s.track_mut(*t) {
             // Routing is session-specific: keep the track's own input/output, VCA and arm state.
@@ -311,8 +315,14 @@ fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
             }
             if tr.kind == TrackKind::Instrument && instrument.is_some() {
                 tr.instrument = instrument.clone();
+                if one_sample {
+                    lines.push(transit_model::legacy_sampler::track_line(&tr.name, None, &[]));
+                }
             }
         }
+    }
+    for line in lines {
+        e.message(line);
     }
     // A preset saved before transit 0.7.0 (ADR 0049): the status line and the result say what to do.
     if tag == crate::file_tags::Tag::Legacy {
