@@ -590,8 +590,9 @@ zooming and scrolling never change the kit.
 
 Without a loop, drop an audio file on the bench or choose **Load…**. In **Manual**, click the
 bench to add a marker (a dashed line shows where it lands, and says `too close` where it cannot),
-drag a marker's handle to move it (Escape cancels the drag), click a flag to remove its marker,
-and double-click a slice's cell to name it. Left and Right select slices, Alt+Left and Alt+Right
+drag a marker's handle to move it (a click that does not move leaves it where it is; Escape, or
+switching to another window, cancels the drag), click a flag to remove its marker, and
+double-click a slice's cell to name it. Left and Right select slices, Alt+Left and Alt+Right
 nudge the selected marker a frame (Shift for ten), and Delete removes it. **SNAP 0×** snaps edits
 to the nearest zero crossing. Each edit is one undo step. An edit in **Auto** first copies Auto's
 markers to Manual in the same step, and a notice offers **Undo**.
@@ -608,7 +609,9 @@ Under the panels, **Playback** and **Amp Envelope** edit the selected slice's pa
 Pads view. **Off · Loop · Ping-pong** loops the selected slice over its whole length; choosing a
 loop also sets Gate (it loops while held), so One-shot is greyed while the slice loops. Ping-pong
 sets the crossfade to 0 in the same step. The crossfade field beside it (forward loops only) takes
-milliseconds at the loop file's own sample rate; its tooltip gives the frames. When a later marker
+milliseconds at the loop file's own sample rate; its tooltip gives the frames. Enter or a click
+elsewhere sets it, on the slice you typed it for even when the click selects another slice. In any
+of the view's fields, Escape gives the typing up and leaves the window open. When a later marker
 edit makes the slice too short for its crossfade, the field keeps your value and a line says how
 much is used. On the bench a looping slice shows a magenta band under its flag, `↻` or `⇄` after
 its number, and its crossfade as a hatch at its end.
