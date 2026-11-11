@@ -41,14 +41,16 @@ works across the suite) keep the agent to the folders you give it:
 - Every file a command reads must lie inside the **read root**: `open_session`, `session.open`,
   `import_audio` and `file.import_audio`, `file.import_midi`,
   `file.import_clip_groups`, `file.import_session_data`, `track.load_preset`,
-  and `mix.sampler_zone_source`. The media a session file names is read too, so an opened session whose
-  audio paths lead outside the read root loads without that audio and lists it under `missing`.
+  `mix.sampler_zone_source` and `mix.sampler_kit_load`. The media a session file names is read too, so an opened session whose
+  audio paths lead outside the read root loads without that audio and lists it under `missing`;
+  likewise every sample a kit file names must lie inside the read root, and one outside it is
+  never read: it loads in the missing state and is listed under `missing`.
 - Every file a command writes must lie inside the **write root**: `save_session`, `session.save`,
   `session.save_as`, `session.save_copy`, `session.save_template`, `bounce_mix` and
   `file.bounce_mix`, `file.bounce_stems`, `file.export_clips`, `file.export_midi`,
   `file.export_dawproject`, `file.export_session_text`, `file.export_selected_tracks_as_session`, `file.export_sibelius`,
   `file.send_to_sibelius`, `file.print_score`, `file.export_clip_groups` and
-  `track.save_preset`, together with what a session save writes beside the session file
+  `track.save_preset` and `mix.sampler_kit_save` (with its temporary `<name>.tkit.tmp`), together with what a session save writes beside the session file
   (`Audio Files/`, `Backups/`) and its temporary file. A score command given no `path` writes to
   the temp folder, which is outside the write root unless you made it the root, so it is refused.
 - Read and write access are separate. Give the same folder twice for both; a root left out grants

@@ -69,6 +69,17 @@ and a summary, and the open reads as modified. A patch in any state, opaque incl
 touched. The old source stays in `sources` and, now named by no instrument, decodes at the session
 rate like timeline audio; a source shared with a timeline clip did so for the clip already.
 
+### Kit preset file (#467)
+
+A Sampler kit preset (`.tkit`, `crates/model/src/sampler_portable.rs`) is not a session file but
+the same patch serialization: `{"format": "transit-sampler-kit", "version": 1, "kit": ..}`, the
+patch with each `sources` entry carrying `file: {path, name, frames, channels, sample_rate,
+format}` in place of the session's source id (relative with `/` in or below the kit file's folder,
+else absolute). A recall writes new session sources (referenced, or in the missing state with the
+kit's recorded facts); the session format itself does not change and no `needs` entry is added.
+Unknown fields inside `file` are not kept. The rules are ADR 0041's amendment of 2026-11-11, "kit
+presets".
+
 ## Device pages (#355, ADR 0047)
 
 `Insert::pages` (instruments and inserts) and `MidiEffectSlot::pages` hold the macro strip's user

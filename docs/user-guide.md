@@ -712,6 +712,46 @@ and keep their pitch. Clips are never changed: the notes they hold no longer rea
 so transpose the pad clips by the distance you moved the start note (select their notes in the
 piano roll and move them by that many semitones).
 
+### Kit presets
+
+The Sampler's presets are **kit files**. A kit file holds the whole kit: every pad (its name, note,
+choke group, mute and solo), every zone and its settings, the slice loop with its markers, the
+groups and round robin, and the pad start note. It does not hold the audio: each sample is
+referenced by its file path, as the session references media. A sample in or below the kit file's
+folder is stored relative to it, so the folder moves and copies as one; any other sample is stored
+by its full path. Kit files end in `.tkit` and live in the `presets/sampler` folder of the settings
+folder (Windows: `%APPDATA%\transit\presets\sampler`; macOS:
+`~/Library/Application Support/transit/presets/sampler`; Linux: `~/.config/transit/presets/sampler`).
+No factory kits ship.
+
+The Sampler window's title bar works as on the other instruments. Click the name field to list your
+kits, recall one, save the kit under a new name (type it in **Save As…** and press Enter or
+**Save**) or delete the kit shown. The save button writes over the kit you last recalled or saved
+in this window; until you have one, it opens the list for Save As. The arrows step to the previous
+or next kit, wrapping at either end. A recall replaces the whole kit in one undo step, and a run of
+arrow steps is one undo step back to the kit you had before the run. When the kit has loaded pads
+(or any zone, or a slice loop) and you changed it since you last recalled or saved it, transit asks
+first: `Replace the kit? 12 loaded pads will be replaced by "808".` **Replace** (Enter) or
+**Cancel** (Escape, nothing changes). An unchanged kit is replaced without asking, since it is in a
+file and undo brings it back. After a recall the view, the bank and the selected pad stay as they
+were.
+
+A sample that is not where the kit says, that changed since the kit was saved (another length or
+sample rate), or that cannot be read is **missing**: its pad and zones load as saved and play
+silence, and the rest of the kit loads. On the Pads view a missing pad is hatched and its tooltip
+reads `Kick 01.wav is missing`; the Instrument and Slices views show the card naming the file. The
+note under the pads names each missing file and the path transit looked for. To fix it, put the
+file back at that path (or move the kit folder so relative paths resolve) and recall the kit again,
+or load a sample onto the pad (drop it, or **Load…**), which keeps the pad's settings. Relinking is
+not available yet. A kit made on Windows names Windows paths, which are missing on macOS and Linux,
+and the reverse; a sample on a network share is found only when the kit file is on that same
+share. A kit that cannot be recalled (saved by a newer transit, or not a kit) changes nothing, and
+the reason shows under the pads.
+
+Through the control channel, `mix.sampler_kit_save` and `mix.sampler_kit_load` take any path (see
+the control protocol's Sampler kit presets section). **Load kit…** in the Pads bar is different:
+it fills the free pads from a folder of samples (its undo step is **Load Kit Folder**).
+
 ## Resonator
 
 The Resonator is a built-in instrument (choose it from a track's instrument slot, beside the Macro
@@ -1030,8 +1070,7 @@ The session opens as modified, and the next save writes the empty kit. Tracks im
 older session (`file.import_session_data`) and track presets that hold the old Sampler get the
 same empty kit; an import does not bring the sample file along. Built-in Sampler user presets held
 only the old settings: each startup writes one log line per old preset, the files stay on disk, and
-the Sampler lists no presets. The Sampler's preset controls are not available yet (kit presets come
-later), so they save nothing.
+the Sampler does not list them. The Sampler's presets are now kit files ([Kit presets](#kit-presets)).
 The control-channel commands `mix.sampler_load` and `mix.sampler_clear` are removed: use
 `mix.sampler_zone_source` or `mix.sampler_load_kit`. A session saved by 0.7.0 and opened in
 v0.6.2 or earlier warns that it needs `sampler_patch`, has a silent Sampler, and loses the empty
