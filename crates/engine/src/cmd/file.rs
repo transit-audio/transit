@@ -106,6 +106,13 @@ pub fn specs() -> Vec<CommandSpec> {
             crate::io::write_file(&path, &bytes)?;
             Ok(json!({"path": path, "bytes": bytes.len()}))
         }),
+        cmd!(noundo "file.export_dawproject", "DAWproject...", ["File", "Export"], None, "{path, replace?: false} — tracks, mixer, note clips and MIDI expression, tempo and meter, markers, and full-length WAV stems for audible audio/instrument tracks; External Instrument audio is left out and named", always, |e, p| {
+            let requested = str_param(p, "path").ok_or_else(|| bad("file.export_dawproject", "`path` required"))?;
+            let path = crate::io::dawproject_file(requested);
+            refuse_replacing(e, "file.export_dawproject", &path, p)?;
+            let r = crate::io::export_dawproject(e, &path.to_string_lossy())?;
+            Ok(json!({"path": r.path, "tracks": r.tracks, "clips": r.clips, "stems": r.stems, "notes": r.notes, "left_out": r.left_out}))
+        }),
         cmd!(noundo "file.export_session_text", "Session Info as Text...", ["File", "Export"], None, "{path?}", always, |e, p| {
             let text = crate::inspect::session_text(e);
             if let Some(path) = str_param(p, "path") {

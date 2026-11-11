@@ -159,6 +159,20 @@ Swipe comping (picking a range from one take and the next range from another, wi
 renaming or coloring takes and auditioning a lane are not in this version. Logic's Take Folder and
 Live's Take Lanes work the same way for everything above.
 
+## DAWproject interchange
+
+**File > Open** opens a `.dawproject` as a new, untitled session with its tracks, mixer settings,
+note clips, MIDI expression, tempo and meter, and markers. Anything the importer does not support is
+counted in the load report.
+
+**File > Export DAWproject…** writes those editable parts to a new `.dawproject`. Audible audio and
+instrument tracks also include full-length 32-bit float WAV stems, so built-in and hosted device
+processing survives even though the devices themselves, routing, groups and parameter automation are
+not exported separately. Track and master volume/pan automation is omitted in favor of the static
+mixer values. Muted and empty tracks have no stem; inactive tracks are omitted. External Instrument
+audio cannot render offline; those tracks keep their MIDI and are named in the result. The confirmation
+dialog states these limits before choosing a location.
+
 ## Bounce
 
 File > Bounce… (Ctrl+Alt+B) writes the main mix or a bus over the selection, the cycle range or

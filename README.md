@@ -265,7 +265,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Full undo history; every edit is a command.
 - Autosave, and sessions saved as versioned, human-readable JSON in `.transit` files.
 - A launch splash that reports the audio device opening first, then plug-in scan progress, and Help > About with version info and a link to the transit repository.
-- Import audio and MIDI files; export MIDI. File > Open Session also opens a DAWproject (`.dawproject`, from Bitwig, Studio One, Cubase and others) as a new session: its tracks, note clips, tempo and meter, markers and MIDI expression (the first slice of #261). File > Open Recent lists your last ten sessions (Ctrl+Shift+O).
+- Import audio and MIDI files; export MIDI. File > Open Session also opens a DAWproject (`.dawproject`, from Bitwig, Studio One, Cubase and others) as a new session: its tracks, note clips, tempo and meter, markers and MIDI expression. File > Export DAWproject writes those editable parts plus full-length WAV stems for audible audio and instrument tracks (#261). File > Open Recent lists your last ten sessions (Ctrl+Shift+O).
 - Browser preview: select a supported audio file in the Files tab and press play to hear it before you drag it in. A headphone toggle auto-previews each selection, and the preview has its own volume on a path that never records, meters or routes to a track. It stops on another file, on transport start or on Escape; every importer format works, including RF64.
 
 ### Under the hood

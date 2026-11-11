@@ -86,6 +86,11 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         app.open_bounce();
                     }
                     ui.separator();
+                    if ui.add(crate::chrome::MenuRow::new("Export DAWproject…")).clicked() {
+                        ui.close();
+                        app.open_dawproject_export();
+                    }
+                    ui.separator();
                     if ui.add(crate::chrome::MenuRow::new("Quit")).clicked() {
                         ui.close();
                         app.run_or_ask("app.quit", json!({}));
@@ -711,6 +716,10 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
 /// The save-changes question.
 pub fn dialogs(app: &mut StudioApp, ctx: &egui::Context) {
     session_settings::window(app, ctx);
+    if matches!(app.dialog, Some(Dialog::DawprojectExport)) {
+        crate::dawproject::dialog(app, ctx);
+        return;
+    }
     if let Some(Dialog::DeleteTracks { tracks, clips }) = app.dialog.clone() {
         return delete_tracks_dialog(app, ctx, &tracks, clips);
     }

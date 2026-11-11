@@ -23,6 +23,7 @@ pub mod chrome_pick;
 pub mod clip_inspector;
 pub mod compressor_panel;
 pub mod control;
+mod dawproject;
 pub mod debug_log;
 pub mod device_editor;
 pub mod device_window;
@@ -181,6 +182,8 @@ pub enum Dialog {
     DeleteTracks { tracks: Vec<TrackId>, clips: bool },
     /// File > Bounce: its form, then its progress (slice 6, `finish`).
     Bounce,
+    /// File > Export DAWproject: the stem fallback is stated before choosing a location.
+    DawprojectExport,
     /// Track > Bounce in Place.
     BounceInPlace,
     /// Track > Show Hidden Tracks.
@@ -639,6 +642,7 @@ impl StudioApp {
                 Dialog::SaveChanges { .. } => "save_changes",
                 Dialog::DeleteTracks { .. } => "delete_tracks",
                 Dialog::Bounce => "bounce",
+                Dialog::DawprojectExport => "dawproject_export",
                 Dialog::BounceInPlace => "bounce_in_place",
                 Dialog::HiddenTracks => "hidden_tracks",
                 Dialog::DeleteTake { .. } => "delete_take",
