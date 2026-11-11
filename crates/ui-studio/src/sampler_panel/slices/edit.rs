@@ -99,7 +99,7 @@ fn auto_count(v: &SlicesView) -> usize {
     v.snapshot.data.as_ref().map_or(0, |l| l.auto.len())
 }
 
-/// Click on the empty bench: one add at the frame under the pointer (the engine snaps it with the
+/// Double-click on the bench: one add at the frame under the pointer (the engine snaps it with the
 /// loop's setting and clamps nothing: a refused add says why).
 pub(crate) fn add(app: &mut StudioApp, dev: Dev, v: &mut SlicesView, frame: u64) {
     let n = auto_count(v);

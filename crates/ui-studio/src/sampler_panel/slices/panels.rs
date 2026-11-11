@@ -18,13 +18,13 @@ use crate::tokens::{self, SPACE, layout, radius, sampler as tk};
 use crate::widgets::{self, r4};
 use egui::{Align2, Rect, Stroke, StrokeKind, Ui, pos2, vec2};
 
-pub const MANUAL_TEXT: &str = "Your own markers, kept apart from Auto's. Click the bench to add, drag to move, click a marker to remove. The first marker is the loop start and stays; E is a boundary, not a slice.";
+pub const MANUAL_TEXT: &str = "Your own markers, kept apart from Auto's. Click the bench to play a slice, double-click it to add, drag to move, click a marker to remove. The first marker is the loop start and stays; E is a boundary, not a slice.";
 pub const MANUAL_RESTING: &str = "Each edit is one undo step; Manual is never overwritten by detection.";
 pub const FROM_AUTO: &str = "Start from Auto's markers";
 pub const CLEAR: &str = "Clear";
 /// The four gestures, each as its verb (in `text`) and the rest (in `text.faint`).
 pub const GESTURES: [(&str, &str); 4] =
-    [("click", " the bench · add"), ("drag", " a handle · move"), ("click", " a flag · remove"), ("click", " the strip · select")];
+    [("double-click", " the bench · add"), ("drag", " a handle · move"), ("click", " a flag · remove"), ("click", " the strip · select")];
 
 /// A panel's rows: a cursor down its inside.
 pub struct Rows {

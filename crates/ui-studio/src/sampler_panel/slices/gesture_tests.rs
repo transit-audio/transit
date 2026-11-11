@@ -11,7 +11,8 @@ use serde_json::json;
 fn bench_swallows_the_second_click_of_a_double_click() {
     let (mut t, tr) = sliced();
     let (undo, log) = (t.undo_len(), view(&t).sent.len());
-    // A double-click on the empty bench: one add, the second click swallowed.
+    // A double-click on the bench: one add (#469: the double-click adds; its first click selects
+    // and plays).
     let at = at_frame(&bench(&t, tr), 5_000);
     t.click(at, 2);
     let s = sent(&t, log);
@@ -96,7 +97,7 @@ fn auto_gesture_copies_then_edits_with_one_undo_and_the_notice_offers_undo() {
     let before = t.patch(tr).slicing.unwrap();
     let (undo, log) = (t.undo_len(), view(&t).sent.len());
     let at = at_frame(&bench(&t, tr), 5_000);
-    t.click(at, 1);
+    t.click(at, 2);
     let s = sent(&t, log);
     assert_eq!(s.len(), 1, "the engine copies and adds in one command: {s:?}");
     assert_eq!(t.undo_len(), undo + 1, "one undo step");
@@ -261,14 +262,18 @@ fn quick_clicks_at_different_places_each_act() {
     let b = bench(&t, tr);
     let cell = mid(b.cells.iter().find(|c| c.0 == 0).unwrap().1);
     let (a, c) = (at_frame(&b, 5_000), at_frame(&b, 16_000));
-    // A select, then an add elsewhere, then a second add at another place, each within the
-    // double-click time of the one before.
+    let auditions = |t: &super::super::test_rig::T| t.app.builtin_editor.devices.sampler.views.values().next().unwrap().auditions;
+    let n = auditions(&t);
+    // A select, then a click on the bench elsewhere, then a click at another place, each within
+    // the double-click time of the one before: each acts (selects and plays, #469), none is
+    // taken for the second click of a double-click.
     let click = |at| vec![moved(at), press(at, true), press(at, false)];
     let events: Vec<egui::Event> = [cell, a, c].into_iter().flat_map(click).collect();
     steps(&mut t, events);
-    let s = sent(&t, log);
-    assert_eq!(s.len(), 2, "both adds are sent: {s:?}");
-    assert_eq!(frames(&t, tr).len(), 6);
+    assert_eq!(auditions(&t), n + 2, "both bench clicks play");
+    assert_eq!(view(&t).selected, 1, "the last one selected slice 2");
+    assert_eq!(sent(&t, log), Vec::<String>::new(), "single clicks add nothing");
+    assert_eq!(frames(&t, tr).len(), 4);
 }
 
 #[test]
@@ -278,12 +283,21 @@ fn a_typed_name_commits_when_the_next_click_adds_or_removes() {
     let cell = bench(&t, tr).cells.iter().find(|c| c.0 == 1).unwrap().1;
     t.click(mid(cell), 2);
     t.send("ui.text", json!({"text": "Snare"}));
-    // A click on the bench adds a marker: the name is committed first, and the add is sent too.
+    // A click on the bench commits the name. While the field has the keyboard the bench's press
+    // plays nothing (#469), so the click adds nothing; the next double-click adds.
+    let auditions = |t: &super::super::test_rig::T| t.app.builtin_editor.devices.sampler.views.values().next().unwrap().auditions;
+    let n = auditions(&t);
     let at = at_frame(&bench(&t, tr), 40_000);
     t.click(at, 1);
     let s = sent(&t, log);
-    assert_eq!(s.len(), 2, "{s:?}");
+    assert_eq!(s.len(), 1, "{s:?}");
     assert!(s[0].contains("\"op\":\"label\"") && s[0].contains("Snare"), "{s:?}");
+    assert_eq!(auditions(&t), n, "the press that ended the typing plays nothing");
+    // Past the double-click time of that click (the toolkit's own count), a double-click adds.
+    t.frames(30);
+    t.click(at, 2);
+    let s = sent(&t, log);
+    assert_eq!(s.len(), 2, "{s:?}");
     assert!(s[1].contains("\"op\":\"add\""), "{s:?}");
     assert_eq!(t.undo_len(), undo + 2);
     assert_eq!(t.patch(tr).slicing.unwrap().manual.unwrap().markers[1].label.as_deref(), Some("Snare"));

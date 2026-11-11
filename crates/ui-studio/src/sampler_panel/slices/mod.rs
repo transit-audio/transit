@@ -14,6 +14,11 @@
 //! removes it (never S); Space or Enter auditions the selected slice while held; Escape cancels a
 //! marker drag. Never while typing, a menu or a modal is open, or another window has the
 //! keyboard; the keys never fall through to the arrangement.
+//!
+//! The pointer (#469): a press on the bench selects the slice under it and auditions it while the
+//! button is held; a double-click adds a marker. One audition is held at a time: whichever of a
+//! press and Space or Enter started last owns it, and only its owner's release ends it (a key's
+//! release does not end a press's audition, and a button's release does not end a key's).
 
 pub mod bench;
 pub mod bench_gestures;
@@ -31,6 +36,8 @@ pub(crate) mod wave;
 
 #[cfg(test)]
 mod bench_tests;
+#[cfg(test)]
+mod click_tests;
 #[cfg(test)]
 mod gesture_tests;
 #[cfg(test)]
@@ -71,8 +78,8 @@ pub struct SlicesView {
     pub usage: use_panel::UseState,
     /// The Playback section's loop row (the crossfade being typed).
     pub play: loop_row::PlayState,
-    /// An audition held by Space or Enter (released with the key, or when the window closes, the
-    /// view switches or the instance changes).
+    /// The held audition is Space's or Enter's (released with the key, or when the window closes,
+    /// the view switches or the instance changes); otherwise a held audition is the pointer's.
     pub key_held: bool,
     /// Every command this view sent, latest last (bounded): `id {params}`.
     pub sent: Vec<String>,
@@ -133,6 +140,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let s = app.engine.session_arc();
     let audio = data.as_ref().and_then(|l| l.source).and_then(|id| s.pool.get(id).cloned());
     let missing = data.as_ref().and_then(|l| l.source.filter(|id| !s.pool.contains(*id)).map(|_| file_name(app, l).unwrap_or_default()));
+    let held_off = held_off(app, ui.ctx());
     let (now, held) = ui.input(|i| (i.time, i.pointer.any_down()));
     if let Some(l) = &data {
         detect_panel::tick(app, dev, &mut v, l, now, held);
@@ -149,6 +157,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
         handle_tip: tip("Move: drag; cancel", &[Action::SamplerCancelDrag])
             + &tip("; nudge one frame", &[Action::SamplerNudgeEarlier, Action::SamplerNudgeLater])
             + &tip("; ten", &[Action::SamplerNudgeEarlierTen, Action::SamplerNudgeLaterTen]),
+        held_off,
     };
     let h = bench::height(ui.painter());
     let bench_rect = Rect::from_min_size(rect.min, vec2(rect.width(), h));
@@ -198,10 +207,24 @@ fn typing(ctx: &egui::Context, uid: u64) -> Option<egui::Id> {
     ctx.memory(|m| ids.into_iter().find(|id| m.has_focus(*id)))
 }
 
+/// A menu, a modal or a dialog is open, or a field has the keyboard: the bench's press and
+/// double-click do nothing, as the view's keys do nothing (`keys`).
+fn held_off(app: &StudioApp, ctx: &egui::Context) -> bool {
+    ctx.egui_wants_keyboard_input() || app.dialog.is_some() || ctx.memory(|m| m.top_modal_layer().is_some()) || egui::Popup::is_any_open(ctx)
+}
+
 /// Sends what a completed bench gesture asks for.
 fn apply(app: &mut StudioApp, dev: Dev, v: &mut SlicesView, intent: Intent) {
     match intent {
         Intent::Add(f) => edit::add(app, dev, v, f),
+        Intent::Audition(index) => {
+            if let Some(note) = v.snapshot.data.as_ref().and_then(|l| l.showing().get(index)).and_then(|s| s.key) {
+                behavior::audition(app, dev, note);
+                // The pointer owns it now (`v` is the view's state while it draws: the state in
+                // the app is a placeholder until `show` puts `v` back).
+                v.key_held = false;
+            }
+        }
         Intent::Move { id, frame } => edit::move_to(app, dev, v, id, frame, None),
         Intent::Remove { id, index } => edit::remove(app, dev, v, id, index),
         Intent::Rename(index) => {
@@ -230,12 +253,14 @@ pub(crate) fn height(p: &egui::Painter) -> f32 {
 
 /// Releases held auditions that lost their key or window: a keyboard audition when its window
 /// closed, its view switched, another window took the keyboard or neither audition key is down;
-/// a pointer audition when its window closed, its view switched or no button is down. The note-off
-/// goes to the track the note went to.
+/// a pointer audition when its window closed, its view switched or no button is down, and on the
+/// Slices view also when the pointer left the window or the window lost the focus (the system may
+/// deliver the release elsewhere, or never). The note-off goes to the track the note went to.
 fn release_stale(app: &mut StudioApp, ctx: &egui::Context) {
-    let (keys_down, button_down) = ctx.input(|i| {
+    let (keys_down, button_down, gone) = ctx.input(|i| {
         let down = shortcuts::rows(Action::SamplerAuditionSlice).any(|s| i.key_down(s.key));
-        (down, i.pointer.any_down())
+        let gone = i.raw.events.iter().any(|e| matches!(e, egui::Event::PointerGone | egui::Event::WindowFocused(false)));
+        (down, i.pointer.any_down(), gone)
     });
     let focused = app.builtin_editor.devices.focused;
     let open: Vec<u64> = app.ui.plugin_windows.iter().filter_map(|k| app.builtin_at(*k).map(|i| i.uid.get())).collect();
@@ -250,6 +275,8 @@ fn release_stale(app: &mut StudioApp, ctx: &egui::Context) {
             let shown = open.contains(uid);
             if v.slices.key_held {
                 !shown || v.view != super::View::Slices || focused != Some(**uid) || !keys_down
+            } else if v.view == super::View::Slices {
+                !shown || !button_down || gone
             } else {
                 !shown || v.view != super::View::Pads || !button_down
             }
@@ -337,7 +364,7 @@ pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
                 behavior::audition(app, dev, note);
                 view(app, uid).slices.key_held = view(app, uid).held.is_some();
             }
-        } else {
+        } else if view(app, uid).slices.key_held {
             behavior::release(app, dev);
         }
     }

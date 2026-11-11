@@ -245,13 +245,16 @@ pub(crate) fn pad_input(app: &mut StudioApp, ui: &egui::Ui, dev: Dev, index: u8,
     }
 }
 
-/// The pointer let go: a held audition ends; a drag from a pad released on another pad swaps them.
+/// The pointer let go: a held audition ends (unless Space or Enter holds it on the Slices view: a
+/// key's audition ends with its key, #469); a drag from a pad released on another pad swaps them.
 pub(crate) fn end_drag(app: &mut StudioApp, ctx: &egui::Context, dev: Dev, out: &SamplerLayout) {
     let (released, pos) = ctx.input(|i| (i.pointer.primary_released(), i.pointer.latest_pos()));
     if !released {
         return;
     }
-    release(app, dev);
+    if !view(app, dev.uid()).slices.key_held {
+        release(app, dev);
+    }
     let Some(from) = view(app, dev.uid()).drag.take() else { return };
     let target = pos.and_then(|p| out.pads.iter().find(|r| super::grid_rect(r.pad.rect).contains(p)).map(|r| r.index));
     if let Some(to) = target.filter(|t| *t != from) {

@@ -5,14 +5,20 @@
 //! the ghost turns `too close` exactly where the add would be refused and a drag shows where the
 //! move will land; there is no second implementation.
 //!
-//! - **Single clicks only.** The bench swallows the second click of a double-click, so one
-//!   double-click never adds twice or adds and then removes; the one exception is a double-click
-//!   on the same slice's cell, which renames the slice in place.
-//! - **Add:** a click on the bench under the flag strip. **Remove:** a click on a flag. **Move:**
-//!   drag a Manual handle (by the distance dragged, once past the toolkit's drag threshold; a
-//!   click on a handle sends nothing); Escape, or the window losing focus, cancels and nothing is
-//!   sent; one move per completed drag.
-//!   **Select:** a click on a slice's cell.
+//! - **The bench under the flag strip:** a press inside a slice selects it and auditions it while
+//!   the button is held (the view's held audition, as Space does; released with the button, when
+//!   the pointer leaves the window, the window loses focus or closes); a double-click adds a
+//!   marker at the pointer, exactly one (the maintainer's decision of 2026-11-11, #469). Neither
+//!   acts while a menu, a modal or a dialog is open or a field has the keyboard, and a click whose
+//!   press was held off that way never counts as the first click of a double-click.
+//! - **The flag strip** acts on single clicks and swallows the second click of a double-click, so
+//!   a double-click never removes and then selects; the one exception is a double-click on the
+//!   same slice's cell, which renames the slice in place.
+//! - **Add:** a double-click on the bench under the flag strip. **Remove:** a click on a flag.
+//!   **Move:** drag a Manual handle (by the distance dragged, once past the toolkit's drag
+//!   threshold; a click on a handle sends nothing and plays nothing); Escape, or the window losing
+//!   focus, cancels and nothing is sent; one move per completed drag.
+//!   **Select:** a click on a slice's cell, or a press on the bench inside the slice.
 
 use super::state::{Loop, Mode};
 use transit_model::SourceAudio;
@@ -33,6 +39,9 @@ pub enum Intent {
         id: u32,
         index: usize,
     },
+    /// Audition the slice at this index while the button is held (a press on the bench; the view
+    /// already selected it).
+    Audition(usize),
     /// Start renaming the slice at this index.
     Rename(usize),
     /// Commit a typed name for the marker with this id.
@@ -57,8 +66,10 @@ pub enum Target {
 /// What to do with a click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Act {
-    /// Act on it (add, remove or select).
+    /// Act on it (remove or select; on the bench the press already acted).
     Single,
+    /// The second click of a double-click on the bench: add a marker.
+    Add,
     /// The second click of a double-click on the same cell: rename.
     Rename,
     /// The second click of any other double-click: nothing.
@@ -95,6 +106,9 @@ pub struct Gestures {
     /// The last click acted on: when (the frame's input time) and on what.
     pub last: Option<(f64, Target)>,
     pub renaming: Option<Renaming>,
+    /// The last press on the bench came while a menu, a modal or a dialog was open or a field had
+    /// the keyboard: it played nothing, and its click is not counted.
+    pub press_held_off: bool,
 }
 
 impl Gestures {
@@ -106,6 +120,7 @@ impl Gestures {
             self.last = None;
             return match (first, target) {
                 (Target::Cell(a), Target::Cell(b)) if a == b => Act::Rename,
+                (Target::Body, Target::Body) => Act::Add,
                 _ => Act::Swallow,
             };
         }

@@ -275,7 +275,7 @@ fn over_capacity_at(narrow: bool) {
     t.click(mid(b.cells[40].1), 1);
     assert_eq!(view(&t).selected, 40);
     let undo = t.undo_len();
-    t.click(at_frame(&b, 43_900), 1);
+    t.click(at_frame(&b, 43_900), 2);
     assert_eq!(t.undo_len(), undo);
     assert_eq!(panels(&t, tr).left_error.unwrap().text, "Cannot add slice: 64 slices per loop");
 }

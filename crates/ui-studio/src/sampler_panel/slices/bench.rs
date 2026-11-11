@@ -70,7 +70,9 @@ pub const LOAD: &str = "Load…";
 pub const RELINK: &str = "Relink…";
 pub const NOT_YET: &str = "Not available yet";
 pub const HINT_AUTO: &str = "Detected markers are read-only. Any edit copies the set to Manual and switches there.";
-pub const HINT_MANUAL: &str = "Click adds · drag a handle moves · click a flag removes · snaps to the nearest zero crossing";
+pub const HINT_MANUAL: &str = "Click plays · double-click adds · drag a handle moves · click a flag removes · snaps to zero crossings";
+/// The bench's hover tooltip after the pointer's milliseconds from S.
+pub const HOVER_ADD: &str = "double-click adds a marker";
 pub const SNAP: &str = "SNAP 0×";
 pub const MODES: [&str; 2] = ["Auto", "Manual"];
 
@@ -85,6 +87,9 @@ pub struct Inputs {
     pub cell_tip: String,
     pub flag_tip: String,
     pub handle_tip: String,
+    /// A menu, a modal or a dialog is open, or a field has the keyboard: a press on the bench
+    /// plays nothing and a double-click adds nothing (as the view's keys are held).
+    pub held_off: bool,
 }
 
 /// One slice start as drawn: its line, its flag (not drawn where crowded) and (Manual, past S)
@@ -280,7 +285,7 @@ pub(crate) fn button_w(p: &egui::Painter, text: &str) -> f32 {
 
 /// Draws the bench into `rect` (the panel card) for instance `uid`; returns what it drew and what
 /// the gestures that completed this frame ask for, in order: a name being typed commits before
-/// what the click that ended it asks for (a mode switch, an add, a remove).
+/// what the click that ended it asks for (a mode switch, an audition, an add, a remove).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn show(
     ui: &mut Ui,
@@ -295,7 +300,7 @@ pub(crate) fn show(
     let t = &TOKENS;
     let mut out = BenchLayout { panel: r4(rect), header_opacity: 1.0, ..BenchLayout::default() };
     let mut intent = None;
-    let (mut label, mut gesture) = (None, None);
+    let (mut label, mut gestures) = (None, Vec::new());
     let p = ui.painter().clone();
     p.rect(rect, radius::PANEL, t.surface_panel, Stroke::new(1.0, t.line), StrokeKind::Inside);
     let inner = rect.shrink2(vec2(layout::PANEL_PADDING[1], layout::PANEL_PADDING[0]));
@@ -356,7 +361,7 @@ pub(crate) fn show(
             if let Some(name) = &inputs.missing {
                 missing(ui, &wp, uid, body, name, &mut out);
             }
-            (label, gesture) = draw_loop(ui, &wp, uid, view, l, audio, inputs, area, strip, body, &mut out);
+            (label, gestures) = draw_loop(ui, &wp, uid, view, l, audio, inputs, area, strip, body, &mut out);
             wp.line_segment(
                 [pos2(strip.min.x, strip.max.y - 0.5), pos2(strip.max.x, strip.max.y - 0.5)],
                 Stroke::new(1.0, named(tk::BENCH_FLAG_STRIP_LINE)),
@@ -383,7 +388,7 @@ pub(crate) fn show(
         out.selection = selection_line(l, i, s, mc);
         out.selection_rect = r4(widgets::role_text(&p, &tokens::VALUE, &out.selection, t.text, Align2::RIGHT_CENTER, hint_row.right_center()));
     }
-    (out, [label, intent, gesture].into_iter().flatten().collect())
+    (out, [label, intent].into_iter().flatten().chain(gestures).collect())
 }
 
 /// No loop: the well is a dashed `line.strong` drop target with `+ Drop a loop` and Load…, or,
@@ -492,7 +497,7 @@ fn draw_loop(
     strip: Rect,
     body: Rect,
     out: &mut BenchLayout,
-) -> (Option<Intent>, Option<Intent>) {
+) -> (Option<Intent>, Vec<Intent>) {
     let t = &TOKENS;
     let mut intent = None;
     let set = l.showing();
@@ -594,9 +599,10 @@ fn draw_loop(
         out.end = Some(EndRecord { line: r4(end_line), flag: r4(flag), fill, ink });
     }
     let end_left = out.end.as_ref().map_or(area.max.x, |e| e.flag[0]);
-    // The bench under the flag strip: a click adds (the second click of a double-click is
-    // swallowed); hovering shows the ghost and the pointer's milliseconds from S. Registered
-    // before the handles, which sit over it and take their own presses.
+    // The bench under the flag strip: a press selects the slice under the pointer and plays it
+    // while held, a double-click adds; hovering shows the ghost and the pointer's milliseconds
+    // from S. Registered before the handles, which sit over it and take their own presses (the
+    // toolkit gives a press on a drag-only widget on top to that widget alone).
     let sense = if inputs.missing.is_some() { Sense::hover() } else { Sense::click() };
     let body_resp = ui.interact(body, egui::Id::new(("sampler_slice_well", uid)), sense);
     // Past 1× the scroll bar sits in the well's foot under the handles (the board draws the two
@@ -764,17 +770,21 @@ fn draw_loop(
                     view.viewport.select(s.frame, s.end);
                 }
                 Act::Rename => intent = Some(Intent::Rename(i)),
-                Act::Swallow => {}
+                Act::Swallow | Act::Add => {}
             }
         }
         out.cells.push((i, r4(cell)));
     }
     let cells = out.cells.clone();
     let label = rename(ui, uid, view, &cells, strip, out);
-    // A click on the bench adds; the ghost previews it.
+    let audition = press(ui, view, l, inputs, area, &body_resp);
+    // A double-click on the bench adds (the ghost previews where); a click whose press was held
+    // off is not counted, so it never starts a double-click.
     if body_resp.clicked()
+        && !view.gesture.press_held_off
+        && !inputs.held_off
         && let Some(at) = body_resp.interact_pointer_pos()
-        && view.gesture.click(now, body_resp.double_clicked() || body_resp.triple_clicked(), Target::Body, window) == Act::Single
+        && view.gesture.click(now, body_resp.double_clicked() || body_resp.triple_clicked(), Target::Body, window) == Act::Add
     {
         intent = Some(Intent::Add(view.viewport.frame_at(l, at.x, area.min.x, area.width())));
     }
@@ -785,9 +795,34 @@ fn draw_loop(
         if view.gesture.drag.is_none() && inputs.missing.is_none() {
             ghost(wp, view, l, audio, area, strip, body, frame, out);
         }
-        body_resp.on_hover_text(format!("{ms:.1} ms"));
+        body_resp.on_hover_text(format!("{ms:.1} ms · {HOVER_ADD}"));
     }
-    (label, intent)
+    (label, audition.into_iter().chain(intent).collect())
+}
+
+/// A press on the bench this frame (a fast click's press and release may share it): the slice
+/// under the pointer becomes the selected one and the returned intent auditions it while the
+/// button is held. The view does not scroll (only at 1×, where the view shows the whole loop, the
+/// selection sets the center the next zoom keeps), so the second click of a double-click lands
+/// where the first did. Held off, the press does nothing and is remembered as held off.
+fn press(ui: &Ui, view: &mut SlicesView, l: &Loop, inputs: &Inputs, area: Rect, body: &egui::Response) -> Option<Intent> {
+    let pressed = ui.input(|i| i.pointer.primary_pressed()) && (body.is_pointer_button_down_on() || body.clicked());
+    if !pressed {
+        return None;
+    }
+    view.gesture.press_held_off = inputs.held_off;
+    if inputs.held_off {
+        return None;
+    }
+    let at = body.interact_pointer_pos()?;
+    let frame = view.viewport.frame_at(l, at.x, area.min.x, area.width());
+    let set = l.showing();
+    let i = set.iter().rposition(|s| s.frame <= frame)?;
+    view.selected = i;
+    if view.viewport.factor() <= 1.0 {
+        view.viewport.select(set[i].frame, set[i].end);
+    }
+    Some(Intent::Audition(i))
 }
 
 /// The rename field over the renamed slice's cell (the cell's height inside the strip, at least
