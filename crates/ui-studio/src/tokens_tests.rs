@@ -706,6 +706,8 @@ fn the_sampler_views_match_tokens_json_both_ways() {
         "bench/handleLine",
         "bench/handleFill",
         "bench/midline",
+        "tag/ink",
+        "tag/edge",
         "candidate/line",
         "lockGlyph/color",
         "seed/sequential",

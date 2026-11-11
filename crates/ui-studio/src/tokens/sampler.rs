@@ -53,6 +53,10 @@ pub const BENCH_END_FLAG: [&str; 2] = ["surface.selected", "text.muted"];
 pub const BENCH_HANDLE_LINE: &str = "text";
 pub const BENCH_HANDLE_FILL: &str = "surface.inset";
 pub const BENCH_MIDLINE: &str = "line.inset";
+/// A well's status tag (`Analyzing…`, `keys out of order`): its font, ink and edge.
+pub const TAG_FONT: &str = "mono";
+pub const TAG_INK: &str = "text.muted";
+pub const TAG_EDGE: &str = "line.strong";
 /// The Pads bar's Start note field (`startNote`; `sampler_panel::bar` draws it).
 pub const START_NOTE_LABEL: &str = "Start note";
 pub const START_NOTE_FONT: &str = "mono";
@@ -111,6 +115,9 @@ pub const STRINGS: &[(&str, &str)] = &[
     ("bench/handleLine", BENCH_HANDLE_LINE),
     ("bench/handleFill", BENCH_HANDLE_FILL),
     ("bench/midline", BENCH_MIDLINE),
+    ("tag/font/font", TAG_FONT),
+    ("tag/ink", TAG_INK),
+    ("tag/edge", TAG_EDGE),
     ("type/zoneLabel/font", TYPE[0].1),
     ("type/rrTag/font", TYPE[1].1),
     ("type/octaveName/font", TYPE[2].1),
@@ -174,6 +181,12 @@ pub const BENCH_RULER_HEIGHT: f32 = 12.0;
 pub const BENCH_RULER_STEP: f32 = 0.5;
 pub const BENCH_RULER_FINE_STEP: f32 = 0.1;
 pub const BENCH_RULER_FINE_FROM_ZOOM: f32 = 4.0;
+/// The status tag: its inset from the well's corner, font weight and size, radius and padding a side.
+pub const TAG_INSET: f32 = 6.0;
+pub const TAG_FONT_WEIGHT: f32 = 500.0;
+pub const TAG_FONT_SIZE: f32 = 10.0;
+pub const TAG_RADIUS: f32 = 3.0;
+pub const TAG_PADDING_X: f32 = 4.0;
 /// The flag's corner radii (top left, top right, bottom right, bottom left).
 pub const BENCH_FLAG_RADIUS: [f32; 4] = [0.0, 3.0, 3.0, 0.0];
 pub const CHIP: f32 = 22.0;
@@ -237,6 +250,11 @@ pub const METRICS: &[(&str, f32)] = &[
     ("bench/ruler/step", BENCH_RULER_STEP),
     ("bench/ruler/fineStep", BENCH_RULER_FINE_STEP),
     ("bench/ruler/fineFromZoom", BENCH_RULER_FINE_FROM_ZOOM),
+    ("tag/inset", TAG_INSET),
+    ("tag/font/weight", TAG_FONT_WEIGHT),
+    ("tag/font/size", TAG_FONT_SIZE),
+    ("tag/radius", TAG_RADIUS),
+    ("tag/paddingX", TAG_PADDING_X),
     ("bench/flagRadius/0", BENCH_FLAG_RADIUS[0]),
     ("bench/flagRadius/1", BENCH_FLAG_RADIUS[1]),
     ("bench/flagRadius/2", BENCH_FLAG_RADIUS[2]),
