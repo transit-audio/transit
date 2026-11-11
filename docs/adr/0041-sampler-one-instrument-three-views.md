@@ -3,7 +3,7 @@ title: One Sampler instrument with three views (Instrument: zones, velocity laye
 -->
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, accepted, pad start note; amended 2026-11-11, proposed, the one-sample instrument retired (#455)
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, accepted, pad start note; amended 2026-11-11, accepted, the one-sample instrument retired (#455)
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
@@ -1286,7 +1286,9 @@ pruning a stored note equal to its default.
 
 ## Amendment 2026-11-11: the one-sample instrument is retired (#455)
 
-Proposed 2026-11-11. The maintainer decided (#455), and these points are fixed: the old one-sample
+Amended 2026-11-11, accepted: settled in one judging round with edits; the maintainer decided
+the product choice (no conversion: an old one-sample Sampler opens as an empty kit). The
+maintainer decided (#455), and these points are fixed: the old one-sample
 Sampler panel and the legacy playback path this record kept for it are retired and deleted, and
 nothing shows that panel or its New Kit notice again; an old session's one-sample Sampler opens
 as an empty kit, its sample assignment and its 19 parameters dropped, with no conversion, no
@@ -1294,7 +1296,7 @@ migration shim and a load note; this is stated plainly as an alpha break in the 
 and a new Sampler is an empty kit on the Pads view (#454). This record's general rules stay
 ("checked when set, clamped when used", "the engine never guesses UI state", sources keep their
 native rate). Where these leave a gap, the items below choose the narrowest rule, marked
-**proposed**, and "Open for the maintainer" lists it with a recommendation.
+**proposed**; the two gaps the maintainer settled are under "Decided by the maintainer".
 
 **What exists today.** A Sampler is one-sample when its instrument slot names `sampler` and
 `Insert::sampler_patch` is absent (`crates/model/src/mixer.rs`, `Insert`; the UI's test is
@@ -1344,9 +1346,17 @@ patch and plays through `transit-sampler-core`. The legacy renderer, the legacy 
 and New Kit, and every command that made or fed a one-sample Sampler are deleted (item 7).
 `SAMPLER_INFO` keeps its id, name and category, and its parameter table becomes empty: the 19
 ids were the legacy renderer's, and the zone slot ids stay outside it (body, "Capacities and
-admission"). `mix.sampler_new_patch` stays, since #454's new Sampler uses it. **Proposed:** an
-instance that still meets a Sampler without a patch (none should exist after item 2) plays
-silence through the core with nothing published; there is no third path.
+admission"). `mix.sampler_new_patch` stays, since #454's new Sampler uses it. Every command that
+puts `sampler` into an instrument slot gives it `SamplerPatch::new()` in the same step: today
+those are `mix.instrument` (the browser and the mixer's instrument picker) and `track.new` with
+`instrument: "sampler"`, beside `mix.sampler_new_patch`. #454 covers both; if it covers only
+`mix.instrument`, slice 1 adds `track.new`. A test runs each with `sampler` and finds a ready
+empty patch. With that and item 2, nothing makes a Sampler without a patch once slice 2 removes
+`mix.sampler_load`. **Proposed:** an instance that still meets one plays silence through the
+core with nothing published, and the window draws it as it draws an opaque patch (no legacy
+body, Load kit… unavailable); there is no third path. A `sampler` id that `mix.insert` puts in an
+insert slot is outside this amendment: only the instrument slot's `Insert::sample` was ever
+handed to an instance.
 
 **2. Old instruments open as empty kits.** The drop happens on parse, in the model. A new
 `legacy_sampler::retire_one_sample_sampler` (proposed file `crates/model/src/legacy_sampler.rs`,
@@ -1372,9 +1382,20 @@ old state back. A second pass finds nothing.
   yield 36 in the code; only reading a saved patch without the field yields 60). Because 36 is
   not 60, the next save writes `pad_start_note: 36`, exactly as #454's new kit does. The 19 ids
   are removed from `Insert::params`, `Insert::sample` is cleared, and the instrument's user pages
-  are removed (item 4). `bypass`, `active` and the `preset` label are kept.
+  are removed (item 4). `bypass` and `active` are kept. The `preset` label is reset to the one
+  `Insert::new` gives (`<factory default>`), as `retire_subtractive_synth` does: a kept name
+  would title the empty kit after a preset of the 19 retired values, which no longer applies
+  and which the Sampler no longer lists (item 6).
 - **What is written.** The next save (and autosave) writes the empty patch, no `sample` and none
   of the 19 ids; `Session::needs` then lists `sampler_patch` (item 6).
+- **Kits that already hold the 19 ids.** A Sampler with a patch is never touched, its
+  `Insert::params` included. Today `mix.instrument` writes the 19 defaults and
+  `mix.sampler_new_patch` keeps them, so kits saved by current builds carry them, and lanes,
+  mappings or macro targets made on them before New Kit may remain. They already drive nothing
+  audible (the core ignores the legacy ids). Once the table is empty they are unknown parameters
+  under the existing rule (`unknown_param_lines` in `crates/engine/src/io/session.rs`): kept in
+  the document, one INFO log line per id at open, no load note, and the session opens clean. The
+  plan compiler's `set_param` refuses them without logging.
 
 **3. The old sample's file and pool entry.** Nothing deletes or rewrites it. The session source
 that `Insert::sample` named stays in `Session::sources` (it shows in the Clip List), and the open
@@ -1382,13 +1403,25 @@ path still decodes it into the pool, because the open path decodes every entry o
 `Session::sources` (`open_session_linked` in `crates/engine/src/io/session.rs`). No instrument
 references it any more, so it becomes unreferenced unless a timeline clip also uses it. One
 change follows: the drop runs before decoding, so it is no longer in `sampler_sources`, and it
-is decoded at the session rate like timeline audio rather than at its stored rate; the file on
-disk is unchanged. Save keeps it like every other source (`write_session` writes or keeps every
-entry of `Session::sources`), so a saved session still carries the file. The user removes it
-with the Clip List's clear, as for any unused file, or loads it onto a pad again (from its file;
-through `mix.sampler_zone_source` with the source id it would enter at its decoded, session-rate
-PCM). `file.import_session_data` no longer brings the file along with a dropped instrument, since
-the donor is parsed first and the instrument names no source (`session_data.rs`, `needed`).
+is decoded at the session rate like timeline audio rather than at its stored rate. The file on
+disk is unchanged. When the two rates differ, the pool's PCM is resampled, while the source's
+stored `frames` and `sample_rate` still describe the file. Save keeps the file like every other
+source (`write_session` keeps a source whose file is already in the session folder or its Audio
+Files), so a saved session still carries the original file. A save to another folder (Save As)
+writes each source's pool audio as a new 32-bit float WAV, as for timeline audio; for this
+source that copy is now at the session rate, where it used to be at the stored rate. The user
+removes the source with the Clip List's clear, as for any unused file, or loads it onto a pad
+again from its file (a pad drop, Load…, or `mix.sampler_zone_source` with `path`), which imports
+it at its native rate as a new source. **Proposed:** `mix.sampler_zone_source` with `source`
+refuses a session source whose decoded rate differs from its stored `sample_rate` ("load it
+from its file"): the zone's bounds would come from the session-rate PCM, and the next open
+decodes a Sampler source at its stored rate.
+`file.import_session_data` no longer brings the file along with a dropped instrument, since
+the donor is parsed first and the instrument names no source (`session_data.rs`, `needed`). The
+import posts the donor's item 5 line for each one-sample track it imports, under the name the
+donor gave it, and the summary for those tracks. It already posts the donor's video note this
+way. Without this the drop would be silent on import, because the import discards the donor's
+other load notes.
 
 **4. What addressed the old parameters.** The drop removes, on that track: automation lanes on
 the instrument slot whose parameter is one of the 19 ids; session MIDI mappings to those ids on
@@ -1411,11 +1444,14 @@ open, open from bytes, crash recovery, session templates (saved sessions) and
 `file.import_session_data` (import of tracks; the donor is parsed with `Session::from_json`).
 Copying, duplicating or pasting a track inside a session meets only instruments that already
 have a patch. **Proposed:** `track.load_preset` (`crates/engine/src/cmd/track_more.rs`), which
-deserializes an `Insert` without parsing a session, applies the same drop to a one-sample
-instrument before it is applied and posts the same note in its status line. Built-in Sampler
-user presets (`crates/ui-studio/src/presets.rs`) hold only the 19 retired values: **proposed**,
-they are reported once like presets of retired devices (`retired_user_preset_lines`) and never
-deleted, and the Sampler shows no preset list until a patch preset exists. No factory Sampler
+deserializes an `Insert` without parsing a session, applies the slot part of the drop (item 2:
+the empty patch, no `sample`, none of the 19 ids, no user pages, the preset label reset) to a
+one-sample instrument before it is applied, and posts the track line in its status line. It
+leaves the target track's lanes and mappings as any preset load does. Built-in Sampler user
+presets (`crates/ui-studio/src/presets.rs`) hold only the 19 retired values. Decided by the
+maintainer: they are reported once like presets of retired devices (a
+`retired_user_preset_lines` line for a preset whose `plugin` is `sampler`) and never deleted,
+and the Sampler shows no preset list until a patch preset exists. No factory Sampler
 preset ships (body). No new compatibility marker: the empty kit is an ordinary schema 1 patch,
 so `Session::needs` emits `sampler_patch` (ADR 0023). A previous release, which lacks that
 entry, warns that the session needs `sampler_patch`, has a Sampler with no sample (silent, as
@@ -1444,6 +1480,11 @@ the kit is), and loses the empty patch if it saves; a development build that kno
   `compile.rs` and `compile/build.rs`. They exist only to call `set_sample`.
 - The legacy panel (`sampler_panel/legacy.rs`, `LegacyLayout`, `view_bar::legacy_bar`, the legacy
   branch of `body`), its notice and New Kit (`behavior::new_kit`).
+- Every other New Kit reference. The refusal "New Kit first." in `mix.sampler_load_kit`
+  (`crates/engine/src/cmd/sampler_kit.rs`, `prepare`): a Sampler without a patch gets
+  `patch_of`'s own error. The Pads view bar's disabled hover "Choose New Kit first" on Load kit…
+  (`view_bar.rs`): an opaque patch still reaches it, and it now says the patch is kept as saved.
+  Once the Instrument view is on main, its legacy body.
 - The 19-parameter table. Its readers are the legacy renderer, the legacy rows, built-in Sampler
   user presets (item 6), and `fill_default_params` in `mix.sampler_new_patch`, which writes those
   19 defaults into every new patch's `Insert::params` today and writes nothing once the table
@@ -1464,8 +1505,12 @@ half stays), the `set_sample` assertion in `crates/dsp/src/lib.rs`,
 `a_sampler_sample_swap_allocates_and_frees_nothing` and the test wrappers' `set_sample`
 forwarders (`crates/mix/tests/plan_alloc_probe.rs`, `crates/mix/src/plan_tests.rs`,
 `crates/playback/src/plan_bridge/tests.rs`), the tests in `cmd/sampler.rs`, the one-sample
-refusals in `tests_sampler_patch.rs`, `sampler_panel/legacy_tests.rs`, and the legacy cases of
-the builtin editor, Middle C display, view bar and browser drop tests. Rewritten on the current
+refusals in `tests_sampler_patch.rs`, `legacy_one_sample_patch_refused` in
+`tests_sampler_kit.rs`, `sampler_panel/legacy_tests.rs`,
+`the_legacy_window_loads_its_one_sample_without_an_import` in `drop_routing_tests.rs`,
+`a_legacy_patch_shows_new_kit_on_the_instrument_view` in `instrument/states_tests.rs` (once the
+Instrument view is on main), and the legacy cases of the builtin editor, Middle C display, view
+bar (`legacy_views_keep_the_sample_until_new_kit_is_chosen`) and browser drop tests. Rewritten on the current
 path: the read-root check in `crates/automation/tests/automation_roots.rs` (through
 `mix.sampler_zone_source`) and the donor in `setup_more.rs`'s session data test. Added:
 
@@ -1482,25 +1527,38 @@ path: the read-root check in `crates/automation/tests/automation_roots.rs` (thro
   and not reported as one-sample;
 - a one-sample Sampler without a sample (the note without the sample clause), a track preset
   and `file.import_session_data` taking the same drop;
+- `mix.instrument` and `track.new` with `sampler` each leaving a ready empty patch;
+- the import posting the track line, and a track preset taking the slot part only (the target
+  track's lanes kept);
+- the preset label reset;
+- a kit holding the 19 ids in `params` with a lane on one of them: it opens with no note, reads
+  unmodified, and saves the ids and the lane unchanged;
+- `mix.sampler_zone_source` with `source` refusing a source whose decoded rate differs from its
+  stored rate, and accepting one whose rates match;
 - no pinned hash anywhere in these tests.
 
 These negative mutations must fail them: an opaque patch treated as one-sample; the lanes kept;
-the pool entry removed; the drop missing from `changes` (the open reads clean).
+the pool entry removed; the drop missing from `changes` (the open reads clean); `track.new`
+with `sampler` making no patch; the import's note missing; the preset label kept.
 
 **9. Slices.** In this order, each building and passing on its own. #454 lands first.
 
 | Slice | Content | Rough size (non-test lines) |
 |---|---|---|
-| 1 | The drop on parse and in `track.load_preset`, with its load note and tests. With every old instrument opening as a kit, and the legacy panel shown only for a Sampler without a patch, the panel becomes unreachable. | +120 |
+| 1 | The drop on parse, in `track.load_preset` and on import, with its notes; the patch on `track.new` if #454 did not add it (item 1); the `source` rate refusal (item 3); and tests. Every old instrument opens as a kit and no UI path makes a Sampler without a patch, so the legacy panel cannot be reached from the UI. Until slice 2 removes them, `mix.sampler_load` and `mix.sampler_clear` can still make or feed one through the control channel; a session saved that way is dropped again on its next open. Nothing converted needs the Instrument view, so slice 1 does not wait for it. | +150 |
 | 2 | Delete the legacy renderer, `set_sample`, the mix plumbing, the panel, notice and New Kit, the commands, the dropped-bytes loader, the window drop, the sample picker and the parameter table, with item 8's test removals and rewrites. | +40, −800 |
-| 3 | Docs: the user guide, `docs/control-protocol.md` (the two commands removed), the design language README's Sampler rows and legacy notice, the session-format knowledge note, and the release-note text below. | docs only |
+| 3 | Docs: the user guide (including "A one-sample Sampler needs **New Kit** first"), `docs/control-protocol.md` (the two commands removed, and "require **New Kit** first"), `docs/mcp.md` (its `mix.sampler_load` lines), the design language README's Sampler rows and legacy notice, the session-format knowledge note, and the release-note text below. No help catalog entry names the legacy panel, so `cargo xtask help --check` stays green without `--write`; the slice runs it anyway. | docs only |
 
 Release-note text (proposed): "Alpha break: the old one-sample Sampler is gone. Opening an older
 session gives each one-sample Sampler an empty Sampler kit: its sample assignment and settings
 are dropped, and so are the automation, MIDI mappings and rack macros that pointed at them. The
 sample file stays in the session (it is in the Clip List) and can be dropped onto a pad again.
 The load notes name every affected track. The control-channel commands `mix.sampler_load` and
-`mix.sampler_clear` are removed: use `mix.sampler_zone_source` or `mix.sampler_load_kit`."
+`mix.sampler_clear` are removed: use `mix.sampler_zone_source` or `mix.sampler_load_kit`. Tracks
+imported from an older session get the same empty kit, and the sample file does not come along.
+Built-in Sampler user presets are retired: they are reported once and left on disk. A session
+saved by this version and opened in v0.6.2 or earlier warns that it needs `sampler_patch`, has
+a silent Sampler, and loses the empty kit if saved there."
 
 **Alternatives rejected.** Keep the legacy path: two renderers and a panel the maintainer decided
 has no place. Convert the old instrument into one zone (the draft first proposed for #455): the
@@ -1513,11 +1571,9 @@ leave `Insert::sample` unset").
 **Reopen when** a release decides that sessions saved before this change no longer open; that
 ends the drop code.
 
-**Open for the maintainer.**
+**Decided by the maintainer (2026-11-11).**
 
-1. Built-in Sampler user presets: report them once as retired and hide the Sampler's preset list
-   until a patch preset exists (recommended), or leave the list showing presets that change
-   nothing.
-2. How long the drop code lives: until a release stops opening sessions saved before this change
-   (recommended: decide at 0.8.0, beside ADR 0049's file tags), or remove it at the next minor
-   release.
+1. Built-in Sampler user presets are reported once as retired and never deleted; the Sampler
+   shows no preset list until a patch preset exists (item 6).
+2. The drop code stays until a release stops opening sessions saved before this change; whether
+   it is removed is decided at 0.8.0, beside ADR 0049's file tags.
