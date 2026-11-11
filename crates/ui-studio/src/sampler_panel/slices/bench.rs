@@ -278,8 +278,9 @@ pub(crate) fn button_w(p: &egui::Painter, text: &str) -> f32 {
     (widgets::role_size(p, &chrome::BUTTON_FONT, text).x + 2.0 * chrome::BUTTON_PADDING[1]).ceil()
 }
 
-/// Draws the bench into `rect` (the panel card) for instance `uid`; returns what it drew and the
-/// gesture that completed this frame, if any.
+/// Draws the bench into `rect` (the panel card) for instance `uid`; returns what it drew and what
+/// the gestures that completed this frame ask for, in order: a name being typed commits before
+/// what the click that ended it asks for (a mode switch, an add, a remove).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn show(
     ui: &mut Ui,
@@ -290,10 +291,11 @@ pub(crate) fn show(
     inputs: &Inputs,
     mc: transit_midi::MiddleC,
     rect: Rect,
-) -> (BenchLayout, Option<Intent>) {
+) -> (BenchLayout, Vec<Intent>) {
     let t = &TOKENS;
     let mut out = BenchLayout { panel: r4(rect), header_opacity: 1.0, ..BenchLayout::default() };
     let mut intent = None;
+    let (mut label, mut gesture) = (None, None);
     let p = ui.painter().clone();
     p.rect(rect, radius::PANEL, t.surface_panel, Stroke::new(1.0, t.line), StrokeKind::Inside);
     let inner = rect.shrink2(vec2(layout::PANEL_PADDING[1], layout::PANEL_PADDING[0]));
@@ -354,9 +356,7 @@ pub(crate) fn show(
             if let Some(name) = &inputs.missing {
                 missing(ui, &wp, uid, body, name, &mut out);
             }
-            if let Some(i) = draw_loop(ui, &wp, uid, view, l, audio, inputs, area, strip, body, &mut out) {
-                intent = Some(i);
-            }
+            (label, gesture) = draw_loop(ui, &wp, uid, view, l, audio, inputs, area, strip, body, &mut out);
             wp.line_segment(
                 [pos2(strip.min.x, strip.max.y - 0.5), pos2(strip.max.x, strip.max.y - 0.5)],
                 Stroke::new(1.0, named(tk::BENCH_FLAG_STRIP_LINE)),
@@ -383,7 +383,7 @@ pub(crate) fn show(
         out.selection = selection_line(l, i, s, mc);
         out.selection_rect = r4(widgets::role_text(&p, &tokens::VALUE, &out.selection, t.text, Align2::RIGHT_CENTER, hint_row.right_center()));
     }
-    (out, intent)
+    (out, [label, intent, gesture].into_iter().flatten().collect())
 }
 
 /// No loop: the well is a dashed `line.strong` drop target with `+ Drop a loop` and Load…, or,
@@ -471,7 +471,7 @@ fn draw_loop(
     strip: Rect,
     body: Rect,
     out: &mut BenchLayout,
-) -> Option<Intent> {
+) -> (Option<Intent>, Option<Intent>) {
     let t = &TOKENS;
     let mut intent = None;
     let set = l.showing();
@@ -733,7 +733,7 @@ fn draw_loop(
         out.cells.push((i, r4(cell)));
     }
     let cells = out.cells.clone();
-    rename(ui, uid, view, &cells, strip, &mut intent, out);
+    let label = rename(ui, uid, view, &cells, strip, out);
     // A click on the bench adds; the ghost previews it.
     if body_resp.clicked()
         && let Some(at) = body_resp.interact_pointer_pos()
@@ -750,22 +750,21 @@ fn draw_loop(
         }
         body_resp.on_hover_text(format!("{ms:.1} ms"));
     }
-    intent
+    (label, intent)
 }
 
 /// The rename field over the renamed slice's cell (the cell's height inside the strip, at least
-/// four flags wide): Enter or a click elsewhere commits, Escape cancels.
+/// four flags wide): Enter or a click elsewhere commits (the name returned), Escape cancels.
 fn rename(
     ui: &mut Ui,
     uid: u64,
     view: &mut SlicesView,
     cells: &[(usize, [f32; 4])],
     strip: Rect,
-    intent: &mut Option<Intent>,
     out: &mut BenchLayout,
-) {
-    let Some(r) = view.gesture.renaming.as_mut() else { return };
-    let Some(cell) = cells.iter().find(|c| c.0 == r.index).map(|c| c.1) else { return };
+) -> Option<Intent> {
+    let r = view.gesture.renaming.as_mut()?;
+    let cell = cells.iter().find(|c| c.0 == r.index).map(|c| c.1)?;
     let (left, right) = (cell[0], cell[2].max(cell[0] + tk::BENCH_FLAG_MIN_WIDTH * 4.0));
     let field = Rect::from_min_max(pos2(left, strip.min.y + tk::BENCH_FLAG_INSET), pos2(right, strip.max.y - tk::BENCH_FLAG_INSET));
     let edit = egui::TextEdit::singleline(&mut r.text)
@@ -778,14 +777,13 @@ fn rename(
         r.focused = true;
     }
     out.rename = Some(r4(field));
-    if resp.lost_focus() {
-        let cancel = super::escaped(ui);
-        let (id, text) = (r.id, r.text.clone());
-        view.gesture.renaming = None;
-        if !cancel {
-            *intent = Some(Intent::Label { id, text });
-        }
+    if !resp.lost_focus() {
+        return None;
     }
+    let cancel = super::escaped(ui);
+    let (id, text) = (r.id, r.text.clone());
+    view.gesture.renaming = None;
+    (!cancel).then_some(Intent::Label { id, text })
 }
 
 /// The add preview: a dashed `text` line at the snapped frame with its time on a `text` flag, a

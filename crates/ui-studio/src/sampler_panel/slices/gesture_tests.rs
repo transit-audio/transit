@@ -270,3 +270,32 @@ fn quick_clicks_at_different_places_each_act() {
     assert_eq!(s.len(), 2, "both adds are sent: {s:?}");
     assert_eq!(frames(&t, tr).len(), 6);
 }
+
+#[test]
+fn a_typed_name_commits_when_the_next_click_adds_or_removes() {
+    let (mut t, tr) = sliced();
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    let cell = bench(&t, tr).cells.iter().find(|c| c.0 == 1).unwrap().1;
+    t.click(mid(cell), 2);
+    t.send("ui.text", json!({"text": "Snare"}));
+    // A click on the bench adds a marker: the name is committed first, and the add is sent too.
+    let at = at_frame(&bench(&t, tr), 40_000);
+    t.click(at, 1);
+    let s = sent(&t, log);
+    assert_eq!(s.len(), 2, "{s:?}");
+    assert!(s[0].contains("\"op\":\"label\"") && s[0].contains("Snare"), "{s:?}");
+    assert!(s[1].contains("\"op\":\"add\""), "{s:?}");
+    assert_eq!(t.undo_len(), undo + 2);
+    assert_eq!(t.patch(tr).slicing.unwrap().manual.unwrap().markers[1].label.as_deref(), Some("Snare"));
+    // A click on a flag removes its marker, with the name typed before it committed.
+    let cell = bench(&t, tr).cells.iter().find(|c| c.0 == 2).unwrap().1;
+    t.click(mid(cell), 2);
+    t.send("ui.text", json!({"text": "Hat"}));
+    let log = view(&t).sent.len();
+    let flag = bench(&t, tr).flags.iter().find(|f| f.frame == 33_075).unwrap().flag;
+    t.click(mid(flag), 1);
+    let s = sent(&t, log);
+    assert_eq!(s.len(), 2, "{s:?}");
+    assert!(s[0].contains("\"op\":\"label\"") && s[0].contains("Hat") && s[1].contains("\"op\":\"remove\""), "{s:?}");
+    assert!(!frames(&t, tr).contains(&33_075));
+}

@@ -152,8 +152,8 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     };
     let h = bench::height(ui.painter());
     let bench_rect = Rect::from_min_size(rect.min, vec2(rect.width(), h));
-    let (mut layout, intent) = bench::show(ui, uid, &mut v, data.as_ref(), audio.as_deref(), &inputs, mc, bench_rect);
-    if let Some(i) = intent {
+    let (mut layout, intents) = bench::show(ui, uid, &mut v, data.as_ref(), audio.as_deref(), &inputs, mc, bench_rect);
+    for i in intents {
         apply(app, dev, &mut v, i);
     }
     let mut y = rect.min.y + h;
