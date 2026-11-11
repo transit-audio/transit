@@ -1,7 +1,7 @@
 //! The Sampler's editor in the design language (#326, job 326-S; the sampler is #269, ADR 0041):
 //! the Pads view, the first of the Sampler's three views, in the shared device window
 //! ([`crate::device_editor::window`], content-sized, no resize handle). The Slices and Instrument
-//! views wait for their boards.
+//! views currently show placeholders behind the shared view switch.
 //!
 //! Anatomy (README, Device anatomy; the Pad component and the board "Pads with choke groups"):
 //! A, the shared 52 px title bar; the view bar ([`bar`]: the summary and the kit's Start note
@@ -25,10 +25,12 @@
 pub mod bar;
 mod behavior;
 mod grid;
+mod kit_load;
 mod legacy;
 mod live;
 pub(crate) mod pad_actions;
 mod strip;
+mod view_bar;
 pub mod window;
 mod zone;
 
@@ -41,6 +43,8 @@ mod drop_routing_tests;
 #[cfg(test)]
 mod grid_tests;
 #[cfg(test)]
+mod kit_load_tests;
+#[cfg(test)]
 mod legacy_tests;
 #[cfg(test)]
 mod live_tests;
@@ -48,6 +52,8 @@ mod live_tests;
 mod pad_actions_tests;
 #[cfg(test)]
 mod test_rig;
+#[cfg(test)]
+mod view_bar_tests;
 #[cfg(test)]
 mod width_tests;
 #[cfg(test)]
@@ -67,6 +73,7 @@ use transit_model::{Session, TrackId};
 
 pub use behavior::pad_name;
 pub use live::Live;
+pub use view_bar::View;
 
 /// The Sampler's plug-in id.
 pub const SAMPLER: &str = "sampler";
@@ -102,6 +109,8 @@ pub fn pad_id(index: u8) -> String {
 /// the last refused edit and the pad a drag started on.
 #[derive(Debug, Clone)]
 pub struct PadsView {
+    pub view: View,
+    pub kit_preview: Option<kit_load::Preview>,
     pub bank: usize,
     pub selected: u8,
     pub live: [Live; PADS],
@@ -121,6 +130,8 @@ pub struct PadsView {
 impl Default for PadsView {
     fn default() -> Self {
         PadsView {
+            view: View::Pads,
+            kit_preview: None,
             bank: 0,
             selected: 0,
             live: [Live::default(); PADS],
@@ -210,8 +221,9 @@ pub struct SamplerLayout {
     pub title: TitleLayout,
     /// The legacy one-sample body (`None` on the pads).
     pub legacy: Option<LegacyLayout>,
-    /// The view bar (`Default` on the legacy body).
+    /// The shared view bar, including the legacy body.
     pub bar: bar::BarLayout,
+    pub placeholder: Option<(String, [f32; 4])>,
     /// The body's top left as egui placed it (on the physical pixel grid, so at a fractional
     /// scale it can sit a fraction of a point below the title bar's bottom).
     pub body_origin: [f32; 2],
@@ -366,6 +378,9 @@ pub fn content_height(app: &StudioApp, ctx: &egui::Context, key: (TrackId, usize
     let w = width - 2.0 * space::WINDOW_PADDING;
     let p = measurer(ctx);
     let v = app.builtin_editor.devices.sampler.views.get(&ins.uid.get());
+    if v.is_some_and(|v| v.view != View::Pads) {
+        return 2.0 * space::WINDOW_PADDING + bar::HEIGHT_WITH_GAP + grid::height(&p);
+    }
     let selected = v.map_or(0, |v| v.selected);
     let peers = patch_at(s, key).map(|patch| strip::peers_line(&pads_of(s, &patch), selected)).unwrap_or_default();
     let hero = grid::height(&p).max(strip::height(&p, w - grid::WIDTH - space::PANEL_GAP, &peers));
@@ -430,6 +445,13 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     let mut y = origin.y + space::WINDOW_PADDING;
     bar::show(app, ui, dev, &patch, &pads, Rect::from_min_size(pos2(x, y), vec2(w, bar::HEIGHT)), out);
     y += bar::HEIGHT_WITH_GAP;
+    if !view_bar::is_pads(app, dev.uid()) {
+        let h = grid::height(&p);
+        view_bar::placeholder(app, ui, dev.uid(), Rect::from_min_size(pos2(x, y), vec2(w, h)), out);
+        behavior::end_drag(app, ui.ctx(), dev, out);
+        ui.allocate_rect(Rect::from_min_size(origin, vec2(width, y + h + space::WINDOW_PADDING - origin.y)), Sense::hover());
+        return;
+    }
     let selected = view(app, dev.uid()).selected;
     let peers = strip::peers_line(&pads, selected);
     let strip_w = w - grid::WIDTH - space::PANEL_GAP;
@@ -449,6 +471,7 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     let data = pads.get(usize::from(selected)).cloned();
     y += zone::show(app, ui, dev, &patch, data.as_ref(), Rect::from_min_size(pos2(x, y), vec2(w, zone::height(&p))), lay, out);
     y += space::WINDOW_PADDING;
+    kit_load::show(app, ui.ctx(), dev);
     behavior::drops(app, dev, out);
     behavior::end_drag(app, ui.ctx(), dev, out);
     if live::moving(app, dev.uid(), now) {

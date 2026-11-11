@@ -199,15 +199,16 @@ fn the_bar_sits_under_the_title_bar_at_the_readmes_sizes_at_both_zooms() {
         assert!((bar[0] - origin[0] - space::WINDOW_PADDING).abs() < EPS, "{ppp}");
         assert!((pads[1] - bar[3] - space::PANEL_GAP).abs() < EPS, "{ppp}");
         assert!((bar[0] - pads[0]).abs() < EPS && (bar[2] - strip[2]).abs() < EPS, "{ppp}");
-        // The field: 48 by the dense 24, centred in the bar (2 above and below), at its right edge;
+        // The field: 48 by the dense 24, centered in the bar, one bar gap before Load kit;
         // the label 6 before it.
         assert_eq!(tk::START_NOTE_HEIGHT, tk::VIEW_BAR_CONTROL_HEIGHT, "the field takes the bar's control height");
         assert!((field[2] - field[0] - tk::START_NOTE_WIDTH).abs() < EPS && (field[3] - field[1] - tk::VIEW_BAR_CONTROL_HEIGHT).abs() < EPS);
-        assert!((field[2] - bar[2]).abs() < EPS, "{ppp}");
+        assert_eq!(super::view_bar_tests::hundredths(p.bar.load_kit.unwrap()[0]) - super::view_bar_tests::hundredths(field[2]), 1200, "{ppp}");
         assert!((field[1] - bar[1] - 2.0).abs() < EPS && (bar[3] - field[3] - 2.0).abs() < EPS, "{ppp}: {bar:?} {field:?}");
         assert!((field[0] - label[2] - tk::START_NOTE_LABEL_GAP).abs() < EPS, "{ppp}: {label:?} {field:?}");
-        // The summary at the left, clear of the label.
-        assert!((summary[0] - bar[0]).abs() < EPS && summary[1] >= bar[1] - EPS && summary[3] <= bar[3] + EPS);
+        // The summary follows the switch by one bar gap, clear of the label.
+        assert_eq!(super::view_bar_tests::hundredths(summary[0]) - super::view_bar_tests::hundredths(p.bar.switch.as_ref().unwrap().track[2]), 1200);
+        assert!(summary[1] >= bar[1] - EPS && summary[3] <= bar[3] + EPS);
         assert!(summary[2] + tk::VIEW_BAR_GAP <= label[0], "{summary:?} {label:?}");
         assert_eq!(p.bar.summary, "Bank A · 3 of 16 loaded · no choke groups");
         // The pad grid keeps its size.

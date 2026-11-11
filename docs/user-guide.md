@@ -573,8 +573,16 @@ build keeps that stored PCM and rate and plays as before. There is no migration 
 of the original unconverted audio; reimport a file to use its native PCM. Timeline audio imports
 keep their existing conversion to the session rate.
 
-To fill a kit from a folder through the control channel, use `mix.sampler_load_kit` with the
-track and `folder`. Set `preview: true` first to see the assignments. WAV, AIFF and FLAC files
+The Sampler's **Instrument · Pads · Slices** switch changes only the view. It remembers the
+choice for each instance while the app is open, including closing and reopening the editor.
+Instrument and Slices currently show a line saying the view is not built yet. Pads keeps its
+selected pad and bank when you return.
+
+To fill a kit from a folder, choose **Load kit…** in the Pads bar. Pick a folder, review the
+file count and pad range, then choose **Load kit**. Cancel leaves the kit unchanged. A refusal
+appears under the pads in the engine's words. Loading currently waits for the folder to finish
+decoding. Through the control channel, use `mix.sampler_load_kit` with the track and `folder`,
+and `preview: true` to see the assignments. WAV, AIFF and FLAC files
 are ordered by filename without regard to case and placed on the first free pads, A1 through
 D16. Occupied pads, including slices, stay as they are. Subfolders, hidden files, links and
 other files are ignored; SFZ mappings are listed but never executed. Files stay where they are,
@@ -589,8 +597,8 @@ note up (bank B starts 16 notes above A, C 32 and D 48). A new kit starts at MID
 General MIDI drums start and where other DAWs put the first pad of their drum instruments, so drum
 clips made elsewhere land on bank A; a kit saved before this setting existed keeps its pads on
 MIDI note 60 and up. To match a pad controller whose first pad sends another note, set the start
-note to that note instead of remapping the controller: use the **Start note** field at the right
-of the bar above the pads (drag it up or down a semitone at a time, with Shift by octaves, or turn
+note to that note instead of remapping the controller: use the **Start note** field before
+Load kit in the bar above the pads (drag it up or down a semitone at a time, with Shift by octaves, or turn
 Ctrl+wheel over it; double-click it to type a note name such as `C1` or `c#1`, or a MIDI number
 from 0 to 64), or the `mix.sampler_pad_start` command. A change the kit cannot take, such as one
 that would put a pad on a note another pad keeps, is refused, and the reason shows under the pads.

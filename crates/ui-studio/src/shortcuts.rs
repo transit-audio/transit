@@ -556,6 +556,10 @@ pub fn edges(ctx: &egui::Context, action: Action) -> Vec<bool> {
 
 /// Consume a press of any of `action`'s keys. The held modifiers must be exactly the row's.
 pub fn pressed(ctx: &egui::Context, action: Action) -> bool {
+    // A modal owns its keys before editor and arrangement handlers can consume them.
+    if ctx.memory(|m| m.top_modal_layer().is_some()) && rows(action).all(|s| s.scope != Scope::Dialog) {
+        return false;
+    }
     if matches!(action, Action::TrackHeightIn | Action::TrackHeightOut) {
         return ctx.input_mut(|i| {
             let mut hit = false;

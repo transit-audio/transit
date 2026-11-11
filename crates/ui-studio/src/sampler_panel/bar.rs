@@ -1,12 +1,9 @@
 //! The Pads view's view bar (README, Sampler views: View bar, and the round 2 "Pads view bar"):
 //! a row `VIEW_BAR_HEIGHT` (28) high under the title bar, before the hero row, its controls at the
 //! dense `VIEW_BAR_CONTROL_HEIGHT` (24) centred in it, its items `VIEW_BAR_GAP` (12) apart (a label
-//! and its field count as one item). Built so far: the one-line summary at the left in
-//! `readout.display` (`Bank A · 3 of 16 loaded · 2 choke groups`: the shown bank, the choke
-//! groups in use across banks) and, at the right, the kit's Start note field (ADR 0041 amendment
-//! of 2026-11-09; ADR 0051 decision 9). The view switch and the actions (`Load kit…`, `Expand to
-//! rack…`) wait for their slice: the switch goes before the summary and the actions after the
-//! field, one bar gap from it, and until then the field keeps the bar's right edge.
+//! and its field count as one item). The shared view switch precedes the one-line summary in
+//! `readout.display`; the kit's Start note item and Load kit action align to the right.
+//! Navigation and folder loading live in `view_bar` and `kit_load`.
 //!
 //! The Start note field: `Start note` in `label.control`, `START_NOTE_LABEL_GAP`, then a
 //! `START_NOTE_WIDTH` by `START_NOTE_HEIGHT` Text field (`surface.inset`, the control radius) with
@@ -128,6 +125,11 @@ pub struct BarLayout {
     pub summary: String,
     pub summary_rect: [f32; 4],
     pub start: StartNoteLayout,
+    pub switch: Option<crate::widgets::segmented::SegmentedLayout>,
+    /// The summary's flexible slot, one bar gap from the switch and the next item.
+    pub summary_slot: [f32; 4],
+    pub load_kit: Option<[f32; 4]>,
+    pub load_enabled: bool,
 }
 
 /// The id of the Start note field of instance `uid` (its typing state lives under `editing`).
@@ -203,17 +205,8 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
     let p = ui.painter().clone();
     let mc = app.ui.middle_c;
     let bank = view(app, dev.uid()).bank.min(super::BANKS - 1);
-    let bar = &mut out.bar;
-    bar.rect = r4(rect);
-    // The summary, left.
-    bar.summary = summary(pads, bank);
-    bar.summary_rect = r4(widgets::role_text(&p, &tokens::READOUT_DISPLAY, &bar.summary, t.text_faint, Align2::LEFT_CENTER, rect.left_center()));
-    // The Start note field, right (where the actions will follow it), at the dense height,
-    // centred in the bar.
-    let field = Rect::from_min_size(
-        pos2(rect.max.x - tk::START_NOTE_WIDTH, rect.center().y - tk::START_NOTE_HEIGHT / 2.0),
-        vec2(tk::START_NOTE_WIDTH, tk::START_NOTE_HEIGHT),
-    );
+    let summary = summary(pads, bank);
+    let Some(field) = super::view_bar::show(app, ui, dev, &summary, true, rect, out) else { return };
     let label = widgets::role_text(
         &p,
         &tokens::LABEL_CONTROL,

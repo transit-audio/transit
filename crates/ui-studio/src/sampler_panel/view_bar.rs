@@ -1,0 +1,141 @@
+//! Shared view navigation and the Pads view's folder action. Navigation is session UI state.
+
+use super::{SamplerLayout, bar, view};
+use crate::StudioApp;
+use crate::device_editor::Dev;
+use crate::theme::TOKENS;
+use crate::tokens::{self, chrome, radius, sampler as tk};
+use crate::widgets::{self, r4, segmented};
+use egui::{Align2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum View {
+    Instrument,
+    #[default]
+    Pads,
+    Slices,
+}
+
+impl View {
+    pub const ALL: [Self; 3] = [Self::Instrument, Self::Pads, Self::Slices];
+
+    pub fn index(self) -> usize {
+        match self {
+            Self::Instrument => 0,
+            Self::Pads => 1,
+            Self::Slices => 2,
+        }
+    }
+}
+
+const FACE: tokens::TypeRole =
+    tokens::TypeRole { size: tk::VIEW_SWITCH_FONT_SIZE, weight: tk::VIEW_SWITCH_FONT_WEIGHT as u16, ..tokens::LABEL_CONTROL };
+
+/// The shared segmented track retains its existing padding until that design value has a token.
+fn switch(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect) -> segmented::SegmentedLayout {
+    let t = &TOKENS;
+    let p = ui.painter().clone();
+    let widths = tk::VIEW_BAR_VIEWS.map(|name| widgets::role_size(&p, &FACE, name).x + 2.0 * tk::VIEW_SWITCH_PADDING_X);
+    let track = Rect::from_min_size(
+        pos2(rect.min.x, rect.center().y - tk::VIEW_BAR_CONTROL_HEIGHT / 2.0),
+        vec2(widths.iter().sum::<f32>() + 2.0 * segmented::PADDING, tk::VIEW_BAR_CONTROL_HEIGHT),
+    );
+    p.rect(track, radius::DISPLAY, t.surface_inset, Stroke::new(chrome::FIELD_EDGE_WIDTH, t.line), StrokeKind::Inside);
+    let inner = track.shrink(segmented::PADDING);
+    let mut x = inner.min.x;
+    let mut segments = Vec::new();
+    for (i, width) in widths.into_iter().enumerate() {
+        let seg = Rect::from_min_size(pos2(x, inner.min.y), vec2(width, inner.height()));
+        x += width;
+        let response = ui.interact(seg, ui.id().with(("sampler_view", dev.uid(), i)), Sense::click());
+        let selected = view(app, dev.uid()).view.index() == i;
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, tk::VIEW_BAR_VIEWS[i]));
+        if response.clicked() {
+            view(app, dev.uid()).view = View::ALL[i];
+        }
+        segments.push(seg);
+    }
+    let selected = view(app, dev.uid()).view.index();
+    let mut inks = Vec::new();
+    for (i, seg) in segments.iter().enumerate() {
+        let ink = if i == selected { t.text } else { t.text_faint };
+        if i == selected {
+            p.rect_filled(*seg, radius::SEGMENT, t.surface_selected);
+        }
+        widgets::role_text(&p, &FACE, tk::VIEW_BAR_VIEWS[i], ink, Align2::CENTER_CENTER, seg.center());
+        inks.push(ink);
+    }
+    segmented::SegmentedLayout {
+        track: r4(track),
+        segments: segments.into_iter().map(r4).collect(),
+        selected,
+        inks,
+        selected_fill: t.surface_selected,
+    }
+}
+
+/// Draw navigation and actions; return the Start note field's slot on a ready Pads view.
+pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, ready: bool, rect: Rect, out: &mut SamplerLayout) -> Option<Rect> {
+    out.bar.rect = r4(rect);
+    let switch = switch(app, ui, dev, rect);
+    let summary_x = switch.track[2] + tk::VIEW_BAR_GAP;
+    out.bar.switch = Some(switch);
+    if view(app, dev.uid()).view != View::Pads {
+        return None;
+    }
+    let p = ui.painter().clone();
+    let button_w = (widgets::role_size(&p, &chrome::BUTTON_FONT, "Load kit…").x + 2.0 * chrome::BUTTON_PADDING[1]).ceil();
+    let action = Rect::from_min_size(
+        pos2(rect.max.x - button_w, rect.center().y - tk::VIEW_BAR_CONTROL_HEIGHT / 2.0),
+        vec2(button_w, tk::VIEW_BAR_CONTROL_HEIGHT),
+    );
+    let response = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(action), |ui| {
+            if !ready {
+                ui.disable();
+            }
+            ui.spacing_mut().button_padding = vec2(chrome::BUTTON_PADDING[1], chrome::BUTTON_PADDING[0]);
+            ui.put(action, egui::Button::new(egui::RichText::new("Load kit…").font(chrome::BUTTON_FONT.font_id(ui.ctx()))))
+        })
+        .inner;
+    out.bar.load_kit = Some(r4(response.rect));
+    out.bar.load_enabled = ready;
+    let response = response.on_disabled_hover_text("Choose New Kit first");
+    if response.clicked() {
+        super::kit_load::pick(app, dev);
+    }
+    let field = Rect::from_min_size(
+        pos2(action.min.x - tk::VIEW_BAR_GAP - tk::START_NOTE_WIDTH, rect.center().y - tk::START_NOTE_HEIGHT / 2.0),
+        vec2(tk::START_NOTE_WIDTH, tk::START_NOTE_HEIGHT),
+    );
+    let summary_right = if ready {
+        field.min.x - tk::START_NOTE_LABEL_GAP - widgets::role_size(&p, &tokens::LABEL_CONTROL, tk::START_NOTE_LABEL).x - tk::VIEW_BAR_GAP
+    } else {
+        action.min.x - tk::VIEW_BAR_GAP
+    };
+    out.bar.summary = summary.to_string();
+    let slot = Rect::from_min_max(pos2(summary_x, rect.min.y), pos2(summary_right, rect.max.y));
+    out.bar.summary_slot = r4(slot);
+    out.bar.summary_rect = r4(widgets::role_text(&p, &tokens::READOUT_DISPLAY, summary, TOKENS.text_faint, Align2::LEFT_CENTER, slot.left_center()));
+    ready.then_some(field)
+}
+
+/// A view without its editor yet: plain centered text, using the existing control-label role.
+pub(crate) fn placeholder(app: &mut StudioApp, ui: &Ui, uid: u64, rect: Rect, out: &mut SamplerLayout) {
+    let name = tk::VIEW_BAR_VIEWS[view(app, uid).view.index()];
+    let text = format!("{name} view is not built yet.");
+    let drawn = widgets::role_text(ui.painter(), &tokens::LABEL_CONTROL, &text, TOKENS.text_muted, Align2::CENTER_CENTER, rect.center());
+    out.placeholder = Some((text, r4(drawn)));
+}
+
+/// A legacy patch keeps its existing controls and offers New Kit explicitly on every view.
+pub(crate) fn legacy_bar(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, out: &mut SamplerLayout) {
+    show(app, ui, dev, "One sample · New Kit to load pads", false, rect, out);
+}
+
+pub(crate) fn is_pads(app: &mut StudioApp, uid: u64) -> bool {
+    view(app, uid).view == View::Pads
+}
+
+/// Space occupied by a bar and the gap before the body.
+pub(crate) const HEIGHT_WITH_GAP: f32 = bar::HEIGHT_WITH_GAP;

@@ -74,7 +74,7 @@ pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
     else {
         return;
     };
-    if !super::has_patch(app.engine.session(), key) {
+    if !super::has_patch(app.engine.session(), key) || !super::view_bar::is_pads(app, uid) || view(app, uid).kit_preview.is_some() {
         return;
     }
     if crate::shortcuts::pressed(ctx, crate::shortcuts::Action::SamplerClearPad) {
