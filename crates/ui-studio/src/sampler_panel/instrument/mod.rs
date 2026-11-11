@@ -295,6 +295,12 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
         y += section_bar::HEIGHT + if i == 0 { SPACE[1] } else { 0.0 };
     }
     v.height = Some(y - rect.min.y);
+    // A drag lives only while a button is down: one whose release this view did not see (its
+    // widget was not drawn that frame) is dropped here, never kept to take Escape or send later.
+    if !ui.input(|i| i.pointer.any_down()) {
+        v.drag = None;
+        v.wave_drag = None;
+    }
     view(app, uid).instrument = v;
     out.instrument = Some(lo);
     y - rect.min.y

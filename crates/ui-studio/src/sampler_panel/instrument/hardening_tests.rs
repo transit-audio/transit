@@ -39,3 +39,47 @@ fn close_handles_each_take_their_own_press() {
     let s = sent(&t, log);
     assert!(s.len() == 1 && s[0].contains("\"end\""), "{s:?}");
 }
+
+#[test]
+fn a_handle_drag_released_outside_the_window_sends_one_edit_and_clears() {
+    let (mut t, tr) = region(1000, 20_000);
+    let w = layout(&t, tr).zone.unwrap().wave;
+    let from = mid(w.end_flag);
+    let out = (t.screen.x + 300.0, t.screen.y + 300.0);
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    steps(&mut t, vec![moved(from), press(from, true), moved((from.0 + 30.0, from.1)), moved(out), press(out, false)]);
+    assert_eq!(sent(&t, log), vec!["mix.sampler_zone_edit {\"region\":{\"end\":48000},\"zone\":1}".to_string()]);
+    assert_eq!(t.undo_len(), undo + 1);
+    assert!(view(&t).wave_drag.is_none(), "nothing stays held");
+}
+
+#[test]
+fn a_key_map_drag_released_outside_the_window_sends_one_edit_and_clears() {
+    let (mut t, tr) = layered();
+    let r = layout(&t, tr).key_map.zone(1).unwrap().rect;
+    let from = (r[2] - 2.0, (r[1] + r[3]) / 2.0);
+    let out = (t.screen.x + 300.0, -200.0);
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    steps(&mut t, vec![moved(from), press(from, true), moved((from.0 + 30.0, from.1)), moved(out), press(out, false)]);
+    assert_eq!(sent(&t, log).len(), 1);
+    assert_eq!(stored(&t, tr, 1).0, [48, layout(&t, tr).key_map.hi], "clamped to the last key shown");
+    assert_eq!(t.undo_len(), undo + 1);
+    assert!(view(&t).drag.is_none());
+}
+
+#[test]
+fn a_drag_whose_widget_went_away_is_dropped_and_escape_closes_the_window_again() {
+    let (mut t, tr) = region(1000, 20_000);
+    let w = layout(&t, tr).zone.unwrap().wave;
+    let from = mid(w.end_flag);
+    steps(&mut t, vec![moved(from), press(from, true), moved((from.0 + 30.0, from.1))]);
+    assert!(view(&t).wave_drag.is_some());
+    // The zone goes while the button is held: the Zone panel and its handles are not drawn.
+    t.run("mix.sampler_zone_clear", json!({"track": tr.0, "zone": 1}));
+    let log = view(&t).sent.len();
+    steps(&mut t, vec![press((from.0 + 30.0, from.1), false)]);
+    assert!(view(&t).wave_drag.is_none(), "the drag ends with the button");
+    assert_eq!(sent(&t, log).len(), 0);
+    t.key("Escape");
+    assert!(t.app.builtin_editor.windows.is_empty(), "Escape is the window's again");
+}
