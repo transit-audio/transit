@@ -104,8 +104,10 @@ pub struct ZonePanelLayout {
     pub fade_fields: Vec<[f32; 4]>,
     /// The field rings as refused typing.
     pub crossfade_error: bool,
-    /// The field has the keyboard or holds typing (the device window then keeps Escape).
+    /// A field has the keyboard or holds typing (the device window then keeps Escape).
     pub typing: bool,
+    /// A field has the keyboard.
+    pub focused: bool,
     pub crossfade_tip: String,
     /// The crossfade field's opacity (dimmed under Ping-pong; still editable).
     pub crossfade_opacity: f32,
@@ -195,7 +197,8 @@ pub struct Typing {
     pub fades: Option<super::fade_fields::FadeDraft>,
 }
 
-/// Draws the panel into `rect` for instance `uid`. `typed` is the fields' typing.
+/// Draws the panel into `rect` for instance `uid`. `typed` is the fields' typing; `kept` says the
+/// view's typing key survived since the last frame (the device window's Escape removes it).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn show(
     ui: &mut Ui,
@@ -205,11 +208,10 @@ pub(crate) fn show(
     inputs: &PanelInputs,
     wave_drag: &mut Option<WaveDrag>,
     typed: &mut Typing,
+    kept: bool,
     rect: Rect,
 ) -> (ZonePanelLayout, Option<Intent>) {
     let text = &mut typed.crossfade;
-    let edit_id = crossfade_id(uid).with("editing");
-    let kept = ui.data(|d| d.get_temp::<String>(edit_id).is_some());
     let mut typing_now = false;
     let t = &TOKENS;
     let p = ui.painter().clone();
@@ -377,14 +379,7 @@ pub(crate) fn show(
     }
     out.crossfade_error = error;
     out.typing = typing_now || text.as_ref().is_some_and(|d| !d.error) || typed.fades.is_some();
-    // While a field has the keyboard the panel's typing key is set where the device window's
-    // Escape rule gives typing up (`<crossfade id>.editing`): gone when a field lets go, Escape
-    // was pressed.
-    if typing_now {
-        ui.data_mut(|d| d.insert_temp(edit_id, String::new()));
-    } else {
-        ui.data_mut(|d| d.remove::<String>(edit_id));
-    }
+    out.focused = typing_now;
     out.crossfade_text = text.as_ref().map_or(stored, |d| d.text.clone());
     let fo = clipped(&p, &tokens::LABEL_CONTROL, FORWARD_ONLY, fade(t.text_faint), pos2(field.max.x + tk::ZONE_ROW_GAP, cy), inner.max.x);
     out.forward_only = r4(fo);

@@ -14,6 +14,8 @@
 //! window has the keyboard, and it never falls through to the arrangement.
 
 pub mod fade_fields;
+pub mod group_actions;
+pub mod group_panel;
 pub mod key_map;
 pub mod key_map_gestures;
 pub mod state;
@@ -22,6 +24,8 @@ pub mod zone_wave;
 
 #[cfg(test)]
 mod fades_tests;
+#[cfg(test)]
+mod group_panel_tests;
 #[cfg(test)]
 mod hardening_tests;
 #[cfg(test)]
@@ -41,9 +45,9 @@ use crate::builtin_editor::EditorLayout;
 use crate::device_editor::Dev;
 use crate::shortcuts::{self, Action};
 use crate::theme::TOKENS;
-use crate::tokens::{self, SPACE, layout as space, radius, sampler as tk};
-use crate::widgets::{self, r4, section_bar};
-use egui::{Align2, Color32, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use crate::tokens::{SPACE, layout as space, radius, sampler as tk};
+use crate::widgets::{r4, section_bar};
+use egui::{Color32, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use key_map_gestures::{Drag, ZoneEdit};
 use serde_json::{Value, json};
 use transit_model::sampler_patch::LoopMode;
@@ -77,6 +81,12 @@ pub struct InstrumentView {
     /// when the zone changes, so it never lands on another zone).
     pub sections_zone: Option<u16>,
     pub knob_fields: Vec<String>,
+    /// The pad zone the add chip asked about (the Group panel's Notice shows until an answer or
+    /// another zone is selected).
+    pub ask: Option<u16>,
+    /// The seed field's typing and the velocity fader's value while dragged.
+    pub seed_text: Option<String>,
+    pub fader: Option<f32>,
 }
 
 /// The view as last drawn.
@@ -85,9 +95,9 @@ pub struct InstrumentLayout {
     pub key_map: key_map::KeyMapLayout,
     pub note: Option<(String, [f32; 4])>,
     pub zone: Option<zone_panel::ZonePanelLayout>,
-    /// The Group panel's card and its opacity (not built yet).
+    /// The Group panel's card and what it drew.
     pub group: [f32; 4],
-    pub group_opacity: f32,
+    pub group_panel: Option<group_panel::GroupPanelLayout>,
     /// The sections row.
     pub sections: [f32; 4],
     pub bars: Vec<section_bar::SectionBarLayout>,
@@ -219,7 +229,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let mc = app.ui.middle_c;
     let now = ui.input(|i| i.time);
     let mut v = std::mem::take(&mut view(app, uid).instrument);
-    let mut lo = InstrumentLayout { bar_opacity: tk::UNUSED_CONTROL_ALPHA, group_opacity: tk::UNUSED_CONTROL_ALPHA, ..InstrumentLayout::default() };
+    let mut lo = InstrumentLayout { bar_opacity: tk::UNUSED_CONTROL_ALPHA, ..InstrumentLayout::default() };
     let data = v.snapshot.data.clone();
     let s = app.engine.session_arc();
     let p = ui.painter().clone();
@@ -239,6 +249,10 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
         lo.key_map = km;
         match intent {
             Some(key_map::Intent::Select(z)) => v.selected = Some(z),
+            Some(key_map::Intent::Ask(z)) => {
+                v.selected = Some(z);
+                v.ask = Some(z);
+            }
             Some(key_map::Intent::Map(edits)) => {
                 send(app, dev, &mut v, "mix.sampler_zone_map", key_map_gestures::params(&edits));
             }
@@ -254,37 +268,64 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
         lo.note = Some((n, r4(r)));
         y += nh;
     }
-    // The zone row: the Zone panel and the Group panel's place.
+    // The zone row: the Zone panel and the Group panel, as tall as the taller.
     y += space::PANEL_GAP;
     let [a, b] = tk::ZONE_COLUMNS;
     let zone_w = ((rect.width() - space::PANEL_GAP) * a / (a + b)).round();
+    let group_w = rect.width() - zone_w - space::PANEL_GAP;
     let warn = matches!((&data, &selected), (Some(st), Some(z)) if zone_panel::warning(st, z, mc).is_some());
-    let zh = zone_panel::height(&p, warn);
+    let asking = selected.as_ref().is_some_and(|z| v.ask == Some(z.zone) && z.pad.is_some());
+    // The question goes with its zone: another selected zone drops it.
+    if v.ask != v.selected {
+        v.ask = None;
+    }
+    let ask_text = selected.as_ref().and_then(|z| z.pad.filter(|_| asking)).map(|pad| group_panel::ask_text(&super::pad_id(pad - 1)));
+    let rows = match (&data, &selected) {
+        (Some(st), Some(z)) => group_panel::layers(st, z).len(),
+        _ => 1,
+    };
+    let zh = zone_panel::height(&p, warn).max(group_panel::height(&p, group_w, rows, ask_text.as_deref()));
     let zone_rect = Rect::from_min_size(pos2(rect.min.x, y), vec2(zone_w, zh));
+    let group = Rect::from_min_size(pos2(zone_rect.max.x + space::PANEL_GAP, y), vec2(group_w, zh));
+    lo.group = r4(group);
+    // The view's typing key: set while a field has the keyboard, where the device window's Escape
+    // rule gives typing up (`<crossfade id>.editing`), so a field that lets go finds it gone then.
+    let edit_id = zone_panel::crossfade_id(uid).with("editing");
+    let kept = ui.data(|d| d.get_temp::<String>(edit_id).is_some());
+    let mut focused = false;
     match (&data, &selected) {
         (Some(st), Some(z)) => {
             let (file, frames, audio) = source_of(&s, st, z);
             let inputs = zone_panel::PanelInputs { file, frames, audio: audio.as_deref(), names: mc };
-            let (zl, intent) = zone_panel::show(ui, uid, st, z, &inputs, &mut v.wave_drag, &mut v.typed, zone_rect);
+            let (zl, intent) = zone_panel::show(ui, uid, st, z, &inputs, &mut v.wave_drag, &mut v.typed, kept, zone_rect);
+            focused |= zl.focused;
             lo.zone = Some(zl);
             if let Some(i) = intent {
                 apply(app, dev, &mut v, z.zone, i);
             }
+            let gi = group_panel::GroupInputs { names: mc, asking, seed_text: &mut v.seed_text, fader: &mut v.fader, kept };
+            let (gl, intent) = group_panel::show(ui, uid, st, z, gi, group);
+            focused |= ui.memory(|m| m.has_focus(group_panel::seed_id(uid)));
+            if let Some(zl) = lo.zone.as_mut() {
+                zl.typing |= gl.typing;
+            }
+            lo.group_panel = Some(gl);
+            if let Some(i) = intent {
+                group_actions::apply(app, dev, &mut v, st, z, i);
+            }
         }
         _ => {
-            p.rect(zone_rect, radius::PANEL, TOKENS.surface_panel, Stroke::new(1.0, TOKENS.line), StrokeKind::Inside);
-            let inner = zone_rect.shrink2(vec2(space::PANEL_PADDING[1], space::PANEL_PADDING[0]));
-            super::section_label(&p, inner.min, "Zone");
+            for (r, name) in [(zone_rect, "Zone"), (group, "Group")] {
+                p.rect(r, radius::PANEL, TOKENS.surface_panel, Stroke::new(1.0, TOKENS.line), StrokeKind::Inside);
+                let inner = r.shrink2(vec2(space::PANEL_PADDING[1], space::PANEL_PADDING[0]));
+                super::section_label(&p, inner.min, name);
+            }
         }
     }
-    let group = Rect::from_min_max(pos2(zone_rect.max.x + space::PANEL_GAP, y), pos2(rect.max.x, y + zh));
-    lo.group = r4(group);
-    {
-        let a = tk::UNUSED_CONTROL_ALPHA;
-        p.rect(group, radius::PANEL, TOKENS.surface_panel.gamma_multiply(a), Stroke::new(1.0, TOKENS.line.gamma_multiply(a)), StrokeKind::Inside);
-        let inner = group.shrink2(vec2(space::PANEL_PADDING[1], space::PANEL_PADDING[0]));
-        widgets::role_text(&p, &tokens::LABEL_SECTION, "Group", TOKENS.text_muted.gamma_multiply(a), Align2::LEFT_TOP, inner.min);
-        ui.interact(group, egui::Id::new(("sampler_group_panel", uid)), Sense::hover()).on_hover_text(NOT_YET);
+    if focused {
+        ui.data_mut(|d| d.insert_temp(edit_id, String::new()));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(edit_id));
     }
     y += zh + space::PANEL_GAP;
     // The sections row, editing the selected zone.

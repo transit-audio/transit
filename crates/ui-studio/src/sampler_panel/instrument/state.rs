@@ -7,7 +7,7 @@
 use crate::StudioApp;
 use serde::Deserialize;
 use serde_json::json;
-use transit_model::sampler_patch::{LoopMode, PatchV1, PlayMode, ZoneEntry};
+use transit_model::sampler_patch::{LoopMode, PatchV1, PlayMode, RoundRobin, ZoneEntry};
 use transit_model::{SourceId, TrackId};
 
 /// A zone's place in a key-map group.
@@ -84,6 +84,7 @@ pub struct Pad {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Group {
     pub group: u8,
+    pub round_robin: RoundRobin,
     pub zones: Vec<u16>,
 }
 
@@ -92,6 +93,8 @@ pub struct Group {
 pub struct State {
     /// The patch as stored (the conflict preview's input to the model's own admission checks).
     pub patch: PatchV1,
+    /// The patch's round-robin seed, normalized (a stored 0 reads 1).
+    pub seed: u32,
     pub pad_start_note: u8,
     pub pads: Vec<Pad>,
     pub zones: Vec<Zone>,

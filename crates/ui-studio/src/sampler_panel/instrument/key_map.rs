@@ -213,6 +213,9 @@ pub struct Inputs<'a> {
 pub enum Intent {
     Select(u16),
     Map(Vec<ZoneEdit>),
+    /// An Alt-drag on a pad's zone: select it and ask about making it a group (the Group panel's
+    /// Notice; nothing changes until Make group).
+    Ask(u16),
 }
 
 /// The zone's label: its root key's name, then its stored label (`E2 ff`); the pad id on a pad
@@ -620,6 +623,9 @@ fn input(
         && let Some((z, part)) = hit(out, at)
     {
         intent = Some(Intent::Select(z.zone));
+        if z.pad.is_some() && ui.input(|i| i.modifiers.alt) {
+            intent = Some(Intent::Ask(z.zone));
+        }
         if let (None, Some(part), Some(zs)) = (z.pad, part, state.zone(z.zone)) {
             *drag = Some(Drag { zone: z.zone, part, value: value_of(zs, part), cancelled: false });
         }

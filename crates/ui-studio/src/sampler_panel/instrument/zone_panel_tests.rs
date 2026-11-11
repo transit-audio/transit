@@ -74,8 +74,12 @@ fn zone_panel_rects_match_the_board_at_both_scales() {
             (h(tk::CROSSFADE_WIDTH), h(space::DENSE_CONTROL_HEIGHT))
         );
         assert_eq!(h(z.forward_only[0] - z.crossfade[2]), h(tk::ZONE_ROW_GAP));
-        assert_eq!(h(z.panel[3]), h(seg[3] + pv));
-        assert_eq!(h(z.panel[3] - z.panel[1]), h(zone_panel::height(&super::super::measurer(&t.ctx), false)));
+        // The row is as tall as the taller card: here the Group panel (one layer row and its
+        // closing line), so the Zone card runs past its loop row's padding.
+        let m = super::super::measurer(&t.ctx);
+        let group_h = super::group_panel::height(&m, l.group[2] - l.group[0], 1, None);
+        assert_eq!(h(z.panel[3]), h((seg[3] + pv).max(z.panel[1] + group_h)));
+        assert_eq!(h(z.panel[3] - z.panel[1]), h(zone_panel::height(&m, false).max(group_h)));
         // The sections row a panel gap under, then the two bars.
         assert_eq!((h(l.sections[1] - z.panel[3]), h(l.sections[0]), h(l.sections[2])), (h(space::PANEL_GAP), h(p.bar.rect[0]), h(p.bar.rect[2])));
         assert_eq!(l.bars.len(), 2);
@@ -220,12 +224,12 @@ fn the_sections_edit_the_selected_zone_and_unbuilt_parts_are_unavailable() {
     assert!(rows.iter().any(|r| r.param == "zone002_transpose"), "the Playback knobs edit zone 2");
     assert!(!rows.iter().any(|r| r.param == "zone001_transpose"));
     let l = layout(&t, tr);
-    assert_eq!((l.group_opacity, l.bar_opacity), (tk::UNUSED_CONTROL_ALPHA, tk::UNUSED_CONTROL_ALPHA));
+    assert_eq!(l.bar_opacity, tk::UNUSED_CONTROL_ALPHA);
     assert_eq!(l.bars.iter().map(|b| b.chevron_deg).collect::<Vec<_>>(), vec![-90.0, -90.0], "collapsed");
     // A click on the unbuilt parts changes nothing.
     let (undo, before) = (t.undo_len(), serde_json::to_value(t.app.engine.session()).unwrap());
     t.click(mid(l.bars[0].button), 1);
-    t.click(mid(l.group), 1);
+    t.click(mid(l.group_panel.as_ref().unwrap().label.1), 1);
     assert_eq!((t.undo_len(), serde_json::to_value(t.app.engine.session()).unwrap()), (undo, before));
 }
 
