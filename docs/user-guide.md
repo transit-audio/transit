@@ -648,7 +648,11 @@ its pad and that pad's note. Press Space or Enter to hear the selected slice whi
 window has the keyboard. **Zoom** shows the loop at 1×, 2×, 4× or 8× around the selected slice,
 with a scroll bar inside the bench past 1×; hover the bench to read the position in milliseconds
 from the loop start. Times count the source's own frames at its own sample rate. Selecting,
-playing, zooming and scrolling never change the kit.
+playing, zooming and scrolling never change the kit. While the loop plays, whether from the bench,
+Space, a pad, a MIDI keyboard or the song, a thin line moves through the waveform at the point you
+hear, one line per sounding note, so you can see where a hit sits and place or nudge a marker on
+it. It follows pitch, loops and reverse; a note outside the zoomed range shows no line, and the
+bench does not scroll to follow.
 
 Without a loop, drop an audio file on the bench or choose **Load…**. In **Manual**, double-click
 the waveform to add a marker (a dashed line shows where it lands, and says `too close` where it

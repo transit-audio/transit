@@ -3,7 +3,7 @@ title: One Sampler instrument with three views (Instrument: zones, velocity laye
 -->
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, accepted, pad start note; amended 2026-11-11, accepted, the one-sample instrument retired (#455); amended 2026-11-11, accepted, kit presets (#467); amended 2026-11-11, decided by the maintainer, click plays a slice and double-click adds a marker (#469)
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, accepted, pad start note; amended 2026-11-11, accepted, the one-sample instrument retired (#455); amended 2026-11-11, accepted, kit presets (#467); amended 2026-11-11, decided by the maintainer, click plays a slice and double-click adds a marker (#469); amended 2026-11-11, decided by the maintainer, playheads on the Slices bench (#470)
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
@@ -2094,3 +2094,27 @@ Decision's Manual paragraph ("Clicking empty bench space adds a marker") and in 
   modal or a dialog open, or while a field has the keyboard, the click and the double-click do
   nothing, as the keys do nothing. The bench's hint and its hover tooltip name the double-click
   (`double-click adds a marker`); the ghost line still shows where an add would land.
+
+## Amendment 2026-11-11: playheads on the Slices bench (#470)
+
+Amended 2026-11-11: decided by the maintainer (#470): a playhead for every sounding voice in the
+Slices view. The record was silent on a play position in the Slices view; everything else stands.
+
+- **Every sounding voice of the slice loop** draws a thin vertical line across the bench's
+  waveform at the source frame it reads, whatever started it: a click on the bench, Space or
+  Enter, a pad, MIDI or the song. Release tails count while they sound. The purpose is to show
+  where a transient that is heard sits in the loop, to place and nudge markers.
+- **The position is the voice's own.** The instrument publishes each sounding voice's zone and
+  its phase in the source's own frames (the bench's coordinate) after every block, so pitch, the
+  source's rate, loops, ping-pong and reverse are already in it. The view draws what the last
+  block published and never extrapolates between blocks with a clock: the line moves in audio
+  block steps. Publishing is display only: it never changes the audio, and it costs nothing
+  while no Sampler window is open.
+- **Only the loop's source:** a voice whose zone plays another source draws nothing. A voice
+  outside the visible zoom range draws nothing, and the view never scrolls to follow a voice.
+  Every voice has a slot (the published places equal the voice count), so no voice is left out.
+- **Nothing moves when nothing sounds:** with no voice of the loop sounding, no line is drawn
+  and the view asks for no repaint. A bypassed or inactive Sampler, or an inactive track, shows
+  none, as no bypassed device shows a moving meter.
+- The line is 1 px in `waveform/playhead` (`text`), the token the zone waveform's playhead
+  already names.
