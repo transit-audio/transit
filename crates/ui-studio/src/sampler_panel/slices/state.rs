@@ -5,6 +5,7 @@
 use crate::StudioApp;
 use serde::Deserialize;
 use serde_json::json;
+use transit_model::sampler_patch::{LoopMode, PlayMode, SliceSet};
 use transit_model::{SourceId, TrackId};
 
 /// Which marker set shows (`mode`).
@@ -84,6 +85,47 @@ pub struct Loop {
     /// `ascending`, `stale` or `none`.
     #[serde(default)]
     pub mapping: String,
+    /// Every slice-bound zone (either set) as the engine reports it.
+    #[serde(default)]
+    pub zones: Vec<Zone>,
+}
+
+/// A slice-bound zone's binding: its set, its marker id and the slice's 1-based number in the set.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Binding {
+    pub set: SliceSet,
+    pub id: u32,
+    #[serde(default)]
+    pub slice: Option<usize>,
+}
+
+/// The region a slice-bound zone derives from its slice (source frames).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct Region {
+    pub start: u64,
+    pub end: u64,
+    pub loop_start: u64,
+    pub loop_end: u64,
+}
+
+/// One slice-bound zone as `mix.sampler_slice_state` reports it: the stored loop mode and
+/// crossfade beside the values playback uses (checked when set, clamped when used), its trigger
+/// mode, pad, binding and derived region, and its source's native rate (the crossfade's
+/// milliseconds are counted at it).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Zone {
+    /// 1-based.
+    pub zone: u16,
+    /// 1-based.
+    pub pad: Option<u8>,
+    pub mode: PlayMode,
+    pub loop_mode: LoopMode,
+    pub loop_used: LoopMode,
+    pub crossfade: u64,
+    pub crossfade_used: u64,
+    pub slice: Option<Binding>,
+    pub region: Option<Region>,
+    pub rate: u32,
 }
 
 impl Loop {
@@ -107,7 +149,22 @@ impl Loop {
             beat_length: None,
             default_beat_length: None,
             mapping: String::new(),
+            zones: Vec::new(),
         }
+    }
+
+    /// The zone slice `index` of the showing set plays: the zone its pad plays, else the first
+    /// zone bound to it (a group member without a pad); `None` when nothing plays it.
+    pub fn zone_of(&self, index: usize) -> Option<&Zone> {
+        let s = self.showing().get(index)?;
+        let set = match self.mode {
+            Mode::Auto => SliceSet::Auto,
+            Mode::Manual => SliceSet::Manual,
+        };
+        let id = s.id?;
+        let mut bound = self.zones.iter().filter(|z| z.slice.as_ref().is_some_and(|b| b.set == set && b.id == id));
+        let first = bound.clone().next();
+        bound.find(|z| s.pad.is_some() && z.pad == s.pad).or(first)
     }
 
     /// The set that shows.

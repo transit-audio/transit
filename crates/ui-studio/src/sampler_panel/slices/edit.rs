@@ -19,6 +19,8 @@ const SENT_KEPT: usize = 32;
 pub enum Panel {
     Left,
     Use,
+    /// The Playback section's loop row.
+    Play,
 }
 
 /// Runs `id` with `params` (the track added) for the instance's view, logging it. A refusal is
@@ -42,6 +44,7 @@ pub(crate) fn send(app: &mut StudioApp, dev: Dev, v: &mut SlicesView, panel: Pan
     match panel {
         Panel::Left => v.feedback.left_error = error,
         Panel::Use => v.feedback.use_error = error,
+        Panel::Play => v.feedback.play_error = error,
     }
     // What the panels now say is about the document as this command left it.
     v.feedback.revision = Some(app.engine.revision);
@@ -209,4 +212,13 @@ pub(crate) fn load(app: &mut StudioApp, dev: Dev, v: &mut SlicesView, path: &str
     } else {
         v.feedback.note = v.feedback.left_error.take();
     }
+}
+
+/// A loop row gesture on the selected slice's zone `zone` (1-based): one `mix.sampler_zone_edit`
+/// with `fields` (its `region` and `playback` objects), one undo step.
+pub(crate) fn zone(app: &mut StudioApp, dev: Dev, v: &mut SlicesView, zone: u16, mut fields: Value) {
+    if let Some(o) = fields.as_object_mut() {
+        o.insert("zone".into(), json!(zone));
+    }
+    send(app, dev, v, Panel::Play, "mix.sampler_zone_edit", fields);
 }

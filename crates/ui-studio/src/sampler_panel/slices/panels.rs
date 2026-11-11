@@ -108,6 +108,8 @@ pub struct PanelsLayout {
     pub left_line: Option<LineRecord>,
     pub use_error: Option<CardRecord>,
     pub use_line: Option<LineRecord>,
+    /// The sections row's loop row under the panels (Playback).
+    pub loop_row: super::loop_row::LoopRowLayout,
 }
 
 /// Draws the panels row from `at` across `width`; returns its layout and height.

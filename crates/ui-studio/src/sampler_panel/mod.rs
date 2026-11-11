@@ -464,7 +464,7 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     bar::show(app, ui, dev, &patch, &pads, Rect::from_min_size(pos2(x, y), vec2(w, bar::HEIGHT)), out);
     y += bar::HEIGHT_WITH_GAP;
     if view(app, dev.uid()).view == View::Slices {
-        let h = slices::show(app, ui, dev, Rect::from_min_size(pos2(x, y), vec2(w, 0.0)), out);
+        let h = slices::show(app, ui, dev, Rect::from_min_size(pos2(x, y), vec2(w, 0.0)), lay, out);
         behavior::end_drag(app, ui.ctx(), dev, out);
         ui.allocate_rect(Rect::from_min_size(origin, vec2(width, y + h + space::WINDOW_PADDING - origin.y)), Sense::hover());
         return;

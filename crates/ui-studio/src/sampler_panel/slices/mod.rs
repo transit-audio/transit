@@ -1,6 +1,7 @@
 //! The Sampler's Slices view (ADR 0041 and its amendment 2026-11-08; README, Sampler views, Slices
 //! view and its round 2 decisions): the bench ([`bench`], its gestures in [`bench_gestures`]),
-//! then the panels row ([`panels`]: Detect or Manual, and Use slices). Everything it shows comes
+//! then the panels row ([`panels`]: Detect or Manual, and Use slices), then the sections row with
+//! the per-slice loop ([`loop_row`]; a looping slice on the bench, [`bench_loop`]). Everything it shows comes
 //! from `mix.sampler_slice_state` ([`state`]), read again when the document or the placement
 //! changes, and from the commands' own previews; the source's peaks draw the waveform ([`wave`]).
 //! Zoom, scroll and the selected slice are UI state. Each gesture sends one command on completion
@@ -16,9 +17,11 @@
 
 pub mod bench;
 pub mod bench_gestures;
+pub mod bench_loop;
 pub mod detect_panel;
 pub mod edit;
 pub mod feedback;
+pub mod loop_row;
 pub mod panels;
 pub mod placement;
 pub mod state;
@@ -33,6 +36,8 @@ mod gesture_tests;
 #[cfg(test)]
 mod keyboard_tests;
 #[cfg(test)]
+mod loop_tests;
+#[cfg(test)]
 mod panel_tests;
 #[cfg(test)]
 pub(super) mod rig;
@@ -41,6 +46,7 @@ mod viewport_tests;
 
 use super::{SamplerLayout, behavior, view};
 use crate::StudioApp;
+use crate::builtin_editor::EditorLayout;
 use crate::device_editor::Dev;
 use crate::shortcuts::{self, Action};
 use crate::tokens::layout as space;
@@ -63,6 +69,8 @@ pub struct SlicesView {
     pub feedback: feedback::Feedback,
     pub detect: detect_panel::DetectState,
     pub usage: use_panel::UseState,
+    /// The Playback section's loop row (the crossfade being typed).
+    pub play: loop_row::PlayState,
     /// An audition held by Space or Enter (released with the key, or when the window closes, the
     /// view switches or the instance changes).
     pub key_held: bool,
@@ -108,7 +116,7 @@ fn tip(what: &str, actions: &[Action]) -> String {
 
 /// Draws the view's body into `rect` (the bench at the top, the note row, the panels) and returns
 /// its height.
-pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, out: &mut SamplerLayout) -> f32 {
+pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut EditorLayout, out: &mut SamplerLayout) -> f32 {
     refresh(app, dev);
     let uid = dev.uid();
     let mc = app.ui.middle_c;
@@ -160,8 +168,11 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, out: 
     }
     y += space::PANEL_GAP;
     let data = v.snapshot.data.clone();
-    let (panels, ph) = panels::show(app, ui, dev, &mut v, data.as_ref(), pos2(rect.min.x, y), rect.width());
-    y += ph;
+    let (mut panels, ph) = panels::show(app, ui, dev, &mut v, data.as_ref(), pos2(rect.min.x, y), rect.width());
+    y += ph + space::PANEL_GAP;
+    let (row, sh) = loop_row::show(app, ui, dev, &mut v, data.as_ref(), pos2(rect.min.x, y), rect.width(), lay, out);
+    panels.loop_row = row;
+    y += sh;
     if data.is_none()
         && let Some(offer) = crate::drops::take(app, dev.key)
         && let Some(path) = offer.paths.iter().find(|p| p.is_absolute() && crate::builtin_editor::is_audio_name(&p.to_string_lossy()))
@@ -206,7 +217,7 @@ fn apply(app: &mut StudioApp, dev: Dev, v: &mut SlicesView, intent: Intent) {
 
 /// The body's height before it is first drawn (for the window's size).
 pub(crate) fn height(p: &egui::Painter) -> f32 {
-    bench::height(p) + space::PANEL_GAP + crate::tokens::sampler::PANEL_MIN_HEIGHT
+    bench::height(p) + space::PANEL_GAP + crate::tokens::sampler::PANEL_MIN_HEIGHT + space::PANEL_GAP + loop_row::height(p)
 }
 
 /// Releases held auditions that lost their key or window: a keyboard audition when its window

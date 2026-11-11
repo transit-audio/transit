@@ -13,6 +13,10 @@ fn pick(t: &mut T, tr: TrackId, index: usize) {
 #[test]
 fn view_bar_is_on_every_view_and_switching_changes_no_routing_or_parameters() {
     let (mut t, tr) = T::kit();
+    // A screen tall enough that the Slices view's window (bench, panels and sections) leaves the
+    // device chain's editor buttons uncovered for the second instance below.
+    t.screen = egui::vec2(1400.0, 1400.0);
+    t.frames(3);
     t.click(t.pad_at(tr, 1), 1);
     let before = serde_json::to_value(t.app.engine.session()).unwrap();
     let undo = t.undo_len();

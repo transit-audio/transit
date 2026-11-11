@@ -24,6 +24,8 @@ pub struct Feedback {
     /// The Use slices panel's refusal and last edit.
     pub use_error: Option<String>,
     pub use_success: Option<String>,
+    /// The Playback section's loop row refusal (the engine's words, or the One-shot press's).
+    pub play_error: Option<String>,
     /// A refused file (Load… or a drop on the empty bench): the note row under the bench.
     pub note: Option<String>,
     /// The engine revision the panels' banners and lines were made at: when the document changes
@@ -39,7 +41,7 @@ impl Feedback {
             return false;
         }
         self.revision = Some(revision);
-        (self.left_error, self.left_success, self.use_error, self.use_success) = (None, None, None, None);
+        (self.left_error, self.left_success, self.use_error, self.use_success, self.play_error) = (None, None, None, None, None);
         true
     }
 }

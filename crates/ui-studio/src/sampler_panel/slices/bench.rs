@@ -150,6 +150,8 @@ pub struct BenchLayout {
     pub cells: Vec<(usize, [f32; 4])>,
     /// Each visible slice's tint under the strip and its color (none: no tint).
     pub bands: Vec<(usize, [f32; 4], Option<Color32>)>,
+    /// Each visible looping slice's band, wash, glyph and crossfade hatch (what plays).
+    pub loops: Vec<super::bench_loop::LoopMark>,
     /// Waveform columns drawn, how many in the selected slice, and their inks.
     pub columns: usize,
     pub selected_columns: usize,
@@ -483,6 +485,10 @@ fn draw_loop(
             wp.rect_filled(r, 0.0, c);
         }
         out.bands.push((i, r4(r), tint));
+        if let Some((mode, xf)) = super::bench_loop::used(l, i) {
+            let xf_left = (xf > 0).then(|| x(view, l, area, s.end.saturating_sub(xf) as f64));
+            out.loops.push(super::bench_loop::paint(wp, i, mode, a, b, xf_left, strip, body));
+        }
     }
     // The waveform: one column per physical pixel, the selected slice `signal` at 60 percent,
     // the rest `text.faint` at 45 percent; the midline over it. A missing source draws none.
@@ -582,7 +588,7 @@ fn draw_loop(
                 tk::BENCH_AUTO_LINE
             })
         };
-        let text = if i == 0 { "S 1".to_string() } else { (i + 1).to_string() };
+        let text = super::bench_loop::flag_text(i, super::bench_loop::used(l, i).map(|u| u.0));
         let w = (widgets::role_size(wp, &FLAG_FONT, &text).x + 2.0 * (tk::BENCH_FLAG_PADDING_X + tk::BENCH_FLAG_EDGE_WIDTH))
             .max(tk::BENCH_FLAG_MIN_WIDTH);
         let flag = Rect::from_min_size(pos2(lx, strip.min.y + tk::BENCH_FLAG_INSET), vec2(w, tk::BENCH_FLAG_HEIGHT));
