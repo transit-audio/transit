@@ -304,35 +304,18 @@ pub(crate) fn show(
     tl.track_rect = r4(Rect::from_min_max(pos2(rect.min.x + space::WINDOW_PADDING, r.min.y), r.max));
 
     // Centered in the free space: previous, the field, next, save.
-    let mut x = px;
     let sq = |x: f32| Rect::from_min_size(pos2(x, cy - BUTTON / 2.0), vec2(BUTTON, BUTTON));
-    let names = preset_names(app, dev.info.id);
-    let prev = sq(x);
-    if button(ui, id("prev"), prev, !names.is_empty()).clicked()
-        && let Some(i) = stepped(&names, &dev.ins.preset, -1)
-    {
-        recall(app, dev, &names, i);
+    let prev = sq(px);
+    let field = Rect::from_min_size(pos2(prev.max.x + 4.0, cy - BUTTON / 2.0), vec2(field_w, BUTTON));
+    let next = sq(field.max.x + 4.0);
+    let save = sq(next.max.x + 8.0);
+    if presets::available(dev.info) {
+        preset_browser(app, ui, dev, [prev, field, next, save], &mut tl);
+    } else {
+        unavailable_presets(ui, dev, [prev, field, next, save], &mut tl);
     }
-    paint_glyph(&p, prev.center(), "prev", t.text_muted);
-    x += BUTTON + 4.0;
-    let field = Rect::from_min_size(pos2(x, cy - BUTTON / 2.0), vec2(field_w, BUTTON));
-    field_ui(app, ui, dev, field, &names, &mut tl);
-    lay.preset = r4(field);
-    x += field_w + 4.0;
-    let next = sq(x);
-    if button(ui, id("next"), next, !names.is_empty()).clicked()
-        && let Some(i) = stepped(&names, &dev.ins.preset, 1)
-    {
-        recall(app, dev, &names, i);
-    }
-    paint_glyph(&p, next.center(), "next", t.text_muted);
-    x += BUTTON + 8.0;
-    let save = sq(x);
-    if button(ui, id("save"), save, app.services.config_dir.is_some()).clicked() {
-        save_current(app, ui, dev, &names);
-    }
-    paint_glyph(&p, save.center(), "save", t.text_muted);
     (tl.prev, tl.field, tl.next, tl.save) = (r4(prev), r4(field), r4(next), r4(save));
+    lay.preset = r4(field);
 
     // Right, from the edge in: close, menu, bypass, follow, readout, meter.
     let mut x = rect.max.x - space::WINDOW_PADDING - BUTTON;
@@ -459,6 +442,57 @@ fn field_ui(app: &mut StudioApp, ui: &mut Ui, dev: Dev, field: Rect, names: &[(b
     ui.data_mut(|d| d.insert_temp(name_id, name));
     presets::act(app, ui, dev.key, dev.ins, dev.info, picked, name_id);
 }
+
+/// The preset browser: previous and next step through the device's presets, the field lists them
+/// (with Save As and Delete), save writes the current one.
+fn preset_browser(app: &mut StudioApp, ui: &mut Ui, dev: Dev, [prev, field, next, save]: [Rect; 4], tl: &mut TitleLayout) {
+    let t = &TOKENS;
+    let p = ui.painter().clone();
+    let id = |s: &str| egui::Id::new(("macro_osc_title", dev.uid(), s.to_string()));
+    let names = preset_names(app, dev.info.id);
+    if button(ui, id("prev"), prev, !names.is_empty()).clicked()
+        && let Some(i) = stepped(&names, &dev.ins.preset, -1)
+    {
+        recall(app, dev, &names, i);
+    }
+    paint_glyph(&p, prev.center(), "prev", t.text_muted);
+    field_ui(app, ui, dev, field, &names, tl);
+    if button(ui, id("next"), next, !names.is_empty()).clicked()
+        && let Some(i) = stepped(&names, &dev.ins.preset, 1)
+    {
+        recall(app, dev, &names, i);
+    }
+    paint_glyph(&p, next.center(), "next", t.text_muted);
+    if button(ui, id("save"), save, app.services.config_dir.is_some()).clicked() {
+        save_current(app, ui, dev, &names);
+    }
+    paint_glyph(&p, save.center(), "save", t.text_muted);
+}
+
+/// A device whose presets are not available yet (the Sampler, whose kit presets come later): the
+/// browser at the unused-control alpha, `<factory default>` in the field, every part taking no
+/// click and saying "Not available yet". Nothing is listed, recalled or written.
+fn unavailable_presets(ui: &mut Ui, dev: Dev, [prev, field, next, save]: [Rect; 4], tl: &mut TitleLayout) {
+    let t = &TOKENS;
+    let mut p = ui.painter().clone();
+    p.multiply_opacity(tokens::sampler::UNUSED_CONTROL_ALPHA);
+    for (r, which) in [(prev, "prev"), (next, "next"), (save, "save")] {
+        let resp = ui.interact(r, egui::Id::new(("macro_osc_title", dev.uid(), which)), Sense::hover());
+        p.rect(r, BUTTON_RADIUS, t.surface_panel, Stroke::new(1.0, t.line), StrokeKind::Inside);
+        paint_glyph(&p, r.center(), which, t.text_muted);
+        resp.on_hover_text(UNAVAILABLE);
+    }
+    let resp = ui.interact(field, egui::Id::new(("macro_osc_preset", dev.uid())), Sense::hover());
+    p.rect(field, BUTTON_RADIUS, t.surface_inset, Stroke::new(1.0, t.line), StrokeKind::Inside);
+    widgets::role_text(&p, &tokens::chrome::BUTTON_FONT, FACTORY_DEFAULT, t.text, Align2::LEFT_CENTER, pos2(field.min.x + 12.0, field.center().y));
+    resp.on_hover_text(UNAVAILABLE);
+    (tl.preset_group, tl.preset_name) = (String::new(), FACTORY_DEFAULT.to_string());
+}
+
+/// The tooltip of a preset control that is not available yet.
+pub const UNAVAILABLE: &str = "Not available yet";
+/// What the field of a device without presets reads.
+const FACTORY_DEFAULT: &str = "<factory default>";
 
 /// Save: a user preset is written over with the current values (what Save As with its own name
 /// did); a factory preset or none opens the list, where Save As names a new one.

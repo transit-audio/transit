@@ -217,7 +217,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
         super::View::Instrument => super::instrument::summary(app, dev),
         super::View::Pads => summary(pads, bank),
     };
-    let Some(field) = super::view_bar::show(app, ui, dev, &summary, true, rect, out) else { return };
+    let Some(field) = super::view_bar::show(app, ui, dev, &summary, rect, out) else { return };
     let label = widgets::role_text(
         &p,
         &tokens::LABEL_CONTROL,

@@ -176,7 +176,7 @@ mod tests {
         let t = track(&mut e, "instrument");
         let undo = e.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len();
         e.execute("mix.instrument", &json!({"track": t.0, "plugin": "sampler"})).unwrap();
-        assert_eq!(kit(&e, t), (true, Some(empty.clone())), "an empty kit, as New Kit makes");
+        assert_eq!(kit(&e, t), (true, Some(empty.clone())), "an empty kit, as mix.sampler_new_patch makes");
         assert_eq!(e.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len(), undo + 1, "one step");
         e.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(instrument_of(&e, t).as_deref(), Some("macro_oscillator"), "one undo takes it away");

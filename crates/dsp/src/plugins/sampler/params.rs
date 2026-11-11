@@ -3,8 +3,8 @@
 //! `zone{n:03}_level` (dB) and `zone{n:03}_pan` (-100..100 %), then the Macro Oscillator's shaper
 //! block and matrix rows with the same ids behind the prefix (`zone001_shaper`,
 //! `zone001_amp_attack`, .., `zone001_lfo2_amount`, `zone001_mod1_source` .. `zone001_mod16_curve`),
-//! with the same ranges and defaults. The existing unprefixed ids keep their legacy meanings (the 19
-//! parameters of `SAMPLER_INFO`, which address the legacy renderer only).
+//! with the same ranges and defaults. `SAMPLER_INFO` has no other parameters: the one-sample
+//! instrument's 19 unprefixed ids are retired (#455).
 //!
 //! The ids are not in `SAMPLER_INFO`'s table: 256 zones of 113 fields do not fit the mix's inline
 //! parameter cache. Their values live here, in one table allocated when the core path is installed

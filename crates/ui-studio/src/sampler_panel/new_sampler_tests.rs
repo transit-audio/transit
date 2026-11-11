@@ -15,7 +15,7 @@ fn a_new_instrument_track_with_a_sampler_opens_on_an_empty_kit_in_one_step() {
     let tr = t.app.engine.session().tracks.last().unwrap().id;
     let ins = t.app.engine.session().track(tr).unwrap().instrument.clone().unwrap();
     assert!(ins.sample.is_none(), "no one-sample field");
-    // The empty kit New Kit makes (its default seed, 1).
+    // The empty kit `mix.sampler_new_patch` makes (its default seed, 1).
     assert_eq!(t.patch(tr), transit_model::sampler_patch::PatchV1 { seed: 1, ..Default::default() });
     t.app.focus(tr);
     t.frames(4);
@@ -41,4 +41,46 @@ fn the_factory_default_on_a_kit_leaves_the_kit() {
     assert_eq!(t.patch(tr), before, "its zones and pads kept");
     let p = t.panel(tr);
     assert_eq!(p.pads.len(), 16);
+}
+
+#[test]
+fn the_sampler_preset_controls_are_not_available_and_save_nothing() {
+    // Kit presets come later: a Sampler preset holds only parameter values, and the Sampler has none.
+    let dir = std::env::temp_dir().join(format!("transit-sampler-presets-off-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (mut t, tr) = T::kit();
+    t.app.services.config_dir = Some(dir.clone());
+    t.frames(2);
+    let title = t.panel(tr).title;
+    assert_eq!((title.preset_group.as_str(), title.preset_name.as_str()), ("", "<factory default>"));
+    let before = serde_json::to_value(t.app.engine.session()).unwrap();
+    let undo = t.undo_len();
+    for r in [title.save, title.field, title.prev, title.next, title.save] {
+        t.click(super::test_rig::mid(r), 1);
+    }
+    t.frames(2);
+    assert!(!dir.join("presets").exists(), "no preset file is written");
+    assert_eq!(serde_json::to_value(t.app.engine.session()).unwrap(), before, "nothing changes");
+    assert_eq!(t.undo_len(), undo);
+    assert!(t.app.builtin_editor.windows.iter().any(|w| w.key.0 == tr), "the window stays open");
+    // Save As itself (what the list's Save As sends): nothing for the Sampler, a file for another
+    // built-in instrument.
+    let synth = t.app.run("track.new", json!({"kind": "instrument"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let save_as = |t: &mut T, track: u64, name: &str| {
+        let key = (transit_model::TrackId(track), transit_mix::INSTRUMENT_SLOT);
+        let ins = t.app.builtin_at(key).unwrap();
+        let info = transit_dsp::plugin_info(&ins.plugin).unwrap();
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let picked = crate::presets::Picked { save: Some(name.to_string()), ..Default::default() };
+            crate::presets::act(&mut t.app, ui, key, &ins, info, picked, egui::Id::new("t"));
+        });
+        out.textures_delta.clear();
+    };
+    save_as(&mut t, tr.0, "Kit");
+    assert!(crate::presets::user_names(&dir, "sampler").is_empty() && !dir.join("presets").join("sampler").exists(), "no Sampler preset written");
+    save_as(&mut t, synth, "Mine");
+    assert_eq!(crate::presets::user_names(&dir, "macro_oscillator"), ["Mine"], "the Macro Oscillator's Save As still writes");
+    let _ = std::fs::remove_dir_all(dir);
 }

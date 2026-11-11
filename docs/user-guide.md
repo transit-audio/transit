@@ -1008,7 +1008,9 @@ a pad again. The load notes name every affected track, for example:
 The session opens as modified, and the next save writes the empty kit. Tracks imported from an
 older session (`file.import_session_data`) and track presets that hold the old Sampler get the
 same empty kit; an import does not bring the sample file along. Built-in Sampler user presets held
-only the old settings: they are reported once and left on disk, and the Sampler lists no presets.
+only the old settings: each startup writes one log line per old preset, the files stay on disk, and
+the Sampler lists no presets. The Sampler's preset controls are not available yet (kit presets come
+later), so they save nothing.
 The control-channel commands `mix.sampler_load` and `mix.sampler_clear` are removed: use
 `mix.sampler_zone_source` or `mix.sampler_load_kit`. A session saved by 0.7.0 and opened in
 v0.6.2 or earlier warns that it needs `sampler_patch`, has a silent Sampler, and loses the empty

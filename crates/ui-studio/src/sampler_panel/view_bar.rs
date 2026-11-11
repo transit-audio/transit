@@ -100,14 +100,14 @@ fn action_button(ui: &mut Ui, p: &egui::Painter, text: &str, right: f32, enabled
     .inner
 }
 
-/// Draw navigation and actions; return the Start note field's slot on a ready Pads view.
-pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, ready: bool, rect: Rect, out: &mut SamplerLayout) -> Option<Rect> {
+/// Draw navigation and actions; return the Start note field's slot on the Pads view.
+pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, rect: Rect, out: &mut SamplerLayout) -> Option<Rect> {
     out.bar.rect = r4(rect);
     let switch = switch(app, ui, dev, rect);
     let summary_x = switch.track[2] + tk::VIEW_BAR_GAP;
     out.bar.switch = Some(switch);
     let p = ui.painter().clone();
-    if view(app, dev.uid()).view == View::Slices && ready {
+    if view(app, dev.uid()).view == View::Slices {
         // The loop's summary; the view's action (Load loop…) is not built yet, so the slot runs to
         // the bar's end. A long file name is cut with an ellipsis at the slot's end (the names'
         // rule), never past the window.
@@ -125,7 +125,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, re
         p.galley(at, galley, TOKENS.text_faint);
         return None;
     }
-    if view(app, dev.uid()).view == View::Instrument && ready {
+    if view(app, dev.uid()).view == View::Instrument {
         // The map's summary, then the view's actions, shown unavailable until they are built
         // (Add zone… and Import SFZ…, #271).
         let mut right = rect.max.x;
@@ -152,12 +152,11 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, re
     let (expand, expand_opacity) = action_button(ui, &p, EXPAND_TO_RACK, rect.max.x, false, rect);
     let expand = expand.on_disabled_hover_text(EXPAND_TO_RACK_TIP);
     out.bar.expand = Some(r4(expand.rect));
-    let (response, load_opacity) = action_button(ui, &p, "Load kit…", expand.rect.min.x - tk::VIEW_BAR_GAP, ready, rect);
+    let (response, load_opacity) = action_button(ui, &p, "Load kit…", expand.rect.min.x - tk::VIEW_BAR_GAP, true, rect);
     out.bar.opacity = [load_opacity, expand_opacity];
     let action = response.rect;
     out.bar.load_kit = Some(r4(action));
-    out.bar.load_enabled = ready;
-    let response = response.on_disabled_hover_text("This Sampler patch is kept as saved: this version cannot load a kit into it");
+    out.bar.load_enabled = true;
     if response.clicked() {
         super::kit_load::pick(app, dev);
     }
@@ -165,16 +164,13 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, re
         pos2(action.min.x - tk::VIEW_BAR_GAP - tk::START_NOTE_WIDTH, rect.center().y - tk::START_NOTE_HEIGHT / 2.0),
         vec2(tk::START_NOTE_WIDTH, tk::START_NOTE_HEIGHT),
     );
-    let summary_right = if ready {
-        field.min.x - tk::START_NOTE_LABEL_GAP - widgets::role_size(&p, &tokens::LABEL_CONTROL, tk::START_NOTE_LABEL).x - tk::VIEW_BAR_GAP
-    } else {
-        action.min.x - tk::VIEW_BAR_GAP
-    };
+    let summary_right =
+        field.min.x - tk::START_NOTE_LABEL_GAP - widgets::role_size(&p, &tokens::LABEL_CONTROL, tk::START_NOTE_LABEL).x - tk::VIEW_BAR_GAP;
     out.bar.summary = summary.to_string();
     let slot = Rect::from_min_max(pos2(summary_x, rect.min.y), pos2(summary_right, rect.max.y));
     out.bar.summary_slot = r4(slot);
     out.bar.summary_rect = r4(widgets::role_text(&p, &tokens::READOUT_DISPLAY, summary, TOKENS.text_faint, Align2::LEFT_CENTER, slot.left_center()));
-    ready.then_some(field)
+    Some(field)
 }
 
 /// A view without its editor yet: plain centered text, using the existing control-label role.

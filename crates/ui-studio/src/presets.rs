@@ -121,7 +121,7 @@ fn dir_of(root: &Path, plugin: &str) -> PathBuf {
 /// The names of the user presets of `plugin` under the config dir `root`, sorted.
 pub fn user_names(root: &Path, plugin: &str) -> Vec<String> {
     // The Sampler's user presets hold the retired one-sample instrument's parameters (#455):
-    // reported once (`retired_user_preset_lines`), never listed until a patch preset exists.
+    // one log line each at startup (`retired_user_preset_lines`), never listed until a patch preset exists.
     if plugin == RETIRED_SAMPLER_PRESETS {
         return Vec::new();
     }
@@ -293,7 +293,16 @@ pub(crate) fn list(ui: &mut Ui, ins: &Insert, info: &'static PluginInfo, root: O
 }
 
 /// Carries out what the user chose in a preset list: recall, Save As (and clear the field), Delete.
+/// Whether `info`'s device has presets: a built-in preset holds parameter values, so a device with
+/// none (the Sampler, whose kit presets come later) has nothing to save, recall or list.
+pub fn available(info: &PluginInfo) -> bool {
+    !info.params.is_empty()
+}
+
 pub(crate) fn act(app: &mut StudioApp, ui: &Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, picked: Picked, name_id: egui::Id) {
+    if !available(info) {
+        return;
+    }
     let root = app.services.config_dir.clone();
     if let Some((n, p)) = picked.pick {
         match p {

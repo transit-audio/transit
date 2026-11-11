@@ -102,9 +102,10 @@ fn keys_under_an_open_popup_do_nothing_and_never_reach_the_arrangement() {
     t.run("edit.select", json!({"clips": [clip]}));
     let doc = |t: &T| serde_json::to_value(t.app.engine.session()).unwrap();
     let before = doc(&t);
-    // The title bar's preset list: a popup inside the Sampler window (the window keeps the keys).
-    let field = t.panel(tr).title.field;
-    t.click(mid(field), 1);
+    // The title bar's device menu: a popup inside the Sampler window (the window keeps the keys).
+    // (The preset list was this popup until the Sampler's presets became unavailable, #455.)
+    let menu = t.panel(tr).title.menu;
+    t.click(mid(menu), 1);
     assert!(egui::Popup::is_any_open(&t.ctx), "the popup is open");
     let (undo, sel) = (t.undo_len(), view(&t).selected);
     press(&mut t, "Delete", false, false);
@@ -118,8 +119,8 @@ fn keys_under_an_open_popup_do_nothing_and_never_reach_the_arrangement() {
 #[test]
 fn the_view_takes_its_keys_under_a_popup_so_none_is_left_for_others() {
     let (mut t, tr) = layered();
-    let field = t.panel(tr).title.field;
-    t.click(mid(field), 1);
+    let menu = t.panel(tr).title.menu;
+    t.click(mid(menu), 1);
     assert!(egui::Popup::is_any_open(&t.ctx), "the popup is open");
     // One frame with Delete down: the view's scope is exempt from the app's popup guard, so the
     // view consumes the key (and does nothing with it); a held scope would leave it in the input.

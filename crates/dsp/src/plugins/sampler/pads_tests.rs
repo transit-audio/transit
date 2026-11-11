@@ -69,7 +69,7 @@ fn words(s: &Sampler) -> [PadWord; PAD_SLOTS] {
 }
 
 #[test]
-fn an_admitted_trigger_counts_with_its_velocity_and_a_legacy_instance_has_no_pads() {
+fn an_admitted_trigger_counts_with_its_velocity_and_an_instance_off_the_core_path_has_no_pads() {
     let mut s = instance(&[0, 0], &[], &[]);
     assert_eq!(words(&s)[0], PadWord(0));
     on(&mut s, 3, 60, 90);
@@ -86,10 +86,10 @@ fn an_admitted_trigger_counts_with_its_velocity_and_a_legacy_instance_has_no_pad
     on(&mut s, 1, 61, 0);
     block(&mut s, 64);
     assert_eq!(words(&s)[1], PadWord(0));
-    // Negative control: a legacy instance publishes no pads.
-    let legacy = Sampler::new();
+    // Negative control: an instance off the core path publishes no pads.
+    let off = Sampler::new();
     let mut out = [7u32; PAD_SLOTS];
-    assert!(!legacy.pad_activity(&mut out));
+    assert!(!off.pad_activity(&mut out));
 }
 
 #[test]
