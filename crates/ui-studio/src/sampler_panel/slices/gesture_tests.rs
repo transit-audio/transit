@@ -319,9 +319,18 @@ fn a_click_on_a_handle_never_moves_its_marker_and_a_drag_moves_by_the_distance_d
     let b = bench(&t, tr);
     let width = b.well[2] - b.well[0] - 2.0;
     let from = (hd.0 + 4.0, hd.1);
-    steps(&mut t, vec![moved(from), press(from, true), moved((from.0 + 30.0, from.1)), moved((from.0 + 60.0, from.1)), press((from.0 + 60.0, from.1), false)]);
+    steps(
+        &mut t,
+        vec![moved(from), press(from, true), moved((from.0 + 30.0, from.1)), moved((from.0 + 60.0, from.1)), press((from.0 + 60.0, from.1), false)],
+    );
     let want = (11_025.0 + f64::from(60.0 / width) * 44_100.0 + 0.5).floor() as u64;
-    assert_eq!(sent(&t, log), [format!("mix.sampler_slice_marker {{\"frame\":{want},\"id\":{},\"op\":\"move\"}}", t.patch(tr).slicing.unwrap().manual.unwrap().markers[1].id)]);
+    assert_eq!(
+        sent(&t, log),
+        [format!(
+            "mix.sampler_slice_marker {{\"frame\":{want},\"id\":{},\"op\":\"move\"}}",
+            t.patch(tr).slicing.unwrap().manual.unwrap().markers[1].id
+        )]
+    );
     assert_eq!(frames(&t, tr)[1], want);
     assert_eq!(t.undo_len(), undo + 1);
 }

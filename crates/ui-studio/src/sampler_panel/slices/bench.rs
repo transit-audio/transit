@@ -771,22 +771,13 @@ fn draw_loop(
 
 /// The rename field over the renamed slice's cell (the cell's height inside the strip, at least
 /// four flags wide): Enter or a click elsewhere commits (the name returned), Escape cancels.
-fn rename(
-    ui: &mut Ui,
-    uid: u64,
-    view: &mut SlicesView,
-    cells: &[(usize, [f32; 4])],
-    strip: Rect,
-    out: &mut BenchLayout,
-) -> Option<Intent> {
+fn rename(ui: &mut Ui, uid: u64, view: &mut SlicesView, cells: &[(usize, [f32; 4])], strip: Rect, out: &mut BenchLayout) -> Option<Intent> {
     let r = view.gesture.renaming.as_mut()?;
     let cell = cells.iter().find(|c| c.0 == r.index).map(|c| c.1)?;
     let (left, right) = (cell[0], cell[2].max(cell[0] + tk::BENCH_FLAG_MIN_WIDTH * 4.0));
     let field = Rect::from_min_max(pos2(left, strip.min.y + tk::BENCH_FLAG_INSET), pos2(right, strip.max.y - tk::BENCH_FLAG_INSET));
-    let edit = egui::TextEdit::singleline(&mut r.text)
-        .font(FLAG_FONT.font_id(ui.ctx()))
-        .margin(vec2(tk::BENCH_FLAG_PADDING_X, 0.0))
-        .id(rename_id(uid));
+    let edit =
+        egui::TextEdit::singleline(&mut r.text).font(FLAG_FONT.font_id(ui.ctx())).margin(vec2(tk::BENCH_FLAG_PADDING_X, 0.0)).id(rename_id(uid));
     let resp = ui.put(field, edit);
     if !r.focused {
         resp.request_focus();
