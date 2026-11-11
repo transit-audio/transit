@@ -253,3 +253,20 @@ fn a_drag_whose_release_was_not_seen_ends_with_no_button_down() {
     assert_eq!(sent(&t, log), Vec::<String>::new(), "and sends nothing");
     assert_eq!(frames(&t, tr), [0, 11_025, 22_050, 33_075]);
 }
+
+#[test]
+fn quick_clicks_at_different_places_each_act() {
+    let (mut t, tr) = sliced();
+    let log = view(&t).sent.len();
+    let b = bench(&t, tr);
+    let cell = mid(b.cells.iter().find(|c| c.0 == 0).unwrap().1);
+    let (a, c) = (at_frame(&b, 5_000), at_frame(&b, 16_000));
+    // A select, then an add elsewhere, then a second add at another place, each within the
+    // double-click time of the one before.
+    let click = |at| vec![moved(at), press(at, true), press(at, false)];
+    let events: Vec<egui::Event> = [cell, a, c].into_iter().flat_map(click).collect();
+    steps(&mut t, events);
+    let s = sent(&t, log);
+    assert_eq!(s.len(), 2, "both adds are sent: {s:?}");
+    assert_eq!(frames(&t, tr).len(), 6);
+}
