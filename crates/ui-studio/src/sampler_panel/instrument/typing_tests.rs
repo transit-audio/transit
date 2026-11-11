@@ -89,3 +89,20 @@ fn a_crossfade_typed_for_one_zone_commits_to_it_when_another_zone_is_selected() 
     let z = layout(&t, tr).zone.unwrap();
     assert_eq!((z.crossfade_text.as_str(), z.typing), ("0.0 ms", false), "zone 2's own value shows");
 }
+
+#[test]
+fn a_knob_value_typed_for_one_zone_never_lands_on_another() {
+    let (mut t, tr) = layered();
+    let knob = |t: &T| t.panel(tr).knobs.into_iter().find(|k| k.field == "transpose").expect("the Tune knob");
+    t.click(mid(knob(&t).knob.value), 1);
+    assert!(knob(&t).knob.editing);
+    t.send("ui.key", json!({"key": "A", "cmd": true}));
+    t.send("ui.text", json!({"text": "5"}));
+    let z2 = layout(&t, tr).key_map.zone(2).unwrap().rect;
+    t.click(mid(z2), 1);
+    assert_eq!(view(&t).selected, Some(2));
+    t.key("Enter");
+    let p = t.patch(tr);
+    assert_eq!((p.zone(0).unwrap().transpose, p.zone(1).unwrap().transpose), (0.0, 0.0), "the typing was given up, not moved to zone 2");
+    assert!(!knob(&t).knob.editing);
+}
