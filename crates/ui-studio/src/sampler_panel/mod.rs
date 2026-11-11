@@ -1,8 +1,8 @@
 //! The Sampler's editor in the design language (#326, job 326-S; the sampler is #269, ADR 0041):
 //! the Pads view, the first of the Sampler's three views, in the shared device window
 //! ([`crate::device_editor::window`], content-sized, no resize handle). The Slices and Instrument
-//! views sit behind the shared view switch: Slices shows its bench ([`slices`], read-only so far),
-//! Instrument a placeholder.
+//! views sit behind the shared view switch: Slices shows its bench ([`slices`]), Instrument its key
+//! map and Zone panel ([`instrument`]).
 //!
 //! Anatomy (README, Device anatomy; the Pad component and the board "Pads with choke groups"):
 //! A, the shared 52 px title bar; the view bar ([`bar`]: the summary and the kit's Start note
@@ -26,6 +26,7 @@
 pub mod bar;
 mod behavior;
 mod grid;
+pub mod instrument;
 mod kit_load;
 mod legacy;
 mod live;
@@ -132,6 +133,8 @@ pub struct PadsView {
     pub legacy_h: Option<f32>,
     /// The Slices view's zoom, scroll, selected slice and last state read.
     pub slices: slices::SlicesView,
+    /// The Instrument view's selected zone, last state read and gestures.
+    pub instrument: instrument::InstrumentView,
 }
 
 impl Default for PadsView {
@@ -150,6 +153,7 @@ impl Default for PadsView {
             last_audition: None,
             legacy_h: None,
             slices: slices::SlicesView::default(),
+            instrument: instrument::InstrumentView::default(),
         }
     }
 }
@@ -239,6 +243,8 @@ pub struct SamplerLayout {
     pub slice_panels: Option<slices::panels::PanelsLayout>,
     /// The Slices view's note row (a refused file) and where it sits.
     pub slice_note: Option<(String, [f32; 4])>,
+    /// The Instrument view (`None` on the other views).
+    pub instrument: Option<instrument::InstrumentLayout>,
     /// The body's top left as egui placed it (on the physical pixel grid, so at a fractional
     /// scale it can sit a fraction of a point below the title bar's bottom).
     pub body_origin: [f32; 2],
@@ -396,6 +402,9 @@ pub fn content_height(app: &StudioApp, ctx: &egui::Context, key: (TrackId, usize
     if let Some(v) = v.filter(|v| v.view == View::Slices) {
         return 2.0 * space::WINDOW_PADDING + bar::HEIGHT_WITH_GAP + v.slices.height.unwrap_or_else(|| slices::height(&p));
     }
+    if let Some(v) = v.filter(|v| v.view == View::Instrument) {
+        return 2.0 * space::WINDOW_PADDING + bar::HEIGHT_WITH_GAP + v.instrument.height.unwrap_or_else(|| instrument::height(&p));
+    }
     if v.is_some_and(|v| v.view != View::Pads) {
         return 2.0 * space::WINDOW_PADDING + bar::HEIGHT_WITH_GAP + grid::height(&p);
     }
@@ -466,6 +475,15 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     if view(app, dev.uid()).view == View::Slices {
         let h = slices::show(app, ui, dev, Rect::from_min_size(pos2(x, y), vec2(w, 0.0)), lay, out);
         behavior::end_drag(app, ui.ctx(), dev, out);
+        ui.allocate_rect(Rect::from_min_size(origin, vec2(width, y + h + space::WINDOW_PADDING - origin.y)), Sense::hover());
+        return;
+    }
+    if view(app, dev.uid()).view == View::Instrument {
+        let h = instrument::show(app, ui, dev, Rect::from_min_size(pos2(x, y), vec2(w, 0.0)), lay, out);
+        behavior::end_drag(app, ui.ctx(), dev, out);
+        if live::moving(app, dev.uid(), now) {
+            ui.ctx().request_repaint();
+        }
         ui.allocate_rect(Rect::from_min_size(origin, vec2(width, y + h + space::WINDOW_PADDING - origin.y)), Sense::hover());
         return;
     }

@@ -133,8 +133,24 @@ pub(crate) fn show(
     lay: &mut EditorLayout,
     out: &mut SamplerLayout,
 ) -> f32 {
+    show_zone(app, ui, dev, patch, pad.and_then(|d| d.zone.as_ref()), rect, lay, out)
+}
+
+/// Draws the row for `zone` (the Instrument view's selected zone; `None`: the row at 40 percent,
+/// inert) into `rect`; returns its height.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn show_zone(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    dev: Dev,
+    patch: &PatchV1,
+    zone: Option<&ZoneEntry>,
+    rect: Rect,
+    lay: &mut EditorLayout,
+    out: &mut SamplerLayout,
+) -> f32 {
     let t = &TOKENS;
-    let zone = pad.and_then(|d| d.zone.clone());
+    let zone = zone.cloned();
     let slot = slot_at(rect.width());
     let knobs_w = 4.0 * slot + 3.0 * SLOT_GAP;
     let amp_w = knobs_w + 2.0 * space::PANEL_PADDING[1];

@@ -13,8 +13,9 @@ fn pick(t: &mut T, tr: TrackId, index: usize) {
 #[test]
 fn view_bar_is_on_every_view_and_switching_changes_no_routing_or_parameters() {
     let (mut t, tr) = T::kit();
-    // A screen tall enough that the Slices view's window (bench, panels and sections) leaves the
-    // device chain's editor buttons uncovered for the second instance below.
+    // A screen tall enough for the tallest view (a taller window than the screen moves up onto
+    // it, which would move the bar), and for the Slices view's window (bench, panels and
+    // sections) to leave the device chain's editor buttons uncovered for the second instance below.
     t.screen = egui::vec2(1400.0, 1400.0);
     t.frames(3);
     t.click(t.pad_at(tr, 1), 1);
@@ -34,10 +35,11 @@ fn view_bar_is_on_every_view_and_switching_changes_no_routing_or_parameters() {
             assert!(panel.placeholder.is_none());
         } else {
             if index == 2 {
-                // The Slices view shows its bench (pass G2); the Instrument view keeps the placeholder.
+                // The Slices view shows its bench (pass G2).
                 assert!(panel.placeholder.is_none() && panel.slices.is_some());
             } else {
-                assert_eq!(panel.placeholder.unwrap().0, format!("{} view is not built yet.", crate::tokens::sampler::VIEW_BAR_VIEWS[index]));
+                // The Instrument view shows its key map (pass M1).
+                assert!(panel.placeholder.is_none() && panel.instrument.is_some());
             }
             assert!(panel.pads.is_empty() && panel.bar.load_kit.is_none());
             t.key("Delete");

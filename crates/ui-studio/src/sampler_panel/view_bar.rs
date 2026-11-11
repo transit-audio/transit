@@ -74,6 +74,9 @@ fn switch(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect) -> segmented::
     }
 }
 
+/// The Instrument bar's actions, unavailable until they are built.
+pub(crate) const INSTRUMENT_ACTIONS: [&str; 2] = ["Add zone…", "Import SFZ…"];
+
 /// The Pads bar's unavailable action and its tooltip.
 pub(crate) const EXPAND_TO_RACK: &str = "Expand to rack…";
 pub(crate) const EXPAND_TO_RACK_TIP: &str = "Not available yet";
@@ -120,6 +123,25 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, re
         let at = pos2(slot.min.x, slot.center().y - galley.size().y / 2.0);
         out.bar.summary_rect = r4(Rect::from_min_size(at, galley.size()));
         p.galley(at, galley, TOKENS.text_faint);
+        return None;
+    }
+    if view(app, dev.uid()).view == View::Instrument && ready {
+        // The map's summary, then the view's actions, shown unavailable until they are built
+        // (Add zone… and Import SFZ…, #271).
+        let mut right = rect.max.x;
+        let mut actions = Vec::new();
+        for text in INSTRUMENT_ACTIONS.iter().rev() {
+            let (resp, opacity) = action_button(ui, &p, text, right, false, rect);
+            let resp = resp.on_disabled_hover_text(EXPAND_TO_RACK_TIP);
+            right = resp.rect.min.x - tk::VIEW_BAR_GAP;
+            actions.insert(0, (r4(resp.rect), opacity));
+        }
+        out.bar.instrument_actions = actions;
+        out.bar.summary = summary.to_string();
+        let slot = Rect::from_min_max(pos2(summary_x, rect.min.y), pos2(right, rect.max.y));
+        out.bar.summary_slot = r4(slot);
+        out.bar.summary_rect =
+            r4(widgets::role_text(&p, &tokens::READOUT_DISPLAY, summary, TOKENS.text_faint, Align2::LEFT_CENTER, slot.left_center()));
         return None;
     }
     if view(app, dev.uid()).view != View::Pads {

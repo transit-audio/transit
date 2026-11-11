@@ -432,6 +432,8 @@ impl StudioApp {
         clip_inspector::keys(self, &ctx); // Escape in a fade field gives its draft up
         // A Slices bench drag takes Escape first (it cancels the drag; the window stays).
         crate::sampler_panel::slices::keys(self, &ctx);
+        // An Instrument view drag takes Escape first too.
+        crate::sampler_panel::instrument::keys(self, &ctx);
         crate::device_editor::window::keys(self, &ctx); // 326-M: Escape closes the focused device editor
         crate::sampler_panel::pad_actions::keys(self, &ctx);
         keys::shortcuts(self, &ctx); // slice 3: before the arrangement's keys

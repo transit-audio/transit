@@ -76,6 +76,7 @@ fn every_handler_takes_its_keys_from_the_table() {
         include_str!("device_editor/window.rs"),
         include_str!("sampler_panel/pad_actions.rs"),
         include_str!("sampler_panel/slices/mod.rs"),
+        include_str!("sampler_panel/instrument/mod.rs"),
         include_str!("compressor_panel/mod.rs"),
         include_str!("compressor_panel/sections.rs"),
     ];

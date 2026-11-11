@@ -134,6 +134,9 @@ pub struct BarLayout {
     pub expand: Option<[f32; 4]>,
     /// The factor Load kit… and Expand to rack… apply to the window's opacity (1 when available).
     pub opacity: [f32; 2],
+    /// The Instrument bar's actions (`Add zone…`, `Import SFZ…`), unavailable: each rect and the
+    /// factor it applies to the window's opacity.
+    pub instrument_actions: Vec<([f32; 4], f32)>,
 }
 
 /// The id of the Start note field of instance `uid` (its typing state lives under `editing`).
@@ -209,7 +212,11 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
     let p = ui.painter().clone();
     let mc = app.ui.middle_c;
     let bank = view(app, dev.uid()).bank.min(super::BANKS - 1);
-    let summary = if view(app, dev.uid()).view == super::View::Slices { super::slices::summary(app, dev) } else { summary(pads, bank) };
+    let summary = match view(app, dev.uid()).view {
+        super::View::Slices => super::slices::summary(app, dev),
+        super::View::Instrument => super::instrument::summary(app, dev),
+        super::View::Pads => summary(pads, bank),
+    };
     let Some(field) = super::view_bar::show(app, ui, dev, &summary, true, rect, out) else { return };
     let label = widgets::role_text(
         &p,

@@ -575,8 +575,26 @@ keep their existing conversion to the session rate.
 
 The Sampler's **Instrument · Pads · Slices** switch changes only the view. It remembers the
 choice for each instance while the app is open, including closing and reopening the editor.
-Instrument currently shows a line saying the view is not built yet. Pads keeps its
-selected pad and bank when you return.
+Each view keeps its own selection when you return: Pads its pad and bank, Instrument its zone.
+
+The **Instrument** view shows every zone on the key map: a rectangle over the keys and velocities
+it plays, its root key and name in the corner and its root as a dot on its foot. A zone on a pad
+shows as one key at full velocity with a dashed edge and a lock: it plays on the pad's note, so
+its edges do not drag. Click a zone to select it. Drag a side edge to change its key range, the
+top edge to change its highest velocity, or the dot to move its root; letting go is one undo step,
+and Escape cancels the drag. A drag that the kit cannot take is outlined in red before you let go,
+then snaps back with the reason under the key map. A group member's edge moves the whole group's
+key range, and a round-robin layer's top edge moves all of its alternatives.
+
+The **Zone** panel under the key map names the selected zone, its file, sample rate and length,
+and its keys, velocities, root and edge fades. Its waveform shows the region between **S** and
+**E** (drag either to move it, one undo step) and the loop in magenta. **Loop** sets Off, Forward
+or Ping-pong, and **Crossfade** takes milliseconds at the sample's own rate (the tooltip shows the
+frames); a crossfade works on forward loops only. When a shorter loop leaves less room than the
+stored crossfade, a warning line says how much is used. A zone that plays a slice follows its
+slice: its handles are locked and edited in the Slices view. Playback and Amp Envelope edit the
+selected zone. Groups, adding zones, SFZ import, and the Shaper and Modulation sections are not
+available yet.
 
 The **Slices** view shows the kit's slice loop on the bench: the loop's waveform under a strip of
 numbered flags, one per slice start (`S 1` is the loop start, `E` the loop's end), the set in use

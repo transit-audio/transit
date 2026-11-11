@@ -36,7 +36,8 @@ pub enum Scope {
     Automation,
     /// A device editor window: the one last clicked or opened (326-M).
     Editor,
-    /// The focused Sampler: its Pads view (Clear pad) and its Slices view (Audition slice).
+    /// The focused Sampler: its Pads view (Clear pad), its Slices view (Audition slice) and its
+    /// Instrument view (Cancel zone drag).
     Sampler,
     /// The focused Sampler's Slices view, the bench: the slice selection, the marker nudges and
     /// Delete (its own scope: Delete clears a pad on the Pads view).
@@ -187,6 +188,7 @@ pub enum Action {
     SamplerNudgeLaterTen,
     SamplerRemoveMarker,
     SamplerCancelDrag,
+    SamplerCancelZoneDrag,
     ToggleAutomation,
     GridNarrow,
     GridWiden,
@@ -266,6 +268,14 @@ pub const TABLE: &[Shortcut] = &[
         "The selected slice's start marker, never the loop start; one undo step.",
     ),
     row(A::SamplerCancelDrag, "Cancel marker drag", NONE, Key::Escape, S::SamplerSlices, "Sends nothing; the marker stays where it was."),
+    row(
+        A::SamplerCancelZoneDrag,
+        "Cancel zone drag",
+        NONE,
+        Key::Escape,
+        S::Sampler,
+        "A key-map edge, root or waveform handle drag on the Instrument view; sends nothing.",
+    ),
     // Transport.
     row(A::PlayStop, "Play / Stop", NONE, Key::Space, S::Global, "All DAWs."),
     row(

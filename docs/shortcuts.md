@@ -29,6 +29,7 @@ list or a dialog keeps Escape for itself. **Window > Close All Editors** closes 
 |---|---|---|
 | Sampler | Clear pad | Delete, Backspace |
 | Sampler | Audition slice | Space, Enter |
+| Sampler | Cancel zone drag | Escape |
 | Sampler slices | Previous slice / Next slice | Left / Right |
 | Sampler slices | Nudge marker earlier / later | Alt+Left / Alt+Right |
 | Sampler slices | Nudge marker earlier / later ×10 | Alt+Shift+Left / Alt+Shift+Right |
@@ -48,6 +49,9 @@ the previous and next slice. The nudges move the selected slice's start marker b
 with Shift) in Manual, one undo step each. Delete removes the selected slice's start marker, never
 the loop start. Escape cancels a marker drag in progress and sends nothing; otherwise it closes the
 window as usual. The keys never reach the arrangement while the Slices view has the keyboard.
+
+On the Instrument view, Escape cancels a key-map edge, root or waveform handle drag in progress
+and sends nothing; otherwise it closes the window as usual.
 
 ## Interface and arrangement zoom
 
