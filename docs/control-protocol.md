@@ -106,10 +106,17 @@ plus one, when the command runs) or `rack` (a rack card).
 
 ## Sampler import rates
 
+`mix.sampler_load` and `mix.sampler_clear` are removed in 0.7.0 with the one-sample Sampler (ADR
+0041 amendment 2026-11-11, #455): every Sampler is a kit. Give a zone its sample with
+`mix.sampler_zone_source` (a `path`, a session `source` or a staged `import`), or fill free pads
+from a folder with `mix.sampler_load_kit`. `mix.sampler_zone_source` with `source` refuses a session
+source whose audio is held at a rate other than its stored one (the old one-sample Sampler's
+sample, opened at the session rate): load it from its file.
+
 | Command | Rate and frame policy |
 |---|---|
 | `file.prepare_import` | `rate: "native"` prepares Sampler PCM without conversion; omitted or numeric rate keeps timeline preparation. Progress includes `sample_rate`, frames at that rate, and duration in seconds. |
-| `mix.sampler_load`, `mix.sampler_zone_source`, `mix.sampler_slice_loop`, `mix.sampler_load_kit` | New file and byte imports retain native PCM through the shared preparation. A staged Sampler import must have been prepared with `rate: "native"`; a converted job is refused and remains staged. Existing source ids keep their admitted PCM and rate. All start/end, loop, crossfade, slice and cue positions and reported lengths count admitted source frames. |
+| `mix.sampler_zone_source`, `mix.sampler_slice_loop`, `mix.sampler_load_kit` | New file and byte imports retain native PCM through the shared preparation. A staged Sampler import must have been prepared with `rate: "native"`; a converted job is refused and remains staged. Existing source ids keep their admitted PCM and rate. All start/end, loop, crossfade, slice and cue positions and reported lengths count admitted source frames. |
 | `mix.sampler_slice_state`, `mix.sampler_state` | Source `rate` is the admitted PCM rate. Milliseconds use that rate; envelope and choke durations use output frames. Older kits keep already-converted PCM and its stored rate, with no migration. |
 
 ## Sampler slicing
@@ -150,8 +157,7 @@ removed is freed, as each row says.
 Relative folders resolve against the saved session's folder. Hidden entries, directories,
 symbolic links and other files (including SFZ mappings) are listed under `ignored` and never
 opened. An empty kit, insufficient pads, zones or sources, an unreadable file, more than two
-channels, or any source/patch memory limit refuses the whole kit. Legacy one-sample instruments
-require **New Kit** first. PCM WAV/AIFF and FLAC with a declared frame count support header-only
+channels, or any source/patch memory limit refuses the whole kit. PCM WAV/AIFF and FLAC with a declared frame count support header-only
 admission; a codec without such a header is refused with its reason. Preview cannot certify a
 compressed audio body without decoding it, so a later decode error still refuses the whole load.
 

@@ -78,7 +78,7 @@ Clicking empty grid clears the selection and marks where step entry begins; it n
 **Options > Middle C** sets the name MIDI note 60 carries in every transit window: **C3** (the
 default, as Logic and Live show it) or **C4** (scientific pitch, as a hardware tuner and most
 notation show it). One key has one name everywhere: the piano roll's keys, the MIDI Monitor, the
-MIDI Mappings table, the Sampler's note rows, the Macro Oscillator's wave readout, the Tuner (its
+MIDI Mappings table, the Sampler's note names, the Macro Oscillator's wave readout, the Tuner (its
 note and its Reference caption, the A above middle C) and every note-named choice, such as the
 Resonator's Tonic. A flip renames them in the next frame, including the MIDI Monitor's earlier
 lines, so Copy gives one convention.
@@ -549,8 +549,8 @@ Editors** closes every editor, built-in and hosted. The link button in the title
 as Logic's Link does; off, the window stays on its own instrument.
 
 To give a Sampler pad its sample, drag a sample from the Files browser or from your file manager
-onto a pad: the file dropped on a pad becomes that pad's sample, in one undo step (a one-sample
-Sampler takes it anywhere in its window). While you drag from the browser, the pad under the pointer
+onto a pad: the file dropped on a pad becomes that pad's sample, in one undo step. While you drag
+from the browser, the pad under the pointer
 is outlined. A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
 drop, so nothing behind it is reached. Anywhere else, a browser drag lands on the track lane,
 header, mixer strip or device chain where you let go, and a file from the file manager is imported
@@ -669,7 +669,7 @@ D16. Occupied pads, including slices, stay as they are. Subfolders, hidden files
 other files are ignored; SFZ mappings are listed but never executed. Files stay where they are,
 referenced by path. The whole kit loads in one undo step. If it cannot fit, a file cannot be
 read, or an audio limit is exceeded, nothing loads and the result names the reason and counts.
-A one-sample Sampler needs **New Kit** first. Folder loading currently accepts PCM WAV/AIFF and
+Folder loading currently accepts PCM WAV/AIFF and
 FLAC files whose headers declare their length; preview checks headers, while loading also
 checks the audio data.
 
@@ -988,8 +988,28 @@ Every control can be automated and mapped to a MIDI controller.
 transit 0.7.0 stops writing the names it inherited from the SoundCraft fork into two kinds of file:
 **clip group files** (`file.export_clip_groups` and `file.import_clip_groups`) and **track
 presets** (`track.save_preset` and `track.load_preset`), which you reach through the assistant, MCP,
-the control protocol or the CLI. Your sessions need nothing: a `.transit` file opens and saves as
-before ([ADR 0049](adr/0049-inherited-file-identifiers-retire.md)).
+the control protocol or the CLI. Your sessions need nothing for this: a `.transit` file opens and
+saves as before ([ADR 0049](adr/0049-inherited-file-identifiers-retire.md)).
+
+**The old one-sample Sampler is gone (an alpha break).** Builds before 0.7.0 had a Sampler that
+played one sample across the keyboard, with its own panel and a **New Kit** button. Every Sampler
+is now a kit of pads. When you open an older session, each one-sample Sampler becomes an empty
+Sampler kit: its sample assignment and its settings are dropped, and so are the automation lanes,
+MIDI mappings, rack macro targets and user pages that pointed at those settings. Nothing is
+converted. The sample file stays in the session (it is in the Clip List), so you can drop it onto
+a pad again. The load notes name every affected track, for example:
+
+- `track "Keys": the old one-sample Sampler was removed and is now an empty kit; its sample "Hit.wav" stays in the session's files and can be loaded onto a pad again; dropped 2 automation lane(s), 1 MIDI mapping(s)`
+- `1 track(s) had the old one-sample Sampler and now have an empty Sampler kit`
+
+The session opens as modified, and the next save writes the empty kit. Tracks imported from an
+older session (`file.import_session_data`) and track presets that hold the old Sampler get the
+same empty kit; an import does not bring the sample file along. Built-in Sampler user presets held
+only the old settings: they are reported once and left on disk, and the Sampler lists no presets.
+The control-channel commands `mix.sampler_load` and `mix.sampler_clear` are removed: use
+`mix.sampler_zone_source` or `mix.sampler_load_kit`. A session saved by 0.7.0 and opened in
+v0.6.2 or earlier warns that it needs `sampler_patch`, has a silent Sampler, and loses the empty
+kit if saved there.
 
 **What converts.** Any 0.7 release reads clip group files and track presets saved by older
 versions, and writes every new one in transit's format. Reading an old file does not change it, so

@@ -60,8 +60,14 @@ seed, the loop's Auto and Manual marker sets, and the sparse map of nondefault s
 Every field has a default and unknown fields are kept and written back at every level. An unknown
 schema version or an invalid patch is kept as its raw object with a load note, plays silence and is
 never rewritten. A session with a patch lists `sampler_patch` under `needs`, and
-`sampler_slicing_modes` when the patch has a loop; an old one-sample Sampler (`Insert::sample`)
-gets no patch from opening or saving, and a new patch leaves `sample` unset.
+`sampler_slicing_modes` when the patch has a loop. The retired one-sample Sampler (a `sampler`
+slot with no `sampler_patch`, its state in `Insert::sample` and 19 parameters) is dropped on parse
+(`crates/model/src/legacy_sampler.rs`, ADR 0041 amendment 2026-11-11, #455): the slot gets an empty
+patch (seed 1, pad start note 36), `sample`, the 19 ids and the instrument's user pages go, and
+so do the lanes, session MIDI mappings and rack macro targets on those ids; one load note per track
+and a summary, and the open reads as modified. A patch in any state, opaque included, is never
+touched. The old source stays in `sources` and, now named by no instrument, decodes at the session
+rate like timeline audio; a source shared with a timeline clip did so for the clip already.
 
 ## Device pages (#355, ADR 0047)
 
