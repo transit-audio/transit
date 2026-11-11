@@ -27,7 +27,7 @@ pub mod placement;
 pub mod state;
 pub mod use_panel;
 pub mod viewport;
-mod wave;
+pub(crate) mod wave;
 
 #[cfg(test)]
 mod bench_tests;
