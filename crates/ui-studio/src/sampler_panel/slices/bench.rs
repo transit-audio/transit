@@ -583,6 +583,13 @@ fn draw_loop(
     scroll(ui, wp, uid, view, l, area, out);
     // The markers: lines, then flags over them (a flag that would run into the next boundary is
     // left out, so the cell between the two boundaries stays clickable), then the Manual handles.
+    // The window losing focus cancels a drag (the system may never deliver its release: the next
+    // release in the window would otherwise commit wherever it lands).
+    if let Some(d) = view.gesture.drag.as_mut()
+        && ui.input(|i| i.raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))))
+    {
+        d.cancelled = true;
+    }
     let dragging = view.gesture.drag.clone();
     let mut flag_rights = Vec::with_capacity(set.len());
     for (i, s) in set.iter().enumerate() {
@@ -658,18 +665,27 @@ fn draw_loop(
             }
             if let Some(id) = s.id {
                 let resp = ui.interact(h, egui::Id::new(("sampler_slice_handle", uid, i)), Sense::drag()).on_hover_text(&inputs.handle_tip);
-                let pointer = resp.interact_pointer_pos().map(|p| view.viewport.frame_at(l, p.x, area.min.x, area.width()));
+                let pointer = resp.interact_pointer_pos();
+                // The toolkit starts a drag-only widget's drag on the press: the marker stays
+                // until the pointer has traveled past the drag threshold, then moves by the
+                // distance dragged (where the press grabbed the handle stays under the pointer).
                 if resp.drag_started() {
-                    view.gesture.drag = Some(g::Drag { index: i, id, requested: pointer.unwrap_or(s.frame), cancelled: false });
+                    let grab = ui.input(|i| i.pointer.press_origin()).or(pointer).unwrap_or(h.center());
+                    view.gesture.drag = Some(g::Drag { index: i, id, requested: s.frame, cancelled: false, grab, moved: false });
                 } else if resp.dragged()
-                    && let (Some(d), Some(f)) = (view.gesture.drag.as_mut(), pointer)
+                    && let (Some(d), Some(p)) = (view.gesture.drag.as_mut(), pointer)
                     && d.index == i
                 {
-                    d.requested = f;
+                    let threshold = ui.ctx().options(|o| o.input_options.max_click_dist);
+                    d.moved |= p.distance(d.grab) > threshold;
+                    if d.moved {
+                        d.requested = view.viewport.shifted(l, s.frame, p.x - d.grab.x, area.width());
+                    }
                 }
                 if resp.drag_stopped()
                     && let Some(d) = view.gesture.drag.take()
                     && !d.cancelled
+                    && d.moved
                     && d.requested != s.frame
                 {
                     intent = Some(Intent::Move { id: d.id, frame: d.requested });

@@ -9,7 +9,9 @@
 //!   double-click never adds twice or adds and then removes; the one exception is a double-click
 //!   on the same slice's cell, which renames the slice in place.
 //! - **Add:** a click on the bench under the flag strip. **Remove:** a click on a flag. **Move:**
-//!   drag a Manual handle; Escape cancels and nothing is sent; one move per completed drag.
+//!   drag a Manual handle (by the distance dragged, once past the toolkit's drag threshold; a
+//!   click on a handle sends nothing); Escape, or the window losing focus, cancels and nothing is
+//!   sent; one move per completed drag.
 //!   **Select:** a click on a slice's cell.
 
 use super::state::{Loop, Mode};
@@ -63,13 +65,18 @@ pub enum Act {
     Swallow,
 }
 
-/// A handle being dragged: the marker, the frame under the pointer, and whether Escape canceled it.
+/// A handle being dragged: the marker, where the drag asks it to go, and whether Escape (or the
+/// window losing focus) canceled it. The drag is relative to where the press grabbed the handle
+/// (`grab`), and asks for nothing until the pointer has traveled past the toolkit's drag threshold
+/// (`moved`): a click on a handle never moves its marker.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Drag {
     pub index: usize,
     pub id: u32,
     pub requested: u64,
     pub cancelled: bool,
+    pub grab: egui::Pos2,
+    pub moved: bool,
 }
 
 /// A slice's name being typed in its cell.

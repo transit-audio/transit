@@ -247,7 +247,7 @@ fn a_drag_whose_release_was_not_seen_ends_with_no_button_down() {
     // A drag left over with no button down (its release went to no frame of the bench).
     let id = t.patch(tr).slicing.unwrap().manual.unwrap().markers[1].id;
     t.app.builtin_editor.devices.sampler.views.values_mut().next().unwrap().slices.gesture.drag =
-        Some(super::bench_gestures::Drag { index: 1, id, requested: 15_000, cancelled: false });
+        Some(super::bench_gestures::Drag { index: 1, id, requested: 15_000, cancelled: false, grab: egui::pos2(0.0, 0.0), moved: true });
     t.frames(2);
     assert!(view(&t).gesture.drag.is_none(), "the bench drops it");
     assert_eq!(sent(&t, log), Vec::<String>::new(), "and sends nothing");
@@ -298,4 +298,47 @@ fn a_typed_name_commits_when_the_next_click_adds_or_removes() {
     assert_eq!(s.len(), 2, "{s:?}");
     assert!(s[0].contains("\"op\":\"label\"") && s[0].contains("Hat") && s[1].contains("\"op\":\"remove\""), "{s:?}");
     assert!(!frames(&t, tr).contains(&33_075));
+}
+
+#[test]
+fn a_click_on_a_handle_never_moves_its_marker_and_a_drag_moves_by_the_distance_dragged() {
+    let (mut t, tr) = sliced();
+    t.run("mix.sampler_slice_set", json!({"track": tr.0, "snap": false}));
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    let hd = mid(bench(&t, tr).flags[1].handle.unwrap());
+    // A press and release at the handle's center, then 4 points off center, with no motion.
+    for at in [hd, (hd.0 + 4.0, hd.1)] {
+        steps(&mut t, vec![moved(at), press(at, true), press(at, false)]);
+        assert_eq!(sent(&t, log), Vec::<String>::new(), "a click at {at:?} sends nothing");
+        assert_eq!(frames(&t, tr), [0, 11_025, 22_050, 33_075]);
+        assert!(view(&t).gesture.drag.is_none());
+    }
+    assert_eq!(t.undo_len(), undo, "no undo step");
+    // A real drag from 4 points off center, 60 points right: the marker moves by 60 points' worth
+    // of frames (the grab is kept), not to the frame under the pointer.
+    let b = bench(&t, tr);
+    let width = b.well[2] - b.well[0] - 2.0;
+    let from = (hd.0 + 4.0, hd.1);
+    steps(&mut t, vec![moved(from), press(from, true), moved((from.0 + 30.0, from.1)), moved((from.0 + 60.0, from.1)), press((from.0 + 60.0, from.1), false)]);
+    let want = (11_025.0 + f64::from(60.0 / width) * 44_100.0 + 0.5).floor() as u64;
+    assert_eq!(sent(&t, log), [format!("mix.sampler_slice_marker {{\"frame\":{want},\"id\":{},\"op\":\"move\"}}", t.patch(tr).slicing.unwrap().manual.unwrap().markers[1].id)]);
+    assert_eq!(frames(&t, tr)[1], want);
+    assert_eq!(t.undo_len(), undo + 1);
+}
+
+#[test]
+fn a_drag_is_cancelled_when_the_window_loses_focus() {
+    let (mut t, tr) = sliced();
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    let hd = mid(bench(&t, tr).flags[1].handle.unwrap());
+    let to = (hd.0 + 60.0, hd.1);
+    steps(&mut t, vec![moved(hd), press(hd, true), moved((hd.0 + 30.0, hd.1)), moved(to)]);
+    assert!(view(&t).gesture.drag.as_ref().is_some_and(|d| d.moved && !d.cancelled), "dragging");
+    // The system takes the focus (an alt-tab) and never delivers the release; the next release in
+    // the window lands elsewhere.
+    steps(&mut t, vec![egui::Event::WindowFocused(false), egui::Event::WindowFocused(true), press((hd.0 + 200.0, hd.1), false)]);
+    assert_eq!(sent(&t, log), Vec::<String>::new(), "a canceled drag sends nothing");
+    assert_eq!(frames(&t, tr), [0, 11_025, 22_050, 33_075]);
+    assert_eq!(t.undo_len(), undo);
+    assert!(view(&t).gesture.drag.is_none());
 }

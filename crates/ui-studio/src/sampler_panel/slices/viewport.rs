@@ -64,6 +64,15 @@ impl Viewport {
         let f = a + f64::from((x - left) / width.max(f32::MIN_POSITIVE)) * (b - a);
         (f + 0.5).floor().clamp(l.start as f64, l.end as f64) as u64
     }
+
+    /// `frame` moved by `dx` points across a well `width` wide at the view's scale, rounded to the
+    /// nearest frame (ties upward) and kept in the loop (a handle drag: the marker moves by the
+    /// distance dragged, keeping where the press grabbed its handle).
+    pub fn shifted(&self, l: &Loop, frame: u64, dx: f32, width: f32) -> u64 {
+        let (a, b) = self.range(l);
+        let f = frame as f64 + f64::from(dx / width.max(f32::MIN_POSITIVE)) * (b - a);
+        (f + 0.5).floor().clamp(l.start as f64, l.end as f64) as u64
+    }
 }
 
 /// Milliseconds from S to `frame`, at the source's own rate (the pointer readout, ADR 0041).
