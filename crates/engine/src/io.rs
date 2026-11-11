@@ -353,6 +353,8 @@ pub use paths::{PathBounce, PathBounced, PathNormalize, PathStem, bounce_paths, 
 mod bounce;
 pub use bounce::{Bounce, BounceOptions, Bounced, bounce_stems, bounce_stems_with};
 
+/// The Sampler's kit preset files (#467), through the checked file access.
+pub mod kit_presets;
 /// Hosted plug-ins' user preset files (issue #68), through the checked file access.
 pub mod presets;
 pub(crate) use bounce::{bounce_layout, check_bounce_range};

@@ -141,12 +141,19 @@ pub(super) fn patch_of(s: &Session, id: &str, t: TrackId) -> Result<PatchV1> {
     patch.ready().cloned().ok_or_else(|| bad(id, "this version cannot edit the track's Sampler patch (it is kept as saved)"))
 }
 
-/// Checks `p` as the instance will, then stores it on track `t`.
+/// Checks `p` as the instance will, then stores it on track `t` (an edit: see [`store_with`]).
 pub(super) fn store(e: &mut Engine, id: &str, t: TrackId, p: PatchV1) -> Result<()> {
+    store_with(e, id, t, p, false)
+}
+
+/// Checks `p` as the instance will, then stores it on track `t`. `replacing`: `p` replaces the
+/// track's patch whole (a kit recall, #467), so the eight-voices rule is judged against an empty
+/// patch and the kit's own overloads count; an edit compares with the patch before it.
+pub(super) fn store_with(e: &mut Engine, id: &str, t: TrackId, p: PatchV1, replacing: bool) -> Result<()> {
     transit_mix::check_sampler_patch(&p, e.session()).map_err(|m| bad(id, m))?;
     // At most eight voices start for one note (ADR 0041), before publication: refused when this
     // edit adds a voice past the bound (a map loaded over it is never refused for another edit).
-    let before = patch_of(e.session(), id, t).unwrap_or_default();
+    let before = if replacing { PatchV1::default() } else { patch_of(e.session(), id, t).unwrap_or_default() };
     if let Some(o) = p.layer_overload(&before) {
         return Err(bad(id, o.text(e.message_middle_c())));
     }

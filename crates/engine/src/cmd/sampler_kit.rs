@@ -57,22 +57,7 @@ fn load(e: &mut Engine, p: &Value) -> Result<Value> {
         Some(v) => v.as_bool().ok_or_else(|| bad(ID, "`preview` must be true or false"))?,
     };
     let folder = resolve_path(e, ID, given)?;
-    let session = e.session_arc();
-    let roots = crate::file_access::current();
-    let names = e.message_middle_c();
-    // The command owns its snapshot until the worker is joined. No device, live engine or
-    // import staging map crosses threads. File access retains the caller's checked roots.
-    let worker = std::thread::Builder::new()
-        .name("transit-kit-import".into())
-        .spawn(move || {
-            crate::file_access::confine(roots.as_ref(), || {
-                let mut staged = Engine::new((*session).clone());
-                staged.set_message_middle_c(names);
-                prepare(&mut staged, t, &folder, preview)
-            })
-        })
-        .map_err(|err| EngineError::Io(format!("Load kit: could not start import: {err}")))?;
-    let candidate = worker.join().map_err(|_| EngineError::Io("Load kit: import worker failed; nothing was loaded".into()))?;
+    let candidate = stage(e, "Load kit", move |staged| prepare(staged, t, &folder, preview))?;
     match candidate {
         Err(refusal) => Ok(refusal),
         Ok(candidate) => {
@@ -85,6 +70,27 @@ fn load(e: &mut Engine, p: &Value) -> Result<Value> {
             Ok(candidate.result)
         }
     }
+}
+
+/// Runs `work` on a worker thread over a staged engine holding a clone of `e`'s session, inside the
+/// caller's checked file access roots, and joins it before returning: the engine waits for the
+/// decode (ADR 0041 #450; Load kit and kit recall share this one place). No device, live engine or
+/// import staging map crosses threads. `what` names the job in an error.
+pub(super) fn stage<T: Send + 'static>(e: &Engine, what: &str, work: impl FnOnce(&mut Engine) -> T + Send + 'static) -> Result<T> {
+    let session = e.session_arc();
+    let roots = crate::file_access::current();
+    let names = e.message_middle_c();
+    let worker = std::thread::Builder::new()
+        .name("transit-kit-import".into())
+        .spawn(move || {
+            crate::file_access::confine(roots.as_ref(), || {
+                let mut staged = Engine::new((*session).clone());
+                staged.set_message_middle_c(names);
+                work(&mut staged)
+            })
+        })
+        .map_err(|err| EngineError::Io(format!("{what}: could not start import: {err}")))?;
+    worker.join().map_err(|_| EngineError::Io(format!("{what}: import worker failed; nothing was loaded")))
 }
 
 fn prepare(e: &mut Engine, t: TrackId, folder: &std::path::Path, preview: bool) -> std::result::Result<Candidate, Value> {

@@ -44,6 +44,7 @@ pub(crate) mod sampler;
 mod sampler_acid;
 mod sampler_groups;
 mod sampler_kit;
+mod sampler_kit_presets;
 pub(crate) mod sampler_patch;
 mod sampler_slice_detect;
 mod sampler_slice_pads;
@@ -205,6 +206,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(sampler_state::specs());
         v.extend(sampler_groups::specs());
         v.extend(sampler_kit::specs());
+        v.extend(sampler_kit_presets::specs());
         v.extend(zoom_toggle::specs());
         v.extend(rack::specs());
         v.extend(takes::specs());
