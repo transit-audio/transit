@@ -492,11 +492,31 @@ fn log_bands(n: usize, sr: f32) -> Vec<Vec<(usize, f32)>> {
         .collect()
 }
 
-/// Where the attack found in the frame starting at `frame` begins. The log spectrum jumps as soon as the
-/// window reaches an attack, so it can sit up to half a window past the frame. Find the step edge of the
-/// high-passed energy, the sample where the next 3 ms gain most over the 6 ms before, then go back to
-/// where the energy first crosses the midpoint (in dB) between the two.
+/// Where the attack found in the frame starting at `frame` begins, and the strength of its high-passed
+/// edge (what the release check reads). The log spectrum jumps as soon as the window reaches an attack,
+/// so it can sit up to half a window past the frame. Find the step edge of the high-passed energy, the
+/// sample where the next 3 ms gain most over the 6 ms before, then go back to where the energy first
+/// crosses the midpoint (in dB) between the two.
+///
+/// High-passed energy gives a sharp edge for most attacks, but an attack whose energy is nearly all low
+/// (a kick) barely shows in it under hats, cymbals or noise: its high-passed edge lands on whatever high
+/// event is strongest nearby (a hat's grain before it, its click or the edges of its clipped cycles
+/// after it), not on the kick. So the same edge is also found in the plain energy, and the attack starts
+/// there when that edge is the stronger one and is itself an attack edge (the energy at least doubles,
+/// the bound the release check below uses for a weak edge), unless the high-passed edge is an attack
+/// edge too and comes first: a marker never moves later than an attack it already sits on (#468). A
+/// weaker plain edge is a low cycle's swing, not an attack.
 fn attack_start(ch: &[Vec<f32>], frame: usize, n: usize, sr: f32) -> (usize, f64) {
+    use std::f64::consts::LN_2;
+    let (high, edge) = step_edge(ch, frame, n, sr, true);
+    let (plain, plain_edge) = step_edge(ch, frame, n, sr, false);
+    let plain_wins = plain_edge > edge && plain_edge >= LN_2 && (plain < high || edge < LN_2);
+    (if plain_wins { plain } else { high }, edge)
+}
+
+/// The step edge [`attack_start`] looks for, in the high-passed (first difference) energy or the plain
+/// energy: where it starts and its strength (the log ratio of the 3 ms after to the 6 ms before).
+fn step_edge(ch: &[Vec<f32>], frame: usize, n: usize, sr: f32, high_passed: bool) -> (usize, f64) {
     let (before, after, short) = (((sr * 0.006) as usize).max(1), ((sr * 0.003) as usize).max(1), ((sr * 0.0005) as usize).max(1));
     let (from, to) = (frame.saturating_sub(before), frame + n + n / 2 + after);
     let mut cum = vec![0.0f64; to - from + 1];
@@ -504,7 +524,8 @@ fn attack_start(ch: &[Vec<f32>], frame: usize, n: usize, sr: f32) -> (usize, f64
         let e: f32 = ch
             .iter()
             .map(|x| {
-                let d = x.get(i).copied().unwrap_or(0.0) - i.checked_sub(1).and_then(|p| x.get(p)).copied().unwrap_or(0.0);
+                let prev = if high_passed { i.checked_sub(1).and_then(|p| x.get(p)).copied().unwrap_or(0.0) } else { 0.0 };
+                let d = x.get(i).copied().unwrap_or(0.0) - prev;
                 d * d
             })
             .sum();
