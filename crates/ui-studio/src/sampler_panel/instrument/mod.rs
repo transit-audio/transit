@@ -81,10 +81,6 @@ pub struct InstrumentView {
     pub sent: Vec<String>,
     /// The body's height as last drawn.
     pub height: Option<f32>,
-    /// The zone the sections last edited and their knobs' fields (a knob's typed value is closed
-    /// when the zone changes, so it never lands on another zone).
-    pub sections_zone: Option<u16>,
-    pub knob_fields: Vec<String>,
     /// The pad zone the add chip asked about (the Group panel's Notice shows until an answer or
     /// another zone is selected).
     pub ask: Option<u16>,
@@ -344,18 +340,9 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let entry = selected.as_ref().and_then(|z| data.as_ref().and_then(|st| st.entry(z.zone)).cloned());
     let patch = data.as_ref().map(|st| st.patch.clone()).unwrap_or_default();
     let sections = Rect::from_min_size(pos2(rect.min.x, y), vec2(rect.width(), sh));
-    let shown_zone = entry.as_ref().map(|e| e.id + 1);
-    if shown_zone != v.sections_zone {
-        // The knobs' value fields are keyed by field, not zone: typing open for the zone shown
-        // before is given up rather than committed to this one.
-        for f in &v.knob_fields {
-            ui.data_mut(|d| d.remove::<String>(super::zone::knob_id(uid, f).with("editing")));
-        }
-        v.sections_zone = shown_zone;
-    }
-    let knobs_before = out.knobs.len();
+    // A knob's value typed for the zone shown before is dropped by the shared knob itself (it
+    // remembers the zone it was typed for), never committed to this one.
     super::zone::show_zone(app, ui, dev, &patch, entry.as_ref(), sections, lay, out);
-    v.knob_fields = out.knobs[knobs_before..].iter().map(|k| k.field.clone()).collect();
     lo.sections = r4(sections);
     y += sh + space::PANEL_GAP;
     // Shaper and Modulation: collapsed bars, not built yet.
