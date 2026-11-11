@@ -347,3 +347,39 @@ fn panel_rects_match_the_boards_at_both_scales() {
         assert_eq!(h(u.create[3] - u.create[1]), h(layout::DENSE_CONTROL_HEIGHT));
     }
 }
+
+#[test]
+fn settings_back_at_the_stored_ones_stop_waiting() {
+    let (mut t, tr) = auto();
+    let log = view(&t).sent.len();
+    let d = panels(&t, tr).detect.unwrap();
+    pick(&mut t, d.division.as_ref().unwrap(), 1);
+    assert!(view(&t).detect.changed_at.is_some(), "a change waits for the debounce");
+    pick(&mut t, d.division.as_ref().unwrap(), 0);
+    let v = view(&t);
+    assert!(v.detect.pending.is_none() && v.detect.changed_at.is_none(), "back at the stored settings nothing waits (no repaint loop)");
+    settle(&mut t);
+    assert_eq!(sent(&t, log), Vec::<String>::new());
+}
+
+#[test]
+fn banners_lines_and_a_picked_root_go_when_the_document_changes_underneath() {
+    let (mut t, tr) = sliced();
+    // A refusal, then an edit from elsewhere (not this panel): the banner goes.
+    t.click(mid(bench(&t, tr).flags[0].flag), 1);
+    assert!(panels(&t, tr).left_error.is_some(), "S refuses in the banner");
+    t.run("mix.sampler_slice_set", json!({"track": tr.0, "snap": false}));
+    assert!(panels(&t, tr).left_error.is_none(), "an edit from elsewhere takes the banner away");
+    // A Success line, then Undo (Ctrl+Z, not the Notice's): the line goes.
+    let f3 = bench(&t, tr).flags[2].flag;
+    t.click(mid(f3), 1);
+    assert!(panels(&t, tr).left_line.is_some_and(|l| l.check), "the remove's Success line");
+    t.run("edit.undo", json!({}));
+    assert!(panels(&t, tr).left_line.is_some_and(|l| !l.check), "after the undo the panel rests");
+    // A root picked in the panel returns to the stored one when the document changes.
+    t.app.builtin_editor.devices.sampler.views.values_mut().next().unwrap().slices.usage.root = Some(72);
+    t.frames(2);
+    assert_eq!(view(&t).usage.root, Some(72));
+    t.run("mix.sampler_slice_set", json!({"track": tr.0, "snap": true}));
+    assert_eq!(view(&t).usage.root, None);
+}

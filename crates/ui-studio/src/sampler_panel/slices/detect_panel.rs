@@ -209,7 +209,9 @@ fn set(v: &mut SlicesView, l: &Loop, now: f64, f: impl FnOnce(&mut Settings)) {
     let mut s = v.detect.pending.clone().unwrap_or_else(|| Settings::stored(l));
     f(&mut s);
     v.detect.pending = (s != Settings::stored(l)).then_some(s);
-    v.detect.changed_at = Some(now);
+    // Back at the stored settings there is nothing to detect, so nothing waits (and the view stops
+    // asking for repaints).
+    v.detect.changed_at = v.detect.pending.is_some().then_some(now);
 }
 
 /// Draws the panel's rows into `rows` and handles its controls.

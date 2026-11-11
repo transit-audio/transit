@@ -116,6 +116,11 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, out: 
     if v.feedback.notice.as_ref().is_some_and(|(_, rev)| *rev != app.engine.revision) {
         v.feedback.notice = None;
     }
+    // The document changed underneath the view: its banners and lines go, and a picked root
+    // returns to the stored one.
+    if v.feedback.follow(app.engine.revision) {
+        v.usage.root = None;
+    }
     let data = v.snapshot.data.clone();
     let s = app.engine.session_arc();
     let audio = data.as_ref().and_then(|l| l.source).and_then(|id| s.pool.get(id).cloned());

@@ -43,6 +43,8 @@ pub(crate) fn send(app: &mut StudioApp, dev: Dev, v: &mut SlicesView, panel: Pan
         Panel::Left => v.feedback.left_error = error,
         Panel::Use => v.feedback.use_error = error,
     }
+    // What the panels now say is about the document as this command left it.
+    v.feedback.revision = Some(app.engine.revision);
     answer
 }
 

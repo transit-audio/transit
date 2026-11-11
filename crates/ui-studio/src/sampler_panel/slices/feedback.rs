@@ -26,6 +26,22 @@ pub struct Feedback {
     pub use_success: Option<String>,
     /// A refused file (Load… or a drop on the empty bench): the note row under the bench.
     pub note: Option<String>,
+    /// The engine revision the panels' banners and lines were made at: when the document changes
+    /// underneath them (undo, redo, an edit from elsewhere) they go.
+    pub revision: Option<u64>,
+}
+
+impl Feedback {
+    /// The panels' banners and last-edit lines go when the document is no longer the one they
+    /// spoke of. Returns whether it was.
+    pub fn follow(&mut self, revision: u64) -> bool {
+        if self.revision == Some(revision) {
+            return false;
+        }
+        self.revision = Some(revision);
+        (self.left_error, self.left_success, self.use_error, self.use_success) = (None, None, None, None);
+        true
+    }
 }
 
 /// A card as drawn: its rect, its text, its edge color and (a Notice) its action's rect.
