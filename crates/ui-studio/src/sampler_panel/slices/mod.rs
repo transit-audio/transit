@@ -19,6 +19,9 @@
 //! button is held; a double-click adds a marker. One audition is held at a time: whichever of a
 //! press and Space or Enter started last owns it, and only its owner's release ends it (a key's
 //! release does not end a press's audition, and a button's release does not end a key's).
+//!
+//! The playheads (#470, `playheads`): a line over the waveform at each sounding voice of the
+//! loop, from the source frames the instrument publishes each block; nothing while none sounds.
 
 pub mod bench;
 pub mod bench_gestures;
@@ -29,6 +32,7 @@ pub mod feedback;
 pub mod loop_row;
 pub mod panels;
 pub mod placement;
+pub(crate) mod playheads;
 pub mod state;
 pub mod use_panel;
 pub mod viewport;
@@ -46,6 +50,8 @@ mod keyboard_tests;
 mod loop_tests;
 #[cfg(test)]
 mod panel_tests;
+#[cfg(test)]
+mod playheads_tests;
 #[cfg(test)]
 pub(super) mod rig;
 #[cfg(test)]
@@ -162,6 +168,20 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     let h = bench::height(ui.painter());
     let bench_rect = Rect::from_min_size(rect.min, vec2(rect.width(), h));
     let (mut layout, intents) = bench::show(ui, uid, &mut v, data.as_ref(), audio.as_deref(), &inputs, mc, bench_rect);
+    // The playheads over the waveform (#470): what the instrument's last block published, and a
+    // repaint asked for only while a voice of the loop sounds.
+    if let Some(l) = &data {
+        let frames = playheads::sounding(app, dev);
+        let [x0, y0, x1, y1] = layout.well;
+        let area = Rect::from_min_max(pos2(x0, y0), pos2(x1, y1)).shrink(crate::tokens::chrome::FIELD_EDGE_WIDTH);
+        let body = Rect::from_min_max(pos2(area.min.x, layout.strip[3]), area.max);
+        layout.playhead_ink = bench::named(crate::tokens::sampler::WAVE_PLAYHEAD);
+        layout.playheads = playheads::paint(ui.painter(), &v.viewport, l, area, body, &frames, layout.playhead_ink);
+        layout.playhead_repaint = !frames.is_empty();
+        if layout.playhead_repaint {
+            ui.ctx().request_repaint();
+        }
+    }
     for i in intents {
         apply(app, dev, &mut v, i);
     }

@@ -164,6 +164,11 @@ pub struct BenchLayout {
     pub selected_wave_ink: Color32,
     /// The status tag in the well's corner (`Analyzing…`, `keys out of order`, `64 of 64 slices`).
     pub tag: Option<(String, [f32; 4])>,
+    /// Each sounding voice's playhead line in view (#470), its ink, and whether the view asked
+    /// for a repaint for them (only while a voice of the loop sounds).
+    pub playheads: Vec<[f32; 4]>,
+    pub playhead_ink: Color32,
+    pub playhead_repaint: bool,
     pub analyzing: Option<[f32; 4]>,
     pub ghost: Option<GhostRecord>,
     /// A pending detection's dashed markers (the x of each, Auto only).
