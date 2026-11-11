@@ -51,10 +51,13 @@ pub enum Icon {
     ArrowRight,
     /// Lucide zap: the Low Latency toggle on the transport (#417).
     Zap,
+    /// Lucide lock: an edge or handle that does not drag (the Sampler's pad-bound zones and
+    /// slice-bound handles, #270).
+    Lock,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 28] = [
+    pub const ALL: [Icon; 29] = [
         Icon::Rewind,
         Icon::Stop,
         Icon::Play,
@@ -83,6 +86,7 @@ impl Icon {
         Icon::Help,
         Icon::ArrowRight,
         Icon::Zap,
+        Icon::Lock,
     ];
 
     /// The Lucide name (the file under `assets/icons/`), plus `-filled` for filled variants.
@@ -116,6 +120,7 @@ impl Icon {
             Icon::Help => "circle-help",
             Icon::ArrowRight => "arrow-right",
             Icon::Zap => "zap",
+            Icon::Lock => "lock",
         }
     }
 
@@ -148,6 +153,7 @@ impl Icon {
             Icon::Help => include_bytes!("../assets/icons/circle-help.svg"),
             Icon::ArrowRight => include_bytes!("../assets/icons/arrow-right.svg"),
             Icon::Zap => include_bytes!("../assets/icons/zap.svg"),
+            Icon::Lock => include_bytes!("../assets/icons/lock.svg"),
         }
     }
 
