@@ -586,9 +586,23 @@ its pad and that pad's note. Press Space or Enter to hear the selected slice whi
 window has the keyboard. **Zoom** shows the loop at 1×, 2×, 4× or 8× around the selected slice,
 with a scroll bar inside the bench past 1×; hover the bench to read the position in milliseconds
 from the loop start. Times count the source's own frames at its own sample rate. Selecting,
-zooming and scrolling never change the kit. Editing markers, Detect and the Use slices actions
-come in a later build; until then make the loop and its slices through the control channel
-(`mix.sampler_slice_loop`, `mix.sampler_slice_marker`, `mix.sampler_slices_to_pads`).
+zooming and scrolling never change the kit.
+
+Without a loop, drop an audio file on the bench or choose **Load…**. In **Manual**, click the
+bench to add a marker (a dashed line shows where it lands, and says `too close` where it cannot),
+drag a marker's handle to move it (Escape cancels the drag), click a flag to remove its marker,
+and double-click a slice's cell to name it. Left and Right select slices, Alt+Left and Alt+Right
+nudge the selected marker a frame (Shift for ten), and Delete removes it. **SNAP 0×** snaps edits
+to the nearest zero crossing. Each edit is one undo step. An edit in **Auto** first copies Auto's
+markers to Manual in the same step, and a notice offers **Undo**.
+
+In Auto, the **Detect** panel sets the source (cue points, transients or a grid), the sensitivity
+and the grid. A change detects again after a moment and previews the result as dashed lines;
+**Replace markers** takes it, **Keep current** drops it. **Use slices** puts the slices on pads
+(**Slices to pads**, with a preview of the bank it fills) or writes them as a MIDI clip (**Create
+clip**) at the selection's start on the track, else the edit cursor, else the playhead. A refusal
+is shown in the engine's words; when the slices' keys no longer run in order, **Map slices to
+keys** repairs them.
 
 To fill a kit from a folder, choose **Load kit…** in the Pads bar. Pick a folder, review the
 file count and pad range, then choose **Load kit**. Cancel leaves the kit unchanged. **Expand to rack…** beside it is not available yet. A refusal

@@ -28,6 +28,11 @@ list or a dialog keeps Escape for itself. **Window > Close All Editors** closes 
 |---|---|---|
 | Sampler | Clear pad | Delete, Backspace |
 | Sampler | Audition slice | Space, Enter |
+| Sampler slices | Previous slice / Next slice | Left / Right |
+| Sampler slices | Nudge marker earlier / later | Alt+Left / Alt+Right |
+| Sampler slices | Nudge marker earlier / later ×10 | Alt+Shift+Left / Alt+Shift+Right |
+| Sampler slices | Remove slice marker | Delete |
+| Sampler slices | Cancel marker drag | Escape |
 
 The focused Sampler's selected pad is cleared in one undo step. A text field, open menu, or
 dialog keeps the keys for itself. Right-click a pad for **Clear pad** and, when it stores its
@@ -36,6 +41,12 @@ own note, **Reset note**.
 On the Slices view, Space or Enter plays the selected slice's pad at the piano roll's audition
 velocity for as long as the key is held, while the Sampler window has the keyboard (the window
 you last clicked); elsewhere Space plays the song and Enter returns to zero.
+
+The Sampler slices keys act on the Slices view's bench under the same rule. Left and Right select
+the previous and next slice. The nudges move the selected slice's start marker by one frame (ten
+with Shift) in Manual, one undo step each. Delete removes the selected slice's start marker, never
+the loop start. Escape cancels a marker drag in progress and sends nothing; otherwise it closes the
+window as usual. The keys never reach the arrangement while the Slices view has the keyboard.
 
 ## Interface and arrangement zoom
 

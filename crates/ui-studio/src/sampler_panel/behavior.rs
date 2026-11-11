@@ -217,14 +217,25 @@ pub(crate) fn audition(app: &mut StudioApp, dev: Dev, note: u8) {
     {
         return;
     }
-    view(app, dev.uid()).held = Some(note);
+    let v = view(app, dev.uid());
+    v.held = Some(note);
+    v.held_track = Some(track(dev));
 }
 
 /// Ends a held audition.
 pub(crate) fn release(app: &mut StudioApp, dev: Dev) {
-    let Some(note) = view(app, dev.uid()).held.take() else { return };
+    release_uid(app, dev.uid());
+}
+
+/// Ends instance `uid`'s held audition, its window open or not (the note-off goes to the track
+/// the note-on went to).
+pub(crate) fn release_uid(app: &mut StudioApp, uid: u64) {
+    let v = view(app, uid);
+    let Some(note) = v.held.take() else { return };
+    v.slices.key_held = false;
+    let Some(t) = v.held_track.take() else { return };
     if let Some(p) = &app.player {
-        let _ = app.player_requests.result(&mut app.status, p.note(track(dev), note, 0));
+        let _ = app.player_requests.result(&mut app.status, p.note(t, note, 0));
     }
 }
 

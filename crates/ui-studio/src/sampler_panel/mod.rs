@@ -121,8 +121,10 @@ pub struct PadsView {
     pub note: Option<String>,
     /// The pad a drag started on (a swap on release over another pad).
     pub drag: Option<u8>,
-    /// The note an audition holds (released with the pointer).
+    /// The note an audition holds (released with the pointer, or the key on the Slices view) and
+    /// the track it plays on.
     pub held: Option<u8>,
+    pub held_track: Option<TrackId>,
     /// Auditions so far and the last one as (note, velocity): with or without a player.
     pub auditions: u64,
     pub last_audition: Option<(u8, u8)>,
@@ -143,6 +145,7 @@ impl Default for PadsView {
             note: None,
             drag: None,
             held: None,
+            held_track: None,
             auditions: 0,
             last_audition: None,
             legacy_h: None,
@@ -232,6 +235,10 @@ pub struct SamplerLayout {
     pub placeholder: Option<(String, [f32; 4])>,
     /// The Slices view's bench (`None` on the other views).
     pub slices: Option<slices::BenchLayout>,
+    /// The Slices view's panels row under the bench.
+    pub slice_panels: Option<slices::panels::PanelsLayout>,
+    /// The Slices view's note row (a refused file) and where it sits.
+    pub slice_note: Option<(String, [f32; 4])>,
     /// The body's top left as egui placed it (on the physical pixel grid, so at a fractional
     /// scale it can sit a fraction of a point below the title bar's bottom).
     pub body_origin: [f32; 2],
@@ -386,8 +393,8 @@ pub fn content_height(app: &StudioApp, ctx: &egui::Context, key: (TrackId, usize
     let w = width - 2.0 * space::WINDOW_PADDING;
     let p = measurer(ctx);
     let v = app.builtin_editor.devices.sampler.views.get(&ins.uid.get());
-    if v.is_some_and(|v| v.view == View::Slices) {
-        return 2.0 * space::WINDOW_PADDING + bar::HEIGHT_WITH_GAP + slices::height(&p);
+    if let Some(v) = v.filter(|v| v.view == View::Slices) {
+        return 2.0 * space::WINDOW_PADDING + bar::HEIGHT_WITH_GAP + v.slices.height.unwrap_or_else(|| slices::height(&p));
     }
     if v.is_some_and(|v| v.view != View::Pads) {
         return 2.0 * space::WINDOW_PADDING + bar::HEIGHT_WITH_GAP + grid::height(&p);

@@ -38,10 +38,13 @@ pub enum Scope {
     Editor,
     /// The focused Sampler: its Pads view (Clear pad) and its Slices view (Audition slice).
     Sampler,
+    /// The focused Sampler's Slices view, the bench: the slice selection, the marker nudges and
+    /// Delete (its own scope: Delete clears a pad on the Pads view).
+    SamplerSlices,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 11] = [
+    pub const ALL: [Scope; 12] = [
         Scope::Global,
         Scope::Arrangement,
         Scope::PianoRoll,
@@ -53,6 +56,7 @@ impl Scope {
         Scope::Rename,
         Scope::Editor,
         Scope::Sampler,
+        Scope::SamplerSlices,
     ];
 
     pub fn label(self) -> &'static str {
@@ -68,6 +72,7 @@ impl Scope {
             Scope::Automation => "Automation",
             Scope::Editor => "Device editor",
             Scope::Sampler => "Sampler",
+            Scope::SamplerSlices => "Sampler slices",
         }
     }
 }
@@ -174,6 +179,14 @@ pub enum Action {
     CloseEditor,
     SamplerClearPad,
     SamplerAuditionSlice,
+    SamplerPreviousSlice,
+    SamplerNextSlice,
+    SamplerNudgeEarlier,
+    SamplerNudgeLater,
+    SamplerNudgeEarlierTen,
+    SamplerNudgeLaterTen,
+    SamplerRemoveMarker,
+    SamplerCancelDrag,
     ToggleAutomation,
     GridNarrow,
     GridWiden,
@@ -224,6 +237,35 @@ pub const TABLE: &[Shortcut] = &[
         "The selected slice while the Slices view has the keyboard, held as long as the key; Space plays the song elsewhere.",
     ),
     row(A::SamplerAuditionSlice, "Audition slice", NONE, Key::Enter, S::Sampler, "Same as Space."),
+    row(A::SamplerPreviousSlice, "Previous slice", NONE, Key::ArrowLeft, S::SamplerSlices, "Selects the slice before; the design's round 2."),
+    row(A::SamplerNextSlice, "Next slice", NONE, Key::ArrowRight, S::SamplerSlices, "Selects the slice after; the design's round 2."),
+    row(
+        A::SamplerNudgeEarlier,
+        "Nudge marker earlier",
+        ALT,
+        Key::ArrowLeft,
+        S::SamplerSlices,
+        "The selected slice's start marker, one frame (Manual); one undo step.",
+    ),
+    row(
+        A::SamplerNudgeLater,
+        "Nudge marker later",
+        ALT,
+        Key::ArrowRight,
+        S::SamplerSlices,
+        "The selected slice's start marker, one frame (Manual); one undo step.",
+    ),
+    row(A::SamplerNudgeEarlierTen, "Nudge marker earlier ×10", ALT_SHIFT, Key::ArrowLeft, S::SamplerSlices, "Ten frames (Manual)."),
+    row(A::SamplerNudgeLaterTen, "Nudge marker later ×10", ALT_SHIFT, Key::ArrowRight, S::SamplerSlices, "Ten frames (Manual)."),
+    row(
+        A::SamplerRemoveMarker,
+        "Remove slice marker",
+        NONE,
+        Key::Delete,
+        S::SamplerSlices,
+        "The selected slice's start marker, never the loop start; one undo step.",
+    ),
+    row(A::SamplerCancelDrag, "Cancel marker drag", NONE, Key::Escape, S::SamplerSlices, "Sends nothing; the marker stays where it was."),
     // Transport.
     row(A::PlayStop, "Play / Stop", NONE, Key::Space, S::Global, "All DAWs."),
     row(

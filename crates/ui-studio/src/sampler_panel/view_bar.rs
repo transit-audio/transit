@@ -106,12 +106,20 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, re
     let p = ui.painter().clone();
     if view(app, dev.uid()).view == View::Slices && ready {
         // The loop's summary; the view's action (Load loop…) is not built yet, so the slot runs to
-        // the bar's end.
+        // the bar's end. A long file name is cut with an ellipsis at the slot's end (the names'
+        // rule), never past the window.
         out.bar.summary = summary.to_string();
         let slot = Rect::from_min_max(pos2(summary_x, rect.min.y), rect.max);
         out.bar.summary_slot = r4(slot);
-        out.bar.summary_rect =
-            r4(widgets::role_text(&p, &tokens::READOUT_DISPLAY, summary, TOKENS.text_faint, Align2::LEFT_CENTER, slot.left_center()));
+        let mut job = tokens::READOUT_DISPLAY.job(p.ctx(), summary, TOKENS.text_faint);
+        job.wrap.max_width = slot.width();
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        job.wrap.overflow_character = Some('…');
+        let galley = p.layout_job(job);
+        let at = pos2(slot.min.x, slot.center().y - galley.size().y / 2.0);
+        out.bar.summary_rect = r4(Rect::from_min_size(at, galley.size()));
+        p.galley(at, galley, TOKENS.text_faint);
         return None;
     }
     if view(app, dev.uid()).view != View::Pads {

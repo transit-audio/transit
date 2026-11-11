@@ -5,7 +5,17 @@ use super::viewport::{Viewport, ms_from_start};
 
 /// A loop of 44,100 frames at 44.1 kHz starting at frame 1,000 (one second; S at 1,000).
 fn lp() -> Loop {
-    Loop { source: None, start: 1_000, end: 45_100, rate: 44_100, mode: Mode::Auto, snap: true, auto: Vec::new(), manual: Vec::new() }
+    Loop {
+        source: None,
+        start: 1_000,
+        end: 45_100,
+        rate: 44_100,
+        mode: Mode::Auto,
+        snap: true,
+        auto: Vec::new(),
+        manual: Vec::new(),
+        ..Loop::empty()
+    }
 }
 
 #[test]
