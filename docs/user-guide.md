@@ -626,18 +626,21 @@ key map.
 
 The **Slices** view shows the kit's slice loop on the bench: the loop's waveform under a strip of
 numbered flags, one per slice start (`S 1` is the loop start, `E` the loop's end), the set in use
-(Auto or Manual) and its count, and the time from the loop start under it. Click a slice's cell in
-the flag strip, between two flags, to select it; the line under the bench names it, its times,
+(Auto or Manual) and its count, and the time from the loop start under it. Click the waveform to
+select the slice under the pointer and hear it while you hold the button (its pad's note at the
+piano roll's velocity; the song does not start), or click a slice's cell in the flag strip,
+between two flags, to select it without playing; the line under the bench names it, its times,
 its pad and that pad's note. Press Space or Enter to hear the selected slice while the Sampler
 window has the keyboard. **Zoom** shows the loop at 1×, 2×, 4× or 8× around the selected slice,
 with a scroll bar inside the bench past 1×; hover the bench to read the position in milliseconds
 from the loop start. Times count the source's own frames at its own sample rate. Selecting,
-zooming and scrolling never change the kit.
+playing, zooming and scrolling never change the kit.
 
-Without a loop, drop an audio file on the bench or choose **Load…**. In **Manual**, click the
-bench to add a marker (a dashed line shows where it lands, and says `too close` where it cannot),
-drag a marker's handle to move it (a click that does not move leaves it where it is; Escape, or
-switching to another window, cancels the drag), click a flag to remove its marker, and
+Without a loop, drop an audio file on the bench or choose **Load…**. In **Manual**, double-click
+the waveform to add a marker (a dashed line shows where it lands, and says `too close` where it
+cannot), drag a marker's handle to move it (a click that does not move leaves it where it is and
+plays nothing; Escape, or switching to another window, cancels the drag), click a flag to remove
+its marker, and
 double-click a slice's cell to name it. Left and Right select slices, Alt+Left and Alt+Right
 nudge the selected marker a frame (Shift for ten), and Delete removes it. **SNAP 0×** snaps edits
 to the nearest zero crossing. Each edit is one undo step. An edit in **Auto** first copies Auto's

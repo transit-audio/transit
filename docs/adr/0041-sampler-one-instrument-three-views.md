@@ -3,7 +3,7 @@ title: One Sampler instrument with three views (Instrument: zones, velocity laye
 -->
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, accepted, pad start note; amended 2026-11-11, accepted, the one-sample instrument retired (#455); amended 2026-11-11, accepted, kit presets (#467)
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed); amended 2026-11-03; amended 2026-11-08, accepted; amended 2026-11-09, accepted, pad start note; amended 2026-11-11, accepted, the one-sample instrument retired (#455); amended 2026-11-11, accepted, kit presets (#467); amended 2026-11-11, decided by the maintainer, click plays a slice and double-click adds a marker (#469)
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
@@ -2069,3 +2069,28 @@ latest), and slice 6 rides with #450.
 **Reopen when** kit presets must carry their samples (the later feature #467 names), Relink lands
 and missing files want a search rule, or the patch moves to a schema 2 that changes how sources
 are named.
+
+## Amendment 2026-11-11: click plays a slice, double-click adds a marker (#469)
+
+Amended 2026-11-11: decided by the maintainer (#469). This replaces the bench's add gesture in
+Decision's Manual paragraph ("Clicking empty bench space adds a marker") and in the amendment of
+2026-11-03 ("click to add"); everything else stands.
+
+- **A single click on the waveform** (the bench under the flag strip) selects the slice under
+  the pointer and plays it the way Space does (the slice's pad note at the piano roll's
+  velocity) while the button is held. Release ends it, and so do the pointer leaving the window,
+  the window losing the focus and the window closing. It never starts the song, changes nothing
+  in the kit, is no undo step, and in Auto copies nothing to Manual. One audition is held at a
+  time: whichever of the click and Space or Enter started last owns it, and only its own release
+  ends it. The click does not scroll the view, so the second click of a double-click lands
+  where the first did.
+- **A double-click on the waveform** adds one marker at the pointer with every existing rule:
+  the `too close` refusal, the zero-crossing snap, one undo step, and in Auto the copy to Manual
+  in the same step with its notice. Its first click selects and plays as above. The double-click
+  is the toolkit's own detection.
+- **Unchanged:** dragging a Manual handle (silent: a press on a handle plays nothing); the flag
+  strip (a click in a cell selects, a click on a flag removes its marker, a double-click in a
+  cell names the slice); Space and Enter, the arrow keys, the nudges and Delete. With a menu, a
+  modal or a dialog open, or while a field has the keyboard, the click and the double-click do
+  nothing, as the keys do nothing. The bench's hint and its hover tooltip name the double-click
+  (`double-click adds a marker`); the ghost line still shows where an add would land.
