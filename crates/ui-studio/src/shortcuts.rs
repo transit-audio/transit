@@ -700,7 +700,7 @@ pub fn pressed(ctx: &egui::Context, action: Action) -> bool {
 /// device editor window's and the Sampler's (those consume their keys under a popup and do
 /// nothing with them, so the keys never fall through).
 fn popup_holds(scope: Scope) -> bool {
-    !matches!(scope, Scope::Dialog | Scope::Rename | Scope::Editor | Scope::Sampler | Scope::SamplerSlices)
+    !matches!(scope, Scope::Dialog | Scope::Rename | Scope::Editor | Scope::Sampler | Scope::SamplerSlices | Scope::SamplerInstrument)
 }
 
 /// The only opt-in override: click the key cell to switch between Enter and Space.

@@ -114,3 +114,30 @@ fn keys_under_an_open_popup_do_nothing_and_never_reach_the_arrangement() {
     assert_eq!((t.undo_len(), view(&t).selected, view(&t).confirm), (undo, sel, None), "and the view does nothing");
     assert!(t.app.engine.session().tracks.iter().any(|x| x.clips().iter().any(|c| c.id.0 == clip)));
 }
+
+#[test]
+fn the_view_takes_its_keys_under_a_popup_so_none_is_left_for_others() {
+    let (mut t, tr) = layered();
+    let field = t.panel(tr).title.field;
+    t.click(mid(field), 1);
+    assert!(egui::Popup::is_any_open(&t.ctx), "the popup is open");
+    // One frame with Delete down: the view's scope is exempt from the app's popup guard, so the
+    // view consumes the key (and does nothing with it); a held scope would leave it in the input.
+    t.time += 1.0 / 60.0;
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, t.screen)),
+        time: Some(t.time),
+        events: vec![super::super::slices::rig::key(egui::Key::Delete, true, egui::Modifiers::NONE)],
+        ..Default::default()
+    };
+    let app = &mut t.app;
+    let mut left = true;
+    let mut out = t.ctx.run_ui(raw, |ui| {
+        app.logic(ui.ctx());
+        app.ui(ui);
+        left = ui.ctx().input(|i| i.key_pressed(egui::Key::Delete));
+    });
+    out.textures_delta.clear();
+    assert!(!left, "the view took Delete");
+    assert_eq!(view(&t).confirm, None, "and asked nothing");
+}
