@@ -7,8 +7,8 @@ use super::plan_tests::*;
 use super::*;
 use std::sync::atomic::Ordering;
 use std::sync::{Mutex, Weak};
-use transit_audio_io::AudioBuffer;
-use transit_model::{Insert, SourceId};
+
+use transit_model::Insert;
 
 #[test]
 fn a_mid_commit_unwind_loses_no_owner_and_stops_the_engine() {
@@ -144,20 +144,14 @@ fn a_factory_panic_mid_compile_reports_the_instances_already_made() {
     assert!(rel.contains(&made[0]), "destroyed generation {:?} not reported; released {rel:?}", made[0]);
 }
 
-/// A sampler track with a gain insert; the next plan removes the gain and changes the sample.
+/// A sampler track with a gain insert; the next plan removes the gain.
 fn sampler_with_gain() -> (Session, Session) {
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    let audio = |v: f32| Arc::new(SourceAudio::new(AudioBuffer { sample_rate: SR, channels: vec![vec![v; 4_800]] }));
-    s.pool.insert(SourceId(1), audio(0.5));
-    s.pool.insert(SourceId(2), audio(0.25));
-    let mut ins = builtin("sampler");
-    ins.sample = Some(SourceId(1));
-    s.track_mut(t).unwrap().instrument = Some(ins);
+    s.track_mut(t).unwrap().instrument = Some(builtin("sampler"));
     s.track_mut(t).unwrap().mixer.inserts[0] = Some(builtin("gain"));
     let mut s2 = s.clone();
     s2.track_mut(t).unwrap().mixer.inserts[0] = None;
-    s2.track_mut(t).unwrap().instrument.as_mut().unwrap().sample = Some(SourceId(2));
     (s, s2)
 }
 
@@ -169,11 +163,11 @@ fn a_torn_reclaim_never_leaves_a_released_instance_active() {
     let before = rig.comp.active_bindings();
     assert_eq!(before.len(), 2, "the sampler and the gain");
     let mut env = rig.compile(&s2);
-    assert!(env.plan.attach.iter().any(|a| matches!(a, Attach::Sample { .. })));
-    // The sampler refuses its new sample during the commit, after the tables swapped.
-    rig.log.panic_on_sample.store(true, Ordering::Relaxed);
+    // The commit unwinds at its last point, after the tables and the session swapped (where the
+    // retired one-sample Sampler took its sample, #455).
+    FAULT_AT.set(5);
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rig.eng.adopt_plan(&mut env)));
-    rig.log.panic_on_sample.store(false, Ordering::Relaxed);
+    FAULT_AT.set(0);
     assert!(r.is_err());
     assert!(env.torn(), "the envelope says torn");
     assert!(!rig.comp.faulted(), "nothing known yet: the envelope has not come back");
@@ -226,12 +220,7 @@ fn after_a_torn_reclaim_at_any_commit_step_the_active_bindings_are_what_the_engi
 fn rich_torn(step: usize) -> (Vec<SlotBinding>, Vec<SlotBinding>, Vec<SlotBinding>, usize, usize, Rig, Session) {
     let (mut s, a, b) = audio_session();
     let inst = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    let audio = |v: f32| Arc::new(SourceAudio::new(AudioBuffer { sample_rate: SR, channels: vec![vec![v; 480]] }));
-    s.pool.insert(SourceId(5), audio(0.5));
-    s.pool.insert(SourceId(6), audio(0.25));
-    let mut smp = Insert::new("sampler");
-    smp.sample = Some(SourceId(5));
-    s.track_mut(inst).unwrap().instrument = Some(smp);
+    s.track_mut(inst).unwrap().instrument = Some(Insert::new("sampler"));
     s.track_mut(a).unwrap().mixer.inserts[0] = Some(builtin("room_reverb"));
     s.track_mut(a).unwrap().mixer.inserts[1] = Some(builtin("compressor"));
     let mut rig = Rig::new();
@@ -246,12 +235,14 @@ fn rich_torn(step: usize) -> (Vec<SlotBinding>, Vec<SlotBinding>, Vec<SlotBindin
     assert!(matches!(rig.eng.adopt_plan(&mut env), Adoption::Rejected(_)));
     rig.comp.reclaim(env);
     assert_eq!(rig.comp.pooled(), 1);
-    // The torn plan: reuse the pooled gain, replace the reverb (displaced), keep the compressor,
-    // swap the sampler's sample.
+    // The torn plan: reuse the pooled gain, replace the reverb (displaced), keep the compressor
+    // and grow its parameter map past the inline storage (an `Attach::Applied`).
     s2.track_mut(a).unwrap().mixer.inserts[0] = Some(builtin("filter"));
-    s2.track_mut(inst).unwrap().instrument.as_mut().unwrap().sample = Some(SourceId(6));
+    for i in 0..140 {
+        s2.track_mut(a).unwrap().mixer.inserts[1].as_mut().unwrap().params.insert(format!("extra{i:03}"), 0.5);
+    }
     let mut env = rig.compile(&s2);
-    assert!(env.plan.attach.iter().any(|x| matches!(x, Attach::Sample { .. })));
+    assert!(env.plan.attach.iter().any(|x| matches!(x, Attach::Applied { .. })));
     let mut released = rig.comp.take_released();
     FAULT_AT.set(step);
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rig.eng.adopt_plan(&mut env)));

@@ -260,7 +260,8 @@ fn rejected_instances_keep_their_binding_when_reused_and_status_never_crosses_ge
 struct Tracked {
     inner: Box<dyn transit_dsp::Plugin>,
     drops: Arc<Mutex<Vec<std::thread::ThreadId>>>,
-    panic_sample: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Panics on a note release (armed to unwind inside an adoption's commit).
+    panic_release: Option<Arc<std::sync::atomic::AtomicBool>>,
     panic_processing: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
@@ -290,6 +291,7 @@ impl transit_dsp::Plugin for Tracked {
         self.inner.note_on(offset, note, velocity);
     }
     fn note_off(&mut self, offset: usize, note: u8) {
+        assert!(!self.panic_release.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)), "injected release adoption fault");
         assert!(!self.panic_processing.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)), "release after torn adoption");
         self.inner.note_off(offset, note);
     }
@@ -299,10 +301,6 @@ impl transit_dsp::Plugin for Tracked {
             "all-notes-off after torn adoption"
         );
         self.inner.all_notes_off();
-    }
-    fn set_sample(&mut self, sample: Option<Arc<dyn transit_dsp::SampleSource>>) -> bool {
-        assert!(!self.panic_sample.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)), "injected sample adoption fault");
-        self.inner.set_sample(sample)
     }
 }
 
@@ -325,7 +323,7 @@ fn shutdown_recovers_queued_returned_rejected_and_live_instances_on_control() {
                 let mut inner = transit_dsp::create("gain")?;
                 inner.prepare(48_000.0, 512, spec.ch);
                 Some(NewInstance {
-                    plugin: Box::new(Tracked { inner, drops: Arc::clone(&drops), panic_sample: None, panic_processing: None }),
+                    plugin: Box::new(Tracked { inner, drops: Arc::clone(&drops), panic_release: None, panic_processing: None }),
                     refused_state: false,
                 })
             })
@@ -370,12 +368,12 @@ fn an_adoption_unwind_keeps_the_outer_envelope_until_control_teardown() {
     let (mut control, mut audio) = plan_bridge::pair(target(), PlanLimits::default());
     let mut s = Session::default();
     let track = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    let mut sampler = Insert::new("sampler");
-    sampler.sample = Some(SourceId(1));
-    s.track_mut(track).unwrap().instrument = Some(sampler);
-    for source in [SourceId(1), SourceId(2)] {
-        s.pool.insert(source, Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 64]] })));
-    }
+    s.track_mut(track).unwrap().instrument = Some(Insert::new("sampler"));
+    // A clip note held from frame 0, so the instrument's note table has an open note.
+    let mut seq = transit_midi::Sequence::default();
+    seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 40_000 });
+    let clip = s.new_clip_id();
+    s.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(Clip::midi(clip, "held", 0, 96_000, seq));
     let drops = Arc::new(Mutex::new(Vec::new()));
     let fault = Arc::new(AtomicBool::new(false));
     let forbid = Arc::new(AtomicBool::new(false));
@@ -388,7 +386,7 @@ fn an_adoption_unwind_keeps_the_outer_envelope_until_control_teardown() {
                 plugin: Box::new(Tracked {
                     inner,
                     drops: Arc::clone(&drops),
-                    panic_sample: Some(Arc::clone(&fault)),
+                    panic_release: Some(Arc::clone(&fault)),
                     panic_processing: Some(Arc::clone(&forbid)),
                 }),
                 refused_state: false,
@@ -398,7 +396,11 @@ fn an_adoption_unwind_keeps_the_outer_envelope_until_control_teardown() {
     adopt(&mut audio);
     control.poll();
     let live = control.active_bindings();
-    s.track_mut(track).unwrap().instrument.as_mut().unwrap().sample = Some(SourceId(2));
+    // The clip's note sounds on the instrument; the next plan makes its track inactive, so the
+    // commit voids the instrument after the tables and the session swapped, and the release it
+    // sends unwinds (where the retired one-sample Sampler took its sample, #455).
+    audio.render(0, 64);
+    s.track_mut(track).unwrap().inactive = true;
     control.request(Arc::new(s), None);
     control.prepare(&mut |_, _| panic!("instance must be reused")).unwrap();
     fault.store(true, Ordering::Relaxed);
@@ -642,7 +644,7 @@ fn public_stop_handler_reaches_the_plugin_before_ack_and_faults_both_classes_on_
                 let mut inner = transit_dsp::create("gain")?;
                 inner.prepare(48_000.0, 512, spec.ch);
                 Some(NewInstance {
-                    plugin: Box::new(Tracked { inner, drops: Arc::clone(&drops), panic_sample: None, panic_processing: Some(Arc::clone(&fault)) }),
+                    plugin: Box::new(Tracked { inner, drops: Arc::clone(&drops), panic_release: None, panic_processing: Some(Arc::clone(&fault)) }),
                     refused_state: false,
                 })
             })

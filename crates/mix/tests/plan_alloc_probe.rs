@@ -14,7 +14,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use transit_audio_io::AudioBuffer;
-use transit_dsp::{Plugin, ProcessStatus, SampleSource, Transport};
+use transit_dsp::{Plugin, ProcessStatus, Transport};
 use transit_mix::{
     Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanEnvelope, PlanGeneration, PlanLimits, PlanStatus,
     RenderTarget, mark_audio_thread,
@@ -74,9 +74,6 @@ impl Plugin for Fake {
     }
     fn set_transport(&mut self, t: &Transport) {
         self.inner.set_transport(t);
-    }
-    fn set_sample(&mut self, s: Option<Arc<dyn SampleSource>>) -> bool {
-        self.inner.set_sample(s)
     }
 }
 
@@ -449,23 +446,6 @@ fn a_long_parameter_map_grows_through_prepared_storage() {
     assert_eq!(rig.mix.status().applied_mismatch, 0);
     s.track_mut(t).unwrap().mixer.inserts[0] = None;
     no_cost("remove it", &rig.edit(&s));
-}
-
-#[test]
-fn a_sampler_sample_swap_allocates_and_frees_nothing() {
-    let mut s = Session::default();
-    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    let audio = |v: f32| Arc::new(SourceAudio::new(AudioBuffer { sample_rate: SR, channels: vec![vec![v; 4_800]] }));
-    s.pool.insert(SourceId(1), audio(0.5));
-    s.pool.insert(SourceId(2), audio(0.25));
-    let mut ins = builtin("sampler");
-    ins.sample = Some(SourceId(1));
-    s.track_mut(t).unwrap().instrument = Some(ins);
-    let mut rig = Rig::new(&s);
-    s.track_mut(t).unwrap().instrument.as_mut().unwrap().sample = Some(SourceId(2));
-    no_cost("swap the sample", &rig.edit(&s));
-    s.track_mut(t).unwrap().instrument.as_mut().unwrap().sample = None;
-    no_cost("clear the sample", &rig.edit(&s));
 }
 
 #[test]

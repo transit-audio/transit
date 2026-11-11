@@ -120,6 +120,11 @@ fn dir_of(root: &Path, plugin: &str) -> PathBuf {
 
 /// The names of the user presets of `plugin` under the config dir `root`, sorted.
 pub fn user_names(root: &Path, plugin: &str) -> Vec<String> {
+    // The Sampler's user presets hold the retired one-sample instrument's parameters (#455):
+    // reported once (`retired_user_preset_lines`), never listed until a patch preset exists.
+    if plugin == RETIRED_SAMPLER_PRESETS {
+        return Vec::new();
+    }
     let mut v: Vec<String> = std::fs::read_dir(dir_of(root, plugin))
         .into_iter()
         .flatten()
@@ -156,9 +161,19 @@ pub fn delete_user(root: &Path, plugin: &str, name: &str) -> Result<(), String> 
     std::fs::remove_file(dir_of(root, plugin).join(format!("{}.json", file_name(name)))).map_err(|e| e.to_string())
 }
 
+/// The plug-in id whose user presets hold only the retired one-sample Sampler's 19 parameters.
+const RETIRED_SAMPLER_PRESETS: &str = "sampler";
+
+/// The retired device a user preset naming `plugin` was for: an inherited effect, or the
+/// one-sample Sampler (#455).
+fn retired_device(plugin: &str) -> Option<&'static str> {
+    transit_model::legacy_effects::retired_name(plugin).or((plugin == RETIRED_SAMPLER_PRESETS).then_some("one-sample Sampler"))
+}
+
 /// One line per user preset file under the config dir `root` that names a retired built-in device
-/// (the inherited effects retired in v0.6.0, #264, ADR 0040), in a folder of its own or filed under
-/// another device's. The file stays where it is, and nothing lists or loads it: the device is gone.
+/// (the inherited effects retired in v0.6.0, #264, ADR 0040, and the one-sample Sampler, #455), in
+/// a folder of its own or filed under another device's. The file stays where it is, and nothing
+/// lists or loads it: the device is gone.
 pub fn retired_user_preset_lines(root: &Path) -> Vec<String> {
     let mut lines = Vec::new();
     let mut dirs: Vec<PathBuf> =
@@ -179,10 +194,7 @@ pub fn retired_user_preset_lines(root: &Path) -> Vec<String> {
                 .ok()
                 .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
                 .and_then(|v| v.get("plugin").and_then(serde_json::Value::as_str).map(str::to_string));
-            let device = named
-                .as_deref()
-                .and_then(transit_model::legacy_effects::retired_name)
-                .or_else(|| transit_model::legacy_effects::retired_name(&folder));
+            let device = named.as_deref().and_then(retired_device).or_else(|| retired_device(&folder));
             if let Some(device) = device {
                 let name = f.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 lines.push(format!("presets: user preset \"{name}\" skipped: it is for the retired {device} (presets/{folder})"));
@@ -354,6 +366,23 @@ mod retired_tests {
             ]
         );
         assert!(retired_user_preset_lines(&root.join("none")).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_sampler_user_presets_of_the_retired_one_sample_instrument_are_reported_and_not_listed() {
+        let root = std::env::temp_dir().join(format!("transit-retired-sampler-presets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("presets").join("sampler");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Plucky.json");
+        std::fs::write(&file, r#"{"plugin": "sampler", "version": 1, "params": {"root_note": 48.0}}"#).unwrap();
+        assert_eq!(
+            retired_user_preset_lines(&root),
+            ["presets: user preset \"Plucky\" skipped: it is for the retired one-sample Sampler (presets/sampler)"]
+        );
+        assert!(user_names(&root, "sampler").is_empty(), "the Sampler lists no preset");
+        assert!(file.exists(), "the file is left on disk");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -86,8 +86,6 @@ struct ShadowSlot {
     layout: u16,
     /// Length of its prepared long-map storage (0: none).
     heap: usize,
-    /// Identity of the sample it was handed (0: none).
-    sample: usize,
     latency: usize,
     raw_latency: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -113,9 +111,9 @@ struct Desc {
     bypass: BTreeSet<u64>,
     tail: Vec<crate::graph::tail::Row>,
     strips: Vec<StripDesc>,
-    /// Per slot: key, kind, plugin id, channels, layout, long map length (0 inline), sample, insert
+    /// Per slot: key, kind, plugin id, channels, layout, long map length (0 inline), insert
     /// identity (a reordered chain is a new structure), Sampler core seed.
-    slots: Vec<((TrackId, usize), CellKind, String, usize, u16, usize, usize, u64, Option<u32>)>,
+    slots: Vec<((TrackId, usize), CellKind, String, usize, u16, usize, u64, Option<u32>)>,
     busses: Vec<(BusId, ChannelFormat)>,
     /// The end (exclusive) of each phase-1 layer, in strip table order (see [`render_rows`]).
     layers: Vec<u16>,
@@ -259,7 +257,6 @@ enum SlotPlan {
         from: u16,
         generation: SlotGen,
         applied: Option<usize>,
-        sample: Option<Option<Arc<SourceAudio>>>,
     },
     Fresh(Box<PluginSlot>),
     Absent,
@@ -272,7 +269,6 @@ struct PlannedSlot {
     index: u16,
     spec: InstanceSpec,
     params: usize,
-    sample: Option<Arc<SourceAudio>>,
     plan: SlotPlan,
     /// A fresh instance's latency, read once when it is made.
     latency: usize,
@@ -284,10 +280,6 @@ type PlannedStrip = (usize, u16, Vec<PlannedSlot>, Vec<(u64, Option<InstanceSpec
 /// Stable code of a channel format (its place in [`ChannelFormat::ALL`]).
 pub(crate) fn layout_code(f: ChannelFormat) -> u16 {
     ChannelFormat::ALL.iter().position(|x| *x == f).map_or(u16::MAX, |i| u16::try_from(i + 1).unwrap_or(u16::MAX))
-}
-
-fn sample_id(a: Option<&Arc<SourceAudio>>) -> usize {
-    a.map_or(0, |a| Arc::as_ptr(a) as *const () as usize)
 }
 
 /// The strip index of each track in render order: live tracks other than auxes (processing
@@ -830,7 +822,6 @@ impl PlanCompiler {
             for (key, kind, ins) in slot_keys(t, &clips) {
                 let Some(spec) = specs.get(&key) else { continue };
                 let params = ins.map_or(0, |i| i.params.len());
-                let sample = if kind == CellKind::Instrument { sample_id(instrument_sample(s, t).as_ref()) } else { 0 };
                 desc.slots.push((
                     key,
                     kind,
@@ -838,7 +829,6 @@ impl PlanCompiler {
                     spec.ch,
                     layout,
                     if needs_storage(params) { params } else { 0 },
-                    sample,
                     spec.uid,
                     spec.sampler_core,
                 ));
@@ -871,7 +861,6 @@ impl PlanCompiler {
         mode: CompileMode,
         make: &mut dyn FnMut(&InstanceSpec, SlotGen) -> Option<NewInstance>,
     ) -> Result<(), CompileError> {
-        let sample = sample_id(p.sample.as_ref());
         let long = if needs_storage(p.params) { p.params } else { 0 };
         // The instance of an insert follows it to another slot of its track (a reorder).
         let old_key = match self.active.slots.get(&p.key) {
@@ -900,13 +889,9 @@ impl PlanCompiler {
                     return Ok(());
                 }
             } else {
-                let sampler = old.spec.id == SAMPLER;
-                if old.sample == sample || sampler {
-                    let applied = (long > 0 && long != old.heap).then_some(long);
-                    let sample = (old.sample != sample).then(|| p.sample.clone());
-                    p.plan = SlotPlan::Move { old: old_key, from: old.cell, generation: old.generation, applied, sample };
-                    return Ok(());
-                }
+                let applied = (long > 0 && long != old.heap).then_some(long);
+                p.plan = SlotPlan::Move { old: old_key, from: old.cell, generation: old.generation, applied };
+                return Ok(());
             }
         }
         let slot =
@@ -954,12 +939,6 @@ impl PlanCompiler {
         // An instrument takes realtime events (F10): its queue and note table, sized here.
         if p.kind == CellKind::Instrument && slot.events.is_none() {
             slot.events = Some(crate::events::InstrumentEvents::new());
-        }
-        if p.kind == CellKind::Instrument && sample_id(slot.sample_audio.as_ref()) != sample {
-            let wrapper = p.sample.as_ref().map(|a| Arc::new(PoolSample(Arc::clone(a))) as Arc<dyn SampleSource>);
-            slot.plugin.set_sample(wrapper.clone());
-            slot.sample_audio = p.sample.clone();
-            slot.sample_wrapper = wrapper;
         }
         // Fresh instances have no audio owner yet. Apply their saved values before reading
         // latency, including built-in lookahead settings that are not in opaque state.
@@ -1010,14 +989,12 @@ impl PlanCompiler {
                     }
                     _ => 0,
                 };
-                let sample = if kind == CellKind::Instrument { instrument_sample(s, t) } else { None };
                 let p = PlannedSlot {
                     key,
                     kind,
                     index: u16::try_from(index).unwrap_or(u16::MAX),
                     spec: spec.clone(),
                     params: ins.map_or(0, |i| i.params.len()),
-                    sample,
                     plan: SlotPlan::Absent,
                     latency: 0,
                 };
@@ -1204,11 +1181,6 @@ fn slot_keys<'a>(
         }
     }
     out
-}
-
-/// The pool audio a track's instrument plays.
-fn instrument_sample(s: &Session, t: &Track) -> Option<Arc<SourceAudio>> {
-    t.instrument.as_ref().and_then(|i| i.sample).and_then(|id| s.pool.get(id)).cloned()
 }
 
 /// Session audio shared with a sample-playing instrument.

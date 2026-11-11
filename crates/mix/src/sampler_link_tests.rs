@@ -29,7 +29,6 @@ fn session(patch: Option<PatchV1>) -> (Session, TrackId) {
     let tr = s.track_mut(t).unwrap();
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 96_000, seq));
     let mut ins = Insert::new("sampler");
-    ins.sample = Some(SourceId(2));
     ins.sampler_patch = patch.map(|p| SamplerPatch { state: PatchState::Ready(Box::new(p)) });
     tr.instrument = Some(ins);
     (s, t)
@@ -64,7 +63,7 @@ fn a_patch_makes_a_core_instance_and_edits_reach_the_running_one() {
     assert_eq!(rig.comp.samplers.len(), 1, "the compiler holds the instance's publisher");
     let made = rig.log.made.load(Ordering::Relaxed);
     let out = rig.render(8);
-    assert!(last(&out) > 0.4, "the patch plays source 1, not the one-sample field: {}", last(&out));
+    assert!(last(&out) > 0.4, "the patch plays source 1: {}", last(&out));
     // A control edit: the instance is kept, the value arrives through the lane and glides in.
     let mut p = kit(1);
     p.set_control("zone001_level", -48.0, 0.0);
@@ -86,7 +85,7 @@ fn a_patch_made_or_removed_or_a_new_seed_is_a_fresh_instance() {
     let mut rig = Rig::new();
     rig.publish(&s);
     rig.render(4);
-    assert_eq!(rig.comp.samplers.len(), 0, "a one-sample Sampler stays on its legacy renderer");
+    assert_eq!(rig.comp.samplers.len(), 0, "a Sampler without a patch has no core link");
     let made = rig.log.made.load(Ordering::Relaxed);
     set_patch(&mut s, t, Some(kit(1)));
     rig.publish(&s);
@@ -100,7 +99,7 @@ fn a_patch_made_or_removed_or_a_new_seed_is_a_fresh_instance() {
     assert_eq!(rig.comp.samplers.len(), 1, "the replaced instance's link is dropped");
     set_patch(&mut s, t, None);
     rig.publish(&s);
-    assert_eq!(rig.log.made.load(Ordering::Relaxed), made + 3, "removing the patch goes back to the legacy renderer");
+    assert_eq!(rig.log.made.load(Ordering::Relaxed), made + 3, "removing the patch is a fresh instance off the core path");
     assert_eq!(rig.comp.samplers.len(), 0);
 }
 
@@ -134,14 +133,14 @@ fn the_instruments_tap_carries_the_pads_its_instance_published() {
     let w = transit_dsp::PadWord(words[0]);
     assert_eq!((w.hits(), w.velocity(), w.chokes()), (1, 127, 0));
     assert!(words[1..].iter().all(|w| *w == 0), "no other pad did anything");
-    // Negative control: the one-sample Sampler on its legacy renderer publishes no pads.
-    let (legacy, lt) = session(None);
+    // Negative control: a Sampler without a patch is silent and publishes no pads.
+    let (none, lt) = session(None);
     let mut rig = Rig::new();
-    rig.publish(&legacy);
+    rig.publish(&none);
     let hub = rig.comp.scope_hub();
     assert!(hub.set_enabled(lt, crate::INSTRUMENT_UID, true));
     let out = rig.render(4);
-    assert!(out.iter().any(|x| *x != 0.0), "the legacy renderer plays the note");
+    assert!(out.iter().all(|x| *x == 0.0), "nothing plays");
     assert_eq!(hub.pad_activity(lt, crate::INSTRUMENT_UID), Some([0; transit_dsp::PAD_SLOTS]));
 }
 

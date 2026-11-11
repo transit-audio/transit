@@ -5,8 +5,9 @@
 //! frame. Events and buffers are injected; nothing waits on a clock.
 
 use super::*;
-use crate::SampleBuffer;
 use crate::event::{Message, NoteId};
+use crate::{SampleBuffer, SampleSource};
+use std::sync::Arc;
 
 const SR: f32 = 48_000.0;
 

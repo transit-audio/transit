@@ -11,7 +11,7 @@
 //!
 //! [`PlanCompiler`]: crate::PlanCompiler
 
-use super::{APPLIED_INLINE, BusTable, ChannelFormat, KeyBank, PluginSlot, SampleSource, Session, Sink, SourceAudio, Strip, StripMeter, TrackId};
+use super::{APPLIED_INLINE, BusTable, ChannelFormat, KeyBank, PluginSlot, Session, Sink, Strip, StripMeter, TrackId};
 use std::sync::Arc;
 use transit_dsp::Plugin;
 use transit_model::IoMap;
@@ -148,8 +148,6 @@ pub(crate) struct CellMove {
 pub(crate) enum Attach {
     /// NaN-filled parameter storage of the slot's new (long) map length.
     Applied { cell: u16, from_move: Option<u16>, storage: Vec<f32> },
-    /// The native Sampler's new sample: both owners. `set_sample` runs after the swap.
-    Sample { cell: u16, from_move: Option<u16>, audio: Option<Arc<SourceAudio>>, wrapper: Option<Arc<dyn SampleSource>> },
 }
 
 /// Every table a realtime engine renders from, sized off the audio thread.

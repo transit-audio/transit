@@ -190,12 +190,11 @@ impl PlanCompiler {
                     kind: p.kind,
                     layout,
                     heap: long,
-                    sample: sample_id(p.sample.as_ref()),
                     latency: 0,
                     raw_latency: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 };
                 match p.plan {
-                    SlotPlan::Move { old, from, generation, applied, sample } => {
+                    SlotPlan::Move { old, from, generation, applied } => {
                         let old = self.active.slots.get(&old);
                         sh.generation = generation;
                         if let Some(o) = old {
@@ -208,10 +207,6 @@ impl PlanCompiler {
                         if let Some(n) = applied {
                             attach.push(Attach::Applied { cell, from_move, storage: vec![f32::NAN; n] });
                             sh.heap = n;
-                        }
-                        if let Some(audio) = sample {
-                            let wrapper = audio.as_ref().map(|a| Arc::new(PoolSample(Arc::clone(a))) as Arc<dyn SampleSource>);
-                            attach.push(Attach::Sample { cell, from_move, audio, wrapper });
                         }
                     }
                     SlotPlan::Fresh(slot) => {

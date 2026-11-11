@@ -1,41 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use super::plan::{Attach, CellKind};
 use super::plan_tests::*;
 use super::*;
-use std::sync::Weak;
-use std::sync::atomic::Ordering;
-use transit_audio_io::AudioBuffer;
-use transit_model::{Insert, SourceId};
-
-#[test]
-fn a_sampler_sample_swap_keeps_both_owners_until_reclaim() {
-    let mut s = Session::default();
-    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    let audio = |v: f32| Arc::new(SourceAudio::new(AudioBuffer { sample_rate: SR, channels: vec![vec![v; 4_800]] }));
-    s.pool.insert(SourceId(1), audio(0.5));
-    s.pool.insert(SourceId(2), audio(0.25));
-    let mut ins = Insert::new("sampler");
-    ins.sample = Some(SourceId(1));
-    s.track_mut(t).unwrap().instrument = Some(ins);
-    let first: Weak<SourceAudio> = Arc::downgrade(s.pool.get(SourceId(1)).unwrap());
-    let mut rig = Rig::new();
-    assert_eq!(rig.publish(&s), Adoption::Adopted);
-    rig.render(2);
-    // Only the sample changes, and source 1 leaves the pool.
-    s.track_mut(t).unwrap().instrument.as_mut().unwrap().sample = Some(SourceId(2));
-    s.pool = transit_model::SourcePool::default();
-    s.pool.insert(SourceId(2), audio(0.25));
-    let mut env = rig.compile(&s);
-    assert!(env.plan.attach.iter().any(|a| matches!(a, Attach::Sample { .. })), "the sampler is reused with a new sample");
-    let made = rig.log.made.load(Ordering::Relaxed);
-    assert_eq!(adopt_measured(&mut rig.eng, &mut env), Adoption::Adopted);
-    assert!(first.upgrade().is_some(), "the old audio is still owned, by the envelope");
-    rig.comp.reclaim(env);
-    assert!(first.upgrade().is_none(), "dropped at reclaim, on the control thread");
-    assert_eq!(rig.log.made.load(Ordering::Relaxed), made, "the instance was kept");
-    assert_eq!(rig.drops(), 0);
-}
 
 // Coverage for the review's mutants.
 
@@ -51,20 +17,6 @@ fn synth_track(s: &mut Session) -> TrackId {
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 96_000, seq));
     tr.instrument = Some(builtin("macro_oscillator"));
     t
-}
-
-#[test]
-fn a_sample_attachment_on_an_instrument_that_is_not_the_sampler_is_rejected() {
-    let mut s = Session::default();
-    let t = synth_track(&mut s);
-    let mut rig = Rig::new();
-    assert_eq!(rig.publish(&s), Adoption::Adopted);
-    s.track_mut(t).unwrap().mixer.inserts[0] = Some(builtin("gain"));
-    let mut env = rig.compile(&s);
-    let (i, m) = env.plan.moves.iter().enumerate().find(|(_, m)| m.kind == CellKind::Instrument).unwrap();
-    let (to, from_move) = (m.to, Some(i as u16));
-    env.plan.attach = vec![Attach::Sample { cell: to, from_move, audio: None, wrapper: None }].into_boxed_slice();
-    assert_rejected(rig, env, RejectReason::AttachInvalid);
 }
 
 #[test]

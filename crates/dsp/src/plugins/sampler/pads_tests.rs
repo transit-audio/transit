@@ -5,7 +5,8 @@
 
 use super::*;
 use crate::event::{Message, NoteId};
-use crate::{PAD_SLOTS, PadWord, SampleBuffer};
+use crate::{PAD_SLOTS, PadWord, SampleBuffer, SampleSource};
+use std::sync::Arc;
 
 const SR: f32 = 48_000.0;
 

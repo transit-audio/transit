@@ -569,12 +569,14 @@ pub struct Insert {
     /// Frozen Texture recording and its continuation state, stored beside the session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen_recording: Option<crate::FrozenRecording>,
-    /// The session audio source a sample-playing instrument (the built-in Sampler) plays.
+    /// The session source the retired one-sample Sampler played (#455): read on parse only, as
+    /// the input of the drop that gives that instrument an empty kit (`legacy_sampler`, which
+    /// names the file in its load note and clears the field); nothing else reads or writes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sample: Option<SourceId>,
-    /// The built-in Sampler's patch (ADR 0041): zones, pads, slicing and controls. Present only
-    /// once a patch was made for the instrument; an old one-sample Sampler (`sample`) has none,
-    /// and opening or saving it never makes one. A new patch leaves `sample` unset.
+    /// The built-in Sampler's patch (ADR 0041): zones, pads, slicing and controls. Every Sampler
+    /// has one: a command that makes a Sampler makes its empty kit, and a session or track preset
+    /// holding the retired one-sample Sampler gets one when it loads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sampler_patch: Option<crate::SamplerPatch>,
     /// The sidechain key this insert detects on (built-in compressor and gate); the key belongs

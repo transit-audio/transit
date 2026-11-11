@@ -38,8 +38,6 @@ pub(super) struct Log {
     pub(super) prepared: AtomicUsize,
     /// Latency every `clap:test.latent` instance reports.
     pub(super) latency: AtomicUsize,
-    /// `set_sample` unwinds (armed after the instances are made).
-    pub(super) panic_on_sample: AtomicBool,
     pub(super) panic_on_drop: AtomicBool,
     pub(super) panic_on_process: AtomicBool,
 }
@@ -105,12 +103,6 @@ impl Plugin for Probe {
     }
     fn all_notes_off(&mut self) {
         self.inner.all_notes_off();
-    }
-    fn set_sample(&mut self, s: Option<Arc<dyn SampleSource>>) -> bool {
-        if self.log.panic_on_sample.load(Ordering::Relaxed) {
-            panic!("test sampler refuses its sample");
-        }
-        self.inner.set_sample(s)
     }
     fn enable_sampler_core(&mut self, seed: u32) -> Option<transit_dsp::plugins::sampler::Publisher> {
         self.inner.enable_sampler_core(seed)
@@ -214,7 +206,6 @@ fn digest(eng: &MixEngine) -> Vec<u64> {
                     &*s.plugin as *const dyn Plugin as *const () as usize as u64,
                     s.applied.heap.as_ptr() as usize as u64,
                     s.applied.heap.len() as u64,
-                    s.sample_audio.as_ref().map_or(0, |a| Arc::as_ptr(a) as usize as u64),
                     s.events.as_deref().map_or(0, |e| e as *const _ as usize as u64),
                 ]),
                 None => d.push(u64::MAX),
@@ -460,14 +451,13 @@ fn rejects_a_destination_of_another_kind_channel_count_or_layout() {
 
 #[test]
 fn rejects_invalid_attachments() {
-    for f in 0..3 {
+    for f in 0..2 {
         let (rig, _, mut env) = rig_with_pending();
         let to = env.plan.moves[slot_moves(&env)[0]].to;
         let strip_cell = env.plan.moves.iter().find(|m| m.kind == CellKind::Strip).unwrap().to;
         let a = match f {
             0 => Attach::Applied { cell: to, from_move: None, storage: vec![f32::NAN; 8] },
-            1 => Attach::Applied { cell: strip_cell, from_move: None, storage: vec![f32::NAN; 80] },
-            _ => Attach::Sample { cell: to, from_move: None, audio: None, wrapper: None },
+            _ => Attach::Applied { cell: strip_cell, from_move: None, storage: vec![f32::NAN; 80] },
         };
         env.plan.attach = vec![a].into_boxed_slice();
         assert_rejected(rig, env, RejectReason::AttachInvalid);

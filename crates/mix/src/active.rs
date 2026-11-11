@@ -1,9 +1,7 @@
 //! A realtime engine's side of the plan contract: [`MixEngine::adopt_plan`] (validate, then swap)
 //! and [`MixEngine::render_active`] (render the active plan's tables). Neither allocates, frees,
-//! locks, makes a system call, waits or calls a plug-in lifecycle function (the native Sampler's
-//! `set_sample` aside, which only stops voices and stores the shared sample).
+//! locks, makes a system call, waits or calls a plug-in lifecycle function.
 
-use super::compile::SAMPLER;
 use super::plan::{ActivePlan, Attach, CellKind, CellLoc, PlanTables, Shape};
 use super::tail::{DeviceLatency, RenderPhases, TailCtx, fold_latency};
 use super::*;
@@ -155,18 +153,13 @@ fn validate(active: &ActivePlan, plan: &mut PreparedPlan) -> Result<(), RejectRe
         }
     }
     for a in &plan.attach {
-        let (cell, from_move, sample) = match a {
-            Attach::Applied { cell, from_move, storage } => {
-                if !plan::needs_storage(storage.len()) {
-                    return Err(RejectReason::AttachInvalid);
-                }
-                (*cell, *from_move, false)
-            }
-            Attach::Sample { cell, from_move, .. } => (*cell, *from_move, true),
-        };
+        let Attach::Applied { cell, from_move, storage } = a;
+        if !plan::needs_storage(storage.len()) {
+            return Err(RejectReason::AttachInvalid);
+        }
+        let (cell, from_move) = (*cell, *from_move);
         let Some(loc) = new.cells.get(usize::from(cell)) else { return Err(RejectReason::AttachInvalid) };
-        let kind_ok = if sample { loc.shape.kind == CellKind::Instrument } else { matches!(loc.shape.kind, CellKind::Insert | CellKind::Instrument) };
-        if !kind_ok {
+        if !matches!(loc.shape.kind, CellKind::Insert | CellKind::Instrument) {
             return Err(RejectReason::AttachInvalid);
         }
         // The slot that will be live there after the moves: the one its move brings (named by
@@ -184,7 +177,7 @@ fn validate(active: &ActivePlan, plan: &mut PreparedPlan) -> Result<(), RejectRe
             _ => None,
         };
         let Some(slot) = slot else { return Err(RejectReason::AttachInvalid) };
-        if slot_shape(loc.shape.kind, slot) != loc.shape || (sample && slot.id != SAMPLER) {
+        if slot_shape(loc.shape.kind, slot) != loc.shape {
             return Err(RejectReason::AttachInvalid);
         }
     }
@@ -282,22 +275,12 @@ impl MixEngine {
                 fault_point(1);
             }
             for a in plan.attach.iter_mut() {
-                let cell = match a {
-                    Attach::Applied { cell, .. } | Attach::Sample { cell, .. } => *cell,
-                };
-                let Some(loc) = new.cells.get(usize::from(cell)).copied() else { continue };
+                let Attach::Applied { cell, storage, .. } = a;
+                let Some(loc) = new.cells.get(usize::from(*cell)).copied() else { continue };
                 let Some(Some(slot)) = new.slot_mut(&loc) else { continue };
-                match a {
-                    Attach::Applied { storage, .. } => {
-                        std::mem::swap(&mut slot.applied.heap, storage);
-                        // The next block treats the map as new: every value is pushed again.
-                        slot.applied.len = usize::MAX;
-                    }
-                    Attach::Sample { audio, wrapper, .. } => {
-                        std::mem::swap(&mut slot.sample_audio, audio);
-                        std::mem::swap(&mut slot.sample_wrapper, wrapper);
-                    }
-                }
+                std::mem::swap(&mut slot.applied.heap, storage);
+                // The next block treats the map as new: every value is pushed again.
+                slot.applied.len = usize::MAX;
                 fault_point(2);
                 #[cfg(feature = "testing")]
                 crate::sched_seam::observe_checkpoint(5);
@@ -311,17 +294,9 @@ impl MixEngine {
         fault_point(4);
         // An instrument on a track that became inactive keeps no pending events (F10).
         MixEngine::void_silent_instruments(active);
-        // Last: the native Sampler takes its new sample. The old (audio, wrapper) pair is already
-        // in the envelope, so the wrapper the Sampler drops here is never the last owner.
-        for a in plan.attach.iter() {
-            let Attach::Sample { cell, .. } = a else { continue };
-            let Some(loc) = active.tables.cells.get(usize::from(*cell)).copied() else { continue };
-            if let Some(Some(slot)) = active.tables.slot_mut(&loc)
-                && slot.id == SAMPLER
-            {
-                slot.plugin.set_sample(slot.sample_wrapper.clone());
-            }
-        }
+        // The commit's last point: the tables and the session are swapped and the silent
+        // instruments voided, before the slots' parameter passes are reset.
+        fault_point(5);
         for st in &mut active.tables.strips {
             for slot in st.plugins.iter_mut().flatten().chain(st.instrument.iter_mut()) {
                 slot.parameter_pass = false;

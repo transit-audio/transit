@@ -42,8 +42,6 @@ pub use osc::Waveform;
 pub use plugins::eq::{eq1_response, eq7_response};
 pub use plugins::filter::filter_response;
 
-use std::sync::Arc;
-
 /// Plugin category, used to group the insert menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Category {
@@ -593,17 +591,9 @@ pub trait Plugin: Send {
     fn sample_accurate_params(&self) -> bool {
         false
     }
-    /// Sample-playing instruments (the Sampler): the recorded audio to play, `None` to clear it.
-    /// `false` when the plugin does not play samples. Does not allocate; sounding voices stop.
-    /// The previous sample is dropped here, so hosts keep their own reference to it (the
-    /// session's source pool does) to keep deallocation off the audio thread.
-    fn set_sample(&mut self, _sample: Option<Arc<dyn SampleSource>>) -> bool {
-        false
-    }
     /// The built-in Sampler's patch seam (ADR 0041): switches the instance to its core path, with
-    /// the voices' random state from `seed`, and returns the control side of its patch handoff
-    /// (multi-source banks, which [`Plugin::set_sample`]'s single source cannot carry). `None` for
-    /// every other plugin. Control side only, before the instance first processes: it allocates.
+    /// the voices' random state from `seed`, and returns the control side of its patch handoff (a
+    /// prepared multi-source bank). `None` for every other plugin. Control side only, before the instance first processes: it allocates.
     fn enable_sampler_core(&mut self, _seed: u32) -> Option<plugins::sampler::Publisher> {
         None
     }
@@ -917,16 +907,6 @@ mod trait_default_tests {
         let mut p = Fake;
         p.set_input_silent(true);
         assert_eq!(p.process_status(), ProcessStatus::Continue);
-    }
-
-    #[test]
-    fn only_the_sampler_takes_samples() {
-        for info in plugins() {
-            let mut p = create(info.id).unwrap();
-            let s: Arc<dyn SampleSource> = Arc::new(SampleBuffer { sample_rate: 48_000.0, channels: vec![vec![0.0; 16]] });
-            assert_eq!(p.set_sample(Some(s)), info.id == "sampler", "{}", info.id);
-            assert_eq!(p.set_sample(None), info.id == "sampler", "{}", info.id);
-        }
     }
 
     #[test]

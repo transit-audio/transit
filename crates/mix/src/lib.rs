@@ -34,9 +34,9 @@
 //! edits made in its own editor, so both agree; the state carries everything else). A host reads
 //! states back for saving through each instance's [`Plugin::state_reader`], on its UI thread.
 //!
-//! A built-in instrument's parameter values are applied the same way. A sample-playing
-//! instrument (the Sampler) is handed the decoded audio of its insert's
-//! [`Insert::sample`] source straight from the session's pool, shared and never copied.
+//! A built-in instrument's parameter values are applied the same way. The Sampler's kit takes
+//! its sources' decoded audio straight from the session's pool, shared and never copied
+//! (`sampler_link`).
 //!
 //! ## Prepared plans
 //! An engine made with [`MixEngine::realtime`] never discovers structure on the audio thread.
@@ -55,7 +55,6 @@
 //! renders ([`render_range`], [`RangeRender`]) alike.
 //!
 //! [`Insert::state`]: transit_model::Insert::state
-//! [`Insert::sample`]: transit_model::Insert::sample
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use std::ops::Bound;
@@ -463,10 +462,6 @@ struct PluginSlot {
     generation: SlotGen,
     /// Plan mode: channel-format code of the strip it was prepared for.
     layout: u16,
-    /// Plan mode: the pool audio and the wrapper handed to the instrument with `set_sample`. Both
-    /// owners stay here, so the plug-in never drops the last one.
-    sample_audio: Option<Arc<SourceAudio>>,
-    sample_wrapper: Option<Arc<dyn SampleSource>>,
     /// Plan mode, instruments: the event queue and the open notes and pedals (F10), prepared by
     /// the compiler. They travel with the instance and retire with it.
     events: Option<Box<events::InstrumentEvents>>,
@@ -500,8 +495,6 @@ impl PluginSlot {
             parameter_pass: false,
             generation: SlotGen::VACANT,
             layout: 0,
-            sample_audio: None,
-            sample_wrapper: None,
             events: None,
             note_delay,
             tap: None,

@@ -2,12 +2,12 @@
 //! injected; no sleeps, elapsed-time thresholds or scheduling assertions): Gate 1's frames through
 //! the event conversion and the plug-in's buffers, block-size invariance, the handoff's credit and
 //! retirement rules, the slot parameter ids, the event queue's reserve and what the transport sends.
-//! The allocation and free probe is the integration test `tests/sampler_core_alloc.rs`; the legacy
-//! renderer's bits are `tests/sampler_legacy_golden.rs`.
+//! The allocation and free probe is the integration test `tests/sampler_core_alloc.rs`.
 
 use super::*;
-use crate::SampleBuffer;
 use crate::event::{Message, NoteId};
+use crate::{SampleBuffer, SampleSource};
+use std::sync::Arc;
 use transit_sampler_core::patch::{Pad, PlayMode, Playback, Zone};
 use transit_sampler_core::playhead::{LoopMode, Region};
 
@@ -118,20 +118,16 @@ fn gate1_one_shot_and_gate_release_frames_at_the_plug_in_boundary() {
 }
 
 #[test]
-fn a_legacy_instance_never_touches_the_core_and_a_core_instance_ignores_the_legacy_sample() {
-    let mut legacy = Sampler::new();
-    legacy.prepare(SR, 512, 2);
-    assert!(!legacy.uses_core());
-    assert!(!legacy.set_param("zone001_level", -6.0), "slot ids exist only on the core path");
-    let (mut s, mut p) = instance();
-    assert!(s.uses_core());
-    assert!(s.set_sample(Some(constant(0.5, 4800))));
-    s.note_on(0, 60, 127);
-    assert_frames(&block(&mut s, 256)[0], |_| 0.0);
-    p.publish(spec(vec![constant(0.25, 4800)], vec![Some(zone(0, 4800, unity(PlayMode::OneShot, 60, 0)))], &[(0, 0)])).unwrap();
-    block(&mut s, 1);
-    s.note_on(0, 60, 127);
-    assert_frames(&block(&mut s, 256)[0], |_| 0.25);
+fn an_instance_off_the_core_path_takes_no_slot_ids_and_plays_silence() {
+    let mut off = Sampler::new();
+    off.prepare(SR, 512, 2);
+    assert!(!off.uses_core());
+    assert!(!off.set_param("zone001_level", -6.0), "slot ids exist only on the core path");
+    off.note_on(0, 60, 127);
+    let mut io = vec![vec![1.0; 256]; 2];
+    off.process(&mut io, 256);
+    assert!(io.iter().flatten().all(|x| *x == 0.0), "nothing to play");
+    assert_eq!(off.tail_samples(), 0);
 }
 
 /// The block-size schedule: absolute frames of every event.
@@ -283,7 +279,7 @@ fn block_sizes_while_the_transport_plays_keep_what_is_promised() {
 }
 
 #[test]
-fn slot_ids_are_stable_and_unprefixed_ids_keep_their_legacy_meaning() {
+fn slot_ids_are_stable_and_the_unprefixed_legacy_ids_are_retired() {
     assert_eq!(ZONE_FIELDS, 113);
     assert_eq!(slot_id(0, FIELD_LEVEL).as_deref(), Some("zone001_level"));
     assert_eq!(slot_id(0, FIELD_PAN).as_deref(), Some("zone001_pan"));
@@ -305,13 +301,11 @@ fn slot_ids_are_stable_and_unprefixed_ids_keep_their_legacy_meaning() {
     for bad in ["zone000_level", "zone257_level", "zone01_level", "zone001level", "zone001_", "zone001_nope", "zoneabc_level", "level_zone001"] {
         assert_eq!(table.resolve(bad), None, "{bad}");
     }
-    // The unprefixed ids are the 19 legacy ones, unchanged, and address the legacy renderer.
+    // The table has no parameters: the 19 unprefixed legacy ids are retired (#455).
     let (mut s, mut p) = instance();
-    let legacy: Vec<&str> = SAMPLER_INFO.params.iter().map(|i| i.id).collect();
-    assert_eq!(legacy.len(), 19);
-    assert!(legacy.iter().all(|id| !id.starts_with("zone")));
-    assert!(s.set_param("level", -6.0));
-    assert_eq!(s.param("level"), Some(-6.0));
+    assert!(SAMPLER_INFO.params.is_empty());
+    assert!(!s.set_param("level", -6.0));
+    assert_eq!(s.param("level"), None);
     assert_eq!(s.param("zone001_level"), Some(0.0));
     // The slot ids map to the zone's fields: level, pan, the matrix rows.
     p.publish(spec(vec![constant(1.0, 512)], vec![Some(zone(0, 512, unity(PlayMode::OneShot, 60, 0)))], &[(0, 0)])).unwrap();

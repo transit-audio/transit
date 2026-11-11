@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use transit_dsp::event::PluginEvent;
 use transit_dsp::{
     EditorHeader, EditorOpenReport, HeaderAction, JobPoll, LoadedValues, Plugin, PluginEditor, PluginInfo, PluginStateReader, ProcessStatus,
-    SampleSource, StateBusy, StateJob, Transport,
+    StateBusy, StateJob, Transport,
 };
 
 /// What the UI is told when the instance's host thread is wedged or gone.
@@ -256,9 +256,6 @@ impl Plugin for Hosted {
     }
     fn sample_accurate_params(&self) -> bool {
         self.inner.as_ref().is_some_and(|p| p.sample_accurate_params())
-    }
-    fn set_sample(&mut self, sample: Option<Arc<dyn SampleSource>>) -> bool {
-        self.inner.as_mut().is_some_and(|p| p.set_sample(sample))
     }
     /// The instance's own, on the calling thread (as before adoption); hosts read states through
     /// [`Plugin::state_reader`], which goes to the host thread.
