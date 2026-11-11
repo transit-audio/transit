@@ -86,6 +86,8 @@ pub(crate) fn color(name: &str) -> Color32 {
         "surface.panel" => t.surface_panel,
         "surface.raised" => t.surface_raised,
         "surface.inset" => t.surface_inset,
+        "line" => t.line,
+        "line.inset" => t.line_inset,
         "line.strong" => t.line_strong,
         "text" => t.text,
         "text.muted" => t.text_muted,

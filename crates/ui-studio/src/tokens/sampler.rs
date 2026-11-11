@@ -382,6 +382,31 @@ pub const ZONE_FIELD_GAP: f32 = 14.0;
 pub const LOOP_LABEL_WIDTH: f32 = 40.0;
 pub const CROSSFADE_LABEL_GAP: f32 = 6.0;
 pub const CROSSFADE_WIDTH: f32 = 76.0;
+/// The Instrument view's Group panel (the board `SamplerInstrument`; the seed field's width from
+/// `SamplerRound2`, answer 13).
+pub const GROUP_ROW_GAP: f32 = 10.0;
+pub const LAYER_GAP: f32 = 4.0;
+pub const LAYER_HEIGHT: f32 = 28.0;
+pub const LAYER_ITEM_GAP: f32 = 6.0;
+pub const LAYER_LABEL_WIDTH: f32 = 58.0;
+pub const CHIP_MIN_WIDTH: f32 = 40.0;
+pub const CHIP_PADDING_X: f32 = 6.0;
+pub const CHIP_RADIUS: f32 = 4.0;
+pub const CHIP_FILL: &str = "surface.raised";
+pub const CHIP_EDGE: &str = "line";
+/// The chip's text: Mono, its weight and size.
+pub const CHIP_FONT: (f32, f32) = (500.0, 10.0);
+pub const CHIP_FONT_FAMILY: &str = "mono";
+pub const ADD_CHIP_PADDING_X: f32 = 7.0;
+pub const ADD_CHIP_EDGE: &str = "line.strong";
+pub const ADD_CHIP_INK: &str = "text.faint";
+/// The add chip's `+` and the panel's closing line: Sans, its weight and size.
+pub const CAPTION_FONT: (f32, f32) = (400.0, 11.0);
+pub const CAPTION_FONT_FAMILY: &str = "sans";
+pub const GROUP_DIVIDER: &str = "line.inset";
+pub const GROUP_LABEL_WIDTH: f32 = 84.0;
+pub const GROUP_FADER_LENGTH: f32 = 120.0;
+pub const SEED_WIDTH: f32 = 96.0;
 /// Every string under `sampler/instrument` in tokens.json by its path.
 pub const INSTRUMENT_STRINGS: &[(&str, &str)] = &[
     ("instrument/keyMap/keyEdge", KEY_EDGE),
@@ -399,6 +424,13 @@ pub const INSTRUMENT_STRINGS: &[(&str, &str)] = &[
     ("instrument/keyMap/conflictEdge", CONFLICT_EDGE),
     ("instrument/waveform/flagInk", ZONE_FLAG_INK),
     ("instrument/waveform/braceInk", BRACE_INK),
+    ("instrument/groupPanel/chipFill", CHIP_FILL),
+    ("instrument/groupPanel/chipEdge", CHIP_EDGE),
+    ("instrument/groupPanel/addChipEdge", ADD_CHIP_EDGE),
+    ("instrument/groupPanel/addChipInk", ADD_CHIP_INK),
+    ("instrument/groupPanel/divider", GROUP_DIVIDER),
+    ("instrument/groupPanel/chipFont/font", CHIP_FONT_FAMILY),
+    ("instrument/groupPanel/captionFont/font", CAPTION_FONT_FAMILY),
 ];
 /// Every number under `sampler/instrument` in tokens.json by its path.
 pub const INSTRUMENT_METRICS: &[(&str, f32)] = &[
@@ -436,4 +468,20 @@ pub const INSTRUMENT_METRICS: &[(&str, f32)] = &[
     ("instrument/zonePanel/loopLabelWidth", LOOP_LABEL_WIDTH),
     ("instrument/zonePanel/crossfadeLabelGap", CROSSFADE_LABEL_GAP),
     ("instrument/zonePanel/crossfadeWidth", CROSSFADE_WIDTH),
+    ("instrument/groupPanel/rowGap", GROUP_ROW_GAP),
+    ("instrument/groupPanel/layerGap", LAYER_GAP),
+    ("instrument/groupPanel/layerHeight", LAYER_HEIGHT),
+    ("instrument/groupPanel/layerItemGap", LAYER_ITEM_GAP),
+    ("instrument/groupPanel/layerLabelWidth", LAYER_LABEL_WIDTH),
+    ("instrument/groupPanel/chipMinWidth", CHIP_MIN_WIDTH),
+    ("instrument/groupPanel/chipPaddingX", CHIP_PADDING_X),
+    ("instrument/groupPanel/chipRadius", CHIP_RADIUS),
+    ("instrument/groupPanel/chipFont/weight", CHIP_FONT.0),
+    ("instrument/groupPanel/chipFont/size", CHIP_FONT.1),
+    ("instrument/groupPanel/addChipPaddingX", ADD_CHIP_PADDING_X),
+    ("instrument/groupPanel/captionFont/weight", CAPTION_FONT.0),
+    ("instrument/groupPanel/captionFont/size", CAPTION_FONT.1),
+    ("instrument/groupPanel/labelWidth", GROUP_LABEL_WIDTH),
+    ("instrument/groupPanel/faderLength", GROUP_FADER_LENGTH),
+    ("instrument/groupPanel/seedWidth", SEED_WIDTH),
 ];

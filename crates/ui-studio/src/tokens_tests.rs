@@ -726,6 +726,11 @@ fn the_sampler_views_match_tokens_json_both_ways() {
         "instrument/keyMap/conflictEdge",
         "instrument/waveform/flagInk",
         "instrument/waveform/braceInk",
+        "instrument/groupPanel/chipFill",
+        "instrument/groupPanel/chipEdge",
+        "instrument/groupPanel/addChipEdge",
+        "instrument/groupPanel/addChipInk",
+        "instrument/groupPanel/divider",
     ] {
         let name = at(sp, path).as_str().unwrap();
         assert!(known.contains(name), "sampler/{path}: {name} is not a token");

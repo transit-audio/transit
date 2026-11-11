@@ -266,7 +266,7 @@ fn the_state_is_read_once_per_document_change() {
 
 #[test]
 fn every_instrument_color_name_is_a_token() {
-    for (path, name) in tk::INSTRUMENT_STRINGS {
+    for (path, name) in tk::INSTRUMENT_STRINGS.iter().filter(|(p, _)| !p.ends_with("/font")) {
         assert_ne!(super::color(name), egui::Color32::MAGENTA, "{path}: {name}");
     }
     for name in [
