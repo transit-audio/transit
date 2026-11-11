@@ -342,3 +342,31 @@ fn escape_in_the_crossfade_field_cancels_and_keeps_the_window() {
     t.key("Escape");
     assert!(!t.app.ui.plugin_windows.iter().any(|k| k.0 == tr));
 }
+
+#[test]
+fn the_one_shot_sentence_is_the_engines_own_refusal() {
+    // The loop row never sends a loop on a one-shot (it sends Gate with it), so the sentence the
+    // One-shot press shows is tied here to the engine's refusal of exactly that edit.
+    let (mut t, tr) = sliced();
+    let z = zone_of(&t, tr, 1);
+    let e = t.app.engine.execute("mix.sampler_zone_edit", &json!({"track": tr.0, "zone": z + 1, "region": {"loop_mode": "forward"}}));
+    assert_eq!(e.map_err(|e| super::edit::words(&e)).err().as_deref(), Some(ONE_SHOT_LOOP));
+}
+
+#[test]
+fn the_playback_banner_goes_when_the_document_changes_underneath() {
+    let (mut t, tr, z) = looping(0);
+    let seg = row(&t, tr).one_shot.expect("One-shot is ghosted").0;
+    t.click(mid(seg), 1);
+    assert_eq!(row(&t, tr).error.map(|e| e.text).as_deref(), Some(ONE_SHOT_LOOP));
+    // An edit from elsewhere (not this row) takes it away.
+    zone_edit(&mut t, tr, z, json!({"playback": {"attack_ms": 5.0}}));
+    assert!(row(&t, tr).error.is_none(), "an outside edit clears the banner");
+    // So does an undo. (The banner's coming and going can scroll the window's body: the segment is
+    // read again.)
+    let seg = row(&t, tr).one_shot.expect("One-shot is ghosted").0;
+    t.click(mid(seg), 1);
+    assert!(row(&t, tr).error.is_some());
+    t.run("edit.undo", json!({}));
+    assert!(row(&t, tr).error.is_none(), "an undo clears the banner");
+}

@@ -43,7 +43,8 @@ use transit_model::sampler_patch::{LoopMode, PlayMode};
 use super::super::{SamplerLayout, zone as sections};
 
 /// The engine's refusal of a loop on a one-shot (ADR 0041), also the One-shot segment's tooltip
-/// while the loop is on.
+/// while the loop is on. The engine's constant is crate-private; a test ties the two together
+/// (`loop_tests::the_one_shot_sentence_is_the_engines_own_refusal`).
 pub const ONE_SHOT_LOOP: &str = "A one-shot cannot loop: choose Gate, or turn the loop off.";
 pub const LOOPS: [&str; 3] = ["Off", "Loop", "Ping-pong"];
 pub const XF_NONE: &str = "xf —";
