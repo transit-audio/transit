@@ -201,6 +201,21 @@ pub const SEED_MAX: u32 = u32::MAX;
 pub const VIEW_SWITCH_FONT_WEIGHT: f32 = 500.0;
 pub const VIEW_SWITCH_FONT_SIZE: f32 = 12.0;
 pub const VIEW_SWITCH_PADDING_X: f32 = 12.0;
+/// The Slices view's Detect, Manual and Use slices panels (the board `SamplerSlices`; the beat
+/// field's width from `SamplerRound2`): the gap between rows and between a row's items, the left
+/// panel's least height, the label columns, the action buttons, the Root and beat fields, the
+/// Sensitivity fader's travel and the pad preview's grid.
+pub const PANEL_ROW_GAP: f32 = 10.0;
+pub const PANEL_ITEM_GAP: f32 = 10.0;
+pub const PANEL_MIN_HEIGHT: f32 = 190.0;
+pub const DETECT_LABEL_WIDTH: f32 = 70.0;
+pub const USE_LABEL_WIDTH: f32 = 62.0;
+pub const PANEL_ACTION_WIDTH: f32 = 112.0;
+pub const ROOT_WIDTH: f32 = 92.0;
+pub const BEAT_WIDTH: f32 = 84.0;
+pub const FADER_LENGTH: f32 = 150.0;
+pub const PREVIEW_COLUMNS: f32 = 8.0;
+pub const PREVIEW_GAP: f32 = 2.0;
 pub const METRICS: &[(&str, f32)] = &[
     ("viewBar/height", VIEW_BAR_HEIGHT),
     ("viewBar/controlHeight", VIEW_BAR_CONTROL_HEIGHT),
@@ -291,4 +306,15 @@ pub const METRICS: &[(&str, f32)] = &[
     ("startNote/dragPxPerSemitone", START_NOTE_DRAG_PX_PER_SEMITONE),
     ("startNote/range/0", START_NOTE_RANGE[0] as f32),
     ("startNote/range/1", START_NOTE_RANGE[1] as f32),
+    ("slicePanels/rowGap", PANEL_ROW_GAP),
+    ("slicePanels/itemGap", PANEL_ITEM_GAP),
+    ("slicePanels/minHeight", PANEL_MIN_HEIGHT),
+    ("slicePanels/detectLabelWidth", DETECT_LABEL_WIDTH),
+    ("slicePanels/useLabelWidth", USE_LABEL_WIDTH),
+    ("slicePanels/actionWidth", PANEL_ACTION_WIDTH),
+    ("slicePanels/rootWidth", ROOT_WIDTH),
+    ("slicePanels/beatWidth", BEAT_WIDTH),
+    ("slicePanels/faderLength", FADER_LENGTH),
+    ("slicePanels/previewColumns", PREVIEW_COLUMNS),
+    ("slicePanels/previewGap", PREVIEW_GAP),
 ];
