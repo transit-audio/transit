@@ -665,9 +665,9 @@ fn the_sampler_views_match_tokens_json_both_ways() {
     let mut leaves = Vec::new();
     number_leaves(sp, "", &mut leaves);
     let in_json: BTreeSet<&str> = leaves.iter().map(|(p, _)| p.as_str()).collect();
-    let in_rust: BTreeSet<&str> = tokens::sampler::METRICS.iter().map(|(p, _)| *p).collect();
+    let in_rust: BTreeSet<&str> = tokens::sampler::METRICS.iter().chain(tokens::sampler::INSTRUMENT_METRICS).map(|(p, _)| *p).collect();
     assert_eq!(in_json, in_rust, "sampler paths differ between tokens.json and Rust");
-    for (path, x) in tokens::sampler::METRICS {
+    for (path, x) in tokens::sampler::METRICS.iter().chain(tokens::sampler::INSTRUMENT_METRICS) {
         assert_eq!(num(sp, path), *x, "sampler/{path}");
     }
     let known: BTreeSet<String> = ["color", "arrangement"].iter().flat_map(|k| color_names(&v, k)).collect();
@@ -711,6 +711,21 @@ fn the_sampler_views_match_tokens_json_both_ways() {
         "candidate/line",
         "lockGlyph/color",
         "seed/sequential",
+        "instrument/keyMap/keyEdge",
+        "instrument/keyMap/blackKeyEdge",
+        "instrument/keyMap/octaveNameInk",
+        "instrument/keyMap/zoneInk",
+        "instrument/keyMap/selectedInk",
+        "instrument/keyMap/rootDotInk",
+        "instrument/keyMap/selectedRootDotInk",
+        "instrument/keyMap/rrTagEdge",
+        "instrument/keyMap/rrTagInk",
+        "instrument/keyMap/padZoneFill",
+        "instrument/keyMap/padZoneInk",
+        "instrument/keyMap/padZoneDot",
+        "instrument/keyMap/conflictEdge",
+        "instrument/waveform/flagInk",
+        "instrument/waveform/braceInk",
     ] {
         let name = at(sp, path).as_str().unwrap();
         assert!(known.contains(name), "sampler/{path}: {name} is not a token");
@@ -722,7 +737,7 @@ fn the_sampler_views_match_tokens_json_both_ways() {
     let mut strings = Vec::new();
     string_leaves(sp, "", &mut strings);
     let in_json: BTreeSet<(&str, &str)> = strings.iter().map(|(p, s)| (p.as_str(), s.as_str())).collect();
-    let in_rust: BTreeSet<(&str, &str)> = tokens::sampler::STRINGS.iter().copied().collect();
+    let in_rust: BTreeSet<(&str, &str)> = tokens::sampler::STRINGS.iter().chain(tokens::sampler::INSTRUMENT_STRINGS).copied().collect();
     assert_eq!(in_json, in_rust, "sampler strings differ between tokens.json and Rust");
 }
 

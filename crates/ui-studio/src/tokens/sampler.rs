@@ -320,3 +320,120 @@ pub const METRICS: &[(&str, f32)] = &[
     ("slicePanels/previewGap", PREVIEW_GAP),
     ("slicePanels/previewRadius", PREVIEW_RADIUS),
 ];
+/// The Instrument view (`instrument`; the boards `SamplerInstrument` and `SamplerRound2`). The key
+/// map: the zone well's height; the velocity axis's width, its gap to the well and its labels'
+/// inset from its right; the keyboard's gap under the well and its height; a black key's height and
+/// its width as a share of a white key's (centered on the white keys' boundary); the keys' bottom
+/// radii; how far a zone sits inside the keys and velocities it covers; the zone label's inset
+/// (left, top); the root dot's inset from the zone's foot; the `RR n` tag's inset, padding and
+/// radius; the conflict outline's width.
+pub const KEY_MAP_WELL_HEIGHT: f32 = 196.0;
+pub const AXIS_WIDTH: f32 = 26.0;
+pub const AXIS_GAP: f32 = 6.0;
+pub const AXIS_INSET: f32 = 2.0;
+pub const KEYBOARD_GAP: f32 = 4.0;
+pub const KEYBOARD_HEIGHT: f32 = 52.0;
+pub const BLACK_KEY_HEIGHT: f32 = 32.0;
+pub const BLACK_KEY_WIDTH: f32 = 0.6;
+pub const WHITE_KEY_RADIUS: f32 = 3.0;
+pub const BLACK_KEY_RADIUS: f32 = 2.0;
+pub const OCTAVE_NAME_INSET: f32 = 3.0;
+pub const ZONE_INSET: f32 = 1.0;
+pub const ZONE_LABEL_INSET: [f32; 2] = [4.0, 3.0];
+pub const ROOT_DOT_INSET: f32 = 4.0;
+pub const RR_TAG_INSET: f32 = 3.0;
+pub const RR_TAG_PADDING_X: f32 = 2.0;
+pub const RR_TAG_RADIUS: f32 = 3.0;
+pub const CONFLICT_WIDTH: f32 = 2.0;
+/// The key map's colors: the keys' edges, the octave names, a zone's label (and selected), its
+/// root dot (and selected), the `RR n` tag's edge and ink, a pad zone's fill, label and dot, the
+/// conflict outline.
+pub const KEY_EDGE: &str = "line.strong";
+pub const BLACK_KEY_EDGE: &str = "surface.inset";
+pub const OCTAVE_NAME_INK: &str = "ink.dark";
+pub const ZONE_INK: &str = "text.muted";
+pub const SELECTED_INK: &str = "text";
+pub const ROOT_DOT_INK: &str = "text.faint";
+pub const SELECTED_ROOT_DOT_INK: &str = "text";
+pub const RR_TAG_EDGE: &str = "line.strong";
+pub const RR_TAG_INK: &str = "text.muted";
+pub const PAD_ZONE_FILL: &str = "surface.panel";
+pub const PAD_ZONE_INK: &str = "text.faint";
+pub const PAD_ZONE_DOT: &str = "ink.arrow";
+pub const CONFLICT_EDGE: &str = "meter.hot";
+/// The zone waveform: the well's height, the S and E flags' padding a side, inner corner radius and
+/// letters, the loop brace's radius and label ink, the crossfade hatch's stroke and spacing, and the
+/// region readout's top (its right is the status tag's inset).
+pub const ZONE_WAVE_HEIGHT: f32 = 108.0;
+pub const ZONE_FLAG_PADDING_X: f32 = 4.0;
+pub const ZONE_FLAG_RADIUS: f32 = 3.0;
+pub const ZONE_FLAG_INK: &str = "surface.inset";
+pub const BRACE_RADIUS: f32 = 2.0;
+pub const BRACE_INK: &str = "ink.dark";
+pub const HATCH_STROKE: f32 = 1.5;
+pub const HATCH_SPACING: f32 = 6.0;
+pub const READOUT_TOP: f32 = 18.0;
+/// The zone row: the Zone and Group columns' shares; the Zone panel's row gap, header gap and field
+/// gap; the Loop label's width; the gap before Crossfade and the crossfade field's width.
+pub const ZONE_COLUMNS: [f32; 2] = [1.45, 1.0];
+pub const ZONE_ROW_GAP: f32 = 10.0;
+pub const ZONE_HEADER_GAP: f32 = 10.0;
+pub const ZONE_FIELD_GAP: f32 = 14.0;
+pub const LOOP_LABEL_WIDTH: f32 = 40.0;
+pub const CROSSFADE_LABEL_GAP: f32 = 6.0;
+pub const CROSSFADE_WIDTH: f32 = 76.0;
+/// Every string under `sampler/instrument` in tokens.json by its path.
+pub const INSTRUMENT_STRINGS: &[(&str, &str)] = &[
+    ("instrument/keyMap/keyEdge", KEY_EDGE),
+    ("instrument/keyMap/blackKeyEdge", BLACK_KEY_EDGE),
+    ("instrument/keyMap/octaveNameInk", OCTAVE_NAME_INK),
+    ("instrument/keyMap/zoneInk", ZONE_INK),
+    ("instrument/keyMap/selectedInk", SELECTED_INK),
+    ("instrument/keyMap/rootDotInk", ROOT_DOT_INK),
+    ("instrument/keyMap/selectedRootDotInk", SELECTED_ROOT_DOT_INK),
+    ("instrument/keyMap/rrTagEdge", RR_TAG_EDGE),
+    ("instrument/keyMap/rrTagInk", RR_TAG_INK),
+    ("instrument/keyMap/padZoneFill", PAD_ZONE_FILL),
+    ("instrument/keyMap/padZoneInk", PAD_ZONE_INK),
+    ("instrument/keyMap/padZoneDot", PAD_ZONE_DOT),
+    ("instrument/keyMap/conflictEdge", CONFLICT_EDGE),
+    ("instrument/waveform/flagInk", ZONE_FLAG_INK),
+    ("instrument/waveform/braceInk", BRACE_INK),
+];
+/// Every number under `sampler/instrument` in tokens.json by its path.
+pub const INSTRUMENT_METRICS: &[(&str, f32)] = &[
+    ("instrument/keyMap/wellHeight", KEY_MAP_WELL_HEIGHT),
+    ("instrument/keyMap/axisWidth", AXIS_WIDTH),
+    ("instrument/keyMap/axisGap", AXIS_GAP),
+    ("instrument/keyMap/axisInset", AXIS_INSET),
+    ("instrument/keyMap/keyboardGap", KEYBOARD_GAP),
+    ("instrument/keyMap/keyboardHeight", KEYBOARD_HEIGHT),
+    ("instrument/keyMap/blackKeyHeight", BLACK_KEY_HEIGHT),
+    ("instrument/keyMap/blackKeyWidth", BLACK_KEY_WIDTH),
+    ("instrument/keyMap/whiteKeyRadius", WHITE_KEY_RADIUS),
+    ("instrument/keyMap/blackKeyRadius", BLACK_KEY_RADIUS),
+    ("instrument/keyMap/octaveNameInset", OCTAVE_NAME_INSET),
+    ("instrument/keyMap/zoneInset", ZONE_INSET),
+    ("instrument/keyMap/labelInset/0", ZONE_LABEL_INSET[0]),
+    ("instrument/keyMap/labelInset/1", ZONE_LABEL_INSET[1]),
+    ("instrument/keyMap/rootDotInset", ROOT_DOT_INSET),
+    ("instrument/keyMap/rrTagInset", RR_TAG_INSET),
+    ("instrument/keyMap/rrTagPaddingX", RR_TAG_PADDING_X),
+    ("instrument/keyMap/rrTagRadius", RR_TAG_RADIUS),
+    ("instrument/keyMap/conflictWidth", CONFLICT_WIDTH),
+    ("instrument/waveform/wellHeight", ZONE_WAVE_HEIGHT),
+    ("instrument/waveform/flagPaddingX", ZONE_FLAG_PADDING_X),
+    ("instrument/waveform/flagRadius", ZONE_FLAG_RADIUS),
+    ("instrument/waveform/braceRadius", BRACE_RADIUS),
+    ("instrument/waveform/hatchStroke", HATCH_STROKE),
+    ("instrument/waveform/hatchSpacing", HATCH_SPACING),
+    ("instrument/waveform/readoutTop", READOUT_TOP),
+    ("instrument/zonePanel/columns/0", ZONE_COLUMNS[0]),
+    ("instrument/zonePanel/columns/1", ZONE_COLUMNS[1]),
+    ("instrument/zonePanel/rowGap", ZONE_ROW_GAP),
+    ("instrument/zonePanel/headerGap", ZONE_HEADER_GAP),
+    ("instrument/zonePanel/fieldGap", ZONE_FIELD_GAP),
+    ("instrument/zonePanel/loopLabelWidth", LOOP_LABEL_WIDTH),
+    ("instrument/zonePanel/crossfadeLabelGap", CROSSFADE_LABEL_GAP),
+    ("instrument/zonePanel/crossfadeWidth", CROSSFADE_WIDTH),
+];
