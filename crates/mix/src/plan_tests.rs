@@ -110,6 +110,9 @@ impl Plugin for Probe {
     fn pad_activity(&self, out: &mut [u32; transit_dsp::PAD_SLOTS]) -> bool {
         self.inner.pad_activity(out)
     }
+    fn voice_positions(&self, out: &mut [u64; transit_dsp::VOICE_SLOTS]) -> usize {
+        self.inner.voice_positions(out)
+    }
 }
 
 impl Drop for Probe {

@@ -142,12 +142,15 @@ fn processing_events_controls_and_reset_neither_allocate_nor_free() {
     let mut total = AllocStats::default();
     let mut frame = 0u64;
     let mut peak = 0;
+    let mut placed = 0;
     for (round, events) in spans.iter().enumerate() {
         let n = sizes[round % sizes.len()].max(if events.is_empty() { 1 } else { 8 });
         let ctx = Context { frame, tempo: 128.0, quarters: if round % 4 == 1 { Some(frame as f64 / 22_500.0) } else { None } };
         let ((), stats) = measure(|| {
             c.process(&ctx, &sources[..], events, &mut [&mut l[..n], &mut r[..n]]);
             peak = peak.max(c.active_voices());
+            // The playheads' seam (#470), read after every block as the desktop adapter does.
+            placed = placed.max(c.voice_positions().filter(|p| p.phase.is_finite()).count());
             if round == 7 {
                 c.reset();
             }
@@ -160,6 +163,7 @@ fn processing_events_controls_and_reset_neither_allocate_nor_free() {
     // The probe reached the paths it claims: all voices busy, steals and chokes happened.
     let d = c.diagnostics();
     assert_eq!(peak, VOICES);
+    assert_eq!(placed, VOICES, "every voice's position was read at full load");
     assert!(d.steals > 0 && d.chokes > 0, "{d:?}");
     assert!(total.is_zero(), "{total:?}");
 }

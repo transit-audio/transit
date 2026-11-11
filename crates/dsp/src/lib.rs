@@ -336,6 +336,37 @@ impl PadWord {
     }
 }
 
+/// Voice places an instrument publishes ([`Plugin::voice_positions`]): the Sampler's voice count,
+/// so every sounding voice has a slot.
+pub const VOICE_SLOTS: usize = 64;
+
+/// One sounding voice's place as an instrument publishes it ([`Plugin::voice_positions`]), packed
+/// in a `u64` so a tap carries it in one atomic: bit 63 set, bits 48..63 the zone slot the voice
+/// plays and bits 0..48 the whole source frame it reads next, in the source's own frames. Zero is
+/// no voice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VoicePos(pub u64);
+
+impl VoicePos {
+    const SOUNDING: u64 = 1 << 63;
+    const FRAME: u64 = (1 << 48) - 1;
+
+    /// Zone slot `zone` (15 bits kept) at phase `phase` in source frames (floored; below 0 reads
+    /// 0, past 2^48 - 1 frames reads that).
+    #[must_use]
+    pub fn new(zone: u16, phase: f64) -> VoicePos {
+        // `as` saturates: NaN and negatives read 0.
+        let frame = (phase.floor() as u64).min(Self::FRAME);
+        VoicePos(Self::SOUNDING | u64::from(zone & 0x7FFF) << 48 | frame)
+    }
+
+    /// The zone slot and source frame, or `None` for no voice.
+    #[must_use]
+    pub fn get(self) -> Option<(u16, u64)> {
+        (self.0 & Self::SOUNDING != 0).then_some(((self.0 >> 48 & 0x7FFF) as u16, self.0 & Self::FRAME))
+    }
+}
+
 /// A time in milliseconds as Ableton and Logic print envelope and LFO times (#326): three
 /// significant digits with at most two decimals, milliseconds below a second and seconds from it
 /// (`0.00 ms` under 0.005 ms, `0.01 ms`, `0.50 ms`, `9.99 ms`, `35.0 ms`, `350 ms`, `1.00 s`,
@@ -522,6 +553,13 @@ pub trait Plugin: Send {
     /// audio thread, so it must be cheap and allocation-free. The default: no pads.
     fn pad_activity(&self, _out: &mut [u32; PAD_SLOTS]) -> bool {
         false
+    }
+    /// Sample instruments (the Sampler's core path, #470): where each sounding voice reads, as a
+    /// [`VoicePos`] each from `out[0]`, after the last block; returns how many it wrote. Read
+    /// after `process`, on the audio thread, so it must be cheap and allocation-free, and it never
+    /// changes what the instrument plays. The default: none.
+    fn voice_positions(&self, _out: &mut [u64; VOICE_SLOTS]) -> usize {
+        0
     }
     /// Test seam (feature `testing`, issue #210): writes the plug-in's DSP state (whatever a
     /// later block's output depends on: detector envelopes, filter memories, delay-line contents

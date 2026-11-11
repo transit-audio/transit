@@ -59,6 +59,8 @@ pub use transit_sampler_core::patch::{Fades, GroupMode, Membership, Pad, PatchEr
 pub use transit_sampler_core::playhead::{LoopMode, Region};
 pub use transit_sampler_core::{GROUPS, PADS, ZONES};
 
+const _: () = assert!(transit_sampler_core::VOICES == crate::VOICE_SLOTS, "every voice has a published place");
+
 /// Checks a spec as [`Publisher::publish`] will before it prepares anything (counts, sources,
 /// regions, the zones and pads as the core checks them), without publishing: a command validates
 /// an edit with it before it changes the document.
@@ -213,6 +215,11 @@ impl Plugin for Sampler {
         true
     }
 
+    /// The core path's sounding voices (the Slices view's playheads, #470).
+    fn voice_positions(&self, out: &mut [u64; crate::VOICE_SLOTS]) -> usize {
+        self.core.as_deref().map_or(0, |c| c.voice_positions(out))
+    }
+
     fn enable_sampler_core(&mut self, seed: u32) -> Option<Publisher> {
         Some(self.enable_core(seed))
     }
@@ -226,3 +233,6 @@ mod core_tests_c2;
 
 #[cfg(test)]
 mod pads_tests;
+
+#[cfg(test)]
+mod positions_tests;

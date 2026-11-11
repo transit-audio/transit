@@ -12,9 +12,9 @@
 
 use crate::sample_tap::SampleTap;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use transit_dsp::{PAD_SLOTS, VoiceShape};
+use transit_dsp::{PAD_SLOTS, VOICE_SLOTS, VoiceShape};
 use transit_model::TrackId;
 
 /// The hub key of an instrument (an instrument's instance has no insert uid).
@@ -46,6 +46,10 @@ pub struct ScopeTap {
     /// A pad instrument's pads as of the last block (`Plugin::pad_activity`, a
     /// [`transit_dsp::PadWord`] each).
     pads: Box<[AtomicU32]>,
+    /// A sample instrument's sounding voices as of the last block (`Plugin::voice_positions`, a
+    /// [`transit_dsp::VoicePos`] each, 0 for an empty slot), and how many the render last wrote.
+    positions: Box<[AtomicU64]>,
+    positions_len: AtomicUsize,
 }
 
 /// The newest-voice note a tap holds while no key holds a voice.
@@ -74,11 +78,14 @@ impl ScopeTap {
             newest_note: AtomicU32::new(NO_VOICE),
             newest_shape: [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)],
             pads: (0..PAD_SLOTS).map(|_| AtomicU32::new(0)).collect(),
+            positions: (0..VOICE_SLOTS).map(|_| AtomicU64::new(0)).collect(),
+            positions_len: AtomicUsize::new(0),
         }
     }
 
     /// Bytes one tap holds (counted in the plan's prepared bytes).
-    pub(crate) const BYTES: usize = (SCOPE_FRAMES + PAD_SLOTS) * size_of::<AtomicU32>() + size_of::<ScopeTap>();
+    pub(crate) const BYTES: usize =
+        (SCOPE_FRAMES + PAD_SLOTS) * size_of::<AtomicU32>() + VOICE_SLOTS * size_of::<AtomicU64>() + size_of::<ScopeTap>();
 
     /// Whether the render writes to this tap.
     #[must_use]
@@ -86,9 +93,16 @@ impl ScopeTap {
         self.enabled.load(Ordering::Relaxed)
     }
 
-    /// Switches the render's writes on or off. Switching on clears the detector level, so a panel
-    /// that opens shows only what the render publishes from then on.
+    /// Switches the render's writes on or off. Switching on clears the detector level and the voice
+    /// positions, so a panel that opens shows only what the render publishes from then on (the
+    /// positions are cleared while the render still writes nothing, before the flag goes on).
     pub fn set_enabled(&self, on: bool) {
+        if on && !self.enabled() {
+            for a in self.positions.iter() {
+                a.store(0, Ordering::Relaxed);
+            }
+            self.positions_len.store(0, Ordering::Relaxed);
+        }
         let was = self.enabled.swap(on, Ordering::Relaxed);
         if on && !was {
             self.detector.store(NO_LEVEL, Ordering::Relaxed);
@@ -174,6 +188,34 @@ impl ScopeTap {
         for (a, w) in self.pads.iter().zip(words) {
             a.store(*w, Ordering::Relaxed);
         }
+    }
+
+    /// A sample instrument's sounding voices as the render last stored them
+    /// (`Plugin::voice_positions`): a [`transit_dsp::VoicePos`] word per slot, 0 for an empty one.
+    /// Each slot is one atomic, so a word is never torn; a reader may see slots of two blocks (a
+    /// display: accepted).
+    #[must_use]
+    pub fn voice_positions(&self) -> [u64; VOICE_SLOTS] {
+        core::array::from_fn(|i| self.positions.get(i).map_or(0, |a| a.load(Ordering::Relaxed)))
+    }
+
+    /// Audio thread: stores a sample instrument's sounding voices (at most [`VOICE_SLOTS`]; more
+    /// are left out) and empties the slots the last block filled that this one does not: one
+    /// relaxed store per voice plus one per voice that ended. Does nothing while disabled.
+    pub fn push_positions(&self, words: &[u64]) {
+        if !self.enabled() {
+            return;
+        }
+        let n = words.len().min(VOICE_SLOTS);
+        for (a, w) in self.positions.iter().zip(words) {
+            a.store(*w, Ordering::Relaxed);
+        }
+        // One writer: the render thread.
+        let last = self.positions_len.load(Ordering::Relaxed).min(VOICE_SLOTS);
+        for a in self.positions.iter().take(last).skip(n) {
+            a.store(0, Ordering::Relaxed);
+        }
+        self.positions_len.store(n, Ordering::Relaxed);
     }
 
     /// Audio thread: stores the peak of each of the first `frames` frames of `buf`, `gr_db` and
@@ -321,6 +363,13 @@ impl ScopeHub {
         self.get(track, uid).map(|t| t.pad_activity())
     }
 
+    /// A sample instrument's sounding voices as last reported (see [`ScopeTap::voice_positions`]);
+    /// `None` with no tap.
+    #[must_use]
+    pub fn voice_positions(&self, track: TrackId, uid: u64) -> Option<[u64; VOICE_SLOTS]> {
+        self.get(track, uid).map(|t| t.voice_positions())
+    }
+
     /// An instrument's newest voice as last reported (see [`ScopeTap::newest_voice`]); `None` with
     /// no tap or no voice.
     #[must_use]
@@ -375,6 +424,37 @@ mod tests {
         hub.register(TrackId(4), INSTRUMENT_UID, &t);
         assert_eq!(hub.pad_activity(TrackId(4), INSTRUMENT_UID), Some(words));
         assert_eq!(hub.pad_activity(TrackId(5), INSTRUMENT_UID), None, "another track has no tap");
+    }
+
+    #[test]
+    fn voice_positions_are_stored_while_enabled_ended_voices_empty_and_switching_on_clears() {
+        use transit_dsp::VoicePos;
+        let t = Arc::new(ScopeTap::new());
+        let (a, b) = (VoicePos::new(2, 100.0).0, VoicePos::new(5, 7.5).0);
+        t.push_positions(&[a, b]);
+        assert_eq!(t.voice_positions(), [0; VOICE_SLOTS], "negative control: a disabled tap stores nothing");
+        t.set_enabled(true);
+        t.push_positions(&[a, b]);
+        let hub = ScopeHub::default();
+        hub.register(TrackId(4), INSTRUMENT_UID, &t);
+        let got = hub.voice_positions(TrackId(4), INSTRUMENT_UID).unwrap();
+        assert_eq!((got[0], got[1], got[2]), (a, b, 0));
+        // One voice ended: its slot empties.
+        t.push_positions(&[b]);
+        let got = t.voice_positions();
+        assert_eq!((got[0], got[1]), (b, 0));
+        // More words than slots: the first VOICE_SLOTS are kept.
+        let many: Vec<u64> = (0..VOICE_SLOTS as u16 + 3).map(|z| VoicePos::new(z, 1.0).0).collect();
+        t.push_positions(&many);
+        assert!(t.voice_positions().iter().all(|w| *w != 0));
+        // Off and on again: what the render stored before is gone.
+        t.set_enabled(false);
+        t.set_enabled(true);
+        assert_eq!(t.voice_positions(), [0; VOICE_SLOTS], "a panel that opens starts with no playheads");
+        t.push_positions(&[a]);
+        t.set_enabled(true);
+        assert_eq!(t.voice_positions()[0], a, "switching on while on keeps them");
+        assert_eq!(hub.voice_positions(TrackId(5), INSTRUMENT_UID), None, "another track has no tap");
     }
 
     #[test]

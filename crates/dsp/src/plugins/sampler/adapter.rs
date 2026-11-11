@@ -284,6 +284,16 @@ impl CorePath {
         self.pads.words()
     }
 
+    /// Each sounding voice's [`crate::VoicePos`] as of the last block into `out`; how many.
+    pub(super) fn voice_positions(&self, out: &mut [u64; crate::VOICE_SLOTS]) -> usize {
+        let mut n = 0;
+        for (slot, p) in out.iter_mut().zip(self.core.voice_positions()) {
+            *slot = crate::VoicePos::new(p.zone, p.phase).0;
+            n += 1;
+        }
+        n
+    }
+
     /// The state fingerprint (feature `testing`): the core's, the adapter's frame counter.
     #[cfg(feature = "testing")]
     pub(super) fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {

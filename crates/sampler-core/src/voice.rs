@@ -307,6 +307,11 @@ impl Voice {
         self.region.source
     }
 
+    /// The phase in source frames: where the next frame reads.
+    pub(crate) fn phase(&self) -> f64 {
+        self.head.pos
+    }
+
     /// The voice is ending (releasing or fading): stolen before sounding voices.
     pub(crate) fn is_ending(&self) -> bool {
         self.fade.is_some() || self.env.is_releasing()

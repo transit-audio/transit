@@ -44,6 +44,16 @@ pub struct Diagnostics {
     pub underruns: u64,
 }
 
+/// One sounding voice's place ([`SamplerCore::voice_positions`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VoicePosition {
+    /// The zone slot the voice plays (a fading voice of a replaced zone keeps its slot).
+    pub zone: u16,
+    /// The phase in the source's native frames (above -1: only a crossfaded reverse loop that
+    /// starts at frame 0 reads below 0).
+    pub phase: f64,
+}
+
 #[derive(Debug, Clone)]
 struct Slot {
     zone: Zone,
@@ -274,6 +284,15 @@ impl SamplerCore {
     /// keeps a source generation until no voice reads it.
     pub fn playing_sources(&self) -> impl Iterator<Item = u16> + '_ {
         self.voices.iter().filter(|v| v.active).map(Voice::source)
+    }
+
+    /// Where every sounding voice reads (tails included), in voice-slot order: its zone slot and its
+    /// phase in its source's native frames as the last block left it (the frame the next output
+    /// frame reads: pitch, the source-to-session rate, loops, ping-pong and reverse included). A
+    /// display seam (the Slices view's playheads, #470): reading it changes nothing, and it neither
+    /// allocates nor frees. At most [`crate::VOICES`] items.
+    pub fn voice_positions(&self) -> impl Iterator<Item = VoicePosition> + '_ {
+        self.voices.iter().filter(|v| v.active).map(|v| VoicePosition { zone: v.zone, phase: v.phase() })
     }
 
     /// Zone `index`, if set.

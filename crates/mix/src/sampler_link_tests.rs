@@ -144,6 +144,31 @@ fn the_instruments_tap_carries_the_pads_its_instance_published() {
     assert_eq!(hub.pad_activity(lt, crate::INSTRUMENT_UID), Some([0; transit_dsp::PAD_SLOTS]));
 }
 
+#[test]
+fn the_instruments_tap_carries_its_voices_positions_and_reading_them_changes_no_audio() {
+    // The clip's note 60 holds pad 1's Gate voice from frame 0 over a 48 kHz source at 48 kHz
+    // (the Slices view's playheads, #470).
+    let (s, t) = session(Some(kit(1)));
+    let (mut read, mut unread) = (Rig::new(), Rig::new());
+    read.publish(&s);
+    unread.publish(&s);
+    let hub = read.comp.scope_hub();
+    assert!(hub.set_enabled(t, crate::INSTRUMENT_UID, true), "the instrument has a tap");
+    assert!(!unread.comp.scope_hub().get(t, crate::INSTRUMENT_UID).unwrap().enabled(), "the other tap is off: nothing reads it");
+    let mut placed = Vec::new();
+    for b in 0..6 {
+        let (x, y) = (read.render(1), unread.render(1));
+        assert!(x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits()), "block {b}: the audio is the same bit for bit");
+        let words = hub.voice_positions(t, crate::INSTRUMENT_UID).expect("the tap is alive");
+        placed.push(words.iter().filter_map(|w| transit_dsp::VoicePos(*w).get()).collect::<Vec<_>>());
+    }
+    let expected: Vec<Vec<(u16, u64)>> = (1..=6).map(|b| vec![(0, (b * BLOCK) as u64)]).collect();
+    assert_eq!(placed, expected, "zone 1 (slot 0) at the frames rendered, the source's own");
+    // Negative control: the tap that is off holds no positions.
+    let off = unread.comp.scope_hub().voice_positions(t, crate::INSTRUMENT_UID).unwrap();
+    assert_eq!(off, [0; transit_dsp::VOICE_SLOTS]);
+}
+
 // Round robin through the plan compiler (ADR 0041 and its amendment of 2026-11-08, item 4): a
 // group member whose media is missing is published as a silent placeholder, so it keeps its turn
 // and relinking it does not reorder the others; each group's stored mode reaches the instance.

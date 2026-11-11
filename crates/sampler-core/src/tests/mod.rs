@@ -9,6 +9,7 @@ mod crossfade;
 mod fades;
 mod gate1;
 mod loops;
+mod positions;
 mod round_robin;
 mod seams;
 mod seams_c2;

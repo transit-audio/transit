@@ -37,7 +37,7 @@ mod sampler;
 mod selection;
 mod voice;
 
-pub use sampler::{Diagnostics, SamplerCore};
+pub use sampler::{Diagnostics, SamplerCore, VoicePosition};
 
 /// Pads, in four banks of sixteen.
 pub const PADS: usize = 64;

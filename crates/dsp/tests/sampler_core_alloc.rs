@@ -71,6 +71,8 @@ struct Rig {
     io: Vec<Vec<f32>>,
     total: AllocStats,
     frame: i64,
+    /// The most voice places one read after a block returned (#470).
+    placed: usize,
 }
 
 impl Rig {
@@ -92,10 +94,15 @@ impl Rig {
             ..Transport::default()
         };
         self.frame += BLOCK as i64;
+        let mut placed = 0;
         self.audio(|s, io| {
             s.set_transport(&t);
             s.process(io, BLOCK);
+            // The playheads' read after the block, as the mix does while a panel is open (#470).
+            let mut at = [0u64; transit_dsp::VOICE_SLOTS];
+            placed = s.voice_positions(&mut at);
         });
+        self.placed = self.placed.max(placed);
     }
 }
 
@@ -105,7 +112,7 @@ fn the_core_path_allocates_and_frees_nothing_on_the_audio_thread() {
     let mut s = Sampler::new();
     s.prepare(RATE, BLOCK, 2);
     let p = s.enable_core(11);
-    let mut rig = Rig { s, p, io: vec![vec![0.0; BLOCK]; 2], total: AllocStats::default(), frame: 0 };
+    let mut rig = Rig { s, p, io: vec![vec![0.0; BLOCK]; 2], total: AllocStats::default(), frame: 0, placed: 0 };
     rig.p.publish(spec(&sources)).unwrap();
     // Every zone shaped, all 16 matrix rows active (set on the audio thread, measured).
     rig.audio(|s, _| {
@@ -193,6 +200,7 @@ fn the_core_path_allocates_and_frees_nothing_on_the_audio_thread() {
     assert!(held_back >= 2, "the held generations come back to the control side");
     assert!(rig.io[0].iter().chain(&rig.io[1]).all(|x| x.is_finite()));
     assert_eq!(VOICES, 64);
+    assert_eq!(rig.placed, VOICES, "the read after a block saw every voice at full load");
 }
 
 /// A session load, then edits, as the engine drives them (C2): the control side switches a fresh
@@ -214,7 +222,7 @@ fn a_load_and_its_edits_allocate_and_free_nothing_on_the_audio_thread() {
         assert!(s.set_param(fmt(&mut id, z, "pan"), 25.0));
         assert!(s.set_param(fmt(&mut id, z, "shaper"), 1.0));
     }
-    let mut rig = Rig { s, p, io: vec![vec![0.0; BLOCK]; 2], total: AllocStats::default(), frame: 0 };
+    let mut rig = Rig { s, p, io: vec![vec![0.0; BLOCK]; 2], total: AllocStats::default(), frame: 0, placed: 0 };
     rig.p.publish(spec(&sources)).unwrap();
     rig.block(true);
     rig.audio(|s, _| {

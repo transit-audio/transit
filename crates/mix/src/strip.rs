@@ -185,6 +185,10 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                         if inst.plugin.pad_activity(&mut pads) {
                             tap.push_pads(&pads);
                         }
+                        // A sample instrument's playheads (the Sampler's Slices view, #470).
+                        let mut at = [0u64; transit_dsp::VOICE_SLOTS];
+                        let n = inst.plugin.voice_positions(&mut at);
+                        tap.push_positions(at.get(..n).unwrap_or(&[]));
                     }
                 }
                 if contain_failure(inst, &mut strip.buf, frames) {
