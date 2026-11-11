@@ -375,8 +375,10 @@ pub fn signal_generator(kind: Waveform, freq: f32, level_db: f32, sample_rate: f
 /// before, each band against the loudest of its neighbours there so vibrato doesn't count
 /// (vibrato-suppressed spectral flux). A peak must stand out from the flux within 0.1 s by a fixed
 /// amount, not relative to the loudest hit, so quiet hits count and the result doesn't depend on where
-/// the analysed audio starts. Each is placed where its attack starts. `sensitivity` 0..1 (higher finds
-/// more). Returns sample positions, ascending.
+/// the analysed audio starts. The audio is read as it plays, after silence: an attack on its first
+/// sample rises like one after silence anywhere else, and the start itself is never reported. Each is
+/// placed where its attack starts. `sensitivity` 0..1 (higher finds more). Returns sample positions,
+/// ascending.
 pub fn detect_transients(ch: &[Vec<f32>], sample_rate: f32, sensitivity: f32) -> Vec<usize> {
     let len = max_len(ch);
     let sr = sane_sr(sample_rate);
@@ -386,8 +388,17 @@ pub fn detect_transients(ch: &[Vec<f32>], sample_rate: f32, sensitivity: f32) ->
     if len < n || ch.is_empty() {
         return Vec::new();
     }
-    let ch: Vec<Vec<f32>> =
-        ch.iter().take(crate::util::MAX_CHANNELS).map(|c| c.iter().map(|v| if v.is_finite() { *v } else { 0.0 }).collect()).collect();
+    // One window of silence ahead of the audio (a whole number of hops, so the frames keep their
+    // places). Without it the first frame has nothing to rise against: an attack on the first sample
+    // never makes a flux peak, nothing masks its body, and the body's first bump reads as an onset
+    // (#468). Positions below are in the padded audio until they are returned.
+    let lead = n;
+    let ch: Vec<Vec<f32>> = ch
+        .iter()
+        .take(crate::util::MAX_CHANNELS)
+        .map(|c| std::iter::repeat_n(0.0, lead).chain(c.iter().map(|v| if v.is_finite() { *v } else { 0.0 })).collect())
+        .collect();
+    let len = len + lead;
     let nch = ch.len() as f32;
     let bands = log_bands(n, sr);
     let fft = FftPlanner::<f32>::new().plan_fft_forward(n);
@@ -444,6 +455,8 @@ pub fn detect_transients(ch: &[Vec<f32>], sample_rate: f32, sensitivity: f32) ->
             continue;
         }
         last = Some(m);
+        // The start of the audio is where it begins, not an onset found in it.
+        let Some(at) = at.checked_sub(lead).filter(|p| *p > 0) else { continue };
         if out.last().is_none_or(|&p| at > p) {
             out.push(at);
         }
