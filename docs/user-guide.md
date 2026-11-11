@@ -604,6 +604,15 @@ clip**) at the selection's start on the track, else the edit cursor, else the pl
 is shown in the engine's words; when the slices' keys no longer run in order, **Map slices to
 keys** repairs them.
 
+Under the panels, **Playback** and **Amp Envelope** edit the selected slice's pad zone, as on the
+Pads view. **Off · Loop · Ping-pong** loops the selected slice over its whole length; choosing a
+loop also sets Gate (it loops while held), so One-shot is greyed while the slice loops. Ping-pong
+sets the crossfade to 0 in the same step. The crossfade field beside it (forward loops only) takes
+milliseconds at the loop file's own sample rate; its tooltip gives the frames. When a later marker
+edit makes the slice too short for its crossfade, the field keeps your value and a line says how
+much is used. On the bench a looping slice shows a magenta band under its flag, `↻` or `⇄` after
+its number, and its crossfade as a hatch at its end.
+
 To fill a kit from a folder, choose **Load kit…** in the Pads bar. Pick a folder, review the
 file count and pad range, then choose **Load kit**. Cancel leaves the kit unchanged. **Expand to rack…** beside it is not available yet. A refusal
 appears under the pads in the engine's words. Loading currently waits for the folder to finish
