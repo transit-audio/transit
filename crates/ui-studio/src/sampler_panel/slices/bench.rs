@@ -390,11 +390,8 @@ pub(crate) fn show(
 /// when the state read was refused, the engine's words in the error pattern. Returns whether
 /// Load… was clicked.
 fn empty(ui: &mut Ui, p: &egui::Painter, uid: u64, well: Rect, inputs: &Inputs, out: &mut BenchLayout) -> bool {
-    let t = &TOKENS;
-    let pts = [well.left_top(), well.right_top(), well.right_bottom(), well.left_bottom(), well.left_top()];
-    let [dash, gap] = tk::CANDIDATE_DASH;
-    p.extend(egui::Shape::dashed_line(&pts, Stroke::new(chrome::FIELD_EDGE_WIDTH, t.line_strong), dash, gap));
     if let Some(e) = &inputs.error {
+        dashed_well(p, well);
         let font = tokens::LABEL_CONTROL.font_id(ui.ctx());
         let g = crate::chrome::glyph_size(font.size);
         let w = widgets::role_size(p, &tokens::LABEL_CONTROL, e).x + g + 3.0;
@@ -402,22 +399,45 @@ fn empty(ui: &mut Ui, p: &egui::Painter, uid: u64, well: Rect, inputs: &Inputs, 
         out.error = Some((e.clone(), r4(r)));
         return false;
     }
-    let text_w = widgets::role_size(p, &tokens::LABEL_CONTROL, DROP).x;
+    let (b, clicked) = drop_target(ui, p, egui::Id::new(("sampler_slice_load", uid)), well, DROP);
+    out.empty = Some((r4(well), r4(b)));
+    clicked
+}
+
+/// A well's dashed `line.strong` edge (the Sampler views' empty drop target).
+pub(crate) fn dashed_well(p: &egui::Painter, well: Rect) {
+    let pts = [well.left_top(), well.right_top(), well.right_bottom(), well.left_bottom(), well.left_top()];
+    let [dash, gap] = tk::CANDIDATE_DASH;
+    p.extend(egui::Shape::dashed_line(&pts, Stroke::new(chrome::FIELD_EDGE_WIDTH, TOKENS.line_strong), dash, gap));
+}
+
+/// A Sampler view's empty well (README, Sampler views, States, "empty"): a dashed `line.strong`
+/// drop target with `drop` (`+ Drop a loop`, `+ Drop a sample`) and Load… centered in it. Returns
+/// the button's rect and whether it was clicked.
+pub(crate) fn drop_target(ui: &mut Ui, p: &egui::Painter, id: egui::Id, well: Rect, drop: &str) -> (Rect, bool) {
+    dashed_well(p, well);
+    let text_w = widgets::role_size(p, &tokens::LABEL_CONTROL, drop).x;
     let bw = button_w(p, LOAD);
     let x = well.center().x - (text_w + ITEM_GAP + bw) / 2.0;
-    widgets::role_text(p, &tokens::LABEL_CONTROL, DROP, t.text_faint, Align2::LEFT_CENTER, pos2(x, well.center().y));
+    widgets::role_text(p, &tokens::LABEL_CONTROL, drop, TOKENS.text_faint, Align2::LEFT_CENTER, pos2(x, well.center().y));
     let b = Rect::from_min_size(
         pos2(x + text_w + ITEM_GAP, well.center().y - layout::DENSE_CONTROL_HEIGHT / 2.0),
         vec2(bw, layout::DENSE_CONTROL_HEIGHT),
     );
-    let clicked = dense_button(ui, egui::Id::new(("sampler_slice_load", uid)), b, LOAD, true).clicked();
-    out.empty = Some((r4(well), r4(b)));
-    clicked
+    let clicked = dense_button(ui, id, b, LOAD, true).clicked();
+    (b, clicked)
 }
 
 /// Missing media: the hatch over the well's body (it cannot take input) with a card naming the
 /// file and Relink…, which waits for its command (drawn at the unused-control alpha).
 fn missing(ui: &mut Ui, wp: &egui::Painter, uid: u64, body: Rect, name: &str, out: &mut BenchLayout) {
+    out.missing = Some(missing_card(ui, wp, egui::Id::new(("sampler_slice_relink", uid)), body, name));
+}
+
+/// A Sampler view's missing source (README, Sampler views, States, "missing media"): the hatch
+/// over `body` with a card naming the file (`Loop.wav is missing`) and Relink…, unavailable until
+/// a relink command exists. Returns the card, its text and the button.
+pub(crate) fn missing_card(ui: &mut Ui, wp: &egui::Painter, id: egui::Id, body: Rect, name: &str) -> ([f32; 4], String, [f32; 4]) {
     let t = &TOKENS;
     widgets::hatch::paint(wp, body);
     let text = format!("{name} is missing");
@@ -431,8 +451,8 @@ fn missing(ui: &mut Ui, wp: &egui::Painter, uid: u64, body: Rect, name: &str, ou
     wp.rect(card, chrome::NOTICE_RADIUS, t.surface_panel, Stroke::new(chrome::FIELD_EDGE_WIDTH, t.line_strong), StrokeKind::Inside);
     crate::chrome::status_text(wp, pos2(card.min.x + pl, card.center().y), &text, font, crate::chrome::Severity::Error);
     let b = Rect::from_min_size(pos2(card.max.x - pr - bw, card.min.y + pt), vec2(bw, layout::DENSE_CONTROL_HEIGHT));
-    dense_button(ui, egui::Id::new(("sampler_slice_relink", uid)), b, RELINK, false);
-    out.missing = Some((r4(card), text, r4(b)));
+    dense_button(ui, id, b, RELINK, false);
+    (r4(card), text, r4(b))
 }
 
 /// The view's x of `frame` across the well's inside.
@@ -444,8 +464,9 @@ fn out_count(n: usize) -> String {
     format!("{n} of {} slices", transit_model::sampler_patch::MAX_SLICES)
 }
 
-/// A status tag in the well's top-right corner under the flag strip.
-fn tag(wp: &egui::Painter, body: Rect, text: &str) -> Rect {
+/// A status tag (README, Sampler views, "Status tag") in the top-right corner of `body`, the well's
+/// area under anything along its top (the bench's flag strip, the zone waveform's brace row).
+pub(crate) fn tag(wp: &egui::Painter, body: Rect, text: &str) -> Rect {
     let size = widgets::role_size(wp, &TAG_FONT, text) + vec2(2.0 * tk::TAG_PADDING_X, 0.0);
     let r = Rect::from_min_size(pos2(body.max.x - tk::TAG_INSET - size.x, body.min.y + tk::TAG_INSET), size);
     wp.rect(r, tk::TAG_RADIUS, Color32::TRANSPARENT, Stroke::new(chrome::FIELD_EDGE_WIDTH, named(tk::TAG_EDGE)), StrokeKind::Inside);
