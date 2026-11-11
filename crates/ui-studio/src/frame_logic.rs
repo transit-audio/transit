@@ -129,6 +129,7 @@ impl StudioApp {
         }
         if id.starts_with("session.save")
             || id.starts_with("file.bounce")
+            || id == "file.export_dawproject"
             || matches!(id, "track.bounce" | "clip.bounce" | "track.commit" | "track.freeze" | "track.flatten")
         {
             // Third-party plugins keep state the session can't see: store it first.

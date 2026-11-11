@@ -176,3 +176,27 @@ fn enter_saves_then_continues_and_escape_cancels() {
     assert!(t.app.engine.session().tracks.is_empty(), "then the new session it was asked for");
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn dawproject_export_discloses_the_fallback_then_enter_chooses_a_location() {
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let path = std::env::temp_dir().join(format!("transit-dawproject-dialog-{}-{stamp}.dawproject", std::process::id()));
+    let answer = path.to_string_lossy().into_owned();
+    let services = Services { pick_save: Some(Box::new(move |_| Some(answer.clone()))), ..Services::default() };
+    let mut t = T::with(services);
+    t.app.dialog = Some(Dialog::DawprojectExport);
+    t.frames(3);
+    let layout = t.modal("dawproject_export");
+    let detail = layout.detail_text.as_deref().unwrap_or_default();
+    assert!(detail.contains("full-length WAV stems") && detail.contains("MIDI clips remain editable"), "{detail}");
+    assert!(detail.contains("External Instrument audio is left out"), "{detail}");
+    assert_eq!(texts(&layout), ["Cancel", "Choose Location…"]);
+    t.input("ui.key", json!({"key": "Escape"}));
+    assert!(t.app.dialog.is_none() && !path.exists(), "Escape exports nothing");
+    t.app.dialog = Some(Dialog::DawprojectExport);
+    t.frames(2);
+    t.input("ui.key", json!({"key": "Enter"}));
+    assert!(t.app.dialog.is_none() && path.is_file(), "Enter chooses the location and exports");
+    assert!(t.app.status.starts_with("Exported DAWproject to "), "{}", t.app.status);
+    let _ = std::fs::remove_file(&path);
+}

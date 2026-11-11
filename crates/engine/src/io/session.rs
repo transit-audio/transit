@@ -217,14 +217,14 @@ pub fn session_file(path: &str) -> PathBuf {
     if p.extension().is_none() && !is_file { p.with_extension(transit_model::SESSION_EXTENSION) } else { p }
 }
 
-/// True when `command` would write a session over the existing `file`. Save, Save As and Save
-/// Copy In may write the open session's own file; other commands never ask.
+/// True when `command` writes to an existing `file` and needs `replace: true`. Save, Save As and
+/// Save Copy In may write the open session's own file; templates and exports always ask.
 pub fn replaces(e: &Engine, command: &str, file: &Path) -> bool {
     match command {
         "session.save" | "session.save_as" | "session.save_copy" => {
             file.exists() && !e.path.as_deref().is_some_and(|own| same_path(Path::new(own), file))
         }
-        "session.save_template" | "file.export_selected_tracks_as_session" => file.exists(),
+        "session.save_template" | "file.export_selected_tracks_as_session" | "file.export_dawproject" => file.exists(),
         _ => false,
     }
 }

@@ -291,6 +291,7 @@ fn services(logger: Option<&'static logging::AppLogger>) -> Services {
             let d = match ext.as_str() {
                 "wav" | "aif" | "aiff" | "flac" | "opus" => rfd::FileDialog::new().add_filter("Audio", &[ext.as_str()]),
                 "vstpreset" | "clappreset" => rfd::FileDialog::new().add_filter("Plug-in preset", &[ext.as_str()]),
+                "dawproject" => rfd::FileDialog::new().add_filter("DAWproject", &["dawproject"]),
                 _ => rfd::FileDialog::new().add_filter("Session", &["transit"]),
             };
             let d = match path.parent().filter(|dir| !dir.as_os_str().is_empty() && dir.is_dir()) {
