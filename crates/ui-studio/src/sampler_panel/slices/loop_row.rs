@@ -185,15 +185,15 @@ pub(crate) fn show(
     let mut y = inner.min.y + label_h + sections::LABEL_GAP + widgets::knob::cell(widgets::knob::Size::M).y + sections::ROW_GAP;
     let uid = dev.uid();
     let stored = zs.as_ref().map_or(LoopMode::Off, |z| z.loop_mode);
-    if let Some(i) = segments(&mut body, uid, pos2(inner.min.x, y), index(stored), &mut row) {
-        if let Some(z) = &zs {
-            let fields = match i {
-                0 => json!({"region": {"loop_mode": "off"}}),
-                1 => json!({"region": {"loop_mode": "forward"}, "playback": {"mode": "gate"}}),
-                _ => json!({"region": {"loop_mode": "ping_pong", "crossfade": 0}, "playback": {"mode": "gate"}}),
-            };
-            edit::zone(app, dev, v, z.zone, fields);
-        }
+    if let Some(i) = segments(&mut body, uid, pos2(inner.min.x, y), index(stored), &mut row)
+        && let Some(z) = &zs
+    {
+        let fields = match i {
+            0 => json!({"region": {"loop_mode": "off"}}),
+            1 => json!({"region": {"loop_mode": "forward"}, "playback": {"mode": "gate"}}),
+            _ => json!({"region": {"loop_mode": "ping_pong", "crossfade": 0}, "playback": {"mode": "gate"}}),
+        };
+        edit::zone(app, dev, v, z.zone, fields);
     }
     crossfade(app, &mut body, dev, v, zs.as_ref(), pos2(row.track[2] + tokens::SPACE[1], y), &mut row);
     y += segmented::HEIGHT;
