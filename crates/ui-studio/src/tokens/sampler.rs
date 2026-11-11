@@ -42,6 +42,17 @@ pub const LOCK_GLYPH_COLOR: &str = "text.faint";
 pub const SEED_REROLL_ICON: &str = "dices";
 pub const SEED_SEQUENTIAL: &str = "ink.arrow";
 pub const VIEW_SWITCH_FONT: &str = "sans";
+/// The Slices view's bench: (fill, ink, edge) of an Auto, a Manual and the selected slice's flag,
+/// the selected marker's line, (fill, ink) of the end boundary's flag, the Manual handle's line
+/// and fill, and the waveform's midline.
+pub const BENCH_AUTO_FLAG: [&str; 3] = ["surface.panel", "text.faint", "line"];
+pub const BENCH_MANUAL_FLAG: [&str; 3] = ["surface.selected", "text", "line.strong"];
+pub const BENCH_SELECTED_FLAG: [&str; 3] = ["signal", "surface.inset", "signal"];
+pub const BENCH_SELECTED_LINE: &str = "signal";
+pub const BENCH_END_FLAG: [&str; 2] = ["surface.selected", "text.muted"];
+pub const BENCH_HANDLE_LINE: &str = "text";
+pub const BENCH_HANDLE_FILL: &str = "surface.inset";
+pub const BENCH_MIDLINE: &str = "line.inset";
 /// The Pads bar's Start note field (`startNote`; `sampler_panel::bar` draws it).
 pub const START_NOTE_LABEL: &str = "Start note";
 pub const START_NOTE_FONT: &str = "mono";
@@ -85,6 +96,21 @@ pub const STRINGS: &[(&str, &str)] = &[
     ("bench/sliceLoop/glyphForward", SLICE_LOOP_GLYPH_FORWARD),
     ("bench/sliceLoop/glyphPingPong", SLICE_LOOP_GLYPH_PING_PONG),
     ("bench/flagStripLine", BENCH_FLAG_STRIP_LINE),
+    ("bench/autoFlag/fill", BENCH_AUTO_FLAG[0]),
+    ("bench/autoFlag/ink", BENCH_AUTO_FLAG[1]),
+    ("bench/autoFlag/edge", BENCH_AUTO_FLAG[2]),
+    ("bench/manualFlag/fill", BENCH_MANUAL_FLAG[0]),
+    ("bench/manualFlag/ink", BENCH_MANUAL_FLAG[1]),
+    ("bench/manualFlag/edge", BENCH_MANUAL_FLAG[2]),
+    ("bench/selectedFlag/fill", BENCH_SELECTED_FLAG[0]),
+    ("bench/selectedFlag/ink", BENCH_SELECTED_FLAG[1]),
+    ("bench/selectedFlag/edge", BENCH_SELECTED_FLAG[2]),
+    ("bench/selectedLine", BENCH_SELECTED_LINE),
+    ("bench/endFlag/fill", BENCH_END_FLAG[0]),
+    ("bench/endFlag/ink", BENCH_END_FLAG[1]),
+    ("bench/handleLine", BENCH_HANDLE_LINE),
+    ("bench/handleFill", BENCH_HANDLE_FILL),
+    ("bench/midline", BENCH_MIDLINE),
     ("type/zoneLabel/font", TYPE[0].1),
     ("type/rrTag/font", TYPE[1].1),
     ("type/octaveName/font", TYPE[2].1),
@@ -131,6 +157,23 @@ pub const SLICE_LOOP_BAND: f32 = 4.0;
 pub const SLICE_LOOP_WASH_ALPHA: f32 = 0.07;
 pub const SLICE_LOOP_HATCH_ALPHA: f32 = 0.28;
 pub const BENCH_ZOOMS: [f32; 4] = [1.0, 2.0, 4.0, 8.0];
+/// The bench well's height, its flags (height, top inset, minimum width, padding a side, edge),
+/// the end line's width and its flag's radii, the Manual handle's inset from the well's foot and
+/// its stroke, and the time ruler (row height; tick step in seconds, the finer step from zoom 4).
+pub const BENCH_WELL_HEIGHT: f32 = 188.0;
+pub const BENCH_FLAG_HEIGHT: f32 = 16.0;
+pub const BENCH_FLAG_INSET: f32 = 1.0;
+pub const BENCH_FLAG_MIN_WIDTH: f32 = 18.0;
+pub const BENCH_FLAG_PADDING_X: f32 = 4.0;
+pub const BENCH_FLAG_EDGE_WIDTH: f32 = 1.0;
+pub const BENCH_END_WIDTH: f32 = 2.0;
+pub const BENCH_END_FLAG_RADIUS: [f32; 4] = [3.0, 0.0, 0.0, 3.0];
+pub const BENCH_HANDLE_INSET: f32 = 3.0;
+pub const BENCH_HANDLE_STROKE: f32 = 1.5;
+pub const BENCH_RULER_HEIGHT: f32 = 12.0;
+pub const BENCH_RULER_STEP: f32 = 0.5;
+pub const BENCH_RULER_FINE_STEP: f32 = 0.1;
+pub const BENCH_RULER_FINE_FROM_ZOOM: f32 = 4.0;
 /// The flag's corner radii (top left, top right, bottom right, bottom left).
 pub const BENCH_FLAG_RADIUS: [f32; 4] = [0.0, 3.0, 3.0, 0.0];
 pub const CHIP: f32 = 22.0;
@@ -177,6 +220,23 @@ pub const METRICS: &[(&str, f32)] = &[
     ("bench/zooms/1", BENCH_ZOOMS[1]),
     ("bench/zooms/2", BENCH_ZOOMS[2]),
     ("bench/zooms/3", BENCH_ZOOMS[3]),
+    ("bench/wellHeight", BENCH_WELL_HEIGHT),
+    ("bench/flagHeight", BENCH_FLAG_HEIGHT),
+    ("bench/flagInset", BENCH_FLAG_INSET),
+    ("bench/flagMinWidth", BENCH_FLAG_MIN_WIDTH),
+    ("bench/flagPaddingX", BENCH_FLAG_PADDING_X),
+    ("bench/flagEdgeWidth", BENCH_FLAG_EDGE_WIDTH),
+    ("bench/endWidth", BENCH_END_WIDTH),
+    ("bench/endFlag/radius/0", BENCH_END_FLAG_RADIUS[0]),
+    ("bench/endFlag/radius/1", BENCH_END_FLAG_RADIUS[1]),
+    ("bench/endFlag/radius/2", BENCH_END_FLAG_RADIUS[2]),
+    ("bench/endFlag/radius/3", BENCH_END_FLAG_RADIUS[3]),
+    ("bench/handleInset", BENCH_HANDLE_INSET),
+    ("bench/handleStroke", BENCH_HANDLE_STROKE),
+    ("bench/ruler/height", BENCH_RULER_HEIGHT),
+    ("bench/ruler/step", BENCH_RULER_STEP),
+    ("bench/ruler/fineStep", BENCH_RULER_FINE_STEP),
+    ("bench/ruler/fineFromZoom", BENCH_RULER_FINE_FROM_ZOOM),
     ("bench/flagRadius/0", BENCH_FLAG_RADIUS[0]),
     ("bench/flagRadius/1", BENCH_FLAG_RADIUS[1]),
     ("bench/flagRadius/2", BENCH_FLAG_RADIUS[2]),
