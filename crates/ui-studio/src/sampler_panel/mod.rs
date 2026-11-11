@@ -15,9 +15,8 @@
 //! Pads view, Playback (Level, Pan, Tune, Fine, the trigger mode, Reverse, Key track) and Amp
 //! Envelope (Attack, Decay, Sustain, Release); the footer with the load readout.
 //!
-//! An instance on the legacy one-sample path ([`legacy`]) shows its sample line, Load Sample,
-//! Clear and the legacy parameter rows as before, and a New Kit button that makes the patch
-//! (`mix.sampler_new_patch`) and switches the window to the pads.
+//! Every Sampler is a kit (ADR 0041 amendment 2026-11-11, #455): an instance without a patch, or
+//! with one this build cannot edit, shows the kept-as-saved note and plays silence.
 //!
 //! Every edit goes through the C2 commands ([`behavior`]), one undo step per gesture; the live
 //! state (the hit fill, the cut) comes from what the instrument publishes through its tap
@@ -28,7 +27,6 @@ mod behavior;
 mod grid;
 pub mod instrument;
 mod kit_load;
-mod legacy;
 mod live;
 pub(crate) mod pad_actions;
 pub mod slices;
@@ -47,8 +45,6 @@ mod drop_routing_tests;
 mod grid_tests;
 #[cfg(test)]
 mod kit_load_tests;
-#[cfg(test)]
-mod legacy_tests;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]
@@ -131,8 +127,6 @@ pub struct PadsView {
     /// Auditions so far and the last one as (note, velocity): with or without a player.
     pub auditions: u64,
     pub last_audition: Option<(u8, u8)>,
-    /// The legacy body's height as last drawn (its egui rows size themselves).
-    pub legacy_h: Option<f32>,
     /// The Slices view's zoom, scroll, selected slice and last state read.
     pub slices: slices::SlicesView,
     /// The Instrument view's selected zone, last state read and gestures.
@@ -153,7 +147,6 @@ impl Default for PadsView {
             held_track: None,
             auditions: 0,
             last_audition: None,
-            legacy_h: None,
             slices: slices::SlicesView::default(),
             instrument: instrument::InstrumentView::default(),
         }
@@ -222,21 +215,12 @@ pub struct StripLayout {
     pub hint_rect: [f32; 4],
 }
 
-/// The legacy one-sample body as last drawn.
-#[derive(Debug, Clone, Default)]
-pub struct LegacyLayout {
-    pub panel: [f32; 4],
-    pub new_kit: [f32; 4],
-}
-
 /// The whole panel as last drawn, for `ui.inspect`-style checks and the tests.
 #[derive(Debug, Clone, Default)]
 pub struct SamplerLayout {
     pub window: [f32; 4],
     pub title: TitleLayout,
-    /// The legacy one-sample body (`None` on the pads).
-    pub legacy: Option<LegacyLayout>,
-    /// The shared view bar, including the legacy body.
+    /// The shared view bar.
     pub bar: bar::BarLayout,
     pub placeholder: Option<(String, [f32; 4])>,
     /// The Slices view's bench (`None` on the other views).
@@ -308,15 +292,14 @@ pub(crate) struct PadData {
     pub name: String,
 }
 
-/// The ready patch of the Sampler on `key`'s track (`None`: the legacy one-sample path, or a patch
-/// this build cannot edit).
+/// The ready patch of the Sampler on `key`'s track (`None`: no patch, or a patch this build cannot
+/// edit).
 pub(crate) fn patch_at(s: &Session, key: (TrackId, usize)) -> Option<PatchV1> {
     let ins = if key.1 == transit_mix::INSTRUMENT_SLOT { s.track(key.0)?.instrument.as_ref() } else { None }?;
     ins.sampler_patch.as_ref()?.ready().cloned()
 }
 
-/// Whether the instance has a patch at all (ready or kept opaque): the pads view rather than the
-/// legacy one.
+/// Whether the instance has a patch at all (ready or kept opaque).
 pub(crate) fn has_patch(s: &Session, key: (TrackId, usize)) -> bool {
     key.1 == transit_mix::INSTRUMENT_SLOT && s.track(key.0).and_then(|t| t.instrument.as_ref()).is_some_and(|i| i.sampler_patch.is_some())
 }
@@ -393,10 +376,6 @@ fn inside_width(app: &StudioApp, avail: f32) -> f32 {
 pub fn content_height(app: &StudioApp, ctx: &egui::Context, key: (TrackId, usize), width: f32) -> f32 {
     let Some(ins) = app.builtin_at(key) else { return 0.0 };
     let s = app.engine.session();
-    if !has_patch(s, key) {
-        let measured = app.builtin_editor.devices.sampler.views.get(&ins.uid.get()).and_then(|v| v.legacy_h);
-        return measured.unwrap_or(legacy::ESTIMATE);
-    }
     let width = inside_width(app, width);
     let w = width - 2.0 * space::WINDOW_PADDING;
     let p = measurer(ctx);
@@ -448,14 +427,9 @@ pub(crate) fn body(app: &mut StudioApp, ui: &mut Ui, dev: Dev, lay: &mut EditorL
     let origin = ui.cursor().min;
     let o = r4(Rect::from_min_size(origin, egui::Vec2::ZERO));
     out.body_origin = [o[0], o[1]];
-    if !has_patch(app.engine.session(), dev.key) {
-        let h = legacy::show(app, ui, dev, Rect::from_min_size(origin, vec2(width, 0.0)), lay, out);
-        view(app, dev.uid()).legacy_h = Some(h);
-        ui.allocate_rect(Rect::from_min_max(origin, pos2(origin.x + width, origin.y + h)), Sense::hover());
-        return;
-    }
     let Some(patch) = patch_at(app.engine.session(), dev.key) else {
-        // A patch this build cannot edit: it is kept as saved and plays silence.
+        // A patch this build cannot edit, or none (a Sampler only a hand-made session can hold):
+        // it is kept as saved and plays silence.
         let note =
             app.engine.session().track(dev.key.0).and_then(|t| t.instrument.as_ref()).and_then(|i| i.sampler_patch.as_ref()).and_then(|p| p.note(""));
         let r = Rect::from_min_size(origin + vec2(space::WINDOW_PADDING, space::WINDOW_PADDING), vec2(width - 2.0 * space::WINDOW_PADDING, 40.0));

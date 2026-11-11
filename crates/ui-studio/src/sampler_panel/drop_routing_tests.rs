@@ -78,21 +78,16 @@ fn a_drop_with_a_stale_pointer_waits_for_the_pointer_and_lands_on_the_pad_under_
 }
 
 #[test]
-fn the_legacy_window_loads_its_one_sample_without_an_import() {
-    let mut t = T::new();
-    let tr = t.sampler_track();
-    t.open_card(0);
-    let clips = t.clip_count();
+fn a_kits_window_loads_nothing_from_a_file_dropped_off_the_grid() {
+    // Kept from the retired one-sample panel's tests (#455): on the pads, a file dropped off the
+    // grid is not loaded.
+    let (mut t, tr) = T::open();
     let hit = t.sample("Hit.wav", 2400);
-    t.drop_file(&hit, mid(t.panel(tr).legacy.unwrap().panel));
-    assert!(t.window(tr).sample.starts_with("Hit"), "{}", t.window(tr).sample);
-    assert_eq!(t.clip_count(), clips, "no arrangement clip");
-    // Negative control: the same file beside the window imports and leaves the sample alone.
-    let other = t.sample("Other.wav", 2400);
-    let at = arrangement_point(&t, tr);
-    t.drop_file(&other, at);
-    assert_eq!(t.clip_count(), clips + 1);
-    assert!(t.window(tr).sample.starts_with("Hit"));
+    let footer = t.panel(tr).footer;
+    t.drop_file(&hit, mid(footer));
+    let ins = t.app.engine.session().track(tr).unwrap().instrument.clone().unwrap();
+    assert!(ins.sample.is_none());
+    assert!(t.patch(tr).zones.is_empty());
 }
 
 #[test]

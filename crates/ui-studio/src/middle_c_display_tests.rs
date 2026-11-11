@@ -116,32 +116,6 @@ fn the_midi_mappings_table_names_a_note_source_in_the_setting() {
     assert!(sources(&r).contains(&"CC 7".to_string()), "the CC row is untouched");
 }
 
-#[test]
-fn the_built_in_editors_note_parameters_follow_the_setting() {
-    let mut r = Rig::new();
-    r.app.ui.show_devices = true;
-    let t = crate::tests::new_track(&mut r.app, json!({"kind": "instrument"}));
-    crate::tests::one_sample_sampler(&mut r.app, t);
-    r.app.focus(t);
-    r.frames(4);
-    let button = r.app.mixer.devices.cards[0].editor_button;
-    r.click(button);
-    let rows = |r: &Rig| {
-        let w = r.app.builtin_editor.windows.iter().find(|w| w.key.0 == t).expect("the Sampler's window");
-        ["root_note", "key_low", "key_high"].map(|id| w.rows.iter().find(|row| row.param == id).map(|row| row.value.clone()).unwrap())
-    };
-    let before = rows(&r);
-    assert_eq!(before, ["C3 (60)", "C-2 (0)", "G8 (127)"]);
-    let (mut gone, mut new) = r.flip(C4);
-    let after = rows(&r);
-    assert_eq!(after, ["C4 (60)", "C-1 (0)", "G9 (127)"], "the next frame");
-    let (mut want_gone, mut want_new) = (before.to_vec(), after.to_vec());
-    for v in [&mut gone, &mut new, &mut want_gone, &mut want_new] {
-        v.sort();
-    }
-    assert_eq!((gone, new), (want_gone, want_new), "nothing else in the frame changed");
-}
-
 /// ADR 0051 decision 6: MusicXML keeps its own convention (scientific pitch, C4 = 60) and never
 /// reads the setting: the export of one clip is byte-identical under both.
 #[test]

@@ -19,7 +19,7 @@ impl StudioApp {
                 return Err(self.status.clone());
             }
             // Not offered for a plug-in (`drop_target`), kept refused here.
-            Target::Pad { .. } | Target::SamplerWindow { .. } => {
+            Target::Pad { .. } => {
                 self.status = format!("Drop {name} on a track, a mixer strip or the device chain");
                 return Err(self.status.clone());
             }

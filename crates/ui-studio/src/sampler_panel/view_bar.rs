@@ -1,6 +1,6 @@
 //! Shared view navigation and the Pads view's folder action. Navigation is session UI state.
 
-use super::{SamplerLayout, bar, view};
+use super::{SamplerLayout, view};
 use crate::StudioApp;
 use crate::device_editor::Dev;
 use crate::theme::TOKENS;
@@ -157,7 +157,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, summary: &str, re
     let action = response.rect;
     out.bar.load_kit = Some(r4(action));
     out.bar.load_enabled = ready;
-    let response = response.on_disabled_hover_text("Choose New Kit first");
+    let response = response.on_disabled_hover_text("This Sampler patch is kept as saved: this version cannot load a kit into it");
     if response.clicked() {
         super::kit_load::pick(app, dev);
     }
@@ -185,14 +185,6 @@ pub(crate) fn placeholder(app: &mut StudioApp, ui: &Ui, uid: u64, rect: Rect, ou
     out.placeholder = Some((text, r4(drawn)));
 }
 
-/// A legacy patch keeps its existing controls and offers New Kit explicitly on every view.
-pub(crate) fn legacy_bar(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, out: &mut SamplerLayout) {
-    show(app, ui, dev, "One sample · New Kit to load pads", false, rect, out);
-}
-
 pub(crate) fn is_pads(app: &mut StudioApp, uid: u64) -> bool {
     view(app, uid).view == View::Pads
 }
-
-/// Space occupied by a bar and the gap before the body.
-pub(crate) const HEIGHT_WITH_GAP: f32 = bar::HEIGHT_WITH_GAP;

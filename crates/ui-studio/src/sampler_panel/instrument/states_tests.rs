@@ -1,6 +1,6 @@
 //! The Instrument view's states through the panel's rig (README, Sampler views, States): empty
-//! with its drop target, Load… and a drop, a refused file, loading, missing media, the legacy
-//! one-sample patch, and over capacity (every zone in use, a ninth alternative).
+//! with its drop target, Load… and a drop, a refused file, loading, missing media, and over
+//! capacity (every zone in use, a ninth alternative).
 
 use super::super::slices::bench;
 use super::super::test_rig::{T, mid};
@@ -149,20 +149,6 @@ fn missing_media_hatches_the_well_names_the_file_and_keeps_ids_and_places() {
     assert!(l.key_map.zone(1).is_some());
     assert_eq!(l.group_panel.unwrap().layers.iter().map(|r| r.chips.len()).sum::<usize>(), 3);
     assert_eq!(t.patch(tr).zones, before.zones, "nothing rewritten");
-}
-
-#[test]
-fn a_legacy_patch_shows_new_kit_on_the_instrument_view() {
-    let mut t = T::new();
-    let tr = t.sampler_track();
-    t.open_card(0);
-    let switch = t.panel(tr).bar.switch.unwrap();
-    t.click(mid(switch.segments[0]), 1);
-    let p = t.panel(tr);
-    assert!(p.instrument.is_none(), "no Instrument view on the one-sample path");
-    let legacy = p.legacy.expect("the legacy body with its New Kit notice");
-    assert!(legacy.new_kit != [0.0; 4]);
-    assert!(t.app.engine.session().track(tr).unwrap().instrument.as_ref().unwrap().sampler_patch.is_none(), "never converted on open");
 }
 
 /// Layer 0 of `grouped()` filled to `count` alternatives (zones 5 on, with zone 1's source).

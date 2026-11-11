@@ -19,7 +19,7 @@
 //! sections at 40 percent; a refused file is the engine's text in the note row, nothing loaded;
 //! the zone waveform reads `Analyzing…` while its source's peaks are not there, and hatches with
 //! a card naming the file when its audio is missing (the zone, its id and its round-robin place
-//! kept). A legacy one-sample patch shows the shared New Kit notice ([`super::legacy`]).
+//! kept).
 
 pub mod fade_fields;
 pub mod group_actions;

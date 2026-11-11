@@ -61,34 +61,9 @@ fn view_bar_is_on_every_view_and_switching_changes_no_routing_or_parameters() {
     t.open_card(0);
     assert_eq!(t.panel(tr).bar.switch.unwrap().selected, 2, "reopening retains the instance's view");
     let second = t.sampler_track();
-    t.app.run("mix.sampler_new_patch", json!({"track": second.0})).unwrap();
-    t.frames(3);
     t.open_card(0);
     assert_eq!(t.panel(second).bar.switch.unwrap().selected, 1, "another instance starts on Pads");
     assert_eq!(t.panel(tr).bar.switch.unwrap().selected, 2);
-}
-
-#[test]
-fn legacy_views_keep_the_sample_until_new_kit_is_chosen() {
-    let mut t = T::new();
-    let tr = t.sampler_track();
-    let sample = t.sample("Legacy.wav", 64);
-    t.app.run("mix.sampler_load", json!({"track": tr.0, "path": sample})).unwrap();
-    t.open_card(0);
-    let before = serde_json::to_value(t.app.engine.session()).unwrap();
-    let undo = t.undo_len();
-    for index in [0, 2, 1] {
-        pick(&mut t, tr, index);
-        assert!(t.panel(tr).legacy.is_some());
-        assert!(!t.panel(tr).bar.load_enabled);
-        assert_eq!(serde_json::to_value(t.app.engine.session()).unwrap(), before);
-        assert_eq!(t.undo_len(), undo);
-    }
-    pick(&mut t, tr, 2);
-    t.click(mid(t.panel(tr).legacy.unwrap().new_kit), 1);
-    assert_eq!(t.panel(tr).bar.switch.unwrap().selected, 1);
-    assert_eq!(t.panel(tr).pads.len(), 16);
-    assert_eq!(t.undo_len(), undo + 1);
 }
 
 pub(super) fn hundredths(x: f32) -> i32 {
@@ -153,14 +128,6 @@ fn expand_to_rack_is_shown_unavailable_at_the_unused_control_alpha() {
     assert_eq!(serde_json::to_value(t.app.engine.session()).unwrap(), before, "it takes no input");
     assert_eq!(t.undo_len(), undo);
     assert!(t.app.dialog.is_none() && t.app.builtin_editor.devices.sampler.views.values().all(|v| v.kit_preview.is_none()));
-    // A legacy patch's Load kit is unavailable the same way.
-    let mut t = T::new();
-    let tr = t.sampler_track();
-    let sample = t.sample("Legacy.wav", 64);
-    t.app.run("mix.sampler_load", json!({"track": tr.0, "path": sample})).unwrap();
-    t.open_card(0);
-    assert!(!t.panel(tr).bar.load_enabled);
-    assert_eq!(t.panel(tr).bar.opacity, [crate::tokens::sampler::UNUSED_CONTROL_ALPHA; 2]);
 }
 
 #[test]

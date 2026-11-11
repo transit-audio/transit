@@ -15,11 +15,7 @@ use serde_json::json;
 use transit_dsp::{ParamInfo, PluginInfo, Taper, Unit};
 use transit_model::{Insert, TrackId};
 
-const SAMPLER: &str = "sampler";
-/// Sampler parameters that are MIDI notes, and the ones that are whole numbers besides.
-const NOTE_PARAMS: [&str; 3] = ["root_note", "key_low", "key_high"];
-const WHOLE_PARAMS: [&str; 2] = ["vel_low", "vel_high"];
-/// What the sample picker offers and a dropped file may be.
+/// What a dropped audio file may be.
 const AUDIO_EXTS: &[&str] = &["wav", "wave", "bwf", "aif", "aiff", "aifc", "flac", "mp3", "ogg", "oga", "m4a", "aac", "mp4", "caf"];
 
 /// One parameter row as last drawn.
@@ -39,7 +35,7 @@ pub struct EditorLayout {
     pub uid: u64,
     pub title: String,
     pub rect: [f32; 4],
-    /// The bypass toggle (inserts only), the Sampler's "Load Sample…" button and its sample line.
+    /// The bypass toggle (inserts only).
     pub bypass: [f32; 4],
     /// The preset dropdown.
     pub preset: [f32; 4],
@@ -51,8 +47,6 @@ pub struct EditorLayout {
     pub level: String,
     pub gr_bar: [f32; 4],
     pub gr: String,
-    pub picker: [f32; 4],
-    pub sample: String,
     pub rows: Vec<RowLayout>,
     /// The credit line of a ported instrument's panel (the Macro Oscillator), empty elsewhere.
     pub credit: String,
@@ -93,20 +87,8 @@ fn rect4(r: egui::Rect) -> [f32; 4] {
     [r.min.x, r.min.y, r.max.x, r.max.y]
 }
 
-/// Whether a built-in instrument's parameter only takes whole numbers.
-fn whole_number(plugin: &str, param: &str) -> bool {
-    plugin == SAMPLER && (NOTE_PARAMS.contains(&param) || WHOLE_PARAMS.contains(&param))
-}
-
-/// A parameter's value as its row shows it: the Sampler's notes by name, in the Middle C setting.
-fn format_param(plugin: &str, p: &ParamInfo, value: f32, middle_c: transit_midi::MiddleC) -> String {
-    if plugin == SAMPLER && NOTE_PARAMS.contains(&p.id) {
-        let n = value.round().clamp(0.0, 127.0) as u8;
-        return format!("{} ({n})", transit_midi::note_name(n, middle_c));
-    }
-    if whole_number(plugin, p.id) {
-        return format!("{:.0}", value.round());
-    }
+/// A parameter's value as its row shows it, in the Middle C setting.
+fn format_param(p: &ParamInfo, value: f32, middle_c: transit_midi::MiddleC) -> String {
     crate::middle_c::param_text(p, value, middle_c)
 }
 
@@ -172,8 +154,6 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             level: String::new(),
             gr_bar: [0.0; 4],
             gr: String::new(),
-            picker: [0.0; 4],
-            sample: String::new(),
             rows: Vec::new(),
             credit: String::new(),
             addition: String::new(),
@@ -233,12 +213,6 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
-pub(crate) fn load_sample(app: &mut StudioApp, t: TrackId, path: &str) {
-    if let Err(e) = app.run("mix.sampler_load", json!({"track": t.0, "path": path})) {
-        app.status = e;
-    }
-}
-
 fn body(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, instrument: bool, lay: &mut EditorLayout) {
     let (t, slot) = key;
     ui.horizontal(|ui| {
@@ -257,9 +231,6 @@ fn body(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     if let Some(rows) = crate::panel::layout(&ins.plugin) {
         crate::panel::show(app, ui, key, ins, info, rows, lay);
         return;
-    }
-    if ins.plugin == SAMPLER {
-        sample_picker(app, ui, t, ins, lay);
     }
     egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
         ui.spacing_mut().slider_width = 170.0;
@@ -303,9 +274,6 @@ pub(crate) fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize),
         (r, double)
     } else {
         let mut sl = egui::Slider::new(&mut x, p.min..=p.max).show_value(false);
-        if whole_number(&ins.plugin, p.id) {
-            sl = sl.integer();
-        }
         if p.taper == Taper::Log && p.min > 0.0 {
             sl = sl.logarithmic(true);
         }
@@ -326,39 +294,9 @@ pub(crate) fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize),
         crate::chrome::context_menu(&menu, app.learn_checks(key.0, &control)).show(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
         crate::midi_learn::mark(app, ui.painter(), resp.rect, key.0, control);
     }
-    let shown = format_param(&ins.plugin, p, x, app.ui.middle_c);
+    let shown = format_param(p, x, app.ui.middle_c);
     ui.label(RichText::new(&shown).monospace().color(TOKENS.text_dim));
     lay.rows.push(RowLayout { param: p.id.to_string(), control: rect4(resp.rect), value: shown });
-}
-
-/// The Sampler's sample line, "Load Sample…" and Clear.
-pub(crate) fn sample_picker(app: &mut StudioApp, ui: &mut Ui, t: TrackId, ins: &Insert, lay: &mut EditorLayout) {
-    let name = ins.sample.and_then(|id| app.engine.session().source(id)).map(|s| s.name.clone());
-    let secs = ins.sample.and_then(|id| app.engine.session().pool.get(id)).map(|a| a.frames() as f64 / f64::from(a.buffer.sample_rate.max(1)));
-    lay.sample = match (name, secs) {
-        (Some(n), Some(s)) => format!("{n} · {s:.2} s"),
-        (Some(n), None) => format!("{n}: missing"),
-        _ => "No sample".to_string(),
-    };
-    ui.horizontal(|ui| {
-        let can_pick = app.services.pick_open.is_some();
-        let load = ui.add_enabled(can_pick, egui::Button::new("Load Sample…"));
-        lay.picker = rect4(load.rect);
-        let load = if can_pick { load } else { load.on_disabled_hover_text("Drop an audio file on this window") };
-        if load.clicked()
-            && let Some(path) = app.services.pick_open.as_ref().and_then(|pick| pick("mix.sampler_load", None))
-        {
-            load_sample(app, t, &path);
-        }
-        if ins.sample.is_some() && ui.button("Clear").clicked() {
-            let _ = app.run("mix.sampler_clear", json!({"track": t.0}));
-        }
-    });
-    ui.label(RichText::new(&lay.sample).monospace().color(TOKENS.text_dim));
-    if ins.sample.is_none() {
-        ui.label(RichText::new("The Sampler is silent until it has a sample: load one or drop an audio file here.").color(TOKENS.text_dim));
-    }
-    ui.add_space(4.0);
 }
 
 /// Switches on the scope tap of every open bespoke panel and off the ones whose window is gone.

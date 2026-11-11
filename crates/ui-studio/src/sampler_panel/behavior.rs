@@ -118,15 +118,6 @@ pub(crate) fn control(app: &mut StudioApp, dev: Dev, id: &str, value: f32) -> bo
     merged(app, dev, "mix.sampler_control", json!({"id": id, "value": value}), &key)
 }
 
-/// New Kit: the instrument gets an empty patch and the window shows the pads.
-pub(crate) fn new_kit(app: &mut StudioApp, dev: Dev) -> bool {
-    let landed = run(app, dev, "mix.sampler_new_patch", json!({}));
-    if landed {
-        view(app, dev.uid()).view = super::View::Pads;
-    }
-    landed
-}
-
 /// The zone a sample dropped on pad `pad` goes to: the pad's own, else the lowest free slot.
 pub(crate) fn zone_for(patch: &PatchV1, pad: u8) -> Option<u16> {
     patch.pad(pad).zone.or_else(|| (0..ZONES as u16).find(|z| patch.zone(*z).is_none()))

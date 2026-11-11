@@ -3,7 +3,7 @@
 //! 1/60 s). Audio files are generated here; a dropped file is injected as egui receives one.
 
 use super::SamplerLayout;
-use crate::builtin_editor::{EditorLayout, RowLayout};
+use crate::builtin_editor::EditorLayout;
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -33,10 +33,6 @@ pub struct T {
 
 pub fn mid(r: [f32; 4]) -> (f32, f32) {
     ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0)
-}
-
-pub fn info() -> &'static transit_dsp::PluginInfo {
-    transit_dsp::plugin_info(super::SAMPLER).unwrap()
 }
 
 /// A file egui reports as dropped.
@@ -215,11 +211,10 @@ impl T {
         p
     }
 
-    /// An instrument track with a one-sample (legacy) Sampler, focused.
+    /// An instrument track with a new Sampler (an empty kit, #454), focused.
     pub fn sampler_track(&mut self) -> TrackId {
-        let r = self.app.run("track.new", json!({"kind": "instrument"})).unwrap();
+        let r = self.app.run("track.new", json!({"kind": "instrument", "instrument": "sampler"})).unwrap();
         let t = TrackId(r["tracks"][0].as_u64().unwrap());
-        crate::tests::one_sample_sampler(&mut self.app, t);
         self.app.focus(t);
         self.frames(4);
         t
@@ -229,8 +224,6 @@ impl T {
     pub fn open() -> (T, TrackId) {
         let mut t = T::new();
         let tr = t.sampler_track();
-        t.app.run("mix.sampler_new_patch", json!({"track": tr.0})).unwrap();
-        t.frames(3);
         t.open_card(0);
         (t, tr)
     }
@@ -262,10 +255,6 @@ impl T {
 
     pub fn panel(&self, t: TrackId) -> SamplerLayout {
         *self.window(t).sampler.expect("the Sampler's panel")
-    }
-
-    pub fn row(&self, t: TrackId, param: &str) -> RowLayout {
-        self.window(t).rows.into_iter().find(|r| r.param == param).unwrap_or_else(|| panic!("a row for `{param}`"))
     }
 
     /// The track's patch.

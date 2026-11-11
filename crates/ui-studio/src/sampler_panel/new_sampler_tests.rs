@@ -21,7 +21,6 @@ fn a_new_instrument_track_with_a_sampler_opens_on_an_empty_kit_in_one_step() {
     t.frames(4);
     t.open_card(0);
     let p = t.panel(tr);
-    assert!(p.legacy.is_none(), "not the one-sample panel");
     assert_eq!(p.pads.len(), 16, "the Pads view");
     assert!(p.bar.load_kit.is_some() && p.bar.load_enabled, "Load kit available");
     // One undo removes the track and its Sampler.
@@ -41,5 +40,5 @@ fn the_factory_default_on_a_kit_leaves_the_kit() {
     assert!(ins.sample.is_none() && ins.sampler_patch.is_some(), "still a kit");
     assert_eq!(t.patch(tr), before, "its zones and pads kept");
     let p = t.panel(tr);
-    assert!(p.legacy.is_none() && p.pads.len() == 16);
+    assert_eq!(p.pads.len(), 16);
 }

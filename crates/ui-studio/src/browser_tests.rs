@@ -1023,19 +1023,13 @@ fn dragging_a_folder_row_onto_the_locations_header_adds_it() {
     assert_eq!(t.app.ui.browser.locations.len(), 2);
 }
 
-// ---- Drops onto a Sampler's window: its pads, or a legacy Sampler's window. ----
+// ---- Drops onto a Sampler's window: its pads. ----
 
 impl T {
-    /// The instrument track plays a Sampler (a kit when `kit`, else the one-sample legacy path),
-    /// its editor window open.
-    fn sampler(&mut self, kit: bool) -> (TrackId, usize) {
+    /// The instrument track plays a Sampler (an empty kit, #454), its editor window open.
+    fn sampler(&mut self) -> (TrackId, usize) {
         let tr = self.track(TrackKind::Instrument);
-        // A Sampler made now is a kit (#454); the one-sample path is an earlier build's session.
-        if kit {
-            self.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
-        } else {
-            crate::tests::one_sample_sampler(&mut self.app, tr);
-        }
+        self.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
         let key = (tr, transit_mix::INSTRUMENT_SLOT);
         self.app.toggle_editor(key);
         // The window sizes itself to its content over its first frames.
@@ -1046,10 +1040,6 @@ impl T {
     fn sampler_panel(&self, key: (TrackId, usize)) -> crate::sampler_panel::SamplerLayout {
         let w = self.app.builtin_editor.windows.iter().find(|w| w.key == key).expect("the Sampler's window");
         *w.sampler.clone().expect("the Sampler's panel")
-    }
-
-    fn window_rect(&self, key: (TrackId, usize)) -> [f32; 4] {
-        self.app.builtin_editor.windows.iter().find(|w| w.key == key).expect("the Sampler's window").rect
     }
 
     fn pad_at(&self, key: (TrackId, usize), index: u8) -> (f32, f32) {
@@ -1106,7 +1096,7 @@ impl T {
 fn an_audio_file_dragged_onto_pad_a2_binds_the_pad_in_one_step_and_imports_no_clip() {
     let mut t = T::new();
     t.add_and_expand();
-    let key = t.sampler(true);
+    let key = t.sampler();
     let from = mid(t.row_named("loop 90.wav").rect.unwrap());
     let a2 = t.pad_at(key, 1);
     let (clips, u0) = (t.all_clips(), t.undo_len());
@@ -1131,7 +1121,7 @@ fn an_audio_file_dragged_onto_pad_a2_binds_the_pad_in_one_step_and_imports_no_cl
 fn an_audio_file_released_on_the_pads_window_strip_does_nothing() {
     let mut t = T::new();
     t.add_and_expand();
-    let key = t.sampler(true);
+    let key = t.sampler();
     let from = mid(t.row_named("loop 90.wav").rect.unwrap());
     let strip = mid(t.sampler_panel(key).strip.panel);
     let (clips, u0) = (t.all_clips(), t.undo_len());
@@ -1150,27 +1140,9 @@ fn an_audio_file_released_on_the_pads_window_strip_does_nothing() {
 }
 
 #[test]
-fn an_audio_file_released_on_a_legacy_sampler_window_loads_as_its_sample() {
-    let mut t = T::new();
-    t.add_and_expand();
-    let key = t.sampler(false);
-    let legacy = t.sampler_panel(key).legacy.expect("the legacy body").panel;
-    let from = mid(t.row_named("loop 90.wav").rect.unwrap());
-    let clips = t.all_clips();
-    t.hold_over(from, mid(legacy));
-    assert_eq!(t.app.browser.layout.drop_target, Some(crate::browser::Target::SamplerWindow { dev: key }));
-    assert_eq!(t.app.browser.layout.drop, Some(t.window_rect(key)));
-    t.release_at(mid(legacy));
-    let ins = t.app.engine.session().track(key.0).unwrap().instrument.clone().unwrap();
-    assert!(ins.sample.is_some(), "the sample loaded: {}", t.app.status);
-    assert_eq!(t.all_clips(), clips, "no clip");
-    assert!(!t.app.imports.active(), "no import queued");
-}
-
-#[test]
 fn a_plugin_dragged_over_a_pad_has_no_target() {
     let mut t = T::new();
-    let key = t.sampler(true);
+    let key = t.sampler();
     let a4 = t.pad_at(key, 3);
     // Audio tracks until one's header or lane lies under pad A4: a plug-in target behind the window.
     let covered = |t: &T| {

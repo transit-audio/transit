@@ -160,36 +160,37 @@ fn the_editor_button_opens_a_window_for_a_built_in_instrument_and_effect() {
 
 #[test]
 fn dragging_a_slider_writes_the_value_in_one_undo_step() {
+    // The generic parameter rows, on the Gain (the one-sample Sampler's rows are gone, #455).
     let mut t = T::new();
-    let tr = t.track("instrument");
-    crate::tests::one_sample_sampler(&mut t.app, tr);
+    let tr = t.track("audio");
+    t.app.add_device(tr, "gain").unwrap();
     t.frames(4);
     t.open_editor(0);
-    let id = "velocity";
-    let p = info("sampler").param(id).unwrap();
+    let id = "gain";
+    let p = info("gain").param(id).unwrap();
     let before = t.undo_len();
     let r = t.row(tr, id);
     let from = mid(r.control);
     t.send("ui.drag", json!({"x": from.0, "y": from.1, "to_x": r.control[0] + 6.0, "to_y": from.1}));
-    let v = t.param(tr, None, id).expect("the drag wrote the parameter");
+    let v = t.param(tr, Some(0), id).expect("the drag wrote the parameter");
     assert!(v < p.default, "dragged toward the left end: {v}");
     assert_eq!(t.undo_len(), before + 1, "one undo step for the whole drag");
     assert_eq!(t.row(tr, id).value, p.format(v), "the row shows the value");
     t.app.run("edit.undo", json!({})).unwrap();
-    assert!(t.param(tr, None, id).is_none_or(|u| (u - p.default).abs() < 1e-3), "undo restores the default");
+    assert!(t.param(tr, Some(0), id).is_none_or(|u| (u - p.default).abs() < 1e-3), "undo restores the default");
 }
 
 #[test]
 fn double_clicking_a_control_resets_it() {
     let mut t = T::new();
-    let tr = t.track("instrument");
-    crate::tests::one_sample_sampler(&mut t.app, tr);
+    let tr = t.track("audio");
+    t.app.add_device(tr, "gain").unwrap();
     t.frames(4);
-    t.app.run("mix.instrument_param", json!({"track": tr.0, "param": "velocity", "value": 10.0})).unwrap();
+    t.app.run("mix.insert_param", json!({"track": tr.0, "slot": 0, "param": "gain", "value": 10.0})).unwrap();
     t.frames(3);
     t.open_editor(0);
-    t.click(mid(t.row(tr, "velocity").control), 2);
-    assert_eq!(t.param(tr, None, "velocity"), Some(default_of("sampler", "velocity")));
+    t.click(mid(t.row(tr, "gain").control), 2);
+    assert_eq!(t.param(tr, Some(0), "gain"), Some(default_of("gain", "gain")));
 }
 
 #[test]
@@ -217,52 +218,6 @@ fn an_effects_editor_has_a_bypass_toggle_and_follows_the_insert_when_reordered()
     t.frames(2);
     t.click(mid(t.row(tr, id).control), 2);
     assert_eq!(t.param(tr, Some(1), id), Some(default_of("gain", id)));
-}
-
-/// A tiny mono 16-bit WAV.
-fn wav(path: &std::path::Path) {
-    let samples: Vec<i16> = (0..4800).map(|i| ((i as f32 * 0.1).sin() * 8000.0) as i16).collect();
-    let data_len = (samples.len() * 2) as u32;
-    let mut b = Vec::new();
-    b.extend(b"RIFF");
-    b.extend((36 + data_len).to_le_bytes());
-    b.extend(b"WAVEfmt ");
-    b.extend(16u32.to_le_bytes());
-    b.extend(1u16.to_le_bytes());
-    b.extend(1u16.to_le_bytes());
-    b.extend(48_000u32.to_le_bytes());
-    b.extend(96_000u32.to_le_bytes());
-    b.extend(2u16.to_le_bytes());
-    b.extend(16u16.to_le_bytes());
-    b.extend(b"data");
-    b.extend(data_len.to_le_bytes());
-    for s in samples {
-        b.extend(s.to_le_bytes());
-    }
-    std::fs::write(path, b).unwrap();
-}
-
-#[test]
-fn the_sampler_window_has_a_sample_picker_and_names_the_sample() {
-    let mut t = T::new();
-    let tr = t.track("instrument");
-    crate::tests::one_sample_sampler(&mut t.app, tr);
-    t.frames(4);
-    let dir = std::env::temp_dir().join(format!("transit-sampler-editor-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("hit.wav");
-    wav(&file);
-    let path = file.to_string_lossy().into_owned();
-    t.app.services.pick_open =
-        Some(Box::new(move |purpose: &str, _: Option<&std::path::Path>| (purpose == "mix.sampler_load").then(|| path.clone())));
-    t.open_editor(0);
-    let w = t.window(tr);
-    assert_eq!(w.sample, "No sample");
-    assert!(w.picker != [0.0; 4], "the picker is shown");
-    t.click(mid(w.picker), 1);
-    let s = t.window(tr).sample;
-    assert!(s.starts_with("hit"), "the loaded sample is named: {s}");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

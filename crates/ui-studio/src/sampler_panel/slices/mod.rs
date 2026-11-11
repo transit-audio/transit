@@ -216,7 +216,7 @@ fn apply(app: &mut StudioApp, dev: Dev, v: &mut SlicesView, intent: Intent) {
         Intent::Mode(m) => edit::mode(app, dev, v, m),
         Intent::Snap(on) => edit::snap(app, dev, v, on),
         Intent::Load => {
-            if let Some(path) = app.services.pick_open.as_ref().and_then(|pick| pick("mix.sampler_load", None)) {
+            if let Some(path) = app.services.pick_open.as_ref().and_then(|pick| pick("mix.sampler_slice_loop", None)) {
                 edit::load(app, dev, v, &path);
             }
         }

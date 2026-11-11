@@ -5,7 +5,7 @@
 //!
 //! The error banner is the Notice card with the error's `meter.hot` edge and circle-alert (an
 //! error carries its color on its glyph and edge; the message stays `text`). The Notice omits its
-//! `info` glyph until the bundled icon set has it, as the legacy notice does.
+//! `info` glyph until the bundled icon set has it.
 
 use crate::theme::TOKENS;
 use crate::tokens::{self, chrome as c, sampler as tk};
