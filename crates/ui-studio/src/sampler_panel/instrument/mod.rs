@@ -13,12 +13,15 @@
 //! zone or handle drag (nothing is sent), never while typing, a menu or a modal is open, or another
 //! window has the keyboard, and it never falls through to the arrangement.
 
+pub mod fade_fields;
 pub mod key_map;
 pub mod key_map_gestures;
 pub mod state;
 pub mod zone_panel;
 pub mod zone_wave;
 
+#[cfg(test)]
+mod fades_tests;
 #[cfg(test)]
 mod hardening_tests;
 #[cfg(test)]
@@ -61,7 +64,8 @@ pub struct InstrumentView {
     /// The last conflict check: the edits it was made for and its reason.
     pub conflict: Option<(Vec<ZoneEdit>, Option<String>)>,
     pub wave_drag: Option<WaveDrag>,
-    pub crossfade_text: Option<zone_panel::Draft>,
+    /// The Zone panel's typing (the crossfade and fades fields).
+    pub typed: zone_panel::Typing,
     /// The last refused edit, in the engine's words (until the next edit that lands).
     pub note: Option<String>,
     /// Every command this view sent, latest last (bounded): `id {params}` (the tests read it).
@@ -261,7 +265,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
         (Some(st), Some(z)) => {
             let (file, frames, audio) = source_of(&s, st, z);
             let inputs = zone_panel::PanelInputs { file, frames, audio: audio.as_deref(), names: mc };
-            let (zl, intent) = zone_panel::show(ui, uid, st, z, &inputs, &mut v.wave_drag, &mut v.crossfade_text, zone_rect);
+            let (zl, intent) = zone_panel::show(ui, uid, st, z, &inputs, &mut v.wave_drag, &mut v.typed, zone_rect);
             lo.zone = Some(zl);
             if let Some(i) = intent {
                 apply(app, dev, &mut v, z.zone, i);
@@ -352,6 +356,10 @@ fn apply(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, zone: u16, inten
         }}),
         zone_panel::Intent::Crossfade(n, x) => {
             send(app, dev, v, "mix.sampler_zone_edit", json!({"zone": n, "region": {"crossfade": x}}));
+            return;
+        }
+        zone_panel::Intent::Fades(n, f) => {
+            send(app, dev, v, "mix.sampler_zone_edit", json!({"zone": n, "playback": {"fades": f}}));
             return;
         }
         zone_panel::Intent::Invalid(reason) => {

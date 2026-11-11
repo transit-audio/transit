@@ -43,6 +43,8 @@ pub enum Intent {
     Region(Handle, u64),
     /// Typed text that is not a crossfade: the reason, for the note row.
     Invalid(String),
+    /// Zone (from 1) and its four fade widths as typed (`{key_lo, key_hi, vel_lo, vel_hi}`).
+    Fades(u16, serde_json::Value),
 }
 
 /// The crossfade field's typing: the zone it is typed for, the text, and whether the text was
@@ -98,6 +100,8 @@ pub struct ZonePanelLayout {
     pub crossfade_label: [f32; 4],
     pub crossfade: [f32; 4],
     pub crossfade_text: String,
+    /// The four fade fields while they show.
+    pub fade_fields: Vec<[f32; 4]>,
     /// The field rings as refused typing.
     pub crossfade_error: bool,
     /// The field has the keyboard or holds typing (the device window then keeps Escape).
@@ -184,7 +188,14 @@ fn clipped(p: &egui::Painter, role: &tokens::TypeRole, text: &str, ink: egui::Co
     r
 }
 
-/// Draws the panel into `rect` for instance `uid`. `text` is the crossfade field's typing.
+/// The panel's typing: the crossfade field's and the fades fields'.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Typing {
+    pub crossfade: Option<Draft>,
+    pub fades: Option<super::fade_fields::FadeDraft>,
+}
+
+/// Draws the panel into `rect` for instance `uid`. `typed` is the fields' typing.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn show(
     ui: &mut Ui,
@@ -193,9 +204,13 @@ pub(crate) fn show(
     z: &Zone,
     inputs: &PanelInputs,
     wave_drag: &mut Option<WaveDrag>,
-    text: &mut Option<Draft>,
+    typed: &mut Typing,
     rect: Rect,
 ) -> (ZonePanelLayout, Option<Intent>) {
+    let text = &mut typed.crossfade;
+    let edit_id = crossfade_id(uid).with("editing");
+    let kept = ui.data(|d| d.get_temp::<String>(edit_id).is_some());
+    let mut typing_now = false;
     let t = &TOKENS;
     let p = ui.painter().clone();
     let mut out = ZonePanelLayout { panel: r4(rect), crossfade_opacity: 1.0, ..ZonePanelLayout::default() };
@@ -229,6 +244,17 @@ pub(crate) fn show(
     let fh = line_h(&p, &tokens::VALUE);
     let mut x = inner.min.x;
     for (label, value) in fields(state, z, inputs.names) {
+        if label == "fades " {
+            let f = super::fade_fields::show(ui, uid, state, z, pos2(x, y + fh / 2.0), &mut typed.fades, kept);
+            typing_now |= f.focused;
+            if f.intent.is_some() {
+                intent = f.intent;
+            }
+            out.fields.push((f.text, r4(f.rect)));
+            out.fade_fields = f.fields;
+            x = f.rect.max.x + tk::ZONE_FIELD_GAP;
+            continue;
+        }
         let lr = widgets::role_text(&p, &tokens::READOUT_DISPLAY, label, t.text_faint, Align2::LEFT_CENTER, pos2(x, y + fh / 2.0));
         let vr = widgets::role_text(&p, &tokens::VALUE, &value, t.text, Align2::LEFT_CENTER, pos2(lr.max.x, y + fh / 2.0));
         out.fields.push((format!("{label}{value}"), r4(lr.union(vr))));
@@ -320,20 +346,13 @@ pub(crate) fn show(
         })
         .inner
         .on_hover_text(&out.crossfade_tip);
-    // While the field has the keyboard its text is also kept where the device window's Escape
-    // rule gives typing up (`<id>.editing`): gone when the field lets go, Escape was pressed.
     // Whether it had the keyboard last frame is kept beside it (egui can report the letting go on
     // two frames; only the first is the field's).
-    let (edit_id, had_id) = (crossfade_id(uid).with("editing"), crossfade_id(uid).with("had"));
-    let kept = ui.data(|d| d.get_temp::<String>(edit_id).is_some());
+    let had_id = crossfade_id(uid).with("had");
     let had = ui.data(|d| d.get_temp::<bool>(had_id).unwrap_or(false));
     let focused = resp.has_focus();
     ui.data_mut(|d| d.insert_temp(had_id, focused));
-    if resp.has_focus() {
-        ui.data_mut(|d| d.insert_temp(edit_id, typing.clone()));
-    } else {
-        ui.data_mut(|d| d.remove::<String>(edit_id));
-    }
+    typing_now |= focused;
     if resp.has_focus() || resp.changed() {
         // The draft belongs to the zone it is typed for; an edit clears the error.
         *text = Some(Draft { zone: z.zone, text: typing.clone(), error: error && !resp.changed() });
@@ -357,7 +376,15 @@ pub(crate) fn show(
         p.rect_stroke(field, crate::tokens::chrome::RADIUS_CONTROL, super::super::bar::field_stroke(super::super::bar::FieldState::Error), StrokeKind::Inside);
     }
     out.crossfade_error = error;
-    out.typing = resp.has_focus() || text.as_ref().is_some_and(|d| !d.error);
+    out.typing = typing_now || text.as_ref().is_some_and(|d| !d.error) || typed.fades.is_some();
+    // While a field has the keyboard the panel's typing key is set where the device window's
+    // Escape rule gives typing up (`<crossfade id>.editing`): gone when a field lets go, Escape
+    // was pressed.
+    if typing_now {
+        ui.data_mut(|d| d.insert_temp(edit_id, String::new()));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(edit_id));
+    }
     out.crossfade_text = text.as_ref().map_or(stored, |d| d.text.clone());
     let fo = clipped(&p, &tokens::LABEL_CONTROL, FORWARD_ONLY, fade(t.text_faint), pos2(field.max.x + tk::ZONE_ROW_GAP, cy), inner.max.x);
     out.forward_only = r4(fo);

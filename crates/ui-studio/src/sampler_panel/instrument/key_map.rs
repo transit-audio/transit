@@ -140,6 +140,8 @@ pub struct ZoneRecord {
     pub rr: Option<(String, [f32; 4])>,
     /// A pad zone's lock.
     pub lock: Option<[f32; 4]>,
+    /// Edge fades: the rect at full fill inside the wedges, and the fill's alpha at the edges.
+    pub fade: Option<([f32; 4], f32)>,
 }
 
 /// One key of the keyboard as drawn.
@@ -269,6 +271,26 @@ impl Frame {
         let (a, w) = self.keys.span(k[1]);
         let r = Rect::from_min_max(pos2(x0, self.y(f32::from(v[1]))), pos2(a + w, self.y(f32::from(v[0]) - 1.0)));
         r.shrink(tk::ZONE_INSET)
+    }
+
+    /// The part of zone `z`'s rect `r` at full fill: inside its key fades (a low width n is full
+    /// from key `lo + n`, a high one up to key `hi - n`) and its velocity fades (full from
+    /// velocity `lo + n`, up to `hi - n`).
+    fn fade_inner(&self, z: &Zone, r: Rect, w: [u8; 4]) -> Rect {
+        let [klo, khi] = z.keys;
+        let [vlo, vhi] = z.velocities;
+        let left = if w[0] > 0 { self.keys.span(klo.saturating_add(w[0])).0 } else { r.min.x };
+        let right = if w[1] > 0 {
+            let (a, width) = self.keys.span(khi.saturating_sub(w[1]));
+            a + width
+        } else {
+            r.max.x
+        };
+        let bottom = if w[2] > 0 { self.y(f32::from(vlo.saturating_add(w[2])) - 1.0) } else { r.max.y };
+        let top = if w[3] > 0 { self.y(f32::from(vhi.saturating_sub(w[3]))) } else { r.min.y };
+        let cx = |x: f32| x.clamp(r.min.x, r.max.x);
+        let cy = |y: f32| y.clamp(r.min.y, r.max.y);
+        Rect::from_min_max(pos2(cx(left), cy(top)), pos2(cx(right).max(cx(left)), cy(bottom).max(cy(top))))
     }
 
     fn rect_of(&self, state: &State, z: &Zone) -> Rect {
@@ -421,7 +443,16 @@ fn zone(p: &egui::Painter, state: &State, f: &Frame, z: &Zone, inputs: &Inputs, 
     };
     let dashed = dashed || (selected && pad.is_some());
     let zr = tk::ZONE_RADIUS;
-    p.rect_filled(r, zr, fill);
+    // Edge fades (the widths playback uses): the fill runs down to the floor across them.
+    let fades = z.fades_used.all();
+    let fade = (pad.is_none() && fades != [0; 4]).then(|| {
+        let inner = f.fade_inner(z, r, fades);
+        fade_fill(p, r, inner, fades, fill);
+        (r4(inner), tk::FADE_FLOOR_ALPHA)
+    });
+    if fade.is_none() {
+        p.rect_filled(r, zr, fill);
+    }
     if dashed {
         dashed_rect(p, r, Stroke::new(edge_width, edge));
     } else {
@@ -470,7 +501,32 @@ fn zone(p: &egui::Painter, state: &State, f: &Frame, z: &Zone, inputs: &Inputs, 
         dot_ink,
         rr,
         lock,
+        fade,
     }
+}
+
+/// The zone fill with its edge fades: a mesh over `r` whose alpha is full inside `inner` and runs
+/// to `fadeFloorAlpha` at each faded edge (the lower of the two factors where both axes fade).
+fn fade_fill(p: &egui::Painter, r: Rect, inner: Rect, fades: [u8; 4], fill: Color32) {
+    let floor = tk::FADE_FLOOR_ALPHA;
+    let xs = [r.min.x, inner.min.x, inner.max.x, r.max.x];
+    let ys = [r.min.y, inner.min.y, inner.max.y, r.max.y];
+    let fx = [if fades[0] > 0 { floor } else { 1.0 }, 1.0, 1.0, if fades[1] > 0 { floor } else { 1.0 }];
+    let fy = [if fades[3] > 0 { floor } else { 1.0 }, 1.0, 1.0, if fades[2] > 0 { floor } else { 1.0 }];
+    let mut mesh = egui::Mesh::default();
+    for (j, y) in ys.iter().enumerate() {
+        for (i, x) in xs.iter().enumerate() {
+            mesh.colored_vertex(pos2(*x, *y), fill.gamma_multiply(fx[i].min(fy[j])));
+        }
+    }
+    for j in 0..3u32 {
+        for i in 0..3u32 {
+            let a = j * 4 + i;
+            mesh.add_triangle(a, a + 1, a + 5);
+            mesh.add_triangle(a, a + 5, a + 4);
+        }
+    }
+    p.add(Shape::mesh(mesh));
 }
 
 /// The keyboard: white keys (pad keys fainter), octave names on the Cs, black keys over them;
