@@ -253,6 +253,51 @@ fn drawn(state: &State, selected: Option<u16>) -> Vec<&Zone> {
     out
 }
 
+/// A direction of the keyboard's zone selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Toward {
+    Left,
+    Right,
+    Above,
+    Below,
+}
+
+/// Where a zone sits on the map: its keys and velocities (a pad's zone: the pad's note at full
+/// velocity).
+fn extent(state: &State, z: &Zone) -> ([u8; 2], [u8; 2]) {
+    match z.pad.and_then(|p| state.pad_note(p)) {
+        Some(n) => ([n, n], [1, 127]),
+        None => (z.keys, z.velocities),
+    }
+}
+
+/// The zone the keyboard selects from `selected` toward `to`, among the zones the map draws:
+/// left and right step through them by their lowest key (then lowest velocity, then number); above
+/// and below take the nearest zone over overlapping keys with higher or lower velocities.
+pub fn neighbor(state: &State, selected: u16, to: Toward) -> Option<u16> {
+    let shown = drawn(state, Some(selected));
+    let me = shown.iter().find(|z| z.zone == selected)?;
+    let (mk, mv) = extent(state, me);
+    match to {
+        Toward::Left | Toward::Right => {
+            let mut order: Vec<(u8, u8, u16)> = shown.iter().map(|z| (extent(state, z).0[0], extent(state, z).1[0], z.zone)).collect();
+            order.sort_unstable();
+            let i = order.iter().position(|o| o.2 == selected)?;
+            let j = if to == Toward::Left { i.checked_sub(1)? } else { i + 1 };
+            order.get(j).map(|o| o.2)
+        }
+        Toward::Above | Toward::Below => {
+            let over =
+                shown.iter().filter(|z| z.zone != selected).map(|z| (extent(state, z), z.zone)).filter(|((k, _), _)| k[0] <= mk[1] && mk[0] <= k[1]);
+            if to == Toward::Above {
+                over.filter(|((_, v), _)| v[0] > mv[1]).min_by_key(|((_, v), n)| (v[0], *n)).map(|(_, n)| n)
+            } else {
+                over.filter(|((_, v), _)| v[1] < mv[0]).max_by_key(|((_, v), n)| (v[1], u16::MAX - *n)).map(|(_, n)| n)
+            }
+        }
+    }
+}
+
 /// The map's frame: the well's inside, the keys, and velocity to y.
 struct Frame {
     area: Rect,
@@ -604,6 +649,8 @@ fn input(
     {
         if let Some(pad) = z.pad {
             resp.clone().on_hover_text(pad_tip(state, pad, names));
+        } else if part.is_none() {
+            resp.clone().on_hover_text(zone_tip());
         } else if let Some(part) = part {
             ui.ctx().set_cursor_icon(match part {
                 Part::Low | Part::High => egui::CursorIcon::ResizeHorizontal,
@@ -648,6 +695,13 @@ fn input(
         }
     }
     intent
+}
+
+/// A zone's tooltip: how to select it and remove it from the keyboard.
+pub fn zone_tip() -> String {
+    use crate::shortcuts::Action as A;
+    let select = super::tip("Select: click, or", &[A::SamplerPreviousZone, A::SamplerNextZone, A::SamplerZoneAbove, A::SamplerZoneBelow]);
+    format!("{select}; {}", super::tip("remove", &[A::SamplerRemoveZone]))
 }
 
 /// Why a pad zone's edges do not drag (its tooltip).

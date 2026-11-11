@@ -43,6 +43,14 @@ fn view_bar_is_on_every_view_and_switching_changes_no_routing_or_parameters() {
             }
             assert!(panel.pads.is_empty() && panel.bar.load_kit.is_none());
             t.key("Delete");
+            if index == 0 {
+                // On the Instrument view Delete asks to remove the selected zone (pass M2); Escape
+                // answers Cancel.
+                let uid = *t.app.builtin_editor.devices.sampler.views.keys().next().unwrap();
+                assert!(t.app.builtin_editor.devices.sampler.views[&uid].instrument.confirm.is_some(), "Delete asks first");
+                t.key("Escape");
+                assert!(t.app.builtin_editor.devices.sampler.views[&uid].instrument.confirm.is_none());
+            }
             t.key("Backspace");
             assert_eq!(serde_json::to_value(t.app.engine.session()).unwrap(), before, "hidden pads do not take Delete or Backspace");
         }

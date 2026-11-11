@@ -18,6 +18,7 @@ pub mod group_actions;
 pub mod group_panel;
 pub mod key_map;
 pub mod key_map_gestures;
+pub mod keyboard;
 pub mod state;
 pub mod zone_panel;
 pub mod zone_wave;
@@ -30,6 +31,8 @@ mod group_panel_tests;
 mod hardening_tests;
 #[cfg(test)]
 mod key_map_tests;
+#[cfg(test)]
+mod keyboard_tests;
 #[cfg(test)]
 mod reach_tests;
 #[cfg(test)]
@@ -49,6 +52,7 @@ use crate::tokens::{SPACE, layout as space, radius, sampler as tk};
 use crate::widgets::{r4, section_bar};
 use egui::{Color32, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use key_map_gestures::{Drag, ZoneEdit};
+pub(crate) use keyboard::keys;
 use serde_json::{Value, json};
 use transit_model::sampler_patch::LoopMode;
 use zone_wave::{Handle, WaveDrag};
@@ -87,6 +91,10 @@ pub struct InstrumentView {
     /// The seed field's typing and the velocity fader's value while dragged.
     pub seed_text: Option<String>,
     pub fader: Option<f32>,
+    /// The waveform handle the nudges move: the last one pressed (S until then).
+    pub handle: Option<Handle>,
+    /// The zone Delete asked to remove (the question shows until it is answered).
+    pub confirm: Option<u16>,
 }
 
 /// The view as last drawn.
@@ -299,6 +307,9 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
             let inputs = zone_panel::PanelInputs { file, frames, audio: audio.as_deref(), names: mc };
             let (zl, intent) = zone_panel::show(ui, uid, st, z, &inputs, &mut v.wave_drag, &mut v.typed, kept, zone_rect);
             focused |= zl.focused;
+            if let Some(h) = zl.wave.touched {
+                v.handle = Some(h);
+            }
             lo.zone = Some(zl);
             if let Some(i) = intent {
                 apply(app, dev, &mut v, z.zone, i);
@@ -411,30 +422,4 @@ fn apply(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, zone: u16, inten
         zone_panel::Intent::Region(Handle::End, f) => json!({"end": f}),
     };
     send(app, dev, v, "mix.sampler_zone_edit", json!({"zone": zone, "region": region}));
-}
-
-/// The Instrument view's keys on the focused Sampler: Escape cancels a zone or handle drag (see
-/// the module notes). Runs before the device window's Escape, so the window stays.
-pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
-    let Some(uid) = app.builtin_editor.devices.focused else { return };
-    let modal = ctx.memory(|m| m.top_modal_layer().is_some());
-    if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || modal || egui::Popup::is_any_open(ctx) {
-        return;
-    }
-    let shown = app.ui.plugin_windows.iter().copied().any(|key| app.builtin_at(key).is_some_and(|i| i.uid.get() == uid && super::handles(&i.plugin)));
-    let Some(v) = app.builtin_editor.devices.sampler.views.get_mut(&uid) else { return };
-    if !shown || v.view != super::View::Instrument {
-        return;
-    }
-    let iv = &mut v.instrument;
-    // A drag is live only while a button is down (a stale one never takes Escape from the window).
-    let down = ctx.input(|i| i.pointer.any_down());
-    if down && (iv.drag.is_some() || iv.wave_drag.is_some()) && shortcuts::pressed(ctx, Action::SamplerCancelZoneDrag) {
-        if let Some(d) = iv.drag.as_mut() {
-            d.cancelled = true;
-        }
-        if let Some(d) = iv.wave_drag.as_mut() {
-            d.cancelled = true;
-        }
-    }
 }

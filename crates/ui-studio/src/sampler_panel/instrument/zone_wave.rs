@@ -77,6 +77,8 @@ pub struct WaveLayout {
     /// Waveform columns drawn and how many inside the region.
     pub columns: usize,
     pub inside: usize,
+    /// The handle a press took this frame (the keyboard's nudges move it).
+    pub touched: Option<Handle>,
 }
 
 /// The handles' hit areas: each line with a band of [`super::key_map::EDGE`] either side, and its
@@ -240,12 +242,19 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, w: &WaveInputs, drag: &mut Option<Wave
     if over.is_some() || drag.as_ref().is_some_and(|d| d.zone == w.zone) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
+    // A press on a handle makes it the one the keyboard's nudges move.
+    if ui.input(|i| i.pointer.primary_pressed())
+        && let Some(h) = ui.input(|i| i.pointer.press_origin()).filter(|at| area.contains(*at)).and_then(|at| grabs.handle_at(at))
+    {
+        out.touched = Some(h);
+    }
     if resp.drag_started()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && let Some(handle) = grabs.handle_at(origin)
     {
         let now = if handle == Handle::Start { w.span.start } else { w.span.end };
         *drag = Some(WaveDrag { zone: w.zone, handle, frame: now, cancelled: false, grab: origin.x - x_of(now) });
+        out.touched = Some(handle);
     }
     if resp.dragged()
         && let (Some(d), Some(at)) = (drag.as_mut(), resp.interact_pointer_pos())

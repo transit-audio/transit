@@ -269,7 +269,9 @@ pub(crate) fn show(
     let tip = if z.slice.is_some() {
         format!("Slice {}: its region and loop follow the slice (Slices view).", z.slice.as_ref().map_or(0, |s| s.slice))
     } else {
-        super::tip("Move: drag; cancel", &[crate::shortcuts::Action::SamplerCancelZoneDrag])
+        use crate::shortcuts::Action as A;
+        let nudges = [A::SamplerNudgeHandleEarlier, A::SamplerNudgeHandleLater, A::SamplerNudgeHandleEarlierTen, A::SamplerNudgeHandleLaterTen];
+        format!("{}; {}", super::tip("Move: drag; nudge", &nudges), super::tip("cancel", &[A::SamplerCancelZoneDrag]))
     };
     let w = zone_wave::WaveInputs {
         zone: z.zone,
@@ -375,7 +377,12 @@ pub(crate) fn show(
     }
     let error = text.as_ref().is_some_and(|d| d.error);
     if error {
-        p.rect_stroke(field, crate::tokens::chrome::RADIUS_CONTROL, super::super::bar::field_stroke(super::super::bar::FieldState::Error), StrokeKind::Inside);
+        p.rect_stroke(
+            field,
+            crate::tokens::chrome::RADIUS_CONTROL,
+            super::super::bar::field_stroke(super::super::bar::FieldState::Error),
+            StrokeKind::Inside,
+        );
     }
     out.crossfade_error = error;
     out.typing = typing_now || text.as_ref().is_some_and(|d| !d.error) || typed.fades.is_some();

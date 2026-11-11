@@ -35,6 +35,11 @@ list or a dialog keeps Escape for itself. **Window > Close All Editors** closes 
 | Sampler slices | Nudge marker earlier / later ×10 | Alt+Shift+Left / Alt+Shift+Right |
 | Sampler slices | Remove slice marker | Delete |
 | Sampler slices | Cancel marker drag | Escape |
+| Sampler instrument | Previous zone / Next zone | Left / Right |
+| Sampler instrument | Zone above / Zone below | Up / Down |
+| Sampler instrument | Nudge handle earlier / later | Alt+Left / Alt+Right |
+| Sampler instrument | Nudge handle earlier / later ×10 | Alt+Shift+Left / Alt+Shift+Right |
+| Sampler instrument | Remove zone | Delete |
 
 The focused Sampler's selected pad is cleared in one undo step. A text field, open menu, or
 dialog keeps the keys for itself. Right-click a pad for **Clear pad** and, when it stores its
@@ -51,7 +56,13 @@ the loop start. Escape cancels a marker drag in progress and sends nothing; othe
 window as usual. The keys never reach the arrangement while the Slices view has the keyboard.
 
 On the Instrument view, Escape cancels a key-map edge, root or waveform handle drag in progress
-and sends nothing; otherwise it closes the window as usual.
+and sends nothing; otherwise it closes the window as usual. Left and Right select the zone beside
+the selected one on the key map, Up and Down the next velocity layer over the same keys. The
+nudges move the zone waveform's handle you last pressed (S until then) by one frame (ten with
+Shift), one undo step each; a slice's handles stay locked. Delete asks before it removes the
+selected zone (Undo brings it back). A text field, a dialog, or another window having the keyboard
+keeps these keys; while a menu or other popup is open they do nothing, and they never reach the
+arrangement while the Instrument view has the keyboard.
 
 ## Interface and arrangement zoom
 

@@ -42,10 +42,13 @@ pub enum Scope {
     /// The focused Sampler's Slices view, the bench: the slice selection, the marker nudges and
     /// Delete (its own scope: Delete clears a pad on the Pads view).
     SamplerSlices,
+    /// The focused Sampler's Instrument view, the key map: the zone selection, the waveform
+    /// handles' nudges and Delete (its own scope, as the Slices view's).
+    SamplerInstrument,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 12] = [
+    pub const ALL: [Scope; 13] = [
         Scope::Global,
         Scope::Arrangement,
         Scope::PianoRoll,
@@ -58,6 +61,7 @@ impl Scope {
         Scope::Editor,
         Scope::Sampler,
         Scope::SamplerSlices,
+        Scope::SamplerInstrument,
     ];
 
     pub fn label(self) -> &'static str {
@@ -74,6 +78,7 @@ impl Scope {
             Scope::Editor => "Device editor",
             Scope::Sampler => "Sampler",
             Scope::SamplerSlices => "Sampler slices",
+            Scope::SamplerInstrument => "Sampler instrument",
         }
     }
 }
@@ -189,6 +194,15 @@ pub enum Action {
     SamplerRemoveMarker,
     SamplerCancelDrag,
     SamplerCancelZoneDrag,
+    SamplerPreviousZone,
+    SamplerNextZone,
+    SamplerZoneAbove,
+    SamplerZoneBelow,
+    SamplerNudgeHandleEarlier,
+    SamplerNudgeHandleLater,
+    SamplerNudgeHandleEarlierTen,
+    SamplerNudgeHandleLaterTen,
+    SamplerRemoveZone,
     ToggleAutomation,
     GridNarrow,
     GridWiden,
@@ -275,6 +289,36 @@ pub const TABLE: &[Shortcut] = &[
         Key::Escape,
         S::Sampler,
         "A key-map edge, root or waveform handle drag on the Instrument view; sends nothing.",
+    ),
+    row(A::SamplerPreviousZone, "Previous zone", NONE, Key::ArrowLeft, S::SamplerInstrument, "The zone to the left on the key map."),
+    row(A::SamplerNextZone, "Next zone", NONE, Key::ArrowRight, S::SamplerInstrument, "The zone to the right on the key map."),
+    row(A::SamplerZoneAbove, "Zone above", NONE, Key::ArrowUp, S::SamplerInstrument, "The next higher velocity layer over the same keys."),
+    row(A::SamplerZoneBelow, "Zone below", NONE, Key::ArrowDown, S::SamplerInstrument, "The next lower velocity layer over the same keys."),
+    row(
+        A::SamplerNudgeHandleEarlier,
+        "Nudge handle earlier",
+        ALT,
+        Key::ArrowLeft,
+        S::SamplerInstrument,
+        "The zone waveform's last-used handle (S or E), one frame; one undo step; the Slices view's nudge.",
+    ),
+    row(
+        A::SamplerNudgeHandleLater,
+        "Nudge handle later",
+        ALT,
+        Key::ArrowRight,
+        S::SamplerInstrument,
+        "The zone waveform's last-used handle (S or E), one frame; one undo step; the Slices view's nudge.",
+    ),
+    row(A::SamplerNudgeHandleEarlierTen, "Nudge handle earlier ×10", ALT_SHIFT, Key::ArrowLeft, S::SamplerInstrument, "Ten frames."),
+    row(A::SamplerNudgeHandleLaterTen, "Nudge handle later ×10", ALT_SHIFT, Key::ArrowRight, S::SamplerInstrument, "Ten frames."),
+    row(
+        A::SamplerRemoveZone,
+        "Remove zone",
+        NONE,
+        Key::Delete,
+        S::SamplerInstrument,
+        "The selected zone, after a question (the destructive-action pattern); one undo step.",
     ),
     // Transport.
     row(A::PlayStop, "Play / Stop", NONE, Key::Space, S::Global, "All DAWs."),
