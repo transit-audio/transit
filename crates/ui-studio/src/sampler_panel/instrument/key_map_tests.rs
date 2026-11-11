@@ -319,3 +319,37 @@ fn instrument_bar_reads_the_map_and_its_actions_are_unavailable() {
     assert_eq!(h(bar.instrument_actions[1].0[2]), h(bar.rect[2]), "right-aligned");
     assert_eq!(h(bar.instrument_actions[1].0[0] - bar.instrument_actions[0].0[2]), h(tk::VIEW_BAR_GAP));
 }
+
+#[test]
+fn a_group_members_side_edge_moves_the_whole_group_in_one_command() {
+    let (mut t, tr) = grouped();
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    let from = right_edge(&t, tr);
+    let to = (key_x(&t, tr, 55), from.1);
+    drag(&mut t, from, to);
+    for z in 1..=3 {
+        assert_eq!(stored(&t, tr, z).0, [48, 55], "zone {z}: one key range per group");
+    }
+    let s = sent(&t, log);
+    assert_eq!(s.len(), 1, "{s:?}");
+    for z in 1..=3 {
+        assert!(s[0].contains(&format!("\"zone\":{z}")), "zone {z} listed: {s:?}");
+    }
+    assert_eq!(t.undo_len(), undo + 1);
+}
+
+#[test]
+fn a_layers_top_edge_moves_all_its_alternatives_in_one_command() {
+    let (mut t, tr) = grouped();
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    let k = layout(&t, tr).key_map;
+    let r = k.zone(1).unwrap().rect;
+    let from = ((r[0] + r[2]) / 2.0 - 10.0, r[1] + 2.0);
+    let (top, bottom) = (k.well[1] + 1.0, k.well[3] - 1.0);
+    drag(&mut t, from, (from.0, bottom - 40.0 / 127.0 * (bottom - top)));
+    assert_eq!((stored(&t, tr, 1).1, stored(&t, tr, 2).1), ([1, 40], [1, 40]), "the layer's alternatives together");
+    assert_eq!(stored(&t, tr, 3).1, [64, 127], "the other layer stays");
+    let s = sent(&t, log);
+    assert!(s.len() == 1 && !s[0].contains("\"zone\":3"), "{s:?}");
+    assert_eq!(t.undo_len(), undo + 1);
+}

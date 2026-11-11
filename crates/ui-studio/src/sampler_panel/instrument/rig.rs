@@ -27,6 +27,21 @@ pub fn layered() -> (T, TrackId) {
     (t, tr)
 }
 
+/// Group 0 over keys 48 to 52: layer 0 (velocities 1 to 63) with alternatives zone 1 and zone 2,
+/// layer 1 (64 to 127) with zone 3 alone, all rooted at 50; a sample on pad A1 (zone 4); the
+/// Instrument view showing.
+pub fn grouped() -> (T, TrackId) {
+    let (mut t, tr) = T::open();
+    let m = |layer: u8, alternative: u8| json!({"group": 0, "layer": layer, "alternative": alternative});
+    for (z, vel, place) in [(1, [1, 63], m(0, 0)), (2, [1, 63], m(0, 1)), (3, [64, 127], m(1, 0))] {
+        zone(&mut t, tr, z, &format!("G{z}.wav"), 48_000, json!({"keys": [48, 52], "velocities": vel, "root": 50, "membership": place}));
+    }
+    let path = t.sample("Kick.wav", 4_800);
+    t.run("mix.sampler_zone_source", json!({"track": tr.0, "zone": 4, "pad": 1, "path": path.to_string_lossy()}));
+    show_instrument(&mut t, tr);
+    (t, tr)
+}
+
 pub fn show_instrument(t: &mut T, tr: TrackId) {
     let switch = t.panel(tr).bar.switch.unwrap();
     t.click(mid(switch.segments[0]), 1);
