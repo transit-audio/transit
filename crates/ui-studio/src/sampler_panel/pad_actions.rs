@@ -10,6 +10,11 @@ use serde_json::json;
 fn clear(app: &mut StudioApp, dev: Dev, index: u8) {
     let Ok(state) = app.engine.execute("mix.sampler_state", &json!({"track": dev.key.0.0})) else { return };
     let Some(pad) = state["pads"].as_array().and_then(|pads| pads.get(usize::from(index))) else { return };
+    // Nothing to clear (no zone, no name, no choke group, mute and solo off): no step at all.
+    let unset = pad["zone"].is_null() && pad["name"].is_null() && pad["choke"] == 0 && pad["mute"] == false && pad["solo"] == false;
+    if unset {
+        return;
+    }
     let mut steps = Vec::new();
     if let Some(zone) = pad["zone"].as_u64() {
         // A zone has at most one pad binding. Clearing it unbinds that pad in the same checked
@@ -66,7 +71,7 @@ pub(crate) fn menu(app: &mut StudioApp, response: &egui::Response, dev: Dev, ind
 /// Runs before arrangement shortcuts, only for the focused Sampler with its Pads view visible.
 pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
     let Some(uid) = app.builtin_editor.devices.focused else { return };
-    if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || egui::Popup::is_any_open(ctx) {
+    if ctx.egui_wants_keyboard_input() || app.dialog.is_some() {
         return;
     }
     let Some(key) =
@@ -77,7 +82,10 @@ pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
     if !super::has_patch(app.engine.session(), key) || !super::view_bar::is_pads(app, uid) || view(app, uid).kit_preview.is_some() {
         return;
     }
-    if crate::shortcuts::pressed(ctx, crate::shortcuts::Action::SamplerClearPad) {
+    let pressed = crate::shortcuts::pressed(ctx, crate::shortcuts::Action::SamplerClearPad);
+    // An open menu (the pad's own, or any other popup) holds the keyboard, as system menus do:
+    // the key is taken here and does nothing, so it never reaches the arrangement's Delete.
+    if pressed && !egui::Popup::is_any_open(ctx) {
         let Some(ins) = app.builtin_at(key) else { return };
         let Some(info) = transit_dsp::plugin_info(&ins.plugin) else { return };
         let selected = view(app, uid).selected;

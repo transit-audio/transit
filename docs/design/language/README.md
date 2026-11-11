@@ -415,7 +415,9 @@ The Pads grid's context menu uses the standard plain menu rows: **Clear pad** wi
 `Delete / Backspace`, followed by **Reset note** only for a pad with a stored note. Right-click
 selects that pad. Clear resets the binding, unused zone, name, choke, mute and solo in one undo
 step, keeping its trigger note; Reset note clears only the stored note, also in one step. The
-keyboard action belongs to the focused Pads view; typing and popups keep their keys. Refusals
+keyboard action belongs to the focused Pads view; typing keeps its keys, and while a menu or
+other popup is open the keys do nothing (the menu holds the keyboard, as system menus do), so they
+never reach the arrangement. Refusals
 use the existing error note below the hero row. In code: `sampler_panel/pad_actions.rs`.
 
 The Instrument and Slices views (ADR 0041), drawn at the built panel's design width, 976, with the same title bar, sections row and footer as the Pads view. Mockups: `chrome/SamplerInstrument.dc.html`, `chrome/SamplerSlices.dc.html` (the chrome canvas, Sampler views page).
