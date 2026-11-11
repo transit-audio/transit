@@ -54,10 +54,12 @@ pub enum Icon {
     /// Lucide lock: an edge or handle that does not drag (the Sampler's pad-bound zones and
     /// slice-bound handles, #270).
     Lock,
+    /// Lucide dices: a fresh random value (the Sampler's round-robin seed reroll, #270).
+    Dices,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 29] = [
+    pub const ALL: [Icon; 30] = [
         Icon::Rewind,
         Icon::Stop,
         Icon::Play,
@@ -87,6 +89,7 @@ impl Icon {
         Icon::ArrowRight,
         Icon::Zap,
         Icon::Lock,
+        Icon::Dices,
     ];
 
     /// The Lucide name (the file under `assets/icons/`), plus `-filled` for filled variants.
@@ -121,6 +124,7 @@ impl Icon {
             Icon::ArrowRight => "arrow-right",
             Icon::Zap => "zap",
             Icon::Lock => "lock",
+            Icon::Dices => "dices",
         }
     }
 
@@ -154,6 +158,7 @@ impl Icon {
             Icon::ArrowRight => include_bytes!("../assets/icons/arrow-right.svg"),
             Icon::Zap => include_bytes!("../assets/icons/zap.svg"),
             Icon::Lock => include_bytes!("../assets/icons/lock.svg"),
+            Icon::Dices => include_bytes!("../assets/icons/dices.svg"),
         }
     }
 
