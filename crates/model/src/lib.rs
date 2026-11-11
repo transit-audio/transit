@@ -37,6 +37,7 @@ pub mod sampler_fades;
 pub mod sampler_groups;
 pub mod sampler_loops;
 pub mod sampler_patch;
+pub mod sampler_portable;
 mod sampler_validate;
 pub use sampler_patch::SamplerPatch;
 mod session;
