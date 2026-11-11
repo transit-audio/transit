@@ -26,6 +26,8 @@ mod key_map_tests;
 #[cfg(test)]
 mod rig;
 #[cfg(test)]
+mod typing_tests;
+#[cfg(test)]
 mod zone_panel_tests;
 
 use super::{SamplerLayout, view};
@@ -57,7 +59,7 @@ pub struct InstrumentView {
     /// The last conflict check: the edits it was made for and its reason.
     pub conflict: Option<(Vec<ZoneEdit>, Option<String>)>,
     pub wave_drag: Option<WaveDrag>,
-    pub crossfade_text: Option<String>,
+    pub crossfade_text: Option<zone_panel::Draft>,
     /// The last refused edit, in the engine's words (until the next edit that lands).
     pub note: Option<String>,
     /// Every command this view sent, latest last (bounded): `id {params}`.
@@ -326,7 +328,14 @@ fn apply(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, zone: u16, inten
             LoopMode::Forward => "forward",
             LoopMode::PingPong => "ping_pong",
         }}),
-        zone_panel::Intent::Crossfade(x) => json!({"crossfade": x}),
+        zone_panel::Intent::Crossfade(n, x) => {
+            send(app, dev, v, "mix.sampler_zone_edit", json!({"zone": n, "region": {"crossfade": x}}));
+            return;
+        }
+        zone_panel::Intent::Invalid(reason) => {
+            v.note = Some(reason);
+            return;
+        }
         zone_panel::Intent::Region(Handle::Start, f) => json!({"start": f}),
         zone_panel::Intent::Region(Handle::End, f) => json!({"end": f}),
     };

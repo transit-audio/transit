@@ -38,8 +38,48 @@ pub struct PanelInputs<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
     LoopMode(LoopMode),
-    Crossfade(u64),
+    /// Zone (from 1) and its crossfade in source frames.
+    Crossfade(u16, u64),
     Region(Handle, u64),
+    /// Typed text that is not a crossfade: the reason, for the note row.
+    Invalid(String),
+}
+
+/// The crossfade field's typing: the zone it is typed for, the text, and whether the text was
+/// refused as not a crossfade (the field's error ring).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Draft {
+    pub zone: u16,
+    pub text: String,
+    pub error: bool,
+}
+
+/// The crossfade field's id on instance `uid` (the device window's Escape rule reads it).
+pub fn crossfade_id(uid: u64) -> egui::Id {
+    egui::Id::new(("sampler_zone_crossfade", uid))
+}
+
+/// What the field shows for `z`'s stored crossfade (`12.0 ms`).
+fn stored_text(z: &Zone) -> String {
+    format!("{} ms", crossfade_ms_text(z.crossfade, z.rate))
+}
+
+/// The reason typed text is not a crossfade.
+pub fn invalid(text: &str) -> String {
+    format!("No crossfade {}: type milliseconds, such as 12.5.", text.trim())
+}
+
+/// What committing `d` to zone `z` sends: nothing when the text still reads the stored value (a
+/// focus that comes and goes, or the shown value's rounding read back, never edits) or names the
+/// same frames; else the frames at the zone source's rate. Text that is not a number of
+/// milliseconds is refused with its reason (the engine checks the value's limits).
+fn commit(d: &Draft, z: &Zone) -> Result<Option<Intent>, String> {
+    if d.text.trim() == stored_text(z) {
+        return Ok(None);
+    }
+    let typed = d.text.trim().trim_end_matches("ms").trim();
+    let frames = typed.parse::<f64>().ok().and_then(tenths_of_ms).map(|t| crossfade_frames(t, z.rate)).ok_or_else(|| invalid(&d.text))?;
+    Ok((frames != z.crossfade).then_some(Intent::Crossfade(z.zone, frames)))
 }
 
 /// The panel as last drawn.
@@ -58,6 +98,10 @@ pub struct ZonePanelLayout {
     pub crossfade_label: [f32; 4],
     pub crossfade: [f32; 4],
     pub crossfade_text: String,
+    /// The field rings as refused typing.
+    pub crossfade_error: bool,
+    /// The field has the keyboard or holds typing (the device window then keeps Escape).
+    pub typing: bool,
     pub crossfade_tip: String,
     /// The crossfade field's opacity (dimmed under Ping-pong; still editable).
     pub crossfade_opacity: f32,
@@ -149,13 +193,21 @@ pub(crate) fn show(
     z: &Zone,
     inputs: &PanelInputs,
     wave_drag: &mut Option<WaveDrag>,
-    text: &mut Option<String>,
+    text: &mut Option<Draft>,
     rect: Rect,
 ) -> (ZonePanelLayout, Option<Intent>) {
     let t = &TOKENS;
     let p = ui.painter().clone();
     let mut out = ZonePanelLayout { panel: r4(rect), crossfade_opacity: 1.0, ..ZonePanelLayout::default() };
     let mut intent = None;
+    // Text typed for another zone (the selection changed as the field let go) commits to that
+    // zone, never to this one, and never stays on screen; text that cannot commit is dropped.
+    if let Some(d) = text.take_if(|d| d.zone != z.zone)
+        && !d.error
+        && let Some(o) = state.zone(d.zone)
+    {
+        intent = commit(&d, o).ok().flatten();
+    }
     p.rect(rect, radius::PANEL, t.surface_panel, Stroke::new(1.0, t.line), StrokeKind::Inside);
     let inner = rect.shrink2(vec2(layout::PANEL_PADDING[1], layout::PANEL_PADDING[0]));
     // Header: ZONE, the name, the file line.
@@ -248,16 +300,17 @@ pub(crate) fn show(
         vec2(tk::CROSSFADE_WIDTH, layout::DENSE_CONTROL_HEIGHT),
     );
     out.crossfade = r4(field);
-    let stored = format!("{} ms", crossfade_ms_text(z.crossfade, z.rate));
+    let stored = stored_text(z);
     out.crossfade_tip = format!("{} frames at {}", z.crossfade, khz(z.rate));
-    let mut typing = text.clone().unwrap_or_else(|| stored.clone());
+    let mut typing = text.as_ref().map_or_else(|| stored.clone(), |d| d.text.clone());
+    let error = text.as_ref().is_some_and(|d| d.error);
     let resp = ui
         .scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
             if dim {
                 ui.multiply_opacity(tk::UNUSED_CONTROL_ALPHA);
             }
             let edit = egui::TextEdit::singleline(&mut typing)
-                .id(egui::Id::new(("sampler_zone_crossfade", uid)))
+                .id(crossfade_id(uid))
                 .font(tokens::VALUE.font_id(ui.ctx()))
                 .horizontal_align(egui::Align::RIGHT)
                 .desired_width(field.width())
@@ -267,20 +320,45 @@ pub(crate) fn show(
         })
         .inner
         .on_hover_text(&out.crossfade_tip);
-    if resp.has_focus() || resp.changed() {
-        *text = Some(typing.clone());
+    // While the field has the keyboard its text is also kept where the device window's Escape
+    // rule gives typing up (`<id>.editing`): gone when the field lets go, Escape was pressed.
+    // Whether it had the keyboard last frame is kept beside it (egui can report the letting go on
+    // two frames; only the first is the field's).
+    let (edit_id, had_id) = (crossfade_id(uid).with("editing"), crossfade_id(uid).with("had"));
+    let kept = ui.data(|d| d.get_temp::<String>(edit_id).is_some());
+    let had = ui.data(|d| d.get_temp::<bool>(had_id).unwrap_or(false));
+    let focused = resp.has_focus();
+    ui.data_mut(|d| d.insert_temp(had_id, focused));
+    if resp.has_focus() {
+        ui.data_mut(|d| d.insert_temp(edit_id, typing.clone()));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(edit_id));
     }
-    // Text that still reads the stored value commits nothing (a focus that comes and goes, or the
-    // shown value's rounding read back, never edits).
-    if resp.lost_focus() && std::mem::take(text).is_some_and(|_| typing.trim() != stored) {
-        let typed = typing.trim().trim_end_matches("ms").trim();
-        if let Some(frames) = typed.parse::<f64>().ok().and_then(tenths_of_ms).map(|t| crossfade_frames(t, z.rate))
-            && frames != z.crossfade
-        {
-            intent = Some(Intent::Crossfade(frames));
+    if resp.has_focus() || resp.changed() {
+        // The draft belongs to the zone it is typed for; an edit clears the error.
+        *text = Some(Draft { zone: z.zone, text: typing.clone(), error: error && !resp.changed() });
+    }
+    if resp.lost_focus() && had {
+        if !kept || ui.input(|i| crate::shortcuts::hit(i, crate::shortcuts::Action::CloseEditor)) {
+            // Escape gives the typing up: the field reads the stored value again.
+            *text = None;
+        } else if let Some(d) = text.take() {
+            match commit(&d, z) {
+                Ok(i) => intent = i,
+                Err(reason) => {
+                    *text = Some(Draft { error: true, ..d });
+                    intent = Some(Intent::Invalid(reason));
+                }
+            }
         }
     }
-    out.crossfade_text = text.clone().unwrap_or(stored);
+    let error = text.as_ref().is_some_and(|d| d.error);
+    if error {
+        p.rect_stroke(field, crate::tokens::chrome::RADIUS_CONTROL, super::super::bar::field_stroke(super::super::bar::FieldState::Error), StrokeKind::Inside);
+    }
+    out.crossfade_error = error;
+    out.typing = resp.has_focus() || text.as_ref().is_some_and(|d| !d.error);
+    out.crossfade_text = text.as_ref().map_or(stored, |d| d.text.clone());
     let fo = clipped(&p, &tokens::LABEL_CONTROL, FORWARD_ONLY, fade(t.text_faint), pos2(field.max.x + tk::ZONE_ROW_GAP, cy), inner.max.x);
     out.forward_only = r4(fo);
     y += layout::DENSE_CONTROL_HEIGHT;

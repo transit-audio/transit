@@ -65,6 +65,9 @@ impl shared::Panel for Panel {
         if let Some(id) = rec.slices.as_ref().and_then(|s| s.typing) {
             return Some(id);
         }
+        if rec.instrument.as_ref().and_then(|i| i.zone.as_ref()).is_some_and(|z| z.typing) {
+            return Some(super::instrument::zone_panel::crossfade_id(uid));
+        }
         rec.knobs.iter().find(|k| k.knob.editing).map(|k| super::zone::knob_id(uid, &k.field))
     }
 
