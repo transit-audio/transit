@@ -54,7 +54,7 @@ use bench_gestures::{Intent, Renaming};
 use egui::{Rect, Ui, pos2, vec2};
 
 pub use bench::BenchLayout;
-pub(crate) use bench::segmented_at;
+pub(crate) use bench::{escaped, segmented_at};
 
 /// One instance's Slices view: the viewport, the selected slice (an index into the showing set),
 /// the last state read, the placement, the gestures, the panels' state and what the view said.
@@ -152,7 +152,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     };
     let h = bench::height(ui.painter());
     let bench_rect = Rect::from_min_size(rect.min, vec2(rect.width(), h));
-    let (layout, intent) = bench::show(ui, uid, &mut v, data.as_ref(), audio.as_deref(), &inputs, mc, bench_rect);
+    let (mut layout, intent) = bench::show(ui, uid, &mut v, data.as_ref(), audio.as_deref(), &inputs, mc, bench_rect);
     if let Some(i) = intent {
         apply(app, dev, &mut v, i);
     }
@@ -185,9 +185,17 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     }
     v.height = Some(y - rect.min.y);
     view(app, uid).slices = v;
+    layout.typing = typing(ui.ctx(), uid);
     out.slices = Some(layout);
     out.slice_panels = Some(panels);
     y - rect.min.y
+}
+
+/// The view's text field that has the keyboard (the rename, the BPM, the beat length or the
+/// crossfade), so that the device window leaves Escape to it.
+fn typing(ctx: &egui::Context, uid: u64) -> Option<egui::Id> {
+    let ids = [bench::rename_id(uid), detect_panel::bpm_id(uid), use_panel::beat_id(uid), loop_row::crossfade_id(uid)];
+    ctx.memory(|m| ids.into_iter().find(|id| m.has_focus(*id)))
 }
 
 /// Sends what a completed bench gesture asks for.

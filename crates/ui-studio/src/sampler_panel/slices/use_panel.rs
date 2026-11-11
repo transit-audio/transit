@@ -232,6 +232,11 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesVie
     r4(label)
 }
 
+/// The beat length field's id on the insert `uid`.
+pub fn beat_id(uid: u64) -> egui::Id {
+    egui::Id::new(("sampler_use_beat", uid))
+}
+
 /// Slice to MIDI's rows.
 fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop, rows: &mut Rows, out: &mut UseLayout) {
     let t = &TOKENS;
@@ -255,7 +260,8 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
     out.timing = Some(seg.layout);
     out.beat_enabled = !v.usage.keep;
     let beats = v.usage.beat.or(l.beats());
-    let mut text = v.usage.beat_text.clone().unwrap_or_else(|| beats.map(|b| format!("{b:.2} beats")).unwrap_or_default());
+    let resting = beats.map(|b| format!("{b:.2} beats")).unwrap_or_default();
+    let mut text = v.usage.beat_text.clone().unwrap_or_else(|| resting.clone());
     let resp = ui
         .scope_builder(egui::UiBuilder::new().max_rect(br), |ui| {
             if !out.beat_enabled {
@@ -266,7 +272,8 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
                 .desired_width(br.width())
                 .min_size(br.size())
                 .horizontal_align(egui::Align::Max)
-                .vertical_align(egui::Align::Center);
+                .vertical_align(egui::Align::Center)
+                .id(beat_id(uid));
             crate::chrome::text_field_enabled(ui, out.beat_enabled, edit)
         })
         .inner;
@@ -275,9 +282,15 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
     if resp.has_focus() || resp.changed() {
         v.usage.beat_text = Some(text.clone());
     }
-    if resp.lost_focus() {
-        v.usage.beat_text = None;
-        let typed = text.trim().trim_end_matches("beats").trim();
+    // The typed text commits once (the toolkit reports a lost focus on two frames running: the
+    // second finds no typed text) and only when it changed; Escape cancels and the field returns
+    // to the beat length in use.
+    if resp.lost_focus()
+        && let Some(typed) = v.usage.beat_text.take()
+        && !super::escaped(ui)
+        && typed.trim() != resting
+    {
+        let typed = typed.trim().trim_end_matches("beats").trim();
         if typed.is_empty() {
             v.usage.beat = None;
         } else if let Ok(b) = typed.parse::<f64>() {

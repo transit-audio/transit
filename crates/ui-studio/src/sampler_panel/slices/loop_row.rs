@@ -335,10 +335,12 @@ fn crossfade(
         v.play.typing = Some((z.zone, text.clone()));
     }
     if resp.lost_focus() {
-        v.play.typing = None;
-        // Escape cancels.
-        if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            commit(app, dev, v, z, &text);
+        // The typed text commits once (the toolkit reports a lost focus on two frames running:
+        // the second finds no typed text); Escape cancels.
+        if let Some((_, typed)) = v.play.typing.take()
+            && !super::escaped(ui)
+        {
+            commit(app, dev, v, z, &typed);
         }
     } else if !resp.has_focus() {
         // Not being typed (the field went away without giving up its focus here): no text is kept.

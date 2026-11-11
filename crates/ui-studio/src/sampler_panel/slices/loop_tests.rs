@@ -324,3 +324,21 @@ fn a_knob_value_typed_for_one_slice_never_lands_on_the_next() {
     assert_eq!(t.undo_len(), undo, "Enter commits nothing");
     assert_eq!((attack(&t, z2), attack(&t, z3)), (a2, a3), "neither zone changed");
 }
+
+#[test]
+fn escape_in_the_crossfade_field_cancels_and_keeps_the_window() {
+    let (mut t, tr, z) = looping(221);
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    type_only(&mut t, tr, "9");
+    assert_eq!(row(&t, tr).crossfade_text, "9");
+    t.key("Escape");
+    assert!(t.app.ui.plugin_windows.iter().any(|k| k.0 == tr), "the field keeps Escape: the window stays");
+    assert_eq!(sent(&t, log), Vec::<String>::new(), "nothing is sent");
+    assert_eq!(t.undo_len(), undo);
+    assert_eq!(t.patch(tr).zone(z).unwrap().crossfade, 221);
+    assert_eq!(row(&t, tr).crossfade_text, "xf 5.0 ms", "the stored value shows again");
+    assert_eq!(view(&t).play.typing, None);
+    // With nothing typed, Escape closes the window as usual.
+    t.key("Escape");
+    assert!(!t.app.ui.plugin_windows.iter().any(|k| k.0 == tr));
+}

@@ -186,6 +186,20 @@ pub struct BenchLayout {
     pub selection_rect: [f32; 4],
     /// The frame under the pointer and its readout in milliseconds from S.
     pub pointer: Option<(u64, f64)>,
+    /// The view's text field that has the keyboard (it keeps Escape from the device window).
+    pub typing: Option<egui::Id>,
+}
+
+/// Whether Escape was pressed this frame, even when the device window's Escape took the key first
+/// (a text field gives its focus up on Escape before the window's keys run; the field keeps
+/// Escape, and the window's handler consumes it so that it does not also close the window).
+pub(crate) fn escaped(ui: &Ui) -> bool {
+    ui.input(|i| i.raw.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. })))
+}
+
+/// The rename field's id on the insert `uid`.
+pub fn rename_id(uid: u64) -> egui::Id {
+    egui::Id::new(("sampler_slice_rename", uid))
 }
 
 fn line_h(p: &egui::Painter, role: &tokens::TypeRole) -> f32 {
@@ -719,7 +733,7 @@ fn draw_loop(
         out.cells.push((i, r4(cell)));
     }
     let cells = out.cells.clone();
-    rename(ui, view, &cells, strip, &mut intent, out);
+    rename(ui, uid, view, &cells, strip, &mut intent, out);
     // A click on the bench adds; the ghost previews it.
     if body_resp.clicked()
         && let Some(at) = body_resp.interact_pointer_pos()
@@ -741,12 +755,23 @@ fn draw_loop(
 
 /// The rename field over the renamed slice's cell (the cell's height inside the strip, at least
 /// four flags wide): Enter or a click elsewhere commits, Escape cancels.
-fn rename(ui: &mut Ui, view: &mut SlicesView, cells: &[(usize, [f32; 4])], strip: Rect, intent: &mut Option<Intent>, out: &mut BenchLayout) {
+fn rename(
+    ui: &mut Ui,
+    uid: u64,
+    view: &mut SlicesView,
+    cells: &[(usize, [f32; 4])],
+    strip: Rect,
+    intent: &mut Option<Intent>,
+    out: &mut BenchLayout,
+) {
     let Some(r) = view.gesture.renaming.as_mut() else { return };
     let Some(cell) = cells.iter().find(|c| c.0 == r.index).map(|c| c.1) else { return };
     let (left, right) = (cell[0], cell[2].max(cell[0] + tk::BENCH_FLAG_MIN_WIDTH * 4.0));
     let field = Rect::from_min_max(pos2(left, strip.min.y + tk::BENCH_FLAG_INSET), pos2(right, strip.max.y - tk::BENCH_FLAG_INSET));
-    let edit = egui::TextEdit::singleline(&mut r.text).font(FLAG_FONT.font_id(ui.ctx())).margin(vec2(tk::BENCH_FLAG_PADDING_X, 0.0));
+    let edit = egui::TextEdit::singleline(&mut r.text)
+        .font(FLAG_FONT.font_id(ui.ctx()))
+        .margin(vec2(tk::BENCH_FLAG_PADDING_X, 0.0))
+        .id(rename_id(uid));
     let resp = ui.put(field, edit);
     if !r.focused {
         resp.request_focus();
@@ -754,7 +779,7 @@ fn rename(ui: &mut Ui, view: &mut SlicesView, cells: &[(usize, [f32; 4])], strip
     }
     out.rename = Some(r4(field));
     if resp.lost_focus() {
-        let cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let cancel = super::escaped(ui);
         let (id, text) = (r.id, r.text.clone());
         view.gesture.renaming = None;
         if !cancel {

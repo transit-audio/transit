@@ -147,3 +147,94 @@ fn an_open_dropdown_holds_the_nudges() {
     assert_eq!(frames(&t, tr), markers, "the marker does not nudge");
     assert_eq!(t.undo_len(), undo);
 }
+
+fn window_open(t: &T, tr: transit_model::TrackId) -> bool {
+    t.app.ui.plugin_windows.iter().any(|k| k.0 == tr)
+}
+
+/// Replaces the focused field's text with `text`.
+fn retype(t: &mut T, text: &str) {
+    steps(t, vec![key(Key::A, true, Modifiers::COMMAND), egui::Event::Text(text.to_string())]);
+}
+
+#[test]
+fn escape_in_the_rename_field_cancels_and_keeps_the_window() {
+    let (mut t, tr) = sliced();
+    let (undo, log) = (t.undo_len(), view(&t).sent.len());
+    let cell = bench(&t, tr).cells.iter().find(|c| c.0 == 1).unwrap().1;
+    t.click(mid(cell), 2);
+    assert!(view(&t).gesture.renaming.is_some());
+    retype(&mut t, "Snare");
+    t.key("Escape");
+    assert!(window_open(&t, tr), "the field keeps Escape: the window stays");
+    assert_eq!(sent(&t, log), Vec::<String>::new(), "nothing is sent");
+    assert_eq!(t.undo_len(), undo);
+    assert!(view(&t).gesture.renaming.is_none() && bench(&t, tr).rename.is_none(), "the field closes");
+    assert_eq!(t.patch(tr).slicing.unwrap().manual.unwrap().markers[1].label, None, "the stored name stays");
+    t.key("Escape");
+    assert!(!window_open(&t, tr), "with nothing typed, Escape closes the window");
+}
+
+#[test]
+fn escape_in_the_bpm_field_cancels_and_keeps_the_window() {
+    let (mut t, tr) = auto();
+    let log = view(&t).sent.len();
+    let d = panels(&t, tr).detect.unwrap();
+    assert_eq!(d.bpm_text, "240.00");
+    t.click(mid(d.bpm), 1);
+    retype(&mut t, "120");
+    assert_eq!(panels(&t, tr).detect.unwrap().bpm_text, "120");
+    t.key("Escape");
+    // Past the debounce: a typed BPM would have sent Detect by now.
+    t.frames(30);
+    assert!(window_open(&t, tr), "the field keeps Escape: the window stays");
+    assert_eq!(sent(&t, log), Vec::<String>::new(), "nothing is sent");
+    assert!(view(&t).detect.pending.is_none() && view(&t).detect.bpm_text.is_none());
+    assert_eq!(panels(&t, tr).detect.unwrap().bpm_text, "240.00", "the stored value shows again");
+    t.key("Escape");
+    assert!(!window_open(&t, tr));
+}
+
+#[test]
+fn escape_in_the_beat_field_cancels_and_keeps_the_window() {
+    let (mut t, tr) = sliced();
+    let log = view(&t).sent.len();
+    let u = panels(&t, tr).uses;
+    let before = u.beat_text.clone();
+    assert!(before.ends_with(" beats"), "{before}");
+    t.click(mid(u.beat), 1);
+    retype(&mut t, "3");
+    assert_eq!(panels(&t, tr).uses.beat_text, "3");
+    t.key("Escape");
+    assert!(window_open(&t, tr), "the field keeps Escape: the window stays");
+    assert_eq!(sent(&t, log), Vec::<String>::new(), "nothing is sent");
+    assert_eq!((view(&t).usage.beat, view(&t).usage.beat_text), (None, None));
+    assert_eq!(panels(&t, tr).uses.beat_text, before, "the beat length in use shows again");
+    t.key("Escape");
+    assert!(!window_open(&t, tr));
+}
+
+#[test]
+fn a_click_in_and_out_of_the_beat_and_bpm_fields_changes_nothing() {
+    // The toolkit reports a lost focus on two frames running; each field commits once, and only a
+    // changed text.
+    let (mut t, tr) = sliced();
+    let log = view(&t).sent.len();
+    t.click(mid(panels(&t, tr).uses.beat), 1);
+    t.click(mid(bench(&t, tr).hint_rect), 1);
+    assert_eq!(view(&t).usage.beat, None, "the default beat length stays the default (not sent as typed)");
+    assert_eq!(sent(&t, log), Vec::<String>::new());
+    // A stored BPM that its two-decimal text does not give back.
+    let (mut t, tr) = auto();
+    detect(&mut t, tr, serde_json::json!({"source": "grid", "division": "1/4", "grid_bpm": 123.456, "at": 0}));
+    let c = wait_candidate(&mut t, tr);
+    t.run("mix.sampler_slice_replace", serde_json::json!({"track": tr.0, "candidate_id": c["candidate_id"]}));
+    let log = view(&t).sent.len();
+    let d = panels(&t, tr).detect.unwrap();
+    assert_eq!(d.bpm_text, "123.46");
+    t.click(mid(d.bpm), 1);
+    t.click(mid(bench(&t, tr).hint_rect), 1);
+    t.frames(30);
+    assert!(view(&t).detect.pending.is_none(), "the panel's settings stay the stored ones");
+    assert_eq!(sent(&t, log), Vec::<String>::new(), "no Detect is sent");
+}

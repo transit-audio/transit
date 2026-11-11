@@ -62,6 +62,9 @@ impl shared::Panel for Panel {
         if rec.bar.start.editing {
             return Some(super::bar::field_id(uid));
         }
+        if let Some(id) = rec.slices.as_ref().and_then(|s| s.typing) {
+            return Some(id);
+        }
         rec.knobs.iter().find(|k| k.knob.editing).map(|k| super::zone::knob_id(uid, &k.field))
     }
 

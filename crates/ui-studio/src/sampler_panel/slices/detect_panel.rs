@@ -301,21 +301,24 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesVie
 /// The BPM field after Bars: empty, it shows the tempo in use and its origin as its hint; typing
 /// sets `grid_bpm` and clearing returns to none; while Bars is explicit it shows the derived BPM,
 /// read-only.
+/// The BPM field's id on the insert `uid`.
+pub fn bpm_id(uid: u64) -> egui::Id {
+    egui::Id::new(("sampler_detect_bpm", uid))
+}
+
 #[allow(clippy::too_many_arguments)]
-fn bpm_field(ui: &mut Ui, _uid: u64, v: &mut SlicesView, l: &Loop, s: &Settings, now: f64, at: egui::Pos2, out: &mut DetectLayout) {
+fn bpm_field(ui: &mut Ui, uid: u64, v: &mut SlicesView, l: &Loop, s: &Settings, now: f64, at: egui::Pos2, out: &mut DetectLayout) {
     let r = Rect::from_min_size(at, vec2(tk::BEAT_WIDTH, layout::DENSE_CONTROL_HEIGHT));
     let tempo = l.grid_tempo.as_ref();
     out.bpm_hint = tempo.filter(|g| g.origin != "bars").map(|g| format!("{} {:.2}", g.origin, g.bpm)).unwrap_or_default();
     out.bpm_enabled = s.bars.is_none();
-    let shown = if let Some(text) = &v.detect.bpm_text {
-        text.clone()
-    } else if s.bars.is_some() {
+    let resting = if s.bars.is_some() {
         let derived = v.detect.candidate.as_ref().filter(|c| c.tempo_origin.as_deref() == Some("bars")).and_then(|c| c.bpm);
         derived.or(tempo.filter(|g| g.origin == "bars").map(|g| g.bpm)).map(|b| format!("{b:.2}")).unwrap_or_default()
     } else {
         s.grid_bpm.map(|b| format!("{b:.2}")).unwrap_or_default()
     };
-    let mut text = shown.clone();
+    let mut text = v.detect.bpm_text.clone().unwrap_or_else(|| resting.clone());
     let resp = ui
         .scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
             let edit = egui::TextEdit::singleline(&mut text)
@@ -323,7 +326,8 @@ fn bpm_field(ui: &mut Ui, _uid: u64, v: &mut SlicesView, l: &Loop, s: &Settings,
                 .font(tokens::VALUE.font_id(ui.ctx()))
                 .desired_width(r.width())
                 .min_size(r.size())
-                .vertical_align(egui::Align::Center);
+                .vertical_align(egui::Align::Center)
+                .id(bpm_id(uid));
             crate::chrome::text_field_enabled(ui, out.bpm_enabled, edit)
         })
         .inner;
@@ -332,9 +336,15 @@ fn bpm_field(ui: &mut Ui, _uid: u64, v: &mut SlicesView, l: &Loop, s: &Settings,
     if resp.has_focus() || resp.changed() {
         v.detect.bpm_text = Some(text.clone());
     }
-    if resp.lost_focus() {
-        v.detect.bpm_text = None;
-        let typed = text.trim();
+    // The typed text commits once (the toolkit reports a lost focus on two frames running: the
+    // second finds no typed text) and only when it changed; Escape cancels and the field returns
+    // to the panel's settings.
+    if resp.lost_focus()
+        && let Some(typed) = v.detect.bpm_text.take()
+        && !super::escaped(ui)
+        && typed.trim() != resting
+    {
+        let typed = typed.trim();
         let next = if typed.is_empty() { Some(None) } else { typed.parse::<f64>().ok().map(Some) };
         if let Some(b) = next.filter(|b| *b != s.grid_bpm) {
             set(v, l, now, |s| s.grid_bpm = b);
