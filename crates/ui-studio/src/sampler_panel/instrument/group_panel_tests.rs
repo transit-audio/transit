@@ -59,7 +59,9 @@ fn group_panel_rects_match_the_board_at_both_scales() {
                 assert_eq!(h(r.row[1] - g.layers[i - 1].row[3]), h(tk::LAYER_GAP));
             }
         }
-        assert_eq!(h(g.layers[0].row[1] - (g.panel[1] + pv)) > 0, true);
+        let m = super::super::measurer(&t.ctx);
+        let header = super::super::line_h(&m, &crate::tokens::LABEL_SECTION).max(super::super::line_h(&m, &crate::tokens::READOUT_DISPLAY));
+        assert_eq!(h(g.layers[0].row[1]), h(g.panel[1] + pv + header + gap), "the rows a gap under the header");
         // The divider a gap under the rows, 1 high across the inside; each control row a gap under
         // the one before, at the dense height, its control after the 84 label column and a gap.
         let last = g.layers.last().unwrap().row;
