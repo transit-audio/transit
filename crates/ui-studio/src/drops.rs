@@ -32,6 +32,9 @@ pub(crate) struct Router {
     pub(crate) windows: Vec<(egui::LayerId, (TrackId, usize))>,
     /// This frame's drop, claimed by the editor window `key`; its body takes it.
     offer: Option<((TrackId, usize), DropOffer)>,
+    /// A browser drag released on a Sampler view's empty well (#464): next frame's offer to that
+    /// window, so the view takes it as it takes a dropped file.
+    next: Option<((TrackId, usize), DropOffer)>,
 }
 
 /// Frames a held drop waits for a position after the pointer is reported gone before it goes to
@@ -78,8 +81,9 @@ pub(crate) fn step(app: &mut StudioApp, ctx: &egui::Context) {
         (files, moved, gone)
     });
     let r = &mut app.builtin_editor.drops;
-    // An offer no editor took last frame (its window closed) is refused.
-    r.offer = None;
+    // An offer no editor took last frame (its window closed) is refused; a browser drag's offer
+    // made since is this frame's.
+    r.offer = r.next.take();
     r.pending.extend(files);
     if r.pending.is_empty() {
         r.gone_frames = None;
@@ -109,6 +113,12 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
     for p in &offer.paths {
         open_path(app, &p.to_string_lossy());
     }
+}
+
+/// Offers `path` to the editor window `key` in the next frame, as a file dropped on it there (a
+/// browser drag released on a Sampler view's empty well, #464).
+pub(crate) fn offer_next(app: &mut StudioApp, key: (TrackId, usize), path: PathBuf) {
+    app.builtin_editor.drops.next = Some((key, DropOffer { paths: vec![path], pos: None }));
 }
 
 /// The drop the editor window `key` claimed this frame, if any (taken once).

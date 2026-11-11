@@ -1179,3 +1179,75 @@ fn a_plugin_dragged_over_a_pad_has_no_target() {
     t.drag(from, a4, json!({}));
     assert_eq!(inserts(&t), 1, "{}", t.app.status);
 }
+
+// ---- #464: a browser drag onto the Slices or Instrument view's empty well. ----
+
+impl T {
+    /// Shows `view` in the Sampler window `key`.
+    fn show_view(&mut self, key: (TrackId, usize), view: crate::sampler_panel::View) {
+        let uid = self.app.engine.session().track(key.0).unwrap().instrument.as_ref().unwrap().uid.get();
+        self.app.builtin_editor.devices.sampler.views.entry(uid).or_default().view = view;
+        self.frames(30);
+    }
+
+    /// The empty well the shown Slices or Instrument view draws.
+    fn well(&self, key: (TrackId, usize)) -> Option<[f32; 4]> {
+        let s = self.sampler_panel(key);
+        s.slices.as_ref().and_then(|b| b.empty).or_else(|| s.instrument.as_ref().and_then(|i| i.key_map.empty)).map(|(w, _)| w)
+    }
+}
+
+#[test]
+fn an_audio_file_dragged_onto_the_empty_slices_bench_makes_the_slice_loop_in_one_step() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let key = t.sampler();
+    t.show_view(key, crate::sampler_panel::View::Slices);
+    let well = t.well(key).expect("the empty bench");
+    let from = mid(t.row_named("loop 90.wav").rect.unwrap());
+    let (clips, u0) = (t.all_clips(), t.undo_len());
+    t.hold_over(from, mid(well));
+    assert_eq!(t.app.browser.layout.drop_target, Some(crate::browser::Target::SamplerWell { dev: key }));
+    assert_eq!(t.app.browser.layout.drop, Some(well), "the well is outlined");
+    t.release_at(mid(well));
+    assert!(t.patch(key).slicing.is_some(), "the file is the slice loop: {}", t.app.status);
+    assert_eq!(t.undo_len(), u0 + 1, "one undo step");
+    assert_eq!(t.all_clips(), clips, "no clip");
+    assert!(!t.app.imports.active(), "no import queued");
+    // The bench has its loop now: a second drag is not taken and changes nothing.
+    let before = t.patch(key);
+    let u1 = t.undo_len();
+    assert!(t.well(key).is_none());
+    t.hold_over(from, mid(well));
+    assert_eq!(t.app.browser.layout.drop_target, None, "a bench with content takes no drag");
+    t.release_at(mid(well));
+    assert_eq!(t.patch(key), before);
+    assert_eq!((t.undo_len(), t.all_clips()), (u1, clips));
+}
+
+#[test]
+fn an_audio_file_dragged_onto_the_empty_instrument_map_makes_one_zone_in_one_step() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let key = t.sampler();
+    t.show_view(key, crate::sampler_panel::View::Instrument);
+    let well = t.well(key).expect("the empty key map");
+    let from = mid(t.row_named("loop 90.wav").rect.unwrap());
+    let (clips, u0) = (t.all_clips(), t.undo_len());
+    t.hold_over(from, mid(well));
+    assert_eq!(t.app.browser.layout.drop_target, Some(crate::browser::Target::SamplerWell { dev: key }));
+    assert_eq!(t.app.browser.layout.drop, Some(well), "the well is outlined");
+    t.release_at(mid(well));
+    assert_eq!(t.patch(key).zones.len(), 1, "one zone: {}", t.app.status);
+    assert_eq!(t.undo_len(), u0 + 1, "one undo step");
+    assert_eq!(t.all_clips(), clips, "no clip");
+    // The map has a zone now: a second drag is not taken and changes nothing.
+    let before = t.patch(key);
+    let u1 = t.undo_len();
+    assert!(t.well(key).is_none());
+    t.hold_over(from, mid(well));
+    assert_eq!(t.app.browser.layout.drop_target, None, "a map with zones takes no drag");
+    t.release_at(mid(well));
+    assert_eq!(t.patch(key), before);
+    assert_eq!((t.undo_len(), t.all_clips()), (u1, clips));
+}

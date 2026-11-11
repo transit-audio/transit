@@ -14,8 +14,9 @@
 //! commands: audio is imported in the background (`crate::import`, one undo step per file),
 //! plug-ins load with `mix.instrument` or `mix.insert` (one undo step per drop).
 //! An audio file dropped on a pad of an open Sampler window becomes the pad's sample (the pad's
-//! own drop, one undo step); an editor window on top takes every drop over it, so nothing behind
-//! it is reached.
+//! own drop, one undo step), and on the Slices or Instrument view's empty well it goes where that
+//! view's Load… sends a file (#464); an editor window on top takes every drop over it, so nothing
+//! behind it is reached.
 //! Everything else here (tabs, width, expanding, filters, favorites) is view state.
 //!
 //! The footer previews the selected file outside the document (issue #211, [`preview`]).
@@ -194,6 +195,9 @@ pub enum Target {
     Below { at: Option<Samples> },
     /// Pad `pad` (0-based) of an open Sampler's Pads window: an audio file becomes its sample.
     Pad { dev: (TrackId, usize), pad: u8 },
+    /// The empty well of an open Sampler's Slices or Instrument view: an audio file is offered to
+    /// the view as a dropped file, so it takes the path its Load… takes (#464).
+    SamplerWell { dev: (TrackId, usize) },
 }
 
 /// The status after a drag of audio files released on no target.
@@ -656,8 +660,8 @@ impl StudioApp {
 
     /// What lies under `pos` for a drop, from last frame's editor windows, arrangement, mixer and
     /// device layouts. An editor window on top at `pos` comes first and takes the drop whole:
-    /// `audio` (the payload holds an audio file) lands on a Sampler pad, anything else over a
-    /// window is no target (nothing behind a window is reached).
+    /// `audio` (the payload holds an audio file) lands on a Sampler pad or an empty Sampler view's
+    /// well, anything else over a window is no target (nothing behind a window is reached).
     fn drop_target(&self, ctx: &egui::Context, pos: Pos2, snap: bool, audio: bool) -> Option<(Target, R4)> {
         if let Some(key) = self.editor_window_at(ctx, pos) {
             return if audio { self.editor_target(key, pos) } else { None };
@@ -710,10 +714,15 @@ impl StudioApp {
     }
 
     /// Where an audio file over the editor window `key` lands: the pad under `pos` in a Pads
-    /// window, else nothing (the window refuses it).
+    /// window, the well under `pos` of an empty Slices bench or Instrument key map (outlined on
+    /// the well), else nothing (the window refuses it, as a view with content refuses a dropped file).
     fn editor_target(&self, key: (TrackId, usize), pos: Pos2) -> Option<(Target, R4)> {
         let w = self.builtin_editor.windows.iter().find(|w| w.key == key)?;
         let s = w.sampler.as_ref()?;
+        let empty = s.slices.as_ref().and_then(|b| b.empty).or_else(|| s.instrument.as_ref().and_then(|i| i.key_map.empty));
+        if let Some((well, _)) = empty {
+            return crate::sampler_panel::grid_rect(well).contains(pos).then_some((Target::SamplerWell { dev: key }, well));
+        }
         let pad = s.pads.iter().find(|r| crate::sampler_panel::grid_rect(r.pad.rect).contains(pos))?;
         Some((Target::Pad { dev: key, pad: pad.index }, pad.pad.rect))
     }
@@ -729,6 +738,13 @@ impl StudioApp {
                         // The pad's own drop (#368): its zone takes the first audio file, one step.
                         if let Some(p) = first_audio(&files) {
                             crate::sampler_panel::drop_file_on_pad(self, dev, pad, &p.to_string_lossy());
+                        }
+                        return;
+                    }
+                    Target::SamplerWell { dev } => {
+                        // The view's own dropped-file path, next frame: the slice loop or a new zone.
+                        if let Some(p) = first_audio(&files) {
+                            crate::drops::offer_next(self, dev, p.clone());
                         }
                         return;
                     }

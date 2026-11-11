@@ -551,7 +551,10 @@ as Logic's Link does; off, the window stays on its own instrument.
 To give a Sampler pad its sample, drag a sample from the Files browser or from your file manager
 onto a pad: the file dropped on a pad becomes that pad's sample, in one undo step. While you drag
 from the browser, the pad under the pointer
-is outlined. A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
+is outlined. On the Slices view's empty bench or the Instrument view's empty key map, a file dragged
+from the browser does what that view's Load… does (the slice loop, or a zone in the first free
+slot), in one undo step, with the dashed well outlined while you hold it there; once the view has
+content it takes no drag. A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
 drop, so nothing behind it is reached. Anywhere else, a browser drag lands on the track lane,
 header, mixer strip or device chain where you let go, and a file from the file manager is imported
 into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as the session, a MIDI
