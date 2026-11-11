@@ -27,10 +27,15 @@ list or a dialog keeps Escape for itself. **Window > Close All Editors** closes 
 | Scope | Action | Keys |
 |---|---|---|
 | Sampler | Clear pad | Delete, Backspace |
+| Sampler | Audition slice | Space, Enter |
 
 The focused Sampler's selected pad is cleared in one undo step. A text field, open menu, or
 dialog keeps the keys for itself. Right-click a pad for **Clear pad** and, when it stores its
 own note, **Reset note**.
+
+On the Slices view, Space or Enter plays the selected slice's pad at the piano roll's audition
+velocity for as long as the key is held, while the Sampler window has the keyboard (the window
+you last clicked); elsewhere Space plays the song and Enter returns to zero.
 
 ## Interface and arrangement zoom
 

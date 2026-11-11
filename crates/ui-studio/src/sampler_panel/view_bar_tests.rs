@@ -29,7 +29,12 @@ fn view_bar_is_on_every_view_and_switching_changes_no_routing_or_parameters() {
             assert_eq!(panel.pads.len(), 16);
             assert!(panel.placeholder.is_none());
         } else {
-            assert_eq!(panel.placeholder.unwrap().0, format!("{} view is not built yet.", crate::tokens::sampler::VIEW_BAR_VIEWS[index]));
+            if index == 2 {
+                // The Slices view shows its bench (pass G2); the Instrument view keeps the placeholder.
+                assert!(panel.placeholder.is_none() && panel.slices.is_some());
+            } else {
+                assert_eq!(panel.placeholder.unwrap().0, format!("{} view is not built yet.", crate::tokens::sampler::VIEW_BAR_VIEWS[index]));
+            }
             assert!(panel.pads.is_empty() && panel.bar.load_kit.is_none());
             t.key("Delete");
             t.key("Backspace");

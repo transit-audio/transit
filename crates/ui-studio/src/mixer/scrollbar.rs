@@ -11,29 +11,29 @@ use crate::tokens::chrome;
 
 /// The track length along the scroll axis and the handle's length in it, for a view of
 /// `view_len` showing that share of `content` (at least the chrome's minimum handle).
-pub(super) fn handle_len(view_len: f32, content: f32) -> (f32, f32) {
+pub(crate) fn handle_len(view_len: f32, content: f32) -> (f32, f32) {
     let track = view_len - 2.0 * chrome::SCROLL_INSET;
     let handle = (track * view_len / content.max(1.0)).clamp(chrome::SCROLL_MIN_HANDLE.min(track), track);
     (track, handle)
 }
 
 /// Where the handle starts along the scroll axis, from the view's start, for `offset` of `max`.
-pub(super) fn handle_start(track: f32, handle: f32, offset: f32, max: f32) -> f32 {
+pub(crate) fn handle_start(track: f32, handle: f32, offset: f32, max: f32) -> f32 {
     chrome::SCROLL_INSET + if max > 0.0 { (track - handle) * offset / max } else { 0.0 }
 }
 
 /// The scroll offset after the handle is dragged `delta` along the axis.
-pub(super) fn dragged_offset(offset: f32, delta: f32, max: f32, track: f32, handle: f32) -> f32 {
+pub(crate) fn dragged_offset(offset: f32, delta: f32, max: f32, track: f32, handle: f32) -> f32 {
     (offset + delta * max / (track - handle).max(1.0)).clamp(0.0, max)
 }
 
 /// The handle's thickness: wide on hover or drag, thin at rest.
-pub(super) fn thickness(hovered: bool, dragging: bool) -> f32 {
+pub(crate) fn thickness(hovered: bool, dragging: bool) -> f32 {
     if hovered || dragging { chrome::SCROLL_HOVER } else { chrome::SCROLL_REST }
 }
 
 /// The handle's ink.
-pub(super) fn ink(hovered: bool, dragging: bool) -> Color32 {
+pub(crate) fn ink(hovered: bool, dragging: bool) -> Color32 {
     if dragging {
         TOKENS.text_faint
     } else if hovered {
@@ -44,7 +44,7 @@ pub(super) fn ink(hovered: bool, dragging: bool) -> Color32 {
 }
 
 /// Paints the hover track (when `track` is given) and the handle, round ended.
-pub(super) fn paint(p: &egui::Painter, track: Option<Rect>, thumb: Rect, color: Color32) {
+pub(crate) fn paint(p: &egui::Painter, track: Option<Rect>, thumb: Rect, color: Color32) {
     let rad = chrome::SCROLL_HOVER / 2.0;
     if let Some(track) = track {
         p.rect_filled(track, rad, TOKENS.surface_panel);

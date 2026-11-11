@@ -52,15 +52,15 @@ impl egui::DroppedFile for Dropped {
     }
 }
 
-fn header(b: &mut Vec<u8>, data_len: u32) {
+fn header(b: &mut Vec<u8>, data_len: u32, rate: u32) {
     b.extend(b"RIFF");
     b.extend((36 + data_len).to_le_bytes());
     b.extend(b"WAVEfmt ");
     b.extend(16u32.to_le_bytes());
     b.extend(1u16.to_le_bytes());
     b.extend(1u16.to_le_bytes());
-    b.extend(48_000u32.to_le_bytes());
-    b.extend(96_000u32.to_le_bytes());
+    b.extend(rate.to_le_bytes());
+    b.extend((2 * rate).to_le_bytes());
     b.extend(2u16.to_le_bytes());
     b.extend(16u16.to_le_bytes());
     b.extend(b"data");
@@ -69,9 +69,14 @@ fn header(b: &mut Vec<u8>, data_len: u32) {
 
 /// A mono 16-bit WAV of `frames` frames at 48 kHz.
 pub fn wav(path: &Path, frames: usize) {
+    wav_at(path, frames, 48_000);
+}
+
+/// A mono 16-bit WAV of `frames` frames at `rate`.
+pub fn wav_at(path: &Path, frames: usize, rate: u32) {
     let samples: Vec<i16> = (0..frames).map(|i| ((i as f32 * 0.05).sin() * 8000.0) as i16).collect();
     let mut b = Vec::new();
-    header(&mut b, (samples.len() * 2) as u32);
+    header(&mut b, (samples.len() * 2) as u32, rate);
     for s in samples {
         b.extend(s.to_le_bytes());
     }
@@ -200,6 +205,13 @@ impl T {
     pub fn sample(&self, name: &str, frames: usize) -> PathBuf {
         let p = self.dir.join(name);
         wav(&p, frames);
+        p
+    }
+
+    /// A generated WAV of `frames` frames at `rate` named `name` in the test's folder.
+    pub fn sample_at(&self, name: &str, frames: usize, rate: u32) -> PathBuf {
+        let p = self.dir.join(name);
+        wav_at(&p, frames, rate);
         p
     }
 

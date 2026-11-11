@@ -206,7 +206,7 @@ fn audition_velocity(app: &StudioApp) -> u8 {
 }
 
 /// Starts an audition of `note` on the track (a note-on through the player's live path).
-fn audition(app: &mut StudioApp, dev: Dev, note: u8) {
+pub(crate) fn audition(app: &mut StudioApp, dev: Dev, note: u8) {
     let velocity = audition_velocity(app);
     release(app, dev);
     let v = view(app, dev.uid());
@@ -221,7 +221,7 @@ fn audition(app: &mut StudioApp, dev: Dev, note: u8) {
 }
 
 /// Ends a held audition.
-fn release(app: &mut StudioApp, dev: Dev) {
+pub(crate) fn release(app: &mut StudioApp, dev: Dev) {
     let Some(note) = view(app, dev.uid()).held.take() else { return };
     if let Some(p) = &app.player {
         let _ = app.player_requests.result(&mut app.status, p.note(track(dev), note, 0));

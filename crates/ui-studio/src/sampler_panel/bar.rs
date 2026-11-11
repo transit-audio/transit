@@ -209,7 +209,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
     let p = ui.painter().clone();
     let mc = app.ui.middle_c;
     let bank = view(app, dev.uid()).bank.min(super::BANKS - 1);
-    let summary = summary(pads, bank);
+    let summary = if view(app, dev.uid()).view == super::View::Slices { super::slices::summary(app, dev) } else { summary(pads, bank) };
     let Some(field) = super::view_bar::show(app, ui, dev, &summary, true, rect, out) else { return };
     let label = widgets::role_text(
         &p,

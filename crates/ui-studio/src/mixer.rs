@@ -33,7 +33,7 @@ mod menus;
 mod meters;
 mod overflow;
 mod routing;
-mod scrollbar;
+pub(crate) mod scrollbar;
 mod sends;
 mod short;
 mod strip;

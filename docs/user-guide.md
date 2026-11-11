@@ -575,8 +575,20 @@ keep their existing conversion to the session rate.
 
 The Sampler's **Instrument · Pads · Slices** switch changes only the view. It remembers the
 choice for each instance while the app is open, including closing and reopening the editor.
-Instrument and Slices currently show a line saying the view is not built yet. Pads keeps its
+Instrument currently shows a line saying the view is not built yet. Pads keeps its
 selected pad and bank when you return.
+
+The **Slices** view shows the kit's slice loop on the bench: the loop's waveform under a strip of
+numbered flags, one per slice start (`S 1` is the loop start, `E` the loop's end), the set in use
+(Auto or Manual) and its count, and the time from the loop start under it. Click a slice's cell in
+the flag strip, between two flags, to select it; the line under the bench names it, its times,
+its pad and that pad's note. Press Space or Enter to hear the selected slice while the Sampler
+window has the keyboard. **Zoom** shows the loop at 1×, 2×, 4× or 8× around the selected slice,
+with a scroll bar inside the bench past 1×; hover the bench to read the position in milliseconds
+from the loop start. Times count the source's own frames at its own sample rate. Selecting,
+zooming and scrolling never change the kit. Editing markers, Detect and the Use slices actions
+come in a later build; until then make the loop and its slices through the control channel
+(`mix.sampler_slice_loop`, `mix.sampler_slice_marker`, `mix.sampler_slices_to_pads`).
 
 To fill a kit from a folder, choose **Load kit…** in the Pads bar. Pick a folder, review the
 file count and pad range, then choose **Load kit**. Cancel leaves the kit unchanged. **Expand to rack…** beside it is not available yet. A refusal

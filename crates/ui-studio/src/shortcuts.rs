@@ -36,7 +36,7 @@ pub enum Scope {
     Automation,
     /// A device editor window: the one last clicked or opened (326-M).
     Editor,
-    /// The focused Sampler's Pads view.
+    /// The focused Sampler: its Pads view (Clear pad) and its Slices view (Audition slice).
     Sampler,
 }
 
@@ -173,6 +173,7 @@ pub enum Action {
     DialogCancel,
     CloseEditor,
     SamplerClearPad,
+    SamplerAuditionSlice,
     ToggleAutomation,
     GridNarrow,
     GridWiden,
@@ -214,6 +215,15 @@ use Scope as S;
 pub const TABLE: &[Shortcut] = &[
     row(A::SamplerClearPad, "Clear pad", NONE, Key::Delete, S::Sampler, "The selected pad; one undo step."),
     row(A::SamplerClearPad, "Clear pad", NONE, Key::Backspace, S::Sampler, "Same as Delete."),
+    row(
+        A::SamplerAuditionSlice,
+        "Audition slice",
+        NONE,
+        Key::Space,
+        S::Sampler,
+        "The selected slice while the Slices view has the keyboard, held as long as the key; Space plays the song elsewhere.",
+    ),
+    row(A::SamplerAuditionSlice, "Audition slice", NONE, Key::Enter, S::Sampler, "Same as Space."),
     // Transport.
     row(A::PlayStop, "Play / Stop", NONE, Key::Space, S::Global, "All DAWs."),
     row(
