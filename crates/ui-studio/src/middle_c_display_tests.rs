@@ -121,7 +121,7 @@ fn the_built_in_editors_note_parameters_follow_the_setting() {
     let mut r = Rig::new();
     r.app.ui.show_devices = true;
     let t = crate::tests::new_track(&mut r.app, json!({"kind": "instrument"}));
-    r.app.run("mix.instrument", json!({"track": t.0, "plugin": "sampler"})).unwrap();
+    crate::tests::one_sample_sampler(&mut r.app, t);
     r.app.focus(t);
     r.frames(4);
     let button = r.app.mixer.devices.cards[0].editor_button;

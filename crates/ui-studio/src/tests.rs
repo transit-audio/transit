@@ -255,6 +255,18 @@ pub(crate) fn new_track(app: &mut StudioApp, p: Value) -> TrackId {
     TrackId(app.run("track.new", p).unwrap()["tracks"][0].as_u64().unwrap())
 }
 
+/// Makes track `t`'s instrument a one-sample Sampler with no kit, as a session saved by an earlier
+/// build holds it (a Sampler created now starts as an empty kit, #454). Test setup, as opening such
+/// a session would leave it; the UI itself only executes commands.
+pub(crate) fn one_sample_sampler(app: &mut StudioApp, t: TrackId) {
+    let info = transit_dsp::plugin_info("sampler").expect("the Sampler");
+    let mut ins = transit_model::Insert::new("sampler");
+    for p in info.params {
+        ins.params.insert(p.id.to_string(), p.default);
+    }
+    app.engine.session_mut().track_mut(t).expect("the track").instrument = Some(ins);
+}
+
 pub(crate) fn right_click(app: &mut StudioApp, at: (f32, f32)) {
     let (req, _rx) = crate::ControlRequest::new("ui.click", json!({"x": at.0, "y": at.1, "button": "right"}));
     let ctx = egui::Context::default();

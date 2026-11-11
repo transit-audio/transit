@@ -1030,9 +1030,11 @@ impl T {
     /// its editor window open.
     fn sampler(&mut self, kit: bool) -> (TrackId, usize) {
         let tr = self.track(TrackKind::Instrument);
-        self.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
+        // A Sampler made now is a kit (#454); the one-sample path is an earlier build's session.
         if kit {
-            self.app.run("mix.sampler_new_patch", json!({"track": tr.0})).unwrap();
+            self.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
+        } else {
+            crate::tests::one_sample_sampler(&mut self.app, tr);
         }
         let key = (tr, transit_mix::INSTRUMENT_SLOT);
         self.app.toggle_editor(key);

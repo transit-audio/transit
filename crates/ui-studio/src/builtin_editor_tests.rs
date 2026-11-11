@@ -162,7 +162,7 @@ fn the_editor_button_opens_a_window_for_a_built_in_instrument_and_effect() {
 fn dragging_a_slider_writes_the_value_in_one_undo_step() {
     let mut t = T::new();
     let tr = t.track("instrument");
-    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
+    crate::tests::one_sample_sampler(&mut t.app, tr);
     t.frames(4);
     t.open_editor(0);
     let id = "velocity";
@@ -183,7 +183,7 @@ fn dragging_a_slider_writes_the_value_in_one_undo_step() {
 fn double_clicking_a_control_resets_it() {
     let mut t = T::new();
     let tr = t.track("instrument");
-    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
+    crate::tests::one_sample_sampler(&mut t.app, tr);
     t.frames(4);
     t.app.run("mix.instrument_param", json!({"track": tr.0, "param": "velocity", "value": 10.0})).unwrap();
     t.frames(3);
@@ -246,7 +246,7 @@ fn wav(path: &std::path::Path) {
 fn the_sampler_window_has_a_sample_picker_and_names_the_sample() {
     let mut t = T::new();
     let tr = t.track("instrument");
-    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
+    crate::tests::one_sample_sampler(&mut t.app, tr);
     t.frames(4);
     let dir = std::env::temp_dir().join(format!("transit-sampler-editor-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

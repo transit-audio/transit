@@ -623,12 +623,20 @@ fn each_stale_cause_refuses_replace() {
     assert_eq!(cand(&mut e, t)["candidate_id"], new);
     // The instrument replaced (and the patch brought back by undo): discarded.
     let cid = detect(&mut e, t, g.clone());
-    e.execute("mix.instrument", &json!({"track": t, "plugin": "sampler"})).unwrap();
+    // (Another instrument: a Sampler made now is an empty kit, #454, which the next case covers.)
+    e.execute("mix.instrument", &json!({"track": t, "plugin": "macro_oscillator"})).unwrap();
     assert!(ready_sampler_patch(e.session(), t).is_none());
     e.undo();
     assert!(ready_sampler_patch(e.session(), t).is_some());
     assert_eq!(cand(&mut e, t), Value::Null);
     assert_eq!(replace_refused(&mut e, t, cid), STALE, "instrument replaced");
+    // Replaced by a new Sampler (an empty kit, #454): the candidate is stale and refused.
+    let cid = detect(&mut e, t, g.clone());
+    e.execute("mix.instrument", &json!({"track": t, "plugin": "sampler"})).unwrap();
+    assert!(ready_sampler_patch(e.session(), t).is_some_and(|p| p.slicing.is_none() && p.zones.is_empty()));
+    e.undo();
+    assert_eq!(cand(&mut e, t)["stale"], true);
+    assert_eq!(replace_refused(&mut e, t, cid), STALE, "replaced by a new Sampler");
     // The session closed, then opened again: discarded.
     let file = d.path("s.transit");
     e.execute("session.save_as", &json!({"path": file})).unwrap();

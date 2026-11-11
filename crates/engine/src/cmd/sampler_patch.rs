@@ -226,13 +226,27 @@ fn new_patch(e: &mut Engine, p: &Value) -> Result<Value> {
         tr.instrument = Some(ins);
     }
     if let Some(ins) = tr.instrument.as_mut() {
-        // ADR 0041: a new patch leaves the one-sample field unset, so an older build does not play an
-        // arbitrary first sample as the whole kit.
-        ins.sample = None;
-        ins.sampler_patch =
-            Some(SamplerPatch { state: transit_model::sampler_patch::PatchState::Ready(Box::new(PatchV1 { seed, ..PatchV1::default() })) });
+        empty_kit(ins, seed);
     }
     Ok(json!({"track": t, "seed": seed}))
+}
+
+/// Makes `ins` an empty kit with seed `seed`. ADR 0041: a new patch leaves the one-sample field
+/// unset, so an older build does not play an arbitrary first sample as the whole kit.
+fn empty_kit(ins: &mut Insert, seed: u32) {
+    ins.sample = None;
+    ins.sampler_patch =
+        Some(SamplerPatch { state: transit_model::sampler_patch::PatchState::Ready(Box::new(PatchV1 { seed, ..PatchV1::default() })) });
+}
+
+/// A Sampler created by a command (`mix.instrument`, `track.new`) starts as an empty kit, in the
+/// same step as its creation (#454). Only new instances: a Sampler loaded from a session, a
+/// template or a track preset keeps what it was saved with (ADR 0041 never converts a one-sample
+/// instrument on open), and `mix.sampler_load` still makes the one-sample instrument it names.
+pub(crate) fn new_instance(ins: &mut Insert) {
+    if ins.plugin == SAMPLER && ins.sampler_patch.is_none() && ins.sample.is_none() {
+        empty_kit(ins, 1);
+    }
 }
 
 /// The size of decoded audio: frames × channels × 4 bytes, `None` on overflow.

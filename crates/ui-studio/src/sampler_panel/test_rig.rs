@@ -219,7 +219,7 @@ impl T {
     pub fn sampler_track(&mut self) -> TrackId {
         let r = self.app.run("track.new", json!({"kind": "instrument"})).unwrap();
         let t = TrackId(r["tracks"][0].as_u64().unwrap());
-        self.app.run("mix.instrument", json!({"track": t.0, "plugin": "sampler"})).unwrap();
+        crate::tests::one_sample_sampler(&mut self.app, t);
         self.app.focus(t);
         self.frames(4);
         t

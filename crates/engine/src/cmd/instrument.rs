@@ -69,6 +69,7 @@ fn set_instrument(e: &mut Engine, p: &Value) -> Result<Value> {
     for (k, v) in values {
         ins.params.insert(k, v);
     }
+    super::sampler_patch::new_instance(&mut ins);
     if let Some(tr) = e.session_mut().track_mut(t) {
         tr.instrument = Some(ins);
     }
@@ -162,6 +163,29 @@ mod tests {
         assert_eq!(params, transit_dsp::plugin_info("sampler").map(|p| p.params.len()), "every parameter at its default");
         e.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(instrument_of(&e, t).as_deref(), Some("macro_oscillator"));
+    }
+
+    #[test]
+    fn a_sampler_made_by_a_command_starts_as_an_empty_kit_in_the_same_step() {
+        let kit = |e: &Engine, t: TrackId| {
+            let ins = e.session().track(t).and_then(|tr| tr.instrument.clone()).unwrap();
+            (ins.sample.is_none(), ins.sampler_patch.and_then(|p| p.ready().cloned()))
+        };
+        let empty = transit_model::sampler_patch::PatchV1 { seed: 1, ..Default::default() };
+        let mut e = Engine::default();
+        let t = track(&mut e, "instrument");
+        let undo = e.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len();
+        e.execute("mix.instrument", &json!({"track": t.0, "plugin": "sampler"})).unwrap();
+        assert_eq!(kit(&e, t), (true, Some(empty.clone())), "an empty kit, as New Kit makes");
+        assert_eq!(e.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len(), undo + 1, "one step");
+        e.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(instrument_of(&e, t).as_deref(), Some("macro_oscillator"), "one undo takes it away");
+        // A new track given a Sampler: the same.
+        let r = e.execute("track.new", &json!({"kind": "instrument", "instrument": "sampler"})).unwrap();
+        let t2 = TrackId(r["tracks"][0].as_u64().unwrap());
+        assert_eq!(kit(&e, t2), (true, Some(empty)));
+        // Another instrument stays as it was made.
+        assert!(e.session().track(t).and_then(|tr| tr.instrument.as_ref()).is_some_and(|i| i.sampler_patch.is_none()));
     }
 
     #[test]
