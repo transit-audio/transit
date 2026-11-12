@@ -26,9 +26,11 @@ fn a_hosted_plug_in_lists_every_parameter_by_name_with_none_stored() {
     // The host registry is process-global; the fixture runs in a child process (see
     // plugin_requests_tests).
     if std::env::var_os("TRANSIT_PICKER_FIXTURE_CHILD").is_none() {
+        let install = transit_test_support::TestDir::new("studio-clap-requests");
         let output = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "automation_picker_tests::a_hosted_plug_in_lists_every_parameter_by_name_with_none_stored", "--nocapture"])
             .env("TRANSIT_PICKER_FIXTURE_CHILD", "1")
+            .env("TRANSIT_REQUESTS_INSTALL", install.path())
             .output()
             .unwrap();
         let out = String::from_utf8_lossy(&output.stdout);
