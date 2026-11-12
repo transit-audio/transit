@@ -4363,6 +4363,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-parametric-eq"
+version = "0.7.0"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "transit-playback"
 version = "0.7.0"
 dependencies = [

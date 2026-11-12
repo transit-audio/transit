@@ -28,6 +28,7 @@ transit-macro-osc = { path = "crates/macro-osc" }
 # Tier B (ADR 0037): no incoming edge turns `std` on by default; each consumer names it.
 transit-instrument-core = { path = "crates/instrument-core", default-features = false }
 transit-sampler-core = { path = "crates/sampler-core", default-features = false }
+transit-parametric-eq = { path = "crates/parametric-eq", default-features = false }
 transit-resonator = { path = "crates/resonator" }
 transit-modal-voice = { path = "crates/modal-voice" }
 transit-granular = { path = "crates/granular" }

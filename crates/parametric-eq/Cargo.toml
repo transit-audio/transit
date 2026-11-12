@@ -1,0 +1,24 @@
+[package]
+name = "transit-parametric-eq"
+description = "transit's Parametric EQ core: magnitude-matched band designs on 64-bit state-variable sections, the band chain with its smoothing and ramps, the left/right and mid/side stages, the response functions and the gain-match computation (ADR 0054)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["std"]
+# The desktop arithmetic: the inherent float methods. Off, the crate is `no_std` + `alloc` and `libm`
+# supplies them (ADR 0037 Tier B; CI checks that configuration for thumbv7em-none-eabihf).
+std = []
+# Test seams (the state fingerprint for dsp's `Plugin::fingerprint`); never enabled by the app.
+testing = []
+
+[dependencies]
+# The float functions of the no-default (`no_std`) configuration only; unused with `std`.
+libm.workspace = true
+
+[lints]
+workspace = true
