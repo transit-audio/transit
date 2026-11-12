@@ -593,7 +593,7 @@ mod record_tests {
         assert!(t.clips().iter().all(|c| c.take.is_none()), "undo leaves no take numbers behind");
     }
 
-    fn over_a_clip(tag: &str) -> (Engine, TrackId, PathBuf, PathBuf) {
+    fn over_a_clip(tag: &str) -> (Engine, TrackId, transit_test_support::TestDir, PathBuf) {
         let dir = transit_test_support::TestDir::new(&format!("newtake-{tag}"));
         let _ = std::fs::remove_dir_all(&dir);
         let (first, second) = (dir.join("Audio Files/Vox_01.wav"), dir.join("Audio Files/Vox_02.wav"));
@@ -601,13 +601,13 @@ mod record_tests {
         write_take(&second, 4_800);
         let mut e = Engine::default();
         let vox = armed(&mut e, "Vox", "mono", "In 1");
-        add_recording(&mut e, 1_000, vec![(vox, first.clone())], None);
-        (e, vox, first, second)
+        add_recording(&mut e, 1_000, vec![(vox, first)], None);
+        (e, vox, dir, second)
     }
 
     #[test]
     fn new_take_recording_over_a_clip_is_one_record_step() {
-        let (mut e, vox, _, second) = over_a_clip("one");
+        let (mut e, vox, _dir, second) = over_a_clip("one");
         let before = e.undo_history();
         let plan = Recording { start: 2_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
         let ids = place_recording_take(&mut e, &plan, vec![(vox, second)], true);
@@ -624,7 +624,7 @@ mod record_tests {
 
     #[test]
     fn new_take_with_punch_folds_the_trim_into_the_record_step() {
-        let (mut e, vox, _, second) = over_a_clip("punch");
+        let (mut e, vox, _dir, second) = over_a_clip("punch");
         let n = e.undo_history().len();
         let plan = Recording {
             start: 1_000,
@@ -646,7 +646,7 @@ mod record_tests {
 
     #[test]
     fn new_take_fold_still_works_when_the_history_is_full() {
-        let (mut e, vox, _, second) = over_a_clip("full");
+        let (mut e, vox, _dir, second) = over_a_clip("full");
         e.history_limit = e.undo_history().len();
         let last = e.undo_history().pop();
         let plan = Recording { start: 2_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
@@ -662,7 +662,7 @@ mod record_tests {
 
     #[test]
     fn new_take_across_two_tracks_with_clips_is_one_step() {
-        let (mut e, vox, _, second) = over_a_clip("two");
+        let (mut e, vox, _dir, second) = over_a_clip("two");
         let gtr = armed(&mut e, "Gtr", "mono", "In 2");
         add_recording(&mut e, 1_000, vec![(gtr, second.clone())], None);
         let n = e.undo_history().len();
@@ -677,7 +677,7 @@ mod record_tests {
 
     #[test]
     fn new_take_into_empty_space_does_not_duplicate_and_is_one_step() {
-        let (mut e, vox, _, second) = over_a_clip("empty");
+        let (mut e, vox, _dir, second) = over_a_clip("empty");
         let n = e.undo_history().len();
         let plan = Recording { start: 20_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
         place_recording_take(&mut e, &plan, vec![(vox, second)], true);
@@ -688,7 +688,7 @@ mod record_tests {
 
     #[test]
     fn recording_without_new_take_keeps_the_old_steps() {
-        let (mut e, vox, _, second) = over_a_clip("old");
+        let (mut e, vox, _dir, second) = over_a_clip("old");
         let n = e.undo_history().len();
         let plan = Recording {
             start: 1_000,

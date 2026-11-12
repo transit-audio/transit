@@ -37,8 +37,8 @@ pub(crate) fn requests_fixture() {
         } else {
             "libclap_fixture.so"
         };
-        let dir = transit_test_support::TestDir::new("studio-clap-requests");
-        let _ = std::fs::remove_dir_all(&dir);
+        // The parent made this folder and removes it once this child has ended (a child that exits runs no destructors).
+        let dir = std::path::PathBuf::from(std::env::var_os("TRANSIT_REQUESTS_INSTALL").expect("the parent passes the install folder"));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::copy(target.join("debug").join(lib), dir.join("Requests.clap")).unwrap();
         assert_eq!(transit_clap_host::add_search_dir(&dir), 1);
@@ -56,9 +56,11 @@ fn the_frame_loop_restarts_a_gui_less_clap_plugin_with_no_audio_running() {
     // The host registry is process-global: `create` below scans and publishes the fixture, which
     // every other test in this process would then see as an installed plug-in. Run in a child.
     if std::env::var_os("TRANSIT_REQUESTS_FIXTURE_CHILD").is_none() {
+        let install = transit_test_support::TestDir::new("studio-clap-requests");
         let output = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "plugin_requests_tests::the_frame_loop_restarts_a_gui_less_clap_plugin_with_no_audio_running", "--nocapture"])
             .env("TRANSIT_REQUESTS_FIXTURE_CHILD", "1")
+            .env("TRANSIT_REQUESTS_INSTALL", install.path())
             .output()
             .unwrap();
         assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));

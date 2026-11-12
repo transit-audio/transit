@@ -47,14 +47,13 @@ fn old_session() -> String {
     s.to_json().unwrap()
 }
 
-fn open(text: &str, tag: &str) -> (Engine, PathBuf) {
-    let dir = transit_test_support::TestDir::new(&format!("retired-effects-{tag}"));
-    std::fs::create_dir_all(&dir).unwrap();
+fn open(text: &str, tag: &str) -> (Engine, PathBuf, transit_test_support::TestDir) {
+    let dir = transit_test_support::TestDir::created(&format!("retired-effects-{tag}"));
     let path = dir.join("Old.transit");
     std::fs::write(&path, text).unwrap();
     let mut e = Engine::default();
     e.execute("session.open", &json!({"path": path.to_string_lossy()})).unwrap();
-    (e, path)
+    (e, path, dir)
 }
 
 fn plugins(e: &Engine, track: &str) -> Vec<Option<String>> {
@@ -63,7 +62,7 @@ fn plugins(e: &Engine, track: &str) -> Vec<Option<String>> {
 
 #[test]
 fn a_session_with_retired_inserts_opens_emptied_reported_counted_and_modified() {
-    let (mut e, path) = open(&old_session(), "load");
+    let (mut e, path, _dir) = open(&old_session(), "load");
     assert_eq!(plugins(&e, "Vox")[..3], [Some("compressor".into()), None, None]);
     assert_eq!(plugins(&e, "Gtr")[4], None);
 

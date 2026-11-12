@@ -5,13 +5,11 @@ use crate::preview::{Preview, PreviewState};
 use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat, encode};
 
 /// A stereo file of `frames` frames at `value`, in a scratch folder of this test's own.
-fn constant(name: &str, value: f32, frames: usize) -> std::path::PathBuf {
-    let dir = transit_test_support::TestDir::new(&format!("audio-preview-{name}"));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+/// The returned guard owns the file: keep it until the preview has been heard.
+fn constant(name: &str, value: f32, frames: usize) -> transit_test_support::TestDir {
+    let path = transit_test_support::TestDir::file(&format!("audio-preview-{name}"), "wav");
     let buf = AudioBuffer { sample_rate: 48_000, channels: vec![vec![value; frames]; 2] };
     let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None, bitrate_kbps: None, title: None };
-    let path = dir.join("take.wav");
     std::fs::write(&path, encode(&buf, &opts).unwrap()).unwrap();
     path
 }
@@ -27,7 +25,8 @@ fn a_preview_plays_through_the_callback_without_a_plan_change_a_meter_or_an_allo
     let (preview, voice) = Preview::manual(48_000);
     audio.set_preview(voice);
     let plan = *audio.plans.engine().active();
-    preview.play(&constant("plays", 0.25, 48_000));
+    let file = constant("plays", 0.25, 48_000);
+    preview.play(&file);
     let mut out = vec![0.0f32; 480 * 2];
     let mut frames = 0;
     for _ in 0..20 {
@@ -49,7 +48,8 @@ fn starting_the_transport_stops_the_preview_in_the_callback() {
     fill(&mut audio, &mut [0.0; 8]);
     let (preview, voice) = Preview::manual(48_000);
     audio.set_preview(voice);
-    preview.play(&constant("transport", 0.5, 48_000));
+    let file = constant("transport", 0.5, 48_000);
+    preview.play(&file);
     let mut out = vec![0.0f32; 480 * 2];
     preview.pump();
     fill(&mut audio, &mut out);

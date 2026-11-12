@@ -75,10 +75,8 @@ fn refused_any(r: Result<serde_json::Value, EngineError>) -> String {
     }
 }
 
-fn temp(tag: &str) -> std::path::PathBuf {
-    let dir = transit_test_support::TestDir::new(&format!("hwins-{tag}"));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir.join("s.transit")
+fn temp(tag: &str) -> transit_test_support::TestDir {
+    transit_test_support::TestDir::created(&format!("hwins-{tag}"))
 }
 
 #[test]
@@ -115,7 +113,8 @@ fn a_session_that_opens_with_a_conflicting_hardware_insert_opens_with_it_disable
     // A file edited outside the app: B sends on A's path, C's strip routes to its own send.
     e.session_mut().tracks[1].mixer.inserts[0] = Some(transit_model::Insert::hardware("Out 3-4", "In 1-2"));
     e.session_mut().tracks[2].mixer.output = Route::Hardware("Out 5-6".into());
-    let file = temp("open");
+    let dir = temp("open");
+    let file = dir.join("s.transit");
     e.execute("session.save", &json!({"path": file.to_string_lossy(), "replace": true})).unwrap();
     e.messages.clear();
     e.execute("session.open", &json!({"path": file.to_string_lossy()})).unwrap();

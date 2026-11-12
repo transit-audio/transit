@@ -594,13 +594,14 @@ uint64_t jack_get_time(void) { return 0; }
     /// Builds `fakes` under a folder of the test's own (`tag`), every one with the soname `soname`
     /// (as jackd2's and PipeWire's libjack share `libjack.so.0`), and returns their paths in order.
     /// Each test uses its own soname, so no other test's libraries are mapped under it.
-    fn build(tag: &str, soname: &str, fakes: &[Fake]) -> Vec<String> {
-        let root = transit_test_support::TestDir::new("jack-fakes").join(tag);
+    fn build(tag: &str, soname: &str, fakes: &[Fake]) -> (transit_test_support::TestDir, Vec<String>) {
+        let guard = transit_test_support::TestDir::new(&format!("jack-fakes-{tag}"));
+        let root = guard.path().to_path_buf();
         std::fs::create_dir_all(&root).unwrap();
         let source = root.join("fake.c");
         std::fs::write(&source, FAKE_SOURCE).unwrap();
         let compiler = std::env::var("CC").unwrap_or_else(|_| "cc".into());
-        fakes
+        let paths = fakes
             .iter()
             .map(|fake| {
                 let out: PathBuf = root.join(fake.file);
@@ -615,7 +616,8 @@ uint64_t jack_get_time(void) { return 0; }
                 assert!(status.success(), "compiling {}", fake.file);
                 out.to_string_lossy().into_owned()
             })
-            .collect()
+            .collect();
+        (guard, paths)
     }
 
     /// Which library a table calls into: its `jack_get_version_string`.
@@ -631,7 +633,7 @@ uint64_t jack_get_time(void) { return 0; }
     #[test]
     fn the_table_is_bound_from_the_library_that_connected_not_the_first_mapped_soname() {
         let soname = "libjackfake-pair.so.0";
-        let paths = build(
+        let (_fakes, paths) = build(
             "pair",
             soname,
             &[
@@ -666,7 +668,7 @@ uint64_t jack_get_time(void) { return 0; }
     /// nothing calls into the incomplete one.
     #[test]
     fn a_library_lacking_a_function_is_passed_over_for_the_next() {
-        let paths = build(
+        let (_fakes, paths) = build(
             "partial",
             "libjackfake-partial.so.0",
             &[
@@ -684,7 +686,7 @@ uint64_t jack_get_time(void) { return 0; }
     /// No library connects: nothing is kept to bind, and the error is "no server".
     #[test]
     fn with_no_library_connecting_nothing_is_bound() {
-        let paths =
+        let (_fakes, paths) =
             build("none", "libjackfake-none.so.0", &[Fake { file: "jackd2/libjack.so.0", id: "jackd2", connects: false, lacks_port_buffer: false }]);
         let mut loader = DlLoader::default();
         let selection = select(&paths, &mut loader);
@@ -699,7 +701,8 @@ uint64_t jack_get_time(void) { return 0; }
     /// injected and the client pointer is never dereferenced.
     #[test]
     fn the_callback_state_is_alive_during_the_close_and_freed_after_it() {
-        let paths = build("close", "libjackfake-close.so.0", &[Fake { file: "libjack.so.0", id: "close", connects: true, lacks_port_buffer: false }]);
+        let (_fakes, paths) =
+            build("close", "libjackfake-close.so.0", &[Fake { file: "libjack.so.0", id: "close", connects: true, lacks_port_buffer: false }]);
         let mut loader = DlLoader::default();
         assert_eq!(loader.probe(&paths[0]), Outcome::Connected);
         let fns: &'static JackFns = Box::leak(Box::new(loader.connected.unwrap().1));

@@ -168,7 +168,7 @@ mod tests {
     use serde_json::json;
     use transit_model::TrackId;
 
-    fn engine() -> (Engine, TrackId, String) {
+    fn engine() -> (Engine, TrackId, String, transit_test_support::TestDir) {
         let mut e = Engine::default();
         e.set_io_map(transit_model::IoMap::for_device("ASIO", "Scarlett", 2, 2));
         e.execute("track.new", &json!({"kind": "instrument"})).unwrap();
@@ -176,7 +176,7 @@ mod tests {
         e.session_mut().track_mut(t).unwrap().name = "Model D".into();
         let dir = transit_test_support::TestDir::new("rt-plan");
         let path = dir.join("mix.wav").to_string_lossy().into_owned();
-        (e, t, path)
+        (e, t, path, dir)
     }
 
     fn port() -> serde_json::Value {
@@ -187,7 +187,7 @@ mod tests {
     /// anything is written; an accepted plan names the files and C.
     #[test]
     fn each_refusal_is_said_and_a_good_request_is_planned() {
-        let (mut e, t, path) = engine();
+        let (mut e, t, path, _dir) = engine();
         let rt = |e: &mut Engine, extra: serde_json::Value| {
             let mut p = json!({"path": path, "start": 0, "end": 48_000, "mode": "realtime"});
             p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
@@ -230,7 +230,7 @@ mod tests {
     /// the refusal now names both ways.
     #[test]
     fn the_offline_alternative_keeps_its_old_name_and_the_refusal_names_both_modes() {
-        let (mut e, t, path) = engine();
+        let (mut e, t, path, _dir) = engine();
         e.execute("instrument.external", &json!({"track": t.0, "port": port(), "return": "In 1"})).unwrap();
         let err = e.execute("file.bounce_mix", &json!({"path": path, "start": 0, "end": 4800})).unwrap_err().to_string();
         assert!(err.contains("mode: \"realtime\"") && err.contains("offline_without_external"), "{err}");
