@@ -340,8 +340,9 @@ jobs:
           files: dist/*
           body_path: ${{ runner.temp }}/release-body.md
           draft: false
-          # Every release is a GitHub pre-release while transit is alpha.
-          prerelease: true
+          # A tag with a suffix (v0.8.0-rc.1) is a GitHub pre-release; a plain tag (v0.7.0) is a normal
+          # release, so GitHub marks the newest one "Latest". The alpha warning is in the body either way.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           # Generated notes only with the generic body; a notes file is the whole body.
           generate_release_notes: ${{ steps.body.outputs.notes != 'true' }}
 

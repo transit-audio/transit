@@ -1,6 +1,6 @@
 (function () {
-  // The releases list: every release is a GitHub pre-release while transit is alpha, and GitHub's
-  // "latest" skips pre-releases, so the newest entry is resolved from the list instead.
+  // The releases list: GitHub's "latest" skips pre-releases (tags with a suffix), so the newest
+  // entry is resolved from the list instead.
   var REL = "https://github.com/transit-audio/transit/releases";
   var meta = document.getElementById("release-meta");
   function has(n, word) { return n.toLowerCase().indexOf(word) !== -1; }

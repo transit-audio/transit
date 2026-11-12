@@ -130,8 +130,8 @@ if has appimage; then
   # Update information: AppImageUpdate, AppImageLauncher and the like read it from the file and
   # fetch only the blocks that changed in a newer release, through the .zsync published next to
   # each AppImage on GitHub Releases. `latest-all` is the newest published release OR pre-release.
-  # Every transit release is a GitHub pre-release while alpha, so plain `latest` (which skips
-  # pre-releases) would stay on the last non-pre-release and offer it as an update: a downgrade.
+  # Plain `latest` skips pre-releases, so an AppImage built from a pre-release tag would be offered
+  # the last normal release as an update: a downgrade.
   # A fork's builds point at its own releases through GITHUB_REPOSITORY.
   REPO="${GITHUB_REPOSITORY:-transit-audio/transit}"
   UPDATE_INFO="gh-releases-zsync|${REPO%%/*}|${REPO#*/}|latest-all|transit-*-linux-$ARCH.AppImage.zsync"
