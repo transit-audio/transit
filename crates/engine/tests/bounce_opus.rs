@@ -3,14 +3,13 @@
 //! their files `.opus`, and write files that decode to the bounce's length at 48 kHz.
 
 use serde_json::json;
-use std::path::PathBuf;
 use transit_audio_io::{AudioBuffer, FileFormat};
 use transit_engine::Engine;
 use transit_model::{ChannelFormat, Clip, Session, TrackKind};
 use transit_time::SampleRate;
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-opus-{name}-{}", std::process::id()));
+fn scratch(name: &str) -> transit_test_support::TestDir {
+    let dir = transit_test_support::TestDir::new(&format!("opus-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

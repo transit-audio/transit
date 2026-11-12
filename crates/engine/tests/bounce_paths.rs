@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
 use transit_engine::Engine;
@@ -16,8 +16,8 @@ const SR: u32 = 48_000;
 const AT: usize = 2_400;
 const LEN: usize = 8_192;
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-{name}-{}", std::process::id()));
+fn scratch(name: &str) -> transit_test_support::TestDir {
+    let dir = transit_test_support::TestDir::new(&format!("scratch-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

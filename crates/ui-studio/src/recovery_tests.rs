@@ -4,11 +4,11 @@
 
 use crate::{Services, StudioApp};
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use transit_engine::autosave::leftovers;
 
-fn folder(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-{name}-{}", std::process::id()));
+fn folder(name: &str) -> transit_test_support::TestDir {
+    let dir = transit_test_support::TestDir::new(&format!("scratch-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

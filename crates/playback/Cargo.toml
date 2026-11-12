@@ -51,6 +51,7 @@ test-hooks = []
 native-jack = ["dep:transit-audio-jack", "transit-audio-jack/libjack"]
 
 [dev-dependencies]
+transit-test-support.workspace = true
 transit-midi.workspace = true
 transit-plugin-host = { workspace = true, features = ["testing"] }
 transit-rt = { workspace = true, features = ["testing"] }

@@ -272,8 +272,8 @@ mod tests {
     use super::*;
 
     /// A fresh folder holding `in` (read root), `out` (write root) and `outside`.
-    fn folders(name: &str) -> (PathBuf, Arc<AutomationRoots>) {
-        let base = std::env::temp_dir().join(format!("sc-file-access-{name}-{}", std::process::id()));
+    fn folders(name: &str) -> (transit_test_support::TestDir, Arc<AutomationRoots>) {
+        let base = transit_test_support::TestDir::new(&format!("file-access-{name}"));
         let _ = std::fs::remove_dir_all(&base);
         for d in ["in/sub", "out", "outside", "in2"] {
             std::fs::create_dir_all(base.join(d)).unwrap();

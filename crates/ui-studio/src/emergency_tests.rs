@@ -23,6 +23,9 @@ use transit_engine::emergency::{EXIT_AFTER_SHUTDOWN, EXIT_TERMINATED, emergency_
 
 const CHILD: &str = "TRANSIT_EMERGENCY_CHILD";
 const FIXTURE: &str = "TRANSIT_EMERGENCY_FIXTURE";
+/// The folder the parent made for the child to install the fixture bundle in; the parent removes it once the
+/// child has ended (a child that exits or is killed runs no destructors).
+const INSTALL: &str = "TRANSIT_EMERGENCY_INSTALL";
 /// The child prints this once the plug-in is loaded, right before the simulated panic.
 const READY: &str = "emergency child: plug-in loaded, panicking";
 
@@ -62,20 +65,18 @@ fn built_fixture() -> &'static Path {
 
 /// In the child: installs the built fixture as a bundle in a folder of its own, adds it to the
 /// search path and returns the synth's id.
-fn install_fixture(built: &Path) -> String {
+fn install_fixture(built: &Path, dir: &Path) -> String {
     transit_vst3_host::set_scan_extra_dirs_only(true);
     let (folder, exe) = if cfg!(windows) {
         ("x86_64-win", "Fixture.vst3")
     } else {
         (if cfg!(target_arch = "aarch64") { "aarch64-linux" } else { "x86_64-linux" }, "Fixture.so")
     };
-    let dir = std::env::temp_dir().join(format!("studio-vst3-emergency-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
     let bin = dir.join("Fixture.vst3/Contents").join(folder);
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(built, bin.join(exe)).unwrap();
-    assert_eq!(transit_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
-    transit_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
+    assert_eq!(transit_vst3_host::add_search_dir(dir), 3, "the fixture's plug-ins");
+    transit_vst3_host::scan_paths(&[dir.to_path_buf()]).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
 }
 
 fn frame(app: &mut StudioApp, ctx: &egui::Context) {
@@ -86,7 +87,10 @@ fn frame(app: &mut StudioApp, ctx: &egui::Context) {
 /// The child: an app with the fixture synth loaded on the plug-in host thread, then a panic on
 /// this thread, then `case`.
 fn child(case: &str) -> ! {
-    let synth = install_fixture(Path::new(&std::env::var_os(FIXTURE).expect("the built fixture")));
+    let synth = install_fixture(
+        Path::new(&std::env::var_os(FIXTURE).expect("the built fixture")),
+        Path::new(&std::env::var_os(INSTALL).expect("the install folder")),
+    );
     let mut engine = transit_engine::Engine::default();
     let track = engine.session_mut().add_track(transit_model::TrackKind::Instrument, transit_model::ChannelFormat::Stereo, Some("Synth"));
     let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
@@ -127,10 +131,12 @@ struct Ended {
 }
 
 fn run_child(test: &str, case: &str, wait: Duration) -> Ended {
+    let install = transit_test_support::TestDir::new("studio-vst3-emergency");
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", test, "--nocapture"])
         .env(CHILD, case)
         .env(FIXTURE, built_fixture())
+        .env(INSTALL, install.path())
         .env("VST3_FIXTURE_UNLOAD_WAITS_ON_WORKER", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

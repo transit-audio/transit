@@ -7,15 +7,13 @@ use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
 use transit_model::sampler_patch::ZoneEntry;
 use transit_model::{ChannelFormat, Clip, Frozen, TrackId, TrackKind};
 
-pub(super) struct Dir(pub(super) PathBuf);
+pub(super) struct Dir(pub(super) transit_test_support::TestDir);
 
 impl Dir {
     pub(super) fn new() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        // The stamp only names fresh storage; no test outcome depends on elapsed time.
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let path = std::env::temp_dir().join(format!("transit-tkit-{}-{id}-{stamp}", std::process::id()));
+        let path = transit_test_support::TestDir::new(&format!("tkit-{id}"));
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -211,7 +209,7 @@ fn a_relative_sample_resolves_against_the_kit_file_and_follows_a_moved_folder() 
     // The session's folder holds a same-named sample: never used for a kit's relative path.
     let decoy = Dir::new();
     decoy.audio("Kick.wav", 64, 48_000);
-    b.session_mut().folder = Some(decoy.0.clone());
+    b.session_mut().folder = Some(decoy.0.to_path_buf());
     let out = recall(&mut b, u, &moved.join("Mine.tkit"), false);
     assert_eq!(out["missing"], json!([]), "{out}");
     let p = kit(&b, u);

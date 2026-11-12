@@ -76,7 +76,7 @@ fn new_and_close_forget_the_copy_too() {
 
 #[test]
 fn open_and_revert_forget_the_copy() {
-    let dir = std::env::temp_dir().join(format!("transit-clipboard-476-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("clipboard-476");
     let _ = std::fs::remove_dir_all(&dir);
     let path = dir.join("A.transit").to_string_lossy().into_owned();
     let mut e = Engine::new(session_with_audio());
@@ -108,7 +108,7 @@ fn copy_and_paste_within_one_session_still_works_and_survives_undo_and_redo() {
 
 #[test]
 fn save_as_keeps_the_copy() {
-    let dir = std::env::temp_dir().join(format!("transit-clipboard-476-sa-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("clipboard-476-sa");
     let _ = std::fs::remove_dir_all(&dir);
     let path = dir.join("Same.transit").to_string_lossy().into_owned();
     let mut e = Engine::new(session_with_audio());

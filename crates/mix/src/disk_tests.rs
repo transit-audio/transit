@@ -218,21 +218,11 @@ fn a_locate_without_priming_counts_one_underrun_and_resumes() {
 }
 
 /// Unique temp dir per test (E51), removed on drop.
-struct Dir(PathBuf);
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+struct Dir(transit_test_support::TestDir);
 
 #[test]
 fn export_of_a_short_file_forced_disk_backed_equals_the_in_memory_render_bit_for_bit() {
-    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let dir = Dir(std::env::temp_dir().join(format!(
-        "transit-disk-export-{}-{}",
-        std::process::id(),
-        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    )));
+    let dir = Dir(transit_test_support::TestDir::new("disk-export"));
     std::fs::create_dir_all(&dir.0).unwrap();
     let path = dir.0.join("Take_01.wav");
     let data = content(9_000);

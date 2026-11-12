@@ -54,6 +54,7 @@ A good brief is the biggest token saver. Include:
 - No Rust file over 1500 lines. `cargo xtask file-size` is a ratchet over the `OVER_BUDGET` table: a
   listed file may only shrink, an unlisted one may not cross the line. Never grow a file near the
   budget; split it by concern as a pure move first, then add the code ([`evidence/gates.md`](evidence/gates.md)).
+- A test that needs a scratch folder takes it from `transit_test_support::TestDir`, which removes it when the test ends; `cargo xtask temp-dirs` rejects a direct system temp directory call ([`evidence/gates.md`](evidence/gates.md)).
 - Tests do not assert scheduling or real-clock outcomes (E49 class). A freshness or rate comes from the
   message's own stamp (E59), and a test that compares file times sets them itself (E60). A playback
   or UI test that renders four or more strips calls `MixEngine::force_serial(true)` unless it tests the
@@ -98,6 +99,7 @@ cargo xtask layers
 cargo xtask assets
 cargo xtask timing
 cargo xtask file-size
+cargo xtask temp-dirs
 cargo xtask help
 cargo xtask indexes --validate
 cargo xtask indexes --check

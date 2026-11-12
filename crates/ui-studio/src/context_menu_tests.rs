@@ -290,18 +290,11 @@ fn a_device_card_instrument_menu_has_the_chrome_rows_with_the_instrument_checked
 }
 
 /// A scratch folder holding `Kicks/`, removed on drop.
-struct Dir(std::path::PathBuf);
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+struct Dir(transit_test_support::TestDir);
 
 #[test]
 fn the_browser_location_menu_has_the_chrome_rows_and_add_to_locations_still_adds() {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let dir = Dir(std::env::temp_dir().join(format!("transit-ctxmenu-{}-{nanos}", std::process::id())));
+    let dir = Dir(transit_test_support::TestDir::new("ctxmenu"));
     std::fs::create_dir_all(dir.0.join("Kicks")).unwrap();
     std::fs::write(dir.0.join("Kicks").join("notes.txt"), b"x").unwrap();
     let root = dir.0.to_string_lossy().into_owned();

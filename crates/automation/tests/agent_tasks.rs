@@ -106,7 +106,7 @@ fn agent_builds_and_mixes_a_session() {
     assert!(pad["automation"].as_array().unwrap().iter().any(|l| l["param"] == "volume"));
 
     // 8. Bounce 4 seconds and check loudness is sane.
-    let dir = std::env::temp_dir().join(format!("transit-agent-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("agent");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("bounce.wav");
     let r =

@@ -1,12 +1,11 @@
 //! Bounces stream the main mix or a bus to their file, exactly as rendered in memory.
 
-use std::path::PathBuf;
 use transit_audio_io::{BitDepth, EncodeOptions, FileFormat};
 use transit_engine::io::{Bounce, bounce_stems};
 use transit_time::Range;
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-{name}-{}", std::process::id()));
+fn scratch(name: &str) -> transit_test_support::TestDir {
+    let dir = transit_test_support::TestDir::new(&format!("scratch-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

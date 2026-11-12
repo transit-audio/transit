@@ -153,7 +153,7 @@ fn midi_effect_session() -> Session {
 #[ignore = "writes the MIDI effect fixture (#201) into crates/model/tests/corpus; run it by hand"]
 fn write_midi_effect_fixture() {
     let file = "v0.6.0-midi-effects.transit";
-    let scratch = std::env::temp_dir().join(format!("transit-corpus-{}-midi-effects", std::process::id()));
+    let scratch = transit_test_support::TestDir::new("corpus-midi-effects");
     std::fs::create_dir_all(&scratch).unwrap();
     let mut engine = Engine::new(midi_effect_session());
     transit_engine::io::save_session(&mut engine, scratch.join(file).to_str().unwrap()).unwrap();

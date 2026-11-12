@@ -12,8 +12,8 @@ fn largest_step(out: &[f32], from: usize) -> f32 {
 }
 
 /// A scratch folder of this test's own.
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-preview-{}-{name}", std::process::id()));
+fn scratch(name: &str) -> transit_test_support::TestDir {
+    let dir = transit_test_support::TestDir::new(&format!("preview-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

@@ -45,6 +45,8 @@ transit-engine = { path = "crates/engine" }
 transit-playback = { path = "crates/playback" }
 transit-automation = { path = "crates/automation" }
 transit-ui-studio = { path = "crates/ui-studio" }
+# Test scratch folders (#497): dev-dependency only (xtask layers).
+transit-test-support = { path = "crates/test-support" }
 
 # foundation
 thiserror = "2"

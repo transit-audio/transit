@@ -144,7 +144,7 @@ fn focus_follows_both_views_and_views_never_dirty_the_document() {
     app.ui.mixer_height = crate::mixer::min_pane_height();
     let r = app.run("track.new", json!({"kind": "instrument", "name": "Keys"})).unwrap();
     let t2 = TrackId(r["tracks"][0].as_u64().unwrap());
-    let path = std::env::temp_dir().join(format!("transit-mixer-{}.sc", std::process::id()));
+    let path = transit_test_support::TestDir::file("mixer", "sc");
     app.run("session.save_as", json!({"path": path.to_string_lossy(), "replace": true})).unwrap();
     frames(&mut app, &ctx, 3, &mut time);
     // Mixer to arrangement: click the first strip's name.

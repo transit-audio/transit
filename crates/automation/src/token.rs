@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn the_file_round_trips() {
-        let dir = std::env::temp_dir().join(format!("transit-token-test-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("token-test");
         let path = dir.join("nested").join(TOKEN_FILE_NAME);
         write_token_file(&path, "abc123").unwrap();
         write_token_file(&path, "def456").unwrap();

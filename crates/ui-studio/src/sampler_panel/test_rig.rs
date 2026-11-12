@@ -28,7 +28,7 @@ pub struct T {
     /// Raw events the next frame receives (a press held across frames, say).
     events: Vec<egui::Event>,
     /// The folder of the test's generated files.
-    pub dir: PathBuf,
+    pub dir: transit_test_support::TestDir,
 }
 
 pub fn mid(r: [f32; 4]) -> (f32, f32) {
@@ -87,7 +87,7 @@ impl T {
         app.ui.show_mixer = true;
         app.ui.show_devices = true;
         let n = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("transit-sampler-pads-{}-{n}", std::process::id()));
+        let dir = transit_test_support::TestDir::new(&format!("sampler-pads-{n}"));
         std::fs::create_dir_all(&dir).unwrap();
         let mut t = T {
             app,
@@ -275,11 +275,5 @@ impl T {
         hub.register(t, transit_mix::INSTRUMENT_UID, &tap);
         self.app.builtin_editor.hub = Some(hub);
         tap
-    }
-}
-
-impl Drop for T {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }

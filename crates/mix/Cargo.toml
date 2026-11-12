@@ -26,6 +26,7 @@ rayon.workspace = true
 testing = ["transit-dsp/testing", "transit-rt/testing"]
 
 [dev-dependencies]
+transit-test-support.workspace = true
 serde_json.workspace = true
 transit-rt = { workspace = true, features = ["testing"] }
 transit-mix = { path = ".", features = ["testing"] }

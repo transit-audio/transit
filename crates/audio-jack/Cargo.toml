@@ -22,6 +22,7 @@ log.workspace = true
 libloading = { version = "=0.7.4", optional = true }
 
 [dev-dependencies]
+transit-test-support.workspace = true
 transit-audio-backend.workspace = true
 log.workspace = true
 transit-rt = { workspace = true, features = ["testing"] }

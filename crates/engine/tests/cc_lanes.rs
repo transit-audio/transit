@@ -99,8 +99,7 @@ fn recorded_sustain_survives_edit_undo_disk_roundtrip_and_audio_playback() {
     assert!(e.undo());
     assert_eq!(points(&e, clip), original);
     assert_eq!(render(&e), recorded);
-    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!("transit-cc-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let dir = transit_test_support::TestDir::new("cc");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("sustain.transit");
     e.execute("session.save_as", &json!({"path":file})).unwrap();

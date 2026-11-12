@@ -157,7 +157,7 @@ fn enter_runs_delete_take_and_escape_does_not() {
 
 #[test]
 fn enter_saves_then_continues_and_escape_cancels() {
-    let path = std::env::temp_dir().join(format!("transit-326c-enter-{}.transit", std::process::id()));
+    let path = transit_test_support::TestDir::file("326c-enter", "transit");
     let _ = std::fs::remove_file(&path);
     let target = path.to_string_lossy().to_string();
     let services = Services { pick_save: Some(Box::new(move |_| Some(target.clone()))), ..Services::default() };
@@ -180,7 +180,7 @@ fn enter_saves_then_continues_and_escape_cancels() {
 #[test]
 fn dawproject_export_discloses_the_fallback_then_enter_chooses_a_location() {
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let path = std::env::temp_dir().join(format!("transit-dawproject-dialog-{}-{stamp}.dawproject", std::process::id()));
+    let path = transit_test_support::TestDir::file(&format!("dawproject-dialog-{stamp}"), "dawproject");
     let answer = path.to_string_lossy().into_owned();
     let services = Services { pick_save: Some(Box::new(move |_| Some(answer.clone()))), ..Services::default() };
     let mut t = T::with(services);

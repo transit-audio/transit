@@ -304,7 +304,7 @@ fn a_tempo_change_moves_ticks_material_with_the_bars_and_leaves_samples_audio_in
     let clip = t.app.run("midi.new_clip", json!({"tracks": [inst.0], "start": 96_000, "end": 384_000})).unwrap()["clip"].as_u64().unwrap();
     t.app.run("midi.note_add", json!({"clip": clip, "pitch": 60, "start_ticks": 960, "length_ticks": 480})).unwrap();
     let audio = t.track(json!({"kind": "audio"}));
-    let dir = std::env::temp_dir().join(format!("transit-tempo-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("tempo");
     std::fs::create_dir_all(&dir).unwrap();
     let wav = dir.join("a.wav");
     std::fs::write(&wav, silent_wav(96_000)).unwrap();

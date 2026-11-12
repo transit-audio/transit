@@ -154,11 +154,11 @@ fn queued_stop_stop_play_locates_before_restarting_and_pause_does_not_rewind() {
     t.assert_stopped_at(96_000);
 }
 
-struct TakeFile(std::path::PathBuf);
+struct TakeFile(transit_test_support::TestDir);
 
 impl TakeFile {
     fn new(tag: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("transit-stop-{tag}-{}.wav", std::process::id()));
+        let path = transit_test_support::TestDir::file(&format!("stop-{tag}"), "wav");
         // One second of synthetic mono PCM, just as the recording writer supplies to the host.
         let mut wav = Vec::new();
         wav.extend(b"RIFF");
@@ -202,7 +202,7 @@ fn stop_take(tag: &str, approximate: bool) -> T {
         midi_journal: None,
         midi_placed: false,
     });
-    t.app.finished_test_takes = Some((vec![(track, take.0.clone())], None));
+    t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
     t.app.test_approximate_start = approximate;
     t.app.engine.transport.recording = true;
     t.app.start_play(96_000, None, None);
@@ -242,7 +242,7 @@ fn recording_stop(count: u32) {
         midi_journal: None,
         midi_placed: false,
     });
-    t.app.finished_test_takes = Some((vec![(track, take.0.clone())], None));
+    t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
     t.app.engine.transport.recording = true;
     t.app.start_play(96_000, None, None);
     let before = t.app.engine.undo_history();

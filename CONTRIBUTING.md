@@ -34,6 +34,8 @@ The native-backend features need no SDK. The Linux job of `.github/workflows/ci.
 compile proof. Details and the reasons are in [`gates.md`](docs/contributing/evidence/gates.md).
 A pull request from outside merges only on green CI.
 
+Tests take scratch folders from `transit_test_support::TestDir` (removed when the test ends); `cargo xtask temp-dirs` rejects a direct system temp directory call. `transit-*` folders left in the system temp directory by older runs are safe to delete.
+
 ## Adding a known issue or an escape record
 
 The indexes in `docs/known-issues/README.md`, `docs/adr/README.md` and `docs/escapes/README.md` are

@@ -45,16 +45,11 @@ pub fn dialog(app: &mut StudioApp, ctx: &egui::Context) {
 mod tests {
     use super::*;
     use std::cell::RefCell;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::rc::Rc;
 
-    fn temp_dir() -> PathBuf {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("transit-dawproject-export-ui-{}-{stamp}-{serial}", std::process::id()));
-        std::fs::create_dir(&dir).unwrap();
-        dir
+    fn temp_dir() -> transit_test_support::TestDir {
+        transit_test_support::TestDir::created("dawproject-export-ui")
     }
 
     #[test]

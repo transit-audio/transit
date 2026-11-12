@@ -26,20 +26,14 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
 }
 
 /// A temp folder for one test, removed on drop.
-struct Dir(std::path::PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let d = std::env::temp_dir().join(format!("transit-slice7-{tag}-{}", std::process::id()));
+        let d = transit_test_support::TestDir::new(&format!("slice7-{tag}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         Dir(d)
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

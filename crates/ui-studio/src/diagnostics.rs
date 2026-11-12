@@ -991,7 +991,7 @@ mod tests {
 
     #[test]
     fn log_tail_keeps_the_last_lines_in_order() {
-        let dir = std::env::temp_dir().join(format!("transit-diag-{}-tail", std::process::id()));
+        let dir = transit_test_support::TestDir::new("diag-tail");
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("transit.log");
         std::fs::write(&path, (0..300).map(|i| format!("line {i}\n")).collect::<String>()).expect("write");

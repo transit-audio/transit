@@ -1,0 +1,12 @@
+[package]
+name = "transit-test-support"
+description = "transit test support: scratch folders that are removed when the test ends (#497). Dev-dependency only."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

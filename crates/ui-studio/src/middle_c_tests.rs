@@ -146,7 +146,7 @@ fn the_options_menu_radio_pair_runs_the_command() {
 
 #[test]
 fn the_command_saves_middle_c_into_ui_json_and_keeps_the_other_keys() {
-    let dir = std::env::temp_dir().join(format!("transit-middle-c-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("middle-c");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("ui.json");
     std::fs::write(&path, r#"{"unrelated":42,"middle_c":"C3"}"#).unwrap();

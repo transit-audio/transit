@@ -429,6 +429,7 @@ dependencies = [
  "transit-midi-io",
  "transit-playback",
  "transit-rt",
+ "transit-test-support",
 ]
 
 [[package]]
@@ -4099,6 +4100,7 @@ dependencies = [
  "transit-engine",
  "transit-playback",
  "transit-rt",
+ "transit-test-support",
  "transit-ui-studio",
  "ureq",
  "winresource",
@@ -4150,6 +4152,7 @@ dependencies = [
  "log",
  "transit-audio-backend",
  "transit-rt",
+ "transit-test-support",
 ]
 
 [[package]]
@@ -4170,6 +4173,7 @@ dependencies = [
  "getrandom 0.3.4",
  "serde_json",
  "transit-engine",
+ "transit-test-support",
 ]
 
 [[package]]
@@ -4185,6 +4189,7 @@ dependencies = [
  "transit-clap-host",
  "transit-dsp",
  "transit-rt",
+ "transit-test-support",
  "windows-sys 0.61.2",
 ]
 
@@ -4197,6 +4202,7 @@ dependencies = [
  "transit-automation",
  "transit-dsp",
  "transit-engine",
+ "transit-test-support",
 ]
 
 [[package]]
@@ -4244,6 +4250,7 @@ dependencies = [
  "transit-model",
  "transit-plugin-host",
  "transit-rt",
+ "transit-test-support",
  "transit-time",
  "transit-vst3-host",
  "zip",
@@ -4323,6 +4330,7 @@ dependencies = [
  "transit-mix",
  "transit-model",
  "transit-rt",
+ "transit-test-support",
  "transit-time",
  "transit-vst3-host",
 ]
@@ -4345,6 +4353,7 @@ dependencies = [
  "thiserror 2.0.21",
  "transit-audio-io",
  "transit-midi",
+ "transit-test-support",
  "transit-time",
 ]
 
@@ -4392,6 +4401,7 @@ dependencies = [
  "transit-model",
  "transit-plugin-host",
  "transit-rt",
+ "transit-test-support",
  "transit-time",
  "transit-vst3-host",
  "triple_buffer",
@@ -4446,6 +4456,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-test-support"
+version = "0.7.0"
+
+[[package]]
 name = "transit-texture"
 version = "0.7.0"
 dependencies = [
@@ -4483,6 +4497,7 @@ dependencies = [
  "transit-model",
  "transit-playback",
  "transit-plugin-host",
+ "transit-test-support",
  "transit-time",
  "transit-vst3-host",
 ]
@@ -4499,6 +4514,7 @@ dependencies = [
  "thiserror 2.0.21",
  "transit-dsp",
  "transit-rt",
+ "transit-test-support",
  "transit-vst3-host",
  "vst3",
  "windows-sys 0.61.2",
@@ -5766,6 +5782,7 @@ dependencies = [
  "serde_json",
  "syn 2.0.119",
  "toml",
+ "transit-test-support",
 ]
 
 [[package]]

@@ -7,7 +7,6 @@ mod fixture;
 use fixture::{IMPULSES, LEN, positions, session};
 use serde_json::json;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use transit_audio_io::{BitDepth, EncodeOptions, FileFormat};
 use transit_engine::{Engine, io::Bounce};
 use transit_time::Range;
@@ -29,8 +28,7 @@ fn freeze_stores_the_corrected_pre_fader_render() {
 
 #[test]
 fn float_wav_export_contains_the_corrected_mix_sample_for_sample() {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let dir = std::env::temp_dir().join(format!("transit-251-export-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    let dir = transit_test_support::TestDir::new("251-export");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Mix.wav");
     let (s, _) = session("compressor", &[0.0, 5.0, 0.0], &[2085, 6175]);

@@ -207,7 +207,7 @@ fn deleting_a_folder_that_promotes_a_member_into_a_loop_is_refused() {
 
 #[test]
 fn loading_a_preset_with_a_send_into_the_own_input_is_refused() {
-    let dir = std::env::temp_dir().join(format!("route-cycles-preset-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("route-cycles-preset");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("p.tpreset");
     let mut e = Engine::default();
@@ -225,7 +225,7 @@ fn loading_a_preset_with_a_send_into_the_own_input_is_refused() {
 
 #[test]
 fn importing_session_data_that_closes_a_loop_is_refused() {
-    let dir = std::env::temp_dir().join(format!("route-cycles-import-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("route-cycles-import");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("other.json");
     let mut other = Engine::default();
@@ -245,7 +245,7 @@ fn importing_session_data_that_closes_a_loop_is_refused() {
 
 #[test]
 fn opening_a_session_with_a_loop_is_still_allowed() {
-    let dir = std::env::temp_dir().join(format!("route-cycles-open-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("route-cycles-open");
     std::fs::create_dir_all(&dir).unwrap();
     let mut e = auxes(&["A", "B"]);
     chain(&mut e, &["A", "B"]);

@@ -201,8 +201,8 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn scratch(tag: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("transit-kits-{tag}-{}", std::process::id()));
+    fn scratch(tag: &str) -> transit_test_support::TestDir {
+        let root = transit_test_support::TestDir::new(&format!("kits-{tag}"));
         let _ = std::fs::remove_dir_all(&root);
         root
     }

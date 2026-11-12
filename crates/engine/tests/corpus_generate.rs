@@ -23,7 +23,7 @@ fn corpus_dir() -> PathBuf {
 /// A session saved the way File > Save As does, reduced to its `.transit` file.
 fn save_corpus_file(session: Session, name: &str) {
     let version = env!("CARGO_PKG_VERSION");
-    let scratch = std::env::temp_dir().join(format!("transit-corpus-{}-{name}", std::process::id()));
+    let scratch = transit_test_support::TestDir::new("corpus");
     std::fs::create_dir_all(&scratch).unwrap();
     let file = format!("v{version}-{name}.transit");
     let mut engine = Engine::new(session);

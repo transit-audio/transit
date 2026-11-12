@@ -29,7 +29,7 @@ fn header_only_take(path: &std::path::Path, frames: u64) {
 
 #[test]
 fn a_take_of_one_and_a_half_gi_samples_is_one_disk_backed_clip_and_reopens_so() {
-    let dir = std::env::temp_dir().join(format!("long-take-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("long-take");
     std::fs::create_dir_all(&dir).unwrap();
     let _cleanup = Cleanup(dir.clone());
     let path = dir.join("Loopback_01.wav");

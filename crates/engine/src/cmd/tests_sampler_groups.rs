@@ -5,7 +5,6 @@
 
 use crate::{Engine, EngineError};
 use serde_json::{Value, json};
-use std::path::PathBuf;
 use std::sync::Arc;
 use transit_audio_io::{AudioBuffer, FileFormat};
 use transit_midi::{MiddleC, Note, Sequence};
@@ -13,25 +12,17 @@ use transit_model::sampler_patch::{LoopMode, PatchV1, PlayMode, RoundRobin, Slic
 use transit_model::{Clip, SourceAudio, TrackId};
 use transit_time::{Range, TICKS_PER_QUARTER};
 
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let p = std::env::temp_dir().join(format!("sc-sampler-groups-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let p = transit_test_support::TestDir::new(&format!("sampler-groups-{tag}"));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Dir(p)
     }
     fn path(&self, name: &str) -> String {
         self.0.join(name).to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

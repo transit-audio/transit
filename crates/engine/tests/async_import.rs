@@ -2,7 +2,6 @@
 //! step. Files live in a temp folder each test makes.
 
 use serde_json::{Value, json};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -31,13 +30,11 @@ fn wav(channels: u16, rate: u32, frames: u32) -> Vec<u8> {
     b
 }
 
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let p = std::env::temp_dir().join(format!("sc-async-import-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let p = transit_test_support::TestDir::new(&format!("async-import-{tag}"));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Dir(p)
@@ -46,12 +43,6 @@ impl Dir {
         let p = self.0.join(name);
         std::fs::write(&p, bytes).unwrap();
         p.to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

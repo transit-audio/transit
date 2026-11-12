@@ -595,7 +595,7 @@ uint64_t jack_get_time(void) { return 0; }
     /// (as jackd2's and PipeWire's libjack share `libjack.so.0`), and returns their paths in order.
     /// Each test uses its own soname, so no other test's libraries are mapped under it.
     fn build(tag: &str, soname: &str, fakes: &[Fake]) -> Vec<String> {
-        let root = std::env::temp_dir().join(format!("transit-jack-fakes-{}", std::process::id())).join(tag);
+        let root = transit_test_support::TestDir::new("jack-fakes").join(tag);
         std::fs::create_dir_all(&root).unwrap();
         let source = root.join("fake.c");
         std::fs::write(&source, FAKE_SOURCE).unwrap();

@@ -579,8 +579,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    fn folder(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("transit-{name}-{}", std::process::id()));
+    fn folder(name: &str) -> transit_test_support::TestDir {
+        let dir = transit_test_support::TestDir::new(&format!("scratch-{name}"));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
@@ -629,12 +629,7 @@ mod tests {
     #[test]
     fn frozen_texture_media_survives_autosave_and_crash_recovery() {
         use transit_dsp::{Plugin, plugins::texture::TextureFx};
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "transit-frozen-autosave-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
+        let dir = transit_test_support::TestDir::new("frozen-autosave");
         let mut e = Engine::default();
         e.execute("track.new", &json!({"name": "Pad"})).unwrap();
         let track = e.session().tracks[0].id.0;
@@ -702,7 +697,7 @@ mod tests {
     #[test]
     fn the_writer_saves_the_newest_change_and_drops_the_folder_when_done() {
         let root = folder("autosave-writer");
-        let w = Autosaver::new(root.clone());
+        let w = Autosaver::new(root.to_path_buf());
         let mut e = Engine::default();
         for _ in 0..5 {
             record(&mut e, 0.5);

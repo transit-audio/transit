@@ -125,7 +125,8 @@ fn with_audio(s: &mut Session, src: Source) {
 
 /// An absolute scratch folder in this platform's form (nothing is created in it).
 fn scratch() -> PathBuf {
-    std::env::temp_dir().join("transit-portable-paths")
+    // The guard drops at once: the path is unique and nothing is ever created at it.
+    transit_test_support::TestDir::new("portable-paths").path().to_path_buf()
 }
 
 fn text(p: &Path) -> String {

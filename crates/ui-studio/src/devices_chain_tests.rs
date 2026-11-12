@@ -475,7 +475,7 @@ fn a_bounce_with_an_external_instrument_asks_and_leaves_it_out_only_when_chosen(
     let t = new_track(&mut app, json!({"kind": "instrument", "name": "Model D"}));
     app.run("instrument.external", json!({"track": t.0, "return": "In 1"})).unwrap();
     app.run("midi.new_clip", json!({"tracks": [t.0], "start": 0, "end": 4_800})).unwrap();
-    let dir = std::env::temp_dir().join(format!("transit-ext-bounce-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("ext-bounce");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("mix.wav");

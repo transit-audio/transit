@@ -48,7 +48,7 @@ fn old_session() -> String {
 }
 
 fn open(text: &str, tag: &str) -> (Engine, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("transit-retired-effects-{tag}-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new(&format!("retired-effects-{tag}"));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Old.transit");
     std::fs::write(&path, text).unwrap();

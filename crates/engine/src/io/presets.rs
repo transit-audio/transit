@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn write_list_read_and_delete_in_a_temp_folder() {
-        let root = std::env::temp_dir().join(format!("transit-presets-{}", std::process::id()));
+        let root = transit_test_support::TestDir::new("presets");
         let _ = std::fs::remove_dir_all(&root);
         let state = transit_vst3_host::preset::join_state(b"comp", b"ctrl").unwrap();
         for name in ["b kit", "A Kit"] {

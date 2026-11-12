@@ -43,13 +43,11 @@ fn wav(channels: u16, rate: u32, frames: u32) -> Vec<u8> {
 }
 
 /// A folder of its own under the temp dir, removed when dropped.
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let p = std::env::temp_dir().join(format!("transit-browser-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let p = transit_test_support::TestDir::new(&format!("browser-{tag}"));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Dir(p)
@@ -62,12 +60,6 @@ impl Dir {
     }
     fn s(&self) -> String {
         self.0.to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -875,7 +867,7 @@ fn files_the_engine_would_not_prepare_are_named_in_the_status() {
     t.add_and_expand();
     let audio = t.track(TrackKind::Audio);
     let ok = t.dir.0.join("loop 90.wav");
-    let outside = std::env::temp_dir().join(format!("transit-outside-{}", std::process::id())).join("elsewhere.wav");
+    let outside = transit_test_support::TestDir::new("outside").join("elsewhere.wav");
     let roots = transit_engine::file_access::AutomationRoots::new(Some(&t.dir.0), None).unwrap();
     let files = vec![ok, outside];
     let app = &mut t.app;

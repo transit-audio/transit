@@ -1231,7 +1231,7 @@ fn samples_after_a_reset_request_or_a_stall_never_land_in_the_take() {
         let cfg = asio_config();
         let player = open_asio(&fake, &cfg);
         let mut recorder = player.open_input(&cfg).unwrap();
-        let dir = std::env::temp_dir().join(format!("transit-d1-b1-{}-{error:?}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("d1-b1");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("take.wav");
         recorder.arm(vec![(transit_model::TrackId(1), vec![0], path.clone())]).unwrap();

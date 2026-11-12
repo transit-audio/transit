@@ -5,15 +5,13 @@ use std::path::Path;
 use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
 use transit_model::sampler_patch::PlayMode;
 
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        // The stamp only names fresh storage; no test outcome depends on elapsed time.
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let path = std::env::temp_dir().join(format!("transit-kit-{}-{id}-{stamp}", std::process::id()));
+        let path = transit_test_support::TestDir::new(&format!("kit-{id}"));
         std::fs::create_dir(&path).unwrap();
         Self(path)
     }
@@ -273,7 +271,7 @@ fn kit_empty_missing_and_relative_folders_are_checked() {
     assert_eq!(load(&mut e, t, &d.0.join("absent"), false)["loaded"], 0);
     assert!(Arc::ptr_eq(&before, &e.session_arc()));
     d.audio("hit.wav", 128, 48_000, 1);
-    e.session_mut().folder = Some(d.0.clone());
+    e.session_mut().folder = Some(d.0.to_path_buf());
     assert_eq!(load(&mut e, t, Path::new("../").join(d.0.file_name().unwrap()).as_path(), false)["loaded"], 1);
 }
 

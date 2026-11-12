@@ -125,7 +125,7 @@ fn musicxml_export_is_byte_identical_under_both_settings() {
     for (pitch, start) in [(60, 0), (69, 960), (61, 1920), (48, 2880)] {
         app.run("midi.note_add", json!({"clip": clip.0, "pitch": pitch, "start_ticks": start, "length_ticks": 960})).unwrap();
     }
-    let dir = std::env::temp_dir().join(format!("transit-middle-c-xml-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("middle-c-xml");
     std::fs::create_dir_all(&dir).unwrap();
     let mut out = Vec::new();
     for mc in ["C3", "C4"] {

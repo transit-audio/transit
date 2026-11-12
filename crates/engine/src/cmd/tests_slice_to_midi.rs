@@ -264,23 +264,17 @@ fn old_clip(e: &mut Engine, t: TrackId, start: i64, len: i64, pitch: u8) -> Clip
     id
 }
 
-struct Dir(std::path::PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let p = std::env::temp_dir().join(format!("sc-slice-to-midi-{tag}-{}", std::process::id()));
+        let p = transit_test_support::TestDir::new(&format!("slice-to-midi-{tag}"));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Dir(p)
     }
     fn path(&self, name: &str) -> String {
         self.0.join(name).to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

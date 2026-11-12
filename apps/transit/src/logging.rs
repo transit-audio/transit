@@ -577,14 +577,10 @@ pub fn install(args: &LogArgs) -> Option<(&'static AppLogger, Resolved)> {
 mod tests {
     use super::*;
     use log::Log;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, UNIX_EPOCH};
 
-    fn temp_dir(tag: &str) -> PathBuf {
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let d = std::env::temp_dir().join(format!("transit-logging-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-        let _ = std::fs::remove_dir_all(&d);
-        d
+    fn temp_dir(tag: &str) -> transit_test_support::TestDir {
+        transit_test_support::TestDir::new(&format!("logging-{tag}"))
     }
 
     fn read(path: &Path) -> String {

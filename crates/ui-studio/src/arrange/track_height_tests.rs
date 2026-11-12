@@ -578,11 +578,10 @@ fn cached_waveforms_and_live_peaks_scale_with_body_for_mono_stereo_and_loops() {
 
 #[test]
 fn reopen_and_revert_drop_previews_reset_lane_bases_and_ignore_old_ui_height() {
-    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     for wheel in [false, true] {
         for reopen in ["session.open", "session.revert"] {
             let mut r = Rig::new(&[TrackHeight::Medium, TrackHeight::Custom(73), TrackHeight::Fit(120)]);
-            let dir = std::env::temp_dir().join(format!("height-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+            let dir = transit_test_support::TestDir::new("height");
             std::fs::create_dir_all(&dir).unwrap();
             let file = dir.join("heights.transit");
             r.app.run("session.save_as", json!({"path":file})).unwrap();

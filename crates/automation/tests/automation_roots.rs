@@ -13,16 +13,10 @@ use transit_engine::file_access::AutomationRoots;
 const SECRET: &str = "TOP-SECRET-MARKER-5f3a";
 
 struct Fixture {
-    base: PathBuf,
+    base: transit_test_support::TestDir,
     read: PathBuf,
     write: PathBuf,
     outside: PathBuf,
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.base);
-    }
 }
 
 fn s(p: impl AsRef<Path>) -> String {
@@ -33,7 +27,7 @@ fn s(p: impl AsRef<Path>) -> String {
 /// a session with audio, a WAV, a MIDI file, a track preset and a clip group file. `outside/`
 /// also holds text files holding [`SECRET`] under the names a command might open.
 fn fixture(name: &str) -> Fixture {
-    let base = std::env::temp_dir().join(format!("sc-roots-{name}-{}", std::process::id()));
+    let base = transit_test_support::TestDir::new(&format!("roots-{name}"));
     let _ = std::fs::remove_dir_all(&base);
     let (read, write, outside) = (base.join("in"), base.join("out"), base.join("outside"));
     for d in [&read, &write, &outside] {

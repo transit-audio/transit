@@ -238,7 +238,7 @@ fn a_plain_drag_still_moves_and_snaps() {
 fn setting_the_cursor_does_not_dirty_the_document() {
     let mut app = app();
     let (t, _clip, bar) = track_with_clip(&mut app);
-    let path = std::env::temp_dir().join(format!("transit-cursor-{}.sc", std::process::id()));
+    let path = transit_test_support::TestDir::file("cursor", "sc");
     app.run("session.save_as", json!({"path": path.to_string_lossy(), "replace": true})).unwrap();
     assert!(!app.engine.is_dirty());
     app.set_cursor(bar, Some(t));
@@ -251,7 +251,7 @@ fn setting_the_cursor_does_not_dirty_the_document() {
 fn a_shuffle_document_keeps_its_mode_and_stays_clean() {
     let mut e = transit_engine::Engine::default();
     e.execute("edit.mode", &json!({"mode": "shuffle"})).unwrap();
-    let path = std::env::temp_dir().join(format!("transit-shuffle-{}.sc", std::process::id()));
+    let path = transit_test_support::TestDir::file("shuffle", "sc");
     e.execute("session.save_as", &json!({"path": path.to_string_lossy(), "replace": true})).unwrap();
     let mut app = StudioApp::new(e, None, Services::default());
     assert_eq!(app.engine.session().edit.edit_mode, transit_model::EditMode::Shuffle);

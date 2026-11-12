@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn the_file_round_trips_into_the_audio_config_and_unrelated_keys_survive() {
-        let dir = std::env::temp_dir().join(format!("audio-bench-settings-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("audio-bench-settings");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("ui.json");
         std::fs::write(&path, r#"{"theme":"dark","audio":{"output":"Speakers","buffer_size":128},"zoom":[1,2]}"#).unwrap();

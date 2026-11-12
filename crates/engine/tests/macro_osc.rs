@@ -140,7 +140,7 @@ fn a_session_with_the_removed_tuning_id_opens_and_logs_it() {
     let clean = render(e.session());
     let ins = e.session_mut().track_mut(t).unwrap().instrument.as_mut().unwrap();
     ins.params.insert("hardware_tuning".into(), 1.0);
-    let dir = std::env::temp_dir().join(format!("transit-macro-osc-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("macro-osc");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("old.transit");
     std::fs::write(&path, e.session().to_json().unwrap()).unwrap();

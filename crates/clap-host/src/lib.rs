@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn garbage_files_are_errors_not_crashes() {
         set_scan_extra_dirs_only(true);
-        let d = std::env::temp_dir().join(format!("transit-clap-garbage-{}", std::process::id()));
+        let d = transit_test_support::TestDir::new("clap-garbage");
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("Bundle.clap/Contents/MacOS")).unwrap();
         std::fs::write(d.join("garbage.clap"), b"\x7fELF this is not a plugin \x00\x01\x02").unwrap();
@@ -322,7 +322,7 @@ mod tests {
         for f in ["garbage.clap", "empty.clap", "Bundle.clap", "missing.clap"] {
             assert!(load_bundle(&d.join(f)).is_err(), "{f}");
         }
-        assert!(scan_paths(std::slice::from_ref(&d)).is_empty());
+        assert!(scan_paths(&[d.to_path_buf()]).is_empty());
         assert!(create("clap:does.not.exist").is_none());
         assert!(plugin_info("clap:does.not.exist").is_none());
         assert!(instantiate("clap:does.not.exist").is_err());

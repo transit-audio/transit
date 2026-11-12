@@ -256,10 +256,8 @@ fn file_size_counts_newline_terminated_lines() {
     assert_eq!(file_size::count_lines(b"a\nb"), 1);
 }
 
-fn temp_tree(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("xtask-root-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    dir
+fn temp_tree(name: &str) -> transit_test_support::TestDir {
+    transit_test_support::TestDir::new(&format!("xtask-root-{name}"))
 }
 
 #[test]
@@ -279,7 +277,7 @@ members = [\"crates/inner\"]
 name = \"inner\"
 ",
     )?;
-    assert_eq!(resolve_root(None, Some(nested), PathBuf::from("fallback")), top);
+    assert_eq!(resolve_root(None, Some(nested), PathBuf::from("fallback")), top.path());
     std::fs::remove_dir_all(&top)?;
     Ok(())
 }
@@ -294,7 +292,7 @@ fn root_falls_back_when_no_workspace_is_found() -> Result<(), Box<dyn std::error
 name = \"lone\"
 ",
     )?;
-    let found = resolve_root(None, Some(dir.clone()), PathBuf::from("fallback"));
+    let found = resolve_root(None, Some(dir.to_path_buf()), PathBuf::from("fallback"));
     // A workspace above the system temp dir would legitimately win; only the no-workspace case is checked.
     if !dir.ancestors().any(has_workspace_table) {
         assert_eq!(found, PathBuf::from("fallback"));
@@ -320,7 +318,7 @@ fn root_prefers_the_manifest_dir_env_over_the_walk() -> Result<(), Box<dyn std::
         "[workspace]
 ",
     )?;
-    assert_eq!(resolve_root(Some(top.join("xtask").into_os_string()), Some(other.clone()), PathBuf::from("fallback")), top);
+    assert_eq!(resolve_root(Some(top.join("xtask").into_os_string()), Some(other.to_path_buf()), PathBuf::from("fallback")), top.path());
     std::fs::remove_dir_all(&top)?;
     std::fs::remove_dir_all(&other)?;
     Ok(())
@@ -376,4 +374,41 @@ fn an_unsafe_module_crate_allows_unsafe_on_its_one_module_only() {
 #[test]
 fn the_repository_unsafe_modules_pass() {
     unsafe_modules(&root()).unwrap();
+}
+
+fn source(path: &str, text: &str) -> (String, String) {
+    (path.to_string(), text.to_string())
+}
+
+// The needle is split so these tests do not trip the gate on themselves.
+const DIRECT: &str = concat!("let d = std::env::temp", "_dir().join(\"x\");");
+
+#[test]
+fn temp_dirs_flags_a_direct_call_outside_the_helper() {
+    let error = temp_dirs::check_temp_dirs(&[source("crates/a/src/lib.rs", &format!("fn t() {{\n    {DIRECT}\n}}"))], &[]).unwrap_err();
+    assert!(error.contains("crates/a/src/lib.rs") && error.contains("line 2") && error.contains("TestDir"), "{error}");
+}
+
+#[test]
+fn temp_dirs_accepts_the_helper_comments_and_listed_product_sites() {
+    let files = [
+        source("crates/test-support/src/lib.rs", DIRECT),
+        source("crates/a/src/lib.rs", "// a note about the system temp directory function\nfn t() {}"),
+        source("crates/b/src/lib.rs", DIRECT),
+    ];
+    assert!(temp_dirs::check_temp_dirs(&files, &[("crates/b/src/lib.rs", 1)]).is_ok());
+}
+
+#[test]
+fn temp_dirs_allow_list_is_exact() {
+    // A listed file may not gain a call, and a row whose call is gone or whose file is gone must leave the table.
+    let two = format!("{DIRECT}\n{DIRECT}");
+    assert!(temp_dirs::check_temp_dirs(&[source("b.rs", &two)], &[("b.rs", 1)]).is_err());
+    assert!(temp_dirs::check_temp_dirs(&[source("b.rs", "fn t() {}")], &[("b.rs", 1)]).is_err());
+    assert!(temp_dirs::check_temp_dirs(&[], &[("gone.rs", 1)]).is_err());
+}
+
+#[test]
+fn the_repository_has_no_direct_temp_dir_calls() {
+    temp_dirs::run(&root()).unwrap();
 }

@@ -497,8 +497,8 @@ fn turning_a_knob_is_one_undo_step_and_double_click_resets() {
     assert_eq!(t.param(tr, slot, "limiter"), Some(1.0));
 }
 
-fn temp_config(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-presets-{tag}-{}", std::process::id()));
+fn temp_config(tag: &str) -> transit_test_support::TestDir {
+    let dir = transit_test_support::TestDir::new(&format!("presets-{tag}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -509,7 +509,7 @@ fn a_user_preset_saves_loads_lists_and_deletes_as_one_undo_step() {
     use crate::presets;
     let dir = temp_config("user");
     let mut t = T::new();
-    t.app.services.config_dir = Some(dir.clone());
+    t.app.services.config_dir = Some(dir.to_path_buf());
     let (tr, slot) = open_plugin(&mut t, "compressor");
     let key = (tr, 0);
     let comp = info("compressor");
@@ -1023,7 +1023,7 @@ fn the_tuner_note_and_reference_caption_follow_the_middle_c_setting() {
 fn the_dropdown_preset_list_stays_open_for_save_as_then_saves_and_closes() {
     let dir = temp_config("saveas");
     let mut t = T::new();
-    t.app.services.config_dir = Some(dir.clone());
+    t.app.services.config_dir = Some(dir.to_path_buf());
     let (tr, _) = open_plugin(&mut t, "compressor");
     let preset = t.window(tr).preset;
     t.click(mid(preset), 1);

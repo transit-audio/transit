@@ -357,7 +357,7 @@ mod retired_tests {
 
     #[test]
     fn a_user_preset_for_a_retired_device_is_reported_and_the_others_are_not() {
-        let root = std::env::temp_dir().join(format!("transit-retired-presets-{}", std::process::id()));
+        let root = transit_test_support::TestDir::new("retired-presets");
         let _ = std::fs::remove_dir_all(&root);
         for (dir, file, text) in [
             ("chorus", "Wide", r#"{"plugin": "chorus", "version": 1, "params": {"rate": 1.0}}"#),
@@ -381,7 +381,7 @@ mod retired_tests {
 
     #[test]
     fn the_sampler_user_presets_of_the_retired_one_sample_instrument_are_reported_and_not_listed() {
-        let root = std::env::temp_dir().join(format!("transit-retired-sampler-presets-{}", std::process::id()));
+        let root = transit_test_support::TestDir::new("retired-sampler-presets");
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("presets").join("sampler");
         std::fs::create_dir_all(&dir).unwrap();

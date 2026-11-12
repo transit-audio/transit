@@ -88,9 +88,9 @@ pub(super) fn on_finalize_gate() {
 #[test]
 fn mapping_failure_between_write_and_stop_check_reports_failure() {
     let (key, map, now) = recording_map();
-    let path = std::env::temp_dir().join(format!("clock-failure-{}.wav", std::process::id()));
+    let path = transit_test_support::TestDir::file("clock-failure", "wav");
     let _ = std::fs::remove_file(&path);
-    let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.clone(), 48_000).unwrap()];
+    let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.to_path_buf(), 48_000).unwrap()];
     let shared = Shared::new(CaptureRing::new(32));
     shared.start_capture();
     {
@@ -123,9 +123,9 @@ fn mapping_failure_between_write_and_stop_check_reports_failure() {
 fn writer_delay_overflow_and_input_partitions_preserve_boundary() {
     let (key, map, now) = recording_map();
     for (case, parts) in [vec![12], vec![4, 4, 4], vec![1, 3, 5, 3]].into_iter().enumerate() {
-        let path = std::env::temp_dir().join(format!("boundary-overflow-{}-{case}.wav", std::process::id()));
+        let path = transit_test_support::TestDir::file(&format!("boundary-overflow-{case}"), "wav");
         let _ = std::fs::remove_file(&path);
-        let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.clone(), 48_000).unwrap()];
+        let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.to_path_buf(), 48_000).unwrap()];
         let shared = Shared::new(CaptureRing::new(8));
         shared.start_capture();
         let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(5));
@@ -159,7 +159,7 @@ fn writer_delay_overflow_and_input_partitions_preserve_boundary() {
     }
 }
 
-fn decode(path: &PathBuf) -> Vec<Vec<f32>> {
+fn decode(path: &std::path::Path) -> Vec<Vec<f32>> {
     transit_audio_io::decode(&std::fs::read(path).unwrap(), None).unwrap().1.channels
 }
 
@@ -195,10 +195,10 @@ fn applied_record_boundary_trims_real_wav_channels_across_input_order_and_partit
     let (key, map, now) = recording_map();
     let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
     let data: Vec<f32> = (0..12).flat_map(|frame| [frame as f32 / 20.0, -(frame as f32) / 20.0]).collect();
-    for (case, parts) in [vec![12], vec![4, 4, 4], vec![1, 2, 5, 1, 3]].iter().enumerate() {
+    for (_case, parts) in [vec![12], vec![4, 4, 4], vec![1, 2, 5, 1, 3]].iter().enumerate() {
         for published_after in 0..=parts.len() {
-            let path = std::env::temp_dir().join(format!("transit-record-start-{}-{unique}-{case}-{published_after}.wav", std::process::id()));
-            let mut takes = [TakeWriter::create(TrackId(1), vec![1, 0], path.clone(), 48_000).unwrap()];
+            let path = transit_test_support::TestDir::file(&format!("record-start-{unique}"), "wav");
+            let mut takes = [TakeWriter::create(TrackId(1), vec![1, 0], path.to_path_buf(), 48_000).unwrap()];
             let shared = Shared::new(CaptureRing::new(64));
             shared.first_frame.store(100, Ordering::Release);
             let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(5));
@@ -249,8 +249,8 @@ fn stopped_writer_waits_for_clock_ack_without_another_input_callback() {
     let (key, map, now) = recording_map();
     let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
     for success in [false, true] {
-        let path = std::env::temp_dir().join(format!("transit-final-start-{}-{unique}-{success}.wav", std::process::id()));
-        let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.clone(), 48_000).unwrap()];
+        let path = transit_test_support::TestDir::file(&format!("final-start-{unique}"), "wav");
+        let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.to_path_buf(), 48_000).unwrap()];
         let shared = Arc::new(Shared::new(CaptureRing::new(32)));
         shared.start_capture();
         {
@@ -451,7 +451,7 @@ fn a_writer_panic_is_reported_with_capture_closed() {
 #[test]
 fn writer_panic_waits_for_admitted_capture_and_discards_old_debt_before_rearm() {
     use std::sync::mpsc::channel;
-    let dir = std::env::temp_dir().join(format!("transit-panic-rearm-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("panic-rearm");
     let _ = std::fs::remove_dir_all(&dir);
     let path = dir.join("new.wav");
     let shared = Arc::new(Shared::new(CaptureRing::new(8)));
@@ -504,7 +504,7 @@ fn writer_panic_waits_for_admitted_capture_and_discards_old_debt_before_rearm() 
 
 #[test]
 fn final_overflow_silence_preserves_multichannel_length_and_does_not_leak_on_rearm() {
-    let dir = std::env::temp_dir().join(format!("transit-final-capture-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("final-capture");
     let _ = std::fs::remove_dir_all(&dir);
     let shared = Arc::new(Shared::new(CaptureRing::new(8)));
     let mut r = recorder(&shared);
@@ -561,7 +561,7 @@ fn a_bug_a_stall_or_a_lost_device_is_trouble() {
 
 #[test]
 fn a_failed_write_is_trouble_while_still_recording() {
-    let dir = std::env::temp_dir().join(format!("transit-failed-take-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("failed-take");
     let _ = std::fs::remove_dir_all(&dir);
     let mut take = TakeWriter::create(TrackId(1), vec![0], dir.join("Vox_01.wav"), 48_000).unwrap();
     take.file = File::open(&take.path).unwrap();
@@ -584,7 +584,7 @@ fn a_failed_write_is_trouble_while_still_recording() {
 
 #[test]
 fn takes_stream_into_their_files() {
-    let dir = std::env::temp_dir().join(format!("transit-takes-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("takes");
     let _ = std::fs::remove_dir_all(&dir);
     let gtr = TakeWriter::create(TrackId(1), vec![1, 2], dir.join("Gtr_01.wav"), 48_000).unwrap();
     let mut vox = TakeWriter::create(TrackId(2), vec![0], dir.join("Vox_01.wav"), 48_000).unwrap();
@@ -611,7 +611,7 @@ fn takes_stream_into_their_files() {
 
 #[test]
 fn a_take_sums_itself_up_for_drawing_while_it_records() {
-    let dir = std::env::temp_dir().join(format!("transit-live-take-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("live-take");
     let _ = std::fs::remove_dir_all(&dir);
     let mut take = TakeWriter::create(TrackId(4), vec![2, 0], dir.join("Gtr_01.wav"), 48_000).unwrap();
     let input: Vec<f32> = (0..300).flat_map(|f| [f as f32, -1.0, -(f as f32)]).collect();

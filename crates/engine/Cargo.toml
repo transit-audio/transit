@@ -31,6 +31,7 @@ craft-docpath.workspace = true
 transit-rt.workspace = true
 
 [dev-dependencies]
+transit-test-support.workspace = true
 proptest.workspace = true
 transit-rt = { workspace = true, features = ["testing"] }
 # The Cross Modulator's keyed test renders the C++ oracle (dev-only, ADR 0033).

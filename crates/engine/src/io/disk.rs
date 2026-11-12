@@ -149,20 +149,15 @@ mod tests {
     use super::*;
     use crate::io::{open_session, save_session};
 
-    /// Removes the directory on drop, so a failed assertion leaks nothing (E51: pid + counter).
-    struct TempDir(PathBuf);
+    /// Removes the directory on drop, so a failed assertion leaks nothing, and clears the faked file length.
+    struct TempDir(transit_test_support::TestDir);
     impl TempDir {
         fn new(tag: &str) -> TempDir {
-            static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-            let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let p = std::env::temp_dir().join(format!("transit-disk-{tag}-{}-{n}", std::process::id()));
-            std::fs::create_dir_all(&p).unwrap();
-            TempDir(p)
+            TempDir(transit_test_support::TestDir::created(tag))
         }
     }
     impl Drop for TempDir {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
             FAKE_LEN.with(|l| l.set(None));
         }
     }

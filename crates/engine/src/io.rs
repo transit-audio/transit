@@ -833,7 +833,7 @@ mod pipe_tests {
 
     #[test]
     fn a_pipe_named_as_media_is_refused_not_waited_on() {
-        let dir = std::env::temp_dir().join(format!("transit-pipe-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("pipe");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let fifo = dir.join("pipe.wav");
@@ -862,7 +862,7 @@ mod stem_tests {
     #[test]
     fn stems_one_file_per_track() {
         let mut e = crate::demo::demo_engine();
-        let dir = std::env::temp_dir().join(format!("transit-stems-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("stems");
         let r = e
             .execute("file.bounce_stems", &serde_json::json!({"dir": dir.to_string_lossy(), "start": {"seconds": 10.0}, "end": {"seconds": 11.0}}))
             .unwrap();

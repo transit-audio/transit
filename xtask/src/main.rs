@@ -1,4 +1,4 @@
-//! `cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico|help|indexes>` — repository gates.
+//! `cargo xtask <ci|layers|file-size|temp-dirs|assets|timing|rt-targets|audio-bench|ico|help|indexes>` — repository gates.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -6,6 +6,7 @@ mod file_size;
 mod help;
 mod ico;
 mod indexes;
+mod temp_dirs;
 mod timing;
 
 use std::path::{Path, PathBuf};
@@ -127,10 +128,10 @@ const UNSAFE_ALLOWED: &[&str] = &[
     "transit-macro-osc-oracle",
     "transit-opus",
 ];
-/// Dev-only crates (ADR 0033: the C++ null-test oracle). No package, apps included, may take one as a
+/// Dev-only crates (ADR 0033: the C++ null-test oracle; `transit-test-support`, the test scratch folders, #497). No package, apps included, may take one as a
 /// normal or build dependency, so none can be linked into a shipped binary; a dev-dependency is
 /// allowed. They are outside the layer order.
-const DEV_ONLY: &[&str] = &["transit-macro-osc-oracle"];
+const DEV_ONLY: &[&str] = &["transit-macro-osc-oracle", "transit-test-support"];
 
 /// Parse Cargo's string and table lint forms, including workspace inheritance.
 fn opts_out_of_forbid(manifest: &str) -> Result<bool, String> {
@@ -262,6 +263,7 @@ fn layers() -> Result<(), String> {
     check_layers(&metadata, |path| std::fs::read_to_string(path).map_err(|e| e.to_string()))?;
     unsafe_modules(&root())?;
     file_size::run(&root())?;
+    temp_dirs::run(&root())?;
     println!("layers: ok");
     Ok(())
 }
@@ -363,7 +365,7 @@ fn main() -> ExitCode {
     if let Some(gate) = args
         .first()
         .map(String::as_str)
-        .filter(|g| ["ci", "layers", "file-size", "assets", "timing", "rt-targets", "audio-bench", "ico", "help", "indexes"].contains(g))
+        .filter(|g| ["ci", "layers", "file-size", "temp-dirs", "assets", "timing", "rt-targets", "audio-bench", "ico", "help", "indexes"].contains(g))
     {
         announce(gate);
     }
@@ -371,6 +373,7 @@ fn main() -> ExitCode {
         Some("ci") => ci(),
         Some("layers") => layers(),
         Some("file-size") => file_size::run(&root()),
+        Some("temp-dirs") => temp_dirs::run(&root()),
         Some("help") => help::run(&root(), args.get(1..).unwrap_or(&[])),
         Some("indexes") => indexes::run(&root(), args.get(1..).unwrap_or(&[])),
         Some("assets") => assets(),
@@ -378,7 +381,7 @@ fn main() -> ExitCode {
         Some("rt-targets") => rt_targets(),
         Some("audio-bench") => audio_bench(args.get(1..).unwrap_or(&[])),
         Some("ico") => ico::run(args.get(1..).unwrap_or(&[])),
-        _ => Err("usage: cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico|help|indexes>".into()),
+        _ => Err("usage: cargo xtask <ci|layers|file-size|temp-dirs|assets|timing|rt-targets|audio-bench|ico|help|indexes>".into()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,

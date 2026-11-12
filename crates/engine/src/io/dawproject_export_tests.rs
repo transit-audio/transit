@@ -135,13 +135,8 @@ fn a_loop_keeps_its_content_window_and_a_plain_midi_track_needs_no_stem() {
     assert_eq!(notes.iter().map(|n| n.start).collect::<Vec<_>>(), vec![0, 960]);
 }
 
-fn temp_dir() -> PathBuf {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("transit-dawproject-export-{}-{stamp}-{serial}", std::process::id()));
-    std::fs::create_dir(&dir).unwrap();
-    dir
+fn temp_dir() -> transit_test_support::TestDir {
+    transit_test_support::TestDir::created("dawproject-export")
 }
 
 fn zip_entry(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Vec<u8> {

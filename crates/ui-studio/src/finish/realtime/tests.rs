@@ -13,13 +13,7 @@ struct T {
     ctx: egui::Context,
     time: f64,
     track: TrackId,
-    dir: std::path::PathBuf,
-}
-
-impl Drop for T {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    dir: transit_test_support::TestDir,
 }
 
 impl T {
@@ -78,7 +72,7 @@ fn rig() -> T {
     // Two bars at 120 bpm, 4/4.
     app.run("midi.new_clip", json!({"tracks": [track.0], "start": 0, "end": 192_000})).unwrap();
     app.finish.realtime.fake = Some(FakeRender::default());
-    let dir = std::env::temp_dir().join(format!("transit-rt-ui-{}-{:?}", std::process::id(), std::thread::current().id()));
+    let dir = transit_test_support::TestDir::new("rt-ui");
     std::fs::create_dir_all(&dir).unwrap();
     let mut t = T { app, ctx: egui::Context::default(), time: 0.0, track, dir };
     t.frames(3);

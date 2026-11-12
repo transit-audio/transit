@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn rows_append_to_a_file_with_the_table() {
-        let dir = std::env::temp_dir().join(format!("audio-bench-report-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("audio-bench-report");
         let path = dir.join("nested").join("out.md");
         write(&path, &[row(true)]).unwrap();
         write(&path, &[row(false)]).unwrap();

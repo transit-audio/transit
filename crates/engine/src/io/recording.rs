@@ -320,9 +320,9 @@ mod record_tests {
         let tr = e.session_mut().track_mut(t).unwrap();
         tr.freeze = Some(transit_model::Frozen { source, start: 0, length: 480, hash: tr.freeze_hash(), revision: 1, latency: 0 });
         let before = e.session_arc();
-        let path = std::env::temp_dir().join(format!("failed-playlist-{}.wav", std::process::id()));
+        let path = transit_test_support::TestDir::file("failed-playlist", "wav");
         write_take(&path, 480);
-        assert!(add_recording_take(&mut e, 0, vec![(t, path.clone())], None, true, None).is_empty());
+        assert!(add_recording_take(&mut e, 0, vec![(t, path.to_path_buf())], None, true, None).is_empty());
         assert_eq!(e.session(), before.as_ref());
         assert!(path.is_file());
         assert!(e.messages.last().is_some_and(|m| m.contains("not placed") && m.contains(path.to_string_lossy().as_ref())));
@@ -331,12 +331,7 @@ mod record_tests {
     }
 
     /// Removes the directory on drop, so a failed assertion leaks nothing.
-    struct TempDir(PathBuf);
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
+    struct TempDir(transit_test_support::TestDir);
 
     use super::super::disk::FAKE_LEN;
 
@@ -359,7 +354,7 @@ mod record_tests {
 
     #[test]
     fn a_take_over_the_decode_limit_is_one_disk_backed_clip_that_undo_and_redo_keep_issue_187() {
-        let dir = TempDir(std::env::temp_dir().join(format!("disk-take-undo-{}", std::process::id())));
+        let dir = TempDir(transit_test_support::TestDir::new("disk-take-undo"));
         let frames = transit_audio_io::MAX_DECODE_SAMPLES + 1_000;
         let (path, _fake_len) = header_only(&dir, "Long_01.wav", frames, 48_000);
         let mut e = Engine::default();
@@ -383,7 +378,7 @@ mod record_tests {
 
     #[test]
     fn a_long_take_that_cannot_stream_is_refused_and_survives_undo_and_redo_issue_192() {
-        let dir = TempDir(std::env::temp_dir().join(format!("refused-undo-{}", std::process::id())));
+        let dir = TempDir(transit_test_support::TestDir::new("refused-undo"));
         // At 44.1 kHz in a 48 kHz session: not streamed in slice 1 of ADR 0035, too long to decode.
         let (path, _fake_len) = header_only(&dir, "Long_01.wav", transit_audio_io::MAX_DECODE_SAMPLES + 1_000, 44_100);
         let mut e = Engine::default();
@@ -407,7 +402,7 @@ mod record_tests {
 
     #[test]
     fn a_take_over_the_setting_streams_and_a_shorter_one_is_decoded_issue_187() {
-        let dir = TempDir(std::env::temp_dir().join(format!("disk-setting-{}", std::process::id())));
+        let dir = TempDir(transit_test_support::TestDir::new("disk-setting"));
         let mut e = Engine::default();
         let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
         // One second at 48 kHz against a setting of half a second.
@@ -450,7 +445,7 @@ mod record_tests {
     #[test]
     fn an_input_path_by_name_records_its_channel_and_old_labels_keep_their_meaning() {
         use transit_model::{ChannelFormat, IoDirection, IoMap, IoPath};
-        let dir = std::env::temp_dir().join(format!("transit-takes-path-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("takes-path");
         let mut e = Engine::default();
         let mut io = IoMap::for_device("ASIO", "x", 8, 2);
         io.add_path(IoPath { live: false, name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono })
@@ -478,7 +473,7 @@ mod record_tests {
 
     #[test]
     fn a_system_audio_track_records_the_pair_after_the_device_inputs_or_silence() {
-        let dir = std::env::temp_dir().join(format!("transit-takes-system-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("takes-system");
         let mut e = Engine::default();
         e.set_io_map(transit_model::IoMap::for_device("WASAPI", "x", 2, 2));
         let browser = armed(&mut e, "Browser", "stereo", "System Audio");
@@ -493,7 +488,7 @@ mod record_tests {
 
     #[test]
     fn armed_tracks_get_new_take_files_used_in_place() {
-        let dir = std::env::temp_dir().join(format!("transit-takes-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("takes");
         let _ = std::fs::remove_dir_all(&dir);
         let mut e = Engine::default();
         let vox = armed(&mut e, "Vox", "mono", "In 2");
@@ -519,7 +514,7 @@ mod record_tests {
 
     #[test]
     fn a_loop_take_becomes_one_clip_per_pass_and_autosaves_in_place() {
-        let dir = std::env::temp_dir().join(format!("transit-loop-take-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("loop-take");
         let path = dir.join("Audio Files/Vox_01.wav");
         write_take(&path, 1_050);
         let mut e = Engine::default();
@@ -542,7 +537,7 @@ mod record_tests {
 
     #[test]
     fn three_laps_of_cycle_recording_are_three_audio_takes_each_one_lap_long() {
-        let dir = std::env::temp_dir().join(format!("transit-cycle-take-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("cycle-take");
         let path = dir.join("Audio Files/Gtr_01.wav");
         write_take(&path, 1_200);
         let mut e = Engine::default();
@@ -564,7 +559,7 @@ mod record_tests {
     /// pass on it, and a clip that was under the loop is take 1.
     #[test]
     fn cycle_recording_keeps_the_rest_of_the_track_playing_and_the_clip_under_the_loop_as_take_1() {
-        let dir = TempDir(std::env::temp_dir().join(format!("transit-cycle-rest-{}", std::process::id())));
+        let dir = TempDir(transit_test_support::TestDir::new("cycle-rest"));
         let path = dir.0.join("Audio Files/Gtr_01.wav");
         write_take(&path, 1_200);
         let mut e = Engine::default();
@@ -599,7 +594,7 @@ mod record_tests {
     }
 
     fn over_a_clip(tag: &str) -> (Engine, TrackId, PathBuf, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("transit-newtake-{tag}-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new(&format!("newtake-{tag}"));
         let _ = std::fs::remove_dir_all(&dir);
         let (first, second) = (dir.join("Audio Files/Vox_01.wav"), dir.join("Audio Files/Vox_02.wav"));
         write_take(&first, 4_800);

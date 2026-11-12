@@ -6,11 +6,7 @@ use super::*;
 fn review_quit_before_verification_keeps_previous_good_audio() {
     const CHILD: &str = "TRANSIT_AUDIO_REVIEW_QUIT_CHILD";
     if std::env::var_os(CHILD).is_none() {
-        let dir = std::env::temp_dir().join(format!(
-            "transit-audio-review-quit-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
+        let dir = transit_test_support::TestDir::new("audio-review-quit");
         std::fs::create_dir_all(&dir).unwrap();
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "audio_review_tests::review_quit_before_verification_keeps_previous_good_audio", "--nocapture"])

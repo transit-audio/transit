@@ -240,8 +240,8 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
-    fn dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("sc-scan-cache-{name}-{}", std::process::id()));
+    fn dir(name: &str) -> transit_test_support::TestDir {
+        let d = transit_test_support::TestDir::new(&format!("scan-cache-{name}"));
         let _ = std::fs::remove_dir_all(&d);
         let _ = std::fs::create_dir_all(&d);
         d

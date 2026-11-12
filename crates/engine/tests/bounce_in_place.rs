@@ -11,14 +11,13 @@ use transit_engine::{Engine, io};
 use transit_model::{ChannelFormat, Clip, Session, TrackId, TrackKind};
 
 fn fixture() -> (Engine, TrackId) {
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let path = std::env::temp_dir().join(format!("transit-bounce-{}-{}.wav", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    let path = transit_test_support::TestDir::file("bounce", "wav");
     let buffer = AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 9600]] };
     std::fs::write(&path, transit_audio_io::encode(&buffer, &EncodeOptions::default()).unwrap()).unwrap();
     let mut e = Engine::default();
     let t = TrackId(e.execute("track.new", &json!({"kind": "audio", "name": "Vox"})).unwrap()["tracks"][0].as_u64().unwrap());
     let plan = io::Recording { start: 1200, pass: Some(4800), punch: None, rate: 48_000, takes: vec![], midi_journal: None, midi_placed: false };
-    let clips = io::place_recording_take(&mut e, &plan, vec![(t, path.clone())], true);
+    let clips = io::place_recording_take(&mut e, &plan, vec![(t, path.to_path_buf())], true);
     std::fs::remove_file(path).unwrap();
     assert_eq!(clips.len(), 2);
     assert_eq!(e.session().track(t).unwrap().take_stacks()[0].takes.len(), 2);
@@ -217,8 +216,7 @@ fn show_hidden_defaults_to_all_hidden_and_preserves_inactive_and_mute() {
 /// bit from its first frame, then the two seconds of silence the print adds after the last clip.
 #[test]
 fn a_plain_bounce_of_a_take_stack_prints_the_active_take_bit_for_bit_from_frame_zero() {
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let path = std::env::temp_dir().join(format!("transit-bounce-332-{}-{}.wav", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    let path = transit_test_support::TestDir::file("bounce-332", "wav");
     // Two passes of 4800 frames: the second (the active take) holds 0.5, then a step to -0.25.
     let signal: Vec<f32> = (0..9600).map(|i| if i < 6000 { 0.5 } else { -0.25 }).collect();
     let buffer = AudioBuffer { sample_rate: 48_000, channels: vec![signal.clone()] };
@@ -226,7 +224,7 @@ fn a_plain_bounce_of_a_take_stack_prints_the_active_take_bit_for_bit_from_frame_
     let mut e = Engine::default();
     let t = TrackId(e.execute("track.new", &json!({"kind": "audio", "name": "Guitar"})).unwrap()["tracks"][0].as_u64().unwrap());
     let plan = io::Recording { start: 0, pass: Some(4800), punch: None, rate: 48_000, takes: vec![], midi_journal: None, midi_placed: false };
-    io::place_recording_take(&mut e, &plan, vec![(t, path.clone())], true);
+    io::place_recording_take(&mut e, &plan, vec![(t, path.to_path_buf())], true);
     std::fs::remove_file(path).unwrap();
     let source = e.session().track(t).unwrap();
     assert_eq!(source.channels(), 1);

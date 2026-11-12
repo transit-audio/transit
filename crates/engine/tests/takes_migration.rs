@@ -2,7 +2,6 @@
 
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use transit_engine::{Engine, io};
 use transit_model::{ClipContent, ClipId, Frozen, Session, SourceId, TrackId};
 use transit_time::Range;
@@ -11,11 +10,10 @@ const OLD: &str = include_str!("../../model/tests/corpus/v0.5.1-pre-take-lanes.t
 const CURRENT: &str = include_str!("../../model/tests/corpus/v0.6.0-takes.transit");
 const SUMMARY: &str = "2 track(s) recorded with an earlier build now show their laps as takes";
 
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 impl Dir {
     fn new() -> Self {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let path = std::env::temp_dir().join(format!("transit-take-migration-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let path = transit_test_support::TestDir::new("take-migration");
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
     }

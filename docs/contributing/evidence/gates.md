@@ -12,6 +12,7 @@ cargo xtask layers      # crate layering and the no-UI-below-L6 rule (xtask/src/
 cargo xtask assets      # every bundled asset has a row in ATTRIBUTION.md
 cargo xtask timing      # E49-class timing assertions in tests (xtask/src/timing.rs)
 cargo xtask file-size   # no Rust file over 1500 lines; also part of `cargo xtask layers` (xtask/src/file_size.rs)
+cargo xtask temp-dirs   # no test takes a folder from the system temp directory except through transit_test_support::TestDir; also part of `cargo xtask layers` (xtask/src/temp_dirs.rs, #497)
 cargo xtask indexes --validate   # the known-issue and escape entry files are well formed (ADR 0050)
 cargo xtask indexes --check   # the generated known-issues, ADR and escapes indexes match their entry files (xtask/src/indexes.rs, ADR 0050); `cargo xtask indexes` rewrites them; pull requests run `--validate` only
 cargo xtask help        # the help catalog: every registered help id has an entry, every entry is used, the generated docs sections are current (xtask/src/help.rs)
@@ -36,6 +37,12 @@ Cargo's fingerprint for a workspace member records the source paths of whichever
 - Worktrees use one separate target directory for pre-hand-back checks, and agents working in worktrees must not share a target directory concurrently (stale or missing artifacts, E0463). After the first run, check the test count of the crate you changed against what you expect.
 - An agent that runs alongside others keeps its own target directory.
 - The chain reports per-crate test counts for the crates a batch touched, so a stale binary shows up as a count that does not match the implementer's report.
+
+## Scratch folders in tests
+
+A test that needs a folder or file in the system temp directory takes it from `transit_test_support::TestDir` (`crates/test-support`, a dev-dependency only). The guard removes the path when it drops, so a passing, failing or panicking test leaves nothing behind, and its name carries the process id, the clock and a counter, so a path is never reused (#497; E51 covers the reused-path half). A child process that exits or is killed runs no destructors: the parent test makes the folder, passes it to the child and removes it after the child has ended. `cargo xtask temp-dirs` (also run by `cargo xtask layers`) fails when code outside that crate names the system temp directory function directly; the few product call sites (run-time fallback folders) are in `ALLOWED` in `xtask/src/temp_dirs.rs` with an exact count per file.
+
+Older runs left `transit-*` and `sc-*` folders in the system temp directory; they are safe to delete when no test run is in progress.
 
 ## File-size budget
 

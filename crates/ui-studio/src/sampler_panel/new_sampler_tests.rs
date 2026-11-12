@@ -47,11 +47,11 @@ fn the_factory_default_on_a_kit_leaves_the_kit() {
 fn the_sampler_with_no_kit_files_saves_nothing_and_never_writes_a_parameter_preset() {
     // The Sampler's presets are kit files (#467): with none listed, previous and next do nothing,
     // and Save opens the list for Save As; the parameter preset path writes nothing for it.
-    let dir = std::env::temp_dir().join(format!("transit-sampler-presets-off-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("sampler-presets-off");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (mut t, tr) = T::kit();
-    t.app.services.config_dir = Some(dir.clone());
+    t.app.services.config_dir = Some(dir.to_path_buf());
     t.frames(2);
     let title = t.panel(tr).title;
     assert_eq!((title.preset_group.as_str(), title.preset_name.as_str()), ("", "<factory default>"));

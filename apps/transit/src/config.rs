@@ -326,8 +326,8 @@ mod tests {
         assert!(scanned > 20, "the scan found the sources ({scanned} files)");
     }
 
-    fn temp_root(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("transit-migrate-{name}-{}", std::process::id()));
+    fn temp_root(name: &str) -> transit_test_support::TestDir {
+        let root = transit_test_support::TestDir::new(&format!("migrate-{name}"));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         root
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn the_io_map_round_trips_through_ui_json_and_old_files_load_without_it() {
-        let dir = std::env::temp_dir().join(format!("transit-io-map-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("io-map");
         let path = dir.join("ui.json");
         let mut ui = transit_ui_studio::UiState::default();
         let mut map = transit_engine::model::IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10);
@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn recent_files_round_trip_through_ui_json_and_old_files_load_without_them() {
-        let dir = std::env::temp_dir().join(format!("transit-recent-files-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("recent-files");
         let path = dir.join("ui.json");
         let mut ui = transit_ui_studio::UiState::default();
         ui.remember_recent(Path::new("/music/a.transit"), 100);
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn the_last_session_folder_round_trips_through_ui_json_and_is_null_until_set() {
-        let dir = std::env::temp_dir().join(format!("transit-last-session-dir-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("last-session-dir");
         let path = dir.join("ui.json");
         // Unset by default: written as null, and a file written before the field loads as None (#385).
         save_ui(&path, &transit_ui_studio::UiState::default()).unwrap();
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn settings_round_trip() {
-        let dir = std::env::temp_dir().join(format!("transit-ui-prefs-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("ui-prefs");
         let path = dir.join("ui.json");
         let mut ui = transit_ui_studio::UiState { header_width: 260.0, ..Default::default() };
         ui.keys.velocity = 87;

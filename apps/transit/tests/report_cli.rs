@@ -2,12 +2,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU32, Ordering};
 
-static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-fn temp_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-report-cli-{}-{}-{tag}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed)));
+fn temp_dir(tag: &str) -> transit_test_support::TestDir {
+    let dir = transit_test_support::TestDir::new(&format!("report-cli-{tag}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
 }

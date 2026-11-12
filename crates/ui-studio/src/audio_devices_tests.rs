@@ -618,11 +618,7 @@ fn driver_panel_follows_running_system_not_draft() {
 fn last_good_audio_persists_in_isolated_config_dir() {
     // Set environment only on a child process: no unsafe set_var, no parallel-test races, and
     // never the user's real settings directory.
-    let dir = std::env::temp_dir().join(format!(
-        "transit-audio-good-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-    ));
+    let dir = transit_test_support::TestDir::new("audio-good");
     std::fs::create_dir_all(&dir).unwrap();
     let result = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "audio_devices_tests::last_good_audio_child", "--nocapture"])
@@ -1060,7 +1056,7 @@ fn a_driver_reset_while_recording_ends_the_take_keeps_it_and_then_reopens() {
     let audio = t.app.engine.session().tracks.iter().find(|tr| tr.id != track).unwrap().id;
     t.app.engine.session_mut().track_mut(audio).unwrap().mixer.input_monitor = true;
     run(&mut t, &driver, 10);
-    let dir = std::env::temp_dir().join(format!("transit-d1-ui-take-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("d1-ui-take");
     std::fs::create_dir_all(&dir).unwrap();
     t.app.recorder.as_mut().expect("the monitored track took the input").arm(vec![(audio, vec![0], dir.join("take.wav"))]).unwrap();
     pump_capture(&driver, 4, 0.25);

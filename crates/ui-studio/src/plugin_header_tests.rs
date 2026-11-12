@@ -64,13 +64,13 @@ fn fixture_gain() -> String {
     } else {
         (if cfg!(target_arch = "aarch64") { "aarch64-linux" } else { "x86_64-linux" }, "Fixture.so")
     };
-    let dir = std::env::temp_dir().join(format!("studio-vst3-header-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    // The parent made this folder and removes it once this child has ended.
+    let dir = PathBuf::from(std::env::var_os("TRANSIT_HEADER_INSTALL").expect("the parent passes the install folder"));
     let bin = dir.join("Fixture.vst3/Contents").join(folder);
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(&lib, bin.join(exe)).unwrap_or_else(|e| panic!("copy {}: {e}", lib.display()));
     assert_eq!(transit_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
-    transit_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Gain").expect("the fixture's gain").id
+    transit_vst3_host::scan_paths(&[dir.clone()]).into_iter().find(|d| d.name == "Fixture Gain").expect("the fixture's gain").id
 }
 
 /// One frame of the app, with the device-free player's "audio callback" first.
@@ -180,10 +180,12 @@ fn in_child(test: &str) -> bool {
         return true;
     }
     let name = format!("plugin_header_tests::{test}");
+    let install = transit_test_support::TestDir::new("studio-vst3-header");
     let output = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", name.as_str(), "--nocapture"])
         .env("TRANSIT_HEADER_FIXTURE_CHILD", "1")
         .env(FIXTURE_LIB, fixture_lib())
+        .env("TRANSIT_HEADER_INSTALL", install.path())
         .output()
         .unwrap();
     let (out, err) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
@@ -211,7 +213,7 @@ struct Rig {
     ctx: egui::Context,
     t: TrackId,
     gain: String,
-    config: PathBuf,
+    config: transit_test_support::TestDir,
     name: Shared<String>,
     yes: Shared<bool>,
     questions: Shared<Vec<String>>,
@@ -219,7 +221,7 @@ struct Rig {
 
 fn rig(tag: &str) -> Rig {
     let gain = fixture_gain();
-    let config = std::env::temp_dir().join(format!("studio-header-config-{tag}-{}", std::process::id()));
+    let config = transit_test_support::TestDir::new(&format!("studio-header-config-{tag}"));
     let _ = std::fs::remove_dir_all(&config);
     let mut engine = transit_engine::Engine::default();
     let t = engine.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Stereo, Some("Drums"));
@@ -231,7 +233,7 @@ fn rig(tag: &str) -> Rig {
     let questions = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let (picked, answer, asked) = (std::sync::Arc::clone(&name), std::sync::Arc::clone(&yes), std::sync::Arc::clone(&questions));
     let services = Services {
-        config_dir: Some(config.clone()),
+        config_dir: Some(config.to_path_buf()),
         pick_save: Some(Box::new(move |default: &str| {
             let p = Path::new(default);
             Some(p.with_file_name(picked.lock().unwrap().as_str()).to_string_lossy().into_owned())

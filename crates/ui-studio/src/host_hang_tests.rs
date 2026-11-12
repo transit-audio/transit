@@ -122,7 +122,7 @@ fn the_message_names_the_plug_in_and_give_up_quarantines_it() {
 #[test]
 fn later_hides_the_message_for_that_thread_and_save_now_saves() {
     let mut t = T::stuck();
-    let dir = std::env::temp_dir().join(format!("transit-host-hang-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("host-hang");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("hang.transit");
     t.app.run("session.save_as", json!({"path": path, "replace": true})).unwrap();

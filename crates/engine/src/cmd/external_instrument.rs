@@ -347,7 +347,7 @@ mod tests {
         let mut e = Engine::default();
         let t = instrument_track(&mut e);
         e.session_mut().track_mut(t).unwrap().name = "Model D".into();
-        let dir = std::env::temp_dir().join(format!("transit-ext-render-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("ext-render");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("mix.wav").to_string_lossy().into_owned();
         // Without the device, the bounce runs as before.

@@ -10,6 +10,9 @@ publish = false
 name = "transit-cli"
 path = "src/main.rs"
 
+[dev-dependencies]
+transit-test-support.workspace = true
+
 [lints]
 workspace = true
 

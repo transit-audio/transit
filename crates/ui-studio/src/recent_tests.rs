@@ -4,25 +4,17 @@ use crate::{Services, StudioApp, UiState};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new() -> Dir {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let p = std::env::temp_dir().join(format!("transit-recent-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let p = transit_test_support::TestDir::new("recent");
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Dir(p)
     }
     fn path(&self, name: &str) -> String {
         self.0.join(name).to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

@@ -604,8 +604,8 @@ mod tests {
             e.session_mut().edit.loop_range = range;
             let latch = Latch { output_frame: 10_000, position: range.start, device_rate: 48_000, session_rate: 48_000 };
             let header = Header::new(latch, &plan(range.start, pass), Some(range), vec![t]);
-            let path = std::env::temp_dir().join(format!("transit-midi-wrap-{}-{pass:?}.midijournal", std::process::id()));
-            let mut writer = Writer::new(path.clone());
+            let path = transit_test_support::TestDir::file("midi-wrap", "midijournal");
+            let mut writer = Writer::new(path.to_path_buf());
             let records = [
                 Record { frame: 46_000, track: t, channel: 2, approximate: false, msg: Msg::NoteOn { pitch: 67, velocity: 103 } },
                 Record { frame: 118_000, track: t, channel: 2, approximate: false, msg: Msg::NoteOff { pitch: 67, velocity: 75 } },
@@ -968,8 +968,8 @@ mod tests {
         // The latch at device frame 100,000 is the session start; the count-in is the two beats before it.
         let latch = Latch { output_frame: 100_000, position: 0, device_rate: 48_000, session_rate: 48_000 };
         let header = Header::new(latch, &plan(0, None), None, vec![t]);
-        let path = std::env::temp_dir().join(format!("transit-midi-440-{}.midijournal", std::process::id()));
-        let mut writer = Writer::new(path.clone());
+        let path = transit_test_support::TestDir::file("midi-440", "midijournal");
+        let mut writer = Writer::new(path.to_path_buf());
         let at = |offset: i64| u64::try_from(100_000 + offset).unwrap();
         let msgs = [
             (at(-45_000), Msg::NoteOn { pitch: 55, velocity: 90 }),

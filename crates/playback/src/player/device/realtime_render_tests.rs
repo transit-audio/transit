@@ -40,13 +40,7 @@ struct Rig {
     synth: TrackId,
     session: Session,
     _recorder: record::Recorder,
-    dir: std::path::PathBuf,
-}
-
-impl Drop for Rig {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    dir: transit_test_support::TestDir,
 }
 
 fn session(fake: &Fake, click: bool) -> (Session, TrackId, transit_midi_io::PortKey) {
@@ -104,7 +98,7 @@ fn rig_with(click: bool) -> Rig {
     player.set_io(IoMap::for_device("test", "fake duplex", 2, 2)).unwrap();
     let recorder = player.open_input(&cfg).expect("the duplex input");
     player.set_input(Arc::clone(&recorder.monitor)).unwrap();
-    let dir = std::env::temp_dir().join(format!("transit-rt-render-{}-{:?}", std::process::id(), std::thread::current().id()));
+    let dir = transit_test_support::TestDir::new("rt-render");
     std::fs::create_dir_all(&dir).unwrap();
     let rig = Rig { player, audio, midi, key, synth, session: s, _recorder: recorder, dir };
     let (mut output, input) = (vec![0.0f32; BLOCK * 2], vec![0.0f32; BLOCK * 2]);

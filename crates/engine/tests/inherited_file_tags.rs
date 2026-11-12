@@ -21,8 +21,8 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-fn temp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("transit-adr49-{name}-{}", std::process::id()));
+fn temp(name: &str) -> transit_test_support::TestDir {
+    let d = transit_test_support::TestDir::new(&format!("adr49-{name}"));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d

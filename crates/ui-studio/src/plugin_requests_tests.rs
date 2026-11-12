@@ -37,7 +37,7 @@ pub(crate) fn requests_fixture() {
         } else {
             "libclap_fixture.so"
         };
-        let dir = std::env::temp_dir().join(format!("studio-clap-requests-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("studio-clap-requests");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::copy(target.join("debug").join(lib), dir.join("Requests.clap")).unwrap();

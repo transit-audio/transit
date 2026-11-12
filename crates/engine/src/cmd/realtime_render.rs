@@ -174,7 +174,7 @@ mod tests {
         e.execute("track.new", &json!({"kind": "instrument"})).unwrap();
         let t = e.session().tracks.last().unwrap().id;
         e.session_mut().track_mut(t).unwrap().name = "Model D".into();
-        let dir = std::env::temp_dir().join(format!("transit-rt-plan-{}", std::process::id()));
+        let dir = transit_test_support::TestDir::new("rt-plan");
         let path = dir.join("mix.wav").to_string_lossy().into_owned();
         (e, t, path)
     }

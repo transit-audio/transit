@@ -158,14 +158,14 @@ fn a_run_without_a_loopback_has_no_calibration_and_writes_no_settings() {
     assert!(run(&config(64, 2.0, false, script(0, None, 144))).unwrap().calibration.is_none());
     // A run without a loopback has nothing to calibrate, so --settings refuses and writes nothing.
     let mut no_loopback = config(64, 2.0, false, script(0, None, 144));
-    no_loopback.settings = Some(std::env::temp_dir().join("audio-bench-never-written.json"));
+    no_loopback.settings = Some(transit_test_support::TestDir::file("never-written", "json").path().to_path_buf());
     assert!(run(&no_loopback).unwrap_err().contains("--settings needs"));
     assert!(!no_loopback.settings.unwrap().exists());
 }
 
 #[test]
 fn settings_receive_the_measured_calibration_and_keep_what_was_there() {
-    let dir = std::env::temp_dir().join(format!("audio-bench-e2e-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("audio-bench-e2e");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("ui.json");
     std::fs::write(&path, r#"{"keep":{"me":1},"audio":{"output":"Fake device"}}"#).unwrap();
@@ -187,7 +187,7 @@ fn settings_receive_the_measured_calibration_and_keep_what_was_there() {
 
 #[test]
 fn an_exclusive_run_notes_its_mode_and_calibrates_under_the_exclusive_key() {
-    let dir = std::env::temp_dir().join(format!("audio-bench-e2e-exclusive-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("audio-bench-e2e-exclusive");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("ui.json");
     let mut c = config(128, 3.0, true, script(0, None, 240));

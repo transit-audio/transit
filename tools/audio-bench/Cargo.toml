@@ -32,6 +32,7 @@ transit-audio-wasapi.workspace = true
 transit-audio-asio.workspace = true
 
 [dev-dependencies]
+transit-test-support.workspace = true
 transit-midi-io = { workspace = true, features = ["fake"] }
 transit-rt = { workspace = true, features = ["testing"] }
 

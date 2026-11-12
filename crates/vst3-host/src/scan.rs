@@ -230,8 +230,8 @@ pub fn is_instrument<S: AsRef<str>>(subs: &[S]) -> bool {
 mod tests {
     use super::*;
 
-    fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("transit-vst3-scan-{name}-{}", std::process::id()));
+    fn tmp(name: &str) -> transit_test_support::TestDir {
+        let d = transit_test_support::TestDir::new(&format!("vst3-scan-{name}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -247,7 +247,7 @@ mod tests {
         std::fs::create_dir_all(d.join("c.vst3/Contents/MacOS")).unwrap();
         std::fs::write(d.join("c.vst3/Contents/MacOS/c"), b"x").unwrap();
         std::fs::write(d.join("c.vst3/Contents/inner.vst3"), b"x").unwrap();
-        let found = find_bundles(&[d.clone(), d.join("missing")]);
+        let found = find_bundles(&[d.to_path_buf(), d.join("missing")]);
         let names: Vec<String> = found.iter().map(|p| p.strip_prefix(&d).unwrap().to_string_lossy().replace('\\', "/")).collect();
         assert_eq!(names, vec!["a.vst3", "c.vst3", "vendor/sub/B.VST3"]);
         assert_eq!(find_bundles(&[d.join("a.vst3")]), vec![d.join("a.vst3")]);

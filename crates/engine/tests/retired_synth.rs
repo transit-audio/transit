@@ -32,7 +32,7 @@ fn a_session_with_the_old_synth_opens_with_the_substitution_plays_and_reports_it
     let text = fixture("v0.4.1-demo.transit");
     let old = text.matches("\"plugin\": \"subtractive_synth\"").count();
     assert!(old > 0, "the fixture names the old synth in an instrument slot");
-    let dir = std::env::temp_dir().join(format!("transit-retired-synth-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("retired-synth");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Demo.transit");
     std::fs::write(&path, &text).unwrap();

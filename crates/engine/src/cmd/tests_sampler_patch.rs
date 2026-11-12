@@ -14,25 +14,17 @@ use transit_model::sampler_patch::{AutoSource, Detector, Division, Marker, Marke
 use transit_model::{Clip, SourceId, TrackId};
 use transit_time::{Range, TICKS_PER_QUARTER};
 
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let p = std::env::temp_dir().join(format!("sc-sampler-patch-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let p = transit_test_support::TestDir::new(&format!("sampler-patch-{tag}"));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Dir(p)
     }
     fn path(&self, name: &str) -> PathBuf {
         self.0.join(name)
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

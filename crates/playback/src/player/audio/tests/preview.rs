@@ -6,7 +6,7 @@ use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat, encode}
 
 /// A stereo file of `frames` frames at `value`, in a scratch folder of this test's own.
 fn constant(name: &str, value: f32, frames: usize) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-audio-preview-{}-{name}", std::process::id()));
+    let dir = transit_test_support::TestDir::new(&format!("audio-preview-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let buf = AudioBuffer { sample_rate: 48_000, channels: vec![vec![value; frames]; 2] };

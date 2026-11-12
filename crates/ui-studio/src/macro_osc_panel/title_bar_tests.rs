@@ -80,11 +80,11 @@ fn next_and_previous_recall_the_factory_presets_in_order_as_one_step_each() {
 
 #[test]
 fn save_writes_over_the_current_user_preset_and_opens_the_list_for_a_factory_one() {
-    let dir = std::env::temp_dir().join(format!("transit-326m-save-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("326m-save");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (mut t, tr) = T::open();
-    t.app.services.config_dir = Some(dir.clone());
+    t.app.services.config_dir = Some(dir.to_path_buf());
     let synth = info();
     let values: std::collections::BTreeMap<String, f32> = synth.params.iter().map(|p| (p.id.to_string(), p.default)).collect();
     crate::presets::save_user(&dir, synth, "Mine", &values).unwrap();
@@ -158,11 +158,11 @@ fn the_follow_toggle_latches_in_the_option_role() {
 
 #[test]
 fn the_title_bar_preset_list_stays_open_for_save_as_then_saves_and_closes() {
-    let dir = std::env::temp_dir().join(format!("transit-326p-saveas-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("326p-saveas");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let (mut t, tr) = T::open();
-    t.app.services.config_dir = Some(dir.clone());
+    t.app.services.config_dir = Some(dir.to_path_buf());
     let synth = info();
     let field = t.panel(tr).title.field;
     t.click(mid(field), 1);

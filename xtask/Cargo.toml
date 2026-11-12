@@ -12,5 +12,8 @@ toml.workspace = true
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 
+[dev-dependencies]
+transit-test-support.workspace = true
+
 [lints]
 workspace = true

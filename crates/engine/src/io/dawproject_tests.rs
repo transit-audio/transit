@@ -221,7 +221,7 @@ fn hostile_and_unsupported_files_are_refused() {
 
 #[test]
 fn open_replaces_the_session_untitled_and_posts_the_report() {
-    let dir = std::env::temp_dir().join(format!("transit-dawproject-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("dawproject");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("piano.dawproject");
     let structure =
@@ -250,7 +250,7 @@ fn notes_track(clips: &str) -> String {
 
 #[test]
 fn b1_open_respects_the_automation_read_root() {
-    let base = std::env::temp_dir().join(format!("transit-dawproject-root-{}", std::process::id()));
+    let base = transit_test_support::TestDir::new("dawproject-root");
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(base.join("in")).unwrap();
     std::fs::create_dir_all(base.join("outside")).unwrap();

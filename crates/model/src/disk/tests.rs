@@ -178,18 +178,12 @@ fn the_threshold_reads_the_session_setting() {
 }
 
 /// A unique temp dir, removed on drop (E51).
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 impl Dir {
     fn new(tag: &str) -> Dir {
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let p = std::env::temp_dir().join(format!("transit-disk-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let p = transit_test_support::TestDir::new(&format!("disk-{tag}"));
         let _ = std::fs::create_dir_all(&p);
         Dir(p)
-    }
-}
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

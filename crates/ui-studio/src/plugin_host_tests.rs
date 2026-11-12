@@ -38,13 +38,13 @@ fn slow_synth() -> String {
     } else {
         ("libvst3_fixture.so", if cfg!(target_arch = "aarch64") { "aarch64-linux" } else { "x86_64-linux" }, "Fixture.so")
     };
-    let dir = std::env::temp_dir().join(format!("studio-vst3-slow-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    // The parent made this folder and removes it once this child has ended (a child that exits runs no destructors).
+    let dir = PathBuf::from(std::env::var_os("TRANSIT_PLUGIN_HOST_INSTALL").expect("the parent passes the install folder"));
     let bin = dir.join("Fixture.vst3/Contents").join(folder);
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(target.join("debug").join(lib), bin.join(exe)).unwrap();
     assert_eq!(transit_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
-    transit_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
+    transit_vst3_host::scan_paths(&[dir.clone()]).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
 }
 
 /// The fixture synth's creation time in the child. A frame that waited for it takes all of it,
@@ -65,8 +65,10 @@ fn frames_advance_while_a_slow_plug_in_loads_and_the_slot_shows_loading_then_rea
     // The host registry is process-global: run in a child so no other test sees the fixture.
     if std::env::var_os("TRANSIT_PLUGIN_HOST_FIXTURE_CHILD").is_none() {
         let name = "plugin_host_tests::frames_advance_while_a_slow_plug_in_loads_and_the_slot_shows_loading_then_ready";
+        let install = transit_test_support::TestDir::new("studio-vst3-slow");
         let output = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", name, "--nocapture"])
+            .env("TRANSIT_PLUGIN_HOST_INSTALL", install.path())
             .env("TRANSIT_PLUGIN_HOST_FIXTURE_CHILD", "1")
             .env("VST3_FIXTURE_CREATE_MS", SLOW.as_millis().to_string())
             .output()
@@ -156,8 +158,10 @@ fn a_heavy_instrument_slower_than_the_display_budget_is_adopted() {
     }
     if std::env::var_os("TRANSIT_PLUGIN_HOST_FIXTURE_CHILD").is_none() {
         let name = "plugin_host_tests::a_heavy_instrument_slower_than_the_display_budget_is_adopted";
+        let install = transit_test_support::TestDir::new("studio-vst3-slow");
         let output = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", name, "--nocapture"])
+            .env("TRANSIT_PLUGIN_HOST_INSTALL", install.path())
             .env("TRANSIT_PLUGIN_HOST_FIXTURE_CHILD", "1")
             .env("VST3_FIXTURE_CREATE_MS", HEAVY.as_millis().to_string())
             .output()

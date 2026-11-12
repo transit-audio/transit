@@ -250,8 +250,8 @@ mod tests {
         (e, t.0)
     }
 
-    fn dir(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("transit-plugin-presets-{tag}-{}", std::process::id()));
+    fn dir(tag: &str) -> transit_test_support::TestDir {
+        let d = transit_test_support::TestDir::new(&format!("plugin-presets-{tag}"));
         let _ = std::fs::remove_dir_all(&d);
         d
     }

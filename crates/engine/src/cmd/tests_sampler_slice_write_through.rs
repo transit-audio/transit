@@ -246,7 +246,7 @@ fn start_from_autos_markers_frees_manual_zones_and_leaves_auto_zones_as_stored()
 
 #[test]
 fn a_saved_and_reopened_session_stores_the_written_regions() {
-    let d = std::env::temp_dir().join(format!("sc-sampler-write-through-{}", std::process::id()));
+    let d = transit_test_support::TestDir::new("sampler-write-through");
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     let (mut e, t, _) = setup();

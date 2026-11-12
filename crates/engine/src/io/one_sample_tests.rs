@@ -5,7 +5,7 @@
 #![allow(clippy::unwrap_used)]
 use crate::Engine;
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use transit_model::legacy_sampler::{RETIRED_PARAMS, SAMPLER_ID, is_one_sample};
 use transit_model::{AutoParam, ChannelFormat, Insert, Session, Source, SourceId, TrackKind};
 
@@ -13,8 +13,8 @@ const LINE: &str = "track \"Keys\": the old one-sample Sampler was removed and i
                     the session's files and can be loaded onto a pad again; dropped 1 automation lane(s)";
 const SUMMARY: &str = "1 track(s) had the old one-sample Sampler and now have an empty Sampler kit";
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-one-sample-{name}-{}", std::process::id()));
+fn scratch(name: &str) -> transit_test_support::TestDir {
+    let dir = transit_test_support::TestDir::new(&format!("one-sample-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("Audio Files")).unwrap();
     dir

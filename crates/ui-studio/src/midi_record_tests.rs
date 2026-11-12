@@ -304,8 +304,8 @@ fn the_lane_shows_a_growing_recording_clip_with_the_notes_played_so_far_until_st
 
 use transit_engine::midi_journal;
 
-fn folder(name: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("transit-midijournal-{name}-{}", std::process::id()));
+fn folder(name: &str) -> transit_test_support::TestDir {
+    let d = transit_test_support::TestDir::new(&format!("midijournal-{name}"));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d

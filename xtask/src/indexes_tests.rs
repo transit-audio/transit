@@ -5,12 +5,11 @@ const OLD_ADR: &str = include_str!("../tests/fixtures/indexes/adr-README.md");
 const OLD_ESCAPES: &str = include_str!("../tests/fixtures/indexes/escapes-README.md");
 
 /// A scratch repository: the three frozen old READMEs plus a stub file for every ADR and escape they link.
-struct Scratch(PathBuf);
+struct Scratch(transit_test_support::TestDir);
 
 impl Scratch {
     fn new(name: &str) -> Scratch {
-        let root = std::env::temp_dir().join(format!("transit-indexes-{}-{name}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
+        let root = transit_test_support::TestDir::new(&format!("indexes-{name}"));
         for dir in [ADR_DIR, ESCAPES_DIR, "docs/known-issues"] {
             fs::create_dir_all(root.join(dir)).unwrap();
         }
@@ -55,12 +54,6 @@ impl Scratch {
                 fs::remove_file(self.0.join(KNOWN_ENTRIES).join(name)).unwrap();
             }
         }
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
     }
 }
 

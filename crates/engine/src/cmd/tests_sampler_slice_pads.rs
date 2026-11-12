@@ -588,23 +588,17 @@ fn hash(out: &[Vec<f32>]) -> u64 {
     h
 }
 
-struct Dir(std::path::PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let p = std::env::temp_dir().join(format!("sc-sampler-slice-pads-{tag}-{}", std::process::id()));
+        let p = transit_test_support::TestDir::new(&format!("sampler-slice-pads-{tag}"));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Dir(p)
     }
     fn path(&self, name: &str) -> String {
         self.0.join(name).to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

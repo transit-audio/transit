@@ -15,9 +15,8 @@ fn closed_stdout() -> std::process::Stdio {
     Stdio::from(writer)
 }
 
-fn temp_dir(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("sc-cli-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn temp_dir(name: &str) -> transit_test_support::TestDir {
+    let dir = transit_test_support::TestDir::new(&format!("cli-{name}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

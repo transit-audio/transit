@@ -2,13 +2,11 @@
 #![allow(clippy::unwrap_used)]
 use super::persist_audio;
 use crate::{UiState, io_settings};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use transit_model::IoMap;
 
 #[test]
 fn live_cue_survives_the_atomic_ui_json_merge_and_device_adoption() {
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!("transit-live-cue-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    let dir = transit_test_support::TestDir::new("live-cue");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("ui.json");
     std::fs::write(&file, r#"{"unrelated_preference":42}"#).unwrap();
@@ -30,7 +28,7 @@ fn live_cue_survives_the_atomic_ui_json_merge_and_device_adoption() {
 
 #[test]
 fn low_latency_preferences_survive_the_atomic_merge() {
-    let dir = std::env::temp_dir().join(format!("transit-low-latency-{}", std::process::id()));
+    let dir = transit_test_support::TestDir::new("low-latency");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("ui.json");
     std::fs::write(&path, r#"{"unrelated":42}"#).unwrap();

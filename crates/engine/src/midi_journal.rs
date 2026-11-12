@@ -325,8 +325,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
 
-    fn dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("sc-midijournal-{name}-{}", std::process::id()));
+    fn dir(name: &str) -> transit_test_support::TestDir {
+        let d = transit_test_support::TestDir::new(&format!("midijournal-{name}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

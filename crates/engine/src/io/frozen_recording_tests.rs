@@ -1,22 +1,15 @@
 use super::*;
-use std::sync::atomic::{AtomicU64, Ordering};
 use transit_dsp::{Plugin, plugins::texture::TextureFx};
 
-struct Folder(PathBuf);
+struct Folder(transit_test_support::TestDir);
 impl Folder {
     fn new() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!("transit-frozen-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let dir = transit_test_support::TestDir::new("frozen");
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
     }
     fn file(&self) -> PathBuf {
         self.0.join("pad.transit")
-    }
-}
-impl Drop for Folder {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

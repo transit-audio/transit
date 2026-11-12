@@ -29,6 +29,7 @@ image.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+transit-test-support.workspace = true
 transit-playback = { workspace = true, features = ["test-hooks"] }
 transit-clap-host = { workspace = true, features = ["test-hooks"] }
 transit-vst3-host = { workspace = true, features = ["test-hooks"] }

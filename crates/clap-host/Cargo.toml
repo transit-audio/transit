@@ -46,4 +46,5 @@ test-hooks = []
 
 # Turns the hook on for this crate's own tests.
 [dev-dependencies]
+transit-test-support.workspace = true
 transit-clap-host = { path = ".", features = ["test-hooks"] }
