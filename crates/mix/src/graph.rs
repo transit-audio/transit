@@ -29,7 +29,113 @@ pub(crate) const RENDER_GRAPH_ENV: &str = "TRANSIT_RENDER_GRAPH";
 /// Keyed plans render through the task graph ([`MixEngine::force_graph`], [`RENDER_GRAPH_ENV`]).
 /// On by default; [`RENDER_GRAPH_ENV`]`=0` clears it at startup.
 static GRAPH: AtomicBool = AtomicBool::new(true);
-static TAIL: AtomicBool = AtomicBool::new(false);
+
+/// The aux and bus tail's task graph (ADR 0029 section 11): `1` turns it on, `0` turns it off,
+/// unset means [`TAIL_DEFAULT`]. Read once per process with [`RENDER_GRAPH_ENV`], never on the
+/// audio thread; anything else is logged once and treated as unset.
+pub(crate) const RENDER_TAIL_ENV: &str = "TRANSIT_RENDER_TAIL";
+
+/// Whether the tail graph is on when [`RENDER_TAIL_ENV`] is unset: the one place the default
+/// lives. Off until the paired measurement of docs/contributing/knowledge/render-graph-measurement.md
+/// passes; flipping it to `true` is a separate reviewed commit (with the docs and the release
+/// note ADR 0029 section 11 lists), after which `TRANSIT_RENDER_TAIL=0` is the opt-out.
+pub(crate) const TAIL_DEFAULT: bool = false;
+
+static TAIL: AtomicBool = AtomicBool::new(TAIL_DEFAULT);
+/// Why the tail switch has its value ([`TailWhy`] as a byte), for the report's "Render path" row.
+static TAIL_WHY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(TailWhy::Default as u8);
+
+/// What a [`RENDER_TAIL_ENV`] value asks for ([`render_tail_setting`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RenderTailSetting {
+    /// Unset: [`TAIL_DEFAULT`].
+    Unset,
+    /// `1`: on.
+    On,
+    /// `0`: off (the opt-out once the default is on).
+    Off,
+    /// Anything else: logged once and treated as unset.
+    Unrecognized,
+}
+
+/// The setting a [`RENDER_TAIL_ENV`] value (`None`: unset) asks for. Surrounding whitespace is
+/// ignored. Pure, so the parse is testable without the process environment.
+pub(crate) fn render_tail_setting(value: Option<&str>) -> RenderTailSetting {
+    match value.map(str::trim) {
+        None => RenderTailSetting::Unset,
+        Some("1") => RenderTailSetting::On,
+        Some("0") => RenderTailSetting::Off,
+        Some(_) => RenderTailSetting::Unrecognized,
+    }
+}
+
+/// Why the tail switch is on or off.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TailWhy {
+    /// [`RENDER_TAIL_ENV`] unset: the default.
+    #[default]
+    Default = 0,
+    /// `TRANSIT_RENDER_TAIL=1`.
+    On = 1,
+    /// `TRANSIT_RENDER_TAIL=0`.
+    Off = 2,
+    /// An unrecognized value, treated as unset (the default).
+    Unrecognized = 3,
+    /// `TRANSIT_RENDER_GRAPH=0` turns the tail graph off too.
+    GraphOff = 4,
+    /// A test or measurement switch ([`MixEngine::force_tail`]).
+    Forced = 5,
+}
+
+impl TailWhy {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::On,
+            2 => Self::Off,
+            3 => Self::Unrecognized,
+            4 => Self::GraphOff,
+            5 => Self::Forced,
+            _ => Self::Default,
+        }
+    }
+
+    /// The reason as the log line and the report say it.
+    #[must_use]
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::On => "TRANSIT_RENDER_TAIL=1",
+            Self::Off => "TRANSIT_RENDER_TAIL=0",
+            Self::Unrecognized => "TRANSIT_RENDER_TAIL not recognized; default",
+            Self::GraphOff => "TRANSIT_RENDER_GRAPH=0",
+            Self::Forced => "set for a test or a measurement",
+        }
+    }
+}
+
+/// The tail switch for a parsed setting, the graph switch and the default: on or off, and why.
+/// Pure: the default is a parameter, so the opt-out of the later flip is tested now.
+pub(crate) fn tail_switch(setting: RenderTailSetting, graph: bool, default: bool) -> (bool, TailWhy) {
+    if !graph {
+        return (false, TailWhy::GraphOff);
+    }
+    match setting {
+        RenderTailSetting::Unset => (default, TailWhy::Default),
+        RenderTailSetting::On => (true, TailWhy::On),
+        RenderTailSetting::Off => (false, TailWhy::Off),
+        RenderTailSetting::Unrecognized => (default, TailWhy::Unrecognized),
+    }
+}
+
+/// The startup line for the tail switch.
+pub(crate) fn tail_log_text(on: bool, why: TailWhy) -> String {
+    if on {
+        format!("mix: the aux and bus tail renders through the task graph on the render workers ({})", why.text())
+    } else {
+        format!("mix: the aux and bus tail renders serially on the audio thread ({})", why.text())
+    }
+}
 
 /// What a [`RENDER_GRAPH_ENV`] value asks for ([`render_graph_setting`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,12 +167,19 @@ pub(crate) fn init_graph_switch() {
         ONCE.call_once(|| {
             let value = std::env::var(RENDER_GRAPH_ENV).ok();
             apply_graph_setting(value.as_deref(), &GRAPH);
-            match std::env::var("TRANSIT_RENDER_TAIL").ok().as_deref().map(str::trim) {
-                Some("1") if GRAPH.load(Ordering::Relaxed) => TAIL.store(true, Ordering::Relaxed),
-                Some("1") => log::info!("mix: TRANSIT_RENDER_TAIL=1 ignored with TRANSIT_RENDER_GRAPH=0"),
-                None | Some("0") => {}
-                Some(value) => log::warn!("mix: TRANSIT_RENDER_TAIL={value:?} ignored; tail stays serial"),
+            let tail = std::env::var(RENDER_TAIL_ENV).ok();
+            let setting = render_tail_setting(tail.as_deref());
+            let graph = GRAPH.load(Ordering::Relaxed);
+            if setting == RenderTailSetting::Unrecognized {
+                log::warn!("mix: {RENDER_TAIL_ENV}={:?} not recognized (1 turns the tail graph on, 0 off); treated as unset", tail.unwrap_or_default());
             }
+            if !graph && setting == RenderTailSetting::On {
+                log::info!("mix: {RENDER_TAIL_ENV}=1 ignored with {RENDER_GRAPH_ENV}=0");
+            }
+            let (on, why) = tail_switch(setting, graph, TAIL_DEFAULT);
+            TAIL.store(on, Ordering::Relaxed);
+            TAIL_WHY.store(why as u8, Ordering::Relaxed);
+            log::info!("{}", tail_log_text(on, why));
         });
     }
 }
@@ -93,11 +206,18 @@ impl MixEngine {
     #[doc(hidden)]
     pub fn force_tail(on: bool) {
         TAIL.store(on, Ordering::Relaxed);
+        TAIL_WHY.store(TailWhy::Forced as u8, Ordering::Relaxed);
     }
 
-    /// Whether the opt-in tail graph is enabled.
+    /// Whether the tail graph is enabled (the tail switch, and the graph switch under it).
     pub fn tail_enabled() -> bool {
         Self::graph_enabled() && TAIL.load(Ordering::Relaxed)
+    }
+
+    /// Why the tail graph is on or off ([`TailWhy::GraphOff`] whenever the graph switch is off).
+    #[must_use]
+    pub fn tail_why() -> TailWhy {
+        if Self::graph_enabled() { TailWhy::from_u8(TAIL_WHY.load(Ordering::Relaxed)) } else { TailWhy::GraphOff }
     }
     /// Turns the task graph on or off for every engine in the process: on, a plan with sidechain
     /// keys renders its strips through the render workers (issue #174, the default); off
@@ -215,6 +335,56 @@ mod tests {
             let on = AtomicBool::new(true);
             apply_graph_setting(v, &on);
             assert!(on.load(Ordering::Relaxed), "{v:?}");
+        }
+    }
+
+    /// G9: the tail switch's parse is pure: unset, `1`, `0` and anything else, whitespace trimmed.
+    #[test]
+    fn the_tail_setting_parses_unset_1_0_and_anything_else() {
+        assert_eq!(render_tail_setting(None), RenderTailSetting::Unset);
+        for v in ["1", " 1", "1\n"] {
+            assert_eq!(render_tail_setting(Some(v)), RenderTailSetting::On, "{v:?}");
+        }
+        for v in ["0", "0 ", " 0\n"] {
+            assert_eq!(render_tail_setting(Some(v)), RenderTailSetting::Off, "{v:?}");
+        }
+        for v in ["", " ", "2", "on", "off", "true", "01", "-0"] {
+            assert_eq!(render_tail_setting(Some(v)), RenderTailSetting::Unrecognized, "{v:?}");
+        }
+        assert_eq!(RENDER_TAIL_ENV, "TRANSIT_RENDER_TAIL");
+    }
+
+    /// G9: the switch for both defaults, so the flip's opt-out is built and tested now: with the
+    /// default on, `0` (and the graph's opt-out) turns the tail off and anything else keeps it on;
+    /// with the default off (today), only `1` turns it on. Unrecognized is treated as unset.
+    #[test]
+    fn the_tail_switch_follows_the_default_and_0_opts_out_after_the_flip() {
+        use RenderTailSetting::{Off, On, Unrecognized, Unset};
+        assert!(!TAIL_DEFAULT, "the default flips in its own reviewed commit");
+        for (setting, graph, default, want) in [
+            (Unset, true, false, (false, TailWhy::Default)),
+            (On, true, false, (true, TailWhy::On)),
+            (Off, true, false, (false, TailWhy::Off)),
+            (Unrecognized, true, false, (false, TailWhy::Unrecognized)),
+            (On, false, false, (false, TailWhy::GraphOff)),
+            (Unset, true, true, (true, TailWhy::Default)),
+            (On, true, true, (true, TailWhy::On)),
+            (Off, true, true, (false, TailWhy::Off)),
+            (Unrecognized, true, true, (true, TailWhy::Unrecognized)),
+            (Unset, false, true, (false, TailWhy::GraphOff)),
+        ] {
+            assert_eq!(tail_switch(setting, graph, default), want, "{setting:?} graph {graph} default {default}");
+        }
+        assert_eq!(
+            tail_log_text(false, TailWhy::Default),
+            "mix: the aux and bus tail renders serially on the audio thread (default)"
+        );
+        assert_eq!(
+            tail_log_text(true, TailWhy::On),
+            "mix: the aux and bus tail renders through the task graph on the render workers (TRANSIT_RENDER_TAIL=1)"
+        );
+        for v in 0..=6u8 {
+            assert_eq!(TailWhy::from_u8(TailWhy::from_u8(v) as u8), TailWhy::from_u8(v));
         }
     }
 

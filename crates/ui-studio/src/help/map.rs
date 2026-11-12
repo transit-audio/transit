@@ -15,6 +15,7 @@ pub fn telemetry_row(row: &str) -> Option<Id> {
         ("Over-budget callbacks while", Id::TelemetryOverBudgetLoading),
         ("Render workers:", Id::TelemetryRenderWorkers),
         ("Strip deadline:", Id::TelemetryStripDeadline),
+        ("Render path:", Id::TelemetryRenderPath),
         ("Strip overruns, busy:", Id::TelemetryOverrunsBusy),
         ("Strip overruns, late:", Id::TelemetryOverrunsLate),
         ("Strip overruns, unstarted:", Id::TelemetryOverrunsUnstarted),

@@ -719,6 +719,19 @@ fn the_strip_deadline_share_prints_right_after_the_render_workers() {
     assert!(!serial.iter().any(|r| r.starts_with("Strip deadline:")), "no workers, no share: {serial:?}");
 }
 
+/// G9: the render path row comes right after the strip deadline, with the path and the tail
+/// switch's reason (the wording is `transit_mix::render_path_text`'s, tested there).
+#[test]
+fn the_render_path_prints_after_the_strip_deadline() {
+    use crate::telemetry::detail_rows;
+    let f = transit_mix::StripFaults { workers: 8, render_path: 2, tail_why: transit_mix::TailWhy::Default, ..Default::default() };
+    let rows = detail_rows(&transit_playback::telemetry::CallbackTelemetry { strip_faults: Some(f), ..Default::default() });
+    let at = |label: &str| rows.iter().position(|r| r.starts_with(label)).unwrap_or_else(|| panic!("{label} missing: {rows:?}"));
+    assert_eq!(rows[at("Render path:")], "Render path: strips on the render workers; bus tail graph off (default)");
+    assert_eq!(at("Render path:"), at("Strip deadline:") + 1);
+    assert!(!detail_rows(&Default::default()).iter().any(|r| r.starts_with("Render path:")), "no workers, no row");
+}
+
 #[test]
 fn refused_inline_renders_print_by_reason_after_the_inline_renders() {
     use crate::telemetry::detail_rows;

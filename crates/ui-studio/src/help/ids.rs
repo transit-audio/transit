@@ -361,6 +361,7 @@ ids! {
     TelemetryQueueOver => "telemetry.queue_over",
     TelemetryQueueLate => "telemetry.queue_late",
     TelemetryMeasurementMailbox => "telemetry.measurement_mailbox",
+    TelemetryRenderPath => "telemetry.render_path",
     TelemetryResetPeak => "telemetry.reset_peak",
     TelemetryCopyDiagnostics => "telemetry.copy_diagnostics",
     // help\texture.toml

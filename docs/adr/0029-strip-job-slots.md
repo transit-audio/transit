@@ -411,6 +411,7 @@ Rules that hold in every case:
 - `TRANSIT_RENDER_TAIL` is read once, like `TRANSIT_RENDER_GRAPH`. Unset means off until the default flip (a separately reviewed commit after the measurement) and on after it; `1` is on; `0` is off; any other value is logged once and treated as unset.
 - A block takes the tail graph when all of these hold: a pool exists (zero workers included), the block renders on the audio thread, the strips are not forced serial, both the graph and the tail switch are on, every task strip has a worker slot, and phase 1 plus the live auxes number at least `PARALLEL_STRIPS`.
 - `TRANSIT_RENDER_GRAPH=0` turns the tail graph off too; a `TRANSIT_RENDER_TAIL=1` beside it is logged once and ignored.
+- As built for the flip (2026-11-12, G9 of the tail audit): the parse is a pure function (`graph::render_tail_setting`, `graph::tail_switch` with the default as a parameter, so the `0` opt-out of the flipped default is tested now); the default lives in one constant (`graph::TAIL_DEFAULT`, `false` until the flip commit); one startup line says which tail is in effect and why; the diagnostics report's `Render path` row names the last block's path and why the tail graph is on, off, or not taken.
 - A block also takes the tail graph whenever a tail strip is away, whatever the switches and counts say.
 - When only phase-1 strips are away, the existing recovery path and its capacity rules apply.
 - No out-of-range slot reaches the worker set, and a refused block opening never processes or routes an away placeholder.

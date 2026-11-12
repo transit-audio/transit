@@ -447,6 +447,16 @@ impl MixEngine {
                             .count()
                         >= PARALLEL_STRIPS)
         });
+        // G9: why a block with the tail switch on did not take the tail graph, for the report.
+        let tail_reason = match self.pool.as_ref() {
+            Some(pool) if !tail_eligible && on_audio_thread() && MixEngine::tail_enabled() => crate::render_path::tail_reason(
+                self.serial || MixEngine::serial_forced(),
+                tables.aux_end > pool.capacity(),
+                tables.phase1
+                    + tables.strips[tables.phase1..tables.aux_end].iter().filter(|st| s.tracks.get(usize::from(st.track)).is_some_and(live)).count(),
+            ),
+            _ => 0,
+        };
         if !tail_eligible {
             tables.prepare_block(s, pos, frames, sample_rate, !self.input.is_empty(), status, self.pool.as_ref());
         }
@@ -546,6 +556,17 @@ impl MixEngine {
                 _ => false,
             };
         let recovery = !pooled && self.pool.as_ref().is_some_and(|p| p.any_away() || tail_eligible || (keyed && p1.len() > p.capacity()));
+        if let Some(pool) = self.pool.as_ref() {
+            use crate::render_path::{PATH_GRAPH, PATH_RECOVERY, PATH_SERIAL, PATH_TAIL, PATH_WORKERS, encode};
+            let path = match (tail_done, pooled, keyed, recovery) {
+                (true, ..) => PATH_TAIL,
+                (false, true, true, _) => PATH_GRAPH,
+                (false, true, false, _) => PATH_WORKERS,
+                (false, false, _, true) => PATH_RECOVERY,
+                _ => PATH_SERIAL,
+            };
+            pool.note_render_path(encode(path, tail_reason));
+        }
         if recovery && let Some(pool) = self.pool.as_mut() {
             pool.deliver_home(p1, &mut self.events, s, frame, frames);
             let block = strip_pool::PoolBlock {
@@ -789,10 +810,13 @@ impl MixEngine {
             ) {
                 Ok(pool) => {
                     log::info!(
-                        "mix: {workers} render workers ({}); strip deadline {}{}",
+                        "mix: {workers} render workers ({}); strip deadline {}{}; task graph for keyed plans {}; bus tail graph {} ({})",
                         if promote { "promoted" } else { "default priority" },
                         strip_deadline_text(u64::from(pool.deadline_percent()), u64::from(frames), u64::from(rate), overridden.is_some()),
-                        if overridden.is_some() { "" } else { ", until the device's buffer size is known" }
+                        if overridden.is_some() { "" } else { ", until the device's buffer size is known" },
+                        if MixEngine::graph_enabled() { "on" } else { "off" },
+                        if MixEngine::tail_enabled() { "on" } else { "off" },
+                        MixEngine::tail_why().text(),
                     );
                     self.pool = Some(pool);
                 }

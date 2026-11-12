@@ -33,6 +33,8 @@ pub(super) struct Counters {
     pub(super) upstream_missed: AtomicU64,
     /// Auxes skipped because a phase-1 key source missed (#174).
     pub(super) upstream_tail: AtomicU64,
+    /// The last block's render path code (`crate::render_path`), stored only on a change.
+    pub(super) render_path: AtomicU32,
 }
 
 /// Reads an engine's [`StripFaults`] from any thread (relaxed loads; each figure exact on its own).
@@ -91,6 +93,9 @@ impl StripFaultsReader {
             },
             measurement_status: c.measurement_status.load(Ordering::Relaxed),
             workers: r(&c.workers),
+            render_path: c.render_path.load(Ordering::Relaxed),
+            tail_on: crate::MixEngine::tail_enabled(),
+            tail_why: crate::MixEngine::tail_why(),
             deadline_percent: r(&c.deadline_percent),
             deadline_frames: r(&c.deadline_frames),
             deadline_rate: r(&c.deadline_rate),

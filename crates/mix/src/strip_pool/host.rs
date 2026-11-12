@@ -8,6 +8,14 @@ impl StripPool {
         self.set.install_test_seams();
     }
 
+    /// The block's render path code (`crate::render_path`): one relaxed load, and a store only
+    /// when it changed. Allocation-free.
+    pub(crate) fn note_render_path(&self, code: u32) {
+        if self.counters.render_path.load(Ordering::Relaxed) != code {
+            self.counters.render_path.store(code, Ordering::Relaxed);
+        }
+    }
+
     pub(crate) fn measurement_requested(&self) -> bool {
         self.set.measurement_requested()
     }

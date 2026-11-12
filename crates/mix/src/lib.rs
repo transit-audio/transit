@@ -91,6 +91,7 @@ mod fm_loop_wrap_tests;
 #[cfg(test)]
 mod frozen_state_tests;
 mod graph;
+mod render_path;
 #[cfg(test)]
 mod grid_end_tests;
 mod hardware;
@@ -209,6 +210,8 @@ pub use scope::{INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub, ScopeTap};
 use sink::Sink;
 pub use sink::{MAX_SINK_CHANNELS, SinkPlan, SinkSpec, plan_sinks, unresolved_routes};
 use strip::{LiveInput, StripRender, head_latency, note_insert_latency, process_master, process_strip};
+pub use graph::TailWhy;
+pub use render_path::render_path_text;
 pub use strip_pool::{HELD_SECS, StripFaultsReader};
 pub use touch::TOUCH_RETURN_S;
 use touch::TouchRamps;

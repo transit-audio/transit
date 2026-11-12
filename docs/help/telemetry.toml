@@ -266,6 +266,11 @@ name = "Worker completions late / after long queue"
 text = "Worker completions that landed after their deadline, then the subset that had also queued over a quarter period. This is distinct from the callback's late-overrun count."
 
 [[entry]]
+id = "telemetry.render_path"
+name = "Render path"
+text = "Which path the last block took: the strips serial on the audio thread, on the render workers, or through the task graph (plans with sidechain keys), or the strips and the bus tail through the task graph; then whether the bus tail graph is on and why (the default, TRANSIT_RENDER_TAIL, TRANSIT_RENDER_GRAPH=0, or a measurement), and why a block did not take it (fewer than four strips and live auxes, more than the render workers' cells, or the strips forced serial)."
+
+[[entry]]
 id = "telemetry.measurement_mailbox"
 name = "Render measurement mailbox"
 text = "The state of the control-thread measurement reader: idle, requested, or a complete or incomplete response awaiting acknowledgment. It is informational; only complete start and end snapshots form a valid measurement row."

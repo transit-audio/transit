@@ -292,6 +292,13 @@ pub struct StripFaults {
     pub measurement_status: u32,
     /// Render worker threads (0: no pool, the strips render serially).
     pub workers: u64,
+    /// The last block's render path and, with the tail switch on, why it did not take the tail
+    /// graph (G9; [`crate::render_path_text`] reads it).
+    pub render_path: u32,
+    /// The bus tail's task graph is switched on ([`crate::MixEngine::tail_enabled`]).
+    pub tail_on: bool,
+    /// Why the tail switch is on or off.
+    pub tail_why: crate::TailWhy,
     /// The strips' deadline in effect, percent of the block period (#172): the
     /// [`STRIP_DEADLINE_PERCENT_ENV`] override, else [`default_strip_deadline_percent`] of
     /// [`StripFaults::deadline_frames`].
