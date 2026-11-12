@@ -122,6 +122,16 @@ fn fill_free_pads_is_unavailable_with_the_engines_reason_and_enter_does_nothing(
     assert!(modal(&t, tr).is_some(), "the unavailable button takes no click");
     assert_eq!(doc(&t), before);
     assert_eq!(t.undo_len(), undo);
+    // Keyboard focus never reaches Replace: the first Tab lands on Cancel, so Tab then Enter
+    // cancels (review N1).
+    t.key("Tab");
+    let focused: Vec<_> = modal(&t, tr).unwrap().buttons.iter().filter(|b| b.focused).map(|b| b.text.clone()).collect();
+    assert_eq!(focused, ["Cancel"], "the first Tab lands on Cancel");
+    t.key("Enter");
+    assert_eq!(doc(&t), before, "Tab then Enter never replaces");
+    assert_eq!(t.undo_len(), undo);
+    load(&mut t, tr, &d);
+    let m = modal(&t, tr).expect("asked again");
     t.click(mid(button(&m, REPLACE).rect), 1);
     assert!(modal(&t, tr).is_none());
     assert_eq!(t.undo_len(), undo + 1, "Replace is one undo step");

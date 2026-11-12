@@ -122,6 +122,8 @@ pub struct ButtonLayout {
     pub default: bool,
     /// Whether it takes input (an unavailable choice does not).
     pub enabled: bool,
+    /// Whether it has keyboard focus.
+    pub focused: bool,
 }
 
 /// The default button: `signal` fill, ink `surface.inset`, Sans 600 12, 26 high with 16 px a
@@ -147,16 +149,27 @@ pub fn default_button(ui: &mut Ui, text: &str) -> (Response, ButtonLayout) {
     let p = ui.painter();
     p.rect_filled(rect, c::RADIUS_CONTROL, fill);
     p.text(rect.center(), Align2::CENTER_CENTER, text, c::DEFAULT_BUTTON_FONT.font_id(ui.ctx()), ink);
-    (resp, ButtonLayout { rect: r4(rect), fill, ink, text: text.to_string(), default: true, enabled })
+    let focused = resp.has_focus();
+    (resp, ButtonLayout { rect: r4(rect), fill, ink, text: text.to_string(), default: true, enabled, focused })
 }
 
 /// A standard button, recorded: egui's button (borderless `surface.raised`), exactly 26 high with
 /// 12 px a side, and its layout.
 pub fn button(ui: &mut Ui, text: &str) -> (Response, ButtonLayout) {
+    button_sensed(ui, text, Sense::click())
+}
+
+/// [`button`] that takes a pointer click only, never keyboard focus (so neither Tab nor Enter or
+/// Space on a focused button can press it).
+fn pointer_button(ui: &mut Ui, text: &str) -> (Response, ButtonLayout) {
+    button_sensed(ui, text, Sense::CLICK)
+}
+
+fn button_sensed(ui: &mut Ui, text: &str, sense: Sense) -> (Response, ButtonLayout) {
     let resp = with_style(
         ui,
         |st| st.spacing.button_padding = vec2(c::BUTTON_PADDING[1], c::BUTTON_PADDING[0]),
-        |ui| ui.add(egui::Button::new(text).min_size(vec2(0.0, c::CONTROL_HEIGHT))),
+        |ui| ui.add(egui::Button::new(text).min_size(vec2(0.0, c::CONTROL_HEIGHT)).sense(sense)),
     );
     let t = &TOKENS;
     let fill = if resp.is_pointer_button_down_on() {
@@ -166,7 +179,15 @@ pub fn button(ui: &mut Ui, text: &str) -> (Response, ButtonLayout) {
     } else {
         t.surface_raised
     };
-    let layout = ButtonLayout { rect: r4(resp.rect), fill, ink: t.text, text: text.to_string(), default: false, enabled: ui.is_enabled() };
+    let layout = ButtonLayout {
+        rect: r4(resp.rect),
+        fill,
+        ink: t.text,
+        text: text.to_string(),
+        default: false,
+        enabled: ui.is_enabled(),
+        focused: resp.has_focus(),
+    };
     (resp, layout)
 }
 
@@ -247,9 +268,12 @@ pub enum Primary<'a> {
     Unavailable(&'a str),
 }
 
-/// [`modal`] with the rightmost button as `primary` says; Escape is Cancel either way.
+/// [`modal`] with the rightmost button as `primary` says; Escape is Cancel either way. With no
+/// default (`Plain`, `Unavailable`) only Cancel takes keyboard focus: every other choice needs a
+/// pointer click, so Tab then Enter can never confirm a destructive action (#465 review N1).
 pub fn modal_with(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>, primary: Primary<'_>) -> Option<Choice> {
     let t = &TOKENS;
+    let action = if primary == Primary::Enter { button } else { pointer_button };
     let frame = modal_frame(t);
     // The content width that makes the outer width 380: the padding and the 1 px edge each side.
     let inner_w = c::MODAL_WIDTH - 2.0 * c::MODAL_PADDING[1] - 2.0 * frame.stroke.width;
@@ -269,7 +293,7 @@ pub fn modal_with(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>, primary: Pri
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             if let Some(third) = ask.third {
-                let (b, l) = button(ui, third);
+                let (b, l) = action(ui, third);
                 layout.buttons.push(l);
                 if b.clicked() {
                     choice = Some(Choice::Third);
@@ -278,9 +302,9 @@ pub fn modal_with(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>, primary: Pri
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let (d, dl) = match primary {
                     Primary::Enter => default_button(ui, ask.default),
-                    Primary::Plain => button(ui, ask.default),
+                    Primary::Plain => pointer_button(ui, ask.default),
                     Primary::Unavailable(why) => {
-                        let (r, l) = ui.add_enabled_ui(false, |ui| button(ui, ask.default)).inner;
+                        let (r, l) = ui.add_enabled_ui(false, |ui| pointer_button(ui, ask.default)).inner;
                         (r.on_disabled_hover_text(why), l)
                     }
                 };

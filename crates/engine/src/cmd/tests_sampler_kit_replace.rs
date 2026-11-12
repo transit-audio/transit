@@ -222,3 +222,26 @@ fn a_refused_replace_changes_nothing() {
     assert_eq!(out["notice"], "Load kit needs 65 pads; a Sampler has 64.");
     assert!(Arc::ptr_eq(&before, &e.session_arc()));
 }
+
+#[test]
+fn a_replace_over_the_patch_budget_is_refused_and_changes_nothing() {
+    let (mut e, t, _old) = loaded(&["k1.wav", "k2.wav"]);
+    // Sparse PCM files: their headers alone pass the aggregate bound; nothing is decoded.
+    let d = Dir::new();
+    for i in 0..12 {
+        let path = d.0.join(format!("{i:02}.wav"));
+        let header = transit_audio_io::wav_float_header(2, 48_000, 1_440_000).unwrap();
+        std::fs::write(&path, &header).unwrap();
+        std::fs::OpenOptions::new().write(true).open(path).unwrap().set_len(header.len() as u64 + 1_440_000 * 8).unwrap();
+    }
+    let before = e.session_arc();
+    let steps = e.undo_history().len();
+    for preview in [true, false] {
+        let out = load_with(&mut e, t, &d.0, preview, true);
+        assert_eq!(out["loaded"], 0, "{out}");
+        assert!(out["notice"].as_str().unwrap().contains("128 MiB"), "{out}");
+        assert_eq!(out["offender"], "11.wav");
+        assert!(Arc::ptr_eq(&before, &e.session_arc()), "the kit and its sources are untouched");
+        assert_eq!(e.undo_history().len(), steps);
+    }
+}

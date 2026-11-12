@@ -63,6 +63,16 @@ fn deleting_a_kit_asks_first_with_no_default_and_escape_cancels() {
     assert!(confirm(&t, tr).is_some() && file.is_file(), "Enter does nothing");
     t.key("Escape");
     assert!(confirm(&t, tr).is_none() && file.is_file(), "Escape cancels");
+    // Keyboard focus never reaches Delete Kit: the first Tab lands on Cancel, so Tab then Enter
+    // cancels (review N1).
+    click_delete(&mut t, tr, "808");
+    t.key("Tab");
+    let focused: Vec<_> = confirm_layout(&t, tr).buttons.iter().filter(|b| b.focused).map(|b| b.text.clone()).collect();
+    assert_eq!(focused, ["Cancel"], "the first Tab lands on Cancel");
+    t.key("Tab");
+    assert!(confirm_layout(&t, tr).buttons.iter().all(|b| b.text != DELETE_KIT || !b.focused), "Delete Kit never takes focus");
+    t.key("Enter");
+    assert!(file.is_file(), "Tab then Enter never deletes");
     click_delete(&mut t, tr, "808");
     let m = confirm_layout(&t, tr);
     t.click(mid(button(&m, DELETE_KIT)), 1);
