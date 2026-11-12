@@ -356,7 +356,8 @@ with Mono or Dim on is identical to one made with them off. They are settings of
 kept with the audio settings, not part of the session, and never an undo step.
 
 - **Mono** sums the left and right sides to mono, each at -3 dB, to check how the mix holds up on
-  one speaker.
+  one speaker. It works on a stereo main bus only: on a wider one it is grayed out and its hover
+  text says why, and your choice comes back when the main bus is stereo again.
 - **Dim** turns what you hear down 20 dB until you press it again.
 - **Ref** plays at your stored reference listening level while it is on. **Alt+click** on Ref
   stores the current monitor level as the reference. The monitor level itself (0 dB, the default,
@@ -365,7 +366,8 @@ kept with the audio settings, not part of the session, and never an undo step.
 
 The line under the main bus's readouts, **INT**, is the integrated loudness of the mix in LUFS
 (ITU-R BS.1770-4, gated, as streaming services measure it), running since the last reset. It
-measures the mix after the master fader, not what Dim or Ref make of it. Click it to reset it;
+measures the mix after the master fader, before the metronome click joins it, not what Dim or Ref
+make of it, so it reads the same as a render of the same program. Click it to reset it;
 starting the transport from a stop resets it too. A dash means nothing loud enough has played
 yet. Under the strip's name, the main bus shows the output path it plays on and the audio device
 that path feeds ("Out 1-2 · Speakers"; the path alone while no device is open).
