@@ -9,15 +9,6 @@ use std::io::Write;
 use transit_engine::{Engine, io::add_recording_take};
 use transit_model::{ChannelFormat, TrackKind};
 
-/// Removes the directory when the test ends, passing or not.
-struct Cleanup(std::path::PathBuf);
-
-impl Drop for Cleanup {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 /// A header-only take: an RF64 header for `frames` mono float frames at 48 kHz, then a file
 /// length that holds them as a hole (sparse), never as written bytes.
 fn header_only_take(path: &std::path::Path, frames: u64) {
@@ -31,7 +22,6 @@ fn header_only_take(path: &std::path::Path, frames: u64) {
 fn a_take_of_one_and_a_half_gi_samples_is_one_disk_backed_clip_and_reopens_so() {
     let dir = transit_test_support::TestDir::new("long-take");
     std::fs::create_dir_all(&dir).unwrap();
-    let _cleanup = Cleanup(dir.clone());
     let path = dir.join("Loopback_01.wav");
     let frames = 3 * (1u64 << 29);
     assert!(frames > transit_audio_io::MAX_DECODE_SAMPLES);
