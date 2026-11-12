@@ -96,6 +96,16 @@ pub fn specs() -> Vec<CommandSpec> {
             let files = crate::io::bounce_stems_with(e, &dir, r, &opts, fold)?;
             Ok(json!({"files": files, "left_out": left_out}))
         }),
+        cmd!(noundo "file.bounce_consolidated", "Consolidated Stems from Session Start...", [], None, "{dir, format?: wav|aiff|flac|opus, bit_depth?: 16|24|32f, bitrate?: kb/s (Opus), fold_down?: stereo, mode?: offline_without_external, without_external?: false} — full-length track stems, one MIDI file per MIDI track and a tempo-only MIDI file", has_tracks, |e, p| {
+            let job = bounce_consolidated_job(e, p)?;
+            let left_out = super::external_instrument::external_in_render(e.session());
+            let seconds = e.session().sample_rate.seconds(job.range().len());
+            let dir = job.dir().to_string_lossy().into_owned();
+            let done = job.run()?;
+            let files: Vec<String> = done.files.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+            let midi_files: Vec<String> = done.midi_files.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+            Ok(json!({"dir": dir, "seconds": seconds, "files": files, "midi_files": midi_files, "tempo_file": done.tempo_file.to_string_lossy(), "left_out": left_out}))
+        }),
         cmd!(noundo "file.bounce_paths", "Bounce Stems by Output Path...", [], None, "{dir, paths?: [output path name | main] | all (default: every routed path), format?: wav|aiff|flac|opus, bit_depth?: 16|24|32f, bitrate?: kb/s (Opus), start?, end?, normalize?: false|true|joint|each, dither?: true, mode?: offline_without_external, without_external?: false}", has_tracks, bounce_paths),
         cmd!(noundo "file.export_midi", "MIDI...", ["File", "Export"], None, "{path, tracks?}", always, |e, p| {
             let path = str_param(p, "path").ok_or_else(|| bad("file.export_midi", "`path` required"))?.to_string();
@@ -465,6 +475,19 @@ fn bounce_paths(e: &mut Engine, p: &Value) -> Result<Value> {
         .collect();
     let empty: Vec<&str> = done.stems.iter().filter(|s| s.empty).map(|s| s.path.as_str()).collect();
     Ok(json!({"dir": dir, "seconds": seconds, "files": files, "empty": empty, "joint_gain_db": done.joint_gain_db, "left_out": left_out}))
+}
+
+/// The consolidated export `file.bounce_consolidated` runs for `p`, not rendered yet.
+pub fn bounce_consolidated_job(e: &Engine, p: &Value) -> Result<crate::io::ConsolidatedBounce> {
+    const ID: &str = "file.bounce_consolidated";
+    let dir = str_param(p, "dir").ok_or_else(|| bad(ID, "`dir` required"))?.to_string();
+    super::external_instrument::render_guard(e, ID, p)?;
+    let format_name = str_param(p, "format").unwrap_or("wav");
+    let format = transit_audio_io::encode_format_for(format_name)
+        .ok_or_else(|| bad(ID, format!("cannot write `{format_name}` files (supported: {})", transit_audio_io::ENCODE_EXTENSIONS)))?;
+    let opts = encode_options(e, ID, p, format)?;
+    let fold = fold_down_param(p, ID)?;
+    crate::io::ConsolidatedBounce::new(e.session_arc(), std::path::Path::new(&dir), &opts, fold)
 }
 
 /// The bounce `file.bounce_paths` runs for `p`, not rendered yet.

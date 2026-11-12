@@ -1,4 +1,5 @@
 use super::*;
+use transit_midi::CtrlEvent;
 
 /// The track's MIDI Track Offset (`midi.offset.<id>` in the edit values), in samples. Looked up
 /// without formatting the key, since this runs on the audio thread every block.
@@ -26,8 +27,8 @@ pub(crate) fn schedule_notes(s: &Session, t: &Track, pos: Samples, frames: usize
     let rack = s.rack_of(t);
     sorted_events(s, t, rack.map(|(r, _)| r), pos, frames, |at, from_rack, event| {
         let event = match (from_rack, event, rack) {
-            (true, ClipEvent::On(key, velocity, ch), Some((_, member))) => match member.velocity(key, velocity) {
-                Some(v) => ClipEvent::On(key, v, ch),
+            (true, ClipEvent::On(key, velocity, release, channel), Some((_, member))) => match member.velocity(key, velocity) {
+                Some(v) => ClipEvent::On(key, v, release, channel),
                 None => return,
             },
             (_, e, _) => e,
@@ -51,7 +52,7 @@ fn sorted_events(s: &Session, t: &Track, rack: Option<&Track>, pos: Samples, fra
     // Fixed scratch bounds memory, not event count. If a range overflows, split its time span
     // and rescan; a single sample can stream directly in the visitor's off-before-on order.
     // Usually the entire block fits and needs just one visit and one allocation-free sort.
-    let mut scratch = [(0usize, 0usize, false, ClipEvent::Off(0, 0)); 256];
+    let mut scratch = [(0usize, 0usize, false, ClipEvent::Off(0, 0, 0)); 256];
     let (mut from, mut until) = (0, frames);
     while from < frames {
         let mut used = 0usize;
@@ -90,12 +91,107 @@ fn sorted_events(s: &Session, t: &Track, rack: Option<&Track>, pos: Samples, fra
     }
 }
 
+/// The session content end after every MIDI track's positive real-time delay and track offset.
+/// Audio stems and exported clip sequences use the same end, so a transformed tail is not cut off.
+pub fn playback_content_end(s: &Session) -> Samples {
+    let mut end = s.content_end().max(1);
+    for t in s.tracks.iter().filter(|t| t.kind.is_midi()) {
+        let rtp = Rtp::of(s, t);
+        let offset = midi_offset(s, t);
+        let rack_clips = s.rack_of(t).map_or(&[][..], |(rack, _)| rack.clips());
+        for clip in t.clips().iter().chain(rack_clips) {
+            let base = s.tempo.samples_to_ticks(clip.start, s.sample_rate);
+            let delay = s.tempo.tick_to_samples(base.saturating_add(rtp.delay), s.sample_rate).saturating_sub(clip.start);
+            end = end.max(clip.end().saturating_add(offset).saturating_add(delay));
+        }
+    }
+    end.max(1)
+}
+
+/// The clip-level performance of `t` over `range` as a plain sequence: rack clips and zones,
+/// real-time properties, track offset, clip edges and loop repetitions all follow playback. MIDI
+/// effects are device processing, not clip content, and are not regenerated here.
+pub fn sequence_as_played(s: &Session, t: &Track, range: Range) -> Option<transit_midi::Sequence> {
+    const MAX_EVENTS: usize = 2_000_000;
+    let membership = s.rack_of(t);
+    let rack = membership.map(|(rack, _)| rack);
+    let member = membership.map(|(_, member)| member);
+    let mut out = transit_midi::Sequence::default();
+    let mut open: std::collections::BTreeMap<(bool, u8, u8), std::collections::VecDeque<transit_midi::Note>> = std::collections::BTreeMap::new();
+    let mut events = 0usize;
+    let mut pos = range.start;
+    while pos < range.end {
+        let frames = usize::try_from((range.end - pos).min(1024)).unwrap_or(1024);
+        sorted_events(s, t, rack, pos, frames, |at, from_rack, event| {
+            let event = match (from_rack, event, member) {
+                (true, ClipEvent::On(key, velocity, release, channel), Some(member)) => match member.velocity(key, velocity) {
+                    Some(velocity) => ClipEvent::On(key, velocity, release, channel),
+                    None => return,
+                },
+                (_, event, _) => event,
+            };
+            events = events.saturating_add(1);
+            if events > MAX_EVENTS {
+                return;
+            }
+            let tick = s.tempo.samples_to_ticks(pos.saturating_add(at as i64), s.sample_rate);
+            match event {
+                ClipEvent::On(pitch, velocity, release_velocity, channel) => {
+                    open.entry((from_rack, pitch, channel)).or_default().push_back(transit_midi::Note {
+                        pitch,
+                        velocity,
+                        release_velocity,
+                        channel,
+                        start: tick,
+                        length: 1,
+                    });
+                }
+                ClipEvent::Off(pitch, release_velocity, channel) => {
+                    if let Some(mut note) = open.get_mut(&(from_rack, pitch, channel)).and_then(std::collections::VecDeque::pop_front) {
+                        note.release_velocity = release_velocity;
+                        note.length = tick.saturating_sub(note.start).max(1);
+                        out.notes.push(note);
+                    }
+                }
+                ClipEvent::Control(msg, channel) => {
+                    let kind = match msg[0] & 0xf0 {
+                        0xa0 => CtrlKind::PolyPressure(msg[1]),
+                        0xb0 => CtrlKind::Cc(msg[1]),
+                        0xc0 => CtrlKind::Program,
+                        0xd0 => CtrlKind::ChannelPressure,
+                        0xe0 => CtrlKind::PitchBend,
+                        _ => return,
+                    };
+                    let value = match kind {
+                        CtrlKind::PitchBend => ((u16::from(msg[1]) | (u16::from(msg[2]) << 7)) as i32) - 8192,
+                        CtrlKind::Program | CtrlKind::ChannelPressure => i32::from(msg[1]),
+                        _ => i32::from(msg[2]),
+                    };
+                    out.ctrls.push(CtrlEvent { tick, channel, kind, value });
+                }
+            }
+        });
+        pos = pos.saturating_add(frames as i64);
+        if events > MAX_EVENTS {
+            return None;
+        }
+    }
+    let end = s.tempo.samples_to_ticks(range.end, s.sample_rate);
+    for note in open.into_values().flatten() {
+        let mut note = note;
+        note.length = end.saturating_sub(note.start).max(1);
+        out.notes.push(note);
+    }
+    out.sort();
+    Some(out)
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum ClipEvent {
-    /// Pitch, velocity, recorded channel (zero-based).
-    On(u8, u8, u8),
-    /// Pitch, recorded channel.
-    Off(u8, u8),
+    /// Pitch, velocity, release velocity and recorded channel (zero-based).
+    On(u8, u8, u8, u8),
+    /// Pitch, release velocity and recorded channel.
+    Off(u8, u8, u8),
     /// A channel-1 message and the recorded channel; the instrument path ignores the channel.
     Control([u8; 3], u8),
 }
@@ -107,14 +203,14 @@ fn deliver_clip_event(inst: &mut PluginSlot, render_frame: u64, at: usize, event
         e.deliver(&mut *inst.plugin, render_frame, at);
         let offset = u32::try_from(at).unwrap_or(u32::MAX);
         match event {
-            ClipEvent::On(key, velocity, _) => e.clip_on(&mut *inst.plugin, offset, key, velocity, rack),
-            ClipEvent::Off(key, _) => e.clip_off(&mut *inst.plugin, offset, key, rack),
+            ClipEvent::On(key, velocity, _, _) => e.clip_on(&mut *inst.plugin, offset, key, velocity, rack),
+            ClipEvent::Off(key, _, _) => e.clip_off(&mut *inst.plugin, offset, key, rack),
             ClipEvent::Control(msg, _) => e.clip_ctrl(&mut *inst.plugin, offset, msg, rack),
         }
     } else {
         match event {
-            ClipEvent::On(key, velocity, _) => inst.plugin.note_on(at, key, velocity),
-            ClipEvent::Off(key, _) => inst.plugin.note_off(at, key),
+            ClipEvent::On(key, velocity, _, _) => inst.plugin.note_on(at, key, velocity),
+            ClipEvent::Off(key, _, _) => inst.plugin.note_off(at, key),
             ClipEvent::Control(msg, _) => inst.plugin.midi(at, msg),
         }
     }
@@ -251,11 +347,11 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
                 note_spans(s, last, looping, on, off, pos, end, |on, off| {
                     if ons && on >= pos && on < end {
                         let at = usize::try_from(on - pos).unwrap_or(0);
-                        visit(at, ClipEvent::On(n.pitch, n.velocity, n.channel));
+                        visit(at, ClipEvent::On(n.pitch, n.velocity, n.release_velocity, n.channel));
                     }
                     if off >= pos && off < end && (ons == (off == on)) {
                         let at = usize::try_from(off - pos).unwrap_or(0);
-                        visit(at, ClipEvent::Off(n.pitch, n.channel));
+                        visit(at, ClipEvent::Off(n.pitch, n.release_velocity, n.channel));
                     }
                 });
             }
@@ -423,7 +519,7 @@ pub fn clip_note_ons(s: &Session, track: TrackId, pos: Samples, frames: usize) -
     let mut out = Vec::new();
     if let Some(t) = s.track(track) {
         visit_clip_events(s, t, pos, frames, |at, e| {
-            if let ClipEvent::On(key, _, _) = e {
+            if let ClipEvent::On(key, _, _, _) = e {
                 out.push((pos + at as Samples, key));
             }
         });

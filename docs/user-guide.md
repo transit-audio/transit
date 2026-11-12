@@ -217,6 +217,16 @@ FLAC, lossless at the bit depth you pick (16-bit, 24-bit or 32-bit float), or **
 lossy format for sharing: small files that play in every browser, phone and messaging app.
 A 32-bit float file keeps levels above 0 dBFS as they are; 16-bit and 24-bit files clip at full scale.
 
+**Consolidated tracks** exports for another DAW: every audio, instrument and MIDI track gets one
+stem from session start to the content end, including leading silence, muted or inactive material,
+and any real-time delay or track offset. Every MIDI or instrument track, including an empty one,
+gets a Standard MIDI File beside it. Rack clips, real-time properties, track offsets, clip edges,
+muted clips and loop repetitions follow playback; MIDI effects remain represented by the audio stem
+rather than generating new notes. A separate tempo-only SMF carries the session tempo, meter and
+markers even when the session has no MIDI tracks. External Instrument audio is left out only after
+the usual explicit choice, while its MIDI is kept. The control channel command is
+`file.bounce_consolidated` with `dir` and the ordinary format options.
+
 With Opus the bit depth row gives way to **Bitrate**: 96, 128, 160 (the default), 192 or 256 kb/s
 for stereo; a mono bus offers 96 (the default), 128 or 160 kb/s.
 The encoder is the reference libopus at its highest quality setting, with a variable bitrate that
@@ -228,8 +238,8 @@ exactly as long as the range you bounced. Opus is mono or stereo; a surround mix
 and its encoder is BSD-licensed where MP3's is LGPL. Importing MP3 still works, and `.opus` files
 import too.
 
-The control channel's `file.bounce_mix`, `file.bounce_stems`, `file.bounce_paths` and
-`file.export_clips` take `format: "opus"` and `bitrate` in kb/s (6 to 510; the dialog offers the
+The control channel's `file.bounce_mix`, `file.bounce_stems`, `file.bounce_consolidated`,
+`file.bounce_paths` and `file.export_clips` take `format: "opus"` and `bitrate` in kb/s (6 to 510; the dialog offers the
 five above); a `path` ending in `.opus` picks Opus on its own.
 
 ## Bounce in Place

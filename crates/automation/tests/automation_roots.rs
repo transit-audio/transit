@@ -213,6 +213,29 @@ fn every_writing_command_is_refused_outside_the_write_root_and_writes_nothing() 
 }
 
 #[test]
+fn consolidated_stems_and_midi_stay_inside_the_write_root() {
+    let f = fixture("consolidated");
+    let mut engine = transit_engine::Engine::default();
+    let track =
+        engine.session_mut().add_track(transit_engine::model::TrackKind::Instrument, transit_engine::model::ChannelFormat::Stereo, Some("Keys"));
+    let clip = engine.session_mut().new_clip_id();
+    engine.session_mut().track_mut(track).unwrap().playlist_mut().unwrap().clips.push(transit_engine::model::Clip::midi(
+        clip,
+        "empty",
+        0,
+        1,
+        Default::default(),
+    ));
+    let roots = AutomationRoots::new(None, Some(&f.write)).unwrap();
+    let mut srv = Server::new(Headless::new(engine).with_automation_roots(roots));
+    refused(&mut srv, "file.bounce_consolidated", json!({"dir": s(f.outside.join("stems"))}), "outside the write root");
+    assert!(!f.outside.join("stems").exists());
+    ok(&mut srv, "file.bounce_consolidated", json!({"dir": s(f.write.join("stems"))}));
+    let files = std::fs::read_dir(f.write.join("stems")).unwrap().count();
+    assert_eq!(files, 3, "one stem, one track MIDI file and one tempo-only MIDI file");
+}
+
+#[test]
 fn saving_over_an_existing_file_outside_does_not_report_that_it_exists() {
     let f = fixture("exists");
     let mut srv = demo_server(Some(&f.read), Some(&f.write));
