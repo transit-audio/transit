@@ -116,18 +116,12 @@ fn clear_pads(patch: &mut PatchV1, n: usize) -> Cleared {
                 cleared.slices += 1;
             }
             patch.zones.retain(|zone| zone.id != z);
-            reset_controls(patch, z);
+            patch.reset_controls(z);
         }
         patch.set_pad(PadEntry { zone: None, name: None, choke: 0, mute: false, solo: false, ..entry });
     }
     patch.drop_unused_sources();
     cleared
-}
-
-/// Removes zone `z`'s slot controls (`zoneNNN_...`), so they read their defaults again.
-fn reset_controls(patch: &mut PatchV1, z: u16) {
-    let prefix = format!("zone{:03}_", z + 1);
-    patch.controls.retain(|id, _| !id.starts_with(&prefix));
 }
 
 /// Runs `work` on a worker thread over a staged engine holding a clone of `e`'s session, inside the
@@ -178,7 +172,7 @@ fn prepare(e: &mut Engine, t: TrackId, folder: &std::path::Path, preview: bool, 
     plan.zones = (0..ZONES as u16).filter(|zone| patch.zone(*zone).is_none()).collect();
     if replace {
         for zone in plan.zones.iter().take(needed) {
-            reset_controls(&mut patch, *zone);
+            patch.reset_controls(*zone);
         }
     }
     if needed > plan.pads.len() {

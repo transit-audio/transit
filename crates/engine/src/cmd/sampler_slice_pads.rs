@@ -299,6 +299,8 @@ fn apply(p: &mut PatchV1, plan: &Plan, views: &[SliceView], absolute: bool) {
         let pad = p.pad(*q);
         if let Some(z) = pad.zone {
             p.zones.retain(|x| x.id != z);
+            // Its controls go with it (#478), so a new zone in the slot starts from defaults.
+            p.reset_controls(z);
         }
         p.set_pad(PadEntry { zone: None, ..pad });
     }

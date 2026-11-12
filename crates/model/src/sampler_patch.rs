@@ -622,6 +622,15 @@ impl PatchV1 {
         }
     }
 
+    /// Removes zone slot `zone`'s controls (`zoneNNN_...`, `zone` 0-based), so they read their
+    /// defaults again: every edit that empties a zone calls it in the same step, so the next
+    /// sample in that slot starts from defaults (#478) and undo restores the controls with the
+    /// zone.
+    pub fn reset_controls(&mut self, zone: u16) {
+        let prefix = format!("zone{:03}_", u32::from(zone) + 1);
+        self.controls.retain(|id, _| !id.starts_with(&prefix));
+    }
+
     /// Moves a single legacy marker set into Manual (ADR 0041: Manual selected, Auto at S only,
     /// no redetection); explicitly saved two-set state wins.
     fn migrate(&mut self) {

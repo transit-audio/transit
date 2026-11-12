@@ -577,7 +577,7 @@ platforms it lands as soon as the pointer moves after you let go (see the known 
 
 Right-click a pad and choose **Clear pad** to empty it and reset its name, choke group, mute,
 and solo. Delete or Backspace does the same for the selected pad while the Sampler window has
-the keyboard and shows its pads; while a menu is open, the keys do nothing. Its unused zone is removed; audio files and other pads stay intact. One Undo
+the keyboard and shows its pads; while a menu is open, the keys do nothing. Its unused zone is removed with its level, pan, envelope, modulation and shaper settings, so the next sample loaded there starts from the defaults; audio files and other pads stay intact. One Undo
 restores the whole edit. The trigger note stays as it was. **Reset note** appears in the same
 menu only when the pad stores its own note; it returns that pad to the kit's start note plus
 its position. A refused reset shows the engine's reason under the pads and changes nothing.

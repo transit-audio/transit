@@ -184,6 +184,10 @@ pub(super) fn free_bindings(p: &mut PatchV1, set: SliceSet, ids: &[u32]) -> (Vec
         }
     }
     p.zones.retain(|z| !gone.contains(&z.id));
+    for z in &gone {
+        // An emptied zone's controls go with it (#478), as Clear pad's do.
+        p.reset_controls(*z);
+    }
     p.drop_unused_sources();
     pads.sort_unstable();
     (pads, gone.iter().map(|z| z + 1).collect())

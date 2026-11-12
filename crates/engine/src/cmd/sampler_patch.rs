@@ -80,7 +80,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Clear Sampler Zone",
             [],
             None,
-            "{track?, zone: 1-256}: the zone is emptied (its voices fade; its pad is unbound; no file is deleted) → {track, zone}",
+            "{track?, zone: 1-256}: the zone is emptied (its voices fade; its pad is unbound; its zoneNNN_* controls return to their defaults; no file is deleted) → {track, zone}",
             has_selection,
             zone_clear
         ),
@@ -497,6 +497,9 @@ fn zone_clear(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, format!("zone {} is already empty", zone + 1)));
     }
     patch.zones.retain(|z| z.id != zone);
+    // The slot's controls go with the zone in this step (#478): the next sample loaded into the
+    // slot starts from defaults, and undo restores them with the zone.
+    patch.reset_controls(zone);
     if let Some(pad) = patch.pad_of(zone) {
         patch.set_pad(PadEntry { zone: None, ..patch.pad(pad) });
     }
@@ -643,3 +646,6 @@ pub fn load_zone_bytes(e: &mut Engine, t: TrackId, zone: u16, name: &str, bytes:
 #[cfg(test)]
 #[path = "tests_sampler_patch.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "tests_sampler_zone_reset.rs"]
+mod zone_reset_tests;
