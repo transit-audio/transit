@@ -18,7 +18,15 @@ fn counters(published: u64, claimed: u64, inline_pre: u64, unclaimed: u64) -> Qu
 }
 
 fn edge(callbacks: u64, over_budget: u64, holes: u64, q: QueueSnapshot) -> RunEdge {
-    let faults = StripFaults { workers: 8, overrun_blocks: holes * 2, overruns_busy: holes, overruns_late: holes + 1, aux_overruns_busy: holes, aux_holes: holes, ..StripFaults::default() };
+    let faults = StripFaults {
+        workers: 8,
+        overrun_blocks: holes * 2,
+        overruns_busy: holes,
+        overruns_late: holes + 1,
+        aux_overruns_busy: holes,
+        aux_holes: holes,
+        ..StripFaults::default()
+    };
     RunEdge {
         mailbox: Some(Measurement { request: callbacks, complete: true, counters: q }),
         telemetry: CallbackTelemetry {
@@ -40,13 +48,13 @@ fn a_row_is_the_difference_of_its_two_edges() {
     let row = RunRow::between("64 idle", TailPath::Graph, &start, &end);
     assert!(row.valid(), "{:?}", row.problems);
     assert_eq!((row.callbacks, row.over_budget, row.holes, row.aux_busy, row.busy, row.late), (480_000, 364, 4, 4, 4, 4));
-    assert_eq!((row.counters.published, row.counters.claimed, row.counters.inline_pre, row.counters.unclaimed_at_deadline), (10_000, 6_000, 3_000, 1_000));
+    assert_eq!(
+        (row.counters.published, row.counters.claimed, row.counters.inline_pre, row.counters.unclaimed_at_deadline),
+        (10_000, 6_000, 3_000, 1_000)
+    );
     assert_eq!(row.counters.deadline_reclaimed_tail, 500);
     assert_eq!(row.overloads, None, "no backend stats: n/a");
-    assert_eq!(
-        row.table_row(),
-        "| 64 idle | graph | 64 | 480000 | 364 | 2.1 ms | 8 | 4 | 4 | 0 | 4 | 0 | 4 | 0 | 1000 | 500 | 0 | n/a | 0 |"
-    );
+    assert_eq!(row.table_row(), "| 64 idle | graph | 64 | 480000 | 364 | 2.1 ms | 8 | 4 | 4 | 0 | 4 | 0 | 4 | 0 | 1000 | 500 | 0 | n/a | 0 |");
     assert_eq!(TABLE_HEADER[0].matches('|').count(), row.table_row().matches('|').count(), "one cell per column");
     // a: 1000 * 10000 > 10000; b: no late completions; c: 0 * 100 > 10000 is false.
     assert_eq!(row.slice4(), (true, false, false));

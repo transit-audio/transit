@@ -70,7 +70,11 @@ impl StudioApp {
                 if self.measure.phase != Phase::Idle {
                     return Err(format!("a measurement is {} (measure.stop ends it)", self.measure.state()));
                 }
-                let label = p.get("label").and_then(Value::as_str).filter(|l| !l.trim().is_empty()).ok_or("measure.start needs a label, for example \"64 idle\"")?;
+                let label = p
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .filter(|l| !l.trim().is_empty())
+                    .ok_or("measure.start needs a label, for example \"64 idle\"")?;
                 let path = match p.get("tail").and_then(Value::as_str) {
                     Some("serial") => TailPath::Serial,
                     Some("graph") => TailPath::Graph,

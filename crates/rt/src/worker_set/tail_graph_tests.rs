@@ -3,7 +3,7 @@
 
 use super::tests::{Fake, STALL, set_of};
 use super::*;
-use crate::task_graph::{StartAt, EdgeKind, GraphHost, GraphRun, Rendered, Start, TaskGraph, Window, drive};
+use crate::task_graph::{EdgeKind, GraphHost, GraphRun, Rendered, Start, StartAt, TaskGraph, Window, drive};
 
 struct Host {
     set: WorkerSet,
@@ -291,7 +291,6 @@ fn g5_the_no_reclaim_seam_also_suppresses_the_tail_rule() {
     let q = set.queue_snapshot();
     assert_eq!((inlined, q.inline_pre, q.unclaimed_at_deadline, q.deadline_reclaimed_tail), (1, 0, 1, 1));
 }
-
 
 /// #215 item 1, through the race seam: a worker's claim and the callback's deadline reclaim of a
 /// published tail task, in both orders. Worker first: the policy of `claimed_at_deadline` (G10:

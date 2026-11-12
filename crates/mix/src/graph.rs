@@ -171,7 +171,10 @@ pub(crate) fn init_graph_switch() {
             let setting = render_tail_setting(tail.as_deref());
             let graph = GRAPH.load(Ordering::Relaxed);
             if setting == RenderTailSetting::Unrecognized {
-                log::warn!("mix: {RENDER_TAIL_ENV}={:?} not recognized (1 turns the tail graph on, 0 off); treated as unset", tail.unwrap_or_default());
+                log::warn!(
+                    "mix: {RENDER_TAIL_ENV}={:?} not recognized (1 turns the tail graph on, 0 off); treated as unset",
+                    tail.unwrap_or_default()
+                );
             }
             if !graph && setting == RenderTailSetting::On {
                 log::info!("mix: {RENDER_TAIL_ENV}=1 ignored with {RENDER_GRAPH_ENV}=0");
@@ -375,10 +378,7 @@ mod tests {
         ] {
             assert_eq!(tail_switch(setting, graph, default), want, "{setting:?} graph {graph} default {default}");
         }
-        assert_eq!(
-            tail_log_text(false, TailWhy::Default),
-            "mix: the aux and bus tail renders serially on the audio thread (default)"
-        );
+        assert_eq!(tail_log_text(false, TailWhy::Default), "mix: the aux and bus tail renders serially on the audio thread (default)");
         assert_eq!(
             tail_log_text(true, TailWhy::On),
             "mix: the aux and bus tail renders through the task graph on the render workers (TRANSIT_RENDER_TAIL=1)"

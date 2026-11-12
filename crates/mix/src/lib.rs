@@ -91,7 +91,6 @@ mod fm_loop_wrap_tests;
 #[cfg(test)]
 mod frozen_state_tests;
 mod graph;
-mod render_path;
 #[cfg(test)]
 mod grid_end_tests;
 mod hardware;
@@ -100,6 +99,7 @@ mod key;
 #[cfg(test)]
 mod loop_wrap_tests;
 mod low_latency;
+mod render_path;
 pub use low_latency::{SlotLatencies, low_latency_bypass, low_latency_frames};
 mod matrix;
 mod meter_rms;
@@ -168,6 +168,7 @@ pub use external::{ExternalReport, ExternalState, external_report};
 pub use external_midi::{ExternalMidi, external_midi_events};
 #[cfg(feature = "testing")]
 pub use fingerprint::{Fnv, StripPrint};
+pub use graph::TailWhy;
 pub use hardware::{HardwareReport, HardwareState, hardware_report};
 pub use instance::{
     InstanceSpec, NewInstance, create_instance, create_instance_with, creating_instance, creation_line, instance_specs, realtime_instance_specs,
@@ -191,6 +192,7 @@ pub use plan::{
     RenderTarget, Retired, SlotBinding, SlotGen,
 };
 pub use rack::{RACK_SLOT, rack_binding};
+pub use render_path::render_path_text;
 #[cfg(test)]
 use render_pool::flag_value;
 use render_pool::{FORCE_SERIAL, PARALLEL_STRIPS, guarded, init_render_switch, run_strips};
@@ -210,8 +212,6 @@ pub use scope::{INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub, ScopeTap};
 use sink::Sink;
 pub use sink::{MAX_SINK_CHANNELS, SinkPlan, SinkSpec, plan_sinks, unresolved_routes};
 use strip::{LiveInput, StripRender, head_latency, note_insert_latency, process_master, process_strip};
-pub use graph::TailWhy;
-pub use render_path::render_path_text;
 pub use strip_pool::{HELD_SECS, StripFaultsReader};
 pub use touch::TOUCH_RETURN_S;
 use touch::TouchRamps;

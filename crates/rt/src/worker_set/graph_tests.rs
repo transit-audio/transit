@@ -13,7 +13,7 @@
 
 use super::tests::{Behavior, Fake, STALL, set_of, wait_until};
 use super::*;
-use crate::task_graph::{StartAt, GraphHost, GraphRun, Rendered, Start, TaskGraph, Window, drive};
+use crate::task_graph::{GraphHost, GraphRun, Rendered, Start, StartAt, TaskGraph, Window, drive};
 use crate::testing::measure;
 
 /// The test's side of the driver: the fake strips, the edges (to check the publication order),
