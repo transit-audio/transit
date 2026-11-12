@@ -17,22 +17,24 @@ const FOOTER: TypeRole = NUMBER;
 /// Alt+click on Ref stores the current monitor level as the reference.
 pub(super) fn monitor_toggles(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect, cells: [Rect; 3], sl: &mut StripLayout) {
     let m = app.ui.monitor.sane();
+    let no_mono = app.mono_unavailable();
     let items = [
-        ("Mono", Role::Monitor, m.mono, "mono", crate::help::Id::MixerStripMono),
+        ("Mono", Role::Monitor, m.mono && no_mono.is_none(), "mono", crate::help::Id::MixerStripMono),
         ("Dim", Role::Mute, m.dim, "dim", crate::help::Id::MixerStripDim),
         ("Ref", Role::Monitor, m.reference, "ref", crate::help::Id::MixerStripRef),
     ];
     for ((label, role, on, key, help), r) in items.into_iter().zip(cells) {
         let resp = ui.interact(r.intersect(clip), ui.id().with(("main_monitor", key)), Sense::click());
-        let lay = toggle::paint(p, r, label, role, on, true);
+        let lay = toggle::paint(p, r, label, role, on, key != "mono" || no_mono.is_none());
         crate::help::hover(ui, &resp, help);
         let tip = match key {
             "mono" => "Mono: hear the mix summed to mono. Never in a bounce",
             "dim" => "Dim: the monitor level 20 dB down. Never in a bounce",
             _ => "Ref: hear the stored reference level. Alt+click stores the current monitor level as the reference",
         };
-        let resp = resp.on_hover_text(tip);
-        if resp.clicked() {
+        let off_for = if key == "mono" { no_mono.as_deref() } else { None };
+        let resp = resp.on_hover_text(off_for.unwrap_or(tip));
+        if resp.clicked() && off_for.is_none() {
             let alt = ui.input(|i| i.modifiers.alt);
             let params = if key == "ref" && alt { json!({"store_ref": true}) } else { json!({ key: !on }) };
             let _ = app.run("mix.monitor", params);

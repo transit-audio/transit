@@ -199,3 +199,25 @@ fn the_toggles_reach_the_player_and_the_footer_follows_the_live_loudness() {
     step(&mut app, &ctx, &mut time, 60);
     assert_ne!(main_strip(&app).lufs_text, "—");
 }
+
+#[test]
+fn mono_is_unavailable_with_a_reason_on_a_main_bus_wider_than_stereo() {
+    let (mut app, ctx, mut time, _) = mixer_app();
+    full_mixer(&mut app, &ctx, &mut time);
+    let mono = |app: &StudioApp| toggle(&main_strip(app), "Mono").available;
+    assert!(mono(&app), "a stereo main bus can fold to mono");
+    app.run("mix.monitor", json!({"mono": true})).unwrap();
+    app.engine.session_mut().outputs[0].format = transit_model::ChannelFormat::Surround51;
+    frames(&mut app, &ctx, 5, &mut time);
+    let lay = main_strip(&app);
+    let t = toggle(&lay, "Mono");
+    assert!(!t.available && !t.on, "a stored Mono does not read as active on a wider bus");
+    let err = app.run("mix.monitor", json!({"mono": true})).unwrap_err().to_string();
+    assert!(err.contains("stereo main bus only") && err.contains("6 channels"), "{err}");
+    click(&mut app, mid(lay.mono));
+    frames(&mut app, &ctx, 5, &mut time);
+    assert!(app.ui.monitor.mono, "the ghosted toggle does nothing (the stored value stays)");
+    // Turning it off stays possible, and the other toggles are unaffected.
+    app.run("mix.monitor", json!({"mono": false, "dim": true})).unwrap();
+    assert!(!app.ui.monitor.mono && app.ui.monitor.dim);
+}

@@ -86,6 +86,13 @@ impl StudioApp {
         }
     }
 
+    /// Why Mono cannot act, when the session's main bus is wider than stereo (the monitor path
+    /// folds a stereo pair only; a summing rule for a surround main bus is not defined), else `None`.
+    pub(crate) fn mono_unavailable(&self) -> Option<String> {
+        let channels = self.engine.session().main_format().channels();
+        (channels > 2).then(|| format!("Mono acts on a stereo main bus only; this session's main bus has {channels} channels"))
+    }
+
     /// `mix.monitor`: sets any of Mono, Dim, Ref and the monitor level, and with `store_ref` stores
     /// the monitor level (after `level_db`, when both are given) as the reference. A preference,
     /// not a session edit: no undo step, the session stays clean. Answers with the state.
@@ -105,6 +112,11 @@ impl StudioApp {
                 _ => return Err(format!("{id}: `level_db` must be a number of dB from \"-inf\" to 0")),
             },
         };
+        if mono == Some(true)
+            && let Some(why) = self.mono_unavailable()
+        {
+            return Err(format!("{id}: {why}"));
+        }
         let m = &mut self.ui.monitor;
         if let Some(v) = mono {
             m.mono = v;
