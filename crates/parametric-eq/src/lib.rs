@@ -30,16 +30,23 @@
 
 extern crate alloc;
 
+mod band;
 mod butterworth;
+mod chain;
 mod design;
+mod gain_match;
 mod math;
 mod prototype;
 mod response;
 mod section;
+mod smooth;
+mod weights;
 
 #[cfg(test)]
 mod tests;
 
+pub use chain::ParametricEq;
+pub use gain_match::gain_match_db;
 pub use response::{band_response_db, response_db};
 
 /// Band slots of the device (decision 5.1). A band's number on the panel is its index plus one.
