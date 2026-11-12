@@ -5,8 +5,8 @@
 //! cut at 40 Hz, then 30 s of silence, leave every f64 state exactly zero (negative control, recorded:
 //! without the 1e-30 flush a subnormal state remains); silence in gives zero out after a reset at once.
 
-use super::util::{band, noise};
 use super::proc::{eq, fingerprint, run};
+use super::util::{band, noise};
 use crate::{BandParams, BandType, ParametricEq, Slope};
 
 fn states(e: &ParametricEq) -> impl Iterator<Item = f64> + '_ {

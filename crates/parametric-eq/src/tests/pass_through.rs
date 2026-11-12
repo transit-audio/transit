@@ -5,8 +5,8 @@
 //! Negative control (recorded): computing identity bands instead of skipping them (designing a 0 dB
 //! band by the fit) breaks bit-exactness. IEEE-exact; no platform math reaches the output.
 
-use super::util::{band, noise};
 use super::proc::{eq, run};
+use super::util::{band, noise};
 use crate::{BandType, Placement};
 
 fn hostile_mix(io: &mut [Vec<f32>]) {

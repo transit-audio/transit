@@ -13,8 +13,8 @@
 //! their measured excess plus 0.6 dB, so a regression still fails and their negative control (no
 //! smoothing) fails by far more.
 
-use super::util::band;
 use super::proc::eq;
+use super::util::band;
 use crate::{BandParams, BandType, ParametricEq, Placement, Slope};
 
 const FS: f64 = 48_000.0;

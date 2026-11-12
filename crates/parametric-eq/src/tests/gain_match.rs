@@ -16,8 +16,8 @@
 //! The examples depend on the crate's `math` (`exp2`, `log2`) and are compared with tolerances; the
 //! weight table is literals and is pinned bit for bit.
 
-use super::util::{band, noise};
 use super::proc::{eq, run};
+use super::util::{band, noise};
 use crate::gain_match::{grid, match_of_powers};
 use crate::prototype::Prototype;
 use crate::weights::{POINTS, WEIGHTS};

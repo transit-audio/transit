@@ -5,8 +5,8 @@
 //! frame every block size shares. Negative control (recorded): redesigning at block starts instead of
 //! on the sample clock differs at block size 7. In-process comparison.
 
-use super::util::{band, noise};
 use super::proc::{eq, fingerprint};
+use super::util::{band, noise};
 use crate::{BandParams, BandType, ParametricEq, Placement, Slope};
 
 fn first(e: &mut ParametricEq) {

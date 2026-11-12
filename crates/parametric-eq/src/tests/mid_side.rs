@@ -11,8 +11,8 @@
 //!
 //! The round trip and the pass-through are IEEE-exact (additions, subtractions and halvings).
 
-use super::util::{Rng, band, noise};
 use super::proc::{eq, run};
+use super::util::{Rng, band, noise};
 use crate::chain::{decode_ms, encode_ms};
 use crate::{BandType, Placement};
 
