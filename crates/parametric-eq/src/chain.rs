@@ -2,14 +2,14 @@
 //! clock, a left/right stage then a mid/side stage, the Output gain and the applied gain match, all in
 //! f64 from input to output.
 //!
-//! Every 16 samples of the clock a control tick advances the smoothers, redesigns moving bands,
-//! decides ramps and configuration switches, decides whether the mid/side stage runs, and advances
-//! the gain-match refresh. Between ticks the bands run band by band over the samples, in band-number
+//! Every 16 samples of the clock a control tick advances the smoothers, redesigns moving bands (whose
+//! coefficients then glide per sample to the new design, see `band`), decides ramps and configuration
+//! switches, decides whether the mid/side stage runs, and advances the gain-match refresh. Between ticks the bands run band by band over the samples, in band-number
 //! order within each stage; the arithmetic of every sample is the same whatever the host block size.
 
 use alloc::vec::Vec;
 
-use crate::band::Band;
+use crate::band::{Band, Interp};
 use crate::gain_match::{SHARE, Scheduler};
 use crate::math;
 use crate::smooth::{Smoother, time_coef};
@@ -40,6 +40,7 @@ pub struct ParametricEq {
     pub(crate) match_gain: Smoother,
     pub(crate) gm: Scheduler,
     work: Vec<[f64; TICK]>,
+    interp: alloc::boxed::Box<Interp>,
     /// Test seam: a build with the mid/side stage removed (Evidence "Mid/side exactness").
     #[cfg(test)]
     pub(crate) no_stage2: bool,
@@ -82,6 +83,7 @@ impl ParametricEq {
             match_gain: Smoother::new(1.0),
             gm: Scheduler::new(),
             work: Vec::new(),
+            interp: alloc::boxed::Box::default(),
             #[cfg(test)]
             no_stage2: false,
         }
@@ -296,13 +298,13 @@ impl ParametricEq {
                 self.control_tick();
             }
             let len = (TICK - phase).min(frames - done);
-            self.run_chunk(io, nch, done, len);
+            self.run_chunk(io, nch, done, len, phase);
             self.clock += len as u64;
             done += len;
         }
     }
 
-    fn run_chunk<C: AsMut<[f32]>>(&mut self, io: &mut [C], nch: usize, off: usize, len: usize) {
+    fn run_chunk<C: AsMut<[f32]>>(&mut self, io: &mut [C], nch: usize, off: usize, len: usize, phase: usize) {
         for (buf, ch) in self.work.iter_mut().zip(io.iter_mut()) {
             for (w, &x) in buf[..len].iter_mut().zip(&ch.as_mut()[off..off + len]) {
                 let x = f64::from(x);
@@ -319,12 +321,13 @@ impl ParametricEq {
                 continue;
             }
             b.wet(&mut wet[..len], ramp_len);
+            b.fill(phase, len, &mut self.interp);
             match b.place {
-                Placement::Left if stereo => b.run(0, &mut self.work[0][..len], &wet[..len]),
-                Placement::Right if stereo => b.run(1, &mut self.work[1][..len], &wet[..len]),
+                Placement::Left if stereo => b.run(0, &mut self.work[0][..len], &wet[..len], &self.interp),
+                Placement::Right if stereo => b.run(1, &mut self.work[1][..len], &wet[..len], &self.interp),
                 Placement::Stereo => {
                     for (ch, buf) in self.work.iter_mut().enumerate().take(nch) {
-                        b.run(ch, &mut buf[..len], &wet[..len]);
+                        b.run(ch, &mut buf[..len], &wet[..len], &self.interp);
                     }
                 }
                 _ => {}
@@ -344,10 +347,11 @@ impl ParametricEq {
                 continue;
             }
             b.wet(&mut wet[..len], ramp_len);
+            b.fill(phase, len, &mut self.interp);
             match b.place {
                 // On mono a Mid band acts on the one channel (decision 4).
-                Placement::Mid if encode || self.channels == 1 => b.run(0, &mut self.work[0][..len], &wet[..len]),
-                Placement::Side if encode => b.run(1, &mut self.work[1][..len], &wet[..len]),
+                Placement::Mid if encode || self.channels == 1 => b.run(0, &mut self.work[0][..len], &wet[..len], &self.interp),
+                Placement::Side if encode => b.run(1, &mut self.work[1][..len], &wet[..len], &self.interp),
                 _ => {}
             }
         }
@@ -391,6 +395,11 @@ impl ParametricEq {
                 h.write_u64(s.target.to_bits());
             }
             h.write_u32(b.ramp.pos);
+            h.write_u8(b.interp as u8);
+            for s in &b.prev.sos[..b.prev.n_sos] {
+                h.write_u64(s.a1.to_bits());
+                h.write_u64(s.m1.to_bits());
+            }
             h.write_i8(b.ramp.dir);
             h.write_u8(b.processed as u8);
             h.write_u8(b.kind as u8);

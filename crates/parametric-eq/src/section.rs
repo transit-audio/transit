@@ -87,6 +87,23 @@ impl Svf {
         Self { g, k, m0: n0 / c0, m1: n1 * g / c0, m2: n2 / c2, a1, a2, a3: g * a2 }
     }
 
+    /// The coefficients a fraction `t` of the way from `a` to `b`, each linearly (the per-sample glide
+    /// between two control-rate designs).
+    #[inline]
+    pub(crate) fn lerp(a: &Self, b: &Self, t: f64) -> Self {
+        let l = |x: f64, y: f64| x + (y - x) * t;
+        Self {
+            g: l(a.g, b.g),
+            k: l(a.k, b.k),
+            m0: l(a.m0, b.m0),
+            m1: l(a.m1, b.m1),
+            m2: l(a.m2, b.m2),
+            a1: l(a.a1, b.a1),
+            a2: l(a.a2, b.a2),
+            a3: l(a.a3, b.a3),
+        }
+    }
+
     /// One sample: the SVF's unit low, band (before `k`) and high outputs mixed by `m0`, `m1`, `m2`.
     #[inline]
     pub(crate) fn tick(&self, st: &mut [f64; 2], x: f64) -> f64 {
@@ -116,6 +133,13 @@ impl OnePole {
         let [d0, d1] = f.d;
         let g = d0 / d1;
         Self { big_g: g / (1.0 + g), m0: n0 / d0, m1: n1 / d1 }
+    }
+
+    /// The coefficients a fraction `t` of the way from `a` to `b`.
+    #[inline]
+    pub(crate) fn lerp(a: &Self, b: &Self, t: f64) -> Self {
+        let l = |x: f64, y: f64| x + (y - x) * t;
+        Self { big_g: l(a.big_g, b.big_g), m0: l(a.m0, b.m0), m1: l(a.m1, b.m1) }
     }
 
     #[inline]

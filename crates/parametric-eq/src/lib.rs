@@ -10,7 +10,8 @@
 //! - **Realization**: every section is a 64-bit trapezoidal state-variable filter with mixed outputs
 //!   (decision 2.3); the whole chain runs in f64 from input to output.
 //! - **The processor** ([`ParametricEq`]): 24 band slots with smoothing in the log2 and dB domains,
-//!   designs on a 16-sample control clock, 10 ms wet ramps for discrete changes, identity skipping,
+//!   designs on a 16-sample control clock with the coefficients gliding per sample between designs,
+//!   10 ms wet ramps for discrete changes, identity skipping,
 //!   a left/right stage then a mid/side stage, input sanitizing, the Output gain and the applied gain
 //!   match. Everything runs on the processor's own sample clock, so the output does not depend on the
 //!   host block size.

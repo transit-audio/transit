@@ -11,6 +11,7 @@ mod feasibility;
 mod flat_tilt;
 mod full_sweep;
 mod gain_match;
+mod glide;
 mod hostile;
 mod matching;
 mod mid_side;

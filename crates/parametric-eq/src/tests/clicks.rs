@@ -5,13 +5,9 @@
 //! output's steady peaks before and after, in the 50 ms after the step. Negative controls (recorded):
 //! each parameter's smoothing or ramp set to 0. Deterministic, in samples.
 //!
-//! Two steps do not meet the criterion under decision 3.1's design interval (sections redesigned every
-//! 16 samples): Gain −30 to +30 dB exceeds the threshold by 16.4 dB and Q 0.1 to 40 by 20.5 dB,
-//! because each redesign steps the mixed outputs. With a design every sample both pass (15 and 12 dB
-//! under); every 4 samples they still exceed (5.7 and 10.0 dB). That is a contradiction between
-//! decisions 3.1 and 3.3, reported in the result note; until it is decided these two steps are held to
-//! their measured excess plus 0.6 dB, so a regression still fails and their negative control (no
-//! smoothing) fails by far more.
+//! Gain −30 to +30 dB and Q 0.1 to 40 meet the criterion because the coefficients glide per sample
+//! between the 16-sample designs; with the coefficients stepped once per design they exceed it by 16.4
+//! and 20.5 dB (the result note's click experiment).
 
 use super::proc::eq;
 use super::util::band;
@@ -92,15 +88,9 @@ fn base() -> BandParams {
 }
 
 fn check(name: &str, setup: impl Fn(&mut ParametricEq), step: impl Fn(&mut ParametricEq)) {
-    check_within(name, 0.0, setup, step);
-}
-
-/// The criterion with `excess_db` above the threshold allowed (0 for the record's criterion).
-fn check_within(name: &str, excess_db: f64, setup: impl Fn(&mut ParametricEq), step: impl Fn(&mut ParametricEq)) {
     let (worst, threshold) = criterion(setup, step);
     eprintln!("{name:<32} worst {:>7.2} dB re threshold", 20.0 * (worst / threshold).log10());
-    let limit = threshold * 10f64.powf(excess_db / 20.0);
-    assert!(worst <= limit, "{name}: {worst:e} above {limit:e}");
+    assert!(worst <= threshold, "{name}: {worst:e} above {threshold:e}");
 }
 
 #[test]
@@ -111,12 +101,12 @@ fn frequency_steps_are_click_free() {
 
 #[test]
 fn gain_steps_are_click_free() {
-    check_within("gain -30 -> +30 dB", 17.0, |e| e.set_band(0, BandParams { gain_db: -30.0, ..base() }), |e| e.set_gain(0, 30.0));
+    check("gain -30 -> +30 dB", |e| e.set_band(0, BandParams { gain_db: -30.0, ..base() }), |e| e.set_gain(0, 30.0));
 }
 
 #[test]
 fn q_steps_are_click_free() {
-    check_within("Q 0.1 -> 40", 21.1, |e| e.set_band(0, BandParams { q: 0.1, ..base() }), |e| e.set_q(0, 40.0));
+    check("Q 0.1 -> 40", |e| e.set_band(0, BandParams { q: 0.1, ..base() }), |e| e.set_q(0, 40.0));
 }
 
 #[test]
