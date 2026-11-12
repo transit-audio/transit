@@ -5,6 +5,8 @@
 
 #![allow(dead_code)]
 
+pub mod dd;
+
 /// Points spread over each function's useful domain (ADR 0055, 2.3).
 pub const N: usize = 4096;
 
