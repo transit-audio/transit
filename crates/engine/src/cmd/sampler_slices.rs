@@ -31,7 +31,7 @@ use crate::cmd;
 use serde_json::json;
 use transit_model::Session;
 use transit_model::sampler_loops::{DerivedRegion, derived_region, write_region};
-use transit_model::sampler_patch::{MAX_SLICES, Markers, Ownership, PadEntry, PatchV1, SliceLoop, SliceMode, SliceSet};
+use transit_model::sampler_patch::{MAX_SLICES, Markers, PadEntry, PatchV1, SliceLoop, SliceMode, SliceSet};
 use transit_model::slicing::{self, ClampedAt, FULL_TEXT, MarkerError, SnapError};
 
 /// The longest marker label, in characters (after trimming).
@@ -241,7 +241,7 @@ fn slice_loop(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, "the patch already has a slice loop (one loop per patch)"));
     }
     let (sid, ownership) = match source_param(e, id, p, &patch)? {
-        NewSource::Session(sid) => (sid, Ownership::Managed),
+        NewSource::Session(sid, ownership) => (sid, ownership),
         NewSource::Audio(audio, ownership) => (add_audio(e, audio, ownership), ownership),
     };
     let frames = e.session().pool.get(sid).map_or(0, |a| a.frames() as u64);

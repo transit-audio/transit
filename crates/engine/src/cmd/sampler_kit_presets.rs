@@ -505,5 +505,8 @@ pub(super) fn prune(e: &mut Engine, old: &[SourceId]) {
 #[path = "tests_sampler_kit_presets_evidence.rs"]
 mod evidence;
 #[cfg(test)]
+#[path = "tests_sampler_source_kind.rs"]
+mod source_kind_tests;
+#[cfg(test)]
 #[path = "tests_sampler_kit_presets.rs"]
 mod tests;

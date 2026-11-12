@@ -219,7 +219,7 @@ fn prepare(e: &mut Engine, t: TrackId, folder: &std::path::Path, preview: bool, 
             files::regular(path).map_err(|err| refused(err.to_string()))?;
             match source_param(e, ID, &json!({"path": path, "copy": false}), &patch).map_err(|err| refused(err.to_string()))? {
                 NewSource::Audio(audio, ownership) => add_audio(e, audio, ownership),
-                NewSource::Session(sid) => sid,
+                NewSource::Session(sid, _) => sid,
             }
         };
         let frames = if preview { rows[i]["frames"].as_u64().unwrap_or(0) } else { e.session().pool.get(sid).map_or(0, |a| a.frames() as u64) };

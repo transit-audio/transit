@@ -15,7 +15,8 @@
 //!   from the session's folder; every path goes through the checked file access); `import` takes a
 //!   prepared asynchronous import (`file.prepare_import`). A file is referenced where it is by
 //!   default (ADR 0041's save model: its path is kept and never rewritten by a save); `copy: true`
-//!   makes it the session's own audio, written into `Audio Files/` like any import. Dropped bytes
+//!   makes it the session's own audio, written into `Audio Files/` like any import. A source given
+//!   by id keeps its own kind ([`source_kind`]): a referenced file stays referenced. Dropped bytes
 //!   have no durable path and are always the session's own ([`load_zone_bytes`]). Clearing a zone
 //!   never deletes a file.
 //! - **Admission** (ADR 0041 "Capacities and admission"): a source holds at most 30 seconds and
@@ -333,10 +334,20 @@ pub(crate) fn frames_at(frames: u64, from: u32, to: u32) -> Option<u64> {
 
 /// Where a zone's new source comes from.
 pub(super) enum NewSource {
-    /// An existing session source.
-    Session(SourceId),
+    /// An existing session source, with its own kind ([`source_kind`]).
+    Session(SourceId, Ownership),
     /// Decoded audio to add, with the path it keeps (`None`: managed `Audio Files/` audio).
     Audio(crate::io::PreparedAudio, Ownership),
+}
+
+/// The kind a session source keeps when a zone or the slice loop takes it by id (#471): a file
+/// the session holds where it is (an absolute path, and nothing for a save to write) is
+/// referenced, as `add_audio` adds one; anything else is managed: the session's own `Audio Files/`
+/// audio (a path relative to the session folder), or audio a save has still to write (`unsaved`,
+/// such as a timeline import or dropped bytes). The session's save keeps a referenced Sampler
+/// source's path by the same two facts, and kit save chooses its path form by the stored path.
+pub(super) fn source_kind(src: &transit_model::Source) -> Ownership {
+    if !src.unsaved && Path::new(&src.path).is_absolute() { Ownership::Referenced } else { Ownership::Managed }
 }
 
 pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &PatchV1) -> Result<NewSource> {
@@ -367,7 +378,7 @@ pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &Patch
             .map_err(|m| bad(id, m))?;
         let adding = if admitted.sources.iter().any(|r| r.source == sid) { 0 } else { bytes };
         admit_patch(admitted, s, adding).map_err(|m| bad(id, m))?;
-        return Ok(NewSource::Session(sid));
+        return Ok(NewSource::Session(sid, source_kind(src)));
     }
     if let Some(path) = str_param(p, "path") {
         let abs = resolve_path(e, id, path)?;
@@ -438,7 +449,7 @@ fn zone_source(e: &mut Engine, p: &Value) -> Result<Value> {
     // Settings parse before any file is read.
     apply_settings(id, &ZoneEntry::default(), p)?;
     let (sid, ownership) = match source_param(e, id, p, &patch)? {
-        NewSource::Session(sid) => (sid, Ownership::Managed),
+        NewSource::Session(sid, ownership) => (sid, ownership),
         NewSource::Audio(prepared, ownership) => (add_audio(e, prepared, ownership), ownership),
     };
     let s = e.session();
