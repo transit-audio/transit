@@ -204,3 +204,22 @@ fn the_live_loudness_reads_the_mix_as_the_offline_integrator_does_and_resets() {
     assert_eq!(shared.monitor.integrated_lufs(), None, "a start from a stop resets it");
     control.retire(audio.plans, audio.actions);
 }
+
+#[test]
+fn the_live_loudness_measures_the_program_without_the_metronome_click() {
+    // The same program with the click off and on: the click is heard at the device, never in the figure.
+    let run = |click: bool| {
+        let mut session = sine_session(-20.0, 6);
+        session.edit.click = click;
+        let (control, mut audio, shared) = playing(session);
+        let out = callbacks(&mut audio, &shared, 500, |_, _| ());
+        let live = shared.monitor.integrated_lufs().expect("a figure after five seconds");
+        control.retire(audio.plans, audio.actions);
+        (live, out)
+    };
+    let (quiet, plain) = run(false);
+    let (clicked, with_click) = run(true);
+    let heard = plain.iter().zip(&with_click).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(heard > 0.01, "the click is audible at the device: {heard}");
+    assert!((clicked - quiet).abs() < 1e-3, "click on {clicked} LUFS, off {quiet} LUFS");
+}

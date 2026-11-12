@@ -946,6 +946,13 @@ impl MixEngine {
         self.plan.as_deref().map_or(ChannelFormat::Stereo, |p| p.tables.main_fmt)
     }
 
+    /// Main's block as it was before the metronome click joined it, when the last rendered block
+    /// had a click (`None` otherwise: Main itself is the program). The live loudness reads this
+    /// so the figure measures the program, as a render does (#399). Real-time safe.
+    pub fn program_before_click(&self) -> Option<&[Vec<f32>]> {
+        self.plan.as_deref().filter(|p| p.tables.clicked).map(|p| p.tables.pre_click.as_slice())
+    }
+
     /// Channels of the main mix of the active plan.
     pub fn main_channels(&self) -> usize {
         self.plan.as_deref().map_or(MAIN_CHANNELS, |p| p.tables.main.len())

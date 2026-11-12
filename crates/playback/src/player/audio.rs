@@ -923,7 +923,8 @@ impl Audio {
         // monitor path join it (#366). A start from a stop resets it.
         let channels = self.plans.engine().main_channels();
         let running = state.playing || state.count_in.is_some();
-        self.monitor.measure(&self.shared.monitor, self.plans.output(), channels, frames, running);
+        let program = self.plans.engine().program_before_click().unwrap_or_else(|| self.plans.output());
+        self.monitor.measure(&self.shared.monitor, program, channels, frames, running);
         // A real-time render keeps Main and the External Instruments' returns of this block, as
         // live playback renders and reads them (ADR 0027): a copy into its ring, nothing more.
         if let Some(tap) = &self.render_tap {

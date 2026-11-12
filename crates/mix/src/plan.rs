@@ -176,6 +176,11 @@ pub(crate) struct PlanTables {
     pub(crate) tracks: Box<[(TrackId, u16)]>,
     pub(crate) busses: BusTable,
     pub(crate) main: Vec<Vec<f32>>,
+    /// Main as it was before the metronome click joined it, for the block that had a click: the
+    /// live loudness measures the program, as a render does (#399). Sized like `main`.
+    pub(crate) pre_click: Vec<Vec<f32>>,
+    /// The last block mixed a click into `main`, so `pre_click` holds that block's program.
+    pub(crate) clicked: bool,
     pub(crate) main_fmt: ChannelFormat,
     pub(crate) main_meter: StripMeter,
     /// The output paths the session routes to, as laid out for this machine (ADR 0015).

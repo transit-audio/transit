@@ -492,7 +492,7 @@ impl MixEngine {
         if tail_eligible && !tail_done {
             tables.prepare_block(s, pos, frames, sample_rate, !self.input.is_empty(), status, self.pool.as_ref());
         }
-        let PlanTables { strips, phase1, aux_end, layers, keys, graph, busses, main, main_fmt, main_meter, sinks, .. } = tables;
+        let PlanTables { strips, phase1, aux_end, layers, keys, graph, busses, main, main_fmt, main_meter, sinks, pre_click, clicked, .. } = tables;
         let (phase1, aux_end) = (*phase1, *aux_end);
         let main_fmt = *main_fmt;
         let n_strips = strips.len();
@@ -668,7 +668,17 @@ impl MixEngine {
             st.meter.plugin_failures = st.failures;
         }
         mark(Phase::Mixdown, None);
-        if self.metronome && !self.monitor_only && s.edit.click && (!s.edit.flag("click.only_during_record") || self.recording) {
+        let ticking = self.metronome && !self.monitor_only && s.edit.click && (!s.edit.flag("click.only_during_record") || self.recording);
+        // The program before the click, kept for the live loudness (a copy into a buffer sized
+        // with Main; nothing when no click sounds this block).
+        *clicked = ticking || self.count_in.is_some();
+        if *clicked {
+            for (to, from) in pre_click.iter_mut().zip(main.iter()) {
+                let n = frames.min(to.len()).min(from.len());
+                to[..n].copy_from_slice(&from[..n]);
+            }
+        }
+        if ticking {
             click::render(s, pos, frames, main, self.metronome_gain);
         }
         if let Some(c) = self.count_in {

@@ -232,6 +232,7 @@ impl PlanCompiler {
         busses.dedup_by_key(|(id, _)| *id);
         tables.busses = BusTable(busses);
         tables.main = vec![vec![0.0; block]; main_ch];
+        tables.pre_click = vec![vec![0.0; block]; main_ch];
         tables.sinks = desc.sinks.iter().map(|sp| Sink::new(sp, block)).collect();
         tables.io = Arc::clone(&self.io);
         tables.main_meter = StripMeter::prepared(main_ch, self.target.sample_rate);
