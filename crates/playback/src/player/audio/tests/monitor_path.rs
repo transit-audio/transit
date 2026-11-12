@@ -205,21 +205,46 @@ fn the_live_loudness_reads_the_mix_as_the_offline_integrator_does_and_resets() {
     control.retire(audio.plans, audio.actions);
 }
 
+/// The live loudness figure and the device output of `session` over five seconds of callbacks, with
+/// the metronome click on or off.
+fn loudness_with_click(mut session: Session, click: bool) -> (f32, Vec<f32>) {
+    session.edit.click = click;
+    let (control, mut audio, shared) = playing(session);
+    let out = callbacks(&mut audio, &shared, 500, |_, _| ());
+    let live = shared.monitor.integrated_lufs().expect("a figure after five seconds");
+    control.retire(audio.plans, audio.actions);
+    (live, out)
+}
+
+/// The largest difference between two device outputs.
+fn most_different(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max)
+}
+
 #[test]
 fn the_live_loudness_measures_the_program_without_the_metronome_click() {
     // The same program with the click off and on: the click is heard at the device, never in the figure.
-    let run = |click: bool| {
-        let mut session = sine_session(-20.0, 6);
-        session.edit.click = click;
-        let (control, mut audio, shared) = playing(session);
-        let out = callbacks(&mut audio, &shared, 500, |_, _| ());
-        let live = shared.monitor.integrated_lufs().expect("a figure after five seconds");
-        control.retire(audio.plans, audio.actions);
-        (live, out)
-    };
-    let (quiet, plain) = run(false);
-    let (clicked, with_click) = run(true);
-    let heard = plain.iter().zip(&with_click).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    let (quiet, plain) = loudness_with_click(sine_session(-20.0, 6), false);
+    let (clicked, with_click) = loudness_with_click(sine_session(-20.0, 6), true);
+    let heard = most_different(&plain, &with_click);
     assert!(heard > 0.01, "the click is audible at the device: {heard}");
-    assert!((clicked - quiet).abs() < 1e-3, "click on {clicked} LUFS, off {quiet} LUFS");
+    assert_eq!(clicked.to_bits(), quiet.to_bits(), "click on {clicked} LUFS, off {quiet} LUFS");
+}
+
+#[test]
+fn the_figure_without_the_click_holds_with_tempo_events_inside_the_callbacks() {
+    // A tempo event every 30 ticks (about 15 ms) splits most 10 ms callbacks into sub-blocks, each
+    // rendered and clicked on its own; the figure still reads the program of every one of them.
+    let session = || {
+        let mut s = sine_session(-20.0, 6);
+        for k in 1..=400 {
+            s.tempo.set_tempo(k * 30, if k % 2 == 0 { 120.0 } else { 121.0 }).unwrap();
+        }
+        s
+    };
+    let (quiet, plain) = loudness_with_click(session(), false);
+    let (clicked, with_click) = loudness_with_click(session(), true);
+    let heard = most_different(&plain, &with_click);
+    assert!(heard > 0.01, "the click is audible at the device: {heard}");
+    assert_eq!(clicked.to_bits(), quiet.to_bits(), "click on {clicked} LUFS, off {quiet} LUFS");
 }

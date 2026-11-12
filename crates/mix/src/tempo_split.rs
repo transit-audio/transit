@@ -31,6 +31,8 @@ impl MixEngine {
                 (budget, _) => start + budget.unwrap_or_else(|| pool.strip_budget(frames, rate)).min(std::time::Duration::from_secs(3600)),
             }
         });
+        // The program-before-click copy accumulates over the sub-blocks below.
+        self.forget_program_before_click();
         let mut offset = 0;
         loop {
             let at = pos.saturating_add(offset as i64);

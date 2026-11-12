@@ -669,13 +669,15 @@ impl MixEngine {
         }
         mark(Phase::Mixdown, None);
         let ticking = self.metronome && !self.monitor_only && s.edit.click && (!s.edit.flag("click.only_during_record") || self.recording);
-        // The program before the click, kept for the live loudness (a copy into a buffer sized
-        // with Main; nothing when no click sounds this block).
-        *clicked = ticking || self.count_in.is_some();
-        if *clicked {
-            for (to, from) in pre_click.iter_mut().zip(main.iter()) {
-                let n = frames.min(to.len()).min(from.len());
-                to[..n].copy_from_slice(&from[..n]);
+        // The program before the click, kept for the live loudness: this sub-block's span of Main
+        // copied into a buffer sized with Main, at the offset it has in the callback, on every
+        // sub-block (a click may start part way through a callback). `clicked` accumulates over the
+        // callback; `render_active` clears it first.
+        *clicked |= ticking || self.count_in.is_some();
+        for (to, from) in pre_click.iter_mut().zip(main.iter()) {
+            let n = frames.min(from.len()).min(to.len().saturating_sub(offset));
+            if let Some(dst) = to.get_mut(offset..offset + n) {
+                dst.copy_from_slice(&from[..n]);
             }
         }
         if ticking {

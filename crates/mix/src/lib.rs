@@ -953,6 +953,14 @@ impl MixEngine {
         self.plan.as_deref().filter(|p| p.tables.clicked).map(|p| p.tables.pre_click.as_slice())
     }
 
+    /// Forgets the saved program before the click: nothing was rendered, so the live loudness reads
+    /// Main itself. Real-time safe.
+    pub fn forget_program_before_click(&mut self) {
+        if let Some(p) = self.plan.as_deref_mut() {
+            p.tables.clicked = false;
+        }
+    }
+
     /// Channels of the main mix of the active plan.
     pub fn main_channels(&self) -> usize {
         self.plan.as_deref().map_or(MAIN_CHANNELS, |p| p.tables.main.len())

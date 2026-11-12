@@ -830,6 +830,8 @@ impl Audio {
                 channel.iter_mut().take(frames).for_each(|sample| *sample = 0.0);
             }
             self.clear_meters();
+            // The loudness reads the silent output, not the last good block's program.
+            self.mix.forget_program_before_click();
             return;
         }
         let target = self.mix.active().target;
