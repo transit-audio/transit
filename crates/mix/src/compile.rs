@@ -821,7 +821,7 @@ impl PlanCompiler {
             ));
             for (key, kind, ins) in slot_keys(t, &clips) {
                 let Some(spec) = specs.get(&key) else { continue };
-                let params = ins.map_or(0, |i| i.params.len());
+                let params = ins.map_or(0, |i| crate::automation::applied_len(t, crate::automation::lane_slot(key.1), i));
                 desc.slots.push((
                     key,
                     kind,
@@ -994,7 +994,7 @@ impl PlanCompiler {
                     kind,
                     index: u16::try_from(index).unwrap_or(u16::MAX),
                     spec: spec.clone(),
-                    params: ins.map_or(0, |i| i.params.len()),
+                    params: ins.map_or(0, |i| crate::automation::applied_len(t, crate::automation::lane_slot(key.1), i)),
                     plan: SlotPlan::Absent,
                     latency: 0,
                 };

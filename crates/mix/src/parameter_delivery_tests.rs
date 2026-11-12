@@ -159,3 +159,38 @@ fn own_bypassed_edits_wait_while_other_instance_confirms_without_allocation() {
     assert_eq!(second, ParameterDelivery::Pending);
     assert!(heap.is_zero(), "per-instance acknowledgment: {heap:?}");
 }
+
+/// #296: a hosted insert's map starts empty and holds only parameters set statically. A lane on
+/// a parameter the map never held must still reach the plug-in, with a map that fits the inline
+/// cache and with one that needs the compiler's prepared storage, allocation-free.
+#[test]
+fn a_lane_on_a_parameter_absent_from_the_stored_map_reaches_the_plugin() {
+    for stored in [0, APPLIED_INLINE] {
+        let mut s = Session::default();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+        let mut ins = Insert::new("clap:test.queued");
+        for k in 0..stored {
+            ins.params.insert(format!("p{k:03}"), -3.0);
+        }
+        let tr = s.track_mut(t).unwrap();
+        tr.mixer.inserts[0] = Some(ins);
+        tr.mixer.automation_mode = AutomationMode::Read;
+        let mut lane = AutomationLane::new(AutoParam::Plugin { slot: 0, param: "gain".into() });
+        lane.set_point(0, -12.0);
+        tr.automation.push(lane);
+        let seen = Arc::new(AtomicU32::new(0));
+        let fake = Queued { queued: Arc::new(AtomicU32::new(0)), seen: Arc::clone(&seen), calls: Arc::new(AtomicUsize::new(0)), pending: None };
+        let mut rig = PlanRig::new(64).fake(t, 0, fake);
+        rig.publish(&s);
+        let mut out = vec![vec![0.0; 64]; 2];
+        let (_, heap) = measure(|| rig.eng.render_active(0, 64, &mut out));
+        assert!(heap.is_zero(), "lane-only parameter delivery: {heap:?}");
+        assert_eq!(f32::from_bits(seen.load(Relaxed)), -12.0, "the lane reaches the plug-in ({stored} stored values)");
+        s.track_mut(t).unwrap().automation[0].set_point(0, -6.0);
+        rig.publish(&s);
+        let (_, heap) = measure(|| rig.eng.render_active(64, 64, &mut out));
+        assert!(heap.is_zero(), "lane-only parameter delivery: {heap:?}");
+        assert_eq!(f32::from_bits(seen.load(Relaxed)), -6.0, "a lane edit reaches the plug-in ({stored} stored values)");
+        assert_eq!(rig.eng.status().applied_mismatch, 0, "the prepared cache covers the lane ({stored} stored values)");
+    }
+}

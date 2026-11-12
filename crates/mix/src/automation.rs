@@ -27,7 +27,7 @@ pub(crate) fn apply_params(
     // slot, so it never picks up slot A's lanes.
     let slot_u8 = if i == INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(i).unwrap_or(u8::MAX) };
     if slot_u8 == u8::MAX {
-        return apply_values(slot, ins, pos, |_, v| v, |_| &[]);
+        return apply_values(slot, ins, pos, |_, v| v, |_| &[], ins.params.len(), std::iter::empty(), |_| false);
     }
     let automated = t.mixer.automation_mode.reads()
         && t.automation.iter().any(|l| matches!(&l.param, AutoParam::Plugin { slot, .. } if *slot == slot_u8) && !l.points.is_empty());
@@ -67,7 +67,34 @@ pub(crate) fn apply_params(
             }
             _ => &[],
         },
+        applied_len(t, slot_u8, ins),
+        lane_only(t, slot_u8, ins),
+        |k| rack(k).is_some() || lane(k).is_some(),
     );
+}
+
+/// The parameters of slot `slot_u8` (an insert index or [`AutoParam::INSTRUMENT_SLOT`]) that
+/// `t` automates but `ins`'s stored map does not hold, in lane order (#296). A hosted insert's
+/// map starts empty and holds only the parameters set statically, so a lane may be the only
+/// place a parameter appears. Their last pushed values follow the stored ones in the slot's
+/// applied cache.
+pub(crate) fn lane_only<'a>(t: &'a Track, slot_u8: u8, ins: &'a transit_model::Insert) -> impl Iterator<Item = &'a str> + 'a {
+    t.automation.iter().filter_map(move |l| match &l.param {
+        AutoParam::Plugin { slot, param } if *slot == slot_u8 && slot_u8 != u8::MAX && !ins.params.contains_key(param) => Some(param.as_str()),
+        _ => None,
+    })
+}
+
+/// Length of slot `slot_u8`'s applied cache: the stored parameters, then [`lane_only`] ones. The
+/// compiler sizes the prepared storage with this; every reader of the cache passes the same.
+pub(crate) fn applied_len(t: &Track, slot_u8: u8, ins: &transit_model::Insert) -> usize {
+    ins.params.len().saturating_add(lane_only(t, slot_u8, ins).count())
+}
+
+/// The lane slot of mixer slot `i` (an insert index or [`INSTRUMENT_SLOT`]); `u8::MAX` when it
+/// has none.
+pub(crate) fn lane_slot(i: usize) -> u8 {
+    if i == INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(i).unwrap_or(u8::MAX) }
 }
 
 /// The Texture idle hook may follow Freeze without delivering any other pending edit.
@@ -95,7 +122,7 @@ pub(crate) fn apply_idle_freeze(
             .find(|l| matches!(&l.param, AutoParam::Plugin { slot, param } if *slot == slot_u8 && param == "freeze") && !l.points.is_empty())
             .map_or(*base, |l| touch::plugin_value(t, ramps, slot_u8, "freeze", l, *base, pos).0)
     });
-    let Some(last) = slot.applied.values(ins.params.len()).get_mut(index) else { return };
+    let Some(last) = slot.applied.values(applied_len(t, slot_u8, ins)).get_mut(index) else { return };
     if value.to_bits() != last.to_bits() {
         slot.plugin.set_param("freeze", value);
         *last = value;
@@ -105,13 +132,20 @@ pub(crate) fn apply_idle_freeze(
 
 /// Sends each stored param (as mapped by `value`) to the plugin when it changed since last time,
 /// then each of its `points` (breakpoints inside the block at `pos`) at its offset, and then marks
-/// the slot [`woken`](PluginSlot::woken).
-fn apply_values<'a>(
+/// the slot [`woken`](PluginSlot::woken). Then the same for each `extra` parameter (the lanes of
+/// parameters absent from the stored map, [`lane_only`]) while `driven` says its lane or a macro
+/// rules it, from the plug-in's own current value as the base; a parameter no longer driven
+/// keeps the last value it was sent. `len` is the cache length ([`applied_len`]).
+#[allow(clippy::too_many_arguments)]
+fn apply_values<'a, 'k>(
     slot: &mut PluginSlot,
     ins: &transit_model::Insert,
     pos: Samples,
     value: impl Fn(&str, f32) -> f32,
     points: impl Fn(&str) -> &'a [transit_model::AutomationPoint],
+    len: usize,
+    extra: impl Iterator<Item = &'k str>,
+    driven: impl Fn(&str) -> bool,
 ) {
     // First pass over a hosted plugin: it has just loaded its own settings, so a stored value equal to
     // the default it reports is not a choice and is left alone. Older sessions store every parameter
@@ -119,7 +153,9 @@ fn apply_values<'a>(
     // pan at minimum). Values that differ from the default, and every later change, are pushed.
     slot.parameter_pass = true;
     let first = std::mem::take(&mut slot.fresh);
-    for ((k, v), last) in ins.params.iter().zip(slot.applied.values(ins.params.len()).iter_mut()) {
+    let cache = slot.applied.values(len);
+    let (stored, rest) = cache.split_at_mut(ins.params.len().min(cache.len()));
+    for ((k, v), last) in ins.params.iter().zip(stored.iter_mut()) {
         let val = value(k, *v);
         if val.to_bits() != last.to_bits() {
             let untouched = first && slot.plugin.info().param(k).is_some_and(|pi| pi.default.to_bits() == val.to_bits());
@@ -132,16 +168,46 @@ fn apply_values<'a>(
             *last = val;
             slot.woken = true;
         }
-        // Allocation-free: the lane's own points, each one call; the host queues are bounded
-        // (past them the last point wins and the host counts the miss).
-        for p in points(k) {
-            let offset = u32::try_from(p.at.saturating_sub(pos)).unwrap_or(u32::MAX);
-            if slot.plugin.set_param_at(offset, k, p.value) {
-                *last = p.value;
-                slot.woken = true;
-            } else {
+        send_points(slot.plugin.as_mut(), &mut slot.parameter_pass, &mut slot.woken, k, last, points(k), pos);
+    }
+    // A lane is a choice, so the first-pass rule above does not hold these back.
+    for (k, last) in extra.zip(rest.iter_mut()) {
+        if !driven(k) {
+            continue;
+        }
+        let base = slot.plugin.param(k).or_else(|| slot.plugin.info().param(k).map(|pi| pi.default)).unwrap_or(0.0);
+        let val = value(k, base);
+        if val.to_bits() != last.to_bits() {
+            if !slot.plugin.set_param(k, val) {
                 slot.parameter_pass = false;
+                continue;
             }
+            *last = val;
+            slot.woken = true;
+        }
+        send_points(slot.plugin.as_mut(), &mut slot.parameter_pass, &mut slot.woken, k, last, points(k), pos);
+    }
+}
+
+/// Sends `k`'s breakpoints inside the block at `pos`, each at its offset. Allocation-free: the
+/// lane's own points, each one call; the host queues are bounded (past them the last point wins
+/// and the host counts the miss).
+fn send_points(
+    plugin: &mut dyn Plugin,
+    pass: &mut bool,
+    woken: &mut bool,
+    k: &str,
+    last: &mut f32,
+    points: &[transit_model::AutomationPoint],
+    pos: Samples,
+) {
+    for p in points {
+        let offset = u32::try_from(p.at.saturating_sub(pos)).unwrap_or(u32::MAX);
+        if plugin.set_param_at(offset, k, p.value) {
+            *last = p.value;
+            *woken = true;
+        } else {
+            *pass = false;
         }
     }
 }

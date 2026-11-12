@@ -82,9 +82,11 @@ pub(super) fn measure(
         bytes = add(bytes, mul(readers, crate::note_delay::NoteDelay::BYTES)?)?;
         // A scope ring for each insert and the instrument.
         bytes = add(bytes, mul(add(t.mixer.inserts.iter().flatten().count(), usize::from(t.instrument.is_some()))?, ScopeTap::BYTES)?)?;
-        for ins in t.mixer.inserts.iter().flatten().chain(t.instrument.iter()) {
-            if needs_storage(ins.params.len()) {
-                bytes = add(bytes, mul(ins.params.len(), size_of::<f32>())?)?;
+        let slots = t.mixer.inserts.iter().enumerate().filter_map(|(i, ins)| ins.as_ref().map(|ins| (i, ins)));
+        for (i, ins) in slots.chain(t.instrument.iter().map(|ins| (INSTRUMENT_SLOT, ins))) {
+            let len = crate::automation::applied_len(t, crate::automation::lane_slot(i), ins);
+            if needs_storage(len) {
+                bytes = add(bytes, mul(len, size_of::<f32>())?)?;
             }
         }
     }
