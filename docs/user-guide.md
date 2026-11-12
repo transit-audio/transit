@@ -1158,9 +1158,10 @@ A user preset file saved for a retired device is skipped, with a line in the log
 
 Stage 2 (Compressor/Limiter, Expander/Gate, EQ 7-Band and EQ 1-Band, Room and Plate Reverb,
 Saturator and Gain) follows each device's replacement, with the same rule for old sessions, with
-one change: the automation lanes of a retired stage 2 device are kept, as lanes with no assigned
-parameter, so they can be assigned to a replacement device's parameter later. Nothing plays from
-them until you assign them.
+one change (amended 2026-11-12): the automation lanes, MIDI mappings and rack macro targets of a retired stage 2
+device are kept, as lanes and mappings with no assigned parameter, so they can be assigned to a
+replacement device's parameter later. Nothing plays from them, and an unassigned MIDI mapping does
+not take over its controller, until you assign them.
 
 ## Tuning a hardware synth
 
