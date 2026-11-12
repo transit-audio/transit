@@ -19,6 +19,10 @@ pub fn specs() -> Vec<CommandSpec> {
     )]
 }
 
+/// Seconds of tail a bounce prints after the last clip (a whole-track bounce, a clip bounce, and the
+/// furthest start a `range` may have past the material).
+pub(crate) const BOUNCE_TAIL_SECONDS: f64 = 2.0;
+
 /// The `source` param shared by `track.bounce` and `clip.bounce`.
 pub(super) fn source_param(p: &Value) -> Result<BounceSource> {
     match p.get("source") {
@@ -43,11 +47,18 @@ pub(super) fn range_param(e: &Engine, p: &Value) -> Result<Option<Range>> {
     if start < 0 || len <= 0 {
         return Err(bad(id, "range must start at or after zero and have a positive length"));
     }
-    // Checked when set: a range that starts where there is no material prints silence and, far
-    // out, places a clip near the end of the integer range that overflows a later bounce.
+    // Checked when set: a range may start in the tail after the material (a script prints only the
+    // tail), up to and including the end of the tail; further out it prints silence and places a
+    // clip near the end of the integer range that overflows a later bounce.
     let end = e.session().content_end();
-    if start >= end {
-        return Err(bad(id, format!("range starts at or after the end of the session's material (sample {end})")));
+    let limit = end.saturating_add(e.session().sample_rate.samples(BOUNCE_TAIL_SECONDS));
+    if start > limit {
+        return Err(bad(
+            id,
+            format!(
+                "range starts past the end of the bounce tail (sample {limit}: the end of the session's material, sample {end}, plus {BOUNCE_TAIL_SECONDS} seconds)"
+            ),
+        ));
     }
     Ok(Some(Range::new(start, start.saturating_add(len))))
 }
@@ -96,7 +107,7 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
             }
         }
     }
-    let tail = s.sample_rate.samples(2.0);
+    let tail = s.sample_rate.samples(BOUNCE_TAIL_SECONDS);
     let mut out = Vec::new();
     for (t, start, end) in spans {
         let span = Range::new(start, end.saturating_add(tail));

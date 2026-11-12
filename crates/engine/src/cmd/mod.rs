@@ -10,7 +10,7 @@ mod audio_midi;
 mod audiosuite;
 mod clap;
 mod clip;
-mod clip_bounce;
+pub(crate) mod clip_bounce;
 mod clip_list;
 mod clip_more;
 mod device_pages;

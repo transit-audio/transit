@@ -144,18 +144,34 @@ fn a_ranged_track_bounce_prints_the_range_and_the_default_stays_the_whole_track(
 }
 
 #[test]
-fn a_range_starting_at_or_past_the_end_of_the_material_is_refused_and_changes_nothing() {
+fn a_range_starting_past_the_bounce_tail_is_refused_and_changes_nothing() {
     let mut e = Engine::default();
     let (t, _) = track(&mut e, "Keys", 0.25, &SPANS);
     let before = e.session().to_json().unwrap();
+    // The material ends at 310,000; the tail is two seconds (96,000 samples at 48 kHz).
     for cmd in ["track.bounce", "track.commit"] {
-        for start in [310_000, 310_001, i64::MAX - 1] {
+        for start in [406_001, 500_000, i64::MAX - 1] {
             let err = e.execute(cmd, &json!({"tracks": [t.0], "range": {"start": start, "length": 10}})).unwrap_err();
-            assert!(err.to_string().contains("after the end of the session's material"), "{cmd} {start}: {err}");
+            assert!(err.to_string().contains("past the end of the bounce tail (sample 406000"), "{cmd} {start}: {err}");
             assert_eq!(e.session().to_json().unwrap(), before, "{cmd} {start}: the session is unchanged");
         }
     }
     // The last sample of material is still accepted, and a whole-track bounce afterwards works.
     e.execute("track.bounce", &json!({"tracks": [t.0], "source": "leave", "range": {"start": 309_999, "length": 10}})).unwrap();
     e.execute("track.bounce", &json!({"tracks": [t.0], "source": "leave"})).unwrap();
+}
+
+#[test]
+fn a_range_may_start_in_the_tail_up_to_the_end_of_the_tail() {
+    let mut e = Engine::default();
+    let (t, _) = track(&mut e, "Keys", 0.25, &SPANS);
+    // One sample past the tail is refused (before a print adds material and moves the end).
+    let err = e.execute("track.bounce", &json!({"tracks": [t.0], "range": {"start": 406_001, "length": 10}})).unwrap_err();
+    assert!(err.to_string().contains("past the end of the bounce tail"), "{err}");
+    // Exactly at the end of the material and at the end of the tail: each prints its range.
+    for start in [310_000, 406_000] {
+        let r = e.execute("track.bounce", &json!({"tracks": [t.0], "source": "leave", "range": {"start": start, "length": 10}})).unwrap();
+        let (at, print) = print_of(&e, dest(&r, 0), 0);
+        assert_eq!((at, print.len()), (start, 10), "start {start}");
+    }
 }
