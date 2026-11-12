@@ -283,8 +283,8 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
             // Reset operator phase if a note on is detected & if the patch requires it.
             // transit's restart resets it too, unless this is the copy that keeps it (#263).
             if struck && patch.reset_phase != 0 && !self.keep_phase {
-                for i in 0..NUM_OPERATORS {
-                    self.operator[i].phase = 0;
+                for operator in &mut self.operator[..NUM_OPERATORS] {
+                    operator.phase = 0;
                 }
             }
 
