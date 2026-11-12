@@ -24,6 +24,47 @@ fn band_response_is_the_designed_magnitude() {
     assert!(top[0].is_nan());
 }
 
+/// The response contract (decision 8): a frequency above 0.49 of the rate and every non-finite
+/// frequency return NaN, and so does a negative one (the record is silent on negative finite
+/// frequencies; no value is the narrowest choice). Zero and exactly 0.49 of the rate are valid. Both
+/// entry points follow it. Negative control: evaluating a negative frequency at DC (the earlier
+/// clamp) makes the negative and negative-infinity cases return a finite value and fail here.
+#[test]
+fn frequencies_outside_zero_to_the_top_or_not_finite_have_no_value() {
+    let fs = 48_000.0;
+    let top = 0.49 * fs;
+    let b = band(BandType::Bell, 1_000.0, 6.0, 1.0);
+    let bands = [b];
+    let above = top * (1.0 + 1e-12);
+    let cases = [
+        ("NaN", f64::NAN, false),
+        ("+inf", f64::INFINITY, false),
+        ("-inf", f64::NEG_INFINITY, false),
+        ("negative", -1_000.0, false),
+        ("tiny negative", -f64::MIN_POSITIVE, false),
+        ("exactly 0.49 fs", top, true),
+        ("just above 0.49 fs", above, false),
+        ("0 Hz", 0.0, true),
+        ("-0 Hz", -0.0, true),
+    ];
+    for (name, f, valid) in cases {
+        let (mut one, mut all) = ([0.0], [0.0]);
+        band_response_db(&b, fs, PhaseMode::ZeroLatency, &[f], &mut one);
+        response_db(&bands, fs, PhaseMode::ZeroLatency, CurveChannel::Left, &[f], &mut all);
+        for (what, v) in [("band", one[0]), ("composite", all[0])] {
+            if valid {
+                assert!(v.is_finite(), "{what} at {name}: {v}");
+            } else {
+                assert!(v.is_nan(), "{what} at {name}: {v}");
+            }
+        }
+    }
+    // DC is the design's DC gain: a bell has none, so 0 dB.
+    let mut dc = [1.0];
+    band_response_db(&b, fs, PhaseMode::ZeroLatency, &[0.0], &mut dc);
+    assert!(dc[0].abs() < 1e-9, "{}", dc[0]);
+}
+
 #[test]
 fn the_composite_is_the_sum_of_the_bands_on_the_channel_path() {
     let fs = 48_000.0;

@@ -15,16 +15,18 @@ fn designed(b: &BandParams, fs: f64) -> design::Design {
     design::design(b.kind, b.slope, Used::from_stored(b.freq_hz, b.gain_db, b.q, fs), fs)
 }
 
-/// Writes `|H|²` in dB of the product of `designs` at each frequency of `freqs` into `out`; a
-/// frequency above 0.49 of the rate gets NaN (no value: the panel draws nothing there).
+/// Writes `|H|²` in dB of the product of `designs` at each frequency of `freqs` into `out`. A
+/// frequency above 0.49 of the rate, a negative frequency and every non-finite frequency (NaN and
+/// both infinities) get NaN (no value: the panel draws nothing there; decision 8's contract). Zero
+/// and exactly 0.49 of the rate are valid.
 fn evaluate(designs: &[design::Design], fs: f64, freqs: &[f64], out: &mut [f64]) {
     for (o, &f) in out.iter_mut().zip(freqs) {
-        // Above the top, or not a number: no value.
-        if f.partial_cmp(&(TOP * fs)).is_none_or(|o| o == core::cmp::Ordering::Greater) {
+        // Inside [0, top] or no value; a comparison with NaN is false, so NaN lands here too.
+        if !(0.0..=TOP * fs).contains(&f) {
             *o = f64::NAN;
             continue;
         }
-        let half = 0.5 * TAU * f.max(0.0) / fs;
+        let half = 0.5 * TAU * f / fs;
         let (s, co) = (math::sin(half), math::cos(half));
         let mut p = 1.0;
         for d in designs {
@@ -35,7 +37,7 @@ fn evaluate(designs: &[design::Design], fs: f64, freqs: &[f64], out: &mut [f64])
 }
 
 /// One band's own response in dB at each frequency (Zero latency: the matched sections' magnitude),
-/// whether or not the band is used or on. A frequency above 0.49 of the rate gets NaN.
+/// whether or not the band is used or on. A frequency outside 0 to 0.49 of the rate, or not finite, gets NaN.
 pub fn band_response_db(band: &BandParams, sample_rate: f64, mode: PhaseMode, freqs: &[f64], out: &mut [f64]) {
     let PhaseMode::ZeroLatency = mode;
     let fs = sane_rate(sample_rate);
@@ -43,7 +45,7 @@ pub fn band_response_db(band: &BandParams, sample_rate: f64, mode: PhaseMode, fr
 }
 
 /// The composite response in dB of the used and on bands on `channel`'s path (decision 8) at each
-/// frequency. A frequency above 0.49 of the rate gets NaN.
+/// frequency. A frequency outside 0 to 0.49 of the rate, or not finite, gets NaN.
 pub fn response_db(bands: &[BandParams], sample_rate: f64, mode: PhaseMode, channel: CurveChannel, freqs: &[f64], out: &mut [f64]) {
     let PhaseMode::ZeroLatency = mode;
     let fs = sane_rate(sample_rate);
