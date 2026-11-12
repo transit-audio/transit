@@ -709,8 +709,8 @@ FLAC files whose headers declare their length; preview checks headers, while loa
 checks the audio data.
 
 Each Sampler kit has a **pad start note**: the note of pad A1, with every other pad on the next
-note up (bank B starts 16 notes above A, C 32 and D 48). A new kit starts at MIDI note 36, where
-General MIDI drums start and where other DAWs put the first pad of their drum instruments, so drum
+note up (bank B starts 16 notes above A, C 32 and D 48). A new kit starts at MIDI note 36, the
+General MIDI kick, where other DAWs put the first pad of their drum instruments, so drum
 clips made elsewhere land on bank A; a kit saved before this setting existed keeps its pads on
 MIDI note 60 and up. To match a pad controller whose first pad sends another note, set the start
 note to that note instead of remapping the controller: use the **Start note** field before
