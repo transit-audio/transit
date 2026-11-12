@@ -738,7 +738,10 @@ No factory kits ship.
 The Sampler window's title bar works as on the other instruments. Click the name field to list your
 kits, recall one, save the kit under a new name (type it in **Save As…** and press Enter or
 **Save**) or delete the kit shown. The save button writes over the kit you last recalled or saved
-in this window; until you have one, it opens the list for Save As. The arrows step to the previous
+in this window; until you have one, it opens the list for Save As. Save As onto the name of a kit
+that already exists asks first (`Replace the kit file "808"?`, **Replace** or **Cancel**), and
+deleting a kit asks too (`Delete the kit "808"?`, **Delete Kit** or **Cancel**; Enter does nothing
+there, since a deleted kit file cannot be brought back, and Escape cancels). The arrows step to the previous
 or next kit, wrapping at either end. A recall replaces the whole kit in one undo step, and a run of
 arrow steps is one undo step back to the kit you had before the run. When the kit has loaded pads
 (or any zone, or a slice loop) and you changed it since you last recalled or saved it, transit asks

@@ -26,9 +26,9 @@ text = "Writes the kit over the kit file last recalled or saved in this window. 
 [[entry]]
 id = "sampler_kits.save_as"
 name = "Save As"
-text = "Saves the whole kit (pads, zones, slices, groups and every setting) as a new kit file under the typed name. Samples are referenced by their file paths, relative when they sit beside or below the kit file."
+text = "Saves the whole kit (pads, zones, slices, groups and every setting) as a new kit file under the typed name. A name that is already a kit asks before it writes over it. Samples are referenced by their file paths, relative when they sit beside or below the kit file."
 
 [[entry]]
 id = "sampler_kits.delete"
 name = "Delete kit"
-text = "Deletes the shown kit's file from your kit folder. The kit on the Sampler stays as it is."
+text = "Deletes the shown kit's file from your kit folder, after asking: a deleted kit file cannot be brought back. The kit on the Sampler stays as it is."

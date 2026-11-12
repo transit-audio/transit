@@ -11,7 +11,7 @@ use transit_model::TrackId;
 use transit_model::sampler_patch::PatchV1;
 
 /// Every painted text that reads exactly `want`, by its center.
-fn painted(t: &T, want: &str) -> Vec<(f32, f32)> {
+pub(super) fn painted(t: &T, want: &str) -> Vec<(f32, f32)> {
     fn walk(shape: &egui::Shape, want: &str, out: &mut Vec<(f32, f32)>) {
         match shape {
             egui::Shape::Text(s) if s.galley.text() == want => out.push((s.pos.x + s.galley.size().x / 2.0, s.pos.y + s.galley.size().y / 2.0)),
@@ -25,7 +25,7 @@ fn painted(t: &T, want: &str) -> Vec<(f32, f32)> {
 }
 
 /// A Sampler kit (pads A1 to A3) with its editor open and a scratch config folder.
-fn rig() -> (T, TrackId, PathBuf) {
+pub(super) fn rig() -> (T, TrackId, PathBuf) {
     let (mut t, tr) = T::kit();
     let root = t.dir.join("config");
     std::fs::create_dir_all(&root).unwrap();
@@ -34,37 +34,37 @@ fn rig() -> (T, TrackId, PathBuf) {
     (t, tr, root)
 }
 
-fn uid(t: &T, tr: TrackId) -> u64 {
+pub(super) fn uid(t: &T, tr: TrackId) -> u64 {
     t.app.engine.session().track(tr).unwrap().instrument.as_ref().unwrap().uid.get()
 }
 
-fn pending(t: &T, tr: TrackId) -> Option<kit_presets::Pending> {
+pub(super) fn pending(t: &T, tr: TrackId) -> Option<kit_presets::Pending> {
     t.app.builtin_editor.devices.sampler.views.get(&uid(t, tr)).and_then(|v| v.kit.pending.clone())
 }
 
-fn kit_file(root: &std::path::Path, name: &str) -> PathBuf {
+pub(super) fn kit_file(root: &std::path::Path, name: &str) -> PathBuf {
     files::folder(root).join(format!("{name}.tkit"))
 }
 
 /// Saves the track's kit as `name` through the engine, as the list's Save As sends it.
-fn save_kit(t: &mut T, tr: TrackId, root: &std::path::Path, name: &str) {
+pub(super) fn save_kit(t: &mut T, tr: TrackId, root: &std::path::Path, name: &str) {
     t.app.run("mix.sampler_kit_save", json!({"track": tr.0, "path": kit_file(root, name)})).unwrap();
 }
 
 /// Loads `name` (a generated sample) onto zone and pad `n`.
-fn load_pad(t: &mut T, tr: TrackId, n: u64, name: &str) {
+pub(super) fn load_pad(t: &mut T, tr: TrackId, n: u64, name: &str) {
     let p = t.sample(name, 2400);
     t.app.run("mix.sampler_zone_source", json!({"track": tr.0, "zone": n, "pad": n, "path": p.to_string_lossy()})).unwrap();
     t.frames(2);
 }
 
-fn open_list(t: &mut T, tr: TrackId) {
+pub(super) fn open_list(t: &mut T, tr: TrackId) {
     let field = t.panel(tr).title.field;
     t.click(mid(field), 1);
 }
 
 /// Opens the kit list and clicks the entry `name` (below the field).
-fn pick(t: &mut T, tr: TrackId, name: &str) {
+pub(super) fn pick(t: &mut T, tr: TrackId, name: &str) {
     open_list(t, tr);
     // In the list's popup: under the field and across its width (never a bank button or a pad).
     let field = t.panel(tr).title.field;
@@ -74,7 +74,7 @@ fn pick(t: &mut T, tr: TrackId, name: &str) {
 }
 
 /// Types `name` into the list's Save As field and presses Enter.
-fn save_as(t: &mut T, tr: TrackId, name: &str) {
+pub(super) fn save_as(t: &mut T, tr: TrackId, name: &str) {
     open_list(t, tr);
     let hint = painted(t, "Save As\u{2026}");
     t.click(*hint.first().expect("the Save As field is in the list"), 1);
@@ -91,7 +91,7 @@ fn normalized(p: &PatchV1) -> PatchV1 {
     p
 }
 
-fn doc(t: &T) -> Value {
+pub(super) fn doc(t: &T) -> Value {
     serde_json::to_value(t.app.engine.session()).unwrap()
 }
 

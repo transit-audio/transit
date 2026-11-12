@@ -16,8 +16,10 @@
 //!   the kit before the run; any edit ends the run. The question can only come at a run's first
 //!   step: a step leaves the kit as recalled, so the next one finds it unchanged.
 //! - **Save** writes over the kit file this window last recalled or saved, while the field still
-//!   shows it; otherwise it opens the list, whose Save As names a new kit file. **Delete** removes
-//!   the shown kit's file.
+//!   shows it; otherwise it opens the list, whose Save As names a new kit file. Save As over a kit
+//!   file that exists asks first (`Replace the kit file "808"?`, Replace or Cancel). **Delete**
+//!   removes the shown kit's file after asking (`Delete the kit "808"?`, Delete Kit or Cancel, no
+//!   default: Enter does nothing; Escape cancels). Other devices' preset Delete does not ask.
 //! - **The field** reads the kit last recalled or saved in this window while the slot's preset
 //!   label is still what it was then (an undo past the recall restores the old label), else the
 //!   slot's label, else `<factory default>`. There is no modified mark in v0.7.0.
@@ -46,6 +48,9 @@ const SAVE: &str = "mix.sampler_kit_save";
 pub const REPLACE: &str = "Replace";
 /// The question.
 pub const QUESTION: &str = "Replace the kit?";
+/// The delete question's button (it names the loss, as the design language's destructive actions
+/// do).
+pub const DELETE_KIT: &str = "Delete Kit";
 
 /// The kit as it stood after this window's last recall or save.
 #[derive(Debug, Clone)]
@@ -70,16 +75,31 @@ pub struct Pending {
     pub detail: String,
 }
 
+/// A kit file action waiting for its answer: deleting a kit, or Save As over an existing one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Confirm {
+    Delete { file: PathBuf, name: String },
+    Overwrite { file: PathBuf, name: String },
+}
+
 /// One Sampler window's kit preset state (UI state for the session).
 #[derive(Debug, Clone, Default)]
 pub struct KitState {
     pub baseline: Option<Baseline>,
     pub pending: Option<Pending>,
+    /// The file question and whether it has been drawn once (the frame that raised it, by Enter in
+    /// the Save As field, must not answer it with the same key).
+    pub confirm: Option<(Confirm, bool)>,
 }
 
 /// The question's id for instance `uid` (its layout is read by `chrome::modal_layout`).
 pub fn modal_id(uid: u64) -> egui::Id {
     egui::Id::new(("sampler_kit_replace", uid))
+}
+
+/// The file question's id for instance `uid`.
+pub fn confirm_id(uid: u64) -> egui::Id {
+    egui::Id::new(("sampler_kit_file", uid))
 }
 
 /// Whether a run of previous and next steps goes on: the document is still the one its last step
@@ -168,6 +188,7 @@ pub(crate) fn browser(app: &mut StudioApp, ui: &mut Ui, dev: Dev, [prev, field, 
     }
     paint_glyph(&p, save.center(), "save", t.text_muted);
     ask(app, ui.ctx(), dev);
+    confirm(app, ui.ctx(), dev);
 }
 
 /// The field's popup id (`Popup::default_response_id` of the field's response).
@@ -230,9 +251,9 @@ fn field_ui(app: &mut StudioApp, ui: &mut Ui, dev: Dev, field: Rect, kits: &[(St
         save_as(app, dev, &n);
     }
     if picked.delete
-        && let Some((_, file)) = kits.iter().find(|(n, _)| n == current)
+        && let Some((name, file)) = kits.iter().find(|(n, _)| n == current)
     {
-        delete(app, dev, file);
+        view(app, dev.uid()).kit.confirm = Some((Confirm::Delete { file: file.clone(), name: name.clone() }, false));
     }
 }
 
@@ -301,14 +322,47 @@ fn ask(app: &mut StudioApp, ctx: &egui::Context, dev: Dev) {
     }
 }
 
+/// The file question, while one is open: drawn every frame until answered.
+fn confirm(app: &mut StudioApp, ctx: &egui::Context, dev: Dev) {
+    use crate::chrome::{Ask, Choice, Primary, modal_with};
+    let Some((asked, drawn)) = view(app, dev.uid()).kit.confirm.clone() else { return };
+    let (question, detail, button, primary) = match &asked {
+        Confirm::Delete { name, .. } => (format!("Delete the kit \"{name}\"?"), "This cannot be undone.", DELETE_KIT, Primary::Plain),
+        Confirm::Overwrite { name, .. } => {
+            (format!("Replace the kit file \"{name}\"?"), "It is written over with the kit on this Sampler.", REPLACE, Primary::Enter)
+        }
+    };
+    let ask = Ask { question, detail: Some(detail.to_string()), default: button, cancel: "Cancel", third: None };
+    let choice = modal_with(ctx, confirm_id(dev.uid()), &ask, primary);
+    if !drawn {
+        view(app, dev.uid()).kit.confirm = Some((asked, true));
+        return;
+    }
+    match choice {
+        Some(Choice::Default) => {
+            view(app, dev.uid()).kit.confirm = None;
+            match asked {
+                Confirm::Delete { file, .. } => delete(app, dev, &file),
+                Confirm::Overwrite { file, .. } => save_to(app, dev, &file),
+            }
+        }
+        Some(_) => view(app, dev.uid()).kit.confirm = None,
+        None => {}
+    }
+}
+
 /// Sends the recall (the user's choice is made: `replace` is stated for a loaded kit) and takes in
 /// the answer.
-fn recall(app: &mut StudioApp, dev: Dev, file: &Path, step: bool) {
+pub(super) fn recall(app: &mut StudioApp, dev: Dev, file: &Path, step: bool) {
     let t = dev.key.0.0;
     let replace = super::patch_at(app.engine.session(), dev.key).is_some_and(|p| loaded(&p));
     let params = json!({"track": t, "path": file, "replace": replace});
+    let before = app.engine.session_arc();
     let reply = if step { app.execute_ui_merged(LOAD, &params, &step_key(t)).map_err(|e| e.to_string()) } else { app.run(LOAD, params) };
-    if step {
+    // Only a step that changed the document carries the run on; a refused one (an error, or a
+    // refusal answered as data) leaves the run as it was, so it never holds another gesture's merge
+    // open (review F1).
+    if step && !std::sync::Arc::ptr_eq(&before, &app.engine.session_arc()) {
         app.builtin_editor.devices.sampler.step_run = Some(std::sync::Arc::downgrade(&app.engine.session_arc()));
     }
     let uid = dev.uid();
@@ -351,9 +405,13 @@ fn save_current(app: &mut StudioApp, ui: &Ui, dev: Dev) {
     }
 }
 
-/// Save As under `name` in the kit folder.
+/// Save As under `name` in the kit folder; over a kit file that exists, asked first.
 fn save_as(app: &mut StudioApp, dev: Dev, name: &str) {
     match app.services.config_dir.as_deref().and_then(|root| files::path(root, name)) {
+        Some(file) if file.exists() => {
+            let name = file.file_stem().map_or_else(|| name.to_string(), |s| s.to_string_lossy().into_owned());
+            view(app, dev.uid()).kit.confirm = Some((Confirm::Overwrite { file, name }, false));
+        }
         Some(file) => save_to(app, dev, &file),
         None => app.status = "Name the kit first.".to_string(),
     }

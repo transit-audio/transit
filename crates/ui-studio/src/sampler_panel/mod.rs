@@ -49,6 +49,8 @@ mod kit_load_ask_tests;
 #[cfg(test)]
 mod kit_load_tests;
 #[cfg(test)]
+mod kit_presets_confirm_tests;
+#[cfg(test)]
 mod kit_presets_tests;
 #[cfg(test)]
 mod live_tests;
