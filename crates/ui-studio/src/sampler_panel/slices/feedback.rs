@@ -134,17 +134,36 @@ pub fn card(ui: &mut Ui, id: egui::Id, rect: Rect, text: &str, error: bool, acti
     (CardRecord { rect: r4(r), text: text.to_string(), edge, action: action_rect }, clicked)
 }
 
-/// The last-edit line's height.
+/// The last-edit line's height at one line.
 pub fn line_height(ui: &Ui) -> f32 {
     widgets::role_size(ui.painter(), &tokens::READOUT_DISPLAY, "Ag").y.max(c::SUCCESS_ICON_SIZE)
 }
 
+/// The width the message has across a line `width` wide (less the check and its gap).
+fn message_width(width: f32, check: bool) -> f32 {
+    (width - if check { c::SUCCESS_ICON_SIZE + CHECK_GAP } else { 0.0 }).max(40.0)
+}
+
+fn line_job(ui: &Ui, text: &str, width: f32, check: bool) -> egui::text::LayoutJob {
+    let ink = if check { TOKENS.text } else { TOKENS.text_faint };
+    let mut job = tokens::READOUT_DISPLAY.job(ui.ctx(), text, ink);
+    job.wrap.max_width = message_width(width, check);
+    job
+}
+
+/// The last-edit line's height when `text` wraps across `width`.
+pub fn last_edit_height(ui: &Ui, text: &str, width: f32, check: bool) -> f32 {
+    ui.painter().layout_job(line_job(ui, text, width, check)).size().y.max(line_height(ui))
+}
+
 /// The Success line (`check`: a 12 px check in `text`, the message in `text`) or the panel's
-/// resting line (no check, `text.faint`), from `at` (its top left).
-pub fn last_edit(ui: &Ui, at: egui::Pos2, text: &str, check: bool) -> LineRecord {
+/// resting line (no check, `text.faint`), from `at` (its top left), wrapped to `width` so it
+/// never leaves its panel.
+pub fn last_edit(ui: &Ui, at: egui::Pos2, width: f32, text: &str, check: bool) -> LineRecord {
     let t = &TOKENS;
     let p = ui.painter();
-    let h = line_height(ui);
+    let galley = p.layout_job(line_job(ui, text, width, check));
+    let h = galley.size().y.max(line_height(ui));
     let cy = at.y + h / 2.0;
     let mut x = at.x;
     if check {
@@ -153,6 +172,7 @@ pub fn last_edit(ui: &Ui, at: egui::Pos2, text: &str, check: bool) -> LineRecord
         x += g + CHECK_GAP;
     }
     let ink = if check { t.text } else { t.text_faint };
-    let r = widgets::role_text(p, &tokens::READOUT_DISPLAY, text, ink, Align2::LEFT_CENTER, pos2(x, cy));
-    LineRecord { rect: r4(Rect::from_min_max(at, pos2(r.max.x, at.y + h))), text: text.to_string(), check }
+    let size = galley.size();
+    p.galley(pos2(x, cy - size.y / 2.0), galley, ink);
+    LineRecord { rect: r4(Rect::from_min_max(at, pos2(x + size.x, at.y + h))), text: text.to_string(), check }
 }

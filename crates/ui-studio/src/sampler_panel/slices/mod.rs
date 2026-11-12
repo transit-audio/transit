@@ -47,6 +47,8 @@ mod gesture_tests;
 #[cfg(test)]
 mod keyboard_tests;
 #[cfg(test)]
+mod layout_tests;
+#[cfg(test)]
 mod loop_tests;
 #[cfg(test)]
 mod panel_tests;

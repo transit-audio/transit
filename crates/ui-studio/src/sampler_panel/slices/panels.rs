@@ -74,8 +74,8 @@ impl Rows {
             let r = self.row(h);
             self.error = Some(feedback::card(ui, id, r, e, true, None).0);
         } else if let Some(text) = success.map(|s| (s, true)).or(resting.map(|s| (s, false))) {
-            let r = self.row(feedback::line_height(ui));
-            self.line = Some(feedback::last_edit(ui, r.min, text.0, text.1));
+            let r = self.row(feedback::last_edit_height(ui, text.0, self.w, text.1));
+            self.line = Some(feedback::last_edit(ui, r.min, self.w, text.0, text.1));
         }
     }
 }
@@ -87,7 +87,9 @@ pub struct ManualLayout {
     pub text: [f32; 4],
     pub from_auto: [f32; 4],
     pub clear: [f32; 4],
-    pub gestures: [f32; 4],
+    /// The four gestures, one rectangle each (verb and rest), wrapped onto as many lines as the
+    /// panel's width needs.
+    pub gestures: Vec<[f32; 4]>,
 }
 
 /// The panels row as drawn.
@@ -205,14 +207,22 @@ fn manual(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, rows: 
         edit::clear(app, dev, v);
     }
     (out.from_auto, out.clear) = (r4(from), r4(clear));
-    let r = rows.row(super::super::line_h(&p, &tokens::READOUT_DISPLAY));
+    // The gestures flow left to right and wrap to the next line before they leave the panel.
+    let line = super::super::line_h(&p, &tokens::READOUT_DISPLAY);
+    let right = rows.x + rows.w;
+    let mut r = rows.row(line);
     let mut x = r.min.x;
     for (verb, rest) in GESTURES {
+        let width = widgets::role_size(&p, &tokens::READOUT_DISPLAY, verb).x + widgets::role_size(&p, &tokens::READOUT_DISPLAY, rest).x;
+        if x > rows.x && x + width > right {
+            r = rows.row(line);
+            x = r.min.x;
+        }
         let a = widgets::role_text(&p, &tokens::READOUT_DISPLAY, verb, t.text, Align2::LEFT_CENTER, pos2(x, r.center().y));
         let b = widgets::role_text(&p, &tokens::READOUT_DISPLAY, rest, t.text_faint, Align2::LEFT_CENTER, pos2(a.max.x, r.center().y));
+        out.gestures.push(r4(a.union(b)));
         x = b.max.x + tk::PANEL_ITEM_GAP;
     }
-    out.gestures = r4(Rect::from_min_max(r.min, pos2(x - tk::PANEL_ITEM_GAP, r.max.y)));
     let error = v.feedback.left_error.clone();
     let success = v.feedback.left_success.clone();
     rows.feedback(ui, egui::Id::new(("sampler_manual_feedback", uid)), error.as_deref(), success.as_deref(), Some(MANUAL_RESTING));

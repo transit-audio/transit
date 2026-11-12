@@ -77,6 +77,8 @@ pub struct UseLayout {
     pub overlap: Option<[f32; 4]>,
     pub map: Option<[f32; 4]>,
     pub create: [f32; 4],
+    /// Every text of the panel (caption, key, plan, help, placement, summary, map caption).
+    pub texts: Vec<[f32; 4]>,
 }
 
 fn beat_bits(b: Option<f64>) -> Option<u64> {
@@ -130,11 +132,12 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesVie
         previews(app, dev, v);
     }
     let p = ui.painter().clone();
+    out.texts.clear();
     // The label and the set it uses.
     let r = rows.row(super::super::line_h(&p, &tokens::LABEL_SECTION));
     let label = super::super::section_label(&p, r.min, "Use slices");
     out.caption = format!("the {} set, as shown", if l.mode == super::state::Mode::Auto { "Auto" } else { "Manual" });
-    widgets::role_text(
+    let r = widgets::role_text(
         &p,
         &tokens::READOUT_DISPLAY,
         &out.caption,
@@ -142,6 +145,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesVie
         Align2::LEFT_CENTER,
         pos2(label.max.x + tk::PANEL_ITEM_GAP, label.center().y),
     );
+    out.texts.push(r4(r));
     // Root.
     let r = rows.row(layout::DENSE_CONTROL_HEIGHT);
     rows.label(&p, r, "Root");
@@ -166,7 +170,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesVie
         v.usage.root = (Some(n) != l.root).then_some(n);
     }
     out.root = r4(rr);
-    widgets::role_text(
+    let key_text = widgets::role_text(
         &p,
         &tokens::READOUT_DISPLAY,
         &format!("slice i → key {root}+i"),
@@ -174,6 +178,7 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesVie
         Align2::LEFT_CENTER,
         pos2(rr.max.x + tk::PANEL_ITEM_GAP, r.center().y),
     );
+    out.texts.push(r4(key_text));
     // Slices to pads, with the bank it fills.
     let cell = tk::PREVIEW_CELL;
     let grid_h = 2.0 * cell + tk::PREVIEW_GAP;
@@ -220,14 +225,16 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesVie
         }
         _ => plan["reason"].as_str().unwrap_or_default().to_string(),
     };
-    widgets::role_text(
-        &p,
-        &tokens::READOUT_DISPLAY,
-        &out.plan,
-        t.text_faint,
-        Align2::LEFT_CENTER,
-        pos2(grid_right + tk::PANEL_ITEM_GAP, r.center().y),
-    );
+    // The plan wraps across the room the preview leaves (an engine refusal is a sentence); a
+    // taller text grows the row.
+    let room = (rows.x + rows.w - grid_right - tk::PANEL_ITEM_GAP).max(40.0);
+    let mut job = tokens::READOUT_DISPLAY.job(ui.ctx(), &out.plan, t.text_faint);
+    job.wrap.max_width = room;
+    let galley = p.layout_job(job);
+    let top = (r.center().y - galley.size().y / 2.0).max(r.min.y);
+    out.texts.push(r4(Rect::from_min_size(pos2(grid_right + tk::PANEL_ITEM_GAP, top), galley.size())));
+    rows.y = rows.y.max(top + galley.size().y);
+    p.galley(pos2(grid_right + tk::PANEL_ITEM_GAP, top), galley, t.text_faint);
     midi(app, ui, dev, v, l, rows, out);
     r4(label)
 }
@@ -256,7 +263,13 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
     if let Some(i) = seg.picked {
         v.usage.keep = i == 1;
     }
-    let br = Rect::from_min_size(pos2(seg.layout.track[2] + tk::PANEL_ITEM_GAP, r.min.y), vec2(tk::BEAT_WIDTH, r.height()));
+    let mut br = Rect::from_min_size(pos2(seg.layout.track[2] + tk::PANEL_ITEM_GAP, r.min.y), vec2(tk::BEAT_WIDTH, r.height()));
+    if br.max.x > rows.x + rows.w {
+        // Too narrow for the field beside the timing: it wraps to its own row under it, at the
+        // timing's left edge.
+        let next = rows.row(layout::DENSE_CONTROL_HEIGHT);
+        br = Rect::from_min_size(pos2(seg.layout.track[0], next.min.y), br.size());
+    }
     out.timing = Some(seg.layout);
     out.beat_enabled = !v.usage.keep;
     let beats = v.usage.beat.or(l.beats());
@@ -300,11 +313,11 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
     // The help line, the placement and the summary.
     out.help = if v.usage.keep { KEEP_HELP } else { FIT_HELP }.to_string();
     let r = rows.row(super::super::line_h(&p, &tokens::LABEL_CONTROL));
-    widgets::role_text(&p, &tokens::LABEL_CONTROL, &out.help, t.text_faint, Align2::LEFT_CENTER, r.left_center());
+    out.texts.push(r4(widgets::role_text(&p, &tokens::LABEL_CONTROL, &out.help, t.text_faint, Align2::LEFT_CENTER, r.left_center())));
     let place = placement::of(app, dev.key.0);
     out.placement = placement::line(app, place);
     let r = rows.row(super::super::line_h(&p, &tokens::VALUE));
-    widgets::role_text(&p, &tokens::VALUE, &out.placement, t.text, Align2::LEFT_CENTER, r.left_center());
+    out.texts.push(r4(widgets::role_text(&p, &tokens::VALUE, &out.placement, t.text, Align2::LEFT_CENTER, r.left_center())));
     let preview = v.usage.midi.as_ref().map(|(_, a)| a.clone());
     if let Some(Ok(a)) = &preview {
         let key = |k: &str| a[k].as_u64().and_then(|n| u8::try_from(n).ok()).map(|n| transit_midi::note_name(n, mc)).unwrap_or_default();
@@ -317,7 +330,7 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
             a["channel"].as_u64().unwrap_or(0)
         );
         let r = rows.row(super::super::line_h(&p, &tokens::READOUT_DISPLAY));
-        widgets::role_text(&p, &tokens::READOUT_DISPLAY, &out.summary, t.text_muted, Align2::LEFT_CENTER, r.left_center());
+        out.texts.push(r4(widgets::role_text(&p, &tokens::READOUT_DISPLAY, &out.summary, t.text_muted, Align2::LEFT_CENTER, r.left_center())));
         if a["overlap"] == true {
             let font = tokens::LABEL_CONTROL.font_id(ui.ctx());
             let r = rows.row(crate::chrome::glyph_size(font.size));
@@ -344,7 +357,14 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
                 previews(app, dev, v);
             }
             let caption = format!("from {}, one undo step; existing MIDI unchanged", transit_midi::note_name(root, mc));
-            widgets::role_text(&p, &tokens::LABEL_CONTROL, &caption, t.text_faint, Align2::LEFT_CENTER, pos2(mb.max.x + SPACE[1], r.center().y));
+            out.texts.push(r4(widgets::role_text(
+                &p,
+                &tokens::LABEL_CONTROL,
+                &caption,
+                t.text_faint,
+                Align2::LEFT_CENTER,
+                pos2(mb.max.x + SPACE[1], r.center().y),
+            )));
             out.map = Some(r4(mb));
         }
     }
@@ -353,7 +373,10 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
     let cw = default_w(&p, CREATE);
     let cb = Rect::from_min_size(pos2(r.max.x - cw, r.min.y), vec2(cw, r.height()));
     if let Some(s) = v.feedback.use_success.clone().filter(|_| refusal.is_none()) {
-        rows.line = Some(feedback::last_edit(ui, pos2(r.min.x, r.center().y - feedback::line_height(ui) / 2.0), &s, true));
+        // Beside the button: wrapped to the room it leaves, centered on the row.
+        let room = cb.min.x - tk::PANEL_ITEM_GAP - r.min.x;
+        let h = feedback::last_edit_height(ui, &s, room, true);
+        rows.line = Some(feedback::last_edit(ui, pos2(r.min.x, r.center().y - h / 2.0), room, &s, true));
     }
     if default_button(ui, egui::Id::new(("sampler_use_create", uid)), cb, CREATE).clicked() {
         let params = midi_params(dev.key.0.0, v.at, &v.usage, false);
