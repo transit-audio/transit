@@ -52,8 +52,8 @@ impl ScaleRecorder {
         let octave = F::from_i32((v / base_interval).trunc_i32()) * base_interval;
         v -= octave;
         let mut nearest = None;
-        for i in 0..self.num_degrees {
-            let av = self.degrees[i].average_voltage;
+        for (i, degree) in self.degrees[..self.num_degrees].iter().enumerate() {
+            let av = degree.average_voltage;
             let tolerance = 1.0_f32 / 36.0;
             if (v - av).abs() < tolerance {
                 nearest = Some(i);

@@ -391,8 +391,8 @@ impl Sequencer {
 
     /// Ends the sounding notes at offset 0 and clears the schedule.
     fn release_all(&mut self, emit: &mut impl FnMut(Event)) {
-        for v in 0..3 {
-            if let Some(key) = self.sounding[v].take() {
+        for sounding in &mut self.sounding {
+            if let Some(key) = sounding.take() {
                 emit(Event { offset: 0, kind: EventKind::NoteOff { key } });
             }
         }

@@ -131,9 +131,8 @@ impl Quantizer {
             let mut a = at(l.last) - self.base_interval;
             let mut b = at(l.first) + self.base_interval;
             let mut bitmask = l.bitmask;
-            for i in 0..usize::try_from(self.num_degrees).unwrap_or(0) {
+            for &v in &self.voltage[..usize::try_from(self.num_degrees).unwrap_or(0)] {
                 if bitmask & 1 != 0 {
-                    let v = self.voltage[i];
                     if note_fractional > v {
                         a = v;
                     } else {
