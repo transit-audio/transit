@@ -118,6 +118,7 @@ sample, opened at the session rate): load it from its file.
 | `file.prepare_import` | `rate: "native"` prepares Sampler PCM without conversion; omitted or numeric rate keeps timeline preparation. Progress includes `sample_rate`, frames at that rate, and duration in seconds. |
 | `mix.sampler_zone_source`, `mix.sampler_slice_loop`, `mix.sampler_load_kit` | New file and byte imports retain native PCM through the shared preparation. A staged Sampler import must have been prepared with `rate: "native"`; a converted job is refused and remains staged. Existing source ids keep their admitted PCM and rate. All start/end, loop, crossfade, slice and cue positions and reported lengths count admitted source frames. |
 | `mix.sampler_slice_state`, `mix.sampler_state` | Source `rate` is the admitted PCM rate. Milliseconds use that rate; envelope and choke durations use output frames. Older kits keep already-converted PCM and its stored rate, with no migration. |
+| `clip.place_source` | `{source, track?, at?}` places a session source on the timeline, where it plays at the session rate. It refuses a source whose stored rate differs from the session rate (a Sampler source keeps its native rate), naming both rates and pointing to `file.import_audio`, with no change and no undo step. It does not convert. A session whose Sampler source stores rate 0 (a damaged file) reads that source at the session rate on open, with a load note. |
 
 ## Sampler slicing
 

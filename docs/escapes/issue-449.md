@@ -1,4 +1,4 @@
-# Sampler admission converted native PCM despite the playback contract (#449)
+# E82: Sampler admission converted native PCM despite the playback contract (#449)
 
 1. **Failure.** New Sampler samples were converted to the session rate on import. Native cue,
    slice and loop coordinates no longer named the original PCM, and pitching converted audio
