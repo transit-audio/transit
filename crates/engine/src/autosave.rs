@@ -386,6 +386,9 @@ pub fn recover(e: &mut Engine, left: &Leftover) -> Result<Vec<String>> {
     let links = left.origin.as_deref().map_or(session.as_path(), Path::new);
     let mut missing = open_session_linked(&mut r, &session.to_string_lossy(), links)?;
     let mut s = r.session().clone();
+    // The session belongs to the folder of the file it came from, not to the autosave folder it was
+    // read from, which goes once it is recovered: a save resolves relative paths against this (#572).
+    s.folder = left.origin.as_deref().and_then(|o| Path::new(o).parent()).map(Path::to_path_buf);
     let unfinished = unfinished_takes(left, &s, &mut missing);
     if let Some(home) = left.origin.as_deref().and_then(|o| Path::new(o).parent()) {
         for src in s.sources.iter_mut().filter(|src| !src.unsaved) {
