@@ -233,6 +233,24 @@ fn execute(h: &mut Host<'_, '_>, task: usize, slot: usize, start: Start) -> bool
     }
 }
 
+/// #293 item 2: the fit uses the time left the driver read with the window, not a clock read
+/// of its own: with no injected budget, the worst case plus the margin equal to that time publishes
+/// and one nanosecond more does not. Mutation: reading the clock again in the fit sees a deadline
+/// 60 s away and publishes both.
+#[test]
+fn the_fit_uses_the_drivers_time_left() {
+    for (left, want) in [(10 + M, Start::Publish), (10 + M - 1, Start::Callback)] {
+        let (mut rig, ..) = fixture(false);
+        host(&mut rig, |h, slot, task| {
+            h.pool.set.set_cost_estimate(slot, Duration::from_nanos(10));
+            let at = StartAt { window: Window::Open, alone: false, left: Duration::from_nanos(left) };
+            let start = h.start(task, at);
+            assert_eq!(start, want, "left {left}");
+            assert!(execute(h, task, slot, start));
+        });
+    }
+}
+
 /// T4a: always-publish must fail here; the worst case plus the wake margin equal to the time
 /// left is accepted (G5: one nanosecond less is not), Closed is never published.
 #[test]
@@ -1069,4 +1087,23 @@ fn g11_a_lone_ready_aux_renders_on_the_callback_without_a_publish_or_a_wake() {
     assert_eq!((q.published, q.tail_callback), (4 * blocks, blocks), "the lone aux is never published");
     assert!(q.conserves());
     assert_eq!(pool.set.stats().wakes, blocks, "one wake call a block, for the phase-1 batch");
+}
+
+/// #293 item 5: when `take` cannot read the job's render stamp (the cell's lock refused), the
+/// result fails safe and is counted as a protocol conflict, not as a stale result. Mutation:
+/// reading the stamp into a default and comparing it counts `stale` instead.
+#[test]
+fn take_counts_a_refused_stamp_read_as_a_conflict_not_as_stale() {
+    let (mut rig, ..) = fixture(false);
+    host(&mut rig, |h, slot, task| {
+        let cells = Arc::clone(&h.pool.cells);
+        let (stale, conflicts) = (h.pool.counters.stale.load(Ordering::Relaxed), h.pool.counters.conflicts.load(Ordering::Relaxed));
+        let guard = cells.0[slot].lock().unwrap();
+        assert!(!h.take(task, Outcome::Inline), "no usable result without its stamp");
+        drop(guard);
+        assert_eq!(h.pool.counters.stale.load(Ordering::Relaxed) - stale, 0, "not a stale result");
+        // Two refusals of the held lock, both conflicts: the key take-back of `home` and the stamp read.
+        assert_eq!(h.pool.counters.conflicts.load(Ordering::Relaxed) - conflicts, 2, "a refused lock is a conflict");
+        assert!(h.pool.silent[slot]);
+    });
 }

@@ -68,7 +68,8 @@ impl Host<'_, '_> {
     /// callback; publishing it would only wake a worker for the callback to take it back). The
     /// force-publish seam forces all of it but the window.
     fn fits(&self, slot: usize, at: StartAt) -> bool {
-        let left = self.pool.deadline(self.b).saturating_duration_since(Instant::now());
+        // The driver's own clock read, the one that decided the window (#293 item 2).
+        let left = at.left;
         #[cfg(feature = "testing")]
         let left = self.pool.set.slot_overrides(slot).budget_left.unwrap_or(left);
         let worst = self.pool.set.worst_case(slot).unwrap_or_default();
@@ -211,8 +212,14 @@ impl GraphHost for Host<'_, '_> {
     fn take(&mut self, task: usize, _: Outcome) -> bool {
         let Some(slot) = self.graph.slot(task) else { return true };
         let mut stamp = Stamp::default();
-        self.pool.cells.with(slot, |job| stamp = job.rendered);
+        let read = self.pool.cells.with(slot, |job| stamp = job.rendered);
         if !self.home(slot) {
+            self.pool.silent[slot] = true;
+            return false;
+        }
+        if !read {
+            // The cell's lock was refused: a protocol conflict, not a stale result (#293 item 5).
+            self.pool.counters.conflicts.fetch_add(1, Ordering::Relaxed);
             self.pool.silent[slot] = true;
             return false;
         }

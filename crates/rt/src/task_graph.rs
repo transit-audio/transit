@@ -40,7 +40,7 @@
 //! [`drive`] allocates. No `unsafe`.
 
 use crate::worker_set::{BlockReport, Outcome, Poll, Published, WorkerSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// FNV-1a offset basis (the edge hash).
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -397,12 +397,16 @@ pub struct StartAt {
     /// to be started, none is queued for the callback). A worker woken for it would only find the
     /// callback taking it back (G11 of the tail audit): a host may render it on the callback.
     pub alone: bool,
+    /// The time to the deadline at the window decision, from the same clock read (#293 item 2:
+    /// a host's fit decision uses it rather than a later read of its own); zero when Closed.
+    pub left: Duration,
 }
 
 impl From<Window> for StartAt {
-    /// A start in `window` with company (`alone` false): the host decides as before G11.
+    /// A start in `window` with company (`alone` false) and no deadline in sight (`left` the
+    /// longest duration when Open): for host tests that inject their own budget.
     fn from(window: Window) -> Self {
-        StartAt { window, alone: false }
+        StartAt { window, alone: false, left: if window == Window::Open { Duration::MAX } else { Duration::ZERO } }
     }
 }
 
@@ -509,9 +513,12 @@ impl Driver {
     }
 
     fn start(&mut self, host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, t: usize, phase: Phase) {
-        let window = if phase == Phase::Late || Instant::now() >= self.deadline { Window::Closed } else { Window::Open };
+        // One clock read decides the window and the time left the host's fit uses (#293 item 2).
+        let now = Instant::now();
+        let window = if phase == Phase::Late || now >= self.deadline { Window::Closed } else { Window::Open };
+        let left = if window == Window::Open { self.deadline.saturating_duration_since(now) } else { Duration::ZERO };
         let alone = window == Window::Open && host.set().pending() == 0 && !run.render_queued(graph);
-        let start = host.start(t, StartAt { window, alone });
+        let start = host.start(t, StartAt { window, alone, left });
         let Some(slot) = graph.slot(t) else {
             // Control work is executed by start/Ready or by the callback, never the worker set.
             if start == Start::Callback {
