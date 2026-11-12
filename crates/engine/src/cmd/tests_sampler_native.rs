@@ -243,3 +243,28 @@ fn previously_converted_pcm_round_trips_bit_identically() {
     reopened.execute("session.open", &json!({"path":s(&song)})).unwrap();
     assert!(same_bits(&reference, &render(&reopened, 2048)), "old referenced PCM is converted to its stored rate exactly as main did");
 }
+
+#[test]
+fn a_damaged_zero_rate_sampler_source_reads_at_the_session_rate() {
+    let d = Dir::new("zero-rate");
+    let (mut e, t) = loaded(44_100, triangle(44_100));
+    let sid = patch(&e, t).sources[0].source;
+    let song = d.path("zero.transit");
+    e.execute("session.save_as", &json!({"path": s(&song)})).unwrap();
+    // Damage the saved file: this source's stored rate becomes 0.
+    let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&song).unwrap()).unwrap();
+    for src in doc["sources"].as_array_mut().unwrap() {
+        src["sample_rate"] = json!(0);
+    }
+    std::fs::write(&song, serde_json::to_string(&doc).unwrap()).unwrap();
+    let mut back = Engine::default();
+    back.execute("session.open", &json!({"path": s(&song)})).unwrap();
+    assert_eq!(back.session().source(sid).unwrap().sample_rate, 48_000);
+    assert_eq!(back.session().pool.get(sid).unwrap().buffer.sample_rate, 48_000);
+    assert!(back.session().pool.get(sid).unwrap().frames() > 0);
+    let out = render(&back, 2048);
+    let length = out[0].iter().rposition(|v| *v != 0.0).map_or(0, |n| n + 1);
+    // The patch's stored region is in source frames (882), played one to one at the session rate.
+    assert_eq!(length, 882, "the stored region plays at the session rate");
+    assert!(back.messages.iter().any(|m| m.contains("sample rate was missing") && m.contains("48000 Hz")), "{:?}", back.messages);
+}

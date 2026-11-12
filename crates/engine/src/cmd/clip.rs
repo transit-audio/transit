@@ -152,7 +152,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Place Audio File",
             [],
             None,
-            "{source: id, track?: id|name (default: a new track), at?: position}",
+            "{source: id, track?: id|name (default: a new track), at?: position} — refused when the file's sample rate differs from the session rate (import it to the timeline instead)",
             always,
             |e, p| {
                 let src = p
@@ -162,11 +162,22 @@ pub fn specs() -> Vec<CommandSpec> {
                     .ok_or_else(|| bad("clip.place_source", "`source` id required"))?;
                 let at = position_param(e, "clip.place_source", p, "at")?.unwrap_or(e.session().edit.selection.start).max(0);
                 let track = track_param(e, "clip.place_source", p, "track")?;
-                let (name, frames, chans) = e
+                let (name, frames, chans, rate) = e
                     .session()
                     .source(src)
-                    .map(|x| (x.name.clone(), i64::try_from(x.frames).unwrap_or(0), usize::from(x.channels)))
+                    .map(|x| (x.name.clone(), i64::try_from(x.frames).unwrap_or(0), usize::from(x.channels), x.sample_rate))
                     .ok_or_else(|| bad("clip.place_source", "no such audio file"))?;
+                // A timeline clip plays its source at the session rate; a Sampler source keeps its native
+                // rate (ADR 0041), so on the timeline it would play at the wrong speed.
+                let session_rate = e.session().sample_rate.hz();
+                if rate != session_rate {
+                    return Err(bad(
+                        "clip.place_source",
+                        format!(
+                            "`{name}` is a {rate} Hz file and the session runs at {session_rate} Hz: import the file to the timeline instead (file.import_audio)"
+                        ),
+                    ));
+                }
                 let s = e.session_mut();
                 let t = match track {
                     Some(t) if s.track(t).is_some_and(|x| x.kind == transit_model::TrackKind::Audio) => t,

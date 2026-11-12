@@ -282,6 +282,7 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     let mut files = DecodedFiles::new();
     missing.extend(super::frozen_recording::load(&mut s, links));
     let sampler_sources = sampler_sources(&s);
+    repair_source_rates(&mut s, &sampler_sources);
     for src in &s.sources {
         let rate = if sampler_sources.contains(&src.id) { src.sample_rate } else { s.sample_rate.hz() };
         let decoded = stored_path(&src.path, links)
@@ -409,6 +410,18 @@ pub fn session_open_line(path: &str, s: &Session, missing_media: usize, took: st
 /// Sources whose frame coordinates are independent of the current session rate.
 pub(crate) fn sampler_sources(s: &Session) -> std::collections::HashSet<SourceId> {
     s.tracks.iter().filter_map(|t| t.instrument.as_ref()).flat_map(|i| i.sampler_patch.iter().flat_map(transit_model::SamplerPatch::media)).collect()
+}
+
+/// A Sampler source keeps its native rate in the session file (ADR 0041). A damaged file can store
+/// 0, which would decode at rate 0: such a source falls back to the session rate, with a load note.
+fn repair_source_rates(s: &mut Session, sampler_sources: &std::collections::HashSet<SourceId>) {
+    let session_rate = s.sample_rate.hz();
+    let mut notes = Vec::new();
+    for src in s.sources.iter_mut().filter(|x| x.sample_rate == 0 && sampler_sources.contains(&x.id)) {
+        src.sample_rate = session_rate;
+        notes.push(format!("{}: its sample rate was missing from the session, so it is read at the session rate ({session_rate} Hz)", src.name));
+    }
+    s.load_notes.extend(notes);
 }
 
 /// Decode one source's audio file at its requested stored or timeline rate.
@@ -543,6 +556,7 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
     let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
     let mut missing = Vec::new();
     let sampler_sources = sampler_sources(&s);
+    repair_source_rates(&mut s, &sampler_sources);
     for src in &s.sources {
         let rate = if sampler_sources.contains(&src.id) { src.sample_rate } else { s.sample_rate.hz() };
         match files.get(&src.path) {

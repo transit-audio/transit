@@ -59,7 +59,7 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
     let mut missing = frozen_notes;
     let sampler_sources = super::session::sampler_sources(&other);
     for src in needed.iter().filter_map(|sid| other.source(*sid)) {
-        let rate = if sampler_sources.contains(&src.id) { src.sample_rate } else { sr };
+        let rate = if sampler_sources.contains(&src.id) && src.sample_rate > 0 { src.sample_rate } else { sr };
         let mut ns = src.clone();
         ns.id = SourceId(s.alloc());
         match crate::io::stored_path(&src.path, Path::new(&path)) {
