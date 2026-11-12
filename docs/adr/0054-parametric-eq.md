@@ -3,7 +3,7 @@ title: Parametric EQ, a transparent built-in equalizer with up to 24 bands as fi
 -->
 # ADR 0054: Parametric EQ
 
-- **Status:** accepted 2026-11-12 (proposed 2026-11-11; settled after three judging rounds with edits; the product choices decided by the maintainer on 2026-11-11 and 2026-11-12: the seven design points, the decisions listed in Context, and the recommendations of the earlier open list); amended 2026-11-12, accepted, slice 1 measurements
+- **Status:** accepted 2026-11-12 (proposed 2026-11-11; settled after three judging rounds with edits; the product choices decided by the maintainer on 2026-11-11 and 2026-11-12: the seven design points, the decisions listed in Context, and the recommendations of the earlier open list); amended 2026-11-12, accepted, slice 1 measurements and shared FFT ownership (amendment item 6)
 - **Date:** 2026-11-12
 - **Implementation:** not started. Slices in the Slices section. Issue #233.
 - **Reopen when:** the portable math record (#437, #277) lands and changes a helper this device names; the zero-latency magnitude bounds of decision 2.5 are missed in the slice 1 measurement; a user needs a band frequency outside 20 Hz to 20 kHz, more than 24 bands, or a Q on the cuts; the linear-phase low-end resolution of decision 6.3 is reported as a problem even at Maximum, or a steep high cut needs a longer Natural correction than `D`; dynamic bands are designed (their own record); the CPU targets of decision 13 are missed; or the reference workstations' equalizers are found to agree on a behavior this record chose differently.
@@ -140,6 +140,15 @@ Measured in the same drafting sweep, maximum magnitude deviation from the analog
 | Low cut composites, 12 / 24 / 48 / 96 dB/oct, `f` to 20 kHz: matched | 1.93 / 1.61 / 0.83 / 0.19 dB | 1.49 / 0.89 / 0.23 / 0.01 dB | 0.12 / 0.00 / 0.00 / 0.00 dB |
 | Flat tilt, ±10 / ±30 dB: matched | 0.23 / 0.78 dB | 0.23 / 0.78 dB | 0.16 / 0.60 dB |
 | Shelves and tilt shelf | the factored design's table above | | |
+
+**Recorded figures: the 18 dB/oct cuts and 32 kHz (amended 2026-11-12, item 4d).** The table above has no 18 dB/oct row and no 32 kHz column. These are recorded figures, not bounds: the maximum deviation in dB between the designed cut and its analog prototype in the slice 1 sweep (decision 2.5's grid, 20 Hz to min(20 kHz, 0.45·fs)), after the Butterworth correction of item 4b, each pinned by the test at the measured value plus 0.05 dB.
+
+| Cut | 44.1 kHz | 48 kHz | 96 kHz | 192 kHz | 32 kHz | 384 kHz |
+|---|---|---|---|---|---|---|
+| Low cut, 18 dB/oct | 1.837 | 1.204 | 0.022 | 0.000 | 2.615 | 0.000 |
+| High cut, 18 dB/oct | 1.926 | 1.934 | 0.555 | 0.127 | 6.133 | 0.031 |
+
+The 32 kHz high-cut figures are the near-Nyquist case: measured from 20 Hz to 0.45·fs with the band frequency at 0.49·fs. The 32 and 384 kHz figures for every other slope and type are in item 4a's table.
 
 The largest residuals sit at the top of the range at 44.1 and 48 kHz: broad, deep bells and the high-Q sections of steep low cuts near 20 kHz, where a second-order digital section cannot follow a response that extends past Nyquist. With `f` at most a fifth of the rate the low cut sections stay within 0.73 dB at 44.1 kHz. The matched sections are minimum phase, but their phase near Nyquist is not the prototype's (up to about 100 degrees for a 15 kHz high cut at 44.1 kHz in the same sweep); that is what Natural phase fixes (decision 6.2).
 
@@ -303,7 +312,7 @@ Every transcendental call in a rendered path goes through the new crate's `math`
 
 - **When a band is designed** (control rate, only for moving bands): `exp2` (the log2-domain frequency and Q back to linear; the pole radius `e^(−ζω)` as `exp2(−ζω·LOG2_E)`, `LOG2_E` an f64 literal; `cosh` for real poles from two `exp2`), `cos` (the pole angle), `sin` (`sin²(ω/2)` at the match frequency and in the cancellation-free forms of 2.3; with `cos`, the `tan(ω_m/2)` of the σ-domain fit as their ratio). `sqrt` is IEEE-exact and needs no seam.
 - **When a parameter is set:** `log2` (smoother targets into the log2 domain), `exp2` (dB to linear for Output and the applied match gain as `exp2(dB/LOG2_TO_DB)`), and `log2` for the gain-match power to dB.
-- **In `prepare`:** `exp2` for the smoothers' one-pole coefficients (`time_coef`'s formula through `exp2`), `cos` for the Blackman-Harris windows, `cos` and `sin` for the correction filter's bin phasors (the FFT's twiddle table is built inside `transit_math::fft`).
+- **In `prepare`:** `exp2` for the smoothers' one-pole coefficients (`time_coef`'s formula through `exp2`), `cos` for the Blackman-Harris windows, `cos` and `sin` for the correction filter's bin phasors (`transit_math::fft` fills the caller-owned twiddle table during `prepare`).
 - **Per sample:** none. The section ticks, the encode and decode, the FIR and the convolution are arithmetic only.
 
 **The FFT is the shared `transit_math::fft`, not this crate's own** (amended 2026-11-12; ADR 0055 (accepted, landing separately), decision 2.7 and its slice 2b carry the specification; the equalizer carries no FFT of its own for rendered output). The requirements on it are that it is radix-2, real input, with power-of-two sizes from 256 to 524,288 (the linear-phase grid is `4·L` points, 16,384, 65,536 or 131,072 at 48 kHz by Resolution, times the rate class of decision 12, so 524,288 for Maximum at 176.4 and 192 kHz; the partition FFTs are `2P` points, 512 to 16,384), with its twiddles from the seam and a fixed arithmetic order. It must have landed before or with slice 5, the first slice that uses an FFT in the rendered path. `rustfft` is not used in a rendered path: its twiddles come from the platform, outside the seam, and its planner picks SSE, AVX or NEON code at run time (its documentation), so its rounding can differ between machines. The analyzer keeps `rustfft` (display only).
@@ -603,6 +612,8 @@ Setters clamp to the parameter ranges and read non-finite values as the default;
 - **At 384 kHz** every type is within 0.07 dB.
 - **Evidence (pinned since slice 1):** the full sweep at 32 and 384 kHz stays within these maxima plus 0.05 dB per type and slope (the slice 1 test `full_sweep.rs` pins all six rate columns), so a regression at those rates is caught.
 - **Help:** the help's phase-mode rows add one sentence: "The accuracy figures are for 44.1 kHz and above; at 32 kHz and below, bands in the top third of the range depart from their analog shape by several dB, and high cuts set near the top far more, as the curve shows."
+
+**4d. Recorded figures for the 18 dB/oct cuts and for 32 kHz (a review follow-up).** The main magnitude table of decision 2.5 had no 18 dB/oct row and no 32 kHz column, so the pinned figures were stated only in items 4a and 4b. They are now collected under that table as recorded figures, not bounds, each pinned by the test at the measured value plus 0.05 dB. Item 4a already holds the 32 and 384 kHz table for every type and slope, so it is not repeated; the main table points to it and adds only the 18 dB/oct low and high cut rows at 44.1, 48, 96, 192, 32 and 384 kHz (from item 4b's re-measurement). The 32 kHz high-cut figures are measured from 20 Hz to 0.45·fs with the band frequency at 0.49·fs, the near-Nyquist case. No figure changed.
 
 **To confirm when slice 2 is briefed** (from 4a): measure, below 0.45·fs at 32 kHz, the band pass, the shelves, the flat tilt, the low cuts and the high cuts at 6, 12, 18, 36 and 72 dB/oct. If the help's sentence or 4a's figures change, record them in this amendment.
 
