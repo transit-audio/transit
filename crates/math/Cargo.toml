@@ -15,5 +15,12 @@ publish = false
 # `pow`'s exact `sqrt` case.
 libm.workspace = true
 
+[dev-dependencies]
+# Tests and examples only, never linked into a rendered build (the layer check skips dev-dependencies):
+# rustfft for the FFT's comparison and bench (display code keeps it; rendered code may not, ADR 0055 2.7),
+# transit-rt's counting allocator for the FFT's no-allocation test (this crate stays free of unsafe).
+rustfft.workspace = true
+transit-rt = { workspace = true, features = ["testing"] }
+
 [lints]
 workspace = true

@@ -4282,6 +4282,8 @@ name = "transit-math"
 version = "0.7.0"
 dependencies = [
  "libm",
+ "rustfft",
+ "transit-rt",
 ]
 
 [[package]]
