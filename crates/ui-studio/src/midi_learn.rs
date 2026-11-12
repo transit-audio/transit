@@ -86,6 +86,8 @@ pub struct State {
     /// The learn menu's entries as last drawn (while it is open).
     pub menu: Vec<MenuItem>,
     pub window: [f32; 4],
+    /// The window's Range fields as last drawn, two a row (low, high), in row order.
+    pub range_fields: Vec<[f32; 4]>,
 }
 
 impl State {

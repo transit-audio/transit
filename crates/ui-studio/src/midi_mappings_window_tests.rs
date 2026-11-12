@@ -298,3 +298,38 @@ fn cells_are_centered_vertically_in_a_row() {
         assert!((cy(cell) - learn).abs() <= 1.0, "{cell:?} at {} vs Learn at {learn}", cy(cell));
     }
 }
+
+#[test]
+fn the_range_fields_have_one_width_that_fits_100_percent_and_line_up_across_rows() {
+    // #496: each field sized itself to its value, so the boxes did not line up row to row.
+    for ppp in [1.0, 1.5] {
+        let screen = (1920.0, 1080.0);
+        let (mut app, ctx, t) = new_app(screen.0, screen.1);
+        ctx.set_pixels_per_point(ppp);
+        map(&mut app, "KeyStep", &format!("track:{}:volume", t.0), 7);
+        app.run("midi.map", json!({"source": {"port": "Pads", "channel": "any", "kind": "cc", "number": 9}, "target": format!("track:{}:pan", t.0), "range": [0.05, 0.5]})).unwrap();
+        open(&mut app, &ctx, screen);
+        let mut time = 10.0;
+        let texts = texts_clipped(&mut app, &ctx, &mut time);
+        let fields = app.midi_learn.range_fields.clone();
+        assert_eq!(fields.len(), 4, "two fields in each of two rows at {ppp}");
+        let w = |r: [f32; 4]| r[2] - r[0];
+        for f in &fields {
+            assert!((w(*f) - w(fields[0])).abs() < 0.01, "one width at {ppp}: {fields:?}");
+        }
+        // The widest value fits: "100.0" and its "%" lie inside the field that shows them.
+        let hundred = texts.iter().find(|(t, ..)| t == "100.0").expect("100.0 is drawn").1;
+        let host = fields
+            .iter()
+            .find(|f| f[0] <= hundred.min.x && hundred.max.x <= f[2])
+            .unwrap_or_else(|| panic!("100.0 {hundred:?} inside a field {fields:?}"));
+        let pct =
+            texts.iter().filter(|(t, ..)| t == "%").map(|x| x.1).find(|r| r.min.x >= hundred.max.x - 0.5 && r.min.x < host[2]).expect("its % sign");
+        assert!(pct.max.x <= host[2] + 0.5, "the % of 100.0 inside the field at {ppp}: {pct:?} {host:?}");
+        // The low and high fields line up across the rows and stay inside the Range column.
+        let (lo1, hi1, lo2, hi2) = (fields[0], fields[1], fields[2], fields[3]);
+        assert!((lo1[0] - lo2[0]).abs() < 0.01 && (hi1[0] - hi2[0]).abs() < 0.01, "aligned at {ppp}: {fields:?}");
+        assert!(lo1[2] < hi1[0], "the low field ends before the high one starts");
+        assert!(hi1[2] - lo1[0] <= 144.0 + 0.01, "both fit the Range column at {ppp}: {fields:?}");
+    }
+}

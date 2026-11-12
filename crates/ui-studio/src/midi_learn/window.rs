@@ -8,7 +8,12 @@ fn kind_color(over: bool) -> Color32 {
 
 /// Natural widths of the table's fixed columns, then the least widths of its stretch columns.
 const COL_CH: f32 = 36.0;
-const COL_RANGE: f32 = 124.0;
+/// Every Range field takes one width, room for the widest value it shows (`100.0%`, about 65
+/// points in the drag value's font, measured), so the fields line up from row to row whatever
+/// their values (#496); the column holds the two fields and the gap between them.
+const RANGE_FIELD_W: f32 = 68.0;
+const RANGE_GAP: f32 = 8.0;
+const COL_RANGE: f32 = 2.0 * RANGE_FIELD_W + RANGE_GAP;
 const COL_THRU: f32 = 90.0;
 const COL_SCOPE: f32 = 176.0;
 const COL_LEARN: f32 = 90.0;
@@ -125,6 +130,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let dropped = app.midi_learn.dropped;
     let mut takeover = app.ui.midi_takeover;
     let mut actions: Vec<(usize, Action)> = Vec::new();
+    let mut range_fields = Vec::new();
     let r = crate::theme::window(ctx, "MIDI Mappings")
         .open(&mut open)
         .collapsible(false)
@@ -223,6 +229,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                             // A table cell lays out top down: the pair needs a row of its own, as
                             // tall as the table's row so the fields center in it.
                             ui.spacing_mut().interact_size.y = ROW_H;
+                            // One width for every field, the widest value's (#496): a drag value's
+                            // least size and its typing field's width are both `interact_size.x`.
+                            ui.spacing_mut().interact_size.x = RANGE_FIELD_W;
+                            ui.spacing_mut().item_spacing.x = RANGE_GAP;
                             let (a, b) = ui
                                 .horizontal(|ui| {
                                     let a = crate::chrome::field(ui, |ui| ui.add(egui::DragValue::new(&mut lo).range(0.0..=100.0).suffix("%").speed(0.5)));
@@ -230,6 +240,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                     (a, b)
                                 })
                                 .inner;
+                            range_fields.extend([mixer::r4(a.rect), mixer::r4(b.rect)]);
                             let now = [lo / 100.0, hi / 100.0];
                             let moved = (now[0] - row.range[0]).abs() > 1e-4 || (now[1] - row.range[1]).abs() > 1e-4;
                             if a.drag_stopped() || a.lost_focus() || b.drag_stopped() || b.lost_focus() {
@@ -287,6 +298,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         app.midi_learn.window = mixer::r4(rect);
         app.ui.midi_mappings.size = window_size([rect.width(), rect.height()], bounds).into();
     }
+    app.midi_learn.range_fields = range_fields;
     app.ui.midi_mappings.open = open;
     app.ui.midi_takeover = takeover;
     for (i, action) in actions {
