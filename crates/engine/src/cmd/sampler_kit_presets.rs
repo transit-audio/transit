@@ -57,7 +57,7 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// An error's message without the command prefix, for a notice.
-fn reason(err: EngineError) -> String {
+pub(super) fn reason(err: EngineError) -> String {
     match err {
         EngineError::BadParams(_, m) | EngineError::Io(m) => m,
         other => other.to_string(),
@@ -65,7 +65,7 @@ fn reason(err: EngineError) -> String {
 }
 
 /// The folder the session's relative source paths point into.
-fn session_folder(e: &Engine) -> Option<PathBuf> {
+pub(super) fn session_folder(e: &Engine) -> Option<PathBuf> {
     e.session().folder.clone().or_else(|| e.path.as_deref().and_then(|x| Path::new(x).parent().map(Path::to_path_buf)))
 }
 
@@ -149,7 +149,7 @@ fn save(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 /// Why a sample takes the missing state.
-enum Why {
+pub(super) enum Why {
     NotFound,
     /// Found, but its rate or length is not the kit's record (`expects`).
     Changed {
@@ -166,6 +166,8 @@ enum Plan {
     Found(PathBuf, Option<u64>),
     Reuse(SourceId),
     Missing(String, Why),
+    /// A session id of the saving session (#458): a new missing source, never resolved.
+    ById(SourceId),
 }
 
 /// A staged recall.
@@ -258,14 +260,28 @@ fn named(items: &[String]) -> String {
 }
 
 fn notice(stem: &str, old: &PatchV1, new: &PatchV1, missing: &[(usize, String, Why)], names: transit_midi::MiddleC) -> String {
-    let mut parts = Vec::new();
+    let mut parts = vec![found_line(&format!("Kit \"{stem}\""), new, missing)];
+    parts.extend(missing_lines(missing));
+    if new.pad_start_note != old.pad_start_note {
+        parts.push(StartChange { from: old.pad_start_note, to: new.pad_start_note }.notice(names));
+    }
+    parts.join(" ")
+}
+
+/// The notice's first sentence for `what` (`Kit "808"`): loaded, or the samples not found.
+pub(super) fn found_line(what: &str, new: &PatchV1, missing: &[(usize, String, Why)]) -> String {
     let not_found: Vec<String> =
         missing.iter().filter(|(_, _, w)| matches!(w, Why::NotFound)).map(|(_, path, _)| format!("{} ({path})", file_label(path))).collect();
     match not_found.len() {
-        0 => parts.push(format!("Kit \"{stem}\" loaded: {} pads, {} zones.", bound_pads(new).len(), new.zones.len())),
-        1 => parts.push(format!("Kit \"{stem}\": 1 sample was not found and plays silence: {}.", named(&not_found))),
-        n => parts.push(format!("Kit \"{stem}\": {n} samples were not found and play silence: {}.", named(&not_found))),
+        0 => format!("{what} loaded: {} pads, {} zones.", bound_pads(new).len(), new.zones.len()),
+        1 => format!("{what}: 1 sample was not found and plays silence: {}.", named(&not_found)),
+        n => format!("{what}: {n} samples were not found and play silence: {}.", named(&not_found)),
     }
+}
+
+/// The notice's sentences for the samples found but changed or unreadable.
+pub(super) fn missing_lines(missing: &[(usize, String, Why)]) -> Vec<String> {
+    let mut parts = Vec::new();
     let mut other = Vec::new();
     for (_, path, why) in missing {
         let name = file_label(path);
@@ -281,10 +297,7 @@ fn notice(stem: &str, old: &PatchV1, new: &PatchV1, missing: &[(usize, String, W
     if other.len() > NAMED {
         parts.push(format!("And {} more files play silence.", other.len() - NAMED));
     }
-    if new.pad_start_note != old.pad_start_note {
-        parts.push(StartChange { from: old.pad_start_note, to: new.pad_start_note }.notice(names));
-    }
-    parts.join(" ")
+    parts
 }
 
 /// The pool bytes of a source's decoded audio.
@@ -381,13 +394,37 @@ fn decode(
 fn prepare(e: &mut Engine, t: TrackId, file: &Path, kit: Value, refs: &[FileRef]) -> std::result::Result<Recalled, String> {
     #[cfg(test)]
     evidence::fail_worker_for(file);
+    let entries: Vec<Entry> = refs.iter().cloned().map(Entry::File).collect();
+    let (patch, missing) = resolve(e, file, kit, &entries)?;
+    // The staged session before the store: the live engine stores the same patch on it.
+    let session = e.session_arc();
+    store_with(e, LOAD, t, patch.clone(), true).map_err(reason)?;
+    Ok(Recalled { session, patch, missing })
+}
+
+/// A resolved portable kit: the patch, and the source indices that took the missing state with
+/// the path looked for and why.
+pub(super) type Resolved = (PatchV1, Vec<(usize, String, Why)>);
+
+/// The patch of the portable kit `kit` (from the file `file`) on `e`: each of `entries` resolved
+/// against `file`, admitted for the kit's own 128 MiB and decoded, or reused, or sent to the
+/// missing state, each as a session source of `e`. A session id (a track preset written before
+/// the portable form, #458) becomes a new missing source named `source <id>` with no path, never a
+/// source of this session. `Err`: the refusal's reason.
+pub(super) fn resolve(e: &mut Engine, file: &Path, kit: Value, entries: &[Entry]) -> std::result::Result<Resolved, String> {
     let folder = file.parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
     let empty = PatchV1::default();
     let mut total = 0u64;
     let mut reused: Vec<SourceId> = Vec::new();
+    let by_id = FileRef::default();
+    let refs: Vec<&FileRef> = entries.iter().map(|x| if let Entry::File(f) = x { f } else { &by_id }).collect();
     let mut plans = Vec::with_capacity(refs.len());
     // Admission from headers first, so an over-budget kit is refused before anything is decoded.
-    for f in refs {
+    for (entry, f) in entries.iter().zip(refs.iter().copied()) {
+        if let Entry::Session(old) = entry {
+            plans.push(Plan::ById(*old));
+            continue;
+        }
         let plan = match files::sample(&f.path, file) {
             Err((found, _)) => Plan::Missing(missing_path(found.as_deref(), &f.path, &folder), Why::NotFound),
             Ok(path) => {
@@ -420,6 +457,7 @@ fn prepare(e: &mut Engine, t: TrackId, file: &Path, kit: Value, refs: &[FileRef]
     for (i, (plan, f)) in plans.into_iter().zip(refs).enumerate() {
         let sid = match plan {
             Plan::Reuse(sid) => sid,
+            Plan::ById(old) => add_missing(e, &FileRef { name: format!("source {}", old.0), ..FileRef::default() }, ""),
             Plan::Missing(path, why) => {
                 let sid = add_missing(e, f, &path);
                 missing.push((i, path, why));
@@ -437,15 +475,11 @@ fn prepare(e: &mut Engine, t: TrackId, file: &Path, kit: Value, refs: &[FileRef]
         };
         ids.push(sid);
     }
-    let patch = match portable::with_sources(kit, &ids).state {
-        PatchState::Ready(p) => *p,
-        PatchState::Invalid { reason, .. } => return Err(format!("not a valid Sampler kit ({reason})")),
-        PatchState::Unknown { schema, .. } => return Err(format!("saved by a newer transit (Sampler kit schema {schema})")),
-    };
-    // The staged session before the store: the live engine stores the same patch on it.
-    let session = e.session_arc();
-    store_with(e, LOAD, t, patch.clone(), true).map_err(reason)?;
-    Ok(Recalled { session, patch, missing })
+    match portable::with_sources(kit, &ids).state {
+        PatchState::Ready(p) => Ok((*p, missing)),
+        PatchState::Invalid { reason, .. } => Err(format!("not a valid Sampler kit ({reason})")),
+        PatchState::Unknown { schema, .. } => Err(format!("saved by a newer transit (Sampler kit schema {schema})")),
+    }
 }
 
 /// One holder of a source other than the timeline's clips (see [`holders`]).

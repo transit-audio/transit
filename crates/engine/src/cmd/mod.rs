@@ -58,6 +58,7 @@ mod takes;
 mod track;
 mod track_height;
 mod track_more;
+mod track_preset_kit;
 mod transport;
 mod view;
 mod view_more;

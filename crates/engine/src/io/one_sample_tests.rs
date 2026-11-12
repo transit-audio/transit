@@ -162,7 +162,14 @@ fn a_track_preset_with_the_old_sampler_loads_as_an_empty_kit_and_keeps_the_targe
     let ins = e.session().track(to).unwrap().instrument.clone().unwrap();
     assert!(is_empty_kit(&ins), "{ins:?}");
     assert_eq!(ins.preset, "<factory default>", "the preset label is reset");
-    assert_eq!(e.messages, vec!["track \"Target\": the old one-sample Sampler was removed and is now an empty kit".to_string()]);
+    // The notes a session load shows for that track, its summary included (the same retire step, #458).
+    assert_eq!(
+        e.messages,
+        vec![
+            "track \"Target\": the old one-sample Sampler was removed and is now an empty kit".to_string(),
+            transit_model::legacy_sampler::summary(1)
+        ]
+    );
     assert_eq!(e.session().track(to).unwrap().automation.len(), 1, "the target track's lanes stay, as for any preset");
     let _ = std::fs::remove_dir_all(&dir);
 }

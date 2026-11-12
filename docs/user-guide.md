@@ -775,6 +775,17 @@ and the reverse; a sample on a network share is found only when the kit file is 
 share. A kit that cannot be recalled (saved by a newer transit, or not a kit) changes nothing, and
 the reason shows under the pads.
 
+A **track preset** (`track.save_preset`) of a Sampler track holds its kit the same way: each sample
+by its file, relative to the preset file when it is in or below the preset's folder. Loading the
+preset (`track.load_preset`) finds the samples by those paths in any session; a sample that is not
+found loads in the missing state and the status line names it. Saving is refused, with nothing
+written, while a sample has no file yet (save the session first). A track preset saved before
+0.7.1 named its samples by the old session's internal numbers, which mean nothing in another
+session: its zones load missing, and the status line says `track preset "Bass": its Sampler samples
+were saved by session id and cannot be found: load them again.` (an alpha break, nothing
+converted). A track preset that holds an instrument retired in an earlier release, such as the old
+Subtractive Synth, now loads exactly as an older session does, with the same notes.
+
 Through the control channel, `mix.sampler_kit_save` and `mix.sampler_kit_load` take any path (see
 the control protocol's Sampler kit presets section). **Load kit…** in the Pads bar is different:
 it fills the free pads from a folder of samples (its undo step is **Load Kit Folder**).

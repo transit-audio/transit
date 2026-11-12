@@ -2,6 +2,7 @@
 //! send bypass subsets, MIDI real-time properties, trim/VCA coalescing and target playlists.
 
 use super::more_util::{activate_playlist, target_playlist, track_key};
+use super::track_preset_kit as kit;
 use super::*;
 use crate::cmd;
 use serde_json::json;
@@ -70,13 +71,13 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             extract_midi
         ),
-        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?} — writes the track's type, width, mixer, inserts, sends and instrument as JSON to `path` with the extension .tpreset; returns the path written", has_selection, save_preset),
+        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?} — writes the track's type, width, mixer, inserts, sends and instrument as JSON to `path` with the extension .tpreset; a Sampler's samples by file (relative to the preset's folder when in or below it), refused for a sample with no file yet; returns the path written", has_selection, save_preset),
         cmd!(
             "track.load_preset",
             "Load Track Preset",
             [],
             None,
-            "{path, tracks?} — applies a saved track preset's mixer, inserts, sends and instrument",
+            "{path, tracks?} — applies a saved track preset's mixer, inserts, sends and instrument (retired devices replaced or removed as a session load does); a Sampler's samples are found by file, missing ones load silent and are named in `notice`; a kit this version cannot load refuses the whole preset",
             has_selection,
             load_preset
         ),
@@ -258,10 +259,15 @@ fn extract_midi(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 fn save_preset(e: &mut Engine, p: &Value) -> Result<Value> {
-    let path = str_param(p, "path").filter(|x| !x.trim().is_empty()).ok_or_else(|| bad("track.save_preset", "`path` required"))?.to_string();
-    let t = tracks_required(e, "track.save_preset", p)?;
-    let first = *t.first().ok_or_else(|| bad("track.save_preset", "no track"))?;
-    let tr = e.session().track(first).ok_or_else(|| bad("track.save_preset", "no track"))?;
+    let id = "track.save_preset";
+    let path = str_param(p, "path").filter(|x| !x.trim().is_empty()).ok_or_else(|| bad(id, "`path` required"))?.to_string();
+    let t = tracks_required(e, id, p)?;
+    let first = *t.first().ok_or_else(|| bad(id, "no track"))?;
+    let path = std::path::Path::new(&path).with_extension(PRESET_EXTENSION);
+    // A Sampler's samples are written by file, relative to the preset's own folder when below it
+    // (#458); refused, nothing written, for a sample with no file yet.
+    let folder = std::path::absolute(&path).unwrap_or_else(|_| path.clone()).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let tr = e.session().track(first).ok_or_else(|| bad(id, "no track"))?;
     let preset = json!({
         "format": PRESET_FORMAT,
         "version": 1,
@@ -269,13 +275,13 @@ fn save_preset(e: &mut Engine, p: &Value) -> Result<Value> {
         "kind": tr.kind.id(),
         "width": tr.format.label(),
         "color": tr.color,
-        "mixer": tr.mixer,
-        "instrument": tr.instrument,
+        "mixer": kit::mixer_value(&tr.mixer)?,
+        "instrument": kit::instrument_value(e, id, tr.instrument.as_ref(), &folder)?,
         "elastic": tr.elastic,
         "comments": tr.comments,
     });
     let text = serde_json::to_string_pretty(&preset).map_err(|err| EngineError::Io(err.to_string()))?;
-    let path = std::path::Path::new(&path).with_extension(PRESET_EXTENSION).to_string_lossy().into_owned();
+    let path = path.to_string_lossy().into_owned();
     crate::io::write_file(&path, text.as_bytes())?;
     Ok(json!({"path": path, "track": first}))
 }
@@ -292,45 +298,58 @@ fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
         Err(crate::file_tags::Refusal::Message(m)) => return Err(EngineError::Io(format!("{path}: {m}"))),
         Err(crate::file_tags::Refusal::Structural) => return Err(EngineError::Io(format!("{path}: not a transit track preset"))),
     };
-    let mut mixer: transit_model::Mixer =
-        serde_json::from_value(v.get("mixer").cloned().unwrap_or(Value::Null)).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
+    let mut mixer_value = v.get("mixer").cloned().unwrap_or(Value::Null);
+    kit::drop_insert_patches(&mut mixer_value);
+    let mut mixer: transit_model::Mixer = serde_json::from_value(mixer_value).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
     mixer.sanitize();
-    let mut instrument: Option<Insert> = v.get("instrument").cloned().and_then(|x| serde_json::from_value(x).ok());
-    // The retired one-sample Sampler (#455): the slot part of the load drop, an empty kit; the
-    // target track's lanes and mappings stay, as for any preset.
-    let one_sample = instrument.as_mut().and_then(transit_model::legacy_sampler::retire_slot).is_some();
-    let s = e.session_mut();
+    let instrument_value = v.get("instrument").cloned();
+    // The instrument's Sampler patch in the portable form (#458), resolved below.
+    let kit_value = instrument_value.as_ref().and_then(|x| x.get("sampler_patch")).filter(|x| !x.is_null()).cloned();
+    let instrument: Option<Insert> = instrument_value.and_then(|x| serde_json::from_value(x).ok());
+    let stem = std::path::Path::new(&path).file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
+    // The retire step a session load runs (the retired Subtractive Synth, the inherited effects,
+    // the one-sample Sampler, the old note mapping), on what each target track takes, with the
+    // notes a session load would show for it; the target's own lanes and mappings stay, as for any
+    // preset (#458, #455).
     let mut lines = Vec::new();
+    let mut targets = Vec::new();
     for t in &tracks {
-        if let Some(tr) = s.track_mut(*t) {
-            // Routing is session-specific: keep the track's own input/output, VCA and arm state.
-            let keep = (tr.mixer.input.clone(), tr.mixer.output.clone(), tr.mixer.vca, tr.mixer.record_arm, tr.mixer.pan.clone());
-            tr.mixer = mixer.clone();
-            tr.mixer.input = keep.0;
-            tr.mixer.output = keep.1;
-            tr.mixer.vca = keep.2;
-            tr.mixer.record_arm = keep.3;
-            if tr.mixer.pan.len() != keep.4.len() {
-                tr.mixer.pan = keep.4;
+        let Some(tr) = e.session().track(*t) else { continue };
+        let mut ins = if tr.kind == TrackKind::Instrument { instrument.clone() } else { None };
+        let mut mx = mixer.clone();
+        lines.extend(transit_model::legacy::retire_preset_slots(&tr.name, tr.kind, &mut ins, &mut mx));
+        let kit = kit_value.is_some() && ins.as_ref().is_some_and(|i| i.plugin == "sampler" && i.sampler_patch.is_some());
+        targets.push(kit::Target { track: *t, mixer: mx, instrument: ins, kit });
+    }
+    let mut notice = None;
+    match kit_value.filter(|_| targets.iter().any(|t| t.kit)) {
+        None => {
+            for t in &targets {
+                kit::apply(e.session_mut(), t);
             }
-            if tr.kind == TrackKind::Instrument && instrument.is_some() {
-                tr.instrument = instrument.clone();
-                if one_sample {
-                    lines.push(transit_model::legacy_sampler::track_line(&tr.name, None, &[]));
-                }
+        }
+        Some(value) => {
+            // Refused whole, nothing applied: a kit this version does not read, the budget, eight
+            // voices per note, or a staging failure.
+            let refuse = |why: String| EngineError::Io(format!("{path}: {why}; nothing was loaded"));
+            let (value, entries) = kit::read_kit(value).map_err(refuse)?;
+            let by_id = entries.iter().any(|x| matches!(x, transit_model::sampler_portable::Entry::Session(_)));
+            let file = std::path::absolute(&path).unwrap_or_else(|_| std::path::PathBuf::from(&path));
+            if let Some(resolved) = kit::load_with_kits(e, targets, &file, value, entries).map_err(refuse)? {
+                notice = kit::kit_notice(&stem, &resolved, by_id);
             }
         }
     }
-    for line in lines {
+    for line in lines.into_iter().chain(notice.clone()) {
         e.message(line);
     }
     // A preset saved before transit 0.7.0 (ADR 0049): the status line and the result say what to do.
     if tag == crate::file_tags::Tag::Legacy {
         let note = legacy_preset_note(&path);
         e.message(note.clone());
-        return Ok(json!({"tracks": tracks, "note": note}));
+        return Ok(kit::with_notice(json!({"tracks": tracks, "note": note}), notice.as_deref()));
     }
-    Ok(json!({"tracks": tracks}))
+    Ok(kit::with_notice(json!({"tracks": tracks}), notice.as_deref()))
 }
 
 fn bypass_where(e: &mut Engine, p: &Value, pick: fn(usize, Option<Category>) -> bool) -> Result<Value> {

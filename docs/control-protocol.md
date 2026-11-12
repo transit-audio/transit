@@ -195,6 +195,21 @@ The user's kits live in the settings folder under `presets/sampler/<name>.tkit`,
 Sampler's title-bar preset browser lists, recalls, saves and deletes them; the commands take any
 path.
 
+Track presets carry a Sampler instrument's kit in the same portable form (#458):
+`track.save_preset` writes `instrument.sampler_patch` with `file` entries (paths relative to the
+`.tpreset` file under the same rules) and is refused, nothing written, for a sample with no file of
+its own; no insert slot's Sampler patch is written (only the instrument slot plays one).
+`track.load_preset` resolves, admits and decodes the samples as `mix.sampler_kit_load` does, once
+per target track, in one undo step; a sample not found, changed or unreadable takes the missing
+state and the result's `notice` (also the status line) names it; any refusal (a kit this build does
+not read, a memory bound, eight voices per note) refuses the whole load with nothing applied. An
+entry naming a session `source` id (a preset written before 0.7.1) becomes a new missing source
+named `source <id>` with no path, never a source of the loading session, and `notice` says
+`track preset "<name>": its Sampler samples were saved by session id and cannot be found: load
+them again.` The preset's instrument and inserts go through the retire step a session load runs
+(the retired Subtractive Synth, the inherited effects, the one-sample Sampler, the old note
+mapping), with the same notes.
+
 | Command | Params | What it does |
 |---|---|---|
 | `mix.sampler_kit_save` | `{track?, path}` | Writes the track's kit to `path` with `.tkit` appended unless it already ends in `.tkit` (any case); another extension is never replaced (`808 v1.5` saves as `808 v1.5.tkit`). Not undoable, not journaled. Written as a session file is: to `<name>.tkit.tmp` beside it, flushed to disk and renamed over it; a failed write removes the temporary file and leaves an existing kit as it was. A sample missing at save time is written with its stored path and listed. Answers `{track, path, pads, zones, sources, relative, absolute, missing: [{zone, pad?, path}], notes}` (`notes` names samples in the session's `Audio Files/`, on which the kit then depends, and samples on another network share, which will be missing on recall). Refused with nothing written: an opaque patch (`this version cannot save the track's Sampler kit (it is kept as saved)`); a sample with no file of its own (`Pad A3's sample "Hit.wav" has no file yet: save the session, or load the sample onto the pad from a file.`); an existing file whose tag, version or kit schema this build does not read (`"808.tkit" was saved by a newer transit: Save As under another name`). |

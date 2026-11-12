@@ -64,6 +64,30 @@ pub fn drop_video_from_lanes(group: &mut Value) -> bool {
     dropped
 }
 
+/// The retire step a session load runs on its tracks (the retired Subtractive Synth, #234; the
+/// inherited effects, #264; the one-sample Sampler, #455; the Macro Oscillator's old note mapping,
+/// #243), run on what a track preset puts on track `name` of kind `kind`: its `instrument` and
+/// `mixer` (the inserts) change as a session's would, and the returned lines are the load notes a
+/// session load would show for that track (#458). The preset carries no lanes, mappings or rack
+/// macros, so nothing else is dropped.
+pub fn retire_preset_slots(name: &str, kind: crate::TrackKind, instrument: &mut Option<crate::Insert>, mixer: &mut crate::Mixer) -> Vec<String> {
+    let mut s = crate::Session::default();
+    let id = s.add_track(kind, crate::ChannelFormat::Stereo, Some(name));
+    let Some(t) = s.track_mut(id) else { return Vec::new() };
+    t.name = name.to_string();
+    t.instrument = instrument.take();
+    t.mixer = mixer.clone();
+    crate::legacy_synth::retire_subtractive_synth(&mut s);
+    crate::legacy_effects::retire_inherited_effects(&mut s);
+    crate::legacy_sampler::retire_one_sample_sampler(&mut s);
+    crate::legacy_mapping::migrate_session(&mut s);
+    if let Some(t) = s.track_mut(id) {
+        *instrument = t.instrument.take();
+        mixer.clone_from(&t.mixer);
+    }
+    std::mem::take(&mut s.load_notes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
