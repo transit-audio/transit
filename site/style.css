@@ -74,3 +74,24 @@ footer{padding-top:24px;padding-bottom:48px;border-top:1px solid var(--line);col
 @media (max-width:820px){.dls{grid-template-columns:1fr}.grid2,.shots{grid-template-columns:1fr}.plain.two{columns:1}}
 @media (max-width:600px){.cta{flex-direction:column;align-items:stretch}.cta .btn{width:100%}.hero{padding-top:40px;min-height:0;padding-bottom:300px}.backdrop{top:auto;bottom:0;height:300px}.backdrop img{width:140%;min-width:0;max-width:none;opacity:.6;transform:perspective(1600px) rotateX(16deg)}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+/* Screenshot lightbox (see the lightbox block in app.js) */
+a.shot{display:block;cursor:zoom-in;border-radius:8px}
+a.shot:focus-visible{outline:2px solid var(--signal);outline-offset:3px}
+html.lb-open{overflow:hidden}
+dialog.lb{position:fixed;inset:0;width:100vw;height:100vh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:transparent;color:var(--text);overflow:hidden}
+dialog.lb[open]{display:flex;align-items:center;justify-content:center;animation:lb-fade .15s ease-out}
+dialog.lb::backdrop{background:rgba(19,21,24,.94)}
+@media (prefers-color-scheme:light){dialog.lb::backdrop{background:rgba(244,245,247,.95)}}
+@keyframes lb-fade{from{opacity:0}to{opacity:1}}
+.lb-fig{margin:0;display:flex;flex-direction:column;align-items:center;max-width:96vw}
+.lb-fig img{display:block;width:auto;max-width:96vw;max-height:calc(92vh - 3.5rem);object-fit:contain;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.lb-fig figcaption{margin-top:10px;max-width:min(96vw,70ch);text-align:center}
+.lb-btn{position:fixed;display:flex;align-items:center;justify-content:center;min-width:44px;height:44px;padding:0 14px;font:inherit;font-size:1.4rem;line-height:1;color:var(--text);background:var(--raised);border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.lb-btn:hover{border-color:var(--signal)}
+.lb-btn:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.lb-close{top:12px;right:12px;font-size:1rem}
+.lb-prev,.lb-next{top:50%;margin-top:-22px}
+.lb-prev{left:8px}
+.lb-next{right:8px}
+@media (max-width:640px){.lb-prev,.lb-next{top:auto;bottom:12px;margin-top:0}.lb-prev{left:12px}.lb-next{right:12px}.lb-fig img{max-height:calc(92vh - 9rem)}}
+@media (prefers-reduced-motion:reduce){dialog.lb[open]{animation:none}}

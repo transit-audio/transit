@@ -89,3 +89,65 @@
     })
     .catch(fallback);
 })();
+
+// Screenshot lightbox: a native <dialog> opened with showModal(), no libraries. Without JavaScript
+// each screenshot is a plain link to the full image. Deep link: #shot=2 opens the second one.
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll("#screenshots a.shot"));
+  if (!links.length || typeof HTMLDialogElement === "undefined") return;
+  var dlg = document.createElement("dialog");
+  dlg.className = "lb";
+  dlg.setAttribute("aria-label", "Screenshot viewer");
+  dlg.innerHTML =
+    '<figure class="lb-fig"><img alt=""><figcaption></figcaption></figure>' +
+    '<button type="button" class="lb-btn lb-close" aria-label="Close">Close</button>' +
+    '<button type="button" class="lb-btn lb-prev" aria-label="Previous screenshot">\u2039</button>' +
+    '<button type="button" class="lb-btn lb-next" aria-label="Next screenshot">\u203a</button>';
+  document.body.appendChild(dlg);
+  var img = dlg.querySelector("img");
+  var cap = dlg.querySelector("figcaption");
+  var cur = 0, opener = null;
+  function show(i) {
+    cur = (i + links.length) % links.length;
+    var a = links[cur], src = a.querySelector("img");
+    img.src = a.getAttribute("href");
+    img.alt = src ? src.alt : "";
+    var fc = a.parentNode.querySelector("figcaption");
+    cap.textContent = fc ? fc.textContent : "";
+  }
+  function open(i, from) {
+    opener = from || links[i];
+    show(i);
+    if (!dlg.open) dlg.showModal();
+    document.documentElement.className += " lb-open";
+  }
+  links.forEach(function (a, i) {
+    a.addEventListener("click", function (e) {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button) return;
+      e.preventDefault();
+      open(i, a);
+    });
+  });
+  dlg.addEventListener("close", function () {
+    document.documentElement.className = document.documentElement.className.replace(/\s*\blb-open\b/, "");
+    img.removeAttribute("src");
+    if (opener) opener.focus();
+  });
+  dlg.addEventListener("click", function (e) {
+    var t = e.target;
+    if (t.closest(".lb-close")) dlg.close();
+    else if (t.closest(".lb-prev")) show(cur - 1);
+    else if (t.closest(".lb-next")) show(cur + 1);
+    else if (t === dlg || t.closest(".lb-fig") === null) dlg.close();
+  });
+  dlg.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowLeft") { e.preventDefault(); show(cur - 1); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); show(cur + 1); }
+  });
+  function fromHash() {
+    var m = /^#shot=(\d+)$/.exec(location.hash);
+    if (m && +m[1] >= 1 && +m[1] <= links.length) open(+m[1] - 1);
+  }
+  fromHash();
+  window.addEventListener("hashchange", fromHash);
+})();
