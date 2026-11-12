@@ -759,6 +759,7 @@ use session::{replace_with, write_synced};
 pub(crate) mod disk;
 pub use disk::{add_disk_source, copy_path};
 mod recording;
+mod save_media;
 pub use recording::{
     Recording, Take, add_recording, add_recording_take, live_span, place_recording, place_recording_take, plan_takes, plan_takes_with,
 };

@@ -234,16 +234,13 @@ mod tests {
         let back = r.session().sources.last().unwrap();
         assert!(back.disk);
         assert!(r.session().pool.get(back.id).is_some_and(|a| a.is_disk() && a.frames() == 480));
-        // Saved elsewhere, it points at the file where it is.
+        // Saved elsewhere, the new folder gets its own copy of the file (#573); the original stays.
         let other = TempDir::new("elsewhere");
         let moved = other.0.join("Moved.transit").to_string_lossy().into_owned();
         crate::io::save_session(&mut r, &moved).unwrap();
-        let p = r.session().sources.last().unwrap().path.clone();
-        assert!(Path::new(&p).is_absolute() && same_file(Path::new(&p), &path), "{p}");
-    }
-
-    fn same_file(a: &Path, b: &Path) -> bool {
-        std::fs::canonicalize(a).ok() == std::fs::canonicalize(b).ok()
+        assert_eq!(r.session().sources.last().unwrap().path, "Audio Files/Take_01.wav");
+        assert_eq!(std::fs::read(other.0.join("Audio Files").join("Take_01.wav")).unwrap(), bytes);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
     }
 
     #[test]

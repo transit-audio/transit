@@ -120,7 +120,32 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
             continue;
         }
         let Some(audio) = s.pool.get(src.id) else { continue };
-        // A disk-backed source's file is its audio (ADR 0035): referenced where it is, never rewritten.
+        // A disk-backed source's file is its audio (ADR 0035): never rewritten. A save references
+        // it where it is when it is the session folder's own, else copies it into `Audio Files`
+        // byte for byte (#573), before the session file is written, so the folder holds every
+        // file the session names; a copy that fails fails the save. An autosave copy
+        // (`overwrite`) references it where it is.
+        if let Some(disk) = audio.disk.as_ref().filter(|_| !overwrite) {
+            let path = match files.get(&Arc::as_ptr(audio)) {
+                Some(path) => path.clone(),
+                None => {
+                    let path = match super::save_media::in_session_folder(&dir, disk.path()) {
+                        Some(path) => path,
+                        None => {
+                            make_dir(&audio_dir)?;
+                            let (name, new) = super::save_media::bring_into(&audio_dir, disk.path(), disk.frames(), disk.channels())?;
+                            written += usize::from(new);
+                            format!("Audio Files/{name}")
+                        }
+                    };
+                    files.insert(Arc::as_ptr(audio), path.clone());
+                    path
+                }
+            };
+            src.path = path;
+            src.unsaved = false;
+            continue;
+        }
         if audio.is_disk() {
             continue;
         }
