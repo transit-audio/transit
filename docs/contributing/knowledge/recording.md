@@ -30,7 +30,13 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   Cycle was on is cut at each wrap into one clip per lap; a note held across the loop end is cut
   there and resumes at offset zero in the next lap with the same pitch and velocity, repeating
   at each wrap until the real release. Each loop lap stays exactly loop-length; a release exactly
-  at the loop end produces no remainder. Journal recovery uses the same rule.
+  at the loop end produces no remainder. Journal recovery uses the same rule. Audio takes are cut by
+  the same laps (`crates/engine/src/take_laps.rs`, shared with `build_wrapping`, #567): the host
+  writes the take's loop into the plan (`Recording::cycle`), so Stop and crash recovery cut an audio
+  take that ran past the loop end exactly as its MIDI. One recording keeps the newest
+  `take_laps::MAX_LAPS` (10,000) laps; the engine says how many earlier laps were left out and the
+  status line shows it (#522). Placing the takes on Stop costs time that grows with the square of
+  the lap count, which is why there is a limit.
 - **Count-in pickups** (#327, Logic's behavior; ADR 0026 amendment): the audio thread also
   captures MIDI while a record count-in runs (`service_midi` in `player/audio.rs`), stamped with the
   device output frame like any captured event. That frame runs on through the count-in to the
