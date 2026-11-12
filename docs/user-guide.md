@@ -684,12 +684,23 @@ much is used. On the bench a looping slice shows a magenta band under its flag, 
 its number, and its crossfade as a hatch at its end.
 
 To fill a kit from a folder, choose **Load kit…** in the Pads bar. Pick a folder, review the
-file count and pad range, then choose **Load kit**. Cancel leaves the kit unchanged. **Expand to rack…** beside it is not available yet. A refusal
+file count and pad range, then choose **Load kit**. Cancel leaves the kit unchanged. When the kit
+already has loaded pads, transit asks what to do before anything changes: **Replace** makes the
+folder the kit from pad A1 on, as it would load into an empty kit: each pad it fills is cleared
+first (its name, choke group, mute, solo and settings go; its trigger note stays), a pad bound to
+a slice is replaced like any other, and pads after the last file, the slice markers and the slice
+loop stay as they are. A replaced sample leaves the session when nothing else uses it.
+**Fill free pads** (the default, Enter) puts the files on the free pads and leaves the loaded pads
+alone; it is unavailable, with the reason, when the folder has more files than free pads.
+**Cancel** (Escape) changes nothing. The question previews the files and pads of each choice and
+says how many loaded pads, and how many slices among them, Replace would replace. Either choice is
+one undo step. **Expand to rack…** beside it is not available yet. A refusal
 appears under the pads in the engine's words. Loading currently waits for the folder to finish
-decoding. Through the control channel, use `mix.sampler_load_kit` with the track and `folder`,
+decoding, and transit does not respond until it has (a load with progress and cancel is planned
+for the next release, #450). Through the control channel, use `mix.sampler_load_kit` with the track and `folder`,
 and `preview: true` to see the assignments. WAV, AIFF and FLAC files
 are ordered by filename without regard to case and placed on the first free pads, A1 through
-D16. Occupied pads, including slices, stay as they are. Subfolders, hidden files, links and
+D16. Occupied pads, including slices, stay as they are, unless you choose Replace (`replace: true`). Subfolders, hidden files, links and
 other files are ignored; SFZ mappings are listed but never executed. Files stay where they are,
 referenced by path. The whole kit loads in one undo step. If it cannot fit, a file cannot be
 read, or an audio limit is exceeded, nothing loads and the result names the reason and counts.

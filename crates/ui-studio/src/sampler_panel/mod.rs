@@ -45,6 +45,8 @@ mod drop_routing_tests;
 #[cfg(test)]
 mod grid_tests;
 #[cfg(test)]
+mod kit_load_ask_tests;
+#[cfg(test)]
 mod kit_load_tests;
 #[cfg(test)]
 mod kit_presets_tests;

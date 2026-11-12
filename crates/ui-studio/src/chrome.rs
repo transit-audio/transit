@@ -120,6 +120,8 @@ pub struct ButtonLayout {
     pub text: String,
     /// The default style (`signal` fill).
     pub default: bool,
+    /// Whether it takes input (an unavailable choice does not).
+    pub enabled: bool,
 }
 
 /// The default button: `signal` fill, ink `surface.inset`, Sans 600 12, 26 high with 16 px a
@@ -145,7 +147,7 @@ pub fn default_button(ui: &mut Ui, text: &str) -> (Response, ButtonLayout) {
     let p = ui.painter();
     p.rect_filled(rect, c::RADIUS_CONTROL, fill);
     p.text(rect.center(), Align2::CENTER_CENTER, text, c::DEFAULT_BUTTON_FONT.font_id(ui.ctx()), ink);
-    (resp, ButtonLayout { rect: r4(rect), fill, ink, text: text.to_string(), default: true })
+    (resp, ButtonLayout { rect: r4(rect), fill, ink, text: text.to_string(), default: true, enabled })
 }
 
 /// A standard button, recorded: egui's button (borderless `surface.raised`), exactly 26 high with
@@ -164,7 +166,7 @@ pub fn button(ui: &mut Ui, text: &str) -> (Response, ButtonLayout) {
     } else {
         t.surface_raised
     };
-    let layout = ButtonLayout { rect: r4(resp.rect), fill, ink: t.text, text: text.to_string(), default: false };
+    let layout = ButtonLayout { rect: r4(resp.rect), fill, ink: t.text, text: text.to_string(), default: false, enabled: ui.is_enabled() };
     (resp, layout)
 }
 
@@ -230,6 +232,23 @@ pub fn modal_frame(t: &Tokens) -> egui::Frame {
 /// this frame: a click, or the keys. Enter is the default button and Escape is Cancel, as in Live
 /// and Logic (the chrome document: "Enter = default, Escape = Cancel").
 pub fn modal(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>) -> Option<Choice> {
+    modal_with(ctx, id, ask, Primary::Enter)
+}
+
+/// How a modal's rightmost button (`Ask::default`) answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Primary<'a> {
+    /// The default button: the default style, and Enter performs it.
+    Enter,
+    /// A standard button that must be clicked: Enter does nothing (a destructive action with no
+    /// default, as deleting a kit file).
+    Plain,
+    /// A standard button that takes no input, its reason on hover; Enter does nothing.
+    Unavailable(&'a str),
+}
+
+/// [`modal`] with the rightmost button as `primary` says; Escape is Cancel either way.
+pub fn modal_with(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>, primary: Primary<'_>) -> Option<Choice> {
     let t = &TOKENS;
     let frame = modal_frame(t);
     // The content width that makes the outer width 380: the padding and the 1 px edge each side.
@@ -257,7 +276,14 @@ pub fn modal(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>) -> Option<Choice>
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (d, dl) = default_button(ui, ask.default);
+                let (d, dl) = match primary {
+                    Primary::Enter => default_button(ui, ask.default),
+                    Primary::Plain => button(ui, ask.default),
+                    Primary::Unavailable(why) => {
+                        let (r, l) = ui.add_enabled_ui(false, |ui| button(ui, ask.default)).inner;
+                        (r.on_disabled_hover_text(why), l)
+                    }
+                };
                 let (cb, cl) = button(ui, ask.cancel);
                 layout.buttons.push(cl);
                 layout.buttons.push(dl);
@@ -272,14 +298,14 @@ pub fn modal(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>) -> Option<Choice>
     });
     layout.rect = r4(shown.response.rect);
     ctx.data_mut(|d| d.insert_temp(modal_key(id), layout));
-    choice.or_else(|| modal_keys(ctx))
+    choice.or_else(|| modal_keys(ctx, primary == Primary::Enter))
 }
 
-/// The modal's keys this frame: Enter is the default button, Escape is Cancel.
-fn modal_keys(ctx: &egui::Context) -> Option<Choice> {
+/// The modal's keys this frame: Enter is the default button (when there is one), Escape is Cancel.
+fn modal_keys(ctx: &egui::Context, default: bool) -> Option<Choice> {
     use crate::shortcuts::{Action, hit};
     let (enter, escape) = ctx.input(|i| (hit(i, Action::DialogConfirm), hit(i, Action::DialogCancel)));
-    if enter {
+    if enter && default {
         Some(Choice::Default)
     } else if escape {
         Some(Choice::Cancel)

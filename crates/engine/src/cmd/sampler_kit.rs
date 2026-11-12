@@ -1,7 +1,17 @@
 //! Atomic folder-to-pad import. A worker stages the complete candidate using the same source
 //! helper as pad drops. Only an admitted candidate reaches the live document, as one undo step.
+//!
+//! The caller states what happens to loaded pads (#465; the engine never guesses and never asks):
+//! without `replace` the files fill the free pads ascending and a folder with more files than free
+//! pads is refused. With `replace: true` the folder fills pads from A1 as a load into an empty kit
+//! does: each pad it fills is first cleared as Clear pad clears one (its zone, and with it any
+//! slice binding, its name, choke group, mute and solo; its trigger note stays) and the slot
+//! controls of the zones it removes and fills are reset, so nothing of the old sample carries over;
+//! pads past the folder's file count, the slice loop and its markers stay as they are. The replaced
+//! pads' referenced sources nothing else names then leave the session, by kit recall's rule.
 
 use super::sampler::instrument_track;
+use super::sampler_kit_presets::prune;
 use super::sampler_patch::{NewSource, add_audio, admit_patch, admit_source, patch_of, resolve_path, source_param, store};
 use super::*;
 use crate::cmd;
@@ -17,7 +27,7 @@ const ID: &str = "mix.sampler_load_kit";
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(@spec false, true, false;
         "mix.sampler_load_kit", "Load Kit Folder", [], None,
-        "{track?, folder: path, preview?: false}: immediate WAV/AIFF/FLAC files, case-folded name order, free pads ascending, referenced by path, one undo step; preview probes headers only → {track, loaded, pads: [{pad, zone, file, frames, channels}], ignored, first_pad, last_pad}; refusal → {loaded: 0, skipped, needed, free, offender?, notice, files}",
+        "{track?, folder: path, preview?: false, replace?: false}: immediate WAV/AIFF/FLAC files, case-folded name order, referenced by path, one undo step; without replace they fill the free pads ascending (refused when more files than free pads); replace: true fills pads from A1, each filled pad cleared first (zone, slice binding, name, choke, mute, solo, zone controls; its note stays), later pads, the slice loop and its markers kept, replaced sources nothing names leave the session; preview probes headers only → {track, loaded, pads: [{pad, zone, file, frames, channels}], ignored, first_pad, last_pad, replace, replaced, replaced_slices}; refusal → {loaded: 0, skipped, needed, free, offender?, notice, files}",
         has_selection, load
     )]
 }
@@ -33,6 +43,14 @@ struct Plan {
     pads: Vec<u8>,
     zones: Vec<u16>,
     ignored: Vec<String>,
+}
+
+/// What clearing the pads a replace fills took away: the loaded pads, and how many of them were
+/// bound to a slice.
+#[derive(Default)]
+struct Cleared {
+    pads: usize,
+    slices: usize,
 }
 
 impl Plan {
@@ -56,20 +74,60 @@ fn load(e: &mut Engine, p: &Value) -> Result<Value> {
         None => false,
         Some(v) => v.as_bool().ok_or_else(|| bad(ID, "`preview` must be true or false"))?,
     };
+    let replace = match p.get("replace") {
+        None => false,
+        Some(v) => v.as_bool().ok_or_else(|| bad(ID, "`replace` must be true or false"))?,
+    };
     let folder = resolve_path(e, ID, given)?;
-    let candidate = stage(e, "Load kit", move |staged| prepare(staged, t, &folder, preview))?;
+    let candidate = stage(e, "Load kit", move |staged| prepare(staged, t, &folder, preview, replace))?;
     match candidate {
         Err(refusal) => Ok(refusal),
         Ok(candidate) => {
             if !preview {
+                let old = if replace { referenced(&patch_of(e.session(), ID, t)?) } else { Vec::new() };
                 // The staged session still has the old patch, so checked store compares the
                 // real before/after layer counts. All source additions belong to this one step.
                 *e.session_mut() = (*candidate.session).clone();
                 store(e, ID, t, candidate.patch)?;
+                // Kit recall's rule, in this same step: a replaced pad's source leaves the session
+                // only when nothing else names it.
+                prune(e, &old);
             }
             Ok(candidate.result)
         }
     }
+}
+
+/// The patch's referenced sources (the ones a replace may leave unnamed).
+fn referenced(patch: &PatchV1) -> Vec<SourceId> {
+    patch.sources.iter().filter(|r| r.ownership == Ownership::Referenced).map(|r| r.source).collect()
+}
+
+/// Clears pads `0..n` of `patch` as Clear pad clears a pad: the bound zone goes (with its slice
+/// binding and its slot controls), and the name, choke group, mute and solo return to their
+/// defaults; the trigger note stays. Sources no zone or loop uses any more drop out of the patch.
+fn clear_pads(patch: &mut PatchV1, n: usize) -> Cleared {
+    let mut cleared = Cleared::default();
+    for pad in (0..PADS as u8).take(n) {
+        let entry = patch.pad(pad);
+        if let Some(z) = entry.zone {
+            cleared.pads += 1;
+            if patch.zone(z).is_some_and(|zone| zone.slice.is_some()) {
+                cleared.slices += 1;
+            }
+            patch.zones.retain(|zone| zone.id != z);
+            reset_controls(patch, z);
+        }
+        patch.set_pad(PadEntry { zone: None, name: None, choke: 0, mute: false, solo: false, ..entry });
+    }
+    patch.drop_unused_sources();
+    cleared
+}
+
+/// Removes zone `z`'s slot controls (`zoneNNN_...`), so they read their defaults again.
+fn reset_controls(patch: &mut PatchV1, z: u16) {
+    let prefix = format!("zone{:03}_", z + 1);
+    patch.controls.retain(|id, _| !id.starts_with(&prefix));
 }
 
 /// Runs `work` on a worker thread over a staged engine holding a clone of `e`'s session, inside the
@@ -93,17 +151,35 @@ pub(super) fn stage<T: Send + 'static>(e: &Engine, what: &str, work: impl FnOnce
     worker.join().map_err(|_| EngineError::Io(format!("{what}: import worker failed; nothing was loaded")))
 }
 
-fn prepare(e: &mut Engine, t: TrackId, folder: &std::path::Path, preview: bool) -> std::result::Result<Candidate, Value> {
+fn prepare(e: &mut Engine, t: TrackId, folder: &std::path::Path, preview: bool, replace: bool) -> std::result::Result<Candidate, Value> {
     let mut plan = Plan { paths: Vec::new(), pads: Vec::new(), zones: Vec::new(), ignored: Vec::new() };
     let listing = files::folder(folder).map_err(|err| plan.refusal(err, None))?;
     plan.paths = listing.files;
     plan.ignored = listing.ignored;
     let mut patch = patch_of(e.session(), ID, t).map_err(|err| plan.refusal(err.to_string(), None))?;
-    plan.pads = (0..PADS as u8).filter(|pad| patch.pad(*pad).zone.is_none()).collect();
-    plan.zones = (0..ZONES as u16).filter(|zone| patch.zone(*zone).is_none()).collect();
+    let free = |p: &PatchV1| (0..PADS as u8).filter(|pad| p.pad(*pad).zone.is_none()).collect::<Vec<u8>>();
+    plan.pads = free(&patch);
     let needed = plan.paths.len();
     if needed == 0 {
         return Err(plan.refusal(format!("No audio files in {}.", folder.display()), None));
+    }
+    let mut cleared = Cleared::default();
+    if replace {
+        if needed > PADS {
+            let mut refusal = plan.refusal("not enough pads", None);
+            refusal["notice"] = json!(format!("Load kit needs {needed} pads; a Sampler has {PADS}."));
+            return Err(refusal);
+        }
+        // The pads the folder fills are cleared first, so they are the first free pads and the
+        // load fills them from A1 as it would an empty kit.
+        cleared = clear_pads(&mut patch, needed);
+        plan.pads = free(&patch);
+    }
+    plan.zones = (0..ZONES as u16).filter(|zone| patch.zone(*zone).is_none()).collect();
+    if replace {
+        for zone in plan.zones.iter().take(needed) {
+            reset_controls(&mut patch, *zone);
+        }
     }
     if needed > plan.pads.len() {
         let mut refusal = plan.refusal("not enough free pads", None);
@@ -167,7 +243,17 @@ fn prepare(e: &mut Engine, t: TrackId, folder: &std::path::Path, preview: bool) 
     Ok(Candidate {
         session,
         patch,
-        result: json!({"track": t, "loaded": needed, "pads": rows, "ignored": plan.ignored, "first_pad": plan.pads[0] + 1, "last_pad": plan.pads[needed - 1] + 1}),
+        result: json!({
+            "track": t,
+            "loaded": needed,
+            "pads": rows,
+            "ignored": plan.ignored,
+            "first_pad": plan.pads[0] + 1,
+            "last_pad": plan.pads[needed - 1] + 1,
+            "replace": replace,
+            "replaced": cleared.pads,
+            "replaced_slices": cleared.slices,
+        }),
     })
 }
 

@@ -461,8 +461,9 @@ fn named_elsewhere(e: &Engine, sid: SourceId) -> bool {
 }
 
 /// Removes each of `old` (the replaced kit's referenced sources) that nothing names any more from
-/// the session's sources, its pool and the source selection. The file is never touched.
-fn prune(e: &mut Engine, old: &[SourceId]) {
+/// the session's sources, its pool and the source selection. The file is never touched. Load Kit
+/// Folder's replace (#465) prunes the replaced pads' sources through this same rule.
+pub(super) fn prune(e: &mut Engine, old: &[SourceId]) {
     let gone: Vec<SourceId> = old.iter().copied().filter(|sid| !named_elsewhere(e, *sid)).collect();
     if gone.is_empty() {
         return;

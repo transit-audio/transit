@@ -383,3 +383,6 @@ fn kit_decode_failure_after_header_preview_discards_all_staged_sources() {
     assert!(Arc::ptr_eq(&before, &e.session_arc()));
     assert_eq!(e.undo_history().len(), steps);
 }
+
+#[path = "tests_sampler_kit_replace.rs"]
+mod replace;

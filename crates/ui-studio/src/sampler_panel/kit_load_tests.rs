@@ -48,7 +48,8 @@ fn load_kit_previews_then_loads_the_panels_track_in_one_undo_step() {
     assert_eq!(serde_json::to_value(t.app.engine.session()).unwrap(), before_preview, "preview edits nothing");
     assert_eq!(t.undo_len(), undo);
     let preview = modal(&t, tr);
-    assert_eq!(preview.detail_text.as_deref(), Some("2 files · pads A4–A5"));
+    // The kit has loaded pads, so the question is asked (#465); Enter is Fill free pads.
+    assert!(preview.detail_text.as_deref().unwrap().ends_with("\nFill free pads: 2 files · pads A4–A5. Loaded pads stay as they are."));
     t.key("Enter");
     assert_eq!(t.undo_len(), undo + 1);
     let patch = t.patch(tr);
