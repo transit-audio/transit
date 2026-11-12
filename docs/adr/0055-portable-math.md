@@ -174,7 +174,7 @@ The ported firmware crates are portable already, apart from five call sites: the
   A false result increments an engine status counter ("floating-point mode restored", shown with the other render counters) and logs the thread once. During an offline render a repair counts and logs and does not fail the export (proposed; open for the maintainer): failing would let a plug-in's habit on another thread abort a bounce, and the repair happens before the render code runs on that thread. The repair cannot make sound what ran before it; that was the foreign code's breach. It stops the mode reaching transit's code.
 
   Tests: the forced mode is set and the guard's own instruction sequence (shared through a macro) runs inside one test `asm!` block, which returns what it read and what it left, so no Rust code runs in the forced mode. Cases: each mode bit on x86_64 and AArch64, the sticky flags alone (no trip). Thread inheritance is not tested by forcing a mode on a creating thread: creating a thread runs Rust code, so that test would itself run Rust code in the forced mode. It is covered by construction instead (the pool's start handler and `worker_main` call the guard before any render code), proven by a test-only counter that each new offline-pool worker and each render worker called `ensure_default` before its first job.
-- **Hosted plug-ins get no mode from transit.** They manage their own denormals, as plug-in frameworks commonly do (not verified). Setting flush-to-zero around their calls would need an assembly trampoline whose whole call stays inside one `asm!` block, and host callbacks made by the plug-in during processing would run transit's Rust code in that mode. Not in v1 (open question 3).
+- **Hosted plug-ins get no mode from transit.** They manage their own denormals, as plug-in frameworks commonly do (not verified). Setting flush-to-zero around their calls would need an assembly trampoline whose whole call stays inside one `asm!` block, and host callbacks made by the plug-in during processing would run transit's Rust code in that mode. Not in v1 (settled as recommended, Open for the maintainer).
 - **Software denormal flushing stays, and becomes a rule.** transit's own state flushes (`util::flush` in `transit-dsp` and `transit-instrument-core`, ADR 0053 decision 8) are arithmetic and portable. With no hardware mode, every recursive state in a rendered crate must flush in software or reach exactly zero: filter and envelope states, feedback and delay lines, reverb tails, smoothers that approach zero. Not every device does today. By reading, the Expander/Gate detector `env = level.max(env * env_rel)` (`plugins/dynamics.rs`) has no flush: in silence it decays until multiplying by `env_rel` rounds back to the same subnormal value, and stays there.
 
   Enforcement (slice 5):
@@ -255,15 +255,26 @@ Order: 1, 2 and 3 in any order; 4a to 4e in order, after 2 and 3; 5 after 2, bef
 - **Clippy `disallowed_methods` as the only check:** no report mode under `-D warnings` and no per-crate scope without duplicated configuration (5.1).
 - **Promising identical output across block sizes:** built-ins take automation at block starts; making every built-in sample-accurate is a separate decision.
 
-## Open questions for the maintainer
+## Open for the maintainer
 
-1. **Real-time playback in the promise?** Recommendation: no. Overruns and device block sizes make it timing-dependent; the promise is for offline renders.
-2. **Depend on `libm` with an exact pin, or vendor the functions?** Recommendation: depend with `=0.2.16`; vendor only if an upstream change is unwanted.
-3. **Flush-to-zero around hosted plug-in calls?** Recommendation: no in v1; reopen on a measured slowdown.
-4. **Make Opus bytes identical** (build libopus with `-ffp-contract=off` and `/fp:strict` and route its math)? Recommendation: no; the encoder's input is promised, a lossy file's bytes are not worth the C build discipline.
-5. **CI runners for aarch64 Linux or x86_64 macOS?** Recommendation: no new runner; the Pi 5 benchmark run includes the golden test.
-6. **Convert the inherited effects ADR 0040 will retire, or exempt them?** Recommendation: convert; each is a few call sites, and the promise then has no device exceptions.
-7. **The 25 % cost budget** (6.1)? Recommendation: accept it as the trigger for a fast variant, revisited with the slice 2 numbers.
+The maintainer has not ruled on these. Each proposed text below is the shared recommendation of the record's author and its first judging round, and is what the record says until the maintainer decides; the alternative is what changes if the maintainer chooses it.
+
+1. **Scope: offline renders only** (decision 1). Proposed: the promise covers offline renders (bounce, export, freeze, commit and consolidate, AudioSuite of built-ins, offline edits, import resampling, analyses that write session data); not real-time playback, hosted plug-ins, lossy-decoded sources or Opus bytes. It is what "a bounce" means and what transit controls. Alternative: include real-time playback, which would need overrun-free rendering and the device's block size fixed to the offline one, a separate design.
+2. **Pin `libm` in the workspace** (2.1). Proposed: `libm = "=0.2.16"` as the workspace entry, with 2.1's upgrade procedure (tables hold: ordinary change; a table moves: a DSP change recaptured in one commit and announced). Alternative: vendor the v1 functions' source into `transit-math`, which freezes them against upstream at the cost of owning the code.
+3. **Existing renders change once, announced under Changed** (6.2). Proposed: no shim (alpha), and the release that carries slice 4b says "Renders are now bit-identical on Windows, Linux and macOS; renders of existing sessions differ slightly from earlier builds." Alternative: keep a platform-math path for old sessions, which this record rejects as a shim.
+4. **The cost budget** (6.1). Proposed: at most 25 % per device, measured with a release build as the median of five runs before and after on one named reference machine; a device over budget converts only with a fast variant (2.5, by amendment) or a restructuring that brings it within budget. Alternative: a different figure, or no budget (convert regardless and record the cost).
+5. **Convert the inherited effects ADR 0040 will retire** (slice 4c). Proposed: convert them; each is a few call sites, and the promise then has no device exceptions. Alternative: exempt them from the promise until they are retired, listed by name under "Not promised", if their retirement is close enough to make the work moot.
+6. **A guard repair during an offline render** (decision 4). Proposed: count it and log it, and do not fail the export. Failing would let a plug-in's habit on another thread abort a bounce, and the repair runs before render code on that thread. Alternative: fail the render and report the thread, which makes any repair visible at the cost of aborted exports.
+7. **Exact decades in `db_to_gain`** (2.2). Proposed: accept that whole multiples of 20 dB other than 0 dB are no longer exact powers of ten, with no special case. Alternative: return exact powers of ten from a literal table for whole multiples of 20 dB, at the cost of a branch whose result can step against its neighbors by the helper's error.
+
+Settled as recommended by author and judge, and reopened only by a "Reopen when" condition: no flush-to-zero around hosted plug-in calls in v1 (decision 4); Opus bytes stay outside the promise (no strict C build of libopus); no new CI runner (the Linux job adds the `--release` golden run, and the Pi 5 run covers aarch64 Linux when it happens).
+
+## Follow-ups outside the slices
+
+- `release.yml` builds with `--locked` (2.1), filed as its own change on acceptance.
+- The one-line notes in ADR 0053 decision 7 and ADR 0054 decision 11 (decision 7 here) and the note on ADR 0037's arm64 sentence (Context), made on acceptance.
+- The current IEEE-exact test rule (#437) written into `docs/contributing/evidence/tests-as-evidence.md` now, before slice 6 replaces it, so contributors see it.
+- A 32-bit Tier B target, if one is ever run rather than only compiled, gets the golden run rather than the "by construction" expectation: `libm`'s `rem_pio2_large.rs` splits on pointer width.
 
 ## Related
 
