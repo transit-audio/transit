@@ -346,6 +346,11 @@ Windows a plug-in opens by itself (its own preset browser or a licensing dialog)
 Returning to transit by clicking a plug-in window brings up only that window; the main window and
 the other plug-in windows come up on your next click on the main window.
 
+A plug-in preset name may contain dots: **Save As** keeps the whole name and adds the file
+extension after it, so "Bass v1.5" and "Bass v1.2" are two files (`Bass v1.5.vstpreset` and
+`Bass v1.2.vstpreset`). Before 0.7.1 the name lost the part after its last dot, so two such names
+could write one file.
+
 On Linux, VST3 and CLAP editors open in an X11 window of transit's, from the track header, the
 device card and the mixer slot, as on Windows. On a Wayland desktop they open through XWayland,
 the X11 compatibility layer GNOME and KDE start by themselves: the plug-in sees X11 either way, so

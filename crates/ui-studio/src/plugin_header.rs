@@ -150,6 +150,18 @@ fn unused_name(path: PathBuf) -> PathBuf {
     (2..10_000).map(|n| path.with_file_name(format!("{stem} {n}.{ext}"))).find(|p| !p.exists()).unwrap_or(path)
 }
 
+/// The file Save As writes for the name the dialog confirmed: the format's extension appended
+/// unless the name ends in it (any case), since a dot in the name is part of the name (#487:
+/// "Bass v1.5" is "Bass v1.5.vstpreset", never "Bass v1.vstpreset"). The dialog confirmed the
+/// name it showed, not the appended one, so an existing preset under that is never replaced
+/// unasked: the save takes a numbered name.
+fn save_path(picked: PathBuf, ext: Option<&str>) -> PathBuf {
+    match ext {
+        Some(ext) if !picked.extension().is_some_and(|x| x.eq_ignore_ascii_case(ext)) => unused_name(presets::append_extension(&picked, ext)),
+        _ => picked,
+    }
+}
+
 fn slot_json(slot: usize) -> Value {
     if slot == transit_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) }
 }
@@ -278,15 +290,7 @@ impl StudioApp {
                     return;
                 };
                 if let Some(path) = pick(&default.to_string_lossy()) {
-                    let mut path = PathBuf::from(path);
-                    if let Some(ext) = presets::extension(&plugin)
-                        && !path.extension().is_some_and(|x| x.eq_ignore_ascii_case(ext))
-                    {
-                        // The dialog confirmed the name it showed, not this one: an existing
-                        // preset under it is never replaced unasked; the save takes a numbered name.
-                        path.set_extension(ext);
-                        path = unused_name(path);
-                    }
+                    let path = save_path(PathBuf::from(path), presets::extension(&plugin));
                     self.start_read(key, &plugin, Then::Save(path));
                 }
             }
@@ -664,5 +668,24 @@ impl StudioApp {
                 self.status = line;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod save_path_tests {
+    use super::*;
+
+    /// #487: a dot in the confirmed name is part of the name; the extension is appended (kept
+    /// when the name ends in it, in any case) and an existing file is never replaced unasked.
+    #[test]
+    fn save_as_appends_the_extension_to_a_dotted_name() {
+        let dir = transit_test_support::TestDir::created("save-path");
+        let ext = Some("vstpreset");
+        assert_eq!(save_path(dir.join("Bass v1.5"), ext), dir.join("Bass v1.5.vstpreset"));
+        assert_eq!(save_path(dir.join("Bass v1.2"), ext), dir.join("Bass v1.2.vstpreset"));
+        assert_eq!(save_path(dir.join("Pad.VSTPRESET"), ext), dir.join("Pad.VSTPRESET"), "kept: the dialog confirmed it");
+        std::fs::write(dir.join("Bass v1.5.vstpreset"), b"x").unwrap();
+        assert_eq!(save_path(dir.join("Bass v1.5"), ext), dir.join("Bass v1.5 2.vstpreset"), "never replaced unasked");
+        assert_eq!(save_path(dir.join("Plain"), None), dir.join("Plain"));
     }
 }

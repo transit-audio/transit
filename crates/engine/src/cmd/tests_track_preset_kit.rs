@@ -161,6 +161,47 @@ fn a_sample_with_no_file_refuses_the_save() {
     assert!(!d.0.join("Drums.tpreset").exists(), "nothing written");
 }
 
+/// #487 with #458: a dotted preset name keeps its dots, the samples are stored relative to that
+/// file's folder, and the preset loads into another session with its samples found.
+#[test]
+fn a_dotted_preset_name_round_trips_with_its_samples() {
+    let d = Dir::new();
+    let kick = d.audio("Kit/Kick.wav", 480, 1);
+    let (mut a, t) = session_with(&kick);
+    let saved = save(&mut a, t, &d.0.join("Kit").join("My.Kit v2"));
+    let written = d.0.join("Kit").join("My.Kit v2.tpreset");
+    assert_eq!(saved["path"], written.to_string_lossy().as_ref(), "the whole name, then .tpreset");
+    assert!(!d.0.join("Kit").join("My.tpreset").exists(), "the name never loses its tail");
+    let file: Value = serde_json::from_str(&std::fs::read_to_string(&written).unwrap()).unwrap();
+    assert_eq!(file["instrument"]["sampler_patch"]["sources"][0]["file"]["path"], "Kick.wav", "relative to the preset's folder");
+    let (mut b, _) = session_with(&d.audio("Other/Snare.wav", 960, 2));
+    b.execute("track.new", &json!({"kind": "instrument", "format": "stereo"})).unwrap();
+    let w = b.session().tracks.last().unwrap().id;
+    let out = load(&mut b, w, written.to_string_lossy().as_ref()).unwrap();
+    assert!(out.get("notice").is_none(), "every sample found: {out}");
+    assert!(portable_same(&pad1_path(&b, w), &kick), "the preset's own kick: {}", pad1_path(&b, w));
+}
+
+/// #487 with #458: a save under a dotted name is refused for a sample with no file yet, and the
+/// preset already saved under that name is left as it was (no file under a cut name either).
+#[test]
+fn a_refused_save_under_a_dotted_name_leaves_the_earlier_preset() {
+    let d = Dir::new();
+    let (mut e, t) = session_with(&d.audio("Kick.wav", 480, 1));
+    let saved = save(&mut e, t, &d.0.join("Drums v1.5"));
+    let written = d.0.join("Drums v1.5.tpreset");
+    assert_eq!(saved["path"], written.to_string_lossy().as_ref());
+    let before = std::fs::read_to_string(&written).unwrap();
+    let buf = AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 64]] };
+    let take = crate::io::add_source(e.session_mut(), "Take", buf, None, FileFormat::Wav);
+    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 2, "pad": 2, "source": take})).unwrap();
+    e.execute("edit.select", &json!({"tracks": [t.0]})).unwrap();
+    let err = e.execute("track.save_preset", &json!({"path": d.0.join("Drums v1.5").to_string_lossy()})).unwrap_err().to_string();
+    assert!(err.contains("has no file yet"), "{err}");
+    assert_eq!(std::fs::read_to_string(&written).unwrap(), before, "the earlier preset is untouched");
+    assert!(!d.0.join("Drums v1.tpreset").exists(), "nothing written under a cut name");
+}
+
 #[test]
 fn a_preset_with_the_retired_subtractive_synth_gets_a_macro_oscillator_as_a_session_load_does() {
     let d = Dir::new();

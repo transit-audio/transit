@@ -71,7 +71,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             extract_midi
         ),
-        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?} — writes the track's type, width, mixer, inserts, sends and instrument as JSON to `path` with the extension .tpreset; a Sampler's samples by file (relative to the preset's folder when in or below it), refused for a sample with no file yet; returns the path written", has_selection, save_preset),
+        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?} — writes the track's type, width, mixer, inserts, sends and instrument as JSON to `path` with the extension .tpreset (a .json extension is replaced, .tpreset in any case kept, any other dot is part of the name); a Sampler's samples by file (relative to the preset's folder when in or below it), refused for a sample with no file yet; returns the path written", has_selection, save_preset),
         cmd!(
             "track.load_preset",
             "Load Track Preset",
@@ -263,7 +263,8 @@ fn save_preset(e: &mut Engine, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").filter(|x| !x.trim().is_empty()).ok_or_else(|| bad(id, "`path` required"))?.to_string();
     let t = tracks_required(e, id, p)?;
     let first = *t.first().ok_or_else(|| bad(id, "no track"))?;
-    let path = std::path::Path::new(&path).with_extension(PRESET_EXTENSION);
+    // The file the preset goes to (#487), settled once, before the samples' folder is taken from it.
+    let path = preset_file(&path);
     // A Sampler's samples are written by file, relative to the preset's own folder when below it
     // (#458); refused, nothing written, for a sample with no file yet.
     let folder = std::path::absolute(&path).unwrap_or_else(|_| path.clone()).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
@@ -284,6 +285,16 @@ fn save_preset(e: &mut Engine, p: &Value) -> Result<Value> {
     let path = path.to_string_lossy().into_owned();
     crate::io::write_file(&path, text.as_bytes())?;
     Ok(json!({"path": path, "track": first}))
+}
+
+/// The file a track preset saved to `given` goes to (ADR 0049 decision 6, #487): `Bass` and
+/// `Bass.json` become `Bass.tpreset`, a name already ending in `.tpreset` (any case) is kept, and
+/// any other dot is part of the name (`Bass v1.5` saves as `Bass v1.5.tpreset`).
+fn preset_file(given: &str) -> std::path::PathBuf {
+    let given = std::path::Path::new(given);
+    let json = given.extension().and_then(|x| x.to_str()).is_some_and(|x| x.eq_ignore_ascii_case("json"));
+    let stem = if json { given.with_extension("") } else { given.to_path_buf() };
+    crate::presets::append_extension(&stem, PRESET_EXTENSION)
 }
 
 fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -668,6 +679,26 @@ mod tests {
         assert_eq!(hats.mixer.inserts[0].as_ref().map(|i| i.plugin.as_str()), Some("compressor"));
         assert_eq!(hats.mixer.volume_db, -5.0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #487: dotted names keep their dots, so two presets never write one file; `.json` is
+    /// replaced and `.tpreset` kept in any case (ADR 0049 decision 6).
+    #[test]
+    fn preset_names_with_dots_write_their_own_files() {
+        let dir = transit_test_support::TestDir::created("preset-dots");
+        let mut e = crate::demo::demo_engine();
+        e.execute("edit.select", &json!({"tracks": ["Bass"]})).unwrap();
+        for (given, written) in [
+            ("Bass v1.5", "Bass v1.5.tpreset"),
+            ("Bass v1.2", "Bass v1.2.tpreset"),
+            ("Pad 1.0.json", "Pad 1.0.tpreset"),
+            ("Up.TPRESET", "Up.TPRESET"),
+        ] {
+            let saved = e.execute("track.save_preset", &json!({"path": dir.join(given).to_string_lossy()})).unwrap();
+            assert_eq!(saved["path"], dir.join(written).to_string_lossy().as_ref(), "{given}");
+            assert!(dir.join(written).is_file(), "{given}");
+        }
+        assert!(!dir.join("Bass v1.tpreset").exists(), "no dotted name loses its tail");
     }
 
     #[test]

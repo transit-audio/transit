@@ -45,6 +45,20 @@ pub fn is_preset_file(path: &Path) -> bool {
         .is_some_and(|x| x.eq_ignore_ascii_case(transit_vst3_host::preset::EXTENSION) || x.eq_ignore_ascii_case(transit_clap_host::preset::EXTENSION))
 }
 
+/// `given` with the extension `ext` appended unless it already ends in it (any case): a dot in
+/// the name is part of the name, so "Bass v1.5" saves as "Bass v1.5.tpreset" and never replaces
+/// "Bass v1.2"'s file (#487).
+#[must_use]
+pub fn append_extension(given: &Path, ext: &str) -> PathBuf {
+    if given.extension().and_then(|x| x.to_str()).is_some_and(|x| x.eq_ignore_ascii_case(ext)) {
+        return given.to_path_buf();
+    }
+    let mut s = given.as_os_str().to_os_string();
+    s.push(".");
+    s.push(ext);
+    PathBuf::from(s)
+}
+
 /// A file-safe name: path separators and other trouble characters become spaces.
 #[must_use]
 pub fn file_name(name: &str) -> String {
@@ -128,5 +142,16 @@ mod tests {
         assert_eq!(path(root, "compressor", "x"), None);
         assert!(is_preset_file(Path::new("a/b.VSTPRESET")) && is_preset_file(Path::new("x.clappreset")));
         assert!(!is_preset_file(Path::new("session.transit")) && !is_preset_file(Path::new("noext")));
+    }
+
+    /// #487: a dot in a name is part of the name; the extension is appended unless it ends the
+    /// name already, in any case.
+    #[test]
+    fn append_extension_keeps_a_dotted_name() {
+        assert_eq!(append_extension(Path::new("d/Bass v1.5"), "tpreset"), Path::new("d/Bass v1.5.tpreset"));
+        assert_eq!(append_extension(Path::new("d/Bass v1.2"), "tpreset"), Path::new("d/Bass v1.2.tpreset"));
+        assert_eq!(append_extension(Path::new("d/Bass"), "tpreset"), Path::new("d/Bass.tpreset"));
+        assert_eq!(append_extension(Path::new("d/Up.TPRESET"), "tpreset"), Path::new("d/Up.TPRESET"));
+        assert_eq!(append_extension(Path::new("d/x.json"), "tpreset"), Path::new("d/x.json.tpreset"));
     }
 }
