@@ -43,4 +43,5 @@ The list is generated from each record's `#` heading by `cargo xtask indexes`: a
 - [E80: a separate input's channel count never reached the I/O table, and a test encoded a refusal the page should not send (#429)](issue-429-b.md)
 - [E81: four tests counted on a race's outcome or a real-clock instant under load (#423, #381, #436)](issue-436.md)
 - [E82: Sampler admission converted native PCM despite the playback contract (#449)](issue-449.md)
+- [The device-rate converter held the last sample of every rendered block (#525)](issue-525.md)
 <!-- indexes:end -->
