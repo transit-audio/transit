@@ -41,6 +41,8 @@ mod bar_tests;
 #[cfg(test)]
 mod behavior_tests;
 #[cfg(test)]
+mod collapsed_keys_tests;
+#[cfg(test)]
 mod drop_routing_tests;
 #[cfg(test)]
 mod grid_tests;
@@ -318,6 +320,15 @@ pub(crate) fn patch_at(s: &Session, key: (TrackId, usize)) -> Option<PatchV1> {
 /// Whether the instance has a patch at all (ready or kept opaque).
 pub(crate) fn has_patch(s: &Session, key: (TrackId, usize)) -> bool {
     key.1 == transit_mix::INSTRUMENT_SLOT && s.track(key.0).and_then(|t| t.instrument.as_ref()).is_some_and(|i| i.sampler_patch.is_some())
+}
+
+/// The focused Sampler instance whose view takes the keys (the Pads, Slices and Instrument views'
+/// handlers all ask here): none while its window is collapsed to its title bar (#482). A folded
+/// window shows no view, so the keys fall through to whatever takes them with the window closed
+/// (Space plays, Delete deletes the arrangement's selection).
+pub(crate) fn key_owner(app: &crate::StudioApp) -> Option<u64> {
+    let uid = app.builtin_editor.devices.focused?;
+    (!app.builtin_editor.devices.collapsed.contains(&uid)).then_some(uid)
 }
 
 /// Every pad's data from `patch`.

@@ -285,6 +285,7 @@ fn release_stale(app: &mut StudioApp, ctx: &egui::Context) {
         (down, i.pointer.any_down(), gone)
     });
     let focused = app.builtin_editor.devices.focused;
+    let collapsed = &app.builtin_editor.devices.collapsed;
     let open: Vec<u64> = app.ui.plugin_windows.iter().filter_map(|k| app.builtin_at(*k).map(|i| i.uid.get())).collect();
     let stale: Vec<u64> = app
         .builtin_editor
@@ -294,7 +295,8 @@ fn release_stale(app: &mut StudioApp, ctx: &egui::Context) {
         .iter()
         .filter(|(_, v)| v.held.is_some())
         .filter(|(uid, v)| {
-            let shown = open.contains(uid);
+            // A window collapsed to its title bar shows no view: its auditions end too (#482).
+            let shown = open.contains(uid) && !collapsed.contains(uid);
             if v.slices.key_held {
                 !shown || v.view != super::View::Slices || focused != Some(**uid) || !keys_down
             } else if v.view == super::View::Slices {
@@ -314,7 +316,7 @@ fn release_stale(app: &mut StudioApp, ctx: &egui::Context) {
 /// shortcuts, so Space does not also play and the arrows do not reach the arrangement.
 pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
     release_stale(app, ctx);
-    let Some(uid) = app.builtin_editor.devices.focused else { return };
+    let Some(uid) = super::key_owner(app) else { return };
     let modal = ctx.memory(|m| m.top_modal_layer().is_some());
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || modal {
         return;

@@ -142,3 +142,26 @@ fn the_view_takes_its_keys_under_a_popup_so_none_is_left_for_others() {
     assert!(!left, "the view took Delete");
     assert_eq!(view(&t).confirm, None, "and asked nothing");
 }
+
+#[test]
+fn collapsed_the_view_takes_no_keys() {
+    let (mut t, tr) = layered();
+    let z2 = layout(&t, tr).key_map.zone(2).unwrap().rect;
+    t.click(mid(z2), 1);
+    let uid = *t.app.builtin_editor.devices.sampler.views.keys().next().unwrap();
+    t.run("window.collapse_editors", json!({}));
+    assert!(t.app.builtin_editor.devices.collapsed.contains(&uid) && t.app.builtin_editor.devices.focused == Some(uid));
+    let doc = |t: &T| serde_json::to_value(t.app.engine.session()).unwrap();
+    let (before, undo, log) = (doc(&t), t.undo_len(), view(&t).sent.len());
+    press(&mut t, "Delete", false, false);
+    assert_eq!(view(&t).confirm, None, "Delete asks nothing (#482)");
+    assert!(crate::chrome::modal_layout(&t.ctx, keyboard::confirm_id(uid)).is_none(), "no question");
+    press(&mut t, egui::Key::ArrowRight.name(), true, false);
+    press(&mut t, egui::Key::ArrowUp.name(), false, false);
+    assert!(doc(&t) == before, "nothing changed");
+    assert_eq!((t.undo_len(), sent(&t, log).len(), view(&t).selected), (undo, 0, Some(2)));
+    // Expanded, Delete asks again.
+    t.run("window.expand_editors", json!({}));
+    t.key("Delete");
+    assert_eq!(view(&t).confirm, Some(2));
+}

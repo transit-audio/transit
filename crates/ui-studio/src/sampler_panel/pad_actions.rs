@@ -92,9 +92,10 @@ pub(crate) fn drag_keys(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
-/// Runs before arrangement shortcuts, only for the focused Sampler with its Pads view visible.
+/// Runs before arrangement shortcuts, only for the focused Sampler with its Pads view visible (not
+/// collapsed to its title bar).
 pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
-    let Some(uid) = app.builtin_editor.devices.focused else { return };
+    let Some(uid) = super::key_owner(app) else { return };
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() {
         return;
     }

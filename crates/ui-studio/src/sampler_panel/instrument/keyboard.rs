@@ -90,7 +90,7 @@ fn confirm(app: &mut StudioApp, ctx: &egui::Context) {
 /// arrangement's keys.
 pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
     confirm(app, ctx);
-    let Some(uid) = app.builtin_editor.devices.focused else { return };
+    let Some(uid) = super::super::key_owner(app) else { return };
     let modal = ctx.memory(|m| m.top_modal_layer().is_some());
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || modal {
         return;
