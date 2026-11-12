@@ -1,7 +1,7 @@
 # Correctly rounded f32 bits of 10^(x/20), x = the f32 nearest k/100, k = -14400..=4800 (-144 to +48 dB
 # in 0.01 dB steps; the 0.1 dB grid is every tenth entry). Generated once, offline, with an
 # arbitrary-precision script (Python decimal at 90 digits: exp(x/20 * ln 10) on the exact value of x,
-# rounded to nearest-even f32 in exact rational arithmetic). The script is not part of the repository.
+# rounded to nearest-even f32 in exact rational arithmetic). The script is reference.py, beside this file.
 # 16 values per line, hexadecimal, in k order.
 33877f3f 3387a72f 3387cf3a 3387f741 33881f54 33884783 33886fad 338897f4 3388c036 3388e884 338910ee 33893954 338961c6 33898a54 3389b2de 3389db74
 338a0425 338a2cd3 338a558d 338a7e62 338aa734 338ad022 338af90c 338b2202 338b4b14 338b7422 338b9d3c 338bc673 338befa5 338c18e4 338c423f 338c6b96

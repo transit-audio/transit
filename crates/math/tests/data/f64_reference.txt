@@ -3,7 +3,7 @@
 # exact result minus that value in its ulps. Generated once, offline, with an arbitrary-precision script
 # (Python decimal at 120 to 200 digits: exp and ln from decimal, sin and cos by Taylor series after
 # reduction with pi to 200 digits, atan by argument halving and series; nearest-even rounding in exact
-# rational arithmetic). The script is not part of the repository.
+# rational arithmetic). The script is reference.py, beside this file.
 sin c059000000000000 3fe03425b78c4db8 +0.027480
 sin c058c699d4606e35 3fefac6b05a8d65a +0.086382
 sin c0588d33a8c0dc6a 3fe754399e39aba8 -0.386812

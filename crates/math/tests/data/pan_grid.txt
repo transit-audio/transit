@@ -2,7 +2,7 @@
 # e = center_db / -3.0103, p = the f32 nearest k/100 for k = -99..=99 (the panel's positions; the
 # hard ends are exact branches). One block per law (center -3, -4.5, -6 dB), pairs l r in k order.
 # Generated once, offline, with an arbitrary-precision script (Python decimal, pi to 200 digits, Taylor
-# series, nearest-even rounding in exact rational arithmetic). The script is not part of the repository.
+# series, nearest-even rounding in exact rational arithmetic). The script is reference.py, beside this file.
 law -3.0
 3f7ffdfc 3c02d476 3f7ff7f1 3c828418 3f7feddf 3cc37e19 3f7fdfc6 3d0230e6 3f7fcda6 3d22997a 3f7fb77f 3d42f9c8 3f7f9d52 3d635247 3f7f7f1f 3d81d192
 3f7f5ce7 3d91f630 3f7f36aa 3da216f7 3f7f0c69 3db233c0 3f7ede24 3dc24c74 3f7eabdd 3dd260ed 3f7e7593 3de27102 3f7e3b49 3df27c86 3f7dfcfd 3e0141a8
