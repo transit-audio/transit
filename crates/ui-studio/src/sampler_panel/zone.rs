@@ -257,7 +257,8 @@ fn knob_at(
     };
     let id = knob_id(dev.uid(), p.id);
     // A value typed for another zone (the selected pad or slice changed while it was typed) is
-    // dropped: a knob's value field commits only on Enter, and never to a zone it was not typed for.
+    // dropped: a knob's value field commits on Enter or a click elsewhere (#484), and never to a
+    // zone it was not typed for.
     let typed_for = id.with("zone");
     let now = live.then_some(zone.id);
     ui.data_mut(|d| {

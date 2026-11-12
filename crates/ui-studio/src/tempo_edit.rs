@@ -270,11 +270,14 @@ pub fn tempo_field(app: &mut StudioApp, ui: &mut Ui) {
     resp.on_hover_text(format!("{tip}. Drag to change, Shift for fine, double-click to type, wheel nudges"));
 }
 
-/// The in-place field: Enter applies, Escape and losing focus cancel.
+/// The in-place field: Enter or a click elsewhere applies, Escape cancels (the one value-field
+/// rule, `widgets::value_typing`, #484).
 fn edit_field(app: &mut StudioApp, ui: &mut Ui, r: Rect) {
+    use crate::widgets::value_typing::{Typing, typing};
     let Some(mut e) = app.tempo_ui.edit.take() else { return };
     let id = egui::Id::new("tempo_edit");
     let (esc, enter) = std::mem::take(&mut app.tempo_ui.keys);
+    let opened = e.fresh;
     if e.fresh {
         e.fresh = false;
         select_all(ui.ctx(), id, &e.text);
@@ -289,7 +292,10 @@ fn edit_field(app: &mut StudioApp, ui: &mut Ui, r: Rect) {
     if esc {
         return;
     }
-    if enter {
+    // Enter is taken for the field before the arrangement's handlers (`keys`); a click elsewhere
+    // shows as the field letting go of the keyboard.
+    let state = typing(ui, &resp, opened);
+    if enter || matches!(state, Typing::Commit { .. }) {
         match parse_bpm(&e.text) {
             Some(v) => {
                 app.set_tempo_at(e.tick, v, None);
@@ -298,7 +304,7 @@ fn edit_field(app: &mut StudioApp, ui: &mut Ui, r: Rect) {
         }
         return;
     }
-    if resp.lost_focus() {
+    if state == Typing::Cancel {
         return;
     }
     app.tempo_ui.edit = Some(e);

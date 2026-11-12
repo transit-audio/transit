@@ -18,9 +18,10 @@
 //! - **Ctrl+wheel**: a semitone a notch (an octave with Shift); a plain wheel stays with the window.
 //! - **Right-click** opens a menu with Reset to C1 (the new-kit start note, named in the Middle C
 //!   setting), one step.
-//! - **Double-click** types a name (`c#1`, `Db1`) or a MIDI number; Enter commits, Escape cancels.
-//!   Text that is not a note from 0 to `MAX_PAD_START` changes nothing: the field takes its error
-//!   ring and the panel's note says why.
+//! - **Double-click** types a name (`c#1`, `Db1`) or a MIDI number; Enter or a click elsewhere
+//!   commits, Escape cancels (`widgets::value_typing`, #484). Text that is not a note from 0 to
+//!   `MAX_PAD_START` changes nothing and the panel's note says why: after Enter the field keeps the
+//!   text with its error ring; after a click elsewhere the typing ends and the keyboard goes on.
 //!
 //! Each step is `mix.sampler_pad_start`, merged while the pointer is held or the wheel turns (one
 //! undo step per gesture, the panel's knob convention); a typed value is one step. The engine's
@@ -32,7 +33,7 @@ use crate::StudioApp;
 use crate::device_editor::Dev;
 use crate::theme::TOKENS;
 use crate::tokens::{self, layout as space, radius, sampler as tk};
-use crate::widgets::{self, r4};
+use crate::widgets::{self, r4, value_typing::Typing};
 use egui::{Align2, Rect, Sense, Stroke, StrokeKind, Ui, epaint::RectShape, pos2, vec2};
 use serde_json::json;
 use transit_midi::{MiddleC, note_name, parse_note_or_number};
@@ -272,9 +273,11 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
     // Double-click: type a name or a number. A double-click that follows another click within
     // egui's triple-click window counts as a triple, so both open the typing (the knob's reset
     // and the strip's rename read clicks the same way, `widgets::reset_click`).
+    let mut opened = false;
     if editing.is_none() && widgets::reset_click(&resp) {
         editing = Some(note_name(value, mc));
         error = false;
+        opened = true;
     }
     // The field's face, under the typing: its slot is kept here and filled once this frame's
     // state is known (Enter can turn the typing into the error below).
@@ -291,10 +294,11 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
             .margin(egui::Margin::ZERO);
         let r = ui.put(inner, edit);
         text_rect = r.rect;
-        r.request_focus();
-        let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-        if enter {
-            match typed_note(text, mc) {
+        // Enter or a click elsewhere commits, Escape cancels; the field asks for the keyboard
+        // only when it opens, so a click elsewhere hands it on (#484).
+        match widgets::value_typing::typing(ui, &r, opened) {
+            Typing::Open => {}
+            Typing::Commit { enter } => match typed_note(text, mc) {
                 Some(n) => {
                     if n != value {
                         send_once(app, dev, n);
@@ -306,12 +310,23 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, patch: &PatchV1, 
                     let msg = typed_error(text, mc);
                     app.status = msg.clone();
                     view(app, dev.uid()).note = Some(msg);
-                    error = true;
+                    if enter {
+                        // Refused after Enter: the text stays in the field with its error ring,
+                        // and the field takes the keyboard back (Enter let go of it).
+                        r.request_focus();
+                        error = true;
+                    } else {
+                        // Refused on a click elsewhere: the keyboard has gone on; the typing ends
+                        // and the note says why.
+                        editing = None;
+                        error = false;
+                    }
                 }
+            },
+            Typing::Cancel => {
+                editing = None;
+                error = false;
             }
-        } else if escape {
-            editing = None;
-            error = false;
         }
     }
     ui.data_mut(|d| {

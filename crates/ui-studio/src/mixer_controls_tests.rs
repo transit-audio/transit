@@ -449,12 +449,18 @@ fn the_fader_readout_edits_in_place_and_applies_cancels_and_clamps() {
     let name = mid(strip(&app, t).name_rect);
     click_with(&mut app, name, json!({}));
     frames(&mut app, &ctx, 8, &mut time);
-    assert_eq!((volume(&app, t), app.mixer.edit.is_none()), (2.0, true), "losing focus cancels");
+    // A click elsewhere commits, as Enter does (the one value-field rule, #484).
+    assert_eq!((volume(&app, t), app.mixer.edit.is_none()), (-20.0, true), "a click elsewhere commits");
+    assert_eq!(undo_len(&mut app), before + 1, "the commit is one step");
+    assert!(!ctx.egui_wants_keyboard_input(), "the keyboard is the app's again");
+    app.run("mix.volume", json!({"tracks": [t.0], "db": 2.0})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let before = undo_len(&mut app);
     edit_readout(&mut app, &ctx, &mut time, ro, "loud", "Enter");
     assert_eq!((volume(&app, t), app.mixer.edit.is_none()), (2.0, true), "garbage changes nothing");
     let status = app.status.clone();
     assert!(status.contains("not a level"), "{status}");
-    assert_eq!(undo_len(&mut app), before, "no cancel made an undo step");
+    assert_eq!(undo_len(&mut app), before, "no refusal made an undo step");
     frames(&mut app, &ctx, 60, &mut time);
     click_with(&mut app, ro, json!({"count": 2}));
     frames(&mut app, &ctx, 12, &mut time);

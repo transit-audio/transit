@@ -94,6 +94,8 @@ fn a_crossfade_typed_for_one_zone_commits_to_it_when_another_zone_is_selected() 
 fn a_knob_value_typed_for_one_zone_never_lands_on_another() {
     let (mut t, tr) = layered();
     let knob = |t: &T| t.panel(tr).knobs.into_iter().find(|k| k.field == "transpose").expect("the Tune knob");
+    // The view numbers zones from 1; the patch's ids are from 0.
+    let typed_for = view(&t).selected.expect("a zone is selected");
     t.click(mid(knob(&t).knob.value), 1);
     assert!(knob(&t).knob.editing);
     t.send("ui.key", json!({"key": "A", "cmd": true}));
@@ -102,7 +104,11 @@ fn a_knob_value_typed_for_one_zone_never_lands_on_another() {
     t.click(mid(z2), 1);
     assert_eq!(view(&t).selected, Some(2));
     t.key("Enter");
+    // The click on zone 2 commits the typing (the one value-field rule, #484) to the zone it was
+    // typed for, never to the zone the click selects.
     let p = t.patch(tr);
-    assert_eq!((p.zone(0).unwrap().transpose, p.zone(1).unwrap().transpose), (0.0, 0.0), "the typing was given up, not moved to zone 2");
+    assert_ne!(typed_for, 2);
+    assert_eq!(p.zone(typed_for - 1).unwrap().transpose, 5.0, "committed to the zone it was typed for");
+    assert_eq!(p.zone(1).unwrap().transpose, 0.0, "not moved to zone 2");
     assert!(!knob(&t).knob.editing);
 }

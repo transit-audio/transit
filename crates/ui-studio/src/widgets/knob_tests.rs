@@ -193,3 +193,59 @@ fn a_drag_accumulates_so_a_rounding_caller_follows_a_slow_pointer() {
     let stuck = (0..40).fold(0.5, |n, _| round(knob::dragged(n, -4.0, false)));
     assert_eq!(stuck, 0.5);
 }
+
+/// The knob and a second text field (the browser's search, say) side by side.
+fn with_field(ui: &mut egui::Ui, k: &Knob, other: &mut String) -> (KnobOut, egui::Response) {
+    let out = draw(ui, k);
+    let field =
+        ui.put(egui::Rect::from_min_size(egui::pos2(300.0, 40.0), vec2(120.0, 20.0)), egui::TextEdit::singleline(other).id(egui::Id::new("other")));
+    (out, field)
+}
+
+#[test]
+fn a_click_elsewhere_commits_the_typed_value_and_hands_the_keyboard_on() {
+    // #484: the value field asked for the keyboard every frame, so a click in another field never
+    // took it, the typing went on into the value field, and the app's shortcuts stayed dead.
+    let mut rig = Rig::new();
+    let k = Knob::new("Cutoff", "1.20 kHz", 0.5);
+    let mut other = String::new();
+    let value = rig.idle(|ui| with_field(ui, &k, &mut other)).0.layout.value;
+    rig.click(mid(value), |ui| with_field(ui, &k, &mut other));
+    let out = rig.idle(|ui| with_field(ui, &k, &mut other)).0;
+    assert!(out.layout.editing, "the value field opens");
+    rig.frame(vec![Event::Key { key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND }], |ui| {
+        with_field(ui, &k, &mut other)
+    });
+    rig.frame(vec![Event::Text("440 Hz".into())], |ui| with_field(ui, &k, &mut other));
+    // Press in the other field: the knob commits what was typed in that frame.
+    let field_at = egui::pos2(360.0, 50.0);
+    let mut typed = None;
+    for events in [Rig::press(field_at, Modifiers::NONE), Rig::release(field_at, Modifiers::NONE)] {
+        let out = rig.frame(events, |ui| with_field(ui, &k, &mut other)).0;
+        typed = typed.or(out.typed);
+    }
+    assert_eq!(typed.as_deref(), Some("440 Hz"), "a click elsewhere commits the typing");
+    let (out, field) = rig.idle(|ui| with_field(ui, &k, &mut other));
+    assert!(!out.layout.editing, "the value field closed");
+    assert!(field.has_focus(), "the clicked field has the keyboard");
+    rig.frame(vec![Event::Text("kick".into())], |ui| with_field(ui, &k, &mut other));
+    assert_eq!(other, "kick", "typing goes to the clicked field");
+    // A click on empty space releases the keyboard altogether.
+    rig.click(egui::pos2(600.0, 400.0), |ui| with_field(ui, &k, &mut other));
+    assert!(!rig.ctx.egui_wants_keyboard_input(), "nothing holds the keyboard");
+}
+
+#[test]
+fn escape_gives_the_typing_up_and_nothing_is_returned() {
+    let mut rig = Rig::new();
+    let k = Knob::new("Cutoff", "1.20 kHz", 0.5);
+    let value = rig.idle(|ui| draw(ui, &k)).layout.value;
+    rig.click(mid(value), |ui| draw(ui, &k));
+    rig.frame(vec![Event::Text("9".into())], |ui| draw(ui, &k));
+    let out = rig.frame(vec![Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }], |ui| {
+        draw(ui, &k)
+    });
+    assert_eq!(out.typed, None, "Escape returns no text");
+    assert!(!out.layout.editing, "Escape closes the field");
+    assert!(!rig.ctx.egui_wants_keyboard_input());
+}

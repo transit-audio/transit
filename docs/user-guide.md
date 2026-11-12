@@ -21,6 +21,14 @@ Plug-in editor windows follow the display scale, not this zoom.
 
 See the [shortcuts reference](shortcuts.md) and **Help > Keyboard Shortcuts** for key bindings.
 
+## Typing a value
+
+Every value you can type (a knob's value, the Sampler's Start note, a mixer readout, the tempo)
+follows one rule, as in Ableton Live and Logic Pro: **Enter** applies what you typed, a click
+anywhere else applies it too and hands the keyboard back at once (so the browser's search, Space
+and every shortcut work again), and **Escape** gives the typing up. Text the field cannot take
+changes nothing and the reason shows; after Enter it stays in the field to fix.
+
 ## Lower panes: Piano Roll, Mixer, Devices
 
 The tabs under the arrangement toggle: click the **Mixer** or **Devices** tab to show its pane,
@@ -730,7 +738,7 @@ MIDI note 60 and up. To match a pad controller whose first pad sends another not
 note to that note instead of remapping the controller: use the **Start note** field before
 Load kit in the bar above the pads (drag it up or down a semitone at a time, with Shift by octaves, or turn
 Ctrl+wheel over it; double-click it to type a note name such as `C1` or `c#1`, or a MIDI number
-from 0 to 64), or the `mix.sampler_pad_start` command. A change the kit cannot take, such as one
+from 0 to 64, then Enter or click elsewhere), or the `mix.sampler_pad_start` command. A change the kit cannot take, such as one
 that would put a pad on a note another pad keeps, is refused, and the reason shows under the pads.
 A pad whose note you set yourself keeps that note when the start note changes; the others move,
 and keep their pitch. Clips are never changed: the notes they hold no longer reach the moved pads,

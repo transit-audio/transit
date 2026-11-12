@@ -5,12 +5,14 @@
 //! `label.control` (`label.hero` at size L) and the value below that in mono.
 //!
 //! Interaction: vertical drag (Shift for fine; a drag accumulates from where it started, so a stepped
-//! parameter follows the pointer and the dial shows the stored value), double-click to reset, click the value to type,
+//! parameter follows the pointer and the dial shows the stored value), double-click to reset, click
+//! the value to type (Enter or a click elsewhere commits, Escape cancels: `value_typing`),
 //! Ctrl+scroll (Cmd on macOS) to nudge. A plain wheel is never the knob's: it scrolls the panel
 //! around it and leaves the value alone (326-M: a device body scrolls). The knob works on a normalized position (0..1); the caller maps it to the
 //! parameter, formats the value text and parses what was typed.
 
 use super::r4;
+use super::value_typing::Typing;
 use crate::theme::TOKENS;
 use crate::tokens::{self, knob as geo};
 use egui::{Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
@@ -118,7 +120,7 @@ pub struct KnobOut {
     /// The new value is a reset (a double or triple click): the caller sets the parameter's
     /// default itself, not the value at the default's position.
     pub reset: bool,
-    /// Text the user typed into the value field and confirmed with Enter.
+    /// Text the user typed into the value field and confirmed with Enter or a click elsewhere.
     pub typed: Option<String>,
     /// The new value came from a Ctrl+wheel nudge (the caller merges a wheel gesture's nudges into
     /// one undo step while the wheel continues).
@@ -188,6 +190,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
     let mut typed = None;
     let mut wheeled = false;
     let mut reset = false;
+    let mut opened = false;
     if !k.disabled {
         let fine = ui.input(|i| i.modifiers.shift);
         if response.dragged() {
@@ -222,18 +225,20 @@ pub fn show(ui: &mut Ui, id: egui::Id, k: &Knob) -> KnobOut {
         }
         if value_resp.clicked() && editing.is_none() {
             editing = Some(k.value_text.to_string());
+            opened = true;
         }
     }
     if let Some(text) = editing.as_mut() {
         let edit = egui::TextEdit::singleline(text).font(tokens::VALUE.font_id(ui.ctx())).horizontal_align(egui::Align::Center);
         let r = ui.put(value_r, edit);
-        r.request_focus();
-        let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-        if enter {
-            typed = Some(text.clone());
-        }
-        if enter || escape {
-            editing = None;
+        // Enter or a click elsewhere commits, Escape cancels (#484, `value_typing`).
+        match super::value_typing::typing(ui, &r, opened) {
+            Typing::Open => {}
+            Typing::Commit { .. } => {
+                typed = Some(text.clone());
+                editing = None;
+            }
+            Typing::Cancel => editing = None,
         }
     }
     ui.data_mut(|d| match &editing {

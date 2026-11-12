@@ -469,16 +469,14 @@ pub(crate) fn fader_key(track: TrackId) -> String {
     format!("fader:{}", track.0)
 }
 
-/// The in-place text field of a readout being edited: Enter applies, Escape and losing focus
-/// cancel.
+/// The in-place text field of a readout being edited: Enter or a click elsewhere applies, Escape
+/// cancels (the one value-field rule, `widgets::value_typing`, #484).
 fn edit_field(app: &mut StudioApp, ui: &mut Ui, draw: Rect, id: egui::Id, font: FontId) {
+    use crate::widgets::value_typing::Typing;
     let Some(mut e) = app.mixer.edit.take() else { return };
     let rect = Rect::from_center_size(draw.center(), vec2(draw.width().max(46.0), draw.height().max(16.0)));
     app.mixer.edit_rect = r4(rect);
-    let (esc, enter) = ui.input(|i| {
-        use crate::shortcuts::{Action, hit};
-        (hit(i, Action::ReadoutCancel), hit(i, Action::ReadoutApply))
-    });
+    let opened = e.fresh;
     if e.fresh {
         e.fresh = false;
         // Focused with the whole text selected, so typing replaces it.
@@ -486,6 +484,7 @@ fn edit_field(app: &mut StudioApp, ui: &mut Ui, draw: Rect, id: egui::Id, font: 
         let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
         st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
         st.store(ui.ctx(), id);
+        // Asked before the field is drawn: a field drawn without the keyboard drops its selection.
         ui.memory_mut(|m| m.request_focus(id));
     }
     let field = egui::TextEdit::singleline(&mut e.text)
@@ -495,11 +494,10 @@ fn edit_field(app: &mut StudioApp, ui: &mut Ui, draw: Rect, id: egui::Id, font: 
         .horizontal_align(egui::Align::Center)
         .desired_width(rect.width());
     let resp = crate::chrome::field(ui, |ui| ui.put(rect, field));
-    if esc {
-        return;
-    }
-    if resp.lost_focus() {
-        if enter {
+    match crate::widgets::value_typing::typing(ui, &resp, opened) {
+        Typing::Open => {}
+        Typing::Cancel => return,
+        Typing::Commit { .. } => {
             let v = if e.target.is_pan() { fine::parse_pan(&e.text) } else { fine::parse_db(&e.text) };
             // The strip's gain field stops at the taper's top, like its drag.
             let v = if matches!(e.target, Target::Fader(_)) { v.map(|db| db.min(controls::FADER_TOP_DB)) } else { v };
@@ -509,8 +507,8 @@ fn edit_field(app: &mut StudioApp, ui: &mut Ui, draw: Rect, id: egui::Id, font: 
                 }
                 None => app.status = format!("\"{}\" is not a {}", e.text.trim(), if e.target.is_pan() { "pan position" } else { "level" }),
             }
+            return;
         }
-        return;
     }
     app.mixer.edit = Some(e);
 }

@@ -762,6 +762,13 @@ pub fn hit(i: &egui::InputState, action: Action) -> bool {
     rows(action).any(|s| i.key_pressed(s.key))
 }
 
+/// Was one of `action`'s keys pressed this frame, read from the raw events, so a key another
+/// handler consumed earlier in the frame still counts (a text field gives its focus up on Escape
+/// before a window's keys run, and the window may take the key).
+pub fn hit_raw(i: &egui::InputState, action: Action) -> bool {
+    rows(action).any(|s| i.raw.events.iter().any(|e| matches!(e, egui::Event::Key { key, pressed: true, .. } if *key == s.key)))
+}
+
 fn key_name(k: Key) -> &'static str {
     match k {
         Key::ArrowUp => "Up",

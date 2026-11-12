@@ -150,6 +150,21 @@ fn double_click_types_a_tempo_enter_commits_escape_cancels() {
 }
 
 #[test]
+fn a_click_elsewhere_commits_a_typed_tempo_and_hands_the_keyboard_back() {
+    // The one value-field rule (#484): Enter or a click elsewhere commits, Escape cancels.
+    let mut t = T::new();
+    let before = t.undo_len();
+    let at = t.rect("tempo");
+    t.double(at);
+    t.typed("90");
+    t.click((5.0, 790.0));
+    assert_eq!(t.bpm(), 90.0, "a click elsewhere commits");
+    assert_eq!(t.undo_len(), before + 1);
+    assert!(t.app.tempo_ui.edit.is_none(), "the field closed");
+    assert!(!t.ctx.egui_wants_keyboard_input(), "the keyboard is the app's again");
+}
+
+#[test]
 fn a_typed_tempo_outside_20_to_999_clamps() {
     let mut t = T::new();
     let at = t.rect("tempo");

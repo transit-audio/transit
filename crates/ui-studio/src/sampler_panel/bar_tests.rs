@@ -370,3 +370,40 @@ fn the_note_name_sits_inside_the_field_padding() {
 fn the_start_note_token_range_is_the_models() {
     assert_eq!(tk::START_NOTE_RANGE, [0, transit_model::pad_notes::MAX_PAD_START]);
 }
+
+/// Opens the typing, replaces the text with `text` and clicks far from the window (the
+/// arrangement), without Enter.
+fn type_and_click_away(t: &mut T, tr: TrackId, text: &str) {
+    let field = start(t, tr).field;
+    t.click(mid(field), 2);
+    assert!(start(t, tr).editing, "a double-click opens the typing");
+    t.send("ui.key", json!({"key": "A", "cmd": true}));
+    t.send("ui.text", json!({"text": text}));
+    t.click((5.0, 890.0), 1);
+}
+
+#[test]
+fn a_click_elsewhere_commits_the_typing_and_hands_the_keyboard_back() {
+    // #484: the field asked for the keyboard every frame, so a click elsewhere never ended the
+    // typing and the app's shortcuts stayed dead until Enter or Escape.
+    let (mut t, tr) = T::kit();
+    let before = t.undo_len();
+    type_and_click_away(&mut t, tr, "d1");
+    assert_eq!(t.patch(tr).pad_start_note, 38, "the typed note is committed");
+    assert_eq!(t.undo_len(), before + 1, "one step");
+    assert!(!start(&t, tr).editing, "the typing ended");
+    assert!(!t.ctx.egui_wants_keyboard_input(), "the keyboard is the app's again");
+    // Text typed after the click goes nowhere near the field.
+    t.send("ui.text", json!({"text": "7"}));
+    assert_eq!(t.patch(tr).pad_start_note, 38);
+    assert!(!start(&t, tr).editing);
+    // Refused text on a click elsewhere: nothing changes, the note says why, and the typing ends.
+    type_and_click_away(&mut t, tr, "H2");
+    assert_eq!(t.patch(tr).pad_start_note, 38);
+    assert_eq!(t.undo_len(), before + 1, "no step");
+    let s = start(&t, tr);
+    assert!(!s.editing && !s.error, "the typing ended without an error ring");
+    let note = t.panel(tr).note.expect("the reason is shown").0;
+    assert!(note.starts_with("No start note H2:"), "{note}");
+    assert!(!t.ctx.egui_wants_keyboard_input());
+}

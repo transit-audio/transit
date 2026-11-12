@@ -18,6 +18,7 @@ pub mod section_bar;
 pub mod segmented;
 pub mod switch;
 pub mod toggle;
+pub mod value_typing;
 
 #[cfg(test)]
 mod bipolar_amount_tests;
