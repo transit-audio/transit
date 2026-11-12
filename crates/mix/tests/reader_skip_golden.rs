@@ -16,7 +16,13 @@ fn a_skip_without_a_pedal_matches_the_pre_change_render() {
     let mut bytes = Vec::new();
     for block in 0..16 {
         match block {
-            0 | 8 => rig.on(),
+            0 => rig.on(),
+            // A re-strike, then the first note's off (#292: it closes the first note-on and
+            // reaches no plug-in, so the render is the pre-change one).
+            8 => {
+                rig.on();
+                rig.closing_off();
+            }
             2 => rig.bypass(true),
             5 => rig.bypass(false),
             9 => rig.off(),

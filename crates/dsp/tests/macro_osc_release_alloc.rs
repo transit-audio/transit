@@ -18,6 +18,8 @@ fn colliding_releases_and_switches_allocate_nothing() {
             p.process(&mut io, 240);
             p.note_on(5, 55, 91);
             p.note_off(6, 55);
+            // The re-strike's own off: the first closes the earlier note-on (#292).
+            p.note_off(6, 55);
             p.process(&mut io, 240);
         }
         // End on the shaped path: enough sample frames for the default amp release to rest.

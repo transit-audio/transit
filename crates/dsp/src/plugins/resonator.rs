@@ -53,6 +53,7 @@ use crate::plugins::macro_osc::voice::{key_source, voice_gains};
 use crate::plugins::resample::{Converter, Kernel, half_taps, ticks};
 use crate::util::{Smoother, frames_in, sane_channels, sane_sr, sort_events};
 use crate::{Category, Plugin, PluginInfo, Transport, db_to_gain};
+use transit_instrument_core::pairing::NotePairing;
 use transit_resonator::{CHORD_COUNT, MAX_BLOCK_SIZE, Patch, PerformanceState, Resonator, ResonatorModel};
 
 #[path = "resonator_params.rs"]
@@ -273,6 +274,8 @@ pub struct ResonatorInstrument {
     strum_len: usize,
     /// Keys held down, and keys released while the pedal was down.
     held: [bool; 128],
+    /// The open note-ons per key, so a note-off closes the oldest (#292).
+    pairing: NotePairing,
     pedalled: [bool; 128],
     sustain: bool,
     /// The newest strum's key and velocity (0..1), and the last note-off's velocity.
@@ -333,6 +336,7 @@ impl ResonatorInstrument {
             strum_at: 0,
             strum_len: 0,
             held: [false; 128],
+            pairing: NotePairing::new(),
             pedalled: [false; 128],
             sustain: false,
             key: 60,
@@ -482,6 +486,7 @@ impl ResonatorInstrument {
         self.strum_at = 0;
         self.strum_len = 0;
         self.held = [false; 128];
+        self.pairing.clear();
         self.pedalled = [false; 128];
         self.sustain = false;
         for sh in &mut self.shapers {
@@ -496,6 +501,8 @@ impl ResonatorInstrument {
             Kind::On(key, 0) => self.apply(Kind::Off(key, 0)),
             Kind::On(key, vel) => {
                 let k = usize::from(key);
+                let held = self.held.get(k).copied().unwrap_or(false);
+                self.pairing.on(0, key, held);
                 if let Some(p) = self.poly.get_mut(k) {
                     *p = 0;
                 }
@@ -508,6 +515,12 @@ impl ResonatorInstrument {
                 self.queue_strum(key, f32::from(vel) / 127.0);
             }
             Kind::Off(key, velocity) => {
+                // An off that closes an earlier note-on of a key struck again since leaves the
+                // newest note sounding (#292).
+                self.pairing.off(0, key);
+                if self.pairing.open(0, key) > 0 {
+                    return;
+                }
                 let k = usize::from(key);
                 if self.held.get(k).copied().unwrap_or(false) {
                     if let Some(h) = self.held.get_mut(k) {
@@ -521,6 +534,7 @@ impl ResonatorInstrument {
             }
             Kind::AllOff => {
                 self.held = [false; 128];
+                self.pairing.clear();
                 self.pedalled = [false; 128];
                 self.sustain = false;
                 self.strum_len = 0;
@@ -751,6 +765,7 @@ impl Plugin for ResonatorInstrument {
         self.strum_at = 0;
         self.strum_len = 0;
         self.held = [false; 128];
+        self.pairing.clear();
         self.pedalled = [false; 128];
         self.sustain = false;
         self.key = 60;

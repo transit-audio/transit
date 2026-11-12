@@ -621,3 +621,30 @@ fn a_mono_strip_and_hostile_values() {
     assert_eq!(pitch_cv(0, -24.0), -60.0);
     assert_eq!(pitch_cv(69, 0.0).to_bits(), 21.0f32.to_bits());
 }
+
+/// #292: a note-off pairs with the oldest open note-on of its key. A re-strike before the earlier
+/// note's off (one sample before, or on the same sample), then that off: the key stays down until
+/// the re-struck note's own off. Swept over host block sizes.
+#[test]
+fn an_earlier_notes_off_after_a_restrike_keeps_the_key_down() {
+    for host in [1usize, 7, 12, 13, 256] {
+        for (on, off) in [(5usize, 6usize), (6, 6)] {
+            let mut r = instrument(48_000, &[]);
+            let mut io = [vec![0.0; host], vec![0.0; host]];
+            let mut run = |r: &mut TextureSynth, frames: usize| {
+                for at in (0..frames).step_by(host) {
+                    r.process(&mut io, host.min(frames - at));
+                }
+            };
+            r.note_on(0, 60, 100);
+            run(&mut r, 480);
+            r.note_on(on, 60, 91);
+            r.note_off(off, 60);
+            run(&mut r, 480);
+            assert!(r.held[60], "host={host} on={on} off={off}: the re-struck key is down");
+            r.note_off(0, 60);
+            run(&mut r, 48);
+            assert!(!r.held[60], "host={host} on={on} off={off}: its own off lets it go");
+        }
+    }
+}

@@ -173,8 +173,9 @@ pub enum EventOutcome {
     ReleaseAdvanced {
         frames: u32,
     },
-    /// A controller value replaced one queued for the same frame, or a duplicate release for an
-    /// entry whose release is already queued (no extra slot).
+    /// A controller value replaced one queued for the same frame, a duplicate release for an
+    /// entry whose release is already queued (no extra slot), or a note-off that closes an
+    /// earlier note-on of a key re-struck since (#292): the re-strike already ended that note.
     Coalesced,
     /// The engine epoch differs (or the engine takes no realtime events).
     StaleEngine,
@@ -427,6 +428,10 @@ struct NoteEntry {
     voice: i32,
     /// Note-ons queued and not yet delivered.
     ons: u16,
+    /// Queued note-ons no note-off has closed yet (#292): an off closes the oldest, so while a
+    /// newer one stays open the off only counts down (the re-strike already ended the older
+    /// note's voice). Clip notes do not count (clips keep their first-off rule).
+    open: u16,
     release_queued: bool,
     /// A refused off, retained until the host accepts it (including its release velocity).
     retry_release: Option<u8>,
@@ -441,6 +446,7 @@ const NO_NOTE: NoteEntry = NoteEntry {
     sender: NoteId::NONE,
     voice: -1,
     ons: 0,
+    open: 0,
     release_queued: false,
     retry_release: None,
     last_on: 0,
@@ -586,6 +592,7 @@ impl InstrumentEvents {
                 Action::On(n) => {
                     if let Some(e) = notes.get_mut(usize::from(n)) {
                         e.ons = e.ons.saturating_sub(1);
+                        e.open = e.open.saturating_sub(1);
                         if e.ons == 0 && e.voice < 0 && !e.release_queued {
                             *e = NO_NOTE;
                         }
@@ -647,6 +654,7 @@ impl InstrumentEvents {
                 }
                 if let Some(e) = self.notes.get_mut(n) {
                     e.ons = e.ons.saturating_add(1);
+                    e.open = e.open.saturating_add(1);
                     e.last_on = e.last_on.max(due);
                 }
                 Admit::Queued
@@ -656,6 +664,15 @@ impl InstrumentEvents {
                     let dup = self.notes.iter().any(|e| e.matches(&source, key, id));
                     return if dup { Admit::Coalesced } else { Admit::Unmatched };
                 };
+                // The off closes the oldest open note-on (#292, Ableton's and Logic's pairing).
+                // While a newer one stays open, the closed note is one a re-strike already ended:
+                // the newer note sounds on until its own off.
+                if let Some(e) = self.notes.get_mut(n)
+                    && e.open > 1
+                {
+                    e.open -= 1;
+                    return Admit::Coalesced;
+                }
                 self.release_note(n, due, source, transport, message, st);
                 Admit::Queued
             }
@@ -844,6 +861,7 @@ impl InstrumentEvents {
             } else {
                 // A refused re-strike may have later ons still queued for this entry.
                 e.voice = -1;
+                e.open = e.ons;
                 e.retry_release = None;
                 e.release_queued = release_queued;
             }
@@ -1140,6 +1158,7 @@ impl InstrumentEvents {
                         sender: NoteId::NONE,
                         voice: -1,
                         ons: 0,
+                        open: 0,
                         release_queued: false,
                         retry_release: None,
                         last_on: 0,

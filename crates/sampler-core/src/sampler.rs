@@ -25,6 +25,7 @@ use crate::reader::SourceBank;
 use crate::selection::{self, RoundRobin};
 use crate::voice::{Controls, Owner, Start, Transport, Voice};
 use crate::{ALTERNATIVES, GROUPS, LAYERS, LAYERS_PER_NOTE, PADS, VOICES, ZONES, math};
+use transit_instrument_core::pairing::NotePairing;
 
 #[cfg(test)]
 #[path = "tests/steal_ties.rs"]
@@ -91,6 +92,9 @@ pub struct SamplerCore {
     members: Vec<[u16; ALTERNATIVES]>,
     /// Whether the last block reported a playing transport (`None`: no block yet).
     was_playing: Option<bool>,
+    /// The open note-ons per key and channel: a note-off without a host id closes the oldest
+    /// (#292).
+    pairing: NotePairing,
 }
 
 impl Default for SamplerCore {
@@ -122,6 +126,7 @@ impl SamplerCore {
             rr: RoundRobin::new(1),
             members: Vec::new(),
             was_playing: None,
+            pairing: NotePairing::new(),
         }
     }
 
@@ -371,6 +376,7 @@ impl SamplerCore {
         self.pad_voice = [None; PADS];
         self.order_len = 0;
         self.serial = 0;
+        self.pairing.clear();
         self.rr.restart();
     }
 
@@ -491,7 +497,16 @@ impl SamplerCore {
                     self.note_off(channel, key, 64, id);
                     false
                 } else if key <= 127 && velocity <= 127 {
-                    self.note_on(Owner::Note { channel, key, id }, key, velocity, ctx, n, sources)
+                    let seq = if id < 0 {
+                        let held = self
+                            .voices
+                            .iter()
+                            .any(|v| v.active && v.held && matches!(v.owner, Owner::Note { channel: c, key: k, .. } if c == channel && k == key));
+                        self.pairing.on(channel, key, held)
+                    } else {
+                        0
+                    };
+                    self.note_on(Owner::Note { channel, key, id, seq }, key, velocity, ctx, n, sources)
                 } else {
                     false
                 }
@@ -518,6 +533,7 @@ impl SamplerCore {
                 false
             }
             EventKind::AllNotesOff => {
+                self.pairing.clear();
                 for i in 0..self.voices.len() {
                     let one_shot = self.voices.get(i).is_some_and(|v| v.active && v.one_shot);
                     if one_shot {
@@ -529,6 +545,7 @@ impl SamplerCore {
                 false
             }
             EventKind::AllSoundOff => {
+                self.pairing.clear();
                 self.voices.iter_mut().for_each(Voice::cut);
                 false
             }
@@ -642,14 +659,18 @@ impl SamplerCore {
         }
     }
 
+    /// A note-off: by the host's note id when it has one, else the voices of the oldest open
+    /// note-on of its key and channel (#292; every voice of that key and channel when none is
+    /// counted open).
     fn note_off(&mut self, channel: u8, key: u8, velocity: u8, id: i32) {
+        let closes = if id >= 0 { None } else { self.pairing.off(channel, key) };
         self.key_up_where(
             |o| match o {
-                Owner::Note { channel: c, key: k, id: vid } => {
+                Owner::Note { channel: c, key: k, id: vid, seq } => {
                     if id >= 0 {
                         vid == id
                     } else {
-                        c == channel && k == key
+                        c == channel && k == key && closes.is_none_or(|s| s == seq)
                     }
                 }
                 Owner::Press { .. } => false,

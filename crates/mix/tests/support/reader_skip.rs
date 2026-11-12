@@ -182,6 +182,10 @@ impl Rig {
     }
 
     pub fn send(&mut self, message: Message) {
+        self.send_expecting(message, EventOutcome::Queued);
+    }
+
+    pub fn send_expecting(&mut self, message: Message, outcome: EventOutcome) {
         let target = (self.track, INSTRUMENT_SLOT, self.generation(INSTRUMENT_SLOT));
         assert_eq!(
             self.mix.queue_event(&InstrumentEvent {
@@ -193,7 +197,7 @@ impl Rig {
                 message,
                 arrival: Arrival { host_ns: 0, sequence: 0 },
             }),
-            EventOutcome::Queued
+            outcome
         );
     }
 
@@ -202,6 +206,10 @@ impl Rig {
     }
     pub fn off(&mut self) {
         self.send(Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE });
+    }
+    /// The off of a note a re-strike ended: it closes that note-on and reaches no plug-in (#292).
+    pub fn closing_off(&mut self) {
+        self.send_expecting(Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE }, EventOutcome::Coalesced);
     }
 
     pub fn block(&mut self) {

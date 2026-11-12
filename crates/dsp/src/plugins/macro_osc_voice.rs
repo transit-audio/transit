@@ -176,6 +176,11 @@ impl NoteStack {
         self.keys.get(..self.len).is_some_and(|k| k.contains(&key))
     }
 
+    /// Whether `key` is held down (not only kept by the pedal).
+    pub fn holds(&self, key: u8) -> bool {
+        self.held.get(usize::from(key)).copied().unwrap_or(false) && self.contains(key)
+    }
+
     /// Whether a key is held down (not only kept by the pedal).
     pub fn any_held(&self) -> bool {
         self.keys.get(..self.len).is_some_and(|k| k.iter().any(|&k| self.held.get(usize::from(k)).copied().unwrap_or(false)))

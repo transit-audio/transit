@@ -10,6 +10,10 @@
 //!   voice. The newest note always sounds. A note-off releases its voice, whose low-pass gate tail
 //!   plays on until the voice is silent; only then is it free (idle and not rendered). Voices above
 //!   a lowered `voices` count release and play out their tails. No unison here (racks, ADR 0034).
+//! - Same-key overlaps (#292): a note-off closes the oldest open note-on of its key (Ableton's and
+//!   Logic's convention; every channel counts as one, the instrument is omni). A key struck again
+//!   before its earlier note's off restarts the voice playing it, so that earlier off, arriving
+//!   later, closes the superseded note and leaves the voice sounding until the newest note's off.
 //! - Mono (`voices` 1): the instrument of #195. The held note is the voice's V/OCT input, a note-on
 //!   raises its trigger input and sets its level input from the velocity, a note-off lowers both
 //!   and the low-pass gate's decay is the release. Last-note priority and legato: a note played
@@ -51,6 +55,7 @@ use crate::params::{Params, param_plumbing};
 use crate::plugins::instrument_queue::{MAX_EVENTS, RELEASE_RESERVE};
 use crate::util::{Smoother, frames_in, sane_channels, sane_sr, sort_events};
 use crate::{Category, Plugin, PluginInfo, Transport, VoiceShape, db_to_gain};
+use transit_instrument_core::pairing::NotePairing;
 use transit_macro_osc::SampleRate;
 use transit_macro_osc::utils::random::Random;
 
@@ -271,6 +276,8 @@ pub struct MacroOscillator {
     macros: [f32; 8],
     /// Phrases started (the voices' ages).
     counter: u64,
+    /// The open note-ons per key, so a note-off closes the oldest (#292).
+    pairing: NotePairing,
     /// The left and right sums of the current block (`block` is the left one).
     block_r: [f32; BLOCK],
     /// The matrix and the shaper's settings, from the parameters.
@@ -319,6 +326,7 @@ impl MacroOscillator {
             poly: [0; 128],
             macros: [0.0; 8],
             counter: 0,
+            pairing: NotePairing::new(),
             block_r: [0.0; BLOCK],
             matrix: Matrix::default(),
             shaper: Settings::default(),
@@ -403,6 +411,8 @@ impl MacroOscillator {
                 if let Some(p) = self.poly.get_mut(usize::from(key)) {
                     *p = 0;
                 }
+                let held = self.slots.iter().any(|s| s.notes.holds(key));
+                self.pairing.on(0, key, held);
                 self.counter += 1;
                 let age = self.counter;
                 if self.voices == 1 {
@@ -419,6 +429,12 @@ impl MacroOscillator {
                 }
             }
             Kind::Off(key, velocity) => {
+                // An off that closes an earlier note-on of a key struck again since leaves the
+                // newest note sounding: the re-strike took over that note's voice.
+                self.pairing.off(0, key);
+                if self.pairing.open(0, key) > 0 {
+                    return;
+                }
                 for s in &mut self.slots {
                     s.off(key, velocity, self.sustain);
                 }
@@ -427,12 +443,14 @@ impl MacroOscillator {
                 for s in &mut self.slots {
                     s.notes.clear();
                 }
+                self.pairing.clear();
                 self.sustain = false;
             }
             Kind::SoundOff => {
                 for s in &mut self.slots {
                     s.reset();
                 }
+                self.pairing.clear();
                 self.sustain = false;
             }
             Kind::Sustain(on) => {
@@ -593,6 +611,7 @@ impl Plugin for MacroOscillator {
         self.pressure = 0;
         self.poly = [0; 128];
         self.counter = 0;
+        self.pairing.clear();
         self.block_r = [0.0; BLOCK];
         self.free_phase = [0.0; 2];
         self.anchor = None;
@@ -718,6 +737,10 @@ mod retrigger_tests;
 #[cfg(test)]
 #[path = "macro_osc_release_tests.rs"]
 mod release_tests;
+
+#[cfg(test)]
+#[path = "macro_osc_restrike_tests.rs"]
+mod restrike_tests;
 
 #[cfg(test)]
 #[path = "macro_osc_preview_tests.rs"]

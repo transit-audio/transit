@@ -135,6 +135,19 @@ The switch, ID and learned assignments are saved by exact device name in this ma
 `ui.json`, under `midi_transport`. They carry across sessions and reconnects; they are never
 saved in a session. Devices with the same name share these preferences.
 
+## Striking a key again before its note-off
+
+When a key is struck again before the note-off of its earlier note arrives (from a controller or
+a MIDI effect), transit pairs each note-off with the oldest open note-on of that key and channel,
+as Ableton Live and Logic Pro do. The new note-on ends the earlier note and starts the key again;
+the earlier note's late note-off then closes that earlier note, and the new note plays on until
+its own note-off. Before 0.7.1 the late note-off cut the new note short. On the external MIDI
+outputs, Stop or a loop wrap now also ends a key whose overlapping notes have not all had their
+note-off.
+
+Overlapping notes of one key inside a clip are the exception and keep their 0.7.0 behavior: the
+later note starts the key again and the first note-off ends it.
+
 ## Notes played during the count-in
 
 Notes you play on an armed MIDI or instrument track during the count-in are kept, as in Logic Pro:

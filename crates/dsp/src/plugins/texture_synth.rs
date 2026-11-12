@@ -61,6 +61,7 @@ use crate::plugins::resample::{Converter, Kernel};
 use crate::plugins::resonator::edge;
 use crate::util::{Smoother, frames_in, sane_channels, sane_sr, sort_events};
 use crate::{Category, Plugin, PluginInfo, Transport, db_to_gain};
+use transit_instrument_core::pairing::NotePairing;
 use transit_texture::stmlib::extract_gate_flags;
 use transit_texture::{Controls, Parameter, SYNTH_SAMPLE_RATE, SeedButton, Synth, SynthResolution};
 
@@ -253,6 +254,8 @@ pub struct TextureSynth {
     events: Vec<Event>,
     /// Keys held down, when each was pressed (a counter), and keys released while the pedal is down.
     held: [bool; 128],
+    /// The open note-ons per key, so a note-off closes the oldest (#292).
+    pairing: NotePairing,
     pressed: [u32; 128],
     presses: u32,
     pedalled: [bool; 128],
@@ -322,6 +325,7 @@ impl TextureSynth {
             ch: 2,
             events: Vec::with_capacity(MAX_EVENTS),
             held: [false; 128],
+            pairing: NotePairing::new(),
             pressed: [0; 128],
             presses: 0,
             pedalled: [false; 128],
@@ -451,6 +455,7 @@ impl TextureSynth {
         self.synth.reset();
         self.up.reset();
         self.held = [false; 128];
+        self.pairing.clear();
         self.pedalled = [false; 128];
         self.sustain = false;
         self.strike = None;
@@ -469,6 +474,8 @@ impl TextureSynth {
             Kind::On(key, 0) => self.apply(Kind::Off(key, 0)),
             Kind::On(key, vel) => {
                 let k = usize::from(key);
+                let held = self.held.get(k).copied().unwrap_or(false);
+                self.pairing.on(0, key, held);
                 if let Some(p) = self.poly.get_mut(k) {
                     *p = 0;
                 }
@@ -486,6 +493,12 @@ impl TextureSynth {
                 self.strike = Some((key, f32::from(vel) / 127.0));
             }
             Kind::Off(key, velocity) => {
+                // An off that closes an earlier note-on of a key struck again since leaves the
+                // newest note sounding (#292).
+                self.pairing.off(0, key);
+                if self.pairing.open(0, key) > 0 {
+                    return;
+                }
                 let k = usize::from(key);
                 if self.held.get(k).copied().unwrap_or(false) {
                     if let Some(h) = self.held.get_mut(k) {
@@ -505,6 +518,7 @@ impl TextureSynth {
             }
             Kind::AllOff => {
                 self.held = [false; 128];
+                self.pairing.clear();
                 self.pedalled = [false; 128];
                 self.sustain = false;
             }
@@ -768,6 +782,7 @@ impl Plugin for TextureSynth {
         self.up.reset();
         self.events.clear();
         self.held = [false; 128];
+        self.pairing.clear();
         self.pressed = [0; 128];
         self.presses = 0;
         self.pedalled = [false; 128];

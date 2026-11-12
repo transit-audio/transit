@@ -510,11 +510,19 @@ struct Port {
     foreign: bool,
 }
 
-/// A destination's held state, per origin: notes as 128-bit sets per channel, pedals per channel.
-#[derive(Clone, Copy, Default)]
+/// A destination's held state, per origin: the open note-ons per channel and key (an off closes
+/// one, so a key struck twice before its first off still counts one open note, #292), pedals per
+/// channel.
+#[derive(Clone, Copy)]
 struct Held {
-    notes: [[u128; 16]; 2],
+    notes: [[[u8; 128]; 16]; 2],
     sustain: [u16; 2],
+}
+
+impl Default for Held {
+    fn default() -> Self {
+        Held { notes: [[[0; 128]; 16]; 2], sustain: [0; 2] }
+    }
 }
 
 struct Track {
@@ -1028,13 +1036,13 @@ impl Worker {
         let o = origin_index(origin);
         match (bytes[0] & 0xF0, message) {
             (0x90, [_, key, velocity]) if *velocity > 0 => {
-                if let Some(set) = held.notes[o].get_mut(channel) {
-                    *set |= 1u128 << (key & 0x7F);
+                if let Some(open) = held.notes[o].get_mut(channel).and_then(|c| c.get_mut(usize::from(key & 0x7F))) {
+                    *open = open.saturating_add(1);
                 }
             }
             (0x80 | 0x90, [_, key, _]) => {
-                if let Some(set) = held.notes[o].get_mut(channel) {
-                    *set &= !(1u128 << (key & 0x7F));
+                if let Some(open) = held.notes[o].get_mut(channel).and_then(|c| c.get_mut(usize::from(key & 0x7F))) {
+                    *open = open.saturating_sub(1);
                 }
             }
             (0xB0, [_, 64, value]) => {
@@ -1045,7 +1053,9 @@ impl Worker {
                 }
             }
             (0xB0, [_, 120 | 123, _]) => {
-                held.notes[o][channel] = 0;
+                if let Some(c) = held.notes[o].get_mut(channel) {
+                    *c = [0; 128];
+                }
             }
             _ => {}
         }
@@ -1055,10 +1065,12 @@ impl Worker {
         if !self.send(port, &message) {
             // Not sent: the device does not hold the note either.
             if let Some(track) = self.tracks.get_mut(i)
-                && let Some(set) = track.held.notes[o].get_mut(channel)
                 && message.first().is_some_and(|s| s & 0xF0 == 0x90)
+                && message.get(2).is_some_and(|v| *v > 0)
+                && let Some(open) =
+                    track.held.notes[o].get_mut(channel).and_then(|c| c.get_mut(usize::from(message.get(1).copied().unwrap_or(0) & 0x7F)))
             {
-                *set &= !(1u128 << (message.get(1).copied().unwrap_or(0) & 0x7F));
+                *open = open.saturating_sub(1);
             }
         }
     }
@@ -1106,19 +1118,19 @@ impl Worker {
         for &o in origins {
             let i = origin_index(o);
             for channel in 0..16u8 {
-                let set = track.held.notes[i][usize::from(channel)];
-                if set != 0 {
-                    for key in 0..128u8 {
-                        if set & (1u128 << key) != 0 {
-                            self.send(port, &[0x80 | channel, key, 64]);
-                        }
+                // One off for each key with a note-on still open (as before: a looped or stacked
+                // key gets one off, not one per note-on; Stop and the panic add All Notes Off).
+                let open = track.held.notes[i][usize::from(channel)];
+                for (key, n) in (0u8..).zip(open) {
+                    if n > 0 {
+                        self.send(port, &[0x80 | channel, key, 64]);
                     }
                 }
                 if track.held.sustain[i] & (1 << channel) != 0 {
                     self.send(port, &[0xB0 | channel, 64, 0]);
                 }
             }
-            track.held.notes[i] = [0; 16];
+            track.held.notes[i] = [[0; 128]; 16];
             track.held.sustain[i] = 0;
         }
         if all_off {

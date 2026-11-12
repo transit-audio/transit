@@ -121,13 +121,66 @@ fn a_re_strike_releases_the_old_voice_first() {
     let now = rig.mix.next_frame().0;
     rig.send(src, now, on(60));
     rig.send(src, now + 10, on(60));
-    rig.send(src, now + 20, off(60));
+    // The first off closes the first note-on, which the re-strike ended (#292); the second ends
+    // the re-struck note.
+    assert_eq!(rig.send(src, now + 20, off(60)), EventOutcome::Coalesced);
+    assert_eq!(rig.send(src, now + 30, off(60)), EventOutcome::Queued);
     rig.render(1);
     let heard = rig.heard_by(1);
     assert_eq!(every_on_has_its_off(&heard), 2);
     let kinds: Vec<(u64, bool)> = heard.iter().map(|(f, e)| (*f - now, matches!(e.message, Message::NoteOn { .. }))).collect();
-    assert_eq!(kinds, vec![(0, true), (10, false), (10, true), (20, false)]);
+    assert_eq!(kinds, vec![(0, true), (10, false), (10, true), (30, false)]);
     assert_eq!(rig.mix.event_status().restrikes, 1);
+}
+
+/// Renders `frames` frames in host blocks of `block` (at most the rig's 256).
+fn render_in(rig: &mut Rig, frames: usize, block: usize) {
+    let mut done = 0;
+    while done < frames {
+        let n = block.min(frames - done);
+        rig.mix.render_active(rig.pos, n, &mut rig.out);
+        rig.pos += n as i64;
+        done += n;
+    }
+}
+
+/// #292: a note-off pairs with the oldest open note-on of its key and channel (Ableton's and
+/// Logic's convention). The earlier note's off, due after the re-strike (one sample after it or
+/// on the same sample), closes the earlier note; the re-struck note ends at its own off. Off
+/// before the re-strike (same sample or one before) is the ordinary end then a new note.
+/// Swept over host blocks that put the collision inside a block and across a boundary.
+#[test]
+fn an_earlier_notes_off_after_a_restrike_leaves_the_restrike_sounding() {
+    // (re-strike, earlier note's off, which is sent first): offsets from the start.
+    let orders = [(250u64, 251u64, true), (250, 250, true), (250, 250, false), (251, 250, false)];
+    for block in [1usize, 7, 64, 250, 256] {
+        for (restrike, early_off, on_first) in orders {
+            let mut rig = Rig::new();
+            let src = port(1, 0);
+            let now = rig.mix.next_frame().0;
+            rig.send(src, now, on(60));
+            if on_first {
+                assert_eq!(rig.send(src, now + restrike, on(60)), EventOutcome::Queued);
+                assert_eq!(rig.send(src, now + early_off, off(60)), EventOutcome::Coalesced, "block={block}: closes the earlier note");
+            } else {
+                assert_eq!(rig.send(src, now + early_off, off(60)), EventOutcome::Queued);
+                assert_eq!(rig.send(src, now + restrike, on(60)), EventOutcome::Queued);
+            }
+            assert_eq!(rig.send(src, now + 900, off(60)), EventOutcome::Queued, "block={block}: the re-struck note's own off");
+            render_in(&mut rig, 1024, block);
+            let heard = rig.heard_by(1);
+            let got: Vec<(u64, bool)> = heard.iter().map(|(f, e)| (*f - now, matches!(e.message, Message::NoteOn { .. }))).collect();
+            // The first note ends at the re-strike (which carries its off) or at its own earlier
+            // off; the re-struck note always lasts until frame 900.
+            let first_end = if on_first { restrike } else { early_off };
+            assert_eq!(
+                got,
+                vec![(0, true), (first_end, false), (restrike, true), (900, false)],
+                "block={block} restrike={restrike} off={early_off} on_first={on_first}"
+            );
+            assert_eq!(every_on_has_its_off(&heard), 2);
+        }
+    }
 }
 
 #[test]

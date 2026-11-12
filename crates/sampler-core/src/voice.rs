@@ -24,8 +24,19 @@ use crate::{CHOKE_FRAMES, MAX_STEP, MOD_BLOCK, math};
 /// Who holds a voice: the note that started it, or a direct pad press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Owner {
-    Note { channel: u8, key: u8, id: i32 },
-    Press { pad: u8 },
+    /// `seq`: the note-on's sequence number of its key and channel ([`NotePairing`]), so a note-off
+    /// without a host id releases only the note it closes (#292).
+    ///
+    /// [`NotePairing`]: transit_instrument_core::pairing::NotePairing
+    Note {
+        channel: u8,
+        key: u8,
+        id: i32,
+        seq: u8,
+    },
+    Press {
+        pad: u8,
+    },
 }
 
 /// Channel controllers and rack macros: matrix sources every voice reads.

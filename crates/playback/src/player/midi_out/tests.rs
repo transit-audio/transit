@@ -209,6 +209,30 @@ fn a_wrap_ends_held_notes_at_the_wrap_instant_and_drops_discarded_playback() {
     assert!(s.worker.pending.is_empty());
 }
 
+/// #292: two overlapping notes on one key (two clip notes, or a clip and a live note) count as two
+/// open notes. The first off closes one; a release before the second off still ends the key, at
+/// the release instant. A key with any note-on open gets one off; none when all are closed.
+#[test]
+fn a_release_after_an_overlapping_same_key_off_still_ends_the_open_note() {
+    const T0: u64 = 1_000_000_000;
+    const MS: u64 = 1_000_000;
+    let (on, off) = (vec![0x90, 60, 100], vec![0x80, 60, 64]);
+    for (ons, offs, released) in [(2usize, 1usize, 1usize), (2, 0, 1), (1, 0, 1), (2, 2, 0)] {
+        let mut s = Scheduler::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
+        for k in 0..ons {
+            assert!(s.playback.push(message(1, T0 + k as u64 * MS, [0x90, 60, 100])));
+        }
+        for k in 0..offs {
+            assert!(s.playback.push(message(1, T0 + (2 + k as u64) * MS, [0x80, 60, 64])));
+        }
+        assert!(s.playback.push(OutEvent { kind: Kind::Release, at_ns: T0 + 5 * MS, ..OutEvent::default() }));
+        let mut expect = vec![on.clone(); ons];
+        expect.extend(std::iter::repeat_n(off.clone(), offs + released));
+        assert_eq!(s.at(T0 + 5 * MS), expect, "{ons} ons, {offs} offs: {released} released");
+        assert_eq!(s.at(u64::MAX), expect, "{ons} ons, {offs} offs: nothing more");
+    }
+}
+
 #[test]
 fn a_destination_change_releases_on_the_old_port_only_on_the_tracks_channels() {
     let mut rig = Rig::new(|key| vec![destination(1, key, MidiOutChannel::Channel(0), 0), destination(2, key, MidiOutChannel::Channel(1), 0)]);

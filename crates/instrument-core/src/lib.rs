@@ -1,7 +1,8 @@
 //! transit's shared instrument primitives (ADR 0041): the per-voice shaper (a multimode filter, two
 //! LFOs, the amp and filter envelopes), the 16-row modulation matrix, the state-variable filter
-//! sections, the LFO and the ADSR. The built-in instruments in `transit-dsp` use them, and the
-//! sampler core will; they moved here from dsp unchanged (dsp re-exports them at their old paths).
+//! sections, the LFO, the ADSR and the note-on/note-off pairing table ([`pairing`], #292). The
+//! built-in instruments in `transit-dsp` use them, and the sampler core will; they moved here from
+//! dsp unchanged (dsp re-exports them at their old paths).
 //!
 //! Everything is fixed-size: no allocation, clock, thread or logger; seeds and rates are inputs.
 //!
@@ -15,6 +16,7 @@ pub mod adsr;
 pub mod lfo;
 mod math;
 pub mod matrix;
+pub mod pairing;
 pub mod shaper;
 pub mod svf;
 mod util;

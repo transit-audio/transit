@@ -60,6 +60,7 @@ use crate::plugins::macro_osc::voice::{key_source, voice_gains};
 use crate::plugins::resample::{Converter, Kernel, half_taps, ticks};
 use crate::util::{Smoother, frames_in, sane_channels, sane_sr, sort_events};
 use crate::{Category, Plugin, PluginInfo, Transport, db_to_gain};
+use transit_instrument_core::pairing::NotePairing;
 use transit_modal_voice::{MAX_BLOCK_SIZE, ModalVoice, Patch, PerformanceState, ResonatorModel};
 
 #[path = "modal_voice_params.rs"]
@@ -378,6 +379,8 @@ pub struct ModalVoiceInstrument {
     ch: usize,
     events: Vec<Event>,
     keys: Keys,
+    /// The open note-ons per key, so a note-off closes the oldest (#292).
+    pairing: NotePairing,
     sustain: bool,
     /// A note arrived while the gate was up: the next block drops the gate to retrigger.
     retrigger: bool,
@@ -454,6 +457,7 @@ impl ModalVoiceInstrument {
             ch: 2,
             events: Vec::with_capacity(MAX_EVENTS),
             keys: Keys::new(),
+            pairing: NotePairing::new(),
             sustain: false,
             retrigger: false,
             gate: false,
@@ -583,6 +587,7 @@ impl ModalVoiceInstrument {
         self.configure();
         self.up.reset();
         self.keys.clear();
+        self.pairing.clear();
         self.sustain = false;
         self.retrigger = false;
         self.gate = false;
@@ -603,6 +608,8 @@ impl ModalVoiceInstrument {
                 if let Some(p) = self.poly.get_mut(usize::from(key)) {
                     *p = 0;
                 }
+                let held = self.keys.held.get(usize::from(key)).copied().unwrap_or(false);
+                self.pairing.on(0, key, held);
                 if self.gate {
                     self.retrigger = true;
                 }
@@ -612,6 +619,12 @@ impl ModalVoiceInstrument {
                 self.velocity = f32::from(vel) / 127.0;
             }
             Kind::Off(key, velocity) => {
+                // An off that closes an earlier note-on of a key struck again since leaves the
+                // newest note sounding (#292).
+                self.pairing.off(0, key);
+                if self.pairing.open(0, key) > 0 {
+                    return;
+                }
                 if self.keys.release(key, self.sustain) {
                     self.release_velocity = f32::from(velocity.min(127)) / 127.0;
                     if let Some(top) = self.keys.top() {
@@ -622,6 +635,7 @@ impl ModalVoiceInstrument {
             Kind::AllOff => {
                 self.latch = false;
                 self.keys.clear();
+                self.pairing.clear();
                 self.sustain = false;
                 self.retrigger = false;
             }
@@ -888,6 +902,7 @@ impl Plugin for ModalVoiceInstrument {
         self.up.reset();
         self.events.clear();
         self.keys.clear();
+        self.pairing.clear();
         self.sustain = false;
         self.retrigger = false;
         self.gate = false;

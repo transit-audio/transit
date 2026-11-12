@@ -458,3 +458,38 @@ fn a_publication_is_checked_whole_and_a_refused_one_changes_nothing() {
     assert_eq!(s.core.as_deref().unwrap().core().pad(0).map(|p| p.note), Some(61));
     let _: Pad = *s.core.as_deref().unwrap().core().pad(1).unwrap();
 }
+
+/// #292: a note-off without a host id pairs with the oldest open note-on of its key and channel.
+/// A re-strike one sample before the earlier note's off, or on the same sample, then that off: a
+/// pad restarts its one voice, which plays on; under the keys the earlier note's voice releases
+/// and the re-struck one plays on. Its own off ends it. Swept over host block sizes.
+#[test]
+fn an_earlier_notes_off_after_a_restrike_leaves_the_restrike_sounding() {
+    for pad in [true, false] {
+        for host in [1usize, 7, 64] {
+            for (on, off) in [(5u32, 6u32), (6, 6)] {
+                let (mut s, mut p) = instance();
+                let gate = zone(0, 4_800, unity(PlayMode::Gate, 60, 8));
+                let binds: &[(usize, u16)] = if pad { &[(0, 0)] } else { &[] };
+                p.publish(spec(vec![constant(1.0, 4_800)], vec![Some(gate)], binds)).unwrap();
+                block(&mut s, 4);
+                let run = |s: &mut Sampler, frames: usize| {
+                    let mut last = f32::NAN;
+                    for at in (0..frames).step_by(host) {
+                        last = *block(s, host.min(frames - at))[0].last().unwrap();
+                    }
+                    last
+                };
+                note_on(&mut s, 0, 60, -1);
+                run(&mut s, 64);
+                note_on(&mut s, on, 60, -1);
+                note_off(&mut s, off, 60, -1);
+                let held = run(&mut s, 64);
+                assert_eq!(held.to_bits(), 1.0f32.to_bits(), "pad={pad} host={host} on={on} off={off}: the re-struck note plays on");
+                note_off(&mut s, 0, 60, -1);
+                let ended = run(&mut s, 64);
+                assert_eq!(ended.to_bits(), 0.0f32.to_bits(), "pad={pad} host={host} on={on} off={off}: its own off ends it");
+            }
+        }
+    }
+}

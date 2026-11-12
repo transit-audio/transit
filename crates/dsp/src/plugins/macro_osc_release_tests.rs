@@ -23,8 +23,9 @@ fn released(stage: Stage) -> bool {
 
 /// 384 sixteenths in G minor, varying velocity and length around 68% gate. The re-strikes
 /// include off/on and on/off at one sample, adjacent samples in one voice block, and an on
-/// while the key is held. This instrument is omni and reuses one voice per key: a later off
-/// releases that voice even if another generator gate previously struck the same key.
+/// while the key is held. This instrument is omni and reuses one voice per key: an off that
+/// closes an earlier note-on of a key struck again since leaves the voice sounding (#292), so it
+/// ends at the newest note's off.
 #[test]
 fn scripted_sixteenths_release_every_ungated_voice() {
     for mode in ["off", "on", "held-toggle"] {
@@ -131,6 +132,10 @@ fn a_phrase_ending_before_its_first_render_releases_both_envelopes() {
                     }
                     m.note_on(1, 60, 80);
                     m.note_off(off, 60);
+                    if held {
+                        // The re-strike's own off: the first closes the held note (#292).
+                        m.note_off(off, 60);
+                    }
                     render(&mut m, 2 * BLOCK, host);
                     let s = &m.slots[0];
                     assert!(!s.sounding());
@@ -173,6 +178,10 @@ fn shaper_toggles_around_a_release_do_not_leave_a_gate_high() {
                         }
                         if sample == off {
                             m.note_off(0, 60);
+                            if restart {
+                                // The restart's own off: the first closes the held note (#292).
+                                m.note_off(0, 60);
+                            }
                         }
                         render(&mut m, 1, 1);
                     }
@@ -205,6 +214,8 @@ fn a_colliding_restrike_releases_without_needing_an_unshaped_restart() {
     m.note_on(0, 55, 100);
     render(&mut m, 4800, 256);
     m.note_on(5, 55, 91);
+    m.note_off(6, 55);
+    // The re-strike's own off at the same sample: the first off closes the held note (#292).
     m.note_off(6, 55);
     render(&mut m, RELEASE + 2 * BLOCK, 256);
     let stage = m.slots[0].shaper.amp.stage;
