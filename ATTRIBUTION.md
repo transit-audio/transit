@@ -119,6 +119,9 @@ and, at runtime, the operating system's own UI fonts when available (never redis
 | `docs/images/transit-pianoroll.png` | @derekmwright | screenshot of transit (pianoroll) | MIT OR Apache-2.0 |
 | `docs/images/transit-midi.png` | @derekmwright | screenshot of transit (midi) | MIT OR Apache-2.0 |
 | `docs/images/transit-audio-devices.png` | @derekmwright | screenshot of transit (audio devices) | MIT OR Apache-2.0 |
+| `docs/images/transit-arrange-detail.png` | @derekmwright | screenshot of transit (arrange, detail) | MIT OR Apache-2.0 |
+| `docs/images/transit-sampler.png` | @derekmwright | screenshot of transit (Sampler and Compressor) | MIT OR Apache-2.0 |
+| `docs/images/transit-sampler-slices.png` | @derekmwright | screenshot of transit (Sampler Slices view) | MIT OR Apache-2.0 |
 | `assets/brand/transit-wordmark-white.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
 | `assets/brand/transit-wordmark-graphite.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
 | `assets/brand/transit-wordmark-white-2172.png` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
@@ -130,6 +133,9 @@ and, at runtime, the operating system's own UI fonts when available (never redis
 | `site/assets/transit-pianoroll.png` | @derekmwright | screenshot of transit (pianoroll) | MIT OR Apache-2.0 |
 | `site/assets/transit-midi.png` | @derekmwright | screenshot of transit (midi) | MIT OR Apache-2.0 |
 | `site/assets/transit-audio-devices.png` | @derekmwright | screenshot of transit (audio devices) | MIT OR Apache-2.0 |
+| `site/assets/transit-arrange-detail.png` | @derekmwright | screenshot of transit (arrange, detail) | MIT OR Apache-2.0 |
+| `site/assets/transit-sampler.png` | @derekmwright | screenshot of transit (Sampler and Compressor) | MIT OR Apache-2.0 |
+| `site/assets/transit-sampler-slices.png` | @derekmwright | screenshot of transit (Sampler Slices view) | MIT OR Apache-2.0 |
 | `site/assets/transit-icon-dark-1024.png` | @derekmwright | original (pale t on charcoal; dark-surface icon variant) | MIT OR Apache-2.0 |
 | `site/assets/transit-wordmark-white.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
 | `site/assets/transit-wordmark-graphite.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
