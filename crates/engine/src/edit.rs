@@ -277,20 +277,24 @@ struct Span {
     start: Samples,
     end: Samples,
     locked: bool,
+    /// Its [`start_floor`]: where a ripple to the left stops.
+    floor: Samples,
 }
 
-fn spans(clips: &[Clip]) -> Vec<Span> {
-    clips.iter().map(|c| Span { id: c.id, start: c.start, end: c.end(), locked: locked(c) }).collect()
+/// The spans of `clips`, with the session start `zone` for their floors.
+fn spans(clips: &[Clip], zone: Samples) -> Vec<Span> {
+    clips.iter().map(|c| Span { id: c.id, start: c.start, end: c.end(), locked: locked(c), floor: start_floor(c, zone) }).collect()
 }
 
 /// Shuffle mode's ripple: the spans from `from` on move by `by`, up to the first locked one, which
-/// stays put with everything after it. A move left stops at the session start, keeping their
+/// stays put with everything after it. A move left stops where the first of them reaches its
+/// floor (ADR 0052 decision 7: the session start for MIDI, bar 1 for audio), keeping their
 /// spacing. Returns how far they moved and where the lock is (`Samples::MAX` when none).
 fn ripple_spans(spans: &mut [Span], from: Samples, by: Samples) -> (Samples, Samples) {
     let lock = spans.iter().filter(|c| c.locked && c.start >= from).map(|c| c.start).min().unwrap_or(Samples::MAX);
     let moves = |c: &Span| c.start >= from && c.start < lock;
-    let floor = spans.iter().filter(|c| moves(c)).map(|c| c.start).min().unwrap_or(0).max(0);
-    let by = by.max(-floor);
+    let lowest = spans.iter().filter(|c| moves(c)).map(|c| c.floor.saturating_sub(c.start)).max().unwrap_or(0).min(0);
+    let by = by.max(lowest);
     for c in spans.iter_mut().filter(|c| moves(c)) {
         c.start = c.start.saturating_add(by);
         c.end = c.end.saturating_add(by);
@@ -300,8 +304,9 @@ fn ripple_spans(spans: &mut [Span], from: Samples, by: Samples) -> (Samples, Sam
 
 /// [`ripple_spans`] on a track's clips.
 fn ripple(s: &mut Session, track: TrackId, from: Samples, by: Samples) -> (Samples, Samples) {
+    let zone = s.start();
     let Some(pl) = s.track_mut(track).and_then(|t| t.playlist_mut()) else { return (0, Samples::MAX) };
-    let mut sp = spans(&pl.clips);
+    let mut sp = spans(&pl.clips, zone);
     let moved = ripple_spans(&mut sp, from, by);
     for (c, n) in pl.clips.iter_mut().zip(&sp) {
         c.start = n.start;
@@ -477,12 +482,31 @@ pub fn move_clips(s: &mut Session, ids: &[ClipId], delta: Samples, dest: &[(Trac
         }
     }
     let n = moving.len();
+    // The clips stop together where the first one reaches its floor, keeping their spacing (ADR
+    // 0052 decision 7). A clip already before its floor (only from a hand-edited file) does not
+    // hold the others; it is lifted to its floor on its own, as every clip was before.
+    let zone = s.start().min(moving.iter().map(|(_, c)| c.start).min().unwrap_or(0));
+    let floor = |c: &Clip| start_floor(c, zone);
+    let delta = delta.max(lowest_delta(moving.iter().map(|(_, c)| c).filter(|c| c.start >= floor(c)), zone));
     let placed = moving.into_iter().map(|(tid, mut c)| {
-        c.start = c.start.saturating_add(delta).max(0);
+        c.start = c.start.saturating_add(delta).max(floor(&c));
         (lands(dest, tid), c)
     });
     put_clips(s, placed.collect());
     n
+}
+
+/// The earliest start a clip may be moved, pasted or copied to (ADR 0052 decisions 7 and 11): a
+/// MIDI clip may go back to the session start `zone`, an audio clip to bar 1.
+pub fn start_floor(c: &Clip, zone: Samples) -> Samples {
+    if c.is_audio() { 0 } else { zone }
+}
+
+/// The least delta that keeps every one of `clips` at or after its [`start_floor`], so a group
+/// moved, pasted or copied by at least this stops together, keeping its spacing (`Samples::MIN`
+/// for no clips).
+pub fn lowest_delta<'a>(clips: impl IntoIterator<Item = &'a Clip>, zone: Samples) -> Samples {
+    clips.into_iter().map(|c| start_floor(c, zone).saturating_sub(c.start)).max().unwrap_or(Samples::MIN)
 }
 
 /// Place moved clips, overwriting what they cover but not each other, so a crossfaded pair
@@ -610,7 +634,7 @@ fn lift_plan(mut sp: Vec<Span>, moving: &HashSet<ClipId>) -> (Vec<Lift>, Vec<Spa
 /// for an empty track.
 pub fn shuffle_slots(s: &Session, track: TrackId, moving: &[ClipId]) -> Vec<Samples> {
     let clips = s.track(track).map(|t| t.clips()).unwrap_or_default();
-    let (_, mut sp) = lift_plan(spans(clips), &moving.iter().copied().collect());
+    let (_, mut sp) = lift_plan(spans(clips, s.start()), &moving.iter().copied().collect());
     sp.sort_by_key(|c| c.start);
     let reach: Vec<Samples> = sp
         .iter()
@@ -641,7 +665,8 @@ pub fn shuffle_slot(s: &Session, track: TrackId, at: Samples, moving: &[ClipId])
 /// Automation Follows Edit their automation leaves with them. Returns the clips, each with that
 /// automation timed from its start.
 fn lift_all(s: &mut Session, track: TrackId, moving: &HashSet<ClipId>) -> Vec<(Clip, Vec<(AutoParam, AutomationPoint)>)> {
-    let Some(clips) = s.track(track).map(|t| spans(t.clips())) else { return Vec::new() };
+    let zone = s.start();
+    let Some(clips) = s.track(track).map(|t| spans(t.clips(), zone)) else { return Vec::new() };
     let (lifts, staying) = lift_plan(clips, moving);
     let mut points: HashMap<ClipId, Vec<(AutoParam, AutomationPoint)>> = HashMap::new();
     for l in &lifts {

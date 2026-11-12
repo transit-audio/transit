@@ -340,6 +340,8 @@ fn paste(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         None => s.edit.selection.start,
     };
+    // A paste never goes before the clips' floors: it stops there (ADR 0052 decision 7).
+    let at = at.max(ops::lowest_delta(cb.tracks.iter().flatten(), s.start()));
     let sh = shuffle(s) && !cb.automation_only;
     let follow = s.edit.automation_follows_edit;
     let replace = Some(s.edit.selection).filter(|r| sh && given.is_none() && !r.is_empty());
@@ -490,9 +492,10 @@ fn select(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         ed.selected_tracks = t;
     }
+    let floor = s.start();
     match (st, en) {
-        (Some(a), Some(b)) => ed.selection = transit_time::Range::new(a.max(0), b.max(0)),
-        (Some(a), None) => ed.selection = transit_time::Range::point(a.max(0)),
+        (Some(a), Some(b)) => ed.selection = transit_time::Range::new(a.max(floor), b.max(floor)),
+        (Some(a), None) => ed.selection = transit_time::Range::point(a.max(floor)),
         _ => {}
     }
     if let Some(c) = clips {
@@ -533,8 +536,9 @@ fn shift_selection(e: &mut Engine, dir: i64) -> Result<Value> {
     let s = e.session_mut();
     let len = s.edit.selection.len().max(1);
     s.edit.selection = s.edit.selection.shifted(dir * len);
-    if s.edit.selection.start < 0 {
-        s.edit.selection = s.edit.selection.shifted(-s.edit.selection.start);
+    let floor = s.start();
+    if s.edit.selection.start < floor {
+        s.edit.selection = s.edit.selection.shifted(floor - s.edit.selection.start);
     }
     Ok(json!({"selection": s.edit.selection}))
 }
@@ -908,8 +912,9 @@ fn nudge(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     let n = if ids.is_empty() { 0 } else { ops::move_clips(s, &ids, step, &[]) };
     s.edit.selection = s.edit.selection.shifted(step);
-    if s.edit.selection.start < 0 {
-        s.edit.selection = s.edit.selection.shifted(-s.edit.selection.start);
+    let floor = s.start();
+    if s.edit.selection.start < floor {
+        s.edit.selection = s.edit.selection.shifted(floor - s.edit.selection.start);
     }
     Ok(json!({"moved": n, "by": step}))
 }
@@ -965,7 +970,9 @@ fn copy_clips(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad("edit.copy_clips", "no clips"));
     }
     src.sort_by_key(|(_, c)| c.start);
-    let by = position_param(e, "edit.copy_clips", p, "by")?.unwrap_or(0).max(-src[0].1.start);
+    // The copies stop together where the first one reaches its floor (ADR 0052 decision 7).
+    let lowest = ops::lowest_delta(src.iter().map(|(_, c)| c), s.start());
+    let by = position_param(e, "edit.copy_clips", p, "by")?.unwrap_or(0).max(lowest);
     let hits_original = src.iter().any(|(t, c)| {
         let (to, range) = (ops::lands(&dest, *t), transit_time::Range::new(c.start + by, c.end() + by));
         src.iter().any(|(ot, o)| *ot == to && o.start < range.end && range.start < o.end())

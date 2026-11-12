@@ -449,8 +449,10 @@ fn paste_clip_effects(e: &mut Engine, p: &Value) -> Result<Value> {
 fn paste_merge_midi(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "edit.paste_merge_midi";
     let tracks = tracks_required(e, id, p)?;
-    let at = position_param(e, id, p, "at")?.unwrap_or(e.session().edit.selection.start).max(0);
     let cb = e.clipboard.clone();
+    // At or after the session start, and never putting a clip before its floor (ADR 0052 decision 7).
+    let floor = e.session().start().max(ops::lowest_delta(cb.tracks.iter().flatten(), e.session().start()));
+    let at = position_param(e, id, p, "at")?.unwrap_or(e.session().edit.selection.start).max(floor);
     let s = e.session_mut();
     let tempo = s.tempo.clone();
     let sr = s.sample_rate;
@@ -655,8 +657,9 @@ fn space_clips(e: &mut Engine, p: &Value) -> Result<Value> {
             pl.clips.retain(|c| !sel.iter().any(|x| x.id == c.id));
         }
         let mut cur = sel.first().map_or(0, |c| c.start);
+        let zone = s.start().min(cur);
         for mut c in sel {
-            c.start = cur.max(0);
+            c.start = cur.max(ops::start_floor(&c, zone));
             cur = if s2s { c.start.saturating_add(gap) } else { c.end().saturating_add(gap) };
             ops::place_clip(s, t, c);
             moved += 1;

@@ -59,8 +59,11 @@ pub(super) fn selection_span(s: &transit_model::Session) -> Option<transit_time:
 
 fn default_region(e: &Engine, at: Option<i64>) -> transit_time::Range {
     let s = e.session();
-    let at = at.unwrap_or(if e.transport.playing { e.transport.position } else { s.edit.playhead }).max(0);
-    four_bars(&s.tempo, s.sample_rate, at, s.content_end())
+    // Floored at the session start, and so is the region it gives (ADR 0052 decision 6).
+    let floor = s.start();
+    let at = at.unwrap_or(if e.transport.playing { e.transport.position } else { s.edit.playhead }).max(floor);
+    let r = four_bars(&s.tempo, s.sample_rate, at, s.content_end());
+    transit_time::Range::new(r.start.max(floor), r.end)
 }
 
 /// Four bars from the bar holding `at`. Cut at `content` (the end of the content) when that lies

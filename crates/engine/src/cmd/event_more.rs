@@ -184,8 +184,15 @@ fn note_ticks(v: Option<&Value>, default: i64) -> i64 {
     }
 }
 
+/// Why `event.move_song_start` refuses while the session has a pre-count zone.
+pub(crate) const ZONE_REFUSAL: &str = "the session has clips before bar 1 (a pre-count zone); moving the song start would move them onto bar 1";
+
 fn move_song_start(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "event.move_song_start";
+    // Its clamp at 0 would crush clips before bar 1 onto it (ADR 0052 decision 7).
+    if e.session().start() < 0 {
+        return Err(bad(id, ZONE_REFUSAL));
+    }
     let to = position_param(e, id, p, "to")?.ok_or_else(|| bad(id, "`to` required"))?.max(0);
     let s = e.session_mut();
     let from = s.edit.value("song.start", 0.0).max(0.0) as Samples;
@@ -413,10 +420,12 @@ fn step_input(e: &mut Engine, p: &Value) -> Result<Value> {
     };
     let s = e.session_mut();
     let sr = s.sample_rate;
+    // Step input floors at the session start (ADR 0052 decision 12).
+    let floor = midi_time::start_tick(s);
     let (at, tick) = match p.get("at").and_then(Value::as_i64) {
-        Some(t) => (s.tempo.tick_to_samples(t.max(0), sr), t.max(0)),
+        Some(t) => (s.tempo.tick_to_samples(t.max(floor), sr), t.max(floor)),
         None => {
-            let at = s.edit.selection.start.max(0);
+            let at = s.edit.selection.start.max(s.start());
             (at, s.tempo.samples_to_ticks(at, sr))
         }
     };
@@ -782,6 +791,8 @@ fn retro_record(e: &mut Engine, p: &Value) -> Result<Value> {
     let t = midi_target(e, p, id)?;
     let s = e.session();
     let sr = s.sample_rate;
+    // The new clip and its notes floor at the session start (ADR 0052 decision 12).
+    let floor = midi_time::start_tick(s);
     let mut raw: Vec<(i64, Note)> = Vec::new();
     for v in list.iter().take(100_000) {
         if v.get("start_ticks").is_some() && v.get("start").is_some() {
@@ -789,8 +800,8 @@ fn retro_record(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         let tick = match (v.get("start_ticks").and_then(Value::as_i64), v.get("start")) {
             (None, Some(value)) if midi_time::is_musical(value) => midi_time::param(e, v, "start", 0, id)?.unwrap_or(0),
-            (Some(tk), _) => tk.max(0),
-            (None, Some(_)) => s.tempo.samples_to_ticks(position_param(e, id, v, "start")?.unwrap_or(0).max(0), sr),
+            (Some(tk), _) => tk.max(floor),
+            (None, Some(_)) => s.tempo.samples_to_ticks(position_param(e, id, v, "start")?.unwrap_or(0).max(s.start()), sr).max(floor),
             _ => return Err(bad(id, "each note needs `start` or `start_ticks`")),
         };
         let note = Note {
@@ -809,7 +820,7 @@ fn retro_record(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     let first = raw.iter().map(|x| x.0).min().unwrap_or(0);
     // Start the clip on the bar line so the quantize grid lines up with the music.
-    let clip_tick = s.tempo.bar_start_tick(s.tempo.bar_beat_at_tick(first).bar).min(first).max(0);
+    let clip_tick = s.tempo.bar_start_tick(s.tempo.bar_beat_at_tick(first).bar).min(first).max(floor);
     let end_tick = raw.iter().map(|(tk, n)| tk.saturating_add(n.length)).max().unwrap_or_else(|| first.saturating_add(1));
     let mut seq = transit_midi::Sequence::default();
     for (tk, mut n) in raw {

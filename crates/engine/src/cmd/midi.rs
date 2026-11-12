@@ -138,11 +138,14 @@ fn new_clip(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad("midi.new_clip", "not a MIDI or instrument track"));
     }
     let mut r = midi_time::clip_range(e, p, "midi.new_clip")?;
+    // A new MIDI clip starts at or after the session start (ADR 0052 decision 12).
+    let floor = e.session().start();
+    r = transit_time::Range::new(r.start.max(floor), r.end.max(floor));
     if r.is_empty() {
         let s = e.session();
         let bar = transit_time::GridValue::Note { value: transit_time::NoteValue::Bar, dotted: false, triplet: false };
-        let start = bar.line_at_or_before(r.start, s.sample_rate, &s.tempo, s.frame_rate);
-        r = transit_time::Range::new(start, bar.next_line(start, s.sample_rate, &s.tempo, s.frame_rate));
+        let line = bar.line_at_or_before(r.start, s.sample_rate, &s.tempo, s.frame_rate);
+        r = transit_time::Range::new(line.max(floor), bar.next_line(line, s.sample_rate, &s.tempo, s.frame_rate));
     }
     let s = e.session_mut();
     let id = s.new_clip_id();

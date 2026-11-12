@@ -467,7 +467,8 @@ impl Engine {
         self.transient_cache = cmd::TransientCache::default();
         self.acid_cache = cmd::AcidCache::default();
         log_route_loops(&s);
-        self.transport = TransportStatus { position: s.edit.selection.start.max(0), ..TransportStatus::default() };
+        // A stored position floors at the session start on read (ADR 0052 decision 7).
+        self.transport = TransportStatus { position: s.edit.selection.start.max(s.start()), ..TransportStatus::default() };
         self.transport_requests.clear();
         self.transport_requests.push(TransportRequest::ResetSession);
         // A hardware insert that cannot work here (a send path in use, a loop through the device)
@@ -973,6 +974,8 @@ fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
 
 #[cfg(test)]
 mod loop_edit_tests;
+#[cfg(test)]
+mod pre_count_tests;
 #[cfg(test)]
 mod tests_clipboard_session;
 #[cfg(test)]

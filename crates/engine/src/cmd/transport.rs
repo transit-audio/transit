@@ -9,7 +9,8 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(noundo "transport.play", "Play", [], Some("Space"), "{from?: position}", always, |e, p| {
             if let Some(at) = position_param(e, "transport.play", p, "from")? {
-                e.transport_requests.push(TransportRequest::PlayExact(at.max(0)));
+                let floor = e.session().start();
+                e.transport_requests.push(TransportRequest::PlayExact(at.max(floor)));
             } else {
                 e.transport_requests.push(TransportRequest::Play);
             }
@@ -21,12 +22,12 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "transport.pause", "Pause", [], None, "{}", always, |e, _| { e.transport_requests.push(TransportRequest::Pause); Ok(json!({})) }),
         cmd!(noundo "transport.half_speed", "Half-Speed Playback", [], Some("Shift+Space"), "{}", always, |e, _| { e.transport_requests.push(TransportRequest::HalfSpeed); Ok(json!({})) }),
         cmd!(noundo "transport.play_selection", "Play Edit", ["Edit", "Selection"], Some("Alt+["), "{}", always, |e, _| { e.transport_requests.push(TransportRequest::PlaySelection); Ok(json!({})) }),
-        cmd!(noundo "transport.rtz", "Return to Zero", [], Some("Home"), "{}", always, |e, _| locate(e, 0)),
+        cmd!(noundo "transport.rtz", "Return to Zero", [], Some("Home"), "{}", always, |e, _| { let start = e.session().start(); locate(e, start) }),
         cmd!(noundo "transport.go_to_end", "Go to End", [], Some("End"), "{}", always, |e, _| { let end = e.session().content_end(); locate(e, end) }),
         cmd!(noundo "transport.rewind", "Rewind", [], None, "{seconds?: 1}", always, |e, p| {
             let s = e.session();
             let d = s.sample_rate.samples(f64_or(p, "seconds", 1.0).clamp(0.0, 86_400.0));
-            let at = (cur(e) - d).max(0);
+            let at = (cur(e) - d).max(s.start());
             locate(e, at)
         }),
         cmd!(noundo "transport.fast_forward", "Fast Forward", [], None, "{seconds?: 1}", always, |e, p| {
@@ -37,7 +38,8 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
         cmd!(noundo "transport.locate", "Locate", [], None, "{at: position}", always, |e, p| {
             let at = position_param(e, "transport.locate", p, "at")?.ok_or_else(|| bad("transport.locate", "`at` required"))?;
-            locate(e, at.max(0))
+            let floor = e.session().start();
+            locate(e, at.max(floor))
         }),
         cmd!(
             "transport.loop",
@@ -53,10 +55,11 @@ pub fn specs() -> Vec<CommandSpec> {
                     return Err(bad("transport.loop", "`start` and `end` go together"));
                 }
                 let enabled = p.get("enabled").and_then(Value::as_bool);
+                let floor = e.session().start();
                 let edit = &e.session().edit;
                 let range = st
                     .zip(en)
-                    .map(|(a, b)| transit_time::Range::new(a.max(0), b.max(0)))
+                    .map(|(a, b)| transit_time::Range::new(a.max(floor), b.max(floor)))
                     .map(|r| if r.is_empty() { transit_time::Range::default() } else { r });
                 // Touch the document only when something changes, so a no-op leaves no undo step.
                 if range.is_some_and(|r| r != edit.loop_range) || enabled.is_some_and(|v| v != edit.loop_playback) {

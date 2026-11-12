@@ -68,9 +68,11 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(view "view.scroll", "Scroll Timeline", [], None, "{to?: position, by_px?: n}", always, |e, p| {
             let to = position_param(e, "view.scroll", p, "to")?;
             let by = f64_or(p, "by_px", 0.0);
+            // The view scrolls back to the session start and no further (ADR 0052 decision 4).
+            let floor = e.session().start();
             let z = e.zoom_mut();
             let by = transit_time::to_samples(by * z.samples_per_px);
-            z.scroll = to.unwrap_or(z.scroll.saturating_add(by)).clamp(0, MAX_POSITION);
+            z.scroll = to.unwrap_or(z.scroll.saturating_add(by)).clamp(floor, MAX_POSITION);
             Ok(json!({"scroll": z.scroll}))
         }),
         cmd!(view "view.waveform_zoom", "Waveform Zoom", [], Some("Cmd+Alt+[ / ]"), "{factor?: 2 | value}", always, |e, p| {
@@ -121,11 +123,12 @@ const MAX_SPP: f64 = 1_000_000.0;
 
 fn zoom(e: &mut Engine, f: f64, x: Option<f64>) -> Result<Value> {
     let insertion = e.session().edit.selection.start as f64;
+    let floor = e.session().start();
     let z = e.zoom_mut();
     let (old, scroll) = (z.samples_per_px, z.scroll as f64);
     let new = (old * f).clamp(MIN_SPP, MAX_SPP);
     if let Some(x) = x.or_else(|| Some((insertion - scroll) / old).filter(|x| (0.0..4000.0).contains(x))) {
-        z.scroll = transit_time::to_samples(scroll + x * (old - new)).clamp(0, MAX_POSITION);
+        z.scroll = transit_time::to_samples(scroll + x * (old - new)).clamp(floor, MAX_POSITION);
     }
     z.samples_per_px = new;
     Ok(json!({"samples_per_px": new, "scroll": z.scroll}))

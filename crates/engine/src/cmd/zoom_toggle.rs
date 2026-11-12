@@ -13,7 +13,8 @@ fn toggle(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     if let Some(back) = s.edit.zoom_toggle.take() {
         s.edit.zoom.samples_per_px = back.samples_per_px.clamp(0.25, 1_000_000.0);
-        s.edit.zoom.scroll = back.scroll.clamp(0, MAX_POSITION);
+        // A stored scroll floors at the session start on read (ADR 0052 decision 7).
+        s.edit.zoom.scroll = back.scroll.clamp(s.start(), MAX_POSITION);
         for t in &mut s.tracks {
             t.height = back.heights.iter().find(|(id, _)| *id == t.id).map_or(t.height, |(_, h)| *h);
         }

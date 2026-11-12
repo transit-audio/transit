@@ -3,7 +3,8 @@
 use super::*;
 use transit_time::TempoMap;
 
-/// A local bar grid begins at `origin`; a later meter change starts a new local bar.
+/// A local bar grid begins at `origin`, the signed absolute tick of a clip start (negative in the
+/// pre-count zone, ADR 0052 decision 12); a later meter change starts a new local bar.
 /// Both components are 1-based, including durations: 1|2 is one beat, 2|1 is one bar.
 pub(super) fn parse(map: &TempoMap, origin: i64, text: &str, cmd: &str) -> Result<i64> {
     let invalid = || bad(cmd, "expected bar|beat[|tick], with positive bar/beat and tick within the beat");
@@ -18,7 +19,7 @@ pub(super) fn parse(map: &TempoMap, origin: i64, text: &str, cmd: &str) -> Resul
     let bar = number(parts.next())?;
     let beat = number(parts.next())?;
     let tick = parts.next().map(|p| number(Some(p))).transpose()?.unwrap_or(0);
-    if parts.next().is_some() || bar < 1 || beat < 1 || origin < 0 {
+    if parts.next().is_some() || bar < 1 || beat < 1 {
         return Err(invalid());
     }
     let overflow = || bad(cmd, "musical time is out of range");
@@ -52,10 +53,18 @@ pub(super) fn parse(map: &TempoMap, origin: i64, text: &str, cmd: &str) -> Resul
     end.checked_sub(origin).ok_or_else(overflow)
 }
 
+/// The signed absolute tick of a clip's start: musical note times are local to it.
 pub(super) fn origin(e: &Engine, clip: ClipId, cmd: &str) -> Result<i64> {
     let s = e.session();
     let (_, c) = s.find_clip(clip).ok_or_else(|| bad(cmd, "no such clip"))?;
-    Ok(s.tempo.samples_to_ticks(c.start, s.sample_rate).max(0))
+    Ok(s.tempo.samples_to_ticks(c.start, s.sample_rate))
+}
+
+/// The first tick at or after the session start (ADR 0052): where MIDI clip creation floors.
+pub(super) fn start_tick(s: &transit_model::Session) -> i64 {
+    let (start, sr) = (s.start(), s.sample_rate);
+    let tick = s.tempo.samples_to_ticks(start, sr);
+    if s.tempo.tick_to_samples(tick, sr) < start { tick.saturating_add(1) } else { tick }
 }
 
 pub(super) fn param(e: &Engine, p: &Value, key: &str, origin: i64, cmd: &str) -> Result<Option<i64>> {
@@ -106,7 +115,7 @@ pub(super) fn clip_range(e: &Engine, p: &Value, cmd: &str) -> Result<Range> {
         if p.get("end").is_some() {
             return Err(bad(cmd, "use either end or length, not both"));
         }
-        let start = position_param(e, cmd, &params, "start")?.unwrap_or(s.edit.selection.start).max(0);
+        let start = position_param(e, cmd, &params, "start")?.unwrap_or(s.edit.selection.start).max(s.start());
         let origin = s.tempo.samples_to_ticks(start, s.sample_rate);
         let ticks = parse(&s.tempo, origin, value.as_str().unwrap_or_default(), cmd)?;
         if ticks == 0 {
