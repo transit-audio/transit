@@ -34,7 +34,7 @@ section{padding:40px 0;border-top:1px solid var(--line)}
 h2{margin:0 0 16px;font-size:1.6rem}
 h3{margin:0 0 6px;font-size:1.1rem}
 .muted{color:var(--muted)}
-.lead{color:var(--muted);max-width:70ch}
+.lead{color:var(--muted);text-wrap:pretty}
 .rel{font-variant-numeric:tabular-nums;font-weight:600}
 .dls{display:grid;gap:16px;grid-template-columns:repeat(3,1fr);margin:16px 0 24px}
 .dl{position:relative;background:var(--raised);border:1px solid var(--line);border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:12px}
