@@ -639,7 +639,7 @@ pub fn bounce_track_range(
             if end <= 0 {
                 return Ok(None);
             }
-            Range::new(0, end + s.sample_rate.samples(2.0))
+            Range::new(0, end.saturating_add(s.sample_rate.samples(2.0)))
         }
     };
     if range.is_empty() {

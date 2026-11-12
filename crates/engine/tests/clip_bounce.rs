@@ -142,3 +142,20 @@ fn a_ranged_track_bounce_prints_the_range_and_the_default_stays_the_whole_track(
     let bad = e.execute("track.bounce", &json!({"tracks": [t.0], "range": {"start": 5, "length": 0}}));
     assert!(bad.is_err());
 }
+
+#[test]
+fn a_range_starting_at_or_past_the_end_of_the_material_is_refused_and_changes_nothing() {
+    let mut e = Engine::default();
+    let (t, _) = track(&mut e, "Keys", 0.25, &SPANS);
+    let before = e.session().to_json().unwrap();
+    for cmd in ["track.bounce", "track.commit"] {
+        for start in [310_000, 310_001, i64::MAX - 1] {
+            let err = e.execute(cmd, &json!({"tracks": [t.0], "range": {"start": start, "length": 10}})).unwrap_err();
+            assert!(err.to_string().contains("after the end of the session's material"), "{cmd} {start}: {err}");
+            assert_eq!(e.session().to_json().unwrap(), before, "{cmd} {start}: the session is unchanged");
+        }
+    }
+    // The last sample of material is still accepted, and a whole-track bounce afterwards works.
+    e.execute("track.bounce", &json!({"tracks": [t.0], "source": "leave", "range": {"start": 309_999, "length": 10}})).unwrap();
+    e.execute("track.bounce", &json!({"tracks": [t.0], "source": "leave"})).unwrap();
+}

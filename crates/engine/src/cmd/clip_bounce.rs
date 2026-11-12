@@ -43,6 +43,12 @@ pub(super) fn range_param(e: &Engine, p: &Value) -> Result<Option<Range>> {
     if start < 0 || len <= 0 {
         return Err(bad(id, "range must start at or after zero and have a positive length"));
     }
+    // Checked when set: a range that starts where there is no material prints silence and, far
+    // out, places a clip near the end of the integer range that overflows a later bounce.
+    let end = e.session().content_end();
+    if start >= end {
+        return Err(bad(id, format!("range starts at or after the end of the session's material (sample {end})")));
+    }
     Ok(Some(Range::new(start, start.saturating_add(len))))
 }
 
@@ -93,7 +99,7 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
     let tail = s.sample_rate.samples(2.0);
     let mut out = Vec::new();
     for (t, start, end) in spans {
-        let span = Range::new(start, end + tail);
+        let span = Range::new(start, end.saturating_add(tail));
         if let Some(nt) = crate::io::bounce_track_range(e, t, destination, source, Some(span))? {
             out.push(nt);
         }
