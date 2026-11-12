@@ -17,8 +17,9 @@ Three rules agents break most often:
 - **No real-clock assertions.** A test never asserts scheduling or wall-clock outcomes; inject the
   stamps and the readout (`cargo xtask timing`, [escapes](docs/escapes/)).
 - **Never rerun a failed test.** Not to pass it, and not to capture its message: read the output,
-  report it verbatim and find the root cause before changing the test. A failure on a loaded host is
-  not a verdict (rerun on a quiet host); a quiet failure is real.
+  report it verbatim and find the root cause before changing the test. A failure is real whatever
+  the load: start a gate run on a quiet host instead (E61). The only reruns are for build-system
+  faults where no test ran: `os error 32`, `LNK1104`, a test binary "never executed", `E0463`.
 
 Then [`docs/contributing/README.md`](docs/contributing/README.md) for the knowledge and evidence
 folders, and [`docs/known-issues/README.md`](docs/known-issues/README.md) so you do not rediscover

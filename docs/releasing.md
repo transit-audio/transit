@@ -34,7 +34,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
    git push origin v0.2.0-alpha.1
    ```
 
-6. `release.yml` builds the archives and attaches them to the GitHub release for the tag (a pre-release only when the tag has a suffix):
+6. `release.yml` builds the archives and attaches them to the GitHub release for the tag. While transit is alpha every release is a GitHub pre-release, with or without a suffix on the tag, and the workflow puts a fixed "Alpha software" block at the top of the body:
    - Windows x86_64 (one download, a `.msi` installer and a portable `.zip`): `windows-x86_64`
      (native WASAPI and native ASIO; see below). Unsigned unless the
      Windows signing secrets below are set. SmartScreen may ask for "More info", then "Run anyway".

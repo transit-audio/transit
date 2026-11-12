@@ -2,15 +2,29 @@
 
 ## CI
 
-`.github/workflows/ci.yml` is the push gate: it runs on every pull request and on every push to
-`main`, and cancels a superseded run. Jobs:
+`.github/workflows/ci.yml` runs on every pull request and on every push to `main` (except changes
+to Markdown and `docs/` only), and cancels a superseded run. Landings do not wait for it: a landing
+passes the full local gates on Windows and on Linux, pushes, and then CI's result is checked. A red
+`main` stops every landing until it is fixed, and a release tag and an external pull request merge
+need green CI. Jobs:
 
-- `windows`: `cargo xtask layers` (which includes the file-size ratchet), `cargo xtask assets`, `cargo xtask timing`, then clippy (`-D warnings`) and the tests for
-  the whole workspace (every Windows build has native WASAPI and native ASIO; no feature, ADR 0046).
-- `linux`: `cargo fmt --check`, `cargo xtask timing`, clippy and the tests on default features, plus the native JACK
-  clippy and tests. It is the Linux compile proof.
-- `macos`: clippy and the tests on default features (`crates/au-host` and the objc2 code compile only
-  there).
+- `windows` (native WASAPI and native ASIO in every Windows build; no feature, ADR 0046): the tooling
+  script checks (`xtask/tests/tooling.ps1`), `cargo xtask layers` (which includes the file-size
+  ratchet), `assets`, `timing`, `help` and `indexes --validate`, a library check of the CLAP and VST3
+  hosts, the workspace clippy (`--all-targets`, `-D warnings`), the library-only clippy of
+  `transit-mix`, `transit-plugin-host`, `transit-dsp` and `transit-rt` (#215), and the workspace tests.
+- `linux`: the packaging version checks (`xtask/tests/packaging-version.sh`), `cargo fmt --check`,
+  `cargo xtask timing`, the bare-metal checks of `transit-instrument-core` and `transit-sampler-core`
+  (ADR 0037 Tier B), the host library check, both clippy runs as on Windows, the native JACK clippy and
+  tests, the workspace tests (the UI tests on Mesa's CPU Vulkan driver), and the plug-in editor window
+  tests under Xvfb. It is the Linux compile proof.
+- `macos`: the host library check, the workspace clippy and the workspace tests (`crates/au-host`
+  and the objc2 code compile only there).
+
+`.github/workflows/indexes.yml` carries the generated-index checks (ADR 0050): every pull request,
+including one that touches only an entry file, runs `cargo xtask indexes --validate`, and a push to
+`main` that touches the entry folders or `xtask/` regenerates the three tables, commits them back
+when they changed and runs `--check`.
 
 `rt.yml` (the realtime-crate platform matrix) runs on pushes and pull requests that touch `crates/rt`,
 `crates/mix` or the workspace manifest, and on tags. `release.yml` runs only on release tags and
@@ -23,7 +37,7 @@ advisories (no `deny.toml`), and every hardware test. Hardware tests are `#[igno
 gates: they need a real device and a person (see below).
 
 The Windows release job builds one target, `windows-x86_64` (native WASAPI and native ASIO are in
-every Windows build, no SDK); the `windows` job in `ci.yml` builds and tests both.
+every Windows build, no SDK); the `windows` job in `ci.yml` builds and tests the same configuration.
 
 ## Hardware evidence
 

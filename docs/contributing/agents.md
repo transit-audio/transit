@@ -11,8 +11,11 @@ that has worked, so you can reproduce it with any agent or model. Nothing here i
   agent with no context on the change tries to break it before it merges. The bar is critical-only:
   crash, data loss, hang, allocation or blocking on the audio thread, unsound `unsafe`, or a test that
   does not test what it claims. Anything else becomes a known issue or a follow-up issue.
-- **A housekeeping pass after every push to `transit`.** Close issues with the commit hashes, update
+- **A housekeeping pass after every push to `main`.** Close issues with the commit hashes, update
   [known issues](../known-issues/README.md) and the README feature list.
+- **GitHub CI is checked after the push.** A landing passes the full local gates on Windows and on
+  Linux first, and then pushes; CI's result is checked once it finishes. A red `main` stops every
+  landing until it is fixed, and a release tag and an external pull request merge need green CI.
 
 ## Model tiers by task class, not by name
 
@@ -21,9 +24,6 @@ that has worked, so you can reproduce it with any agent or model. Nothing here i
 - **Strongest tier:** engine, `unsafe`, FFI and threading work, and every refutation review of such work.
 - **The coordinator itself** runs on the strongest model available, since it makes every judgment call:
   what to build, how to brief, what a review finding means, and when a result is good enough to merge.
-
-As of October 2026 the maintainers use Haiku, Sonnet and Opus class models for the three tiers, with
-Fable running the coordinator.
 
 ## Briefing a worker
 
@@ -61,8 +61,11 @@ A good brief is the biggest token saver. Include:
   ([ADR 0029](../adr/0029-strip-job-slots.md), [gates](evidence/gates.md)).
 - A failing test is never rerun to make it pass, and a chain never reruns a failed test even to
   capture its message. Read the output, report it verbatim and bug-hunt the root cause before any test
-  change. A starved or timing-bound failure on a loaded host is not a verdict: rerun on a quiet host,
-  and a quiet failure is real (E61). See [`../escapes/`](../escapes/) and the [escape record](evidence/escape-record.md).
+  change. A failure is real whatever the host's load: check that the host is quiet before a gate run
+  starts, never after it fails (E61). The only reruns are for build-system faults where no test ran:
+  `os error 32`, `LNK1104`, a test binary "never executed", `E0463`. A builder whose new test fails
+  finds the cause and changes the code; that is a new run, not a rerun. See [`../escapes/`](../escapes/)
+  and the [escape record](evidence/escape-record.md).
 - One cargo target directory per checkout class. Agents working in different worktrees must not share
   a target directory at the same time: cargo then reuses another checkout's stale binaries or loses
   artifacts (E0463, #159). Give each concurrent worktree its own.
@@ -87,19 +90,26 @@ A good brief is the biggest token saver. Include:
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo clippy --locked -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings   # lib targets only (#215)
 cargo test --locked --workspace --no-fail-fast
 cargo test -p transit-rt --release
 cargo xtask layers
 cargo xtask assets
 cargo xtask timing
 cargo xtask file-size
+cargo xtask help
+cargo xtask indexes --validate
+cargo xtask indexes --check
+cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core
+cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core
 ```
 
-(plus `cargo xtask rt-targets` when `crates/rt` or `crates/mix` changed), and the Linux job in
-`.github/workflows/ci.yml`, the Linux compile proof, which runs
-`cargo clippy --locked --workspace --all-targets -- -D warnings` and
-`cargo test --locked --workspace` on Ubuntu (it needs `libasound2-dev` and `pkg-config`); that job also runs the plug-in editor window tests under Xvfb (`xvfb-run`). Release chains run the workspace test with `TRANSIT_FULL_ORACLE=1`, the full oracle nulls; CI runs the strided subset ([gates](evidence/gates.md)).
+(plus `cargo xtask rt-targets` when `crates/rt` or `crates/mix` changed), run on Windows and on
+Linux before a landing pushes, and then `.github/workflows/ci.yml` on GitHub, which spreads these
+checks over Windows, Linux and macOS jobs ([the job lists](evidence/hardware-and-ci.md#ci)). The Linux job
+needs `libasound2-dev` and `pkg-config`, adds the native JACK clippy and tests, and runs the plug-in
+editor window tests under Xvfb (`xvfb-run`). Release chains run the workspace test with `TRANSIT_FULL_ORACLE=1`, the full oracle nulls; CI runs the strided subset ([gates](evidence/gates.md)).
 Area gates are in [`evidence/gates.md`](evidence/gates.md).
 
 ## A worked example

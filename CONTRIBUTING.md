@@ -15,14 +15,16 @@ Before you open one, read the contributor docs and run the gates:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings   # lib targets only: the `testing` feature stays off (#215)
+cargo clippy --locked -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings   # lib targets only: the `testing` feature stays off (#215)
 cargo test --locked --workspace --no-fail-fast
 cargo test -p transit-rt --release
 cargo xtask layers
 cargo xtask assets
 cargo xtask timing
 cargo xtask file-size
+cargo xtask help        # the in-app help catalog matches docs/help (`cargo xtask help --write` refreshes the generated sections)
 cargo xtask indexes --validate   # the known-issue and escape entry files are well formed (ADR 0050)
+cargo xtask indexes --check      # the generated tables match the entry files; a pull request that only adds an entry file skips this (main regenerates)
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core   # Tier B bare-metal check (ADR 0037); `rustup target add thumbv7em-none-eabihf` once
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core      # Tier B bare-metal check (ADR 0041)
 cargo xtask rt-targets   # only when crates/rt or crates/mix changed
@@ -30,6 +32,7 @@ cargo xtask rt-targets   # only when crates/rt or crates/mix changed
 
 The native-backend features need no SDK. The Linux job of `.github/workflows/ci.yml` is the Linux
 compile proof. Details and the reasons are in [`gates.md`](docs/contributing/evidence/gates.md).
+A pull request from outside merges only on green CI.
 
 ## Adding a known issue or an escape record
 
@@ -71,6 +74,6 @@ Rules:
   ([`gates.md`](docs/contributing/evidence/gates.md), [escapes](docs/escapes/)).
 - Use American English in code, comments, UI strings and docs.
 - Do not add assets without a row in `ATTRIBUTION.md`.
-- Crates are named `transit-*`. The settings folder keeps its older name so existing installs keep their settings.
+- Crates are named `transit-*`. The settings folder is `transit` (`TRANSIT_CONFIG_DIR` overrides it).
 
 By contributing you agree that your work is licensed under MIT OR Apache-2.0, like the project.

@@ -5,15 +5,18 @@
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings   # lib targets only: the `testing` feature stays off (#215)
+cargo clippy --locked -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings   # lib targets only: the `testing` feature stays off (#215)
 cargo test --locked --workspace --no-fail-fast
 cargo test -p transit-rt --release
 cargo xtask layers      # crate layering and the no-UI-below-L6 rule (xtask/src/main.rs, LAYERS)
 cargo xtask assets      # every bundled asset has a row in ATTRIBUTION.md
 cargo xtask timing      # E49-class timing assertions in tests (xtask/src/timing.rs)
 cargo xtask file-size   # no Rust file over 1500 lines; also part of `cargo xtask layers` (xtask/src/file_size.rs)
+cargo xtask indexes --validate   # the known-issue and escape entry files are well formed (ADR 0050)
 cargo xtask indexes --check   # the generated known-issues, ADR and escapes indexes match their entry files (xtask/src/indexes.rs, ADR 0050); `cargo xtask indexes` rewrites them; pull requests run `--validate` only
 cargo xtask help        # the help catalog: every registered help id has an entry, every entry is used, the generated docs sections are current (xtask/src/help.rs)
+cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core   # Tier B bare-metal check (ADR 0037)
+cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core      # Tier B bare-metal check (ADR 0041)
 ```
 
 Also `cargo xtask rt-targets` (cross-target check) when `crates/rt` or `crates/mix` changed. The
@@ -202,10 +205,16 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   records are in [`docs/escapes`](../../escapes/), and the process is in [`escape-record.md`](escape-record.md).
 - A default changes only on a measurement on the reference hardware. Benchmarks and the decisions
   they made are in [`docs/benchmarks/README.md`](../../benchmarks/README.md).
-- A test failure blocks a merge. A suspected flake needs a tracked issue and a green re-run on the
-  failing platform before the change merges; "passes locally" or "passes on re-run elsewhere" is not
-  enough. The CI conclusion after a push is itself a gate: check it, and a red run is a failure until
-  it is explained and fixed (E47, `../../escapes/E47-header-state-jobs-raced-the-rendered-document.md`).
+- A test failure blocks a merge, and a failed test is never rerun as a suspected flake: it is a
+  defect in the product or in the test until its cause is found and fixed. "Passes locally" or
+  "passes on re-run elsewhere" proves nothing. The only reruns are for build-system faults where no
+  test ran (`os error 32`, `LNK1104`, a test binary "never executed", `E0463`), and, once per CI job,
+  a runner or setup-step fault before any project code ran (checkout, toolchain install, system
+  packages, cache restore).
+- GitHub CI is checked after the push, not waited for: a landing passes the full local gates on
+  Windows and on Linux, pushes, and then reads CI's result. A red `main` stops every landing until it
+  is explained and fixed; a release tag and an external pull request merge need green CI (E47,
+  `../../escapes/E47-header-state-jobs-raced-the-rendered-document.md`).
 - Every test that starts a thread or takes the worker or host-thread path is audited, one row each, in [`e49-audit-2026-10-30.md`](e49-audit-2026-10-30.md) (#226); add a row for a new such test.
 - `cargo xtask timing` rule (e) (#226, `xtask/src/timing_pool.rs`) holds the worker-path rules above for
   test code in `mix`, `rt`, `plugin-host`, `audio-asio`, `playback` and `ui-studio`. A `#[test]` is a pool
@@ -342,9 +351,9 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   (`File::set_modified`), never relying on the real clock between two writes: coarse file-time
   ticks (10 ms at HZ=100) make "later" equal, and a deliberate `>=` then keeps the older item
   (E60, `../../escapes/E60-a-recovered-autosave-test-left-the-save-order-to-the-clock.md`).
-- A gate's starved run (WSL) is valid only on a quiet host: no `cargo` or `rustc` process on the
-  Windows host when it starts or while it runs. A run with host builds is void and runs again;
-  it is neither a pass nor a failure of the tree. A failure on a quiet host is a failure
+- A gate's starved run (WSL) starts only on a quiet host: no `cargo` or `rustc` process on the
+  Windows host when it starts, and no host build started while it runs. The check comes before the
+  run, never after a failure: a failed test is a failure whatever the load
   (E61, `../../escapes/E61-a-starved-gate-run-shared-the-host-with-cold-builds.md`).
 - Tests create unique temp dirs: process id plus a per-process counter (or `TemporaryAutosave`),
   never a fixed name or a clock-only suffix; concurrent tests share a process and a clock tick
