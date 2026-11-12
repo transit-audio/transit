@@ -85,6 +85,23 @@ static MODULES_EXITED: AtomicBool = AtomicBool::new(false);
 /// (see [`exit_modules`]): their exit may never have run.
 static EXITS_UNFINISHED: AtomicUsize = AtomicUsize::new(0);
 
+/// How often [`exit_modules`] found the cache lock held by another thread (#235). Read by tests.
+static EXIT_CONTENDED: AtomicUsize = AtomicUsize::new(0);
+
+/// Runs `f` while this thread holds the loaded-module cache lock, as another plug-in main
+/// thread's [`exit_modules`] or a load holds it. Only for host tests.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn while_cache_held<R>(f: impl FnOnce() -> R) -> R {
+    let _cache = loaded().lock().unwrap_or_else(PoisonError::into_inner);
+    f()
+}
+
+/// How often a module exit call found the cache lock held (see [`EXIT_CONTENDED`]).
+#[cfg(feature = "test-hooks")]
+pub(crate) fn exits_contended() -> usize {
+    EXIT_CONTENDED.load(Ordering::Acquire)
+}
+
 /// Where a module's entry ran. Its exit must run on the same thread: Qt-based modules tie their
 /// application object to it (Native Instruments' Massive X crashes in `bundleExit` on another
 /// thread). Modules wanted on a plug-in main thread (the thread named `main`, or one that called
@@ -287,15 +304,41 @@ fn open_library(bundle: &Path, exe: &Path) -> Result<(libloading::Library, Optio
 /// with a live instance or leaked objects keeps running and is not exited, and so is one entered
 /// on another plug-in main thread than the calling one (that thread's own call exits it). The
 /// first call refuses later loads.
+///
+/// Host threads shut down in parallel (`Host::shutdown`), so two calls can meet at the cache lock
+/// (#235). A call that finds it held waits for it, up to [`EXIT_LOCK_WAIT`], instead of skipping
+/// the modules it entered: every holder keeps the lock only to look up, add or take out cache
+/// entries, never across plug-in code (module entries and exits run outside it, K38), so the wait
+/// is short unless the holder died with it.
 pub(crate) fn exit_modules() {
+    exit_modules_within(EXIT_LOCK_WAIT);
+}
+
+/// How long a module exit call waits for the cache lock (#235): the stuck-call bound of the
+/// module-thread exits below.
+const EXIT_LOCK_WAIT: Duration = Duration::from_secs(5);
+
+/// [`exit_modules`], waiting at most `wait` for the cache lock. The exit handler does not wait:
+/// by then the process exit may have ended a thread that held the lock.
+fn exit_modules_within(wait: Duration) {
     // Later loads are refused. A later call (another main thread, or the exit handler) still
     // exits what is left that it may: each bundle is exited at most once, it leaves the cache.
     MODULES_EXITED.store(true, Ordering::Release);
-    let mut cache = match loaded().try_lock() {
-        Ok(g) => g,
-        Err(TryLockError::Poisoned(p)) => p.into_inner(),
-        // Another thread is loading a module right now: leave every module as it is.
-        Err(TryLockError::WouldBlock) => return,
+    let deadline = std::time::Instant::now() + wait;
+    let mut cache = loop {
+        match loaded().try_lock() {
+            Ok(g) => break g,
+            Err(TryLockError::Poisoned(p)) => break p.into_inner(),
+            // Another thread holds it (its own exit, or a load): wait for it, bounded. Past the
+            // bound every module is left as it is and counts as not exited.
+            Err(TryLockError::WouldBlock) => {
+                EXIT_CONTENDED.fetch_add(1, Ordering::AcqRel);
+                if std::time::Instant::now() >= deadline {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
     };
     let me = EntryThread::Here(os_thread());
     let (mut kept, mut here, mut there) = (Vec::new(), Vec::new(), Vec::new());
@@ -352,7 +395,7 @@ fn register_exit_hook() {
     }
     extern "C" fn hook() {
         // Nothing may unwind out of an exit handler.
-        let _ = std::panic::catch_unwind(exit_modules);
+        let _ = std::panic::catch_unwind(|| exit_modules_within(Duration::ZERO));
     }
     // SAFETY: `atexit` is the C library function with this signature; `hook` is a plain function
     // of this binary, so it lives as long as the process.

@@ -264,6 +264,23 @@ pub fn while_instances_held<R>(f: impl FnOnce() -> R) -> R {
     plugin::while_held(f)
 }
 
+/// Runs `f` while this thread holds the loaded-module cache lock, as a second plug-in main
+/// thread running its own [`shutdown`] does (#235). Only for host tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn while_module_cache_held<R>(f: impl FnOnce() -> R) -> R {
+    ffi::while_cache_held(f)
+}
+
+/// How often a [`shutdown`] call found the loaded-module cache lock held by another thread.
+/// Only for host tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+#[must_use]
+pub fn module_exits_contended() -> usize {
+    ffi::exits_contended()
+}
+
 /// Restricts scans to extra folders for deterministic registry tests. Defaults to false;
 /// enabling test hooks alone does not change normal search paths or installed-plugin smoke tests.
 #[cfg(feature = "test-hooks")]

@@ -54,6 +54,10 @@ harness = false
 name = "module_exit_host_thread"
 harness = false
 
+[[test]]
+name = "module_exit_concurrent"
+harness = false
+
 # An isolated unsafe helper crate (craftrules never-crash), like transit-clap-host: this crate
 # opts out of the workspace `unsafe_code = "forbid"` for itself only. It denies unsafe everywhere
 # and allows it solely on the FFI module (`src/ffi.rs`). The rest mirrors `[workspace.lints]`.
