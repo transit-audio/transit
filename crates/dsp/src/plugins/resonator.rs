@@ -319,13 +319,24 @@ impl Default for ResonatorInstrument {
 /// The shapers' random seed: the part's power-on seed.
 const SHAPER_SEED: u32 = transit_resonator::stmlib::random::Random::DEFAULT_SEED;
 
+/// The part as the instrument plays it: the firmware's, but a chord's notes keep their own pitches
+/// (#521). The instrument strums one queued note per 24-frame block, so the notes of a chord strum
+/// on consecutive blocks, closer than the module's trigger input ever strums; the part's
+/// `set_strum_keeps_voice_notes` keeps each just-plucked voice on its note there and leaves every
+/// other strum the firmware's, bit for bit. Kept across the part's `reset`.
+fn chord_ready_part() -> Resonator {
+    let mut part = Resonator::new();
+    part.set_strum_keeps_voice_notes(true);
+    part
+}
+
 impl ResonatorInstrument {
     pub fn new() -> Self {
         let kernel = Kernel::new();
         let (up, latency) = edge(&kernel, ENGINE_RATE);
         let mut s = Self {
             p: Params::new(&PARAMS),
-            part: Box::new(Resonator::new()),
+            part: Box::new(chord_ready_part()),
             kernel,
             up,
             latency,

@@ -94,6 +94,12 @@ impl NoteFilter {
     pub fn stable_note(&self) -> F {
         self.delayed_stable_note.read_fixed()
     }
+
+    /// How many blocks ago [`stable_note`](Self::stable_note) reads (8 at the part's block rate).
+    #[must_use]
+    pub fn stable_note_delay(&self) -> usize {
+        self.delayed_stable_note.delay()
+    }
 }
 
 /// `std::sort` on four floats: the standard libraries sort so few elements by insertion with `<`,

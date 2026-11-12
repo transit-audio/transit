@@ -68,6 +68,14 @@ specify:
 
 ## Changes
 
-None yet: every model nulls bit-identical against the oracle as written (see the README). A
-deviation, if one is ever needed, is its own commit with its null test as the proof and a line
-here.
+Every model nulls bit-identical against the oracle as written (see the README). A deviation is
+its own commit with its null test as the proof and a line here.
+
+- `Resonator::set_strum_keeps_voice_notes` (#521), off by default; the null tests never set it.
+  On a strum the firmware retunes the outgoing voice to the note filter's stable note of 8 blocks
+  ago (`stable_note()`), a history written only on blocks without a strum, so strums closer than
+  that (a chord of MIDI notes, which the instrument strums on consecutive blocks) retuned each
+  just-plucked voice to the note held before the chord. With the switch on, a strum within the
+  stable note's delay of the previous strum leaves the outgoing voice on its note; every other
+  strum is the firmware's bit for bit (`the_chord_switch_leaves_spaced_strums_bit_exact`). The
+  Resonator instrument turns it on.

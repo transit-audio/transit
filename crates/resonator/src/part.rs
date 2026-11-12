@@ -132,6 +132,10 @@ pub struct Resonator {
     reverb: Reverb,
     limiter: Limiter,
     random: Random,
+    /// transit's deviation (#521), off by default: see [`Resonator::set_strum_keeps_voice_notes`].
+    strum_keeps_voice_notes: bool,
+    /// Blocks since the last strum (saturating; `usize::MAX` before the first).
+    blocks_since_strum: usize,
 }
 
 impl Default for Resonator {
@@ -181,6 +185,8 @@ impl Resonator {
             reverb: Reverb::default(),
             limiter: Limiter::default(),
             random: Random::default(),
+            strum_keeps_voice_notes: false,
+            blocks_since_strum: usize::MAX,
         };
         part.init();
         part
@@ -214,6 +220,8 @@ impl Resonator {
             reverb: self.reverb.take_zeroed(),
             limiter: Limiter::default(),
             random: Random::default(),
+            strum_keeps_voice_notes: self.strum_keeps_voice_notes,
+            blocks_since_strum: usize::MAX,
         };
         fresh.init();
         *self = fresh;
@@ -281,6 +289,21 @@ impl Resonator {
             self.note[i] = self.note[0] + F::from_usize(i) * 0.05;
         }
         self.dirty = true;
+    }
+
+    /// transit's deviation from the firmware (#521), off by default and kept across
+    /// [`reset`](Self::reset). On a strum the firmware retunes the voice it leaves to the note
+    /// filter's stable note of 8 blocks ago (`stable_note()`, so that a pitch CV still settling
+    /// when the trigger arrives does not leak onto the previous voice), and writes that history
+    /// only on blocks without a strum. Strums closer than that, which a module's trigger input
+    /// never sees but a chord of MIDI notes strummed on consecutive blocks always does, retune
+    /// each just-plucked voice to the note held before them. With this on, a strum that comes
+    /// within the stable note's delay of the previous strum leaves the outgoing voice on the
+    /// note it is playing; any other strum is the firmware's, bit for bit (the stable note is
+    /// then exactly the note the voice plays whenever the note only changes on strums, as a MIDI
+    /// host drives it). The oracle nulls never set it.
+    pub fn set_strum_keeps_voice_notes(&mut self, on: bool) {
+        self.strum_keeps_voice_notes = on;
     }
 
     /// The model.
@@ -543,8 +566,15 @@ impl Resonator {
         self.configure_resonators();
 
         self.note_filter.process(F(performance.note), performance.strum);
+        self.blocks_since_strum = self.blocks_since_strum.saturating_add(1);
         if performance.strum {
-            self.note[self.active_voice] = self.note_filter.stable_note();
+            // #521: within the stable note's delay of the last strum its history still holds the
+            // note from before that strum; the outgoing voice keeps its own note instead.
+            let recent = self.blocks_since_strum <= self.note_filter.stable_note_delay();
+            if !(self.strum_keeps_voice_notes && recent) {
+                self.note[self.active_voice] = self.note_filter.stable_note();
+            }
+            self.blocks_since_strum = 0;
             if self.polyphony > 1 && self.polyphony & 1 == 1 {
                 self.active_voice = PING_PATTERN[self.step_counter % 8];
                 self.step_counter = (self.step_counter + 1) % 8;
@@ -742,6 +772,48 @@ mod tests {
                 let mut fresh = Resonator::new();
                 assert!(render(&mut dirty, model, polyphony) == render(&mut fresh, model, polyphony), "{model:?} at polyphony {polyphony}");
                 let _ = render(&mut dirty, ResonatorModel::StringAndReverb, 4);
+            }
+        }
+    }
+
+    /// #521: `set_strum_keeps_voice_notes` changes no bit of a performance whose strums are at
+    /// least 9 blocks apart (the stable note's delay plus one), the first one at block 3 of a new
+    /// part, the note changing only on strums as a MIDI host drives it; it does change a chord
+    /// strummed on consecutive blocks; and a reset keeps it.
+    #[test]
+    fn the_chord_switch_leaves_spaced_strums_bit_exact() {
+        let render = |on: bool, model: ResonatorModel, polyphony: usize, strums: &[usize]| {
+            let mut part = Resonator::new();
+            part.set_strum_keeps_voice_notes(on);
+            part.reset();
+            part.set_model(model);
+            part.set_polyphony(polyphony);
+            let input = [0.0; 24];
+            let (mut out, mut aux) = ([0.0; 24], [0.0; 24]);
+            let mut bits = Vec::new();
+            let mut note = 24.0;
+            for block in 0..700 {
+                let strum = strums.contains(&block);
+                if strum {
+                    note = [12.0, 26.0, 29.0, 33.0, 19.0, 40.0][block % 6];
+                }
+                let p = PerformanceState { strum, note, ..performance() };
+                part.process(&p, &Patch { damping: 0.8, ..Patch::default() }, &input, &mut out, &mut aux);
+                bits.extend(out.iter().chain(&aux).map(|s| s.to_bits()));
+            }
+            bits
+        };
+        let spaced = [3, 12, 21, 31, 50, 59, 99, 140, 149, 300, 309, 318, 500];
+        let chord = [3, 100, 101, 102, 103, 300, 301];
+        for model in ResonatorModel::ALL {
+            for polyphony in 1..=MAX_POLYPHONY {
+                assert!(render(false, model, polyphony, &spaced) == render(true, model, polyphony, &spaced), "{model:?} at polyphony {polyphony}");
+                if polyphony > 1 {
+                    assert!(
+                        render(false, model, polyphony, &chord) != render(true, model, polyphony, &chord),
+                        "{model:?} at polyphony {polyphony}: the switch acts on a chord"
+                    );
+                }
             }
         }
     }

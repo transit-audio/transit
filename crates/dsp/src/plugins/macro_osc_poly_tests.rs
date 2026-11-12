@@ -421,3 +421,47 @@ fn the_chiptune_model_holds_while_held_and_ends_after_the_note_off() {
     assert_eq!(peak(&tail[tail.len() - 4800..]), 0.0, "silent within the tail");
     assert!(m.slots[0].idle);
 }
+
+/// The magnitude (dB) of `x` at `hz` (a Hann-windowed single-bin DFT).
+fn level_db(x: &[f32], hz: f64) -> f64 {
+    let n = x.len() as f64;
+    let (mut re, mut im) = (0.0f64, 0.0f64);
+    for (i, v) in x.iter().enumerate() {
+        let w = 0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / n).cos();
+        let ph = std::f64::consts::TAU * hz * i as f64 / f64::from(SR);
+        re += f64::from(*v) * w * ph.cos();
+        im += f64::from(*v) * w * ph.sin();
+    }
+    10.0 * (re * re + im * im).max(1e-30).log10()
+}
+
+/// The strongest frequency within 1.5% of `hz` (0.1 Hz steps).
+fn peak_hz(x: &[f32], hz: f64) -> f64 {
+    let steps = (hz * 0.03 / 0.1) as usize;
+    (0..=steps).map(|k| hz / 1.015 + k as f64 * 0.1).max_by(|a, b| level_db(x, *a).total_cmp(&level_db(x, *b))).unwrap_or(hz)
+}
+
+/// #521's check on this instrument: a chord sent in one block (notes 62, 65 and 69 after a held
+/// 48, the sine of the FM model at Timbre 0) sounds each note at its own pitch, measured from the
+/// audio (each voice is its own firmware voice, so no shared note state can retune one).
+#[test]
+fn a_chord_in_one_block_sounds_each_note_at_its_pitch() {
+    let mut m = poly(8);
+    m.set_param("model", 10.0);
+    m.set_param("timbre", 0.0);
+    m.note_on(0, 48, 100);
+    run(&mut m, 2400);
+    for key in [62, 65, 69] {
+        m.note_on(0, key, 100);
+    }
+    let x = run(&mut m, 48_000);
+    let window = &x[4800..4800 + 24_000];
+    for key in [62u8, 65, 69] {
+        let want = 440.0 * 2f64.powf((f64::from(key) - 69.0) / 12.0);
+        let got = peak_hz(window, want);
+        let cents = 1200.0 * (got / want).log2();
+        let clear = level_db(window, got) - level_db(window, got * 1.03).max(level_db(window, got / 1.03));
+        println!("note {key}: {got:.2} Hz ({cents:+.2} cents), {clear:.1} dB clear");
+        assert!(cents.abs() < 2.0 && clear > 20.0, "note {key}: {got:.2} Hz ({cents:+.2} cents), {clear:.1} dB clear");
+    }
+}

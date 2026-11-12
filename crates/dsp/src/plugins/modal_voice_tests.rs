@@ -861,3 +861,28 @@ fn an_earlier_notes_off_after_a_restrike_keeps_the_key_down() {
         }
     }
 }
+
+/// #521's check on this instrument: it is one voice played mono, so a chord sent in one block
+/// (62, 65, 69 after a held 48) sounds its newest note, 69, at 440 Hz within 1 cent, measured from
+/// the audio (the settings of the A4 pitch test above, at 48 kHz).
+#[test]
+fn a_chord_in_one_block_sounds_its_newest_note_at_its_pitch() {
+    let params = [
+        ("geometry", 25.0),
+        ("damping", 100.0),
+        ("space", 0.0),
+        ("strike_level", 60.0),
+        ("level", 0.0),
+        ("brightness", 0.0),
+        ("strike_timbre", 20.0),
+    ];
+    let mut r = instrument(48_000, &params);
+    let script = [(0, Ev::On(48, 127)), (2400, Ev::On(62, 127)), (2400, Ev::On(65, 127)), (2400, Ev::On(69, 127))];
+    let y = render(&mut r, 2400 + 62_400, 256, &script);
+    let from = 2400 + 9600;
+    let window: Vec<f64> = y[1][from..from + 48_000].iter().map(|&v| f64::from(v)).collect();
+    let hz = pitch_hz(&window, 48_000.0, 440.0, "chord");
+    let cents = 1200.0 * (hz / 440.0).log2();
+    println!("newest note 69: {hz:.4} Hz ({cents:+.4} cents)");
+    assert!(cents.abs() < 1.0, "{hz} Hz ({cents:+.3} cents)");
+}

@@ -51,6 +51,12 @@ impl<const N: usize> DelayLine<N> {
         self.delay = delay;
     }
 
+    /// The delay [`read_fixed`](Self::read_fixed) reads at.
+    #[must_use]
+    pub fn delay(&self) -> usize {
+        self.delay
+    }
+
     /// `Write(sample)`.
     #[inline(always)]
     pub fn write(&mut self, sample: F) {

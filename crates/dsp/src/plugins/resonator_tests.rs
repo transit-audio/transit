@@ -84,11 +84,13 @@ const STRUMS: [(usize, Ev); 9] = [
 /// each note's frame; the second of two notes in one block on the next block), and their keys.
 const STRUM_BLOCKS: [(usize, u8); 7] = [(0, 69), (5, 57), (42, 64), (43, 67), (100, 72), (209, 45), (1251, 81)];
 
-/// The crate driven directly in 24-frame blocks, as the instrument should drive it: the internal
-/// exciter, the tonic C1 (MIDI 36), the note over it, FM `fm`, the chord from structure, a strum
+/// The crate driven directly in 24-frame blocks, as the instrument should drive it: the chord
+/// switch on (#521), the internal exciter, the tonic C1 (MIDI 36), the note over it, FM `fm`, the chord from structure, a strum
 /// at each of `strums` (block, key). Returns the two outputs.
 fn crate_render(model: ResonatorModel, polyphony: usize, patch: Patch, fm: f32, strums: &[(usize, u8)], blocks: usize) -> [Vec<f32>; 2] {
     let mut part = Resonator::new();
+    // As the instrument drives it (#521): chord notes keep their pitches.
+    part.set_strum_keeps_voice_notes(true);
     part.set_model(model);
     if polyphony != 1 {
         part.set_polyphony(polyphony);
@@ -568,4 +570,82 @@ fn an_earlier_notes_off_after_a_restrike_keeps_the_key_down() {
             assert!(!r.held[60], "host={host} on={on} off={off}: its own off lets it go");
         }
     }
+}
+
+/// MIDI note `n`'s frequency (A4 = 440 Hz).
+fn note_hz(n: u8) -> f64 {
+    440.0 * 2f64.powf((f64::from(n) - 69.0) / 12.0)
+}
+
+/// The two outputs summed over `len` frames from `from`, as f64.
+fn mono(y: &[Vec<f32>; 2], from: usize, len: usize) -> Vec<f64> {
+    (from..from + len).map(|i| f64::from(y[0][i]) + f64::from(y[1][i])).collect()
+}
+
+/// The strongest spectral peak within 1.5% of `hz` and how far it stands above the spectrum at
+/// the window's two edges (dB): a voice ringing at `hz` stands well clear, leakage does not.
+fn partial(x: &[f64], hz: f64) -> (f64, f64) {
+    let (f, m) = dft_peak(x, 48_000.0, hz);
+    let (_, lo) = dft_peak(x, 48_000.0, hz / 1.03);
+    let (_, hi) = dft_peak(x, 48_000.0, hz * 1.03);
+    let edge = |e: f64| 20.0 * (m - e) / std::f64::consts::LN_10;
+    (f, edge(lo).min(edge(hi)))
+}
+
+/// #521: each note of `script` (default Resonator, Polyphony 4, 48 kHz) rings at its own pitch in
+/// the second after frame `from`: each fundamental measured from the rendered audio (a spectral
+/// peak within 1.5% of the note's frequency, standing at least 20 dB clear of its neighborhood
+/// and within 2 cents of the note), not from the part's note values. Returns the measurements
+/// (note, Hz, cents, dB clear) for the report; asserts only when `check`.
+fn chord_pitches(script: &[(usize, Ev)], notes: &[u8], from: usize, check: bool) -> Vec<(u8, f64, f64, f64)> {
+    let mut r = instrument(48_000, &[]);
+    let y = render(&mut r, from + 48_000, 256, script);
+    let x = mono(&y, from, 48_000);
+    let mut got = Vec::new();
+    for &n in notes {
+        let (hz, clear) = partial(&x, note_hz(n));
+        let cents = 1200.0 * (hz / note_hz(n)).log2();
+        println!("note {n}: {hz:.3} Hz ({cents:+.2} cents), {clear:.1} dB clear");
+        got.push((n, hz, cents, clear));
+        if check {
+            assert!(clear > 20.0 && cents.abs() < 2.0, "note {n}: {hz:.3} Hz ({cents:+.2} cents), {clear:.1} dB clear");
+        }
+    }
+    got
+}
+
+/// The measurement itself: each note alone on a fresh instance rings at its pitch, and a note
+/// that is not playing does not pass (note 62's neighborhood with only note 48 sounding).
+#[test]
+fn the_chord_measurement_hears_single_notes_and_refuses_absent_ones() {
+    for n in [48u8, 60, 62, 64, 65, 67, 69, 71] {
+        chord_pitches(&[(0, Ev::On(n, 100))], &[n], 4800, true);
+    }
+    let absent = chord_pitches(&[(0, Ev::On(48, 100))], &[62, 65, 69], 4800, false);
+    assert!(absent.iter().all(|(_, _, c, d)| *d < 20.0 || c.abs() >= 2.0), "a silent note passed: {absent:?}");
+}
+
+/// #521, the issue's case: note 48 held for 2,400 frames, then notes 62, 65 and 69 in the same
+/// block. The adapter strums them on three consecutive 24-frame blocks; before the fix the part
+/// retuned each just-plucked voice one block later to the note held before the chord.
+#[test]
+fn a_chord_after_a_held_note_rings_at_its_own_pitches() {
+    let script = [(0, Ev::On(48, 100)), (2400, Ev::On(62, 100)), (2400, Ev::On(65, 100)), (2400, Ev::On(69, 100))];
+    chord_pitches(&script, &[62, 65, 69], 2400 + 4800, true);
+}
+
+/// Two notes one block apart, and a four-note chord on a fresh instance (whose delayed note is
+/// still the power-on zero, the tonic).
+#[test]
+fn notes_one_block_apart_and_a_fresh_four_note_chord_ring_at_their_pitches() {
+    chord_pitches(&[(0, Ev::On(60, 100)), (24, Ev::On(64, 100))], &[60, 64], 4800, true);
+    let chord = [(0, Ev::On(60, 100)), (0, Ev::On(64, 100)), (0, Ev::On(67, 100)), (0, Ev::On(71, 100))];
+    chord_pitches(&chord, &[60, 64, 67, 71], 4800, true);
+}
+
+/// Notes 5 ms apart (240 frames, ten blocks) were already right before the fix: the boundary.
+#[test]
+fn notes_five_ms_apart_ring_at_their_pitches() {
+    let script = [(0, Ev::On(48, 100)), (2400, Ev::On(62, 100)), (2640, Ev::On(65, 100)), (2880, Ev::On(69, 100))];
+    chord_pitches(&script, &[62, 65, 69], 2880 + 4800, true);
 }
