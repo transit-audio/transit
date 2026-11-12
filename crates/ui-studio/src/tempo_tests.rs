@@ -331,6 +331,7 @@ fn a_tempo_change_moves_ticks_material_with_the_bars_and_leaves_samples_audio_in
         takes: Vec::new(),
         midi_journal: None,
         midi_placed: false,
+        cycle: None,
     };
     t.app.place_takes(&plan, vec![(audio, wav)], 192_000, 1);
     t.app.run("automation.write_range", json!({"track": inst.0, "param": "volume", "start": 96_000, "end": 192_000, "value": -6.0})).unwrap();

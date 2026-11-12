@@ -16,7 +16,16 @@ fn fixture() -> (Engine, TrackId) {
     std::fs::write(&path, transit_audio_io::encode(&buffer, &EncodeOptions::default()).unwrap()).unwrap();
     let mut e = Engine::default();
     let t = TrackId(e.execute("track.new", &json!({"kind": "audio", "name": "Vox"})).unwrap()["tracks"][0].as_u64().unwrap());
-    let plan = io::Recording { start: 1200, pass: Some(4800), punch: None, rate: 48_000, takes: vec![], midi_journal: None, midi_placed: false };
+    let plan = io::Recording {
+        start: 1200,
+        pass: Some(4800),
+        punch: None,
+        rate: 48_000,
+        takes: vec![],
+        midi_journal: None,
+        midi_placed: false,
+        cycle: None,
+    };
     let clips = io::place_recording_take(&mut e, &plan, vec![(t, path.to_path_buf())], true);
     std::fs::remove_file(path).unwrap();
     assert_eq!(clips.len(), 2);
@@ -223,7 +232,8 @@ fn a_plain_bounce_of_a_take_stack_prints_the_active_take_bit_for_bit_from_frame_
     std::fs::write(&path, transit_audio_io::encode(&buffer, &EncodeOptions::default()).unwrap()).unwrap();
     let mut e = Engine::default();
     let t = TrackId(e.execute("track.new", &json!({"kind": "audio", "name": "Guitar"})).unwrap()["tracks"][0].as_u64().unwrap());
-    let plan = io::Recording { start: 0, pass: Some(4800), punch: None, rate: 48_000, takes: vec![], midi_journal: None, midi_placed: false };
+    let plan =
+        io::Recording { start: 0, pass: Some(4800), punch: None, rate: 48_000, takes: vec![], midi_journal: None, midi_placed: false, cycle: None };
     io::place_recording_take(&mut e, &plan, vec![(t, path.to_path_buf())], true);
     std::fs::remove_file(path).unwrap();
     let source = e.session().track(t).unwrap();

@@ -292,7 +292,16 @@ pub fn recover(e: &mut Engine, path: &Path) -> Result<Vec<ClipId>> {
     let h = &journal.header;
     // Held notes end a little after the last event (the journal doesn't record when Stop came).
     let stop = events.iter().map(|ev| ev.offset).max().unwrap_or(0).saturating_add(i64::from(h.session_rate) / 4);
-    let plan = Recording { start: h.plan_start, pass: h.pass, punch: h.punch, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false };
+    let plan = Recording {
+        start: h.plan_start,
+        pass: h.pass,
+        punch: h.punch,
+        rate: 0,
+        takes: Vec::new(),
+        midi_journal: None,
+        midi_placed: false,
+        cycle: h.loop_range,
+    };
     let before = e.session_arc();
     let ids = crate::midi_take::place_midi_recording_wrapping(e, &plan, &events, stop, h.loop_range);
     let mut named: Vec<(TrackId, usize)> = Vec::new();
@@ -332,7 +341,8 @@ mod tests {
         d
     }
     fn header(tracks: Vec<TrackId>) -> Header {
-        let plan = Recording { start: 48_000, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let plan =
+            Recording { start: 48_000, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None };
         let latch = Latch { output_frame: 10_000, position: 48_000, device_rate: 48_000, session_rate: 48_000 };
         Header::new(latch, &plan, None, tracks)
     }
@@ -444,7 +454,8 @@ mod tests {
         let path = d.join("s.midijournal");
         let mut e = Engine::default();
         let t = TrackId(e.execute("track.new", &serde_json::json!({"kind": "midi", "name": "Keys"})).unwrap()["tracks"][0].as_u64().unwrap());
-        let plan = Recording { start: 96_000, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let plan =
+            Recording { start: 96_000, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None };
         let latch = Latch { output_frame: 10_000, position: 96_000, device_rate: 48_000, session_rate: 48_000 };
         let header = Header::new(latch, &plan, loop_range, vec![t]);
         // Lap length 48,000: a note from 10,000 to 60,000 after the latch crosses one wrap, and a

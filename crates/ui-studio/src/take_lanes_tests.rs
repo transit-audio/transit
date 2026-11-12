@@ -85,6 +85,7 @@ impl T {
             takes: Vec::new(),
             midi_journal: None,
             midi_placed: false,
+            cycle: None,
         };
         self.app.place_takes(&plan, vec![(t, path)], start + 48_000, 1);
         self.frames(3);
@@ -368,6 +369,7 @@ mod midi {
             takes: Vec::new(),
             midi_journal: None,
             midi_placed: false,
+            cycle: None,
         });
         t.app.engine.transport.recording = true;
         t.app.start_play(4 * BEAT, None, None);

@@ -97,6 +97,7 @@ fn record(app: &mut StudioApp, start: i64, pass_len: Option<i64>, stop: i64, tak
         takes: Vec::new(),
         midi_journal: None,
         midi_placed: false,
+        cycle: None,
     });
     app.engine.transport.recording = true;
     app.start_play(stop, None, None);
@@ -283,6 +284,7 @@ fn the_lane_shows_a_growing_recording_clip_with_the_notes_played_so_far_until_st
         takes: Vec::new(),
         midi_journal: None,
         midi_placed: false,
+        cycle: None,
     });
     app.engine.transport.recording = true;
     app.start_play(4 * BEAT, None, None);
@@ -325,6 +327,7 @@ fn journaled_pass(app: &mut StudioApp, t: TrackId, journal: &std::path::Path) {
         takes: Vec::new(),
         midi_journal: Some(journal.to_path_buf()),
         midi_placed: false,
+        cycle: None,
     });
     app.engine.transport.recording = true;
     app.start_play(4 * BEAT, None, None);
@@ -499,6 +502,7 @@ fn cycling(app: &mut StudioApp, at: i64) {
         takes: Vec::new(),
         midi_journal: None,
         midi_placed: false,
+        cycle: None,
     });
     app.engine.transport.recording = true;
     app.start_play(at, None, None);

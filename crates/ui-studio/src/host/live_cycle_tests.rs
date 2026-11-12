@@ -206,6 +206,7 @@ fn cycle_toggled_while_a_take_records_keeps_its_loop_until_the_take_ends() {
         takes: Vec::new(),
         midi_journal: None,
         midi_placed: false,
+        cycle: None,
     });
     cycle(&mut app, true);
     seen.extend(steps(&mut app, 20));

@@ -25,9 +25,6 @@ use transit_midi::{CtrlEvent, CtrlKind, Note, Sequence};
 use transit_model::{Clip, ClipContent, ClipId, TrackId};
 use transit_time::{Range, SampleRate, Samples, TempoMap};
 
-/// The most loop passes one recording turns into clips (as for audio takes).
-const MAX_PASSES: i64 = 1_000;
-
 /// One captured channel message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Msg {
@@ -104,6 +101,8 @@ pub fn build(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut) -
 /// One stretch of the pass that becomes one clip: the offsets it takes (`window`), where its clip
 /// lies on the timeline (`range`) and the session sample at the window's first offset (`origin`).
 struct Segment {
+    /// Which lap of the pass it is (0 when it is not cut into laps).
+    index: i64,
     window: Range,
     range: Range,
     origin: Samples,
@@ -190,19 +189,17 @@ pub fn left_out_before_start(plan: &Recording, events: &[RecEvent]) -> usize {
     tracks.into_iter().map(|t| taken(events.iter().filter(|e| e.track == t).collect(), &cut).left_out).sum()
 }
 
-/// Does a recording that started at or before the loop end of `wrap` (the loop region the
-/// transport cycles over) run past it, so the transport wrapped while recording? The player wraps
-/// at the loop end from any position before it, so a start ahead of the loop counts too.
-fn wrapped(cut: &Cut, wrap: Option<Range>, last: Samples) -> Option<Range> {
-    let w = wrap.filter(|w| cut.pass.is_none() && !w.is_empty() && cut.start >= 0 && cut.start < w.end)?;
-    (last >= w.end - cut.start).then_some(w)
-}
-
 /// As [`build`], for a recording the transport may have looped over `wrap` while it ran. Every
 /// pass of the loop is its own clip, as with loop recording; the offsets are device time, which a
 /// wrap does not reset, so the session position at Stop (which is back inside the loop) is never
 /// used to decide what was played.
 pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, wrap: Option<Range>) -> Vec<Built> {
+    build_laps(tempo, sr, events, cut, wrap).0
+}
+
+/// As [`build_wrapping`], with the most laps any track's pass left out (past
+/// [`crate::take_laps::MAX_LAPS`], #522).
+fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, wrap: Option<Range>) -> (Vec<Built>, i64) {
     let mut tracks: Vec<TrackId> = Vec::new();
     for e in events {
         if !tracks.contains(&e.track) {
@@ -210,52 +207,29 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
         }
     }
     let mut out = Vec::new();
+    let mut left_out = 0;
     for track in tracks {
         let Taken { lead, events: mine, .. } = taken(events.iter().filter(|e| e.track == track).collect(), cut);
         let mine: Vec<&RecEvent> = mine.iter().collect();
         let last = mine.last().map_or(0, |e| e.offset);
-        let pass_len = cut.pass.filter(|p| *p > 0);
-        let segments: Vec<Segment> = if let Some(len) = pass_len {
-            let passes = mine.last().map_or(0, |e| (e.offset / len + 1).clamp(1, MAX_PASSES));
-            (0..passes)
-                .map(|k| {
-                    // Pickups belong to the first pass, whose clip starts early; later passes are whole laps.
-                    let lead = if k == 0 { lead } else { 0 };
-                    Segment {
-                        window: Range::new(k * len + lead, (k + 1) * len),
-                        range: Range::new(cut.start + lead, cut.start.saturating_add(len)),
-                        origin: cut.start + lead,
-                    }
-                })
-                .collect()
-        } else if let Some(w) = wrapped(cut, wrap, last) {
-            // The first stretch runs from the latch (or its first pickup) to the loop end, every
-            // later one is a whole loop.
-            let first = w.end - cut.start;
-            let passes = (1 + (last - first) / w.len() + 1).min(MAX_PASSES);
-            (0..passes)
-                .map(|k| {
-                    if k == 0 {
-                        Segment { window: Range::new(lead, first), range: Range::new(cut.start + lead, w.end), origin: cut.start + lead }
-                    } else {
-                        let from = first + (k - 1) * w.len();
-                        Segment { window: Range::new(from, from + w.len()), range: w, origin: w.start }
-                    }
-                })
-                .collect()
+        // Laps as an audio take of the same pass is cut (#567); the newest are kept past the
+        // most laps a recording keeps (#522).
+        let segments: Vec<Segment> = if let Some(cut_laps) = crate::take_laps::laps(cut.start, cut.pass, wrap, lead, last) {
+            left_out = left_out.max(cut_laps.left_out);
+            cut_laps.laps.into_iter().map(|l| Segment { index: l.index, window: l.window, range: l.range, origin: l.range.start }).collect()
         } else {
             // Stop never cuts off what was captured: the transport can halt at a punch end or
             // the end of the session before Stop, leaving the position behind the events.
             let stop = cut.stop.max(last);
             let end = cut.start.saturating_add(stop);
             let range = cut.punch.map_or(Range::new(cut.start + lead, end), |p| Range::new(p.start.max(cut.start), p.end.min(end)));
-            vec![Segment { window: Range::new(lead, stop.saturating_add(1)), range, origin: cut.start + lead }]
+            vec![Segment { index: 0, window: Range::new(lead, stop.saturating_add(1)), range, origin: cut.start + lead }]
         };
         // Held notes survive wraps: (channel, pitch, start offset, velocity).
         // The earliest matching note-on wins, including notes carried from a previous lap.
         let mut held: Vec<(u8, u8, Samples, u8)> = Vec::new();
-        for (k, seg) in segments.into_iter().enumerate() {
-            let Segment { window, range, origin } = seg;
+        for seg in segments {
+            let Segment { index, window, range, origin } = seg;
             if range.is_empty() {
                 continue;
             }
@@ -272,7 +246,9 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
                 let (a, b) = (tick(at(started.max(window.start))), tick(end));
                 sequence.notes.push(Note { pitch, velocity, release_velocity: release, channel, start: a, length: (b - a).max(1) });
             };
-            for e in mine.iter().filter(|e| window.contains(e.offset)) {
+            // The events are sorted by offset: the window's are one run of them.
+            let (lo, hi) = (mine.partition_point(|e| e.offset < window.start), mine.partition_point(|e| e.offset < window.end));
+            for e in mine.get(lo..hi).unwrap_or_default() {
                 let sample = at(e.offset);
                 if !range.contains(sample) && !matches!(e.msg, Msg::NoteOff { .. }) {
                     continue;
@@ -326,10 +302,10 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
                 continue;
             }
             sequence.sort();
-            out.push(Built { track, pass: k, range, sequence });
+            out.push(Built { track, pass: usize::try_from(index).unwrap_or(usize::MAX), range, sequence });
         }
     }
-    out
+    (out, left_out)
 }
 
 /// Place a finished MIDI recording as one undo step ("Record") and return the clips it created
@@ -349,10 +325,14 @@ pub fn place_midi_recording(e: &mut Engine, plan: &Recording, events: &[RecEvent
 /// while a take records does not change the loop that take was recorded with (#81).
 pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &[RecEvent], stop: Samples, wrap: Option<Range>) -> Vec<ClipId> {
     let cut = Cut { start: plan.start, pass: plan.pass, punch: plan.punch, stop };
-    let built = {
+    let (built, left_out) = {
         let s = e.session();
-        build_wrapping(&s.tempo, s.sample_rate, events, &cut, wrap)
+        build_laps(&s.tempo, s.sample_rate, events, &cut, wrap)
     };
+    // Said even when the laps kept hold nothing, before anything is placed (#522).
+    if left_out > 0 {
+        e.warn(crate::take_laps::left_out_note(left_out, " with the MIDI played in them"));
+    }
     if built.is_empty() {
         return Vec::new();
     }
@@ -644,7 +624,7 @@ mod tests {
         (e, t)
     }
     fn plan(start: Samples, pass: Option<Samples>) -> Recording {
-        Recording { start, pass, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false }
+        Recording { start, pass, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None }
     }
     fn two_notes(t: TrackId) -> Vec<RecEvent> {
         let mut v = vec![on(0, 60), off(24_000, 60), on(24_000, 64), off(48_000, 64)];

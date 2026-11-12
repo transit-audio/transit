@@ -201,6 +201,7 @@ fn stop_take(tag: &str, approximate: bool) -> T {
         takes: Vec::new(),
         midi_journal: None,
         midi_placed: false,
+        cycle: None,
     });
     t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
     t.app.test_approximate_start = approximate;
@@ -241,6 +242,7 @@ fn recording_stop(count: u32) {
         takes: Vec::new(),
         midi_journal: None,
         midi_placed: false,
+        cycle: None,
     });
     t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
     t.app.engine.transport.recording = true;
@@ -357,4 +359,61 @@ fn the_low_latency_button_is_the_size_of_the_cycle_and_metronome_buttons() {
     let tr = &t.app.arrange.layout.transport;
     assert_eq!(size(tr["low_latency"]), size(tr["cycle"]));
     assert_eq!(size(tr["low_latency"]), size(tr["metronome"]));
+}
+
+/// #567: Record pressed while cycling, away from the loop start. The pass keeps the loop it
+/// records under, and at Stop its audio take is cut at each wrap, a take per lap, as its MIDI is:
+/// not one clip running past the loop end.
+#[test]
+fn record_pressed_mid_loop_while_cycling_stacks_an_audio_take_per_lap_issue_567() {
+    let take = TakeFile::new("mid-loop");
+    let mut t = T::new();
+    let track = TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
+    let cycle = transit_time::Range::new(48_000, 64_000);
+    let edit = &mut t.app.engine.session_mut().edit;
+    edit.loop_playback = true;
+    edit.loop_range = cycle;
+    t.app.engine.transport.playing = true;
+    t.app.engine.transport.position = 56_000;
+    t.app.begin_pass(Vec::new());
+    let plan = t.app.take_plan.clone().expect("a pass is planned");
+    assert_eq!((plan.start, plan.pass, plan.cycle), (56_000, None, Some(cycle)), "the plan keeps the loop the pass records under");
+    t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
+    t.app.engine.transport.recording = true;
+    t.stop(1);
+    let tr = t.app.engine.session().track(track).unwrap();
+    let mut laps: Vec<(i64, i64, i64)> = tr.playlists.iter().flat_map(|p| p.clips.iter().map(|c| (c.source_offset(), c.start, c.length))).collect();
+    laps.sort_unstable();
+    // One second recorded from the middle of a third-of-a-second loop: half a lap, two whole laps
+    // and a half lap. The newest (half) lap plays over its range and the lap before it plays
+    // after it, so that lap is in two pieces (ADR 0039, item 4).
+    assert_eq!(laps, vec![(0, 56_000, 8_000), (8_000, 48_000, 16_000), (24_000, 48_000, 8_000), (32_000, 56_000, 8_000), (40_000, 48_000, 8_000)]);
+    assert!(laps.iter().all(|c| c.1 + c.2 <= cycle.end), "nothing past the loop end");
+    assert_eq!((tr.playlists.len(), tr.active_playlist), (4, 0));
+    assert!(t.app.status.starts_with("Recorded 4 takes"), "{}", t.app.status);
+    assert_eq!(t.app.ui.takes_open, vec![track], "the lanes open, as after loop recording");
+}
+
+/// #522: past the most laps one recording keeps, the status line says how many earlier laps were
+/// left out and that the take file still holds them (they used to vanish without a word).
+#[test]
+fn laps_left_out_past_the_most_a_recording_keeps_are_said_in_the_status_line_issue_522() {
+    let take = TakeFile::new("many-laps");
+    let mut t = T::new();
+    let track = TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
+    // One second in laps of four frames: 12,000 laps.
+    let plan = transit_engine::io::Recording {
+        start: 0,
+        pass: Some(4),
+        punch: None,
+        rate: 48_000,
+        takes: Vec::new(),
+        midi_journal: None,
+        midi_placed: false,
+        cycle: None,
+    };
+    t.app.place_takes(&plan, vec![(track, take.0.to_path_buf())], 4, 1);
+    let status = &t.app.status;
+    assert!(status.starts_with("Recorded 10000 takes"), "{status}");
+    assert!(status.contains("2000 earlier laps were left out") && status.contains(take.0.to_string_lossy().as_ref()), "{status}");
 }

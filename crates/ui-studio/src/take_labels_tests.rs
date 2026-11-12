@@ -23,6 +23,7 @@ fn six_laps(t: &mut T, dir: &Dir, partial: bool) -> TrackId {
         takes: Vec::new(),
         midi_journal: None,
         midi_placed: false,
+        cycle: None,
     };
     t.app.place_takes(&plan, vec![(track, path)], 96_000, 1);
     t.app.run("view.zoom_set", json!({"samples_per_px": 200.0})).unwrap();

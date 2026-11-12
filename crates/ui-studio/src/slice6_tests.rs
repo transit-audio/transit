@@ -165,8 +165,16 @@ impl T {
         let path = dir.0.join(format!("take{n}.wav"));
         let frames = (secs * 48_000.0) as u32;
         write_wav(&path, frames);
-        let plan =
-            transit_engine::io::Recording { start, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let plan = transit_engine::io::Recording {
+            start,
+            pass: None,
+            punch: None,
+            rate: 48_000,
+            takes: Vec::new(),
+            midi_journal: None,
+            midi_placed: false,
+            cycle: None,
+        };
         self.app.place_takes(&plan, vec![(t, path)], start + i64::from(frames), 1);
         self.frames(3);
         self.app.status.clone()
@@ -505,6 +513,7 @@ fn a_failed_start_after_the_count_in_releases_the_take_and_says_why() {
         takes: Vec::new(),
         midi_journal: None,
         midi_placed: false,
+        cycle: None,
     });
     app.status = "Recording".into();
     assert!(app.recording_active());

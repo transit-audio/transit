@@ -30,7 +30,7 @@ fn a_take_of_one_and_a_half_gi_samples_is_one_disk_backed_clip_and_reopens_so() 
 
     let mut e = Engine::default();
     let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
-    let ids = add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None);
+    let ids = add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None, None);
     assert_eq!(ids.len(), 1, "{:?}", e.messages);
     assert!(e.session().unplaced_takes.is_empty());
     let src = e.session().sources.last().cloned().unwrap();

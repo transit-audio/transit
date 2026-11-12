@@ -763,6 +763,7 @@ mod tests {
             takes: vec![Take { track, path: take, channels: 1 }],
             midi_journal: None,
             midi_placed: false,
+            cycle: None,
         };
         let clips = |e: &Engine| e.session().track(track).unwrap().clips().iter().map(|c| (c.start, c.length)).collect::<Vec<_>>();
         let w = Autosaver::new(root.clone());
@@ -817,6 +818,7 @@ mod tests {
             takes: paths.iter().map(|p| Take { track, path: p.clone(), channels: 1 }).collect(),
             midi_journal: None,
             midi_placed: false,
+            cycle: None,
         };
         let w = Autosaver::new(root.clone());
         w.write(e.session_arc(), None, Some(plan));
@@ -842,6 +844,7 @@ mod tests {
             takes: Vec::new(),
             midi_journal: Some(journal.to_path_buf()),
             midi_placed: placed,
+            cycle: None,
         };
         let w = Autosaver::new(root.to_path_buf());
         w.write(e.session_arc(), None, Some(plan));
@@ -859,7 +862,7 @@ mod tests {
 
     fn journal_with_a_note(path: &Path, track: transit_model::TrackId) {
         use crate::midi_journal::{Header, Latch, Record, Writer};
-        let plan = Recording { start: 0, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let plan = Recording { start: 0, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None };
         let latch = Latch { output_frame: 0, position: 0, device_rate: 48_000, session_rate: 48_000 };
         let mut w = Writer::new(path.to_path_buf());
         let on = Record { frame: 100, track, channel: 0, approximate: false, msg: crate::midi_take::Msg::NoteOn { pitch: 60, velocity: 90 } };

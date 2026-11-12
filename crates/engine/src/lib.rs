@@ -27,6 +27,7 @@ pub mod retime;
 pub mod score;
 pub mod slice_detect;
 pub mod step_input;
+pub mod take_laps;
 pub mod takes;
 
 use serde_json::{Value, json};
@@ -212,6 +213,8 @@ pub struct Engine {
     retimed: bool,
     /// Messages for the UI status line / agents.
     pub messages: Vec<String>,
+    /// Messages pushed since creation; unlike `messages.len()` it still counts once the list is full.
+    message_pushes: u64,
     /// The edit selection (range, tracks) before the last change, for Restore Last Selection.
     /// Kept out of the document so selecting never marks the session modified.
     pub last_selection: Option<(transit_time::Range, Vec<TrackId>)>,
@@ -276,6 +279,7 @@ impl Engine {
             undo: Vec::new(),
             redo: Vec::new(),
             undo_pushes: 0,
+            message_pushes: 0,
             history_limit: 200,
             clipboard: Clipboard::default(),
             transport_requests: Vec::new(),
@@ -906,7 +910,20 @@ impl Engine {
         self.push_message(m);
     }
 
+    /// Messages pushed since creation (see [`Engine::messages_since`]).
+    pub fn message_pushes(&self) -> u64 {
+        self.message_pushes
+    }
+
+    /// The messages pushed since [`Engine::message_pushes`] said `mark`, oldest first (those
+    /// still held: the list keeps the last 100).
+    pub fn messages_since(&self, mark: u64) -> &[String] {
+        let n = usize::try_from(self.message_pushes.saturating_sub(mark)).unwrap_or(usize::MAX).min(self.messages.len());
+        &self.messages[self.messages.len() - n..]
+    }
+
     fn push_message(&mut self, m: String) {
+        self.message_pushes += 1;
         self.messages.push(m);
         if self.messages.len() > 100 {
             self.messages.remove(0);

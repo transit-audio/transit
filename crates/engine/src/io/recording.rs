@@ -56,6 +56,11 @@ pub struct Recording {
     /// discards the journal instead of rebuilding them (set once Stop has placed the clips).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub midi_placed: bool,
+    /// The loop the transport cycled over while the takes recorded (the host's `take_cycle`),
+    /// `None` when it played straight through. Without `pass`, a take that ran past its end is
+    /// cut at each wrap, a take per lap (#567); recovery cuts the same way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cycle: Option<Range>,
 }
 
 /// One track's take file.
@@ -68,7 +73,7 @@ pub struct Take {
 
 /// Place recorded take files as `plan` says, as one undo step ("Record").
 pub fn place_recording(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>) -> Vec<transit_model::ClipId> {
-    let ids = add_recording(e, plan.start, takes, plan.pass);
+    let ids = add_recording_take(e, plan.start, takes, plan.pass, false, None, plan.cycle);
     if let Some(p) = plan.punch {
         let clips: Vec<u64> = ids.iter().map(|c| c.0).collect();
         let _ = e.execute_merged("edit.trim_to_fill_selection", &json!({"clips": clips, "start": p.start, "end": p.end}), "record");
@@ -82,7 +87,7 @@ pub fn place_recording(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, Pa
 /// trim is folded in too. A loop recording over clips duplicates too, as MIDI does: the old
 /// clips stay as take 1 (#25).
 pub fn place_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>, new_take: bool) -> Vec<transit_model::ClipId> {
-    let ids = add_recording_take(e, plan.start, takes, plan.pass, new_take, plan.punch);
+    let ids = add_recording_take(e, plan.start, takes, plan.pass, new_take, plan.punch, plan.cycle);
     let n0 = e.undo_pushes();
     if !ids.is_empty() {
         if let Some(p) = plan.punch {
@@ -99,14 +104,16 @@ pub fn place_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackI
 }
 
 /// Turn recorded take files into clips at `start`, as one undo step ("Record"); each file is the
-/// source of its clips. With `pass` (loop recording), a take becomes one clip per pass (at most
-/// 1000), each pass after the first on a new playlist.
+/// source of its clips. With `pass` (loop recording), a take becomes one clip per pass, each pass
+/// after the first on a new playlist (the newest [`crate::take_laps::MAX_LAPS`], said when more).
 pub fn add_recording(e: &mut Engine, start: Samples, takes: Vec<(TrackId, PathBuf)>, pass: Option<Samples>) -> Vec<transit_model::ClipId> {
-    add_recording_take(e, start, takes, pass, false, None)
+    add_recording_take(e, start, takes, pass, false, None, None)
 }
 
 /// `add_recording` with `new_take`: a track with clips under the take (clipped to `punch`) gets a
-/// duplicate of its active playlist first, inside the same "Record" step.
+/// duplicate of its active playlist first, inside the same "Record" step. Without `pass`, a take
+/// that ran past the end of `cycle` (the loop the transport cycled over) is cut at each wrap, as
+/// its MIDI is (#567).
 pub fn add_recording_take(
     e: &mut Engine,
     start: Samples,
@@ -114,6 +121,7 @@ pub fn add_recording_take(
     pass: Option<Samples>,
     new_take: bool,
     punch: Option<Range>,
+    cycle: Option<Range>,
 ) -> Vec<transit_model::ClipId> {
     let before = e.session_arc();
     let n0 = e.undo_pushes();
@@ -128,11 +136,12 @@ pub fn add_recording_take(
             }
         };
         if new_take {
-            // A loop's passes all lie over its first lap.
-            let frames = i64::try_from(got.frames()).unwrap_or(0);
-            let frames = pass.map_or(frames, |p| frames.min(p.max(1)));
-            let from = punch.map_or(start, |p| p.start.max(start));
-            let to = punch.map_or(start + frames, |p| p.end.min(start + frames));
+            // A loop's laps all lie over the loop.
+            let (pieces, _) = take_pieces(start, pass, cycle, i64::try_from(got.frames()).unwrap_or(0));
+            let span = pieces.iter().map(|p| Range::new(p.at, p.at + p.len)).reduce(|a, b| Range::new(a.start.min(b.start), a.end.max(b.end)));
+            let span = span.unwrap_or(Range::point(start));
+            let from = punch.map_or(span.start, |p| p.start.max(span.start));
+            let to = punch.map_or(span.end, |p| p.end.min(span.end));
             let over = to > from && e.session().track(tid).is_some_and(|t| t.clips().iter().any(|c| c.start < to && c.end() > from));
             let previous = e.session().track(tid).map_or(0, |t| t.active_playlist);
             if over && let Err(err) = e.execute("track.playlist_duplicate", &json!({"track": tid.0})) {
@@ -163,26 +172,25 @@ pub fn add_recording_take(
             Got::Disk(audio) => super::disk::add_disk_source(s, name, audio, &path.to_string_lossy()),
         };
         let Some(x) = s.source(src) else { continue };
-        let len = i64::try_from(x.frames).unwrap_or(0);
-        let pass = pass.unwrap_or(len).max(1);
-        for offset in (0..len).step_by(usize::try_from(pass).unwrap_or(usize::MAX)).take(1_000) {
-            let n = pass.min(len - offset);
-            if offset > 0 && n < pass / 8 {
-                break;
-            }
-            if offset > 0
+        let (pieces, left_out) = take_pieces(start, pass, cycle, i64::try_from(x.frames).unwrap_or(0));
+        for (k, piece) in pieces.iter().enumerate() {
+            if k > 0
                 && let Some(t) = s.track_mut(tid)
             {
                 t.playlists.push(transit_model::Playlist::new(format!("{}.{:02}", t.name, t.playlists.len() + 1)));
                 t.active_playlist = t.playlists.len() - 1;
             }
             let cid = s.new_clip_id();
-            crate::edit::place_clip(s, tid, Clip::audio(cid, name, src, offset, start, n));
+            crate::edit::place_clip(s, tid, Clip::audio(cid, name, src, piece.offset, piece.at, piece.len));
             out.push(cid);
         }
         // The track plays what it played before the passes, with the newest pass on top (#25).
         if let Some(new) = out.get(first..) {
             crate::takes::settle_new_takes(s, tid, base, new);
+        }
+        if left_out > 0 {
+            let kept = format!("; their audio is kept in {}", path.display());
+            e.warn(crate::take_laps::left_out_note(left_out, &kept));
         }
     }
     if !out.is_empty() {
@@ -202,6 +210,37 @@ pub fn add_recording_take(
         }
     }
     out
+}
+
+/// One clip of a take: from `offset` in its file, `len` frames at `at` on the timeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Piece {
+    offset: Samples,
+    at: Samples,
+    len: Samples,
+}
+
+/// The clips a take of `frames` frames latched at `start` becomes: one per lap when it loop
+/// recorded in laps of `pass` or ran past the end of `cycle` (as its MIDI is cut, #567), else one
+/// of the whole file. A last lap shorter than an eighth of the loop is no take. Also returns how
+/// many earlier laps were left out (#522).
+fn take_pieces(start: Samples, pass: Option<Samples>, cycle: Option<Range>, frames: Samples) -> (Vec<Piece>, i64) {
+    if frames <= 0 {
+        return (Vec::new(), 0);
+    }
+    let Some(laps) = crate::take_laps::laps(start, pass, cycle, 0, frames - 1) else {
+        return (vec![Piece { offset: 0, at: start, len: frames }], 0);
+    };
+    let pieces = laps
+        .laps
+        .iter()
+        .filter_map(|lap| {
+            let len = lap.window.end.min(frames) - lap.window.start;
+            let short = lap.index > 0 && len < lap.range.len() / 8;
+            (len > 0 && !short).then_some(Piece { offset: lap.window.start, at: lap.range.start, len })
+        })
+        .collect();
+    (pieces, laps.left_out)
 }
 
 /// A take's audio: decoded, or played from its file.
@@ -322,7 +361,7 @@ mod record_tests {
         let before = e.session_arc();
         let path = transit_test_support::TestDir::file("failed-playlist", "wav");
         write_take(&path, 480);
-        assert!(add_recording_take(&mut e, 0, vec![(t, path.to_path_buf())], None, true, None).is_empty());
+        assert!(add_recording_take(&mut e, 0, vec![(t, path.to_path_buf())], None, true, None, None).is_empty());
         assert_eq!(e.session(), before.as_ref());
         assert!(path.is_file());
         assert!(e.messages.last().is_some_and(|m| m.contains("not placed") && m.contains(path.to_string_lossy().as_ref())));
@@ -359,7 +398,7 @@ mod record_tests {
         let (path, _fake_len) = header_only(&dir, "Long_01.wav", frames, 48_000);
         let mut e = Engine::default();
         let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
-        let ids = add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None);
+        let ids = add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None, None);
         assert_eq!(ids.len(), 1, "one clip: {:?}", e.messages);
         assert!(e.session().unplaced_takes.is_empty());
         let src = e.session().sources.last().unwrap().clone();
@@ -384,7 +423,7 @@ mod record_tests {
         let mut e = Engine::default();
         let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
         e.execute("mix.volume", &json!({"tracks": [t.0], "db": -6.0})).unwrap();
-        assert!(add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None).is_empty());
+        assert!(add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None, None).is_empty());
         let listed = e.session().unplaced_takes.clone();
         assert_eq!(listed.len(), 1, "{listed:?}");
         assert!(listed[0].contains("Long_01.wav") && listed[0].contains("6.76 h of mono at 44.1 kHz"), "{listed:?}");
@@ -414,7 +453,7 @@ mod record_tests {
         write_take(&long, 48_000);
         let short = dir.0.join("Short_01.wav");
         write_take(&short, 4_800);
-        add_recording_take(&mut e, 0, vec![(t, long), (t, short)], None, false, None);
+        add_recording_take(&mut e, 0, vec![(t, long), (t, short)], None, false, None, None);
         let disk: Vec<bool> = e.session().sources.iter().map(|s| s.disk).collect();
         assert_eq!(disk, [true, false]);
     }
@@ -570,7 +609,16 @@ mod record_tests {
         crate::edit::place_clip(s, gtr, Clip::audio(under, "Under", source, 0, 900, 600));
         crate::edit::place_clip(s, gtr, Clip::audio(later, "Later", source, 0, 3_000, 500));
         let undo = e.undo_history().len();
-        let plan = Recording { start: 1_000, pass: Some(400), punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let plan = Recording {
+            start: 1_000,
+            pass: Some(400),
+            punch: None,
+            rate: 48_000,
+            takes: Vec::new(),
+            midi_journal: None,
+            midi_placed: false,
+            cycle: None,
+        };
         let ids = place_recording_take(&mut e, &plan, vec![(gtr, path)], true);
         assert_eq!(ids.len(), 3);
         assert_eq!(e.undo_history().len(), undo + 1, "one Record step");
@@ -609,7 +657,8 @@ mod record_tests {
     fn new_take_recording_over_a_clip_is_one_record_step() {
         let (mut e, vox, _dir, second) = over_a_clip("one");
         let before = e.undo_history();
-        let plan = Recording { start: 2_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let plan =
+            Recording { start: 2_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None };
         let ids = place_recording_take(&mut e, &plan, vec![(vox, second)], true);
         assert_eq!(ids.len(), 1);
         let h = e.undo_history();
@@ -634,6 +683,7 @@ mod record_tests {
             takes: Vec::new(),
             midi_journal: None,
             midi_placed: false,
+            cycle: None,
         };
         let ids = place_recording_take(&mut e, &plan, vec![(vox, second)], true);
         let h = e.undo_history();
@@ -649,7 +699,8 @@ mod record_tests {
         let (mut e, vox, _dir, second) = over_a_clip("full");
         e.history_limit = e.undo_history().len();
         let last = e.undo_history().pop();
-        let plan = Recording { start: 2_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let plan =
+            Recording { start: 2_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None };
         place_recording_take(&mut e, &plan, vec![(vox, second)], true);
         let h = e.undo_history();
         // One new entry on top of the previous newest; the duplicate step is folded, not left behind.
@@ -666,7 +717,8 @@ mod record_tests {
         let gtr = armed(&mut e, "Gtr", "mono", "In 2");
         add_recording(&mut e, 1_000, vec![(gtr, second.clone())], None);
         let n = e.undo_history().len();
-        let plan = Recording { start: 2_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let plan =
+            Recording { start: 2_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None };
         place_recording_take(&mut e, &plan, vec![(vox, second.clone()), (gtr, second)], true);
         let h = e.undo_history();
         assert_eq!((h.len(), h.last().map(String::as_str)), (n + 1, Some("Record")));
@@ -679,7 +731,16 @@ mod record_tests {
     fn new_take_into_empty_space_does_not_duplicate_and_is_one_step() {
         let (mut e, vox, _dir, second) = over_a_clip("empty");
         let n = e.undo_history().len();
-        let plan = Recording { start: 20_000, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let plan = Recording {
+            start: 20_000,
+            pass: None,
+            punch: None,
+            rate: 48_000,
+            takes: Vec::new(),
+            midi_journal: None,
+            midi_placed: false,
+            cycle: None,
+        };
         place_recording_take(&mut e, &plan, vec![(vox, second)], true);
         let h = e.undo_history();
         assert_eq!((h.len(), h.last().map(String::as_str)), (n + 1, Some("Record")));
@@ -698,6 +759,7 @@ mod record_tests {
             takes: Vec::new(),
             midi_journal: None,
             midi_placed: false,
+            cycle: None,
         };
         place_recording(&mut e, &plan, vec![(vox, second)]);
         assert_eq!(e.undo_history().len(), n + 2);

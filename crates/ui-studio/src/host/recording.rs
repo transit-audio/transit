@@ -52,7 +52,8 @@ impl StudioApp {
             self.punch = None;
             // Cycling already: the pass is the loop, so every lap is a take.
             // (The per-pass path cuts from the latch in whole laps, so it needs the latch at the
-            // loop start; from inside the loop the wrapped-recording path cuts the laps instead.)
+            // loop start; from anywhere else the takes are cut at each wrap of `take_cycle`, the
+            // audio and the MIDI alike, #567.)
             let e = &self.engine.session().edit;
             let sel = e.cycle_range();
             let pass = (e.loop_playback && !sel.is_empty() && at == sel.start).then(|| sel.len());
@@ -110,6 +111,8 @@ impl StudioApp {
             takes,
             midi_journal: self.midi_journal.as_ref().map(|j| j.path().to_path_buf()),
             midi_placed: false,
+            // Audio takes are cut into laps by it as MIDI is (#567), and recovery reads it here.
+            cycle: self.take_cycle,
         });
         if self.refuse_for_reopen() || !self.sync_player_session() {
             self.finish_recording();
@@ -368,6 +371,7 @@ impl StudioApp {
             takes: Vec::new(),
             midi_journal: None,
             midi_placed: false,
+            cycle: self.take_cycle,
         });
         // The audio take and the MIDI pass share one latch; either's applied start is the real one.
         let latch = finished
@@ -441,11 +445,13 @@ impl StudioApp {
     /// into a clip already under the take. Nothing played, nothing placed.
     fn place_midi_take(&mut self, plan: &transit_engine::io::Recording, midi: &transit_playback::MidiTake, end: Samples) {
         let events: Vec<_> = midi.timed(self.engine.session().sample_rate.hz()).iter().filter_map(|(offset, e)| rec_event(*offset, e)).collect();
+        let said = self.engine.message_pushes();
         let ids = transit_engine::midi_take::place_midi_recording_wrapping(&mut self.engine, plan, &events, end - plan.start, self.take_cycle);
         if midi.dropped > 0 {
             self.status = format!("{} MIDI events were lost: the capture queue was full", midi.dropped);
         }
         self.report_midi_take(midi, &ids);
+        self.report_laps_left_out(said);
         // #440: count-in notes that ended before the session start are not in the take; the
         // status line says so, once per recording.
         let left_out = transit_engine::midi_take::left_out_before_start(plan, &events);
@@ -502,6 +508,15 @@ impl StudioApp {
         }
     }
 
+    /// Add to the status line the note the engine gave, since it said `mark`, about earlier laps
+    /// of a cycle recording left out past the most laps a recording keeps (#522).
+    fn report_laps_left_out(&mut self, mark: u64) {
+        let note = self.engine.messages_since(mark).iter().rev().find(|m| m.starts_with(transit_engine::take_laps::LEFT_OUT_NOTE)).cloned();
+        if let Some(note) = note {
+            self.status = format!("{}. {note}", self.status.trim_end_matches('.'));
+        }
+    }
+
     /// After cycle recording, open the take lanes of each track where `ids` (just recorded) made
     /// or joined a take stack (#25): Logic opens the take folder, Live shows the take lanes. A
     /// single take over a clip leaves the lanes as they were (its chip shows them).
@@ -536,11 +551,14 @@ impl StudioApp {
                 }
             }
         }
+        let said = self.engine.message_pushes();
         let ids = transit_engine::io::place_recording_take(&mut self.engine, plan, takes, true);
-        if plan.pass.is_some() {
+        let passes = ids.len() / tracks.max(1);
+        // Cut into laps: loop recording, or a take that ran past the end of the loop it cycled over (#567).
+        if plan.pass.is_some() || (plan.cycle.is_some() && passes > 1) {
             self.show_new_takes(&ids);
-            let passes = ids.len() / tracks.max(1);
             self.status = if passes > 1 { format!("Recorded {passes} takes") } else { format!("Loop-recorded {passes} take(s)") };
+            self.report_laps_left_out(said);
             return;
         }
         let s = self.engine.session_arc();
