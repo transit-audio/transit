@@ -9,8 +9,9 @@ repository.workspace = true
 
 [features]
 # Test seams (`Plugin::fingerprint`, issue #210); never enabled by the app.
-# `transit-sampler-core/testing` gives the Sampler's core path its state fingerprint.
-testing = ["transit-instrument-core/testing", "transit-sampler-core/testing"]
+# `transit-sampler-core/testing` gives the Sampler's core path its state fingerprint;
+# `transit-parametric-eq/testing` the Parametric EQ core's (ADR 0054).
+testing = ["transit-instrument-core/testing", "transit-sampler-core/testing", "transit-parametric-eq/testing"]
 
 [dependencies]
 serde.workspace = true
@@ -37,6 +38,9 @@ transit-instrument-core = { workspace = true, features = ["std"] }
 # The portable Sampler core (ADR 0041) the Sampler's core path plays through: a same-layer (L1)
 # dependency, `std` named explicitly (ADR 0037). sampler-core never depends on dsp.
 transit-sampler-core = { workspace = true, features = ["std"] }
+# The Parametric EQ core (ADR 0054): a same-layer (L1) dependency, `std` named explicitly (ADR 0037).
+# The device wrapper arrives with the next slice; parametric-eq never depends on dsp.
+transit-parametric-eq = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 proptest.workspace = true

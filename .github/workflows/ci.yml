@@ -99,13 +99,14 @@ jobs:
       # ADR 0037 Tier B: each enrolled processing crate type-checks for a bare-metal ARM target with
       # default features off (no std). A library check: no tests, oracle, link or hardware run.
       # Enrolled: transit-instrument-core, transit-sampler-core (ADR 0041), transit-math (ADR 0055: no_std
-      # always, no features). Add each Tier B crate as it is retrofitted.
+      # always, no features), transit-parametric-eq (ADR 0054). Add each Tier B crate as it is retrofitted.
       - name: Bare-metal library check (ADR 0037 Tier B)
         run: |
           rustup target add thumbv7em-none-eabihf
           cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core
           cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core
           cargo check --locked --target thumbv7em-none-eabihf -p transit-math
+          cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-parametric-eq
         shell: bash
       # Check production host code without the integration tests' self-dev feature activation.
       - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib

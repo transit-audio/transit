@@ -4214,6 +4214,7 @@ dependencies = [
  "transit-macro-osc-oracle",
  "transit-modal-voice",
  "transit-modulator",
+ "transit-parametric-eq",
  "transit-random-sequencer",
  "transit-resonator",
  "transit-rt",
