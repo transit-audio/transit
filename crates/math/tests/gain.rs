@@ -248,7 +248,8 @@ fn negative_control_an_f32_only_conversion_fails_the_decade_test() {
     let plus20 = db_to_gain_f32_only(20.0);
     assert_ne!(plus20, 10.0, "the f32-only form must miss +20 dB");
     assert_eq!(plus20, 9.999_999, "+20 dB gives 9.999999 in f32 alone");
-    let wrong: Vec<i32> = DECADES.iter().filter(|(d, _)| *d <= 40).filter(|(d, bits)| db_to_gain_f32_only(*d as f32).to_bits() != *bits).map(|(d, _)| *d).collect();
+    let wrong: Vec<i32> =
+        DECADES.iter().filter(|(d, _)| *d <= 40).filter(|(d, bits)| db_to_gain_f32_only(*d as f32).to_bits() != *bits).map(|(d, _)| *d).collect();
     println!("f32-only form: {} of 10 decades from -140 to +40 dB wrong: {wrong:?}", wrong.len());
     assert!(!wrong.is_empty());
 }
