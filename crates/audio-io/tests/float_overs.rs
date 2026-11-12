@@ -25,13 +25,7 @@ fn stored_words(bytes: &[u8], format: FileFormat) -> Vec<u32> {
     let at = bytes.windows(4).position(|w| w == id).unwrap();
     let size = bytes[at + 4..at + 8].try_into().map(|b: [u8; 4]| if big { u32::from_be_bytes(b) } else { u32::from_le_bytes(b) }).unwrap() as usize;
     let len = if big { size - 8 } else { size };
-    bytes[at + skip..at + skip + len]
-        .chunks_exact(4)
-        .map(|w| {
-            let w: [u8; 4] = w.try_into().unwrap();
-            if big { u32::from_be_bytes(w) } else { u32::from_le_bytes(w) }
-        })
-        .collect()
+    bytes[at + skip..at + skip + len].as_chunks::<4>().0.iter().map(|&w| if big { u32::from_be_bytes(w) } else { u32::from_le_bytes(w) }).collect()
 }
 
 #[test]
