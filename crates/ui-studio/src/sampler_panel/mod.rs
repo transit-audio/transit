@@ -59,6 +59,8 @@ mod new_sampler_tests;
 #[cfg(test)]
 mod pad_actions_tests;
 #[cfg(test)]
+mod pad_drag_tests;
+#[cfg(test)]
 mod test_rig;
 #[cfg(test)]
 mod view_bar_tests;

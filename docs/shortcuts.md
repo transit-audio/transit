@@ -29,7 +29,7 @@ list or a dialog keeps Escape for itself. **Window > Close All Editors** closes 
 |---|---|---|
 | Sampler | Clear pad | Delete, Backspace |
 | Sampler | Audition slice | Space, Enter |
-| Sampler | Cancel zone drag | Escape |
+| Sampler | Cancel pad or zone drag | Escape |
 | Sampler slices | Previous slice / Next slice | Left / Right |
 | Sampler slices | Nudge marker earlier / later | Alt+Left / Alt+Right |
 | Sampler slices | Nudge marker earlier / later ×10 | Alt+Shift+Left / Alt+Shift+Right |
@@ -45,7 +45,8 @@ list or a dialog keeps Escape for itself. **Window > Close All Editors** closes 
 
 The focused Sampler's selected pad is cleared in one undo step. A text field, open menu, or
 dialog keeps the keys for itself. Right-click a pad for **Clear pad** and, when it stores its
-own note, **Reset note**.
+own note, **Reset note**. Escape during a pad drag cancels it and sends nothing (the pads stay
+as they were); otherwise it closes the window as usual.
 
 On the Slices view, Space or Enter plays the selected slice's pad at the piano roll's audition
 velocity for as long as the key is held, while the Sampler window has the keyboard (the window

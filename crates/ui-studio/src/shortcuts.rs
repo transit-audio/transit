@@ -286,11 +286,11 @@ pub const TABLE: &[Shortcut] = &[
     row(A::SamplerCancelDrag, "Cancel marker drag", NONE, Key::Escape, S::SamplerSlices, "Sends nothing; the marker stays where it was."),
     row(
         A::SamplerCancelZoneDrag,
-        "Cancel zone drag",
+        "Cancel pad or zone drag",
         NONE,
         Key::Escape,
         S::Sampler,
-        "A key-map edge, root or waveform handle drag on the Instrument view; sends nothing.",
+        "A pad drag on the Pads view, or a key-map edge, root or waveform handle drag on the Instrument view; sends nothing.",
     ),
     row(A::SamplerPreviousZone, "Previous zone", NONE, Key::ArrowLeft, S::SamplerInstrument, "The zone to the left on the key map."),
     row(A::SamplerNextZone, "Next zone", NONE, Key::ArrowRight, S::SamplerInstrument, "The zone to the right on the key map."),
