@@ -24,7 +24,7 @@
 
 use super::sampler::instrument_track;
 use super::sampler_groups::zone_json;
-use super::sampler_patch::{NewSource, add_audio, patch_of, source_param, store};
+use super::sampler_patch::{NewSource, add_audio, patch_of, source_param, store, take_import};
 use super::sampler_slice_pads::{MappingStatus, StaleSlice, mapping_status};
 use super::*;
 use crate::cmd;
@@ -264,6 +264,7 @@ fn slice_loop(e: &mut Engine, p: &Value) -> Result<Value> {
     patch.slicing = Some(SliceLoop { source: index, start, end, root, ..SliceLoop::default() });
     let used = patch.slice_root();
     store(e, id, t, patch)?;
+    take_import(e, p);
     Ok(json!({"track": t, "source": sid, "start": start, "end": end, "mode": "auto", "root": used, "root_stored": root.is_some()}))
 }
 

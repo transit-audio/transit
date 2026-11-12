@@ -545,3 +545,29 @@ fn a_template_is_refused_while_a_kit_sample_has_no_file() {
     assert!(err.contains("has no file yet"), "{err}");
     assert!(!template.exists(), "nothing written");
 }
+
+/// #491: a refused zone or slice-loop command leaves its prepared import staged, so the same call
+/// with corrected values succeeds; a command that succeeds takes it.
+#[test]
+fn a_refused_command_leaves_the_prepared_import_for_the_corrected_call() {
+    let d = Dir::new("import-refused");
+    let wav = d.path("loop.wav");
+    tone(&wav, 330.0, 48_000, 0.1, 1);
+    let mut e = Engine::default();
+    let t = instrument(&mut e);
+    e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
+    let job = e.imports.prepare_here_for_testing(&s(&wav), crate::io::ImportRate::Native);
+    // A slice loop with an end past the file, then the same call with a valid end.
+    assert!(e.execute("mix.sampler_slice_loop", &json!({"track": t, "import": job, "end": 1_000_000})).is_err());
+    e.execute("mix.sampler_slice_loop", &json!({"track": t, "import": job, "end": 2_400})).unwrap();
+    assert!(e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 9, "import": job})).is_err(), "taken by the success");
+    // A zone the group check refuses once its source is read (a second key range in group 0),
+    // then the same call on the group's key.
+    let member = |keys: [u8; 2], alternative: u8| json!({"keys": keys, "membership": {"group": 0, "layer": 0, "alternative": alternative}});
+    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 3, "path": s(&wav), "playback": member([60, 60], 0)})).unwrap();
+    let job = e.imports.prepare_here_for_testing(&s(&wav), crate::io::ImportRate::Native);
+    let refused = e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 1, "import": job, "playback": member([61, 61], 1)}));
+    assert!(refused.is_err(), "{refused:?}");
+    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 1, "import": job, "playback": member([60, 60], 1)})).unwrap();
+    assert!(e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 2, "import": job})).is_err(), "taken by the success");
+}

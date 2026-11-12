@@ -330,6 +330,23 @@ impl Imports {
         g.grace = grace;
     }
 
+    /// A finished job's audio, left in the map (the decoded audio is shared, not copied): a command
+    /// that can still be refused reads it with this and takes the job with [`Imports::take`] only
+    /// once it has succeeded, so a refusal leaves the import for a corrected call (#491).
+    pub fn peek(&self, id: u64) -> Result<PreparedAudio> {
+        self.ready(id)?;
+        let g = lock(&self.shared);
+        let p = g.jobs.get(&id).and_then(|j| j.prepared.as_ref()).ok_or_else(|| gone(id))?;
+        Ok(PreparedAudio {
+            name: p.name.clone(),
+            path: p.path.clone(),
+            audio: Arc::clone(&p.audio),
+            format: p.format,
+            file_rate: p.file_rate,
+            time_reference: p.time_reference,
+        })
+    }
+
     /// Take a finished job's audio out of the map.
     pub fn take(&mut self, id: u64) -> Result<PreparedAudio> {
         self.ready(id)?;

@@ -416,13 +416,23 @@ pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &Patch
     let report = e.imports.progress(job).unwrap_or_default();
     let (frames, channels) = (report["frames"].as_u64().unwrap_or(0), report["channels"].as_u64().unwrap_or(0));
     let name = report["name"].as_str().unwrap_or("Sample").to_string();
-    // Checked before the import is taken, so a refusal leaves it staged.
+    // Checked before the import is read; a refusal here or later leaves it staged.
     let pcm = admit_source(e.session(), &name, frames, channels, rate).map_err(|m| bad(id, m))?;
     admit_patch(admitted, e.session(), pcm).map_err(|m| bad(id, m))?;
-    let prepared = e.imports.take(job)?;
+    // Read, not taken: the caller takes it once the command has succeeded (`take_import`), so a
+    // refusal by a later check leaves it staged (#491).
+    let prepared = e.imports.peek(job)?;
     // A prepared file keeps its path (referenced unless copied); one without a path is managed.
     let ownership = if prepared.path.is_some() { ownership } else { Ownership::Managed };
     Ok(NewSource::Audio(prepared, ownership))
+}
+
+/// Takes the prepared import a successful command used (`import` in `p`, read by `source_param`)
+/// out of the staging map. Called after the command's last check, the store.
+pub(super) fn take_import(e: &mut Engine, p: &Value) {
+    if let Some(job) = p.get("import").and_then(Value::as_u64) {
+        let _ = e.imports.take(job);
+    }
 }
 
 /// Adds decoded audio as a session source: a referenced file keeps its path (and is not written
@@ -479,6 +489,7 @@ fn zone_source(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     patch.drop_unused_sources();
     store(e, id, t, patch)?;
+    take_import(e, p);
     Ok(json!({"track": t, "zone": zone + 1, "source": sid, "frames": frames, "channels": channels}))
 }
 
