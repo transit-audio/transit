@@ -129,10 +129,12 @@ if has appimage; then
   rm -f "$OUT.zsync"
   # Update information: AppImageUpdate, AppImageLauncher and the like read it from the file and
   # fetch only the blocks that changed in a newer release, through the .zsync published next to
-  # each AppImage on GitHub Releases. `latest` is the newest published release that is not a
-  # pre-release. A fork's builds point at its own releases through GITHUB_REPOSITORY.
+  # each AppImage on GitHub Releases. `latest-all` is the newest published release OR pre-release.
+  # Every transit release is a GitHub pre-release while alpha, so plain `latest` (which skips
+  # pre-releases) would stay on the last non-pre-release and offer it as an update: a downgrade.
+  # A fork's builds point at its own releases through GITHUB_REPOSITORY.
   REPO="${GITHUB_REPOSITORY:-transit-audio/transit}"
-  UPDATE_INFO="gh-releases-zsync|${REPO%%/*}|${REPO#*/}|latest|transit-*-linux-$ARCH.AppImage.zsync"
+  UPDATE_INFO="gh-releases-zsync|${REPO%%/*}|${REPO#*/}|latest-all|transit-*-linux-$ARCH.AppImage.zsync"
   # Extract-and-run: works without FUSE (containers, CI). The output embeds the static runtime,
   # so users don't need libfuse2 either. With zsyncmake on the host (CI installs the zsync
   # package) appimagetool also writes the .zsync, into its working directory, hence the cd.
