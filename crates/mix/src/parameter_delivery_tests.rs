@@ -194,3 +194,95 @@ fn a_lane_on_a_parameter_absent_from_the_stored_map_reaches_the_plugin() {
         assert_eq!(rig.eng.status().applied_mismatch, 0, "the prepared cache covers the lane ({stored} stored values)");
     }
 }
+
+/// A stand-in for a hosted plug-in: it refuses an id its own description does not hold, as the
+/// `Plugin` contract says, and records the last value it took.
+struct Strict {
+    seen: Arc<AtomicU32>,
+}
+
+impl Plugin for Strict {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        transit_dsp::plugin_info("gain").unwrap()
+    }
+    fn prepare(&mut self, _: f32, _: usize, _: usize) {}
+    fn reset(&mut self) {}
+    fn set_param(&mut self, id: &str, value: f32) -> bool {
+        if self.info().param(id).is_none() {
+            return false;
+        }
+        self.seen.store(value.to_bits(), Relaxed);
+        true
+    }
+    fn param(&self, id: &str) -> Option<f32> {
+        self.info().param(id).map(|_| f32::from_bits(self.seen.load(Relaxed)))
+    }
+    fn process(&mut self, _: &mut [Vec<f32>], _: usize) {}
+}
+
+fn orphan_lane(slot: u8, param: &str) -> AutomationLane {
+    let mut lane = AutomationLane::new(AutoParam::Plugin { slot, param: param.into() });
+    lane.set_point(0, 0.5);
+    lane
+}
+
+/// #296 review M1: lanes are keyed by slot and parameter id, and replacing a plug-in keeps them,
+/// so a lane can name a parameter the slot's plug-in does not have. It is skipped; the slot still
+/// confirms its parameters.
+#[test]
+fn a_lane_on_a_parameter_the_builtin_insert_does_not_have_does_not_block_confirmation() {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+    let tr = s.track_mut(t).unwrap();
+    tr.mixer.inserts[0] = Some(Insert::new("gain"));
+    tr.mixer.automation_mode = AutomationMode::Read;
+    tr.automation.push(orphan_lane(0, "no_such_param"));
+    let mut rig = PlanRig::new(64);
+    rig.publish(&s);
+    for k in 0..8 {
+        let _ = rig.render(k * 64);
+    }
+    assert_eq!(rig.eng.parameter_delivery(t, 0), ParameterDelivery::Ready);
+}
+
+#[test]
+fn a_lane_on_a_parameter_the_instrument_does_not_have_does_not_block_confirmation() {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+    let tr = s.track_mut(t).unwrap();
+    tr.instrument = Some(Insert::new("clap:test.strict"));
+    tr.mixer.automation_mode = AutomationMode::Read;
+    tr.automation.push(orphan_lane(AutoParam::INSTRUMENT_SLOT, "no_such_param"));
+    let seen = Arc::new(AtomicU32::new(0));
+    let mut rig = PlanRig::new(64).fake(t, INSTRUMENT_SLOT, Strict { seen });
+    rig.publish(&s);
+    for k in 0..8 {
+        let _ = rig.render(k * 64);
+    }
+    assert_eq!(rig.eng.parameter_delivery(t, INSTRUMENT_SLOT), ParameterDelivery::Ready);
+}
+
+/// The hosted case, with a valid lane-only parameter listed after the orphan: the cache is
+/// matched to the keys by position, so skipping the orphan must not shift the valid lane's
+/// entry (no mismatch), and the valid lane still reaches the plug-in.
+#[test]
+fn an_orphan_lane_does_not_shift_the_applied_cache_of_a_hosted_plugin() {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+    let tr = s.track_mut(t).unwrap();
+    tr.mixer.inserts[0] = Some(Insert::new("clap:test.strict"));
+    tr.mixer.automation_mode = AutomationMode::Read;
+    tr.automation.push(orphan_lane(0, "no_such_param"));
+    let mut good = AutomationLane::new(AutoParam::Plugin { slot: 0, param: "gain".into() });
+    good.set_point(0, -12.0);
+    tr.automation.push(good);
+    let seen = Arc::new(AtomicU32::new(0));
+    let mut rig = PlanRig::new(64).fake(t, 0, Strict { seen: Arc::clone(&seen) });
+    rig.publish(&s);
+    for k in 0..8 {
+        let _ = rig.render(k * 64);
+    }
+    assert_eq!(f32::from_bits(seen.load(Relaxed)), -12.0, "the valid lane reaches the plug-in");
+    assert_eq!(rig.eng.status().applied_mismatch, 0, "cache length matches the lane-only keys");
+    assert_eq!(rig.eng.parameter_delivery(t, 0), ParameterDelivery::Ready);
+}

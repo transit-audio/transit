@@ -85,3 +85,12 @@ Tests: `crates/mix/src/touch_tests.rs` (block-driven, measured in samples, no cl
 `crates/engine/src/lib.rs` `a_held_control_is_runtime_state`, and
 `crates/ui-studio/src/automation/pass_tests.rs`
 `holding_a_control_on_a_touch_track_tells_the_engine_until_release`.
+
+## A hosted parameter driven only by a lane (#296)
+
+A hosted plug-in's stored map holds only the parameters set statically, so a lane may be the only
+place a parameter appears. While a lane (or a rack macro) rules such a parameter the mix sends
+its value; when the lane is removed or the mode is Off the parameter keeps the last value it was
+sent, because there is no static value to return to (Ableton and Logic leave a parameter where it
+is in the same case). A lane on a parameter the slot's plug-in does not have, kept after the
+plug-in was replaced, is skipped and never blocks the slot's parameter confirmation.

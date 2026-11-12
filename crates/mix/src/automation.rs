@@ -179,7 +179,14 @@ fn apply_values<'a, 'k>(
         let val = value(k, base);
         if val.to_bits() != last.to_bits() {
             if !slot.plugin.set_param(k, val) {
-                slot.parameter_pass = false;
+                // A lane outlives the plug-in it was drawn for (replacing an insert keeps its
+                // lanes), so it may name a parameter this plug-in does not have: nothing is owed
+                // for it, and its cache entry stays unused (the length is unchanged, so the
+                // entries of the other lanes keep their place). Any other refusal is an
+                // admission failure and is retried. The lookup runs only after a refusal.
+                if slot.plugin.info().param(k).is_some() {
+                    slot.parameter_pass = false;
+                }
                 continue;
             }
             *last = val;
