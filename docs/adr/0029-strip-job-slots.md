@@ -351,10 +351,12 @@ Rules that hold in every case:
 - In the Closed window, Busy is recorded as a skip without a wake.
 - A claimed strip is never touched or rerun.
 - An already published aux renders inline only after a successful Published-to-Reclaimed transition. The deadline admits that transition through a per-slot flag, which the publisher sets before each tail publish and which is cleared at every block start.
+- Before the deadline, an unclaimed published aux is reclaimed whatever its history, recent overruns and worst case whenever the callback waits for nothing a worker holds: it would be rendered at the deadline anyway, and a worker that claimed it once it no longer fits would only silence its bus (amended 2026-11-12, G5 of the tail audit; counted as a pre-deadline reclaim).
+- The driver starts every ready task of a batch, and wakes the workers for the published ones, before the callback renders any task of that batch; callback renders run lowest task first (amended 2026-11-12, G4).
 - An aux claimed and unfinished at the deadline is Late, silent for the block, and Busy for as long as its worker holds it.
 
 **Publication and cost history.**
-- An aux is published only in the Open window, and only when `worst > 0 && worst <= left`. `worst` is its recorded worst case; `left` is the time to the deadline at the decision. Equality publishes.
+- An aux is published only in the Open window, and only when `worst > 0 && worst + TAIL_WAKE_MARGIN <= left`. `worst` is its recorded worst case; `left` is the time to the deadline at the decision; `TAIL_WAKE_MARGIN` is 50 µs, the time a worker needs to wake and claim it (under 50 µs for 99.99% of claims in the gate 6 record). Equality publishes. (Amended 2026-11-12, G5 of the tail audit: `worst <= left` before.)
 - Every direct callback render of an aux records its cost exactly once, while the callback owns the strip, through the same update that worker and reclaimed-inline renders use (the estimate and the decaying maximum). A cold aux therefore acquires history.
 - A chain change resets that history before the decision (#168).
 - The fit guard is a scheduling heuristic based on measured render cost, not a completion guarantee. Queueing between publication and claim, preemption, render-cost variation and failures can still silence an aux.

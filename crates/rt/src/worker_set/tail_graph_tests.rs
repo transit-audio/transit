@@ -241,3 +241,104 @@ fn g4_sweep_starts_the_whole_batch_before_a_callback_render_in_table_order() {
     assert_eq!(host.rendered, [1, 3], "callback work in table order");
     assert_eq!((report.mixed, host.set.stats().misuse), (3, 0));
 }
+
+/// G5: a published tail task the callback refuses by admission (barred after a recent overrun, or
+/// a worst case longer than the time left) is taken before the deadline when the callback waits
+/// for nothing a worker holds, and counted as a pre-deadline reclaim, not left to spin until the
+/// deadline (where a worker could still claim it and silence the bus). Zero workers, a 60 s
+/// deadline, no clock assertion. Mutation: dropping the tail rule spins to the deadline, which
+/// then reclaims it (`unclaimed_at_deadline` 1, `late`).
+#[test]
+fn g5_an_unclaimed_tail_task_the_admission_refuses_is_taken_before_the_deadline() {
+    for barred in [true, false] {
+        let mut set = set_of(&Fake::new(1, Duration::ZERO), 0);
+        assert!(set.begin_block(1));
+        if barred {
+            set.set_cost_estimate(0, Duration::from_nanos(1));
+            set.bar(0);
+        } else {
+            set.set_cost_estimate(0, Duration::from_secs(3600));
+        }
+        set.set_inline_at_deadline(0);
+        assert_eq!(set.publish(0), Ok(Published::Published));
+        let mut inlined = 0;
+        let poll = set.poll(Instant::now() + STALL, |_| inlined += 1);
+        assert_eq!(poll, Poll::Resolved { strip: 0, outcome: Outcome::Inline, late: false }, "barred {barred}");
+        let q = set.queue_snapshot();
+        assert_eq!((inlined, q.inline_pre, q.unclaimed_at_deadline, q.deadline_reclaimed_tail), (1, 1, 0, 0), "barred {barred}");
+        assert!(q.conserves());
+        assert_eq!(set.poll(Instant::now() + STALL, |_| panic!("rendered twice")), Poll::Finished);
+    }
+}
+
+/// G5 with the no-reclaim seam: the tail rule is a pre-deadline reclaim, so the seam that
+/// suppresses those suppresses it; the deadline reclaim still renders the task (B2).
+#[test]
+fn g5_the_no_reclaim_seam_also_suppresses_the_tail_rule() {
+    use super::seams::SlotOverrides;
+    let mut set = set_of(&Fake::new(1, Duration::ZERO), 0);
+    set.arm_slot_overrides(0, SlotOverrides { no_reclaim: true, ..SlotOverrides::default() });
+    set.install_test_seams();
+    assert!(set.begin_block(1));
+    set.set_cost_estimate(0, Duration::from_secs(3600));
+    set.set_inline_at_deadline(0);
+    assert_eq!(set.publish(0), Ok(Published::Published));
+    let mut inlined = 0;
+    // A deadline already passed: no pre-deadline window at all, so nothing waits on the clock.
+    let deadline = Instant::now();
+    assert_eq!(set.poll(deadline, |_| inlined += 1), Poll::Resolved { strip: 0, outcome: Outcome::Inline, late: true });
+    let q = set.queue_snapshot();
+    assert_eq!((inlined, q.inline_pre, q.unclaimed_at_deadline, q.deadline_reclaimed_tail), (1, 0, 1, 1));
+}
+
+
+/// #215 item 1, through the race seam: a worker's claim and the callback's deadline reclaim of a
+/// published tail task, in both orders. Worker first: the policy of `claimed_at_deadline` (G10:
+/// `Late`, silent for the block, the result retired unread, never rendered by the callback).
+/// Callback first: rendered inline at the deadline, and the worker's claim fails. Either way the
+/// task is executed exactly once. Mutation: dropping the seam's call before the deadline reclaim
+/// leaves the worker-first case without a claim (the token is `None`).
+#[test]
+fn a_claim_at_the_deadline_in_both_orders_executes_the_tail_task_exactly_once() {
+    for worker_first in [true, false] {
+        let mut set = set_of(&Fake::new(1, Duration::ZERO), 0);
+        let shared = Arc::clone(&set.shared);
+        assert!(set.begin_block(1));
+        set.set_cost_estimate(0, Duration::from_nanos(1));
+        set.set_inline_at_deadline(0);
+        assert_eq!(set.publish(0), Ok(Published::Published));
+        let mut inlined = 0u64;
+        let mut token = None;
+        let mut races = 0;
+        // Passed before the poll reads the clock: only the deadline's reclaim is attempted.
+        let deadline = Instant::now();
+        let poll = set.poll_racing(
+            deadline,
+            |_| inlined += 1,
+            |strip| {
+                races += 1;
+                if worker_first && strip == 0 {
+                    token = shared.jobs.slot(0).unwrap().try_claim();
+                }
+            },
+        );
+        assert_eq!(races, 1, "one reclaim attempt, at the deadline");
+        if worker_first {
+            assert_eq!(poll, Poll::Resolved { strip: 0, outcome: Outcome::Overrun(OverrunCause::Late), late: true });
+            assert_eq!(inlined, 0);
+            // The worker finishes later; its result is retired unread at the next block.
+            shared.run_attempt(0, token.take().expect("the worker claimed at the deadline"), Instant::now);
+            assert!(set.begin_block(2));
+            assert_eq!(set.stats().late_results, 1);
+            assert!(set.inline_barred(0), "a late claim bars inline renders");
+        } else {
+            assert_eq!(poll, Poll::Resolved { strip: 0, outcome: Outcome::Inline, late: true });
+            assert_eq!(inlined, 1);
+            assert!(shared.jobs.slot(0).unwrap().try_claim().is_none(), "the worker's claim after the reclaim fails");
+            assert_eq!(set.queue_snapshot().deadline_reclaimed_tail, 1);
+        }
+        let st = set.stats();
+        assert_eq!(st.worker_runs + inlined, 1, "executed exactly once (worker first {worker_first})");
+        assert_eq!(st.misuse, 0);
+    }
+}

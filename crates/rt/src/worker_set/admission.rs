@@ -1,11 +1,42 @@
+use super::super::strip_jobs::JobSlot;
 use super::{Count, InlineRefusal, OVERRUN_BAR_BLOCKS, Outcome, WorkerSet, bump};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 impl WorkerSet {
-    /// The pre-deadline ownership transition, counted at reclaim rather than completion.
-    pub(super) fn reclaim_before_deadline(&mut self, strip: usize, now: Instant, deadline: Instant) -> bool {
-        if !self.admits(strip, now, deadline) || !self.shared.jobs.slot(strip).is_some_and(super::super::strip_jobs::JobSlot::reclaim) {
+    /// The pre-deadline ownership transition of an admitted strip, counted at reclaim rather than
+    /// completion. `race` runs just before the compare-and-swap (the test seam of a worker
+    /// claiming at that point; production passes a no-op).
+    pub(super) fn reclaim_before_deadline(&mut self, strip: usize, now: Instant, deadline: Instant, race: &mut impl FnMut(usize)) -> bool {
+        if !self.admits(strip, now, deadline) {
+            return false;
+        }
+        race(strip);
+        if !self.shared.jobs.slot(strip).is_some_and(JobSlot::reclaim) {
+            return false;
+        }
+        bump(&self.shared.queue.counts.inline_pre);
+        true
+    }
+
+    /// G5 of the tail audit: the pre-deadline transition of a tail task (flagged with
+    /// [`WorkerSet::set_inline_at_deadline`]) still unclaimed while the callback waits for nothing
+    /// a worker holds. The callback would render it at the deadline whatever its history (ADR 0029
+    /// B2), and no executor gains by its waiting: a worker that claimed it now, when it no longer
+    /// fits the time left, would only turn a late render into a silent bus. So it is taken now,
+    /// without the history, recent-overrun and worst-case checks of [`Self::admission`], and
+    /// counted as a pre-deadline reclaim. The test seam that suppresses pre-deadline reclaims
+    /// suppresses this one too.
+    pub(super) fn reclaim_tail_alone(&mut self, strip: usize, race: &mut impl FnMut(usize)) -> bool {
+        #[cfg(any(test, feature = "testing"))]
+        if self.slot_overrides(strip).no_reclaim {
+            return false;
+        }
+        if !self.inline_at_deadline.get(strip).copied().unwrap_or(false) {
+            return false;
+        }
+        race(strip);
+        if !self.shared.jobs.slot(strip).is_some_and(JobSlot::reclaim) {
             return false;
         }
         bump(&self.shared.queue.counts.inline_pre);

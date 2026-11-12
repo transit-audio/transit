@@ -58,7 +58,7 @@ fn r5_counters_partition_every_published_attempt_exactly_once() {
         assert!(set.begin_block(generation));
         set.set_cost_estimate(0, Duration::from_nanos(1));
         publish(&mut set, 0, origin, origin + 100, 80);
-        assert!(set.reclaim_before_deadline(0, at(10), at(100)));
+        assert!(set.reclaim_before_deadline(0, at(10), at(100), &mut |_| {}));
         let mut renders = 0;
         set.render_inline(0, at(100), &mut |_| renders += 1, two_reads(at(10), at(end)));
         assert_eq!(renders, 1);

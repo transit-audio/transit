@@ -29,6 +29,14 @@
 //!      `Published` is reclaimed and retired unrendered ([`OverrunCause::Unstarted`]), a slot
 //!      still `Claimed` is left alone ([`OverrunCause::Late`]; the next block skips it).
 //!
+//! **Exactly once.** Every published attempt is executed at most once and resolved exactly once,
+//! by whichever of the two compare-and-swaps from `Published` wins: a worker's claim (then it runs
+//! once: `Mixed` or `Faulted` when consumed, or `Late` at the deadline, its result retired unread
+//! later), or the callback's reclaim (then it is rendered inline once, before the deadline or, for
+//! a tail task, at it, or retired unrendered as `Unstarted`). A strip never published this block is
+//! rendered on the callback once or not at all (a skip). Nothing renders a strip twice in a block,
+//! and nothing published is left unresolved by [`WorkerSet::finish`] or [`WorkerSet::poll`].
+//!
 //! `finish` returns no later than the deadline plus one sweep, unless an admitted inline render
 //! ran longer than the strip's worst observed cost (a render slower than any it has had): then by
 //! that excess. It never blocks on a worker. Silence for an overrun strip is the caller's job;
@@ -884,7 +892,7 @@ impl WorkerSet {
                     }
                     // Admitted, and the reclaim won against the workers (a lost reclaim means a
                     // worker claimed it; it is waited for like any claimed slot).
-                    State::Published if self.reclaim_before_deadline(strip, now, deadline) => {
+                    State::Published if self.reclaim_before_deadline(strip, now, deadline, &mut |_| {}) => {
                         now = self.render_inline(strip, deadline, &mut inline, Instant::now);
                         open -= 1;
                         progressed = true;
@@ -935,21 +943,23 @@ impl WorkerSet {
         for k in 0..self.published_len {
             let strip = self.published[k];
             if self.outcomes[strip] == Outcome::Pending {
-                self.overrun_strip(strip, g, deadline_ns, inline);
+                self.overrun_strip(strip, g, deadline_ns, inline, &mut |_| {});
             }
         }
     }
 
     /// At the deadline, one strip still pending: a last read of `Done`, else an overrun
     /// (`Unstarted` when it is taken back unrendered, `Late` when a worker holds it). Sets and
-    /// returns its outcome (`Pending` only for a strip with no slot).
-    fn overrun_strip(&mut self, strip: usize, g: u64, deadline_ns: u64, inline: &mut impl FnMut(usize)) -> Outcome {
+    /// returns its outcome (`Pending` only for a strip with no slot). `race` runs just before the
+    /// reclaim's compare-and-swap (the test seam; production passes a no-op).
+    fn overrun_strip(&mut self, strip: usize, g: u64, deadline_ns: u64, inline: &mut impl FnMut(usize), race: &mut impl FnMut(usize)) -> Outcome {
         if let Some(o) = self.take_done(strip, g) {
             self.outcomes[strip] = o;
             return o;
         }
         let shared = Arc::clone(&self.shared);
         let Some(slot) = shared.jobs.slot(strip) else { return Outcome::Pending };
+        race(strip);
         let cause = if slot.reclaim() {
             bump(&shared.queue.counts.unclaimed_at_deadline);
             if self.inline_at_deadline[strip] {
@@ -973,13 +983,26 @@ impl WorkerSet {
             self.outcomes[strip] = o;
             return o;
         } else {
-            bump(&self.shared.stats.overruns_late);
-            shared.figures.count(strip, Count::Late);
-            self.late_deadline_ns[strip] = deadline_ns;
-            self.bar(strip);
-            OverrunCause::Late
+            return self.claimed_at_deadline(strip, deadline_ns);
         };
         self.outcomes[strip] = Outcome::Overrun(cause);
+        self.outcomes[strip]
+    }
+
+    /// **The late-claim policy, in one place** (G10 of the tail audit; ADR 0029 section 11). A
+    /// slot a worker claimed and had not finished when the callback resolves the deadline: the
+    /// callback never waits for it. The strip is `Late`: silent for the block (its result is
+    /// retired unread at a later `begin_block`), barred from inline renders, and `Busy` for as long
+    /// as the worker holds it. A tail task too: a bus whose aux a worker claimed and did not finish
+    /// in time is silent for the block, where the serial tail would have made the callback later.
+    /// Another policy (for example, waiting for a claimed tail task up to its recorded worst case)
+    /// is a change to this function alone, plus the ADR.
+    fn claimed_at_deadline(&mut self, strip: usize, deadline_ns: u64) -> Outcome {
+        bump(&self.shared.stats.overruns_late);
+        self.shared.figures.count(strip, Count::Late);
+        self.late_deadline_ns[strip] = deadline_ns;
+        self.bar(strip);
+        self.outcomes[strip] = Outcome::Overrun(OverrunCause::Late);
         self.outcomes[strip]
     }
 

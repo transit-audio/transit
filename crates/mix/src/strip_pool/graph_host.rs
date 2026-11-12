@@ -3,6 +3,13 @@ use crate::graph::task_identity;
 use transit_rt::task_graph::{GraphHost, Rendered, Start, TaskGraph, Window};
 use transit_rt::worker_set::Poll;
 
+/// The time a published aux must leave a worker to wake and claim it, over its worst case, before
+/// it is published (G5 of the tail audit; ADR 0029 section 11, amended 2026-11-12): an aux whose
+/// worst case fits the time left only without it renders on the callback instead. Worker wake
+/// stayed under 50 µs for 99.99% of claims in the gate 6 measurement on the reference hardware
+/// (docs/benchmarks/2026-10-28-scarlett-render-workers-gate-6.md).
+pub(crate) const TAIL_WAKE_MARGIN: Duration = Duration::from_micros(50);
+
 /// One driver host. Tail controls have no slot; render tasks use their explicit slot.
 pub(super) struct Host<'a, 'b> {
     pub(super) pool: &'a mut StripPool,
@@ -61,7 +68,7 @@ impl Host<'_, '_> {
         #[cfg(feature = "testing")]
         let left = self.pool.set.slot_overrides(slot).budget_left.unwrap_or(left);
         let worst = self.pool.set.worst_case(slot).unwrap_or_default();
-        let fit = !worst.is_zero() && worst <= left;
+        let fit = !worst.is_zero() && worst.saturating_add(TAIL_WAKE_MARGIN) <= left;
         #[cfg(feature = "testing")]
         let fit = fit || self.pool.set.slot_overrides(slot).force_publish;
         window == Window::Open && fit

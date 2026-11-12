@@ -12,6 +12,8 @@ use transit_rt::worker_set::seams::{CostClock, SlotOverrides};
 
 const N: usize = 64;
 const FAR: Duration = Duration::from_secs(60);
+/// The fit's wake margin in nanoseconds, added to an injected budget that is meant to fit.
+const M: u64 = super::graph_host::TAIL_WAKE_MARGIN.as_nanos() as u64;
 static NO_KEYS: KeyBank = KeyBank::EMPTY;
 
 mod forgo;
@@ -231,15 +233,18 @@ fn execute(h: &mut Host<'_, '_>, task: usize, slot: usize, start: Start) -> bool
     }
 }
 
-/// T4a: always-publish must fail here; equality is accepted, Closed is never published.
+/// T4a: always-publish must fail here; the worst case plus the wake margin equal to the time
+/// left is accepted (G5: one nanosecond less is not), Closed is never published.
 #[test]
 fn t4a_production_fit() {
     for (worst, left, window, want) in [
-        (0, 10, Window::Open, Start::Callback),
-        (5, 10, Window::Open, Start::Publish),
-        (10, 10, Window::Open, Start::Publish),
-        (11, 10, Window::Open, Start::Callback),
-        (5, 10, Window::Closed, Start::Callback),
+        (0, 10 + M, Window::Open, Start::Callback),
+        (5, 10 + M, Window::Open, Start::Publish),
+        (10, 10 + M, Window::Open, Start::Publish),
+        (10, 10 + M - 1, Window::Open, Start::Callback),
+        (10, 10, Window::Open, Start::Callback),
+        (11, 10 + M, Window::Open, Start::Callback),
+        (5, 10 + M, Window::Closed, Start::Callback),
     ] {
         let (mut rig, ..) = fixture(false);
         host(&mut rig, |h, slot, task| {
@@ -339,7 +344,7 @@ fn t4c_no_reclaim_only_and_lifetime() {
     host(&mut rig, |h, slot, task| {
         override_slot(h, slot, 0, 0, false, true);
         assert_eq!(h.start(task, Window::Open), Start::Callback);
-        override_slot(h, slot, 10, 10, false, true);
+        override_slot(h, slot, 10, 10 + M, false, true);
         assert_eq!(h.start(task, Window::Open), Start::Publish);
         let _ = h.pool.set.publish(slot).unwrap();
         h.pool.set.set_cost_estimate(0, Duration::from_nanos(1));
@@ -360,7 +365,7 @@ fn t4c_no_reclaim_only_and_lifetime() {
 #[test]
 fn t7_current_keys_in_every_window_and_fit_branch() {
     for bus in [false, true] {
-        for (worst, left, window) in [(0, 20, Window::Open), (30, 20, Window::Open), (10, 20, Window::Open), (10, 20, Window::Closed)] {
+        for (worst, left, window) in [(0, 20, Window::Open), (30, 20 + M, Window::Open), (10, 20 + M, Window::Open), (10, 20, Window::Closed)] {
             let (mut rig, _, _, probe) = fixture(bus);
             host(&mut rig, |h, slot, task| {
                 // Fill old keys before changing their actual sources.
@@ -565,7 +570,7 @@ fn t18_callback_cost_warms_a_cold_aux() {
         assert_eq!(h.pool.set.cost_estimate(slot), Some(Duration::from_nanos(6400)));
         assert_eq!(h.pool.set.worst_case(slot), Some(Duration::from_nanos(6400)));
         assert_eq!(h.pool.set.queue_snapshot().tail_callback, 1);
-        h.pool.set.arm_slot_overrides(slot, SlotOverrides { budget_left: Some(Duration::from_nanos(6400)), ..SlotOverrides::default() });
+        h.pool.set.arm_slot_overrides(slot, SlotOverrides { budget_left: Some(Duration::from_nanos(6400 + M)), ..SlotOverrides::default() });
         h.pool.set.install_test_seams();
         let start = h.start(task, Window::Open);
         assert_eq!(start, Start::Publish);

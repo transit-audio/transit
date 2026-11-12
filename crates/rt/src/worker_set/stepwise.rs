@@ -56,11 +56,28 @@ impl WorkerSet {
     /// none is pending. Strips may be published between two calls. Never blocks on a worker;
     /// allocation-free. Call it until it returns [`Poll::Finished`], then read
     /// [`WorkerSet::block_report`].
-    pub fn poll(&mut self, deadline: Instant, mut inline: impl FnMut(usize)) -> Poll {
+    pub fn poll(&mut self, deadline: Instant, inline: impl FnMut(usize)) -> Poll {
+        self.poll_with(deadline, inline, |_| {})
+    }
+
+    /// Test seam (#215 item 1): [`WorkerSet::poll`] with `race(strip)` called just before each
+    /// compare-and-swap by which the callback reclaims a published slot (before the deadline, and
+    /// at it), so a test can claim the slot there as a worker would, or not, and so produce both
+    /// orders of a claim at the deadline without a clock.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn poll_racing(&mut self, deadline: Instant, inline: impl FnMut(usize), race: impl FnMut(usize)) -> Poll {
+        self.poll_with(deadline, inline, race)
+    }
+
+    fn poll_with(&mut self, deadline: Instant, mut inline: impl FnMut(usize), mut race: impl FnMut(usize)) -> Poll {
         let g = self.generation;
         let shared = Arc::clone(&self.shared);
         loop {
             let mut open = false;
+            // A worker holds a strip the callback waits for (G5: then a tail task keeps waiting).
+            let mut claimed = false;
+            // The first unclaimed tail task flagged for the deadline reclaim, in publish order.
+            let mut tail = None;
             // One clock read per sweep, as in `finish`.
             let now = Instant::now();
             for k in 0..self.published_len {
@@ -78,22 +95,34 @@ impl WorkerSet {
                             return Poll::Resolved { strip, outcome: o, late: now >= deadline };
                         }
                     }
-                    State::Published if self.reclaim_before_deadline(strip, now, deadline) => {
+                    State::Published if self.reclaim_before_deadline(strip, now, deadline, &mut race) => {
                         let end = self.render_inline(strip, deadline, &mut inline, Instant::now);
                         return Poll::Resolved { strip, outcome: Outcome::Inline, late: end > deadline };
                     }
+                    State::Published if tail.is_none() && self.inline_at_deadline[strip] => tail = Some(strip),
+                    State::Claimed => claimed = true,
                     _ => {}
                 }
             }
             if !open {
                 return Poll::Finished;
             }
+            // G5: nothing resolved, and the callback waits for nothing a worker holds: an unclaimed
+            // tail task is rendered now rather than at the deadline (`reclaim_tail_alone`).
+            if !claimed
+                && now < deadline
+                && let Some(strip) = tail
+                && self.reclaim_tail_alone(strip, &mut race)
+            {
+                let end = self.render_inline(strip, deadline, &mut inline, Instant::now);
+                return Poll::Resolved { strip, outcome: Outcome::Inline, late: end > deadline };
+            }
             if now >= deadline {
                 let deadline_ns = shared.figures.nanos(deadline).max(1);
                 for k in 0..self.published_len {
                     let strip = self.published[k];
                     if self.outcomes[strip] == Outcome::Pending {
-                        let outcome = self.overrun_strip(strip, g, deadline_ns, &mut inline);
+                        let outcome = self.overrun_strip(strip, g, deadline_ns, &mut inline, &mut race);
                         if outcome != Outcome::Pending {
                             return Poll::Resolved { strip, outcome, late: true };
                         }
