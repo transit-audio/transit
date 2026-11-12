@@ -187,6 +187,13 @@ pub(crate) fn failed_plugin_status(s: &transit_model::Session, track: TrackId, s
     Some(format!("{} on {} put out invalid audio, so it is bypassed until playback stops or starts again.", ins.plugin, t.name))
 }
 
+/// The status line naming the plug-in in `slot` that reported a processing error (#284).
+pub(crate) fn plugin_error_status(s: &transit_model::Session, track: TrackId, slot: usize) -> Option<String> {
+    let t = s.track(track)?;
+    let ins = if slot == transit_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(slot)?.as_ref() }?;
+    Some(format!("{} on {} reported a processing error, so its output is silent while the error lasts.", ins.plugin, t.name))
+}
+
 /// A refused audio action as a sentence for the status line; the raw variants go to the log only.
 pub(crate) fn refusal_text(outcome: transit_playback::action_lane::Outcome, result: Option<transit_playback::ActionResult>) -> String {
     use transit_playback::{ActionResult, action_lane::Outcome, device_clock::Unavailable};

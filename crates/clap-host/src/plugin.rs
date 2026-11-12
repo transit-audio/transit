@@ -431,6 +431,8 @@ pub struct ClapPlugin {
     /// Timed parameter points refused by a full queue (the value went onto the parameter's
     /// latest queued point, so the last point wins, but at that point's earlier time).
     params_dropped: u64,
+    /// Slices the plug-in itself failed (`CLAP_PROCESS_ERROR`), each put out as silence (#284).
+    process_errors: u64,
     /// The [`Shared::loads`] count the queued values were set under.
     loads_seen: u64,
 }
@@ -519,6 +521,7 @@ impl ClapPlugin {
             reset_pending: false,
             gate: Gate::new(),
             params_dropped: 0,
+            process_errors: 0,
             loads_seen: 0,
         }
     }
@@ -800,7 +803,17 @@ impl ClapPlugin {
             self.tail = tail_samples_from(tail);
             self.status = r.as_ref().map_or(ProcessStatus::Continue, |&s| status_from_clap(s, tail));
             self.steady = self.steady.saturating_add(i64::try_from(n).unwrap_or(0));
-            // Failed blocks retain the silence prepared above; never log from this callback.
+            // A slice the plug-in itself failed is silence for as long as the error lasts, never
+            // the caller's dry input (#284): on a wet-only insert or a bus that would be a burst
+            // of unprocessed signal. Counted for the mixer to report; never log from this callback.
+            if r.is_err() {
+                for dst in io.iter_mut().take(ch) {
+                    if let Some(dst) = dst.get_mut(start..start + n) {
+                        dst.fill(0.0);
+                    }
+                }
+                self.process_errors = self.process_errors.saturating_add(1);
+            }
             if let (Ok(_), Some(p)) = (r, core.out_main) {
                 let oc = core.outputs.channels(p);
                 for (c, dst) in io.iter_mut().take(ch).enumerate() {
@@ -908,6 +921,10 @@ impl Plugin for ClapPlugin {
 
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
         self.process_keyed(io, None, frames);
+    }
+
+    fn process_errors(&self) -> u64 {
+        self.process_errors
     }
 
     fn process_with_key(&mut self, io: &mut [Vec<f32>], key: &[Vec<f32>], frames: usize) {

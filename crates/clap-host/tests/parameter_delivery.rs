@@ -61,3 +61,22 @@ fn a_plugin_reported_process_error_does_not_replay_its_events() {
     assert_eq!(io[0][8191], 0.0, "note-ons delivered again after the plug-in's error");
     assert!(!plugin.params_pending(), "events delivered to an error-returning plug-in are consumed");
 }
+
+/// #284: a block the plug-in itself fails is silence, never the caller's dry input (the
+/// maintainer's rule), and the next good block is the plug-in's own output again.
+#[test]
+fn a_plugin_reported_process_error_silences_the_block_instead_of_passing_the_input() {
+    common::events_fixture_dir();
+    let mut plugin = transit_clap_host::create("clap:org.soundcraft.test.events").unwrap();
+    plugin.prepare(48_000.0, 256, 2);
+    assert!(plugin.load_state(b"CMD:process-error-once"));
+    assert!(plugin.set_param("5", 0.5));
+    let mut io = vec![vec![0.5; 256]; 2];
+    plugin.process(&mut io, 256);
+    assert!(io.iter().flatten().all(|v| *v == 0.0), "the failed block carries the dry input");
+    assert_eq!(plugin.process_errors(), 1, "the error is counted for the mixer to report");
+    io.iter_mut().for_each(|c| c.fill(0.5));
+    plugin.process(&mut io, 256);
+    assert!(io.iter().flatten().all(|v| *v != 0.5), "the recovered block is the plug-in's output, not the input");
+    assert_eq!(plugin.process_errors(), 1);
+}

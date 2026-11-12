@@ -155,6 +155,8 @@ pub struct MeterDisplay {
     pub peak: f32,
     pub gr: f32,
     pub plugin_failures: u32,
+    /// The strip's plug-in processing error count last seen (`transit_mix::PluginFailures::errors`).
+    pub plugin_errors: u32,
     /// The mixer's channel meter reading per channel (linear): the incoming peaks stepped with
     /// the kit's peak fall-off ballistics (`widgets::level_meter`), fed with `level`.
     pub falloff: [f32; 2],

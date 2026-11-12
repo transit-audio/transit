@@ -325,6 +325,12 @@ impl StudioApp {
                         self.status = msg;
                     }
                 }
+                if m.plugin_failures.errors != d.plugin_errors {
+                    d.plugin_errors = m.plugin_failures.errors;
+                    if let Some(msg) = plugin_error_status(self.engine.session(), *id, m.plugin_failures.error_slot) {
+                        self.status = msg;
+                    }
+                }
             }
             let main = snap.main.peak;
             feed_meter(&mut self.main_meter, main, 0.0, dt);

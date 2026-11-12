@@ -217,6 +217,9 @@ impl Plugin for Hosted {
     fn params_pending(&self) -> bool {
         self.inner.as_ref().is_some_and(|p| p.params_pending())
     }
+    fn process_errors(&self) -> u64 {
+        self.inner.as_ref().map_or(0, |p| p.process_errors())
+    }
     fn gain_reduction_db(&self) -> f32 {
         self.inner.as_ref().map_or(0.0, |p| p.gain_reduction_db())
     }

@@ -175,6 +175,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                     }
                 }
                 inst.woken = inst.plugin.params_pending();
+                strip.failures.note_errors(inst, INSTRUMENT_SLOT);
                 if let Some(tap) = &inst.tap {
                     tap.push(&strip.buf, frames, 0.0, None);
                     if tap.enabled() {
@@ -263,7 +264,9 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
         if let Some(delay) = &mut slot.note_delay {
             notes_lost = notes_lost.saturating_add(delay.deliver(notes, latency, frames, &mut *slot.plugin));
         }
-        if run_insert(slot, &mut strip.buf, key, frames, transport, live.no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
+        let ran = run_insert(slot, &mut strip.buf, key, frames, transport, live.no_suspend);
+        strip.failures.note_errors(slot, i);
+        if ran && contain_failure(slot, &mut strip.buf, frames) {
             strip.failures.record(i);
             continue;
         }
@@ -370,7 +373,9 @@ pub(crate) fn process_master(
             if ins.bypass || strip.mode_bypass.get(i).copied().unwrap_or(false) {
                 continue;
             }
-            if run_insert(slot, &mut strip.buf, None, frames, transport, live.no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
+            let ran = run_insert(slot, &mut strip.buf, None, frames, transport, live.no_suspend);
+            strip.failures.note_errors(slot, i);
+            if ran && contain_failure(slot, &mut strip.buf, frames) {
                 strip.failures.record(i);
             } else if let Some(tap) = &slot.tap {
                 tap.push(&strip.buf, frames, slot.plugin.gain_reduction_db(), slot.plugin.detector_level_db());
@@ -892,7 +897,7 @@ mod tests {
         let only_b = render_block(&mut rig, 512);
         assert!(only_b > 0.3 && (only_b - both / 2.0).abs() < 1e-6, "{only_b} vs {both}");
         let failures = |rig: &PlanRig, t: TrackId| rig.eng.meters().find(|(id, _)| *id == t).map(|(_, m)| m.plugin_failures).unwrap();
-        assert_eq!(failures(&rig, a), PluginFailures { count: 1, last: 2 });
+        assert_eq!(failures(&rig, a), PluginFailures { count: 1, last: 2, ..PluginFailures::default() });
         assert_eq!(failures(&rig, b), PluginFailures::default());
         assert_eq!(render_block(&mut rig, 1024), both);
         rig.eng.reset();
@@ -916,12 +921,65 @@ mod tests {
         let failures = |rig: &PlanRig, t: TrackId| rig.eng.meters().find(|(id, _)| *id == t).map(|(_, m)| m.plugin_failures).unwrap();
         let only_b = render_block(&mut rig, 0);
         assert!(only_b > 0.3, "{only_b}");
-        assert_eq!(failures(&rig, synth), PluginFailures { count: 1, last: INSTRUMENT_SLOT });
+        assert_eq!(failures(&rig, synth), PluginFailures { count: 1, last: INSTRUMENT_SLOT, ..PluginFailures::default() });
         assert_eq!(failures(&rig, b), PluginFailures::default());
         rig.fakes.push((m, 0, Box::new(Nan(transit_dsp::create("gain").unwrap()))));
         rig.publish(&s);
         assert_eq!(render_block(&mut rig, 512), 0.0);
-        assert_eq!(failures(&rig, m), PluginFailures { count: 1, last: 0 });
+        assert_eq!(failures(&rig, m), PluginFailures { count: 1, last: 0, ..PluginFailures::default() });
         assert_eq!(render_block(&mut rig, 1024), only_b);
+    }
+
+    /// Reports a processing error on each of its first `failing` blocks, as a CLAP host does
+    /// for `CLAP_PROCESS_ERROR` (its host already put the block out as silence).
+    struct Erring {
+        inner: Box<dyn Plugin>,
+        failing: u64,
+        errors: u64,
+    }
+
+    impl Plugin for Erring {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
+            self.inner.info()
+        }
+        fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
+            self.inner.prepare(sr, mb, ch);
+        }
+        fn reset(&mut self) {
+            self.inner.reset();
+        }
+        fn set_param(&mut self, id: &str, v: f32) -> bool {
+            self.inner.set_param(id, v)
+        }
+        fn param(&self, id: &str) -> Option<f32> {
+            self.inner.param(id)
+        }
+        fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+            self.inner.process(io, frames);
+            if self.failing > 0 {
+                self.failing -= 1;
+                self.errors += 1;
+            }
+        }
+        fn process_errors(&self) -> u64 {
+            self.errors
+        }
+    }
+
+    /// #284: a plug-in-reported processing error reaches the strip's meter (the status line reads
+    /// it), and the plug-in stays in the signal path, unlike one that puts out NaN.
+    #[test]
+    fn a_reported_processing_error_is_counted_and_leaves_the_plugin_in() {
+        let (mut s, a) = session_with_dc(0.5, 48_000);
+        s.track_mut(a).unwrap().mixer.inserts[1] = Some(Insert::new("clap:test.erring"));
+        let mut rig = PlanRig::new(512).fake(a, 1, Erring { inner: transit_dsp::create("gain").unwrap(), failing: 2, errors: 0 });
+        rig.publish(&s);
+        let failures = |rig: &PlanRig| rig.eng.meters().find(|(id, _)| *id == a).map(|(_, m)| m.plugin_failures).unwrap();
+        let first = render_block(&mut rig, 0);
+        assert_eq!(failures(&rig), PluginFailures { errors: 1, error_slot: 1, ..PluginFailures::default() });
+        assert_eq!(render_block(&mut rig, 512), first);
+        assert_eq!(failures(&rig).errors, 2);
+        assert_eq!(render_block(&mut rig, 1024), first, "the plug-in stays in after its error");
+        assert_eq!(failures(&rig), PluginFailures { errors: 2, error_slot: 1, ..PluginFailures::default() }, "no new error, nothing taken out");
     }
 }

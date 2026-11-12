@@ -516,6 +516,12 @@ pub trait Plugin: Send {
     fn params_pending(&self) -> bool {
         false
     }
+    /// How many `process` slices the plug-in itself reported as failed so far (a CLAP plug-in's
+    /// `CLAP_PROCESS_ERROR`, #284). Its host puts each out as silence; the mix reports a change
+    /// so the error is visible. Read after `process`, on the audio thread. The default: none.
+    fn process_errors(&self) -> u64 {
+        0
+    }
     /// Effect inserts that analyze their input on the UI thread (the Tuner, #266): the mix then
     /// gives the instance a sample tap (`transit_mix::SampleTap`), a ring of its input the panel
     /// reads while it is open. Asked once, when the instance is made. The default: no tap.

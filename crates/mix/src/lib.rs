@@ -284,20 +284,37 @@ pub struct StripMeter {
     rms_window: Vec<RmsWindow>,
 }
 
-/// How often a strip's plugins were taken out of the signal path for putting out NaN or infinity.
-/// Each stays out until the engine is next reset (playback starts or stops).
+/// How often a strip's plugins were taken out of the signal path for putting out NaN or infinity
+/// (`count`, `last`); each stays out until the engine is next reset (playback starts or stops).
+/// And how often a hosted plug-in newly reported that it failed processing (`errors`,
+/// `error_slot`, [`Plugin::process_errors`], #284): its host puts the failed audio out as
+/// silence and it stays in the signal path, so its output returns when the error ends.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PluginFailures {
     /// It only grows.
     pub count: u32,
     /// The slot of the latest: an insert index or [`INSTRUMENT_SLOT`].
     pub last: usize,
+    /// Blocks in which a plug-in reported new processing errors. It only grows.
+    pub errors: u32,
+    /// The slot of the latest error: an insert index or [`INSTRUMENT_SLOT`].
+    pub error_slot: usize,
 }
 
 impl PluginFailures {
     fn record(&mut self, slot: usize) {
         self.count = self.count.wrapping_add(1);
         self.last = slot;
+    }
+
+    /// Records slot `i` when its plug-in reported processing errors since the last look.
+    fn note_errors(&mut self, plugin_slot: &mut PluginSlot, i: usize) {
+        let errors = plugin_slot.plugin.process_errors();
+        if errors != plugin_slot.errors_seen {
+            plugin_slot.errors_seen = errors;
+            self.errors = self.errors.wrapping_add(1);
+            self.error_slot = i;
+        }
     }
 }
 
@@ -442,6 +459,8 @@ struct PluginSlot {
     /// Last values pushed to the plugin, in the insert's parameter-map order.
     applied: Applied,
     failed: bool,
+    /// [`Plugin::process_errors`] when the strip last looked (see [`PluginFailures::note_errors`]).
+    errors_seen: u64,
     /// A hosted plugin that has not had its first parameter pass yet (see `apply_values`).
     fresh: bool,
     /// A hosted (third-party) effect insert: it may be left unprocessed while its input is
@@ -490,6 +509,7 @@ impl PluginSlot {
             plugin,
             applied: Applied::new(),
             failed: false,
+            errors_seen: 0,
             fresh: third,
             suspendable: third && slot != INSTRUMENT_SLOT && clip_fx_of_slot(slot).is_none(),
             quiet: 0,

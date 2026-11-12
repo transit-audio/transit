@@ -33,6 +33,8 @@ struct AtomicMeter {
     reduction: AtomicU32,
     failures: AtomicU32,
     last_failure: AtomicUsize,
+    errors: AtomicU32,
+    error_slot: AtomicUsize,
 }
 
 impl AtomicMeter {
@@ -45,6 +47,8 @@ impl AtomicMeter {
             reduction: AtomicU32::new(0),
             failures: AtomicU32::new(0),
             last_failure: AtomicUsize::new(0),
+            errors: AtomicU32::new(0),
+            error_slot: AtomicUsize::new(0),
         }
     }
 
@@ -62,6 +66,8 @@ impl AtomicMeter {
         self.reduction.store(source.gain_reduction_db.to_bits(), Ordering::Relaxed);
         self.failures.store(source.plugin_failures.count, Ordering::Relaxed);
         self.last_failure.store(source.plugin_failures.last, Ordering::Relaxed);
+        self.errors.store(source.plugin_failures.errors, Ordering::Relaxed);
+        self.error_slot.store(source.plugin_failures.error_slot, Ordering::Relaxed);
     }
 
     fn clear(&self) {
@@ -88,6 +94,8 @@ impl AtomicMeter {
         out.gain_reduction_db = f32::from_bits(self.reduction.load(Ordering::Relaxed));
         out.plugin_failures.count = self.failures.load(Ordering::Relaxed);
         out.plugin_failures.last = self.last_failure.load(Ordering::Relaxed);
+        out.plugin_failures.errors = self.errors.load(Ordering::Relaxed);
+        out.plugin_failures.error_slot = self.error_slot.load(Ordering::Relaxed);
     }
 }
 
