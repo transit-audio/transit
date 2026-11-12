@@ -45,6 +45,19 @@
   </ul>
 </section>
 
+<section id="bones" class="quiet">
+  <h2>The bones</h2>
+  <p class="lead">Everything below links to a public record. Check it.</p>
+  <dl class="facts">
+    <div><dt>55<small>design decisions</small></dt><dd>Each one is written down with its evidence before the code. <a href="https://github.com/transit-audio/transit/tree/main/docs/adr">Read the decisions</a>.</dd></div>
+    <div><dt>39<small>escape records so far</small></dt><dd>Every bug that got past a check has a record naming the check that now catches it. <a href="https://github.com/transit-audio/transit/tree/main/docs/escapes">Read the records</a>.</dd></div>
+    <div><dt>13<small>hardware benchmarks so far</small></dt><dd>Round trips on a Focusrite Scarlett 2i2 and a TASCAM Model 12, hardware synth timing, and an eight-hour recording run, each with the decision that followed. <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">See the numbers</a>.</dd></div>
+    <div><dt>Bit for bit<small>ported instruments</small></dt><dd>The instruments and effects ported from &Eacute;milie Gillet&rsquo;s MIT-licensed firmware are rendered next to the original code and compared sample by sample. <a href="https://github.com/transit-audio/transit/blob/main/docs/adr/0033-built-in-instruments-mutable-instruments-port.md">How the port is checked</a>.</dd></div>
+    <div><dt>No allocation<small>on the audio thread</small></dt><dd>A written rule: the audio callback never blocks, allocates unexpectedly or does I/O. The crates that run it are linted and tested on every platform. <a href="https://github.com/transit-audio/transit/blob/main/docs/principles.md">The principle</a> and <a href="https://github.com/transit-audio/transit/blob/main/.github/workflows/rt.yml">the check</a>.</dd></div>
+    <div><dt>Every merge<small>reviewed to break it</small></dt><dd>A second reviewer with fresh context tries to break each change before it merges. <a href="https://github.com/transit-audio/transit/blob/main/docs/contributing/evidence/refutation-review.md">How the review works</a>.</dd></div>
+  </dl>
+</section>
+
 <section id="downloads">
   <h2>Downloads</h2>
   <p class="lead">transit is free. It is also early software (alpha): it changes every week, and some things are rough or missing. Back up anything you care about, and tell us what breaks on the <a href="https://discord.gg/7PPUBZqA66">Discord</a> or in the <a href="https://github.com/transit-audio/transit/issues/49">testing thread</a>.</p>
