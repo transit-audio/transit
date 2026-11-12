@@ -14,9 +14,14 @@
 //! fails decision 3.3's click criterion for large Gain and Q moves; the glide meets it. The design
 //! cost is unchanged; while a band moves, each of its second-order sections costs 24 more operations a
 //! sample (eight coefficients, one subtraction, multiplication and addition each), computed once per
-//! band and shared by its channels; a band at rest runs its plain design, bit for bit. Every
-//! interpolated set is stable (the glide test checks the state matrix's spectral radius at every
-//! point of every interval over the full ranges).
+//! band and shared by its channels; a band at rest runs its plain design, bit for bit.
+//!
+//! Stability is argued in exact arithmetic (ADR 0054 decision 3.1): each design's zero-input update
+//! matrix has Euclidean norm exactly 1, a blend of two has norm at most 1, and any two consecutive
+//! steps contract every nonzero state strictly, with a uniform factor below 1 when the endpoint
+//! designs lie in a compact set with positive, finite `g` and `k` at a fixed sample rate. The glide
+//! tests are floating-point evidence at the points they sample (spectral radius over trajectories
+//! between the corners of the ranges at 44.1 and 192 kHz), not a proof; 1.536 MHz is unchecked.
 
 use alloc::vec::Vec;
 

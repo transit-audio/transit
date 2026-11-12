@@ -92,6 +92,8 @@ impl Svf {
     #[inline]
     pub(crate) fn lerp(a: &Self, b: &Self, t: f64) -> Self {
         let l = |x: f64, y: f64| x + (y - x) * t;
+        // `g` is carried so a blended set is a complete `Svf`, like a designed one; the tick reads
+        // only `k`, `m0`..`m2` and `a1`..`a3` (decision 3.1's amendment lists `g` as optional).
         Self {
             g: l(a.g, b.g),
             k: l(a.k, b.k),

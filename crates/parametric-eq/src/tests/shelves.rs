@@ -104,8 +104,8 @@ fn the_single_fit_misses_a_resonant_shelf_by_more_than_ten_decibels() {
 }
 
 /// Every factor section's inverse is stable: `Z` divides by `P`'s fitted numerator, whose σ
-/// coefficients must all be positive (Hurwitz in σ, inside the unit circle in z), at every point of
-/// the sweep and every rate.
+/// coefficients must all be positive (Hurwitz in σ, inside the unit circle in z), checked at every
+/// point of the sweep and every rate it samples.
 #[test]
 fn every_factor_section_inverse_is_stable() {
     let mut smallest = f64::INFINITY;

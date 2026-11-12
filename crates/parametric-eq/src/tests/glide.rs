@@ -1,13 +1,16 @@
 //! The per-sample coefficient glide between control-rate designs (the click amendment to decision
-//! 3.1): stable at every interpolated point, no blow-up across the shelf transition, and bit-identical
-//! to the plain design once a band rests.
+//! 3.1): evidence that the interpolated sets are stable at the points sampled, that nothing blows up
+//! across the shelf transition, and that a band at rest is bit-identical to the plain design.
 //!
-//! Stability of the trapezoidal SVF with frozen coefficients: the state update is
-//! `[ic1, ic2]' = M·[ic1, ic2] + b·x` with `M = [[2a1 − 1, −2a2], [2a2, 1 − 2a3]]`, stable when the
-//! spectral radius of `M` is below 1; the one-pole is stable when `0 < G < 1`. The sweep follows the
-//! processor's own smoothing (20 ms one-poles stepped per sample, a design every 16 samples) between
-//! every pair of corners of the frequency, gain and Q ranges, and checks all 16 interpolated points of
-//! every interval.
+//! What this is evidence for, and what it is not. ADR 0054 decision 3.1 argues stability in exact
+//! arithmetic (two consecutive steps strictly contract, for endpoint designs in a compact set with
+//! positive, finite `g` and `k`, at a fixed sample rate). The frozen-coefficient criterion used here,
+//! a spectral radius below 1, is the weaker property, and it is checked in floating point at the
+//! sampled points only: it proves nothing between them, at other rates, or at 1.536 MHz. The state
+//! update is `[ic1, ic2]' = M·[ic1, ic2] + b·x` with `M = [[2a1 − 1, −2a2], [2a2, 1 − 2a3]]`; the
+//! one-pole is stable when `0 < G < 1`. The sweep follows the processor's own smoothing (20 ms
+//! one-poles stepped per sample, a design every 16 samples) between every pair of corners of the
+//! frequency, gain and Q ranges, and checks all 16 interpolated points of every interval.
 
 use super::proc::{eq, run};
 use super::util::{band, noise};

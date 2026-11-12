@@ -26,8 +26,11 @@ pub(crate) use single::cut_section;
 /// The most second-order sections a band needs (a 96 dB/oct cut).
 pub(crate) const MAX_SOS: usize = 8;
 
-/// A designed band: its second-order sections in run order (ascending Q, decision 2.6), then the
-/// optional first-order section. No section at all is the identity.
+/// A designed band: its second-order sections in run order, then the optional first-order section;
+/// no section at all is the identity. The order is decision 2.6's: a cut's second-order sections by
+/// ascending Q, then any first-order section; a shelf runs `P` then `Z`, the constant on `P`; flat
+/// tilt runs its pairs in frequency order, the last first-order; a bell, notch or band pass is one
+/// section.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Design {
     pub(crate) sos: [Sos; MAX_SOS],

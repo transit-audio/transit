@@ -1,8 +1,8 @@
 //! Every band type against its closed form (Evidence item 1): the impulse response of each type and
 //! slope, realized by the 64-bit state-variable sections, evaluated by a direct DFT in f64, matches the
 //! digital transfer function of the designed σ coefficients within 0.05 dB where it is above −60 dB,
-//! else within 1e-4 linear (the Filter test's bounds). This proves the realization of decision 2.3 is
-//! exact. Negative control (recorded in the result note): an SVF map with `m1 = n1/c0` (the factor
+//! else within 1e-4 linear (the Filter test's bounds). This checks the realization of decision 2.3
+//! against the designed transfer function to those tolerances. Negative control (recorded in the result note): an SVF map with `m1 = n1/c0` (the factor
 //! `g` dropped) fails. In-process comparison; no pinned values.
 
 use super::sweep::Case;

@@ -1,7 +1,8 @@
 //! The cuts are Butterworth (decision 2.1: "a cut is −3 dB at f"): every cut's analog prototype is
-//! −3.0103 dB (half power) at its band frequency, low and high cut at every slope, and the matched
-//! digital design is within 0.1 dB of that at band frequencies well below Nyquist (at most fs/40,
-//! where decision 2.2's table puts the matched cuts within hundredths of a decibel). Negative control
+//! −10·log10(2) dB (half power, about −3.0103) at its band frequency, low and high cut at every slope
+//! (the prototype to 1e-9 dB), and the matched digital design is within 0.1 dB of that at 100 Hz and
+//! at fs/40, at 44.1, 48, 96 and 192 kHz (well below Nyquist, where decision 2.2's table puts the
+//! matched cuts within hundredths of a decibel). Negative control
 //! (recorded in the result note): the record's even-order formula for the 18 dB/oct section (Q 0.5774
 //! instead of 1) puts both 18 dB/oct cuts at −7.78 dB. The prototype check is a closed form; the
 //! digital check an in-process comparison with a tolerance.
@@ -10,6 +11,7 @@ use super::sweep::Case;
 use super::util::{RATES, db};
 use crate::{BandType, Slope};
 
+/// −10·log10(2), correctly rounded (the exact half-power target, not a rounded −3.0103).
 const HALF_POWER_DB: f64 = -3.010_299_956_639_812;
 
 #[test]

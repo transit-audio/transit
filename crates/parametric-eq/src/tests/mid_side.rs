@@ -1,7 +1,8 @@
 //! Mid/side exactness (Evidence "Mid/side exactness", decision 4, the narrowed claim):
-//! - encode then decode with nothing between returns every f32 pair bit for bit, over random pairs
-//!   within a factor of 2^29, pairs with a zero (equal in value; a −0 returns as +0) and full-scale
-//!   extremes (negative control in-process: the f32 encode and decode fails);
+//! - encode then decode with nothing between returns every f32 pair bit for bit, except that a
+//!   negative zero may return as positive zero (decision 4's exception; zeros compare equal in value),
+//!   over random pairs within a factor of 2^29, pairs with a zero and full-scale extremes (negative
+//!   control in-process: the f32 encode and decode fails);
 //! - with Mid bands only, the output's side component equals the input's within one unit in the last
 //!   place of the larger output;
 //! - with a Mid band at identity (skipped), every pair, `(1, 1e-40)` included, passes bit for bit
