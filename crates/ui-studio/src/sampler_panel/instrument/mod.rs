@@ -40,6 +40,8 @@ mod group_panel_tests;
 #[cfg(test)]
 mod hardening_tests;
 #[cfg(test)]
+mod key_map_range_tests;
+#[cfg(test)]
 mod key_map_tests;
 #[cfg(test)]
 mod keyboard_tests;

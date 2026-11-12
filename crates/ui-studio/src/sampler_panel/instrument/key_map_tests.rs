@@ -56,12 +56,12 @@ fn key_map_rects_match_the_board_at_both_scales() {
         assert_eq!(h((k.axis_labels[1].1[1] + k.axis_labels[1].1[3]) / 2.0), h(y64));
         assert_eq!(h(k.axis_labels[2].1[3]), h(bottom));
         assert_eq!(h(k.mid_line[1]), h(y64.round()));
-        // Keys 36 to 59 (two octaves from the pad's C): equal white keys across the inside, black
-        // keys 0.6 of one centered on the boundary, 32 high; octave lines at the inner Cs.
-        assert_eq!((k.lo, k.hi), (36, 59));
+        // The whole keyboard, keys 0 to 127 (#492): equal white keys across the inside, black keys
+        // 0.6 of one centered on the boundary, 32 high; octave lines at the inner Cs.
+        assert_eq!((k.lo, k.hi), (0, 127));
         // The drawn keys are the formula's spans across the well's inside.
         assert_eq!((h(k.frame.0), h(k.frame.0 + k.frame.1)), (h(k.well[0] + e), h(k.well[2] - e)));
-        let keys = key_map::Keys::new(36, 59, k.frame.0, k.frame.1);
+        let keys = key_map::Keys::new(0, 127, k.frame.0, k.frame.1);
         let q = |v: f32| (v * 100.0).round() / 100.0;
         for x in &k.keys {
             let (a, w) = keys.span(x.note);
@@ -70,18 +70,19 @@ fn key_map_rects_match_the_board_at_both_scales() {
             assert_eq!((h(x.rect[1]), h(x.rect[3] - x.rect[1])), (h(k.keyboard[1]), h(tall)), "key {}", x.note);
         }
         let whites: Vec<_> = k.keys.iter().filter(|x| !is_black(x.note)).collect();
-        assert_eq!(whites.len(), 14);
-        let ww = k.frame.1 / 14.0;
-        for (i, n) in (36..=59u8).filter(|n| !is_black(*n)).enumerate() {
+        assert_eq!(whites.len(), 75);
+        let ww = k.frame.1 / 75.0;
+        for (i, n) in (0..=127u8).filter(|n| !is_black(*n)).enumerate() {
             assert_eq!(keys.span(n), (k.frame.0 + i as f32 * ww, ww), "white {n}: equal keys from the left");
         }
-        for n in (36..=59u8).filter(|n| is_black(*n)) {
+        for n in (0..=127u8).filter(|n| is_black(*n)) {
             let (a, w) = keys.span(n);
             assert_eq!(w, ww * tk::BLACK_KEY_WIDTH, "black {n}");
             assert_eq!(h(a + w / 2.0), h(keys.span(n + 1).0), "black {n} centered on the boundary");
         }
         let c48 = whites.iter().find(|w| w.note == 48).unwrap();
-        assert_eq!(k.octave_lines.iter().map(|x| h(*x)).collect::<Vec<_>>(), vec![h(c48.rect[0])]);
+        let inner_cs: Vec<i32> = whites.iter().filter(|w| w.note % 12 == 0 && w.note > 0).map(|w| h(w.rect[0])).collect();
+        assert_eq!(k.octave_lines.iter().map(|x| h(*x)).collect::<Vec<_>>(), inner_cs);
         assert_eq!(h(c48.name.as_ref().unwrap().1[3]), h(c48.rect[3] - tk::OCTAVE_NAME_INSET));
         // Zones: one inside each side of the keys and velocities they cover; label 4 and 3 in; the
         // 7 px dot 4 above the foot under the root key.

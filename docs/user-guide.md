@@ -597,7 +597,9 @@ choice for each instance while the app is open, including closing and reopening 
 Each view keeps its own selection when you return: Pads its pad and bank, Instrument its zone.
 
 The **Instrument** view shows every zone on the key map: a rectangle over the keys and velocities
-it plays, its root key and name in the corner and its root as a dot on its foot. A zone on a pad
+it plays, its root key and name in the corner and its root as a dot on its foot. The key map
+always shows the whole keyboard, all 128 MIDI notes, so a zone's edge drags to any key and the
+keys no zone plays stay in sight. A zone on a pad
 shows as one key at full velocity with a dashed edge and a lock: it plays on the pad's note, so
 its edges do not drag. Click a zone to select it. Drag a side edge to change its key range, the
 top edge to change its highest velocity, or the dot to move its root; letting go is one undo step,

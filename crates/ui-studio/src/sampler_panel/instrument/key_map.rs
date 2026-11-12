@@ -7,10 +7,16 @@
 //! velocity (the pad's note) with a dashed edge, the pad id and the lock: they do not drag. Held
 //! keys light on the keyboard and as a column over the zones.
 //!
-//! The keys shown run from the lowest to the highest key any zone covers (a pad zone covers its
-//! pad's note), at least two octaves, widened to white keys at both ends. A round-robin layer's
-//! alternatives share one rectangle: the map draws the selected alternative, else the layer's
-//! lowest. Everything comes from `mix.sampler_state` ([`super::state`]); the gestures are
+//! The map shows the whole keyboard, MIDI notes 0 to 127 (75 white keys), whatever the zones
+//! cover, as the reference workstations' zone editors do (#492): an edit never changes the keys
+//! shown, so an edge drags to any key and free keys stay in sight for another sample. All 128 keys
+//! fit the well with no scrolling: a white key is at least [`MIN_WHITE_KEY`] wide (two edge holds
+//! and the zone's inset a side, so a one-key zone holds both its side edges apart) from the
+//! window's minimum width up (856 points: 10.1 points a white key; 976, the design width: 11.7;
+//! the same in points at every scale). A zone narrower than two edge holds (one black key) splits
+//! its width between its two side edges. The octave names label every C, drawn over the white
+//! keys and kept inside the keyboard. A round-robin layer's alternatives share one rectangle: the
+//! map draws the selected alternative, else the layer's lowest. Everything comes from `mix.sampler_state` ([`super::state`]); the gestures are
 //! [`super::key_map_gestures`].
 //!
 //! With no zone the well is the view's drop target (README, Sampler views, States, "empty"): a
@@ -29,8 +35,13 @@ const ITEM_GAP: f32 = SPACE[2];
 const ROW_GAP: f32 = SPACE[1];
 /// How far inside a zone's edge a press holds that edge (no stated value: the `space` step 4).
 pub const EDGE: f32 = SPACE[0];
-/// The fewest keys the map shows.
-const MIN_KEYS: u8 = 24;
+/// The keys the map shows: the whole MIDI keyboard (both ends white).
+pub const LOWEST: u8 = 0;
+pub const HIGHEST: u8 = 127;
+/// The narrowest white key the map draws with every key in the well: a one-key zone (its inset a
+/// side) holds both side edges, [`EDGE`] each, apart. The window's minimum width gives more (see
+/// the module notes; `key_map_range_tests` checks both widths at both scales).
+pub const MIN_WHITE_KEY: f32 = 2.0 * EDGE + 2.0 * tk::ZONE_INSET;
 
 /// The empty well's words.
 pub const DROP: &str = "+ Drop a sample";
@@ -100,29 +111,6 @@ impl Keys {
         }
         if x < self.span(self.lo).0 { self.lo } else { self.hi }
     }
-}
-
-/// The keys the map shows for `state` (see the module notes).
-pub fn range(state: &State) -> (u8, u8) {
-    let covered = state.zones.iter().filter_map(|z| match z.pad {
-        Some(p) => state.pad_note(p).map(|n| (n, n)),
-        None => Some((z.keys[0], z.keys[1])),
-    });
-    let (mut lo, mut hi) =
-        covered.fold((None::<u8>, None::<u8>), |(lo, hi), (a, b)| (Some(lo.map_or(a, |l| l.min(a))), Some(hi.map_or(b, |h| h.max(b)))));
-    let start = state.pad_start_note;
-    let (mut lo, mut hi) = (lo.take().unwrap_or(start), hi.take().unwrap_or(start));
-    if hi - lo + 1 < MIN_KEYS {
-        hi = lo.saturating_add(MIN_KEYS - 1).min(127);
-        lo = hi.saturating_sub(MIN_KEYS - 1).min(lo);
-    }
-    if is_black(lo) {
-        lo -= 1;
-    }
-    if is_black(hi) {
-        hi += 1;
-    }
-    (lo, hi)
 }
 
 /// One zone as drawn.
@@ -361,14 +349,16 @@ impl Frame {
 
 /// Where a press at `at` lands on `rect` (a zone with its dot at `dot`): an edge or the dot, or the
 /// body (`None`).
+/// A zone narrower than two edge holds (one black key) splits its width between its side edges.
 pub fn part_at(rect: Rect, dot: Rect, at: egui::Pos2) -> Option<Part> {
+    let side = EDGE.min(rect.width() / 2.0);
     if dot.expand(EDGE / 2.0).contains(at) {
         Some(Part::Root)
     } else if at.y - rect.min.y < EDGE {
         Some(Part::Top)
-    } else if at.x - rect.min.x < EDGE {
+    } else if at.x - rect.min.x < side {
         Some(Part::Low)
-    } else if rect.max.x - at.x < EDGE {
+    } else if rect.max.x - at.x <= side {
         Some(Part::High)
     } else {
         None
@@ -422,7 +412,7 @@ pub(crate) fn show(
         p.rect(well, radius::DISPLAY, t.surface_inset, Stroke::new(chrome::FIELD_EDGE_WIDTH, t.line_inset), StrokeKind::Inside);
     }
     let area = well.shrink(chrome::FIELD_EDGE_WIDTH);
-    let (lo, hi) = range(state);
+    let (lo, hi) = (LOWEST, HIGHEST);
     (out.lo, out.hi) = (lo, hi);
     out.frame = (area.min.x, area.width());
     let f = Frame { area, keys: Keys::new(lo, hi, area.min.x, area.width()) };
@@ -621,19 +611,23 @@ fn keys(p: &egui::Painter, state: &State, f: &Frame, kb: Rect, inputs: &Inputs, 
         let drawn = Rect::from_min_max(r.min, pos2((r.max.x + chrome::FIELD_EDGE_WIDTH).min(kb.max.x), r.max.y));
         let cr = CornerRadius { nw: 0, ne: 0, sw: wr, se: wr };
         kp.rect(drawn, cr, fill, Stroke::new(chrome::FIELD_EDGE_WIDTH, color(tk::KEY_EDGE)), StrokeKind::Inside);
-        let name = (n % 12 == 0).then(|| {
-            let text = transit_midi::note_name(n, inputs.names);
-            let nr = widgets::role_text(
-                &kp,
-                &OCTAVE_NAME,
-                &text,
-                color(tk::OCTAVE_NAME_INK),
-                Align2::CENTER_BOTTOM,
-                pos2(r.center().x, r.max.y - tk::OCTAVE_NAME_INSET),
-            );
-            (text, r4(nr))
-        });
-        out.keys.push(KeyRecord { note: n, rect: r4(r), fill, name });
+        out.keys.push(KeyRecord { note: n, rect: r4(r), fill, name: None });
+    }
+    // The octave names over every white key (a name is wider than its key), centered on their C
+    // and kept inside the keyboard.
+    for k in out.keys.iter_mut().filter(|k| k.note % 12 == 0) {
+        let text = transit_midi::note_name(k.note, inputs.names);
+        let w = widgets::role_size(&kp, &OCTAVE_NAME, &text).x;
+        let cx = ((k.rect[0] + k.rect[2]) / 2.0).clamp(kb.min.x + w / 2.0, kb.max.x - w / 2.0);
+        let nr = widgets::role_text(
+            &kp,
+            &OCTAVE_NAME,
+            &text,
+            color(tk::OCTAVE_NAME_INK),
+            Align2::CENTER_BOTTOM,
+            pos2(cx, kb.max.y - tk::OCTAVE_NAME_INSET),
+        );
+        k.name = Some((text, r4(nr)));
     }
     let br = tk::BLACK_KEY_RADIUS as u8;
     for n in (f.keys.lo..=f.keys.hi).filter(|n| is_black(*n)) {
