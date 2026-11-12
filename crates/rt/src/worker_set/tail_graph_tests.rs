@@ -13,6 +13,8 @@ struct Host {
     rendered: Vec<usize>,
     taken: Vec<usize>,
     skipped: Vec<(usize, usize)>,
+    /// Starts and callback renders, in call order.
+    log: Vec<(&'static str, usize)>,
 }
 
 impl Host {
@@ -25,6 +27,7 @@ impl Host {
             rendered: Vec::new(),
             taken: Vec::new(),
             skipped: Vec::new(),
+            log: Vec::new(),
         }
     }
 
@@ -41,6 +44,7 @@ impl GraphHost for Host {
     }
     fn start(&mut self, t: usize, window: Window) -> Start {
         self.seen.push((t, window));
+        self.log.push(("start", t));
         self.starts[t]
     }
     fn refused(&mut self, _: usize) {
@@ -48,16 +52,17 @@ impl GraphHost for Host {
     }
     fn render_here(&mut self, t: usize) -> Rendered {
         self.rendered.push(t);
+        self.log.push(("render", t));
         if self.usable[t] { Rendered::Usable } else { Rendered::Unusable }
     }
-    fn poll(&mut self, _: Instant) -> Poll {
+    fn poll(&mut self, deadline: Instant) -> Poll {
         // Step each worker to completion before the poll, with injected equal stamps.
         let shared = Arc::clone(&self.set.shared);
         while let Some((slot, token)) = shared.jobs.try_claim_next(0) {
             let stamp = Instant::now();
             shared.run_attempt(slot, token, || stamp);
         }
-        self.set.poll(Instant::now(), |_| panic!("every published task already completed"))
+        self.set.poll(deadline, |_| panic!("every published task already completed"))
     }
     fn take(&mut self, t: usize, _: Outcome) -> bool {
         self.taken.push(t);
@@ -217,4 +222,22 @@ fn seams_default_off_and_reset_per_host_block() {
     assert_eq!(set.cost_clock(), CostClock::Real);
     set.install_test_seams();
     assert_eq!(set.slot_overrides(0), off);
+}
+
+/// G4: in the sweep (the dependents of a task a worker finished), every ready task of the batch is
+/// started, and the published ones woken, before the callback renders any of its own; the
+/// callback's renders come in table order. Mutation: rendering a callback task inside the step
+/// loop (as the wave did not) puts `render` between the starts and reverses the renders.
+#[test]
+fn g4_sweep_starts_the_whole_batch_before_a_callback_render_in_table_order() {
+    let edges: Vec<_> = (1..5).map(|t| (0, t, EdgeKind::Soft)).collect();
+    let graph = TaskGraph::with_slots(1, &[Some(0), Some(1), Some(2), Some(3), Some(4)], &edges);
+    let mut host = Host::new(5, 5);
+    host.starts = vec![Start::Publish, Start::Callback, Start::Publish, Start::Callback, Start::Publish];
+    let report = host.drive(&graph, false);
+    let last_start = host.log.iter().rposition(|e| e.0 == "start").unwrap();
+    let first_render = host.log.iter().position(|e| e.0 == "render").unwrap();
+    assert!(last_start < first_render, "a callback render ran before the batch was started: {:?}", host.log);
+    assert_eq!(host.rendered, [1, 3], "callback work in table order");
+    assert_eq!((report.mixed, host.set.stats().misuse), (3, 0));
 }

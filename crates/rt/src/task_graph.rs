@@ -12,14 +12,20 @@
 //! 1. [`GraphRun::begin`]: every task's counter is set to its input count; the tasks with none
 //!    are ready.
 //! 2. The wave: each ready task is started ([`GraphHost::start`]): published to the workers,
-//!    queued for the callback (a pinned task, rendered after the wake), taken as ready without a
+//!    queued for the callback (a pinned task, or one the host keeps), taken as ready without a
 //!    render, or found unavailable. Then the workers are woken, and the queued callback tasks are
 //!    rendered.
 //! 3. The sweep ([`GraphHost::poll`], which is [`WorkerSet::poll`]): each time a task resolves
 //!    with a result for this block ([`Outcome::Mixed`] or [`Outcome::Inline`]) the host takes it
-//!    home and checks its completion identity ([`GraphHost::take`]); each dependent whose
-//!    counter reaches zero is started at once (a pinned one rendered right there) and the newly
-//!    published are woken.
+//!    home and checks its completion identity ([`GraphHost::take`]); its dependents whose counter
+//!    reaches zero are a new batch, run as the wave is.
+//!
+//! **One batch** (the wave and every later batch alike; G4 of the tail audit): every ready step
+//! is started first (a callback task only queued), then the newly published are woken, and only
+//! then does the callback render its queued tasks, one at a time and lowest task number first
+//! (table order), the ready dependents of each render being started and woken before the next
+//! queued render. So no published task waits unwoken behind a callback render. The order of the
+//! sums does not depend on it: every bus and destination is summed in the order its edges force.
 //!
 //! **The failure rule.** A source that resolves without a usable result (an overrun of any cause,
 //! a fault, an identity mismatch, or unavailable when started) is the *origin* of a miss: every
@@ -208,7 +214,7 @@ pub struct GraphRun {
     /// The steps not yet handed out (a stack; each task is pushed at most once a block).
     steps: Box<[Step]>,
     steps_len: usize,
-    /// Pinned tasks ready during the wave, rendered after the wake.
+    /// Callback tasks of the open batch, rendered after its wake, lowest task number first.
     later: Box<[u32]>,
     later_len: usize,
     /// Tasks of the open block.
@@ -334,6 +340,16 @@ impl GraphRun {
             self.later_len += 1;
         }
     }
+
+    /// Takes the queued callback task with the lowest number (table order). Bounded by the queue,
+    /// which holds each task at most once a block.
+    fn take_deferred(&mut self) -> Option<usize> {
+        let queued = self.later.get(..self.later_len)?;
+        let (k, &t) = queued.iter().enumerate().min_by_key(|&(_, &t)| t)?;
+        self.later_len -= 1;
+        self.later.swap(k, self.later_len);
+        Some(t as usize)
+    }
 }
 
 /// How a ready task runs this block ([`GraphHost::start`]).
@@ -342,7 +358,7 @@ pub enum Start {
     /// Its inputs are written: the driver publishes it to the workers.
     Publish,
     /// Pinned to the callback (it reads the live input or the hardware): the driver has the
-    /// host render it ([`GraphHost::render_here`]), after the wake when it is ready in the wave.
+    /// host render it ([`GraphHost::render_here`]) after its batch is started and woken.
     Callback,
     /// Nothing to render: its result is ready as it is (dependents go ahead).
     Ready,
@@ -404,18 +420,7 @@ pub fn drive(host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, d
         return host.set().block_report();
     }
     let mut d = Driver { wake: 0, deadline };
-    d.steps(host, graph, run, Phase::Wave);
-    d.wake(host, deadline);
-    // In task order; nothing is deferred outside the wave, so the list does not grow here.
-    for k in 0..run.later_len {
-        let t = run.later[k] as usize;
-        Driver::render(host, graph, run, t);
-        // A pinned render that ran past the deadline leaves no time for its dependents.
-        let phase = if Instant::now() >= deadline { Phase::Late } else { Phase::Sweep };
-        d.steps(host, graph, run, phase);
-        d.wake(host, deadline);
-    }
-    run.later_len = 0;
+    d.batch(host, graph, run, Phase::Open);
     loop {
         match host.poll(deadline) {
             Poll::Finished => break,
@@ -426,8 +431,7 @@ pub fn drive(host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, d
                 } else {
                     run.fail(graph, task, task);
                 }
-                d.steps(host, graph, run, if late { Phase::Late } else { Phase::Sweep });
-                d.wake(host, deadline);
+                d.batch(host, graph, run, if late { Phase::Late } else { Phase::Open });
             }
         }
     }
@@ -436,10 +440,8 @@ pub fn drive(host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, d
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
-    /// The first wave: pinned tasks wait until the workers are woken.
-    Wave,
-    /// Inside the block: a ready task starts at once.
-    Sweep,
+    /// Before the deadline: a ready task may be published (the host's window decides).
+    Open,
     /// The deadline phase: a ready task is not published any more.
     Late,
 }
@@ -451,6 +453,21 @@ struct Driver {
 }
 
 impl Driver {
+    /// One batch (see the module docs): start every ready step, wake, then render the queued
+    /// callback tasks lowest first, each followed by the starts and the wake of what it made ready.
+    fn batch(&mut self, host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, mut phase: Phase) {
+        loop {
+            self.steps(host, graph, run, phase);
+            self.wake(host, self.deadline);
+            let Some(t) = run.take_deferred() else { return };
+            Self::render(host, graph, run, t);
+            // A callback render that ran past the deadline leaves no time for its dependents.
+            if Instant::now() >= self.deadline {
+                phase = Phase::Late;
+            }
+        }
+    }
+
     fn steps(&mut self, host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, phase: Phase) {
         while let Some(step) = run.next(graph) {
             match step {
@@ -481,20 +498,18 @@ impl Driver {
             Start::Publish if window == Window::Closed => {
                 host.set().closed_publish();
                 host.refused(t);
-                Self::render(host, graph, run, t);
+                run.defer(t);
             }
             Start::Publish => match host.set().publish(slot) {
                 Ok(Published::Published) => self.wake += 1,
                 Ok(Published::Skipped) => run.fail(graph, t, t),
                 Err(_) => {
                     host.refused(t);
-                    Self::render(host, graph, run, t);
+                    run.defer(t);
                 }
             },
-            Start::Callback if phase == Phase::Wave => run.defer(t),
-            Start::Callback => {
-                Self::render(host, graph, run, t);
-            }
+            // Rendered after the batch's starts and wake (`batch`).
+            Start::Callback => run.defer(t),
             Start::Ready => run.succeed(graph, t),
             Start::Busy => {
                 let _ = host.set().skip_busy(slot);
