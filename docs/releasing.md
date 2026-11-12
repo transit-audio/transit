@@ -13,7 +13,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
 
 3. Add this release's corpus files, `crates/model/tests/corpus/v<version>-demo.transit` and `v<version>-features.transit`,
    from the release commit (before tagging, so the files are what the tag writes):
-   `cargo test -p transit-engine --test corpus_generate -- --ignored --nocapture`. Extend the features session
+   `cargo test -p transit-engine --test corpus_generate -- --ignored --nocapture write_corpus_files` (the name keeps the other generators, which write the rack and take fixtures, from writing files for this release). Extend the features session
    in `crates/engine/tests/corpus_generate.rs` first if the release serializes something new, then run
    `cargo test -p transit-model` and commit the two files (`crates/model/tests/corpus/README.md`). Never
    regenerate an earlier release's files.

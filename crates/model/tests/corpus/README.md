@@ -22,6 +22,8 @@ v0.5.0 adds optional fields (`Source::disk` for disk-backed takes, the Macro Osc
 
 v0.6.0 adds its two files plus the rack, MIDI effect and take-stack fixtures. The v0.6.0 features session carries a rack with a macro, a MIDI effect slot (Transpose and the Random Sequencer) ahead of the instrument, a Resonator and a Modal Voice track, a Filter, a Time Stretcher and a Tuner insert, and a Touch return ramp of 350 ms. System Audio is off (nothing saved). It carries no Texture insert or take lanes: the Texture's frozen recording is a WAV beside the session, and the take stacks are in `v0.6.0-takes.transit`.
 
+v0.6.1 and v0.6.2 serialized nothing new and have no files. v0.7.0 adds its two files. The v0.7.0 features session also carries a Sampler kit (ADR 0041) on a track of its own: two managed sources (one at its native 44.1 kHz), pads with names, a stored note, mute, solo and a choke group, a pad start note of 40, keyed zones with every playback field, forward and ping-pong loops with a crossfade, edge fades, a round-robin group and a velocity-layered group with a seed, zones bound to a slice of each marker set, the slice loop with both marker sets (each past a removed id) and every detector and grid field, and slot controls; a user page on the Sampler (ADR 0047); a Custom and a Fit track height; and Grid Over Clips on, so it lists the `device_pages`, `sampler_patch` and `sampler_slicing_modes` needs. Transport mappings and Live outputs are per machine and never in a session. Kit presets (`.tkit`) are separate files with their own schema, tested in the model's own tests, and are not in the corpus. Only `write_corpus_files` runs for a release: the other ignored generators in `corpus_generate.rs` write the rack and take fixtures, which stay as v0.6.0 wrote them.
+
 One file is hand-written, not saved by a build: `v0.3.2-video.transit` has an audio track, a Video
 track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 (it opens with the video
 dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`
@@ -58,7 +60,7 @@ The files are what the release's code writes. Generate them from the release com
 release binary:
 
 ```
-cargo test -p transit-engine --test corpus_generate -- --ignored --nocapture
+cargo test -p transit-engine --test corpus_generate -- --ignored --nocapture write_corpus_files
 ```
 
 That builds the demo session with the app's own builder (`transit_engine::demo`), builds the

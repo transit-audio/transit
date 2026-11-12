@@ -52,8 +52,9 @@ fn pages_write_eight_slots_with_null_and_absent_or_empty_pages_are_not_written()
 
 #[test]
 fn sessions_without_pages_save_as_before() {
-    // Every released corpus session: no `pages` key and no `device_pages` need appear on a save,
-    // and a save of the save is the same bytes.
+    // Every released corpus session saved without user pages: no `pages` key and no `device_pages`
+    // need appear on a save. Every corpus session, also one that carries pages (v0.7.0's features
+    // session): a save of the save is the same bytes.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus");
     let mut n = 0;
     for entry in std::fs::read_dir(dir).unwrap() {
@@ -63,11 +64,13 @@ fn sessions_without_pages_save_as_before() {
         }
         let text = std::fs::read_to_string(&path).unwrap();
         let first = Session::from_json(&text).unwrap().to_json().unwrap();
-        assert!(!first.contains("\"pages\""), "{}", path.display());
-        assert!(!first.contains("device_pages"), "{}", path.display());
+        if !text.contains("\"pages\"") {
+            assert!(!first.contains("\"pages\""), "{}", path.display());
+            assert!(!first.contains("device_pages"), "{}", path.display());
+            n += 1;
+        }
         let second = Session::from_json(&first).unwrap().to_json().unwrap();
         assert_eq!(first, second, "{}", path.display());
-        n += 1;
     }
     assert!(n >= 2);
     let plain = session();
