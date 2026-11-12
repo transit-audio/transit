@@ -402,7 +402,8 @@ impl Session {
     }
 
     /// Features a file can list under `needs` (see [`Session::to_json`]) that this build understands.
-    pub const KNOWN_NEEDS: [&'static str; 5] = ["clip_loop", "clip_scale_mode", "device_pages", "sampler_patch", "sampler_slicing_modes"];
+    pub const KNOWN_NEEDS: [&'static str; 6] =
+        ["clip_loop", "clip_scale_mode", "device_pages", "pre_count", "sampler_patch", "sampler_slicing_modes"];
 
     /// The `needs` entries this session's content requires: a reader that does not know one would
     /// silently drop or misplay it. Empty for a session that uses none.
@@ -415,6 +416,10 @@ impl Session {
         // ADR 0047: user pages on any instrument, insert or MIDI effect.
         if self.tracks.iter().any(Track::has_device_pages) {
             needs.push("device_pages");
+        }
+        // ADR 0052: content before bar 1 (a pre-count zone).
+        if self.start() < 0 {
+            needs.push("pre_count");
         }
         // ADR 0041: a Sampler patch, and its loop's two marker sets and mode.
         let patches = || self.tracks.iter().filter_map(|t| t.instrument.as_ref()).filter_map(|i| i.sampler_patch.as_ref());
@@ -558,6 +563,13 @@ impl Session {
     /// End of the last clip on any track (session length).
     pub fn content_end(&self) -> Samples {
         self.tracks.iter().filter_map(|t| t.playlist().map(|p| p.end())).max().unwrap_or(0)
+    }
+
+    /// The session start (ADR 0052): the earliest start of any clip on any playlist of any track,
+    /// or 0 when that is later than 0, so never after bar 1. Every playlist counts, so choosing a
+    /// take never moves it. The pre-count zone is `start()..0`, empty when this is 0.
+    pub fn start(&self) -> Samples {
+        self.all_clips().map(|c| c.start).min().unwrap_or(0).min(0)
     }
 
     /// Feet+frames reading of sample 0, in frames (Setup › Current Feet+Frames Position).

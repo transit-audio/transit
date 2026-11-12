@@ -31,6 +31,8 @@ pub use midi_transport::{TransportControl, TransportPrefs, TransportProfiles};
 mod midi_output;
 mod mixer;
 pub mod pad_notes;
+#[cfg(test)]
+mod pre_count_tests;
 mod rack;
 mod route_graph;
 pub mod sampler_fades;
