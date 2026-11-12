@@ -303,7 +303,10 @@ pub fn decode(bytes: &[u8], ext_hint: Option<&str>) -> Result<(AudioInfo, AudioB
     }
 }
 
-/// Encode `buf` as WAV/BWF, AIFF/AIFF-C, FLAC or Ogg Opus. Samples are clamped to [-1, 1].
+/// Encode `buf` as WAV/BWF, AIFF/AIFF-C, FLAC or Ogg Opus. 32-bit float files keep every finite
+/// sample as it is, beyond full scale too; integer files (and the Opus encoder's input) clip at
+/// full scale. A NaN sample is written as silence; so is an infinite one in a float file (an
+/// integer file clips it to full scale).
 pub fn encode(buf: &AudioBuffer, opts: &EncodeOptions) -> Result<Vec<u8>> {
     match opts.format {
         FileFormat::Wav => wav::encode(buf, opts.bit_depth, opts.dither, opts.bwf.as_ref(), false, None),

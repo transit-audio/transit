@@ -53,6 +53,46 @@ fn bounces_write_exactly_the_mix_and_report_its_levels() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A 32-bit float bounce of a mix peaking at +6 dBFS keeps the peak (#519); a 24-bit and a 16-bit
+/// bounce of the same mix clip at full scale, sample for sample as the integer writer always has.
+#[test]
+fn a_float_bounce_keeps_a_peak_above_full_scale_and_integer_bounces_clip_it() {
+    let rate = 48_000u32;
+    let mut s = transit_model::Session::new("Hot", transit_time::SampleRate::new(rate).unwrap());
+    let t = s.add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Stereo, Some("Hot"));
+    let peak = 10f32.powf(6.0 / 20.0);
+    let ch: Vec<f32> = (0..4_800).map(|i| peak * (2.0 * std::f32::consts::PI * 100.0 * i as f32 / rate as f32).sin()).collect();
+    let buf = transit_audio_io::AudioBuffer { sample_rate: rate, channels: vec![ch.clone(), ch] };
+    let src = transit_engine::io::add_source(&mut s, "Hot", buf, None, FileFormat::Wav);
+    let id = s.new_clip_id();
+    transit_engine::edit::place_clip(&mut s, t, transit_model::Clip::audio(id, "Hot", src, 0, 0, 4_800));
+    let e = transit_engine::Engine::new(s);
+    let r = Range::new(0, 4_800);
+    let mix = transit_mix::render_range(e.session(), r, 1024);
+    let top = mix.iter().flatten().fold(0f32, |m, v| m.max(v.abs()));
+    assert!(top > 1.9, "the mix peaks near +6 dBFS: {top}");
+    let dir = scratch("bounce-overs");
+    let path = dir.join("Mix.wav");
+    for (depth, bits) in [(BitDepth::Float32, 0), (BitDepth::Int24, 24), (BitDepth::Int16, 16)] {
+        let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: depth, dither: false, bwf: None, bitrate_kbps: None, title: None };
+        let mut bounce = Bounce::new(e.session_arc(), &path, r, &opts, None, false, false).unwrap();
+        while bounce.step(|| false).unwrap().is_none() {}
+        let (_, file) = transit_audio_io::decode(&std::fs::read(&path).unwrap(), None).unwrap();
+        if bits == 0 {
+            let as_bits = |m: &[Vec<f32>]| m.iter().map(|c| c.iter().map(|v| v.to_bits()).collect::<Vec<_>>()).collect::<Vec<_>>();
+            assert_eq!(as_bits(&file.channels), as_bits(&mix), "the float bounce is the mix, bit for bit");
+            continue;
+        }
+        let scale = f64::from(1u32 << (bits - 1));
+        let quantize = |v: f32| ((f64::from(v.clamp(-1.0, 1.0)) * scale).round().clamp(-scale, scale - 1.0) / scale) as f32;
+        let expect: Vec<Vec<f32>> = mix.iter().map(|c| c.iter().map(|&v| quantize(v)).collect()).collect();
+        assert_eq!(file.channels, expect, "{depth:?}");
+        let file_top = file.channels.iter().flatten().fold(0f32, |m, v| m.max(*v));
+        assert_eq!(file_top, ((scale - 1.0) / scale) as f32, "{depth:?} clips at full scale");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_bounce_too_big_for_its_format_fails_and_keeps_the_old_file() {
     let e = transit_engine::demo::demo_engine();

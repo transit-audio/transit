@@ -212,7 +212,8 @@ fn encode_rejects_bad_buffers_and_formats() {
     for f in [FileFormat::Mp3, FileFormat::Ogg, FileFormat::Aac, FileFormat::Alac, FileFormat::Caf, FileFormat::Other] {
         assert!(encode(&sine(48_000, 1, 10), &EncodeOptions { format: f, ..EncodeOptions::default() }).is_err());
     }
-    // Non-finite and out-of-range samples are clamped, not errors.
+    // Non-finite and out-of-range samples are not errors: integer depths clamp them to full scale
+    // (NaN to silence); a float file keeps every finite sample and writes a non-finite one as 0.0.
     let mut b = AudioBuffer::new(48_000, 1, 4);
     b.channels[0] = vec![f32::NAN, f32::INFINITY, -5.0, 0.5];
     for format in [FileFormat::Wav, FileFormat::Aiff, FileFormat::Flac] {
@@ -223,8 +224,12 @@ fn encode_rejects_bad_buffers_and_formats() {
             let bytes = encode(&b, &EncodeOptions { format, bit_depth: depth, ..EncodeOptions::default() }).unwrap();
             let (_, out) = decode(&bytes, None).unwrap();
             assert_eq!(out.channels[0][0], 0.0);
-            assert!(out.channels[0][1] > 0.99 && out.channels[0][1] <= 1.0);
-            assert_eq!(out.channels[0][2], -1.0);
+            if depth == BitDepth::Float32 {
+                assert_eq!(out.channels[0][1..], [0.0, -5.0, 0.5], "{format:?}");
+            } else {
+                assert!(out.channels[0][1] > 0.99 && out.channels[0][1] <= 1.0);
+                assert_eq!(out.channels[0][2], -1.0);
+            }
         }
     }
     // Ragged buffers encode the common length.

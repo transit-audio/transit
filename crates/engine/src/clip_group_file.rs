@@ -268,6 +268,32 @@ mod tests {
     }
 
     #[test]
+    fn audio_above_full_scale_survives_a_group_file_bit_for_bit() {
+        use transit_model::{ChannelFormat, Clip, TrackKind};
+        let dir = std::env::temp_dir().join(format!("transit-grp-overs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("hot.tclips").to_string_lossy().into_owned();
+        let hot = vec![1.5f32, -2.0, 0.25, 1.0e3, f32::from_bits(1), -0.0];
+        let mut e = crate::Engine::default();
+        let s = e.session_mut();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        let audio = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![hot.clone()] };
+        let src = crate::io::add_source(s, "Hot", audio, None, transit_audio_io::FileFormat::Wav);
+        let id = s.new_clip_id();
+        crate::edit::place_clip(s, t, Clip::audio(id, "Hot", src, 0, 0, 6));
+        assert_eq!(e.execute("file.export_clip_groups", &json!({"path": path, "clips": [id.0]})).unwrap()["clips"], 1);
+        let r = e.execute("file.import_clip_groups", &json!({"path": path, "at": 48_000})).unwrap();
+        let placed = transit_model::ClipId(r["clips"][0].as_u64().unwrap());
+        let Some((_, c)) = e.session().find_clip(placed) else { panic!("no imported clip") };
+        let transit_model::ClipContent::Audio { source, .. } = &c.content else { panic!("not audio") };
+        let source = *source;
+        assert_ne!(source, src, "the import reads the file, not the session's own source");
+        let got = &e.session().pool.get(source).unwrap().buffer.channels[0];
+        assert_eq!(got.iter().map(|s| s.to_bits()).collect::<Vec<_>>(), hot.iter().map(|s| s.to_bits()).collect::<Vec<_>>(), "{got:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn positions_in_a_group_file_are_kept_within_reach() {
         let dir = transit_test_support::TestDir::new("grp-far");
         let _ = std::fs::create_dir_all(&dir);

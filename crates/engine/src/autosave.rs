@@ -627,6 +627,27 @@ mod tests {
     }
 
     #[test]
+    fn audio_above_full_scale_survives_autosave_and_crash_recovery_bit_for_bit() {
+        let dir = folder("autosave-overs");
+        let hot = vec![1.5f32, -2.0, 0.25, 1.0e3, f32::from_bits(1), -0.0];
+        let mut e = Engine::default();
+        let s = e.session_mut();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        let src = crate::io::add_source(s, "Hot", AudioBuffer { sample_rate: 48_000, channels: vec![hot.clone()] }, None, FileFormat::Wav);
+        let id = s.new_clip_id();
+        crate::edit::place_clip(s, t, Clip::audio(id, "Hot", src, 0, 0, 6));
+        let mut a = Autosave::create(&dir, "Hot").unwrap();
+        a.write(e.session(), None, None).unwrap();
+        drop(a);
+        let left = leftovers(&dir);
+        let mut r = Engine::default();
+        recover(&mut r, &left[0]).unwrap();
+        let got = &r.session().pool.get(r.session().sources[0].id).unwrap().buffer.channels[0];
+        assert_eq!(got.iter().map(|s| s.to_bits()).collect::<Vec<_>>(), hot.iter().map(|s| s.to_bits()).collect::<Vec<_>>(), "{got:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn frozen_texture_media_survives_autosave_and_crash_recovery() {
         use transit_dsp::{Plugin, plugins::texture::TextureFx};
         let dir = transit_test_support::TestDir::new("frozen-autosave");

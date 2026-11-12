@@ -943,6 +943,10 @@ mod open_tests {
 }
 
 #[cfg(test)]
+#[path = "float_overs_tests.rs"]
+mod float_overs_tests;
+
+#[cfg(test)]
 mod bundle_tests {
     use super::*;
 
