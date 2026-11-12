@@ -6,17 +6,11 @@ use std::path::PathBuf;
 use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
 use transit_model::sampler_patch::{PatchV1, SamplerPatch};
 
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new() -> Self {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        // The stamp only names fresh storage; no test outcome depends on elapsed time.
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let path = std::env::temp_dir().join(format!("transit-tpreset-{}-{id}-{stamp}", std::process::id()));
-        std::fs::create_dir_all(&path).unwrap();
-        Self(path)
+        Self(transit_test_support::TestDir::created("tpreset"))
     }
 
     fn audio(&self, name: &str, frames: usize, seed: usize) -> PathBuf {
@@ -27,12 +21,6 @@ impl Dir {
         let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Int16, ..EncodeOptions::default() };
         std::fs::write(&path, transit_audio_io::encode(&audio, &opts).unwrap()).unwrap();
         path
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

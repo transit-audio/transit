@@ -8,16 +8,11 @@ use std::collections::BTreeMap;
 use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
 use transit_model::sampler_patch::{Marker, Markers, SliceBinding, SliceMode, SliceSet};
 
-struct Dir(PathBuf);
+struct Dir(transit_test_support::TestDir);
 
 impl Dir {
     fn new() -> Self {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("transit-zone-reset-{}-{id}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir_all(&path).unwrap();
-        Self(path)
+        Self(transit_test_support::TestDir::created("zone-reset"))
     }
 
     fn audio(&self, name: &str, frames: usize) -> PathBuf {
@@ -27,12 +22,6 @@ impl Dir {
         let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Int16, ..EncodeOptions::default() };
         std::fs::write(&path, transit_audio_io::encode(&audio, &opts).unwrap()).unwrap();
         path
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
