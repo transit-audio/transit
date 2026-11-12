@@ -84,13 +84,19 @@ impl Rig {
     }
 
     fn block(&mut self, playing: bool) {
+        let quarters = self.frame as f64 / 22_500.0;
+        // Every block starts a new bar where bar 0 would fall elsewhere, as after a meter change, so
+        // every block rebuilds every zone's settings under the probe (#490).
+        let bar = self.frame / BLOCK as i64;
         let t = Transport {
             playing,
             tempo: 128.0,
             numerator: 4,
             denominator: 4,
             samples: self.frame,
-            quarters: self.frame as f64 / 22_500.0,
+            quarters,
+            bar_start: quarters,
+            bar,
             ..Transport::default()
         };
         self.frame += BLOCK as i64;

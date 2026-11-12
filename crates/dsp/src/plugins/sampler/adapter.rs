@@ -31,6 +31,7 @@ use super::handoff::{self, AudioEnd, Generation, Publisher};
 use super::pads::PadWords;
 use super::params::SlotParams;
 use crate::Transport;
+use crate::plugins::lfo::SyncDivision;
 use crate::util::frames_in;
 
 pub(super) struct CorePath {
@@ -54,6 +55,9 @@ pub(super) struct CorePath {
     bar_quarters: f64,
     bar_origin: (i64, f64),
     sr: f32,
+    /// Zones handed to the core by `apply_params` since the instance was made (#490's count).
+    #[cfg(test)]
+    reapplied: usize,
 }
 
 impl CorePath {
@@ -81,6 +85,8 @@ impl CorePath {
             bar_quarters: 4.0,
             bar_origin: (0, 0.0),
             sr,
+            #[cfg(test)]
+            reapplied: 0,
         };
         (path, publisher)
     }
@@ -113,9 +119,12 @@ impl CorePath {
         self.quarters = playing.then_some(t.quarters);
         let bar = if t.numerator > 0 && t.denominator > 0 { f64::from(t.numerator) * 4.0 / f64::from(t.denominator) } else { 4.0 };
         let bar = bar.clamp(0.0625, 256.0);
-        if bar != self.bar_quarters || self.bar_origin != (t.bar, t.bar_start) {
+        // A bar line moves (bar, bar_start) but not where bar 0 falls, which is all the zones'
+        // synced divisions read: only a meter change, or a locate across one, rebuilds them (#490).
+        let origin = (t.bar, t.bar_start);
+        if bar != self.bar_quarters || SyncDivision::bar_zero(bar, origin) != SyncDivision::bar_zero(bar, self.bar_origin) {
             self.bar_quarters = bar;
-            self.bar_origin = (t.bar, t.bar_start);
+            self.bar_origin = origin;
             self.all_dirty = true;
         }
     }
@@ -226,6 +235,10 @@ impl CorePath {
                 self.params.compose(z, zone, self.bar_quarters, self.bar_origin, self.sr);
                 // Same region: no fade; checked when it was published.
                 let _ = self.core.set_zone_glide(z, *zone, self.frame, u32::try_from(frames).unwrap_or(u32::MAX));
+                #[cfg(test)]
+                {
+                    self.reapplied += 1;
+                }
             }
         }
     }
@@ -311,6 +324,12 @@ impl CorePath {
     #[cfg(test)]
     pub(super) fn held(&self) -> (bool, usize) {
         (self.current.is_some(), self.retained.iter().flatten().count())
+    }
+
+    /// Zones re-applied to the core by slot parameter changes, rate or meter changes, ever.
+    #[cfg(test)]
+    pub(super) fn reapplied(&self) -> usize {
+        self.reapplied
     }
 
     #[cfg(test)]

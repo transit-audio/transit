@@ -306,3 +306,51 @@ fn a_random_group_mode_reaches_the_core() {
         assert_eq!(out[0], (x % 4) as f32 + 1.0);
     }
 }
+
+/// A kit of 16 key-map groups of 16 zones each (two velocity layers of eight alternatives), every
+/// group on its own key: all 256 zones in groups.
+fn grouped_kit() -> PatchSpec {
+    let zones = (0..ZONES)
+        .map(|z| {
+            let (group, layer, alternative) = ((z / 16) as u8, ((z / 8) % 2) as u8, (z % 8) as u8);
+            let membership = Some(Membership { group, layer, alternative });
+            let velocities = if layer == 0 { (1, 63) } else { (64, 127) };
+            let key = 36 + group;
+            Some(Zone { membership, keys: (key, key), velocities, ..zone(0, 4, unity(PlayMode::OneShot, key, 0)) })
+        })
+        .collect();
+    PatchSpec { sources: vec![mono(vec![0.5; 4])], zones, ..PatchSpec::default() }
+}
+
+/// The transport playing at the start of bar `bar` (which starts at quarter `bar_start`) in
+/// `numerator`/4.
+fn at_bar(bar: i64, bar_start: f64, numerator: u32) -> Transport {
+    Transport { playing: true, tempo: 120.0, numerator, denominator: 4, quarters: bar_start, bar_start, bar, ..Transport::default() }
+}
+
+/// #490: a bar line re-applies no zone (nothing a zone reads moved), a meter change re-applies
+/// each zone once, and neither re-runs the key-map group check, whose shapes cannot have changed.
+#[test]
+fn a_bar_line_reapplies_no_zone_and_a_meter_change_runs_no_group_check() {
+    let (mut s, mut p) = instance();
+    p.publish(grouped_kit()).unwrap();
+    s.set_transport(&at_bar(0, 0.0, 4));
+    block(&mut s, 64);
+    let counts = |s: &Sampler| {
+        let c = s.core.as_deref().unwrap();
+        (c.reapplied(), c.core().diagnostics().group_checks)
+    };
+    let (zones0, checks0) = counts(&s);
+    assert!(s.core.as_deref().unwrap().core().zone(255).is_some(), "the kit is adopted");
+    for bar in 1..=8 {
+        s.set_transport(&at_bar(bar, bar as f64 * 4.0, 4));
+        block(&mut s, 64);
+    }
+    assert_eq!(counts(&s), (zones0, checks0), "eight bar lines in 4/4 re-apply nothing");
+    // 3/4 from bar 9 (quarter 36): the zones' bar divisions are rebuilt once.
+    for bar in 9..=12 {
+        s.set_transport(&at_bar(bar, 36.0 + (bar - 9) as f64 * 3.0, 3));
+        block(&mut s, 64);
+    }
+    assert_eq!(counts(&s), (zones0 + ZONES, checks0), "one rebuild at the meter change, no group check");
+}

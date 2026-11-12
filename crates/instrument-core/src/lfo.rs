@@ -63,9 +63,18 @@ pub struct SyncDivision {
 impl SyncDivision {
     /// `bar` is zero-based; `bar_start` is its absolute quarter-note position. Meter changes
     /// occur on bar lines, and update this origin without resetting the count of bars.
-    pub fn new(i: usize, quarters_per_bar: f64, (bar, bar_start): (i64, f64)) -> Self {
-        let origin = if i <= 2 && bar_start.is_finite() { bar_start - bar as f64 * quarters_per_bar } else { 0.0 };
+    pub fn new(i: usize, quarters_per_bar: f64, bar_origin: (i64, f64)) -> Self {
+        let origin = if i <= 2 { Self::bar_zero(quarters_per_bar, bar_origin) } else { 0.0 };
         Self { quarters: division_quarters(i, quarters_per_bar), origin }
+    }
+
+    /// Where bar 0 would start, in quarter notes, had the meter of bar `bar` (starting at
+    /// `bar_start`) held from the beginning: all a bar division reads of the bar position. It is
+    /// the same for every bar of a stretch in one meter, so a host can tell a bar line (nothing to
+    /// rebuild) from a meter change or a locate across one (#490).
+    #[must_use]
+    pub fn bar_zero(quarters_per_bar: f64, (bar, bar_start): (i64, f64)) -> f64 {
+        if bar_start.is_finite() { bar_start - bar as f64 * quarters_per_bar } else { 0.0 }
     }
 
     /// `(bar + (quarters - bar_start) / quarters_per_bar) / bars_per_cycle`, modulo one.

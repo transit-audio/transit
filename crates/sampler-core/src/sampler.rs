@@ -42,6 +42,9 @@ pub struct Diagnostics {
     pub steals: u64,
     /// Voice-blocks that read a missing frame (played as zero): one per voice per `process` call.
     pub underruns: u64,
+    /// Key-map group checks a zone edit ran (each one a pass over every zone of every group): only
+    /// an edit that changes a zone's group, layer, alternative, keys or velocities runs one (#490).
+    pub group_checks: u64,
 }
 
 /// One sounding voice's place ([`SamplerCore::voice_positions`]).
@@ -176,7 +179,10 @@ impl SamplerCore {
         }
         let shape = zone.as_ref().and_then(selection::shape);
         let old_member = self.zone(index).and_then(|z| z.membership);
-        if shape.is_some() || old_member.is_some() {
+        // The zones in place always pass the check, so an edit that keeps this zone's shape (a
+        // level, pan or shaper change) leaves every group as it was and needs no pass (#490).
+        if (shape.is_some() || old_member.is_some()) && shape != self.zone(index).and_then(selection::shape) {
+            self.diag.group_checks += 1;
             selection::check_groups(|i| if i == index { shape } else { self.zone(i).and_then(selection::shape) })?;
         }
         let old = self.zones.get(index).and_then(|s| s.as_ref().map(|s| s.zone.region));
