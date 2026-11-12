@@ -479,10 +479,11 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     ui.painter().line_segment([pos2(list.max.x, full.min.y), pos2(list.max.x, full.max.y)], Stroke::new(1.0, TOKENS.line));
 
     // The grid is computed and painted once. View > Grid Over Clips only moves its layer: above the
-    // clips instead of beneath them (#302).
+    // clips instead of beneath them (#302). View > Show Grid Lines off hides it in both layers; the
+    // ruler keeps its ticks and bar numbers (#328).
     let grid = grid_overlay::lines(&s, map, tl.min.x, tl.max.x);
     let over = s.edit.grid_lines && s.edit.grid_over_clips;
-    grid_and_ruler(ui, &grid, ruler, tl, !over);
+    grid_and_ruler(ui, &grid, ruler, tl, s.edit.grid_lines && !over);
     clips(app, ui, &s, map, tl, &rows, &geo, &mut layout);
     if over {
         let bodies = grid_overlay::bodies(&layout.clips, tl);
@@ -513,7 +514,8 @@ fn bar_at(s: &Session, bar: i64) -> Samples {
 }
 
 /// The ruler with bar numbers and, when `lane` is set, the grid lines across the timeline. With
-/// Grid Over Clips on, the caller paints the lane lines itself after the clips.
+/// Grid Over Clips on, the caller paints the lane lines itself after the clips; with Show Grid
+/// Lines off nobody does, and the ruler alone keeps its ticks.
 fn grid_and_ruler(ui: &Ui, grid: &[grid_overlay::Line], ruler: Rect, tl: Rect, lane: bool) {
     let p = ui.painter();
     p.rect_filled(ruler, 0.0, TOKENS.ruler);

@@ -53,6 +53,7 @@ ids! {
     // help\arrange-header.toml
     ArrangeHeaderHeight => "arrange_header.height",
     ViewTrackHeight => "view.track_height",
+    ViewGridLines => "view.grid_lines",
     ViewGridOverClips => "view.grid_over_clips",
     WindowCollapseEditors => "window.collapse_editors",
     WindowExpandEditors => "window.expand_editors",

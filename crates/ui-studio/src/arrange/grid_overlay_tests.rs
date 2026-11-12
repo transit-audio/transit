@@ -157,16 +157,35 @@ fn toggling_the_command_flips_the_layer_and_leaves_the_segment_set() {
     }
 }
 
+/// The ruler's tick and bar-number strokes of a frame (short verticals inside the ruler).
+fn ruler_ticks(ui: &Ui) -> usize {
+    let r = ui.app.arrange.layout.ruler;
+    flat(&ui.shapes)
+        .iter()
+        .filter(|s| matches!(s, Shape::LineSegment { points, .. } if points[0].x == points[1].x && points[0].y >= r[1] - 0.5 && points[1].y <= r[3] + 0.5))
+        .count()
+}
+
 #[test]
-fn hidden_grid_lines_keep_the_grid_beneath_the_clips_even_when_the_option_is_on() {
+fn hidden_grid_lines_hide_the_lane_grid_in_both_layers_and_the_ruler_keeps_its_ticks() {
+    // #328: the flag hid only the overlay; the lane grid beneath the clips drew regardless.
     let mut ui = with_clip();
-    ui.app.run("view.grid_over_clips", json!({"value": true})).unwrap();
+    let shown = painted(&mut ui);
+    let ticks = ruler_ticks(&ui);
+    assert!(!shown.grid.is_empty() && ticks > 0, "lines and ticks drawn by default");
     ui.app.run("view.grid_lines", json!({"value": false})).unwrap();
-    let p = painted(&mut ui);
-    assert!(p.grid.iter().all(|g| g.0 < *p.clip.iter().min().unwrap()), "beneath, as with the option off");
+    let hidden = painted(&mut ui);
+    assert!(hidden.grid.is_empty(), "no lane grid with the lines hidden: {:?}", hidden.grid);
+    assert_eq!(ruler_ticks(&ui), ticks, "the ruler keeps every tick");
+    // Grid Over Clips on changes nothing while the lines are hidden.
+    ui.app.run("view.grid_over_clips", json!({"value": true})).unwrap();
+    assert!(painted(&mut ui).grid.is_empty(), "no overlay either");
+    // Shown again: the overlay above the clips, then beneath them with the option off.
     ui.app.run("view.grid_lines", json!({"value": true})).unwrap();
     let p = painted(&mut ui);
-    assert!(p.grid.iter().all(|g| g.0 > *p.clip.iter().max().unwrap()), "above once lines are shown");
+    assert!(!p.grid.is_empty() && p.grid.iter().all(|g| g.0 > *p.clip.iter().max().unwrap()), "above once lines are shown");
+    ui.app.run("view.grid_over_clips", json!({"value": false})).unwrap();
+    assert_eq!(painted(&mut ui).all, shown.all, "back to the default paint");
 }
 
 #[test]
@@ -240,6 +259,19 @@ impl Ui {
         let _ = crate::control::handle_for_test(&mut self.app, &ctx, &req);
         self.frames(30);
     }
+}
+
+#[test]
+fn the_view_menus_show_grid_lines_item_toggles_the_flag() {
+    let mut t = Ui::new();
+    assert!(t.app.engine.session().edit.grid_lines, "on by default");
+    t.menu("View");
+    t.menu("Show Grid Lines");
+    assert!(!t.app.engine.session().edit.grid_lines, "the item hides the lines");
+    assert!(t.app.engine.journal.iter().any(|(id, _)| id == "view.grid_lines"));
+    t.menu("View");
+    t.menu("Show Grid Lines");
+    assert!(t.app.engine.session().edit.grid_lines, "and shows them again");
 }
 
 #[test]

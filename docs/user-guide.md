@@ -68,6 +68,11 @@ timing edits can be judged by eye. It is off by default, which keeps the grid be
 Ableton Live draws its grid through clips while Logic Pro draws it behind regions, so transit offers
 both. The setting is saved in the session.
 
+**View > Show Grid Lines** (on by default) shows or hides the grid's lines across the arrangement,
+beneath the clips and over them; the ruler keeps its ticks and bar numbers and snapping still
+follows the grid, as when you hide the grid in Ableton Live or Logic Pro. It is saved in the
+session.
+
 ## Piano roll
 
 Click the ruler above the notes to set the playhead; drag it up or down to zoom.

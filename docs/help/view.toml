@@ -9,6 +9,11 @@ text = "Increase All and Decrease All step every track independently. Reset Trac
 key = "Alt+= or Alt+-"
 
 [[entry]]
+id = "view.grid_lines"
+name = "Show Grid Lines"
+text = "Shows or hides the arrangement's bar, beat and grid lines, beneath the clips and over them. The ruler keeps its ticks and bar numbers, and snapping still follows the grid. On by default; Ableton Live and Logic Pro both let you hide the grid."
+
+[[entry]]
 id = "view.grid_over_clips"
 name = "Grid Over Clips"
 text = "Strokes the bar and beat lines again over clip bodies, over the waveform, at reduced strength, so timing edits can be judged by eye. Off by default, which keeps the lines in empty lane space only. Ableton Live draws its grid through clips; Logic Pro draws it behind regions. This option gives you either."

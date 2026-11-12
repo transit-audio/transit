@@ -226,6 +226,15 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                     }
                     ui.separator();
                     crate::arrange::track_height::menu(app, ui, &mut view_items);
+                    // The arrangement's grid lines shown or hidden (#328): Live and Logic both let you
+                    // hide them; the ruler keeps its ticks.
+                    let b = ui.add(crate::chrome::MenuRow::new("Show Grid Lines").checked(app.engine.session().edit.grid_lines));
+                    crate::help::hover(ui, &b, crate::help::Id::ViewGridLines);
+                    view_items.push(crate::mixer::MenuItem::at(ui, "Show Grid Lines".into(), "view.grid_lines".into(), b.rect));
+                    if b.clicked() {
+                        let _ = app.run("view.grid_lines", json!({}));
+                        ui.close();
+                    }
                     // Grid lines through clips (#302): Ableton draws them over clips, Logic behind regions.
                     let b = ui.add(crate::chrome::MenuRow::new("Grid Over Clips").checked(app.engine.session().edit.grid_over_clips));
                     crate::help::hover(ui, &b, crate::help::Id::ViewGridOverClips);
