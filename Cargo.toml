@@ -50,8 +50,10 @@ thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
-# Float functions for the Tier B crates' no-default (`no_std`) configuration (ADR 0037).
-libm = "0.2"
+# Float functions: the backing of transit-math (ADR 0055) and of the Tier B crates' no-default
+# (`no_std`) configuration (ADR 0037). Pinned exactly: an upgrade is a pull request that moves this pin,
+# and if any of transit-math's pinned output tables moves, it is a DSP change (ADR 0055, 2.1).
+libm = "=0.2.16"
 getrandom = "0.3"
 rayon = "1"
 proptest = "1"
