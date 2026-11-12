@@ -12,11 +12,10 @@ use transit_vst3_host as host;
 const FIXTURE_PLUGINS: usize = 3;
 
 static SERIAL: Mutex<()> = Mutex::new(());
-static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 struct Test {
     _serial: MutexGuard<'static, ()>,
-    dir: PathBuf,
+    dir: transit_test_support::TestDir,
     fixture: PathBuf,
 }
 
@@ -24,9 +23,11 @@ impl Test {
     fn new() -> Self {
         let serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let fixture = common::fixture_dir().to_path_buf();
-        let dir =
-            Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("vst3-registry-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
-        std::fs::create_dir_all(&dir).unwrap();
+        // A fresh folder per test, never one left by an earlier run (E51 recurrence, #347, as #346 did for CLAP). The
+        // process id alone repeats across runs whose processes get the same ids (a VM that boots for each run). The
+        // guard names the folder with the clock and a counter, creates it with `create_dir` (it refuses a folder that
+        // exists) and removes it when the test ends, so no plug-in a scan loaded is ever rewritten in place.
+        let dir = transit_test_support::TestDir::created_in(Path::new(env!("CARGO_TARGET_TMPDIR")), "vst3-registry");
         host::set_scan_extra_dirs_only(true);
         host::set_scan_hook(None);
         host::set_extra_dirs(Vec::new());
