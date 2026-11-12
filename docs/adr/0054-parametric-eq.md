@@ -346,7 +346,7 @@ The hand-off's 1120 by 560 points with a minimum width of 880 follows the device
 ### 17. Control channel and help
 
 - **No new command.** The device is driven by the existing `mix.insert`, `mix.insert_param` and `mix.insert_params` with the ids of decision 5, and read by `session.inspect`. Refusals carry the words of 5.3. A read-only query of the computed curve is a later option (Open).
-- **Help:** `docs/help/parametric-eq.toml` with rows for the device, adding and removing bands, Type, Slope, Placement, Solo, the three phase modes, Linear Resolution, Gain match (computed from the curve), the analyzer and its settings, and the bypassed state. The phase-mode rows carry the framing by use (decision 6): Zero latency is the default and the mode for mixing and tracking, and near the top of the range at 44.1 and 48 kHz its bands can depart from their analog shape by up to about 3.8 dB at 44.1 kHz and 2.8 dB at 48 kHz (amended 2026-11-12) (the curve shows exactly this; Natural corrects it); Natural and Linear add latency and are for mastering and other work where nothing is being tracked. The Linear rows state each Resolution's latency, pre-ringing, stepped drags, and plainly the low-end error at Short (a +12 dB Q 4 bell at 100 Hz reaches about +9.9 dB and at 30 Hz about +6.3 dB; use Long or Maximum, or another mode, for low bands), and that narrow notches stay shallow in Linear.
+- **Help:** `docs/help/parametric-eq.toml` with rows for the device, adding and removing bands, Type, Slope, Placement, Solo, the three phase modes, Linear Resolution, Gain match (computed from the curve), the analyzer and its settings, and the bypassed state. The phase-mode rows carry the framing by use (decision 6): Zero latency is the default and the mode for mixing and tracking, and near the top of the range at 44.1 and 48 kHz its bands can depart from their analog shape by up to about 3.8 dB at 44.1 kHz and 2.8 dB at 48 kHz (amended 2026-11-12) (the curve shows exactly this; Natural corrects it); Natural and Linear add latency and are for mastering and other work where nothing is being tracked. A further sentence states that the accuracy figures are for 44.1 kHz and above and what 32 kHz and below give (the amendment of 2026-11-12, item 4a). The Linear rows state each Resolution's latency, pre-ringing, stepped drags, and plainly the low-end error at Short (a +12 dB Q 4 bell at 100 Hz reaches about +9.9 dB and at 30 Hz about +6.3 dB; use Long or Maximum, or another mode, for low bands), and that narrow notches stay shallow in Linear.
 - **User guide:** a Parametric EQ section with the same framing by use and the same low-end statement, and the README Features line, in the slices that change public behavior.
 
 ### 18. Dynamic bands (a later release)
@@ -527,7 +527,7 @@ Amended 2026-11-12, accepted. The slice 1 build (the DSP core, `transit-parametr
    - On mono, `P` is the one channel's curve (Stereo and Mid bands).
    - `reset` leaves the tables and any refresh in flight unchanged.
    - `prepare` computes all 24 tables at once.
-8. **Response functions above 0.49·fs return NaN, open.** A frequency above 0.49·fs returns NaN, an exact notch center −∞ dB, and `band_response_db` draws the band's own shape whether or not it is used or on. NaN stays the contract for slice 1. *Recommendation for slice 3* (open for the maintainer): keep NaN as the core's "no value here" and have the panel stop the polyline at the last finite column; the panel already draws nothing above 0.49·fs (decision 12). A numeric floor would be drawn as a real value. The panel clamps −∞ to the bottom of the display.
+8. **Response functions above 0.49·fs return NaN.** A frequency above 0.49·fs returns NaN (no value there, decision 12), an exact notch center −∞ dB, and `band_response_db` draws the band's own shape whether or not it is used or on. NaN is the core's contract. **The panel rule is proposed, to confirm before slice 3:** the panel stops the curve at the last finite column and never draws a numeric floor as if it were a value. A −∞ at a notch center is a real value (infinite depth); the panel draws it to the bottom edge of the display.
 9. **Phase modes in the core.** `PhaseMode` carries only `ZeroLatency` (non-exhaustive); Natural and Linear join with slices 6 and 5.
 10. **The `transit-dsp` dependency** exists from slice 1, before its user in slice 2, because the record asks for the `testing` forwarding in the first slice.
 
@@ -573,6 +573,33 @@ pub fn gain_match_db(bands: &[BandParams], sample_rate: f64, channels: usize) ->
 ```
 
 Setters clamp to the parameter ranges and read non-finite values as the default; the 0.49·fs clamp applies when used. Output and the applied gain match live in the core, because the chain is f64 from input to output (2.3). Slice 2 maps `output` and `gain_match` onto these setters and the band parameters onto `set_band` or the single setters. A change to this API in a later slice is that slice's to state.
+
+**4a. The low and high rate classes.** Decision 2.5's accuracy claims, the tables of 2.2 and the help's figures are for 44.1 kHz and above. Rates of 32 kHz and below use the 48 kHz sizes (decision 12), and there the top of the range is too close to Nyquist for second-order sections. The slice 1 sweep (2.5's grid; band frequencies clamped to 0.49·fs when used) measured these maxima, in dB, at one rate of each outer class:
+
+| Type | 32 kHz | 384 kHz |
+|---|---|---|
+| Bell | 5.516 | 0.029 |
+| Low shelf, high shelf, tilt shelf | 3.821 | 0.003 |
+| Notch (floor −40 dB) | 13.339 | 0.013 |
+| Band pass | 6.186 | 0.031 |
+| Flat tilt | 0.790 | 0.067 |
+| Low cut 6 / 12 / 18 / 24 dB/oct | 1.623 / 2.416 / 4.444 / 2.614 | 0.030 / 0.000 / 0.061 / 0.000 |
+| Low cut 36 / 48 / 72 / 96 dB/oct | 2.497 / 2.356 / 2.081 / 1.828 | 0.000 each |
+| High cut 6 / 12 / 18 / 24 dB/oct | 0.966 / 7.153 / 6.878 / 13.441 | 0.030 / 0.000 / 0.031 / 0.001 |
+| High cut 36 / 48 / 72 / 96 dB/oct | 19.593 / 25.828 / 38.505 / 51.292 | 0.001 each |
+
+- **Where the large figures sit at 32 kHz.** The largest values come from band frequencies at or above 0.45·fs (14.4 kHz). The grid's 15.76 kHz and 20 kHz points are clamped to 15.68 kHz, just under Nyquist (16 kHz), where a cut's prototype still falls over the band but the digital section cannot.
+- **Below 0.45·fs** at 32 kHz the worst cases are much smaller. These are from an independent drafting check of the same procedure, which reproduces the 32 kHz column above:
+  - bell 2.7 dB (−30 dB, Q 0.5, 12.4 kHz);
+  - notch 7.0 dB (Q 0.1, 12.4 kHz);
+  - high cuts 2.1 / 3.9 / 5.9 dB at 24 / 48 / 96 dB/oct (between 6 and 12.4 kHz).
+- **Not measured below 0.45·fs:** the band pass, the shelves, the flat tilt, the low cuts and the high cuts at 6, 12, 18, 36 and 72 dB/oct. They are listed for slice 2's brief below.
+- **What a 32 kHz session gets.** Bands below about a fifth of the rate (6.4 kHz) behave as at 48 kHz. Above that, bands depart from their analog shape by a few dB. High cuts set at or near the top of the range (above about 14 kHz) fall far from their prototype: up to 51 dB for a 96 dB/oct cut placed at the clamp. The curve draws exactly what is heard.
+- **At 384 kHz** every type is within 0.07 dB.
+- **Evidence (pinned since slice 1):** the full sweep at 32 and 384 kHz stays within these maxima plus 0.05 dB per type and slope (the slice 1 test `full_sweep.rs` pins all six rate columns), so a regression at those rates is caught.
+- **Help:** the help's phase-mode rows add one sentence: "The accuracy figures are for 44.1 kHz and above; at 32 kHz and below, bands in the top third of the range depart from their analog shape by several dB, and high cuts set near the top far more, as the curve shows."
+
+**To confirm when slice 2 is briefed** (from 4a): measure, below 0.45·fs at 32 kHz, the band pass, the shelves, the flat tilt, the low cuts and the high cuts at 6, 12, 18, 36 and 72 dB/oct. If the help's sentence or 4a's figures change, record them in this amendment.
 
 **5. The landing gate.** The landing chain's gate needs a bare-metal step for `transit-parametric-eq` (`cargo check --target thumbv7em-none-eabihf --no-default-features -p transit-parametric-eq`), beside the CI job slice 1 added, so the crate stays Tier B at every landing.
 
