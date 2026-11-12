@@ -787,6 +787,13 @@ were saved by session id and cannot be found: load them again.` (an alpha break,
 converted). A track preset that holds an instrument retired in an earlier release, such as the old
 Subtractive Synth, now loads exactly as an older session does, with the same notes.
 
+**Save As Template** (`session.save_template`) leaves out the clips and the audio files, but keeps
+the files the session's Sampler kits play, each by its full path as a kit file names them, so a
+session started from the template plays its kits. Freezes are left out: a track frozen in the
+session is live in the template. While a kit holds a sample with no file yet (a recording or a
+dropped file before the session's first save), the template is refused with nothing written: save
+the session first.
+
 Through the control channel, `mix.sampler_kit_save` and `mix.sampler_kit_load` take any path (see
 the control protocol's Sampler kit presets section). **Load kit…** in the Pads bar is different:
 it fills the free pads from a folder of samples (its undo step is **Load Kit Folder**).

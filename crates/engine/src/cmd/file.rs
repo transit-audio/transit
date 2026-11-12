@@ -37,13 +37,11 @@ pub fn specs() -> Vec<CommandSpec> {
             let written = crate::io::save_session_copy(e, &path)?;
             Ok(json!({"path": path, "audio_files_written": written}))
         }),
-        cmd!(noundo "session.save_template", "Save As Template...", ["File"], None, "{path, replace?: false}", always, |e, p| {
+        cmd!(noundo "session.save_template", "Save As Template...", ["File"], None, "{path, replace?: false} — the session without clips, freezes or audio files, except the files its Sampler kits play (kept by full path); refused while a kit sample has no file yet", always, |e, p| {
             let path = str_param(p, "path").ok_or_else(|| bad("session.save_template", "`path` required"))?.to_string();
             let file = crate::io::session_file(&path);
             refuse_replacing(e, "session.save_template", &file, p)?;
-            let mut s = e.session().clone();
-            for t in &mut s.tracks { for pl in &mut t.playlists { pl.clips.clear() } }
-            s.sources.clear();
+            let s = crate::io::template_session(e)?;
             let text = s.to_json().map_err(|err| EngineError::Io(err.to_string()))?;
             crate::io::replace_file(&file.with_extension("transit.tmp"), &file, text.as_bytes())?;
             Ok(json!({"path": file}))

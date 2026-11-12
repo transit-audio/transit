@@ -496,3 +496,52 @@ fn a_save_keeps_the_referenced_path_of_an_opaque_patch() {
     let saved = v["tracks"].as_array().unwrap().iter().find(|x| x["id"] == json!(t.0)).unwrap();
     assert_eq!(saved["instrument"]["sampler_patch"], raw, "kept exactly as saved");
 }
+
+/// #493: a template keeps the files its Sampler patches name (by path) and drops every freeze, so
+/// a session opened from it plays its kits and claims no freeze it does not have.
+#[test]
+fn a_template_keeps_its_sampler_samples_and_drops_freezes() {
+    let d = Dir::new("template");
+    let mut e = Engine::default();
+    let t = kit(&mut e, &d);
+    // Dropped bytes (managed): once the session is saved they are a file in its Audio Files, which
+    // the template names by its full path.
+    let song = d.path("song/song.transit");
+    let own = d.path("own.wav");
+    tone(&own, 330.0, 48_000, 0.25, 1);
+    super::load_zone_bytes(&mut e, t, 2, "own.wav", &std::fs::read(&own).unwrap()).unwrap();
+    std::fs::remove_file(&own).unwrap();
+    e.execute("session.save_as", &json!({"path": s(&song)})).unwrap();
+    let frozen = patch(&e, t).sources[0].source;
+    e.session_mut().track_mut(t).unwrap().freeze =
+        Some(transit_model::Frozen { source: frozen, start: 0, length: 48, hash: 0, revision: 0, latency: 0 });
+    let template = d.path("templates/Drums.transit");
+    std::fs::create_dir_all(d.path("templates")).unwrap();
+    e.execute("session.save_template", &json!({"path": s(&template)})).unwrap();
+    let mut back = Engine::default();
+    let r = back.execute("session.open", &json!({"path": s(&template)})).unwrap();
+    assert_eq!(r["missing"].as_array().map(Vec::len), Some(0), "{r}");
+    assert!(back.session().track(t).unwrap().freeze.is_none(), "no freeze claimed");
+    assert!(back.session().tracks.iter().all(|x| x.playlists.iter().all(|p| p.clips.is_empty())), "no clips");
+    let p = patch(&back, t);
+    assert_eq!(p.sources.len(), 2);
+    for r in &p.sources {
+        let src = back.session().source(r.source).unwrap_or_else(|| panic!("{:?} kept", r.source));
+        assert!(Path::new(&src.path).is_absolute(), "by its full path: {}", src.path);
+        assert!(back.session().pool.get(r.source).is_some(), "{} decoded", src.path);
+    }
+    notes(&mut back, t, &[(60, 0, 1)]);
+    assert!(peak(&render(&back, 48_000)[0]) > 0.1, "the kit plays");
+}
+
+#[test]
+fn a_template_is_refused_while_a_kit_sample_has_no_file() {
+    let d = Dir::new("template-unsaved");
+    let mut e = Engine::default();
+    let t = kit(&mut e, &d);
+    super::load_zone_bytes(&mut e, t, 2, "drop.wav", &std::fs::read(d.path("tone.wav")).unwrap()).unwrap();
+    let template = d.path("Drums.transit");
+    let err = e.execute("session.save_template", &json!({"path": s(&template)})).unwrap_err().to_string();
+    assert!(err.contains("has no file yet"), "{err}");
+    assert!(!template.exists(), "nothing written");
+}

@@ -23,6 +23,41 @@ pub fn save_session(e: &mut Engine, path: &str) -> Result<usize> {
     Ok(written)
 }
 
+/// The session as Save As Template writes it: no clips, no freeze (a template has nothing a
+/// freeze could stand for), and of the session's sources only the files its Sampler patches name
+/// (instrument and insert slots, opaque patches by their raw sources), each by its full path as a
+/// kit file names it, so a session opened from the template plays its kits (#493). A sample that
+/// has no file yet (audio still to be written by a session save) refuses the template, nothing
+/// written, as a kit save refuses it.
+pub fn template_session(e: &Engine) -> Result<Session> {
+    let mut s = e.session().clone();
+    let folder = s.folder.clone().or_else(|| e.path.as_deref().and_then(|x| Path::new(x).parent().map(Path::to_path_buf)));
+    let named: std::collections::HashSet<SourceId> = s
+        .tracks
+        .iter()
+        .flat_map(|t| t.instrument.iter().chain(t.mixer.inserts.iter().flatten()))
+        .flat_map(|i| i.sampler_patch.iter().flat_map(transit_model::SamplerPatch::media))
+        .collect();
+    for t in &mut s.tracks {
+        for pl in &mut t.playlists {
+            pl.clips.clear();
+        }
+        t.freeze = None;
+    }
+    s.sources.retain(|x| named.contains(&x.id));
+    for src in &mut s.sources {
+        let path = transit_model::sampler_portable::sample_path(src, folder.as_deref()).filter(|_| !src.unsaved);
+        let Some(path) = path else {
+            return Err(EngineError::Io(format!(
+                "the Sampler sample \"{}\" has no file yet: save the session first, then save the template",
+                src.name
+            )));
+        };
+        src.path = path;
+    }
+    Ok(s)
+}
+
 /// Write a copy of the session (and any audio it needs) without touching the open document —
 /// used for autosave / crash recovery. Audio already written for a source is reused.
 pub fn save_copy(e: &Engine, path: &str) -> Result<usize> {
