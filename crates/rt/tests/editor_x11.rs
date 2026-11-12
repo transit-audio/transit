@@ -385,7 +385,7 @@ mod linux {
             change.is_some()
         }));
         assert_eq!(change, Some(2.0));
-        assert_eq!(win.scale(), 2.0);
+        assert!((win.scale() - 2.0).abs() < f64::EPSILON);
         assert_eq!(win.take_scale_change(), None, "once");
         if before.type_ == u32::from(AtomEnum::NONE) {
             obs.delete_property(root, AtomEnum::RESOURCE_MANAGER.into()).unwrap();
