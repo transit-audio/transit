@@ -142,6 +142,13 @@ impl Clipboard {
         if audio {
             self.tracks.clear();
         }
+        // The numbers of a clip group, a loop and a take are the old session's: a later Group or
+        // Loop in the new one can reuse them and would pull the pasted clips in (#479).
+        for clip in self.tracks.iter_mut().flatten() {
+            clip.group = None;
+            clip.loop_id = None;
+            clip.take = None;
+        }
     }
 }
 

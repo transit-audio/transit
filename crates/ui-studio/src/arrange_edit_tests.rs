@@ -36,6 +36,22 @@ fn paste_goes_to_the_cursor_and_never_onto_the_copied_clip() {
 }
 
 #[test]
+fn after_the_session_is_replaced_paste_is_never_refused_for_landing_on_the_old_copy() {
+    let mut app = app();
+    let (t, clip, _) = track_with_clip(&mut app);
+    app.click_empty(Some(t), 0);
+    app.click_clip(clip, false);
+    app.copy_selected(false).unwrap();
+    assert!(!app.copied.is_empty());
+    // A new document whose track ids repeat the old ones, replaced before any frame runs.
+    let next = transit_model::Session { tracks: app.engine.session().tracks.clone(), ..Default::default() };
+    app.engine.replace_session(next);
+    let _ = app.paste_at_cursor();
+    assert!(app.copied.is_empty(), "the copied range went with the session");
+    assert!(!app.status.contains("replace it"), "{}", app.status);
+}
+
+#[test]
 fn alt_drag_copies_and_keeps_the_clipboard() {
     let mut app = app();
     let (t, clip, bar) = track_with_clip(&mut app);

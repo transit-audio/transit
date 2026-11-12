@@ -138,3 +138,43 @@ fn copied_midi_is_values_and_pastes_into_a_new_session() {
     e.execute("edit.paste", &json!({"at": 0})).unwrap();
     assert_eq!(clip_count(&e), 1);
 }
+
+/// A MIDI session whose one clip carries a group, a loop id and a take number.
+fn grouped_midi() -> Session {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Midi, ChannelFormat::Stereo, None);
+    let mut seq = Sequence::default();
+    seq.notes.push(Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: TICKS_PER_QUARTER as _ });
+    let id = s.new_clip_id();
+    let mut clip = Clip::midi(id, "m", 0, 24_000, seq);
+    (clip.group, clip.loop_id, clip.take) = (Some(7), Some(9), Some(2));
+    crate::edit::place_clip(&mut s, t, clip);
+    s.edit.selected_tracks = vec![t];
+    s
+}
+
+fn pasted(e: &Engine) -> Clip {
+    e.session().tracks.iter().filter_map(|t| t.playlist()).flat_map(|p| p.clips.iter()).find(|c| c.start == 30_000).cloned().expect("the pasted clip")
+}
+
+#[test]
+fn midi_kept_across_a_session_change_pastes_without_the_old_group_loop_or_take() {
+    let mut e = Engine::new(grouped_midi());
+    copy_all(&mut e);
+    let mut b = Session::default();
+    let tb = b.add_track(TrackKind::Midi, ChannelFormat::Stereo, None);
+    b.edit.selected_tracks = vec![tb];
+    e.replace_session(b);
+    e.execute("edit.paste", &json!({"at": 30_000})).unwrap();
+    let c = pasted(&e);
+    assert_eq!((c.group, c.loop_id, c.take), (None, None, None));
+}
+
+#[test]
+fn a_paste_within_one_session_keeps_the_group_loop_and_take() {
+    let mut e = Engine::new(grouped_midi());
+    copy_all(&mut e);
+    e.execute("edit.paste", &json!({"at": 30_000})).unwrap();
+    let c = pasted(&e);
+    assert_eq!((c.group, c.loop_id, c.take), (Some(7), Some(9), Some(2)));
+}

@@ -496,6 +496,11 @@ impl StudioApp {
     /// Never onto the copied clips themselves: Paste there would silently replace the original
     /// (UX gap 2026-10-18, plan 06), so it is refused with a hint.
     pub fn paste_at_cursor(&mut self) -> Result<Value, String> {
+        // A session replaced since the last frame: the copied ranges are the old document's, and
+        // the frame that clears them (`TransportRequest::ResetSession`) has not run yet (#479).
+        if self.engine.transport_requests.contains(&transit_engine::TransportRequest::ResetSession) {
+            self.copied.clear();
+        }
         let at = self.cursor();
         let len = self.engine.clipboard.length;
         let lanes = self.engine.clipboard.tracks.len().max(1);
