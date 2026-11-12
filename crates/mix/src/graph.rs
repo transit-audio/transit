@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn the_tail_switch_follows_the_default_and_0_opts_out_after_the_flip() {
         use RenderTailSetting::{Off, On, Unrecognized, Unset};
-        assert!(!TAIL_DEFAULT, "the default flips in its own reviewed commit");
+        assert_eq!(tail_switch(Unset, true, TAIL_DEFAULT), (false, TailWhy::Default), "unset is off until the flip, its own reviewed commit");
         for (setting, graph, default, want) in [
             (Unset, true, false, (false, TailWhy::Default)),
             (On, true, false, (true, TailWhy::On)),
