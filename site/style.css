@@ -6,10 +6,10 @@ body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 "IBM Plex San
 a{color:var(--link)}
 a:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:4px}
 img{max-width:100%;height:auto;display:block}
-.hero{position:relative;overflow:hidden;isolation:isolate;text-align:center;padding:64px 16px 48px;max-width:none;margin:0 auto;min-height:700px}
+.hero{position:relative;overflow:hidden;isolation:isolate;text-align:center;padding:64px 16px 48px;max-width:none;margin:0 auto;min-height:800px}
 .hero>*:not(.backdrop){position:relative;z-index:2;max-width:1040px;margin-left:auto;margin-right:auto}
 .hero .cta{max-width:1040px}
-.backdrop{position:absolute;left:0;right:0;top:420px;z-index:0;display:flex;justify-content:center;pointer-events:none}
+.backdrop{position:absolute;left:0;right:0;top:530px;z-index:0;display:flex;justify-content:center;pointer-events:none}
 .backdrop img{width:82%;min-width:880px;max-width:1400px;flex:none;border:1px solid var(--line);border-radius:10px;opacity:.85;transform:perspective(1600px) rotateX(24deg) rotateY(-9deg) rotateZ(1.5deg);transform-origin:top center;-webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,.9) 0%,rgba(0,0,0,.55) 40%,rgba(0,0,0,0) 92%);mask-image:linear-gradient(to bottom,rgba(0,0,0,.9) 0%,rgba(0,0,0,.55) 40%,rgba(0,0,0,0) 92%)}
 .hero::before{content:"";position:absolute;inset:0;z-index:1;background:radial-gradient(ellipse at 50% 28%,var(--halo),transparent 60%);pointer-events:none}
 .hero::after{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(to bottom,transparent 55%,var(--bg) 100%);pointer-events:none}
