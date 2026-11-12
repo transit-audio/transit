@@ -12,7 +12,7 @@ use transit_mix::{PlanLimits, RenderTarget};
 use transit_time::{MAX_POSITION, Range, Samples};
 
 mod phase;
-use phase::Phase;
+use phase::{Hold, Phase};
 mod external;
 #[cfg(test)]
 pub(in crate::player) use external::FRAME_CLOCK_BASE;
@@ -503,6 +503,9 @@ pub(super) struct Audio {
     shared: Arc<Shared>,
     pending: usize,
     read: Phase,
+    /// The previous block's last frame, for the output frames between it and the pending block's
+    /// first (#525). Cleared with `read` whenever the pending block is discarded.
+    hold: Box<Hold>,
     sample_rate: u32,
     device_rate: u32,
     speed: u32,
@@ -608,6 +611,7 @@ impl Audio {
                 shared,
                 pending: 0,
                 read,
+                hold: Box::new(Hold::new()),
                 sample_rate: target.sample_rate,
                 device_rate,
                 speed: 1000,
@@ -690,14 +694,22 @@ impl Audio {
             self.transport.change(Some(end), false, None)?;
             self.transport.end = None;
             self.transport.render_position = end;
-            self.pending = 0;
-            self.read.reset();
+            self.restart_converter();
             self.plans.processing().set_transport_epoch(transit_mix::TransportEpoch(self.transport.epoch));
             self.plans.reset();
             self.shared.position.store(end, Ordering::Relaxed);
             self.shared.playing.store(false, Ordering::Relaxed);
         }
         Ok(())
+    }
+
+    /// Discard the pending block and the converter's history: the next output frame reads frame 0
+    /// of a fresh render. On a start, locate or stop (`discard_pending`) and at the transport's end;
+    /// a new device or stream builds a new `Audio`.
+    fn restart_converter(&mut self) {
+        self.pending = 0;
+        self.read.reset();
+        self.hold.reset();
     }
 
     /// The callback enters `phase` (#162): one clock read and relaxed stores.
@@ -733,8 +745,7 @@ impl Audio {
         });
         self.faulted |= report.faulted || self.transport.timeline_fault.is_some();
         if std::mem::take(&mut self.transport.discard_pending) {
-            self.pending = 0;
-            self.read.reset();
+            self.restart_converter();
         }
         self.service_midi(budget);
         self.shared.playing.store(self.transport.playing && !self.faulted, Ordering::Relaxed);
@@ -1078,9 +1089,12 @@ impl Audio {
         let quantum = self.read.quantum(out.len() / channels, step, self.plans.engine().max_block());
         let mut consumed = 0;
         'frames: for frame in out.chunks_exact_mut(channels) {
-            while self.read.covers(self.pending) {
+            // The next block is rendered as soon as this output frame interpolates into it (#525);
+            // the pending block's last frame is kept for that interpolation.
+            while self.read.needs(self.pending) {
                 self.consumed(consumed)?;
                 consumed = 0;
+                self.hold.keep(self.plans.output(), self.pending);
                 self.read.remove(self.pending)?;
                 self.pending = 0;
                 self.plans.service(plans, true);
@@ -1091,13 +1105,9 @@ impl Audio {
                 self.render_next(quantum, actions)?;
             }
             let output = self.plans.output();
-            let (index, fraction) = self.read.index()?;
-            let sample = |channel: usize| {
-                let buffer = output.get(channel);
-                let a = buffer.and_then(|v| v.get(index)).copied().unwrap_or(0.0);
-                let b = if index + 1 < self.pending { buffer.and_then(|v| v.get(index + 1)).copied().unwrap_or(a) } else { a };
-                a + (b - a) * fraction
-            };
+            let (index, fraction) = self.read.index();
+            let (hold, pending) = (&self.hold, self.pending);
+            let sample = |channel: usize| hold.sample(output.get(channel), channel, index, fraction, pending);
             {
                 // The block holds Main's channels, then the output sinks' (ADR 0015). With sinks,
                 // everything is summed per device channel first and clamped once after.
@@ -1136,8 +1146,9 @@ impl Audio {
                     }
                 }
             }
-            if let (Some(probe), Some(block)) = (&self.probe, self.probe_block) {
-                probe.add_click(frame, block + index as u64);
+            // Index -1 is the previous block's last frame, the plan frame before this block's first.
+            if let (Some(probe), Some(at)) = (&self.probe, self.probe_block.and_then(|block| block.checked_add_signed(index as i64))) {
+                probe.add_click(frame, at);
                 for out in frame.iter_mut() {
                     *out = out.clamp(-1.0, 1.0);
                 }

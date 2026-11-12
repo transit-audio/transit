@@ -52,6 +52,8 @@ native-jack = ["dep:transit-audio-jack", "transit-audio-jack/libjack"]
 
 [dev-dependencies]
 transit-test-support.workspace = true
+# The converter's quality test generates and measures tones with the portable math (ADR 0055).
+transit-math = { path = "../math" }
 transit-midi.workspace = true
 transit-plugin-host = { workspace = true, features = ["testing"] }
 transit-rt = { workspace = true, features = ["testing"] }

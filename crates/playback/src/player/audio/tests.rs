@@ -510,16 +510,20 @@ fn end_is_acknowledged_at_the_consumed_boundary_even_without_another_callback() 
 
 #[test]
 fn changed_layout_waits_for_old_render_ahead_and_releases_it_on_control() {
-    let (mut control, mut audio, _) = fixture(44_100);
+    // A 96 kHz device reads the 48 kHz render at half steps: after two output frames the pending
+    // block's frame 1 is still unread and is read whole by the next output frame, so that fill
+    // stays inside the old render-ahead. (On a 44.1 kHz device every next output frame reads past
+    // the pending block, and since #525 the converter renders the next block for it at once.)
+    let (mut control, mut audio, _) = fixture(96_000);
     control.send_action(Command::Play { from: 0, end: None, looped: None }, true).unwrap();
-    fill(&mut audio, &mut [0.0; 2]);
+    fill(&mut audio, &mut [0.0; 4]);
     let old = audio.plans.engine().active().generation;
     control.service(&mut make);
     let mut surround = Session::default();
     surround.outputs[0].format = transit_model::ChannelFormat::Surround51;
     control.request(Arc::new(surround), None).unwrap();
     control.service(&mut make);
-    assert!(!audio.read.covers(audio.pending));
+    assert!(!audio.read.needs(audio.pending));
     let ((), heap) = measure(|| fill(&mut audio, &mut [0.0; 2]));
     assert!(heap.is_zero(), "{heap:?}");
     assert_eq!(audio.plans.engine().active().generation, old);
@@ -844,19 +848,6 @@ fn stop_and_end_do_not_process_discarded_instrument_frames_outside_the_render_cl
         assert_eq!(audio.plans.engine().next_frame().0 - before_render, 128);
         control.retire(audio.plans, audio.actions);
     }
-}
-
-#[test]
-fn the_linear_converter_never_interpolates_from_unrendered_storage_after_a_short_loop_block() {
-    let (mut control, mut audio, _) = fixture_session(44_100, signal());
-    control.send_action(Command::Play { from: 17, end: None, looped: Some(Range::new(17, 20)) }, true).unwrap();
-    let mut out = [0.0; 6];
-    fill(&mut audio, &mut out);
-    // The third output sample is fractional but sits at the last valid frame of
-    // this 3-frame render. Capacity beyond that frame is NOT a valid neighbor.
-    assert!((out[4] - 20.0 / 128.0).abs() < 0.00001);
-    assert!((out[5] - 40.0 / 128.0).abs() < 0.00001);
-    control.retire(audio.plans, audio.actions);
 }
 
 struct PanicOwner {
@@ -1401,6 +1392,7 @@ fn an_external_instruments_notes_are_not_stamped_with_the_mixs_delay() {
     assert!(moved(false) > 0, "a bare MIDI-out track still moves with the delayed mix");
 }
 
+mod converter;
 mod count_in;
 mod loop_wrap;
 mod monitor_path;
