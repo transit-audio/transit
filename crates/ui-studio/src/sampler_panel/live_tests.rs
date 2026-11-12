@@ -86,8 +86,8 @@ fn instance(mute: bool, solo: bool) -> Sampler {
         zones: (0..3).map(|i| Some(Zone { playback: pb(60 + i as u8), ..Zone::new(Region::whole(i as u16, 4800)) })).collect(),
         ..PatchSpec::default()
     };
-    for i in 0..3 {
-        spec.pads[i].zone = Some(i as u16);
+    for (i, pad) in spec.pads[..3].iter_mut().enumerate() {
+        pad.zone = Some(i as u16);
     }
     spec.pads[0].choke = 1;
     spec.pads[1].choke = 1;
