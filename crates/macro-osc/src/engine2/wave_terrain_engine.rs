@@ -171,14 +171,20 @@ fn terrain_lookup(mut x: f32, mut y: f32, terrain: &[u8; 4096]) -> f32 {
     (xy[0] + (xy[1] - xy[0]) * y_fractional) * value_scale
 }
 
+/// The firmware's `InterpolateIntegratedWave`, with each read clamped to the end of `table`.
+/// `table` runs from the wave's start to the end of the whole wavetable, so the clamp acts
+/// only where the firmware reads past the table (its last wave at `y > 1.03`); every read the
+/// firmware keeps inside the table, the next wave's first samples included, is unchanged (#520).
 #[inline]
 fn interpolate_integrated_wave<T>(table: &[T], index_integral: usize, index_fractional: f32) -> f32
 where
-    T: Num + FromPrimitive + ToPrimitive,
+    T: Num + FromPrimitive + ToPrimitive + Copy,
 {
-    let a = table[index_integral].to_f32().unwrap_or_default();
-    let b = table[index_integral + 1].to_f32().unwrap_or_default();
-    let c = table[index_integral + 2].to_f32().unwrap_or_default();
+    let last = table.len() - 1;
+    let at = |i: usize| table[i.min(last)].to_f32().unwrap_or_default();
+    let a = at(index_integral);
+    let b = at(index_integral.saturating_add(1));
+    let c = at(index_integral.saturating_add(2));
     let t = index_fractional;
 
     (b - a) + (c - b - b + a) * t
@@ -194,20 +200,29 @@ fn terrain_lookup_wt(x: f32, y: f32, bank: i32) -> f32 {
     let wt = (x + 1.0) * 0.5 * (num_waves - 1) as f32;
 
     let waves = &WAV_INTEGRATED_WAVES;
-    let mut waves_index = (bank * num_waves * table_size_full) as usize;
 
     let sample_integral = sample as usize;
     let sample_fractional = sample - (sample_integral as f32);
     let wt_integral = wt as usize;
     let wt_fractional = wt - (wt_integral as f32);
 
+    // Stability patch (#520): the firmware reads waves `wt_integral` and `wt_integral + 1` of the
+    // bank, and past the top of the x axis (x >= 1.0, reached when note changes grow the path)
+    // the last bank's second wave starts at the table's end: the firmware reads whatever memory
+    // follows, the port would panic. Each wave is clamped to the table's last one (the last
+    // wave repeated, so the terrain stays continuous past its edge). Every wave the firmware
+    // reads inside the table, the next bank's included, is unchanged; the oracle's copy
+    // (`patches/all/0013`) clamps the same way.
+    let last_wave = WAV_INTEGRATED_WAVES.len() / table_size_full as usize - 1;
+    let first_wave = (bank * num_waves) as usize;
+    let wave_0 = first_wave.saturating_add(wt_integral).min(last_wave);
+    let wave_1 = first_wave.saturating_add(wt_integral).saturating_add(1).min(last_wave);
+
     let mut xy = [0.0; 2];
 
     let value_scale = 1.0 / 1024.0;
-    waves_index += wt_integral * table_size_full as usize;
-    xy[0] = interpolate_integrated_wave(&waves[waves_index..], sample_integral, sample_fractional);
-    waves_index += table_size_full as usize;
-    xy[1] = interpolate_integrated_wave(&waves[waves_index..], sample_integral, sample_fractional);
+    xy[0] = interpolate_integrated_wave(&waves[wave_0 * table_size_full as usize..], sample_integral, sample_fractional);
+    xy[1] = interpolate_integrated_wave(&waves[wave_1 * table_size_full as usize..], sample_integral, sample_fractional);
 
     (xy[0] + (xy[1] - xy[0]) * wt_fractional) * value_scale
 }
@@ -218,3 +233,7 @@ fn squash(mut x: f32, a: f32) -> f32 {
 
     x / (1.0 + f32::abs(x))
 }
+
+#[cfg(test)]
+#[path = "wave_terrain_engine_tests.rs"]
+mod tests;

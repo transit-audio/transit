@@ -200,6 +200,18 @@ Found at the voice level (the engine sweep never reached them), each its own com
   coefficients are per 12-frame block whatever a call's size; the output is the firmware's int16
   frame; `init` restores the power-on state and the first render loads its engine (even engine 0).
 
+Stability patches (a read past a table the firmware makes in ordinary use, clamped; bit for bit
+the firmware wherever its read stays inside the table; the oracle's copy patched the same way):
+
+- Wave terrain, terrains 5 to 7 (#520): the path's quadrature oscillator renormalizes only when
+  its squared norm leaves 0.5 to 2.0, so note changes grow its radius up to about 1.41 (a legato
+  melody at Timbre 100% reached x 1.038 and |y| 1.38 at Morph 100%). Past x = 1.0 the last
+  bank's second wave started at the end of the wavetable (a panic in the port, whatever memory
+  follows the table on the module), and past y = 1.03 the last wave's samples ran past it. Each
+  wave is clamped to the table's last one and each sample read to its last sample, so terrain 5
+  repeats its last wave past its edge. Banks 0 and 1 still read into the next bank there, as the
+  firmware does (`patches/all/0013` in the oracle).
+
 Two items flagged before the port was vendored turned out to be firmware behavior, kept as is: the
 virtual analog engine's auxiliary oscillator starts at phase 0.25 (`set_master_phase(0.25f)` in the
 firmware), and the VOSIM oscillator advances its carrier with the un-interpolated frequency, as the

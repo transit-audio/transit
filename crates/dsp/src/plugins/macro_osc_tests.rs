@@ -505,3 +505,66 @@ fn all_sound_off_silences_at_once_and_all_notes_off_releases() {
     assert_eq!(peak(&sound_off[4800 + 12..]), 0.0, "All Sound Off: silent from the next block on");
     assert!(peak(&notes_off[4800..4800 + 48]) > 0.01, "All Notes Off: the release still sounds");
 }
+
+/// A mono Wave terrain instance at Harmonics 65% (terrains 4 and 5: terrain 5 reads the last
+/// wavetable bank), Timbre 100%, Morph `morph`.
+fn wave_terrain(morph: f32) -> MacroOscillator {
+    let mut m = inst();
+    m.set_param("model", 5.0);
+    m.set_param("harmonics", 65.0);
+    m.set_param("timbre", 100.0);
+    m.set_param("morph", morph);
+    m
+}
+
+/// #520, the issue's case: note 84, then note 36 at frame 132, 2,000 twelve-frame blocks. The
+/// pitch change grows the path's quadrature oscillator, so its x reaches 1.0 at block 30 and
+/// terrain 5's second wave lay past the table: a panic on the audio thread before the fix.
+#[test]
+fn wave_terrain_note_84_then_36_renders_finite() {
+    let mut m = wave_terrain(100.0);
+    m.note_on(0, 84, 100);
+    let mut x = render(&mut m, 132, 12);
+    m.note_off(0, 84);
+    m.note_on(0, 36, 100);
+    x.extend(render(&mut m, 2000 * 12 - 132, 12));
+    assert!(x.iter().all(|v| v.is_finite()), "every sample finite");
+    assert!(peak(&x) > 0.05, "it sounds: peak {}", peak(&x));
+}
+
+/// #520, ordinary playing that reaches the top of the terrain: a legato melody over the keyboard
+/// grows the path (the quadrature oscillator renormalizes only outside 0.5 to 2.0 of its squared
+/// norm), so its x passes 1.0 and terrain 5's second wave lay past the table, a panic on the
+/// audio thread before the fix. The melody is a fixed pseudo-random one (a note every 3 to 40
+/// blocks over notes 0 to 108), 60 s at 48 kHz.
+#[test]
+fn wave_terrain_survives_a_melody_that_grows_the_path() {
+    for morph in [100.0, 50.0] {
+        let mut m = wave_terrain(morph);
+        let mut s = 1u32.wrapping_mul(2_654_435_761);
+        let mut prev: Option<u8> = None;
+        let mut frames = 0;
+        let mut io = vec![vec![0.0; 12]; 2];
+        let mut peak_out = 0.0f32;
+        while frames < 60 * 48_000 {
+            s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let len = 3 + (s >> 8) as usize % 38;
+            s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let note = ((s >> 8) % 109) as u8;
+            if let Some(p) = prev {
+                m.note_off(0, p);
+            }
+            m.note_on(0, note, 100);
+            prev = Some(note);
+            for _ in 0..len {
+                m.process(&mut io, 12);
+                for v in &io[0] {
+                    assert!(v.is_finite(), "Morph {morph}: a non-finite sample at frame {frames}");
+                    peak_out = peak_out.max(v.abs());
+                }
+                frames += 12;
+            }
+        }
+        assert!(peak_out > 0.05, "Morph {morph}: it sounds (peak {peak_out})");
+    }
+}

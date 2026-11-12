@@ -1,0 +1,47 @@
+--- plaits/dsp/engine2/wave_terrain_engine.cc
++++ plaits/dsp/engine2/wave_terrain_engine.cc
+@@ -91,2 +91,24 @@
+ #define DIFFERENTIATE_WAVE_DATA
+
++// transit oracle: the wavetable terrains read waves wt_integral and
++// wt_integral + 1 of their bank, and the path's x passes 1.0 when note changes
++// grow its quadrature oscillator: the last bank's second wave then starts at the
++// end of wav_integrated_waves (3 banks of 64 waves of 132 samples), and at y
++// past 1.03 the last wave's samples run past it. Each wave is clamped to the
++// table's last one and each sample read to the table's last sample, so a read
++// past the table returns the last wave; every read upstream keeps inside the
++// table (the next bank's first wave, the next wave's first samples) is
++// unchanged. The port does the same.
++const int32_t kTransitLastWave = 3 * 64 - 1;
++const int32_t kTransitLastSample = 3 * 64 * 132 - 1;
++
++inline float TransitIntegratedSample(int32_t i) {
++  return static_cast<float>(
++      wav_integrated_waves[i > kTransitLastSample ? kTransitLastSample : i]);
++}
++
++inline float TransitInterpolateIntegratedWaveClamped(
++    int32_t start, int32_t index_integral, float index_fractional) {
++  float a = TransitIntegratedSample(start + index_integral);
++  float b = TransitIntegratedSample(start + index_integral + 1);
++  float c = TransitIntegratedSample(start + index_integral + 2);
++  float t = index_fractional;
++  return (b - a) + (c - b - b + a) * t;
++}
++
+@@ -108,6 +130,13 @@
+   const float value_scale = 1.0f / 1024.0f;
+-  waves += wt_integral * table_size_full;
+-  xy[0] = InterpolateIntegratedWave(waves, sample_integral, sample_fractional);
+-  waves += table_size_full;
+-  xy[1] = InterpolateIntegratedWave(waves, sample_integral, sample_fractional);
++  (void)waves;
++  int32_t wave_0 = bank * num_waves + wt_integral;
++  int32_t wave_1 = wave_0 + 1;
++  if (wave_0 > kTransitLastWave) wave_0 = kTransitLastWave;
++  if (wave_1 > kTransitLastWave) wave_1 = kTransitLastWave;
++  xy[0] = TransitInterpolateIntegratedWaveClamped(
++      wave_0 * table_size_full, sample_integral, sample_fractional);
++  xy[1] = TransitInterpolateIntegratedWaveClamped(
++      wave_1 * table_size_full, sample_integral, sample_fractional);
+ #else

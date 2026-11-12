@@ -356,6 +356,17 @@ checked against `git ls-tree` of the upstream commit).
   zeroed static storage: the part's `Init` leaves some members unwritten (the voice rotation
   counter, the strings' resampler phase, the FM voices' feedback sample, the reverb's low-pass
   states), so the oracle must start them at zero to be the module and to be deterministic.
+- `patches/all/` holds one for the macro oscillator (#520):
+  - `0013-wave-terrain-reads-stay-inside.patch`: the wave terrain engine's wavetable terrains
+    (`TerrainLookupWT`, `plaits/dsp/engine2/wave_terrain_engine.cc`) read waves `wt_integral` and
+    `wt_integral + 1` of a bank of `wav_integrated_waves` (3 banks of 64 waves of 132 samples).
+    The path's quadrature oscillator renormalizes only when its squared norm leaves 0.5 to 2.0,
+    so ordinary note changes grow it past the unit circle: past x = 1.0 the last bank's second
+    wave starts at the table's end, and past y = 1.03 the last wave's samples run past it. Each
+    wave is clamped to the table's last one and each sample read to the table's last sample, so a
+    read past the table returns the last wave; every read upstream keeps inside the table (the
+    next bank's first wave past the top of banks 0 and 1, the next wave's first samples) is
+    unchanged. The port clamps the same way. An upstream finding (the read past the table).
 
 ## Updating
 
