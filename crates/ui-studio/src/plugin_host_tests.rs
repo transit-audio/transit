@@ -44,7 +44,7 @@ fn slow_synth() -> String {
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(target.join("debug").join(lib), bin.join(exe)).unwrap();
     assert_eq!(transit_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
-    transit_vst3_host::scan_paths(&[dir.clone()]).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
+    transit_vst3_host::scan_paths(std::slice::from_ref(&dir)).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
 }
 
 /// The fixture synth's creation time in the child. A frame that waited for it takes all of it,

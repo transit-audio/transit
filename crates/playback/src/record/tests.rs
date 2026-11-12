@@ -195,7 +195,7 @@ fn applied_record_boundary_trims_real_wav_channels_across_input_order_and_partit
     let (key, map, now) = recording_map();
     let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
     let data: Vec<f32> = (0..12).flat_map(|frame| [frame as f32 / 20.0, -(frame as f32) / 20.0]).collect();
-    for (_case, parts) in [vec![12], vec![4, 4, 4], vec![1, 2, 5, 1, 3]].iter().enumerate() {
+    for parts in [vec![12], vec![4, 4, 4], vec![1, 2, 5, 1, 3]].iter() {
         for published_after in 0..=parts.len() {
             let path = transit_test_support::TestDir::file(&format!("record-start-{unique}"), "wav");
             let mut takes = [TakeWriter::create(TrackId(1), vec![1, 0], path.to_path_buf(), 48_000).unwrap()];

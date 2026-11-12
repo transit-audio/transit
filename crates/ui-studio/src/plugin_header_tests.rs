@@ -70,7 +70,7 @@ fn fixture_gain() -> String {
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(&lib, bin.join(exe)).unwrap_or_else(|e| panic!("copy {}: {e}", lib.display()));
     assert_eq!(transit_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
-    transit_vst3_host::scan_paths(&[dir.clone()]).into_iter().find(|d| d.name == "Fixture Gain").expect("the fixture's gain").id
+    transit_vst3_host::scan_paths(std::slice::from_ref(&dir)).into_iter().find(|d| d.name == "Fixture Gain").expect("the fixture's gain").id
 }
 
 /// One frame of the app, with the device-free player's "audio callback" first.
