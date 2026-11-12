@@ -112,7 +112,151 @@ fn features_session() -> Session {
     s.midi_mappings.set(m).unwrap();
     add_v060_features(&mut s, inst, audio[0]);
     add_rack(&mut s);
+    add_v070_features(&mut s, audio[1]);
     s
+}
+
+/// What v0.7.0 serializes: a Sampler kit (ADR 0041) on its own track, with two managed sources (one
+/// at its native 44.1 kHz), pads with names, a stored note, mute, solo and a choke group, a pad start
+/// note, keyed zones with every playback field, forward and ping-pong loops with a crossfade, edge
+/// fades, a round-robin group and a velocity-layered group with a seed, zones bound to a slice of
+/// each marker set, the slice loop with both marker sets (each with a removed id) and every detector
+/// and grid field, and slot controls; a user page on the Sampler (ADR 0047); a Custom and a Fit track
+/// height; Grid Over Clips on. Transport mappings and Live outputs are per machine and never saved.
+fn add_v070_features(s: &mut Session, audio: transit_engine::model::TrackId) {
+    use transit_model::sampler_patch::{
+        AutoSource, Detector, Division, Fades, GroupEntry, LoopMode, Marker, Markers, Membership, Ownership, PadEntry, PatchState, PatchV1,
+        RoundRobin, SliceBinding, SliceLoop, SliceMode, SliceSet, SourceRef, ZoneEntry,
+    };
+    let sr = s.sample_rate;
+    let hit: Vec<f32> = (0..9600).map(|i| (i as f32 * 0.02).sin() * (1.0 - i as f32 / 9600.0)).collect();
+    let hit = transit_engine::io::add_source(s, "Kit Hit", AudioBuffer { sample_rate: sr.hz(), channels: vec![hit] }, None, FileFormat::Wav);
+    let brk: Vec<f32> = (0..44_100).map(|i| if i % 11_025 < 400 { 0.8 } else { (i as f32 * 0.003).sin() * 0.1 }).collect();
+    let brk = transit_engine::io::add_source_audio(
+        s,
+        "Break",
+        std::sync::Arc::new(transit_engine::model::SourceAudio::new(AudioBuffer { sample_rate: 44_100, channels: vec![brk] })),
+        None,
+        FileFormat::Wav,
+    );
+    let managed = |source| SourceRef { source, ownership: Ownership::Managed, extra: Default::default() };
+    let pad_zone = |id: u16, end: u64, note: u8, label: &str| {
+        let mut z = ZoneEntry { label: Some(label.into()), ..ZoneEntry::whole(id, 0, end) };
+        z.pad_defaults(note);
+        z
+    };
+    let keyed = ZoneEntry {
+        keys: [48, 72],
+        velocities: [10, 127],
+        root: 60,
+        transpose: 12.0,
+        cents: -15.0,
+        reverse: true,
+        attack_ms: 2.0,
+        decay_ms: 250.0,
+        sustain: 0.6,
+        release_ms: 300.0,
+        declick_ms: 1.5,
+        velocity_sensitivity: 0.5,
+        loop_mode: LoopMode::Forward,
+        loop_start: 1000,
+        loop_end: 8000,
+        crossfade: 400,
+        fades: Fades { key_lo: 2, key_hi: 3, vel_lo: 4, vel_hi: 0, extra: Default::default() },
+        label: Some("Keys".into()),
+        ..ZoneEntry::whole(2, 0, 9600)
+    };
+    let ping_pong = ZoneEntry { keys: [73, 96], loop_mode: LoopMode::PingPong, loop_start: 500, loop_end: 9000, ..ZoneEntry::whole(3, 0, 9600) };
+    let member = |id: u16, group: u8, layer: u8, alternative: u8, keys: [u8; 2], velocities: [u8; 2]| ZoneEntry {
+        keys,
+        velocities,
+        membership: Some(Membership { group, layer, alternative, extra: Default::default() }),
+        ..ZoneEntry::whole(id, 0, 4800)
+    };
+    let sliced = |id: u16, set: SliceSet, slice: u32, start: u64, end: u64| {
+        let mut z = ZoneEntry {
+            id,
+            source: 1,
+            start,
+            end,
+            loop_end: end,
+            slice: Some(SliceBinding { set, id: slice, extra: Default::default() }),
+            ..ZoneEntry::default()
+        };
+        z.pad_defaults(42);
+        z
+    };
+    let marker = |id: u32, frame: u64, label: Option<&str>| Marker { id, frame, label: label.map(str::to_string), extra: Default::default() };
+    let patch = PatchV1 {
+        seed: 12_345,
+        sources: vec![managed(hit), managed(brk)],
+        zones: vec![
+            pad_zone(0, 9600, 40, "Kick"),
+            pad_zone(1, 4800, 41, "Hat"),
+            keyed,
+            ping_pong,
+            member(4, 1, 0, 0, [36, 47], [1, 127]),
+            member(5, 1, 0, 1, [36, 47], [1, 127]),
+            member(6, 2, 0, 0, [24, 35], [1, 63]),
+            member(7, 2, 1, 0, [24, 35], [64, 127]),
+            sliced(8, SliceSet::Auto, 2, 11_025, 22_050),
+            sliced(9, SliceSet::Manual, 11, 16_000, 30_000),
+        ],
+        pad_start_note: 40,
+        pads: vec![
+            PadEntry { index: 0, zone: Some(0), choke: 1, name: Some("Kick".into()), ..PadEntry::default() },
+            PadEntry { index: 1, zone: Some(1), choke: 1, solo: true, name: Some("Hat".into()), ..PadEntry::default() },
+            PadEntry { index: 2, zone: Some(8), mute: true, ..PadEntry::default() },
+            PadEntry { index: 3, zone: Some(9), note: Some(20), ..PadEntry::default() },
+        ],
+        groups: vec![
+            GroupEntry { id: 1, round_robin: RoundRobin::Sequential, extra: Default::default() },
+            GroupEntry { id: 2, round_robin: RoundRobin::Random, extra: Default::default() },
+        ],
+        slicing: Some(SliceLoop {
+            source: 1,
+            start: 0,
+            end: 44_100,
+            mode: SliceMode::Manual,
+            snap: false,
+            detector: Detector { source: AutoSource::Transients, sensitivity: 0.65, extra: Default::default() },
+            division: Division::Eighth,
+            bars: Some(1),
+            grid_bpm: Some(96.0),
+            root: Some(48),
+            beat_length: Some(4.0),
+            auto: Some(Markers {
+                markers: vec![marker(1, 0, None), marker(2, 11_025, None), marker(4, 22_050, None)],
+                next_id: 5,
+                extra: Default::default(),
+            }),
+            manual: Some(Markers {
+                markers: vec![marker(10, 0, Some("Intro")), marker(11, 16_000, None), marker(13, 30_000, Some("Fill"))],
+                next_id: 14,
+                extra: Default::default(),
+            }),
+            markers: None,
+            extra: Default::default(),
+        }),
+        controls: [("zone001_level".to_string(), -6.0), ("zone003_pan".to_string(), -30.0)].into_iter().collect(),
+        ..PatchV1::default()
+    };
+    assert_eq!(patch.validate(), Ok(()), "the corpus kit must load without a note");
+    let mut ins = Insert::new("sampler");
+    ins.sampler_patch = Some(transit_model::SamplerPatch { state: PatchState::Ready(Box::new(patch)) });
+    let mut page = transit_model::UserPage::named("Kit");
+    page.slots[0] = Some("zone001_level".into());
+    page.slots[1] = Some("zone003_pan".into());
+    ins.pages.push(page);
+    let kit = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Kit"));
+    if let Some(t) = s.track_mut(kit) {
+        t.instrument = Some(ins);
+        t.height = transit_model::TrackHeight::Custom(200);
+    }
+    if let Some(t) = s.track_mut(audio) {
+        t.height = transit_model::TrackHeight::Fit(120);
+    }
+    s.edit.grid_over_clips = true;
 }
 
 /// What v0.6.0 serializes beyond the rack: a MIDI effect slot with a Random Sequencer ahead of the
