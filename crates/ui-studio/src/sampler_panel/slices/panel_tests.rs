@@ -117,7 +117,7 @@ fn slices_to_pads_previews_the_bank_then_applies() {
 
 /// The sliced fixture with slices 1 and 2 swapped between pads A1 and A2 by the pad commands: the
 /// keys no longer run in order.
-fn stale() -> (T, transit_model::TrackId) {
+pub(super) fn stale() -> (T, transit_model::TrackId) {
     let (mut t, tr) = sliced();
     let (za, zb) = (t.patch(tr).pad(0).zone.unwrap(), t.patch(tr).pad(1).zone.unwrap());
     for (cmd, pad, zone) in [
@@ -342,7 +342,9 @@ fn panel_rects_match_the_boards_at_both_scales() {
         let div = d.division.unwrap().track;
         assert_eq!((h(div[0]), h(div[1] - d.fader[3])), (h(src[0]), h(tk::PANEL_ROW_GAP)));
         assert_eq!(h(d.bars[0] - div[2]), h(tk::PANEL_ITEM_GAP));
-        assert_eq!((h(d.bpm[0] - d.bars[2]), h(d.bpm[2] - d.bpm[0])), (h(tk::PANEL_ITEM_GAP), h(tk::BEAT_WIDTH)));
+        // The BPM field does not fit beside Bars at this width (#472): it takes its own row under
+        // Bars, at the controls' left edge.
+        assert_eq!((h(d.bpm[0]), h(d.bpm[1] - d.bars[3]), h(d.bpm[2] - d.bpm[0])), (h(src[0]), h(tk::PANEL_ROW_GAP), h(tk::BEAT_WIDTH)));
         // Use slices: Root after the 62 px label column, 92 wide; the 112 px action; the
         // 12 px preview cells 2 apart in rows of eight; the 84 px beat field.
         let u = p.uses;

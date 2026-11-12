@@ -268,11 +268,23 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesVie
         if let Some(i) = seg.picked {
             set(v, l, now, |s| s.division = DIVISIONS[i].into());
         }
-        let bars_x = seg.layout.track[2] + tk::PANEL_ITEM_GAP;
+        let mut bars_at = pos2(seg.layout.track[2] + tk::PANEL_ITEM_GAP, r.min.y);
         out.division = Some(seg.layout);
         out.bars_text = s.bars.map_or_else(|| FROM_TEMPO.to_string(), |b| format!("{b} bars"));
-        let bars_w = widgets::role_size(&p, &tokens::VALUE, FROM_TEMPO).x + 2.0 * chrome::FIELD_PADDING[1] + SPACE[2];
-        let bars = Rect::from_min_size(pos2(bars_x, r.min.y), vec2(bars_w, layout::DENSE_CONTROL_HEIGHT));
+        // The combo box is as wide as its text plus its arrow, so the field is reserved at that
+        // (its painted width, not just the text's).
+        let bars_w = widgets::role_size(&p, &tokens::VALUE, FROM_TEMPO).x
+            + 2.0 * chrome::FIELD_PADDING[1]
+            + SPACE[2]
+            + ui.spacing().icon_width
+            + ui.spacing().icon_spacing;
+        let right = rows.x + rows.w;
+        if bars_at.x + bars_w > right {
+            // Too narrow for Bars beside the division control: Bars and the BPM field move to
+            // their own row under it, starting at its left edge.
+            bars_at = pos2(control_x, rows.row(layout::DENSE_CONTROL_HEIGHT).min.y);
+        }
+        let bars = Rect::from_min_size(bars_at, vec2(bars_w, layout::DENSE_CONTROL_HEIGHT));
         let mut pick = None;
         ui.scope_builder(egui::UiBuilder::new().max_rect(bars), |ui| {
             ui.spacing_mut().interact_size.y = layout::DENSE_CONTROL_HEIGHT;
@@ -293,7 +305,13 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesVie
             set(v, l, now, |s| s.bars = b);
         }
         out.bars = r4(bars);
-        bpm_field(ui, uid, v, l, &s, now, pos2(bars.max.x + tk::PANEL_ITEM_GAP, r.min.y), out);
+        let mut at = pos2(bars.max.x + tk::PANEL_ITEM_GAP, bars.min.y);
+        if at.x + tk::BEAT_WIDTH > right {
+            // Too narrow for the field beside Bars: it wraps to a row of its own, at the
+            // division control's left edge.
+            at = pos2(control_x, rows.row(layout::DENSE_CONTROL_HEIGHT).min.y);
+        }
+        bpm_field(ui, uid, v, l, &s, now, at, out);
     });
     candidate_rows(app, ui, dev, v, l, rows, out);
 }

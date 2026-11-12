@@ -332,9 +332,18 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
         let r = rows.row(super::super::line_h(&p, &tokens::READOUT_DISPLAY));
         out.texts.push(r4(widgets::role_text(&p, &tokens::READOUT_DISPLAY, &out.summary, t.text_muted, Align2::LEFT_CENTER, r.left_center())));
         if a["overlap"] == true {
-            let font = tokens::LABEL_CONTROL.font_id(ui.ctx());
-            let r = rows.row(crate::chrome::glyph_size(font.size));
-            out.overlap = Some(r4(crate::chrome::status_text(&p, r.left_center(), OVERLAP, font, crate::chrome::Severity::Warning)));
+            // The warning's triangle and its sentence, wrapped to the panel (the status line
+            // helper draws one line).
+            let sev = crate::chrome::Severity::Warning;
+            let g = crate::chrome::glyph_size(tokens::LABEL_CONTROL.size);
+            let mut job = tokens::LABEL_CONTROL.job(ui.ctx(), OVERLAP, sev.ink());
+            job.wrap.max_width = (rows.w - g - 3.0).max(40.0);
+            let galley = p.layout_job(job);
+            let r = rows.row(galley.size().y.max(g));
+            crate::icons::paint(&p, pos2(r.min.x + g / 2.0, r.min.y + g / 2.0), sev.icon(), g, sev.glyph());
+            let text_at = pos2(r.min.x + g + 3.0, r.min.y);
+            out.overlap = Some(r4(Rect::from_min_size(r.min, vec2(g + 3.0 + galley.size().x, r.height()))));
+            p.galley(text_at, galley, sev.ink());
         }
     }
     // A refusal: the click's, else the preview's, in the engine's words; a stale mapping offers
@@ -357,14 +366,15 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
                 previews(app, dev, v);
             }
             let caption = format!("from {}, one undo step; existing MIDI unchanged", transit_midi::note_name(root, mc));
-            out.texts.push(r4(widgets::role_text(
-                &p,
-                &tokens::LABEL_CONTROL,
-                &caption,
-                t.text_faint,
-                Align2::LEFT_CENTER,
-                pos2(mb.max.x + SPACE[1], r.center().y),
-            )));
+            // Wrapped to the room beside the button; a taller caption grows the row.
+            let cx = mb.max.x + SPACE[1];
+            let mut job = tokens::LABEL_CONTROL.job(ui.ctx(), &caption, t.text_faint);
+            job.wrap.max_width = (rows.x + rows.w - cx).max(40.0);
+            let galley = p.layout_job(job);
+            let top = (r.center().y - galley.size().y / 2.0).max(r.min.y);
+            out.texts.push(r4(Rect::from_min_size(pos2(cx, top), galley.size())));
+            rows.y = rows.y.max(top + galley.size().y);
+            p.galley(pos2(cx, top), galley, t.text_faint);
             out.map = Some(r4(mb));
         }
     }
@@ -376,7 +386,9 @@ fn midi(app: &mut StudioApp, ui: &mut Ui, dev: Dev, v: &mut SlicesView, l: &Loop
         // Beside the button: wrapped to the room it leaves, centered on the row.
         let room = cb.min.x - tk::PANEL_ITEM_GAP - r.min.x;
         let h = feedback::last_edit_height(ui, &s, room, true);
-        rows.line = Some(feedback::last_edit(ui, pos2(r.min.x, r.center().y - h / 2.0), room, &s, true));
+        let top = (r.center().y - h / 2.0).max(r.min.y);
+        rows.line = Some(feedback::last_edit(ui, pos2(r.min.x, top), room, &s, true));
+        rows.y = rows.y.max(top + h);
     }
     if default_button(ui, egui::Id::new(("sampler_use_create", uid)), cb, CREATE).clicked() {
         let params = midi_params(dev.key.0.0, v.at, &v.usage, false);
