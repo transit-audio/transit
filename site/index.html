@@ -23,8 +23,8 @@
     <source srcset="assets/transit-wordmark-graphite.svg" media="(prefers-color-scheme: light)">
     <img class="wordmark" src="assets/transit-wordmark-white.svg" alt="transit" width="420" height="120">
   </picture>
-  <p class="tagline">Record, edit and mix music on Windows, Mac and Linux. Free and open source.</p>
-  <p class="sub muted">Cubase bones, Ableton manners.</p>
+  <h1 class="hook">Hit record. It keeps up.</h1>
+  <p class="tagline">A free, open-source DAW for recording and playing live, on Windows, Mac and Linux. Every engine default is measured on a real audio interface first, and <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">the numbers are public</a>. It&rsquo;s alpha, so judge it by those.</p>
   <p class="cta">
     <a class="btn primary" href="#downloads"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg><span class="lbl">Download</span></a>
     <a class="btn discord" href="https://discord.gg/7PPUBZqA66"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg><span class="lbl">Join the Discord</span></a>
@@ -33,6 +33,18 @@
 </header>
 
 <main>
+<section id="live">
+  <h2>Made for the take</h2>
+  <ul class="cards live">
+    <li class="card"><h3>Track without <span class="nw">plug-in</span> latency, in one click.</h3><p>Low Latency mode bypasses the slowest inserts on the tracks you are recording and monitoring. Turn it off and your mix is back as it was.</p></li>
+    <li class="card"><h3>Your outboard gear, lined up.</h3><p>Hardware inserts measure their own round trip with a click train, and delay compensation keeps the track in time.</p></li>
+    <li class="card"><h3>Play a hardware synth like a <span class="nw">plug-in</span>.</h3><p>External Instrument sends MIDI out and brings the audio back on the input you pick.</p></li>
+    <li class="card"><h3>A count-in that keeps your pickup.</h3><p>Notes you play during the count-in are kept, and recording starts sample-exact at the end of it.</p></li>
+    <li class="card"><h3>One heavy <span class="nw">plug-in</span> doesn&rsquo;t stall the rest.</h3><p>Mixer strips render on several cores with a bounded deadline, and the transport shows the load, buffer and driver at a glance.</p></li>
+    <li class="card"><h3>Native ASIO, WASAPI and JACK.</h3><p>Opens every channel of your interface; name your own paths and route anything to them.</p></li>
+  </ul>
+</section>
+
 <section id="downloads">
   <h2>Downloads</h2>
   <p class="lead">transit is free. It is also early software (alpha): it changes every week, and some things are rough or missing. Back up anything you care about, and tell us what breaks on the <a href="https://discord.gg/7PPUBZqA66">Discord</a> or in the <a href="https://github.com/transit-audio/transit/issues/49">testing thread</a>.</p>
@@ -67,6 +79,7 @@
 
 <section id="why">
   <h2>Why transit</h2>
+  <p class="lead">Cubase bones, Ableton manners.</p>
   <div class="cards">
     <article class="card"><h3>Record and pick your best take</h3><p>Record a part again and again. Every take stacks up in its own lane, so you choose the one that plays. Bounce in Place turns a track into audio when you are done.</p></article>
     <article class="card"><h3>Use the plug-ins you own</h3><p>Plays CLAP and VST3 plug-ins. Each one loads on its own, so a slow or stuck plug-in cannot freeze the window.</p></article>
