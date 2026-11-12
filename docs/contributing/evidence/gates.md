@@ -17,6 +17,7 @@ cargo xtask indexes --check   # the generated known-issues, ADR and escapes inde
 cargo xtask help        # the help catalog: every registered help id has an entry, every entry is used, the generated docs sections are current (xtask/src/help.rs)
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core   # Tier B bare-metal check (ADR 0037)
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core      # Tier B bare-metal check (ADR 0041)
+cargo check --locked --target thumbv7em-none-eabihf -p transit-math      # the portable math seam, no_std always (ADR 0055)
 ```
 
 Also `cargo xtask rt-targets` (cross-target check) when `crates/rt` or `crates/mix` changed. The
@@ -70,9 +71,10 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 The [2026-11-03 amendment](../../adr/0037-adaptable-core-small-hardware.md#amendment-2026-11-03-two-tiers-of-portability)
 specifies two independent jobs to add alongside the platform jobs in `.github/workflows/ci.yml`.
 The headless build is a required future gate. The bare-metal check runs today, as a step of the
-linux job ("Bare-metal library check (ADR 0037 Tier B)"), for the two enrolled crates,
-`transit-instrument-core` and `transit-sampler-core` (ADR 0041, #269); the other packages below
-are candidates:
+linux job ("Bare-metal library check (ADR 0037 Tier B)"), for the enrolled crates,
+`transit-instrument-core` and `transit-sampler-core` (ADR 0041, #269) and the portable math seam
+`transit-math` (ADR 0055, `no_std` always, so no feature flag); the other packages below are
+candidates:
 
 - **Headless build (#236):** the ADR's bash package list and explicit feature set run
   `cargo build --locked --no-default-features` and `cargo test --locked --no-default-features`

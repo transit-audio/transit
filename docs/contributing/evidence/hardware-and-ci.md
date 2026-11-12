@@ -14,8 +14,8 @@ need green CI. Jobs:
   hosts, the workspace clippy (`--all-targets`, `-D warnings`), the library-only clippy of
   `transit-mix`, `transit-plugin-host`, `transit-dsp` and `transit-rt` (#215), and the workspace tests.
 - `linux`: the packaging version checks (`xtask/tests/packaging-version.sh`), `cargo fmt --check`,
-  `cargo xtask timing`, the bare-metal checks of `transit-instrument-core` and `transit-sampler-core`
-  (ADR 0037 Tier B), the host library check, both clippy runs as on Windows, the native JACK clippy and
+  `cargo xtask timing`, the bare-metal checks of `transit-instrument-core`, `transit-sampler-core`
+  (ADR 0037 Tier B) and `transit-math` (ADR 0055), the host library check, both clippy runs as on Windows, the native JACK clippy and
   tests, the workspace tests (the UI tests on Mesa's CPU Vulkan driver), and the plug-in editor window
   tests under Xvfb. It is the Linux compile proof.
 - `macos`: the host library check, the workspace clippy and the workspace tests (`crates/au-host`

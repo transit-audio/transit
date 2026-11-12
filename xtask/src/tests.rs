@@ -127,6 +127,28 @@ fn standalone_and_ui_checks_cover_normal_and_build_dependencies_but_not_dev() {
 }
 
 #[test]
+fn standalone_crates_may_depend_on_the_math_seam_and_nothing_else() {
+    // ADR 0055 2.1: the FOUNDATION list holds only transit-math, which is itself standalone at L0.
+    assert_eq!(FOUNDATION, &["transit-math"]);
+    assert!(STANDALONE.contains(&"transit-math"));
+    assert_eq!(LAYERS.iter().find(|(n, _)| *n == "transit-math"), Some(&("transit-math", 0)));
+    for name in STANDALONE.iter().filter(|n| **n != "transit-math") {
+        for kind in [None, Some("build"), Some("dev")] {
+            let metadata = Metadata { packages: vec![package(name, &[("transit-math", kind)]), package("transit-math", &[])] };
+            assert!(check_layers(&metadata, |_| Ok(INHERIT.into())).is_ok(), "{name} -> transit-math ({kind:?})");
+        }
+    }
+    // The exemption is for the seam only: the seam itself, and any other standalone edge, still fail.
+    let metadata = Metadata { packages: vec![package("transit-math", &[("transit-time", None)]), package("transit-time", &[])] };
+    assert!(check_layers(&metadata, |_| Ok(INHERIT.into())).unwrap_err().contains("standalone"));
+    // Upper layers reach it as any L0 crate.
+    for name in ["transit-dsp", "transit-model", "transit-audio-io", "transit-mix"] {
+        let metadata = Metadata { packages: vec![package(name, &[("transit-math", None)]), package("transit-math", &[])] };
+        assert!(check_layers(&metadata, |_| Ok(INHERIT.into())).is_ok(), "{name} -> transit-math");
+    }
+}
+
+#[test]
 fn upward_and_app_edges_fail_while_documented_same_layer_edges_remain_valid() {
     for (source, dest, valid) in [
         ("transit-model", "transit-engine", false),

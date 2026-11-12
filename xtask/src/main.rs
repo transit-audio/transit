@@ -65,6 +65,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-audio-jack", 0),
     ("transit-midi-io", 0),
     ("transit-midi", 0),
+    ("transit-math", 0),
     ("transit-dsp", 1),
     ("transit-macro-osc", 1),
     ("transit-instrument-core", 1),
@@ -86,10 +87,12 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-automation", 5),
     ("transit-ui-studio", 6),
 ];
-/// Standalone crates have no workspace dependencies (dev-dependencies excepted).
+/// Standalone crates have no workspace dependencies (dev-dependencies excepted) apart from the
+/// `FOUNDATION` crates.
 /// transit-audio-io left the list with #238: it takes the Opus codec from transit-opus (L0, ADR 0048).
 const STANDALONE: &[&str] = &[
     "transit-time",
+    "transit-math",
     "transit-opus",
     "transit-audio-backend",
     "transit-midi-io",
@@ -102,6 +105,9 @@ const STANDALONE: &[&str] = &[
     "transit-modulator",
     "transit-random-sequencer",
 ];
+/// Foundation crates a standalone crate may still depend on: the portable math seam, the only place a
+/// rendered crate may get a transcendental function (ADR 0055, 2.1). Itself standalone.
+const FOUNDATION: &[&str] = &["transit-math"];
 // The image crate encodes screenshots (PNG); it is not a UI-only dependency.
 const UI_CRATES: &[&str] = &["egui", "eframe", "winit", "rfd", "egui-wgpu", "egui_glow", "egui_extras", "resvg", "wgpu"];
 // audio-bench is an app over playback and the native backends, not an engine layer.
@@ -201,7 +207,7 @@ fn check_layers(metadata: &Metadata, read_manifest: impl Fn(&Path) -> Result<Str
                 problems.push(format!("{name} (L{layer}) depends on UI crate {dn}"));
             }
             if metadata.packages.iter().any(|p| p.name == dn) {
-                if STANDALONE.contains(&name) {
+                if STANDALONE.contains(&name) && !FOUNDATION.contains(&dn) {
                     problems.push(format!("{name} is standalone but depends on {dn}"));
                 }
                 if let Some(&(_, dl)) = LAYERS.iter().find(|(n, _)| *n == dn) {

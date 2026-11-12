@@ -103,6 +103,7 @@ cargo xtask indexes --validate
 cargo xtask indexes --check
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core
+cargo check --locked --target thumbv7em-none-eabihf -p transit-math
 ```
 
 (plus `cargo xtask rt-targets` when `crates/rt` or `crates/mix` changed), run on Windows and on
