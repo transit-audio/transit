@@ -58,7 +58,15 @@ The current release is [v0.7.0](https://github.com/transit-audio/transit/release
 
 The builds are unsigned. On Windows, SmartScreen shows "More info", then "Run anyway". On macOS, if the app is blocked, run `xattr -dr com.apple.quarantine /Applications/transit.app` or right-click it and choose Open.
 
+v0.7.0 is the Sampler release: one kit with three views (Pads, Slices and Instrument) and kit presets, shown here beside the Compressor in the new device design.
+
+![The Sampler on its Pads view with a kit loaded, beside the Compressor](docs/images/transit-sampler.png)
+
 ![Arrangement view](docs/images/transit-arrange.png)
+
+![Arrangement detail: a chopped clip with fades and gaps, an automation curve and stacked takes](docs/images/transit-arrange-detail.png)
+
+![The Sampler's Slices view: a drum loop cut at its transients](docs/images/transit-sampler-slices.png)
 
 ![Mixer](docs/images/transit-mixer.png)
 
