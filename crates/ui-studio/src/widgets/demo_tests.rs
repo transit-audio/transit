@@ -47,6 +47,7 @@ fn one_of_every_control_lays_out_without_overlap_in_both_themes() {
                         points: &[[1.0, 0.7]],
                         mod_band: None,
                         between: None,
+                        floor_fade: 0.0,
                     },
                 )
                 .layout

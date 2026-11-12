@@ -519,6 +519,8 @@ and off, and a disabled Shaper that is shown dims and stays editable.
   does), and a **filter** (low, band or high pass; 12 or 24 dB; **Cutoff**, **Resonance**, **Drive**,
   **Key Track**) with its own envelope (**Env Amount**, up to six octaves, and its ADSR). The
   filter is the Filter effect's own, one per voice, so a chord's notes each get their own sweep.
+  The curve above the filter's knobs is its exact response, with room over the highest resonance
+  peak; drag the point on it to set the cutoff.
   Turning the shaper on or off applies to held notes at once, with a short crossfade and no new
   attack (on, a held note goes through the filter at its envelopes' current level); notes already
   released finish the way they started, so the switch does not click.

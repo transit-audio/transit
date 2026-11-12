@@ -469,3 +469,56 @@ fn bar_divisions_use_the_full_valid_meter_range() {
         }
     }
 }
+
+/// The panel's response well draws `shaper_response_db` (#428): it is the shaper's real response.
+/// An impulse through a voice's shaper filter (its own `design` and sections, drive at unity) is
+/// measured by a DFT at probes around the cutoff and compared with the function, in every mode and
+/// slope at three resonances and three cutoffs; and no setting rises above `shaper_peak_db`.
+#[test]
+fn the_panels_response_is_the_shaper_filters_measured_response() {
+    use shaper::{FilterMods, Shaper};
+    let dft = |x: &[f32], f: f64| {
+        let w = std::f64::consts::TAU * f / f64::from(SR);
+        let (mut re, mut im) = (0.0f64, 0.0f64);
+        for (n, v) in x.iter().enumerate() {
+            let a = w * n as f64;
+            re += f64::from(*v) * a.cos();
+            im -= f64::from(*v) * a.sin();
+        }
+        20.0 * re.hypot(im).max(1e-12).log10()
+    };
+    let peak = f64::from(shaper_peak_db());
+    for mode in 0..3 {
+        for slope24 in [false, true] {
+            for resonance in [0.0f32, 0.5, 1.0] {
+                for cutoff in [400.0f32, 2000.0, 9000.0] {
+                    let s = Settings {
+                        on: true,
+                        mode: shaper::filter_mode(mode),
+                        slope24,
+                        cutoff_log2: cutoff.log2(),
+                        resonance,
+                        sr: SR,
+                        ..Settings::default()
+                    };
+                    let mut sh = Shaper::new(1);
+                    sh.design(&s, 60.0, FilterMods::default());
+                    let h: Vec<f32> = (0..1 << 16).map(|n| sh.filter_frame(&s, true, if n == 0 { 1.0 } else { 0.0 })).collect();
+                    let fc = f64::from(cutoff);
+                    for probe in [0.5 * fc, 0.9 * fc, fc, 1.1 * fc, 2.0 * fc] {
+                        let want = f64::from(shaper_response_db(mode, slope24, cutoff, resonance, SR, probe as f32));
+                        let got = dft(&h, probe);
+                        assert!(
+                            want < -60.0 || (got - want).abs() < 0.05,
+                            "mode {mode} slope24 {slope24} res {resonance} fc {cutoff} at {probe:.1} Hz: measured {got:.3} dB, drawn {want:.3} dB"
+                        );
+                        assert!(got <= peak + 0.01, "{got:.3} dB above the peak bound {peak:.3}");
+                    }
+                }
+            }
+        }
+    }
+    // The bound is reached: the 12 dB low pass at full resonance peaks at it (just under the cutoff).
+    let top = (0..2000).map(|i| shaper_response_db(0, false, 400.0, 1.0, SR, 380.0 + i as f32 * 0.02)).fold(f32::MIN, f32::max);
+    assert!((f64::from(top) - peak).abs() < 0.01, "peak {top} vs bound {peak}");
+}

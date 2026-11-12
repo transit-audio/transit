@@ -4,6 +4,9 @@
 use super::shaper::{SHAPES, env_curve, freq_x, lfo_curve, response_db, section_key, x_freq};
 use super::test_rig::{T, mid};
 use crate::tokens::alpha;
+use crate::widgets::display_well;
+
+const SR: f32 = 48_000.0;
 
 #[test]
 fn the_switch_toggles_the_shaper_parameter_and_collapse_persists_in_ui_state() {
@@ -79,16 +82,17 @@ fn the_filter_segments_set_mode_and_slope_and_the_cutoff_point_drags() {
 #[test]
 fn the_response_follows_mode_slope_and_cutoff() {
     // Low pass: flat well below the cutoff, falling above it; high pass the mirror.
-    assert!(response_db(0, false, 1000.0, 0.0, 50.0).abs() < 0.1);
-    assert!(response_db(0, false, 1000.0, 0.0, 10_000.0) < -35.0);
-    assert!(response_db(2, false, 1000.0, 0.0, 50.0) < -45.0);
-    assert!(response_db(2, false, 1000.0, 0.0, 15_000.0).abs() < 0.1);
-    // 24 dB doubles the slope; resonance lifts the cutoff.
-    let (a, b) = (response_db(0, false, 1000.0, 0.0, 8000.0), response_db(0, true, 1000.0, 0.0, 8000.0));
+    assert!(response_db(0, false, 1000.0, 0.0, SR, 50.0).abs() < 0.1);
+    assert!(response_db(0, false, 1000.0, 0.0, SR, 10_000.0) < -35.0);
+    assert!(response_db(2, false, 1000.0, 0.0, SR, 50.0) < -45.0);
+    assert!(response_db(2, false, 1000.0, 0.0, SR, 15_000.0).abs() < 0.1);
+    // 24 dB at no resonance doubles the slope (both sections are Butterworth); resonance lifts the
+    // cutoff.
+    let (a, b) = (response_db(0, false, 1000.0, 0.0, SR, 8000.0), response_db(0, true, 1000.0, 0.0, SR, 8000.0));
     assert!((b - 2.0 * a).abs() < 1e-3);
-    assert!(response_db(0, false, 1000.0, 0.8, 1000.0) > 12.0);
+    assert!(response_db(0, false, 1000.0, 0.8, SR, 1000.0) > 12.0);
     // Negative control: band pass passes the cutoff and cuts both sides.
-    assert!(response_db(1, false, 1000.0, 0.0, 1000.0) > -0.1 && response_db(1, false, 1000.0, 0.0, 30.0) < -20.0);
+    assert!(response_db(1, false, 1000.0, 0.0, SR, 1000.0) > -0.1 && response_db(1, false, 1000.0, 0.0, SR, 30.0) < -20.0);
     for x in [0.0, 0.25, 0.5, 1.0] {
         assert!((freq_x(x_freq(x)) - x).abs() < 1e-5);
     }
@@ -334,4 +338,42 @@ fn the_sync_rate_knob_follows_a_slow_drag_through_the_divisions_in_duration_orde
     // The stored index and a saved session are unchanged: the table keeps its order.
     assert_eq!(DIVISIONS[0], "4 bars");
     assert_eq!(DIVISIONS[4], "1/4");
+}
+
+#[test]
+fn the_resonance_peak_is_drawn_whole_with_the_cutoffs_point_on_it_and_the_slope_fades_into_the_floor() {
+    // #428: LP, 24 dB, full resonance, 400 Hz: the peak was cut flat by the well's top (an 18 dB
+    // top under a model that drew a 40 dB peak), the point sat on the plateau, and the slope ran
+    // flat along the floor to 20 kHz with a hard corner.
+    let (mut t, tr) = T::open();
+    t.expand(tr);
+    for (id, v) in [("filter_mode", 0.0), ("filter_slope", 1.0), ("resonance", 100.0), ("cutoff", 400.0)] {
+        t.set(tr, id, v);
+    }
+    let w = t.panel(tr).wells.iter().find(|w| w.name == "filter").cloned().unwrap().well;
+    let top = w.curve.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+    assert!(top < 0.99, "the peak stays under the well's top: {top}");
+    assert!(w.curve.iter().all(|p| p[1] < 1.0), "no sample is clamped flat at the top");
+    // The cutoff's point is the curve's highest sample, at the cutoff.
+    let (plot, point) = (w.plot, mid(w.points[0]));
+    let py = (plot[3] - point.1) / (plot[3] - plot[1]);
+    assert!((py - top).abs() < 0.005, "the point {py} sits on the peak {top}");
+    assert!((point.0 - (plot[0] + (plot[2] - plot[0]) * freq_x(400.0))).abs() < 0.5);
+    // At 410 Hz the curve's samples fall either side of the narrow peak (399 and 415 Hz): the
+    // cutoff's own sample keeps the line up to the point.
+    t.set(tr, "cutoff", 410.0);
+    let w410 = t.panel(tr).wells.iter().find(|w| w.name == "filter").cloned().unwrap().well;
+    let top410 = w410.curve.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+    let py410 = (w410.plot[3] - mid(w410.points[0]).1) / (w410.plot[3] - w410.plot[1]);
+    assert!((py410 - top410).abs() < 0.005, "at 410 Hz the point {py410} sits on the line's peak {top410}");
+    // The scale's top is the filter's highest gain plus the room: the drawn peak is the real one.
+    let peak = transit_dsp::plugins::macro_osc::shaper_peak_db();
+    let at_cut = response_db(0, true, 400.0, 1.0, SR, 400.0);
+    assert!(peak > 27.0 && at_cut <= peak && at_cut > peak - 4.0, "{at_cut} dB at the cutoff under the {peak} dB bound");
+    // The slope reaches the floor well before 20 kHz, and its stroke fades out there.
+    assert!(w.curve.last().is_some_and(|p| p[1] == 0.0), "the 24 dB slope is under the floor at 20 kHz");
+    assert!(w.floor_fade > 0.0 && w.floor_fade < 0.5, "{}", w.floor_fade);
+    assert_eq!(display_well::floor_alpha(0.0, w.floor_fade), 0.0, "no ink along the floor");
+    assert_eq!(display_well::floor_alpha(w.floor_fade, w.floor_fade), 1.0, "full ink from the fade's top");
+    assert_eq!(display_well::floor_alpha(0.5, 0.0), 1.0, "a well without a fade draws its whole curve");
 }

@@ -6,6 +6,10 @@
 //!
 //! Positions are normalized: x 0..1 left to right, y 0..1 bottom to top. The caller maps them to
 //! its units and owns the values; a dragged point comes back as a new normalized position.
+//!
+//! A curve whose values run off the bottom (a filter's slope past the well's floor) can fade into
+//! the floor (`floor_fade`, #428): the stroke's alpha falls from full at that height to nothing at
+//! the floor, so the clamped part never draws a flat line along the floor with a hard corner.
 
 use super::r4;
 use crate::theme::TOKENS;
@@ -31,6 +35,8 @@ pub struct Well<'a> {
     /// A modulation reach: the region between two curves sampled at the same x positions
     /// (normalized), filled in the band color under the curve (326-X).
     pub between: Option<(&'a [[f32; 2]], &'a [[f32; 2]])>,
+    /// The normalized height over which the curve's stroke fades out toward the floor (0: no fade).
+    pub floor_fade: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -49,6 +55,10 @@ pub struct WellLayout {
     pub fill_color: Color32,
     #[serde(skip)]
     pub band_color: Color32,
+    /// The curve as drawn (normalized), and the height its stroke fades over toward the floor.
+    #[serde(skip)]
+    pub curve: Vec<[f32; 2]>,
+    pub floor_fade: f32,
 }
 
 pub struct WellOut {
@@ -66,6 +76,12 @@ pub fn to_screen(plot: Rect, n: [f32; 2]) -> Pos2 {
 /// The normalized position of a screen position in `plot`, clamped to the plot.
 pub fn to_norm(plot: Rect, p: Pos2) -> [f32; 2] {
     [((p.x - plot.min.x) / plot.width()).clamp(0.0, 1.0), ((plot.max.y - p.y) / plot.height()).clamp(0.0, 1.0)]
+}
+
+/// The curve stroke's alpha (0..1) at normalized height `y` with a floor fade over `fade`: 0 at
+/// the floor, 1 from `fade` up; no fade (1 everywhere) when `fade` is 0.
+pub fn floor_alpha(y: f32, fade: f32) -> f32 {
+    if fade <= 0.0 { 1.0 } else { (y / fade).clamp(0.0, 1.0) }
 }
 
 /// The plot area of a well at `well`, under a readout row when it has readouts.
@@ -124,7 +140,17 @@ pub fn show(ui: &mut Ui, id: egui::Id, size: egui::Vec2, w: &Well) -> WellOut {
             mesh.add_triangle(base, base + 2, base + 3);
         }
         p.add(Shape::mesh(mesh));
-        p.add(Shape::line(pts, Stroke::new(CURVE_STROKE, t.signal)));
+        if w.floor_fade > 0.0 {
+            // The stroke's ink by height: full from the fade's top, nothing at the floor.
+            let (signal, fade) = (t.signal, w.floor_fade);
+            let stroke = egui::epaint::PathStroke::new_uv(CURVE_STROKE, move |_, at| {
+                let y = (plot.max.y - at.y) / plot.height().max(1.0);
+                signal.gamma_multiply(floor_alpha(y, fade))
+            });
+            p.add(Shape::line(pts, stroke));
+        } else {
+            p.add(Shape::line(pts, Stroke::new(CURVE_STROKE, t.signal)));
+        }
     }
     let mut points = Vec::new();
     let mut dragged = None;
@@ -140,6 +166,18 @@ pub fn show(ui: &mut Ui, id: egui::Id, size: egui::Vec2, w: &Well) -> WellOut {
         p.circle(c, POINT_R, t.surface_inset, Stroke::new(POINT_STROKE, t.text));
         points.push(r4(Rect::from_center_size(c, vec2(2.0 * POINT_R, 2.0 * POINT_R))));
     }
-    let layout = WellLayout { well: r4(well), plot: r4(plot), readouts, points, band, between, curve_color: t.signal, fill_color, band_color };
+    let layout = WellLayout {
+        well: r4(well),
+        plot: r4(plot),
+        readouts,
+        points,
+        band,
+        between,
+        curve_color: t.signal,
+        fill_color,
+        band_color,
+        curve: w.curve.to_vec(),
+        floor_fade: w.floor_fade,
+    };
     WellOut { response, layout, dragged }
 }

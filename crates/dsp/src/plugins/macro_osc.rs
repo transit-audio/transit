@@ -77,6 +77,29 @@ pub(crate) use params::{
 use shaper::Settings;
 use voice::{Controls, Shared, Slot};
 
+/// The shaper filter's static magnitude response in dB at `hz` (the panel's response well, #428):
+/// the `filter_mode` choice `mode`, the 24 dB slope, the cutoff knob in Hz and the resonance knob
+/// as 0..1, at sample rate `sr`, through the analytic transfer function of the very sections the
+/// voice runs (`svf::magnitude` at `svf::q_of`, the 24 dB slope's Butterworth second section),
+/// without modulation, key tracking or drive.
+pub fn shaper_response_db(mode: usize, slope24: bool, cutoff: f32, resonance: f32, sr: f32, hz: f32) -> f32 {
+    use transit_instrument_core::svf;
+    let sr = f64::from(sane_sr(sr));
+    let q = f64::from(svf::q_of(100.0 * resonance));
+    let m = svf::magnitude(shaper::filter_mode(mode), slope24, f64::from(cutoff), q, sr, f64::from(hz).clamp(1.0, 0.499 * sr));
+    (20.0 * m.max(1e-9).log10()) as f32
+}
+
+/// The highest gain the shaper filter reaches at any setting, in dB: the 12 dB low or high pass at
+/// full resonance, whose peak is `Q / sqrt(1 - 1/(4 Q²))` at `svf::Q_MAX`. The 24 dB slope's
+/// Butterworth second section never lifts it (its gain is at most 1), the band pass is unity at
+/// its peak, and the bilinear transform keeps the analog prototype's magnitudes, so this bounds
+/// every cutoff and rate.
+pub fn shaper_peak_db() -> f32 {
+    let q = f64::from(transit_instrument_core::svf::Q_MAX);
+    (20.0 * (q / (1.0 - 1.0 / (4.0 * q * q)).sqrt()).log10()) as f32
+}
+
 /// The voice's block: its envelopes advance once per render call, timed for 12 frames.
 pub const BLOCK: usize = 12;
 // The shaper works out its modulations once per this same block.

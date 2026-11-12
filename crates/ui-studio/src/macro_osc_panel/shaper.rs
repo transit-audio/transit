@@ -50,9 +50,24 @@ pub const MODES: [&str; 3] = ["LP", "BP", "HP"];
 pub const SLOPES: [&str; 2] = ["12 dB", "24 dB"];
 /// The LFO shapes in the parameter's order, short.
 pub const SHAPES: [&str; 6] = ["SIN", "TRI", "SAW", "SQR", "S&H", "RND"];
-/// The response well's dB range.
-const DB_TOP: f32 = 18.0;
+/// The response well's floor, and the room left over the filter's highest peak (#428).
 const DB_FLOOR: f32 = -42.0;
+const PEAK_ROOM_DB: f32 = 2.0;
+/// The height over which the curve fades into the floor: a slope that runs past the floor fades
+/// out instead of running flat along it to 20 kHz.
+const FLOOR_FADE_DB: f32 = 12.0;
+
+/// The well's top: the shaper filter's highest gain at any setting (full resonance) plus
+/// [`PEAK_ROOM_DB`], so the resonance peak is always drawn as a peak with the cutoff's point on it.
+pub fn db_top() -> f32 {
+    transit_dsp::plugins::macro_osc::shaper_peak_db() + PEAK_ROOM_DB
+}
+
+/// The normalized height of `db` in the well (clamped to the floor and the top).
+fn db_y(db: f32) -> f32 {
+    let top = db_top();
+    (db.clamp(DB_FLOOR, top) - DB_FLOOR) / (top - DB_FLOOR)
+}
 /// The scale's marks.
 pub const SCALE: [(f32, &str); 5] = [(20.0, "20"), (100.0, "100"), (1000.0, "1k"), (10_000.0, "10k"), (20_000.0, "20k")];
 
@@ -120,29 +135,33 @@ pub(crate) fn cutoff_depth(app: &StudioApp, dev: Dev) -> f32 {
 }
 
 /// The response curve at `cutoff`, sampled across the well (normalized).
-fn response_curve(mode: usize, slope24: bool, cutoff: f32, res: f32) -> Vec<[f32; 2]> {
+pub(crate) fn response_curve(mode: usize, slope24: bool, cutoff: f32, res: f32, sr: f32) -> Vec<[f32; 2]> {
     (0..=180)
         .map(|i| {
             let x = i as f32 / 180.0;
-            let db = response_db(mode, slope24, cutoff, res, x_freq(x)).clamp(DB_FLOOR, DB_TOP);
-            [x, (db - DB_FLOOR) / (DB_TOP - DB_FLOOR)]
+            [x, db_y(response_db(mode, slope24, cutoff, res, sr, x_freq(x)))]
         })
         .collect()
 }
 
-/// The filter's response in dB at `hz`: a two-pole low, band or high pass (mode 0, 1, 2) at
-/// `cutoff` with the resonance's peak, squared for 24 dB.
-pub fn response_db(mode: usize, slope24: bool, cutoff: f32, resonance: f32, hz: f32) -> f32 {
-    let q = 0.707 + resonance.clamp(0.0, 1.0) * 9.3;
-    let r = hz / cutoff.max(1.0);
-    let den = ((1.0 - r * r).powi(2) + (r / q).powi(2)).sqrt().max(1e-9);
-    let mag = match mode {
-        1 => (r / q) / den,
-        2 => r * r / den,
-        _ => 1.0 / den,
-    };
-    let db = 20.0 * mag.max(1e-9).log10();
-    if slope24 { 2.0 * db } else { db }
+/// `curve` with the cutoff's own sample put in its place: a high resonance's peak is narrower than
+/// the curve's spacing (16 Hz wide at 400 Hz at full resonance), so without it the line passes
+/// under the peak and the cutoff's point floats above it. The gain at the cutoff is within 0.07 dB
+/// of the peak from a resonance of 50% up (0.002 dB at full), and the point is always on the line.
+pub(crate) fn with_cutoff(mut curve: Vec<[f32; 2]>, at: [f32; 2]) -> Vec<[f32; 2]> {
+    let i = curve.partition_point(|p| p[0] < at[0]);
+    if curve.get(i).is_some_and(|p| p[0] == at[0]) {
+        curve[i] = at;
+    } else {
+        curve.insert(i, at);
+    }
+    curve
+}
+
+/// The filter's response in dB at `hz`: the shaper filter's own analytic response (#428; low, band
+/// or high pass for mode 0, 1, 2, 12 or 24 dB, the resonance 0..1) at sample rate `sr`.
+pub fn response_db(mode: usize, slope24: bool, cutoff: f32, resonance: f32, sr: f32, hz: f32) -> f32 {
+    transit_dsp::plugins::macro_osc::shaper_response_db(mode, slope24, cutoff, resonance, sr, hz)
 }
 
 /// An ADSR shape in a well's normalized space: attack, decay and release take their knobs'
@@ -392,21 +411,24 @@ fn filter(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: &mut Edit
     // The response well, with the modulation's reach under the base response.
     let (mode, slope24) = (dev.index(app, "filter_mode"), dev.index(app, "filter_slope") == 1);
     let (cutoff, res) = (dev.value(app, "cutoff"), dev.value(app, "resonance") / 100.0);
-    let curve = response_curve(mode, slope24, cutoff, res);
+    let sr = app.engine.session().sample_rate.as_f64() as f32;
     let cx = freq_x(cutoff);
-    let at_cut = (response_db(mode, slope24, cutoff, res, cutoff).clamp(DB_FLOOR, DB_TOP) - DB_FLOOR) / (DB_TOP - DB_FLOOR);
+    let at_cut = db_y(response_db(mode, slope24, cutoff, res, sr, cutoff));
+    let curve = with_cutoff(response_curve(mode, slope24, cutoff, res, sr), [cx, at_cut]);
     let reach = cutoff_reach(cutoff, cutoff_depth(app, dev), dev.value(app, "filter_env_amount") / 100.0);
-    let edges = reach.map(|[lo, hi]| (response_curve(mode, slope24, lo, res), response_curve(mode, slope24, hi, res)));
+    let edges = reach.map(|[lo, hi]| (response_curve(mode, slope24, lo, res, sr), response_curve(mode, slope24, hi, res, sr)));
     let wr = Rect::from_min_size(pos2(inner.min.x, head.max.y + GAP), vec2(inner.width(), FILTER_WELL_H));
     let between = edges.as_ref().map(|(lo, hi)| (lo.as_slice(), hi.as_slice()));
-    let shown = well(ui, dev, wr, "filter", &display_well::Well { curve: &curve, points: &[[cx, at_cut]], between, ..Default::default() }, out);
+    let floor_fade = FLOOR_FADE_DB / (db_top() - DB_FLOOR);
+    let shown =
+        well(ui, dev, wr, "filter", &display_well::Well { curve: &curve, points: &[[cx, at_cut]], between, floor_fade, ..Default::default() }, out);
     let plot = display_well::plot_rect(wr, false);
     out.filter_reach = reach.map(|[lo, hi]| [plot.min.x + plot.width() * freq_x(lo), plot.min.x + plot.width() * freq_x(hi)]);
     for hz in [100.0, 1000.0, 10_000.0] {
         let x = plot.min.x + plot.width() * freq_x(hz);
         p.line_segment([pos2(x, plot.min.y), pos2(x, plot.max.y)], Stroke::new(1.0, t.grid));
     }
-    let zero = plot.max.y - plot.height() * (-DB_FLOOR / (DB_TOP - DB_FLOOR));
+    let zero = plot.max.y - plot.height() * db_y(0.0);
     p.extend(Shape::dashed_line(&[pos2(plot.min.x, zero), pos2(plot.max.x, zero)], Stroke::new(1.0, t.line), 3.0, 3.0));
     for (hz, label) in SCALE {
         let x = plot.min.x + plot.width() * freq_x(hz);

@@ -15,7 +15,7 @@ fn well(ui: &mut egui::Ui) -> display_well::WellOut {
         ui,
         egui::Id::new("w"),
         vec2(240.0, 120.0),
-        &Well { readouts: &["1.20 kHz", "Q 0.71"], curve: &CURVE, points: &POINTS, mod_band: Some([0.4, 0.6]), between: None },
+        &Well { readouts: &["1.20 kHz", "Q 0.71"], curve: &CURVE, points: &POINTS, mod_band: Some([0.4, 0.6]), between: None, floor_fade: 0.0 },
     )
 }
 
