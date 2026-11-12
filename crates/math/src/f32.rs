@@ -63,6 +63,29 @@ pub fn powf(x: f32, y: f32) -> f32 {
     libm::powf(x, y)
 }
 
+/// `x^n` by transit's own binary exponentiation (Rust's `powi` has unspecified precision). The order of
+/// the plain multiplications is fixed: the exponent's bits are read from the lowest; a set bit
+/// multiplies the accumulator (starting at 1) by the current square, and the square is squared before
+/// each further bit. So `x^2 = x·x`, `x^3 = x·(x·x)`, `x^4 = (x·x)·(x·x)`. A negative `n` is
+/// `1 / x^|n|`, one division after the multiplications; `n = 0` is 1 for every `x`, NaN included.
+/// Identical everywhere by construction.
+#[inline]
+pub fn powi(x: f32, n: i32) -> f32 {
+    let mut e = n.unsigned_abs();
+    let mut square = x;
+    let mut acc = 1.0;
+    while e != 0 {
+        if e & 1 == 1 {
+            acc *= square;
+        }
+        e >>= 1;
+        if e != 0 {
+            square *= square;
+        }
+    }
+    if n < 0 { 1.0 / acc } else { acc }
+}
+
 /// Hyperbolic tangent (`libm::tanhf`).
 #[inline]
 pub fn tanh(x: f32) -> f32 {

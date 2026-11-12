@@ -63,6 +63,25 @@ pub fn pow(x: f64, y: f64) -> f64 {
     libm::pow(x, y)
 }
 
+/// `x^n` by transit's own binary exponentiation, in the multiplication order of
+/// [`crate::f32::powi`]: exact operations in a fixed order, identical everywhere.
+#[inline]
+pub fn powi(x: f64, n: i32) -> f64 {
+    let mut e = n.unsigned_abs();
+    let mut square = x;
+    let mut acc = 1.0;
+    while e != 0 {
+        if e & 1 == 1 {
+            acc *= square;
+        }
+        e >>= 1;
+        if e != 0 {
+            square *= square;
+        }
+    }
+    if n < 0 { 1.0 / acc } else { acc }
+}
+
 /// Four-quadrant arctangent of `y / x` in radians (`libm::atan2`; the surround panner's azimuth).
 #[inline]
 pub fn atan2(y: f64, x: f64) -> f64 {

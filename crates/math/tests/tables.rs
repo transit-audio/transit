@@ -7,7 +7,7 @@
 
 mod common;
 
-use common::{Fnv, args32, args64, pairs32, pairs64, triples32, triples64};
+use common::{Fnv, args32, args64, lin32, lin64, pairs32, pairs64, specials32, specials64, triples32, triples64};
 use transit_math::{f32 as m32, f64 as m64};
 
 fn one32(name: &str, f: fn(f32) -> f32) -> (String, u64) {
@@ -76,6 +76,25 @@ fn computed() -> Vec<(String, u64)> {
         one64("round", m64::round),
         one64("trunc", m64::trunc),
     ];
+    // powi: 64 bases from -4 to 4 and the specials, each to every power from -32 to 31.
+    let mut h = Fnv::new();
+    let mut xs = lin32(-4.0, 4.0, 64);
+    xs.extend(specials32());
+    for &x in &xs {
+        for n in -32..32 {
+            h.f32(m32::powi(x, n));
+        }
+    }
+    v.push(("f32::powi".into(), h.0));
+    let mut h = Fnv::new();
+    let mut xs = lin64(-4.0, 4.0, 64);
+    xs.extend(specials64());
+    for &x in &xs {
+        for n in -32..32 {
+            h.f64(m64::powi(x, n));
+        }
+    }
+    v.push(("f64::powi".into(), h.0));
     let mut h = Fnv::new();
     for (a, b, c) in triples32() {
         h.f32(m32::mul_add(a, b, c));
@@ -108,6 +127,7 @@ const PINNED: &[(&str, u64)] = &[
     ("f32::round", 0x70741d22c771be08),
     ("f32::trunc", 0xa5074f29cf269380),
     ("f32::mul_add", 0xd49c9f742b42bd53),
+    ("f32::powi", 0xd2ebefb616eb99da),
     ("f64::sin", 0x73d3fd62837394fc),
     ("f64::cos", 0xced317e21e5262f0),
     ("f64::tan", 0x3fedaebd2138c28c),
@@ -124,6 +144,7 @@ const PINNED: &[(&str, u64)] = &[
     ("f64::round", 0xcdba6a0db25dbd20),
     ("f64::trunc", 0xca6349ff909ea6f0),
     ("f64::mul_add", 0x79ce07ddb3d100a3),
+    ("f64::powi", 0xc1346b34b8b5af72),
 ];
 
 #[test]

@@ -19,5 +19,6 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod consts;
 pub mod f32;
 pub mod f64;
