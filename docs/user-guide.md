@@ -1162,6 +1162,7 @@ one change (amended 2026-11-12): the automation lanes, MIDI mappings and rack ma
 device are kept, as lanes and mappings with no assigned parameter, so they can be assigned to a
 replacement device's parameter later. Nothing plays from them, and an unassigned MIDI mapping does
 not take over its controller, until you assign them.
+From the release that retires the first stage 2 device, replacing or removing a plug-in also leaves its automation lanes and the mappings to its former parameters explicitly unassigned. Flatten keeps retained unassigned lanes and their curves; it removes the plug-in automation it rendered into audio. Retained mappings appear as unassigned in MIDI Mappings and in the macro's target list, with the former device and parameter names, and can be assigned to a new parameter.
 
 ## Tuning a hardware synth
 
