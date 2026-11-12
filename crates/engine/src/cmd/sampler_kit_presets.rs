@@ -448,16 +448,41 @@ fn prepare(e: &mut Engine, t: TrackId, file: &Path, kit: Value, refs: &[FileRef]
     Ok(Recalled { session, patch, missing })
 }
 
+/// One holder of a source other than the timeline's clips (see [`holders`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Holder {
+    /// A Sampler patch on the named track: its instrument or an insert, opaque ones included.
+    Sampler(String),
+    /// The named track's freeze.
+    Freeze(String),
+    /// A copied audio clip.
+    Clipboard,
+}
+
+/// Who names source `sid` besides the timeline's clips: each track whose Sampler patch names it
+/// (opaque ones by their raw sources), each track whose freeze is it, and the clipboard. Clear
+/// Clips (#488) refuses a file any of these still holds.
+pub(super) fn holders(e: &Engine, sid: SourceId) -> Vec<Holder> {
+    let mut out = Vec::new();
+    for tr in &e.session().tracks {
+        let mut patches = tr.instrument.iter().chain(tr.mixer.inserts.iter().flatten()).filter_map(|i| i.sampler_patch.as_ref());
+        if patches.any(|p| p.media().contains(&sid)) {
+            out.push(Holder::Sampler(tr.name.clone()));
+        }
+        if tr.freeze.as_ref().is_some_and(|f| f.source == sid) {
+            out.push(Holder::Freeze(tr.name.clone()));
+        }
+    }
+    if e.clipboard.tracks.iter().flatten().any(|c| c.source() == Some(sid)) {
+        out.push(Holder::Clipboard);
+    }
+    out
+}
+
 /// Whether anything in the session or on the clipboard names source `sid`: a clip in any playlist,
 /// a freeze, or any Sampler patch (opaque ones by their raw sources).
 fn named_elsewhere(e: &Engine, sid: SourceId) -> bool {
-    let s = e.session();
-    let mut patches =
-        s.tracks.iter().flat_map(|tr| tr.instrument.iter().chain(tr.mixer.inserts.iter().flatten())).filter_map(|i| i.sampler_patch.as_ref());
-    s.clips_using(sid).next().is_some()
-        || s.tracks.iter().any(|tr| tr.freeze.as_ref().is_some_and(|f| f.source == sid))
-        || patches.any(|p| p.media().contains(&sid))
-        || e.clipboard.tracks.iter().flatten().any(|c| c.source() == Some(sid))
+    e.session().clips_using(sid).next().is_some() || !holders(e, sid).is_empty()
 }
 
 /// Removes each of `old` (the replaced kit's referenced sources) that nothing names any more from
