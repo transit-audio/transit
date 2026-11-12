@@ -261,3 +261,24 @@ fn playback_content_end_converts_delay_across_tempo_changes() {
     e.execute("event.midi_rtp", &serde_json::json!({"track": track.0, "delay": 1920})).unwrap();
     assert_eq!(transit_mix::playback_content_end(e.session()), 100_800, "960 ticks at 600 BPM plus 960 at 60 BPM extend the tail");
 }
+
+#[test]
+fn an_inactive_external_instrument_is_refused_then_named_after_confirmation() {
+    let dir = scratch("consolidated-inactive-external");
+    let mut s = Session::default();
+    let track = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Hardware"));
+    s.track_mut(track).unwrap().instrument = Some(transit_model::Insert::external("In 1"));
+    s.track_mut(track).unwrap().inactive = true;
+    let clip = s.new_clip_id();
+    s.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(Clip::midi(clip, "phrase", 0, 4800, Sequence::default()));
+    let mut e = Engine::new(s);
+
+    let err = e.execute("file.bounce_consolidated", &serde_json::json!({"dir": dir.to_string_lossy()})).unwrap_err().to_string();
+    assert!(err.contains("Hardware"), "the inactive device is named in the refusal: {err}");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "nothing is written before confirmation");
+    let result = e.execute("file.bounce_consolidated", &serde_json::json!({"dir": dir.to_string_lossy(), "without_external": true})).unwrap();
+    assert_eq!(result["left_out"], serde_json::json!(["Hardware"]));
+    assert_eq!(result["files"].as_array().unwrap().len(), 0);
+    assert_eq!(result["midi_files"].as_array().unwrap().len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}

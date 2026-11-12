@@ -117,6 +117,26 @@ impl ConsolidatedBounce {
         files
     }
 
+    /// Files completed so far, including MIDI and the tempo map.
+    pub fn written(&self) -> Vec<PathBuf> {
+        let mut files = self.done.files.clone();
+        files.extend(self.done.midi_files.clone());
+        if !self.done.tempo_file.as_os_str().is_empty() {
+            files.push(self.done.tempo_file.clone());
+        }
+        files
+    }
+
+    /// A stop/error report that names every file already completed.
+    pub fn report_stopped(&self, reason: &str) -> String {
+        let written = self.written();
+        if written.is_empty() {
+            reason.to_string()
+        } else {
+            format!("{reason}; completed files: {}", written.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "))
+        }
+    }
+
     pub fn progress(&self) -> f32 {
         if self.next == self.tracks.len() {
             return 1.0;
@@ -185,8 +205,10 @@ impl ConsolidatedBounce {
     /// Render the complete export (see [`Self::step`]).
     pub fn run(mut self) -> Result<ConsolidatedBounced> {
         loop {
-            if let Some(done) = self.step(|| true)? {
-                return Ok(done);
+            match self.step(|| true) {
+                Ok(Some(done)) => return Ok(done),
+                Ok(None) => {}
+                Err(e) => return Err(EngineError::Io(self.report_stopped(&e.to_string()))),
             }
         }
     }

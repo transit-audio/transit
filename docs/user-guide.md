@@ -223,9 +223,11 @@ and any real-time delay or track offset. Every MIDI or instrument track, includi
 gets a Standard MIDI File beside it. Rack clips, real-time properties, track offsets, clip edges,
 muted clips and loop repetitions follow playback; MIDI effects remain represented by the audio stem
 rather than generating new notes. A separate tempo-only SMF carries the session tempo, meter and
-markers even when the session has no MIDI tracks. External Instrument audio is left out only after
-the usual explicit choice, while its MIDI is kept. The control channel command is
-`file.bounce_consolidated` with `dir` and the ordinary format options.
+markers even when the session has no MIDI tracks. Stems include the track fader and pan and the
+master chain. External Instrument audio, including audio on an inactive track, is left out only after
+the usual explicit choice that names the track; its MIDI is kept. If an export stops partway through,
+the result names any files that completed. The control channel command is `file.bounce_consolidated`
+with `dir` and the ordinary format options.
 
 With Opus the bit depth row gives way to **Bitrate**: 96, 128, 160 (the default), 192 or 256 kb/s
 for stereo; a mono bus offers 96 (the default), 128 or 160 kb/s.
