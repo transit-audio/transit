@@ -456,13 +456,21 @@ mod tests {
     #[test]
     fn every_command_survives_empty_params() {
         // No command may panic with `{}` params on an empty or demo session.
+        // Without a path the score writers put their file in the system temp folder; give them one in a guarded folder.
+        let dir = transit_test_support::TestDir::created("empty-params");
         for demo in [false, true] {
             for c in command_specs() {
                 if matches!(c.id, "app.quit") {
                     continue;
                 }
                 let mut e = if demo { crate::demo::demo_engine() } else { Engine::default() };
-                let r = e.execute(c.id, &serde_json::json!({}));
+                let params = match c.id {
+                    "file.export_sibelius" | "file.send_to_sibelius" | "file.print_score" => {
+                        serde_json::json!({"path": dir.join("score.out").to_string_lossy()})
+                    }
+                    _ => serde_json::json!({}),
+                };
+                let r = e.execute(c.id, &params);
                 if let Err(EngineError::Internal(id, msg)) = r {
                     panic!("{id} panicked: {msg}");
                 }

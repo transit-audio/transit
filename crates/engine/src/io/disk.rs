@@ -286,6 +286,14 @@ mod tests {
         };
         let (m, t, id) = make(false);
         let (d, _, _) = make(true);
+        // The peaks thread writes the `.peaks` sidecar beside the file; let it finish before the folder is removed.
+        let src = d.session().sources[0].id;
+        let disk = d.session().pool.get(src).unwrap().disk.clone().unwrap();
+        let give_up = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while disk.peaks().is_none() {
+            assert!(std::time::Instant::now() < give_up, "the peaks thread never finished");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
         (dir, path, m, d, t, id)
     }
 
