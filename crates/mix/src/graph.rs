@@ -180,9 +180,13 @@ pub(crate) fn init_graph_switch() {
                 log::info!("mix: {RENDER_TAIL_ENV}=1 ignored with {RENDER_GRAPH_ENV}=0");
             }
             let (on, why) = tail_switch(setting, graph, TAIL_DEFAULT);
-            TAIL.store(on, Ordering::Relaxed);
-            TAIL_WHY.store(why as u8, Ordering::Relaxed);
-            log::info!("{}", tail_log_text(on, why));
+            // A test or measurement that set the switch before the first engine started its
+            // workers keeps it (as before, where only `1` was ever stored here).
+            if TailWhy::from_u8(TAIL_WHY.load(Ordering::Relaxed)) != TailWhy::Forced {
+                TAIL.store(on, Ordering::Relaxed);
+                TAIL_WHY.store(why as u8, Ordering::Relaxed);
+            }
+            log::info!("{}", tail_log_text(MixEngine::tail_enabled(), MixEngine::tail_why()));
         });
     }
 }
