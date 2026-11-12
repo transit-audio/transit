@@ -70,7 +70,16 @@ fn real_vs_complex<T: Eps>() {
 
         // The inverse of a Hermitian spectrum (the half spectrum of a real signal, mirrored).
         let half = spec.clone();
-        let mut full: Vec<_> = (0..n).map(|k| if k <= n / 2 { half[k] } else { let z = half[n - k]; Complex::new(z.re, T::default() - z.im) }).collect();
+        let mut full: Vec<_> = (0..n)
+            .map(|k| {
+                if k <= n / 2 {
+                    half[k]
+                } else {
+                    let z = half[n - k];
+                    Complex::new(z.re, T::default() - z.im)
+                }
+            })
+            .collect();
         fft::inverse(&tw, &mut full).unwrap();
         let mut y = vec![T::default(); n];
         let mut scratch = vec![Complex::default(); n / 2];

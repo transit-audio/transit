@@ -378,12 +378,7 @@ pub fn forward_real<T: Float>(table: &[Complex<T>], input: &[T], output: &mut [C
 ///
 /// [`FftError::Size`], [`FftError::Twiddles`], or [`FftError::Buffer`] for a `spectrum` or `scratch` of
 /// the wrong length; nothing is written then.
-pub fn inverse_real<T: Float>(
-    table: &[Complex<T>],
-    spectrum: &[Complex<T>],
-    output: &mut [T],
-    scratch: &mut [Complex<T>],
-) -> Result<(), FftError> {
+pub fn inverse_real<T: Float>(table: &[Complex<T>], spectrum: &[Complex<T>], output: &mut [T], scratch: &mut [Complex<T>]) -> Result<(), FftError> {
     let n = output.len();
     if !is_supported(n) {
         return Err(FftError::Size(n));

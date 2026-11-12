@@ -157,8 +157,14 @@ fn parseval_linearity<T: Eps>() {
         fft::forward(&tw, &mut big_x).unwrap();
         // Energies summed with compensation, so the test's own summation (about n unit roundoffs if naive,
         // in f64) does not swamp the transform's error.
-        let ex = sum(x.iter().map(|z| { let (a, b) = fft_support::c64(*z); a * a + b * b }));
-        let eb = sum(big_x.iter().map(|z| { let (a, b) = fft_support::c64(*z); a * a + b * b })) / n as f64;
+        let ex = sum(x.iter().map(|z| {
+            let (a, b) = fft_support::c64(*z);
+            a * a + b * b
+        }));
+        let eb = sum(big_x.iter().map(|z| {
+            let (a, b) = fft_support::c64(*z);
+            a * a + b * b
+        })) / n as f64;
         let e = ((eb - ex) / ex).abs() / T::EPS;
         assert!(e <= 4.0 * log2(n), "Parseval, n = {n}: {e} eps");
         worst_p = worst_p.max(e / log2(n));
