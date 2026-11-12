@@ -163,6 +163,9 @@ pub(crate) struct Packets {
     pub(crate) frames: u64,
     /// Channels of the first decoded packet (0 until one decodes).
     pub(crate) channels: usize,
+    /// A decode error not yet known to be at the end of the stream: if the stream ends before
+    /// another packet of the track, that last packet is dropped; if one follows, it is a refusal.
+    pending_decode_error: Option<String>,
 }
 
 impl Packets {
@@ -197,7 +200,22 @@ impl Packets {
             next_packet_ts: None,
             frames: 0,
             channels: 0,
+            pending_decode_error: None,
         })
+    }
+
+    /// The stream ended. A decode error held back from the last packet means that packet is
+    /// dropped (encoders can end a stream with a frame whose last granule is empty, which the
+    /// decoder rejects); with nothing decoded before it, the file is still refused.
+    fn end_of_stream(&mut self) -> Result<Option<(usize, usize)>> {
+        match self.pending_decode_error.take() {
+            Some(m) if self.frames == 0 => Err(AudioError::Malformed(format!("corrupt audio packet: {m}"))),
+            Some(m) => {
+                log::warn!("the last audio packet could not be decoded and was dropped: {m}");
+                Ok(None)
+            }
+            None => Ok(None),
+        }
     }
 
     /// Decode the next packet of the track: `Some((frames, channels))`, its interleaved samples in
@@ -206,18 +224,22 @@ impl Packets {
         loop {
             let packet = match self.reader.next_packet() {
                 Ok(p) => p,
-                Err(SymError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-                Err(SymError::ResetRequired) => return Ok(None),
+                Err(SymError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return self.end_of_stream(),
+                Err(SymError::ResetRequired) => return self.end_of_stream(),
                 Err(e) => {
                     if self.frames == 0 {
                         return Err(map_err(e));
                     }
                     log::warn!("stopping decode after demux error: {e}");
-                    return Ok(None);
+                    return self.end_of_stream();
                 }
             };
             if packet.track_id() != self.track_id {
                 continue;
+            }
+            // A packet after a decode error: the error was in the middle of the stream.
+            if let Some(m) = self.pending_decode_error.take() {
+                return Err(AudioError::Malformed(format!("corrupt audio packet: {m}")));
             }
             // Some demuxers discard corrupt packets internally. Their next timestamp still
             // exposes the missing duration; never concatenate across that gap.
@@ -228,8 +250,12 @@ impl Packets {
             let decoded = match self.decoder.decode(&packet) {
                 Ok(d) => d,
                 // A skipped packet would move all later audio earlier. Packet durations are not
-                // available for every codec, so refuse the import instead of returning a short clip.
-                Err(SymError::DecodeError(m)) => return Err(AudioError::Malformed(format!("corrupt audio packet: {m}"))),
+                // available for every codec, so refuse the import instead of returning a short
+                // clip, unless no packet follows: then nothing shifts and the audio so far is kept.
+                Err(SymError::DecodeError(m)) => {
+                    self.pending_decode_error = Some(m.to_string());
+                    continue;
+                }
                 Err(SymError::IoError(_)) => return Ok(None),
                 Err(e) => return Err(map_err(e)),
             };
@@ -344,5 +370,61 @@ mod tests {
         });
         bytes[end - 2..end].copy_from_slice(&crc.to_be_bytes());
         assert!(matches!(decode(&bytes, FileFormat::Flac), Err(AudioError::Malformed(_))), "decoder error must be refused");
+    }
+
+    /// One MPEG-1 Layer III mono frame (128 kbit/s, 44.1 kHz, 417 bytes) of silence. With
+    /// `empty_last_granule`, granule 0 claims the whole main data (all ones decode as zero
+    /// quadruples) and granule 1 claims none, the shape that makes the decoder report
+    /// "invalid main_data offset".
+    fn mp3_frame(empty_last_granule: bool) -> Vec<u8> {
+        let mut f = vec![0u8; 417];
+        f[..4].copy_from_slice(&[0xFF, 0xFB, 0x90, 0xC0]);
+        if empty_last_granule {
+            let mut bits = Vec::new();
+            let mut put = |v: u32, n: u32| bits.extend((0..n).rev().map(|i| (v >> i) & 1 == 1));
+            put(0, 9); // main_data_begin
+            put(0, 5); // private bits
+            put(0, 4); // scfsi
+            for part2_3_length in [(417 - 4 - 17) * 8, 0] {
+                put(part2_3_length, 12);
+                put(0, 9); // big_values
+                put(0, 8); // global_gain
+                put(0, 4); // scalefac_compress
+                put(0, 1); // window switching
+                put(0, 15); // table_select
+                put(0, 4); // region0_count
+                put(0, 3); // region1_count
+                put(0, 3); // preflag, scalefac_scale, count1table_select
+            }
+            for (i, chunk) in bits.chunks(8).enumerate() {
+                f[4 + i] = chunk.iter().fold(0u8, |a, &b| (a << 1) | u8::from(b));
+            }
+            for b in &mut f[4 + 17..] {
+                *b = 0xFF;
+            }
+        }
+        f
+    }
+
+    fn mp3(frames: &[bool]) -> Vec<u8> {
+        frames.iter().flat_map(|&bad| mp3_frame(bad)).collect()
+    }
+
+    #[test]
+    fn an_empty_last_granule_in_the_last_frame_keeps_the_audio_before_it() {
+        let (info, audio) = decode(&mp3(&[false, false, false, true]), FileFormat::Mp3).expect("the audio before the last frame is kept");
+        assert_eq!(info.channels, 1);
+        assert_eq!(audio.channels[0].len(), 3 * 1152);
+    }
+
+    #[test]
+    fn the_same_frame_in_the_middle_is_still_refused() {
+        let err = decode(&mp3(&[false, true, false, false]), FileFormat::Mp3).unwrap_err();
+        assert!(matches!(&err, AudioError::Malformed(m) if m.contains("corrupt audio packet")), "{err:?}");
+    }
+
+    #[test]
+    fn a_stream_whose_only_frame_fails_is_refused() {
+        assert!(matches!(decode(&mp3(&[true]), FileFormat::Mp3), Err(AudioError::Malformed(_))));
     }
 }
