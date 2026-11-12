@@ -205,6 +205,7 @@ File > Bounce… (Ctrl+Alt+B) writes the main mix or a bus over the selection, t
 the whole song, or one file per output path (**Stems by output path**). **Format** is WAV, AIFF or
 FLAC, lossless at the bit depth you pick (16-bit, 24-bit or 32-bit float), or **Opus**, transit's
 lossy format for sharing: small files that play in every browser, phone and messaging app.
+A 32-bit float file keeps levels above 0 dBFS as they are; 16-bit and 24-bit files clip at full scale.
 
 With Opus the bit depth row gives way to **Bitrate**: 96, 128, 160 (the default), 192 or 256 kb/s
 for stereo; a mono bus offers 96 (the default), 128 or 160 kb/s.
