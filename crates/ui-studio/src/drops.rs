@@ -115,10 +115,10 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
     }
 }
 
-/// Offers `path` to the editor window `key` in the next frame, as a file dropped on it there (a
-/// browser drag released on a Sampler view's empty well, #464).
-pub(crate) fn offer_next(app: &mut StudioApp, key: (TrackId, usize), path: PathBuf) {
-    app.builtin_editor.drops.next = Some((key, DropOffer { paths: vec![path], pos: None }));
+/// Offers `path` to the editor window `key` in the next frame, as a file dropped on it at `pos` (a
+/// browser drag released on a Sampler view's empty well, #464, or on its key map's keys, #492).
+pub(crate) fn offer_next(app: &mut StudioApp, key: (TrackId, usize), path: PathBuf, pos: Option<egui::Pos2>) {
+    app.builtin_editor.drops.next = Some((key, DropOffer { paths: vec![path], pos }));
 }
 
 /// The drop the editor window `key` claimed this frame, if any (taken once).

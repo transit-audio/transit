@@ -19,12 +19,16 @@
 //! sections at 40 percent; a refused file is the engine's text in the note row, nothing loaded;
 //! the zone waveform reads `Analyzing…` while its source's peaks are not there, and hatches with
 //! a card naming the file when its audio is missing (the zone, its id and its round-robin place
-//! kept).
+//! kept). With zones, a file dropped on keys no zone covers (from the browser or the system) becomes
+//! a zone over that run of free keys rooted under the pointer, and Load… in the key map's label row
+//! places one on the lowest free run ([`key_map_drop`], #492); a drop on a zone's keys is refused
+//! with the reason in the note row and changes nothing.
 
 pub mod fade_fields;
 pub mod group_actions;
 pub mod group_panel;
 pub mod key_map;
+pub mod key_map_drop;
 pub mod key_map_gestures;
 pub mod keyboard;
 pub mod state;
@@ -39,6 +43,8 @@ mod followup_tests;
 mod group_panel_tests;
 #[cfg(test)]
 mod hardening_tests;
+#[cfg(test)]
+mod key_map_drop_tests;
 #[cfg(test)]
 mod key_map_range_tests;
 #[cfg(test)]
@@ -267,7 +273,12 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     // The key map.
     let kh = key_map::height(&p);
     if let Some(st) = &data {
-        let inputs = key_map::Inputs { selected: v.selected, held: &held(app, uid, st, now), names: mc, session: &s };
+        // A browser drag of an audio file over this map's keys: its x, for the preview.
+        let drop_at = match app.browser.drag.as_ref().and_then(|d| d.target) {
+            Some((crate::browser::Target::KeyMap { dev: k, at }, _)) if k == dev.key => Some(at[0]),
+            _ => None,
+        };
+        let inputs = key_map::Inputs { selected: v.selected, held: &held(app, uid, st, now), names: mc, session: &s, drop_at };
         let (km, intent) = key_map::show(ui, uid, st, &inputs, &mut v.drag, &mut v.conflict, Rect::from_min_size(rect.min, vec2(rect.width(), kh)));
         lo.key_map = km;
         match intent {
@@ -280,18 +291,30 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
                 send(app, dev, &mut v, "mix.sampler_zone_map", key_map_gestures::params(&edits));
             }
             Some(key_map::Intent::Load) => {
-                if let Some(path) = app.services.pick_open.as_ref().and_then(|pick| pick("mix.sampler_zone_source", None)) {
-                    load(app, dev, &mut v, st, &path);
+                // With zones: the lowest free run (the button is unavailable when there is none).
+                let place = if st.zones.is_empty() { None } else { key_map_drop::lowest_free(st) };
+                if (st.zones.is_empty() || place.is_some())
+                    && let Some(path) = app.services.pick_open.as_ref().and_then(|pick| pick("mix.sampler_zone_source", None))
+                {
+                    load(app, dev, &mut v, st, &path, place);
                 }
             }
             None => {}
         }
-        // The empty view is the drop target: a file dropped anywhere on it loads as a new zone.
-        if st.zones.is_empty()
-            && let Some(offer) = crate::drops::take(app, dev.key)
+        // The empty view is the drop target: a file dropped anywhere on it loads as a new zone. With
+        // zones, a file dropped on the map's keys lands on the free run there, or is refused.
+        if let Some(offer) = crate::drops::take(app, dev.key)
             && let Some(path) = offer.paths.iter().find(|p| p.is_absolute() && crate::builtin_editor::is_audio_name(&p.to_string_lossy()))
         {
-            load(app, dev, &mut v, st, &path.to_string_lossy());
+            let path = path.to_string_lossy();
+            if st.zones.is_empty() {
+                load(app, dev, &mut v, st, &path, None);
+            } else if let Some(key) = offer.pos.and_then(|p| key_map_drop::key_under(&lo.key_map, p)) {
+                match key_map_drop::free_run(st, key) {
+                    Some(run) => load(app, dev, &mut v, st, &path, Some((run, key))),
+                    None => v.note = Some(key_map_drop::covered(st, key, mc)),
+                }
+            }
         }
     }
     y += kh;
@@ -408,12 +431,18 @@ pub(crate) fn show(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, lay: 
     y - rect.min.y
 }
 
-/// The empty view's Load… or a dropped file: one `mix.sampler_zone_source` with the file's path
-/// into the lowest empty zone (the UI's default, ADR 0041 amendment 2026-11-08); the engine sets
-/// the rest. The new zone is selected; a refusal is the note row and nothing is loaded.
-fn load(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, st: &state::State, path: &str) {
+/// Load… or a dropped file: one `mix.sampler_zone_source` with the file's path into the lowest
+/// empty zone (the UI's default, ADR 0041 amendment 2026-11-08); with `place` (free keys and a
+/// root, #492) the same command sets the zone's keys, full velocity and root, so it is one undo
+/// step; else the engine sets the rest. The new zone is selected; a refusal is the note row and
+/// nothing is loaded.
+fn load(app: &mut StudioApp, dev: Dev, v: &mut InstrumentView, st: &state::State, path: &str, place: Option<([u8; 2], u8)>) {
     let zone = group_actions::free_zone(st).unwrap_or(transit_model::sampler_patch::ZONES as u16 + 1);
-    if send(app, dev, v, "mix.sampler_zone_source", json!({"zone": zone, "path": path})) {
+    let mut params = json!({"zone": zone, "path": path});
+    if let Some((run, root)) = place {
+        params["playback"] = key_map_drop::playback(run, root);
+    }
+    if send(app, dev, v, "mix.sampler_zone_source", params) {
         v.selected = Some(zone);
     }
 }

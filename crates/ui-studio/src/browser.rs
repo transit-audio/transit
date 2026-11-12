@@ -198,6 +198,10 @@ pub enum Target {
     /// The empty well of an open Sampler's Slices or Instrument view: an audio file is offered to
     /// the view as a dropped file, so it takes the path its Load… takes (#464).
     SamplerWell { dev: (TrackId, usize) },
+    /// The keys of an open Sampler's Instrument view key map with zones (#492), at the pointer: an
+    /// audio file over free keys becomes a zone over them; over a zone's keys it is refused with the
+    /// reason. The key map draws its own preview.
+    KeyMap { dev: (TrackId, usize), at: [f32; 2] },
 }
 
 /// The status after a drag of audio files released on no target.
@@ -715,13 +719,19 @@ impl StudioApp {
 
     /// Where an audio file over the editor window `key` lands: the pad under `pos` in a Pads
     /// window, the well under `pos` of an empty Slices bench or Instrument key map (outlined on
-    /// the well), else nothing (the window refuses it, as a view with content refuses a dropped file).
+    /// the well), the keys of a key map with zones (#492: the map previews the landing itself), else
+    /// nothing (the window refuses it, as a view with content refuses a dropped file).
     fn editor_target(&self, key: (TrackId, usize), pos: Pos2) -> Option<(Target, R4)> {
         let w = self.builtin_editor.windows.iter().find(|w| w.key == key)?;
         let s = w.sampler.as_ref()?;
         let empty = s.slices.as_ref().and_then(|b| b.empty).or_else(|| s.instrument.as_ref().and_then(|i| i.key_map.empty));
         if let Some((well, _)) = empty {
             return crate::sampler_panel::grid_rect(well).contains(pos).then_some((Target::SamplerWell { dev: key }, well));
+        }
+        if let Some(k) = s.instrument.as_ref().map(|i| &i.key_map)
+            && crate::sampler_panel::instrument::key_map_drop::key_under(k, pos).is_some()
+        {
+            return Some((Target::KeyMap { dev: key, at: [pos.x, pos.y] }, k.well));
         }
         let pad = s.pads.iter().find(|r| crate::sampler_panel::grid_rect(r.pad.rect).contains(pos))?;
         Some((Target::Pad { dev: key, pad: pad.index }, pad.pad.rect))
@@ -744,7 +754,14 @@ impl StudioApp {
                     Target::SamplerWell { dev } => {
                         // The view's own dropped-file path, next frame: the slice loop or a new zone.
                         if let Some(p) = first_audio(&files) {
-                            crate::drops::offer_next(self, dev, p.clone());
+                            crate::drops::offer_next(self, dev, p.clone(), None);
+                        }
+                        return;
+                    }
+                    Target::KeyMap { dev, at } => {
+                        // The same path at the pointer: a zone over the free keys there, or the reason.
+                        if let Some(p) = first_audio(&files) {
+                            crate::drops::offer_next(self, dev, p.clone(), Some(egui::pos2(at[0], at[1])));
                         }
                         return;
                     }
@@ -902,6 +919,8 @@ fn drive_drag(app: &mut StudioApp, ctx: &egui::Context) {
         let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("browser-drag")));
         match target {
             // A pad shows the Pad's selected border (2 px `signal`): the kit has no drop-hover state.
+            // The key map draws its own preview (the free keys dashed, or the refused key).
+            Some((Target::KeyMap { .. }, _)) => {}
             Some((Target::Pad { .. }, r)) => {
                 let w = crate::widgets::pad::SELECTED_WIDTH;
                 p.rect_stroke(rect(r), crate::widgets::pad::RADIUS, Stroke::new(w, TOKENS.signal), StrokeKind::Inside);

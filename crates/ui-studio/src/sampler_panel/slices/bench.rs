@@ -267,6 +267,12 @@ pub fn selection_line(l: &Loop, index: usize, s: &Slice, mc: transit_midi::Middl
 /// the button font; `enabled: false` draws it at the unused-control alpha with no input and the
 /// `Not available yet` tooltip.
 pub(crate) fn dense_button(ui: &mut Ui, id: egui::Id, rect: Rect, text: &str, enabled: bool) -> egui::Response {
+    dense_button_why(ui, id, rect, text, (!enabled).then_some(NOT_YET))
+}
+
+/// [`dense_button`], unavailable with `why` as its tooltip when given.
+pub(crate) fn dense_button_why(ui: &mut Ui, id: egui::Id, rect: Rect, text: &str, why: Option<&str>) -> egui::Response {
+    let enabled = why.is_none();
     let t = &TOKENS;
     let resp = ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
     let fill = if enabled && resp.is_pointer_button_down_on() {
@@ -280,7 +286,10 @@ pub(crate) fn dense_button(ui: &mut Ui, id: egui::Id, rect: Rect, text: &str, en
     let p = ui.painter();
     p.rect_filled(rect, chrome::RADIUS_CONTROL, fill.gamma_multiply(a));
     widgets::role_text(p, &chrome::BUTTON_FONT, text, t.text.gamma_multiply(a), Align2::CENTER_CENTER, rect.center());
-    if enabled { resp } else { resp.on_hover_text(NOT_YET) }
+    match why {
+        None => resp,
+        Some(w) => resp.on_hover_text(w),
+    }
 }
 
 /// A dense button's width for `text` (its text plus the button padding a side).

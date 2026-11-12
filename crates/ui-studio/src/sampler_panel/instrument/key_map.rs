@@ -21,6 +21,8 @@
 //!
 //! With no zone the well is the view's drop target (README, Sampler views, States, "empty"): a
 //! dashed `line.strong` edge with `+ Drop a sample` and Load…, the axis and the keyboard kept.
+//! With zones, Load… sits right-aligned in the label row (onto the lowest free keys) and a browser
+//! drag over the keys previews where the file would land ([`super::key_map_drop`]).
 
 use super::color;
 use super::key_map_gestures::{self as g, Drag, Part, ZoneEdit};
@@ -174,6 +176,20 @@ pub struct KeyMapLayout {
     pub preview: Option<([f32; 4], Option<String>)>,
     /// No zone: the well as the drop target and its Load… button.
     pub empty: Option<([f32; 4], [f32; 4])>,
+    /// With zones: Load… right-aligned in the label row, and why it is unavailable (no free key).
+    pub load: Option<([f32; 4], Option<String>)>,
+    /// A browser drag of a file over the keys: where it would land (or why it is refused).
+    pub drop_preview: Option<DropPreview>,
+}
+
+/// Where a file dragged over the map would land: the key under the pointer (the new zone's root),
+/// the free run it would cover and its rect, or the reason it is refused (the keys are a zone's).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropPreview {
+    pub key: u8,
+    pub keys: [u8; 2],
+    pub rect: [f32; 4],
+    pub refused: Option<String>,
 }
 
 impl KeyMapLayout {
@@ -202,6 +218,8 @@ pub struct Inputs<'a> {
     pub held: &'a [u8],
     pub names: transit_midi::MiddleC,
     pub session: &'a transit_model::Session,
+    /// The pointer's x while a browser drag of an audio file is over the map's keys.
+    pub drop_at: Option<f32>,
 }
 
 /// What the map's input asks for this frame.
@@ -212,7 +230,8 @@ pub enum Intent {
     /// An Alt-drag on a pad's zone: select it and ask about making it a group (the Group panel's
     /// Notice; nothing changes until Make group).
     Ask(u16),
-    /// The empty well's Load…: pick a sample for a new zone.
+    /// Load…: pick a sample for a new zone (the empty well's, or the label row's with zones, onto
+    /// the lowest free keys).
     Load,
 }
 
@@ -402,7 +421,7 @@ pub(crate) fn show(
     let well = Rect::from_min_max(pos2(axis.max.x + tk::AXIS_GAP, top), pos2(inner.max.x, top + tk::KEY_MAP_WELL_HEIGHT));
     out.well = r4(well);
     let empty = state.zones.is_empty();
-    let mut load = false;
+    let load;
     if empty {
         let id = egui::Id::new(("sampler_zone_load", uid));
         let (b, clicked) = super::super::slices::bench::drop_target(ui, &p, id, well, DROP);
@@ -410,6 +429,22 @@ pub(crate) fn show(
         load = clicked;
     } else {
         p.rect(well, radius::DISPLAY, t.surface_inset, Stroke::new(chrome::FIELD_EDGE_WIDTH, t.line_inset), StrokeKind::Inside);
+        // Load… in the label row, onto the lowest free keys (#492).
+        use super::super::slices::bench::{LOAD, button_w, dense_button_why};
+        let place = super::key_map_drop::lowest_free(state);
+        let bw = button_w(&p, LOAD);
+        let b = Rect::from_min_size(pos2(inner.max.x - bw, cy - layout::DENSE_CONTROL_HEIGHT / 2.0), vec2(bw, layout::DENSE_CONTROL_HEIGHT));
+        let why = place.is_none().then_some(super::key_map_drop::FULL);
+        let resp = dense_button_why(ui, egui::Id::new(("sampler_zone_load", uid)), b, LOAD, why);
+        let resp = match place {
+            Some((run, _)) => {
+                let n = |k: u8| transit_midi::note_name(k, inputs.names);
+                resp.on_hover_text(format!("Load a sample onto the free keys {}–{}", n(run[0]), n(run[1])))
+            }
+            None => resp,
+        };
+        load = resp.clicked();
+        out.load = Some((r4(b), why.map(str::to_string)));
     }
     let area = well.shrink(chrome::FIELD_EDGE_WIDTH);
     let (lo, hi) = (LOWEST, HIGHEST);
@@ -460,6 +495,22 @@ pub(crate) fn show(
         }
         out.zones.push(rec);
     }
+    // A browser drag over the keys: the free run it would cover, dashed as the drop target is, or
+    // the refused key outlined as a refused drag is.
+    if let Some(x) = inputs.drop_at.filter(|_| !empty) {
+        let key = f.keys.at(x);
+        let (keys, refused) = match super::key_map_drop::free_run(state, key) {
+            Some(run) => (run, None),
+            None => ([key, key], Some(super::key_map_drop::covered(state, key, inputs.names))),
+        };
+        let r = f.zone_rect(keys, [1, 127]);
+        let stroke = match refused {
+            None => Stroke::new(chrome::FIELD_EDGE_WIDTH, t.line_strong),
+            Some(_) => Stroke::new(tk::CONFLICT_WIDTH, color(tk::CONFLICT_EDGE)),
+        };
+        dashed_rect(&wp, r, stroke);
+        out.drop_preview = Some(DropPreview { key, keys, rect: r4(r), refused });
+    }
     // Held keys: a column over the zones.
     for n in inputs.held.iter().copied().filter(|n| (lo..=hi).contains(n)) {
         let (x, w) = f.keys.span(n);
@@ -471,8 +522,10 @@ pub(crate) fn show(
         Rect::from_min_max(pos2(area.min.x, well.max.y + tk::KEYBOARD_GAP), pos2(area.max.x, well.max.y + tk::KEYBOARD_GAP + tk::KEYBOARD_HEIGHT));
     out.keyboard = r4(keyboard);
     keys(&p, state, &f, keyboard, inputs, &mut out);
-    // The empty well takes no map input, so Load… keeps its own presses.
-    let intent = if empty { load.then_some(Intent::Load) } else { input(ui, uid, state, &f, drag, inputs.names, &out) };
+    // The empty well takes no map input, so Load… keeps its own presses; with zones Load… is in
+    // the label row, off the map's input.
+    let intent =
+        if empty { load.then_some(Intent::Load) } else { input(ui, uid, state, &f, drag, inputs.names, &out).or(load.then_some(Intent::Load)) };
     (out, intent)
 }
 

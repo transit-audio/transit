@@ -1241,13 +1241,41 @@ fn an_audio_file_dragged_onto_the_empty_instrument_map_makes_one_zone_in_one_ste
     assert_eq!(t.patch(key).zones.len(), 1, "one zone: {}", t.app.status);
     assert_eq!(t.undo_len(), u0 + 1, "one undo step");
     assert_eq!(t.all_clips(), clips, "no clip");
-    // The map has a zone now: a second drag is not taken and changes nothing.
+    // The map has a zone now, over every key: a second drag is the key map's (#492), refused with
+    // the reason, and changes nothing.
     let before = t.patch(key);
     let u1 = t.undo_len();
     assert!(t.well(key).is_none());
     t.hold_over(from, mid(well));
-    assert_eq!(t.app.browser.layout.drop_target, None, "a map with zones takes no drag");
+    assert!(matches!(t.app.browser.layout.drop_target, Some(crate::browser::Target::KeyMap { dev, .. }) if dev == key));
+    let preview = t.sampler_panel(key).instrument.unwrap().key_map.drop_preview.expect("the map previews the drop");
+    assert!(preview.refused.as_deref().is_some_and(|r| r.contains("already plays zone 1")), "{preview:?}");
     t.release_at(mid(well));
     assert_eq!(t.patch(key), before);
     assert_eq!((t.undo_len(), t.all_clips()), (u1, clips));
+    let note = t.sampler_panel(key).instrument.unwrap().note.expect("the reason under the map").0;
+    assert!(note.contains("already plays zone 1"), "{note}");
+}
+
+#[test]
+fn a_file_dragged_over_free_keys_previews_the_zone_it_makes_and_lands_there_in_one_step() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let key = t.sampler();
+    t.show_view(key, crate::sampler_panel::View::Instrument);
+    let wav = t.path("loop 90.wav");
+    t.app.run("mix.sampler_zone_source", json!({"track": key.0.0, "zone": 1, "path": wav, "playback": {"keys": [0, 47]}})).unwrap();
+    t.frames(4);
+    let km = t.sampler_panel(key).instrument.unwrap().key_map;
+    let k60 = km.keys.iter().find(|k| k.note == 60).unwrap().rect;
+    let over = ((k60[0] + k60[2]) / 2.0, (km.well[1] + km.well[3]) / 2.0);
+    let from = mid(t.row_named("loop 90.wav").rect.unwrap());
+    let u0 = t.undo_len();
+    t.hold_over(from, over);
+    let preview = t.sampler_panel(key).instrument.unwrap().key_map.drop_preview.expect("the preview");
+    assert_eq!((preview.key, preview.keys, preview.refused), (60, [48, 127], None), "the free run, rooted under the pointer");
+    t.release_at(over);
+    let z = t.patch(key).zone(1).cloned().expect("zone 2 made");
+    assert_eq!((z.keys, z.velocities, z.root), (preview.keys, [1, 127], preview.key), "the preview is the result");
+    assert_eq!(t.undo_len(), u0 + 1, "one undo step");
 }

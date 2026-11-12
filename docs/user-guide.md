@@ -567,8 +567,9 @@ onto a pad: the file dropped on a pad becomes that pad's sample, in one undo ste
 from the browser, the pad under the pointer
 is outlined. On the Slices view's empty bench or the Instrument view's empty key map, a file dragged
 from the browser does what that view's Load… does (the slice loop, or a zone in the first free
-slot), in one undo step, with the dashed well outlined while you hold it there; once the view has
-content it takes no drag. A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
+slot), in one undo step, with the dashed well outlined while you hold it there; once the Slices
+view has content it takes no drag. On an Instrument key map with zones, a file dragged over keys
+no zone plays shows, dashed, the keys it will cover, and letting go makes a zone there (see below). A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
 drop, so nothing behind it is reached. Anywhere else, a browser drag lands on the track lane,
 header, mixer strip or device chain where you let go, and a file from the file manager is imported
 into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as the session, a MIDI
@@ -635,7 +636,13 @@ from the view bar, SFZ import, and the Shaper and Modulation sections are not av
 
 With no zone, the key map is a drop target: drop an audio file anywhere on the view or choose
 **Load…** to load it into the first empty zone (one undo step); a file the Sampler cannot take
-shows the reason under the key map and nothing changes. While a sample's waveform is still being
+shows the reason under the key map and nothing changes. With zones, drop an audio file on keys no
+zone plays: it becomes a new zone over that whole run of free keys, rooted at the key you dropped
+it on, at full velocity, in one undo step, and is selected. A pad's zone takes only its pad's key.
+Dropping on keys a zone already plays is refused with the reason under the key map (layering
+samples on the key map comes in a later release). **Load…** at the right of the key map's label
+places a sample on the lowest run of free keys, rooted at its first C (or its lowest key); with
+no free key it is unavailable. While a sample's waveform is still being
 read, the zone waveform says `Analyzing…` and everything stays editable. When a zone's audio file
 is missing, its waveform is hatched with a card naming the file; the zone keeps its place on the
 map and in its group (relinking is not available yet). When the kit is full (256 zones, or eight
