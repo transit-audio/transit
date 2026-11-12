@@ -18,10 +18,38 @@ use super::*;
 use std::hash::Hasher;
 use transit_rt::strip_jobs::State;
 
-/// A last-resort hang bound, not a latency claim: turns a held strip no worker ever claims into a
-/// failure. The tests' own hang ceiling (`common::stall::HANG`, ten minutes): a host stall of a
-/// minute is not a hang (E72).
-const CLAIM_BOUND: Duration = Duration::from_secs(600);
+/// A last-resort hang ceiling, not a latency claim: ten minutes without a claim turns a held strip no
+/// worker ever claims into a failure. It is the tests' own ceiling (`tests/common/stall.rs`, `HANG`): a
+/// host stall of a minute is not a hang (E72), and a claim by any held strip's worker renews the budget.
+const CLAIM_HANG: Duration = Duration::from_secs(600);
+
+/// The no-progress watch of [`StripPool::gated_deadline`]: no outcome depends on how long the pool waited
+/// for a worker, only on whether workers keep claiming held strips. The clock and the progress read are
+/// injected so tests cover the interleavings without sleeping (the same shape as `Watchdog` in
+/// `tests/common/stall.rs`, which an integration test's module cannot share with the crate).
+pub(crate) struct ClaimWatch {
+    progress: usize,
+    since: Duration,
+}
+
+impl ClaimWatch {
+    pub(crate) fn new(progress: usize) -> Self {
+        Self { progress, since: Duration::ZERO }
+    }
+
+    /// Read time before progress for expiry, but renew at a fresh time after observing progress: either
+    /// read can be separated from the other by an arbitrarily long scheduler pause.
+    pub(crate) fn stalled(&mut self, progress: impl FnOnce() -> usize, mut elapsed: impl FnMut() -> Duration) -> bool {
+        let before = elapsed();
+        let observed = progress();
+        if observed != self.progress {
+            self.progress = observed;
+            self.since = elapsed();
+            return false;
+        }
+        before.saturating_sub(self.since) >= CLAIM_HANG
+    }
+}
 
 impl StripPool {
     pub(crate) fn arm_tail_slot(&mut self, slot: usize, value: transit_rt::worker_set::seams::SlotOverrides) {
@@ -35,9 +63,11 @@ impl StripPool {
         if !self.gated {
             return deadline;
         }
-        let t0 = Instant::now();
+        // The first progress read precedes the clock origin, so a pause between them is never charged.
+        let mut watch = ClaimWatch::new(0);
+        let start = Instant::now();
         loop {
-            let mut unclaimed = false;
+            let (mut unclaimed, mut claimed) = (false, 0usize);
             for (i, o) in self.set.outcomes().iter().enumerate() {
                 if *o != Outcome::Pending {
                     continue;
@@ -48,12 +78,14 @@ impl StripPool {
                 }
                 if self.set.workers() > 0 && self.set.jobs().slot(i).is_some_and(|s| s.state() != State::Claimed) {
                     unclaimed = true;
+                } else {
+                    claimed += 1;
                 }
             }
             if !unclaimed {
                 return Instant::now();
             }
-            assert!(t0.elapsed() < CLAIM_BOUND, "a held strip was never claimed by a worker");
+            assert!(!watch.stalled(|| claimed, || start.elapsed()), "a held strip was never claimed by a worker");
             std::hint::spin_loop();
         }
     }
@@ -118,3 +150,6 @@ pub(crate) fn never(start: Instant) -> Instant {
 pub(crate) fn pinned(t: &Track, st: &Strip) -> bool {
     reads_input(t, st)
 }
+
+#[cfg(test)]
+mod tests;
