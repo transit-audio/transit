@@ -177,6 +177,12 @@ impl WorkerSet {
         Ok(self.outcomes[strip])
     }
 
+    /// Strips published this block and not resolved yet. Bounded by the strips published.
+    #[must_use]
+    pub fn pending(&self) -> usize {
+        self.published[..self.published_len].iter().filter(|&&s| self.outcomes[s] == Outcome::Pending).count()
+    }
+
     /// The open block's counts so far (the same as [`WorkerSet::finish`] returns).
     #[must_use]
     pub fn block_report(&self) -> BlockReport {

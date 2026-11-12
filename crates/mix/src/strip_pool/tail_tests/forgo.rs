@@ -41,8 +41,8 @@ impl GraphHost for CompletedSource<'_, '_, '_> {
     fn set(&mut self) -> &mut WorkerSet {
         self.host.set()
     }
-    fn start(&mut self, task: usize, window: Window) -> Start {
-        if task == self.source { Start::Ready } else { self.host.start(task, window) }
+    fn start(&mut self, task: usize, at: StartAt) -> Start {
+        if task == self.source { Start::Ready } else { self.host.start(task, at) }
     }
     fn refused(&mut self, task: usize) {
         self.host.refused(task);

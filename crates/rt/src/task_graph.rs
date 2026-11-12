@@ -334,6 +334,12 @@ impl GraphRun {
         Some(step)
     }
 
+    /// Another render task (one with a worker slot) is ready in the open batch: waiting to be
+    /// started, or queued for the callback. Bounded by the run's storage.
+    fn render_queued(&self, graph: &TaskGraph) -> bool {
+        self.later_len > 0 || self.steps[..self.steps_len].iter().any(|s| matches!(*s, Step::Ready(t) if graph.slot(t as usize).is_some()))
+    }
+
     fn defer(&mut self, task: usize) {
         if let Some(s) = self.later.get_mut(self.later_len) {
             *s = u32::try_from(task).unwrap_or(u32::MAX);
@@ -381,6 +387,25 @@ pub enum Window {
     Closed,
 }
 
+/// What the driver knows when it starts a ready task ([`GraphHost::start`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartAt {
+    /// Open before the deadline, Closed at or after it.
+    pub window: Window,
+    /// In the Open window, nothing would run beside the task if it were published: no published
+    /// task of the block is pending, and no other render task is ready in this batch (none waits
+    /// to be started, none is queued for the callback). A worker woken for it would only find the
+    /// callback taking it back (G11 of the tail audit): a host may render it on the callback.
+    pub alone: bool,
+}
+
+impl From<Window> for StartAt {
+    /// A start in `window` with company (`alone` false): the host decides as before G11.
+    fn from(window: Window) -> Self {
+        StartAt { window, alone: false }
+    }
+}
+
 /// Whether a direct callback render produced a usable current-block result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rendered {
@@ -395,8 +420,8 @@ pub trait GraphHost {
     /// The worker set (the single publisher's).
     fn set(&mut self) -> &mut WorkerSet;
     /// Every input of `task` is ready for this block: write its inputs (its keys, its cell) and
-    /// say how it runs.
-    fn start(&mut self, task: usize, window: Window) -> Start;
+    /// say how it runs. `at` carries the window and whether the task would run alone.
+    fn start(&mut self, task: usize, at: StartAt) -> Start;
     /// The set refused to publish `task` after [`Start::Publish`] (a protocol fault): take its
     /// inputs back; the driver renders it on the callback next.
     fn refused(&mut self, task: usize);
@@ -485,7 +510,8 @@ impl Driver {
 
     fn start(&mut self, host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, t: usize, phase: Phase) {
         let window = if phase == Phase::Late || Instant::now() >= self.deadline { Window::Closed } else { Window::Open };
-        let start = host.start(t, window);
+        let alone = window == Window::Open && host.set().pending() == 0 && !run.render_queued(graph);
+        let start = host.start(t, StartAt { window, alone });
         let Some(slot) = graph.slot(t) else {
             // Control work is executed by start/Ready or by the callback, never the worker set.
             if start == Start::Callback {

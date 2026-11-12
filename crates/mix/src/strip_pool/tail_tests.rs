@@ -7,7 +7,7 @@ use crate::tail::DeviceLatency;
 use crate::tests::PlanRig;
 use std::sync::atomic::AtomicUsize;
 use transit_model::{Bus, Insert, KeyFrom, KeySource, Tap};
-use transit_rt::task_graph::{GraphHost, Rendered, Start, Window};
+use transit_rt::task_graph::{GraphHost, Rendered, Start, StartAt, Window};
 use transit_rt::worker_set::seams::{CostClock, SlotOverrides};
 
 const N: usize = 64;
@@ -27,7 +27,7 @@ fn claimed_aux_before_cell_entry_keeps_snapshot_across_render_boundary() {
     let (mut rig, ..) = fixture(false);
     let slot = host(&mut rig, |h, slot, task| {
         override_slot(h, slot, 1, 1, true, true);
-        assert_eq!(h.start(task, Window::Open), Start::Publish);
+        assert_eq!(h.start(task, StartAt::from(Window::Open)), Start::Publish);
         assert_eq!(h.pool.set.publish(slot), Ok(transit_rt::worker_set::Published::Published));
         let claim = h.pool.set.jobs().slot(slot).unwrap().try_claim().unwrap();
         assert_eq!(claim.generation(), h.g);
@@ -249,7 +249,7 @@ fn t4a_production_fit() {
         let (mut rig, ..) = fixture(false);
         host(&mut rig, |h, slot, task| {
             override_slot(h, slot, worst, left, false, false);
-            let start = h.start(task, window);
+            let start = h.start(task, StartAt::from(window));
             assert_eq!(start, want);
             assert!(execute(h, task, slot, start));
         });
@@ -278,7 +278,7 @@ fn t4b_force_publish_only() {
                 _ => {}
             }
             let window = if refusal == 5 { Window::Closed } else { Window::Open };
-            let start = h.start(task, window);
+            let start = h.start(task, StartAt::from(window));
             if refusal == 0 {
                 assert_eq!(start, Start::Publish);
                 assert!(execute(h, task, slot, start));
@@ -299,13 +299,13 @@ fn t4b_force_publish_only() {
     host(&mut rig, |h, _, _| {
         let slot = h.p1.iter().position(|st| st.id == aux).unwrap();
         override_slot(h, slot, 0, 0, true, false);
-        assert_eq!(h.start(slot, Window::Open), Start::Callback, "pinned is never published");
+        assert_eq!(h.start(slot, StartAt::from(Window::Open)), Start::Callback, "pinned is never published");
     });
     let (mut rig, ..) = fixture(false);
     rig.eng.pool = Some(StripPool::new(0, 4, false, None, N as u32, 48_000).unwrap());
     host(&mut rig, |h, slot, task| {
         override_slot(h, slot, 0, 0, true, false);
-        assert_eq!(h.start(task, Window::Open), Start::Callback, "out of capacity is never published");
+        assert_eq!(h.start(task, StartAt::from(Window::Open)), Start::Callback, "out of capacity is never published");
     });
 }
 
@@ -343,9 +343,9 @@ fn t4c_no_reclaim_only_and_lifetime() {
     let (mut rig, ..) = fixture(false);
     host(&mut rig, |h, slot, task| {
         override_slot(h, slot, 0, 0, false, true);
-        assert_eq!(h.start(task, Window::Open), Start::Callback);
+        assert_eq!(h.start(task, StartAt::from(Window::Open)), Start::Callback);
         override_slot(h, slot, 10, 10 + M, false, true);
-        assert_eq!(h.start(task, Window::Open), Start::Publish);
+        assert_eq!(h.start(task, StartAt::from(Window::Open)), Start::Publish);
         let _ = h.pool.set.publish(slot).unwrap();
         h.pool.set.set_cost_estimate(0, Duration::from_nanos(1));
         let _ = h.pool.set.publish(0).unwrap();
@@ -392,7 +392,7 @@ fn t7_current_keys_in_every_window_and_fit_branch() {
                     }
                 }
                 override_slot(h, slot, worst, left, false, false);
-                let start = h.start(task, window);
+                let start = h.start(task, StartAt::from(window));
                 assert!(execute(h, task, slot, start));
                 assert_eq!(f32::from_bits(probe.key.load(Ordering::Relaxed)), 0.75);
                 assert_eq!(h.p1[slot].buf[0][0], 0.75);
@@ -410,17 +410,17 @@ fn b3_closed_pinned_phase1_prepares_fresh_keys() {
     rig.publish(&s);
     host(&mut rig, |h, _, _| {
         let slot = h.p1.iter().position(|st| st.id == aux).unwrap();
-        assert_eq!(h.start(slot, Window::Closed), Start::Callback);
+        assert_eq!(h.start(slot, StartAt::from(Window::Closed)), Start::Callback);
         assert_eq!(h.render_here(slot), Rendered::Usable);
         assert_eq!(f32::from_bits(probe.key.load(Ordering::Relaxed)), 0.75);
         h.p1[slot].panic = Some(Box::new("retained"));
-        assert_eq!(h.start(slot, Window::Closed), Start::Unavailable);
+        assert_eq!(h.start(slot, StartAt::from(Window::Closed)), Start::Unavailable);
         h.p1[slot].panic = None;
         h.pool.set.mark_suspect(slot);
-        assert_eq!(h.start(slot, Window::Closed), Start::Unavailable);
+        assert_eq!(h.start(slot, StartAt::from(Window::Closed)), Start::Unavailable);
         h.pool.away[slot] = true;
         h.pool.set.mark_busy(slot);
-        assert_eq!(h.start(slot, Window::Closed), Start::Busy);
+        assert_eq!(h.start(slot, StartAt::from(Window::Closed)), Start::Busy);
         h.pool.away[slot] = false;
         assert_eq!(probe.process.load(Ordering::Relaxed), 1);
     });
@@ -433,11 +433,11 @@ fn t5_render_panic_is_unusable_inline_and_callback() {
         probe.panic.store(1, Ordering::Relaxed);
         host(&mut rig, |h, slot, task| {
             override_slot(h, slot, 1, 1, publish, false);
-            let start = h.start(task, if publish { Window::Open } else { Window::Closed });
+            let start = h.start(task, StartAt::from(if publish { Window::Open } else { Window::Closed }));
             assert!(!execute(h, task, slot, start));
             assert!(h.p1[slot].panic.is_some());
             assert!(h.pool.silent[slot]);
-            h.start(task + 1, Window::Closed);
+            h.start(task + 1, StartAt::from(Window::Closed));
             assert!(h.tail.as_ref().unwrap().main.iter().flatten().all(|x| *x == 0.0));
         });
     }
@@ -460,10 +460,10 @@ fn t5f_mix_guards_preparation() {
         let (mut rig, _, _, probe) = fixture(false);
         probe.panic.store(panic, Ordering::Relaxed);
         host(&mut rig, |h, slot, task| {
-            assert_eq!(h.start(slot, Window::Closed), Start::Ready);
+            assert_eq!(h.start(slot, StartAt::from(Window::Closed)), Start::Ready);
             assert!(h.tail.as_ref().unwrap().latency.aborted);
             assert!(h.p1[slot].panic.is_some());
-            assert_eq!(h.start(task, Window::Closed), Start::Unavailable);
+            assert_eq!(h.start(task, StartAt::from(Window::Closed)), Start::Unavailable);
             finish_aborted_drive(h);
         });
     }
@@ -482,10 +482,10 @@ fn t17_mix_keeps_away_latency_and_does_not_call_suspect() {
                 h.pool.set.mark_suspect(slot);
             }
             let before = (probe.params.load(Ordering::Relaxed), probe.latency.load(Ordering::Relaxed));
-            h.start(slot, Window::Closed);
+            h.start(slot, StartAt::from(Window::Closed));
             assert_eq!(h.p1[slot].latency, 123);
             assert_eq!((probe.params.load(Ordering::Relaxed), probe.latency.load(Ordering::Relaxed)), before);
-            assert_eq!(h.start(task, Window::Closed), if away { Start::Busy } else { Start::Unavailable });
+            assert_eq!(h.start(task, StartAt::from(Window::Closed)), if away { Start::Busy } else { Start::Unavailable });
             h.pool.away[slot] = false;
         });
     }
@@ -564,7 +564,7 @@ fn t18_callback_cost_warms_a_cold_aux() {
     host(&mut rig, |h, slot, task| {
         h.pool.set.arm_cost_clock(CostClock::Fixed(Duration::from_nanos(6400)));
         h.pool.set.install_test_seams();
-        let start = h.start(task, Window::Open);
+        let start = h.start(task, StartAt::from(Window::Open));
         assert_eq!(start, Start::Callback);
         assert!(execute(h, task, slot, start));
         assert_eq!(h.pool.set.cost_estimate(slot), Some(Duration::from_nanos(6400)));
@@ -572,7 +572,7 @@ fn t18_callback_cost_warms_a_cold_aux() {
         assert_eq!(h.pool.set.queue_snapshot().tail_callback, 1);
         h.pool.set.arm_slot_overrides(slot, SlotOverrides { budget_left: Some(Duration::from_nanos(6400 + M)), ..SlotOverrides::default() });
         h.pool.set.install_test_seams();
-        let start = h.start(task, Window::Open);
+        let start = h.start(task, StartAt::from(Window::Open));
         assert_eq!(start, Start::Publish);
         assert!(execute(h, task, slot, start));
     });
@@ -719,7 +719,7 @@ fn t8_aux_to_phase1_clears_deadline_reclaim_flag() {
     let original = rig.eng.strip_index(aux).unwrap();
     host(&mut rig, |h, slot, task| {
         override_slot(h, slot, 1, 1, true, true);
-        let start = h.start(task, Window::Open);
+        let start = h.start(task, StartAt::from(Window::Open));
         assert!(execute(h, task, slot, start));
     });
     s.track_mut(aux).unwrap().kind = TrackKind::Audio;
@@ -727,7 +727,7 @@ fn t8_aux_to_phase1_clears_deadline_reclaim_flag() {
     assert_eq!(rig.eng.strip_index(aux), Some(original));
     host(&mut rig, |h, _, _| {
         override_slot(h, original, 3_600_000_000_000, 0, false, true);
-        assert_eq!(h.start(original, Window::Open), Start::Publish);
+        assert_eq!(h.start(original, StartAt::from(Window::Open)), Start::Publish);
         let _ = h.pool.set.publish(original).unwrap();
         let _ = h.poll(Instant::now());
         assert_eq!(h.pool.set.outcome(original), Some(Outcome::Overrun(OverrunCause::Unstarted)));
@@ -955,10 +955,10 @@ fn t5f_mix_retains_a_master_latency_panic() {
     rig.publish(&s);
     probe.panic.store(2, Ordering::Relaxed);
     host(&mut rig, |h, slot, task| {
-        h.start(slot, Window::Closed);
+        h.start(slot, StartAt::from(Window::Closed));
         assert!(h.tail.as_ref().unwrap().latency.aborted);
         assert!(h.tail.as_ref().unwrap().others.iter().any(|st| st.panic.is_some()));
-        assert_eq!(h.start(task, Window::Closed), Start::Unavailable);
+        assert_eq!(h.start(task, StartAt::from(Window::Closed)), Start::Unavailable);
         finish_aborted_drive(h);
     });
 }
@@ -1038,4 +1038,35 @@ fn t19_held_aux_chain_adoption_uses_fresh_input_and_latency() {
         MixEngine::force_serial(true);
         drop(rig.eng.into_retired());
     }
+}
+
+/// G11: a lone ready aux (the one return of a small session, ready after MIX with no other render
+/// pending or queued) is rendered on the callback, never published: publishing it only woke a
+/// worker for the callback to take it back. Four phase-1 strips are published each block, the aux
+/// is a tail callback render each block, and the callback makes one wake call per block (the
+/// phase-1 batch), not two. Zero workers, a 60 s deadline. Mutation: publishing a lone aux makes
+/// `published` five a block and `tail_callback` zero.
+#[test]
+fn g11_a_lone_ready_aux_renders_on_the_callback_without_a_publish_or_a_wake() {
+    let _switch = SWITCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut rig, ..) = fixture(false);
+    MixEngine::force_graph(true);
+    MixEngine::force_tail(true);
+    MixEngine::force_serial(false);
+    rig.eng.set_strip_deadline(Some(FAR));
+    rig.eng.seed_strip_costs(Duration::from_nanos(1));
+    mark_audio_thread();
+    let blocks = 6u64;
+    for b in 0..blocks {
+        let _ = rig.render(b as i64 * N as i64);
+    }
+    unmark_audio_thread();
+    MixEngine::force_tail(false);
+    MixEngine::force_serial(true);
+    let pool = rig.eng.pool.as_ref().unwrap();
+    assert!(pool.last_tail, "the blocks went through the tail graph");
+    let q = pool.set.queue_snapshot();
+    assert_eq!((q.published, q.tail_callback), (4 * blocks, blocks), "the lone aux is never published");
+    assert!(q.conserves());
+    assert_eq!(pool.set.stats().wakes, blocks, "one wake call a block, for the phase-1 batch");
 }

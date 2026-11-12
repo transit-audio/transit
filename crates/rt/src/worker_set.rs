@@ -305,6 +305,9 @@ pub struct Stats {
     pub misuse: u64,
     /// Strips skipped because a task they depend on missed ([`OverrunCause::UpstreamMissed`]).
     pub upstream_missed: u64,
+    /// Calls of [`WorkerSet::wake`] with work to hand out (a nonzero count): one per batch that
+    /// published something, whatever the workers were doing (G11 of the tail audit).
+    pub wakes: u64,
 }
 
 #[derive(Default)]
@@ -323,6 +326,7 @@ struct Counters {
     runner_panics: AtomicU64,
     misuse: AtomicU64,
     upstream_missed: AtomicU64,
+    wakes: AtomicU64,
 }
 
 /// Adds one to a statistic. Relaxed: no other memory is published through it.
@@ -606,6 +610,7 @@ impl WorkerSet {
             runner_panics: r(&c.runner_panics),
             misuse: r(&c.misuse),
             upstream_missed: r(&c.upstream_missed),
+            wakes: r(&c.wakes),
         }
     }
 
@@ -837,6 +842,9 @@ impl WorkerSet {
         // claims the job. Paired with the fence after `current.store(0)` in `worker_main`.
         // Kept (rather than dropping the busy skip) so `wake(count)` reaches idle workers
         // instead of spending its count on busy ones.
+        if count > 0 {
+            bump(&self.shared.stats.wakes);
+        }
         std::sync::atomic::fence(Ordering::SeqCst);
         let n = self.threads.len();
         let mut woken = 0;

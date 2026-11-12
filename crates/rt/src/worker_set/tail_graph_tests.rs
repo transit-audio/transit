@@ -3,7 +3,7 @@
 
 use super::tests::{Fake, STALL, set_of};
 use super::*;
-use crate::task_graph::{EdgeKind, GraphHost, GraphRun, Rendered, Start, TaskGraph, Window, drive};
+use crate::task_graph::{StartAt, EdgeKind, GraphHost, GraphRun, Rendered, Start, TaskGraph, Window, drive};
 
 struct Host {
     set: WorkerSet,
@@ -42,7 +42,8 @@ impl GraphHost for Host {
     fn set(&mut self) -> &mut WorkerSet {
         &mut self.set
     }
-    fn start(&mut self, t: usize, window: Window) -> Start {
+    fn start(&mut self, t: usize, at: StartAt) -> Start {
+        let window = at.window;
         self.seen.push((t, window));
         self.log.push(("start", t));
         self.starts[t]

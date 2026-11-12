@@ -13,7 +13,7 @@
 
 use super::tests::{Behavior, Fake, STALL, set_of, wait_until};
 use super::*;
-use crate::task_graph::{GraphHost, GraphRun, Rendered, Start, TaskGraph, Window, drive};
+use crate::task_graph::{StartAt, GraphHost, GraphRun, Rendered, Start, TaskGraph, Window, drive};
 use crate::testing::measure;
 
 /// The test's side of the driver: the fake strips, the edges (to check the publication order),
@@ -107,7 +107,8 @@ impl GraphHost for Host {
         &mut self.set
     }
 
-    fn start(&mut self, t: usize, window: Window) -> Start {
+    fn start(&mut self, t: usize, at: StartAt) -> Start {
+        let window = at.window;
         // Preserve the slice-1 fixture policy and all existing test assertions.
         if window == Window::Closed {
             return Start::Forgo;

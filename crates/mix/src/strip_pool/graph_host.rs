@@ -1,6 +1,6 @@
 use super::*;
 use crate::graph::task_identity;
-use transit_rt::task_graph::{GraphHost, Rendered, Start, TaskGraph, Window};
+use transit_rt::task_graph::{GraphHost, Rendered, Start, StartAt, TaskGraph, Window};
 use transit_rt::worker_set::Poll;
 
 /// The time a published aux must leave a worker to wake and claim it, over its worst case, before
@@ -63,15 +63,19 @@ impl Host<'_, '_> {
         self.tail.is_some() && slot >= self.layer_start.len()
     }
 
-    fn fits(&self, slot: usize, window: Window) -> bool {
+    /// An aux is published when it fits: Open window, history, its worst case plus the wake margin
+    /// within the time left, and company (G11: a lone ready aux, `at.alone`, renders on the
+    /// callback; publishing it would only wake a worker for the callback to take it back). The
+    /// force-publish seam forces all of it but the window.
+    fn fits(&self, slot: usize, at: StartAt) -> bool {
         let left = self.pool.deadline(self.b).saturating_duration_since(Instant::now());
         #[cfg(feature = "testing")]
         let left = self.pool.set.slot_overrides(slot).budget_left.unwrap_or(left);
         let worst = self.pool.set.worst_case(slot).unwrap_or_default();
-        let fit = !worst.is_zero() && worst.saturating_add(TAIL_WAKE_MARGIN) <= left;
+        let fit = !worst.is_zero() && worst.saturating_add(TAIL_WAKE_MARGIN) <= left && !at.alone;
         #[cfg(feature = "testing")]
         let fit = fit || self.pool.set.slot_overrides(slot).force_publish;
-        window == Window::Open && fit
+        at.window == Window::Open && fit
     }
 }
 
@@ -80,7 +84,8 @@ impl GraphHost for Host<'_, '_> {
         &mut self.pool.set
     }
 
-    fn start(&mut self, task: usize, window: Window) -> Start {
+    fn start(&mut self, task: usize, at: StartAt) -> Start {
+        let window = at.window;
         let Some(slot) = self.graph.slot(task) else {
             if let Some(tail) = self.tail.as_mut() {
                 tail.control(task, self.p1, self.pool, self.b);
@@ -113,7 +118,7 @@ impl GraphHost for Host<'_, '_> {
             return Start::Forgo;
         }
         self.fill(slot, true);
-        if aux && !self.fits(slot, window) {
+        if aux && !self.fits(slot, at) {
             self.pool.on_callback[slot] = true;
             return Start::Callback;
         }
