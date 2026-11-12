@@ -747,10 +747,26 @@ impl SamplerPatch {
         }
     }
 
-    /// The session sources the patch references where they are ([`Ownership::Referenced`]).
+    /// The session sources the patch references where they are ([`Ownership::Referenced`]), also
+    /// for an opaque patch (its raw `sources` entries marked `"ownership": "referenced"`), so a save
+    /// keeps their paths as it would a readable patch's (#489).
     #[must_use]
     pub fn referenced(&self) -> Vec<SourceId> {
-        self.ready().map(|p| p.sources.iter().filter(|s| s.ownership == Ownership::Referenced).map(|s| s.source).collect()).unwrap_or_default()
+        match &self.state {
+            PatchState::Ready(p) => p.sources.iter().filter(|s| s.ownership == Ownership::Referenced).map(|s| s.source).collect(),
+            PatchState::Unknown { raw, .. } | PatchState::Invalid { raw, .. } => raw
+                .get("sources")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter(|s| s.get("ownership").and_then(Value::as_str) == Some("referenced"))
+                        .filter_map(|s| s.get("source").and_then(Value::as_u64))
+                        .map(SourceId)
+                        .take(MAX_SOURCES)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
     }
 
     /// Renames every session source the patch names through `f` (a track moved to another session),

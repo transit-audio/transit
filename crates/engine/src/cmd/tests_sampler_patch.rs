@@ -471,3 +471,28 @@ fn a_pad_or_zone_holding_only_unknown_fields_survives_load_edit_and_save() {
 
 #[path = "tests_sampler_native.rs"]
 mod native;
+
+/// #489: a patch this build cannot read is kept exactly as saved, and a save never rewrites the
+/// path of a source it marks referenced: no copy in Audio Files, the session still points at the
+/// file where it is.
+#[test]
+fn a_save_keeps_the_referenced_path_of_an_opaque_patch() {
+    let d = Dir::new("opaque");
+    let mut e = Engine::default();
+    let t = kit(&mut e, &d);
+    let wav = s(&d.path("tone.wav"));
+    let mut raw = serde_json::to_value(patch(&e, t)).unwrap();
+    raw["schema"] = json!(2);
+    assert_eq!(raw["sources"][0]["ownership"], "referenced", "{raw}");
+    let opaque = transit_model::SamplerPatch::from_value(raw.clone());
+    assert!(opaque.ready().is_none(), "opaque");
+    e.session_mut().track_mut(t).unwrap().instrument.as_mut().unwrap().sampler_patch = Some(opaque);
+    let sid = SourceId(raw["sources"][0]["source"].as_u64().unwrap());
+    let song = d.path("song/song.transit");
+    e.execute("session.save_as", &json!({"path": s(&song)})).unwrap();
+    assert_eq!(e.session().source(sid).unwrap().path, wav, "the session still points at the file where it is");
+    assert!(!d.path("song/Audio Files").exists(), "nothing copied");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&song).unwrap()).unwrap();
+    let saved = v["tracks"].as_array().unwrap().iter().find(|x| x["id"] == json!(t.0)).unwrap();
+    assert_eq!(saved["instrument"]["sampler_patch"], raw, "kept exactly as saved");
+}

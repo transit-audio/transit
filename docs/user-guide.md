@@ -715,7 +715,8 @@ and `preview: true` to see the assignments. WAV, AIFF and FLAC files
 are ordered by filename without regard to case and placed on the first free pads, A1 through
 D16. Occupied pads, including slices, stay as they are, unless you choose Replace (`replace: true`). Subfolders, hidden files, links and
 other files are ignored; SFZ mappings are listed but never executed. Files stay where they are,
-referenced by path. The whole kit loads in one undo step. If it cannot fit, a file cannot be
+referenced by path: saving the session keeps those paths and copies nothing into Audio Files, also
+for a kit saved by a newer transit, which this version keeps exactly as saved and plays as silence. The whole kit loads in one undo step. If it cannot fit, a file cannot be
 read, or an audio limit is exceeded, nothing loads and the result names the reason and counts.
 Folder loading currently accepts PCM WAV/AIFF and
 FLAC files whose headers declare their length; preview checks headers, while loading also
