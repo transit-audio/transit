@@ -629,8 +629,8 @@ mod tests {
         assert!(!t.copy_insert(0, 10));
         assert!(!t.copy_insert(10, 0));
         assert!(!t.copy_insert(5, 0), "an empty slot has nothing to copy");
-        for i in 4..10 {
-            t.mixer.inserts[i] = Some(crate::Insert::new("z"));
+        for slot in &mut t.mixer.inserts[4..10] {
+            *slot = Some(crate::Insert::new("z"));
         }
         let full = order(&t);
         assert!(!t.copy_insert(0, 2), "no empty slot to shift into");

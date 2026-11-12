@@ -1203,8 +1203,8 @@ mod tests {
             let (a, b) = aux(&mut s, &format!("a{i}"));
             set_output(&mut s, a, Route::Bus(b));
             if let (Some(p), Some(t)) = (prev, s.track_mut(a)) {
-                for k in 0..4 {
-                    t.mixer.sends[k] = Some(SendSlot::new(Route::Bus(p)));
+                for slot in &mut t.mixer.sends[..4] {
+                    *slot = Some(SendSlot::new(Route::Bus(p)));
                 }
             }
             prev = Some(b);
