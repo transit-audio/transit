@@ -3,7 +3,7 @@ title: Parametric EQ, a transparent built-in equalizer with up to 24 bands as fi
 -->
 # ADR 0054: Parametric EQ
 
-- **Status:** accepted 2026-11-12 (proposed 2026-11-11; settled after three judging rounds with edits; the product choices decided by the maintainer on 2026-11-11 and 2026-11-12: the seven design points, the decisions listed in Context, and the recommendations of the earlier open list)
+- **Status:** accepted 2026-11-12 (proposed 2026-11-11; settled after three judging rounds with edits; the product choices decided by the maintainer on 2026-11-11 and 2026-11-12: the seven design points, the decisions listed in Context, and the recommendations of the earlier open list); amended 2026-11-12, accepted, slice 1 measurements
 - **Date:** 2026-11-12
 - **Implementation:** not started. Slices in the Slices section. Issue #233.
 - **Reopen when:** the portable math record (#437, #277) lands and changes a helper this device names; the zero-latency magnitude bounds of decision 2.5 are missed in the slice 1 measurement; a user needs a band frequency outside 20 Hz to 20 kHz, more than 24 bands, or a Q on the cuts; the linear-phase low-end resolution of decision 6.3 is reported as a problem even at Maximum, or a steep high cut needs a longer Natural correction than `D`; dynamic bands are designed (their own record); the CPU targets of decision 13 are missed; or the reference workstations' equalizers are found to agree on a behavior this record chose differently.
@@ -105,7 +105,8 @@ The review's trial blended the whole sections (numerators too), which put the in
 | Shelves and tilt shelf, worst deviation | 44.1 kHz | 48 kHz | 96 kHz | 192 kHz |
 |---|---|---|---|---|
 | Hard switch at `0.9π` (round 2), every gain and Q, `f` to 20 kHz | 5.19 dB | 5.40 dB | 2.33 dB | 0.07 dB |
-| Continuous transition, the same | 3.56 dB | 2.75 dB | 2.33 dB | 0.07 dB |
+| Continuous transition, the same, on the round-2 gains (±3, 6, 12, 18, 24, 30 dB) | 3.56 dB | 2.75 dB | 2.33 dB | 0.07 dB |
+| Continuous transition, on decision 2.5's 3 dB gain steps (the grid of the Evidence; amended 2026-11-12) | 3.83 dB | 2.76 dB | 2.33 dB | 0.07 dB |
 | Continuous transition, `f` at most fs/5 (unchanged: no pair reaches the band there) | 1.58 dB | 1.03 dB | 0.93 dB | 0.07 dB |
 
 Continuity, measured by sweeping each shelf's frequency from 20 Hz to the top of the range (20 kHz or 0.49·fs) in steps of 1 cent, both shelf types, gains ±3, ±12 and ±30 dB, Qs 0.1, 0.707, 2, 10 and 40, the response evaluated at 200 frequencies: the largest change of the response in one step is 0.39 dB at 44.1 kHz, 0.33 dB at 48 kHz, 0.22 dB at 96 kHz and none at 192 kHz (where no pair reaches the transition) within a band around the transition, against 0.23 dB anywhere else in the sweep, which is the prototype's own change when a Q 40 resonance moves by 1 cent. The hard switch steps 20.7 dB at 44.1 kHz (a −3 dB Q 40 low shelf at 18.2 kHz) and 8.1 dB at 48 kHz. The design's change is a slope, not a jump: at the worst case it is 0.39, 0.039 and 0.0039 dB for steps of 1, 0.1 and 0.01 cent (the prototype's 0.23, 0.023 and 0.0023 dB), so it shrinks with the step to nothing; near Nyquist the digital resonance moves about 1.7 times as fast as the prototype's. A wider transition band lowers that ratio but raises the worst deviation (0.8π to 0.99π: excess over the prototype's step 0.05 dB, but 16.6 dB worst at 44.1 kHz and 4.7 dB at 48 kHz); this record takes 0.9π to 0.99π and records the trade as settled choice 23.
@@ -115,29 +116,29 @@ A shelf therefore costs two sections, a bell one. Measured in the round-2 drafti
 
 | Shelves and tilt shelf, factored design | 44.1 kHz | 48 kHz | 96 kHz | 192 kHz |
 |---|---|---|---|---|
-| Every gain and Q (0.1 to 40), `f` to 20 kHz (with the continuous transition below; 5.19 / 5.40 dB with the round-2 hard switch) | 3.56 dB | 2.75 dB | 2.33 dB | 0.07 dB |
+| Every gain in 3 dB steps and every Q (0.1 to 40), `f` to 20 kHz (with the continuous transition below; 5.19 / 5.40 dB with the round-2 hard switch on the round-2 gains; amended 2026-11-12: 3.56 dB at 44.1 kHz on the round-2 gains) | 3.83 dB | 2.76 dB | 2.33 dB | 0.07 dB |
 | Every gain and Q, `f` at most fs/5 | 1.58 dB | 1.03 dB | 0.93 dB | 0.07 dB |
 | ±30 dB at 1 kHz, every Q | 0.20 dB | 0.15 dB | 0.00 dB | 0.00 dB |
 | ±3 to ±12 dB, Q 0.707, `f` ≤ 16 kHz: factored / bilinear | 2.22 / 3.53 dB | 2.38 / 3.04 dB | 0.12 / 0.59 dB | |
 | The single fit, for comparison: Q up to 2 / up to 40, `f` to 20 kHz | 2.77 / 24.3 dB | 2.34 / 25.2 dB | 1.64 / 22.8 dB | 0.55 / 17.5 dB |
 
-The bound no longer depends on Q. The single fit is better for gentle, low-Q shelves near the top of the range (0.44 dB against 2.22 dB at Q 0.707 and 44.1 kHz), and a design that switched between the two by Q or by frequency was measured too: the two designs differ by 6 to 26 dB at the switching point for high-Q shelves, depending on where the switch is put, so a parameter sweep across it would step the response. One design for every setting was chosen; its largest residuals sit above a fifth of the rate. Zero latency, the mode for mixing and tracking, keeps them (up to 3.6 dB near 20 kHz at 44.1 kHz and 2.8 dB at 48 kHz, and the curve draws exactly what is heard); Natural reduces them for mastering (decision 2.5). With `D = 64` Natural brings the factored shelves within 0.009 dB and 0.18 degree of the prototype on the cases measured (the +30 dB Q 10 low shelf at 1 kHz, a −30 dB Q 40 low shelf at 5 kHz, +12 dB Q 4 and +30 dB Q 0.707 high shelves at 12 and 15 kHz, a −12 dB high shelf at 16 kHz, at 44.1 and 48 kHz).
+The bound no longer depends on Q. The single fit is better for gentle, low-Q shelves near the top of the range (0.44 dB against 2.22 dB at Q 0.707 and 44.1 kHz), and a design that switched between the two by Q or by frequency was measured too: the two designs differ by 6 to 26 dB at the switching point for high-Q shelves, depending on where the switch is put, so a parameter sweep across it would step the response. One design for every setting was chosen; its largest residuals sit above a fifth of the rate. Zero latency, the mode for mixing and tracking, keeps them (up to 3.8 dB near 20 kHz at 44.1 kHz and 2.8 dB at 48 kHz, and the curve draws exactly what is heard); Natural reduces them for mastering (decision 2.5). With `D = 64` Natural brings the factored shelves within 0.009 dB and 0.18 degree of the prototype on the cases measured (the +30 dB Q 10 low shelf at 1 kHz, a −30 dB Q 40 low shelf at 5 kHz, +12 dB Q 4 and +30 dB Q 0.707 high shelves at 12 and 15 kHz, a −12 dB high shelf at 16 kHz, at 44.1 and 48 kHz).
 
 Measured in the same drafting sweep, maximum magnitude deviation from the analog prototype from 20 Hz to min(20 kHz, 0.45·fs), where the prototype is above −40 dB (the slice 1 tests restate and pin these bounds; decision 2.5):
 
 | | 44.1 kHz | 48 kHz | 96 kHz |
 |---|---|---|---|
 | Bell, ±3 to ±12 dB, Q 0.5 to 4, `f` ≤ 16 kHz: matched / bilinear | 1.36 / 7.79 dB | 1.09 / 6.22 dB | 0.36 / 1.41 dB |
-| Bell, full ranges (±30 dB, Q 0.1 to 40, `f` to 20 kHz): matched / bilinear | 4.30 / 16.40 dB | 3.32 / 12.66 dB | 0.54 / 2.36 dB |
+| Bell, full ranges (±30 dB, Q 0.1 to 40, `f` to 20 kHz): matched / bilinear | 4.35 / 16.40 dB | 3.37 / 12.66 dB | 0.54 / 2.36 dB |
 | Band pass, Q 0.5 to 4, `f` ≤ 16 kHz: matched / bilinear | 2.49 / 14.23 dB | 1.96 / 10.44 dB | 0.61 / 1.80 dB |
 | High cut sections, Q 0.5 to 5.1, `f` to 20 kHz: matched / bilinear | 2.52 / 25.95 dB | 1.28 / 18.17 dB | 0.11 / 2.76 dB |
 | Low cut sections, Q 0.5 to 5.1, `f` to 20 kHz: matched / bilinear | 9.15 / 27.11 dB | 6.85 / 18.17 dB | 1.07 / 2.76 dB |
-| Notch, Q 0.5 to 40, `f` to 20 kHz, where the prototype is above −20 dB: matched / bilinear | 6.44 / 15.28 dB | 4.04 / 12.48 dB | 0.18 / 2.53 dB |
+| Notch, Q 0.5 to 40, `f` to 20 kHz, where the prototype is above −20 dB: matched / bilinear | 6.59 / 15.28 dB | 4.04 / 12.48 dB | 0.18 / 2.53 dB |
 | Band pass, full ranges (Q 0.1 to 40, `f` to 20 kHz): matched | 4.95 dB | 3.87 dB | 0.61 dB |
-| High cut composites, 12 / 24 / 48 / 96 dB/oct, `f` to 20 kHz: matched | 2.40 / 4.53 / 8.91 / 17.8 dB | 1.21 / 2.32 / 4.62 / 9.24 dB | 0.11 / 0.20 / 0.25 / 0.29 dB |
-| High cut composites, the same, `f` at most fs/5: matched | 1.09 / 2.12 / 0.91 / 0.36 dB | 1.08 / 2.10 / 0.60 / 0.27 dB | as above |
+| High cut composites, 12 / 24 / 48 / 96 dB/oct, `f` to 20 kHz: matched | 2.40 / 4.53 / 8.91 / 17.8 dB | 1.21 / 2.32 / 4.62 / 9.24 dB | 0.11 / 0.20 / 0.29 / 0.38 dB |
+| High cut composites, the same, `f` at most fs/5: matched | 1.09 / 2.12 / 1.53 / 0.66 dB | 1.08 / 2.10 / 1.11 / 0.47 dB | as above |
 | Low cut composites, 12 / 24 / 48 / 96 dB/oct, `f` to 20 kHz: matched | 1.93 / 1.61 / 0.83 / 0.19 dB | 1.49 / 0.89 / 0.23 / 0.01 dB | 0.12 / 0.00 / 0.00 / 0.00 dB |
-| Flat tilt, ±10 / ±30 dB: matched | 0.23 / 0.73 dB | 0.23 / 0.72 dB | 0.16 / 0.53 dB |
+| Flat tilt, ±10 / ±30 dB: matched | 0.23 / 0.78 dB | 0.23 / 0.78 dB | 0.16 / 0.60 dB |
 | Shelves and tilt shelf | the factored design's table above | | |
 
 The largest residuals sit at the top of the range at 44.1 and 48 kHz: broad, deep bells and the high-Q sections of steep low cuts near 20 kHz, where a second-order digital section cannot follow a response that extends past Nyquist. With `f` at most a fifth of the rate the low cut sections stay within 0.73 dB at 44.1 kHz. The matched sections are minimum phase, but their phase near Nyquist is not the prototype's (up to about 100 degrees for a 15 kHz high cut at 44.1 kHz in the same sweep); that is what Natural phase fixes (decision 6.2).
@@ -156,7 +157,7 @@ The largest residuals sit at the top of the range at 44.1 and 48 kHz: broad, dee
 
 The map needs only `sqrt`, which IEEE 754 rounds exactly. First-order sections use a trapezoidal one-pole with the same mixing. The sections hold their states and coefficients in f64 and the whole chain (sections, placement stages, correction filter and convolution) runs in f64 from input to output (one conversion each way). The SVF keeps its states meaningful when coefficients change, which direct forms do not, and its coefficient sensitivity at low frequencies is low; f64 removes the remaining concern at 20 Hz and 192 kHz, where the pole radius is within 1e-3 of 1. The cost is a few more cycles per section than f32, accepted (decision 13). The `Biquad` of `biquad.rs` is not used.
 
-**2.4 Flat tilt.** Fifteen first-order shelving pairs at `f_k = 10·2^k` Hz for `k = −1 … 13` (5 Hz to 81.92 kHz), each `(1 + s/z_k)/(1 + s/p_k)` with `p_k/z_k = 10^(t/20)` and `z_k = f_k·10^(−t/40)` for a slope of `t = G/9.966` dB per octave (swapped for a negative slope), the whole scaled so the response is 0 dB at `f`. The analog cascade lies within 0.07 dB of the straight line from 20 Hz to 20 kHz at ±3 dB per octave (measured in drafting; slice 1 pins it). Pairs above Nyquist are real poles and map validly; the digital response near Nyquist is the matched one, and Natural phase corrects the rest. Each pair is designed as a first-order section (pole mapped, `b0` and `b1` fitted at DC and Nyquist, both square roots taken positive, so minimum phase); the fitted pairs are then multiplied two by two into second-order sections (eight sections, the last first-order) whose σ-domain coefficients are the products of the pairs' (no second fit). In Zero latency the cascade lies within 0.73 dB of the line at ±30 dB and 44.1 kHz (table).
+**2.4 Flat tilt.** Fifteen first-order shelving pairs at `f_k = 10·2^k` Hz for `k = −1 … 13` (5 Hz to 81.92 kHz), each `(1 + s/z_k)/(1 + s/p_k)` with `p_k/z_k = 10^(t/20)` and `z_k = f_k·10^(−t/40)` for a slope of `t = G/9.966` dB per octave (swapped for a negative slope), the whole scaled so the response is 0 dB at `f`. The analog cascade lies within 0.07 dB of the straight line from 20 Hz to 20 kHz at ±3 dB per octave for band frequencies from 100 Hz to 5 kHz, and within 0.123 dB with the band frequency anywhere in range (at 20 Hz or 20 kHz the cascade's ripple falls on one side once scaled to 0 dB there; measured in slice 1, amended 2026-11-12). Pairs above Nyquist are real poles and map validly; the digital response near Nyquist is the matched one, and Natural phase corrects the rest. Each pair is designed as a first-order section (pole mapped, `b0` and `b1` fitted at DC and Nyquist, both square roots taken positive, so minimum phase); the fitted pairs are then multiplied two by two into second-order sections (eight sections, the last first-order) whose σ-domain coefficients are the products of the pairs' (no second fit). In Zero latency the cascade lies within 0.73 dB of the line at ±30 dB and 44.1 kHz (table).
 
 **2.5 What "transparent" means, measurably.**
 
@@ -168,7 +169,7 @@ The map needs only `sqrt`, which IEEE 754 rounds exactly. First-order sections u
 
 ### 3. Changing parameters without clicks
 
-**3.1 Smoothing rule: parameters, per sample; coefficients at control rate.** Each used band smooths its frequency and Q in the log2 domain and its gain in dB, each a one-pole of 20 ms on the plug-in's own sample clock with the snap of `transit-dsp`'s `Smoother` (to the target within 1e-6 relative). A band whose smoothers moved recomputes its sections every 16 samples of that clock (the Filter's `CONTROL` rule, ADR 0038 and ADR 0053 decision 2.5), plus once in `prepare` and `reset`. A band at rest costs no design work. Output is smoothed as a linear gain over 20 ms.
+**3.1 Smoothing rule: parameters, per sample; coefficients at control rate.** Each used band smooths its frequency and Q in the log2 domain and its gain in dB, each a one-pole of 20 ms on the plug-in's own sample clock with the snap of `transit-dsp`'s `Smoother` (to the target within 1e-6 relative). A band whose smoothers moved recomputes its sections every 16 samples of that clock (the Filter's `CONTROL` rule, ADR 0038 and ADR 0053 decision 2.5), plus once in `prepare` and `reset`, and over each 16-sample interval its state-variable coefficients glide linearly per sample from the previous design to the new one, the interval's last sample being exactly the new design (amended 2026-11-12; the amendment gives the measurements). A band at rest runs its plain design, bit-identical to a band that never moved, and costs no design or glide work. Output is smoothed as a linear gain over 20 ms.
 
 Cost: one design of one band is a few dozen floating-point operations plus one `exp2`, one `cos` and one `sin` per second-order section; 24 bands all moving at 96 kHz is 144,000 band designs a second, up to 1.15 million section designs with eight sections a band: at the worst case the same order of cost as the section ticks, so slice 2 measures it within decision 13's figures. Smoothing coefficients directly (interpolating `b` and `a`) was not chosen: an interpolated coefficient set is not the design of any parameter value and can leave the stable region between two stable endpoints.
 
@@ -179,7 +180,7 @@ Cost: one design of one band is a few dozen floating-point operations plus one `
 ### 4. Placement: a left/right stage, then a mid/side stage
 
 - **Stages.** Stage 1 runs every Stereo, Left and Right band in the left/right domain: a Stereo band on both channels, a Left band on channel 0, a Right band on channel 1. Stage 2 runs every Mid and Side band in the mid/side domain. Stereo bands commute with everything (the same filter on both channels), so placing them in stage 1 changes no response. Left/right and mid/side bands do not commute with each other; the fixed order (stage 1, then stage 2) is part of the device's definition.
-- **Encode and decode.** Stage 2 exists only while at least one Mid or Side band is processed (used, and neither skipped as an identity nor at `w = 0`). Then, in f64: `M = L + R`, `S = L − R` before it and `L = (M + S)·0.5`, `R = (M − S)·0.5` after it. Each step is exact in f64 whenever the two input samples are within a factor of 2^29 of each other or either is zero (their f32 sum and difference then fit in 53 bits, and the halving is exact), so encode then decode with nothing between returns both channels bit for bit. Beyond that ratio (about 175 dB, as a full-scale left channel against a right channel at −180 dBFS or a subnormal) the quieter channel comes back changed: `(1, 1e-40)` returns `(1, 0)`. That is why stage 2 is skipped while no Mid or Side band is processed, so decision 2.5's bit-exact pass-through holds with identity Mid and Side bands too. With no Mid or Side band in use the encode and decode are skipped, so a session with only Stereo, Left and Right bands runs exactly the left/right arithmetic.
+- **Encode and decode.** Stage 2 exists only while at least one Mid or Side band is processed (used, and neither skipped as an identity nor at `w = 0`). Then, in f64: `M = L + R`, `S = L − R` before it and `L = (M + S)·0.5`, `R = (M − S)·0.5` after it. Each step is exact in f64 whenever the two input samples are within a factor of 2^29 of each other or either is zero (their f32 sum and difference then fit in 53 bits, and the halving is exact), so encode then decode with nothing between returns both channels exactly: bit for bit, except that a negative-zero sample returns as positive zero (`(1 + −1)·0.5`), equal in value (amended 2026-11-12). Beyond that ratio (about 175 dB, as a full-scale left channel against a right channel at −180 dBFS or a subnormal) the quieter channel comes back changed: `(1, 1e-40)` returns `(1, 0)`. That is why stage 2 is skipped while no Mid or Side band is processed, so decision 2.5's bit-exact pass-through holds with identity Mid and Side bands too. With no Mid or Side band in use the encode and decode are skipped, so a session with only Stereo, Left and Right bands runs exactly the left/right arithmetic.
 - **An untouched side.** With Mid bands only, the side signal passes stage 2 untouched in f64; the output's side component, computed in f64 from the f32 outputs, equals the input's within one unit in the last place of the larger of the two outputs (the decode's rounding is relative to the louder channel). It is not bit-identical at the f32 output, because the decode rounds `M' ± S` to f32; the record does not claim more.
 - **Cost.** Two additions and two multiplications per frame each way, only while stage 2 exists.
 - **Mono** (settled choice 7): Stereo and Mid bands process the one channel; Left, Right and Side bands are inactive (no left, right or side exists), and the panel shows their nodes as disabled. **More than two channels** (settled choice 7): Stereo bands process every channel; Left, Right, Mid and Side bands apply to channels 0 and 1 only.
@@ -345,7 +346,7 @@ The hand-off's 1120 by 560 points with a minimum width of 880 follows the device
 ### 17. Control channel and help
 
 - **No new command.** The device is driven by the existing `mix.insert`, `mix.insert_param` and `mix.insert_params` with the ids of decision 5, and read by `session.inspect`. Refusals carry the words of 5.3. A read-only query of the computed curve is a later option (Open).
-- **Help:** `docs/help/parametric-eq.toml` with rows for the device, adding and removing bands, Type, Slope, Placement, Solo, the three phase modes, Linear Resolution, Gain match (computed from the curve), the analyzer and its settings, and the bypassed state. The phase-mode rows carry the framing by use (decision 6): Zero latency is the default and the mode for mixing and tracking, and near the top of the range at 44.1 and 48 kHz its bands can depart from their analog shape by a few dB (the curve shows exactly this; Natural corrects it); Natural and Linear add latency and are for mastering and other work where nothing is being tracked. The Linear rows state each Resolution's latency, pre-ringing, stepped drags, and plainly the low-end error at Short (a +12 dB Q 4 bell at 100 Hz reaches about +9.9 dB and at 30 Hz about +6.3 dB; use Long or Maximum, or another mode, for low bands), and that narrow notches stay shallow in Linear.
+- **Help:** `docs/help/parametric-eq.toml` with rows for the device, adding and removing bands, Type, Slope, Placement, Solo, the three phase modes, Linear Resolution, Gain match (computed from the curve), the analyzer and its settings, and the bypassed state. The phase-mode rows carry the framing by use (decision 6): Zero latency is the default and the mode for mixing and tracking, and near the top of the range at 44.1 and 48 kHz its bands can depart from their analog shape by up to about 3.8 dB at 44.1 kHz and 2.8 dB at 48 kHz (amended 2026-11-12) (the curve shows exactly this; Natural corrects it); Natural and Linear add latency and are for mastering and other work where nothing is being tracked. The Linear rows state each Resolution's latency, pre-ringing, stepped drags, and plainly the low-end error at Short (a +12 dB Q 4 bell at 100 Hz reaches about +9.9 dB and at 30 Hz about +6.3 dB; use Long or Maximum, or another mode, for low bands), and that narrow notches stay shallow in Linear.
 - **User guide:** a Parametric EQ section with the same framing by use and the same low-end statement, and the README Features line, in the slices that change public behavior.
 
 ### 18. Dynamic bands (a later release)
@@ -359,8 +360,8 @@ All tests are deterministic, use no wall clock and no audio device, and drive ti
 - **Every band type against its closed form** (slice 1). The impulse response of each type and slope, at 44.1, 48, 96 and 192 kHz, over a grid of frequencies, gains and Qs, evaluated by a direct DFT in f64, matches the digital transfer function of the designed coefficients within 0.05 dB above −60 dB, else 1e-4 linear (the Filter test's bounds; proves the realization of 2.3 is exact). Negative control: an SVF map with `m1 = n1/c0` (the factor `g` dropped) fails. (`2·(b0 − b2)` is the same quantity as `n1` and in f64 differs only by rounding, so it cannot serve as a control.)
 - **The matching claim** (slice 1). The deviation of the designed magnitude from the analog prototype, over the same grid from 20 Hz to min(20 kHz, 0.45·fs), stays within decision 2.5's bounds, and the same test run on RBJ bilinear sections (the comparison) exceeds them; the measured maxima are recorded in the result note. Negative control: the bilinear sections fail the zero-latency bound at 44.1 kHz.
 - **Feasibility** (slice 1). The sweep of 2.2 on a finer grid; any clamped point is recorded.
-- **Shelves over the whole Q range** (slice 1). The factored design of 2.2, low shelf, high shelf and tilt shelf, over the sweep of 2.5 (every gain in 3 dB steps, every listed Q from 0.1 to 40) at 44.1, 48, 96 and 192 kHz and the outer rate classes, stays within the factored table's bounds plus 0.05 dB, at 1 kHz within 0.25 dB at every Q and gain. Negative control: the single three-point fit for shelves misses by more than 10 dB at Q 40 and 1 kHz. The factor sections' inverses are stable (all poles inside the unit circle) at every swept point. Continuity across the transition: sweeping each shelf type's frequency from 20 Hz to the top of the range in steps of 1 cent, at Qs 0.1, 0.707, 2, 10 and 40 and gains ±3, ±12 and ±30 dB, at 44.1, 48, 96 and 192 kHz, no step changes the response at any of 200 log-spaced frequencies by more than the prototype's own change in the same step plus 0.2 dB, nor by more than 0.45 dB at all (measured in drafting: 0.39 dB at most, 0.17 dB over the prototype's step); at the worst case the change for a 0.1-cent step is a tenth of the 1-cent change within 5 % (a slope, not a jump). Negative control: the hard switch at `θ = 0.9π` steps by more than 5 dB at 44.1 kHz.
-- **Flat tilt** (slice 1). Within 0.07 dB of the line from 20 Hz to 20 kHz in the analog cascade at ±3 dB per octave.
+- **Shelves over the whole Q range** (slice 1). The factored design of 2.2, low shelf, high shelf and tilt shelf, over the sweep of 2.5 (every gain in 3 dB steps, every listed Q from 0.1 to 40) at 44.1, 48, 96 and 192 kHz and the outer rate classes, stays within the factored table's bounds (3 dB gain steps) plus 0.05 dB, at 1 kHz within 0.25 dB at every Q and gain at 44.1 kHz and above and within 0.30 dB at 32 kHz (0.252 measured, a +30 dB Q 0.1 tilt shelf). Negative control, at 44.1 and 48 kHz: the single three-point fit for shelves misses by more than 10 dB at ±30 dB, Q 40 and 1 kHz (12.7 and 12.1 dB measured; at 96 kHz it misses by 6.9 dB, so the control is not run there; amended 2026-11-12). The factor sections' inverses are stable (all poles inside the unit circle) at every swept point. Continuity across the transition: sweeping each shelf type's frequency from 20 Hz to the top of the range in steps of 1 cent, at Qs 0.1, 0.707, 2, 10 and 40 and gains ±3, ±12 and ±30 dB, at 44.1, 48, 96 and 192 kHz, no step changes the response at any of 200 log-spaced frequencies by more than the prototype's own change in the same step plus 0.2 dB, nor by more than 0.45 dB at all (measured in drafting: 0.39 dB at most, 0.17 dB over the prototype's step); at the worst case the change for a 0.1-cent step is a tenth of the 1-cent change within 5 % (a slope, not a jump). Negative control: the hard switch at `θ = 0.9π` steps by more than 5 dB at 44.1 kHz.
+- **Flat tilt** (slice 1). Within 0.07 dB of the line from 20 Hz to 20 kHz in the analog cascade at ±3 dB per octave for band frequencies from 100 Hz to 5 kHz, and within 0.17 dB (0.123 measured plus 0.05) for any band frequency (amended 2026-11-12).
 - **Natural** (slice 6). Within decision 2.5's Natural bounds, per type and slope, of the prototype composite after removing `D`, for single bands and sets of up to 24 at every rate class, including 96 dB/oct high cuts from 10 to 20 kHz, the shelves at the top of their Q range, and bands in both placement domains. The correction is finite at its shared zeros: a 12 dB/oct low cut at 100 Hz, a band pass, and a notch at exactly `fs/4` meet the bounds (negative control: the plain ratio with `C(0) = 0` misses the low cut by about 0.8 dB at 20 Hz). Negative control: `D = 16` fails at 44.1 kHz.
 - **Linear** (slice 5, each shipped Resolution). The kernel is symmetric about tap `L − 2P` to the bit (it is built symmetric); no host block of 64 samples does more convolution work than 6.3's per-block bound, counted by an instrumented build (negative control: computing each frame in the block where it completes exceeds it at Long); the realized gains of decision 6.3's table are reproduced by impulse DFT within 0.3 dB of the table at every shipped Resolution (the tolerance is confirmed on the implemented kernels when slice 5 is briefed; the result note records the measured values); a change of `linear_res` is a mode change by 6.5; the impulse response of the device peaks at sample `L` for a +6 dB Q 1 bell at 1 kHz with the spread schedule (negative control: a kernel centered at `L − P` with the spread peaks one partition late) (a flat target runs the identity delay line of 6.5 and is checked in the pass-through item); the reported latency equals the measured delay of a click through that kernel at every rate class; the magnitude within 0.1 dB of the target for bells, shelves and band passes of Q at most 4 at 1 kHz and above at 48 kHz (proposed; the slice records the measured region where the bound holds, and below it the resolution-limited deviation is recorded, not bounded). Negative control: reporting `L − 2P` fails the delay check.
 - **Bit-exact pass-through** (slices 1 and 2). No used band, or every band an identity: output equals input bit for bit (Zero latency) or the input delayed by exactly the latency (Natural, Linear). Negative control: computing identity bands instead of skipping them breaks bit-exactness.
@@ -401,7 +402,7 @@ Order: 1, 2, 3; 4 after 3; 5 after 2 (the panel shows it once 3 is in); 5b after
 - transit gets a transparent equalizer whose zero-latency highs are close to the analog prototype at 44.1 and 48 kHz without oversampling, and within decision 2.5's per-type Natural bounds of it for 1.3 ms of latency.
 - The curve the user sees is computed by the code that runs, so it cannot drift from the sound.
 - Zero latency is the mode for mixing and tracking; Natural and Linear are for mastering. Linear costs 85 to 683 ms of latency at 48 kHz by its Resolution, pre-ringing and stepped drags, and at its shortest setting it renders low bands visibly short of their gain; Natural is the mode for analog behavior at almost no latency.
-- Shelves cost two sections each, so that a resonant shelf follows its prototype at every Q (within 0.2 dB at 1 kHz; near 20 kHz up to about 3.6 dB at 44.1 kHz and 2.8 dB at 48 kHz in Zero latency, as the curve shows).
+- Shelves cost two sections each, so that a resonant shelf follows its prototype at every Q (within 0.2 dB at 1 kHz; near 20 kHz up to about 3.8 dB at 44.1 kHz and 2.8 dB at 48 kHz in Zero latency, as the curve shows).
 - 220 parameters make this the longest built-in table; the fixed slots keep every lane, mapping and macro valid for the device's life, at the cost of long lane menus (grouped by band in the menus is a UI matter) and unused slots stored in every session.
 - A new rendered FFT enters the workspace, small and ours, so the linear and natural paths can become bit-identical across operating systems with the portable math record.
 - A device-to-panel control word (audition) and a pre-insert tap enter the strip; other devices can use them later.
@@ -447,7 +448,7 @@ On 2026-11-12 the maintainer accepted the recommendations of the earlier open li
 20. **The Linear Resolution control on the panel** (decision 6.3). A one-line design follow-up: *decided:* the latency readout beside the phase segmented control becoming a small dropdown (Short, Long, Maximum, each with its latency) while Linear is selected.
 21. **Memory for the latent modes** (decision 13). Every instance would hold about 12 MB at 48 kHz once Maximum ships (about 48 MB at 192 kHz) whether or not it uses Natural or Linear. *Decided:* allocating the Natural and Linear storage only when an instance first selects one of those modes, through a re-prepare on the recompile the latency change already triggers (the device silent until the new plan is adopted, inside the mode-change gap of 6.5). Alternative: allocate in every instance, or allocate up to Long only until Maximum is selected.
 22. **Rebuild speed** (decision 6.4). *Decided:* a fixed share per control tick sized for four band tables, so every block is bounded and a preset recall in Linear is heard after about six latencies (0.5 s at Short, 4.1 s at Maximum, 48 kHz). Alternative: a larger share, faster recalls at a higher per-block bound (about 2 Gflop/s at 192 kHz for an `L`-sample recall).
-23. **The shelf transition band** (decision 2.2). *Decided:* 0.9π to 0.99π: continuous, stable, and more accurate than round 2's hard switch (3.56 dB worst at 44.1 kHz, 2.75 dB at 48 kHz), with the response near Nyquist moving at most 0.17 dB per cent faster than the prototype's (0.39 against 0.23 dB). Alternative: 0.8π to 0.99π, whose step stays within 0.05 dB of the prototype's but whose worst deviation rises to 16.6 dB at 44.1 kHz and 4.7 dB at 48 kHz. No band measured meets both the prototype's step and round 2's accuracy at 44.1 kHz.
+23. **The shelf transition band** (decision 2.2). *Decided:* 0.9π to 0.99π: continuous, stable, and more accurate than round 2's hard switch (3.83 dB worst at 44.1 kHz on 3 dB gain steps, 2.76 dB at 48 kHz), with the response near Nyquist moving at most 0.17 dB per cent faster than the prototype's (0.39 against 0.23 dB). Alternative: 0.8π to 0.99π, whose step stays within 0.05 dB of the prototype's but whose worst deviation rises to 16.6 dB at 44.1 kHz and 4.7 dB at 48 kHz. No band measured meets both the prototype's step and round 2's accuracy at 44.1 kHz.
 
 The hand-off's conflicts and open questions, for the record: conflict 1 (name), 2 (placement by badge and line style), 3 (Q by Ctrl+wheel and Alt-drag) and 5 (no second bypass) are decided by the maintainer; conflict 4 (a live spectrum in a display well) is decided in substance by the maintainer's decision 7, and the wording of the Display well exception lands with slice 3. Questions 9 (24 bands) and 10 (smoothing Off) are decided; 1 (refusal words) is decided here (5.3); 2 is settled choice 10; 3 (analyzer scale fixed at −90 to 0 dB), 4 (number keys 1 to 9 and 0, Tab for the rest), 5 (a new band is a bell at Q 1.0) and 7 (latency in milliseconds and samples) are taken as the hand-off recommends, panel matters this record does not change; 6 is settled choice 14; 8 (a bypassed device draws nothing moving) follows the maintainer's decision 6 for this device; 11 (low-end resolution) is decided here (decision 9, two windows).
 
@@ -458,6 +459,122 @@ Not blocking; the briefs carry them.
 - **Slice 6:** Natural's per-type bounds re-measured on the full grid of 2.5, starting from the known corners listed there; whether a longer correction (`D = 128`) at 44.1 and 48 kHz is worth its latency for broad deep bells, steep cuts and resonant shelves near 20 kHz is a reopen condition the brief can raise with the measurements.
 - **Slice 5:** the rebuild share in operations per tick (settled choice 22) and the memory policy (settled choice 21) confirmed with measurements before Maximum ships; the 0.3 dB tolerance of the Linear realized-gain test measured on the implemented kernels; and a help note that the panel's Linear curve leads the sound by up to one latency (more after a preset recall).
 - **Slice 1:** the shelf continuity bound (the prototype's step plus 0.2 dB) has a thin margin (0.17 dB measured in drafting); if slice 1's grid finds slightly more, the brief records it rather than loosening the bound silently.
+
+## Amendment 2026-11-12: slice 1 measurements
+
+Amended 2026-11-12, accepted. The slice 1 build (the DSP core, `transit-parametric-eq`) measured the record against itself, and the record's reopen condition "the zero-latency magnitude bounds of decision 2.5 are missed in the slice 1 measurement" was met. The build also found one contradiction (decision 3.1 against the click criterion of 3.3) and ten points where the record is silent. This amendment settles all three. It changes nothing else: the designs, the ranges, the parameters and the slices stand. Figures quoted elsewhere in this record are updated in place and marked "amended 2026-11-12".
+
+**1. Coefficients glide between designs (decisions 3.1 and 3.3 reconciled).**
+
+- **The contradiction.** With sections redesigned every 16 samples and the coefficients stepped at each design, two of 3.3's steps exceed the −60 dB criterion: Gain −30 to +30 dB by 16.4 dB and Q 0.1 to 40 by 20.5 dB. Each redesign steps the mixed outputs.
+- **The decision.** The design still runs every 16 samples of the plug-in's sample clock (3.1). Over each 16-sample interval, each section's state-variable coefficients (`a1`, `a2`, `a3` and the mixing coefficients of 2.3; `G` and the mixing of a first-order section) glide linearly per sample from the previous design to the new one. Sample `n` of the interval (0 to 15) uses the fraction `(n + 1)/16`, so the last sample is exactly the new design.
+  - The glide applies only between designs of the same shape: the same section count, and neither of them the identity.
+  - Configuration switches (at `w = 0`), switch-ins and resets apply the new design at once, as before.
+  - A band at rest runs its plain design. Its coefficients equal a never-moved band's exactly, and with the same states its output is bit-identical.
+  - Smoothing stays at 20 ms. Block-size independence holds, with the glide state included in the fingerprint.
+- **Measured** with 3.3's harness, dB relative to the −60 dB threshold (negative passes):
+
+  | Step | Coefficients stepped | With the glide |
+  |---|---|---|
+  | Gain −30 → +30 dB | +16.4 | −13.4 |
+  | Q 0.1 → 40 | +20.5 | −9.9 |
+  | Frequency 400 Hz → 4 kHz / back | −44.3 / −33.6 | −77.9 / −61.5 |
+  | Slope 6 → 96, Type Bell → High cut, Placement / On / Used | unchanged (−12.4, −13.0, −23.4) | unchanged |
+
+- **Stability.** A brute-force sweep follows the processor's own smoothing (20 ms one-poles stepped per sample, a design every 16 samples). It runs between every pair of corners of the frequency, gain and Q ranges: 56 trajectories of 0.3 s, every type and slope, at 44.1 and 192 kHz. At each of the 16 interpolated points of every interval it computes the spectral radius of the SVF state matrix `[[2a1 − 1, −2a2], [2a2, 1 − 2a3]]` and checks the one-pole's `0 < G < 1`.
+  - Every interpolated set is stable.
+  - The largest radius is 0.999998545. That is the radius of a 20 Hz bell's own poles at 192 kHz, not an interpolation effect.
+  - An interpolated radius exceeds the larger of its endpoints' radii by at most 2.4e-4 (the stable region is not convex in these coefficients), and nowhere reaches 1.
+  - Shelves swept back and forth between 9 and 20 kHz across the 0.9π to 0.99π transition, at ±30 dB and Q 0.707, 10 and 40, at 44.1 and 48 kHz, keep a bounded, finite output.
+- **Cost.** 24 operations a sample for each second-order section of a moving band and 9 for a first-order section, computed once per band and shared by its channels; nothing for a band at rest. That is 576 a sample for 24 moving bells and about 4,800 for 24 moving 96 dB/oct cuts or flat tilts. A timing run could not separate it from the redesigns that dominate.
+- **Alternatives measured and rejected:**
+  - *Redesign every sample* (−15.1 and −12.0 dB): about sixteen times 3.1's design cost while a band moves, for a result no better than the glide's.
+  - *Double the Gain and Q smoothing to 40 ms* without the glide: rejected, since the stepped coefficients remain at every interval. With the glide, 40 ms gives −19.2 and −15.7 dB, which the 20 ms glide does not need.
+  - *Designs every 8 or 4 samples*: +10.4 / +14.5 and +5.7 / +10.0 dB, still over.
+- **Evidence added:** the click steps pass at −60 dB with the glide (negative control: glide off fails by +16.4 / +20.5 dB). The stability sweep is required (negative control: coefficients overshooting fourfold reach radius 3.5). Shelves stay bounded across the transition (negative control: a blend with a negative all-pole weight gives non-finite output). At rest is bit-identical (negative control: a glide that never stops).
+
+**2. Corrected magnitude figures.** The drafting sweeps used coarser grids than decision 2.5's 1,000-point evaluation grid and its 3 dB gain steps. Slice 1 measured on the record's own grid. An independent reimplementation written from the record's text agrees with the Rust to three decimals in every disputed case, so these are corrections of the record's numbers, not regressions of the design. Every figure the slice 1 measurement did not reproduce within 0.05 dB is replaced by the measured one, in the tables above and in the Evidence:
+
+| Figure | Record | Measured | Note |
+|---|---|---|---|
+| High cut composites, 48 dB/oct, `f` ≤ fs/5, 44.1 / 48 kHz | 0.91 / 0.60 dB | 1.53 / 1.11 dB | the deviation grows toward the −40 dB floor on the knee's high side |
+| High cut composites, 96 dB/oct, `f` ≤ fs/5, 44.1 / 48 kHz | 0.36 / 0.27 dB | 0.66 / 0.47 dB | |
+| High cut composites, 48 / 96 dB/oct, 96 kHz | 0.25 / 0.29 dB | 0.29 / 0.38 dB | |
+| Bell, full ranges, 44.1 / 48 kHz | 4.30 / 3.32 dB | 4.354 / 3.373 dB | 0.004 dB over the margin |
+| Notch, 44.1 kHz | 6.44 dB | 6.59 dB | grid density |
+| Flat tilt ±30 dB, 44.1 / 48 / 96 kHz | 0.73 / 0.72 / 0.53 dB | 0.78 / 0.78 / 0.60 dB | ±10 dB is within the margin |
+| Shelves, every gain and Q, 44.1 kHz | 3.56 dB | 3.83 dB on 3 dB gain steps (a −9 dB Q 40 low shelf at 15.76 kHz) | 3.56 holds on the round-2 gains |
+| Shelves at 1 kHz, 32 kHz | within 0.25 dB | 0.252 dB (a +30 dB Q 0.1 tilt shelf) | an outer rate class |
+| Flat tilt analog line | within 0.07 dB | 0.067 dB for band frequencies 100 Hz to 5 kHz; 0.123 dB at 20 Hz or 20 kHz | |
+| Single-fit shelf negative control | more than 10 dB | 12.7 / 12.1 dB at 44.1 / 48 kHz; 6.9 dB at 96 kHz | the control runs at 44.1 and 48 kHz only |
+
+- **One grid.** The shelf table and the shelf Evidence item now both use decision 2.5's grid: 3 dB gain steps, 30 band frequencies, the ten Qs, 1,000 evaluation points. The round-2 gain set is kept in the table only as a labeled row.
+- **The test rule.** A pinned bound is the corrected figure plus 0.05 dB (2.5's slice 1 pin rule). Each test states the record's figure and the measured one side by side.
+- **Where users read it.** The help text's statement about Zero latency near 20 kHz (decision 17) uses the corrected 3.8 dB at 44.1 kHz and 2.8 dB at 48 kHz.
+- **Also confirmed** within 0.05 dB: the rest of 2.2's table, the factored shelves at fs/5 and at 1 kHz at 44.1 kHz and above, the continuity sweep (0.390, 0.325, 0.232, 0.232 dB; excess over the prototype 0.165 dB at most), feasibility (4,692,000 designs, none clamped), the closed form, the gain-match examples, the mid/side round trip, and the round robin.
+
+**3. Where the record was silent: the rules slice 1 built.**
+
+1. **Reset settles the ramps.** `reset` ends any ramp in progress: each band's wet amount goes to its end value (1 when used and on, else 0) and the configuration switches to the stored one. It does not zero the wet amount, which would fade every band in after a stop and contradict "the first sample of a fresh instance is correct". Decision 12's "ramps to zero" means "ramps ended".
+2. **Discrete changes at the next tick.** Configuration switches, ramp direction, identity and the mid/side stage decision are taken at the 16-sample control ticks, so a setter takes effect up to 15 samples later, on the sample clock.
+3. **Slope crossfades only for cuts.** A Slope change ramps (3.2) only when the band's type is a cut; on any other type Slope is stored and unused (5.1), so the band does not dip.
+4. **Switch-in snaps.** A band switching in from `w = 0` snaps its smoothers to their targets; the ramp makes the entry click-free, and a newly added band does not glide from old stored values.
+5. **Section order.** A shelf runs `P` then `Z`, the constant on `P`. Flat-tilt sections run their pairs in frequency order (2.6's "ascending Q" does not apply to them).
+6. **Flat tilt's 0 dB point** is the analog cascade's value at the band frequency (the prototype's definition); the digital pairs are fitted to their own prototypes.
+7. **Gain match details:**
+   - The target is recomputed when a band's refresh completes, so it always comes from a consistent set of tables.
+   - With bands in both placement domains, `P` is the mean of all four channel curves (left, right, mid and side).
+   - On mono, `P` is the one channel's curve (Stereo and Mid bands).
+   - `reset` leaves the tables and any refresh in flight unchanged.
+   - `prepare` computes all 24 tables at once.
+8. **Response functions above 0.49·fs return NaN, open.** A frequency above 0.49·fs returns NaN, an exact notch center −∞ dB, and `band_response_db` draws the band's own shape whether or not it is used or on. NaN stays the contract for slice 1. *Recommendation for slice 3* (open for the maintainer): keep NaN as the core's "no value here" and have the panel stop the polyline at the last finite column; the panel already draws nothing above 0.49·fs (decision 12). A numeric floor would be drawn as a real value. The panel clamps −∞ to the bottom of the display.
+9. **Phase modes in the core.** `PhaseMode` carries only `ZeroLatency` (non-exhaustive); Natural and Linear join with slices 6 and 5.
+10. **The `transit-dsp` dependency** exists from slice 1, before its user in slice 2, because the record asks for the `testing` forwarding in the first slice.
+
+And two wording points:
+
+- **Bit-exact pass-through** (2.5) holds bit for bit, signed zeros included, whenever stage 2 is skipped. While stage 2 runs, a negative-zero sample returns as positive zero, equal in value (decision 4 as amended).
+- **The single-fit negative control** runs at 44.1 and 48 kHz only, where its figure holds.
+
+**4. The contract between slices.** Slice 1's public API, which slices 2 and 3 call (crate `transit-parametric-eq`):
+
+```rust
+pub const BANDS: usize = 24;            // band i = panel band i + 1
+pub const FREQ_MIN, FREQ_MAX, GAIN_MAX_DB, Q_MIN, Q_MAX, OUTPUT_MAX_DB, GAIN_MATCH_MAX_DB: f64;
+pub enum BandType { Bell, LowShelf, HighShelf, LowCut, HighCut, Notch, BandPass, TiltShelf, FlatTilt } // ALL, from_index, uses_slope/gain/q
+pub enum Slope { Db6, Db12, Db18, Db24, Db36, Db48, Db72, Db96 }  // ALL, from_index, index, order, db_per_octave
+pub enum Placement { Stereo, Left, Right, Mid, Side }            // ALL, from_index, is_mid_side
+#[non_exhaustive] pub enum PhaseMode { ZeroLatency }            // Natural and Linear join with slices 6 and 5
+pub enum CurveChannel { Left, Right, Mid, Side }                // includes(place)
+pub struct BandParams { used, on, kind, freq_hz, gain_db, q, slope, place } // Default = decision 5's defaults
+pub fn rate_class(sample_rate: f64) -> usize;
+
+impl ParametricEq {
+    pub fn new() -> Self;
+    pub fn prepare(&mut self, sample_rate: f64, channels: usize);
+    pub fn reset(&mut self);
+    pub fn process<C: AsMut<[f32]>>(&mut self, io: &mut [C], frames: usize);
+    pub fn set_used(&mut self, i: usize, v: bool); pub fn set_on(&mut self, i: usize, v: bool);
+    pub fn set_kind(&mut self, i: usize, k: BandType); pub fn set_slope(&mut self, i: usize, s: Slope);
+    pub fn set_place(&mut self, i: usize, p: Placement);
+    pub fn set_freq(&mut self, i: usize, hz: f64); pub fn set_gain(&mut self, i: usize, db: f64);
+    pub fn set_q(&mut self, i: usize, q: f64); pub fn set_band(&mut self, i: usize, p: BandParams);
+    pub fn set_output_db(&mut self, db: f64);   // 20 ms, linear
+    pub fn set_gain_match(&mut self, on: bool); // applied, 50 ms
+    pub fn gain_match_db(&self) -> f64;         // computed and clamped, applied or not
+    pub fn band(&self, i: usize) -> BandParams; pub fn bands(&self) -> [BandParams; 24];
+    pub fn latency(&self) -> usize;             // 0 until slices 5 and 6
+    pub fn sample_rate(&self) -> f64; pub fn channels(&self) -> usize;
+    // testing feature: fingerprint
+}
+pub fn response_db(bands: &[BandParams], sample_rate: f64, mode: PhaseMode, channel: CurveChannel, freqs: &[f64], out: &mut [f64]);
+pub fn band_response_db(band: &BandParams, sample_rate: f64, mode: PhaseMode, freqs: &[f64], out: &mut [f64]);
+pub fn gain_match_db(bands: &[BandParams], sample_rate: f64, channels: usize) -> f64; // bit-identical to the processor's once current
+```
+
+Setters clamp to the parameter ranges and read non-finite values as the default; the 0.49·fs clamp applies when used. Output and the applied gain match live in the core, because the chain is f64 from input to output (2.3). Slice 2 maps `output` and `gain_match` onto these setters and the band parameters onto `set_band` or the single setters. A change to this API in a later slice is that slice's to state.
+
+**5. The landing gate.** The landing chain's gate needs a bare-metal step for `transit-parametric-eq` (`cargo check --target thumbv7em-none-eabihf --no-default-features -p transit-parametric-eq`), beside the CI job slice 1 added, so the crate stays Tier B at every landing.
 
 ## Related
 
