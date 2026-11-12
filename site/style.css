@@ -49,10 +49,7 @@ h3{margin:0 0 6px;font-size:1.1rem}
 .size{display:block;min-height:1.2em}
 .other{margin:0;font-size:.9rem}
 .cards{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
-ul.cards{list-style:none;margin:0;padding:0}
-.cards.live{grid-template-columns:repeat(3,1fr)}
 .nw{white-space:nowrap}
-.cards.live h3{margin-bottom:8px;text-wrap:balance}
 .card{background:var(--raised);border:1px solid var(--line);border-top:4px solid var(--line);border-radius:8px;padding:20px;transition:border-color .15s}
 .card:hover{border-top-color:var(--signal)}
 .card p{margin:0;color:var(--muted)}
@@ -81,8 +78,8 @@ figcaption{color:var(--muted);font-size:.9rem;margin-top:8px}
 .join-row .lbl{flex:1;justify-content:center}
 .more{margin:16px 0 0}
 footer{padding-top:24px;padding-bottom:48px;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem;text-align:center}
-@media (max-width:820px){.cards.live{grid-template-columns:repeat(2,1fr)}.dls{grid-template-columns:1fr}.grid2,.shots{grid-template-columns:1fr}.plain.two{columns:1}}
-@media (max-width:600px){.facts>div{grid-template-columns:1fr}.cards.live{grid-template-columns:1fr}.cta{flex-direction:column;align-items:stretch}.cta .btn{width:100%}.hero{padding-top:40px;min-height:0;padding-bottom:300px}.backdrop{top:auto;bottom:0;height:300px}.backdrop img{width:140%;min-width:0;max-width:none;opacity:.6;transform:perspective(1600px) rotateX(16deg)}}
+@media (max-width:820px){.dls{grid-template-columns:1fr}.grid2,.shots{grid-template-columns:1fr}.plain.two{columns:1}}
+@media (max-width:600px){.facts>div{grid-template-columns:1fr}.cta{flex-direction:column;align-items:stretch}.cta .btn{width:100%}.hero{padding-top:40px;min-height:0;padding-bottom:300px}.backdrop{top:auto;bottom:0;height:300px}.backdrop img{width:140%;min-width:0;max-width:none;opacity:.6;transform:perspective(1600px) rotateX(16deg)}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 /* Screenshot lightbox (see the lightbox block in app.js) */
 a.shot{display:block;cursor:zoom-in;border-radius:8px}
@@ -105,3 +102,127 @@ dialog.lb::backdrop{background:rgba(19,21,24,.94)}
 .lb-next{right:8px}
 @media (max-width:640px){.lb-prev,.lb-next{top:auto;bottom:12px;margin-top:0}.lb-prev{left:12px}.lb-next{right:12px}.lb-fig img{max-height:calc(92vh - 9rem)}}
 @media (prefers-reduced-motion:reduce){dialog.lb[open]{animation:none}}
+/* Recording story (#live). Static by default: stacked scenes, picture above text. With .is-live
+   (added by app.js unless reduced motion is asked for) the stage pins and one number, --p (0 to
+   --n), says how far the visitor has scrolled through the scenes. Browsers with scroll-driven
+   animations animate --p from the section's own view timeline; others get it from a passive
+   scroll handler in app.js. Every opacity and transform below is derived from --p, so only
+   opacity and transform change while scrolling. The markup comment in index.html lists the
+   per-scene variables. Wide stage: --dx/--dy place a cover picture's focus point; tall stage:
+   --mx/--my, and --mk the zoom (default 0.8 of --k). Pictures are clamped to cover the stage. */
+.story-eyebrow{font-size:.8rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 20px;display:flex;align-items:center;gap:10px}
+.story-eyebrow::before{content:"";width:20px;height:2px;border-radius:1px;background:var(--signal)}
+.story-scenes{list-style:none;margin:0;padding:0;display:grid;gap:48px}
+.scene-pic{margin:0}
+.scene-pic img.cover{aspect-ratio:16/10;object-fit:cover;object-position:calc(var(--fx)*100%) calc(var(--fy)*100%)}
+.scene-pic img.bg{display:none}
+.frame{--ucx:var(--cx);--ucy:var(--cy);--ucw:var(--cw);--uch:var(--ch);--ufar:var(--far);position:relative;aspect-ratio:var(--ufar);overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.frame+.frame{margin-top:16px}
+.frame img{position:absolute;max-width:none;border:0;border-radius:0;width:calc(100% / var(--ucw));height:auto;left:calc(-100% * var(--ucx) / var(--ucw));top:calc(-100% * var(--ucy) / var(--uch))}
+/* Phones: a frame may name a tighter crop (--mcx/--mcy/--mcw/--mch/--mfar) so its subject stays legible. */
+@media (max-width:700px){.frame{--ucx:var(--mcx,var(--cx));--ucy:var(--mcy,var(--cy));--ucw:var(--mcw,var(--cw));--uch:var(--mch,var(--ch));--ufar:var(--mfar,var(--far))}}
+/* Low Latency loop (scene 1). Static: the lit capture over the unlit one, no cursor. */
+.ll-zoom{position:absolute;left:0;top:0;width:calc(100% / var(--ucw));aspect-ratio:2100/1181;transform-origin:0 0}
+.frame.ll img{width:100%;left:0;top:0}
+.ll-pulse,.ll-x{display:none}
+.scene-copy h3{font-size:clamp(1.6rem,1rem + 2vw,2.4rem);line-height:1.15;margin:16px 0 8px;text-wrap:balance}
+.scene-copy p{color:var(--muted);font-size:1.1rem;margin:0;max-width:60ch;text-wrap:pretty}
+.story-ticks{display:none}
+@property --p{syntax:"<number>";inherits:true;initial-value:0}
+@keyframes story-p{from{--p:0}to{--p:calc(var(--n) - .001)}}
+@media (prefers-reduced-motion:no-preference){
+  .story.is-live{--p:0;--ink:#E7E9EC;--ink-2:#C3C8CF;--ink-3:#A7ADB6;--stage:#131518;position:relative;width:100vw;margin-left:calc(50% - 50vw);padding:0;border-top:0;height:calc(100svh + var(--n) * 85svh);background:var(--stage)}
+  .is-live .story-stage{position:sticky;top:0;height:100vh;height:100svh;overflow:hidden;container-type:size;isolation:isolate;color:var(--ink);
+    --gutter:max(16px,calc((100cqw - 1240px) / 2 + 16px));--col:min(30rem,calc(100cqw - 2 * var(--gutter)));--rise:28px}
+  .is-live .story-eyebrow{position:absolute;z-index:3;top:32px;left:var(--gutter);margin:0;color:var(--ink-3)}
+  .is-live .story-eyebrow::before{background:#4C9EFF}
+  .is-live .story-scenes{display:block;position:absolute;inset:0}
+  .is-live .scene{position:absolute;inset:0;--sx:var(--dx,68%);--sy:var(--dy,50%);--kk:var(--k);
+    --px:calc((var(--gutter) + var(--col) + 40px + 100cqw - 64px) / 2);--py:52%;--pw:calc(100cqw - var(--gutter) - var(--col) - 104px);--ph:var(--dph,70cqh);
+    --a:clamp(0,(var(--p) - var(--i) + .16) / .16,1);
+    --z:clamp(0,(var(--p) - var(--i) + .16) / 1.3,1);
+    --b:clamp(0,(var(--p) - var(--i) - .42) / .14,1);
+    --ti:clamp(0,(var(--p) - var(--i) - .04) / .14,1);
+    --to:clamp(0,(var(--p) - var(--i) - .74) / .12,1);
+    --ei:calc(var(--ti) * var(--ti) * (3 - 2 * var(--ti)));
+    --eo:calc(var(--to) * var(--to) * (3 - 2 * var(--to)))}
+  .is-live .scene.flip{--px:calc((48px + 100cqw - var(--gutter) - var(--col) - 40px) / 2);--pw:calc(100cqw - var(--gutter) - var(--col) - 88px)}
+  .is-live .scene:first-child{--a:1;--ei:1}
+  .is-live .scene:last-child{--eo:0}
+  .is-live .scene-pic{position:absolute;inset:0;z-index:0;opacity:var(--a);background:var(--stage)}
+  /* The shade travels with its picture, so it crossfades with it; it sits under the frames and
+     the caption. The first layer fades the top and bottom edges into the stage. */
+  .is-live .scene-pic::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(to bottom,var(--stage) 0,var(--stage) 48px,rgba(19,21,24,0) 168px,rgba(19,21,24,0) calc(100% - 140px),var(--stage) 100%),linear-gradient(var(--dir,90deg),rgba(19,21,24,.95) 0,rgba(19,21,24,.92) calc(var(--gutter) + var(--col)),rgba(19,21,24,.45) calc(var(--gutter) + var(--col) + 12rem),rgba(19,21,24,.1) calc(var(--gutter) + var(--col) + 24rem),rgba(19,21,24,.1) calc(100% - 6rem),rgba(19,21,24,.6) 100%)}
+  .is-live .scene.flip .scene-pic::after{--dir:270deg}
+  .is-live .scene-pic img.cover{--w:max(100cqw,100cqh * var(--ar,1.8695));--h:calc(var(--w) / var(--ar,1.8695));position:absolute;max-width:none;width:var(--w);height:var(--h);aspect-ratio:auto;object-fit:fill;border:0;border-radius:0;
+    left:clamp(calc(100cqw - (1 - var(--fx)) * var(--kk) * var(--w)),var(--sx),calc(var(--fx) * var(--kk) * var(--w)));
+    top:clamp(calc(100cqh - (1 - var(--fy)) * var(--kk) * var(--h)),var(--sy),calc(var(--fy) * var(--kk) * var(--h)));
+    transform-origin:calc(var(--fx) * 100%) calc(var(--fy) * 100%);
+    transform:translate(calc(var(--fx) * -100%),calc(var(--fy) * -100%)) scale(calc(var(--kk) * (1 + .05 * var(--z))))}
+  .is-live .scene-pic img.bg{display:block;position:absolute;inset:0;width:100%;height:100%;max-width:none;object-fit:cover;border:0;border-radius:0;opacity:.16}
+  .is-live .frame{position:absolute;z-index:1;margin:0;left:var(--px);top:var(--py);width:min(var(--pw),calc(var(--ph) * var(--ufar)));border-color:#2B3036;border-radius:12px;background:#1A1D21;box-shadow:0 24px 80px rgba(0,0,0,.5);
+    transform:translate(-50%,-50%) scale(calc(1 + .03 * var(--z)))}
+  .is-live .frame+.frame{opacity:var(--b)}
+  .is-live .frame:has(+ .frame){opacity:calc(1 - var(--b))}
+  /* Low Latency loop: 7 s, runs only while scene 1 is the current scene (app.js sets
+     .is-current). Positions are percentages of the capture: the button's center is at 18.07%,
+     6.6%. Two nested wrappers move the cursor across and down with different easings, so its path
+     curves. Only transform and opacity animate. */
+  .is-live .ll-anim{animation-duration:7s;animation-iteration-count:infinite;animation-play-state:paused}
+  .is-live .scene.is-current .ll-anim{animation-play-state:running}
+  .is-live .ll-zoom{animation-name:ll-zoom;animation-timing-function:ease-in-out}
+  .is-live .ll-on{opacity:0;animation-name:ll-on;animation-timing-function:linear}
+  .is-live .ll-x,.is-live .ll-y{display:block;position:absolute;inset:0;pointer-events:none}
+  .is-live .ll-x{animation-name:ll-x}
+  .is-live .ll-y{animation-name:ll-y}
+  .is-live .ll-cursor{position:absolute;left:0;top:0;width:1.7%;height:auto;transform-origin:0 0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));animation-name:ll-cursor}
+  .is-live .ll-pulse{display:block;position:absolute;left:18.07%;top:6.6%;width:3.6%;aspect-ratio:1;margin:-1.8% 0 0 -1.8%;border:2px solid #4C9EFF;border-radius:50%;opacity:0;animation-name:ll-pulse;animation-timing-function:ease-out}
+  .is-live .scene-pic figcaption{position:absolute;z-index:3;right:64px;bottom:28px;margin:0;max-width:min(30rem,calc(100cqw - 128px));padding:4px 10px;border-radius:6px;background:rgba(19,21,24,.85);color:var(--ink-3);font-size:.85rem;opacity:calc(var(--ei) - var(--eo))}
+  .is-live .scene.flip .scene-pic figcaption{right:auto;left:48px}
+  .is-live .scene-copy{position:absolute;z-index:2;left:var(--gutter);top:50%;width:var(--col);
+    opacity:calc(var(--ei) - var(--eo));transform:translateY(calc(-50% + (1 - var(--ei)) * var(--rise) - var(--eo) * var(--rise)))}
+  .is-live .scene.flip .scene-copy{left:auto;right:var(--gutter)}
+  .is-live .scene-copy h3{font-size:clamp(2.2rem,1.2rem + 2.6vw,3.4rem);line-height:1.08;letter-spacing:-.01em;margin:0 0 18px;color:var(--ink)}
+  .is-live .scene-copy p{font-size:clamp(1.05rem,.9rem + .45vw,1.3rem);line-height:1.5;color:var(--ink-2);max-width:34ch}
+  .is-live .story-ticks{display:flex;flex-direction:column;gap:10px;position:absolute;z-index:3;right:20px;top:50%;transform:translateY(-50%);list-style:none;margin:0;padding:12px 8px;border-radius:999px;background:rgba(19,21,24,.72)}
+  .is-live .story-ticks li{position:relative;width:3px;height:24px;border-radius:2px;background:rgba(231,233,236,.4)}
+  .is-live .story-ticks li::after{content:"";position:absolute;inset:0;border-radius:2px;background:#4C9EFF;
+    opacity:min(clamp(0,(var(--p) - var(--i)) * 1000,1),clamp(0,(var(--i) + 1 - var(--p)) * 1000,1))}
+  /* Portrait and phones: the picture fills the upper part, the text sits at the bottom over a
+     stronger shade, the ticks run across the top. */
+  @media (max-width:700px),(max-aspect-ratio:1/1){
+    .is-live .story-stage{--rise:20px}
+    .is-live .scene,.is-live .scene.flip{--sx:var(--mx,50%);--sy:var(--my,30%);--kk:var(--mk,calc(var(--k) * .8));--px:50%;--py:37%;--pw:calc(100cqw - 2 * var(--gutter));--ph:42cqh}
+    .is-live .scene-pic::after,.is-live .scene.flip .scene-pic::after{background:linear-gradient(to bottom,var(--stage) 0,rgba(19,21,24,.6) 7rem,rgba(19,21,24,0) 12rem),
+      linear-gradient(to top,rgba(19,21,24,.97) 0,rgba(19,21,24,.93) 42%,rgba(19,21,24,.5) 58%,rgba(19,21,24,0) 70%)}
+    .is-live .story-eyebrow{top:24px}
+    .is-live .scene-copy,.is-live .scene.flip .scene-copy{left:var(--gutter);right:var(--gutter);width:auto;top:auto;bottom:max(32px,env(safe-area-inset-bottom));transform:translateY(calc((1 - var(--ei)) * var(--rise) - var(--eo) * var(--rise)))}
+    .is-live .scene-copy p{max-width:none}
+    .is-live .scene-pic figcaption,.is-live .scene.flip .scene-pic figcaption{left:var(--gutter);right:auto;top:60px;bottom:auto;max-width:calc(100cqw - 2 * var(--gutter))}
+    .is-live .story-ticks{flex-direction:row;gap:6px;top:24px;right:calc(var(--gutter) - 8px);transform:none;padding:7px 8px}
+    .is-live .story-ticks li{width:14px;height:3px}
+  }
+  @media (max-width:700px){
+    .is-live .story-ticks{gap:5px}
+    .is-live .story-ticks li{width:10px}
+  }
+  /* Tall but roomy (a tablet upright): the text block is short, so the shade starts lower and a
+     framed picture can be larger. */
+  @media (min-width:701px) and (max-aspect-ratio:1/1){
+    .is-live .scene,.is-live .scene.flip{--py:42%;--ph:56cqh}
+    .is-live .scene-pic::after,.is-live .scene.flip .scene-pic::after{background:linear-gradient(to bottom,var(--stage) 0,rgba(19,21,24,.6) 7rem,rgba(19,21,24,0) 12rem),
+      linear-gradient(to top,rgba(19,21,24,.97) 0,rgba(19,21,24,.93) 22%,rgba(19,21,24,.45) 36%,rgba(19,21,24,0) 48%)}
+  }
+}
+@keyframes ll-zoom{0%,42%{transform:scale(1.9)}66%,80%{transform:scale(1.08)}100%{transform:scale(1.9)}}
+@keyframes ll-on{0%,32%{opacity:0}33.7%,70%{opacity:1}72.5%,100%{opacity:0}}
+@keyframes ll-x{0%{transform:translateX(42%);animation-timing-function:cubic-bezier(.25,.1,.25,1)}30%,72%{transform:translateX(18.07%);animation-timing-function:cubic-bezier(.45,0,.55,1)}92%,100%{transform:translateX(44%)}}
+@keyframes ll-y{0%{transform:translateY(48%);animation-timing-function:cubic-bezier(.6,0,.4,1)}30%,72%{transform:translateY(6.6%);animation-timing-function:cubic-bezier(.45,0,.55,1)}92%,100%{transform:translateY(42%)}}
+@keyframes ll-cursor{0%{opacity:0;transform:scale(1)}6%{opacity:1}30%{transform:scale(1)}31.5%{transform:scale(.85)}33.5%{transform:scale(1)}80%{opacity:1}92%,100%{opacity:0;transform:scale(1)}}
+@keyframes ll-pulse{0%,30.5%{opacity:0;transform:scale(.3)}31%{opacity:.9;transform:scale(.4)}35%,100%{opacity:0;transform:scale(2.2)}}
+@supports (animation-timeline:view()){
+  @media (prefers-reduced-motion:no-preference){
+    .story.is-live{view-timeline:--story block;animation:story-p linear both;animation-timeline:--story;animation-range:contain 0% contain 100%}
+  }
+}

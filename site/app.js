@@ -151,3 +151,60 @@
   fromHash();
   window.addEventListener("hashchange", fromHash);
 })();
+
+// Recording story (#live): adds .is-live so the stage pins and scenes take turns (see the
+// "Recording story" block in style.css). Browsers with scroll-driven animations drive --p from
+// CSS; for the rest, a passive scroll handler writes --p once per animation frame. Either way the
+// handler marks the current scene. Native scrolling is never intercepted. Reduced motion keeps the
+// plain stacked list.
+(function () {
+  var s = document.querySelector(".story");
+  if (!s || !window.matchMedia) return;
+  var stage = s.querySelector(".story-stage");
+  var mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var css = !!(window.CSS && CSS.supports && CSS.supports("animation-timeline: view()"));
+  var n = parseFloat(getComputedStyle(s).getPropertyValue("--n")) || 6;
+  var scenes = s.querySelectorAll(".scene");
+  var raf = 0, listening = false, cur = -1;
+  // Marks the scene on screen with .is-current (it lets a scene's own loop run only while it
+  // shows). With the CSS timeline --p is read back; otherwise it is computed and written here.
+  function measure() {
+    raf = 0;
+    var p;
+    if (css) {
+      p = parseFloat(getComputedStyle(s).getPropertyValue("--p")) || 0;
+    } else {
+      var r = s.getBoundingClientRect();
+      var span = r.height - stage.offsetHeight;
+      var t = span > 0 ? Math.min(Math.max(-r.top / span, 0), 1) : 0;
+      p = t * (n - 0.001);
+      s.style.setProperty("--p", p.toFixed(4));
+    }
+    var i = Math.min(Math.floor(p), scenes.length - 1);
+    if (i !== cur) {
+      if (scenes[cur]) scenes[cur].classList.remove("is-current");
+      if (scenes[i]) scenes[i].classList.add("is-current");
+      cur = i;
+    }
+  }
+  function request() { if (!raf) raf = requestAnimationFrame(measure); }
+  function apply() {
+    var live = !mq.matches;
+    s.classList.toggle("is-live", live);
+    if (live && !listening) {
+      window.addEventListener("scroll", request, { passive: true });
+      window.addEventListener("resize", request);
+      listening = true;
+      measure();
+    } else if (!live && listening) {
+      window.removeEventListener("scroll", request);
+      window.removeEventListener("resize", request);
+      listening = false;
+      s.style.removeProperty("--p");
+      if (scenes[cur]) scenes[cur].classList.remove("is-current");
+      cur = -1;
+    }
+  }
+  apply();
+  if (mq.addEventListener) mq.addEventListener("change", apply);
+})();

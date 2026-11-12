@@ -33,16 +33,93 @@
 </header>
 
 <main>
-<section id="live">
-  <h2>Made for the take</h2>
-  <ul class="cards live">
-    <li class="card"><h3>Track without plug-in latency.</h3><p>One click on Low Latency mode bypasses the slowest inserts on the tracks you are recording and monitoring. Turn it off and your mix is back as it was.</p></li>
-    <li class="card"><h3>Your outboard gear, lined up.</h3><p>Hardware inserts measure their own round trip with a click train, and delay compensation keeps the track in time.</p></li>
-    <li class="card"><h3>Play hardware synths like plug-ins.</h3><p>External Instrument sends MIDI out and brings the audio back on the input you pick.</p></li>
-    <li class="card"><h3>A count-in that keeps your pickup.</h3><p>Notes you play during the count-in are kept, and recording starts sample-exact at the end of it.</p></li>
-    <li class="card"><h3>One heavy <span class="nw">plug-in</span> won&rsquo;t stall the rest.</h3><p>Mixer strips render on several cores with a bounded deadline, and the transport shows the load, buffer and driver at a glance.</p></li>
-    <li class="card"><h3>Native ASIO, WASAPI and JACK.</h3><p>Opens every channel of your interface; name your own paths and route anything to them.</p></li>
-  </ul>
+<!-- The recording story. Plain HTML: a list of scenes (picture, line, sentence) that reads top to
+     bottom with no CSS animation and no script. Enhanced (style.css "Recording story", app.js
+     "Recording story"): the stage pins while the section scrolls past and one scene shows at a time.
+     A scene's picture is either a full-stage screenshot (img.cover: --fx/--fy focus point as
+     fractions of the image, --k zoom, --ar its aspect ratio if not 3840x2054) or one or two framed
+     crops (div.frame: --cx/--cy/--cw/--ch the crop as fractions of the image, --far the crop's
+     aspect ratio; a second frame fades in halfway through the scene). img.bg is a dimmed
+     full-stage backdrop and must have an empty alt. Class "flip" puts the text on the right.
+     To add a scene: copy an <li class="scene">, give it the next --i, add a tick to .story-ticks,
+     and raise --n on .story. -->
+<section id="live" class="story" style="--n:8">
+  <div class="story-stage">
+    <h2 class="story-eyebrow">Made for the take</h2>
+    <ol class="story-scenes">
+      <li class="scene" style="--i:0">
+        <figure class="scene-pic">
+          <!-- A CSS-only loop (style.css "Low Latency loop"): a drawn cursor clicks the Low Latency
+               button and the lit capture fades in over the unlit one. The two captures differ only
+               in the button. Reduced motion and no-animation readers see the lit capture. -->
+          <div class="frame ll" style="--cx:0;--cy:0;--cw:1;--ch:1;--far:1.7782;--mcw:.6;--mch:1;--mfar:1.0669">
+            <div class="ll-zoom ll-anim">
+              <img src="assets/transit-story-lowlat-off.png" width="2100" height="1181" decoding="async" alt="">
+              <img class="ll-on ll-anim" src="assets/transit-story-lowlat-on.png" width="2100" height="1181" decoding="async" alt="The transit mixer with the Low Latency button in the transport being switched on">
+              <span class="ll-pulse ll-anim" aria-hidden="true"></span>
+              <span class="ll-x ll-anim" aria-hidden="true"><span class="ll-y ll-anim"><svg class="ll-cursor ll-anim" viewBox="0 0 16 22" focusable="false"><path d="M1.5 1.5v16l4.2-3.9 2.9 6.6 2.6-1.1-2.9-6.5h5.7z" fill="#F6F6F8" stroke="#131518" stroke-width="1.3" stroke-linejoin="round"/></svg></span></span>
+            </div>
+          </div>
+          <figcaption>In the picture: the mixer, as the Low Latency button in the transport is switched on.</figcaption>
+        </figure>
+        <div class="scene-copy"><h3>Track without plug-in latency.</h3><p>One click on Low Latency mode bypasses the slowest inserts on the tracks you are recording and monitoring. Turn it off and your mix is back as it was.</p></div>
+      </li>
+      <li class="scene flip" style="--i:1">
+        <figure class="scene-pic">
+          <img class="bg" src="assets/transit-story-count-in.png" width="3840" height="2054" loading="lazy" decoding="async" alt="" aria-hidden="true">
+          <div class="frame" style="--cx:0;--cy:0;--cw:.28646;--ch:.2629;--far:2.037;--mcx:0;--mcy:.0195;--mcw:.1875;--mch:.2093;--mfar:1.674"><img src="assets/transit-story-count-in.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The metronome's menu open on the transport: the click level, and a count-in of Off, 1, 2 or 4 bars with 2 selected."></div>
+          <figcaption>In the picture: the metronome&rsquo;s menu, with a two-bar count-in.</figcaption>
+        </figure>
+        <div class="scene-copy"><h3>A count-in that keeps your pickup.</h3><p>Notes you play during the count-in are kept, and recording starts sample-exact at the end of it.</p></div>
+      </li>
+      <li class="scene" style="--i:2">
+        <figure class="scene-pic">
+          <div class="frame" style="--cx:0;--cy:0;--cw:1;--ch:.2849;--far:4.0667;--mcx:0;--mcy:0;--mcw:.623;--mch:.2184;--mfar:3.304"><img src="assets/transit-story-hardware-inserts.png" width="1220" height="1053" loading="lazy" decoding="async" alt="The Hardware inserts page of Audio Devices: a click plays on the send path and is found again on the return path. Here no audio device is open, so the Send and Return pickers are empty and Measure is unavailable."></div>
+          <figcaption>In the picture: the Hardware inserts page, with no audio device open.</figcaption>
+        </figure>
+        <div class="scene-copy"><h3>Your outboard gear, lined up.</h3><p>Hardware inserts measure their own round trip with a click train, and delay compensation keeps the track in time.</p></div>
+      </li>
+      <li class="scene flip" style="--i:3;--fx:.347;--fy:.573;--k:2.2;--dx:30%">
+        <figure class="scene-pic">
+          <img class="cover" src="assets/transit-story-mixer.png" width="3840" height="2054" loading="lazy" decoding="async" alt="Mixer strips: the Lead track is an External Instrument, with All MIDI in and its MIDI Out button lit; the audio tracks beside it take In 1 or In 1-2.">
+          <figcaption>In the picture: the mixer, with an External Instrument on the Lead track.</figcaption>
+        </figure>
+        <div class="scene-copy"><h3>Play hardware synths like plug-ins.</h3><p>External Instrument sends MIDI out and brings the audio back on the input you pick.</p></div>
+      </li>
+      <li class="scene" style="--i:4">
+        <figure class="scene-pic">
+          <img class="bg" src="assets/transit-sampler.png" width="3840" height="2054" loading="lazy" decoding="async" alt="" aria-hidden="true">
+          <div class="frame" style="--cx:.092708;--cy:.074;--cw:.38125;--ch:.44206;--far:1.6123;--mcw:.2198;--mch:.3252;--mfar:1.2635"><img src="assets/transit-sampler.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The Sampler on its Pads view: bank A of four banks of sixteen pads, with the selected pad's choke group and playback settings."></div>
+          <div class="frame" style="--cx:.092708;--cy:.074;--cw:.38125;--ch:.44206;--far:1.6123;--mcw:.2198;--mch:.3252;--mfar:1.2635"><img src="assets/transit-sampler-slices.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The Sampler's Slices view: a drum loop cut at its transients into 18 slices, with Slices to pads and Create clip."></div>
+          <figcaption>In the picture: the Sampler&rsquo;s Pads view, then its Slices view.</figcaption>
+        </figure>
+        <div class="scene-copy"><h3>A sampler built for kits and loops.</h3><p>Pads, Slices and Instrument views on one instrument: load a kit from a folder, cut a loop at its transients, and play it from your pads.</p></div>
+      </li>
+      <li class="scene flip" style="--i:5;--col:24rem;--dph:78cqh">
+        <figure class="scene-pic">
+          <div class="frame" style="--cx:0;--cy:0;--cw:1;--ch:1;--far:1.1316;--mcx:0;--mcy:.0524;--mcw:.6577;--mch:.3302;--mfar:2.254"><img src="assets/transit-story-macro-oscillator.png" width="2159" height="1908" loading="lazy" decoding="async" alt="The Macro Oscillator editor on its Additive model: the waveform display, the Timbre and Morph pad, the shaper's envelopes, filter and LFOs, and three modulation routes shown as amber rings on the knobs they move."></div>
+          <div class="frame" style="--cx:0;--cy:0;--cw:1;--ch:1;--far:1.7287;--mcx:.0278;--mcy:.12;--mcw:.5556;--mch:.7203;--mfar:1.3333"><img src="assets/transit-story-compressor.png" width="1440" height="833" loading="lazy" decoding="async" alt="The Compressor/Limiter editor: its transfer curve, gain reduction history and controls."></div>
+          <figcaption>In the picture: the Macro Oscillator, then the Compressor/Limiter.</figcaption>
+        </figure>
+        <div class="scene-copy"><h3>Instruments worth opening.</h3><p>Built-in synths ported from &Eacute;milie Gillet&rsquo;s MIT-licensed firmware and checked against the originals sample for sample, in a design language made for reading at a glance.</p></div>
+      </li>
+      <li class="scene" style="--i:6;--fx:.40;--fy:.42;--k:1.35">
+        <figure class="scene-pic">
+          <img class="cover" src="assets/transit-mixer.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The mixer: a strip for every track with inserts, sends, pan, fader and meter, then the Master.">
+          <figcaption>In the picture: the mixer, one strip per track.</figcaption>
+        </figure>
+        <div class="scene-copy"><h3>One heavy <span class="nw">plug-in</span> won&rsquo;t stall the rest.</h3><p>Mixer strips render on several cores with a bounded deadline, and the transport shows the load, buffer and driver at a glance.</p></div>
+      </li>
+      <li class="scene flip" style="--i:7;--fx:.57;--fy:.36;--k:1.6;--dx:30%">
+        <figure class="scene-pic">
+          <img class="cover" src="assets/transit-audio-devices.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The Audio Devices window set to ASIO on an eight-channel USB audio interface at 48 kHz and 128 samples, with an I/O paths page in the sidebar.">
+          <figcaption>In the picture: Audio Devices on ASIO, an eight-channel interface.</figcaption>
+        </figure>
+        <div class="scene-copy"><h3>Native ASIO, WASAPI and JACK.</h3><p>Opens every channel of your interface; name your own paths and route anything to them.</p></div>
+      </li>
+    </ol>
+    <ol class="story-ticks" aria-hidden="true"><li style="--i:0"></li><li style="--i:1"></li><li style="--i:2"></li><li style="--i:3"></li><li style="--i:4"></li><li style="--i:5"></li><li style="--i:6"></li><li style="--i:7"></li></ol>
+  </div>
 </section>
 
 <section id="bones" class="quiet">

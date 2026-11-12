@@ -136,6 +136,13 @@ and, at runtime, the operating system's own UI fonts when available (never redis
 | `site/assets/transit-arrange-detail.png` | @derekmwright | screenshot of transit (arrange, detail) | MIT OR Apache-2.0 |
 | `site/assets/transit-sampler.png` | @derekmwright | screenshot of transit (Sampler and Compressor) | MIT OR Apache-2.0 |
 | `site/assets/transit-sampler-slices.png` | @derekmwright | screenshot of transit (Sampler Slices view) | MIT OR Apache-2.0 |
+| `site/assets/transit-story-lowlat-off.png` | @derekmwright | screenshot of transit (mixer, Low Latency off) | MIT OR Apache-2.0 |
+| `site/assets/transit-story-lowlat-on.png` | @derekmwright | screenshot of transit (mixer, Low Latency on) | MIT OR Apache-2.0 |
+| `site/assets/transit-story-count-in.png` | @derekmwright | screenshot of transit (metronome menu with count-in) | MIT OR Apache-2.0 |
+| `site/assets/transit-story-hardware-inserts.png` | @derekmwright | screenshot of transit (Audio Devices, Hardware inserts page) | MIT OR Apache-2.0 |
+| `site/assets/transit-story-mixer.png` | @derekmwright | screenshot of transit (mixer with an External Instrument track) | MIT OR Apache-2.0 |
+| `site/assets/transit-story-macro-oscillator.png` | @derekmwright | screenshot of transit (Macro Oscillator editor) | MIT OR Apache-2.0 |
+| `site/assets/transit-story-compressor.png` | @derekmwright | screenshot of transit (Compressor/Limiter editor) | MIT OR Apache-2.0 |
 | `site/assets/transit-icon-dark-1024.png` | @derekmwright | original (pale t on charcoal; dark-surface icon variant) | MIT OR Apache-2.0 |
 | `site/assets/transit-wordmark-white.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
 | `site/assets/transit-wordmark-graphite.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
