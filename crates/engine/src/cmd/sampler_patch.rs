@@ -340,14 +340,20 @@ pub(super) enum NewSource {
     Audio(crate::io::PreparedAudio, Ownership),
 }
 
-/// The kind a session source keeps when a zone or the slice loop takes it by id (#471): a file
-/// the session holds where it is (an absolute path, and nothing for a save to write) is
-/// referenced, as `add_audio` adds one; anything else is managed: the session's own `Audio Files/`
-/// audio (a path relative to the session folder), or audio a save has still to write (`unsaved`,
-/// such as a timeline import or dropped bytes). The session's save keeps a referenced Sampler
-/// source's path by the same two facts, and kit save chooses its path form by the stored path.
-pub(super) fn source_kind(src: &transit_model::Source) -> Ownership {
-    if !src.unsaved && Path::new(&src.path).is_absolute() { Ownership::Referenced } else { Ownership::Managed }
+/// The kind source `sid` keeps when a zone or the slice loop takes it by id (#471): the kind the
+/// Sampler patches of `s` already record for it (any track, the instrument slot or an insert), so a
+/// file loaded by path stays referenced. It is referenced only when every patch that names it
+/// says so; a source no patch names yet (a timeline import, a recorded take, the session's own
+/// audio) is managed, so a save copies it into the session. The path is never read: a recorded
+/// take also has an absolute path and nothing left to write, and is still the session's own.
+pub(super) fn source_kind(s: &Session, sid: SourceId) -> Ownership {
+    let patches = s
+        .tracks
+        .iter()
+        .flat_map(|tr| tr.instrument.iter().chain(tr.mixer.inserts.iter().flatten()))
+        .filter_map(|i| i.sampler_patch.as_ref().and_then(SamplerPatch::ready));
+    let mut marks = patches.flat_map(|p| p.sources.iter()).filter(|r| r.source == sid).map(|r| r.ownership).peekable();
+    if marks.peek().is_some() && marks.all(|o| o == Ownership::Referenced) { Ownership::Referenced } else { Ownership::Managed }
 }
 
 pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &PatchV1) -> Result<NewSource> {
@@ -378,7 +384,7 @@ pub(super) fn source_param(e: &mut Engine, id: &str, p: &Value, admitted: &Patch
             .map_err(|m| bad(id, m))?;
         let adding = if admitted.sources.iter().any(|r| r.source == sid) { 0 } else { bytes };
         admit_patch(admitted, s, adding).map_err(|m| bad(id, m))?;
-        return Ok(NewSource::Session(sid, source_kind(src)));
+        return Ok(NewSource::Session(sid, source_kind(s, sid)));
     }
     if let Some(path) = str_param(p, "path") {
         let abs = resolve_path(e, id, path)?;

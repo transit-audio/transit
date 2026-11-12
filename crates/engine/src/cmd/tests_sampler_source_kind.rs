@@ -5,6 +5,7 @@
 use super::tests::{Dir, kit, recall, save_kit, setup};
 use super::*;
 use transit_audio_io::{AudioBuffer, FileFormat};
+use transit_model::{ChannelFormat, TrackKind};
 
 /// A second Sampler track with an empty patch.
 fn second(e: &mut Engine) -> TrackId {
@@ -41,7 +42,7 @@ fn a_referenced_source_assigned_by_id_stays_referenced_and_leaves_with_its_kit()
     let (mut e, t) = setup();
     let u = second(&mut e);
     let (sid, kick) = by_id(&mut e, &d, t, u);
-    assert_eq!(kit(&e, u).sources[0].ownership, Ownership::Referenced, "the zone keeps the source's own kind");
+    // No assertion on the mark here, so a wrong mark fails at the release itself.
     assert!(e.session().source(sid).is_some(), "still named by track u's zone");
     let file = other_kit(&other);
     let undone = serde_json::to_value(e.session()).unwrap();
@@ -50,6 +51,62 @@ fn a_referenced_source_assigned_by_id_stays_referenced_and_leaves_with_its_kit()
     assert!(kick.is_file(), "the file is never touched");
     e.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(serde_json::to_value(e.session()).unwrap(), undone, "undo brings it back");
+}
+
+#[test]
+fn a_source_assigned_by_id_inherits_the_mark_a_patch_already_records() {
+    let d = Dir::new();
+    let (mut e, t) = setup();
+    let u = second(&mut e);
+    let kick = d.audio("Kick.wav", 128, 48_000);
+    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 1, "path": kick})).unwrap();
+    let sid = kit(&e, t).sources[0].source;
+    e.execute("mix.sampler_zone_source", &json!({"track": u, "zone": 1, "source": sid})).unwrap();
+    assert_eq!(kit(&e, u).sources[0].ownership, Ownership::Referenced, "the zone keeps the source's own kind");
+}
+
+#[test]
+fn a_recorded_take_assigned_by_id_stays_managed_and_a_save_copies_it_into_the_session() {
+    let (takes, out) = (Dir::new(), Dir::new());
+    let (mut e, t) = setup();
+    let rate = e.session().sample_rate.hz();
+    // A take as recording adds it: an absolute path in the take folder, in memory, and nothing
+    // left to write when the input rate matches the session's.
+    let take = takes.audio("Take 1.wav", 96, rate);
+    let audio = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+    crate::io::add_recording(&mut e, 0, vec![(audio, take.clone())], None);
+    let sid = e.session().sources.last().unwrap().id;
+    let src = e.session().source(sid).unwrap();
+    assert!(!src.unsaved && Path::new(&src.path).is_absolute(), "{src:?}");
+    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 1, "pad": 1, "source": sid})).unwrap();
+    assert_eq!(kit(&e, t).sources[0].ownership, Ownership::Managed, "no patch named it: managed");
+    let song = out.0.join("song").join("song.transit");
+    e.execute("session.save_as", &json!({"path": song})).unwrap();
+    let path = e.session().source(sid).unwrap().path.clone();
+    assert!(path.starts_with("Audio Files/"), "the take is copied into the session: {path}");
+    assert!(out.0.join("song").join(&path).is_file(), "{path}");
+}
+
+#[test]
+fn the_slice_loop_given_a_source_by_id_keeps_its_kind() {
+    let d = Dir::new();
+    let (mut e, t) = setup();
+    let u = second(&mut e);
+    let w = second(&mut e);
+    let rate = e.session().sample_rate.hz();
+    let kick = d.audio("Loop.wav", 4_800, 48_000);
+    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 1, "path": kick})).unwrap();
+    let referenced = kit(&e, t).sources[0].source;
+    let buf = AudioBuffer { sample_rate: rate, channels: vec![(0..4_800).map(|i| (i as f32 * 0.01).sin()).collect()] };
+    let own = crate::io::add_source(e.session_mut(), "own", buf, None, FileFormat::Wav);
+    e.execute("mix.sampler_slice_loop", &json!({"track": u, "source": referenced})).unwrap();
+    e.execute("mix.sampler_slice_loop", &json!({"track": w, "source": own})).unwrap();
+    let mark = |e: &Engine, x: TrackId| {
+        let p = kit(e, x);
+        p.sources[usize::from(p.slicing.as_ref().unwrap().source)].ownership
+    };
+    assert_eq!(mark(&e, u), Ownership::Referenced, "a file loaded by path stays referenced");
+    assert_eq!(mark(&e, w), Ownership::Managed, "the session's own audio stays managed");
 }
 
 #[test]
@@ -78,12 +135,20 @@ fn managed_audio_assigned_by_id_stays_managed_and_stays_after_a_recall() {
     let pending = d.audio("Import.wav", 96, rate);
     let import = crate::io::add_source(e.session_mut(), "import", buf(), Some(pending.to_string_lossy().as_ref()), FileFormat::Wav);
     assert!(e.session().source(import).unwrap().unsaved);
+    // An absolute path with nothing left to write that no patch has marked: still managed.
+    let other_file = d.audio("Loose.wav", 96, rate);
+    let unmarked = crate::io::add_source(e.session_mut(), "loose", buf(), Some(other_file.to_string_lossy().as_ref()), FileFormat::Wav);
+    e.session_mut().sources.iter_mut().find(|x| x.id == unmarked).unwrap().unsaved = false;
     e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 1, "source": own})).unwrap();
     e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 2, "source": import})).unwrap();
+    e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 3, "source": unmarked})).unwrap();
     let p = kit(&e, t);
+    assert_eq!(p.sources.len(), 3);
     assert!(p.sources.iter().all(|r| r.ownership == Ownership::Managed), "{:?}", p.sources);
     recall(&mut e, t, &other_kit(&other), true);
-    assert!(e.session().source(own).is_some() && e.session().source(import).is_some(), "managed sources stay: they may be the only copy");
+    for sid in [own, import, unmarked] {
+        assert!(e.session().source(sid).is_some(), "managed sources stay: they may be the only copy");
+    }
 }
 
 #[test]
