@@ -206,6 +206,10 @@ fn handle(app: &mut SoundApp, ctx: &egui::Context, req: &ControlRequest) -> Opti
             }
             Err(e) => err(e),
         },
+        "measure.start" | "measure.stop" | "measure.rows" => match app.measure_command(&req.method, p) {
+            Ok(v) => ok(v),
+            Err(e) => err(e),
+        },
         "app.quit" => {
             app.quit_requested = true;
             ok(json!({}))

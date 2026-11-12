@@ -359,6 +359,15 @@ pub struct StripFaults {
     /// no result (#174, the task graph): silent like an overrun, counted apart from the overruns,
     /// which count the source once.
     pub upstream_missed: u64,
+    /// Aux task overruns because a worker still held the aux (a subset of `overruns_busy`; once
+    /// per host block per aux, as the other overrun counts).
+    pub aux_overruns_busy: u64,
+    /// Aux task overruns because the worker that claimed it had not finished at the deadline (a
+    /// subset of `overruns_late`).
+    pub aux_overruns_late: u64,
+    /// Aux hole task-blocks (`H` of the tail acceptance rule): one per host block per aux task
+    /// that was Late or Busy in any of the block's sub-blocks.
+    pub aux_holes: u64,
     /// The strips with the most overruns, most first (#169): at most [`TOP_STRIPS`], only strips
     /// with an overrun, the rest `None`.
     pub top_strips: [Option<StripFigure>; TOP_STRIPS],

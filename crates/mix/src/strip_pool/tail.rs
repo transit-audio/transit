@@ -93,6 +93,7 @@ impl StripPool {
         self.set.set_block_timing(deadline, self.host_period);
         self.generation = g;
         self.last_tail = true;
+        self.tail_from = tables.phase1;
         let clock = BlockClock { frame: b.live.frame, frames: b.frames };
         self.returned.fill(false);
         for (i, st) in tables.strips.iter_mut().take(tables.aux_end).enumerate().take(self.capacity()) {

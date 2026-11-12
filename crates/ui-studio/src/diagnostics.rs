@@ -338,6 +338,8 @@ pub struct Report {
     pub note_view_dropped: Option<u64>,
     /// Recorded takes the session could not place (#192): the file and what it holds.
     pub unplaced_takes: Vec<String>,
+    /// The render measurement's table, rows and acceptance lines (G1); empty without a run.
+    pub render_measurement: Vec<String>,
     pub log_dir: Option<PathBuf>,
     pub log_lines: Vec<String>,
     /// The last status-bar message and when it appeared (seconds since the Unix epoch), kept
@@ -488,6 +490,13 @@ impl Report {
             o.push_str("Recorded takes that were never placed in this session (the files are kept):\n");
             for take in &self.unplaced_takes {
                 o.push_str(take);
+                o.push('\n');
+            }
+        }
+        if !self.render_measurement.is_empty() {
+            section(&mut o, "Render measurement");
+            for line in &self.render_measurement {
+                o.push_str(line);
                 o.push('\n');
             }
         }
@@ -772,10 +781,22 @@ mod tests {
             deferred_services: 3,
             note_view_dropped: Some(7),
             unplaced_takes: Vec::new(),
+            render_measurement: Vec::new(),
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             last_status: None,
             log_lines: vec!["INFO opened /home/alice/Music/song.transit".into(), "WARN something".into()],
         }
+    }
+
+    #[test]
+    fn the_render_measurement_has_a_section_only_with_lines() {
+        let without = fake().render(&Redaction::default());
+        assert!(!without.contains("== Render measurement =="));
+        let lines = vec!["| run | tail |".to_owned(), "Verdict: no pair measured yet".to_owned()];
+        let text = Report { render_measurement: lines, ..fake() }.render(&Redaction::default());
+        let at = text.find("== Render measurement ==").expect("the section");
+        assert!(text[at..].starts_with("== Render measurement ==\n| run | tail |\nVerdict: no pair measured yet\n"));
+        assert!(at < text.find("== Log ==").expect("the log section"));
     }
 
     #[test]

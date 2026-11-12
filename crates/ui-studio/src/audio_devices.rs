@@ -648,6 +648,7 @@ impl StudioApp {
             deferred_services: transit_dsp::host_call::deferred(),
             note_view_dropped: Some(transit_mix::note_view_dropped_total()),
             unplaced_takes: self.engine.session().unplaced_takes.clone(),
+            render_measurement: self.measure.lines(),
             log_dir: self.services.config_dir.as_ref().map(|d| d.join("logs")),
             ..Default::default()
         }

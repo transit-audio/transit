@@ -1107,3 +1107,32 @@ fn take_counts_a_refused_stamp_read_as_a_conflict_not_as_stale() {
         assert!(h.pool.silent[slot]);
     });
 }
+
+/// G1: aux task overruns and the acceptance rule's `H` are counted per host block: an aux Busy in
+/// two sub-blocks of one host block is one hole and one busy aux overrun; a phase-1 strip's
+/// overrun is neither; the next host block counts again. Outcomes injected (a Busy skip), no
+/// worker, no clock. Mutation: counting per sub-block makes the holes 3.
+#[test]
+fn aux_holes_and_aux_overruns_count_once_per_host_block() {
+    let (mut rig, ..) = fixture(false);
+    let plan = rig.eng.plan.as_deref().unwrap();
+    let phase1 = plan.tables.phase1;
+    let pool = rig.eng.pool.as_mut().unwrap();
+    pool.tail_from = phase1;
+    let mut g = 0;
+    for host_block in 0..2 {
+        pool.begin_host_block();
+        for _sub in 0..(2 - host_block) {
+            g += 1;
+            assert!(pool.set.begin_block(g));
+            for slot in [0, phase1] {
+                pool.set.mark_busy(slot);
+                assert_eq!(pool.set.publish(slot), Ok(transit_rt::worker_set::Published::Skipped));
+            }
+            pool.note_host_outcomes();
+        }
+    }
+    let f = pool.reader().snapshot();
+    assert_eq!((f.aux_holes, f.aux_overruns_busy, f.aux_overruns_late), (2, 2, 0));
+    assert_eq!(f.overruns_busy, 4, "the phase-1 strip and the aux, once per host block each");
+}

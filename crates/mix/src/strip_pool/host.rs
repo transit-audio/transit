@@ -56,6 +56,20 @@ impl StripPool {
                 OverrunCause::Unstarted => (1, &self.counters.overruns_unstarted),
                 OverrunCause::UpstreamMissed => (2, &self.counters.upstream_missed),
             };
+            // G1: an aux task Late or Busy in any sub-block is one hole task-block of the host
+            // block (`H`), and its first own overrun of the host block is an aux task overrun.
+            let aux = i >= self.tail_from;
+            if aux && matches!(cause, OverrunCause::Busy | OverrunCause::Late) && *seen & 4 == 0 {
+                *seen |= 4;
+                self.counters.aux_holes.fetch_add(1, Ordering::Relaxed);
+            }
+            if aux && bit == 1 && *seen & 1 == 0 {
+                match cause {
+                    OverrunCause::Busy => self.counters.aux_overruns_busy.fetch_add(1, Ordering::Relaxed),
+                    OverrunCause::Late => self.counters.aux_overruns_late.fetch_add(1, Ordering::Relaxed),
+                    _ => 0,
+                };
+            }
             if *seen & bit != 0 {
                 continue;
             }

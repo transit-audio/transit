@@ -23,6 +23,16 @@ impl Player {
     pub fn strip_faults(&self) -> Option<transit_mix::StripFaults> {
         self.owner().ok().and_then(|owner| owner.strip_faults())
     }
+    /// Posts a render measurement request (G1; docs/contributing/knowledge/render-graph-measurement.md):
+    /// the live engine captures its counters at a later block's entry. False without render
+    /// workers, or while a request or response is outstanding. Never waits for the audio side.
+    pub fn request_render_measurement(&self, identity: u64) -> bool {
+        self.owner().ok().is_some_and(|owner| owner.request_render_measurement(identity))
+    }
+    /// Copies and acknowledges the render measurement response, if one has arrived.
+    pub fn read_render_measurement(&self) -> Option<transit_rt::worker_set::queue::Measurement> {
+        self.owner().ok().and_then(|owner| owner.read_render_measurement())
+    }
     /// The overrun marks of the MIDI pass under way (blocks in which render-worker strips were
     /// silence while it recorded, ADR 0029), oldest first, for its take journal. Drains the
     /// capture queue like [`Player::midi_recording_snapshot`]; nothing is consumed.

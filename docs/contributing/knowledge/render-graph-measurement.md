@@ -101,3 +101,17 @@ Report every term per row.
 - the maintainer's listening pass at 64 frames.
 
 The flip is a separate reviewed commit. Record the run in docs/benchmarks/<date>-scarlett-tail-graph-vs-serial.md with a row in the decisions table.
+
+Deadline-reclaimed tail renders run serially on the callback: their cost shows in the overshoot and longest-callback columns, not in `H` (#293 item 3).
+
+## Running the paired measurement
+
+The recorder is the app's control channel, as for the strip measurements of gate 6 and section 8 (open the session, play, stop, Copy diagnostics, quit), with three methods of its own ([control-protocol.md](../../control-protocol.md)): `measure.start`, `measure.stop` and `measure.rows`. The tail switch is set per run by `measure.start` (the process-wide measurement switch), so one app session with the device open measures both tails at one buffer size. The callback only fills preallocated lock-free counters; the control side copies the mailbox's response and reads the callback telemetry beside it.
+
+1. Close any other transit. Start `transit --control 0` on the reference interface with the device at the row's buffer size (64 or 128 frames, 48 kHz, the default share) and note the printed `TRANSIT_CONTROL_PORT`. Open the acceptance session and start playback (the `transport.play` command); let it run a few seconds so every plug-in has rendered once.
+2. Serial row: `{"id":1,"method":"measure.start","params":{"label":"64 idle","tail":"serial"}}`. Wait ten minutes. `{"id":2,"method":"measure.stop"}`.
+3. Graph row: `{"id":3,"method":"measure.start","params":{"label":"64 idle","tail":"graph"}}`. Wait ten minutes. `{"id":4,"method":"measure.stop"}`.
+4. `{"id":5,"method":"measure.rows"}` (or Copy diagnostics, section "Render measurement") prints the table in the columns above, each row's counters with the conservation check and the slice 4 terms, and per label the acceptance line (`pass` or `fail` with the reason) and a verdict. A row with an incomplete or non-conserving snapshot is printed as invalid and decides nothing.
+5. Repeat at 128 frames idle (`"128 idle"`; reopening the device at the new size starts a new engine, so start and stop a run within one device opening) and at 64 frames under compile (`"64 compile"`, with a looped `cargo check --workspace` in a separate target directory running for both rows).
+
+The listening pass at 64 frames stays the maintainer's. Each request line goes after the `auth` line (see the control protocol; `transit-cli app --port <port> measure.start '{"label":"64 idle","tail":"serial"}'` sends both).

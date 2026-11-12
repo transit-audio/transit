@@ -311,6 +311,9 @@ pub(crate) struct StripPool {
     generation: u64,
     host_period: Duration,
     pub(crate) last_tail: bool,
+    /// The first aux slot of the last tail-graph block (`usize::MAX` before one): from it on, a
+    /// strip's overruns are aux task overruns (G1).
+    tail_from: usize,
     /// Strips silent by an overrun in the last block.
     last_overruns: u32,
     /// Host-block accounting, independent of the worker generation of each sub-block.
@@ -367,6 +370,7 @@ impl StripPool {
             generation: 0,
             host_period: block_period(frames as usize, rate),
             last_tail: false,
+            tail_from: usize::MAX,
             last_overruns: 0,
             host_seen: vec![0; strips].into_boxed_slice(),
             host_counted: false,

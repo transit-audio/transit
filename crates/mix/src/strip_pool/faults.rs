@@ -35,6 +35,10 @@ pub(super) struct Counters {
     pub(super) upstream_tail: AtomicU64,
     /// The last block's render path code (`crate::render_path`), stored only on a change.
     pub(super) render_path: AtomicU32,
+    /// Aux task overruns, busy and late, and aux hole task-blocks (G1: the acceptance rule's `H`).
+    pub(super) aux_overruns_busy: AtomicU64,
+    pub(super) aux_overruns_late: AtomicU64,
+    pub(super) aux_holes: AtomicU64,
 }
 
 /// Reads an engine's [`StripFaults`] from any thread (relaxed loads; each figure exact on its own).
@@ -119,6 +123,9 @@ impl StripFaultsReader {
             midi_dropped: d.dropped,
             midi_silences: d.silences,
             upstream_missed: r(&c.upstream_missed).saturating_add(r(&c.upstream_tail)),
+            aux_overruns_busy: r(&c.aux_overruns_busy),
+            aux_overruns_late: r(&c.aux_overruns_late),
+            aux_holes: r(&c.aux_holes),
             top_strips: self.figures.top_overruns::<TOP_STRIPS>().map(|t| {
                 t.map(|(i, f)| StripFigure {
                     track: self.tracks.get(i).map_or(u32::MAX, |t| t.load(Ordering::Relaxed)),

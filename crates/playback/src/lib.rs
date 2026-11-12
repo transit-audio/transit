@@ -33,6 +33,7 @@ pub mod player;
 pub mod preview;
 pub mod publication;
 pub mod realtime_render;
+pub mod render_measurement;
 pub mod record;
 pub mod reopen;
 pub mod scheduling;

@@ -321,6 +321,9 @@ pub struct Control {
     counters: Arc<Counters>,
     /// The live engine's render-worker faults, when it has workers (the default, ADR 0029).
     strip_faults: Option<transit_mix::StripFaultsReader>,
+    /// The render measurement mailbox's one consumer (G1), taken before the engine went to the
+    /// audio side; control-side only (the lock is never touched by the callback).
+    measurement: Option<std::sync::Mutex<transit_rt::worker_set::queue::MeasurementReader>>,
 }
 
 /// Borrowed by audio, anchored by control until quiescence. The caller owns transport and
@@ -364,6 +367,7 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
         mix.start_render_workers(usize::from(limits.tracks));
     }
     let strip_faults = mix.strip_faults();
+    let measurement = mix.render_measurement_reader().map(std::sync::Mutex::new);
     (
         Control {
             compiler: PlanCompiler::new(target, limits),
@@ -381,6 +385,7 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
             status: None,
             counters: Arc::clone(&counters),
             strip_faults,
+            measurement,
         },
         Audio { port: audio_port, mix, buffers, status_tx, counters, deferred_age: 0, maximum_age: 0 },
     )
@@ -543,6 +548,18 @@ impl Control {
     /// serially). Relaxed loads; call from control or the UI.
     pub fn strip_faults(&self) -> Option<transit_mix::StripFaults> {
         self.strip_faults.as_ref().map(transit_mix::StripFaultsReader::snapshot)
+    }
+
+    /// Posts a render measurement request (G1) with `identity`: captured at a later host-block
+    /// entry, before any publication. False without render workers, or while a request or an
+    /// unread response is outstanding. Control side; never waits.
+    pub fn request_render_measurement(&self, identity: u64) -> bool {
+        self.measurement.as_ref().is_some_and(|m| m.lock().is_ok_and(|mut r| r.request(identity)))
+    }
+
+    /// Copies and acknowledges the render measurement response, if one has arrived.
+    pub fn read_render_measurement(&self) -> Option<transit_rt::worker_set::queue::Measurement> {
+        self.measurement.as_ref().and_then(|m| m.lock().ok().and_then(|mut r| r.read()))
     }
 
     /// The ids of the tracks whose strips a render worker has held past

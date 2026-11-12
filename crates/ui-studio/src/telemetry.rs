@@ -364,6 +364,7 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) -> bool {
         app.telemetry.open = false;
         return false;
     }
+    app.poll_render_measurement();
     if app.telemetry.due(now) {
         let (snap, host, rate, buffer) = match (&app.player, app.telemetry.injected) {
             (Some(p), _) => (p.callback_telemetry(), host_name(p), p.device_rate, p.device_buffer.unwrap_or(0)),

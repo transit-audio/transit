@@ -77,6 +77,7 @@ pub mod plugin_scan;
 mod prefs_file;
 pub mod presets;
 pub mod rack_panel;
+pub mod render_measurement;
 pub mod random_sequencer_panel;
 pub mod recent;
 pub mod resonator_panel;
@@ -375,6 +376,8 @@ pub struct StudioApp {
     pub builtin_editor: builtin_editor::EditorState,
     /// The Copy diagnostics buttons' state (#114).
     pub diag: diagnostics::DiagState,
+    /// The control channel's render measurement (G1 of the tail audit).
+    pub measure: render_measurement::MeasureState,
 }
 
 impl StudioApp {
@@ -413,6 +416,7 @@ impl StudioApp {
             state_notice: None,
             services,
             diag: Default::default(),
+            measure: Default::default(),
             autosave_dir: None,
             autosaver: None,
             autosaved_rev: 0,

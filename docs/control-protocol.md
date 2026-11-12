@@ -81,6 +81,9 @@ Errors: `{"id": 1, "ok": false, "error": "bad parameters for `mix.volume`: no tr
 | `ui.key` | `{key, cmd?, shift?, alt?, ctrl?}` | Key press (`Space`, `Enter`, `A`, `F7`, `=`…). |
 | `ui.text` | `{text}` | Type text into the focused field. |
 | `ui.screenshot` | `{path?}` | PNG of the window (base64 in `png_base64` when no path). |
+| `measure.start` | `{label, tail: "serial"\|"graph"}` | The render graph tail's acceptance measurement ([render-graph-measurement.md](contributing/knowledge/render-graph-measurement.md)): sets the tail switch for the run (process-wide, until the next start), starts the peak load over and requests the start snapshot from the engine's measurement mailbox. Refused without an open device, without render workers, with `tail: "graph"` under `TRANSIT_RENDER_GRAPH=0`, or while a run is under way. Answers `{requested, label, tail}`. |
+| `measure.stop` | `{}` | Requests the end snapshot of the run under way; the row is added once it arrives (a block later). |
+| `measure.rows` | `{}` | `{state, lines}`: the table of finished rows, each row's counters, conservation and slice 4 terms, and the acceptance lines (serial and graph rows with one label are a pair). Copy diagnostics prints the same lines under "Render measurement". |
 | `app.quit` | `{}` | Quit. |
 
 ## Positions and references

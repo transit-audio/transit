@@ -298,6 +298,14 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn strip_faults(&self) -> Option<transit_mix::StripFaults> {
         self.control.sessions.bridge.strip_faults()
     }
+    /// See [`crate::plan_bridge::Control::request_render_measurement`].
+    pub fn request_render_measurement(&self, identity: u64) -> bool {
+        self.control.sessions.bridge.request_render_measurement(identity)
+    }
+    /// See [`crate::plan_bridge::Control::read_render_measurement`].
+    pub fn read_render_measurement(&self) -> Option<transit_rt::worker_set::queue::Measurement> {
+        self.control.sessions.bridge.read_render_measurement()
+    }
     pub fn faulted(&self) -> bool {
         self.control.sessions.faulted() || self.sources.faulted()
     }
