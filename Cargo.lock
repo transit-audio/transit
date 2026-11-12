@@ -4278,6 +4278,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-math"
+version = "0.7.0"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "transit-midi"
 version = "0.7.0"
 dependencies = [

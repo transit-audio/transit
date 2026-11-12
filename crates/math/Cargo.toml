@@ -1,0 +1,19 @@
+[package]
+name = "transit-math"
+description = "transit's portable math seam: the transcendental functions every rendered crate calls, backed by the exactly pinned pure-Rust libm so a render is bit-identical on every platform, and the exact gain conversions (ADR 0055)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# The only dependency, pinned exactly in the workspace (ADR 0055, 2.1). Its default feature `arch`
+# stays on (the workspace entry does not change it): it selects exactly rounded hardware instructions for
+# `sqrt`, `fma` and (AArch64) `rint` only, which no v1 transcendental function here calls apart from
+# `pow`'s exact `sqrt` case.
+libm.workspace = true
+
+[lints]
+workspace = true
