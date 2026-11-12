@@ -360,6 +360,11 @@ first, and the button says what goes (**Delete Track**, **Delete 3 Tracks**, **D
 In every such question Enter presses the highlighted button and Escape cancels: in the
 save-changes question Enter is **Save**.
 
+Send levels, volume and send automation lanes and MIDI Learn's volume and send mappings use the
+channel fader's scale and stop where it does, at +6 dB, as in Ableton Live and Logic Pro. A level
+saved higher by an earlier build is kept and shown as it is (the control sits at the top) until you
+change it; moving an automation point only in time keeps its value.
+
 ## Main bus monitoring
 
 The main bus strip (the rightmost strip in the mixer) has a monitoring set beside its M: **Mono**,

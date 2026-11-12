@@ -161,7 +161,7 @@ The app bundles IBM Plex Sans (Regular, Medium, SemiBold) and IBM Plex Mono (Reg
 ### Fader
 One dB taper everywhere, shared by the fader, its scale and any meter beside it so positions line up.
 
-- **Taper** (fraction of travel from the top): `+6 → 0`, `0 → 0.14`, `−6 → 0.28`, `−12 → 0.42`, `−24 → 0.60`, `−36 → 0.74`, `−48 → 0.86`, `−60 → 0.94`, `−∞ → 1`. Linear between marks; −60…−90 compresses into the last 6%.
+- **Taper** (fraction of travel from the top): `+6 → 0`, `0 → 0.14`, `−6 → 0.28`, `−12 → 0.42`, `−24 → 0.60`, `−36 → 0.74`, `−48 → 0.86`, `−60 → 0.94`, `−∞ → 1`. Linear between marks; −60…−90 compresses into the last 6%. One taper for every level control (#357): the strip's fader, its gain and send fields and wheel, the send level bars, volume and send automation lanes, and MIDI Learn's volume and send mappings all top out at +6 dB (`mixer::db_to_k` and `k_to_db` are the taper). A level stored above the top is never clamped on display or rewritten: its control pins at the top, its readout and lane text show it as stored, a wheel notch never raises it, and a lane point moved only in time keeps it; a new edit lands within the taper.
 - **Variants:**
   - **Channel** (mixer): fader + labelled scale + stereo meter, width 116. Labels `+6 0 −6 −12 −24 −36 −48 −∞` in Mono 10, right-aligned; `0` in `text`, others `text.faint`; thinned on short travel (Labels by travel, below). Meter grid lines where a label is placed (Meter grid, below).
   - **Compact** (device panels, e.g. Sampler layer level): fader + ticks only, width 40.

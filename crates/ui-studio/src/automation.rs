@@ -866,7 +866,10 @@ fn lane_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, t: &Track, lane: &L
                 }
             }
             for (a, v0) in &g.group {
-                cmds.extend(lane.set_cmds(t, a + dt, lane.denorm(t, lane.norm(t, *v0) + dk), None));
+                // A move in time alone keeps each value as stored (a level above the lane's top,
+                // pinned there, is not pulled down to it, #357).
+                let v = if dk == 0.0 { *v0 } else { lane.denorm(t, lane.norm(t, *v0) + dk) };
+                cmds.extend(lane.set_cmds(t, a + dt, v, None));
             }
             if app.auto_exec(cmds, Some(&g.key)).is_ok() {
                 app.auto.selection.retain(|q| !(q.track == t.id.0 && q.lane == lid));

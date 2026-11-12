@@ -74,8 +74,6 @@ pub const STRIP_W: f32 = crate::tokens::channel_strip::WIDTH;
 const GAP: f32 = crate::tokens::channel_strip::GAP;
 /// Space separating ordinary tracks (including groups) from aux buses and returns.
 const FX_GAP: f32 = 12.0;
-/// The fader's top, in dB.
-pub const FADER_MAX_DB: f32 = 12.0;
 
 /// A drag in progress on a fader, knob or send level. `raw` is where the pointer has taken the
 /// control (fader position 0..1 for a fader or send, balance -1..1 for a knob), before snapping,
@@ -499,8 +497,8 @@ fn edit_field(app: &mut StudioApp, ui: &mut Ui, draw: Rect, id: egui::Id, font: 
         Typing::Cancel => return,
         Typing::Commit { .. } => {
             let v = if e.target.is_pan() { fine::parse_pan(&e.text) } else { fine::parse_db(&e.text) };
-            // The strip's gain field stops at the taper's top, like its drag.
-            let v = if matches!(e.target, Target::Fader(_)) { v.map(|db| db.min(controls::FADER_TOP_DB)) } else { v };
+            // A gain or send field stops at the taper's top, like the drags (#357).
+            let v = if matches!(e.target, Target::Fader(_) | Target::Send(..)) { v.map(|db| db.min(controls::FADER_TOP_DB)) } else { v };
             match v {
                 Some(v) => {
                     let _ = app.set_value(e.target, v);

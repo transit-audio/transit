@@ -509,3 +509,13 @@ fn takeover_defaults_to_scaled_is_per_machine_and_the_menu_sets_it() {
     assert_eq!(loaded.midi_takeover, MapMode::Scaled);
     assert!(!serde_json::to_string(app.engine.session()).unwrap().contains("takeover"));
 }
+
+#[test]
+fn a_mapped_knob_at_its_top_sets_the_faders_top_not_plus_12() {
+    // #357: MIDI Learn's volume mapping used the old +12 dB law.
+    let (mut app, ctx, mut time, t) = new_app();
+    map(&mut app, t, "volume", 7, json!({"mode": "jump"}));
+    frames(&mut app, &ctx, 2, &mut time);
+    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: 1.0, seq: 1 }]), 10.0);
+    assert_eq!(app.engine.session().track(t).unwrap().mixer.volume_db, 6.0);
+}

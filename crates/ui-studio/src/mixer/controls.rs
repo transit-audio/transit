@@ -1,22 +1,18 @@
 use super::*;
 
-/// Fader position 0..1 for a gain in dB: the fourth root of the amplitude, scaled so +12 dB is
-/// the top. 0 dB sits at about 70 %, -60 dB at about 13 %; -144 dB (silence) is the bottom.
+/// Travel position 0..1 of a level in dB for the paths that move a level without the strip's
+/// fader: automation volume and send lanes, MIDI Learn's volume and send mappings, and the send
+/// level bars (#357). It is the strip fader's own taper ([`fader_k`]), so all of them top out where
+/// the fader does, at [`FADER_TOP_DB`] (+6 dB, as Ableton's and Logic's faders do). A stored level
+/// above the top pins at 1 and keeps its value: its readout and lane text show it as it is.
 pub fn db_to_k(db: f32) -> f32 {
-    if db <= -144.0 {
-        return 0.0;
-    }
-    let top = 10f32.powf(FADER_MAX_DB / 80.0);
-    (10f32.powf(db / 80.0) / top).clamp(0.0, 1.0)
+    fader_k(db)
 }
 
-/// The inverse of [`db_to_k`].
+/// The inverse of [`db_to_k`]: a new edit through these paths reaches [`FADER_TOP_DB`] at most;
+/// the bottom is silence.
 pub fn k_to_db(k: f32) -> f32 {
-    if k <= 0.0005 {
-        return -144.0;
-    }
-    let top = 10f32.powf(FADER_MAX_DB / 80.0);
-    (80.0 * (k.min(1.0) * top).log10()).clamp(-144.0, FADER_MAX_DB)
+    fader_db(k)
 }
 
 /// The panners for balance `b` (-1..1) on a track with `n` of them (plan 06, L10). Mono: the one
@@ -47,8 +43,9 @@ pub(crate) fn fader_k(db: f32) -> f32 {
 }
 
 /// The top of the design taper (+6 dB): the strip's fader, its gain field and its wheel stop
-/// here, as Ableton's and Logic's do. A higher gain from elsewhere (an old session, an automation
-/// lane, MIDI Learn) still reads truthfully, with the cap pinned at the top of the travel.
+/// here, as Ableton's and Logic's do, and so do automation lanes, MIDI Learn and send levels
+/// (#357). A higher gain stored before (an old session, the control channel) still reads
+/// truthfully, with the cap pinned at the top of the travel, and is never rewritten until edited.
 pub(crate) const FADER_TOP_DB: f32 = match crate::tokens::fader::TAPER[0].0 {
     Some(db) => db,
     None => 0.0,

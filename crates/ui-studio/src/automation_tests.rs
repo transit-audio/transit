@@ -807,3 +807,30 @@ fn a_header_volume_drag_suspends_the_follow() {
     t.app.arrange.gesture = Some(crate::arrange::Gesture::Volume { track: a, start_db: 0.0 });
     assert!(t.app.followed(&tr, &Lane::Volume).is_none(), "the header drag shows the value it sets");
 }
+
+#[test]
+fn a_volume_lanes_top_is_the_faders_and_a_higher_stored_point_is_kept_as_it_is() {
+    // #357: the lane's law reached +12 dB where the strip fader stops at +6.
+    let mut t = T::new();
+    let a = t.with_lane();
+    t.double(t.at(a, "volume", 0.3, 0.0));
+    let top = t.points(a, &AutoParam::Volume)[0].1;
+    assert!(top > 5.0 && top <= 6.0, "a point at the lane's top edge is +6 dB at most: {top}");
+    // A point stored above the top (an older session, the control channel) keeps its value: it is
+    // drawn at the top and its value reads as stored; a move in time alone leaves it as it is.
+    t.app.run("edit.undo", json!({})).unwrap();
+    set_point(&mut t, a, 96_000, 10.0);
+    t.frames(3);
+    let p = t.lane(a, "volume").points[0].clone();
+    assert_eq!(p.value, 10.0);
+    let lane = t.lane(a, "volume").area;
+    assert!(p.y - lane[1] < 12.0, "pinned at the top of the lane: {} vs {}", p.y, lane[1]);
+    t.drag((p.x, p.y), (p.x + 60.0, p.y), json!({}));
+    let pts = t.points(a, &AutoParam::Volume);
+    assert!(pts[0].0 != 96_000, "the point moved in time");
+    assert_eq!(pts[0].1, 10.0, "and kept its stored value");
+    // A vertical drag is a new edit: it lands on the lane's range.
+    let p = t.lane(a, "volume").points[0].clone();
+    t.drag((p.x, p.y), (p.x, p.y + 10.0), json!({}));
+    assert!(t.points(a, &AutoParam::Volume)[0].1 < 6.0, "{}", t.points(a, &AutoParam::Volume)[0].1);
+}

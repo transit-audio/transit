@@ -52,12 +52,19 @@ fn the_cap_line_zero_label_tick_and_grid_line_share_one_pixel_row() {
 #[test]
 fn fader_and_balance_laws_round_trip() {
     use crate::mixer::{balance_of, db_to_k, k_to_db, pans_for};
-    for db in [-60.0f32, -24.0, -6.0, 0.0, 6.0, 12.0] {
+    for db in [-60.0f32, -24.0, -6.0, 0.0, 6.0] {
         assert!((k_to_db(db_to_k(db)) - db).abs() < 0.01, "{db}");
     }
     assert_eq!(db_to_k(-144.0), 0.0);
     assert_eq!(k_to_db(0.0), -144.0);
-    assert!((db_to_k(12.0) - 1.0).abs() < 1e-6);
+    // The strip fader's taper (#357): +6 dB is the top of the travel, and a higher stored level
+    // pins there; the travel never yields more than +6.
+    assert_eq!((db_to_k(6.0), k_to_db(1.0)), (1.0, 6.0));
+    assert_eq!(db_to_k(12.0), 1.0, "a stored +12 pins at the top");
+    for k in [0.25f32, 0.5, 0.86, 1.0] {
+        let db = k_to_db(k);
+        assert_eq!(db_to_k(db), 1.0 - crate::widgets::fader::taper(db), "the strip fader's law: {k}");
+    }
     assert_eq!(pans_for(0.0, 2), vec![-1.0, 1.0], "center keeps the stereo image");
     assert_eq!(pans_for(-1.0, 2), vec![-1.0, -1.0]);
     assert_eq!(pans_for(1.0, 2), vec![1.0, 1.0]);
@@ -493,7 +500,8 @@ fn the_pan_and_send_readouts_edit_in_place() {
     let row = strip(&app, t).sends[0].clone();
     assert_eq!(row.level_text, "0");
     let num = mid(row.readout_rect);
-    for (text, want) in [("-6", -6.0), ("+1.5", 1.5), ("40", 12.0), ("-7.25 dB", -7.25)] {
+    // The send field stops at the taper's top, +6 dB, like the gain field (#357).
+    for (text, want) in [("-6", -6.0), ("+1.5", 1.5), ("40", 6.0), ("-7.25 dB", -7.25)] {
         edit_readout(&mut app, &ctx, &mut time, num, text, "Enter");
         assert_eq!(send_db(&app, t), want, "{text:?}");
     }
@@ -574,4 +582,26 @@ fn backspace_over_a_control_resets_it_like_delete_and_keeps_the_clip() {
     frames(&mut app, &ctx, 6, &mut time);
     assert_eq!(volume(&app, t), 0.0, "Backspace over the fader resets it");
     assert_eq!(clips_on(&app, ct).len(), 1, "and the selected clip stays");
+}
+
+#[test]
+fn a_send_drag_and_wheel_stop_at_the_faders_top_and_a_higher_stored_send_is_kept() {
+    // #357: the send bar used the old +12 dB law.
+    let (mut app, ctx, mut time, t) = send_app();
+    let bar = mid(strip(&app, t).sends[0].level_rect);
+    drag(&mut app, bar, (bar.0 + 400.0, bar.1 - 400.0), json!({}));
+    frames(&mut app, &ctx, 30, &mut time);
+    assert_eq!(send_db(&app, t), 6.0, "a drag to the end reaches +6 dB, not +12");
+    // A send stored higher (an older session, the control channel) shows as it is and the wheel
+    // never raises it; a notch down moves it from where it is.
+    app.run("mix.send_level", json!({"track": t.0, "slot": 0, "db": 10.0})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(strip(&app, t).sends[0].level_db, 10.0, "read as stored");
+    let num = mid(strip(&app, t).sends[0].readout_rect);
+    wheel(&mut app, num, 1.0, json!({}));
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(send_db(&app, t), 10.0, "a notch up leaves a higher level alone");
+    wheel(&mut app, num, -1.0, json!({}));
+    frames(&mut app, &ctx, 3, &mut time);
+    assert!((send_db(&app, t) - (10.0 - crate::fine::WHEEL_DB)).abs() < 1e-4, "a notch down moves from it: {}", send_db(&app, t));
 }
