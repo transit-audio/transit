@@ -131,6 +131,18 @@ impl Clipboard {
         let line = s.edit.grid.line_at_or_before(range.start, s.sample_rate, &s.tempo, s.frame_rate);
         Clipboard { length: range.len(), grid_offset: range.start.saturating_sub(line), ..Clipboard::default() }
     }
+
+    /// Drops what only means something in the session it was copied from (#476). Audio clips name
+    /// a source of that session's pool, so a paste into another document would place clips that
+    /// are silent or play a different sound; the copy is one unit, so all its clips go, and Paste
+    /// answers as for an empty clipboard. Everything else is stored as values and pastes the same
+    /// anywhere: MIDI clips (notes in ticks), automation points, clip gain, clip effects, markers.
+    pub fn forget_session_sources(&mut self) {
+        let audio = self.tracks.iter().flatten().any(|c| matches!(c.content, transit_model::ClipContent::Audio { .. }));
+        if audio {
+            self.tracks.clear();
+        }
+    }
 }
 
 /// A tempo change being dragged (see `execute_merged`): the document the gesture started from,
@@ -462,6 +474,7 @@ impl Engine {
         self.redo.clear();
         self.state_restores.clear();
         self.last_selection = None;
+        self.clipboard.forget_session_sources();
         self.imports.clear();
         self.slice_candidates.clear();
         // An armed MIDI Learn names a control of the old session; the host disarms the worker.
@@ -953,6 +966,8 @@ fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
 
 #[cfg(test)]
 mod loop_edit_tests;
+#[cfg(test)]
+mod tests_clipboard_session;
 #[cfg(test)]
 mod merge_tests {
     use super::*;
