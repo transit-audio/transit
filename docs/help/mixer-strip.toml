@@ -37,7 +37,7 @@ text = "Hear the track's live input through the mixer. Audio tracks only."
 [[entry]]
 id = "mixer_strip.mono"
 name = "Mono (main bus)"
-text = "Hear the mix summed to mono, to check how it holds up on one speaker. It changes only what you hear: a bounce, a freeze or a stem never has it."
+text = "Hear the mix summed to mono, to check how it holds up on one speaker. Stereo main bus only: on a wider main bus it is unavailable. It changes only what you hear: a bounce, a freeze or a stem never has it."
 
 [[entry]]
 id = "mixer_strip.dim"

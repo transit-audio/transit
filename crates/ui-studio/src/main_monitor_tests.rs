@@ -206,9 +206,12 @@ fn mono_is_unavailable_with_a_reason_on_a_main_bus_wider_than_stereo() {
     full_mixer(&mut app, &ctx, &mut time);
     let mono = |app: &StudioApp| toggle(&main_strip(app), "Mono").available;
     assert!(mono(&app), "a stereo main bus can fold to mono");
-    app.run("mix.monitor", json!({"mono": true})).unwrap();
+    let on = app.run("mix.monitor", json!({"mono": true})).unwrap();
+    assert_eq!((on["mono"].as_bool(), on["mono_preference"].as_bool()), (Some(true), Some(true)), "stereo: acting and stored");
     app.engine.session_mut().outputs[0].format = transit_model::ChannelFormat::Surround51;
     frames(&mut app, &ctx, 5, &mut time);
+    let wide = app.monitor_state();
+    assert_eq!((wide["mono"].as_bool(), wide["mono_preference"].as_bool()), (Some(false), Some(true)), "wide: not acting, still stored: {wide}");
     let lay = main_strip(&app);
     let t = toggle(&lay, "Mono");
     assert!(!t.available && !t.on, "a stored Mono does not read as active on a wider bus");

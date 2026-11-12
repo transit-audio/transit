@@ -142,7 +142,10 @@ impl StudioApp {
         let m = self.ui.monitor.sane();
         let lufs = self.loudness();
         json!({
-            "mono": m.mono,
+            // What the app does: Mono acts on a stereo main bus only. The stored choice is kept
+            // (it returns on a stereo bus) and shown beside it.
+            "mono": m.mono && self.mono_unavailable().is_none(),
+            "mono_preference": m.mono,
             "dim": m.dim,
             "ref": m.reference,
             "level_db": m.level_db,
