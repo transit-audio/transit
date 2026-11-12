@@ -57,19 +57,29 @@ fn the_composite_is_the_sum_of_the_bands_on_the_channel_path() {
 }
 
 #[test]
-fn the_butterworth_literals_are_the_formula() {
+fn the_butterworth_literals_are_the_pole_pairs() {
+    // The N-pole Butterworth's poles are `exp(j·pi·(2k + N − 1)/(2N))`, k = 1 … N; each pair in the
+    // upper half plane has damping `−Re(p)/|p|` and section Q `1/(2·damping)`; odd N adds a real pole.
     let orders = [1usize, 2, 3, 4, 6, 8, 12, 16];
     for (qs, n) in butterworth::QS.iter().zip(orders) {
-        assert_eq!(qs.len(), n / 2);
-        for (i, &q) in qs.iter().enumerate() {
-            let k = (i + 1) as f64;
-            let exact = 1.0 / (2.0 * (std::f64::consts::PI * (2.0 * k - 1.0) / (2.0 * n as f64)).cos());
-            assert!((q / exact - 1.0).abs() < 4.0 * f64::EPSILON, "N {n} i {i}");
+        let mut pairs: Vec<f64> = (1..=n)
+            .map(|k| std::f64::consts::PI * (2 * k + n - 1) as f64 / (2 * n) as f64)
+            .filter(|a| a.sin() > 1e-12)
+            .map(|a| 1.0 / (2.0 * -a.cos()))
+            .collect();
+        pairs.sort_by(f64::total_cmp);
+        assert_eq!(qs.len(), pairs.len(), "N {n}");
+        assert_eq!(qs.len(), n / 2, "N {n}");
+        for (&q, &p) in qs.iter().zip(&pairs) {
+            assert!((q / p - 1.0).abs() < 1e-13, "N {n}: {q} against the poles' {p}");
         }
         assert!(qs.windows(2).all(|w| w[0] < w[1]), "ascending");
     }
-    assert_eq!(butterworth::QS[1][0].to_bits(), 0.707_106_781_186_547_5f64.to_bits());
-    assert_eq!(butterworth::QS[7][7].to_bits(), 5.101_148_618_689_155f64.to_bits());
+    // Correctly rounded literals: N = 3 is one pair at Q 1 (plus the first-order section), N = 2 is
+    // 1/sqrt(2).
+    assert_eq!(butterworth::QS[2], &[1.0]);
+    assert_eq!(butterworth::QS[1][0].to_bits(), std::f64::consts::FRAC_1_SQRT_2.to_bits());
+    assert_eq!(butterworth::QS[7][7].to_bits(), 5.101_148_618_689_164f64.to_bits());
 }
 
 /// The SVF map is arithmetic and `sqrt` only, so exactly representable inputs give exact outputs.

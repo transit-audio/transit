@@ -7,6 +7,7 @@ mod block_size;
 mod clicks;
 mod closed_form;
 mod continuity;
+mod cuts;
 mod feasibility;
 mod flat_tilt;
 mod full_sweep;

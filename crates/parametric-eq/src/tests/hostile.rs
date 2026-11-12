@@ -43,6 +43,8 @@ fn non_finite_input_reads_as_zero() {
     assert_eq!(fingerprint(&a), fingerprint(&b));
 }
 
+/// It cannot fail by construction (the states of a 1e-30 input sit near 1e-30, never subnormal); the
+/// Evidence names it, and `a_long_decay_leaves_every_state_exactly_zero` carries the proof of the flush.
 #[test]
 fn a_run_of_tiny_values_leaves_no_subnormal_state() {
     let mut e = eq(48_000.0, 2);

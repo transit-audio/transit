@@ -135,7 +135,13 @@ fn without_mid_or_side_bands_the_output_equals_a_build_without_the_stage() {
         e.set_band(2, r);
         e.reset();
     };
-    let input = noise(8_000, 2, 3);
+    // A right channel far beyond 2^29 below the left (f32 subnormals) through the whole run, so its
+    // filtered output stays that quiet: an encode and decode that ran without a Mid or Side band would
+    // lose it (the stage-always mutation fails this test).
+    let mut input = noise(8_000, 2, 3);
+    for x in input[1].iter_mut() {
+        *x *= 1e-39;
+    }
     let mut a = eq(44_100.0, 2);
     setup(&mut a);
     let mut b = eq(44_100.0, 2);
