@@ -443,7 +443,7 @@ impl StudioApp {
         };
         // An External Instrument plays only in real time: the bounce leaves it out only when the
         // user chooses that (ADR 0020 decision 9), never silently.
-        let left_out = transit_engine::cmd::external_in_render(s);
+        let left_out = if f.consolidated { transit_engine::cmd::external_in_consolidated(s) } else { transit_engine::cmd::external_in_render(s) };
         if !left_out.is_empty() && !f.without_external && !f.realtime {
             self.status = format!("{}: render without it, or cancel", external_notice(&left_out));
             self.finish.external_question = Some(left_out);
@@ -523,7 +523,10 @@ impl StudioApp {
             Ok(job) => match ConsolidatedJob::new(job) {
                 Ok(job) => {
                     self.finish.replace = Replace::No;
-                    let status = format!("Bouncing consolidated tracks to {dir}...{}", left_out_note(&self.engine));
+                    let status = format!(
+                        "Bouncing consolidated tracks to {dir}...{}",
+                        left_out_note_for(&transit_engine::cmd::external_in_consolidated(self.engine.session()))
+                    );
                     self.status = self.with_state_notice(status);
                     self.finish.consolidated_job = Some(job);
                     self.finish.bounce_form = None;
@@ -1047,8 +1050,10 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
             }
         } else if f.consolidated {
             ui.label(
-                egui::RichText::new("Whole session from sample zero; one stem per track, one MIDI file per MIDI track and a tempo map")
-                    .color(TOKENS.text_dim),
+                egui::RichText::new(
+                    "Whole session from sample zero; per-track stems include fader/pan and the master chain; MIDI and tempo files included",
+                )
+                .color(TOKENS.text_dim),
             );
         } else {
             ui.label(egui::RichText::new("Source").color(TOKENS.text_dim));
@@ -1170,7 +1175,10 @@ fn external_notice(names: &[String]) -> String {
 /// What a bounce started without the External Instruments adds to the status line: the tracks
 /// left out.
 fn left_out_note(engine: &transit_engine::Engine) -> String {
-    let names = transit_engine::cmd::external_in_render(engine.session());
+    left_out_note_for(&transit_engine::cmd::external_in_render(engine.session()))
+}
+
+fn left_out_note_for(names: &[String]) -> String {
     if names.is_empty() { String::new() } else { format!(" Left out: {} (External Instrument).", names.join(", ")) }
 }
 

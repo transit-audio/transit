@@ -98,7 +98,7 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
         cmd!(noundo "file.bounce_consolidated", "Consolidated Stems from Session Start...", [], None, "{dir, format?: wav|aiff|flac|opus, bit_depth?: 16|24|32f, bitrate?: kb/s (Opus), fold_down?: stereo, mode?: offline_without_external, without_external?: false} — full-length track stems, one MIDI file per MIDI track and a tempo-only MIDI file", has_tracks, |e, p| {
             let job = bounce_consolidated_job(e, p)?;
-            let left_out = super::external_instrument::external_in_render(e.session());
+            let left_out = super::external_instrument::external_in_consolidated(e.session());
             let seconds = e.session().sample_rate.seconds(job.range().len());
             let dir = job.dir().to_string_lossy().into_owned();
             let done = job.run()?;
@@ -481,7 +481,7 @@ fn bounce_paths(e: &mut Engine, p: &Value) -> Result<Value> {
 pub fn bounce_consolidated_job(e: &Engine, p: &Value) -> Result<crate::io::ConsolidatedBounce> {
     const ID: &str = "file.bounce_consolidated";
     let dir = str_param(p, "dir").ok_or_else(|| bad(ID, "`dir` required"))?.to_string();
-    super::external_instrument::render_guard(e, ID, p)?;
+    super::external_instrument::consolidated_render_guard(e, p)?;
     let format_name = str_param(p, "format").unwrap_or("wav");
     let format = transit_audio_io::encode_format_for(format_name)
         .ok_or_else(|| bad(ID, format!("cannot write `{format_name}` files (supported: {})", transit_audio_io::ENCODE_EXTENSIONS)))?;

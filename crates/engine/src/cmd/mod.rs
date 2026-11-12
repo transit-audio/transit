@@ -65,7 +65,7 @@ mod view_more;
 mod vst3;
 mod zoom_toggle;
 
-pub use external_instrument::{external_in_render, measure_blocker as external_measure_blocker};
+pub use external_instrument::{external_in_consolidated, external_in_render, measure_blocker as external_measure_blocker};
 pub use file::{bounce_consolidated_job, bounce_job, bounce_paths_job};
 pub use realtime_render::{RealtimePlan, RealtimeStem, RenderMode, realtime_plan, realtime_plan_mode};
 

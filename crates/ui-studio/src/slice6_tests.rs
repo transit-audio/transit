@@ -1001,6 +1001,33 @@ fn consolidated_stems_use_the_whole_session_and_write_midi() {
 }
 
 #[test]
+fn consolidated_export_warns_about_an_inactive_external_instrument() {
+    let dir = Dir::new("consolidated-inactive-external");
+    let mut t = T::new();
+    let track = t.track(json!({"kind": "instrument", "name": "Hardware"}));
+    t.app.engine.session_mut().track_mut(track).unwrap().instrument = Some(transit_model::Insert::external("In 1"));
+    t.app.engine.session_mut().track_mut(track).unwrap().inactive = true;
+    t.app.open_bounce();
+    t.frames(3);
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    t.click(mid(lay.modes.iter().find(|m| m.value == "consolidated").unwrap().rect));
+    if let Some(f) = &mut t.app.finish.bounce_form {
+        f.dir = dir.0.to_string_lossy().into_owned();
+    }
+    t.frames(2);
+    let err = t.app.start_bounce().unwrap_err();
+    assert!(err.contains("Hardware"), "{err}");
+    assert_eq!(t.app.finish.external_question, Some(vec!["Hardware".to_string()]));
+    t.app.bounce_without_external().unwrap();
+    assert!(t.app.status.contains("Left out: Hardware"), "{}", t.app.status);
+    if let Some(job) = &t.app.finish.consolidated_job {
+        job.wait_for_completion();
+    }
+    t.frames(1);
+    assert!(t.app.finish.consolidated_job.is_none(), "{}", t.app.status);
+}
+
+#[test]
 fn the_transport_menu_lists_set_cycle_to_selection_and_it_leaves_cycle_alone() {
     let mut t = T::new();
     let tr = t.track(json!({"kind": "instrument"}));

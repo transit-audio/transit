@@ -16,6 +16,10 @@ pub struct ConsolidatedJob {
     completion: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
 }
 
+fn stopped_with(job: &ConsolidatedBounce, reason: String) -> String {
+    job.report_stopped(&reason)
+}
+
 impl ConsolidatedJob {
     pub fn new(job: ConsolidatedBounce) -> Result<Self, String> {
         let dir = job.dir().to_path_buf();
@@ -24,16 +28,16 @@ impl ConsolidatedJob {
             let mut job = job;
             loop {
                 if cancel.load(Ordering::Relaxed) {
-                    return Err("Bounce cancelled".into());
+                    return Err(stopped_with(&job, "Bounce cancelled".into()));
                 }
                 let until = std::time::Instant::now() + std::time::Duration::from_millis(30);
                 match job.step(|| !cancel.load(Ordering::Relaxed) && std::time::Instant::now() < until) {
                     Ok(Some(done)) => return Ok(done),
                     Ok(None) => progress.store(job.progress().to_bits(), Ordering::Relaxed),
-                    Err(e) => return Err(e.to_string()),
+                    Err(e) => return Err(stopped_with(&job, e.to_string())),
                 }
                 if cancel.load(Ordering::Relaxed) {
-                    return Err("Bounce cancelled".into());
+                    return Err(stopped_with(&job, "Bounce cancelled".into()));
                 }
             }
         })

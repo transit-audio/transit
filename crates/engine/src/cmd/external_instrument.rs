@@ -170,14 +170,27 @@ pub fn external_in_render(s: &transit_model::Session) -> Vec<String> {
     s.tracks.iter().filter(|t| !t.inactive && t.freeze.is_none() && t.external_instrument().is_some()).map(|t| t.name.clone()).collect()
 }
 
+/// Consolidated export includes inactive material, so it warns about every unfrozen External
+/// Instrument, including inactive tracks.
+pub fn external_in_consolidated(s: &transit_model::Session) -> Vec<String> {
+    s.tracks.iter().filter(|t| t.freeze.is_none() && t.external_instrument().is_some()).map(|t| t.name.clone()).collect()
+}
+
 /// The refusal of an offline render that includes External Instruments (decision 9), or the
 /// tracks it leaves out when `mode: "offline_without_external"` (or `without_external: true`)
 /// asks for that explicitly. Never a silent skip. A real-time render (ADR 0027) is the mix's
 /// (`file.bounce_mix`), which takes its own path before this guard.
 pub(crate) fn render_guard(e: &Engine, id: &str, p: &Value) -> Result<Vec<String>> {
+    render_guard_names(id, p, external_in_render(e.session()))
+}
+
+pub(crate) fn consolidated_render_guard(e: &Engine, p: &Value) -> Result<Vec<String>> {
+    render_guard_names("file.bounce_consolidated", p, external_in_consolidated(e.session()))
+}
+
+fn render_guard_names(id: &str, p: &Value, names: Vec<String>) -> Result<Vec<String>> {
     use super::realtime_render::RenderMode;
     let mode = super::realtime_render::mode_param(id, p)?;
-    let names = external_in_render(e.session());
     if mode == RenderMode::Realtime {
         return Err(bad(
             id,
