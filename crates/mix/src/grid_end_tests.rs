@@ -29,8 +29,8 @@ fn events(s: &Session, t: TrackId, from: Samples, to: Samples, block: usize) -> 
         visit_clip_events(s, s.track(t).unwrap(), pos, n, |at, e| {
             let at = pos + at as Samples;
             out.push(match e {
-                ClipEvent::On(key, _, _) => Ev::On(at, key),
-                ClipEvent::Off(key, _) => Ev::Off(at, key),
+                ClipEvent::On(key, _, _, _) => Ev::On(at, key),
+                ClipEvent::Off(key, _, _) => Ev::Off(at, key),
                 ClipEvent::Control(m, _) => Ev::Ctrl(at, m[0] & 0xF0),
             });
         });

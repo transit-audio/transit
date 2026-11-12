@@ -12,6 +12,8 @@ use egui::{FontId, Rect, pos2, vec2};
 use serde_json::{Value, json};
 use transit_model::{ClipId, TrackId};
 
+mod consolidated;
+pub use consolidated::ConsolidatedJob;
 /// File > Bounce in real time through the live device (ADR 0027).
 mod realtime;
 pub use realtime::{Conditions as RealtimeConditions, RealtimeState, Rendering, device_blocker as realtime_device_blocker};
@@ -71,6 +73,8 @@ pub struct BounceForm {
     pub path: String,
     /// Stems by output path instead of one mix (ADR 0015 slice e).
     pub by_path: bool,
+    /// Full-length per-track stems and their MIDI files (#261 slice 3).
+    pub consolidated: bool,
     /// The machine's output paths, as listed when the form opened.
     pub paths: Vec<PathChoice>,
     /// With `normalize` in the by-path mode: one shared gain (relative levels hold) or one per file.
@@ -144,7 +148,7 @@ pub struct BounceLayout {
     pub window: R4,
     pub ranges: Vec<MenuItem>,
     pub sources: Vec<MenuItem>,
-    /// "Mix" and "Stems by output path".
+    /// "Mix", "Consolidated tracks" and "Stems by output path".
     pub modes: Vec<MenuItem>,
     /// The output paths' checkboxes in the by-path mode (value: the path name).
     pub paths: Vec<MenuItem>,
@@ -195,6 +199,8 @@ pub struct FinishState {
     pub job: Option<transit_engine::io::Bounce>,
     /// The stems by output path being rendered, a slice per frame (instead of `job`).
     pub path_job: Option<transit_engine::io::PathBounce>,
+    /// The consolidated track export on its worker, polled per frame.
+    pub consolidated_job: Option<ConsolidatedJob>,
     /// The parameters of the last `file.bounce_paths` job the form started.
     pub paths_request: Option<Value>,
     pub layout: FinishLayout,
@@ -255,6 +261,7 @@ impl std::fmt::Debug for FinishState {
             .field("bounce_form", &self.bounce_form)
             .field("job", &self.job.is_some())
             .field("path_job", &self.path_job.is_some())
+            .field("consolidated_job", &self.consolidated_job.is_some())
             .finish()
     }
 }
@@ -266,6 +273,8 @@ impl FinishState {
             "bounce_form": self.bounce_form,
             "bouncing": self.job.as_ref().map(|j| json!({"progress": j.progress(), "path": j.path(), "cancel": self.cancel})).or_else(|| {
                 self.path_job.as_ref().map(|j| json!({"progress": j.progress(), "dir": j.dir(), "files": j.files(), "cancel": self.cancel}))
+            }).or_else(|| {
+                self.consolidated_job.as_ref().map(|j| json!({"progress": j.progress(), "dir": j.dir(), "files": j.files(), "cancel": self.cancel}))
             }),
             "paths_request": self.paths_request,
             "realtime": self.realtime.running.as_ref().map(|r| json!({"path": r.path, "stems": r.stems, "cancel": self.cancel})),
@@ -282,13 +291,14 @@ pub fn rect(r: R4) -> Rect {
 /// A session-replacing command while a bounce holds its own copy of the session is refused (two
 /// large sessions could run out of memory); Quit cancels the bounce.
 pub fn refuses(app: &mut StudioApp, id: &str) -> bool {
-    if app.finish.job.is_none() && app.finish.path_job.is_none() && app.finish.realtime.running.is_none() {
+    if app.finish.job.is_none() && app.finish.path_job.is_none() && app.finish.consolidated_job.is_none() && app.finish.realtime.running.is_none() {
         return false;
     }
     if id == "app.quit" {
         app.cancel_realtime();
         app.finish.job = None;
         app.finish.path_job = None;
+        app.finish.consolidated_job = None;
         app.dialog = None;
         return false;
     }
@@ -374,7 +384,7 @@ impl StudioApp {
 
     /// File > Bounce…: open the form with the selection (or the whole song) and the main mix.
     pub fn open_bounce(&mut self) {
-        if self.finish.job.is_some() || self.finish.path_job.is_some() || self.dialog.is_some() {
+        if self.finish.job.is_some() || self.finish.path_job.is_some() || self.finish.consolidated_job.is_some() || self.dialog.is_some() {
             return;
         }
         let s = self.engine.session();
@@ -392,6 +402,7 @@ impl StudioApp {
             normalize: false,
             path: dir.join(name).to_string_lossy().into_owned(),
             by_path: false,
+            consolidated: false,
             paths: self.path_choices(),
             joint: true,
             dir: dir.join("Stems").to_string_lossy().into_owned(),
@@ -418,13 +429,17 @@ impl StudioApp {
     pub fn start_bounce(&mut self) -> Result<(), String> {
         let Some(f) = self.finish.bounce_form.clone() else { return Err("no bounce form".into()) };
         let s = self.engine.session();
-        let (start, end) = match f.range {
-            BounceRange::Selection if !bounce_range(&s.edit).is_empty() => (bounce_range(&s.edit).start, bounce_range(&s.edit).end),
-            BounceRange::Selection => {
-                self.status = "Nothing is selected: pick a range, or bounce the whole song.".into();
-                return Err(self.status.clone());
+        let (start, end) = if f.consolidated {
+            (0, s.content_end().max(1))
+        } else {
+            match f.range {
+                BounceRange::Selection if !bounce_range(&s.edit).is_empty() => (bounce_range(&s.edit).start, bounce_range(&s.edit).end),
+                BounceRange::Selection => {
+                    self.status = "Nothing is selected: pick a range, or bounce the whole song.".into();
+                    return Err(self.status.clone());
+                }
+                BounceRange::Whole => (0, s.content_end().max(1)),
             }
-            BounceRange::Whole => (0, s.content_end().max(1)),
         };
         // An External Instrument plays only in real time: the bounce leaves it out only when the
         // user chooses that (ADR 0020 decision 9), never silently.
@@ -433,6 +448,9 @@ impl StudioApp {
             self.status = format!("{}: render without it, or cancel", external_notice(&left_out));
             self.finish.external_question = Some(left_out);
             return Err(self.status.clone());
+        }
+        if f.consolidated {
+            return self.start_bounce_consolidated(&f);
         }
         if f.by_path {
             return self.start_bounce_paths(&f, start, end);
@@ -476,6 +494,46 @@ impl StudioApp {
                 self.status = self.with_state_notice(status);
                 Ok(())
             }
+            Err(e) => {
+                self.status = e.to_string();
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Start the whole-session track stems and MIDI files, rendered a slice per frame.
+    fn start_bounce_consolidated(&mut self, f: &BounceForm) -> Result<(), String> {
+        let dir = f.dir.trim();
+        if dir.is_empty() {
+            self.status = "Choose a folder for the stems.".into();
+            return Err(self.status.clone());
+        }
+        let mut p = json!({"dir": dir, "format": f.format, "bit_depth": f.bit_depth});
+        add_bitrate(&mut p, f);
+        if f.without_external {
+            p["without_external"] = json!(true);
+        }
+        self.capture_plugin_states()?;
+        match transit_engine::cmd::bounce_consolidated_job(&self.engine, &p) {
+            Ok(job) if job.files().iter().any(|x| x.exists()) && self.finish.replace != Replace::Yes => {
+                self.finish.replace = Replace::Asking;
+                self.status = "Some stem or MIDI files exist".into();
+                Err(self.status.clone())
+            }
+            Ok(job) => match ConsolidatedJob::new(job) {
+                Ok(job) => {
+                    self.finish.replace = Replace::No;
+                    let status = format!("Bouncing consolidated tracks to {dir}...{}", left_out_note(&self.engine));
+                    self.status = self.with_state_notice(status);
+                    self.finish.consolidated_job = Some(job);
+                    self.finish.bounce_form = None;
+                    Ok(())
+                }
+                Err(e) => {
+                    self.status = e.clone();
+                    Err(e)
+                }
+            },
             Err(e) => {
                 self.status = e.to_string();
                 Err(e.to_string())
@@ -559,6 +617,9 @@ impl StudioApp {
     /// Why the form cannot render in real time now (shown in the question before starting).
     pub(crate) fn form_realtime_blocker(&self) -> Option<String> {
         let f = self.finish.bounce_form.as_ref()?;
+        if f.consolidated {
+            return Some("Consolidated tracks render offline: choose Mix to render in real time".into());
+        }
         if f.by_path {
             return Some("Stems by output path render offline: choose Mix to render in real time".into());
         }
@@ -614,7 +675,10 @@ impl StudioApp {
 
     /// Cancel the bounce form or the bounce being rendered (its part file is removed).
     pub fn cancel_bounce(&mut self) {
-        if self.finish.job.take().is_some() || self.finish.path_job.take().is_some() {
+        if let Some(job) = &self.finish.consolidated_job {
+            job.cancel();
+        }
+        if self.finish.job.take().is_some() || self.finish.path_job.take().is_some() || self.finish.consolidated_job.is_some() {
             self.status = "Bounce cancelled".into();
         }
         self.cancel_realtime();
@@ -749,6 +813,9 @@ pub fn step_bounce(app: &mut StudioApp, ctx: &egui::Context) {
         ctx.request_repaint();
         return;
     }
+    if app.finish.consolidated_job.is_some() {
+        return step_consolidated_bounce(app, ctx);
+    }
     if app.finish.path_job.is_some() {
         return step_path_bounce(app, ctx);
     }
@@ -768,6 +835,28 @@ pub fn step_bounce(app: &mut StudioApp, ctx: &egui::Context) {
         Err(e) => e.to_string(),
     };
     app.finish.job = None;
+    if matches!(app.dialog, Some(Dialog::Bounce)) {
+        app.dialog = None;
+    }
+}
+
+/// [`step_bounce`] for consolidated track stems and MIDI.
+fn step_consolidated_bounce(app: &mut StudioApp, ctx: &egui::Context) {
+    let Some(job) = &mut app.finish.consolidated_job else { return };
+    let dir = job.dir().to_string_lossy().into_owned();
+    app.status = match job.poll() {
+        None => {
+            ctx.request_repaint();
+            return;
+        }
+        Some(Ok(done)) => {
+            app.finish.layout.last_bounce =
+                Some(json!({"dir": dir, "files": done.files.len(), "midi_files": done.midi_files.len(), "tempo_file": done.tempo_file}));
+            format!("Bounced {} stems, {} track MIDI files and a tempo map to {dir}", done.files.len(), done.midi_files.len())
+        }
+        Some(Err(e)) => e,
+    };
+    app.finish.consolidated_job = None;
     if matches!(app.dialog, Some(Dialog::Bounce)) {
         app.dialog = None;
     }
@@ -800,7 +889,7 @@ fn step_path_bounce(app: &mut StudioApp, ctx: &egui::Context) {
 /// The channel count the form's Opus bounce has, for its bitrate presets: 1 for a mono bus,
 /// otherwise 2 (the main mix bounces as stereo at least; stems by path use the stereo presets).
 fn opus_channels(f: &BounceForm, s: &transit_model::Session) -> usize {
-    if f.by_path || f.source == "main" {
+    if f.consolidated || f.by_path || f.source == "main" {
         return 2;
     }
     match s.bus_by_name(&f.source) {
@@ -869,10 +958,11 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         app.finish.layout.bounce = None;
         return;
     }
-    let running = match (&app.finish.job, &app.finish.path_job) {
-        (Some(j), _) => Some((j.path().file_name().unwrap_or_default().to_string_lossy().into_owned(), j.progress())),
-        (None, Some(j)) => Some((format!("{} stems", j.files().len()), j.progress())),
-        (None, None) => None,
+    let running = match (&app.finish.job, &app.finish.path_job, &app.finish.consolidated_job) {
+        (Some(j), _, _) => Some((j.path().file_name().unwrap_or_default().to_string_lossy().into_owned(), j.progress())),
+        (None, Some(j), _) => Some((format!("{} stems", j.files().len()), j.progress())),
+        (None, None, Some(j)) => Some(("consolidated tracks".to_string(), j.progress())),
+        (None, None, None) => None,
     };
     if let Some((name, progress)) = running {
         let mut cancel = ctx.input(|i| hit(i, A::DialogCancel));
@@ -922,15 +1012,29 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
             let what = if s.edit.loop_playback { "Cycle range" } else { "Selection" };
             format!("{what} {} – {}", a.trim(), b.trim())
         };
-        ui.label(egui::RichText::new("Range").color(TOKENS.text_dim));
-        let cur = if f.range == BounceRange::Selection { "selection" } else { "whole" };
-        let items = [(sel_text, "selection".to_string()), ("Whole song".to_string(), "whole".to_string())];
-        if let Some(v) = choices(ui, cur, &items, &mut lay.ranges) {
-            f.range = if v == "selection" { BounceRange::Selection } else { BounceRange::Whole };
+        if !f.consolidated {
+            ui.label(egui::RichText::new("Range").color(TOKENS.text_dim));
+            let cur = if f.range == BounceRange::Selection { "selection" } else { "whole" };
+            let items = [(sel_text, "selection".to_string()), ("Whole song".to_string(), "whole".to_string())];
+            if let Some(v) = choices(ui, cur, &items, &mut lay.ranges) {
+                f.range = if v == "selection" { BounceRange::Selection } else { BounceRange::Whole };
+            }
         }
         ui.label(egui::RichText::new("Kind").color(TOKENS.text_dim));
-        let items = [("Mix".to_string(), "mix".to_string()), ("Stems by output path".to_string(), "paths".to_string())];
-        if let Some(v) = choices(ui, if f.by_path { "paths" } else { "mix" }, &items, &mut lay.modes) {
+        let items = [
+            ("Mix".to_string(), "mix".to_string()),
+            ("Consolidated tracks".to_string(), "consolidated".to_string()),
+            ("Stems by output path".to_string(), "paths".to_string()),
+        ];
+        let current = if f.consolidated {
+            "consolidated"
+        } else if f.by_path {
+            "paths"
+        } else {
+            "mix"
+        };
+        if let Some(v) = choices(ui, current, &items, &mut lay.modes) {
+            f.consolidated = v == "consolidated";
             f.by_path = v == "paths";
         }
         if f.by_path {
@@ -941,6 +1045,11 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
                 let b = crate::chrome::checkbox(ui, &mut c.checked, text);
                 lay.paths.push(MenuItem::at(ui, c.name.clone(), c.name.clone(), b.rect));
             }
+        } else if f.consolidated {
+            ui.label(
+                egui::RichText::new("Whole session from sample zero; one stem per track, one MIDI file per MIDI track and a tempo map")
+                    .color(TOKENS.text_dim),
+            );
         } else {
             ui.label(egui::RichText::new("Source").color(TOKENS.text_dim));
             let mut items = vec![("Main mix".to_string(), "main".to_string())];
@@ -975,17 +1084,24 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
                 f.bit_depth = v;
             }
         }
-        let n = crate::chrome::checkbox(ui, &mut f.normalize, "Normalize to -0.1 dBFS");
-        lay.normalize = crate::arrange::r4(n.rect);
-        if f.by_path && f.normalize {
-            let items =
-                [("Joint: keep relative levels".to_string(), "joint".to_string()), ("Each file to its own peak".to_string(), "each".to_string())];
-            if let Some(v) = choices(ui, if f.joint { "joint" } else { "each" }, &items, &mut lay.norm_modes) {
-                f.joint = v == "joint";
+        if !f.consolidated {
+            let n = crate::chrome::checkbox(ui, &mut f.normalize, "Normalize to -0.1 dBFS");
+            lay.normalize = crate::arrange::r4(n.rect);
+            if f.by_path && f.normalize {
+                let items =
+                    [("Joint: keep relative levels".to_string(), "joint".to_string()), ("Each file to its own peak".to_string(), "each".to_string())];
+                if let Some(v) = choices(ui, if f.joint { "joint" } else { "each" }, &items, &mut lay.norm_modes) {
+                    f.joint = v == "joint";
+                }
             }
         }
-        if f.by_path {
-            ui.label(egui::RichText::new("Folder (files are named after the session and the path)").color(TOKENS.text_dim));
+        if f.by_path || f.consolidated {
+            let label = if f.consolidated {
+                "Folder (files are named after the session and track)"
+            } else {
+                "Folder (files are named after the session and the path)"
+            };
+            ui.label(egui::RichText::new(label).color(TOKENS.text_dim));
             ui.horizontal(|ui| {
                 let field = crate::chrome::text_field(ui, egui::TextEdit::singleline(&mut f.dir).id(path_id).desired_width(320.0));
                 lay.dir = crate::arrange::r4(field.rect);
@@ -1015,7 +1131,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     });
     lay.window = crate::arrange::r4(resp.response.rect);
     app.finish.layout.bounce = Some(lay);
-    if choose && f.by_path {
+    if choose && (f.by_path || f.consolidated) {
         // The host offers a save dialog only: the folder of the file picked is the folder.
         // The dialog starts in the form's folder (#385).
         let name = std::path::Path::new(&f.dir).join(format!("{}_stems", transit_engine::io::sanitize_name(&s.name)));
@@ -1110,12 +1226,14 @@ fn external_question(app: &mut StudioApp, ctx: &egui::Context, names: &[String])
 /// the form with nothing written.
 fn replace_question(app: &mut StudioApp, ctx: &egui::Context, f: &BounceForm) {
     let path = fit_extension(std::path::Path::new(f.path.trim()), &f.format);
-    let name = if f.by_path { "Some of the stem files".to_string() } else { path.file_name().unwrap_or_default().to_string_lossy().into_owned() };
+    let folder = f.by_path || f.consolidated;
+    let name =
+        if folder { "Some of the stem or MIDI files".to_string() } else { path.file_name().unwrap_or_default().to_string_lossy().into_owned() };
     let (mut yes, mut no) = (false, false);
     egui::Modal::new(egui::Id::new("bounce_replace")).show(ctx, |ui| {
         ui.set_width(380.0);
         ui.label(egui::RichText::new("Replace existing file?").strong());
-        ui.label(egui::RichText::new(format!("{name} already {}.", if f.by_path { "exist" } else { "exists" })).color(TOKENS.text_dim));
+        ui.label(egui::RichText::new(format!("{name} already {}.", if folder { "exist" } else { "exists" })).color(TOKENS.text_dim));
         ui.add_space(crate::theme::SPACE);
         ui.horizontal(|ui| {
             let r = ui.button("Replace");

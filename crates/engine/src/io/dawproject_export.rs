@@ -182,7 +182,7 @@ fn bus_outputs(t: &transit_model::Track, busses: &mut HashSet<BusId>) {
 
 /// Auxes and folders downstream of `source`, through every output/send hop. The mix's implicit-solo
 /// check is one hop; marking the whole chain keeps nested processing audible in an isolated stem.
-fn downstream_tracks(s: &Session, source: TrackId) -> HashSet<TrackId> {
+pub(crate) fn downstream_tracks(s: &Session, source: TrackId) -> HashSet<TrackId> {
     let mut busses = HashSet::new();
     let mut tracks = HashSet::new();
     if let Some(t) = s.track(source) {

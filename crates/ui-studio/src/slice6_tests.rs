@@ -958,6 +958,49 @@ fn stems_by_output_path_start_one_job_with_the_checked_paths() {
 }
 
 #[test]
+fn consolidated_stems_use_the_whole_session_and_write_midi() {
+    let dir = Dir::new("consolidated-stems");
+    let mut t = T::new();
+    t.midi_clip();
+    t.app.run("edit.select", json!({"start": 0, "end": 100})).unwrap();
+    let content_end = t.app.engine.session().content_end();
+    t.app.open_bounce();
+    t.frames(3);
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    t.click(mid(lay.modes.iter().find(|m| m.value == "consolidated").unwrap().rect));
+    let lay = t.app.finish.layout.bounce.clone().unwrap();
+    assert!(lay.ranges.is_empty() && lay.sources.is_empty() && lay.paths.is_empty(), "the consolidated mode fixes the range and source");
+    if let Some(f) = &mut t.app.finish.bounce_form {
+        f.dir = dir.0.to_string_lossy().into_owned();
+    }
+    t.frames(2);
+    t.click(mid(t.app.finish.layout.bounce.clone().unwrap().ok));
+    assert!(
+        t.app.finish.consolidated_job.is_some() || t.app.finish.layout.last_bounce.is_some(),
+        "the form started an incremental consolidated export: {}",
+        t.app.status
+    );
+    if let Some(job) = &t.app.finish.consolidated_job {
+        job.wait_for_completion();
+    }
+    t.frames(1);
+    assert!(t.app.finish.consolidated_job.is_none(), "{}", t.app.status);
+    let mut files: Vec<_> = std::fs::read_dir(&dir.0).unwrap().map(|e| e.unwrap().path()).collect();
+    files.sort();
+    assert_eq!(files.len(), 3, "{files:?}");
+    let wav = files.iter().find(|p| p.extension().and_then(|e| e.to_str()) == Some("wav")).unwrap();
+    let mid = files.iter().find(|p| p.extension().and_then(|e| e.to_str()) == Some("mid") && !p.to_string_lossy().contains("tempo")).unwrap();
+    let (_, decoded) = transit_audio_io::decode(&std::fs::read(wav).unwrap(), Some("wav")).unwrap();
+    assert_eq!(decoded.frames() as i64, content_end, "the selection does not shorten a consolidated stem");
+    let smf = transit_midi::read_smf(&std::fs::read(mid).unwrap()).unwrap();
+    assert_eq!(smf.tracks.len(), 1);
+    assert!(!smf.tempos.is_empty());
+    let tempo = transit_midi::read_smf(&std::fs::read(dir.0.join("Untitled - tempo.mid")).unwrap()).unwrap();
+    assert!(tempo.tracks.iter().all(|t| t.sequence.notes.is_empty() && t.sequence.ctrls.is_empty()) && !tempo.tempos.is_empty());
+    assert!(t.app.dialog.is_none());
+}
+
+#[test]
 fn the_transport_menu_lists_set_cycle_to_selection_and_it_leaves_cycle_alone() {
     let mut t = T::new();
     let tr = t.track(json!({"kind": "instrument"}));

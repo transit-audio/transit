@@ -107,7 +107,7 @@ fn pass_ons(s: &Session, t: TrackId, end: Samples, block: usize) -> Vec<Samples>
     while pos < end {
         let n = block.min((end - pos) as usize);
         visit_clip_events(s, s.track(t).unwrap(), pos, n, |at, e| {
-            if let ClipEvent::On(KICK, _, _) = e {
+            if let ClipEvent::On(KICK, _, _, _) = e {
                 out.push(pos + at as Samples);
             }
         });

@@ -352,6 +352,8 @@ pub use paths::{PathBounce, PathBounced, PathNormalize, PathStem, bounce_paths, 
 
 mod bounce;
 pub use bounce::{Bounce, BounceOptions, Bounced, bounce_stems, bounce_stems_with};
+mod consolidated;
+pub use consolidated::{ConsolidatedBounce, ConsolidatedBounced, bounce_consolidated};
 
 /// The Sampler's kit preset files (#467), through the checked file access.
 pub mod kit_presets;

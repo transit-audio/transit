@@ -50,15 +50,22 @@ pub fn import_midi_bytes(e: &mut Engine, bytes: &[u8], at: Samples, tempo_map: b
 
 /// Export MIDI clips as a format-1 SMF. `only` limits the file to those tracks.
 pub fn export_midi(e: &Engine, only: Option<&[TrackId]>) -> Result<Vec<u8>> {
-    let s = e.session();
-    let mut smf = transit_midi::Smf {
+    export_midi_session(e.session(), only)
+}
+
+fn session_smf(s: &Session) -> transit_midi::Smf {
+    transit_midi::Smf {
         format: 1,
         tracks: Vec::new(),
         tempos: s.tempo.tempos().iter().map(|t| (t.tick, t.bpm)).collect(),
         meters: s.tempo.meters().iter().map(|m| (m.tick, u8::try_from(m.numerator).unwrap_or(4), u8::try_from(m.denominator).unwrap_or(4))).collect(),
         markers: s.markers.iter().map(|m| (s.tempo.samples_to_ticks(m.start, s.sample_rate), m.name.clone())).collect(),
         key_sigs: Vec::new(),
-    };
+    }
+}
+
+pub(super) fn export_midi_session(s: &Session, only: Option<&[TrackId]>) -> Result<Vec<u8>> {
+    let mut smf = session_smf(s);
     let chosen: Vec<_> = s.tracks.iter().filter(|t| t.kind.is_midi() && only.is_none_or(|ids| ids.contains(&t.id))).collect();
     if only.is_some() && chosen.is_empty() {
         return Err(EngineError::BadParams("file.export_midi".into(), "none of the requested tracks hold MIDI".into()));
@@ -84,4 +91,26 @@ pub fn export_midi(e: &Engine, only: Option<&[TrackId]>) -> Result<Vec<u8>> {
         smf.tracks.push(transit_midi::SmfTrack { name: t.name.clone(), sequence: seq });
     }
     transit_midi::write_smf(&smf).map_err(|err| EngineError::Io(err.to_string()))
+}
+
+/// One track as it sounds, for a consolidated interchange package.
+pub(super) fn export_consolidated_midi_track(s: &Session, track: TrackId) -> Result<Vec<u8>> {
+    let Some(t) = s.track(track).filter(|t| t.kind.is_midi()) else {
+        return Err(EngineError::BadParams("file.bounce_consolidated".into(), "the MIDI track no longer exists".into()));
+    };
+    let range = Range::new(0, transit_mix::playback_content_end(s));
+    let Some(sequence) = transit_mix::sequence_as_played(s, t, range) else {
+        return Err(EngineError::BadParams(
+            "file.bounce_consolidated".into(),
+            format!("{}: a looped MIDI clip would unroll to too many events", t.name),
+        ));
+    };
+    let mut smf = session_smf(s);
+    smf.tracks.push(transit_midi::SmfTrack { name: t.name.clone(), sequence });
+    transit_midi::write_smf(&smf).map_err(|err| EngineError::Io(err.to_string()))
+}
+
+/// The session's tempo, meter and markers as a conductor-only SMF.
+pub(super) fn export_tempo_map(s: &Session) -> Result<Vec<u8>> {
+    transit_midi::write_smf(&session_smf(s)).map_err(|err| EngineError::Io(err.to_string()))
 }

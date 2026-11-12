@@ -28,10 +28,12 @@ impl ExternalMidi {
 
     fn of(offset: usize, event: ClipEvent, channel: MidiOutChannel) -> Self {
         match event {
-            ClipEvent::On(pitch, velocity, recorded) => {
+            ClipEvent::On(pitch, velocity, _, recorded) => {
                 Self { offset, bytes: [0x90 | channel.resolve(recorded), pitch & 0x7F, velocity.clamp(1, 127)], len: 3 }
             }
-            ClipEvent::Off(pitch, recorded) => Self { offset, bytes: [0x80 | channel.resolve(recorded), pitch & 0x7F, 64], len: 3 },
+            ClipEvent::Off(pitch, release_velocity, recorded) => {
+                Self { offset, bytes: [0x80 | channel.resolve(recorded), pitch & 0x7F, release_velocity], len: 3 }
+            }
             ClipEvent::Control(msg, recorded) => {
                 let kind = msg[0] & 0xF0;
                 let len = if matches!(kind, 0xC0 | 0xD0) { 2 } else { 3 };
@@ -54,19 +56,23 @@ pub fn external_midi_events(s: &Session, t: &Track, pos: Samples, frames: usize,
     sorted_clip_events(s, t, pos, frames, |at, event| {
         if !chased && at > 0 {
             chased = true;
-            sounding_notes(s, t, pos, |pitch, velocity, recorded| visit(ExternalMidi::of(0, ClipEvent::On(pitch, velocity, recorded), channel)));
+            sounding_notes(s, t, pos, |pitch, velocity, release, recorded| {
+                visit(ExternalMidi::of(0, ClipEvent::On(pitch, velocity, release, recorded), channel));
+            });
         }
         visit(ExternalMidi::of(at, event, channel));
     });
     if !chased {
-        sounding_notes(s, t, pos, |pitch, velocity, recorded| visit(ExternalMidi::of(0, ClipEvent::On(pitch, velocity, recorded), channel)));
+        sounding_notes(s, t, pos, |pitch, velocity, release, recorded| {
+            visit(ExternalMidi::of(0, ClipEvent::On(pitch, velocity, release, recorded), channel));
+        });
     }
 }
 
 /// Notes of `t` that started before `pos` and are still sounding at it, as playback (loop cycles
 /// included) would have them. Runs where the chase does (the external driver, possibly the audio
 /// thread): no allocation, no lock.
-fn sounding_notes(s: &Session, t: &Track, pos: Samples, mut visit: impl FnMut(u8, u8, u8)) {
+fn sounding_notes(s: &Session, t: &Track, pos: Samples, mut visit: impl FnMut(u8, u8, u8, u8)) {
     let pos = pos.saturating_sub(midi_offset(s, t));
     let rtp = Rtp::of(s, t);
     for clip in t.clips() {
@@ -83,7 +89,7 @@ fn sounding_notes(s: &Session, t: &Track, pos: Samples, mut visit: impl FnMut(u8
             // for the one sample `pos`.
             note_spans(s, last, looping, on, off, pos, pos.saturating_add(1), |on, off| {
                 if on < pos && off > pos {
-                    visit(n.pitch, n.velocity, n.channel);
+                    visit(n.pitch, n.velocity, n.release_velocity, n.channel);
                 }
             });
         }
