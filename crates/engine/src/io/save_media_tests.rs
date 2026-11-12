@@ -8,29 +8,18 @@ use crate::autosave::{Autosaver, discard, leftovers, recover};
 use crate::io::{add_recording, open_session, save_session, save_session_copy};
 use serde_json::json;
 
-/// A scratch folder, removed when the test ends, pass or fail.
-struct Scratch(PathBuf);
+/// A scratch folder from the test guard, removed when the test ends, pass or fail.
+struct Scratch(transit_test_support::TestDir);
 
 impl Scratch {
     fn new(tag: &str) -> Scratch {
-        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!("transit-save-media-{tag}-{}-{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        Scratch(p)
+        Scratch(transit_test_support::TestDir::created(&format!("save-media-{tag}")))
     }
     fn path(&self, rel: &str) -> PathBuf {
         self.0.join(rel)
     }
     fn file(&self, rel: &str) -> String {
         self.path(rel).to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
