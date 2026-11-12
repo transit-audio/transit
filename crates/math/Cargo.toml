@@ -1,6 +1,6 @@
 [package]
 name = "transit-math"
-description = "transit's portable math seam: the transcendental functions every rendered crate calls, backed by the exactly pinned pure-Rust libm so a render is bit-identical on every platform, and the exact gain conversions (ADR 0055)"
+description = "transit's portable math seam: the transcendental functions every rendered crate calls, backed by the exactly pinned pure-Rust libm so a render is bit-identical on every platform, the exact gain conversions, and the one FFT for rendered code (ADR 0055)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

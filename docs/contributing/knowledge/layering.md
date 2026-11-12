@@ -22,7 +22,7 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
   `macro-osc`, `instrument-core`, `resonator`, `texture`, `granular`, `modulator`, `random-sequencer`) have no
   production workspace dependencies apart from the `FOUNDATION` crates. `FOUNDATION` holds only
   `math` (`transit-math`), the portable math seam every rendered crate takes its transcendental
-  functions from ([ADR 0055](../../adr/0055-portable-math.md) 2.1); it is itself standalone. `audio-io` was standalone until it took `opus`, the
+  functions and its FFT from ([ADR 0055](../../adr/0055-portable-math.md) 2.1); it is itself standalone. `audio-io` was standalone until it took `opus`, the
   vendored libopus behind its Ogg Opus writer and reader (#238, ADR 0048, a same-layer L0 edge). `modal-voice` depends on `resonator` at L1, and
   `sampler-core` (the portable Sampler core, ADR 0041) on `instrument-core` at L1, its only
   workspace dependency: never on `dsp`.
