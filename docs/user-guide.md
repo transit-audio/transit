@@ -166,8 +166,10 @@ take runs from where you pressed it to the loop end, then each full lap is a tak
 are cut the same way. One recording records up to 10,000 laps (over five hours of a one-bar loop
 in 4/4 at 120 BPM): when it completes its 10,000th lap, recording stops by itself as if you had
 pressed Stop, every lap is a take, and the status line says the recording ended at its limit.
-Press Record to go on with a new recording. A last lap shorter than an eighth of the loop is not a take;
-the status line says how long it was, and it stays in the take file. The takes of one stretch of time form a stack, and the track plays one of them:
+Press Record to go on with a new recording. A lap runs from one wrap to the next; the first runs
+from where you pressed Record to the first wrap. On audio, a last lap shorter than an eighth of
+the loop is not a take; the status line says how long it was, and it stays in the take file. On
+MIDI, a last lap is a take when it holds any note or controller. The takes of one stretch of time form a stack, and the track plays one of them:
 the newest when you stop. Takes work the same for audio and MIDI.
 
 - **Take lanes.** After cycle recording the track's take lanes open under it: one lane per take,

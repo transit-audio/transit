@@ -37,12 +37,17 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   pass end (`Recording::end`, set by the host at Stop from the Stop position, the take files and
   the last MIDI event; `io::pass_end` works it out from the take files and journal for crash
   recovery), so audio and MIDI agree on whether the transport wrapped. A pass records at most
-  `take_laps::MAX_LAPS` (10,000) laps: the host counts the wraps of the pass's clock once a frame
-  on the control side and ends the recording like Record pressed again once the pass completes
-  that many (`end_recording_at_lap_limit`), saying so on the status line and in the log (#522).
-  Every lap is a take; the few frames recorded after the last wrap are the final partial lap. The
-  cut never drops a lap: a pass with more laps than the limit keeps the first 10,000 as takes and
-  the rest as one longer final take, said in the engine's messages. The host ends the status line
+  `take_laps::MAX_LAPS` (10,000) laps. Once a frame on the control side, the host reads how far
+  the pass has run from an unwrapped clock (`Player::samples_since`: the output frames the audio
+  thread consumed since the latch, published as one relaxed store beside the position; the
+  simulated transport counts its own wraps in `sim_laps`), counts completed laps with
+  `take_laps::completed` and, at the first check that sees the limit, ends the recording like
+  Record pressed again (`end_recording_at_lap_limit`), saying so on the status line and in the
+  log (#522). Every lap is a take; what was recorded after the last wrap is one more lap window
+  under the ordinary partial-lap rules. The cut never drops a lap: a pass that reaches lap 10,001
+  keeps laps 0 to 9,999 as takes and everything from lap 10,000 on as one longer final take, said
+  in the engine's messages. The short-lap summary counts take files from `Engine::short_laps`,
+  never from the 100-entry message list. The host ends the status line
   with the lap notes of the pass (`report_lap_notes`), after Stop and after crash recovery. A last
   audio lap shorter than an eighth of the loop is still no take, but is said (#634). The first
   MIDI take of a pass goes on the playlist the track plays, as the first audio take does. Placing
