@@ -232,3 +232,30 @@ fn continuous_additions_publish_after_four_late_rounds_and_defer_the_rest() {
     assert_eq!(host::problems().len(), 5, "the next rescan covers the deferred folder");
     assert_eq!(t.cache().len(), 5);
 }
+
+/// #659: plug-in files that are found but none of which loads are reported as such (counts and the
+/// first loader error), not as "none found"; a file that loads keeps the report away.
+#[test]
+fn a_scan_whose_files_all_fail_reports_them_instead_of_none_found() {
+    let t = Test::new();
+    let (a, b) = (t.dir.join("a.clap"), t.dir.join("b.clap"));
+    std::fs::write(&a, b"not a plugin").unwrap();
+    std::fs::write(&b, b"not a plugin either").unwrap();
+    host::set_extra_dirs(vec![a.clone(), b.clone()]);
+    assert!(host::rescan().is_empty());
+    let summary = host::scan_summary().expect("a published scan has a summary");
+    assert_eq!((summary.found, summary.loaded, summary.failed), (2, 0, 2), "{summary:?}");
+    let first = summary.first_error.clone().expect("the first loader error");
+    assert_eq!(Some(first.as_str()), host::problems().first().map(|p| p.1.as_str()));
+    let message = summary.none_loaded_message("CLAP").expect("none loaded is said");
+    assert!(message.starts_with("2 CLAP plug-in files found, but none could be loaded."), "{message}");
+    assert!(message.ends_with(&first), "{message}");
+    // The cache records the build that failed, so another build retries the files.
+    assert!(t.cache().iter().all(|f| f["host"].as_str().is_some_and(|h| !h.is_empty())), "{:?}", t.cache());
+
+    host::set_extra_dirs(vec![a, t.fixture.clone()]);
+    t.assert_fixture(&host::rescan());
+    let summary = host::scan_summary().expect("a published scan has a summary");
+    assert_eq!((summary.found, summary.loaded, summary.failed), (2, 1, 1), "{summary:?}");
+    assert_eq!(summary.none_loaded_message("CLAP"), None);
+}

@@ -926,12 +926,16 @@ pub struct HostedEntry {
 }
 
 /// What the instrument menu lists: built-in instruments, then the scanned VST3 and CLAP
-/// instruments (`None` while a format has no scan result).
+/// instruments (`None` while a format has no scan result). `vst3_none_loaded` and
+/// `clap_none_loaded` say why a format's list is empty when its scan found plug-in files and none
+/// of them loaded (#659).
 #[derive(Debug, Clone, Default)]
 pub struct InstrumentLists {
     pub builtin: Vec<PluginEntry>,
     pub vst3: Option<Vec<HostedEntry>>,
     pub clap: Option<Vec<HostedEntry>>,
+    pub vst3_none_loaded: Option<String>,
+    pub clap_none_loaded: Option<String>,
 }
 
 /// More entries than this and the instrument menu gets a filter box.
@@ -950,6 +954,8 @@ impl StudioApp {
             builtin: self.builtin_plugins().into_iter().filter(|p| p.instrument).collect(),
             vst3: crate::plugin_scan::cached_vst3().map(hosted),
             clap: crate::plugin_scan::cached_clap().map(hosted),
+            vst3_none_loaded: crate::plugin_scan::none_loaded_vst3(),
+            clap_none_loaded: crate::plugin_scan::none_loaded_clap(),
         }
     }
 }
@@ -968,6 +974,8 @@ impl StudioApp {
             builtin: self.builtin_plugins().into_iter().filter(|p| !p.instrument).collect(),
             vst3: crate::plugin_scan::cached_vst3().map(hosted),
             clap: crate::plugin_scan::cached_clap().map(hosted),
+            vst3_none_loaded: crate::plugin_scan::none_loaded_vst3(),
+            clap_none_loaded: crate::plugin_scan::none_loaded_clap(),
         }
     }
 }
@@ -1029,7 +1037,7 @@ pub fn plugin_menu(
         for e in lists.builtin.iter().filter(|e| keep(&e.name, "")) {
             item(ui, &e.id, &e.name, &mut picked);
         }
-        for (format, list) in [("VST3", &lists.vst3), ("CLAP", &lists.clap)] {
+        for (format, list, none_loaded) in [("VST3", &lists.vst3, &lists.vst3_none_loaded), ("CLAP", &lists.clap, &lists.clap_none_loaded)] {
             ui.separator();
             heading(ui, format);
             match list {
@@ -1043,7 +1051,7 @@ pub fn plugin_menu(
                     }
                 },
                 Some(l) if l.is_empty() => {
-                    crate::chrome::menu_note(ui, egui::RichText::new(format!("No {format} {noun} found")).weak());
+                    crate::chrome::menu_note(ui, egui::RichText::new(empty_list_note(format, noun, none_loaded.as_deref())).weak());
                 }
                 Some(l) => {
                     let mut vendor: Option<&str> = None;
@@ -1065,6 +1073,16 @@ pub fn plugin_menu(
         }
     });
     picked
+}
+
+/// What a plug-in menu says under a format whose list is empty: "No VST3 effects found", unless
+/// its scan found plug-in files and none of them loaded (`none_loaded`, #659), which it says
+/// instead, with the first loader error.
+pub(crate) fn empty_list_note(format: &str, noun: &str, none_loaded: Option<&str>) -> String {
+    match none_loaded {
+        Some(why) => why.to_string(),
+        None => format!("No {format} {noun} found"),
+    }
 }
 
 /// The device chain's "Sends" section for the focused track: rows in columns, then "+ Send".

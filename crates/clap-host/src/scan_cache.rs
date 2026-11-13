@@ -1,6 +1,8 @@
 //! The scan cache file: what each plugin file held when it was last loaded, keyed by the size and
 //! modification time of its binary, so a scan loads only new and changed files (as REAPER does).
-//! A file that failed to load is remembered too and not retried until it changes.
+//! A file that failed to load is remembered too, with the app build that tried it ([`this_host`]),
+//! and not retried until the file changes or another build scans (an update can fix the cause:
+//! the macOS app once refused every plug-in, #659).
 //!
 //! Files can also be loaded in a child process (see [`load_in_child`]), so that a plugin's
 //! start-up never runs in the app: on Windows a library initialising holds the loader lock, which
@@ -36,6 +38,56 @@ pub struct Entry<D> {
     modified_ns: u64,
     pub plugins: Vec<D>,
     pub error: Option<String>,
+    /// The app build that made this entry ([`this_host`]). A failure is reused only by the same
+    /// build; entries written before builds were recorded have none, so their failures are retried.
+    #[serde(default)]
+    host: String,
+}
+
+/// What one scan found for a format: the plug-in files, how many loaded and how many did not, and
+/// the first failure. Remembered failures count, so a scan that reuses them still reports them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanSummary {
+    /// Plug-in files (bundles) found.
+    pub found: usize,
+    /// Files that loaded (some may hold no plug-in this host lists).
+    pub loaded: usize,
+    /// Files that did not load.
+    pub failed: usize,
+    /// Why the first file that did not load failed.
+    pub first_error: Option<String>,
+}
+
+impl ScanSummary {
+    /// The counts of a scan's entries.
+    pub fn of<D>(files: &[Entry<D>]) -> Self {
+        let failed = files.iter().filter(|f| f.error.is_some()).count();
+        ScanSummary { found: files.len(), loaded: files.len() - failed, failed, first_error: files.iter().find_map(|f| f.error.clone()) }
+    }
+
+    /// When plug-in files were found and none of them loaded: what to tell the user instead of
+    /// "none found", with the first error (`format` is "VST3" or "CLAP"). `None` otherwise.
+    pub fn none_loaded_message(&self, format: &str) -> Option<String> {
+        if self.found == 0 || self.loaded > 0 {
+            return None;
+        }
+        let error = self.first_error.as_deref().unwrap_or("no reason given");
+        Some(match self.found {
+            1 => format!("1 {format} plug-in file found, but it could not be loaded: {error}"),
+            n => format!("{n} {format} plug-in files found, but none could be loaded. The first error: {error}"),
+        })
+    }
+}
+
+/// The app build a scan runs in: this crate's version and the size and modification time of the
+/// running program, so an updated, rebuilt or re-signed app is another build. Only the version
+/// when the program cannot be read.
+pub fn this_host() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    match std::env::current_exe().ok().and_then(|exe| stamp(&exe)) {
+        Some((size, modified_ns)) => format!("{version} {size} {modified_ns}"),
+        None => version.to_string(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -95,7 +147,8 @@ pub fn write<D: Serialize>(file: &Path, files: &[Entry<D>]) {
 }
 
 /// One entry per plugin file in `files`: the `known` entry when the file's `binary` (else the
-/// file itself) has the same size and modification time, else what `load` reads now. Before each
+/// file itself) has the same size and modification time (and, for a failure, it was made by the
+/// same `host` build, see [`this_host`]), else what `load` reads now. Before each
 /// load, `ahead(index, count, file)` is told what comes; when it returns `false` the file is left
 /// out (it is neither listed nor cached, so the next scan loads it), as is a file whose `load`
 /// gives `None` (interrupted).
@@ -105,6 +158,7 @@ pub fn scan<D: Clone>(
     binary: impl Fn(&Path) -> Option<PathBuf>,
     load: impl Fn(&Path) -> Option<Result<Vec<D>, String>>,
     ahead: impl Fn(usize, usize, &Path) -> bool,
+    host: &str,
 ) -> Vec<Entry<D>> {
     let count = files.len();
     files
@@ -113,7 +167,8 @@ pub fn scan<D: Clone>(
         .filter_map(|(i, path)| {
             let stamp = stamp(&binary(&path).unwrap_or_else(|| path.clone()));
             if let Some((size, modified_ns)) = stamp
-                && let Some(e) = known.iter().find(|e| e.path == path && e.size == size && e.modified_ns == modified_ns)
+                && let Some(e) =
+                    known.iter().find(|e| e.path == path && e.size == size && e.modified_ns == modified_ns && (e.error.is_none() || e.host == host))
             {
                 return Some(e.clone());
             }
@@ -128,7 +183,7 @@ pub fn scan<D: Clone>(
                 }
             };
             let (size, modified_ns) = stamp.unwrap_or_default();
-            Some(Entry { path, size, modified_ns, plugins, error })
+            Some(Entry { path, size, modified_ns, plugins, error, host: host.to_string() })
         })
         .collect()
 }
@@ -258,7 +313,7 @@ mod tests {
             loads.set(loads.get() + 1);
             Some(if p == b { Err("b is broken".to_string()) } else { Ok(vec![p.display().to_string()]) })
         };
-        let first = scan(vec![a.clone(), b.clone()], &[], |_| None, load, |_, _, _| true);
+        let first = scan(vec![a.clone(), b.clone()], &[], |_| None, load, |_, _, _| true, "build 1");
         assert_eq!(loads.get(), 2);
         let file = d.join("cache.json");
         write(&file, &first);
@@ -266,7 +321,7 @@ mod tests {
         assert_eq!(known.len(), 2);
 
         // Both unchanged: nothing is loaded, the failure is remembered.
-        let again = scan(vec![a.clone(), b.clone()], &known, |_| None, load, |_, _, _| true);
+        let again = scan(vec![a.clone(), b.clone()], &known, |_| None, load, |_, _, _| true, "build 1");
         assert_eq!(loads.get(), 2);
         assert_eq!(again[0].plugins, vec![a.display().to_string()]);
         assert_eq!(again[1].error.as_deref(), Some("b is broken"));
@@ -275,7 +330,7 @@ mod tests {
         std::fs::write(&b, "fixed, longer").ok();
         let c = d.join("c.plug");
         std::fs::write(&c, "c").ok();
-        let next = scan(vec![b.clone(), c.clone()], &known, |_| None, load, |_, _, _| true);
+        let next = scan(vec![b.clone(), c.clone()], &known, |_| None, load, |_, _, _| true, "build 1");
         assert_eq!(loads.get(), 4);
         assert_eq!(next.iter().map(|e| e.path.clone()).collect::<Vec<_>>(), vec![b.clone(), c.clone()]);
 
@@ -290,11 +345,72 @@ mod tests {
                 told.borrow_mut().push((i, n));
                 false
             },
+            "build 1",
         );
         assert_eq!(loads.get(), 4);
         assert_eq!(told.into_inner(), vec![(1, 3), (2, 3)]);
         assert_eq!(skipped.iter().map(|e| e.path.clone()).collect::<Vec<_>>(), vec![a]);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_remembered_failure_is_retried_by_another_build_and_reported_until_then() {
+        let d = dir("host");
+        let (good, bad) = (d.join("good.plug"), d.join("bad.plug"));
+        std::fs::write(&good, "good").ok();
+        std::fs::write(&bad, "bad").ok();
+        let loads = std::cell::RefCell::new(Vec::new());
+        let load = |p: &Path| {
+            loads.borrow_mut().push(p.to_path_buf());
+            Some(if p == bad { Err("refused by the loader".to_string()) } else { Ok(vec!["Good".to_string()]) })
+        };
+        let file = d.join("cache.json");
+        write(&file, &scan(vec![good.clone(), bad.clone()], &[], |_| None, load, |_, _, _| true, "build 1"));
+        let known: Vec<Entry<String>> = read(&file);
+        loads.borrow_mut().clear();
+
+        // The same build reuses both entries, and the summary still reports the failure.
+        let same = scan(vec![good.clone(), bad.clone()], &known, |_| None, load, |_, _, _| true, "build 1");
+        assert!(loads.borrow().is_empty(), "{:?}", loads.borrow());
+        assert_eq!(ScanSummary::of(&same), ScanSummary { found: 2, loaded: 1, failed: 1, first_error: Some("refused by the loader".into()) });
+
+        // Another build loads the failed file again, never the one that loaded.
+        let other = scan(vec![good.clone(), bad.clone()], &known, |_| None, load, |_, _, _| true, "build 2");
+        assert_eq!(*loads.borrow(), vec![bad.clone()]);
+        assert_eq!(other.len(), 2);
+        loads.borrow_mut().clear();
+
+        // A cache file written before builds were recorded: its failures are retried by any build.
+        let old = std::fs::read_to_string(&file).unwrap_or_default().replace("\"host\": \"build 1\"", "\"_was\": 0");
+        assert!(!old.contains("\"host\""), "{old}");
+        std::fs::write(&file, old).ok();
+        let older: Vec<Entry<String>> = read(&file);
+        assert_eq!(older.len(), 2);
+        scan(vec![good, bad.clone()], &older, |_| None, load, |_, _, _| true, "build 1");
+        assert_eq!(*loads.borrow(), vec![bad]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn none_loaded_is_said_only_when_files_were_found_and_every_one_failed() {
+        let entry = |error: Option<&str>| Entry::<String> {
+            path: PathBuf::from("x.plug"),
+            size: 0,
+            modified_ns: 0,
+            plugins: Vec::new(),
+            error: error.map(Into::into),
+            host: String::new(),
+        };
+        assert_eq!(ScanSummary::of::<String>(&[]).none_loaded_message("VST3"), None, "nothing found is \"none found\"");
+        assert_eq!(ScanSummary::of(&[entry(None), entry(Some("a"))]).none_loaded_message("VST3"), None, "one loaded");
+        assert_eq!(
+            ScanSummary::of(&[entry(Some("first")), entry(Some("second"))]).none_loaded_message("CLAP").as_deref(),
+            Some("2 CLAP plug-in files found, but none could be loaded. The first error: first")
+        );
+        assert_eq!(
+            ScanSummary::of(&[entry(Some("refused"))]).none_loaded_message("VST3").as_deref(),
+            Some("1 VST3 plug-in file found, but it could not be loaded: refused")
+        );
     }
 
     #[test]

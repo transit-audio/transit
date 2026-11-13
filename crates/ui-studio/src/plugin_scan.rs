@@ -92,6 +92,8 @@ pub fn inspect() -> serde_json::Value {
         "state": state(),
         "vst3": count(transit_vst3_host::cached().map(|l| l.len())),
         "clap": count(transit_clap_host::cached().map(|l| l.len())),
+        "vst3_none_loaded": none_loaded_vst3(),
+        "clap_none_loaded": none_loaded_clap(),
     })
 }
 
@@ -125,6 +127,17 @@ pub(crate) struct CachedPlugin {
     pub name: String,
     pub vendor: String,
     pub instrument: bool,
+}
+
+/// When the last VST3 scan found plug-in files and none of them loaded: what to say instead of
+/// "none found", with the first loader error (#659). Remembered failures count.
+pub(crate) fn none_loaded_vst3() -> Option<String> {
+    transit_vst3_host::scan_summary()?.none_loaded_message("VST3")
+}
+
+/// [`none_loaded_vst3`] for CLAP.
+pub(crate) fn none_loaded_clap() -> Option<String> {
+    transit_clap_host::scan_summary()?.none_loaded_message("CLAP")
 }
 
 pub(crate) fn cached_vst3() -> Option<Vec<CachedPlugin>> {

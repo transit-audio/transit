@@ -154,8 +154,12 @@ fn a_long_instrument_list_filters_and_groups_by_vendor() {
     use crate::devices::{HostedEntry, InstrumentLists, instrument_menu};
     let hosted =
         |v: &'static str, n: usize| (0..n).map(move |i| HostedEntry { id: format!("vst3:{v}{i}"), name: format!("{v} Synth {i}"), vendor: v.into() });
-    let lists =
-        InstrumentLists { builtin: Vec::new(), vst3: Some(hosted("Arturia", 10).chain(hosted("Native", 10)).collect()), clap: Some(Vec::new()) };
+    let lists = InstrumentLists {
+        builtin: Vec::new(),
+        vst3: Some(hosted("Arturia", 10).chain(hosted("Native", 10)).collect()),
+        clap: Some(Vec::new()),
+        ..Default::default()
+    };
     let ctx = egui::Context::default();
     let mut items = Vec::new();
     let mut filter = "arturia".to_string();
@@ -227,6 +231,7 @@ fn the_plus_menu_is_shaped_like_the_instrument_menu_and_publishes_its_rows() {
         builtin: vec![builtin("gain"), builtin("dither")],
         vst3: Some(hosted("Native", 8).chain(hosted("Arturia", 8)).collect()),
         clap: Some(hosted("Clapper", 2).collect()),
+        ..Default::default()
     };
     let ctx = egui::Context::default();
     let run = |filter: &mut String, rect: &mut [f32; 4], items: &mut Vec<crate::mixer::MenuItem>| {
@@ -252,7 +257,7 @@ fn the_plus_menu_is_shaped_like_the_instrument_menu_and_publishes_its_rows() {
     assert_eq!(items.len(), 2);
     assert!(items.iter().all(|m| m.value.starts_with("vst3:Clapper")));
     // A short list has no filter box.
-    let short = InstrumentLists { builtin: vec![builtin("gain")], vst3: Some(Vec::new()), clap: None };
+    let short = InstrumentLists { builtin: vec![builtin("gain")], vst3: Some(Vec::new()), clap: None, ..Default::default() };
     let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
         plugin_menu(ui, &short, "effects", None, &mut String::new(), &mut rect, &mut items);
     });
@@ -516,4 +521,37 @@ fn a_bounce_with_an_external_instrument_asks_and_leaves_it_out_only_when_chosen(
     }
     assert!(out.exists(), "{}", app.status);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Every text a frame painted, nested shapes included.
+fn painted_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|c| walk(&c.shape, &mut out));
+    out
+}
+
+#[test]
+fn a_format_whose_plug_ins_all_failed_to_load_says_so_instead_of_none_found() {
+    // #659: the macOS app found every plug-in and loaded none, and the menu said "No VST3 effects found".
+    use crate::devices::{InstrumentLists, empty_list_note, plugin_menu};
+    let why = "2 VST3 plug-in files found, but none could be loaded. The first error: refused";
+    assert_eq!(empty_list_note("VST3", "effects", Some(why)), why);
+    assert_eq!(empty_list_note("CLAP", "effects", None), "No CLAP effects found");
+    let lists = InstrumentLists { vst3: Some(Vec::new()), clap: Some(Vec::new()), vst3_none_loaded: Some(why.into()), ..Default::default() };
+    let ctx = egui::Context::default();
+    let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+        plugin_menu(ui, &lists, "effects", None, &mut String::new(), &mut [0.0; 4], &mut Vec::new());
+    });
+    out.textures_delta.clear();
+    let texts = painted_texts(&out.shapes);
+    assert!(texts.iter().any(|t| t == why), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "No VST3 effects found"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "No CLAP effects found"), "a format with nothing found still says so: {texts:?}");
 }

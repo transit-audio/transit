@@ -29,6 +29,8 @@ struct Registry {
     scanner: Option<PathBuf>,
     /// The files the last scan could not load, with the reason.
     problems: Vec<(PathBuf, String)>,
+    /// The last published scan's counts (see [`scan_summary`]).
+    summary: Option<scan_cache::ScanSummary>,
     /// One leaked `PluginInfo` per plugin type that was actually instantiated (bounded by the
     /// number of distinct installed plugins).
     infos: HashMap<String, &'static PluginInfo>,
@@ -92,7 +94,14 @@ pub fn load_bundle(path: &Path) -> Result<Vec<Vst3Descriptor>, Vst3Error> {
 /// Scans `dirs` (uncached). Unloadable files are logged and skipped; the first plugin with a
 /// given id wins.
 pub fn scan_paths(dirs: &[PathBuf]) -> Vec<Vst3Descriptor> {
-    merge(scan_cache::scan(paths::find_bundles(dirs), &[], paths::bundle_binary, |p| Some(load_bundle(p).map_err(|e| e.to_string())), |_, _, _| true))
+    merge(scan_cache::scan(
+        paths::find_bundles(dirs),
+        &[],
+        paths::bundle_binary,
+        |p| Some(load_bundle(p).map_err(|e| e.to_string())),
+        |_, _, _| true,
+        &scan_cache::this_host(),
+    ))
 }
 
 /// The plugins of every file, the first plugin with a given id winning, sorted by name.
@@ -146,11 +155,12 @@ fn scan_now(reuse: bool) -> Vec<Vst3Descriptor> {
         lock().remembered = merge(known.clone());
     }
     SKIP.store(false, Ordering::Release);
+    let host = scan_cache::this_host();
     let ahead = |i: usize, n: usize, p: &Path| {
         *loading() = Some((i, n, p.to_path_buf()));
         !SKIP.load(Ordering::Acquire)
     };
-    let mut files = scan_cache::scan(paths::find_bundles(&dirs), &known, paths::bundle_binary, load, ahead);
+    let mut files = scan_cache::scan(paths::find_bundles(&dirs), &known, paths::bundle_binary, load, ahead, &host);
     let mut rounds = 0;
     // Every round uses the same loader, cancellation, progress and file-level cache entries.
     // Publish after at most four late rounds even if additions continue. Remaining folders stay
@@ -165,8 +175,14 @@ fn scan_now(reuse: bool) -> Vec<Vst3Descriptor> {
             let problems: Vec<(PathBuf, String)> = files.iter().filter_map(|f| Some((f.path.clone(), f.error.clone()?))).collect();
             let list = merge(files.clone());
             log::info!("{}", scan_line("VST3", list.len(), files.len(), problems.len(), started.elapsed()));
+            let summary = scan_cache::ScanSummary::of(&files);
+            // Remembered failures count too: a cached refusal is reported at every scan (#659).
+            if let Some(message) = summary.none_loaded_message("VST3") {
+                log::warn!("{message}");
+            }
             r.scanned = Some(list.clone());
             r.problems = problems;
+            r.summary = Some(summary);
             // The check and publication share the registry lock: a later add merges into scanned.
             drop(r);
             if let Some(f) = &cache_file {
@@ -184,7 +200,7 @@ fn scan_now(reuse: bool) -> Vec<Vst3Descriptor> {
         let mut late_known = files.clone();
         late_known.extend(known.iter().cloned());
         let bundles = paths::find_bundles(&late);
-        let added = scan_cache::scan(bundles.clone(), &late_known, paths::bundle_binary, load, ahead);
+        let added = scan_cache::scan(bundles.clone(), &late_known, paths::bundle_binary, load, ahead, &host);
         // Replace file entries, including failures and skipped files, rather than just merging
         // descriptors: otherwise an updated file can leave stale plugins or duplicate cache rows.
         files.retain(|f| !bundles.contains(&f.path) || added.iter().any(|e| e.path == f.path));
@@ -320,6 +336,10 @@ pub fn skip_scan() {
 
 pub fn problems() -> Vec<(PathBuf, String)> {
     lock().problems.clone()
+}
+
+pub fn scan_summary() -> Option<scan_cache::ScanSummary> {
+    lock().summary.clone()
 }
 
 pub fn scanning() -> bool {

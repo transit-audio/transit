@@ -39,6 +39,7 @@ mod registry;
 mod scan_cache;
 
 pub use plugin::ClapPlugin;
+pub use scan_cache::ScanSummary;
 
 use std::path::{Path, PathBuf};
 use transit_dsp::{Category, Plugin, PluginInfo};
@@ -171,6 +172,13 @@ pub fn set_extra_dirs(dirs: Vec<PathBuf>) {
 /// until they change or the cache is cleared ([`rescan`]).
 pub fn problems() -> Vec<(PathBuf, String)> {
     api::problems()
+}
+
+/// The last scan's counts: plug-in files found, loaded and not loaded, with the first failure
+/// (remembered failures included). `None` until a scan publishes.
+/// [`ScanSummary::none_loaded_message`] says what to show when files were found and none loaded.
+pub fn scan_summary() -> Option<ScanSummary> {
+    api::scan_summary()
 }
 
 /// The argument that makes the scan program set with [`set_scanner`] load one file:
