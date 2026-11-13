@@ -40,7 +40,7 @@ layer and egui UI.
 
 transit changes a default only after a measurement on the reference hardware. The multicore render became the default on two records: the [gate 6 run on a Focusrite Scarlett](docs/benchmarks/2026-10-28-scarlett-render-workers-gate-6.md) and the eight-hour endurance run recorded on [issue #130](https://github.com/transit-audio/transit/issues/130), both listed in the [benchmark index](docs/benchmarks/README.md).
 
-- Every defect that gets past a gate becomes an [escape record](docs/escapes) (39 so far) naming the gate that now catches it.
+- Every defect that gets past a gate becomes an [escape record](docs/escapes) (40 so far) naming the gate that now catches it.
 - Every design change is an [ADR](docs/adr) that cites its evidence, for example [ADR 0029](docs/adr/0029-strip-job-slots.md).
 - Every merge gets a [refutation review](docs/contributing/evidence/refutation-review.md) that tries to break it.
 - Design rounds come before code: the [judging-first record](docs/contributing/evidence/judging-first.md) counts what they bought.
