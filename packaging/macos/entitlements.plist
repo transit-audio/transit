@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Hardened-runtime entitlements for transit. The app is pure Rust, loads no unsigned code,
-     needs no JIT, and is not sandboxed (it opens files by path, from the command line and
+<!-- Hardened-runtime entitlements for transit. The app itself is pure Rust and needs no JIT, but
+     it hosts plug-ins: it loads VST3, CLAP and Audio Unit code signed by other developers (or not
+     signed at all). It is not sandboxed (it opens files by path, from the command line and
      drag-and-drop). Add exceptions here only with a reason in a comment. -->
 <plist version="1.0">
 <dict>
   <!-- Recording: the hardened runtime blocks audio input (CoreAudio via cpal) without this,
        even after the user grants microphone access (NSMicrophoneUsageDescription). -->
   <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <!-- Plug-ins: transit hosts third-party VST3, CLAP and Audio Unit plug-ins, each signed by
+       its own vendor. Library validation, which the hardened runtime turns on, loads only code
+       signed by Apple or by the app's own team, so without this every plug-in is refused when
+       it loads and a scan finds none (#659). -->
+  <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
 </dict>
 </plist>

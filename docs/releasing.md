@@ -82,7 +82,12 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
 With all five repository secrets set, the macOS job imports the certificate into a temporary
 keychain, signs `transit.app` and the DMG (hardened runtime, `packaging/macos/entitlements.plist`),
 submits them with `notarytool --wait` and staples the tickets. With any of them missing the step logs
-that it is skipping and the DMG is ad-hoc signed. The owner provides:
+that it is skipping and the DMG is ad-hoc signed. Both ways the app is signed with the hardened
+runtime and the same entitlements, each with its reason in the plist:
+`com.apple.security.device.audio-input` (recording) and
+`com.apple.security.cs.disable-library-validation` (hosting third-party VST3, CLAP and Audio Unit
+plug-ins, which are signed by their own vendors; without it the hardened runtime refuses to load
+them and a scan finds none, #659). The owner provides:
 
 - `MACOS_CERTIFICATE_P12`: a Developer ID Application certificate exported with its private key
   as a `.p12`, base64-encoded (`base64 -i certificate.p12 | pbcopy`).
