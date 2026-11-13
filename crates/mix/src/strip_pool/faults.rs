@@ -35,7 +35,7 @@ pub(super) struct Counters {
     pub(super) upstream_tail: AtomicU64,
     /// The last block's render path code (`crate::render_path`), stored only on a change.
     pub(super) render_path: AtomicU32,
-    /// Aux task overruns, busy and late, and aux hole task-blocks (G1: the acceptance rule's `H`).
+    /// Aux task overruns, busy and late, and aux hole task-blocks (the tail acceptance rule's `H`, render-graph-measurement.md).
     pub(super) aux_overruns_busy: AtomicU64,
     pub(super) aux_overruns_late: AtomicU64,
     pub(super) aux_holes: AtomicU64,

@@ -293,7 +293,7 @@ pub struct StripFaults {
     /// Render worker threads (0: no pool, the strips render serially).
     pub workers: u64,
     /// The last block's render path and, with the tail switch on, why it did not take the tail
-    /// graph (G9; [`crate::render_path_text`] reads it).
+    /// graph (#174; [`crate::render_path_text`] reads it).
     pub render_path: u32,
     /// The bus tail's task graph is switched on ([`crate::MixEngine::tail_enabled`]).
     pub tail_on: bool,

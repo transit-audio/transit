@@ -1,4 +1,4 @@
-//! The render graph tail's acceptance measurement (G1 of the tail audit; ADR 0029 section 11;
+//! The render graph tail's acceptance measurement (#174, #635; ADR 0029 section 11;
 //! docs/contributing/knowledge/render-graph-measurement.md): a run's row from two edges, each a
 //! render measurement mailbox response with the callback telemetry read beside it, and the
 //! paired acceptance check of the serial tail against the tail graph.

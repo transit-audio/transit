@@ -338,7 +338,7 @@ pub struct Report {
     pub note_view_dropped: Option<u64>,
     /// Recorded takes the session could not place (#192): the file and what it holds.
     pub unplaced_takes: Vec<String>,
-    /// The render measurement's table, rows and acceptance lines (G1); empty without a run.
+    /// The render measurement's table, rows and acceptance lines (#174); empty without a run.
     pub render_measurement: Vec<String>,
     pub log_dir: Option<PathBuf>,
     pub log_lines: Vec<String>,

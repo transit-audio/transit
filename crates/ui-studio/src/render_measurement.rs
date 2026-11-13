@@ -1,4 +1,4 @@
-//! The render graph tail's paired measurement through the control channel (G1 of the tail audit;
+//! The render graph tail's paired measurement through the control channel (#174, #635;
 //! docs/contributing/knowledge/render-graph-measurement.md, "Running the paired measurement").
 //!
 //! `measure.start {label, tail}` sets the tail switch for the run (`serial` or `graph`, the

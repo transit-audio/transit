@@ -23,7 +23,7 @@ impl Player {
     pub fn strip_faults(&self) -> Option<transit_mix::StripFaults> {
         self.owner().ok().and_then(|owner| owner.strip_faults())
     }
-    /// Posts a render measurement request (G1; docs/contributing/knowledge/render-graph-measurement.md):
+    /// Posts a render measurement request (#174; docs/contributing/knowledge/render-graph-measurement.md):
     /// the live engine captures its counters at a later block's entry. False without render
     /// workers, or while a request or response is outstanding. Never waits for the audio side.
     pub fn request_render_measurement(&self, identity: u64) -> bool {

@@ -4,7 +4,7 @@ use transit_rt::task_graph::{GraphHost, Rendered, Start, StartAt, TaskGraph, Win
 use transit_rt::worker_set::Poll;
 
 /// The time a published aux must leave a worker to wake and claim it, over its worst case, before
-/// it is published (G5 of the tail audit; ADR 0029 section 11, amended 2026-11-12): an aux whose
+/// it is published (the wake margin; ADR 0029 section 11, amended 2026-11-12): an aux whose
 /// worst case fits the time left only without it renders on the callback instead. Worker wake
 /// stayed under 50 µs for 99.99% of claims in the gate 6 measurement on the reference hardware
 /// (docs/benchmarks/2026-10-28-scarlett-render-workers-gate-6.md).
@@ -64,7 +64,7 @@ impl Host<'_, '_> {
     }
 
     /// An aux is published when it fits: Open window, history, its worst case plus the wake margin
-    /// within the time left, and company (G11: a lone ready aux, `at.alone`, renders on the
+    /// within the time left, and company (the lone-aux rule, ADR 0029 section 11: a lone ready aux, `at.alone`, renders on the
     /// callback; publishing it would only wake a worker for the callback to take it back). The
     /// force-publish seam forces all of it but the window.
     fn fits(&self, slot: usize, at: StartAt) -> bool {

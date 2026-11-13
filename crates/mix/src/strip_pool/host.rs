@@ -56,7 +56,7 @@ impl StripPool {
                 OverrunCause::Unstarted => (1, &self.counters.overruns_unstarted),
                 OverrunCause::UpstreamMissed => (2, &self.counters.upstream_missed),
             };
-            // G1: an aux task Late or Busy in any sub-block is one hole task-block of the host
+            // The tail acceptance rule's `H`: an aux task Late or Busy in any sub-block is one hole task-block of the host
             // block (`H`), and its first own overrun of the host block is an aux task overrun.
             let aux = i >= self.tail_from;
             if aux && matches!(cause, OverrunCause::Busy | OverrunCause::Late) && *seen & 4 == 0 {

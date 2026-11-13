@@ -1,4 +1,4 @@
-//! The "Render path" row of the diagnostics report (G9 of the tail audit): which path the last
+//! The "Render path" row of the diagnostics report (#174, #635): which path the last
 //! block took (strips serial, on the render workers, through the task graph, or the strips and
 //! the bus tail through the task graph) and why the bus tail graph is on or off. The callback
 //! stores one code per block in a relaxed atomic, only when it changes (allocation-free); the
@@ -82,7 +82,7 @@ mod tests {
         render_path_text(&StripFaults { render_path: encode(path, reason), tail_on, tail_why, ..StripFaults::default() })
     }
 
-    /// G9: the row names the last block's path and the tail switch with its reason, injected.
+    /// #174: the row names the last block's path and the tail switch with its reason, injected.
     #[test]
     fn the_render_path_row_names_the_path_and_why_the_tail_is_on_or_off() {
         assert_eq!(text(0, 0, false, TailWhy::Default), "no block rendered yet; bus tail graph off (default)");

@@ -225,12 +225,12 @@ fn seams_default_off_and_reset_per_host_block() {
     assert_eq!(set.slot_overrides(0), off);
 }
 
-/// G4: in the sweep (the dependents of a task a worker finished), every ready task of the batch is
+/// The batch order (ADR 0029 section 11): in the sweep (the dependents of a task a worker finished), every ready task of the batch is
 /// started, and the published ones woken, before the callback renders any of its own; the
 /// callback's renders come in table order. Mutation: rendering a callback task inside the step
 /// loop (as the wave did not) puts `render` between the starts and reverses the renders.
 #[test]
-fn g4_sweep_starts_the_whole_batch_before_a_callback_render_in_table_order() {
+fn batch_order_sweep_starts_the_whole_batch_before_a_callback_render_in_table_order() {
     let edges: Vec<_> = (1..5).map(|t| (0, t, EdgeKind::Soft)).collect();
     let graph = TaskGraph::with_slots(1, &[Some(0), Some(1), Some(2), Some(3), Some(4)], &edges);
     let mut host = Host::new(5, 5);
@@ -243,14 +243,14 @@ fn g4_sweep_starts_the_whole_batch_before_a_callback_render_in_table_order() {
     assert_eq!((report.mixed, host.set.stats().misuse), (3, 0));
 }
 
-/// G5: a published tail task the callback refuses by admission (barred after a recent overrun, or
+/// The reclaim of a lone unclaimed aux (ADR 0029 section 11): a published tail task the callback refuses by admission (barred after a recent overrun, or
 /// a worst case longer than the time left) is taken before the deadline when the callback waits
 /// for nothing a worker holds, and counted as a pre-deadline reclaim, not left to spin until the
 /// deadline (where a worker could still claim it and silence the bus). Zero workers, a 60 s
 /// deadline, no clock assertion. Mutation: dropping the tail rule spins to the deadline, which
 /// then reclaims it (`unclaimed_at_deadline` 1, `late`).
 #[test]
-fn g5_an_unclaimed_tail_task_the_admission_refuses_is_taken_before_the_deadline() {
+fn lone_reclaim_an_unclaimed_tail_task_the_admission_refuses_is_taken_before_the_deadline() {
     for barred in [true, false] {
         let mut set = set_of(&Fake::new(1, Duration::ZERO), 0);
         assert!(set.begin_block(1));
@@ -272,10 +272,10 @@ fn g5_an_unclaimed_tail_task_the_admission_refuses_is_taken_before_the_deadline(
     }
 }
 
-/// G5 with the no-reclaim seam: the tail rule is a pre-deadline reclaim, so the seam that
+/// The lone-aux reclaim with the no-reclaim seam: the tail rule is a pre-deadline reclaim, so the seam that
 /// suppresses those suppresses it; the deadline reclaim still renders the task (B2).
 #[test]
-fn g5_the_no_reclaim_seam_also_suppresses_the_tail_rule() {
+fn lone_reclaim_the_no_reclaim_seam_also_suppresses_the_tail_rule() {
     use super::seams::SlotOverrides;
     let mut set = set_of(&Fake::new(1, Duration::ZERO), 0);
     set.arm_slot_overrides(0, SlotOverrides { no_reclaim: true, ..SlotOverrides::default() });
@@ -293,7 +293,7 @@ fn g5_the_no_reclaim_seam_also_suppresses_the_tail_rule() {
 }
 
 /// #215 item 1, through the race seam: a worker's claim and the callback's deadline reclaim of a
-/// published tail task, in both orders. Worker first: the policy of `claimed_at_deadline` (G10:
+/// published tail task, in both orders. Worker first: the policy of `claimed_at_deadline` (ADR 0029 section 11:
 /// `Late`, silent for the block, the result retired unread, never rendered by the callback).
 /// Callback first: rendered inline at the deadline, and the worker's claim fails. Either way the
 /// task is executed exactly once. Mutation: dropping the seam's call before the deadline reclaim

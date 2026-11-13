@@ -321,7 +321,7 @@ pub struct Control {
     counters: Arc<Counters>,
     /// The live engine's render-worker faults, when it has workers (the default, ADR 0029).
     strip_faults: Option<transit_mix::StripFaultsReader>,
-    /// The render measurement mailbox's one consumer (G1), taken before the engine went to the
+    /// The render measurement mailbox's one consumer (#174, the tail measurement), taken before the engine went to the
     /// audio side; control-side only (the lock is never touched by the callback).
     measurement: Option<std::sync::Mutex<transit_rt::worker_set::queue::MeasurementReader>>,
 }
@@ -550,7 +550,7 @@ impl Control {
         self.strip_faults.as_ref().map(transit_mix::StripFaultsReader::snapshot)
     }
 
-    /// Posts a render measurement request (G1) with `identity`: captured at a later host-block
+    /// Posts a render measurement request (#174) with `identity`: captured at a later host-block
     /// entry, before any publication. False without render workers, or while a request or an
     /// unread response is outstanding. Control side; never waits.
     pub fn request_render_measurement(&self, identity: u64) -> bool {

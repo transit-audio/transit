@@ -74,7 +74,7 @@ impl WorkerSet {
         let shared = Arc::clone(&self.shared);
         loop {
             let mut open = false;
-            // A worker holds a strip the callback waits for (G5: then a tail task keeps waiting).
+            // A worker holds a strip the callback waits for (then a tail task keeps waiting; #635 item 1).
             let mut claimed = false;
             // The first unclaimed tail task flagged for the deadline reclaim, in publish order.
             let mut tail = None;
@@ -107,7 +107,7 @@ impl WorkerSet {
             if !open {
                 return Poll::Finished;
             }
-            // G5: nothing resolved, and the callback waits for nothing a worker holds: an unclaimed
+            // The reclaim of a lone unclaimed aux (ADR 0029 section 11): nothing resolved, and the callback waits for nothing a worker holds: an unclaimed
             // tail task is rendered now rather than at the deadline (`reclaim_tail_alone`).
             if !claimed
                 && now < deadline

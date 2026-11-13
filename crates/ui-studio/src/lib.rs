@@ -376,7 +376,7 @@ pub struct StudioApp {
     pub builtin_editor: builtin_editor::EditorState,
     /// The Copy diagnostics buttons' state (#114).
     pub diag: diagnostics::DiagState,
-    /// The control channel's render measurement (G1 of the tail audit).
+    /// The control channel's render measurement (#174, the tail measurement).
     pub measure: render_measurement::MeasureState,
 }
 

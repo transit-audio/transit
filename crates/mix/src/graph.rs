@@ -345,7 +345,7 @@ mod tests {
         }
     }
 
-    /// G9: the tail switch's parse is pure: unset, `1`, `0` and anything else, whitespace trimmed.
+    /// #174: the tail switch's parse is pure: unset, `1`, `0` and anything else, whitespace trimmed.
     #[test]
     fn the_tail_setting_parses_unset_1_0_and_anything_else() {
         assert_eq!(render_tail_setting(None), RenderTailSetting::Unset);
@@ -361,7 +361,7 @@ mod tests {
         assert_eq!(RENDER_TAIL_ENV, "TRANSIT_RENDER_TAIL");
     }
 
-    /// G9: the switch for both defaults, so the flip's opt-out is built and tested now: with the
+    /// #174: the switch for both defaults, so the flip's opt-out is built and tested now: with the
     /// default on, `0` (and the graph's opt-out) turns the tail off and anything else keeps it on;
     /// with the default off (today), only `1` turns it on. Unrecognized is treated as unset.
     #[test]

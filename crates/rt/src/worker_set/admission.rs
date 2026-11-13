@@ -19,7 +19,7 @@ impl WorkerSet {
         true
     }
 
-    /// G5 of the tail audit: the pre-deadline transition of a tail task (flagged with
+    /// The reclaim of a lone unclaimed aux (ADR 0029 section 11): the pre-deadline transition of a tail task (flagged with
     /// [`WorkerSet::set_inline_at_deadline`]) still unclaimed while the callback waits for nothing
     /// a worker holds. The callback would render it at the deadline whatever its history (ADR 0029
     /// B2), and no executor gains by its waiting: a worker that claimed it now, when it no longer

@@ -20,7 +20,7 @@
 //!    home and checks its completion identity ([`GraphHost::take`]); its dependents whose counter
 //!    reaches zero are a new batch, run as the wave is.
 //!
-//! **One batch** (the wave and every later batch alike; G4 of the tail audit): every ready step
+//! **One batch** (the wave and every later batch alike; the batch order of ADR 0029 section 11): every ready step
 //! is started first (a callback task only queued), then the newly published are woken, and only
 //! then does the callback render its queued tasks, one at a time and lowest task number first
 //! (table order), the ready dependents of each render being started and woken before the next
@@ -395,7 +395,7 @@ pub struct StartAt {
     /// In the Open window, nothing would run beside the task if it were published: no published
     /// task of the block is pending, and no other render task is ready in this batch (none waits
     /// to be started, none is queued for the callback). A worker woken for it would only find the
-    /// callback taking it back (G11 of the tail audit): a host may render it on the callback.
+    /// callback taking it back (the lone-aux rule, ADR 0029 section 11): a host may render it on the callback.
     pub alone: bool,
     /// The time to the deadline at the window decision, from the same clock read (#293 item 2:
     /// a host's fit decision uses it rather than a later read of its own); zero when Closed.

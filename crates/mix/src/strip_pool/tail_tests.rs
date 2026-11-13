@@ -252,7 +252,7 @@ fn the_fit_uses_the_drivers_time_left() {
 }
 
 /// T4a: always-publish must fail here; the worst case plus the wake margin equal to the time
-/// left is accepted (G5: one nanosecond less is not), Closed is never published.
+/// left is accepted (the wake margin: one nanosecond less is not), Closed is never published.
 #[test]
 fn t4a_production_fit() {
     for (worst, left, window, want) in [
@@ -1058,14 +1058,14 @@ fn t19_held_aux_chain_adoption_uses_fresh_input_and_latency() {
     }
 }
 
-/// G11: a lone ready aux (the one return of a small session, ready after MIX with no other render
+/// The lone-aux rule (ADR 0029 section 11): a lone ready aux (the one return of a small session, ready after MIX with no other render
 /// pending or queued) is rendered on the callback, never published: publishing it only woke a
 /// worker for the callback to take it back. Four phase-1 strips are published each block, the aux
 /// is a tail callback render each block, and the callback makes one wake call per block (the
 /// phase-1 batch), not two. Zero workers, a 60 s deadline. Mutation: publishing a lone aux makes
 /// `published` five a block and `tail_callback` zero.
 #[test]
-fn g11_a_lone_ready_aux_renders_on_the_callback_without_a_publish_or_a_wake() {
+fn a_lone_ready_aux_renders_on_the_callback_without_a_publish_or_a_wake() {
     let _switch = SWITCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (mut rig, ..) = fixture(false);
     MixEngine::force_graph(true);
@@ -1108,7 +1108,7 @@ fn take_counts_a_refused_stamp_read_as_a_conflict_not_as_stale() {
     });
 }
 
-/// G1: aux task overruns and the acceptance rule's `H` are counted per host block: an aux Busy in
+/// The tail measurement (#174): aux task overruns and the acceptance rule's `H` are counted per host block: an aux Busy in
 /// two sub-blocks of one host block is one hole and one busy aux overrun; a phase-1 strip's
 /// overrun is neither; the next host block counts again. Outcomes injected (a Busy skip), no
 /// worker, no clock. Mutation: counting per sub-block makes the holes 3.

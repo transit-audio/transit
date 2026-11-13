@@ -306,7 +306,7 @@ pub struct Stats {
     /// Strips skipped because a task they depend on missed ([`OverrunCause::UpstreamMissed`]).
     pub upstream_missed: u64,
     /// Calls of [`WorkerSet::wake`] with work to hand out (a nonzero count): one per batch that
-    /// published something, whatever the workers were doing (G11 of the tail audit).
+    /// published something, whatever the workers were doing (the lone-aux rule, ADR 0029 section 11).
     pub wakes: u64,
 }
 
@@ -997,7 +997,7 @@ impl WorkerSet {
         self.outcomes[strip]
     }
 
-    /// **The late-claim policy, in one place** (G10 of the tail audit; ADR 0029 section 11). A
+    /// **The late-claim policy, in one place** (ADR 0029 section 11; #635). A
     /// slot a worker claimed and had not finished when the callback resolves the deadline: the
     /// callback never waits for it. The strip is `Late`: silent for the block (its result is
     /// retired unread at a later `begin_block`), barred from inline renders, and `Busy` for as long

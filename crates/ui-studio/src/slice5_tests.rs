@@ -719,7 +719,7 @@ fn the_strip_deadline_share_prints_right_after_the_render_workers() {
     assert!(!serial.iter().any(|r| r.starts_with("Strip deadline:")), "no workers, no share: {serial:?}");
 }
 
-/// G9: the render path row comes right after the strip deadline, with the path and the tail
+/// #174: the render path row comes right after the strip deadline, with the path and the tail
 /// switch's reason (the wording is `transit_mix::render_path_text`'s, tested there).
 #[test]
 fn the_render_path_prints_after_the_strip_deadline() {

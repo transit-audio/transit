@@ -447,7 +447,7 @@ impl MixEngine {
                             .count()
                         >= PARALLEL_STRIPS)
         });
-        // G9: why a block with the tail switch on did not take the tail graph, for the report.
+        // #174: why a block with the tail switch on did not take the tail graph, for the report.
         let tail_reason = match self.pool.as_ref() {
             Some(pool) if !tail_eligible && on_audio_thread() && MixEngine::tail_enabled() => crate::render_path::tail_reason(
                 self.serial || MixEngine::serial_forced(),
