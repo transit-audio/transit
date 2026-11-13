@@ -760,6 +760,8 @@ use session::{replace_with, write_synced};
 
 pub(crate) mod disk;
 pub use disk::{add_disk_source, copy_path};
+mod disk_reads;
+pub use disk_reads::{DiskReads, unreadable_line};
 mod recording;
 mod save_media;
 pub use recording::{

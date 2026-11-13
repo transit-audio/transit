@@ -47,6 +47,15 @@ fn report(e: &mut Engine, _: &Value) -> Result<Value> {
                     );
                     continue;
                 };
+                // A streamed take whose file failed to open or read the last time it was tried (#523).
+                if let Some(why) = audio.disk.as_deref().and_then(|d| d.fault()) {
+                    add(
+                        "unreadable_audio",
+                        &format!(
+                            "The file of this streamed take could not be read ({why}); it plays as silence. Reconnect its drive or restore the file, then play again."
+                        ),
+                    );
+                }
                 if audio.buffer.sample_rate != s.sample_rate.hz() {
                     add("sample_rate_mismatch", "Loaded audio differs from the session sample rate. Reimport it to convert to the session rate.");
                 }
@@ -76,7 +85,7 @@ fn report(e: &mut Engine, _: &Value) -> Result<Value> {
     Ok(json!({"audio_clips": clips, "active_audio_end_samples": active_end,
         "active_audio_end_seconds": (s.sample_rate.hz() != 0).then(|| active_end as f64 / f64::from(s.sample_rate.hz())),
         "issue_count": issues.len(), "healthy": issues.is_empty(), "issues": issues,
-        "scope": "All playlists; loaded audio availability and clip bounds only. Does not check files on disk, signal levels, plugins or routing."}))
+        "scope": "All playlists; loaded audio availability, the last read of streamed takes, and clip bounds only. Does not check files on disk, signal levels, plugins or routing."}))
 }
 
 #[cfg(test)]
@@ -144,6 +153,24 @@ mod tests {
         let r = check(&mut e);
         assert_eq!(r["issues"][0]["code"], "invalid_clip");
         assert_eq!(r["issues"][1]["code"], "source_bounds");
+    }
+
+    #[test]
+    fn a_streamed_take_whose_file_could_not_be_read_is_reported_issue_523() {
+        use transit_model::disk::{DiskSource, Opener};
+        let mut e = crate::demo::demo_engine();
+        let id = e.session().sources.first().unwrap().id;
+        let sr = e.session().sample_rate.hz();
+        let opener: Opener = Arc::new(|| Err("gone".into()));
+        let d = DiskSource::with_window(std::path::PathBuf::from("lost.wav"), 1, 1_000_000, sr, 1_024, opener);
+        e.session_mut().pool.insert(id, Arc::new(SourceAudio::disk(Arc::clone(&d))));
+        let unreadable = |r: &Value| r["issues"].as_array().unwrap().iter().filter(|i| i["code"] == "unreadable_audio").count();
+        assert_eq!(unreadable(&check(&mut e)), 0, "not tried yet: the query opens nothing");
+        assert!(d.check().is_err());
+        let r = check(&mut e);
+        assert!(unreadable(&r) > 0, "{r}");
+        let issue = r["issues"].as_array().unwrap().iter().find(|i| i["code"] == "unreadable_audio").unwrap();
+        assert!(issue["message"].as_str().unwrap().contains("could not be opened: gone"), "{issue}");
     }
 
     #[test]
