@@ -96,7 +96,9 @@ pub(super) fn bytes(s: &Session) -> Result<usize, CompileError> {
 }
 
 /// Builds `s`'s group indexes. Call only after [`bytes`] (through `measure`) admitted them: the two
-/// walk the same lanes and envelopes, so what is allocated here is what was counted.
+/// walk the same lanes and envelopes, so what is allocated is at most what was counted. A clip envelope
+/// that is not sorted by time (a file can hold one; `Session::sanitize` sorts lanes, not envelopes) gets
+/// no index rather than a meaningless one: the plan still compiles and plays exactly as before.
 pub(super) fn build(s: &Session) -> GainIndexes {
     let total: usize =
         s.tracks.iter().map(|t| lanes(t).map(|(_, l)| l.points.len()).sum::<usize>() + envelopes(t).map(|c| c.gain_env.len()).sum::<usize>()).sum();

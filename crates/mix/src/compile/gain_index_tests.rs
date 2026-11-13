@@ -150,3 +150,22 @@ fn every_mixer_gain_lane_and_clip_envelope_gets_its_index_and_device_lanes_get_n
     check(&env, &s2);
     rig.comp.reclaim(env);
 }
+
+#[test]
+fn an_unsorted_clip_envelope_gets_no_index_and_the_plan_still_compiles() {
+    let (mut s, a, _) = audio_session();
+    s.track_mut(a).unwrap().lane_mut(&AutoParam::Volume).points = points(&[(0, 0.0), (64, -6.0)]);
+    let clip = {
+        let c = &mut s.track_mut(a).unwrap().playlist_mut().unwrap().clips[0];
+        c.gain_env = vec![(100, -6.0), (10, 0.0), (50, -3.0)];
+        c.id
+    };
+    let mut rig = Rig::new();
+    let env = rig.compile(&s);
+    let ix = &env.plan().gain_indexes;
+    assert_eq!(ix.envelope(a, clip), None, "no meaningless index for an unsorted envelope");
+    assert!(ix.lane(a, 0).is_some(), "the sorted lane keeps its index");
+    // Counted conservatively: the unsorted envelope's bytes were admitted, though not allocated.
+    assert!(bytes(&s).unwrap() >= ix.data.len() * size_of::<u32>() + ix.entries.len() * size_of::<IndexEntry>());
+    rig.comp.reclaim(env);
+}

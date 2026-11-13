@@ -151,6 +151,13 @@ fn the_group_index_holds_each_points_last_group_member() {
     let mut table = [9u32; 9];
     assert!(fill_group_index(&pts, &mut table));
     assert_eq!(table, [1, 1, 2, 5, 5, 5, 6, 9, 9]);
+    // Unsorted points (a clip envelope as a file may hold it): no index, nothing written.
+    let unsorted = [(10i64, 0.0f32), (5, 1.0), (20, 2.0)];
+    assert!(!is_sorted_by_time(&unsorted) && is_sorted_by_time(&pts));
+    assert!(build_group_index(&unsorted).is_none());
+    let mut untouched = [9u32; 3];
+    assert!(!fill_group_index(&unsorted, &mut untouched));
+    assert_eq!(untouched, [9; 3]);
     let mut short = [9u32; 6];
     assert!(!fill_group_index(&pts, &mut short));
     assert_eq!(short, [9; 6]);

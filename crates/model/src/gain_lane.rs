@@ -15,6 +15,11 @@
 //!   crossing however many points share a time. The index changes cost, never values:
 //!   [`gain_value_at`] needs none and returns the same value.
 //!
+//! **Precondition:** breakpoints sorted by time ([`is_sorted_by_time`]). Lanes are (`Session::sanitize`
+//! sorts them stably); clip envelopes are kept as written, so the plan compiler builds no index for an
+//! unsorted one ([`fill_group_index`] refuses it) and a debug build asserts the order where the
+//! evaluator interpolates.
+//!
 //! Device-parameter lanes keep [`crate::AutomationLane::value_at`]; nothing in the mixer calls this
 //! module before ADR 0058 slice G1 (lanes) and G3 (clip envelopes). Allocation-free except
 //! [`build_group_index`], which runs off the audio thread (the plan compiler).
@@ -61,8 +66,17 @@ pub fn group_index_bytes(points: usize) -> Option<usize> {
     points.checked_mul(size_of::<u32>())
 }
 
+/// True when `points` are sorted by time (equal times allowed): the precondition of every function in
+/// this module. Lanes are sorted by `Session::sanitize`; clip envelopes are kept as written, so a file
+/// can hold an unsorted one.
+#[must_use]
+pub fn is_sorted_by_time<P: GainPoint>(points: &[P]) -> bool {
+    points.iter().zip(points.iter().skip(1)).all(|(p, q)| p.at() <= q.at())
+}
+
 /// The group index of `points` (sorted by time): for each point, the index of the last point that
-/// shares its time. `None` when a `u32` cannot index the points. Allocates: off the audio thread only.
+/// shares its time. `None` when a `u32` cannot index the points or they are not sorted by time (no
+/// meaningless index is ever built). Allocates: off the audio thread only.
 #[must_use]
 pub fn build_group_index<P: GainPoint>(points: &[P]) -> Option<Box<[u32]>> {
     group_index_bytes(points.len())?;
@@ -71,10 +85,10 @@ pub fn build_group_index<P: GainPoint>(points: &[P]) -> Option<Box<[u32]>> {
 }
 
 /// [`build_group_index`] into storage the caller allocated (the plan compiler's one table): writes
-/// `points.len()` entries to the front of `out`. False, writing nothing, when `out` is too short or a
-/// `u32` cannot index the points. Allocates nothing.
+/// `points.len()` entries to the front of `out`. False, writing nothing, when `out` is too short, a
+/// `u32` cannot index the points, or they are not sorted by time. Allocates nothing.
 pub fn fill_group_index<P: GainPoint>(points: &[P], out: &mut [u32]) -> bool {
-    if group_index_bytes(points.len()).is_none() {
+    if group_index_bytes(points.len()).is_none() || !is_sorted_by_time(points) {
         return false;
     }
     let Some(out) = out.get_mut(..points.len()) else { return false };
@@ -126,7 +140,8 @@ impl GainCursor {
 
     /// The lane's value at `at`, for a cursor positioned there ([`Self::seek`] or [`Self::advance`]
     /// to `at`); `None` for an empty lane. `step` holds the outgoing value between groups (Mute,
-    /// SendMute).
+    /// SendMute). Precondition: `points` sorted by time ([`is_sorted_by_time`]); a debug build checks
+    /// that the two points it interpolates between bracket `at`.
     #[must_use]
     pub fn value<P: GainPoint>(&self, points: &[P], at: Samples, step: bool) -> Option<f64> {
         let next = points.get(self.next);
@@ -142,6 +157,7 @@ impl GainCursor {
             (Some(u), None) => Some(f64::from(u.value())),
             (Some(u), Some(w)) => {
                 let (a, b) = (u.at(), w.at());
+                debug_assert!(a < at && at < b, "gain lane points not sorted by time, or the cursor is not at {at}");
                 let u = f64::from(u.value());
                 if step {
                     return Some(u);
