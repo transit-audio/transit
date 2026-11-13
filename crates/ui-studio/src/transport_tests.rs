@@ -490,3 +490,26 @@ fn a_last_lap_too_short_to_be_a_take_is_said_at_stop_issue_634() {
     let said = format!("{}: the last 150 frames (3.1 ms) stay in {}.", transit_engine::take_laps::SHORT_LAP_NOTE, take.0.display());
     assert!(status.ends_with(&said), "{status}");
 }
+
+/// Judge round 1, item 3: 101 take files each with a last lap too short to be a take. The
+/// engine's message list keeps only the last 100 notes, yet the status line gives the exact count
+/// (the engine counts them as it places) and points to the log, which has every one.
+#[test]
+fn more_short_laps_than_the_message_list_holds_are_counted_exactly() {
+    let take = TakeFile::new("short-laps-101");
+    let mut t = T::new();
+    let tracks: Vec<TrackId> = (0..101)
+        .map(|_| TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap()))
+        .collect();
+    t.app.record_start = 0;
+    t.app.take_plan = Some(transit_engine::io::Recording { pass: Some(15_950), rate: 48_000, ..transit_engine::io::Recording::new(0) });
+    t.app.finished_test_takes = Some((tracks.iter().map(|tr| (*tr, take.0.to_path_buf())).collect(), None));
+    t.app.engine.transport.recording = true;
+    t.app.start_play(4, None, None);
+    t.stop(1);
+    let held = t.app.engine.messages.iter().filter(|m| m.starts_with(transit_engine::take_laps::SHORT_LAP_NOTE)).count();
+    assert!(held <= 100, "the list dropped some: {held}");
+    let status = &t.app.status;
+    let said = format!("{}: 101 take files keep such a lap (see the log).", transit_engine::take_laps::SHORT_LAP_NOTE);
+    assert!(status.ends_with(&said), "{status}");
+}

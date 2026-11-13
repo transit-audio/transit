@@ -395,6 +395,14 @@ impl Player {
         *self.midi_pass.try_borrow_mut().map_err(|_| PlayerError::Busy.to_string())? = Some(MidiPass { reader, tracks });
         Ok(())
     }
+    /// The latch of the MIDI pass under way, once the audio thread applied it.
+    pub fn midi_recording_latch(&self) -> Option<record::start::Point> {
+        let pass = self.midi_pass.try_borrow().ok()?;
+        match pass.as_ref()?.reader.status() {
+            Status::Started(point) => Some(point),
+            _ => None,
+        }
+    }
     /// Is a MIDI pass prepared and not yet finished?
     pub fn midi_recording_prepared(&self) -> bool {
         self.midi_pass.try_borrow().is_ok_and(|pass| pass.is_some())
@@ -896,6 +904,13 @@ impl Player {
     }
     pub fn position(&self) -> Samples {
         self.shared.position.load(Ordering::Relaxed)
+    }
+    /// Session samples (at `session_rate`) from the recording latch `latch` to the output frame
+    /// the transport has consumed to: how far a pass has run, laps included, read from the clock
+    /// the audio thread already keeps, so no wrap between two reads is missed (#522). The MIDI
+    /// take's offsets are measured the same way ([`MidiTake::timed`]).
+    pub fn samples_since(&self, latch: record::start::Point, session_rate: u32) -> Option<Samples> {
+        latch_offset(self.shared.output_frame.load(Ordering::Relaxed), latch.output_frame, self.device_rate, session_rate)
     }
     /// The browser's preview player (#211): outside the plan and the session.
     pub fn preview(&self) -> Option<&crate::preview::Preview> {

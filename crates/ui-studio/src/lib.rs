@@ -279,6 +279,10 @@ pub struct StudioApp {
     last_meter_poll: f64,
     /// Transport simulation when there is no player (tests, `--no-audio`).
     sim: Option<(Samples, Option<Samples>, Option<Range>)>,
+    /// How far the simulated transport has jumped back at its loop wraps since the pass under way
+    /// was planned: its position plus this never wraps (the player's equivalent is the output
+    /// frame it consumed, `Player::samples_since`).
+    pub(crate) sim_laps: Samples,
     /// The same for a record count-in: samples left, then what to play when it ends.
     sim_count_in: Option<(Samples, (Samples, Option<Samples>, Option<Range>))>,
     /// The running count-in's grid, for the transport's beat counter.
@@ -433,6 +437,7 @@ impl StudioApp {
             meter_snapshot: transit_playback::MeterSnapshot::default(),
             last_meter_poll: f64::NEG_INFINITY,
             sim: None,
+            sim_laps: 0,
             sim_count_in: None,
             count_in_plan: None,
             metro_popup: false,

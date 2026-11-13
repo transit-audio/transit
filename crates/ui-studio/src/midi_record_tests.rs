@@ -512,8 +512,14 @@ fn cycling(app: &mut StudioApp, at: i64) {
     app.start_play(at, None, None);
 }
 
-/// The fake clock: the transport reaches `at`, and a frame of the UI sees it.
+/// The fake clock: the transport reaches `at`, and a frame of the UI sees it. Back inside the
+/// loop means it wrapped once, which the simulated transport counts as at its own wraps.
 fn tick(app: &mut StudioApp, at: i64) {
+    if let Some(cycle) = app.take_cycle
+        && at < app.engine.transport.position
+    {
+        app.sim_laps += cycle.len();
+    }
     app.engine.transport.position = at;
     app.update_midi_live();
 }

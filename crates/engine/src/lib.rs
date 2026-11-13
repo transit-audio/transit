@@ -215,6 +215,9 @@ pub struct Engine {
     pub messages: Vec<String>,
     /// Messages pushed since creation; unlike `messages.len()` it still counts once the list is full.
     message_pushes: u64,
+    /// Take files placed with a last lap too short to be a take (#634), counted since creation:
+    /// exact however many messages the 100-entry list has dropped since.
+    short_laps: u64,
     /// The edit selection (range, tracks) before the last change, for Restore Last Selection.
     /// Kept out of the document so selecting never marks the session modified.
     pub last_selection: Option<(transit_time::Range, Vec<TrackId>)>,
@@ -280,6 +283,7 @@ impl Engine {
             redo: Vec::new(),
             undo_pushes: 0,
             message_pushes: 0,
+            short_laps: 0,
             history_limit: 200,
             clipboard: Clipboard::default(),
             transport_requests: Vec::new(),
@@ -913,6 +917,18 @@ impl Engine {
     /// Messages pushed since creation (see [`Engine::messages_since`]).
     pub fn message_pushes(&self) -> u64 {
         self.message_pushes
+    }
+
+    /// Take files placed so far with a last lap too short to be a take (#634); compare two
+    /// readings for the count of one placement.
+    pub fn short_laps(&self) -> u64 {
+        self.short_laps
+    }
+
+    /// One more take file placed with a last lap too short to be a take, said in `note`.
+    pub(crate) fn short_lap(&mut self, note: String) {
+        self.short_laps += 1;
+        self.warn(note);
     }
 
     /// The messages pushed since [`Engine::message_pushes`] said `mark`, oldest first (those

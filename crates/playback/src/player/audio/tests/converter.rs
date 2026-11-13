@@ -201,6 +201,7 @@ fn play(session: u32, device: u32, speed: u32, callbacks: &[usize], frames: usiz
     let (doc, input) = ramp_session(session, input_frames(session, device, speed, frames) + 1024);
     let shared = Arc::new(Shared {
         position: AtomicI64::new(0),
+        output_frame: std::sync::atomic::AtomicU64::new(0),
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(speed),
         editors_open: AtomicBool::new(false),

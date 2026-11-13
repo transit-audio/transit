@@ -225,3 +225,137 @@ fn cycle_toggled_while_a_take_records_keeps_its_loop_until_the_take_ends() {
     assert!(looped.windows(2).any(|w| w[1] < w[0]), "Cycle is now in force: {looped:?}");
     assert!(looped.iter().all(|p| (r.start..r.end).contains(p)), "{looped:?}");
 }
+
+/// #522: a cycle recording through the device-free player, a MIDI track armed. Blocks render on
+/// their own between host frames, as the audio thread runs on while the UI thread is busy.
+mod lap_clock {
+    use super::*;
+    use transit_model::TrackId;
+
+    /// A loop of 0.8 s at 48 kHz: 75 blocks.
+    const LOOP: i64 = 38_400;
+    const BLOCKS_PER_LAP: usize = 75;
+
+    /// One host frame's recording part, in `logic`'s order: follow the pass, then the limit.
+    fn frame(app: &mut StudioApp) {
+        app.update_midi_live();
+        app.end_recording_at_lap_limit();
+    }
+
+    /// Blocks with a host frame after each until `done`, at most `limit` of them: a clock that
+    /// stopped counting fails here instead of running on.
+    fn run_until(app: &mut StudioApp, limit: usize, done: impl Fn(&StudioApp) -> bool) {
+        for _ in 0..limit {
+            if done(app) {
+                return;
+            }
+            step(app);
+            frame(app);
+        }
+        assert!(done(app), "not reached in {limit} blocks: {}", app.status);
+    }
+
+    /// Render `n` blocks with no host frame between them (the UI thread stalled).
+    fn stall(app: &mut StudioApp, n: usize) {
+        for _ in 0..n {
+            app.player.as_ref().unwrap().step_device_free();
+        }
+    }
+
+    /// The laps the host counts as complete for the pass under way.
+    fn completed(app: &StudioApp) -> i64 {
+        let (Some(plan), Some(c)) = (&app.take_plan, app.record_clock) else { return -1 };
+        let wrap = app.take_cycle.filter(|_| plan.pass.is_none());
+        transit_engine::take_laps::completed(c.start, plan.pass, wrap, c.reach - c.start)
+    }
+
+    /// A session with an armed MIDI track and Cycle over `[LOOP, 2 * LOOP)`, the limit `limit`;
+    /// its scratch folder stays alive with the app.
+    fn armed(limit: i64) -> (StudioApp, transit_test_support::TestDir) {
+        let dir = transit_test_support::TestDir::new("lap-clock");
+        let mut app = app();
+        app.autosave_dir = Some(dir.join("Autosave"));
+        let t = TrackId(app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
+        app.run("mix.record_arm", json!({"tracks": [t.0], "value": true})).unwrap();
+        region(&mut app, LOOP, 2 * LOOP);
+        cycle(&mut app, true);
+        app.test_lap_limit = Some(limit);
+        (app, dir)
+    }
+
+    /// Run blocks with a host frame after each until the pass has latched and is playing.
+    fn until_latched(app: &mut StudioApp) {
+        for _ in 0..200 {
+            step(app);
+            frame(app);
+            if app.record_clock.is_some() {
+                return;
+            }
+        }
+        panic!("the pass never latched: {}", app.status);
+    }
+
+    /// Record from stopped (the loop start), then a two-second stall right after the fourth wrap:
+    /// 2.5 laps go by unseen and the playhead comes back ahead of where it was, so no frame sees
+    /// it go back. The host still counts six laps and ends the recording at its next frame, the
+    /// first check that sees the limit of five.
+    #[test]
+    fn a_two_second_stall_past_the_limit_ends_the_recording_at_the_next_frame() {
+        let (mut app, _dir) = armed(5);
+        app.start_recording();
+        until_latched(&mut app);
+        let latched = app.record_clock.unwrap();
+        // To just past the fourth wrap, a frame after each block.
+        run_until(&mut app, 400, |a| completed(a) >= 4);
+        assert!(app.recording_active(), "{}", app.status);
+        let before = app.player.as_ref().unwrap().position();
+        stall(&mut app, 188);
+        assert!(app.player.as_ref().unwrap().position() > before, "the playhead came back ahead: no backward step to see");
+        frame(&mut app);
+        // The pass is over at once (the player's own recording flag clears when its stop notice is
+        // polled, a frame later).
+        assert!(app.take_plan.is_none() && app.record_clock.is_none(), "the first frame after the stall ended the recording: {}", app.status);
+        assert!(app.status.ends_with("Cycle recording ended at its limit of 5 laps; press Record to continue."), "{}", app.status);
+        assert_eq!(latched.start, LOOP, "the pass latched at the loop start");
+    }
+
+    /// Three whole laps between two host frames: the playhead is where it was, yet the host
+    /// counts the three laps.
+    #[test]
+    fn laps_between_frames_that_see_the_same_position_are_counted() {
+        let (mut app, _dir) = armed(10);
+        app.start_recording();
+        until_latched(&mut app);
+        run_until(&mut app, 200, |a| completed(a) >= 1);
+        let (laps, at) = (completed(&app), app.player.as_ref().unwrap().position());
+        stall(&mut app, 3 * BLOCKS_PER_LAP);
+        assert_eq!(app.player.as_ref().unwrap().position(), at, "the same position three laps later");
+        frame(&mut app);
+        assert_eq!(completed(&app), laps + 3);
+        assert!(app.recording_active(), "below the limit it records on");
+    }
+
+    /// Record pressed while the loop plays, halfway in (#567): the first lap runs from the latch
+    /// to the loop end, so it is complete at the first wrap, and every later lap one loop on.
+    #[test]
+    fn a_pass_latched_mid_loop_completes_its_first_lap_at_the_first_wrap() {
+        let (mut app, _dir) = armed(10);
+        play_from(&mut app, LOOP);
+        run_until(&mut app, 100, |a| a.player.as_ref().unwrap().position() >= LOOP + LOOP / 2);
+        app.start_recording();
+        until_latched(&mut app);
+        let c = app.record_clock.unwrap();
+        assert!(c.start > LOOP && c.start < 2 * LOOP, "latched inside the loop at {}", c.start);
+        assert_eq!(app.take_plan.as_ref().unwrap().pass, None, "cut at each wrap");
+        let first = 2 * LOOP - c.start;
+        // Blocks until just before the first wrap, then across it, then one loop more.
+        run_until(&mut app, 100, |a| a.record_clock.is_some_and(|r| r.reach - c.start >= first - 512));
+        assert_eq!(completed(&app), 0);
+        stall(&mut app, 2);
+        frame(&mut app);
+        assert_eq!(completed(&app), 1, "the first lap ends at the first wrap");
+        stall(&mut app, BLOCKS_PER_LAP);
+        frame(&mut app);
+        assert_eq!(completed(&app), 2);
+    }
+}

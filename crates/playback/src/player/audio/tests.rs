@@ -19,6 +19,7 @@ fn fixture(device_rate: u32) -> (Control<Command, ActionResult>, Audio, Arc<Shar
 pub(super) fn fixture_session(device_rate: u32, session: Arc<Session>) -> (Control<Command, ActionResult>, Audio, Arc<Shared>) {
     let shared = Arc::new(Shared {
         position: AtomicI64::new(0),
+        output_frame: std::sync::atomic::AtomicU64::new(0),
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
@@ -180,6 +181,7 @@ fn owner_fixture() -> (crate::player::RuntimeControl<Command, ActionResult>, Aud
     let key = ClockKey { generation: 73, domain: 73, direction: Direction::Output };
     let shared = Arc::new(Shared {
         position: AtomicI64::new(0),
+        output_frame: std::sync::atomic::AtomicU64::new(0),
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
@@ -319,6 +321,7 @@ fn invalid_audio_initialization_returns_every_endpoint_for_main_thread_retiremen
         let key = ClockKey { generation, domain: generation, direction: Direction::Output };
         let shared = Arc::new(Shared {
             position: AtomicI64::new(0),
+            output_frame: std::sync::atomic::AtomicU64::new(0),
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             editors_open: AtomicBool::new(false),
@@ -1010,6 +1013,7 @@ fn click_on_device(channels: usize, io: Option<transit_model::IoMap>) -> Vec<Vec
 fn play_on_device(session: Session, channels: usize, io: Option<transit_model::IoMap>) -> Vec<Vec<f32>> {
     let shared = Arc::new(Shared {
         position: AtomicI64::new(0),
+        output_frame: std::sync::atomic::AtomicU64::new(0),
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
@@ -1071,6 +1075,7 @@ fn a_path_table_edit_on_an_open_stream_moves_main_through_the_published_plan() {
     let session = Arc::new(session);
     let shared = Arc::new(Shared {
         position: AtomicI64::new(0),
+        output_frame: std::sync::atomic::AtomicU64::new(0),
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),

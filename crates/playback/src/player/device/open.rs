@@ -74,6 +74,7 @@ impl Player {
     fn shared() -> Arc<Shared> {
         Arc::new(Shared {
             position: AtomicI64::new(0),
+            output_frame: std::sync::atomic::AtomicU64::new(0),
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             editors_open: AtomicBool::new(false),

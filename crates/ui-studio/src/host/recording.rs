@@ -101,6 +101,7 @@ impl StudioApp {
     ) {
         let rate = self.recorder.as_ref().map_or(0, |r| r.sample_rate);
         self.record_clock = None;
+        self.sim_laps = 0;
         // The loop this pass records under; Cycle edits made while it runs wait for its end (#81).
         self.take_cycle = self.wanted_loop();
         self.take_plan = Some(transit_engine::io::Recording {
@@ -301,11 +302,12 @@ impl StudioApp {
         let wrap = self.take_cycle.filter(|_| plan.pass.is_none());
         let mut built = transit_engine::midi_take::build_wrapping(&s.tempo, s.sample_rate, &events, &cut, wrap);
         // After a wrap only the lap under way is drawn, from the loop start to the playhead.
-        let (start, end) = match self.record_clock.filter(|c| c.laps > 0 && wrap.is_some()) {
-            Some(c) => {
-                let lap = usize::try_from(c.laps / cycle.len().max(1)).unwrap_or(0);
+        let done = self.record_clock.map_or(0, |c| transit_engine::take_laps::completed(c.start, plan.pass, wrap, c.reach - c.start));
+        let (start, end) = match self.record_clock.filter(|_| done > 0 && wrap.is_some()) {
+            Some(_) => {
+                let lap = usize::try_from(done).unwrap_or(0);
                 built.retain(|b| b.pass == lap);
-                (cycle.start, c.last)
+                (cycle.start, self.position())
             }
             // A pickup played over the count-in (#327) starts the clip before the latch.
             None => (built.iter().map(|b| b.range.start).fold(start, Samples::min), now),
@@ -313,27 +315,36 @@ impl StudioApp {
         self.midi_live = Some(MidiLive { tracks: take.tracks.clone(), start, end, built });
     }
 
-    /// Follow the transport while a pass runs, counting each wrap of the cycle it records under
-    /// (`take_cycle`) as a lap.
+    /// Follow the transport while a pass runs: how far it has got, laps included, from the
+    /// transport's own unwrapped clock ([`StudioApp::pass_clock`]), never from a frame seeing the
+    /// position go back, so a slow frame or one that sees the same position laps later misses no
+    /// wrap (#522).
     pub(crate) fn observe_recording(&mut self) {
         if self.take_plan.is_none() || !self.is_playing() {
             return;
         }
-        let at = self.position();
-        let cycle = self.take_cycle;
-        let clock = self.record_clock.get_or_insert(RecordClock { last: at, laps: 0 });
-        if let Some(cycle) = cycle
-            && at < clock.last
-        {
-            clock.laps += cycle.len();
+        if let Some(now) = self.pass_clock() {
+            let reach = self.record_clock.map_or(now.reach, |c| c.reach.max(now.reach));
+            self.record_clock = Some(RecordClock { start: now.start, reach });
         }
-        clock.last = at;
+    }
+
+    /// Where the pass under way latched and how far it has run, unwrapped: the output frames the
+    /// audio thread consumed since the latch, or the simulated transport's position plus the
+    /// jumps back it made at its wraps. `None` before the latch.
+    fn pass_clock(&self) -> Option<RecordClock> {
+        let Some(p) = &self.player else {
+            return Some(RecordClock { start: self.record_start, reach: self.engine.transport.position.saturating_add(self.sim_laps) });
+        };
+        let latch = self.recorder.as_ref().and_then(transit_playback::record::Recorder::applied_start).or_else(|| p.midi_recording_latch())?;
+        let since = p.samples_since(latch, self.engine.session().sample_rate.hz())?;
+        Some(RecordClock { start: latch.position.sample, reach: latch.position.sample.saturating_add(since.max(0)) })
     }
 
     /// Samples from the latch `start` to where the pass has got to, laps included. Never the
     /// position at Stop: that wrapped back into the loop, or is the edit cursor once stopped.
     fn recording_elapsed(&self, start: Samples) -> Samples {
-        self.record_clock.map_or(0, |c| (c.last + c.laps - start).max(0))
+        self.record_clock.map_or(0, |c| (c.reach - start).max(0))
     }
 
     pub(super) fn finish_recording(&mut self) {
@@ -349,7 +360,7 @@ impl StudioApp {
         }
         let plan = self.take_plan.take();
         // What the engine says while this pass is placed; the lap notes among it end the status line.
-        let said = self.engine.message_pushes();
+        let said = self.lap_mark();
         let approximate = self.pass_approximate();
         let finished = self.recorder.as_mut().filter(|r| r.has_pending_take()).map(transit_playback::record::Recorder::finish);
         // Tests substitute only the device's finished files; placement and stop ordering stay real.
@@ -390,7 +401,7 @@ impl StudioApp {
         self.punch = None;
         self.autosaved_rev = 0;
         let tracked = self.record_clock.take();
-        let end = tracked.map_or(self.engine.transport.position, |c| c.last + c.laps);
+        let end = tracked.map_or(self.engine.transport.position, |c| c.reach);
         // The pass's end, once for every track, audio and MIDI, so they all decide from it whether
         // the transport wrapped (review M1). Stop, the take files and the last MIDI event,
         // whichever is furthest.
@@ -408,7 +419,7 @@ impl StudioApp {
             }
         }
         if let Some(midi) = midi {
-            let end = tracked.map_or_else(|| self.position().max(plan.start), |c| (c.last + c.laps).max(plan.start));
+            let end = tracked.map_or_else(|| self.position().max(plan.start), |c| c.reach.max(plan.start));
             // Whatever the last frame hadn't journaled reaches the file before the clip is built,
             // which then deletes it: a crash while placing still leaves the whole pass.
             self.midi_journal = journal;
@@ -443,13 +454,22 @@ impl StudioApp {
         self.report_lap_notes(said);
     }
 
+    /// Where the engine's messages and its count of short last laps stand before a placement, for
+    /// [`StudioApp::report_lap_notes`] after it.
+    pub(super) fn lap_mark(&self) -> LapMark {
+        LapMark { messages: self.engine.message_pushes(), short: self.engine.short_laps() }
+    }
+
     /// End the status line with what the engine said, since `mark`, about laps of this pass that
     /// are not a take of their own (#522, #634), after the placement reports: a final take past the
     /// lap limit, said once, and each last lap too short to be a take with the file that keeps it.
-    /// The engine logged each of them. Stop and crash recovery both end with it.
-    pub(super) fn report_lap_notes(&mut self, mark: u64) {
+    /// More than two such files, or any whose note the engine's 100-message list no longer holds,
+    /// are given as their exact count (the engine counts them as it places) and the log. The
+    /// engine logged each note. Stop and crash recovery both end with it.
+    pub(super) fn report_lap_notes(&mut self, mark: LapMark) {
         use transit_engine::take_laps::{OVER_LIMIT_NOTE, SHORT_LAP_NOTE};
-        let said = self.engine.messages_since(mark);
+        let files = self.engine.short_laps().saturating_sub(mark.short);
+        let said = self.engine.messages_since(mark.messages);
         let mut notes: Vec<String> = Vec::new();
         for m in said.iter().filter(|m| m.starts_with(OVER_LIMIT_NOTE)).map(|m| m.trim_end_matches('.').to_string()) {
             if !notes.contains(&m) {
@@ -457,8 +477,8 @@ impl StudioApp {
             }
         }
         let short: Vec<String> = said.iter().filter(|m| m.starts_with(SHORT_LAP_NOTE)).map(|m| m.trim_end_matches('.').to_string()).collect();
-        if short.len() > 2 {
-            notes.push(format!("{SHORT_LAP_NOTE}: {} take files keep such a lap (see the log)", short.len()));
+        if files > 2 || u64::try_from(short.len()).unwrap_or(u64::MAX) != files {
+            notes.push(format!("{SHORT_LAP_NOTE}: {files} take files keep such a lap (see the log)"));
         } else {
             notes.extend(short);
         }
@@ -480,12 +500,14 @@ impl StudioApp {
     /// #522: end a cycle recording once its pass has completed the lap limit, as Record pressed
     /// again does (the transport stops and the takes are placed), so every lap is a take and
     /// nothing is left out. Control side, once a frame after the pass's clock has followed the
-    /// transport: completed laps are the wraps it counted. Whatever the pass recorded after the
-    /// last wrap is its final, partial lap, a take or a short lap said at Stop like at any Stop.
+    /// transport: completed laps are counted from the pass's unwrapped clock as the take cut counts
+    /// them ([`transit_engine::take_laps::completed`]), so a slow frame stops it late by at most
+    /// that frame, never a lap. Whatever the pass recorded after the last wrap is its final, partial lap, a take or a short lap said at Stop like at any Stop.
     pub(crate) fn end_recording_at_lap_limit(&mut self) {
-        let (Some(_), Some(cycle), Some(clock)) = (&self.take_plan, self.take_cycle, self.record_clock) else { return };
+        let (Some(plan), Some(cycle), Some(clock)) = (&self.take_plan, self.take_cycle, self.record_clock) else { return };
+        let wrap = plan.pass.is_none().then_some(cycle);
         let limit = self.lap_limit();
-        if clock.laps / cycle.len().max(1) < limit {
+        if transit_engine::take_laps::completed(clock.start, plan.pass, wrap, clock.reach - clock.start) < limit {
             return;
         }
         self.stop_play();
@@ -639,6 +661,13 @@ impl StudioApp {
             self.ui.focus_track = Some(*t);
         }
     }
+}
+
+/// Where the engine's messages and its count of short last laps stood before a placement.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct LapMark {
+    messages: u64,
+    short: u64,
 }
 
 /// A captured event as the journal keeps it (device frame, not yet placed); None for what

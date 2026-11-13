@@ -390,12 +390,13 @@ impl PlayerRequests {
 #[path = "player_tests.rs"]
 mod player_tests;
 
-/// How far a recording pass has run on the transport: the last position seen and the cycle laps
-/// it has wrapped over since, so `last + laps` only ever grows.
+/// How far a recording pass has run, read from the transport's own clock while it plays: where
+/// it latched on the timeline and how far it has got, unwrapped (laps included), so `reach` only
+/// ever grows and no wrap is missed between two frames (#522).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RecordClock {
-    pub(crate) last: Samples,
-    pub(crate) laps: Samples,
+    pub(crate) start: Samples,
+    pub(crate) reach: Samples,
 }
 
 /// A MIDI pass under way, for drawing: the armed tracks, where it started and the playhead, and

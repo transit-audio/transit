@@ -466,6 +466,7 @@ impl Transport {
             return Err(error);
         }
         shared.position.store(self.timeline.position()?.sample, Ordering::Relaxed);
+        shared.output_frame.store(self.timeline.next_output(), Ordering::Relaxed);
         shared.playing.store(self.playing, Ordering::Relaxed);
         Ok(())
     }

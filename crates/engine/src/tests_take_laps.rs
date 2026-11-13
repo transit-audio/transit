@@ -240,3 +240,29 @@ fn the_first_midi_take_of_a_pass_whose_first_lap_is_empty_plays() {
     let transit_model::ClipContent::Midi { sequence } = &tr.clips()[0].content else { panic!("not MIDI") };
     assert_eq!(sequence.notes.len(), 1, "the playing take holds the note");
 }
+
+/// #522: completed laps come from how far the pass has run, never from where the playhead is: the
+/// judge's case of a 0.8 s loop at 48 kHz, a two-second stall just after 9,999 wraps, laps that
+/// end on the same position, and a start halfway into the loop.
+#[test]
+fn completed_laps_count_every_wrap_from_the_pass_clock() {
+    let lap = 38_400;
+    let looped = Range::new(96_000, 96_000 + lap);
+    // From the loop start, in laps of the loop.
+    let after_9999 = 9_999 * lap;
+    assert_eq!(completed(96_000, Some(lap), None, after_9999), 9_999);
+    assert_eq!(completed(96_000, Some(lap), None, after_9999 + 96_000), 10_001, "the stall's two and a half laps all count");
+    assert_eq!(completed(96_000, Some(lap), None, 5 * lap + 100) - completed(96_000, Some(lap), None, 2 * lap + 100), 3, "same position, three laps");
+    // Halfway into the loop: the first lap is the half to the loop end.
+    let start = 96_000 + lap / 2;
+    assert_eq!(completed(start, None, Some(looped), lap / 2 - 1), 0);
+    assert_eq!(completed(start, None, Some(looped), lap / 2), 1, "the first lap ends at the first wrap");
+    assert_eq!(completed(start, None, Some(looped), lap / 2 + 9_999 * lap), MAX_LAPS);
+    assert_eq!(completed(start, None, Some(looped), lap / 2 + 9_999 * lap - 1), MAX_LAPS - 1);
+    // It agrees with the cut at every lap end.
+    let cut = laps(start, None, Some(looped), 0, 5 * lap - 1, 5 * lap).unwrap();
+    for l in &cut.laps {
+        assert_eq!(completed(start, None, Some(looped), l.window.end), l.index + 1, "lap {} is complete at its window end", l.index);
+    }
+    assert_eq!(completed(1_200, None, None, 10_000), 0, "no loop: no laps");
+}

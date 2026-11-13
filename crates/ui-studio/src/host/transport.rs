@@ -348,13 +348,18 @@ impl StudioApp {
         } else if let Some((pos, end, looped)) = &mut self.sim {
             let sr = self.engine.session().sample_rate.as_f64();
             *pos += (f64::from(dt) * sr) as i64;
+            let mut wrapped = 0;
             if let Some(l) = looped
                 && *pos >= l.end
             {
+                // The jump back is the simulated transport's own wrap: its clock counts it, so a
+                // recording's laps never depend on a frame seeing the position go back (#522).
+                wrapped = *pos - l.start;
                 *pos = l.start;
             }
             let stop = end.is_some_and(|e| *pos >= e);
             self.engine.transport.position = *pos;
+            self.sim_laps += wrapped;
             if stop {
                 self.stop_play();
             }

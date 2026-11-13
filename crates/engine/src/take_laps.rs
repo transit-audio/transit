@@ -14,9 +14,11 @@ use transit_time::{Range, Samples};
 /// and each lap is a clip per recorded track, so there is a limit; 10,000 is an engineering
 /// choice, not a measured safe maximum.
 ///
-/// The cut never drops a lap either: a pass handed over with more laps than this (the host could
-/// not stop it in time, or crash recovery of a pass that ran on) keeps its first `MAX_LAPS` laps
-/// as takes and everything after them as one longer final take, said in [`over_limit_note`].
+/// The cut allows one lap window after these (zero-based lap 10,000: the partial lap a Stop at
+/// the limit leaves), under the ordinary partial-lap rules and with no notice. A pass that
+/// reaches lap 10,001 or later, by its end or its material (the host could not stop it in time,
+/// or crash recovery of a pass that ran on), keeps laps 0 to 9,999 as takes and everything from lap 10,000 on as one
+/// longer final take, said in [`over_limit_note`].
 pub const MAX_LAPS: i64 = 10_000;
 
 /// How the note begins that says a pass ran past [`MAX_LAPS`] and its last laps are one take.
@@ -81,6 +83,20 @@ pub fn laps(start: Samples, pass: Option<Samples>, wrap: Option<Range>, lead: Sa
             Lap { index: k, window: Range::new(from, from.saturating_add(w.len())), range: w }
         }
     }))
+}
+
+/// How many laps of a pass that latched at `start` are complete once it has run `elapsed`
+/// samples since the latch, laps included, as [`laps`] cuts them: the first lap runs from the
+/// latch to the first wrap (one lap length with `pass`, else to the end of `wrap` even when the
+/// pass started inside the loop), every later lap from one wrap to the next. The host ends a cycle
+/// recording when this reaches [`MAX_LAPS`] (#522).
+pub fn completed(start: Samples, pass: Option<Samples>, wrap: Option<Range>, elapsed: Samples) -> i64 {
+    if let Some(len) = pass.filter(|p| *p > 0) {
+        return elapsed.max(0) / len;
+    }
+    let Some(w) = wrap.filter(|w| pass.is_none() && !w.is_empty() && start >= 0 && start < w.end) else { return 0 };
+    let first = w.end - start;
+    if elapsed < first { 0 } else { (elapsed - first) / w.len() + 1 }
 }
 
 /// The `total` laps of a pass that reaches offset `reach`: the first [`MAX_LAPS`] as they are,

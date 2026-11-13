@@ -234,7 +234,7 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         }
         if short > 0 {
             let seconds = e.session().sample_rate.seconds(short);
-            e.warn(crate::take_laps::short_lap_note(short, seconds, &path.display().to_string()));
+            e.short_lap(crate::take_laps::short_lap_note(short, seconds, &path.display().to_string()));
         }
     }
     if !out.is_empty() {

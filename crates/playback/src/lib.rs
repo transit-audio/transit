@@ -56,7 +56,7 @@ pub use transit_midi_io::TRANSPORT_CAPACITY;
 pub use transit_plugin_host::{GaveUp, LoadPhase, Quarantined, RELOG_EVERY, StuckCall, loading_text, seconds_text};
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use transit_mix::{MAX_CHANNELS, StripMeter, itu_stereo_fold};
 use transit_model::{Session, TrackId};
 
@@ -79,6 +79,10 @@ pub type EditorEdit = (TrackId, usize, String, f32);
 
 struct Shared {
     position: AtomicI64,
+    /// The output frame the transport's timeline has consumed to (`Timeline::next_output`),
+    /// published beside `position` once a block: unlike the position it never wraps, so the
+    /// control side counts a recording's laps from it exactly (#522).
+    output_frame: AtomicU64,
     playing: AtomicBool,
     /// Speed × 1000.
     speed: AtomicU32,
