@@ -271,6 +271,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Linux: native JACK/PipeWire backend (the Linux release builds carry it; under PipeWire it tries PipeWire's own JACK library first, so `pw-jack` should no longer be needed, a tester confirmation is pending). It plays and records duplex in one server cycle at the server's rate and buffer size, counts the server's xruns, and reopens by itself when the server changes its buffer size or rate or comes back after stopping.
 - Linux packages: an `.AppImage`, a `.deb` and an `.rpm` come with the tarball.
 - Audio Devices shows "Requested 128 · running at 256" when the device runs a different buffer size or rate than you asked for.
+- When the device runs at a different rate than the session, the converted output is the same whatever the buffer size (no wrong frames at block edges), and equal rates pass through bit for bit. The converter is linear interpolation, so run the device at the session's rate for the cleanest sound; its measured limits are in the [#525 record](docs/escapes/issue-525.md) and the [known issue](docs/known-issues/entries/device-rate-converter-quality.md).
 - System Audio input: record what the computer plays (a browser video, another app) on an audio track, with no cable. On Windows a WASAPI loopback capture of the output you choose, at its own rate and clock, with its latency and drift shown in Audio Devices; on Linux an output's PipeWire or PulseAudio monitor is named as System Audio.
 
 ### Sessions and rendering
@@ -281,6 +282,8 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Bounce in Place turns a track's clips, or only the selected clips, into audio: to a new track or an existing one, with the source left, muted or hidden, and its clips and takes always kept.
 - Full undo history; every edit is a command.
 - Autosave, and sessions saved as versioned, human-readable JSON in `.transit` files.
+- Long takes stay with their session: a session recovered after a crash keeps its long takes and offline files in its own folder, and Save As, Save Copy In and the first save of an untitled session copy long take files into the session's Audio Files folder; if a copy fails, the save fails naming the file and the earlier session file is left as it was.
+- Preset names keep their dots: "Bass v1.5" and "Bass v1.2" are two presets.
 - A launch splash that reports the audio device opening first, then plug-in scan progress, and Help > About with version info and a link to the transit repository.
 - Import audio and MIDI files; export MIDI. File > Open Session also opens a DAWproject (`.dawproject`, from Bitwig, Studio One, Cubase and others) as a new session: its tracks, note clips, tempo and meter, markers and MIDI expression. File > Export DAWproject writes those editable parts plus full-length WAV stems for audible audio and instrument tracks (#261). File > Open Recent lists your last ten sessions (Ctrl+Shift+O).
 - Browser preview: select a supported audio file in the Files tab and press play to hear it before you drag it in. A headphone toggle auto-previews each selection, and the preview has its own volume on a path that never records, meters or routes to a track. It stops on another file, on transport start or on Escape; every importer format works, including RF64.
