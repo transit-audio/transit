@@ -81,6 +81,8 @@
       var rel = (Array.isArray(list) ? list : []).filter(function (x) { return x && !x.draft; })[0];
       if (!rel) { fallback(); return; }
       if (rel.html_url) REL = rel.html_url;
+      var hr = document.getElementById("hero-rel");
+      if (hr && rel.tag_name) hr.textContent = rel.tag_name;
       var date = rel.published_at ? new Date(rel.published_at).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "";
       meta.textContent = (rel.name || rel.tag_name) + (date ? ", released " + date : "");
       var assets = rel.assets || [];

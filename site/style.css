@@ -16,6 +16,8 @@ img{max-width:100%;height:auto;display:block}
 .wordmark{margin:0 auto;width:min(420px,80%);height:auto}
 .hook{font-size:clamp(2rem,6.5vw,3.5rem);line-height:1.1;font-weight:600;margin:24px auto 16px;text-wrap:balance}
 .tagline{font-size:clamp(1rem,2.4vw,1.25rem);margin:0 auto 28px;max-width:52ch;text-wrap:pretty}
+.status{margin:0 auto 24px;max-width:52ch;font-size:.95rem;color:var(--muted)}
+.hero .status{text-shadow:0 0 18px var(--halo),0 0 6px var(--halo)}
 .hero .tagline,.hero .hook{text-shadow:0 0 18px var(--halo),0 0 6px var(--halo)}
 .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:0}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:12px;min-height:56px;padding:10px 24px;border:1px solid var(--line);border-radius:8px;background:var(--raised);color:var(--text);font-size:1.1rem;font-weight:600;text-decoration:none;line-height:1.25;transition:background-color .15s,border-color .15s,transform .15s}

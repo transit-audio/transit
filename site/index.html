@@ -18,13 +18,14 @@
 </head>
 <body id="top">
 <header class="hero">
-  <div class="backdrop" aria-hidden="true"><img src="assets/transit-arrange.png" alt="" decoding="async"></div>
+  <div class="backdrop" aria-hidden="true"><img width="3840" height="2054" src="assets/transit-arrange.png" alt="" decoding="async"></div>
   <picture>
     <source srcset="assets/transit-wordmark-graphite.svg" media="(prefers-color-scheme: light)">
     <img class="wordmark" src="assets/transit-wordmark-white.svg" alt="transit" width="420" height="120">
   </picture>
   <h1 class="hook">Hit record. It keeps up.</h1>
-  <p class="tagline">A free, open-source DAW for recording and playing live, on Windows, Mac and Linux. Every engine default is measured on a real audio interface first, and <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">the numbers are public</a>. It&rsquo;s alpha, so judge it by those.</p>
+  <p class="tagline">A free, open-source DAW for recording and playing live, on Windows, Mac and Linux. Latency settings are chosen from measurements on real audio interfaces, and <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">the numbers are public</a>.</p>
+  <p class="status"><strong>Alpha.</strong> Current release: <a id="hero-rel" href="https://github.com/transit-audio/transit/releases/latest">v0.7.1</a>. Early software that changes every week: back up what you care about, and see the <a href="https://github.com/transit-audio/transit/blob/main/docs/known-issues/README.md">known issues</a>.</p>
   <p class="cta">
     <a class="btn primary" href="#downloads"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg><span class="lbl">Download</span></a>
     <a class="btn discord" href="https://discord.gg/7PPUBZqA66"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg><span class="lbl">Join the Discord</span></a>
@@ -43,7 +44,7 @@
      full-stage backdrop and must have an empty alt. Class "flip" puts the text on the right.
      To add a scene: copy an <li class="scene">, give it the next --i, add a tick to .story-ticks,
      and raise --n on .story. -->
-<section id="live" class="story" style="--n:8">
+<section id="live" class="story" style="--n:7">
   <div class="story-stage">
     <h2 class="story-eyebrow">Made for the take</h2>
     <ol class="story-scenes">
@@ -66,59 +67,51 @@
       </li>
       <li class="scene flip" style="--i:1">
         <figure class="scene-pic">
-          <img class="bg" src="assets/transit-story-count-in.png" width="3840" height="2054" loading="lazy" decoding="async" alt="" aria-hidden="true">
           <div class="frame" style="--cx:0;--cy:0;--cw:.28646;--ch:.2629;--far:2.037;--mcx:0;--mcy:.0195;--mcw:.1875;--mch:.2093;--mfar:1.674"><img src="assets/transit-story-count-in.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The metronome's menu open on the transport: the click level, and a count-in of Off, 1, 2 or 4 bars with 2 selected."></div>
           <figcaption>In the picture: the metronome&rsquo;s menu, with a two-bar count-in.</figcaption>
         </figure>
-        <div class="scene-copy"><h3>A count-in that keeps your pickup.</h3><p>Notes you play during the count-in are kept, and recording starts sample-exact at the end of it.</p></div>
+        <div class="scene-copy"><h3>A count-in that keeps your pickup.</h3><p>Notes you play during the count-in land in the take as pickups. One known limit: at the very start of a session, a note released before bar 1 is left out and the status line says so (<a href="https://github.com/transit-audio/transit/blob/main/docs/known-issues/README.md">known issues</a>).</p></div>
       </li>
       <li class="scene" style="--i:2">
         <figure class="scene-pic">
           <div class="frame" style="--cx:0;--cy:0;--cw:1;--ch:.2849;--far:4.0667;--mcx:0;--mcy:0;--mcw:.623;--mch:.2184;--mfar:3.304"><img src="assets/transit-story-hardware-inserts.png" width="1220" height="1053" loading="lazy" decoding="async" alt="The Hardware inserts page of Audio Devices: a click plays on the send path and is found again on the return path. Here no audio device is open, so the Send and Return pickers are empty and Measure is unavailable."></div>
-          <figcaption>In the picture: the Hardware inserts page, with no audio device open.</figcaption>
+          <div class="frame" style="--cx:.2174;--cy:.5334;--cw:.2135;--ch:.1923;--far:2.075"><img src="assets/transit-story-mixer.png" width="3840" height="2054" loading="lazy" decoding="async" alt="Mixer strips: the Lead track is an External Instrument, with All MIDI in and its MIDI Out button lit; the audio tracks beside it take In 1 or In 1-2."></div>
+          <figcaption>In the picture: the Hardware inserts page, then the mixer with an External Instrument on the Lead track.</figcaption>
         </figure>
-        <div class="scene-copy"><h3>Your outboard gear, lined up.</h3><p>Hardware inserts measure their own round trip with a click train, and delay compensation keeps the track in time.</p></div>
+        <div class="scene-copy"><h3>Hardware, in the session.</h3><p>Hardware inserts measure their own round trip with a click train and delay compensation uses the result. External Instrument sends MIDI out and brings the audio back on the input you pick.</p></div>
       </li>
-      <li class="scene flip" style="--i:3;--fx:.347;--fy:.573;--k:2.2;--dx:30%">
+      <li class="scene flip" style="--i:3">
         <figure class="scene-pic">
-          <img class="cover" src="assets/transit-story-mixer.png" width="3840" height="2054" loading="lazy" decoding="async" alt="Mixer strips: the Lead track is an External Instrument, with All MIDI in and its MIDI Out button lit; the audio tracks beside it take In 1 or In 1-2.">
-          <figcaption>In the picture: the mixer, with an External Instrument on the Lead track.</figcaption>
-        </figure>
-        <div class="scene-copy"><h3>Play hardware synths like plug-ins.</h3><p>External Instrument sends MIDI out and brings the audio back on the input you pick.</p></div>
-      </li>
-      <li class="scene" style="--i:4">
-        <figure class="scene-pic">
-          <img class="bg" src="assets/transit-sampler.png" width="3840" height="2054" loading="lazy" decoding="async" alt="" aria-hidden="true">
           <div class="frame" style="--cx:.092708;--cy:.074;--cw:.38125;--ch:.44206;--far:1.6123;--mcw:.2198;--mch:.3252;--mfar:1.2635"><img src="assets/transit-sampler.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The Sampler on its Pads view: bank A of four banks of sixteen pads, with the selected pad's choke group and playback settings."></div>
           <div class="frame" style="--cx:.092708;--cy:.074;--cw:.38125;--ch:.44206;--far:1.6123;--mcw:.2198;--mch:.3252;--mfar:1.2635"><img src="assets/transit-sampler-slices.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The Sampler's Slices view: a drum loop cut at its transients into 18 slices, with Slices to pads and Create clip."></div>
           <figcaption>In the picture: the Sampler&rsquo;s Pads view, then its Slices view.</figcaption>
         </figure>
         <div class="scene-copy"><h3>A sampler built for kits and loops.</h3><p>Pads, Slices and Instrument views on one instrument: load a kit from a folder, cut a loop at its transients, and play it from your pads.</p></div>
       </li>
-      <li class="scene flip" style="--i:5;--col:24rem;--dph:78cqh">
+      <li class="scene" style="--i:4;--col:24rem;--dph:78cqh">
         <figure class="scene-pic">
           <div class="frame" style="--cx:0;--cy:0;--cw:1;--ch:1;--far:1.1316;--mcx:0;--mcy:.0524;--mcw:.6577;--mch:.3302;--mfar:2.254"><img src="assets/transit-story-macro-oscillator.png" width="2159" height="1908" loading="lazy" decoding="async" alt="The Macro Oscillator editor on its Additive model: the waveform display, the Timbre and Morph pad, the shaper's envelopes, filter and LFOs, and three modulation routes shown as amber rings on the knobs they move."></div>
           <div class="frame" style="--cx:0;--cy:0;--cw:1;--ch:1;--far:1.7287;--mcx:.0278;--mcy:.12;--mcw:.5556;--mch:.7203;--mfar:1.3333"><img src="assets/transit-story-compressor.png" width="1440" height="833" loading="lazy" decoding="async" alt="The Compressor/Limiter editor: its transfer curve, gain reduction history and controls."></div>
           <figcaption>In the picture: the Macro Oscillator, then the Compressor/Limiter.</figcaption>
         </figure>
-        <div class="scene-copy"><h3>Instruments worth opening.</h3><p>Built-in synths ported from &Eacute;milie Gillet&rsquo;s MIT-licensed firmware and checked against the originals sample for sample, in a design language made for reading at a glance.</p></div>
+        <div class="scene-copy"><h3>Instruments worth opening.</h3><p>Built-in synths ported from &Eacute;milie Gillet&rsquo;s MIT-licensed firmware and tested against the original code, in a design language made for reading at a glance.</p></div>
       </li>
-      <li class="scene" style="--i:6;--fx:.40;--fy:.42;--k:1.35">
+      <li class="scene flip" style="--i:5">
         <figure class="scene-pic">
-          <img class="cover" src="assets/transit-mixer.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The mixer: a strip for every track with inserts, sends, pan, fader and meter, then the Master.">
+          <div class="frame" style="--cx:0;--cy:.058;--cw:.4775;--ch:.82;--far:1.088;--mcx:0;--mcy:.058;--mcw:.2;--mch:.4;--mfar:.9322"><img src="assets/transit-mixer.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The mixer: a strip for every track with inserts, sends, pan, fader and meter."></div>
           <figcaption>In the picture: the mixer, one strip per track.</figcaption>
         </figure>
-        <div class="scene-copy"><h3>One heavy <span class="nw">plug-in</span> won&rsquo;t stall the rest.</h3><p>Mixer strips render on several cores with a bounded deadline, and the transport shows the load, buffer and driver at a glance.</p></div>
+        <div class="scene-copy"><h3>The mixer shows what is loaded.</h3><p>Mixer strips render on several cores, and the transport shows the load, buffer and driver at a glance. <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">The measurements behind that default</a> are public.</p></div>
       </li>
-      <li class="scene flip" style="--i:7;--fx:.57;--fy:.36;--k:1.6;--dx:30%">
+      <li class="scene" style="--i:6">
         <figure class="scene-pic">
-          <img class="cover" src="assets/transit-audio-devices.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The Audio Devices window set to ASIO on an eight-channel USB audio interface at 48 kHz and 128 samples, with an I/O paths page in the sidebar.">
+          <div class="frame" style="--cx:.3998;--cy:.2685;--cw:.3152;--ch:.508;--far:1.16"><img src="assets/transit-audio-devices.png" width="3840" height="2054" loading="lazy" decoding="async" alt="The Audio Devices window set to ASIO on an eight-channel USB audio interface at 48 kHz and 128 samples, with an I/O paths page in the sidebar."></div>
           <figcaption>In the picture: Audio Devices on ASIO, an eight-channel interface.</figcaption>
         </figure>
-        <div class="scene-copy"><h3>Native ASIO, WASAPI and JACK.</h3><p>Opens every channel of your interface; name your own paths and route anything to them.</p></div>
+        <div class="scene-copy"><h3>Native ASIO, WASAPI and JACK.</h3><p>See every channel of your interface; name your own paths and route anything to them.</p></div>
       </li>
     </ol>
-    <ol class="story-ticks" aria-hidden="true"><li style="--i:0"></li><li style="--i:1"></li><li style="--i:2"></li><li style="--i:3"></li><li style="--i:4"></li><li style="--i:5"></li><li style="--i:6"></li><li style="--i:7"></li></ol>
+    <ol class="story-ticks" aria-hidden="true"><li style="--i:0"></li><li style="--i:1"></li><li style="--i:2"></li><li style="--i:3"></li><li style="--i:4"></li><li style="--i:5"></li><li style="--i:6"></li></ol>
   </div>
 </section>
 
@@ -126,11 +119,12 @@
   <h2>The bones</h2>
   <p class="lead">Everything below links to a public record. Check it.</p>
   <dl class="facts">
-    <div><dt>55<small>design decisions</small></dt><dd>Each one is written down with its evidence before the code. <a href="https://github.com/transit-audio/transit/tree/main/docs/adr">Read the decisions</a>.</dd></div>
-    <div><dt>39<small>escape records so far</small></dt><dd>Every bug that got past a check has a record naming the check that now catches it. <a href="https://github.com/transit-audio/transit/tree/main/docs/escapes">Read the records</a>.</dd></div>
+    <div><dt>57<small>design decisions</small></dt><dd>Each one is written down with its evidence before the code. <a href="https://github.com/transit-audio/transit/tree/main/docs/adr">Read the decisions</a>.</dd></div>
+    <div><dt>34<small>escape records so far</small></dt><dd>Every bug that got past a check has a record naming the check that now catches it. <a href="https://github.com/transit-audio/transit/tree/main/docs/escapes">Read the records</a>.</dd></div>
     <div><dt>13<small>benchmark records so far</small></dt><dd>Some ran on a Focusrite Scarlett 2i2 or a TASCAM Model 12, including an eight-hour recording run with a hardware synth. Each record names the decision that followed. <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">See the numbers</a>.</dd></div>
-    <div><dt>Bit for bit<small>ported instruments</small></dt><dd>The instruments and effects ported from &Eacute;milie Gillet&rsquo;s MIT-licensed firmware are rendered next to the original code and compared sample by sample. <a href="https://github.com/transit-audio/transit/blob/main/docs/adr/0033-built-in-instruments-mutable-instruments-port.md">How the port is checked</a>.</dd></div>
-    <div><dt>Real-time rules<small>for the audio callback</small></dt><dd>A written rule: the audio callback never blocks, allocates unexpectedly or does I/O. The real-time crates are linted and tested on every platform. <a href="https://github.com/transit-audio/transit/blob/main/docs/principles.md">The principle</a> and <a href="https://github.com/transit-audio/transit/blob/main/.github/workflows/rt.yml">the workflow</a>.</dd></div>
+    <div><dt>Tested against the original<small>ported instruments</small></dt><dd>The instruments and effects ported from &Eacute;milie Gillet&rsquo;s MIT-licensed firmware are rendered next to the original code and compared in tests. The differences we know of are written down. <a href="https://github.com/transit-audio/transit/blob/main/docs/adr/0033-built-in-instruments-mutable-instruments-port.md">How the port is checked</a>.</dd></div>
+    <div><dt>No resampling<small>at equal rates</small></dt><dd>When your interface runs at the session&rsquo;s sample rate, the output goes straight through, with no sample-rate conversion. A test pins it. <a href="https://github.com/transit-audio/transit/blob/main/crates/playback/src/player/audio/tests/converter.rs">The test</a>. When the rates differ, the converter uses plain linear interpolation, and <a href="https://github.com/transit-audio/transit/issues/601">improving it is tracked</a>.</dd></div>
+    <div><dt>Real-time rules<small>for the audio callback</small></dt><dd>A written rule: the audio callback never blocks, allocates unexpectedly or does I/O. The real-time crates are linted and tested on Windows, Linux and macOS. <a href="https://github.com/transit-audio/transit/blob/main/docs/principles.md">The principle</a> and <a href="https://github.com/transit-audio/transit/blob/main/.github/workflows/rt.yml">the workflow</a>.</dd></div>
     <div><dt>Every merge<small>reviewed to break it</small></dt><dd>A second reviewer with fresh context tries to break each change before it merges. <a href="https://github.com/transit-audio/transit/blob/main/docs/contributing/evidence/refutation-review.md">How the review works</a>.</dd></div>
   </dl>
 </section>
@@ -169,13 +163,12 @@
 
 <section id="why">
   <h2>Why transit</h2>
-  <p class="lead">Cubase bones, Ableton manners.</p>
-  <div class="cards">
+    <div class="cards">
     <article class="card"><h3>Record and pick your best take</h3><p>Record a part again and again. Every take stacks up in its own lane, so you choose the one that plays. Bounce in Place turns a track into audio when you are done.</p></article>
-    <article class="card"><h3>Use the plug-ins you own</h3><p>Plays CLAP and VST3 plug-ins. Each one loads on its own, so a slow or stuck plug-in cannot freeze the window.</p></article>
+    <article class="card"><h3>Use the plug-ins you own</h3><p>Plays CLAP and VST3 plug-ins. Open their editors in their own windows.</p></article>
     <article class="card"><h3>A sampler built for kits and loops</h3><p>The Sampler holds a whole kit with three views: pads to play, slices to cut a loop at its hits, and key zones with velocity layers. Save a kit and load it again with one click.</p></article>
     <article class="card"><h3>Instruments and effects included</h3><p>Comes with synths such as the Macro Oscillator, Resonator and Modal Voice, plus compressor, EQ, reverb and more.</p></article>
-    <article class="card"><h3>Low delay, and it shows the number</h3><p>On Windows, transit talks to your audio interface directly for low delay, and the Audio Devices window shows how much you really have.</p></article>
+    <article class="card"><h3>Low delay, and it shows the number</h3><p>On Windows, transit talks to ASIO and WASAPI directly, and the Audio Devices window shows the delay it measures.</p></article>
   </div>
   <h3 class="also">Also in the box</h3>
   <ul class="plain two">
@@ -198,7 +191,7 @@
   <p class="lead">For the curious: how changes get into transit.</p>
   <div class="grid2">
     <div><h3>Measure first</h3><p>We change a setting only after measuring it on real hardware, and we <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">publish the numbers</a>.</p></div>
-    <div><h3>Mistakes become checks</h3><p>When a bug slips through, we write <a href="https://github.com/transit-audio/transit/tree/main/docs/escapes">what happened</a> and add a check so it cannot happen again.</p></div>
+    <div><h3>Mistakes become checks</h3><p>When a bug slips through, we write <a href="https://github.com/transit-audio/transit/tree/main/docs/escapes">what happened</a> and add a check that catches it.</p></div>
     <div><h3>Decisions are written down</h3><p>Every design change gets a <a href="https://github.com/transit-audio/transit/tree/main/docs/adr">short written decision</a> with its evidence, and every change is reviewed by someone trying to break it.</p></div>
     <div><h3>Known problems are public</h3><p>What we know is broken is in the <a href="https://github.com/transit-audio/transit/blob/main/docs/known-issues/README.md">known issues list</a>.</p></div>
   </div>
@@ -207,14 +200,14 @@
 <section id="screenshots">
   <h2>Screenshots</h2>
   <div class="shots">
-  <figure class="wide"><a class="shot" href="assets/transit-sampler.png"><img src="assets/transit-sampler.png" alt="The Sampler on its Pads view beside the Compressor" loading="lazy"></a><figcaption>Sampler: a kit on four banks of sixteen pads, here beside the Compressor.</figcaption></figure>
-  <figure class="wide"><a class="shot" href="assets/transit-arrange.png"><img src="assets/transit-arrange.png" alt="The transit arrange view" loading="lazy"></a><figcaption>Arrange: your tracks and clips laid out along a timeline.</figcaption></figure>
-  <figure><a class="shot" href="assets/transit-arrange-detail.png"><img src="assets/transit-arrange-detail.png" alt="A close look at chopped clips, fades, automation and takes" loading="lazy"></a><figcaption>Up close: chopped clips with fades, an automation curve, and stacked takes.</figcaption></figure>
-  <figure><a class="shot" href="assets/transit-sampler-slices.png"><img src="assets/transit-sampler-slices.png" alt="The Sampler's Slices view" loading="lazy"></a><figcaption>Slices: a drum loop cut at its hits, ready to play from pads.</figcaption></figure>
-  <figure><a class="shot" href="assets/transit-mixer.png"><img src="assets/transit-mixer.png" alt="The transit mixer" loading="lazy"></a><figcaption>Mixer: a volume fader, pan and level meter for every track.</figcaption></figure>
-  <figure><a class="shot" href="assets/transit-pianoroll.png"><img src="assets/transit-pianoroll.png" alt="The transit piano roll" loading="lazy"></a><figcaption>Piano roll: draw and edit notes on a grid.</figcaption></figure>
-  <figure><a class="shot" href="assets/transit-midi.png"><img src="assets/transit-midi.png" alt="The MIDI Mappings window" loading="lazy"></a><figcaption>MIDI Mappings: the list of knobs and buttons on your controller and what each one does.</figcaption></figure>
-  <figure><a class="shot" href="assets/transit-audio-devices.png"><img src="assets/transit-audio-devices.png" alt="The Audio Devices window" loading="lazy"></a><figcaption>Audio Devices: pick your interface and buffer size, and see how much delay you really have.</figcaption></figure>
+  <figure class="wide"><a class="shot" href="assets/transit-sampler.png"><img width="3840" height="2054" src="assets/transit-sampler.png" alt="The Sampler on its Pads view beside the Compressor" loading="lazy"></a><figcaption>Sampler: a kit on four banks of sixteen pads, here beside the Compressor.</figcaption></figure>
+  <figure class="wide"><a class="shot" href="assets/transit-arrange.png"><img width="3840" height="2054" src="assets/transit-arrange.png" alt="The transit arrange view" loading="lazy"></a><figcaption>Arrange: your tracks and clips laid out along a timeline.</figcaption></figure>
+  <figure><a class="shot" href="assets/transit-arrange-detail.png"><img width="3840" height="2054" src="assets/transit-arrange-detail.png" alt="A close look at chopped clips, fades, automation and takes" loading="lazy"></a><figcaption>Up close: chopped clips with fades, an automation curve, and stacked takes.</figcaption></figure>
+  <figure><a class="shot" href="assets/transit-sampler-slices.png"><img width="3840" height="2054" src="assets/transit-sampler-slices.png" alt="The Sampler's Slices view" loading="lazy"></a><figcaption>Slices: a drum loop cut at its hits, ready to play from pads.</figcaption></figure>
+  <figure><a class="shot" href="assets/transit-mixer.png"><img width="3840" height="2054" src="assets/transit-mixer.png" alt="The transit mixer" loading="lazy"></a><figcaption>Mixer: a volume fader, pan and level meter for every track.</figcaption></figure>
+  <figure><a class="shot" href="assets/transit-pianoroll.png"><img width="3840" height="2054" src="assets/transit-pianoroll.png" alt="The transit piano roll" loading="lazy"></a><figcaption>Piano roll: draw and edit notes on a grid.</figcaption></figure>
+  <figure><a class="shot" href="assets/transit-midi.png"><img width="3840" height="2054" src="assets/transit-midi.png" alt="The MIDI Mappings window" loading="lazy"></a><figcaption>MIDI Mappings: the list of knobs and buttons on your controller and what each one does.</figcaption></figure>
+  <figure><a class="shot" href="assets/transit-audio-devices.png"><img width="3840" height="2054" src="assets/transit-audio-devices.png" alt="The Audio Devices window" loading="lazy"></a><figcaption>Audio Devices: pick your interface and buffer size, and see how much delay you really have.</figcaption></figure>
   </div>
 </section>
 
