@@ -33,12 +33,20 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   at the loop end produces no remainder. Journal recovery uses the same rule. Audio takes are cut by
   the same laps (`crates/engine/src/take_laps.rs`, shared with `build_wrapping`, #567): the host
   writes the take's loop into the plan (`Recording::cycle`), so Stop and crash recovery cut an audio
-  take that ran past the loop end exactly as its MIDI. One recording keeps the newest
-  `take_laps::MAX_LAPS` (10,000) laps; the engine says how many earlier laps were left out and the
-  status line shows it (#522). Their audio stays in the take file; their MIDI is written once to
-  `<session> left-out laps NN.mid` beside the journal (`midi_journal::keep_left_out_laps`), which
-  the journal's cleanup never removes (ADR 0026, lap limit amendment). Placing the takes on Stop costs time that grows with the square of
-  the lap count, which is why there is a limit.
+  take that ran past the loop end exactly as its MIDI. One pass keeps the newest
+  `take_laps::MAX_LAPS` (10,000) laps, one window for every track: `take_laps::laps` takes the
+  pass's end (`Recording::end`, set by the host at Stop from the Stop position, the take files and
+  the last MIDI event; `io::pass_end` works it out from the take files and journal for crash
+  recovery) and cuts the cutoff from it alone (#522). Their audio stays in the take file; their
+  MIDI is written once to `<session> left-out laps NN.mid` beside the journal
+  (`midi_take::keep_left_out`, `midi_journal::keep_left_out_laps`), each note that starts before
+  the cutoff whole and a held pedal's release with it; the first kept lap resumes a held note as
+  after any wrap. The journal's cleanup never removes the file; when it cannot be written the host
+  keeps the journal instead (`midi_journal::export_left_out` writes the file from it later). The
+  host collects every lap note of the pass and ends the status line with them
+  (`report_lap_notes`). A last audio lap shorter than an eighth of the loop is still no take, but
+  is said (#634). Placing the takes on Stop costs work quadratic in the lap count per track, which
+  is why there is a limit (ADR 0026, lap limit amendment).
 - **Count-in pickups** (#327, Logic's behavior; ADR 0026 amendment): the audio thread also
   captures MIDI while a record count-in runs (`service_midi` in `player/audio.rs`), stamped with the
   device output frame like any captured event. That frame runs on through the count-in to the
