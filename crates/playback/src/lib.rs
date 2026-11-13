@@ -80,7 +80,8 @@ pub type EditorEdit = (TrackId, usize, String, f32);
 struct Shared {
     position: AtomicI64,
     /// The output frame the transport's timeline has consumed to (`Timeline::next_output`),
-    /// stored beside `position` at each consumed-progress publication (one or more a callback):
+    /// stored beside `position` at each consumed-progress publication, which occurs at render
+    /// boundaries, including zero-progress calls, and at the end of each conversion chunk:
     /// unlike the position it never wraps, so the
     /// control side counts a recording's laps from it exactly (#522).
     output_frame: AtomicU64,

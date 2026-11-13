@@ -75,6 +75,8 @@ pub enum StartFailure {
     Timeline = 2,
     /// The start position was out of range.
     Position = 3,
+    /// The transport was not at normal speed (#522): recording runs at 1x only.
+    Speed = 4,
 }
 
 impl StartFailure {
@@ -83,6 +85,7 @@ impl StartFailure {
             ActionResult::RecordingClock(_) => Some(Self::Clock),
             ActionResult::Timeline(_) => Some(Self::Timeline),
             ActionResult::InvalidPosition => Some(Self::Position),
+            ActionResult::RecordingSpeed => Some(Self::Speed),
             _ => None,
         }
     }
@@ -92,6 +95,7 @@ impl StartFailure {
             1 => Some(Self::Clock),
             2 => Some(Self::Timeline),
             3 => Some(Self::Position),
+            4 => Some(Self::Speed),
             _ => None,
         }
     }
@@ -102,6 +106,7 @@ impl StartFailure {
             Self::Clock => "the audio device clock was not ready in time",
             Self::Timeline => "the transport timeline refused the start position",
             Self::Position => "the start position is out of range",
+            Self::Speed => "the transport was not at normal speed",
         }
     }
 }
@@ -112,6 +117,8 @@ pub enum ActionResult {
     RecordingStarted(start::Point),
     RecordingClock(device_clock::Unavailable),
     RecordingNotPlaying,
+    /// The transport's applied speed stayed other than 1x for the whole wait (#522).
+    RecordingSpeed,
     RecordingCancelled,
     MidiClock(device_clock::Unavailable),
     MidiTimeline(timeline_map::MapError),
@@ -136,6 +143,11 @@ struct Transport {
     history: timeline_map::History,
     epoch: u64,
     rate: timeline_map::Rate,
+    /// The speed (x 1000) `rate` was made for: the one requested when it was last applied.
+    speed: u32,
+    /// The session and device rates `rate` is made from, at `speed`.
+    sample_rate: u32,
+    device_rate: u32,
     render_position: Samples,
     playing: bool,
     recording: bool,
@@ -202,6 +214,25 @@ impl Transport {
         matches!(reason, device_clock::Unavailable::WarmingUp | device_clock::Unavailable::Stale)
     }
 
+    /// Make the timeline's rate follow the speed requested now (`requested`, x 1000, clamped),
+    /// from the next consumed output frame. Called before every command is applied and at every
+    /// block boundary, so a command always runs at the speed requested when it was applied: the
+    /// host stores a speed before it sends the command that relies on it (#522).
+    fn apply_speed(&mut self, requested: u32, live: &mut plan_bridge::Processing<'_>) -> Result<(), timeline_map::MapError> {
+        let speed = requested.clamp(100, 4000);
+        if speed == self.speed {
+            return Ok(());
+        }
+        let rate = timeline_map::Rate::new(u64::from(self.sample_rate) * u64::from(speed), u64::from(self.device_rate) * 1000)?;
+        let epoch = self.epoch.checked_add(1).ok_or(timeline_map::MapError::Arithmetic)?;
+        self.timeline.change(epoch, None, rate, self.playing, self.looped.map(|r| (r.start, r.end)))?;
+        self.rate = rate;
+        self.epoch = epoch;
+        live.set_transport_epoch(transit_mix::TransportEpoch(epoch));
+        self.speed = speed;
+        Ok(())
+    }
+
     fn record(
         &mut self,
         ticket: start::Ticket,
@@ -232,6 +263,21 @@ impl Transport {
         live: &mut plan_bridge::Processing<'_>,
         patience: Option<u64>,
     ) -> ActionResult {
+        if self.speed != 1000 {
+            // Backstop: a latch is published only at 1x (#522). The applied speed follows the
+            // requested one before every command, and the host refuses Record at another speed,
+            // so this waits only if the two ever disagree; it never records at another rate and
+            // never changes the requested speed. It is retried at each block boundary, as a start
+            // waiting for the clock is, and fails when its second is up.
+            if patience != Some(0) {
+                let now = self.timeline.next_output();
+                let deadline = patience.unwrap_or_else(|| now.saturating_add(self.wait_frames));
+                self.waiting = Some(Waiting { ticket, from, end, looped, deadline });
+                return ActionResult::Applied;
+            }
+            self.record_start.cancel(ticket);
+            return ActionResult::RecordingSpeed;
+        }
         let audio = self.record_start.audio_pass();
         let prepared = (|| {
             let mut timeline = self.timeline;
@@ -509,7 +555,6 @@ pub(super) struct Audio {
     hold: Box<Hold>,
     sample_rate: u32,
     device_rate: u32,
-    speed: u32,
     faulted: bool,
     /// An escaped panic may own a heap payload. Retain it with the audio holder
     /// until main reclaims that holder; do not destroy it during error handling.
@@ -615,7 +660,6 @@ impl Audio {
                 hold: Box::new(Hold::new()),
                 sample_rate: target.sample_rate,
                 device_rate,
-                speed: 1000,
                 faulted: false,
                 panic_payload: RetainedPanic(None),
                 clock_reader: None,
@@ -625,6 +669,9 @@ impl Audio {
                     history: timeline_map::History::default(),
                     epoch: 0,
                     rate,
+                    speed: 1000,
+                    sample_rate: target.sample_rate,
+                    device_rate,
                     render_position: 0,
                     playing: false,
                     recording: false,
@@ -725,6 +772,13 @@ impl Audio {
         self.marker = Some(marker);
     }
 
+    /// Apply the speed requested now to the transport at a block boundary (#522).
+    fn follow_speed(&mut self) -> Result<(), timeline_map::MapError> {
+        let requested = self.shared.speed.load(Ordering::Relaxed);
+        let mut live = self.plans.processing();
+        self.transport.apply_speed(requested, &mut live)
+    }
+
     fn service_actions(&mut self, budget: &mut action_lane::Budget) {
         let source_report = self.sources.service(budget, &mut self.plans, &mut |port, generation, live| {
             live.revoke_source(port, generation);
@@ -736,11 +790,19 @@ impl Audio {
         }
         let transport = &mut self.transport;
         let sources = &self.sources;
+        let requested = &self.shared.speed;
         let report = self.actions.service(budget, &mut self.plans, &mut |event, live| {
             if let action_lane::Event::Action { payload: Command::Note(note), .. } = event
                 && !sources.permits(note.source.port, note.source.generation)
             {
                 return ActionResult::Event(transit_mix::EventOutcome::RevokedSource);
+            }
+            // The speed requested when this command is applied, wherever the callback services
+            // it (#522): never one read earlier in the callback.
+            if let Err(error) = transport.apply_speed(requested.load(Ordering::Relaxed), live) {
+                transport.timeline_fault = Some(error);
+                live.fault();
+                return ActionResult::Timeline(error);
             }
             transport.command(event, live)
         });
@@ -894,7 +956,7 @@ impl Audio {
         self.midi_inbox.dispatch(
             self.read,
             state.timeline.next_output(),
-            u64::from(self.sample_rate) * u64::from(self.speed),
+            u64::from(self.sample_rate) * u64::from(self.transport.speed),
             frames,
             actions,
             &self.sources,
@@ -977,7 +1039,7 @@ impl Audio {
     /// presentation time from the device clock map (else the callback-entry fallback).
     fn external_block(&self, frames: usize) -> external::Block {
         let state = &self.transport;
-        let step = u64::from(self.sample_rate) * u64::from(self.speed);
+        let step = u64::from(self.sample_rate) * u64::from(state.speed);
         let output = state.timeline.next_output();
         let ns_per_output = 1e9 / f64::from(self.device_rate.max(1));
         let base = match (state.clock_map, state.clock_now) {
@@ -1076,18 +1138,10 @@ impl Audio {
         if self.faulted {
             return Ok(());
         }
-        let speed = self.shared.speed.load(Ordering::Relaxed).clamp(100, 4000);
-        if speed != self.speed {
-            let rate = timeline_map::Rate::new(u64::from(self.sample_rate) * u64::from(speed), u64::from(self.device_rate) * 1000)?;
-            let epoch = self.transport.epoch.checked_add(1).ok_or(timeline_map::MapError::Arithmetic)?;
-            self.transport.timeline.change(epoch, None, rate, self.transport.playing, self.transport.looped.map(|r| (r.start, r.end)))?;
-            self.transport.rate = rate;
-            self.transport.epoch = epoch;
-            self.plans.processing().set_transport_epoch(transit_mix::TransportEpoch(epoch));
-            self.speed = speed;
-        }
-        let step = u64::from(self.sample_rate) * u64::from(speed);
-        let quantum = self.read.quantum(out.len() / channels, step, self.plans.engine().max_block());
+        self.follow_speed()?;
+        let mut step = u64::from(self.sample_rate) * u64::from(self.transport.speed);
+        let callback_frames = out.len() / channels;
+        let mut quantum = self.read.quantum(callback_frames, step, self.plans.engine().max_block());
         let mut consumed = 0;
         'frames: for frame in out.chunks_exact_mut(channels) {
             // The next block is rendered as soon as this output frame interpolates into it (#525);
@@ -1102,6 +1156,14 @@ impl Audio {
                 self.service_actions(actions);
                 if self.faulted {
                     break 'frames;
+                }
+                // A speed changed since the callback began reaches the converter here, at the
+                // block boundary, with no frame rendered at the old one (#522).
+                self.follow_speed()?;
+                let now = u64::from(self.sample_rate) * u64::from(self.transport.speed);
+                if now != step {
+                    step = now;
+                    quantum = self.read.quantum(callback_frames, step, self.plans.engine().max_block());
                 }
                 self.render_next(quantum, actions)?;
             }

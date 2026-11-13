@@ -1402,3 +1402,4 @@ mod count_in;
 mod loop_wrap;
 mod monitor_path;
 mod preview;
+mod speed;

@@ -210,6 +210,7 @@ pub(crate) fn refusal_text(outcome: transit_playback::action_lane::Outcome, resu
             format!("Recording can't start: {reason}.")
         }
         Some(ActionResult::RecordingNotPlaying) => "Recording can't start: the transport is not playing.".into(),
+        Some(ActionResult::RecordingSpeed) => "Recording can't start: the transport is not at normal speed.".into(),
         Some(ActionResult::RecordingCancelled) => "Recording was canceled before it could start.".into(),
         Some(ActionResult::InvalidPosition) => "The audio engine can't go there: the position is out of range.".into(),
         Some(ActionResult::Timeline(_) | ActionResult::MidiTimeline(_)) => {
