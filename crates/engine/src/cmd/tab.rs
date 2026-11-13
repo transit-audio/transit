@@ -169,7 +169,7 @@ fn analysed(e: &Engine, t: TrackId, around: Range) -> Vec<Samples> {
         return a.hits.clone();
     }
     // A streamed take that cannot be read has no transients to stop at; the audio health check
-    // names it, and nothing is cached, so the take is analysed again once it reads (#523).
+    // names it, and nothing is cached, so the take is analyzed again once it reads (#523).
     let Ok(hits) = crate::io::transients_in(s, "edit.tab", t, around, 0.5) else { return Vec::new() };
     let mut kept = e.transient_cache.0.borrow_mut();
     if kept.len() >= CACHE_LIMIT {
