@@ -270,8 +270,7 @@ mod tests {
     #[test]
     fn audio_above_full_scale_survives_a_group_file_bit_for_bit() {
         use transit_model::{ChannelFormat, Clip, TrackKind};
-        let dir = std::env::temp_dir().join(format!("transit-grp-overs-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = transit_test_support::TestDir::new("grp-overs");
         let path = dir.join("hot.tclips").to_string_lossy().into_owned();
         let hot = vec![1.5f32, -2.0, 0.25, 1.0e3, f32::from_bits(1), -0.0];
         let mut e = crate::Engine::default();

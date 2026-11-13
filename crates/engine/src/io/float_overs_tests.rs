@@ -30,10 +30,8 @@ fn source_bits(e: &Engine) -> Vec<Vec<u32>> {
     bits(&s.pool.get(s.sources[0].id).unwrap().buffer.channels)
 }
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("transit-float-overs-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    dir
+fn scratch(name: &str) -> transit_test_support::TestDir {
+    transit_test_support::TestDir::new(&format!("float-overs-{name}"))
 }
 
 #[test]
