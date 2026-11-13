@@ -5,7 +5,7 @@
 //! the streaming thread [`register`] starts, on a control thread priming the transport
 //! ([`DiskSource::prime`]), and in tests, which call it between blocks (block-driven, no clock).
 
-use super::{CUEING, Cache, DiskSource, FREE, LIVE, StreamMap};
+use super::{CUEING, Cache, DiskSource, FREE, LIVE, STREAMER, StreamMap};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::Duration;
@@ -26,7 +26,8 @@ pub(crate) struct Pump {
     seen: Vec<(u64, u64)>,
     pass: u64,
     cache: Option<Cache>,
-    /// The file could not be opened: the error is logged once, and the source plays silence.
+    /// The file could not be opened, or a read failed: the fault is recorded on the source, which
+    /// plays silence until the next [`DiskSource::prime`] tries the file again (issue #523).
     broken: bool,
 }
 
@@ -52,9 +53,12 @@ impl DiskSource {
         }
         if p.cache.is_none() && !p.broken {
             match (self.opener)() {
-                Ok(file) => p.cache = Some(Cache::new(file, self.frames, self.path.clone())),
+                Ok(file) => {
+                    p.cache = Some(Cache::new(file, self.frames));
+                    self.clear(STREAMER);
+                }
                 Err(e) => {
-                    log::warn!("{}: the streamed source could not be opened: {e}; it plays as silence", self.path.display());
+                    self.record(STREAMER, format!("could not be opened: {e}"));
                     p.broken = true;
                 }
             }
@@ -76,7 +80,39 @@ impl DiskSource {
                 written += n;
             }
         }
+        if let Some(why) = cache.take_error() {
+            self.record(STREAMER, why);
+            p.broken = true;
+        }
         written
+    }
+
+    /// Control side, before the transport plays: a file that failed to open or read is tried
+    /// again by the next pass, so a drive plugged back in plays without reopening the session.
+    pub(crate) fn retry(&self) {
+        let mut p = self.pump.lock().unwrap_or_else(PoisonError::into_inner);
+        if !p.broken {
+            return;
+        }
+        p.broken = false;
+        p.cache = None;
+        // Rings filled since the failure hold silence in place of the file: free them (not one the
+        // reader is in, as in `cue_slot`) so they are cued and read again.
+        for (i, slot) in self.slots.iter().enumerate() {
+            let was = slot.state.load(Ordering::Acquire);
+            if was == FREE {
+                continue;
+            }
+            slot.state.store(CUEING, Ordering::SeqCst);
+            if slot.busy.load(Ordering::SeqCst) {
+                slot.state.store(was, Ordering::SeqCst);
+                continue;
+            }
+            if let Some(m) = p.maps.get_mut(i) {
+                *m = None;
+            }
+            slot.state.store(FREE, Ordering::Release);
+        }
     }
 
     /// Give `map`'s clip a stream from clip time `k`: nothing when a ring already holds or is

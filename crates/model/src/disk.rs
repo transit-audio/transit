@@ -10,6 +10,10 @@
 //! the same file synchronously through [`DiskSource::with_sync`], so they produce what an
 //! in-memory source of the same file produces, sample for sample.
 //!
+//! A file that cannot be opened or read (a drive unplugged, a file moved) reads as silence, and
+//! the source says why ([`DiskSource::fault`]) until a later open succeeds: the next prime for
+//! playback, [`DiskSource::check`] before an offline render (issue #523).
+//!
 //! A ring is keyed by clip time (samples from the clip's start), and holds the source channels'
 //! samples already mapped through the clip's loop and stretch ([`StreamMap::sample`], the
 //! function the in-memory read uses too). Clip time only moves forward while the transport
@@ -324,16 +328,23 @@ pub(crate) struct Cache {
     len: usize,
     data: Vec<Vec<f32>>,
     failed: bool,
-    path: PathBuf,
+    /// The read error not yet reported to the source ([`Cache::take_error`]).
+    error: Option<String>,
 }
 
 impl Cache {
-    fn new(file: Box<dyn DiskFile>, frames: u64, path: PathBuf) -> Cache {
-        Cache { file, frames, start: 0, len: 0, data: Vec::new(), failed: false, path }
+    fn new(file: Box<dyn DiskFile>, frames: u64) -> Cache {
+        Cache { file, frames, start: 0, len: 0, data: Vec::new(), failed: false, error: None }
+    }
+
+    /// The read error this reader met, once: its owner records it on the source (issue #523).
+    pub(crate) fn take_error(&mut self) -> Option<String> {
+        self.error.take()
     }
 
     /// Channel `ch`'s sample at frame `x`; `None` past the file (as an in-memory source reads).
-    /// A read error is logged once and the file then reads as silence.
+    /// After a read error the file reads as silence until a new reader is opened; the error is
+    /// kept for [`Cache::take_error`].
     pub(crate) fn get(&mut self, ch: usize, x: usize) -> Option<f32> {
         let x = x as u64;
         if x >= self.frames || self.failed {
@@ -345,8 +356,8 @@ impl Cache {
             match self.file.read_at(at, CACHE_FRAMES, &mut self.data) {
                 Ok(n) => (self.start, self.len) = (at, n),
                 Err(e) => {
-                    log::warn!("{}: reading the streamed source failed: {e}; it plays as silence", self.path.display());
                     self.failed = true;
+                    self.error = Some(format!("reading failed: {e}"));
                     return None;
                 }
             }
@@ -371,7 +382,17 @@ pub struct DiskSource {
     sync: Mutex<Option<Cache>>,
     peaks: OnceLock<DiskPeaks>,
     underruns: AtomicU64,
+    /// Why the file last failed to open or read, for the streamer ([`STREAMER`]) and the
+    /// synchronous reader ([`SYNC`]) apart: each reader's next good open clears only its own.
+    faults: Mutex<[Option<String>; 2]>,
+    /// Failed opens and reads of the synchronous reader so far, so an offline render can tell
+    /// whether it met one ([`DiskSource::sync_failures`]).
+    sync_failures: AtomicU64,
 }
+
+/// The readers a fault is recorded for.
+const STREAMER: usize = 0;
+const SYNC: usize = 1;
 
 impl std::fmt::Debug for DiskSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -408,6 +429,8 @@ impl DiskSource {
             sync: Mutex::new(None),
             peaks: OnceLock::new(),
             underruns: AtomicU64::new(0),
+            faults: Mutex::new([None, None]),
+            sync_failures: AtomicU64::new(0),
         })
     }
 
@@ -506,26 +529,91 @@ impl DiskSource {
     }
 
     /// Control side: have `map`'s clip ready from clip time `k`, a ring's worth (the transport
-    /// waits for this before it plays, as it waits for a plan). Reads on the calling thread.
+    /// waits for this before it plays, as it waits for a plan). Reads on the calling thread, and
+    /// tries a file that failed before again.
     pub fn prime(&self, map: &StreamMap, k: Samples) -> bool {
+        self.retry();
         self.cue(map, k);
         self.pump();
         self.ready(map, k.clamp(0, map.length.max(0)), self.window)
     }
 
     /// Off the audio thread: `f` with this file's frames read synchronously (bounce, export,
-    /// consolidate). `get(ch, frame)` is `None` past the file.
+    /// consolidate). `get(ch, frame)` is `None` past the file, and everywhere when the file fails
+    /// to open or read: the failure is recorded ([`DiskSource::fault`],
+    /// [`DiskSource::sync_failures`]). A failed open is tried again on the next call; a reader that
+    /// failed a read reads nothing more until [`DiskSource::check`] opens a new one.
     pub fn with_sync<R>(&self, f: impl FnOnce(&mut dyn FnMut(usize, usize) -> Option<f32>) -> R) -> R {
         let mut guard = self.sync.lock().unwrap_or_else(PoisonError::into_inner);
         if guard.is_none() {
-            match (self.opener)() {
-                Ok(file) => *guard = Some(Cache::new(file, self.frames, self.path.clone())),
-                Err(e) => log::warn!("{}: the streamed source could not be opened: {e}; it renders as silence", self.path.display()),
+            let _ = self.open_sync(&mut guard);
+        }
+        let Some(cache) = guard.as_mut() else { return f(&mut |_, _| None) };
+        let out = f(&mut |ch, x| cache.get(ch, x));
+        if let Some(why) = cache.take_error() {
+            self.record(SYNC, why);
+        }
+        out
+    }
+
+    /// Off the audio thread, before an offline render: open the synchronous reader anew (a reader
+    /// that failed reads nothing more), so a file that is back renders again. `Err` with why the
+    /// file cannot be opened, also recorded as the source's fault.
+    pub fn check(&self) -> Result<(), String> {
+        let mut guard = self.sync.lock().unwrap_or_else(PoisonError::into_inner);
+        self.open_sync(&mut guard)
+    }
+
+    /// Open the synchronous reader into `slot` (replacing what it held), recording the outcome.
+    fn open_sync(&self, slot: &mut Option<Cache>) -> Result<(), String> {
+        match (self.opener)() {
+            Ok(file) => {
+                *slot = Some(Cache::new(file, self.frames));
+                self.clear(SYNC);
+                Ok(())
+            }
+            Err(e) => {
+                *slot = None;
+                Err(self.record(SYNC, format!("could not be opened: {e}")))
             }
         }
-        match guard.as_mut() {
-            Some(cache) => f(&mut |ch, x| cache.get(ch, x)),
-            None => f(&mut |_, _| None),
+    }
+
+    /// Why this source's file could not be opened or read the last time a reader tried, or
+    /// `None` when every reader's last open succeeded (issue #523). The path is not repeated.
+    pub fn fault(&self) -> Option<String> {
+        let faults = self.faults.lock().unwrap_or_else(PoisonError::into_inner);
+        faults.iter().flatten().next().cloned()
+    }
+
+    /// Failed opens and reads of the synchronous reader since the source was made: an offline
+    /// render that sees this move met a part of the file it could not read.
+    pub fn sync_failures(&self) -> u64 {
+        self.sync_failures.load(Ordering::Acquire)
+    }
+
+    /// Record `why` (the path not repeated) as `reader`'s fault and return it; logged when it is
+    /// new for the reader, so a file still missing on every block logs once.
+    fn record(&self, reader: usize, why: String) -> String {
+        let why = why.replacen(&format!("{}: ", self.path.display()), "", 1);
+        if reader == SYNC {
+            self.sync_failures.fetch_add(1, Ordering::AcqRel);
+        }
+        let mut faults = self.faults.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(f) = faults.get_mut(reader)
+            && f.as_deref() != Some(why.as_str())
+        {
+            log::warn!("{}: the streamed source {why}; it plays as silence", self.path.display());
+            *f = Some(why.clone());
+        }
+        why
+    }
+
+    /// `reader` opened the file: its fault is cleared.
+    fn clear(&self, reader: usize) {
+        let mut faults = self.faults.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(f) = faults.get_mut(reader) {
+            *f = None;
         }
     }
 }

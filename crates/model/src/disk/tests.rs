@@ -164,6 +164,121 @@ fn prime_fills_a_window_on_the_calling_thread() {
     assert!(d.stream(&m, 1_000, 4_096).is_some());
 }
 
+/// A source whose file opens only while `gone` is false (a drive unplugged and plugged back),
+/// counting the readers opened.
+fn flaky(data: Vec<Vec<f32>>, window: usize, gone: &Arc<AtomicBool>) -> (Arc<DiskSource>, Arc<AtomicUsize>) {
+    let opened = Arc::new(AtomicUsize::new(0));
+    let frames = data.first().map_or(0, Vec::len) as u64;
+    let channels = data.len();
+    let data = Arc::new(data);
+    let (count, gone) = (Arc::clone(&opened), Arc::clone(gone));
+    let opener: Opener = Arc::new(move || {
+        if gone.load(Ordering::Relaxed) {
+            return Err("gone".into());
+        }
+        count.fetch_add(1, Ordering::Relaxed);
+        Ok(Box::new(Fake { data: Arc::clone(&data) }) as Box<dyn DiskFile>)
+    });
+    (DiskSource::with_window(PathBuf::from("lost.wav"), channels, frames, 48_000, window, opener), opened)
+}
+
+#[test]
+fn a_streamed_file_that_could_not_be_opened_is_opened_again_on_the_next_prime_issue_523() {
+    let data = ramp(1, 10_000);
+    let gone = Arc::new(AtomicBool::new(true));
+    let (d, opened) = flaky(data.clone(), 1_024, &gone);
+    let m = map(2, 10_000);
+    assert!(!d.prime(&m, 0), "nothing to play while the file is gone");
+    gone.store(false, Ordering::Relaxed);
+    assert!(d.prime(&m, 0), "the drive is back: the next prime opens the file again");
+    assert_eq!(opened.load(Ordering::Relaxed), 1);
+    let v = d.stream(&m, 0, 64).expect("filled");
+    assert_eq!(v.get(0, 63), data[0][63]);
+    drop(v);
+    assert_eq!(d.fault(), None, "the good open cleared the fault");
+}
+
+#[test]
+fn an_unopenable_file_is_reported_with_its_reason_until_a_later_open_succeeds_issue_523() {
+    let data = ramp(1, 10_000);
+    let gone = Arc::new(AtomicBool::new(true));
+    let (d, _) = flaky(data.clone(), 1_024, &gone);
+    assert_eq!(d.fault(), None, "nothing tried yet");
+    d.with_sync(|get| assert_eq!(get(0, 5), None));
+    assert_eq!(d.fault().as_deref(), Some("could not be opened: gone"));
+    assert_eq!(d.sync_failures(), 1);
+    assert_eq!(d.check(), Err("could not be opened: gone".into()), "the pre-flight says why");
+    assert_eq!(d.sync_failures(), 2);
+    gone.store(false, Ordering::Relaxed);
+    assert!(d.prime(&map(1, 10_000), 0));
+    assert!(d.fault().is_some(), "the streamer's good open does not clear the offline reader's fault");
+    assert_eq!(d.check(), Ok(()));
+    assert_eq!(d.fault(), None);
+    d.with_sync(|get| assert_eq!(get(0, 5), Some(data[0][5])));
+    assert_eq!(d.sync_failures(), 2);
+}
+
+/// A file whose reads fail while `failing` is set (a drive that drops out mid-take).
+struct Dropping {
+    inner: Fake,
+    failing: Arc<AtomicBool>,
+}
+
+impl DiskFile for Dropping {
+    fn read_at(&mut self, at: u64, frames: usize, out: &mut Vec<Vec<f32>>) -> std::io::Result<usize> {
+        if self.failing.load(Ordering::Relaxed) {
+            return Err(std::io::Error::other("device not ready"));
+        }
+        self.inner.read_at(at, frames, out)
+    }
+}
+
+fn dropping(data: Vec<Vec<f32>>, window: usize, failing: &Arc<AtomicBool>) -> Arc<DiskSource> {
+    let frames = data.first().map_or(0, Vec::len) as u64;
+    let channels = data.len();
+    let data = Arc::new(data);
+    let failing = Arc::clone(failing);
+    let opener: Opener =
+        Arc::new(move || Ok(Box::new(Dropping { inner: Fake { data: Arc::clone(&data) }, failing: Arc::clone(&failing) }) as Box<dyn DiskFile>));
+    DiskSource::with_window(PathBuf::from("dropped.wav"), channels, frames, 48_000, window, opener)
+}
+
+#[test]
+fn a_read_that_fails_is_counted_and_the_next_check_reads_the_file_again_issue_523() {
+    let data = ramp(1, 200_000);
+    let failing = Arc::new(AtomicBool::new(false));
+    let d = dropping(data.clone(), 1_024, &failing);
+    d.with_sync(|get| assert_eq!(get(0, 10), Some(data[0][10])));
+    assert_eq!((d.fault(), d.sync_failures()), (None, 0));
+    failing.store(true, Ordering::Relaxed);
+    d.with_sync(|get| assert_eq!(get(0, 150_000), None, "past the cached window: a read, which fails"));
+    assert_eq!(d.fault().as_deref(), Some("reading failed: device not ready"));
+    assert_eq!(d.sync_failures(), 1);
+    failing.store(false, Ordering::Relaxed);
+    d.with_sync(|get| assert_eq!(get(0, 150_000), None, "a reader that failed reads nothing more"));
+    assert_eq!(d.sync_failures(), 1, "and does not count the same failure twice");
+    assert_eq!(d.check(), Ok(()));
+    d.with_sync(|get| assert_eq!(get(0, 150_000), Some(data[0][150_000])));
+    assert_eq!(d.fault(), None);
+}
+
+#[test]
+fn a_live_read_that_fails_is_reported_and_the_next_prime_streams_the_file_not_the_silence_issue_523() {
+    let data = ramp(1, 10_000);
+    let failing = Arc::new(AtomicBool::new(true));
+    let d = dropping(data.clone(), 1_024, &failing);
+    let m = map(6, 10_000);
+    d.prime(&m, 0);
+    assert_eq!(d.fault().as_deref(), Some("reading failed: device not ready"));
+    failing.store(false, Ordering::Relaxed);
+    assert!(d.prime(&m, 0));
+    assert_eq!(d.fault(), None);
+    let v = d.stream(&m, 0, 64).expect("filled");
+    for k in 0..64 {
+        assert_eq!(v.get(0, k), data[0][k as usize], "clip time {k} is the file's, not the silence the failed pass wrote");
+    }
+}
+
 #[test]
 fn the_threshold_reads_the_session_setting() {
     let mut s = Session::default();
