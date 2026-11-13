@@ -260,18 +260,23 @@ fn a_scan_whose_files_all_fail_reports_them_instead_of_none_found() {
     assert_eq!(summary.none_loaded_message("CLAP"), None);
 }
 
-/// Runs one background scan and waits for it to publish: the hook only reports that the scan loaded
-/// its files, and `scan()` returns once the scan lock is free, which is after publication.
+/// Runs one background scan to its end and returns what it published. The scan thread is idle
+/// before the request, so the request starts a scan: that is asserted at once (a request that
+/// did not start fails here, with the reason, instead of timing out later). `wait_for_scans`
+/// returns when the thread has ended, which is after publication; nothing here waits on a clock.
 fn background_scan(clear_cache: bool) -> Vec<host::ClapDescriptor> {
-    let (tx, rx) = channel();
-    let tx = Mutex::new(tx);
+    host::wait_for_scans();
+    let ran = Arc::new(AtomicUsize::new(0));
+    let count = ran.clone();
     host::set_scan_hook(Some(Arc::new(move || {
-        let _ = tx.lock().unwrap().send(());
+        count.fetch_add(1, Ordering::Relaxed);
     })));
     host::rescan_in_background(clear_cache);
-    rx.recv_timeout(Duration::from_secs(60)).expect("the scan reached publication");
+    assert!(host::scanning(), "the request started no scan although none was running");
+    host::wait_for_scans();
     host::set_scan_hook(None);
-    host::scan()
+    assert_eq!(ran.load(Ordering::Relaxed), 1, "the scan loaded its files exactly once");
+    host::cached().expect("the scan published")
 }
 
 /// Plants a wrong cached failure for the good file and a wrong cached success for a bad one, so
