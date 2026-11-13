@@ -174,6 +174,7 @@ impl T {
             midi_journal: None,
             midi_placed: false,
             cycle: None,
+            end: None,
         };
         self.app.place_takes(&plan, vec![(t, path)], start + i64::from(frames), 1);
         self.frames(3);
@@ -514,6 +515,7 @@ fn a_failed_start_after_the_count_in_releases_the_take_and_says_why() {
         midi_journal: None,
         midi_placed: false,
         cycle: None,
+        end: None,
     });
     app.status = "Recording".into();
     assert!(app.recording_active());

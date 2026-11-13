@@ -42,7 +42,17 @@ fn pass(track: TrackId, sample: i64, events: Vec<CapturedEvent>) -> MidiTake {
 }
 
 fn plan(start: i64, pass: Option<i64>) -> transit_engine::io::Recording {
-    transit_engine::io::Recording { start, pass, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None }
+    transit_engine::io::Recording {
+        start,
+        pass,
+        punch: None,
+        rate: 48_000,
+        takes: Vec::new(),
+        midi_journal: None,
+        midi_placed: false,
+        cycle: None,
+        end: None,
+    }
 }
 
 /// Record from `start` to `stop` with `take` as the capture, then Stop through the host.

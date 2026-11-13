@@ -202,6 +202,7 @@ fn stop_take(tag: &str, approximate: bool) -> T {
         midi_journal: None,
         midi_placed: false,
         cycle: None,
+        end: None,
     });
     t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
     t.app.test_approximate_start = approximate;
@@ -243,6 +244,7 @@ fn recording_stop(count: u32) {
         midi_journal: None,
         midi_placed: false,
         cycle: None,
+        end: None,
     });
     t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
     t.app.engine.transport.recording = true;
@@ -394,26 +396,43 @@ fn record_pressed_mid_loop_while_cycling_stacks_an_audio_take_per_lap_issue_567(
     assert_eq!(t.app.ui.takes_open, vec![track], "the lanes open, as after loop recording");
 }
 
-/// #522: past the most laps one recording keeps, the status line says how many earlier laps were
-/// left out and that the take file still holds them (they used to vanish without a word).
+/// Stop a pass of the one-second take `take` on `track`, loop recorded in laps of `pass` frames
+/// from 0, through the Stop button.
+fn stop_laps(t: &mut T, track: TrackId, take: &TakeFile, pass: i64) {
+    t.app.record_start = 0;
+    t.app.take_plan = Some(transit_engine::io::Recording { pass: Some(pass), rate: 48_000, ..transit_engine::io::Recording::new(0) });
+    t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
+    t.app.engine.transport.recording = true;
+    t.app.start_play(4, None, None);
+    t.stop(1);
+}
+
+/// #522: past the most laps one recording keeps, the status line after Stop says how many earlier
+/// laps were left out and that the take file still holds them (they used to vanish without a word).
 #[test]
 fn laps_left_out_past_the_most_a_recording_keeps_are_said_in_the_status_line_issue_522() {
     let take = TakeFile::new("many-laps");
     let mut t = T::new();
     let track = TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
     // One second in laps of four frames: 12,000 laps.
-    let plan = transit_engine::io::Recording {
-        start: 0,
-        pass: Some(4),
-        punch: None,
-        rate: 48_000,
-        takes: Vec::new(),
-        midi_journal: None,
-        midi_placed: false,
-        cycle: None,
-    };
-    t.app.place_takes(&plan, vec![(track, take.0.to_path_buf())], 4, 1);
+    stop_laps(&mut t, track, &take, 4);
     let status = &t.app.status;
     assert!(status.starts_with("Recorded 10000 takes"), "{status}");
-    assert!(status.contains("2000 earlier laps were left out") && status.contains(take.0.to_string_lossy().as_ref()), "{status}");
+    let said = format!("2000 earlier laps were left out; their audio is kept in {}.", take.0.display());
+    assert!(status.ends_with(&said), "{status}");
+}
+
+/// #634: a last lap shorter than an eighth of the loop is no take, and the status line after Stop
+/// says so, with the frames and the file that keeps them.
+#[test]
+fn a_last_lap_too_short_to_be_a_take_is_said_at_stop_issue_634() {
+    let take = TakeFile::new("short-lap");
+    let mut t = T::new();
+    let track = TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
+    // 48,000 frames in laps of 15,950: three laps and 150 frames.
+    stop_laps(&mut t, track, &take, 15_950);
+    let status = &t.app.status;
+    assert!(status.starts_with("Recorded 3 takes"), "{status}");
+    let said = format!("{}: the last 150 frames (3.1 ms) stay in {}.", transit_engine::take_laps::SHORT_LAP_NOTE, take.0.display());
+    assert!(status.ends_with(&said), "{status}");
 }

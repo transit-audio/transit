@@ -113,6 +113,7 @@ impl StudioApp {
             midi_placed: false,
             // Audio takes are cut into laps by it as MIDI is (#567), and recovery reads it here.
             cycle: self.take_cycle,
+            end: None,
         });
         if self.refuse_for_reopen() || !self.sync_player_session() {
             self.finish_recording();
@@ -347,6 +348,8 @@ impl StudioApp {
             self.player_requests.recording = Some(sequence);
         }
         let plan = self.take_plan.take();
+        // What the engine says while this pass is placed; the lap notes among it end the status line.
+        let said = self.engine.message_pushes();
         let approximate = self.pass_approximate();
         let finished = self.recorder.as_mut().filter(|r| r.has_pending_take()).map(transit_playback::record::Recorder::finish);
         // Tests substitute only the device's finished files; placement and stop ordering stay real.
@@ -372,6 +375,7 @@ impl StudioApp {
             midi_journal: None,
             midi_placed: false,
             cycle: self.take_cycle,
+            end: None,
         });
         // The audio take and the MIDI pass share one latch; either's applied start is the real one.
         let latch = finished
@@ -387,7 +391,15 @@ impl StudioApp {
         self.autosaved_rev = 0;
         let tracked = self.record_clock.take();
         let end = tracked.map_or(self.engine.transport.position, |c| c.last + c.laps);
+        // The pass's end, once for every track, audio and MIDI: it decides the laps left out past
+        // the limit, so they all keep the same window (#522). Stop, the take files and the last
+        // MIDI event, whichever is furthest.
+        let rate = self.engine.session().sample_rate.hz();
+        let files = finished.as_ref().map(|(takes, _)| transit_engine::io::takes_end(&self.engine, takes.iter().map(|(_, p)| p.as_path())));
+        let played = midi.as_ref().and_then(|m| m.timed(rate).iter().map(|(offset, _)| offset.saturating_add(1)).max());
+        plan.end = Some([Some(end - plan.start), files.flatten(), played].into_iter().flatten().fold(1, Samples::max));
         let pushes = self.engine.undo_pushes();
+        let mut kept_journal = None;
         if let Some((takes, problem)) = finished {
             let tracks = takes.len().max(1);
             self.place_takes(&plan, takes, end, tracks);
@@ -403,9 +415,15 @@ impl StudioApp {
             self.midi_journal = journal;
             self.journal_midi(&midi, &plan, true);
             let journal = self.midi_journal.take();
-            self.place_midi_take(&plan, &midi, end);
+            let left_out = self.place_midi_take(&plan, &midi, end);
             if let Some(journal) = journal {
-                self.hold_journal(journal, &plan);
+                if matches!(left_out, Some(transit_engine::midi_take::LeftOutMidi::Failed(_))) {
+                    // The laps left out are in no file: the journal is kept, never cleaned up, so
+                    // their MIDI is not lost (`midi_journal::export_left_out` writes the file later).
+                    kept_journal = Some(journal.path().to_path_buf());
+                } else {
+                    self.hold_journal(journal, &plan);
+                }
             }
         } else if let Some(journal) = journal {
             journal.discard();
@@ -429,6 +447,45 @@ impl StudioApp {
             log::warn!("recording: the take was aligned without a validated audio device clock");
             self.status = format!("{}. {APPROXIMATE_TAKE}", self.status.trim_end_matches('.'));
         }
+        self.report_lap_notes(said, kept_journal.as_deref());
+    }
+
+    /// End the status line with what the engine said, since `mark`, about laps of this pass that
+    /// are no takes (#522, #634), after every other report so none replaces it: the count of laps
+    /// left out once, then where they remain (each audio take file, the MIDI file, or the MIDI
+    /// journal kept at `journal` when that file could not be written). More places than the line
+    /// holds legibly are counted and listed in the log.
+    fn report_lap_notes(&mut self, mark: u64, journal: Option<&std::path::Path>) {
+        use transit_engine::take_laps::{LEFT_OUT_NOTE, SHORT_LAP_NOTE, split_note};
+        let said = self.engine.messages_since(mark);
+        let left: Vec<&String> = said.iter().filter(|m| m.starts_with(LEFT_OUT_NOTE)).collect();
+        let short: Vec<String> = said.iter().filter(|m| m.starts_with(SHORT_LAP_NOTE)).map(|m| m.trim_end_matches('.').to_string()).collect();
+        let mut notes = Vec::new();
+        if let Some(first) = left.first() {
+            let head = split_note(first).0;
+            let mut places: Vec<String> = left.iter().filter_map(|m| split_note(m).1.map(str::to_string)).collect();
+            if let Some(j) = journal {
+                places.push(format!("the MIDI journal is kept at {}", j.display()));
+            }
+            let all = std::iter::once(head.to_string()).chain(places.iter().cloned()).collect::<Vec<_>>().join("; ");
+            if places.len() > 3 {
+                log::warn!("recording: {all}");
+                notes.push(format!("{head}; they remain in {} files (see the log)", places.len()));
+            } else {
+                notes.push(all);
+            }
+        }
+        if short.len() > 2 {
+            for m in &short {
+                log::warn!("recording: {m}");
+            }
+            notes.push(format!("{SHORT_LAP_NOTE}: {} take files keep such a lap (see the log)", short.len()));
+        } else {
+            notes.extend(short);
+        }
+        if !notes.is_empty() {
+            self.status = format!("{}. {}.", self.status.trim_end_matches('.'), notes.join(". "));
+        }
     }
 
     /// Did this pass start without a validated audio device clock (see
@@ -443,15 +500,20 @@ impl StudioApp {
 
     /// Place a finished MIDI pass: one clip per armed track (per pass when loop recording), merged
     /// into a clip already under the take. Nothing played, nothing placed.
-    fn place_midi_take(&mut self, plan: &transit_engine::io::Recording, midi: &transit_playback::MidiTake, end: Samples) {
+    /// Returns what became of the laps the pass left out past the limit, if it left any out.
+    fn place_midi_take(
+        &mut self,
+        plan: &transit_engine::io::Recording,
+        midi: &transit_playback::MidiTake,
+        end: Samples,
+    ) -> Option<transit_engine::midi_take::LeftOutMidi> {
         let events: Vec<_> = midi.timed(self.engine.session().sample_rate.hz()).iter().filter_map(|(offset, e)| rec_event(*offset, e)).collect();
-        let said = self.engine.message_pushes();
-        let ids = transit_engine::midi_take::place_midi_recording_wrapping(&mut self.engine, plan, &events, end - plan.start, self.take_cycle);
+        let placed = transit_engine::midi_take::place_midi_recording_reported(&mut self.engine, plan, &events, end - plan.start, self.take_cycle);
+        let ids = placed.clips;
         if midi.dropped > 0 {
             self.status = format!("{} MIDI events were lost: the capture queue was full", midi.dropped);
         }
         self.report_midi_take(midi, &ids);
-        self.report_laps_left_out(said);
         // #440: count-in notes that ended before the session start are not in the take; the
         // status line says so, once per recording.
         let left_out = transit_engine::midi_take::left_out_before_start(plan, &events);
@@ -463,6 +525,7 @@ impl StudioApp {
             };
             self.status = format!("{}; {what} left out", self.status.trim_end_matches('.'));
         }
+        placed.left_out
     }
 
     /// The status line, selection and take lanes after a MIDI pass placed `ids` (none: nothing played).
@@ -508,15 +571,6 @@ impl StudioApp {
         }
     }
 
-    /// Add to the status line the note the engine gave, since it said `mark`, about earlier laps
-    /// of a cycle recording left out past the most laps a recording keeps (#522).
-    fn report_laps_left_out(&mut self, mark: u64) {
-        let note = self.engine.messages_since(mark).iter().rev().find(|m| m.starts_with(transit_engine::take_laps::LEFT_OUT_NOTE)).cloned();
-        if let Some(note) = note {
-            self.status = format!("{}. {note}", self.status.trim_end_matches('.'));
-        }
-    }
-
     /// After cycle recording, open the take lanes of each track where `ids` (just recorded) made
     /// or joined a take stack (#25): Logic opens the take folder, Live shows the take lanes. A
     /// single take over a clip leaves the lanes as they were (its chip shows them).
@@ -551,14 +605,12 @@ impl StudioApp {
                 }
             }
         }
-        let said = self.engine.message_pushes();
         let ids = transit_engine::io::place_recording_take(&mut self.engine, plan, takes, true);
         let passes = ids.len() / tracks.max(1);
         // Cut into laps: loop recording, or a take that ran past the end of the loop it cycled over (#567).
         if plan.pass.is_some() || (plan.cycle.is_some() && passes > 1) {
             self.show_new_takes(&ids);
             self.status = if passes > 1 { format!("Recorded {passes} takes") } else { format!("Loop-recorded {passes} take(s)") };
-            self.report_laps_left_out(said);
             return;
         }
         let s = self.engine.session_arc();

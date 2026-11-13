@@ -83,7 +83,17 @@ fn recorded_sustain_survives_edit_undo_disk_roundtrip_and_audio_playback() {
         (40000, Msg::Cc { cc: 11, value: 43 }),
     ]
     .map(|(offset, msg)| RecEvent { track, channel: 0, offset, msg });
-    let plan = io::Recording { start: 0, pass: None, punch: None, rate: 48000, takes: vec![], midi_journal: None, midi_placed: false, cycle: None };
+    let plan = io::Recording {
+        start: 0,
+        pass: None,
+        punch: None,
+        rate: 48000,
+        takes: vec![],
+        midi_journal: None,
+        midi_placed: false,
+        cycle: None,
+        end: None,
+    };
     let clip = midi_take::place_midi_recording(&mut e, &plan, &events, 48000)[0];
     let original = points(&e, clip);
     assert_eq!(original.iter().map(|c| c.value).collect::<Vec<_>>(), [101, 12, 43]);
@@ -120,7 +130,17 @@ fn controller_only_recording_overdubs_and_undo_preserves_the_existing_notes() {
     let (mut e, clip) = setup();
     let track: TrackId = e.session().find_clip(clip).unwrap().0;
     e.execute("midi.note_add", &json!({"clip":clip.0,"pitch":60,"start_ticks":0,"length_ticks":480})).unwrap();
-    let plan = io::Recording { start: 0, pass: None, punch: None, rate: 48000, takes: vec![], midi_journal: None, midi_placed: false, cycle: None };
+    let plan = io::Recording {
+        start: 0,
+        pass: None,
+        punch: None,
+        rate: 48000,
+        takes: vec![],
+        midi_journal: None,
+        midi_placed: false,
+        cycle: None,
+        end: None,
+    };
     let events = [(6000, 127), (36000, 0)].map(|(offset, value)| RecEvent { track, channel: 3, offset, msg: Msg::Cc { cc: 64, value } });
     let before = e.session().clone();
     let undo = e.undo_pushes();

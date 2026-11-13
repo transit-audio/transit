@@ -194,21 +194,29 @@ pub fn left_out_before_start(plan: &Recording, events: &[RecEvent]) -> usize {
 /// wrap does not reset, so the session position at Stop (which is back inside the loop) is never
 /// used to decide what was played.
 pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, wrap: Option<Range>) -> Vec<Built> {
-    build_laps(tempo, sr, events, cut, wrap).0
+    build_laps(tempo, sr, events, cut, wrap, events_end(events, cut.stop)).0
 }
 
-/// The laps a pass left out past [`crate::take_laps::MAX_LAPS`] (#522).
+/// The end of a pass from what it captured: Stop (`stop`, samples since the latch) or just past
+/// its last event, whichever is later.
+fn events_end(events: &[RecEvent], stop: Samples) -> Samples {
+    events.iter().map(|e| e.offset.saturating_add(1)).fold(stop, Samples::max)
+}
+
+/// The laps a pass left out past [`crate::take_laps::MAX_LAPS`] (#522). The window is the pass's,
+/// so every track left out the same laps.
 #[derive(Debug, Default)]
 struct LeftOut {
-    /// The most laps any track's pass left out.
+    /// How many laps the pass left out.
     laps: i64,
-    /// Per track that left laps out: the offset its first kept lap starts at (everything before
-    /// it is in the laps left out).
+    /// Per track: the offset the pass's first kept lap starts at (everything before it is in the
+    /// laps left out).
     before: Vec<(TrackId, Samples)>,
 }
 
-/// As [`build_wrapping`], with what it left out.
-fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, wrap: Option<Range>) -> (Vec<Built>, LeftOut) {
+/// As [`build_wrapping`], with `end` the pass's end (samples since the latch, the same for every
+/// track) and what it left out.
+fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, wrap: Option<Range>, end: Samples) -> (Vec<Built>, LeftOut) {
     let mut tracks: Vec<TrackId> = Vec::new();
     for e in events {
         if !tracks.contains(&e.track) {
@@ -223,10 +231,16 @@ fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, 
         let last = mine.last().map_or(0, |e| e.offset);
         // Laps as an audio take of the same pass is cut (#567); the newest are kept past the
         // most laps a recording keeps (#522).
-        let segments: Vec<Segment> = if let Some(cut_laps) = crate::take_laps::laps(cut.start, cut.pass, wrap, lead, last) {
+        // Held notes survive wraps: (channel, pitch, start offset, velocity).
+        // The earliest matching note-on wins, including notes carried from a previous lap.
+        let mut held: Vec<(u8, u8, Samples, u8)> = Vec::new();
+        let segments: Vec<Segment> = if let Some(cut_laps) = crate::take_laps::laps(cut.start, cut.pass, wrap, lead, last, end) {
             if cut_laps.left_out > 0 {
-                left_out.laps = left_out.laps.max(cut_laps.left_out);
-                left_out.before.push((track, cut_laps.laps.first().map_or(Samples::MAX, |l| l.window.start)));
+                let cutoff = cut_laps.laps.first().map_or(Samples::MAX, |l| l.window.start);
+                left_out.laps = cut_laps.left_out;
+                left_out.before.push((track, cutoff));
+                // The first kept lap resumes a note held into it, as every lap after a wrap does.
+                held = open_notes(&mine, cutoff);
             }
             cut_laps.laps.into_iter().map(|l| Segment { index: l.index, window: l.window, range: l.range, origin: l.range.start }).collect()
         } else {
@@ -237,9 +251,6 @@ fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, 
             let range = cut.punch.map_or(Range::new(cut.start + lead, end), |p| Range::new(p.start.max(cut.start), p.end.min(end)));
             vec![Segment { index: 0, window: Range::new(lead, stop.saturating_add(1)), range, origin: cut.start + lead }]
         };
-        // Held notes survive wraps: (channel, pitch, start offset, velocity).
-        // The earliest matching note-on wins, including notes carried from a previous lap.
-        let mut held: Vec<(u8, u8, Samples, u8)> = Vec::new();
         for seg in segments {
             let Segment { index, window, range, origin } = seg;
             if range.is_empty() {
@@ -320,6 +331,42 @@ fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, 
     (out, left_out)
 }
 
+/// The notes of `events` (sorted by offset) still held at `at`, as the take pairs them: each
+/// note-off closes the earliest matching note-on. (channel, pitch, start offset, velocity).
+fn open_notes(events: &[&RecEvent], at: Samples) -> Vec<(u8, u8, Samples, u8)> {
+    let mut held: Vec<(u8, u8, Samples, u8)> = Vec::new();
+    for e in events.iter().take_while(|e| e.offset < at) {
+        match e.msg {
+            Msg::NoteOn { pitch, velocity } => held.push((e.channel, pitch, e.offset, velocity.clamp(1, 127))),
+            Msg::NoteOff { pitch, .. } => {
+                if let Some(i) = held.iter().position(|h| h.0 == e.channel && h.1 == pitch) {
+                    held.remove(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    held
+}
+
+/// What became of the MIDI of the laps a pass left out (#522).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeftOutMidi {
+    /// Written to this MIDI file.
+    Kept(std::path::PathBuf),
+    /// They held no MIDI.
+    Nothing,
+    /// The file could not be written, for this reason.
+    Failed(String),
+}
+
+/// A placed MIDI pass: the clips, and what became of the laps it left out (`None`: none were).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiPlaced {
+    pub clips: Vec<ClipId>,
+    pub left_out: Option<LeftOutMidi>,
+}
+
 /// Place a finished MIDI recording as one undo step ("Record") and return the clips it created
 /// or merged into. `stop` is the samples from the latch to Stop. The transport is taken to have
 /// cycled over the session's cycle range while Cycle is on (a caller that doesn't know the take's own
@@ -336,22 +383,28 @@ pub fn place_midi_recording(e: &mut Engine, plan: &Recording, events: &[RecEvent
 /// pass (`None`: it played straight through). The host knows it: Cycle toggled or the region moved
 /// while a take records does not change the loop that take was recorded with (#81).
 pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &[RecEvent], stop: Samples, wrap: Option<Range>) -> Vec<ClipId> {
+    place_midi_recording_reported(e, plan, events, stop, wrap).clips
+}
+
+/// The pass end of a MIDI pass: the plan's ([`crate::io::pass_end`]: Stop's, or what recovery
+/// finds in the take files and journal), else Stop or its last event.
+fn midi_pass_end(e: &Engine, plan: &Recording, events: &[RecEvent], stop: Samples) -> Samples {
+    crate::io::pass_end(e, plan).unwrap_or_else(|| events_end(events, stop))
+}
+
+/// As [`place_midi_recording_wrapping`], saying what became of the laps it left out: their MIDI
+/// is written to a file before any clip is placed, and the engine says where (#522).
+pub fn place_midi_recording_reported(e: &mut Engine, plan: &Recording, events: &[RecEvent], stop: Samples, wrap: Option<Range>) -> MidiPlaced {
     let cut = Cut { start: plan.start, pass: plan.pass, punch: plan.punch, stop };
+    let end = midi_pass_end(e, plan, events, stop);
     let (built, left_out) = {
         let s = e.session();
-        build_laps(&s.tempo, s.sample_rate, events, &cut, wrap)
+        build_laps(&s.tempo, s.sample_rate, events, &cut, wrap, end)
     };
-    // Kept in a file and said, even when the laps kept hold nothing, before anything is placed (#522).
-    if left_out.laps > 0 {
-        let then = match keep_left_out(e, plan, events, &left_out.before) {
-            Ok(Some(path)) => format!("; their MIDI is kept in {}", path.display()),
-            Ok(None) => " (no MIDI was played in them)".to_string(),
-            Err(err) => format!(" and their MIDI could not be kept: {err}"),
-        };
-        e.warn(crate::take_laps::left_out_note(left_out.laps, &then));
-    }
+    // Kept in a file and said, even when the laps kept hold nothing, before anything is placed.
+    let kept = (left_out.laps > 0).then(|| say_left_out(e, plan, events, &left_out, end));
     if built.is_empty() {
-        return Vec::new();
+        return MidiPlaced { clips: Vec::new(), left_out: kept };
     }
     let before = e.session_arc();
     let n0 = e.undo_pushes();
@@ -428,13 +481,86 @@ pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &
             let _ = e.squash_undo(added, "Record");
         }
     }
-    ids
+    MidiPlaced { clips: ids, left_out: kept }
+}
+
+/// Write the MIDI of the laps `left_out` to a file and say so (or why not) in the engine's messages.
+fn say_left_out(e: &mut Engine, plan: &Recording, events: &[RecEvent], left_out: &LeftOut, end: Samples) -> LeftOutMidi {
+    let kept = match keep_left_out(e, plan, events, &left_out.before, end) {
+        Ok(Some(path)) => LeftOutMidi::Kept(path),
+        Ok(None) => LeftOutMidi::Nothing,
+        Err(err) => LeftOutMidi::Failed(err.to_string()),
+    };
+    let then = match &kept {
+        LeftOutMidi::Kept(path) => format!("; their MIDI is kept in {}", path.display()),
+        LeftOutMidi::Nothing => " (no MIDI was played in them)".to_string(),
+        LeftOutMidi::Failed(err) => format!("; their MIDI could not be written to a file ({err})"),
+    };
+    e.warn(crate::take_laps::left_out_note(left_out.laps, &then));
+    kept
+}
+
+/// Write the MIDI of the laps a pass left out to a file, placing no clip: for a journal kept
+/// because the file could not be written at Stop (#522). `None` when it left no laps out.
+pub fn export_left_out(e: &mut Engine, plan: &Recording, events: &[RecEvent], stop: Samples, wrap: Option<Range>) -> Option<LeftOutMidi> {
+    let cut = Cut { start: plan.start, pass: plan.pass, punch: plan.punch, stop };
+    let end = midi_pass_end(e, plan, events, stop);
+    let (_, left_out) = {
+        let s = e.session();
+        build_laps(&s.tempo, s.sample_rate, events, &cut, wrap, end)
+    };
+    (left_out.laps > 0).then(|| say_left_out(e, plan, events, &left_out, end))
+}
+
+/// What of `mine` (one track's events, sorted) the file of the laps left out before `cutoff` holds:
+/// everything before it, and the real end of what is still sounding there: each held note's own
+/// note-off and a held sustain pedal's release, even after the cutoff. Returns them and where the
+/// file ends: just past the last one (`end`, the pass's end, for a note never released).
+fn left_out_events(mine: &[RecEvent], cutoff: Samples, end: Samples) -> (Vec<RecEvent>, Samples) {
+    let refs: Vec<&RecEvent> = mine.iter().collect();
+    let mut open: Vec<(u8, u8)> = open_notes(&refs, cutoff).iter().map(|h| (h.0, h.1)).collect();
+    let mut pedal: Vec<u8> = Vec::new();
+    for e in mine.iter().take_while(|e| e.offset < cutoff) {
+        if let Msg::Cc { cc: 64, value } = e.msg {
+            pedal.retain(|c| *c != e.channel);
+            if value >= 64 {
+                pedal.push(e.channel);
+            }
+        }
+    }
+    let mut out: Vec<RecEvent> = mine.iter().take_while(|e| e.offset < cutoff).copied().collect();
+    let mut last = cutoff;
+    for e in mine.iter().skip_while(|e| e.offset < cutoff) {
+        if open.is_empty() && pedal.is_empty() {
+            break;
+        }
+        let closes = match e.msg {
+            Msg::NoteOff { pitch, .. } => open.iter().position(|o| *o == (e.channel, pitch)).map(|i| open.remove(i)).is_some(),
+            Msg::Cc { cc: 64, value } if value < 64 => pedal.iter().position(|c| *c == e.channel).map(|i| pedal.remove(i)).is_some(),
+            _ => false,
+        };
+        if closes {
+            out.push(*e);
+            last = last.max(e.offset.saturating_add(1));
+        }
+    }
+    if !open.is_empty() {
+        last = last.max(end);
+    }
+    (out, last)
 }
 
 /// Write the MIDI of the laps left out (`before`: each track's first kept offset) to a MIDI file
-/// beside the pass's journal, as played: one track per armed track, the notes where they fell from
-/// the latch on with the loop unrolled, on the session's tempo map. `None` when they hold nothing.
-fn keep_left_out(e: &Engine, plan: &Recording, events: &[RecEvent], before: &[(TrackId, Samples)]) -> crate::Result<Option<std::path::PathBuf>> {
+/// beside the pass's journal: one track per track with material there, at the unrolled positions
+/// from the latch on the session's tempo map; every note that starts before the cutoff is whole,
+/// with its real note-off ([`left_out_events`]). `None` when they hold nothing.
+fn keep_left_out(
+    e: &Engine,
+    plan: &Recording,
+    events: &[RecEvent],
+    before: &[(TrackId, Samples)],
+    end: Samples,
+) -> crate::Result<Option<std::path::PathBuf>> {
     let s = e.session();
     let mut smf = transit_midi::Smf {
         format: 1,
@@ -444,9 +570,11 @@ fn keep_left_out(e: &Engine, plan: &Recording, events: &[RecEvent], before: &[(T
         markers: Vec::new(),
         key_sigs: Vec::new(),
     };
-    for &(track, end) in before {
-        let mine: Vec<RecEvent> = events.iter().filter(|x| x.track == track && x.offset < end).copied().collect();
-        let straight = Cut { start: plan.start, pass: None, punch: None, stop: end };
+    for &(track, cutoff) in before {
+        let mut mine: Vec<RecEvent> = events.iter().filter(|x| x.track == track).copied().collect();
+        mine.sort_by_key(|x| x.offset);
+        let (mine, stop) = left_out_events(&mine, cutoff, end);
+        let straight = Cut { start: plan.start, pass: None, punch: None, stop };
         for b in build(&s.tempo, s.sample_rate, &mine, &straight) {
             let base = s.tempo.samples_to_ticks(b.range.start, s.sample_rate);
             let mut sequence = b.sequence;
@@ -685,7 +813,7 @@ mod tests {
         (e, t)
     }
     fn plan(start: Samples, pass: Option<Samples>) -> Recording {
-        Recording { start, pass, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None }
+        Recording { start, pass, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None, end: None }
     }
     fn two_notes(t: TrackId) -> Vec<RecEvent> {
         let mut v = vec![on(0, 60), off(24_000, 60), on(24_000, 64), off(48_000, 64)];

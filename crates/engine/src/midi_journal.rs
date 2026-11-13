@@ -309,6 +309,12 @@ impl Journal {
 /// "Record" undo step. The new clips are named `<Track>_recovered`; notes merged into a clip that
 /// was already there keep its name. Returns the clips touched; none when nothing was played.
 pub fn recover(e: &mut Engine, path: &Path) -> Result<Vec<ClipId>> {
+    recover_with_takes(e, path, Vec::new())
+}
+
+/// The plan, events and Stop of the journal at `path`, with the audio `takes` of the same pass
+/// (so the pass's end, which decides the laps left out, is the one its audio recovery finds).
+fn replay(path: &Path, takes: Vec<crate::io::Take>) -> Result<(Recording, Vec<RecEvent>, Samples, Option<Range>)> {
     let journal = read(path)?;
     let events = journal.events();
     let h = &journal.header;
@@ -319,14 +325,30 @@ pub fn recover(e: &mut Engine, path: &Path) -> Result<Vec<ClipId>> {
         pass: h.pass,
         punch: h.punch,
         rate: 0,
-        takes: Vec::new(),
+        takes,
         // Laps left out past the limit are kept beside the journal (#522).
         midi_journal: Some(path.to_path_buf()),
         midi_placed: false,
         cycle: h.loop_range,
+        end: None,
     };
+    Ok((plan, events, stop, h.loop_range))
+}
+
+/// Write the MIDI of the laps the pass of the journal at `path` left out past the lap limit to a
+/// file beside it, placing no clip (#522): for a journal kept because that file could not be
+/// written at Stop. `None` when the pass left no laps out.
+pub fn export_left_out(e: &mut Engine, path: &Path) -> Result<Option<crate::midi_take::LeftOutMidi>> {
+    let (plan, events, stop, wrap) = replay(path, Vec::new())?;
+    Ok(crate::midi_take::export_left_out(e, &plan, &events, stop, wrap))
+}
+
+/// [`recover`] for a pass that also recorded the audio `takes` (the recording plan's), so its laps
+/// are left out exactly as its audio recovery leaves them out.
+pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Take>) -> Result<Vec<ClipId>> {
+    let (plan, events, stop, wrap) = replay(path, takes)?;
     let before = e.session_arc();
-    let ids = crate::midi_take::place_midi_recording_wrapping(e, &plan, &events, stop, h.loop_range);
+    let ids = crate::midi_take::place_midi_recording_wrapping(e, &plan, &events, stop, wrap);
     let mut named: Vec<(TrackId, usize)> = Vec::new();
     for id in &ids {
         if before.find_clip(*id).is_some() {
@@ -364,8 +386,17 @@ mod tests {
         d
     }
     fn header(tracks: Vec<TrackId>) -> Header {
-        let plan =
-            Recording { start: 48_000, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None };
+        let plan = Recording {
+            start: 48_000,
+            pass: None,
+            punch: None,
+            rate: 0,
+            takes: Vec::new(),
+            midi_journal: None,
+            midi_placed: false,
+            cycle: None,
+            end: None,
+        };
         let latch = Latch { output_frame: 10_000, position: 48_000, device_rate: 48_000, session_rate: 48_000 };
         Header::new(latch, &plan, None, tracks)
     }
@@ -477,8 +508,17 @@ mod tests {
         let path = d.join("s.midijournal");
         let mut e = Engine::default();
         let t = TrackId(e.execute("track.new", &serde_json::json!({"kind": "midi", "name": "Keys"})).unwrap()["tracks"][0].as_u64().unwrap());
-        let plan =
-            Recording { start: 96_000, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None };
+        let plan = Recording {
+            start: 96_000,
+            pass: None,
+            punch: None,
+            rate: 0,
+            takes: Vec::new(),
+            midi_journal: None,
+            midi_placed: false,
+            cycle: None,
+            end: None,
+        };
         let latch = Latch { output_frame: 10_000, position: 96_000, device_rate: 48_000, session_rate: 48_000 };
         let header = Header::new(latch, &plan, loop_range, vec![t]);
         // Lap length 48,000: a note from 10,000 to 60,000 after the latch crosses one wrap, and a
