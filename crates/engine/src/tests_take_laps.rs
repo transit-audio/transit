@@ -165,17 +165,27 @@ fn a_midi_note_after_lap_1000_is_kept_issue_522() {
     assert_eq!(built[0].sequence.notes.len(), 1);
 }
 
+/// #522: the MIDI of the laps left out is never lost: it is kept in a MIDI file beside the
+/// journal, named in the status note, and holds those laps' notes.
 #[test]
-fn past_the_most_laps_the_midi_of_the_earlier_laps_is_said_to_be_left_out_issue_522() {
+fn past_the_most_laps_the_midi_of_the_earlier_laps_is_kept_in_a_file_and_said_issue_522() {
+    let dir = TempDir::new("midi-cap");
     let mut e = Engine::default();
     let t = TrackId(e.execute("track.new", &json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
     let last = (MAX_LAPS + 1) * 8;
-    let mut events = vec![on(1), off(2), on(last + 1), off(last + 2)];
+    // A note in each of the two laps left out, and one in the newest lap.
+    let mut events = vec![on(1), off(2), on(9), off(10), on(last + 1), off(last + 2)];
     for x in &mut events {
         x.track = t;
     }
-    let ids = place_midi_recording(&mut e, &plan(0, Some(8), None), &events, 0);
-    assert_eq!(ids.len(), 1, "the newest lap's note is a take; the first lap's is not");
-    let note = e.messages.iter().find(|m| m.starts_with(LEFT_OUT_NOTE)).unwrap();
-    assert!(note.contains("2 earlier laps were left out with the MIDI played in them"), "{note}");
+    let mut p = plan(0, Some(8), None);
+    p.midi_journal = Some(dir.0.join("Audio Files/Song_1.midijournal"));
+    let ids = place_midi_recording(&mut e, &p, &events, 0);
+    assert_eq!(ids.len(), 1, "the newest lap's note is a take; the earlier laps' are not");
+    let note = e.messages.iter().find(|m| m.starts_with(LEFT_OUT_NOTE)).unwrap().clone();
+    let kept = dir.0.join("Audio Files").join(format!("{} left-out laps 01.mid", crate::io::sanitize_name(&e.session().name)));
+    assert!(note.ends_with(&format!("2 earlier laps were left out; their MIDI is kept in {}.", kept.display())), "{note}");
+    let smf = transit_midi::read_smf(&std::fs::read(&kept).unwrap()).unwrap();
+    let notes: usize = smf.tracks.iter().map(|tr| tr.sequence.notes.len()).sum();
+    assert_eq!(notes, 2, "the left-out laps' notes are in the file");
 }

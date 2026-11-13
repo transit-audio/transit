@@ -197,9 +197,18 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
     build_laps(tempo, sr, events, cut, wrap).0
 }
 
-/// As [`build_wrapping`], with the most laps any track's pass left out (past
-/// [`crate::take_laps::MAX_LAPS`], #522).
-fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, wrap: Option<Range>) -> (Vec<Built>, i64) {
+/// The laps a pass left out past [`crate::take_laps::MAX_LAPS`] (#522).
+#[derive(Debug, Default)]
+struct LeftOut {
+    /// The most laps any track's pass left out.
+    laps: i64,
+    /// Per track that left laps out: the offset its first kept lap starts at (everything before
+    /// it is in the laps left out).
+    before: Vec<(TrackId, Samples)>,
+}
+
+/// As [`build_wrapping`], with what it left out.
+fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, wrap: Option<Range>) -> (Vec<Built>, LeftOut) {
     let mut tracks: Vec<TrackId> = Vec::new();
     for e in events {
         if !tracks.contains(&e.track) {
@@ -207,7 +216,7 @@ fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, 
         }
     }
     let mut out = Vec::new();
-    let mut left_out = 0;
+    let mut left_out = LeftOut::default();
     for track in tracks {
         let Taken { lead, events: mine, .. } = taken(events.iter().filter(|e| e.track == track).collect(), cut);
         let mine: Vec<&RecEvent> = mine.iter().collect();
@@ -215,7 +224,10 @@ fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, 
         // Laps as an audio take of the same pass is cut (#567); the newest are kept past the
         // most laps a recording keeps (#522).
         let segments: Vec<Segment> = if let Some(cut_laps) = crate::take_laps::laps(cut.start, cut.pass, wrap, lead, last) {
-            left_out = left_out.max(cut_laps.left_out);
+            if cut_laps.left_out > 0 {
+                left_out.laps = left_out.laps.max(cut_laps.left_out);
+                left_out.before.push((track, cut_laps.laps.first().map_or(Samples::MAX, |l| l.window.start)));
+            }
             cut_laps.laps.into_iter().map(|l| Segment { index: l.index, window: l.window, range: l.range, origin: l.range.start }).collect()
         } else {
             // Stop never cuts off what was captured: the transport can halt at a punch end or
@@ -329,9 +341,14 @@ pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &
         let s = e.session();
         build_laps(&s.tempo, s.sample_rate, events, &cut, wrap)
     };
-    // Said even when the laps kept hold nothing, before anything is placed (#522).
-    if left_out > 0 {
-        e.warn(crate::take_laps::left_out_note(left_out, " with the MIDI played in them"));
+    // Kept in a file and said, even when the laps kept hold nothing, before anything is placed (#522).
+    if left_out.laps > 0 {
+        let then = match keep_left_out(e, plan, events, &left_out.before) {
+            Ok(Some(path)) => format!("; their MIDI is kept in {}", path.display()),
+            Ok(None) => " (no MIDI was played in them)".to_string(),
+            Err(err) => format!(" and their MIDI could not be kept: {err}"),
+        };
+        e.warn(crate::take_laps::left_out_note(left_out.laps, &then));
     }
     if built.is_empty() {
         return Vec::new();
@@ -412,6 +429,50 @@ pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &
         }
     }
     ids
+}
+
+/// Write the MIDI of the laps left out (`before`: each track's first kept offset) to a MIDI file
+/// beside the pass's journal, as played: one track per armed track, the notes where they fell from
+/// the latch on with the loop unrolled, on the session's tempo map. `None` when they hold nothing.
+fn keep_left_out(e: &Engine, plan: &Recording, events: &[RecEvent], before: &[(TrackId, Samples)]) -> crate::Result<Option<std::path::PathBuf>> {
+    let s = e.session();
+    let mut smf = transit_midi::Smf {
+        format: 1,
+        tracks: Vec::new(),
+        tempos: s.tempo.tempos().iter().map(|t| (t.tick, t.bpm)).collect(),
+        meters: s.tempo.meters().iter().map(|m| (m.tick, u8::try_from(m.numerator).unwrap_or(4), u8::try_from(m.denominator).unwrap_or(4))).collect(),
+        markers: Vec::new(),
+        key_sigs: Vec::new(),
+    };
+    for &(track, end) in before {
+        let mine: Vec<RecEvent> = events.iter().filter(|x| x.track == track && x.offset < end).copied().collect();
+        let straight = Cut { start: plan.start, pass: None, punch: None, stop: end };
+        for b in build(&s.tempo, s.sample_rate, &mine, &straight) {
+            let base = s.tempo.samples_to_ticks(b.range.start, s.sample_rate);
+            let mut sequence = b.sequence;
+            for n in &mut sequence.notes {
+                n.start = n.start.saturating_add(base);
+            }
+            for c in &mut sequence.ctrls {
+                c.tick = c.tick.saturating_add(base);
+            }
+            let name = s.track(track).map_or_else(|| "Take".to_string(), |t| t.name.clone());
+            smf.tracks.push(transit_midi::SmfTrack { name, sequence });
+        }
+    }
+    if smf.tracks.is_empty() {
+        return Ok(None);
+    }
+    let bytes = transit_midi::write_smf(&smf).map_err(|err| crate::EngineError::Io(err.to_string()))?;
+    // Beside the journal (where the audio takes go), else in the saved session's Audio Files.
+    let dir = plan
+        .midi_journal
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| e.path.as_deref().and_then(|p| std::path::Path::new(p).parent()).map(|d| d.join("Audio Files")))
+        .ok_or_else(|| crate::EngineError::Io("no folder to keep them in (no journal and the session is not saved)".into()))?;
+    crate::midi_journal::keep_left_out_laps(&dir, &s.name, &bytes).map(Some)
 }
 
 /// Overdub: the new notes join the clip, which grows to cover the take (nothing else is in the

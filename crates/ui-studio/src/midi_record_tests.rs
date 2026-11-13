@@ -676,3 +676,39 @@ fn the_journal_header_keeps_the_loop_the_take_started_with_when_the_region_is_ed
     let header = midi_journal::read(&path).unwrap().header;
     assert_eq!(header.loop_range, Some(transit_time::Range::new(4 * BEAT, 6 * BEAT)));
 }
+
+/// #522: a MIDI pass over the most laps a recording keeps. The clean Stop deletes the journal as
+/// always, but the laps left out keep their MIDI in a file of their own beside it, which the
+/// status line names and no cleanup removes.
+#[test]
+fn the_midi_of_laps_left_out_is_kept_in_a_file_the_clean_stop_does_not_delete_issue_522() {
+    let (mut app, t) = app();
+    let dir = folder("left-out");
+    let path = midi_journal::journal_path(&dir, "Song");
+    let last = LATCH + u64::try_from(transit_engine::take_laps::MAX_LAPS + 1).unwrap() * 4;
+    // Laps of four samples: a note in each of the two laps left out, and one in the newest lap.
+    let events =
+        vec![on(LATCH + 1, t, 60), off(LATCH + 2, t, 60), on(LATCH + 5, t, 62), off(LATCH + 6, t, 62), on(last + 1, t, 64), off(last + 2, t, 64)];
+    app.midi_journal = Some(midi_journal::Writer::new(path.clone()));
+    app.record_start = 0;
+    app.take_plan = Some(transit_engine::io::Recording {
+        start: 0,
+        pass: Some(4),
+        punch: None,
+        rate: 48_000,
+        takes: Vec::new(),
+        midi_journal: Some(path.clone()),
+        midi_placed: false,
+        cycle: None,
+    });
+    app.engine.transport.recording = true;
+    app.start_play(4 * BEAT, None, None);
+    app.finished_test_midi = Some(pass(t, Some(0), events));
+    app.stop_play();
+    assert!(!path.exists(), "the clean Stop deletes the journal, as before");
+    let kept = dir.join(format!("{} left-out laps 01.mid", transit_engine::io::sanitize_name(&app.engine.session().name)));
+    let said = format!("2 earlier laps were left out; their MIDI is kept in {}.", kept.display());
+    assert!(app.status.ends_with(&said), "{}", app.status);
+    let smf = transit_midi::read_smf(&std::fs::read(&kept).expect("the left-out laps' file is kept")).unwrap();
+    assert_eq!(smf.tracks.iter().map(|tr| tr.sequence.notes.len()).sum::<usize>(), 2, "it holds the left-out laps' notes");
+}

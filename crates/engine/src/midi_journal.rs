@@ -219,6 +219,28 @@ fn line<T: serde::Serialize>(file: &mut impl Write, value: &T) -> std::io::Resul
     file.write_all(b"\n")
 }
 
+/// Keep `bytes`, a MIDI file of the laps a cycle recording left out past the most laps it keeps
+/// (#522), in `dir` (beside the journal, where the audio takes go) as `<session> left-out laps
+/// NN.mid`, never over an existing file. The file is the user's: unlike the journal, no cleanup
+/// removes it.
+pub fn keep_left_out_laps(dir: &Path, session: &str, bytes: &[u8]) -> Result<PathBuf> {
+    let io = |path: &Path, e: std::io::Error| EngineError::Io(format!("{}: {e}", path.display()));
+    std::fs::create_dir_all(dir).map_err(|e| io(dir, e))?;
+    let base = sanitize_name(session);
+    for n in 1..10_000 {
+        let path = dir.join(format!("{base} left-out laps {n:02}.mid"));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                file.write_all(bytes).and_then(|()| file.sync_all()).map_err(|e| io(&path, e))?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(io(&path, e)),
+        }
+    }
+    Err(EngineError::Io(format!("{}: no free name for the left-out laps", dir.display())))
+}
+
 /// A journal as read back.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Journal {
@@ -298,7 +320,8 @@ pub fn recover(e: &mut Engine, path: &Path) -> Result<Vec<ClipId>> {
         punch: h.punch,
         rate: 0,
         takes: Vec::new(),
-        midi_journal: None,
+        // Laps left out past the limit are kept beside the journal (#522).
+        midi_journal: Some(path.to_path_buf()),
         midi_placed: false,
         cycle: h.loop_range,
     };
