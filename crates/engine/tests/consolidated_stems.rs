@@ -7,13 +7,8 @@ use transit_midi::{Note, Sequence};
 use transit_model::{ChannelFormat, Clip, Session, TrackKind};
 use transit_time::SampleRate;
 
-fn scratch(name: &str) -> PathBuf {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("transit-{name}-{}-{stamp}-{serial}", std::process::id()));
-    std::fs::create_dir(&dir).unwrap();
-    dir
+fn scratch(name: &str) -> transit_test_support::TestDir {
+    transit_test_support::TestDir::created(name)
 }
 
 fn tone(s: &mut Session) -> transit_model::SourceId {
