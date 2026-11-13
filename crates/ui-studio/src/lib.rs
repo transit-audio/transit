@@ -242,6 +242,9 @@ pub struct StudioApp {
     /// Makes the next Stop see an approximate start, standing in for the recorder's latch.
     #[cfg(test)]
     test_approximate_start: bool,
+    /// A lap limit for cycle recording smaller than the engine's, so a test reaches it (#522).
+    #[cfg(test)]
+    test_lap_limit: Option<Samples>,
     /// Punch range to trim the take to (loop recording only in this UI).
     punch: Option<Range>,
     /// Why the audio input did not open or stopped (the open error, or the device trouble), until
@@ -401,6 +404,8 @@ impl StudioApp {
             placed_journal: None,
             #[cfg(test)]
             test_approximate_start: false,
+            #[cfg(test)]
+            test_lap_limit: None,
             punch: None,
             input_failure: None,
             reopen: transit_playback::reopen::Reopener::default(),

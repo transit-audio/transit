@@ -62,9 +62,9 @@ pub struct Recording {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cycle: Option<Range>,
     /// Where the pass ended, in samples since the latch (set at Stop, so never in a plan crash
-    /// recovery reads). It alone decides which laps are left out past
-    /// [`crate::take_laps::MAX_LAPS`], so every track of the pass keeps the same window; without
-    /// it, the end is worked out from the plan's take files and journal ([`pass_end`]).
+    /// recovery reads). Every track of the pass is cut into laps through it, so audio and MIDI
+    /// decide from the same end whether the transport wrapped (review M1); without it, the end is
+    /// worked out from the plan's take files and journal ([`pass_end`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<Samples>,
 }
@@ -149,7 +149,7 @@ pub fn place_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackI
 
 /// Turn recorded take files into clips at `start`, as one undo step ("Record"); each file is the
 /// source of its clips. With `pass` (loop recording), a take becomes one clip per pass, each pass
-/// after the first on a new playlist (the newest [`crate::take_laps::MAX_LAPS`], said when more).
+/// after the first on a new playlist ([`crate::take_laps::laps`]).
 pub fn add_recording(e: &mut Engine, start: Samples, takes: Vec<(TrackId, PathBuf)>, pass: Option<Samples>) -> Vec<transit_model::ClipId> {
     add_recording_take(e, &Recording { pass, ..Recording::new(start) }, takes, false)
 }
@@ -157,8 +157,8 @@ pub fn add_recording(e: &mut Engine, start: Samples, takes: Vec<(TrackId, PathBu
 /// `add_recording` as `plan` says, with `new_take`: a track with clips under the take (clipped to
 /// the plan's punch) gets a duplicate of its active playlist first, inside the same "Record" step.
 /// Without a loop pass, a take that ran past the end of the plan's `cycle` (the loop the transport
-/// cycled over) is cut at each wrap, as its MIDI is (#567). Every take of the pass keeps the same
-/// lap window ([`pass_end`]).
+/// cycled over) is cut at each wrap, as its MIDI is (#567). Every take of the pass is cut through
+/// the same end ([`pass_end`]).
 pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>, new_take: bool) -> Vec<transit_model::ClipId> {
     let (start, pass, punch, cycle) = (plan.start, plan.pass, plan.punch, plan.cycle);
     let end = pass_end(e, plan);
@@ -213,7 +213,7 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         };
         let Some(x) = s.source(src) else { continue };
         let frames = i64::try_from(x.frames).unwrap_or(0);
-        let (pieces, left_out, short) = take_pieces(start, pass, cycle, frames, end.unwrap_or(frames));
+        let (pieces, merged, short) = take_pieces(start, pass, cycle, frames, end.unwrap_or(frames));
         for (k, piece) in pieces.iter().enumerate() {
             if k > 0
                 && let Some(t) = s.track_mut(tid)
@@ -229,9 +229,8 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         if let Some(new) = out.get(first..) {
             crate::takes::settle_new_takes(s, tid, base, new);
         }
-        if left_out > 0 {
-            let kept = format!("; their audio is kept in {} (import that file to reach it)", path.display());
-            e.warn(crate::take_laps::left_out_note(left_out, &kept));
+        if merged > 0 {
+            e.warn(crate::take_laps::over_limit_note(merged));
         }
         if short > 0 {
             let seconds = e.session().sample_rate.seconds(short);
@@ -267,9 +266,9 @@ struct Piece {
 
 /// The clips a take of `frames` frames latched at `start` becomes: one per lap when it loop
 /// recorded in laps of `pass` or ran past the end of `cycle` (as its MIDI is cut, #567), else one
-/// of the whole file. `end` is the pass's end (it decides the laps left out, #522). A last lap
-/// shorter than an eighth of the loop is no take (ADR 0026). Also returns how many earlier laps
-/// were left out and how many frames that short last lap held (#634).
+/// of the whole file. `end` is the pass's end. A last lap shorter than an eighth of the loop is no
+/// take (ADR 0026). Also returns how many laps the final take holds past the lap limit (0: none,
+/// #522) and how many frames that short last lap held (#634).
 fn take_pieces(start: Samples, pass: Option<Samples>, cycle: Option<Range>, frames: Samples, end: Samples) -> (Vec<Piece>, i64, Samples) {
     if frames <= 0 {
         return (Vec::new(), 0, 0);
@@ -277,6 +276,8 @@ fn take_pieces(start: Samples, pass: Option<Samples>, cycle: Option<Range>, fram
     let Some(laps) = crate::take_laps::laps(start, pass, cycle, 0, frames - 1, end) else {
         return (vec![Piece { offset: 0, at: start, len: frames }], 0, 0);
     };
+    // The loop's length: a final take past the lap limit is longer, never short.
+    let loop_len = pass.or(cycle.map(|c| c.len())).unwrap_or(0);
     let mut short = 0;
     let mut pieces = Vec::with_capacity(laps.laps.len());
     for lap in &laps.laps {
@@ -284,13 +285,13 @@ fn take_pieces(start: Samples, pass: Option<Samples>, cycle: Option<Range>, fram
         if len <= 0 {
             continue;
         }
-        if lap.index > 0 && len < lap.range.len() / 8 {
+        if lap.index > 0 && len < loop_len / 8 {
             short += len;
             continue;
         }
         pieces.push(Piece { offset: lap.window.start, at: lap.range.start, len });
     }
-    (pieces, laps.left_out, short)
+    (pieces, laps.merged, short)
 }
 
 /// A take's audio: decoded, or played from its file.

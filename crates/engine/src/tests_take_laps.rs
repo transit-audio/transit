@@ -1,12 +1,12 @@
 //! The lap cut of cycle recording: an audio take recorded from inside the loop is cut per lap as
-//! its MIDI is (#567), and no lap past the thousandth is dropped (#522). Engine level, no devices:
+//! its MIDI is (#567), and no lap is ever dropped (#522). Engine level, no devices:
 //! the take files are written here and placed as Stop places them.
 #![allow(clippy::unwrap_used)]
 
 use super::*;
 use crate::Engine;
 use crate::io::{Recording, add_recording, place_recording, place_recording_take};
-use crate::midi_take::{Cut, LeftOutMidi, Msg, RecEvent, build_wrapping, place_midi_recording, place_midi_recording_reported};
+use crate::midi_take::{Cut, Msg, RecEvent, build_wrapping, place_midi_recording_wrapping};
 use serde_json::json;
 use std::path::Path;
 use transit_model::TrackId;
@@ -61,7 +61,7 @@ fn a_pass_from_inside_the_loop_is_a_first_stretch_then_whole_laps() {
     let cut = laps(1_200, None, Some(LOOP), 0, 999, 1_000).unwrap();
     let got: Vec<_> = cut.laps.iter().map(|l| (l.index, l.window, l.range)).collect();
     assert_eq!(got, vec![(0, Range::new(0, 200), Range::new(1_200, 1_400)), (1, Range::new(200, 600), LOOP), (2, Range::new(600, 1_000), LOOP)]);
-    assert_eq!(cut.left_out, 0);
+    assert_eq!(cut.merged, 0);
     assert_eq!(laps(1_200, None, Some(LOOP), 0, 199, 200), None, "it never reached the loop end: one straight take");
     assert_eq!(laps(1_400, None, Some(LOOP), 0, 999, 1_000), None, "started at the loop end: the transport does not wrap");
     assert_eq!(laps(1_200, None, None, 0, 999, 1_000), None, "no loop: straight through");
@@ -128,25 +128,7 @@ fn an_audio_take_past_lap_1000_is_placed_to_its_last_frame_issue_522() {
     let clips = clips_of(&e, gtr);
     assert_eq!(clips.iter().map(|c| c.2).sum::<i64>(), 100_150, "every frame is in a take");
     assert_eq!(clips.last(), Some(&(100_100, 0, 50)));
-    assert!(!e.messages.iter().any(|m| m.starts_with(LEFT_OUT_NOTE)), "{:?}", e.messages);
-}
-
-/// #522: past the most laps a recording keeps, the newest are the takes and the status says how
-/// many earlier laps were left out and that the file still holds them.
-#[test]
-fn past_the_most_laps_the_newest_are_kept_and_the_earlier_ones_are_said_issue_522() {
-    let dir = TempDir::new("cap");
-    let path = dir.0.join("Audio Files/Gtr_01.wav");
-    let laps = usize::try_from(MAX_LAPS).unwrap() + 2;
-    write_take(&path, laps * 8);
-    let mut e = Engine::default();
-    let gtr = audio_track(&mut e);
-    let ids = add_recording(&mut e, 0, vec![(gtr, path.clone())], Some(8));
-    assert_eq!(ids.len(), usize::try_from(MAX_LAPS).unwrap());
-    let clips = clips_of(&e, gtr);
-    assert_eq!((clips.first().map(|c| c.0), clips.last().map(|c| c.0)), (Some(16), Some((MAX_LAPS + 1) * 8)), "the newest laps");
-    let note = e.messages.iter().find(|m| m.starts_with(LEFT_OUT_NOTE)).unwrap();
-    assert!(note.contains("2 earlier laps were left out") && note.contains(path.to_string_lossy().as_ref()), "{note}");
+    assert!(!e.messages.iter().any(|m| m.starts_with(OVER_LIMIT_NOTE)), "{:?}", e.messages);
 }
 
 #[test]
@@ -158,193 +140,14 @@ fn a_midi_note_after_lap_1000_is_kept_issue_522() {
     assert_eq!(built[0].sequence.notes.len(), 1);
 }
 
-/// #522: the MIDI of the laps left out is never lost: it is kept in a MIDI file beside the
-/// journal, named in the status note, and holds those laps' notes.
-#[test]
-fn past_the_most_laps_the_midi_of_the_earlier_laps_is_kept_in_a_file_and_said_issue_522() {
-    let dir = TempDir::new("midi-cap");
-    let mut e = Engine::default();
-    let t = TrackId(e.execute("track.new", &json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
-    let last = (MAX_LAPS + 1) * 8;
-    // A note in each of the two laps left out, and one in the newest lap.
-    let mut events = vec![on(1), off(2), on(9), off(10), on(last + 1), off(last + 2)];
-    for x in &mut events {
-        x.track = t;
-    }
-    let mut p = plan(0, Some(8), None);
-    p.midi_journal = Some(dir.0.join("Audio Files/Song_1.midijournal"));
-    let ids = place_midi_recording(&mut e, &p, &events, 0);
-    assert_eq!(ids.len(), 1, "the newest lap's note is a take; the earlier laps' are not");
-    let note = e.messages.iter().find(|m| m.starts_with(LEFT_OUT_NOTE)).unwrap().clone();
-    let kept = dir.0.join("Audio Files").join(format!("{} left-out laps 01.mid", crate::io::sanitize_name(&e.session().name)));
-    assert!(note.ends_with(&format!("2 earlier laps were left out; their MIDI is kept in {}.", kept.display())), "{note}");
-    let smf = transit_midi::read_smf(&std::fs::read(&kept).unwrap()).unwrap();
-    let notes: usize = smf.tracks.iter().map(|tr| tr.sequence.notes.len()).sum();
-    assert_eq!(notes, 2, "the left-out laps' notes are in the file");
-}
-
 fn on_at(track: TrackId, offset: Samples, pitch: u8) -> RecEvent {
     RecEvent { track, channel: 0, offset, msg: Msg::NoteOn { pitch, velocity: 90 } }
 }
 fn off_at(track: TrackId, offset: Samples, pitch: u8) -> RecEvent {
     RecEvent { track, channel: 0, offset, msg: Msg::NoteOff { pitch, velocity: 0 } }
 }
-fn cc_at(track: TrackId, offset: Samples, cc: u8, value: u8) -> RecEvent {
-    RecEvent { track, channel: 0, offset, msg: Msg::Cc { cc, value } }
-}
 fn midi_track(e: &mut Engine) -> TrackId {
     TrackId(e.execute("track.new", &json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap())
-}
-/// The MIDI clips of a track on every playlist, by start: (start, notes as (pitch, start tick, length)).
-fn midi_clips(e: &Engine, t: TrackId) -> Vec<(i64, Vec<(u8, i64, i64)>)> {
-    let mut out: Vec<_> = e
-        .session()
-        .track(t)
-        .unwrap()
-        .playlists
-        .iter()
-        .flat_map(|p| p.clips.iter())
-        .filter_map(|c| match &c.content {
-            transit_model::ClipContent::Midi { sequence } => Some((c.start, sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect())),
-            _ => None,
-        })
-        .collect();
-    out.sort();
-    out
-}
-
-/// Judge item 3 (2026-11-13): the window of laps kept past the limit is the pass's, not each
-/// track's. Two MIDI tracks whose last events fall in different laps and an audio track of the same
-/// pass all keep the laps from the same first lap on; the earlier laps of each go to the file.
-#[test]
-fn every_track_of_a_pass_over_the_limit_keeps_the_same_lap_window() {
-    let dir = TempDir::new("one-window");
-    let mut e = Engine::default();
-    let (a, b, gtr) = (midi_track(&mut e), midi_track(&mut e), audio_track(&mut e));
-    let laps = MAX_LAPS + 2;
-    // A plays to the last lap; B's last note is in lap 2, the first lap the pass keeps.
-    let events = vec![on_at(a, 1, 60), off_at(a, 2, 60), on_at(a, (laps - 1) * 8 + 1, 62), off_at(a, (laps - 1) * 8 + 2, 62)];
-    let events = [events, vec![on_at(b, 1, 64), off_at(b, 2, 64), on_at(b, 9, 65), off_at(b, 10, 65), on_at(b, 17, 67), off_at(b, 18, 67)]].concat();
-    let mut p = plan(0, Some(8), None);
-    p.end = Some(laps * 8);
-    p.midi_journal = Some(dir.0.join("Audio Files/Song_1.midijournal"));
-    place_midi_recording(&mut e, &p, &events, 0);
-    assert_eq!(midi_clips(&e, b).iter().map(|c| c.0).collect::<Vec<_>>(), vec![0], "B keeps only its lap-2 note");
-    assert_eq!(midi_clips(&e, b)[0].1.len(), 1);
-    assert_eq!(midi_clips(&e, a).len(), 1, "A keeps its last-lap note; its lap-0 note is left out like B's");
-    let kept = dir.0.join("Audio Files").join(format!("{} left-out laps 01.mid", crate::io::sanitize_name(&e.session().name)));
-    let smf = transit_midi::read_smf(&std::fs::read(&kept).unwrap()).unwrap();
-    assert_eq!(smf.tracks.iter().map(|tr| tr.sequence.notes.len()).collect::<Vec<_>>(), vec![1, 2], "A's lap 0, B's laps 0 and 1");
-    // The audio take of the same pass keeps the same laps.
-    let path = dir.0.join("Audio Files/Gtr_01.wav");
-    write_take(&path, usize::try_from(laps * 8).unwrap());
-    place_recording_take(&mut e, &p, vec![(gtr, path)], true);
-    assert_eq!(clips_of(&e, gtr).first().map(|c| c.0), Some(16), "audio's first kept lap is lap 2 too");
-    // Empty MIDI laps make no clip: B made one, though the pass kept 10,000 laps.
-}
-
-/// Judge item 1 (2026-11-13): a note, a sustain pedal and a controller across the cutoff. The file
-/// holds each note that starts before the cutoff whole (its real note-off) and a held pedal's real
-/// release; the first kept lap resumes the held note from its start, as every lap after a wrap does,
-/// and holds what changed at or after the cutoff.
-#[test]
-fn a_note_and_a_pedal_held_across_the_cutoff_lose_nothing() {
-    let dir = TempDir::new("held");
-    let mut e = Engine::default();
-    let t = midi_track(&mut e);
-    let lap = 4_800;
-    let cutoff = 2 * lap;
-    let events = vec![
-        on_at(t, lap + 100, 60),
-        cc_at(t, lap + 200, 64, 127),
-        cc_at(t, lap + 300, 1, 10),
-        off_at(t, cutoff + 2_400, 60),
-        cc_at(t, cutoff + 2_500, 64, 0),
-        cc_at(t, cutoff + 2_600, 1, 90),
-    ];
-    let mut p = plan(0, Some(lap), None);
-    p.end = Some((MAX_LAPS + 2) * lap);
-    p.midi_journal = Some(dir.0.join("Song_1.midijournal"));
-    let placed = place_midi_recording_reported(&mut e, &p, &events, 0, None);
-    let s = e.session();
-    let ticks = |at: Samples| s.tempo.samples_to_ticks(at, s.sample_rate);
-    // The kept first lap (lap 2): the note resumed from the lap start to its release.
-    let clips = midi_clips(&e, t);
-    assert_eq!(clips, vec![(0, vec![(60, 0, ticks(2_400))])]);
-    let clip = e.session().track(t).unwrap().playlists.iter().flat_map(|p| p.clips.iter()).find(|c| c.id == placed.clips[0]).unwrap().clone();
-    let transit_model::ClipContent::Midi { sequence } = &clip.content else { panic!("not MIDI") };
-    let kept_ctrls: Vec<_> = sequence.ctrls.iter().map(|c| (c.kind, c.value)).collect();
-    assert_eq!(kept_ctrls, vec![(transit_midi::CtrlKind::Cc(64), 0), (transit_midi::CtrlKind::Cc(1), 90)], "what changed at or after the cutoff");
-    // The file: the whole note, the pedal down and its real release, the controller before the cutoff.
-    let Some(LeftOutMidi::Kept(path)) = placed.left_out else { panic!("not kept: {:?}", placed.left_out) };
-    let smf = transit_midi::read_smf(&std::fs::read(&path).unwrap()).unwrap();
-    let seq = &smf.tracks[0].sequence;
-    let n = seq.notes[0];
-    assert_eq!((n.pitch, n.start, n.start + n.length), (60, ticks(lap + 100), ticks(cutoff + 2_400)), "the whole note, not cut at the cutoff");
-    let file_ctrls: Vec<_> = seq.ctrls.iter().map(|c| (c.tick, c.kind, c.value)).collect();
-    assert_eq!(
-        file_ctrls,
-        vec![
-            (ticks(lap + 200), transit_midi::CtrlKind::Cc(64), 127),
-            (ticks(lap + 300), transit_midi::CtrlKind::Cc(1), 10),
-            (ticks(cutoff + 2_500), transit_midi::CtrlKind::Cc(64), 0),
-        ]
-    );
-}
-
-/// Judge item 4 (2026-11-13): when the file of the laps left out cannot be written, placement says
-/// so with the reason (the host then keeps the journal, see `midi_record_tests`).
-#[test]
-fn a_file_that_cannot_be_written_is_said_with_the_reason() {
-    let dir = TempDir::new("cannot-write");
-    std::fs::create_dir_all(&dir.0).unwrap();
-    // The journal's "folder" is a file, so no file can go beside it.
-    let blocker = dir.0.join("not-a-folder");
-    std::fs::write(&blocker, b"x").unwrap();
-    let mut e = Engine::default();
-    let t = midi_track(&mut e);
-    let mut p = plan(0, Some(8), None);
-    p.end = Some((MAX_LAPS + 2) * 8);
-    p.midi_journal = Some(blocker.join("Song_1.midijournal"));
-    let placed = place_midi_recording_reported(&mut e, &p, &[on_at(t, 1, 60), off_at(t, 2, 60)], 0, None);
-    assert!(matches!(placed.left_out, Some(LeftOutMidi::Failed(_))), "{:?}", placed.left_out);
-    let note = e.messages.iter().find(|m| m.starts_with(LEFT_OUT_NOTE)).unwrap();
-    assert!(note.contains("2 earlier laps were left out; their MIDI could not be written to a file ("), "{note}");
-}
-
-/// Judge item 4 (2026-11-13): a journal kept because the file could not be written gives the file
-/// later, placing no clip.
-#[test]
-fn a_kept_journal_gives_the_file_of_the_laps_left_out_later_without_placing_clips() {
-    use crate::midi_journal::{Header, Latch, Record, Writer, export_left_out};
-    let dir = TempDir::new("kept-journal");
-    let mut e = Engine::default();
-    let t = midi_track(&mut e);
-    let path = dir.0.join("Song_1.midijournal");
-    std::fs::create_dir_all(&dir.0).unwrap();
-    let latch = Latch { output_frame: 0, position: 0, device_rate: 48_000, session_rate: 48_000 };
-    let header = Header::new(latch, &plan(0, Some(8), None), None, vec![t]);
-    let last = u64::try_from((MAX_LAPS + 1) * 8).unwrap();
-    let records: Vec<Record> = [(1, true), (2, false), (last + 1, true), (last + 2, false)]
-        .iter()
-        .map(|&(frame, down)| Record {
-            frame,
-            track: t,
-            channel: 0,
-            approximate: false,
-            msg: if down { Msg::NoteOn { pitch: 60, velocity: 90 } } else { Msg::NoteOff { pitch: 60, velocity: 0 } },
-        })
-        .collect();
-    let mut writer = Writer::new(path.clone());
-    writer.append(&header, &records, records.len()).unwrap();
-    writer.flush().unwrap();
-    let undo = e.undo_history().len();
-    let got = export_left_out(&mut e, &path).unwrap();
-    let Some(LeftOutMidi::Kept(file)) = got else { panic!("{got:?}") };
-    assert_eq!(file.parent(), Some(dir.0.path()), "beside the journal");
-    let smf = transit_midi::read_smf(&std::fs::read(&file).unwrap()).unwrap();
-    assert_eq!(smf.tracks.iter().map(|tr| tr.sequence.notes.len()).sum::<usize>(), 1);
-    assert!(e.session().track(t).unwrap().clips().is_empty() && e.undo_history().len() == undo, "no clip placed");
 }
 
 /// #634: a last lap shorter than an eighth of the loop is still no take (a product choice), but it
@@ -373,7 +176,7 @@ fn midi_played_only_before_the_first_wrap_is_cut_at_the_loop_end_like_its_audio(
     let t = midi_track(&mut e);
     let gtr = audio_track(&mut e);
     let p = plan(1_200, None, Some(LOOP));
-    let ids = crate::midi_take::place_midi_recording_wrapping(&mut e, &p, &[on_at(t, 50, 60), off_at(t, 60, 60)], 1_000, Some(LOOP));
+    let ids = place_midi_recording_wrapping(&mut e, &p, &[on_at(t, 50, 60), off_at(t, 60, 60)], 1_000, Some(LOOP));
     let ranges: Vec<Range> = ids.iter().map(|id| e.session().track(t).unwrap().playlists.iter().find_map(|p| p.clip(*id)).unwrap().range()).collect();
     assert_eq!(ranges, vec![Range::new(1_200, 1_400)]);
     let path = dir.0.join("Audio Files/Gtr_01.wav");
@@ -381,4 +184,59 @@ fn midi_played_only_before_the_first_wrap_is_cut_at_the_loop_end_like_its_audio(
     let audio = place_recording_take(&mut e, &p, vec![(gtr, path)], true);
     let first = e.session().track(gtr).unwrap().playlists.iter().find_map(|p| p.clip(audio[0])).unwrap().range();
     assert_eq!(first, ranges[0], "the MIDI clip is the audio's first lap");
+}
+
+/// #522: a pass handed to the cut with more laps than the limit (the host could not stop it in
+/// time, or crash recovery of a pass that ran on) loses nothing: its first `MAX_LAPS` laps are
+/// takes, everything after them one longer final take, said once. Audio and MIDI of the same pass
+/// get the same final take.
+#[test]
+fn past_the_lap_limit_the_last_laps_are_one_final_take_and_nothing_is_dropped_issue_522() {
+    let dir = TempDir::new("over-limit");
+    let path = dir.0.join("Audio Files/Gtr_01.wav");
+    let laps = MAX_LAPS + 3;
+    write_take(&path, usize::try_from(laps * 8).unwrap());
+    let mut e = Engine::default();
+    let (gtr, t) = (audio_track(&mut e), midi_track(&mut e));
+    let mut p = plan(0, Some(8), None);
+    p.end = Some(laps * 8);
+    let audio = place_recording_take(&mut e, &p, vec![(gtr, path)], true);
+    assert_eq!(audio.len(), usize::try_from(MAX_LAPS + 1).unwrap());
+    let clips = clips_of(&e, gtr);
+    assert_eq!(clips.iter().map(|c| c.2).sum::<i64>(), laps * 8, "every frame is in a take");
+    assert_eq!(clips.last(), Some(&(MAX_LAPS * 8, 0, 24)), "the last three laps are one final take");
+    let said: Vec<&String> = e.messages.iter().filter(|m| m.starts_with(OVER_LIMIT_NOTE)).collect();
+    assert_eq!(said, vec![&over_limit_note(3)]);
+    assert_eq!(said[0], "Cycle recording ran past its limit of 10000 laps: its last 3 laps are one longer final take.");
+    // The MIDI of the same pass: a note in the first lap and one in the very last.
+    let events = [on_at(t, 1, 60), off_at(t, 2, 60), on_at(t, (laps - 1) * 8 + 1, 62), off_at(t, (laps - 1) * 8 + 2, 62)];
+    let ids = place_midi_recording_wrapping(&mut e, &p, &events, 0, None);
+    assert_eq!(ids.len(), 2, "empty laps make no clip");
+    let tr = e.session().track(t).unwrap();
+    let last = tr.playlists.iter().find_map(|pl| pl.clip(ids[1])).unwrap();
+    let audio_last = e.session().track(gtr).unwrap().playlists.iter().find_map(|pl| pl.clip(*audio.last().unwrap())).unwrap();
+    assert_eq!(last.range(), audio_last.range(), "the same final take as the audio");
+    let transit_model::ClipContent::Midi { sequence } = &last.content else { panic!("not MIDI") };
+    assert_eq!(sequence.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![62], "the last lap's note is kept");
+}
+
+/// Judging round 2, item 1: the first MIDI take of a pass is heard even when the pass's first lap
+/// held nothing. It used to go on a new playlist the track does not play, alone and silent.
+#[test]
+fn the_first_midi_take_of_a_pass_whose_first_lap_is_empty_plays() {
+    // Record pressed inside the loop, notes only after the first wrap.
+    let mut e = Engine::default();
+    let t = midi_track(&mut e);
+    let ids = place_midi_recording_wrapping(&mut e, &plan(1_200, None, Some(LOOP)), &[on_at(t, 300, 60), off_at(t, 310, 60)], 1_000, Some(LOOP));
+    assert_eq!(ids.len(), 1);
+    let playing = e.session().track(t).unwrap().clips().iter().map(|c| c.id).collect::<Vec<_>>();
+    assert_eq!(playing, ids, "on the playlist the track plays");
+    // Loop recording from the loop start, notes only in the third lap.
+    let mut e = Engine::default();
+    let t = midi_track(&mut e);
+    let ids = place_midi_recording_wrapping(&mut e, &plan(1_000, Some(400), None), &[on_at(t, 850, 60), off_at(t, 860, 60)], 1_000, None);
+    let tr = e.session().track(t).unwrap();
+    assert_eq!(tr.clips().iter().map(|c| (c.id, c.start, c.length)).collect::<Vec<_>>(), vec![(ids[0], 1_000, 400)]);
+    let transit_model::ClipContent::Midi { sequence } = &tr.clips()[0].content else { panic!("not MIDI") };
+    assert_eq!(sequence.notes.len(), 1, "the playing take holds the note");
 }

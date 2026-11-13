@@ -297,6 +297,8 @@ impl StudioApp {
             ctx.request_repaint();
         }
         self.update_midi_live();
+        // After the pass's clock followed the transport (in `update_midi_live`).
+        self.end_recording_at_lap_limit();
         self.step_poll();
         editor_group::drive(self, ctx);
         self.drive_editors();

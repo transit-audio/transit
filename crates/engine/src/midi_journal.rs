@@ -219,37 +219,6 @@ fn line<T: serde::Serialize>(file: &mut impl Write, value: &T) -> std::io::Resul
     file.write_all(b"\n")
 }
 
-/// Keep `bytes`, a MIDI file of the laps a cycle recording left out past the most laps it keeps
-/// (#522), in `dir` (beside the journal, where the audio takes go) as `<session> left-out laps
-/// NN.mid`, never over an existing file. The file is the user's: unlike the journal, no cleanup
-/// removes it.
-pub fn keep_left_out_laps(dir: &Path, session: &str, bytes: &[u8]) -> Result<PathBuf> {
-    let io = |path: &Path, e: std::io::Error| EngineError::Io(format!("{}: {e}", path.display()));
-    std::fs::create_dir_all(dir).map_err(|e| io(dir, e))?;
-    let base = sanitize_name(session);
-    // Written whole to a temporary name and synced first, so a failed or interrupted write
-    // never leaves a partial `.mid` under the name the user is told.
-    let tmp = dir.join(format!(".{base} left-out laps.{}.part", std::process::id()));
-    let written = std::fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()));
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(io(&tmp, e));
-    }
-    for n in 1..10_000 {
-        let path = dir.join(format!("{base} left-out laps {n:02}.mid"));
-        if path.exists() {
-            continue;
-        }
-        // Never over a file: only a name nothing holds is taken.
-        return std::fs::rename(&tmp, &path).map(|()| path.clone()).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            io(&path, e)
-        });
-    }
-    let _ = std::fs::remove_file(&tmp);
-    Err(EngineError::Io(format!("{}: no free name for the left-out laps", dir.display())))
-}
-
 /// A journal as read back.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Journal {
@@ -318,12 +287,12 @@ impl Journal {
 /// "Record" undo step. The new clips are named `<Track>_recovered`; notes merged into a clip that
 /// was already there keep its name. Returns the clips touched; none when nothing was played.
 pub fn recover(e: &mut Engine, path: &Path) -> Result<Vec<ClipId>> {
-    recover_with_takes(e, path, Vec::new()).map(|placed| placed.clips)
+    recover_with_takes(e, path, Vec::new())
 }
 
-/// The plan, events and Stop of the journal at `path`, with the audio `takes` of the same pass
-/// (so the pass's end, which decides the laps left out, is the one its audio recovery finds).
-fn replay(path: &Path, takes: Vec<crate::io::Take>) -> Result<(Recording, Vec<RecEvent>, Samples, Option<Range>)> {
+/// [`recover`] for a pass that also recorded the audio `takes` (the recording plan's), so its laps
+/// are cut through the same end as its audio recovery cuts them.
+pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Take>) -> Result<Vec<ClipId>> {
     let journal = read(path)?;
     let events = journal.events();
     let h = &journal.header;
@@ -335,30 +304,14 @@ fn replay(path: &Path, takes: Vec<crate::io::Take>) -> Result<(Recording, Vec<Re
         punch: h.punch,
         rate: 0,
         takes,
-        // Laps left out past the limit are kept beside the journal (#522).
+        // The pass's end counts the journal's events as the audio recovery's does.
         midi_journal: Some(path.to_path_buf()),
         midi_placed: false,
         cycle: h.loop_range,
         end: None,
     };
-    Ok((plan, events, stop, h.loop_range))
-}
-
-/// Write the MIDI of the laps the pass of the journal at `path` left out past the lap limit to a
-/// file beside it, placing no clip (#522): for a journal kept because that file could not be
-/// written at Stop. `None` when the pass left no laps out.
-pub fn export_left_out(e: &mut Engine, path: &Path) -> Result<Option<crate::midi_take::LeftOutMidi>> {
-    let (plan, events, stop, wrap) = replay(path, Vec::new())?;
-    Ok(crate::midi_take::export_left_out(e, &plan, &events, stop, wrap))
-}
-
-/// [`recover`] for a pass that also recorded the audio `takes` (the recording plan's), so its laps
-/// are left out exactly as its audio recovery leaves them out; says what became of them.
-pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Take>) -> Result<crate::midi_take::MidiPlaced> {
-    let (plan, events, stop, wrap) = replay(path, takes)?;
     let before = e.session_arc();
-    let placed = crate::midi_take::place_midi_recording_reported(e, &plan, &events, stop, wrap);
-    let ids = placed.clips.clone();
+    let ids = crate::midi_take::place_midi_recording_wrapping(e, &plan, &events, stop, h.loop_range);
     let mut named: Vec<(TrackId, usize)> = Vec::new();
     for id in &ids {
         if before.find_clip(*id).is_some() {
@@ -381,7 +334,7 @@ pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Tak
             clip.name = name;
         }
     }
-    Ok(placed)
+    Ok(ids)
 }
 
 #[cfg(test)]

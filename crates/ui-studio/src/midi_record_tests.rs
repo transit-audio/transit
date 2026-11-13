@@ -681,156 +681,18 @@ fn the_journal_header_keeps_the_loop_the_take_started_with_when_the_region_is_ed
     assert_eq!(header.loop_range, Some(transit_time::Range::new(4 * BEAT, 6 * BEAT)));
 }
 
-/// #522: a MIDI pass over the most laps a recording keeps. The clean Stop deletes the journal as
-/// always, but the laps left out keep their MIDI in a file of their own beside it, which the
-/// status line names and no cleanup removes.
+/// #522: crash recovery of a cycle recording that ran past the lap limit (a pass the host could not
+/// stop in time) loses nothing: its laps are cut as at Stop, the laps past the limit are one final
+/// take, and the recovery status line ends saying so.
 #[test]
-fn the_midi_of_laps_left_out_is_kept_in_a_file_the_clean_stop_does_not_delete_issue_522() {
-    let (mut app, t) = app();
-    let dir = folder("left-out");
-    let path = midi_journal::journal_path(&dir, "Song");
-    let last = LATCH + u64::try_from(transit_engine::take_laps::MAX_LAPS + 1).unwrap() * 4;
-    // Laps of four samples: a note in each of the two laps left out, and one in the newest lap.
-    let events =
-        vec![on(LATCH + 1, t, 60), off(LATCH + 2, t, 60), on(LATCH + 5, t, 62), off(LATCH + 6, t, 62), on(last + 1, t, 64), off(last + 2, t, 64)];
-    app.midi_journal = Some(midi_journal::Writer::new(path.clone()));
-    app.record_start = 0;
-    app.take_plan = Some(transit_engine::io::Recording {
-        start: 0,
-        pass: Some(4),
-        punch: None,
-        rate: 48_000,
-        takes: Vec::new(),
-        midi_journal: Some(path.clone()),
-        midi_placed: false,
-        cycle: None,
-        end: None,
-    });
-    app.engine.transport.recording = true;
-    // The transport stops where the pass ended, just past its last event.
-    app.start_play(i64::try_from(last - LATCH).unwrap() + 3, None, None);
-    app.finished_test_midi = Some(pass(t, Some(0), events));
-    app.stop_play();
-    assert!(!path.exists(), "the clean Stop deletes the journal, as before");
-    let kept = dir.join(format!("{} left-out laps 01.mid", transit_engine::io::sanitize_name(&app.engine.session().name)));
-    let said = format!("2 earlier laps were left out; their MIDI is kept in {}.", kept.display());
-    assert!(app.status.ends_with(&said), "{}", app.status);
-    let smf = transit_midi::read_smf(&std::fs::read(&kept).expect("the left-out laps' file is kept")).unwrap();
-    assert_eq!(smf.tracks.iter().map(|tr| tr.sequence.notes.len()).sum::<usize>(), 2, "it holds the left-out laps' notes");
-}
-
-/// A one-second mono float take in `dir`.
-fn audio_take(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    let path = dir.join(name);
-    let mut bytes = transit_audio_io::wav_float_header(1, 48_000, 48_000).unwrap();
-    bytes.extend((0..48_000).flat_map(|i| (f32::from(u16::try_from(i % 100).unwrap()) / 1000.0).to_le_bytes()));
-    std::fs::write(&path, bytes).unwrap();
-    path
-}
-
-/// A pass loop recorded in laps of four frames: `audio` takes of one second (12,000 laps, so
-/// 2,000 are left out) on new audio tracks, and `events` captured on the MIDI track `t`, journaled
-/// in `dir`. Stopped through the host.
-fn over_the_limit(app: &mut StudioApp, t: TrackId, dir: &std::path::Path, audio: usize, events: Vec<CapturedEvent>) -> Vec<std::path::PathBuf> {
-    let mut files = Vec::new();
-    let mut takes = Vec::new();
-    for k in 0..audio {
-        let a = TrackId(app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
-        let path = audio_take(dir, &format!("Audio {k}_01.wav"));
-        takes.push((a, path.clone()));
-        files.push(path);
-    }
-    let journal = midi_journal::journal_path(dir, "Song");
-    app.midi_journal = Some(midi_journal::Writer::new(journal.clone()));
-    app.record_start = 0;
-    app.take_plan =
-        Some(transit_engine::io::Recording { pass: Some(4), rate: 48_000, midi_journal: Some(journal), ..transit_engine::io::Recording::new(0) });
-    if audio > 0 {
-        app.finished_test_takes = Some((takes, None));
-    }
-    app.engine.transport.recording = true;
-    // The transport stops where the pass ended: one second, the takes' length.
-    app.start_play(48_000, None, None);
-    app.finished_test_midi = Some(pass(t, Some(0), events));
-    app.stop_play();
-    files
-}
-
-/// Judge item 2 (2026-11-13): an audio take over the limit with a short MIDI performance in the
-/// laps kept. The MIDI report comes last, yet the final status line still says the laps left out
-/// once, where the audio is, and that the MIDI laps left out held nothing.
-#[test]
-fn the_lap_notice_survives_the_midi_report_and_names_the_audio_file() {
-    let (mut app, t) = app();
-    let dir = folder("notice-audio-midi");
-    let near_end = LATCH + 47_000;
-    let files = over_the_limit(&mut app, t, &dir, 1, vec![on(near_end, t, 60), off(near_end + 1, t, 60)]);
-    let status = app.status.clone();
-    assert!(status.starts_with("Recorded 1 MIDI clip (1 notes)"), "{status}");
-    let said = format!(
-        "{} 10000 laps as takes: 2000 earlier laps were left out; their audio is kept in {} (import that file to reach it); no MIDI was played in them.",
-        transit_engine::take_laps::LEFT_OUT_NOTE,
-        files[0].display()
-    );
-    assert!(status.ends_with(&said), "{status}");
-    assert_eq!(status.matches("earlier laps were left out").count(), 1, "said once");
-}
-
-/// Judge item 2 (2026-11-13): several audio takes over the limit: the count once, every file named.
-#[test]
-fn the_lap_notice_names_every_audio_take_file() {
-    let (mut app, t) = app();
-    let dir = folder("notice-two-audio");
-    let files = over_the_limit(&mut app, t, &dir, 2, Vec::new());
-    let status = app.status.clone();
-    let places: Vec<String> = files.iter().map(|f| format!("their audio is kept in {} (import that file to reach it)", f.display())).collect();
-    assert!(status.ends_with(&format!("2000 earlier laps were left out; {}.", places.join("; "))), "{status}");
-    assert_eq!(status.matches("earlier laps were left out").count(), 1, "said once");
-}
-
-/// Judge item 4 (2026-11-13): the file of the laps left out cannot be written (its folder is a
-/// file, as a full or read-only disk would refuse it). The journal is kept, never cleaned up, and
-/// the status line names it with the reason.
-#[test]
-fn when_the_left_out_laps_file_cannot_be_written_the_journal_is_kept_and_named() {
-    let (mut app, t) = app();
-    let dir = folder("cannot-write");
-    let blocker = dir.join("not-a-folder");
-    std::fs::write(&blocker, b"x").unwrap();
-    let journal = midi_journal::journal_path(&dir, "Song");
-    let last = LATCH + u64::try_from(transit_engine::take_laps::MAX_LAPS + 1).unwrap() * 4;
-    let events = vec![on(LATCH + 1, t, 60), off(LATCH + 2, t, 60), on(last + 1, t, 64), off(last + 2, t, 64)];
-    app.midi_journal = Some(midi_journal::Writer::new(journal.clone()));
-    app.record_start = 0;
-    // The plan points the file beside a journal in that "folder"; the journal itself is in `dir`.
-    app.take_plan = Some(transit_engine::io::Recording {
-        pass: Some(4),
-        rate: 48_000,
-        midi_journal: Some(blocker.join("Song.midijournal")),
-        ..transit_engine::io::Recording::new(0)
-    });
-    app.engine.transport.recording = true;
-    // The transport stops where the pass ended, just past its last event.
-    app.start_play(i64::try_from(last - LATCH).unwrap() + 3, None, None);
-    app.finished_test_midi = Some(pass(t, Some(0), events));
-    app.stop_play();
-    assert!(journal.is_file(), "the journal is kept");
-    let status = app.status.clone();
-    assert!(status.contains("2 earlier laps were left out; their MIDI could not be written to a file ("), "{status}");
-    assert!(status.ends_with(&format!("; the MIDI journal is kept at {}.", journal.display())), "{status}");
-}
-
-/// Review F5 (2026-11-13): a cycle recording over the limit interrupted by a crash. Recovery
-/// writes the file of the laps left out, and its status line ends with the lap notice naming it,
-/// after the recovery report.
-#[test]
-fn recovery_of_a_pass_over_the_limit_says_the_laps_left_out() {
-    let root = folder("recover-left-out");
+fn recovery_of_a_looped_pass_past_the_lap_limit_keeps_every_lap() {
+    let root = folder("recover-over-limit");
     let (mut app, t) = app();
     app.autosave_dir = Some(root.join("Autosave"));
     let dir = takes_of(&app, &root);
     std::fs::create_dir_all(&dir).unwrap();
     let journal = midi_journal::journal_path(&dir, "Song");
+    // Laps of four samples: a note in the first lap and one in the lap after the limit's final lap.
     let last = LATCH + u64::try_from(transit_engine::take_laps::MAX_LAPS + 1).unwrap() * 4;
     let events = vec![on(LATCH + 1, t, 60), off(LATCH + 2, t, 60), on(last + 1, t, 64), off(last + 2, t, 64)];
     app.midi_journal = Some(midi_journal::Writer::new(journal.clone()));
@@ -851,7 +713,17 @@ fn recovery_of_a_pass_over_the_limit_says_the_laps_left_out() {
     let (next, _) = recovered(&root);
     let status = next.status.clone();
     assert!(status.starts_with("Recovered "), "{status}");
-    let kept = dir.join(format!("{} left-out laps 01.mid", transit_engine::io::sanitize_name(&next.engine.session().name)));
-    assert!(status.ends_with(&format!("2 earlier laps were left out; their MIDI is kept in {}.", kept.display())), "{status}");
-    assert!(kept.is_file());
+    assert!(status.ends_with(&transit_engine::take_laps::over_limit_note(2)), "{status}");
+    let tr = next.engine.session().track(t).unwrap();
+    let mut takes: Vec<(i64, i64, Vec<u8>)> = tr
+        .playlists
+        .iter()
+        .flat_map(|p| p.clips.iter())
+        .filter_map(|c| match &c.content {
+            ClipContent::Midi { sequence } => Some((c.start, c.length, sequence.notes.iter().map(|n| n.pitch).collect())),
+            _ => None,
+        })
+        .collect();
+    takes.sort();
+    assert_eq!(takes, vec![(0, 4, vec![60]), (0, 7, vec![64])], "the first lap, and the last laps as one final take to the pass end");
 }

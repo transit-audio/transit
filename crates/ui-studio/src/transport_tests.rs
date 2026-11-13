@@ -407,19 +407,70 @@ fn stop_laps(t: &mut T, track: TrackId, take: &TakeFile, pass: i64) {
     t.stop(1);
 }
 
-/// #522: past the most laps one recording keeps, the status line after Stop says how many earlier
-/// laps were left out and that the take file still holds them (they used to vanish without a word).
+/// #522: a cycle recording ends by itself once its pass completes the lap limit (a small limit
+/// here; the real one is `take_laps::MAX_LAPS`). The transport stops as when Record is pressed
+/// again, every lap is a take on every armed track, audio and MIDI alike, the frames recorded
+/// after the last wrap are said as a short last lap, and the status line says the recording ended
+/// at its limit. Record works again at once.
 #[test]
-fn laps_left_out_past_the_most_a_recording_keeps_are_said_in_the_status_line_issue_522() {
-    let take = TakeFile::new("many-laps");
+fn cycle_recording_ends_at_its_lap_limit_with_every_lap_a_take_issue_522() {
+    use transit_mix::{Message, NoteId};
+    use transit_playback::midi_capture::CapturedEvent;
+    let take = TakeFile::new("lap-limit");
     let mut t = T::new();
-    let track = TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
-    // One second in laps of four frames: 12,000 laps.
-    stop_laps(&mut t, track, &take, 4);
-    let status = &t.app.status;
-    assert!(status.starts_with("Recorded 10000 takes"), "{status}");
-    let said = format!("2000 earlier laps were left out; their audio is kept in {} (import that file to reach it).", take.0.display());
-    assert!(status.ends_with(&said), "{status}");
+    let audio = TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
+    let keys = TrackId(t.app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
+    // Laps of 15,950 samples: three laps are 47,850 frames of the one-second take, whose last 150
+    // frames are the partial lap after the third wrap.
+    let (lap, cycle) = (15_950, transit_time::Range::new(48_000, 63_950));
+    let edit = &mut t.app.engine.session_mut().edit;
+    edit.loop_playback = true;
+    edit.loop_range = cycle;
+    t.app.test_lap_limit = Some(3);
+    t.app.begin_pass(Vec::new());
+    assert_eq!(t.app.take_plan.as_ref().map(|p| (p.start, p.pass)), Some((48_000, Some(lap))));
+    t.app.finished_test_takes = Some((vec![(audio, take.0.to_path_buf())], None));
+    // A note in each lap, the device frame of the latch at 10,000.
+    let note = |frame: u64, down: bool| CapturedEvent {
+        frame,
+        track: keys,
+        channel: 0,
+        message: if down {
+            Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE }
+        } else {
+            Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE }
+        },
+        approximate: false,
+    };
+    let events = (0..3u64).flat_map(|k| [note(10_000 + k * 15_950 + 1_000, true), note(10_000 + k * 15_950 + 2_000, false)]).collect();
+    let position = transit_playback::timeline_map::Position { sample: 48_000, fraction: 0, denominator: 1 };
+    let start = transit_playback::record::start::Point { host_ns: 0, output_frame: 10_000, position };
+    t.app.finished_test_midi = Some(transit_playback::MidiTake { tracks: vec![keys], start: Some(start), events, dropped: 0, device_rate: 48_000 });
+    let mut frames = 0;
+    while t.app.recording_active() && frames < 200 {
+        t.frames(1);
+        frames += 1;
+    }
+    assert!(!t.app.recording_active() && !t.app.is_playing(), "the recording ended by itself after {frames} frames");
+    let laps = |app: &crate::StudioApp, track: TrackId| -> Vec<(i64, i64, i64)> {
+        let tr = app.engine.session().track(track).unwrap();
+        let mut v: Vec<_> = tr.playlists.iter().flat_map(|p| p.clips.iter().map(|c| (c.start, c.length, c.source_offset()))).collect();
+        v.sort_unstable_by_key(|c| c.2);
+        v
+    };
+    assert_eq!(laps(&t.app, audio), vec![(48_000, lap, 0), (48_000, lap, lap), (48_000, lap, 2 * lap)], "every lap a take, nothing past the limit");
+    assert_eq!(laps(&t.app, keys).iter().map(|c| (c.0, c.1)).collect::<Vec<_>>(), vec![(48_000, lap); 3], "the MIDI laps line up");
+    let status = t.app.status.clone();
+    assert!(status.starts_with("Recorded 3 takes (3 notes) on"), "{status}");
+    let short = format!("{}: the last 150 frames (3.1 ms) stay in {}.", transit_engine::take_laps::SHORT_LAP_NOTE, take.0.display());
+    assert!(status.contains(&short), "{status}");
+    assert!(status.ends_with(". Cycle recording ended at its limit of 3 laps; press Record to continue."), "{status}");
+    // Record again at once: the new pass counts its laps from the start, so it runs on.
+    t.app.begin_pass(Vec::new());
+    t.frames(30);
+    assert!(t.app.recording_active() && t.app.is_playing(), "{}", t.app.status);
+    t.stop(1);
+    assert_eq!(laps(&t.app, audio).len(), 3, "the earlier takes stay");
 }
 
 /// #634: a last lap shorter than an eighth of the loop is no take, and the status line after Stop
