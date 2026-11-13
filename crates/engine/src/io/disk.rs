@@ -96,22 +96,67 @@ pub fn add_disk_source(s: &mut Session, name: &str, audio: Arc<SourceAudio>, pat
     id
 }
 
+#[cfg(test)]
+thread_local! {
+    /// When set, every path an unplaced-take entry leads to is recorded here and reported as not
+    /// there, so a test sees what would reach the file system without anything being touched.
+    pub(super) static UNPLACED_PROBES: std::cell::RefCell<Option<Vec<PathBuf>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Whether the take file at `path` is there: the one place an unplaced-take entry reaches the
+/// file system.
+fn take_file_there(path: &Path) -> bool {
+    #[cfg(test)]
+    if let Some(there) = UNPLACED_PROBES.with(|l| {
+        l.borrow_mut().as_mut().map(|seen| {
+            seen.push(path.to_path_buf());
+            false
+        })
+    }) {
+        return there;
+    }
+    crate::file_access::check_read(path).is_ok() && path.is_file()
+}
+
 /// The file an unplaced-take entry of an older build names (`<path> (<what it holds>)`, #192),
-/// when it is still there.
-fn unplaced_file(entry: &str) -> Option<PathBuf> {
-    entry.match_indices(" (").map(|(i, _)| PathBuf::from(&entry[..i])).find(|p| crate::file_access::check_read(p).is_ok() && p.is_file())
+/// when it is still there, or why it is not looked for. The path is a stored path like every other
+/// the session file `links` names: it goes through [`stored_path`] before the file system sees it,
+/// so an entry naming another computer, a device or a URL is refused unopened, and a relative one
+/// is taken from the session's folder, never the working directory.
+fn unplaced_file(entry: &str, links: &Path) -> std::result::Result<Option<PathBuf>, String> {
+    let (mut looked, mut refused) = (false, None);
+    for (i, _) in entry.match_indices(" (") {
+        match stored_path(&entry[..i], links) {
+            Ok(path) if take_file_there(&path) => return Ok(Some(path)),
+            Ok(_) => looked = true,
+            Err(why) => {
+                refused.get_or_insert(why);
+            }
+        }
+    }
+    // A file looked for and not found is the plain "never placed" case; only an entry with no
+    // path that may be looked for says why.
+    match refused {
+        Some(why) if !looked => Err(why),
+        _ => Ok(None),
+    }
 }
 
 /// On open: place each take an older build left unplaced (#192) whose file is still there, as one
 /// disk-backed clip at the session's start on a new track named after the file (`<track>_<NN>.wav`
-/// gives `<track>`), so nothing already in the session is touched. Returns what it says and whether
-/// anything was placed; the entries placed leave the list.
-pub(crate) fn place_unplaced(s: &mut Session) -> (Vec<String>, bool) {
+/// gives `<track>`), so nothing already in the session is touched. `links` is the session file the
+/// entries' paths are stored in. Returns what it says and whether anything was placed; the entries
+/// placed leave the list, the rest stay listed.
+pub(crate) fn place_unplaced(s: &mut Session, links: &Path) -> (Vec<String>, bool) {
     let mut placed_any = false;
     let mut said = Vec::new();
     let entries = std::mem::take(&mut s.unplaced_takes);
     for entry in entries {
-        let placed = unplaced_file(&entry).and_then(|path| {
+        let file = unplaced_file(&entry, links).unwrap_or_else(|why| {
+            said.push(format!("the unplaced take {entry} is not looked for: {why}"));
+            None
+        });
+        let placed = file.and_then(|path| {
             let (info, len) = probe(&path)?;
             match open_disk_audio(&path, len, s.sample_rate.hz()) {
                 Ok(audio) => Some((path, info, audio)),
@@ -366,9 +411,146 @@ mod tests {
         bytes.extend([0u8; 6 * 4 * 100]);
         std::fs::write(&path, &bytes).unwrap();
         let mut s = Session { unplaced_takes: vec![format!("{} (0.00 h of 6-channel at 48 kHz)", path.display())], ..Session::default() };
-        let (_, placed) = place_unplaced(&mut s);
+        let (_, placed) = place_unplaced(&mut s, &dir.0.join("S.transit"));
         assert!(placed);
         let t = s.tracks.last().unwrap();
         assert_eq!((t.format, t.channels()), (ChannelFormat::for_channels(6), 6), "{}", t.name);
+    }
+
+    /// Records the paths unplaced-take entries lead to instead of touching them, until dropped.
+    struct Probes;
+    impl Probes {
+        fn on() -> Probes {
+            UNPLACED_PROBES.with(|l| *l.borrow_mut() = Some(Vec::new()));
+            Probes
+        }
+        fn take(&self) -> Vec<PathBuf> {
+            UNPLACED_PROBES.with(|l| l.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default())
+        }
+    }
+    impl Drop for Probes {
+        fn drop(&mut self) {
+            UNPLACED_PROBES.with(|l| *l.borrow_mut() = None);
+        }
+    }
+
+    const HOLDS: &str = " (8.00 h of mono at 48 kHz)";
+
+    /// Entries a hostile session could hold: other computers, devices, URLs, a drive the session is
+    /// not on, and climbs above the root, in Windows and Unix spellings and mixed separators.
+    fn hostile_entries(session: &Path) -> Vec<String> {
+        let drive = session.to_str().and_then(|s| s.chars().next()).filter(|_| cfg!(windows)).unwrap_or('C').to_ascii_uppercase();
+        let other = if drive == 'Q' { 'R' } else { 'Q' };
+        let mut out: Vec<String> = [
+            r"\\host\share\Take_01.wav",
+            "//host/share/Take_01.wav",
+            r"\/host/share\Take_01.wav",
+            r"/\host\share/Take_01.wav",
+            r"\\host\share\..\..\Take_01.wav",
+            r"\\?\UNC\host\share\Take_01.wav",
+            "//?/UNC/host/share/Take_01.wav",
+            r"\\.\UNC\host\share\Take_01.wav",
+            r"\\.\pipe\Take_01",
+            r"\\.\C:\Take_01.wav",
+            r"\\?\GLOBALROOT\Device\Mup\host\share\Take_01.wav",
+            r"\??\C:\Take_01.wav",
+            "file://host/share/Take_01.wav",
+            "file:////host/share/Take_01.wav",
+            "FILE://host/Take_01.wav",
+            "file:%5C%5Chost%5Cshare%5CTake_01.wav",
+            "smb://host/share/Take_01.wav",
+            "https://host/Take_01.wav",
+            r"http:\\host\Take_01.wav",
+            "webdav://host/Take_01.wav",
+            "sftp://host/Take_01.wav",
+            "ms-settings:Take_01.wav",
+            "search-ms:query=Take_01",
+            "NUL",
+            "CON.wav",
+            r"Audio Files\COM1.wav",
+            "Audio Files/LPT1",
+            "/../Take_01.wav",
+            "Take_01.wav\u{7}",
+        ]
+        .map(String::from)
+        .into();
+        out.push(format!("{other}:Take_01.wav"));
+        out.push(format!("{}Take_01.wav", "../".repeat(200)));
+        out.push(format!(r"Audio Files\{}Take_01.wav", r"..\".repeat(200)));
+        out
+    }
+
+    #[test]
+    fn an_unplaced_take_naming_another_computer_a_device_or_a_url_is_refused_unopened() {
+        let dir = TempDir::new("hostile-takes");
+        let session = dir.0.join("Song.transit");
+        let probes = Probes::on();
+        for path in hostile_entries(&session) {
+            let entry = format!("{path}{HOLDS}");
+            let mut s = Session { unplaced_takes: vec![entry.clone()], ..Session::default() };
+            let (said, placed) = place_unplaced(&mut s, &session);
+            assert_eq!(probes.take(), Vec::<PathBuf>::new(), "{path:?}: nothing reaches the file system");
+            assert!(!placed && s.tracks.is_empty() && s.sources.is_empty(), "{path:?}");
+            assert_eq!(s.unplaced_takes, std::slice::from_ref(&entry), "{path:?}: the take stays listed");
+            assert!(said.iter().any(|m| m.contains(&entry) && m.contains("is not looked for: not opened")), "{path:?}: {said:?}");
+        }
+    }
+
+    #[test]
+    fn an_unplaced_take_with_a_relative_path_is_looked_for_in_the_session_folder_only() {
+        let dir = TempDir::new("relative-takes");
+        let session = dir.0.join("Song.transit");
+        let take = dir.0.join("Audio Files").join("Take_01.wav");
+        let probes = Probes::on();
+        let entries = [
+            "Audio Files/Take_01.wav".to_string(),
+            r"Audio Files\Take_01.wav".to_string(),
+            r"./Audio Files/..\Audio Files/Take_01.wav".to_string(),
+            take.display().to_string(),
+        ];
+        for path in entries {
+            let entry = format!("{path}{HOLDS}");
+            let mut s = Session { unplaced_takes: vec![entry.clone()], ..Session::default() };
+            let (said, placed) = place_unplaced(&mut s, &session);
+            assert_eq!(probes.take(), std::slice::from_ref(&take), "{path:?}: taken from the session's folder, never the working directory");
+            assert!(!placed && said.is_empty(), "{path:?}: a file not there is the plain never-placed case: {said:?}");
+            assert_eq!(s.unplaced_takes, [entry], "the take stays listed");
+        }
+        // On the session's own network share the entry is the session's, as for every stored path
+        // (checked without touching it: a share path is not absolute on Unix, so refused there).
+        let shared = Path::new(r"\\host\share\Song\Song.transit");
+        let mut s = Session { unplaced_takes: vec![format!(r"\\host\share\Song\Audio Files\Take_01.wav{HOLDS}")], ..Session::default() };
+        let (said, _) = place_unplaced(&mut s, shared);
+        if cfg!(windows) {
+            assert_eq!(probes.take(), [PathBuf::from(r"\\host\share\Song\Audio Files\Take_01.wav")], "{said:?}");
+        } else {
+            assert!(probes.take().is_empty() && said.iter().any(|m| m.contains("is not looked for")), "{said:?}");
+        }
+        // A take on another share than the session's is another computer.
+        let mut s = Session { unplaced_takes: vec![format!(r"\\host\other\Take_01.wav{HOLDS}")], ..Session::default() };
+        let (said, _) = place_unplaced(&mut s, shared);
+        assert!(probes.take().is_empty() && said.iter().any(|m| m.contains("the path is on another computer")), "{said:?}");
+    }
+
+    #[test]
+    fn a_session_whose_unplaced_take_names_another_computer_opens_and_lists_it_untouched() {
+        let dir = TempDir::new("hostile-open");
+        let mut e = Engine::default();
+        let remote = format!(r"\\host\share\Take_01.wav{HOLDS}");
+        let near = format!("Take_02.wav{HOLDS}");
+        e.session_mut().unplaced_takes = vec![remote.clone(), near.clone()];
+        let session = dir.0.join("Hostile.transit");
+        save_session(&mut e, &session.to_string_lossy()).unwrap();
+
+        let probes = Probes::on();
+        let mut r = Engine::default();
+        open_session(&mut r, &session.to_string_lossy()).unwrap();
+        assert_eq!(probes.take(), [dir.0.join("Take_02.wav")], "only the session folder's file is looked for");
+        assert_eq!(r.session().unplaced_takes, [remote.clone(), near.clone()], "both stay listed");
+        assert!(r.messages.iter().any(|m| m.contains(&remote) && m.contains("is not looked for: not opened")), "{:?}", r.messages);
+        for entry in [&remote, &near] {
+            assert!(r.messages.iter().any(|m| m.contains(transit_model::UNPLACED_NOTE) && m.contains(entry.as_str())), "{:?}", r.messages);
+        }
+        assert!(!r.is_dirty(), "nothing was placed, so the session opens as saved");
     }
 }

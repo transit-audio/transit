@@ -374,7 +374,7 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     if !s.unplaced_takes.is_empty() {
         let before = s.clone();
         notes.retain(|n| !n.starts_with(transit_model::UNPLACED_NOTE));
-        let (said, placed) = super::disk::place_unplaced(&mut s);
+        let (said, placed) = super::disk::place_unplaced(&mut s, links);
         notes.extend(said);
         notes.extend(s.unplaced_takes.iter().map(|t| format!("{} {t}", transit_model::UNPLACED_NOTE)));
         as_saved = placed.then_some(before);
