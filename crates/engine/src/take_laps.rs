@@ -54,7 +54,7 @@ pub struct Laps {
 ///
 /// The laps run through the furthest of `last` (the last offset this track holds material at) and
 /// `end - 1` (`end` is the pass's end in samples since the latch, the same for every track), so
-/// every track of a pass decides from the same end whether the transport wrapped (review M1).
+/// every track of a pass decides from the same end whether the transport wrapped (#567).
 pub fn laps(start: Samples, pass: Option<Samples>, wrap: Option<Range>, lead: Samples, last: Samples, end: Samples) -> Option<Laps> {
     let reach = last.max(end - 1);
     if let Some(len) = pass.filter(|p| *p > 0) {

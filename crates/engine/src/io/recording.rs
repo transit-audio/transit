@@ -63,7 +63,7 @@ pub struct Recording {
     pub cycle: Option<Range>,
     /// Where the pass ended, in samples since the latch (set at Stop, so never in a plan crash
     /// recovery reads). Every track of the pass is cut into laps through it, so audio and MIDI
-    /// decide from the same end whether the transport wrapped (review M1); without it, the end is
+    /// decide from the same end whether the transport wrapped (#567); without it, the end is
     /// worked out from the plan's take files and journal ([`pass_end`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<Samples>,

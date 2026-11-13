@@ -274,6 +274,9 @@ impl StudioApp {
                 TransportRequest::HalfSpeed => {
                     if self.count_in_state().is_some() {
                         self.stop_play();
+                    } else if self.recording_active() {
+                        // Recording runs at normal speed only (#522): the speed stays as it is.
+                        self.status = super::recording::HALF_SPEED_WHILE_RECORDING.into();
                     } else {
                         if let Some(p) = &self.player {
                             p.set_speed(0.5);
@@ -352,10 +355,12 @@ impl StudioApp {
             if let Some(l) = looped
                 && *pos >= l.end
             {
-                // The jump back is the simulated transport's own wrap: its clock counts it, so a
-                // recording's laps never depend on a frame seeing the position go back (#522).
-                wrapped = *pos - l.start;
-                *pos = l.start;
+                // The simulated transport's own wraps, every one and with its overshoot carried
+                // into the loop as the player does: its clock counts them, so a recording's laps
+                // never depend on a frame seeing the position go back (#522).
+                let len = l.len().max(1);
+                wrapped = ((*pos - l.end) / len + 1) * len;
+                *pos -= wrapped;
             }
             let stop = end.is_some_and(|e| *pos >= e);
             self.engine.transport.position = *pos;

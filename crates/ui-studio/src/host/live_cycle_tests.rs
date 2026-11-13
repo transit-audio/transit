@@ -358,4 +358,40 @@ mod lap_clock {
         frame(&mut app);
         assert_eq!(completed(&app), 2);
     }
+
+    /// Recording runs at normal speed only (#522): Record pressed while playing at half
+    /// speed is refused before anything is armed, with the reason, and the speed is left alone.
+    #[test]
+    fn record_is_refused_while_the_transport_plays_at_half_speed() {
+        let (mut app, _dir) = armed(5);
+        app.run("transport.half_speed", json!({})).unwrap();
+        run_until(&mut app, 20, StudioApp::is_playing);
+        assert_eq!(app.player.as_ref().unwrap().speed(), 0.5);
+        app.run("transport.record", json!({})).unwrap();
+        step(&mut app);
+        assert!(app.take_plan.is_none() && !app.recording_active(), "nothing records");
+        assert!(!app.player.as_ref().unwrap().midi_recording_prepared(), "nothing was armed");
+        assert_eq!(app.status, crate::host::recording::record_speed_refusal(0.5));
+        assert_eq!(app.status, "Cannot record at half speed: recording runs at normal speed only. Press Stop, then Record.");
+        assert!(app.is_playing() && app.player.as_ref().unwrap().speed() == 0.5, "the speed is the user's to change");
+    }
+
+    /// And Half-Speed Playback is refused while a recording is pending (before the latch) or under
+    /// way: the pass goes on at normal speed.
+    #[test]
+    fn half_speed_is_refused_while_a_recording_is_pending_or_under_way() {
+        let (mut app, _dir) = armed(5);
+        app.start_recording();
+        assert!(app.recording_active() && app.record_clock.is_none(), "pending: not latched yet");
+        app.run("transport.half_speed", json!({})).unwrap();
+        step(&mut app);
+        assert_eq!(app.player.as_ref().unwrap().speed(), 1.0, "pending");
+        assert_eq!(app.status, crate::host::recording::HALF_SPEED_WHILE_RECORDING);
+        until_latched(&mut app);
+        app.run("transport.half_speed", json!({})).unwrap();
+        step(&mut app);
+        assert_eq!(app.player.as_ref().unwrap().speed(), 1.0, "under way");
+        assert_eq!(app.status, crate::host::recording::HALF_SPEED_WHILE_RECORDING);
+        assert!(app.recording_active() && app.take_plan.is_some(), "the pass goes on");
+    }
 }

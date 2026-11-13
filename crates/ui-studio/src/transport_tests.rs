@@ -491,7 +491,7 @@ fn a_last_lap_too_short_to_be_a_take_is_said_at_stop_issue_634() {
     assert!(status.ends_with(&said), "{status}");
 }
 
-/// Judge round 1, item 3: 101 take files each with a last lap too short to be a take. The
+/// #634: 101 take files each with a last lap too short to be a take. The
 /// engine's message list keeps only the last 100 notes, yet the status line gives the exact count
 /// (the engine counts them as it places) and points to the log, which has every one.
 #[test]

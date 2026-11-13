@@ -165,7 +165,7 @@ fn a_last_lap_too_short_to_be_a_take_is_said_issue_634() {
     assert!(note.contains("the last 20 frames (0.4 ms) stay in"), "{note}");
 }
 
-/// Review M1 (2026-11-13): MIDI played only before the first wrap. Loop [1000, 1400), Record at
+/// #567: MIDI played only before the first wrap. Loop [1000, 1400), Record at
 /// 1200, one note at offsets 50 to 60, two wraps, Stop at offset 1000. The pass wrapped, so the
 /// MIDI is cut as the audio of the same pass is: its one note is a clip over [1200, 1400), and the
 /// empty later laps make no clip. It used to be one clip over [1200, 2200), past the loop end.
@@ -220,7 +220,7 @@ fn past_the_lap_limit_the_last_laps_are_one_final_take_and_nothing_is_dropped_is
     assert_eq!(sequence.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![62], "the last lap's note is kept");
 }
 
-/// Judging round 2, item 1: the first MIDI take of a pass is heard even when the pass's first lap
+/// #522: the first MIDI take of a pass is heard even when the pass's first lap
 /// held nothing. It used to go on a new playlist the track does not play, alone and silent.
 #[test]
 fn the_first_midi_take_of_a_pass_whose_first_lap_is_empty_plays() {
@@ -242,7 +242,7 @@ fn the_first_midi_take_of_a_pass_whose_first_lap_is_empty_plays() {
 }
 
 /// #522: completed laps come from how far the pass has run, never from where the playhead is: the
-/// judge's case of a 0.8 s loop at 48 kHz, a two-second stall just after 9,999 wraps, laps that
+/// case of a 0.8 s loop at 48 kHz, a two-second stall just after 9,999 wraps, laps that
 /// end on the same position, and a start halfway into the loop.
 #[test]
 fn completed_laps_count_every_wrap_from_the_pass_clock() {
@@ -259,10 +259,16 @@ fn completed_laps_count_every_wrap_from_the_pass_clock() {
     assert_eq!(completed(start, None, Some(looped), lap / 2), 1, "the first lap ends at the first wrap");
     assert_eq!(completed(start, None, Some(looped), lap / 2 + 9_999 * lap), MAX_LAPS);
     assert_eq!(completed(start, None, Some(looped), lap / 2 + 9_999 * lap - 1), MAX_LAPS - 1);
-    // It agrees with the cut at every lap end.
-    let cut = laps(start, None, Some(looped), 0, 5 * lap - 1, 5 * lap).unwrap();
-    for l in &cut.laps {
-        assert_eq!(completed(start, None, Some(looped), l.window.end), l.index + 1, "lap {} is complete at its window end", l.index);
+    // It agrees with the cut at every lap end, and one sample before it: from inside the loop,
+    // from before it (the first lap reaches back to the start) and loop recording from its start.
+    for (start, pass, wrap) in [(start, None, Some(looped)), (40_000, None, Some(looped)), (96_000, Some(lap), None)] {
+        let cut = laps(start, pass, wrap, 0, 5 * lap - 1, 5 * lap).unwrap();
+        assert!(cut.laps.len() >= 4, "{start}: several laps to check");
+        for l in &cut.laps {
+            let at = |elapsed| completed(start, pass, wrap, elapsed);
+            assert_eq!(at(l.window.end), l.index + 1, "start {start}: lap {} is complete at its window end", l.index);
+            assert_eq!(at(l.window.end - 1), l.index, "start {start}: lap {} is not complete before it", l.index);
+        }
     }
     assert_eq!(completed(1_200, None, None, 10_000), 0, "no loop: no laps");
 }

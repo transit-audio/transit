@@ -6,6 +6,13 @@ impl StudioApp {
     /// which in this UI is usually a clicked clip. With Cycle on, it loop-records
     /// the cycle range, one take per lap, until Stop.
     pub(crate) fn start_recording(&mut self) {
+        // Recording runs at normal speed only: the take is placed and its laps counted at 1x
+        // (#522). Refused before anything is armed; the speed is never changed for the user.
+        if let Some(speed) = self.player.as_ref().map(Player::speed).filter(|s| *s != 1.0) {
+            self.status = record_speed_refusal(speed);
+            log::warn!("recording: {}", self.status);
+            return;
+        }
         if self.midi_transport.resume_record_at.is_none() {
             self.midi_transport.record_pass_pushes = None;
         }
@@ -403,7 +410,7 @@ impl StudioApp {
         let tracked = self.record_clock.take();
         let end = tracked.map_or(self.engine.transport.position, |c| c.reach);
         // The pass's end, once for every track, audio and MIDI, so they all decide from it whether
-        // the transport wrapped (review M1). Stop, the take files and the last MIDI event,
+        // the transport wrapped (#567). Stop, the take files and the last MIDI event,
         // whichever is furthest.
         let rate = self.engine.session().sample_rate.hz();
         let files = finished.as_ref().map(|(takes, _)| transit_engine::io::takes_end(&self.engine, takes.iter().map(|(_, p)| p.as_path())));
@@ -662,6 +669,16 @@ impl StudioApp {
         }
     }
 }
+
+/// What the status line says when Record is pressed while the transport plays at `speed`, not 1x.
+pub(crate) fn record_speed_refusal(speed: f32) -> String {
+    let at = if (speed - 0.5).abs() < f32::EPSILON { "half speed".to_string() } else { format!("{speed}x speed") };
+    format!("Cannot record at {at}: recording runs at normal speed only. Press Stop, then Record.")
+}
+
+/// What the status line says when Half-Speed Playback is asked for while a recording is pending
+/// or under way.
+pub(crate) const HALF_SPEED_WHILE_RECORDING: &str = "Half-Speed Playback is not available while recording: recording runs at normal speed only.";
 
 /// Where the engine's messages and its count of short last laps stood before a placement.
 #[derive(Debug, Clone, Copy)]
