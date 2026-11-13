@@ -339,6 +339,161 @@ impl PendingParams {
     }
 }
 
+/// Reports kept per parameter (#651): enough for the session's echoes still on their way when the
+/// plug-in reports again (a quick run of preset picks, a knob drag in its editor).
+const REPORTS_KEPT: usize = 4;
+
+/// What the plug-in reported for each parameter (`performEdit`, or a values re-read for
+/// `kParamValuesChanged`), each with the plain value the host handed the session for it (#651).
+/// The session sends that plain value back through `set_param`; this table lets the audio side
+/// recognize it ([`Echoes`]) and give the processor exactly the normalized value the plug-in
+/// reported, instead of a re-normalized one, with nothing for the controller, which holds that
+/// value already. Written on the instance's main thread only (one writer), read on the audio
+/// thread with no lock or allocation: a sequence lock per parameter, like the MIDI table's.
+pub(crate) struct Reported {
+    params: Box<[ReportSlots]>,
+}
+
+struct ReportSlots {
+    /// Twice the number of reports so far, plus one while one is being written.
+    seq: AtomicU64,
+    /// Report `k` (from 1) at `(k - 1) % REPORTS_KEPT`: the plain value (`f32` bits) and the
+    /// normalized value (`f64` bits).
+    plain: [AtomicU32; REPORTS_KEPT],
+    normalized: [AtomicU64; REPORTS_KEPT],
+}
+
+/// What [`Reported::echo`] found.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Echo {
+    /// Report number `report` carried this plain value, with this normalized value.
+    Of { report: u64, normalized: f64 },
+    /// No report after the ones already seen carried it; `reports` is the number made so far.
+    None { reports: u64 },
+    /// A report was being written throughout: no answer.
+    Busy,
+}
+
+impl Reported {
+    pub fn new(params: usize) -> Reported {
+        Reported {
+            params: (0..params)
+                .map(|_| ReportSlots {
+                    seq: AtomicU64::new(0),
+                    plain: std::array::from_fn(|_| AtomicU32::new(0)),
+                    normalized: std::array::from_fn(|_| AtomicU64::new(0)),
+                })
+                .collect(),
+        }
+    }
+
+    /// Records that the plug-in reported normalized `normalized` for parameter `i`, handed to the
+    /// session as `plain`. The instance's main thread only (the one writer).
+    pub fn record(&self, i: usize, plain: f32, normalized: f64) {
+        let Some(slot) = self.params.get(i) else { return };
+        let s = slot.seq.load(Ordering::Relaxed);
+        slot.seq.store(s.wrapping_add(1), Ordering::Relaxed);
+        std::sync::atomic::fence(Ordering::Release);
+        let at = (s / 2) as usize % REPORTS_KEPT;
+        if let (Some(p), Some(n)) = (slot.plain.get(at), slot.normalized.get(at)) {
+            p.store(plain.to_bits(), Ordering::Relaxed);
+            n.store(normalized.to_bits(), Ordering::Relaxed);
+        }
+        slot.seq.store(s.wrapping_add(2), Ordering::Release);
+    }
+
+    /// The newest report of parameter `i` after report `seen` whose plain value is exactly
+    /// `plain`. Any thread; no lock, no allocation.
+    pub fn echo(&self, i: usize, plain: f32, seen: u64) -> Echo {
+        let Some(slot) = self.params.get(i) else { return Echo::None { reports: 0 } };
+        // The writer's section is a few stores: a short bounded retry.
+        for _ in 0..4 {
+            let s1 = slot.seq.load(Ordering::Acquire);
+            if s1 & 1 == 1 {
+                std::hint::spin_loop();
+                continue;
+            }
+            let reports = s1 / 2;
+            let oldest = seen.saturating_add(1).max(reports.saturating_sub(REPORTS_KEPT as u64 - 1)).max(1);
+            let mut found = None;
+            let mut k = reports;
+            while k >= oldest && found.is_none() {
+                let at = ((k - 1) % REPORTS_KEPT as u64) as usize;
+                if let (Some(p), Some(n)) = (slot.plain.get(at), slot.normalized.get(at))
+                    && p.load(Ordering::Relaxed) == plain.to_bits()
+                {
+                    found = Some((k, f64::from_bits(n.load(Ordering::Relaxed))));
+                }
+                k -= 1;
+            }
+            std::sync::atomic::fence(Ordering::Acquire);
+            if slot.seq.load(Ordering::Relaxed) != s1 {
+                continue;
+            }
+            return match found {
+                Some((report, normalized)) => Echo::Of { report, normalized },
+                None => Echo::None { reports },
+            };
+        }
+        Echo::Busy
+    }
+
+    /// The number of reports parameter `i` has had (one being written counts as not yet made).
+    fn reports(&self, i: usize) -> u64 {
+        self.params.get(i).map_or(0, |s| s.seq.load(Ordering::Acquire) / 2)
+    }
+}
+
+/// The audio side's half of [`Reported`] (#651): which host-set values are the session's echo of a
+/// value the plug-in reported, and the reports already used. Sized at creation; no call allocates.
+pub(crate) struct Echoes {
+    /// Per parameter: the echoed plain value (`f32` bits) and the plug-in's normalized value
+    /// (`f64` bits), while the host's value is that echo.
+    exact: Vec<Option<(u32, u64)>>,
+    /// Per parameter: reports up to this number are used up (echoed, or overtaken by a value of
+    /// the host's own or by a state load).
+    seen: Vec<u64>,
+}
+
+impl Echoes {
+    pub fn new(params: usize) -> Echoes {
+        Echoes { exact: vec![None; params], seen: vec![0; params] }
+    }
+
+    /// The host just set plain `v` for parameter `i`: the session's echo of a report not used up
+    /// yet, or a value of the host's own (which uses up every report made so far: one of them
+    /// coming back later is then the host's value, not the plug-in's).
+    pub fn note(&mut self, reported: &Reported, i: usize, v: f32) {
+        let (Some(exact), Some(seen)) = (self.exact.get_mut(i), self.seen.get_mut(i)) else { return };
+        *exact = match reported.echo(i, v, *seen) {
+            Echo::Of { report, normalized } => {
+                *seen = report;
+                Some((v.to_bits(), normalized.to_bits()))
+            }
+            Echo::None { reports } => {
+                *seen = reports;
+                None
+            }
+            Echo::Busy => None,
+        };
+    }
+
+    /// The plug-in's own normalized value when the host's plain value `v` for parameter `i` is
+    /// still the session's echo of it.
+    pub fn normalized(&self, i: usize, v: f32) -> Option<f64> {
+        let (plain, n) = (*self.exact.get(i)?)?;
+        (plain == v.to_bits()).then(|| f64::from_bits(n))
+    }
+
+    /// A state was loaded: what the plug-in reported before it is history.
+    pub fn forget(&mut self, reported: &Reported) {
+        self.exact.fill(None);
+        for (i, seen) in self.seen.iter_mut().enumerate() {
+            *seen = reported.reports(i);
+        }
+    }
+}
+
 /// State loads into the live instance on its main thread (the state reader, a user preset), counted
 /// so the audio side can drop the values it queued before one (#78): sent after the load, such a
 /// value would overwrite the state just loaded.
@@ -356,13 +511,22 @@ impl Loads {
 /// Audio side, before it queues a value and once it holds the instance for a block: if a state was
 /// loaded since the last call, drops every value queued before it (`pending`, the timed points) and
 /// forgets which values the host set, so a reactivation does not re-send them over the loaded
-/// state either. A value queued while the load runs counts as before it. No allocation.
-pub(crate) fn drop_before_load(pending: &mut PendingParams, loads: &Loads, timed: &mut Vec<crate::ffi::ParamPoint>, host_set: &mut [bool]) {
+/// state either, and what the plug-in reported before it (#651). A value queued while the load
+/// runs counts as before it. No allocation.
+pub(crate) fn drop_before_load(
+    pending: &mut PendingParams,
+    loads: &Loads,
+    timed: &mut Vec<crate::ffi::ParamPoint>,
+    host_set: &mut [bool],
+    echoes: &mut Echoes,
+    reported: &Reported,
+) {
     let n = loads.0.load(Ordering::Acquire);
     if n != std::mem::replace(&mut pending.loads_seen, n) {
         pending.clear();
         timed.clear();
         host_set.fill(false);
+        echoes.forget(reported);
     }
 }
 
@@ -497,6 +661,66 @@ mod tests {
         assert!((c.to_plain(1, 0.5).unwrap() - 5.0).abs() < 1e-5);
         assert_eq!((c.curves_sampled(), c.step(8, Duration::MAX, |_, n| Some(n))), (2, 0));
         assert_ne!(c.generation(), g);
+    }
+
+    /// #651: the session's echo of a reported value is recognized once, newest report first, even
+    /// with later reports in flight; a value of the host's own uses up every report so far, and a
+    /// state load forgets them.
+    #[test]
+    fn an_echo_carries_the_reported_value_and_a_host_value_uses_up_the_reports() {
+        let r = Reported::new(2);
+        let mut e = Echoes::new(2);
+        let (p03, p07) = ((2.0 * 0.3) as f32, (2.0 * 0.7) as f32);
+        r.record(0, p03, 0.3);
+        r.record(0, p07, 0.7);
+        e.note(&r, 0, p03);
+        assert_eq!(e.normalized(0, p03).map(f64::to_bits), Some(0.3f64.to_bits()), "the older report, still on its way");
+        assert_eq!(e.normalized(0, p07), None, "only the value the host holds");
+        e.note(&r, 0, p07);
+        assert_eq!(e.normalized(0, p07).map(f64::to_bits), Some(0.7f64.to_bits()));
+        assert_eq!(e.normalized(1, p07), None, "per parameter");
+        // A value of the host's own, then one equal to a report already used: both are the host's.
+        e.note(&r, 0, 1.0);
+        assert_eq!(e.normalized(0, 1.0), None);
+        e.note(&r, 0, p03);
+        assert_eq!(e.normalized(0, p03), None, "a used report is not an echo again");
+        // A report overtaken by a value of the host's own before its echo arrived: the host's.
+        r.record(0, p03, 0.3);
+        e.note(&r, 0, 1.5);
+        e.note(&r, 0, p03);
+        assert_eq!(e.normalized(0, p03), None, "overtaken by the host's 1.5");
+        // Two reports with the same plain value: the newer normalized value wins.
+        r.record(0, p03, 0.30000000001);
+        r.record(0, p03, 0.3);
+        e.note(&r, 0, p03);
+        assert_eq!(e.normalized(0, p03).map(f64::to_bits), Some(0.3f64.to_bits()));
+        // Only the last REPORTS_KEPT reports are kept.
+        for k in 0..=REPORTS_KEPT {
+            r.record(1, k as f32, k as f64 / 10.0);
+        }
+        e.note(&r, 1, 1.0);
+        assert_eq!(e.normalized(1, 1.0), Some(0.1), "the oldest report kept");
+        let mut other = Echoes::new(2);
+        other.note(&r, 1, 0.0);
+        assert_eq!(other.normalized(1, 0.0), None, "overwritten");
+        // A state load forgets what came before it.
+        r.record(1, 9.0, 0.9);
+        e.forget(&r);
+        e.note(&r, 1, 9.0);
+        assert_eq!(e.normalized(1, 9.0), None);
+    }
+
+    #[test]
+    fn a_report_being_written_gives_no_answer() {
+        let r = Reported::new(1);
+        r.record(0, 1.0, 0.5);
+        assert_eq!(r.echo(0, 1.0, 0), Echo::Of { report: 1, normalized: 0.5 });
+        r.params[0].seq.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(r.echo(0, 1.0, 0), Echo::Busy);
+        let mut e = Echoes::new(1);
+        e.note(&r, 0, 1.0);
+        assert_eq!(e.normalized(0, 1.0), None);
+        assert_eq!(e.seen[0], 0, "a busy table uses up nothing");
     }
 
     #[test]

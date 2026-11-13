@@ -50,6 +50,12 @@ impl IAudioProcessorTrait for GainProcessor {
                 let (mut off, mut v) = (0, 0.0);
                 let n = unsafe { q.getPointCount() };
                 let id = unsafe { q.getParameterId() };
+                for k in 0..n {
+                    let (mut at, mut x) = (0, 0.0);
+                    if unsafe { q.getPoint(k, &mut at, &mut x) } == kResultOk {
+                        log_call(|| format!("proc.point({id})={x:?}@{at}"));
+                    }
+                }
                 if n > 0 && unsafe { q.getPoint(n - 1, &mut off, &mut v) } == kResultOk {
                     if id == 7 {
                         self.gain.store(v.to_bits(), Ordering::Relaxed);

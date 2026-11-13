@@ -32,7 +32,8 @@ impl PluginEditor for Vst3Editor {
             transit_dsp::host_call::defer();
             return Vec::new();
         }
-        if let Some(s) = self.shared.upgrade() {
+        let shared = self.shared.upgrade();
+        if let Some(s) = &shared {
             s.service(&mut Serviced::default());
         }
         self.conv.link.idle();
@@ -41,6 +42,10 @@ impl PluginEditor for Vst3Editor {
         for (vid, n) in self.host.take_edits() {
             let Some(i) = self.conv.ids.iter().position(|&x| x == vid) else { continue };
             if let (Some(p), Some(v)) = (self.conv.info.params.get(i), self.conv.plain(i, n)) {
+                // #651: the session sends `v` back; the audio side then recognizes it as this value.
+                if let Some(s) = &shared {
+                    s.note_report(i, v, n);
+                }
                 out.push((p.id.to_string(), v));
             }
         }

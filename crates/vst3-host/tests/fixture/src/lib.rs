@@ -30,6 +30,9 @@
 //! that cannot create them, or a controller that never got the message by the time the host sets
 //! its component handler, is a host contract violation.
 //!
+//! Gain's editor has two presets a controller state can make the "user" pick; the module then
+//! logs the calls the host makes that write to Gain (see "call log and presets" below, #651).
+//!
 //! Probe mode (`VST3_FIXTURE_PROBES` set; see "probe mode" below) checks VST3's edit-controller
 //! threading rule and reports the Freq values Gain's processor receives.
 //!
@@ -354,6 +357,86 @@ static FINE_VALUE: AtomicU64 = AtomicU64::new(0);
 static LAST_FINE: AtomicU64 = AtomicU64::new(0);
 /// Edit-controller calls made so far (any thread).
 static CTRL_CALLS: AtomicU64 = AtomicU64::new(0);
+
+// ---- call log and presets (#651) -----------------------------------------------------------
+//
+// A preset picked in Gain's own editor, and a log of every call the host makes afterward that
+// writes to Gain. A controller state whose fourth f64 is `1 + 2 * preset + announce` arms a pick
+// (see `GainController::pick_armed_preset`); it happens at the controller's next `getState` (a
+// main-thread call, as a click in the editor would be), which also starts the log afresh. While
+// the log runs, the component's state carries it after the gain: one line per call, such as
+// `ctrl.setParamNormalized(7)=0.3`, `proc.point(7)=0.3@0`, `ctrl.setState`, `comp.setState`,
+// `comp.setActive(1)` (values in Rust's shortest round-trip form, so a test can compare them bit
+// for bit), and reading it there clears it.
+
+/// The log: `None` until the first armed pick.
+static CALL_LOG: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+
+/// Appends a line to the call log when it runs.
+fn log_call(line: impl FnOnce() -> String) {
+    if let Some(log) = CALL_LOG.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
+        log.push(line());
+    }
+}
+
+/// The log so far (lines joined by `\n`), cleared; empty when it does not run.
+fn take_log() -> String {
+    let mut log = CALL_LOG.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    log.as_mut().map(|l| std::mem::take(l).join("\n")).unwrap_or_default()
+}
+
+/// The two presets of Gain's editor: (parameter, normalized value) as the plug-in stores and
+/// reports them. Values a host cannot carry exactly through a single-precision plain value
+/// (Gain's `2 n`), through a sampled log curve (Freq), or through its step grid (Mode, reported
+/// off the grid, as plug-ins that keep step centers do).
+const PRESETS: [[(u32, f64); 3]; 2] = [[(7, 0.3), (3, 0.45), (12, 0.3)], [(7, 0.7), (3, 0.95), (12, 0.7)]];
+
+/// Gain's Mode as its controller holds it (normalized, f64 bits).
+static MODE_VALUE: AtomicU64 = AtomicU64::new(0);
+/// An armed pick: `1 + 2 * preset + announce`, 0 for none.
+static ARMED_PICK: AtomicU64 = AtomicU64::new(0);
+
+impl GainController {
+    /// Stores a value the controller holds.
+    fn store(&self, id: u32, v: f64) {
+        match id {
+            7 => self.gain.store(v.to_bits(), Ordering::Relaxed),
+            12 => self.freq.store(v.to_bits(), Ordering::Relaxed),
+            3 => MODE_VALUE.store(v.to_bits(), Ordering::Relaxed),
+            FINE => FINE_VALUE.store(v.to_bits(), Ordering::Relaxed),
+            _ => {}
+        }
+    }
+
+    /// Runs an armed pick: the user picks the preset in the editor, and the log starts afresh.
+    /// `announce` 0: each value is announced as an edit (`beginEdit`, `performEdit`, `endEdit`),
+    /// as plug-ins whose parameters notify the host do; 1: the values change and the host is told
+    /// to re-read them (`restartComponent(kParamValuesChanged)`).
+    fn pick_armed_preset(&self) {
+        let code = ARMED_PICK.swap(0, Ordering::SeqCst);
+        if code == 0 {
+            return;
+        }
+        let (index, announce) = ((code - 1) / 2, (code - 1) % 2);
+        let Some(preset) = PRESETS.get(index as usize) else { return };
+        *CALL_LOG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
+        for &(id, v) in preset {
+            self.store(id, v);
+        }
+        let Some(h) = (unsafe { ComRef::from_raw(self.handler.load(Ordering::SeqCst)) }) else { return };
+        if announce == 0 {
+            for &(id, v) in preset {
+                unsafe {
+                    h.beginEdit(id);
+                    h.performEdit(id, v);
+                    h.endEdit(id);
+                }
+            }
+        } else {
+            unsafe { h.restartComponent(RestartFlags_::kParamValuesChanged as i32) };
+        }
+    }
+}
 
 /// Gain's normalized → plain conversion (Freq follows the current shape).
 fn gain_to_plain(id: u32, n: f64) -> f64 {

@@ -1,0 +1,135 @@
+//! Issue #651: a preset the user picks in a hosted plug-in's own editor must not come back to the
+//! plug-in changed. The plug-in reports the preset's values (`performEdit`, or
+//! `restartComponent(kParamValuesChanged)` and a re-read); the host hands them to the session as
+//! plain values, and the session sends them back through `set_param` (`mix.insert_param`, then the
+//! engine). The processor must get exactly the normalized values the plug-in reported (VST3 has
+//! the host forward a controller's edits to the processor), and nothing may go back to the
+//! controller: a plug-in that receives any other value, or a `setParamNormalized` it did not ask
+//! for, marks its preset modified.
+//!
+//! The fixture's Gain logs every call the host makes that writes to it, and its "user" picks a
+//! preset at the controller's next `getState` once a controller state armed the pick (see
+//! `tests/fixture`, "call log and presets"): a main-thread call, as a click in its editor is.
+
+#![cfg(not(target_os = "macos"))] // Editor handles drive windows on the process main thread on macOS.
+
+mod common;
+
+use transit_dsp::{Plugin, PluginEditor};
+
+const BLOCK: usize = 64;
+
+/// The fixture's presets, as `tests/fixture` defines them: (parameter, normalized).
+const PRESETS: [[(u32, f64); 3]; 2] = [[(7, 0.3), (3, 0.45), (12, 0.3)], [(7, 0.7), (3, 0.95), (12, 0.7)]];
+
+/// A Gain state that arms a pick of preset `index`, announced by `performEdit` (`announce` 0) or
+/// `kParamValuesChanged` (1): gain 0.5, Freq 0.5, no "preset" gain, no timer.
+fn arming_state(index: u32, announce: u32) -> Vec<u8> {
+    let comp = 0.5f64.to_le_bytes();
+    let ctrl: Vec<u8> = [0.5f64, -1.0, -1.0, f64::from(1 + 2 * index + announce)].iter().flat_map(|v| v.to_le_bytes()).collect();
+    let mut out = b"SCV3".to_vec();
+    out.extend_from_slice(&(comp.len() as u32).to_le_bytes());
+    out.extend_from_slice(&comp);
+    out.extend_from_slice(&(ctrl.len() as u32).to_le_bytes());
+    out.extend_from_slice(&ctrl);
+    out
+}
+
+/// The call log a saved state carries after the component's gain (see `tests/fixture`).
+fn log_of(blob: Option<Vec<u8>>) -> Vec<String> {
+    let blob = blob.expect("state");
+    assert_eq!(&blob[..4], b"SCV3");
+    let len = u32::from_le_bytes(blob[4..8].try_into().unwrap()) as usize;
+    let comp = &blob[8..8 + len];
+    String::from_utf8(comp[8..].to_vec()).expect("utf-8 log").lines().map(str::to_string).collect()
+}
+
+/// UI frames as the app runs them: the editor handle's idle (which services the plug-in's
+/// requests), its edits into the session and back to the plug-in through `set_param` (the engine
+/// clamps to the range, as `set_param` does itself), then an audio block.
+fn frames(p: &mut Box<dyn Plugin>, ed: &mut Box<dyn PluginEditor>, n: usize) {
+    for _ in 0..n {
+        for (id, v) in ed.idle() {
+            assert!(p.set_param(&id, v), "{id}");
+        }
+        p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK);
+    }
+}
+
+/// What the host did to the plug-in after a preset pick, against what the plug-in reported:
+/// every write it did not ask for, and every value the processor got that differs from the
+/// plug-in's (bit for bit). Empty when the host sent only what the plug-in reported.
+fn unasked(log: &[String], preset: &[(u32, f64)]) -> Vec<String> {
+    let mut bad = Vec::new();
+    for line in log {
+        let Some(rest) = line.strip_prefix("proc.point(") else {
+            // A controller or component write, or a reactivation: nothing the pick asked for.
+            bad.push(line.clone());
+            continue;
+        };
+        let (id, rest) = rest.split_once(")=").expect("point line");
+        let (value, _) = rest.split_once('@').expect("point offset");
+        let (id, value): (u32, f64) = (id.parse().expect("id"), value.parse().expect("value"));
+        match preset.iter().find(|(pid, _)| *pid == id) {
+            Some(&(_, want)) if want.to_bits() == value.to_bits() => {}
+            _ => bad.push(line.clone()),
+        }
+    }
+    bad
+}
+
+#[test]
+fn a_preset_picked_in_the_plugins_editor_reaches_the_processor_exactly_and_nothing_goes_back() {
+    let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
+    let id = found.into_iter().find(|d| d.name == "Fixture Gain").expect("fixture gain").id;
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
+    p.prepare(48_000.0, BLOCK, 2);
+    let mut ed = p.editor().expect("editor handle");
+    let mut reader = p.state_reader().expect("state reader");
+    // Settle: the fixture's setup edit goes through the session too; every curve gets sampled.
+    frames(&mut p, &mut ed, 4);
+    for (index, announce) in [(0u32, 0u32), (1, 1), (0, 1), (1, 0)] {
+        let preset = &PRESETS[index as usize];
+        let how = if announce == 0 { "performEdit" } else { "kParamValuesChanged" };
+        // The host's own load, before the scenario: it only arms the pick.
+        assert!(p.load_state(&arming_state(index, announce)));
+        frames(&mut p, &mut ed, 2);
+        // The user picks the preset (inside this getState); the log starts.
+        assert!(reader.save_state().is_some());
+        frames(&mut p, &mut ed, 4);
+        // An autosave or backup reads the state; its own writes are in the log it returns.
+        let mut log = log_of(reader.save_state());
+        frames(&mut p, &mut ed, 2);
+        log.extend(log_of(reader.save_state()));
+        assert_eq!(
+            unasked(&log, preset),
+            Vec::<String>::new(),
+            "preset {index} announced by {how}: the host sent back what the plug-in did not report; log: {log:#?}"
+        );
+        for &(pid, want) in preset {
+            assert!(
+                log.iter().any(|l| l.starts_with(&format!("proc.point({pid})="))),
+                "preset {index} ({how}): the processor never got parameter {pid} = {want}; log: {log:#?}"
+            );
+        }
+        assert_eq!(p.param("7"), Some((2.0 * preset[0].1) as f32), "preset {index} ({how}): Gain in the session");
+    }
+    // A value of the host's own (automation, a mapped control) still reaches the controller,
+    // including one equal to a plain value the plug-in reported before. Here the session drops
+    // the report (as while a session restore is pending), so it never echoes it.
+    assert!(p.load_state(&arming_state(0, 0)));
+    frames(&mut p, &mut ed, 2);
+    assert!(reader.save_state().is_some());
+    let dropped = ed.idle();
+    assert!(dropped.iter().any(|(id, _)| id == "7"), "{dropped:?}");
+    for v in [1.0f32, (2.0 * PRESETS[0][0].1) as f32] {
+        assert!(p.set_param("7", v));
+        frames(&mut p, &mut ed, 2);
+        let log = log_of(reader.save_state());
+        assert!(log.iter().any(|l| l.starts_with("ctrl.setParamNormalized(7)=")), "the host's {v} reaches the controller; log: {log:#?}");
+        assert!(log.iter().any(|l| l.starts_with("proc.point(7)=")), "and the processor; log: {log:#?}");
+    }
+    drop(reader);
+    drop(ed);
+    drop(p);
+}

@@ -44,7 +44,7 @@ use crate::ffi::{
     ParamPoint, RELEASE_RESERVE,
 };
 use crate::gate::{Gate, MAX_CHANNELS};
-use crate::params::{Loads, Mapping, ParamCurves, PendingParams, differs, drop_before_load, resend_indices};
+use crate::params::{Echoes, Loads, Mapping, ParamCurves, PendingParams, Reported, differs, drop_before_load, resend_indices};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError, Weak};
@@ -197,6 +197,9 @@ pub(crate) struct Shared {
     /// The editor/state link, for `setParamNormalized` on the main thread (under its own lock,
     /// never the instance's, so the audio side is not held up).
     link: Arc<EditorLink>,
+    /// What the plug-in reported for each parameter, and the plain value the session got for it
+    /// (#651; written on the main thread, read by the audio side's [`Echoes`]).
+    reported: Reported,
 }
 
 fn try_lock<T>(m: &Mutex<T>) -> Option<MutexGuard<'_, T>> {
@@ -431,6 +434,15 @@ impl Shared {
         true
     }
 
+    /// The plug-in reported normalized `n` for parameter `i` (an edit in its editor, or a value a
+    /// re-read found changed), handed to the session as `plain` (#651). Main thread only: the
+    /// table has one writer.
+    pub(crate) fn note_report(&self, i: usize, plain: f32, n: f64) {
+        if std::thread::current().id() == self.main {
+            self.reported.record(i, plain, n);
+        }
+    }
+
     /// The controller's values become the host's view (after a load the host made itself).
     fn remember_values(&self, inst: &Instance) {
         let mut st = lock(&self.values);
@@ -465,6 +477,8 @@ pub struct Vst3Plugin {
     curves_seen: u64,
     /// Normalized values waiting for the next block (latest per parameter; never drops).
     pending: PendingParams,
+    /// Which host-set values are the session's echo of a value the plug-in reported (#651).
+    echoes: Echoes,
     /// One block's share of `pending`, handed to the processor (capacity `PARAM_QUEUE_CAP`).
     batch: Vec<(u32, f64)>,
     /// Host-set plain values the controller has not seen yet (same order as `ids`; the bits
@@ -569,6 +583,7 @@ impl Vst3Plugin {
             view,
             to_controller: ids.iter().map(|_| AtomicBool::new(false)).collect::<Vec<_>>().into(),
             link,
+            reported: Reported::new(ids.len()),
         });
         lock(live()).push(Arc::downgrade(&shared));
         let mut p = Vst3Plugin {
@@ -579,6 +594,7 @@ impl Vst3Plugin {
             curves_seen: curves.generation(),
             curves,
             pending: PendingParams::new(ids.len()),
+            echoes: Echoes::new(ids.len()),
             batch: Vec::with_capacity(PARAM_QUEUE_CAP),
             unsynced: ids.iter().map(|_| AtomicU64::new(SYNCED)).collect(),
             notes: Vec::with_capacity(EVENT_CAP),
@@ -680,6 +696,22 @@ impl Vst3Plugin {
     /// next state save).
     fn host_value(&mut self, i: usize) -> Option<f64> {
         let &v = self.values.get(i)?;
+        // #651: the session's echo of a value the plug-in reported goes back as exactly the value
+        // it reported (a re-normalized one differs by rounding, and the plug-in calls its preset
+        // modified), and is nothing new for the controller, which reported it: the host's view
+        // takes it, and nothing waits for the controller or the next state save.
+        if let Some(n) = self.echoes.normalized(i, v) {
+            if let Some(view) = self.shared.view.get(i) {
+                view.store(n.to_bits(), Ordering::Release);
+            }
+            if let Some(f) = self.shared.to_controller.get(i) {
+                f.store(false, Ordering::Release);
+            }
+            if let Some(u) = self.unsynced.get(i) {
+                u.store(SYNCED, Ordering::Relaxed);
+            }
+            return Some(n);
+        }
         let n = self.normalized_from_plain(i, v)?;
         // A value re-sent unchanged (after a reactivation or a curve re-sample) is nothing new
         // for the controller.
@@ -729,6 +761,7 @@ impl Vst3Plugin {
             u.store(SYNCED, Ordering::Relaxed);
         }
         self.host_set.fill(false);
+        self.echoes.forget(&self.shared.reported);
     }
 
     /// Takes a newer MIDI table from the main thread, if one is published (no allocation).
@@ -809,7 +842,7 @@ impl Vst3Plugin {
             self.gate.skip(io, ch, frames);
             return;
         };
-        drop_before_load(&mut self.pending, &shared.loads, &mut self.timed, &mut self.host_set);
+        drop_before_load(&mut self.pending, &shared.loads, &mut self.timed, &mut self.host_set, &mut self.echoes, &shared.reported);
         let core = &mut *guard;
         if !core.inst.is_active() || core.max_block == 0 {
             self.pending.fold_timed(&self.ids, &mut self.timed);
@@ -959,13 +992,14 @@ impl Plugin for Vst3Plugin {
     /// Runs on the audio thread (automation): converts through the sampled curves, never the
     /// controller, and queues without allocating.
     fn set_param(&mut self, id: &str, value: f32) -> bool {
-        drop_before_load(&mut self.pending, &self.shared.loads, &mut self.timed, &mut self.host_set);
+        drop_before_load(&mut self.pending, &self.shared.loads, &mut self.timed, &mut self.host_set, &mut self.echoes, &self.shared.reported);
         let Some(i) = self.param_index.get(id).copied() else { return false };
         let Some(pi) = self.info.params.get(i) else { return false };
         let v = pi.clamp(value);
         if let Some(slot) = self.values.get_mut(i) {
             *slot = v;
         }
+        self.echoes.note(&self.shared.reported, i, v);
         if let Some(h) = self.host_set.get_mut(i) {
             *h = true;
         }
@@ -976,13 +1010,14 @@ impl Plugin for Vst3Plugin {
     /// Like `set_param`, but the point reaches the plug-in at `offset` within the next block, in
     /// a queue of its own with every other point of that parameter.
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
-        drop_before_load(&mut self.pending, &self.shared.loads, &mut self.timed, &mut self.host_set);
+        drop_before_load(&mut self.pending, &self.shared.loads, &mut self.timed, &mut self.host_set, &mut self.echoes, &self.shared.reported);
         let Some(i) = self.param_index.get(id).copied() else { return false };
         let (Some(pi), Some(&pid)) = (self.info.params.get(i), self.ids.get(i)) else { return false };
         let v = pi.clamp(value);
         if let Some(slot) = self.values.get_mut(i) {
             *slot = v;
         }
+        self.echoes.note(&self.shared.reported, i, v);
         if let Some(h) = self.host_set.get_mut(i) {
             *h = true;
         }

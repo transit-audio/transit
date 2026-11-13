@@ -35,10 +35,12 @@ impl IComponentTrait for GainProcessor {
     unsafe fn activateBus(&self, _m: MediaType, _d: BusDirection, _i: i32, _s: TBool) -> tresult {
         kResultOk
     }
-    unsafe fn setActive(&self, _state: TBool) -> tresult {
+    unsafe fn setActive(&self, state: TBool) -> tresult {
+        log_call(|| format!("comp.setActive({state})"));
         kResultOk
     }
     unsafe fn setState(&self, state: *mut IBStream) -> tresult {
+        log_call(|| "comp.setState".to_string());
         let Some(s) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
         let mut bytes = [0u8; 8];
         let mut n = 0;
@@ -57,7 +59,13 @@ impl IComponentTrait for GainProcessor {
         let Some(s) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
         let mut bytes = f64::from_bits(self.gain.load(Ordering::Relaxed)).to_le_bytes();
         let mut n = 0;
-        unsafe { s.write(bytes.as_mut_ptr().cast(), 8, &mut n) }
+        let r = unsafe { s.write(bytes.as_mut_ptr().cast(), 8, &mut n) };
+        // The call log, while it runs (see "call log and presets").
+        let mut log = take_log().into_bytes();
+        if r != kResultOk || log.is_empty() {
+            return r;
+        }
+        unsafe { s.write(log.as_mut_ptr().cast(), log.len() as i32, &mut n) }
     }
 }
 

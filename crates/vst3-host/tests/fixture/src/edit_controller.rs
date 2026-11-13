@@ -3,6 +3,7 @@ use super::*;
 impl IEditControllerTrait for GainController {
     unsafe fn setComponentState(&self, state: *mut IBStream) -> tresult {
         ctrl_call("setComponentState");
+        log_call(|| "ctrl.setComponentState".to_string());
         let Some(s) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
         let mut bytes = [0u8; 8];
         let mut n = 0;
@@ -16,6 +17,7 @@ impl IEditControllerTrait for GainController {
     }
     unsafe fn setState(&self, state: *mut IBStream) -> tresult {
         ctrl_call("setState");
+        log_call(|| "ctrl.setState".to_string());
         let Some(s) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
         let mut bytes = [0u8; 8];
         let mut n = 0;
@@ -25,12 +27,14 @@ impl IEditControllerTrait for GainController {
             }
             self.freq.store(f64::from_le_bytes(bytes).clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         }
+        // A negative preset or delay: none.
         if unsafe { s.read(bytes.as_mut_ptr().cast(), 8, &mut n) } == kResultOk && n == 8 {
-            self.preset.store(f64::from_le_bytes(bytes).clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+            let preset = f64::from_le_bytes(bytes);
+            self.preset.store(if preset < 0.0 { u64::MAX } else { preset.clamp(0.0, 1.0).to_bits() }, Ordering::Relaxed);
         }
         // A third f64: after that many ms, a thread of the plug-in's own tells the host its values
         // changed (with nothing changed), outside any host call.
-        if unsafe { s.read(bytes.as_mut_ptr().cast(), 8, &mut n) } == kResultOk && n == 8 {
+        if unsafe { s.read(bytes.as_mut_ptr().cast(), 8, &mut n) } == kResultOk && n == 8 && f64::from_le_bytes(bytes) >= 0.0 {
             let ms = f64::from_le_bytes(bytes).clamp(0.0, 10_000.0) as u64;
             let h = HandlerPtr(self.handler.load(Ordering::SeqCst));
             std::thread::spawn(move || {
@@ -41,6 +45,10 @@ impl IEditControllerTrait for GainController {
                 }
             });
         }
+        // A fourth f64: a preset pick armed for the next getState (see "call log and presets").
+        if unsafe { s.read(bytes.as_mut_ptr().cast(), 8, &mut n) } == kResultOk && n == 8 {
+            ARMED_PICK.store(f64::from_le_bytes(bytes).max(0.0) as u64, Ordering::SeqCst);
+        }
         // Like many plug-ins, it tells the host its values changed while it loads a state.
         if let Some(h) = unsafe { ComRef::from_raw(self.handler.load(Ordering::SeqCst)) } {
             unsafe { h.restartComponent(RestartFlags_::kParamValuesChanged as i32) };
@@ -49,6 +57,7 @@ impl IEditControllerTrait for GainController {
     }
     unsafe fn getState(&self, state: *mut IBStream) -> tresult {
         ctrl_call("getState");
+        self.pick_armed_preset();
         let preset = self.preset.load(Ordering::Relaxed);
         if preset != u64::MAX && self.gain.swap(preset, Ordering::Relaxed) != preset {
             if let Some(h) = unsafe { ComRef::from_raw(self.handler.load(Ordering::SeqCst)) } {
@@ -106,21 +115,17 @@ impl IEditControllerTrait for GainController {
             7 => f64::from_bits(self.gain.load(Ordering::Relaxed)),
             12 => f64::from_bits(self.freq.load(Ordering::Relaxed)),
             FINE => f64::from_bits(FINE_VALUE.load(Ordering::Relaxed)),
+            3 => f64::from_bits(MODE_VALUE.load(Ordering::Relaxed)),
             _ => 0.0,
         }
     }
     unsafe fn setParamNormalized(&self, id: u32, v: f64) -> tresult {
         ctrl_call("setParamNormalized");
+        log_call(|| format!("ctrl.setParamNormalized({id})={v:?}"));
         if probes() && id == 3 {
             reshape_freq(v >= 0.75);
         }
-        if id == 7 {
-            self.gain.store(v.to_bits(), Ordering::Relaxed);
-        } else if id == 12 {
-            self.freq.store(v.to_bits(), Ordering::Relaxed);
-        } else if id == FINE {
-            FINE_VALUE.store(v.to_bits(), Ordering::Relaxed);
-        }
+        self.store(id, v);
         kResultOk
     }
     unsafe fn setComponentHandler(&self, handler: *mut IComponentHandler) -> tresult {
