@@ -153,11 +153,7 @@ mod tests {
 
     #[test]
     fn the_real_worker_stops_after_the_current_block_and_leaves_no_files() {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("transit-consolidated-cancel-{}-{stamp}-{serial}", std::process::id()));
-        std::fs::create_dir(&dir).unwrap();
+        let dir = transit_test_support::TestDir::created("consolidated-cancel");
         let mut session = transit_model::Session::default();
         let track = session.add_track(transit_model::TrackKind::Instrument, transit_model::ChannelFormat::Stereo, Some("Long"));
         let clip = session.new_clip_id();
