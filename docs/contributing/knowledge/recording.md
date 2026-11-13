@@ -35,7 +35,9 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   writes the take's loop into the plan (`Recording::cycle`), so Stop and crash recovery cut an audio
   take that ran past the loop end exactly as its MIDI. One recording keeps the newest
   `take_laps::MAX_LAPS` (10,000) laps; the engine says how many earlier laps were left out and the
-  status line shows it (#522). Placing the takes on Stop costs time that grows with the square of
+  status line shows it (#522). Their audio stays in the take file; their MIDI is written once to
+  `<session> left-out laps NN.mid` beside the journal (`midi_journal::keep_left_out_laps`), which
+  the journal's cleanup never removes (ADR 0026, lap limit amendment). Placing the takes on Stop costs time that grows with the square of
   the lap count, which is why there is a limit.
 - **Count-in pickups** (#327, Logic's behavior; ADR 0026 amendment): the audio thread also
   captures MIDI while a record count-in runs (`service_midi` in `player/audio.rs`), stamped with the
