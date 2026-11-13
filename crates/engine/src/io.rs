@@ -420,12 +420,15 @@ pub fn bounded_to_track(s: &Session, t: TrackId, r: Range) -> Range {
 }
 
 /// Transient positions (absolute) in a track's clips within `r`.
-pub fn transients_in(s: &Session, t: TrackId, r: Range, sens: f32) -> Vec<Samples> {
+/// Refused for `cmd` when a streamed take in the scan cannot be read.
+pub fn transients_in(s: &Session, cmd: &str, t: TrackId, r: Range, sens: f32) -> Result<Vec<Samples>> {
     let r = if r.is_empty() { Range::new(0, s.content_end()) } else { r };
     let r = bounded_to_track(s, t, r);
+    let reads = DiskReads::refuse(s, cmd, Some(&[t]), r)?;
     let _offline = offline();
     let audio = transit_mix::render_clips(s, t, r);
-    transit_dsp::offline::detect_transients(&audio, s.sample_rate.as_f64() as f32, sens).into_iter().map(|i| r.start + i as i64).collect()
+    reads.verify(cmd)?;
+    Ok(transit_dsp::offline::detect_transients(&audio, s.sample_rate.as_f64() as f32, sens).into_iter().map(|i| r.start + i as i64).collect())
 }
 
 /// Strip Silence: keep only the non-silent ranges of clips inside `r`.
@@ -487,6 +490,7 @@ fn non_silent(s: &Session, t: TrackId, r: Range, options: SilenceOptions) -> Res
     if spans.iter().map(Range::len).fold(0, i64::saturating_add) > s.sample_rate.samples(86_400.0) {
         return Err(EngineError::BadParams("edit.strip_silence".into(), format!("`{}` has more than a day of clips to scan", tr.name)));
     }
+    let reads = DiskReads::refuse(s, "edit.strip_silence", Some(&[t]), r)?;
     let window = i64::try_from(STRIP_WINDOW_SAMPLES / tr.channels().max(1)).unwrap_or(i64::MAX);
     let len = |n: Samples| u64::try_from(n).unwrap_or(0);
     let mut scan = transit_dsp::offline::SilenceScan::new(thr, len(min_len));
@@ -502,6 +506,7 @@ fn non_silent(s: &Session, t: TrackId, r: Range, options: SilenceOptions) -> Res
         }
     }
     scan.skip(len(r.end - at));
+    reads.verify("edit.strip_silence")?;
     Ok(scan.finish(len(pre), len(post)).into_iter().map(|(a, b)| (r.start.saturating_add_unsigned(a), r.start.saturating_add_unsigned(b))).collect())
 }
 
@@ -521,8 +526,10 @@ pub fn consolidate(e: &mut Engine, cmd: &str, t: TrackId, r: Range) -> Result<bo
         return Err(crate::cmd::bad(cmd, format!("selection is too long to consolidate on `{}` (at most {secs:.0} s)", tr.name)));
     }
     let r = Range::new(start, start + len);
+    let reads = DiskReads::refuse(s, cmd, Some(&[t]), r)?;
     let _offline = offline();
     let audio = transit_mix::render_clips(s, t, r);
+    reads.verify(cmd)?;
     if audio.iter().any(|ch| ch.len() as i64 != len) {
         return Err(EngineError::Internal(cmd.to_string(), "consolidate rendered the wrong length".into()));
     }
@@ -571,8 +578,10 @@ pub fn render_clip_gain(e: &mut Engine, cmd: &str, id: transit_model::ClipId) ->
     if let Some(pl) = tmp.track_mut(t).and_then(|x| x.playlist_mut()) {
         pl.clips = vec![c2];
     }
+    let reads = DiskReads::refuse(&tmp, cmd, Some(&[t]), c.range())?;
     let _offline = offline();
     let audio = transit_mix::render_clips(&tmp, t, c.range());
+    reads.verify(cmd)?;
     let buf = AudioBuffer { sample_rate: s.sample_rate.hz(), channels: audio };
     let s = e.session_mut();
     let src = add_source(s, &format!("{}_gain", c.name), buf, None, FileFormat::Wav);
@@ -649,8 +658,10 @@ pub fn bounce_track_range(
     }
     // The track renders through a main mix of at least two channels.
     refuse_longer(s, "track.commit", &tr.name, "commit", range.len(), render_limit(tr.channels().max(2)))?;
+    let reads = DiskReads::refuse(s, "track.bounce", Some(&[t]), range)?;
     let _offline = offline();
     let audio = transit_mix::render_track_pre_fader(s, t, range);
+    reads.verify("track.bounce")?;
     let name = format!("{} bounce", tr.name);
     let fmt = ChannelFormat::for_channels(audio.len().clamp(1, 2));
     let mixer = tr.mixer.clone();
@@ -717,14 +728,23 @@ pub(crate) fn validate_bounce_destination(s: &Session, sources: &[TrackId], dest
 }
 
 pub fn export_clips(e: &Engine, ids: &[transit_model::ClipId], dir: &str, opts: &EncodeOptions) -> Result<usize> {
+    const CMD: &str = "file.export_clips";
     let s = e.session();
+    // Every clip is checked before the first file is written.
+    for id in ids {
+        if let Some((t, c)) = s.find_clip(*id) {
+            DiskReads::refuse(s, CMD, Some(&[t]), c.range())?;
+        }
+    }
     make_dir(dir)?;
     let ext = transit_audio_io::encode_extension(opts.format);
     let mut n = 0;
     for id in ids {
         let Some((t, c)) = s.find_clip(*id) else { continue };
+        let reads = DiskReads::refuse(s, CMD, Some(&[t]), c.range())?;
         let _offline = offline();
         let audio = transit_mix::render_clips(s, t, c.range());
+        reads.verify(CMD)?;
         let buf = AudioBuffer { sample_rate: s.sample_rate.hz(), channels: audio };
         let opts = EncodeOptions { title: Some(c.name.clone()), ..opts.clone() };
         let bytes = transit_audio_io::encode(&buf, &opts).map_err(|err| EngineError::Io(err.to_string()))?;

@@ -8,7 +8,7 @@
 //! Every file therefore starts at the range start, sample-aligned with the others and with a
 //! plain main bounce of the same session.
 
-use super::{Out, bounce_layout, check_bounce_range, make_dir, sanitize_name};
+use super::{DiskReads, Out, bounce_layout, check_bounce_range, make_dir, sanitize_name};
 use crate::{EngineError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -102,6 +102,8 @@ pub struct PathBounce {
     done: usize,
     joint_gain: f32,
     dir: PathBuf,
+    /// The streamed takes checked before the render, checked again before any file is kept.
+    disk: DiskReads,
 }
 
 impl PathBounce {
@@ -118,6 +120,7 @@ impl PathBounce {
     ) -> Result<PathBounce> {
         const CMD: &str = "file.bounce_paths";
         check_bounce_range(&s, r, CMD)?;
+        let disk = DiskReads::refuse(&s, CMD, None, r)?;
         let mut names: Vec<String> = if paths.is_empty() { routed_paths(&s, io) } else { Vec::new() };
         for want in paths {
             let want = want.trim();
@@ -193,6 +196,7 @@ impl PathBounce {
             done: 0,
             joint_gain: 1.0,
             dir: dir.to_path_buf(),
+            disk,
         })
     }
 
@@ -271,6 +275,8 @@ impl PathBounce {
     }
 
     fn finish(&mut self) -> Result<PathBounced> {
+        // A take that failed mid-render printed silence: the part files are dropped, never kept.
+        self.disk.verify("file.bounce_paths")?;
         // Every encoder finishes before any part file replaces a file, so a failure keeps the older set.
         let mut finished = Vec::new();
         for st in &mut self.stems {

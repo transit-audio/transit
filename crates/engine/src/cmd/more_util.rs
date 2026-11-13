@@ -176,9 +176,16 @@ pub fn render_stretched(s: &mut Session, cmd: &str, c: &Clip, out_len: Samples) 
             })
             .collect()
     };
-    // A disk-backed source is read from its file here, off the audio thread (ADR 0035).
+    // A disk-backed source is read from its file here, off the audio thread (ADR 0035); a file
+    // that cannot be opened or read refuses the render rather than stretch silence (#523).
     let ch = match &audio.disk {
-        Some(d) => d.with_sync(read),
+        Some(d) => {
+            let name = s.sources.iter().find(|m| m.id == source).map_or_else(|| c.name.clone(), |m| m.name.clone());
+            let reads = crate::io::DiskReads::refuse_one(cmd, &name, d)?;
+            let ch = d.with_sync(read);
+            reads.verify(cmd)?;
+            ch
+        }
         None => read(&mut |ch, x| audio.buffer.channels.get(ch).and_then(|v| v.get(x)).copied()),
     };
     let sr = s.sample_rate;

@@ -65,6 +65,7 @@ fn process(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         let channels = e.session().track(track).map_or(1, |t| t.channels());
         crate::io::refuse_longer(e.session(), "audiosuite.process", &clip.name, "process", clip.length, most.min(crate::io::render_limit(channels)))?;
+        let reads = crate::io::DiskReads::refuse(e.session(), "audiosuite.process", Some(&[track]), clip.range())?;
         let _offline = crate::io::offline();
         let mut audio = transit_mix::render_clips(e.session(), track, clip.range());
         // Render without the clip's own fades: re-render a copy without fades so they stay editable.
@@ -79,6 +80,7 @@ fn process(e: &mut Engine, p: &Value) -> Result<Value> {
             pl.clips.retain(|c| c.id == id);
             audio = transit_mix::render_clips(&tmp, track, clip.range());
         }
+        reads.verify("audiosuite.process")?;
         let srf = sr.as_f64() as f32;
         let out: Vec<Vec<f32>> = match name.as_str() {
             "normalize" => {

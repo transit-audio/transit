@@ -25,8 +25,10 @@ fn audio_as_midi(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, "select audio on an audio track"));
     }
     let r = crate::io::bounded_to_track(s, t, r);
+    let reads = crate::io::DiskReads::refuse(s, id, Some(&[t]), r)?;
     let _offline = crate::io::offline();
     let audio = transit_mix::render_clips(s, t, r);
+    reads.verify(id)?;
     let n = audio.first().map_or(0, Vec::len);
     let k = audio.len().max(1) as f32;
     let mono: Vec<f32> = (0..n).map(|i| audio.iter().map(|c| c.get(i).copied().unwrap_or(0.0)).sum::<f32>() / k).collect();

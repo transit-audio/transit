@@ -687,7 +687,7 @@ fn separate_at_transients(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     let mut n = 0;
     for t in &tracks {
-        let hits = crate::io::transients_in(s, *t, r, sens);
+        let hits = crate::io::transients_in(s, "edit.separate_at_transients", *t, r, sens)?;
         for at in hits {
             n += ops::separate_at(s, *t, at);
         }

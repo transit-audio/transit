@@ -26,6 +26,8 @@ pub struct Bounce {
     peak: f32,
     meter: transit_dsp::meter::LoudnessMeter,
     enc: Option<transit_audio_io::FileEncoder<Out>>,
+    /// The streamed takes checked before the render, checked again before the file is kept.
+    disk: DiskReads,
 }
 
 /// A finished bounce: the size of its file and its levels.
@@ -65,6 +67,7 @@ impl Bounce {
     pub fn with_options(s: Arc<Session>, path: &Path, r: Range, opts: &EncodeOptions, options: BounceOptions) -> Result<Bounce> {
         let BounceOptions { bus, normalize, fold_stereo } = options;
         check_bounce_range(&s, r, "file.bounce_mix")?;
+        let disk = DiskReads::refuse(&s, "file.bounce_mix", None, r)?;
         let (fmt, channels, fold) = bounce_layout(&s, bus, fold_stereo);
         let name = path.file_name().map_or_else(|| "bounce".into(), |n| n.to_string_lossy().into_owned());
         let part = path.with_file_name(format!("{name}.part"));
@@ -101,6 +104,7 @@ impl Bounce {
             peak: 0.0,
             meter,
             enc: Some(enc),
+            disk,
         })
     }
 
@@ -165,6 +169,8 @@ impl Bounce {
     }
 
     fn finish(&mut self) -> Result<Bounced> {
+        // A take that failed mid-render printed silence: the part file is dropped, never kept.
+        self.disk.verify("file.bounce_mix")?;
         let bytes = match self.enc.take() {
             Some(enc) => enc.finish().map_err(|err| EngineError::Io(format!("{}: {err}", self.path.display())))?.complete(&self.part, &self.path)?,
             None => 0,
@@ -229,15 +235,18 @@ pub fn bounce_stems(e: &Engine, dir: &str, r: Range, opts: &EncodeOptions) -> Re
 pub fn bounce_stems_with(e: &Engine, dir: &str, r: Range, opts: &EncodeOptions, fold_stereo: bool) -> Result<Vec<String>> {
     let s = e.session();
     check_bounce_range(s, r, "file.bounce_stems")?;
-    make_dir(dir)?;
-    let ext = transit_audio_io::encode_extension(opts.format);
-    let mut out = Vec::new();
     let stems: Vec<(TrackId, String)> = s
         .tracks
         .iter()
         .filter(|t| matches!(t.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Midi) && !t.inactive && !t.mixer.mute)
         .map(|t| (t.id, t.name.clone()))
         .collect();
+    // Refused before the first stem is written; each stem's bounce checks its own render again.
+    let ids: Vec<TrackId> = stems.iter().map(|x| x.0).collect();
+    DiskReads::refuse(s, "file.bounce_stems", Some(&ids), r)?;
+    make_dir(dir)?;
+    let ext = transit_audio_io::encode_extension(opts.format);
+    let mut out = Vec::new();
     let mut solo = Arc::new(s.clone());
     for (id, name) in stems {
         for t in &mut Arc::make_mut(&mut solo).tracks {

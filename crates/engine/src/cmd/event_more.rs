@@ -716,7 +716,7 @@ fn beat_detective(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut hits: Vec<Samples> = Vec::new();
     for t in &tracks {
         if s.track(*t).is_some_and(|x| x.kind.has_playlist() && !x.kind.is_midi()) {
-            hits.extend(crate::io::transients_in(s, *t, r, sens));
+            hits.extend(crate::io::transients_in(s, id, *t, r, sens)?);
         }
     }
     hits.sort_unstable();

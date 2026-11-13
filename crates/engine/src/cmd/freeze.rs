@@ -65,8 +65,10 @@ fn freeze_track(e: &mut Engine, id: &str, t: TrackId) -> Result<bool> {
     }
     let range = Range::new(0, end + s.sample_rate.samples(TAIL_SECS));
     refuse_longer(s, id, &tr.name, "freeze", range.len(), render_limit(tr.channels().max(2)))?;
+    let reads = crate::io::DiskReads::refuse(s, id, Some(&[t]), range)?;
     let _offline = offline();
     let (audio, latency) = transit_mix::render_track_pre_fader_timed(s, t, range);
+    reads.verify(id)?;
     let name = format!("{}.frz", tr.name);
     let rate = s.sample_rate.hz();
     let revision = e.revision;
