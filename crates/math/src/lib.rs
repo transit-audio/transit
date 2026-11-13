@@ -11,7 +11,8 @@
 //!   `no_std` callers; `powi` is transit's own exact binary exponentiation; `sin_cos` is two calls.
 //! - [`consts`]: the conversion literals the devices share.
 //! - [`gain`]: decibel and pan-law conversions computed in `f64` and rounded once to `f32`, so they
-//!   return the correctly rounded value at every 0.01 dB step (0 dB is exactly 1, +20 dB exactly 10).
+//!   return the correctly rounded value at every 0.01 dB step (0 dB is exactly 1, +20 dB exactly 10);
+//!   the `f64`-input forms with the mixer's named caps (ADR 0058) are faithfully rounded.
 //! - [`fft`]: the one FFT for rendered code (2.7): radix-2, real and complex, forward and inverse, `f32`
 //!   and `f64`, power-of-two sizes from 256 through 524,288, twiddles from the seam's `sin` and `cos`, one
 //!   fixed arithmetic sequence, the caller's twiddle table and scratch.

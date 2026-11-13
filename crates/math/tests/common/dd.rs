@@ -46,8 +46,15 @@ const LN_2: Dd = Dd(core::f64::consts::LN_2, 2.319_046_813_846_299_6e-17);
 
 /// 10^(x/20) for the exact value of `x`, to about 100 bits.
 pub fn db_to_gain(x: f32) -> Dd {
-    let (p, e) = two_prod(DB_TO_LOG2.0, f64::from(x));
-    let t = quick_two_sum(p, e + DB_TO_LOG2.1 * f64::from(x));
+    db_to_gain_f64(f64::from(x))
+}
+
+/// 10^(x/20) for the exact value of an `f64` `x`, to about 100 bits: the same computation as
+/// [`db_to_gain`] (which calls it with the widened `f32`), so the committed table's validation of that
+/// function covers this code. `x · log2(10)/20` is formed exactly by `two_prod` for any `f64`.
+pub fn db_to_gain_f64(x: f64) -> Dd {
+    let (p, e) = two_prod(DB_TO_LOG2.0, x);
+    let t = quick_two_sum(p, e + DB_TO_LOG2.1 * x);
     let k = t.0.round();
     let g = mul(add(t, Dd(-k, 0.0)), LN_2);
     let mut term = Dd(1.0, 0.0);
@@ -95,4 +102,18 @@ pub fn midpoint_distance(y: f64) -> f64 {
     let (lo, hi) = (f64::from(f32::from_bits(b - 1)), f64::from(f32::from_bits(b + 1)));
     let rf = f64::from(r);
     (y - (rf + lo) / 2.0).abs().min((y - (rf + hi) / 2.0).abs()) / y
+}
+
+/// The two `f32` values bracketing a positive normal double-double `v` (both the same when `v` is
+/// exactly an `f32`): a faithfully rounded result is one of them.
+pub fn bracket_f32(v: Dd) -> (f32, f32) {
+    let r = v.0 as f32;
+    let c = cmp(v, f64::from(r));
+    if c == 0.0 {
+        (r, r)
+    } else if c > 0.0 {
+        (r, f32::from_bits(r.to_bits() + 1))
+    } else {
+        (f32::from_bits(r.to_bits() - 1), r)
+    }
 }

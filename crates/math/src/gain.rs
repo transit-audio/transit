@@ -8,6 +8,10 @@
 //! misround only when its exact result lies that close to an `f32` rounding midpoint (a handful of the
 //! roughly 2.2e9 inputs, measured exhaustively by the crate's ignored near-tie test); such a result is
 //! still within one rounding step of exact and still identical on every platform.
+//!
+//! [`db_to_gain_f64`] and [`db_to_gain_f64_unrounded`] take an `f64` input with a named cap
+//! ([`FADER_CAP_DB`], [`TRIM_CAP_DB`], [`CLIP_CAP_DB`]) for the mixer's gain path (ADR 0058,
+//! decision 3): faithfully rounded for every `f64` input, not claimed correctly rounded.
 
 use crate::consts::{DB_TO_LOG2_F64, LOG2_TO_DB_F64};
 use crate::f64 as m64;
@@ -28,6 +32,45 @@ pub fn db_to_gain(db: f32) -> f32 {
         return 0.0;
     }
     m64::exp2(f64::from(db.min(MAX_DB)) * DB_TO_LOG2_F64) as f32
+}
+
+/// The cap of the mixer's fader stage, the master and the send levels: their stored range, +12 dB
+/// (ADR 0058, decision 3). Named, never computed.
+pub const FADER_CAP_DB: f64 = 12.0;
+
+/// The cap of the static trim: its stored range, +24 dB (ADR 0058, decision 3).
+pub const TRIM_CAP_DB: f64 = 24.0;
+
+/// The cap of clip gain (static gain plus envelope): +48 dB (ADR 0058, decision 3).
+pub const CLIP_CAP_DB: f64 = 48.0;
+
+/// Decibels in `f64` to linear gain in `f64`, unrounded (ADR 0058, decision 3): exactly 0.0 when `d`
+/// is NaN or at or below [`MIN_DB`] (negative infinity included), else `exp2(min(d, cap) · log2(10)/20)`
+/// in `f64` through the seam (positive infinity gives the cap's gain). Used inside a mixer stage's
+/// `f64` expression, whose result alone is rounded to `f32`.
+///
+/// `cap` is one of [`FADER_CAP_DB`], [`TRIM_CAP_DB`] and [`CLIP_CAP_DB`]: finite and at most
+/// [`MAX_DB`] (debug-asserted). NaN is tested before the clamp, because `f64::min` returns the other
+/// operand when one is NaN.
+#[inline]
+pub fn db_to_gain_f64_unrounded(d: f64, cap: f64) -> f64 {
+    debug_assert!(cap.is_finite() && cap <= f64::from(MAX_DB), "a gain cap is finite and at most +200 dB");
+    if d.is_nan() || d <= f64::from(MIN_DB) {
+        return 0.0;
+    }
+    m64::exp2(d.min(cap) * DB_TO_LOG2_F64)
+}
+
+/// [`db_to_gain_f64_unrounded`] rounded once to `f32` (ADR 0058, decision 3).
+///
+/// Faithfully rounded for every `f64` input: the result is one of the two `f32` values bracketing
+/// the exact `10^(min(d, cap)/20)` (correct rounding is not claimed for `f64` inputs), and identical
+/// on every platform. For every non-NaN `f32` `x`, `db_to_gain_f64(f64::from(x), cap)` is
+/// bit-identical to `db_to_gain(x.min(cap as f32))`; for every `x`, NaN included, to
+/// `db_to_gain(if x.is_nan() { x } else { x.min(cap as f32) })`. Non-decreasing in `d`.
+#[inline]
+pub fn db_to_gain_f64(d: f64, cap: f64) -> f32 {
+    db_to_gain_f64_unrounded(d, cap) as f32
 }
 
 /// Linear gain (sign ignored) to decibels: `20·log10(2) · log2(|g|)` in `f64`, rounded once to `f32`
