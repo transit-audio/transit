@@ -8,21 +8,14 @@ use crate::Engine;
 use crate::io::{Recording, add_recording, place_recording, place_recording_take};
 use crate::midi_take::{Cut, Msg, RecEvent, build_wrapping, place_midi_recording};
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use transit_model::TrackId;
 
-/// Removes the directory on drop, so a failed assertion leaks nothing.
-struct TempDir(PathBuf);
+/// A scratch folder (#497), removed on drop so a failed assertion leaks nothing.
+struct TempDir(transit_test_support::TestDir);
 impl TempDir {
     fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("transit-take-laps-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        TempDir(dir)
-    }
-}
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        TempDir(transit_test_support::TestDir::new(&format!("take-laps-{tag}")))
     }
 }
 
