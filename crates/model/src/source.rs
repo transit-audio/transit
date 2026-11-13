@@ -64,6 +64,16 @@ impl SourceAudio {
     }
 }
 
+/// The owner of a disk-backed source goes: its background peaks work stops and writes nothing
+/// more beside the file, even while the streaming thread still holds the source for a pass (#663).
+impl Drop for SourceAudio {
+    fn drop(&mut self) {
+        if let Some(d) = &self.disk {
+            d.stop_peaks();
+        }
+    }
+}
+
 /// Shared decoded audio, keyed by source id.
 #[derive(Debug, Clone, Default)]
 pub struct SourcePool {

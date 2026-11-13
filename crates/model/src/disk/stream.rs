@@ -167,9 +167,12 @@ fn fill(ring: &[AtomicU32], window: usize, channels: usize, map: &StreamMap, fro
 /// The sources the streaming thread serves.
 static REGISTRY: Mutex<Vec<Weak<DiskSource>>> = Mutex::new(Vec::new());
 static THREAD: OnceLock<()> = OnceLock::new();
+/// The name of the thread that builds one source's waveform peaks.
+pub(crate) const PEAKS_THREAD: &str = "transit-disk-peaks";
 
 /// Serve `source` from the streaming thread (started on first use) and build its waveform peaks
-/// in the background, from its sidecar when that is current ([`super::load_or_build_peaks`]).
+/// in the background, from its sidecar when that is current ([`super::load_or_build_peaks`]),
+/// until the source's owner lets it go ([`DiskSource::stop_peaks`]).
 pub fn register(source: &Arc<DiskSource>) {
     REGISTRY.lock().unwrap_or_else(PoisonError::into_inner).push(Arc::downgrade(source));
     THREAD.get_or_init(|| {
@@ -194,13 +197,18 @@ pub fn register(source: &Arc<DiskSource>) {
     if source.peaks().is_none() {
         let weak = Arc::downgrade(source);
         let (path, opener, channels, frames) = (source.path.clone(), Arc::clone(&source.opener), source.channels, source.frames);
-        let spawned = std::thread::Builder::new().name("transit-disk-peaks".into()).spawn(move || {
-            match super::load_or_build_peaks(&path, &opener, channels, frames) {
-                Ok((peaks, _)) => {
+        // The build holds the gate, never the source: the streaming thread may hold the source a
+        // pass longer than its owner, and the owner's going closes the gate (#663).
+        let gate = Arc::clone(&source.peaks_gate);
+        let spawned = std::thread::Builder::new().name(PEAKS_THREAD.into()).spawn(move || {
+            match super::peaks::load_or_build_peaks_until(&path, &opener, channels, frames, &gate) {
+                Ok(Some((peaks, _))) => {
                     if let Some(s) = weak.upgrade() {
                         s.set_peaks(peaks);
                     }
                 }
+                Ok(None) => {}
+                Err(_) if gate.is_closed() => {}
                 Err(e) => log::warn!("{}: waveform peaks could not be built: {e}", path.display()),
             }
         });

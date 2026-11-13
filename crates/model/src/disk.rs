@@ -388,6 +388,14 @@ pub struct DiskSource {
     /// Failed opens and reads of the synchronous reader so far, so an offline render can tell
     /// whether it met one ([`DiskSource::sync_failures`]).
     sync_failures: AtomicU64,
+    /// Whether the background peaks build may still write beside the file (#663).
+    peaks_gate: Arc<peaks::PeaksGate>,
+}
+
+impl Drop for DiskSource {
+    fn drop(&mut self) {
+        self.stop_peaks();
+    }
 }
 
 /// The readers a fault is recorded for.
@@ -431,6 +439,7 @@ impl DiskSource {
             underruns: AtomicU64::new(0),
             faults: Mutex::new([None, None]),
             sync_failures: AtomicU64::new(0),
+            peaks_gate: Arc::default(),
         })
     }
 
@@ -471,6 +480,16 @@ impl DiskSource {
     }
     pub fn set_peaks(&self, peaks: DiskPeaks) {
         let _ = self.peaks.set(peaks);
+    }
+
+    /// The source's owner let it go (its [`crate::SourceAudio`] was dropped, or the source
+    /// itself): the background peaks build stops at its next read of the file, and once this
+    /// returns it writes nothing more beside the file, so a closed session's folder can be moved
+    /// or deleted (#663). Waits only for a sidecar write already under way (one file of eight
+    /// bytes per channel per [`PEAKS_BUCKET`] frames, synced; about 11 MB a channel for 8 h at
+    /// 48 kHz), never for the build. Not for the audio thread, which never drops a source.
+    pub fn stop_peaks(&self) {
+        self.peaks_gate.close();
     }
 
     /// Audio thread: the ring holding clip time `k0..k0 + n` of `map`'s clip as `map` maps it, or

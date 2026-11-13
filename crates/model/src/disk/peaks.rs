@@ -5,10 +5,16 @@
 //! Sidecar layout (little-endian): `TPKS`, version (u32), file length (u64), modification time
 //! (ns since the Unix epoch, u64, 0 when unknown), source hash (u64), frames (u64), frames per
 //! bucket (u32), channels (u32), buckets (u64), then per channel each bucket's min and max (f32).
+//!
+//! The background build belongs to its source: once the source's owner lets it go
+//! ([`super::DiskSource::stop_peaks`]), the build stops at its next read and writes nothing more
+//! beside the file, so a session that was closed, moved or deleted is not written into (#663).
 
 use super::{DiskFile, Opener};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 /// Frames summed up in one peaks bucket: 1.4 M buckets (11 MB a channel) for 8 h at 48 kHz.
 pub const PEAKS_BUCKET: usize = 1024;
@@ -18,7 +24,7 @@ const HEADER: usize = 4 + 4 + 8 + 8 + 8 + 8 + 4 + 4 + 8;
 /// Bytes of the file's start the source hash covers.
 const HASHED: u64 = 64 * 1024;
 /// Frames read at a time while building.
-const READ_FRAMES: usize = 1 << 16;
+pub(super) const READ_FRAMES: usize = 1 << 16;
 
 /// Each channel's min and max per [`PEAKS_BUCKET`] frames: what a waveform of a disk-backed source
 /// draws from (an in-memory source keeps exact `Peaks` instead).
@@ -83,26 +89,74 @@ fn stamp(path: &Path) -> std::io::Result<Stamp> {
     Ok(Stamp { len: meta.len(), mtime, hash })
 }
 
+/// Whether a source's background peaks work may still touch the folder beside its file (#663).
+/// Closed once, when the source's owner goes; a close waits for a sidecar write under way, so
+/// nothing is written after [`PeaksGate::close`] returns.
+#[derive(Debug, Default)]
+pub(crate) struct PeaksGate {
+    closed: AtomicBool,
+    /// Held for the whole sidecar write, and by a close.
+    writing: Mutex<()>,
+}
+
+impl PeaksGate {
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
+    /// Close the gate: a write under way finishes first (this waits for it), none starts after.
+    pub(crate) fn close(&self) {
+        let _writing = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        self.closed.store(true, Ordering::Release);
+    }
+
+    /// `write()` unless the gate is closed; a close waits until it is done.
+    fn write<R>(&self, write: impl FnOnce() -> R) -> Option<R> {
+        let _writing = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        (!self.is_closed()).then(write)
+    }
+}
+
 /// The peaks of the source file at `path` (`channels` × `frames`, read through `opener`): from its
 /// sidecar when that matches the file, else built by reading the whole file once and written to
 /// the sidecar (a folder that cannot be written keeps them in memory only).
 pub fn load_or_build_peaks(path: &Path, opener: &Opener, channels: usize, frames: u64) -> Result<(DiskPeaks, PeaksOrigin), String> {
+    load_or_build_peaks_until(path, opener, channels, frames, &PeaksGate::default())?.ok_or_else(|| "stopped".to_string())
+}
+
+/// [`load_or_build_peaks`] for a source whose owner may let it go: `Ok(None)` once `gate` is
+/// closed, checked before each read of the file and, under the gate, before the sidecar is written.
+pub(crate) fn load_or_build_peaks_until(
+    path: &Path,
+    opener: &Opener,
+    channels: usize,
+    frames: u64,
+    gate: &PeaksGate,
+) -> Result<Option<(DiskPeaks, PeaksOrigin)>, String> {
+    if gate.is_closed() {
+        return Ok(None);
+    }
     let side = sidecar_path(path);
     let now = stamp(path).ok();
     if let Some(peaks) = now.and_then(|s| read_sidecar(&side, s, channels, frames)) {
-        return Ok((peaks, PeaksOrigin::Sidecar));
+        return Ok(Some((peaks, PeaksOrigin::Sidecar)));
     }
     let mut file = opener()?;
-    let peaks = build(file.as_mut(), channels, frames).map_err(|e| format!("{}: {e}", path.display()))?;
-    if let Some(s) = now
-        && let Err(e) = write_sidecar(&side, s, &peaks)
-    {
-        log::info!("{}: the peaks sidecar was not written: {e}", side.display());
+    let Some(peaks) = build(file.as_mut(), channels, frames, gate).map_err(|e| format!("{}: {e}", path.display()))? else {
+        return Ok(None);
+    };
+    if let Some(s) = now {
+        match gate.write(|| write_sidecar(&side, s, &peaks)) {
+            None => return Ok(None),
+            Some(Err(e)) => log::info!("{}: the peaks sidecar was not written: {e}", side.display()),
+            Some(Ok(())) => {}
+        }
     }
-    Ok((peaks, PeaksOrigin::Built))
+    Ok(Some((peaks, PeaksOrigin::Built)))
 }
 
-fn build(file: &mut dyn DiskFile, channels: usize, frames: u64) -> std::io::Result<DiskPeaks> {
+/// The peaks of `file`, or `None` when `gate` closes before the build is done.
+fn build(file: &mut dyn DiskFile, channels: usize, frames: u64, gate: &PeaksGate) -> std::io::Result<Option<DiskPeaks>> {
     let buckets = usize::try_from(frames.div_ceil(PEAKS_BUCKET as u64)).unwrap_or(usize::MAX);
     let mut out = vec![Vec::with_capacity(buckets); channels];
     let mut acc = vec![(f32::INFINITY, f32::NEG_INFINITY); channels];
@@ -110,6 +164,9 @@ fn build(file: &mut dyn DiskFile, channels: usize, frames: u64) -> std::io::Resu
     let mut data = Vec::new();
     let mut at = 0u64;
     while at < frames {
+        if gate.is_closed() {
+            return Ok(None);
+        }
         let n = file.read_at(at, READ_FRAMES, &mut data)?;
         if n == 0 {
             break;
@@ -142,7 +199,7 @@ fn build(file: &mut dyn DiskFile, channels: usize, frames: u64) -> std::io::Resu
             *b = (0.0, 0.0);
         }
     }
-    Ok(DiskPeaks { frames, bucket: PEAKS_BUCKET, channels: out })
+    Ok(Some(DiskPeaks { frames, bucket: PEAKS_BUCKET, channels: out }))
 }
 
 fn write_sidecar(side: &Path, s: Stamp, p: &DiskPeaks) -> std::io::Result<()> {

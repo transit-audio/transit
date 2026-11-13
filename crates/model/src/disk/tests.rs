@@ -371,3 +371,108 @@ fn a_sidecar_that_cannot_be_written_leaves_no_temporary_file() {
     tmp.push(".tmp");
     assert!(!PathBuf::from(tmp).exists());
 }
+
+/// What a test sees of a peaks build's reader (#663): `entered` when its first read starts (that
+/// read then waits for `go`), `closed` when the reader is dropped, after any sidecar write.
+struct Events {
+    entered: std::sync::mpsc::Sender<()>,
+    go: Mutex<std::sync::mpsc::Receiver<()>>,
+    closed: std::sync::mpsc::Sender<()>,
+}
+
+/// The peaks build's reader: its first read waits for the test; every read is counted.
+struct Held {
+    inner: Fake,
+    events: Arc<Events>,
+    reads: Arc<AtomicUsize>,
+}
+
+impl DiskFile for Held {
+    fn read_at(&mut self, at: u64, frames: usize, out: &mut Vec<Vec<f32>>) -> std::io::Result<usize> {
+        if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+            let _ = self.events.entered.send(());
+            let _ = self.events.go.lock().unwrap_or_else(PoisonError::into_inner).recv();
+        }
+        self.inner.read_at(at, frames, out)
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let _ = self.events.closed.send(());
+    }
+}
+
+/// A registered source of `frames` frames at `path` (a real file there, for the sidecar's stamp),
+/// held by the streaming thread's way too (`source`) and owned by `owner`; its peaks build reads
+/// through a [`Held`] reader, the streaming thread through a plain one.
+struct Rig {
+    source: Arc<DiskSource>,
+    owner: crate::SourceAudio,
+    entered: std::sync::mpsc::Receiver<()>,
+    go: std::sync::mpsc::Sender<()>,
+    closed: std::sync::mpsc::Receiver<()>,
+    reads: Arc<AtomicUsize>,
+}
+
+fn held(path: &Path, frames: usize) -> Rig {
+    let data = Arc::new(ramp(1, frames));
+    let (entered_tx, entered) = std::sync::mpsc::channel();
+    let (go, go_rx) = std::sync::mpsc::channel();
+    let (closed_tx, closed) = std::sync::mpsc::channel();
+    let events = Arc::new(Events { entered: entered_tx, go: Mutex::new(go_rx), closed: closed_tx });
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&reads);
+    let opener: Opener = Arc::new(move || {
+        let inner = Fake { data: Arc::clone(&data) };
+        if std::thread::current().name() == Some(stream::PEAKS_THREAD) {
+            Ok(Box::new(Held { inner, events: Arc::clone(&events), reads: Arc::clone(&counted) }) as Box<dyn DiskFile>)
+        } else {
+            Ok(Box::new(inner) as Box<dyn DiskFile>)
+        }
+    });
+    let source = DiskSource::with_window(path.to_path_buf(), 1, frames as u64, 48_000, 1_024, opener);
+    let owner = crate::SourceAudio::disk(Arc::clone(&source));
+    register(&source);
+    Rig { source, owner, entered, go, closed, reads }
+}
+
+fn sidecar_tmp_of(path: &Path) -> PathBuf {
+    let mut tmp = sidecar_path(path).into_os_string();
+    tmp.push(".tmp");
+    PathBuf::from(tmp)
+}
+
+#[test]
+fn a_source_let_go_while_its_peaks_are_built_writes_no_sidecar_after_issue_663() {
+    let dir = Dir::new("peaks-let-go");
+    let path = dir.0.join("Take_03.wav");
+    write_wav(&path, &[0.25; 3_000]);
+    // One read builds these peaks: the owner goes during it, after the build's last look at the
+    // gate before the sidecar write (a session closed and its folder deleted as its peaks finish).
+    let Rig { source, owner, entered, go, closed, .. } = held(&path, 3_000);
+    entered.recv().unwrap_or_else(|e| panic!("{e}"));
+    // The streaming thread can hold the source a pass longer than its owner: `source` does here.
+    drop(owner);
+    go.send(()).unwrap_or_else(|e| panic!("{e}"));
+    closed.recv().unwrap_or_else(|e| panic!("{e}"));
+    assert!(!sidecar_path(&path).exists(), "a sidecar was written after the source's owner let it go");
+    assert!(!sidecar_tmp_of(&path).exists(), "a temporary sidecar was written after the source's owner let it go");
+    assert!(source.peaks().is_none());
+}
+
+#[test]
+fn a_source_let_go_stops_its_peaks_build_at_the_next_read_issue_663() {
+    let dir = Dir::new("peaks-stop");
+    let path = dir.0.join("Take_04.wav");
+    write_wav(&path, &[0.25; 3_000]);
+    let rig = held(&path, 3 * peaks::READ_FRAMES + 1);
+    rig.entered.recv().unwrap_or_else(|e| panic!("{e}"));
+    let Rig { source, owner, go, closed, reads, .. } = rig;
+    drop(owner);
+    go.send(()).unwrap_or_else(|e| panic!("{e}"));
+    closed.recv().unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(reads.load(Ordering::SeqCst), 1, "the build read on after the source's owner let it go");
+    assert!(!sidecar_path(&path).exists());
+    drop(source);
+}

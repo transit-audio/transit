@@ -310,7 +310,7 @@ pub fn place_prepared(e: &mut Engine, prepared: PreparedAudio, target: Option<Tr
     let src = if audio.buffer.sample_rate == session_rate {
         add_source_audio(s, &label, audio, path.as_deref(), format)
     } else {
-        let buf = Arc::try_unwrap(audio).map_or_else(|a| a.buffer.clone(), |a| a.buffer);
+        let buf = Arc::try_unwrap(audio).map_or_else(|a| a.buffer.clone(), |mut a| std::mem::take(&mut a.buffer));
         add_source(s, &label, buf, path.as_deref(), format)
     };
     if let (Some(stamp), Some(sx)) = (time_reference, s.sources.last_mut()) {
