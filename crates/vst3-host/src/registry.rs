@@ -54,8 +54,23 @@ fn scan_lock() -> MutexGuard<'static, ()> {
     S.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Set while [`scan_in_background`]'s thread runs.
-static BACKGROUND: AtomicBool = AtomicBool::new(false);
+/// The background scan thread: whether one runs, and whether an explicit full rescan was asked for
+/// while it ran. Both change under one lock, so a request is either seen by the thread before it
+/// ends or starts a new thread; it is never lost between the two.
+struct Background {
+    running: bool,
+    /// At most one: a full rescan waits for the running scan, repeated requests do not stack.
+    pending: bool,
+}
+
+static BACKGROUND: Mutex<Background> = Mutex::new(Background { running: false, pending: false });
+
+/// Wakes [`wait_for_scans`] when the scan thread ends.
+static BACKGROUND_IDLE: std::sync::Condvar = std::sync::Condvar::new();
+
+fn background() -> MutexGuard<'static, Background> {
+    BACKGROUND.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Set by [`skip_scan`]: the running scan loads no more files.
 static SKIP: AtomicBool = AtomicBool::new(false);
@@ -276,34 +291,70 @@ pub fn set_cache_file(file: Option<PathBuf>) {
 
 pub fn scan_in_background() {
     if cached().is_none() {
-        in_background(|| {
-            scan();
-        });
+        in_background(
+            || {
+                scan();
+            },
+            false,
+        );
     }
 }
 
+/// Starts a rescan on the scan thread. With `clear_cache` (an explicit "rescan everything": every
+/// file is loaded again and the cache is rewritten) a request that arrives while a scan runs is
+/// kept and runs once after it, however that scan ends; a second request meanwhile adds nothing.
+/// Without it (the scan at launch, which reuses the cache) a request during a scan is dropped:
+/// the running scan is that scan.
 pub fn rescan_in_background(clear_cache: bool) {
-    in_background(if clear_cache { || drop(rescan_with(false)) } else { || drop(rescan_with(true)) });
+    if clear_cache {
+        in_background(|| drop(rescan_with(false)), true);
+    } else {
+        in_background(|| drop(rescan_with(true)), false);
+    }
 }
 
-/// Runs `job` on a scan thread, unless one is running already.
-fn in_background(job: fn()) {
-    if BACKGROUND.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    /// Clears [`BACKGROUND`] however the job ends.
-    struct Done;
-    impl Drop for Done {
-        fn drop(&mut self) {
-            BACKGROUND.store(false, Ordering::Release);
+/// Runs `job` on a scan thread, unless one is running already; then a `full` request is queued.
+fn in_background(job: fn(), full: bool) {
+    {
+        let mut b = background();
+        if b.running {
+            b.pending |= full;
+            return;
         }
+        b.running = true;
     }
-    let done = Done;
     if let Err(e) = std::thread::Builder::new().name("vst3-scan".into()).spawn(move || {
-        let _done = done;
-        job();
+        let mut job: fn() = job;
+        loop {
+            // A job that panics must not lose the rescan that waits behind it.
+            if std::panic::catch_unwind(job).is_err() {
+                log::warn!("vst3: a scan failed");
+            }
+            let mut b = background();
+            if !b.pending {
+                b.running = false;
+                BACKGROUND_IDLE.notify_all();
+                return;
+            }
+            b.pending = false;
+            job = || drop(rescan_with(false));
+        }
     }) {
         log::warn!("vst3: no scan thread: {e}");
+        let mut b = background();
+        b.running = false;
+        b.pending = false;
+        BACKGROUND_IDLE.notify_all();
+    }
+}
+
+/// Test hook: blocks until no scan thread runs and no rescan waits (a rescan that waits keeps the
+/// thread running). No clock: the thread wakes this when it ends.
+#[cfg(feature = "test-hooks")]
+pub fn wait_for_scans() {
+    let mut b = background();
+    while b.running {
+        b = BACKGROUND_IDLE.wait(b).unwrap_or_else(PoisonError::into_inner);
     }
 }
 
@@ -343,7 +394,7 @@ pub fn scan_summary() -> Option<scan_cache::ScanSummary> {
 }
 
 pub fn scanning() -> bool {
-    BACKGROUND.load(Ordering::Acquire)
+    background().running
 }
 
 pub fn add_search_dir(dir: &Path) -> usize {

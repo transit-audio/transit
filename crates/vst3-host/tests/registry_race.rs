@@ -271,13 +271,9 @@ fn background_scan(clear_cache: bool) -> Vec<host::Vst3Descriptor> {
     host::scan()
 }
 
-/// #659: the start-up scan reuses what the cache holds for unchanged files (a remembered failure
-/// and a remembered success alike), and an explicit rescan loads every file again and rewrites
-/// the cache from what it found. The cache is planted with a wrong failure for a good file and a
-/// wrong success for a bad one, so reuse and a fresh read give different answers.
-#[test]
-fn an_explicit_rescan_loads_every_file_again_but_the_start_up_scan_reuses_the_cache() {
-    let t = Test::new();
+/// Plants a wrong cached failure for the good file and a wrong cached success for a bad one, so
+/// that reuse and a fresh read give different answers. Returns the bad file's real error.
+fn plant_wrong_cache(t: &Test) -> serde_json::Value {
     let bad = t.dir.join("bad.vst3");
     std::fs::write(&bad, b"not a plugin").unwrap();
     host::set_extra_dirs(vec![t.fixture.clone(), bad]);
@@ -294,6 +290,17 @@ fn an_explicit_rescan_loads_every_file_again_but_the_start_up_scan_reuses_the_ca
     files[broken]["error"] = serde_json::Value::Null;
     files[broken]["plugins"] = good_plugins;
     std::fs::write(t.dir.join("cache.json"), serde_json::to_vec(&cache).unwrap()).unwrap();
+    real_error
+}
+
+/// #659: the start-up scan reuses what the cache holds for unchanged files (a remembered failure
+/// and a remembered success alike), and an explicit rescan loads every file again and rewrites
+/// the cache from what it found. The start-up scan here is `rescan_in_background(false)`, the same
+/// `scan_now(true)` that `scan_in_background` runs.
+#[test]
+fn an_explicit_rescan_loads_every_file_again_but_the_start_up_scan_reuses_the_cache() {
+    let t = Test::new();
+    let real_error = plant_wrong_cache(&t);
 
     // The start-up scan: both planted entries are taken from the cache.
     background_scan(false);
@@ -310,4 +317,78 @@ fn an_explicit_rescan_loads_every_file_again_but_the_start_up_scan_reuses_the_ca
     let errors: Vec<_> = after.iter().filter_map(|f| f["error"].as_str()).collect();
     assert_eq!(errors.len(), 1, "{after:?}");
     assert!(!errors.contains(&"planted failure"), "the cache is rewritten from the results: {after:?}");
+}
+
+/// Holds a scan that reuses the cache after it loaded its files and before it publishes, runs
+/// `during` meanwhile, lets the scan go (it panics when `fail_first`) and returns how many scans
+/// reached their publication step. The held scan blocks on a channel. The only bound is the
+/// `recv_timeout` on the hold, which can fire only if the scan thread never reaches the hook
+/// (nothing before the hook can fail in these tests), so never in a correct run.
+fn held_start_up_scan(fail_first: bool, during: impl FnOnce()) -> usize {
+    host::wait_for_scans();
+    let (held_tx, held_rx) = channel();
+    let (go_tx, go_rx) = channel::<()>();
+    let go_rx = Mutex::new(go_rx);
+    let held_tx = Mutex::new(held_tx);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    host::set_scan_hook(Some(Arc::new(move || {
+        if count.fetch_add(1, Ordering::Relaxed) == 0 {
+            held_tx.lock().unwrap().send(()).unwrap();
+            // Ends when the test sends or drops its end (`resume` below always does).
+            let _ = go_rx.lock().unwrap().recv();
+            assert!(!fail_first, "a planted scan failure");
+        }
+    })));
+    let resume = go_tx;
+    host::rescan_in_background(false);
+    held_rx.recv_timeout(Duration::from_secs(60)).expect("the start-up scan reached its hold");
+    assert!(host::scanning());
+    during();
+    assert_eq!(calls.load(Ordering::Relaxed), 1, "a request during a scan starts no second scan beside it");
+    drop(resume);
+    host::wait_for_scans();
+    host::set_scan_hook(None);
+    calls.load(Ordering::Relaxed)
+}
+
+/// #659: Scan Plug-ins clicked while the cache-reusing start-up scan runs is not dropped: after
+/// that scan, every file is loaded again, including the cached failure.
+#[test]
+fn a_full_rescan_asked_for_during_a_scan_runs_after_it_and_rereads_every_file() {
+    let t = Test::new();
+    let real_error = plant_wrong_cache(&t);
+    let scans = held_start_up_scan(false, || host::rescan_in_background(true));
+    assert_eq!(scans, 2, "the start-up scan, then the queued rescan");
+    t.assert_fixture(&host::cached().unwrap());
+    let problems = host::problems();
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert_eq!(serde_json::json!(problems[0].1), real_error, "the planted entries were loaded again");
+    assert!(!t.cache().iter().any(|f| f["error"].as_str() == Some("planted failure")));
+}
+
+/// Two full requests during one scan, and a cache-reusing request among them, make one rescan.
+#[test]
+fn repeated_requests_during_a_scan_queue_one_rescan() {
+    let t = Test::new();
+    let scans = held_start_up_scan(false, || {
+        host::rescan_in_background(true);
+        host::rescan_in_background(true);
+        host::rescan_in_background(false);
+    });
+    assert_eq!(scans, 2, "the start-up scan and one rescan, however many requests came");
+    assert!(!host::scanning());
+    assert!(t.cache().is_empty());
+    // A request after the thread ended starts a scan of its own, once.
+    assert!(background_scan(true).is_empty());
+}
+
+/// A queued rescan is not lost when the running scan fails.
+#[test]
+fn a_queued_rescan_runs_even_when_the_scan_before_it_fails() {
+    let _t = Test::new();
+    let scans = held_start_up_scan(true, || host::rescan_in_background(true));
+    assert_eq!(scans, 2, "the failed scan reached its hook, the queued rescan ran");
+    assert!(host::cached().is_some(), "the rescan published");
+    assert!(!host::scanning());
 }

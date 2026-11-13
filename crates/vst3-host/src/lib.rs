@@ -264,6 +264,13 @@ pub fn set_scan_hook(hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
     registry::set_after_load_hook(hook)
 }
 
+/// Blocks until the background scan thread has ended and no rescan waits. Only for registry tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn wait_for_scans() {
+    registry::wait_for_scans()
+}
+
 /// Runs `f` while this thread holds every live instance (#78): a `process` in `f` skips its block
 /// as it does while the main thread services the instance. Only for host tests.
 #[cfg(feature = "test-hooks")]
