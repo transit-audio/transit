@@ -169,7 +169,9 @@ pressed Stop, every lap is a take, and the status line says the recording ended 
 Press Record to go on with a new recording. A lap runs from one wrap to the next; the first runs
 from where you pressed Record to the first wrap. On audio, a last lap shorter than an eighth of
 the loop is not a take; the status line says how long it was, and it stays in the take file. On
-MIDI, a last lap is a take when it holds any note or controller. The takes of one stretch of time form a stack, and the track plays one of them:
+MIDI, a last lap is a take when it holds any note or controller. Recording runs at normal speed only: Record is
+refused while Half-Speed Playback runs (press Stop, then Record), and Half-Speed Playback is refused while
+you record. The takes of one stretch of time form a stack, and the track plays one of them:
 the newest when you stop. Takes work the same for audio and MIDI.
 
 - **Take lanes.** After cycle recording the track's take lanes open under it: one lane per take,

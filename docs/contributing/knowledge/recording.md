@@ -39,7 +39,9 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   recovery), so audio and MIDI agree on whether the transport wrapped. A pass records at most
   `take_laps::MAX_LAPS` (10,000) laps. Once a frame on the control side, the host reads how far
   the pass has run from an unwrapped clock (`Player::samples_since`: the output frames the audio
-  thread consumed since the latch, published as one relaxed store beside the position; the
+  thread consumed since the latch, one relaxed store per consumed-progress publication beside the
+  position; recording runs at 1x only (Record refused at another speed, Half-Speed refused while
+  recording); the
   simulated transport counts its own wraps in `sim_laps`), counts completed laps with
   `take_laps::completed` and, at the first check that sees the limit, ends the recording like
   Record pressed again (`end_recording_at_lap_limit`), saying so on the status line and in the
