@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "audio-bench"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "ctrlc",
  "serde_json",
@@ -4087,7 +4087,7 @@ dependencies = [
 
 [[package]]
 name = "transit"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "eframe",
  "egui",
@@ -4108,7 +4108,7 @@ dependencies = [
 
 [[package]]
 name = "transit-au-host"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "log",
  "serde",
@@ -4118,7 +4118,7 @@ dependencies = [
 
 [[package]]
 name = "transit-audio-asio"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "log",
  "transit-audio-backend",
@@ -4129,11 +4129,11 @@ dependencies = [
 
 [[package]]
 name = "transit-audio-backend"
-version = "0.7.0"
+version = "0.7.1"
 
 [[package]]
 name = "transit-audio-io"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "log",
  "proptest",
@@ -4146,7 +4146,7 @@ dependencies = [
 
 [[package]]
 name = "transit-audio-jack"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "libloading 0.7.4",
  "log",
@@ -4157,7 +4157,7 @@ dependencies = [
 
 [[package]]
 name = "transit-audio-wasapi"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "log",
  "transit-audio-backend",
@@ -4168,7 +4168,7 @@ dependencies = [
 
 [[package]]
 name = "transit-automation"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "getrandom 0.3.4",
  "serde_json",
@@ -4178,7 +4178,7 @@ dependencies = [
 
 [[package]]
 name = "transit-clap-host"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "clap-sys",
  "libloading 0.8.9",
@@ -4195,7 +4195,7 @@ dependencies = [
 
 [[package]]
 name = "transit-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "serde_json",
  "transit-audio-io",
@@ -4207,7 +4207,7 @@ dependencies = [
 
 [[package]]
 name = "transit-dsp"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "log",
  "proptest",
@@ -4230,7 +4230,7 @@ dependencies = [
 
 [[package]]
 name = "transit-engine"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "craft-docpath",
  "flate2",
@@ -4258,21 +4258,21 @@ dependencies = [
 
 [[package]]
 name = "transit-granular"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "transit-macro-osc-oracle",
 ]
 
 [[package]]
 name = "transit-instrument-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "libm",
 ]
 
 [[package]]
 name = "transit-macro-osc"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "num-traits",
  "transit-macro-osc-oracle",
@@ -4280,14 +4280,14 @@ dependencies = [
 
 [[package]]
 name = "transit-macro-osc-oracle"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "transit-math"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "libm",
  "rustfft",
@@ -4296,7 +4296,7 @@ dependencies = [
 
 [[package]]
 name = "transit-midi"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "proptest",
  "serde",
@@ -4306,7 +4306,7 @@ dependencies = [
 
 [[package]]
 name = "transit-midi-io"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "log",
  "midir",
@@ -4317,7 +4317,7 @@ dependencies = [
 
 [[package]]
 name = "transit-mix"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "log",
  "rayon",
@@ -4337,7 +4337,7 @@ dependencies = [
 
 [[package]]
 name = "transit-modal-voice"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "transit-macro-osc-oracle",
  "transit-resonator",
@@ -4345,7 +4345,7 @@ dependencies = [
 
 [[package]]
 name = "transit-model"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "log",
  "serde",
@@ -4359,14 +4359,14 @@ dependencies = [
 
 [[package]]
 name = "transit-modulator"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "transit-macro-osc-oracle",
 ]
 
 [[package]]
 name = "transit-opus"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cc",
  "thiserror 2.0.21",
@@ -4374,14 +4374,14 @@ dependencies = [
 
 [[package]]
 name = "transit-parametric-eq"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "libm",
 ]
 
 [[package]]
 name = "transit-playback"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cpal",
  "log",
@@ -4409,7 +4409,7 @@ dependencies = [
 
 [[package]]
 name = "transit-plugin-host"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "log",
  "transit-clap-host",
@@ -4421,21 +4421,21 @@ dependencies = [
 
 [[package]]
 name = "transit-random-sequencer"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "transit-macro-osc-oracle",
 ]
 
 [[package]]
 name = "transit-resonator"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "transit-macro-osc-oracle",
 ]
 
 [[package]]
 name = "transit-rt"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "libc",
  "log",
@@ -4448,7 +4448,7 @@ dependencies = [
 
 [[package]]
 name = "transit-sampler-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "libm",
  "transit-instrument-core",
@@ -4457,18 +4457,18 @@ dependencies = [
 
 [[package]]
 name = "transit-test-support"
-version = "0.7.0"
+version = "0.7.1"
 
 [[package]]
 name = "transit-texture"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "transit-macro-osc-oracle",
 ]
 
 [[package]]
 name = "transit-time"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -4476,7 +4476,7 @@ dependencies = [
 
 [[package]]
 name = "transit-ui-studio"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "egui",
  "egui_extras",
@@ -4504,7 +4504,7 @@ dependencies = [
 
 [[package]]
 name = "transit-vst3-host"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "libloading 0.8.9",
  "log",
@@ -5775,7 +5775,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "proc-macro2",
  "serde",

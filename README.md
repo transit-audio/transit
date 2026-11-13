@@ -21,7 +21,7 @@ A desktop DAW in pure Rust with Ableton/Logic-style ergonomics and its own audio
 layer and egui UI.
 
 > [!NOTE]
-> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.7.0](https://github.com/transit-audio/transit/releases/tag/v0.7.0) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
+> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.7.1](https://github.com/transit-audio/transit/releases/tag/v0.7.1) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
 > correctness, stability and performance, measured on real hardware, ahead of new features.
 > Expect rough edges in the UI and some missing features; the audio engine, recording alignment
 > and device handling get fixed first, following [the engineering principles](docs/principles.md).
@@ -50,7 +50,7 @@ Send us a measurement with the [measurement issue template](https://github.com/t
 
 ## Downloads
 
-The current release is [v0.7.0](https://github.com/transit-audio/transit/releases/tag/v0.7.0). The files are `transit-v0.7.0-windows-x86_64.msi` and `.zip`, `transit-v0.7.0-macos-arm64.dmg` and `.tar.gz`, `transit-v0.7.0-linux-x86_64.tar.gz`, and `transit-0.7.0-linux-x86_64.AppImage`, `.deb` and `.rpm`.
+The current release is [v0.7.1](https://github.com/transit-audio/transit/releases/tag/v0.7.1). The files are `transit-v0.7.1-windows-x86_64.msi` and `.zip`, `transit-v0.7.1-macos-arm64.dmg` and `.tar.gz`, `transit-v0.7.1-linux-x86_64.tar.gz`, and `transit-0.7.1-linux-x86_64.AppImage`, `.deb` and `.rpm`.
 
 - **Windows (x86_64):** one download, the `.zip` (portable) or the `.msi` (installer with the standard install dialogs and license; it registers `.transit` and `.transitz`). It has native WASAPI and native ASIO.
 - **macOS (Apple silicon):** the `.dmg`; open it and drag `transit.app` to Applications.
@@ -163,7 +163,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Move and copy drags preview every selected clip at its destination, not only the one under the pointer.
 - Drag a rectangle across empty lane space to select every clip it touches, as in Logic: Shift adds to the selection, Ctrl toggles, Escape cancels, and a click still sets the cursor.
 - Loop strip on the ruler, in its own magenta hue (kept apart from the blue and amber of the device panels): drag to make a loop, drag its edges to resize it, double-click to toggle it. The loop follows tempo changes.
-- Automation lanes under any track for volume, pan, mute, sends and every device parameter; Read, Touch, Latch and Write modes.
+- Automation lanes under any track for volume, pan, mute, sends and every device parameter; Read, Touch, Latch and Write modes. A lane on a hosted plug-in's parameter reaches the plug-in whether or not you ever moved that parameter by hand, and volume and send levels from lanes, MIDI Learn and send drags follow the channel fader's own law (+6 dB at the top).
 - Touch mode suspends a lane while you hold its control, and the lane takes over again over 0.2 s after you let go, as in Logic and Ableton.
 - Tempo and meter changes along the timeline, edited by dragging or typing in the transport.
 - Transport metronome button: right-click for click level and count-in bars. Count-in works at bar 1, and recording starts sample-exact at the end of it.
@@ -208,7 +208,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Plug-in browser with a background scan and your own search folders.
 - Built-in instruments: Macro Oscillator (the default for a new instrument track), Resonator, Texture Synth, Modal Voice, Sampler. All built-ins open an editor window.
 - Sampler: one kit with three views ([ADR 0041](docs/adr/0041-sampler-one-instrument-three-views.md)). Pads: four banks of sixteen pads with names, choke groups, mute and solo, a per-kit Start note, and Load kit from a folder (it asks Replace, Fill free pads or Cancel when pads are loaded). Slices: a loop cut by cue points, transients, a grid or by hand; click to hear a slice and double-click to add a marker, a playhead at each sounding note, Slices to pads and Create clip, per-slice loops. Instrument: key and velocity zones, velocity layers, sequential or seeded random round robin, edge fades, loops with a crossfade. A file dropped on a pad becomes its sample, never an arrangement clip; samples keep their native rate; a new Sampler opens as an empty kit.
-- Sampler kit presets: the title bar saves and recalls a whole kit as a `.tkit` file, with samples referenced by path; a sample that is missing loads as missing and the rest plays.
+- Sampler kit presets: the title bar saves and recalls a whole kit as a `.tkit` file, with samples referenced by path; a sample that is missing loads as missing and the rest plays. Track presets and Save As Template carry a Sampler kit's samples by file, so a track or session started from them plays its kit.
 - Resonator: a physical-modeling resonator ported from Émilie Gillet's firmware (MIT) and checked bit for bit against it: six models (modal, sympathetic strings, inharmonic string, FM voice, chord strings, string and reverb) played from MIDI, each note striking the next of up to four ringing voices, at the module's own 48 kHz (converted at the edge at other session rates, latency compensated), with the Macro Oscillator's shaper and matrix; presets Struck Bell, Sympathetic Harp, Steel Pluck, FM Mallet, Strummed Chords and Ambient Pluck.
 - Texture Synth: the synth of Émilie Gillet's texture synthesizer firmware (MIT), checked bit for bit against it, played from MIDI as the Texture insert's instrument form: a wavetable oscillator and clouds of wavetable grains pitched by the notes, the notes holding the module's seed gate (a steady or random stream of grains while a key is held, or one grain per note), freeze that holds the cloud and saves it with the session, four quality resolutions, at the module's 48 kHz (converted at the edge, latency compensated), with the Macro Oscillator's shaper and matrix; presets Grain Pad, Grain Pulse, Frozen Cloud and Tape Keys.
 - Modal Voice: a gated exciter-and-resonator voice ported from Émilie Gillet's modal synthesizer firmware (MIT) and checked bit for bit against it: a bow, a blow and a strike (samples, mallet, plectrum or particles) under an envelope, into a modal bank, a string or five chord strings (or the module's hidden FM voice), with its space reverb; played mono from MIDI with a real gate (the pedal holds it), velocity as the module's strength input, at the module's own 32 kHz converted at the edge (latency compensated), with the Macro Oscillator's shaper and matrix; presets Bowed Glass, Breath Pipe, Struck Bar, Temple Bell, Plucked Wire and Noise Pad.
@@ -275,7 +275,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 
 ### Sessions and rendering
 
-- Bounce the main mix or any bus over the selection or loop range to WAV, AIFF or FLAC at 16-bit, 24-bit or 32-bit float.
+- Bounce the main mix or any bus over the selection or loop range to WAV, AIFF or FLAC at 16-bit, 24-bit or 32-bit float; float files keep every sample as it is, even above 0 dBFS.
 - Opus export for sharing: mix, stems and clips as `.opus` at 96 to 256 kb/s (160 by default), encoded by the reference libopus. No MP3, on purpose: Opus sounds better at every bitrate and its license is BSD.
 - Stems by output path from the Bounce dialog.
 - Bounce in Place turns a track's clips, or only the selected clips, into audio: to a new track or an existing one, with the source left, muted or hidden, and its clips and takes always kept.
