@@ -259,3 +259,58 @@ fn a_scan_whose_files_all_fail_reports_them_instead_of_none_found() {
     assert_eq!((summary.found, summary.loaded, summary.failed), (2, 1, 1), "{summary:?}");
     assert_eq!(summary.none_loaded_message("CLAP"), None);
 }
+
+/// Runs one background scan and waits for it to publish: the hook only reports that the scan loaded
+/// its files, and `scan()` returns once the scan lock is free, which is after publication.
+fn background_scan(clear_cache: bool) -> Vec<host::ClapDescriptor> {
+    let (tx, rx) = channel();
+    let tx = Mutex::new(tx);
+    host::set_scan_hook(Some(Arc::new(move || {
+        let _ = tx.lock().unwrap().send(());
+    })));
+    host::rescan_in_background(clear_cache);
+    rx.recv_timeout(Duration::from_secs(60)).expect("the scan reached publication");
+    host::set_scan_hook(None);
+    host::scan()
+}
+
+/// #659: the start-up scan reuses what the cache holds for unchanged files (a remembered failure
+/// and a remembered success alike), and an explicit rescan loads every file again and rewrites
+/// the cache from what it found. The cache is planted with a wrong failure for a good file and a
+/// wrong success for a bad one, so reuse and a fresh read give different answers.
+#[test]
+fn an_explicit_rescan_loads_every_file_again_but_the_start_up_scan_reuses_the_cache() {
+    let t = Test::new();
+    let bad = t.dir.join("bad.clap");
+    std::fs::write(&bad, b"not a plugin").unwrap();
+    host::set_extra_dirs(vec![t.fixture.clone(), bad]);
+    t.assert_fixture(&host::rescan());
+    let mut cache: serde_json::Value = serde_json::from_slice(&std::fs::read(t.dir.join("cache.json")).unwrap()).unwrap();
+    let files = cache["files"].as_array_mut().unwrap();
+    assert_eq!(files.len(), 2, "one good file and one bad file");
+    let (good, broken) = if files[0]["error"].is_null() { (0, 1) } else { (1, 0) };
+    assert!(files[broken]["error"].is_string(), "the bad file failed");
+    let real_error = files[broken]["error"].clone();
+    let good_plugins = files[good]["plugins"].clone();
+    files[good]["error"] = serde_json::json!("planted failure");
+    files[good]["plugins"] = serde_json::json!([]);
+    files[broken]["error"] = serde_json::Value::Null;
+    files[broken]["plugins"] = good_plugins;
+    std::fs::write(t.dir.join("cache.json"), serde_json::to_vec(&cache).unwrap()).unwrap();
+
+    // The start-up scan: both planted entries are taken from the cache.
+    background_scan(false);
+    let problems = host::problems();
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert_eq!(problems[0].1, "planted failure", "the cached failure is reused, not loaded again");
+
+    // The explicit rescan: nothing comes from the cache, and the cache is rewritten.
+    t.assert_fixture(&background_scan(true));
+    let problems = host::problems();
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert_eq!(serde_json::json!(problems[0].1), real_error, "the cached success is loaded again and fails");
+    let after = t.cache();
+    let errors: Vec<_> = after.iter().filter_map(|f| f["error"].as_str()).collect();
+    assert_eq!(errors.len(), 1, "{after:?}");
+    assert!(!errors.contains(&"planted failure"), "the cache is rewritten from the results: {after:?}");
+}

@@ -46,12 +46,40 @@ pub fn scan_child(args: &[String]) -> Option<String> {
 /// Set once a scan has been started (at launch with a settings folder, or by [`rescan`]).
 static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Scans again on background threads, reusing what the cache remembers about unchanged files.
-/// A scan already running keeps running. Works without a settings folder (nothing is remembered).
+/// The explicit rescan (Audio > Scan Plug-ins): scans again on background threads and loads EVERY
+/// plug-in file again, whatever the cache remembers (failures and successes alike), then rewrites
+/// the cache from the results (#659). Only the scan at launch reuses the cache. Plug-ins already
+/// loaded in the session are not touched: the registry is forgotten, their instances are not. A
+/// scan already running keeps running. Works without a settings folder (nothing is remembered).
 pub fn rescan() {
     STARTED.store(true, std::sync::atomic::Ordering::Release);
-    transit_vst3_host::rescan_in_background(false);
-    transit_clap_host::rescan_in_background(false);
+    rescan_using(transit_vst3_host::rescan_in_background, transit_clap_host::rescan_in_background);
+}
+
+/// [`rescan`] with the host entry points given, so a test can see what they are asked for (it does
+/// not mark the scan as started: that would change what other tests in the process read).
+fn rescan_using(vst3: fn(bool), clap: fn(bool)) {
+    vst3(true);
+    clap(true);
+}
+
+#[cfg(test)]
+mod rescan_tests {
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    static VST3: AtomicU8 = AtomicU8::new(0);
+    static CLAP: AtomicU8 = AtomicU8::new(0);
+
+    /// 1 for "clear the cache", 2 for "reuse it".
+    fn record(slot: &AtomicU8, clear_cache: bool) {
+        slot.store(if clear_cache { 1 } else { 2 }, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn the_scan_plug_ins_command_asks_both_formats_to_load_every_file_again() {
+        super::rescan_using(|clear| record(&VST3, clear), |clear| record(&CLAP, clear));
+        assert_eq!((VST3.load(Ordering::SeqCst), CLAP.load(Ordering::SeqCst)), (1, 1), "1 = every file loaded again, 2 = cache reused");
+    }
 }
 
 /// Where the scan is: `"idle"` (none started), `"running"`, `"done"`, or `"failed: <why>"`
