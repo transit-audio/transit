@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use transit_model::{IoDirection, IoMap, IoPath};
 
 mod build;
+mod gain_index;
 mod storage;
+pub(crate) use gain_index::GainIndexes;
 use storage::measure;
 #[cfg(test)]
 pub(crate) use storage::strip_bytes;
@@ -690,6 +692,8 @@ impl PlanCompiler {
             log::warn!("mix: dropping delay-capacity hints that exceed the plan limits ({e:?})");
             self.hints.clear();
         }
+        // Admitted by `measure` above (ADR 0058 G1a): held in the plan, not read before slice G1.
+        let gain_indexes = gain_index::build(&session);
 
         let id = PlanIdentity { generation: next, base, target: self.target };
         let mut description = self.describe(&session, need, mode);
@@ -713,6 +717,7 @@ impl PlanCompiler {
                 src_claimed: Box::new([]),
                 dst_claimed: Box::new([]),
                 tracks: self.active.tracks.clone(),
+                gain_indexes,
             };
             self.drop_pool();
             sync_samplers(&mut self.samplers, &plan.session, &self.active.slots);
@@ -742,6 +747,7 @@ impl PlanCompiler {
             moves: moves.into_boxed_slice(),
             attach: attach.into_boxed_slice(),
             tracks,
+            gain_indexes,
         };
         // The pool goes before the plan is committed: a plug-in destructor that unwinds here
         // leaves no plan in flight (and the plan's own instances reported), not a wedge.

@@ -67,6 +67,17 @@ pub fn group_index_bytes(points: usize) -> Option<usize> {
 pub fn build_group_index<P: GainPoint>(points: &[P]) -> Option<Box<[u32]>> {
     group_index_bytes(points.len())?;
     let mut out = vec![0u32; points.len()];
+    fill_group_index(points, &mut out).then_some(out.into_boxed_slice())
+}
+
+/// [`build_group_index`] into storage the caller allocated (the plan compiler's one table): writes
+/// `points.len()` entries to the front of `out`. False, writing nothing, when `out` is too short or a
+/// `u32` cannot index the points. Allocates nothing.
+pub fn fill_group_index<P: GainPoint>(points: &[P], out: &mut [u32]) -> bool {
+    if group_index_bytes(points.len()).is_none() {
+        return false;
+    }
+    let Some(out) = out.get_mut(..points.len()) else { return false };
     let mut last = 0u32;
     for (i, slot) in out.iter_mut().enumerate().rev() {
         let starts_group_end = match (points.get(i), points.get(i + 1)) {
@@ -74,11 +85,12 @@ pub fn build_group_index<P: GainPoint>(points: &[P]) -> Option<Box<[u32]>> {
             _ => true,
         };
         if starts_group_end {
-            last = u32::try_from(i).ok()?;
+            // In range: the point count was checked against a u32 above.
+            last = u32::try_from(i).unwrap_or(u32::MAX);
         }
         *slot = last;
     }
-    Some(out.into_boxed_slice())
+    true
 }
 
 /// A forward cursor over one lane's breakpoints (ADR 0058, decision 2: bounded traversal). `next` is

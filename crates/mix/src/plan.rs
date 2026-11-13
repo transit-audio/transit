@@ -265,6 +265,10 @@ pub struct PreparedPlan {
     pub(crate) dst_claimed: Box<[bool]>,
     /// Sorted by id: each track and its strip index in the plan.
     pub(crate) tracks: Box<[(TrackId, u16)]>,
+    /// The group indexes of the plan's mixer gain lanes and clip envelopes (ADR 0058 G1a), built and
+    /// admitted by the compiler with every plan, structural or not. Not read before slice G1.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) gain_indexes: crate::compile::GainIndexes,
 }
 
 impl PreparedPlan {

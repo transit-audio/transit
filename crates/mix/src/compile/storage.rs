@@ -110,6 +110,8 @@ pub(super) fn measure(
     // Two edge Vecs coexist during construction, each with less than twice the final
     // edge capacity (24 bytes/edge on 64-bit), plus the graph's compact output arrays.
     bytes = add(bytes, mul(edge_bound, 128)?)?;
+    // The group indexes of every mixer gain lane and clip envelope (ADR 0058 G1a), with their entries.
+    bytes = add(bytes, super::gain_index::bytes(s)?)?;
     over("cells", cells, usize::from(u16::MAX))?;
     over("prepared_bytes", bytes, l.prepared_bytes)
 }

@@ -21,6 +21,16 @@ The renderer for realtime playback, bounces and freezes. The old `MixEngine::ren
   file). **Keys** (`crates/mix/src/key.rs`): sidechain taps; see `sidechain.md`.
 - **Events** (`crates/mix/src/events.rs`): instrument events with sample-accurate offsets.
 
+## Limits and admission
+
+`PlanLimits` (`compile.rs`) bounds every plan: counts, and `prepared_bytes` (1 GiB by default).
+`measure` (`compile/storage.rs`) adds up everything a plan will allocate with checked arithmetic
+before anything is allocated; a plan over a limit (or an overflow) is refused with
+`CompileError::ResourceLimit` and the active plan keeps playing. Anything new a plan allocates is
+counted there first. Since ADR 0058 slice G1a that includes the group indexes of every mixer gain lane
+and clip gain envelope (`compile/gain_index.rs`: 4 bytes a point plus an entry each; a 100,000-point
+envelope is 400,000 bytes), built with every plan, structural or not, and held in `PreparedPlan`.
+
 ## Plug-in delay compensation (PDC)
 
 Every path to a sink is aligned to the longest one, plus a shared device latency L so that

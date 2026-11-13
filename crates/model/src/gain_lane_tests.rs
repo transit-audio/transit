@@ -147,6 +147,13 @@ fn the_group_index_holds_each_points_last_group_member() {
     assert_eq!(&*build_group_index(&[(3i64, 1.0f32)]).unwrap(), &[0]);
     let empty: [(Samples, f32); 0] = [];
     assert!(build_group_index(&empty).unwrap().is_empty());
+    // Into caller storage: the front of a longer table, nothing written into a short one.
+    let mut table = [9u32; 9];
+    assert!(fill_group_index(&pts, &mut table));
+    assert_eq!(table, [1, 1, 2, 5, 5, 5, 6, 9, 9]);
+    let mut short = [9u32; 6];
+    assert!(!fill_group_index(&pts, &mut short));
+    assert_eq!(short, [9; 6]);
     assert_eq!(group_index_bytes(0), Some(0));
     assert_eq!(group_index_bytes(100_000), Some(400_000), "the record's example");
     #[cfg(target_pointer_width = "64")]
