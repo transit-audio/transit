@@ -80,6 +80,41 @@ sign() {
   codesign --force --sign "$IDENTITY" ${kc[@]+"${kc[@]}"} "${ts[@]}" "$@"
 }
 
+# Usage: check_entitlements <signed code>. Returns 1 (after saying which) unless the signature
+# carries every key entitlements.plist names, with the plist's value: a key lost on the way would
+# ship an app that quietly cannot record or load plug-ins (#659). Ad-hoc signatures carry
+# entitlements too, so this runs the same with the identity "-".
+check_entitlements() {
+  local code="$1" signed="$WORK/entitlements-check.plist" keys key want got bad=0
+  keys="$(sed -n 's:.*<key>\(.*\)</key>.*:\1:p' "$HERE/entitlements.plist")"
+  if [ -z "$keys" ]; then
+    echo "error: no entitlement keys found in $HERE/entitlements.plist" >&2
+    return 1
+  fi
+  rm -f "$signed"
+  if ! codesign -d --entitlements - --xml "$code" >"$signed" 2>/dev/null; then
+    echo "error: could not read the entitlements of $code" >&2
+    return 1
+  fi
+  if [ ! -s "$signed" ]; then
+    echo "error: $code is signed without entitlements; entitlements.plist names:" $keys >&2
+    return 1
+  fi
+  for key in $keys; do
+    if ! want="$(/usr/libexec/PlistBuddy -c "Print :$key" "$HERE/entitlements.plist")"; then
+      echo "error: entitlements.plist has no readable value for $key" >&2
+      return 1
+    fi
+    got="$(/usr/libexec/PlistBuddy -c "Print :$key" "$signed" 2>/dev/null || true)"
+    if [ "$got" != "$want" ]; then
+      echo "error: $code lacks the entitlement $key = $want (signed: ${got:-missing})" >&2
+      bad=1
+    fi
+  done
+  [ "$bad" = 0 ] || return 1
+  echo "==> entitlements of $code:" $keys
+}
+
 notarize() {
   local file="$1" out id status
   echo "==> notarizing $(basename "$file") (this can take a few minutes)"
@@ -118,6 +153,8 @@ xattr -cr "$APP"
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/MacOS/transit"
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP"
 codesign --verify --strict --deep --verbose=2 "$APP"
+check_entitlements "$APP/Contents/MacOS/transit" || exit 1
+check_entitlements "$APP" || exit 1
 
 if [ "$NOTARIZE" = 1 ]; then
   ditto -c -k --keepParent "$APP" "$WORK/transit-notarize.zip"
@@ -171,7 +208,8 @@ dmg_ok=1
 codesign --verify --strict --deep --verbose=2 "$MOUNT/transit.app" || dmg_ok=0
 if [ "$dmg_ok" = 1 ]; then
   { ditto "$MOUNT/transit.app" "$COPY/transit.app" &&
-    codesign --verify --strict --deep --verbose=2 "$COPY/transit.app"; } || dmg_ok=0
+    codesign --verify --strict --deep --verbose=2 "$COPY/transit.app" &&
+    check_entitlements "$COPY/transit.app"; } || dmg_ok=0
 fi
 if [ "$dmg_ok" = 1 ] && [ "$NOTARIZE" = 1 ]; then
   spctl --assess --type execute -vvv "$COPY/transit.app" || dmg_ok=0

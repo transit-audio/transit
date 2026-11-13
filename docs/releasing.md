@@ -87,7 +87,10 @@ runtime and the same entitlements, each with its reason in the plist:
 `com.apple.security.device.audio-input` (recording) and
 `com.apple.security.cs.disable-library-validation` (hosting third-party VST3, CLAP and Audio Unit
 plug-ins, which are signed by their own vendors; without it the hardened runtime refuses to load
-them and a scan finds none, #659). The owner provides:
+them and a scan finds none, #659). After signing, `package.sh` reads the signed app's entitlements
+back (`codesign -d --entitlements`) and fails if any key the plist names is missing or has another
+value; it checks the app as built and the copy taken out of the finished DMG, ad-hoc or not.
+The owner provides:
 
 - `MACOS_CERTIFICATE_P12`: a Developer ID Application certificate exported with its private key
   as a `.p12`, base64-encoded (`base64 -i certificate.p12 | pbcopy`).
