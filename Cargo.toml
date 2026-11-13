@@ -14,6 +14,8 @@ repository = "https://github.com/transit-audio/transit"
 toml = "1.1"
 # internal
 transit-time = { path = "crates/time" }
+# The portable math seam (ADR 0055): every rendered crate takes its transcendental functions here.
+transit-math = { path = "crates/math" }
 transit-rt = { path = "crates/rt" }
 transit-audio-io = { path = "crates/audio-io" }
 transit-opus = { path = "crates/opus" }

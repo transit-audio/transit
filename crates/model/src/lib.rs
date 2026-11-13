@@ -11,7 +11,9 @@ mod clip;
 pub mod device_pages;
 #[cfg(test)]
 mod device_pages_tests;
+pub mod fade_law;
 mod frozen_recording;
+pub mod gain_lane;
 pub use frozen_recording::FrozenRecording;
 pub mod disk;
 mod ids;

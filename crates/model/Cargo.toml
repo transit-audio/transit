@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 transit-time.workspace = true
+# The clip fade kernel's sin and exp2 (ADR 0058 decision 13), through the portable seam (ADR 0055).
+transit-math.workspace = true
 transit-audio-io.workspace = true
 transit-midi.workspace = true
 serde.workspace = true

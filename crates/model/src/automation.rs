@@ -139,6 +139,28 @@ impl AutoParam {
             AutoParam::Plugin { .. } => (f32::MIN, f32::MAX, 0.0),
         }
     }
+
+    /// The track trim lane: a mixer lane despite its plug-in encoding (`Plugin { slot: 255, param:
+    /// "trim" }`, read through the mixer's reader).
+    pub fn is_trim_lane(&self) -> bool {
+        matches!(self, AutoParam::Plugin { slot: u8::MAX, param } if param == "trim")
+    }
+
+    /// The mixer gain lanes of ADR 0058 decision 2: Volume (a VCA's Volume lane included), the trim
+    /// lane, Pan, Mute, SendLevel, SendPan and SendMute. These (and clip gain envelopes) are read by
+    /// the gain-lane evaluator ([`AutomationLane::gain_value_at`]) from slice G1 on; every other lane is
+    /// a device-parameter lane and keeps today's evaluator.
+    pub fn is_mixer_gain(&self) -> bool {
+        matches!(
+            self,
+            AutoParam::Volume | AutoParam::Pan(_) | AutoParam::Mute | AutoParam::SendLevel(_) | AutoParam::SendPan(_) | AutoParam::SendMute(_)
+        ) || self.is_trim_lane()
+    }
+
+    /// Lanes that step between breakpoints instead of ramping (Mute, SendMute).
+    pub fn steps(&self) -> bool {
+        matches!(self, AutoParam::Mute | AutoParam::SendMute(_))
+    }
 }
 
 pub fn slot_letter(i: u8) -> char {
@@ -189,6 +211,15 @@ impl AutomationLane {
             (Some(a), _) => a.value,
             _ => default,
         }
+    }
+
+    /// The value of a mixer gain lane at `at` by the gain-lane evaluator (ADR 0058, decision 2), in
+    /// `f64`: a group of breakpoints sharing a time gives its first value at its time and its last
+    /// value after it, `f64` interpolation, a step for Mute and SendMute; `default` (widened) when the
+    /// lane has no points. Meant for [`AutoParam::is_mixer_gain`] lanes; not yet called by the mixer
+    /// (slice G1 switches its readers).
+    pub fn gain_value_at(&self, at: Samples, default: f32) -> f64 {
+        crate::gain_lane::gain_value_at(&self.points, at, self.param.steps()).unwrap_or(f64::from(default))
     }
 
     /// Insert or replace a breakpoint.

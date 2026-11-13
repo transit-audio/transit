@@ -4352,6 +4352,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "transit-audio-io",
+ "transit-math",
  "transit-midi",
  "transit-test-support",
  "transit-time",
