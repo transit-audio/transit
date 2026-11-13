@@ -361,3 +361,24 @@ fn a_last_lap_too_short_to_be_a_take_is_said_issue_634() {
     assert_eq!(note, &short_lap_note(20, 20.0 / 48_000.0, &path.display().to_string()));
     assert!(note.contains("the last 20 frames (0.4 ms) stay in"), "{note}");
 }
+
+/// Review M1 (2026-11-13): MIDI played only before the first wrap. Loop [1000, 1400), Record at
+/// 1200, one note at offsets 50 to 60, two wraps, Stop at offset 1000. The pass wrapped, so the
+/// MIDI is cut as the audio of the same pass is: its one note is a clip over [1200, 1400), and the
+/// empty later laps make no clip. It used to be one clip over [1200, 2200), past the loop end.
+#[test]
+fn midi_played_only_before_the_first_wrap_is_cut_at_the_loop_end_like_its_audio() {
+    let dir = TempDir::new("before-wrap");
+    let mut e = Engine::default();
+    let t = midi_track(&mut e);
+    let gtr = audio_track(&mut e);
+    let p = plan(1_200, None, Some(LOOP));
+    let ids = crate::midi_take::place_midi_recording_wrapping(&mut e, &p, &[on_at(t, 50, 60), off_at(t, 60, 60)], 1_000, Some(LOOP));
+    let ranges: Vec<Range> = ids.iter().map(|id| e.session().track(t).unwrap().playlists.iter().find_map(|p| p.clip(*id)).unwrap().range()).collect();
+    assert_eq!(ranges, vec![Range::new(1_200, 1_400)]);
+    let path = dir.0.join("Audio Files/Gtr_01.wav");
+    write_take(&path, 1_000);
+    let audio = place_recording_take(&mut e, &p, vec![(gtr, path)], true);
+    let first = e.session().track(gtr).unwrap().playlists.iter().find_map(|p| p.clip(audio[0])).unwrap().range();
+    assert_eq!(first, ranges[0], "the MIDI clip is the audio's first lap");
+}

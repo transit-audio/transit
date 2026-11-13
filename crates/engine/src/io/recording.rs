@@ -230,7 +230,7 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
             crate::takes::settle_new_takes(s, tid, base, new);
         }
         if left_out > 0 {
-            let kept = format!("; their audio is kept in {}", path.display());
+            let kept = format!("; their audio is kept in {} (import that file to reach it)", path.display());
             e.warn(crate::take_laps::left_out_note(left_out, &kept));
         }
         if short > 0 {

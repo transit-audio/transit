@@ -418,7 +418,7 @@ fn laps_left_out_past_the_most_a_recording_keeps_are_said_in_the_status_line_iss
     stop_laps(&mut t, track, &take, 4);
     let status = &t.app.status;
     assert!(status.starts_with("Recorded 10000 takes"), "{status}");
-    let said = format!("2000 earlier laps were left out; their audio is kept in {}.", take.0.display());
+    let said = format!("2000 earlier laps were left out; their audio is kept in {} (import that file to reach it).", take.0.display());
     assert!(status.ends_with(&said), "{status}");
 }
 

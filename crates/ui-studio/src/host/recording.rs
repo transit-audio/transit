@@ -399,7 +399,6 @@ impl StudioApp {
         let played = midi.as_ref().and_then(|m| m.timed(rate).iter().map(|(offset, _)| offset.saturating_add(1)).max());
         plan.end = Some([Some(end - plan.start), files.flatten(), played].into_iter().flatten().fold(1, Samples::max));
         let pushes = self.engine.undo_pushes();
-        let mut kept_journal = None;
         if let Some((takes, problem)) = finished {
             let tracks = takes.len().max(1);
             self.place_takes(&plan, takes, end, tracks);
@@ -420,7 +419,7 @@ impl StudioApp {
                 if matches!(left_out, Some(transit_engine::midi_take::LeftOutMidi::Failed(_))) {
                     // The laps left out are in no file: the journal is kept, never cleaned up, so
                     // their MIDI is not lost (`midi_journal::export_left_out` writes the file later).
-                    kept_journal = Some(journal.path().to_path_buf());
+                    self.engine.warn(transit_engine::take_laps::kept_journal_note(journal.path()));
                 } else {
                     self.hold_journal(journal, &plan);
                 }
@@ -447,16 +446,16 @@ impl StudioApp {
             log::warn!("recording: the take was aligned without a validated audio device clock");
             self.status = format!("{}. {APPROXIMATE_TAKE}", self.status.trim_end_matches('.'));
         }
-        self.report_lap_notes(said, kept_journal.as_deref());
+        self.report_lap_notes(said);
     }
 
     /// End the status line with what the engine said, since `mark`, about laps of this pass that
     /// are no takes (#522, #634), after every other report so none replaces it: the count of laps
     /// left out once, then where they remain (each audio take file, the MIDI file, or the MIDI
-    /// journal kept at `journal` when that file could not be written). More places than the line
-    /// holds legibly are counted and listed in the log.
-    fn report_lap_notes(&mut self, mark: u64, journal: Option<&std::path::Path>) {
-        use transit_engine::take_laps::{LEFT_OUT_NOTE, SHORT_LAP_NOTE, split_note};
+    /// journal kept when that file could not be written). More places than the line holds
+    /// legibly are counted and listed in the log. Stop and crash recovery both end with it.
+    pub(super) fn report_lap_notes(&mut self, mark: u64) {
+        use transit_engine::take_laps::{KEPT_JOURNAL_NOTE, LEFT_OUT_NOTE, SHORT_LAP_NOTE, split_note};
         let said = self.engine.messages_since(mark);
         let left: Vec<&String> = said.iter().filter(|m| m.starts_with(LEFT_OUT_NOTE)).collect();
         let short: Vec<String> = said.iter().filter(|m| m.starts_with(SHORT_LAP_NOTE)).map(|m| m.trim_end_matches('.').to_string()).collect();
@@ -464,9 +463,7 @@ impl StudioApp {
         if let Some(first) = left.first() {
             let head = split_note(first).0;
             let mut places: Vec<String> = left.iter().filter_map(|m| split_note(m).1.map(str::to_string)).collect();
-            if let Some(j) = journal {
-                places.push(format!("the MIDI journal is kept at {}", j.display()));
-            }
+            places.extend(said.iter().filter(|m| m.starts_with(KEPT_JOURNAL_NOTE)).map(|m| m.trim_end_matches('.').to_string()));
             let all = std::iter::once(head.to_string()).chain(places.iter().cloned()).collect::<Vec<_>>().join("; ");
             if places.len() > 3 {
                 log::warn!("recording: {all}");

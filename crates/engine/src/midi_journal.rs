@@ -227,17 +227,26 @@ pub fn keep_left_out_laps(dir: &Path, session: &str, bytes: &[u8]) -> Result<Pat
     let io = |path: &Path, e: std::io::Error| EngineError::Io(format!("{}: {e}", path.display()));
     std::fs::create_dir_all(dir).map_err(|e| io(dir, e))?;
     let base = sanitize_name(session);
+    // Written whole to a temporary name and synced first, so a failed or interrupted write
+    // never leaves a partial `.mid` under the name the user is told.
+    let tmp = dir.join(format!(".{base} left-out laps.{}.part", std::process::id()));
+    let written = std::fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()));
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(io(&tmp, e));
+    }
     for n in 1..10_000 {
         let path = dir.join(format!("{base} left-out laps {n:02}.mid"));
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                file.write_all(bytes).and_then(|()| file.sync_all()).map_err(|e| io(&path, e))?;
-                return Ok(path);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(io(&path, e)),
+        if path.exists() {
+            continue;
         }
+        // Never over a file: only a name nothing holds is taken.
+        return std::fs::rename(&tmp, &path).map(|()| path.clone()).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            io(&path, e)
+        });
     }
+    let _ = std::fs::remove_file(&tmp);
     Err(EngineError::Io(format!("{}: no free name for the left-out laps", dir.display())))
 }
 
@@ -309,7 +318,7 @@ impl Journal {
 /// "Record" undo step. The new clips are named `<Track>_recovered`; notes merged into a clip that
 /// was already there keep its name. Returns the clips touched; none when nothing was played.
 pub fn recover(e: &mut Engine, path: &Path) -> Result<Vec<ClipId>> {
-    recover_with_takes(e, path, Vec::new())
+    recover_with_takes(e, path, Vec::new()).map(|placed| placed.clips)
 }
 
 /// The plan, events and Stop of the journal at `path`, with the audio `takes` of the same pass
@@ -344,11 +353,12 @@ pub fn export_left_out(e: &mut Engine, path: &Path) -> Result<Option<crate::midi
 }
 
 /// [`recover`] for a pass that also recorded the audio `takes` (the recording plan's), so its laps
-/// are left out exactly as its audio recovery leaves them out.
-pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Take>) -> Result<Vec<ClipId>> {
+/// are left out exactly as its audio recovery leaves them out; says what became of them.
+pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Take>) -> Result<crate::midi_take::MidiPlaced> {
     let (plan, events, stop, wrap) = replay(path, takes)?;
     let before = e.session_arc();
-    let ids = crate::midi_take::place_midi_recording_wrapping(e, &plan, &events, stop, wrap);
+    let placed = crate::midi_take::place_midi_recording_reported(e, &plan, &events, stop, wrap);
+    let ids = placed.clips.clone();
     let mut named: Vec<(TrackId, usize)> = Vec::new();
     for id in &ids {
         if before.find_clip(*id).is_some() {
@@ -371,7 +381,7 @@ pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Tak
             clip.name = name;
         }
     }
-    Ok(ids)
+    Ok(placed)
 }
 
 #[cfg(test)]

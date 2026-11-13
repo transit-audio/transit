@@ -528,11 +528,26 @@ pub fn recover_midi(e: &mut Engine, left: &Leftover) -> Result<Vec<transit_model
     std::fs::File::open(journal).map_err(|err| io_error(journal, err))?;
     // The audio takes of the same pass: its laps are left out as theirs are (#522).
     let takes = plan_of(&left.dir).map(|p| p.takes).unwrap_or_default();
-    crate::midi_journal::recover_with_takes(e, journal, takes)
+    let placed = crate::midi_journal::recover_with_takes(e, journal, takes)
         .inspect_err(|_| {
             let _ = std::fs::remove_file(journal);
         })
-        .map_err(|err| EngineError::Io(format!("{err} (the journal was discarded)")))
+        .map_err(|err| EngineError::Io(format!("{err} (the journal was discarded)")))?;
+    // The file of the laps left out could not be written: the journal is moved out of the
+    // leftover's reach (discarding the leftover deletes the journal it names), so their MIDI is
+    // kept, and the status line names it (#522).
+    if matches!(placed.left_out, Some(crate::midi_take::LeftOutMidi::Failed(_))) {
+        let stem = journal.file_stem().map_or_else(|| "journal".into(), |s| s.to_string_lossy().into_owned());
+        let kept = journal.with_file_name(format!("{stem} kept.{}", crate::midi_journal::EXTENSION));
+        match std::fs::rename(journal, &kept) {
+            Ok(()) => e.warn(crate::take_laps::kept_journal_note(&kept)),
+            Err(err) => e.warn(format!(
+                "{}, but it could not be set aside ({err}): copy it before discarding the recovery",
+                crate::take_laps::kept_journal_note(journal)
+            )),
+        }
+    }
+    Ok(placed.clips)
 }
 
 /// Delete a leftover autosave, and the MIDI journal it names if it is one transit wrote.

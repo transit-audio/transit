@@ -169,6 +169,8 @@ impl StudioApp {
             return;
         }
         self.close_autosave();
+        // What the engine says while it places the interrupted pass; its lap notes end the line.
+        let said = self.engine.message_pushes();
         match transit_engine::autosave::recover(&mut self.engine, left) {
             Ok(missing) => {
                 let midi = transit_engine::autosave::recover_midi(&mut self.engine, left);
@@ -189,6 +191,7 @@ impl StudioApp {
                     Ok(_) => {}
                     Err(e) => self.status = format!("{} The MIDI take couldn't be recovered: {e}", self.status),
                 }
+                self.report_lap_notes(said);
             }
             Err(e) => self.status = format!("Couldn't recover “{}”: {e}", left.name),
         }

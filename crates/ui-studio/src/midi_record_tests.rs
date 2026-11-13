@@ -768,7 +768,7 @@ fn the_lap_notice_survives_the_midi_report_and_names_the_audio_file() {
     let status = app.status.clone();
     assert!(status.starts_with("Recorded 1 MIDI clip (1 notes)"), "{status}");
     let said = format!(
-        "{} 10000 laps as takes: 2000 earlier laps were left out; their audio is kept in {}; no MIDI was played in them.",
+        "{} 10000 laps as takes: 2000 earlier laps were left out; their audio is kept in {} (import that file to reach it); no MIDI was played in them.",
         transit_engine::take_laps::LEFT_OUT_NOTE,
         files[0].display()
     );
@@ -783,7 +783,7 @@ fn the_lap_notice_names_every_audio_take_file() {
     let dir = folder("notice-two-audio");
     let files = over_the_limit(&mut app, t, &dir, 2, Vec::new());
     let status = app.status.clone();
-    let places: Vec<String> = files.iter().map(|f| format!("their audio is kept in {}", f.display())).collect();
+    let places: Vec<String> = files.iter().map(|f| format!("their audio is kept in {} (import that file to reach it)", f.display())).collect();
     assert!(status.ends_with(&format!("2000 earlier laps were left out; {}.", places.join("; "))), "{status}");
     assert_eq!(status.matches("earlier laps were left out").count(), 1, "said once");
 }
@@ -818,4 +818,40 @@ fn when_the_left_out_laps_file_cannot_be_written_the_journal_is_kept_and_named()
     let status = app.status.clone();
     assert!(status.contains("2 earlier laps were left out; their MIDI could not be written to a file ("), "{status}");
     assert!(status.ends_with(&format!("; the MIDI journal is kept at {}.", journal.display())), "{status}");
+}
+
+/// Review F5 (2026-11-13): a cycle recording over the limit interrupted by a crash. Recovery
+/// writes the file of the laps left out, and its status line ends with the lap notice naming it,
+/// after the recovery report.
+#[test]
+fn recovery_of_a_pass_over_the_limit_says_the_laps_left_out() {
+    let root = folder("recover-left-out");
+    let (mut app, t) = app();
+    app.autosave_dir = Some(root.join("Autosave"));
+    let dir = takes_of(&app, &root);
+    std::fs::create_dir_all(&dir).unwrap();
+    let journal = midi_journal::journal_path(&dir, "Song");
+    let last = LATCH + u64::try_from(transit_engine::take_laps::MAX_LAPS + 1).unwrap() * 4;
+    let events = vec![on(LATCH + 1, t, 60), off(LATCH + 2, t, 60), on(last + 1, t, 64), off(last + 2, t, 64)];
+    app.midi_journal = Some(midi_journal::Writer::new(journal.clone()));
+    app.record_start = 0;
+    app.take_plan = Some(transit_engine::io::Recording {
+        pass: Some(4),
+        rate: 48_000,
+        midi_journal: Some(journal.clone()),
+        ..transit_engine::io::Recording::new(0)
+    });
+    app.engine.transport.recording = true;
+    app.start_play(i64::try_from(last - LATCH).unwrap() + 3, None, None);
+    app.finished_test_midi = Some(pass(t, Some(0), events));
+    app.update_midi_live();
+    app.midi_journal.as_mut().unwrap().flush().unwrap();
+    assert!(app.write_autosave());
+    drop(app);
+    let (next, _) = recovered(&root);
+    let status = next.status.clone();
+    assert!(status.starts_with("Recovered "), "{status}");
+    let kept = dir.join(format!("{} left-out laps 01.mid", transit_engine::io::sanitize_name(&next.engine.session().name)));
+    assert!(status.ends_with(&format!("2 earlier laps were left out; their MIDI is kept in {}.", kept.display())), "{status}");
+    assert!(kept.is_file());
 }

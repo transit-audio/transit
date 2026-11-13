@@ -110,6 +110,15 @@ pub fn split_note(note: &str) -> (&str, Option<&str>) {
     }
 }
 
+/// How the note begins that names a MIDI journal kept because the file of the laps left out
+/// could not be written (#522): no cleanup removes that journal.
+pub const KEPT_JOURNAL_NOTE: &str = "the MIDI journal is kept at";
+
+/// The note naming the MIDI journal kept at `path`.
+pub fn kept_journal_note(path: &std::path::Path) -> String {
+    format!("{KEPT_JOURNAL_NOTE} {}", path.display())
+}
+
 /// The note for a last lap of `frames` frames (`seconds` long) at the end of the take file `file`
 /// that is no take, being shorter than an eighth of the loop (#634): the frames stay in the file.
 pub fn short_lap_note(frames: Samples, seconds: f64, file: &str) -> String {
