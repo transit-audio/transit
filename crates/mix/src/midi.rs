@@ -312,6 +312,53 @@ pub(crate) fn note_spans(
     }
 }
 
+/// The notes of `t` that sound across `pos` as playback plays them (MIDI Track Offset, real-time
+/// properties, muted clips, loop cycles, seam cuts, the negative-tick rule): started before `pos`,
+/// with their off after it, or with `ending` also at it (an off due at `pos` itself is still to be
+/// sent by the block that starts there). `visit` gets pitch, velocity, release velocity and recorded channel.
+/// No allocation, no lock: runs on the audio thread.
+pub(crate) fn notes_across(s: &Session, t: &Track, pos: Samples, ending: bool, mut visit: impl FnMut(u8, u8, u8, u8)) {
+    let pos = pos.saturating_sub(midi_offset(s, t));
+    let rtp = Rtp::of(s, t);
+    for clip in t.clips() {
+        if clip.muted || clip.start.min(grid_start(s, clip)) >= pos || clip.end() < pos || (!ending && clip.end() == pos) {
+            continue;
+        }
+        let ClipContent::Midi { sequence } = &clip.content else { continue };
+        let base = s.tempo.samples_to_ticks(clip.start, s.sample_rate);
+        let looping = midi_loop_frame(s, clip);
+        let last = grid_end(s, clip);
+        for n0 in &sequence.notes {
+            let Some((n, on, off)) = played_note(s, last, base, rtp, n0, looping.is_some()) else { continue };
+            // The same spans playback plays, looked up for the one sample `pos`.
+            note_spans(s, last, looping, on, off, pos, pos.saturating_add(1), |on, off| {
+                if on < pos && (off > pos || (ending && off == pos)) {
+                    visit(n.pitch, n.velocity, n.release_velocity, n.channel);
+                }
+            });
+        }
+    }
+}
+
+/// An edit was adopted (the session changed under a playing instrument): every clip note the
+/// instrument holds that the track's clips (or its rack's, ADR 0034) no longer sound across `pos`
+/// is released now, at offset 0, before the block's own clip events (#556). Clip scheduling is
+/// stateless, so an edit that deletes, mutes, re-pitches, shortens or moves a sounding note (or
+/// moves its clip, its track's real-time properties or offset, or the tempo) would otherwise take
+/// its note-off with it. A note the new session still sounds keeps sounding and gets its off from
+/// the clips as always; the released entry is gone, so a later clip off for it finds nothing.
+pub(crate) fn release_edited_clip_notes(s: &Session, t: &Track, pos: Samples, inst: &mut PluginSlot) {
+    let Some(e) = inst.events.as_deref_mut() else { return };
+    let keys = |track: &Track| {
+        let mut keys = 0u128;
+        notes_across(s, track, pos, true, |pitch, _, _, _| keys |= 1u128 << (pitch & 0x7F));
+        keys
+    };
+    let own = keys(t);
+    let rack = s.rack_of(t).map_or(0, |(r, _)| keys(r));
+    e.release_clip_notes_except(&mut *inst.plugin, own, rack);
+}
+
 /// Visit candidates without mutating delivery state. At each offset all nonzero-length offs
 /// precede ons; a note whose on and off round to the same sample keeps on-then-off.
 pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: usize, mut visit: impl FnMut(usize, ClipEvent)) {

@@ -165,7 +165,7 @@ pub use events::{
     PluginEvent, QUEUE_CAP, RenderFrame, Shed, ShedCounts, Source, TapRecord, TransportEpoch,
 };
 pub use external::{ExternalReport, ExternalState, external_report};
-pub use external_midi::{ExternalMidi, external_midi_events};
+pub use external_midi::{ExternalMidi, external_midi_events, external_notes_across};
 #[cfg(feature = "testing")]
 pub use fingerprint::{Fnv, StripPrint};
 pub use graph::TailWhy;
@@ -176,12 +176,9 @@ pub use instance::{
 use key::{KeyBank, KeyEnd, KeyIn, KeySpec};
 use matrix::{PanSpec, apply_matrix, apply_matrix_span, build_matrix, identity_matrix};
 pub use matrix::{fold_down_stereo, itu_stereo_fold};
-use midi::{
-    ClipEvent, Rtp, chase_controllers, grid_end, grid_start, midi_loop_frame, midi_offset, note_spans, played_note, schedule_notes,
-    sorted_clip_events,
-};
+use midi::{ClipEvent, chase_controllers, notes_across, release_edited_clip_notes, schedule_notes, sorted_clip_events};
 #[cfg(test)]
-use midi::{GRID_ENDS, PEDAL_SCANS, visit_clip_events};
+use midi::{GRID_ENDS, PEDAL_SCANS, midi_loop_frame, visit_clip_events};
 pub use midi::{LoopFrame, clip_note_ons, loop_frame, loop_frame_in, playback_content_end, sequence_as_played, unroll_midi_loop};
 pub use midi_fx::{MIDI_FX_BLOCK, MIDI_FX_CARRY, MIDI_FX_NOTES, MIDI_FX_RETRY, MidiFxCounts, note_view_dropped_total};
 pub use offline::{
@@ -541,6 +538,9 @@ struct Strip {
     instrument: Option<PluginSlot>,
     /// The instrument's next block starts somewhere new: send it the controllers in effect there.
     chase: bool,
+    /// An edit was adopted since the instrument's last block: its clip notes are checked against
+    /// the new session ([`midi::release_edited_clip_notes`], #556).
+    edited: bool,
     muted: bool,
     gr: f32,
     /// Per-clip effect chains (Clip Effects) and a scratch buffer to render clips into.
@@ -816,6 +816,7 @@ impl Strip {
             plugins: Vec::new(),
             instrument: None,
             chase: true,
+            edited: false,
             muted: false,
             gr: 0.0,
             clip_fx: ClipFxTable::default(),

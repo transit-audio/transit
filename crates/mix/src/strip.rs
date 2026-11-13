@@ -151,6 +151,10 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 // leave an instrument voice stuck.
                 if !live.monitor_only {
                     let internal = t.midi_output.is_internal();
+                    // An edit since the last block: what the new clips no longer sound ends now.
+                    if std::mem::take(&mut strip.edited) {
+                        release_edited_clip_notes(s, t, pos, inst);
+                    }
                     if std::mem::take(&mut strip.chase) && internal {
                         chase_controllers(s, t, pos, inst);
                     }

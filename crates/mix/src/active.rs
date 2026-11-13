@@ -301,6 +301,8 @@ impl MixEngine {
             for slot in st.plugins.iter_mut().flatten().chain(st.instrument.iter_mut()) {
                 slot.parameter_pass = false;
             }
+            // The clips may have changed under a sounding note (#556).
+            st.edited = true;
         }
         active.id = plan.id;
         active.status = PlanStatus::default();

@@ -1252,6 +1252,30 @@ impl InstrumentEvents {
         }
     }
 
+    /// An edit was adopted: each open clip note whose key the clips no longer sound across the
+    /// block start is released at offset 0 (#556). `own` and `rack` are bit sets of keys (bit k:
+    /// key k), for the track's clips and for its rack's. Live sources, pedals and a release
+    /// already being retried are left alone. A note-on the host refused never sounded, so its
+    /// entry is freed without an off.
+    pub(crate) fn release_clip_notes_except(&mut self, plugin: &mut dyn Plugin, own: u128, rack: u128) {
+        for n in 0..MAX_OPEN {
+            let Some(e) = self.notes.get(n) else { break };
+            if !e.used || e.retry_release.is_some() {
+                continue;
+            }
+            let keys = if e.source == CLIP_SOURCE {
+                own
+            } else if e.source == RACK_CLIP_SOURCE {
+                rack
+            } else {
+                continue;
+            };
+            if (keys >> (e.key & 0x7F)) & 1 == 0 {
+                self.deliver_off(plugin, 0, n, 0);
+            }
+        }
+    }
+
     /// Seek or loop wrap: the clips' notes and pedals are released (live sources keep sounding).
     pub(crate) fn release_clips(&mut self, plugin: &mut dyn Plugin) {
         self.release_sender(plugin, Source::CLIP, CLIP_SOURCE.generation);

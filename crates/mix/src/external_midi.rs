@@ -4,8 +4,8 @@
 //! real-time properties, muted clips, clip-end clamping and off-before-on at one sample all match
 //! what the hosted instrument would have played. Runs on the audio thread: no allocation, no lock.
 
-use super::{ClipEvent, Rtp, midi_offset, note_spans, played_note, sorted_clip_events};
-use transit_model::{ClipContent, MidiOutChannel, MidiOutput, Session, Track};
+use super::{ClipEvent, notes_across, sorted_clip_events};
+use transit_model::{MidiOutChannel, MidiOutput, Session, Track};
 use transit_time::Samples;
 
 /// One message for an external destination, at a sample offset into the block.
@@ -69,31 +69,21 @@ pub fn external_midi_events(s: &Session, t: &Track, pos: Samples, frames: usize,
     }
 }
 
+/// The notes `t` sounds across `pos` on its external destination, as (status-byte channel, key):
+/// started before `pos`, with their off at or after it. What the track still holds once an edit is
+/// adopted; a note playback sent that is not here lost its off to the edit (#556). Nothing for an
+/// internal destination. No allocation, no lock: runs on the audio thread.
+pub fn external_notes_across(s: &Session, t: &Track, pos: Samples, mut visit: impl FnMut(u8, u8)) {
+    let MidiOutput::External { channel, .. } = &t.midi_output else { return };
+    let channel = *channel;
+    notes_across(s, t, pos, true, |pitch, _, _, recorded| visit(channel.resolve(recorded), pitch & 0x7F));
+}
+
 /// Notes of `t` that started before `pos` and are still sounding at it, as playback (loop cycles
 /// included) would have them. Runs where the chase does (the external driver, possibly the audio
 /// thread): no allocation, no lock.
-fn sounding_notes(s: &Session, t: &Track, pos: Samples, mut visit: impl FnMut(u8, u8, u8, u8)) {
-    let pos = pos.saturating_sub(midi_offset(s, t));
-    let rtp = Rtp::of(s, t);
-    for clip in t.clips() {
-        if clip.muted || clip.start.min(super::grid_start(s, clip)) >= pos || clip.end() <= pos {
-            continue;
-        }
-        let ClipContent::Midi { sequence } = &clip.content else { continue };
-        let base = s.tempo.samples_to_ticks(clip.start, s.sample_rate);
-        let looping = super::midi_loop_frame(s, clip);
-        let last = super::grid_end(s, clip);
-        for n0 in &sequence.notes {
-            let Some((n, on, off)) = played_note(s, last, base, rtp, n0, looping.is_some()) else { continue };
-            // The same spans playback plays (loop cycles, seam cuts, negative-tick rule), looked up
-            // for the one sample `pos`.
-            note_spans(s, last, looping, on, off, pos, pos.saturating_add(1), |on, off| {
-                if on < pos && off > pos {
-                    visit(n.pitch, n.velocity, n.release_velocity, n.channel);
-                }
-            });
-        }
-    }
+fn sounding_notes(s: &Session, t: &Track, pos: Samples, visit: impl FnMut(u8, u8, u8, u8)) {
+    notes_across(s, t, pos, false, visit);
 }
 
 #[cfg(test)]
@@ -101,7 +91,7 @@ fn sounding_notes(s: &Session, t: &Track, pos: Samples, mut visit: impl FnMut(u8
 mod tests {
     use super::*;
     use transit_midi::{CtrlEvent, CtrlKind, Note, Sequence};
-    use transit_model::{ChannelFormat, Clip, ClipId, MidiOutPort, TrackKind};
+    use transit_model::{ChannelFormat, Clip, ClipContent, ClipId, MidiOutPort, TrackKind};
 
     fn session(channel: MidiOutChannel) -> (Session, transit_model::TrackId) {
         let mut s = Session::default();
