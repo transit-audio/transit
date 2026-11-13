@@ -452,6 +452,9 @@ fn cycle_recording_ends_at_its_lap_limit_with_every_lap_a_take_issue_522() {
         frames += 1;
     }
     assert!(!t.app.recording_active() && !t.app.is_playing(), "the recording ended by itself after {frames} frames");
+    // A frame moves the simulated transport on by 800 samples, so a lap is 20 frames: the third
+    // wrap is seen in the 61st frame, and the recording ends then, not a lap later.
+    assert_eq!(frames, 61, "it ended at the first check after the third lap");
     let laps = |app: &crate::StudioApp, track: TrackId| -> Vec<(i64, i64, i64)> {
         let tr = app.engine.session().track(track).unwrap();
         let mut v: Vec<_> = tr.playlists.iter().flat_map(|p| p.clips.iter().map(|c| (c.start, c.length, c.source_offset()))).collect();
