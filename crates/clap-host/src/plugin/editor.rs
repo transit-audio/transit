@@ -98,20 +98,31 @@ impl PluginEditor for ClapEditor {
             transit_dsp::host_call::defer();
             return Vec::new();
         }
-        if let Some(s) = self.shared.upgrade() {
+        let shared = self.shared.upgrade();
+        if let Some(s) = &shared {
             s.service(&mut Serviced::default());
         }
         let raw = self.link.idle();
         let _ = self.link.host().dirty.swap(false, Ordering::Relaxed);
-        let mut out: Vec<(String, f32)> = Vec::new();
-        for (cid, v) in raw {
-            let Some(i) = self.ids.iter().position(|&x| x == cid) else { continue };
+        // Only the latest value per parameter: (index, the session's value, the plug-in's).
+        let mut latest: Vec<(usize, f32, f64)> = Vec::new();
+        for (cid, x) in raw {
+            let Some(i) = self.ids.iter().position(|&c| c == cid) else { continue };
             let Some(p) = self.info.params.get(i) else { continue };
-            let v = p.clamp(v as f32);
-            // Keep only the latest value per parameter.
-            match out.iter_mut().find(|(id, _)| id == p.id) {
-                Some(e) => e.1 = v,
-                None => out.push((p.id.to_string(), v)),
+            let v = p.clamp(x as f32);
+            match latest.iter_mut().find(|e| e.0 == i) {
+                Some(e) => (e.1, e.2) = (v, x),
+                None => latest.push((i, v, x)),
+            }
+        }
+        let mut out: Vec<(String, f32)> = Vec::with_capacity(latest.len());
+        for (i, v, x) in latest {
+            // #651: the session sends `v` back; the audio side then recognizes it as `x`.
+            if let Some(s) = &shared {
+                s.note_report(i, v, x);
+            }
+            if let Some(p) = self.info.params.get(i) {
+                out.push((p.id.to_string(), v));
             }
         }
         out

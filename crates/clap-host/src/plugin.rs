@@ -42,8 +42,10 @@
 
 mod midi_events;
 use midi_events::midi_events;
+mod echoes;
 mod editor;
 mod parameter_queue;
+use echoes::{Echoes, Reported};
 
 use crate::ffi::{EVENT_CAP, Event, GuiLink, HostState, Instance, NotePort, PortBuffers, RELEASE_RESERVE};
 use crate::gate::{Gate, MAX_CHANNELS};
@@ -162,6 +164,9 @@ pub(crate) struct Shared {
     /// Live state loads (#78), bumped while holding `core`: the audio side drops the values it
     /// queued before one (see [`drop_before_load`]).
     loads: AtomicU64,
+    /// What the plug-in reported for each parameter, and the value the session got for it (#651;
+    /// written on the main thread, read by the audio side's [`Echoes`]).
+    reported: Reported,
 }
 
 /// A `params.rescan` of the values being serviced: the next parameter to re-read.
@@ -253,6 +258,15 @@ impl Shared {
         let rescanning = lock(&self.rescan).active;
         if self.host.restart.load(Ordering::Relaxed) || self.host.params_rescan.load(Ordering::Relaxed) || rescanning {
             out.pending += 1;
+        }
+    }
+
+    /// The plug-in reported `value` for parameter `i` (an output parameter event, or a value a
+    /// rescan found changed), handed to the session as `session` (#651). Main thread only: the
+    /// table has one writer.
+    fn note_report(&self, i: usize, session: f32, value: f64) {
+        if std::thread::current().id() == self.main {
+            self.reported.record(i, session, value);
         }
     }
 
@@ -436,6 +450,8 @@ pub struct ClapPlugin {
     process_errors: u64,
     /// The [`Shared::loads`] count the queued values were set under.
     loads_seen: u64,
+    /// Which host-set values are the session's echo of a value the plug-in reported (#651).
+    echoes: Echoes,
 }
 
 #[derive(Clone, Copy)]
@@ -498,6 +514,7 @@ impl ClapPlugin {
             processed_gen: AtomicU64::new(0),
             set_at: ids.iter().map(|_| AtomicU64::new(0)).collect(),
             loads: AtomicU64::new(0),
+            reported: Reported::new(ids.len()),
         });
         lock(live()).push(Arc::downgrade(&shared));
         ClapPlugin {
@@ -524,6 +541,7 @@ impl ClapPlugin {
             params_dropped: 0,
             process_errors: 0,
             loads_seen: 0,
+            echoes: Echoes::new(info.params.len()),
         }
     }
 
@@ -544,6 +562,7 @@ impl ClapPlugin {
         drop(core);
         // Pending changes from before the load would undo it; none is on its way any more.
         self.queue.retain(|e| !matches!(e, Event::Param { .. }));
+        self.echoes.forget(&self.shared.reported);
         self.shared.processed_gen.store(self.shared.host_gen.load(Ordering::Acquire), Ordering::Release);
     }
 
@@ -573,6 +592,34 @@ impl ClapPlugin {
         } else {
             self.push(Event::Param { time, id: cid, value }, false)
         }
+    }
+
+    /// #651: when the host's `value` for parameter `id` is the session's echo of a value the
+    /// plug-in reported, the plug-in already has it: nothing goes back (an `f32` echo of its `f64`
+    /// differs by rounding, and the plug-in calls its preset modified), except over a value of the
+    /// host's still queued at `time` for that parameter, which takes the plug-in's exact value.
+    /// The host's view takes it too. `None` for any other value (which uses up the reports).
+    fn echo(&mut self, time: u32, id: &str, value: f32) -> Option<bool> {
+        let i = self.param_index.get(id).copied()?;
+        let (pi, &cid) = (self.info.params.get(i)?, self.ids.get(i)?);
+        let v = pi.clamp(value);
+        self.echoes.note(&self.shared.reported, i, v);
+        let x = self.echoes.plugin_value(i, v)?;
+        if let Some(slot) = self.values.get_mut(i) {
+            *slot = v;
+        }
+        if let Some(view) = self.shared.view.get(i) {
+            view.store(x.to_bits(), Ordering::Relaxed);
+        }
+        for e in self.queue.iter_mut() {
+            if let Event::Param { id: q, time: t, value: queued } = e
+                && *q == cid
+                && *t == time
+            {
+                *queued = x;
+            }
+        }
+        Some(true)
     }
 
     /// The host-set value of parameter `id`, clamped and noted: (CLAP id, value).
@@ -625,10 +672,12 @@ fn collapse_params(queue: &mut Vec<Event>) {
 /// main thread loaded a state since the last call, drops every parameter value queued before it,
 /// which would otherwise overwrite the state just loaded. A value queued while the load runs counts
 /// as before it. No allocation.
-fn drop_before_load(queue: &mut Vec<Event>, loads: &AtomicU64, seen: &mut u64) {
+fn drop_before_load(queue: &mut Vec<Event>, loads: &AtomicU64, seen: &mut u64, echoes: &mut Echoes, reported: &Reported) {
     let n = loads.load(Ordering::Acquire);
     if n != std::mem::replace(seen, n) {
         queue.retain(|e| !matches!(e, Event::Param { .. }));
+        // What the plug-in reported before the load is history too (#651).
+        echoes.forget(reported);
     }
 }
 
@@ -724,7 +773,7 @@ impl ClapPlugin {
             self.gate.skip(io, ch, frames);
             return;
         };
-        drop_before_load(&mut self.queue, &shared.loads, &mut self.loads_seen);
+        drop_before_load(&mut self.queue, &shared.loads, &mut self.loads_seen, &mut self.echoes, &shared.reported);
         let core = &mut *guard;
         if core.max_block == 0 {
             collapse_params(&mut self.queue);
@@ -880,7 +929,10 @@ impl Plugin for ClapPlugin {
     }
 
     fn set_param(&mut self, id: &str, value: f32) -> bool {
-        drop_before_load(&mut self.queue, &self.shared.loads, &mut self.loads_seen);
+        drop_before_load(&mut self.queue, &self.shared.loads, &mut self.loads_seen, &mut self.echoes, &self.shared.reported);
+        if let Some(done) = self.echo(0, id, value) {
+            return done;
+        }
         let Some((cid, v)) = self.host_value(id, value) else { return false };
         // Coalesce with a pending change of the same parameter at the block start.
         self.param_at(0, cid, v)
@@ -890,7 +942,10 @@ impl Plugin for ClapPlugin {
     /// With the queue full, the value replaces the parameter's latest queued point (the last
     /// point wins, applied at that point's time: earlier than asked) and the miss is counted.
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
-        drop_before_load(&mut self.queue, &self.shared.loads, &mut self.loads_seen);
+        drop_before_load(&mut self.queue, &self.shared.loads, &mut self.loads_seen, &mut self.echoes, &self.shared.reported);
+        if let Some(done) = self.echo(offset, id, value) {
+            return done;
+        }
         let Some((cid, v)) = self.host_value(id, value) else { return false };
         if self.param_at(offset, cid, v) {
             return true;

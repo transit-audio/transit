@@ -8,7 +8,10 @@
 //!
 //! The gain plugin also implements `clap.state` (gain and mode as two little-endian f64s) and a
 //! floating-only `clap.gui` without a real window: showing it "edits" the gain to 0.25 in the GUI,
-//! reported as an output parameter event by the next `process`. Embedded (`CMD:gui-embedded`), its
+//! reported as an output parameter event by the next `process` (`CMD:edit:<gain>` makes such an
+//! edit to any gain, as a preset picked in its editor would, issue #651). After `CMD:log-start`
+//! its saved state carries, after the two f64s, a log of every parameter event the host sends it
+//! (`param(<id>)=<value>@<time>`, the value in Rust's shortest round-trip form), cleared as read. Embedded (`CMD:gui-embedded`), its
 //! GUI takes `set_scale` and reports 400×300 times the scale; with `CMD:gui-self-scaling` it
 //! ignores `set_scale` and reports 400×300 (issue #101).
 //!
@@ -195,6 +198,10 @@ struct Fx {
     gui_created: bool,
     gui_visible: bool,
     gui_edit_pending: bool,
+    /// The gain the pending GUI edit sets (0.25 unless `CMD:edit:<gain>` said otherwise).
+    gui_edit_value: f64,
+    /// The parameter events the host sent since `CMD:log-start` (see the crate docs).
+    param_log: Option<Vec<String>>,
     /// Issue #68: 0 floating only (the default), 1 embedded too, 2 embedded reported but its
     /// `create` fails. Set by the gain's `CMD:gui-embedded` and `CMD:gui-embedded-fails`.
     gui_embed: u8,
@@ -385,6 +392,9 @@ fn apply(f: &mut Fx, h: &clap_event_header) {
     match h.type_ {
         CLAP_EVENT_PARAM_VALUE => {
             let e = unsafe { &*(h as *const clap_event_header as *const clap_event_param_value) };
+            if let Some(log) = f.param_log.as_mut() {
+                log.push(format!("param({})={:?}@{}", e.param_id, e.value, h.time));
+            }
             match e.param_id {
                 7 => f.gain = e.value,
                 3 => f.mode = e.value,
@@ -430,7 +440,7 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
     };
     if f.gui_edit_pending {
         f.gui_edit_pending = false;
-        f.gain = 0.25;
+        f.gain = f.gui_edit_value;
         let e = clap_event_param_value {
             header: clap_event_header {
                 size: std::mem::size_of::<clap_event_param_value>() as u32,
@@ -445,7 +455,7 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
             port_index: -1,
             channel: -1,
             key: -1,
-            value: 0.25,
+            value: f.gui_edit_value,
         };
         let out = unsafe { &*pr.out_events };
         assert!(unsafe { (out.try_push.unwrap())(pr.out_events, &e.header) });
@@ -786,7 +796,10 @@ unsafe extern "C" fn state_save(p: *const clap_plugin, stream: *const clap_ostre
     // Write in two pieces to exercise appending.
     let a = unsafe { (s.write.unwrap())(stream, bytes.as_ptr().cast(), 5) };
     let b = unsafe { (s.write.unwrap())(stream, bytes[5..].as_ptr().cast(), 11) };
-    a == 5 && b == 11
+    // The parameter log, while it runs (see the crate docs).
+    let log = f.param_log.as_mut().map(|l| std::mem::take(l).join("\n")).unwrap_or_default();
+    let c = if log.is_empty() { 0 } else { unsafe { (s.write.unwrap())(stream, log.as_ptr().cast(), log.len() as u64) } };
+    a == 5 && b == 11 && c == log.len() as i64
 }
 
 unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istream) -> bool {
@@ -815,6 +828,16 @@ unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istre
         && cmd.starts_with("rescan-")
     {
         return requests_command(f, &cmd.to_string());
+    }
+    // A GUI edit to any gain, and the parameter log (#651).
+    if let Some(gain) = std::str::from_utf8(&bytes[..got]).ok().and_then(|t| t.strip_prefix("CMD:edit:")).and_then(|g| g.parse::<f64>().ok()) {
+        f.gui_edit_value = gain;
+        f.gui_edit_pending = true;
+        return true;
+    }
+    if std::str::from_utf8(&bytes[..got]).ok() == Some("CMD:log-start") {
+        f.param_log = Some(Vec::new());
+        return true;
     }
     // And its GUI modes (issue #68): embedded too, embedded that fails, and a query.
     if let Some(cmd) = std::str::from_utf8(&bytes[..got]).ok().and_then(|s| s.strip_prefix("CMD:")) {
@@ -1127,6 +1150,8 @@ unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const
         gui_created: false,
         gui_visible: false,
         gui_edit_pending: false,
+        gui_edit_value: 0.25,
+        param_log: None,
         gui_embed: 0,
         gui_floating: false,
         gui_scale: 1.0,
