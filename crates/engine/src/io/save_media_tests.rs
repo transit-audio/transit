@@ -46,7 +46,12 @@ fn engine() -> Option<(Engine, TrackId)> {
 
 /// Record the take file at `path` (one second: over the setting) onto `t`; it is placed disk-backed.
 fn record_long(e: &mut Engine, t: TrackId, path: &Path) -> Vec<u8> {
-    let bytes = write_take(path, 48_000);
+    record_long_of(e, t, path, 48_000)
+}
+
+/// [`record_long`] with a take of `frames` frames (over half a second).
+fn record_long_of(e: &mut Engine, t: TrackId, path: &Path, frames: usize) -> Vec<u8> {
+    let bytes = write_take(path, frames);
     assert_eq!(add_recording(e, 0, vec![(t, path.to_path_buf())], None).len(), 1);
     let src = e.session().sources.last().unwrap();
     assert!(src.disk && e.session().pool.get(src.id).is_some_and(|a| a.is_disk()), "a long take plays from its file");
@@ -210,4 +215,47 @@ fn a_copy_never_replaces_a_file_reuses_an_identical_one_and_is_checked_against_i
     let err = bring_into(&dir.path("T/Audio Files"), &take, 4_801, 1).map(|_| ()).unwrap_err().to_string();
     assert!(err.contains("Vox_01.wav") && err.contains("reads as 4800 frames"), "{err}");
     assert_eq!(std::fs::read_dir(dir.path("T/Audio Files")).unwrap().count(), 0, "no reservation or partial copy is left");
+}
+
+#[test]
+fn two_different_takes_of_the_same_length_are_never_taken_for_each_other_on_save_issue_573() {
+    // 300,000 mono float frames: 1.2 MB, past the first 1 MiB chunk of the comparison, so a
+    // difference beyond it is found only by reading on across the chunk boundary.
+    const FRAMES: usize = 300_000;
+    let header = transit_audio_io::wav_float_header(1, 48_000, FRAMES as u64).unwrap().len();
+    let len = header + FRAMES * 4;
+    assert!(len > CHUNK + 4_096, "the take spans more than one chunk");
+    // Where the file already in the target `Audio Files` differs from the take: one sample early
+    // in the file, only the last byte, only a byte beyond the first chunk; `None`: the same bytes.
+    for (what, flip) in
+        [("a sample", Some(header + 4 * 1_000)), ("past the first chunk", Some(CHUNK + 4_096)), ("the last byte", Some(len - 1)), ("nothing", None)]
+    {
+        let Some((mut e, t)) = engine() else { return };
+        let dir = Scratch::new("same-length");
+        save_session(&mut e, &dir.file("A/Song.transit")).unwrap();
+        let take = record_long_of(&mut e, t, &dir.path("A/Audio Files/Vox_01.wav"), FRAMES);
+        assert_eq!(take.len(), len);
+        save_session(&mut e, &dir.file("A/Song.transit")).unwrap();
+        // A file of the take's name, length and header is already in the new folder.
+        let mut there = take.clone();
+        if let Some(k) = flip {
+            there[k] ^= 0x01;
+        }
+        let existing = dir.path("B/Audio Files/Vox_01.wav");
+        std::fs::create_dir_all(existing.parent().unwrap()).unwrap();
+        std::fs::write(&existing, &there).unwrap();
+
+        let done = e.execute("session.save_as", &json!({"path": dir.file("B/Song.transit")})).unwrap();
+        assert_eq!(std::fs::read(&existing).unwrap(), there, "{what}: the file already there is never replaced");
+        let copy = dir.path("B/Audio Files/Vox_01_01.wav");
+        if flip.is_some() {
+            assert_eq!(done["audio_files_written"], 1, "{what}: {done}");
+            assert_eq!(source_path(&e, "Vox_01"), "Audio Files/Vox_01_01.wav", "{what}: the session names its own copy");
+            assert_eq!(std::fs::read(&copy).unwrap(), take, "{what}: the copy is the take");
+        } else {
+            assert_eq!(done["audio_files_written"], 0, "{what}: {done}");
+            assert_eq!(source_path(&e, "Vox_01"), "Audio Files/Vox_01.wav", "{what}: the identical file is reused");
+            assert!(!copy.exists(), "{what}: nothing new is written");
+        }
+    }
 }
