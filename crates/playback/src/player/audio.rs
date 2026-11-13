@@ -1058,7 +1058,8 @@ impl Audio {
         // which compensates it like any other path (ADR 0020 decision 2). `Block::host_for` picks.
         let delay = self.plans.engine().latency as f64 * ns_per_frame;
         let delay_ns = if delay.is_finite() && delay > 0.0 { delay as u64 } else { 0 };
-        external::Block { playing: state.playing, position: state.render_position, frames, host_ns, delay_ns, ns_per_frame }
+        let plan = self.plans.engine().active().generation;
+        external::Block { playing: state.playing, position: state.render_position, frames, host_ns, delay_ns, ns_per_frame, plan }
     }
 
     /// One device callback shares these budgets across all scratch chunks and mix blocks.

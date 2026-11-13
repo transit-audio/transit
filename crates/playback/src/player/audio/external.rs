@@ -6,8 +6,9 @@
 //! first render frame mapped through the converter phase to an output-device frame, and that
 //! frame through the device clock map (or, while the map is unavailable, the host time at
 //! callback entry plus the frames between). See `docs/contributing/knowledge/midi-output.md`.
-use crate::player::midi_out::{Kind, OutEvent, Producer};
-use transit_model::Session;
+use crate::player::midi_out::{Kind, MAX_DESTINATIONS, OutEvent, Producer};
+use transit_mix::PlanGeneration;
+use transit_model::{MidiOutput, Session, Track};
 use transit_time::Samples;
 
 #[cfg(test)]
@@ -34,6 +35,49 @@ pub(in crate::player) struct External {
     next: Option<Samples>,
     /// Host time at callback entry and the output frame the callback started filling.
     anchor: Option<(u64, u64)>,
+    /// The clip notes this path sent and has not ended, per track (#556). Clip scheduling is
+    /// stateless, so an edit that takes a sounding note's off away (the note deleted, re-pitched
+    /// or shortened, its clip moved or muted, the tempo changed) leaves only this to say which
+    /// note needs one. At most [`MAX_DESTINATIONS`] entries, allocated up front; never grows.
+    held: Vec<Held>,
+    /// The plan the previous block played: another one means an edit was adopted.
+    plan: Option<PlanGeneration>,
+}
+
+/// One track's clip notes on its external destination: the note-ons sent and not yet ended, per
+/// status-byte channel and key (an off ends one, as the output thread counts them).
+struct Held {
+    track: u64,
+    /// The destination they went to ([`destination_key`]): a track whose port or channel changed
+    /// was released by the output thread, so its notes are forgotten here.
+    destination: u64,
+    open: [[u8; 128]; 16],
+}
+
+/// A fingerprint of a track's external port and channel; `None` for an internal destination.
+/// Hashes in place: no allocation.
+fn destination_key(output: &MidiOutput) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let MidiOutput::External { port, channel, .. } = output else { return None };
+    let mut h = std::hash::DefaultHasher::new();
+    (port.backend.as_str(), port.name.as_str(), port.ordinal, port.id.as_str()).hash(&mut h);
+    match channel {
+        transit_model::MidiOutChannel::AsRecorded => 0xFFu8.hash(&mut h),
+        transit_model::MidiOutChannel::Channel(c) => c.hash(&mut h),
+    }
+    Some(h.finish())
+}
+
+/// The entry of `track` in `held`, made when there is room.
+fn held_slot(held: &mut Vec<Held>, track: &Track) -> Option<usize> {
+    if let Some(i) = held.iter().position(|h| h.track == track.id.0) {
+        return Some(i);
+    }
+    let destination = destination_key(&track.midi_output)?;
+    (held.len() < held.capacity()).then(|| {
+        held.push(Held { track: track.id.0, destination, open: [[0; 128]; 16] });
+        held.len() - 1
+    })
 }
 
 /// The block about to render, as the scheduler needs it.
@@ -49,6 +93,8 @@ pub(in crate::player) struct Block {
     pub delay_ns: u64,
     /// Nanoseconds per session sample at the current speed.
     pub ns_per_frame: f64,
+    /// The plan the block renders with: its session is the one passed with the block.
+    pub plan: PlanGeneration,
 }
 
 impl Block {
@@ -62,7 +108,7 @@ impl Block {
 
 impl External {
     pub(in crate::player) fn new(out: Producer) -> Self {
-        Self { out, was_playing: false, next: None, anchor: None }
+        Self { out, was_playing: false, next: None, anchor: None, held: Vec::with_capacity(MAX_DESTINATIONS), plan: None }
     }
 
     /// At callback entry: the host time now and the output frame about to be filled.
@@ -106,10 +152,13 @@ impl External {
             })
         };
         let at = |offset: usize| at_from(block.host_ns, offset);
+        let edited = self.plan.replace(block.plan).is_some_and(|p| p != block.plan);
         if !block.playing {
             if self.was_playing {
                 self.out.push(OutEvent { kind: Kind::Stop, at_ns: at(0), ..OutEvent::default() });
             }
+            // Stop ends every playback note at the output thread.
+            self.held.clear();
             self.was_playing = false;
             self.next = None;
             return;
@@ -118,6 +167,10 @@ impl External {
         if jump {
             // P(R) of the wrap: each destination adds A / r if its notes carry it.
             self.out.push(OutEvent { kind: Kind::Release, at_ns: at(0), delay_ns: block.delay_ns, ..OutEvent::default() });
+            // The release ends what playback holds; the chase below starts what sounds on.
+            self.held.clear();
+        } else if edited && self.was_playing {
+            self.release_edited(session, &block);
         }
         let chase = jump || !self.was_playing;
         let any_solo = session.tracks.iter().any(|t| t.mixer.solo);
@@ -127,26 +180,97 @@ impl External {
             }
             let host = block.host_for(track.external_instrument().is_some());
             let silent = track.mixer.mute || (any_solo && !track.mixer.solo && !track.mixer.solo_safe);
-            let out = &mut self.out;
+            let (out, held) = (&mut self.out, &mut self.held);
+            let mut slot = held.iter().position(|h| h.track == track.id.0);
             transit_mix::external_midi_events(session, track, block.position, block.frames, chase, |event| {
                 // A muted track still ends its notes.
                 if silent && !transit_midi_io::is_release(event.message()) {
                     return;
                 }
-                out.push(OutEvent {
+                let message = OutEvent {
                     kind: Kind::Message,
                     track: track.id.0,
                     at_ns: at_from(host, event.offset),
                     bytes: event.bytes,
                     len: event.len,
                     delay_ns: 0,
-                });
+                };
+                let (status, key) = (event.bytes[0], usize::from(event.bytes[1] & 0x7F));
+                let channel = usize::from(status & 0x0F);
+                match status & 0xF0 {
+                    0x90 => {
+                        if out.push(message) {
+                            slot = slot.or_else(|| held_slot(held, track));
+                            if let Some(open) = slot.and_then(|i| held.get_mut(i)).and_then(|h| h.open.get_mut(channel)?.get_mut(key)) {
+                                *open = open.saturating_add(1);
+                            }
+                        }
+                    }
+                    0x80 => match slot.and_then(|i| held.get_mut(i)).and_then(|h| h.open.get_mut(channel)?.get_mut(key)) {
+                        // An off ends a note this path started; one it never started is not sent.
+                        Some(open) if *open > 0 => {
+                            *open -= 1;
+                            out.push(message);
+                        }
+                        Some(_) => {}
+                        // No entry: nothing started since the last release, unless the table was
+                        // full and the track's notes went untracked.
+                        None => {
+                            if held.len() >= held.capacity() {
+                                out.push(message);
+                            }
+                        }
+                    },
+                    _ => {
+                        out.push(message);
+                    }
+                }
             });
         }
         self.was_playing = true;
         self.next = block.position.checked_add(block.frames as i64);
     }
+
+    /// An edit was adopted during playback: each note a track holds beyond what its clips still
+    /// sound across the block start ends now, at offset 0, before the block's own events (#556).
+    /// A track that went away, went inactive, went internal or changed its port or channel was
+    /// released by the output thread itself; its notes are forgotten here.
+    fn release_edited(&mut self, session: &Session, block: &Block) {
+        let mut i = 0;
+        while let Some(h) = self.held.get_mut(i) {
+            let track = session
+                .tracks
+                .iter()
+                .find(|t| t.id.0 == h.track)
+                .filter(|t| t.kind.is_midi() && !t.inactive && destination_key(&t.midi_output) == Some(h.destination));
+            let Some(track) = track else {
+                self.held.swap_remove(i);
+                continue;
+            };
+            let mut alive = [[0u8; 128]; 16];
+            transit_mix::external_notes_across(session, track, block.position, |channel, key| {
+                if let Some(n) = alive.get_mut(usize::from(channel & 0x0F)).and_then(|c| c.get_mut(usize::from(key & 0x7F))) {
+                    *n = n.saturating_add(1);
+                }
+            });
+            let at_ns = block.host_for(track.external_instrument().is_some()).unwrap_or(0);
+            for (channel, (open, alive)) in (0u8..).zip(h.open.iter_mut().zip(alive.iter())) {
+                for (key, (open, alive)) in (0u8..).zip(open.iter_mut().zip(alive.iter())) {
+                    while *open > *alive {
+                        *open -= 1;
+                        let bytes = [0x80 | channel, key, 64];
+                        self.out.push(OutEvent { kind: Kind::Message, track: h.track, at_ns, bytes, len: 3, delay_ns: 0 });
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "external_edit_tests.rs"]
+mod edit_tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -186,7 +310,15 @@ mod tests {
         let (out, mut rx) = crate::player::midi_out::test_ring(1024);
         let mut external = External::new(out);
         let (host, delay) = (1_000_000_000u64, 22_000_000u64);
-        let block = Block { playing: true, position: 0, frames: 64, host_ns: Some(host), delay_ns: delay, ns_per_frame: 1e9 / 48_000.0 };
+        let block = Block {
+            playing: true,
+            position: 0,
+            frames: 64,
+            host_ns: Some(host),
+            delay_ns: delay,
+            ns_per_frame: 1e9 / 48_000.0,
+            plan: PlanGeneration::from_raw(1),
+        };
         external.block(&s, block);
         let mut ons = Vec::new();
         while let Ok(e) = rx.pop() {
@@ -222,6 +354,7 @@ mod tests {
                 host_ns: Some(host + (i as f64 * 64.0 * ns) as u64),
                 delay_ns: delay,
                 ns_per_frame: ns,
+                plan: PlanGeneration::from_raw(1),
             };
             external.measure(&probe, &block, &input, 64, None);
             while let Ok(e) = rx.pop() {
@@ -327,6 +460,7 @@ mod tests {
                 host_ns: Some(H0 + (pos as f64 * ns) as u64),
                 delay_ns: (mix.latency as f64 * ns) as u64,
                 ns_per_frame: ns,
+                plan: PlanGeneration::from_raw(1),
             };
             external.block(s, block);
             while let Ok(e) = rx.pop() {
