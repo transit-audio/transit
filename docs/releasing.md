@@ -60,6 +60,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
 
 ## Released
 
+- `v0.7.1`, 2026-11-13, commit `5b2102a3` (the corpus commit; the `Release v0.7.1` commit is `82a95859`; the tag points at `5b2102a3`): patch: 32-bit float files keep levels above 0 dBFS, levels from automation lanes, MIDI Learn and send drags follow the channel fader's law, a re-struck key plays on, Resonator chords keep their pitches, hosted automation lanes reach the plug-in, track presets and templates carry Sampler samples. Body from `docs/releases/v0.7.1.md`.
 - `v0.7.0`, 2026-11-12, commit `9baab92f` (the `Release v0.7.0` commit; tag commit `d1818bde`): feature release, the Sampler release: one kit with Pads, Slices and Instrument views, kit presets, the new device design, native Windows audio only. Body from `docs/releases/v0.7.0.md`.
 - `v0.6.2`, 2026-11-04, commit `e429b777` (the `Release v0.6.2` commit; tag commit `e429b777`): patch: Linux plug-in editors that rely on the host to map their window appear (XEmbed embedder support) and an editor surface diagnostic (#289). Body from `docs/releases/v0.6.2.md`.
 - `v0.6.1`, 2026-11-02, commit `a5d01bf6` (the `Release v0.6.1` commit; tag commit `a5d01bf6`): hotfix: a VST3 editor whose view reports its size only after it is attached opens again (#295). Body from `docs/releases/v0.6.1.md`.
