@@ -165,11 +165,14 @@ the previous take. Press Record while the loop is already playing, anywhere in i
 take runs from where you pressed it to the loop end, then each full lap is a take; audio and MIDI
 are cut the same way. One recording keeps up to 10,000 laps as takes (over five hours of a
 one-bar loop in 4/4 at 120 BPM), the same laps on every track; past that the newest laps are kept
-and, after Stop, the status line says how many earlier laps were left out and where they are. An
-audio take's file still holds every lap. The MIDI of the laps left out is saved as a MIDI file
-beside the audio takes (`<session> left-out laps 01.mid`), notes held across the cut whole; you
-can import it, and it is yours to delete. If that file cannot be written, the MIDI journal is kept
-instead and the status line names it. A last lap shorter than an eighth of the loop is not a take;
+and, after Stop (or after recovering an interrupted recording), the status line says how many
+earlier laps were left out and where they are. An audio take's file still holds every lap: import
+that file (it is named in the status line) to reach the laps left out, or trim them out of it in
+another editor. The MIDI of the laps left out is saved as a MIDI file, notes held across the cut
+whole, in the folder the takes were recorded into, named `<session> left-out laps 01.mid`; the
+status line gives its full path. It stays there: saving the session, or Save As, does not move or
+copy it. You can import it, and it is yours to move or delete. If that file cannot be written, the
+MIDI journal is kept instead and the status line names it. A last lap shorter than an eighth of the loop is not a take;
 the status line says how long it was, and it stays in the take file. The takes of one stretch of time form a stack, and the track plays one of them:
 the newest when you stop. Takes work the same for audio and MIDI.
 

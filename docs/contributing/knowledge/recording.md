@@ -44,7 +44,7 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   after any wrap. The journal's cleanup never removes the file; when it cannot be written the host
   keeps the journal instead (`midi_journal::export_left_out` writes the file from it later). The
   host collects every lap note of the pass and ends the status line with them
-  (`report_lap_notes`). A last audio lap shorter than an eighth of the loop is still no take, but
+  (`report_lap_notes`), after Stop and after crash recovery. The file is written whole to a temporary name, then takes a free name; it is not a session source and stays where it was written (Save and Save As never move it). A last audio lap shorter than an eighth of the loop is still no take, but
   is said (#634). Placing the takes on Stop costs work quadratic in the lap count per track, which
   is why there is a limit (ADR 0026, lap limit amendment).
 - **Count-in pickups** (#327, Logic's behavior; ADR 0026 amendment): the audio thread also
