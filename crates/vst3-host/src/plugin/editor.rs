@@ -62,3 +62,41 @@ impl PluginEditor for Vst3Editor {
         self.conv.link.header().take_clicks().into_iter().map(header_action).collect()
     }
 }
+
+/// The strip's model as the window shows it (issue #68).
+fn header_view(h: &transit_dsp::EditorHeader) -> transit_rt::editor_window::HeaderView {
+    transit_rt::editor_window::HeaderView {
+        title: h.title.clone(),
+        preset: h.preset.clone(),
+        user: h.user.clone(),
+        factory: h.factory.clone(),
+        bypassed: h.bypassed,
+        can_bypass: h.can_bypass,
+        can_paste: h.can_paste,
+        can_delete: h.can_delete,
+        disabled: h.disabled.clone(),
+        learning: h.learning,
+    }
+}
+
+/// What a click in the strip asks of the host.
+fn header_action(c: transit_rt::editor_window::HeaderClick) -> transit_dsp::HeaderAction {
+    use transit_dsp::HeaderAction as A;
+    use transit_rt::editor_window::HeaderClick as C;
+    match c {
+        C::User(i) => A::User(i),
+        C::Factory(i) => A::Factory(i),
+        C::Previous => A::Previous,
+        C::Next => A::Next,
+        C::Save => A::Save,
+        C::SaveAs => A::SaveAs,
+        C::Load => A::Load,
+        C::Bypass => A::Bypass,
+        C::Reset => A::Reset,
+        C::Copy => A::Copy,
+        C::Paste => A::Paste,
+        C::Delete => A::Delete,
+        C::ShowInChain => A::ShowInChain,
+        C::LearnNext => A::LearnNext,
+    }
+}
