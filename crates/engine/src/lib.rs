@@ -1018,6 +1018,8 @@ mod tests_clipboard_session;
 #[cfg(test)]
 mod tests_pre_count_output;
 #[cfg(test)]
+mod trim_floor_tests;
+#[cfg(test)]
 mod merge_tests {
     use super::*;
 

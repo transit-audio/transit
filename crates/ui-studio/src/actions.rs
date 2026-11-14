@@ -239,10 +239,13 @@ impl StudioApp {
         Ok(pasted)
     }
 
-    /// Trim one edge of a clip to `to`.
+    /// Trim one edge of a clip to `to`, never before the edge's floor: the session start, or for a
+    /// start edge the clip's hidden content before it (ADR 0052 decision 7, `arrange::trim_floor`,
+    /// the floor `edit.trim_clip` applies itself).
     pub fn trim_clip(&mut self, clip: ClipId, start_edge: bool, to: Samples) -> Result<Value, String> {
         let edge = if start_edge { "start" } else { "end" };
-        self.run("edit.trim_clip", json!({"clip": clip.0, edge: to.max(0)}))
+        let to = to.max(crate::arrange::trim_floor(self.engine.session(), clip, start_edge));
+        self.run("edit.trim_clip", json!({"clip": clip.0, edge: to}))
     }
 
     /// Split at the cursor: the selected clips under the cursor, or else every clip under the

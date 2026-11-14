@@ -815,6 +815,8 @@ mod texture_synth_panel_tests;
 mod time_stretcher_panel_tests;
 #[cfg(test)]
 mod tokens_tests;
+#[cfg(test)]
+mod trim_floor_ui_tests;
 /// Services what hosted plug-ins asked of the host (audit F08, ADR 0012 G7): CLAP restarts,
 /// callbacks and rescans, VST3 `restartComponent`. Main thread, every frame, also with no player
 /// and no editor open (the instances were created on this thread). Idempotent: the playback

@@ -589,11 +589,22 @@ fn group_floor(app: &StudioApp, clip: ClipId, start: Samples) -> Samples {
 }
 
 /// Where a trimmed edge lands: `edge` moved by `dx` and snapped as a position to the visible grid
-/// (like the loop handle; a move snaps its delta instead), unless Shift is held. The caller clamps
-/// against the other edge; the engine command clamps against neighbors and the source.
-fn trim_edge(app: &StudioApp, map: Map, edge: Samples, dx: Samples, shift: bool) -> Samples {
-    let to = edge.saturating_add(dx).max(0);
-    if shift { to } else { crate::automation::snap(app.engine.session(), map.spp, &map.grid, to) }
+/// (like the loop handle; a move snaps its delta instead), unless Shift is held, and never before
+/// `floor`. The caller clamps against the other edge; the engine command clamps against neighbors
+/// and the source.
+fn trim_edge(app: &StudioApp, map: Map, edge: Samples, dx: Samples, shift: bool, floor: Samples) -> Samples {
+    let to = edge.saturating_add(dx);
+    if shift { to.max(floor) } else { crate::automation::snap_at_or_after(app.engine.session(), map.spp, &map.grid, to, floor) }
+}
+
+/// The floor of a trim drag of `clip`'s `start_edge` (ADR 0052 decision 7 and slice 6b): a start
+/// edge stops where `edit.trim_clip` stops it (`edit::start_trim_floor`, the same function), an
+/// end edge at the session start.
+pub(crate) fn trim_floor(s: &Session, clip: ClipId, start_edge: bool) -> Samples {
+    match s.find_clip(clip) {
+        Some((_, c)) if start_edge => transit_engine::edit::start_trim_floor(s, c),
+        _ => s.start(),
+    }
 }
 
 /// The clip being dragged, as it would land: (track, start, end).
@@ -612,11 +623,17 @@ fn drag_preview(app: &StudioApp, ui: &Ui, map: Map, rows: &[&Track], tl: Rect, g
             let dest = row.and_then(|i| rows.get(i)).map(|t| t.id).filter(|t| app.holds_clips(*t)).unwrap_or(track);
             (clip, dest, new_start, new_start + (end - start), drag_copies(m))
         }
-        // Start trims keep their floor at bar 1 until the hidden-content floor lands (ADR 0052,
-        // Slices 6). `trim_edge` already floors at 0, so `min` alone: `clamp(0, end - 1)` panics
-        // for a clip that ends before bar 1.
-        DragKind::TrimStart => (clip, track, trim_edge(app, map, start, dx, m.shift).min(end - 1), end, false),
-        DragKind::TrimEnd => (clip, track, start, trim_edge(app, map, end, dx, m.shift).max(start + 1), false),
+        // A start trim floors where the engine command does: the session start, or the clip's
+        // hidden content before it (ADR 0052 decision 7). `trim_edge` already floors, so `min`
+        // alone: `clamp(floor, end - 1)` would panic for a clip ending before its floor.
+        DragKind::TrimStart => {
+            let floor = trim_floor(app.engine.session(), clip, true);
+            (clip, track, trim_edge(app, map, start, dx, m.shift, floor).min(end - 1), end, false)
+        }
+        DragKind::TrimEnd => {
+            let floor = trim_floor(app.engine.session(), clip, false);
+            (clip, track, start, trim_edge(app, map, end, dx, m.shift, floor).max(start + 1), false)
+        }
         DragKind::Loop | DragKind::FadeIn | DragKind::FadeOut | DragKind::FadeCurveIn | DragKind::FadeCurveOut => return None,
     })
 }
@@ -908,7 +925,8 @@ fn loop_drag(app: &StudioApp, ui: &Ui, map: Map) -> Option<LoopDrag> {
     let s = app.engine.session();
     let c = s.find_clip(clip)?.1;
     let dx = (f64::from(pos?.x - press.x) * map.spp).round() as Samples;
-    let to = end.saturating_add(dx).max(0);
+    // Never before the session start: a clip ending before bar 1 keeps its end there (slice 6b).
+    let to = crate::at_or_after_start(s, end.saturating_add(dx));
     let to = if m.shift { to } else { crate::automation::snap_delta(s, map.spp, &map.grid, 0, to) };
     let overwrite = m.command && !m.alt;
     // Without the modifier a longer loop stops at the next clip, as the command does.

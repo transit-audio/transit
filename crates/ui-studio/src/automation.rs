@@ -611,10 +611,26 @@ pub fn snap(s: &Session, spp: f64, g: &GridView, at: Samples) -> Samples {
     if !g.snap_enabled {
         return at;
     }
+    snapped(s, spp, g, crate::at_or_after_start(s, at), |x| crate::at_or_after_start(s, x))
+}
+
+/// `at` snapped to the grid like [`snap`] (unchanged when snapping is off), then floored at
+/// `floor`: a start trim's floor may be before the session start, at the clip's hidden content
+/// (ADR 0052 decision 7). The pointer is snapped before the floor applies, so a drag past an
+/// off-grid floor lands on the floor itself, never on the grid line after it.
+pub fn snap_at_or_after(s: &Session, spp: f64, g: &GridView, at: Samples, floor: Samples) -> Samples {
+    if !g.snap_enabled {
+        return at.max(floor);
+    }
+    snapped(s, spp, g, at, |x| x.max(floor))
+}
+
+/// `at` on the nearest grid line, passed through `floor`.
+fn snapped(s: &Session, spp: f64, g: &GridView, at: Samples, floor: impl Fn(Samples) -> Samples) -> Samples {
     let step = grid_ticks(s, spp, g).max(1);
-    let tick = s.tempo.samples_to_ticks(crate::at_or_after_start(s, at), s.sample_rate);
-    let snapped = ((tick as f64 / step as f64).round() as i64).saturating_mul(step);
-    crate::at_or_after_start(s, s.tempo.tick_to_samples(snapped, s.sample_rate))
+    let tick = s.tempo.samples_to_ticks(at, s.sample_rate);
+    let line = ((tick as f64 / step as f64).round() as i64).saturating_mul(step);
+    floor(s.tempo.tick_to_samples(line, s.sample_rate))
 }
 
 /// A drag of `dx` samples from `start`, quantized to the grid as a delta (Logic's relative

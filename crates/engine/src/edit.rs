@@ -516,6 +516,31 @@ pub fn start_floor(c: &Clip, zone: Samples) -> Samples {
     if c.is_audio() { 0 } else { zone }
 }
 
+/// The earliest position a start trim may move `c`'s start edge to (ADR 0052 decision 7), shared
+/// by `edit.trim_clip` and the arranger's start-trim drag and preview so the three agree. An audio
+/// clip floors at bar 1 (decision 11; its file start is a separate bound). A MIDI clip floors at
+/// the session start, or earlier at its own hidden content: for a clip whose left edge hides
+/// ([`transit_mix::left_edge_hides`]), the position of its earliest event before tick 0, found as
+/// a tick (the clip start's tick plus the event's) and converted once, so a tempo change inside the
+/// clip moves it with the music. A looped clip's negative ticks are loop material, not hidden, so
+/// its floor is the session start. Only captured content can be revealed: a trim to this floor
+/// grows the zone to it and no further.
+pub fn start_trim_floor(s: &Session, c: &Clip) -> Samples {
+    if c.is_audio() {
+        return 0;
+    }
+    let zone = s.start();
+    let ClipContent::Midi { sequence } = &c.content else { return zone };
+    if !transit_mix::left_edge_hides(c) {
+        return zone;
+    }
+    let earliest = sequence.notes.iter().map(|n| n.start).chain(sequence.ctrls.iter().map(|e| e.tick)).filter(|&t| t < 0).min();
+    let Some(h) = earliest else { return zone };
+    let base = s.tempo.samples_to_ticks(c.start, s.sample_rate);
+    let hidden = s.tempo.tick_to_samples(base.saturating_add(h), s.sample_rate).max(-transit_time::MAX_POSITION);
+    hidden.min(zone)
+}
+
 /// The least delta that keeps every one of `clips` at or after its [`start_floor`], so a group
 /// moved, pasted or copied by at least this stops together, keeping its spacing (`Samples::MIN`
 /// for no clips).
@@ -784,7 +809,11 @@ pub fn trim_clip(s: &mut Session, id: ClipId, start: Option<Samples>, end: Optio
         if let Some(next) = others.filter(|c| c.start > old.start).map(|c| c.start).min() {
             hi = hi.min(next.max(old.end()));
         }
-        lo = lo.max(0);
+    }
+    // The start floor (ADR 0052 decision 7) in every mode; an audio clip in Shuffle keeps only its
+    // file start as before, since its start edge does not move there.
+    if start.is_some() && !(shuffle && old.is_audio()) {
+        lo = lo.max(start_trim_floor(s, &old));
     }
     let file = |c: &Clip| {
         let start = c.start.saturating_sub(c.source_offset());

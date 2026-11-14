@@ -313,8 +313,8 @@ fn a_loop_strip_drag_reaches_the_zone_and_stops_at_its_start() {
 
 #[test]
 fn a_start_trim_drag_on_a_clip_wholly_before_bar_1_does_not_panic() {
-    // Start trims keep their bar-1 floor until the hidden-content floor (ADR 0052, Slices 6); the
-    // preview must not panic on a clip that ends before bar 1 meanwhile.
+    // The preview must not panic on a clip that ends before bar 1 (its floors since slice 6b are
+    // pinned in trim_floor_ui_tests).
     let ctx = egui::Context::default();
     let mut time = 0.0;
     let (mut app, _, ids) = zone_app(&[(-2 * BAR, BAR)]);

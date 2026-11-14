@@ -92,10 +92,14 @@ Clicking empty grid clears the selection and marks where step entry begins; it n
 
 Dragging a MIDI clip's start edge later hides the notes and controller moves before the new start;
 it does not delete them. Drag the start edge back out and they return exactly where they were
-played. Trim Start to Insertion and Trim to Selection work the same way. A note
+played. The start edge drags back as far as the session start (bar 1, or the start of a zone before
+bar 1), or further when the clip's earliest hidden note or controller move is before that: then it
+stops exactly at that event, so nothing captured is out of reach. A looped clip's start stops at the
+session start. Trim Start to Insertion and Trim to Selection work the same way. A note
 that starts before the edge is silent as a whole, even if it is still held after the edge: a chord
 held across the edge stays silent until the edge is dragged back before it. The end edge already
-worked this way: notes past it stay in the clip and do not play.
+worked this way: notes past it stay in the clip and do not play. The end edge and the loop handle of
+a clip that ends before bar 1 stay before bar 1 when dragged; they no longer stretch the clip to bar 1.
 
 Hidden notes are not drawn in the piano roll or on the clip, and Select All, quantize, transpose,
 Duplicate and Delete leave them alone. The session file keeps them. A copy of the clip, a copied or
