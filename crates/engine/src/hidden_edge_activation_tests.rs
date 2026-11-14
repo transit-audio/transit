@@ -277,3 +277,72 @@ fn a_split_of_a_clip_with_an_invalid_loop_is_a_partition() {
     assert_eq!(l.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![48, 50], "the left half keeps its own side");
     assert_eq!(r.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![60, 64, 67]);
 }
+
+// ---- the loop handle's independent copies (decision 17.10) ---------------------------------
+
+#[test]
+fn independent_loop_handle_copies_carry_nothing_the_start_edge_hides() {
+    let (mut e, t, id) = engine_with(START, fixture(), None);
+    let original = clip(&e, id).clone();
+    trim(&mut e, id, CUT);
+    let trimmed = clip(&e, id).clone();
+    let len = trimmed.length;
+    let before = ons(e.session(), t);
+    // Two whole copies and a tail of half a copy after the trimmed clip.
+    let out = run(&mut e, "clip.loop_to", json!({"clip": id.0, "to": trimmed.end() + 2 * len + len / 2, "independent": true}));
+    assert_eq!(out["repeats"], 3, "{out}");
+    let copies: Vec<Clip> = e.session().track(t).unwrap().clips().iter().filter(|c| c.id != id).cloned().collect();
+    assert_eq!(copies.len(), 3);
+    for c in &copies {
+        let ClipContent::Midi { sequence } = &c.content else { panic!("not MIDI") };
+        assert_eq!(negatives(sequence), (0, 0), "a copy carries nothing hidden: {:?}", c.id);
+        assert!(!c.holds_left_hidden());
+    }
+    // The original keeps what it hides and sounds as before; each whole copy sounds it one length later.
+    assert_eq!(clip(&e, id), &trimmed, "the original is unchanged");
+    let all = ons(e.session(), t);
+    let own: Vec<_> = all.iter().filter(|(at, _)| *at < trimmed.end()).copied().collect();
+    assert_eq!(own, before, "the original's playback is unchanged");
+    // Events sit on each clip's tick grid (ADR 0019), so the copy's notes move by the distance
+    // between the two clips' grid starts, not by the sample length.
+    let (tempo, sr) = (&e.session().tempo, e.session().sample_rate);
+    let grid = |at: Samples| tempo.tick_to_samples(tempo.samples_to_ticks(at, sr), sr);
+    let shift = grid(trimmed.end()) - grid(trimmed.start);
+    let first: Vec<_> = all.iter().filter(|(at, _)| (trimmed.end()..trimmed.end() + len).contains(at)).copied().collect();
+    assert_eq!(first, before.iter().map(|(at, p)| (at + shift, *p)).collect::<Vec<_>>(), "the first copy sounds what the original does");
+    // The original still gives its notes back on a trim back.
+    trim(&mut e, id, START);
+    assert_eq!(clip(&e, id).content, original.content);
+}
+
+// ---- the model's rule and the mix's rule agree (decision 17) -------------------------------
+
+#[test]
+fn holds_left_hidden_agrees_with_left_hidden_on_every_kind_of_clip() {
+    let loops = [
+        None,
+        Some(ClipLoop { start: 0, end: BAR }),
+        Some(ClipLoop { start: -BAR, end: 0 }),
+        Some(ClipLoop { start: 0, end: transit_model::MIN_CYCLE - 1 }),
+    ];
+    let mut checked = 0;
+    for looping in loops {
+        for tick in [-1, 0, 1] {
+            for (notes, ctrls) in [(vec![note(60, tick, Q)], Vec::new()), (Vec::new(), vec![cc(tick, 9)]), (vec![note(60, 5, Q)], vec![cc(tick, 9)])]
+            {
+                let mut c = Clip::midi(ClipId(1), "m", BAR, 2 * BAR, Sequence { notes, ctrls });
+                c.looping = looping;
+                let ClipContent::Midi { sequence } = &c.content else { panic!() };
+                let mix = sequence.notes.iter().any(|n| transit_mix::left_hidden(&c, n.start))
+                    || sequence.ctrls.iter().any(|e| transit_mix::left_hidden(&c, e.tick));
+                assert_eq!(c.holds_left_hidden(), mix, "loop {looping:?}, tick {tick}");
+                assert_eq!(mix, tick < 0 && !looping.is_some_and(|l| l.is_valid()), "loop {looping:?}, tick {tick}");
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 36);
+    // An audio clip holds no hidden events and the mix rule hides nothing in it.
+    let audio = Clip::audio(ClipId(2), "a", transit_model::SourceId(1), BAR, 0, BAR);
+    assert!(!audio.holds_left_hidden() && !transit_mix::left_hidden(&audio, -1));
+}

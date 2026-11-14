@@ -412,9 +412,12 @@ fn loop_to(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 /// Alt on the handle (a Repeat): plain copies of `base` back to back from its end up to `to`, the
-/// last one trimmed there. Nothing is linked; the original is unchanged.
+/// last one trimmed there. Nothing is linked; the original is unchanged. The copies are copies,
+/// not trims: they carry nothing the original's start edge hides (ADR 0052 decision 17.10), while
+/// the original keeps it.
 fn repeat_copies(s: &mut transit_model::Session, track: TrackId, mut base: transit_model::Clip, to: Samples) -> Result<Value> {
     base.loop_id = None;
+    crate::edit::drop_left_hidden(&mut base);
     let len = base.length.max(1);
     let from = base.end();
     let span = to.saturating_sub(from).max(0);

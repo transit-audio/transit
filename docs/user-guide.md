@@ -99,8 +99,8 @@ worked this way: notes past it stay in the clip and do not play.
 
 Hidden notes are not drawn in the piano roll or on the clip, and Select All, quantize, transpose,
 Duplicate and Delete leave them alone. The session file keeps them. A copy of the clip, a copied or
-pasted range, a DAWproject export and a clip group file carry only what sounds; a split gives each
-half the notes on its side.
+pasted range, a DAWproject export and a clip group file carry nothing the start edge hides; a
+split gives each unlooped half the notes on its side.
 
 Clear Loop on a looped clip whose start was trimmed, or dragging its loop handle back to the end
 of the first cycle, leaves the notes before the start that the loop's repeats played. They are
