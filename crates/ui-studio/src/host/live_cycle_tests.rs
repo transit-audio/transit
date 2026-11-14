@@ -394,4 +394,20 @@ mod lap_clock {
         assert_eq!(app.status, crate::host::recording::HALF_SPEED_WHILE_RECORDING);
         assert!(app.recording_active() && app.take_plan.is_some(), "the pass goes on");
     }
+
+    /// A held start the player refuses because the transport was not at normal speed reads the
+    /// same whether it comes at the end of a count-in or as a refused action (#634 follow-up).
+    #[test]
+    fn a_start_refused_for_speed_says_one_sentence_on_both_paths() {
+        use transit_playback::{ActionResult, StartFailure, action_lane::Outcome};
+        let want = "Recording could not start: the transport was not at normal speed.";
+        let (mut app, _dir) = armed(5);
+        app.start_recording();
+        assert!(app.recording_active(), "{}", app.status);
+        app.player.as_ref().unwrap().report_start_failure(StartFailure::Speed);
+        step(&mut app);
+        assert!(app.take_plan.is_none() && !app.recording_active(), "nothing records");
+        assert_eq!(app.status, want, "at the end of a count-in");
+        assert_eq!(crate::host::refusal_text(Outcome::Applied, Some(ActionResult::RecordingSpeed)), want, "as a refused action");
+    }
 }

@@ -154,7 +154,7 @@ impl StudioApp {
             // The count-in ended but Record could not start: nothing is recording, so release the
             // take and the recorder arm, and say why.
             self.finish_recording();
-            self.status = format!("Recording could not start: {}", failure.reason());
+            self.status = super::start_failure_text(failure);
         }
         if self.status == "Count-in" && self.count_in_state().is_none() && self.sim_count_in.is_none() {
             self.status = if self.recording_active() { "Recording".into() } else { String::new() };
@@ -168,13 +168,14 @@ impl StudioApp {
                     self.midi_transport.deferred.clear();
                     self.restore_pending = true;
                     if let Some(p) = &self.player {
+                        // Normal speed is stored before Stop is sent, as `stop_play` does.
+                        p.set_speed(1.0);
                         if let Some(sequence) = self.player_requests.result(&mut self.status, p.stop()) {
                             self.player_requests.stop = Some(sequence);
                         }
                         if let Some(sequence) = self.player_requests.result(&mut self.status, p.set_recording(false)) {
                             self.player_requests.recording = Some(sequence);
                         }
-                        p.set_speed(1.0);
                     }
                     self.sim = None;
                     // The old capture belongs to the replaced document, never to the new one.

@@ -194,6 +194,12 @@ pub(crate) fn plugin_error_status(s: &transit_model::Session, track: TrackId, sl
     Some(format!("{} on {} reported a processing error, so its output is silent while the error lasts.", ins.plugin, t.name))
 }
 
+/// The status line when a held recording start fails: one sentence per reason, whether the
+/// player reports it at the end of a count-in or as a refused action.
+pub(crate) fn start_failure_text(failure: transit_playback::StartFailure) -> String {
+    format!("Recording could not start: {}.", failure.reason())
+}
+
 /// A refused audio action as a sentence for the status line; the raw variants go to the log only.
 pub(crate) fn refusal_text(outcome: transit_playback::action_lane::Outcome, result: Option<transit_playback::ActionResult>) -> String {
     use transit_playback::{ActionResult, action_lane::Outcome, device_clock::Unavailable};
@@ -210,7 +216,7 @@ pub(crate) fn refusal_text(outcome: transit_playback::action_lane::Outcome, resu
             format!("Recording can't start: {reason}.")
         }
         Some(ActionResult::RecordingNotPlaying) => "Recording can't start: the transport is not playing.".into(),
-        Some(ActionResult::RecordingSpeed) => "Recording can't start: the transport is not at normal speed.".into(),
+        Some(ActionResult::RecordingSpeed) => start_failure_text(transit_playback::StartFailure::Speed),
         Some(ActionResult::RecordingCancelled) => "Recording was canceled before it could start.".into(),
         Some(ActionResult::InvalidPosition) => "The audio engine can't go there: the position is out of range.".into(),
         Some(ActionResult::Timeline(_) | ActionResult::MidiTimeline(_)) => {
