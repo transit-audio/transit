@@ -152,6 +152,10 @@ later note starts the key again and the first note-off ends it.
 
 ## Notes played during the count-in
 
+Not yet when recording from the very start of the session: there, a note you released during the
+count-in is left out of the take, because nothing can sit before bar 1 (a zone before bar 1 is being
+built, #441). Start the recording a bar or more into the session and the following applies.
+
 Notes you play on an armed MIDI or instrument track during the count-in are kept, as in Logic Pro:
 the clip starts at the first of them instead of at the record start, and every note stays where
 you played it. Recording already starts at the pre-roll start, so notes in the pre-roll are kept

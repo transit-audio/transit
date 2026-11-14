@@ -182,7 +182,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Clip-internal loops: drag the loop handle at a clip header's upper right to repeat the clip in cycles (dividers show each cycle; Alt-drag makes independent copies, Ctrl/Cmd-drag overwrites the clips in the way). Edits inside the loop apply to every cycle.
 - Track height from 16 to 440 points: drag a header's bottom edge (Alt resizes every track), Alt+wheel over one track, Alt+= and Alt+- for the presets, View > Track Height to reset. Heights are saved in the session; automation and take lanes follow their track.
 - View > Grid Over Clips draws the grid above the clips as one structure carrying the tempo, meter and triplets, as Ableton draws it; off by default, as in Logic.
-- Notes you play during the record count-in are kept, and the clip starts at the first one, as in Logic.
+- Notes you play during the record count-in are kept when recording starts after the start of the session, and the clip starts at the first one, as in Logic. Recording from the very start of the session does not keep them yet: a note released before bar 1 is left out, and the status line says how many (#441 adds room before bar 1).
 
 ### Mixer and routing
 
