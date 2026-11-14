@@ -20,6 +20,7 @@
 //! plays, so a ring never needs to wrap content; a locate or a transport loop is a new stream.
 
 mod peaks;
+mod retarget;
 mod stream;
 
 use crate::{Clip, ClipContent, ClipLoop, Session};
@@ -370,12 +371,13 @@ impl Cache {
 /// A disk-backed source: its file, the rings the streamer fills and the audio thread drains, and
 /// the waveform peaks once they are built. See the module documentation.
 pub struct DiskSource {
-    path: PathBuf,
+    /// The file read and how to open it: one file for the source's life, unless a save moves the
+    /// session onto a copy of it ([`DiskSource::retarget`], #629).
+    target: Mutex<Target>,
     channels: usize,
     frames: u64,
     rate: u32,
     window: usize,
-    opener: Opener,
     slots: Box<[Slot]>,
     requests: Box<[Request]>,
     pump: Mutex<stream::Pump>,
@@ -388,8 +390,17 @@ pub struct DiskSource {
     /// Failed opens and reads of the synchronous reader so far, so an offline render can tell
     /// whether it met one ([`DiskSource::sync_failures`]).
     sync_failures: AtomicU64,
-    /// Whether the background peaks build may still write beside the file (#663).
-    peaks_gate: Arc<peaks::PeaksGate>,
+    /// Whether the background peaks build may still write beside the file (#663); a new gate for
+    /// each file the source reads.
+    peaks_gate: Mutex<Arc<peaks::PeaksGate>>,
+    /// Served by the streaming thread ([`register`]), which builds the peaks in the background.
+    registered: AtomicBool,
+}
+
+/// The file a disk-backed source reads, and the opener of its readers.
+struct Target {
+    path: PathBuf,
+    opener: Opener,
 }
 
 impl Drop for DiskSource {
@@ -405,7 +416,7 @@ const SYNC: usize = 1;
 impl std::fmt::Debug for DiskSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DiskSource")
-            .field("path", &self.path)
+            .field("path", &self.path())
             .field("channels", &self.channels)
             .field("frames", &self.frames)
             .field("rate", &self.rate)
@@ -425,12 +436,11 @@ impl DiskSource {
     /// [`DiskSource::new`] with rings of `window` frames (tests use short ones).
     pub fn with_window(path: PathBuf, channels: usize, frames: u64, rate: u32, window: usize, opener: Opener) -> Arc<DiskSource> {
         Arc::new(DiskSource {
-            path,
+            target: Mutex::new(Target { path, opener }),
             channels: channels.max(1),
             frames,
             rate,
             window: window.max(1),
-            opener,
             slots: (0..SLOTS).map(|_| Slot::new()).collect(),
             requests: (0..REQUESTS).map(|_| Request::new()).collect(),
             pump: Mutex::new(stream::Pump::default()),
@@ -439,20 +449,20 @@ impl DiskSource {
             underruns: AtomicU64::new(0),
             faults: Mutex::new([None, None]),
             sync_failures: AtomicU64::new(0),
-            peaks_gate: Arc::default(),
+            peaks_gate: Mutex::default(),
+            registered: AtomicBool::new(false),
         })
     }
 
     /// The native PCM file at `path`, `len` bytes long, through [`BlockFile`].
     pub fn open(path: &Path, len: u64) -> Result<Arc<DiskSource>, String> {
-        let (_, info) = BlockFile::open(path, len)?;
-        let owned = path.to_path_buf();
-        let opener: Opener = Arc::new(move || BlockFile::open(&owned, len).map(|(f, _)| Box::new(f) as Box<dyn DiskFile>));
+        let (opener, info) = block_opener(path, len)?;
         Ok(Self::new(path.to_path_buf(), usize::from(info.channels), info.frames, info.sample_rate, opener))
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    /// The file this source reads now.
+    pub fn path(&self) -> PathBuf {
+        self.target.lock().unwrap_or_else(PoisonError::into_inner).path.clone()
     }
     pub fn channels(&self) -> usize {
         self.channels
@@ -467,8 +477,9 @@ impl DiskSource {
     pub fn window(&self) -> usize {
         self.window
     }
-    pub fn opener(&self) -> &Opener {
-        &self.opener
+    /// The opener of a reader of the file this source reads now.
+    pub fn opener(&self) -> Opener {
+        Arc::clone(&self.target.lock().unwrap_or_else(PoisonError::into_inner).opener)
     }
     /// This source's disk underruns (see [`underruns`] for the process).
     pub fn underruns(&self) -> u64 {
@@ -489,7 +500,7 @@ impl DiskSource {
     /// bytes per channel per [`PEAKS_BUCKET`] frames, synced; about 11 MB a channel for 8 h at
     /// 48 kHz), never for the build. Not for the audio thread, which never drops a source.
     pub fn stop_peaks(&self) {
-        self.peaks_gate.close();
+        self.peaks_gate.lock().unwrap_or_else(PoisonError::into_inner).close();
     }
 
     /// Audio thread: the ring holding clip time `k0..k0 + n` of `map`'s clip as `map` maps it, or
@@ -585,7 +596,7 @@ impl DiskSource {
 
     /// Open the synchronous reader into `slot` (replacing what it held), recording the outcome.
     fn open_sync(&self, slot: &mut Option<Cache>) -> Result<(), String> {
-        match (self.opener)() {
+        match (self.opener())() {
             Ok(file) => {
                 *slot = Some(Cache::new(file, self.frames));
                 self.clear(SYNC);
@@ -614,7 +625,8 @@ impl DiskSource {
     /// Record `why` (the path not repeated) as `reader`'s fault and return it; logged when it is
     /// new for the reader, so a file still missing on every block logs once.
     fn record(&self, reader: usize, why: String) -> String {
-        let why = why.replacen(&format!("{}: ", self.path.display()), "", 1);
+        let path = self.path();
+        let why = why.replacen(&format!("{}: ", path.display()), "", 1);
         if reader == SYNC {
             self.sync_failures.fetch_add(1, Ordering::AcqRel);
         }
@@ -622,7 +634,7 @@ impl DiskSource {
         if let Some(f) = faults.get_mut(reader)
             && f.as_deref() != Some(why.as_str())
         {
-            log::warn!("{}: the streamed source {why}; it plays as silence", self.path.display());
+            log::warn!("{}: the streamed source {why}; it plays as silence", path.display());
             *f = Some(why.clone());
         }
         why
@@ -635,6 +647,15 @@ impl DiskSource {
             *f = None;
         }
     }
+}
+
+/// The opener of [`BlockFile`] readers of the native PCM file at `path` (`len` bytes long), and
+/// what its header says.
+fn block_opener(path: &Path, len: u64) -> Result<(Opener, AudioInfo), String> {
+    let (_, info) = BlockFile::open(path, len)?;
+    let owned = path.to_path_buf();
+    let opener: Opener = Arc::new(move || BlockFile::open(&owned, len).map(|(f, _)| Box::new(f) as Box<dyn DiskFile>));
+    Ok((opener, info))
 }
 
 /// A ring's view of clip time `..end` for one audio-thread read; dropping it marks the clip read

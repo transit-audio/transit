@@ -14,7 +14,7 @@ use super::{DiskFile, Opener};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// Frames summed up in one peaks bucket: 1.4 M buckets (11 MB a channel) for 8 h at 48 kHz.
 pub const PEAKS_BUCKET: usize = 1024;
@@ -97,6 +97,8 @@ pub(crate) struct PeaksGate {
     closed: AtomicBool,
     /// Held for the whole sidecar write, and by a close.
     writing: Mutex<()>,
+    /// Held by the background build for as long as it may have the file open (#629).
+    reading: Mutex<()>,
 }
 
 impl PeaksGate {
@@ -108,6 +110,19 @@ impl PeaksGate {
     pub(crate) fn close(&self) {
         let _writing = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
         self.closed.store(true, Ordering::Release);
+    }
+
+    /// Held by the background build around its whole run, readers of the file included.
+    pub(crate) fn reading(&self) -> MutexGuard<'_, ()> {
+        self.reading.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Close the gate and wait until the build has let go of the file: it stops at its next read
+    /// (the wait is at most one read of [`READ_FRAMES`] frames) or a sidecar write under way ends.
+    /// After this, no reader of the file is held for the peaks (#629).
+    pub(crate) fn close_and_release(&self) {
+        self.close();
+        drop(self.reading());
     }
 
     /// `write()` unless the gate is closed; a close waits until it is done.
@@ -200,6 +215,13 @@ fn build(file: &mut dyn DiskFile, channels: usize, frames: u64, gate: &PeaksGate
         }
     }
     Ok(Some(DiskPeaks { frames, bucket: PEAKS_BUCKET, channels: out }))
+}
+
+/// Write the sidecar of the file at `path` from `peaks` already built from the same audio (a save's
+/// copy of the file, #629), unless `gate` is closed. The copy's own stamp is recorded.
+pub(super) fn save_sidecar(path: &Path, peaks: &DiskPeaks, gate: &PeaksGate) -> std::io::Result<()> {
+    let s = stamp(path)?;
+    gate.write(|| write_sidecar(&sidecar_path(path), s, peaks)).unwrap_or(Ok(()))
 }
 
 fn write_sidecar(side: &Path, s: Stamp, p: &DiskPeaks) -> std::io::Result<()> {

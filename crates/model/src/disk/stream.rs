@@ -52,7 +52,7 @@ impl DiskSource {
             }
         }
         if p.cache.is_none() && !p.broken {
-            match (self.opener)() {
+            match (self.opener())() {
                 Ok(file) => {
                     p.cache = Some(Cache::new(file, self.frames));
                     self.clear(STREAMER);
@@ -91,13 +91,22 @@ impl DiskSource {
     /// again by the next pass, so a drive plugged back in plays without reopening the session.
     pub(crate) fn retry(&self) {
         let mut p = self.pump.lock().unwrap_or_else(PoisonError::into_inner);
-        if !p.broken {
-            return;
+        if p.broken {
+            self.drop_reader(&mut p);
         }
-        p.broken = false;
+    }
+
+    /// Drop the streamer's reader, so the next pass opens the file anew. After a failure the rings
+    /// filled since hold silence in place of the file: they are freed too.
+    pub(super) fn drop_reader(&self, p: &mut Pump) {
         p.cache = None;
-        // Rings filled since the failure hold silence in place of the file: free them (not one the
-        // reader is in, as in `cue_slot`) so they are cued and read again.
+        if std::mem::take(&mut p.broken) {
+            self.free_rings(p);
+        }
+    }
+
+    /// Free every ring (not one the reader is in, as in `cue_slot`) so it is cued and read again.
+    fn free_rings(&self, p: &mut Pump) {
         for (i, slot) in self.slots.iter().enumerate() {
             let was = slot.state.load(Ordering::Acquire);
             if was == FREE {
@@ -175,6 +184,7 @@ pub(crate) const PEAKS_THREAD: &str = "transit-disk-peaks";
 /// until the source's owner lets it go ([`DiskSource::stop_peaks`]).
 pub fn register(source: &Arc<DiskSource>) {
     REGISTRY.lock().unwrap_or_else(PoisonError::into_inner).push(Arc::downgrade(source));
+    source.registered.store(true, Ordering::Release);
     THREAD.get_or_init(|| {
         let spawned = std::thread::Builder::new().name("transit-disk-stream".into()).spawn(|| {
             loop {
@@ -195,25 +205,34 @@ pub fn register(source: &Arc<DiskSource>) {
         }
     });
     if source.peaks().is_none() {
-        let weak = Arc::downgrade(source);
-        let (path, opener, channels, frames) = (source.path.clone(), Arc::clone(&source.opener), source.channels, source.frames);
-        // The build holds the gate, never the source: the streaming thread may hold the source a
-        // pass longer than its owner, and the owner's going closes the gate (#663).
-        let gate = Arc::clone(&source.peaks_gate);
-        let spawned = std::thread::Builder::new().name(PEAKS_THREAD.into()).spawn(move || {
-            match super::peaks::load_or_build_peaks_until(&path, &opener, channels, frames, &gate) {
-                Ok(Some((peaks, _))) => {
-                    if let Some(s) = weak.upgrade() {
-                        s.set_peaks(peaks);
-                    }
+        spawn_peaks(source);
+    }
+}
+
+/// Build `source`'s waveform peaks on a thread of their own, from the file it reads now.
+pub(super) fn spawn_peaks(source: &Arc<DiskSource>) {
+    let weak = Arc::downgrade(source);
+    let (path, opener, channels, frames) = (source.path(), source.opener(), source.channels, source.frames);
+    // The build holds the gate, never the source: the streaming thread may hold the source a pass
+    // longer than its owner, and the owner's going closes the gate (#663).
+    let gate = Arc::clone(&source.peaks_gate.lock().unwrap_or_else(PoisonError::into_inner));
+    let spawned = std::thread::Builder::new().name(PEAKS_THREAD.into()).spawn(move || {
+        // Held while the build may have the file open, so a retarget knows when it let go (#629).
+        let reading = gate.reading();
+        let built = super::peaks::load_or_build_peaks_until(&path, &opener, channels, frames, &gate);
+        drop(reading);
+        match built {
+            Ok(Some((peaks, _))) => {
+                if let Some(s) = weak.upgrade() {
+                    s.set_peaks(peaks);
                 }
-                Ok(None) => {}
-                Err(_) if gate.is_closed() => {}
-                Err(e) => log::warn!("{}: waveform peaks could not be built: {e}", path.display()),
             }
-        });
-        if let Err(e) = spawned {
-            log::warn!("the waveform peaks thread could not start: {e}");
+            Ok(None) => {}
+            Err(_) if gate.is_closed() => {}
+            Err(e) => log::warn!("{}: waveform peaks could not be built: {e}", path.display()),
         }
+    });
+    if let Err(e) = spawned {
+        log::warn!("the waveform peaks thread could not start: {e}");
     }
 }

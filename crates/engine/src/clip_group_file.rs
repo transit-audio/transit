@@ -74,9 +74,10 @@ pub fn export(e: &Engine, ids: &[ClipId], path: &str) -> Result<usize> {
                 let rel = match &buf.disk {
                     // A disk-backed source's file is its audio (ADR 0035): copied as it is.
                     Some(d) => {
-                        let ext = d.path().extension().and_then(|x| x.to_str()).unwrap_or("wav");
+                        let file = d.path();
+                        let ext = file.extension().and_then(|x| x.to_str()).unwrap_or("wav");
                         let rel = format!("{name}.{ext}");
-                        crate::io::copy_path(d.path(), dir.join(&rel))?;
+                        crate::io::copy_path(&file, dir.join(&rel))?;
                         rel
                     }
                     None => {

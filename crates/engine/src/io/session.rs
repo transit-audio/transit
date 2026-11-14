@@ -129,11 +129,11 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
             let path = match files.get(&Arc::as_ptr(audio)) {
                 Some(path) => path.clone(),
                 None => {
-                    let path = match super::save_media::in_session_folder(&dir, disk.path()) {
+                    let path = match super::save_media::in_session_folder(&dir, &disk.path()) {
                         Some(path) => path,
                         None => {
                             make_dir(&audio_dir)?;
-                            let (name, new) = super::save_media::bring_into(&audio_dir, disk.path(), disk.frames(), disk.channels())?;
+                            let (name, new) = super::save_media::bring_into(&audio_dir, &disk.path(), disk.frames(), disk.channels())?;
                             written += usize::from(new);
                             format!("Audio Files/{name}")
                         }
@@ -560,11 +560,11 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
         let bytes = match &audio.disk {
             // A disk-backed source goes in as its file, as long as a bundle can hold it.
             Some(d) => {
-                let len = std::fs::metadata(d.path()).map_err(ioerr)?.len();
+                let len = std::fs::metadata(&d.path()).map_err(ioerr)?.len();
                 if len > MAX_BUNDLE_BYTES {
                     return Err(EngineError::Io(format!("bundle: {} is too long to bundle; save the session as a folder", d.path().display())));
                 }
-                read_file(d.path())?
+                read_file(&d.path())?
             }
             None => {
                 let opts_wav = EncodeOptions {

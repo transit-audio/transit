@@ -5,8 +5,8 @@ use super::*;
 use std::sync::atomic::AtomicUsize;
 
 /// A file held in memory, counting how many readers were opened.
-struct Fake {
-    data: Arc<Vec<Vec<f32>>>,
+pub(super) struct Fake {
+    pub(super) data: Arc<Vec<Vec<f32>>>,
 }
 
 impl DiskFile for Fake {
@@ -23,7 +23,7 @@ impl DiskFile for Fake {
     }
 }
 
-fn ramp(channels: usize, frames: usize) -> Vec<Vec<f32>> {
+pub(super) fn ramp(channels: usize, frames: usize) -> Vec<Vec<f32>> {
     (0..channels).map(|c| (0..frames).map(|i| c as f32 * 10.0 + i as f32 / frames as f32).collect()).collect()
 }
 
@@ -40,7 +40,7 @@ fn fake(data: Vec<Vec<f32>>, window: usize) -> (Arc<DiskSource>, Arc<AtomicUsize
     (DiskSource::with_window(PathBuf::from("fake.wav"), channels, frames, 48_000, window, opener), opened)
 }
 
-fn map(clip: u64, length: i64) -> StreamMap {
+pub(super) fn map(clip: u64, length: i64) -> StreamMap {
     StreamMap { clip, offset: 0, looping: None, stretch: 1.0, length }
 }
 
@@ -293,16 +293,16 @@ fn the_threshold_reads_the_session_setting() {
 }
 
 /// A unique temp dir, removed on drop (E51).
-struct Dir(transit_test_support::TestDir);
+pub(super) struct Dir(pub(super) transit_test_support::TestDir);
 impl Dir {
-    fn new(tag: &str) -> Dir {
+    pub(super) fn new(tag: &str) -> Dir {
         let p = transit_test_support::TestDir::new(&format!("disk-{tag}"));
         let _ = std::fs::create_dir_all(&p);
         Dir(p)
     }
 }
 
-fn write_wav(path: &Path, data: &[f32]) {
+pub(super) fn write_wav(path: &Path, data: &[f32]) {
     let mut bytes = transit_audio_io::wav_float_header(1, 48_000, data.len() as u64).unwrap_or_default();
     bytes.extend(data.iter().flat_map(|v| v.to_le_bytes()));
     std::fs::write(path, bytes).unwrap_or_else(|e| panic!("{e}"));
@@ -315,7 +315,7 @@ fn peaks_are_built_once_then_read_from_the_sidecar_until_the_file_changes() {
     let data: Vec<f32> = (0..5_000).map(|i| ((i % 700) as f32 / 350.0) - 1.0).collect();
     write_wav(&path, &data);
     let d = DiskSource::open(&path, std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)).unwrap_or_else(|e| panic!("{e}"));
-    let (built, origin) = load_or_build_peaks(&path, d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
+    let (built, origin) = load_or_build_peaks(&path, &d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(origin, PeaksOrigin::Built);
     assert!(sidecar_path(&path).is_file());
     assert_eq!(built.channels[0].len(), 5_000usize.div_ceil(PEAKS_BUCKET));
@@ -323,7 +323,7 @@ fn peaks_are_built_once_then_read_from_the_sidecar_until_the_file_changes() {
     assert_eq!(built.channels[0][0], first);
     assert_eq!(built.minmax(0, 0.0, 5_000.0), Some((-1.0, data.iter().copied().fold(f32::NEG_INFINITY, f32::max))));
 
-    let (again, origin) = load_or_build_peaks(&path, d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
+    let (again, origin) = load_or_build_peaks(&path, &d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!((origin, &again), (PeaksOrigin::Sidecar, &built), "reused, unread");
 
     // Same length, new content and a new modification time: the sidecar is stale.
@@ -332,7 +332,7 @@ fn peaks_are_built_once_then_read_from_the_sidecar_until_the_file_changes() {
     let f = std::fs::File::options().write(true).open(&path).unwrap_or_else(|e| panic!("{e}"));
     f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000)).unwrap_or_else(|e| panic!("{e}"));
     drop(f);
-    let (rebuilt, origin) = load_or_build_peaks(&path, d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
+    let (rebuilt, origin) = load_or_build_peaks(&path, &d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(origin, PeaksOrigin::Built);
     assert_ne!(rebuilt, built);
 }
@@ -365,7 +365,7 @@ fn a_sidecar_that_cannot_be_written_leaves_no_temporary_file() {
     // A folder where the sidecar would go: the rename fails.
     std::fs::create_dir_all(sidecar_path(&path).join("x")).unwrap_or_else(|e| panic!("{e}"));
     let d = DiskSource::open(&path, std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)).unwrap_or_else(|e| panic!("{e}"));
-    let (peaks, origin) = load_or_build_peaks(&path, d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
+    let (peaks, origin) = load_or_build_peaks(&path, &d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!((origin, peaks.channels[0][0]), (PeaksOrigin::Built, (0.25, 0.25)), "kept in memory");
     let mut tmp = sidecar_path(&path).into_os_string();
     tmp.push(".tmp");

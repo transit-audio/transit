@@ -45,7 +45,7 @@ impl DiskReads {
                 }
                 let name = s.sources.iter().find(|m| m.id == id).map_or_else(|| clip.name.clone(), |m| m.name.clone());
                 if let Err(why) = disk.check() {
-                    lines.push(unreadable_line(&name, disk.path(), &why));
+                    lines.push(unreadable_line(&name, &disk.path(), &why));
                 }
                 reads.push(Read { mark: disk.sync_failures(), disk, name });
             }
@@ -67,7 +67,7 @@ impl DiskReads {
         self.reads
             .iter()
             .filter(|x| x.disk.sync_failures() != x.mark)
-            .map(|x| unreadable_line(&x.name, x.disk.path(), x.disk.fault().as_deref().unwrap_or("a read failed during the render")))
+            .map(|x| unreadable_line(&x.name, &x.disk.path(), x.disk.fault().as_deref().unwrap_or("a read failed during the render")))
             .collect()
     }
 }
@@ -83,7 +83,7 @@ impl DiskReads {
     /// The pre-flight of a render that reads one streamed take `disk` (named `name`) directly.
     pub(crate) fn refuse_one(cmd: &str, name: &str, disk: &Arc<DiskSource>) -> Result<DiskReads> {
         if let Err(why) = disk.check() {
-            return Err(refusal(cmd, &[unreadable_line(name, disk.path(), &why)]));
+            return Err(refusal(cmd, &[unreadable_line(name, &disk.path(), &why)]));
         }
         Ok(DiskReads { reads: vec![Read { mark: disk.sync_failures(), disk: Arc::clone(disk), name: name.to_string() }] })
     }
