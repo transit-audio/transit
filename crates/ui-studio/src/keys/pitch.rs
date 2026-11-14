@@ -15,7 +15,7 @@ impl StudioApp {
         let mut selection = Vec::new();
         for (part, indices) in groups {
             params["clip"] = json!(part.clip.0);
-            params["indices"] = json!(indices);
+            params["indices"] = json!(part.sources(&indices));
             let result = self.keys_exec(command, params.clone(), &key)?;
             let notes: Vec<Note> = serde_json::from_value(result["notes"].clone()).map_err(|e| e.to_string())?;
             selection.extend(notes.into_iter().map(|n| Note { start: n.start + part.off, ..n }));

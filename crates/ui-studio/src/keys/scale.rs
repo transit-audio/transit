@@ -13,16 +13,17 @@ impl StudioApp {
             return Err("notes changed during move".into());
         }
         let ticks = pairs.first().map_or(0, |(a, b)| b.start - a.start);
-        // Per clip, in the pairs' order: its local indices and the new pitches.
+        // Per clip, in the pairs' order: its notes' sequence indices and the new pitches.
         let mut groups: Vec<(ClipId, Vec<usize>, Vec<u8>)> = Vec::new();
         for (i, (_, new)) in indices.into_iter().zip(pairs) {
             let Some((part, local)) = all.locate(i) else { continue };
+            let Some(index) = part.sources(&[local]).first().copied() else { continue };
             match groups.iter_mut().find(|g| g.0 == part.clip) {
                 Some(g) => {
-                    g.1.push(local);
+                    g.1.push(index);
                     g.2.push(new.pitch);
                 }
-                None => groups.push((part.clip, vec![local], vec![new.pitch])),
+                None => groups.push((part.clip, vec![index], vec![new.pitch])),
             }
         }
         self.keys_refuse_frozen(&groups.iter().map(|g| g.0).collect::<Vec<_>>())?;

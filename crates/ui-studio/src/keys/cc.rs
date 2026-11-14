@@ -21,6 +21,7 @@ pub struct Layout {
     pub channel: R4,
     pub choices: Vec<(u8, R4)>,
     pub controller: Option<u8>,
+    /// Each point drawn: its sequence index (what `midi.cc_edit` addresses) and its handle.
     pub points: Vec<(usize, R4)>,
     pub sustain: Vec<R4>,
 }
@@ -84,7 +85,14 @@ pub(super) fn lane(app: &mut StudioApp, ui: &mut Ui, map: &Map, rect: Rect, cv: 
     let Some(controller) = app.keys.cc.controller else { return };
     let Some(clip) = app.keys.clip else { return };
     let channel = app.keys.cc.channel;
-    let points: Vec<_> = cv.ctrls.iter().copied().enumerate().filter(|(_, c)| c.kind == CtrlKind::Cc(controller) && c.channel == channel).collect();
+    // Each shown point with its sequence index, the index `midi.cc_edit` and `midi.cc_delete` address.
+    let points: Vec<_> = cv
+        .ctrl_src
+        .iter()
+        .copied()
+        .zip(cv.ctrls.iter().copied())
+        .filter(|(_, c)| c.kind == CtrlKind::Cc(controller) && c.channel == channel)
+        .collect();
     let painter = ui.painter().with_clip_rect(rect);
     painter.rect_filled(rect, 0.0, TOKENS.panel);
     let mut last = None;
@@ -150,7 +158,7 @@ pub(super) fn lane(app: &mut StudioApp, ui: &mut Ui, map: &Map, rect: Rect, cv: 
         let value = value(rect, pos.y);
         if let Some((drag_clip, index, old)) = app.keys.cc.drag.take() {
             // A clip switch or external edit during a drag must never edit a different point.
-            if drag_clip == clip && cv.ctrls.get(index) == Some(&old) && (tick != old.tick || value != old.value) {
+            if drag_clip == clip && cv.ctrl_at(index) == Some(&old) && (tick != old.tick || value != old.value) {
                 let _ = app.run("midi.cc_edit", json!({"clip": clip.0, "index": index, "tick": tick, "value": value}));
             }
         } else if near(pos).is_none() && cv.len > 0 {

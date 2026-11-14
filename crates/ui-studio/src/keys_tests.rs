@@ -2,6 +2,8 @@
 //! clicks, drags, wheel and keys through the control channel's input queue, one frame at a time.
 //! No player, no plug-ins, no scan.
 
+#[path = "keys/hidden_edge_tests.rs"]
+mod hidden_edge_tests;
 #[path = "keys/multi_tests.rs"]
 mod multi_tests;
 #[path = "keys/overlay_tests.rs"]

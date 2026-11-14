@@ -118,9 +118,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
             if rect.max.x >= tl.min.x && rect.min.x <= tl.max.x {
                 draw_clip(&p, s, map, tl, t, &g, &app.takes_of(t).stacks, rect, false, GHOST_ALPHA, false);
                 // MIDI notes of the cycle the ghost plays, dimmed like the ghost body.
-                if let ClipContent::Midi { sequence } = &base.content
-                    && let Some((lo, span)) = pitch_span(&sequence.notes)
-                {
+                if let Some((lo, span)) = pitch_span(&base) {
                     let body = Rect::from_min_max(pos2(rect.min.x, rect.min.y + CLIP_NAME_H), rect.max).shrink2(vec2(0.0, 2.0));
                     if body.height() > 4.0 {
                         let (body_col, ..) = theme::clip_colors(clip_base_color(&base, t), false);
@@ -229,12 +227,10 @@ pub(super) fn draw_clip(
                     crate::waveform::draw(&wp, s, tl, c, audio, t.channels().min(2), body, ink);
                 }
             }
-            ClipContent::Midi { sequence } => {
-                let notes = &sequence.notes;
-                if let (Some(lo), Some(hi)) = (notes.iter().map(|n| n.pitch).min(), notes.iter().map(|n| n.pitch).max()) {
-                    let span = f32::from(hi.saturating_sub(lo)).max(11.0);
+            ClipContent::Midi { .. } => {
+                if let Some((lo, span)) = pitch_span(c) {
                     let clip_tick = s.tempo.samples_to_ticks(c.start, s.sample_rate);
-                    for n in notes.iter().take(5000) {
+                    for n in shown_notes(c).take(5000) {
                         let a = s.tempo.tick_to_samples(clip_tick.saturating_add(n.start), s.sample_rate);
                         let b = s.tempo.tick_to_samples(clip_tick.saturating_add(n.end()), s.sample_rate);
                         let fy = 1.0 - f32::from(n.pitch.saturating_sub(lo)) / span;
@@ -322,8 +318,8 @@ fn draw_cycles(
                     crate::waveform::draw(&wp, s, tl, &g, audio, t.channels().min(2), seg, ink);
                 }
             }
-            ClipContent::Midi { sequence } => {
-                if let Some((lo, span)) = pitch_span(&sequence.notes) {
+            ClipContent::Midi { .. } => {
+                if let Some((lo, span)) = pitch_span(c) {
                     let wp = p.with_clip_rect(seg.intersect(tl));
                     for (from, to, pitch) in loop_note_spans(s, c, l, i > 0, a) {
                         let fy = 1.0 - f32::from(pitch.saturating_sub(lo)) / span;
@@ -343,9 +339,19 @@ pub(super) fn clip_base_color(c: &Clip, t: &Track) -> Color32 {
     if c.muted { theme::darken(base, 0.5) } else { base }
 }
 
+/// A MIDI clip's notes the thumbnail draws: an unlooped clip's notes before its left edge are hidden
+/// (ADR 0052 decision 17), so they neither draw nor widen the pitch span.
+fn shown_notes(c: &Clip) -> impl Iterator<Item = &transit_midi::Note> {
+    let notes = match &c.content {
+        ClipContent::Midi { sequence } => sequence.notes.as_slice(),
+        ClipContent::Audio { .. } => &[],
+    };
+    notes.iter().filter(move |n| !transit_mix::left_hidden(c, n.start))
+}
+
 /// The lowest pitch and the pitch span (at least an octave) a MIDI clip's mini notes are laid out in.
-fn pitch_span(notes: &[transit_midi::Note]) -> Option<(u8, f32)> {
-    let (lo, hi) = (notes.iter().map(|n| n.pitch).min()?, notes.iter().map(|n| n.pitch).max()?);
+fn pitch_span(c: &Clip) -> Option<(u8, f32)> {
+    let (lo, hi) = (shown_notes(c).map(|n| n.pitch).min()?, shown_notes(c).map(|n| n.pitch).max()?);
     Some((lo, f32::from(hi.saturating_sub(lo)).max(11.0)))
 }
 
@@ -682,5 +688,30 @@ mod loop_corner_tests {
         assert_eq!(overwritten(&s, &drag(1200)), vec![(1000, 1200)]);
         // A locked clip that abuts the clip stops the drag at once: nothing shaded.
         assert!(overwritten(&s, &LoopDrag { from: 1500, start: 1000, clip: ids[1], ..drag(2400) }).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod hidden_edge_tests {
+    use super::*;
+    use transit_midi::{Note, Sequence};
+
+    fn clip(looping: Option<ClipLoop>) -> Clip {
+        let n = |pitch: u8, start: i64| Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start, length: 240 };
+        // A hidden note far below the visible ones, before the left edge (ADR 0052 decision 17).
+        let mut c = Clip::midi(ClipId(1), "m", 96_000, 96_000, Sequence { notes: vec![n(30, -480), n(60, 0), n(64, 480)], ctrls: Vec::new() });
+        c.looping = looping;
+        c
+    }
+
+    #[test]
+    fn the_thumbnail_neither_draws_nor_spans_a_note_before_the_left_edge() {
+        let c = clip(None);
+        assert_eq!(shown_notes(&c).map(|n| n.pitch).collect::<Vec<_>>(), vec![60, 64]);
+        assert_eq!(pitch_span(&c), Some((60, 11.0)), "the hidden note does not widen the span");
+        // A valid loop's negative ticks are loop material: shown and spanned as before.
+        let looped = clip(Some(ClipLoop { start: -24_000, end: 96_000 }));
+        assert_eq!(shown_notes(&looped).count(), 3);
+        assert_eq!(pitch_span(&looped), Some((30, 34.0)));
     }
 }

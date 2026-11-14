@@ -3,7 +3,7 @@
 //! cursor; Backspace takes the last step back. Every step is one `event.step_input` (or
 //! `midi.note_delete`) command, so one undo step each. Session state only: never saved.
 
-use super::{ClipView, Note, PPQ, StudioApp, clip_view, json, resolve};
+use super::{ClipView, Note, PPQ, StudioApp, clip_view, json};
 use transit_engine::step_input::{StepAction, StepBinding, StepChord, StepControl, StepController};
 use transit_model::ClipId;
 use transit_playback::{PlayedMidi, PlayedNote};
@@ -409,7 +409,7 @@ impl StudioApp {
             self.keys.step.follow = true;
             return;
         };
-        let idx = resolve(&self.keys_notes(), &last.notes);
+        let idx = self.keys_sources(&last.notes);
         if !last.before.is_empty() {
             if idx.len() != last.notes.len() {
                 self.status = "Step back stopped: the tied notes have changed.".into();
@@ -417,7 +417,7 @@ impl StudioApp {
             }
             let key = self.keys_merge_key();
             for (current, before) in last.notes.iter().zip(&last.before) {
-                let indices = resolve(&self.keys_notes(), &[*current]);
+                let indices = self.keys_sources(&[*current]);
                 let Some(index) = indices.first() else { return };
                 if self.keys_exec("midi.note_edit", json!({"clip": clip.0, "index": index, "length_ticks": before.length}), &key).is_err() {
                     return;

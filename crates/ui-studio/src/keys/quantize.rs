@@ -70,7 +70,7 @@ impl StudioApp {
             let result = self.keys_exec(
                 "event.quantize",
                 json!({
-                    "clip": part.clip.0, "indices": indices, "grid": grid.clamp(1, PPQ * 16),
+                    "clip": part.clip.0, "indices": part.sources(&indices), "grid": grid.clamp(1, PPQ * 16),
                     "strength": prefs.strength.min(100), "swing": prefs.swing.min(100), "quantize_ends": prefs.ends,
                 }),
                 &key,

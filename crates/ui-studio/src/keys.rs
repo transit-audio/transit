@@ -352,7 +352,10 @@ fn is_black(p: u8) -> bool {
     matches!(p % 12, 1 | 3 | 6 | 8 | 10)
 }
 
-/// The clip's track, start tick, length in ticks, notes and name.
+/// The clip's track, start tick, length in ticks, notes and name. The notes and controllers are
+/// the ones the roll may show and edit: an unlooped clip's events before its left edge (a stored
+/// tick before 0) are hidden (ADR 0052 decision 17) and left out, so a view index is not the
+/// sequence index note commands address; `note_src` and `ctrl_src` map one to the other.
 struct ClipView {
     track: TrackId,
     c0: i64,
@@ -363,7 +366,11 @@ struct ClipView {
     /// The loop cycle `(start, end)` in ticks from the clip start, when the clip has a valid loop.
     cycle: Option<(i64, i64)>,
     notes: Vec<Note>,
+    /// The sequence index of each of `notes`.
+    note_src: Vec<usize>,
     ctrls: Vec<transit_midi::CtrlEvent>,
+    /// The sequence index of each of `ctrls`.
+    ctrl_src: Vec<usize>,
     name: String,
 }
 
@@ -385,7 +392,10 @@ fn clip_view(s: &Session, clip: ClipId) -> Option<ClipView> {
         })
         .filter(|(a, b)| b > a && *b > 0);
     let len = cycle.map_or(full, |(_, end)| end.min(full));
-    Some(ClipView { track, c0, len, full, cycle, notes: sequence.notes.clone(), ctrls: sequence.ctrls.clone(), name: c.name.clone() })
+    let shown = |tick: i64| !transit_mix::left_hidden(c, tick);
+    let (note_src, notes) = sequence.notes.iter().enumerate().filter(|(_, n)| shown(n.start)).map(|(i, n)| (i, *n)).unzip();
+    let (ctrl_src, ctrls) = sequence.ctrls.iter().enumerate().filter(|(_, e)| shown(e.tick)).map(|(i, e)| (i, *e)).unzip();
+    Some(ClipView { track, c0, len, full, cycle, notes, note_src, ctrls, ctrl_src, name: c.name.clone() })
 }
 
 /// Most ghost notes drawn for a clip's repeats (a degenerate cycle could ask for millions).
@@ -405,6 +415,16 @@ fn ghost_colors() -> (egui::Color32, egui::Color32) {
 }
 
 impl ClipView {
+    /// The sequence indices of `want` (each note matched once): the indices note commands address.
+    fn sources(&self, want: &[Note]) -> Vec<usize> {
+        resolve(&self.notes, want).into_iter().map(|i| self.note_src[i]).collect()
+    }
+
+    /// The controller at sequence index `index`, when the view shows it.
+    fn ctrl_at(&self, index: usize) -> Option<&transit_midi::CtrlEvent> {
+        self.ctrl_src.iter().position(|i| *i == index).map(|k| &self.ctrls[k])
+    }
+
     /// The repeats of a looped clip's cycle from `loop.end` to the arrangement length (ADR 0019): the
     /// notes that start inside the cycle, shifted one cycle per repeat, each cut at its seam and at the end.
     /// Only the repeats that touch the view `view.0..view.1` (ticks) are built, at most `MAX_GHOST_CYCLES`
@@ -619,6 +639,11 @@ impl StudioApp {
     /// The foreground clip's notes (step entry, the controller lane and the clip-end handle are its own).
     fn keys_notes(&self) -> Vec<Note> {
         self.keys.clip.and_then(|c| clip_view(self.engine.session(), c)).map(|v| v.notes).unwrap_or_default()
+    }
+
+    /// The sequence indices of `want` in the foreground clip (each note matched once).
+    fn keys_sources(&self, want: &[Note]) -> Vec<usize> {
+        self.keys.clip.and_then(|c| clip_view(self.engine.session(), c)).map(|v| v.sources(want)).unwrap_or_default()
     }
 
     /// Play `pitch` at the toolbar velocity (when the audition switch is on).
@@ -1298,7 +1323,18 @@ mod ghost_tests {
         let bar = PPQ * 4;
         let notes: Vec<Note> =
             (0..500).map(|i| Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: i % 4, length: 1 }).collect();
-        let cv = ClipView { track: TrackId(1), c0: 0, len: 4, full: 600 * bar, cycle: Some((0, 4)), notes, ctrls: Vec::new(), name: String::new() };
+        let cv = ClipView {
+            track: TrackId(1),
+            c0: 0,
+            len: 4,
+            full: 600 * bar,
+            cycle: Some((0, 4)),
+            note_src: (0..notes.len()).collect(),
+            notes,
+            ctrls: Vec::new(),
+            ctrl_src: Vec::new(),
+            name: String::new(),
+        };
         let (ghosts, walked) = cv.ghosts((0, 600 * bar));
         assert!(walked <= MAX_GHOST_CYCLES, "walked {walked} cycles");
         assert!(ghosts.len() <= MAX_GHOSTS);

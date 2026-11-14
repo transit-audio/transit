@@ -20,8 +20,8 @@ impl StudioApp {
                 continue;
             }
             let Some((clip, off)) = owner else { continue };
-            let local = clip_view(self.engine.session(), clip).map(|v| v.notes).unwrap_or_default();
-            let Some(i) = resolve(&local, &[Note { start: old.start - off, ..*old }]).first().copied() else { continue };
+            let found = clip_view(self.engine.session(), clip).map(|v| v.sources(&[Note { start: old.start - off, ..*old }])).unwrap_or_default();
+            let Some(i) = found.first().copied() else { continue };
             let start = new.start - off;
             self.keys_exec(
                 "midi.note_edit",
@@ -52,7 +52,7 @@ impl StudioApp {
         self.keys_refuse_frozen(&groups.iter().map(|(p, _)| p.clip).collect::<Vec<_>>())?;
         let key = self.keys_merge_key();
         for (part, idx) in groups {
-            self.keys_exec("midi.notes_move", json!({"clip": part.clip.0, "indices": idx, "ticks": dt, "semitones": ds}), &key)?;
+            self.keys_exec("midi.notes_move", json!({"clip": part.clip.0, "indices": part.sources(&idx), "ticks": dt, "semitones": ds}), &key)?;
         }
         self.keys.selection = sel.iter().map(|n| shifted(n, dt, ds)).collect();
         Ok(())
@@ -70,7 +70,7 @@ impl StudioApp {
         self.keys.selection.clear();
         let key = self.keys_merge_key();
         for (part, idx) in groups {
-            self.keys_exec("midi.note_delete", json!({"clip": part.clip.0, "indices": idx}), &key)?;
+            self.keys_exec("midi.note_delete", json!({"clip": part.clip.0, "indices": part.sources(&idx)}), &key)?;
         }
         Ok(())
     }

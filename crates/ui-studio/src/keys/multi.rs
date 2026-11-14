@@ -33,7 +33,9 @@ pub(super) fn open_set(s: &Session, clip: ClipId) -> (ClipId, Vec<ClipId>, usize
 }
 
 /// One clip open in the roll, at `off` ticks from the foreground's start; its notes are
-/// `notes[base..base + count]` of the [`Composite`].
+/// `notes[base..base + count]` of the [`Composite`]. A local index `i` counts the notes the roll
+/// shows; `src[i]` is that note's sequence index, the one note commands address (ADR 0052
+/// decision 17: notes hidden before the left edge are not shown, so the two can differ).
 #[derive(Debug, Clone)]
 pub(super) struct Part {
     pub(super) clip: ClipId,
@@ -43,7 +45,15 @@ pub(super) struct Part {
     pub(super) len: i64,
     pub(super) base: usize,
     pub(super) count: usize,
+    src: Vec<usize>,
     pub(super) color: [u8; 3],
+}
+
+impl Part {
+    /// The sequence indices of the local indices `local`: what a note command is sent.
+    pub(super) fn sources(&self, local: &[usize]) -> Vec<usize> {
+        local.iter().filter_map(|i| self.src.get(*i).copied()).collect()
+    }
 }
 
 /// Every open clip's notes in the roll's ticks (the foreground's first, then each other's shifted
@@ -61,8 +71,9 @@ impl Composite {
             let Some(cv) = clip_view(s, clip) else { continue };
             let color = s.find_clip(clip).and_then(|(_, c)| c.color).or_else(|| s.track(cv.track).map(|t| t.color)).unwrap_or_default();
             let off = cv.c0 - f0;
-            out.parts.push(Part { clip, track: cv.track, off, len: cv.len, base: out.notes.len(), count: cv.notes.len(), color });
+            let (base, count) = (out.notes.len(), cv.notes.len());
             out.notes.extend(cv.notes.iter().map(|n| Note { start: n.start + off, ..*n }));
+            out.parts.push(Part { clip, track: cv.track, off, len: cv.len, base, count, src: cv.note_src, color });
         }
         Some(out)
     }
@@ -77,7 +88,7 @@ impl Composite {
     }
 
     /// The notes of `want` found again (each matched once), grouped by clip in `want`'s order:
-    /// each clip with the local indices of its notes.
+    /// each clip with the local indices of its notes (commands take [`Part::sources`] of them).
     pub(super) fn groups(&self, want: &[Note]) -> Vec<(Part, Vec<usize>)> {
         let mut out: Vec<(Part, Vec<usize>)> = Vec::new();
         for i in resolve(&self.notes, want) {
