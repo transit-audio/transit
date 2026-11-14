@@ -438,7 +438,8 @@ impl StudioApp {
                     self.status = "Nothing is selected: pick a range, or bounce the whole song.".into();
                     return Err(self.status.clone());
                 }
-                BounceRange::Whole => (0, s.content_end().max(1)),
+                // The whole song includes the pre-count zone (ADR 0052 decision 10).
+                BounceRange::Whole => (s.start(), s.content_end().max(1)),
             }
         };
         // An External Instrument plays only in real time: the bounce leaves it out only when the
@@ -613,7 +614,7 @@ impl StudioApp {
         match f.range {
             BounceRange::Selection if !bounce_range(&s.edit).is_empty() => Some((bounce_range(&s.edit).start, bounce_range(&s.edit).end)),
             BounceRange::Selection => None,
-            BounceRange::Whole => Some((0, s.content_end().max(1))),
+            BounceRange::Whole => Some((s.start(), s.content_end().max(1))),
         }
     }
 

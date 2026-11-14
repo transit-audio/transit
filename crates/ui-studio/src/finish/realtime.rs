@@ -258,7 +258,8 @@ impl StudioApp {
         let done: Option<u64> = None;
         let done = done.or_else(|| self.player.as_ref().and_then(|p| p.realtime_render_progress()).map(|p| p.done)).unwrap_or(0);
         let s = self.engine.session();
-        let bar = |at: i64| s.tempo.bar_beat_at(at.max(0), s.sample_rate).bar;
+        // The ruler's numbering, bars before bar 1 included (a render from the pre-count zone).
+        let bar = |at: i64| s.tempo.bar_beat_at(at, s.sample_rate).bar;
         let first = bar(r.range.start);
         let of = bar((r.range.end - 1).max(r.range.start)) - first + 1;
         let at = r.range.start.saturating_add(i64::try_from(done).unwrap_or(0)).min(r.range.end - 1);

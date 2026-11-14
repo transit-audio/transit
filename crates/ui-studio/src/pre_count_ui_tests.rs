@@ -328,3 +328,54 @@ fn a_start_trim_drag_on_a_clip_wholly_before_bar_1_does_not_panic() {
         app.arrange.gesture
     );
 }
+
+#[test]
+fn a_view_left_before_a_zone_that_has_gone_shows_bar_1() {
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    let (mut app, t, ids) = zone_app(&[(-2 * BAR, BAR), (BAR, BAR)]);
+    framed(&mut app, &ctx, &mut time, 400.0, -2 * BAR);
+    assert_eq!(app.arrange.layout.scroll, -2 * BAR);
+    app.run("edit.clear", json!({"tracks": [t.0], "clips": [ids[0].0], "start": -BAR, "end": -BAR})).unwrap();
+    frames(&mut app, &ctx, 2, &mut time);
+    assert_eq!(app.engine.session().edit.zoom.scroll, -2 * BAR, "the stored scroll is not rewritten");
+    assert_eq!(app.arrange.layout.scroll, 0, "floored when read: the view starts at bar 1");
+    app.run("edit.undo", json!({})).unwrap();
+    frames(&mut app, &ctx, 2, &mut time);
+    assert_eq!(app.arrange.layout.scroll, -2 * BAR, "undo brings the zone and the view back");
+}
+
+#[test]
+fn the_bounce_dialogs_whole_song_starts_at_the_session_start() {
+    let dir = transit_test_support::TestDir::new("pre-count-bounce");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (clips, want) in [(vec![(-BAR, BAR), (BAR, BAR)], -BAR), (vec![(BAR, BAR)], 0)] {
+        let (mut app, ..) = zone_app(&clips);
+        app.open_bounce();
+        let f = app.finish.bounce_form.as_mut().unwrap();
+        f.range = crate::finish::BounceRange::Whole;
+        f.path = dir.join(format!("mix{want}.wav")).to_string_lossy().into_owned();
+        app.start_bounce().unwrap();
+        let r = app.finish.job.as_ref().expect("the bounce runs").range();
+        assert_eq!((r.start, r.end), (want, 2 * BAR), "zone clips {clips:?}");
+        app.finish.job = None;
+    }
+}
+
+#[test]
+fn a_group_drag_previews_where_the_group_stops() {
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    // The first clip sets the session start at -BAR; the second and third are dragged together.
+    let (mut app, _, ids) = zone_app(&[(-BAR, BEAT), (0, BEAT), (2 * BAR, BEAT)]);
+    framed(&mut app, &ctx, &mut time, 1024.0, -2 * BAR);
+    app.run("edit.select", json!({"clips": [ids[1].0, ids[2].0]})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let rect = app.arrange.layout.clips.iter().find(|c| c.id == ids[2].0).unwrap().rect;
+    let grab = (rect[0] + 12.0, (rect[1] + rect[3]) / 2.0 + 6.0);
+    let px_per_beat = (BEAT as f64 / app.arrange.layout.samples_per_px) as f32;
+    // Ten beats back: the clip at bar 1 reaches the session start after four.
+    hold_drag(&mut app, &ctx, &mut time, grab, (grab.0 - 10.0 * px_per_beat, grab.1), egui::Modifiers::NONE);
+    let ghost = |id: ClipId| app.arrange.layout.drag_ghosts.iter().find(|g| g.clip == id.0).map(|g| g.start);
+    assert_eq!((ghost(ids[1]), ghost(ids[2])), (Some(-BAR), Some(2 * BAR - BAR)), "the group stops together at the session start");
+}

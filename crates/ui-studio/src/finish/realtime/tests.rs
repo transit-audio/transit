@@ -200,3 +200,38 @@ fn all_notes_off_cancels_the_render_and_transport_moves_are_refused() {
     t.frames(3);
     assert!(t.app.dialog.is_none());
 }
+
+/// A render from the pre-count zone (ADR 0052): the Whole range starts at the session start, and
+/// "bar N of M" counts the zone's bars with the ruler's numbering (bar -1 and 0 are the first two).
+#[test]
+fn a_render_from_the_pre_count_zone_counts_its_bars() {
+    const BAR: i64 = 96_000;
+    let mut s = transit_model::Session::default();
+    let t = s.add_track(transit_model::TrackKind::Midi, transit_model::ChannelFormat::Mono, None);
+    let id = s.new_clip_id();
+    transit_engine::edit::place_clip(&mut s, t, transit_model::Clip::midi(id, "m", -2 * BAR, 3 * BAR, Default::default()));
+    let mut app = StudioApp::new(transit_engine::Engine::new(s), None, Services::default());
+    app.open_bounce();
+    let mut f = app.finish.bounce_form.clone().unwrap();
+    f.range = crate::finish::BounceRange::Whole;
+    assert_eq!(app.form_range(&f), Some((-2 * BAR, BAR)), "the whole song from the session start");
+    app.finish.realtime.fake = Some(FakeRender::default());
+    app.finish.realtime.running = Some(super::Rendering {
+        path: "mix.wav".into(),
+        stems: Vec::new(),
+        range: transit_time::Range::new(-2 * BAR, BAR),
+        tracks: Vec::new(),
+        uncompensated: Vec::new(),
+    });
+    // Counted as the existing test counts: from the bar holding the start to the bar holding the
+    // last sample (`end - 1` rounds to the next bar's first tick here, as it does at bar 1).
+    let s = app.engine.session();
+    let bar = |at: i64| s.tempo.bar_beat_at(at, s.sample_rate).bar;
+    assert_eq!(bar(-2 * BAR), -1, "the render starts in bar -1");
+    let of = bar(BAR - 1) - bar(-2 * BAR) + 1;
+    assert!(of >= 3, "{of}");
+    assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((1, of)), "bar -1 is the first");
+    app.finish.realtime.fake.as_mut().unwrap().done = 144_000;
+    assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((2, of)), "bar 0 is the second");
+    app.finish.realtime.running = None;
+}

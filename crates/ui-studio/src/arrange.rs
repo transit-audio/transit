@@ -319,7 +319,11 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     let corner = Rect::from_min_max(full.min, pos2(full.min.x + hw, full.min.y + RULER_H));
     track_height::input(app, ui, list, tl);
     let s = app.engine.session_arc();
-    let map = Map { x0: tl.min.x, scroll: s.edit.zoom.scroll, spp: s.edit.zoom.samples_per_px.max(0.01), grid: app.arrange.grid };
+    // The session start, read once per frame: the zone's span below, and the floor of the stored
+    // scroll, which is floored on read so a view left before a zone that has gone shows bar 1
+    // (ADR 0052 decision 7).
+    let zone = s.start();
+    let map = Map { x0: tl.min.x, scroll: s.edit.zoom.scroll.max(zone), spp: s.edit.zoom.samples_per_px.max(0.01), grid: app.arrange.grid };
     let p = ui.painter();
     p.rect_filled(corner, 0.0, TOKENS.ruler);
     p.with_clip_rect(corner).text(
@@ -361,7 +365,6 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     let outputs = s.tracks.iter().any(|t| t.midi_output.is_external()).then(|| crate::midi_output::OutputView::read(app.player.as_ref()));
     // The pre-count zone's span on screen, `[session start, bar 1)` (ADR 0052 decision 4); none
     // without a zone.
-    let zone = s.start();
     let zone_x = (zone < 0).then(|| (map.x(zone), map.x(0)));
     for (i, t) in rows.iter().enumerate() {
         let rh = geo.main[i];
@@ -570,6 +573,21 @@ pub fn drop_start(start: Samples, dx: Samples, shift: bool, floor: Samples, snap
     start.saturating_add(if shift { dx } else { snap(dx) }).max(floor)
 }
 
+/// The earliest start the dragged clip may preview at: where the first clip the drag carries
+/// reaches its own floor (`edit::lowest_delta`, the session start for MIDI and bar 1 for audio),
+/// so the whole group stops together, as `edit.move_clips` and `edit.copy_clips` stop it. A clip
+/// already before its floor (only from a hand-edited file) does not hold the others, as there.
+fn group_floor(app: &StudioApp, clip: ClipId, start: Samples) -> Samples {
+    let s = app.engine.session();
+    let zone = s.start();
+    let set = copy_drag::drag_set(app, clip);
+    let carried = set.iter().filter_map(|id| s.find_clip(*id).map(|(_, c)| c)).filter(|c| c.start >= transit_engine::edit::start_floor(c, zone));
+    match transit_engine::edit::lowest_delta(carried, zone) {
+        Samples::MIN => s.find_clip(clip).map_or(0, |(_, c)| transit_engine::edit::start_floor(c, zone)),
+        by => start.saturating_add(by),
+    }
+}
+
 /// Where a trimmed edge lands: `edge` moved by `dx` and snapped as a position to the visible grid
 /// (like the loop handle; a move snaps its delta instead), unless Shift is held. The caller clamps
 /// against the other edge; the engine command clamps against neighbors and the source.
@@ -588,7 +606,7 @@ fn drag_preview(app: &StudioApp, ui: &Ui, map: Map, rows: &[&Track], tl: Rect, g
     Some(match kind {
         DragKind::Move => {
             let s = app.engine.session();
-            let floor = s.find_clip(clip).map_or(0, |(_, c)| transit_engine::edit::start_floor(c, s.start()));
+            let floor = group_floor(app, clip, start);
             let new_start = drop_start(start, dx, m.shift, floor, |d| crate::automation::snap_delta(s, map.spp, &map.grid, start, d));
             let row = geo.index_at(pos.y - tl.min.y + app.arrange.vscroll);
             let dest = row.and_then(|i| rows.get(i)).map(|t| t.id).filter(|t| app.holds_clips(*t)).unwrap_or(track);
