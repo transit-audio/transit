@@ -1,0 +1,75 @@
+name: Bug report
+description: Something in transit does not work. One problem per report.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are for defects. Ideas and requests go on the [Ideas board](https://github.com/transit-audio/transit/discussions/categories/ideas); questions go to [Q&A](https://github.com/transit-audio/transit/discussions/categories/q-a).
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched the open and closed issues and the [known issues](https://github.com/transit-audio/transit/blob/main/docs/known-issues/README.md), and this is not there.
+          required: true
+        - label: This report is about one problem.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: transit version
+      description: The build or version string from Help > About, or the release you downloaded.
+      placeholder: v0.7.2
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: os_detail
+    attributes:
+      label: OS version
+      description: For Linux, the distribution, desktop and audio server too.
+      placeholder: Windows 11 24H2, macOS 15.1, Kubuntu 26.04 with PipeWire
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: What you did, one step per line, from a new or named session.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: What happened instead. Paste any message exactly as shown.
+    validations:
+      required: true
+  - type: textarea
+    id: audio
+    attributes:
+      label: Audio settings
+      description: Interface, driver or system (ASIO, WASAPI, Core Audio, JACK, ALSA), sample rate and buffer size. Leave empty if the problem has nothing to do with audio devices.
+  - type: textarea
+    id: report
+    attributes:
+      label: Diagnostics
+      description: Run `transit --report` and attach the file it writes, or press Copy diagnostics in Audio Devices and paste. It holds system and audio details and the end of the log, and nothing from your sessions.

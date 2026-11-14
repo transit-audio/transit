@@ -1,7 +1,10 @@
 # Contributing to transit
 
-Issues are welcome: bug reports (include the log from the settings folder, see the README), feature
-ideas and questions.
+Issues are for defects: file a bug report with the form (one problem per report, with the output of
+`transit --report`). Feature ideas go on the
+[Ideas board](https://github.com/transit-audio/transit/discussions/categories/ideas), where an upvote
+counts, and questions go to [Q&A](https://github.com/transit-audio/transit/discussions/categories/q-a)
+or the Discord. An idea becomes an issue when it is picked up to be built.
 
 Pull requests should be small, focused and written in the style of the code around them.
 
