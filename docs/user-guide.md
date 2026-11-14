@@ -1,4 +1,6 @@
-# User guide: appearance and interface size
+# User guide
+
+## Appearance and interface size
 
 **View > Appearance** lists **System**, **Dark**, and **Light**. v0.7.0 is dark only: Dark is
 the graphite look of the device design language, and System and Light are shown unavailable
