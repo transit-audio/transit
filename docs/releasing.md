@@ -77,6 +77,23 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
   release by hand; the workflow no longer builds them (commits `451bb52`, `f792a0e`, `f751a17`). Its DMG is
   named `transit-0.2.0-alpha.1-macos-aarch64.dmg`; later tags use the `transit-v<version>-macos-arm64.dmg` form.
 
+## Build provenance attestation
+
+The publish job attests every file it uploads to the release (`actions/attest-build-provenance`):
+GitHub stores a signed statement that the file was built by `release.yml` in this repository from
+the tag's commit. The signing identity is issued to the workflow run; no key is stored in the
+repository or its secrets. To check a download:
+
+```
+gh attestation verify transit-v<version>-<platform>.<ext> --repo transit-audio/transit
+```
+
+The attestation says where and from which commit a file was built. It is not a code signature:
+it does not change what Windows or macOS show when the file is opened (see the signing sections
+below). The step does not stop a release when it fails; after publishing, check the "Attest build
+provenance" step of the run, and say in the release notes that downloads can be verified only when
+it succeeded.
+
 ## macOS signing and notarization (optional)
 
 With all five repository secrets set, the macOS job imports the certificate into a temporary

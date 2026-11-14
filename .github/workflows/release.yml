@@ -286,6 +286,12 @@ jobs:
     needs: build
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    # contents: the release and its files. id-token and attestations: the build provenance
+    # attestation below (a short-lived signing identity for this run; no stored key).
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       # The repository at the tag, for docs/releases/<tag>.md (the release body). It goes into src/
       # so it cannot clobber the downloaded archives in dist/.
@@ -296,6 +302,17 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # Build provenance: a signed statement, stored by GitHub, that each file below was built by this
+      # workflow from this tag's commit. Anyone can check a download with
+      # `gh attestation verify <file> --repo transit-audio/transit` (docs/releasing.md). It covers
+      # exactly the files the release step below uploads. A failure here does not stop the release:
+      # the files are the same either way, and the release notes must then not claim an attestation.
+      - name: Attest build provenance
+        id: attest
+        continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
       # The release body: docs/releases/<tag>.md from the repository when it exists, else the generic
       # text below. Either way it lands in $RUNNER_TEMP/release-body.md and the step after uses it.
       # While transit is alpha, a fixed alpha block is prepended to either body, so no release ships
