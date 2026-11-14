@@ -77,10 +77,11 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
         TrackKind::Audio if !live.input.is_empty() && (t.mixer.input_monitor || (t.mixer.record_arm && (live.monitor_only || live.recording))) => {
             // Input monitoring: the track hears its hardware input instead of its clips.
             let n_in = live.input.len().max(1);
+            let width = t.channels();
             for (k, dst) in strip.buf.iter_mut().enumerate() {
                 // System Audio (#268) is silent while it does not run, never another input.
                 let channel = match &t.mixer.input {
-                    Route::Hardware(h) => transit_model::live_input_channel(live.io, h, k, n_in),
+                    Route::Hardware(h) => transit_model::live_input_channel(live.io, h, k, width, n_in),
                     _ => Some(k % n_in),
                 };
                 if let Some(src) = channel.and_then(|c| live.input.get(c)) {

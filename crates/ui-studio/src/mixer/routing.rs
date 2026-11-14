@@ -189,7 +189,7 @@ pub fn route_label(s: &Session, r: &Route, input: bool, format_channels: usize) 
 /// input channel (#681), so it reads "In 1" there, the entry the dropdown lists.
 pub fn input_route_label(s: &Session, t: &Track, device_inputs: usize) -> String {
     let channels = match t.kind {
-        TrackKind::Audio if device_inputs == 1 => t.channels().min(1),
+        TrackKind::Audio if device_inputs == 1 && t.channels() == 2 => 1,
         TrackKind::Audio => t.channels(),
         _ => 0,
     };
@@ -238,9 +238,9 @@ pub fn input_choices_with(s: &Session, t: &Track, device_inputs: usize, io: &IoM
     let mut v = Vec::new();
     let n = device_inputs;
     if t.kind == TrackKind::Audio || t.kind == TrackKind::Aux {
-        if t.channels() >= 2 {
-            // A stereo strip takes a stereo input, or a mono one on both sides (#681): the stereo
-            // inputs first, then a separator and the mono ones.
+        if t.kind == TrackKind::Audio && t.channels() == 2 {
+            // A stereo audio track takes a stereo input, or a mono one on both sides (#681): the
+            // stereo inputs first, then a separator and the mono ones.
             push_hardware_inputs(&mut v, io, n, 2);
             let mut mono = Vec::new();
             push_hardware_inputs(&mut mono, io, n, 1);
@@ -248,6 +248,9 @@ pub fn input_choices_with(s: &Session, t: &Track, device_inputs: usize, io: &IoM
                 v.push(RoutingChoice::Separator);
             }
             v.extend(mono);
+        } else if t.channels() >= 2 {
+            // Wider audio tracks and FX channels: the stereo inputs, as before #681.
+            push_hardware_inputs(&mut v, io, n, 2);
         } else {
             push_hardware_inputs(&mut v, io, n, 1);
         }

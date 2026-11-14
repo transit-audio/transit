@@ -35,12 +35,15 @@ impl StudioApp {
             }
             format!("In {first}")
         } else {
+            // A numbered input takes its pair ("In 3" -> "In 3-4"), as it always did. An input on
+            // this device with no pair (the one input of a one-input device, "In 3" of three)
+            // stays mono and feeds both sides (#681). A named path is never remapped (above).
             let start = first - (first - 1) % 2;
-            let last = start
-                .checked_add(1)
-                .filter(|last| *last <= self.device_inputs())
-                .ok_or_else(|| format!("Input {first} has no stereo pair on this device; pick a stereo input first"))?;
-            format!("In {start}-{last}")
+            match start.checked_add(1).filter(|last| *last <= self.device_inputs()) {
+                Some(last) => format!("In {start}-{last}"),
+                None if first <= self.device_inputs() => return Ok(None),
+                None => return Err(format!("Input {first} has no stereo pair on this device; pick a stereo input first")),
+            }
         };
         if mapped == input {
             return Ok(None);

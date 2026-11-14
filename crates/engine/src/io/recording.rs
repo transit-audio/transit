@@ -26,7 +26,9 @@ pub fn plan_takes_with(e: &Engine, unsaved_dir: &Path, input_channels: usize, sy
             // System Audio (#268) that does not run records silence (a channel no frame has).
             let inputs = (0..t.channels())
                 .map(|k| match &t.mixer.input {
-                    transit_model::Route::Hardware(h) => transit_model::live_input_channel(Some(&io), h, k, input_channels).unwrap_or(usize::MAX),
+                    transit_model::Route::Hardware(h) => {
+                        transit_model::live_input_channel(Some(&io), h, k, t.channels(), input_channels).unwrap_or(usize::MAX)
+                    }
                     _ => k % input_channels.max(1),
                 })
                 .collect();
@@ -553,14 +555,17 @@ mod record_tests {
         let drums = armed(&mut e, "Drums", "stereo", "Drum pair");
         let old = armed(&mut e, "Old", "stereo", "In 3-4");
         let wide = armed(&mut e, "Wide", "stereo", "Guitar");
+        let quad = armed(&mut e, "Quad", "mono", "Guitar");
+        e.session_mut().track_mut(quad).unwrap().format = ChannelFormat::Quad;
         let plan = plan_takes(&e, &dir, 8);
         let channels = |t: TrackId| plan.iter().find(|p| p.0 == t).map(|p| p.1.clone()).unwrap();
         assert_eq!(channels(gtr), [4], "Guitar is input channel 5");
         assert_eq!(channels(drums), [6, 7]);
         assert_eq!(channels(old), [2, 3]);
         assert_eq!(channels(wide), [4, 4], "a stereo track on a mono path records it on both sides (#681)");
+        assert_eq!(channels(quad), [4, 5, 6, 7], "wider than stereo: the channels after it, as before");
         // The same names, resolved by the mix: one function (`transit_model::input_channel`).
-        assert_eq!(transit_model::input_channel(Some(e.io_map()), "Guitar", 0), 4);
+        assert_eq!(transit_model::input_channel(Some(e.io_map()), "Guitar", 0, 1), 4);
     }
 
     #[test]

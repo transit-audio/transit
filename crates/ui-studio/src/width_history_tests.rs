@@ -90,9 +90,60 @@ fn a_stereo_track_on_two_inputs_can_pick_a_mono_input() {
     assert_eq!(input_labels(&app, mono), ["In 1", "In 2"]);
 }
 
+/// #681 is for stereo audio tracks only: a wider track and an FX channel keep the stereo inputs
+/// they listed before, with no mono group.
 #[test]
-fn stereo_conversion_refuses_unpaired_or_missing_inputs_atomically() {
-    for (inputs, input) in [(3, 3), (3, 4), (2, 3), (2, 8), (1, 1), (0, 1), (4, 5)] {
+fn a_wider_track_and_an_fx_channel_keep_their_input_lists() {
+    let mut app = app(2);
+    app.engine.set_io_map(transit_model::IoMap::for_device("test", "two inputs", 2, 2));
+    let quad = track(&mut app, "mono", "In 1");
+    app.engine.session_mut().track_mut(quad).unwrap().format = ChannelFormat::Quad;
+    assert_eq!(input_labels(&app, quad), ["In 1-2"]);
+    app.new_fx_channel(None, 0.0).unwrap();
+    let fx = app.engine.session().tracks.iter().find(|t| t.kind == transit_model::TrackKind::Aux).map(|t| t.id).unwrap();
+    let hardware: Vec<String> = input_labels(&app, fx).into_iter().filter(|l| l.starts_with("In ") || l.is_empty()).collect();
+    assert_eq!(hardware, ["In 1-2"]);
+}
+
+/// #681: Make Stereo on a mono track whose input has no pair keeps the mono input on both sides
+/// instead of refusing; a numbered input with a pair still takes it, and a named mono path is
+/// kept as the user named it.
+#[test]
+fn stereo_conversion_keeps_an_unpaired_or_named_mono_input_on_both_sides() {
+    let mut one = app(1);
+    let t = track(&mut one, "mono", "In 1");
+    width(&mut one, &[t], "stereo").unwrap();
+    let tr = one.engine.session().track(t).unwrap();
+    assert_eq!((tr.channels(), tr.mixer.input.clone()), (2, Route::Hardware("In 1".into())));
+    assert_eq!(capture_inputs(&one), [vec![0, 0]]);
+    let mut three = app(3);
+    let paired = track(&mut three, "mono", "In 1");
+    let last = track(&mut three, "mono", "In 3");
+    width(&mut three, &[paired, last], "stereo").unwrap();
+    let input = |app: &StudioApp, t: TrackId| app.engine.session().track(t).unwrap().mixer.input.clone();
+    assert_eq!(input(&three, paired), Route::Hardware("In 1-2".into()));
+    assert_eq!(input(&three, last), Route::Hardware("In 3".into()));
+    assert_eq!(capture_inputs(&three), [vec![0, 1], vec![2, 2]]);
+    let mut app = app(4);
+    let mut io = transit_model::IoMap::for_device("test", "four inputs", 4, 2);
+    io.add_path(transit_model::IoPath {
+        live: false,
+        name: "Guitar".into(),
+        direction: transit_model::IoDirection::Input,
+        channels: vec![2],
+        format: ChannelFormat::Mono,
+    })
+    .unwrap();
+    app.engine.set_io_map(io);
+    let named = track(&mut app, "mono", "Guitar");
+    width(&mut app, &[named], "stereo").unwrap();
+    assert_eq!(input(&app, named), Route::Hardware("Guitar".into()));
+    assert_eq!(capture_inputs(&app), [vec![2, 2]], "Guitar on both sides, never Guitar and input 4");
+}
+
+#[test]
+fn stereo_conversion_refuses_missing_inputs_atomically() {
+    for (inputs, input) in [(3, 4), (2, 3), (2, 8), (0, 1), (4, 5)] {
         let mut app = app(inputs);
         // A valid track before the invalid one must not be partially converted either.
         let valid = track(&mut app, "mono", "In 1");
@@ -105,9 +156,6 @@ fn stereo_conversion_refuses_unpaired_or_missing_inputs_atomically() {
         assert_eq!(app.status, error);
         assert!(std::sync::Arc::ptr_eq(&before, &app.engine.session_arc()), "{inputs} inputs, In {input}");
         assert_eq!(history(&mut app), steps);
-        if inputs == 3 && input == 3 {
-            assert_eq!(capture_inputs(&app), [vec![0], vec![2]], "capture must still use only input 3 for the rejected track");
-        }
         if inputs >= 2 {
             app.set_input(invalid, "In 2").unwrap();
             width(&mut app, &ids, "stereo").unwrap();
@@ -138,9 +186,10 @@ fn width_conversion_and_input_choices_use_only_available_channels() {
         // No stereo pair: a stereo track is offered the mono input there is (#681), and none at 0.
         let mono: &[&str] = if inputs == 1 { &["In 1"] } else { &[] };
         assert_eq!(input_labels(&app, t), mono);
-        // Default (implicit input 1) routes must obey the same boundary.
+        // Default (implicit input 1) routes obey the same boundary: refused with no input, kept
+        // on the one input (#681).
         app.engine.session_mut().track_mut(t).unwrap().mixer.input = Route::None;
-        assert!(width(&mut app, &[t], "stereo").is_err());
+        assert_eq!(width(&mut app, &[t], "stereo").is_err(), inputs == 0);
     }
     let mut app = app(2);
     let t = track(&mut app, "stereo", "In 3-4");
@@ -247,11 +296,20 @@ fn disabled_tooltip(app: &mut StudioApp, reason: &str, mut item: impl FnMut(&mut
 
 #[test]
 fn width_menu_explains_missing_stereo_pairs() {
-    for (inputs, first) in [(3, 3), (2, 3), (1, 1), (0, 1)] {
+    for (inputs, first) in [(2, 3), (0, 1)] {
         let mut app = app(inputs);
         let t = track(&mut app, "mono", &format!("In {first}"));
         let reason = format!("Input {first} has no stereo pair on this device; pick a stereo input first");
         disabled_tooltip(&mut app, &reason, |app, ui| crate::arrange::width_item(app, ui, t).unwrap());
+    }
+    // An input this device has, with no pair, stays mono on both sides (#681): Make Stereo is on.
+    for (inputs, first) in [(3, 3), (1, 1)] {
+        let mut app = app(inputs);
+        let t = track(&mut app, "mono", &format!("In {first}"));
+        let mut out = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+            assert!(crate::arrange::width_item(&mut app, ui, t).unwrap().enabled(), "{inputs} inputs, In {first}");
+        });
+        out.textures_delta.clear();
     }
 }
 
