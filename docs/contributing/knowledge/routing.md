@@ -31,6 +31,13 @@ with a test that loads a loop from a file.
 - Resolving names to channels: `crates/engine/src/io.rs` and `crates/mix/src/sink.rs`.
 - Commands that edit routes: `crates/engine/src/cmd/track.rs`, `setup_more.rs`.
 - Input path resolution is shared by monitoring and recording; do not duplicate it.
+- Strip channel to input channel (`transit_model::input_channel`, #681): a stereo strip on a
+  one-channel path or a plain "In N" label hears that channel on both sides. Wider paths, and
+  strips wider than stereo, take the path's channels in order and then the channels after its last
+  one, as before. ADR 0015 does not state this rule yet.
+- I/O table reconcile (`IoMap::reconcile`, #690): a table that had no inputs gets the default input
+  paths when the device opens with inputs; a table without its Main gets the defaults back; user
+  paths stay, and a default removed or renamed while the count stays is not restored.
 
 ## Hardware inserts
 
