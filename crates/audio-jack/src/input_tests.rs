@@ -90,9 +90,9 @@ fn no_chosen_input_keeps_the_outputs_group_and_without_one_takes_the_first_that_
 
 #[test]
 fn a_chosen_input_that_does_not_exist_falls_back_and_the_endpoint_names_the_group_opened() {
-    let opened = open(&pipewire(), "Headset", Some("Valve Mic"));
+    let opened = open(&pipewire(), "Headset", Some("Second Mic"));
     assert_eq!((opened.group.as_str(), opened.channels), ("Headset", 2), "the output's group, named so the app can say so");
-    let hdmi = open(&pipewire(), "HDMI", Some("Valve Mic"));
+    let hdmi = open(&pipewire(), "HDMI", Some("Second Mic"));
     assert_eq!(hdmi.group, "Mic", "an output without capture ports falls back to the first group that records");
     // A group that only plays is not an input either.
     assert_eq!(open(&pipewire(), "Headset", Some("HDMI")).group, "Headset");

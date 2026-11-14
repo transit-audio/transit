@@ -60,7 +60,7 @@ fn no_chosen_input_keeps_the_outputs_own_inputs() {
 #[test]
 fn a_chosen_input_that_is_missing_falls_back_and_the_output_still_opens() {
     let native = jack("Headset", 2);
-    let player = open(&native, Some("Valve Mic"));
+    let player = open(&native, Some("Second Mic"));
     assert!(!player.silent && native.running(ab::Direction::Output), "the output open does not fail on the input");
     assert_eq!(native.capture_opens(), ["Headset"]);
     assert_eq!(input_of(&player).0, "Headset", "the recorder names the device that opened, so the app can say the choice is missing");
