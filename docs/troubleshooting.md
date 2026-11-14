@@ -244,7 +244,9 @@ or for automated captures. Neither is in the menus.
 transit --null-audio --log-stderr
 ```
 
-The two cannot be combined. Without either option nothing changes.
+The two cannot be combined. `--report` cannot be combined with `--null-audio` either: the report lists
+the machine's audio devices, which a `--null-audio` run never does, so `transit --report --null-audio`
+stops with a message and writes nothing. Without either option nothing changes.
 
 ## More detail
 

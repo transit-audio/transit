@@ -1,11 +1,12 @@
 //! transit desktop app: the studio UI over the transit engine.
 //!
-//! Usage: `transit --report [path]` writes a diagnostics file and exits; otherwise `transit [--demo] [--control <port>] [--no-audio | --null-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
+//! Usage: `transit --report [path]` writes a diagnostics file and exits (not with `--null-audio`); otherwise `transit [--demo] [--control <port>] [--no-audio | --null-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
 //!
 //! `--null-audio` is a diagnostic: the player, the mixer and hosted plug-ins (with their editors) run
 //! on a silent device (48 kHz, stereo, 512 frames, paced at real time, output discarded) and no
 //! audio hardware is listed or opened; there is no recording and no MIDI port. `--no-audio` runs
-//! with no player at all. See `docs/troubleshooting.md`.
+//! with no player at all. Neither `--no-audio` nor `--report` (which lists the machine's audio
+//! devices) can be combined with it. See `docs/troubleshooting.md`.
 //!
 //! `--verbose` logs debug detail for every transit target; `--log <directives>` takes `RUST_LOG` syntax
 //! (`warn,transit_mix=trace`); `--log-stderr` copies the log to standard error when it is not a
@@ -42,6 +43,12 @@ use transit_ui_studio::{Services, StudioApp, UiState};
 
 /// The diagnostic flag that runs the player on the silent device (`docs/troubleshooting.md`).
 const NULL_AUDIO_FLAG: &str = "--null-audio";
+
+/// Why `--report` refuses its arguments: with `--null-audio`, which promises that no audio device is
+/// listed, while the report lists the machine's devices.
+fn report_refusal(args: &[String]) -> Option<&'static str> {
+    args.iter().any(|a| a == NULL_AUDIO_FLAG).then_some("--report and --null-audio cannot be combined: the report lists the machine's audio devices")
+}
 
 /// The choices the launch open is handed: the saved ones, or under `--null-audio` only the silent
 /// device's name for the splash (the open ignores the rest; the saved choices stay as they are).
@@ -434,6 +441,10 @@ fn main() -> eframe::Result {
     let report_target = report::parse(&args);
     let console = (report_target.is_some() || args.iter().any(|a| a == "--version" || a == "-V")) && transit_rt::attach_parent_console();
     if let Some(target) = report_target {
+        if let Some(refusal) = report_refusal(&args) {
+            say(console, &format!("transit --report: {refusal}"));
+            std::process::exit(1);
+        }
         let prefs = load_prefs();
         let profile_mappings = prefs.as_ref().map_or(0, |ui| ui.midi_profile.len());
         let settings = prefs.map(|ui| ui.audio).unwrap_or_default();
@@ -603,7 +614,20 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::{APP_USER_MODEL_ID, NULL_AUDIO_FLAG, app_icon, launch_audio, sane_window_size};
+    use super::{APP_USER_MODEL_ID, NULL_AUDIO_FLAG, app_icon, launch_audio, report_refusal, sane_window_size};
+
+    /// `--report` lists the machine's audio devices, so it refuses `--null-audio`; nothing else.
+    #[test]
+    fn the_report_refuses_null_audio_and_nothing_else() {
+        let args = |values: &[&str]| values.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for refused in [&["--report", "--null-audio"][..], &["--report", "out.json", "--null-audio"], &["--null-audio", "--report"]] {
+            let refusal = report_refusal(&args(refused));
+            assert!(refusal.is_some_and(|r| r.contains("--null-audio") && r.contains("cannot be combined")), "{refused:?}: {refusal:?}");
+        }
+        for allowed in [&["--report"][..], &["--report", "out.json"], &["--report", "--no-audio"]] {
+            assert_eq!(report_refusal(&args(allowed)), None, "{allowed:?}");
+        }
+    }
 
     /// Without `--null-audio` the launch open gets the saved choices unchanged; with it, only the
     /// silent device's name for the splash (the open ignores the rest).
