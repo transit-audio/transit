@@ -10,6 +10,15 @@ fn number(p: &Value, key: &str, max: i64, default: Option<i64>, cmd: &str) -> Re
     value.filter(|v| (0..=max).contains(v)).ok_or_else(|| bad(cmd, format!("{key} must be 0..{max}")))
 }
 
+/// Whether point `index` of the clip is hidden by its left edge ([`transit_mix::left_hidden`], ADR
+/// 0052 decision 17): like a non-CC event, it is never addressed here.
+fn hidden(e: &Engine, id: ClipId, index: usize) -> bool {
+    e.session().find_clip(id).is_some_and(|(_, c)| match &c.content {
+        ClipContent::Midi { sequence } => sequence.ctrls.get(index).is_some_and(|p| transit_mix::left_hidden(c, p.tick)),
+        ClipContent::Audio { .. } => false,
+    })
+}
+
 pub(super) fn add(e: &mut Engine, p: &Value) -> Result<Value> {
     let cmd = "midi.cc_add";
     let id = clip_id(p, cmd)?;
@@ -33,6 +42,9 @@ pub(super) fn edit(e: &mut Engine, p: &Value) -> Result<Value> {
     if !matches!(old.kind, CtrlKind::Cc(_)) {
         return Err(bad(cmd, "not a CC point"));
     }
+    if hidden(e, id, index) {
+        return Err(bad(cmd, "the point is hidden by the clip's left edge"));
+    }
     let point = CtrlEvent {
         tick: number(p, "tick", i64::MAX, Some(old.tick), cmd)?,
         value: number(p, "value", 127, Some(i64::from(old.value)), cmd)? as i32,
@@ -52,6 +64,10 @@ pub(super) fn delete(e: &mut Engine, p: &Value) -> Result<Value> {
     if !seq.ctrls.get(index).is_some_and(|c| matches!(c.kind, CtrlKind::Cc(_))) {
         return Err(bad(cmd, "index is not a CC point"));
     }
+    if hidden(e, id, index) {
+        return Err(bad(cmd, "the point is hidden by the clip's left edge"));
+    }
+    let seq = seq_mut(e, id, cmd)?;
     seq.ctrls.remove(index);
     Ok(json!({"deleted": 1}))
 }

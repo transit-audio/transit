@@ -498,6 +498,21 @@ pub(crate) fn grid_end(s: &Session, clip: &Clip) -> Samples {
     s.tempo.tick_to_samples(s.tempo.samples_to_ticks(end, sr), sr).min(end)
 }
 
+/// Whether a clip's left edge hides events (ADR 0052 decision 17): a MIDI clip that is not validly
+/// looped. Its events before tick 0 (the tick [`grid_start`] sits on) are hidden by the left edge,
+/// as its events from [`grid_end`] on are hidden by the right edge. A looped clip's negative ticks
+/// are loop material that later cycles play, never hidden.
+pub fn left_edge_hides(clip: &Clip) -> bool {
+    matches!(clip.content, ClipContent::Midi { .. }) && !clip.looping.is_some_and(|l| l.is_valid())
+}
+
+/// The left-edge rule (ADR 0052 decision 17): an event of `clip` at stored tick `tick` is hidden
+/// when the clip is a MIDI clip that is not validly looped and the tick is before 0. Hidden events
+/// stay in the clip; the walkers that act on what the clip holds skip them.
+pub fn left_hidden(clip: &Clip, tick: i64) -> bool {
+    tick < 0 && left_edge_hides(clip)
+}
+
 /// Pedal controllers the clip-end release covers: 16 channels times sustain, sostenuto, soft, hold 2.
 const PEDAL_SLOTS: usize = 64;
 

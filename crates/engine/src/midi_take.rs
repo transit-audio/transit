@@ -426,8 +426,11 @@ pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &
 }
 
 /// Overdub: the new notes join the clip, which grows to cover the take (nothing else is in the
-/// way: the caller found this the only clip in the range).
-fn merge(s: &mut transit_model::Session, id: ClipId, built: &Built, tempo: &TempoMap, sr: SampleRate) {
+/// way: the caller found this the only clip in the range). Every event, existing or incoming, is
+/// rebased onto the final clip start, so the final left edge decides what is hidden (ADR 0052
+/// decisions 8 and 17.11): a hidden event the new start passes sounds, an incoming event before
+/// the final start stays hidden.
+pub(crate) fn merge(s: &mut transit_model::Session, id: ClipId, built: &Built, tempo: &TempoMap, sr: SampleRate) {
     let Some(clip) = s.find_clip_mut(id) else { return };
     let old_start = clip.start;
     let start = old_start.min(built.range.start);

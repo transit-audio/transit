@@ -74,7 +74,8 @@ fn stop(e: &Engine, from: Samples, back: bool) -> Option<Samples> {
         let notes: Vec<Samples> = match &c.content {
             ClipContent::Midi { sequence } if transients => {
                 let base = s.tempo.samples_to_ticks(c.start, s.sample_rate);
-                let ticks = sequence.notes.iter().flat_map(|n| {
+                // A note the left edge hides is no stop (ADR 0052 decision 17).
+                let ticks = sequence.notes.iter().filter(|n| !transit_mix::left_hidden(c, n.start)).flat_map(|n| {
                     let on = base.saturating_add(n.start);
                     [on, on.saturating_add(n.length)]
                 });

@@ -970,6 +970,8 @@ fn copy_clips(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad("edit.copy_clips", "no clips"));
     }
     src.sort_by_key(|(_, c)| c.start);
+    // A copy never carries what a source's left edge hides (ADR 0052 decision 17.10).
+    src.iter_mut().for_each(|(_, c)| ops::drop_left_hidden(c));
     // The copies stop together where the first one reaches its floor (ADR 0052 decision 7).
     let lowest = ops::lowest_delta(src.iter().map(|(_, c)| c), s.start());
     let by = position_param(e, "edit.copy_clips", p, "by")?.unwrap_or(0).max(lowest);

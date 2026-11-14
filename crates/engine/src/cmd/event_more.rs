@@ -469,9 +469,12 @@ fn step_input(e: &mut Engine, p: &Value) -> Result<Value> {
         if end > c.end() && next_start.is_some_and(|next| end > next) {
             return Err(bad(id, "the next clip starts before the step ends"));
         }
+        let hides = transit_mix::left_edge_hides(c);
         if let ClipContent::Midi { sequence } = &mut c.content {
             if tie {
-                let previous: Vec<_> = sequence.notes.iter().enumerate().filter(|(_, n)| n.end() == tick - base).map(|(i, _)| i).collect();
+                // The previous chord is what sounds: a note the left edge hides is not in it (ADR 0052 decision 17).
+                let previous: Vec<_> =
+                    sequence.notes.iter().enumerate().filter(|(_, n)| n.end() == tick - base && !(hides && n.start < 0)).map(|(i, _)| i).collect();
                 let mut actual: Vec<_> = previous.iter().map(|i| sequence.notes[*i].pitch).collect();
                 let mut wanted = pitches.clone();
                 actual.sort_unstable();
@@ -633,7 +636,8 @@ fn extract_chords(e: &mut Engine, p: &Value) -> Result<Value> {
             let ClipContent::Midi { sequence } = &c.content else { continue };
             let base = s.tempo.samples_to_ticks(c.start, s.sample_rate);
             let end = s.tempo.samples_to_ticks(c.end(), s.sample_rate);
-            for n in &sequence.notes {
+            // What the left edge hides does not sound (ADR 0052 decision 17).
+            for n in sequence.notes.iter().filter(|n| !transit_mix::left_hidden(c, n.start)) {
                 let a = base + n.start;
                 let b = (base + n.end()).min(end);
                 if b > a {

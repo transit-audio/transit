@@ -176,10 +176,26 @@ pub fn copy_range(s: &Session, track: TrackId, range: Range) -> Vec<Clip> {
         if isect.end < part.end() {
             part.trim_end_to(isect.end);
         }
+        // A copy is a cut, not a trim: it never carries what the left edge hides (ADR 0052
+        // decision 17.10), whether the clip hid it already or the trim above cut it off.
+        drop_left_hidden(&mut part);
         part.start -= range.start;
         out.push(part);
     }
     out
+}
+
+/// Drop the events `clip`'s left edge hides ([`transit_mix::left_hidden`]): what a copy of the
+/// clip leaves behind (ADR 0052 decision 17.10). A looped clip keeps its negative ticks: later
+/// cycles play them.
+pub fn drop_left_hidden(clip: &mut Clip) {
+    if !transit_mix::left_edge_hides(clip) {
+        return;
+    }
+    if let ClipContent::Midi { sequence } = &mut clip.content {
+        sequence.notes.retain(|n| n.start >= 0);
+        sequence.ctrls.retain(|c| c.tick >= 0);
+    }
 }
 
 /// Merge the MIDI inside `range` into one clip covering the whole range, gaps included, as it

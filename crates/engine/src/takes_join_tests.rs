@@ -117,3 +117,23 @@ fn pieces_edited_after_the_cut_are_not_joined() {
     let starts: Vec<i64> = e.session().track(t).unwrap().clips().iter().map(|c| c.start).collect();
     assert_eq!(starts, vec![0, 56_000], "the left and middle pieces join; the edited one stays apart");
 }
+
+/// ADR 0052 decision 17: a join keeps the first piece's hidden notes (before its left edge) hidden,
+/// and does not join a later piece that holds one, which the joined clip would reveal.
+#[test]
+fn a_join_keeps_hidden_notes_hidden_and_refuses_a_later_piece_that_holds_one() {
+    let s = Session::default();
+    let tc = super::TimeCtx::of(&s);
+    let q = TICKS_PER_QUARTER;
+    let note = |pitch, start, length| Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start, length };
+    let seq = Sequence { notes: vec![note(61, -q, q / 2), note(60, 0, q), note(64, 5 * q, q)], ctrls: Vec::new() };
+    let mut whole = Clip::midi(ClipId(1), "A", 96_000, 192_000, seq);
+    whole.take = Some(1);
+    let (left, right) = super::split_clip(&whole, 192_000, ClipId(2), tc).unwrap();
+    let joined = super::join(&[&left, &right], tc).expect("the pieces of a cut join");
+    assert_eq!(joined.content, whole.content, "the hidden note stays at its negative tick");
+    let mut edited = right.clone();
+    let transit_model::ClipContent::Midi { sequence } = &mut edited.content else { panic!("not MIDI") };
+    sequence.notes.insert(0, note(70, -10, 5));
+    assert!(super::join(&[&left, &edited], tc).is_none(), "a piece holding a hidden note is not joined");
+}

@@ -218,12 +218,16 @@ fn midi_op(e: &mut Engine, p: &Value, f: impl Fn(&mut [transit_midi::Note])) -> 
     let s = e.session_mut();
     let mut n = 0;
     for id in ids {
-        if let Some(c) = s.find_clip_mut(id)
-            && let ClipContent::Midi { sequence } = &mut c.content
-        {
-            f(&mut sequence.notes);
+        if let Some(c) = s.find_clip_mut(id) {
+            let hides = transit_mix::left_edge_hides(c);
+            let ClipContent::Midi { sequence } = &mut c.content else { continue };
+            // Only the visible notes (ADR 0052 decision 17): what the left edge hides is untouched.
+            let (hidden, mut visible): (Vec<_>, Vec<_>) = std::mem::take(&mut sequence.notes).into_iter().partition(|x| hides && x.start < 0);
+            f(&mut visible);
+            n += visible.len();
+            sequence.notes = hidden;
+            sequence.notes.extend(visible);
             sequence.sort();
-            n += sequence.notes.len();
         }
     }
     Ok(json!({"notes": n}))
@@ -276,6 +280,10 @@ fn quantize(e: &mut Engine, p: &Value) -> Result<Value> {
         let ClipContent::Midi { sequence } = &clip.content else { return Err(bad(id, "not a MIDI clip")) };
         if indices.iter().any(|i| *i >= sequence.notes.len()) {
             return Err(bad(id, "note index out of range"));
+        }
+        // A hidden note is never addressed (ADR 0052 decision 17): refused like an index out of range.
+        if indices.iter().any(|i| transit_mix::left_hidden(clip, sequence.notes[*i].start)) {
+            return Err(bad(id, "a note is hidden by the clip's left edge"));
         }
         let mut notes: Vec<_> = indices.iter().map(|i| sequence.notes[*i]).collect();
         transit_midi::ops::quantize(&mut notes, &opts);

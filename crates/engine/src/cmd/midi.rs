@@ -124,6 +124,17 @@ fn seq_mut<'a>(e: &'a mut Engine, id: ClipId, cmd: &str) -> Result<&'a mut Seque
     }
 }
 
+/// The indices of the notes the clip's left edge hides ([`transit_mix::left_hidden`], ADR 0052
+/// decision 17). A note command never addresses one: each treats a hidden index as it treats an
+/// index out of range (refused where that is refused, skipped where that is ignored).
+fn hidden_notes(e: &Engine, id: ClipId) -> Vec<usize> {
+    let Some((_, c)) = e.session().find_clip(id) else { return Vec::new() };
+    let ClipContent::Midi { sequence } = &c.content else { return Vec::new() };
+    sequence.notes.iter().enumerate().filter(|(_, n)| transit_mix::left_hidden(c, n.start)).map(|(i, _)| i).collect()
+}
+
+/// `midi.notes` lists every stored note, hidden ones included: the list is the index map the
+/// note commands address (ADR 0052 decision 17; a hidden note shows its negative start).
 fn notes(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = clip_id(p, "midi.notes")?;
     match e.session().find_clip(id).map(|(_, c)| &c.content) {
@@ -175,6 +186,9 @@ fn note_add(e: &mut Engine, p: &Value) -> Result<Value> {
 fn note_edit(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = clip_id(p, "midi.note_edit")?;
     let idx = p.get("index").and_then(Value::as_u64).ok_or_else(|| bad("midi.note_edit", "`index` required"))? as usize;
+    if hidden_notes(e, id).contains(&idx) {
+        return Err(bad("midi.note_edit", "the note is hidden by the clip's left edge"));
+    }
     let original = *seq_mut(e, id, "midi.note_edit")?.notes.get(idx).ok_or_else(|| bad("midi.note_edit", "index out of range"))?;
     let origin = midi_time::origin(e, id, "midi.note_edit")?;
     let start = midi_time::param(e, p, "start", origin, "midi.note_edit")?.unwrap_or(original.start).max(0);
@@ -218,7 +232,8 @@ fn indices(p: &Value) -> Vec<usize> {
 
 fn note_delete(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = clip_id(p, "midi.note_delete")?;
-    let idx = indices(p);
+    let hidden = hidden_notes(e, id);
+    let idx: Vec<usize> = indices(p).into_iter().filter(|i| !hidden.contains(i)).collect();
     let seq = seq_mut(e, id, "midi.note_delete")?;
     let before = seq.notes.len();
     let mut i = 0;
@@ -235,7 +250,8 @@ fn notes_move(e: &mut Engine, p: &Value) -> Result<Value> {
         return notes_move_to(e, p);
     }
     let id = clip_id(p, "midi.notes_move")?;
-    let idx = indices(p);
+    let hidden = hidden_notes(e, id);
+    let idx: Vec<usize> = indices(p).into_iter().filter(|i| !hidden.contains(i)).collect();
     let dt = i64_or(p, "ticks", 0);
     let ds = i64_or(p, "semitones", 0);
     let seq = seq_mut(e, id, "midi.notes_move")?;
@@ -272,6 +288,9 @@ fn notes_move_to(e: &mut Engine, p: &Value) -> Result<Value> {
     for (index, pitch) in raw.iter().zip(pitches) {
         let index = index.as_u64().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| bad(cmd, "invalid index"))?;
         let original = sequence.notes.get(index).ok_or_else(|| bad(cmd, "index out of range"))?;
+        if transit_mix::left_hidden(clip, original.start) {
+            return Err(bad(cmd, "a note is hidden by the clip's left edge"));
+        }
         if edits.iter().any(|(i, _)| *i == index) {
             return Err(bad(cmd, "duplicate index"));
         }
@@ -300,6 +319,10 @@ fn pitch_edit(e: &mut Engine, p: &Value, command: &str, pitch: impl Fn(u8) -> u8
         .collect::<Result<Vec<_>>>()?;
     selected.sort_unstable();
     selected.dedup();
+    let hidden = hidden_notes(e, id);
+    if selected.iter().any(|i| hidden.contains(i)) {
+        return Err(bad(command, "a note is hidden by the clip's left edge"));
+    }
     let seq = seq_mut(e, id, command)?;
     if selected.iter().any(|&i| i >= seq.notes.len()) {
         return Err(bad(command, "index out of range"));

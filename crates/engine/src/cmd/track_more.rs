@@ -239,6 +239,8 @@ fn extract_midi(e: &mut Engine, p: &Value) -> Result<Value> {
         let mut clips = Vec::new();
         for mut c in midi {
             c.id = s.new_clip_id();
+            // A copy never carries what the left edge hides (ADR 0052 decision 17.10).
+            crate::edit::drop_left_hidden(&mut c);
             clips.push(c);
         }
         let n = clips.len();
@@ -439,12 +441,19 @@ fn write_rtp(e: &mut Engine, p: &Value) -> Result<Value> {
         let r = rtp_of(s, *t);
         let Some(pl) = s.track_mut(*t).and_then(Track::playlist_mut) else { continue };
         for c in &mut pl.clips {
+            // The bake keeps what sounds (ADR 0052 decision 17.9): a hidden note stays as it is;
+            // a visible note takes Delay with playback's clamp at tick 0; a valid looped clip has
+            // no hidden notes and no clamp, as playback plays it.
+            let hides = transit_mix::left_edge_hides(c);
             let ClipContent::Midi { sequence } = &mut c.content else { continue };
-            for n in &mut sequence.notes {
+            for n in sequence.notes.iter_mut().filter(|n| !(hides && n.start < 0)) {
                 n.velocity = (i64::from(n.velocity) + r.velocity).clamp(1, 127) as u8;
                 n.pitch = (i64::from(n.pitch) + r.transpose).clamp(0, 127) as u8;
                 n.length = ((n.length as f64 * r.duration_pct / 100.0).round() as i64).max(1);
-                n.start = n.start.saturating_add(r.delay_ticks).max(0);
+                n.start = n.start.saturating_add(r.delay_ticks);
+                if hides {
+                    n.start = n.start.max(0);
+                }
                 notes += 1;
             }
             sequence.sort();
