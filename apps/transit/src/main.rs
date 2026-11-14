@@ -1,6 +1,11 @@
 //! transit desktop app: the studio UI over the transit engine.
 //!
-//! Usage: `transit --report [path]` writes a diagnostics file and exits; otherwise `transit [--demo] [--control <port>] [--no-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
+//! Usage: `transit --report [path]` writes a diagnostics file and exits; otherwise `transit [--demo] [--control <port>] [--no-audio | --null-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
+//!
+//! `--null-audio` is a diagnostic: the player, the mixer and hosted plug-ins (with their editors) run
+//! on a silent device (48 kHz, stereo, 512 frames, paced at real time, output discarded) and no
+//! audio hardware is listed or opened; there is no recording and no MIDI port. `--no-audio` runs
+//! with no player at all. See `docs/troubleshooting.md`.
 //!
 //! `--verbose` logs debug detail for every transit target; `--log <directives>` takes `RUST_LOG` syntax
 //! (`warn,transit_mix=trace`); `--log-stderr` copies the log to standard error when it is not a
@@ -34,6 +39,19 @@ mod audio_review_tests;
 use std::sync::Arc;
 use transit_engine::Engine;
 use transit_ui_studio::{Services, StudioApp, UiState};
+
+/// The diagnostic flag that runs the player on the silent device (`docs/troubleshooting.md`).
+const NULL_AUDIO_FLAG: &str = "--null-audio";
+
+/// The choices the launch open is handed: the saved ones, or under `--null-audio` only the silent
+/// device's name for the splash (the open ignores the rest; the saved choices stay as they are).
+fn launch_audio(null_audio: bool, saved: &transit_playback::AudioConfig) -> transit_playback::AudioConfig {
+    if null_audio {
+        transit_playback::AudioConfig { output: Some(transit_playback::backend::null::DEVICE.into()), ..Default::default() }
+    } else {
+        saved.clone()
+    }
+}
 
 /// Help > Debug Logging: the studio's handle on the logger.
 struct LoggerControl(&'static logging::AppLogger);
@@ -444,6 +462,10 @@ fn main() -> eframe::Result {
     }
     let demo = args.iter().any(|a| a == "--demo" || a == "--sample");
     let no_audio = args.iter().any(|a| a == "--no-audio");
+    let null_audio = args.iter().any(|a| a == NULL_AUDIO_FLAG);
+    if no_audio && null_audio {
+        return Err(eframe::Error::AppCreation("--no-audio and --null-audio cannot be combined".into()));
+    }
     let control_port =
         parse_control_port(&args, std::env::var("TRANSIT_CONTROL_PORT").ok().as_deref()).map_err(|error| eframe::Error::AppCreation(error.into()))?;
     let files: Vec<String> = args
@@ -535,8 +557,12 @@ fn main() -> eframe::Result {
                     shutdown::watch_device(&render_state.device, &device_watch, &cc.egui_ctx);
                 }
                 let mut app = StudioApp::new(engine, None, services(logger));
+                app.null_audio = null_audio;
+                if null_audio {
+                    log::info!("{NULL_AUDIO_FLAG}: the silent device runs; no audio hardware is listed or opened");
+                }
                 if !no_audio {
-                    app.splash.defer_open(prefs.audio.clone());
+                    app.splash.defer_open(launch_audio(null_audio, &prefs.audio));
                 }
                 // Our own autosave folder: the two apps must not recover each other's sessions. Runs
                 // without preferences (agents' tests) autosave into a folder of their own, so they
@@ -577,7 +603,24 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::{APP_USER_MODEL_ID, app_icon, sane_window_size};
+    use super::{APP_USER_MODEL_ID, NULL_AUDIO_FLAG, app_icon, launch_audio, sane_window_size};
+
+    /// Without `--null-audio` the launch open gets the saved choices unchanged; with it, only the
+    /// silent device's name for the splash (the open ignores the rest).
+    #[test]
+    fn the_launch_open_gets_the_saved_choices_unless_null_audio_is_given() {
+        let saved = transit_playback::AudioConfig {
+            system: Some("ASIO".into()),
+            output: Some("Interface".into()),
+            buffer_size: Some(64),
+            ..Default::default()
+        };
+        assert_eq!(launch_audio(false, &saved), saved, "no change without the flag");
+        let null = launch_audio(true, &saved);
+        assert_eq!(null.output.as_deref(), Some(transit_playback::backend::null::DEVICE));
+        assert_eq!((null.system, null.buffer_size), (None, None), "nothing of the saved device");
+        assert_eq!(NULL_AUDIO_FLAG, "--null-audio");
+    }
 
     #[test]
     fn embedded_ico_holds_the_expected_sizes() {

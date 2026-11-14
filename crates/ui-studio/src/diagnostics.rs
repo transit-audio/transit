@@ -589,6 +589,9 @@ impl crate::StudioApp {
 
 /// The report's device list in a run with audio off (#363).
 pub const NO_AUDIO_DEVICES: &str = "Audio is off in this run (--no-audio): the audio devices were not listed, and no driver was loaded.";
+/// The same for a `--null-audio` run: the silent device plays, nothing else is listed or loaded.
+pub const NULL_AUDIO_DEVICES: &str =
+    "The silent device runs in this run (--null-audio): the audio devices were not listed, and no driver was loaded.";
 
 /// The MIDI note of a report made without a Player (no audio device): MIDI runs with the audio.
 pub const NO_PLAYER_MIDI: &str = "MIDI is not running (no audio device is open): the ports are listed, none is open";
@@ -640,6 +643,9 @@ impl crate::StudioApp {
         let list_here = unlisted && self.may_list_machine();
         if report.systems.is_empty() && self.player.is_none() && self.audio_devices.fake.is_none() {
             report.devices_note = Some(NO_AUDIO_DEVICES.into());
+        }
+        if report.systems.is_empty() && self.null_audio {
+            report.devices_note = Some(NULL_AUDIO_DEVICES.into());
         }
         // No Player, no MIDI side to ask: the worker lists the ports (enumeration, nothing opened).
         let list_midi = self.player.is_none() && self.audio_devices.fake.is_none();

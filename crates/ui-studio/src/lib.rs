@@ -268,6 +268,9 @@ pub struct StudioApp {
     state_notice: Option<String>,
     pub services: Services,
     pub autosave_dir: Option<std::path::PathBuf>,
+    /// The `--null-audio` diagnostic run: every device open is the silent device (no hardware is
+    /// listed or opened, no input, no MIDI ports), and the Audio Devices window offers no switching.
+    pub null_audio: bool,
     autosaver: Option<transit_engine::autosave::Autosaver>,
     autosaved_rev: u64,
     pub leftovers: Vec<transit_engine::autosave::Leftover>,
@@ -427,6 +430,7 @@ impl StudioApp {
             diag: Default::default(),
             measure: Default::default(),
             autosave_dir: None,
+            null_audio: false,
             autosaver: None,
             autosaved_rev: 0,
             leftovers: Vec::new(),

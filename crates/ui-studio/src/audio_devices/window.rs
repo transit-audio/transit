@@ -163,7 +163,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let mut lay = AudioDevicesLayout { open: true, systems: systems.iter().map(|s| s.name.clone()).collect(), ..Default::default() };
     let recording = app.recording_active();
     let panel_open = app.audio_devices.panel.is_some();
-    let audio_on = app.player.is_some() || app.audio_devices.fake.is_some();
+    // The silent device (`--null-audio`) is a player, but it offers nothing to switch.
+    let audio_on = (app.player.is_some() && !app.null_audio) || app.audio_devices.fake.is_some();
     let (mut apply, mut reconnect, mut rescan, mut revert) = (false, false, false, false);
     let mut native_panel: Option<String> = None;
     let mut copy_diagnostics = false;
@@ -296,11 +297,12 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                             crate::help::status_line(ui, line, line.starts_with("Backend"));
                         }
                         if !audio_on {
-                            ui.label(
-                                egui::RichText::new("Audio is off in this run (--no-audio): choices are saved and open at the next start.")
-                                    .color(TOKENS.text_dim)
-                                    .size(11.5),
-                            );
+                            let note = if app.null_audio {
+                                NULL_AUDIO_NOTE
+                            } else {
+                                "Audio is off in this run (--no-audio): choices are saved and open at the next start."
+                            };
+                            ui.label(egui::RichText::new(note).color(TOKENS.text_dim).size(11.5));
                         }
                         for n in &app.audio_devices.notes {
                             ui.horizontal(|ui| {

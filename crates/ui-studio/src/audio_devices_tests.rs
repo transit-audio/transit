@@ -6,6 +6,8 @@
 mod calibration_tests;
 #[path = "audio_devices/no_audio_tests.rs"]
 mod no_audio_tests;
+#[path = "audio_devices/null_audio_tests.rs"]
+mod null_audio_tests;
 #[path = "audio_devices/selection_tests.rs"]
 mod selection_tests;
 #[path = "audio_devices/system_audio_tests.rs"]

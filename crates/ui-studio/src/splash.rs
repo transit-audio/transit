@@ -130,7 +130,7 @@ pub fn advance_open(app: &mut StudioApp, ctx: &egui::Context) {
     let player = match &open {
         Some(open) => open(session, &cfg),
         // The saved monitoring set from the first block (#366), as a reopen does.
-        None => transit_playback::Player::with_config_and_monitor(session, &cfg, &app.ui.monitor.settings()),
+        None => crate::host::reconnect::open_player(app.null_audio, session, &cfg, &app.ui.monitor.settings()),
     };
     app.splash.failed = player.silent.then(|| player.initial_error().unwrap_or("no device").to_string());
     app.player = Some(player);

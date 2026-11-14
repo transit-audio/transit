@@ -1,5 +1,17 @@
 use super::*;
 
+/// The Player a device open makes: the silent device in a `--null-audio` run (`null_audio`; no
+/// audio system is asked, whatever `cfg` says), else the saved choices `cfg`. The launch open and
+/// every reopen go through here, so a `--null-audio` run never reaches the hardware.
+pub(crate) fn open_player(
+    null_audio: bool,
+    session: std::sync::Arc<transit_model::Session>,
+    cfg: &transit_playback::AudioConfig,
+    monitor: &transit_playback::monitor_path::MonitorSettings,
+) -> Player {
+    if null_audio { Player::with_null_device(session, monitor) } else { Player::with_config_and_monitor(session, cfg, monitor) }
+}
+
 impl StudioApp {
     /// Stop the transport, keeping a take in progress, when the audio output fails.
     pub(crate) fn watch_output(&mut self) {
@@ -86,8 +98,8 @@ impl StudioApp {
 
     /// Reopen audio with editors closed before teardown. Never interrupt a recording.
     pub fn reconnect_audio(&mut self) {
-        let monitor = self.ui.monitor.settings();
-        match self.reconnect_audio_using(true, |session, cfg| Player::with_config_and_monitor(session, cfg, &monitor)) {
+        let (monitor, null) = (self.ui.monitor.settings(), self.null_audio);
+        match self.reconnect_audio_using(true, |session, cfg| open_player(null, session, cfg, &monitor)) {
             Ok(captured) => {
                 self.reopen.reconnected();
                 if !captured {
@@ -189,8 +201,8 @@ impl StudioApp {
             self.reopen_with = Some(open);
             return result;
         }
-        let monitor = self.ui.monitor.settings();
-        self.reconnect_audio_using(preserve, |session, cfg| Player::with_config_and_monitor(session, cfg, &monitor))
+        let (monitor, null) = (self.ui.monitor.settings(), self.null_audio);
+        self.reconnect_audio_using(preserve, |session, cfg| open_player(null, session, cfg, &monitor))
     }
 
     pub(crate) fn reconnect_audio_using(

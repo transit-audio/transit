@@ -17,7 +17,7 @@
 
 mod autosave;
 mod plugin_state;
-mod reconnect;
+pub(crate) mod reconnect;
 mod recording;
 mod transport;
 

@@ -227,6 +227,25 @@ it opens, a note names it, and Copy diagnostics has an "Unplaced takes" section.
 intact (an RF64 WAV past 4 GiB); open it in another editor, or split it and import the pieces. Placing
 takes of any length is issue #187 (known issue K91).
 
+## Running without audio hardware
+
+Two command-line options run transit without touching the audio interface, for diagnosing a problem
+or for automated captures. Neither is in the menus.
+
+- **`--null-audio`** runs everything above the device as usual: the player, the mixer, hosted
+  plug-ins with their editor windows, meters and the transport. The audio goes to a silent built-in
+  device instead of hardware: 48 kHz, stereo, 512 frames, paced at real time, the output discarded.
+  No audio device is listed or opened (no WASAPI, ASIO, CoreAudio, ALSA or JACK call). Audio Devices
+  shows "No hardware (silent)" and offers no switching; choices made there are saved for the next
+  start. There are no inputs, so recording is unavailable, and no MIDI port is opened.
+- **`--no-audio`** runs with no player at all: plug-ins get no instance and no editor window.
+
+```
+transit --null-audio --log-stderr
+```
+
+The two cannot be combined. Without either option nothing changes.
+
 ## More detail
 
 Three ways, from least to most effort:

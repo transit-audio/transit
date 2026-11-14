@@ -35,6 +35,11 @@ use transit_playback::devices::{self, AudioSystem, DeviceInfo};
 use transit_playback::telemetry::{StatsBackend, StreamStats};
 use transit_playback::{AudioConfig, Backend};
 
+/// Said when Apply (or `ui.set {audio}`) saves choices in a `--null-audio` run: nothing reopens.
+pub const NULL_AUDIO_SAVED: &str = "Audio devices saved. This run uses the silent device (--null-audio); they open at the next start.";
+/// The Audio Devices window's note in a `--null-audio` run, where it offers no switching.
+pub const NULL_AUDIO_NOTE: &str =
+    "No hardware (silent) in this run (--null-audio): no audio device was listed or opened; choices are saved and open at the next start.";
 /// Said when Apply (or `ui.set {audio}`) is asked while recording.
 pub const REFUSED_RECORDING: &str = "Stop recording before changing the audio devices.";
 /// The label of every "no choice" entry.
@@ -521,6 +526,11 @@ impl StudioApp {
         let was_playing = self.is_playing();
         let cfg = self.ui.audio.clone();
         self.audio_devices.input_reported = None;
+        if self.null_audio {
+            self.audio_devices.notes.clear();
+            self.status = NULL_AUDIO_SAVED.into();
+            return Ok(());
+        }
         let (opened, captured) = if self.player.is_some() || self.audio_devices.fake.is_some() {
             let captured = match self.reconnect_with_player(true) {
                 Ok(captured) => {
@@ -688,7 +698,8 @@ impl StudioApp {
     /// each listing let through ([`AudioDevicesState::machine_listings`]) and still never reaches the
     /// machine (scripted listings, [`listing_from`]).
     pub(crate) fn may_list_machine(&self) -> bool {
-        let allowed = self.player.is_some();
+        // The silent device of a `--null-audio` run is a player, but no hardware may be listed.
+        let allowed = self.player.is_some() && !self.null_audio;
         #[cfg(test)]
         if allowed {
             self.audio_devices.machine_listings.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -864,7 +875,10 @@ fn check(app: &mut StudioApp) {
     app.poll_native_asio_panel();
     if !app.audio_devices.startup_checked && app.player.is_some() {
         app.audio_devices.startup_checked = true;
-        startup_notes(app);
+        // The saved choices are not what a `--null-audio` run opens, by design: nothing to say.
+        if !app.null_audio {
+            startup_notes(app);
+        }
     }
     let (Some(want), Some(r)) = (app.ui.audio.input.as_deref(), &app.recorder) else { return };
     let pair = (want.to_string(), r.device_name.clone());
