@@ -735,6 +735,13 @@ impl Vst3Plugin {
         Some(n)
     }
 
+    /// #651: the session sent the echo the host already holds again (a parameter map that grew
+    /// re-sends every stored value). The processor has the plug-in's value, or has it queued, and
+    /// the controller reported it: nothing is sent.
+    fn echo_repeat(&self, i: usize, v: f32) {
+        trace::record(self.shared.host.trace_id, Call::EchoRepeat, self.ids.get(i).copied().unwrap_or(0), 0.0, u64::from(v.to_bits()));
+    }
+
     /// Queues every value the host set again (after a (re)activation).
     fn resend_host_set(&mut self) {
         for i in 0..self.ids.len() {
@@ -1012,7 +1019,10 @@ impl Plugin for Vst3Plugin {
         if let Some(slot) = self.values.get_mut(i) {
             *slot = v;
         }
-        self.echoes.note(&self.shared.reported, i, v);
+        if self.echoes.note(&self.shared.reported, i, v) {
+            self.echo_repeat(i, v);
+            return true;
+        }
         if let Some(h) = self.host_set.get_mut(i) {
             *h = true;
         }
@@ -1031,7 +1041,10 @@ impl Plugin for Vst3Plugin {
         if let Some(slot) = self.values.get_mut(i) {
             *slot = v;
         }
-        self.echoes.note(&self.shared.reported, i, v);
+        if self.echoes.note(&self.shared.reported, i, v) {
+            self.echo_repeat(i, v);
+            return true;
+        }
         if let Some(h) = self.host_set.get_mut(i) {
             *h = true;
         }

@@ -462,20 +462,29 @@ impl Echoes {
 
     /// The host just set plain `v` for parameter `i`: the session's echo of a report not used up
     /// yet, or a value of the host's own (which uses up every report made so far: one of them
-    /// coming back later is then the host's value, not the plug-in's).
-    pub fn note(&mut self, reported: &Reported, i: usize, v: f32) {
-        let (Some(exact), Some(seen)) = (self.exact.get_mut(i), self.seen.get_mut(i)) else { return };
-        *exact = match reported.echo(i, v, *seen) {
+    /// coming back later is then the host's value, not the plug-in's). True when `v` only repeats
+    /// the echo the host holds (the session sent the same value again): nothing changes, and a
+    /// newer report still on its way stays recognizable.
+    pub fn note(&mut self, reported: &Reported, i: usize, v: f32) -> bool {
+        let (Some(exact), Some(seen)) = (self.exact.get_mut(i), self.seen.get_mut(i)) else { return false };
+        let held = exact.is_some_and(|(plain, _)| plain == v.to_bits());
+        match reported.echo(i, v, *seen) {
             Echo::Of { report, normalized } => {
                 *seen = report;
-                Some((v.to_bits(), normalized.to_bits()))
+                *exact = Some((v.to_bits(), normalized.to_bits()));
+                false
             }
+            Echo::None { .. } | Echo::Busy if held => true,
             Echo::None { reports } => {
                 *seen = reports;
-                None
+                *exact = None;
+                false
             }
-            Echo::Busy => None,
-        };
+            Echo::Busy => {
+                *exact = None;
+                false
+            }
+        }
     }
 
     /// The plug-in's own normalized value when the host's plain value `v` for parameter `i` is
@@ -708,6 +717,28 @@ mod tests {
         e.forget(&r);
         e.note(&r, 1, 9.0);
         assert_eq!(e.normalized(1, 9.0), None);
+    }
+
+    /// The session sending the echo the host holds again changes nothing: not a value of the
+    /// host's own, and a newer report still on its way stays recognizable (#651, round 2).
+    #[test]
+    fn a_repeat_of_the_held_echo_changes_nothing() {
+        let r = Reported::new(1);
+        let mut e = Echoes::new(1);
+        let (s03, s07) = (0.3f64 as f32, 0.7f64 as f32);
+        r.record(0, s03, 0.3);
+        assert!(!e.note(&r, 0, s03), "the echo itself");
+        assert!(e.note(&r, 0, s03), "sent again: a repeat");
+        assert_eq!(e.normalized(0, s03).map(f64::to_bits), Some(0.3f64.to_bits()), "still the plug-in's value");
+        r.record(0, s07, 0.7);
+        assert!(e.note(&r, 0, s03), "the old value again, with a newer report on its way: a repeat");
+        assert!(!e.note(&r, 0, s07), "the newer report's echo");
+        assert_eq!(e.normalized(0, s07).map(f64::to_bits), Some(0.7f64.to_bits()), "recognized");
+        assert!(!e.note(&r, 0, 1.0), "a value of the host's own");
+        assert!(!e.note(&r, 0, 1.0), "and again: still the host's, never a repeat of an echo");
+        assert_eq!(e.normalized(0, 1.0), None);
+        assert!(!e.note(&r, 0, s07), "a used report after a host value is the host's");
+        assert_eq!(e.normalized(0, s07), None);
     }
 
     #[test]

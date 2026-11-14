@@ -150,12 +150,14 @@ pub(crate) enum Call {
     Echo,
     /// `set_param` took a value of the host's own: `value` goes to the plug-in. `aux`: the `f32`.
     HostValue,
+    /// `set_param` repeated the echo the host already holds: nothing is sent. `aux`: the `f32`.
+    EchoRepeat,
 }
 
 impl Call {
     fn from_u8(v: u8) -> Option<Call> {
         use Call::*;
-        const ALL: [Call; 13] = [
+        const ALL: [Call; 14] = [
             ParamsRescan,
             RequestFlush,
             MarkDirty,
@@ -169,6 +171,7 @@ impl Call {
             Report,
             Echo,
             HostValue,
+            EchoRepeat,
         ];
         ALL.get(usize::from(v)).copied()
     }
@@ -330,7 +333,7 @@ pub(crate) fn lines(records: &[Record], dropped: u64) -> Vec<String> {
 }
 
 fn collapsible(c: Call) -> bool {
-    matches!(c, Call::OutParamValue | Call::InParamValue | Call::Echo | Call::HostValue | Call::Report)
+    matches!(c, Call::OutParamValue | Call::InParamValue | Call::Echo | Call::HostValue | Call::EchoRepeat | Call::Report)
 }
 
 fn value(v: f64) -> String {
@@ -375,6 +378,7 @@ pub(crate) fn line(r: &Record) -> String {
             plain(r.aux),
             if r.aux >> 32 == 1 { format!("a queued host value takes {}", value(r.value)) } else { "nothing sent".to_owned() }
         ),
+        Call::EchoRepeat => format!("{head} set_param id={} {}: repeats the echo the host holds, nothing sent", r.id, plain(r.aux)),
         Call::HostValue => format!("{head} set_param id={} {}: a host value, the plug-in gets {}", r.id, plain(r.aux), value(r.value)),
     }
 }

@@ -19,6 +19,10 @@ use transit_dsp::{Plugin, PluginEditor};
 
 const BLOCK: usize = 64;
 
+/// The tests of this file run one at a time: the fixture keeps its call log and its armed pick
+/// process-wide.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The fixture's presets, as `tests/fixture` defines them: (parameter, normalized).
 const PRESETS: [[(u32, f64); 3]; 2] = [[(7, 0.3), (3, 0.45), (12, 0.3)], [(7, 0.7), (3, 0.95), (12, 0.7)]];
 
@@ -80,6 +84,7 @@ fn unasked(log: &[String], preset: &[(u32, f64)]) -> Vec<String> {
 
 #[test]
 fn a_preset_picked_in_the_plugins_editor_reaches_the_processor_exactly_and_nothing_goes_back() {
+    let _one_at_a_time = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
     let id = found.into_iter().find(|d| d.name == "Fixture Gain").expect("fixture gain").id;
     let mut p = transit_vst3_host::create(&id).expect("instantiate");
@@ -128,6 +133,50 @@ fn a_preset_picked_in_the_plugins_editor_reaches_the_processor_exactly_and_nothi
         let log = log_of(reader.save_state());
         assert!(log.iter().any(|l| l.starts_with("ctrl.setParamNormalized(7)=")), "the host's {v} reaches the controller; log: {log:#?}");
         assert!(log.iter().any(|l| l.starts_with("proc.point(7)=")), "and the processor; log: {log:#?}");
+    }
+    drop(reader);
+    drop(ed);
+    drop(p);
+}
+
+/// The session may send the same values again: a parameter map that grows re-sends every value
+/// it stores (a hosted plug-in's map starts empty and grows with each parameter the plug-in
+/// reports), and a later publication of the same values does the same. A repeat of the echo the
+/// host already holds is nothing new: the processor got the plug-in's value once and nothing
+/// goes to the controller.
+#[test]
+fn the_session_sending_its_echo_again_sends_nothing_more() {
+    let _one_at_a_time = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
+    let id = found.into_iter().find(|d| d.name == "Fixture Gain").expect("fixture gain").id;
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
+    p.prepare(48_000.0, BLOCK, 2);
+    let mut ed = p.editor().expect("editor handle");
+    let mut reader = p.state_reader().expect("state reader");
+    frames(&mut p, &mut ed, 4);
+    for (index, announce) in [(0u32, 0u32), (1, 1), (0, 1), (1, 0)] {
+        let preset = &PRESETS[index as usize];
+        let how = if announce == 0 { "performEdit" } else { "kParamValuesChanged" };
+        assert!(p.load_state(&arming_state(index, announce)));
+        frames(&mut p, &mut ed, 2);
+        assert!(reader.save_state().is_some());
+        let edits = ed.idle();
+        assert_eq!(edits.len(), preset.len(), "preset {index} ({how}): {edits:?}");
+        for _ in 0..3 {
+            for (id, v) in &edits {
+                assert!(p.set_param(id, *v), "{id}");
+            }
+            p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK);
+        }
+        frames(&mut p, &mut ed, 2);
+        let mut log = log_of(reader.save_state());
+        frames(&mut p, &mut ed, 2);
+        log.extend(log_of(reader.save_state()));
+        assert_eq!(unasked(&log, preset), Vec::<String>::new(), "preset {index} ({how}): log: {log:#?}");
+        for &(pid, _) in preset {
+            let n = log.iter().filter(|l| l.starts_with(&format!("proc.point({pid})="))).count();
+            assert_eq!(n, 1, "preset {index} ({how}): parameter {pid} reaches the processor once; log: {log:#?}");
+        }
     }
     drop(reader);
     drop(ed);

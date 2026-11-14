@@ -152,12 +152,14 @@ pub(crate) enum Call {
     /// A (re)activation or a curve re-sample re-sends a value the host set (the `set_param` line
     /// that follows says how).
     Resend,
+    /// `set_param` repeated the echo the host already holds: nothing is sent. `aux`: plain bits.
+    EchoRepeat,
 }
 
 impl Call {
     fn from_u8(v: u8) -> Option<Call> {
         use Call::*;
-        const ALL: [Call; 17] = [
+        const ALL: [Call; 18] = [
             BeginEdit,
             PerformEdit,
             EndEdit,
@@ -175,6 +177,7 @@ impl Call {
             Echo,
             HostValue,
             Resend,
+            EchoRepeat,
         ];
         ALL.get(usize::from(v)).copied()
     }
@@ -336,7 +339,7 @@ pub(crate) fn lines(records: &[Record], dropped: u64) -> Vec<String> {
 }
 
 fn collapsible(c: Call) -> bool {
-    matches!(c, Call::PerformEdit | Call::SetParamNormalized | Call::ProcessorPoint | Call::Echo | Call::HostValue | Call::Report)
+    matches!(c, Call::PerformEdit | Call::SetParamNormalized | Call::ProcessorPoint | Call::Echo | Call::HostValue | Call::EchoRepeat | Call::Report)
 }
 
 fn value(v: f64) -> String {
@@ -400,6 +403,7 @@ pub(crate) fn line(r: &Record) -> String {
         Call::Report => format!("{head} report to the session id={} {} {}", r.id, value(r.value), plain(r.aux)),
         Call::Echo => format!("{head} set_param id={} {}: the session's echo, processor gets {}", r.id, plain(r.aux), value(r.value)),
         Call::HostValue => format!("{head} set_param id={} {}: a host value, processor and controller get {}", r.id, plain(r.aux), value(r.value)),
+        Call::EchoRepeat => format!("{head} set_param id={} {}: repeats the echo the host holds, nothing sent", r.id, plain(r.aux)),
         Call::Resend => format!("{head} re-send of a value the host set (after a (re)activation or a curve re-sample) id={}", r.id),
     }
 }

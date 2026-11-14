@@ -15,6 +15,10 @@ use transit_dsp::{Plugin, PluginEditor};
 
 const BLOCK: usize = 64;
 
+/// The tests of this file run one at a time: the fixture keeps its call log and its armed pick
+/// process-wide.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// UI frames as the app runs them: the editor handle's idle, its edits into the session and back
 /// to the plug-in through `set_param`, then an audio block.
 fn frames(p: &mut Box<dyn Plugin>, ed: &mut Box<dyn PluginEditor>, n: usize) {
@@ -34,6 +38,7 @@ fn log_of(blob: Option<Vec<u8>>) -> Vec<String> {
 
 #[test]
 fn a_value_the_plugin_reports_is_not_sent_back_to_it() {
+    let _one_at_a_time = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     common::fixture_dir();
     let mut p = transit_clap_host::create("clap:org.soundcraft.test.gain").expect("gain fixture");
     p.prepare(48_000.0, BLOCK, 2);
@@ -63,6 +68,38 @@ fn a_value_the_plugin_reports_is_not_sent_back_to_it() {
         frames(&mut p, &mut ed, 1);
         let log = log_of(reader.save_state());
         assert_eq!(log, vec![format!("param(7)={:?}@0", f64::from(v))], "the host's {v} reaches the plug-in");
+    }
+    drop(reader);
+    drop(ed);
+    drop(p);
+}
+
+/// The session may send the same values again: a parameter map that grows re-sends every value
+/// it stores (a hosted plug-in's map starts empty and grows with each parameter the plug-in
+/// reports), and a later publication of the same values does the same. A repeat of the echo the
+/// host already holds is nothing new: nothing goes to the plug-in.
+#[test]
+fn the_session_sending_its_echo_again_sends_nothing() {
+    let _one_at_a_time = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    common::fixture_dir();
+    let mut p = transit_clap_host::create("clap:org.soundcraft.test.gain").expect("gain fixture");
+    p.prepare(48_000.0, BLOCK, 2);
+    let mut ed = p.editor().expect("the gain fixture has an editor handle");
+    let mut reader = p.state_reader().expect("state reader");
+    frames(&mut p, &mut ed, 2);
+    assert!(p.load_state(b"CMD:log-start"));
+    for (cmd, want) in [("CMD:edit:0.3", 0.3f64), ("CMD:rescan-values:0.7", 0.7)] {
+        let _ = p.load_state(cmd.as_bytes());
+        p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK);
+        let edits = ed.idle();
+        assert_eq!(edits, vec![("7".to_string(), want as f32)], "{cmd}");
+        for _ in 0..3 {
+            assert!(p.set_param("7", want as f32));
+            p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK);
+        }
+        frames(&mut p, &mut ed, 2);
+        let log = log_of(reader.save_state());
+        assert_eq!(log, Vec::<String>::new(), "{cmd}: the host sent the plug-in's own value back to it");
     }
     drop(reader);
     drop(ed);

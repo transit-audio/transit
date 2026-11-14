@@ -609,7 +609,12 @@ impl ClapPlugin {
         let i = self.param_index.get(id).copied()?;
         let (pi, &cid) = (self.info.params.get(i)?, self.ids.get(i)?);
         let v = pi.clamp(value);
-        self.echoes.note(&self.shared.reported, i, v);
+        if self.echoes.note(&self.shared.reported, i, v) {
+            // The session sent the echo the host holds again (a parameter map that grew re-sends
+            // every stored value): the plug-in has the value, nothing changes.
+            trace::record(self.host.trace_id, Call::EchoRepeat, cid, 0.0, u64::from(v.to_bits()));
+            return Some(true);
+        }
         let x = self.echoes.plugin_value(i, v)?;
         if let Some(slot) = self.values.get_mut(i) {
             *slot = v;
