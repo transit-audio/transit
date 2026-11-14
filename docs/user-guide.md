@@ -235,6 +235,11 @@ the usual explicit choice that names the track; its MIDI is kept. If an export s
 the result names any files that completed. The control channel command is `file.bounce_consolidated`
 with `dir` and the ordinary format options.
 
+**File > Export > MIDI…** writes one Standard MIDI File with a track per MIDI or instrument track
+(`file.export_midi`). Each clip is written as it plays: a note that starts past the clip's end is
+left out, a note held over the end stops there, and a looped clip's repeats are written out. The
+notes are the clips' own: real-time properties, track offsets and MIDI effects are not applied.
+
 With Opus the bit depth row gives way to **Bitrate**: 96, 128, 160 (the default), 192 or 256 kb/s
 for stereo; a mono bus offers 96 (the default), 128 or 160 kb/s.
 The encoder is the reference libopus at its highest quality setting, with a variable bitrate that
