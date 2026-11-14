@@ -185,3 +185,45 @@ fn a_midi_export_writes_only_what_sounds() {
     assert_eq!(ctrls, [(100, 90)]);
     assert_eq!(notes_of(&smf, 1), [(48, 3840, 240), (48, 4800, 240), (48, 5760, 240), (48, 6720, 240)]);
 }
+
+/// A looped clip trimmed so its loop end lies past its clip end: notes and controllers at or after
+/// the clip end do not sound, so they are not written (not even as one-tick notes).
+#[test]
+fn a_midi_export_leaves_out_what_a_looped_clip_holds_past_its_end() {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, Some("Keys"));
+    let mut seq = Sequence::default();
+    seq.notes.push(note(60, 0, 480));
+    seq.notes.push(note(62, 1000, 2000)); // held over the clip end at tick 1920
+    seq.notes.push(note(64, 2880, 480)); // past the clip end, inside the loop
+    seq.ctrls.push(CtrlEvent { tick: 3000, channel: 0, kind: CtrlKind::Cc(7), value: 10 }); // past the clip end
+    // Half a bar long, looping a whole bar.
+    let mut c = Clip::midi(ClipId(1), "m", 0, BAR / 2, seq);
+    c.set_loop(Some(ClipLoop { start: 0, end: BAR }));
+    s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(c);
+    let smf = exported(s);
+    assert_eq!(notes_of(&smf, 0), [(60, 0, 480), (62, 1000, 920)]);
+    assert!(smf.tracks[0].sequence.ctrls.is_empty(), "{:?}", smf.tracks[0].sequence.ctrls);
+}
+
+/// A muted clip is left out (a file cannot mark it muted); a muted track is still written.
+#[test]
+fn a_midi_export_leaves_out_muted_clips_and_keeps_muted_tracks() {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, Some("Keys"));
+    for (id, start, pitch, muted) in [(1, 0, 60u8, false), (2, BAR, 62, true)] {
+        let mut seq = Sequence::default();
+        seq.notes.push(note(pitch, 0, 480));
+        let mut c = Clip::midi(ClipId(id), "m", start, BAR, seq);
+        c.muted = muted;
+        s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(c);
+    }
+    let m = s.add_track(TrackKind::Midi, ChannelFormat::Mono, Some("Bass"));
+    let mut seq = Sequence::default();
+    seq.notes.push(note(36, 0, 480));
+    s.track_mut(m).unwrap().playlist_mut().unwrap().clips.push(Clip::midi(ClipId(3), "b", 0, BAR, seq));
+    s.track_mut(m).unwrap().mixer.mute = true;
+    let smf = exported(s);
+    assert_eq!(notes_of(&smf, 0), [(60, 0, 480)], "the muted clip is left out");
+    assert_eq!(notes_of(&smf, 1), [(36, 0, 480)], "the muted track is written");
+}

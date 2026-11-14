@@ -647,13 +647,19 @@ pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<transit_midi::Sequen
 /// is not MIDI, or a loop that would unroll to too many events.
 pub fn clip_as_played(s: &Session, clip: &Clip) -> Option<transit_midi::Sequence> {
     let ClipContent::Midi { sequence } = &clip.content else { return None };
-    if midi_loop_frame(s, clip).is_some() {
-        return unroll_midi_loop(s, clip);
-    }
     let sr = s.sample_rate;
     let base = s.tempo.samples_to_ticks(clip.start, sr);
     let last = grid_end(s, clip);
     let tick = |at: Samples| s.tempo.samples_to_ticks(at, sr).saturating_sub(base);
+    if midi_loop_frame(s, clip).is_some() {
+        // The unrolled first pass keeps points at or after the grid end when the loop end lies past
+        // the clip end; playback does not sound them, so they are dropped here.
+        let mut out = unroll_midi_loop(s, clip)?;
+        let end = tick(last);
+        out.notes.retain(|n| n.start < end);
+        out.ctrls.retain(|c| c.tick < end);
+        return Some(out);
+    }
     let neutral = Rtp { velocity: 0, transpose: 0, duration: 1.0, delay: 0 };
     let mut out = transit_midi::Sequence::default();
     for n0 in &sequence.notes {
@@ -663,6 +669,7 @@ pub fn clip_as_played(s: &Session, clip: &Clip) -> Option<transit_midi::Sequence
         out.notes.push(n);
     }
     // As playback: a controller before tick 0 does not sound in a clip that is not looped.
+    // `c.tick >= 0` is the left-edge rule; it calls the shared helper once the hidden-edge slices stack.
     out.ctrls.extend(sequence.ctrls.iter().filter(|c| c.tick >= 0 && s.tempo.tick_to_samples(base.saturating_add(c.tick), sr) < last));
     out.sort();
     Some(out)

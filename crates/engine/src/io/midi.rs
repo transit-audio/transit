@@ -98,7 +98,7 @@ fn conductor_from(s: &Session, origin: i64) -> transit_midi::Smf {
     smf
 }
 
-/// Every MIDI clip of the chosen tracks as it sounds ([`transit_mix::clip_as_played`]), from the
+/// Every unmuted MIDI clip of the chosen tracks as it sounds ([`transit_mix::clip_as_played`]), from the
 /// bar holding the session start ([`export_origin`]).
 pub(super) fn export_midi_session(s: &Session, only: Option<&[TrackId]>) -> Result<Vec<u8>> {
     let origin = export_origin(s);
@@ -109,7 +109,9 @@ pub(super) fn export_midi_session(s: &Session, only: Option<&[TrackId]>) -> Resu
     }
     for t in chosen {
         let mut seq = transit_midi::Sequence::default();
-        for c in t.clips().iter().filter(|c| matches!(c.content, ClipContent::Midi { .. })) {
+        // A file cannot mark a clip muted, so a muted clip is left out (it would sound wherever the
+        // file is opened); a muted track is still written.
+        for c in t.clips().iter().filter(|c| !c.muted && matches!(c.content, ClipContent::Midi { .. })) {
             let Some(sequence) = transit_mix::clip_as_played(s, c) else {
                 return Err(EngineError::BadParams(
                     "file.export_midi".into(),
