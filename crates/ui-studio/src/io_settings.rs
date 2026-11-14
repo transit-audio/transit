@@ -41,7 +41,8 @@ pub fn remember(saved: &mut Vec<IoMap>, map: &IoMap) {
 impl StudioApp {
     /// Once per opened device, give the engine this machine's table for it; afterwards pass every
     /// change of the engine's table to the audio thread and the preferences. Without a real
-    /// device (`--no-audio`, the silent fallback) there is nothing to open or keep.
+    /// device (`--no-audio`, the silent fallback) there is nothing to open or keep; the silent
+    /// device of `--null-audio` gets its table, but it is not this machine's, so it is never saved.
     pub(crate) fn sync_io(&mut self) {
         // A Player waiting to be reopened after a driver reset gets the table with its successor.
         let Some(player) = self.player.as_ref().filter(|p| !p.silent && p.reopen_cause().is_none()) else { return };
@@ -60,7 +61,9 @@ impl StudioApp {
         }
         let map = self.engine.io_map().clone();
         if player.set_io(map.clone()).is_ok() {
-            remember(&mut self.ui.io_maps, &map);
+            if !player.null_device() {
+                remember(&mut self.ui.io_maps, &map);
+            }
             self.io_pushed = self.engine.io_revision();
         }
     }
@@ -70,6 +73,25 @@ impl StudioApp {
 mod tests {
     use super::*;
     use transit_model::{ChannelFormat, IoDirection, IoPath};
+
+    /// `--null-audio`: the silent device's table reaches the engine and the player, and nothing is
+    /// added to the saved tables in `ui.json`.
+    #[test]
+    fn a_null_audio_run_saves_no_table_for_the_silent_device() {
+        use std::sync::Arc;
+        use transit_playback::backend::null::{self, PaceClock, StepClock};
+        let engine = transit_engine::Engine::default();
+        let clock = StepClock::new();
+        let player = transit_playback::Player::with_null_device_clock(engine.session_arc(), Arc::clone(&clock) as Arc<dyn PaceClock>);
+        clock.settle();
+        let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+        app.null_audio = true;
+        assert!(app.player.as_ref().is_some_and(|p| p.null_device() && !p.silent));
+        app.sync_io();
+        assert_eq!(app.engine.io_map().key(), (null::SYSTEM, null::DEVICE), "the engine holds the silent device's table");
+        assert_eq!(app.io_pushed, app.engine.io_revision(), "the table went to the player");
+        assert!(app.ui.io_maps.is_empty(), "no table kept for the silent device: {:?}", app.ui.io_maps);
+    }
 
     fn tascam() -> IoMap {
         IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10)
