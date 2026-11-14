@@ -651,7 +651,8 @@ pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<transit_midi::Sequen
 /// A MIDI clip's own events as playback sounds them (ADR 0052 decision 10): ticks from the clip
 /// start, only what plays between its grid start and its grid end, each note-off cut at the grid
 /// end, and a looped clip's repetitions written out ([`unroll_midi_loop`]). The notes go through
-/// [`played_note`], so a stored note before tick 0 is placed as playback places it. The track's
+/// [`played_note`] and the controllers through [`left_hidden`], so what the left edge hides is left
+/// out, as in playback. The track's
 /// real-time properties, MIDI Track Offset and MIDI effects are not applied. `None` for a clip that
 /// is not MIDI, or a loop that would unroll to too many events.
 pub fn clip_as_played(s: &Session, clip: &Clip) -> Option<transit_midi::Sequence> {
@@ -670,16 +671,16 @@ pub fn clip_as_played(s: &Session, clip: &Clip) -> Option<transit_midi::Sequence
         return Some(out);
     }
     let neutral = Rtp { velocity: 0, transpose: 0, duration: 1.0, delay: 0 };
+    let hides = left_edge_hides(clip);
     let mut out = transit_midi::Sequence::default();
     for n0 in &sequence.notes {
-        let Some((mut n, on, off)) = played_note(s, last, base, neutral, n0, false) else { continue };
+        let Some((mut n, on, off)) = played_note(s, last, base, neutral, n0, hides) else { continue };
         n.start = tick(on);
         n.length = tick(off).saturating_sub(n.start).max(1);
         out.notes.push(n);
     }
-    // As playback: a controller before tick 0 does not sound in a clip that is not looped.
-    // `c.tick >= 0` is the left-edge rule; it calls the shared helper once the hidden-edge slices stack.
-    out.ctrls.extend(sequence.ctrls.iter().filter(|c| c.tick >= 0 && s.tempo.tick_to_samples(base.saturating_add(c.tick), sr) < last));
+    // As playback: the left edge hides a controller before tick 0 in a clip that is not looped.
+    out.ctrls.extend(sequence.ctrls.iter().filter(|c| !left_hidden(clip, c.tick) && s.tempo.tick_to_samples(base.saturating_add(c.tick), sr) < last));
     out.sort();
     Some(out)
 }

@@ -179,8 +179,8 @@ pub use matrix::{fold_down_stereo, itu_stereo_fold};
 use midi::{ClipEvent, chase_controllers, notes_across, release_edited_clip_notes, schedule_notes, sorted_clip_events};
 #[cfg(test)]
 use midi::{GRID_ENDS, PEDAL_SCANS, midi_loop_frame, visit_clip_events};
-pub use midi::{left_edge_hides, left_hidden};
 pub use midi::{LoopFrame, clip_as_played, clip_note_ons, loop_frame, loop_frame_in, playback_content_end, sequence_as_played, unroll_midi_loop};
+pub use midi::{left_edge_hides, left_hidden};
 pub use midi_fx::{MIDI_FX_BLOCK, MIDI_FX_CARRY, MIDI_FX_NOTES, MIDI_FX_RETRY, MidiFxCounts, note_view_dropped_total};
 pub use offline::{
     MAX_RENDER_SAMPLES, RUN_IN_SECONDS, RangeRender, render_bus, render_range, render_track_pre_fader, render_track_pre_fader_timed, source_channels,

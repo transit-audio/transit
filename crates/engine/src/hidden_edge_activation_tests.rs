@@ -346,3 +346,23 @@ fn holds_left_hidden_agrees_with_left_hidden_on_every_kind_of_clip() {
     let audio = Clip::audio(ClipId(2), "a", transit_model::SourceId(1), BAR, 0, BAR);
     assert!(!audio.holds_left_hidden() && !transit_mix::left_hidden(&audio, -1));
 }
+
+// ---- the session MIDI export (File > Export > MIDI) -------------------------------------------
+
+#[test]
+fn the_midi_file_export_of_a_start_trimmed_clip_writes_none_of_the_hidden_notes_or_controllers() {
+    let (mut e, t, id) = engine_with(START, fixture(), None);
+    trim(&mut e, id, CUT);
+    assert!(hides_something(clip(&e, id)), "the trim hides events, so the export has something to leave out");
+    let bytes = crate::io::export_midi(&e, None).unwrap();
+    let smf = transit_midi::read_smf(&bytes).unwrap();
+    let track = smf.tracks.iter().find(|tr| tr.name == e.session().track(t).unwrap().name).expect("the track is in the file");
+    // The clip starts two bars in (8 quarters) and the file starts at bar 1, so a visible event at
+    // clip tick k sits at file tick 8Q + k. The trim moves the start edge, never the content.
+    let bar = 4 * Q;
+    let mut notes: Vec<(i64, u8)> = track.sequence.notes.iter().map(|n| (n.start, n.pitch)).collect();
+    notes.sort_unstable();
+    assert_eq!(notes, vec![(2 * bar + 2 * Q, 60), (2 * bar + 4 * Q, 64), (2 * bar + 6 * Q, 67)], "only the visible notes, at their ticks");
+    let ctrls: Vec<(i64, i32)> = track.sequence.ctrls.iter().map(|c| (c.tick, c.value)).collect();
+    assert_eq!(ctrls, vec![(2 * bar + 3 * Q, 30)], "only the visible controller, at its tick");
+}
