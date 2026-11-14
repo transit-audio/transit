@@ -569,11 +569,11 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
         let bytes = match &audio.disk {
             // A disk-backed source goes in as its file, as long as a bundle can hold it.
             Some(d) => {
-                let len = std::fs::metadata(&d.path()).map_err(ioerr)?.len();
+                let len = std::fs::metadata(d.path()).map_err(ioerr)?.len();
                 if len > MAX_BUNDLE_BYTES {
                     return Err(EngineError::Io(format!("bundle: {} is too long to bundle; save the session as a folder", d.path().display())));
                 }
-                read_file(&d.path())?
+                read_file(d.path())?
             }
             None => {
                 let opts_wav = EncodeOptions {
