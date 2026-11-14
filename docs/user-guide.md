@@ -253,7 +253,7 @@ Every print (Bounce in Place, Commit, Freeze and File > Bounce) starts once ever
 been running for a few seconds, as live play from a stop does, so a plug-in's start-up does not
 land in a print.
 
-- **Destination:** **New track** creates **<name> bounce** directly under the source and copies its
+- **Destination:** **New track** creates **\<name> bounce** directly under the source and copies its
   volume, output and sends. **Existing track** adds the print to the active playlist of a visible,
   unfrozen audio track other than the source. It overwrites material inside the printed range,
   preserving material outside it, just like pasting over clips in Slip mode.
@@ -264,7 +264,7 @@ land in a print.
   **Track > Make Active**, **Make Active** in the track's header menu, or click the **inactive**
   tag on its header or mixer strip, and unmute it if needed. Inactive tracks have dimmed names and
   the tag in both views; in the arrangement their color bar turns gray, their clips become gray
-  outlines, and the track is striped across its header and lane. A source that is already inactive is refused with "<track> is inactive:
+  outlines, and the track is striped across its header and lane. A source that is already inactive is refused with "\<track> is inactive:
   Track > Make Active first", and nothing changes.
 
 **Enter** bounces; **Esc** cancels. Choices are remembered for the current session. The destination
@@ -308,7 +308,7 @@ copy with audio on opens its saved device like the first). When transit quits it
 it holds before the process ends.
 
 If the device does not open, transit says why and leaves it closed, with no other backend standing
-in: the status line and Audio Devices read "The audio device did not open: <reason>." Fix the cause
+in: the status line and Audio Devices read "The audio device did not open: \<reason>." Fix the cause
 (close the driver's settings panel, plug the interface in, free it from another app), then change
 a choice and press **Apply**, or press **Reconnect**. If a saved output or input is not connected,
 the system's default opens instead and transit says so at startup and on Apply, for example
@@ -433,7 +433,7 @@ that path feeds ("Out 1-2 · Speakers"; the path alone while no device is open).
 
 ## A plug-in that stops responding
 
-If a plug-in stops responding (its editor turns white), transit names it in a message: audio keeps playing, **Save now** saves the session with the plug-in's last stored state, and **Give up on <plug-in>** lets transit carry on without it until you restart; End Task on the plug-in's window would end transit ([troubleshooting](troubleshooting.md#a-plug-in-stopped-responding)).
+If a plug-in stops responding (its editor turns white), transit names it in a message: audio keeps playing, **Save now** saves the session with the plug-in's last stored state, and **Give up on \<plug-in>** lets transit carry on without it until you restart; End Task on the plug-in's window would end transit ([troubleshooting](troubleshooting.md#a-plug-in-stopped-responding)).
 
 ## Multicore mixer render
 
