@@ -1448,6 +1448,7 @@ fn a_live_loop_survives_the_document_edit_that_superseded_its_snapshot() {
 
 mod duplex_input;
 mod fake_only;
+mod jack_calibration;
 mod no_fallback;
 mod null;
 mod open;

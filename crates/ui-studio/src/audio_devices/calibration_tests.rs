@@ -390,3 +390,45 @@ fn an_asio_calibration_that_outlives_its_wait_is_given_up_and_stores_nothing() {
     assert_eq!(t.layout()["calibration_measure"]["result"], "the audio device did not answer: no measurement");
     assert!(t.app.ui.audio.calibrations.is_empty() && driver.live_calibrations().is_empty());
 }
+
+/// #683: on JACK a loopback calibration measured through one input port group does not apply
+/// after a switch to another; the Audio Devices notes and the status line say it needs a new
+/// measurement. The same calibration with its own group open applies and says nothing.
+#[test]
+fn a_jack_calibration_measured_through_another_input_group_is_not_applied_and_the_page_says_so() {
+    use transit_audio_backend as ab;
+    let client = || {
+        ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32))
+            .named("JACK", "Headset")
+            .with_capture(2, true)
+            .with_capture_device("Mic", 1)
+            .with_capture_device("Line", 2)
+    };
+    let cfg = |input: &str, calibrations: Vec<transit_playback::LoopbackCalibration>| AudioConfig {
+        system: Some("JACK".into()),
+        output: Some("Headset".into()),
+        input: Some(input.into()),
+        calibrations,
+        ..Default::default()
+    };
+    // The loop measured with the input on Mic, under the key the open pair gives.
+    let t = T::new();
+    let on_mic = transit_playback::Player::open_fake_native_jack(t.app.engine.session_arc(), &cfg("Mic", Vec::new()), &client()).unwrap();
+    let record = on_mic.calibration_key.as_ref().expect("a duplex JACK open has a key").record(480, 25, "2026-11-14");
+    assert_eq!(record.input.as_deref(), Some("Mic"));
+    drop(on_mic);
+    let expected =
+        "The loopback calibration of “Headset” was measured with input “Mic” and does not apply to input “Line”: it needs a new measurement.";
+    for (input, applies) in [("Line", false), ("Mic", true)] {
+        let mut t = T::new();
+        let saved = cfg(input, vec![record.clone()]);
+        let player = transit_playback::Player::open_fake_native_jack(t.app.engine.session_arc(), &saved, &client()).unwrap();
+        assert_eq!(player.calibration.is_some(), applies, "input {input}");
+        t.app.player = Some(player);
+        t.app.ui.audio = saved;
+        t.frames(2);
+        let noted = t.app.audio_devices.notes.iter().any(|n| n == expected);
+        assert_eq!(noted, !applies, "input {input}: {:?}", t.app.audio_devices.notes);
+        assert_eq!(t.app.status.contains(expected), !applies, "input {input}: {}", t.app.status);
+    }
+}

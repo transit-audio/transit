@@ -20,6 +20,7 @@
 //! the same path. A choice that cannot be honored falls back to the default (the playback crate
 //! logs it); the fallback is said on the status line and in the window.
 
+mod jack_calibration;
 #[cfg(test)]
 mod live_tests;
 mod period;
@@ -550,6 +551,7 @@ impl StudioApp {
         };
         let mut notes = fallback_notes(&cfg, self.audio_devices.systems.as_deref(), &opened);
         notes.extend(self.player.as_ref().and_then(|p| p.backend_note.clone()));
+        notes.extend(self.jack_calibration_note());
         notes.extend(self.not_opened_note());
         let stopped = if was_playing { "Playback stopped to change devices. " } else { "" };
         self.status = if notes.is_empty() {
@@ -919,6 +921,7 @@ pub(crate) fn startup_notes(app: &mut StudioApp) {
         notes.extend(input_note(&app.ui.audio, &systems));
     }
     notes.extend(app.player.as_ref().and_then(|p| p.backend_note.clone()));
+    notes.extend(app.jack_calibration_note());
     notes.extend(app.not_opened_note());
     if !notes.is_empty() {
         app.status = format!("{} {CHOOSE_ANOTHER}", notes.join(" "));

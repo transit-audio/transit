@@ -287,6 +287,11 @@ impl LoopbackCalibration {
             && self.period == other.period
     }
 
+    /// Whether this was measured on `key`'s output, mode, rate and period, whatever input it names.
+    fn of_output(&self, key: &CalibrationKey) -> bool {
+        self.device.eq_ignore_ascii_case(&key.device) && self.mode == key.mode && self.rate == key.rate && self.period == key.period
+    }
+
     /// The calibration the backend applies: the round trip and its bound in nanoseconds.
     pub fn to_backend(&self) -> Option<transit_audio_backend::Calibration> {
         if self.rate == 0 {
@@ -369,6 +374,15 @@ pub fn input_matches(recorded: Option<&str>, pairing: Option<&str>, resolved: Op
     }
 }
 
+/// Whether a calibration whose run named `recorded` measured the JACK pair of output `output` and
+/// the input port group `opened` (#683). One JACK client records from any group (#682), so the key
+/// names the group that opened, and the same name (case-insensitive) matches. A record that names
+/// none was saved while the input was always the output's own group: it matches only that group.
+/// Without an opened input there is no loop, and nothing matches.
+pub fn jack_input_matches(recorded: Option<&str>, output: &str, opened: Option<&str>) -> bool {
+    opened.is_some_and(|opened| recorded.unwrap_or(output).eq_ignore_ascii_case(opened))
+}
+
 impl AudioConfig {
     /// Keep `calibration`, replacing a saved one with the same key.
     pub fn store_calibration(&mut self, calibration: LoopbackCalibration) {
@@ -422,6 +436,22 @@ impl AudioConfig {
     ) -> Option<transit_audio_backend::Calibration> {
         let mode = calibration_mode(system, request.mode)?;
         self.find_calibration_paired(device, paired_input, mode, request.format.rate, request.period.frames().unwrap_or(0))?.to_backend()
+    }
+
+    /// The saved calibration of the JACK pair `key` names: its output, mode, rate and period, and
+    /// an input that matches the group that opened by [`jack_input_matches`] (#683).
+    pub fn jack_calibration(&self, key: &CalibrationKey) -> Option<&LoopbackCalibration> {
+        self.calibrations.iter().find(|c| c.of_output(key) && jack_input_matches(c.input.as_deref(), &key.device, key.input.as_deref()))
+    }
+
+    /// A saved calibration of `key`'s output, mode, rate and period that does not apply on JACK
+    /// because it was measured through another input group (#683); `None` when one applies or
+    /// none is saved.
+    pub fn jack_calibration_elsewhere(&self, key: &CalibrationKey) -> Option<&LoopbackCalibration> {
+        if self.jack_calibration(key).is_some() {
+            return None;
+        }
+        self.calibrations.iter().find(|c| c.of_output(key))
     }
 }
 
@@ -693,6 +723,17 @@ mod tests {
             origin: ab::HostOrigin::default(),
             calibration: None,
         }
+    }
+
+    /// #683: a JACK record names the input group that opened; one without a name measured the
+    /// output's own group; without an opened input nothing matches. Case does not matter.
+    #[test]
+    fn a_jack_record_matches_the_input_group_that_opened() {
+        assert!(jack_input_matches(Some("mic"), "Headset", Some("Mic")));
+        assert!(!jack_input_matches(Some("Mic"), "Headset", Some("Line")), "another group");
+        assert!(jack_input_matches(None, "Headset", Some("headset")), "an unnamed record: the output's own group");
+        assert!(!jack_input_matches(None, "Headset", Some("Mic")), "an unnamed record did not measure Mic");
+        assert!(!jack_input_matches(Some("Headset"), "Headset", None) && !jack_input_matches(None, "Headset", None), "no input, no loop");
     }
 
     #[test]

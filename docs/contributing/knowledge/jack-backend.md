@@ -76,6 +76,11 @@ The rate half reflects the rate of the open attempt, not a value the device repo
   else the output's own group when it has capture ports, else the first group that has some. A
   missing chosen input falls back that way and the app says so ("Input … is not available");
   with no group that records, the output opens without an input.
+- A loopback calibration on JACK is keyed by the output and the input group that opened (#683,
+  `AudioConfig::jack_calibration`), not by a pairing. A record without an input name (saved before
+  #683) applies only when the input opened on the output's own group. One measured through another
+  group is not applied, and Audio Devices says it needs a new measurement. The JACK streams do not
+  use a calibration in their stamps yet (slice 3), so this keeps the key right ahead of that.
 - The first `start` builds the engine from both directions' callbacks, installs the JACK callbacks
   and activates; each direction's start connects its ports (`out_i` to the device's i-th playback
   port, its i-th capture port to `in_i`), unless `TRANSIT_JACK_AUTOCONNECT=0` (`no`, `off`, `false`)

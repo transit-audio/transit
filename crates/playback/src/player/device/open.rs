@@ -271,6 +271,17 @@ impl Player {
         Ok(player)
     }
 
+    /// A native JACK Player over a scripted client (a fake named "JACK" whose other port groups are
+    /// [`ab::fake::FakeBackend::with_capture_device`]), for the caller's device-free tests.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn open_fake_native_jack(session: Arc<Session>, cfg: &AudioConfig, client: &ab::fake::FakeBackend) -> Result<Self, String> {
+        let fallback = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32));
+        let mut player = Self::open_native(session, cfg, Box::new(client.clone()), &fallback, NativeKind::Jack)?;
+        player.fake_only = true;
+        Ok(player)
+    }
+
     /// [`Self::open_fake_native_asio`], or the silent runtime with its error when it does not open
     /// (as [`Self::with_config`] does), for the caller's device-free tests.
     #[cfg(feature = "test-hooks")]
@@ -457,6 +468,12 @@ impl Player {
         } else {
             None
         };
+        // On JACK a calibration is keyed by the input group that opened, not by a pairing (#683).
+        let jack = devices::is_jack_system(Some(&system));
+        let opened_input = match &capture {
+            Some(Ok(input)) if jack => Some(input.name.as_str()),
+            _ => None,
+        };
         // Every output the stream opened, and the duplex input's channels, get default paths; the
         // app replaces them with this machine's saved table (`set_io`), keyed by the output.
         let inputs = match &capture {
@@ -480,7 +497,14 @@ impl Player {
             // panel's size for "driver buffer", a fixed-size driver's one size): the calibration is
             // looked up by the achieved buffer after the open and handed to both streams then.
             let asio = system == devices::ASIO_SYSTEM;
-            request.calibration = if duplex && !asio { cfg.calibration_for(&system, &name, paired.as_deref(), &request) } else { None };
+            request.calibration = if !duplex || asio {
+                None
+            } else if jack {
+                devices::CalibrationKey::of(&system, &name, opened_input, &request)
+                    .and_then(|key| cfg.jack_calibration(&key).and_then(devices::LoopbackCalibration::to_backend))
+            } else {
+                cfg.calibration_for(&system, &name, paired.as_deref(), &request)
+            };
             let (rate, channels) = (request.format.rate, request.format.channels);
             let mut io = IoMap::for_device(&system, &name, inputs, channels);
             // System Audio (#268) rides on the duplex input as the pair after its channels; the
@@ -619,8 +643,15 @@ impl Player {
                 _ => Vec::new(),
             };
             player.device_exclusive = request.mode == ab::Mode::Exclusive;
-            // On ASIO the input is the driver's own: its calibration names none.
-            let key_input = if system == devices::ASIO_SYSTEM { None } else { cfg.input_pairing.as_deref().or(paired.as_deref()) };
+            // On ASIO the input is the driver's own: its calibration names none. On JACK it names the
+            // group that opened (#683).
+            let key_input = if system == devices::ASIO_SYSTEM {
+                None
+            } else if jack {
+                opened_input
+            } else {
+                cfg.input_pairing.as_deref().or(paired.as_deref())
+            };
             player.calibration_key = if duplex { devices::CalibrationKey::of(&system, &name, key_input, &keyed) } else { None };
             player.calibration = calibration;
             player.silent = false;
