@@ -33,6 +33,8 @@ struct State {
     loopback_started: bool,
     loopback_opens: Vec<Option<String>>,
     fail_loopback: Option<OpenError>,
+    /// The endpoint name of every capture open, in order.
+    capture_endpoints: Vec<String>,
 }
 
 /// The scripted backend. Clones share one script and one set of streams.
@@ -55,6 +57,10 @@ pub struct FakeBackend {
     fixed_buffer: Option<Arc<Mutex<u32>>>,
     /// The mix format of the render endpoint a loopback capture records; `None` refuses loopback.
     loopback_format: Option<Format>,
+    /// Other input devices (name, channels) a duplex open may record from instead of this device's
+    /// own inputs, as one JACK client links its inputs to any port group
+    /// ([`Backend::duplex_capture_endpoint`]); empty keeps the trait's default.
+    capture_devices: Vec<(String, u16)>,
 }
 
 impl FakeBackend {
@@ -73,7 +79,22 @@ impl FakeBackend {
             strict: false,
             fixed_buffer: None,
             loopback_format: None,
+            capture_devices: Vec::new(),
         }
+    }
+    /// One more input device `name` with `channels` inputs that a duplex open records from when
+    /// the input wish names it (see the field). Its channels are named `name:capture_1..`.
+    pub fn with_capture_device(mut self, name: &str, channels: u16) -> Self {
+        self.capture_devices.push((name.into(), channels));
+        self
+    }
+    /// The endpoint name of every capture open so far, in order.
+    pub fn capture_opens(&self) -> Vec<String> {
+        self.lock().capture_endpoints.clone()
+    }
+    fn capture_device(&self, name: &str) -> Option<Endpoint> {
+        let (name, channels) = self.capture_devices.iter().find(|(n, _)| n == name)?;
+        Some(Endpoint::new(name.clone(), name.clone(), self.system.clone(), *channels, 0, Vec::new(), Arc::new(())))
     }
     /// Loopback captures open at `format` (the render endpoint's mix format).
     pub fn with_loopback(mut self, format: Format) -> Self {
@@ -259,24 +280,37 @@ impl Backend for FakeBackend {
         Ok(Plan { endpoint: self.endpoint(Direction::Input), attempts: vec![request] })
     }
     fn capture_with_render(&self, _render: &Endpoint) -> bool {
-        self.duplex && self.capture_channels > 0
+        self.duplex && (self.capture_channels > 0 || !self.capture_devices.is_empty())
+    }
+    /// With other input devices: the wished one, else this device's own inputs, else the first
+    /// other one (the JACK backend's order); without any, the trait's default.
+    fn duplex_capture_endpoint(&self, render: &Endpoint, wish: &InputWish) -> Result<Endpoint, String> {
+        if let Some(chosen) = wish.device.as_deref().and_then(|name| self.capture_device(name)) {
+            return Ok(chosen);
+        }
+        if self.capture_devices.is_empty() || self.capture_channels > 0 {
+            return Ok(render.clone());
+        }
+        self.capture_devices.first().and_then(|(name, _)| self.capture_device(name)).ok_or_else(|| "no input device".into())
     }
     /// A duplex fake is pumped as one driver cycle: the test delivers the capture, then the render.
     fn capture_precedes_render(&self, endpoint: &Endpoint) -> bool {
         self.capture_with_render(endpoint)
     }
-    fn channel_names(&self, _endpoint: &Endpoint, direction: Direction) -> Vec<String> {
+    fn channel_names(&self, endpoint: &Endpoint, direction: Direction) -> Vec<String> {
         match direction {
+            Direction::Input if endpoint.name != self.name => (1..=endpoint.inputs).map(|i| format!("{}:capture_{i}", endpoint.name)).collect(),
             Direction::Input => self.names.0.clone(),
             Direction::Output => self.names.1.clone(),
         }
     }
-    fn capture_format(&self, _endpoint: &Endpoint, rate: Option<u32>) -> Result<Format, String> {
+    /// The endpoint's inputs: this device's own, or another input device's.
+    fn capture_format(&self, endpoint: &Endpoint, rate: Option<u32>) -> Result<Format, String> {
         let first = self.attempts.first().ok_or("no input")?.format;
-        if self.capture_channels == 0 {
+        if endpoint.inputs == 0 {
             return Err("the audio input has no channels".into());
         }
-        Ok(Format::new(rate.unwrap_or(first.rate), self.capture_channels, SampleFormat::F32))
+        Ok(Format::new(rate.unwrap_or(first.rate), endpoint.inputs, SampleFormat::F32))
     }
     fn open_render(
         &self,
@@ -292,13 +326,14 @@ impl Backend for FakeBackend {
     }
     fn open_capture(
         &self,
-        _endpoint: &Endpoint,
+        endpoint: &Endpoint,
         request: &OpenRequest,
         capture: CaptureCallback,
         error: ErrorCallback,
     ) -> Result<(Box<dyn Stream>, Achieved), OpenError> {
         let opened = self.open(Direction::Input, request)?;
         let mut state = self.lock();
+        state.capture_endpoints.push(endpoint.name.clone());
         (state.capture, state.capture_error) = (Some(capture), Some(error));
         Ok(opened)
     }

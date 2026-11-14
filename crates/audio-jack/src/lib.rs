@@ -48,6 +48,8 @@ mod fake;
 #[cfg(all(target_os = "linux", feature = "libjack"))]
 #[allow(unsafe_code)]
 mod ffi;
+#[cfg(test)]
+mod input_tests;
 pub mod library;
 pub mod search;
 #[cfg(all(test, target_os = "linux", feature = "libjack"))]

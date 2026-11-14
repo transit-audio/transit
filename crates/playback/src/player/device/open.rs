@@ -427,7 +427,8 @@ impl Player {
     ///
     /// **Open order.** For a duplex backend (`capture_with_render`: cpal's and the native ASIO
     /// driver, one set of buffers for both directions) both streams are opened before either
-    /// starts: the input is built first ([`record::Recorder::build_on`], `open_capture`), then the
+    /// starts: the input is built first ([`record::Recorder::build_on`], `open_capture`, on the
+    /// endpoint `Backend::duplex_capture_endpoint` gives: the output's own, or JACK's chosen input), then the
     /// output (`open_render`), then the input starts, then the output. That is the ASIO open-order
     /// rule of `transit-audio-asio` (`createBuffers` once for both directions, the driver started
     /// by the first `start`) and the order cpal's ASIO host needs; native WASAPI pairs two
@@ -448,9 +449,20 @@ impl Player {
         let first = plan.attempts.first().ok_or("no usable output stream")?;
         let duplex = backend.capture_with_render(endpoint);
         let paired = if duplex { backend.paired_input_name(endpoint) } else { None };
-        // Every output the stream opened, and the duplex device's inputs, get default paths; the
-        // app replaces them with this machine's saved table (`set_io`).
-        let inputs = if duplex { backend.capture_format(endpoint, Some(first.format.rate)).map_or(0, |format| format.channels) } else { 0 };
+        // The duplex input's own endpoint: the output's on ASIO and WASAPI, the chosen input's on
+        // JACK (#682), whose one client records from any port group.
+        let capture = if duplex {
+            let wish = ab::InputWish { device: cfg.input.clone(), rate: Some(first.format.rate), period: cfg.buffer_size };
+            Some(backend.duplex_capture_endpoint(endpoint, &wish))
+        } else {
+            None
+        };
+        // Every output the stream opened, and the duplex input's channels, get default paths; the
+        // app replaces them with this machine's saved table (`set_io`), keyed by the output.
+        let inputs = match &capture {
+            Some(Ok(input)) => backend.capture_format(input, Some(first.format.rate)).map_or(0, |format| format.channels),
+            _ => 0,
+        };
         let wide = first.format.channels;
         let mut error = "no usable output stream".to_owned();
         // The first backend error decides the ladder: the first attempt is the device's own rate.
@@ -479,12 +491,14 @@ impl Player {
             }
             let (mut player, access, clock) = Self::prepare_with(Arc::clone(&session), rate, io, false, monitor)?;
             player.system_audio.set(player.io.get_mut().system_audio);
-            *player.input.get_mut() = if duplex {
+            *player.input.get_mut() = if let Some(input) = &capture {
                 let progress = player.record_start.get_mut().as_ref().map(record::start::Control::input_progress);
-                let built = progress.ok_or_else(|| ab::OpenError::Other("the record start latch is missing".to_owned())).and_then(|progress| {
+                let input = input.as_ref().map_err(|why| ab::OpenError::Other(why.clone()));
+                let built = input.and_then(|input| {
+                    let progress = progress.ok_or_else(|| ab::OpenError::Other("the record start latch is missing".to_owned()))?;
                     record::Recorder::build_on(
                         &*backend,
-                        endpoint,
+                        input,
                         rate,
                         request.period,
                         request.mode,
@@ -600,7 +614,10 @@ impl Player {
             player.output_latency = achieved.latency;
             player.output_sample = Some(achieved.format.sample);
             player.output_channel_names = backend.channel_names(endpoint, ab::Direction::Output);
-            player.input_channel_names = if duplex { backend.channel_names(endpoint, ab::Direction::Input) } else { Vec::new() };
+            player.input_channel_names = match &capture {
+                Some(Ok(input)) => backend.channel_names(input, ab::Direction::Input),
+                _ => Vec::new(),
+            };
             player.device_exclusive = request.mode == ab::Mode::Exclusive;
             // On ASIO the input is the driver's own: its calibration names none.
             let key_input = if system == devices::ASIO_SYSTEM { None } else { cfg.input_pairing.as_deref().or(paired.as_deref()) };

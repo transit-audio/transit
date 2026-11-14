@@ -71,6 +71,11 @@ The rate half reflects the rate of the open attempt, not a value the device repo
 - One client "transit" per session. The first open registers `in_1..` or `out_1..` and keeps the
   user callback; the other direction joins before either starts (the ASIO open-order rule). An open
   after a start and a second open of one direction are refused.
+- The input's port group is the chosen input device's, not the output's (#682,
+  `Backend::duplex_capture_endpoint`): the saved input when it names a group with capture ports,
+  else the output's own group when it has capture ports, else the first group that has some. A
+  missing chosen input falls back that way and the app says so ("Input … is not available");
+  with no group that records, the output opens without an input.
 - The first `start` builds the engine from both directions' callbacks, installs the JACK callbacks
   and activates; each direction's start connects its ports (`out_i` to the device's i-th playback
   port, its i-th capture port to `in_i`), unless `TRANSIT_JACK_AUTOCONNECT=0` (`no`, `off`, `false`)

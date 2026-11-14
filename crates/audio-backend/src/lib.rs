@@ -626,6 +626,15 @@ pub trait Backend {
     fn paired_input_name(&self, _render: &Endpoint) -> Option<String> {
         None
     }
+    /// The endpoint the input of a duplex open ([`Self::capture_with_render`]) is built on, for the
+    /// user's input `wish`: `render` itself by default (ASIO: one driver is both directions; WASAPI:
+    /// the render endpoint stands for its paired input). A backend whose one client can record from
+    /// any device (JACK: `in_N` links to any port group's capture ports) resolves the wish instead,
+    /// falling back when the wished device is missing; the caller reads which device it got from
+    /// the endpoint's name. An error means there is no input to open with this output.
+    fn duplex_capture_endpoint(&self, render: &Endpoint, _wish: &InputWish) -> Result<Endpoint, String> {
+        Ok(render.clone())
+    }
     /// Whether the system's host thread is blocked in a driver call (an ASIO driver's settings
     /// panel is open), so every request to it is refused. Opening the same device through
     /// another backend would load it twice, so a caller does not fall back while this is true.

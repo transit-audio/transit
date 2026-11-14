@@ -1446,6 +1446,7 @@ fn a_live_loop_survives_the_document_edit_that_superseded_its_snapshot() {
     assert_eq!((receipt.outcome, receipt.handler_result), (action_lane::Outcome::Applied, Some(ActionResult::Applied)));
 }
 
+mod duplex_input;
 mod fake_only;
 mod no_fallback;
 mod null;

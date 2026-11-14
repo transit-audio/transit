@@ -316,6 +316,25 @@ impl ab::Backend for JackBackend {
         render.handle::<JackDevice>().is_some()
     }
 
+    /// The port group the duplex input links `in_N` to (#682): the one client records from any
+    /// group, so the chosen input is honored when it names a group with capture ports; else the
+    /// output's own group when it has capture ports (the behavior before a choice was read); else
+    /// the first group that has some, as a plan with no device chosen takes. A missing chosen input
+    /// falls back the same way and is logged; the endpoint's name says which group opened.
+    fn duplex_capture_endpoint(&self, render: &ab::Endpoint, wish: &ab::InputWish) -> Result<ab::Endpoint, String> {
+        let device = render.handle::<JackDevice>().ok_or("the endpoint is not a JACK port group")?;
+        if let Some(name) = wish.device.as_deref() {
+            match self.find(ab::Direction::Input, Some(name)) {
+                Ok(chosen) => return Ok(chosen),
+                Err(why) => log::warn!("{why}: the input falls back"),
+            }
+        }
+        if !device.capture.is_empty() {
+            return Ok(render.clone());
+        }
+        self.find(ab::Direction::Input, None)
+    }
+
     /// One process callback runs the capture callback, then the render callback (K22: the live
     /// input ring aligns with no slack).
     fn capture_precedes_render(&self, endpoint: &ab::Endpoint) -> bool {
