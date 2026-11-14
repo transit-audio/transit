@@ -20,6 +20,7 @@
 </head>
 <body id="top">
 <header class="hero">
+  <nav class="top-nav" aria-label="Site"><ul>{{ range hugo.Data.nav.items }}<li><a href="{{ .url }}">{{ .name }}</a></li>{{ end }}</ul></nav>
   <div class="backdrop" aria-hidden="true"><img width="3840" height="2054" src="assets/transit-arrange.png" alt="" decoding="async"></div>
   <picture>
     <source srcset="assets/transit-wordmark-graphite.svg" media="(prefers-color-scheme: light)">

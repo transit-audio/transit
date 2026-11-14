@@ -21,13 +21,6 @@ text = "Bezier curves in automation lanes, with handles, easing presets and a Si
 issue = 654
 
 [[item]]
-area = "Mixer and routing"
-title = "One per-sample gain path"
-text = "Faders, mutes, pans and sends evaluated per sample, so a bounce matches playback at any buffer size."
-issue = 656
-adr = "docs/adr/0058-one-gain-path-for-the-mixer.md"
-
-[[item]]
 area = "Instruments and effects"
 title = "Multiband Dynamics"
 text = "A three-band compressor that works upward and downward."
@@ -58,9 +51,3 @@ area = "MIDI"
 title = "MIDI plug-ins in the MIDI effect chain"
 text = "Host VST3 and CLAP plug-ins that output notes in a track's MIDI effect chain."
 issue = 671
-
-[[item]]
-area = "Audio devices"
-title = "A better rate converter"
-text = "A band-limited converter for when the interface runs at a different rate than the session, in place of linear interpolation."
-issue = 601
