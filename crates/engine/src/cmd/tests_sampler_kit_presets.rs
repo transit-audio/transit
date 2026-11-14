@@ -279,7 +279,7 @@ fn a_newer_kit_is_refused_and_never_overwritten() {
         let out = recall(&mut e, t, &path, true);
         assert!(out["notice"].as_str().unwrap().contains(says), "{out}");
         assert!(Arc::ptr_eq(&before, &e.session_arc()));
-        let err = e.execute(SAVE, &json!({"track": t, "path": path})).unwrap_err().to_string();
+        let err = e.execute(SAVE, &json!({"track": t, "path": path, "replace": true})).unwrap_err().to_string();
         assert!(err.contains("was saved by a newer transit: Save As under another name"), "{err}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "byte-identical");
     }
@@ -386,4 +386,21 @@ fn save_appends_the_extension_and_refuses_a_sample_with_no_file() {
     let err = e.execute(SAVE, &json!({"track": t, "path": d.0.join("NoFile")})).unwrap_err().to_string();
     assert!(err.contains("Pad A3's sample \"Hit.wav\" has no file yet"), "{err}");
     assert!(!d.0.join("NoFile.tkit").exists() && !d.0.join("NoFile.tkit.tmp").exists());
+}
+
+/// #487: a kit file that exists is replaced only with `replace: true`; the refusal names the file
+/// and leaves it as it was.
+#[test]
+fn saving_a_kit_over_a_file_needs_replace() {
+    let d = Dir::new();
+    let (mut e, t) = setup();
+    let file = d.0.join("Mine.tkit");
+    save_kit(&mut e, t, &d.0.join("Mine"));
+    std::fs::write(&file, std::fs::read_to_string(&file).unwrap() + " ").unwrap();
+    let before = std::fs::read(&file).unwrap();
+    let err = e.execute(SAVE, &json!({"track": t, "path": d.0.join("Mine")})).unwrap_err().to_string();
+    assert!(err.contains("Mine.tkit") && err.contains("replace: true"), "{err}");
+    assert_eq!(std::fs::read(&file).unwrap(), before, "a refused save writes nothing");
+    e.execute(SAVE, &json!({"track": t, "path": d.0.join("Mine"), "replace": true})).unwrap();
+    assert_ne!(std::fs::read(&file).unwrap(), before, "replace: true writes the kit");
 }

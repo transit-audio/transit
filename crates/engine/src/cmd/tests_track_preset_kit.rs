@@ -196,7 +196,7 @@ fn a_refused_save_under_a_dotted_name_leaves_the_earlier_preset() {
     let take = crate::io::add_source(e.session_mut(), "Take", buf, None, FileFormat::Wav);
     e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 2, "pad": 2, "source": take})).unwrap();
     e.execute("edit.select", &json!({"tracks": [t.0]})).unwrap();
-    let err = e.execute("track.save_preset", &json!({"path": d.0.join("Drums v1.5").to_string_lossy()})).unwrap_err().to_string();
+    let err = e.execute("track.save_preset", &json!({"path": d.0.join("Drums v1.5").to_string_lossy(), "replace": true})).unwrap_err().to_string();
     assert!(err.contains("has no file yet"), "{err}");
     assert_eq!(std::fs::read_to_string(&written).unwrap(), before, "the earlier preset is untouched");
     assert!(!d.0.join("Drums v1.tpreset").exists(), "nothing written under a cut name");

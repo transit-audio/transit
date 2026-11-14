@@ -837,6 +837,12 @@ and the reverse; a sample on a network share is found only when the kit file is 
 share. A kit that cannot be recalled (saved by a newer transit, or not a kit) changes nothing, and
 the reason shows under the pads.
 
+Saving a preset, a kit file or a plug-in preset through the control channel (`track.save_preset`,
+`mix.sampler_kit_save`, `plugin.preset_save`) never replaces an existing file unasked: the command
+is refused with a message naming the file, and `replace: true` says the file may be replaced, as
+`session.save_template` has it. The Sampler's kit browser asks before it writes over a kit file,
+and the plug-in preset header's Save on the loaded preset is the explicit replace.
+
 A **track preset** (`track.save_preset`) of a Sampler track holds its kit the same way: each sample
 by its file, relative to the preset file when it is in or below the preset's folder. Loading the
 preset (`track.load_preset`) finds the samples by those paths in any session; a sample that is not

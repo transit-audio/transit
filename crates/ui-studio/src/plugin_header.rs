@@ -75,7 +75,8 @@ enum Source {
 
 /// What to do with a live state once it is read.
 enum Then {
-    Save(PathBuf),
+    /// The file to write, and whether the user already said it may be replaced (#487).
+    Save(PathBuf, bool),
     Copy,
     /// Store it (so the load's undo returns to it), then load this.
     Load(Source),
@@ -118,7 +119,7 @@ enum Step {
 impl Step {
     fn doing(&self) -> &'static str {
         match self {
-            Step::Read { then: Then::Save(_), .. } | Step::Waiting { start: Start::Read(Then::Save(_)), .. } => "Saving preset…",
+            Step::Read { then: Then::Save(..), .. } | Step::Waiting { start: Start::Read(Then::Save(..)), .. } => "Saving preset…",
             Step::Read { then: Then::Copy, .. } | Step::Waiting { start: Start::Read(Then::Copy), .. } => "Copying state…",
             Step::Read { then: Then::Load(_), .. }
             | Step::Load { .. }
@@ -273,7 +274,8 @@ impl StudioApp {
                 }
             }
             HeaderAction::Save => match current.and_then(|i| user.get(i)).and_then(|n| user_path(n)) {
-                Some(path) => self.start_read(key, &plugin, Then::Save(path)),
+                // Save on the loaded preset is the explicit replace.
+                Some(path) => self.start_read(key, &plugin, Then::Save(path, true)),
                 None => self.header_action(t, slot, HeaderAction::SaveAs),
             },
             HeaderAction::SaveAs => {
@@ -290,8 +292,12 @@ impl StudioApp {
                     return;
                 };
                 if let Some(path) = pick(&default.to_string_lossy()) {
-                    let path = save_path(PathBuf::from(path), presets::extension(&plugin));
-                    self.start_read(key, &plugin, Then::Save(path));
+                    let picked = PathBuf::from(path);
+                    let path = save_path(picked.clone(), presets::extension(&plugin));
+                    // The dialog confirmed the name it showed (its own replace question); a name
+                    // `save_path` changed is free, so it never replaces.
+                    let replace = path == picked;
+                    self.start_read(key, &plugin, Then::Save(path, replace));
                 }
             }
             HeaderAction::Load => {
@@ -437,12 +443,12 @@ impl StudioApp {
     fn read_done(&mut self, key: (TrackId, usize), plugin: String, instance: Option<SlotGen>, state: Option<Vec<u8>>, then: Then) {
         let slot = slot_json(key.1);
         match then {
-            Then::Save(path) => {
+            Then::Save(path, replace) => {
                 let Some(state) = state else {
                     self.status = "The plug-in gave no state to save".into();
                     return;
                 };
-                let p = json!({"track": key.0.0, "slot": slot, "path": path.to_string_lossy(), "state": b64::encode(&state)});
+                let p = json!({"track": key.0.0, "slot": slot, "path": path.to_string_lossy(), "state": b64::encode(&state), "replace": replace});
                 match self.execute_ui("plugin.preset_save", &p) {
                     Ok(r) => self.status = format!("Saved the preset \u{201c}{}\u{201d}", r["name"].as_str().unwrap_or("")),
                     Err(e) => self.status = format!("Preset: {e}"),

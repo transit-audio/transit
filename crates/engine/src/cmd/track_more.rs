@@ -71,7 +71,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             extract_midi
         ),
-        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?} — writes the track's type, width, mixer, inserts, sends and instrument as JSON to `path` with the extension .tpreset (a .json extension is replaced, .tpreset in any case kept, any other dot is part of the name); a Sampler's samples by file (relative to the preset's folder when in or below it), refused for a sample with no file yet; returns the path written", has_selection, save_preset),
+        cmd!(noundo "track.save_preset", "Save Track Preset...", ["Track"], None, "{path, track?, replace?: false} — writes the track's type, width, mixer, inserts, sends and instrument as JSON to `path` with the extension .tpreset (a .json extension is replaced, .tpreset in any case kept, any other dot is part of the name); a Sampler's samples by file (relative to the preset's folder when in or below it), refused for a sample with no file yet; an existing file is refused unless `replace: true`; returns the path written", has_selection, save_preset),
         cmd!(
             "track.load_preset",
             "Load Track Preset",
@@ -265,6 +265,8 @@ fn save_preset(e: &mut Engine, p: &Value) -> Result<Value> {
     let first = *t.first().ok_or_else(|| bad(id, "no track"))?;
     // The file the preset goes to (#487), settled once, before the samples' folder is taken from it.
     let path = preset_file(&path);
+    // An existing preset file is replaced only when asked for (#487).
+    super::file::refuse_replacing(e, id, &path, p)?;
     // A Sampler's samples are written by file, relative to the preset's own folder when below it
     // (#458); refused, nothing written, for a sample with no file yet.
     let folder = std::path::absolute(&path).unwrap_or_else(|_| path.clone()).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
@@ -783,5 +785,25 @@ mod tests {
         assert_eq!(e.session().track_by_name("Kick").unwrap().active_playlist, 0);
         e.execute("track.toggle_recent_playlist", &json!({})).unwrap();
         assert_eq!(e.session().track_by_name("Kick").unwrap().active_playlist, 1);
+    }
+
+    /// #487: a preset file that exists is replaced only with `replace: true`; the refusal names
+    /// the file and leaves it as it was.
+    #[test]
+    fn saving_a_track_preset_over_a_file_needs_replace() {
+        let dir = transit_test_support::TestDir::created("preset-replace");
+        let mut e = crate::demo::demo_engine();
+        e.execute("edit.select", &json!({"tracks": ["Bass"]})).unwrap();
+        let given = dir.join("Bass v1.5").to_string_lossy().into_owned();
+        let file = dir.join("Bass v1.5.tpreset");
+        e.execute("track.save_preset", &json!({"path": given})).unwrap();
+        std::fs::write(&file, b"earlier").unwrap();
+        let err = e.execute("track.save_preset", &json!({"path": given})).unwrap_err().to_string();
+        assert!(err.contains("Bass v1.5.tpreset") && err.contains("replace: true"), "{err}");
+        let err = e.execute("track.save_preset", &json!({"path": given, "replace": false})).unwrap_err().to_string();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(std::fs::read(&file).unwrap(), b"earlier", "a refused save writes nothing");
+        e.execute("track.save_preset", &json!({"path": given, "replace": true})).unwrap();
+        assert_ne!(std::fs::read(&file).unwrap(), b"earlier", "replace: true writes the preset");
     }
 }

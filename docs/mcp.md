@@ -50,7 +50,7 @@ works across the suite) keep the agent to the folders you give it:
   `file.bounce_mix`, `file.bounce_stems`, `file.bounce_consolidated`, `file.export_clips`, `file.export_midi`,
   `file.export_dawproject`, `file.export_session_text`, `file.export_selected_tracks_as_session`, `file.export_sibelius`,
   `file.send_to_sibelius`, `file.print_score`, `file.export_clip_groups` and
-  `track.save_preset` and `mix.sampler_kit_save` (with its temporary `<name>.tkit.tmp`), together with what a session save writes beside the session file
+  `track.save_preset`, `plugin.preset_save` and `mix.sampler_kit_save` (with its temporary `<name>.tkit.tmp`), together with what a session save writes beside the session file
   (`Audio Files/`, `Backups/`) and its temporary file. A score command given no `path` writes to
   the temp folder, which is outside the write root unless you made it the root, so it is refused.
 - Read and write access are separate. Give the same folder twice for both; a root left out grants

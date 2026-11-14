@@ -217,7 +217,7 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// Writing a session over an existing file needs `replace: true` (see `io::replaces`).
-fn refuse_replacing(e: &Engine, id: &str, file: &std::path::Path, p: &Value) -> Result<()> {
+pub(super) fn refuse_replacing(e: &Engine, id: &str, file: &std::path::Path, p: &Value) -> Result<()> {
     // First, so a path outside the write root is refused as such and never reported as existing.
     crate::file_access::check_write(file).map_err(EngineError::Io)?;
     if crate::io::replaces(e, id, file) && !bool_or(p, "replace", false) {

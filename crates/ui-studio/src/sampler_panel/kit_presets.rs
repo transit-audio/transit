@@ -343,7 +343,7 @@ fn confirm(app: &mut StudioApp, ctx: &egui::Context, dev: Dev) {
             view(app, dev.uid()).kit.confirm = None;
             match asked {
                 Confirm::Delete { file, .. } => delete(app, dev, &file),
-                Confirm::Overwrite { file, .. } => save_to(app, dev, &file),
+                Confirm::Overwrite { file, .. } => save_to(app, dev, &file, true),
             }
         }
         Some(_) => view(app, dev.uid()).kit.confirm = None,
@@ -400,7 +400,7 @@ pub(super) fn recall(app: &mut StudioApp, dev: Dev, file: &Path, step: bool) {
 fn save_current(app: &mut StudioApp, ui: &Ui, dev: Dev) {
     let file = current_baseline(app, dev).map(|b| b.file.clone()).filter(|f| f.is_file());
     match file {
-        Some(f) => save_to(app, dev, &f),
+        Some(f) => save_to(app, dev, &f, true),
         None => egui::Popup::open_id(ui.ctx(), popup_id(dev.uid())),
     }
 }
@@ -412,14 +412,16 @@ fn save_as(app: &mut StudioApp, dev: Dev, name: &str) {
             let name = file.file_stem().map_or_else(|| name.to_string(), |s| s.to_string_lossy().into_owned());
             view(app, dev.uid()).kit.confirm = Some((Confirm::Overwrite { file, name }, false));
         }
-        Some(file) => save_to(app, dev, &file),
+        Some(file) => save_to(app, dev, &file, false),
         None => app.status = "Name the kit first.".to_string(),
     }
 }
 
 /// Saves the kit to `file` through the engine; the window's baseline becomes the saved kit.
-fn save_to(app: &mut StudioApp, dev: Dev, file: &Path) {
-    let reply = app.run(SAVE, json!({"track": dev.key.0.0, "path": file}));
+/// `replace` is the user's answer: true for the Save of the loaded kit's own file and for a
+/// confirmed replace, false for a name that was free when asked (#487).
+fn save_to(app: &mut StudioApp, dev: Dev, file: &Path, replace: bool) {
+    let reply = app.run(SAVE, json!({"track": dev.key.0.0, "path": file, "replace": replace}));
     let uid = dev.uid();
     match reply {
         Ok(r) => {

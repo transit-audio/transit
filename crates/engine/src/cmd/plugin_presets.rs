@@ -16,7 +16,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Save Plug-in Preset",
             menu: &[],
             shortcut: None,
-            params: "{track, slot: 0..9 | \"a\"..\"j\" | \"instrument\", path, state: base64} → {path, name, bytes}. Writes the hosted plug-in's state (read live by the caller) as its preset file (.vstpreset for VST3, .clappreset for CLAP), stores it on the insert and names the preset. Not undoable and not journaled (states can be large).",
+            params: "{track, slot: 0..9 | \"a\"..\"j\" | \"instrument\", path, state: base64, replace?: false} → {path, name, bytes}. Writes the hosted plug-in's state (read live by the caller) as its preset file (.vstpreset for VST3, .clappreset for CLAP), stores it on the insert and names the preset. An existing file is refused unless `replace: true`. Not undoable and not journaled (states can be large).",
             enabled: has_tracks,
             run: preset_save,
             journal: false,
@@ -159,6 +159,8 @@ fn preset_save(e: &mut Engine, p: &Value) -> Result<Value> {
     let path = path_param(CMD, p)?;
     let state = state_param(CMD, p)?;
     let plugin = plugin_at(e, CMD, p)?;
+    // An existing preset file is replaced only when asked for (#487).
+    super::file::refuse_replacing(e, CMD, &path, p)?;
     crate::io::presets::write(&path, &plugin, &state).map_err(|m| bad(CMD, m))?;
     let name = crate::presets::name_of(&path);
     let ins = hosted(e, CMD, p)?;
@@ -353,6 +355,28 @@ mod tests {
         // A built-in device has no preset files of this kind.
         e.execute("mix.insert", &json!({"track": t, "plugin": "gain", "slot": 1})).unwrap();
         assert!(e.execute("plugin.state_load", &json!({"track": t, "slot": 1, "state": b64::encode(b"x")})).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #487: a plug-in preset file that exists is replaced only with `replace: true`.
+    #[test]
+    fn saving_a_plugin_preset_over_a_file_needs_replace() {
+        let (mut e, t) = engine();
+        let root = dir("replace");
+        let state = |s: &[u8]| b64::encode(&transit_vst3_host::preset::join_state(s, b"ctrl").unwrap());
+        let path = crate::presets::path(&root, VST3, "Mine").unwrap();
+        let save = |e: &mut Engine, s: &str, extra: serde_json::Value| {
+            let mut p = json!({"track": t, "slot": "a", "path": path.to_string_lossy(), "state": state(s.as_bytes())});
+            p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            e.execute("plugin.preset_save", &p)
+        };
+        save(&mut e, "one", json!({})).unwrap();
+        let first = std::fs::read(&path).unwrap();
+        let err = save(&mut e, "two", json!({})).unwrap_err().to_string();
+        assert!(err.contains("Mine.vstpreset") && err.contains("replace: true"), "{err}");
+        assert_eq!(std::fs::read(&path).unwrap(), first, "a refused save writes nothing");
+        save(&mut e, "two", json!({"replace": true})).unwrap();
+        assert_ne!(std::fs::read(&path).unwrap(), first, "replace: true writes the preset");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

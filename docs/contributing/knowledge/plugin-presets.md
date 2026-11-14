@@ -80,7 +80,7 @@ Issue #68. Read with [ADR 0018](../../adr/0018-plugin-host-thread.md) (the plug-
   An unrelated inactive, failed or bypassed slot never gates the job. If its own bypassed values
   stay queued, the existing give-up says "The audio session is still updating; try again after it
   applies" and saves nothing.
-- Commands: `plugin.preset_save` (not undoable), `plugin.preset_load` and `plugin.state_load` (one
+- Commands: `plugin.preset_save` (not undoable; an existing file is refused unless `replace: true`, #487), `plugin.preset_load` and `plugin.state_load` (one
   undo step each, recorded after the plug-in took the state), `plugin.preset_list`,
   `plugin.preset_delete`. Undoing or redoing a load asks the UI to load the stored state live
   (`Engine::take_state_restores`).

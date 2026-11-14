@@ -45,7 +45,7 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(@spec false, false, false;
             "mix.sampler_kit_save", "Save Sampler Kit", [], None,
-            "{track?, path}: the track's whole Sampler kit as a kit file ({format: transit-sampler-kit, version: 1, kit}); `.tkit` appended unless the path ends in it (never replacing another extension); each sample by its file: relative with / when in or below the kit file's folder, else absolute; no audio copied; not undoable, not journaled; refused for an opaque patch, a sample with no file yet (save the session first), or an existing file this version does not read → {track, path, pads, zones, sources, relative, absolute, missing: [{zone, pad?, path}], notes}",
+            "{track?, path, replace?: false}: the track's whole Sampler kit as a kit file ({format: transit-sampler-kit, version: 1, kit}); `.tkit` appended unless the path ends in it (never replacing another extension); each sample by its file: relative with / when in or below the kit file's folder, else absolute; no audio copied; an existing file is refused unless `replace: true`; not undoable, not journaled; refused for an opaque patch, a sample with no file yet (save the session first), or an existing file this version does not read → {track, path, pads, zones, sources, relative, absolute, missing: [{zone, pad?, path}], notes}",
             has_selection, save
         ),
         cmd!(@spec false, true, false;
@@ -112,6 +112,8 @@ fn bound_pads(patch: &PatchV1) -> Vec<u8> {
 fn save(e: &mut Engine, p: &Value) -> Result<Value> {
     let t = instrument_track(e, SAVE, p)?;
     let file = portable::kit_file_path(&absolute(e, SAVE, path_param(SAVE, p)?)?);
+    // An existing kit file is replaced only when asked for (#487).
+    super::file::refuse_replacing(e, SAVE, &file, p)?;
     let s = e.session();
     let ins = s.track(t).and_then(|tr| tr.instrument.as_ref()).filter(|i| i.plugin == SAMPLER);
     let patch = ins
