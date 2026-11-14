@@ -494,6 +494,13 @@ impl Echoes {
         (plain == v.to_bits()).then(|| f64::from_bits(n))
     }
 
+    /// The plug-in reported parameter `i` since the host last took a value in (the echo of a
+    /// report, or a value of its own): the host's copy is stale until the session's echo of that
+    /// report arrives.
+    pub fn stale(&self, reported: &Reported, i: usize) -> bool {
+        self.seen.get(i).is_some_and(|&seen| reported.reports(i) > seen)
+    }
+
     /// A state was loaded: what the plug-in reported before it is history.
     pub fn forget(&mut self, reported: &Reported) {
         self.exact.fill(None);

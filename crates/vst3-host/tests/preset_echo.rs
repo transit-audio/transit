@@ -29,8 +29,13 @@ const PRESETS: [[(u32, f64); 3]; 2] = [[(7, 0.3), (3, 0.45), (12, 0.3)], [(7, 0.
 /// A Gain state that arms a pick of preset `index`, announced by `performEdit` (`announce` 0) or
 /// `kParamValuesChanged` (1): gain 0.5, Freq 0.5, no "preset" gain, no timer.
 fn arming_state(index: u32, announce: u32) -> Vec<u8> {
+    arming(1 + 2 * index + announce)
+}
+
+/// A Gain state that arms fixture code `code` (see `tests/fixture`, "call log and presets").
+fn arming(code: u32) -> Vec<u8> {
     let comp = 0.5f64.to_le_bytes();
-    let ctrl: Vec<u8> = [0.5f64, -1.0, -1.0, f64::from(1 + 2 * index + announce)].iter().flat_map(|v| v.to_le_bytes()).collect();
+    let ctrl: Vec<u8> = [0.5f64, -1.0, -1.0, f64::from(code)].iter().flat_map(|v| v.to_le_bytes()).collect();
     let mut out = b"SCV3".to_vec();
     out.extend_from_slice(&(comp.len() as u32).to_le_bytes());
     out.extend_from_slice(&comp);
@@ -176,6 +181,60 @@ fn the_session_sending_its_echo_again_sends_nothing_more() {
         for &(pid, _) in preset {
             let n = log.iter().filter(|l| l.starts_with(&format!("proc.point({pid})="))).count();
             assert_eq!(n, 1, "preset {index} ({how}): parameter {pid} reaches the processor once; log: {log:#?}");
+        }
+    }
+    drop(reader);
+    drop(ed);
+    drop(p);
+}
+
+/// A plug-in may ask for a reactivation (`kLatencyChanged`) or a re-read of its parameter infos
+/// (`kParamTitlesChanged`) along with a preset it loads. After either the host re-sends the values
+/// it set, at the next block, before the session's echo of the preset can arrive; a value the
+/// plug-in has replaced since must not be among them (the session's copy is stale until the echo
+/// arrives), or the plug-in sees the host take its preset back.
+#[test]
+fn a_restart_asked_with_a_preset_re_sends_no_value_the_plugin_replaced() {
+    let _one_at_a_time = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
+    let id = found.into_iter().find(|d| d.name == "Fixture Gain").expect("fixture gain").id;
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
+    p.prepare(48_000.0, BLOCK, 2);
+    let mut ed = p.editor().expect("editor handle");
+    let mut reader = p.state_reader().expect("state reader");
+    frames(&mut p, &mut ed, 4);
+    let preset = &PRESETS[0];
+    for (flag, what) in [(16u32, "kLatencyChanged"), (32, "kParamTitlesChanged")] {
+        for announce in [0u32, 1] {
+            let how = if announce == 0 { "performEdit" } else { "kParamValuesChanged" };
+            assert!(p.load_state(&arming(1 + announce + flag)));
+            frames(&mut p, &mut ed, 2);
+            // Values of the host's own, unlike the preset's, delivered before the pick.
+            for (pid, v) in [("7", 1.0f32), ("3", 0.0), ("12", 1000.0)] {
+                assert!(p.set_param(pid, v));
+            }
+            frames(&mut p, &mut ed, 3);
+            // The pick and its restart request; the next idle services the restart and hands the
+            // session the preset; a block runs before the session's echo comes back.
+            assert!(reader.save_state().is_some());
+            let edits = ed.idle();
+            p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK);
+            for (pid, v) in &edits {
+                assert!(p.set_param(pid, *v), "{pid}");
+            }
+            frames(&mut p, &mut ed, 3);
+            let mut log = log_of(reader.save_state());
+            frames(&mut p, &mut ed, 2);
+            log.extend(log_of(reader.save_state()));
+            // The reactivation was asked for.
+            let log: Vec<String> = log.into_iter().filter(|l| !l.starts_with("comp.setActive(")).collect();
+            assert_eq!(unasked(&log, preset), Vec::<String>::new(), "{what} with a pick announced by {how}: log: {log:#?}");
+            for &(pid, want) in preset {
+                assert!(
+                    log.iter().any(|l| l.starts_with(&format!("proc.point({pid})="))),
+                    "{what} ({how}): the processor never got parameter {pid} = {want}; log: {log:#?}"
+                );
+            }
         }
     }
     drop(reader);

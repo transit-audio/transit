@@ -363,7 +363,9 @@ static CTRL_CALLS: AtomicU64 = AtomicU64::new(0);
 // A preset picked in Gain's own editor, and a log of every call the host makes afterward that
 // writes to Gain. A controller state whose fourth f64 is `1 + 2 * preset + announce` arms a pick
 // (see `GainController::pick_armed_preset`); it happens at the controller's next `getState` (a
-// main-thread call, as a click in the editor would be), which also starts the log afresh. While
+// main-thread call, as a click in the editor would be), which also starts the log afresh. Adding
+// 16 also asks for `kLatencyChanged` with the pick, 32 for `kParamTitlesChanged` (in the same
+// `restartComponent` as `kParamValuesChanged` when that announces it; #651, round 2). While
 // the log runs, the component's state carries it after the gain: one line per call, such as
 // `ctrl.setParamNormalized(7)=0.3`, `proc.point(7)=0.3@0`, `ctrl.setState`, `comp.setState`,
 // `comp.setActive(1)` (values in Rust's shortest round-trip form, so a test can compare them bit
@@ -393,7 +395,8 @@ const PRESETS: [[(u32, f64); 3]; 2] = [[(7, 0.3), (3, 0.45), (12, 0.3)], [(7, 0.
 
 /// Gain's Mode as its controller holds it (normalized, f64 bits).
 static MODE_VALUE: AtomicU64 = AtomicU64::new(0);
-/// An armed pick: `1 + 2 * preset + announce`, 0 for none.
+/// An armed pick: `1 + 2 * preset + announce` (plus the restart flags of the section docs), 0
+/// for none.
 static ARMED_PICK: AtomicU64 = AtomicU64::new(0);
 
 impl GainController {
@@ -417,13 +420,21 @@ impl GainController {
         if code == 0 {
             return;
         }
-        let (index, announce) = ((code - 1) / 2, (code - 1) % 2);
+        let x = code - 1;
+        let mut extra = 0;
+        if x & 16 != 0 {
+            extra |= RestartFlags_::kLatencyChanged as i32;
+        }
+        if x & 32 != 0 {
+            extra |= RestartFlags_::kParamTitlesChanged as i32;
+        }
+        let (index, announce) = ((x & 15) / 2, (x & 15) % 2);
         let Some(preset) = PRESETS.get(index as usize) else { return };
         *CALL_LOG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
+        let Some(h) = (unsafe { ComRef::from_raw(self.handler.load(Ordering::SeqCst)) }) else { return };
         for &(id, v) in preset {
             self.store(id, v);
         }
-        let Some(h) = (unsafe { ComRef::from_raw(self.handler.load(Ordering::SeqCst)) }) else { return };
         if announce == 0 {
             for &(id, v) in preset {
                 unsafe {
@@ -432,8 +443,11 @@ impl GainController {
                     h.endEdit(id);
                 }
             }
+            if extra != 0 {
+                unsafe { h.restartComponent(extra) };
+            }
         } else {
-            unsafe { h.restartComponent(RestartFlags_::kParamValuesChanged as i32) };
+            unsafe { h.restartComponent(RestartFlags_::kParamValuesChanged as i32 | extra) };
         }
     }
 }

@@ -742,14 +742,27 @@ impl Vst3Plugin {
         trace::record(self.shared.host.trace_id, Call::EchoRepeat, self.ids.get(i).copied().unwrap_or(0), 0.0, u64::from(v.to_bits()));
     }
 
-    /// Queues every value the host set again (after a (re)activation).
+    /// Queues every value the host set again (after a (re)activation or a curve re-sample).
     fn resend_host_set(&mut self) {
         for i in 0..self.ids.len() {
             if self.host_set.get(i).copied().unwrap_or(false) {
-                trace::record(self.shared.host.trace_id, Call::Resend, self.ids.get(i).copied().unwrap_or(0), 0.0, 0);
-                self.queue(i);
+                self.resend(i);
             }
         }
+    }
+
+    /// Queues the value the host set for parameter `i` again, unless the plug-in reported a newer
+    /// one the session has not echoed yet (#651): a restart the plug-in asks for with a preset it
+    /// loads is serviced before the echo can arrive, and the host's stale copy would take the
+    /// preset back. The echo brings the plug-in's value.
+    fn resend(&mut self, i: usize) {
+        let id = self.ids.get(i).copied().unwrap_or(0);
+        if self.echoes.stale(&self.shared.reported, i) {
+            trace::record(self.shared.host.trace_id, Call::ResendSkipped, id, 0.0, 1);
+            return;
+        }
+        trace::record(self.shared.host.trace_id, Call::Resend, id, 0.0, 0);
+        self.queue(i);
     }
 
     /// The editor's size in pixels without opening it (creates and releases a view). For
@@ -995,8 +1008,7 @@ impl Plugin for Vst3Plugin {
         // the minimum, silencing it.
         self.pending.clear();
         for i in resend_indices(&self.host_set, self.ids.len()).collect::<Vec<_>>() {
-            trace::record(self.shared.host.trace_id, Call::Resend, self.ids.get(i).copied().unwrap_or(0), 0.0, 0);
-            self.queue(i);
+            self.resend(i);
         }
     }
 

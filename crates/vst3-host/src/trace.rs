@@ -154,12 +154,14 @@ pub(crate) enum Call {
     Resend,
     /// `set_param` repeated the echo the host already holds: nothing is sent. `aux`: plain bits.
     EchoRepeat,
+    /// A re-send left out: the plug-in reported a newer value the session has not echoed yet.
+    ResendSkipped,
 }
 
 impl Call {
     fn from_u8(v: u8) -> Option<Call> {
         use Call::*;
-        const ALL: [Call; 18] = [
+        const ALL: [Call; 19] = [
             BeginEdit,
             PerformEdit,
             EndEdit,
@@ -178,6 +180,7 @@ impl Call {
             HostValue,
             Resend,
             EchoRepeat,
+            ResendSkipped,
         ];
         ALL.get(usize::from(v)).copied()
     }
@@ -403,6 +406,7 @@ pub(crate) fn line(r: &Record) -> String {
         Call::Report => format!("{head} report to the session id={} {} {}", r.id, value(r.value), plain(r.aux)),
         Call::Echo => format!("{head} set_param id={} {}: the session's echo, processor gets {}", r.id, plain(r.aux), value(r.value)),
         Call::HostValue => format!("{head} set_param id={} {}: a host value, processor and controller get {}", r.id, plain(r.aux), value(r.value)),
+        Call::ResendSkipped => format!("{head} re-send left out id={}: the plug-in reported a newer value, its echo is on the way", r.id),
         Call::EchoRepeat => format!("{head} set_param id={} {}: repeats the echo the host holds, nothing sent", r.id, plain(r.aux)),
         Call::Resend => format!("{head} re-send of a value the host set (after a (re)activation or a curve re-sample) id={}", r.id),
     }
