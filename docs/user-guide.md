@@ -239,6 +239,7 @@ with `dir` and the ordinary format options.
 (`file.export_midi`). Each clip is written as it plays: a note that starts past the clip's end is
 left out, a note held over the end stops there, and a looped clip's repeats are written out. The
 notes are the clips' own: real-time properties, track offsets and MIDI effects are not applied.
+Muted clips are left out, since a MIDI file cannot mark them muted; muted tracks are included.
 
 With Opus the bit depth row gives way to **Bitrate**: 96, 128, 160 (the default), 192 or 256 kb/s
 for stereo; a mono bus offers 96 (the default), 128 or 160 kb/s.
