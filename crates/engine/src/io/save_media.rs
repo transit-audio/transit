@@ -17,34 +17,64 @@ pub(super) fn copy_source(reads: &Path, named: &Path) -> PathBuf {
 }
 
 /// Disk-backed sources a written session names from files other than the ones they read, each
-/// with that file (#629).
+/// with the source's name and that file (#629).
 #[derive(Default)]
-pub(super) struct Moved(Vec<(Arc<transit_model::disk::DiskSource>, PathBuf)>);
+pub(super) struct Moved(Vec<(Arc<transit_model::disk::DiskSource>, String, PathBuf)>);
 
 impl Moved {
-    /// The written session names `file` for `disk`: kept when it is not the file `disk` reads.
-    pub(super) fn note(&mut self, disk: &Arc<transit_model::disk::DiskSource>, file: PathBuf) {
-        let reads = disk.path();
-        let same = reads == file || matches!((std::fs::canonicalize(&reads), std::fs::canonicalize(&file)), (Ok(a), Ok(b)) if a == b);
-        if !same {
-            self.0.push((Arc::clone(disk), file));
+    /// Every disk-backed source of `s`, a session just written to its folder, that reads a file
+    /// other than the one `s` names for it, whatever the save did with that file (copied it now,
+    /// copied it at an earlier save, or found it in the folder already). So a source whose move
+    /// failed at one save is moved at the next (#629).
+    pub(super) fn of(s: &Session) -> Moved {
+        let dir = s.folder.clone().unwrap_or_default();
+        let mut moved = Moved::default();
+        for src in s.sources.iter().filter(|src| !src.path.is_empty()) {
+            let Some(disk) = s.pool.get(src.id).and_then(|a| a.disk.as_ref()) else { continue };
+            if moved.0.iter().any(|(d, ..)| Arc::ptr_eq(d, disk)) {
+                continue;
+            }
+            // An absolute path replaces `dir` when joined.
+            let file = dir.join(&src.path);
+            let reads = disk.path();
+            let same = reads == file || matches!((std::fs::canonicalize(&reads), std::fs::canonicalize(&file)), (Ok(a), Ok(b)) if a == b);
+            if !same {
+                moved.0.push((Arc::clone(disk), src.name.clone(), file));
+            }
         }
+        moved
     }
+}
+
+/// How a save moves a disk-backed source onto the file the saved session names: [`open_copy`],
+/// or a fake in tests.
+pub(super) type Follow<'a> = &'a dyn Fn(&Arc<transit_model::disk::DiskSource>, &Path) -> std::result::Result<(), String>;
+
+/// Move `disk` onto `file` when `file` opens as the same audio ([`transit_model::disk::DiskSource::retarget_file`]).
+pub(super) fn open_copy(disk: &Arc<transit_model::disk::DiskSource>, file: &Path) -> std::result::Result<(), String> {
+    super::disk::probe(file).ok_or_else(|| "it cannot be read".to_string()).and_then(|(_, len)| disk.retarget_file(file, len))
 }
 
 /// After a save the session stays open on (Save, Save As, the first save of an untitled session),
 /// once its session file is written: each disk-backed source reads the file the saved session
 /// names for it from now on (#629), so playback, offline renders and later saves no longer need
 /// the folder it came from, and that folder's files are let go (it can be deleted or ejected).
-/// A file that cannot be opened as the same audio leaves its source reading the file it read;
-/// a later save copies from the file the session names when that one is gone ([`copy_source`]).
-pub(super) fn follow_copies(moved: &Moved) {
-    for (disk, file) in &moved.0 {
-        let opened = super::disk::probe(file).ok_or_else(|| "it cannot be read".to_string()).and_then(|(_, len)| disk.retarget_file(file, len));
-        if let Err(why) = opened {
-            log::warn!("a long take plays on from {}: its saved copy {} could not be opened: {why}", disk.path().display(), file.display());
+/// A file that cannot be opened as the same audio leaves its source reading the file it read:
+/// the save still succeeds, and the returned note, one per such source, names the take and the
+/// file it still reads. The next save tries again ([`Moved::of`]); meanwhile a save copies from
+/// the file the session names when the one read is gone ([`copy_source`]).
+pub(super) fn follow_copies(moved: &Moved, follow: Follow) -> Vec<String> {
+    let mut notes = Vec::new();
+    for (disk, name, file) in &moved.0 {
+        if let Err(why) = follow(disk, file) {
+            notes.push(format!(
+                "The long take \"{name}\" still plays from {}: its copy in the saved session, {}, could not be opened ({why}). The next save tries again.",
+                disk.path().display(),
+                file.display()
+            ));
         }
     }
+    notes
 }
 
 /// The path, relative to the session folder `dir`, of `from` when it already lives there: in `dir`

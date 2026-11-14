@@ -392,3 +392,47 @@ fn a_take_recorded_before_the_first_save_plays_from_the_session_folder_and_save_
     move_away_and_delete(&dir, "Copy");
     plays(&e, "Vox_01", 48_000);
 }
+
+#[test]
+fn a_take_whose_move_fails_at_save_as_is_said_and_moved_at_the_next_plain_save_issue_629() {
+    let Some((mut e, t)) = engine() else { return };
+    let dir = Scratch::new("refollow");
+    let a = dir.file("A/Song.transit");
+    save_session(&mut e, &a).unwrap();
+    record_long(&mut e, t, &dir.path("A/Audio Files/Vox_01.wav"));
+    save_session(&mut e, &a).unwrap();
+    plays(&e, "Vox_01", 48_000);
+    let old = disk_of(&e, "Vox_01").path();
+    let copy = dir.path("B/Audio Files/Vox_01.wav");
+
+    // Save As whose move onto the copy fails (the copy cannot be opened right after it is written).
+    let b = dir.file("B/Song.transit");
+    let mark = e.message_pushes();
+    let refuse: Follow = &|_, _| Err("the copy is locked".to_string());
+    assert_eq!(crate::io::session::save_session_following(&mut e, &b, refuse).unwrap(), 1, "the save itself succeeds and copies the take");
+    let said = e.messages_since(mark).to_vec();
+    assert_eq!(said.len(), 1, "one note for the one take: {said:?}");
+    let note = &said[0];
+    assert!(note.starts_with("The long take \"Vox_01\" still plays from "), "{note}");
+    assert!(note.contains(&old.display().to_string()), "it names the file the take still reads: {note}");
+    assert!(note.contains("could not be opened (the copy is locked). The next save tries again."), "{note}");
+    assert_eq!(e.path.as_deref(), Some(b.as_str()));
+    assert!(copy.is_file());
+    assert!(same_file(&disk_of(&e, "Vox_01").path(), &old), "a failed move leaves the take on the file it read");
+    plays(&e, "Vox_01", 48_000);
+
+    // Save Copy In and the autosave copy never move it, even with a move owed.
+    save_session_copy(&e, &dir.file("Copy/Copy.transit")).unwrap();
+    crate::io::save_copy(&e, &dir.file("Auto/Auto.transit")).unwrap();
+    assert!(same_file(&disk_of(&e, "Vox_01").path(), &old), "Save Copy In and autosave leave the take where it reads");
+
+    // A plain Save into the same folder: the copy is there already, nothing is copied, and the
+    // take is moved onto it without a note.
+    let mark = e.message_pushes();
+    assert_eq!(save_session(&mut e, &b).unwrap(), 0);
+    assert_eq!(e.messages_since(mark), &[] as &[String]);
+    assert!(same_file(&disk_of(&e, "Vox_01").path(), &copy), "the next plain save moves the take onto its copy");
+    move_away_and_delete(&dir, "Copy");
+    move_away_and_delete(&dir, "A");
+    plays(&e, "Vox_01", 48_000);
+}

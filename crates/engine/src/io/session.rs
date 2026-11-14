@@ -3,11 +3,20 @@ use super::*;
 /// Save the session to `path` (a `.transit` file). Audio that only exists in memory is written
 /// as 32-bit float WAV into `Audio Files/` next to it. Returns how many audio files were written.
 pub fn save_session(e: &mut Engine, path: &str) -> Result<usize> {
-    let (fresh, written, p, moved) = write_session(e.session(), path, false)?;
+    save_session_following(e, path, &super::save_media::open_copy)
+}
+
+/// [`save_session`], moving each long take onto the file the saved session names through `follow`.
+pub(super) fn save_session_following(e: &mut Engine, path: &str, follow: super::save_media::Follow) -> Result<usize> {
+    let (fresh, written, p) = write_session(e.session(), path, false)?;
     // Keep the in-memory document in sync (paths, unsaved flags) without an undo step.
     *e.session_mut() = fresh;
-    // The session file names the copies now: the open session reads them too (#629).
-    super::save_media::follow_copies(&moved);
+    // The session file names the copies now: the open session reads them too, a take a failed
+    // move left behind included (#629). A move that fails again is said, not only logged.
+    let moved = super::save_media::Moved::of(e.session());
+    for note in super::save_media::follow_copies(&moved, follow) {
+        e.warn(note);
+    }
     let reports: Vec<_> = e
         .session()
         .tracks
@@ -73,10 +82,8 @@ pub fn save_session_copy(e: &Engine, path: &str) -> Result<usize> {
 }
 
 /// Write `session` to `path`; returns the session with updated media paths, the number of audio
-/// files written, the final path, and each disk-backed source the written session names from a
-/// file other than the one it reads (with that file), for a save that keeps the session open
-/// there to move it onto ([`super::save_media::follow_copies`]).
-fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Session, usize, PathBuf, super::save_media::Moved)> {
+/// files written and the final path.
+fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Session, usize, PathBuf)> {
     use std::collections::{HashMap, HashSet};
     let p = session_file(path);
     // Before any audio is written: a session saved outside the write root changes nothing.
@@ -97,7 +104,6 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
     };
     // Files written for audio during this save: sources playing the same audio share one.
     let mut files: HashMap<*const SourceAudio, String> = HashMap::new();
-    let mut moved = super::save_media::Moved::default();
     // Files a Sampler patch references where they are (ADR 0041): a save keeps their paths.
     let referenced: HashSet<transit_model::SourceId> = s
         .tracks
@@ -146,7 +152,6 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
                             format!("Audio Files/{name}")
                         }
                     };
-                    moved.note(disk, dir.join(&path));
                     files.insert(Arc::as_ptr(audio), path.clone());
                     path
                 }
@@ -212,7 +217,7 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
         back_up(&p);
     }
     replace_file(&tmp, &p, text.as_bytes())?;
-    Ok((s, written, p, moved))
+    Ok((s, written, p))
 }
 
 /// Write `bytes` to `tmp`, flush it to disk and rename it over `file`, so `file` holds either the
