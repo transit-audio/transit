@@ -139,8 +139,13 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let plugin = Arc::clone(&first.plugin);
     match act {
         Some(Act::Save) => {
+            let mark = app.engine.message_pushes();
             if app.save() {
-                app.status = format!("Saved; {plugin} keeps the state it had when it was last read");
+                let saved = format!("Saved; {plugin} keeps the state it had when it was last read");
+                app.status = match app.save_notes_line(mark) {
+                    Some(notes) => format!("{saved}. {notes}"),
+                    None => saved,
+                };
             }
         }
         Some(Act::GiveUp) => app.give_up_on_stuck_plugins(),

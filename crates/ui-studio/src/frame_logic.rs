@@ -145,6 +145,9 @@ impl StudioApp {
             self.stop_play();
             self.close_autosave();
         }
+        // What a save says (a take that could not be moved onto its copy, a frozen recording's
+        // report) is what the engine posts while it runs: told in the status line below.
+        let save_mark = id.starts_with("session.save").then(|| self.engine.message_pushes());
         let result = if id == "track.change_width" {
             self.change_track_width(&params)
         } else if self.slip_override(id) {
@@ -168,6 +171,9 @@ impl StudioApp {
                         self.dialog = None;
                     }
                 }
+                if let Some(mark) = save_mark {
+                    self.say_save_notes(mark);
+                }
                 if replacing || (id.starts_with("session.save") && !self.engine.is_dirty()) {
                     self.release_autosave(false);
                 }
@@ -184,6 +190,26 @@ impl StudioApp {
                 log::warn!("{id}: {e}");
                 Err(e.to_string())
             }
+        }
+    }
+
+    /// The status line for what the engine posted since [`Engine::message_pushes`] said `mark`
+    /// while a save ran: the one warning, or the first with the count of the others (every one is
+    /// in the log, where the engine wrote it, and in the engine's message list). Only the save
+    /// that posted them says them: the mark moves on with the next one.
+    pub(crate) fn save_notes_line(&self, mark: u64) -> Option<String> {
+        let count = self.engine.message_pushes().saturating_sub(mark);
+        let first = self.engine.messages_since(mark).first()?;
+        Some(match count {
+            0 | 1 => first.clone(),
+            n => format!("{}. {} more warnings in the log", first.trim_end_matches('.'), n - 1),
+        })
+    }
+
+    /// Show [`Self::save_notes_line`] in the status line; a save with nothing to say leaves it alone.
+    pub(crate) fn say_save_notes(&mut self, mark: u64) {
+        if let Some(line) = self.save_notes_line(mark) {
+            self.status = line;
         }
     }
 

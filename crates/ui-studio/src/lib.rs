@@ -786,6 +786,8 @@ mod recovery_tests;
 #[cfg(test)]
 mod resonator_panel_tests;
 #[cfg(test)]
+mod save_notes_tests;
+#[cfg(test)]
 mod session_folder_tests;
 #[cfg(test)]
 mod slice5_tests;
