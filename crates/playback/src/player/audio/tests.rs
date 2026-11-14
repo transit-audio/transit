@@ -1401,5 +1401,6 @@ mod converter;
 mod count_in;
 mod loop_wrap;
 mod monitor_path;
+mod pre_count;
 mod preview;
 mod speed;

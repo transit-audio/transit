@@ -84,7 +84,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let dir = str_param(p, "dir").ok_or_else(|| bad("file.bounce_stems", "`dir` required"))?.to_string();
             let left_out = super::external_instrument::render_guard(e, "file.bounce_stems", p)?;
             let r = range_param(e, "file.bounce_stems", p)?;
-            let r = if r.is_empty() { transit_time::Range::new(0, e.session().content_end().max(1)) } else { r };
+            let r = if r.is_empty() { crate::io::default_render_range(e.session()) } else { r };
             let format = match str_param(p, "format") {
                 Some("aiff") | Some("aif") => transit_audio_io::FileFormat::Aiff,
                 Some("flac") => transit_audio_io::FileFormat::Flac,
@@ -433,7 +433,7 @@ pub fn bounce_job(e: &Engine, p: &Value) -> Result<crate::io::Bounce> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.bounce_mix", "`path` required"))?.to_string();
     super::external_instrument::render_guard(e, "file.bounce_mix", p)?;
     let r = range_param(e, "file.bounce_mix", p)?;
-    let r = if r.is_empty() { transit_time::Range::new(0, e.session().content_end().max(1)) } else { r };
+    let r = if r.is_empty() { crate::io::default_render_range(e.session()) } else { r };
     let ext = std::path::Path::new(&path).extension().and_then(|x| x.to_str()).unwrap_or("wav").to_ascii_lowercase();
     let format_name = str_param(p, "format").unwrap_or(ext.as_str());
     let format = transit_audio_io::encode_format_for(format_name)
@@ -497,7 +497,7 @@ pub fn bounce_paths_job(e: &Engine, p: &Value) -> Result<crate::io::PathBounce> 
     let dir = str_param(p, "dir").ok_or_else(|| bad(ID, "`dir` required"))?.to_string();
     super::external_instrument::render_guard(e, ID, p)?;
     let r = range_param(e, ID, p)?;
-    let r = if r.is_empty() { transit_time::Range::new(0, e.session().content_end().max(1)) } else { r };
+    let r = if r.is_empty() { crate::io::default_render_range(e.session()) } else { r };
     let format_name = str_param(p, "format").unwrap_or("wav");
     let format = transit_audio_io::encode_format_for(format_name)
         .ok_or_else(|| bad(ID, format!("cannot write `{format_name}` files (supported: {})", transit_audio_io::ENCODE_EXTENSIONS)))?;

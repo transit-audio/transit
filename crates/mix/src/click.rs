@@ -39,7 +39,8 @@ pub fn render(s: &Session, pos: Samples, frames: usize, main: &mut [Vec<f32>], t
     let end = pos.saturating_add(frames as i64);
     let (gain, accent, normal) = sound(s, trim);
     // Start one blip length early so a click that began in an earlier block still rings into this one.
-    let t0 = s.tempo.samples_to_ticks(pos.saturating_sub(len), sr).max(0).saturating_sub(1);
+    // Not floored at bar 1: the click sounds in the pre-count zone too (ADR 0052 decision 5).
+    let t0 = s.tempo.samples_to_ticks(pos.saturating_sub(len), sr).saturating_sub(1);
     let mut tick = t0.saturating_sub(s.tempo.bar_beat_at_tick(t0).tick);
     // Blocks hold a few beats at most; the guard only protects against a malformed tempo map.
     for _ in 0..4096 {
@@ -89,6 +90,11 @@ mod tests {
 
     /// Renders `len` frames from zero the way playback does (metronome on), in blocks of `block`.
     fn render_playback(s: &Session, len: usize, block: usize, recording: bool) -> Vec<Vec<f32>> {
+        render_playback_from(s, 0, len, block, recording)
+    }
+
+    /// [`render_playback`] from `from`, which may be before bar 1.
+    fn render_playback_from(s: &Session, from: i64, len: usize, block: usize, recording: bool) -> Vec<Vec<f32>> {
         let mut rig = PlanRig::new(block);
         rig.publish(s);
         rig.eng.metronome = true;
@@ -97,7 +103,7 @@ mod tests {
         let mut done = 0usize;
         while done < len {
             let n = (len - done).min(block);
-            let tmp = rig.render(done as i64);
+            let tmp = rig.render(from + done as i64);
             for (o, t) in out.iter_mut().zip(tmp.iter()) {
                 if let (Some(d), Some(src)) = (o.get_mut(done..done + n), t.get(..n)) {
                     d.copy_from_slice(src);
@@ -130,6 +136,26 @@ mod tests {
         // Blocks that start mid-beat render the same clicks as a single pass.
         let split = render_playback(&s, len, 97, false);
         assert_eq!(out, split);
+    }
+
+    /// ADR 0052 decision 5: the click sounds in the pre-count zone. At 120 BPM and 4/4, playback
+    /// from a bar before bar 1 clicks on every beat, the zone's first beat (tick -3840) included,
+    /// with the accent on bar 0's first beat and on bar 1's. Compared in process, never by hash.
+    #[test]
+    fn click_sounds_on_every_beat_of_the_pre_count_zone() {
+        let mut s = Session::default();
+        s.edit.click = true;
+        let beat = s.sample_rate.as_f64() as usize * 60 / 120;
+        let from = -4 * beat as i64;
+        let out = render_playback_from(&s, from, beat * 5, 512, false);
+        let peak = |a: usize, b: usize| out[0][a..b].iter().map(|x| x.abs()).fold(0.0, f32::max);
+        let beats: Vec<f32> = (0..5).map(|b| peak(b * beat, b * beat + 200)).collect();
+        for (b, on) in beats.iter().enumerate() {
+            assert!(*on > 0.1, "beat {b} from tick -3840 should click, peaks {beats:?}");
+            assert_eq!(peak(b * beat + beat / 2, b * beat + beat / 2 + 200), 0.0, "between beats must stay silent");
+        }
+        assert!(beats[0] > beats[1] && beats[4] > beats[3], "bar 0 and bar 1 start accented: {beats:?}");
+        assert_eq!(render_playback_from(&s, from, beat * 5, 97, false), out, "blocks that start mid-beat render the same clicks");
     }
 
     #[test]

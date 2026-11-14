@@ -141,7 +141,7 @@ pub fn realtime_plan(e: &Engine, p: &Value) -> Result<RealtimePlan> {
         stems.push(stem);
     }
     let r = range_param(e, ID, p)?;
-    let range = if r.is_empty() { transit_time::Range::new(0, s.content_end().max(1)) } else { r };
+    let range = if r.is_empty() { crate::io::default_render_range(s) } else { r };
     crate::io::check_bounce_range(s, range, ID)?;
     let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("wav").to_ascii_lowercase();
     let format_name = str_param(p, "format").unwrap_or(ext.as_str());

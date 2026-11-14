@@ -639,6 +639,35 @@ pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<transit_midi::Sequen
     Some(out)
 }
 
+/// A MIDI clip's own events as playback sounds them (ADR 0052 decision 10): ticks from the clip
+/// start, only what plays between its grid start and its grid end, each note-off cut at the grid
+/// end, and a looped clip's repetitions written out ([`unroll_midi_loop`]). The notes go through
+/// [`played_note`], so a stored note before tick 0 is placed as playback places it. The track's
+/// real-time properties, MIDI Track Offset and MIDI effects are not applied. `None` for a clip that
+/// is not MIDI, or a loop that would unroll to too many events.
+pub fn clip_as_played(s: &Session, clip: &Clip) -> Option<transit_midi::Sequence> {
+    let ClipContent::Midi { sequence } = &clip.content else { return None };
+    if midi_loop_frame(s, clip).is_some() {
+        return unroll_midi_loop(s, clip);
+    }
+    let sr = s.sample_rate;
+    let base = s.tempo.samples_to_ticks(clip.start, sr);
+    let last = grid_end(s, clip);
+    let tick = |at: Samples| s.tempo.samples_to_ticks(at, sr).saturating_sub(base);
+    let neutral = Rtp { velocity: 0, transpose: 0, duration: 1.0, delay: 0 };
+    let mut out = transit_midi::Sequence::default();
+    for n0 in &sequence.notes {
+        let Some((mut n, on, off)) = played_note(s, last, base, neutral, n0, false) else { continue };
+        n.start = tick(on);
+        n.length = tick(off).saturating_sub(n.start).max(1);
+        out.notes.push(n);
+    }
+    // As playback: a controller before tick 0 does not sound in a clip that is not looped.
+    out.ctrls.extend(sequence.ctrls.iter().filter(|c| c.tick >= 0 && s.tempo.tick_to_samples(base.saturating_add(c.tick), sr) < last));
+    out.sort();
+    Some(out)
+}
+
 /// A looped MIDI clip's frame (ADR 0019): the sample its tick grid starts at, the loop range
 /// measured from there, and how its cycles repeat. Notes sound on the tick grid
 /// (`tick_to_samples(base + tick)`), and `base` is `clip.start` rounded to a tick, so a clip that

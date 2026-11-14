@@ -410,12 +410,18 @@ impl std::io::Seek for Out {
     }
 }
 
+/// The range a bounce or render renders when none is given: from the session start, which is the
+/// pre-count zone's start when there is one (ADR 0052 decision 10), to the content end.
+pub fn default_render_range(s: &Session) -> Range {
+    Range::new(s.start(), s.content_end().max(1))
+}
+
 /// Limit a range used for rendering to the track's material (plus a second), so a huge
-/// selection never renders hours of silence.
+/// selection never renders hours of silence. It starts no earlier than the session start.
 pub fn bounded_to_track(s: &Session, t: TrackId, r: Range) -> Range {
     let Some(tr) = s.track(t) else { return Range::point(r.start) };
     let end = tr.clips().iter().map(Clip::end).max().unwrap_or(0).saturating_add(s.sample_rate.samples(1.0));
-    let start = r.start.max(0).min(end);
+    let start = r.start.max(s.start()).min(end);
     Range::new(start, r.end.min(end).max(start))
 }
 

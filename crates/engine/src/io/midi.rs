@@ -64,27 +64,68 @@ fn session_smf(s: &Session) -> transit_midi::Smf {
     }
 }
 
-pub(super) fn export_midi_session(s: &Session, only: Option<&[TrackId]>) -> Result<Vec<u8>> {
+/// The session tick a MIDI file export starts at (ADR 0052 decision 10): the first tick of the bar
+/// holding the session start, so the file's first bar is the pre-count zone's first bar; 0 (bar 1)
+/// without a zone.
+fn export_origin(s: &Session) -> i64 {
+    let start = s.start();
+    if start >= 0 {
+        return 0;
+    }
+    let tick = s.tempo.samples_to_ticks(start, s.sample_rate);
+    s.tempo.bar_start_tick(s.tempo.bar_beat_at_tick(tick).bar).min(0)
+}
+
+/// The conductor written from `origin` (a tick at or before 0): the tempo and meter in effect
+/// there, which are bar 1's extended backward, at file tick 0, and every later tempo, meter and
+/// marker moved later by `-origin`.
+fn conductor_from(s: &Session, origin: i64) -> transit_midi::Smf {
     let mut smf = session_smf(s);
+    if origin >= 0 {
+        return smf;
+    }
+    let shift = origin.saturating_neg();
+    let place = |i: usize, tick: i64| if i == 0 { 0 } else { tick.saturating_add(shift) };
+    for (i, t) in smf.tempos.iter_mut().enumerate() {
+        t.0 = place(i, t.0);
+    }
+    for (i, m) in smf.meters.iter_mut().enumerate() {
+        m.0 = place(i, m.0);
+    }
+    for m in &mut smf.markers {
+        m.0 = m.0.saturating_add(shift);
+    }
+    smf
+}
+
+/// Every MIDI clip of the chosen tracks as it sounds ([`transit_mix::clip_as_played`]), from the
+/// bar holding the session start ([`export_origin`]).
+pub(super) fn export_midi_session(s: &Session, only: Option<&[TrackId]>) -> Result<Vec<u8>> {
+    let origin = export_origin(s);
+    let mut smf = conductor_from(s, origin);
     let chosen: Vec<_> = s.tracks.iter().filter(|t| t.kind.is_midi() && only.is_none_or(|ids| ids.contains(&t.id))).collect();
     if only.is_some() && chosen.is_empty() {
         return Err(EngineError::BadParams("file.export_midi".into(), "none of the requested tracks hold MIDI".into()));
     }
     for t in chosen {
         let mut seq = transit_midi::Sequence::default();
-        for c in t.clips() {
-            if let ClipContent::Midi { sequence } = &c.content {
-                let base = s.tempo.samples_to_ticks(c.start, s.sample_rate);
-                for n in &sequence.notes {
-                    let mut n = *n;
-                    n.start = n.start.saturating_add(base);
-                    seq.notes.push(n);
-                }
-                for ev in &sequence.ctrls {
-                    let mut ev = *ev;
-                    ev.tick = ev.tick.saturating_add(base);
-                    seq.ctrls.push(ev);
-                }
+        for c in t.clips().iter().filter(|c| matches!(c.content, ClipContent::Midi { .. })) {
+            let Some(sequence) = transit_mix::clip_as_played(s, c) else {
+                return Err(EngineError::BadParams(
+                    "file.export_midi".into(),
+                    format!("{}: a looped MIDI clip would unroll to too many events", t.name),
+                ));
+            };
+            let base = s.tempo.samples_to_ticks(c.start, s.sample_rate).saturating_sub(origin);
+            for n in &sequence.notes {
+                let mut n = *n;
+                n.start = n.start.saturating_add(base);
+                seq.notes.push(n);
+            }
+            for ev in &sequence.ctrls {
+                let mut ev = *ev;
+                ev.tick = ev.tick.saturating_add(base);
+                seq.ctrls.push(ev);
             }
         }
         seq.sort();
