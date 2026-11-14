@@ -88,6 +88,9 @@ repository or its secrets. To check a download:
 gh attestation verify transit-v<version>-<platform>.<ext> --repo transit-audio/transit
 ```
 
+That checks the file was built in this repository. To also require the release workflow as the
+builder, add `--signer-workflow transit-audio/transit/.github/workflows/release.yml`.
+
 The attestation says where and from which commit a file was built. It is not a code signature:
 it does not change what Windows or macOS show when the file is opened (see the signing sections
 below). The step does not stop a release when it fails; after publishing, check the "Attest build
