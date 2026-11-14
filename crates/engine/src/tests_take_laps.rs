@@ -69,6 +69,35 @@ fn a_pass_from_inside_the_loop_is_a_first_stretch_then_whole_laps() {
     assert_eq!(ahead.laps[0].range, Range::new(800, 1_400), "started ahead of the loop: the first stretch reaches back");
 }
 
+/// #634: the lap under way while a pass records, for drawing: each lap where [`laps`] lays its
+/// take, from the lap's start to the playhead, with the latch's offset 0 placed so that lap's
+/// material lines up under it.
+#[test]
+fn the_lap_under_way_lies_where_its_take_will_from_the_loop_start_after_each_wrap() {
+    // Cut at each wrap from inside the loop: the first stretch from the latch, then whole laps.
+    assert_eq!(live(1_200, None, Some(LOOP), 150), (1_200, Range::new(1_200, 1_350)));
+    assert_eq!(live(1_200, None, Some(LOOP), 200), (800, Range::new(1_000, 1_000)), "at the wrap: an empty second lap");
+    assert_eq!(live(1_200, None, Some(LOOP), 250), (800, Range::new(1_000, 1_050)));
+    assert_eq!(live(1_200, None, Some(LOOP), 650), (400, Range::new(1_000, 1_050)));
+    // Started ahead of the loop: the first stretch reaches back to the latch.
+    assert_eq!(live(800, None, Some(LOOP), 500), (800, Range::new(800, 1_300)));
+    assert_eq!(live(800, None, Some(LOOP), 700), (400, Range::new(1_000, 1_100)));
+    // In passes from the loop start.
+    assert_eq!(live(1_000, Some(400), None, 399), (1_000, Range::new(1_000, 1_399)));
+    assert_eq!(live(1_000, Some(400), None, 900), (200, Range::new(1_000, 1_100)));
+    // No loop: one straight stretch, however long.
+    assert_eq!(live(1_000, None, None, 5_000), (1_000, Range::new(1_000, 6_000)));
+    for elapsed in [0, 199, 200, 201, 599, 600, 4_321] {
+        let k = completed(1_200, None, Some(LOOP), elapsed);
+        let lap = laps(1_200, None, Some(LOOP), 0, elapsed, elapsed + 1)
+            .unwrap_or(Laps { laps: vec![Lap { index: 0, window: Range::new(0, elapsed + 1), range: Range::new(1_200, 1_400) }], merged: 0 })
+            .laps[k as usize];
+        let (origin, span) = live(1_200, None, Some(LOOP), elapsed);
+        assert_eq!(span.start, lap.range.start, "lap {k} starts where its take does");
+        assert_eq!(origin + lap.window.start, lap.range.start, "lap {k}'s first sample lines up");
+    }
+}
+
 /// #567: Record pressed inside a cycling loop, away from the loop start. The audio take was one
 /// straight clip of the whole file running past the loop end; it is now cut as the MIDI is.
 #[test]

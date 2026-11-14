@@ -305,16 +305,17 @@ impl StudioApp {
         let now = start + self.recording_elapsed(start);
         let cut = transit_engine::midi_take::Cut { start, pass: plan.pass, punch: plan.punch, stop: now - start };
         let s = self.engine.session();
-        let cycle = self.take_cycle.unwrap_or_default();
         let wrap = self.take_cycle.filter(|_| plan.pass.is_none());
         let mut built = transit_engine::midi_take::build_wrapping(&s.tempo, s.sample_rate, &events, &cut, wrap);
-        // After a wrap only the lap under way is drawn, from the loop start to the playhead.
+        // After a wrap only the lap under way is drawn, from the loop start to the playhead, in
+        // passes of `plan.pass` as when cut at each wrap (#634).
         let done = self.record_clock.map_or(0, |c| transit_engine::take_laps::completed(c.start, plan.pass, wrap, c.reach - c.start));
-        let (start, end) = match self.record_clock.filter(|_| done > 0 && wrap.is_some()) {
-            Some(_) => {
+        let (start, end) = match self.record_clock.filter(|_| done > 0) {
+            Some(c) => {
                 let lap = usize::try_from(done).unwrap_or(0);
                 built.retain(|b| b.pass == lap);
-                (cycle.start, self.position())
+                let (_, span) = transit_engine::take_laps::live(c.start, plan.pass, wrap, c.reach - c.start);
+                (span.start, span.end)
             }
             // A pickup played over the count-in (#327) starts the clip before the latch.
             None => (built.iter().map(|b| b.range.start).fold(start, Samples::min), now),
@@ -346,6 +347,17 @@ impl StudioApp {
         let latch = self.recorder.as_ref().and_then(transit_playback::record::Recorder::applied_start).or_else(|| p.midi_recording_latch())?;
         let since = p.samples_since(latch, self.engine.session().sample_rate.hz())?;
         Some(RecordClock { start: latch.position.sample, reach: latch.position.sample.saturating_add(since.max(0)) })
+    }
+
+    /// Where the pass under way latched and how far it has run, laps included, as of now: the
+    /// frame's [`StudioApp::observe_recording`] ran before the transport moved this frame, so a
+    /// drawing reads the clock again, never behind what it has already seen (#634).
+    pub(crate) fn live_clock(&self) -> Option<RecordClock> {
+        let now = if self.is_playing() { self.pass_clock() } else { None };
+        match (self.record_clock, now) {
+            (Some(seen), Some(now)) => Some(RecordClock { start: now.start, reach: seen.reach.max(now.reach) }),
+            (seen, now) => now.or(seen),
+        }
     }
 
     /// Samples from the latch `start` to where the pass has got to, laps included. Never the

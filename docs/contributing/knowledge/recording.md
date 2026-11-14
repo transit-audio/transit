@@ -52,7 +52,13 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   in the engine's messages. The short-lap summary counts take files from `Engine::short_laps`,
   never from the 100-entry message list. The host ends the status line
   with the lap notes of the pass (`report_lap_notes`), after Stop and after crash recovery. A last
-  audio lap shorter than an eighth of the loop is still no take, but is said (#634). The first
+  audio lap shorter than an eighth of the loop (`take_pieces` in `io/recording.rs`: fewer frames
+  than the loop length / 8; the first lap is always a take) is still no take, but is said, naming
+  the take file that keeps its frames (#634). The rule was inherited, and ADR 0026 records no
+  reason for it. What it does: a Stop pressed just after a wrap makes no sliver take, which as the
+  newest take would play over the start of the last whole lap. Making it a take instead is left
+  open in ADR 0026. While a pass records, the arrangement draws only the lap under way, from the
+  loop start after each wrap (`take_laps::live`, the same laps the takes are cut by). The first
   MIDI take of a pass goes on the playlist the track plays, as the first audio take does. Placing
   the takes on Stop costs work quadratic in the lap count per track, which is why there is a limit
   (ADR 0026, lap limit amendment).

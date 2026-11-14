@@ -544,6 +544,25 @@ fn a_wrapped_recording_stops_where_the_capture_got_to_not_where_the_cycle_wrappe
     assert!(app.take_plan.is_none() && app.record_clock.is_none());
 }
 
+/// #634: loop recording in passes from the loop start draws the lap under way as the pass cut
+/// at each wrap does: from the loop start to the playhead, never on past the loop end.
+#[test]
+fn a_pass_recorded_in_laps_draws_the_lap_under_way_from_the_loop_start() {
+    let (mut app, t) = app();
+    cycling(&mut app, 4 * BEAT);
+    app.take_plan.as_mut().unwrap().pass = Some(2 * BEAT);
+    let lap = 2 * BEAT as u64;
+    let events = vec![on(LATCH + 1_000, t, 60), off(LATCH + 2_000, t, 60), on(LATCH + lap + 1_000, t, 62), off(LATCH + lap + 2_000, t, 62)];
+    app.finished_test_midi = Some(pass(t, Some(4 * BEAT), events));
+    tick(&mut app, 5 * BEAT);
+    let live = app.midi_live.as_ref().expect("the pass is drawn");
+    assert_eq!((live.start, live.end), (4 * BEAT, 5 * BEAT), "first lap");
+    tick(&mut app, 4 * BEAT + BEAT / 5);
+    let live = app.midi_live.as_ref().expect("the pass is drawn");
+    assert_eq!((live.start, live.end), (4 * BEAT, 4 * BEAT + BEAT / 5), "after the wrap the lap under way is drawn from the loop start");
+    assert_eq!(live.built.iter().map(|b| b.pass).collect::<Vec<_>>(), vec![1], "only the second lap's notes");
+}
+
 #[test]
 fn recording_within_one_lap_keeps_the_single_take_status() {
     let (mut app, t) = app();

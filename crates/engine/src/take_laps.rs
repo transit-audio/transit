@@ -99,6 +99,26 @@ pub fn completed(start: Samples, pass: Option<Samples>, wrap: Option<Range>, ela
     if elapsed < first { 0 } else { (elapsed - first) / w.len() + 1 }
 }
 
+/// The lap under way of a pass that latched at `start` and has run `elapsed` samples since the
+/// latch, laps included, for drawing it while it records (#634): where its take lies on the
+/// timeline so far (from the lap's start to the playhead), and where offset 0 since the latch
+/// falls when that lap's material is drawn over it. Laps as [`laps`] cuts them and [`completed`]
+/// counts them: after a wrap the lap under way starts at the loop start (at `start` with `pass`,
+/// at the start of `wrap` otherwise), never past the loop end. `elapsed` is unwrapped, never the
+/// playhead, which wraps back into the loop.
+pub fn live(start: Samples, pass: Option<Samples>, wrap: Option<Range>, elapsed: Samples) -> (Samples, Range) {
+    let elapsed = elapsed.max(0);
+    let k = completed(start, pass, wrap, elapsed);
+    let (from, at) = match (pass.filter(|p| *p > 0), wrap) {
+        _ if k == 0 => (0, start),
+        (Some(len), _) => (k.saturating_mul(len), start),
+        (None, Some(w)) => ((w.end - start).saturating_add((k - 1).saturating_mul(w.len())), w.start),
+        // `completed` counts laps only with a pass or a wrap.
+        (None, None) => (0, start),
+    };
+    (at.saturating_sub(from), Range::new(at, at.saturating_add(elapsed - from)))
+}
+
 /// The `total` laps of a pass that reaches offset `reach`: the first [`MAX_LAPS`] as they are,
 /// and one final lap after them (the partial lap a Stop at the limit leaves, under the usual
 /// partial-lap rule). Past that, the final lap holds everything to `reach`, its take lying from

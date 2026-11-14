@@ -386,11 +386,11 @@ fn refuse_take(e: &mut Engine, path: &Path, held: &Held, why: Option<&str>) -> S
 }
 
 /// Where a take recording from `start` shows while it holds `len` samples, as it will be placed:
-/// just the pass under way when loop recording in passes of `pass`, within the `punch` range.
+/// just the lap under way when loop recording in passes of `pass` or cut at each wrap of `wrap`
+/// ([`crate::take_laps::live`]), within the `punch` range. `len` is unwrapped (laps included).
 /// Returns the timeline position of its first sample and the span it covers.
-pub fn live_span(start: Samples, pass: Option<Samples>, punch: Option<Range>, len: Samples) -> Option<(Samples, Range)> {
-    let origin = start.saturating_sub(pass.filter(|p| *p > 0).map_or(0, |p| len / p * p));
-    let span = Range::new(start, origin.saturating_add(len));
+pub fn live_span(start: Samples, pass: Option<Samples>, wrap: Option<Range>, punch: Option<Range>, len: Samples) -> Option<(Samples, Range)> {
+    let (origin, span) = crate::take_laps::live(start, pass, wrap, len);
     Some((origin, span.intersect(&punch.unwrap_or(span))?))
 }
 
@@ -849,12 +849,24 @@ mod record_tests {
 
     #[test]
     fn a_take_shows_the_pass_under_way_within_the_punch_while_it_records() {
-        assert_eq!(live_span(1_000, None, None, 0), None);
-        assert_eq!(live_span(1_000, None, None, 500), Some((1_000, Range::new(1_000, 1_500))));
-        assert_eq!(live_span(1_000, Some(400), None, 900), Some((200, Range::new(1_000, 1_100))));
-        assert_eq!(live_span(1_000, Some(400), None, 800), None);
+        assert_eq!(live_span(1_000, None, None, None, 0), None);
+        assert_eq!(live_span(1_000, None, None, None, 500), Some((1_000, Range::new(1_000, 1_500))));
+        assert_eq!(live_span(1_000, Some(400), None, None, 900), Some((200, Range::new(1_000, 1_100))));
+        assert_eq!(live_span(1_000, Some(400), None, None, 800), None);
         let punch = Some(Range::new(1_200, 1_400));
-        assert_eq!(live_span(1_000, None, punch, 150), None);
-        assert_eq!(live_span(1_000, None, punch, 500), Some((1_000, Range::new(1_200, 1_400))));
+        assert_eq!(live_span(1_000, None, None, punch, 150), None);
+        assert_eq!(live_span(1_000, None, None, punch, 500), Some((1_000, Range::new(1_200, 1_400))));
+    }
+
+    /// #634: a pass punched in mid-loop and cut at each wrap shows only the lap under way: from
+    /// the latch to the loop end, then from the loop start, never past the loop end.
+    #[test]
+    fn a_take_cut_at_each_wrap_shows_the_lap_under_way_from_the_loop_start() {
+        let wrap = Some(Range::new(800, 1_200));
+        assert_eq!(live_span(1_000, None, wrap, None, 150), Some((1_000, Range::new(1_000, 1_150))));
+        // 200 samples to the loop end, then 50 into the second lap.
+        assert_eq!(live_span(1_000, None, wrap, None, 250), Some((600, Range::new(800, 850))));
+        // And 30 into the third.
+        assert_eq!(live_span(1_000, None, wrap, None, 630), Some((200, Range::new(800, 830))));
     }
 }

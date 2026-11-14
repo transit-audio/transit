@@ -372,6 +372,13 @@ The loop region has its own hue, `loop` (magenta), clear of amber (mod) and blue
 - **Piano roll:** out-of-scale rows at 12 percent of the hue (the artboard allows 9 to 12), their key labels in the hue; the keys keep their own fills; a live out-of-scale note is solid `loop`.
 - The ranges the artboard allows (ruler tint 16 to 20 percent, edges 60 to 75) are pinned to one value each in `alpha` (`loopRulerTint`, `loopEdge`, `loopBraceOff`, `loopBraceOffEdge`, `loopScaleRow`).
 
+### The recording strip
+The take being recorded grows on each armed lane where it will be placed, as a clip that is not placed yet.
+
+- **Look:** the body is `record` at 45 percent with the clip radius; the name strip on top is solid `record` (top corners rounded, `CLIP_NAME_H` high) reading "Recording" in Sans 11 in `text_on(record)`. An audio take draws its live waveform in the body, a MIDI take its notes played so far, both in `text_on(record)`. The strip is at least 2 points wide, so a take that has just started still shows.
+- **Laps** (#634): in a cycle recording the strip is only the lap under way, lying where that lap's take will: the first lap from where recording latched to the loop end, then after each wrap from the loop start to the playhead. It never draws past the loop end, and the waveform or notes under it are that lap's. Earlier laps are takes once Stop places them; until then nothing of them is drawn. Audio and MIDI follow the same laps.
+- **In code:** `arrange.rs` (`overlays`, `midi_recording`), `arrange/recording_preview.rs` (`span`, on the pass's unwrapped clock), the lap from `take_laps::live` in the engine, cut as `take_laps::laps` cuts the takes; each strip is a `RecordingLane` in the layout.
+
 ### Hatch
 A pattern for a region that cannot take input right now: hatch means "can't take input"; dim means "off, still editable"; never both.
 

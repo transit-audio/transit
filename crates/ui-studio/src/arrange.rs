@@ -988,11 +988,9 @@ fn ruler_input(app: &mut StudioApp, ui: &mut Ui, map: Map, ruler: Rect) {
 fn overlays(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Rect, rows: &[&Track], geo: &RowGeo, layout: &mut Layout) {
     let p = ui.painter();
     // The take being recorded grows on each armed track where it will land (slice 6: inside the
-    // punch range, after a count-in), with a "Recording" name strip.
-    let span = app.engine.transport.recording.then(|| {
-        let pass = app.take_plan.as_ref().and_then(|p| p.pass);
-        transit_engine::io::live_span(app.record_start, pass, app.punch, (app.position() - app.record_start).max(0))
-    });
+    // punch range, after a count-in), with a "Recording" name strip; in a cycle recording only
+    // the lap under way, from the loop start after each wrap (#634).
+    let span = app.engine.transport.recording.then(|| recording_preview::span(app));
     if let Some(Some((origin, span))) = span {
         let rp = p.with_clip_rect(tl);
         for (i, t) in rows.iter().enumerate() {
