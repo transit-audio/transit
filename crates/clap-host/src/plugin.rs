@@ -523,6 +523,13 @@ impl ClapPlugin {
             reported: Reported::new(ids.len()),
         });
         lock(live()).push(Arc::downgrade(&shared));
+        // #651: the plug-in's own values, held like echoes (see `Echoes::hold`).
+        let mut echoes = Echoes::new(info.params.len());
+        for (i, (p, id)) in info.params.iter().zip(&ids).enumerate() {
+            if let Some(x) = lock(&shared.core).inst.param_value(*id) {
+                echoes.hold(i, p.clamp(x as f32), x);
+            }
+        }
         ClapPlugin {
             shared,
             host,
@@ -547,7 +554,7 @@ impl ClapPlugin {
             params_dropped: 0,
             process_errors: 0,
             loads_seen: 0,
-            echoes: Echoes::new(info.params.len()),
+            echoes,
         }
     }
 
@@ -558,17 +565,19 @@ impl ClapPlugin {
 
     /// Re-reads every parameter value from the plugin (after a state load).
     fn refresh_values(&mut self) {
+        self.echoes.forget(&self.shared.reported);
         let core = lock(&self.shared.core);
-        for (((v, p), id), view) in self.values.iter_mut().zip(self.info.params).zip(&self.ids).zip(self.shared.view.iter()) {
+        for (i, (((v, p), id), view)) in self.values.iter_mut().zip(self.info.params).zip(&self.ids).zip(self.shared.view.iter()).enumerate() {
             if let Some(x) = core.inst.param_value(*id) {
                 *v = p.clamp(x as f32);
                 view.store(f64::from(*v).to_bits(), Ordering::Relaxed);
+                // #651: the plug-in's own value, held like an echo (see `Echoes::hold`).
+                self.echoes.hold(i, *v, x);
             }
         }
         drop(core);
         // Pending changes from before the load would undo it; none is on its way any more.
         self.queue.retain(|e| !matches!(e, Event::Param { .. }));
-        self.echoes.forget(&self.shared.reported);
         self.shared.processed_gen.store(self.shared.host_gen.load(Ordering::Acquire), Ordering::Release);
     }
 

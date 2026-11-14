@@ -105,3 +105,29 @@ fn the_session_sending_its_echo_again_sends_nothing() {
     drop(ed);
     drop(p);
 }
+
+/// A new instance restores a state the host made (a session reopened, a plug-in rebuilt), and the
+/// session then sends the values it stores, which are the plug-in's own (as `f32`). Nothing goes
+/// back to the plug-in; a different value of the host's own still does.
+#[test]
+fn a_restored_instance_gets_nothing_back_for_its_own_values() {
+    let _one_at_a_time = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    common::fixture_dir();
+    let mut p = transit_clap_host::create("clap:org.soundcraft.test.gain").expect("gain fixture");
+    p.prepare(48_000.0, BLOCK, 2);
+    let mut reader = p.state_reader().expect("state reader");
+    let state: Vec<u8> = [0.3f64, 0.0].iter().flat_map(|v| v.to_le_bytes()).collect();
+    assert!(p.load_state(&state));
+    assert!(p.load_state(b"CMD:log-start"));
+    assert_eq!(p.param("7"), Some(0.3f64 as f32));
+    for _ in 0..2 {
+        assert!(p.set_param("7", 0.3f64 as f32));
+        p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK);
+    }
+    assert_eq!(log_of(reader.save_state()), Vec::<String>::new(), "the session's copy of the plug-in's own value went back to it");
+    assert!(p.set_param("7", 1.5));
+    p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK);
+    assert_eq!(log_of(reader.save_state()), vec!["param(7)=1.5@0".to_string()], "a value of the host's own reaches it");
+    drop(reader);
+    drop(p);
+}

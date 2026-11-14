@@ -501,6 +501,15 @@ impl Echoes {
         self.seen.get(i).is_some_and(|&seen| reported.reports(i) > seen)
     }
 
+    /// The host read plain `v` (normalized `n`) from the plug-in for parameter `i` (at creation,
+    /// or after a state load the host made): that is the plug-in's value, held like an echo, so the
+    /// session sending it back is a repeat and nothing goes to the plug-in (#651, round 2).
+    pub fn hold(&mut self, i: usize, v: f32, n: f64) {
+        if let Some(exact) = self.exact.get_mut(i) {
+            *exact = Some((v.to_bits(), n.to_bits()));
+        }
+    }
+
     /// A state was loaded: what the plug-in reported before it is history.
     pub fn forget(&mut self, reported: &Reported) {
         self.exact.fill(None);

@@ -126,13 +126,15 @@ fn a_preset_picked_in_the_plugins_editor_reaches_the_processor_exactly_and_nothi
     }
     // A value of the host's own (automation, a mapped control) still reaches the controller,
     // including one equal to a plain value the plug-in reported before. Here the session drops
-    // the report (as while a session restore is pending), so it never echoes it.
+    // the report (as while a session restore is pending), so it never echoes it. (Not 1.0: that
+    // is the Gain the arming state loads, the plug-in's own value as the host read it, which the
+    // session sending back is nothing new; #651, round 2.)
     assert!(p.load_state(&arming_state(0, 0)));
     frames(&mut p, &mut ed, 2);
     assert!(reader.save_state().is_some());
     let dropped = ed.idle();
     assert!(dropped.iter().any(|(id, _)| id == "7"), "{dropped:?}");
-    for v in [1.0f32, (2.0 * PRESETS[0][0].1) as f32] {
+    for v in [1.2f32, (2.0 * PRESETS[0][0].1) as f32] {
         assert!(p.set_param("7", v));
         frames(&mut p, &mut ed, 2);
         let log = log_of(reader.save_state());
@@ -239,5 +241,48 @@ fn a_restart_asked_with_a_preset_re_sends_no_value_the_plugin_replaced() {
     }
     drop(reader);
     drop(ed);
+    drop(p);
+}
+
+/// A new instance restores a state the host made (a session reopened, a plug-in rebuilt), and the
+/// session then sends the values it stores, which are the plug-in's own (they came from its
+/// reports through the same conversion). Nothing goes back to the plug-in; a different value of the
+/// host's own still does.
+#[test]
+fn a_restored_instance_gets_nothing_back_for_its_own_values() {
+    let _one_at_a_time = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
+    let id = found.into_iter().find(|d| d.name == "Fixture Gain").expect("fixture gain").id;
+    // The fixture's call log starts with a pick (on a first instance).
+    let mut first = transit_vst3_host::create(&id).expect("instantiate");
+    first.prepare(48_000.0, BLOCK, 2);
+    assert!(first.load_state(&arming_state(0, 0)));
+    assert!(first.state_reader().expect("state reader").save_state().is_some());
+    drop(first);
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
+    p.prepare(48_000.0, BLOCK, 2);
+    let mut reader = p.state_reader().expect("state reader");
+    assert!(p.load_state(&arming(0)));
+    // The host's own load is in the log; read it away.
+    let _ = log_of(reader.save_state());
+    let stored: Vec<(&str, f32)> = p.info().params.iter().map(|pi| (pi.id, p.param(pi.id).expect("value"))).collect();
+    assert!(!stored.is_empty());
+    for _ in 0..2 {
+        for &(pid, v) in &stored {
+            assert!(p.set_param(pid, v), "{pid}");
+        }
+        p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK);
+    }
+    transit_vst3_host::service_requests();
+    let log = log_of(reader.save_state());
+    assert_eq!(log, Vec::<String>::new(), "the session's copy of the plug-in's own values went back to it");
+    // A value of the host's own still reaches the processor and the controller.
+    assert!(p.set_param("7", 1.5));
+    p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK);
+    transit_vst3_host::service_requests();
+    let log = log_of(reader.save_state());
+    assert!(log.iter().any(|l| l == "proc.point(7)=0.75@0"), "{log:#?}");
+    assert!(log.iter().any(|l| l == "ctrl.setParamNormalized(7)=0.75"), "{log:#?}");
+    drop(reader);
     drop(p);
 }

@@ -625,12 +625,23 @@ impl Vst3Plugin {
         };
         let shared = Arc::clone(&p.shared);
         let core = lock(&shared.core);
-        let values: Vec<f32> = (0..p.ids.len())
-            .map(|i| {
-                let (Some(pi), Some(&id)) = (p.info.params.get(i), p.ids.get(i)) else { return 0.0 };
-                core.inst.normalized_value(id).and_then(|n| p.plain_via_controller(&core.inst, i, n)).map_or(pi.default, |v| pi.clamp(v))
-            })
-            .collect();
+        let mut values = Vec::with_capacity(p.ids.len());
+        for i in 0..p.ids.len() {
+            let (Some(pi), Some(&id)) = (p.info.params.get(i), p.ids.get(i)) else {
+                values.push(0.0);
+                continue;
+            };
+            let n = core.inst.normalized_value(id);
+            match n.and_then(|n| p.plain_via_controller(&core.inst, i, n)) {
+                Some(v) => {
+                    let v = pi.clamp(v);
+                    // #651: the plug-in's own value, held like an echo (see `Echoes::hold`).
+                    p.echoes.hold(i, v, n.unwrap_or_default());
+                    values.push(v);
+                }
+                None => values.push(pi.default),
+            }
+        }
         drop(core);
         p.values = values;
         p
@@ -775,13 +786,16 @@ impl Vst3Plugin {
     /// Re-reads every parameter value from the controller (after a state load) and drops
     /// changes still queued from before it.
     fn refresh_values(&mut self, inst: &Instance) {
+        self.echoes.forget(&self.shared.reported);
         for i in 0..self.ids.len() {
             let (Some(pi), Some(&id)) = (self.info.params.get(i), self.ids.get(i)) else { continue };
-            let v = inst.normalized_value(id).and_then(|n| self.plain_via_controller(inst, i, n));
-            if let Some(v) = v
+            let Some(n) = inst.normalized_value(id) else { continue };
+            if let Some(v) = self.plain_via_controller(inst, i, n)
                 && let Some(slot) = self.values.get_mut(i)
             {
                 *slot = pi.clamp(v);
+                // #651: the plug-in's own value, held like an echo (see `Echoes::hold`).
+                self.echoes.hold(i, *slot, n);
             }
         }
         self.pending.clear();
@@ -790,7 +804,6 @@ impl Vst3Plugin {
             u.store(SYNCED, Ordering::Relaxed);
         }
         self.host_set.fill(false);
-        self.echoes.forget(&self.shared.reported);
     }
 
     /// Takes a newer MIDI table from the main thread, if one is published (no allocation).
