@@ -8,6 +8,45 @@ use std::io::Read;
 /// Bytes compared at a time: a take's file is never held in memory whole.
 const CHUNK: usize = 1 << 20;
 
+/// The file to copy a disk-backed source's audio from: `reads`, the file it reads, unless that
+/// is gone and `named`, the file the session names for it, is there (#629). The copy is checked
+/// against the source's audio either way ([`bring_into`]).
+pub(super) fn copy_source(reads: &Path, named: &Path) -> PathBuf {
+    let there = |p: &Path| crate::file_access::check_read(p).is_ok() && p.is_file();
+    if !there(reads) && there(named) { named.to_path_buf() } else { reads.to_path_buf() }
+}
+
+/// Disk-backed sources a written session names from files other than the ones they read, each
+/// with that file (#629).
+#[derive(Default)]
+pub(super) struct Moved(Vec<(Arc<transit_model::disk::DiskSource>, PathBuf)>);
+
+impl Moved {
+    /// The written session names `file` for `disk`: kept when it is not the file `disk` reads.
+    pub(super) fn note(&mut self, disk: &Arc<transit_model::disk::DiskSource>, file: PathBuf) {
+        let reads = disk.path();
+        let same = reads == file || matches!((std::fs::canonicalize(&reads), std::fs::canonicalize(&file)), (Ok(a), Ok(b)) if a == b);
+        if !same {
+            self.0.push((Arc::clone(disk), file));
+        }
+    }
+}
+
+/// After a save the session stays open on (Save, Save As, the first save of an untitled session),
+/// once its session file is written: each disk-backed source reads the file the saved session
+/// names for it from now on (#629), so playback, offline renders and later saves no longer need
+/// the folder it came from, and that folder's files are let go (it can be deleted or ejected).
+/// A file that cannot be opened as the same audio leaves its source reading the file it read;
+/// a later save copies from the file the session names when that one is gone ([`copy_source`]).
+pub(super) fn follow_copies(moved: &Moved) {
+    for (disk, file) in &moved.0 {
+        let opened = super::disk::probe(file).ok_or_else(|| "it cannot be read".to_string()).and_then(|(_, len)| disk.retarget_file(file, len));
+        if let Err(why) = opened {
+            log::warn!("a long take plays on from {}: its saved copy {} could not be opened: {why}", disk.path().display(), file.display());
+        }
+    }
+}
+
 /// The path, relative to the session folder `dir`, of `from` when it already lives there: in `dir`
 /// itself or in its `Audio Files`. A file anywhere else (another session's folder, the unsaved
 /// recordings folder, an autosave folder, or deeper under `dir`, which may be a home folder holding

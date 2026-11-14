@@ -259,3 +259,136 @@ fn two_different_takes_of_the_same_length_are_never_taken_for_each_other_on_save
         }
     }
 }
+
+/// The disk-backed audio the source `name` plays.
+fn disk_of(e: &Engine, name: &str) -> Arc<transit_model::disk::DiskSource> {
+    let src = e.session().sources.iter().find(|s| s.name == name).unwrap_or_else(|| panic!("no source {name}"));
+    e.session().pool.get(src.id).and_then(|a| a.disk.clone()).unwrap_or_else(|| panic!("{name} is not disk-backed"))
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    std::fs::canonicalize(a).ok().is_some_and(|x| std::fs::canonicalize(b).ok().is_some_and(|y| x == y))
+}
+
+/// The long take `name` (a [`write_take`] ramp of `frames` frames) plays and renders: every long
+/// take primes, its ring holds the take's samples, and an offline render's check finds it readable.
+fn plays(e: &Engine, name: &str, frames: usize) {
+    assert_eq!(transit_model::disk::prime_session(e.session(), 0), 0, "{name}: every long take is ready to play");
+    let src = e.session().sources.iter().find(|s| s.name == name).unwrap().id;
+    let clip = e.session().tracks.iter().flat_map(|t| t.clips().iter()).find(|c| c.source() == Some(src)).unwrap();
+    let map = transit_model::disk::StreamMap::of(clip).unwrap();
+    let disk = disk_of(e, name);
+    let v = disk.stream(&map, 0, 64).unwrap_or_else(|| panic!("{name}: no ring after the prime"));
+    for k in 0..64 {
+        let want = map.sample(k, |x| (x < frames).then(|| x as f32 / frames as f32 - 0.5));
+        assert_eq!(v.get(0, k), want, "{name}: clip time {k}");
+    }
+    drop(v);
+    let (_, lines) = crate::io::DiskReads::check(e.session(), None, transit_time::Range::new(0, frames as i64));
+    assert_eq!(lines, Vec::<String>::new(), "{name}: an offline render can read it");
+    assert_eq!(disk.fault(), None, "{name}");
+}
+
+/// Move the folder at `from` away and delete it, as a user does with a session folder they no
+/// longer need. On Windows a folder holding a file some reader still has open cannot be renamed.
+fn move_away_and_delete(dir: &Scratch, from: &str) {
+    let gone = dir.path(&format!("{from} moved"));
+    std::fs::rename(dir.path(from), &gone).unwrap_or_else(|e| panic!("the folder {from} could not be moved: {e}"));
+    std::fs::remove_dir_all(&gone).unwrap_or_else(|e| panic!("the folder {from} could not be deleted: {e}"));
+}
+
+#[test]
+fn after_save_as_a_long_take_plays_from_its_copy_and_the_old_folder_can_go_while_the_session_is_open_issue_629() {
+    let Some((mut e, t)) = engine() else { return };
+    let dir = Scratch::new("follow");
+    let a = dir.file("A/Song.transit");
+    save_session(&mut e, &a).unwrap();
+    record_long(&mut e, t, &dir.path("A/Audio Files/Vox_01.wav"));
+    save_session(&mut e, &a).unwrap();
+    // The take plays and has been read offline: readers of the old file are open.
+    plays(&e, "Vox_01", 48_000);
+    disk_of(&e, "Vox_01").with_sync(|get| assert!(get(0, 100).is_some()));
+    // An edit the save does not end: undo and redo reach across the save.
+    e.execute("mix.volume", &json!({"tracks": [t.0], "db": -6.0})).unwrap();
+
+    let b = dir.file("B/Song.transit");
+    e.execute("session.save_as", &json!({"path": b})).unwrap();
+    assert!(same_file(&disk_of(&e, "Vox_01").path(), &dir.path("B/Audio Files/Vox_01.wav")), "the open session reads the copy");
+    move_away_and_delete(&dir, "A");
+    plays(&e, "Vox_01", 48_000);
+
+    assert!(e.undo());
+    plays(&e, "Vox_01", 48_000);
+    assert_eq!(save_session(&mut e, &b).unwrap(), 0, "a save while the edit is undone needs nothing from the old folder");
+    assert!(e.redo());
+    plays(&e, "Vox_01", 48_000);
+    assert_eq!(save_session(&mut e, &b).unwrap(), 0);
+
+    let c = dir.file("C/Song.transit");
+    let done = e.execute("session.save_as", &json!({"path": c})).unwrap();
+    assert_eq!(done["audio_files_written"], 1, "a further Save As copies the take from the folder it plays from: {done}");
+    assert!(same_file(&disk_of(&e, "Vox_01").path(), &dir.path("C/Audio Files/Vox_01.wav")));
+    move_away_and_delete(&dir, "B");
+    plays(&e, "Vox_01", 48_000);
+}
+
+#[test]
+fn a_save_copies_from_the_file_the_session_names_when_the_one_played_is_gone_issue_629() {
+    let Some((mut e, t)) = engine() else { return };
+    let dir = Scratch::new("named");
+    let a = dir.file("A/Song.transit");
+    save_session(&mut e, &a).unwrap();
+    let bytes = record_long(&mut e, t, &dir.path("A/Audio Files/Vox_01.wav"));
+    save_session(&mut e, &a).unwrap();
+    e.execute("session.save_as", &json!({"path": dir.file("B/Song.transit")})).unwrap();
+    move_away_and_delete(&dir, "A");
+    // A take left reading its original, now gone, while the session names its copy (what every
+    // build before this fix did after Save As).
+    let disk = disk_of(&e, "Vox_01");
+    disk.retarget(dir.path("A/Audio Files/Vox_01.wav"), Arc::new(|| Err("the folder was deleted".to_string())));
+
+    let done = e.execute("session.save_as", &json!({"path": dir.file("C/Song.transit")})).unwrap();
+    assert_eq!(done["audio_files_written"], 1, "{done}");
+    assert_eq!(std::fs::read(dir.path("C/Audio Files/Vox_01.wav")).unwrap(), bytes, "copied from the file the session names");
+    assert!(same_file(&disk.path(), &dir.path("C/Audio Files/Vox_01.wav")), "and played from its copy");
+    plays(&e, "Vox_01", 48_000);
+}
+
+#[test]
+fn a_save_that_fails_half_way_leaves_the_open_session_reading_the_files_it_had_issue_629() {
+    let Some((mut e, t)) = engine() else { return };
+    let g = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Gtr"));
+    let dir = Scratch::new("half-way");
+    let a = dir.file("A/Song.transit");
+    save_session(&mut e, &a).unwrap();
+    record_long(&mut e, t, &dir.path("A/Audio Files/Vox_01.wav"));
+    record_long(&mut e, g, &dir.path("A/Audio Files/Gtr_01.wav"));
+    save_session(&mut e, &a).unwrap();
+    // The second take's file goes: Save As copies the first, then fails on the second.
+    std::fs::remove_file(dir.path("A/Audio Files/Gtr_01.wav")).unwrap();
+    let err = save_session(&mut e, &dir.file("B/Song.transit")).unwrap_err().to_string();
+    assert!(err.contains("Gtr_01.wav"), "{err}");
+    assert!(dir.path("B/Audio Files/Vox_01.wav").is_file(), "the first take was copied before the failure");
+    assert!(same_file(&disk_of(&e, "Vox_01").path(), &dir.path("A/Audio Files/Vox_01.wav")), "the open session still reads its own file");
+    assert_eq!(e.path.as_deref(), Some(a.as_str()));
+}
+
+#[test]
+fn a_take_recorded_before_the_first_save_plays_from_the_session_folder_and_save_copy_in_changes_nothing_issue_629() {
+    let Some((mut e, t)) = engine() else { return };
+    let dir = Scratch::new("first-save");
+    record_long(&mut e, t, &dir.path("Unsaved/Untitled/Audio Files/Vox_01.wav"));
+    plays(&e, "Vox_01", 48_000);
+    save_session(&mut e, &dir.file("Song/Song.transit")).unwrap();
+    assert!(same_file(&disk_of(&e, "Vox_01").path(), &dir.path("Song/Audio Files/Vox_01.wav")));
+    move_away_and_delete(&dir, "Unsaved");
+    plays(&e, "Vox_01", 48_000);
+
+    assert_eq!(save_session_copy(&e, &dir.file("Copy/Copy.transit")).unwrap(), 1);
+    assert!(
+        same_file(&disk_of(&e, "Vox_01").path(), &dir.path("Song/Audio Files/Vox_01.wav")),
+        "Save Copy In leaves the session reading its own files"
+    );
+    move_away_and_delete(&dir, "Copy");
+    plays(&e, "Vox_01", 48_000);
+}
