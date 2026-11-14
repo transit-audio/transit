@@ -70,6 +70,7 @@ fn the_color_table_matches_tokens_json_both_ways() {
 fn the_arrangement_colors_match_tokens_json_both_ways() {
     let mut rust = tokens::arrangement::OPAQUE.to_vec();
     rust.push(("overlay", tokens::arrangement::OVERLAY));
+    rust.push(("lane.preCount", tokens::arrangement::LANE_PRE_COUNT));
     same_colors(&json(), "arrangement", &rust);
 }
 
@@ -77,6 +78,7 @@ fn the_arrangement_colors_match_tokens_json_both_ways() {
 fn the_light_set_matches_tokens_json_both_ways() {
     let mut rust = tokens::color_light::ALL.to_vec();
     rust.push(("overlay", tokens::color_light::OVERLAY));
+    rust.push(("lane.preCount", tokens::color_light::LANE_PRE_COUNT));
     same_colors(&json(), "colorLight", &rust);
     // Every dark name has a light value, and the light set has no name of its own.
     let v = json();

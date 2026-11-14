@@ -118,6 +118,8 @@ pub struct Tokens {
     pub header_selected: Color32,
     pub lane: Color32,
     pub lane_alt: Color32,
+    /// `lane.preCount`: translucent, darkens the lanes of the pre-count zone before bar 1.
+    pub lane_pre_count: Color32,
     pub ruler: Color32,
     /// `line`: panel borders, arc tracks, and the 1 px separator between areas (the only
     /// "shadow" there is).
@@ -197,6 +199,7 @@ macro_rules! token_set {
             header_selected: HEADER_SELECTED,
             lane: LANE,
             lane_alt: LANE_ALT,
+            lane_pre_count: LANE_PRE_COUNT,
             ruler: RULER,
             line: LINE,
             grid_bar: GRID_BAR,

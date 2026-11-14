@@ -58,6 +58,7 @@ Tokens the device design does not name, used by the arrangement, the transport a
 |---|---|---|---|---|---|
 | `lane` | `#171A1D` | `#F3F4F6` | `lane` | 1.05, 1.05 on the window | Track lanes |
 | `lane.alt` | `#1A1E22` | `#EDEFF2` | `lane_alt` | 1.09, 1.09 | Alternate lanes |
+| `lane.preCount` | `#00000040` | `#00000008` | `lane_pre_count` | new: over `lane` 1.07 (dark) and 1.07 (light), over `lane.alt` 1.08 and 1.07; a step more than `lane` against `lane.alt` (1.04) | Painted over every lane of the pre-count zone before bar 1, so bar 1 reads as where the song starts (ADR 0052). Translucent, so the alternate lanes keep their stripe; drawn only when a session has a zone |
 | `ruler` | `#23282D` | `#DDE1E5` | `ruler` | 1.22, 1.23 | Ruler |
 | `header` | `#23262C` | `#F0F2F4` | `header` | 1.21, 1.21 | Track headers |
 | `header.selected` | `#333840` | `#DCE1E8` | `header_selected` | 1.55, 1.55 | Selected track header |

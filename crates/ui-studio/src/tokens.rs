@@ -84,6 +84,9 @@ pub mod arrangement {
     pub const LOOP_STRIP_HEIGHT: f32 = 14.0;
     /// Dims what lies outside a range: black at 70/255 (`#00000046`).
     pub const OVERLAY: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 70);
+    /// Darkens the lanes of the pre-count zone before bar 1 (ADR 0052): black at 64/255
+    /// (`#00000040`), over `lane` and `lane.alt` alike.
+    pub const LANE_PRE_COUNT: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 64);
 }
 
 /// Fills that the component specs give as literals (toggle option and unavailable fills, the
@@ -156,6 +159,8 @@ pub mod color_light {
     }
     /// Dims what lies outside a range: black at 28/255 (`#0000001C`).
     pub const OVERLAY: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 28);
+    /// Darkens the lanes of the pre-count zone before bar 1: black at 8/255 (`#00000008`).
+    pub const LANE_PRE_COUNT: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 8);
 }
 
 /// Fill alphas (`alpha` in tokens.json).
