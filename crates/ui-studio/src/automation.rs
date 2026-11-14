@@ -605,29 +605,30 @@ pub fn grid_ticks(s: &Session, spp: f64, g: &GridView) -> i64 {
     crate::grid::ticks(crate::grid::px_per_tick(s, spp), crate::grid::bar_ticks(s), g)
 }
 
-/// `at` snapped to the grid (unchanged when snapping is off).
+/// `at` snapped to the grid (unchanged when snapping is off), never before the session start:
+/// bar 1 without a pre-count zone, the zone's start with one (ADR 0052 decision 4).
 pub fn snap(s: &Session, spp: f64, g: &GridView, at: Samples) -> Samples {
     if !g.snap_enabled {
         return at;
     }
     let step = grid_ticks(s, spp, g).max(1);
-    let tick = s.tempo.samples_to_ticks(at.max(0), s.sample_rate);
+    let tick = s.tempo.samples_to_ticks(crate::at_or_after_start(s, at), s.sample_rate);
     let snapped = ((tick as f64 / step as f64).round() as i64).saturating_mul(step);
-    s.tempo.tick_to_samples(snapped.max(0), s.sample_rate)
+    crate::at_or_after_start(s, s.tempo.tick_to_samples(snapped, s.sample_rate))
 }
 
 /// A drag of `dx` samples from `start`, quantized to the grid as a delta (Logic's relative
 /// snap): a start on the grid lands on it, an off-grid start keeps its offset. Same grid as
-/// [`snap`]; unchanged when snapping is off.
+/// [`snap`], and the same floor at the session start; unchanged when snapping is off.
 pub fn snap_delta(s: &Session, spp: f64, g: &GridView, start: Samples, dx: Samples) -> Samples {
     if !g.snap_enabled {
         return dx;
     }
     let step = grid_ticks(s, spp, g).max(1);
-    let t0 = s.tempo.samples_to_ticks(start.max(0), s.sample_rate);
-    let t1 = s.tempo.samples_to_ticks(start.saturating_add(dx).max(0), s.sample_rate);
+    let t0 = s.tempo.samples_to_ticks(crate::at_or_after_start(s, start), s.sample_rate);
+    let t1 = s.tempo.samples_to_ticks(crate::at_or_after_start(s, start.saturating_add(dx)), s.sample_rate);
     let q = ((t1 - t0) as f64 / step as f64).round() as i64;
-    let to = s.tempo.tick_to_samples(t0.saturating_add(q.saturating_mul(step)).max(0), s.sample_rate);
+    let to = crate::at_or_after_start(s, s.tempo.tick_to_samples(t0.saturating_add(q.saturating_mul(step)), s.sample_rate));
     to - s.tempo.tick_to_samples(t0, s.sample_rate)
 }
 

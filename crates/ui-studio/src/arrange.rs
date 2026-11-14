@@ -359,6 +359,10 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     app.arrange.menu.clear();
     // One status read per frame, and only when some track sends to an external port (#69).
     let outputs = s.tracks.iter().any(|t| t.midi_output.is_external()).then(|| crate::midi_output::OutputView::read(app.player.as_ref()));
+    // The pre-count zone's span on screen, `[session start, bar 1)` (ADR 0052 decision 4); none
+    // without a zone.
+    let zone = s.start();
+    let zone_x = (zone < 0).then(|| (map.x(zone), map.x(0)));
     for (i, t) in rows.iter().enumerate() {
         let rh = geo.main[i];
         let y0 = tl.min.y + geo.tops[i] - app.arrange.vscroll;
@@ -386,6 +390,13 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         let lane_fill = if i % 2 == 0 { TOKENS.lane } else { TOKENS.lane_alt };
         let row_rect = Rect::from_min_max(lane.min, pos2(lane.max.x, y0 + geo.heights[i]));
         ui.painter().with_clip_rect(tl).rect_filled(row_rect, 0.0, lane_fill);
+        if let Some((x0, x1)) = zone_x {
+            // The pre-count zone reads darker, so bar 1 reads as where the song starts.
+            let z = Rect::from_min_max(pos2(x0.max(row_rect.min.x), row_rect.min.y), pos2(x1.min(row_rect.max.x), row_rect.max.y));
+            if z.is_positive() {
+                ui.painter().with_clip_rect(tl).rect_filled(z, 0.0, TOKENS.lane_pre_count);
+            }
+        }
         if t.inactive {
             // An inactive track cannot take input: its lane is hatched (#326).
             row.hatch_lane = crate::widgets::hatch::paint(&ui.painter().with_clip_rect(tl), row_rect);
@@ -552,9 +563,11 @@ pub fn drag_copies(m: egui::Modifiers) -> bool {
 }
 
 /// Where a dragged clip's start lands: `start` moved by `dx` (through `snap`, the session grid's
-/// snapped delta, unless Shift is held), never before zero. Moves and copies share this.
-pub fn drop_start(start: Samples, dx: Samples, shift: bool, snap: impl Fn(Samples) -> Samples) -> Samples {
-    start.saturating_add(if shift { dx } else { snap(dx) }).max(0)
+/// snapped delta, unless Shift is held), never before `floor`: the clip's own floor, the session
+/// start for a MIDI clip and bar 1 for an audio clip (ADR 0052 decisions 7 and 11). Moves and
+/// copies share this.
+pub fn drop_start(start: Samples, dx: Samples, shift: bool, floor: Samples, snap: impl Fn(Samples) -> Samples) -> Samples {
+    start.saturating_add(if shift { dx } else { snap(dx) }).max(floor)
 }
 
 /// Where a trimmed edge lands: `edge` moved by `dx` and snapped as a position to the visible grid
@@ -575,12 +588,16 @@ fn drag_preview(app: &StudioApp, ui: &Ui, map: Map, rows: &[&Track], tl: Rect, g
     Some(match kind {
         DragKind::Move => {
             let s = app.engine.session();
-            let new_start = drop_start(start, dx, m.shift, |d| crate::automation::snap_delta(s, map.spp, &map.grid, start, d));
+            let floor = s.find_clip(clip).map_or(0, |(_, c)| transit_engine::edit::start_floor(c, s.start()));
+            let new_start = drop_start(start, dx, m.shift, floor, |d| crate::automation::snap_delta(s, map.spp, &map.grid, start, d));
             let row = geo.index_at(pos.y - tl.min.y + app.arrange.vscroll);
             let dest = row.and_then(|i| rows.get(i)).map(|t| t.id).filter(|t| app.holds_clips(*t)).unwrap_or(track);
             (clip, dest, new_start, new_start + (end - start), drag_copies(m))
         }
-        DragKind::TrimStart => (clip, track, trim_edge(app, map, start, dx, m.shift).clamp(0, end - 1), end, false),
+        // Start trims keep their floor at bar 1 until the hidden-content floor lands (ADR 0052,
+        // Slices 6). `trim_edge` already floors at 0, so `min` alone: `clamp(0, end - 1)` panics
+        // for a clip that ends before bar 1.
+        DragKind::TrimStart => (clip, track, trim_edge(app, map, start, dx, m.shift).min(end - 1), end, false),
         DragKind::TrimEnd => (clip, track, start, trim_edge(app, map, end, dx, m.shift).max(start + 1), false),
         DragKind::Loop | DragKind::FadeIn | DragKind::FadeOut | DragKind::FadeCurveIn | DragKind::FadeCurveOut => return None,
     })
@@ -1118,6 +1135,7 @@ fn follow_playhead(app: &mut StudioApp, map: Map, tl: Rect) {
     let x = map.x(app.engine.transport.position);
     if x > tl.max.x - 8.0 || x < tl.min.x {
         let to = app.engine.transport.position - (f64::from(tl.width()) * map.spp * 0.05) as Samples;
-        let _ = app.execute_ui("view.scroll", &json!({"to": to.max(0)}));
+        let to = crate::at_or_after_start(app.engine.session(), to);
+        let _ = app.execute_ui("view.scroll", &json!({"to": to}));
     }
 }

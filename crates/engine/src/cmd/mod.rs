@@ -364,7 +364,7 @@ fn position_param_raw(e: &Engine, cmd: &str, p: &Value, key: &str) -> Result<Opt
         return Ok(Some(s.sample_rate.samples(secs)));
     }
     if let Some(text) = v.as_str() {
-        // Try each format, starting with an explicit prefix like "bars:5|1|000".
+        // Try each format, starting with an explicit prefix like "bars_beats:5|1|000".
         let (fmt, body) = match text.split_once(':') {
             Some((f, b)) if transit_time::TimeFormat::from_id(f).is_some() => (transit_time::TimeFormat::from_id(f), b),
             _ => (None, text),

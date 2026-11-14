@@ -310,7 +310,13 @@ impl StudioApp {
         let ticks = if fine || !self.arrange.grid.snap_enabled { (ticks / 4).max(1) } else { ticks };
         let t0 = s.tempo.samples_to_ticks(first, s.sample_rate);
         let by = if dir < 0 {
-            -(first - s.tempo.tick_to_samples((t0 - ticks).max(0), s.sample_rate))
+            // Back to the session start and no further: bar 1 without a pre-count zone, the zone's
+            // start with one, and bar 1 for an audio clip (ADR 0052 decisions 5 and 11), the
+            // floors `edit.move_clips` stops the group at.
+            let zone = s.start();
+            let to = s.tempo.tick_to_samples((t0 - ticks).max(s.tempo.samples_to_ticks(zone, s.sample_rate)), s.sample_rate);
+            let clips = sel.iter().filter_map(|(_, c, _)| s.find_clip(*c).map(|(_, c)| c));
+            (to - first).max(transit_engine::edit::lowest_delta(clips, zone))
         } else {
             s.tempo.tick_to_samples(t0 + ticks, s.sample_rate) - first
         };

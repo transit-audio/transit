@@ -163,7 +163,7 @@ impl StudioApp {
     /// While playing, the playhead jumps there too (Ableton).
     pub fn click_empty(&mut self, track: Option<TrackId>, at: Samples) {
         self.auto.selection.clear();
-        let at = at.max(0);
+        let at = crate::at_or_after_start(self.engine.session(), at);
         let params = match track {
             Some(t) => json!({"tracks": [t.0], "start": at}),
             None => json!({"start": at}),
@@ -182,7 +182,7 @@ impl StudioApp {
 
     /// Click on the ruler: the cursor moves (and a running playhead), the selection stays.
     pub fn click_ruler(&mut self, at: Samples) {
-        let at = at.max(0);
+        let at = crate::at_or_after_start(self.engine.session(), at);
         self.set_cursor(at, None);
         self.locate_playing(at);
     }
@@ -212,10 +212,16 @@ impl StudioApp {
     /// selected. Built from Copy and Paste (one undo step: Copy has none); the clipboard is
     /// restored afterwards so the gesture doesn't replace what the user copied.
     pub fn copy_clip_to(&mut self, clip: ClipId, at: Samples, to_track: TrackId) -> Result<Value, String> {
-        let Some((from, range)) = self.engine.session().find_clip(clip).map(|(t, c)| (t, Range::new(c.start, c.end()))) else {
+        let s = self.engine.session();
+        // A MIDI copy may land in the pre-count zone, an audio copy at bar 1 or later (ADR 0052
+        // decisions 7 and 11), as `edit.paste` floors it.
+        let Some((from, range, floor)) =
+            s.find_clip(clip).map(|(t, c)| (t, Range::new(c.start, c.end()), transit_engine::edit::start_floor(c, s.start())))
+        else {
             return Err("no such clip".into());
         };
-        let target = Range::new(at.max(0), at.max(0).saturating_add((range.end - range.start).max(1)));
+        let at = at.max(floor);
+        let target = Range::new(at, at.saturating_add((range.end - range.start).max(1)));
         if from == to_track && range.start < target.end && target.start < range.end {
             self.status = "Copy would land on the original clip and replace part of it: drag it further.".into();
             return Err(self.status.clone());
@@ -223,7 +229,7 @@ impl StudioApp {
         let before = self.clip_ids();
         let clipboard = self.engine.clipboard.clone();
         let copied = self.run("edit.copy", json!({"tracks": [from.0], "start": range.start, "end": range.end}));
-        let pasted = copied.and_then(|_| self.run("edit.paste", json!({"tracks": [to_track.0], "at": at.max(0)})));
+        let pasted = copied.and_then(|_| self.run("edit.paste", json!({"tracks": [to_track.0], "at": at})));
         self.engine.clipboard = clipboard;
         let pasted = pasted?;
         let new: Vec<u64> = self.clip_ids().into_iter().filter(|c| !before.contains(c)).map(|c| c.0).collect();

@@ -59,10 +59,12 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(view "view.zoom_fit", "Fill Window With Session", [], Some("Alt+A"), "{width_px?: 1200}", always, |e, p| {
             let w = f64_or(p, "width_px", 1200.0).max(100.0);
             let s = e.session();
+            // From the session start: a pre-count zone is part of the session (ADR 0052 decision 4).
+            let start = s.start();
             let end = s.content_end().max(s.sample_rate.samples(30.0));
             let z = e.zoom_mut();
-            z.samples_per_px = (end as f64 * 1.05 / w).clamp(MIN_SPP, MAX_SPP);
-            z.scroll = 0;
+            z.samples_per_px = (end.saturating_sub(start) as f64 * 1.05 / w).clamp(MIN_SPP, MAX_SPP);
+            z.scroll = start;
             Ok(json!({}))
         }),
         cmd!(view "view.scroll", "Scroll Timeline", [], None, "{to?: position, by_px?: n}", always, |e, p| {

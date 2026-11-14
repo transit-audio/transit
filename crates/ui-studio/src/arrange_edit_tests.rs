@@ -137,11 +137,11 @@ fn drag_modifiers_choose_copy_and_the_snap_bypass() {
     assert!(drag_copies(Modifiers::ALT));
     assert!(drag_copies(Modifiers::COMMAND));
     let beat = |d: i64| (d as f64 / 1000.0).round() as i64 * 1000;
-    assert_eq!(drop_start(0, 1500, false, beat), 2000, "snapped");
-    assert_eq!(drop_start(0, 1400, false, beat), 1000);
-    assert_eq!(drop_start(500, 1500, true, beat), 2000, "Shift keeps the raw delta");
-    assert_eq!(drop_start(500, 1400, true, beat), 1900);
-    assert_eq!(drop_start(500, -3000, false, beat), 0, "never before zero");
+    assert_eq!(drop_start(0, 1500, false, 0, beat), 2000, "snapped");
+    assert_eq!(drop_start(0, 1400, false, 0, beat), 1000);
+    assert_eq!(drop_start(500, 1500, true, 0, beat), 2000, "Shift keeps the raw delta");
+    assert_eq!(drop_start(500, 1400, true, 0, beat), 1900);
+    assert_eq!(drop_start(500, -3000, false, 0, beat), 0, "never before zero");
 }
 
 #[test]

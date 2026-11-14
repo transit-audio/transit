@@ -75,7 +75,8 @@ impl StudioApp {
             let s = self.engine.session();
             let preroll = if s.edit.pre_post_roll { s.edit.pre_roll } else { 0 };
             let at = self.cursor();
-            self.start_play((at - preroll).max(0), None, None);
+            // Pre-roll may start in the pre-count zone and never before it (ADR 0052 decision 5).
+            self.start_play(crate::at_or_after_start(s, at - preroll), None, None);
         }
     }
 
@@ -98,10 +99,15 @@ impl StudioApp {
         }
     }
 
-    /// The range Cycle loops, as Play starts it: the cycle range while Cycle is on.
+    /// The range Cycle loops, as Play starts it: the cycle range while Cycle is on. A stored range
+    /// that starts before the session start (a pre-count zone that has since gone) starts at the
+    /// session start, and one that ends at or before it loops nothing (ADR 0052 decision 7); the
+    /// stored range itself is never rewritten.
     pub(crate) fn wanted_loop(&self) -> Option<Range> {
-        let edit = &self.engine.session().edit;
+        let s = self.engine.session();
+        let edit = &s.edit;
         let cycle = edit.cycle_range();
+        let cycle = Range { start: crate::at_or_after_start(s, cycle.start), end: cycle.end };
         (edit.loop_playback && !cycle.is_empty()).then_some(cycle)
     }
 

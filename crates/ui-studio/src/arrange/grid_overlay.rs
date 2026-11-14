@@ -76,7 +76,9 @@ pub(super) struct Line {
 /// denser than `MIN_DRAW_PX` (the snap still uses the step).
 pub(super) fn lines(s: &Session, map: Map, x_min: f32, x_max: f32) -> Vec<Line> {
     let mut out = Vec::new();
-    let first = s.tempo.bar_beat_at(map.at(x_min).max(0), s.sample_rate).bar.max(1);
+    // From the bar holding the session start: bar 1 without a pre-count zone, bar 0, -1, ... in
+    // one (ADR 0052 decisions 1.4 and 4).
+    let first = s.tempo.bar_beat_at(crate::at_or_after_start(s, map.at(x_min)), s.sample_rate).bar;
     let bar_px = (map.x(bar_at(s, first + 1)) - map.x(bar_at(s, first))).max(0.01);
     // Label every n bars so labels keep about 40 points apart.
     let every = [1, 2, 4, 8, 16, 32, 64, 128].into_iter().find(|n| bar_px * *n as f32 >= 40.0).unwrap_or(256);
@@ -110,7 +112,7 @@ pub(super) fn lines(s: &Session, map: Map, x_min: f32, x_max: f32) -> Vec<Line> 
                 }
             }
         }
-        if (bar - 1) % every == 0 {
+        if (bar - 1).rem_euclid(every) == 0 {
             out.push(Line { x, kind: Kind::Bar { labeled: true }, bar });
         } else if bar_px >= 6.0 {
             out.push(Line { x, kind: Kind::Bar { labeled: false }, bar });

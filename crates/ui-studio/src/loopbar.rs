@@ -61,18 +61,19 @@ pub fn hit(xl: f32, xr: f32, x: f32, handle: f32) -> Part {
 }
 
 /// The region a gesture describes with the pointer at `at`; `snap` rounds a position to the grid.
-/// Dragging an edge past the other one swaps them; a body never moves before zero.
-pub fn drag_range(grab: Grab, at: Samples, snap: impl Fn(Samples) -> Samples) -> Range {
+/// Dragging an edge past the other one swaps them; nothing goes before `floor`, the session start
+/// (bar 1 without a pre-count zone, ADR 0052 decision 6), and a body stops there with its length.
+pub fn drag_range(grab: Grab, at: Samples, floor: Samples, snap: impl Fn(Samples) -> Samples) -> Range {
     let r = match grab {
         Grab::Create { anchor } => Range::new(snap(anchor), snap(at)),
         Grab::Left { end } => Range::new(snap(at), end),
         Grab::Right { start } => Range::new(start, snap(at)),
         Grab::Body { start, end, press } => {
-            let s = snap(start.saturating_add(at.saturating_sub(press))).max(0);
+            let s = snap(start.saturating_add(at.saturating_sub(press))).max(floor);
             Range { start: s, end: s.saturating_add(end.saturating_sub(start)) }
         }
     };
-    Range { start: r.start.max(0), end: r.end.max(0) }
+    Range { start: r.start.max(floor), end: r.end.max(floor) }
 }
 
 /// Remove the loop region (an empty pair clears it); one undo step.
@@ -88,7 +89,7 @@ fn gesture(app: &mut StudioApp, ui: &Ui, resp: &egui::Response, s: &Session, map
     let enabled = s.edit.loop_playback;
     // Edges land on the nearest grid line (the one automation uses); Shift drags freely.
     let free = ui.input(|i| i.modifiers.shift);
-    let snap = |at: Samples| if free { at.max(0) } else { crate::automation::snap(s, map.spp, &map.grid, at) };
+    let snap = |at: Samples| if free { crate::at_or_after_start(s, at) } else { crate::automation::snap(s, map.spp, &map.grid, at) };
     let part_at = |x: f32| {
         if region.is_empty() { Part::Outside } else { hit(map.x(region.start), map.x(region.end), x, HANDLE) }
     };
@@ -107,7 +108,7 @@ fn gesture(app: &mut StudioApp, ui: &Ui, resp: &egui::Response, s: &Session, map
     if let (Some(d), Some(pos)) = (app.arrange.loop_drag.as_mut(), resp.interact_pointer_pos())
         && resp.dragged()
     {
-        d.range = drag_range(d.grab, map.at(pos.x.clamp(bounds.min.x, bounds.max.x)), snap);
+        d.range = drag_range(d.grab, map.at(pos.x.clamp(bounds.min.x, bounds.max.x)), s.start(), snap);
     }
     if resp.drag_stopped()
         && let Some(d) = app.arrange.loop_drag.take()
@@ -315,33 +316,33 @@ mod tests {
 
     #[test]
     fn create_snaps_both_ends_and_orders_them() {
-        assert_eq!(drag_range(Grab::Create { anchor: 130 }, 480, s), Range::new(100, 500));
-        assert_eq!(drag_range(Grab::Create { anchor: 480 }, 130, s), Range::new(100, 500), "dragging backwards");
-        assert_eq!(drag_range(Grab::Create { anchor: 130 }, -900, s), Range::new(0, 100), "clamped at zero");
-        assert!(drag_range(Grab::Create { anchor: 130 }, 149, s).is_empty(), "within one step: no region");
+        assert_eq!(drag_range(Grab::Create { anchor: 130 }, 480, 0, s), Range::new(100, 500));
+        assert_eq!(drag_range(Grab::Create { anchor: 480 }, 130, 0, s), Range::new(100, 500), "dragging backwards");
+        assert_eq!(drag_range(Grab::Create { anchor: 130 }, -900, 0, s), Range::new(0, 100), "clamped at zero");
+        assert!(drag_range(Grab::Create { anchor: 130 }, 149, 0, s).is_empty(), "within one step: no region");
     }
 
     #[test]
     fn resizing_an_edge_keeps_the_other_and_swaps_on_crossing() {
         let left = Grab::Left { end: 800 };
-        assert_eq!(drag_range(left, 290, s), Range::new(300, 800));
-        assert_eq!(drag_range(left, 1010, s), Range::new(800, 1000), "left edge dragged past the right end");
-        assert_eq!(drag_range(left, -50, s), Range::new(0, 800));
+        assert_eq!(drag_range(left, 290, 0, s), Range::new(300, 800));
+        assert_eq!(drag_range(left, 1010, 0, s), Range::new(800, 1000), "left edge dragged past the right end");
+        assert_eq!(drag_range(left, -50, 0, s), Range::new(0, 800));
         let right = Grab::Right { start: 300 };
-        assert_eq!(drag_range(right, 910, s), Range::new(300, 900));
-        assert_eq!(drag_range(right, 90, s), Range::new(100, 300), "right edge dragged past the left start");
-        assert!(drag_range(right, 300, s).is_empty());
+        assert_eq!(drag_range(right, 910, 0, s), Range::new(300, 900));
+        assert_eq!(drag_range(right, 90, 0, s), Range::new(100, 300), "right edge dragged past the left start");
+        assert!(drag_range(right, 300, 0, s).is_empty());
         // Shift: no snapping (the caller passes a plain clamp).
-        assert_eq!(drag_range(right, 913, |at| at.max(0)), Range::new(300, 913));
+        assert_eq!(drag_range(right, 913, 0, |at| at.max(0)), Range::new(300, 913));
     }
 
     #[test]
     fn moving_the_body_keeps_its_length_and_stops_at_zero() {
         let body = Grab::Body { start: 300, end: 800, press: 500 };
-        assert_eq!(drag_range(body, 740, s), Range::new(500, 1000));
-        assert_eq!(drag_range(body, 500, s), Range::new(300, 800), "no movement");
-        assert_eq!(drag_range(body, 100, s), Range::new(0, 500), "clamped at zero, length kept");
-        assert_eq!(drag_range(body, -5000, s), Range::new(0, 500));
+        assert_eq!(drag_range(body, 740, 0, s), Range::new(500, 1000));
+        assert_eq!(drag_range(body, 500, 0, s), Range::new(300, 800), "no movement");
+        assert_eq!(drag_range(body, 100, 0, s), Range::new(0, 500), "clamped at zero, length kept");
+        assert_eq!(drag_range(body, -5000, 0, s), Range::new(0, 500));
     }
 
     #[test]

@@ -507,9 +507,10 @@ impl StudioApp {
     }
 
     /// The edit cursor: where Play starts and Paste lands. Distinct from the selection
-    /// (`edit.selection`); view state in [`UiState`], never in the document.
+    /// (`edit.selection`); view state in [`UiState`], never in the document. Floored at the
+    /// session start when read, so a cursor left in a pre-count zone that has gone reads bar 1.
     pub fn cursor(&self) -> Samples {
-        self.ui.cursor.max(0)
+        at_or_after_start(self.engine.session(), self.ui.cursor)
     }
 
     /// The track the cursor was last set on (paste target), if it still exists.
@@ -520,7 +521,7 @@ impl StudioApp {
 
     /// Set the cursor (and its track). View state only: the document is untouched.
     pub fn set_cursor(&mut self, at: Samples, track: Option<TrackId>) {
-        self.ui.cursor = at.max(0);
+        self.ui.cursor = at_or_after_start(self.engine.session(), at);
         if let Some(t) = track {
             self.ui.cursor_track = Some(t);
         }
@@ -715,6 +716,13 @@ impl StudioApp {
     }
 }
 
+/// `at`, or the session start when `at` is before it (ADR 0052 decisions 5 and 7): a position the
+/// UI sets or reads may address the pre-count zone and no further. Without a zone this is
+/// `at.max(0)`. The session start walks every clip, so it is read only for a position before bar 1.
+pub(crate) fn at_or_after_start(s: &transit_model::Session, at: Samples) -> Samples {
+    if at >= 0 { at } else { at.max(s.start()) }
+}
+
 #[cfg(test)]
 mod audio_devices_tests;
 #[cfg(test)]
@@ -781,6 +789,8 @@ mod modal_voice_panel_tests;
 mod modulator_panel_tests;
 #[cfg(test)]
 mod param_capture_tests;
+#[cfg(test)]
+mod pre_count_ui_tests;
 #[cfg(test)]
 mod rack_panel_tests;
 #[cfg(test)]

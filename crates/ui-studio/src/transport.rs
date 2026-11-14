@@ -149,19 +149,20 @@ fn play_button(app: &mut StudioApp, ui: &mut Ui, on: bool) -> egui::Response {
     resp.on_hover_text(reason)
 }
 
-/// `1. 1. 1. 000` (bar, beat, sixteenth, tick within the sixteenth).
+/// `1. 1. 1. 000` (bar, beat, sixteenth, tick within the sixteenth). Bars before bar 1 count
+/// down, `0.` then `-1.` (ADR 0052 decision 1.4).
 pub fn bars_beats(app: &StudioApp, at: Samples) -> String {
     let s = app.engine.session();
-    let bb = s.tempo.bar_beat_at(at.max(0), s.sample_rate);
+    let bb = s.tempo.bar_beat_at(at, s.sample_rate);
     let sixteenth = transit_time::TICKS_PER_QUARTER / 4;
     format!("{:>3}. {}. {}. {:03}", bb.bar, bb.beat, bb.tick / sixteenth + 1, bb.tick % sixteenth)
 }
 
-/// `0:00.000`.
+/// `0:00.000`; before bar 1 signed, `-0:02.000`, as `transit_time::format_position` writes it.
 pub fn min_sec(app: &StudioApp, at: Samples) -> String {
-    let secs = at.max(0) as f64 / app.engine.session().sample_rate.as_f64().max(1.0);
+    let secs = at.unsigned_abs() as f64 / app.engine.session().sample_rate.as_f64().max(1.0);
     let m = (secs / 60.0).floor();
-    format!("{}:{:06.3}", m as i64, secs - m * 60.0)
+    format!("{}{}:{:06.3}", if at < 0 { "-" } else { "" }, m as i64, secs - m * 60.0)
 }
 
 pub fn bar(app: &mut StudioApp, ui: &mut Ui) {
