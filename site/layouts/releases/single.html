@@ -1,0 +1,16 @@
+{{ define "main" }}
+{{- $r := partial "release-info.html" . -}}
+<div class="doc">
+  <article class="prose">
+    <p class="crumbs"><a href="/releases/">Release notes</a></p>
+    {{- if $r.inprogress }}
+    <div class="callout wip" role="note">
+      <span class="badge wip">Not released yet</span>
+      <p><strong>{{ $r.version }} is in progress.</strong> These notes describe work on the main branch that is not in any release yet. They change until the release is tagged, and the downloads on this site are still the current release.</p>
+    </div>
+    {{- end }}
+    {{ .Content }}
+    <p class="src muted">This page is built from <a href="{{ site.Params.blob }}docs/releases/{{ $r.version }}.md">docs/releases/{{ $r.version }}.md</a> in the repository.</p>
+  </article>
+</div>
+{{ end }}

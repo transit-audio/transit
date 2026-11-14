@@ -1,0 +1,113 @@
+# Hugo configuration for transit-audio.com. The pages are built from the markdown in the
+# repository at deploy time (.github/workflows/pages.yml); nothing generated is committed.
+# See site/README.md for a local preview.
+baseURL = "https://transit-audio.com/"
+locale = "en-US"
+title = "transit"
+disableKinds = ["taxonomy", "term", "rss"]
+enableRobotsTXT = true
+disableHugoGeneratorInject = true
+# Links between markdown files are resolved by layouts/_markup/render-link.html.
+[markup.goldmark.parser]
+  autoHeadingIDType = "github"
+[markup.goldmark.renderer]
+  # Raw HTML in the markdown is dropped (GitHub drops most of it too), so a stray "<name>" in
+  # prose can never unbalance a page; write it as "\<name>" or in backticks.
+  unsafe = false
+[markup.tableOfContents]
+  startLevel = 2
+  endLevel = 3
+  ordered = false
+
+[outputFormats.llms]
+  mediaType = "text/plain"
+  baseName = "llms"
+  isPlainText = true
+  notAlternative = true
+[outputs]
+  home = ["html", "llms"]
+  section = ["html"]
+  page = ["html"]
+
+[params]
+  repo = "https://github.com/transit-audio/transit"
+  blob = "https://github.com/transit-audio/transit/blob/main/"
+  description = "Record, edit and mix music on Windows, Mac and Linux. Free and open source. Early software that you can download and try today."
+  # Repository files that are published as a page here. Links to any other repository file go
+  # to its GitHub page; release notes (docs/releases/vX.Y.Z.md) map to /releases/vX.Y.Z/.
+  [params.pages]
+    "docs/user-guide.md" = "/guide/"
+    "docs/shortcuts.md" = "/shortcuts/"
+    "docs/troubleshooting.md" = "/troubleshooting/"
+    "docs/releases/README.md" = "/releases/"
+
+# The source markdown stays where it is in the repository and is mounted into the site.
+# Declaring any mount replaces Hugo's default mounts, so the site's own folders are listed too.
+[module]
+  [[module.mounts]]
+    source = "content"
+    target = "content"
+  [[module.mounts]]
+    source = "../docs/user-guide.md"
+    target = "content/guide/index.md"
+  [[module.mounts]]
+    source = "../docs/shortcuts.md"
+    target = "content/shortcuts/index.md"
+  [[module.mounts]]
+    source = "../docs/troubleshooting.md"
+    target = "content/troubleshooting/index.md"
+  [[module.mounts]]
+    source = "../docs/releases"
+    target = "content/releases"
+    files = ["v*.md"]
+  # The whole repository, read-only, so templates can cut the README Features section and
+  # check that a linked repository file exists before linking to it on GitHub.
+  [[module.mounts]]
+    source = ".."
+    target = "assets/repo"
+    files = ["! .git/**", "! target/**", "! target-*/**", "! dist/**", "! Audio Files/**", "! Backups/**", "! site/**", "! **/node_modules/**"]
+  [[module.mounts]]
+    source = "static"
+    target = "static"
+  [[module.mounts]]
+    source = "layouts"
+    target = "layouts"
+  [[module.mounts]]
+    source = "data"
+    target = "data"
+
+# Front matter for the mounted files, which carry none of their own.
+[[cascade]]
+  [cascade.params]
+    srcdir = "docs"
+    srcfile = "docs/user-guide.md"
+    toc = true
+  description = "The transit user guide: the interface, recording, takes, bouncing, audio setup, plug-ins, the mixer and every built-in instrument and effect."
+  [cascade.target]
+    path = "/guide"
+[[cascade]]
+  [cascade.params]
+    srcdir = "docs"
+    srcfile = "docs/shortcuts.md"
+    toc = true
+  description = "Keyboard shortcuts in transit: the Info panel, device editors, the Sampler, zoom and the piano roll."
+  [cascade.target]
+    path = "/shortcuts"
+[[cascade]]
+  [cascade.params]
+    srcdir = "docs"
+    srcfile = "docs/troubleshooting.md"
+    toc = true
+  description = "Troubleshooting transit: where the log is, what to send in a report, and what the Callback Telemetry and Audio Devices figures mean."
+  [cascade.target]
+    path = "/troubleshooting"
+[[cascade]]
+  [cascade.params]
+    srcdir = "docs/releases"
+  [cascade.target]
+    path = "/releases/**"
+[[cascade]]
+  title = "Release notes"
+  description = "Release notes for every transit release, newest first."
+  [cascade.target]
+    path = "/releases"

@@ -1,0 +1,4 @@
+# Hugo build output and lock file (the site is built at deploy time; nothing generated is committed)
+/public/
+/resources/
+.hugo_build.lock

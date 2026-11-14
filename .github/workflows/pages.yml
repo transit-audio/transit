@@ -1,10 +1,18 @@
-# Deploys site/ to GitHub Pages.
+# Builds the website with Hugo (site/, see site/README.md) and deploys it to GitHub Pages.
 # One-time setup: Settings > Pages > Source must be "GitHub Actions".
 name: pages
 on:
   push:
     branches: [main]
-    paths: ['site/**']
+    # The site and the markdown its pages are built from.
+    paths:
+      - 'site/**'
+      - 'README.md'
+      - 'docs/user-guide.md'
+      - 'docs/shortcuts.md'
+      - 'docs/troubleshooting.md'
+      - 'docs/releases/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,11 +27,26 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      # Pinned: change both together, the checksum from the release's hugo_<version>_checksums.txt.
+      HUGO_VERSION: 0.170.0
+      HUGO_SHA256: 0930754ec22ad2dd1a252f8c31a5e57faccc9d15f1c3d381ddafcb96eeb8aef0
     steps:
       - uses: actions/checkout@v4
+      - name: Install Hugo
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/hugo.tar.gz" "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_${HUGO_VERSION}_linux-amd64.tar.gz"
+          echo "${HUGO_SHA256}  $RUNNER_TEMP/hugo.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/hugo"
+          tar -xzf "$RUNNER_TEMP/hugo.tar.gz" -C "$RUNNER_TEMP/hugo" hugo
+          echo "$RUNNER_TEMP/hugo" >> "$GITHUB_PATH"
       - uses: actions/configure-pages@v5
+      - name: Build the site
+        run: |
+          hugo version
+          hugo --source site --panicOnWarning --destination "$RUNNER_TEMP/public"
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: ${{ runner.temp }}/public
       - id: deployment
         uses: actions/deploy-pages@v4

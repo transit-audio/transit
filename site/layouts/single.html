@@ -1,0 +1,19 @@
+{{ define "main" }}
+{{- $toc := and .Params.toc (gt (len .Fragments.Headings) 0) -}}
+<div class="doc{{ if $toc }} has-toc{{ end }}">
+  {{- if $toc }}
+  <aside class="toc">
+    <details>
+      <summary>On this page</summary>
+      {{ .TableOfContents }}
+    </details>
+  </aside>
+  {{- end }}
+  <article class="prose">
+    {{ .Content }}
+    {{- with .Params.srcfile }}
+    <p class="src muted">This page is built from <a href="{{ site.Params.blob }}{{ . }}">{{ . }}</a> in the repository.</p>
+    {{- end }}
+  </article>
+</div>
+{{ end }}

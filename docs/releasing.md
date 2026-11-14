@@ -6,7 +6,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
    every crate inherit it) and refresh `Cargo.lock` with `cargo metadata`. Update the README's two current-release sentences (the intro note and the Downloads paragraph: the tag link and the asset names) in the same commit. Write the release notes in
    `docs/releases/vX.Y.Z.md` with a `## Highlights` section first (see `docs/releases/README.md`). Commit
    both, push, and wait for CI to be green.
-2. Refresh the screenshots (`docs/images` and `site/assets`) at every release that changes the UI. Take them
+2. Refresh the screenshots (`docs/images` and `site/static/assets`) at every release that changes the UI. Take them
    from the release build through the control channel, using the built-in demo session
    (`--demo --no-audio --control 0`) on a scratch config directory, never a user's real config. Five shots:
    arrange, mixer, piano roll, MIDI mappings, and Audio Devices with fake devices.

@@ -1,0 +1,21 @@
+# transit
+
+> transit is a free, open-source DAW (digital audio workstation) for recording, editing and mixing music on Windows, Mac and Linux. It is alpha software: it changes every week, and the session format may still change.
+
+transit records audio and MIDI with stacked takes, edits in an arrangement and a piano roll, and mixes with buses, sends, sidechains, automation and plug-in delay compensation. It hosts CLAP and VST3 plug-ins and includes its own instruments (a Sampler with pads, slices and key zones, and synths ported from Émilie Gillet's MIT-licensed firmware) and effects. On Windows it talks to ASIO and WASAPI directly; on Linux to JACK and PipeWire. It is licensed MIT OR Apache-2.0.
+
+The features page separates what is in transit now (Shipped) from planned work (Coming, with no dates promised).
+
+## Pages
+
+{{ range hugo.Data.nav.items -}}
+{{ $p := site.GetPage (strings.TrimSuffix "/" .url) -}}
+- [{{ .name }}]({{ .url | absURL }}){{ with $p }}{{ with .Description }}: {{ . }}{{ end }}{{ end }}
+{{ end }}
+## Elsewhere
+
+- [Source code and issues]({{ site.Params.repo }})
+- [Downloads (GitHub releases)]({{ site.Params.repo }}/releases)
+- [Known issues]({{ site.Params.blob }}docs/known-issues/README.md)
+- [Design decisions (ADRs)]({{ site.Params.repo }}/tree/main/docs/adr)
+- [Benchmarks]({{ site.Params.blob }}docs/benchmarks/README.md)

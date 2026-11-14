@@ -1,0 +1,16 @@
+# The documentation pages, in the order the header and the home page footer list them.
+[[items]]
+name = "Features"
+url = "/features/"
+[[items]]
+name = "Guide"
+url = "/guide/"
+[[items]]
+name = "Shortcuts"
+url = "/shortcuts/"
+[[items]]
+name = "Troubleshooting"
+url = "/troubleshooting/"
+[[items]]
+name = "Releases"
+url = "/releases/"

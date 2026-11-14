@@ -1,0 +1,24 @@
+{{- $title := partial "page-title.html" . -}}
+{{- $full := cond (eq $title "transit") "transit" (printf "%s | transit" $title) -}}
+{{- $desc := .Description | default site.Params.description -}}
+{{- if and (eq .Section "releases") .IsPage -}}
+  {{- $r := partial "release-info.html" . -}}
+  {{- $desc = cond $r.inprogress (printf "Notes for transit %s, a release in progress and not out yet." $r.version) (printf "Release notes for transit %s: what changed, what was fixed and what to watch for when upgrading." $r.version) -}}{{- end -}}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ $full }}</title>
+<meta name="description" content="{{ $desc }}">
+<link rel="canonical" href="{{ .Permalink }}">
+<meta property="og:type" content="{{ cond .IsHome "website" "article" }}">
+<meta property="og:site_name" content="transit">
+<meta property="og:title" content="{{ $full }}">
+<meta property="og:description" content="{{ $desc }}">
+<meta property="og:url" content="{{ .Permalink }}">
+<meta property="og:image" content="https://raw.githubusercontent.com/transit-audio/transit/main/assets/brand/social-preview-1280x640.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/assets/transit-icon-dark-1024.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/docs.css">

@@ -1,0 +1,14 @@
+{{- /* Images: a repository image is copied into the site; an absolute URL is kept. The build
+  fails on a relative image path that is not in the repository. */ -}}
+{{- $src := .Destination -}}
+{{- if not (findRE `^[a-zA-Z][a-zA-Z0-9+.-]*:` $src) -}}
+  {{- $srcdir := .Page.Params.srcdir | default "" -}}
+  {{- $rp := path.Clean (path.Join $srcdir $src) -}}
+  {{- with resources.Get (printf "repo/%s" $rp) -}}
+    {{- $src = .RelPermalink -}}
+  {{- else -}}
+    {{- errorf "unresolved image %q in %s" .Destination .Page.RelPermalink -}}
+  {{- end -}}
+{{- end -}}
+<img src="{{ $src | safeURL }}" alt="{{ .PlainText }}"{{ with .Title }} title="{{ . }}"{{ end }} loading="lazy" decoding="async">
+{{- /* chomp trailing newline */ -}}

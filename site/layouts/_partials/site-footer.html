@@ -1,0 +1,7 @@
+<footer>
+  <nav class="foot-nav" aria-label="Pages">
+    {{- range $i, $e := hugo.Data.nav.items }}{{ if $i }} &middot; {{ end }}<a href="{{ .url }}">{{ .name }}</a>{{ end -}}
+  </nav>
+  <p>MIT OR Apache-2.0.</p>
+  <p><a href="https://github.com/transit-audio/transit">github.com/transit-audio/transit</a> &middot; <a href="#top">Top</a></p>
+</footer>

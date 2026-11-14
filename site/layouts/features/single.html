@@ -1,0 +1,58 @@
+{{ define "main" }}
+{{- /* Built from the "## Features" section of the repository README (cut at the next "## "
+  heading, one block per "### " area) and from data/coming.toml. The README stays the single
+  source; nothing is copied. */ -}}
+{{- $readme := resources.Get "repo/README.md" -}}
+{{- if not $readme }}{{ errorf "README.md not found through the repository mount" }}{{ end -}}
+{{- $src := replace $readme.Content "\r\n" "\n" -}}
+{{- $parts := split $src "\n## Features\n" -}}
+{{- if ne (len $parts) 2 }}{{ errorf "README.md must have exactly one \"## Features\" heading" }}{{ end -}}
+{{- $section := index (split (index $parts 1) "\n## ") 0 -}}
+{{- $areas := slice -}}
+{{- range after 1 (split (printf "\n%s" $section) "\n### ") -}}
+  {{- $lines := split . "\n" -}}
+  {{- $name := trim (index $lines 0) " " -}}
+  {{- $body := delimit (after 1 $lines) "\n" -}}
+  {{- $areas = $areas | append (dict "name" $name "id" (anchorize $name) "body" $body) -}}
+{{- end -}}
+{{- if not $areas }}{{ errorf "the README Features section has no \"### \" areas" }}{{ end -}}
+{{- $names := slice -}}{{- range $areas }}{{ $names = $names | append .name }}{{ end -}}
+{{- range hugo.Data.coming.item -}}
+  {{- if not (in $names .area) }}{{ errorf "data/coming.toml: area %q is not a README Features area (%s)" .area (delimit $names ", ") }}{{ end -}}
+  {{- if not .issue }}{{ errorf "data/coming.toml: %q has no tracking issue" .title }}{{ end -}}
+  {{- with .adr }}{{ if not (resources.Get (printf "repo/%s" .)) }}{{ errorf "data/coming.toml: ADR %q does not exist" . }}{{ end }}{{ end -}}
+{{- end -}}
+<div class="doc has-toc">
+  <aside class="toc toc-wide" aria-label="Areas">
+    <p class="toc-title">Areas</p>
+    <ul>{{ range $areas }}<li><a href="#{{ .id }}">{{ .name }}</a></li>{{ end }}</ul>
+  </aside>
+  <article class="prose features">
+    <h1>Features</h1>
+    <p class="lead"><strong>Alpha.</strong> transit is early software that changes every week. This page lists what it does today, area by area, and the main work that is planned. Anything added since the latest release comes with the next one.</p>
+    <p class="legend"><span class="badge shipped">Shipped</span> in transit now. <span class="badge coming">Coming</span> planned and tracked in public, not in transit yet; no dates promised.</p>
+    <nav class="area-nav" aria-label="Areas">
+      <ul>{{ range $areas }}<li><a href="#{{ .id }}">{{ .name }}</a></li>{{ end }}</ul>
+    </nav>
+    {{- range $areas }}
+    {{- $area := . }}
+    <section class="area" aria-labelledby="{{ .id }}">
+      <h2 id="{{ .id }}">{{ .name }} <span class="badge shipped">Shipped</span></h2>
+      {{ $.RenderString (dict "display" "block") .body }}
+      {{- $coming := where hugo.Data.coming.item "area" .name }}
+      {{- with $coming }}
+      <div class="coming-box" aria-labelledby="{{ $area.id }}-coming">
+        <h3 id="{{ $area.id }}-coming">Coming in {{ $area.name }}</h3>
+        <ul>
+        {{- range . }}
+          <li><span class="badge coming">Coming</span> <strong>{{ .title }}.</strong> {{ .text }} <span class="track">Tracked in <a href="{{ site.Params.repo }}/issues/{{ .issue }}">#{{ .issue }}</a>{{ with .adr }}; decided in <a href="{{ site.Params.blob }}{{ . }}">{{ partial "adr-name.html" . }}</a>{{ end }}.</span></li>
+        {{- end }}
+        </ul>
+      </div>
+      {{- end }}
+    </section>
+    {{- end }}
+    <p class="src muted">The shipped lists are built from the Features section of the <a href="{{ site.Params.repo }}#features">README</a>; the coming items from <a href="{{ site.Params.blob }}site/data/coming.toml">site/data/coming.toml</a>. The <a href="{{ site.Params.repo }}/milestones">milestones</a> hold the full plan.</p>
+  </article>
+</div>
+{{ end }}

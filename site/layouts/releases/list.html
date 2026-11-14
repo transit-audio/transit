@@ -1,0 +1,20 @@
+{{ define "main" }}
+{{- $rows := slice -}}
+{{- range .RegularPages -}}
+  {{- $rows = $rows | append (merge (partial "release-info.html" .) (dict "page" .)) -}}
+{{- end -}}
+<div class="doc">
+  <article class="prose">
+    <h1>Release notes</h1>
+    <p class="lead">Every release of transit, newest first. transit is alpha software: each release can change how sessions, presets and sound behave, so read the notes before you upgrade and back up what you care about. Downloads are on the <a href="https://github.com/transit-audio/transit/releases">GitHub releases page</a>.</p>
+    <ul class="releases">
+    {{- range sort $rows "key" "desc" }}
+      <li>
+        <a href="{{ .page.RelPermalink }}">{{ .version }}</a>
+        {{- if .inprogress }} <span class="badge wip">Not released yet</span>{{ else if .minor }} <span class="badge minor">Minor release</span>{{ end }}      </li>
+    {{- end }}
+    </ul>
+    <p class="src muted">These pages are built from <a href="{{ site.Params.repo }}/tree/main/docs/releases">docs/releases</a> in the repository.</p>
+  </article>
+</div>
+{{ end }}

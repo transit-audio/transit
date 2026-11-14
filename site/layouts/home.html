@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>transit: record, edit and mix music</title>
 <meta name="description" content="Record, edit and mix music on Windows, Mac and Linux. Free and open source. Early software that you can download and try today.">
+<link rel="canonical" href="{{ .Permalink }}">
 <meta property="og:type" content="website">
+<meta property="og:url" content="{{ .Permalink }}">
 <meta property="og:title" content="transit: record, edit and mix music">
 <meta property="og:description" content="Record, edit and mix music on Windows, Mac and Linux. Free and open source.">
 <meta property="og:image" content="https://raw.githubusercontent.com/transit-audio/transit/main/assets/brand/social-preview-1280x640.png">
@@ -224,6 +226,9 @@
 </main>
 
 <footer>
+  <nav class="foot-nav" aria-label="Pages">
+    {{- range $i, $e := hugo.Data.nav.items }}{{ if $i }} &middot; {{ end }}<a href="{{ .url }}">{{ .name }}</a>{{ end -}}
+  </nav>
   <p>MIT OR Apache-2.0.</p>
   <p><a href="https://github.com/transit-audio/transit">github.com/transit-audio/transit</a> &middot; <a href="#top">Top</a></p>
 </footer>

@@ -1,0 +1,19 @@
+{{- $here := .RelPermalink -}}
+<header class="site-head">
+  <div class="site-head-in">
+    <a class="brand" href="/">
+      <picture>
+        <source srcset="/assets/transit-wordmark-graphite.svg" media="(prefers-color-scheme: light)">
+        <img src="/assets/transit-wordmark-white.svg" alt="transit home" width="112" height="32">
+      </picture>
+    </a>
+    <nav class="site-nav" aria-label="Site">
+      <ul>
+      {{- range hugo.Data.nav.items }}
+        <li><a href="{{ .url }}"{{ if strings.HasPrefix $here .url }} aria-current="page"{{ end }}>{{ .name }}</a></li>
+      {{- end }}
+        <li><a href="/#downloads">Download</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>

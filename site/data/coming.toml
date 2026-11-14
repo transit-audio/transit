@@ -1,0 +1,66 @@
+# Planned work shown as "Coming" on the features page (/features/), under the README Features
+# area it belongs to. Reviewed text, edited by hand: only the main planned items, each with a
+# public tracking issue and, where there is one, its accepted ADR. No dates, no release numbers.
+# When an item ships, delete it here and the README Features section takes it over.
+#
+# Fields: area (an exact "### " heading of the README Features section; the build fails on any
+# other), title, text (one sentence, no stronger than the issue), issue (number), adr (optional,
+# a repository path; the build fails if the file does not exist).
+
+[[item]]
+area = "Arrangement"
+title = "Audio clip editor"
+text = "Double-click an audio clip to edit it without changing the file: trim, fades, gain, reverse, pitch and loop."
+issue = 515
+adr = "docs/adr/0056-audio-clip-editor.md"
+
+[[item]]
+area = "Arrangement"
+title = "Curved automation"
+text = "Bezier curves in automation lanes, with handles, easing presets and a Simplify command."
+issue = 654
+
+[[item]]
+area = "Mixer and routing"
+title = "One per-sample gain path"
+text = "Faders, mutes, pans and sends evaluated per sample, so a bounce matches playback at any buffer size."
+issue = 656
+adr = "docs/adr/0058-one-gain-path-for-the-mixer.md"
+
+[[item]]
+area = "Instruments and effects"
+title = "Multiband Dynamics"
+text = "A three-band compressor that works upward and downward."
+issue = 448
+adr = "docs/adr/0053-multiband-dynamics.md"
+
+[[item]]
+area = "Instruments and effects"
+title = "Parametric EQ"
+text = "A transparent equalizer with an interactive display and a spectrum overlay."
+issue = 233
+adr = "docs/adr/0054-parametric-eq.md"
+
+[[item]]
+area = "MIDI"
+title = "Step Sequencer for MIDI clips"
+text = "Pad rows with per-step chance and repeat, and a length and rate per row."
+issue = 443
+
+[[item]]
+area = "MIDI"
+title = "More piano roll lanes"
+text = "Lanes for pitch bend, aftertouch and program change, with several lanes open at once."
+issue = 676
+
+[[item]]
+area = "MIDI"
+title = "MIDI plug-ins in the MIDI effect chain"
+text = "Host VST3 and CLAP plug-ins that output notes in a track's MIDI effect chain."
+issue = 671
+
+[[item]]
+area = "Audio devices"
+title = "A better rate converter"
+text = "A band-limited converter for when the interface runs at a different rate than the session, in place of linear interpolation."
+issue = 601

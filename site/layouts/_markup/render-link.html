@@ -1,0 +1,3 @@
+{{- $href := partial "resolve-link.html" (dict "page" .Page "dest" .Destination) -}}
+<a href="{{ $href | safeURL }}"{{ with .Title }} title="{{ . }}"{{ end }}>{{ .Text }}</a>
+{{- /* chomp trailing newline */ -}}

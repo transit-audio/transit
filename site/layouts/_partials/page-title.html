@@ -1,0 +1,9 @@
+{{- /* The page's title: its front matter title, or else the first level-one heading of its
+  markdown (the mounted repository files carry no front matter). */ -}}
+{{- $t := .Title -}}
+{{- if not $t -}}
+  {{- with findRESubmatch `(?m)^# +(.+?)\s*$` .RawContent 1 -}}
+    {{- $t = index (index . 0) 1 -}}
+  {{- end -}}
+{{- end -}}
+{{- return $t -}}

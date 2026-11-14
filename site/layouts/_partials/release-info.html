@@ -1,0 +1,11 @@
+{{- /* Facts about one release-notes page (docs/releases/vX.Y.Z.md): its version, a sort key,
+  and whether it is still in progress (the file's first heading says "(in progress)"; such a file
+  describes a release that is not out yet). */ -}}
+{{- $title := partial "page-title.html" . -}}
+{{- $v := path.BaseName .File.Path -}}
+{{- $m := findRESubmatch `^v([0-9]+)\.([0-9]+)\.([0-9]+)$` $v 1 -}}
+{{- if not $m }}{{ errorf "release notes file %s is not named vX.Y.Z.md" .File.Path }}{{ end -}}
+{{- $n := index $m 0 -}}
+{{- $key := add (mul (int (index $n 1)) 1000000) (mul (int (index $n 2)) 1000) (int (index $n 3)) -}}
+{{- $wip := findRE `(?i)\(in progress\)` $title -}}
+{{- return dict "version" $v "key" $key "inprogress" (gt (len $wip) 0) "title" $title "minor" (eq (index $n 3) "0") -}}

@@ -1,0 +1,76 @@
+/* Documentation pages (features, guide, shortcuts, troubleshooting, releases). Loaded after
+   style.css and uses its tokens; the home page does not load this file. */
+.skip{position:absolute;left:-9999px;top:8px;z-index:10;background:var(--raised);color:var(--text);padding:8px 12px;border-radius:6px}
+.skip:focus{left:16px}
+.site-head{border-bottom:1px solid var(--line);background:var(--panel)}
+.site-head-in{max-width:1240px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:12px 32px;flex-wrap:wrap}
+.brand{display:block;flex:none;border-radius:4px}
+.brand img{width:112px;height:auto}
+.site-nav ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:4px 20px}
+.site-nav a{color:var(--muted);text-decoration:none;font-weight:600;font-size:.95rem;padding:4px 0;border-bottom:2px solid transparent}
+.site-nav a:hover{color:var(--text)}
+.site-nav a[aria-current=page]{color:var(--text);border-bottom-color:var(--signal)}
+.doc-main{max-width:1240px;padding:32px 16px 16px}
+.doc{min-width:0}
+.doc.has-toc{display:grid;grid-template-columns:250px minmax(0,1fr);gap:48px;align-items:start}
+.toc{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto;font-size:.9rem;border-right:1px solid var(--line);padding-right:16px}
+.toc summary{font-weight:600;color:var(--muted);cursor:pointer;margin-bottom:8px;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase}
+.toc ul{list-style:none;margin:0;padding:0}
+.toc ul ul{padding-left:14px;margin:2px 0 6px}
+.toc li{margin:3px 0;line-height:1.35}
+.toc a{color:var(--muted);text-decoration:none}
+.toc a:hover{color:var(--text);text-decoration:underline}
+@supports selector(::details-content){@media (min-width:1001px){.toc summary{pointer-events:none;list-style:none}.toc summary::-webkit-details-marker{display:none}.toc details::details-content{content-visibility:visible;display:block}}}
+.prose{max-width:76ch;min-width:0;overflow-wrap:break-word}
+.prose h1{font-size:clamp(1.8rem,1.2rem + 2vw,2.4rem);line-height:1.15;margin:0 0 16px;text-wrap:balance}
+.prose h2{font-size:1.5rem;margin:40px 0 12px;padding-top:24px;border-top:1px solid var(--line);scroll-margin-top:16px}
+.prose h3{font-size:1.15rem;margin:28px 0 8px;scroll-margin-top:16px}
+.prose h4{font-size:1rem;margin:20px 0 6px}
+.prose p,.prose li{text-wrap:pretty}
+.prose ul,.prose ol{padding-left:22px}
+.prose li{margin:4px 0}
+.prose li::marker{color:var(--muted)}
+.prose code{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;font-size:.88em;background:var(--raised);border:1px solid var(--line);border-radius:4px;padding:0 4px;overflow-wrap:anywhere}
+.prose pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;overflow-x:auto;max-width:100%}
+.prose pre code{background:none;border:0;padding:0;overflow-wrap:normal}
+.prose blockquote{margin:16px 0;padding:8px 16px;border-left:4px solid var(--mod);background:var(--panel);border-radius:0 8px 8px 0}
+.prose blockquote p{margin:6px 0}
+.prose table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;margin:16px 0;font-size:.95rem}
+.prose th,.prose td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+.prose th{background:var(--panel)}
+.prose img{border:1px solid var(--line);border-radius:8px}
+.prose hr{border:0;border-top:1px solid var(--line);margin:32px 0}
+.prose kbd{font-family:inherit;font-size:.85em;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--raised)}
+.prose section{padding:0;border-top:0}
+.src{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);font-size:.9rem}
+.crumbs{margin:0 0 8px;font-size:.9rem}
+.crumbs a::before{content:"\2190\00a0"}
+/* Marks: always a text label, never color alone. */
+.badge{display:inline-block;vertical-align:middle;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;line-height:1.5;padding:0 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.prose h2 .badge,.prose h3 .badge{margin-left:8px;position:relative;top:-2px}
+.badge.shipped{color:var(--signal);border-color:var(--signal)}
+.badge.coming{color:var(--mod);border:1px dashed var(--mod)}
+.badge.wip{color:var(--mod);border-color:var(--mod)}
+.legend{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;color:var(--muted);font-size:.95rem}
+.area-nav ul{list-style:none;padding:0;margin:16px 0 0;display:flex;flex-wrap:wrap;gap:8px}
+.area-nav li{margin:0}
+.area-nav a{display:inline-block;padding:4px 12px;border:1px solid var(--line);border-radius:999px;background:var(--raised);color:var(--text);text-decoration:none;font-size:.9rem}
+.area-nav a:hover{border-color:var(--signal)}
+.coming-box{margin:24px 0 8px;padding:4px 18px 8px;border:1px dashed var(--mod);border-radius:8px;background:var(--panel)}
+.coming-box h3{margin-top:14px;color:var(--text)}
+.coming-box ul{list-style:none;padding:0}
+.coming-box li{margin:10px 0}
+.coming-box li>.badge{margin-right:4px}
+.coming-box .track{color:var(--muted);font-size:.92rem}
+.callout{margin:0 0 24px;padding:12px 16px;border:1px solid var(--mod);border-radius:8px;background:var(--panel)}
+.callout p{margin:6px 0 0}
+.releases{list-style:none;padding:0;margin:24px 0}
+.releases li{margin:0;padding:10px 0;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}
+.releases a{font-weight:600;font-size:1.1rem;font-variant-numeric:tabular-nums}
+.docs footer{margin-top:24px}
+@media (max-width:1000px){.doc.has-toc{display:block}.toc{position:static;max-height:none;overflow:visible;border-right:0;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:24px;background:var(--panel)}.toc summary{margin:0}.toc details[open] summary{margin-bottom:8px}}
+@media (max-width:600px){.doc-main{padding-top:20px}.site-head-in{gap:8px 16px}.site-nav ul{gap:2px 14px}.prose h2{font-size:1.3rem}}
+.toc-title{font-weight:600;color:var(--muted);margin:0 0 8px;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase}
+.doc:not(.has-toc){max-width:76ch;margin:0 auto}
+@media (min-width:1001px){.features .area-nav{display:none}}
+@media (max-width:1000px){.toc-wide{display:none}}

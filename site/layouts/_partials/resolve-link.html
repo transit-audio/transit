@@ -1,0 +1,43 @@
+{{- /* Resolves a link written in a repository markdown file.
+  Context: dict "page" (the page being rendered) "dest" (the link destination as written).
+  Returns the URL to use. A link to another repository file goes to its page on this site when
+  there is one (params.pages, or a release note), otherwise to its GitHub page. The build fails
+  on a relative link to a file that does not exist in the repository. */ -}}
+{{- $dest := .dest -}}
+{{- $page := .page -}}
+{{- $out := $dest -}}
+{{- if or (findRE `^[a-zA-Z][a-zA-Z0-9+.-]*:` $dest) (strings.HasPrefix $dest "#") (strings.HasPrefix $dest "//") -}}
+  {{- /* An absolute URL or an anchor on the same page: kept as written. */ -}}
+{{- else -}}
+  {{- $p := $dest -}}
+  {{- $frag := "" -}}
+  {{- with findRESubmatch `^([^#]*)(#.*)?$` $dest 1 -}}
+    {{- $p = index (index . 0) 1 -}}
+    {{- $frag = index (index . 0) 2 -}}
+  {{- end -}}
+  {{- $srcdir := $page.Params.srcdir | default "" -}}
+  {{- $rp := "" -}}
+  {{- if strings.HasPrefix $p "/" -}}
+    {{- $rp = path.Clean (strings.TrimPrefix "/" $p) -}}
+  {{- else -}}
+    {{- $rp = path.Clean (path.Join $srcdir $p) -}}
+  {{- end -}}
+  {{- if strings.HasPrefix $rp "../" -}}
+    {{- errorf "link %q in %s points outside the repository" $dest $page.RelPermalink -}}
+  {{- end -}}
+  {{- $rp = strings.TrimSuffix "/" $rp -}}
+  {{- $mapped := index site.Params.pages $rp -}}
+  {{- $rel := findRESubmatch `^docs/releases/(v[0-9]+\.[0-9]+\.[0-9]+)\.md$` $rp 1 -}}
+  {{- if $mapped -}}
+    {{- $out = printf "%s%s" $mapped $frag -}}
+  {{- else if $rel -}}
+    {{- $out = printf "/releases/%s/%s" (index (index $rel 0) 1) $frag -}}
+  {{- else if resources.Get (printf "repo/%s" $rp) -}}
+    {{- $out = printf "%s%s%s" site.Params.blob $rp $frag -}}
+  {{- else if resources.Match (printf "repo/%s/**" $rp) -}}
+    {{- $out = printf "%s/tree/main/%s%s" site.Params.repo $rp $frag -}}
+  {{- else -}}
+    {{- errorf "unresolved link %q in %s (looked for %s in the repository)" $dest $page.RelPermalink $rp -}}
+  {{- end -}}
+{{- end -}}
+{{- return $out -}}

@@ -128,25 +128,25 @@ and, at runtime, the operating system's own UI fonts when available (never redis
 | `assets/brand/transit-wordmark-graphite-2172.png` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
 | `assets/brand/social-preview-1280x640.png` | @derekmwright | GitHub social preview (wordmark on charcoal with tagline; derived from the wordmark PNG) | MIT OR Apache-2.0 |
 | `docs/images/transit-wordmark-dark.png` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
-| `site/assets/transit-arrange.png` | @derekmwright | screenshot of transit (arrange) | MIT OR Apache-2.0 |
-| `site/assets/transit-mixer.png` | @derekmwright | screenshot of transit (mixer) | MIT OR Apache-2.0 |
-| `site/assets/transit-pianoroll.png` | @derekmwright | screenshot of transit (pianoroll) | MIT OR Apache-2.0 |
-| `site/assets/transit-midi.png` | @derekmwright | screenshot of transit (midi) | MIT OR Apache-2.0 |
-| `site/assets/transit-audio-devices.png` | @derekmwright | screenshot of transit (audio devices) | MIT OR Apache-2.0 |
-| `site/assets/transit-arrange-detail.png` | @derekmwright | screenshot of transit (arrange, detail) | MIT OR Apache-2.0 |
-| `site/assets/transit-sampler.png` | @derekmwright | screenshot of transit (Sampler and Compressor) | MIT OR Apache-2.0 |
-| `site/assets/transit-sampler-slices.png` | @derekmwright | screenshot of transit (Sampler Slices view) | MIT OR Apache-2.0 |
-| `site/assets/transit-story-lowlat-off.png` | @derekmwright | screenshot of transit (mixer, Low Latency off) | MIT OR Apache-2.0 |
-| `site/assets/transit-story-lowlat-on.png` | @derekmwright | screenshot of transit (mixer, Low Latency on) | MIT OR Apache-2.0 |
-| `site/assets/transit-story-count-in.png` | @derekmwright | screenshot of transit (metronome menu with count-in) | MIT OR Apache-2.0 |
-| `site/assets/transit-story-hardware-inserts.png` | @derekmwright | screenshot of transit (Audio Devices, Hardware inserts page) | MIT OR Apache-2.0 |
-| `site/assets/transit-story-mixer.png` | @derekmwright | screenshot of transit (mixer with an External Instrument track) | MIT OR Apache-2.0 |
-| `site/assets/transit-story-macro-oscillator.png` | @derekmwright | screenshot of transit (Macro Oscillator editor) | MIT OR Apache-2.0 |
-| `site/assets/transit-story-compressor.png` | @derekmwright | screenshot of transit (Compressor/Limiter editor) | MIT OR Apache-2.0 |
-| `site/assets/transit-icon-dark-1024.png` | @derekmwright | original (pale t on charcoal; dark-surface icon variant) | MIT OR Apache-2.0 |
-| `site/assets/transit-wordmark-white.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
-| `site/assets/transit-wordmark-graphite.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
-| `site/assets/transit-wordmark-white-2172.png` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
+| `site/static/assets/transit-arrange.png` | @derekmwright | screenshot of transit (arrange) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-mixer.png` | @derekmwright | screenshot of transit (mixer) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-pianoroll.png` | @derekmwright | screenshot of transit (pianoroll) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-midi.png` | @derekmwright | screenshot of transit (midi) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-audio-devices.png` | @derekmwright | screenshot of transit (audio devices) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-arrange-detail.png` | @derekmwright | screenshot of transit (arrange, detail) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-sampler.png` | @derekmwright | screenshot of transit (Sampler and Compressor) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-sampler-slices.png` | @derekmwright | screenshot of transit (Sampler Slices view) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-story-lowlat-off.png` | @derekmwright | screenshot of transit (mixer, Low Latency off) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-story-lowlat-on.png` | @derekmwright | screenshot of transit (mixer, Low Latency on) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-story-count-in.png` | @derekmwright | screenshot of transit (metronome menu with count-in) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-story-hardware-inserts.png` | @derekmwright | screenshot of transit (Audio Devices, Hardware inserts page) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-story-mixer.png` | @derekmwright | screenshot of transit (mixer with an External Instrument track) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-story-macro-oscillator.png` | @derekmwright | screenshot of transit (Macro Oscillator editor) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-story-compressor.png` | @derekmwright | screenshot of transit (Compressor/Limiter editor) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-icon-dark-1024.png` | @derekmwright | original (pale t on charcoal; dark-surface icon variant) | MIT OR Apache-2.0 |
+| `site/static/assets/transit-wordmark-white.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
+| `site/static/assets/transit-wordmark-graphite.svg` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
+| `site/static/assets/transit-wordmark-white-2172.png` | @derekmwright | transit wordmark | MIT OR Apache-2.0 |
 | `apps/transit/assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf` | IBM Corp. | IBM Plex Sans 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-sans/OFL.txt`); unmodified; Reserved Font Name "Plex" |
 | `apps/transit/assets/fonts/ibm-plex-sans/IBMPlexSans-Medium.ttf` | IBM Corp. | IBM Plex Sans 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-sans/OFL.txt`); unmodified; Reserved Font Name "Plex" |
 | `apps/transit/assets/fonts/ibm-plex-sans/IBMPlexSans-SemiBold.ttf` | IBM Corp. | IBM Plex Sans 1.1.0 release, https://github.com/IBM/plex | SIL OFL 1.1 (`apps/transit/assets/fonts/ibm-plex-sans/OFL.txt`); unmodified; Reserved Font Name "Plex" |
