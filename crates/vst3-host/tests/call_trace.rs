@@ -94,6 +94,7 @@ fn the_trace_records_each_call_kind_in_order_and_nothing_while_debug_logging_is_
     let mut ed = p.editor().expect("editor handle");
     let mut reader = p.state_reader().expect("state reader");
     frames(&mut p, &mut ed, 4);
+    let made = transit_vst3_host::trace_records_made();
     // Off: a pick, a host value and a save write nothing.
     assert!(p.load_state(&arming_state(0, 0)));
     assert!(reader.save_state().is_some());
@@ -101,6 +102,7 @@ fn the_trace_records_each_call_kind_in_order_and_nothing_while_debug_logging_is_
     frames(&mut p, &mut ed, 3);
     assert!(reader.save_state().is_some());
     assert_eq!(take(), Vec::<String>::new(), "nothing is traced while debug logging is off");
+    assert_eq!(transit_vst3_host::trace_records_made(), made, "nothing is recorded while debug logging is off");
 
     // On.
     log::set_max_level(log::LevelFilter::Debug);

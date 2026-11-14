@@ -69,6 +69,7 @@ fn the_trace_records_each_call_kind_in_order_and_nothing_while_debug_logging_is_
     let mut ed = p.editor().expect("the gain fixture has an editor handle");
     let mut reader = p.state_reader().expect("state reader");
     frames(&mut p, &mut ed, 2);
+    let made = transit_clap_host::trace_records_made();
     // Off: an edit, a rescan, a host value and a save write nothing.
     assert!(p.load_state(b"CMD:edit:0.4"));
     frames(&mut p, &mut ed, 3);
@@ -77,6 +78,7 @@ fn the_trace_records_each_call_kind_in_order_and_nothing_while_debug_logging_is_
     frames(&mut p, &mut ed, 3);
     assert!(reader.save_state().is_some());
     assert_eq!(take(), Vec::<String>::new(), "nothing is traced while debug logging is off");
+    assert_eq!(transit_clap_host::trace_records_made(), made, "nothing is recorded while debug logging is off");
 
     // On.
     log::set_max_level(log::LevelFilter::Debug);

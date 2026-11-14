@@ -278,8 +278,16 @@ pub(crate) fn record(inst: u32, call: Call, id: u32, value: f64, aux: u64) {
     }
 }
 
+/// The next record's sequence number.
+static SEQ: AtomicU64 = AtomicU64::new(1);
+
+/// How many records were made so far (tests check that nothing is recorded while the trace is off).
+#[cfg(feature = "test-hooks")]
+pub(crate) fn made() -> u64 {
+    SEQ.load(Ordering::Relaxed) - 1
+}
+
 fn push(inst: u32, call: Call, id: u32, value: f64, aux: u64) {
-    static SEQ: AtomicU64 = AtomicU64::new(1);
     let Some(r) = ring_if_made() else { return };
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     r.push([seq, u64::from(inst) << 32 | u64::from(id), (call as u64) << 8 | current() as u64, value.to_bits(), aux]);

@@ -242,6 +242,14 @@ pub fn while_instances_held<R>(f: impl FnOnce() -> R) -> R {
     plugin::while_held(f)
 }
 
+/// How many host call trace records were made so far (#651). Only for host tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+#[must_use]
+pub fn trace_records_made() -> u64 {
+    trace::made()
+}
+
 /// Restricts scans to extra folders for deterministic registry tests. Defaults to false;
 /// enabling test hooks alone does not change normal search paths or installed-plugin smoke tests.
 #[cfg(feature = "test-hooks")]
