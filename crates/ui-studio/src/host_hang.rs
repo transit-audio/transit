@@ -142,10 +142,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             let mark = app.engine.message_pushes();
             if app.save() {
                 let saved = format!("Saved; {plugin} keeps the state it had when it was last read");
-                app.status = match app.save_notes_line(mark) {
+                let status = match app.save_notes_line(mark) {
                     Some(notes) => format!("{saved}. {notes}"),
                     None => saved,
                 };
+                app.status = app.with_state_notice(status);
             }
         }
         Some(Act::GiveUp) => app.give_up_on_stuck_plugins(),

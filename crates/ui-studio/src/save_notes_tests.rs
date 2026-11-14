@@ -71,3 +71,16 @@ fn a_save_that_posts_a_frozen_recording_report_says_it_in_the_status_line_once()
     assert_ne!(app.status, report, "an unrelated action does not say it");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A save that skips a busy plug-in (its stored state kept) and also posts a note says both: the
+/// note does not replace the plug-in notice, which is in neither the log nor the message list.
+#[test]
+fn a_save_note_keeps_the_plugin_not_refreshed_notice() {
+    let mut app = crate::tests::app();
+    let mark = app.engine.message_pushes();
+    app.state_notice = Some("State of Reverb not refreshed; stored state kept".into());
+    app.engine.warn("The long take \"Guitar\" still plays from A.wav.");
+    app.say_save_notes(mark);
+    assert!(app.status.contains("The long take \"Guitar\" still plays from A.wav."), "{}", app.status);
+    assert!(app.status.contains("State of Reverb not refreshed; stored state kept"), "{}", app.status);
+}

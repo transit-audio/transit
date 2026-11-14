@@ -209,7 +209,7 @@ impl StudioApp {
     /// Show [`Self::save_notes_line`] in the status line; a save with nothing to say leaves it alone.
     pub(crate) fn say_save_notes(&mut self, mark: u64) {
         if let Some(line) = self.save_notes_line(mark) {
-            self.status = line;
+            self.status = self.with_state_notice(line);
         }
     }
 
