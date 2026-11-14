@@ -391,44 +391,87 @@ fn an_asio_calibration_that_outlives_its_wait_is_given_up_and_stores_nothing() {
     assert!(t.app.ui.audio.calibrations.is_empty() && driver.live_calibrations().is_empty());
 }
 
-/// #683: on JACK a loopback calibration measured through one input port group does not apply
-/// after a switch to another; the Audio Devices notes and the status line say it needs a new
-/// measurement. The same calibration with its own group open applies and says nothing.
-#[test]
-fn a_jack_calibration_measured_through_another_input_group_is_not_applied_and_the_page_says_so() {
+/// A JACK-like client: the output group "Headset" with two inputs of its own, and the groups
+/// "Mic" and "Line" that only record (#683).
+fn jack_client() -> transit_audio_backend::fake::FakeBackend {
     use transit_audio_backend as ab;
-    let client = || {
-        ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32))
-            .named("JACK", "Headset")
-            .with_capture(2, true)
-            .with_capture_device("Mic", 1)
-            .with_capture_device("Line", 2)
-    };
-    let cfg = |input: &str, calibrations: Vec<transit_playback::LoopbackCalibration>| AudioConfig {
-        system: Some("JACK".into()),
-        output: Some("Headset".into()),
-        input: Some(input.into()),
-        calibrations,
-        ..Default::default()
-    };
-    // The loop measured with the input on Mic, under the key the open pair gives.
-    let t = T::new();
-    let on_mic = transit_playback::Player::open_fake_native_jack(t.app.engine.session_arc(), &cfg("Mic", Vec::new()), &client()).unwrap();
+    ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32))
+        .named("JACK", "Headset")
+        .with_capture(2, true)
+        .with_capture_device("Mic", 1)
+        .with_capture_device("Line", 2)
+}
+
+fn jack_cfg(input: &str, calibrations: Vec<transit_playback::LoopbackCalibration>) -> AudioConfig {
+    AudioConfig { system: Some("JACK".into()), output: Some("Headset".into()), input: Some(input.into()), calibrations, ..Default::default() }
+}
+
+/// The stand-in listing of the JACK system [`jack_client`] serves.
+fn jack_listing() -> Value {
+    json!({"systems": [{"name": "JACK", "is_default": true,
+        "outputs": [{"name": "Headset", "is_default": true, "max_channels": 2}],
+        "inputs": [{"name": "Headset", "max_channels": 2}, {"name": "Mic", "max_channels": 1}, {"name": "Line", "max_channels": 2}]}]})
+}
+
+/// A loop measured with the input on Mic, under the key the open pair gives.
+fn measured_on_mic(t: &T) -> transit_playback::LoopbackCalibration {
+    let on_mic = transit_playback::Player::open_fake_native_jack(t.app.engine.session_arc(), &jack_cfg("Mic", Vec::new()), &jack_client()).unwrap();
     let record = on_mic.calibration_key.as_ref().expect("a duplex JACK open has a key").record(480, 25, "2026-11-14");
     assert_eq!(record.input.as_deref(), Some("Mic"));
-    drop(on_mic);
-    let expected =
-        "The loopback calibration of “Headset” was measured with input “Mic” and does not apply to input “Line”: it needs a new measurement.";
+    record
+}
+
+/// The note for a calibration measured on Mic with Line open. JACK cannot measure a loop yet, so
+/// it names no action, and "Choose another…" does not follow it on the status line.
+const JACK_NOTE: &str = "The loopback calibration of “Headset” was measured with input “Mic” and does not apply to input “Line”.";
+
+/// #683: on JACK a loopback calibration measured through one input port group does not apply
+/// with another open at startup; the Audio Devices notes and the status line say so. The same
+/// calibration with its own group open applies and says nothing.
+#[test]
+fn a_jack_calibration_measured_through_another_input_group_is_not_applied_and_the_page_says_so() {
+    let record = measured_on_mic(&T::new());
     for (input, applies) in [("Line", false), ("Mic", true)] {
         let mut t = T::new();
-        let saved = cfg(input, vec![record.clone()]);
-        let player = transit_playback::Player::open_fake_native_jack(t.app.engine.session_arc(), &saved, &client()).unwrap();
+        // A listing that has the JACK groups, so the calibration note is the only one.
+        t.control("audio.fake_devices", jack_listing()).unwrap();
+        let saved = jack_cfg(input, vec![record.clone()]);
+        let player = transit_playback::Player::open_fake_native_jack(t.app.engine.session_arc(), &saved, &jack_client()).unwrap();
         assert_eq!(player.calibration.is_some(), applies, "input {input}");
         t.app.player = Some(player);
         t.app.ui.audio = saved;
         t.frames(2);
-        let noted = t.app.audio_devices.notes.iter().any(|n| n == expected);
-        assert_eq!(noted, !applies, "input {input}: {:?}", t.app.audio_devices.notes);
-        assert_eq!(t.app.status.contains(expected), !applies, "input {input}: {}", t.app.status);
+        if applies {
+            assert!(!t.app.audio_devices.notes.iter().any(|n| n == JACK_NOTE), "{:?}", t.app.audio_devices.notes);
+            assert!(!t.app.status.contains(JACK_NOTE), "{}", t.app.status);
+        } else {
+            assert_eq!(t.app.audio_devices.notes, [JACK_NOTE]);
+            assert_eq!(t.app.status, JACK_NOTE, "the calibration note alone: no \"Choose another\"");
+        }
     }
+}
+
+/// #683: the window's Apply switches the JACK input from Mic, where the calibration was measured,
+/// to Line: the reopened pair is not calibrated, and the notes and the status line say so.
+#[test]
+fn a_reopen_onto_another_jack_input_group_says_the_calibration_does_not_apply() {
+    let mut t = T::new();
+    let record = measured_on_mic(&t);
+    let on_mic = jack_cfg("Mic", vec![record.clone()]);
+    let client = jack_client();
+    let player = transit_playback::Player::open_fake_native_jack(t.app.engine.session_arc(), &on_mic, &client).unwrap();
+    assert_eq!(player.calibration, record.to_backend(), "calibrated on Mic");
+    t.app.player = Some(player);
+    t.app.ui.audio = on_mic;
+    // The real reopen path, opening the scripted client (no device is listed or opened).
+    t.app.audio_devices.fake = None;
+    // The stand-in WASAPI listing goes with it: nothing listed, so no system or input note.
+    t.app.audio_devices.systems = None;
+    t.app.reopen_with = Some(Box::new(|session, cfg| transit_playback::Player::open_fake_native_jack(session, cfg, &jack_client()).unwrap()));
+    // The running client takes the session, so the reopen can keep the live audio state.
+    run(&mut t, &client, 10);
+    t.app.apply_audio(jack_cfg("Line", vec![record])).expect("the reopen succeeds");
+    assert_eq!(t.app.player.as_ref().map(|p| p.calibration), Some(None), "not calibrated on Line");
+    assert_eq!(t.app.audio_devices.notes, [JACK_NOTE]);
+    assert_eq!(t.app.status, JACK_NOTE, "the calibration note alone: no \"Choose another\"");
 }

@@ -551,14 +551,15 @@ impl StudioApp {
         };
         let mut notes = fallback_notes(&cfg, self.audio_devices.systems.as_deref(), &opened);
         notes.extend(self.player.as_ref().and_then(|p| p.backend_note.clone()));
-        notes.extend(self.jack_calibration_note());
+        let calibration = self.jack_calibration_note();
+        notes.extend(calibration.clone());
         notes.extend(self.not_opened_note());
         let stopped = if was_playing { "Playback stopped to change devices. " } else { "" };
         self.status = if notes.is_empty() {
             let name = opened.output.unwrap_or_else(|| "no audio device".into());
             format!("{stopped}Audio devices reopened: {name}.")
         } else {
-            format!("{stopped}{} {CHOOSE_ANOTHER}", notes.join(" "))
+            format!("{stopped}{}", jack_calibration::notes_status(&notes, calibration.as_ref()))
         };
         if !captured {
             self.status.push_str(" Audio recovered from the document state; live plug-in state was unavailable after the audio fault.");
@@ -921,10 +922,11 @@ pub(crate) fn startup_notes(app: &mut StudioApp) {
         notes.extend(input_note(&app.ui.audio, &systems));
     }
     notes.extend(app.player.as_ref().and_then(|p| p.backend_note.clone()));
-    notes.extend(app.jack_calibration_note());
+    let calibration = app.jack_calibration_note();
+    notes.extend(calibration.clone());
     notes.extend(app.not_opened_note());
     if !notes.is_empty() {
-        app.status = format!("{} {CHOOSE_ANOTHER}", notes.join(" "));
+        app.status = jack_calibration::notes_status(&notes, calibration.as_ref());
         app.audio_devices.notes = notes;
     }
 }

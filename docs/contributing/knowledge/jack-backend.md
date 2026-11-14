@@ -79,8 +79,17 @@ The rate half reflects the rate of the open attempt, not a value the device repo
 - A loopback calibration on JACK is keyed by the output and the input group that opened (#683,
   `AudioConfig::jack_calibration`), not by a pairing. A record without an input name (saved before
   #683) applies only when the input opened on the output's own group. One measured through another
-  group is not applied, and Audio Devices says it needs a new measurement. The JACK streams do not
-  use a calibration in their stamps yet (slice 3), so this keeps the key right ahead of that.
+  group is not applied, and Audio Devices says it does not apply to the input that opened. JACK
+  cannot measure a loop yet and its streams do not use a calibration in their stamps (slice 3), so
+  this has no audible effect today: it keeps the key right ahead of that.
+- Hazard for slice 3 (Measure on JACK): a new key names the output's own group (`input:
+  Some("Headset")`), and `store_calibration`'s `same_key` treats that as different from an old
+  unnamed record, so both are kept. `jack_calibration` takes the first match, which is the old
+  unnamed record, and a fresh measurement of the own group would be ignored. Whoever builds JACK
+  measurement must replace or drop the unnamed record of the output's own group when storing.
+- A hardware insert's measured round trip does not use the calibration key. It is stored per send
+  and return path in the I/O table, which is kept per output (#682): after a switch of input group
+  a return path keeps its name and its measured round trip.
 - The first `start` builds the engine from both directions' callbacks, installs the JACK callbacks
   and activates; each direction's start connects its ports (`out_i` to the device's i-th playback
   port, its i-th capture port to `in_i`), unless `TRANSIT_JACK_AUTOCONNECT=0` (`no`, `off`, `false`)
