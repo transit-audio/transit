@@ -160,6 +160,31 @@ mod tests {
         assert!(with_input_count(&alsa, None).is_none(), "no open input: the table stays");
     }
 
+    /// #690: a table saved while the input did not open (0 inputs) gets the default input paths
+    /// when the same device opens duplex with an input (the opened table carries the count); the
+    /// user's paths stay, and a default the user then removes stays removed.
+    #[test]
+    fn a_saved_table_without_inputs_gets_the_default_input_paths_when_inputs_open() {
+        let mut saved_map = IoMap::for_device("test", "duplex", 0, 2);
+        saved_map
+            .add_path(IoPath { live: false, name: "Cue".into(), direction: IoDirection::Output, channels: vec![1], format: ChannelFormat::Mono })
+            .unwrap();
+        let mut saved = Vec::new();
+        remember(&mut saved, &saved_map);
+        let inputs = |m: &IoMap| m.paths_of(IoDirection::Input).map(|p| p.name.clone()).collect::<Vec<_>>();
+        let duplex = adopt(&saved, IoMap::for_device("test", "duplex", 1, 2));
+        assert_eq!(duplex.inputs, 1);
+        assert_eq!(inputs(&duplex), ["In 1"]);
+        assert!(duplex.path("Cue").is_some(), "the user's path stays");
+        assert!(with_input_count(&duplex, Some(1)).is_none(), "nothing left for the input count to add");
+        let two = adopt(&saved, IoMap::for_device("test", "duplex", 2, 2));
+        assert_eq!(inputs(&two), ["In 1", "In 2", "In 1-2"]);
+        let mut edited = duplex.clone();
+        edited.remove_path("In 1").unwrap();
+        remember(&mut saved, &edited);
+        assert!(inputs(&adopt(&saved, IoMap::for_device("test", "duplex", 1, 2))).is_empty(), "a removed default stays removed");
+    }
+
     #[test]
     fn remembering_replaces_by_device_and_is_bounded() {
         let mut saved = Vec::new();

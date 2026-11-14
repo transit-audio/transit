@@ -529,13 +529,17 @@ impl IoMap {
     }
 
     /// Adopt the counts a device opened with: paths that no longer fit are dropped; a table left
-    /// without its Main path gets the defaults back. Returns whether anything changed.
+    /// without its Main path gets the defaults back, and a table that had no inputs gets the
+    /// default input paths (#690: a table saved while the input did not open). Paths the user
+    /// made stay, and a default removed or renamed while the count stays is not restored.
+    /// Returns whether anything changed.
     pub fn reconcile(&mut self, inputs: u16, outputs: u16) -> bool {
         let cap = MAX_DEVICE_CHANNELS as u16;
         let (inputs, outputs) = (inputs.min(cap), outputs.min(cap));
         if (inputs, outputs) == (self.inputs, self.outputs) {
             return false;
         }
+        let had_inputs = self.inputs;
         self.inputs = inputs;
         self.outputs = outputs;
         let fits: Vec<bool> = self.paths.iter().map(|p| p.channels.iter().all(|&c| c < self.opened(p.direction))).collect();
@@ -552,6 +556,14 @@ impl IoMap {
             // A former cue can become the fallback Main when the device loses output channels.
             self.paths.iter_mut().filter(|p| p.name.eq_ignore_ascii_case(&self.main)).for_each(|p| p.live = false);
         }
+        if had_inputs == 0 {
+            let fresh = Self::for_device(&self.system, &self.device, inputs, outputs);
+            for p in fresh.paths.into_iter().filter(|p| p.direction == IoDirection::Input) {
+                if self.path(&p.name).is_none() {
+                    self.paths.push(p);
+                }
+            }
+        }
         true
     }
 
@@ -561,19 +573,7 @@ impl IoMap {
     /// count changes nothing, so input paths the user removed stay removed. Returns whether
     /// anything changed.
     pub fn adopt_inputs(&mut self, inputs: u16) -> bool {
-        let had = self.inputs;
-        if !self.reconcile(inputs, self.outputs) {
-            return false;
-        }
-        if had == 0 {
-            let fresh = Self::for_device(&self.system, &self.device, self.inputs, self.outputs);
-            for p in fresh.paths.into_iter().filter(|p| p.direction == IoDirection::Input) {
-                if self.path(&p.name).is_none() {
-                    self.paths.push(p);
-                }
-            }
-        }
-        true
+        self.reconcile(inputs, self.outputs)
     }
 
     /// Pairs of output paths that share a device channel (they sum there), with the first shared
