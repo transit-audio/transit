@@ -192,6 +192,20 @@ impl ParamChanges {
         dropped
     }
 
+    /// Calls `f(id, offset, value)` for every point the queues hold this block, as the processor
+    /// reads them (no allocation; the trace of #651).
+    pub(super) fn each_point(&self, mut f: impl FnMut(u32, i32, f64)) {
+        let n = self.count.load(Ordering::Relaxed).max(0) as usize;
+        for q in self.queues.iter().take(n) {
+            let id = q.id.load(Ordering::Relaxed);
+            for k in 0..q.points.load(Ordering::Relaxed).max(0) {
+                if let Some((at, v)) = q.point(k) {
+                    f(id, at, v);
+                }
+            }
+        }
+    }
+
     fn queue_ptr(&self, index: usize) -> *mut sv::IParamValueQueue {
         self.queues.get(index).and_then(|q| q.as_com_ref::<sv::IParamValueQueue>()).map_or(std::ptr::null_mut(), |r| r.as_ptr())
     }

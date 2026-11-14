@@ -298,11 +298,18 @@ pub(crate) struct EditorLink {
     pub(super) inner: Mutex<EditorInner>,
     /// The editor window's header strip (issue #68): kept across opens, read by the window.
     pub(super) header: Arc<transit_rt::editor_window::HeaderCell>,
+    /// The instance's number in the host call trace (#651); 0 before it is wired up.
+    pub(super) trace_id: u32,
 }
 
 impl Default for EditorLink {
     fn default() -> Self {
-        Self { main: std::thread::current().id(), inner: Mutex::new(EditorInner::default()), header: transit_rt::editor_window::HeaderCell::new() }
+        Self {
+            main: std::thread::current().id(),
+            inner: Mutex::new(EditorInner::default()),
+            header: transit_rt::editor_window::HeaderCell::new(),
+            trace_id: 0,
+        }
     }
 }
 
@@ -475,6 +482,7 @@ impl EditorLink {
         }
         let g = self.lock();
         if let Some(c) = &g.controller {
+            trace::record(self.trace_id, trace::Call::SetParamNormalized, id, n.clamp(0.0, 1.0), 0);
             // SAFETY: valid controller (the instance clears it under this lock before it terminates).
             unsafe { c.setParamNormalized(id, n.clamp(0.0, 1.0)) };
         }
@@ -487,10 +495,22 @@ impl EditorLink {
         let component = g.component.as_ref()?;
         // SAFETY: valid component (the instance clears it under this lock before it terminates);
         // the stream lives in `read_state` for the whole call.
-        let comp = Instance::read_state(|s| unsafe { component.getState(s) })?;
+        let comp = Instance::read_state(|s| unsafe { component.getState(s) });
+        trace::record(self.trace_id, trace::Call::ComponentGetState, u32::from(comp.is_some()), 0.0, comp.as_ref().map_or(0, |c| c.len() as u64));
+        let comp = comp?;
         let ctrl = match &g.controller {
-            // SAFETY: valid controller; as above.
-            Some(c) => Instance::read_state(|s| unsafe { c.getState(s) }).unwrap_or_default(),
+            Some(c) => {
+                // SAFETY: valid controller; as above.
+                let got = Instance::read_state(|s| unsafe { c.getState(s) });
+                trace::record(
+                    self.trace_id,
+                    trace::Call::ControllerGetState,
+                    u32::from(got.is_some()),
+                    0.0,
+                    got.as_ref().map_or(0, |c| c.len() as u64),
+                );
+                got.unwrap_or_default()
+            }
             None => Vec::new(),
         };
         crate::preset::join_state(&comp, &ctrl)
@@ -573,6 +593,7 @@ impl EditorLink {
         }
         let g = self.lock();
         if let Some(c) = &g.controller {
+            trace::record(self.trace_id, trace::Call::SetParamNormalized, id, n.clamp(0.0, 1.0), 1);
             // SAFETY: valid controller, main thread.
             unsafe { c.setParamNormalized(id, n.clamp(0.0, 1.0)) };
         }

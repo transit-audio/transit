@@ -4,6 +4,7 @@ use super::*;
 
 impl transit_dsp::PluginStateReader for ClapState {
     fn save_state(&mut self) -> Option<Vec<u8>> {
+        let _t = trace::scope(Thread::Ui);
         self.link.save_state()
     }
 
@@ -13,6 +14,7 @@ impl transit_dsp::PluginStateReader for ClapState {
     /// change: its values become the host's view, nothing is reported as an edit, and parameter
     /// values still queued on the audio side from before it are dropped (#78).
     fn load_state(&mut self, data: &[u8]) -> Option<transit_dsp::LoadedValues> {
+        let _t = trace::scope(Thread::Ui);
         let shared = self.shared.upgrade()?;
         if std::thread::current().id() != shared.main {
             log::warn!("{}: a state load off the instance's main thread was refused", shared.info.id);
@@ -98,6 +100,7 @@ impl PluginEditor for ClapEditor {
             transit_dsp::host_call::defer();
             return Vec::new();
         }
+        let _t = trace::scope(Thread::Ui);
         let shared = self.shared.upgrade();
         if let Some(s) = &shared {
             s.service(&mut Serviced::default());
@@ -121,10 +124,12 @@ impl PluginEditor for ClapEditor {
             if let Some(s) = &shared {
                 s.note_report(i, v, x);
             }
+            trace::record(self.link.host().trace_id, Call::Report, self.ids.get(i).copied().unwrap_or(0), x, u64::from(v.to_bits()));
             if let Some(p) = self.info.params.get(i) {
                 out.push((p.id.to_string(), v));
             }
         }
+        trace::drain();
         out
     }
 

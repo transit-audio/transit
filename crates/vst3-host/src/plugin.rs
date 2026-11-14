@@ -45,6 +45,7 @@ use crate::ffi::{
 };
 use crate::gate::{Gate, MAX_CHANNELS};
 use crate::params::{Echoes, Loads, Mapping, ParamCurves, PendingParams, Reported, differs, drop_before_load, resend_indices};
+use crate::trace::{self, Call, Thread};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError, Weak};
@@ -310,6 +311,7 @@ impl Shared {
             out.other_thread += 1;
             return;
         }
+        let _t = trace::scope(Thread::Service);
         // Issue #205: never inside a host call into plug-in code on this thread (a preset load
         // that pumps the message loop): the requests stay recorded for the next call.
         if transit_dsp::host_call::active() {
@@ -522,6 +524,10 @@ pub struct Vst3Plugin {
 
 impl Vst3Plugin {
     pub(crate) fn new(inst: Instance, info: &'static PluginInfo) -> Vst3Plugin {
+        trace::mark_main();
+        if trace::on() {
+            log::debug!(target: trace::TARGET, "vst3 inst={} created: {} ({})", inst.host_ref().trace_id, info.name, info.id);
+        }
         let ids: Vec<u32> = info.params.iter().map(|p| p.id.parse::<u32>().unwrap_or(u32::MAX)).collect();
         // Any stepped parameter (stepCount > 0) converts exactly, however many steps it has; the
         // registry's MAX_CHOICES only decides whether the UI gets a choice list.
@@ -701,6 +707,7 @@ impl Vst3Plugin {
         // modified), and is nothing new for the controller, which reported it: the host's view
         // takes it, and nothing waits for the controller or the next state save.
         if let Some(n) = self.echoes.normalized(i, v) {
+            trace::record(self.shared.host.trace_id, Call::Echo, self.ids.get(i).copied().unwrap_or(0), n, u64::from(v.to_bits()));
             if let Some(view) = self.shared.view.get(i) {
                 view.store(n.to_bits(), Ordering::Release);
             }
@@ -713,6 +720,7 @@ impl Vst3Plugin {
             return Some(n);
         }
         let n = self.normalized_from_plain(i, v)?;
+        trace::record(self.shared.host.trace_id, Call::HostValue, self.ids.get(i).copied().unwrap_or(0), n, u64::from(v.to_bits()));
         // A value re-sent unchanged (after a reactivation or a curve re-sample) is nothing new
         // for the controller.
         if let Some(view) = self.shared.view.get(i)
@@ -731,6 +739,7 @@ impl Vst3Plugin {
     fn resend_host_set(&mut self) {
         for i in 0..self.ids.len() {
             if self.host_set.get(i).copied().unwrap_or(false) {
+                trace::record(self.shared.host.trace_id, Call::Resend, self.ids.get(i).copied().unwrap_or(0), 0.0, 0);
                 self.queue(i);
             }
         }
@@ -816,6 +825,7 @@ impl Vst3Plugin {
 impl Vst3Plugin {
     /// `process`, with the sidechain key when there is one.
     fn process_keyed(&mut self, io: &mut [Vec<f32>], key: Option<&[Vec<f32>]>, frames: usize) {
+        let _t = trace::scope(Thread::Audio);
         // The main thread reactivated it (`kLatencyChanged`, `kIoChanged`): send the values the
         // host set again, as after `prepare`.
         let activation = self.shared.activation.load(Ordering::Acquire);
@@ -962,6 +972,7 @@ impl Plugin for Vst3Plugin {
         let sr = if sample_rate.is_finite() && sample_rate > 0.0 { f64::from(sample_rate) } else { 48_000.0 };
         let mb = max_block.clamp(1, MAX_BLOCK);
         self.channels = channels.clamp(1, MAX_CHANNELS);
+        let _t = trace::scope(Thread::Audio);
         let shared = Arc::clone(&self.shared);
         let mut core = lock(&shared.core);
         core.sample_rate = sr;
@@ -977,6 +988,7 @@ impl Plugin for Vst3Plugin {
         // the minimum, silencing it.
         self.pending.clear();
         for i in resend_indices(&self.host_set, self.ids.len()).collect::<Vec<_>>() {
+            trace::record(self.shared.host.trace_id, Call::Resend, self.ids.get(i).copied().unwrap_or(0), 0.0, 0);
             self.queue(i);
         }
     }
@@ -992,6 +1004,7 @@ impl Plugin for Vst3Plugin {
     /// Runs on the audio thread (automation): converts through the sampled curves, never the
     /// controller, and queues without allocating.
     fn set_param(&mut self, id: &str, value: f32) -> bool {
+        let _t = trace::scope(Thread::Audio);
         drop_before_load(&mut self.pending, &self.shared.loads, &mut self.timed, &mut self.host_set, &mut self.echoes, &self.shared.reported);
         let Some(i) = self.param_index.get(id).copied() else { return false };
         let Some(pi) = self.info.params.get(i) else { return false };
@@ -1010,6 +1023,7 @@ impl Plugin for Vst3Plugin {
     /// Like `set_param`, but the point reaches the plug-in at `offset` within the next block, in
     /// a queue of its own with every other point of that parameter.
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
+        let _t = trace::scope(Thread::Audio);
         drop_before_load(&mut self.pending, &self.shared.loads, &mut self.timed, &mut self.host_set, &mut self.echoes, &self.shared.reported);
         let Some(i) = self.param_index.get(id).copied() else { return false };
         let (Some(pi), Some(&pid)) = (self.info.params.get(i), self.ids.get(i)) else { return false };
@@ -1163,6 +1177,7 @@ impl Plugin for Vst3Plugin {
     }
 
     fn load_state(&mut self, data: &[u8]) -> bool {
+        let _t = trace::scope(Thread::Audio);
         let shared = Arc::clone(&self.shared);
         let core = lock(&shared.core);
         let ok = core.inst.load_state(data);

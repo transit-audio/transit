@@ -35,6 +35,8 @@ pub(crate) struct HostContext {
     pub other_flags: AtomicU32,
     /// `performEdit` values (normalized), bounded by `EDIT_CAP`.
     pub edits: Mutex<Vec<(u32, f64)>>,
+    /// The instance's number in the host call trace (#651).
+    pub trace_id: u32,
 }
 
 impl Default for HostContext {
@@ -53,6 +55,7 @@ impl Default for HostContext {
             reload_requested: AtomicBool::new(false),
             other_flags: AtomicU32::new(0),
             edits,
+            trace_id: crate::trace::next_instance(),
         }
     }
 }
@@ -115,10 +118,12 @@ impl IHostApplicationTrait for HostContext {
 }
 
 impl IComponentHandlerTrait for HostContext {
-    unsafe fn beginEdit(&self, _id: sv::ParamID) -> sb::tresult {
+    unsafe fn beginEdit(&self, id: sv::ParamID) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::BeginEdit, id, 0.0, 0);
         sb::kResultOk
     }
     unsafe fn performEdit(&self, id: sv::ParamID, value: sv::ParamValue) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::PerformEdit, id, value, 0);
         if value.is_finite() {
             let mut e = self.edits.lock().unwrap_or_else(PoisonError::into_inner);
             let v = value.clamp(0.0, 1.0);
@@ -130,10 +135,12 @@ impl IComponentHandlerTrait for HostContext {
         }
         sb::kResultOk
     }
-    unsafe fn endEdit(&self, _id: sv::ParamID) -> sb::tresult {
+    unsafe fn endEdit(&self, id: sv::ParamID) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::EndEdit, id, 0.0, 0);
         sb::kResultOk
     }
     unsafe fn restartComponent(&self, flags: sb::int32) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::RestartComponent, 0, 0.0, u64::from(flags as u32));
         if flags as u32 & sv::RestartFlags_::kLatencyChanged as u32 != 0 {
             self.latency_changed.store(true, Ordering::Relaxed);
         }

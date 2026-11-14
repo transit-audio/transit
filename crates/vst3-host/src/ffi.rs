@@ -10,7 +10,7 @@
 //! in-process can't prevent that. What this module guarantees is that *SoundCraft* never hands
 //! the plugin dangling or mis-sized pointers and never reads plugin strings beyond their bounds.
 
-use crate::{Vst3Error, scan};
+use crate::{Vst3Error, scan, trace};
 use std::ffi::{c_char, c_int, c_void};
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};

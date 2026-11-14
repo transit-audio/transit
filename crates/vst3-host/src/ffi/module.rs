@@ -650,6 +650,7 @@ impl Bundle {
             main: std::thread::current().id(),
             inner: Mutex::new(EditorInner { component: Some(inst.component.clone()), controller: inst.controller.clone(), ..EditorInner::default() }),
             header: transit_rt::editor_window::HeaderCell::new(),
+            trace_id: inst.host.trace_id,
         });
         inst.editor.detect_editor();
         Ok(inst)

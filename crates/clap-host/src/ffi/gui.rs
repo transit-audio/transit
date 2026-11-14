@@ -354,7 +354,9 @@ impl GuiLink {
         let stream = clap_ostream { ctx: (&mut out as *mut Vec<u8>).cast::<c_void>(), write: Some(ostream_write) };
         // SAFETY: live plugin (`alive`, under the lock); the stream and its context live on this
         // frame for the call.
-        unsafe { save(g.plugin, &stream) }.then_some(out)
+        let saved = unsafe { save(g.plugin, &stream) };
+        trace::record(self.host.trace_id, trace::Call::StateSave, u32::from(saved), 0.0, out.len() as u64);
+        saved.then_some(out)
     }
 
     /// Closes (destroys) the editor.

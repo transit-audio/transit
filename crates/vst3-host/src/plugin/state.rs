@@ -4,6 +4,7 @@ use super::*;
 
 impl transit_dsp::PluginStateReader for Vst3State {
     fn save_state(&mut self) -> Option<Vec<u8>> {
+        let _t = trace::scope(Thread::Ui);
         let to_controller = self.shared.upgrade().map(|s| Arc::clone(&s.to_controller));
         // A parameter only the controller stores (no processor state) would otherwise be saved
         // with the controller's stale value. The host's plain value converts through the
@@ -31,6 +32,7 @@ impl transit_dsp::PluginStateReader for Vst3State {
     /// and the values the host set before it are dropped, including any still queued on the audio
     /// side (#78; the caller stores the returned ones).
     fn load_state(&mut self, data: &[u8]) -> Option<transit_dsp::LoadedValues> {
+        let _t = trace::scope(Thread::Ui);
         let shared = self.shared.upgrade()?;
         if std::thread::current().id() != shared.main {
             log::warn!("{}: a state load off the instance's main thread was refused", shared.info.id);

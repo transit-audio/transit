@@ -37,6 +37,7 @@ mod gate;
 mod plugin;
 mod registry;
 mod scan_cache;
+mod trace;
 
 pub use plugin::ClapPlugin;
 pub use scan_cache::ScanSummary;
@@ -291,7 +292,10 @@ pub fn create(id: &str) -> Option<Box<dyn Plugin>> {
 /// `request_process` and `params.request_flush` need no call: the audio side wakes the plug-in.
 /// Editor handles' `idle` services their own instance as well.
 pub fn service_requests() -> Serviced {
-    api::service_requests()
+    let out = api::service_requests();
+    // The host call trace (#651) is written here, on the plug-in main thread.
+    trace::drain();
+    out
 }
 
 /// The description of a `clap:<id>` plugin. The first call for a type instantiates it once to

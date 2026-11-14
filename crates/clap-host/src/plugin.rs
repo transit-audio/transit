@@ -49,6 +49,7 @@ use echoes::{Echoes, Reported};
 
 use crate::ffi::{EVENT_CAP, Event, GuiLink, HostState, Instance, NotePort, PortBuffers, RELEASE_RESERVE};
 use crate::gate::{Gate, MAX_CHANNELS};
+use crate::trace::{self, Call, Thread};
 use clap_sys::ext::note_ports::{CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI};
 use clap_sys::ext::params::{CLAP_PARAM_RESCAN_ALL, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_TEXT, CLAP_PARAM_RESCAN_VALUES};
 use clap_sys::process::{CLAP_PROCESS_CONTINUE, CLAP_PROCESS_CONTINUE_IF_NOT_QUIET, CLAP_PROCESS_SLEEP, CLAP_PROCESS_TAIL, clap_process_status};
@@ -227,6 +228,7 @@ impl Shared {
             out.other_thread += 1;
             return;
         }
+        let _t = trace::scope(Thread::Service);
         // Issue #205: never inside a host call into plug-in code on this thread (a state load
         // that pumps the message loop): `restart`, `callback` and `params_rescan` stay set for
         // the next call.
@@ -476,6 +478,10 @@ impl ClapPlugin {
     }
 
     pub(crate) fn new(mut inst: Instance, info: &'static PluginInfo) -> ClapPlugin {
+        trace::mark_main();
+        if trace::on() {
+            log::debug!(target: trace::TARGET, "clap inst={} created: {} ({})", inst.state().trace_id, info.name, info.id);
+        }
         let ids: Vec<u32> = info.params.iter().map(|p| p.id.parse::<u32>().unwrap_or(u32::MAX)).collect();
         inst.reserve_parameter_events(ids.len());
         let values = info.params.iter().zip(&ids).map(|(p, id)| inst.param_value(*id).map_or(p.default, |v| p.clamp(v as f32))).collect();
@@ -608,6 +614,8 @@ impl ClapPlugin {
         if let Some(slot) = self.values.get_mut(i) {
             *slot = v;
         }
+        let queued = self.queue.iter().any(|e| matches!(e, Event::Param { id: q, time: t, .. } if *q == cid && *t == time));
+        trace::record(self.host.trace_id, Call::Echo, cid, x, u64::from(v.to_bits()) | u64::from(queued) << 32);
         if let Some(view) = self.shared.view.get(i) {
             view.store(x.to_bits(), Ordering::Relaxed);
         }
@@ -636,6 +644,7 @@ impl ClapPlugin {
         if let Some(at) = self.shared.set_at.get(i) {
             at.store(self.shared.host_gen.fetch_add(1, Ordering::AcqRel) + 1, Ordering::Release);
         }
+        trace::record(self.host.trace_id, Call::HostValue, cid, f64::from(v), u64::from(v.to_bits()));
         Some((cid, f64::from(v)))
     }
 }
@@ -740,6 +749,7 @@ fn note_mode(p: Option<NotePort>) -> NoteMode {
 impl ClapPlugin {
     /// `process`, with the sidechain key when there is one.
     fn process_keyed(&mut self, io: &mut [Vec<f32>], key: Option<&[Vec<f32>]>, frames: usize) {
+        let _t = trace::scope(Thread::Audio);
         let ch = self.channels.min(io.len());
         let frames = io.iter().take(ch).map(Vec::len).fold(frames, usize::min);
         if frames == 0 || ch == 0 {
@@ -896,6 +906,7 @@ impl Plugin for ClapPlugin {
         let sr = if sample_rate.is_finite() && sample_rate > 0.0 { f64::from(sample_rate) } else { 48_000.0 };
         let mb = max_block.clamp(1, MAX_BLOCK);
         self.channels = channels.clamp(1, MAX_CHANNELS);
+        let _t = trace::scope(Thread::Audio);
         let shared = Arc::clone(&self.shared);
         let mut core = lock(&shared.core);
         core.inst.deactivate();
@@ -929,6 +940,7 @@ impl Plugin for ClapPlugin {
     }
 
     fn set_param(&mut self, id: &str, value: f32) -> bool {
+        let _t = trace::scope(Thread::Audio);
         drop_before_load(&mut self.queue, &self.shared.loads, &mut self.loads_seen, &mut self.echoes, &self.shared.reported);
         if let Some(done) = self.echo(0, id, value) {
             return done;
@@ -942,6 +954,7 @@ impl Plugin for ClapPlugin {
     /// With the queue full, the value replaces the parameter's latest queued point (the last
     /// point wins, applied at that point's time: earlier than asked) and the miss is counted.
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
+        let _t = trace::scope(Thread::Audio);
         drop_before_load(&mut self.queue, &self.shared.loads, &mut self.loads_seen, &mut self.echoes, &self.shared.reported);
         if let Some(done) = self.echo(offset, id, value) {
             return done;
@@ -1112,6 +1125,7 @@ impl Plugin for ClapPlugin {
     }
 
     fn load_state(&mut self, data: &[u8]) -> bool {
+        let _t = trace::scope(Thread::Audio);
         let ok = lock(&self.shared.core).inst.load_state(data);
         if ok {
             self.refresh_values();

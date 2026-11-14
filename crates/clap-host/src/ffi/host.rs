@@ -31,6 +31,8 @@ pub(crate) struct HostState {
     /// Parameter changes the plugin reported (output events: typically edits in its GUI),
     /// waiting for the UI. Bounded by `EDIT_CAP`; the audio thread only `try_lock`s it.
     pub edits: Mutex<Vec<(u32, f64)>>,
+    /// The instance's number in the host call trace (#651).
+    pub trace_id: u32,
     /// Linux: this state itself, for the run-loop registrations, which hold it weakly.
     #[cfg(target_os = "linux")]
     pub me: std::sync::Weak<HostState>,
@@ -76,6 +78,7 @@ impl Default for HostState {
             gui_hide: AtomicBool::new(false),
             gui_resize: AtomicU64::new(0),
             edits: Mutex::new(Vec::with_capacity(EDIT_CAP)),
+            trace_id: trace::next_instance(),
             #[cfg(target_os = "linux")]
             me: std::sync::Weak::new(),
             #[cfg(target_os = "linux")]
@@ -101,6 +104,7 @@ pub(crate) unsafe fn state<'a>(host: *const clap_host) -> Option<&'a HostState> 
 pub(super) unsafe extern "C" fn host_request_restart(host: *const clap_host) {
     // SAFETY: the plugin passes back the host pointer we gave it.
     if let Some(s) = unsafe { state(host) } {
+        trace::record(s.trace_id, trace::Call::RequestRestart, 0, 0.0, 0);
         s.restart.store(true, Ordering::Relaxed);
     }
 }
@@ -132,6 +136,7 @@ unsafe extern "C" fn host_log(_host: *const clap_host, severity: clap_log_severi
 unsafe extern "C" fn host_params_rescan(host: *const clap_host, flags: clap_param_rescan_flags) {
     // SAFETY: the plugin passes back the host pointer we gave it.
     if let Some(s) = unsafe { state(host) } {
+        trace::record(s.trace_id, trace::Call::ParamsRescan, 0, 0.0, u64::from(flags));
         s.params_rescan_flags.fetch_or(flags, Ordering::Relaxed);
         s.params_rescan.store(true, Ordering::Release);
     }
@@ -142,6 +147,7 @@ unsafe extern "C" fn host_params_clear(_host: *const clap_host, _id: clap_id, _f
 unsafe extern "C" fn host_params_request_flush(host: *const clap_host) {
     // SAFETY: the plugin passes back the host pointer we gave it.
     if let Some(s) = unsafe { state(host) } {
+        trace::record(s.trace_id, trace::Call::RequestFlush, 0, 0.0, 0);
         s.process.store(true, Ordering::Relaxed);
     }
 }
@@ -156,6 +162,7 @@ unsafe extern "C" fn host_latency_changed(host: *const clap_host) {
 unsafe extern "C" fn host_state_mark_dirty(host: *const clap_host) {
     // SAFETY: the plugin passes back the host pointer we gave it.
     if let Some(s) = unsafe { state(host) } {
+        trace::record(s.trace_id, trace::Call::MarkDirty, 0, 0.0, 0);
         s.dirty.store(true, Ordering::Relaxed);
     }
 }

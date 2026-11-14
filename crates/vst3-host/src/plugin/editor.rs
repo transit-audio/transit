@@ -32,6 +32,7 @@ impl PluginEditor for Vst3Editor {
             transit_dsp::host_call::defer();
             return Vec::new();
         }
+        let _t = trace::scope(Thread::Ui);
         let shared = self.shared.upgrade();
         if let Some(s) = &shared {
             s.service(&mut Serviced::default());
@@ -46,9 +47,11 @@ impl PluginEditor for Vst3Editor {
                 if let Some(s) = &shared {
                     s.note_report(i, v, n);
                 }
+                trace::record(self.host.trace_id, Call::Report, vid, n, u64::from(v.to_bits()));
                 out.push((p.id.to_string(), v));
             }
         }
+        trace::drain();
         out
     }
 

@@ -137,7 +137,9 @@ impl Instance {
         let mut cursor = ReadCursor { data, pos: 0 };
         let stream = clap_istream { ctx: (&mut cursor as *mut ReadCursor<'_>).cast::<c_void>(), read: Some(istream_read) };
         // SAFETY: valid instance; the stream and its cursor live on this frame for the call.
-        unsafe { load(self.plugin, &stream) }
+        let accepted = unsafe { load(self.plugin, &stream) };
+        trace::record(self.state.trace_id, trace::Call::StateLoad, u32::from(accepted), 0.0, data.len() as u64);
+        accepted
     }
 
     /// Runs `on_main_thread` if the plugin asked for a callback.
@@ -253,6 +255,7 @@ impl Instance {
     pub fn activate(&mut self, sample_rate: f64, min_frames: u32, max_frames: u32) -> Result<(), ClapError> {
         self.deactivate();
         let f = self.vt().activate.ok_or_else(|| ClapError::Process("plugin has no activate".into()))?;
+        trace::record(self.state.trace_id, trace::Call::Activate, 0, 0.0, 1);
         // SAFETY: valid, inactive instance; arguments are sane (checked by the caller).
         if !unsafe { f(self.plugin, sample_rate, min_frames, max_frames) } {
             return Err(ClapError::Process("activate failed".into()));
@@ -265,6 +268,7 @@ impl Instance {
     pub fn deactivate(&mut self) {
         self.stop_processing();
         if self.active {
+            trace::record(self.state.trace_id, trace::Call::Activate, 0, 0.0, 0);
             if let Some(f) = self.vt().deactivate {
                 // SAFETY: valid, active instance.
                 unsafe { f(self.plugin) };
@@ -276,6 +280,7 @@ impl Instance {
     /// CLAP `stop_processing` (audio thread) when processing.
     pub fn stop_processing(&mut self) {
         if self.processing {
+            trace::record(self.state.trace_id, trace::Call::Processing, 0, 0.0, 0);
             if let Some(f) = self.vt().stop_processing {
                 // SAFETY: valid instance in the processing state.
                 unsafe { f(self.plugin) };
@@ -312,6 +317,7 @@ impl Instance {
             return Err(ProcessError::BeforeCall);
         }
         if !self.processing {
+            trace::record(self.state.trace_id, trace::Call::Processing, 0, 0.0, 1);
             let ok = match self.vt().start_processing {
                 // SAFETY: valid, active instance.
                 Some(f) => unsafe { f(self.plugin) },
@@ -326,6 +332,10 @@ impl Instance {
         self.raw.clear();
         for e in events.iter().take(self.raw.capacity()) {
             self.raw.push(RawEvent::from_event(e, offset));
+            if let Event::Param { time, id, value } = *e {
+                // The values exactly as the plug-in reads them (#651).
+                trace::record(self.state.trace_id, trace::Call::InParamValue, id, value, u64::from(time.saturating_sub(offset)));
+            }
         }
         inputs.refresh();
         outputs.refresh();
@@ -354,6 +364,9 @@ impl Instance {
         // lists and their contexts and the transport live on this stack frame / in `self.raw`,
         // untouched until the call returns.
         let status = unsafe { process(self.plugin, &p) };
+        for &(id, v) in &self.out_params {
+            trace::record(self.state.trace_id, trace::Call::OutParamValue, id, v, 0);
+        }
         if !self.out_params.is_empty()
             && let Ok(mut edits) = self.state.edits.try_lock()
         {

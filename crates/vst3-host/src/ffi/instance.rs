@@ -121,14 +121,18 @@ impl Instance {
         let Some((comp, ctrl)) = split_state(data) else { return false };
         let stream = MemoryStream::new(comp.to_vec());
         let Some(s) = stream.as_com_ref::<sb::IBStream>() else { return false };
+        let id = self.host.trace_id;
         // SAFETY: valid component; the stream lives on this frame for the call.
-        if !ok(unsafe { self.component.setState(s.as_ptr()) }) {
+        let accepted = ok(unsafe { self.component.setState(s.as_ptr()) });
+        trace::record(id, trace::Call::ComponentSetState, u32::from(accepted), 0.0, comp.len() as u64);
+        if !accepted {
             return false;
         }
         if let Some(c) = &self.controller {
             stream.lock().1 = 0;
             // SAFETY: valid controller; the same stream, rewound.
             let result = unsafe { c.setComponentState(s.as_ptr()) };
+            trace::record(id, trace::Call::ControllerSetComponentState, u32::from(ok(result)), 0.0, comp.len() as u64);
             // A controller may leave component-state synchronization unimplemented.
             if !ok(result) && result != sb::kNotImplemented {
                 return false;
@@ -137,7 +141,9 @@ impl Instance {
                 let cs = MemoryStream::new(ctrl.to_vec());
                 let Some(r) = cs.as_com_ref::<sb::IBStream>() else { return false };
                 // SAFETY: valid controller; the stream lives on this frame for the call.
-                if !ok(unsafe { c.setState(r.as_ptr()) }) {
+                let accepted = ok(unsafe { c.setState(r.as_ptr()) });
+                trace::record(id, trace::Call::ControllerSetState, u32::from(accepted), 0.0, ctrl.len() as u64);
+                if !accepted {
                     return false;
                 }
             }
@@ -150,11 +156,16 @@ impl Instance {
         let Some(c) = &self.controller else { return };
         let stream = ComWrapper::new(MemoryStream { inner: Mutex::new((Vec::new(), 0)) });
         let Some(s) = stream.as_com_ref::<sb::IBStream>() else { return };
+        let id = self.host.trace_id;
         // SAFETY: valid component; the stream lives on this frame for the whole call.
-        if ok(unsafe { self.component.getState(s.as_ptr()) }) {
+        let got = ok(unsafe { self.component.getState(s.as_ptr()) });
+        let len = stream.lock().0.len() as u64;
+        trace::record(id, trace::Call::ComponentGetState, u32::from(got), 0.0, len);
+        if got {
             stream.lock().1 = 0;
             // SAFETY: valid controller; same stream, rewound.
-            unsafe { c.setComponentState(s.as_ptr()) };
+            let result = unsafe { c.setComponentState(s.as_ptr()) };
+            trace::record(id, trace::Call::ControllerSetComponentState, u32::from(ok(result)), 0.0, len);
         }
     }
 
@@ -389,6 +400,7 @@ impl Instance {
         if !ok(unsafe { p.setupProcessing(&mut setup) }) {
             return Err(Vst3Error::Process("setupProcessing failed".into()));
         }
+        trace::record(self.host.trace_id, trace::Call::SetActive, 0, 0.0, 1);
         // SAFETY: valid component, configured above.
         if !ok(unsafe { self.component.setActive(1) }) {
             return Err(Vst3Error::Process("setActive failed".into()));
@@ -411,12 +423,14 @@ impl Instance {
     pub fn shutdown(&mut self) {
         if self.processing {
             if let Some(p) = self.processor() {
+                trace::record(self.host.trace_id, trace::Call::SetProcessing, 0, 0.0, 0);
                 // SAFETY: valid processor in the processing state.
                 unsafe { p.setProcessing(0) };
             }
             self.processing = false;
         }
         if self.active {
+            trace::record(self.host.trace_id, trace::Call::SetActive, 0, 0.0, 0);
             // SAFETY: valid, active component.
             unsafe { self.component.setActive(0) };
             self.active = false;
@@ -447,12 +461,18 @@ impl Instance {
         }
         let p = self.processor.clone().ok_or(sb::kNoInterface)?;
         if !self.processing {
+            trace::record(self.host.trace_id, trace::Call::SetProcessing, 0, 0.0, 1);
             // Many plugins return kNotImplemented here; that is not an error.
             // SAFETY: valid, active processor.
             unsafe { p.setProcessing(1) };
             self.processing = true;
         }
         let dropped = self.in_params.fill(points, offset);
+        if trace::on() {
+            // The points exactly as the processor reads them from its queues (#651).
+            let id = self.host.trace_id;
+            self.in_params.each_point(|pid, at, v| trace::record(id, trace::Call::ProcessorPoint, pid, v, u64::from(at.max(0) as u32)));
+        }
         self.out_params.clear();
         let event_in = self.event_in;
         self.in_events.with(|v| {

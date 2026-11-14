@@ -52,6 +52,7 @@ mod params;
 mod plugin;
 mod registry;
 mod scan_cache;
+mod trace;
 
 pub use plugin::Vst3Plugin;
 pub use scan_cache::ScanSummary;
@@ -409,7 +410,10 @@ pub fn create(id: &str) -> Option<Box<dyn Plugin>> {
 /// blocks on the audio thread: a busy instance is serviced by a later call. Editor handles'
 /// `idle` services their own instance as well.
 pub fn service_requests() -> Serviced {
-    api::service_requests()
+    let out = api::service_requests();
+    // The host call trace (#651) is written here, on the plug-in main thread.
+    trace::drain();
+    out
 }
 
 /// The description of a `vst3:<class id>` plugin. The first call for a type instantiates it once

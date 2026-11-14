@@ -10,7 +10,7 @@
 //! *SoundCraft* never hands the plugin dangling or mis-sized pointers, never calls a missing
 //! (null) function pointer, and never reads plugin strings beyond their bounds.
 
-use crate::{ClapError, scan};
+use crate::{ClapError, scan, trace};
 use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::entry::clap_plugin_entry;
 use clap_sys::events::{
