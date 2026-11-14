@@ -26,6 +26,8 @@ v0.6.1 and v0.6.2 serialized nothing new and have no files. v0.7.0 adds its two 
 
 v0.7.1 is a patch with no new serialized feature (the `pre_count` need exists in the model but nothing in 0.7.1 writes a session that needs it), so its two files are the demo session and the same features session as v0.7.0, saved by the 0.7.1 code.
 
+v0.7.2 is a patch with no new serialized feature (what it adds to a recording's journal is not part of the session document), so its two files are the demo session and the same features session as v0.7.0, saved by the 0.7.2 code.
+
 One file is hand-written, not saved by a build: `v0.3.2-video.transit` has an audio track, a Video
 track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 (it opens with the video
 dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`
