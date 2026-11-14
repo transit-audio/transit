@@ -13,7 +13,12 @@
 //! `transit-rt` (MMCSS "Pro Audio" on Windows), as the native WASAPI worker does.
 //!
 //! There are no inputs: a capture open is refused ([`NO_INPUT`]).
+//!
+//! The thread runs its loop under `catch_unwind`, as the native WASAPI render loop does: a panic in
+//! the render callback ends the stream and is reported once through the error callback as
+//! [`ab::StreamError::Other`], instead of showing only as a stall.
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -46,6 +51,8 @@ pub trait PaceClock: Send + Sync {
     fn interrupt(&self) {}
     /// A stream (re)starts on this clock, before its thread runs.
     fn resume(&self) {}
+    /// The pacing thread ended (stopped, or its callback panicked) and waits on this clock no more.
+    fn ended(&self) {}
 }
 
 /// The real-time clock: `std::time::Instant` from the process origin the stamps use, so the time it
@@ -144,12 +151,13 @@ impl ab::Backend for NullBackend {
         _endpoint: &ab::Endpoint,
         request: &ab::OpenRequest,
         render: ab::RenderCallback,
-        _error: ab::ErrorCallback,
+        error: ab::ErrorCallback,
     ) -> Result<(Box<dyn ab::Stream>, ab::Achieved), ab::OpenError> {
-        // The silent device never faults, so its error callback is never called.
+        // The silent device itself never faults: its error callback is called only for a panic in
+        // the render callback.
         let clock = self.clock.clone().unwrap_or_else(|| Arc::new(MonotonicClock::new(request.origin)));
         let stream = NullStream {
-            render: Arc::new(Mutex::new(Some(render))),
+            callbacks: Arc::new(Mutex::new(Some((render, error)))),
             thread: Mutex::new(None),
             stop: Arc::new(AtomicBool::new(false)),
             priority: Arc::new(AtomicU8::new(PRIO_PENDING)),
@@ -183,11 +191,14 @@ const PRIO_FAILED: u8 = 3;
 const PRIO_UNOBSERVED: u8 = 4;
 const PRIO_RELEASED: u8 = 5;
 
-/// The silent device's output stream: the pacing thread runs between `start` and `stop`. The render
-/// callback is lent to the thread while it runs and given back when it ends, so a stopped stream
+/// The render and error callbacks, lent to the pacing thread while it runs.
+type Callbacks = (ab::RenderCallback, ab::ErrorCallback);
+
+/// The silent device's output stream: the pacing thread runs between `start` and `stop`. The
+/// callbacks are lent to the thread while it runs and given back when it ends, so a stopped stream
 /// can start again.
 struct NullStream {
-    render: Arc<Mutex<Option<ab::RenderCallback>>>,
+    callbacks: Arc<Mutex<Option<Callbacks>>>,
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     stop: Arc<AtomicBool>,
     priority: Arc<AtomicU8>,
@@ -203,13 +214,14 @@ impl ab::Stream for NullStream {
         if thread.is_some() {
             return Ok(());
         }
-        let render = self.render.lock().unwrap_or_else(PoisonError::into_inner).take();
-        let render = render.ok_or_else(|| ab::OpenError::Other("the silent device's render callback is gone".into()))?;
+        let callbacks = self.callbacks.lock().unwrap_or_else(PoisonError::into_inner).take();
+        let (render, error) = callbacks.ok_or_else(|| ab::OpenError::Other("the silent device's render callback is gone".into()))?;
         self.stop.store(false, Ordering::Release);
         self.clock.resume();
         let pacing = Pacing {
             render,
-            slot: Arc::clone(&self.render),
+            error,
+            slot: Arc::clone(&self.callbacks),
             stop: Arc::clone(&self.stop),
             priority: Arc::clone(&self.priority),
             clock: Arc::clone(&self.clock),
@@ -253,7 +265,8 @@ impl Drop for NullStream {
 /// What the pacing thread owns while it runs.
 struct Pacing {
     render: ab::RenderCallback,
-    slot: Arc<Mutex<Option<ab::RenderCallback>>>,
+    error: ab::ErrorCallback,
+    slot: Arc<Mutex<Option<Callbacks>>>,
     stop: Arc<AtomicBool>,
     priority: Arc<AtomicU8>,
     clock: Arc<dyn PaceClock>,
@@ -263,7 +276,7 @@ struct Pacing {
 
 impl Pacing {
     fn run(self) {
-        let Pacing { mut render, slot, stop, priority, clock, format, frames } = self;
+        let Pacing { mut render, mut error, slot, stop, priority, clock, format, frames } = self;
         // The device-independent setup of a real callback thread, at thread start (never per block).
         let promotion = transit_rt::promote_audio_thread();
         priority.store(
@@ -278,23 +291,32 @@ impl Pacing {
         let channels = usize::from(format.channels.max(1));
         // Allocated once, before the first block; the loop allocates nothing.
         let mut data = vec![0.0f32; frames as usize * channels];
-        let mut pacer = Pacer::new(clock.now(), frames, format.rate);
-        while !stop.load(Ordering::Acquire) {
-            clock.wait_until(pacer.deadline(), &stop);
-            if stop.load(Ordering::Acquire) {
-                break;
+        let paced = catch_unwind(AssertUnwindSafe(|| {
+            let mut pacer = Pacer::new(clock.now(), frames, format.rate);
+            while !stop.load(Ordering::Acquire) {
+                clock.wait_until(pacer.deadline(), &stop);
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+                let Some(tick) = pacer.wake(clock.now()) else { continue };
+                let mut sink = Discard { data: &mut data, channels };
+                let mut block = ab::RenderBlock::new(frames as usize, tick.stamp, format, &mut sink);
+                block.device_position = Some(tick.position);
+                render(&mut block);
             }
-            let Some(tick) = pacer.wake(clock.now()) else { continue };
-            let mut sink = Discard { data: &mut data, channels };
-            let mut block = ab::RenderBlock::new(frames as usize, tick.stamp, format, &mut sink);
-            block.device_position = Some(tick.position);
-            render(&mut block);
+        }));
+        if let Err(payload) = paced {
+            // Reported once; the error callback may panic too, and there is nobody left to tell.
+            let _ = catch_unwind(AssertUnwindSafe(|| error(ab::StreamError::Other)));
+            // A payload whose own drop panics must not skip the teardown below either.
+            let _ = catch_unwind(AssertUnwindSafe(move || drop(payload)));
         }
         transit_rt::demote(promotion);
         if promotion.is_promoted() {
             priority.store(PRIO_RELEASED, Ordering::Release);
         }
-        *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(render);
+        *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some((render, error));
+        clock.ended();
     }
 }
 
@@ -395,7 +417,7 @@ struct StepState {
     now: Duration,
     /// The deadline the pacing thread waits for, while it waits.
     waiting: Option<Duration>,
-    /// A stop interrupted the wait: the thread is ending.
+    /// A stop interrupted the wait, or the thread ended: nothing waits on this clock now.
     interrupted: bool,
 }
 
@@ -450,6 +472,10 @@ impl PaceClock for StepClock {
     }
     fn resume(&self) {
         self.state.lock().unwrap_or_else(PoisonError::into_inner).interrupted = false;
+    }
+    /// The thread is gone: a [`Self::settle`] in progress returns instead of waiting for a wait.
+    fn ended(&self) {
+        self.interrupt();
     }
 }
 

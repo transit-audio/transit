@@ -128,3 +128,37 @@ fn the_stream_renders_fixed_blocks_paced_by_its_clock_and_restarts_after_a_stop(
     assert_eq!(seen.lock().unwrap().len(), 5, "started again with its callback");
     drop(stream);
 }
+
+#[test]
+fn a_panic_in_the_render_callback_is_reported_once_through_the_error_callback() {
+    let clock = StepClock::new();
+    let backend = NullBackend::new().with_clock(Arc::clone(&clock) as Arc<dyn PaceClock>);
+    let plan = backend.plan_render(&ab::OutputWish::default()).unwrap();
+    let blocks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&blocks);
+    let render: ab::RenderCallback = Box::new(move |_block| {
+        if counted.fetch_add(1, Ordering::Relaxed) + 1 == 2 {
+            panic!("a fault in the render callback (expected by this test)");
+        }
+    });
+    let errors: Arc<Mutex<Vec<ab::StreamError>>> = Arc::default();
+    let reported = Arc::clone(&errors);
+    let error: ab::ErrorCallback = Box::new(move |e| reported.lock().unwrap().push(e));
+    let (stream, _) = backend.open_render(&plan.endpoint, &plan.attempts[0], render, error).unwrap();
+    stream.start().unwrap();
+    clock.settle();
+    assert_eq!(blocks.load(Ordering::Relaxed), 1);
+    assert!(errors.lock().unwrap().is_empty(), "nothing to report before the fault");
+    // The second block panics: the thread reports it and ends (the clock's settle sees it end).
+    clock.advance(PERIOD);
+    assert_eq!(*errors.lock().unwrap(), vec![ab::StreamError::Other], "the panic is reported once, as a stream error");
+    clock.advance(PERIOD * 4);
+    assert_eq!(blocks.load(Ordering::Relaxed), 2, "the stream ended at the panic");
+    assert_eq!(errors.lock().unwrap().len(), 1, "reported once only");
+    // The callbacks were given back: the stream starts again with them.
+    stream.stop().unwrap();
+    stream.start().unwrap();
+    clock.settle();
+    assert_eq!(blocks.load(Ordering::Relaxed), 3, "started again with its callbacks");
+    drop(stream);
+}
