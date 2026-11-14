@@ -158,6 +158,10 @@ pub struct Player {
     system_audio: Cell<Option<u16>>,
     pub device_buffer: Option<u32>,
     pub silent: bool,
+    /// The silent device of a `--null-audio` run ([`Self::with_null_device`]): no hardware, no
+    /// input, no MIDI ports; also set on its silent fallback, so no path of this Player reaches a
+    /// system audio backend.
+    null_device: bool,
 }
 
 impl Player {
@@ -171,6 +175,10 @@ impl Player {
     }
     pub fn initial_error(&self) -> Option<&str> {
         self.initial_error.as_deref()
+    }
+    /// Whether this Player runs the silent device of a `--null-audio` run.
+    pub fn null_device(&self) -> bool {
+        self.null_device
     }
     pub fn update_session(&self, session: Arc<Session>) -> Result<SessionRequestId, PlayerError> {
         self.owner()?.update_session(session)
@@ -997,6 +1005,10 @@ impl Player {
         cpal: &dyn ab::BackendFactory,
         native_for: &dyn Fn(&AudioConfig) -> Option<Box<dyn ab::BackendFactory>>,
     ) -> Result<record::Recorder, String> {
+        // The silent device has no input, and its Player never opens one elsewhere.
+        if self.null_device {
+            return Err(crate::backend::null::NO_INPUT.into());
+        }
         let mut input = self.input.try_borrow_mut().map_err(|_| "input transition is busy")?;
         match &mut *input {
             HeldInput::No => {
@@ -1324,6 +1336,7 @@ mod low_latency;
 mod midi_map_api;
 #[cfg(test)]
 mod midi_map_tests;
+mod null_open;
 mod realtime_render;
 mod telemetry_api;
 

@@ -1448,5 +1448,6 @@ fn a_live_loop_survives_the_document_edit_that_superseded_its_snapshot() {
 
 mod fake_only;
 mod no_fallback;
+mod null;
 mod open;
 use open::{fake_factory, modes};

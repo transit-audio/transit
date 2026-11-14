@@ -44,6 +44,8 @@ impl NativeKind {
 /// Elsewhere the saved choice where it serves the system: native JACK on the JACK system, or `Auto`
 /// when a JACK server answers (ADR 0021).
 pub fn factory_for(cfg: &AudioConfig) -> Option<(Box<dyn ab::BackendFactory>, NativeKind)> {
+    #[cfg(test)]
+    super::asks::count();
     #[cfg(all(target_os = "linux", feature = "native-jack"))]
     if auto_jack_candidate(cfg) && matches!(transit_audio_jack::JackBackend::shared().probe(), transit_audio_jack::ServerState::Running(_)) {
         return Some((Box::new(transit_audio_jack::JackFactory), NativeKind::Jack));

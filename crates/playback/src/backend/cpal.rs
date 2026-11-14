@@ -30,6 +30,8 @@ pub struct CpalFactory;
 
 impl ab::BackendFactory for CpalFactory {
     fn backend(&self, system: Option<&str>) -> Option<Box<dyn ab::Backend>> {
+        #[cfg(test)]
+        super::asks::count();
         host_named(system).map(|host| Box::new(CpalBackend { host }) as Box<dyn ab::Backend>)
     }
 }

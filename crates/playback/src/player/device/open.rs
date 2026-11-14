@@ -138,6 +138,7 @@ impl Player {
             system_audio: Cell::new(None),
             device_buffer: None,
             silent: true,
+            null_device: false,
         }
     }
 
@@ -412,7 +413,12 @@ impl Player {
     /// Open the output through the audio system `factory` makes. Every device call goes through
     /// the backend trait; the adapter owns the sample format, the ASIO duplex order and the
     /// timestamps of the clocks.
-    fn open_with(session: Arc<Session>, cfg: &AudioConfig, factory: &dyn ab::BackendFactory, monitor: &MonitorSettings) -> Result<Self, String> {
+    pub(super) fn open_with(
+        session: Arc<Session>,
+        cfg: &AudioConfig,
+        factory: &dyn ab::BackendFactory,
+        monitor: &MonitorSettings,
+    ) -> Result<Self, String> {
         Self::open_stepped(session, cfg, factory, OpenStep::PLANNED, monitor).map_err(|failure| failure.text)
     }
 
@@ -556,7 +562,13 @@ impl Player {
                 "{}",
                 crate::open_log::describe(&crate::open_log::OpenReport {
                     direction: "output",
-                    backend: if step.native { "native" } else { "cpal" },
+                    backend: if step.native {
+                        "native"
+                    } else if system == crate::backend::null::SYSTEM {
+                        "none"
+                    } else {
+                        "cpal"
+                    },
                     host: &system,
                     device: &name,
                     asked: request,
@@ -597,8 +609,12 @@ impl Player {
             player.silent = false;
             // A unit test enables a fake MIDI backend itself: no test reaches the system's MIDI
             // ports (a session naming a real synth's port would otherwise open it and play it).
+            // Nor does the silent device's run (`--null-audio`): it is a diagnostic beside the user's
+            // own instance, whose MIDI ports it must not take.
             #[cfg(not(test))]
-            if let Some(midi) = player.midi.get_mut() {
+            if system != crate::backend::null::SYSTEM
+                && let Some(midi) = player.midi.get_mut()
+            {
                 midi.enable(transit_midi_io::MidiIo::new("transit"));
             }
             return Ok(player);
@@ -606,7 +622,7 @@ impl Player {
         Err(OpenFailure { text: error, error: typed })
     }
 
-    fn silent_runtime(session: Arc<Session>, error: String) -> Self {
+    pub(super) fn silent_runtime(session: Arc<Session>, error: String) -> Self {
         let rate = session.sample_rate.hz();
         let (mut player, access, _clock) = match Self::prepare(session, rate, IoMap::default()) {
             Ok(prepared) => prepared,
