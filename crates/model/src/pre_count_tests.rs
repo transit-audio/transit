@@ -1,5 +1,5 @@
 //! The pre-count zone in the model (ADR 0052 decisions 2 and 13): the derived session start and
-//! the `pre_count` need.
+//! the `pre_count` need; and the `midi_hidden_notes` need (decision 17.8).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -74,4 +74,56 @@ fn a_session_with_a_zone_round_trips_and_a_build_without_the_entry_warns() {
     assert_eq!(old, vec!["pre_count".to_string()]);
     let note = crate::unknown_needs_note(&old).unwrap();
     assert!(note.contains("pre_count") && note.contains("saving it from here can drop them"), "{note}");
+}
+
+/// The `KNOWN_NEEDS` of the last build before the left edge hid (ADR 0052 decision 17.8).
+const BEFORE_HIDDEN_NOTES: [&str; 6] = ["clip_loop", "clip_scale_mode", "device_pages", "pre_count", "sampler_patch", "sampler_slicing_modes"];
+
+fn session_with_sequence(seq: Sequence, looping: Option<crate::ClipLoop>) -> Session {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
+    let mut c = Clip::midi(ClipId(10), "m", 96_000, 96_000, seq);
+    c.looping = looping;
+    s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(c);
+    s
+}
+
+#[test]
+fn the_hidden_notes_need_is_listed_exactly_when_an_unlooped_clip_holds_an_event_before_tick_0() {
+    let ctrl = |tick| transit_midi::CtrlEvent { tick, channel: 0, kind: transit_midi::CtrlKind::Cc(64), value: 127 };
+    let cases = [
+        (Sequence { notes: vec![note(0)], ctrls: vec![ctrl(0)] }, None, false),
+        (Sequence { notes: vec![note(-1), note(0)], ctrls: Vec::new() }, None, true),
+        (Sequence { notes: vec![note(0)], ctrls: vec![ctrl(-1)] }, None, true),
+        // A valid loop's negative ticks are loop material; an invalid loop is no loop.
+        (Sequence { notes: vec![note(-480)], ctrls: Vec::new() }, Some(crate::ClipLoop { start: 0, end: 48_000 }), false),
+        (Sequence { notes: vec![note(-480)], ctrls: Vec::new() }, Some(crate::ClipLoop { start: 0, end: 10 }), true),
+    ];
+    for (i, (seq, looping, listed)) in cases.into_iter().enumerate() {
+        let s = session_with_sequence(seq, looping);
+        assert_eq!(s.needs().contains(&"midi_hidden_notes"), listed, "case {i}");
+        assert!(!s.needs().contains(&"pre_count"), "case {i}: the clip starts after bar 1");
+    }
+    // A clip on an inactive playlist counts: the file holds it.
+    let mut s = session_with_clip_at(0);
+    let t = s.tracks[0].id;
+    s.track_mut(t).unwrap().playlists.push(Playlist {
+        name: "take 2".into(),
+        clips: vec![Clip::midi(ClipId(12), "p", 0, 48_000, Sequence { notes: vec![note(-10)], ctrls: Vec::new() })],
+    });
+    assert!(s.needs().contains(&"midi_hidden_notes"));
+}
+
+#[test]
+fn a_session_with_hidden_notes_round_trips_and_a_build_without_the_entry_warns() {
+    let s = session_with_sequence(Sequence { notes: vec![note(-960), note(0)], ctrls: Vec::new() }, None);
+    let text = s.to_json().unwrap();
+    let back = Session::from_json(&text).unwrap();
+    assert!(back.load_notes.is_empty(), "{:?}", back.load_notes);
+    assert_eq!(back.tracks[0].clips(), s.tracks[0].clips(), "the hidden note is kept");
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let old = crate::unknown_needs(&v, &BEFORE_HIDDEN_NOTES);
+    assert_eq!(old, vec!["midi_hidden_notes".to_string()]);
+    let note = crate::unknown_needs_note(&old).unwrap();
+    assert!(note.contains("midi_hidden_notes") && note.contains("saving it from here can drop them"), "{note}");
 }

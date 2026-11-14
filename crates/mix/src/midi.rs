@@ -242,23 +242,30 @@ impl Rtp {
 
 /// A clip note as it plays: real-time properties applied, its on and off in session samples (the
 /// off clamped to `last`, the clip's [`grid_end`], which the caller takes once per clip). `None`
-/// when it starts at or after the grid end.
+/// when it starts at or after the grid end, or when the clip's left edge hides it.
+///
+/// `hides` is [`left_edge_hides`] of the clip, taken once per clip: a note stored before tick 0 in
+/// such a clip is hidden whole, even when its release is after the edge (ADR 0052 decision 17.3),
+/// and a visible note the track's Delay moves before tick 0 sounds at tick 0. A looped clip keeps
+/// negative ticks: they are loop material its cycles play. Allocation-free: runs on the audio thread.
 pub(crate) fn played_note(
     s: &Session,
     last: Samples,
     base: i64,
     rtp: Rtp,
     n0: &transit_midi::Note,
-    keep_negative: bool,
+    hides: bool,
 ) -> Option<(transit_midi::Note, Samples, Samples)> {
+    if hides && n0.start < 0 {
+        return None;
+    }
     let sr = s.sample_rate;
     let mut n = *n0;
     n.velocity = (i64::from(n.velocity) + rtp.velocity).clamp(1, 127) as u8;
     n.pitch = (i64::from(n.pitch) + rtp.transpose).clamp(0, 127) as u8;
     n.length = ((n.length as f64 * rtp.duration) as i64).max(1);
-    // A looped clip keeps notes a start trim moved before its start (negative ticks).
     n.start = n.start.saturating_add(rtp.delay);
-    if !keep_negative {
+    if hides {
         n.start = n.start.max(0);
     }
     let on = s.tempo.tick_to_samples(base.saturating_add(n.start), sr);
@@ -328,8 +335,9 @@ pub(crate) fn notes_across(s: &Session, t: &Track, pos: Samples, ending: bool, m
         let base = s.tempo.samples_to_ticks(clip.start, s.sample_rate);
         let looping = midi_loop_frame(s, clip);
         let last = grid_end(s, clip);
+        let hides = left_edge_hides(clip);
         for n0 in &sequence.notes {
-            let Some((n, on, off)) = played_note(s, last, base, rtp, n0, looping.is_some()) else { continue };
+            let Some((n, on, off)) = played_note(s, last, base, rtp, n0, hides) else { continue };
             // The same spans playback plays, looked up for the one sample `pos`.
             note_spans(s, last, looping, on, off, pos, pos.saturating_add(1), |on, off| {
                 if on < pos && (off > pos || (ending && off == pos)) {
@@ -389,8 +397,9 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
             let looping = midi_loop_frame(s, clip);
             // The clip's grid end, once per clip: every point is tested against it.
             let last = grid_end(s, clip);
+            let hides = left_edge_hides(clip);
             for n0 in &sequence.notes {
-                let Some((n, on, off)) = played_note(s, last, base, rtp, n0, looping.is_some()) else { continue };
+                let Some((n, on, off)) = played_note(s, last, base, rtp, n0, hides) else { continue };
                 note_spans(s, last, looping, on, off, pos, end, |on, off| {
                     if ons && on >= pos && on < end {
                         let at = usize::try_from(on - pos).unwrap_or(0);
@@ -436,8 +445,8 @@ pub(crate) fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: us
             let near = s.tempo.samples_to_ticks(pos, sr).saturating_sub(base).saturating_sub(1)
                 ..=s.tempo.samples_to_ticks(end, sr).saturating_sub(base).saturating_add(1);
             // Events before tick 0 are what a start trim hid: they don't play, except in a looped
-            // clip, where later cycles do.
-            for c in sequence.ctrls.iter().filter(|c| c.tick >= 0 || looping.is_some()) {
+            // clip, where later cycles do (the left-edge rule, ADR 0052 decision 17).
+            for c in sequence.ctrls.iter().filter(|c| !left_hidden(clip, c.tick)) {
                 let tick = c.tick.saturating_add(delay);
                 let tick = if looping.is_some() { tick } else { tick.max(0) };
                 if let Some(frame) = looping {
@@ -544,7 +553,7 @@ fn pedal_state_before(s: &Session, clip: &Clip, rtp: Rtp, until: Samples) -> [Op
     let sr = s.sample_rate;
     let base = s.tempo.samples_to_ticks(clip.start, sr);
     let looping = midi_loop_frame(s, clip);
-    for c in sequence.ctrls.iter().filter(|c| c.tick >= 0 || looping.is_some()) {
+    for c in sequence.ctrls.iter().filter(|c| !left_hidden(clip, c.tick)) {
         let CtrlKind::Cc(cc) = c.kind else { continue };
         let Some(slot) = pedal_slot_of(cc & 0x7F, c.channel) else { continue };
         let tick = c.tick.saturating_add(rtp.delay);
@@ -858,7 +867,7 @@ pub(crate) fn chase_controllers(s: &Session, t: &Track, pos: Samples, inst: &mut
         let base = s.tempo.samples_to_ticks(clip.start, sr);
         let until = pos.min(grid_end(s, clip));
         let looping = midi_loop_frame(s, clip);
-        for c in sequence.ctrls.iter().filter(|c| c.tick >= 0 || looping.is_some()) {
+        for c in sequence.ctrls.iter().filter(|c| !left_hidden(clip, c.tick)) {
             let slot = match c.kind {
                 CtrlKind::Cc(n) => usize::from(n & 0x7F),
                 CtrlKind::PitchBend => BEND,

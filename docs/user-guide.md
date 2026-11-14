@@ -88,6 +88,27 @@ Clicking empty grid clears the selection and marks where step entry begins; it n
 - N toggles Focus Mode, or hold N for momentary focus: the other clips' notes dim, and only the foreground clip is edited. Double-click a note to focus its clip without deleting it. With one clip open, double-click still deletes the note.
 - Step entry, the controller lane and the clip-end handle work on the foreground clip.
 
+## Trimming a MIDI clip
+
+Dragging a MIDI clip's start edge later hides the notes and controller moves before the new start;
+it does not delete them. Drag the start edge back out and they return exactly where they were
+played. Trim Start to Insertion and Trim to Selection work the same way. A note
+that starts before the edge is silent as a whole, even if it is still held after the edge: a chord
+held across the edge stays silent until the edge is dragged back before it. The end edge already
+worked this way: notes past it stay in the clip and do not play.
+
+Hidden notes are not drawn in the piano roll or on the clip, and Select All, quantize, transpose,
+Duplicate and Delete leave them alone. The session file keeps them. A copy of the clip, a copied or
+pasted range, a DAWproject export and a clip group file carry only what sounds; a split gives each
+half the notes on its side.
+
+Clear Loop on a looped clip whose start was trimmed, or dragging its loop handle back to the end
+of the first cycle, leaves the notes before the start that the loop's repeats played. They are
+hidden too: kept, and silent until the start edge is dragged back.
+
+A session with hidden notes lists them for older builds. A build before 0.7.3 that reads session
+markers warns when it opens one, because it plays hidden notes all at once at the clip's start.
+
 ## Note names: Middle C
 
 **Options > Middle C** sets the name MIDI note 60 carries in every transit window: **C3** (the

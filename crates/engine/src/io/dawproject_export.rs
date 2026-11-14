@@ -425,6 +425,16 @@ fn midi_clip(out: &mut String, s: &Session, c: &Clip) {
     out.push_str(" name=\"");
     out.push_str(&escaped(&c.name));
     out.push_str("\">\n          <Lanes>\n");
+    // What the clip's left edge hides is not exported: the file gets what sounds (ADR 0052
+    // decision 17, slice 6a). A session file keeps it; the DAWproject clip starts at its edge.
+    let mut shown = None;
+    if c.holds_left_hidden() {
+        let mut kept = sequence.clone();
+        kept.notes.retain(|n| !transit_mix::left_hidden(c, n.start));
+        kept.ctrls.retain(|e| !transit_mix::left_hidden(c, e.tick));
+        shown = Some(kept);
+    }
+    let sequence = shown.as_ref().unwrap_or(sequence);
     notes(out, sequence);
     controllers(out, sequence);
     out.push_str("          </Lanes>\n        </Clip>\n");

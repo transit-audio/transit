@@ -1,7 +1,7 @@
 //! A MIDI clip's left edge hides (ADR 0052 decision 17), engine preparation (slice 4): the walkers
 //! that act on what a clip holds leave alone, or never carry, an event that an unlooped clip
-//! stores before tick 0. Nothing in a session made by transit holds such an event yet, so every
-//! clip here is built with negative ticks directly.
+//! stores before tick 0. Every clip here is built with negative ticks directly; the activation
+//! tests (slice 6a, `hidden_edge_activation_tests.rs`) make them with the real start trim.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 

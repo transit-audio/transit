@@ -339,6 +339,14 @@ impl Clip {
         self.gain_env.iter_mut().for_each(|(t, _)| *t = t.saturating_sub(delta));
     }
 
+    /// Whether the clip's left edge hides something it holds (ADR 0052 decision 17): a MIDI clip that
+    /// is not validly looped with a note or controller at a stored tick before 0. Playback's rule is
+    /// `transit_mix::left_hidden`; this is the same test for the session's `needs`.
+    pub fn holds_left_hidden(&self) -> bool {
+        let ClipContent::Midi { sequence } = &self.content else { return false };
+        !self.looping.is_some_and(ClipLoop::is_valid) && (sequence.notes.iter().any(|n| n.start < 0) || sequence.ctrls.iter().any(|c| c.tick < 0))
+    }
+
     /// Move the loop range `delta` samples earlier (a start trim of `delta`); clears it if the trim
     /// left no cycle.
     pub fn shift_loop(&mut self, delta: Samples) {

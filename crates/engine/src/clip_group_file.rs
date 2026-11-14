@@ -64,6 +64,9 @@ pub fn export(e: &Engine, ids: &[ClipId], path: &str) -> Result<usize> {
     for (_, v) in lanes {
         let mut lane = Vec::new();
         for mut c in v {
+            // An export of clips is a copy: it never carries what a clip's left edge hides (ADR
+            // 0052 decision 17.10, slice 6a), as `edit.copy_clips` does not.
+            crate::edit::drop_left_hidden(&mut c);
             c.start -= start;
             if let ClipContent::Audio { source, .. } = c.content
                 && let std::collections::btree_map::Entry::Vacant(slot) = audio.entry(source.0)
@@ -290,6 +293,31 @@ mod tests {
         assert_ne!(source, src, "the import reads the file, not the session's own source");
         let got = &e.session().pool.get(source).unwrap().buffer.channels[0];
         assert_eq!(got.iter().map(|s| s.to_bits()).collect::<Vec<_>>(), hot.iter().map(|s| s.to_bits()).collect::<Vec<_>>(), "{got:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_exported_midi_clip_carries_nothing_its_left_edge_hides() {
+        use transit_midi::{Note, Sequence};
+        use transit_model::{ChannelFormat, Clip, ClipContent, TrackKind};
+        let dir = transit_test_support::TestDir::new("grp-hidden");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("trimmed.tclips").to_string_lossy().into_owned();
+        let mut e = crate::Engine::default();
+        let s = e.session_mut();
+        let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
+        let id = s.new_clip_id();
+        let n = |pitch, start| Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start, length: 480 };
+        // A start trim left a note before the clip's edge (ADR 0052 decision 17).
+        let seq = Sequence { notes: vec![n(72, -960), n(60, 0)], ctrls: Vec::new() };
+        crate::edit::place_clip(s, t, Clip::midi(id, "Trimmed", 48_000, 96_000, seq));
+        assert_eq!(e.execute("file.export_clip_groups", &json!({"path": path, "clips": [id.0]})).unwrap()["clips"], 1);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let file: super::GroupFile = serde_json::from_str(&text).unwrap();
+        let ClipContent::Midi { sequence } = &file.lanes[0][0].content else { panic!("not MIDI") };
+        assert_eq!(sequence.notes.iter().map(|n| (n.pitch, n.start)).collect::<Vec<_>>(), vec![(60, 0)]);
+        let ClipContent::Midi { sequence } = &e.session().find_clip(id).unwrap().1.content else { panic!("not MIDI") };
+        assert_eq!(sequence.notes.len(), 2, "the session's clip keeps the hidden note");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

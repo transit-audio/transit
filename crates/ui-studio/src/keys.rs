@@ -371,6 +371,8 @@ struct ClipView {
     ctrls: Vec<transit_midi::CtrlEvent>,
     /// The sequence index of each of `ctrls`.
     ctrl_src: Vec<usize>,
+    /// How many of the clip's notes its left edge hides (not in `notes`).
+    hidden_notes: usize,
     name: String,
 }
 
@@ -393,9 +395,10 @@ fn clip_view(s: &Session, clip: ClipId) -> Option<ClipView> {
         .filter(|(a, b)| b > a && *b > 0);
     let len = cycle.map_or(full, |(_, end)| end.min(full));
     let shown = |tick: i64| !transit_mix::left_hidden(c, tick);
-    let (note_src, notes) = sequence.notes.iter().enumerate().filter(|(_, n)| shown(n.start)).map(|(i, n)| (i, *n)).unzip();
+    let (note_src, notes): (Vec<usize>, Vec<Note>) = sequence.notes.iter().enumerate().filter(|(_, n)| shown(n.start)).map(|(i, n)| (i, *n)).unzip();
     let (ctrl_src, ctrls) = sequence.ctrls.iter().enumerate().filter(|(_, e)| shown(e.tick)).map(|(i, e)| (i, *e)).unzip();
-    Some(ClipView { track, c0, len, full, cycle, notes, note_src, ctrls, ctrl_src, name: c.name.clone() })
+    let hidden_notes = sequence.notes.len() - note_src.len();
+    Some(ClipView { track, c0, len, full, cycle, notes, note_src, ctrls, ctrl_src, hidden_notes, name: c.name.clone() })
 }
 
 /// Most ghost notes drawn for a clip's repeats (a degenerate cycle could ask for millions).
@@ -1333,6 +1336,7 @@ mod ghost_tests {
             notes,
             ctrls: Vec::new(),
             ctrl_src: Vec::new(),
+            hidden_notes: 0,
             name: String::new(),
         };
         let (ghosts, walked) = cv.ghosts((0, 600 * bar));

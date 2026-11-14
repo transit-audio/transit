@@ -3,7 +3,12 @@ use super::*;
 /// One note as last drawn (for `ui.inspect`; scripts click and drag them).
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct NoteRect {
+    /// The note's position in what the roll draws (`notes[]`; with several clips open, across them).
     pub index: usize,
+    /// The note's index in its clip's sequence: what `midi.*` note commands address (`midi.notes`
+    /// lists it). It differs from `index` when the clip's left edge hides notes (ADR 0052 decision
+    /// 17), or with several clips open.
+    pub source_index: usize,
     pub pitch: u8,
     pub start: i64,
     pub length: i64,
@@ -120,6 +125,9 @@ pub struct KeysLayout {
     /// Step velocity control.
     pub step_velocity: R4,
     pub notes: Vec<NoteRect>,
+    /// How many notes of the clip being edited its left edge hides (ADR 0052 decision 17): stored
+    /// before its start, not drawn and silent; a start trim back out shows them again.
+    pub hidden_notes: usize,
     /// Instrument/MIDI tracks with no clips, which show the "create a clip" hint (set by the arrangement).
     pub hint_tracks: Vec<u64>,
     pub selected: usize,

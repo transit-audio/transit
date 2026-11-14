@@ -1006,6 +1006,8 @@ fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
 }
 
 #[cfg(test)]
+mod hidden_edge_activation_tests;
+#[cfg(test)]
 mod hidden_edge_tests;
 #[cfg(test)]
 mod loop_edit_tests;

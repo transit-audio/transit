@@ -402,8 +402,8 @@ impl Session {
     }
 
     /// Features a file can list under `needs` (see [`Session::to_json`]) that this build understands.
-    pub const KNOWN_NEEDS: [&'static str; 6] =
-        ["clip_loop", "clip_scale_mode", "device_pages", "pre_count", "sampler_patch", "sampler_slicing_modes"];
+    pub const KNOWN_NEEDS: [&'static str; 7] =
+        ["clip_loop", "clip_scale_mode", "device_pages", "midi_hidden_notes", "pre_count", "sampler_patch", "sampler_slicing_modes"];
 
     /// The `needs` entries this session's content requires: a reader that does not know one would
     /// silently drop or misplay it. Empty for a session that uses none.
@@ -416,6 +416,13 @@ impl Session {
         // ADR 0047: user pages on any instrument, insert or MIDI effect.
         if self.tracks.iter().any(Track::has_device_pages) {
             needs.push("device_pages");
+        }
+        // ADR 0052 decision 17.8: a MIDI clip that is not validly looped holds a note or controller
+        // before tick 0, which its left edge hides; an older build plays such a note at the clip's
+        // first tick. A start trim makes them, and so does Clear Loop (or the loop handle cut back
+        // to the first cycle) on a looped clip whose start was trimmed. Every playlist counts.
+        if self.all_clips().any(Clip::holds_left_hidden) {
+            needs.push("midi_hidden_notes");
         }
         // ADR 0052: content before bar 1 (a pre-count zone).
         if self.start() < 0 {

@@ -1,8 +1,8 @@
 //! A MIDI clip's left edge hides (ADR 0052 decision 17), piano roll preparation (slice 5): the roll
 //! draws, hit-tests, selects, copies and edits no note or controller an unlooped clip stores before
-//! tick 0, and every command it sends addresses the sequence index of the note it means. Nothing
-//! in a session made by transit holds such an event yet, so every clip here gets its hidden
-//! events written into the document directly.
+//! tick 0, and every command it sends addresses the sequence index of the note it means. The
+//! slice 5 tests write their hidden events into the document directly; the activation tests
+//! (slice 6a) at the end make them with the real start trim.
 
 use super::*;
 use transit_midi::{CtrlEvent, CtrlKind};
@@ -222,4 +222,75 @@ fn several_clips_move_their_visible_notes_and_leave_a_hidden_one_in_the_second_c
     };
     assert_eq!(of(&t, t.clip), vec![(61, 0)]);
     assert_eq!(of(&t, b), vec![(72, -480), (65, 0)], "B's visible note moved, its hidden note did not: {}", t.app.status);
+}
+
+// ---- activation (slice 6a): hidden notes made by the real start trim ------------------------
+
+/// The open one-bar clip with C4, D4, E4 and G4 a half beat apart from tick 0, its start then
+/// trimmed one beat later through `edit.trim_clip` (the command the trim drag sends): C4 and D4 are
+/// hidden before the new left edge (sequence indices 0 and 1), E4 and G4 are visible (2 and 3).
+fn trimmed_by_the_trim_command() -> T {
+    let mut t = T::open();
+    for (pitch, start) in [(60, 0), (62, 480), (64, 1920), (67, 2880)] {
+        t.add(pitch, start, 240);
+    }
+    t.app.run("edit.trim_clip", json!({"clip": t.clip.0, "start": 24_000})).unwrap();
+    t.frames(3);
+    assert_eq!(spots(&t.notes()), vec![(60, -960), (62, -480), (64, 960), (67, 1920)], "the trim kept the notes it cut off");
+    t
+}
+
+#[test]
+fn a_roll_edit_of_a_visible_note_in_a_clip_trimmed_by_the_trim_command_addresses_its_own_note() {
+    let mut t = trimmed_by_the_trim_command();
+    let drawn: Vec<_> = t.app.keys.layout.notes.iter().map(|n| (n.pitch, n.start)).collect();
+    assert_eq!(drawn, vec![(64, 960), (67, 1920)], "only the visible notes are drawn");
+    // A velocity edit of G4 (view index 1, sequence index 3).
+    let g4 = t.notes()[3];
+    t.app.keys_edit(&[(g4, Note { velocity: 30, ..g4 })]).unwrap();
+    t.frames(2);
+    assert_eq!(t.notes().iter().map(|n| n.velocity).collect::<Vec<_>>(), vec![100, 100, 100, 30], "G4 was edited, nothing else");
+    // Up a semitone on E4 (view index 0, sequence index 2).
+    t.click(mid(t.note_rect(64, 960)));
+    t.key("ArrowUp", json!({}));
+    assert_eq!(spots(&t.notes()), vec![(60, -960), (62, -480), (65, 960), (67, 1920)], "{}", t.app.status);
+    // The trim dragged back out: the hidden notes return where they were played, unchanged.
+    t.app.run("edit.trim_clip", json!({"clip": t.clip.0, "start": 0})).unwrap();
+    t.frames(3);
+    assert_eq!(spots(&t.notes()), vec![(60, 0), (62, 480), (65, 1920), (67, 2880)]);
+    let drawn: Vec<_> = t.app.keys.layout.notes.iter().map(|n| n.pitch).collect();
+    assert_eq!(drawn, vec![60, 62, 65, 67], "every note is drawn again");
+}
+
+#[test]
+fn a_scale_mode_move_of_a_visible_note_addresses_its_own_note_and_leaves_the_hidden_ones() {
+    let mut t = trimmed_by_the_trim_command();
+    t.app.run("midi.scale_mode", json!({"clip": t.clip.0, "enabled": true, "root": 0, "scale": "major"})).unwrap();
+    t.frames(2);
+    // E4 up one degree of C major is F4: one `midi.notes_move` with `pitches`, through `Part::sources`.
+    t.click(mid(t.note_rect(64, 960)));
+    t.key("ArrowUp", json!({}));
+    assert_eq!(spots(&t.notes()), vec![(60, -960), (62, -480), (65, 960), (67, 1920)], "{}", t.app.status);
+    // G4 up one degree is A4; E4 stays F4, the hidden notes stay as they were.
+    t.click(mid(t.note_rect(67, 1920)));
+    t.key("ArrowUp", json!({}));
+    assert_eq!(spots(&t.notes()), vec![(60, -960), (62, -480), (65, 960), (69, 1920)], "{}", t.app.status);
+}
+
+#[test]
+fn inspect_gives_each_drawn_note_its_engine_index_and_counts_the_hidden_notes() {
+    let mut t = trimmed_by_the_trim_command();
+    let l = &t.app.keys.layout;
+    let rows: Vec<_> = l.notes.iter().map(|n| (n.pitch, n.index, n.source_index)).collect();
+    assert_eq!(rows, vec![(64, 0, 2), (67, 1, 3)], "the drawn position and the sequence index `midi.notes` lists");
+    assert_eq!(l.hidden_notes, 2);
+    let v = serde_json::to_value(l).unwrap();
+    assert_eq!(v["notes"][1]["source_index"], 3);
+    assert_eq!(v["hidden_notes"], 2);
+    // Trimmed back: nothing hidden, and the two indices agree.
+    t.app.run("edit.trim_clip", json!({"clip": t.clip.0, "start": 0})).unwrap();
+    t.frames(3);
+    let l = &t.app.keys.layout;
+    assert_eq!(l.hidden_notes, 0);
+    assert!(l.notes.iter().all(|n| n.index == n.source_index), "{:?}", l.notes.iter().map(|n| (n.index, n.source_index)).collect::<Vec<_>>());
 }

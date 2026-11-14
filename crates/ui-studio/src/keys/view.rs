@@ -247,6 +247,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     layout.key_h = kh;
     layout.clip_start_ticks = cv.c0;
     layout.clip_ticks = cv.len;
+    layout.hidden_notes = cv.hidden_notes;
     layout.looped_to_ticks = cv.cycle.map(|_| cv.full);
     layout.loop_cycle = cv.cycle;
     layout.lead_in_ticks = cv.cycle.map_or(0, |(a, _)| a.max(0));
@@ -932,6 +933,7 @@ fn paint_notes(
         let r = map.note_rect(n);
         layout.notes.push(NoteRect {
             index: i,
+            source_index: all.locate(i).and_then(|(part, local)| part.sources(&[local]).first().copied()).unwrap_or(i),
             pitch: n.pitch,
             start: n.start,
             length: n.length,

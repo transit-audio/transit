@@ -322,3 +322,21 @@ fn inactive_tracks_are_omitted_and_solo_safe_is_translated() {
     let notes = export_notes(&s, 2, &[]);
     assert!(notes.iter().any(|n| n.contains("2 inactive tracks")), "{notes:?}");
 }
+
+#[test]
+fn the_export_writes_nothing_a_clips_left_edge_hides() {
+    let mut s = Session::new("Hidden", transit_time::SampleRate::HZ_48000);
+    let track = s.add_track(TrackKind::Midi, ChannelFormat::Mono, Some("MIDI"));
+    let n = |pitch, start| Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start, length: 480 };
+    let cc = |tick, value| CtrlEvent { tick, channel: 0, kind: CtrlKind::Cc(1), value };
+    // A start trim left a note and a controller before the clip's edge (ADR 0052 decision 17).
+    let seq = Sequence { notes: vec![n(72, -960), n(60, 0)], ctrls: vec![cc(-480, 5), cc(240, 90)] };
+    let clip = Clip::midi(s.new_clip_id(), "Trimmed", 48_000, 96_000, seq);
+    s.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(clip);
+    let xml = project_xml(&s, &[]);
+    let (got, _) = read(&xml);
+    let c = only_clip(&got);
+    assert_eq!(sequence(c).notes.iter().map(|n| (n.pitch, n.start)).collect::<Vec<_>>(), vec![(60, 0)], "{xml}");
+    assert_eq!(sequence(c).ctrls.iter().map(|e| (e.tick, e.value)).collect::<Vec<_>>(), vec![(240, 90)], "{xml}");
+    assert!(!xml.contains("key=\"72\""), "{xml}");
+}

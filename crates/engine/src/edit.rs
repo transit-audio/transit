@@ -42,16 +42,17 @@ pub fn split_clip(clip: &Clip, at: Samples, new_id: ClipId, t: TimeCtx<'_>) -> O
     right.id = new_id;
     left.trim_end_to(at);
     // A looped MIDI clip keeps every note on both halves and cuts at the cycle phase (ADR 0019).
-    if clip.looping.is_some() {
+    // "Looped" is a valid loop, the test playback and the left-edge rule use
+    // ([`transit_mix::left_edge_hides`]): an invalid loop is no loop, so its clip is partitioned.
+    let looped = clip.looping.is_some_and(|l| l.is_valid());
+    if looped {
         trim_start(&mut right, at, t);
     } else {
         right.trim_start_to(at);
     }
     left.fade_out = Fade::default();
     right.fade_in = Fade::default();
-    if clip.looping.is_none()
-        && let (ClipContent::Midi { sequence: ls }, ClipContent::Midi { sequence: rs }) = (&mut left.content, &mut right.content)
-    {
+    if !looped && let (ClipContent::Midi { sequence: ls }, ClipContent::Midi { sequence: rs }) = (&mut left.content, &mut right.content) {
         let boundary = t.ticks(at) - t.ticks(clip.start);
         ls.notes.retain(|n| n.start < boundary);
         ls.ctrls.retain(|c| c.tick < boundary);
@@ -70,9 +71,11 @@ pub fn split_clip(clip: &Clip, at: Samples, new_id: ClipId, t: TimeCtx<'_>) -> O
 /// Move a clip's start edge to `to`: the ONE start-trim for every path (trim drag, Trim to
 /// Selection, Trim Start to Insertion, copy of a time range, retime, split). Audio clips
 /// advance into the file at the cycle phase (the model does that). A MIDI clip re-anchors its
-/// notes and controllers by the phase's ticks and moves its loop with them; an unlooped clip drops
-/// what the trim cut off, a looped one keeps it at negative ticks because later cycles play it
-/// (ADR 0019). A looped MIDI clip on the tick grid takes the cut's cycle phase in ticks, from the
+/// notes and controllers by the phase's ticks and moves its loop with them. Nothing the trim cuts
+/// off is dropped: it stays at negative ticks, where a looped clip's later cycles play it (ADR 0019)
+/// and an unlooped clip's left edge hides it (ADR 0052 decision 17), so a trim back (a start moved
+/// earlier, which shifts every event later by the same ticks) brings it back where it was. A copy
+/// is a cut, not a trim: [`copy_range`] drops what this leaves hidden. A looped MIDI clip on the tick grid takes the cut's cycle phase in ticks, from the
 /// frame playback uses ([`transit_mix::LoopFrame::trim_to`]), never as a sample modulo of the stored
 /// range: a stored cycle is a rounded sample count, so that phase drifted a tick per few dozen
 /// cycles and ignored tempo changes inside the clip.
@@ -85,14 +88,9 @@ pub(crate) fn trim_start(clip: &mut Clip, to: Samples, t: TimeCtx<'_>) {
     };
     let phase = if delta > 0 { clip.content_pos(delta) } else { delta };
     clip.trim_start_to(to);
-    let looped = clip.looping.is_some();
     if let ClipContent::Midi { sequence } = &mut clip.content {
         let shift = grid.map_or_else(|| t.ticks(old.saturating_add(phase)) - t.ticks(old), |(ticks, _)| ticks);
         if shift != 0 {
-            if !looped {
-                sequence.notes.retain(|n| n.start >= shift);
-                sequence.ctrls.retain(|c| c.tick >= shift);
-            }
             sequence.notes.iter_mut().for_each(|n| n.start -= shift);
             sequence.ctrls.iter_mut().for_each(|c| c.tick -= shift);
         }
