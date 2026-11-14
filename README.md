@@ -6,7 +6,7 @@
   </picture>
 </p>
 
-<p align="center"><strong>An open-source DAW in Rust with native ASIO, measured latency, and plug-ins that cannot freeze the window.</strong></p>
+<p align="center"><strong>A free, open-source digital audio workstation (DAW) in Rust for Windows, macOS and Linux: record, edit and mix audio and MIDI, host VST3 and CLAP plug-ins, play the built-in sampler and synths. Native ASIO and JACK, measured low latency.</strong></p>
 
 <p align="center">
   <a href="https://github.com/transit-audio/transit/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/transit-audio/transit/actions/workflows/ci.yml/badge.svg"></a>
@@ -21,7 +21,7 @@ A desktop DAW in pure Rust with Ableton/Logic-style ergonomics and its own audio
 layer and egui UI.
 
 > [!NOTE]
-> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.7.1](https://github.com/transit-audio/transit/releases/tag/v0.7.1) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
+> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.7.2](https://github.com/transit-audio/transit/releases/tag/v0.7.2) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
 > correctness, stability and performance, measured on real hardware, ahead of new features.
 > Expect rough edges in the UI and some missing features; the audio engine, recording alignment
 > and device handling get fixed first, following [the engineering principles](docs/principles.md).
@@ -50,13 +50,13 @@ Send us a measurement with the [measurement issue template](https://github.com/t
 
 ## Downloads
 
-The current release is [v0.7.1](https://github.com/transit-audio/transit/releases/tag/v0.7.1). The files are `transit-v0.7.1-windows-x86_64.msi` and `.zip`, `transit-v0.7.1-macos-arm64.dmg` and `.tar.gz`, `transit-v0.7.1-linux-x86_64.tar.gz`, and `transit-0.7.1-linux-x86_64.AppImage`, `.deb` and `.rpm`.
+The current release is [v0.7.2](https://github.com/transit-audio/transit/releases/tag/v0.7.2). The files are `transit-v0.7.2-windows-x86_64.msi` and `.zip`, `transit-v0.7.2-macos-arm64.dmg` and `.tar.gz`, `transit-v0.7.2-linux-x86_64.tar.gz`, and `transit-0.7.2-linux-x86_64.AppImage`, `.deb` and `.rpm`.
 
 - **Windows (x86_64):** one download, the `.zip` (portable) or the `.msi` (installer with the standard install dialogs and license; it registers `.transit` and `.transitz`). It has native WASAPI and native ASIO.
 - **macOS (Apple silicon):** the `.dmg`; open it and drag `transit.app` to Applications.
 - **Linux (x86_64):** the tarball; unpack it and run `transit`. Each release also carries an `.AppImage`, a `.deb` and an `.rpm` (see [Linux](#linux)).
 
-The builds are unsigned. On Windows, SmartScreen shows "More info", then "Run anyway". On macOS, if the app is blocked, run `xattr -dr com.apple.quarantine /Applications/transit.app` or right-click it and choose Open.
+The Windows builds are unsigned: SmartScreen shows "More info", then "Run anyway". The macOS build is ad-hoc signed and not notarized: if the app is blocked, run `xattr -dr com.apple.quarantine /Applications/transit.app` or right-click it and choose Open.
 
 v0.7.0 is the Sampler release: one kit with three views (Pads, Slices and Instrument) and kit presets, shown here beside the Compressor in the new device design.
 
@@ -200,7 +200,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 
 ### Instruments and effects
 
-- Hosts CLAP and VST3 plug-ins, with their own editor windows, saved state, and reported latency.
+- Hosts CLAP and VST3 plug-ins, with their own editor windows, saved state, and reported latency. A preset picked in a plug-in's own editor does not show as modified, Audio > Scan Plug-ins rescans every file, a scan that finds files and loads none says why, and Help > Debug Logging adds a trace of the calls between transit and each plug-in.
 - The plug-in window header has a preset dropdown (Save, Save As…, Load…, previous/next), Bypass and a menu (Reset, Copy/Paste state, Delete, Show in chain). User presets are `.vstpreset` files other hosts can read.
 - Plug-in editors scale with the display: VST3 and CLAP editors receive the window's content scale, rescale when dragged between monitors with different scaling, and CLAP editors are sharp embedded and floating.
 - The device card shows Loading while a heavy plug-in instantiates.
@@ -246,7 +246,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - External Instrument: choose "External Instrument" in an instrument track's instrument menu to play a hardware synth. Its MIDI goes to the port on the Out button, its audio comes back on an input you pick on the card, with a gain and a latency in ms that delay compensation uses to put the synth on the grid. A bounce asks before leaving it out (it can only be heard in real time). External MIDI on any track now follows delay compensation.
 - External Instrument Measure: the card's Measure button plays a warm-up note and 8 notes to the synth and times their sound on the return, then keeps the median for that MIDI port, input, sample rate and buffer size on this machine (a value typed by hand still wins). Cancel, a refusal or a lost device always ends the note.
 - Real-time render with hardware synths: Bounce can play a mix with an External Instrument through your audio interface in real time, so the file is what you hear, with the synth on the grid and, if you like, its return as a separate stem. Cancel stops the synth cleanly and writes nothing; "Render without hardware" stays as the faster offline choice.
-- MIDI recording: arm an instrument track and record, with a count-in. Overdub merges into the clip under the pass. With Cycle on, Record loops the range and keeps going until Stop, each lap a stacked take (audio too; there is no separate Loop Record option); stopping mid-lap keeps the partial lap, and the status line reports the take count. Held notes are cut at the loop end and resume at the start of the next lap.
+- MIDI recording: arm an instrument track and record, with a count-in. Overdub merges into the clip under the pass. With Cycle on, Record loops the range and keeps going until Stop, each lap a stacked take (audio too, also when Record is pressed in the middle of the loop; there is no separate Loop Record option), up to 10,000 laps, after which the recording stops by itself keeping every lap; the growing strip on an armed track shows the lap under way; stopping mid-lap keeps the partial lap, and the status line reports the take count. Recording runs at normal speed only: Record is refused during Half-Speed Playback. Held notes are cut at the loop end and resume at the start of the next lap.
 - Take lanes: a track's stacked takes show as lanes under it (the T button on the track header, and after cycle recording), newest on top. Click a take to play it over its range, or its label to play it everywhere; Flatten Takes keeps what plays and Delete Take removes a take that does not play, each one undo step.
 - A MIDI take journal is written during the pass and kept until an autosave that holds the recording lands; after a crash, the next launch recovers it as a `<Track>_recovered` clip. Record works without a validated device clock: alignment is approximate, a take recorded that way says so, and when recording cannot start you get a plain-English reason.
 - A hosted plug-in that re-sends an unchanged parameter value no longer registers an automation touch; only a real change does.
@@ -282,10 +282,10 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Bounce in Place turns a track's clips, or only the selected clips, into audio: to a new track or an existing one, with the source left, muted or hidden, and its clips and takes always kept.
 - Full undo history; every edit is a command.
 - Autosave, and sessions saved as versioned, human-readable JSON in `.transit` files.
-- Long takes stay with their session: a session recovered after a crash keeps its long takes and offline files in its own folder, and Save As, Save Copy In and the first save of an untitled session copy long take files into the session's Audio Files folder; if a copy fails, the save fails naming the file and the earlier session file is left as it was.
+- Long takes stay with their session: a session recovered after a crash keeps its long takes and offline files in its own folder, and Save As, Save Copy In and the first save of an untitled session copy long take files into the session's Audio Files folder; if a copy fails, the save fails naming the file and the earlier session file is left as it was. After the copy the open session plays that take from the new folder at once, and a save warning (a take that could not be moved) shows in the status line. An unreadable take refuses bounces and exports naming the take, instead of rendering silence. A preset name keeps its dots ("Bass v1.5" and "Bass v1.2" are two presets), and saving a track preset, Sampler kit or plug-in preset over an existing file through the command channel is refused unless the call says `replace: true`.
 - Preset names keep their dots: "Bass v1.5" and "Bass v1.2" are two presets.
 - A launch splash that reports the audio device opening first, then plug-in scan progress, and Help > About with version info and a link to the transit repository.
-- Import audio and MIDI files; export MIDI. File > Open Session also opens a DAWproject (`.dawproject`, from Bitwig, Studio One, Cubase and others) as a new session: its tracks, note clips, tempo and meter, markers and MIDI expression. File > Export DAWproject writes those editable parts plus full-length WAV stems for audible audio and instrument tracks (#261). File > Open Recent lists your last ten sessions (Ctrl+Shift+O).
+- Import audio and MIDI files; export MIDI. File > Open Session also opens a DAWproject (`.dawproject`, from Bitwig, Studio One, Cubase and others) as a new session: its tracks, note clips, tempo and meter, markers and MIDI expression. File > Export DAWproject writes those editable parts plus full-length WAV stems for audible audio and instrument tracks, and File > Bounce > Consolidated tracks writes one full-length stem per audio, instrument and MIDI track with a MIDI file per MIDI or instrument track and a tempo file (#261). File > Open Recent lists your last ten sessions (Ctrl+Shift+O).
 - Browser preview: select a supported audio file in the Files tab and press play to hear it before you drag it in. A headphone toggle auto-previews each selection, and the preview has its own volume on a path that never records, meters or routes to a track. It stops on another file, on transport start or on Escape; every importer format works, including RF64.
 
 ### Under the hood
@@ -330,6 +330,7 @@ in Audio Devices. Details and the hardware tests:
 cargo run -p transit --release            # empty session
 cargo run -p transit --release -- --demo  # built-in demo song
 transit --version
+transit --null-audio                      # run on a silent built-in device, no audio hardware
 ```
 
 Settings, autosaves and logs live in a per-user folder: `%APPDATA%\transit` on Windows,
