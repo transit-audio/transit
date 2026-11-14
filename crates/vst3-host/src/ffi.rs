@@ -20,8 +20,9 @@ use std::time::Duration;
 use transit_dsp::Transport;
 use vst3::Steinberg::Vst::{self as sv};
 use vst3::Steinberg::Vst::{
-    IAttributeListTrait, IAudioProcessorTrait, IComponentHandlerTrait, IComponentTrait, IConnectionPointTrait, IEditControllerTrait, IEventListTrait,
-    IHostApplicationTrait, IMessageTrait, IMidiMappingTrait, IParamValueQueueTrait, IParameterChangesTrait, IUnitInfoTrait,
+    IAttributeListTrait, IAudioProcessorTrait, IComponentHandler2Trait, IComponentHandlerTrait, IComponentTrait, IConnectionPointTrait,
+    IEditControllerTrait, IEventListTrait, IHostApplicationTrait, IMessageTrait, IMidiMappingTrait, IParamValueQueueTrait, IParameterChangesTrait,
+    IUnitHandlerTrait, IUnitInfoTrait,
 };
 use vst3::Steinberg::{self as sb};
 use vst3::Steinberg::{

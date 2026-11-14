@@ -38,8 +38,13 @@ fn take() -> Vec<String> {
 /// A Gain state that arms a pick of preset `index` at the controller's next `getState`, announced
 /// by `performEdit` (`announce` 0) or `kParamValuesChanged` (1) (see `tests/fixture`).
 fn arming_state(index: u32, announce: u32) -> Vec<u8> {
+    arming(1 + 2 * index + announce)
+}
+
+/// A Gain state that arms fixture code `code` (see `tests/fixture`, "call log and presets").
+fn arming(code: u32) -> Vec<u8> {
     let comp = 0.5f64.to_le_bytes();
-    let ctrl: Vec<u8> = [0.5f64, -1.0, -1.0, f64::from(1 + 2 * index + announce)].iter().flat_map(|v| v.to_le_bytes()).collect();
+    let ctrl: Vec<u8> = [0.5f64, -1.0, -1.0, f64::from(code)].iter().flat_map(|v| v.to_le_bytes()).collect();
     let mut out = b"SCV3".to_vec();
     out.extend_from_slice(&(comp.len() as u32).to_le_bytes());
     out.extend_from_slice(&comp);
@@ -113,6 +118,11 @@ fn the_trace_records_each_call_kind_in_order_and_nothing_while_debug_logging_is_
     frames(&mut p, &mut ed, 1);
     assert!(reader.save_state().is_some());
     frames(&mut p, &mut ed, 3);
+    // A pick through the extended handlers: grouped edits, setDirty, a program-list change.
+    assert!(p.load_state(&arming(1 + 2 + 64)));
+    frames(&mut p, &mut ed, 1);
+    assert!(reader.save_state().is_some());
+    frames(&mut p, &mut ed, 3);
     // A reactivation: setProcessing and setActive.
     p.prepare(48_000.0, BLOCK, 2);
     frames(&mut p, &mut ed, 1);
@@ -147,6 +157,12 @@ fn the_trace_records_each_call_kind_in_order_and_nothing_while_debug_logging_is_
             &["report to the session id=7 value=0.3 "],
             &["thread=audio", "set_param id=7", "the session's echo", "value=0.3 bits=0x3fd3333333333333"],
             &["thread=audio", "processor point id=7 offset=0 value=0.3 bits=0x3fd3333333333333"],
+            // The third pick, through the extended handlers.
+            &["thread=ui", "IComponentHandler2::startGroupEdit"],
+            &["thread=ui", "performEdit id=7 value=0.7 "],
+            &["thread=ui", "IComponentHandler2::finishGroupEdit"],
+            &["thread=ui", "IComponentHandler2::setDirty state=1"],
+            &["thread=ui", "IUnitHandler::notifyProgramListChange list=1 program=1"],
             // The reactivation.
             &["thread=audio", "processor.setProcessing(0)"],
             &["thread=audio", "component.setActive(0)"],

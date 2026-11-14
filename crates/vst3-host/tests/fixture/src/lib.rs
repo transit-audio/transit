@@ -365,7 +365,9 @@ static CTRL_CALLS: AtomicU64 = AtomicU64::new(0);
 // (see `GainController::pick_armed_preset`); it happens at the controller's next `getState` (a
 // main-thread call, as a click in the editor would be), which also starts the log afresh. Adding
 // 16 also asks for `kLatencyChanged` with the pick, 32 for `kParamTitlesChanged` (in the same
-// `restartComponent` as `kParamValuesChanged` when that announces it; #651, round 2). While
+// `restartComponent` as `kParamValuesChanged` when that announces it), and 64 makes the pick use
+// the extended handlers as some plug-ins do: the edits inside `startGroupEdit`/`finishGroupEdit`,
+// then `setDirty(true)` and `notifyProgramListChange(1, preset)` (#651, round 2). While
 // the log runs, the component's state carries it after the gain: one line per call, such as
 // `ctrl.setParamNormalized(7)=0.3`, `proc.point(7)=0.3@0`, `ctrl.setState`, `comp.setState`,
 // `comp.setActive(1)` (values in Rust's shortest round-trip form, so a test can compare them bit
@@ -428,12 +430,17 @@ impl GainController {
         if x & 32 != 0 {
             extra |= RestartFlags_::kParamTitlesChanged as i32;
         }
+        let extended = x & 64 != 0;
         let (index, announce) = ((x & 15) / 2, (x & 15) % 2);
         let Some(preset) = PRESETS.get(index as usize) else { return };
         *CALL_LOG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
         let Some(h) = (unsafe { ComRef::from_raw(self.handler.load(Ordering::SeqCst)) }) else { return };
         for &(id, v) in preset {
             self.store(id, v);
+        }
+        let h2 = if extended { h.cast::<IComponentHandler2>() } else { None };
+        if let Some(h2) = &h2 {
+            unsafe { h2.startGroupEdit() };
         }
         if announce == 0 {
             for &(id, v) in preset {
@@ -448,6 +455,15 @@ impl GainController {
             }
         } else {
             unsafe { h.restartComponent(RestartFlags_::kParamValuesChanged as i32 | extra) };
+        }
+        if let Some(h2) = &h2 {
+            unsafe {
+                h2.finishGroupEdit();
+                h2.setDirty(1);
+            }
+        }
+        if extended && let Some(u) = h.cast::<IUnitHandler>() {
+            unsafe { u.notifyProgramListChange(1, index as i32) };
         }
     }
 }

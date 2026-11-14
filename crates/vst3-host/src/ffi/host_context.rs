@@ -1,4 +1,5 @@
-//! The host context the plug-in calls back into (`IHostApplication`, `IComponentHandler`) and the COM object wrapper.
+//! The host context the plug-in calls back into (`IHostApplication`, `IComponentHandler`,
+//! `IComponentHandler2`, `IUnitHandler`) and the COM object wrapper.
 
 use super::*;
 
@@ -71,7 +72,7 @@ impl HostContext {
 }
 
 impl Class for HostContext {
-    type Interfaces = (sv::IHostApplication, sv::IComponentHandler);
+    type Interfaces = (sv::IHostApplication, sv::IComponentHandler, sv::IComponentHandler2, sv::IUnitHandler);
 }
 
 impl IHostApplicationTrait for HostContext {
@@ -167,6 +168,47 @@ impl IComponentHandlerTrait for HostContext {
             | sv::RestartFlags_::kReloadComponent as u32;
         self.other_flags.fetch_or(flags as u32 & !handled, Ordering::Relaxed);
         self.restart_requested.store(true, Ordering::Release);
+        sb::kResultOk
+    }
+}
+
+/// #651, round 2: the optional extended handler, so the host call trace shows whether a plug-in
+/// uses it. Steinberg, `IComponentHandler2::setDirty`: "Tells host that the plug-in is dirty
+/// (something besides parameters has changed since last save), if true the host should apply a
+/// save before quitting." The host takes note in the trace and does nothing else yet: marking the
+/// session modified is the app's step, as for CLAP's `mark_dirty`. `startGroupEdit` and
+/// `finishGroupEdit` only group the timestamps of automation the host writes, which this host does
+/// not record from edits; `requestOpenEditor` is not supported (the editor opens on the user's
+/// request only).
+impl IComponentHandler2Trait for HostContext {
+    unsafe fn setDirty(&self, state: sb::TBool) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::SetDirty, 0, 0.0, u64::from(state));
+        sb::kResultOk
+    }
+    unsafe fn requestOpenEditor(&self, _name: sb::FIDString) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::RequestOpenEditor, 0, 0.0, 0);
+        sb::kNotImplemented
+    }
+    unsafe fn startGroupEdit(&self) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::StartGroupEdit, 0, 0.0, 0);
+        sb::kResultOk
+    }
+    unsafe fn finishGroupEdit(&self) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::FinishGroupEdit, 0, 0.0, 0);
+        sb::kResultOk
+    }
+}
+
+/// #651, round 2: the unit handler, so the host call trace shows a plug-in's program-list and
+/// unit notifications (it may announce a preset it loads through `notifyProgramListChange`). The
+/// host has no program lists of its own to update; nothing else happens.
+impl IUnitHandlerTrait for HostContext {
+    unsafe fn notifyUnitSelection(&self, unit: sv::UnitID) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::NotifyUnitSelection, unit as u32, 0.0, 0);
+        sb::kResultOk
+    }
+    unsafe fn notifyProgramListChange(&self, list: sv::ProgramListID, program: sb::int32) -> sb::tresult {
+        trace::record(self.trace_id, trace::Call::NotifyProgramListChange, list as u32, 0.0, program as u64);
         sb::kResultOk
     }
 }

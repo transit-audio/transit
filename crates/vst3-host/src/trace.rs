@@ -124,6 +124,15 @@ pub(crate) enum Call {
     EndEdit,
     /// `aux`: the flags.
     RestartComponent,
+    /// `aux`: the state (0 or 1).
+    SetDirty,
+    RequestOpenEditor,
+    StartGroupEdit,
+    FinishGroupEdit,
+    /// `id`: the unit.
+    NotifyUnitSelection,
+    /// `id`: the list, `aux`: the program index.
+    NotifyProgramListChange,
     // Host to plug-in.
     /// `aux`: 0 the host's own value (automation, a mapped control, before a save), 1 to show it.
     SetParamNormalized,
@@ -161,11 +170,17 @@ pub(crate) enum Call {
 impl Call {
     fn from_u8(v: u8) -> Option<Call> {
         use Call::*;
-        const ALL: [Call; 19] = [
+        const ALL: [Call; 25] = [
             BeginEdit,
             PerformEdit,
             EndEdit,
             RestartComponent,
+            SetDirty,
+            RequestOpenEditor,
+            StartGroupEdit,
+            FinishGroupEdit,
+            NotifyUnitSelection,
+            NotifyProgramListChange,
             SetParamNormalized,
             ProcessorPoint,
             ComponentSetState,
@@ -387,6 +402,12 @@ pub(crate) fn line(r: &Record) -> String {
         Call::PerformEdit => format!("{head} performEdit id={} {}", r.id, value(r.value)),
         Call::EndEdit => format!("{head} endEdit id={}", r.id),
         Call::RestartComponent => format!("{head} restartComponent flags={:#x} ({})", r.aux, restart_flags(r.aux as u32)),
+        Call::SetDirty => format!("{head} IComponentHandler2::setDirty state={}", r.aux),
+        Call::RequestOpenEditor => format!("{head} IComponentHandler2::requestOpenEditor (not supported)"),
+        Call::StartGroupEdit => format!("{head} IComponentHandler2::startGroupEdit"),
+        Call::FinishGroupEdit => format!("{head} IComponentHandler2::finishGroupEdit"),
+        Call::NotifyUnitSelection => format!("{head} IUnitHandler::notifyUnitSelection unit={}", r.id as i32),
+        Call::NotifyProgramListChange => format!("{head} IUnitHandler::notifyProgramListChange list={} program={}", r.id as i32, r.aux as u32 as i32),
         Call::SetParamNormalized => {
             format!(
                 "{head} controller.setParamNormalized id={} {} ({})",
