@@ -552,11 +552,13 @@ mod record_tests {
         let gtr = armed(&mut e, "Gtr", "mono", "Guitar");
         let drums = armed(&mut e, "Drums", "stereo", "Drum pair");
         let old = armed(&mut e, "Old", "stereo", "In 3-4");
+        let wide = armed(&mut e, "Wide", "stereo", "Guitar");
         let plan = plan_takes(&e, &dir, 8);
         let channels = |t: TrackId| plan.iter().find(|p| p.0 == t).map(|p| p.1.clone()).unwrap();
         assert_eq!(channels(gtr), [4], "Guitar is input channel 5");
         assert_eq!(channels(drums), [6, 7]);
         assert_eq!(channels(old), [2, 3]);
+        assert_eq!(channels(wide), [4, 4], "a stereo track on a mono path records it on both sides (#681)");
         // The same names, resolved by the mix: one function (`transit_model::input_channel`).
         assert_eq!(transit_model::input_channel(Some(e.io_map()), "Guitar", 0), 4);
     }

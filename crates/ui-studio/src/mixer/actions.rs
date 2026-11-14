@@ -201,8 +201,7 @@ impl StudioApp {
     pub fn set_input(&mut self, t: TrackId, value: &str) -> Result<Value, String> {
         let s = self.engine.session_arc();
         if let Some(tr) = s.track(t) {
-            let ch = if tr.kind == TrackKind::Audio { tr.channels() } else { 0 };
-            let cur = route_label(&s, &tr.mixer.input, true, ch);
+            let cur = input_route_label(&s, tr, self.device_inputs());
             let label = input_choices_with(&s, tr, self.device_inputs(), self.engine.io_map(), self.system_audio_on())
                 .into_iter()
                 .find_map(|choice| match choice {

@@ -184,6 +184,18 @@ pub fn route_label(s: &Session, r: &Route, input: bool, format_channels: usize) 
     }
 }
 
+/// How a track's input reads in its dropdown on a device with `device_inputs` input channels. A
+/// stereo audio track with no input set records input 1 on both sides when the device has one
+/// input channel (#681), so it reads "In 1" there, the entry the dropdown lists.
+pub fn input_route_label(s: &Session, t: &Track, device_inputs: usize) -> String {
+    let channels = match t.kind {
+        TrackKind::Audio if device_inputs == 1 => t.channels().min(1),
+        TrackKind::Audio => t.channels(),
+        _ => 0,
+    };
+    route_label(s, &t.mixer.input, true, channels)
+}
+
 /// The outputs a track can pick, with values for `track.output`.
 pub fn output_choices(s: &Session, t: &Track, io: &IoMap) -> Vec<RoutingChoice> {
     let mut v = vec![RoutingChoice::Entry { label: "Main".into(), value: "main".into() }];
@@ -199,6 +211,22 @@ pub fn output_choices(s: &Session, t: &Track, io: &IoMap) -> Vec<RoutingChoice> 
     v
 }
 
+/// The hardware inputs `width` channels wide (1 or 2) on a device with `n` input channels: the
+/// map's named paths of that width first; a legacy "In N" label stays only for channels no named
+/// path covers, so a renamed path replaces its label.
+fn push_hardware_inputs(v: &mut Vec<RoutingChoice>, io: &IoMap, n: usize, width: usize) {
+    let named: Vec<&IoPath> = io.paths_of(IoDirection::Input).filter(|p| p.channels.len() == width).collect();
+    v.extend(named.iter().map(|p| RoutingChoice::Entry { label: path_label(p), value: p.name.clone() }));
+    let covered = |first: usize| {
+        let want: Vec<u16> = (first - 1..first - 1 + width).filter_map(|c| u16::try_from(c).ok()).collect();
+        named.iter().any(|p| p.channels == want)
+    };
+    for i in (1..=n).step_by(width).filter(|&i| i + width - 1 <= n && !covered(i)) {
+        let label = if width == 2 { format!("In {i}-{}", i + 1) } else { format!("In {i}") };
+        v.push(RoutingChoice::Entry { label: label.clone(), value: label });
+    }
+}
+
 /// The inputs a track can pick: hardware inputs (`In 1`.. or `In 1-2`..) and busses.
 pub fn input_choices(s: &Session, t: &Track, device_inputs: usize, io: &IoMap) -> Vec<RoutingChoice> {
     input_choices_with(s, t, device_inputs, io, false)
@@ -210,18 +238,18 @@ pub fn input_choices_with(s: &Session, t: &Track, device_inputs: usize, io: &IoM
     let mut v = Vec::new();
     let n = device_inputs;
     if t.kind == TrackKind::Audio || t.kind == TrackKind::Aux {
-        let width = if t.channels() >= 2 { 2 } else { 1 };
-        // The map's named paths of the strip's width first; a legacy "In N" label stays only for
-        // channels no named path covers, so a renamed path replaces its label.
-        let named: Vec<&IoPath> = io.paths_of(IoDirection::Input).filter(|p| p.channels.len() == width).collect();
-        v.extend(named.iter().map(|p| RoutingChoice::Entry { label: path_label(p), value: p.name.clone() }));
-        let covered = |first: usize| {
-            let want: Vec<u16> = (first - 1..first - 1 + width).filter_map(|c| u16::try_from(c).ok()).collect();
-            named.iter().any(|p| p.channels == want)
-        };
-        for i in (1..=n).step_by(width).filter(|&i| i + width - 1 <= n && !covered(i)) {
-            let label = if width == 2 { format!("In {i}-{}", i + 1) } else { format!("In {i}") };
-            v.push(RoutingChoice::Entry { label: label.clone(), value: label });
+        if t.channels() >= 2 {
+            // A stereo strip takes a stereo input, or a mono one on both sides (#681): the stereo
+            // inputs first, then a separator and the mono ones.
+            push_hardware_inputs(&mut v, io, n, 2);
+            let mut mono = Vec::new();
+            push_hardware_inputs(&mut mono, io, n, 1);
+            if !v.is_empty() && !mono.is_empty() {
+                v.push(RoutingChoice::Separator);
+            }
+            v.extend(mono);
+        } else {
+            push_hardware_inputs(&mut v, io, n, 1);
         }
         if system_audio && t.kind == TrackKind::Audio {
             let name = transit_model::SYSTEM_AUDIO_PATH.to_owned();

@@ -321,6 +321,33 @@ fn an_input_path_by_name_monitors_its_channel() {
     assert!((heard("In 7") / ch(6) - pan).abs() < 1e-5);
 }
 
+/// #681: a stereo strip monitoring a mono input path hears that one channel on both sides, as a
+/// stereo strip hears two equal channels; never the path's channel and the one after it.
+#[test]
+fn a_stereo_strip_on_a_mono_input_path_hears_it_on_both_sides() {
+    let distinct: Vec<Vec<f32>> = (0..8).map(|c| vec![(c + 1) as f32 / 10.0; BLOCK]).collect();
+    let mut io = IoMap::for_device("test", "test", 8, 2);
+    io.add_path(IoPath { live: false, name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono })
+        .unwrap();
+    let heard = |name: &str, input: &[Vec<f32>]| {
+        let mut s = session();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, Some("Mon"));
+        let tr = s.track_mut(t).unwrap();
+        tr.mixer.input = Route::Hardware(name.into());
+        tr.mixer.input_monitor = true;
+        let r = render(&s, &io, Some(input.to_vec()));
+        (r.channels[0][100], r.channels[1][100])
+    };
+    // The reference: a stereo strip on In 1-2 when both channels carry input 5's level.
+    let same: Vec<Vec<f32>> = (0..8).map(|_| vec![0.5; BLOCK]).collect();
+    let (want_l, want_r) = heard("In 1-2", &same);
+    assert!(want_l > 0.1 && want_l.to_bits() == want_r.to_bits(), "{want_l} {want_r}");
+    for name in ["Guitar", "In 5"] {
+        let (l, r) = heard(name, &distinct);
+        assert_eq!((l.to_bits(), r.to_bits()), (want_l.to_bits(), want_r.to_bits()), "{name}: {l} {r}, want {want_l} on both sides");
+    }
+}
+
 #[test]
 fn a_key_edge_keeps_main_and_a_stem_aligned() {
     // A latent kick (outside the mix) keys the bass's compressor, so the bass waits for the key;

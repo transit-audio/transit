@@ -51,8 +51,8 @@ use meters::{meter_bounds, strip_meter};
 pub use overflow::{OverflowLayout, Section as OverflowSection};
 use routing::{NOT_HERE, push_unused_entry, same_route, unresolved_output};
 pub use routing::{
-    RoutingChoice, bus_label, feeding_loops, input_choices, input_choices_with, listening_loops, orphan_busses, output_choices, path_choices,
-    reaches, route_label, send_targets, takes_sends,
+    RoutingChoice, bus_label, feeding_loops, input_choices, input_choices_with, input_route_label, listening_loops, orphan_busses, output_choices,
+    path_choices, reaches, route_label, send_targets, takes_sends,
 };
 pub use scrollbar::LaneBar;
 pub use sends::SEND_ROW_H;

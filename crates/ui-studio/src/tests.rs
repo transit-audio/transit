@@ -292,7 +292,7 @@ pub(crate) fn typed(app: &mut StudioApp, text: &str) {
 pub(crate) fn input_label(app: &StudioApp, t: TrackId) -> String {
     let s = app.engine.session();
     let tr = s.track(t).unwrap();
-    crate::mixer::route_label(s, &tr.mixer.input, true, tr.channels())
+    crate::mixer::input_route_label(s, tr, app.device_inputs())
 }
 
 pub(crate) fn new_audio(app: &mut StudioApp, r: Result<Value, String>) -> TrackId {

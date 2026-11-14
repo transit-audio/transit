@@ -210,9 +210,13 @@ fn label(prefix: &str, first: u16, width: u16) -> String {
 
 impl IoPath {
     /// The device channel strip channel `k` of a route through this path uses: the path's own
-    /// channels in order, then (a strip wider than the path) the channels after the last one,
-    /// which is what "In 3" on a stereo track always meant.
+    /// channels in order. A mono path feeds every strip channel (a stereo track on "In 3" records
+    /// and hears channel 3 on both sides, #681); a strip wider than a path of two or more channels
+    /// takes the channels after its last one.
     pub fn source_channel(&self, k: usize) -> usize {
+        if let [only] = self.channels[..] {
+            return usize::from(only);
+        }
         match self.channels.get(k) {
             Some(&c) => usize::from(c),
             None => self.channels.last().map_or(k, |&l| usize::from(l).saturating_add(k + 1 - self.channels.len())),
@@ -225,13 +229,19 @@ impl IoPath {
 /// and the recorder, so they cannot disagree (ADR 0015 section 1.4). A name in `io`'s table
 /// resolves through it, so a path renamed "Guitar" on channel 5 is channel 5. A name that is not
 /// there (an old session, or one made on another machine) keeps the label meaning it always had:
-/// the number in "In 3" or "In 3-4" is the first channel.
+/// the number in "In 3" or "In 3-4" is the first channel. A mono label ("In 3") feeds every strip
+/// channel, as a mono path in the table does.
 pub fn input_channel(io: Option<&IoMap>, name: &str, k: usize) -> usize {
     if let Some(p) = io.and_then(|m| m.path(name)).filter(|p| p.direction == IoDirection::Input) {
         return p.source_channel(k);
     }
     let first = name.trim_start_matches("In ").split(['-', ' ']).next().and_then(|n| n.parse::<usize>().ok()).map_or(0, |n| n.saturating_sub(1));
-    first.saturating_add(k)
+    if is_mono_label(name) { first } else { first.saturating_add(k) }
+}
+
+/// Whether `name` is a one-channel input label: "In " and a number, nothing after it.
+fn is_mono_label(name: &str) -> bool {
+    name.strip_prefix("In ").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Whether an input route named `name` is the System Audio path.
@@ -711,16 +721,38 @@ mod tests {
         m.add_path(IoPath { live: false, name: "Pair".into(), direction: IoDirection::Input, channels: vec![6, 1], format: ChannelFormat::Stereo })
             .unwrap();
         assert_eq!(input_channel(Some(&m), "Guitar", 0), 4);
-        assert_eq!(input_channel(Some(&m), "guitar", 1), 5, "a stereo strip on a mono path continues after it, as In 3 always did");
+        assert_eq!(input_channel(Some(&m), "guitar", 1), 4, "a stereo strip on a mono path hears it on both sides (#681)");
         assert_eq!((input_channel(Some(&m), "Pair", 0), input_channel(Some(&m), "Pair", 1)), (6, 1));
         assert_eq!(input_channel(Some(&m), "In 3", 0), 2);
         assert_eq!(input_channel(Some(&m), "In 3-4", 1), 3);
         // Not in the table: the number in the label, as before.
         assert_eq!(input_channel(Some(&m), "In 12", 0), 11);
+        assert_eq!(input_channel(Some(&m), "In 12", 1), 11, "a mono label feeds both sides too");
         assert_eq!(input_channel(None, "In 3-4", 1), 3);
         assert_eq!(input_channel(None, "Guitar", 0), 0);
         // An output path is not an input.
         assert_eq!(input_channel(Some(&m), "Out 1-2", 0), 0);
+    }
+
+    /// #681: a one-channel input gets its default "In 1" however the table arrives (opened with
+    /// it, narrowed from two, or given the count later), and a stereo strip on a mono path reads
+    /// that one channel on both sides, on one input and on two.
+    #[test]
+    fn a_one_channel_input_has_its_default_path_and_a_stereo_strip_hears_it_on_both_sides() {
+        let one = IoMap::for_device("test", "x", 1, 2);
+        assert_eq!(names(&one, IoDirection::Input), ["In 1"]);
+        let mut narrowed = IoMap::for_device("test", "x", 2, 2);
+        assert!(narrowed.reconcile(1, 2));
+        assert_eq!(names(&narrowed, IoDirection::Input), ["In 1"]);
+        let mut late = IoMap::for_device("test", "x", 0, 2);
+        assert!(late.adopt_inputs(1));
+        assert_eq!(names(&late, IoDirection::Input), ["In 1"]);
+        let both = |m: &IoMap, name: &str, live: usize| (live_input_channel(Some(m), name, 0, live), live_input_channel(Some(m), name, 1, live));
+        assert_eq!(both(&one, "In 1", 1), (Some(0), Some(0)));
+        let two = IoMap::for_device("test", "x", 2, 2);
+        assert_eq!(both(&two, "In 2", 2), (Some(1), Some(1)), "In 2 on both sides, never In 2 and a wrap to In 1");
+        assert_eq!(both(&two, "In 1", 2), (Some(0), Some(0)));
+        assert_eq!(both(&two, "In 1-2", 2), (Some(0), Some(1)), "a stereo path is unchanged");
     }
 
     #[test]

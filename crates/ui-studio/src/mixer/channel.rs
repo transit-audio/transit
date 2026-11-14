@@ -238,10 +238,9 @@ fn input_row(
     menu: &mut Vec<MenuItem>,
 ) {
     let id = t.id;
-    let m = &t.mixer;
     let in_r = a.input;
     if matches!(t.kind, TrackKind::Audio | TrackKind::Aux) {
-        let cur = route_label(s, &m.input, true, if t.kind == TrackKind::Audio { t.channels() } else { 0 });
+        let cur = input_route_label(s, t, app.device_inputs());
         let mut choices = input_choices_with(s, t, app.device_inputs(), app.engine.io_map(), app.system_audio_on());
         push_unused_entry(s, &mut choices);
         if let Some(v) = dropdown(ui, clip, in_r, ui.id().with(("input", id.0)), &cur, None, &choices, menu, false) {

@@ -41,6 +41,55 @@ fn capture_inputs(app: &StudioApp) -> Vec<Vec<usize>> {
         .collect()
 }
 
+/// The input dropdown's entries for `t`, a separator as "".
+fn input_labels(app: &StudioApp, t: TrackId) -> Vec<String> {
+    let s = app.engine.session();
+    crate::mixer::input_choices(s, s.track(t).unwrap(), app.device_inputs(), app.engine.io_map())
+        .into_iter()
+        .map(|choice| match choice {
+            RoutingChoice::Entry { label, .. } => label,
+            RoutingChoice::Separator => String::new(),
+        })
+        .collect()
+}
+
+/// #681: on a device with one input channel a stereo track is offered that input, reads it as
+/// its default, and records it on both sides, whether it keeps the default or picks a path.
+#[test]
+fn a_stereo_track_on_a_one_channel_input_lists_and_records_it() {
+    use transit_model::{IoDirection, IoMap, IoPath};
+    let mut app = app(1);
+    app.engine.set_io_map(IoMap::for_device("test", "one input", 1, 2));
+    let t = TrackId(app.add_audio_track("stereo").unwrap()["tracks"][0].as_u64().unwrap());
+    app.run("mix.record_arm", json!({"tracks": [t.0], "value": true})).unwrap();
+    assert_eq!(input_labels(&app, t), ["In 1"]);
+    assert_eq!(crate::tests::input_label(&app, t), "In 1", "the default reads as what it records, never In 1-2");
+    assert_eq!(capture_inputs(&app), [vec![0, 0]]);
+    let mut io = app.engine.io_map().clone();
+    io.add_path(IoPath { live: false, name: "Mic".into(), direction: IoDirection::Input, channels: vec![0], format: ChannelFormat::Mono }).unwrap();
+    app.engine.set_io_map(io);
+    assert_eq!(input_labels(&app, t), ["In 1", "Mic (In 1)"]);
+    app.set_input(t, "Mic").unwrap();
+    assert_eq!(app.engine.session().track(t).unwrap().mixer.input, Route::Hardware("Mic".into()));
+    assert_eq!(capture_inputs(&app), [vec![0, 0]], "the one channel on both sides");
+}
+
+/// #681: on a two-channel device a stereo track lists the stereo input, then the mono ones, and
+/// a mono pick records that channel on both sides; a mono track's list is unchanged.
+#[test]
+fn a_stereo_track_on_two_inputs_can_pick_a_mono_input() {
+    let mut app = app(2);
+    app.engine.set_io_map(transit_model::IoMap::for_device("test", "two inputs", 2, 2));
+    let t = track(&mut app, "stereo", "In 1-2");
+    assert_eq!(input_labels(&app, t), ["In 1-2", "", "In 1", "In 2"]);
+    app.set_input(t, "In 2").unwrap();
+    assert_eq!(app.engine.session().track(t).unwrap().mixer.input, Route::Hardware("In 2".into()));
+    assert_eq!(crate::tests::input_label(&app, t), "In 2");
+    assert_eq!(capture_inputs(&app), [vec![1, 1]], "input 2 on both sides, not inputs 2 and 3");
+    let mono = track(&mut app, "mono", "In 2");
+    assert_eq!(input_labels(&app, mono), ["In 1", "In 2"]);
+}
+
 #[test]
 fn stereo_conversion_refuses_unpaired_or_missing_inputs_atomically() {
     for (inputs, input) in [(3, 3), (3, 4), (2, 3), (2, 8), (1, 1), (0, 1), (4, 5)] {
@@ -86,7 +135,9 @@ fn width_conversion_and_input_choices_use_only_available_channels() {
     for inputs in [0, 1] {
         let mut app = app(inputs);
         let t = track(&mut app, "stereo", "In 1-2");
-        assert!(crate::mixer::input_choices(app.engine.session(), app.engine.session().track(t).unwrap(), inputs, app.engine.io_map()).is_empty());
+        // No stereo pair: a stereo track is offered the mono input there is (#681), and none at 0.
+        let mono: &[&str] = if inputs == 1 { &["In 1"] } else { &[] };
+        assert_eq!(input_labels(&app, t), mono);
         // Default (implicit input 1) routes must obey the same boundary.
         app.engine.session_mut().track_mut(t).unwrap().mixer.input = Route::None;
         assert!(width(&mut app, &[t], "stereo").is_err());
