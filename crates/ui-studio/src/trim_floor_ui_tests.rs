@@ -120,7 +120,25 @@ fn cases() -> Vec<Case> {
             },
             floor: -24_000,
         },
+        Case {
+            name: "a neighbor on the track ends before the hidden content: the neighbor's end",
+            build: || {
+                let (app, id) = studio(Session::default(), vec![(-BAR, 3 * BAR, take(), None)]);
+                let (mut app, id, _) = trimmed(app, id, 0);
+                neighbor(&mut app, id, -3 * BAR, 2 * BAR + BAR / 2);
+                (app, id, None)
+            },
+            floor: -BAR / 2,
+        },
     ]
+}
+
+/// Put an empty MIDI clip from `start` for `length` on `of`'s track.
+fn neighbor(app: &mut StudioApp, of: ClipId, start: Samples, length: Samples) {
+    let s = app.engine.session_mut();
+    let t = s.find_clip(of).unwrap().0;
+    let n = s.new_clip_id();
+    transit_engine::edit::place_clip(s, t, Clip::midi(n, "n", start, length, Sequence::default()));
 }
 
 /// Drag `id`'s start edge to the window's left edge: (the preview's start while held, the start
@@ -223,4 +241,25 @@ fn the_loop_handle_of_a_clip_ending_before_bar_1_loops_to_the_drop_point_not_to_
     let c = the_clip(&app, id);
     assert_eq!((c.start, c.end()), (-2 * BAR, -BAR + 2 * BEAT), "two beats more, on the grid");
     assert_eq!(c.looping, Some(ClipLoop { start: 0, end: BAR }), "looped over its bar");
+}
+
+#[test]
+fn an_end_trim_drag_previews_the_neighbor_it_stops_at() {
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    let (mut app, id) = studio(Session::default(), vec![(0, BAR, take(), None)]);
+    neighbor(&mut app, id, 2 * BAR, BAR);
+    app.run("view.zoom_set", json!({"samples_per_px": 4096.0})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let rect = app.arrange.layout.clips.iter().find(|c| c.id == id.0).unwrap().rect;
+    let edge = (rect[2] - 1.0, (rect[1] + rect[3]) / 2.0 + 6.0);
+    // Far right, past the neighbor at bar 3.
+    let to = (1390.0, edge.1);
+    assert!(app.arrange.layout.samples_per_px * f64::from(to.0 - edge.0) > (2 * BAR) as f64);
+    hold_drag(&mut app, &ctx, &mut time, edge, to, Modifiers::NONE);
+    let ghost = app.arrange.layout.drag_ghosts.iter().find(|g| g.clip == id.0).map(|g| (g.start, g.end));
+    assert_eq!(ghost, Some((0, 2 * BAR)), "the preview stops at the neighbor");
+    release_at(&mut app, &ctx, &mut time, to, Modifiers::NONE);
+    let c = the_clip(&app, id);
+    assert_eq!((c.start, c.end()), (0, 2 * BAR), "where the drop lands");
 }

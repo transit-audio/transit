@@ -590,8 +590,7 @@ fn group_floor(app: &StudioApp, clip: ClipId, start: Samples) -> Samples {
 
 /// Where a trimmed edge lands: `edge` moved by `dx` and snapped as a position to the visible grid
 /// (like the loop handle; a move snaps its delta instead), unless Shift is held, and never before
-/// `floor`. The caller clamps against the other edge; the engine command clamps against neighbors
-/// and the source.
+/// `floor`. The caller clamps against the other edge and the engine's trim bounds.
 fn trim_edge(app: &StudioApp, map: Map, edge: Samples, dx: Samples, shift: bool, floor: Samples) -> Samples {
     let to = edge.saturating_add(dx);
     if shift { to.max(floor) } else { crate::automation::snap_at_or_after(app.engine.session(), map.spp, &map.grid, to, floor) }
@@ -623,16 +622,19 @@ fn drag_preview(app: &StudioApp, ui: &Ui, map: Map, rows: &[&Track], tl: Rect, g
             let dest = row.and_then(|i| rows.get(i)).map(|t| t.id).filter(|t| app.holds_clips(*t)).unwrap_or(track);
             (clip, dest, new_start, new_start + (end - start), drag_copies(m))
         }
-        // A start trim floors where the engine command does: the session start, or the clip's
-        // hidden content before it (ADR 0052 decision 7). `trim_edge` already floors, so `min`
-        // alone: `clamp(floor, end - 1)` would panic for a clip ending before its floor.
+        // A trim stops where the engine command stops it (`edit::trim_bounds`, the same function:
+        // the neighbors, the start floor of ADR 0052 decision 7, an audio clip's file; the arranger
+        // runs edits as Slip, so never Shuffle's). `trim_edge` already floors, so `min` alone:
+        // `clamp(floor, end - 1)` would panic for a clip ending before its floor.
         DragKind::TrimStart => {
-            let floor = trim_floor(app.engine.session(), clip, true);
+            let s = app.engine.session();
+            let floor = s.find_clip(clip).map_or_else(|| s.start(), |(_, c)| transit_engine::edit::trim_bounds(s, c, false).start);
             (clip, track, trim_edge(app, map, start, dx, m.shift, floor).min(end - 1), end, false)
         }
         DragKind::TrimEnd => {
-            let floor = trim_floor(app.engine.session(), clip, false);
-            (clip, track, start, trim_edge(app, map, end, dx, m.shift, floor).max(start + 1), false)
+            let s = app.engine.session();
+            let limit = s.find_clip(clip).map_or(Samples::MAX, |(_, c)| transit_engine::edit::trim_bounds(s, c, false).end);
+            (clip, track, start, trim_edge(app, map, end, dx, m.shift, trim_floor(s, clip, false)).min(limit).max(start + 1), false)
         }
         DragKind::Loop | DragKind::FadeIn | DragKind::FadeOut | DragKind::FadeCurveIn | DragKind::FadeCurveOut => return None,
     })
