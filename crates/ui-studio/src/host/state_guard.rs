@@ -259,6 +259,8 @@ impl StudioApp {
         self.state_guard.jump_captured = false;
         let steps = |k: usize| if k == 1 { "step" } else { "steps" };
         self.status = match stopped {
+            // Nothing done: the refusal says it all (as before the jump captured).
+            Some(e) if n == 0 => e,
             Some(e) => format!("Undid {n} of {want} {}: {e}", steps(want)),
             None => format!("Undid {n} {}", steps(n)),
         };
