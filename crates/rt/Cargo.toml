@@ -36,6 +36,10 @@ objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "=0.13.2", default-features = false }
 
+[dev-dependencies]
+# The private Xvfb the `editor_x11` runner re-runs itself on (#697, shared with clap-host).
+transit-test-support.workspace = true
+
 # Linux editor windows on a real X server (issue #147): its own runner, which starts a private Xvfb
 # when there is no DISPLAY (run it under `xvfb-run -a` in CI).
 [[test]]

@@ -162,21 +162,47 @@ fn host_passes_until(q: &transit_rt::gui_thread::MessageQueue, inst: &Instance, 
     false
 }
 
-/// The only test in this process that maps a top-level window. X gives a closed client's
-/// resource ids to the next client, so the fixture's plug can get the id of a window another
-/// test just closed, raised or not, and a window manager still handling that window then acts
-/// on the plug: WSLg's Weston reparented it (E74, #346) or resized and moved it with a closed,
-/// never-raised editor frame's late requests (E74 recurrence, #697). The host owns a plug it
-/// mapped: it sizes it to the content at (0, 0) and puts it back when another client moves it,
-/// so the embed is read as one state that ends the passes, and a third client then plays that
-/// window manager deterministically. A reparent the host cannot undo; it fails `xembed-hosted`.
-/// On any failure the fixture prints the plug's ids, parent, geometry and events (#349).
+/// Set in the run of the XEmbed test on its private `Xvfb`.
+#[cfg(target_os = "linux")]
+const XEMBED_ON_PRIVATE_XVFB: &str = "TRANSIT_CLAP_XEMBED_ON_PRIVATE_XVFB";
+
+/// The only test in this crate that maps a top-level window, run in a process of its own on a
+/// private `Xvfb` (#697): this test binary runs again with only this test, on a display with no
+/// window manager and no other client. On a shared display a window manager configures the
+/// editor's frame on its own schedule (the content follows the frame by design), and one still
+/// handling a closed client's window acts on the fixture's plug when the plug got that window's
+/// id: WSLg's Weston reparented it (E74, #346) or configured it with a closed editor frame's late
+/// requests (E74 recurrence, #697). Neither can happen on the private server, so every configure
+/// the fixture sees is the host's or the test's own, and the intruder step fails without the
+/// host's restore. Without `Xvfb` the test runs on `DISPLAY` (CI runs the tests under
+/// `xvfb-run -a`, also without a window manager).
 #[cfg(target_os = "linux")]
 #[test]
 fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
+    if std::env::var_os(XEMBED_ON_PRIVATE_XVFB).is_none()
+        && let Some(xvfb) = transit_test_support::xvfb::PrivateXvfb::start()
+    {
+        let module = module_path!().split_once("::").map_or(module_path!(), |(_, path)| path);
+        let name = format!("{module}::xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host");
+        let args = [name, "--exact".into(), "--nocapture".into(), "--test-threads=1".into()];
+        let status = xvfb.rerun_current_exe(&args, XEMBED_ON_PRIVATE_XVFB);
+        drop(xvfb);
+        assert!(status.success(), "the XEmbed test failed on its private Xvfb ({args:?}); its output is in the test log above");
+        return;
+    }
     if !window_available() {
         return;
     }
+    xembed_embed_on_this_display();
+}
+
+/// The XEmbed test's body, on the display it was given (see the test). The host owns a plug it
+/// mapped: it sizes it to the content at (0, 0) and puts it back when another client moves it, so
+/// the embed is read as one state that ends the passes, and a third client then plays a window
+/// manager acting on a reused id. A reparent the host cannot undo; it fails `xembed-hosted`. On
+/// any failure the fixture prints the plug's ids, parent, geometry and events (#349).
+#[cfg(target_os = "linux")]
+fn xembed_embed_on_this_display() {
     let q = transit_rt::gui_thread::MessageQueue::attach();
     let inst = gain("xembed_plug");
     inst.link().open("XEmbed Fixture").unwrap();
@@ -185,8 +211,8 @@ fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
         inst.load_state(b"CMD:xembed-report");
         format!("{what}; the fixture printed the plug's state; {ids}")
     };
-    // Mapped, not VIEWABLE: on the ambient display a window manager maps the top-level on its
-    // own schedule (WSLg's XWM after an idle wake, #289), outside these bounded passes.
+    // Mapped, not VIEWABLE: on a display with a window manager (the fallback without `Xvfb`) it
+    // maps the top-level on its own schedule (WSLg's XWM after an idle wake, #289).
     if !host_passes_until(&q, &inst, b"CMD:xembed-embedded") {
         let report = explain("the embed did not complete");
         assert!(inst.load_state(b"CMD:xembed-hosted"), "the plug left the content window (another client, E74); {report}");
@@ -194,13 +220,14 @@ fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
         assert!(inst.load_state(b"CMD:xembed-notified"), "the actual EMBEDDED_NOTIFY has the content ID and negotiated version 0; {report}");
         panic!("the child's initial 123x45 size follows the resized content; {report}");
     }
-    // A window manager resizing and moving the mapped plug, as WSLg's did through a reused id:
-    // the intruder's request is checked, and `settle_host` then puts the ConfigureNotify it
-    // caused in front of the host's next dispatch. End to end only: on a display with a window
-    // manager, a late frame configure can also make the host lay the plug out again, so this step
-    // can pass without the restore; the deterministic check is rt's editor_x11 test
-    // `xembed_a_plug_another_client_moved_is_put_back` on its private Xvfb. `xembed-restored`
-    // also rejects the window following the plug's new size instead.
+    // Another client moving and resizing the mapped plug, as a window manager acting on a reused
+    // id would: the intruder's request is checked, and `settle_host` then puts the ConfigureNotify
+    // it caused in front of the host's next dispatch. `xembed-restored` requires the content at
+    // its size from before the intrusion, which rejects the window following the plug's new size
+    // instead. That holds only where nothing but the host configures the frame: with a window
+    // manager, a late grant of the frame's size moves the content too (chain hw's starved run,
+    // #697), and a late frame configure can lay the plug out again without the restore. On the
+    // private Xvfb neither happens, so this step fails without the restore.
     assert!(inst.load_state(b"CMD:xembed-intrude"));
     settle_host(&inst);
     assert!(host_passes_until(&q, &inst, b"CMD:xembed-restored"), "{}", explain("the host puts back a plug another client moved and resized"));

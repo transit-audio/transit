@@ -1,6 +1,6 @@
 [package]
 name = "transit-test-support"
-description = "transit test support: scratch folders that are removed when the test ends (#497). Dev-dependency only."
+description = "transit test support: scratch folders that are removed when the test ends (#497), a private X server for display tests (#697). Dev-dependency only."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -25,15 +25,14 @@ mod linux {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use std::cell::Cell;
-    use std::io::{BufRead, BufReader};
     use std::os::fd::AsRawFd;
-    use std::process::{Command, Stdio};
     use std::rc::Rc;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
     use transit_rt::editor_window::{self as ew, EditorWindow, Group, HeaderCell, HeaderView, WindowState};
     use transit_rt::gui_thread::MessageQueue;
     use transit_rt::run_loop::{self, Ready};
+    use transit_test_support::xvfb::PrivateXvfb;
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{
         AtomEnum, ClientMessageEvent, ConnectionExt as _, CreateWindowAux, EventMask, MapState, PropMode, Window, WindowClass,
@@ -89,34 +88,14 @@ mod linux {
         println!("test result: ok. {ran} passed; 0 failed");
     }
 
-    /// Runs this binary again on a private `Xvfb`; false when there is no `Xvfb`. It listens on
-    /// the abstract socket only (`-nolisten unix`): `WSLg` mounts `/tmp/.X11-unix` read-only. With
-    /// `-noreset` (E68): by default it resets when its last client leaves, dropping the connections
-    /// that arrive meanwhile.
+    /// Runs this binary again on a private `Xvfb` (`transit_test_support::xvfb`, shared with
+    /// clap-host's XEmbed test, #697); false when there is no `Xvfb`.
     fn run_under_own_xvfb() -> bool {
-        let xvfb = Command::new("Xvfb")
-            .args(["-displayfd", "1", "-nolisten", "tcp", "-nolisten", "unix", "-noreset", "-screen", "0", "1280x1024x24"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn();
-        let Ok(mut xvfb) = xvfb else { return false };
-        let mut line = String::new();
-        let read = BufReader::new(xvfb.stdout.take().unwrap()).read_line(&mut line);
-        let display = line.trim().to_owned();
-        if read.is_err() || display.is_empty() {
-            let _ = xvfb.kill();
-            panic!("Xvfb did not report its display");
-        }
-        println!("editor_x11: running on a private Xvfb at :{display}");
-        let status = Command::new(std::env::current_exe().unwrap())
-            .args(std::env::args().skip(1))
-            .env("DISPLAY", format!(":{display}"))
-            .env(CHILD, "1")
-            .env_remove("WAYLAND_DISPLAY")
-            .status();
-        let _ = xvfb.kill();
-        let _ = xvfb.wait();
-        assert!(status.unwrap().success(), "the tests failed on the private Xvfb");
+        let Some(xvfb) = PrivateXvfb::start() else { return false };
+        println!("editor_x11: running on a private Xvfb at {}", xvfb.display());
+        let status = xvfb.rerun_current_exe(&std::env::args().skip(1).collect::<Vec<_>>(), CHILD);
+        drop(xvfb);
+        assert!(status.success(), "the tests failed on the private Xvfb");
         true
     }
 

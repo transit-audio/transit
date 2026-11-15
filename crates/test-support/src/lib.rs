@@ -9,6 +9,11 @@
 //! (outside its short allow list), so the leak cannot come back.
 //!
 //! This is a dev-dependency only (`cargo xtask layers` rejects any other kind).
+//!
+//! [`xvfb::PrivateXvfb`] (Linux): a private X server for tests that must own their display (#697).
+
+#[cfg(target_os = "linux")]
+pub mod xvfb;
 
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
