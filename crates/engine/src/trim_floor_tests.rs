@@ -6,7 +6,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use crate::Engine;
-use crate::edit::start_trim_floor;
+use crate::edit::{shuffle_trim_floor, start_trim_floor};
 use serde_json::{Value, json};
 use transit_midi::{CtrlEvent, CtrlKind, Note, Sequence};
 use transit_model::{ChannelFormat, Clip, ClipContent, ClipId, ClipLoop, EditMode, Session, TrackId, TrackKind};
@@ -201,7 +201,7 @@ fn slip_grid_relative_grid_and_spot_all_stop_at_the_floor() {
 }
 
 #[test]
-fn in_shuffle_a_trim_back_reveals_exactly_the_hidden_content_and_no_empty_space() {
+fn in_shuffle_a_trim_back_of_a_clip_at_the_session_start_reveals_exactly_the_hidden_content() {
     // Shuffle keeps the start where it is and slides the material under it: a trim back reveals
     // the hidden events and stops at the earliest one, so the clip is as it was.
     let (mut e, _, ids) = engine(vec![(0, 2 * BAR, take())]);
@@ -211,7 +211,27 @@ fn in_shuffle_a_trim_back_reveals_exactly_the_hidden_content_and_no_empty_space(
     let c = clip(&e, id);
     assert_eq!((c.start, c.length), (0, 2 * BAR - BEAT));
     assert_eq!(seq_of(c).ctrls[0].tick, -Q, "the pedal press is hidden a beat before the edge");
-    assert_eq!(start_trim_floor(e.session(), c), -BEAT);
+    assert_eq!(shuffle_trim_floor(e.session(), c), -BEAT);
+    run(&mut e, EditMode::Shuffle, "edit.trim_clip", json!({"clip": id.0, "start": FAR}));
+    assert_eq!(clip(&e, id), &original);
+}
+
+#[test]
+fn in_shuffle_a_trim_back_of_a_later_clip_reveals_its_hidden_beat_and_no_empty_space() {
+    // A clip at bar 3 with one beat hidden: the absolute floor (bar 1) would slide the material a
+    // bar and three beats further in, as empty leading space; Shuffle's floor is relative to the
+    // kept start.
+    let (mut e, _, ids) = engine(vec![(2 * BAR, 2 * BAR, take())]);
+    let id = ids[0];
+    let original = clip(&e, id).clone();
+    run(&mut e, EditMode::Shuffle, "edit.trim_clip", json!({"clip": id.0, "start": 2 * BAR + BEAT}));
+    assert_eq!(shuffle_trim_floor(e.session(), clip(&e, id)), 2 * BAR - BEAT, "one beat before the kept start");
+    run(&mut e, EditMode::Shuffle, "edit.trim_clip", json!({"clip": id.0, "start": FAR}));
+    let c = clip(&e, id);
+    assert_eq!((c.start, c.length), (2 * BAR, 2 * BAR), "not 360,000 long");
+    assert_eq!(seq_of(c).ctrls[0].tick, 0, "the pedal press is back on the first tick, not 6,720 ticks in");
+    assert_eq!(c, &original);
+    // A clip that hides nothing gains nothing.
     run(&mut e, EditMode::Shuffle, "edit.trim_clip", json!({"clip": id.0, "start": FAR}));
     assert_eq!(clip(&e, id), &original);
 }

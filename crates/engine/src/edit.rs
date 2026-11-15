@@ -530,15 +530,78 @@ pub fn start_trim_floor(s: &Session, c: &Clip) -> Samples {
         return 0;
     }
     let zone = s.start();
-    let ClipContent::Midi { sequence } = &c.content else { return zone };
+    hidden_from(s, c).map_or(zone, |h| h.min(zone))
+}
+
+/// The position of the earliest event `c`'s left edge hides (the rule of [`start_trim_floor`]), or
+/// None when it hides nothing: an audio clip, a validly looped clip, or no event before tick 0.
+fn hidden_from(s: &Session, c: &Clip) -> Option<Samples> {
+    let ClipContent::Midi { sequence } = &c.content else { return None };
     if !transit_mix::left_edge_hides(c) {
-        return zone;
+        return None;
     }
-    let earliest = sequence.notes.iter().map(|n| n.start).chain(sequence.ctrls.iter().map(|e| e.tick)).filter(|&t| t < 0).min();
-    let Some(h) = earliest else { return zone };
+    let h = sequence.notes.iter().map(|n| n.start).chain(sequence.ctrls.iter().map(|e| e.tick)).filter(|&t| t < 0).min()?;
     let base = s.tempo.samples_to_ticks(c.start, s.sample_rate);
-    let hidden = s.tempo.tick_to_samples(base.saturating_add(h), s.sample_rate).max(-transit_time::MAX_POSITION);
-    hidden.min(zone)
+    Some(s.tempo.tick_to_samples(base.saturating_add(h), s.sample_rate).max(-transit_time::MAX_POSITION))
+}
+
+/// The start-trim floor in Shuffle, where the start edge stays put and the material slides under
+/// it: a trim back reveals at most what the left edge hides, so the floor is the hidden content's
+/// position relative to the kept start (from the same rule as [`start_trim_floor`]), and a clip
+/// that hides nothing does not gain empty leading space. A looped MIDI clip reveals earlier
+/// cycles, which are material, so it keeps the absolute floor.
+pub fn shuffle_trim_floor(s: &Session, c: &Clip) -> Samples {
+    if transit_mix::left_edge_hides(c) { hidden_from(s, c).map_or(c.start, |h| h.min(c.start)) } else { start_trim_floor(s, c) }
+}
+
+/// Where a trim of `c` stops (ADR 0052 decision 7 for the start floor), shared by `edit.trim_clip`
+/// and the arranger's trim preview so the preview shows where the drop lands: the earliest start
+/// and the latest end, from the neighboring clips (Shuffle: the room before a locked clip), the
+/// start floor, and an audio clip's file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrimBounds {
+    pub start: Samples,
+    pub end: Samples,
+    /// The end bound before the file applies, for an end trim after a start trim moved the file.
+    room_end: Samples,
+}
+
+pub fn trim_bounds(s: &Session, c: &Clip, shuffle: bool) -> TrimBounds {
+    let (mut lo, mut hi) = (Samples::MIN, Samples::MAX);
+    if shuffle {
+        let track = s.find_clip(c.id).map(|(t, _)| t);
+        let room = track.map_or(Samples::MAX, |t| shuffle_room(s, t, c.end())).max(0);
+        lo = c.start.saturating_sub(room);
+        hi = c.end().saturating_add(room);
+    } else {
+        let clips = s.find_clip(c.id).and_then(|(t, _)| s.track(t)).map(|t| t.clips()).unwrap_or_default();
+        let others = clips.iter().filter(|o| o.id != c.id);
+        if let Some(prev) = others.clone().filter(|o| o.start < c.start).map(Clip::end).max() {
+            lo = lo.max(prev.min(c.start));
+        }
+        if let Some(next) = others.filter(|o| o.start > c.start).map(|o| o.start).min() {
+            hi = hi.min(next.max(c.end()));
+        }
+    }
+    // The start floor in every mode; an audio clip in Shuffle keeps only its file start as
+    // before, since its start edge does not move there.
+    if !(shuffle && c.is_audio()) {
+        lo = lo.max(if shuffle { shuffle_trim_floor(s, c) } else { start_trim_floor(s, c) });
+    }
+    let start = file_span(s, c).map_or(lo, |(f, _)| lo.max(f));
+    TrimBounds { start, end: end_limit(s, c, hi), room_end: hi }
+}
+
+/// The span of the file under a clip, as timeline positions (None for MIDI).
+fn file_span(s: &Session, c: &Clip) -> Option<(Samples, Samples)> {
+    let start = c.start.saturating_sub(c.source_offset());
+    material_len(s, c).map(|n| (start.min(c.start), start.saturating_add(n).max(c.end())))
+}
+
+/// The latest end of `c` under the end bound `hi`: a looped clip repeats, so its file does not
+/// bound it.
+fn end_limit(s: &Session, c: &Clip, hi: Samples) -> Samples {
+    if c.looping.is_some() { hi } else { file_span(s, c).map_or(hi, |(_, f)| hi.min(f)) }
 }
 
 /// The least delta that keeps every one of `clips` at or after its [`start_floor`], so a group
@@ -796,41 +859,18 @@ pub fn grid_delta(s: &Session, clip: &Clip, raw: Samples, relative: bool) -> Sam
 /// change, up to a locked clip; otherwise a trim stops at the neighbouring clips.
 pub fn trim_clip(s: &mut Session, id: ClipId, start: Option<Samples>, end: Option<Samples>, shuffle: bool) -> Option<Clip> {
     let (track, old) = s.find_clip(id).filter(|(_, c)| !c.edit_locked).map(|(t, c)| (t, c.clone()))?;
-    let (mut lo, mut hi) = (Samples::MIN, Samples::MAX);
-    if shuffle {
-        let room = shuffle_room(s, track, old.end()).max(0);
-        lo = old.start.saturating_sub(room);
-        hi = old.end().saturating_add(room);
-    } else {
-        let others = s.track(track).map(|t| t.clips()).unwrap_or_default().iter().filter(|c| c.id != id);
-        if let Some(prev) = others.clone().filter(|c| c.start < old.start).map(Clip::end).max() {
-            lo = lo.max(prev.min(old.start));
-        }
-        if let Some(next) = others.filter(|c| c.start > old.start).map(|c| c.start).min() {
-            hi = hi.min(next.max(old.end()));
-        }
-    }
-    // The start floor (ADR 0052 decision 7) in every mode; an audio clip in Shuffle keeps only its
-    // file start as before, since its start edge does not move there.
-    if start.is_some() && !(shuffle && old.is_audio()) {
-        lo = lo.max(start_trim_floor(s, &old));
-    }
-    let file = |c: &Clip| {
-        let start = c.start.saturating_sub(c.source_offset());
-        material_len(s, c).map(|n| (start.min(c.start), start.saturating_add(n).max(c.end())))
-    };
+    let bounds = trim_bounds(s, &old, shuffle);
     let t = TimeCtx::of(s);
     let mut c = old.clone();
     if let Some(at) = start {
-        let to = at.max(file(&c).map_or(lo, |(f, _)| lo.max(f)));
-        trim_start(&mut c, to, t);
+        trim_start(&mut c, at.max(bounds.start), t);
         if shuffle {
             c.start = old.start;
         }
     }
     if let Some(at) = end {
-        // A looped clip is not bounded by its file: it repeats.
-        let limit = if c.looping.is_some() { hi } else { file(&c).map_or(hi, |(_, f)| hi.min(f)) };
+        // After a start trim the file sits elsewhere under the clip (Shuffle keeps the start).
+        let limit = if start.is_some() { end_limit(s, &c, bounds.room_end) } else { bounds.end };
         c.trim_end_to(at.min(limit));
     }
     let pl = s.track_mut(track).and_then(|t| t.playlist_mut())?;
