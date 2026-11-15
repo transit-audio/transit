@@ -77,6 +77,9 @@ pub struct Cut {
     /// Samples from the latch to Stop. Notes still held then end here (ignored when looping,
     /// where a pass ends at its length).
     pub stop: Samples,
+    /// The count-in before the latch ([`Recording::count_in`]): `Some(0)` without one, `None` for
+    /// a journal written before the field existed (ADR 0052 decision 8).
+    pub count_in: Option<Samples>,
 }
 
 /// One clip's worth of recorded material.
@@ -177,7 +180,7 @@ fn ended_before_start(events: &[RecEvent], floor: Samples) -> Vec<usize> {
 /// How many notes a take of `events` recorded with `plan` leaves out because they ended at or
 /// before the session start (#440), for the status line.
 pub fn left_out_before_start(plan: &Recording, events: &[RecEvent]) -> usize {
-    let cut = Cut { start: plan.start, pass: plan.pass, punch: plan.punch, stop: 0 };
+    let cut = Cut { start: plan.start, pass: plan.pass, punch: plan.punch, stop: 0, count_in: plan.count_in };
     let mut tracks: Vec<TrackId> = Vec::new();
     for e in events {
         if !tracks.contains(&e.track) {
@@ -333,7 +336,7 @@ fn midi_pass_end(e: &Engine, plan: &Recording, events: &[RecEvent], stop: Sample
 /// pass (`None`: it played straight through). The host knows it: Cycle toggled or the region moved
 /// while a take records does not change the loop that take was recorded with (#81).
 pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &[RecEvent], stop: Samples, wrap: Option<Range>) -> Vec<ClipId> {
-    let cut = Cut { start: plan.start, pass: plan.pass, punch: plan.punch, stop };
+    let cut = Cut { start: plan.start, pass: plan.pass, punch: plan.punch, stop, count_in: plan.count_in };
     let end = midi_pass_end(e, plan, events, stop);
     let (built, merged) = {
         let s = e.session();
@@ -482,7 +485,7 @@ mod tests {
         (s.tempo.clone(), s.sample_rate)
     }
     fn cut(start: Samples, stop: Samples) -> Cut {
-        Cut { start, pass: None, punch: None, stop }
+        Cut { start, pass: None, punch: None, stop, count_in: None }
     }
 
     #[test]
@@ -536,7 +539,7 @@ mod tests {
         let (tempo, sr) = tempo();
         // Loop of two beats (48,000 samples) starting at 96,000; two passes.
         let events = [on(0, 60), off(24_000, 60), on(40_000, 62), off(60_000, 62), on(60_000, 64), off(72_000, 64)];
-        let c = Cut { start: 96_000, pass: Some(48_000), punch: None, stop: 0 };
+        let c = Cut { start: 96_000, pass: Some(48_000), punch: None, stop: 0, count_in: None };
         let built = build(&tempo, sr, &events, &c);
         assert_eq!(
             built.iter().map(|b| (b.pass, b.range)).collect::<Vec<_>>(),
@@ -556,7 +559,7 @@ mod tests {
         let events = [ev(36_000, Msg::NoteOn { pitch: 67, velocity: 103 }), off(release, 67)];
         // Exercise both explicit loop recording and ordinary recording across transport wraps.
         for pass in [Some(48_000), None] {
-            let c = Cut { start: 96_000, pass, punch: None, stop: 0 };
+            let c = Cut { start: 96_000, pass, punch: None, stop: 0, count_in: None };
             let built = build_wrapping(&tempo, sr, &events, &c, Some(Range::new(96_000, 144_000)));
             assert_eq!(built.len(), expected.len(), "pass={pass:?}, release={release}");
             for (k, (b, &(start, length))) in built.iter().zip(expected).enumerate() {
@@ -625,7 +628,7 @@ mod tests {
     fn a_punch_keeps_only_its_range() {
         let (tempo, sr) = tempo();
         let events = [on(0, 60), off(24_000, 60), on(30_000, 62), off(40_000, 62), on(60_000, 64), off(66_000, 64)];
-        let c = Cut { start: 0, pass: None, punch: Some(Range::new(24_000, 48_000)), stop: 72_000 };
+        let c = Cut { start: 0, pass: None, punch: Some(Range::new(24_000, 48_000)), stop: 72_000, count_in: None };
         let built = build(&tempo, sr, &events, &c);
         assert_eq!(built[0].range, Range::new(24_000, 48_000));
         assert_eq!(built[0].sequence.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![62]);
@@ -638,7 +641,18 @@ mod tests {
         (e, t)
     }
     fn plan(start: Samples, pass: Option<Samples>) -> Recording {
-        Recording { start, pass, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None, end: None }
+        Recording {
+            start,
+            pass,
+            punch: None,
+            rate: 48_000,
+            takes: Vec::new(),
+            midi_journal: None,
+            midi_placed: false,
+            cycle: None,
+            end: None,
+            count_in: None,
+        }
     }
     fn two_notes(t: TrackId) -> Vec<RecEvent> {
         let mut v = vec![on(0, 60), off(24_000, 60), on(24_000, 64), off(48_000, 64)];
@@ -943,7 +957,7 @@ mod tests {
         let q = TICKS_PER_QUARTER;
         let mut events = count_in_at_the_session_start(T);
         events.extend([on(48_000 + 24_000, 64), off(48_000 + 36_000, 64)]);
-        let c = Cut { start: 0, pass: Some(48_000), punch: None, stop: 0 };
+        let c = Cut { start: 0, pass: Some(48_000), punch: None, stop: 0, count_in: None };
         let built = build(&tempo, sr, &events, &c);
         let laps: Vec<_> =
             built.iter().map(|b| (b.pass, b.range, b.sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect::<Vec<_>>())).collect();
@@ -1000,7 +1014,7 @@ mod tests {
         let events = [on(-12_000, 59), off(-6_000, 59), on(0, 60), off(12_000, 60), on(48_000 + 24_000, 62), off(48_000 + 36_000, 62)];
         // Loop recording after a count-in (the pass starts at the cycle start), and a wrapped one.
         for pass in [Some(48_000), None] {
-            let c = Cut { start: 96_000, pass, punch: None, stop: 0 };
+            let c = Cut { start: 96_000, pass, punch: None, stop: 0, count_in: None };
             let built = build_wrapping(&tempo, sr, &events, &c, Some(lap));
             assert_eq!(built.iter().map(|b| (b.pass, b.range)).collect::<Vec<_>>(), vec![(0, Range::new(84_000, 144_000)), (1, lap)], "{pass:?}");
             let first: Vec<_> = built[0].sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect();
@@ -1013,7 +1027,7 @@ mod tests {
     #[test]
     fn a_punch_keeps_its_range_and_takes_no_pickup() {
         let (tempo, sr) = tempo();
-        let c = Cut { start: 96_000, pass: None, punch: Some(Range::new(96_000, 144_000)), stop: 48_000 };
+        let c = Cut { start: 96_000, pass: None, punch: Some(Range::new(96_000, 144_000)), stop: 48_000, count_in: None };
         let built = build(&tempo, sr, &[on(-12_000, 59), off(-6_000, 59), on(0, 60), off(12_000, 60)], &c);
         assert_eq!(built[0].range, Range::new(96_000, 144_000));
         assert_eq!(built[0].sequence.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![60]);

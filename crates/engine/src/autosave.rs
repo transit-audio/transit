@@ -767,6 +767,7 @@ mod tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         let clips = |e: &Engine| e.session().track(track).unwrap().clips().iter().map(|c| (c.start, c.length)).collect::<Vec<_>>();
         let w = Autosaver::new(root.clone());
@@ -823,6 +824,7 @@ mod tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         let w = Autosaver::new(root.clone());
         w.write(e.session_arc(), None, Some(plan));
@@ -850,6 +852,7 @@ mod tests {
             midi_placed: placed,
             cycle: None,
             end: None,
+            count_in: None,
         };
         let w = Autosaver::new(root.to_path_buf());
         w.write(e.session_arc(), None, Some(plan));
@@ -877,6 +880,7 @@ mod tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         let latch = Latch { output_frame: 0, position: 0, device_rate: 48_000, session_rate: 48_000 };
         let mut w = Writer::new(path.to_path_buf());

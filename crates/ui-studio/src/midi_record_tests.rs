@@ -99,6 +99,7 @@ fn record(app: &mut StudioApp, start: i64, pass_len: Option<i64>, stop: i64, tak
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     });
     app.engine.transport.recording = true;
     app.start_play(stop, None, None);
@@ -287,6 +288,7 @@ fn the_lane_shows_a_growing_recording_clip_with_the_notes_played_so_far_until_st
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     });
     app.engine.transport.recording = true;
     app.start_play(4 * BEAT, None, None);
@@ -331,6 +333,7 @@ fn journaled_pass(app: &mut StudioApp, t: TrackId, journal: &std::path::Path) {
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     });
     app.engine.transport.recording = true;
     app.start_play(4 * BEAT, None, None);
@@ -507,6 +510,7 @@ fn cycling(app: &mut StudioApp, at: i64) {
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     });
     app.engine.transport.recording = true;
     app.start_play(at, None, None);

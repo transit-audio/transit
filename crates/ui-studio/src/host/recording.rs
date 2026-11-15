@@ -122,6 +122,9 @@ impl StudioApp {
             // Audio takes are cut into laps by it as MIDI is (#567), and recovery reads it here.
             cycle: self.take_cycle,
             end: None,
+            // The count-in reaches the take builder, so a pickup opens the clip to its start
+            // (ADR 0052 decision 8); a pass without one carries `Some(0)`.
+            count_in: Some(count_in.filter(|_| play.is_some()).map_or(0, |c| c.frames)),
         });
         if self.refuse_for_reopen() || !self.sync_player_session() {
             self.finish_recording();
@@ -303,7 +306,7 @@ impl StudioApp {
         let events: Vec<_> = take.timed(self.engine.session().sample_rate.hz()).iter().filter_map(|(offset, e)| rec_event(*offset, e)).collect();
         let start = latch.position.sample;
         let now = start + self.recording_elapsed(start);
-        let cut = transit_engine::midi_take::Cut { start, pass: plan.pass, punch: plan.punch, stop: now - start };
+        let cut = transit_engine::midi_take::Cut { start, pass: plan.pass, punch: plan.punch, stop: now - start, count_in: plan.count_in };
         let s = self.engine.session();
         let wrap = self.take_cycle.filter(|_| plan.pass.is_none());
         let mut built = transit_engine::midi_take::build_wrapping(&s.tempo, s.sample_rate, &events, &cut, wrap);
@@ -406,6 +409,7 @@ impl StudioApp {
             midi_placed: false,
             cycle: self.take_cycle,
             end: None,
+            count_in: Some(self.count_in_plan.map_or(0, |c| c.frames)),
         });
         // The audio take and the MIDI pass share one latch; either's applied start is the real one.
         let latch = finished

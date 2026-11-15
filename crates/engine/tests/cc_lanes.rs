@@ -93,6 +93,7 @@ fn recorded_sustain_survives_edit_undo_disk_roundtrip_and_audio_playback() {
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     };
     let clip = midi_take::place_midi_recording(&mut e, &plan, &events, 48000)[0];
     let original = points(&e, clip);
@@ -140,6 +141,7 @@ fn controller_only_recording_overdubs_and_undo_preserves_the_existing_notes() {
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     };
     let events = [(6000, 127), (36000, 0)].map(|(offset, value)| RecEvent { track, channel: 3, offset, msg: Msg::Cc { cc: 64, value } });
     let before = e.session().clone();

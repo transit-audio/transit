@@ -26,6 +26,7 @@ fn fixture() -> (Engine, TrackId) {
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     };
     let clips = io::place_recording_take(&mut e, &plan, vec![(t, path.to_path_buf())], true);
     std::fs::remove_file(path).unwrap();
@@ -243,6 +244,7 @@ fn a_plain_bounce_of_a_take_stack_prints_the_active_take_bit_for_bit_from_frame_
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     };
     io::place_recording_take(&mut e, &plan, vec![(t, path.to_path_buf())], true);
     std::fs::remove_file(path).unwrap();

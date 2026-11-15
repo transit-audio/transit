@@ -52,6 +52,7 @@ fn plan(start: i64, pass: Option<i64>) -> transit_engine::io::Recording {
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     }
 }
 

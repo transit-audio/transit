@@ -69,12 +69,29 @@ pub struct Recording {
     /// worked out from the plan's take files and journal ([`pass_end`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<Samples>,
+    /// The count-in the pass played before its latch, in session samples: `Some(0)` for a pass
+    /// without one, `None` for a plan written before this field existed (ADR 0052 decision 8).
+    /// A note-on in `[-n, 0)` since the latch is a pickup, and the take's clip then covers the
+    /// whole count-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count_in: Option<Samples>,
 }
 
 impl Recording {
     /// A plan for takes latched at `start`, recorded straight through.
     pub fn new(start: Samples) -> Recording {
-        Recording { start, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle: None, end: None }
+        Recording {
+            start,
+            pass: None,
+            punch: None,
+            rate: 0,
+            takes: Vec::new(),
+            midi_journal: None,
+            midi_placed: false,
+            cycle: None,
+            end: None,
+            count_in: None,
+        }
     }
 }
 
@@ -677,6 +694,7 @@ mod record_tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         let ids = place_recording_take(&mut e, &plan, vec![(gtr, path)], true);
         assert_eq!(ids.len(), 3);
@@ -726,6 +744,7 @@ mod record_tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         let ids = place_recording_take(&mut e, &plan, vec![(vox, second)], true);
         assert_eq!(ids.len(), 1);
@@ -753,6 +772,7 @@ mod record_tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         let ids = place_recording_take(&mut e, &plan, vec![(vox, second)], true);
         let h = e.undo_history();
@@ -778,6 +798,7 @@ mod record_tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         place_recording_take(&mut e, &plan, vec![(vox, second)], true);
         let h = e.undo_history();
@@ -805,6 +826,7 @@ mod record_tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         place_recording_take(&mut e, &plan, vec![(vox, second.clone()), (gtr, second)], true);
         let h = e.undo_history();
@@ -828,6 +850,7 @@ mod record_tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         place_recording_take(&mut e, &plan, vec![(vox, second)], true);
         let h = e.undo_history();
@@ -849,6 +872,7 @@ mod record_tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         place_recording(&mut e, &plan, vec![(vox, second)]);
         assert_eq!(e.undo_history().len(), n + 2);

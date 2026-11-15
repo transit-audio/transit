@@ -64,6 +64,7 @@ impl Rig {
             midi_placed: false,
             cycle: app.take_cycle,
             end: None,
+            count_in: None,
         });
         app.engine.transport.recording = true;
         app.start_play(at, None, Some(LOOP));

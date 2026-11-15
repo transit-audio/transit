@@ -46,6 +46,11 @@ pub struct Header {
     pub loop_range: Option<Range>,
     /// The armed tracks of the pass.
     pub tracks: Vec<TrackId>,
+    /// The count-in before the latch, as the plan carries it ([`Recording::count_in`]). `None`
+    /// in a journal written before it existed: recovery then starts the clip at the earliest
+    /// pickup (#327). Older builds ignore the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count_in: Option<Samples>,
 }
 
 /// The device and session side of a [`Header`].
@@ -71,6 +76,7 @@ impl Header {
             punch: plan.punch,
             loop_range,
             tracks,
+            count_in: plan.count_in,
         }
     }
 }
@@ -309,6 +315,7 @@ pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Tak
         midi_placed: false,
         cycle: h.loop_range,
         end: None,
+        count_in: h.count_in,
     };
     let before = e.session_arc();
     let ids = crate::midi_take::place_midi_recording_wrapping(e, &plan, &events, stop, h.loop_range);
@@ -359,6 +366,7 @@ mod tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         let latch = Latch { output_frame: 10_000, position: 48_000, device_rate: 48_000, session_rate: 48_000 };
         Header::new(latch, &plan, None, tracks)
@@ -481,6 +489,7 @@ mod tests {
             midi_placed: false,
             cycle: None,
             end: None,
+            count_in: None,
         };
         let latch = Latch { output_frame: 10_000, position: 96_000, device_rate: 48_000, session_rate: 48_000 };
         let header = Header::new(latch, &plan, loop_range, vec![t]);

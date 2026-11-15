@@ -33,7 +33,7 @@ fn audio_track(e: &mut Engine) -> TrackId {
 }
 
 fn plan(start: Samples, pass: Option<Samples>, cycle: Option<Range>) -> Recording {
-    Recording { start, pass, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle, end: None }
+    Recording { start, pass, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false, cycle, end: None, count_in: None }
 }
 
 /// Every clip of the track on every playlist as (source offset, start, length), by source offset.
@@ -120,7 +120,7 @@ fn an_audio_take_recorded_from_inside_a_cycling_loop_is_cut_per_lap_like_its_mid
     // The MIDI of the same pass: the same clip ranges.
     let events = [on(50), off(60), on(300), off(310), on(700), off(710)];
     let (tempo, sr) = (e.session().tempo.clone(), e.session().sample_rate);
-    let midi = build_wrapping(&tempo, sr, &events, &Cut { start: 1_200, pass: None, punch: None, stop: 1_000 }, Some(LOOP));
+    let midi = build_wrapping(&tempo, sr, &events, &Cut { start: 1_200, pass: None, punch: None, stop: 1_000, count_in: None }, Some(LOOP));
     let midi: Vec<Range> = midi.iter().map(|b| b.range).collect();
     let t = e.session().track(gtr).unwrap();
     // An earlier lap's take is on a playlist the track does not play.
@@ -164,7 +164,8 @@ fn an_audio_take_past_lap_1000_is_placed_to_its_last_frame_issue_522() {
 fn a_midi_note_after_lap_1000_is_kept_issue_522() {
     let s = transit_model::Session::default();
     let events = [on(1_000 * 48_000 + 10), off(1_000 * 48_000 + 500)];
-    let built = crate::midi_take::build(&s.tempo, s.sample_rate, &events, &Cut { start: 96_000, pass: Some(48_000), punch: None, stop: 0 });
+    let built =
+        crate::midi_take::build(&s.tempo, s.sample_rate, &events, &Cut { start: 96_000, pass: Some(48_000), punch: None, stop: 0, count_in: None });
     assert_eq!(built.iter().map(|b| (b.pass, b.range)).collect::<Vec<_>>(), vec![(1_000, Range::new(96_000, 144_000))]);
     assert_eq!(built[0].sequence.notes.len(), 1);
 }

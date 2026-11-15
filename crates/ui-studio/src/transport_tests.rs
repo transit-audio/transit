@@ -203,6 +203,7 @@ fn stop_take(tag: &str, approximate: bool) -> T {
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     });
     t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
     t.app.test_approximate_start = approximate;
@@ -245,6 +246,7 @@ fn recording_stop(count: u32) {
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     });
     t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
     t.app.engine.transport.recording = true;

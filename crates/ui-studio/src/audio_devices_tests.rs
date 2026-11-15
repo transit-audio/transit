@@ -1072,6 +1072,7 @@ fn a_driver_reset_while_recording_ends_the_take_keeps_it_and_then_reopens() {
         midi_placed: false,
         cycle: None,
         end: None,
+        count_in: None,
     });
     t.app.engine.transport.recording = true;
     let note = |frame, message| transit_playback::midi_capture::CapturedEvent { frame, track, channel: 0, message, approximate: false };
