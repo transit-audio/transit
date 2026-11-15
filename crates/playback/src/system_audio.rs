@@ -584,14 +584,18 @@ impl Resampler {
         usize::try_from(self.position().floor() as i64).unwrap_or(0).min(queued)
     }
 
-    /// Restart reading at the frame `keep` frames before the newest: discard the rest from the
-    /// front and put the anchor on the new front. Returns the frames discarded unplayed.
+    /// Restart reading at the frame `keep` frames before the newest (priming, or a resync of a ring
+    /// far over its target). Up to `behind` of the frames before it stay in the ring as the reader's
+    /// history, so the first output frames read the stream on both sides instead of silence behind
+    /// the new position (F5 of the #601 review); the rest is discarded from the front. Returns the
+    /// frames skipped unplayed, as before the history was kept.
     fn restart(&mut self, queue: &mut rtrb::Consumer<f32>, keep: usize) -> usize {
         let queued = queue.slots() / 2;
         let excess = queued.saturating_sub(keep);
         let played = self.played(queued).min(excess);
-        self.commit(queue, excess);
-        (self.anchor, self.fraction, self.n) = (0, 0.0, 0);
+        let history = excess.min(self.behind);
+        self.commit(queue, excess - history);
+        (self.anchor, self.fraction, self.n) = (history as i64, 0.0, 0);
         excess - played
     }
 

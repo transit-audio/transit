@@ -193,6 +193,49 @@ fn a_trim_change_bends_the_position_and_never_moves_it() {
     assert_eq!(status.underrun.load(Ordering::Relaxed), 0);
 }
 
+/// F5 of the #601 review: a resync (a ring four targets full) jumps ahead in the stream, and the
+/// reader starts there with the stream's own frames behind its position, not silence: a 1 kHz tone
+/// is within the reader's passband bound of the tone at every output frame right after the resync.
+#[test]
+fn a_resync_starts_with_the_streams_frames_behind_the_position() {
+    use transit_math::f64 as m;
+    const AMPLITUDE: f64 = 0.5;
+    let tone = |n: f64| AMPLITUDE * m::sin(core::f64::consts::TAU * 1_000.0 * n / 48_000.0);
+    let (mut producer, _, mut source) = ring(48_000);
+    let status = Arc::clone(&source.status);
+    let mut resampler = Resampler::new(48_000, 48_000);
+    let mut pushed = 0u64;
+    let mut push = |producer: &mut rtrb::Producer<f32>, frames: u64| {
+        for n in pushed..pushed + frames {
+            let x = tone(n as f64) as f32;
+            producer.push(x).unwrap();
+            producer.push(x).unwrap();
+        }
+        pushed += frames;
+    };
+    push(&mut producer, 4_000);
+    resampler.begin(&mut source, 128, None);
+    let mut frame = [0.0f32; 2];
+    for _ in 0..300 {
+        resampler.pull(&mut source.queue, &mut frame, &status);
+    }
+    // A burst far over four targets (8,192 frames): the next callback resynchronizes.
+    push(&mut producer, 12_000);
+    let before = status.discarded.load(Ordering::Relaxed);
+    resampler.begin(&mut source, 128, None);
+    assert!(status.discarded.load(Ordering::Relaxed) > before, "the ring resynchronized");
+    resampler.set_step(1.000_37);
+    let bound = 10f64.powf(-73.0 / 20.0) * AMPLITUDE + 1e-6;
+    let mut worst = 0.0f64;
+    for _ in 0..256 {
+        let at = resampler.absolute_position();
+        resampler.pull(&mut source.queue, &mut frame, &status);
+        worst = worst.max((f64::from(frame[0]) - tone(at)).abs());
+    }
+    assert!(worst <= bound, "an output frame after the resync was {worst:.3e} off the tone (bound {bound:.3e})");
+    assert_eq!(status.underrun.load(Ordering::Relaxed), 0);
+}
+
 /// The issue's case through the drift servo (#603): a 15 kHz tone at 48 kHz captured by an endpoint
 /// whose clock runs 0, 50 and 1,000 ppm fast against the 48 kHz device, read in 128-frame callbacks
 /// for 10 s. The tone's level in 100 ms windows (after the first second) stays within 0.1 dB of the
