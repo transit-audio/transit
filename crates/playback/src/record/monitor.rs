@@ -712,17 +712,25 @@ mod ring_tests {
         }
     }
 
-    /// Same rate: samples pass through unchanged.
+    /// Same rate: samples pass through unchanged, bit for bit, a negative zero and a subnormal
+    /// included (the reader at q = 1 would turn the negative zero into +0.0), across reads.
     #[test]
     fn monitor_passes_through_at_equal_rates() {
         let ring = InputRing::new(2, 48_000);
-        let input: Vec<f32> = (0..200).map(|i| i as f32).collect();
+        let mut input: Vec<f32> = (0..200).map(|i| i as f32).collect();
+        input[..6].copy_from_slice(&[-0.0, f32::from_bits(1), 2.0, -0.0, -f32::from_bits(3), 5.0]);
         ring.push(&input);
-        let mut out = vec![vec![0.0f32; 50], vec![0.0f32; 50]];
-        ring.pop_into(&mut out, 50, 48_000);
-        assert_eq!(out[0][0], 0.0);
-        assert_eq!(out[1][0], 1.0);
-        assert_eq!(out[0][49], 98.0);
+        let mut got = Vec::new();
+        for n in [1usize, 2, 47] {
+            let mut out = vec![vec![9.0f32; n], vec![9.0f32; n]];
+            ring.pop_into(&mut out, n, 48_000);
+            for k in 0..n {
+                got.push(out[0][k].to_bits());
+                got.push(out[1][k].to_bits());
+            }
+        }
+        let want: Vec<u32> = input[..100].iter().map(|x| x.to_bits()).collect();
+        assert_eq!(got, want);
     }
 
     /// A ring filled before anything read it (the ASIO input runs from startup) is emptied at

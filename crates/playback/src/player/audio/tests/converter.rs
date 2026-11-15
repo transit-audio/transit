@@ -304,9 +304,16 @@ fn ramp_session(rate: u32, frames: usize) -> (Arc<Session>, [Vec<f32>; 2]) {
     let mut s = Session { sample_rate: transit_time::SampleRate::new(rate).unwrap(), ..Session::default() };
     s.edit.click = false;
     let track = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
-    let ramp: Vec<f32> = (0..frames).map(|n| n as f32 * STEP).collect();
+    let mut ramp: Vec<f32> = (0..frames).map(|n| n as f32 * STEP).collect();
     // The right channel is a sawtooth pattern with a jump every 31 frames (IEEE-exact values).
-    let pattern: Vec<f32> = (0..frames).map(|n| (n % 31) as f32 / 64.0 - 0.25).collect();
+    let mut pattern: Vec<f32> = (0..frames).map(|n| (n % 31) as f32 / 64.0 - 0.25).collect();
+    // F4 of the #601 review: a negative zero and a subnormal. The mix sums the negative zero to
+    // +0.0 and sanitizes non-finite samples before the converter, so no sample value can tell the
+    // direct frame from the reader through the player; there the fast path is pinned by `play`'s
+    // count of reader calls (none at equal rates and speed 1). The input converter and the
+    // primitives pin the negative zero itself.
+    ramp[5] = -0.0;
+    pattern[6] = f32::from_bits(1);
     s.pool.insert(
         SourceId(1),
         Arc::new(SourceAudio::new(transit_audio_io::AudioBuffer { sample_rate: rate, channels: vec![ramp.clone(), pattern.clone()] })),
@@ -395,8 +402,10 @@ fn a_ramp_through_the_player_is_the_reader_at_every_output_frame() {
 fn equal_rates_through_the_player_are_bit_exact_pass_through() {
     for rate in [44_100, 48_000, 96_000] {
         let (left, right, input) = play(rate, rate, 1000, &[512, 7, 1], 9000);
-        assert_eq!(bits(&left), bits(&input[0][..9000]), "{rate} Hz left");
-        assert_eq!(bits(&right), bits(&input[1][..9000]), "{rate} Hz right");
+        // What reaches the device: the mix sums a negative zero to +0.0.
+        let device = |x: &[f32]| x.iter().map(|v| if *v == 0.0 { 0.0 } else { *v }).collect::<Vec<f32>>();
+        assert_eq!(bits(&left), bits(&device(&input[0][..9000])), "{rate} Hz left");
+        assert_eq!(bits(&right), bits(&device(&input[1][..9000])), "{rate} Hz right");
     }
 }
 
