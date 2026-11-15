@@ -102,6 +102,20 @@ pub struct ClipLoop {
 /// of cycles per audio block for no musical purpose.
 pub const MIN_CYCLE: Samples = 64;
 
+/// The smallest stretch a clip plays at: ADR 0056 decision 5.2 bounds the rate `q = 1 / stretch` to
+/// [1/32, 32], the clip reader's domain. The commands keep the stretch within 0.05..20; only a
+/// hand-edited file can hold one outside, and [`Clip::sanitize`] clamps it.
+pub const MIN_STRETCH: f64 = 1.0 / 32.0;
+/// The largest stretch a clip plays at (decision 5.2, as [`MIN_STRETCH`]).
+pub const MAX_STRETCH: f64 = 32.0;
+
+/// A stretch within 1e-9 of 1 is exactly 1 (#604): arithmetic that should come back to 1 (Conform to
+/// Tempo after a tempo change and its inverse) can land one ulp away, and only an exact 1 reads the
+/// file directly. Every place that writes a stretch passes it through here.
+pub fn snap_stretch(stretch: f64) -> f64 {
+    if (stretch - 1.0).abs() < 1e-9 { 1.0 } else { stretch }
+}
+
 impl ClipLoop {
     /// One cycle's length (samples); a valid loop has `start < end`.
     pub fn cycle(self) -> Samples {
@@ -410,6 +424,21 @@ impl Clip {
         if !self.stretch.is_finite() || self.stretch <= 0.0 {
             self.stretch = 1.0;
         }
+        self.stretch = snap_stretch(self.stretch.clamp(MIN_STRETCH, MAX_STRETCH));
+    }
+
+    /// [`Clip::sanitize`], and the load note to show when it had to clamp the clip's stretch into
+    /// [`MIN_STRETCH`]..[`MAX_STRETCH`] (ADR 0056 decision 5.2; a clip outside them could not play).
+    pub fn sanitize_noting(&mut self) -> Option<String> {
+        let before = self.stretch;
+        self.sanitize();
+        let outside = before.is_finite() && before > 0.0 && !(MIN_STRETCH..=MAX_STRETCH).contains(&before);
+        outside.then(|| {
+            format!(
+                "clip \"{}\": its stretch {before} was outside what a clip can play (1/32 to 32, a speed of 1/32 to 32 times), so it was set to {}",
+                self.name, self.stretch
+            )
+        })
     }
 }
 
@@ -634,5 +663,33 @@ mod tests {
         c.fade_out = Fade { len: 800, shape: FadeShape::Linear, curvature: 0.0 };
         c.trim_start_to(900);
         assert!(c.fade_out.len <= c.length);
+    }
+
+    /// A session file's clip stretches as loading leaves them (#604, ADR 0056 decision 5.2): one ulp
+    /// from 1 is exactly 1 (a direct read), and outside 1/32..32 is clamped with a load note naming the
+    /// track and the clip, so no loaded clip is past the reader's rate and silent.
+    #[test]
+    fn a_loaded_stretch_near_one_is_one_and_one_outside_the_bounds_is_clamped_with_a_note() {
+        let mut s = crate::Session::default();
+        let t = s.add_track(crate::TrackKind::Audio, crate::ChannelFormat::Mono, Some("Loop"));
+        let clip = |id: u64, stretch: f64| {
+            let mut c = Clip::audio(ClipId(100 + id), format!("c{id}"), SourceId(1), 0, id as i64 * 1_000, 500);
+            c.stretch = stretch;
+            c
+        };
+        let stretches = [0.9999999999999999, 1.0000000000000002, 1.0 / 40.0, 40.0, 1.0 / 32.0, 32.0, 0.05, 1.25];
+        let pl = s.track_mut(t).unwrap().playlist_mut().unwrap();
+        for (i, &st) in stretches.iter().enumerate() {
+            pl.clips.push(clip(i as u64, st));
+        }
+        let text = s.to_json().unwrap();
+        assert!(text.contains("0.9999999999999999"), "the file holds the value exactly");
+        let back = crate::Session::from_json(&text).unwrap();
+        let got: Vec<u64> = back.track(t).unwrap().clips().iter().map(|c| c.stretch.to_bits()).collect();
+        let want: Vec<u64> = [1.0, 1.0, 1.0 / 32.0, 32.0, 1.0 / 32.0, 32.0, 0.05, 1.25].iter().map(|x: &f64| x.to_bits()).collect();
+        assert_eq!(got, want);
+        assert_eq!(back.load_notes.len(), 2, "{:?}", back.load_notes);
+        assert!(back.load_notes[0].starts_with("track \"Loop\", clip \"c2\": its stretch 0.025 was outside"), "{:?}", back.load_notes);
+        assert!(back.load_notes[1].contains("clip \"c3\": its stretch 40 was outside"), "{:?}", back.load_notes);
     }
 }

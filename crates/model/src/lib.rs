@@ -51,7 +51,7 @@ mod takes;
 mod track;
 
 pub use automation::{AutoParam, AutomationLane, AutomationMode, AutomationPoint};
-pub use clip::{Clip, ClipContent, ClipLoop, Fade, FadeShape, MIN_CYCLE, WholeFades};
+pub use clip::{Clip, ClipContent, ClipLoop, Fade, FadeShape, MAX_STRETCH, MIN_CYCLE, MIN_STRETCH, WholeFades, snap_stretch};
 pub use device_pages::{DeviceRef, MAX_USER_PAGES, PagesError, UserPage};
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
 pub use io_map::{

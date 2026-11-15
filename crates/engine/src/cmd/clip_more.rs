@@ -244,7 +244,9 @@ fn conform(e: &mut Engine, p: &Value) -> Result<Value> {
         let len0 = s.edit.value(&len_key, c.length as f64 / stretch).max(1.0);
         s.edit.values.insert(bpm_key, src_bpm);
         s.edit.values.insert(len_key, len0);
-        let ratio = (src_bpm / now).clamp(0.05, 20.0);
+        // A tempo that came back to the clip's own (a change and its inverse) can leave the ratio one
+        // ulp from 1: that is 1, so the clip reads its file directly (#604).
+        let ratio = transit_model::snap_stretch((src_bpm / now).clamp(0.05, 20.0));
         let new_len = ((len0 * ratio).round() as Samples).max(1);
         if let Some(cl) = s.find_clip_mut(cid) {
             cl.stretch = ratio;
@@ -451,6 +453,51 @@ mod tests {
         assert!(e.session().edit.values.is_empty());
         e.execute("edit.paste_clip_effects", &json!({"clip": ids[0].0})).unwrap();
         assert_eq!(e.session().edit.values.len(), 1);
+    }
+
+    /// A tempo stretch by 3/11 and back by 11/3 brings the tempo back one ulp off its value, so
+    /// Conform to Tempo's ratio comes out one ulp from 1: the stored stretch is exactly 1, and the clip
+    /// reads its file directly (#604).
+    #[test]
+    fn conform_after_a_tempo_change_and_its_inverse_stores_a_stretch_of_exactly_one() {
+        let (mut e, _, ids) = engine_with(&[(0, 48_000, 0)]);
+        let bpm = e.session().tempo.tempo_at_tick(0);
+        e.execute("clip.conform_to_tempo", &json!({"clip": ids[0].0, "source_bpm": bpm})).unwrap();
+        assert_eq!(the_clip(&e, ids[0]).stretch, 1.0);
+        for factor in [3.0 / 11.0, 11.0 / 3.0] {
+            e.execute("event.tempo_stretch", &json!({"start": 0, "end": 96_000, "factor": factor})).unwrap();
+        }
+        let now = e.session().tempo.tempo_at_tick(0);
+        assert_ne!(bpm / now, 1.0, "the round trip lands one ulp away ({now} against {bpm})");
+        assert!((bpm / now - 1.0).abs() < 1e-9);
+        e.execute("clip.conform_to_tempo", &json!({"clip": ids[0].0})).unwrap();
+        assert_eq!(the_clip(&e, ids[0]).stretch.to_bits(), 1.0f64.to_bits());
+    }
+
+    /// Elastic Properties on a track without an Elastic algorithm stores a ratio within 1e-9 of 1 as
+    /// exactly 1 (#604).
+    #[test]
+    fn elastic_properties_store_a_ratio_one_ulp_from_one_as_exactly_one() {
+        let (mut e, _, ids) = engine_with(&[(0, 48_000, 0)]);
+        for (ratio, want) in [(0.9999999999999999, 1.0), (1.0000000000000002, 1.0), (1.25, 1.25)] {
+            e.execute("clip.elastic_properties", &json!({"clip": ids[0].0, "ratio": ratio})).unwrap();
+            assert_eq!(the_clip(&e, ids[0]).stretch.to_bits(), f64::to_bits(want), "{ratio}");
+        }
+    }
+
+    /// A session file with a clip stretched past what a clip can play opens with the stretch clamped
+    /// into 1/32..32 and a message the user sees (ADR 0056 decision 5.2, #604).
+    #[test]
+    fn opening_a_session_with_a_stretch_past_the_bounds_clamps_it_and_says_so() {
+        let (e, t, ids) = engine_with(&[(0, 4_800, 0)]);
+        let mut s = e.session().clone();
+        s.find_clip_mut(ids[0]).unwrap().stretch = 1.0 / 40.0;
+        let mut opened = Engine::default();
+        let mark = opened.message_pushes();
+        crate::io::open_session_bytes(&mut opened, "fast.transit", s.to_json().unwrap().as_bytes()).unwrap();
+        assert_eq!(opened.session().track(t).unwrap().clips()[0].stretch, 1.0 / 32.0);
+        let said = opened.messages_since(mark);
+        assert!(said.iter().any(|m| m.contains("its stretch 0.025 was outside what a clip can play")), "{said:?}");
     }
 
     #[test]

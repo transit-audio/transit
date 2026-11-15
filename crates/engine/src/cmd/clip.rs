@@ -213,7 +213,8 @@ pub fn specs() -> Vec<CommandSpec> {
 /// (the original source is remembered in `edit.values` so Remove Warp restores it).
 fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
     let ids = clip_ids_param(e, p);
-    let ratio = f64_or(p, "ratio", 1.0).clamp(0.05, 20.0);
+    // A ratio within 1e-9 of 1 is 1, so the clip reads its file directly (#604).
+    let ratio = transit_model::snap_stretch(f64_or(p, "ratio", 1.0).clamp(0.05, 20.0));
     let s = e.session_mut();
     let mut rendered = 0;
     for id in &ids {

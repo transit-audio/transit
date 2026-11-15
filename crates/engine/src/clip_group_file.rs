@@ -189,6 +189,7 @@ pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -
     let map: BTreeMap<u64, SourceId> = file_of.into_iter().filter_map(|(old, n)| Some((old, *sources.get(n)?))).collect();
     let start_idx = first.and_then(|t| s.tracks.iter().position(|x| x.id == t));
     let mut placed = Vec::new();
+    let mut stretch_notes = Vec::new();
     let group_id = s.alloc();
     for (li, lane) in file.lanes.into_iter().enumerate() {
         let audio_lane = lane.iter().any(|c| matches!(c.content, ClipContent::Audio { .. }));
@@ -220,10 +221,14 @@ pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -
             c.start = at.saturating_add(scale(c.start.max(0)));
             c.length = scale(c.length);
             c.group = Some(group_id);
-            c.sanitize();
+            // A stretch outside what a clip can play is clamped and said (ADR 0056 decision 5.2).
+            stretch_notes.extend(c.sanitize_noting());
             placed.push(c.id);
             crate::edit::place_clip(s, target, c);
         }
+    }
+    for n in stretch_notes {
+        e.message(n);
     }
     // Last, so a file refused for its contents posts nothing.
     let note = (tag == Tag::Legacy).then(|| legacy_note(path));

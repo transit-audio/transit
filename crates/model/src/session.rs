@@ -794,6 +794,8 @@ impl Session {
         self.next_id = self.next_id.max(max_id.saturating_add(1));
         truncate_chars(&mut self.name, MAX_NAME_CHARS);
         truncate_chars(&mut self.comments, MAX_COMMENT_CHARS);
+        // Clips whose stretch had to be clamped into what a clip can play (ADR 0056 decision 5.2).
+        let mut stretch_notes = Vec::new();
         for t in &mut self.tracks {
             t.mixer.sanitize();
             truncate_chars(&mut t.name, MAX_NAME_CHARS);
@@ -807,7 +809,11 @@ impl Session {
             for p in &mut t.playlists {
                 truncate_chars(&mut p.name, MAX_NAME_CHARS);
                 p.clips.retain(|c| c.length > 0);
-                p.clips.iter_mut().for_each(Clip::sanitize);
+                for c in &mut p.clips {
+                    if let Some(note) = c.sanitize_noting() {
+                        stretch_notes.push(format!("track \"{}\", {note}", t.name));
+                    }
+                }
                 p.sort();
             }
             for l in &mut t.automation {
@@ -816,6 +822,7 @@ impl Session {
                 l.points.sort_by_key(|p| p.at);
             }
         }
+        self.load_notes.extend(stretch_notes);
         for m in &mut self.markers {
             bound(&mut m.start);
             bound(&mut m.end);
