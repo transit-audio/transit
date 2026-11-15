@@ -155,8 +155,10 @@ mod touch;
 mod touch_tests;
 
 use automation::{apply_params, lerp_gain, pan_at, pan_segment, send_level, transport_at, volume_db_at};
-#[cfg(test)]
-use clips::render_clip;
+/// One clip into a strip buffer, as the plan renders it: public for the clip-path bench
+/// (`examples/clip_path_bench.rs`, ADR 0056 decision 8.8), not an API.
+#[doc(hidden)]
+pub use clips::render_clip;
 pub use clips::render_clips;
 use clips::{clip_fx_params, render_audio_clips};
 pub use compile::{CompileError, CompileMode, MIN_DELAY_CAPACITY, PlanCompiler, PlanLimits};

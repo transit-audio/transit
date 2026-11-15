@@ -15,7 +15,7 @@
 //! playback, [`DiskSource::check`] before an offline render (issue #523).
 //!
 //! A ring is keyed by clip time (samples from the clip's start), and holds the source channels'
-//! samples already mapped through the clip's loop and stretch ([`StreamMap::read`], the
+//! samples already mapped through the clip's loop and stretch ([`ClipReader::read`], the
 //! function the in-memory read uses too: a stretched clip goes through the band-limited reader on
 //! the streamer thread, ADR 0056 decision 8.6). Clip time only moves forward while the transport
 //! plays, so a ring never needs to wrap content; a locate or a transport loop is a new stream.
@@ -33,7 +33,7 @@ use transit_audio_io::{AudioInfo, BlockReader};
 use transit_time::{Range, Samples};
 
 pub use peaks::{DiskPeaks, PEAKS_BUCKET, PeaksOrigin, load_or_build_peaks, sidecar_path};
-pub use read::{ClipSource, Frames, MAX_RATE, Memory, SyncSource, prepare_reader};
+pub use read::{ClipReader, ClipSource, Frames, MAX_RATE, Memory, SyncSource, prepare_reader};
 pub use stream::{PUMP_INTERVAL, register};
 
 /// Ring slots per source: streams of its clips that can be held at once (the playing one and the
@@ -600,7 +600,7 @@ impl DiskSource {
         })
     }
 
-    /// [`DiskSource::with_sync`] as a [`ClipSource`], for [`StreamMap::read`]: what an offline
+    /// [`DiskSource::with_sync`] as a [`ClipSource`], for [`ClipReader::read`]: what an offline
     /// render of a clip reads, the same samples the streamer puts in a ring.
     pub fn with_sync_source<R>(&self, f: impl FnOnce(&mut SyncSource<'_>) -> R) -> R {
         let channels = self.channels;

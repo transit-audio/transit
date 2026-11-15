@@ -26,6 +26,8 @@ pub(crate) struct Pump {
     seen: Vec<(u64, u64)>,
     pass: u64,
     cache: Option<Cache>,
+    /// One frame of every channel, for [`fill`] (sized once, on the first pass).
+    frame: Vec<f32>,
     /// The file could not be opened, or a read failed: the fault is recorded on the source, which
     /// plays silence until the next [`DiskSource::prime`] tries the file again (issue #523).
     broken: bool,
@@ -39,6 +41,7 @@ impl DiskSource {
         let p = &mut *guard;
         p.pass += 1;
         p.maps.resize(self.slots.len(), None);
+        p.frame.resize(self.channels, 0.0);
         p.seen.resize(self.slots.len(), (0, 0));
         for (i, slot) in self.slots.iter().enumerate() {
             let reads = slot.reads.load(Ordering::Relaxed);
@@ -74,7 +77,7 @@ impl DiskSource {
             let mut head = slot.head.load(Ordering::Relaxed);
             while head < target {
                 let n = usize::try_from(target - head).unwrap_or(0).min(CHUNK);
-                fill(ring, self.window, self.channels, &map, head, n, cache);
+                fill(ring, self.window, &mut p.frame, &map, head, n, cache);
                 head += n as i64;
                 slot.head.store(head, Ordering::Release);
                 written += n;
@@ -161,13 +164,13 @@ impl DiskSource {
 }
 
 /// Write clip times `from..from + n` of `map` into `ring`, every channel, through
-/// [`StreamMap::read`]: a stretched clip's reader output, its taps made resident in `cache` first
+/// [`ClipReader::read`]: a stretched clip's reader output, its taps made resident in `cache` first
 /// (ADR 0056 decision 8.6), so the ring holds what an in-memory read of the clip gives, bit for bit.
-fn fill(ring: &[AtomicU32], window: usize, channels: usize, map: &StreamMap, from: i64, n: usize, cache: &mut Cache) {
-    let mut frame = vec![0.0f32; channels];
+fn fill(ring: &[AtomicU32], window: usize, frame: &mut [f32], map: &StreamMap, from: i64, n: usize, cache: &mut Cache) {
+    let reader = map.reader();
     for k in from..from + n as i64 {
         let at = (k.max(0) as usize) % window;
-        map.read(k, cache, 0, &mut frame);
+        reader.read(k, cache, 0, frame);
         for (ch, v) in frame.iter().enumerate() {
             if let Some(cell) = ring.get(ch * window + at) {
                 cell.store(v.to_bits(), Ordering::Relaxed);

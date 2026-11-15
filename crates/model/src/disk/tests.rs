@@ -43,7 +43,7 @@ fn fake(data: Vec<Vec<f32>>, window: usize) -> (Arc<DiskSource>, Arc<AtomicUsize
 /// Channel `ch` of `map`'s clip at clip time `k`, read from `data` in memory.
 pub(super) fn memory_read(map: &StreamMap, data: &[Vec<f32>], ch: usize, k: i64) -> f32 {
     let mut out = [0.0f32];
-    map.read(k, &mut Memory(data), ch, &mut out);
+    map.reader().read(k, &mut Memory(data), ch, &mut out);
     out[0]
 }
 

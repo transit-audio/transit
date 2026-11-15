@@ -118,7 +118,7 @@ fn a_stretched_clip_streams_from_disk_as_it_plays_from_memory() {
             sync.with_sync_source(|src| {
                 let mut out = [0.0f32; 2];
                 for k in 0..m.length {
-                    m.read(k, src, 0, &mut out);
+                    m.reader().read(k, src, 0, &mut out);
                     for (ch, (o, w)) in out.iter().zip(&want[k as usize]).enumerate() {
                         assert_eq!(o.to_bits(), w.to_bits(), "{m:?} sync {cache}, channel {ch} at {k}");
                     }
@@ -256,5 +256,81 @@ fn a_request_under_another_stretch_or_loop_is_not_taken_for_it() {
         d.pump();
         assert!(d.stream(&a, 0, 64).is_some());
         assert!(d.stream(&b, 0, 64).is_some(), "{b:?}: its request was left waiting behind another mapping's");
+    }
+}
+
+/// `channels` channels of [`noise`]-like integer noise, `frames` frames each.
+fn noise_channels(channels: usize, frames: usize) -> Vec<Vec<f32>> {
+    let mut x: u32 = 0x0bad_cafe;
+    (0..channels)
+        .map(|_| {
+            (0..frames)
+                .map(|_| {
+                    x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    (x >> 8) as f32 / (1u32 << 23) as f32 - 1.0
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Stream `m` from clip time `cue` through a disk source of `data` and compare every channel of every
+/// frame with the in-memory read of that channel alone, bit for bit; then the offline reader.
+fn streams_as_memory(data: &[Vec<f32>], m: StreamMap, window: usize, cache: usize, block: usize, cue: i64) {
+    let d = source(data, window, cache);
+    d.cue(&m, cue);
+    d.pump();
+    let mut k = cue;
+    while k < m.length {
+        let n = (block as i64).min(m.length - k);
+        let v = d.stream(&m, k, n as usize).unwrap_or_else(|| panic!("{m:?} {window}/{cache}/{block} from {cue}: short at {k}"));
+        for i in k..k + n {
+            for ch in 0..data.len() {
+                let want = memory_read(&m, data, ch, i);
+                assert_eq!(
+                    v.get(ch, i).to_bits(),
+                    want.to_bits(),
+                    "{} channels, {m:?}, ring {window}/{cache}/{block} from {cue}, channel {ch} at {i}",
+                    data.len()
+                );
+            }
+        }
+        drop(v);
+        k += n;
+        d.pump();
+    }
+    assert_eq!(d.underruns(), 0);
+    source(data, window, cache).with_sync_source(|src| {
+        let mut out = vec![0.0f32; data.len()];
+        let reader = m.reader();
+        for k in cue..m.length {
+            reader.read(k, src, 0, &mut out);
+            for (ch, o) in out.iter().enumerate() {
+                assert_eq!(o.to_bits(), memory_read(&m, data, ch, k).to_bits(), "{} channels, {m:?}, sync, channel {ch} at {k}", data.len());
+            }
+        }
+    });
+}
+
+#[test]
+fn every_channel_count_a_source_shorter_than_the_halo_and_a_cue_mid_clip_stream_as_memory_plays() {
+    // Mono, three, six and forty channels (wider than the mix's 32-channel frame), cued at the clip's
+    // start and in its middle.
+    for channels in [1usize, 3, 6, 40] {
+        let data = noise_channels(channels, 6_000);
+        let maps = [stretched(1, 30, 133.0 / 130.0, 3_000, None), stretched(2, 0, 0.25, 1_000, Some(ClipLoop { start: 100, end: 700 }))];
+        for m in maps {
+            for (window, cache, block, cue) in [(256, 8, 61, 0), (1_024, 4_096, 300, 777)] {
+                streams_as_memory(&data, m, window, cache, block, cue);
+            }
+        }
+    }
+    // A source of 10 frames, shorter than every halo (17 at q <= 1, 321 at q 20).
+    let short = noise_channels(2, 10);
+    for stretch in [0.05, 0.8, 1.25, 3.0] {
+        let m = stretched(3, -5, stretch, 60, None);
+        assert!((0..60).any(|k| memory_read(&m, &short, 0, k) != 0.0), "stretch {stretch}");
+        streams_as_memory(&short, m, 64, 8, 7, 0);
+        streams_as_memory(&short, m, 64, 8, 7, 23);
     }
 }

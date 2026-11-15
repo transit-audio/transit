@@ -109,7 +109,7 @@ pub(crate) fn clip_fx_params(s: &Session, clip: u64) -> Option<impl Iterator<Ite
 /// layout-agnostic fold, not a speaker-aware surround matrix: six channels into stereo become
 /// (0 + 2 + 4) / 3 and (1 + 3 + 5) / 3, including LFE if present. Nothing is discarded.
 /// Equal widths map directly; narrower sources retain cyclic duplication (mono to both sides).
-pub(crate) fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize, buf: &mut [Vec<f32>]) {
+pub fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize, buf: &mut [Vec<f32>]) {
     let ClipContent::Audio { source, .. } = clip.content else { return };
     let Some(map) = StreamMap::of(clip) else { return };
     let block = Range { start: pos, end: pos.saturating_add(frames as i64) };
@@ -117,13 +117,14 @@ pub(crate) fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize,
     let Some(audio) = s.pool.get(source) else { return };
     let i0 = usize::try_from(isect.start - pos).unwrap_or(0);
     let i1 = usize::try_from(isect.end - pos).unwrap_or(0).min(frames);
-    // Every read of the clip's source goes through `StreamMap::read` (a stretched clip through the
+    // Every read of the clip's source goes through `ClipReader::read` (a stretched clip through the
     // band-limited reader, ADR 0056 decision 8; #604), except the ring, which holds its output.
     match audio.disk.as_deref() {
         None => {
             let mut src = Memory(&audio.buffer.channels);
             let nsrc = audio.buffer.channels.len();
-            mix_clip(clip, pos, i0, i1, buf, nsrc, |k, first, out| map.read(k, &mut src, first, out));
+            let reader = map.reader();
+            mix_clip(clip, pos, i0, i1, buf, nsrc, |k, first, out| reader.read(k, &mut src, first, out));
         }
         // The audio thread (and a render worker for it) only drains the clip's ring (ADR 0035).
         Some(d) if on_audio_thread() => {
@@ -138,7 +139,10 @@ pub(crate) fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize,
             }
         }
         // Offline (bounce, export, consolidate): the same file, read here.
-        Some(d) => d.with_sync_source(|src| mix_clip(clip, pos, i0, i1, buf, d.channels(), |k, first, out| map.read(k, src, first, out))),
+        Some(d) => {
+            let reader = map.reader();
+            d.with_sync_source(|src| mix_clip(clip, pos, i0, i1, buf, d.channels(), |k, first, out| reader.read(k, src, first, out)));
+        }
     }
 }
 

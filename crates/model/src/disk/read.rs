@@ -1,7 +1,7 @@
 //! How an audio clip reads its source (ADR 0056 decisions 5.3, 8 and 8.6; issue #604).
 //!
 //! Every reader of a clip, in memory or from disk, live or offline, reads through
-//! [`StreamMap::read`]: the loop, then the clip's mapping `x = offset + rel·q` with `q = 1 / stretch`.
+//! [`ClipReader::read`] (from [`StreamMap::reader`]): the loop, then the clip's mapping `x = offset + rel·q` with `q = 1 / stretch`.
 //! A stretch of exactly 1 is the direct index (the source frame itself, bit for bit); any other
 //! stretch goes through the band-limited reader of decision 8 (`transit_resample`), whose taps reach
 //! `16·max(1, q)` source frames on both sides of `x`. A disk-backed source makes those frames resident
@@ -25,8 +25,12 @@ pub fn prepare_reader() {
     let _ = SincTable::shared();
 }
 
-/// A clip's source as [`StreamMap::read`] takes it: frames by index, 0 outside the source.
+/// A clip's source as [`ClipReader::read`] takes it: frames by index, 0 outside the source.
 pub trait ClipSource: Frames {
+    /// Every frame is readable already (an in-memory source): the read skips [`ClipSource::need`]
+    /// and the tap range it would compute for it.
+    const RESIDENT: bool = false;
+
     /// Make source frames `frames` readable before a read (a disk reader loads them from its file);
     /// an in-memory source holds every frame already.
     fn need(&mut self, frames: Range<i64>) {
@@ -50,7 +54,9 @@ impl Frames for Memory<'_> {
     }
 }
 
-impl ClipSource for Memory<'_> {}
+impl ClipSource for Memory<'_> {
+    const RESIDENT: bool = true;
+}
 
 /// Channels `first..` of a source.
 struct Skip<'a, S: ?Sized> {
@@ -76,30 +82,53 @@ impl StreamMap {
         1.0 / self.stretch
     }
 
+    /// The reader of this clip: the rate and the table taken once (a block, a streamer chunk), so the
+    /// per-sample read divides nothing and loads nothing.
+    #[inline]
+    pub fn reader(&self) -> ClipReader {
+        ClipReader { map: *self, q: self.rate(), table: SincTable::shared() }
+    }
+}
+
+/// [`StreamMap::reader`]: one clip's mapping with its rate and the reader's table.
+#[derive(Clone, Copy)]
+pub struct ClipReader {
+    map: StreamMap,
+    q: f64,
+    table: &'static SincTable,
+}
+
+impl ClipReader {
     /// Source channels `first..first + out.len()` at clip time `k` into `out` (channels past the
     /// source's read 0): the loop (ADR 0019), then the mapping. At `q = 1` exactly the source frame
     /// `offset + rel` itself; otherwise the reader at `x = offset + rel·q`, formed as decision 5.3
     /// states (`rel·q` rounded once, then added to the offset), so a position never depends on the
-    /// block it falls in. A rate above [`MAX_RATE`] reads silence.
+    /// block it falls in. A rate above [`MAX_RATE`] reads silence (a loaded clip never has one:
+    /// `Clip::sanitize` clamps the stretch).
     ///
-    /// Real time: no allocation, no lock; at most `2·16·max(1, q) + 1` taps a channel, and an
-    /// in-memory source needs nothing more. A disk source's [`ClipSource::need`] reads its file and is
-    /// for the streamer and offline renders only.
+    /// Real time: no allocation, no lock, no division; at most `2·16·max(1, q) + 1` taps a channel,
+    /// and an in-memory source needs nothing more. A disk source's [`ClipSource::need`] reads its file
+    /// and is for the streamer and offline renders only.
     #[inline]
     pub fn read<S: ClipSource + ?Sized>(&self, k: Samples, src: &mut S, first: usize, out: &mut [f32]) {
-        let rel = crate::clip::content_pos(self.looping, k);
-        let q = self.rate();
+        let m = &self.map;
+        let rel = crate::clip::content_pos(m.looping, k);
+        let q = self.q;
         if q == 1.0 {
-            let at = self.offset.saturating_add(rel);
-            src.need(at..at.saturating_add(1));
+            let at = m.offset.saturating_add(rel);
+            if !S::RESIDENT {
+                src.need(at..at.saturating_add(1));
+            }
             for (i, o) in out.iter_mut().enumerate() {
                 *o = src.sample(first.saturating_add(i), at);
             }
             return;
         }
-        let x = self.offset as f64 + rel as f64 * q;
-        src.need(taps(x, q));
-        read_frame(SincTable::shared(), &Skip { src: &*src, first }, x, q, out);
+        let x = m.offset as f64 + rel as f64 * q;
+        if !S::RESIDENT {
+            src.need(taps(x, q));
+        }
+        read_frame(self.table, &Skip { src: &*src, first }, x, q, out);
     }
 }
 

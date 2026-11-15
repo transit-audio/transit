@@ -282,7 +282,7 @@ fn plays(e: &Engine, name: &str, frames: usize) {
     let take = [(0..frames).map(|x| x as f32 / frames as f32 - 0.5).collect::<Vec<f32>>()];
     for k in 0..64 {
         let mut want = [0.0f32];
-        map.read(k, &mut transit_model::disk::Memory(&take), 0, &mut want);
+        map.reader().read(k, &mut transit_model::disk::Memory(&take), 0, &mut want);
         assert_eq!(v.get(0, k), want[0], "{name}: clip time {k}");
     }
     drop(v);
