@@ -396,15 +396,20 @@ fn a_pickup_played_during_the_count_in_lands_before_the_record_start_by_the_coun
     assert_eq!(offsets(&mut rig, point), [-n, -n + 600, 2_400], "pickup at record_start - {n}");
 }
 
+/// ADR 0052 decision 8: a pickup that lands before bar 1 keeps its full distance from the latch;
+/// the take builder places it in the pre-count zone (it used to be clamped at sample 0).
 #[test]
-fn a_pickup_before_the_session_start_is_clamped_at_sample_zero() {
+fn a_pickup_before_bar_1_keeps_its_full_offset_from_the_latch() {
     let mut rig = Rig::new(48_000);
     // Record start 1,000 samples into the session, after a 4,800-sample count-in.
     let (_start, reader) = counting_in(&mut rig, 1_000, 4_800);
+    let left = rig.audio.transport.count_in.unwrap().left;
     let now = rig.audio.transport.timeline.next_output();
     rig.send(now, 0, false);
     let point = latched(&mut rig, &reader);
-    assert_eq!(offsets(&mut rig, point), [-1_000], "clamped at the session start, never before it");
+    assert_eq!(point.position.sample, 1_000);
+    assert_eq!(offsets(&mut rig, point), [-left], "the whole count-in left before the latch, past bar 1");
+    assert!(left > 1_000, "the pickup is before bar 1: {left}");
 }
 
 #[test]

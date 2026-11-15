@@ -169,16 +169,16 @@ impl StudioApp {
     }
 
     /// The pass under way for `ui.inspect` (null when none): where it starts on the timeline
-    /// (`record_start`, the pre-roll start when pre-roll is on), the count-in before it, and where
-    /// MIDI capture began (`capture_start`, #327): the count-in start, which pickups may reach
-    /// back to, never before the session start.
+    /// (`record_start`, the pre-roll start when pre-roll is on), the count-in before it as the plan
+    /// carries it, and where MIDI capture began (`capture_start`): the count-in start, before bar 1
+    /// too, where a take with a pickup starts (ADR 0052 decisions 8 and 12).
     pub(crate) fn recording_pass_inspect(&self) -> serde_json::Value {
         let Some(plan) = &self.take_plan else { return serde_json::Value::Null };
-        let count_in = self.count_in_plan.map_or(0, |c| c.frames);
+        let count_in = plan.count_in.unwrap_or(0).max(0);
         json!({
             "record_start": plan.start,
             "count_in": count_in,
-            "capture_start": plan.start.saturating_sub(count_in).max(0).min(plan.start),
+            "capture_start": plan.start.saturating_sub(count_in),
         })
     }
 
@@ -558,16 +558,10 @@ impl StudioApp {
             self.status = format!("{} MIDI events were lost: the capture queue was full", midi.dropped);
         }
         self.report_midi_take(midi, &ids);
-        // #440: count-in notes that ended before the session start are not in the take; the
-        // status line says so, once per recording.
-        let left_out = transit_engine::midi_take::left_out_before_start(plan, &events);
-        if left_out > 0 {
-            let what = if left_out == 1 {
-                "1 count-in note before the session start was".to_string()
-            } else {
-                format!("{left_out} count-in notes before the session start were")
-            };
-            self.status = format!("{}; {what} left out", self.status.trim_end_matches('.'));
+        // Notes played before the count-in started are not in the take: said, never silent.
+        let early = transit_engine::midi_take::played_before_count_in(plan, &events);
+        if early > 0 {
+            self.status = format!("{}; {}", self.status.trim_end_matches('.'), before_count_in_note(early));
         }
     }
 
@@ -690,6 +684,16 @@ impl StudioApp {
 pub(crate) fn record_speed_refusal(speed: f32) -> String {
     let at = if (speed - 0.5).abs() < f32::EPSILON { "half speed".to_string() } else { format!("{speed}x speed") };
     format!("Cannot record at {at}: recording runs at normal speed only. Press Stop, then Record.")
+}
+
+/// What the status line adds when `n` notes were played before the count-in started (before the
+/// latch without a count-in): they are not in the take.
+pub(crate) fn before_count_in_note(n: usize) -> String {
+    if n == 1 {
+        "1 note played before recording began was not recorded".into()
+    } else {
+        format!("{n} notes played before recording began were not recorded")
+    }
 }
 
 /// What the status line says when Half-Speed Playback is asked for while a recording is pending

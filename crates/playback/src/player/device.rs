@@ -46,15 +46,14 @@ impl MidiTake {
     /// frames since the latch frame, converted at the session rate (the same latch the audio take
     /// is placed from). The device frame runs on through the record count-in, so an event played
     /// over the click (a pickup, #327) comes out negative, before the latch by the count-in left
-    /// when it was played. Nothing is placed before the session start: an offset that would land
-    /// before sample 0 is clamped there.
+    /// when it was played, before bar 1 too when the latch is near it (ADR 0052 decision 8:
+    /// nothing is clamped).
     pub fn timed(&self, session_rate: u32) -> Vec<(i64, crate::midi_capture::CapturedEvent)> {
         let Some(point) = self.start else { return Vec::new() };
-        let floor = -point.position.sample.max(0);
         self.events
             .iter()
             .filter(|e| self.tracks.contains(&e.track))
-            .filter_map(|e| Some((latch_offset(e.frame, point.output_frame, self.device_rate, session_rate)?.max(floor), *e)))
+            .filter_map(|e| Some((latch_offset(e.frame, point.output_frame, self.device_rate, session_rate)?, *e)))
             .collect()
     }
 }

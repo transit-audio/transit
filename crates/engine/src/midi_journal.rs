@@ -268,21 +268,19 @@ pub fn read(path: &Path) -> Result<Journal> {
 impl Journal {
     /// The events of the pass's tracks, each with the session samples since the latch (device
     /// frames converted at the session rate, as the live take is). A pickup played during the
-    /// count-in (#327) has a frame before the latch and comes out negative; nothing lands before
-    /// the session start (clamped at sample 0, as the live capture is; the take then leaves out a
-    /// note that ended there, #440, through the same path as the live take). A journal written before
-    /// #327 has no frame before its latch, so it reads back exactly as it did.
+    /// count-in (#327) has a frame before the latch and comes out negative, before bar 1 too:
+    /// nothing is clamped (ADR 0052 decision 8), so recovery places what the live take placed. A
+    /// journal written before #327 has no frame before its latch, so it reads back as it did.
     pub fn events(&self) -> Vec<RecEvent> {
         let h = &self.header;
         let rate = i128::from(h.device_rate.max(1));
-        let floor = -h.position.max(0);
         self.records
             .iter()
             .filter(|r| h.tracks.contains(&r.track))
             .filter_map(|r| {
                 let frames = i128::from(r.frame) - i128::from(h.output_frame);
                 let samples = (frames * i128::from(h.session_rate) + rate / 2).div_euclid(rate);
-                Some(RecEvent { track: r.track, channel: r.channel, offset: i64::try_from(samples).ok()?.max(floor), msg: r.msg })
+                Some(RecEvent { track: r.track, channel: r.channel, offset: i64::try_from(samples).ok()?, msg: r.msg })
             })
             .collect()
     }

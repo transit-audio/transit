@@ -86,8 +86,13 @@ fn pass(track: TrackId, sample: Option<i64>, events: Vec<CapturedEvent>) -> Midi
 }
 
 /// Record from `start` to `stop` (session samples) with `take` as what the audio thread captured,
-/// then Stop through the host.
+/// then Stop through the host. No count-in.
 fn record(app: &mut StudioApp, start: i64, pass_len: Option<i64>, stop: i64, take: MidiTake) {
+    record_counted(app, start, 0, pass_len, stop, take);
+}
+
+/// As [`record`], after a count-in of `count_in` samples.
+fn record_counted(app: &mut StudioApp, start: i64, count_in: i64, pass_len: Option<i64>, stop: i64, take: MidiTake) {
     app.record_start = start;
     app.take_plan = Some(transit_engine::io::Recording {
         start,
@@ -99,7 +104,7 @@ fn record(app: &mut StudioApp, start: i64, pass_len: Option<i64>, stop: i64, tak
         midi_placed: false,
         cycle: None,
         end: None,
-        count_in: None,
+        count_in: Some(count_in),
     });
     app.engine.transport.recording = true;
     app.start_play(stop, None, None);
@@ -140,9 +145,10 @@ fn two_played_notes_become_one_clip_at_the_latch_with_their_ticks_and_one_undo_s
 fn events_on_other_tracks_are_not_recorded_and_a_count_in_pickup_starts_the_clip_before_the_latch() {
     let (mut app, t) = app();
     let other = TrackId(t.0 + 100);
-    // A key pressed during the count-in (frame 500, 9,500 frames before the latch), one on an
-    // unarmed track, then the first downbeat note a quarter second after the latch, which a
-    // count-in placed at the cursor. Since #327 the count-in key is a pickup (Logic's behavior).
+    // A key pressed during a one-beat count-in (frame 500, 9,500 frames before the latch), one on
+    // an unarmed track, then the first downbeat note a quarter second after the latch, which a
+    // count-in placed at the cursor. The count-in key is a pickup: the clip covers the whole
+    // count-in (ADR 0052 decision 8, Logic's behavior).
     let events = vec![
         on(500, t, 48),
         off(900, t, 48),
@@ -151,12 +157,13 @@ fn events_on_other_tracks_are_not_recorded_and_a_count_in_pickup_starts_the_clip
         on(LATCH + 12_000, t, 60),
         off(LATCH + 24_000, t, 60),
     ];
-    record(&mut app, 4 * BEAT, None, 8 * BEAT, pass(t, Some(4 * BEAT), events));
+    record_counted(&mut app, 4 * BEAT, BEAT, None, 8 * BEAT, pass(t, Some(4 * BEAT), events));
     let clips = app.engine.session().track(t).unwrap().clips().to_vec();
     assert_eq!(clips.len(), 1);
-    assert_eq!(clips[0].start, 4 * BEAT - 9_500, "the clip starts at the pickup, before the latch");
-    // 9,500 samples is 380 ticks: the downbeat note keeps its place, a half beat after the latch.
-    assert_eq!(clip_notes(&app, clips[0].id), vec![(48, 0, 16, 100), (60, 380 + TICKS / 2, TICKS / 2, 100)]);
+    assert_eq!(clips[0].start, 3 * BEAT, "the clip starts at the count-in start, before the latch");
+    // The pickup is 14,500 samples (580 ticks) into the count-in; the downbeat note keeps its
+    // place, a half beat after the latch.
+    assert_eq!(clip_notes(&app, clips[0].id), vec![(48, 580, 16, 100), (60, TICKS + TICKS / 2, TICKS / 2, 100)]);
 }
 
 #[test]

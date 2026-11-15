@@ -49,8 +49,9 @@ pub struct Laps {
 /// The laps of a pass that latched at `start`, `None` when it was not cut into laps (it played
 /// straight through). With `pass`, it loop-recorded from the loop start in laps of that length.
 /// Otherwise `wrap` is the loop the transport cycled over (the host's `take_cycle`): a pass that
-/// started at or before its end and ran past it is cut at each wrap. `lead` (zero or less) is where
-/// the first stretch starts (a pickup, #327).
+/// started at or before its end and ran past it is cut at each wrap, also when it started before
+/// bar 1 (ADR 0052 decision 8). `lead` (zero or less) is where the first stretch starts (the
+/// count-in start when something was played during it).
 ///
 /// The laps run through the furthest of `last` (the last offset this track holds material at) and
 /// `end - 1` (`end` is the pass's end in samples since the latch, the same for every track), so
@@ -68,7 +69,7 @@ pub fn laps(start: Samples, pass: Option<Samples>, wrap: Option<Range>, lead: Sa
             }
         }));
     }
-    let w = wrap.filter(|w| pass.is_none() && !w.is_empty() && start >= 0 && start < w.end)?;
+    let w = wrap.filter(|w| pass.is_none() && !w.is_empty() && start < w.end)?;
     // The first stretch runs from the latch (or its first pickup) to the loop end, every later
     // one is a whole loop.
     let first = w.end - start;
@@ -94,7 +95,7 @@ pub fn completed(start: Samples, pass: Option<Samples>, wrap: Option<Range>, ela
     if let Some(len) = pass.filter(|p| *p > 0) {
         return elapsed.max(0) / len;
     }
-    let Some(w) = wrap.filter(|w| pass.is_none() && !w.is_empty() && start >= 0 && start < w.end) else { return 0 };
+    let Some(w) = wrap.filter(|w| pass.is_none() && !w.is_empty() && start < w.end) else { return 0 };
     let first = w.end - start;
     if elapsed < first { 0 } else { (elapsed - first) / w.len() + 1 }
 }
