@@ -724,9 +724,9 @@ mod ring_tests {
         for n in [1usize, 2, 47] {
             let mut out = vec![vec![9.0f32; n], vec![9.0f32; n]];
             ring.pop_into(&mut out, n, 48_000);
-            for k in 0..n {
-                got.push(out[0][k].to_bits());
-                got.push(out[1][k].to_bits());
+            for (left, right) in out[0].iter().zip(&out[1]) {
+                got.push(left.to_bits());
+                got.push(right.to_bits());
             }
         }
         let want: Vec<u32> = input[..100].iter().map(|x| x.to_bits()).collect();
