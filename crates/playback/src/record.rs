@@ -108,6 +108,9 @@ struct Shared {
     losses: loss::Losses,
     /// Input callbacks so far, to tell a device that stopped sending.
     beats: AtomicU64,
+    /// The longest input block delivered so far, in frames (#587: how far a start may precede
+    /// the retained history and still be placed at its first frame).
+    block_frames: AtomicU64,
     /// Set from the input stream when it can't go on: `GONE` or `BROKEN`.
     fault: AtomicU8,
     /// The first failure writing a take, until it's reported.
@@ -125,6 +128,7 @@ impl Shared {
             dropped: AtomicUsize::new(0),
             losses: loss::Losses::new(),
             beats,
+            block_frames: AtomicU64::new(0),
             fault,
             failed,
         }
@@ -275,6 +279,7 @@ fn capture_callbacks(
         let first_frame = clock.observer.next_frame();
         let (position, channels) = (block.device_position, usize::from(block.channels));
         clock.observer.record(block.frames, block.stamp);
+        sh.block_frames.fetch_max(block.frames as u64, Ordering::Relaxed);
         if let Some(progress) = &progress {
             progress.publish(clock.observer.next_frame(), block.frames as u64);
         }
@@ -763,6 +768,7 @@ impl WriterStart {
                 }
             }
         }
+        self.history.set_block(shared.block_frames.load(Ordering::Relaxed));
         let first = *self.next.get_or_insert_with(|| shared.first_frame.load(Ordering::Acquire));
         if first == u64::MAX {
             if block.is_empty() {
@@ -772,9 +778,15 @@ impl WriterStart {
             return Err("recording input arrived without a device position".into());
         }
         self.history.push(first, block, |data| takes.iter_mut().for_each(|take| take.write(data, channels)))?;
+        if self.history.moved() {
+            self.reader.mark_approximate();
+        }
         let next = first.checked_add((block.len() / channels.max(1)) as u64).ok_or("recording input position exhausted")?;
         self.next = Some(next);
-        // The take's first frame, as an input frame, once it has one: where losses lie in it.
+        // The take's first frame, as an input frame, once it has one: where losses lie in it. Every
+        // frame from the take's first written sample to `next` was written (ring overflow as owed
+        // silence), so this is that sample's input frame whichever start was applied: the mapped
+        // start, or the first frame after arm when the start was moved there (#587).
         if let Some(written) = takes.iter().map(|take| take.frames).max().filter(|frames| *frames > 0) {
             shared.losses.set_origin(next.saturating_sub(written));
         }

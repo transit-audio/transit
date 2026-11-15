@@ -262,17 +262,42 @@ pub(super) struct History {
     first: Option<u64>,
     next: Option<u64>,
     start: Option<u64>,
+    /// Frames a start may precede the first retained frame by and still be placed there: less
+    /// than one input block (#587). A start that maps before the first block captured after arm
+    /// by less than that block lost nothing the input retained.
+    early: u64,
+    /// The start was moved to the first retained frame: the take is approximate.
+    moved: bool,
 }
 
 impl History {
     pub(super) fn new(channels: usize, frames: usize) -> Self {
         let channels = channels.max(1);
         let capacity = frames.saturating_mul(channels).min(1 << 25) / channels * channels;
-        Self { data: std::collections::VecDeque::with_capacity(capacity), channels, capacity, first: None, next: None, start: None }
+        Self {
+            data: std::collections::VecDeque::with_capacity(capacity),
+            channels,
+            capacity,
+            first: None,
+            next: None,
+            start: None,
+            early: 0,
+            moved: false,
+        }
     }
 
     pub(super) fn set_start(&mut self, frame: u64) {
         self.start = Some(frame);
+    }
+
+    /// The input's block length in frames, for a start just before the retained history.
+    pub(super) fn set_block(&mut self, frames: u64) {
+        self.early = frames;
+    }
+
+    /// Was the start moved to the first retained frame (see [`History::set_block`])?
+    pub(super) fn moved(&self) -> bool {
+        self.moved
     }
 
     pub(super) fn push(&mut self, first: u64, data: &[f32], mut write: impl FnMut(&[f32])) -> Result<(), &'static str> {
@@ -284,8 +309,18 @@ impl History {
         if self.first.is_none() {
             self.first = Some(first);
         }
-        if let Some(start) = self.start {
+        if let Some(mut start) = self.start {
             let oldest = self.first.unwrap_or(first);
+            if start < oldest && oldest - start < self.early {
+                // Writer thread, once per take (#587): the frames before the first block captured
+                // after arm were never retained, so the take starts at that block, approximately.
+                log::warn!(
+                    "recording start at input frame {start} is {} frames before the first retained frame {oldest}; the take starts there and is approximate",
+                    oldest - start
+                );
+                self.moved = true;
+                start = oldest;
+            }
             if start < oldest {
                 // Writer thread, once per failed take. The figures tell a clock disagreement (the
                 // start mapped before the first frame captured after arm) from a late writer (#429).

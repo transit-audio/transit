@@ -110,7 +110,10 @@ fn mapping_failure_between_write_and_stop_check_reports_failure() {
     let gate = WriterStart { reader, history: start::History::new(1, 24), input_start, placed: false, next: None };
     FINALIZE_HOOK.with(|hook| {
         *hook.borrow_mut() = Some(Box::new(move || {
-            assert!(mapping.service(None, Some(now)));
+            // No current map: the placement waits its bounded time (#587), then fails, as it saw
+            // no validated map to fall back to.
+            assert!(!mapping.service(None, Some(now)));
+            assert!(mapping.service(None, Some(now + start::mapping::WAIT_NS)));
         }))
     });
     let (takes, error) = write_takes_started(&shared, takes, 1, Some(gate));
@@ -953,3 +956,5 @@ fn substituted_zeros_the_ring_refused_are_counted_once() {
     assert_eq!((shared.dropped.load(Ordering::Relaxed), shared.losses.substituted_frames()), (BLOCK, BLOCK));
     assert_eq!(recorder(&shared).lost_ms(), 2, "128 frames lost in all, not 192");
 }
+
+mod start_fallback;

@@ -9,6 +9,9 @@ const READY: u8 = 1;
 const FAILED: u8 = 2;
 /// Placed by the degraded policy: the audio thread's own frame choice, no host-time map.
 const READY_APPROXIMATE: u8 = 4;
+/// How long a placement waits for an input clock map that is missing or cannot place the start
+/// before it falls back (#587), as the audio side waits a second for the output clock.
+pub(crate) const WAIT_NS: u64 = 1_000_000_000;
 
 struct Shared {
     state: AtomicU8,
@@ -19,6 +22,11 @@ pub(crate) struct Mapping {
     start: Reader,
     input: ClockKey,
     shared: Arc<Shared>,
+    /// The newest validated input map this placement was offered: what a start falls back to
+    /// when no current map can place it (#587).
+    last: Option<ClockMap>,
+    /// Host time after which a start that no current map places stops waiting for one.
+    deadline: Option<u64>,
 }
 
 pub(crate) struct InputStart {
@@ -28,7 +36,7 @@ pub(crate) struct InputStart {
 
 pub(crate) fn pair(start: Reader, input: ClockKey) -> (Mapping, InputStart) {
     let shared = Arc::new(Shared { state: AtomicU8::new(PENDING), frame: AtomicU64::new(0) });
-    (Mapping { start, input, shared: Arc::clone(&shared) }, InputStart { shared, finished: None })
+    (Mapping { start, input, shared: Arc::clone(&shared), last: None, deadline: None }, InputStart { shared, finished: None })
 }
 
 impl Mapping {
@@ -37,6 +45,9 @@ impl Mapping {
     pub(crate) fn service(&mut self, map: Option<ClockMap>, now: Option<u64>) -> bool {
         if self.shared.state.load(Ordering::Acquire) != PENDING {
             return true;
+        }
+        if let Some(map) = map {
+            self.last = Some(map);
         }
         let point = match self.start.status() {
             Status::Pending => return false,
@@ -57,20 +68,50 @@ impl Mapping {
         // A zero host time means the output had no validated map at the latch.
         let mapped =
             (point.host_ns != 0).then(|| map.zip(now)).flatten().and_then(|(map, now)| map.host_to_frame(self.input, point.host_ns, now).ok());
-        match (mapped, self.start.fallback().and_then(|f| f.input_frame)) {
-            (Some(frame), _) => {
-                self.shared.frame.store(frame, Ordering::Relaxed);
-                self.shared.state.store(READY, Ordering::Release);
+        if let Some(frame) = mapped {
+            self.shared.frame.store(frame, Ordering::Relaxed);
+            self.shared.state.store(READY, Ordering::Release);
+            return true;
+        }
+        // No current map places a start the output did map (#587: a late input callback rejects the
+        // fit, or the map expires): wait a bounded time for one, then place it by the newest map
+        // this placement saw. Neither refuses the take.
+        if point.host_ns != 0 {
+            if !self.waited(now) {
+                return false;
             }
-            (None, Some(frame)) => {
+            if let Some(frame) = self.projected(point.host_ns) {
+                log::warn!("recording input placed by the last validated input clock map (no current map placed the start); the take is approximate");
+                self.place_approximately(frame);
+                return true;
+            }
+        }
+        match self.start.fallback().and_then(|f| f.input_frame) {
+            Some(frame) => {
                 log::warn!("recording input placed by input frame ordinal (no validated device clock); the take is approximate");
-                self.start.mark_approximate();
-                self.shared.frame.store(frame, Ordering::Relaxed);
-                self.shared.state.store(READY_APPROXIMATE, Ordering::Release);
+                self.place_approximately(frame);
             }
-            (None, None) => self.shared.state.store(FAILED, Ordering::Release),
+            None => self.shared.state.store(FAILED, Ordering::Release),
         }
         true
+    }
+
+    fn place_approximately(&self, frame: u64) {
+        self.start.mark_approximate();
+        self.shared.frame.store(frame, Ordering::Relaxed);
+        self.shared.state.store(READY_APPROXIMATE, Ordering::Release);
+    }
+
+    /// Has the start waited its bounded time for a current map? The wait starts at the first
+    /// service that could not place it; without a current host time it does not wait.
+    fn waited(&mut self, now: Option<u64>) -> bool {
+        let Some(now) = now else { return true };
+        now >= *self.deadline.get_or_insert(now.saturating_add(WAIT_NS))
+    }
+
+    /// The start's input frame by the newest validated map offered, projected past its window.
+    fn projected(&self, host_ns: u64) -> Option<u64> {
+        self.last?.project_frame(self.input, host_ns).ok()
     }
 }
 

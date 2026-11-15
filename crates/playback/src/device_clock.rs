@@ -243,6 +243,14 @@ impl ClockMap {
         self.frame_window(frame)?;
         Ok(frame)
     }
+    /// The device frame at `host_ns` by this map's line, without its validity time or frame
+    /// window: a placement whose current map is gone falls back to the last one it saw (#587).
+    pub fn project_frame(&self, key: ClockKey, host_ns: u64) -> Result<u64, Unavailable> {
+        if key != self.key {
+            return Err(Unavailable::WrongClock);
+        }
+        self.frame_at(host_ns)
+    }
     fn frame_at(&self, host_ns: u64) -> Result<u64, Unavailable> {
         let delta = i128::from(host_ns) - i128::from(self.host_origin);
         if delta.abs() > MAX_LOCAL_SPAN {
