@@ -89,7 +89,8 @@ impl CaptureRing {
     }
 }
 
-/// An input sample, or silence for NaN and infinities, which would poison the take and the mix.
+/// An input sample, or silence for NaN and infinities, which would poison the mix (the live
+/// monitor; the take counts them, see [`loss::Losses::finite`]).
 fn finite(x: f32) -> f32 {
     if x.is_finite() { x } else { 0.0 }
 }
@@ -103,6 +104,8 @@ struct Shared {
     pending_silence: AtomicUsize,
     /// Samples lost while the ring was full.
     dropped: AtomicUsize,
+    /// Where those were lost, and every other input the path replaced with silence (#184).
+    losses: loss::Losses,
     /// Input callbacks so far, to tell a device that stopped sending.
     beats: AtomicU64,
     /// Set from the input stream when it can't go on: `GONE` or `BROKEN`.
@@ -120,6 +123,7 @@ impl Shared {
             first_frame: AtomicU64::new(u64::MAX),
             pending_silence: AtomicUsize::new(0),
             dropped: AtomicUsize::new(0),
+            losses: loss::Losses::new(),
             beats,
             fault,
             failed,
@@ -130,6 +134,7 @@ impl Shared {
     fn start_capture(&self) {
         let generation = (self.capture_state.load(Ordering::Relaxed) & !CAPTURE_FLAGS).wrapping_add(CAPTURE_FLAGS + 1);
         self.pending_silence.store(0, Ordering::Relaxed);
+        self.losses.reset();
         self.capture_state.store(generation | ARMED, Ordering::Release);
     }
 
@@ -191,15 +196,26 @@ impl Shared {
     /// as silence before the next block, so the take keeps its timing.
     fn capture_at(&self, first_frame: u64, data: &[f32]) {
         let _ = self.first_frame.compare_exchange(u64::MAX, first_frame, Ordering::Release, Ordering::Relaxed);
-        self.capture(data);
+        if self.queue(data) > 0 {
+            self.losses.overflow(first_frame);
+        }
     }
 
+    /// [`Self::queue`] for tests that need no position.
+    #[cfg(test)]
     fn capture(&self, data: &[f32]) {
+        self.queue(data);
+    }
+
+    /// Returns how many of `data`'s samples the full ring refused (owed as silence, counted).
+    fn queue(&self, data: &[f32]) -> usize {
         let owed = self.pending_silence.load(Ordering::Relaxed);
         let owed = owed - self.ring.push(owed, |_| 0.0);
-        let kept = if owed == 0 { self.ring.push(data.len(), |i| data.get(i).copied().map_or(0.0, finite)) } else { 0 };
-        self.pending_silence.store(owed.saturating_add(data.len() - kept), Ordering::Relaxed);
-        self.dropped.fetch_add(data.len() - kept, Ordering::Relaxed);
+        let kept = if owed == 0 { self.ring.push(data.len(), |i| data.get(i).copied().map_or(0.0, |x| self.losses.finite(x))) } else { 0 };
+        let refused = data.len() - kept;
+        self.pending_silence.store(owed.saturating_add(refused), Ordering::Relaxed);
+        self.dropped.fetch_add(refused, Ordering::Relaxed);
+        refused
     }
 }
 
@@ -261,9 +277,15 @@ fn capture_callbacks(
         if let Some(tap) = tap.as_mut() {
             tap.begin(block.frames, block.stamp);
         }
+        let substituted = block.substituted;
         sh.guarded(|| {
             // One admission covers the entire device callback, including its chunks.
             let capture = sh.begin_capture();
+            // Zeros the backend put in place of input it lost (#184): counted, then recorded so
+            // the take keeps its timing.
+            if substituted && capture.is_some() {
+                sh.losses.substituted(first_frame, block.frames);
+            }
             block.chunks(&mut |offset, samples| {
                 // The loopback calibration (native ASIO) records the return by sample position.
                 if let Some(probe) = &loop_probe {
@@ -626,10 +648,17 @@ impl Recorder {
         (self.seen.1.elapsed() >= STALL).then(|| Trouble::Device(format!("“{name}” stopped sending audio")))
     }
 
-    /// Input the current take has lost to a slow disk so far, in milliseconds.
+    /// Input the current take has lost so far (the full ring refused it, or the backend lost it
+    /// and substituted zeros), in milliseconds.
     pub fn lost_ms(&self) -> u64 {
-        let frames = self.shared.dropped.load(Ordering::Relaxed) / self.channels.max(1);
+        let frames = self.shared.dropped.load(Ordering::Relaxed) / self.channels.max(1) + self.shared.losses.substituted_frames();
         (frames as u64).saturating_mul(1000) / u64::from(self.sample_rate.max(1))
+    }
+
+    /// What the current take has lost so far and from where (see [`Self::finish`]), for the log
+    /// line when the loss begins; None while nothing is lost.
+    pub fn loss_report(&self) -> Option<String> {
+        self.shared.losses.report(self.shared.dropped.load(Ordering::Relaxed) / self.channels.max(1), self.sample_rate)
     }
 
     /// What a refused recording start is logged with (#429), on the control thread: the applied
@@ -674,9 +703,8 @@ impl Recorder {
             w.join().unwrap_or_else(|_| (Vec::new(), Some("the recording writer stopped unexpectedly; check the take files".into())))
         });
         let lost = self.shared.dropped.swap(0, Ordering::Relaxed) / self.channels.max(1);
-        let slow =
-            (lost > 0).then(|| format!("{} ms of input lost: the disk was too slow", lost.saturating_mul(1000) / self.sample_rate.max(1) as usize));
-        (takes, problem.or(slow))
+        // Never one in place of the other: a failed write must not hide lost input (#184).
+        (takes, loss::join(problem, self.shared.losses.report(lost, self.sample_rate)))
     }
 }
 
@@ -735,7 +763,12 @@ impl WriterStart {
             return Err("recording input arrived without a device position".into());
         }
         self.history.push(first, block, |data| takes.iter_mut().for_each(|take| take.write(data, channels)))?;
-        self.next = Some(first.checked_add((block.len() / channels.max(1)) as u64).ok_or("recording input position exhausted")?);
+        let next = first.checked_add((block.len() / channels.max(1)) as u64).ok_or("recording input position exhausted")?;
+        self.next = Some(next);
+        // The take's first frame, as an input frame, once it has one: where losses lie in it.
+        if let Some(written) = takes.iter().map(|take| take.frames).max().filter(|frames| *frames > 0) {
+            shared.losses.set_origin(next.saturating_sub(written));
+        }
         Ok(())
     }
 }
@@ -748,6 +781,11 @@ fn write_block(shared: &Shared, gate: &mut Option<WriterStart>, takes: &mut [Tak
         }
     } else {
         takes.iter_mut().for_each(|take| take.write(block, channels));
+        // Without a start gate the take begins at the first captured frame.
+        let first = shared.first_frame.load(Ordering::Acquire);
+        if first != u64::MAX && !block.is_empty() {
+            shared.losses.set_origin(first);
+        }
     }
 }
 
@@ -805,6 +843,10 @@ fn write_takes_started(shared: &Shared, mut takes: Vec<TakeWriter>, channels: us
     let (mut done, mut problem) = (Vec::new(), None);
     for mut t in takes {
         t.write_header();
+        let file = t.path.file_name().map_or_else(|| t.path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        if let Some(note) = t.zeros.note(&file, t.rate) {
+            log::warn!("recording: {note}");
+        }
         if t.frames == 0 {
             let _ = std::fs::remove_file(&t.path);
         } else {
@@ -825,6 +867,8 @@ struct TakeWriter {
     frames: u64,
     error: Option<String>,
     live: Arc<Mutex<LiveTake>>,
+    /// The longest exact-zero stretch between signal so far (#184).
+    zeros: loss::ZeroRun,
 }
 
 impl TakeWriter {
@@ -832,7 +876,7 @@ impl TakeWriter {
         let file = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| File::create_new(&path));
         let file = file.map_err(|e| format!("{}: {e}", path.display()))?;
         let live = Arc::new(Mutex::new(vec![Vec::new(); inputs.len()]));
-        let mut take = TakeWriter { id, inputs, path, file, rate, frames: 0, error: None, live };
+        let mut take = TakeWriter { id, inputs, path, file, rate, frames: 0, error: None, live, zeros: loss::ZeroRun::default() };
         take.write_header();
         take.error.take().map_or(Ok(take), Err)
     }
@@ -850,6 +894,9 @@ impl TakeWriter {
         match self.file.write_all(&bytes) {
             Ok(()) => {
                 self.summarize(block, channels);
+                for (f, at) in block.chunks_exact(channels).zip(self.frames..) {
+                    self.zeros.frame(at, self.inputs.iter().all(|&i| f.get(i).copied().unwrap_or(0.0) == 0.0));
+                }
                 self.frames += (block.len() / channels) as u64;
             }
             Err(e) => self.fail(e),
@@ -888,6 +935,7 @@ impl TakeWriter {
     }
 }
 
+mod loss;
 #[cfg(test)]
 mod tests;
 

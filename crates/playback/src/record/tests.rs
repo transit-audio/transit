@@ -706,3 +706,150 @@ fn a_refused_start_logs_both_clocks_and_latencies() {
     assert!(line.contains(&format!("revision {}", map.revision)) && line.contains("offset "), "{line}");
     assert!(line.contains("latency Some(85ms); input clock: no map, latency Some(43ms)"), "{line}");
 }
+
+/// A recorder whose take writer starts only now, after the test queued its input: what the
+/// writer finds and what Stop reports are then fixed, with no race against its drain cycle.
+fn finish_after(shared: &Arc<Shared>, take: TakeWriter) -> Takes {
+    let mut r = recorder(shared);
+    let sh = Arc::clone(shared);
+    r.writer = Some((std::thread::spawn(move || write_takes(&sh, vec![take], 1)), Vec::new()));
+    r.finish()
+}
+
+/// #184: a take writer that fell behind long enough for the ring to fill leaves silence in the
+/// take; Stop names how much and from where in the take, not only a total.
+#[test]
+fn a_writer_that_fell_behind_is_counted_located_and_reported_at_stop() {
+    let dir = transit_test_support::TestDir::new("lost-overflow");
+    let _ = std::fs::remove_dir_all(&dir);
+    for (case, overflow) in [("kept", false), ("lost", true)] {
+        let shared = Arc::new(Shared::new(CaptureRing::new(8192)));
+        shared.start_capture();
+        {
+            let _lease = shared.begin_capture().unwrap();
+            shared.capture_at(100, &[0.5; 4800]);
+            // 3,392 samples fit; with `overflow` the other 1,408 are refused and owed as silence.
+            shared.capture_at(4900, &vec![0.25; if overflow { 4800 } else { 3392 }]);
+        }
+        let path = dir.join(format!("{case}.wav"));
+        let (done, problem) = finish_after(&shared, TakeWriter::create(TrackId(1), vec![0], path.clone(), 48_000).unwrap());
+        assert_eq!(done.len(), 1);
+        let audio = decode(&path).remove(0);
+        if overflow {
+            assert_eq!(
+                problem.as_deref(),
+                Some(
+                    "29 ms of input lost from 0.10 s into the take: the take writer fell behind (a busy disk or a starved thread) and the take holds silence there"
+                )
+            );
+            assert_eq!(audio, [vec![0.5; 4800], vec![0.25; 3392], vec![0.0; 1408]].concat(), "the take keeps its timing");
+        } else {
+            assert_eq!(problem, None, "nothing was lost, nothing is reported");
+            assert_eq!(audio, [vec![0.5; 4800], vec![0.25; 3392]].concat());
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #184: zeros a backend put in place of device input it lost (a padded WASAPI discontinuity)
+/// reach the take as silence, so it keeps its timing, and are counted while recording and named
+/// at Stop. The same zeros delivered as input (a quiet device) are not.
+#[test]
+fn zeros_a_backend_substituted_for_lost_input_are_counted_and_reported() {
+    const BLOCK: usize = 64;
+    let dir = transit_test_support::TestDir::new("lost-substituted");
+    let _ = std::fs::remove_dir_all(&dir);
+    for (case, substituted) in [("quiet", false), ("lost", true)] {
+        let shared = Arc::new(Shared::new(CaptureRing::new(1 << 14)));
+        let monitor = InputRing::new(1, 48_000);
+        let (clock, _reader) = crate::device_clock::stream_clock(crate::device_clock::Direction::Input, 48_000).unwrap();
+        let (mut capture, _error) = capture_callbacks(&shared, &monitor, clock, None, None, None);
+        shared.start_capture();
+        // The callback marks its thread as the audio thread: pump it on a thread of its own.
+        std::thread::spawn(move || {
+            let format = ab::Format::new(48_000, 1, ab::SampleFormat::F32);
+            let (signal, zeros) = ([0.5f32; BLOCK], [0.0f32; BLOCK]);
+            for k in 0..25 {
+                let lost = (10..15).contains(&k);
+                let mut source = ab::fake::SliceSource { data: if lost { &zeros } else { &signal }, channels: 1 };
+                let mut block = ab::CaptureBlock::new(BLOCK, ab::Stamp::INVALID, format, &mut source);
+                block.substituted = lost && substituted;
+                capture(&mut block);
+            }
+        })
+        .join()
+        .unwrap();
+        let path = dir.join(format!("{case}.wav"));
+        let lost_ms = recorder(&shared).lost_ms();
+        let (_, problem) = finish_after(&shared, TakeWriter::create(TrackId(1), vec![0], path.clone(), 48_000).unwrap());
+        assert_eq!(decode(&path)[0], [vec![0.5; 10 * BLOCK], vec![0.0; 5 * BLOCK], vec![0.5; 10 * BLOCK]].concat());
+        if substituted {
+            assert_eq!(lost_ms, 6, "the status line counts it while recording");
+            assert_eq!(problem.as_deref(), Some("6 ms of input lost by the audio device from 0.01 s into the take, recorded as silence"));
+        } else {
+            assert_eq!((lost_ms, problem), (0, None), "input that is silent is not lost input");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn nan_and_infinite_input_is_counted_and_reported() {
+    let shared = Shared::new(CaptureRing::new(8));
+    shared.capture(&[0.5, -0.5]);
+    assert_eq!(shared.losses.report(0, 48_000), None);
+    shared.capture(&[f32::NAN, f32::INFINITY, f32::NEG_INFINITY]);
+    assert_eq!(shared.losses.report(0, 48_000).as_deref(), Some("3 invalid input samples (not a number or infinite) recorded as silence"));
+    shared.start_capture();
+    assert_eq!(shared.losses.report(0, 48_000), None, "a new take starts clean");
+}
+
+/// #184: a failed take file does not hide the input lost before it, nor the reverse.
+#[test]
+fn a_write_failure_and_lost_input_are_both_reported() {
+    let dir = transit_test_support::TestDir::new("lost-and-failed");
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut take = TakeWriter::create(TrackId(1), vec![0], dir.join("Vox_01.wav"), 48_000).unwrap();
+    take.file = File::open(&take.path).unwrap();
+    let shared = Arc::new(Shared::new(CaptureRing::new(8)));
+    shared.start_capture();
+    {
+        let _lease = shared.begin_capture().unwrap();
+        shared.capture_at(0, &[0.5; 4]);
+        shared.capture_at(4, &[0.5; 4800]);
+    }
+    let problem = finish_after(&shared, take).1.unwrap();
+    let (write, lost) = problem.split_once("; ").unwrap();
+    assert!(write.contains("Vox_01.wav"), "{problem}");
+    assert!(lost.starts_with("99 ms of input lost from 0.00 s into the take"), "{problem}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #184: the take writer measures each take's longest stretch of exact digital silence between
+/// signal (a device that sent zeros while still calling back), and only a stretch of 100 ms or
+/// more becomes a note; silence at either end of a take is not a stretch.
+#[test]
+fn a_take_measures_its_longest_exact_silence_between_signal() {
+    let dir = transit_test_support::TestDir::new("zero-run");
+    let _ = std::fs::remove_dir_all(&dir);
+    // A stereo take of input channels 1 and 0 of a 3-channel input; channel 2 is not in it.
+    let write = |name: &str, parts: &[(f32, f32, usize)]| {
+        let mut take = TakeWriter::create(TrackId(1), vec![1, 0], dir.join(name), 48_000).unwrap();
+        for &(left, right, n) in parts {
+            let block: Vec<f32> = (0..n).flat_map(|_| [left, right, 0.75]).collect();
+            take.write(&block, 3);
+        }
+        take.zeros
+    };
+    let lost = write("lost.wav", &[(0.0, 0.0, 1000), (0.1, 0.0, 500), (0.0, 0.0, 4800), (0.0, -0.1, 10), (0.0, 0.0, 9000)]);
+    assert_eq!(lost.longest(), Some((1500, 4800)));
+    assert_eq!(
+        lost.note("lost.wav", 48_000).as_deref(),
+        Some("lost.wav holds 0.100 s of exact digital silence between signal, from 0.031 s into the take (frames 1500 to 6300)")
+    );
+    let short = write("short.wav", &[(0.1, 0.1, 10), (0.0, 0.0, 4799), (0.1, 0.1, 10)]);
+    assert_eq!((short.longest(), short.note("short.wav", 48_000)), (Some((10, 4799)), None), "under 100 ms is no note");
+    let ends = write("ends.wav", &[(0.0, 0.0, 48_000), (0.2, 0.2, 10), (0.0, 0.0, 48_000)]);
+    assert_eq!(ends.longest(), None, "silence before the first and after the last signal is not between signal");
+    let _ = std::fs::remove_dir_all(&dir);
+}

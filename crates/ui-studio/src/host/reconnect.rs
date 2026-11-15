@@ -56,8 +56,12 @@ impl StudioApp {
         let Some(trouble) = r.trouble() else {
             let lost = r.lost_ms();
             if recording && lost > self.lost_shown {
+                // The first loss of the take goes to the log when it happens, with where (#184).
+                if self.lost_shown == 0 {
+                    log::warn!("recording: input lost while recording: {}", r.loss_report().unwrap_or_else(|| format!("{lost} ms")));
+                }
                 self.lost_shown = lost;
-                self.status = format!("The disk is too slow: this take has lost {lost} ms of input so far.");
+                self.status = format!("This take has lost {lost} ms of input so far; it keeps its timing with silence there.");
             }
             return;
         };

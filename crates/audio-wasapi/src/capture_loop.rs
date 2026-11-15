@@ -244,6 +244,8 @@ fn fill_gap(
         let mut source = ConvertSource { scratch: &mut *scratch, channels, frames: n, bytes: None, wire: config.wire };
         let mut zeros = CaptureBlock::new(n, stamp, config.format, &mut source);
         zeros.device_position = Some(position);
+        // Not input: the recorder counts these frames as lost and says so (#184).
+        zeros.substituted = true;
         capture(&mut zeros);
         config.filled.fetch_add(frames, Ordering::Relaxed);
         position += frames;
@@ -450,6 +452,7 @@ mod tests {
         position: Option<u64>,
         first_sample: f32,
         all_zero: bool,
+        substituted: bool,
     }
 
     struct Run {
@@ -478,6 +481,7 @@ mod tests {
                 position: block.device_position,
                 first_sample: first,
                 all_zero,
+                substituted: block.substituted,
             });
         });
         let mut error: ErrorCallback = Box::new(move |e| faults.lock().unwrap().push(e));
@@ -525,6 +529,8 @@ mod tests {
         // The first packet starts at sample 0.0, so only its first sample is zero; check by value.
         assert_eq!(run.stats.silent, 1);
         assert_eq!(&zeros[1..], [true, false]);
+        // A silent packet is the device's own report of silence, not input transit lost.
+        assert!(run.seen.iter().all(|s| !s.substituted));
         assert!(run.seen.iter().all(|s| s.stamp.quality == Quality::BackendEstimate), "silence is still timed");
     }
 
@@ -548,6 +554,8 @@ mod tests {
         assert_eq!(run.seen.iter().map(|s| s.frames).collect::<Vec<_>>(), [128, 128, 128, 128, 44, 128, 128]);
         let filler = &run.seen[2..5];
         assert!(filler.iter().all(|s| s.all_zero), "the gap is zeros");
+        // #184: the filler says it is not input, so the recorder counts it; real packets do not.
+        assert_eq!(run.seen.iter().map(|s| s.substituted).collect::<Vec<_>>(), [false, false, true, true, true, false, false]);
         assert_eq!(filler.iter().map(|s| s.frames).sum::<usize>(), 300);
         // The filler sits where the lost frames were: it ends where the packet starts.
         assert_eq!(filler[0].position, Some(2 * u64::from(PERIOD)));

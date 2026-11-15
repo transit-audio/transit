@@ -580,12 +580,24 @@ pub struct CaptureBlock<'a> {
     pub sample: SampleFormat,
     pub channels: u16,
     pub layout: Layout,
+    /// The block is zeros the backend put in place of device input it lost (a WASAPI discontinuity
+    /// it padded), not input: the recorder counts it and says so (#184).
+    pub substituted: bool,
     source: &'a mut dyn CaptureSource,
 }
 
 impl<'a> CaptureBlock<'a> {
     pub fn new(frames: usize, stamp: Stamp, format: Format, source: &'a mut dyn CaptureSource) -> Self {
-        Self { frames, stamp, device_position: None, sample: format.sample, channels: format.channels, layout: Layout::Interleaved, source }
+        Self {
+            frames,
+            stamp,
+            device_position: None,
+            sample: format.sample,
+            channels: format.channels,
+            layout: Layout::Interleaved,
+            substituted: false,
+            source,
+        }
     }
     /// Read the samples of the block as `f32`, chunk by chunk; `each` gets the frame offset of the chunk.
     pub fn chunks(&mut self, each: &mut dyn FnMut(usize, &[f32])) {
