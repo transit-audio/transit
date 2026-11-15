@@ -600,10 +600,13 @@ fn handle(c: &Conn, ev: Event) {
                 let _ = c.c.flush();
             } else if let Some(f) = frame_of_content(e.window) {
                 xembed::resize(c, &f);
-            } else if let Some(f) = frame_of_content(e.event)
-                && f.child.get().is_some_and(|(w, _)| w == e.window)
-            {
-                f.child.set(Some((e.window, (i32::from(e.width), i32::from(e.height)))));
+            } else if let Some(f) = frame_of_content(e.event) {
+                if f.child.get().is_some_and(|(w, _)| w == e.window) {
+                    f.child.set(Some((e.window, (i32::from(e.width), i32::from(e.height)))));
+                }
+                // An XEmbed plug the host mapped is the host's to place: another client that
+                // moved or resized it is undone (E74 recurrence).
+                xembed::configured(c, &f, e.window, (e.x, e.y, e.width, e.height));
             }
         }
         Event::CreateNotify(e) => {

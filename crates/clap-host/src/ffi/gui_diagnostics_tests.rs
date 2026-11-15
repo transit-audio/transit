@@ -143,14 +143,34 @@ fn host_ids(inst: &Instance) -> String {
     g.window.as_ref().map_or_else(|| "no host window".to_owned(), |w| format!("host frame {:#x}, content {:#x}", w.raw().addr(), w.parent().addr()))
 }
 
+/// Host passes until `command` reads true on the fixture, at most 64; returns the last readout.
+/// Each pass dispatches the host's events, runs its idle, round-trips its connection and then
+/// reads the fixture's state on the fixture's own connection (each load_state round-trips that
+/// connection and records the plug's events). The passes count host dispatches, not time: the
+/// host maps the child on the dispatch after the one that detects it (a 100 ms fallback only
+/// makes that sooner), and a stalled host or server delays a pass without using one up.
+#[cfg(target_os = "linux")]
+fn host_passes_until(q: &transit_rt::gui_thread::MessageQueue, inst: &Instance, command: &[u8]) -> bool {
+    for _ in 0..64 {
+        q.dispatch(256);
+        inst.link().idle();
+        settle_host(inst);
+        if inst.load_state(command) {
+            return true;
+        }
+    }
+    false
+}
+
 /// The only test in this process that maps a top-level window. X gives a closed client's
 /// resource ids to the next client, so the fixture's plug can get the id of a window another
-/// test just closed; a window manager still handling that window then acts on the plug (E74,
-/// #346: WSLg's Weston reparented it to its own window). Only the host may move the plug: it
-/// maps, unmaps and sizes it to the content. The fixture records the plug's structure events,
-/// and `xembed-hosted` asserts before the state readouts that no other client acted on it, so
-/// interference fails with the plug's ids, parent, geometry and events printed (#349), not as
-/// a wrong map state or size.
+/// test just closed, raised or not, and a window manager still handling that window then acts
+/// on the plug: WSLg's Weston reparented it (E74, #346) or resized and moved it with a closed,
+/// never-raised editor frame's late requests (E74 recurrence, #697). The host owns a plug it
+/// mapped: it sizes it to the content at (0, 0) and puts it back when another client moves it,
+/// so the embed is read as one state that ends the passes, and a third client then plays that
+/// window manager deterministically. A reparent the host cannot undo; it fails `xembed-hosted`.
+/// On any failure the fixture prints the plug's ids, parent, geometry and events (#349).
 #[cfg(target_os = "linux")]
 #[test]
 fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
@@ -160,41 +180,30 @@ fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
     let q = transit_rt::gui_thread::MessageQueue::attach();
     let inst = gain("xembed_plug");
     inst.link().open("XEmbed Fixture").unwrap();
-    // Explicit readouts on the fixture's separate X connection, each after a host round trip.
-    // Each load_state round-trips that connection and records ClientMessages. The passes count
-    // host dispatches, not time: the host maps the child on the dispatch after the one that
-    // detects it (a 100 ms fallback only makes that sooner), and a stalled host or server
-    // delays a pass without using one up. 64 passes leave room for the finite exchanges.
-    for _ in 0..64 {
-        q.dispatch(256);
-        inst.link().idle();
-        settle_host(&inst);
-        if inst.load_state(b"CMD:xembed-mapped") && inst.load_state(b"CMD:xembed-notified") {
-            break;
-        }
-    }
+    let ids = host_ids(&inst);
+    let explain = |what: &str| {
+        inst.load_state(b"CMD:xembed-report");
+        format!("{what}; the fixture printed the plug's state; {ids}")
+    };
     // Mapped, not VIEWABLE: on the ambient display a window manager maps the top-level on its
     // own schedule (WSLg's XWM after an idle wake, #289), outside these bounded passes.
-    let ids = host_ids(&inst);
-    let hosted = "only the host moved the plug; the fixture printed what another client did (E74)";
-    assert!(inst.load_state(b"CMD:xembed-hosted"), "{hosted}; {ids}");
-    assert!(inst.load_state(b"CMD:xembed-mapped"), "the fixture never maps itself; the host must honor XEMBED_MAPPED; {ids}");
-    assert!(inst.load_state(b"CMD:xembed-notified"), "the actual EMBEDDED_NOTIFY has the content ID and negotiated version 0; {ids}");
-    assert!(
-        inst.load_state(b"CMD:xembed-sized"),
-        "the child's initial 123x45 size follows the resized content; the fixture printed the plug's state; {ids}"
-    );
-    assert!(inst.load_state(b"CMD:xembed-unmap"));
-    for _ in 0..64 {
-        q.dispatch(256);
-        inst.link().idle();
-        // The host unmaps with a request it only flushes, as it resizes.
-        settle_host(&inst);
-        if inst.load_state(b"CMD:xembed-unmapped") {
-            break;
-        }
+    if !host_passes_until(&q, &inst, b"CMD:xembed-embedded") {
+        let report = explain("the embed did not complete");
+        assert!(inst.load_state(b"CMD:xembed-hosted"), "the plug left the content window (another client, E74); {report}");
+        assert!(inst.load_state(b"CMD:xembed-mapped"), "the fixture never maps itself; the host must honor XEMBED_MAPPED; {report}");
+        assert!(inst.load_state(b"CMD:xembed-notified"), "the actual EMBEDDED_NOTIFY has the content ID and negotiated version 0; {report}");
+        panic!("the child's initial 123x45 size follows the resized content; {report}");
     }
-    assert!(inst.load_state(b"CMD:xembed-hosted"), "{hosted}; {ids}");
-    assert!(inst.load_state(b"CMD:xembed-unmapped"), "the host unmaps the plug that cleared XEMBED_MAPPED; {ids}");
+    // A window manager resizing and moving the mapped plug, as WSLg's did through a reused id:
+    // the intruder's request is checked, and `settle_host` then puts the ConfigureNotify it
+    // caused in front of the host's next dispatch, so the first pass sees it. Without the
+    // host's restore the plug keeps 640x480 at (32, 32), or the window follows that size after
+    // the follow's grace time, which `xembed-restored` rejects: it fails every pass.
+    assert!(inst.load_state(b"CMD:xembed-intrude"));
+    settle_host(&inst);
+    assert!(host_passes_until(&q, &inst, b"CMD:xembed-restored"), "{}", explain("the host puts back a plug another client moved and resized"));
+    assert!(inst.load_state(b"CMD:xembed-unmap"));
+    // The host unmaps with a request it only flushes, as it resizes.
+    assert!(host_passes_until(&q, &inst, b"CMD:xembed-unmapped"), "{}", explain("the host unmaps the plug that cleared XEMBED_MAPPED"));
     inst.link().close();
 }

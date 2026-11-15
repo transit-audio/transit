@@ -210,6 +210,25 @@ pub(super) fn resize(c: &Conn, f: &Frame) {
     let _ = c.c.flush();
 }
 
+/// A child of the content window reported a new geometry (`ConfigureNotify`). The embedder
+/// owns a managed plug's geometry (in `XEmbed` the embedder sizes the client; `GtkSocket` too),
+/// and the host sizes a plug only when it maps it and when the content changes. So a host-mapped
+/// plug that is not at (0, 0) at the content's size was moved by another client, for example a
+/// window manager acting late on a closed window whose id the plug's connection was given
+/// (E74): put it back. A configure of ours still in flight compares against the current
+/// content size and converges on the next event; nothing is done for a plug the host does not
+/// manage (a toolkit that maps itself sizes its own window, and `Follow` follows it).
+pub(super) fn configured(c: &Conn, f: &Frame, window: Window, geometry: (i16, i16, u16, u16)) {
+    if !f.xembed.borrow().plugs.iter().any(|p| p.window == window && p.mapped_by_host) {
+        return;
+    }
+    let Some(g) = c.c.get_geometry(f.content).ok().and_then(|r| r.reply().ok()) else { return };
+    if geometry != (0, 0, g.width, g.height) {
+        log::debug!("editor windows: XEmbed plug {window} was moved to {geometry:?} by another client; restoring it");
+        resize(c, f);
+    }
+}
+
 fn focus_on(c: &Conn, f: &Frame, window: Option<Window>) {
     let mut state = f.xembed.borrow_mut();
     if state.focused == window {
