@@ -344,3 +344,44 @@ fn xembed_maps_before_the_window_manager_maps_the_frame() {
     win.close();
     q.dispatch(256);
 }
+
+// A GtkPlug-style toolkit asks for a new size by resizing its own window in place, at (0, 0).
+// The host maps the plug, then leaves that size alone (it puts back only a plug moved off
+// (0, 0), E74 recurrence) and the follow-size path takes it up. The idle clock is injected:
+// before `Follow::GRACE` the window must not follow and the plug must keep its size for every
+// pass; at the grace the content follows the plug. Passes count dispatches, not time.
+fn xembed_a_host_mapped_plug_that_resizes_itself_is_followed() {
+    let q = MessageQueue::attach();
+    let win = EditorWindow::new("Self-resizing XEmbed", 300.0, 200.0, None).unwrap();
+    // After `new`'s own resize: `idle_time` is at or after the host's last resize.
+    let idle_time = Instant::now();
+    let content = id(win.parent());
+    let mut plug = Plug::new(content);
+    plug.flags(1);
+    win.raise();
+    assert!(win.surface_readout().is_some()); // Host round trip queues CreateNotify.
+    for _ in 0..2 {
+        q.dispatch(256);
+        win.sync_at(idle_time);
+    }
+    assert_eq!(plug.state(), MapState::VIEWABLE, "the second dispatch's idle maps the plug");
+    assert_eq!(geometry(&plug.c, plug.window), Some((300, 200)), "mapped at the content's size");
+    plug.c.configure_window(plug.window, &x11rb::protocol::xproto::ConfigureWindowAux::new().width(520).height(330)).unwrap();
+    plug.c.sync().unwrap();
+    for pass in 0..8 {
+        assert!(win.surface_readout().is_some()); // The plug's ConfigureNotify is queued.
+        q.dispatch(256);
+        win.sync_at(idle_time);
+        plug.read();
+        assert_eq!(geometry(&plug.c, plug.window), Some((520, 330)), "pass {pass}: the host left the plug's own size alone");
+        assert_eq!(win.content_size(), (300, 200), "pass {pass}: no follow before the grace");
+    }
+    q.dispatch(256);
+    win.sync_at(idle_time + ew::Follow::GRACE);
+    assert_eq!(win.content_size(), (520, 330), "the window followed the plug's own size");
+    xembed_passes(&q, &win, &mut plug);
+    assert_eq!(geometry(&plug.c, content), Some((520, 330)));
+    assert_eq!(geometry(&plug.c, plug.window), Some((520, 330)), "the plug keeps the size it asked for");
+    win.close();
+    q.dispatch(256);
+}

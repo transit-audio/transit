@@ -202,7 +202,9 @@ pub(super) fn resize(c: &Conn, f: &Frame) {
         return;
     }
     // Read the current content geometry, not a possibly old ConfigureNotify still in the
-    // queue. This also covers a window manager forcing a size and the follow-size path.
+    // queue. Callers: the map, the content's ConfigureNotify (also a window manager forcing the
+    // frame's size), `set_content` (request_resize, and the follow-size path, which first sizes
+    // the content to a plug's own new size so the plug keeps it), and `configured`.
     let Some(g) = c.c.get_geometry(f.content).ok().and_then(|r| r.reply().ok()) else { return };
     for plug in f.xembed.borrow().plugs.iter().filter(|p| p.mapped_by_host) {
         let _ = c.c.configure_window(plug.window, &ConfigureWindowAux::new().x(0).y(0).width(u32::from(g.width)).height(u32::from(g.height)));
@@ -210,23 +212,23 @@ pub(super) fn resize(c: &Conn, f: &Frame) {
     let _ = c.c.flush();
 }
 
-/// A child of the content window reported a new geometry (`ConfigureNotify`). The embedder
-/// owns a managed plug's geometry (in `XEmbed` the embedder sizes the client; `GtkSocket` too),
-/// and the host sizes a plug only when it maps it and when the content changes. So a host-mapped
-/// plug that is not at (0, 0) at the content's size was moved by another client, for example a
-/// window manager acting late on a closed window whose id the plug's connection was given
-/// (E74): put it back. A configure of ours still in flight compares against the current
-/// content size and converges on the next event; nothing is done for a plug the host does not
-/// manage (a toolkit that maps itself sizes its own window, and `Follow` follows it).
-pub(super) fn configured(c: &Conn, f: &Frame, window: Window, geometry: (i16, i16, u16, u16)) {
-    if !f.xembed.borrow().plugs.iter().any(|p| p.window == window && p.mapped_by_host) {
+/// A child of the content window reported a new geometry (`ConfigureNotify`). A plug the host
+/// mapped belongs at (0, 0) of the content: the host only ever places it there, and a plug-in
+/// has no reason to move its own window inside its parent. So a host-mapped plug found anywhere
+/// else was moved by another client, for example a window manager acting late on a closed
+/// window whose id the plug's connection was given (E74 recurrence: both recorded cases left it
+/// at (32, 32)); put it back, position and size. A size change at (0, 0) is left alone: that is
+/// how a GtkPlug-style toolkit asks for a new size, and the follow-size path (`Follow`, in
+/// `sync_at`) takes it up. Knowingly not covered: another client resizing the plug in place at
+/// (0, 0) looks the same as that request and is followed. Only the event's position is read, so
+/// no round trip unless the plug must be restored; nothing is done for a plug the host does not
+/// manage (a toolkit that maps itself owns its window).
+pub(super) fn configured(c: &Conn, f: &Frame, window: Window, position: (i16, i16)) {
+    if position == (0, 0) || !f.xembed.borrow().plugs.iter().any(|p| p.window == window && p.mapped_by_host) {
         return;
     }
-    let Some(g) = c.c.get_geometry(f.content).ok().and_then(|r| r.reply().ok()) else { return };
-    if geometry != (0, 0, g.width, g.height) {
-        log::debug!("editor windows: XEmbed plug {window} was moved to {geometry:?} by another client; restoring it");
-        resize(c, f);
-    }
+    log::debug!("editor windows: XEmbed plug {window} was moved to {position:?} by another client; restoring it");
+    resize(c, f);
 }
 
 fn focus_on(c: &Conn, f: &Frame, window: Option<Window>) {

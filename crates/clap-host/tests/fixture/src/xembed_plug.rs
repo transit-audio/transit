@@ -3,10 +3,11 @@
 //! The plug also records the structure events the server reports for it and for the content
 //! window (`StructureNotify` on both), in server order, for the failure report. The host maps,
 //! unmaps and sizes the plug to the content at (0, 0) (it reads the content's size on its own
-//! connection just before), so a plug configure that does not match the latest content size,
-//! or a reparent, is another client's: a window manager acting on the plug through a reused
-//! window id (E74). The host undoes a configure of a plug it mapped; a reparent it cannot.
-//! `xembed-intrude` plays that window manager deterministically.
+//! connection just before), and this plug never configures itself, so a plug configure that
+//! does not match the latest content size, or a reparent, is another client's: a window manager
+//! acting on the plug through a reused window id (E74). The host puts back a plug it mapped that
+//! another client moved off (0, 0); a reparent it cannot. `xembed-intrude` plays that window
+//! manager deterministically.
 
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;

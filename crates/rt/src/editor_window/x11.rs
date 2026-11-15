@@ -605,8 +605,8 @@ fn handle(c: &Conn, ev: Event) {
                     f.child.set(Some((e.window, (i32::from(e.width), i32::from(e.height)))));
                 }
                 // An XEmbed plug the host mapped is the host's to place: another client that
-                // moved or resized it is undone (E74 recurrence).
-                xembed::configured(c, &f, e.window, (e.x, e.y, e.width, e.height));
+                // moved it off (0, 0) is undone (E74 recurrence); a size change stays for Follow.
+                xembed::configured(c, &f, e.window, (e.x, e.y));
             }
         }
         Event::CreateNotify(e) => {
