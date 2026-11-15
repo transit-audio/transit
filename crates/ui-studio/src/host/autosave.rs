@@ -1,17 +1,28 @@
 use super::*;
 
 impl StudioApp {
-    /// Every two minutes, copy a modified session to the autosave folder (not while recording).
-    /// Timed by the wall clock: egui's stands still while the window is hidden.
+    /// Every two minutes (not while recording), read the hosted plug-ins' live states into the
+    /// session, also when it is clean, so a plug-in that never says its state changed is still
+    /// protected (issue #574; the read is bounded, `read_states_timed`). Then copy the session to
+    /// the autosave folder when it is modified and changed since the last timed copy: a plug-in
+    /// whose state reads the same causes no copy, however often it reports a change. A read the
+    /// audio side refuses is tried again ten seconds later. Timed by the wall clock: egui's stands
+    /// still while the window is hidden.
     pub(crate) fn autosave(&mut self) {
         let Some(dir) = self.autosave_dir.clone() else { return };
-        let last = *self.last_autosave.get_or_insert_with(std::time::Instant::now);
-        if last.elapsed().as_secs() < 120 || !self.engine.is_dirty() || self.engine.transport.recording {
+        let now = std::time::Instant::now();
+        let last = *self.last_autosave.get_or_insert(now);
+        if now.duration_since(last).as_secs() < 120 || self.engine.transport.recording {
             return;
         }
-        self.last_autosave = Some(std::time::Instant::now());
-        if self.capture_plugin_states().is_ok() {
-            self.autosave_to(&dir);
+        if self.hosts_live_plugins() && self.read_states_timed().is_err() {
+            self.last_autosave = now.checked_sub(std::time::Duration::from_secs(110)).or(Some(now));
+            return;
+        }
+        self.last_autosave = Some(now);
+        if self.engine.is_dirty() && self.engine.revision != self.state_guard.timed_rev && self.autosave_to(&dir) {
+            self.state_guard.timed_rev = self.engine.revision;
+            self.state_guard.timed_writes += 1;
         }
     }
 

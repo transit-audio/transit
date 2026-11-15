@@ -1,5 +1,8 @@
 use super::*;
 
+/// A capture refused because the audio side has not applied the current document yet.
+pub(crate) const STILL_UPDATING: &str = "The audio session is still updating; try again after it applies";
+
 impl StudioApp {
     /// Synchronize the immutable snapshot, including view-only COW changes.
     /// Revision alone cannot establish the lineage required by state capture.
@@ -67,7 +70,7 @@ impl StudioApp {
         let action_pending = self.player_requests.play.is_some() || self.player_requests.locate.is_some() || self.player_requests.recording.is_some();
         let changed = self.player.as_ref().is_some_and(|p| !p.has_requested_session(&self.engine.session_arc()));
         if (action_pending && changed) || !self.sync_player_session() {
-            return Err("The audio session is still updating; try again after it applies".into());
+            return Err(STILL_UPDATING.into());
         }
         let Some(p) = &self.player else {
             let skipped = self
@@ -135,7 +138,10 @@ impl StudioApp {
         Ok(true)
     }
 
-    fn store_plugin_states(&mut self, states: Result<transit_playback::PluginStates, transit_playback::PlayerError>) -> Result<(), String> {
+    pub(super) fn store_plugin_states(
+        &mut self,
+        states: Result<transit_playback::PluginStates, transit_playback::PlayerError>,
+    ) -> Result<(), String> {
         let states = self.player_requests.result(&mut self.status, states).ok_or_else(|| self.status.clone())?;
         for (t, slot, data) in states {
             // A hosted plug-in's state that the session already holds is not stored again: the

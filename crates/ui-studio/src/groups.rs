@@ -373,6 +373,7 @@ impl StudioApp {
         let name =
             if groups.len() == 1 { s.track(groups[0]).map_or_else(String::new, |g| g.name.clone()) } else { format!("{} groups", groups.len()) };
         // The group tracks' own devices go with them: keep their live state for Undo (issue #574).
+        self.state_notice = None;
         self.capture_before_dropping(&groups)?;
         let (out, rerouted) = self.composite("Ungroup", |app, key| app.dissolve(&groups, key))?;
         self.ui.collapsed.retain(|x| !groups.contains(x));
@@ -381,7 +382,8 @@ impl StudioApp {
             let _ = self.run("edit.select", json!({"tracks": list}));
             self.ui.focus_track = Some(*first);
         }
-        self.status = format!("Ungrouped {name}{}", reroute_note(&rerouted));
+        let said = format!("Ungrouped {name}{}", reroute_note(&rerouted));
+        self.status = self.with_state_notice(said);
         Ok(out)
     }
 

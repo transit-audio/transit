@@ -280,6 +280,8 @@ pub struct StudioApp {
     pub leftovers: Vec<transit_engine::autosave::Leftover>,
     panic_rev: u64,
     last_autosave: Option<std::time::Instant>,
+    /// Hosted plug-in state protection (issue #574): the bounded waits and the timed read.
+    pub(crate) state_guard: host::state_guard::Guard,
     pub main_meter: MeterDisplay,
     pub meters: HashMap<TrackId, MeterDisplay>,
     meter_snapshot: transit_playback::MeterSnapshot,
@@ -442,6 +444,7 @@ impl StudioApp {
             leftovers: Vec::new(),
             panic_rev: 0,
             last_autosave: None,
+            state_guard: host::state_guard::Guard::default(),
             main_meter: MeterDisplay::default(),
             meters: HashMap::new(),
             meter_snapshot: transit_playback::MeterSnapshot::default(),

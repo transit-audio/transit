@@ -339,7 +339,9 @@ impl StudioApp {
     /// first. The first error stops the batch, undoes it and goes to the status line. The master
     /// is never deleted.
     pub fn delete_tracks(&mut self, tracks: &[TrackId]) -> Result<Value, String> {
-        // Their devices' live state goes into the undo snapshot first (issue #574).
+        // Their devices' live state goes into the undo snapshot first (issue #574); a plug-in that
+        // did not answer is named after the result below.
+        self.state_notice = None;
         self.capture_before_dropping(tracks)?;
         self.tracks_selected_by_header = false;
         self.mixer.serial += 1;
@@ -391,11 +393,12 @@ impl StudioApp {
             self.status = e;
             return Err(self.status.clone());
         }
-        self.status = match (names.len(), notes.first()) {
+        let said = match (names.len(), notes.first()) {
             (1, Some(n)) => n.clone(),
             (1, None) => format!("Deleted {}", names[0]),
             (n, _) => format!("Deleted {n} tracks"),
         };
+        self.status = self.with_state_notice(said);
         Ok(last)
     }
 

@@ -21,6 +21,8 @@ const ID: &str = "clap:test.state574";
 struct Live {
     state: Mutex<Vec<u8>>,
     changed: AtomicBool,
+    /// Its state read does not answer within the save deadline (a modal dialog, a stuck call).
+    busy: AtomicBool,
 }
 
 impl Live {
@@ -79,8 +81,24 @@ impl Plugin for Fake {
         Some(Box::new(Editor { live: Arc::clone(&self.live) }))
     }
     fn state_reader(&mut self) -> Option<Box<dyn PluginStateReader>> {
-        let live = Arc::clone(&self.live);
-        Some(Box::new(move || Some(live.state.lock().unwrap().clone())))
+        Some(Box::new(Reader { live: Arc::clone(&self.live) }))
+    }
+}
+
+/// The fake's state handle; a busy fake does not answer within a deadline.
+struct Reader {
+    live: Arc<Live>,
+}
+
+impl PluginStateReader for Reader {
+    fn save_state(&mut self) -> Option<Vec<u8>> {
+        Some(self.live.state.lock().unwrap().clone())
+    }
+    fn save_state_within(&mut self, _busy: Duration) -> Result<Option<Vec<u8>>, transit_dsp::StateBusy> {
+        if self.live.busy.load(Ordering::Relaxed) {
+            return Err(transit_dsp::StateBusy);
+        }
+        Ok(self.save_state())
     }
 }
 
@@ -113,6 +131,9 @@ struct Rig {
     ctx: egui::Context,
     made: Arc<Made>,
     t: TrackId,
+    /// The device-free player, whose "audio callback" each frame runs; otherwise the audio side
+    /// runs on its own thread.
+    stepped: bool,
 }
 
 /// An app whose track `t` holds the fake (`instrument`: as its instrument on an instrument track,
@@ -121,6 +142,11 @@ struct Rig {
 fn rig(instrument: bool) -> Rig {
     let engine = transit_engine::Engine::default();
     let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    rig_with(engine, player, true, instrument)
+}
+
+/// [`rig`] on `player`, which runs the audio side by itself unless `stepped`.
+fn rig_with(engine: transit_engine::Engine, player: transit_playback::Player, stepped: bool, instrument: bool) -> Rig {
     let now = Instant::now();
     let made = Arc::new(Made::default());
     let m = Arc::clone(&made);
@@ -147,7 +173,7 @@ fn rig(instrument: bool) -> Rig {
     } else {
         tr.mixer.inserts[0] = Some(transit_model::Insert::new(ID));
     }
-    let mut r = Rig { app, ctx: egui::Context::default(), made, t };
+    let mut r = Rig { app, ctx: egui::Context::default(), made, t, stepped };
     r.until_loaded(1);
     r.app.capture_plugin_states().unwrap();
     r.app.engine.mark_clean();
@@ -161,7 +187,13 @@ fn rig(instrument: bool) -> Rig {
 impl Rig {
     /// One frame of the app, the device-free player's "audio callback" first.
     fn frame(&mut self) {
-        self.app.player.as_ref().unwrap().step_device_free();
+        if self.stepped {
+            self.app.player.as_ref().unwrap().step_device_free();
+        } else {
+            // The audio side runs by itself: pace the frames so it gets a turn (a handshake loop,
+            // bounded by the frame count, not a timing assertion).
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let mut out = self.ctx.run_ui(egui::RawInput::default(), |ui| self.app.logic(ui.ctx()));
         out.textures_delta.clear();
     }
@@ -385,6 +417,13 @@ fn only_changes_that_drop_a_hosted_device_capture_first() {
         // Track `a` hosts an insert, not an instrument: replacing its instrument drops nothing hosted.
         ("mix.instrument", json!({"track": a, "plugin": "macro_oscillator"}), false),
         ("mix.mute", json!({"track": a}), false),
+        ("track.change_width", json!({"tracks": [a], "format": "mono"}), true),
+        ("track.change_width", json!({"tracks": [b], "format": "mono"}), false),
+        ("track.load_preset", json!({"tracks": [a], "path": "x.tpreset"}), true),
+        ("track.load_preset", json!({"tracks": [b], "path": "x.tpreset"}), false),
+        // Track `a` hosts an insert, not an instrument.
+        ("instrument.external", json!({"track": a, "return": "In 1"}), false),
+        ("mix.sampler_new_patch", json!({"track": a}), false),
         // Undoing the new tracks would take the hosted insert away with them.
         ("edit.undo", json!({}), true),
     ] {
@@ -396,3 +435,6 @@ fn only_changes_that_drop_a_hosted_device_capture_first() {
     assert!(drops_hosted(&with, &without));
     assert!(!drops_hosted(&without, &with));
 }
+
+#[path = "state_guard_round2_tests.rs"]
+mod round2;

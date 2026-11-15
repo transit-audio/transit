@@ -722,19 +722,10 @@ impl StudioApp {
 
     // ---- Undo history ----
 
-    /// Undo until `keep` steps of the history remain done (a click in Edit > Undo History).
+    /// Undo until `keep` steps of the history remain done (a click in Edit > Undo History); see
+    /// [`StudioApp::undo_steps`] (issue #574: one capture for a jump that drops hosted plug-ins).
     pub fn undo_to(&mut self, keep: usize) -> usize {
-        let mut n = 0;
-        while self.engine.undo_history().len() > keep && n < 10_000 {
-            if self.run("edit.undo", json!({})).is_err() {
-                break;
-            }
-            n += 1;
-        }
-        if n > 0 {
-            self.status = format!("Undid {n} step{}", if n == 1 { "" } else { "s" });
-        }
-        n
+        self.undo_steps(keep)
     }
 }
 
