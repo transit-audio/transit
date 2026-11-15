@@ -430,7 +430,9 @@ impl StudioApp {
         let Some(f) = self.finish.bounce_form.clone() else { return Err("no bounce form".into()) };
         let s = self.engine.session();
         let (start, end) = if f.consolidated {
-            (0, s.content_end().max(1))
+            // From the bar holding the session start, as the engine renders it (ADR 0052 decision 10).
+            let r = transit_engine::io::consolidated_range(s);
+            (r.start, r.end)
         } else {
             match f.range {
                 BounceRange::Selection if !bounce_range(&s.edit).is_empty() => (bounce_range(&s.edit).start, bounce_range(&s.edit).end),

@@ -34,6 +34,17 @@ pub struct ConsolidatedBounce {
     done: ConsolidatedBounced,
 }
 
+/// The range a consolidated export renders: from the first sample of the bar holding the session
+/// start (bar 1, sample 0, without a pre-count zone) to the content end after real-time delays and
+/// track offsets. The MIDI files start at that bar too (ADR 0052 decision 10), so every stem, MIDI
+/// file and the tempo file of one export share the same start and line up when imported at one
+/// position.
+pub fn consolidated_range(s: &Session) -> Range {
+    let origin = super::midi::export_origin(s);
+    let start = if origin < 0 { s.tempo.tick_to_samples(origin, s.sample_rate) } else { 0 };
+    Range::new(start, transit_mix::playback_content_end(s))
+}
+
 fn same_path(a: &Path, b: &Path) -> bool {
     a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
 }
@@ -46,12 +57,13 @@ fn same_output(a: &Option<PathBuf>, b: &Option<PathBuf>) -> bool {
 }
 
 impl ConsolidatedBounce {
-    /// Prepare one stem per audio, instrument and MIDI track from sample zero to the content end,
-    /// one SMF per MIDI track, and a tempo-only SMF. External Instrument audio is skipped, while
-    /// its MIDI remains. Muted and inactive tracks are rendered in isolation so their material is
-    /// not lost from the interchange package.
+    /// Prepare one stem per audio, instrument and MIDI track over [`consolidated_range`] (from the
+    /// bar holding the session start to the content end), one SMF per MIDI track, and a tempo-only
+    /// SMF, all starting at the same bar. External Instrument audio is skipped, while its MIDI
+    /// remains. Muted and inactive tracks are rendered in isolation so their material is not lost
+    /// from the interchange package.
     pub fn new(s: Arc<Session>, dir: &Path, opts: &EncodeOptions, fold_stereo: bool) -> Result<Self> {
-        let range = Range::new(0, transit_mix::playback_content_end(&s));
+        let range = consolidated_range(&s);
         super::check_bounce_range(&s, range, CMD)?;
         super::make_dir(dir)?;
         let ext = transit_audio_io::encode_extension(opts.format);

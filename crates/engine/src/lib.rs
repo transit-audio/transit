@@ -1016,6 +1016,8 @@ mod pre_count_tests;
 #[cfg(test)]
 mod tests_clipboard_session;
 #[cfg(test)]
+mod tests_pre_count_followups;
+#[cfg(test)]
 mod tests_pre_count_output;
 #[cfg(test)]
 mod trim_floor_tests;

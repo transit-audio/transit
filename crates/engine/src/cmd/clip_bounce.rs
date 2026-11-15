@@ -98,16 +98,21 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad("track.bounce", "a destination track needs clips on one track; use `new` for several"));
     }
     crate::io::validate_bounce_destination(s, &tracks, destination)?;
+    let tail = s.sample_rate.samples(BOUNCE_TAIL_SECONDS);
     // Refused before anything renders, so a refusal leaves every track as it was.
-    for t in &tracks {
+    for (t, _, end) in &spans {
         if let Some(tr) = s.track(*t) {
             super::external_instrument::refuse_offline_print(id, tr)?;
             if tr.inactive {
                 return Err(bad("track.bounce", crate::io::inactive_source_refusal(&tr.name)));
             }
+            // The print starts at bar 1 (ADR 0052 decision 10): clips wholly in the pre-count
+            // zone, tail included, would print nothing that sounds.
+            if end.saturating_add(tail) <= 0 {
+                return Err(bad(id, crate::io::zone_print_refusal(&tr.name)));
+            }
         }
     }
-    let tail = s.sample_rate.samples(BOUNCE_TAIL_SECONDS);
     let mut out = Vec::new();
     for (t, start, end) in spans {
         let span = Range::new(start, end.saturating_add(tail));

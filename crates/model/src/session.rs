@@ -567,7 +567,8 @@ impl Session {
         self.all_clips().filter(move |c| c.source() == Some(src))
     }
 
-    /// End of the last clip on any track (session length).
+    /// End of the last clip on any track's active playlist (the content end; the session length
+    /// is [`Self::length`]).
     pub fn content_end(&self) -> Samples {
         self.tracks.iter().filter_map(|t| t.playlist().map(|p| p.end())).max().unwrap_or(0)
     }
@@ -577,6 +578,13 @@ impl Session {
     /// take never moves it. The pre-count zone is `start()..0`, empty when this is 0.
     pub fn start(&self) -> Samples {
         self.all_clips().map(|c| c.start).min().unwrap_or(0).min(0)
+    }
+
+    /// The session length every display and report shows (ADR 0052 decision 10): from the session
+    /// start to the content end, so a pre-count zone counts; never negative. Without a zone it is
+    /// `content_end().max(0)`.
+    pub fn length(&self) -> Samples {
+        self.content_end().saturating_sub(self.start()).max(0)
     }
 
     /// Feet+frames reading of sample 0, in frames (Setup › Current Feet+Frames Position).

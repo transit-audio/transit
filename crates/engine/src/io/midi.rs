@@ -66,8 +66,8 @@ fn session_smf(s: &Session) -> transit_midi::Smf {
 
 /// The session tick a MIDI file export starts at (ADR 0052 decision 10): the first tick of the bar
 /// holding the session start, so the file's first bar is the pre-count zone's first bar; 0 (bar 1)
-/// without a zone.
-fn export_origin(s: &Session) -> i64 {
+/// without a zone. The consolidated export starts its stems and MIDI files here too.
+pub(super) fn export_origin(s: &Session) -> i64 {
     let start = s.start();
     if start >= 0 {
         return 0;
@@ -136,24 +136,38 @@ pub(super) fn export_midi_session(s: &Session, only: Option<&[TrackId]>) -> Resu
     transit_midi::write_smf(&smf).map_err(|err| EngineError::Io(err.to_string()))
 }
 
-/// One track as it sounds, for a consolidated interchange package.
+/// One track as it sounds, for a consolidated interchange package: over the consolidated range
+/// ([`super::consolidated::consolidated_range`]), written from the bar holding the session start
+/// with the conductor initialized at file tick 0, as the plain export is (ADR 0052 decision 10),
+/// so file tick 0 is the stems' first sample.
 pub(super) fn export_consolidated_midi_track(s: &Session, track: TrackId) -> Result<Vec<u8>> {
     let Some(t) = s.track(track).filter(|t| t.kind.is_midi()) else {
         return Err(EngineError::BadParams("file.bounce_consolidated".into(), "the MIDI track no longer exists".into()));
     };
-    let range = Range::new(0, transit_mix::playback_content_end(s));
-    let Some(sequence) = transit_mix::sequence_as_played(s, t, range) else {
+    let origin = export_origin(s);
+    let range = super::consolidated::consolidated_range(s);
+    let Some(mut sequence) = transit_mix::sequence_as_played(s, t, range) else {
         return Err(EngineError::BadParams(
             "file.bounce_consolidated".into(),
             format!("{}: a looped MIDI clip would unroll to too many events", t.name),
         ));
     };
-    let mut smf = session_smf(s);
+    if origin < 0 {
+        let shift = origin.saturating_neg();
+        for n in &mut sequence.notes {
+            n.start = n.start.saturating_add(shift).max(0);
+        }
+        for ev in &mut sequence.ctrls {
+            ev.tick = ev.tick.saturating_add(shift).max(0);
+        }
+    }
+    let mut smf = conductor_from(s, origin);
     smf.tracks.push(transit_midi::SmfTrack { name: t.name.clone(), sequence });
     transit_midi::write_smf(&smf).map_err(|err| EngineError::Io(err.to_string()))
 }
 
-/// The session's tempo, meter and markers as a conductor-only SMF.
+/// The session's tempo, meter and markers as a conductor-only SMF, from the same origin as the
+/// consolidated export's other MIDI files.
 pub(super) fn export_tempo_map(s: &Session) -> Result<Vec<u8>> {
-    transit_midi::write_smf(&session_smf(s)).map_err(|err| EngineError::Io(err.to_string()))
+    transit_midi::write_smf(&conductor_from(s, export_origin(s))).map_err(|err| EngineError::Io(err.to_string()))
 }

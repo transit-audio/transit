@@ -353,7 +353,7 @@ pub use paths::{PathBounce, PathBounced, PathNormalize, PathStem, bounce_paths, 
 mod bounce;
 pub use bounce::{Bounce, BounceOptions, Bounced, bounce_stems, bounce_stems_with};
 mod consolidated;
-pub use consolidated::{ConsolidatedBounce, ConsolidatedBounced, bounce_consolidated};
+pub use consolidated::{ConsolidatedBounce, ConsolidatedBounced, bounce_consolidated, consolidated_range};
 
 /// The Sampler's kit preset files (#467), through the checked file access.
 pub mod kit_presets;
@@ -625,14 +625,21 @@ pub fn inactive_source_refusal(name: &str) -> String {
     format!("{name} is inactive: Track > Make Active first")
 }
 
+/// The refusal for a print whose span (tail included) ends at or before bar 1: an audio clip
+/// cannot start before bar 1 yet (ADR 0052 decision 11), so nothing of it would sound.
+pub(crate) fn zone_print_refusal(name: &str) -> String {
+    format!("{name}: the clips to print end before bar 1, and a print starts at bar 1 until audio can sit before it")
+}
+
 /// Print through inserts, before the fader. Command callers validate every destination before
 /// rendering the first source; direct callers get the same validation here.
 pub fn bounce_track(e: &mut Engine, t: TrackId, destination: Option<TrackId>, source: BounceSource) -> Result<Option<TrackId>> {
     bounce_track_range(e, t, destination, source, None)
 }
 
-/// `bounce_track` of `span` only (`None`: the whole track plus a two-second tail). The printed clip
-/// sits at the span's start; material of the destination outside the span stays.
+/// `bounce_track` of `span` only (`None`: the whole track plus a two-second tail, from bar 1). The
+/// printed clip sits at the span's start, or at bar 1 when the span starts before it; material of
+/// the destination outside the span stays.
 pub fn bounce_track_range(
     e: &mut Engine,
     t: TrackId,
@@ -662,6 +669,9 @@ pub fn bounce_track_range(
     if range.is_empty() {
         return Ok(None);
     }
+    if range.end <= 0 {
+        return Err(crate::cmd::bad("track.bounce", zone_print_refusal(&tr.name)));
+    }
     // The track renders through a main mix of at least two channels.
     refuse_longer(s, "track.commit", &tr.name, "commit", range.len(), render_limit(tr.channels().max(2)))?;
     let reads = DiskReads::refuse(s, "track.bounce", Some(&[t]), range)?;
@@ -689,9 +699,15 @@ pub fn bounce_track_range(
         ntr.mixer.output = mixer.output.clone();
         ntr.mixer.sends = mixer.sends.clone();
     }
+    // An audio clip starts at bar 1 at the earliest until #442 decides where a print of pre-count
+    // zone content lands (ADR 0052 decisions 10 and 11): a span that starts in the zone is rendered
+    // whole, so what sounds from bar 1 on (a zone note's tail included) is exactly what the source
+    // played, and the printed clip starts at bar 1 with the zone's audio hidden before its left
+    // edge in the file. A span at or after bar 1 is placed at its start, as before.
+    let (offset, at) = if range.start < 0 { (range.start.saturating_neg(), 0) } else { (0, range.start) };
     // The same overwrite operation as edit.paste in Slip mode: retain the material outside
     // the printed range. A bounce stays on the timeline regardless of the current edit mode.
-    crate::edit::place_clip(s, nt, Clip::audio(cid, name, src, 0, range.start, range.len()));
+    crate::edit::place_clip(s, nt, Clip::audio(cid, name, src, offset, at, range.end.saturating_sub(at)));
     if let Some(old) = s.track_mut(t) {
         match source {
             BounceSource::Leave => {}

@@ -466,7 +466,7 @@ pub fn unknown_param_lines(s: &Session) -> Vec<String> {
 /// such plug-in).
 pub fn session_open_line(path: &str, s: &Session, missing_media: usize, took: std::time::Duration) -> String {
     let clips: usize = s.tracks.iter().filter_map(|t| t.playlist()).map(|p| p.clips.len()).sum();
-    let seconds = s.content_end().max(0) as f64 / f64::from(s.sample_rate.hz().max(1));
+    let seconds = s.length() as f64 / f64::from(s.sample_rate.hz().max(1));
     // Ids only: `instance_specs` would decode every plug-in's stored state to build its specs.
     let mut needs: Vec<String> = s
         .tracks
