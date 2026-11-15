@@ -156,6 +156,8 @@ fn blocking(entered: &Arc<AtomicBool>, release: &Arc<AtomicBool>) -> ab::RenderC
 fn a_callback_still_inside_at_the_close_leaks_the_buffers_and_the_driver_and_later_sessions_close_cleanly() {
     let _guard = lock();
     let stuck = impatient_rig();
+    // Planned now: after the leak the driver's probe (and so a new plan) is refused too.
+    let reopen = plan(&stuck, ab::Direction::Output);
     let (entered, release) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
     let capture = open_capture(&stuck).expect("capture");
     let render = open_render(&stuck, blocking(&entered, &release)).expect("render");
@@ -180,7 +182,11 @@ fn a_callback_still_inside_at_the_close_leaks_the_buffers_and_the_driver_and_lat
         );
         let refused = stuck.backend.probe("Driver").expect_err("the driver is refused, a probe too");
         assert!(refused.to_string().contains("until transit restarts"), "{refused}");
-        let refused = open_render(&stuck, loud()).err().expect("the driver is refused");
+        let refused = stuck
+            .backend
+            .open_stream(&stuck.endpoint, &reopen, crate::session::Callback::Render(loud()), Box::new(|_| {}))
+            .err()
+            .expect("the driver is refused");
         assert!(refused.to_string().contains("until transit restarts"), "{refused}");
         // With that callback still inside its (leaked) state, another driver's session closes
         // cleanly: the stuck callback is counted in its own state, not in a process-wide count.
