@@ -1159,9 +1159,16 @@ impl Plugin for ClapPlugin {
         }
     }
 
+    /// Every instance gets a handle: one without the gui extension gets a headless one, which
+    /// opens nothing but still carries the plug-in's `mark_dirty` to the app (issue #574).
     fn editor(&mut self) -> Option<Box<dyn PluginEditor>> {
-        let link = lock(&self.shared.core).inst.gui()?;
-        Some(Box::new(ClapEditor { link, info: self.info, ids: self.ids.clone(), shared: Arc::downgrade(&self.shared) }))
+        let core = lock(&self.shared.core);
+        let (link, gui) = match core.inst.gui() {
+            Some(link) => (link, true),
+            None => (core.inst.link(), false),
+        };
+        drop(core);
+        Some(Box::new(ClapEditor { link, gui, info: self.info, ids: self.ids.clone(), shared: Arc::downgrade(&self.shared) }))
     }
 
     fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
@@ -1180,6 +1187,10 @@ struct ClapState {
 /// A CLAP plugin's floating editor, driven from the main thread (see [`GuiLink`]).
 struct ClapEditor {
     link: Arc<GuiLink>,
+    /// The plug-in has the gui extension. Without it the handle is headless: no window, no idle
+    /// work (the plug-in's main-thread requests are serviced by `service_requests`), only the
+    /// state-changed notice.
+    gui: bool,
     info: &'static PluginInfo,
     ids: Vec<u32>,
     /// The instance's requests, serviced on each `idle` (the host calls it every UI frame).
