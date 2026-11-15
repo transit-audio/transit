@@ -3,7 +3,7 @@ title: Clock domains and timestamp quality: the clock contract annex to ADR 0012
 -->
 # ADR 0017: clock domains and timestamp quality
 
-- **Status:** proposed 2026-10-18; component-level G4 passed, hardware timing open
+- **Status:** proposed 2026-10-18; component-level G4 passed, hardware timing open; amended 2026-11-15, proposed: the band-limited rate converters (Amendment 2026-11-15, below)
 - Date: 2026-10-18. Status: proposed for joint review.
 - Parent: [ADR 0012](0012-midi-device-layer.md), gates G4 and G6.
 - Implementation status (2026-10-19 09:58 EDT): the original `f9078c7` jitter
@@ -75,6 +75,22 @@ estimated input/output rate ratio and a controlled asynchronous resampler; a
 periodic discard of queued audio is not drift correction. SRC filter delay and
 route/plugin delay remain named components of the timing model.
 
+**The rate converters** (amended 2026-11-15, #601). The device-rate converter (session to output
+device) and the live input converter (input device to session) are the band-limited reader of
+[ADR 0056](0056-audio-clip-editor.md) decision 8. They convert at the ratio of the nominal rates
+and correct no drift between clocks; the asynchronous resampler above is still open. Each forms its
+positions exactly, as an integer count of units over a fixed denominator, never by adding the rate
+once per frame. At equal rates and speed 1 both pass every sample they receive through bit for
+bit. The reader is linear phase, so the converters move no position on any timeline: the output
+frame at which a render frame is presented is unchanged. Their filter delay is look-ahead instead.
+The output renders up to 16·max(1, q) render frames further ahead of presentation, q being the
+session rate times the speed over the device rate. The live input's alignment keeps
+`halo(q)` = ceil(16·max(1, q)) + 1 more input frames queued in front of the plan's reader, q being
+the input rate over the session rate (0 at equal rates). Both enter any round trip measured on the
+plan's timeline; [ADR 0015](0015-io-routing-abstraction.md) section 5 and
+[ADR 0020](0020-external-instrument-device.md) decision 4 say how a stored figure accounts for
+them, so this delay is counted once.
+
 The drift open item for a second device has one implemented rule so far, for System Audio
 loopback capture (#268, `crates/playback/src/system_audio.rs` and `system_audio_rate.rs`): the
 rate ratio is estimated from frame counts against QPC time, with each side timed as follows: the
@@ -100,10 +116,19 @@ or one callback more than 0.25 ms below the envelope (plus how far the envelope'
 it), which no delay can put there (an offset that ended). After any restart the estimate is held
 until the refilled fit's slope has a standard error within 4 ppm, taking its points as spread
 over the 1 ms band. A lasting offset of 1 ms or less is neither and moves the reading for one
-window (K100). The ratio is fed forward as the trim of a linear interpolator and reported, as
-the clamped estimate, as the drift; a slow proportional-integral term on the ring fill (the
-integral held within 50 ppm) only brings the fill back to its target of one input callback, one
-packet and 30 ms. Drifts up to 1000 ppm are tested; the applied trim is limited to 2000 ppm. It
+window (K100). The ratio is fed forward as the trim of the band-limited reader of ADR 0056
+decision 8 (amended 2026-11-15, #603; it was a linear interpolator) and reported, as the clamped
+estimate, as the drift; a slow proportional-integral term on the ring fill (the integral held
+within 50 ppm) only brings the fill back to its target of one input callback, one packet and
+30 ms. The reader's position for the n-th output frame after an anchor is x0 + n·q; at every input
+callback the anchor moves to the position the old anchor and rate give the next output frame, and
+only then does the new trim apply, so a trim change bends the position's slope and never moves the
+position. The fill is counted from the reader's position. The reader reads up to 16·max(1, q)
+frames past it, inside the target, so the target and the reported latency are unchanged and the
+margin before the ring runs dry is that much smaller. A priming or a resync keeps up to `halo(q)`
+frames (at the largest trimmed rate) before the new position as the reader's history. At equal
+nominal rates with a trim of exactly 0 the converter passes every sample through bit for bit.
+Drifts up to 1000 ppm are tested; the applied trim is limited to 2000 ppm. It
 does not yet cover a second hardware input; that still needs the controlled asynchronous
 resampler above.
 
@@ -247,3 +272,32 @@ Before MIDI depends on the map: cases 1–3 and the clock-only safety cases from
 must pass. MIDI event overload/release cases in 4–5 land with G5. A fake event can
 exercise timestamp placement before the full note/port identity model exists;
 it must still use the production mapping path.
+
+## Amendment 2026-11-15: the band-limited rate converters (#601, #603)
+
+Proposed 2026-11-15. It describes the change for #601 and #603 and lands with it. The device-rate
+converter, the live input converter and the System Audio converter now read through the
+band-limited reader of ADR 0056 decision 8 instead of two-point linear interpolation. It replaces
+one clause of the System Audio drift paragraph ("fed forward as the trim of a linear
+interpolator") and adds the paragraph on the rate converters after "Distinct coordinates"; every
+other statement of this record stands, the drift estimate, its servo, its target and its trim
+limit included.
+
+- **Why.** The System Audio paragraph named a linear interpolator that no longer exists, and the
+  record said nothing about what a converter's filter does to timing. The reader is linear phase,
+  so a converter adds no delay on any timeline; it adds render-ahead on the output and backlog on
+  the input, which a round trip measured on the plan's timeline contains (ADR 0015 section 5,
+  ADR 0020 decisions 2 and 4).
+- **Evidence** (tests of the change for #601 and #603). Equal rates pass through bit for bit:
+  `equal_rates_pass_every_bit_through_whatever_the_partition`,
+  `equal_rates_through_the_player_are_bit_exact_pass_through`,
+  `monitor_passes_through_at_equal_rates` and
+  `equal_nominal_rates_with_zero_drift_pass_every_bit_through`. No position moves:
+  `an_impulse_peaks_at_the_output_frame_the_timeline_maps_it_to`. The input's look-ahead is the
+  backlog: `a_click_through_the_input_converter_peaks_at_its_input_position_and_the_backlog_reports_the_look_ahead`
+  (on a paired device B equals `halo(q)` at 48 into 44.1, 44.1 into 48 and 96 into 48 kHz, and 0 at
+  48 into 48). A trim change never moves the position:
+  `a_trim_change_bends_the_position_and_never_moves_it`. A resync reads the stream behind the new
+  position: `a_resync_starts_with_the_streams_frames_behind_the_position`. Output independent of the
+  block and callback partition: `the_converter_output_is_independent_of_the_render_partition_at_every_rate_pair`,
+  `the_player_output_is_independent_of_the_callback_partition`.
