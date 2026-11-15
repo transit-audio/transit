@@ -262,10 +262,13 @@ pub(super) struct History {
     first: Option<u64>,
     next: Option<u64>,
     start: Option<u64>,
-    /// Frames a start may precede the first retained frame by and still be placed there: less
-    /// than one input block (#587). A start that maps before the first block captured after arm
-    /// by less than that block lost nothing the input retained.
+    /// The first frame captured after arm; unlike `first`, eviction never advances it.
+    arm_first: Option<u64>,
+    /// The input's longest block, in frames (#587): a start that maps before the first frame
+    /// captured after arm by less than this, and less than `max_early`, starts the take there.
     early: u64,
+    /// The cap on that tolerance (100 ms in a recorder; 0, no move, until set).
+    max_early: u64,
     /// The start was moved to the first retained frame: the take is approximate.
     moved: bool,
 }
@@ -281,7 +284,9 @@ impl History {
             first: None,
             next: None,
             start: None,
+            arm_first: None,
             early: 0,
+            max_early: 0,
             moved: false,
         }
     }
@@ -290,7 +295,13 @@ impl History {
         self.start = Some(frame);
     }
 
-    /// The input's block length in frames, for a start just before the retained history.
+    /// Cap the tolerance of [`History::set_block`] at `frames`.
+    pub(super) fn with_early_cap(mut self, frames: u64) -> Self {
+        self.max_early = frames;
+        self
+    }
+
+    /// The input's block length in frames, for a start just before the first frame after arm.
     pub(super) fn set_block(&mut self, frames: u64) {
         self.early = frames;
     }
@@ -309,11 +320,17 @@ impl History {
         if self.first.is_none() {
             self.first = Some(first);
         }
+        if self.arm_first.is_none() {
+            self.arm_first = Some(first);
+        }
         if let Some(mut start) = self.start {
             let oldest = self.first.unwrap_or(first);
-            if start < oldest && oldest - start < self.early {
-                // Writer thread, once per take (#587): the frames before the first block captured
-                // after arm were never retained, so the take starts at that block, approximately.
+            // Only before the first frame captured after arm, never before frames the bounded
+            // history evicted (a late writer): moving the start there would drop captured audio.
+            if start < oldest && self.arm_first == Some(oldest) && oldest - start < self.early.min(self.max_early) {
+                // Writer thread, once per take (#587): the input captured those frames before arm,
+                // so the history never received them; the take starts at the first frame after arm,
+                // approximately.
                 log::warn!(
                     "recording start at input frame {start} is {} frames before the first retained frame {oldest}; the take starts there and is approximate",
                     oldest - start

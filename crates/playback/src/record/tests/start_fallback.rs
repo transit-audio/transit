@@ -88,7 +88,8 @@ fn a_start_less_than_one_block_before_the_first_frame_after_arm_starts_the_take_
         let path = transit_test_support::TestDir::file(&format!("start-before-history-{duplex}"), "wav");
         let _ = std::fs::remove_file(&path);
         let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.to_path_buf(), RATE as u32).unwrap()];
-        let gate = WriterStart { reader: reader.clone(), history: start::History::new(1, RATE as usize * 4), input_start, placed: false, next: None };
+        let history = start::History::new(1, RATE as usize * 4).with_early_cap(RATE / 10);
+        let gate = WriterStart { reader: reader.clone(), history, input_start, placed: false, next: None };
         let (takes, error) = write_takes_started(&recorder.shared, takes, 1, Some(gate));
         assert!(error.is_none(), "duplex {duplex}: {error:?}");
         assert_eq!(takes.len(), 1, "duplex {duplex}");
@@ -103,7 +104,7 @@ fn a_start_less_than_one_block_before_the_first_frame_after_arm_starts_the_take_
 /// not keep those frames, and moving the take further would misplace it by more than a block.
 #[test]
 fn a_start_a_block_or_more_before_the_retained_history_is_still_refused() {
-    let mut history = start::History::new(1, 64);
+    let mut history = start::History::new(1, 64).with_early_cap(1000);
     history.set_block(16);
     history.push(100, &[0.0; 16], |_| panic!("pending take wrote audio")).unwrap();
     history.set_start(84);
@@ -111,10 +112,41 @@ fn a_start_a_block_or_more_before_the_retained_history_is_still_refused() {
     assert!(!history.moved());
 }
 
+/// #587 review F1: the tolerance is capped (a recorder caps it at 100 ms) whatever block the
+/// input once delivered; within the cap the start still moves.
+#[test]
+fn the_move_tolerance_is_capped() {
+    for (start, moved) in [(90, false), (95, true)] {
+        let mut history = start::History::new(1, 64).with_early_cap(8);
+        history.set_block(16);
+        history.push(100, &[0.0; 16], |_| panic!("pending take wrote audio")).unwrap();
+        history.set_start(start);
+        let mut written = 0;
+        let result = history.push(116, &[0.0; 16], |data| written += data.len());
+        assert_eq!(result.is_ok(), moved, "start {start}");
+        assert_eq!(history.moved(), moved, "start {start}");
+        assert_eq!(written, if moved { 32 } else { 0 }, "start {start}");
+    }
+}
+
+/// #587 review F1: a writer late enough that the bounded history evicted frames is refused as
+/// before, even within a block of the oldest retained frame: moving the start there would drop
+/// audio the input captured.
+#[test]
+fn a_start_before_evicted_history_is_refused_not_moved() {
+    let mut history = start::History::new(1, 16).with_early_cap(1000);
+    history.set_block(16);
+    history.push(100, &[0.0; 16], |_| panic!("pending take wrote audio")).unwrap();
+    history.push(116, &[0.0; 16], |_| panic!("pending take wrote audio")).unwrap();
+    history.set_start(110);
+    assert_eq!(history.push(132, &[0.0; 16], |_| panic!("refused take wrote audio")), Err(start::OUTSIDE_HISTORY));
+    assert!(!history.moved());
+}
+
 /// Case 2 of #587: one input observation arrives 200 ms late right after the start. The fit
-/// rejects it and no current map remains, so the placement waits its bounded time for one, then
-/// places the start by the newest validated map it saw: a take, approximate, never "could not be
-/// mapped".
+/// rejects it and no current map remains. A separate input's placement waits its bounded time for
+/// one, then places the start by the newest validated map it saw; a duplex start falls back to its
+/// input ordinal at once, as before. Either way a take, approximate, never "could not be mapped".
 #[test]
 fn a_late_input_observation_after_the_start_still_gives_an_approximate_take() {
     let (key, mut fitter, map) = fitted(BLOCK, 21);
@@ -131,17 +163,24 @@ fn a_late_input_observation_after_the_start_still_gives_an_approximate_take() {
         let (mut mapping, input_start) = start::mapping::pair(reader.clone(), key);
         assert!(!mapping.service(Some(map), Some(callback + 1_000_000)), "nothing to place before the start");
         assert!(publisher.start_placed(reader.ticket(), point(start_host), duplex.then_some(expected - 300), false));
-        assert!(!mapping.service(None, Some(then)), "duplex {duplex}: waits for a current map first");
-        assert_eq!(input_start.frame(), Ok(None));
-        assert!(mapping.service(None, Some(then + start::mapping::WAIT_NS)), "duplex {duplex}");
-        assert_eq!(input_start.frame(), Ok(Some(expected)), "duplex {duplex}: placed by the last validated map");
+        let placed = if duplex {
+            assert!(mapping.service(None, Some(then)), "a duplex start falls back to its ordinal at once");
+            assert_eq!(input_start.frame(), Ok(Some(expected - 300)), "placed by the duplex ordinal");
+            expected - 300
+        } else {
+            assert!(!mapping.service(None, Some(then)), "a separate input waits for a current map first");
+            assert_eq!(input_start.frame(), Ok(None));
+            assert!(mapping.service(None, Some(then + start::mapping::WAIT_NS)));
+            assert_eq!(input_start.frame(), Ok(Some(expected)), "placed by the last validated map");
+            expected
+        };
         assert_eq!(reader.fallback().map(|f| f.approximate), Some(true), "duplex {duplex}");
 
         let shared = Shared::new(CaptureRing::new(1 << 16));
         shared.start_capture();
         {
             let _lease = shared.begin_capture().unwrap();
-            shared.capture_at(expected - 1000, &frames(expected - 1000..expected + 2000), 1);
+            shared.capture_at(placed - 1000, &frames(placed - 1000..placed + 2000), 1);
         }
         shared.stop_capture();
         let path = transit_test_support::TestDir::file(&format!("late-observation-{duplex}"), "wav");
@@ -151,7 +190,24 @@ fn a_late_input_observation_after_the_start_still_gives_an_approximate_take() {
         let (takes, error) = write_takes_started(&shared, takes, 1, Some(gate));
         assert!(error.is_none(), "duplex {duplex}: {error:?}");
         assert_eq!(takes.len(), 1);
-        assert_eq!(decode(&path)[0], frames(expected..expected + 2000));
+        assert_eq!(decode(&path)[0], frames(placed..placed + 2000));
         std::fs::remove_file(path).unwrap();
     }
+}
+
+/// #587 review F2: an input clock that invalidates (a discontinuity) after the placement saw a map
+/// drops that map, so a separate input's fallback never projects across the lost frames.
+#[test]
+fn an_input_clock_invalidation_drops_the_remembered_map() {
+    let (key, _, map) = fitted(BLOCK, 21);
+    let callback = 1_000_000_000 + ns(21 * BLOCK);
+    let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(587));
+    let reader = control.prepare().unwrap();
+    let (mut mapping, input_start) = start::mapping::pair(reader.clone(), key);
+    assert!(!mapping.service_counted(Some(map), Some(callback + 1_000_000), Some(0)));
+    assert!(publisher.start_placed(reader.ticket(), point(callback + 10_000_000), None, false));
+    let then = callback + 300_000_000;
+    assert!(!mapping.service_counted(None, Some(then), Some(1)), "waits for a current map first");
+    assert!(mapping.service_counted(None, Some(then + start::mapping::WAIT_NS), Some(1)));
+    assert!(input_start.frame().is_err(), "no map since the discontinuity: the start must not be projected across it");
 }

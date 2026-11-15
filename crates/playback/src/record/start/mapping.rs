@@ -27,6 +27,9 @@ pub(crate) struct Mapping {
     last: Option<ClockMap>,
     /// Host time after which a start that no current map places stops waiting for one.
     deadline: Option<u64>,
+    /// The input clock's invalidation count when `last` was offered: a change drops `last`, so the
+    /// fallback never projects across a discontinuity (#587).
+    invalidations: Option<u64>,
 }
 
 pub(crate) struct InputStart {
@@ -36,15 +39,28 @@ pub(crate) struct InputStart {
 
 pub(crate) fn pair(start: Reader, input: ClockKey) -> (Mapping, InputStart) {
     let shared = Arc::new(Shared { state: AtomicU8::new(PENDING), frame: AtomicU64::new(0) });
-    (Mapping { start, input, shared: Arc::clone(&shared), last: None, deadline: None }, InputStart { shared, finished: None })
+    (Mapping { start, input, shared: Arc::clone(&shared), last: None, deadline: None, invalidations: None }, InputStart { shared, finished: None })
 }
 
 impl Mapping {
-    /// Called by clock maintenance, never by the audio callback or disk writer.
-    /// Returns true after the one immutable result has been published.
+    /// [`Mapping::service_counted`] without an invalidation count (tests).
+    #[cfg(test)]
     pub(crate) fn service(&mut self, map: Option<ClockMap>, now: Option<u64>) -> bool {
+        self.service_counted(map, now, None)
+    }
+
+    /// Called by clock maintenance, never by the audio callback or disk writer, with the input
+    /// clock's invalidation count (see [`crate::device_clock::FitCounts::invalidations`]) when the
+    /// caller has it. Returns true after the one immutable result has been published.
+    pub(crate) fn service_counted(&mut self, map: Option<ClockMap>, now: Option<u64>, invalidations: Option<u64>) -> bool {
         if self.shared.state.load(Ordering::Acquire) != PENDING {
             return true;
+        }
+        if let Some(count) = invalidations {
+            if self.invalidations.is_some_and(|seen| seen != count) {
+                self.last = None;
+            }
+            self.invalidations = Some(count);
         }
         if let Some(map) = map {
             self.last = Some(map);
@@ -73,10 +89,12 @@ impl Mapping {
             self.shared.state.store(READY, Ordering::Release);
             return true;
         }
-        // No current map places a start the output did map (#587: a late input callback rejects the
-        // fit, or the map expires): wait a bounded time for one, then place it by the newest map
-        // this placement saw. Neither refuses the take.
-        if point.host_ns != 0 {
+        let ordinal = self.start.fallback().and_then(|f| f.input_frame);
+        // No current map places a start the output did map, and it has no duplex input ordinal (a
+        // separate input, #587: a late input callback rejects the fit, or the map expires): wait a
+        // bounded time for one, then place it by the newest map this placement saw. A duplex start
+        // falls back to its ordinal at once, as before.
+        if point.host_ns != 0 && ordinal.is_none() {
             if !self.waited(now) {
                 return false;
             }
@@ -86,7 +104,7 @@ impl Mapping {
                 return true;
             }
         }
-        match self.start.fallback().and_then(|f| f.input_frame) {
+        match ordinal {
             Some(frame) => {
                 log::warn!("recording input placed by input frame ordinal (no validated device clock); the take is approximate");
                 self.place_approximately(frame);

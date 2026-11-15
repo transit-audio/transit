@@ -575,7 +575,8 @@ impl Recorder {
             let input_start = clock.prepare_recording(start.clone())?;
             let gate = WriterStart {
                 reader: start,
-                history: start::History::new(self.channels, (self.sample_rate as usize).saturating_mul(RING_SECONDS)),
+                history: start::History::new(self.channels, (self.sample_rate as usize).saturating_mul(RING_SECONDS))
+                    .with_early_cap(u64::from(self.sample_rate) / 10),
                 input_start,
                 placed: false,
                 next: None,

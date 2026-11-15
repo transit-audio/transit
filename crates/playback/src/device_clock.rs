@@ -143,6 +143,14 @@ pub struct FitCounts {
     pub rejected_fits: u64,
 }
 
+impl FitCounts {
+    /// How often the fitter dropped its window (an invalid observation or a discontinuity): a map
+    /// from before such a drop no longer describes the stream. Rejected fits keep the window.
+    pub fn invalidations(&self) -> u64 {
+        self.invalid.saturating_add(self.discontinuities)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Line {
     x0: i128,

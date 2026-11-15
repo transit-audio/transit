@@ -70,7 +70,7 @@ impl Pump {
             let Ok(placement) = self.placements.pop() else { break };
             self.placement = Some(placement);
         }
-        if self.placement.as_mut().is_some_and(|placement| placement.service(report.map, now)) {
+        if self.placement.as_mut().is_some_and(|placement| placement.service_counted(report.map, now, Some(report.fitting.invalidations()))) {
             self.placement = None;
         }
         self.ui.write(report);
