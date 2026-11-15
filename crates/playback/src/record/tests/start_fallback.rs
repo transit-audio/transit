@@ -211,3 +211,47 @@ fn an_input_clock_invalidation_drops_the_remembered_map() {
     assert!(mapping.service_counted(None, Some(then + start::mapping::WAIT_NS), Some(1)));
     assert!(input_start.frame().is_err(), "no map since the discontinuity: the start must not be projected across it");
 }
+
+/// #587 with #184: a take whose start was moved to the first frame after arm reports a later ring
+/// overflow from that frame, the take's actual first sample, not from the mapped start.
+#[test]
+fn a_moved_start_measures_its_losses_from_the_takes_first_frame() {
+    let (arm_first, mapped) = (21 * BLOCK, 20 * BLOCK + 200);
+    let path = transit_test_support::TestDir::file("moved-start-losses", "wav");
+    let _ = std::fs::remove_file(&path);
+    let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.to_path_buf(), RATE as u32).unwrap()];
+    let shared = Shared::new(CaptureRing::new(8192));
+    shared.start_capture();
+    shared.block_frames.store(BLOCK, Ordering::Relaxed);
+    {
+        let _lease = shared.begin_capture().unwrap();
+        assert_eq!(shared.capture_at(arm_first, &frames(arm_first..arm_first + 2 * BLOCK), 1), 0);
+        // The ring has room for two more blocks: the second half of these four is refused.
+        assert_eq!(shared.capture_at(arm_first + 2 * BLOCK, &frames(arm_first + 2 * BLOCK..arm_first + 6 * BLOCK), 1), 2 * BLOCK as usize);
+    }
+    shared.stop_capture();
+    let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(587));
+    let reader = control.prepare().unwrap();
+    let (mut mapping, input_start) = start::mapping::pair(reader.clone(), ClockKey { generation: 9, domain: 9, direction: Direction::Input });
+    // A start the output placed without a host time and the input by its ordinal: 1848 frames
+    // before the first frame captured after arm, so the writer moves it there.
+    assert!(publisher.start_placed(reader.ticket(), point(0), Some(mapped), false));
+    assert!(mapping.service(None, None));
+    let history = start::History::new(1, RATE as usize * 4).with_early_cap(RATE / 10);
+    let gate = WriterStart { reader: reader.clone(), history, input_start, placed: false, next: None };
+    let (takes, error) = write_takes_started(&shared, takes, 1, Some(gate));
+    assert!(error.is_none(), "{error:?}");
+    assert_eq!(takes.len(), 1);
+    let audio = decode(&path).remove(0);
+    assert_eq!(audio.len(), 6 * BLOCK as usize, "the take keeps its timing from the first frame after arm");
+    assert_eq!(audio[..4 * BLOCK as usize], frames(arm_first..arm_first + 4 * BLOCK)[..]);
+    // The loss begins at input frame 21*2048 + 4*2048, 0.17 s after the take's first frame
+    // (from the mapped start it would read 0.21 s).
+    assert_eq!(
+        shared.losses.report(shared.dropped.load(Ordering::Relaxed), RATE as u32).as_deref(),
+        Some(
+            "85 ms of input lost from 0.17 s into the take: the take writer fell behind (a busy disk or a starved thread) and the take holds silence there"
+        )
+    );
+    std::fs::remove_file(path).unwrap();
+}
