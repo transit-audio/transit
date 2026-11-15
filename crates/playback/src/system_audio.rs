@@ -19,10 +19,10 @@
 //! device: it is a second clock. transit has no second-device input rule yet (an input on another
 //! device is converted at the nominal rate ratio and re-aligned, ADR 0017's open item), so this is
 //! the simplest safe one: the [`Tap`] resamples from the endpoint's rate to the input device's rate
-//! by linear interpolation, with the ratio trimmed by the measured drift of the two clocks (frame
-//! counts against QPC time, [`rate`]) plus a slow correction that holds the ring at its target
-//! (one input callback plus one loopback packet plus 30 ms; [`Resampler`] names each term). The
-//! measured drift is what the diagnostics report. The input converter then takes the widened input
+//! with the band-limited reader (ADR 0056 decision 8, #603), at a ratio trimmed by the measured
+//! drift of the two clocks (frame counts against QPC time, [`rate`]) plus a slow correction that
+//! holds the ring at its target (one input callback plus one loopback packet plus 30 ms;
+//! [`Resampler`] names each term). The measured drift is what the diagnostics report. The input converter then takes the widened input
 //! to the session rate as it does any input. The callback never waits on the loopback client: an
 //! empty ring reads as zeros (a loopback stream sends nothing while nothing plays on some
 //! drivers), a full one drops and counts. The capture has no timeline relation to the session: its
@@ -31,6 +31,7 @@
 //! Linux delivers monitor sources through the JACK and ALSA paths already; [`monitor_label`]
 //! names them in Audio Devices. macOS needs a virtual device (#24).
 
+use crate::band_limited;
 use crate::devices::AudioConfig;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
@@ -402,10 +403,27 @@ fn push_frames(producer: &mut rtrb::Producer<f32>, status: &Status, samples: &[f
     }
 }
 
-/// The endpoint-rate to device-rate converter of the reader: linear interpolation between two held
-/// frames, its step the nominal ratio trimmed by the measured drift plus a slow correction that
-/// holds the ring at its target. Audio-thread code: [`Self::begin`] once per input callback (the
-/// clocks, the target, priming and the trim), [`Self::pull`] for each piece of it.
+/// The endpoint-rate to device-rate converter of the reader: the band-limited reader (ADR 0056
+/// decision 8, #603) at a step of the nominal ratio trimmed by the measured drift plus a slow
+/// correction that holds the ring at its target. Audio-thread code: [`Self::begin`] once per input
+/// callback (the clocks, the target, priming and the trim), [`Self::pull`] for each piece of it.
+///
+/// **Positions.** The step changes with the trim at every callback, so the position is formed as
+/// `x0 + n·q` from an anchor, never by adding `q` once per output frame: `x0` is an integer frame
+/// (from the ring's front) plus a fraction, `n` counts the output frames since the anchor. At every
+/// [`Self::begin`] the anchor moves to the next output frame's position, computed with the old
+/// anchor and step (`x0 := x0 + n·q_old`, its integer part and fraction split exactly, `n := 0`), and
+/// then the new step applies: the next output frame is read exactly where the old step would have
+/// read it, so a trim change bends the position's slope and never moves the position (no click).
+/// Committing played frames from the ring's front moves the anchor's integer part by the same whole
+/// frames. At equal nominal rates with a zero trim the step is exactly 1 and every position a whole
+/// frame, so the frames pass through bit for bit.
+///
+/// **Look-ahead.** The reader needs `halo(q)` frames past its position, which lie inside the target
+/// fill (the 30 ms margin alone is 1,440 frames at 48 kHz): the fill the servo holds is counted from
+/// the read position, so the path's latency is the target, as before, and the reader's look-ahead
+/// only narrows the margin before the ring runs dry by those frames. The frames behind the position
+/// that the taps reach stay in the ring until they are no longer needed.
 ///
 /// The trim has three terms:
 /// - **The rate estimate** ([`rate::RateEstimate`], fed forward): the drift of the endpoint's
@@ -424,11 +442,20 @@ pub(crate) struct Resampler {
     /// Endpoint frames per device frame at the nominal rates.
     nominal: f64,
     device_rate: f64,
-    phase: f64,
-    a: [f32; 2],
-    b: [f32; 2],
-    /// Reading: the ring reached its target and both frames are held. Until then (and after the
-    /// ring runs dry) the reader outputs zeros and waits for the target again at the next callback.
+    /// The anchor: the whole frame from the ring's front and the fraction in `[0, 1)`.
+    anchor: i64,
+    fraction: f64,
+    /// Output frames read since the anchor.
+    n: u64,
+    /// Frames kept in the ring behind the read position for the reader's taps: `halo(q)` at the
+    /// largest step the trim allows.
+    behind: usize,
+    /// Frames committed from the ring's front since the last retune (with the anchor, the position
+    /// from the capture's first kept frame; the tests read it).
+    consumed: u64,
+    table: &'static band_limited::SincTable,
+    /// Reading: the ring reached its target. Until then (and after the ring runs dry) the reader
+    /// outputs zeros and waits for the target again at the next callback.
     primed: bool,
     /// The reader has primed once: zeros from a dry ring count from then on.
     started: bool,
@@ -451,14 +478,45 @@ pub(crate) struct Resampler {
     rate: rate::RateEstimate,
 }
 
+/// The ring's stereo frames as the reader sees them: the front frame at index 0, zeros outside.
+struct Pairs<'a> {
+    first: &'a [f32],
+    second: &'a [f32],
+    frames: usize,
+}
+
+impl band_limited::Frames for Pairs<'_> {
+    fn channels(&self) -> usize {
+        2
+    }
+
+    #[inline]
+    fn sample(&self, channel: usize, frame: i64) -> f32 {
+        let Ok(k) = usize::try_from(frame) else { return 0.0 };
+        if k >= self.frames || channel >= 2 {
+            return 0.0;
+        }
+        let i = 2 * k + channel;
+        match self.first.get(i) {
+            Some(x) => *x,
+            None => self.second.get(i - self.first.len()).copied().unwrap_or(0.0),
+        }
+    }
+}
+
 impl Resampler {
+    /// Allocates nothing itself; takes the reader's shared table (built on its first use, on the
+    /// control thread that reserves the pair).
     pub(crate) fn new(source_rate: u32, device_rate: u32) -> Self {
         let mut r = Self {
             nominal: 1.0,
             device_rate: 1.0,
-            phase: 0.0,
-            a: [0.0; 2],
-            b: [0.0; 2],
+            anchor: 0,
+            fraction: 0.0,
+            n: 0,
+            behind: 0,
+            consumed: 0,
+            table: band_limited::table(),
             primed: false,
             started: false,
             base: 1,
@@ -481,29 +539,60 @@ impl Resampler {
     pub(crate) fn retune(&mut self, source_rate: u32, device_rate: u32) {
         let (src, dst) = (f64::from(source_rate.max(1)), f64::from(device_rate.max(1)));
         (self.nominal, self.device_rate) = (src / dst, dst);
-        (self.phase, self.a, self.b, self.primed, self.started) = (0.0, [0.0; 2], [0.0; 2], false, false);
+        (self.anchor, self.fraction, self.n, self.consumed, self.primed, self.started) = (0, 0.0, 0, 0, false, false);
+        self.behind = band_limited::halo(self.nominal * (1.0 + MAX_TRIM_PPM * 1e-6));
         (self.base, self.packet, self.callback) = (target_frames(source_rate), packet_frames(source_rate), 0);
         self.target = self.base + self.packet;
         (self.fill, self.integral, self.trim, self.step, self.device_frames) = (0.0, 0.0, 0.0, self.nominal, 0);
         self.rate.restart(src, dst);
     }
 
-    fn pop(queue: &mut rtrb::Consumer<f32>) -> Option<[f32; 2]> {
-        if queue.slots() < 2 {
-            return None;
-        }
-        Some([queue.pop().unwrap_or(0.0), queue.pop().unwrap_or(0.0)])
+    /// The next output frame's position from the ring's front: `x0 + n·q`.
+    fn position(&self) -> f64 {
+        self.anchor as f64 + (self.fraction + self.n as f64 * self.step)
     }
 
-    /// Discard queued frames down to `keep`. One commit.
-    fn discard_to(queue: &mut rtrb::Consumer<f32>, keep: usize) -> usize {
-        let excess = (queue.slots() / 2).saturating_sub(keep);
-        if excess > 0
-            && let Ok(chunk) = queue.read_chunk(excess * 2)
+    /// Move the anchor to the next output frame's position at the current step (exactly the
+    /// position the current anchor gives it), with `n` back to 0.
+    fn reanchor(&mut self) {
+        let v = self.fraction + self.n as f64 * self.step;
+        let whole = v.floor();
+        // `v - floor(v)` is exact; the anchor's integer part takes the whole frames.
+        (self.anchor, self.fraction, self.n) = (self.anchor + whole as i64, v - whole, 0);
+    }
+
+    /// The step changes to `step` at the next output frame, with the position carried on (see the
+    /// type's notes).
+    fn set_step(&mut self, step: f64) {
+        self.reanchor();
+        self.step = step;
+    }
+
+    /// Commit `frames` frames from the ring's front (played or discarded); the anchor follows.
+    fn commit(&mut self, queue: &mut rtrb::Consumer<f32>, frames: usize) {
+        if frames > 0
+            && let Ok(chunk) = queue.read_chunk(frames * 2)
         {
             chunk.commit_all();
         }
-        excess
+        self.anchor -= frames as i64;
+        self.consumed += frames as u64;
+    }
+
+    /// Queued frames behind the read position (played, kept for the taps).
+    fn played(&self, queued: usize) -> usize {
+        usize::try_from(self.position().floor() as i64).unwrap_or(0).min(queued)
+    }
+
+    /// Restart reading at the frame `keep` frames before the newest: discard the rest from the
+    /// front and put the anchor on the new front. Returns the frames discarded unplayed.
+    fn restart(&mut self, queue: &mut rtrb::Consumer<f32>, keep: usize) -> usize {
+        let queued = queue.slots() / 2;
+        let excess = queued.saturating_sub(keep);
+        let played = self.played(queued).min(excess);
+        self.commit(queue, excess);
+        (self.anchor, self.fraction, self.n) = (0, 0.0, 0);
+        excess - played
     }
 
     /// Once per input callback of `frames` device frames whose first frame is at `now` (its kind
@@ -531,14 +620,16 @@ impl Resampler {
             if queued < self.target {
                 return;
             }
-            status.discarded.fetch_add(Self::discard_to(queue, self.target) as u64, Ordering::Relaxed);
-            let (Some(a), Some(b)) = (Self::pop(queue), Self::pop(queue)) else { return };
-            (self.a, self.b, self.phase, self.fill, self.primed, self.started) = (a, b, 0.0, self.target as f64, true, true);
+            status.discarded.fetch_add(self.restart(queue, self.target) as u64, Ordering::Relaxed);
+            (self.fill, self.primed, self.started) = (self.target as f64, true, true);
         } else if queued > (self.target * RESYNC_TARGETS).min(queue.buffer().capacity() / 2 * 3 / 4) {
-            status.discarded.fetch_add(Self::discard_to(queue, self.target) as u64, Ordering::Relaxed);
+            status.discarded.fetch_add(self.restart(queue, self.target) as u64, Ordering::Relaxed);
         }
+        // The fill is counted from the read position: the frames behind it, kept for the taps, are
+        // played.
+        let ahead = (queue.slots() / 2) as f64 - self.position();
         let weight = (frames as f64 / (FILL_TAU_SECONDS * self.device_rate)).min(1.0);
-        self.fill += weight * ((queue.slots() / 2) as f64 - self.fill);
+        self.fill += weight * (ahead - self.fill);
         let error = (self.fill - self.target as f64) / self.base as f64;
         let held = INTEGRAL_PPM * 1e-6;
         self.integral = (self.integral + error * KI_PPM_PER_S * 1e-6 * frames as f64 / self.device_rate).clamp(-held, held);
@@ -546,11 +637,13 @@ impl Resampler {
         let fed = estimate.unwrap_or(0.0).clamp(-max, max);
         self.trim = (fed + error * KP_PPM * 1e-6 + self.integral).clamp(-max, max);
         status.drift_deci_ppm.store(reported_deci_ppm(estimate, self.integral), Ordering::Relaxed);
-        self.step = self.nominal * (1.0 + self.trim);
+        self.set_step(self.nominal * (1.0 + self.trim));
     }
 
     /// Fill `out` (interleaved stereo at the device rate) from the ring at the step
-    /// [`Self::begin`] set. Never waits: what the ring does not hold is zeros.
+    /// [`Self::begin`] set. Never waits: what the ring does not hold is zeros. A frame whose taps
+    /// are not all queued yet makes the ring dry: it and the rest of the piece are zeros, counted,
+    /// and the reader waits for the target again.
     pub(crate) fn pull(&mut self, queue: &mut rtrb::Consumer<f32>, out: &mut [f32], status: &Status) {
         out.iter_mut().for_each(|x| *x = 0.0);
         let frames = out.len() / 2;
@@ -560,27 +653,33 @@ impl Resampler {
             }
             return;
         }
-        for (n, frame) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
-            let p = self.phase as f32;
-            frame[0] = self.a[0] + (self.b[0] - self.a[0]) * p;
-            frame[1] = self.a[1] + (self.b[1] - self.a[1]) * p;
-            self.phase += self.step;
-            while self.phase >= 1.0 {
-                self.a = self.b;
-                match Self::pop(queue) {
-                    Some(next) => self.b = next,
-                    None => {
-                        // Dry: the rest of the piece is zeros, and the reader waits for the target.
-                        self.primed = false;
-                        let rest = frames - n - 1;
-                        out[(n + 1) * 2..].iter_mut().for_each(|x| *x = 0.0);
-                        status.underrun.fetch_add(rest as u64, Ordering::Relaxed);
-                        return;
-                    }
+        let queued = queue.slots() / 2;
+        {
+            let Ok(chunk) = queue.read_chunk(queued * 2) else { return };
+            let (first, second) = chunk.as_slices();
+            let source = Pairs { first, second, frames: queued };
+            for (k, frame) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                let x = self.position();
+                if band_limited::span(x, self.step).end > queued as i64 {
+                    self.primed = false;
+                    status.underrun.fetch_add((frames - k) as u64, Ordering::Relaxed);
+                    break;
                 }
-                self.phase -= 1.0;
+                band_limited::frame(self.table, &source, x, self.step, frame);
+                self.n += 1;
             }
         }
+        // Frames more than `behind` before the next position are never read again.
+        let next = self.position().floor() as i64 - self.behind as i64;
+        let done = usize::try_from(next).unwrap_or(0).min(queued);
+        self.commit(queue, done);
+    }
+
+    /// The next output frame's position from the first frame the reader kept since the capture
+    /// arrived (the frames before priming were discarded): the tests follow it across callbacks.
+    #[cfg(test)]
+    pub(crate) fn absolute_position(&self) -> f64 {
+        self.consumed as f64 + self.position()
     }
 }
 

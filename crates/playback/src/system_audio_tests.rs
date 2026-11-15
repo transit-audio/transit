@@ -81,10 +81,145 @@ fn equal_rates_pass_the_samples_through() {
     assert_eq!(resampler.target, target);
     resampler.pull(&mut source.queue, &mut block, &status);
     for (n, frame) in block.as_chunks::<2>().0.iter().enumerate() {
-        // At the target fill the trim is zero: the frames come through as queued.
-        assert!((frame[0] - n as f32).abs() < 1e-3 && (frame[1] + n as f32).abs() < 1e-3, "frame {n}: {frame:?}");
+        // At the target fill the trim is zero: the step is exactly 1, every position a whole frame,
+        // and the frames come through as queued, bit for bit (#603).
+        assert_eq!((frame[0].to_bits(), frame[1].to_bits()), ((n as f32).to_bits(), (-(n as f32)).to_bits()), "frame {n}: {frame:?}");
     }
     assert_eq!(status.discarded.load(Ordering::Relaxed), 0);
+}
+
+/// Equal nominal rates whose clocks show no drift (no observation moves the estimate, and the ring
+/// stays at its target in lockstep) keep a zero trim: every frame passes through bit for bit, for
+/// as long as it runs, whatever the read pieces, and the reading allocates nothing (#603).
+#[test]
+fn equal_nominal_rates_with_zero_drift_pass_every_bit_through() {
+    let (mut producer, _, mut source) = ring(48_000);
+    let status = Arc::clone(&source.status);
+    let mut resampler = Resampler::new(48_000, 48_000);
+    // Deterministic IEEE-exact noise, with the awkward values at the start.
+    let mut state = 7u32;
+    let mut next = move || {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (state >> 8) as f32 / 8_388_608.0 - 1.0
+    };
+    let mut input: Vec<f32> = (0..2 * 48_000 * 3).map(|_| next()).collect();
+    input[..6].copy_from_slice(&[-0.0, 0.0, f32::from_bits(1), -1.0, 1.0, f32::MIN_POSITIVE]);
+    let target = target_frames(48_000) + packet_frames(48_000) + 128;
+    let mut pushed = 0;
+    let mut push = |producer: &mut rtrb::Producer<f32>, frames: usize| {
+        for &x in &input[2 * pushed..2 * (pushed + frames)] {
+            producer.push(x).unwrap();
+        }
+        pushed += frames;
+    };
+    push(&mut producer, target);
+    // Allocated before the measured callbacks: the test's own collection must not count.
+    let mut out = Vec::with_capacity(2 * 128 * 1_000);
+    let mut block = vec![0.0f32; 2 * 128];
+    for i in 0..1_000 {
+        let ((), heap) = measure(|| {
+            resampler.begin(&mut source, 128, None);
+            for piece in [1usize, 31, 96] {
+                resampler.pull(&mut source.queue, &mut block[..2 * piece], &status);
+                out.extend_from_slice(&block[..2 * piece]);
+            }
+        });
+        assert!(heap.is_zero(), "callback {i}: the reader allocated {heap:?}");
+        assert_eq!(resampler.trim, 0.0, "callback {i}: lockstep at the target keeps the trim at zero");
+        push(&mut producer, 128);
+    }
+    let first = out.iter().zip(&input).position(|(a, b)| a.to_bits() != b.to_bits());
+    assert_eq!(first, None, "first sample that did not pass through");
+    assert_eq!(status.underrun.load(Ordering::Relaxed), 0);
+}
+
+/// The anchor rule (#603): a trim change moves the step at the next output frame and never the
+/// position. Driven with a step that jumps at every callback (up to the 2,000 ppm limit and back,
+/// and steps a hair apart) and reads cut into uneven pieces: the next position after a step change
+/// is the one before it, bit for bit; the positions advance by the step at every frame, across
+/// pieces and callbacks; and a 1 kHz tone comes out within the reader's passband bound of the tone
+/// at those positions at every frame (a jump of a thousandth of a frame would be 0.5·ω·0.001 =
+/// 6.5e-5 off, half the bound, and anything audible far more).
+#[test]
+fn a_trim_change_bends_the_position_and_never_moves_it() {
+    use transit_math::f64 as m;
+    const AMPLITUDE: f64 = 0.5;
+    let tone = |n: f64| AMPLITUDE * m::sin(core::f64::consts::TAU * 1_000.0 * n / 48_000.0);
+    let (mut producer, _, mut source) = ring(48_000);
+    let status = Arc::clone(&source.status);
+    let mut resampler = Resampler::new(48_000, 48_000);
+    let mut pushed = 0u64;
+    let mut push = |producer: &mut rtrb::Producer<f32>, frames: u64| {
+        for n in pushed..pushed + frames {
+            let x = tone(n as f64) as f32;
+            producer.push(x).unwrap();
+            producer.push(-x).unwrap();
+        }
+        pushed += frames;
+    };
+    push(&mut producer, 4_000);
+    resampler.begin(&mut source, 128, None);
+    assert!(resampler.primed);
+    let steps = [1.0, 1.002, 0.998, 1.0 + 1e-12, 1.000_05, 0.999_95, 1.001_234_567, 0.998_765_432_1, 1.0];
+    let bound = 10f64.powf(-73.0 / 20.0) * AMPLITUDE + 1e-6;
+    let mut block = vec![0.0f32; 2 * 128];
+    let (mut worst, mut checked) = (0.0f64, 0);
+    let mut expected: Option<f64> = None;
+    for (i, &step) in steps.iter().cycle().take(600).enumerate() {
+        let before = resampler.absolute_position();
+        resampler.set_step(step);
+        assert_eq!(resampler.absolute_position().to_bits(), before.to_bits(), "callback {i}: the step change moved the position");
+        for piece in [5usize, 64, 59] {
+            for _ in 0..piece {
+                let at = resampler.absolute_position();
+                if let Some(e) = expected {
+                    assert!((at - e).abs() < 1e-9, "callback {i}: position {at}, expected {e}");
+                }
+                expected = Some(at + step);
+                resampler.pull(&mut source.queue, &mut block[..2], &status);
+                // The first frames read the silence before the ring's front.
+                if at > 2_000.0 {
+                    let want = tone(at);
+                    worst = worst.max((f64::from(block[0]) - want).abs()).max((f64::from(block[1]) + want).abs());
+                    checked += 1;
+                }
+            }
+        }
+        push(&mut producer, 128);
+    }
+    eprintln!("trim changes: worst error against the tone {worst:.3e} over {checked} frames (bound {bound:.3e})");
+    assert!(checked > 70_000);
+    assert!(worst <= bound, "an output frame was {worst:.3e} off the tone at its position (bound {bound:.3e})");
+    assert_eq!(status.underrun.load(Ordering::Relaxed), 0);
+}
+
+/// The issue's case through the drift servo (#603): a 15 kHz tone at 48 kHz captured by an endpoint
+/// whose clock runs 0, 50 and 1,000 ppm fast against the 48 kHz device, read in 128-frame callbacks
+/// for 10 s. The tone's level in 100 ms windows (after the first second) stays within 0.1 dB of the
+/// tone's own and within 0.1 dB from window to window, the issue's bound (the reader's passband
+/// error bound, -73 dB, would allow 0.004 dB). Linear interpolation swung it by up to 5 dB.
+#[test]
+fn a_15_khz_tone_keeps_its_level_in_every_window_at_any_drift() {
+    for ppm in [0.0, 50.0, 1_000.0] {
+        let run = simulate_with(&|_| ppm, 128, 0.0, 10.0, Opts { tone_hz: Some(15_000.0), ..Opts::default() });
+        assert_eq!((run.dry, run.zeros, run.discarded), (0, 0, 0), "{ppm} ppm: the ring ran dry or resynchronized");
+        let start = run.output.iter().position(|x| *x != 0.0).expect("the reader primed") + 48_000;
+        let windows: Vec<f64> = run.output[start..]
+            .as_chunks::<4_800>()
+            .0
+            .iter()
+            .map(|w| {
+                let power = w.iter().map(|x| f64::from(*x) * f64::from(*x)).sum::<f64>() / w.len() as f64;
+                // The tone's amplitude is 0.5: its power is 0.125.
+                10.0 * (power / 0.125).log10()
+            })
+            .collect();
+        let (low, high) = windows.iter().fold((f64::MAX, f64::MIN), |(l, h), x| (l.min(*x), h.max(*x)));
+        eprintln!("15 kHz at {ppm} ppm: level {low:+.4} to {high:+.4} dB over {} windows of 100 ms", windows.len());
+        assert!(windows.len() >= 85, "{ppm} ppm: {} windows", windows.len());
+        assert!(high - low <= 0.1, "{ppm} ppm: the level swings {:.3} dB", high - low);
+        assert!(low >= -0.1 && high <= 0.1, "{ppm} ppm: the level is {low:+.3} to {high:+.3} dB");
+    }
 }
 
 #[test]
@@ -157,6 +292,8 @@ struct Run {
     /// more than 20 ppm off.
     worst_error: f64,
     over_s: f64,
+    /// The left side of every output frame, with [`Opts::tone_hz`].
+    output: Vec<f32>,
 }
 
 /// Run the reader for `seconds` of simulated device time against an endpoint whose clock runs
@@ -194,6 +331,9 @@ struct Opts<'a> {
     /// The device callback whose first frame is at `t` arrives `delay(t)` seconds late as well (a
     /// lag, a spell that eases off, a lasting offset), held in order like the rest.
     delay: Option<&'a dyn Fn(f64) -> f64>,
+    /// The endpoint captures a sine of this frequency at amplitude 0.5 (in its own clock) instead
+    /// of a constant 0.25, and the run keeps the output.
+    tone_hz: Option<f64>,
 }
 
 fn simulate_with(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f64, opts: Opts) -> Run {
@@ -269,9 +409,10 @@ fn simulate_with(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f
         (ep_at, t_at, a_at) = (ep, now, a_now);
         while pending.front().is_some_and(|(due, _)| *due <= now) {
             let Some((_, obs)) = pending.pop_front() else { break };
-            for _ in 0..PACKET {
-                let _ = producer.push(0.25);
-                let _ = producer.push(0.25);
+            for n in obs.first_frame..obs.first_frame + PACKET {
+                let x = opts.tone_hz.map_or(0.25, |hz| (0.5 * (std::f64::consts::TAU * hz * n as f64 / RATE).sin()) as f32);
+                let _ = producer.push(x);
+                let _ = producer.push(x);
             }
             let _ = stamps.push(obs);
         }
@@ -293,6 +434,9 @@ fn simulate_with(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f
         while left > 0 {
             let n = left.min(PIECE);
             resampler.pull(&mut source.queue, &mut out[..2 * n], &status);
+            if opts.tone_hz.is_some() {
+                run.output.extend(out[..2 * n].as_chunks::<2>().0.iter().map(|f| f[0]));
+            }
             left -= n;
         }
         if (was_primed || primed_now) && !resampler.primed {
