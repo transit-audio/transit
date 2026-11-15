@@ -125,3 +125,17 @@ fn an_unstretched_clip_renders_bit_for_bit_as_before_604() {
     }
     assert_eq!(blocks_checked, 7 * 6 * 2 * 3 * 3 * 5);
 }
+
+/// Every loop gives the same samples, so only this pins the cost: an unstretched in-memory clip takes
+/// the direct slice loop, an unstretched clip from the ring or the file takes the sample-per-fetch
+/// loop, and only stretched reads from memory or the file take the reader's frame loop (#604).
+#[test]
+fn clip_loop_routing_keeps_the_common_case_on_the_cheap_loops() {
+    use crate::clips::{Loop, Path, clip_loop};
+    assert_eq!(clip_loop(Path::Memory, true), Loop::Direct);
+    assert_eq!(clip_loop(Path::Ring, true), Loop::Channels);
+    assert_eq!(clip_loop(Path::Offline, true), Loop::Channels);
+    assert_eq!(clip_loop(Path::Ring, false), Loop::Channels);
+    assert_eq!(clip_loop(Path::Memory, false), Loop::Frames);
+    assert_eq!(clip_loop(Path::Offline, false), Loop::Frames);
+}

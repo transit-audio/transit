@@ -119,42 +119,92 @@ pub fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize, buf: &
     let i1 = usize::try_from(isect.end - pos).unwrap_or(0).min(frames);
     // Every read of the clip's source goes through `ClipReader::read` (a stretched clip through the
     // band-limited reader, ADR 0056 decision 8; #604), except the ring, which holds its output.
-    // A stretch of exactly 1 reads source frames directly, one channel at a time, as before #604:
-    // the common case keeps its cost (the reader's per-frame fetch is for stretched clips only).
-    let direct = map.stretch == 1.0;
-    match audio.disk.as_deref() {
-        None if direct => mix_clip_direct(clip, pos, i0, i1, buf, &audio.buffer.channels, map.offset),
-        None => {
-            let mut src = Memory(&audio.buffer.channels);
-            let nsrc = audio.buffer.channels.len();
-            let reader = map.reader();
-            mix_clip(clip, pos, i0, i1, buf, nsrc, |k, first, out| reader.read(k, &mut src, first, out));
-        }
-        // The audio thread (and a render worker for it) only drains the clip's ring (ADR 0035),
-        // which holds the mapped samples: one channel at a time, as before #604.
-        Some(d) if on_audio_thread() => {
+    let path = match audio.disk.as_deref() {
+        None => Path::Memory,
+        // The audio thread (and a render worker for it) only drains the clip's ring (ADR 0035).
+        Some(_) if on_audio_thread() => Path::Ring,
+        // Offline (bounce, export, consolidate): the same file, read here.
+        Some(_) => Path::Offline,
+    };
+    let lp = clip_loop(path, map.stretch == 1.0);
+    match (audio.disk.as_deref(), path) {
+        (None, _) => match lp {
+            Loop::Direct => mix_clip_direct(clip, pos, i0, i1, buf, &audio.buffer.channels, map.offset),
+            Loop::Channels => {
+                let (mut src, reader) = (Memory(&audio.buffer.channels), map.reader());
+                mix_clip_channels(clip, pos, i0, i1, buf, audio.buffer.channels.len(), |c, k| read_one(&reader, &mut src, c, k));
+            }
+            Loop::Frames => {
+                let (mut src, reader) = (Memory(&audio.buffer.channels), map.reader());
+                mix_clip(clip, pos, i0, i1, buf, audio.buffer.channels.len(), |k, first, out| reader.read(k, &mut src, first, out));
+            }
+        },
+        (Some(d), Path::Ring) => {
             let k0 = isect.start.saturating_sub(clip.start);
             match d.stream(&map, k0, i1.saturating_sub(i0)) {
+                Some(ring) if lp == Loop::Frames => mix_clip(clip, pos, i0, i1, buf, d.channels(), |k, first, out| {
+                    for (c, o) in out.iter_mut().enumerate() {
+                        *o = ring.get(first + c, k);
+                    }
+                }),
                 Some(ring) => mix_clip_channels(clip, pos, i0, i1, buf, d.channels(), |c, k| ring.get(c, k)),
                 None => d.underrun(&map, k0),
             }
         }
-        // Offline (bounce, export, consolidate): the same file, read here.
-        Some(d) => {
+        (Some(d), _) => {
             let reader = map.reader();
             d.with_sync_source(|src| {
-                if direct {
-                    mix_clip_channels(clip, pos, i0, i1, buf, d.channels(), |c, k| {
-                        let mut one = [0.0f32];
-                        reader.read(k, src, c, &mut one);
-                        one[0]
-                    });
-                } else {
+                if lp == Loop::Frames {
                     mix_clip(clip, pos, i0, i1, buf, d.channels(), |k, first, out| reader.read(k, src, first, out));
+                } else {
+                    mix_clip_channels(clip, pos, i0, i1, buf, d.channels(), |c, k| read_one(&reader, src, c, k));
                 }
             });
         }
     }
+}
+
+/// Where a clip block's samples come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Path {
+    /// The source decoded into memory.
+    Memory,
+    /// A disk-backed source's ring, on the audio thread (it holds the mapped samples).
+    Ring,
+    /// A disk-backed source's file, read offline.
+    Offline,
+}
+
+/// Which loop renders a clip block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Loop {
+    /// [`mix_clip_direct`]: source slices, one destination channel at a time.
+    Direct,
+    /// [`mix_clip_channels`]: one sample per fetch, one destination channel at a time.
+    Channels,
+    /// [`mix_clip`]: one frame of every channel per fetch (the reader's coefficients shared).
+    Frames,
+}
+
+/// The loop a clip block takes (#604, round 3): a stretch of exactly 1 keeps the pre-#604 cost, a
+/// direct slice read in memory and a sample per fetch from the ring or the file; the ring holds
+/// mapped samples, so a stretched clip's ring is read a sample at a time too; a stretched read from
+/// memory or the file goes frame by frame through the reader. Every loop gives the same samples;
+/// this decides only the cost, and `clip_loop_routing_keeps_the_common_case_on_the_cheap_loops` pins it.
+pub(crate) fn clip_loop(path: Path, unstretched: bool) -> Loop {
+    match (path, unstretched) {
+        (Path::Memory, true) => Loop::Direct,
+        (Path::Ring, _) | (Path::Offline, true) => Loop::Channels,
+        (Path::Memory | Path::Offline, false) => Loop::Frames,
+    }
+}
+
+/// One source channel `c` at clip time `k` through the reader.
+#[inline]
+fn read_one<S: transit_model::disk::ClipSource + ?Sized>(reader: &transit_model::disk::ClipReader, src: &mut S, c: usize, k: Samples) -> f32 {
+    let mut one = [0.0f32];
+    reader.read(k, src, c, &mut one);
+    one[0]
 }
 
 /// [`mix_clip_channels`] for an in-memory clip with a stretch of exactly 1: source channel `c` at clip
