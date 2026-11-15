@@ -31,6 +31,8 @@ serde_json.workspace = true
 transit-rt = { workspace = true, features = ["testing"] }
 transit-mix = { path = ".", features = ["testing"] }
 transit-clap-host = { workspace = true, features = ["test-hooks"] }
+# The clip reader itself, the reference a stretched clip's render is compared with (#604).
+transit-resample = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

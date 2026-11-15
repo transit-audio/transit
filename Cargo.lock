@@ -4329,6 +4329,7 @@ dependencies = [
  "transit-midi",
  "transit-mix",
  "transit-model",
+ "transit-resample",
  "transit-rt",
  "transit-test-support",
  "transit-time",

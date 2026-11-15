@@ -110,8 +110,12 @@ fn downmix_preserves_offset_stretch_and_clip_gain() {
     let gain = transit_dsp::db_to_gain(-6.0);
     let dry = render_clips(&s, t, Range::new(0, 12));
     assert_eq!(&dry[0][..3], &[0.0; 3]);
+    // The right channel read from frame 1 at half speed by the clip reader (ADR 0056 decision 8,
+    // #604), averaged with the silent left one, at the clip's gain.
+    let right = [0.0, 0.25, 0.5, 0.75, 1.0, 0.75, 0.5, 0.25];
+    let table = transit_resample::SincTable::shared();
     for (i, actual) in dry[0][3..9].iter().enumerate() {
-        let expected = (0.25 + i as f32 * 0.125) / 2.0 * gain;
+        let expected = transit_resample::read(table, &right, 1.0 + i as f64 * 0.5, 0.5) / 2.0 * gain;
         assert!((actual - expected).abs() < 1e-6, "{i}: {actual} vs {expected}");
     }
     assert_eq!(&dry[0][9..], &[0.0; 3]);
