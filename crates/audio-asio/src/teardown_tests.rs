@@ -285,3 +285,33 @@ fn an_error_callback_that_takes_long_does_not_make_a_buffer_switch_skip() {
     });
     drop((capture, render));
 }
+
+/// Defect 4 of #524: the control side spun without bound for the engine's flag, so a callback that
+/// never returned hung the host thread (at raised priority) in a start. The spin is bounded and
+/// fails the start; a start after the callback returned works.
+#[test]
+fn a_start_while_a_callback_still_holds_the_engine_fails_instead_of_spinning() {
+    let _guard = lock();
+    let rig = impatient_rig();
+    let (entered, release) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let capture = open_capture_with(&rig, capture_blocking_at(1, &entered, &release), Box::new(|_| {}));
+    let render = open_render(&rig, loud()).expect("render");
+    ab::Stream::start(&capture).expect("start capture: the driver starts");
+    std::thread::scope(|scope| {
+        let held = scope.spawn(|| testing::switch_time_info(0, Some(0), None));
+        while !entered.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        // The capture stops (its wait for the held callback times out) and the driver stops; the
+        // callback still holds the engine.
+        ab::Stream::stop(&capture).expect("stop capture");
+        assert_eq!(rig.observed.call_names().last(), Some(&"stop"), "the driver stopped");
+        let refused = ab::Stream::start(&render).expect_err("the start fails while the engine is held");
+        assert!(refused.to_string().contains("still inside the driver's callback"), "{refused}");
+        release.store(true, Ordering::SeqCst);
+        held.join().expect("the held switch");
+    });
+    ab::Stream::start(&render).expect("the start works once the callback returned");
+    assert_eq!(rig.observed.call_names().iter().filter(|n| **n == "start").count(), 2, "the driver started again");
+    drop((capture, render));
+}

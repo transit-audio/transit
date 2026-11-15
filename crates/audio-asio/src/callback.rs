@@ -10,8 +10,9 @@
 //! STA host thread), `asioMessage` and `sampleRateDidChange` on whatever thread the driver uses,
 //! sometimes the host thread from inside a call it made. Nothing here blocks, allocates or takes a
 //! lock: the [`Engine`] and the buffer addresses sit in `UnsafeCell`s guarded by one `busy` flag
-//! that the callbacks only ever *try* to take; the control side takes it, spinning, only while the
-//! driver is stopped or before it starts (attach, restart), when no buffer switch runs. A buffer
+//! that the callbacks only ever *try* to take; the control side takes it, spinning for a bounded
+//! time (a callback that never returns fails the request instead of hanging the host thread,
+//! #524), only while the driver is stopped or before it starts (attach, restart). A buffer
 //! switch that finds `busy` taken writes silence into its half (through atomic copies of the
 //! output addresses) and is counted in `busy_skips` (#524). Every write to an output half holds
 //! that half's bit in `claims`, so no two writes to one half overlap. Errors that must reach the
@@ -269,17 +270,22 @@ impl CallbackState {
     }
 
     /// Runs `f` on the engine and the buffer addresses on the control side. Spins (yielding) for
-    /// the flag; call it only when no buffer switch runs (before `start`, after `stop`), where it
-    /// is free at once.
-    pub(crate) fn with<R>(&self, f: impl FnOnce(&mut Engine, &mut PlaneTable) -> R) -> R {
+    /// the flag up to `limit`, `None` past it (#524: a callback that never returns holds it); call
+    /// it only when no buffer switch should run (before `start`, after `stop`), where it is free at
+    /// once.
+    pub(crate) fn with<R>(&self, limit: Duration, f: impl FnOnce(&mut Engine, &mut PlaneTable) -> R) -> Option<R> {
+        let deadline = Instant::now() + limit;
         while !self.try_take() {
+            if Instant::now() > deadline {
+                return None;
+            }
             std::thread::yield_now();
         }
         // SAFETY: `busy` is held: no other access to the cells exists until `give_back`.
         let (engine, planes) = unsafe { (&mut *self.engine.get(), &mut *self.planes.get()) };
         let r = f(engine, planes);
         self.give_back();
-        r
+        Some(r)
     }
 
     /// Runs `f` on the error callbacks on the control side, waiting up to `limit` for an error
@@ -305,9 +311,11 @@ impl CallbackState {
 
     /// Makes `table` the buffers of the buffer switches (control side, before the driver starts)
     /// and publishes its output addresses for a skipped switch's silence. The buffers must already
-    /// be silent: nothing holds a claim on buffers whose addresses were not published.
-    pub(crate) fn install_planes(&self, table: PlaneTable) {
-        self.with(|_, planes| {
+    /// be silent: nothing holds a claim on buffers whose addresses were not published. False when
+    /// the engine stayed busy for `limit`: nothing was published, so the buffers may be disposed.
+    #[must_use]
+    pub(crate) fn install_planes(&self, table: PlaneTable, limit: Duration) -> bool {
+        self.with(limit, |_, planes| {
             // The length before the addresses: a switch that reads a new address reads its length.
             self.silence_bytes.store(table.output_bytes, Ordering::SeqCst);
             for (channel, slot) in self.silence.iter().enumerate() {
@@ -317,24 +325,28 @@ impl CallbackState {
                 }
             }
             *planes = table;
-        });
+        })
+        .is_some()
     }
 
     /// Takes the buffer addresses out of the state, so a buffer switch finds no buffer to touch,
     /// then waits up to `limit` until no switch holds a claim (one that read an address before it
     /// went may still be zeroing that half). Call it before `disposeBuffers`: the host never holds a
-    /// buffer address across it (#524). False when a claim was still held at the limit: the
-    /// buffers must not be disposed.
+    /// buffer address across it (#524). False when the engine stayed busy or a claim was still
+    /// held at the limit: the buffers must not be disposed.
     #[must_use]
     pub(crate) fn forget_planes(&self, limit: Duration) -> bool {
         self.set_output_ready(false);
-        self.with(|_, planes| {
+        let cleared = self.with(limit, |_, planes| {
             *planes = PlaneTable::default();
             for half in self.silence.iter().flatten() {
                 half.store(0, Ordering::SeqCst);
             }
             self.silence_bytes.store(0, Ordering::SeqCst);
         });
+        if cleared.is_none() {
+            return false;
+        }
         // A skipped switch sets its claim, then reads an address (both SeqCst); the clear above
         // stored the zeros, then this reads the claims. So either that switch read a zero, or its
         // claim is seen here until it has finished zeroing.
@@ -365,9 +377,9 @@ impl CallbackState {
             }
             std::thread::yield_now();
         }
-        self.with(|_, planes| planes.silence_outputs());
+        let silenced = self.with(limit, |_, planes| planes.silence_outputs());
         self.claims.fetch_and(!BOTH_HALVES, Ordering::SeqCst);
-        true
+        silenced.is_some()
     }
 
     /// One buffer switch on the driver's thread.

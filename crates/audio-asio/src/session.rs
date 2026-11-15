@@ -148,6 +148,11 @@ impl Default for Limits {
     }
 }
 
+/// The error of a control step that found a buffer switch holding the engine for `limit`.
+fn still_inside(name: &str, limit: Duration) -> ab::OpenError {
+    other(name, format_args!("a buffer switch is still inside the driver's callback after {} ms", limit.as_millis()))
+}
+
 fn next_generation() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     NEXT.fetch_add(1, Ordering::Relaxed)
@@ -300,8 +305,8 @@ impl Session {
                 ab::Direction::Input => errors.capture = Some(reporter),
             })
             .ok_or_else(|| other(name, format_args!("an error callback of its other stream did not return within {} ms", limit.as_millis())))?;
-        // No buffer switch runs (nothing has started), so the engine is free.
-        self.installed.state().with(|engine, _| match callback {
+        // No buffer switch should run (nothing has started), so the engine is free at once.
+        let added = self.installed.state().with(limit, |engine, _| match callback {
             Callback::Render(render) => {
                 engine.render = Some(Side::new(Arc::clone(&shared), render, format, wire, calibration, frames));
             }
@@ -309,6 +314,13 @@ impl Session {
                 engine.capture = Some(Side::new(Arc::clone(&shared), capture, format, wire, calibration, frames));
             }
         });
+        if added.is_none() {
+            let _ = self.installed.state().with_errors(limit, |errors| match direction {
+                ab::Direction::Output => errors.render = None,
+                ab::Direction::Input => errors.capture = None,
+            });
+            return Err(still_inside(name, limit));
+        }
         match direction {
             ab::Direction::Output => self.render = Some(Arc::clone(&shared)),
             ab::Direction::Input => self.capture = Some(Arc::clone(&shared)),
@@ -348,10 +360,14 @@ impl Session {
             ab::Direction::Output => self.render = None,
             ab::Direction::Input => self.capture = None,
         }
-        self.installed.state().with(|engine, _| match direction {
+        // Past the limit the engine keeps the side, which is never called: it is not started.
+        let removed = self.installed.state().with(self.limits.quiesce, |engine, _| match direction {
             ab::Direction::Output => engine.render = None,
             ab::Direction::Input => engine.capture = None,
         });
+        if removed.is_none() {
+            log::warn!("ASIO: a buffer switch held the engine while a failed {direction:?} open was undone");
+        }
         // An error callback still running past the limit keeps its reporter, which reports nothing
         // more: the stream that owned it is gone (detached).
         let _ = self.installed.state().with_errors(self.limits.quiesce, |errors| match direction {
@@ -391,11 +407,16 @@ impl Session {
             BufferState::Missing => {}
         }
         let count: ChannelCount = driver.channels().map_err(|code| asio_error(name, "getChannels", code))?;
-        let (inputs, outputs, input_wire, output_wire) = self.installed.state().with(|engine, _| {
-            let input = engine.capture.as_ref().map(|s| (s.channels(), s.wire()));
-            let output = engine.render.as_ref().map(|s| (s.channels(), s.wire()));
-            (input.map_or(0, |i| i.0), output.map_or(0, |o| o.0), input.map(|i| i.1), output.map(|o| o.1))
-        });
+        let limit = self.limits.quiesce;
+        let (inputs, outputs, input_wire, output_wire) = self
+            .installed
+            .state()
+            .with(limit, |engine, _| {
+                let input = engine.capture.as_ref().map(|s| (s.channels(), s.wire()));
+                let output = engine.render.as_ref().map(|s| (s.channels(), s.wire()));
+                (input.map_or(0, |i| i.0), output.map_or(0, |o| o.0), input.map(|i| i.1), output.map(|o| o.1))
+            })
+            .ok_or_else(|| still_inside(name, limit))?;
         if inputs + outputs == 0 {
             return Ok(());
         }
@@ -412,7 +433,13 @@ impl Session {
         table.silence_outputs();
         let ready = driver.supports_output_ready(&buffers);
         self.installed.state().set_output_ready(ready);
-        self.installed.state().install_planes(table);
+        if !self.installed.state().install_planes(table, limit) {
+            // Never published, so no buffer switch can hold their addresses.
+            if let Err(code) = driver.dispose_buffers(buffers) {
+                log::warn!("{}", asio_error(name, "disposeBuffers", code));
+            }
+            return Err(still_inside(name, limit));
+        }
         self.buffers = BufferState::Prepared(buffers);
         self.refresh_latencies(name, driver);
         Ok(())
@@ -506,7 +533,16 @@ impl Session {
                 // A fresh driver start: forget the stamps of any earlier run, and play silence until
                 // the first buffer switch writes.
                 let state = self.installed.state();
-                state.with(|engine, _| engine.restart());
+                if state.with(self.limits.quiesce, |engine, _| engine.restart()).is_none() {
+                    self.buffers = BufferState::Prepared(buffers);
+                    return Err(other(
+                        name,
+                        format_args!(
+                            "a buffer switch is still inside the driver's callback after {} ms; the stream did not start",
+                            self.limits.quiesce.as_millis()
+                        ),
+                    ));
+                }
                 if !state.silence_outputs(self.limits.quiesce) {
                     self.buffers = BufferState::Prepared(buffers);
                     return Err(other(name, "a buffer switch was still writing its buffers; the stream did not start"));
