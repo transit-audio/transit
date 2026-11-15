@@ -377,9 +377,13 @@ fn only_changes_that_drop_a_hosted_device_capture_first() {
         ("track.delete", json!({"tracks": [b]}), false),
         ("mix.insert_remove", json!({"track": a, "slot": 0}), true),
         ("mix.insert_remove", json!({"track": b, "slot": 0}), false),
-        ("mix.insert", json!({"track": a, "slot": 1, "plugin": "eq7"}), true),
+        ("mix.insert", json!({"track": a, "slot": 0, "plugin": "eq7"}), true),
+        ("mix.insert", json!({"track": a, "slot": "a", "plugin": "eq7"}), true),
+        ("mix.insert", json!({"track": a, "slot": 1, "plugin": "eq7"}), false),
+        ("mix.insert_remove", json!({"track": a, "slot": 1}), false),
         ("mix.insert", json!({"track": a, "plugin": "eq7"}), false),
-        ("mix.instrument", json!({"track": a, "plugin": "macro_oscillator"}), true),
+        // Track `a` hosts an insert, not an instrument: replacing its instrument drops nothing hosted.
+        ("mix.instrument", json!({"track": a, "plugin": "macro_oscillator"}), false),
         ("mix.mute", json!({"track": a}), false),
         // Undoing the new tracks would take the hosted insert away with them.
         ("edit.undo", json!({}), true),

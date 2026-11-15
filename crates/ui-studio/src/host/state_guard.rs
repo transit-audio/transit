@@ -33,6 +33,12 @@ fn any_hosted(s: &Session) -> bool {
 /// Whether the tracks `params` names (`track` or `tracks`, by id or name) host a third-party
 /// device. A command that names none acts on the selection: then any hosted device counts.
 fn named_tracks_host(s: &Session, params: &Value) -> bool {
+    named_tracks_where(s, params, |t| hosted(t).next().is_some())
+}
+
+/// Whether a track `params` names (as for [`named_tracks_host`]) passes `test`; with none named,
+/// whether any track does.
+fn named_tracks_where(s: &Session, params: &Value, test: impl Fn(&Track) -> bool) -> bool {
     let one = |v: &Value| match (v.as_u64(), v.as_str()) {
         (Some(n), _) => s.track(TrackId(n)),
         (_, Some(name)) => s.track_by_name(name),
@@ -41,9 +47,35 @@ fn named_tracks_host(s: &Session, params: &Value) -> bool {
     let named: Vec<&Value> = match (params.get("tracks").and_then(Value::as_array), params.get("track")) {
         (Some(list), _) => list.iter().collect(),
         (None, Some(v)) => vec![v],
-        (None, None) => return any_hosted(s),
+        (None, None) => return s.tracks.iter().any(&test),
     };
-    named.into_iter().filter_map(one).any(|t| hosted(t).next().is_some())
+    named.into_iter().filter_map(one).any(test)
+}
+
+/// Whether the insert slot `params` names (`track` and `slot`: an index or a letter) holds a
+/// third-party device. A slot that cannot be read here counts as the whole track (the command
+/// itself refuses what it cannot read).
+fn named_slot_hosts(s: &Session, params: &Value) -> bool {
+    let track = match params.get("track") {
+        Some(v) => match (v.as_u64(), v.as_str()) {
+            (Some(n), _) => s.track(TrackId(n)),
+            (_, Some(name)) => s.track_by_name(name),
+            _ => None,
+        },
+        None => None,
+    };
+    let slot = params.get("slot").and_then(|v| match (v.as_u64(), v.as_str().map(|x| x.trim().to_ascii_lowercase())) {
+        (Some(n), _) => usize::try_from(n).ok(),
+        (_, Some(x)) => match x.as_bytes() {
+            [c @ b'a'..=b'z'] => Some(usize::from(c - b'a')),
+            _ => x.parse().ok(),
+        },
+        _ => None,
+    });
+    match (track, slot) {
+        (Some(t), Some(i)) => t.mixer.inserts.get(i).and_then(Option::as_ref).is_some_and(|ins| transit_mix::is_third_party(&ins.plugin)),
+        _ => named_tracks_host(s, params),
+    }
 }
 
 impl StudioApp {
@@ -53,9 +85,11 @@ impl StudioApp {
         match id {
             "edit.undo" => self.engine.undo_doc().is_some_and(|d| drops_hosted(s, d)),
             "edit.redo" => self.engine.redo_doc().is_some_and(|d| drops_hosted(s, d)),
-            "track.delete" | "mix.insert_remove" | "mix.instrument" => named_tracks_host(s, params),
+            "track.delete" => named_tracks_host(s, params),
+            "mix.instrument" => named_tracks_where(s, params, |t| t.instrument.as_ref().is_some_and(|i| transit_mix::is_third_party(&i.plugin))),
+            "mix.insert_remove" => named_slot_hosts(s, params),
             // An insert into a named slot replaces what is there.
-            "mix.insert" => params.get("slot").is_some() && named_tracks_host(s, params),
+            "mix.insert" => params.get("slot").is_some() && named_slot_hosts(s, params),
             _ => false,
         }
     }
