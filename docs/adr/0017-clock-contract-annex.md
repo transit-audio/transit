@@ -78,10 +78,13 @@ route/plugin delay remain named components of the timing model.
 **The rate converters** (amended 2026-11-15, #601). The device-rate converter (session to output
 device) and the live input converter (input device to session) are the band-limited reader of
 [ADR 0056](0056-audio-clip-editor.md) decision 8. They convert at the ratio of the nominal rates
-and correct no drift between clocks; the asynchronous resampler above is still open. Each forms its
-positions exactly, as an integer count of units over a fixed denominator, never by adding the rate
-once per frame. At equal rates and speed 1 both pass every sample they receive through bit for
-bit. The reader is linear phase, so the converters move no position on any timeline: the output
+and correct no drift between clocks; the asynchronous resampler above is still open. Each keeps an
+exact rational phase, an integer count of units over a fixed denominator, and never adds the rate
+once per frame; the reader receives that phase with its fraction rounded down to a multiple of
+2^-32 frame. At unit rate (equal rates, speed 1) and a whole-frame phase, both pass every finite
+sample through bit for bit; a fractional phase acquired earlier (at another speed) is kept when
+the rate returns to 1 and is read through the reader. The live input replaces a non-finite sample
+with zero, as it did before. The reader is linear phase, so the converters move no position on any timeline: the output
 frame at which a render frame is presented is unchanged. Their filter delay is look-ahead instead.
 The output renders up to 16·max(1, q) render frames further ahead of presentation, q being the
 session rate times the speed over the device rate. The live input's alignment keeps
@@ -126,8 +129,10 @@ only then does the new trim apply, so a trim change bends the position's slope a
 position. The fill is counted from the reader's position. The reader reads up to 16·max(1, q)
 frames past it, inside the target, so the target and the reported latency are unchanged and the
 margin before the ring runs dry is that much smaller. A priming or a resync keeps up to `halo(q)`
-frames (at the largest trimmed rate) before the new position as the reader's history. At equal
-nominal rates with a trim of exactly 0 the converter passes every sample through bit for bit.
+frames (at the largest trimmed rate) before the new position as the reader's history, and starts
+at a whole frame. At equal nominal rates the converter passes every sample through bit for bit
+while its position stays a whole frame: from a priming or a resync on, for as long as the trim
+stays exactly 0 (a fraction gained under a nonzero trim is kept when the trim returns to 0).
 Drifts up to 1000 ppm are tested; the applied trim is limited to 2000 ppm. It
 does not yet cover a second hardware input; that still needs the controlled asynchronous
 resampler above.
@@ -288,15 +293,16 @@ limit included.
   so a converter adds no delay on any timeline; it adds render-ahead on the output and backlog on
   the input, which a round trip measured on the plan's timeline contains (ADR 0015 section 5,
   ADR 0020 decisions 2 and 4).
-- **Evidence** (tests of the change for #601 and #603). Equal rates pass through bit for bit:
+- **Evidence** (tests of the change for #601 and #603). Equal rates at a whole-frame position pass
+  through bit for bit:
   `equal_rates_pass_every_bit_through_whatever_the_partition`,
   `equal_rates_through_the_player_are_bit_exact_pass_through`,
   `monitor_passes_through_at_equal_rates` and
   `equal_nominal_rates_with_zero_drift_pass_every_bit_through`. No position moves:
   `an_impulse_peaks_at_the_output_frame_the_timeline_maps_it_to`. The input's look-ahead is the
   backlog: `a_click_through_the_input_converter_peaks_at_its_input_position_and_the_backlog_reports_the_look_ahead`
-  (on a paired device B equals `halo(q)` at 48 into 44.1, 44.1 into 48 and 96 into 48 kHz, and 0 at
-  48 into 48). A trim change never moves the position:
+  (on a paired device, with reads of a whole number of input frames, B equals `halo(q)` at 48 into
+  44.1, 44.1 into 48 and 96 into 48 kHz, and 0 at 48 into 48). A trim change never moves the position:
   `a_trim_change_bends_the_position_and_never_moves_it`. A resync reads the stream behind the new
   position: `a_resync_starts_with_the_streams_frames_behind_the_position`. Output independent of the
   block and callback partition: `the_converter_output_is_independent_of_the_render_partition_at_every_rate_pair`,
