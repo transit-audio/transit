@@ -390,7 +390,7 @@ impl StudioApp {
             return;
         }
         let s = self.engine.session();
-        let range = if bounce_range(&s).is_empty() { BounceRange::Whole } else { BounceRange::Selection };
+        let range = if bounce_range(s).is_empty() { BounceRange::Whole } else { BounceRange::Selection };
         let name = format!("{}.wav", transit_engine::io::sanitize_name(&s.name));
         // The session rule (#385): its folder, else the remembered session folder, else Music.
         let dir = self.session_dir_or(&default_dir());
@@ -437,7 +437,7 @@ impl StudioApp {
             (r.start, r.end)
         } else {
             match f.range {
-                BounceRange::Selection if !bounce_range(&s).is_empty() => (bounce_range(&s).start, bounce_range(&s).end),
+                BounceRange::Selection if !bounce_range(s).is_empty() => (bounce_range(s).start, bounce_range(s).end),
                 BounceRange::Selection => {
                     self.status = "Nothing is selected: pick a range, or bounce the whole song.".into();
                     return Err(self.status.clone());
@@ -616,7 +616,7 @@ impl StudioApp {
     fn form_range(&self, f: &BounceForm) -> Option<(i64, i64)> {
         let s = self.engine.session();
         match f.range {
-            BounceRange::Selection if !bounce_range(&s).is_empty() => Some((bounce_range(&s).start, bounce_range(&s).end)),
+            BounceRange::Selection if !bounce_range(s).is_empty() => Some((bounce_range(s).start, bounce_range(s).end)),
             BounceRange::Selection => None,
             BounceRange::Whole => Some((s.start(), s.content_end().max(1))),
         }
