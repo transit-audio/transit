@@ -457,11 +457,13 @@ impl ab::Stream for AsioStream {
     /// stops when no stream of it runs.
     ///
     /// The direction stops at once, before anything else (#524): no later buffer switch calls it,
-    /// even when the host thread is blocked (in a driver's control panel, say) and the request to
-    /// it fails; the host thread finishes the stop (the driver's `stop` when this was the last
-    /// stream) as soon as it is free. From inside a driver callback (this stream's own, say) or on
-    /// the host thread, the stop cannot wait for the host thread, and the driver's `stop` must not
-    /// be called from inside its own buffer switch, so it returns at once there and never blocks.
+    /// even when the host thread is blocked (in a driver's control panel, say). The stream's stop
+    /// has then succeeded: it returns Ok and logs that the driver's part is pending, and the host
+    /// thread finishes the stop (the driver's `stop` when this was the last stream) as soon as it
+    /// is free, logging a failure of that `stop` as it logs every one. From inside a driver
+    /// callback (this stream's own, say) or on the host thread, the stop cannot wait for the host
+    /// thread, and the driver's `stop` must not be called from inside its own buffer switch, so it
+    /// returns at once there and never blocks.
     fn stop(&self) -> Result<(), ab::OpenError> {
         self.owner.0.request_stop();
         if callback::in_driver_callback() || self.host.on_host_thread() {
@@ -469,7 +471,15 @@ impl ab::Stream for AsioStream {
             return Ok(());
         }
         let (name, generation, direction) = (self.name.clone(), self.generation, self.direction);
-        self.host.call(&format!("stop {} of \"{}\"", self.what(), self.name), move |s| s.stop_stream(&name, generation, direction))
+        let label = format!("stop {} of \"{}\"", self.what(), self.name);
+        match self.host.call(&label, move |s| s.stop_stream(&name, generation, direction)) {
+            Err(e) if self.host.is_stuck() => {
+                log::warn!("ASIO: {label}: the stream is stopped; the driver stops when the host thread is free ({e})");
+                self.host.wake();
+                Ok(())
+            }
+            result => result,
+        }
     }
 
     fn latency(&self) -> Option<Duration> {

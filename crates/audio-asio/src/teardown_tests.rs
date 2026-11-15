@@ -345,8 +345,8 @@ fn a_start_while_a_callback_still_holds_the_engine_fails_instead_of_spinning() {
 
 /// Defect 5 of #524: `stop()` asked the host thread first, so while that thread was blocked (in a
 /// driver's control panel, say) the request failed and the stream kept playing after `stop()`
-/// returned its error. The stop now takes the direction out at once and the host thread finishes
-/// it when it is free.
+/// returned its error. The stop now takes the direction out at once and succeeds, and the host
+/// thread finishes the driver's part when it is free.
 #[test]
 fn a_stop_while_the_host_thread_is_blocked_stops_the_direction_at_once_and_the_host_finishes_it() {
     let _guard = lock();
@@ -367,8 +367,7 @@ fn a_stop_while_the_host_thread_is_blocked_stops_the_direction_at_once_and_the_h
     std::thread::scope(|scope| {
         let release = crate::stream_tests::hold_host(scope, host);
         host.set_stuck(true);
-        let refused = ab::Stream::stop(&render).expect_err("the host thread is blocked");
-        assert!(refused.to_string().contains("still blocked"), "{refused}");
+        ab::Stream::stop(&render).expect("the stream's stop succeeds while the host thread is blocked");
         testing::switch_time_info(1, Some(64), None);
         assert_eq!(renders.load(Ordering::SeqCst), 1, "a render callback ran after stop() returned");
         assert!(silent(&rig.observed.read_output(0, 1)), "the stopped direction plays silence");
