@@ -76,6 +76,13 @@ pub(super) fn export_origin(s: &Session) -> i64 {
     s.tempo.bar_start_tick(s.tempo.bar_beat_at_tick(tick).bar).min(0)
 }
 
+/// The first sample of the bar at `origin` (an [`export_origin`] tick): 0 without a zone. The
+/// consolidated and DAWproject exports render their stems from here, so stems and the file's tick
+/// 0 are the same instant.
+pub(super) fn origin_sample(s: &Session, origin: i64) -> Samples {
+    if origin < 0 { s.tempo.tick_to_samples(origin, s.sample_rate) } else { 0 }
+}
+
 /// The conductor written from `origin` (a tick at or before 0): the tempo and meter in effect
 /// there, which are bar 1's extended backward, at file tick 0, and every later tempo, meter and
 /// marker moved later by `-origin`.

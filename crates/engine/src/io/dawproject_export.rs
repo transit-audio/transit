@@ -86,7 +86,7 @@ pub fn export_dawproject(e: &Engine, path: &str) -> Result<DawprojectReport> {
     refuse_existing_part(&part)?;
     let stage = Stage::create(&path)?;
     let s = e.session();
-    let range = Range::new(0, s.content_end().max(1));
+    let range = dawproject_range(s);
     check_bounce_range(s, range, CMD)?;
     let opts = EncodeOptions {
         format: FileFormat::Wav,
@@ -269,6 +269,45 @@ fn color(rgb: [u8; 3]) -> String {
     format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
 }
 
+/// The range the stems render: from the first sample of the bar holding the session start (bar 1
+/// without a pre-count zone, ADR 0052 decision 10) to the content end, as the document's time 0 is
+/// that bar ([`Shift`]).
+pub(super) fn dawproject_range(s: &Session) -> Range {
+    Range::new(super::midi::origin_sample(s, super::midi::export_origin(s)), s.content_end().max(1))
+}
+
+/// How the document's times move so nothing sits before time 0: with a pre-count zone, every
+/// arrangement time (clips, markers, tempo and meter points) moves later by the whole bars from the
+/// bar holding the session start to bar 1, the same origin as the MIDI and consolidated exports.
+/// Without a zone nothing moves (`origin` 0) and every value is computed exactly as before.
+#[derive(Clone, Copy)]
+struct Shift {
+    /// The session tick written at time 0 (at or before 0).
+    origin: i64,
+}
+
+impl Shift {
+    fn of(s: &Session) -> Self {
+        Self { origin: super::midi::export_origin(s) }
+    }
+
+    /// The document time, in beats, of session position `at`.
+    fn beats(self, s: &Session, at: Samples) -> f64 {
+        let value = beats(s, at);
+        if self.origin < 0 { value - self.origin as f64 / f64::from(PPQ) } else { value }
+    }
+
+    /// The document tick of the `i`th tempo or meter event at session `tick`: the first (bar 1's,
+    /// extended backward over the zone) at time 0, later ones moved with everything else.
+    fn conductor_tick(self, i: usize, tick: i64) -> i64 {
+        match (self.origin < 0, i) {
+            (false, _) => tick,
+            (true, 0) => 0,
+            (true, _) => tick.saturating_sub(self.origin),
+        }
+    }
+}
+
 fn beats(s: &Session, at: Samples) -> f64 {
     let value = s.tempo.samples_to_ticks_f(at, s.sample_rate) / f64::from(PPQ);
     if value.is_finite() { value } else { 0.0 }
@@ -305,6 +344,8 @@ fn balance(pan: &[f32]) -> (f64, bool) {
 
 fn project_xml(s: &Session, stems: &[Stem]) -> String {
     let by_track: BTreeMap<TrackId, &Stem> = stems.iter().map(|s| (s.track, s)).collect();
+    let shift = Shift::of(s);
+    let stem_start = dawproject_range(s).start;
     let mut out = String::new();
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -357,17 +398,17 @@ fn project_xml(s: &Session, stems: &[Stem]) -> String {
             let end = s.content_end().max(1);
             line!(
                 "        <Clip time=\"0.000000000\" duration=\"{}\" contentTimeUnit=\"seconds\" playStart=\"0.000000000\" name=\"{}\" color=\"{}\"><Audio channels=\"{}\" sampleRate=\"{}\" duration=\"{}\" timeUnit=\"seconds\"><File path=\"{}\"/></Audio></Clip>",
-                number(beats(s, end)),
+                number(shift.beats(s, end)),
                 escaped(&format!("{} (rendered)", t.name)),
                 color(t.color),
                 stem.channels,
                 s.sample_rate.hz(),
-                number(s.sample_rate.seconds(end)),
+                number(s.sample_rate.seconds(end.saturating_sub(stem_start))),
                 escaped(&stem.path)
             );
         }
         for c in t.clips().iter().filter(|c| matches!(&c.content, ClipContent::Midi { .. })) {
-            midi_clip(&mut out, s, c);
+            midi_clip(&mut out, s, shift, c);
         }
         out.push_str("      </Clips></Lanes>\n");
     }
@@ -376,23 +417,24 @@ fn project_xml(s: &Session, stems: &[Stem]) -> String {
     if !markers.is_empty() {
         out.push_str("    <Markers timeUnit=\"beats\">\n");
         for m in markers {
-            line!("      <Marker time=\"{}\" name=\"{}\"/>", number(beats(s, m.start)), escaped(&m.name));
+            line!("      <Marker time=\"{}\" name=\"{}\"/>", number(shift.beats(s, m.start)), escaped(&m.name));
         }
         out.push_str("    </Markers>\n");
     }
     if s.tempo.tempos().len() > 1 {
         out.push_str("    <TempoAutomation timeUnit=\"beats\" unit=\"bpm\">\n      <Target/>\n");
-        for t in s.tempo.tempos().iter() {
-            line!("      <RealPoint time=\"{}\" value=\"{}\" interpolation=\"hold\"/>", number(t.tick as f64 / f64::from(PPQ)), number(t.bpm));
+        for (i, t) in s.tempo.tempos().iter().enumerate() {
+            let tick = shift.conductor_tick(i, t.tick);
+            line!("      <RealPoint time=\"{}\" value=\"{}\" interpolation=\"hold\"/>", number(tick as f64 / f64::from(PPQ)), number(t.bpm));
         }
         out.push_str("    </TempoAutomation>\n");
     }
     if s.tempo.meters().len() > 1 {
         out.push_str("    <TimeSignatureAutomation timeUnit=\"beats\">\n      <Target/>\n");
-        for m in s.tempo.meters().iter() {
+        for (i, m) in s.tempo.meters().iter().enumerate() {
             line!(
                 "      <TimeSignaturePoint time=\"{}\" numerator=\"{}\" denominator=\"{}\"/>",
-                number(m.tick as f64 / f64::from(PPQ)),
+                number(shift.conductor_tick(i, m.tick) as f64 / f64::from(PPQ)),
                 m.numerator,
                 m.denominator
             );
@@ -403,11 +445,11 @@ fn project_xml(s: &Session, stems: &[Stem]) -> String {
     out
 }
 
-fn midi_clip(out: &mut String, s: &Session, c: &Clip) {
+fn midi_clip(out: &mut String, s: &Session, shift: Shift, c: &Clip) {
     let ClipContent::Midi { sequence } = &c.content else { return };
     let mut attrs = format!(
         "time=\"{}\" duration=\"{}\" contentTimeUnit=\"beats\" playStart=\"0.000000000\"",
-        number(beats(s, c.start)),
+        number(shift.beats(s, c.start)),
         number(beat_len(s, c.start, c.length))
     );
     if let Some(looping) = c.looping.filter(|l| l.is_valid()) {
@@ -512,3 +554,7 @@ fn controllers(out: &mut String, sequence: &Sequence) {
 #[cfg(test)]
 #[path = "dawproject_export_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "dawproject_export_zone_tests.rs"]
+mod zone_tests;

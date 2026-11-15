@@ -40,8 +40,7 @@ pub struct ConsolidatedBounce {
 /// file and the tempo file of one export share the same start and line up when imported at one
 /// position.
 pub fn consolidated_range(s: &Session) -> Range {
-    let origin = super::midi::export_origin(s);
-    let start = if origin < 0 { s.tempo.tick_to_samples(origin, s.sample_rate) } else { 0 };
+    let start = super::midi::origin_sample(s, super::midi::export_origin(s));
     Range::new(start, transit_mix::playback_content_end(s))
 }
 
