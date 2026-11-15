@@ -3,6 +3,12 @@
 use super::*;
 
 impl transit_dsp::PluginStateReader for ClapState {
+    /// `clap_host_state.mark_dirty` since the last call (issue #574), for a plug-in with no editor
+    /// handle; the same flag the editor handle takes.
+    fn take_state_changed(&mut self) -> bool {
+        self.link.host().dirty.swap(false, Ordering::Relaxed)
+    }
+
     fn save_state(&mut self) -> Option<Vec<u8>> {
         let _t = trace::scope(Thread::Ui);
         self.link.save_state()
@@ -79,33 +85,21 @@ fn header_action(c: transit_rt::editor_window::HeaderClick) -> transit_dsp::Head
 }
 
 impl PluginEditor for ClapEditor {
-    fn has_gui(&self) -> bool {
-        self.gui
-    }
-
     fn open(&mut self) -> Result<(), String> {
-        if !self.gui {
-            return Err("no gui extension".into());
-        }
         // Edits reported before the editor opened are stale.
         let _ = self.link.idle_headless();
         self.link.open(self.info.name)
     }
 
     fn close(&mut self) {
-        if self.gui {
-            self.link.close();
-        }
+        self.link.close();
     }
 
     fn is_open(&self) -> bool {
-        self.gui && self.link.is_open()
+        self.link.is_open()
     }
 
     fn idle(&mut self) -> Vec<(String, f32)> {
-        if !self.gui {
-            return Vec::new();
-        }
         // Issue #205: inside a host call into plug-in code on this thread nothing here may call
         // the plug-in (the service, `on_main_thread`); the edits stay queued for the next idle.
         if transit_dsp::host_call::active() {

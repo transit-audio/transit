@@ -33,3 +33,26 @@ fn a_state_changed_notice_reaches_the_proxy_once() {
     drop((editor, plugin));
     assert!(host.shutdown(Duration::from_secs(5)));
 }
+
+/// A plug-in with no editor handle: its notice comes through the state handle's proxy.
+#[test]
+fn a_state_changed_notice_without_an_editor_reaches_the_state_proxy_once() {
+    let host = Host::new(Config { inline: false, ..Config::default() });
+    let log = Arc::new(Log::default());
+    let l = Arc::clone(&log);
+    let mut plugin = host.submit(move |ctx| ctx.adopt(Fake::make_headless(&l))).wait(Duration::from_secs(5)).unwrap();
+    assert!(plugin.editor().is_none());
+    let mut reader = plugin.state_reader().unwrap();
+    assert!(!reader.take_state_changed(), "nothing reported yet");
+    log.state_changed.store(true, Ordering::SeqCst);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut seen = false;
+    while !seen && Instant::now() < deadline {
+        seen = reader.take_state_changed();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(seen, "the notice reached the state proxy");
+    assert!(!reader.take_state_changed(), "once");
+    drop((reader, plugin));
+    assert!(host.shutdown(Duration::from_secs(5)));
+}

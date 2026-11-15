@@ -506,6 +506,10 @@ impl RemoteState {
 }
 
 impl PluginStateReader for RemoteState {
+    fn take_state_changed(&mut self) -> bool {
+        self.token.shared.state_changed.swap(false, Ordering::AcqRel)
+    }
+
     fn save_state(&mut self) -> Option<Vec<u8>> {
         self.read(self.token.timeout).ok().flatten()
     }

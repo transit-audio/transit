@@ -350,7 +350,7 @@ fn a_failed_open_has_no_open_report_and_keeps_its_error() {
     let log = Arc::new(Log::default());
     let l = Arc::clone(&log);
     let mut plugin = host
-        .submit(move |ctx| ctx.adopt(Box::new(Fake { log: l, destroy: Duration::ZERO, editor_fails: true })))
+        .submit(move |ctx| ctx.adopt(Box::new(Fake { log: l, destroy: Duration::ZERO, editor_fails: true, no_editor: false })))
         .wait(Duration::from_secs(5))
         .unwrap();
     let mut editor = plugin.editor().unwrap();
@@ -408,7 +408,7 @@ fn an_editor_that_fails_to_open_reports_why_once() {
     let l = Arc::clone(&log);
     let mut plugin = host
         .submit(move |ctx| {
-            let p = Box::new(Fake { log: l, destroy: Duration::ZERO, editor_fails: true });
+            let p = Box::new(Fake { log: l, destroy: Duration::ZERO, editor_fails: true, no_editor: false });
             ctx.adopt(p)
         })
         .wait(Duration::from_secs(5))

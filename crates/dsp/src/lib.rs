@@ -822,6 +822,12 @@ pub trait PluginStateReader: Send {
     fn begin_load(&mut self, data: Vec<u8>) -> StateJob<Option<LoadedValues>> {
         StateJob::ready(self.load_state(&data))
     }
+    /// [`PluginEditor::take_state_changed`] through the state handle, for a plug-in that has no
+    /// editor handle (a CLAP plug-in without the gui extension, issue #574). Taking it clears it;
+    /// an instance with both handles may report through either. The default never reports.
+    fn take_state_changed(&mut self) -> bool {
+        false
+    }
 }
 
 /// A state read that did not return in time ([`PluginStateReader::save_state_within`]).

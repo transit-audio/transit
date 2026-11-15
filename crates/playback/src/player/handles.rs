@@ -1006,6 +1006,13 @@ impl Handles {
     pub fn idle(&mut self) -> Vec<EditorEdit> {
         let mut out = Vec::new();
         for (&(track, slot), &generation) in &self.active {
+            // A plug-in with no editor handle reports its state change through its state handle.
+            if let Some(entry) = self.entries.get_mut(&(track, generation))
+                && entry.editor.is_none()
+                && entry.state.as_mut().is_some_and(|s| s.take_state_changed())
+            {
+                self.state_changed = true;
+            }
             if let Some(entry) = self.entries.get_mut(&(track, generation))
                 && let Some(editor) = &mut entry.editor
             {

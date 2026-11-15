@@ -622,6 +622,12 @@ impl Ctx {
     /// the shared side. Each idle is
     /// labeled with its plug-in (issue #205), and the open editors are named for the dispatches.
     fn idle(&mut self) {
+        // A plug-in with no editor handle reports its state change through its state handle.
+        for local in self.entries.values_mut() {
+            if local.editor.is_none() && local.state.as_mut().is_some_and(|s| s.take_state_changed()) {
+                local.shared.state_changed.store(true, Ordering::Release);
+            }
+        }
         let mut open: Vec<&str> = Vec::new();
         for local in self.entries.values_mut() {
             if let Some(editor) = &mut local.editor {

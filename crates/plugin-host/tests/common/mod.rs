@@ -50,6 +50,8 @@ pub struct Fake {
     pub log: Arc<Log>,
     pub destroy: Duration,
     pub editor_fails: bool,
+    /// No editor handle at all (a CLAP plug-in without a GUI): only the state handle.
+    pub no_editor: bool,
 }
 
 impl Fake {
@@ -57,7 +59,13 @@ impl Fake {
     pub fn make(log: &Arc<Log>, create: Duration, destroy: Duration) -> Box<dyn Plugin> {
         std::thread::sleep(create);
         log.note("create");
-        Box::new(Fake { log: Arc::clone(log), destroy, editor_fails: false })
+        Box::new(Fake { log: Arc::clone(log), destroy, editor_fails: false, no_editor: false })
+    }
+
+    /// [`Self::make`] without an editor handle.
+    pub fn make_headless(log: &Arc<Log>) -> Box<dyn Plugin> {
+        log.note("create");
+        Box::new(Fake { log: Arc::clone(log), destroy: Duration::ZERO, editor_fails: false, no_editor: true })
     }
 }
 
@@ -93,6 +101,9 @@ impl Plugin for Fake {
         true
     }
     fn editor(&mut self) -> Option<Box<dyn PluginEditor>> {
+        if self.no_editor {
+            return None;
+        }
         Some(Box::new(FakeEditor { log: Arc::clone(&self.log), open: false, fails: self.editor_fails, sent: false }))
     }
     fn state_reader(&mut self) -> Option<Box<dyn PluginStateReader>> {
@@ -107,6 +118,9 @@ pub struct FakeState {
 }
 
 impl PluginStateReader for FakeState {
+    fn take_state_changed(&mut self) -> bool {
+        self.log.state_changed.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
     fn save_state(&mut self) -> Option<Vec<u8>> {
         self.log.note("save_state");
         Some(self.log.state.lock().unwrap().clone())
