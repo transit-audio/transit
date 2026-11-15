@@ -94,8 +94,8 @@ Dragging a MIDI clip's start edge later hides the notes and controller moves bef
 it does not delete them. Drag the start edge back out and they return exactly where they were
 played. The start edge drags back as far as the session start (bar 1, or the start of a zone before
 bar 1), or further when the clip's earliest hidden note or controller move is before that: then it
-stops exactly at that event, so nothing captured is out of reach. A looped clip's start stops at the
-session start. Trim Start to Insertion and Trim to Selection work the same way. A note
+stops exactly at that event. Another clip on the track in the way stops the trim at that clip. A
+looped clip's start stops at the session start. Trim Start to Insertion and Trim to Selection work the same way. A note
 that starts before the edge is silent as a whole, even if it is still held after the edge: a chord
 held across the edge stays silent until the edge is dragged back before it. The end edge already
 worked this way: notes past it stay in the clip and do not play. The end edge and the loop handle of
