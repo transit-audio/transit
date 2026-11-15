@@ -32,6 +32,9 @@ pub struct Log {
     pub hang: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
     /// The next editor open waits on this until its sender is dropped (issue #205).
     pub open_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// The plug-in's "state changed" notice, which the editor's next `take_state_changed` takes
+    /// (issue #574).
+    pub state_changed: std::sync::atomic::AtomicBool,
 }
 
 impl Log {
@@ -169,5 +172,8 @@ impl PluginEditor for FakeEditor {
     }
     fn take_header_actions(&mut self) -> Vec<HeaderAction> {
         std::mem::take(&mut *self.log.actions.lock().unwrap())
+    }
+    fn take_state_changed(&mut self) -> bool {
+        self.log.state_changed.swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 }

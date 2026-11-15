@@ -36,6 +36,8 @@ pub(crate) struct HostContext {
     pub other_flags: AtomicU32,
     /// `performEdit` values (normalized), bounded by `EDIT_CAP`.
     pub edits: Mutex<Vec<(u32, f64)>>,
+    /// `IComponentHandler2::setDirty(true)` since the editor handle last took it (issue #574).
+    pub dirty: AtomicBool,
     /// The instance's number in the host call trace (#651).
     pub trace_id: u32,
 }
@@ -56,6 +58,7 @@ impl Default for HostContext {
             reload_requested: AtomicBool::new(false),
             other_flags: AtomicU32::new(0),
             edits,
+            dirty: AtomicBool::new(false),
             trace_id: crate::trace::next_instance(),
         }
     }
@@ -175,14 +178,18 @@ impl IComponentHandlerTrait for HostContext {
 /// #651, round 2: the optional extended handler, so the host call trace shows whether a plug-in
 /// uses it. Steinberg, `IComponentHandler2::setDirty`: "Tells host that the plug-in is dirty
 /// (something besides parameters has changed since last save), if true the host should apply a
-/// save before quitting." The host takes note in the trace and does nothing else yet: marking the
-/// session modified is the app's step, as for CLAP's `mark_dirty`. `startGroupEdit` and
+/// save before quitting." The host records it in the trace and raises `dirty`, which the editor
+/// handle passes on (`take_state_changed`) so the app marks the session modified (issue #574), as
+/// for CLAP's `mark_dirty`; `setDirty(false)` changes nothing. `startGroupEdit` and
 /// `finishGroupEdit` only group the timestamps of automation the host writes, which this host does
 /// not record from edits; `requestOpenEditor` is not supported (the editor opens on the user's
 /// request only).
 impl IComponentHandler2Trait for HostContext {
     unsafe fn setDirty(&self, state: sb::TBool) -> sb::tresult {
         trace::record(self.trace_id, trace::Call::SetDirty, 0, 0.0, u64::from(state));
+        if state != 0 {
+            self.dirty.store(true, Ordering::Relaxed);
+        }
         sb::kResultOk
     }
     unsafe fn requestOpenEditor(&self, _name: sb::FIDString) -> sb::tresult {

@@ -214,6 +214,9 @@ pub struct Handles {
     loaded: Vec<LoadedIn>,
     /// Editors that finished opening since the UI last asked ([`Self::take_editor_opened`]).
     editor_opened: Vec<EditorOpened>,
+    /// A plug-in in the plan said its own state changed since the UI last asked (issue #574,
+    /// [`Self::take_state_changed`]).
+    state_changed: bool,
     /// How long one [`Self::capture_states`] may wait for plug-ins in all.
     save_deadline: Duration,
     /// The plug-ins whose state the last capture could not read in time (their stored state is
@@ -248,6 +251,7 @@ impl Handles {
             editor_errors: Vec::new(),
             loaded: Vec::new(),
             editor_opened: Vec::new(),
+            state_changed: false,
             save_deadline: DEFAULT_SAVE_DEADLINE,
             unrefreshed: Vec::new(),
             host,
@@ -698,6 +702,12 @@ impl Handles {
         std::mem::take(&mut self.editor_errors)
     }
 
+    /// Whether a plug-in in the plan said its own state changed since the last call (issue #574;
+    /// gathered by [`Self::idle`]).
+    pub fn take_state_changed(&mut self) -> bool {
+        std::mem::take(&mut self.state_changed)
+    }
+
     /// Take every possibly-panicking handle before committing the entry. On a factory
     /// unwind, local resources die on main and there is no partial visible binding.
     pub fn capture(&mut self, binding: SlotBinding, made: NewInstance) -> Option<NewInstance> {
@@ -964,6 +974,9 @@ impl Handles {
                 && let Some(editor) = &mut entry.editor
             {
                 out.extend(editor.idle().into_iter().map(|(id, value)| (track, slot, id, value)));
+                if editor.take_state_changed() {
+                    self.state_changed = true;
+                }
                 if let Some(e) = editor.take_error() {
                     self.editor_errors.push((track, slot, e));
                 }

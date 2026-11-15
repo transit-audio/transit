@@ -602,7 +602,16 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         // Service and drain the old editors, but do not apply their parameter edits
         // to a replacement document before its instances have been adopted.
         let edits = self.handles.idle();
-        if self.control.sessions.restore.is_some() { Vec::new() } else { edits }
+        if self.control.sessions.restore.is_some() {
+            // The old document's state notices are not the replacement's either (issue #574).
+            self.handles.take_state_changed();
+            return Vec::new();
+        }
+        edits
+    }
+    /// Whether a plug-in in the plan said its own state changed since the last call (issue #574).
+    pub fn take_plugin_state_changed(&mut self) -> bool {
+        self.handles.take_state_changed()
     }
 
     /// Creating thread only, after the device owner has established quiescence.

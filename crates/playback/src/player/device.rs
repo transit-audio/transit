@@ -1336,6 +1336,7 @@ mod midi_map_api;
 #[cfg(test)]
 mod midi_map_tests;
 mod null_open;
+mod plugin_state_api;
 mod realtime_render;
 mod telemetry_api;
 

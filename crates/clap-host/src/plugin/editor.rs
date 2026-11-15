@@ -106,7 +106,6 @@ impl PluginEditor for ClapEditor {
             s.service(&mut Serviced::default());
         }
         let raw = self.link.idle();
-        let _ = self.link.host().dirty.swap(false, Ordering::Relaxed);
         // Only the latest value per parameter: (index, the session's value, the plug-in's).
         let mut latest: Vec<(usize, f32, f64)> = Vec::new();
         for (cid, x) in raw {
@@ -139,5 +138,11 @@ impl PluginEditor for ClapEditor {
 
     fn take_header_actions(&mut self) -> Vec<transit_dsp::HeaderAction> {
         self.link.header().take_clicks().into_iter().map(header_action).collect()
+    }
+
+    /// `clap_host_state.mark_dirty` since the last call (issue #574): the app marks the session
+    /// modified.
+    fn take_state_changed(&mut self) -> bool {
+        self.link.host().dirty.swap(false, Ordering::Relaxed)
     }
 }

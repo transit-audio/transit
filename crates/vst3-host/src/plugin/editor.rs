@@ -69,6 +69,12 @@ impl PluginEditor for Vst3Editor {
     fn take_header_actions(&mut self) -> Vec<transit_dsp::HeaderAction> {
         self.conv.link.header().take_clicks().into_iter().map(header_action).collect()
     }
+
+    /// `IComponentHandler2::setDirty(true)` since the last call (issue #574): the app marks the
+    /// session modified.
+    fn take_state_changed(&mut self) -> bool {
+        self.host.dirty.swap(false, Ordering::Relaxed)
+    }
 }
 
 /// The strip's model as the window shows it (issue #68).

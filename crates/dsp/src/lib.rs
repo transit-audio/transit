@@ -730,6 +730,14 @@ pub trait PluginEditor: Send {
     fn window_state(&self) -> Option<EditorWindowState> {
         None
     }
+    /// Whether the plug-in said its own state changed since the last call (CLAP
+    /// `clap_host_state.mark_dirty`, VST3 `IComponentHandler2::setDirty(true)`): something the
+    /// session cannot see in its parameters, such as a patch or a sample loaded in the plug-in's
+    /// own browser (issue #574). Taking it clears it. Read on every idle, open or not. The
+    /// default (a plug-in or host with no such notice) never reports a change.
+    fn take_state_changed(&mut self) -> bool {
+        false
+    }
 }
 
 /// What the UI asks of every plug-in editor window when its main window changes (issue #173, ADR

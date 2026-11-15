@@ -618,7 +618,8 @@ impl Ctx {
         self.entries.get_mut(&key)
     }
 
-    /// Every editor's `idle`: their edits and open state go to the shared side. Each idle is
+    /// Every editor's `idle`: their edits, open state and state-changed notice (issue #574) go to
+    /// the shared side. Each idle is
     /// labeled with its plug-in (issue #205), and the open editors are named for the dispatches.
     fn idle(&mut self) {
         let mut open: Vec<&str> = Vec::new();
@@ -630,6 +631,9 @@ impl Ctx {
                 let edits = editor.idle();
                 let actions = editor.take_header_actions();
                 let is_open = editor.is_open();
+                if editor.take_state_changed() {
+                    local.shared.state_changed.store(true, Ordering::Release);
+                }
                 local.shared.publish(edits, actions, is_open);
                 editor_windows::publish(&local.shared, is_open);
                 if is_open {

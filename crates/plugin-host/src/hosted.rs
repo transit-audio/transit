@@ -29,6 +29,8 @@ pub(crate) struct EditorShared {
     error: Mutex<Option<String>>,
     /// What the user did in the window's header strip (issue #68), for the UI to take.
     actions: Mutex<Vec<HeaderAction>>,
+    /// The plug-in said its own state changed (issue #574), for the UI to take.
+    pub(crate) state_changed: AtomicBool,
     /// The open request on its way and the last one that finished (issue #67).
     timing: Mutex<OpenTiming>,
     /// The editor's window as its open made it (a handle as a number; 0: none), on the host
@@ -396,6 +398,10 @@ impl PluginEditor for RemoteEditor {
 
     fn take_header_actions(&mut self) -> Vec<HeaderAction> {
         std::mem::take(&mut *lock(&self.token.shared.actions))
+    }
+
+    fn take_state_changed(&mut self) -> bool {
+        self.token.shared.state_changed.swap(false, Ordering::AcqRel)
     }
 
     fn available(&self) -> Result<(), String> {

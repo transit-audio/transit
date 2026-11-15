@@ -11,7 +11,8 @@
 //! reported as an output parameter event by the next `process` (`CMD:edit:<gain>` makes such an
 //! edit to any gain, as a preset picked in its editor would, issue #651). After `CMD:log-start`
 //! its saved state carries, after the two f64s, a log of every parameter event the host sends it
-//! (`param(<id>)=<value>@<time>`, the value in Rust's shortest round-trip form), cleared as read. Embedded (`CMD:gui-embedded`), its
+//! (`param(<id>)=<value>@<time>`, the value in Rust's shortest round-trip form), cleared as read.
+//! `CMD:mark-dirty` calls the host's `clap_host_state.mark_dirty` (issue #574). Embedded (`CMD:gui-embedded`), its
 //! GUI takes `set_scale` and reports 400×300 times the scale; with `CMD:gui-self-scaling` it
 //! ignores `set_scale` and reports 400×300 (issue #101).
 //!
@@ -837,6 +838,13 @@ unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istre
     }
     if std::str::from_utf8(&bytes[..got]).ok() == Some("CMD:log-start") {
         f.param_log = Some(Vec::new());
+        return true;
+    }
+    // Its own state changed, with no parameter event (a patch loaded in its browser, issue #574):
+    // `clap_host_state.mark_dirty`, on this (main) thread.
+    if std::str::from_utf8(&bytes[..got]).ok() == Some("CMD:mark-dirty") {
+        let state = unsafe { host_ext::<clap_host_state>(f.host, CLAP_EXT_STATE).as_ref() }.expect("host state");
+        unsafe { (state.mark_dirty.unwrap())(f.host) };
         return true;
     }
     // And its GUI modes (issue #68): embedded too, embedded that fails, and a query.
