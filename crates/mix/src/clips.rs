@@ -1,5 +1,5 @@
 use super::*;
-use transit_model::disk::StreamMap;
+use transit_model::disk::{Memory, StreamMap};
 
 /// Render and sum one clip, reusing the prepared FX buffer in bounded chunks.
 fn mix_clip_fx(
@@ -117,60 +117,88 @@ pub(crate) fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize,
     let Some(audio) = s.pool.get(source) else { return };
     let i0 = usize::try_from(isect.start - pos).unwrap_or(0);
     let i1 = usize::try_from(isect.end - pos).unwrap_or(0).min(frames);
+    // Every read of the clip's source goes through `StreamMap::read` (a stretched clip through the
+    // band-limited reader, ADR 0056 decision 8; #604), except the ring, which holds its output.
     match audio.disk.as_deref() {
         None => {
-            let src = &audio.buffer.channels;
-            mix_clip(clip, pos, i0, i1, buf, src.len(), |c, k| map.sample(k, |x| src.get(c).and_then(|ch| ch.get(x)).copied()));
+            let mut src = Memory(&audio.buffer.channels);
+            let nsrc = audio.buffer.channels.len();
+            mix_clip(clip, pos, i0, i1, buf, nsrc, |k, first, out| map.read(k, &mut src, first, out));
         }
         // The audio thread (and a render worker for it) only drains the clip's ring (ADR 0035).
         Some(d) if on_audio_thread() => {
             let k0 = isect.start.saturating_sub(clip.start);
             match d.stream(&map, k0, i1.saturating_sub(i0)) {
-                Some(ring) => mix_clip(clip, pos, i0, i1, buf, d.channels(), |c, k| ring.get(c, k)),
+                Some(ring) => mix_clip(clip, pos, i0, i1, buf, d.channels(), |k, first, out| {
+                    for (c, o) in out.iter_mut().enumerate() {
+                        *o = ring.get(first + c, k);
+                    }
+                }),
                 None => d.underrun(&map, k0),
             }
         }
         // Offline (bounce, export, consolidate): the same file, read here.
-        Some(d) => d.with_sync(|get| mix_clip(clip, pos, i0, i1, buf, d.channels(), |c, k| map.sample(k, |x| get(c, x)))),
+        Some(d) => d.with_sync_source(|src| mix_clip(clip, pos, i0, i1, buf, d.channels(), |k, first, out| map.read(k, src, first, out))),
     }
 }
 
+/// Source channels one read of a clip fetches together (the reader then computes each tap's
+/// coefficient once for all of them); a wider source reads each channel on its own, which gives the
+/// same samples.
+const FRAME: usize = 32;
+
 /// Sum frames `i0..i1` of a block at `pos` of `clip` into `buf`, with its gain, reading source
-/// channel `c` at clip time `k` through `fetch(c, k)` (`nsrc` channels).
-fn mix_clip(clip: &Clip, pos: Samples, i0: usize, i1: usize, buf: &mut [Vec<f32>], nsrc: usize, mut fetch: impl FnMut(usize, Samples) -> f32) {
+/// channels `first..first + out.len()` at clip time `k` into `out` through `fetch(k, first, out)`
+/// (`nsrc` channels).
+fn mix_clip(clip: &Clip, pos: Samples, i0: usize, i1: usize, buf: &mut [Vec<f32>], nsrc: usize, mut fetch: impl FnMut(Samples, usize, &mut [f32])) {
     if nsrc == 0 {
         return;
     }
     // Gain is evaluated every 32 samples and interpolated (fades and envelopes stay smooth).
     const STEP: usize = 32;
     let ndst = buf.len();
-    for (ch, dst) in buf.iter_mut().enumerate() {
-        let contributors = if nsrc > ndst { (nsrc - 1 - ch) / ndst + 1 } else { 1 };
-        let mut i = i0;
-        while i < i1 {
-            let seg_end = (i + STEP).min(i1);
-            let rel0 = pos.saturating_add(i as i64).saturating_sub(clip.start);
-            // The last sample of this step, not the first sample of the next one, so a breakpoint
-            // on the boundary does not ramp the audio before it.
-            let rel1 = pos.saturating_add(seg_end.saturating_sub(1) as i64).saturating_sub(clip.start);
-            let g0 = clip.gain_at(rel0);
-            let g1 = clip.gain_at(rel1.min(clip.length));
-            let n = (seg_end - i).saturating_sub(1).max(1) as f32;
-            for k in i..seg_end {
-                // Clip time; a looped clip (ADR 0019) reads its content modulo the loop range.
-                let rel = pos.saturating_add(k as i64).saturating_sub(clip.start);
-                let v = if nsrc > ndst {
-                    (ch..nsrc).step_by(ndst).map(|c| fetch(c, rel)).sum::<f32>() / contributors as f32
-                } else {
-                    fetch(ch % nsrc, rel)
+    let mut frame = [0.0f32; FRAME];
+    let mut i = i0;
+    while i < i1 {
+        let seg_end = (i + STEP).min(i1);
+        let rel0 = pos.saturating_add(i as i64).saturating_sub(clip.start);
+        // The last sample of this step, not the first sample of the next one, so a breakpoint
+        // on the boundary does not ramp the audio before it.
+        let rel1 = pos.saturating_add(seg_end.saturating_sub(1) as i64).saturating_sub(clip.start);
+        let g0 = clip.gain_at(rel0);
+        let g1 = clip.gain_at(rel1.min(clip.length));
+        let n = (seg_end - i).saturating_sub(1).max(1) as f32;
+        for k in i..seg_end {
+            // Clip time; a looped clip (ADR 0019) reads its content modulo the loop range.
+            let rel = pos.saturating_add(k as i64).saturating_sub(clip.start);
+            let t = (k - i) as f32 / n;
+            let gain = g0 + (g1 - g0) * t;
+            let whole = nsrc <= FRAME;
+            if whole {
+                fetch(rel, 0, &mut frame[..nsrc]);
+            }
+            for (ch, dst) in buf.iter_mut().enumerate() {
+                let mut get = |c: usize| {
+                    if whole {
+                        frame[c]
+                    } else {
+                        let mut one = [0.0f32];
+                        fetch(rel, c, &mut one);
+                        one[0]
+                    }
                 };
-                let t = (k - i) as f32 / n;
+                let v = if nsrc > ndst {
+                    let contributors = (nsrc - 1 - ch) / ndst + 1;
+                    (ch..nsrc).step_by(ndst).map(&mut get).sum::<f32>() / contributors as f32
+                } else {
+                    get(ch % nsrc)
+                };
                 if let Some(d) = dst.get_mut(k) {
-                    *d += v * (g0 + (g1 - g0) * t);
+                    *d += v * gain;
                 }
             }
-            i = seg_end;
         }
+        i = seg_end;
     }
 }
 

@@ -634,6 +634,9 @@ impl PlanCompiler {
         make: &mut dyn FnMut(&InstanceSpec, SlotGen) -> Option<NewInstance>,
     ) -> Result<PlanEnvelope, CompileError> {
         self.bypass = bypass;
+        // The clip reader's table (ADR 0056 decision 8), built here so a stretched clip's first
+        // read on the audio thread allocates nothing (#604).
+        transit_model::disk::prepare_reader();
         if self.faulted.is_some() {
             return Err(CompileError::Faulted);
         }

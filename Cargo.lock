@@ -4354,6 +4354,7 @@ dependencies = [
  "transit-audio-io",
  "transit-math",
  "transit-midi",
+ "transit-resample",
  "transit-test-support",
  "transit-time",
 ]

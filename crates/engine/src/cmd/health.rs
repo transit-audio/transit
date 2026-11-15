@@ -72,6 +72,13 @@ fn report(e: &mut Engine, _: &Value) -> Result<Value> {
                 }
                 if !clip.stretch.is_finite() || clip.stretch <= 0.0 || clip.length <= 0 {
                     add("invalid_clip", "Clip length or stretch is invalid. Replace this clip.");
+                } else if 1.0 / clip.stretch > transit_model::disk::MAX_RATE {
+                    // The clip reader's bound (ADR 0056 decision 5.2, #604): no command sets a stretch
+                    // this small (they keep it within 0.05..20), so only a session file can carry one.
+                    add(
+                        "stretch_out_of_range",
+                        "This clip is sped up more than 32 times (a stretch below 1/32); it plays as silence. Set its stretch to 0.05 or more.",
+                    );
                 }
                 let stretch = if clip.stretch.is_finite() && clip.stretch > 0.0 { clip.stretch } else { 1.0 };
                 // Match the mixer's last requested source sample, including elastic playback.
@@ -153,6 +160,30 @@ mod tests {
         let r = check(&mut e);
         assert_eq!(r["issues"][0]["code"], "invalid_clip");
         assert_eq!(r["issues"][1]["code"], "source_bounds");
+    }
+
+    /// A clip sped up past the clip reader's rate of 32 (only a session file can carry one) plays as
+    /// silence, and the check says so (#604).
+    #[test]
+    fn a_stretch_past_the_readers_rate_is_reported() {
+        let mut e = crate::demo::demo_engine();
+        let id = e.session().sources.first().unwrap().id;
+        let sr = e.session().sample_rate.hz();
+        e.session_mut().pool.insert(id, Arc::new(SourceAudio::new(AudioBuffer::new(sr, 1, 1_000))));
+        let t = e.session_mut().tracks.first_mut().unwrap();
+        t.playlists.clear();
+        let mut p = transit_model::Playlist::new("Fast");
+        let mut c = Clip::audio(ClipId(999), "Fast", id, 0, 0, 10);
+        c.stretch = 1.0 / 32.0;
+        p.clips.push(c);
+        t.playlists.push(p);
+        t.active_playlist = 0;
+        assert_eq!(check(&mut e)["healthy"], true, "a rate of 32 is the reader's largest");
+        e.session_mut().tracks.first_mut().unwrap().playlists[0].clips[0].stretch = 1.0 / 40.0;
+        let r = check(&mut e);
+        assert_eq!(r["issue_count"], 1, "{r}");
+        assert_eq!(r["issues"][0]["code"], "stretch_out_of_range");
+        assert!(r["issues"][0]["message"].as_str().unwrap().contains("plays as silence"), "{r}");
     }
 
     #[test]

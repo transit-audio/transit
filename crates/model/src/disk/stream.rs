@@ -54,7 +54,7 @@ impl DiskSource {
         if p.cache.is_none() && !p.broken {
             match (self.opener())() {
                 Ok(file) => {
-                    p.cache = Some(Cache::new(file, self.frames));
+                    p.cache = Some(Cache::new(file, self.frames, self.channels, self.cache_frames));
                     self.clear(STREAMER);
                 }
                 Err(e) => {
@@ -160,12 +160,15 @@ impl DiskSource {
     }
 }
 
-/// Write clip times `from..from + n` of `map` into `ring`, every channel.
+/// Write clip times `from..from + n` of `map` into `ring`, every channel, through
+/// [`StreamMap::read`]: a stretched clip's reader output, its taps made resident in `cache` first
+/// (ADR 0056 decision 8.6), so the ring holds what an in-memory read of the clip gives, bit for bit.
 fn fill(ring: &[AtomicU32], window: usize, channels: usize, map: &StreamMap, from: i64, n: usize, cache: &mut Cache) {
+    let mut frame = vec![0.0f32; channels];
     for k in from..from + n as i64 {
         let at = (k.max(0) as usize) % window;
-        for ch in 0..channels {
-            let v = map.sample(k, |x| cache.get(ch, x));
+        map.read(k, cache, 0, &mut frame);
+        for (ch, v) in frame.iter().enumerate() {
             if let Some(cell) = ring.get(ch * window + at) {
                 cell.store(v.to_bits(), Ordering::Relaxed);
             }

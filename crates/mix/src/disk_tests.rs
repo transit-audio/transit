@@ -273,3 +273,43 @@ fn a_full_request_table_drops_the_request_without_allocating() {
     let cued = maps.iter().filter(|m| disk.stream(m, 0, 16).is_some()).count();
     assert!((1..=transit_model::disk::SLOTS).contains(&cued), "{cued}");
 }
+
+/// Stretched clips through the band-limited reader (ADR 0056 decision 8, #604): a clip conformed from
+/// 133 to 130 bpm and a looped clip sped up by 1.25 play and render from a disk-backed source what
+/// memory gives, bit for bit, at any block cut, and neither path allocates on the audio thread.
+#[test]
+fn stretched_clips_play_and_render_from_disk_as_from_memory_at_any_block_cut() {
+    let data = content(10_000);
+    let disk = fake_source(&data, 2_048);
+    let conform = |c: &mut Clip| c.stretch = 133.0 / 130.0;
+    let ds = edited(&session(Arc::new(SourceAudio::disk(Arc::clone(&disk)))).0, conform);
+    let ms = edited(&session(memory(&data)).0, conform);
+    let bits = |x: &[f32]| x.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+    assert_eq!(transit_model::disk::prime_session(&ds, 0), 0);
+    let blocks: Vec<i64> = (0..36).map(|b| b * BLOCK as i64).collect();
+    let got = live(&ds, &blocks, Some(&disk), true);
+    let want = live(&ms, &blocks, None, true);
+    assert!(want.iter().any(|v| v.abs() > 0.01));
+    assert_eq!(bits(&got), bits(&want));
+    assert_eq!(disk.underruns(), 0);
+    let range = Range::new(0, 8_000);
+    let flat = |x: Vec<Vec<f32>>| bits(&x.concat());
+    for block in [512, 97, 4_096] {
+        assert_eq!(flat(render_range(&ds, range, block)), flat(render_range(&ms, range, block)), "block {block}");
+    }
+    let t = ds.tracks[0].id;
+    assert_eq!(render_clips(&ds, t, range), render_clips(&ms, t, range));
+    // Without fades (whose gain steps follow the block today, until ADR 0058's clip slice), the
+    // stretched reads render the same at any block cut.
+    let unfaded = |c: &mut Clip| {
+        conform(c);
+        c.fade_in.len = 0;
+        c.fade_out.len = 0;
+    };
+    let (ds, ms) = (edited(&ds, unfaded), edited(&ms, unfaded));
+    let reference = flat(render_range(&ms, range, 512));
+    for block in [97, 4_096] {
+        assert_eq!(flat(render_range(&ds, range, block)), reference, "disk, block {block}");
+        assert_eq!(flat(render_range(&ms, range, block)), reference, "memory, block {block}");
+    }
+}

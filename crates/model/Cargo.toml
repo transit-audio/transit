@@ -11,6 +11,9 @@ repository.workspace = true
 transit-time.workspace = true
 # The clip fade kernel's sin and exp2 (ADR 0058 decision 13), through the portable seam (ADR 0055).
 transit-math.workspace = true
+# The band-limited reader every clip with a stretch other than 1 is read through (ADR 0056
+# decision 8, issue #604); `std` for the one process-wide table.
+transit-resample = { workspace = true, features = ["std"] }
 transit-audio-io.workspace = true
 transit-midi.workspace = true
 serde.workspace = true

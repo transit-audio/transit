@@ -279,9 +279,11 @@ fn plays(e: &Engine, name: &str, frames: usize) {
     let map = transit_model::disk::StreamMap::of(clip).unwrap();
     let disk = disk_of(e, name);
     let v = disk.stream(&map, 0, 64).unwrap_or_else(|| panic!("{name}: no ring after the prime"));
+    let take = [(0..frames).map(|x| x as f32 / frames as f32 - 0.5).collect::<Vec<f32>>()];
     for k in 0..64 {
-        let want = map.sample(k, |x| (x < frames).then(|| x as f32 / frames as f32 - 0.5));
-        assert_eq!(v.get(0, k), want, "{name}: clip time {k}");
+        let mut want = [0.0f32];
+        map.read(k, &mut transit_model::disk::Memory(&take), 0, &mut want);
+        assert_eq!(v.get(0, k), want[0], "{name}: clip time {k}");
     }
     drop(v);
     let (_, lines) = crate::io::DiskReads::check(e.session(), None, transit_time::Range::new(0, frames as i64));

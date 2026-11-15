@@ -40,6 +40,13 @@ fn fake(data: Vec<Vec<f32>>, window: usize) -> (Arc<DiskSource>, Arc<AtomicUsize
     (DiskSource::with_window(PathBuf::from("fake.wav"), channels, frames, 48_000, window, opener), opened)
 }
 
+/// Channel `ch` of `map`'s clip at clip time `k`, read from `data` in memory.
+pub(super) fn memory_read(map: &StreamMap, data: &[Vec<f32>], ch: usize, k: i64) -> f32 {
+    let mut out = [0.0f32];
+    map.read(k, &mut Memory(data), ch, &mut out);
+    out[0]
+}
+
 pub(super) fn map(clip: u64, length: i64) -> StreamMap {
     StreamMap { clip, offset: 0, looping: None, stretch: 1.0, length }
 }
@@ -112,7 +119,7 @@ fn looped_and_stretched_clips_stream_what_the_in_memory_read_gives() {
             let n = 100.min(3_000 - k) as usize;
             let v = d.stream(&m, k, n).unwrap_or_else(|| panic!("{m:?} short at {k}"));
             for i in k..k + n as i64 {
-                let want = m.sample(i, |x| data[0].get(x).copied());
+                let want = memory_read(&m, &data, 0, i);
                 assert_eq!(v.get(0, i).to_bits(), want.to_bits(), "{m:?} at {i}");
             }
             drop(v);
@@ -353,7 +360,7 @@ fn a_ring_cued_under_another_mapping_of_the_clip_is_a_miss() {
         d.underrun(&other, 64);
         d.pump();
         let v = d.stream(&other, 64, 64).expect("re-cued with the new mapping");
-        assert_eq!(v.get(0, 64), other.sample(64, |x| data[0].get(x).copied()));
+        assert_eq!(v.get(0, 64), memory_read(&other, &data, 0, 64));
     }
 }
 

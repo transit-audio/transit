@@ -15,11 +15,13 @@
 //! playback, [`DiskSource::check`] before an offline render (issue #523).
 //!
 //! A ring is keyed by clip time (samples from the clip's start), and holds the source channels'
-//! samples already mapped through the clip's loop and stretch ([`StreamMap::sample`], the
-//! function the in-memory read uses too). Clip time only moves forward while the transport
+//! samples already mapped through the clip's loop and stretch ([`StreamMap::read`], the
+//! function the in-memory read uses too: a stretched clip goes through the band-limited reader on
+//! the streamer thread, ADR 0056 decision 8.6). Clip time only moves forward while the transport
 //! plays, so a ring never needs to wrap content; a locate or a transport loop is a new stream.
 
 mod peaks;
+mod read;
 mod retarget;
 mod stream;
 
@@ -31,6 +33,7 @@ use transit_audio_io::{AudioInfo, BlockReader};
 use transit_time::{Range, Samples};
 
 pub use peaks::{DiskPeaks, PEAKS_BUCKET, PeaksOrigin, load_or_build_peaks, sidecar_path};
+pub use read::{ClipSource, Frames, MAX_RATE, Memory, SyncSource, prepare_reader};
 pub use stream::{PUMP_INTERVAL, register};
 
 /// Ring slots per source: streams of its clips that can be held at once (the playing one and the
@@ -42,7 +45,8 @@ pub const REQUESTS: usize = 16;
 pub const WINDOW_SECS: u32 = 2;
 /// The smallest ring, frames (a very low sample rate still gets several device periods).
 const MIN_WINDOW: usize = 1 << 14;
-/// Frames the synchronous reader and the streamer read from the file at a time.
+/// Frames the synchronous reader and the streamer read from the file at a time (more when one
+/// read's taps span more, which they never do at the reader's rates: at most 1,025 frames).
 const CACHE_FRAMES: usize = 1 << 16;
 
 /// A take longer than this many minutes is placed disk-backed (the default of the setting).
@@ -164,24 +168,6 @@ impl StreamMap {
         let ClipContent::Audio { offset, .. } = clip.content else { return None };
         let stretch = if clip.stretch.is_finite() && clip.stretch > 0.0 { clip.stretch } else { 1.0 };
         Some(StreamMap { clip: clip.id.0, offset, looping: clip.looping, stretch, length: clip.length })
-    }
-
-    /// One source channel's sample `k` samples of clip time in, read through `get` (a source frame
-    /// index to its sample, `None` past the data): the loop, then the stretch, linear between two
-    /// frames. Every reader of a clip, in memory or from disk, samples through this function.
-    #[inline]
-    pub fn sample(&self, k: Samples, mut get: impl FnMut(usize) -> Option<f32>) -> f32 {
-        let rel = crate::clip::content_pos(self.looping, k);
-        if (self.stretch - 1.0).abs() < 1e-9 {
-            usize::try_from(self.offset.saturating_add(rel)).ok().and_then(&mut get).unwrap_or(0.0)
-        } else {
-            let f = self.offset as f64 + rel as f64 / self.stretch;
-            let x0 = f.floor();
-            let fr = (f - x0) as f32;
-            let a = if x0 >= 0.0 { get(x0 as usize).unwrap_or(0.0) } else { 0.0 };
-            let b = if x0 + 1.0 >= 0.0 { get((x0 as usize).saturating_add(1)).unwrap_or(0.0) } else { 0.0 };
-            a + (b - a) * fr
-        }
     }
 }
 
@@ -312,12 +298,17 @@ impl Request {
         Some((map, k))
     }
 
+    /// The same request is waiting: the clip, the clip time and the whole mapping (the stretch and
+    /// the loop too, ADR 0056 decision 8.6), so a request under another mapping is not taken for it.
     fn is(&self, map: &StreamMap, k: Samples) -> bool {
         self.state.load(Ordering::Acquire) == READY
             && self.clip.load(Ordering::Relaxed) == map.clip
             && self.k.load(Ordering::Relaxed) == k
             && self.offset.load(Ordering::Relaxed) == map.offset
             && self.length.load(Ordering::Relaxed) == map.length
+            && self.stretch.load(Ordering::Relaxed) == map.stretch.to_bits()
+            && self.looped.load(Ordering::Relaxed) == map.looping.is_some()
+            && map.looping.is_none_or(|l| self.loop_start.load(Ordering::Relaxed) == l.start && self.loop_end.load(Ordering::Relaxed) == l.end)
     }
 }
 
@@ -325,6 +316,10 @@ impl Request {
 pub(crate) struct Cache {
     file: Box<dyn DiskFile>,
     frames: u64,
+    /// The source's channels (what a read gives every frame).
+    channels: usize,
+    /// Frames one read of the file loads.
+    window: usize,
     start: u64,
     len: usize,
     data: Vec<Vec<f32>>,
@@ -334,8 +329,21 @@ pub(crate) struct Cache {
 }
 
 impl Cache {
-    fn new(file: Box<dyn DiskFile>, frames: u64) -> Cache {
-        Cache { file, frames, start: 0, len: 0, data: Vec::new(), failed: false, error: None }
+    fn new(file: Box<dyn DiskFile>, frames: u64, channels: usize, window: usize) -> Cache {
+        Cache { file, frames, channels, window: window.max(1), start: 0, len: 0, data: Vec::new(), failed: false, error: None }
+    }
+
+    /// Read `frames` frames from frame `at` into the window; a read error leaves the file silent
+    /// until a new reader is opened, and is kept for [`Cache::take_error`].
+    fn load(&mut self, at: u64, frames: usize) {
+        match self.file.read_at(at, frames, &mut self.data) {
+            Ok(n) => (self.start, self.len) = (at, n),
+            Err(e) => {
+                self.failed = true;
+                self.len = 0;
+                self.error = Some(format!("reading failed: {e}"));
+            }
+        }
     }
 
     /// The read error this reader met, once: its owner records it on the source (issue #523).
@@ -352,15 +360,10 @@ impl Cache {
             return None;
         }
         if x < self.start || x >= self.start + self.len as u64 {
-            // A little behind as well: a stretched read takes the frame after, then the one before.
-            let at = x.saturating_sub(4);
-            match self.file.read_at(at, CACHE_FRAMES, &mut self.data) {
-                Ok(n) => (self.start, self.len) = (at, n),
-                Err(e) => {
-                    self.failed = true;
-                    self.error = Some(format!("reading failed: {e}"));
-                    return None;
-                }
+            // A little behind as well, for a caller stepping back a few frames.
+            self.load(x.saturating_sub(4), self.window);
+            if self.failed {
+                return None;
             }
         }
         let i = usize::try_from(x.checked_sub(self.start)?).ok()?;
@@ -378,6 +381,8 @@ pub struct DiskSource {
     frames: u64,
     rate: u32,
     window: usize,
+    /// Frames one read of the file loads ([`CACHE_FRAMES`]; tests use other sizes).
+    cache_frames: usize,
     slots: Box<[Slot]>,
     requests: Box<[Request]>,
     pump: Mutex<stream::Pump>,
@@ -435,12 +440,27 @@ impl DiskSource {
 
     /// [`DiskSource::new`] with rings of `window` frames (tests use short ones).
     pub fn with_window(path: PathBuf, channels: usize, frames: u64, rate: u32, window: usize, opener: Opener) -> Arc<DiskSource> {
+        Self::with_windows(path, channels, frames, rate, window, CACHE_FRAMES, opener)
+    }
+
+    /// [`DiskSource::with_window`] whose readers load `cache_frames` frames of the file at a time
+    /// (tests read the same clip with several sizes and compare).
+    pub(crate) fn with_windows(
+        path: PathBuf,
+        channels: usize,
+        frames: u64,
+        rate: u32,
+        window: usize,
+        cache_frames: usize,
+        opener: Opener,
+    ) -> Arc<DiskSource> {
         Arc::new(DiskSource {
             target: Mutex::new(Target { path, opener }),
             channels: channels.max(1),
             frames,
             rate,
             window: window.max(1),
+            cache_frames: cache_frames.max(1),
             slots: (0..SLOTS).map(|_| Slot::new()).collect(),
             requests: (0..REQUESTS).map(|_| Request::new()).collect(),
             pump: Mutex::new(stream::Pump::default()),
@@ -574,13 +594,28 @@ impl DiskSource {
     /// [`DiskSource::sync_failures`]). A failed open is tried again on the next call; a reader that
     /// failed a read reads nothing more until [`DiskSource::check`] opens a new one.
     pub fn with_sync<R>(&self, f: impl FnOnce(&mut dyn FnMut(usize, usize) -> Option<f32>) -> R) -> R {
+        self.with_sync_cache(|cache| match cache {
+            Some(cache) => f(&mut |ch, x| cache.get(ch, x)),
+            None => f(&mut |_, _| None),
+        })
+    }
+
+    /// [`DiskSource::with_sync`] as a [`ClipSource`], for [`StreamMap::read`]: what an offline
+    /// render of a clip reads, the same samples the streamer puts in a ring.
+    pub fn with_sync_source<R>(&self, f: impl FnOnce(&mut SyncSource<'_>) -> R) -> R {
+        let channels = self.channels;
+        self.with_sync_cache(|cache| f(&mut SyncSource { cache, channels }))
+    }
+
+    /// `f` with the synchronous reader (`None` when the file cannot be opened), recording a read
+    /// error it met.
+    fn with_sync_cache<R>(&self, f: impl FnOnce(Option<&mut Cache>) -> R) -> R {
         let mut guard = self.sync.lock().unwrap_or_else(PoisonError::into_inner);
         if guard.is_none() {
             let _ = self.open_sync(&mut guard);
         }
-        let Some(cache) = guard.as_mut() else { return f(&mut |_, _| None) };
-        let out = f(&mut |ch, x| cache.get(ch, x));
-        if let Some(why) = cache.take_error() {
+        let out = f(guard.as_mut());
+        if let Some(why) = guard.as_mut().and_then(Cache::take_error) {
             self.record(SYNC, why);
         }
         out
@@ -598,7 +633,7 @@ impl DiskSource {
     fn open_sync(&self, slot: &mut Option<Cache>) -> Result<(), String> {
         match (self.opener())() {
             Ok(file) => {
-                *slot = Some(Cache::new(file, self.frames));
+                *slot = Some(Cache::new(file, self.frames, self.channels, self.cache_frames));
                 self.clear(SYNC);
                 Ok(())
             }
@@ -711,3 +746,6 @@ pub fn prime_session(s: &Session, pos: Samples) -> usize {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod read_tests;
