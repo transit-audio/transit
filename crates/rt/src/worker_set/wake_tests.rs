@@ -37,6 +37,12 @@ impl ClaimGate {
     }
 }
 
+/// Waits (on state, with the stall bound) until worker `w` is parked with no wake pending; `why`
+/// names the point of the test, and the failure names the worker.
+fn wait_parked(set: &WorkerSet, w: usize, why: &str) {
+    wait_until(&format!("worker {w} parked ({why})"), || parked(set, w));
+}
+
 fn parked(set: &WorkerSet, w: usize) -> bool {
     // Acquire on the flag first: a consumed wake orders the worker's clear after `park` before the
     // read of `parked`, so `parked` here is the worker's next park, never the one it woke from.
@@ -47,28 +53,37 @@ fn parked(set: &WorkerSet, w: usize) -> bool {
 /// while worker B is parked. Strip 1 is then published and woken for with the wake cursor on A.
 /// Before the fix the wake counted A and stopped: B slept, strip 1 stayed published while strip 0
 /// stalled, and only the stall bound below ended the test. Now B is woken and renders it.
+///
+/// The test asserts outcomes, never the count `wake` returns: that count reads each worker's
+/// `parked` after unparking it, so a worker that runs at once (or returns from `park` spuriously)
+/// can be uncounted. That errs toward one more wake, never a lost one, and under starvation it
+/// happened (the chain hy starved run: `wake(2)` returned 1 with both workers seen parked).
 #[test]
 fn a_wake_reaches_a_parked_worker_while_an_awake_one_claims_a_strip_that_stalls() {
     let fake = Fake::new(2, Duration::ZERO);
     fake.set(0, Behavior::Stall);
     let mut set = set_of(&fake, 2);
-    wait_until("both workers parked after their first sweep", || parked(&set, 0) && parked(&set, 1));
+    wait_parked(&set, 0, "after its first sweep");
+    wait_parked(&set, 1, "after its first sweep");
     set.shared.claim_gate.strip.store(1, Ordering::Release);
 
     assert!(set.begin_block(1));
     assert_eq!(set.publish(0), Ok(Published::Published));
-    assert_eq!(set.wake(2), 2, "both workers were parked");
+    // Both are flagged and unparked (each reads `current` 0); one claims strip 0 and is held.
+    set.wake(2);
     wait_until("a worker held at the gate with strip 0 claimed", || set.shared.claim_gate.held.load(Ordering::Acquire) != 0);
     let a = set.shared.claim_gate.held.load(Ordering::Acquire) - 1;
     let b = 1 - a;
-    wait_until("the other worker parked again after an empty sweep", || parked(&set, b));
+    // `parked` also requires B's wake taken: B swept after the publish and found nothing.
+    wait_parked(&set, b, "again after an empty sweep");
     assert_eq!(set.shared.workers[a].current.load(Ordering::Relaxed), 0, "A has claimed but not marked itself busy");
     assert_eq!(set.jobs().slot(0).map(JobSlot::state), Some(State::Claimed));
 
     // The wake for strip 1 visits A first, as the cursor would after a wake that reached B last.
     set.wake_cursor = a;
     assert_eq!(set.publish(1), Ok(Published::Published));
-    assert_eq!(set.wake(1), 1, "B, the one parked worker, is the one that counts");
+    // A is awake (flagged, not counted), so the wake goes on to B; the old counting stopped at A.
+    set.wake(1);
     set.shared.claim_gate.open.store(true, Ordering::Release);
     wait_until("strip 1 rendered by B while A is inside strip 0's stall", || set.jobs().slot(1).map(JobSlot::state) == Some(State::Done));
     wait_until("A inside strip 0's stall", || fake.stalled.load(Ordering::Acquire) == 1);
