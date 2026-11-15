@@ -29,7 +29,7 @@ use crate::callback::{CallbackState, Installed, PlaneTable};
 use crate::com::{Buffers, ChannelCount, Driver, Event, Running};
 use crate::convert::Wire;
 use crate::driver::{BufferSize, DriverInfo, asio_error};
-use crate::engine::{DETACHED, Engine, Latencies, OPENED, STARTED, STOPPED, Side, SideShared};
+use crate::engine::{DETACHED, Engine, Latencies, OPENED, Reporter, STARTED, STOPPED, Side, SideShared};
 use crate::mmcss::{Mmcss, Released};
 use crate::stats::DriverEvents;
 use crate::watchdog::Watchdog;
@@ -79,6 +79,9 @@ enum BufferState {
     Missing,
     Prepared(Buffers),
     Running(Running),
+    /// A buffer switch still held a claim on the old buffers when they were to be disposed, so they
+    /// were leaked instead (#524): nothing can start, and the session's end leaks the driver.
+    Leaked,
 }
 
 /// One driver's streams.
@@ -210,7 +213,8 @@ impl Session {
         let engine = Engine::new(frames, format.rate, Arc::clone(&events), Arc::clone(&latencies));
         let system_step = engine.system_time_step_ns();
         let mmcss = Arc::new(Mmcss::new(mmcss));
-        let state = CallbackState::new(engine, driver.callback_driver(), Arc::clone(&events), wake, Arc::clone(&mmcss));
+        let outputs = usize::from(info.outputs);
+        let state = CallbackState::new(engine, driver.callback_driver(), Arc::clone(&events), wake, Arc::clone(&mmcss), outputs);
         let installed = Installed::install(state, limits.drain)
             .map_err(|_| ab::OpenError::InUse(format!("ASIO driver \"{name}\": another ASIO stream session is active in this process")))?;
         let mut session = Self {
@@ -287,13 +291,22 @@ impl Session {
         let shared = Arc::new(SideShared::new(Arc::clone(&self.events)));
         let frames = self.frames;
         let calibration = request.calibration;
+        let reporter = Reporter::new(Arc::clone(&shared), error);
+        let limit = self.limits.quiesce;
+        self.installed
+            .state()
+            .with_errors(limit, |errors| match direction {
+                ab::Direction::Output => errors.render = Some(reporter),
+                ab::Direction::Input => errors.capture = Some(reporter),
+            })
+            .ok_or_else(|| other(name, format_args!("an error callback of its other stream did not return within {} ms", limit.as_millis())))?;
         // No buffer switch runs (nothing has started), so the engine is free.
         self.installed.state().with(|engine, _| match callback {
             Callback::Render(render) => {
-                engine.render = Some(Side::new(Arc::clone(&shared), render, error, format, wire, calibration, frames));
+                engine.render = Some(Side::new(Arc::clone(&shared), render, format, wire, calibration, frames));
             }
             Callback::Capture(capture) => {
-                engine.capture = Some(Side::new(Arc::clone(&shared), capture, error, format, wire, calibration, frames));
+                engine.capture = Some(Side::new(Arc::clone(&shared), capture, format, wire, calibration, frames));
             }
         });
         match direction {
@@ -339,6 +352,12 @@ impl Session {
             ab::Direction::Output => engine.render = None,
             ab::Direction::Input => engine.capture = None,
         });
+        // An error callback still running past the limit keeps its reporter, which reports nothing
+        // more: the stream that owned it is gone (detached).
+        let _ = self.installed.state().with_errors(self.limits.quiesce, |errors| match direction {
+            ab::Direction::Output => errors.render = None,
+            ab::Direction::Input => errors.capture = None,
+        });
     }
 
     /// (Re)creates the buffers for the directions the engine holds, then refetches the latencies
@@ -348,7 +367,14 @@ impl Session {
             BufferState::Prepared(buffers) => {
                 // The table goes first: a failed `createBuffers` below must not leave addresses
                 // `disposeBuffers` made invalid for a buffer switch to write through.
-                self.forget_planes();
+                if !self.installed.state().forget_planes(self.limits.drain) {
+                    buffers.leak();
+                    self.buffers = BufferState::Leaked;
+                    return Err(other(
+                        name,
+                        "a buffer switch did not leave its buffers, so they were not disposed; close the streams and restart transit",
+                    ));
+                }
                 if let Err(code) = driver.dispose_buffers(buffers) {
                     log::warn!("{}", asio_error(name, "disposeBuffers", code));
                 }
@@ -357,6 +383,10 @@ impl Session {
             running @ BufferState::Running(_) => {
                 self.buffers = running;
                 return Err(other(name, "its buffers are in use by a running stream"));
+            }
+            BufferState::Leaked => {
+                self.buffers = BufferState::Leaked;
+                return Err(other(name, "its old buffers were not disposed; close the streams and restart transit"));
             }
             BufferState::Missing => {}
         }
@@ -382,19 +412,10 @@ impl Session {
         table.silence_outputs();
         let ready = driver.supports_output_ready(&buffers);
         self.installed.state().set_output_ready(ready);
-        self.installed.state().with(|_, planes| *planes = table);
+        self.installed.state().install_planes(table);
         self.buffers = BufferState::Prepared(buffers);
         self.refresh_latencies(name, driver);
         Ok(())
-    }
-
-    /// Takes the buffer addresses out of the callback state (a buffer switch then finds no buffer
-    /// to touch), before `disposeBuffers` makes them invalid: the host never holds a buffer address
-    /// across `disposeBuffers` (#524).
-    fn forget_planes(&self) {
-        let state = self.installed.state();
-        state.set_output_ready(false);
-        state.with(|_, planes| *planes = PlaneTable::default());
     }
 
     /// `getLatencies` into the atomics the stamps read.
@@ -472,17 +493,24 @@ impl Session {
         }
         match std::mem::replace(&mut self.buffers, BufferState::Missing) {
             BufferState::Missing => Err(other(name, "its buffers could not be created; close the streams and open them again")),
+            BufferState::Leaked => {
+                self.buffers = BufferState::Leaked;
+                Err(other(name, "its old buffers were not disposed; close the streams and restart transit"))
+            }
             BufferState::Running(running) => {
                 self.buffers = BufferState::Running(running);
                 side.start(pair.0, pair.1);
                 Ok(())
             }
             BufferState::Prepared(buffers) => {
-                // A fresh driver start: forget the stamps of any earlier run.
-                self.installed.state().with(|engine, planes| {
-                    engine.restart();
-                    planes.silence_outputs();
-                });
+                // A fresh driver start: forget the stamps of any earlier run, and play silence until
+                // the first buffer switch writes.
+                let state = self.installed.state();
+                state.with(|engine, _| engine.restart());
+                if !state.silence_outputs(self.limits.quiesce) {
+                    self.buffers = BufferState::Prepared(buffers);
+                    return Err(other(name, "a buffer switch was still writing its buffers; the stream did not start"));
+                }
                 side.start(pair.0, pair.1);
                 self.installed.state().forget_last_switch();
                 self.mmcss.arm();
@@ -584,12 +612,17 @@ impl Session {
             side.state.store(DETACHED, Ordering::Release);
         }
         self.stop_if_idle(name, driver);
-        let drained = self.installed.uninstall();
+        let mut drained = self.installed.uninstall();
         let buffers = match std::mem::replace(&mut self.buffers, BufferState::Missing) {
             BufferState::Prepared(buffers) => Some(buffers),
             // Not reached: every side is detached, so `stop_if_idle` stopped the driver.
             BufferState::Running(running) => Some(driver.stop(running).0),
             BufferState::Missing => None,
+            // Buffers that were never disposed: the driver goes with them.
+            BufferState::Leaked => {
+                drained = false;
+                None
+            }
         };
         match buffers {
             Some(buffers) if drained => {

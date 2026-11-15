@@ -12,7 +12,7 @@ use crate::session::Limits;
 use crate::stream_tests::lock;
 use crate::{AsioBackend, AsioStream};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use transit_audio_backend::{self as ab, Backend};
 
@@ -183,4 +183,105 @@ fn a_callback_still_inside_at_the_close_leaks_the_buffers_and_the_driver_and_lat
         driver.join().expect("the driver thread");
     });
     assert_eq!(stuck.observed.live.load(Ordering::Acquire), 1, "the driver stays loaded for the life of the process");
+}
+
+/// A capture callback that blocks inside its call number `nth` (counted from 1) until `release` is
+/// set; `entered` says it is inside.
+fn capture_blocking_at(nth: usize, entered: &Arc<AtomicBool>, release: &Arc<AtomicBool>) -> ab::CaptureCallback {
+    let (entered, release, calls) = (Arc::clone(entered), Arc::clone(release), AtomicUsize::new(0));
+    Box::new(move |block| {
+        block.chunks(&mut |_, _| {});
+        if calls.fetch_add(1, Ordering::SeqCst) + 1 == nth {
+            entered.store(true, Ordering::SeqCst);
+            while !release.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+        }
+    })
+}
+
+fn open_capture_with(rig: &Rig, capture: ab::CaptureCallback, error: ab::ErrorCallback) -> AsioStream {
+    let request = plan(rig, ab::Direction::Input);
+    rig.backend.open_stream(&rig.endpoint, &request, crate::session::Callback::Capture(capture), error).map(|(s, _)| s).expect("open capture")
+}
+
+fn silent(bytes: &[u8]) -> bool {
+    bytes.iter().all(|b| *b == 0)
+}
+
+/// Defect 3 of #524: a buffer switch that found the engine busy did nothing, so its half played
+/// the block it held from two switches ago at full level. It now writes silence into its half.
+#[test]
+fn a_buffer_switch_that_finds_the_engine_busy_writes_silence_into_its_half() {
+    let _guard = lock();
+    let rig = rig(spec());
+    let (entered, release) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let capture = open_capture_with(&rig, capture_blocking_at(3, &entered, &release), Box::new(|_| {}));
+    let render = open_render(&rig, loud()).expect("render");
+    ab::Stream::start(&capture).expect("start capture");
+    ab::Stream::start(&render).expect("start render");
+    testing::switch_time_info(0, Some(0), None);
+    testing::switch_time_info(1, Some(64), None);
+    assert!(!silent(&rig.observed.read_output(0, 1)), "half 1 holds a rendered block");
+    std::thread::scope(|scope| {
+        // The third switch (half 0) is held inside its capture callback, holding the engine.
+        let held = scope.spawn(|| testing::switch_time_info(0, Some(128), None));
+        while !entered.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        testing::switch_time_info(1, Some(192), None);
+        for channel in 0..2 {
+            assert!(silent(&rig.observed.read_output(channel, 1)), "channel {channel}: the skipped half replays the block from two switches ago");
+        }
+        release.store(true, Ordering::SeqCst);
+        held.join().expect("the held switch");
+    });
+    assert_eq!(ab::Stream::stats(&render).expect("stats").busy_skips, 1, "the skip is counted");
+    assert!(!silent(&rig.observed.read_output(0, 0)), "the held switch rendered its own half");
+    drop((capture, render));
+}
+
+/// Defect 3 of #524: an error was delivered under the flag a buffer switch needs, so an error
+/// callback that took long made the switches skip. Errors now have a flag of their own.
+#[test]
+fn an_error_callback_that_takes_long_does_not_make_a_buffer_switch_skip() {
+    let _guard = lock();
+    let rig = rig(spec());
+    let (entered, release) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let slow_error: ab::ErrorCallback = {
+        let (entered, release) = (Arc::clone(&entered), Arc::clone(&release));
+        Box::new(move |_| {
+            entered.store(true, Ordering::SeqCst);
+            while !release.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+        })
+    };
+    let capture = open_capture_with(&rig, Box::new(|block| block.chunks(&mut |_, _| {})), slow_error);
+    let renders = Arc::new(AtomicUsize::new(0));
+    let counted: ab::RenderCallback = {
+        let renders = Arc::clone(&renders);
+        Box::new(move |block| {
+            block.render(&mut |chunk| chunk.fill(0.5));
+            renders.fetch_add(1, Ordering::SeqCst);
+        })
+    };
+    let render = open_render(&rig, counted).expect("render");
+    ab::Stream::start(&capture).expect("start capture");
+    ab::Stream::start(&render).expect("start render");
+    std::thread::scope(|scope| {
+        // The driver asks for a reset from a thread of its own; the capture's error callback takes
+        // its time.
+        let message = scope.spawn(|| testing::message(abi::K_ASIO_RESET_REQUEST, 0));
+        while !entered.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        testing::switch_time_info(0, Some(0), None);
+        testing::switch_time_info(1, Some(64), None);
+        assert_eq!(renders.load(Ordering::SeqCst), 2, "the buffer switches ran while the error callback was inside");
+        assert_eq!(ab::Stream::stats(&render).expect("stats").busy_skips, 0);
+        release.store(true, Ordering::SeqCst);
+        assert_eq!(message.join().expect("the message thread"), 1);
+    });
+    drop((capture, render));
 }

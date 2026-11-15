@@ -228,11 +228,11 @@ pub(crate) struct Time {
     pub(crate) system_time_ns: Option<u64>,
 }
 
-/// One direction inside the engine: its callbacks and what only the callback thread touches.
+/// One direction inside the engine: its callback and what only the callback thread touches. Its
+/// error callback is apart, in [`Errors`].
 pub(crate) struct Side<C> {
     pub(crate) shared: Arc<SideShared>,
     callback: C,
-    error: ErrorCallback,
     format: Format,
     wire: Wire,
     calibration: Option<Calibration>,
@@ -240,8 +240,6 @@ pub(crate) struct Side<C> {
     held: Held,
     /// The callback panicked: it is not called again and its output is silence.
     faulted: bool,
-    /// An error was delivered; one per stream.
-    reported: bool,
     /// The next stamp is [`Quality::Invalid`]: the position anchor moved (a resync, a position
     /// that went back or skipped), so the clock fit restarts there, as after a WASAPI
     /// discontinuity.
@@ -250,30 +248,10 @@ pub(crate) struct Side<C> {
 
 impl<C> Side<C> {
     /// A direction of `format` on `wire`, with its scratch allocated here (on the control side).
-    pub(crate) fn new(
-        shared: Arc<SideShared>,
-        callback: C,
-        error: ErrorCallback,
-        format: Format,
-        wire: Wire,
-        calibration: Option<Calibration>,
-        frames: usize,
-    ) -> Self {
+    pub(crate) fn new(shared: Arc<SideShared>, callback: C, format: Format, wire: Wire, calibration: Option<Calibration>, frames: usize) -> Self {
         let channels = usize::from(format.channels).max(1);
         let scratch = vec![0.0; frames.clamp(1, transit_audio_backend::SCRATCH_FRAMES) * channels];
-        Self {
-            shared,
-            callback,
-            error,
-            format,
-            wire,
-            calibration,
-            scratch,
-            held: Held::default(),
-            faulted: false,
-            reported: false,
-            invalidate: false,
-        }
+        Self { shared, callback, format, wire, calibration, scratch, held: Held::default(), faulted: false, invalidate: false }
     }
 
     pub(crate) fn channels(&self) -> usize {
@@ -325,24 +303,72 @@ impl<C> Side<C> {
         }
     }
 
+    /// A panicking user callback: counted and never called again; the caller has it reported as
+    /// `Other` ([`PENDING_CAPTURE_FAULT`], [`PENDING_RENDER_FAULT`]).
+    fn panicked(&mut self, payload: Box<dyn std::any::Any + Send>) {
+        self.faulted = true;
+        self.shared.stats.fault();
+        // A payload whose own drop panics must not unwind into the driver either.
+        let _ = catch_unwind(AssertUnwindSafe(move || drop(payload)));
+    }
+}
+
+/// The pending error bits [`Errors::deliver`] reports: a reset request (or a rate change), a
+/// stall the watchdog found, and a panic of each direction's callback.
+pub(crate) const PENDING_RESET: u8 = 1;
+pub(crate) const PENDING_STALL: u8 = 2;
+pub(crate) const PENDING_CAPTURE_FAULT: u8 = 4;
+pub(crate) const PENDING_RENDER_FAULT: u8 = 8;
+
+/// One direction's error callback, reported once per stream.
+pub(crate) struct Reporter {
+    shared: Arc<SideShared>,
+    callback: ErrorCallback,
+    reported: bool,
+}
+
+impl Reporter {
+    pub(crate) fn new(shared: Arc<SideShared>, callback: ErrorCallback) -> Self {
+        Self { shared, callback, reported: false }
+    }
+
     /// Reports `error` once, if the stream is still the owner's (not stopped or dropped).
     fn report(&mut self, error: StreamError) {
         if self.reported || matches!(self.shared.state(), STOPPED | DETACHED) {
             return;
         }
         self.reported = true;
-        let report = &mut self.error;
+        let report = &mut self.callback;
         // The error callback may panic too; there is nobody left to tell.
         let _ = catch_unwind(AssertUnwindSafe(|| report(error)));
     }
+}
 
-    /// A panicking user callback: counted, reported as `Other`, and never called again.
-    fn panicked(&mut self, payload: Box<dyn std::any::Any + Send>) {
-        self.faulted = true;
-        self.shared.stats.fault();
-        // A payload whose own drop panics must not unwind into the driver either.
-        let _ = catch_unwind(AssertUnwindSafe(move || drop(payload)));
-        self.report(StreamError::Other);
+/// The error callbacks of a session's directions. They are kept apart from the [`Engine`] so that
+/// delivering an error (user code, which may take long) never holds the flag a buffer switch needs
+/// (#524): [`crate::callback`] guards them with a flag of their own.
+#[derive(Default)]
+pub(crate) struct Errors {
+    pub(crate) render: Option<Reporter>,
+    pub(crate) capture: Option<Reporter>,
+}
+
+impl Errors {
+    /// Reports the errors of the pending `bits`: a direction's panic to that direction, a reset or
+    /// a stall to each.
+    pub(crate) fn deliver(&mut self, bits: u8) {
+        for (side, bit) in [(&mut self.capture, PENDING_CAPTURE_FAULT), (&mut self.render, PENDING_RENDER_FAULT)] {
+            if let Some(side) = side.as_mut().filter(|_| bits & bit != 0) {
+                side.report(StreamError::Other);
+            }
+        }
+        for (bit, error) in [(PENDING_RESET, StreamError::ResetRequested), (PENDING_STALL, StreamError::Stalled)] {
+            if bits & bit != 0 {
+                for side in [self.capture.as_mut(), self.render.as_mut()].into_iter().flatten() {
+                    side.report(error);
+                }
+            }
+        }
     }
 }
 
@@ -453,8 +479,11 @@ impl Engine {
     }
 
     /// One buffer switch: counters, then the capture callback (its block was just recorded), then
-    /// the render callback (or silence). `arrival_100ns` is the QPC read at callback entry.
-    pub(crate) fn switch(&mut self, time: Time, arrival_100ns: u64, outputs: &mut dyn OutputPlanes, inputs: &dyn InputPlanes) {
+    /// the render callback (or silence). `arrival_100ns` is the QPC read at callback entry. Returns
+    /// the pending bits of the callbacks that panicked, for the caller to have reported.
+    #[must_use]
+    pub(crate) fn switch(&mut self, time: Time, arrival_100ns: u64, outputs: &mut dyn OutputPlanes, inputs: &dyn InputPlanes) -> u8 {
+        let mut faults = 0;
         let late = self.gap_over_period(arrival_100ns);
         if let (Some(now), Some(before)) = (time.position, self.last_position) {
             if now != before.saturating_add(self.frames as u64) {
@@ -516,6 +545,7 @@ impl Engine {
             let callback = &mut side.callback;
             if let Err(payload) = catch_unwind(AssertUnwindSafe(|| callback(&mut block))) {
                 side.panicked(payload);
+                faults |= PENDING_CAPTURE_FAULT;
             }
         }
         match (self.render.as_mut(), render_stamp) {
@@ -538,6 +568,7 @@ impl Engine {
                 let callback = &mut side.callback;
                 if let Err(payload) = catch_unwind(AssertUnwindSafe(|| callback(&mut block))) {
                     side.panicked(payload);
+                    faults |= PENDING_RENDER_FAULT;
                     silence(outputs);
                 }
             }
@@ -546,6 +577,7 @@ impl Engine {
         for shared in [self.capture.as_ref().map(|s| &s.shared), self.render.as_ref().map(|s| &s.shared)].into_iter().flatten() {
             shared.leave();
         }
+        faults
     }
 
     /// The end of a buffer switch's work (after `outputReady`): the service time of each live side.
@@ -556,16 +588,6 @@ impl Engine {
         }
         if let Some(side) = self.capture.as_ref().filter(|s| s.live()) {
             side.shared.stats.service(elapsed);
-        }
-    }
-
-    /// Reports `error` once to each direction the owner still holds.
-    pub(crate) fn report(&mut self, error: StreamError) {
-        if let Some(side) = self.capture.as_mut() {
-            side.report(error);
-        }
-        if let Some(side) = self.render.as_mut() {
-            side.report(error);
         }
     }
 }

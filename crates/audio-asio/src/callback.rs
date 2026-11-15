@@ -10,11 +10,15 @@
 //! STA host thread), `asioMessage` and `sampleRateDidChange` on whatever thread the driver uses,
 //! sometimes the host thread from inside a call it made. Nothing here blocks, allocates or takes a
 //! lock: the [`Engine`] and the buffer addresses sit in `UnsafeCell`s guarded by one `busy` flag
-//! that the callbacks only ever *try* to take (a callback that finds it taken does nothing and is
-//! counted in `busy_skips`); the control side takes it, spinning, only while the driver is stopped or before it
-//! starts (attach, restart), when no buffer switch runs. Driver messages that must reach the
-//! owner's error callback set a pending bit and deliver it under the same flag, from whichever
-//! thread gets it next; the holder rechecks the bit after releasing, so none is lost.
+//! that the callbacks only ever *try* to take; the control side takes it, spinning, only while the
+//! driver is stopped or before it starts (attach, restart), when no buffer switch runs. A buffer
+//! switch that finds `busy` taken writes silence into its half (through atomic copies of the
+//! output addresses) and is counted in `busy_skips` (#524). Every write to an output half holds
+//! that half's bit in `claims`, so no two writes to one half overlap. Errors that must reach the
+//! owner's error callbacks (a driver message, the watchdog, a panicking callback) set a pending
+//! bit and are delivered under a flag of their own, `reporting`, from whichever thread gets it
+//! next (never under `busy`, so a slow error callback cannot make a buffer switch skip); the
+//! holder rechecks the bits after releasing, so none is lost.
 //!
 //! **Lifetime.** A callback counts itself in the process-wide `ENTERING` while it reads `CURRENT`,
 //! and in the state's own `in_flight` count before it leaves `ENTERING`, so
@@ -30,7 +34,7 @@
 use crate::abi::{self, AsioBool, AsioCallbacks, AsioLong, AsioSampleRate, AsioTime};
 use crate::com::{CallbackDriver, Event};
 use crate::convert::{InputPlanes, OutputPlanes};
-use crate::engine::{Engine, Time};
+use crate::engine::{Engine, Errors, PENDING_RESET, PENDING_STALL, Time};
 use crate::mmcss::Mmcss;
 use crate::stats::DriverEvents;
 use std::cell::{Cell, UnsafeCell};
@@ -38,7 +42,7 @@ use std::ffi::c_void;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use transit_audio_backend::{HostOrigin, StreamError};
+use transit_audio_backend::HostOrigin;
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 
 /// The installed state, or null.
@@ -58,11 +62,6 @@ thread_local! {
 pub(crate) fn in_driver_callback() -> bool {
     DEPTH.with(Cell::get) > 0
 }
-
-/// The pending bit of a reset request (or a rate change) not yet reported.
-const PENDING_RESET: u8 = 1;
-/// The pending bit of a stall the watchdog found, not yet reported.
-const PENDING_STALL: u8 = 2;
 
 /// The callback table handed to every `createBuffers`, in writable static memory: the SDK passes
 /// it as `ASIOCallbacks *` and the driver keeps the pointer until `disposeBuffers`.
@@ -142,10 +141,12 @@ impl OutputPlanes for RawOutputs<'_> {
         let Some(address) = self.table.get(channel).and_then(|a| a.get(self.half)).copied().filter(|a| *a != 0) else { return &mut [] };
         // SAFETY: `address` is one of the two buffers `createBuffers` returned for this output
         // channel, `bytes` long (frames times the sample width), valid until `disposeBuffers`
-        // ("buffers are valid until ASIODisposeBuffers"). It is reached only under the state's
-        // `busy` flag (or during attach, before the driver starts), so no other Rust reference to
-        // it exists, and `&mut self` keeps this one unique until it ends. During the buffer switch
-        // for this half the driver works on the other half.
+        // ("buffers are valid until ASIODisposeBuffers"; the host takes the addresses out of the
+        // state before it calls that). It is reached only under the state's `busy` flag and with
+        // this half's claim held (or on fresh buffers whose addresses are not yet published), so
+        // no other Rust reference to it and no other write to it exists, and `&mut self` keeps
+        // this one unique until it ends. During the buffer switch for this half the driver works
+        // on the other half.
         unsafe { std::slice::from_raw_parts_mut(address as *mut u8, self.bytes) }
     }
 }
@@ -176,6 +177,17 @@ pub(crate) struct CallbackState {
     busy: AtomicBool,
     engine: UnsafeCell<Engine>,
     planes: UnsafeCell<PlaneTable>,
+    /// Guards `errors` as `busy` guards the engine, so that delivering an error (user code) never
+    /// holds `busy` and makes a buffer switch skip (#524).
+    reporting: AtomicBool,
+    errors: UnsafeCell<Errors>,
+    /// The halves (bit 0, bit 1) being written: every write to an output half holds its bit (#524).
+    claims: AtomicU8,
+    /// The output buffer addresses once more, as atomics: what a buffer switch that finds `busy`
+    /// taken zeroes its half through ([`CallbackState::silence_half`]). Published and cleared with
+    /// the plane table; one entry for each output channel of the driver.
+    silence: Box<[[AtomicUsize; 2]]>,
+    silence_bytes: AtomicUsize,
     driver: CallbackDriver,
     output_ready: AtomicBool,
     pending: AtomicU8,
@@ -195,19 +207,37 @@ pub(crate) struct CallbackState {
     in_flight: AtomicUsize,
 }
 
-// SAFETY: the `UnsafeCell`s are only accessed under `busy` (an acquire compare-exchange to take it,
-// a release store to give it back), which makes those accesses mutually exclusive across threads;
-// everything else is atomics, `Arc`s of atomics, the `Sync` `Event` and the `Sync` `CallbackDriver`.
-// The engine's user callbacks are `Send`, so running them on whichever thread holds `busy` is fine.
+// SAFETY: the engine and plane cells are only accessed under `busy`, the error cell only under
+// `reporting` (each taken with a compare-exchange and given back with a store, both SeqCst), which
+// makes the accesses to each cell mutually exclusive across threads; everything else is atomics,
+// a boxed slice of atomics, `Arc`s of atomics, the `Sync` `Event` and the `Sync`
+// `CallbackDriver`. The user callbacks are `Send`, so running them on whichever thread holds the
+// flag is fine.
 unsafe impl Sync for CallbackState {}
 
+/// Both halves' bits in `claims`.
+const BOTH_HALVES: u8 = 0b11;
+
 impl CallbackState {
-    pub(crate) fn new(engine: Engine, driver: CallbackDriver, events: Arc<DriverEvents>, wake: Arc<Event>, mmcss: Arc<Mmcss>) -> Box<Self> {
+    /// The state of a session over a driver with `outputs` output channels.
+    pub(crate) fn new(
+        engine: Engine,
+        driver: CallbackDriver,
+        events: Arc<DriverEvents>,
+        wake: Arc<Event>,
+        mmcss: Arc<Mmcss>,
+        outputs: usize,
+    ) -> Box<Self> {
         let rate = f64::from(engine.rate());
         Box::new(Self {
             busy: AtomicBool::new(false),
             engine: UnsafeCell::new(engine),
             planes: UnsafeCell::new(PlaneTable::default()),
+            reporting: AtomicBool::new(false),
+            errors: UnsafeCell::new(Errors::default()),
+            claims: AtomicU8::new(0),
+            silence: (0..outputs).map(|_| [AtomicUsize::new(0), AtomicUsize::new(0)]).collect(),
+            silence_bytes: AtomicUsize::new(0),
             driver,
             output_ready: AtomicBool::new(false),
             pending: AtomicU8::new(0),
@@ -230,9 +260,17 @@ impl CallbackState {
         self.busy.store(false, Ordering::SeqCst);
     }
 
+    fn try_report(&self) -> bool {
+        self.reporting.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_ok()
+    }
+
+    fn end_report(&self) {
+        self.reporting.store(false, Ordering::SeqCst);
+    }
+
     /// Runs `f` on the engine and the buffer addresses on the control side. Spins (yielding) for
     /// the flag; call it only when no buffer switch runs (before `start`, after `stop`), where it
-    /// is free at once or after one `asioMessage` delivery.
+    /// is free at once.
     pub(crate) fn with<R>(&self, f: impl FnOnce(&mut Engine, &mut PlaneTable) -> R) -> R {
         while !self.try_take() {
             std::thread::yield_now();
@@ -241,19 +279,114 @@ impl CallbackState {
         let (engine, planes) = unsafe { (&mut *self.engine.get(), &mut *self.planes.get()) };
         let r = f(engine, planes);
         self.give_back();
-        self.deliver_pending();
         r
+    }
+
+    /// Runs `f` on the error callbacks on the control side, waiting up to `limit` for an error
+    /// being delivered (user code) to end: `None` past it.
+    pub(crate) fn with_errors<R>(&self, limit: Duration, f: impl FnOnce(&mut Errors) -> R) -> Option<R> {
+        let deadline = Instant::now() + limit;
+        while !self.try_report() {
+            if Instant::now() > deadline {
+                return None;
+            }
+            std::thread::yield_now();
+        }
+        // SAFETY: `reporting` is held: no other access to the error cell exists until `end_report`.
+        let r = f(unsafe { &mut *self.errors.get() });
+        self.end_report();
+        self.deliver_pending();
+        Some(r)
     }
 
     pub(crate) fn set_output_ready(&self, supported: bool) {
         self.output_ready.store(supported, Ordering::Relaxed);
     }
 
+    /// Makes `table` the buffers of the buffer switches (control side, before the driver starts)
+    /// and publishes its output addresses for a skipped switch's silence. The buffers must already
+    /// be silent: nothing holds a claim on buffers whose addresses were not published.
+    pub(crate) fn install_planes(&self, table: PlaneTable) {
+        self.with(|_, planes| {
+            // The length before the addresses: a switch that reads a new address reads its length.
+            self.silence_bytes.store(table.output_bytes, Ordering::SeqCst);
+            for (channel, slot) in self.silence.iter().enumerate() {
+                let addresses = table.outputs.get(channel).copied().unwrap_or([0, 0]);
+                for (half, address) in slot.iter().zip(addresses) {
+                    half.store(address, Ordering::SeqCst);
+                }
+            }
+            *planes = table;
+        });
+    }
+
+    /// Takes the buffer addresses out of the state, so a buffer switch finds no buffer to touch,
+    /// then waits up to `limit` until no switch holds a claim (one that read an address before it
+    /// went may still be zeroing that half). Call it before `disposeBuffers`: the host never holds a
+    /// buffer address across it (#524). False when a claim was still held at the limit: the
+    /// buffers must not be disposed.
+    #[must_use]
+    pub(crate) fn forget_planes(&self, limit: Duration) -> bool {
+        self.set_output_ready(false);
+        self.with(|_, planes| {
+            *planes = PlaneTable::default();
+            for half in self.silence.iter().flatten() {
+                half.store(0, Ordering::SeqCst);
+            }
+            self.silence_bytes.store(0, Ordering::SeqCst);
+        });
+        // A skipped switch sets its claim, then reads an address (both SeqCst); the clear above
+        // stored the zeros, then this reads the claims. So either that switch read a zero, or its
+        // claim is seen here until it has finished zeroing.
+        let deadline = Instant::now() + limit;
+        while self.claims.load(Ordering::SeqCst) != 0 {
+            if Instant::now() > deadline {
+                return false;
+            }
+            std::thread::yield_now();
+        }
+        true
+    }
+
+    /// Zeroes both halves of every output buffer before a fresh driver start, holding both
+    /// halves' claims (waited for up to `limit`: false past it, nothing written).
+    #[must_use]
+    pub(crate) fn silence_outputs(&self, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        loop {
+            let before = self.claims.fetch_or(BOTH_HALVES, Ordering::SeqCst);
+            if before == 0 {
+                break;
+            }
+            // Give back the bits only this call set; another writer holds the rest.
+            self.claims.fetch_and(!(BOTH_HALVES & !before), Ordering::SeqCst);
+            if Instant::now() > deadline {
+                return false;
+            }
+            std::thread::yield_now();
+        }
+        self.with(|_, planes| planes.silence_outputs());
+        self.claims.fetch_and(!BOTH_HALVES, Ordering::SeqCst);
+        true
+    }
+
     /// One buffer switch on the driver's thread.
     fn switch(&self, index: AsioLong, time: Time, arrival_100ns: u64) {
         self.last_switch.store(arrival_100ns, Ordering::Relaxed);
         self.mmcss.tend();
+        let half = usize::from(index & 1 == 1);
+        let claim = 1u8 << half;
+        if self.claims.fetch_or(claim, Ordering::SeqCst) & claim != 0 {
+            // Another writer has this very half (a driver that asked twice for it, or the control
+            // side's silence before a start): it is that writer's to fill.
+            self.events.busy_skips.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
         if !self.try_take() {
+            // The engine is busy (an earlier buffer switch still runs, or the control side holds
+            // it): this half plays silence, not the block it held from two switches ago (#524).
+            self.silence_half(half);
+            self.claims.fetch_and(!claim, Ordering::SeqCst);
             self.events.busy_skips.fetch_add(1, Ordering::Relaxed);
             return;
         }
@@ -262,26 +395,36 @@ impl CallbackState {
         if self.resync.swap(false, Ordering::Relaxed) {
             engine.resync();
         }
-        let half = usize::from(index & 1 == 1);
         let mut outputs = RawOutputs { table: &planes.outputs, half, bytes: planes.output_bytes };
         let inputs = RawInputs { table: &planes.inputs, half, bytes: planes.input_bytes };
-        engine.switch(time, arrival_100ns, &mut outputs, &inputs);
+        let faults = engine.switch(time, arrival_100ns, &mut outputs, &inputs);
+        self.claims.fetch_and(!claim, Ordering::SeqCst);
         if self.output_ready.load(Ordering::Relaxed) {
             self.driver.output_ready();
         }
         engine.finish(arrival_100ns, qpc_100ns());
-        Self::deliver_locked(&self.pending, engine);
         self.give_back();
+        if faults != 0 {
+            self.pending.fetch_or(faults, Ordering::SeqCst);
+        }
         self.deliver_pending();
     }
 
-    fn deliver_locked(pending: &AtomicU8, engine: &mut Engine) {
-        let bits = pending.swap(0, Ordering::SeqCst);
-        if bits & PENDING_RESET != 0 {
-            engine.report(StreamError::ResetRequested);
-        }
-        if bits & PENDING_STALL != 0 {
-            engine.report(StreamError::Stalled);
+    /// Zeroes output half `half` of every published output buffer: a buffer switch that holds
+    /// that half's claim but not `busy`.
+    fn silence_half(&self, half: usize) {
+        for slot in self.silence.iter() {
+            let address = slot.get(half).map_or(0, |a| a.load(Ordering::SeqCst));
+            let bytes = self.silence_bytes.load(Ordering::SeqCst);
+            if address != 0 && bytes != 0 {
+                // SAFETY: `address` is an output buffer `createBuffers` returned, `bytes` long, and
+                // published by `install_planes`; `forget_planes` clears it and then waits until no
+                // claim is held before `disposeBuffers` (the SeqCst argument there), and this
+                // switch holds this half's claim, so the buffer is alive. Every write to this half
+                // holds that claim, so no other write to it runs now; the driver works on the
+                // other half during this half's switch. No Rust reference to it is made.
+                unsafe { std::ptr::write_bytes(address as *mut u8, 0, bytes) };
+            }
         }
     }
 
@@ -296,24 +439,26 @@ impl CallbackState {
     }
 
     /// The watchdog found the driver had stopped calling back (host thread): counted, and each
-    /// open stream gets `StreamError::Stalled` once, delivered at once when no buffer switch
-    /// holds the flag (else by its holder when it lets go).
+    /// open stream gets `StreamError::Stalled` once, delivered at once unless another error is
+    /// being delivered (then by that thread when it is done).
     pub(crate) fn stalled(&self) {
         self.events.timeouts.fetch_add(1, Ordering::Relaxed);
         self.pending.fetch_or(PENDING_STALL, Ordering::SeqCst);
         self.deliver_pending();
     }
 
-    /// Delivers pending errors if the flag is free; a holder delivers them before it lets go.
+    /// Delivers pending errors if no other thread is delivering; that one rechecks the bits after
+    /// it lets go, so none is lost. Never touches `busy`.
     fn deliver_pending(&self) {
         while self.pending.load(Ordering::SeqCst) != 0 {
-            if !self.try_take() {
+            if !self.try_report() {
                 return;
             }
-            // SAFETY: `busy` is held (taken above).
-            let engine = unsafe { &mut *self.engine.get() };
-            Self::deliver_locked(&self.pending, engine);
-            self.give_back();
+            // SAFETY: `reporting` is held (taken above): the only access to the error cell until
+            // `end_report`.
+            let errors = unsafe { &mut *self.errors.get() };
+            errors.deliver(self.pending.swap(0, Ordering::SeqCst));
+            self.end_report();
         }
     }
 
