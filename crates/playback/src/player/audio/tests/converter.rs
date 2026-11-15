@@ -1,14 +1,17 @@
-//! #525: the device-rate converter's output is a function of the rendered stream alone. It used
-//! to hold the last frame of every rendered block instead of interpolating into the next block,
-//! one wrong sample per block whenever the converter was active.
+//! #525 and #601: the device-rate converter's output is a function of the rendered stream alone,
+//! and it is the band-limited reader (ADR 0056 decision 8) at an exact position. #525 found it
+//! holding the last frame of every rendered block instead of reading into the next block; #601
+//! replaced its linear interpolation with the reader.
 //!
-//! Three layers: the converter's primitives (`Phase`, `Hold`) driven over a synthetic stream cut
-//! into arbitrary render blocks, compared bit for bit with a closed-form reference; the live
-//! player through its fake device (no real device), with a ramp whose linear interpolation is
-//! exact; and the converter's measured quality (passband and alias figures, deterministic tones).
-use super::super::phase::{Hold, Phase};
+//! Three layers: the converter's primitives (`Phase`, `History`) driven over a synthetic stream cut
+//! into arbitrary render blocks, compared bit for bit with the reader over the whole stream; the
+//! live player through its fake device (no real device); and the converter's measured quality
+//! (passband and alias figures, deterministic tones) against the reader's acceptance bounds.
+use super::super::phase::{History, Phase};
 use super::*;
+use crate::band_limited;
 use transit_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
+use transit_resample::Mono;
 
 const RATES: [u32; 5] = [44_100, 48_000, 88_200, 96_000, 192_000];
 /// Ratios no common rate pair has (session, device).
@@ -19,35 +22,45 @@ fn pairs() -> Vec<(u32, u32)> {
     RATES.iter().flat_map(|&session| RATES.iter().map(move |&device| (session, device))).chain(ODD).collect()
 }
 
-/// Output frame `k` read straight from the whole input: frame `floor(k * step / d)` and the next,
-/// at the fraction the converter computes (`d` = device rate x 1000, `step` = session rate x speed
-/// in thousandths). A whole-frame position is that frame exactly.
+/// Output frames read straight from the whole input with the reader: output frame `k` at the
+/// position `units / d` (`d` = device rate x 1000), `units` advancing by `session x speed` per
+/// output frame, the speed changing to `speeds[i].1` from output frame `speeds[i].0` on (the
+/// position carries on from where it is: nothing jumps).
+fn reference_with(input: &[f32], session: u32, device: u32, speeds: &[(usize, u32)], frames: usize) -> Vec<f32> {
+    let d = i64::from(device) * 1000;
+    let table = band_limited::table();
+    let mut units = 0i64;
+    let mut out = Vec::with_capacity(frames);
+    let mut one = [0.0f32];
+    for k in 0..frames {
+        let speed = speeds.iter().rev().find(|(from, _)| *from <= k).map_or(1000, |(_, s)| *s);
+        let step = i64::from(session) * i64::from(speed);
+        let q = step as f64 / d as f64;
+        band_limited::frame(table, &Mono(input), band_limited::position(units, d), q, &mut one);
+        out.push(one[0]);
+        units += step;
+    }
+    out
+}
+
 fn reference(input: &[f32], session: u32, device: u32, speed: u32, frames: usize) -> Vec<f32> {
-    let step = u128::from(session) * u128::from(speed);
-    let d = u128::from(device) * 1000;
-    (0..frames as u128)
-        .map(|k| {
-            let units = k * step;
-            let index = (units / d) as usize;
-            let fraction = ((units % d) as f64 / d as f64) as f32;
-            let a = input[index];
-            if fraction == 0.0 { a } else { a + (input[index + 1] - a) * fraction }
-        })
-        .collect()
+    reference_with(input, session, device, &[(0, speed)], frames)
 }
 
 /// The converter's own primitives, in the order `fill_inner` uses them, over `input` rendered in
-/// blocks of the sizes in `partition` (repeated).
-fn convert(input: &[f32], session: u32, device: u32, speed: u32, partition: &[usize], frames: usize) -> Vec<f32> {
-    let step = u64::from(session) * u64::from(speed);
+/// blocks of the sizes in `partition` (repeated), with the speed schedule of [`reference_with`].
+fn convert_with(input: &[f32], session: u32, device: u32, speeds: &[(usize, u32)], partition: &[usize], frames: usize) -> Vec<f32> {
     let mut phase = Phase::new(device).unwrap();
-    let mut hold = Hold::new();
+    let mut history = History::new();
     let mut block = vec![vec![0.0f32; 4096]];
     let (mut pending, mut cursor, mut sizes) = (0, 0, partition.iter().cycle());
     let mut out = Vec::with_capacity(frames);
-    for _ in 0..frames {
-        while phase.needs(pending) {
-            hold.keep(&block, pending);
+    let mut one = [0.0f32];
+    for k in 0..frames {
+        let speed = speeds.iter().rev().find(|(from, _)| *from <= k).map_or(1000, |(_, s)| *s);
+        let step = u64::from(session) * u64::from(speed);
+        while phase.needs(pending, step) {
+            history.keep(&block, pending);
             phase.remove(pending).unwrap();
             pending = *sizes.next().unwrap();
             for (slot, value) in block[0].iter_mut().zip(input.iter().skip(cursor).chain(std::iter::repeat(&0.0))).take(pending) {
@@ -55,11 +68,17 @@ fn convert(input: &[f32], session: u32, device: u32, speed: u32, partition: &[us
             }
             cursor += pending;
         }
-        let (index, fraction) = phase.index();
-        out.push(hold.sample(block.first(), 0, index, fraction, pending));
+        let (x, q) = phase.position(step);
+        history.frame(&block, pending, x, q, &mut one);
+        out.push(one[0]);
         phase.advance(step).unwrap();
     }
+    assert_eq!(history.misses(), 0, "{session} -> {device}: a read outside the kept and the pending frames");
     out
+}
+
+fn convert(input: &[f32], session: u32, device: u32, speed: u32, partition: &[usize], frames: usize) -> Vec<f32> {
+    convert_with(input, session, device, &[(0, speed)], partition, frames)
 }
 
 /// Deterministic full-scale noise, IEEE-exact (24-bit integers scaled by a power of two).
@@ -73,8 +92,9 @@ fn noise(frames: usize, seed: u32) -> Vec<f32> {
         .collect()
 }
 
+/// Input frames `frames` output frames read, with the reader's reach past the last one.
 fn input_frames(session: u32, device: u32, speed: u32, frames: usize) -> usize {
-    (frames as u128 * u128::from(session) * u128::from(speed) / (u128::from(device) * 1000)) as usize + 2
+    (frames as u128 * u128::from(session) * u128::from(speed) / (u128::from(device) * 1000)) as usize + 16 * 32 + 2
 }
 
 fn bits(samples: &[f32]) -> Vec<u32> {
@@ -108,22 +128,60 @@ fn equal_rates_pass_every_bit_through_whatever_the_partition() {
     }
 }
 
-/// One tone through the converter: (gain at the tone in dB, tone over everything else in dB).
-/// `frames` output frames hold a whole number of the tone's cycles and of the converter's phase
-/// pattern, so every component sits on a DFT bin (no window, no leakage).
-fn tone(session: u32, device: u32, hz: u32, out_hz: u32, frames: usize) -> (f64, f64) {
+/// A speed change moves the rate, never the position: the converter carries on from the exact
+/// position it reached, so its output is the reader over the whole stream at that piecewise
+/// position, whatever the partition, through changes up and down and back to unit rate.
+#[test]
+fn a_speed_change_continues_from_the_same_position() {
+    const FRAMES: usize = 6000;
+    let speeds: [(usize, u32); 4] = [(0, 1000), (1_234, 1_250), (2_500, 500), (4_000, 1000)];
+    for (session, device) in [(48_000, 48_000), (44_100, 48_000), (96_000, 44_100)] {
+        let input = noise(input_frames(session, device, 1_250, FRAMES), 11);
+        let expected = bits(&reference_with(&input, session, device, &speeds, FRAMES));
+        for partition in PARTITIONS {
+            let got = bits(&convert_with(&input, session, device, &speeds, partition, FRAMES));
+            let first = got.iter().zip(&expected).position(|(g, e)| g != e);
+            assert_eq!(first, None, "{session} -> {device}, blocks {partition:?}: first differing output frame");
+        }
+    }
+}
+
+/// The reader is linear phase, so the converter adds no delay: an impulse at render frame `S`
+/// peaks at the output frame whose position is nearest `S`, the frame the timeline maps `S` to
+/// (the record start point and the MIDI stamps use that map), as it did with the linear converter.
+/// What the reader adds is render-ahead: the block holding `S` is rendered up to the reader's reach
+/// before that output frame.
+#[test]
+fn an_impulse_peaks_at_the_output_frame_the_timeline_maps_it_to() {
+    const AT: usize = 3_001;
+    for (session, device) in [(44_100, 48_000), (48_000, 44_100), (48_000, 96_000), (96_000, 48_000), (44_100, 47_999)] {
+        let mut input = vec![0.0f32; input_frames(session, device, 1000, 8_000)];
+        input[AT] = 0.5;
+        let out = convert(&input, session, device, 1000, &[64], 8_000);
+        let peak = (0..out.len()).max_by(|a, b| out[*a].abs().total_cmp(&out[*b].abs())).unwrap();
+        let q = f64::from(session) / f64::from(device);
+        let nearest = (AT as f64 / q).round() as usize;
+        assert_eq!(peak, nearest, "{session} -> {device}: the impulse peaks at output frame {peak}, the map puts it at {nearest}");
+    }
+}
+
+/// One tone through the converter: (level at the bin `heard` in dB from the tone's amplitude, that
+/// bin over everything else in dB). `frames` output frames, after a warm-up of as many,
+/// hold a whole number of the tone's cycles and of the converter's phase pattern, so every
+/// component sits on a DFT bin (no window, no leakage).
+fn tone(session: u32, device: u32, hz: u32, heard: u32, frames: usize) -> (f64, f64) {
     use transit_math::f64 as m;
     const AMPLITUDE: f64 = 0.5;
     let tau = 2.0 * core::f64::consts::PI;
-    let input: Vec<f32> = (0..input_frames(session, device, 1000, frames))
+    let input: Vec<f32> = (0..input_frames(session, device, 1000, 2 * frames))
         .map(|n| (AMPLITUDE * m::sin(tau * f64::from(hz) * n as f64 / f64::from(session))) as f32)
         .collect();
-    let out = convert(&input, session, device, 1000, &[1, 7, 4096, 3, 64, 480], frames);
+    let out = convert(&input, session, device, 1000, &[1, 7, 4096, 3, 64, 480], 2 * frames);
     let (mut re, mut im, mut total) = (0.0, 0.0, 0.0);
-    for (n, &y) in out.iter().enumerate() {
+    for (n, &y) in out.iter().enumerate().skip(frames) {
         let y = f64::from(y);
         // The bin's angle reduced exactly (integer arithmetic) before the sine.
-        let turn = (u64::from(out_hz) * n as u64 % u64::from(device)) as f64 / f64::from(device);
+        let turn = (u64::from(heard) * n as u64 % u64::from(device)) as f64 / f64::from(device);
         let (s, c) = m::sin_cos(tau * turn);
         re += y * c;
         im -= y * s;
@@ -136,47 +194,69 @@ fn tone(session: u32, device: u32, hz: u32, out_hz: u32, frames: usize) -> (f64,
     (gain, 10.0 * m::log10(at / rest))
 }
 
-/// The linear converter's measured quality, pinned with margin. Linear interpolation is a
-/// triangle kernel: its passband droops as the tone nears the session's Nyquist, its images fall
-/// off only slowly, and with no anti-alias filter a session rate above the device's folds content
-/// above the device's Nyquist back almost unattenuated (an exact 2:1 decimation picks every other
-/// frame, so the fold is at full level). These are the figures a user gets until the converter is
-/// replaced; the fix record states them.
+/// The passband error bound of ADR 0056 decision 8.4 at rate `q`, as an amplitude ratio.
+fn passband_bound(q: f64) -> f64 {
+    10f64.powf(if q < 1.5 { -73.0 } else { -78.0 } / 20.0)
+}
+
+/// The converter at every common rate pair both ways (44.1, 48, 88.2 and 96 kHz), against the
+/// reader's acceptance bounds (ADR 0056 decision 8.4). The bands are those of the reader with the
+/// source at the session rate and the output at the device rate: the passband holds tones up to
+/// 0.42 of the lower of the two rates (18.5 kHz when either is 44.1 kHz, 20.2 kHz at 48 kHz); the
+/// alias band holds source tones that would play at 0.58 of the device rate or above.
+///
+/// A passband error of at most `e` of the tone's amplitude bounds the tone's measured gain within
+/// `20·log10(1 ± 2e)` dB (the error's projection on the bin) and the tone over everything else at
+/// `−20·log10(e) − 3.01` dB or more (the error's power at most `e²` of the squared amplitude, the
+/// tone's half). An alias tone's level at the bin it folds to is at most the alias bound. The
+/// figures are printed; the help and the known issue quote them.
 #[test]
-fn the_linear_converter_quality_is_measured_and_pinned() {
-    // (session, device, tone, where it is heard on the device, output frames, level there in dB
-    // from..to, the tone over everything else at least dB). Where the tone is above the device's
-    // Nyquist, "level" is the alias's: its rejection is minus that figure.
-    let cases: [(u32, u32, u32, u32, usize, f64, f64, f64); 12] = [
-        (44_100, 48_000, 1_000, 1_000, 4800, -0.03, 0.0, 58.0),
-        (44_100, 48_000, 10_000, 10_000, 4800, -1.6, -1.4, 19.0),
-        (44_100, 48_000, 20_000, 20_000, 4800, -6.5, -6.2, 2.5),
-        (48_000, 44_100, 1_000, 1_000, 4410, -0.03, 0.0, 60.0),
-        (48_000, 44_100, 10_000, 10_000, 4410, -1.4, -1.1, 20.0),
-        (48_000, 44_100, 20_000, 20_000, 4410, -5.5, -5.0, 5.0),
-        (48_000, 44_100, 23_000, 21_100, 4410, -7.4, -6.9, 1.0),
-        (48_000, 96_000, 1_000, 1_000, 9600, -0.03, 0.0, 57.0),
-        (48_000, 96_000, 20_000, 20_000, 9600, -4.2, -3.8, 4.0),
-        (96_000, 48_000, 1_000, 1_000, 4800, -0.001, 0.001, 100.0),
-        (96_000, 48_000, 20_000, 20_000, 4800, -0.001, 0.001, 100.0),
-        (96_000, 48_000, 30_000, 18_000, 4800, -0.001, 0.001, 100.0),
-    ];
+fn the_converter_meets_the_readers_bounds_at_every_common_rate_pair() {
+    const COMMON: [u32; 4] = [44_100, 48_000, 88_200, 96_000];
     let mut failures = Vec::new();
-    for (session, device, hz, out_hz, frames, low, high, rest_at_least) in cases {
-        let (level, rest) = tone(session, device, hz, out_hz, frames);
-        eprintln!("converter quality: {session} -> {device}, {hz} Hz heard at {out_hz} Hz: {level:.3} dB, tone over the rest {rest:.1} dB");
-        if !(low..=high).contains(&level) || rest < rest_at_least {
-            failures
-                .push(format!("{session} -> {device} {hz} Hz: {level:.3} dB (pinned {low}..{high}), rest {rest:.1} dB (pinned >= {rest_at_least})"));
+    for session in COMMON {
+        for device in COMMON.into_iter().filter(|d| *d != session) {
+            let q = f64::from(session) / f64::from(device);
+            let frames = device as usize / 10;
+            let low = session.min(device);
+            let edge = (u64::from(low) * 42 / 100 / 10 * 10) as u32;
+            let e = passband_bound(q);
+            let (gain_bound, rest_bound) = (20.0 * (1.0 + 2.0 * e).log10(), -20.0 * e.log10() - 3.0103);
+            for hz in [1_000, 10_000, edge] {
+                let (gain, rest) = tone(session, device, hz, hz, frames);
+                eprintln!("converter passband: {session} -> {device} (q {q:.5}), {hz} Hz: gain {gain:+.5} dB, tone over the rest {rest:.1} dB");
+                if gain.abs() > gain_bound || rest < rest_bound {
+                    failures.push(format!(
+                        "{session} -> {device} {hz} Hz: gain {gain:+.5} dB (bound ±{gain_bound:.5}), rest {rest:.1} dB (bound {rest_bound:.1})"
+                    ));
+                }
+            }
+            // Source tones below the session's Nyquist that would play at 0.58 of the device rate
+            // or above: 30 kHz at 88.2 and 96 kHz into 44.1 and 48 kHz.
+            let alias_from = f64::from(device) * 0.58;
+            if q > 1.0 && 30_000.0 >= alias_from && 30_000 < session / 2 {
+                let heard = device - 30_000;
+                let (level, _) = tone(session, device, 30_000, heard, frames);
+                let bound = if q < 1.5 { -73.5 } else { -78.0 };
+                eprintln!("converter alias: {session} -> {device} (q {q:.5}), 30000 Hz heard at {heard} Hz: {level:.1} dB (bound {bound})");
+                if level > bound {
+                    failures.push(format!("{session} -> {device} 30000 Hz alias at {heard} Hz: {level:.1} dB (bound {bound})"));
+                }
+            }
         }
+    }
+    // Transition-band observations (between 0.42 and 0.58 of the rate, decision 8.4's stated
+    // limits), printed for the record, not bounded: the old known issue's cases.
+    for (session, device, hz, heard) in [(44_100, 48_000, 20_000, 20_000), (48_000, 44_100, 20_000, 20_000), (48_000, 44_100, 23_000, 21_100)] {
+        let (level, rest) = tone(session, device, hz, heard, device as usize / 10);
+        eprintln!("converter transition band: {session} -> {device}, {hz} Hz heard at {heard} Hz: {level:+.2} dB, tone over the rest {rest:.1} dB");
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
 // The live player, through its fake device.
 
-/// The ramp's step: a power of two, so `n * STEP` is exact and linear interpolation of the ramp
-/// is exact up to one rounding.
+/// The ramp's step: a power of two, so `n * STEP` is exact.
 const STEP: f32 = 1.0 / 131_072.0;
 
 fn ramp_session(rate: u32, frames: usize) -> (Arc<Session>, [Vec<f32>; 2]) {
@@ -226,27 +306,42 @@ fn play(session: u32, device: u32, speed: u32, callbacks: &[usize], frames: usiz
             right.push(frame[1]);
         }
     }
+    assert_eq!(audio.history.misses(), 0, "{session} -> {device}: a read outside the kept and the pending frames");
     control.retire(audio.plans, audio.actions);
     (left, right, input)
 }
 
-/// The issue's case: every output frame of a ramp equals the closed form `k * session * speed /
-/// device * STEP` within one rounding, and equals the reference interpolation bit for bit.
+/// The issue's case through the live player: every output frame is the reader over the rendered
+/// stream at the exact position, bit for bit; and the ramp comes out at its closed form `k *
+/// session * speed / device * STEP` within the reader's measured response to a constant, relative
+/// to the value (decision 8.4: a filtered ramp is not exact). That limit is relative and governs
+/// from frame 4,096 on; below it the kernel's first moment at each fraction (an absolute error of a
+/// small fraction of one STEP) is not negligible against the value, and near frame 0 the taps
+/// before the stream read silence.
 #[test]
-fn a_ramp_through_the_player_is_exact_at_every_output_frame() {
+fn a_ramp_through_the_player_is_the_reader_at_every_output_frame() {
     const FRAMES: usize = 51_200;
     for (session, device, speed) in [(44_100, 48_000, 1000), (48_000, 44_100, 1000), (48_000, 96_000, 1000), (48_000, 48_000, 500)] {
         let (left, right, input) = play(session, device, speed, &[512], FRAMES);
-        let mut wrong = 0;
+        let q = f64::from(session) * f64::from(speed) / (f64::from(device) * 1000.0);
+        let limit = if q <= 1.0 {
+            4.2e-5
+        } else if q < 1.5 {
+            5.2e-5
+        } else {
+            3.7e-5
+        };
+        let mut worst = 0.0f64;
         for (k, &got) in left.iter().enumerate() {
-            let position = k as f64 * f64::from(session) * f64::from(speed) / (f64::from(device) * 1000.0);
-            let expected = position * f64::from(STEP);
-            // One rounding of the sum plus the fraction's own rounding (2^-24 of one step).
-            if (f64::from(got) - expected).abs() > expected * f64::from(f32::EPSILON) + f64::from(STEP) * 1e-6 {
-                wrong += 1;
+            let position = k as f64 * q;
+            if position < 4_096.0 {
+                continue;
             }
+            let expected = position * f64::from(STEP);
+            worst = worst.max((f64::from(got) - expected).abs() / expected);
         }
-        assert_eq!(wrong, 0, "{session} -> {device} at speed {speed}: output frames off the ramp");
+        eprintln!("ramp through the player, {session} -> {device} at speed {speed}: worst relative error {worst:.3e} (limit {limit:.1e})");
+        assert!(worst <= limit, "{session} -> {device} at speed {speed}: relative error {worst:.3e} over {limit:.1e}");
         assert_eq!(bits(&left), bits(&reference(&input[0], session, device, speed, FRAMES)), "{session} -> {device} left");
         assert_eq!(bits(&right), bits(&reference(&input[1], session, device, speed, FRAMES)), "{session} -> {device} right");
     }
@@ -279,17 +374,24 @@ fn the_player_output_is_independent_of_the_callback_partition() {
 }
 
 #[test]
-fn the_linear_converter_never_interpolates_from_unrendered_storage_after_a_short_loop_block() {
+fn the_converter_never_reads_unrendered_storage_after_a_short_loop_block() {
     let (mut control, mut audio, _) = fixture_session(44_100, signal());
     control.send_action(Command::Play { from: 17, end: None, looped: Some(Range::new(17, 20)) }, true).unwrap();
     let mut out = [0.0; 6];
     fill(&mut audio, &mut out);
-    // The third output sample is fractional past the last frame of this 3-frame render (frame
-    // 19). Capacity beyond that frame is NOT a valid neighbor: its neighbor is the next block's
-    // first frame, the loop's start (frame 17), rendered for it (#525; it used to hold frame 19).
-    let fraction = ((2 * 48_000_000 - 2 * 44_100_000) as f64 / 44_100_000.0) as f32;
-    let expected = |a: f32, b: f32| a + (b - a) * fraction;
-    assert!((out[4] - expected(20.0 / 128.0, 18.0 / 128.0)).abs() < 0.00001, "{}", out[4]);
-    assert!((out[5] - expected(40.0 / 128.0, 36.0 / 128.0)).abs() < 0.00001, "{}", out[5]);
+    // Every render block is the 3-frame loop (frames 17, 18, 19 again and again). Capacity beyond a
+    // block's last frame is NOT a valid tap: the taps past it read the next blocks, the loop's start
+    // rendered again, so the output is the reader over the looped stream (#525, #601).
+    let stream: Vec<Vec<f32>> = (0..2).map(|ch| (0..64).map(|n| ((17 + n % 3) % 31 + 1) as f32 * (ch + 1) as f32 / 128.0).collect()).collect();
+    let q = 48_000.0 / 44_100.0;
+    for (k, frame) in out.as_chunks::<2>().0.iter().enumerate() {
+        for (ch, &got) in frame.iter().enumerate() {
+            let mut one = [0.0f32];
+            band_limited::frame(band_limited::table(), &Mono(&stream[ch]), band_limited::position(k as i64 * 48_000_000, 44_100_000), q, &mut one);
+            // The plan's gain insert at unity, as before #601: within 1e-5 of the reader's value.
+            assert!((got - one[0]).abs() < 0.00001, "output frame {k} channel {ch}: {got} against the reader's {}", one[0]);
+        }
+    }
+    assert_eq!(audio.history.misses(), 0);
     control.retire(audio.plans, audio.actions);
 }

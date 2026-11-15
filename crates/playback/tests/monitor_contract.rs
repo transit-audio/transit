@@ -94,19 +94,28 @@ fn overflow_is_counted_and_resynchronizes_without_heap_work() {
     assert_eq!(output[1][0], -0.5);
 }
 
+/// At a converted rate the reader needs its look-ahead (`halo(q)` frames, 17 at 24 to 48 kHz) past
+/// a read (#601): two frames are not enough for two outputs, which are counted as underrun, and a
+/// clear then discards both frames unplayed. After the clear the reader starts from the next
+/// frame (its taps before it read silence), and an incomplete frame never shifts the channels.
 #[test]
-fn clear_discards_interpolation_history_and_incomplete_frames_never_shift_channels() {
+fn clear_discards_the_converters_frames_and_incomplete_frames_never_shift_channels() {
     let ring = InputRing::new(2, 24_000);
+    assert_eq!(ring.lookahead_frames(48_000), 17);
     let mut output = vec![vec![0.0; 2]; 2];
     ring.push(&[0.1, -0.1, 0.2, -0.2]);
     ring.pop_into(&mut output, 2, 48_000);
+    assert_eq!(ring.telemetry().underrun_frames, 2);
     ring.clear_monitor();
+    assert_eq!(ring.telemetry().discarded_frames, 2);
     ring.push(&[0.5, -0.5, 123.0]);
+    ring.push(&[0.0; 2 * 16]);
     ring.pop_into(&mut output, 1, 48_000);
+    // An integer position at q <= 1 reads the frame exactly.
     assert_eq!(output[0][0], 0.5);
     assert_eq!(output[1][0], -0.5);
     assert_eq!(ring.telemetry().incomplete_input_samples, 1);
-    assert_eq!(ring.telemetry().discarded_frames, 1);
+    assert_eq!(ring.telemetry().discarded_frames, 2);
 }
 
 #[test]
@@ -214,14 +223,17 @@ fn idle_clear_counts_an_overflow_recovery_exactly_once() {
     assert_eq!(ring.telemetry().overflow_recoveries, 1);
 }
 
+/// The backlog gauge counts from the converter's read position to the newest frame (#601): the
+/// frames before the position, kept only for the reader's taps, are played; the look-ahead past it
+/// is not. A clear discards exactly the unplayed frames.
 #[test]
-fn the_backlog_gauge_includes_unconsumed_interpolation_history() {
-    for (rate, input_frames, output_frames, remaining) in [(24_000, 1, 1, 1), (44_100, 1000, 100, 909)] {
+fn the_backlog_gauge_counts_from_the_read_position() {
+    for (rate, input_frames, output_frames, remaining) in [(24_000, 40, 10, 35), (44_100, 1000, 100, 909)] {
         let ring = InputRing::new(1, rate);
         ring.push(&vec![0.25; input_frames]);
         let mut output = vec![vec![0.0; output_frames]];
         ring.pop_into(&mut output, output_frames, 48_000);
-        // The first case retains left; the second retains a prefetched right frame.
+        // The next read is at input frame 5 (10 outputs at q = 0.5) and 91.875 (100 at q = 0.91875).
         assert_eq!(ring.buffered_input_frames(), remaining);
         assert_eq!(ring.telemetry(), MonitorTelemetry::default());
         ring.clear_monitor();

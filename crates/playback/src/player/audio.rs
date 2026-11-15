@@ -12,7 +12,7 @@ use transit_mix::{PlanLimits, RenderTarget};
 use transit_time::{MAX_POSITION, Range, Samples};
 
 mod phase;
-use phase::{Hold, Phase};
+use phase::{HOLD_CHANNELS, History, Phase};
 mod external;
 #[cfg(test)]
 pub(in crate::player) use external::FRAME_CLOCK_BASE;
@@ -550,9 +550,11 @@ pub(super) struct Audio {
     shared: Arc<Shared>,
     pending: usize,
     read: Phase,
-    /// The previous block's last frame, for the output frames between it and the pending block's
-    /// first (#525). Cleared with `read` whenever the pending block is discarded.
-    hold: Box<Hold>,
+    /// The rendered frames before the pending block that the converter's taps still reach (#525,
+    /// #601). Cleared with `read` whenever the pending block is discarded.
+    history: Box<History>,
+    /// One output frame of the converter, every channel of the block.
+    frame: Box<[f32; HOLD_CHANNELS]>,
     sample_rate: u32,
     device_rate: u32,
     faulted: bool,
@@ -657,7 +659,8 @@ impl Audio {
                 shared,
                 pending: 0,
                 read,
-                hold: Box::new(Hold::new()),
+                history: Box::new(History::new()),
+                frame: Box::new([0.0; HOLD_CHANNELS]),
                 sample_rate: target.sample_rate,
                 device_rate,
                 faulted: false,
@@ -757,7 +760,7 @@ impl Audio {
     fn restart_converter(&mut self) {
         self.pending = 0;
         self.read.reset();
-        self.hold.reset();
+        self.history.reset();
     }
 
     /// The callback enters `phase` (#162): one clock read and relaxed stores.
@@ -1063,8 +1066,8 @@ impl Audio {
     }
 
     /// One device callback shares these budgets across all scratch chunks and mix blocks.
-    /// No Session/plan owner is dropped here. Conversion quality remains the separate F04
-    /// gate; this integration initially preserves the existing linear converter.
+    /// No Session/plan owner is dropped here. The device-rate converter is the band-limited
+    /// reader (#601, `phase.rs`).
     pub(super) fn fill(
         &mut self,
         out: &mut [f32],
@@ -1145,12 +1148,12 @@ impl Audio {
         let mut quantum = self.read.quantum(callback_frames, step, self.plans.engine().max_block());
         let mut consumed = 0;
         'frames: for frame in out.chunks_exact_mut(channels) {
-            // The next block is rendered as soon as this output frame interpolates into it (#525);
-            // the pending block's last frame is kept for that interpolation.
-            while self.read.needs(self.pending) {
+            // The next block is rendered as soon as this output frame's taps reach into it (#525,
+            // #601); the frames before it that the taps still reach are kept.
+            while self.read.needs(self.pending, step) {
                 self.consumed(consumed)?;
                 consumed = 0;
-                self.hold.keep(self.plans.output(), self.pending);
+                self.history.keep(self.plans.output(), self.pending);
                 self.read.remove(self.pending)?;
                 self.pending = 0;
                 self.plans.service(plans, true);
@@ -1169,9 +1172,12 @@ impl Audio {
                 self.render_next(quantum, actions)?;
             }
             let output = self.plans.output();
-            let (index, fraction) = self.read.index();
-            let (hold, pending) = (&self.hold, self.pending);
-            let sample = |channel: usize| hold.sample(output.get(channel), channel, index, fraction, pending);
+            let index = self.read.index();
+            let (x, q) = self.read.position(step);
+            let width = output.len().min(HOLD_CHANNELS);
+            self.history.frame(output, self.pending, x, q, &mut self.frame[..width]);
+            let converted = &self.frame[..width];
+            let sample = |channel: usize| converted.get(channel).copied().unwrap_or(0.0);
             {
                 // The block holds Main's channels, then the output sinks' (ADR 0015). With sinks,
                 // everything is summed per device channel first and clamped once after.

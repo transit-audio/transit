@@ -63,3 +63,13 @@ tone over everything else in the output):
 | 48 to 96 kHz | 20 kHz | -4.02 dB | 4.6 dB |
 | 96 to 48 kHz | 1 kHz and 20 kHz | 0.000 dB | above 130 dB (exact 2:1 pick) |
 | 96 to 48 kHz | 30 kHz (alias at 18 kHz) | 0.000 dB | (alias rejection 0 dB) |
+
+Since #601 (v0.7.3) the converter is the band-limited reader of ADR 0056 decision 8, not linear
+interpolation, and the tests above carry new names: the ramp test is
+`a_ramp_through_the_player_is_the_reader_at_every_output_frame`, the short-loop test
+`the_converter_never_reads_unrendered_storage_after_a_short_loop_block`, and the quality test
+`the_converter_meets_the_readers_bounds_at_every_common_rate_pair`. The partition and pass-through
+tests keep their names and now compare with the reader over the whole stream; `Hold` became
+`History` (the frames the reader's taps still reach). The table above is the linear converter's;
+the known issue [device-rate-converter-quality](../known-issues/entries/device-rate-converter-quality.md)
+has the reader's figures.

@@ -33,7 +33,7 @@ text = "The name of the device as the driver reports it. If it is not the interf
 [[entry]]
 id = "audio_devices.rate"
 name = "Sample rate"
-text = "The rate the device runs at. It should match the session rate; if it differs, transit converts, which costs a little CPU. A Requested line appears when the device runs at something else than you asked for."
+text = "The rate the device runs at. It should match the session rate; then every sample passes through untouched. If it differs, transit converts the output and the live input with a band-limited converter: flat up to 0.42 of the lower rate (18.5 kHz when either is 44.1 kHz, 20.2 kHz at 48 kHz), with a little CPU and about 16 frames of look-ahead each way. A Requested line appears when the device runs at something else than you asked for."
 
 [[entry]]
 id = "audio_devices.channels"

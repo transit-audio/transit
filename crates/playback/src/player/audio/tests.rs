@@ -526,7 +526,7 @@ fn changed_layout_waits_for_old_render_ahead_and_releases_it_on_control() {
     surround.outputs[0].format = transit_model::ChannelFormat::Surround51;
     control.request(Arc::new(surround), None).unwrap();
     control.service(&mut make);
-    assert!(!audio.read.needs(audio.pending));
+    assert!(!audio.read.needs(audio.pending, 48_000 * 1000));
     let ((), heap) = measure(|| fill(&mut audio, &mut [0.0; 2]));
     assert!(heap.is_zero(), "{heap:?}");
     assert_eq!(audio.plans.engine().active().generation, old);

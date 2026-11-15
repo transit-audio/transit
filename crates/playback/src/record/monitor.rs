@@ -1,4 +1,5 @@
 use super::finite;
+use crate::band_limited::{self, Frames, SincTable};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -35,111 +36,135 @@ struct MonitorCounters {
 
 struct MonitorReader {
     queue: rtrb::Consumer<f32>,
-    left: Vec<f32>,
-    right: Vec<f32>,
-    left_valid: bool,
-    right_valid: bool,
-    phase: f64,
+    /// Interleaved channels a queued frame has.
+    ch: usize,
+    /// One converted frame, every channel.
+    frame: Vec<f32>,
+    /// Position of the next output frame from the queue's front frame, in units of `1 / den`
+    /// input frames (#601): exact, moved by the input rate per output frame and by whole frames as
+    /// the front is committed, so it is `x0 + n·q` with nothing accumulated in floating point.
+    units: i64,
+    /// The session rate the position is counted in (1 when the rates are equal or unknown).
+    den: i64,
     removed_frames: u64,
+    table: &'static SincTable,
+}
+
+/// The queued input as the reader sees it: the queue's front frame at index 0, zeros outside.
+struct Queued<'a> {
+    first: &'a [f32],
+    second: &'a [f32],
+    ch: usize,
+    frames: usize,
+}
+
+impl Frames for Queued<'_> {
+    fn channels(&self) -> usize {
+        self.ch
+    }
+
+    #[inline]
+    fn sample(&self, channel: usize, frame: i64) -> f32 {
+        let Ok(k) = usize::try_from(frame) else { return 0.0 };
+        if k >= self.frames || channel >= self.ch {
+            return 0.0;
+        }
+        let i = k * self.ch + channel;
+        match self.first.get(i) {
+            Some(x) => *x,
+            None => self.second.get(i - self.first.len()).copied().unwrap_or(0.0),
+        }
+    }
 }
 
 impl MonitorReader {
-    fn frame(queue: &mut rtrb::Consumer<f32>, frame: &mut [f32], removed: &mut u64) -> bool {
-        if queue.slots() < frame.len() {
-            return false;
-        }
-        for sample in frame {
-            // Only this serialized consumer pops; a producer cannot remove available samples.
-            *sample = queue.pop().unwrap_or(0.0);
-        }
-        *removed = removed.wrapping_add(1);
-        true
-    }
-
+    /// Queued frames before the read position: already played, kept only for the reader's taps.
     fn history_frames(&self) -> usize {
-        // `left` is already consumed when phase >= 1; a prefetched right is still pending.
-        usize::from(self.left_valid && self.phase < 1.0) + usize::from(self.right_valid)
+        usize::try_from(self.units.div_euclid(self.den.max(1))).unwrap_or(0).min(self.queued_frames())
     }
 
     fn retired_input(&self) -> u64 {
-        self.removed_frames.wrapping_sub(self.history_frames() as u64)
+        self.removed_frames.wrapping_add(self.history_frames() as u64)
     }
 
-    /// Whole input frames queued now.
+    /// Whole input frames queued now, the reader's history included.
     fn queued_frames(&self) -> usize {
-        self.queue.slots() / self.left.len()
+        self.queue.slots() / self.ch
     }
 
-    /// Discard the oldest queued frames, and the interpolation history in front of them, until at
-    /// most `keep` remain queued. Returns the frames discarded. One queue commit: a pointer move.
+    /// Commit `frames` frames from the front: played or discarded. One queue commit.
+    fn commit(&mut self, frames: usize) {
+        if frames > 0
+            && let Ok(chunk) = self.queue.read_chunk(frames * self.ch)
+        {
+            chunk.commit_all();
+        }
+        self.removed_frames = self.removed_frames.wrapping_add(frames as u64);
+    }
+
+    /// Discard the oldest queued frames, the reader's history included, until at most `keep`
+    /// remain queued, and read on from the new front. Returns the frames discarded unplayed. One
+    /// queue commit: a pointer move.
     fn align(&mut self, keep: usize) -> usize {
-        let ch = self.left.len();
         let excess = self.queued_frames().saturating_sub(keep);
         if excess == 0 {
             return 0;
         }
-        if let Ok(chunk) = self.queue.read_chunk(excess * ch) {
-            chunk.commit_all();
-        }
-        self.removed_frames = self.removed_frames.wrapping_add(excess as u64);
-        let held = self.history_frames();
-        self.left_valid = false;
-        self.right_valid = false;
-        self.phase = 0.0;
-        excess + held
+        let played = self.history_frames();
+        let drop = excess.max(played);
+        self.commit(drop);
+        self.units = 0;
+        drop - played
     }
 
-    /// Discard only the frames present at entry, never chase a running producer.
+    /// Discard only the frames present at entry, never chase a running producer. Returns the frames
+    /// discarded unplayed.
     fn clear(&mut self) -> usize {
-        let ch = self.left.len();
-        let queued = self.queue.slots() / ch;
-        if let Ok(chunk) = self.queue.read_chunk(queued * ch) {
-            // Commit the discard in one queue operation; f32 carries no destructor.
-            chunk.commit_all();
-        }
-        self.removed_frames = self.removed_frames.wrapping_add(queued as u64);
-        let held = self.history_frames();
-        self.left_valid = false;
-        self.right_valid = false;
-        self.phase = 0.0;
-        queued + held
+        let queued = self.queued_frames();
+        let played = self.history_frames();
+        self.commit(queued);
+        self.units = 0;
+        queued - played
     }
 
-    fn render(&mut self, out: &mut [Vec<f32>], frames: usize, step: f64) -> usize {
-        let mut written = 0;
-        for f in 0..frames {
-            if !self.left_valid {
-                self.left_valid = Self::frame(&mut self.queue, &mut self.left, &mut self.removed_frames);
-                if !self.left_valid {
-                    break;
-                }
-            }
-            while self.phase >= 1.0 {
-                if self.right_valid {
-                    std::mem::swap(&mut self.left, &mut self.right);
-                    self.right_valid = false;
-                } else if !Self::frame(&mut self.queue, &mut self.left, &mut self.removed_frames) {
-                    return written;
-                }
-                self.phase -= 1.0;
-            }
-            // An exact sample needs no lookahead. Equal rates therefore add no interpolation
-            // frame of latency and consume the final available frame, even for a one-frame call.
-            if self.phase > 0.0 && !self.right_valid {
-                self.right_valid = Self::frame(&mut self.queue, &mut self.right, &mut self.removed_frames);
-                if !self.right_valid {
-                    break;
-                }
-            }
-            let fraction = self.phase as f32;
-            for ((channel, &a), &b) in out.iter_mut().zip(&self.left).zip(&self.right) {
-                if let Some(x) = channel.get_mut(f) {
-                    *x = if fraction == 0.0 { a } else { finite(a * (1.0 - fraction) + b * fraction) };
-                }
-            }
-            self.phase += step;
-            written += 1;
+    /// Up to `frames` output frames at `num` input frames per `den` session frames (both 1 when the
+    /// rates are equal or unknown), into `out` from frame 0. Stops at the first frame whose taps are
+    /// not all queued yet (the caller counts the rest as underrun); returns the frames written.
+    fn render(&mut self, out: &mut [Vec<f32>], frames: usize, num: i64, den: i64) -> usize {
+        if den != self.den {
+            // The session rate changed under the ring: the same position in the new units (floor, so
+            // it moves by less than one unit of the new rate, never a jump).
+            self.units = i64::try_from(i128::from(self.units) * i128::from(den) / i128::from(self.den.max(1))).unwrap_or(0);
+            self.den = den;
         }
+        let q = num as f64 / den as f64;
+        let queued = self.queued_frames();
+        let width = out.len().min(self.ch);
+        let mut written = 0;
+        {
+            let Ok(chunk) = self.queue.read_chunk(queued * self.ch) else { return 0 };
+            let (first, second) = chunk.as_slices();
+            let source = Queued { first, second, ch: self.ch, frames: queued };
+            for f in 0..frames {
+                let x = band_limited::position(self.units, den);
+                if band_limited::span(x, q).end > queued as i64 {
+                    break;
+                }
+                band_limited::frame(self.table, &source, x, q, &mut self.frame[..width]);
+                for (channel, &value) in out.iter_mut().zip(&self.frame[..width]) {
+                    if let Some(sample) = channel.get_mut(f) {
+                        *sample = finite(value);
+                    }
+                }
+                self.units += num;
+                written += 1;
+            }
+        }
+        // Frames before the next read's first tap are never read again.
+        let next = band_limited::span(band_limited::position(self.units, den), q).start;
+        let done = usize::try_from(next).unwrap_or(0).min(queued);
+        self.commit(done);
+        self.units -= done as i64 * den;
         written
     }
 }
@@ -169,8 +194,11 @@ pub const ALIGNED_BACKLOG_BLOCKS_UNPAIRED: usize = 1;
 /// alignment (K22): the first read after a plan adopts the ring, and after any
 /// [`Self::clear_monitor`], discards the oldest queued frames so that only the read itself plus
 /// [`ALIGNED_BACKLOG_BLOCKS_PAIRED`] (or `_UNPAIRED`) read blocks remain, whatever queued while
-/// nothing was reading. Otherwise the reader never trims the FIFO. Rate conversion is currently linear interpolation: it is
-/// not bandlimited SRC or compensation for independent device-clock drift.
+/// nothing was reading. Otherwise the reader never trims the FIFO. Rate conversion is the
+/// band-limited reader (#601, ADR 0056 decision 8): at equal rates it passes every frame through
+/// bit for bit; otherwise it reads `halo(q)` frames past its position, which alignment keeps queued
+/// on top of the read and the slack (the backlog B grows by that look-ahead,
+/// [`Self::lookahead_frames`]). It is not compensation for independent device-clock drift.
 pub struct InputRing {
     producer: Mutex<rtrb::Producer<f32>>,
     reader: Mutex<MonitorReader>,
@@ -201,7 +229,7 @@ pub struct InputRing {
 impl InputRing {
     /// Prepare up to half a second of storage, capped at 16 MiB of sample data. Channels
     /// follow CPAL's u16 domain (zero normalizes to one); an extreme format gets a shorter
-    /// FIFO, not an unbounded allocation. Interpolation history adds two device frames.
+    /// FIFO, not an unbounded allocation. The converter's history and look-ahead stay in the FIFO.
     /// Capture and render are taken to run on separate callbacks
     /// ([`ALIGNED_BACKLOG_BLOCKS_UNPAIRED`]); see [`Self::with_pairing`].
     pub fn new(channels: usize, rate: u32) -> Arc<InputRing> {
@@ -217,15 +245,7 @@ impl InputRing {
         let (producer, queue) = rtrb::RingBuffer::new(frames * ch);
         let (producer, reader) = (
             Mutex::new(producer),
-            Mutex::new(MonitorReader {
-                queue,
-                left: vec![0.0; ch],
-                right: vec![0.0; ch],
-                left_valid: false,
-                right_valid: false,
-                phase: 0.0,
-                removed_frames: 0,
-            }),
+            Mutex::new(MonitorReader { queue, ch, frame: vec![0.0; ch], units: 0, den: 1, removed_frames: 0, table: band_limited::table() }),
         );
         // On macOS `std::sync::Mutex` is a lazily boxed `pthread_mutex_t`: the first lock or
         // `try_lock` allocates 64 bytes. Take each lock once here, on the control thread, so the
@@ -343,30 +363,50 @@ impl InputRing {
             self.counters.discarded.fetch_add(reader.clear() as u64, Ordering::Relaxed);
             self.counters.recoveries.fetch_add(u64::from(overrun), Ordering::Relaxed);
         }
-        let step = if self.rate == 0 || session_rate == 0 { 1.0 } else { f64::from(self.rate) / f64::from(session_rate) };
+        let (num, den) = self.ratio(session_rate);
         // Alignment waits for a read that has room and finds input: a read before the device's
-        // input runs leaves it pending rather than aligning an empty ring.
+        // input runs leaves it pending rather than aligning an empty ring. It keeps the read, the
+        // converter's look-ahead past it (0 at equal rates) and the slack.
         if frames > 0 && reader.queued_frames() > 0 && self.align_pending.swap(false, Ordering::AcqRel) {
-            let read = (frames as f64 * step).ceil() as usize;
+            // The input frames the read spans, in integers (an f64 product can round past a whole
+            // number and keep one frame too many).
+            let read = usize::try_from((frames as u128 * num as u128).div_ceil(den as u128)).unwrap_or(usize::MAX);
             let slack = self.aligned_backlog_blocks.saturating_mul(read.max(self.last_push_frames.load(Ordering::Relaxed)));
-            let keep = read.saturating_add(slack);
+            let keep = read.saturating_add(self.lookahead_frames(session_rate)).saturating_add(slack);
             self.counters.discarded.fetch_add(reader.align(keep) as u64, Ordering::Relaxed);
         }
-        let written = reader.render(out, frames, step);
+        let written = reader.render(out, frames, num, den);
         self.retired_frames.store(reader.retired_input(), Ordering::Release);
         self.counters.underrun.fetch_add((frames - written) as u64, Ordering::Relaxed);
     }
 
-    /// Approximate buffered input frames, including pending interpolation history.
+    /// Input rate over `session_rate` as a ratio of integers (1/1 when they are equal or either is
+    /// unknown): the converter's position moves by `num` units of `1 / den` input frames per output
+    /// frame.
+    fn ratio(&self, session_rate: u32) -> (i64, i64) {
+        if self.rate == 0 || session_rate == 0 || self.rate == session_rate { (1, 1) } else { (i64::from(self.rate), i64::from(session_rate)) }
+    }
+
+    /// The input converter's look-ahead into a plan at `session_rate`, in input frames: what the
+    /// alignment keeps queued past the read on top of the backlog's slack, `halo(q)` when the rates
+    /// differ and 0 when they are equal (#601). It is the input-side latency the band-limited reader
+    /// adds, part of the backlog B the ring reports ([`Self::buffered_input_frames`]).
+    pub fn lookahead_frames(&self, session_rate: u32) -> usize {
+        let (num, den) = self.ratio(session_rate);
+        band_limited::lookahead(num as f64 / den as f64, num == den)
+    }
+
+    /// Approximate buffered input frames from the converter's read position to the newest frame
+    /// (the reader's history before the position is not counted; its look-ahead is).
     /// Snapshots can straddle concurrent calls; this is a bounded diagnostic, not a
     /// calibrated latency measurement or a synchronization/control input.
     pub fn buffered_input_frames(&self) -> usize {
         let accepted = self.accepted_frames.load(Ordering::Acquire);
         let retired = self.retired_frames.load(Ordering::Acquire);
-        accepted.saturating_sub(retired).min((self.fifo_frames + 2) as u64) as usize
+        accepted.saturating_sub(retired).min(self.fifo_frames as u64) as usize
     }
 
-    /// FIFO capacity in input frames, excluding two interpolation-history frames.
+    /// FIFO capacity in input frames.
     pub fn fifo_capacity_frames(&self) -> usize {
         self.fifo_frames
     }
@@ -389,7 +429,7 @@ impl InputRing {
 
 #[cfg(test)]
 mod ring_tests {
-    use super::InputRing;
+    use super::{InputRing, band_limited};
 
     #[test]
     fn read_waits_for_a_whole_frame_when_publication_pauses_between_channels() {
@@ -515,7 +555,22 @@ mod ring_tests {
         }
     }
 
-    /// Input faster than the session (96 kHz into 48 kHz): every other frame is read, in order.
+    /// The reader over the whole of `input` (one channel) at the converter's positions: output
+    /// frame `k` at `k · rate / session` input frames.
+    fn reference(input: &[f32], rate: u32, session: u32, frames: usize) -> Vec<f32> {
+        let mut one = [0.0f32];
+        (0..frames)
+            .map(|k| {
+                let x = band_limited::position(k as i64 * i64::from(rate), i64::from(session));
+                band_limited::frame(band_limited::table(), &transit_resample::Mono(input), x, f64::from(rate) / f64::from(session), &mut one);
+                one[0]
+            })
+            .collect()
+    }
+
+    /// Input faster than the session (96 kHz into 48 kHz): the band-limited reader at every other
+    /// input frame, in order (#601). A ramp comes out at `2k` within the reader's measured response
+    /// to a constant (3.7e-5 of the value at q >= 1.5) once the taps are past the stream's start.
     #[test]
     fn monitor_decimates_when_input_is_faster() {
         let ring = InputRing::new(1, 96_000);
@@ -523,8 +578,137 @@ mod ring_tests {
         ring.push(&input);
         let mut out = vec![vec![0.0f32; 100]];
         ring.pop_into(&mut out, 100, 48_000);
+        let expected = reference(&input, 96_000, 48_000, 100);
         for (k, v) in out[0].iter().enumerate() {
-            assert_eq!(*v, (2 * k) as f32, "output {k}");
+            assert_eq!(v.to_bits(), expected[k].to_bits(), "output {k}: {v} against the reader's {}", expected[k]);
+            if k >= 16 {
+                let want = (2 * k) as f32;
+                assert!((v - want).abs() <= 3.7e-5 * want, "output {k}: {v} against {want}");
+            }
+        }
+        assert_eq!(ring.telemetry().underrun_frames, 0);
+    }
+
+    /// The converter is the reader over the input at exact positions, bit for bit, at every pair of
+    /// rates and whatever the read partition (#601); equal rates pass every frame through.
+    #[test]
+    fn the_input_converter_is_the_reader_at_exact_positions() {
+        for (rate, session) in
+            [(44_100, 48_000), (48_000, 44_100), (96_000, 48_000), (48_000, 96_000), (88_200, 44_100), (16_000, 48_000), (48_000, 48_000)]
+        {
+            let input: Vec<f32> = (0..6_000).map(|i| ((i * 7919 % 2003) as f32 / 1001.5) - 1.0).collect();
+            let ring = InputRing::new(1, rate);
+            ring.push(&input);
+            let mut got = Vec::new();
+            let mut out = vec![vec![0.0f32; 127]];
+            for quantum in [1, 127, 3, 64, 127, 63, 127, 7, 100].iter().cycle().take(40) {
+                let ((), heap) = transit_rt::testing::measure(|| ring.pop_into(&mut out, *quantum, session));
+                assert!(heap.is_zero(), "{rate} -> {session}: the read allocated {heap:?}");
+                got.extend_from_slice(&out[0][..*quantum]);
+            }
+            let expected = reference(&input, rate, session, got.len());
+            let first = got.iter().zip(&expected).position(|(g, e)| g.to_bits() != e.to_bits());
+            assert_eq!(first, None, "{rate} -> {session}: first differing output frame");
+            assert_eq!(ring.telemetry().underrun_frames, 0, "{rate} -> {session}");
+        }
+    }
+
+    /// One device cycle of a paired device at `rate` into a `session` plan: the capture block, then
+    /// the plan's read of `frames` frames.
+    fn cycle_at(ring: &InputRing, block: &[f32], frames: usize, session: u32) -> Vec<f32> {
+        ring.push(block);
+        let mut out = vec![vec![0.0f32; frames]];
+        ring.pop_into(&mut out, frames, session);
+        out.swap_remove(0)
+    }
+
+    /// A click recorded through the input converter (#601): the converter adds no delay of its own
+    /// (the reader is linear phase), so the click peaks at the plan frame whose converter position
+    /// is nearest the click's input frame. What it adds is its look-ahead: the aligning read keeps
+    /// `halo(q)` input frames queued past the read, so the plan reads the input that much later,
+    /// and the backlog B the ring reports (which the External Instrument Measure logs and which
+    /// belongs to the measured round trip C) holds exactly that. At equal rates B stays 0.
+    #[test]
+    fn a_click_through_the_input_converter_peaks_at_its_input_position_and_the_backlog_reports_the_look_ahead() {
+        const CLICK: usize = 2_000;
+        // Blocks of a whole number of plan frames, so each read takes exactly one block of input.
+        for (rate, session, block) in [(48_000u32, 44_100u32, 160usize), (44_100, 48_000, 147), (96_000, 48_000, 128), (48_000, 48_000, 64)] {
+            let frames = block * session as usize / rate as usize;
+            let ring = InputRing::with_pairing(1, rate, true);
+            let lookahead = ring.lookahead_frames(session);
+            let q = f64::from(rate) / f64::from(session);
+            assert_eq!(lookahead, if rate == session { 0 } else { transit_resample::halo(q) });
+            // Seven blocks queued before the plan adopted the ring, then lockstep cycles: the aligning
+            // read keeps its own block and the look-ahead (paired: no slack), so the converter's
+            // position starts at input frame 7 blocks less the look-ahead.
+            ring.push(&vec![0.0; 7 * block]);
+            ring.align_on_next_read();
+            let front = 7 * block - lookahead;
+            let mut read = Vec::new();
+            for cycle in 0..40 {
+                let mut capture = vec![0.0f32; block];
+                for (i, x) in capture.iter_mut().enumerate() {
+                    if (7 + cycle) * block + i == CLICK {
+                        *x = 0.5;
+                    }
+                }
+                read.extend(cycle_at(&ring, &capture, frames, session));
+                assert_eq!(ring.buffered_input_frames(), lookahead, "{rate} -> {session}: B after cycle {cycle}");
+            }
+            let peak = (0..read.len()).max_by(|a, b| read[*a].abs().total_cmp(&read[*b].abs())).unwrap();
+            let nearest = ((CLICK - front) as f64 / q).round() as usize;
+            assert_eq!(peak, nearest, "{rate} -> {session}: the click peaks at plan frame {peak}, its input position maps to {nearest}");
+            assert_eq!(ring.telemetry().underrun_frames, 0, "{rate} -> {session}");
+        }
+    }
+
+    /// The input converter at every common rate pair both ways, against the reader's passband bound
+    /// (ADR 0056 decision 8.4): a 1 kHz tone and one at 0.42 of the lower rate, through 128-frame
+    /// reads, keep their level within `20·log10(1 ± 2e)` dB and stand `−20·log10(e) − 3.01` dB over
+    /// everything else (`e` the bound, see the device converter's quality test).
+    #[test]
+    fn the_input_converter_meets_the_readers_passband_bound_at_every_common_rate_pair() {
+        use transit_math::f64 as m;
+        const COMMON: [u32; 4] = [44_100, 48_000, 88_200, 96_000];
+        let tau = 2.0 * core::f64::consts::PI;
+        for rate in COMMON {
+            for session in COMMON.into_iter().filter(|s| *s != rate) {
+                let q = f64::from(rate) / f64::from(session);
+                let e = 10f64.powf(if q < 1.5 { -73.0 } else { -78.0 } / 20.0);
+                let edge = (u64::from(rate.min(session)) * 42 / 100 / 10 * 10) as u32;
+                for hz in [1_000u32, edge] {
+                    let frames = session as usize / 10;
+                    let input: Vec<f32> = (0..(2 * frames as u64 * u64::from(rate) / u64::from(session) + 64))
+                        .map(|n| (0.5 * m::sin(tau * f64::from(hz) * n as f64 / f64::from(rate))) as f32)
+                        .collect();
+                    let ring = InputRing::new(1, rate);
+                    ring.push(&input);
+                    let mut out = vec![vec![0.0f32; 128]];
+                    let mut got = Vec::new();
+                    while got.len() < 2 * frames {
+                        let n = (2 * frames - got.len()).min(128);
+                        ring.pop_into(&mut out, n, session);
+                        got.extend_from_slice(&out[0][..n]);
+                    }
+                    let (mut re, mut im, mut total) = (0.0, 0.0, 0.0);
+                    for (n, &y) in got.iter().enumerate().skip(frames) {
+                        let y = f64::from(y);
+                        let turn = (u64::from(hz) * n as u64 % u64::from(session)) as f64 / f64::from(session);
+                        let (s, c) = m::sin_cos(tau * turn);
+                        re += y * c;
+                        im -= y * s;
+                        total += y * y;
+                    }
+                    let n = frames as f64;
+                    let at = 2.0 * (re * re + im * im) / (n * n);
+                    let gain = 10.0 * m::log10(at / 0.125);
+                    let rest = 10.0 * m::log10(at / (total / n - at).max(1e-30));
+                    eprintln!("input converter: {rate} -> {session} (q {q:.5}), {hz} Hz: gain {gain:+.5} dB, tone over the rest {rest:.1} dB");
+                    assert!(gain.abs() <= 20.0 * (1.0 + 2.0 * e).log10(), "{rate} -> {session} {hz} Hz: gain {gain} dB");
+                    assert!(rest >= -20.0 * e.log10() - 3.0103, "{rate} -> {session} {hz} Hz: rest {rest} dB");
+                    assert_eq!(ring.telemetry().underrun_frames, 0);
+                }
+            }
         }
     }
 

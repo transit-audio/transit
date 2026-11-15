@@ -1,5 +1,17 @@
 use super::*;
 
+/// A device at another rate than the session's says the session is converted (#601); one at the
+/// session's rate says nothing.
+#[test]
+fn the_window_says_when_the_session_is_converted_to_the_device_rate() {
+    use crate::audio_devices::conversion_note;
+    assert_eq!(
+        conversion_note(48_000, 44_100).as_deref(),
+        Some("Session converted between 48000 Hz and the device's 44100 Hz (output and live input)")
+    );
+    assert_eq!(conversion_note(48_000, 48_000), None);
+}
+
 /// A device that runs a buffer other than the one asked for (PipeWire's quantum, a driver whose panel
 /// fixes the size) shows both on the line under "Output open", on any backend; an honored request
 /// shows nothing extra.
