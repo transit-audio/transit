@@ -178,6 +178,8 @@ fn a_callback_still_inside_at_the_close_leaks_the_buffers_and_the_driver_and_lat
             (1, 1),
             "the probe's driver was released, the session's is left loaded"
         );
+        let refused = stuck.backend.probe("Driver").expect_err("the driver is refused, a probe too");
+        assert!(refused.to_string().contains("until transit restarts"), "{refused}");
         let refused = open_render(&stuck, loud()).err().expect("the driver is refused");
         assert!(refused.to_string().contains("until transit restarts"), "{refused}");
         // With that callback still inside its (leaked) state, another driver's session closes
