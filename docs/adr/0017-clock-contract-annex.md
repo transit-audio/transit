@@ -3,7 +3,7 @@ title: Clock domains and timestamp quality: the clock contract annex to ADR 0012
 -->
 # ADR 0017: clock domains and timestamp quality
 
-- **Status:** proposed 2026-10-18; component-level G4 passed, hardware timing open; amended 2026-11-15, proposed: the band-limited rate converters (Amendment 2026-11-15, below)
+- **Status:** proposed 2026-10-18; component-level G4 passed, hardware timing open; amended 2026-11-15, accepted after three judging rounds: the band-limited rate converters (Amendment 2026-11-15, below)
 - Date: 2026-10-18. Status: proposed for joint review.
 - Parent: [ADR 0012](0012-midi-device-layer.md), gates G4 and G6.
 - Implementation status (2026-10-19 09:58 EDT): the original `f9078c7` jitter
@@ -280,7 +280,7 @@ it must still use the production mapping path.
 
 ## Amendment 2026-11-15: the band-limited rate converters (#601, #603)
 
-Proposed 2026-11-15. It describes the change for #601 and #603 and lands with it. The device-rate
+Accepted 2026-11-15 after three judging rounds (proposed the same day). It describes the change for #601 and #603 and lands with it. The device-rate
 converter, the live input converter and the System Audio converter now read through the
 band-limited reader of ADR 0056 decision 8 instead of two-point linear interpolation. It replaces
 one clause of the System Audio drift paragraph ("fed forward as the trim of a linear
@@ -307,3 +307,9 @@ limit included.
   position: `a_resync_starts_with_the_streams_frames_behind_the_position`. Output independent of the
   block and callback partition: `the_converter_output_is_independent_of_the_render_partition_at_every_rate_pair`,
   `the_player_output_is_independent_of_the_callback_partition`.
+- **Judging rounds.** Three, together with the 2026-11-15 amendments of ADR 0015, 0020 and 0056.
+  Round 1 asked for four changes, all made: bit-for-bit pass-through only at a whole-frame phase (a
+  fraction gained at another speed, or under a nonzero System Audio trim, is kept and filtered);
+  only finite samples (the live input zeroes a non-finite one, as before); the exact rational phase
+  reaching the reader with its fraction rounded down to 2^-32 frame; and B equal to `halo(q)` only
+  for reads of a whole number of input frames. Round 2 found nothing further here; round 3 settled.
