@@ -177,17 +177,37 @@ later note starts the key again and the first note-off ends it.
 
 ## Notes played during the count-in
 
-Not yet when recording from the very start of the session: there, a note you released during the
-count-in is left out of the take, because nothing can sit before bar 1 (a zone before bar 1 is being
-built, #441). Start the recording a bar or more into the session and the following applies.
+Notes you play on an armed MIDI or instrument track during the count-in are kept, as in Logic Pro,
+wherever the recording starts, including bar 1 at the very start of the session. When you play
+something during the count-in, the new clip covers the whole count-in: one bar of count-in gives a
+clip that starts one bar before the record start, and every note stays exactly where you played
+it, pickups before the downbeat included. Notes are not moved onto the beat. When you play nothing
+during the count-in, the clip starts at the record start as before. Recording already starts at
+the pre-roll start, so notes in the pre-roll are kept too. With Cycle on, the count-in notes belong
+to the first take, whose clip covers the count-in; later laps are one loop each.
 
-Notes you play on an armed MIDI or instrument track during the count-in are kept, as in Logic Pro:
-the clip starts at the first of them instead of at the record start, and every note stays where
-you played it. Recording already starts at the pre-roll start, so notes in the pre-roll are kept
-too. Nothing lands before the start of the session, and with Cycle on the count-in notes belong to
-the first take. Count-in notes need room before the record start: recording from the very start
-of the session, a note you released during the count-in is left out of the take (the status line
-says how many), and a note still held when recording starts begins at the session start.
+Recording from bar 1 with notes played during the count-in makes room before bar 1: the
+**pre-count zone**. Its bars count down from bar 1 (bar 0, bar -1, and so on), its lanes are drawn
+a little darker, Return to Zero (Home) goes to its start, Play from there plays the pickups, and a
+bounce or MIDI file export starts there. The zone lasts as long as a clip is in it: delete the clip
+or move it to bar 1 or later and the session starts at bar 1 again (undo brings it back). You can
+also record from the cursor in the zone, with a pre-roll that reaches into it, or with a cycle range
+that starts in it. Only MIDI clips sit before bar 1: an audio take that starts in the zone starts
+its clip at bar 1, the audio before bar 1 stays in the take file, and the status line says so.
+
+Because the clip now covers the whole count-in, a take recorded right after an earlier clip on the
+same track overlaps it more often, and so merges into it (or starts a take stack) where it used to
+start beside it.
+
+A controller you move during the count-in (a sustain pedal, the mod wheel) is kept too. With a note
+played, it is in the clip and sounds. With nothing played, it is kept hidden before the clip's start,
+as a start trim hides notes; drag the start edge back to reveal it.
+
+A note played before the count-in started (a key already going down as you pressed Record) is not
+in the take, and the status line says how many such notes were not recorded.
+
+A session with clips before bar 1 lists the `pre_count` need: transit builds from before this
+feature warn when they open it, and moving its zone clips in one of those builds puts them on bar 1.
 
 ## Takes and comping
 

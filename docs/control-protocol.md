@@ -95,6 +95,34 @@ Errors: `{"id": 1, "ok": false, "error": "bad parameters for `mix.volume`: no tr
   `"samples:48000"`.
 - Ranges: `start` + `end` (or `start` + `length`); omitted = the current edit selection.
 
+### Positions before bar 1 (the pre-count zone)
+
+Positions are signed: sample 0 and tick 0 are bar 1, and `"bars_beats:-1|1|000"` or a negative
+Min:Secs reading address the bars before it ([ADR 0052](adr/0052-pre-count-zone.md)). The session
+starts at its earliest clip start when that is before bar 1 (`session.inspect` reports
+`start_samples` beside the end); a MIDI take with notes played during the count-in is what puts a
+clip there.
+
+- **Floor at the session start** (they reach the zone when there is one, and stop at bar 1 when
+  there is none): `transport.play`, `transport.locate`, `transport.rewind`, `transport.rtz` (goes
+  to the session start), `transport.loop`, `view.scroll`, `edit.select`, moves and pastes of MIDI
+  clips, `edit.copy_clips`, `midi.new_clip` and the default start of `file.bounce_mix`,
+  `file.bounce_paths`, `file.bounce_stems`, real-time renders and `file.export_midi`. A stored
+  selection, insertion point or cycle range that starts before the session start (its zone gone)
+  is read from the session start by every command that defaults to it, including `edit.select_all`
+  (from the session start), `view.zoom_to_selection`, `view.zoom_toggle`,
+  `transport.cycle_to_selection`, `transport.fast_forward`, `edit.play_timeline`, `edit.paste` and
+  every range command; the stored value is not rewritten.
+- **Floor at bar 1** (audio and the other lanes): `clip.place_source`, imports,
+  `automation.set_point`, markers, tempo and meter commands. An audio take that starts before bar 1
+  is placed from bar 1 with the audio before it kept in its file.
+- **Musical addresses in a zone clip** stay clip-local (`1|1` is the clip's start); a clip that
+  starts mid-bar has a short first local bar that ends at bar 1, because a meter event always sits
+  at tick 0.
+- **Recording:** `ui.inspect`'s `recording_pass` reports `record_start`, the `count_in` the pass
+  carries (session samples) and `capture_start` (`record_start - count_in`, before bar 1 too).
+- `event.move_song_start` is retired: it is no command.
+
 ## Device pages
 
 The macro strip's pages ([ADR 0047](adr/0047-device-macro-strip.md)) are read and written through
