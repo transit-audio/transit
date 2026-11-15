@@ -38,7 +38,7 @@ fn a_width_change_keeps_the_live_state_of_the_hosted_plugin() {
 }
 
 /// Adds a second fake in insert slot `slot` of the rig's track as one undo step and waits for it.
-fn add_fake(r: &mut Rig, slot: usize) {
+pub(super) fn add_fake(r: &mut Rig, slot: usize) {
     let t = r.t;
     let n = r.made.count() + 1;
     let before = r.app.engine.session_arc();

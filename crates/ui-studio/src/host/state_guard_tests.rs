@@ -456,3 +456,6 @@ fn only_changes_that_drop_a_hosted_device_capture_first() {
 
 #[path = "state_guard_round2_tests.rs"]
 mod round2;
+
+#[path = "state_guard_round3_tests.rs"]
+mod round3;
