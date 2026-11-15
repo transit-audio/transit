@@ -89,7 +89,7 @@ mod linux {
     }
 
     /// Runs this binary again on a private `Xvfb` (`transit_test_support::xvfb`, shared with
-    /// clap-host's XEmbed test, #697); false when there is no `Xvfb`.
+    /// clap-host's `XEmbed` test, #697); false when there is no `Xvfb`.
     fn run_under_own_xvfb() -> bool {
         let Some(xvfb) = PrivateXvfb::start() else { return false };
         println!("editor_x11: running on a private Xvfb at {}", xvfb.display());
