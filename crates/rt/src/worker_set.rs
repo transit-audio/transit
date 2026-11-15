@@ -340,6 +340,9 @@ struct WorkerSlot {
     woken: AtomicBool,
     /// The strip the worker is inside, plus one (0: none). For wake selection and quarantine.
     current: AtomicUsize,
+    /// Set by the worker just before it parks, cleared when `park` returns. A wake counts only a
+    /// parked worker (see [`WorkerSet::wake`]).
+    parked: AtomicBool,
     /// What the worker's promotion achieved (unset when promotion is off or not done yet).
     promotion: OnceLock<Promotion>,
 }
@@ -360,6 +363,9 @@ struct Shared {
     stop: AtomicBool,
     stats: Counters,
     queue: queue::Queue,
+    /// Test seam: holds a worker between its claim and its `current` mark (`wake_tests`).
+    #[cfg(test)]
+    claim_gate: wake_tests::ClaimGate,
 }
 
 impl Shared {
@@ -480,10 +486,19 @@ impl WorkerSet {
             figures: Arc::new(Figures::new(strips)),
             panicked: (0..strips).map(|_| AtomicBool::new(false)).collect(),
             suspect: (0..strips).map(|_| AtomicBool::new(false)).collect(),
-            workers: (0..n).map(|_| WorkerSlot { woken: AtomicBool::new(false), current: AtomicUsize::new(0), promotion: OnceLock::new() }).collect(),
+            workers: (0..n)
+                .map(|_| WorkerSlot {
+                    woken: AtomicBool::new(false),
+                    current: AtomicUsize::new(0),
+                    parked: AtomicBool::new(false),
+                    promotion: OnceLock::new(),
+                })
+                .collect(),
             stop: AtomicBool::new(false),
             stats: Counters::default(),
             queue: queue::Queue::new(strips),
+            #[cfg(test)]
+            claim_gate: wake_tests::ClaimGate::default(),
         });
         let mut set = WorkerSet {
             shared,
@@ -829,9 +844,17 @@ impl WorkerSet {
         }
     }
 
-    /// Publisher: unparks up to `count` workers that are neither working nor already woken, and
-    /// returns how many. Pass the number of strips published. Allocation-free and non-blocking
-    /// (`Thread::unpark`).
+    /// Publisher: wakes workers that are neither working nor already woken until `count` parked
+    /// ones are woken (or every worker was visited), and returns how many parked ones it woke.
+    /// Pass the number of strips published. Allocation-free and non-blocking (`Thread::unpark`).
+    ///
+    /// Only a parked worker counts: it starts a fresh sweep after this publish. An awake one
+    /// (`current` 0 between a sweep and its next claim) gets the flag too, so it sweeps again
+    /// after its current claim, but it may be claiming another published strip right now, one
+    /// that keeps it far longer than a block (a stalled plug-in). Counting it would leave a parked
+    /// worker asleep with the new strip unclaimed until that claim ends: under a clock deadline
+    /// a needless overrun, under the tests' deterministic deadline a hang (the `sched_equivalence`
+    /// hang on main, 2026-11-15).
     pub fn wake(&mut self, count: usize) -> usize {
         // Store-buffering pattern (Dekker): the publisher stores slot states (publish) then loads
         // a worker's `current`; the worker stores `current = 0` then loads slot states (its next
@@ -861,7 +884,12 @@ impl WorkerSet {
             // the slots' own Release/Acquire.
             if !w.woken.swap(true, Ordering::AcqRel) {
                 self.threads[i].unpark();
-                woken += 1;
+                // Relaxed: when the swap above read the worker's consuming swap, that swap
+                // ordered the worker's clear after `park` before this load, so a parked reading
+                // is this park, not an earlier one; a stale `false` only wakes one more worker.
+                if w.parked.load(Ordering::Relaxed) {
+                    woken += 1;
+                }
             }
         }
         if n > 0 {
@@ -1113,6 +1141,8 @@ fn worker_main(shared: &Shared, index: usize, start: usize, promote: bool) {
             break;
         }
         while let Some((strip, token)) = shared.jobs.try_claim_next(next) {
+            #[cfg(test)]
+            shared.claim_gate.pass(index, strip);
             me.current.store(strip + 1, Ordering::Relaxed);
             shared.run_attempt(strip, token, Instant::now);
             me.current.store(0, Ordering::Relaxed);
@@ -1131,7 +1161,9 @@ fn worker_main(shared: &Shared, index: usize, start: usize, promote: bool) {
             if me.woken.swap(false, Ordering::AcqRel) || shared.stop.load(Ordering::Acquire) {
                 break;
             }
+            me.parked.store(true, Ordering::Relaxed);
             std::thread::park();
+            me.parked.store(false, Ordering::Relaxed);
         }
     }
     if let Some(p) = promotion {
@@ -1159,3 +1191,6 @@ mod tail_graph_tests;
 
 #[cfg(test)]
 mod queue_tests;
+
+#[cfg(test)]
+mod wake_tests;
