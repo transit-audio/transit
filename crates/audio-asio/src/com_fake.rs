@@ -542,6 +542,9 @@ pub(crate) struct FakeLoader {
     /// Names whose creation fails like a failed `CoCreateInstance`.
     pub create_fails: Vec<String>,
     pub observed: Arc<Observed>,
+    /// The sessions' waits for the callbacks (short ones for the tests of a callback that does not
+    /// return).
+    pub limits: crate::session::Limits,
 }
 
 impl FakeLoader {
@@ -549,7 +552,7 @@ impl FakeLoader {
         let observed = Arc::new(Observed::default());
         // The callback-thread calls record into this without allocating (the allocation test).
         observed.calls.lock().unwrap().reserve(4096);
-        (Self { drivers, create_fails: Vec::new(), observed: Arc::clone(&observed) }, observed)
+        (Self { drivers, create_fails: Vec::new(), observed: Arc::clone(&observed), limits: crate::session::Limits::default() }, observed)
     }
 }
 
@@ -560,6 +563,9 @@ impl Loader for FakeLoader {
     /// Counting MMCSS calls ([`crate::mmcss::testing`]): no test thread is really registered.
     fn mmcss(&self) -> crate::mmcss::Hooks {
         crate::mmcss::testing::HOOKS
+    }
+    fn limits(&self) -> crate::session::Limits {
+        self.limits
     }
     fn create(&self, entry: &DriverEntry) -> Result<Driver, ab::OpenError> {
         if self.create_fails.contains(&entry.name) {

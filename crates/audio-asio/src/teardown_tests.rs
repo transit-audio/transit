@@ -8,9 +8,11 @@ use crate::abi;
 use crate::callback::testing;
 use crate::com::fake::{FakeLoader, FakeSpec, Observed, entry};
 use crate::host::Slot;
+use crate::session::Limits;
 use crate::stream_tests::lock;
 use crate::{AsioBackend, AsioStream};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use transit_audio_backend::{self as ab, Backend};
 
@@ -38,6 +40,14 @@ fn rig_with(loader: FakeLoader, observed: Arc<Observed>) -> Rig {
 
 fn rig(spec: FakeSpec) -> Rig {
     let (loader, observed) = FakeLoader::new(vec![(entry("Driver", 52), spec)]);
+    rig_with(loader, observed)
+}
+
+/// A rig whose sessions wait only 20 ms for a callback (a callback the test holds never leaves in
+/// time; the waits decide nothing else).
+fn impatient_rig() -> Rig {
+    let (mut loader, observed) = FakeLoader::new(vec![(entry("Driver", 52), spec())]);
+    loader.limits = Limits { quiesce: Duration::from_millis(20), drain: Duration::from_millis(20) };
     rig_with(loader, observed)
 }
 
@@ -91,7 +101,7 @@ fn a_failed_rebuild_leaves_no_disposed_buffer_address_for_a_late_switch() {
     testing::switch_time_info(1, Some(64), None);
     assert_eq!(rig.observed.poison(), (2, true), "a buffer switch wrote through a disposed buffer's address");
     drop(render);
-    assert_eq!(rig.observed.live.load(std::sync::atomic::Ordering::Acquire), 0);
+    assert_eq!(rig.observed.live.load(Ordering::Acquire), 0);
 }
 
 /// Defect 1 of #524: the rebuild and the teardown disposed the buffers while their addresses were
@@ -113,4 +123,64 @@ fn a_switch_inside_dispose_buffers_finds_no_buffer_address_at_the_rebuild_or_the
     assert_eq!(buffer_calls(&rig.observed), ["createBuffers", "disposeBuffers", "createBuffers", "disposeBuffers"]);
     assert_eq!(rig.observed.poison(), (6, true), "the teardown: a switch inside disposeBuffers wrote through the buffers");
     assert!(!testing::installed());
+}
+
+/// A render callback that blocks inside its first call, after its fill, until `release` is set
+/// (a plug-in that does not return); `entered` says it is inside.
+fn blocking(entered: &Arc<AtomicBool>, release: &Arc<AtomicBool>) -> ab::RenderCallback {
+    let (entered, release) = (Arc::clone(entered), Arc::clone(release));
+    Box::new(move |block| {
+        block.render(&mut |chunk| chunk.fill(0.5));
+        entered.store(true, Ordering::SeqCst);
+        while !release.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+    })
+}
+
+/// Defect 2 of #524: after the waits for a callback still inside timed out, the close disposed the
+/// buffers and released the driver anyway, and the one process-wide in-flight count kept every
+/// later close waiting for that callback too. Now the buffers and the driver are leaked, the
+/// driver is refused until the process restarts, and another session still closes cleanly.
+#[test]
+fn a_callback_still_inside_at_the_close_leaks_the_buffers_and_the_driver_and_later_sessions_close_cleanly() {
+    let _guard = lock();
+    let stuck = impatient_rig();
+    let (entered, release) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let capture = open_capture(&stuck).expect("capture");
+    let render = open_render(&stuck, blocking(&entered, &release)).expect("render");
+    ab::Stream::start(&capture).expect("start capture");
+    ab::Stream::start(&render).expect("start render");
+    std::thread::scope(|scope| {
+        let driver = scope.spawn(|| testing::switch_time_info(0, Some(0), None));
+        while !entered.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        // Both streams go while the render callback is inside its buffer switch.
+        drop(capture);
+        drop(render);
+        assert!(stuck.observed.call_names().contains(&"stop"), "the driver was stopped");
+        assert!(!testing::installed(), "the callback state was uninstalled");
+        assert_eq!(buffer_calls(&stuck.observed), ["createBuffers", "disposeBuffers", "createBuffers"], "no disposeBuffers under a callback");
+        assert_eq!(
+            (stuck.observed.live.load(Ordering::Acquire), stuck.observed.released.load(Ordering::Acquire)),
+            (1, 1),
+            "the probe's driver was released, the session's is left loaded"
+        );
+        let refused = open_render(&stuck, loud()).err().expect("the driver is refused");
+        assert!(refused.to_string().contains("until transit restarts"), "{refused}");
+        // With that callback still inside its (leaked) state, another driver's session closes
+        // cleanly: the stuck callback is counted in its own state, not in a process-wide count.
+        let other = impatient_rig();
+        let stream = open_render(&other, loud()).expect("another session");
+        ab::Stream::start(&stream).expect("start");
+        testing::switch_time_info(0, Some(0), None);
+        drop(stream);
+        assert_eq!(buffer_calls(&other.observed), ["createBuffers", "disposeBuffers"], "the other session disposed its buffers");
+        assert_eq!(other.observed.live.load(Ordering::Acquire), 0, "and released its driver");
+        // The stuck callback resumes: it writes into buffers and calls a driver that still exist.
+        release.store(true, Ordering::SeqCst);
+        driver.join().expect("the driver thread");
+    });
+    assert_eq!(stuck.observed.live.load(Ordering::Acquire), 1, "the driver stays loaded for the life of the process");
 }

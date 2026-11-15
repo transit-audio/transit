@@ -10,8 +10,10 @@
 //! fails with a message saying so; close both and open them again. `start` of the first stream
 //! starts the driver (the other direction's callback is not called, and its output plays silence,
 //! until its own `start`); the driver stops when no stream of it is running any more, and the
-//! session ends (buffers disposed, callback state freed, the driver unloaded unless a
-//! [`crate::Loaded`] handle holds it) when both streams are dropped.
+//! session ends (driver stopped, callback state uninstalled and drained, then the buffers disposed
+//! and the driver unloaded unless a [`crate::Loaded`] handle holds it) when both streams are
+//! dropped. A callback that has not left the state within [`Limits::drain`] leaks the buffers
+//! and the driver instead of having them freed under it (#524).
 //!
 //! **MMCSS.** Each driver start arms the session's [`Mmcss`]: the first buffer switch registers its
 //! thread with "Pro Audio"; before the driver's `stop` the registration is reverted (see
@@ -93,6 +95,7 @@ pub(crate) struct Session {
     system_step: Arc<AtomicU64>,
     watchdog: Watchdog,
     mmcss: Arc<Mmcss>,
+    limits: Limits,
     installed: Installed,
 }
 
@@ -125,8 +128,22 @@ pub(crate) fn negotiate(buffer: BufferSize, period: ab::Period) -> Result<u32, S
     Ok(chosen.and_then(|c| u32::try_from(c).ok()).unwrap_or(fallback as u32))
 }
 
-/// How long `stop` and a drop wait for a callback still inside the direction they end.
-const QUIESCE_LIMIT: Duration = Duration::from_secs(2);
+/// How long the control side waits for the driver's callbacks (#524), injectable for tests
+/// ([`crate::host::Loader::limits`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Limits {
+    /// How long `stop` and a drop wait for a callback still inside the direction they end.
+    pub(crate) quiesce: Duration,
+    /// How long the end of a session waits for every callback to leave the callback state before
+    /// it disposes the buffers and releases the driver; past it, both are leaked instead.
+    pub(crate) drain: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self { quiesce: Duration::from_secs(2), drain: Duration::from_secs(2) }
+    }
+}
 
 fn next_generation() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -178,6 +195,7 @@ impl Session {
         wake: Arc<Event>,
         watchdog_floor: Duration,
         mmcss: crate::mmcss::Hooks,
+        limits: Limits,
         request: &ab::OpenRequest,
         callback: Callback,
         error: ab::ErrorCallback,
@@ -193,7 +211,7 @@ impl Session {
         let system_step = engine.system_time_step_ns();
         let mmcss = Arc::new(Mmcss::new(mmcss));
         let state = CallbackState::new(engine, driver.callback_driver(), Arc::clone(&events), wake, Arc::clone(&mmcss));
-        let installed = Installed::install(state)
+        let installed = Installed::install(state, limits.drain)
             .map_err(|_| ab::OpenError::InUse(format!("ASIO driver \"{name}\": another ASIO stream session is active in this process")))?;
         let mut session = Self {
             generation: next_generation(),
@@ -208,6 +226,7 @@ impl Session {
             system_step,
             watchdog: Watchdog::new(frames, format.rate, watchdog_floor),
             mmcss,
+            limits,
             installed,
         };
         let opened = session.add(name, driver, wire, format, request, callback, error)?;
@@ -512,9 +531,9 @@ impl Session {
             return;
         }
         if let Some(side) = self.side(direction)
-            && !side.quiesce(QUIESCE_LIMIT)
+            && !side.quiesce(self.limits.quiesce)
         {
-            log::warn!("ASIO driver \"{name}\": a {direction:?} callback did not return within {} s of its stop", QUIESCE_LIMIT.as_secs());
+            log::warn!("ASIO driver \"{name}\": a {direction:?} callback did not return within {} ms of its stop", self.limits.quiesce.as_millis());
         }
     }
 
@@ -553,19 +572,35 @@ impl Session {
         }
     }
 
-    /// Stops the driver, disposes the buffers and frees the callback state (and the callbacks).
-    pub(crate) fn teardown(mut self, name: &str, driver: &mut Driver) {
+    /// Ends the session: stops the driver, uninstalls the callback state and waits (up to
+    /// [`Limits::drain`]) until no callback is inside it, and only then disposes the buffers and
+    /// frees the state (and the callbacks), so no callback can reach a buffer or a driver call after
+    /// it is gone (#524). False when a callback did not leave in time: the buffers are leaked
+    /// instead of disposed, and the caller must leak the driver too (a callback still inside may
+    /// write the buffers and call `outputReady` when it resumes).
+    #[must_use]
+    pub(crate) fn teardown(mut self, name: &str, driver: &mut Driver) -> bool {
         for side in self.sides() {
             side.state.store(DETACHED, Ordering::Release);
         }
         self.stop_if_idle(name, driver);
-        if let BufferState::Prepared(buffers) = std::mem::replace(&mut self.buffers, BufferState::Missing) {
-            self.forget_planes();
-            if let Err(code) = driver.dispose_buffers(buffers) {
-                log::warn!("{}", asio_error(name, "disposeBuffers", code));
+        let drained = self.installed.uninstall();
+        let buffers = match std::mem::replace(&mut self.buffers, BufferState::Missing) {
+            BufferState::Prepared(buffers) => Some(buffers),
+            // Not reached: every side is detached, so `stop_if_idle` stopped the driver.
+            BufferState::Running(running) => Some(driver.stop(running).0),
+            BufferState::Missing => None,
+        };
+        match buffers {
+            Some(buffers) if drained => {
+                if let Err(code) = driver.dispose_buffers(buffers) {
+                    log::warn!("{}", asio_error(name, "disposeBuffers", code));
+                }
             }
+            Some(buffers) => buffers.leak(),
+            None => {}
         }
-        // `self.installed` drops here: uninstalled, drained, freed.
+        drained
     }
 }
 

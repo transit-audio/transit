@@ -305,6 +305,14 @@ pub(crate) struct Buffers {
     _private: (),
 }
 
+impl Buffers {
+    /// Gives the buffers up without `disposeBuffers`: a callback that did not return may still be
+    /// inside them, so they stay the driver's, and the driver is leaked with them (#524).
+    pub(crate) fn leak(self) {
+        std::mem::forget(self);
+    }
+}
+
 impl Drop for Buffers {
     fn drop(&mut self) {
         log::error!("ASIO: a buffer set was dropped without disposeBuffers");

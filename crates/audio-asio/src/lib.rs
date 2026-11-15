@@ -17,6 +17,9 @@
 //!   one dropped while the host was stuck), a closed session, a call whose caller gave up, and the
 //!   end of the host thread, which waits (bounded, [`RELEASE_WAIT`]) for a driver call it is
 //!   blocked in. [`AsioBackend::shut_down_shared`] ends the shared host at the end of the process.
+//!   The one exception (#524): a driver whose callback has not returned when its session ends
+//!   (past [`session::Limits`]) is left loaded with its buffers, never released under that
+//!   callback, and no ASIO driver opens again until the process restarts.
 //! - [`AsioBackend::load`] keeps one driver loaded and initialized, with no buffers created, for
 //!   queries, the sample rate and the control panel; [`Loaded::close`] (or dropping it) releases it.
 //! - `open_render` and `open_capture` open the two directions of one driver's [`session`]: one

@@ -3,8 +3,8 @@
 //! **Why process-wide.** The ASIO callbacks are plain C functions without a user-data pointer, and
 //! ASIO allows one loaded driver per process (the host's `Slot`), so one callback table
 //! ([`table`]) and one installed [`CallbackState`] (behind the atomic pointer `CURRENT`) serve it.
-//! A state is installed before `createBuffers` and uninstalled after `disposeBuffers`; a second
-//! install while one is in place fails.
+//! A state is installed before `createBuffers` and uninstalled, and drained, before
+//! `disposeBuffers` (#524); a second install while one is in place fails.
 //!
 //! **Which thread.** `bufferSwitch`/`bufferSwitchTimeInfo` run on a thread the driver owns (not the
 //! STA host thread), `asioMessage` and `sampleRateDidChange` on whatever thread the driver uses,
@@ -16,9 +16,12 @@
 //! owner's error callback set a pending bit and deliver it under the same flag, from whichever
 //! thread gets it next; the holder rechecks the bit after releasing, so none is lost.
 //!
-//! **Lifetime.** The QPC read at entry and the in-flight count let [`Installed`]'s drop clear the
-//! pointer and wait until no callback is inside the state before freeing it (and the user
-//! callbacks with it), so the state outlives every callback that saw it.
+//! **Lifetime.** A callback counts itself in the process-wide `ENTERING` while it reads `CURRENT`,
+//! and in the state's own `in_flight` count before it leaves `ENTERING`, so
+//! [`Installed::uninstall`] can clear the pointer and wait (bounded) until no callback is inside
+//! the state before freeing it (and the user callbacks with it): the state outlives every callback
+//! that saw it. A callback that never returns holds only its own state's count, so it leaks that
+//! state and nothing else: a later session drains at once (#524).
 //!
 //! Every `unsafe` block has a `// SAFETY:` comment; the logic is in the safe [`crate::engine`].
 #![deny(clippy::disallowed_macros, clippy::disallowed_methods)]
@@ -40,8 +43,9 @@ use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerforma
 
 /// The installed state, or null.
 static CURRENT: AtomicPtr<CallbackState> = AtomicPtr::new(std::ptr::null_mut());
-/// Callbacks between their entry and their exit, counted before `CURRENT` is read.
-static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+/// Callbacks between their entry and the moment they counted themselves in the state they read
+/// from `CURRENT` (a few atomic operations, nothing that blocks).
+static ENTERING: AtomicUsize = AtomicUsize::new(0);
 thread_local! {
     /// How many of this crate's driver callbacks the calling thread is inside (a const-initialized
     /// `Cell`: no allocation and no destructor).
@@ -54,9 +58,6 @@ thread_local! {
 pub(crate) fn in_driver_callback() -> bool {
     DEPTH.with(Cell::get) > 0
 }
-
-/// How long [`Installed`]'s drop waits for callbacks still inside the state before it leaks it.
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The pending bit of a reset request (or a rate change) not yet reported.
 const PENDING_RESET: u8 = 1;
@@ -190,6 +191,8 @@ pub(crate) struct CallbackState {
     last_switch: AtomicU64,
     /// The buffer-switch thread's MMCSS registration, tended at each switch.
     mmcss: Arc<Mmcss>,
+    /// Callbacks inside this state ([`Flight`]).
+    in_flight: AtomicUsize,
 }
 
 // SAFETY: the `UnsafeCell`s are only accessed under `busy` (an acquire compare-exchange to take it,
@@ -215,6 +218,7 @@ impl CallbackState {
             wake,
             last_switch: AtomicU64::new(0),
             mmcss,
+            in_flight: AtomicUsize::new(0),
         })
     }
 
@@ -351,71 +355,113 @@ impl CallbackState {
     }
 }
 
-/// An installed [`CallbackState`]. Dropping it uninstalls the state, waits for callbacks still
-/// inside it and frees it (with the user callbacks). Drop it only after `disposeBuffers`, or at
-/// least after `stop`, so the driver has no reason to call again.
+/// An installed [`CallbackState`]. [`Installed::uninstall`] (or the drop) uninstalls the state,
+/// waits up to the drain limit for callbacks still inside it and frees it (with the user
+/// callbacks). Uninstall it after `stop` and before `disposeBuffers` (#524).
 pub(crate) struct Installed {
+    /// Null once uninstalled.
     state: *mut CallbackState,
+    drain: Duration,
 }
 
 impl Installed {
-    /// Makes `state` the one the callbacks reach. Fails, giving it back, while another is installed.
-    pub(crate) fn install(state: Box<CallbackState>) -> Result<Self, Box<CallbackState>> {
+    /// Makes `state` the one the callbacks reach, to be drained within `drain` when it goes. Fails,
+    /// giving it back, while another is installed.
+    pub(crate) fn install(state: Box<CallbackState>, drain: Duration) -> Result<Self, Box<CallbackState>> {
         let raw = Box::into_raw(state);
         match CURRENT.compare_exchange(std::ptr::null_mut(), raw, Ordering::SeqCst, Ordering::SeqCst) {
-            Ok(_) => Ok(Self { state: raw }),
+            Ok(_) => Ok(Self { state: raw, drain }),
             // SAFETY: `raw` came from `Box::into_raw` just above and was not published.
             Err(_) => Err(unsafe { Box::from_raw(raw) }),
         }
     }
 
     pub(crate) fn state(&self) -> &CallbackState {
-        // SAFETY: the box is freed only in `Drop`, after which `self` is gone.
+        debug_assert!(!self.state.is_null(), "the callback state is used after its uninstall");
+        // SAFETY: the box is freed (or leaked) only by `uninstall`, which consumes `self`, or by
+        // the drop, after which `self` is gone.
         unsafe { &*self.state }
     }
-}
 
-impl Drop for Installed {
-    fn drop(&mut self) {
-        let _ = CURRENT.compare_exchange(self.state, std::ptr::null_mut(), Ordering::SeqCst, Ordering::SeqCst);
-        // A callback that read the pointer before the swap counted itself in first (SeqCst both
-        // sides), so once the count is zero no callback can still see the state.
-        let deadline = Instant::now() + DRAIN_TIMEOUT;
-        while IN_FLIGHT.load(Ordering::SeqCst) != 0 {
+    /// Uninstalls the state and waits up to the drain limit until no callback is inside it, then
+    /// frees it: true. False when a callback did not leave in time: the state is leaked (never
+    /// freed under it), and so must be everything that callback can still reach, the buffers and
+    /// the driver (#524).
+    #[must_use]
+    pub(crate) fn uninstall(mut self) -> bool {
+        self.finish()
+    }
+
+    fn finish(&mut self) -> bool {
+        let state = std::mem::replace(&mut self.state, std::ptr::null_mut());
+        if state.is_null() {
+            return true;
+        }
+        let _ = CURRENT.compare_exchange(state, std::ptr::null_mut(), Ordering::SeqCst, Ordering::SeqCst);
+        // A callback that read the pointer before the swap counted itself in `ENTERING` first and
+        // in the state's `in_flight` before it left `ENTERING` (SeqCst throughout). So once
+        // `ENTERING` was seen at zero after the swap, and then `in_flight` at zero, no callback is
+        // inside the state and none can still get in.
+        let deadline = Instant::now() + self.drain;
+        // SAFETY: `state` is the live box `install` published; it is freed only below.
+        let inside = || unsafe { &(*state).in_flight }.load(Ordering::SeqCst);
+        while ENTERING.load(Ordering::SeqCst) != 0 || inside() != 0 {
             if Instant::now() > deadline {
-                log::warn!("ASIO: a driver callback did not return within {} s; its state is leaked", DRAIN_TIMEOUT.as_secs());
-                return;
+                log::warn!(
+                    "ASIO: a driver callback did not return within {} ms; its state is leaked, and its buffers and driver with it",
+                    self.drain.as_millis()
+                );
+                return false;
             }
             std::thread::yield_now();
         }
         // SAFETY: `state` came from `Box::into_raw` in `install`, is no longer reachable through
         // `CURRENT` and no callback is inside it (above); it is freed once, here.
-        drop(unsafe { Box::from_raw(self.state) });
+        drop(unsafe { Box::from_raw(state) });
+        true
     }
 }
 
-/// A callback's stay inside the installed state: counted in before `CURRENT` is read.
-struct Flight;
+impl Drop for Installed {
+    fn drop(&mut self) {
+        let _ = self.finish();
+    }
+}
+
+/// A callback's stay inside the installed state: counted in `ENTERING` while it reads `CURRENT`,
+/// then in that state's `in_flight` until it ends.
+struct Flight(*const CallbackState);
 
 impl Flight {
     fn enter() -> Self {
         DEPTH.with(|depth| depth.set(depth.get() + 1));
-        IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
-        Flight
+        ENTERING.fetch_add(1, Ordering::SeqCst);
+        let state = CURRENT.load(Ordering::SeqCst);
+        if !state.is_null() {
+            // SAFETY: a non-null `CURRENT` points to a live installed state, and `ENTERING` counts
+            // this callback: `Installed::uninstall` clears `CURRENT`, then waits until `ENTERING`
+            // and the state's `in_flight` are zero before freeing, so the state is alive here.
+            unsafe { &(*state).in_flight }.fetch_add(1, Ordering::SeqCst);
+        }
+        ENTERING.fetch_sub(1, Ordering::SeqCst);
+        Flight(state)
     }
 
     fn state(&self) -> Option<&CallbackState> {
-        let state = CURRENT.load(Ordering::SeqCst);
-        // SAFETY: a non-null `CURRENT` points to a live installed state; `Installed`'s drop clears
-        // it and then waits until `IN_FLIGHT` (which counts this `Flight`) is zero before freeing,
-        // so the state outlives the borrow, which is tied to this `Flight`.
-        (!state.is_null()).then(|| unsafe { &*state })
+        // SAFETY: a non-null pointer is a state this `Flight` counted itself in (`enter`), which
+        // `Installed::uninstall` does not free while that count is above zero; the borrow is tied
+        // to this `Flight`, which drops the count only when it ends.
+        (!self.0.is_null()).then(|| unsafe { &*self.0 })
     }
 }
 
 impl Drop for Flight {
     fn drop(&mut self) {
-        IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+        if !self.0.is_null() {
+            // SAFETY: as in `state`: the state lives while this `Flight` is counted in it, and this
+            // is the last use of the pointer.
+            unsafe { &(*self.0).in_flight }.fetch_sub(1, Ordering::SeqCst);
+        }
         DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
     }
 }

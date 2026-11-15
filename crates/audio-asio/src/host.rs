@@ -43,7 +43,7 @@
 
 use crate::com::{Driver, Event, MessageWindow, StaGuard};
 use crate::driver::{self, BufferSize, DriverEntry, DriverInfo, asio_error};
-use crate::session::{Callback, Opened, Session};
+use crate::session::{Callback, Limits, Opened, Session};
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -62,11 +62,31 @@ pub(crate) trait Loader: Send + 'static {
     fn mmcss(&self) -> crate::mmcss::Hooks {
         crate::com::MMCSS
     }
+    /// How long the sessions wait for the driver's callbacks.
+    fn limits(&self) -> Limits {
+        Limits::default()
+    }
 }
 
 /// The one-loaded-driver rule: holds the name of the driver loaded in this process.
 #[derive(Clone, Default)]
-pub(crate) struct Slot(Arc<Mutex<Option<String>>>);
+pub(crate) struct Slot(Arc<Mutex<Holder>>);
+
+#[derive(Default)]
+struct Holder {
+    name: Option<String>,
+    /// The driver was left loaded because a callback of it never returned (#524): the slot stays
+    /// taken until the process ends.
+    leaked: bool,
+}
+
+/// Why a load could not claim the slot.
+enum Taken {
+    /// Another driver is loaded.
+    By(String),
+    /// This driver was left loaded when a callback of it did not return.
+    Leaked(String),
+}
 
 impl Slot {
     /// The process-wide slot every real host shares.
@@ -75,12 +95,12 @@ impl Slot {
         PROCESS.get_or_init(Slot::default).clone()
     }
 
-    fn claim(&self, name: &str) -> Result<SlotGuard, String> {
+    fn claim(&self, name: &str) -> Result<SlotGuard, Taken> {
         let mut holder = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(held) = holder.as_ref() {
-            return Err(held.clone());
+        if let Some(held) = holder.name.as_ref() {
+            return Err(if holder.leaked { Taken::Leaked(held.clone()) } else { Taken::By(held.clone()) });
         }
-        *holder = Some(name.to_owned());
+        holder.name = Some(name.to_owned());
         Ok(SlotGuard(self.clone()))
     }
 }
@@ -101,9 +121,17 @@ impl Drop for HandleOwner {
     }
 }
 
+impl SlotGuard {
+    /// Keeps the slot taken until the process ends: the driver holding it was left loaded (#524).
+    fn leak(self) {
+        self.0.0.lock().unwrap_or_else(PoisonError::into_inner).leaked = true;
+        std::mem::forget(self);
+    }
+}
+
 impl Drop for SlotGuard {
     fn drop(&mut self) {
-        *self.0.0.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        self.0.0.lock().unwrap_or_else(PoisonError::into_inner).name = None;
     }
 }
 
@@ -186,11 +214,12 @@ impl HostState {
         if let Some(open) = self.loaded_name() {
             return Err(Self::in_use(&open, entry));
         }
-        let guard = self.slot.claim(&entry.name).map_err(|held| {
-            ab::OpenError::InUse(format!(
+        let guard = self.slot.claim(&entry.name).map_err(|taken| match taken {
+            Taken::By(held) => ab::OpenError::InUse(format!(
                 "ASIO driver \"{held}\" is open elsewhere in this process; ASIO allows one driver per process, so \"{}\" cannot open",
                 entry.name
-            ))
+            )),
+            Taken::Leaked(held) => ab::OpenError::Other(leaked_message(&held)),
         })?;
         let mut driver = self.loader.create(entry)?;
         if !driver.init(self.sys_ref) {
@@ -241,14 +270,20 @@ impl HostState {
         }
     }
 
-    /// Releases the loaded driver: its session first (stop, disposeBuffers, callback state freed),
-    /// then the object.
+    /// Releases the loaded driver: its session first (stop, callback state drained and freed,
+    /// disposeBuffers), then the object. A session a callback did not leave leaks the driver
+    /// instead ([`leak`]).
     fn release(&mut self) {
         if let Some(mut loaded) = self.loaded.take() {
-            if let Some(session) = loaded.session.take() {
-                session.teardown(&loaded.entry.name, &mut loaded.driver);
+            let drained = match loaded.session.take() {
+                Some(session) => session.teardown(&loaded.entry.name, &mut loaded.driver),
+                None => true,
+            };
+            if drained {
+                drop(loaded);
+            } else {
+                leak(loaded);
             }
-            drop(loaded);
         }
     }
 
@@ -271,12 +306,12 @@ impl HostState {
             Some(open) if open == entry.name => {}
             Some(open) => return Err(Self::in_use(&open, entry)),
         }
-        let (wake, floor, mmcss) = (Arc::clone(&self.wake), self.watchdog_floor, self.loader.mmcss());
+        let (wake, floor, mmcss, limits) = (Arc::clone(&self.wake), self.watchdog_floor, self.loader.mmcss(), self.loader.limits());
         let Some(loaded) = self.loaded.as_mut() else { return Err(not_open(&entry.name)) };
         let Loaded { entry: open, info, session, driver, .. } = &mut *loaded;
         let result = match session.as_mut() {
             Some(session) => session.attach(&open.name, driver, info, request, callback, error),
-            None => Session::open(&open.name, driver, info, wake, floor, mmcss, request, callback, error).map(|(s, opened)| {
+            None => Session::open(&open.name, driver, info, wake, floor, mmcss, limits, request, callback, error).map(|(s, opened)| {
                 *session = Some(s);
                 opened
             }),
@@ -337,8 +372,13 @@ impl HostState {
 
     fn end_session(&mut self) {
         let Some(loaded) = self.loaded.as_mut() else { return };
-        if let Some(session) = loaded.session.take() {
-            session.teardown(&loaded.entry.name, &mut loaded.driver);
+        if let Some(session) = loaded.session.take()
+            && !session.teardown(&loaded.entry.name, &mut loaded.driver)
+        {
+            if let Some(loaded) = self.loaded.take() {
+                leak(loaded);
+            }
+            return;
         }
         if !loaded.held() {
             self.release();
@@ -374,6 +414,24 @@ impl HostState {
     pub(crate) fn buffer_size(&mut self, name: &str) -> Result<BufferSize, ab::OpenError> {
         self.with_driver(name, "getBufferSize", Driver::buffer_size)
     }
+}
+
+/// Leaves a driver loaded for the life of the process: a callback of it did not return when its
+/// session ended, so its buffers were not disposed and the object must stay valid for that callback
+/// (it may call `outputReady` when it resumes). Its slot stays taken, so no driver opens again in
+/// this process (#524).
+fn leak(loaded: Loaded) {
+    log::error!("{}", leaked_message(&loaded.entry.name));
+    let Loaded { driver, _slot: slot, .. } = loaded;
+    std::mem::forget(driver);
+    slot.leak();
+}
+
+/// What a load of any driver says after a driver was left loaded.
+fn leaked_message(name: &str) -> String {
+    format!(
+        "ASIO driver \"{name}\" did not return from its audio callback when its streams closed, so it was left loaded; ASIO drivers cannot open again until transit restarts"
+    )
 }
 
 fn not_open(name: &str) -> ab::OpenError {
