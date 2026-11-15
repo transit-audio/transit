@@ -439,3 +439,41 @@ fn the_converter_never_reads_unrendered_storage_after_a_short_loop_block() {
     assert_eq!(audio.history.misses(), 0);
     control.retire(audio.plans, audio.actions);
 }
+
+/// F7 of the #601 review: a new plan with another channel layout, adopted while playing at a
+/// converted rate without a restart, never reads the old layout's kept frames into its channels.
+/// Here the new plan is a silent 5.1 session: from the output frame that reads its first block on,
+/// every output frame is exact silence (without the clear, the old stereo frames still in the taps'
+/// reach leaked into the new channels for about 16 output frames).
+#[test]
+fn a_layout_change_reads_none_of_the_old_layouts_frames() {
+    let (mut control, mut audio, _) = fixture_session(44_100, signal());
+    control.send_action(Command::Play { from: 0, end: None, looped: None }, true).unwrap();
+    let mut out = [0.0f32; 2];
+    for _ in 0..600 {
+        fill(&mut audio, &mut out);
+    }
+    assert!(out.iter().any(|x| *x != 0.0), "the old plan plays");
+    let old = audio.plans.engine().active().generation;
+    control.service(&mut make);
+    let mut surround = Session::default();
+    surround.outputs[0].format = transit_model::ChannelFormat::Surround51;
+    control.request(Arc::new(surround), None).unwrap();
+    control.service(&mut make);
+    let mut after = Vec::new();
+    for _ in 0..3_000 {
+        fill(&mut audio, &mut out);
+        if audio.plans.engine().active().generation > old {
+            after.extend_from_slice(&out);
+            if after.len() >= 2 * 64 {
+                break;
+            }
+        }
+    }
+    assert!(after.len() >= 2 * 64, "the new plan was adopted");
+    assert_eq!(audio.plans.output().len(), 6);
+    let first = after.iter().position(|x| *x != 0.0);
+    assert_eq!(first, None, "an old-layout frame was read after the layout change");
+    control.service(&mut make);
+    control.retire(audio.plans, audio.actions);
+}

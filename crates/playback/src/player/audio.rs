@@ -561,6 +561,9 @@ pub(super) struct Audio {
     /// The largest rate a read can run at on this device: the session over the device rate at the
     /// fastest speed (4x). It bounds the history tail a block keeps.
     q_max: f64,
+    /// The channel layout of the pending block (its width and where Main's and the sinks' channels
+    /// go): a change clears the history, so no frame of an older layout is read into a new channel.
+    layout: u64,
     sample_rate: u32,
     device_rate: u32,
     faulted: bool,
@@ -668,6 +671,7 @@ impl Audio {
                 history: Box::new(History::new()),
                 frame: Box::new([0.0; HOLD_CHANNELS]),
                 q_max: f64::from(target.sample_rate) * f64::from(MAX_SPEED) / (f64::from(device_rate.max(1)) * 1000.0),
+                layout: 0,
                 sample_rate: target.sample_rate,
                 device_rate,
                 faulted: false,
@@ -759,6 +763,25 @@ impl Audio {
             self.shared.playing.store(false, Ordering::Relaxed);
         }
         Ok(())
+    }
+
+    /// The pending block's channel layout as one number: its width and the device channel of each of
+    /// Main's and the sinks' channels (FNV-1a; no allocation).
+    fn layout_key(&self) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        let mut eat = |v: u64| {
+            h ^= v;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        };
+        eat(self.plans.output().len() as u64);
+        for &d in self.plans.main_dest() {
+            eat(u64::from(d));
+        }
+        eat(u64::MAX);
+        for &d in self.plans.sink_dest() {
+            eat(u64::from(d));
+        }
+        h
     }
 
     /// Discard the pending block and the converter's history: the next output frame reads frame 0
@@ -1178,6 +1201,12 @@ impl Audio {
                     quantum = self.read.quantum(callback_frames, step, self.plans.engine().max_block());
                 }
                 self.render_next(quantum, actions)?;
+                // A new plan with another channel layout: the kept frames are the old layout's.
+                let layout = self.layout_key();
+                if layout != self.layout {
+                    self.history.reset();
+                    self.layout = layout;
+                }
             }
             let output = self.plans.output();
             let index = self.read.index();
