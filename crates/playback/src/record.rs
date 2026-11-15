@@ -193,12 +193,17 @@ impl Shared {
     }
 
     /// The input callback's work under a CaptureLease. Samples that don't fit are owed and queued
-    /// as silence before the next block, so the take keeps its timing.
-    fn capture_at(&self, first_frame: u64, data: &[f32]) {
+    /// as silence before the next block, so the take keeps its timing. `data` is `channels` wide
+    /// and starts at input frame `first_frame`. Returns how many samples the full ring refused;
+    /// the first refused frame is where the take's silence begins (#184).
+    fn capture_at(&self, first_frame: u64, data: &[f32], channels: usize) -> usize {
         let _ = self.first_frame.compare_exchange(u64::MAX, first_frame, Ordering::Release, Ordering::Relaxed);
-        if self.queue(data) > 0 {
-            self.losses.overflow(first_frame);
+        let refused = self.queue(data);
+        if refused > 0 {
+            let kept = (data.len() - refused) / channels.max(1);
+            self.losses.overflow(first_frame.saturating_add(kept as u64));
         }
+        refused
     }
 
     /// [`Self::queue`] for tests that need no position.
@@ -278,14 +283,11 @@ fn capture_callbacks(
             tap.begin(block.frames, block.stamp);
         }
         let substituted = block.substituted;
+        // The width of what reaches the capture: the device's channels, plus the System Audio pair.
+        let width = tap.as_ref().map_or(channels, crate::system_audio::Tap::channels).max(1);
         sh.guarded(|| {
             // One admission covers the entire device callback, including its chunks.
             let capture = sh.begin_capture();
-            // Zeros the backend put in place of input it lost (#184): counted, then recorded so
-            // the take keeps its timing.
-            if substituted && capture.is_some() {
-                sh.losses.substituted(first_frame, block.frames);
-            }
             block.chunks(&mut |offset, samples| {
                 // The loopback calibration (native ASIO) records the return by sample position.
                 if let Some(probe) = &loop_probe {
@@ -296,7 +298,14 @@ fn capture_callbacks(
                     if capture.is_some()
                         && let Some(frame) = first_frame.checked_add(at as u64)
                     {
-                        sh.capture_at(frame, frames);
+                        let refused = sh.capture_at(frame, frames, width);
+                        // Zeros the backend put in place of input it lost (#184): counted as lost
+                        // by the device, then recorded so the take keeps its timing. What the full
+                        // ring refused of them is already counted there, never twice.
+                        let kept = (frames.len() - refused) / width;
+                        if substituted && kept > 0 {
+                            sh.losses.substituted(frame, kept);
+                        }
                     }
                 };
                 // System Audio (#268): the pair appended to every frame, read from its ring.
@@ -845,7 +854,7 @@ fn write_takes_started(shared: &Shared, mut takes: Vec<TakeWriter>, channels: us
         t.write_header();
         let file = t.path.file_name().map_or_else(|| t.path.display().to_string(), |n| n.to_string_lossy().into_owned());
         if let Some(note) = t.zeros.note(&file, t.rate) {
-            log::warn!("recording: {note}");
+            log::info!("recording: {note}");
         }
         if t.frames == 0 {
             let _ = std::fs::remove_file(&t.path);

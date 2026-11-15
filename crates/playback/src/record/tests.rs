@@ -37,7 +37,7 @@ fn low_latency_adoption_during_capture_preserves_samples_and_placement() {
         audio.plans.set_processing(false, true, false);
         {
             let _lease = shared.begin_capture().unwrap();
-            shared.capture_at(900 + part as u64 * 32, block);
+            shared.capture_at(900 + part as u64 * 32, block, 1);
         }
         audio.plans.render(part as i64 * 32, 32);
         runtime.service();
@@ -95,7 +95,7 @@ fn mapping_failure_between_write_and_stop_check_reports_failure() {
     shared.start_capture();
     {
         let _lease = shared.begin_capture().unwrap();
-        shared.capture_at(100, &[0.5; 12]);
+        shared.capture_at(100, &[0.5; 12], 1);
     }
     shared.stop_capture();
     let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(5));
@@ -137,7 +137,7 @@ fn writer_delay_overflow_and_input_partitions_preserve_boundary() {
         for frames in parts {
             let (_, heap) = transit_rt::testing::measure(|| {
                 let _lease = shared.begin_capture().unwrap();
-                shared.capture_at(100 + offset as u64, &data[offset..offset + frames]);
+                shared.capture_at(100 + offset as u64, &data[offset..offset + frames], 1);
             });
             assert!(heap.is_zero(), "{heap:?}");
             offset += frames;
@@ -255,7 +255,7 @@ fn stopped_writer_waits_for_clock_ack_without_another_input_callback() {
         shared.start_capture();
         {
             let _lease = shared.begin_capture().unwrap();
-            shared.capture_at(100, &(0..12).map(|i| i as f32 / 20.0).collect::<Vec<_>>());
+            shared.capture_at(100, &(0..12).map(|i| i as f32 / 20.0).collect::<Vec<_>>(), 1);
         }
         shared.stop_capture();
         assert!(shared.quiescent());
@@ -726,10 +726,12 @@ fn a_writer_that_fell_behind_is_counted_located_and_reported_at_stop() {
         let shared = Arc::new(Shared::new(CaptureRing::new(8192)));
         shared.start_capture();
         {
+            // The take starts one second into the input, so its origin shows at two decimals.
             let _lease = shared.begin_capture().unwrap();
-            shared.capture_at(100, &[0.5; 4800]);
-            // 3,392 samples fit; with `overflow` the other 1,408 are refused and owed as silence.
-            shared.capture_at(4900, &vec![0.25; if overflow { 4800 } else { 3392 }]);
+            shared.capture_at(48_000, &[0.5; 4800], 1);
+            // 3,392 samples fit; with `overflow` the other 1,408 are refused and owed as silence,
+            // from input frame 56,192: take frame 8,192, 0.17 s (1.17 s from the input's start).
+            shared.capture_at(52_800, &vec![0.25; if overflow { 4800 } else { 3392 }], 1);
         }
         let path = dir.join(format!("{case}.wav"));
         let (done, problem) = finish_after(&shared, TakeWriter::create(TrackId(1), vec![0], path.clone(), 48_000).unwrap());
@@ -739,7 +741,7 @@ fn a_writer_that_fell_behind_is_counted_located_and_reported_at_stop() {
             assert_eq!(
                 problem.as_deref(),
                 Some(
-                    "29 ms of input lost from 0.10 s into the take: the take writer fell behind (a busy disk or a starved thread) and the take holds silence there"
+                    "29 ms of input lost from 0.17 s into the take: the take writer fell behind (a busy disk or a starved thread) and the take holds silence there"
                 )
             );
             assert_eq!(audio, [vec![0.5; 4800], vec![0.25; 3392], vec![0.0; 1408]].concat(), "the take keeps its timing");
@@ -815,8 +817,8 @@ fn a_write_failure_and_lost_input_are_both_reported() {
     shared.start_capture();
     {
         let _lease = shared.begin_capture().unwrap();
-        shared.capture_at(0, &[0.5; 4]);
-        shared.capture_at(4, &[0.5; 4800]);
+        shared.capture_at(0, &[0.5; 4], 1);
+        shared.capture_at(4, &[0.5; 4800], 1);
     }
     let problem = finish_after(&shared, take).1.unwrap();
     let (write, lost) = problem.split_once("; ").unwrap();
@@ -852,4 +854,102 @@ fn a_take_measures_its_longest_exact_silence_between_signal() {
     let ends = write("ends.wav", &[(0.0, 0.0, 48_000), (0.2, 0.2, 10), (0.0, 0.0, 48_000)]);
     assert_eq!(ends.longest(), None, "silence before the first and after the last signal is not between signal");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #184 review B1, the production path: a take placed by its applied start (the gated writer of
+/// `prepare`) reports where its silence begins counted from that start, not from the first
+/// captured frame or from zero, and the figure matches the silence in the file.
+#[test]
+fn a_gated_take_locates_its_silence_from_the_applied_start() {
+    let (key, map, now) = recording_map();
+    let data: Vec<f32> = (1..=12_000).map(|n| n as f32 / 12_000.0).collect();
+    for (case, parts) in [vec![12_000], vec![4_000, 4_000, 4_000]].into_iter().enumerate() {
+        let path = transit_test_support::TestDir::file(&format!("gated-overflow-{case}"), "wav");
+        let _ = std::fs::remove_file(&path);
+        let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.to_path_buf(), 48_000).unwrap()];
+        let shared = Shared::new(CaptureRing::new(8192));
+        shared.start_capture();
+        let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(5));
+        let reader = control.prepare().unwrap();
+        let (mut mapping, input_start) = start::mapping::pair(reader.clone(), key);
+        let gate = WriterStart { reader: reader.clone(), history: start::History::new(1, 2_000), input_start, placed: false, next: None };
+        let mut offset = 0;
+        for frames in parts {
+            let _lease = shared.begin_capture().unwrap();
+            shared.capture_at(100 + offset as u64, &data[offset..offset + frames], 1);
+            offset += frames;
+        }
+        // The take starts at input frame 1,100. The ring kept input frames 100 to 8,291, so the
+        // take's silence begins at take frame 7,192 (0.15 s; 0.17 s from the first captured frame
+        // or from zero).
+        let point = start::Point {
+            host_ns: map.frame_to_host(key, 1_100, now).unwrap(),
+            output_frame: 900,
+            position: crate::timeline_map::Position { sample: 500, fraction: 0, denominator: 1 },
+        };
+        assert!(publisher.start(reader.ticket(), point));
+        assert!(mapping.service(Some(map), Some(now)));
+        shared.stop_capture();
+        let (takes, error) = write_takes_started(&shared, takes, 1, Some(gate));
+        assert!(error.is_none(), "{error:?}");
+        assert_eq!(takes.len(), 1);
+        let audio = decode(&path).remove(0);
+        assert_eq!(audio.len(), 11_000, "the take keeps its timing");
+        assert_eq!(audio[..7_192], data[1_000..8_192]);
+        assert!(audio[7_192..].iter().all(|v| *v == 0.0));
+        assert_eq!(
+            shared.losses.report(shared.dropped.load(Ordering::Relaxed), 48_000).as_deref(),
+            Some(
+                "79 ms of input lost from 0.15 s into the take: the take writer fell behind (a busy disk or a starved thread) and the take holds silence there"
+            )
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+/// #184 review F1: input lost before the take's first frame (a count-in or pre-roll the take does
+/// not keep) is not placed at 0.00 s in the take.
+#[test]
+fn input_lost_before_the_take_began_is_said_so() {
+    let shared = Shared::new(CaptureRing::new(8));
+    shared.losses.set_origin(48_000);
+    shared.losses.overflow(47_000);
+    assert_eq!(
+        shared.losses.report(480, 48_000).as_deref(),
+        Some(
+            "10 ms of input lost starting before the take began: the take writer fell behind (a busy disk or a starved thread) and the take holds silence there"
+        )
+    );
+    shared.start_capture();
+    shared.losses.set_origin(48_000);
+    shared.losses.overflow(48_480);
+    assert!(shared.losses.report(480, 48_000).unwrap().starts_with("10 ms of input lost from 0.01 s into the take"));
+}
+
+/// #184 review F3: zeros a backend substituted that the full ring also refused are counted once,
+/// as refused input, not again as input the device lost.
+#[test]
+fn substituted_zeros_the_ring_refused_are_counted_once() {
+    const BLOCK: usize = 64;
+    let shared = Arc::new(Shared::new(CaptureRing::new(2 * BLOCK)));
+    let monitor = InputRing::new(1, 48_000);
+    let (clock, _reader) = crate::device_clock::stream_clock(crate::device_clock::Direction::Input, 48_000).unwrap();
+    let (mut capture, _error) = capture_callbacks(&shared, &monitor, clock, None, None, None);
+    shared.start_capture();
+    // One block of input, then two substituted blocks; nothing drains, so the ring takes the first
+    // substituted block and refuses the second.
+    std::thread::spawn(move || {
+        let format = ab::Format::new(48_000, 1, ab::SampleFormat::F32);
+        let (signal, zeros) = ([0.5f32; BLOCK], [0.0f32; BLOCK]);
+        for k in 0..3 {
+            let mut source = ab::fake::SliceSource { data: if k == 0 { &signal } else { &zeros }, channels: 1 };
+            let mut block = ab::CaptureBlock::new(BLOCK, ab::Stamp::INVALID, format, &mut source);
+            block.substituted = k > 0;
+            capture(&mut block);
+        }
+    })
+    .join()
+    .unwrap();
+    assert_eq!((shared.dropped.load(Ordering::Relaxed), shared.losses.substituted_frames()), (BLOCK, BLOCK));
+    assert_eq!(recorder(&shared).lost_ms(), 2, "128 frames lost in all, not 192");
 }

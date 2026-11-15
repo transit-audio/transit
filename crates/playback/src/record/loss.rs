@@ -80,14 +80,19 @@ impl Losses {
         self.substituted.load(Ordering::Relaxed)
     }
 
-    /// Where input frame `at` lies in the take, as " from S s into the take", or nothing when the
-    /// take had no frame yet or `at` is unknown.
+    /// Where input frame `at` lies in the take, as " from S s into the take" (" starting before the
+    /// take began" when it precedes the take's first frame), or nothing when the take had no frame
+    /// yet or `at` is unknown.
     fn position(&self, at: &AtomicU64, rate: u32) -> String {
         let (at, origin) = (at.load(Ordering::Relaxed), self.origin.load(Ordering::Relaxed));
         if at == NONE || origin == NONE {
             return String::new();
         }
-        format!(" from {:.2} s into the take", at.saturating_sub(origin) as f64 / f64::from(rate.max(1)))
+        // Input lost before the take's first frame (a count-in or pre-roll the take does not keep).
+        if at < origin {
+            return " starting before the take began".into();
+        }
+        format!(" from {:.2} s into the take", (at - origin) as f64 / f64::from(rate.max(1)))
     }
 
     /// What the take lost, for the Stop message and the log: `overflow` frames refused by the full
