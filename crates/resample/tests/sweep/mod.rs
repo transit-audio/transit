@@ -222,6 +222,29 @@ pub fn main_grid(t: &SincTable, density: u32) -> [[Top; 3]; 2] {
     top
 }
 
+/// The largest analytic figure at one rate over `n_phi` phases and the main sweep's frequencies.
+pub fn rate_worst(t: &SincTable, kind: Kind, q: f64, n_phi: usize) -> f64 {
+    let m = q.max(1.0);
+    let mut worst = 0.0f64;
+    for j in 0..n_phi {
+        let (k0, x, c) = coefficients(t, q, j as f64 / n_phi as f64);
+        let mut keep = |_: usize, hr: f64, hi: f64| worst = worst.max(value(kind, hr, hi));
+        match kind {
+            Kind::Pass => run(k0, x, &c, 0.005 / m, 0.001 / m, 416, &mut keep),
+            Kind::Alias if q / 2.0 > 0.58 => {
+                let n1 = (((q / 2.0).min(1.2) - 0.58) / 0.0005 - 1e-9).floor() as usize + 1;
+                run(k0, x, &c, 0.58 / q, 0.0005 / q, n1, &mut keep);
+                if q / 2.0 > 1.2 {
+                    let n2 = ((q / 2.0 - 1.2) / 0.01 - 1e-9).floor() as usize;
+                    run(k0, x, &c, 1.21 / q, 0.01 / q, n2, &mut keep);
+                }
+            }
+            Kind::Alias => {}
+        }
+    }
+    worst
+}
+
 fn admissible(kind: Kind, b: usize, q: f64, v: f64) -> bool {
     let q_ok = match b {
         0 => true,

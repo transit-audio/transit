@@ -70,5 +70,33 @@ fn the_reader_meets_its_acceptance_bounds() {
             }
         }
     }
+    // The rates the four callers name, each on the main sweep's phase and frequency sampling (64 phases):
+    // device and sampler rate pairs both ways (44.1, 48 and 96 kHz), transpositions up to +24 semitones,
+    // and both combined.
+    for q in [
+        44_100.0 / 48_000.0,
+        48_000.0 / 44_100.0,
+        48_000.0 / 96_000.0,
+        96_000.0 / 48_000.0,
+        44_100.0 / 96_000.0,
+        96_000.0 / 44_100.0,
+        2f64.powf(7.0 / 12.0),
+        2.0 * 2.0,
+        44_100.0 / 48_000.0 * 4.0,
+        96_000.0 / 44_100.0 * 4.0,
+    ] {
+        let b = sweep::band(q);
+        for (kind, limit) in [(Kind::Pass, bound(Kind::Pass, b)), (Kind::Alias, bound(Kind::Alias, b))] {
+            let Some(limit) = limit else { continue };
+            let worst = sweep::rate_worst(t, kind, q, 64);
+            if worst == 0.0 {
+                continue; // no source tone below the source Nyquist plays at 0.58 fs or above at this rate
+            }
+            println!("named rate q {q:.6}: {kind:?} {:.2} dB (bound {limit} dB)", db(worst));
+            if db(worst) > limit {
+                failures.push(format!("named rate q {q}: {kind:?} {:.2} dB above {limit} dB", db(worst)));
+            }
+        }
+    }
     assert!(failures.is_empty(), "{failures:#?}");
 }
