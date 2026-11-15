@@ -122,5 +122,6 @@ codegen-units = 16
 debug = 0
 
 [patch.crates-io]
-# Reviewed WASAPI lifetime (upstream PR #1406), fork-only worker observation and signed timestamp fixes.
-cpal = { git = "https://github.com/derekmwright/cpal", rev = "31b5dd4d0bcd4b38924cea42e991dbae87f84479" }
+# Reviewed WASAPI lifetime (upstream PR #1406), fork-only worker observation and signed timestamp fixes,
+# and ALSA xrun recovery (an xrun seen while polling is recovered and capture restarted, #586).
+cpal = { git = "https://github.com/derekmwright/cpal", rev = "d7ede1c5543427f4ea3a2c30356faf99b2316558" }
