@@ -323,10 +323,17 @@ mod tests {
             assert_eq!(stream.sample(1, -back), -expected, "frame -{back}");
         }
         assert_eq!(stream.sample(0, -(HISTORY as i64) - 1), 0.0);
-        // A narrower block leaves silence on the channels it lacks, never an older layout's frames.
+        // A narrower block leaves silence on the channels it lacks, never an older layout's frames,
+        // also once a wider block comes back.
         history.keep(&block[..1], 1);
         let stream = Stream { history: &history, block: &block, pending: 0, channels: 2 };
         assert_eq!(stream.sample(1, -2), 0.0);
+        history.keep(&block, 1);
+        let stream = Stream { history: &history, block: &block, pending: 0, channels: 2 };
+        assert_eq!(stream.sample(1, -1), 0.0, "the new block's frame 0");
+        for back in 2..=HISTORY as i64 {
+            assert_eq!(stream.sample(1, -back), 0.0, "frame -{back}: an older layout's frame");
+        }
         history.reset();
         let stream = Stream { history: &history, block: &block, pending: 0, channels: 2 };
         assert_eq!(stream.sample(0, -1), 0.0);
