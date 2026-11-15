@@ -3,7 +3,7 @@
 //! (48,000 frames) at each rate of the record's budget list; each figure is the median of five runs, as a
 //! percentage of one core (the time to read one second of stereo output divided by one second), next
 //! to the budget `max(1, q/2)` percent. The budget covers the whole clip path (read, gain, fades, mix);
-//! this measures the read alone. Run in release: `cargo run --release -p transit-resample --example bench`.
+//! this measures the read alone. Run in release: `cargo run --release -p transit-resample --example reader_bench`.
 
 use std::hint::black_box;
 use std::time::Instant;
