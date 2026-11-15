@@ -135,3 +135,9 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
 /// deactivated or hidden: that part no longer plays.
 pub(crate) const ZONE_SILENCED_NOTICE: &str =
     "The part before bar 1 is kept in the printed file but no longer plays; choose Leave as the source to keep it sounding.";
+
+/// The notice `track.bounce` and `track.commit` return when a printed track has content before
+/// bar 1 and its source is muted, deactivated or hidden: the print starts at bar 1, so that part
+/// no longer plays (#700).
+pub(crate) const ZONE_LEFT_OUT_NOTICE: &str =
+    "The part before bar 1 is not in the print, which starts at bar 1, and no longer plays; choose Leave as the source to keep it sounding.";

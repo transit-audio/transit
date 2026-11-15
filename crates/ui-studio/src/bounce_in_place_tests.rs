@@ -550,3 +550,32 @@ fn the_status_line_says_when_the_part_before_bar_1_stops_playing() {
         assert_eq!(t.app.status.contains("no longer plays; choose Leave"), said, "{source:?}: {}", t.app.status);
     }
 }
+
+/// #700: the track form of Bounce in Place (the Commit shortcut opens it too) prints the whole
+/// track from bar 1; with content before bar 1 and the source muted, the status line says that part
+/// no longer plays, and with Leave it does not. A script's `track.commit` says it too.
+#[test]
+fn the_track_form_says_when_the_part_before_bar_1_stops_playing() {
+    let zone_track = |t: &mut T| {
+        let track = t.track("Keys", "audio");
+        let s = t.app.engine.session_mut();
+        let buf = transit_audio_io::AudioBuffer { sample_rate: s.sample_rate.hz(), channels: vec![vec![0.25; 96_000]] };
+        let src = transit_engine::io::add_source(s, "Keys", buf, None, transit_audio_io::FileFormat::Wav);
+        let id = s.new_clip_id();
+        s.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::audio(id, "Keys", src, 0, -48_000, 96_000));
+        track
+    };
+    for (source, said) in [(Source::Mute, true), (Source::Hide, true), (Source::Leave, false)] {
+        let mut t = T::new();
+        let track = zone_track(&mut t);
+        t.app.bounce_place = crate::bounce_in_place::State { source_track: Some(track), source, ..Default::default() };
+        t.app.bounce_in_place().unwrap();
+        assert!(t.app.status.starts_with("Bounced Keys to "), "{}", t.app.status);
+        assert_eq!(t.app.status.contains("is not in the print, which starts at bar 1, and no longer plays"), said, "{source:?}: {}", t.app.status);
+    }
+    let mut t = T::new();
+    let track = zone_track(&mut t);
+    t.app.status.clear();
+    t.app.run("track.commit", json!({"tracks": [track.0]})).unwrap();
+    assert!(t.app.status.starts_with("The part before bar 1 is not in the print"), "{}", t.app.status);
+}

@@ -318,7 +318,7 @@ five above); a `path` ending in `.opus` picks Opus on its own.
 Choose **Track > Bounce in Place** (Commit, **Alt+Shift+C**) to print the focused track through
 its inserts, before its fader. The print starts at bar 1 and ends two seconds after the last clip
 on the active playlist. Until audio can sit before bar 1, this print (and Commit) leaves out
-anything a track plays in the pre-count zone before bar 1; the source keeps it. The source's clips and take stacks are always preserved.
+anything a track plays in the pre-count zone before bar 1; the source keeps it. With the source set to Mute, Mute and deactivate, or Hide, that part then no longer plays, and the status line says so; choose Leave to keep it sounding. The source's clips and take stacks are always preserved.
 Every print (Bounce in Place, Commit, Freeze and File > Bounce) starts once every insert has already
 been running for a few seconds, as live play from a stop does, so a plug-in's start-up does not
 land in a print.

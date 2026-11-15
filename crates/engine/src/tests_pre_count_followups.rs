@@ -244,3 +244,26 @@ fn bounce_in_place_says_when_the_part_before_bar_1_stops_playing() {
     }
     assert_eq!(notice(true, "leave"), None, "Leave keeps the source playing the part before bar 1");
 }
+
+/// #700: a whole-track print (Track > Bounce, Commit) starts at bar 1. When the track has content
+/// before bar 1 and the source is muted, deactivated or hidden, that part stops playing, and the
+/// reply says so. Not with Leave, and not for a track with nothing before bar 1.
+#[test]
+fn a_whole_track_print_says_when_the_part_before_bar_1_stops_playing() {
+    let notice = |zone: bool, cmd: &str, source: &str| {
+        let mut e = Engine::default();
+        let span = if zone { (-BAR / 2, BAR / 2) } else { (10_000, 20_000) };
+        let (t, _) = audio_track(&mut e, 0.25, &[span]);
+        let r = e.execute(cmd, &json!({"tracks": [t.0], "source": source})).unwrap();
+        assert_eq!(r["tracks"].as_array().unwrap().len(), 1, "{r}");
+        r.get("notice").cloned()
+    };
+    let said = Some(json!(crate::cmd::clip_bounce::ZONE_LEFT_OUT_NOTICE));
+    for cmd in ["track.bounce", "track.commit"] {
+        for source in ["mute", "mute_deactivate", "hide"] {
+            assert_eq!(notice(true, cmd, source), said, "{cmd} {source}");
+            assert_eq!(notice(false, cmd, source), None, "{cmd} {source} without a zone");
+        }
+        assert_eq!(notice(true, cmd, "leave"), None, "{cmd}: Leave keeps the source playing the part before bar 1");
+    }
+}

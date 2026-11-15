@@ -717,13 +717,24 @@ fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
             }
         }
     }
+    // A whole-track print renders from bar 1 (audio clips cannot start before it yet, #442): when
+    // the source is also silenced, a track's part before bar 1 stops playing, and the reply says
+    // so instead of leaving it silent without a word (#700, ADR 0052 decision 10).
+    let silenced = !matches!(source, crate::io::BounceSource::Leave);
     let mut out = Vec::new();
+    let mut left_out = false;
     for t in tracks {
+        let zone = silenced && e.session().track(t).is_some_and(|tr| tr.clips().iter().any(|c| c.start < 0));
         if let Some(id) = crate::io::bounce_track_range(e, t, destination, source, span)? {
             out.push(id);
+            left_out |= zone;
         }
     }
-    Ok(json!({"tracks": out}))
+    let mut reply = json!({"tracks": out});
+    if left_out {
+        reply["notice"] = json!(super::clip_bounce::ZONE_LEFT_OUT_NOTICE);
+    }
+    Ok(reply)
 }
 
 fn show_hidden(e: &mut Engine, p: &Value) -> Result<Value> {

@@ -174,6 +174,13 @@ impl StudioApp {
                 if let Some(mark) = save_mark {
                     self.say_save_notes(mark);
                 }
+                // A whole-track print that leaves the part before bar 1 silent says so on every
+                // path that runs it (menu, shortcut, script); the dialog adds it to its own line (#700).
+                if matches!(id, "track.bounce" | "track.commit")
+                    && let Some(notice) = v["notice"].as_str()
+                {
+                    self.status = notice.to_string();
+                }
                 if replacing || (id.starts_with("session.save") && !self.engine.is_dirty()) {
                     self.release_autosave(false);
                 }
