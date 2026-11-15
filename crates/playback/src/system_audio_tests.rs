@@ -200,10 +200,12 @@ fn a_trim_change_bends_the_position_and_never_moves_it() {
 fn a_resync_starts_with_the_streams_frames_behind_the_position() {
     use transit_math::f64 as m;
     const AMPLITUDE: f64 = 0.5;
-    let tone = |n: f64| AMPLITUDE * m::sin(core::f64::consts::TAU * 1_000.0 * n / 48_000.0);
-    let (mut producer, _, mut source) = ring(48_000);
+    // A 44.1 kHz endpoint into a 48 kHz device: the positions after the resync are fractional, where
+    // silence behind them would show (at a ratio near 1 they sit almost on whole frames).
+    let tone = |n: f64| AMPLITUDE * m::sin(core::f64::consts::TAU * 1_000.0 * n / 44_100.0);
+    let (mut producer, _, mut source) = ring(44_100);
     let status = Arc::clone(&source.status);
-    let mut resampler = Resampler::new(48_000, 48_000);
+    let mut resampler = Resampler::new(44_100, 48_000);
     let mut pushed = 0u64;
     let mut push = |producer: &mut rtrb::Producer<f32>, frames: u64| {
         for n in pushed..pushed + frames {
@@ -219,12 +221,11 @@ fn a_resync_starts_with_the_streams_frames_behind_the_position() {
     for _ in 0..300 {
         resampler.pull(&mut source.queue, &mut frame, &status);
     }
-    // A burst far over four targets (8,192 frames): the next callback resynchronizes.
+    // A burst far over four targets (about 7,500 frames): the next callback resynchronizes.
     push(&mut producer, 12_000);
     let before = status.discarded.load(Ordering::Relaxed);
     resampler.begin(&mut source, 128, None);
     assert!(status.discarded.load(Ordering::Relaxed) > before, "the ring resynchronized");
-    resampler.set_step(1.000_37);
     let bound = 10f64.powf(-73.0 / 20.0) * AMPLITUDE + 1e-6;
     let mut worst = 0.0f64;
     for _ in 0..256 {
