@@ -170,16 +170,18 @@ fn a_shuffle_ripple_in_the_zone_closes_up_to_the_session_start() {
     assert_eq!(start_of(&e, ids[0]), -BAR);
 }
 
+/// ADR 0052 decision 7: Move Song Start is retired with the pre-count zone; it is no command any
+/// more, with or without a zone.
 #[test]
-fn move_song_start_refuses_while_the_session_has_a_zone() {
-    let (s, _, _) = midi_session(&[(-BAR, BAR / 4)]);
-    let mut e = Engine::new(s);
-    let err = e.execute("event.move_song_start", &json!({"to": BAR})).unwrap_err().to_string();
-    assert!(err.contains("pre-count zone"), "{err}");
-    let (s, _, ids) = midi_session(&[(0, BAR / 4)]);
-    let mut e = Engine::new(s);
-    run(&mut e, "event.move_song_start", json!({"to": BAR}));
-    assert_eq!(start_of(&e, ids[0]), BAR, "without a zone it works as before");
+fn move_song_start_is_retired() {
+    for zone in [-BAR, 0] {
+        let (s, _, ids) = midi_session(&[(zone, BAR / 4)]);
+        let mut e = Engine::new(s);
+        let err = e.execute("event.move_song_start", &json!({"to": BAR})).unwrap_err().to_string();
+        assert!(err.contains("unknown command"), "{err}");
+        assert_eq!(start_of(&e, ids[0]), zone, "nothing moved");
+    }
+    assert!(crate::find_command("event.move_song_start").is_none(), "no menu entry either");
 }
 
 // ---- transport, loop, selection, scroll ----------------------------------------------------

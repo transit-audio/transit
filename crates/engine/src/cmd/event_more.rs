@@ -1,4 +1,4 @@
-//! More Event menu commands: the operations windows, Move Song Start, tempo curves, MIDI
+//! More Event menu commands: the operations windows, tempo curves, MIDI
 //! operations (split notes, input quantize, step input, restore/flatten performance), MIDI track
 //! offsets and real-time properties, chord extraction, Beat Detective, Identify Beat and
 //! Retrospective Record.
@@ -10,7 +10,7 @@ use serde_json::json;
 use transit_midi::Note;
 use transit_midi::ops::QuantizeOptions;
 use transit_model::{ChannelFormat, Clip, ClipContent, ClipId, MarkerKind, Session, TrackId, TrackKind};
-use transit_time::{Range, Samples, TICKS_PER_QUARTER, TempoMap};
+use transit_time::{Range, Samples, TICKS_PER_QUARTER};
 
 /// Most tempo events one curve may write.
 const MAX_TEMPO_EVENTS: i64 = 10_000;
@@ -24,21 +24,12 @@ enum Curve {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(query "event.time_ops_window", "Time Operations Window", ["Event", "Time Operations"], None, "{} — tempo/meter map, song start and selection for the Time Operations window", always, |e, _| Ok(time_state(e.session()))),
+        cmd!(query "event.time_ops_window", "Time Operations Window", ["Event", "Time Operations"], None, "{} — tempo/meter map and selection for the Time Operations window", always, |e, _| Ok(time_state(e.session()))),
         cmd!(query "event.tempo_ops_window", "Tempo Operations Window", ["Event", "Tempo Operations"], None, "{}", always, |e, _| Ok(time_state(e.session()))),
         cmd!(query "event.midi_ops_window", "MIDI Operations Window", ["Event", "MIDI Operations"], None, "{} — input quantize and stored performances", always, |e, _| {
             let s = e.session();
             Ok(json!({"input_quantize": input_quantize_state(s), "performances": s.midi_originals.len(), "rtp": values_with_prefix(&s.edit, "rtp.")}))
         }),
-        cmd!(
-            "event.move_song_start",
-            "Move Song Start...",
-            ["Event", "Time Operations"],
-            None,
-            "{to: position} — moves the song start; tick-based clips and later tempo/meter events move with it",
-            always,
-            move_song_start
-        ),
         cmd!(
             "event.tempo_linear",
             "Linear...",
@@ -157,7 +148,6 @@ fn time_state(s: &Session) -> Value {
     json!({
         "tempos": s.tempo.tempos(),
         "meters": s.tempo.meters(),
-        "song_start": s.edit.value("song.start", 0.0),
         "selection": s.edit.selection,
         "sample_rate": s.sample_rate.hz(),
     })
@@ -182,43 +172,6 @@ fn note_ticks(v: Option<&Value>, default: i64) -> i64 {
         },
         _ => default,
     }
-}
-
-/// Why `event.move_song_start` refuses while the session has a pre-count zone.
-pub(crate) const ZONE_REFUSAL: &str = "the session has clips before bar 1 (a pre-count zone); moving the song start would move them onto bar 1";
-
-fn move_song_start(e: &mut Engine, p: &Value) -> Result<Value> {
-    let id = "event.move_song_start";
-    // Its clamp at 0 would crush clips before bar 1 onto it (ADR 0052 decision 7).
-    if e.session().start() < 0 {
-        return Err(bad(id, ZONE_REFUSAL));
-    }
-    let to = position_param(e, id, p, "to")?.ok_or_else(|| bad(id, "`to` required"))?.max(0);
-    let s = e.session_mut();
-    let from = s.edit.value("song.start", 0.0).max(0.0) as Samples;
-    let delta = to - from;
-    if delta == 0 {
-        return Ok(json!({"song_start": to, "moved": 0}));
-    }
-    let bpm0 = s.tempo.tempo_at_tick(0);
-    let dticks = (delta as f64 * bpm0 * TICKS_PER_QUARTER as f64 / (60.0 * s.sample_rate.as_f64())).round() as i64;
-    // Tempo and meter events after the start move with the song.
-    let old = s.tempo.clone();
-    let mut map = TempoMap::new(old.tempo_at_tick(0), old.meter_at_tick(0).numerator, old.meter_at_tick(0).denominator)
-        .map_err(|err| bad(id, err.to_string()))?;
-    for t in old.tempos().iter().filter(|t| t.tick > 0) {
-        map.set_tempo((t.tick + dticks).max(1), t.bpm).map_err(|err| bad(id, err.to_string()))?;
-    }
-    for m in old.meters().iter().filter(|m| m.tick > 0) {
-        map.set_meter((m.tick + dticks).max(1), m.numerator, m.denominator).map_err(|err| bad(id, err.to_string()))?;
-    }
-    s.tempo = map;
-    // Musical material moves with the song: the same set a tempo change re-places (every playlist
-    // of ticks-timebase tracks, their automation, markers, key changes and the selections).
-    let moved: usize = s.tracks.iter().filter(|t| t.ticks_timebase).flat_map(|t| &t.playlists).map(|pl| pl.clips.len()).sum();
-    crate::retime::move_material(s, &|x| x.saturating_add(delta).max(0)).map_err(|m| bad(id, m))?;
-    s.edit.values.insert("song.start".into(), to as f64);
-    Ok(json!({"song_start": to, "moved": moved}))
 }
 
 fn selection_ticks(e: &Engine, p: &Value, id: &str) -> Result<(Range, i64, i64)> {
@@ -1077,15 +1030,6 @@ mod tests {
         let r = e.execute("event.beat_detective", &json!({"tracks": [kick.id.0], "start": c.start, "end": c.start + 48_000 * 8})).unwrap();
         assert!(r["count"].as_u64().unwrap() > 4, "{r}");
         assert!(r["bpm"].as_f64().is_some());
-    }
-
-    #[test]
-    fn move_song_start_moves_tick_material() {
-        let (mut e, t) = midi_engine();
-        e.execute("event.retrospective_record", &json!({"track": t.0, "notes": [{"pitch": 60, "start_ticks": 0}]})).unwrap();
-        e.execute("event.move_song_start", &json!({"to": 48_000})).unwrap();
-        assert_eq!(e.session().track(t).unwrap().clips()[0].start, 48_000);
-        assert_eq!(e.session().edit.value("song.start", 0.0), 48_000.0);
     }
 
     #[test]

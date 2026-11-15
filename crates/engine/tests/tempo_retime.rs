@@ -555,29 +555,6 @@ fn track_lane_markers_follow_their_own_tracks_timebase() {
     assert_eq!(s.markers[1].start, bar(9), "a marker on a samples-timebase track stays");
 }
 
-#[test]
-fn moving_the_song_start_moves_all_musical_material() {
-    let (mut e, t, c) = midi_at_bar_5();
-    {
-        let s = e.session_mut();
-        let mut alt = s.track(t).unwrap().playlists[0].clone();
-        alt.name = "alt".into();
-        s.track_mut(t).unwrap().playlists.push(alt);
-    }
-    run(&mut e, "automation.set_point", json!({"track": t.0, "param": "volume", "at": bar(6), "value": -3.0}));
-    run(&mut e, "markers.add", json!({"at": bar(7)}));
-    let a = new_track(&mut e, "audio");
-    run(&mut e, "automation.set_point", json!({"track": a.0, "param": "volume", "at": bar(6), "value": -3.0}));
-    run(&mut e, "event.move_song_start", json!({"to": BAR}));
-    let s = e.session();
-    let tr = s.track(t).unwrap();
-    assert_eq!(clip(&e, c).start, bar(6));
-    assert_eq!(tr.playlists[1].clips[0].start, bar(6), "the alternate playlist moves too");
-    assert_eq!(tr.automation[0].points[0].at, bar(7));
-    assert_eq!(s.markers[0].start, bar(8));
-    assert_eq!(s.track(a).unwrap().automation[0].points[0].at, bar(6), "samples-timebase automation stays");
-}
-
 /// 10,000 clips and 100,000 automation points under 2,001 tempo events: one retime must fit in a
 /// drag step. Run with `cargo test --release -p transit-engine --test tempo_retime -- --ignored`.
 #[test]
