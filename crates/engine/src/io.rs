@@ -628,7 +628,7 @@ pub fn inactive_source_refusal(name: &str) -> String {
 /// The refusal for a print whose span (tail included) ends at or before bar 1: an audio clip
 /// cannot start before bar 1 yet (ADR 0052 decision 11), so nothing of it would sound.
 pub(crate) fn zone_print_refusal(name: &str) -> String {
-    format!("{name}: the clips to print end before bar 1, and a print starts at bar 1 until audio can sit before it")
+    format!("{name}: these clips end before bar 1, and a print starts at bar 1 for now")
 }
 
 /// Print through inserts, before the fader. Command callers validate every destination before

@@ -530,3 +530,23 @@ fn the_track_form_still_runs_track_bounce_without_a_range() {
     let print = &t.app.engine.session().track(dest).unwrap().clips()[0];
     assert_eq!((print.start, print.length), (0, 20_000 + 96_000), "the whole track from the session start");
 }
+
+/// Bounce in Place of a clip that reaches before bar 1 with the source muted: the status line says
+/// the part before bar 1 no longer plays (ADR 0052 decision 10); with Leave it does not.
+#[test]
+fn the_status_line_says_when_the_part_before_bar_1_stops_playing() {
+    for (source, said) in [(Source::Mute, true), (Source::Leave, false)] {
+        let mut t = T::new();
+        let track = t.track("Keys", "audio");
+        let s = t.app.engine.session_mut();
+        let buf = transit_audio_io::AudioBuffer { sample_rate: s.sample_rate.hz(), channels: vec![vec![0.25; 96_000]] };
+        let src = transit_engine::io::add_source(s, "Keys", buf, None, transit_audio_io::FileFormat::Wav);
+        let id = s.new_clip_id();
+        // No command places audio before bar 1 yet: the clip is put there directly.
+        s.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::audio(id, "Keys", src, 0, -48_000, 96_000));
+        t.app.bounce_place = crate::bounce_in_place::State { source_track: Some(track), clips: vec![id], source, ..Default::default() };
+        t.app.bounce_in_place().unwrap();
+        assert!(t.app.status.starts_with("Bounced Keys to "), "{}", t.app.status);
+        assert_eq!(t.app.status.contains("no longer plays; choose Leave"), said, "{source:?}: {}", t.app.status);
+    }
+}

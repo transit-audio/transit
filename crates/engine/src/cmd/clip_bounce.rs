@@ -113,6 +113,10 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
             }
         }
     }
+    // A span that starts before bar 1 prints from bar 1 with that part hidden in the file (ADR 0052
+    // decision 10); when the source is also silenced, the part before bar 1 stops playing, and the
+    // reply says so instead of leaving it silent without a word.
+    let silenced_zone = !matches!(source, BounceSource::Leave) && spans.iter().any(|(_, start, _)| *start < 0);
     let mut out = Vec::new();
     for (t, start, end) in spans {
         let span = Range::new(start, end.saturating_add(tail));
@@ -120,5 +124,14 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
             out.push(nt);
         }
     }
-    Ok(json!({"tracks": out, "clips": clips.iter().map(|c| c.0).collect::<Vec<_>>()}))
+    let mut reply = json!({"tracks": out, "clips": clips.iter().map(|c| c.0).collect::<Vec<_>>()});
+    if silenced_zone && !out.is_empty() {
+        reply["notice"] = json!(ZONE_SILENCED_NOTICE);
+    }
+    Ok(reply)
 }
+
+/// The notice `clip.bounce` returns when the print hides audio before bar 1 and the source is muted,
+/// deactivated or hidden: that part no longer plays.
+pub(crate) const ZONE_SILENCED_NOTICE: &str =
+    "The part before bar 1 is kept in the printed file but no longer plays; choose Leave as the source to keep it sounding.";

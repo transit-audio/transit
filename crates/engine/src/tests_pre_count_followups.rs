@@ -223,3 +223,24 @@ fn bounce_in_place_of_clips_that_end_before_bar_1_is_refused_and_changes_nothing
     assert!(err.contains("end before bar 1"), "{err}");
     assert!(e.session().to_json().unwrap() == before, "a refused print changes nothing");
 }
+
+/// When the print hides audio before bar 1 and the source is muted, deactivated or hidden, that part
+/// stops playing, and the reply says so. Not with Leave (the source still plays it), and not for a
+/// clip with nothing before bar 1.
+#[test]
+fn bounce_in_place_says_when_the_part_before_bar_1_stops_playing() {
+    let notice = |zone: bool, source: &str| {
+        let mut e = Engine::default();
+        let span = if zone { (-BAR / 2, BAR / 2) } else { (10_000, 20_000) };
+        let (_, c) = audio_track(&mut e, 0.25, &[span]);
+        let r = e.execute("clip.bounce", &json!({"clips": [c[0].0], "source": source})).unwrap();
+        assert_eq!(r["tracks"].as_array().unwrap().len(), 1, "{r}");
+        r.get("notice").cloned()
+    };
+    let said = Some(json!(crate::cmd::clip_bounce::ZONE_SILENCED_NOTICE));
+    for source in ["mute", "mute_deactivate", "hide"] {
+        assert_eq!(notice(true, source), said, "{source}");
+        assert_eq!(notice(false, source), None, "{source} without a zone");
+    }
+    assert_eq!(notice(true, "leave"), None, "Leave keeps the source playing the part before bar 1");
+}

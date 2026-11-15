@@ -172,6 +172,10 @@ impl StudioApp {
             self.focus(dest);
             let what = if f.clips.is_empty() || sources.len() == 1 { name } else { format!("{} tracks", sources.len()) };
             self.status = format!("Bounced {what} to {} (source {})", self.track_name(dest), f.source.status());
+            // The engine's notice when the part before bar 1 stops playing (ADR 0052 decision 10).
+            if let Some(notice) = result["notice"].as_str() {
+                self.status = format!("{}. {notice}", self.status);
+            }
         } else {
             self.status = format!("Nothing to bounce on {name}: it has no clips");
         }
