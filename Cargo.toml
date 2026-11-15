@@ -31,6 +31,8 @@ transit-macro-osc = { path = "crates/macro-osc" }
 transit-instrument-core = { path = "crates/instrument-core", default-features = false }
 transit-sampler-core = { path = "crates/sampler-core", default-features = false }
 transit-parametric-eq = { path = "crates/parametric-eq", default-features = false }
+# The band-limited fractional reader (ADR 0056 decision 8), Tier B like the cores above.
+transit-resample = { path = "crates/resample", default-features = false }
 transit-resonator = { path = "crates/resonator" }
 transit-modal-voice = { path = "crates/modal-voice" }
 transit-granular = { path = "crates/granular" }

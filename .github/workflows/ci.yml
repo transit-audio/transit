@@ -107,6 +107,7 @@ jobs:
           cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core
           cargo check --locked --target thumbv7em-none-eabihf -p transit-math
           cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-parametric-eq
+          cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-resample
         shell: bash
       # Check production host code without the integration tests' self-dev feature activation.
       - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib

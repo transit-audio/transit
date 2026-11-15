@@ -1,0 +1,27 @@
+[package]
+name = "transit-resample"
+description = "transit's band-limited fractional reader (ADR 0056 decision 8): a Kaiser-windowed sinc of 16 zero crossings a side read from one shared table, its cutoff following the rate above 1, stateless, with no allocation, lock or unbounded loop per sample"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["std"]
+# The one process-wide table (`SincTable::shared`). Off, the crate is `no_std` + `alloc` (ADR 0037
+# Tier B; CI checks that configuration for thumbv7em-none-eabihf) and the caller owns its table.
+std = []
+
+[dependencies]
+# The portable math seam (ADR 0055): the table's `sin` and `sqrt`, so it is the same in every bit on
+# every platform.
+transit-math.workspace = true
+
+[dev-dependencies]
+# The allocation probe (`tests/realtime.rs`) counts heap use on the test thread.
+transit-rt = { workspace = true, features = ["testing"] }
+
+[lints]
+workspace = true

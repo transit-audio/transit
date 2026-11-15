@@ -4429,6 +4429,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-resample"
+version = "0.7.2"
+dependencies = [
+ "transit-math",
+ "transit-rt",
+]
+
+[[package]]
 name = "transit-resonator"
 version = "0.7.2"
 dependencies = [

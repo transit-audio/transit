@@ -6,7 +6,7 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 | Layer | Crates |
 |---|---|
 | L0 | `time`, `rt`, `audio-io`, `opus`, `audio-backend`, `audio-wasapi`, `audio-asio`, `audio-jack`, `midi-io`, `midi`, `math` |
-| L1 | `dsp`, `instrument-core`, `sampler-core`, `macro-osc`, `resonator`, `modal-voice`, `texture`, `granular`, `modulator`, `random-sequencer`, `clap-host`, `vst3-host`, `au-host`, `plugin-host` |
+| L1 | `dsp`, `instrument-core`, `sampler-core`, `resample`, `macro-osc`, `resonator`, `modal-voice`, `texture`, `granular`, `modulator`, `random-sequencer`, `clap-host`, `vst3-host`, `au-host`, `plugin-host` |
 | L2 | `model` (the session document) |
 | L3 | `mix` (the render engine) |
 | L4 | `engine` (commands, undo, I/O), `playback` (devices, Player) |
@@ -19,7 +19,7 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 - Every crate is registered in `LAYERS`; a new crate needs a row (and a layer you can justify).
 - No dependency points upward (dev-dependencies excepted).
 - The standalone crates (`STANDALONE`: `time`, `math`, `opus`, `audio-backend`, `midi-io`, `midi`,
-  `macro-osc`, `instrument-core`, `resonator`, `texture`, `granular`, `modulator`, `random-sequencer`) have no
+  `macro-osc`, `instrument-core`, `resample`, `resonator`, `texture`, `granular`, `modulator`, `random-sequencer`) have no
   production workspace dependencies apart from the `FOUNDATION` crates. `FOUNDATION` holds only
   `math` (`transit-math`), the portable math seam every rendered crate takes its transcendental
   functions and its FFT from ([ADR 0055](../../adr/0055-portable-math.md) 2.1); it is itself standalone. `audio-io` was standalone until it took `opus`, the
@@ -48,7 +48,7 @@ Tier B is the required destination for existing candidates, not a claim that the
 without `std`. `instrument-core` and `sampler-core` (ADR 0041) are the crates with the enforced
 check: the linux job of `.github/workflows/ci.yml` runs their bare-metal library checks. The others remain
 candidates until their retrofit slice enrolls them. The ADR lists blockers and the per-crate retrofit order. New DSP crates start with
-the bare-metal check. Allocation belongs in constructors and `prepare`; caller-owned prepared
+the bare-metal check, as `resample` (the band-limited fractional reader of ADR 0056 decision 8) did. Allocation belongs in constructors and `prepare`; caller-owned prepared
 buffers are reused by processing, events, reset and state capture. The processing traits live
 with their cores, and dsp adapts them to its desktop `Plugin` surface. A std-only dependency,
 clock, thread or allocation in process is flagged against the amendment, including while a
