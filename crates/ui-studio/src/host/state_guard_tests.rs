@@ -264,6 +264,10 @@ fn a_reported_plugin_state_change_marks_the_session_modified_and_is_autosaved() 
     r.app.autosave();
     // Let go of the folder, as the app does when the session closes with unsaved changes.
     r.app.release_autosave(true);
+    // The writer thread lets go of the folder's lock when it takes the close; wait for it (a flush
+    // answers after every job handed over before it). Reading at once raced the writer: under load
+    // the lock was still held and the folder was not yet a leftover (seen on Linux).
+    r.app.autosaver.as_ref().expect("the timed autosave made the writer").flush().expect("the close was taken");
     let left = transit_engine::autosave::leftovers(&dir.join("Autosave"));
     assert_eq!(left.len(), 1, "the two-minute autosave ran");
     let mut back = transit_engine::Engine::default();
