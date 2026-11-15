@@ -21,12 +21,15 @@ use x11rb::wrapper::ConnectionExt as _;
 #[derive(Clone, Copy)]
 enum Seen {
     /// The plug configured; `content` is the content's size the server had reported before it.
+    /// `synthetic`: another client sent the event (a window manager's notice, `SendEvent`); it
+    /// changed nothing on the server.
     Configure {
         x: i16,
         y: i16,
         width: u16,
         height: u16,
         content: (u16, u16),
+        synthetic: bool,
     },
     Reparent {
         parent: Window,
@@ -46,7 +49,7 @@ impl Seen {
     /// Whether a host request can explain the event (see the module docs).
     fn hosted(self) -> bool {
         match self {
-            Seen::Configure { x, y, width, height, content } => (x, y, (width, height)) == (0, 0, content),
+            Seen::Configure { x, y, width, height, content, synthetic } => !synthetic && (x, y, (width, height)) == (0, 0, content),
             Seen::Reparent { .. } => false,
             Seen::Map | Seen::Unmap | Seen::Content { .. } => true,
         }
@@ -58,8 +61,14 @@ impl Seen {
 impl std::fmt::Debug for Seen {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            Seen::Configure { x, y, width, height, content: (cw, ch) } => {
-                let whose = if self.hosted() { "" } else { ", not the host's" };
+            Seen::Configure { x, y, width, height, content: (cw, ch), synthetic } => {
+                let whose = if synthetic {
+                    ", sent by another client, no change"
+                } else if self.hosted() {
+                    ""
+                } else {
+                    ", not the host's"
+                };
                 write!(f, "plug configured {width}x{height} at ({x}, {y}) [content then {cw}x{ch}{whose}]")
             }
             Seen::Reparent { parent, x, y } => write!(f, "plug reparented to {parent:#x} at ({x}, {y})"),
@@ -144,9 +153,15 @@ impl Plug {
                     self.content = (e.width, e.height);
                     Seen::Content { width: e.width, height: e.height }
                 }
-                Event::ConfigureNotify(e) if e.window == self.window => {
-                    Seen::Configure { x: e.x, y: e.y, width: e.width, height: e.height, content: self.content }
-                }
+                // The high bit of the event code marks an event another client sent (`SendEvent`).
+                Event::ConfigureNotify(e) if e.window == self.window => Seen::Configure {
+                    x: e.x,
+                    y: e.y,
+                    width: e.width,
+                    height: e.height,
+                    content: self.content,
+                    synthetic: e.response_type & 0x80 != 0,
+                },
                 Event::ReparentNotify(e) if e.window == self.window => Seen::Reparent { parent: e.parent, x: e.x, y: e.y },
                 Event::MapNotify(e) if e.window == self.window => Seen::Map,
                 Event::UnmapNotify(e) if e.window == self.window => Seen::Unmap,
