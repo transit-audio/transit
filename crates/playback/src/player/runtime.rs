@@ -548,6 +548,21 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         }
         Ok(if audio { self.handles.capture_states() } else { self.handles.capture_states_with_audio(false) })
     }
+    /// [`Handles::capture_states_timed`] for the exact confirmed document, as [`Self::capture_states`].
+    pub fn capture_states_timed(
+        &mut self,
+        expected: &Arc<Session>,
+        budget: std::time::Duration,
+        audio: bool,
+    ) -> Result<(PluginStates, bool), PlayerError> {
+        if self.faulted() {
+            return Err(PlayerError::Faulted);
+        }
+        if !Arc::ptr_eq(expected, &self.requested) || self.confirmed != Some(self.control.sessions.bridge.active()) {
+            return Err(PlayerError::SessionPending);
+        }
+        Ok(self.handles.capture_states_timed(budget, audio))
+    }
     /// Whether the audio side rendered exactly `expected`. This is document readiness only;
     /// state jobs use `plays_instance_processed` to wait for host parameter delivery (#219).
     pub fn plays(&self, expected: &Arc<Session>) -> bool {

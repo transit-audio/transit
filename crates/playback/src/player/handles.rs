@@ -217,6 +217,8 @@ pub struct Handles {
     /// A plug-in in the plan said its own state changed since the UI last asked (issue #574,
     /// [`Self::take_state_changed`]).
     state_changed: bool,
+    /// Where the next timed read ([`Self::capture_states_timed`]) starts in the plan's slots.
+    timed_cursor: usize,
     /// How long one [`Self::capture_states`] may wait for plug-ins in all.
     save_deadline: Duration,
     /// The plug-ins whose state the last capture could not read in time (their stored state is
@@ -252,6 +254,7 @@ impl Handles {
             loaded: Vec::new(),
             editor_opened: Vec::new(),
             state_changed: false,
+            timed_cursor: 0,
             save_deadline: DEFAULT_SAVE_DEADLINE,
             unrefreshed: Vec::new(),
             host,
@@ -880,6 +883,39 @@ impl Handles {
             .collect();
         self.unrefreshed = unrefreshed;
         states
+    }
+
+    /// The timed autosave's read (issue #574): the live plug-ins' states, read one after another
+    /// from where the last timed read stopped, until `budget` has gone by (checked after each read,
+    /// so one slow read can run past it; at least one is read). The next call goes on from the
+    /// first plug-in not read, so every plug-in is read over successive calls. Returns the states
+    /// read and whether every plug-in was read this time. A plug-in whose thread is held by a modal
+    /// dialog or wedged is skipped (it keeps its stored state); nothing is reported as unrefreshed.
+    pub fn capture_states_timed(&mut self, budget: Duration, audio: bool) -> (PluginStates, bool) {
+        let start = Instant::now();
+        let slots: Vec<((TrackId, usize), SlotGen)> = self.active.iter().map(|(&k, &g)| (k, g)).collect();
+        let n = slots.len();
+        let first = if n == 0 { 0 } else { self.timed_cursor % n };
+        let mut states = Vec::new();
+        let mut done = 0;
+        while done < n {
+            if done > 0 && start.elapsed() >= budget {
+                break;
+            }
+            let ((track, slot), generation) = slots[(first + done) % n];
+            done += 1;
+            let Some(entry) = self.entries.get_mut(&(track, generation)) else { continue };
+            if entry.refused || (entry.needs_callback && !audio) {
+                continue;
+            }
+            let busy = budget.saturating_sub(start.elapsed());
+            if let Some(Ok(Some(state))) = entry.state.as_mut().map(|r| r.save_state_within(busy)) {
+                entry.stored = true;
+                states.push((track, slot, state));
+            }
+        }
+        self.timed_cursor = if n == 0 { 0 } else { (first + done) % n };
+        (states, done == n)
     }
 
     /// The plug-ins the last [`Self::capture_states`] could not read in time, once.
