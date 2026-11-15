@@ -19,7 +19,9 @@ const DB_RANGE: (f32, f32) = (-24.0, 12.0);
 
 impl StudioApp {
     /// The count-in Record plays first from `at`: `ui.count_in_bars` bars at the tempo and meter
-    /// of the bar containing `at`, measured here in project samples. `None` when it is off.
+    /// of the bar containing `at`, measured here in project samples, before bar 1 too (a bar in
+    /// the pre-count zone has bar 1's tempo and meter, ADR 0052 decision 3). `None` when it is
+    /// off.
     pub(crate) fn count_in_for(&self, at: Samples) -> Option<CountIn> {
         if !self.ui.count_in {
             return None;
@@ -27,7 +29,7 @@ impl StudioApp {
         let bars = i64::from(self.ui.count_in_bars.clamp(1, 16));
         let s = self.engine.session();
         let rate = s.sample_rate;
-        let tick = s.tempo.samples_to_ticks(at.max(0), rate);
+        let tick = s.tempo.samples_to_ticks(at, rate);
         let bar_tick = s.tempo.bar_start_tick(s.tempo.bar_beat_at_tick(tick).bar);
         let meter = s.tempo.meter_at_tick(bar_tick);
         let beat = (s.tempo.tick_to_samples(bar_tick + meter.ticks_per_beat(), rate) - s.tempo.tick_to_samples(bar_tick, rate)).max(1);
@@ -66,7 +68,8 @@ impl StudioApp {
             return None;
         }
         let s = self.engine.session();
-        let tick = s.tempo.samples_to_ticks(self.position().max(0), s.sample_rate);
+        // Before bar 1 too: the click sounds in the pre-count zone, and the pulse follows it.
+        let tick = s.tempo.samples_to_ticks(self.position(), s.sample_rate);
         let bb = s.tempo.bar_beat_at_tick(tick);
         let per_beat = s.tempo.meter_at_tick(tick).ticks_per_beat().max(1);
         Some((bb.tick as f32 / per_beat as f32, bb.beat == 1))

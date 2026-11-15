@@ -60,17 +60,15 @@ impl StudioApp {
             // Cycling already: the pass is the loop, so every lap is a take.
             // (The per-pass path cuts from the latch in whole laps, so it needs the latch at the
             // loop start; from anywhere else the takes are cut at each wrap of `take_cycle`, the
-            // audio and the MIDI alike, #567.)
-            let e = &self.engine.session().edit;
-            let sel = e.cycle_range();
-            let pass = (e.loop_playback && !sel.is_empty() && at == sel.start).then(|| sel.len());
+            // audio and the MIDI alike, #567.) The loop as the player loops it: floored at the
+            // session start (ADR 0052 decision 7).
+            let pass = self.wanted_loop().filter(|sel| at == sel.start).map(|sel| sel.len());
             self.plan_recording(takes, pass, None, None);
             return;
         }
-        let e = self.engine.session().edit.clone();
-        let sel = e.cycle_range();
-        let cycle = e.loop_playback && !sel.is_empty();
-        if cycle {
+        // The cycle range as Play loops it: one that starts before the session start (a zone that
+        // has gone) starts there, and one that ends at or before it is no cycle (decision 7).
+        if let Some(sel) = self.wanted_loop() {
             // Cycle on: Record loops the cycle range and keeps recording lap after lap until Stop,
             // each lap its own take (Cubase, Live). Punching out at the loop end, which Cycle used to
             // do, stopped the recording at the first wrap.
@@ -79,8 +77,10 @@ impl StudioApp {
             let count_in = self.count_in_for(sel.start);
             self.plan_recording(takes, Some(sel.len()), Some((sel.start, None, Some(sel))), count_in);
         } else {
+            // The pre-roll starts no earlier than the session start: at bar 1 without a zone, in
+            // the zone when there is one, and a cursor in the zone records from there (decision 8).
             let at = self.cursor();
-            let from = (at - self.lead_in(at)).max(0);
+            let from = crate::at_or_after_start(self.engine.session(), at - self.lead_in(at));
             self.record_start = from;
             self.punch = None;
             // The count-in clicks with the transport parked at `from`, needing no room before it.

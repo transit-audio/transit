@@ -898,3 +898,5 @@ mod window_title_tests;
 
 #[cfg(test)]
 mod bounce_in_place_tests;
+#[cfg(test)]
+mod zone_record_tests;
