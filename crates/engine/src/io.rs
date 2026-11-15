@@ -807,8 +807,8 @@ pub use disk_reads::{DiskReads, unreadable_line};
 mod recording;
 mod save_media;
 pub use recording::{
-    Recording, Take, add_recording, add_recording_take, live_span, pass_end, place_recording, place_recording_take, plan_takes, plan_takes_with,
-    takes_end,
+    BEFORE_BAR_ONE_NOTE, Recording, Take, add_recording, add_recording_take, before_bar_one_note, live_span, pass_end, place_recording,
+    place_recording_take, plan_takes, plan_takes_with, takes_end,
 };
 
 #[cfg(test)]

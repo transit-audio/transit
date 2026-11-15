@@ -196,7 +196,7 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         if new_take {
             // A loop's laps all lie over the loop.
             let frames = i64::try_from(got.frames()).unwrap_or(0);
-            let (pieces, _, _) = take_pieces(start, pass, cycle, frames, end.unwrap_or(frames));
+            let (pieces, _) = from_bar_one(take_pieces(start, pass, cycle, frames, end.unwrap_or(frames)).0);
             let span = pieces.iter().map(|p| Range::new(p.at, p.at + p.len)).reduce(|a, b| Range::new(a.start.min(b.start), a.end.max(b.end)));
             let span = span.unwrap_or(Range::point(start));
             let from = punch.map_or(span.start, |p| p.start.max(span.start));
@@ -233,6 +233,7 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         let Some(x) = s.source(src) else { continue };
         let frames = i64::try_from(x.frames).unwrap_or(0);
         let (pieces, merged, short) = take_pieces(start, pass, cycle, frames, end.unwrap_or(frames));
+        let (pieces, hidden) = from_bar_one(pieces);
         for (k, piece) in pieces.iter().enumerate() {
             if k > 0
                 && let Some(t) = s.track_mut(tid)
@@ -255,6 +256,10 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
             let seconds = e.session().sample_rate.seconds(short);
             e.short_lap(crate::take_laps::short_lap_note(short, seconds, &path.display().to_string()));
         }
+        if hidden > 0 {
+            let seconds = e.session().sample_rate.seconds(hidden);
+            e.warn(before_bar_one_note(seconds, &path.display().to_string()));
+        }
     }
     if !out.is_empty() {
         e.push_undo("Record", before);
@@ -273,6 +278,36 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         }
     }
     out
+}
+
+/// How every note about audio recorded before bar 1 begins: audio clips start at bar 1 until
+/// audio pickups (#442) decide otherwise (ADR 0052 decision 11).
+pub const BEFORE_BAR_ONE_NOTE: &str = "Audio recorded before bar 1 is not in the clip";
+
+/// The note for `seconds` of a take recorded before bar 1, which stay in the take file `file`.
+pub fn before_bar_one_note(seconds: f64, file: &str) -> String {
+    format!("{BEFORE_BAR_ONE_NOTE} (audio clips start at bar 1): its first {seconds:.2} s stay in {file}.")
+}
+
+/// The pieces of a take as audio clips can hold them: from bar 1 on (ADR 0052 decision 11). A
+/// piece that starts before bar 1, recorded from a cursor, a pre-roll or a cycle in the pre-count
+/// zone, starts at bar 1 further into its file, so the audio before bar 1 stays in the file before
+/// the clip's start, as a start trim keeps it; a piece wholly before bar 1 is no clip. Also
+/// returns how many frames are left before bar 1, for the note that says so.
+fn from_bar_one(pieces: Vec<Piece>) -> (Vec<Piece>, Samples) {
+    let mut hidden: Samples = 0;
+    let kept = pieces
+        .into_iter()
+        .filter_map(|p| {
+            if p.at >= 0 {
+                return Some(p);
+            }
+            let cut = p.at.saturating_neg().min(p.len);
+            hidden = hidden.saturating_add(cut);
+            (p.len > cut).then_some(Piece { offset: p.offset.saturating_add(cut), at: 0, len: p.len - cut })
+        })
+        .collect();
+    (kept, hidden)
 }
 
 /// One clip of a take: from `offset` in its file, `len` frames at `at` on the timeline.
@@ -623,6 +658,32 @@ mod record_tests {
         assert_eq!((src.name.as_str(), src.path.as_str(), src.unsaved, src.frames), ("Vox_02", "Audio Files/Vox_02.wav", false, 4_800));
         e.execute("edit.undo", &json!({})).unwrap();
         assert!(e.session().find_clip(clips[0]).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ADR 0052 decision 11: a take latched before bar 1 (a cursor, pre-roll or cycle in the
+    /// pre-count zone) becomes a clip from bar 1, further into its file; the audio before bar 1
+    /// stays in the file and a note names it. A take wholly before bar 1 is no clip, said too.
+    #[test]
+    fn an_audio_take_latched_before_bar_1_starts_its_clip_at_bar_1_and_says_so() {
+        let dir = transit_test_support::TestDir::new("zone-take");
+        let path = dir.join("Audio Files/Vox_01.wav");
+        write_take(&path, 24_000);
+        let mut e = Engine::default();
+        let vox = armed(&mut e, "Vox", "mono", "In 1");
+        let mark = e.message_pushes();
+        let ids = add_recording(&mut e, -12_000, vec![(vox, path)], None);
+        assert_eq!(ids.len(), 1);
+        let c = e.session().find_clip(ids[0]).unwrap().1.clone();
+        assert_eq!((c.source_offset(), c.start, c.length), (12_000, 0, 12_000), "from bar 1, a quarter second into the file");
+        assert_eq!(e.session().start(), 0, "no audio clip before bar 1");
+        let said = e.messages_since(mark).to_vec();
+        assert!(said.iter().any(|m| m.starts_with(BEFORE_BAR_ONE_NOTE) && m.contains("first 0.25 s") && m.contains("Vox_01.wav")), "{said:?}");
+        let early = dir.join("Audio Files/Vox_02.wav");
+        write_take(&early, 6_000);
+        let mark = e.message_pushes();
+        assert!(add_recording(&mut e, -12_000, vec![(vox, early)], None).is_empty(), "wholly before bar 1: no clip");
+        assert!(e.messages_since(mark).iter().any(|m| m.starts_with(BEFORE_BAR_ONE_NOTE) && m.contains("Vox_02.wav")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

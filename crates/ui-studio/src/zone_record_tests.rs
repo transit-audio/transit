@@ -113,3 +113,18 @@ fn the_beat_pulse_follows_the_transport_in_the_zone() {
     app.engine.transport.position = -BEAT / 2;
     assert_eq!(app.beat_phase(), Some((0.5, false)), "half way through the zone's last beat");
 }
+
+/// Audio recorded before bar 1 that is not in its clip ends the status line, as the lap notes do
+/// (Stop and crash recovery both report through it).
+#[test]
+fn audio_left_before_bar_1_is_said_on_the_status_line() {
+    let mut app = app(None);
+    app.status = "Recorded 1 clip (2.0 s) on Audio 1".into();
+    let mark = app.lap_mark();
+    app.engine.warn(transit_engine::io::before_bar_one_note(0.5, "Vox_01.wav"));
+    app.report_lap_notes(mark);
+    assert_eq!(
+        app.status,
+        "Recorded 1 clip (2.0 s) on Audio 1. Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): its first 0.50 s stay in Vox_01.wav."
+    );
+}

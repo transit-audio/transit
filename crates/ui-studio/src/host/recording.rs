@@ -479,17 +479,18 @@ impl StudioApp {
 
     /// Where the engine's messages and its count of short last laps stand before a placement, for
     /// [`StudioApp::report_lap_notes`] after it.
-    pub(super) fn lap_mark(&self) -> LapMark {
+    pub(crate) fn lap_mark(&self) -> LapMark {
         LapMark { messages: self.engine.message_pushes(), short: self.engine.short_laps() }
     }
 
     /// End the status line with what the engine said, since `mark`, about laps of this pass that
     /// are not a take of their own (#522, #634), after the placement reports: a final take past the
-    /// lap limit, said once, and each last lap too short to be a take with the file that keeps it.
+    /// lap limit, said once, audio recorded before bar 1 that is not in its clip (ADR 0052), and
+    /// each last lap too short to be a take with the file that keeps it.
     /// More than two such files, or any whose note the engine's 100-message list no longer holds,
     /// are given as their exact count (the engine counts them as it places) and the log. The
     /// engine logged each note. Stop and crash recovery both end with it.
-    pub(super) fn report_lap_notes(&mut self, mark: LapMark) {
+    pub(crate) fn report_lap_notes(&mut self, mark: LapMark) {
         use transit_engine::take_laps::{OVER_LIMIT_NOTE, SHORT_LAP_NOTE};
         let files = self.engine.short_laps().saturating_sub(mark.short);
         let said = self.engine.messages_since(mark.messages);
@@ -499,6 +500,9 @@ impl StudioApp {
                 notes.push(m);
             }
         }
+        // Audio recorded before bar 1 stays in its file, said per take (ADR 0052 decision 11).
+        let early = transit_engine::io::BEFORE_BAR_ONE_NOTE;
+        notes.extend(said.iter().filter(|m| m.starts_with(early)).map(|m| m.trim_end_matches('.').to_string()));
         let short: Vec<String> = said.iter().filter(|m| m.starts_with(SHORT_LAP_NOTE)).map(|m| m.trim_end_matches('.').to_string()).collect();
         if files > 2 || u64::try_from(short.len()).unwrap_or(u64::MAX) != files {
             notes.push(format!("{SHORT_LAP_NOTE}: {files} take files keep such a lap (see the log)"));
@@ -702,7 +706,7 @@ pub(crate) const HALF_SPEED_WHILE_RECORDING: &str = "Half-Speed Playback is not 
 
 /// Where the engine's messages and its count of short last laps stood before a placement.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct LapMark {
+pub(crate) struct LapMark {
     messages: u64,
     short: u64,
 }
