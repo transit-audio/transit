@@ -138,6 +138,19 @@ impl StudioApp {
     fn store_plugin_states(&mut self, states: Result<transit_playback::PluginStates, transit_playback::PlayerError>) -> Result<(), String> {
         let states = self.player_requests.result(&mut self.status, states).ok_or_else(|| self.status.clone())?;
         for (t, slot, data) in states {
+            // A hosted plug-in's state that the session already holds is not stored again: the
+            // document stays the one the player has confirmed, so a capture right after another
+            // one (a removal after the save question, issue #574) is not refused as still updating.
+            let held = self
+                .engine
+                .session()
+                .track(t)
+                .and_then(|tr| if slot == transit_mix::INSTRUMENT_SLOT { tr.instrument.as_ref() } else { tr.mixer.inserts.get(slot)?.as_ref() })
+                .filter(|ins| transit_mix::is_third_party(&ins.plugin))
+                .and_then(transit_model::Insert::state_bytes);
+            if held.as_deref() == Some(&data[..]) {
+                continue;
+            }
             let slot = if slot == transit_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) };
             let state = transit_model::b64::encode(&data);
             if let Err(e) = self.execute_ui("mix.insert_state", &json!({"track": t.0, "slot": slot, "state": state})) {
@@ -149,13 +162,19 @@ impl StudioApp {
     }
 
     /// Parameter edits made in plugin editors go into the session (one undo step per gesture).
-    /// Calls `Player::idle`, which hosted editors need every frame (E7).
+    /// Calls `Player::idle`, which hosted editors need every frame (E7). A plug-in that said its
+    /// own state changed marks the session modified (issue #574).
     pub(crate) fn apply_editor_edits(&mut self) {
         let discard = self.restore_pending || self.engine.transport_requests.contains(&TransportRequest::ResetSession);
         let Some(p) = &self.player else { return };
         let Some(edits) = self.player_requests.result(&mut self.status, p.idle()) else { return };
+        // Taken even when discarded: a notice from the document being replaced is not the next one's.
+        let state_changed = p.take_plugin_state_changed();
         if discard {
             return;
+        }
+        if state_changed {
+            self.engine.mark_plugin_state_changed();
         }
         self.apply_edits(edits);
     }

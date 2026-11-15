@@ -167,7 +167,7 @@ impl eframe::App for App {
         }
         if self.0.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        } else if ctx.input(|i| i.viewport().close_requested()) && self.0.engine.is_dirty() {
+        } else if ctx.input(|i| i.viewport().close_requested()) && self.0.unsaved_changes() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.0.run_or_ask("app.quit", serde_json::json!({}));
         }

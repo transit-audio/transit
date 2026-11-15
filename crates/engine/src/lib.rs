@@ -202,6 +202,9 @@ pub struct Engine {
     saved: Arc<Session>,
     /// `is_dirty` as of a revision.
     dirty_at: Cell<(u64, bool)>,
+    /// A hosted plug-in said its own state changed since the session was opened or saved
+    /// ([`Engine::mark_plugin_state_changed`], issue #574).
+    plugin_state_changed: bool,
     /// Gesture key for undo coalescing (see `execute_merged`).
     merge_key: Option<String>,
     /// The key every merged gesture takes while held (see `hold_merge`).
@@ -294,6 +297,7 @@ impl Engine {
             revision: 1,
             dirty: false,
             dirty_at: Cell::new((0, false)),
+            plugin_state_changed: false,
             merge_key: None,
             merge_hold: None,
             tempo_gesture: None,
@@ -500,11 +504,17 @@ impl Engine {
         }
         self.revision = self.revision.wrapping_add(1);
         self.dirty = false;
+        self.plugin_state_changed = false;
     }
 
     /// Whether the document changed since it was opened or saved. Selecting, locating and zooming
-    /// don't count, and undoing back to the saved state makes it clean again.
+    /// don't count, and undoing back to the saved state makes it clean again. A hosted plug-in
+    /// whose own state changed ([`Engine::mark_plugin_state_changed`]) keeps it modified until the
+    /// next save, whatever is undone: its state is not in the undo history.
     pub fn is_dirty(&self) -> bool {
+        if self.plugin_state_changed {
+            return true;
+        }
         if !self.dirty {
             return false;
         }
@@ -518,7 +528,28 @@ impl Engine {
     }
     pub fn mark_clean(&mut self) {
         self.dirty = false;
+        self.plugin_state_changed = false;
         self.saved = Arc::clone(&self.doc);
+    }
+
+    /// A hosted plug-in said its own state changed (issue #574: CLAP `mark_dirty`, VST3
+    /// `setDirty`): something the document cannot show until a capture stores it. The session
+    /// reads modified (title, save prompt, autosave) until it is saved or replaced. Not a document
+    /// change: no revision, no undo step. A plug-in that reports this all the time makes its
+    /// session read modified again soon after every save.
+    pub fn mark_plugin_state_changed(&mut self) {
+        self.plugin_state_changed = true;
+    }
+
+    /// The document Undo would bring back (issue #574: the UI reads hosted plug-in states before
+    /// an undo that drops their instances).
+    pub fn undo_doc(&self) -> Option<&Arc<Session>> {
+        self.undo.last().map(|h| &h.doc)
+    }
+
+    /// The document Redo would bring back (see [`Engine::undo_doc`]).
+    pub fn redo_doc(&self) -> Option<&Arc<Session>> {
+        self.redo.last().map(|h| &h.doc)
     }
 
     pub fn can_undo(&self) -> bool {
@@ -1111,6 +1142,10 @@ mod merge_tests {
         assert_eq!(e.undo_history().len(), 3);
     }
 }
+
+#[cfg(test)]
+#[path = "plugin_dirty_tests.rs"]
+mod plugin_dirty_tests;
 
 #[cfg(test)]
 mod dirty_tests {

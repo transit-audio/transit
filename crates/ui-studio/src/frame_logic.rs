@@ -135,6 +135,10 @@ impl StudioApp {
             // Third-party plugins keep state the session can't see: store it first.
             self.capture_plugin_states()?;
         }
+        if self.drops_live_state(id, &params) {
+            // The step's undo snapshot keeps the state the plug-in has now (issue #574).
+            self.capture_live_states()?;
+        }
         // Any edit command (selection included) ends a header selection; `focus_header` sets it
         // again after its own `edit.select`.
         if id.starts_with("edit.") || id.starts_with("clip.") || id.starts_with("midi.") {

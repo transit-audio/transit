@@ -19,6 +19,7 @@ mod autosave;
 mod plugin_state;
 pub(crate) mod reconnect;
 mod recording;
+mod state_guard;
 mod transport;
 
 use crate::{MeterDisplay, StudioApp};

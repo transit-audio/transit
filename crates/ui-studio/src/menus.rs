@@ -18,7 +18,7 @@ impl StudioApp {
         if self.engine.transport.recording && matches!(id, "session.new" | "session.open" | "app.quit") {
             self.stop_play();
         }
-        if self.engine.is_dirty() && matches!(id, "session.new" | "session.open" | "app.quit") {
+        if matches!(id, "session.new" | "session.open" | "app.quit") && self.unsaved_changes() {
             self.dialog = Some(Dialog::SaveChanges { then: (id.into(), params) });
             return;
         }

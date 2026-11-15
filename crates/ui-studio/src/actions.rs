@@ -339,6 +339,8 @@ impl StudioApp {
     /// first. The first error stops the batch, undoes it and goes to the status line. The master
     /// is never deleted.
     pub fn delete_tracks(&mut self, tracks: &[TrackId]) -> Result<Value, String> {
+        // Their devices' live state goes into the undo snapshot first (issue #574).
+        self.capture_before_dropping(tracks)?;
         self.tracks_selected_by_header = false;
         self.mixer.serial += 1;
         let key = format!("delete-tracks:{}", self.mixer.serial);
