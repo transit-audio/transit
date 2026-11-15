@@ -152,6 +152,10 @@ pub(crate) fn place_unplaced(s: &mut Session, links: &Path) -> (Vec<String>, boo
     let mut said = Vec::new();
     let entries = std::mem::take(&mut s.unplaced_takes);
     for entry in entries {
+        if entry.ends_with(super::recording::BEFORE_BAR_ONE_TAKE_SUFFIX) {
+            s.unplaced_takes.push(entry);
+            continue;
+        }
         let file = unplaced_file(&entry, links).unwrap_or_else(|why| {
             said.push(format!("the unplaced take {entry} is not looked for: {why}"));
             None

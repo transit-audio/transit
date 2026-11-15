@@ -633,13 +633,25 @@ impl Engine {
         }
     }
 
-    /// Undo and Redo never change record-arm or input-monitor, which are runtime state, nor the list
-    /// of unplaced takes: tracks keep what they have now, whatever the restored snapshot held.
-    fn keep_runtime_state(&mut self, from: &Session) {
-        // Takes the session could not place are facts about files on disk, not edits (#192).
-        if self.doc.unplaced_takes != from.unplaced_takes {
-            Arc::make_mut(&mut self.doc).unplaced_takes.clone_from(&from.unplaced_takes);
+    /// Keep references to refused take files even across existing Undo and Redo steps (#192).
+    /// Source-backed unplaced takes instead belong to their recording's ordinary history (#705).
+    pub(crate) fn remember_unplaced_takes(&mut self, entries: &[String]) {
+        if entries.is_empty() {
+            return;
         }
+        self.session_mut();
+        for doc in std::iter::once(&mut self.doc).chain(self.undo.iter_mut().chain(&mut self.redo).map(|h| &mut h.doc)) {
+            for entry in entries {
+                if !doc.unplaced_takes.contains(entry) {
+                    Arc::make_mut(doc).unplaced_takes.push(entry.clone());
+                }
+            }
+        }
+    }
+
+    /// Undo and Redo never change record-arm or input-monitor, which are runtime state:
+    /// tracks keep what they have now, whatever the restored snapshot held.
+    fn keep_runtime_state(&mut self, from: &Session) {
         let differs = |t: &transit_model::Track| {
             from.track(t.id).is_some_and(|f| {
                 f.mixer.record_arm != t.mixer.record_arm || f.mixer.input_monitor != t.mixer.input_monitor || f.mixer.touched != t.mixer.touched

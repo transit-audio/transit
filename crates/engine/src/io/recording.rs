@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// These entries stay unplaced on reopen: loading the file cannot give it room before bar 1.
+pub(super) const BEFORE_BAR_ONE_TAKE_SUFFIX: &str = " (recorded before bar 1)";
+
 /// The record-enabled audio tracks, each with the input channels it records (those its input
 /// route names, "In 3" → 2, wrapped to the device's `input_channels`) and a new take file
 /// `<track>_<NN>.wav` in the `Audio Files` of the session's folder (`unsaved_dir` until it is saved).
@@ -233,7 +236,14 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         let Some(x) = s.source(src) else { continue };
         let frames = i64::try_from(x.frames).unwrap_or(0);
         let (pieces, merged, short) = take_pieces(start, pass, cycle, frames, end.unwrap_or(frames));
+        let early_laps = (pieces.len() > 1).then(|| pieces.iter().filter(|p| p.at < 0).count());
         let (pieces, hidden) = from_bar_one(pieces);
+        if pieces.is_empty() && hidden > 0 {
+            let entry = format!("{}{BEFORE_BAR_ONE_TAKE_SUFFIX}", path.display());
+            if !s.unplaced_takes.contains(&entry) {
+                s.unplaced_takes.push(entry);
+            }
+        }
         for (k, piece) in pieces.iter().enumerate() {
             if k > 0
                 && let Some(t) = s.track_mut(tid)
@@ -258,25 +268,19 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         }
         if hidden > 0 {
             let seconds = e.session().sample_rate.seconds(hidden);
-            e.warn(before_bar_one_note(seconds, &path.display().to_string()));
+            let file = path.display().to_string();
+            e.warn(early_laps.map_or_else(|| before_bar_one_note(seconds, &file), |laps| before_bar_one_laps_note(laps, seconds, &file)));
         }
     }
-    if !out.is_empty() {
+    if !out.is_empty() || e.session().sources.len() > before.sources.len() {
         e.push_undo("Record", before);
         let added = usize::try_from(e.undo_pushes() - n0).unwrap_or(0);
         if new_take && added > 1 {
             let _ = e.squash_undo(added, "Record");
         }
     }
-    // After the undo step, so undoing the recording keeps the reference to the file.
-    if !unplaced.is_empty() {
-        let s = e.session_mut();
-        for entry in unplaced {
-            if !s.unplaced_takes.contains(&entry) {
-                s.unplaced_takes.push(entry);
-            }
-        }
-    }
+    // Refused files have no source to undo; their references survive every history step (#192).
+    e.remember_unplaced_takes(&unplaced);
     out
 }
 
@@ -287,6 +291,12 @@ pub const BEFORE_BAR_ONE_NOTE: &str = "Audio recorded before bar 1 is not in the
 /// The note for `seconds` of a take recorded before bar 1, which stay in the take file `file`.
 pub fn before_bar_one_note(seconds: f64, file: &str) -> String {
     format!("{BEFORE_BAR_ONE_NOTE} (audio clips start at bar 1): its first {seconds:.2} s stay in {file}.")
+}
+
+/// Unlike a single take's leading audio, these stretches can occur throughout a cycle file.
+fn before_bar_one_laps_note(laps: usize, seconds: f64, file: &str) -> String {
+    let noun = if laps == 1 { "lap" } else { "laps" };
+    format!("{BEFORE_BAR_ONE_NOTE} (audio clips start at bar 1): a total of {seconds:.2} s from {laps} {noun} stays in {file}.")
 }
 
 /// The pieces of a take as audio clips can hold them: from bar 1 on (ADR 0052 decision 11). A
@@ -672,19 +682,117 @@ mod record_tests {
         let mut e = Engine::default();
         let vox = armed(&mut e, "Vox", "mono", "In 1");
         let mark = e.message_pushes();
-        let ids = add_recording(&mut e, -12_000, vec![(vox, path)], None);
+        let ids = add_recording(&mut e, -12_000, vec![(vox, path.clone())], None);
         assert_eq!(ids.len(), 1);
         let c = e.session().find_clip(ids[0]).unwrap().1.clone();
         assert_eq!((c.source_offset(), c.start, c.length), (12_000, 0, 12_000), "from bar 1, a quarter second into the file");
         assert_eq!(e.session().start(), 0, "no audio clip before bar 1");
         let said = e.messages_since(mark).to_vec();
-        assert!(said.iter().any(|m| m.starts_with(BEFORE_BAR_ONE_NOTE) && m.contains("first 0.25 s") && m.contains("Vox_01.wav")), "{said:?}");
+        assert_eq!(
+            said,
+            [format!("Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): its first 0.25 s stay in {}.", path.display())]
+        );
         let early = dir.join("Audio Files/Vox_02.wav");
         write_take(&early, 6_000);
         let mark = e.message_pushes();
         assert!(add_recording(&mut e, -12_000, vec![(vox, early)], None).is_empty(), "wholly before bar 1: no clip");
         assert!(e.messages_since(mark).iter().any(|m| m.starts_with(BEFORE_BAR_ONE_NOTE) && m.contains("Vox_02.wav")));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_take_wholly_before_bar_1_is_unplaced_and_undoes_with_its_source_issue_705() {
+        let dir = transit_test_support::TestDir::new("zone-unplaced");
+        let path = dir.join("Audio Files/Vox_01.wav");
+        write_take(&path, 6_000);
+        let file = std::fs::read(&path).unwrap();
+        let mut e = Engine::default();
+        let vox = armed(&mut e, "Vox", "mono", "In 1");
+        let before = e.session_arc();
+        let steps = e.undo_history().len();
+        let mark = e.message_pushes();
+
+        assert!(place_recording_take(&mut e, &Recording::new(-12_000), vec![(vox, path.clone())], true).is_empty());
+        let listed = e.session().unplaced_takes.clone();
+        assert_eq!(listed, [format!("{} (recorded before bar 1)", path.display())]);
+        let source = e.session().sources.last().unwrap().clone();
+        assert_eq!(source.path, path.to_string_lossy());
+        assert_eq!(e.session().sources.len(), before.sources.len() + 1);
+        assert!(e.session().pool.get(source.id).is_some());
+        assert!(e.session().track(vox).unwrap().clips().is_empty());
+        assert_eq!(e.undo_history().len(), steps + 1);
+        assert_eq!(e.undo_label(), Some("Record"));
+        assert!(e.messages_since(mark).iter().any(|m| m.starts_with(BEFORE_BAR_ONE_NOTE) && m.contains(path.to_string_lossy().as_ref())));
+
+        assert!(e.undo());
+        assert_eq!(e.session().unplaced_takes, before.unplaced_takes);
+        assert_eq!(e.session().sources, before.sources);
+        assert!(e.session().pool.get(source.id).is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), file, "Undo keeps every recorded byte");
+        assert!(e.redo());
+        assert_eq!(e.session().unplaced_takes, listed);
+        assert_eq!(e.session().sources.last(), Some(&source));
+        assert!(e.session().pool.get(source.id).is_some());
+        assert!(e.session().track(vox).unwrap().clips().is_empty());
+        assert_eq!(std::fs::read(&path).unwrap(), file);
+
+        let saved = dir.join("Early.transit").to_string_lossy().into_owned();
+        save_session(&mut e, &saved).unwrap();
+        let mut reopened = Engine::default();
+        open_session(&mut reopened, &saved).unwrap();
+        assert_eq!(reopened.session().unplaced_takes, listed);
+        assert_eq!(reopened.session().sources.len(), 1);
+        assert_eq!(reopened.session().tracks.len(), e.session().tracks.len());
+        assert!(reopened.session().track(vox).unwrap().clips().is_empty());
+        assert_eq!(std::fs::read(&path).unwrap(), file);
+    }
+
+    #[test]
+    fn a_refused_take_stays_listed_across_an_existing_redo_issue_705() {
+        let dir = TempDir(transit_test_support::TestDir::new("refused-redo"));
+        let (path, _fake_len) = header_only(&dir, "Long_01.wav", transit_audio_io::MAX_DECODE_SAMPLES + 1_000, 44_100);
+        let mut e = Engine::default();
+        let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        e.execute("mix.volume", &json!({"tracks": [t.0], "db": -6.0})).unwrap();
+        assert!(e.undo());
+        assert!(add_recording_take(&mut e, &Recording::new(0), vec![(t, path.clone())], false).is_empty());
+        let listed = e.session().unplaced_takes.clone();
+        assert_eq!(listed.len(), 1);
+        assert!(e.redo());
+        assert_eq!(e.session().unplaced_takes, listed, "an existing Redo keeps the refused file reference");
+        assert!(e.undo());
+        assert_eq!(e.session().unplaced_takes, listed);
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn cycle_audio_before_bar_1_note_counts_affected_laps_and_total_issue_706() {
+        // Equal loop passes, an earlier loop start after the first wrap, then a first lap
+        // entirely after bar 1: only the laps that contribute hidden audio are counted.
+        for (start, pass, cycle, frames, total, laps) in [
+            (-12_000, Some(24_000), None, 48_000, "0.50", "2 laps"),
+            (-12_000, None, Some(Range::new(-24_000, 12_000)), 60_000, "0.75", "2 laps"),
+            (6_000, None, Some(Range::new(-12_000, 12_000)), 30_000, "0.25", "1 lap"),
+        ] {
+            let dir = transit_test_support::TestDir::new("zone-cycle-note");
+            let path = dir.join("Audio Files/Vox_01.wav");
+            write_take(&path, frames);
+            let mut e = Engine::default();
+            let vox = armed(&mut e, "Vox", "mono", "In 1");
+            let mark = e.message_pushes();
+            let plan = Recording { pass, cycle, ..Recording::new(start) };
+            let clips = place_recording_take(&mut e, &plan, vec![(vox, path.clone())], true);
+            assert_eq!(clips.len(), 2);
+            assert_eq!(e.session().all_clips().count(), 2);
+            assert!(e.session().all_clips().all(|c| c.start >= 0));
+            assert_eq!(
+                e.messages_since(mark),
+                [format!(
+                    "Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): a total of {total} s from {laps} stays in {}.",
+                    path.display()
+                )]
+            );
+        }
     }
 
     #[test]
