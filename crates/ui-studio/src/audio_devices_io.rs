@@ -258,7 +258,7 @@ pub fn section(
         items.push(MenuItem::at(ui, WASAPI_NOTE.into(), "io_wasapi_note".into(), r.rect));
     }
     let outputs: Vec<&IoPath> = io.paths_of(IoDirection::Output).collect();
-    ui.horizontal(|ui| {
+    crate::chrome::control_row(ui, |ui| {
         ui.label("Main plays on");
         let combo = crate::chrome::field(ui, |ui| {
             crate::chrome_pick::Combo::new("io_main", &io.main).show(ui, |ui| {
@@ -361,7 +361,7 @@ pub fn hardware_section(
         ed.hw_ret = None;
     }
     let running = progress.is_some();
-    ui.horizontal(|ui| {
+    crate::chrome::control_row(ui, |ui| {
         ui.add_enabled_ui(!running, |ui| {
             for (label, key, names, pick) in [("Send", "hw_send", &outputs, &mut ed.hw_send), ("Return", "hw_ret", &inputs, &mut ed.hw_ret)] {
                 ui.label(label);

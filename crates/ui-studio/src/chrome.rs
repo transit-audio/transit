@@ -39,6 +39,17 @@ pub fn field<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     with_style(ui, |st| field_visuals(&mut st.visuals, &TOKENS), add)
 }
 
+/// A row of a label and a control: the row is the control's height before anything is placed, so
+/// every element, the first label included, centers on one line (a row sized by its last, tallest
+/// widget leaves the earlier ones riding high).
+pub fn control_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = c::CONTROL_HEIGHT;
+        ui.horizontal(add).inner
+    })
+    .inner
+}
+
 /// Runs `add` with the ui's style changed by `set`, then puts the style back. No child ui: the
 /// widget lays out and takes its id exactly as it would without the chrome.
 fn with_style<R>(ui: &mut Ui, set: impl FnOnce(&mut egui::Style), add: impl FnOnce(&mut Ui) -> R) -> R {

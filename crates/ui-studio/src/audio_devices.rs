@@ -1062,10 +1062,11 @@ fn calibration_measure(
     *ret = pick_path(ret.as_deref(), draft.calibration_return.as_deref(), None, &inputs);
     let running = progress.is_some();
     let mut action = None;
-    ui.horizontal(|ui| {
+    crate::chrome::control_row(ui, |ui| {
         ui.add_enabled_ui(!running, |ui| {
             for (label, key, names, pick) in [("Out", "cal_send", &outputs, &mut *send), ("In", "cal_ret", &inputs, &mut *ret)] {
-                ui.label(egui::RichText::new(label).color(TOKENS.text_dim).size(11.5));
+                let shown = ui.label(egui::RichText::new(label).color(TOKENS.text_dim).size(11.5));
+                controls.push((label.into(), "cal_label", shown.rect));
                 let combo = crate::chrome::field(ui, |ui| {
                     crate::chrome_pick::Combo::new(key, pick.as_deref().unwrap_or("None")).show(ui, |ui| {
                         for n in names {

@@ -626,3 +626,41 @@ fn the_midi_rows_center_on_one_line_and_the_note_stays_inside_the_pane() {
         assert!(r[2] <= right, "{r:?} stays in the pane");
     }
 }
+
+/// Audio Devices > System > Calibration (maintainer screenshot at 150 percent): "Out" sat above "In".
+/// The row is laid out at the control height before anything is placed, so both labels, both
+/// drop-downs and Measure share one vertical center.
+#[test]
+fn the_calibration_row_centers_both_labels_both_dropdowns_and_measure_on_one_line() {
+    if !transit_playback::devices::NATIVE_ASIO_COMPILED {
+        return;
+    }
+    for zoom in [1.0_f32, 1.5] {
+        let mut t = T::new();
+        t.control("audio.fake_devices", asio_devices()).unwrap();
+        t.app.ui.ui_zoom = zoom;
+        t.screen = egui::vec2(1400.0, 800.0) / zoom;
+        t.frames(3);
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        t.open_window();
+        t.pick("system", "ASIO");
+        let c = t.layout()["controls"].clone();
+        let rects: Vec<[f32; 4]> = [Some("Out"), Some("In")]
+            .into_iter()
+            .map(|l| T::rect(&c, l, "cal_label"))
+            .chain([T::rect(&c, None, "cal_send"), T::rect(&c, None, "cal_ret"), T::rect(&c, Some("Measure"), "cal_measure")])
+            .collect();
+        let centers = rects.map_centers();
+        let spread = centers.iter().cloned().fold(f32::MIN, f32::max) - centers.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(spread <= 0.5, "at {zoom} ppp Out, In, both drop-downs and Measure share a center within 0.5 pt: {centers:?} {rects:?}");
+    }
+}
+
+trait MapCenters {
+    fn map_centers(&self) -> Vec<f32>;
+}
+impl MapCenters for Vec<[f32; 4]> {
+    fn map_centers(&self) -> Vec<f32> {
+        self.iter().map(|r| mid(*r).1).collect()
+    }
+}

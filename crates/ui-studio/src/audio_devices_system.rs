@@ -97,7 +97,7 @@ pub fn section(
     let switch = crate::chrome::checkbox(ui, &mut draft.system_audio, "Record what the computer plays");
     crate::help::hover(ui, &switch, crate::help::Id::AudioDevicesSystemAudio);
     controls.push(MenuItem::at(ui, "Record what the computer plays".into(), "system_audio".into(), switch.rect));
-    ui.horizontal(|ui| {
+    crate::chrome::control_row(ui, |ui| {
         ui.label("Output to capture");
         let options: Vec<(String, String)> = view.outputs.iter().map(|o| (o.clone(), o.clone())).collect();
         let (rect, text) = crate::audio_devices::window::choose_or(
