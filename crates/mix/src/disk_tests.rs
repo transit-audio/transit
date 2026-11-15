@@ -313,3 +313,16 @@ fn stretched_clips_play_and_render_from_disk_as_from_memory_at_any_block_cut() {
         assert_eq!(flat(render_range(&ms, range, block)), reference, "memory, block {block}");
     }
 }
+
+/// The clip reader's table is built when a plan is compiled, so a stretched in-memory clip's first
+/// read on the audio thread allocates nothing (#604). Run alone, this is the table's first use in the
+/// process (in a full run another test may have built it already).
+#[test]
+fn a_stretched_clip_in_memory_reads_on_the_audio_thread_without_allocating() {
+    let data = content(10_000);
+    let (ms, _) = session(memory(&data));
+    // Clip `b` (stretch 1.25, looped) starts at 3,500, in block 13.
+    let blocks: Vec<i64> = (0..36).map(|b| b * BLOCK as i64).collect();
+    let out = live(&ms, &blocks, None, true);
+    assert!(out[14 * BLOCK..].iter().any(|v| v.abs() > 0.01));
+}
