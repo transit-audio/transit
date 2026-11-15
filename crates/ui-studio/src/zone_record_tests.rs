@@ -128,3 +128,20 @@ fn audio_left_before_bar_1_is_said_on_the_status_line() {
         "Recorded 1 clip (2.0 s) on Audio 1. Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): its first 0.50 s stay in Vox_01.wav."
     );
 }
+
+#[test]
+fn an_early_only_audio_take_does_not_say_recorded_nothing() {
+    let dir = transit_test_support::TestDir::created("early-status");
+    let path = dir.join("Vox.wav");
+    let mut bytes = transit_audio_io::wav_float_header(1, 48_000, 480).unwrap();
+    bytes.extend((0..480).flat_map(|_| 0.25_f32.to_le_bytes()));
+    std::fs::write(&path, bytes).unwrap();
+    let mut app = app(None);
+    let track = app.engine.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Mono, None);
+    let mark = app.lap_mark();
+    let plan = transit_engine::io::Recording::new(-960);
+    assert!(app.place_takes(&plan, vec![(track, path)], -480, 1).is_empty());
+    app.report_lap_notes(mark);
+    assert!(app.status.starts_with("No audio clips placed. Audio recorded before bar 1"), "{}", app.status);
+    assert!(app.status.contains("stay in"));
+}

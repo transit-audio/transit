@@ -49,6 +49,8 @@ pub mod slicing;
 mod source;
 mod takes;
 mod track;
+mod unplaced_take;
+pub use unplaced_take::UnplacedTake;
 
 pub use automation::{AutoParam, AutomationLane, AutomationMode, AutomationPoint};
 pub use clip::{

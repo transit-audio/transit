@@ -123,7 +123,14 @@ fn take_file_there(path: &Path) -> bool {
 /// the session file `links` names: it goes through [`stored_path`] before the file system sees it,
 /// so an entry naming another computer, a device or a URL is refused unopened, and a relative one
 /// is taken from the session's folder, never the working directory.
-fn unplaced_file(entry: &str, links: &Path) -> std::result::Result<Option<PathBuf>, String> {
+fn unplaced_file(entry: &transit_model::UnplacedTake, links: &Path) -> std::result::Result<Option<PathBuf>, String> {
+    let entry = match entry {
+        transit_model::UnplacedTake::File { path, .. } => {
+            let path = stored_path(path, links)?;
+            return Ok(take_file_there(&path).then_some(path));
+        }
+        transit_model::UnplacedTake::Legacy(text) => text,
+    };
     let (mut looked, mut refused) = (false, None);
     for (i, _) in entry.match_indices(" (") {
         match stored_path(&entry[..i], links) {
@@ -152,7 +159,7 @@ pub(crate) fn place_unplaced(s: &mut Session, links: &Path) -> (Vec<String>, boo
     let mut said = Vec::new();
     let entries = std::mem::take(&mut s.unplaced_takes);
     for entry in entries {
-        if entry.ends_with(super::recording::BEFORE_BAR_ONE_TAKE_SUFFIX) {
+        if !entry.retry_on_open() {
             s.unplaced_takes.push(entry);
             continue;
         }
@@ -237,15 +244,21 @@ mod tests {
         );
         let kept_clip = e.session_mut().new_clip_id();
         crate::edit::place_clip(e.session_mut(), vox, Clip::audio(kept_clip, "Kept", kept, 0, 1_000, 4_800));
-        e.session_mut().unplaced_takes =
-            vec![format!("{} (6.21 h of mono at 48 kHz)", path.display()), format!("{} (6.21 h of mono at 48 kHz)", gone.display())];
+        e.session_mut().unplaced_takes = vec![
+            format!("{} (6.21 h of mono at 48 kHz)", path.display()).into(),
+            transit_model::UnplacedTake::from(format!("{} (6.21 h of mono at 48 kHz)", gone.display())),
+        ];
         let session = dir.0.join("Old.transit").to_string_lossy().into_owned();
         save_session(&mut e, &session).unwrap();
 
         let mut r = Engine::default();
         open_session(&mut r, &session).unwrap();
         let s = r.session();
-        assert_eq!(s.unplaced_takes, [format!("{} (6.21 h of mono at 48 kHz)", gone.display())], "the missing file stays listed");
+        assert_eq!(
+            s.unplaced_takes,
+            [transit_model::UnplacedTake::from(format!("{} (6.21 h of mono at 48 kHz)", gone.display()))],
+            "the missing file stays listed"
+        );
         let src = s.sources.iter().find(|x| x.disk).unwrap();
         assert!(src.frames == frames && src.path == path.to_string_lossy(), "{src:?}");
         let old = s.track(vox).unwrap().clips();
@@ -406,7 +419,7 @@ mod tests {
         let mut bytes = transit_audio_io::wav_float_header(6, 48_000, 100).unwrap();
         bytes.extend([0u8; 6 * 4 * 100]);
         std::fs::write(&path, &bytes).unwrap();
-        let mut s = Session { unplaced_takes: vec![format!("{} (0.00 h of 6-channel at 48 kHz)", path.display())], ..Session::default() };
+        let mut s = Session { unplaced_takes: vec![format!("{} (0.00 h of 6-channel at 48 kHz)", path.display()).into()], ..Session::default() };
         let (_, placed) = place_unplaced(&mut s, &dir.0.join("S.transit"));
         assert!(placed);
         let t = s.tracks.last().unwrap();
@@ -482,13 +495,17 @@ mod tests {
         let session = dir.0.join("Song.transit");
         let probes = Probes::on();
         for path in hostile_entries(&session) {
-            let entry = format!("{path}{HOLDS}");
-            let mut s = Session { unplaced_takes: vec![entry.clone()], ..Session::default() };
-            let (said, placed) = place_unplaced(&mut s, &session);
-            assert_eq!(probes.take(), Vec::<PathBuf>::new(), "{path:?}: nothing reaches the file system");
-            assert!(!placed && s.tracks.is_empty() && s.sources.is_empty(), "{path:?}");
-            assert_eq!(s.unplaced_takes, std::slice::from_ref(&entry), "{path:?}: the take stays listed");
-            assert!(said.iter().any(|m| m.contains(&entry) && m.contains("is not looked for: not opened")), "{path:?}: {said:?}");
+            for entry in [
+                transit_model::UnplacedTake::from(format!("{path}{HOLDS}")),
+                transit_model::UnplacedTake::new(path.clone(), "refused".into(), None, true),
+            ] {
+                let mut s = Session { unplaced_takes: vec![entry.clone()], ..Session::default() };
+                let (said, placed) = place_unplaced(&mut s, &session);
+                assert_eq!(probes.take(), Vec::<PathBuf>::new(), "{path:?}: nothing reaches the file system");
+                assert!(!placed && s.tracks.is_empty() && s.sources.is_empty(), "{path:?}");
+                assert_eq!(s.unplaced_takes, std::slice::from_ref(&entry), "{path:?}: the take stays listed");
+                assert!(said.iter().any(|m| m.contains(&entry.to_string()) && m.contains("is not looked for: not opened")), "{path:?}: {said:?}");
+            }
         }
     }
 
@@ -506,16 +523,16 @@ mod tests {
         ];
         for path in entries {
             let entry = format!("{path}{HOLDS}");
-            let mut s = Session { unplaced_takes: vec![entry.clone()], ..Session::default() };
+            let mut s = Session { unplaced_takes: vec![entry.clone().into()], ..Session::default() };
             let (said, placed) = place_unplaced(&mut s, &session);
             assert_eq!(probes.take(), std::slice::from_ref(&take), "{path:?}: taken from the session's folder, never the working directory");
             assert!(!placed && said.is_empty(), "{path:?}: a file not there is the plain never-placed case: {said:?}");
-            assert_eq!(s.unplaced_takes, [entry], "the take stays listed");
+            assert_eq!(s.unplaced_takes, [transit_model::UnplacedTake::from(entry)], "the take stays listed");
         }
         // On the session's own network share the entry is the session's, as for every stored path
         // (checked without touching it: a share path is not absolute on Unix, so refused there).
         let shared = Path::new(r"\\host\share\Song\Song.transit");
-        let mut s = Session { unplaced_takes: vec![format!(r"\\host\share\Song\Audio Files\Take_01.wav{HOLDS}")], ..Session::default() };
+        let mut s = Session { unplaced_takes: vec![format!(r"\\host\share\Song\Audio Files\Take_01.wav{HOLDS}").into()], ..Session::default() };
         let (said, _) = place_unplaced(&mut s, shared);
         if cfg!(windows) {
             assert_eq!(probes.take(), [PathBuf::from(r"\\host\share\Song\Audio Files\Take_01.wav")], "{said:?}");
@@ -523,7 +540,7 @@ mod tests {
             assert!(probes.take().is_empty() && said.iter().any(|m| m.contains("is not looked for")), "{said:?}");
         }
         // A take on another share than the session's is another computer.
-        let mut s = Session { unplaced_takes: vec![format!(r"\\host\other\Take_01.wav{HOLDS}")], ..Session::default() };
+        let mut s = Session { unplaced_takes: vec![format!(r"\\host\other\Take_01.wav{HOLDS}").into()], ..Session::default() };
         let (said, _) = place_unplaced(&mut s, shared);
         assert!(probes.take().is_empty() && said.iter().any(|m| m.contains("the path is on another computer")), "{said:?}");
     }
@@ -534,7 +551,7 @@ mod tests {
         let mut e = Engine::default();
         let remote = format!(r"\\host\share\Take_01.wav{HOLDS}");
         let near = format!("Take_02.wav{HOLDS}");
-        e.session_mut().unplaced_takes = vec![remote.clone(), near.clone()];
+        e.session_mut().unplaced_takes = vec![remote.clone().into(), near.clone().into()];
         let session = dir.0.join("Hostile.transit");
         save_session(&mut e, &session.to_string_lossy()).unwrap();
 
@@ -542,7 +559,11 @@ mod tests {
         let mut r = Engine::default();
         open_session(&mut r, &session.to_string_lossy()).unwrap();
         assert_eq!(probes.take(), [dir.0.join("Take_02.wav")], "only the session folder's file is looked for");
-        assert_eq!(r.session().unplaced_takes, [remote.clone(), near.clone()], "both stay listed");
+        assert_eq!(
+            r.session().unplaced_takes,
+            [transit_model::UnplacedTake::from(remote.clone()), transit_model::UnplacedTake::from(near.clone())],
+            "both stay listed"
+        );
         assert!(r.messages.iter().any(|m| m.contains(&remote) && m.contains("is not looked for: not opened")), "{:?}", r.messages);
         for entry in [&remote, &near] {
             assert!(r.messages.iter().any(|m| m.contains(transit_model::UNPLACED_NOTE) && m.contains(entry.as_str())), "{:?}", r.messages);

@@ -9,6 +9,7 @@ pub fn save_session(e: &mut Engine, path: &str) -> Result<usize> {
 /// [`save_session`], moving each long take onto the file the saved session names through `follow`.
 pub(super) fn save_session_following(e: &mut Engine, path: &str, follow: super::save_media::Follow) -> Result<usize> {
     let (fresh, written, p) = write_session(e.session(), path, false)?;
+    e.follow_unplaced_history(&fresh);
     // Keep the in-memory document in sync (paths, unsaved flags) without an undo step.
     *e.session_mut() = fresh;
     // The session file names the copies now: the open session reads them too, a take a failed
@@ -200,6 +201,16 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
         src.format = FileFormat::Wav;
         files.insert(Arc::as_ptr(audio), src.path.clone());
         written += usize::from(new);
+    }
+    for (old, new) in session.sources.iter().zip(&s.sources) {
+        let absolute = from.as_deref().and_then(|folder| std::path::absolute(folder.join(&old.path)).ok());
+        for entry in &mut s.unplaced_takes {
+            if !entry.follow_source(old.id, &old.path, &new.path)
+                && let Some(path) = &absolute
+            {
+                entry.follow_source(old.id, &path.to_string_lossy(), &new.path);
+            }
+        }
     }
     written += super::frozen_recording::save(&mut s, &dir)?;
     if written > 0 {

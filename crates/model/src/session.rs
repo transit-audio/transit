@@ -362,7 +362,7 @@ pub struct Session {
     /// names the file kept on disk and what it holds. Saved, so a reopen can find the file; shown
     /// as a load note and in the diagnostics report.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub unplaced_takes: Vec<String>,
+    pub unplaced_takes: Vec<crate::UnplacedTake>,
     #[serde(skip)]
     pub pool: SourcePool,
     /// The folder relative source paths point into: where the session was opened or last saved.

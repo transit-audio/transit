@@ -91,6 +91,40 @@ fn recovering_keeps_the_unsaved_work_it_replaces() {
 }
 
 #[test]
+fn recovering_an_early_take_keeps_its_listing_and_audio_after_saving() {
+    let dir = folder("recovery-early-take");
+    let root = dir.join("Autosave");
+    let mut first = launch(&root);
+    first.run("track.new", json!({"name": "Vocal"})).unwrap();
+    let track = first.engine.session().track_by_name("Vocal").unwrap().id;
+    let path = root.join("Untitled/Audio Files/Vocal_01.wav");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut bytes = transit_audio_io::wav_float_header(1, 48_000, 480).unwrap();
+    bytes.extend((0..480).flat_map(|_| 0.25_f32.to_le_bytes()));
+    std::fs::write(&path, bytes).unwrap();
+    let plan = transit_engine::io::Recording::new(-960);
+    assert!(first.place_takes(&plan, vec![(track, path)], -480, 1).is_empty());
+    first.close_autosave();
+    drop(first);
+    let left = leftovers(&root);
+    assert_eq!(left.len(), 1);
+    let mut next = launch(&root);
+    next.recover(&left[0]);
+    assert_eq!(next.engine.session().unplaced_takes.len(), 1);
+    assert_eq!(next.engine.session().sources.len(), 1);
+    assert!(next.engine.session().track(track).unwrap().clips().is_empty());
+    let saved = dir.join("Saved/Song.transit");
+    next.run("session.save_as", json!({"path": saved})).unwrap();
+    next.close_autosave();
+    let s = next.engine.session();
+    let transit_model::UnplacedTake::File { path, source, .. } = &s.unplaced_takes[0] else { panic!("structured entry required") };
+    assert_eq!(*source, Some(s.sources[0].id));
+    assert_eq!(path, &s.sources[0].path);
+    assert!(saved.parent().unwrap().join(path).is_file());
+    assert_eq!(s.pool.get(s.sources[0].id).unwrap().frames(), 480);
+}
+
+#[test]
 fn closing_the_session_or_quitting_drops_its_autosave() {
     let dir = folder("recovery-close");
     let root = dir.join("Autosave");

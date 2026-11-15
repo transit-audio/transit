@@ -689,7 +689,7 @@ impl StudioApp {
         let s = self.engine.session_arc();
         let placed: Vec<(TrackId, &transit_model::Clip)> = ids.iter().filter_map(|id| s.find_clip(*id)).collect();
         let Some(longest) = placed.iter().map(|(_, c)| c.length).max() else {
-            self.status = "Recorded nothing".into();
+            self.status = "No audio clips placed".into();
             return ids;
         };
         let mut names: Vec<String> = Vec::new();

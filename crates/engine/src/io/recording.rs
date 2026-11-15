@@ -2,9 +2,6 @@
 
 use super::*;
 
-/// These entries stay unplaced on reopen: loading the file cannot give it room before bar 1.
-pub(super) const BEFORE_BAR_ONE_TAKE_SUFFIX: &str = " (recorded before bar 1)";
-
 /// The record-enabled audio tracks, each with the input channels it records (those its input
 /// route names, "In 3" → 2, wrapped to the device's `input_channels`) and a new take file
 /// `<track>_<NN>.wav` in the `Audio Files` of the session's folder (`unsaved_dir` until it is saved).
@@ -147,7 +144,7 @@ pub fn place_recording(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, Pa
     ids
 }
 
-/// `place_recording` that is always exactly one undo step labeled "Record", whatever it does:
+/// `place_recording` with source-backed changes grouped into one undo step labeled "Record":
 /// with `new_take`, a track that already has clips under the take (within the punch range)
 /// first gets a duplicate of its playlist, so the old clips stay as the previous take; the punch
 /// trim is folded in too. A loop recording over clips duplicates too, as MIDI does: the old
@@ -196,7 +193,12 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
                 continue;
             }
         };
-        if new_take {
+        if got.frames() == 0 {
+            e.message(format!("The take {} is empty; no audio was recorded.", path.display()));
+            continue;
+        }
+        let mut not_placed = e.session().track(tid).is_none().then(|| "track was deleted".to_string());
+        if new_take && not_placed.is_none() {
             // A loop's laps all lie over the loop.
             let frames = i64::try_from(got.frames()).unwrap_or(0);
             let (pieces, _) = from_bar_one(take_pieces(start, pass, cycle, frames, end.unwrap_or(frames)).0);
@@ -207,19 +209,15 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
             let over = to > from && e.session().track(tid).is_some_and(|t| t.clips().iter().any(|c| c.start < to && c.end() > from));
             let previous = e.session().track(tid).map_or(0, |t| t.active_playlist);
             if over && let Err(err) = e.execute("track.playlist_duplicate", &json!({"track": tid.0})) {
-                e.message(format!("Take kept at {} but not placed: {err}", path.display()));
-                continue;
+                not_placed = Some(format!("playlist could not be copied: {err}"));
             }
-            if over {
+            if over && not_placed.is_none() {
                 crate::takes::number_covered(e.session_mut(), tid, Range::new(from, to), previous);
             }
         }
         let base = e.session().track(tid).map_or(0, |t| t.active_playlist);
         let first = out.len();
         let s = e.session_mut();
-        if s.track(tid).is_none() {
-            continue;
-        }
         let name = path.file_stem().and_then(|x| x.to_str()).unwrap_or("Take");
         let src = match got {
             Got::Memory(buf) => {
@@ -233,13 +231,18 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
             // A long take is one clip on one source played from its file (ADR 0035).
             Got::Disk(audio) => super::disk::add_disk_source(s, name, audio, &path.to_string_lossy()),
         };
+        if let Some(reason) = not_placed {
+            s.unplaced_takes.push(transit_model::UnplacedTake::new(path.display().to_string(), reason.clone(), Some(src), false));
+            e.warn(format!("Take kept at {} but not placed: {reason}.", path.display()));
+            continue;
+        }
         let Some(x) = s.source(src) else { continue };
         let frames = i64::try_from(x.frames).unwrap_or(0);
         let (pieces, merged, short) = take_pieces(start, pass, cycle, frames, end.unwrap_or(frames));
-        let early_laps = (pieces.len() > 1).then(|| pieces.iter().filter(|p| p.at < 0).count());
+        let early_laps = (pieces.len() > 1).then(|| pieces.iter().filter(|p| p.at < 0).count()).filter(|&laps| laps > 1);
         let (pieces, hidden) = from_bar_one(pieces);
         if pieces.is_empty() && hidden > 0 {
-            let entry = format!("{}{BEFORE_BAR_ONE_TAKE_SUFFIX}", path.display());
+            let entry = transit_model::UnplacedTake::new(path.display().to_string(), "recorded before bar 1".into(), Some(src), false);
             if !s.unplaced_takes.contains(&entry) {
                 s.unplaced_takes.push(entry);
             }
@@ -375,8 +378,8 @@ impl Got {
 
 /// The audio of the take at `path`: played from the file when it is long (over the setting or the
 /// decode limit, ADR 0035), else decoded. `Err(Some(entry))` for a take that can be neither (the
-/// entry the session keeps for it, said loudly), `Err(None)` for one that could not be read (said).
-fn take_audio(e: &mut Engine, path: &Path) -> std::result::Result<Got, Option<String>> {
+/// entry the session keeps for it, said loudly), `Err(None)` for an empty or missing file (said).
+fn take_audio(e: &mut Engine, path: &Path) -> std::result::Result<Got, Option<transit_model::UnplacedTake>> {
     let rate = e.session().sample_rate.hz();
     if let Some((info, len)) = super::disk::probe(path).filter(|(info, _)| super::disk::streams(e.session(), info)) {
         match super::disk::open_disk_audio(path, len, rate) {
@@ -391,16 +394,29 @@ fn take_audio(e: &mut Engine, path: &Path) -> std::result::Result<Got, Option<St
     }
     let bytes = read_file(path).map_err(|err| {
         e.message(err.to_string());
-        None
+        unreadable_take(path)
     })?;
     match transit_audio_io::decode(&bytes, None) {
         Ok((_, buf)) => Ok(Got::Memory(buf)),
         Err(err @ transit_audio_io::AudioError::TooLarge(_)) => Err(Some(refuse_take(e, path, &Held::Unsized(err.to_string()), None))),
         Err(err) => {
             e.message(format!("{}: {err}", path.display()));
-            Err(None)
+            Err((!bytes.is_empty()).then(|| transit_model::UnplacedTake::new(path.display().to_string(), "could not be decoded".into(), None, false)))
         }
     }
+}
+
+/// Keep a reference when reading failed unless the file is known to be missing or empty.
+/// An access refusal does not authorize even a metadata lookup; uncertainty keeps the reference.
+fn unreadable_take(path: &Path) -> Option<transit_model::UnplacedTake> {
+    if crate::file_access::check_read(path).is_ok() {
+        match std::fs::metadata(path) {
+            Ok(m) if !m.is_file() || m.len() == 0 => return None,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+            _ => {}
+        }
+    }
+    Some(transit_model::UnplacedTake::new(path.display().to_string(), "could not be read".into(), None, false))
 }
 
 /// What a refused take holds: its length and layout (read from the header), or only the decoder's words.
@@ -430,7 +446,7 @@ fn limit_hours(channels: u16, rate: u32) -> f64 {
 
 /// Say, loudly, that the take at `path` was not placed and where the file is; returns the entry the
 /// session keeps for it. `why` is why it could not be played from disk either.
-fn refuse_take(e: &mut Engine, path: &Path, held: &Held, why: Option<&str>) -> String {
+fn refuse_take(e: &mut Engine, path: &Path, held: &Held, why: Option<&str>) -> transit_model::UnplacedTake {
     let shown = path.display();
     let (what, said) = match held {
         Held::Sized { frames, channels, rate } => {
@@ -446,7 +462,7 @@ fn refuse_take(e: &mut Engine, path: &Path, held: &Held, why: Option<&str>) -> S
     e.warn(format!(
         "The take {shown} was not placed: it is {said}, more than a session can hold in memory{disk}. The file is kept at {shown}; import it in pieces or open it in another editor."
     ));
-    format!("{shown} ({what})")
+    transit_model::UnplacedTake::new(shown.to_string(), what, None, true)
 }
 
 /// Where a take recording from `start` shows while it holds `len` samples, as it will be placed:
@@ -457,6 +473,10 @@ pub fn live_span(start: Samples, pass: Option<Samples>, wrap: Option<Range>, pun
     let (origin, span) = crate::take_laps::live(start, pass, wrap, len);
     Some((origin, span.intersect(&punch.unwrap_or(span))?))
 }
+
+#[cfg(test)]
+#[path = "unplaced_recording_tests.rs"]
+mod unplaced_recording_tests;
 
 #[cfg(test)]
 mod record_tests {
@@ -477,10 +497,14 @@ mod record_tests {
         let path = transit_test_support::TestDir::file("failed-playlist", "wav");
         write_take(&path, 480);
         assert!(add_recording_take(&mut e, &Recording::new(0), vec![(t, path.to_path_buf())], true).is_empty());
-        assert_eq!(e.session(), before.as_ref());
+        assert_eq!(e.session().tracks, before.tracks);
+        assert_eq!(e.session().unplaced_takes.len(), 1);
+        assert_eq!(e.session().sources.len(), before.sources.len() + 1);
         assert!(path.is_file());
         assert!(e.messages.last().is_some_and(|m| m.contains("not placed") && m.contains(path.to_string_lossy().as_ref())));
-        assert!(e.undo_history().is_empty());
+        assert_eq!(e.undo_label(), Some("Record"));
+        assert!(e.undo());
+        assert_eq!(e.session(), before.as_ref());
         std::fs::remove_file(path).unwrap();
     }
 
@@ -490,7 +514,7 @@ mod record_tests {
     use super::super::disk::FAKE_LEN;
 
     /// Holds the faked file length; clears it on drop, even when the test panics.
-    struct FakeLenGuard;
+    pub(super) struct FakeLenGuard;
     impl Drop for FakeLenGuard {
         fn drop(&mut self) {
             FAKE_LEN.with(|l| l.set(None));
@@ -541,7 +565,7 @@ mod record_tests {
         assert!(add_recording_take(&mut e, &Recording::new(0), vec![(t, path.clone())], false).is_empty());
         let listed = e.session().unplaced_takes.clone();
         assert_eq!(listed.len(), 1, "{listed:?}");
-        assert!(listed[0].contains("Long_01.wav") && listed[0].contains("6.76 h of mono at 44.1 kHz"), "{listed:?}");
+        assert!(listed[0].to_string().contains("Long_01.wav") && listed[0].to_string().contains("6.76 h of mono at 44.1 kHz"), "{listed:?}");
         let said = e.messages.last().unwrap();
         assert!(
             said.contains("the limit is 6.76 h") && said.contains("cannot be played from disk") && said.contains("The file is kept at"),
@@ -578,7 +602,7 @@ mod record_tests {
         let mut e = Engine::default();
         let entry =
             refuse_take(&mut e, Path::new("/rec/A.wav"), &Held::Unsized("audio too large: 5 samples exceeds the 4-sample decode limit".into()), None);
-        assert_eq!(entry, "/rec/A.wav (audio too large: 5 samples exceeds the 4-sample decode limit)");
+        assert_eq!(entry.to_string(), "/rec/A.wav (audio too large: 5 samples exceeds the 4-sample decode limit)");
         assert_eq!(e.messages.last().unwrap().matches("/rec/A.wav").count(), 2, "once as the take, once as where it is kept");
     }
 
@@ -714,7 +738,7 @@ mod record_tests {
 
         assert!(place_recording_take(&mut e, &Recording::new(-12_000), vec![(vox, path.clone())], true).is_empty());
         let listed = e.session().unplaced_takes.clone();
-        assert_eq!(listed, [format!("{} (recorded before bar 1)", path.display())]);
+        assert_eq!(listed[0].to_string(), format!("{} (recorded before bar 1)", path.display()));
         let source = e.session().sources.last().unwrap().clone();
         assert_eq!(source.path, path.to_string_lossy());
         assert_eq!(e.session().sources.len(), before.sources.len() + 1);
@@ -740,7 +764,7 @@ mod record_tests {
         save_session(&mut e, &saved).unwrap();
         let mut reopened = Engine::default();
         open_session(&mut reopened, &saved).unwrap();
-        assert_eq!(reopened.session().unplaced_takes, listed);
+        assert_eq!(reopened.session().unplaced_takes, e.session().unplaced_takes);
         assert_eq!(reopened.session().sources.len(), 1);
         assert_eq!(reopened.session().tracks.len(), e.session().tracks.len());
         assert!(reopened.session().track(vox).unwrap().clips().is_empty());
@@ -787,10 +811,14 @@ mod record_tests {
             assert!(e.session().all_clips().all(|c| c.start >= 0));
             assert_eq!(
                 e.messages_since(mark),
-                [format!(
-                    "Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): a total of {total} s from {laps} stays in {}.",
-                    path.display()
-                )]
+                [if laps == "1 lap" {
+                    before_bar_one_note(total.parse().unwrap(), path.to_str().unwrap())
+                } else {
+                    format!(
+                        "Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): a total of {total} s from {laps} stays in {}.",
+                        path.display()
+                    )
+                }]
             );
         }
     }

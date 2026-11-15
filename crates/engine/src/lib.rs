@@ -635,7 +635,7 @@ impl Engine {
 
     /// Keep references to refused take files even across existing Undo and Redo steps (#192).
     /// Source-backed unplaced takes instead belong to their recording's ordinary history (#705).
-    pub(crate) fn remember_unplaced_takes(&mut self, entries: &[String]) {
+    pub(crate) fn remember_unplaced_takes(&mut self, entries: &[transit_model::UnplacedTake]) {
         if entries.is_empty() {
             return;
         }
@@ -644,6 +644,35 @@ impl Engine {
             for entry in entries {
                 if !doc.unplaced_takes.contains(entry) {
                     Arc::make_mut(doc).unplaced_takes.push(entry.clone());
+                }
+            }
+        }
+    }
+
+    /// Saving relocates files outside history. Snapshots that already contain an unplaced take
+    /// follow its saved file too; snapshots before that recording still contain neither entry
+    /// nor source. Absolute paths work with each snapshot's original session folder.
+    pub(crate) fn follow_unplaced_history(&mut self, saved: &Session) {
+        let folder = saved.folder.as_deref().unwrap_or_else(|| std::path::Path::new(""));
+        for h in self.undo.iter_mut().chain(&mut self.redo).filter(|h| !h.doc.unplaced_takes.is_empty()) {
+            let doc = Arc::make_mut(&mut h.doc);
+            for src in &mut doc.sources {
+                let Some(new) = saved.source(src.id) else { continue };
+                // An ID alone is not enough if an earlier edit replaced its audio.
+                if !matches!((doc.pool.get(src.id), saved.pool.get(src.id)), (Some(a), Some(b)) if Arc::ptr_eq(a, b)) {
+                    continue;
+                }
+                let Ok(path) = std::path::absolute(folder.join(&new.path)) else { continue };
+                let path = path.to_string_lossy();
+                let old_absolute = doc.folder.as_deref().and_then(|folder| std::path::absolute(folder.join(&src.path)).ok());
+                let mut followed = false;
+                for entry in &mut doc.unplaced_takes {
+                    followed |= entry.follow_source(src.id, &src.path, &path)
+                        || old_absolute.as_ref().is_some_and(|old| entry.follow_source(src.id, &old.to_string_lossy(), &path));
+                }
+                if followed {
+                    src.path = path.into_owned();
+                    src.unsaved = new.unsaved;
                 }
             }
         }
