@@ -664,3 +664,34 @@ impl MapCenters for Vec<[f32; 4]> {
         self.iter().map(|r| mid(*r).1).collect()
     }
 }
+
+/// The Copy diagnostics button sits in the diagnostics card's top-right corner, level with the first line, and no
+/// line runs under it (panel actions at the top right, docs/design/language).
+#[test]
+fn copy_diagnostics_is_in_the_cards_top_right_corner_and_no_line_runs_under_it() {
+    for zoom in [1.0_f32, 1.5] {
+        let mut t = T::new();
+        t.app.ui.ui_zoom = zoom;
+        t.screen = egui::vec2(1400.0, 800.0) / zoom;
+        t.frames(3);
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        t.open_window();
+        // A long note reaches the button's rows.
+        t.app.audio_devices.notes =
+            vec!["A long fallback note that says what was tried and why, long enough to reach the corner of the card".repeat(2)];
+        t.frames(3);
+        let c = t.layout()["controls"].clone();
+        let rect = |key: &str| T::rect(&c, None, key);
+        let (card, button) = (rect("diag_card"), rect("copy_diagnostics"));
+        assert!((button[2] - card[2]).abs() <= 0.5, "{zoom} ppp: the button's right edge is the card's inner right: {button:?} {card:?}");
+        assert!((button[1] - card[1]).abs() <= 0.5, "{zoom} ppp: the button's top is the card's inner top: {button:?} {card:?}");
+        let texts: Vec<[f32; 4]> =
+            c.as_array().unwrap().iter().filter(|m| m["value"] == "diag_text").map(|m| serde_json::from_value(m["rect"].clone()).unwrap()).collect();
+        assert!(texts.len() >= 3, "the hover row, the open lines and the note: {texts:?}");
+        assert!((texts[0][1] - card[1]).abs() <= 0.5, "{zoom} ppp: the first line starts at the card's top, level with the button: {texts:?}");
+        for r in &texts {
+            let apart = r[2] <= button[0] || r[0] >= button[2] || r[3] <= button[1] || r[1] >= button[3];
+            assert!(apart, "{zoom} ppp: a line {r:?} runs under the button {button:?}");
+        }
+    }
+}

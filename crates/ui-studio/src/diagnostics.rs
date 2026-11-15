@@ -701,19 +701,26 @@ impl crate::StudioApp {
     /// Draws the "Copy diagnostics" button and, for two seconds after a copy, "Copied". Returns the
     /// button's rect (for the layout) and whether it was clicked.
     pub(crate) fn diagnostics_button(&self, ui: &mut egui::Ui, help: crate::help::Id) -> (egui::Rect, bool) {
+        ui.horizontal(|ui| self.diagnostics_widgets(ui, help)).inner
+    }
+
+    /// [`Self::diagnostics_button`] for a panel's top-right corner: the button sits on the right edge
+    /// of `ui` and "Copied" shows to its left. Lay it out in a right-to-left ui.
+    pub(crate) fn diagnostics_button_right(&self, ui: &mut egui::Ui, help: crate::help::Id) -> (egui::Rect, bool) {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| self.diagnostics_widgets(ui, help)).inner
+    }
+
+    fn diagnostics_widgets(&self, ui: &mut egui::Ui, help: crate::help::Id) -> (egui::Rect, bool) {
         let now = ui.input(|i| i.time);
-        ui.horizontal(|ui| {
-            let b = ui
-                .add_enabled(self.diag.pending.is_none(), egui::Button::new("Copy diagnostics"))
-                .on_hover_text("Copy a report of this computer's audio setup, the device list and the log's last lines.");
-            crate::help::hover(ui, &b, help);
-            if now < self.diag.copied_until {
-                ui.label(egui::RichText::new("Copied").color(crate::theme::TOKENS.text_dim).size(11.5));
-                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(self.diag.copied_until - now));
-            }
-            (b.rect, b.clicked())
-        })
-        .inner
+        let b = ui
+            .add_enabled(self.diag.pending.is_none(), egui::Button::new("Copy diagnostics"))
+            .on_hover_text("Copy a report of this computer's audio setup, the device list and the log's last lines.");
+        crate::help::hover(ui, &b, help);
+        if now < self.diag.copied_until {
+            ui.label(egui::RichText::new("Copied").color(crate::theme::TOKENS.text_dim).size(11.5));
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(self.diag.copied_until - now));
+        }
+        (b.rect, b.clicked())
     }
 
     /// Whether the buttons are saying "Copied" at `now`.

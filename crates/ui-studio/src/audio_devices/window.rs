@@ -281,40 +281,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 }
                 lay.opened = opened_lines(app, ui.input(|i| i.time));
                 // The diagnostics sit in an inset card: the open devices, the backend figures (monospace) and the notes.
-                egui::Frame::NONE
-                    .fill(TOKENS.bg)
-                    .corner_radius(egui::CornerRadius::same(crate::theme::RADIUS as u8))
-                    .inner_margin(egui::Margin::same(8))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Hover a figure for what it means.").color(TOKENS.text_dim).size(11.0));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                crate::help::header_button(app, ui, crate::help::Id::AudioDevicesWindow)
-                            });
-                        });
-                        for line in &lay.opened {
-                            crate::help::status_line(ui, line, line.starts_with("Backend"));
-                        }
-                        if !audio_on {
-                            let note = if app.null_audio {
-                                NULL_AUDIO_NOTE
-                            } else {
-                                "Audio is off in this run (--no-audio): choices are saved and open at the next start."
-                            };
-                            ui.label(egui::RichText::new(note).color(TOKENS.text_dim).size(11.5));
-                        }
-                        for n in &app.audio_devices.notes {
-                            ui.horizontal(|ui| {
-                                let (r, _) = ui.allocate_exact_size(egui::vec2(icons::ICON, icons::ICON), egui::Sense::hover());
-                                icons::paint(ui.painter(), r.center(), Icon::Error, 14.0, TOKENS.record);
-                                ui.label(egui::RichText::new(n).color(TOKENS.text).size(11.5));
-                            });
-                        }
-                        let (rect, clicked) = app.diagnostics_button(ui, crate::help::Id::AudioDevicesCopyDiagnostics);
-                        controls.push(("Copy diagnostics".into(), "copy_diagnostics", rect));
-                        copy_diagnostics |= clicked;
-                    });
+                copy_diagnostics |= card::show(ui, app, (&lay.opened, audio_on), &mut controls);
                 if recording {
                     // An error (#326): the circle-alert in `meter.hot`, the message in `text`.
                     crate::chrome::status_label(ui, REFUSED_RECORDING, 11.5, crate::chrome::Severity::Error);
