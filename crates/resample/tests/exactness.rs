@@ -207,10 +207,11 @@ fn read_frame_is_decision_8_3_bit_for_bit() {
     // not share their bits: positions with full-precision fractions where they do not, read through an
     // impulse on the tap whose fraction differs (its coefficient is then the output itself), and through
     // the stereo noise. The review's six crafted positions first, then a search.
-    let mut near: Vec<(f64, i64)> = [0x400f_fdff_ffea_0001u64, 0x400f_fdff_3f1a_0001, 0x400f_fcff_ffe2_0001, 0x4007_fdff_ffea_0001, 0x4007_fdff_3f1a_0001, 0x4007_fcff_ffe2_0001]
-        .into_iter()
-        .map(|b| (f64::from_bits(b), 12))
-        .collect();
+    let mut near: Vec<(f64, i64)> =
+        [0x400f_fdff_ffea_0001u64, 0x400f_fdff_3f1a_0001, 0x400f_fcff_ffe2_0001, 0x4007_fdff_ffea_0001, 0x4007_fdff_3f1a_0001, 0x4007_fcff_ffe2_0001]
+            .into_iter()
+            .map(|b| (f64::from_bits(b), 12))
+            .collect();
     let crafted = near.len();
     near.extend(fraction_splits_near_zero(400));
     assert!(near.len() - crafted >= 100, "the search found only {} positions", near.len() - crafted);
