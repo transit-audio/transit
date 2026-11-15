@@ -335,6 +335,7 @@ pub fn import_audio_bytes(e: &mut Engine, name: &str, bytes: &[u8], path: Option
 }
 
 mod midi;
+pub(crate) use midi::export_marker_notice;
 pub use midi::{export_midi, import_midi_bytes};
 mod dawproject;
 pub use dawproject::{is_dawproject, open_dawproject, read_dawproject};

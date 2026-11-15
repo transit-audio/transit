@@ -22,6 +22,7 @@ pub struct DawprojectReport {
     pub stems: usize,
     pub notes: Vec<String>,
     pub left_out: Vec<String>,
+    pub notice: Option<String>,
 }
 
 #[derive(Debug)]
@@ -134,7 +135,8 @@ pub fn export_dawproject(e: &Engine, path: &str) -> Result<DawprojectReport> {
         s.tracks.iter().filter(|t| exported_track(t)).flat_map(|t| t.clips()).filter(|c| matches!(&c.content, ClipContent::Midi { .. })).count();
     let notes = export_notes(s, stems.len(), &left_out);
     log::info!("DAWproject exported: path={:?} tracks={tracks} clips={clips} stems={} left_out=[{}]", path, stems.len(), left_out.join(", "));
-    Ok(DawprojectReport { path, tracks, clips, stems: stems.len(), notes, left_out })
+    let notice = super::midi::export_marker_notice(s, true);
+    Ok(DawprojectReport { path, tracks, clips, stems: stems.len(), notes, left_out, notice })
 }
 
 fn write_archive(part: &Path, xml: &str, stems: &[Stem]) -> Result<()> {
@@ -417,7 +419,8 @@ fn project_xml(s: &Session, stems: &[Stem]) -> String {
     if !markers.is_empty() {
         out.push_str("    <Markers timeUnit=\"beats\">\n");
         for m in markers {
-            line!("      <Marker time=\"{}\" name=\"{}\"/>", number(shift.beats(s, m.start)), escaped(&m.name));
+            // Like the MIDI writer, retain out-of-range markers at the export start.
+            line!("      <Marker time=\"{}\" name=\"{}\"/>", number(shift.beats(s, m.start).max(0.0)), escaped(&m.name));
         }
         out.push_str("    </Markers>\n");
     }

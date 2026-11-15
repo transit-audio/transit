@@ -53,6 +53,25 @@ pub fn export_midi(e: &Engine, only: Option<&[TrackId]>) -> Result<Vec<u8>> {
     export_midi_session(e.session(), only)
 }
 
+/// Report markers moved to the export start. Count before tick rounding so even a marker one
+/// sample before the boundary is disclosed. Arrangement-only exports omit other location kinds.
+pub(crate) fn export_marker_notice(s: &Session, arrangement_only: bool) -> Option<String> {
+    let origin = export_origin(s) as f64;
+    let count = s
+        .markers
+        .iter()
+        .filter(|m| {
+            (!arrangement_only || (m.kind == transit_model::MarkerKind::Marker && m.track.is_none()))
+                && s.tempo.samples_to_ticks_f(m.start, s.sample_rate) < origin
+        })
+        .count();
+    match count {
+        0 => None,
+        1 => Some("1 marker before the export start was moved to the start.".into()),
+        _ => Some(format!("{count} markers before the export start were moved to the start.")),
+    }
+}
+
 fn session_smf(s: &Session) -> transit_midi::Smf {
     transit_midi::Smf {
         format: 1,
@@ -88,6 +107,10 @@ pub(super) fn origin_sample(s: &Session, origin: i64) -> Samples {
 /// marker moved later by `-origin`.
 fn conductor_from(s: &Session, origin: i64) -> transit_midi::Smf {
     let mut smf = session_smf(s);
+    // Preserve the SMF writer's clamp at the export boundary, shared by all MIDI exports.
+    for m in &mut smf.markers {
+        m.0 = m.0.max(origin);
+    }
     if origin >= 0 {
         return smf;
     }

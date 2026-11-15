@@ -851,7 +851,11 @@ fn step_consolidated_bounce(app: &mut StudioApp, ctx: &egui::Context) {
         Some(Ok(done)) => {
             app.finish.layout.last_bounce =
                 Some(json!({"dir": dir, "files": done.files.len(), "midi_files": done.midi_files.len(), "tempo_file": done.tempo_file}));
-            format!("Bounced {} stems, {} track MIDI files and a tempo map to {dir}", done.files.len(), done.midi_files.len())
+            let mut status = format!("Bounced {} stems, {} track MIDI files and a tempo map to {dir}", done.files.len(), done.midi_files.len());
+            if let Some(notice) = done.notice {
+                status.push_str(&format!(". {notice}"));
+            }
+            status
         }
         Some(Err(e)) => e,
     };

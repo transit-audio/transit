@@ -127,6 +127,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_export_marker_notice_reaches_the_status_line() {
+        let notice = "1 marker before the export start was moved to the start.";
+        let job = ConsolidatedJob::with_task(move |_, _| Ok(ConsolidatedBounced { notice: Some(notice.into()), ..Default::default() })).unwrap();
+        job.wait_for_completion();
+        let mut app = crate::tests::app();
+        app.finish.consolidated_job = Some(job);
+        crate::finish::step_bounce(&mut app, &egui::Context::default());
+        assert!(app.status.ends_with(notice), "{}", app.status);
+    }
+
+    #[test]
     fn a_blocked_render_does_not_block_cancel() {
         let (started_send, started) = std::sync::mpsc::channel();
         let (release_send, release) = std::sync::mpsc::channel();

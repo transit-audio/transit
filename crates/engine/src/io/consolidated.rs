@@ -11,6 +11,7 @@ pub struct ConsolidatedBounced {
     pub files: Vec<PathBuf>,
     pub midi_files: Vec<PathBuf>,
     pub tempo_file: PathBuf,
+    pub notice: Option<String>,
 }
 
 struct TrackExport {
@@ -98,6 +99,7 @@ impl ConsolidatedBounce {
             let name = path.file_name().map_or_else(|| "export".into(), |n| n.to_string_lossy().into_owned());
             crate::file_access::check_write(path.with_file_name(format!("{name}.part"))).map_err(EngineError::Io)?;
         }
+        let notice = super::midi::export_marker_notice(&s, false);
         Ok(Self {
             session: s,
             dir: dir.to_path_buf(),
@@ -108,7 +110,7 @@ impl ConsolidatedBounce {
             tempo,
             next: 0,
             current: None,
-            done: ConsolidatedBounced::default(),
+            done: ConsolidatedBounced { notice, ..ConsolidatedBounced::default() },
         })
     }
 

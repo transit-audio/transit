@@ -19,6 +19,9 @@ impl StudioApp {
             let external: Vec<_> = v["left_out"].as_array().into_iter().flatten().filter_map(serde_json::Value::as_str).collect();
             let note = if external.is_empty() { String::new() } else { format!("; External Instrument audio left out: {}", external.join(", ")) };
             self.status = format!("Exported DAWproject to {path} ({stems} stems{note})");
+            if let Some(notice) = v["notice"].as_str() {
+                self.status.push_str(&format!(". {notice}"));
+            }
         }
     }
 }
@@ -50,6 +53,20 @@ mod tests {
 
     fn temp_dir() -> transit_test_support::TestDir {
         transit_test_support::TestDir::created("dawproject-export-ui")
+    }
+
+    #[test]
+    fn export_marker_notices_reach_the_status_line() {
+        let dir = temp_dir();
+        let answer = dir.join("early.dawproject");
+        let mut app = crate::tests::app();
+        app.engine.session_mut().add_marker("Early", transit_model::MarkerKind::Marker, -96_000, -96_000);
+        app.services.pick_save = Some(Box::new(move |_| Some(answer.to_string_lossy().into_owned())));
+        app.pick_dawproject_export();
+        let notice = "1 marker before the export start was moved to the start.";
+        assert!(app.status.ends_with(notice), "{}", app.status);
+        app.run("file.export_midi", json!({"path": dir.join("early.mid")})).unwrap();
+        assert_eq!(app.status, notice);
     }
 
     #[test]

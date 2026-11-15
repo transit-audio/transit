@@ -104,7 +104,11 @@ pub fn specs() -> Vec<CommandSpec> {
             let done = job.run()?;
             let files: Vec<String> = done.files.iter().map(|p| p.to_string_lossy().into_owned()).collect();
             let midi_files: Vec<String> = done.midi_files.iter().map(|p| p.to_string_lossy().into_owned()).collect();
-            Ok(json!({"dir": dir, "seconds": seconds, "files": files, "midi_files": midi_files, "tempo_file": done.tempo_file.to_string_lossy(), "left_out": left_out}))
+            let mut reply = json!({"dir": dir, "seconds": seconds, "files": files, "midi_files": midi_files, "tempo_file": done.tempo_file.to_string_lossy(), "left_out": left_out});
+            if let Some(notice) = done.notice {
+                reply["notice"] = json!(notice);
+            }
+            Ok(reply)
         }),
         cmd!(noundo "file.bounce_paths", "Bounce Stems by Output Path...", [], None, "{dir, paths?: [output path name | main] | all (default: every routed path), format?: wav|aiff|flac|opus, bit_depth?: 16|24|32f, bitrate?: kb/s (Opus), start?, end?, normalize?: false|true|joint|each, dither?: true, mode?: offline_without_external, without_external?: false}", has_tracks, bounce_paths),
         cmd!(noundo "file.export_midi", "MIDI...", ["File", "Export"], None, "{path, tracks?}", always, |e, p| {
@@ -112,14 +116,22 @@ pub fn specs() -> Vec<CommandSpec> {
             let only = if p.get("tracks").is_some() || p.get("track").is_some() { Some(tracks_param(e, "file.export_midi", p)?) } else { None };
             let bytes = crate::io::export_midi(e, only.as_deref())?;
             crate::io::write_file(&path, &bytes)?;
-            Ok(json!({"path": path, "bytes": bytes.len()}))
+            let mut reply = json!({"path": path, "bytes": bytes.len()});
+            if let Some(notice) = crate::io::export_marker_notice(e.session(), false) {
+                reply["notice"] = json!(notice);
+            }
+            Ok(reply)
         }),
         cmd!(noundo "file.export_dawproject", "DAWproject...", ["File", "Export"], None, "{path, replace?: false} — tracks, mixer, note clips and MIDI expression, tempo and meter, markers, and full-length WAV stems for audible audio/instrument tracks; External Instrument audio is left out and named", always, |e, p| {
             let requested = str_param(p, "path").ok_or_else(|| bad("file.export_dawproject", "`path` required"))?;
             let path = crate::io::dawproject_file(requested);
             refuse_replacing(e, "file.export_dawproject", &path, p)?;
             let r = crate::io::export_dawproject(e, &path.to_string_lossy())?;
-            Ok(json!({"path": r.path, "tracks": r.tracks, "clips": r.clips, "stems": r.stems, "notes": r.notes, "left_out": r.left_out}))
+            let mut reply = json!({"path": r.path, "tracks": r.tracks, "clips": r.clips, "stems": r.stems, "notes": r.notes, "left_out": r.left_out});
+            if let Some(notice) = r.notice {
+                reply["notice"] = json!(notice);
+            }
+            Ok(reply)
         }),
         cmd!(noundo "file.export_session_text", "Session Info as Text...", ["File", "Export"], None, "{path?}", always, |e, p| {
             let text = crate::inspect::session_text(e);
