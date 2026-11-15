@@ -196,9 +196,11 @@ fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
     }
     // A window manager resizing and moving the mapped plug, as WSLg's did through a reused id:
     // the intruder's request is checked, and `settle_host` then puts the ConfigureNotify it
-    // caused in front of the host's next dispatch, so the first pass sees it. Without the
-    // host's restore the plug keeps 640x480 at (32, 32), or the window follows that size after
-    // the follow's grace time, which `xembed-restored` rejects: it fails every pass.
+    // caused in front of the host's next dispatch. End to end only: on a display with a window
+    // manager, a late frame configure can also make the host lay the plug out again, so this step
+    // can pass without the restore; the deterministic check is rt's editor_x11 test
+    // `xembed_a_plug_another_client_moved_is_put_back` on its private Xvfb. `xembed-restored`
+    // also rejects the window following the plug's new size instead.
     assert!(inst.load_state(b"CMD:xembed-intrude"));
     settle_host(&inst);
     assert!(host_passes_until(&q, &inst, b"CMD:xembed-restored"), "{}", explain("the host puts back a plug another client moved and resized"));

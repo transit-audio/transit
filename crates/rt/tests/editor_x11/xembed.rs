@@ -385,3 +385,37 @@ fn xembed_a_host_mapped_plug_that_resizes_itself_is_followed() {
     win.close();
     q.dispatch(256);
 }
+
+// Another client moves and resizes a host-mapped plug, as WSLg's window manager did through a
+// reused window id (E74 recurrence, #697: the plug ended at (32, 32)). On this private server
+// nothing else configures the content, so only the host's restore can put the plug back: the
+// intruder's request is checked, a host round trip queues the ConfigureNotify, and the one
+// dispatch that follows must restore position and size.
+fn xembed_a_plug_another_client_moved_is_put_back() {
+    let q = MessageQueue::attach();
+    let win = EditorWindow::new("Moved XEmbed", 300.0, 200.0, None).unwrap();
+    let idle_time = Instant::now();
+    let content = id(win.parent());
+    let plug = Plug::new(content);
+    plug.flags(1);
+    win.raise();
+    assert!(win.surface_readout().is_some()); // Host round trip queues CreateNotify.
+    for _ in 0..2 {
+        q.dispatch(256);
+        win.sync_at(idle_time);
+    }
+    assert_eq!(plug.state(), MapState::VIEWABLE, "the second dispatch's idle maps the plug");
+    let intruder = observer();
+    let aux = x11rb::protocol::xproto::ConfigureWindowAux::new().x(32).y(32).width(640).height(480);
+    intruder.configure_window(plug.window, &aux).unwrap().check().unwrap();
+    let at = |w: Window| plug.c.get_geometry(w).unwrap().reply().map(|g| (g.x, g.y, g.width, g.height)).unwrap();
+    assert_eq!(at(plug.window), (32, 32, 640, 480), "the intruder moved the plug");
+    assert!(win.surface_readout().is_some()); // The plug's ConfigureNotify is queued.
+    q.dispatch(256);
+    win.sync_at(idle_time);
+    assert!(win.surface_readout().is_some()); // The host's restore has reached the server.
+    assert_eq!(at(content), (0, 0, 300, 200), "the content is unchanged");
+    assert_eq!(at(plug.window), (0, 0, 300, 200), "the host put the plug back at (0, 0) at the content's size");
+    win.close();
+    q.dispatch(256);
+}
