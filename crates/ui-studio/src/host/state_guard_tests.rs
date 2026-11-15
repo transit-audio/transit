@@ -23,6 +23,8 @@ struct Live {
     changed: AtomicBool,
     /// Its state read does not answer within the save deadline (a modal dialog, a stuck call).
     busy: AtomicBool,
+    /// It has no editor handle (a CLAP plug-in without a GUI): it reports through its state handle.
+    headless: AtomicBool,
 }
 
 impl Live {
@@ -35,6 +37,8 @@ impl Live {
 #[derive(Default)]
 struct Made {
     instances: Mutex<Vec<(Option<Vec<u8>>, Arc<Live>)>>,
+    /// Instances made from now on have no editor handle.
+    headless: AtomicBool,
 }
 
 impl Made {
@@ -78,6 +82,9 @@ impl Plugin for Fake {
         true
     }
     fn editor(&mut self) -> Option<Box<dyn PluginEditor>> {
+        if self.live.headless.load(Ordering::Relaxed) {
+            return None;
+        }
         Some(Box::new(Editor { live: Arc::clone(&self.live) }))
     }
     fn state_reader(&mut self) -> Option<Box<dyn PluginStateReader>> {
@@ -99,6 +106,9 @@ impl PluginStateReader for Reader {
             return Err(transit_dsp::StateBusy);
         }
         Ok(self.save_state())
+    }
+    fn take_state_changed(&mut self) -> bool {
+        self.live.changed.swap(false, Ordering::Relaxed)
     }
 }
 
@@ -155,6 +165,7 @@ fn rig_with(engine: transit_engine::Engine, player: transit_playback::Player, st
         factory: Arc::new(move |spec: &transit_mix::InstanceSpec| {
             let live = Arc::new(Live::default());
             live.set(spec.state.as_deref().unwrap_or(b"factory"));
+            live.headless.store(m.headless.load(Ordering::Relaxed), Ordering::Relaxed);
             m.instances.lock().unwrap().push((spec.state.as_deref().map(<[u8]>::to_vec), Arc::clone(&live)));
             transit_mix::create_instance("gain", None, 48_000.0, 512, spec.ch)
                 .map(|n| transit_mix::NewInstance { plugin: Box::new(Fake { inner: n.plugin, live }), ..n })
@@ -404,7 +415,14 @@ fn only_changes_that_drop_a_hosted_device_capture_first() {
     let (a, b) = (r["tracks"][0].as_u64().unwrap(), r["tracks"][1].as_u64().unwrap());
     app.engine.session_mut().track_mut(TrackId(a)).unwrap().mixer.inserts[0] = Some(transit_model::Insert::new(ID));
     app.engine.session_mut().track_mut(TrackId(b)).unwrap().mixer.inserts[0] = Some(transit_model::Insert::new("eq7"));
+    let r = app.run("track.new", json!({"kind": "instrument"})).unwrap();
+    let c = r["tracks"][0].as_u64().unwrap();
+    app.engine.session_mut().track_mut(TrackId(c)).unwrap().instrument = Some(transit_model::Insert::new(ID));
     for (id, p, drops) in [
+        // Track `c` hosts its instrument.
+        ("instrument.external", json!({"track": c, "return": "In 1"}), true),
+        ("mix.sampler_new_patch", json!({"track": c}), true),
+        ("mix.instrument", json!({"track": c, "plugin": "macro_oscillator"}), true),
         ("track.delete", json!({"tracks": [a]}), true),
         ("track.delete", json!({"tracks": [b]}), false),
         ("mix.insert_remove", json!({"track": a, "slot": 0}), true),

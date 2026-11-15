@@ -238,3 +238,35 @@ fn a_removal_names_a_plugin_whose_state_was_not_refreshed() {
     assert!(r.app.engine.session().track(t).unwrap().mixer.inserts[0].is_none(), "removed");
     assert!(r.app.status.contains("not refreshed"), "{}", r.app.status);
 }
+
+/// Ungroup with a group device that does not answer within the deadline: the status says so
+/// after "Ungrouped".
+#[test]
+fn ungroup_names_a_plugin_whose_state_was_not_refreshed() {
+    let mut r = rig(false);
+    let t = r.t;
+    let g = r.app.group_tracks(&[t]).unwrap();
+    r.app.engine.session_mut().track_mut(g).unwrap().mixer.inserts[0] = Some(transit_model::Insert::new(ID));
+    r.wait_made(2, |app| app.player.as_ref().unwrap().live_name(g, 0).is_some() && app.player.as_ref().unwrap().plays(&app.engine.session_arc()));
+    let (_, live) = r.made.last();
+    live.busy.store(true, Ordering::Relaxed);
+    r.app.ungroup(&[g]).unwrap();
+    assert!(r.app.status.starts_with("Ungrouped"), "{}", r.app.status);
+    assert!(r.app.status.contains("not refreshed"), "{}", r.app.status);
+}
+
+/// A plug-in with no editor handle reports its own state change through its state handle, and
+/// the session reads modified.
+#[test]
+fn a_plugin_without_an_editor_handle_marks_the_session_modified() {
+    let mut r = rig(false);
+    r.made.headless.store(true, Ordering::Relaxed);
+    add_fake(&mut r, 1);
+    assert!(!r.app.player.as_ref().unwrap().has_editor(r.t, 1), "no editor handle");
+    r.app.capture_plugin_states().unwrap();
+    r.app.engine.mark_clean();
+    let (_, live) = r.made.last();
+    live.changed.store(true, Ordering::Relaxed);
+    r.frames(2);
+    assert!(r.app.engine.is_dirty(), "the change reached the session");
+}
