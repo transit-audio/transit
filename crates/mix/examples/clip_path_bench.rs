@@ -47,26 +47,44 @@ fn session(source: Vec<Vec<f32>>) -> (Session, Clip) {
     (s, clip)
 }
 
+/// Seconds `render` takes per second of output: `reps` passes over one second in blocks.
+fn once(render: &mut impl FnMut(Samples, usize, &mut [Vec<f32>]), buf: &mut [Vec<f32>], reps: usize) -> f64 {
+    let mut sum = 0.0f32;
+    let start = Instant::now();
+    for _ in 0..reps {
+        let mut pos = 0;
+        while pos < RATE {
+            let n = BLOCK.min(RATE - pos);
+            buf.iter_mut().for_each(|c| c.fill(0.0));
+            render(pos as Samples, n, buf);
+            sum += buf[0][0] + buf[1][n - 1];
+            pos += n;
+        }
+    }
+    let secs = start.elapsed().as_secs_f64() / reps as f64;
+    black_box(sum);
+    secs
+}
+
 /// The median over [`RUNS`] of the seconds `render` takes for one second of output in blocks.
 fn median(mut render: impl FnMut(Samples, usize, &mut [Vec<f32>])) -> f64 {
     let mut buf = vec![vec![0.0f32; BLOCK]; 2];
     let mut runs = [0.0f64; RUNS];
     for run in &mut runs {
-        let mut sum = 0.0f32;
-        let start = Instant::now();
-        let mut pos = 0;
-        while pos < RATE {
-            let n = BLOCK.min(RATE - pos);
-            buf.iter_mut().for_each(|c| c.fill(0.0));
-            render(pos as Samples, n, &mut buf);
-            sum += buf[0][0] + buf[1][n - 1];
-            pos += n;
-        }
-        *run = start.elapsed().as_secs_f64();
-        black_box(sum);
+        *run = once(&mut render, &mut buf, 1);
     }
     runs.sort_by(f64::total_cmp);
     runs[RUNS / 2]
+}
+
+/// Part 2's alternations: old then new, [`ALTS`] times, each run [`REPS`] seconds of output, so load
+/// drift falls on both sides alike.
+const ALTS: usize = 9;
+const REPS: usize = 200;
+
+fn sorted(mut v: Vec<f64>) -> Vec<f64> {
+    v.sort_by(f64::total_cmp);
+    v
 }
 
 fn main() {
@@ -90,8 +108,13 @@ fn main() {
     }
     println!("two transposed clips crossfading: not measured (clips have no transpose before the rest of slice 7a)");
 
-    println!("part 2: unstretched clips, gain 0 dB, no fades: the current path against the pre-#604 inner loop");
-    println!("{:<22} {:>12} {:>12} {:>8}", "case", "new % core", "old % core", "new/old");
+    println!(
+        "part 2: unstretched clips, gain 0 dB, no fades: the current path against the pre-#604 inner loop, interleaved old, new, {ALTS} times, {REPS} seconds of output a run"
+    );
+    println!(
+        "{:<22} {:>12} {:>17} {:>12} {:>17} {:>8} {:>15}",
+        "case", "old % core", "old min..max", "new % core", "new min..max", "new/old", "ratio min..max"
+    );
     let cases: [(&str, usize, Option<ClipLoop>); 4] = [
         ("mono into stereo", 1, None),
         ("stereo into stereo", 2, None),
@@ -101,24 +124,51 @@ fn main() {
     for (name, channels, looping) in cases {
         let (s, mut clip) = session(noise(channels, RATE + 4 * 1_024 + OFFSET as usize));
         clip.looping = looping;
-        let src = s.pool.get(SourceId(1)).map(|a| a.buffer.channels.clone()).unwrap_or_default();
-        let new = median(|pos, n, buf| transit_mix::render_clip(&s, &clip, pos, n, buf));
-        let old = median(|pos, n, buf| old_render_clip(&clip, pos, n, buf, &src));
-        println!("{name:<22} {:>12.3} {:>12.3} {:>8.3}", new * 100.0, old * 100.0, new / old);
+        let mut buf = vec![vec![0.0f32; BLOCK]; 2];
+        let mut new_render = |pos, n, buf: &mut [Vec<f32>]| transit_mix::render_clip(&s, &clip, pos, n, buf);
+        let mut old_render = |pos, n, buf: &mut [Vec<f32>]| old_render_clip(&s, &clip, pos, n, buf);
+        let (mut olds, mut news, mut ratios) = (Vec::new(), Vec::new(), Vec::new());
+        for _ in 0..ALTS {
+            let o = once(&mut old_render, &mut buf, REPS);
+            let n = once(&mut new_render, &mut buf, REPS);
+            olds.push(o);
+            news.push(n);
+            ratios.push(n / o);
+        }
+        let (olds, news, ratios) = (sorted(olds), sorted(news), sorted(ratios));
+        let (om, nm) = (olds[ALTS / 2], news[ALTS / 2]);
+        println!(
+            "{name:<22} {:>12.4} {:>8.4}..{:<8.4} {:>12.4} {:>8.4}..{:<8.4} {:>8.3} {:>7.3}..{:<7.3}",
+            om * 100.0,
+            olds[0] * 100.0,
+            olds[ALTS - 1] * 100.0,
+            nm * 100.0,
+            news[0] * 100.0,
+            news[ALTS - 1] * 100.0,
+            nm / om,
+            ratios[0],
+            ratios[ALTS - 1]
+        );
     }
 }
 
 /// The in-memory clip render as it was before #604 (`render_clip`'s memory branch, `mix_clip` and
 /// `StreamMap::sample` at c3468fe7), kept to compare the common case.
-fn old_render_clip(clip: &Clip, pos: Samples, frames: usize, buf: &mut [Vec<f32>], src: &[Vec<f32>]) {
-    let ClipContent::Audio { offset, .. } = clip.content else { return };
-    let stretch = if clip.stretch.is_finite() && clip.stretch > 0.0 { clip.stretch } else { 1.0 };
+/// The block's preamble is the pre-#604 one too (the clip's map, the intersection, the pool lookup,
+/// the disk check), so both sides pay the same per-block work.
+fn old_render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize, buf: &mut [Vec<f32>]) {
+    let ClipContent::Audio { source, offset } = clip.content else { return };
+    let Some(map) = transit_model::disk::StreamMap::of(clip) else { return };
     let block = Range { start: pos, end: pos.saturating_add(frames as i64) };
     let Some(isect) = clip.range().intersect(&block) else { return };
+    let Some(audio) = s.pool.get(source) else { return };
     let i0 = usize::try_from(isect.start - pos).unwrap_or(0);
     let i1 = usize::try_from(isect.end - pos).unwrap_or(0).min(frames);
-    let fetch = |c: usize, k: Samples| old_sample(clip, offset, stretch, k, |x| src.get(c).and_then(|ch| ch.get(x)).copied());
-    old_mix_clip(clip, pos, i0, i1, buf, src.len(), fetch);
+    if audio.disk.is_none() {
+        let src = &audio.buffer.channels;
+        let fetch = |c: usize, k: Samples| old_sample(clip, offset, map.stretch, k, |x| src.get(c).and_then(|ch| ch.get(x)).copied());
+        old_mix_clip(clip, pos, i0, i1, buf, src.len(), fetch);
+    }
 }
 
 /// `StreamMap::sample` before #604, generic over `get` as it was (so it inlines the same way).
