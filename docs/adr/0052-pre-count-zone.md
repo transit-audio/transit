@@ -5,7 +5,7 @@ title: A pre-count zone before bar 1: one capture model (everything from the cou
 
 - **Status:** accepted 2026-11-11 (proposed 2026-11-10; settled after three judging rounds; the maintainer decided the product choices on 2026-11-10)
 - **Date:** 2026-11-10
-- **Implementation:** slices 1, 2, 3, 4, 5 and 6a landed; 6b and 7 open. Slices in the Slices section. Issues #441 (this decision), #440 (the stopgap it replaces), #327 (pickups, whose clip-start rule it changes), #442 (audio during the count-in), #330 (retrospective capture).
+- **Implementation:** slices 1, 2, 3, 4, 5, 6a and 6b landed; 2b and 7 open. Slices in the Slices section. Issues #441 (this decision), #440 (the stopgap it replaces), #327 (pickups, whose clip-start rule it changes), #442 (audio during the count-in), #330 (retrospective capture).
 - **Reopen when:** audio pickups (#442) need an audio clip to start before bar 1; a user asks to drag the session start by hand (Logic's project start marker); a tempo or meter change before bar 1 is asked for; a hardware sync output (ADR 0043) has to start a receiver inside the zone; or the derived session start costs a frame budget on a session with many clips.
 
 ## Context
