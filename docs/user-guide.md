@@ -249,8 +249,8 @@ lossy format for sharing: small files that play in every browser, phone and mess
 A 32-bit float file keeps levels above 0 dBFS as they are; 16-bit and 24-bit files clip at full scale.
 
 **Consolidated tracks** exports for another DAW: every audio, instrument and MIDI track gets one
-stem from session start to the content end, including leading silence, muted or inactive material,
-and any real-time delay or track offset. Every MIDI or instrument track, including an empty one,
+stem from the session start to the content end, including leading silence, muted or inactive
+material, and any real-time delay or track offset. Every MIDI or instrument track, including an empty one,
 gets a Standard MIDI File beside it. Rack clips, real-time properties, track offsets, clip edges,
 muted clips and loop repetitions follow playback; MIDI effects remain represented by the audio stem
 rather than generating new notes. A separate tempo-only SMF carries the session tempo, meter and
@@ -259,6 +259,12 @@ master chain. External Instrument audio, including audio on an inactive track, i
 the usual explicit choice that names the track; its MIDI is kept. If an export stops partway through,
 the result names any files that completed. The control channel command is `file.bounce_consolidated`
 with `dir` and the ordinary format options.
+
+When the session has clips before bar 1 (the pre-count zone), every stem, every MIDI file and the
+tempo file start together at the bar line where the zone begins (the start of its first bar, even
+when its first clip starts mid-bar), so they line up when imported at one position. Bar 1 then
+falls that many whole bars into each file: one bar in for a one-bar zone. Without a zone the files
+start at bar 1, as before.
 
 **File > Export > MIDI…** writes one Standard MIDI File with a track per MIDI or instrument track
 (`file.export_midi`). Each clip is written as it plays: a note that starts past the clip's end is
@@ -284,8 +290,9 @@ five above); a `path` ending in `.opus` picks Opus on its own.
 ## Bounce in Place
 
 Choose **Track > Bounce in Place** (Commit, **Alt+Shift+C**) to print the focused track through
-its inserts, before its fader. The print starts at the session start and ends two seconds after
-the last clip on the active playlist. The source's clips and take stacks are always preserved.
+its inserts, before its fader. The print starts at bar 1 and ends two seconds after the last clip
+on the active playlist. Until audio can sit before bar 1, this print (and Commit) leaves out
+anything a track plays in the pre-count zone before bar 1; the source keeps it. The source's clips and take stacks are always preserved.
 Every print (Bounce in Place, Commit, Freeze and File > Bounce) starts once every insert has already
 been running for a few seconds, as live play from a stop does, so a plug-in's start-up does not
 land in a print.
@@ -315,7 +322,10 @@ To print only some clips, select them and choose **Bounce in Place** in the clip
 or the **Edit** menu (Logic's Bounce Regions in Place). The form's second line gives the span, for
 example "2 clips on 1 track, 1.1.1 to 9.1.1". On each track the print runs from the earliest
 selected clip's start to the latest one's end, plus a two-second tail, and starts at the span's
-start; clips outside the span are untouched. With clips on several tracks the print is one new
+start; clips outside the span are untouched. A span that starts in the pre-count zone prints from
+bar 1: the zone's part is in the printed file, hidden before the new clip's start (audio cannot sit
+before bar 1 yet), and what plays from bar 1 on, a held note's tail included, is what the source
+played. Clips that end before bar 1, tail included, are refused, since nothing of them would sound. With clips on several tracks the print is one new
 track per source track, placed under each source, so the existing-track choice is unavailable, and
 one Undo restores them all. The source choice applies to the whole source track, not just the
 span: Mute mutes the track, as in Logic. The Edit item is disabled with no clip selected.
