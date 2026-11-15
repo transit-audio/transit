@@ -263,3 +263,19 @@ fn an_end_trim_drag_previews_the_neighbor_it_stops_at() {
     let c = the_clip(&app, id);
     assert_eq!((c.start, c.end()), (0, 2 * BAR), "where the drop lands");
 }
+
+#[test]
+fn a_drop_that_brings_the_zone_back_scrolls_the_view_to_the_new_session_start() {
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    let (mut app, id, _) = (cases()[1].build)();
+    let (_, committed) = drag_start_far_left(&mut app, id, Modifiers::NONE);
+    assert_eq!(committed, -BAR);
+    frames(&mut app, &ctx, 2, &mut time);
+    assert_eq!(app.arrange.layout.scroll, -BAR, "the pickups are in sight, not left of bar 1");
+    // A trim that does not move the session start leaves the view where it is.
+    let (mut app, id) = studio(Session::default(), vec![(4 * BAR, 2 * BAR, take(), None)]);
+    app.run("view.scroll", json!({"to": 2 * BAR})).unwrap();
+    app.trim_clip(id, true, 3 * BAR).unwrap();
+    assert_eq!(app.engine.session().edit.zoom.scroll, 2 * BAR);
+}

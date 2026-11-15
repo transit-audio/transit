@@ -241,11 +241,21 @@ impl StudioApp {
 
     /// Trim one edge of a clip to `to`, never before the edge's floor: the session start, or for a
     /// start edge the clip's hidden content before it (ADR 0052 decision 7, `arrange::trim_floor`,
-    /// the floor `edit.trim_clip` applies itself).
+    /// the floor `edit.trim_clip` applies itself). A start trim that reveals content before the
+    /// session start grows the zone; the view then scrolls back to the new session start when it
+    /// starts later, so what came back is in sight (the view never scrolls before the session
+    /// start, ADR 0052 decision 4).
     pub fn trim_clip(&mut self, clip: ClipId, start_edge: bool, to: Samples) -> Result<Value, String> {
         let edge = if start_edge { "start" } else { "end" };
         let to = to.max(crate::arrange::trim_floor(self.engine.session(), clip, start_edge));
-        self.run("edit.trim_clip", json!({"clip": clip.0, edge: to}))
+        let before = self.engine.session().start();
+        let out = self.run("edit.trim_clip", json!({"clip": clip.0, edge: to}))?;
+        let s = self.engine.session();
+        let now = s.start();
+        if now < before && crate::at_or_after_start(s, s.edit.zoom.scroll) > now {
+            let _ = self.execute_ui("view.scroll", &json!({"to": now}));
+        }
+        Ok(out)
     }
 
     /// Split at the cursor: the selected clips under the cursor, or else every clip under the
