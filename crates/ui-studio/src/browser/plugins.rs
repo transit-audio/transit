@@ -30,8 +30,11 @@ impl StudioApp {
                 self.status = format!("{name} is an instrument: drop it on an instrument track (or below the tracks for a new one)");
                 return Err(self.status.clone());
             }
+            self.state_notice = None;
             self.set_instrument(track, id)?;
-            self.status = format!("Loaded {name} on {}", t.1);
+            // A plug-in its capture could not read is named after the result (issue #574).
+            let said = format!("Loaded {name} on {}", t.1);
+            self.status = self.with_state_notice(said);
         } else {
             let before = self.status.clone();
             self.add_device(track, id)?;

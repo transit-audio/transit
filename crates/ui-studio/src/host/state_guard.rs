@@ -103,11 +103,40 @@ pub(crate) struct Guard {
     pub(crate) timed_rev: u64,
     /// Timed autosaves written (the tests count them).
     pub(crate) timed_writes: u64,
+    /// An interval passed and the timed read has not run yet (deferred or refused).
+    pub(crate) read_due: bool,
+    /// An interval passed and the timed write has not been considered yet.
+    pub(crate) write_due: bool,
+    /// A refused timed read tries again from then.
+    pub(crate) retry_at: Option<Instant>,
+    /// The pointer is held down (set each frame): a gesture may be open.
+    pub(crate) pointer_down: bool,
+    /// The revision right after the last timed read, and the notice count then (the timed read's
+    /// "clean").
+    pub(crate) read_rev: Option<u64>,
+    pub(crate) notices_seen: u64,
+    /// Per insert uid: changes in a row on a clean session; the noisy uids the timed read skips.
+    pub(crate) streak: HashMap<u64, u8>,
+    pub(crate) noisy: HashSet<u64>,
 }
 
 impl Default for Guard {
     fn default() -> Self {
-        Guard { plan_wait: PLAN_WAIT, timed_budget: TIMED_READ_BUDGET, jump_captured: false, timed_rev: 0, timed_writes: 0 }
+        Guard {
+            plan_wait: PLAN_WAIT,
+            timed_budget: TIMED_READ_BUDGET,
+            jump_captured: false,
+            timed_rev: 0,
+            timed_writes: 0,
+            read_due: false,
+            write_due: false,
+            retry_at: None,
+            pointer_down: false,
+            read_rev: None,
+            notices_seen: 0,
+            streak: HashMap::new(),
+            noisy: HashSet::new(),
+        }
     }
 }
 
@@ -184,6 +213,11 @@ impl StudioApp {
     /// current document, or when waiting cannot help or the time is up. No lock is held; the audio
     /// side never waits on this thread.
     fn wait_for_plan(&mut self) {
+        // While Play, Locate or Record is pending the frame loop publishes nothing, and the capture
+        // refuses for that: the wait must not publish or poll around it (round 3, F1).
+        if self.player_requests.play.is_some() || self.player_requests.locate.is_some() || self.player_requests.recording.is_some() {
+            return;
+        }
         let Some(p) = &self.player else { return };
         if p.reopen_cause().is_some() || p.any_loading() {
             return;
@@ -233,6 +267,7 @@ impl StudioApp {
             drops |= drops_hosted(&prev, doc);
             prev = Arc::clone(doc);
         }
+        self.state_notice = None;
         if drops && let Err(e) = self.capture_live_states() {
             self.status = format!("Nothing undone: {e}");
             return 0;
@@ -258,20 +293,23 @@ impl StudioApp {
         }
         self.state_guard.jump_captured = false;
         let steps = |k: usize| if k == 1 { "step" } else { "steps" };
-        self.status = match stopped {
+        let said = match stopped {
             // Nothing done: the refusal says it all (as before the jump captured).
             Some(e) if n == 0 => e,
             Some(e) => format!("Undid {n} of {want} {}: {e}", steps(want)),
             None => format!("Undid {n} {}", steps(n)),
         };
+        // A plug-in the capture could not read is named after the result.
+        self.status = self.with_state_notice(said);
         n
     }
 
     /// Stores `captured` (uid to state) into the current document's hosted devices whose stored
-    /// state differs (`mix.insert_state`, not an undo step).
+    /// state differs (`mix.insert_state`, not an undo step). A frozen track is left as it is: its
+    /// material may not change, and its plug-ins do not run, so they hold no newer state.
     fn carry_states(&mut self, captured: &HashMap<u64, Vec<u8>>) -> Result<(), String> {
         let mut writes = Vec::new();
-        for t in &self.engine.session().tracks {
+        for t in self.engine.session().tracks.iter().filter(|t| t.freeze.is_none()) {
             let slots = t.mixer.inserts.iter().enumerate().filter_map(|(i, ins)| ins.as_ref().map(|ins| (json!(i), ins)));
             for (slot, ins) in slots.chain(t.instrument.as_ref().map(|ins| (json!("instrument"), ins))) {
                 if let Some(state) = captured.get(&ins.uid.get())
@@ -286,20 +324,6 @@ impl StudioApp {
             self.execute_ui("mix.insert_state", &w).map_err(|e| format!("Cannot store plugin state: {e}"))?;
         }
         Ok(())
-    }
-
-    /// The timed autosave's read (round 2 of #574): the live hosted states, read within
-    /// [`Guard::timed_budget`] (see [`TIMED_READ_BUDGET`]) and stored where they changed. Refused,
-    /// with no change, when the audio side has not applied the current document. A plug-in left
-    /// out this time keeps its stored state and is read next time; nothing is said.
-    pub(crate) fn read_states_timed(&mut self) -> Result<(), String> {
-        let action_pending = self.player_requests.play.is_some() || self.player_requests.locate.is_some() || self.player_requests.recording.is_some();
-        if action_pending || !self.sync_player_session() {
-            return Err(STILL_UPDATING.into());
-        }
-        let Some(p) = &self.player else { return Ok(()) };
-        let read = p.capture_states_timed(&self.engine.session_arc(), self.state_guard.timed_budget).map(|(states, _all)| states);
-        self.store_plugin_states(read)
     }
 
     /// Whether the session holds a hosted device and a player runs it.

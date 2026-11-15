@@ -20,6 +20,7 @@ mod plugin_state;
 pub(crate) mod reconnect;
 mod recording;
 pub(crate) mod state_guard;
+mod timed_read;
 mod transport;
 
 use crate::{MeterDisplay, StudioApp};

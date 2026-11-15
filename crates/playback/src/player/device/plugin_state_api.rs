@@ -12,8 +12,13 @@ impl Player {
     /// The timed autosave's bounded read (issue #574; `Handles::capture_states_timed`): refused
     /// unless `expected` is the confirmed document, as [`Self::capture_states`]. Returns the
     /// states read and whether every plug-in was read.
-    pub fn capture_states_timed(&self, expected: &Arc<Session>, budget: std::time::Duration) -> Result<(PluginStates, bool), PlayerError> {
+    pub fn capture_states_timed(
+        &self,
+        expected: &Arc<Session>,
+        budget: std::time::Duration,
+        skip: &[(TrackId, usize)],
+    ) -> Result<(PluginStates, bool), PlayerError> {
         let mut owner = self.owner()?;
-        owner.capture_states_timed(expected, budget, self.render_callback_runs())
+        owner.capture_states_timed(expected, budget, self.render_callback_runs(), skip)
     }
 }

@@ -891,9 +891,11 @@ impl Handles {
     /// first plug-in not read, so every plug-in is read over successive calls. Returns the states
     /// read and whether every plug-in was read this time. A plug-in whose thread is held by a modal
     /// dialog or wedged is skipped (it keeps its stored state); nothing is reported as unrefreshed.
-    pub fn capture_states_timed(&mut self, budget: Duration, audio: bool) -> (PluginStates, bool) {
+    /// The slots in `skip` are not read at all (issue #574, round 3: plug-ins whose state changes
+    /// on every read).
+    pub fn capture_states_timed(&mut self, budget: Duration, audio: bool, skip: &[(TrackId, usize)]) -> (PluginStates, bool) {
         let start = Instant::now();
-        let slots: Vec<((TrackId, usize), SlotGen)> = self.active.iter().map(|(&k, &g)| (k, g)).collect();
+        let slots: Vec<((TrackId, usize), SlotGen)> = self.active.iter().filter(|(k, _)| !skip.contains(k)).map(|(&k, &g)| (k, g)).collect();
         let n = slots.len();
         let first = if n == 0 { 0 } else { self.timed_cursor % n };
         let mut states = Vec::new();

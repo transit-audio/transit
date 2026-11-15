@@ -369,6 +369,7 @@ impl StudioApp {
             self.poll_low_latency();
         }
         self.autosave_changes();
+        self.state_guard.pointer_down = ctx.input(|i| i.pointer.any_down());
         self.autosave();
         if self.recorder.is_none() && self.input_failure.is_none() && self.engine.session().needs_live_input() {
             self.ensure_input();

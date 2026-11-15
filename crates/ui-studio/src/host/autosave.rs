@@ -1,31 +1,6 @@
 use super::*;
 
 impl StudioApp {
-    /// Every two minutes (not while recording), read the hosted plug-ins' live states into the
-    /// session, also when it is clean, so a plug-in that never says its state changed is still
-    /// protected (issue #574; the read is bounded, `read_states_timed`). Then copy the session to
-    /// the autosave folder when it is modified and changed since the last timed copy: a plug-in
-    /// whose state reads the same causes no copy, however often it reports a change. A read the
-    /// audio side refuses is tried again ten seconds later. Timed by the wall clock: egui's stands
-    /// still while the window is hidden.
-    pub(crate) fn autosave(&mut self) {
-        let Some(dir) = self.autosave_dir.clone() else { return };
-        let now = std::time::Instant::now();
-        let last = *self.last_autosave.get_or_insert(now);
-        if now.duration_since(last).as_secs() < 120 || self.engine.transport.recording {
-            return;
-        }
-        if self.hosts_live_plugins() && self.read_states_timed().is_err() {
-            self.last_autosave = now.checked_sub(std::time::Duration::from_secs(110)).or(Some(now));
-            return;
-        }
-        self.last_autosave = Some(now);
-        if self.engine.is_dirty() && self.engine.revision != self.state_guard.timed_rev && self.autosave_to(&dir) {
-            self.state_guard.timed_rev = self.engine.revision;
-            self.state_guard.timed_writes += 1;
-        }
-    }
-
     /// Autosave a modified session within a second of every change, also while recording. The
     /// plugins' own state reaches the session every two minutes (`autosave`).
     pub(crate) fn autosave_changes(&mut self) {
@@ -111,7 +86,7 @@ impl StudioApp {
         }
     }
 
-    fn autosave_to(&mut self, root: &std::path::Path) -> bool {
+    pub(super) fn autosave_to(&mut self, root: &std::path::Path) -> bool {
         self.queue_autosave(root.to_path_buf());
         let Some(w) = &self.autosaver else { return false };
         let written = w.flush();

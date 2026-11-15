@@ -205,6 +205,9 @@ pub struct Engine {
     /// A hosted plug-in said its own state changed since the session was opened or saved
     /// ([`Engine::mark_plugin_state_changed`], issue #574).
     plugin_state_changed: bool,
+    /// How many plug-in state-change notices arrived (issue #574: the timed read tells a plug-in
+    /// that changed on its own from one that said so).
+    plugin_notices: u64,
     /// Gesture key for undo coalescing (see `execute_merged`).
     merge_key: Option<String>,
     /// The key every merged gesture takes while held (see `hold_merge`).
@@ -298,6 +301,7 @@ impl Engine {
             dirty: false,
             dirty_at: Cell::new((0, false)),
             plugin_state_changed: false,
+            plugin_notices: 0,
             merge_key: None,
             merge_hold: None,
             tempo_gesture: None,
@@ -539,6 +543,17 @@ impl Engine {
     /// session read modified again soon after every save.
     pub fn mark_plugin_state_changed(&mut self) {
         self.plugin_state_changed = true;
+        self.plugin_notices += 1;
+    }
+
+    /// How many plug-in state-change notices arrived so far ([`Engine::mark_plugin_state_changed`]).
+    pub fn plugin_notices(&self) -> u64 {
+        self.plugin_notices
+    }
+
+    /// Whether a held merge gesture is open ([`Engine::hold_merge`]: the automation write pass).
+    pub fn merge_held(&self) -> bool {
+        self.merge_hold.is_some()
     }
 
     /// The document Undo would bring back (issue #574: the UI reads hosted plug-in states before

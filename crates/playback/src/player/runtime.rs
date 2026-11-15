@@ -554,6 +554,7 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         expected: &Arc<Session>,
         budget: std::time::Duration,
         audio: bool,
+        skip: &[(TrackId, usize)],
     ) -> Result<(PluginStates, bool), PlayerError> {
         if self.faulted() {
             return Err(PlayerError::Faulted);
@@ -561,7 +562,7 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         if !Arc::ptr_eq(expected, &self.requested) || self.confirmed != Some(self.control.sessions.bridge.active()) {
             return Err(PlayerError::SessionPending);
         }
-        Ok(self.handles.capture_states_timed(budget, audio))
+        Ok(self.handles.capture_states_timed(budget, audio, skip))
     }
     /// Whether the audio side rendered exactly `expected`. This is document readiness only;
     /// state jobs use `plays_instance_processed` to wait for host parameter delivery (#219).
