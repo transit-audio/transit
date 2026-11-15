@@ -27,7 +27,8 @@ fn toggle(e: &mut Engine, p: &Value) -> Result<Value> {
     for t in s.tracks.iter_mut().filter(|t| heights.iter().any(|(id, _)| *id == t.id)) {
         t.height = fit;
     }
-    let (r, z) = (s.edit.selection, &mut s.edit.zoom);
+    // The stored selection read from the session start (ADR 0052 decision 7).
+    let (r, z) = (crate::zone_read::selection(s), &mut s.edit.zoom);
     s.edit.zoom_toggle = Some(ZoomToggle { samples_per_px: z.samples_per_px, scroll: z.scroll, heights });
     if !r.is_empty() {
         z.samples_per_px = (r.len() as f64 / f64_or(p, "width_px", 1200.0).max(100.0)).clamp(0.25, 1_000_000.0);

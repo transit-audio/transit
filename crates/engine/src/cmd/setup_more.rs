@@ -419,7 +419,8 @@ fn current_timecode(e: &mut Engine, p: &Value) -> Result<Value> {
     let tc = str_param(p, "timecode").ok_or_else(|| bad(id, "`timecode` required (HH:MM:SS:FF)"))?;
     let tc = Timecode::parse(tc).map_err(|err| bad(id, err.to_string()))?;
     let s = e.session_mut();
-    let at = s.edit.selection.start.max(0);
+    // The insertion point from the session start: in a pre-count zone too (ADR 0052 decision 7).
+    let at = crate::zone_read::selection(s).start;
     let abs = tc.to_samples(s.frame_rate, s.sample_rate);
     s.timecode_start = abs - at;
     Ok(json!({"timecode_start": s.timecode_start, "at": at}))
@@ -435,7 +436,7 @@ fn current_feet_frames(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, "feet must be 0.. and frames 0..15"));
     }
     let s = e.session_mut();
-    let at = s.edit.selection.start.max(0);
+    let at = crate::zone_read::selection(s).start;
     let frames_at = s.frame_rate.frames_at(at, s.sample_rate);
     let start = ft * 16 + fr - frames_at;
     s.edit.values.insert(transit_model::FEET_FRAMES_START.into(), start as f64);

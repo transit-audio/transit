@@ -333,18 +333,20 @@ fn paste(e: &mut Engine, p: &Value) -> Result<Value> {
     let given = position_param(e, "edit.paste", p, "at")?;
     let cb = e.clipboard.clone();
     let s = e.session();
+    // The stored selection, read from the session start (ADR 0052 decision 7).
+    let selection = crate::zone_read::selection(s);
     let at = match given {
         Some(at) => at,
         None if s.edit.edit_mode == EditMode::GridRelative => {
-            s.edit.grid.line_at_or_before(s.edit.selection.start, s.sample_rate, &s.tempo, s.frame_rate).saturating_add(cb.grid_offset)
+            s.edit.grid.line_at_or_before(selection.start, s.sample_rate, &s.tempo, s.frame_rate).saturating_add(cb.grid_offset)
         }
-        None => s.edit.selection.start,
+        None => selection.start,
     };
     // A paste never goes before the clips' floors: it stops there (ADR 0052 decision 7).
     let at = at.max(ops::lowest_delta(cb.tracks.iter().flatten(), s.start()));
     let sh = shuffle(s) && !cb.automation_only;
     let follow = s.edit.automation_follows_edit;
-    let replace = Some(s.edit.selection).filter(|r| sh && given.is_none() && !r.is_empty());
+    let replace = Some(selection).filter(|r| sh && given.is_none() && !r.is_empty());
     let s = e.session_mut();
     let mut pasted = 0;
     for (i, t) in tracks.iter().enumerate() {
@@ -462,7 +464,8 @@ fn select_all(e: &mut Engine, _: &Value) -> Result<Value> {
     let s = e.session_mut();
     s.edit.selected_tracks = s.tracks.iter().filter(|t| !t.hidden).map(|t| t.id).collect();
     let end = s.content_end();
-    s.edit.selection = transit_time::Range::new(0, end);
+    // From the session start: Select All takes a pre-count zone in too (ADR 0052 decision 7).
+    s.edit.selection = transit_time::Range::new(s.start(), end);
     Ok(json!({"tracks": s.edit.selected_tracks.len(), "end": end}))
 }
 
@@ -716,7 +719,7 @@ fn trim_to_selection(e: &mut Engine, p: &Value) -> Result<Value> {
 
 fn trim_edge(e: &mut Engine, p: &Value, start: bool) -> Result<Value> {
     let tracks = tracks_required(e, "edit.trim", p)?;
-    let at = position_param(e, "edit.trim", p, "at")?.unwrap_or(e.session().edit.selection.start);
+    let at = position_param(e, "edit.trim", p, "at")?.unwrap_or_else(|| crate::zone_read::selection(e.session()).start);
     let s = e.session_mut();
     let n: usize = tracks.iter().map(|t| if start { ops::trim_start_to(s, *t, at) } else { ops::trim_end_to(s, *t, at) }).sum();
     Ok(json!({"trimmed": n}))
@@ -885,7 +888,7 @@ fn fades_delete(e: &mut Engine, p: &Value) -> Result<Value> {
 
 fn fade_to(e: &mut Engine, p: &Value, to_start: bool) -> Result<Value> {
     let tracks = tracks_required(e, "edit.fade_to", p)?;
-    let at = e.session().edit.selection.start;
+    let at = crate::zone_read::selection(e.session()).start;
     let s = e.session_mut();
     let mut n = 0;
     for t in &tracks {

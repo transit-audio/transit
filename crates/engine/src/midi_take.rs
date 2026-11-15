@@ -285,10 +285,8 @@ fn build_laps(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut, 
 /// cycled over the session's cycle range while Cycle is on (a caller that doesn't know the take's own
 /// loop; journal recovery does, and uses [`place_midi_recording_wrapping`]).
 pub fn place_midi_recording(e: &mut Engine, plan: &Recording, events: &[RecEvent], stop: Samples) -> Vec<ClipId> {
-    let wrap = {
-        let s = e.session();
-        s.edit.loop_playback.then_some(s.edit.cycle_range())
-    };
+    // The cycle range as Play loops it, from the session start (ADR 0052 decision 7).
+    let wrap = crate::zone_read::cycle(e.session());
     place_midi_recording_wrapping(e, plan, events, stop, wrap)
 }
 

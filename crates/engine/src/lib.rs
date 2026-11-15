@@ -29,6 +29,7 @@ pub mod slice_detect;
 pub mod step_input;
 pub mod take_laps;
 pub mod takes;
+pub mod zone_read;
 
 use serde_json::{Value, json};
 use std::cell::Cell;
@@ -1021,6 +1022,8 @@ mod tests_count_in_take;
 mod tests_pre_count_followups;
 #[cfg(test)]
 mod tests_pre_count_output;
+#[cfg(test)]
+mod tests_zone_selection;
 #[cfg(test)]
 mod trim_floor_tests;
 #[cfg(test)]

@@ -48,7 +48,8 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
         cmd!(view "view.zoom_to_selection", "Zoom to Selection", [], Some("Alt+F"), "{width_px?: 1200}", always, |e, p| {
             let w = f64_or(p, "width_px", 1200.0).max(100.0);
-            let r = e.session().edit.selection;
+            // The stored selection read from the session start (ADR 0052 decision 7).
+            let r = crate::zone_read::selection(e.session());
             if !r.is_empty() {
                 let z = e.zoom_mut();
                 z.samples_per_px = (r.len() as f64 / w).clamp(MIN_SPP, MAX_SPP);
@@ -124,7 +125,7 @@ const MIN_SPP: f64 = 0.25;
 const MAX_SPP: f64 = 1_000_000.0;
 
 fn zoom(e: &mut Engine, f: f64, x: Option<f64>) -> Result<Value> {
-    let insertion = e.session().edit.selection.start as f64;
+    let insertion = crate::zone_read::selection(e.session()).start as f64;
     let floor = e.session().start();
     let z = e.zoom_mut();
     let (old, scroll) = (z.samples_per_px, z.scroll as f64);

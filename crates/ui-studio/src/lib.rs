@@ -900,3 +900,5 @@ mod window_title_tests;
 mod bounce_in_place_tests;
 #[cfg(test)]
 mod zone_record_tests;
+#[cfg(test)]
+mod zone_selection_ui_tests;

@@ -107,8 +107,10 @@ impl StudioApp {
         let s = self.engine.session();
         let Some(cv) = clip_view(s, clip) else { return };
         let inside = |abs: i64| (abs >= cv.c0 && abs < cv.c0 + cv.len).then_some(abs - cv.c0);
-        let sel = inside(s.tempo.samples_to_ticks(s.edit.selection.start.max(0), s.sample_rate));
-        let head = inside(s.tempo.samples_to_ticks(self.position().max(0), s.sample_rate));
+        // In a clip in the pre-count zone too (ADR 0052): the insertion point read from the
+        // session start, the playhead where it is.
+        let sel = inside(s.tempo.samples_to_ticks(transit_engine::zone_read::selection(s).start, s.sample_rate));
+        let head = inside(s.tempo.samples_to_ticks(self.position(), s.sample_rate));
         let cursor = sel.filter(|t| *t > 0).or(self.keys.click_tick.map(|t| t.max(0))).or(head.filter(|t| *t > 0)).unwrap_or(0);
         self.keys.step = StepState { on: true, cursor, follow: true, ..StepState::default() };
     }

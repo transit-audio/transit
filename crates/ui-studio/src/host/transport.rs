@@ -274,7 +274,8 @@ impl StudioApp {
                         // Like Play: a count-in is cancelled, never turned into an unarmed play.
                         self.stop_play();
                     } else {
-                        let sel = self.engine.session().edit.selection;
+                        // The stored selection read from the session start (ADR 0052 decision 7).
+                        let sel = transit_engine::zone_read::selection(self.engine.session());
                         self.start_play(sel.start, Some(sel.end.max(sel.start + 1)), None);
                     }
                 }

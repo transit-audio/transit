@@ -42,9 +42,11 @@ pub struct Rename {
 }
 
 /// The range the dialog's "Cycle range" / "Selection" choice bounces: the cycle range while looping
-/// is on (the loop region, else the selection), otherwise the selection.
-pub fn bounce_range(edit: &transit_model::EditState) -> transit_time::Range {
-    if edit.loop_playback { edit.cycle_range() } else { edit.selection }
+/// is on (the loop region, else the selection), otherwise the selection, read from the session
+/// start (in a pre-count zone too; floored there once the zone has gone, ADR 0052 decision 7).
+pub fn bounce_range(s: &transit_model::Session) -> transit_time::Range {
+    let edit = &s.edit;
+    transit_engine::zone_read::from_start(s, if edit.loop_playback { edit.cycle_range() } else { edit.selection })
 }
 
 /// File > Bounce: which part of the song.
@@ -388,7 +390,7 @@ impl StudioApp {
             return;
         }
         let s = self.engine.session();
-        let range = if bounce_range(&s.edit).is_empty() { BounceRange::Whole } else { BounceRange::Selection };
+        let range = if bounce_range(&s).is_empty() { BounceRange::Whole } else { BounceRange::Selection };
         let name = format!("{}.wav", transit_engine::io::sanitize_name(&s.name));
         // The session rule (#385): its folder, else the remembered session folder, else Music.
         let dir = self.session_dir_or(&default_dir());
@@ -435,7 +437,7 @@ impl StudioApp {
             (r.start, r.end)
         } else {
             match f.range {
-                BounceRange::Selection if !bounce_range(&s.edit).is_empty() => (bounce_range(&s.edit).start, bounce_range(&s.edit).end),
+                BounceRange::Selection if !bounce_range(&s).is_empty() => (bounce_range(&s).start, bounce_range(&s).end),
                 BounceRange::Selection => {
                     self.status = "Nothing is selected: pick a range, or bounce the whole song.".into();
                     return Err(self.status.clone());
@@ -614,7 +616,7 @@ impl StudioApp {
     fn form_range(&self, f: &BounceForm) -> Option<(i64, i64)> {
         let s = self.engine.session();
         match f.range {
-            BounceRange::Selection if !bounce_range(&s.edit).is_empty() => Some((bounce_range(&s.edit).start, bounce_range(&s.edit).end)),
+            BounceRange::Selection if !bounce_range(&s).is_empty() => Some((bounce_range(&s).start, bounce_range(&s).end)),
             BounceRange::Selection => None,
             BounceRange::Whole => Some((s.start(), s.content_end().max(1))),
         }
@@ -1009,7 +1011,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         ui.set_width(420.0);
         ui.spacing_mut().item_spacing = vec2(crate::theme::SPACE, crate::theme::SPACE);
         ui.label(egui::RichText::new("Bounce").strong().size(15.0));
-        let sel = bounce_range(&s.edit);
+        let sel = bounce_range(&s);
         let sel_text = if sel.is_empty() {
             "Selection (none)".to_string()
         } else {

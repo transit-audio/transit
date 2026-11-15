@@ -128,6 +128,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "edit.play_timeline", "Play Timeline", ["Edit", "Selection"], None, "{} — plays the timeline selection", always, |e, _| {
             let s = e.session();
             let r = if s.edit.timeline_selection.is_empty() { s.edit.selection } else { s.edit.timeline_selection };
+            let r = crate::zone_read::from_start(s, r);
             e.transport_requests.push(TransportRequest::Locate(r.start));
             e.transport_requests.push(TransportRequest::Play);
             Ok(json!({"start": r.start, "end": r.end}))
@@ -363,7 +364,7 @@ pub(super) fn copy_clip_gain(e: &mut Engine, p: &Value) -> Result<Value> {
 fn paste_clip_gain(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "edit.paste_clip_gain";
     let tracks = tracks_required(e, id, p)?;
-    let at = position_param(e, id, p, "at")?.unwrap_or(e.session().edit.selection.start);
+    let at = position_param(e, id, p, "at")?.unwrap_or_else(|| crate::zone_read::selection(e.session()).start);
     let cb = e.clipboard.clone();
     let paste = Range::new(at, at.saturating_add(cb.length.max(1)));
     let s = e.session_mut();

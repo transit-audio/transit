@@ -243,7 +243,7 @@ pub fn has_range(e: &Engine) -> std::result::Result<(), String> {
     let s = e.session();
     if !e.command_targets.selection
         && !e.command_targets.range
-        && (s.edit.selected_tracks.is_empty() || s.edit.selection.is_empty())
+        && (s.edit.selected_tracks.is_empty() || crate::zone_read::selection(s).is_empty())
         && s.edit.selected_clips.is_empty()
     {
         Err("make an edit selection first".into())
@@ -387,7 +387,8 @@ fn position_param_raw(e: &Engine, cmd: &str, p: &Value, key: &str) -> Result<Opt
     Err(bad(cmd, format!("`{key}` must be samples, {{seconds}}, or a time string")))
 }
 
-/// Range from `start`/`end` params, else the edit selection.
+/// Range from `start`/`end` params, else the edit selection read from the session start (ADR 0052
+/// decision 7).
 pub fn range_param(e: &Engine, cmd: &str, p: &Value) -> Result<Range> {
     let st = position_param(e, cmd, p, "start")?;
     let en = position_param(e, cmd, p, "end")?;
@@ -396,7 +397,7 @@ pub fn range_param(e: &Engine, cmd: &str, p: &Value) -> Result<Range> {
         (Some(a), Some(b), _) => Ok(Range::new(a, b)),
         (Some(a), None, Some(l)) => Ok(Range::new(a, a.saturating_add(l))),
         (Some(a), None, None) => Ok(Range::point(a)),
-        _ => Ok(e.session().edit.selection),
+        _ => Ok(crate::zone_read::selection(e.session())),
     }
 }
 

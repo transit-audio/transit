@@ -145,14 +145,15 @@ fn right_clicking_the_loop_strip_offers_clear_loop_in_one_undo_step() {
 fn the_bounce_dialog_cycle_range_is_the_cycle_range() {
     use crate::finish::bounce_range;
     use transit_time::Range;
-    let mut e = transit_model::EditState { selection: Range::new(10, 20), ..Default::default() };
-    assert_eq!(bounce_range(&e), Range::new(10, 20), "looping off: the selection");
-    e.loop_playback = true;
-    assert_eq!(bounce_range(&e), Range::new(10, 20), "looping on, no loop region: the selection");
-    e.loop_range = Range::new(100, 200);
-    assert_eq!(bounce_range(&e), Range::new(100, 200), "looping on: the loop region");
-    e.loop_playback = false;
-    assert_eq!(bounce_range(&e), Range::new(10, 20), "looping off again");
+    let mut s = transit_model::Session::default();
+    s.edit.selection = Range::new(10, 20);
+    assert_eq!(bounce_range(&s), Range::new(10, 20), "looping off: the selection");
+    s.edit.loop_playback = true;
+    assert_eq!(bounce_range(&s), Range::new(10, 20), "looping on, no loop region: the selection");
+    s.edit.loop_range = Range::new(100, 200);
+    assert_eq!(bounce_range(&s), Range::new(100, 200), "looping on: the loop region");
+    s.edit.loop_playback = false;
+    assert_eq!(bounce_range(&s), Range::new(10, 20), "looping off again");
 }
 
 // ---- Cycle makes a real loop region; the ruler block is a live control ----

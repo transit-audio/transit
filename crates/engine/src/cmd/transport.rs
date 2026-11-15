@@ -96,8 +96,10 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// Where Rewind and Fast Forward move from: the playhead while playing, else the insertion point
+/// read from the session start (ADR 0052 decision 7).
 fn cur(e: &Engine) -> i64 {
-    if e.transport.playing { e.transport.position } else { e.session().edit.selection.start }
+    if e.transport.playing { e.transport.position } else { crate::zone_read::selection(e.session()).start }
 }
 
 fn locate(e: &mut Engine, at: i64) -> Result<Value> {

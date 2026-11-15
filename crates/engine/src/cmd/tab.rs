@@ -35,7 +35,8 @@ pub fn specs() -> Vec<CommandSpec> {
 fn tab(e: &mut Engine, p: &Value) -> Result<Value> {
     let (back, extend) = (bool_or(p, "back", false), bool_or(p, "extend", false));
     let s = e.session();
-    let sel = s.edit.selection;
+    // The stored selection read from the session start (ADR 0052 decision 7).
+    let sel = crate::zone_read::selection(s);
     let to = |from| stop(e, from, back);
     let next = match (extend, back) {
         (false, _) => to(sel.start).map(Range::point),

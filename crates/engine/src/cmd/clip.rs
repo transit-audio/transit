@@ -112,7 +112,7 @@ pub fn specs() -> Vec<CommandSpec> {
             Ok(json!({}))
         }),
         cmd!("clip.identify_sync_point", "Identify Sync Point", ["Clip"], Some("Cmd+,"), "{clip?, at?}", has_selection, |e, p| {
-            let at = position_param(e, "clip.identify_sync_point", p, "at")?.unwrap_or(e.session().edit.selection.start);
+            let at = position_param(e, "clip.identify_sync_point", p, "at")?.unwrap_or_else(|| crate::zone_read::selection(e.session()).start);
             let ids = clip_ids_param(e, p);
             let s = e.session_mut();
             for id in &ids {

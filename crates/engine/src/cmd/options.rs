@@ -42,7 +42,8 @@ fn loop_playback(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 /// The region a selection asks for: the span of the selected clips (earliest start to latest end),
-/// else the time selection when it is not empty. `None` when nothing is selected.
+/// else the time selection when it is not empty, read from the session start (ADR 0052 decision
+/// 7). `None` when nothing is selected.
 pub(super) fn selection_span(s: &transit_model::Session) -> Option<transit_time::Range> {
     let (mut start, mut end) = (i64::MAX, i64::MIN);
     for id in &s.edit.selected_clips {
@@ -54,7 +55,8 @@ pub(super) fn selection_span(s: &transit_model::Session) -> Option<transit_time:
     if start < end {
         return Some(transit_time::Range::new(start, end));
     }
-    (!s.edit.selection.is_empty()).then_some(s.edit.selection)
+    let selection = crate::zone_read::selection(s);
+    (!selection.is_empty()).then_some(selection)
 }
 
 fn default_region(e: &Engine, at: Option<i64>) -> transit_time::Range {

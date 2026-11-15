@@ -228,7 +228,8 @@ impl StudioApp {
     /// would collapse it).
     fn snapped_selection(&self) -> Range {
         let s = self.engine.session();
-        let r = s.edit.selection;
+        // The stored selection read from the session start (ADR 0052 decision 7).
+        let r = transit_engine::zone_read::selection(s);
         let spp = self.arrange.layout.samples_per_px;
         let g = &self.arrange.grid;
         let snapped = Range::new(crate::automation::snap(s, spp, g, r.start), crate::automation::snap(s, spp, g, r.end));
