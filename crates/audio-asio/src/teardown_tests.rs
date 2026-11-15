@@ -125,6 +125,16 @@ fn a_switch_inside_dispose_buffers_finds_no_buffer_address_at_the_rebuild_or_the
     assert!(!testing::installed());
 }
 
+/// Sets its flag when it goes, also when a failing assertion unwinds, so that a callback held on
+/// the flag returns and the scope that runs the driver thread can end.
+struct ReleaseOnDrop(Arc<AtomicBool>);
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
 /// A render callback that blocks inside its first call, after its fill, until `release` is set
 /// (a plug-in that does not return); `entered` says it is inside.
 fn blocking(entered: &Arc<AtomicBool>, release: &Arc<AtomicBool>) -> ab::RenderCallback {
@@ -152,6 +162,7 @@ fn a_callback_still_inside_at_the_close_leaks_the_buffers_and_the_driver_and_lat
     ab::Stream::start(&capture).expect("start capture");
     ab::Stream::start(&render).expect("start render");
     std::thread::scope(|scope| {
+        let _release = ReleaseOnDrop(Arc::clone(&release));
         let driver = scope.spawn(|| testing::switch_time_info(0, Some(0), None));
         while !entered.load(Ordering::SeqCst) {
             std::thread::yield_now();
@@ -224,6 +235,7 @@ fn a_buffer_switch_that_finds_the_engine_busy_writes_silence_into_its_half() {
     testing::switch_time_info(1, Some(64), None);
     assert!(!silent(&rig.observed.read_output(0, 1)), "half 1 holds a rendered block");
     std::thread::scope(|scope| {
+        let _release = ReleaseOnDrop(Arc::clone(&release));
         // The third switch (half 0) is held inside its capture callback, holding the engine.
         let held = scope.spawn(|| testing::switch_time_info(0, Some(128), None));
         while !entered.load(Ordering::SeqCst) {
@@ -270,6 +282,7 @@ fn an_error_callback_that_takes_long_does_not_make_a_buffer_switch_skip() {
     ab::Stream::start(&capture).expect("start capture");
     ab::Stream::start(&render).expect("start render");
     std::thread::scope(|scope| {
+        let _release = ReleaseOnDrop(Arc::clone(&release));
         // The driver asks for a reset from a thread of its own; the capture's error callback takes
         // its time.
         let message = scope.spawn(|| testing::message(abi::K_ASIO_RESET_REQUEST, 0));
@@ -298,6 +311,7 @@ fn a_start_while_a_callback_still_holds_the_engine_fails_instead_of_spinning() {
     let render = open_render(&rig, loud()).expect("render");
     ab::Stream::start(&capture).expect("start capture: the driver starts");
     std::thread::scope(|scope| {
+        let _release = ReleaseOnDrop(Arc::clone(&release));
         let held = scope.spawn(|| testing::switch_time_info(0, Some(0), None));
         while !entered.load(Ordering::SeqCst) {
             std::thread::yield_now();
