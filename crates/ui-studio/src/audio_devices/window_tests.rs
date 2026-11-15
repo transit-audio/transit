@@ -1,15 +1,20 @@
 use super::*;
 
-/// A device at another rate than the session's says the session is converted (#601); one at the
-/// session's rate says nothing.
+/// A device at another rate than the session's says the session is converted (#601), naming only
+/// the paths that are: the live input is named only when the input runs at another rate (F9 of the
+/// review). Devices at the session's rate say nothing.
 #[test]
 fn the_window_says_when_the_session_is_converted_to_the_device_rate() {
     use crate::audio_devices::conversion_note;
     assert_eq!(
-        conversion_note(48_000, 44_100).as_deref(),
-        Some("Session converted between 48000 Hz and the device's 44100 Hz (output and live input)")
+        conversion_note(48_000, 44_100, Some(44_100)).as_deref(),
+        Some("Session at 48000 Hz converted to the output at 44100 Hz and from the live input at 44100 Hz")
     );
-    assert_eq!(conversion_note(48_000, 48_000), None);
+    assert_eq!(conversion_note(48_000, 44_100, None).as_deref(), Some("Session at 48000 Hz converted to the output at 44100 Hz"));
+    assert_eq!(conversion_note(48_000, 44_100, Some(48_000)).as_deref(), Some("Session at 48000 Hz converted to the output at 44100 Hz"));
+    assert_eq!(conversion_note(48_000, 48_000, Some(96_000)).as_deref(), Some("Session at 48000 Hz converted from the live input at 96000 Hz"));
+    assert_eq!(conversion_note(48_000, 48_000, Some(48_000)), None);
+    assert_eq!(conversion_note(48_000, 48_000, None), None);
 }
 
 /// A device that runs a buffer other than the one asked for (PipeWire's quantum, a driver whose panel

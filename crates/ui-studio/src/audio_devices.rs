@@ -1152,7 +1152,9 @@ pub(crate) fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
             let asked = &app.ui.audio;
             lines.extend(requested_note(asked.buffer_size, p.device_buffer, asked.sample_rate, p.device_rate));
             if !p.silent {
-                lines.extend(conversion_note(app.engine.session().sample_rate.hz(), p.device_rate));
+                // The live input's rate: the recorder's input, else the one the output holds.
+                let input = app.recorder.as_ref().map(|r| r.sample_rate).or_else(|| p.with_held_input(|r| r.sample_rate));
+                lines.extend(conversion_note(app.engine.session().sample_rate.hz(), p.device_rate, input));
             }
         }
         None => lines.push("Output open: none".into()),
@@ -1254,11 +1256,18 @@ pub fn requested_note(asked_buffer: Option<u32>, buffer: Option<u32>, asked_rate
     (!parts.is_empty()).then(|| parts.join("; "))
 }
 
-/// The line saying the session is converted to and from the device's rate (#601), when they differ:
-/// the output and the live input then go through the band-limited converter.
-pub fn conversion_note(session_rate: u32, device_rate: u32) -> Option<String> {
-    (session_rate != device_rate)
-        .then(|| format!("Session converted between {session_rate} Hz and the device's {device_rate} Hz (output and live input)"))
+/// The line saying which paths convert the session's rate (#601): the output when the output device
+/// runs at another rate, the live input when the input does (`input` is its rate, `None` without
+/// one). Nothing when neither is converted.
+pub fn conversion_note(session_rate: u32, output_rate: u32, input: Option<u32>) -> Option<String> {
+    let mut paths = Vec::new();
+    if output_rate != session_rate {
+        paths.push(format!("to the output at {output_rate} Hz"));
+    }
+    if let Some(rate) = input.filter(|r| *r != session_rate) {
+        paths.push(format!("from the live input at {rate} Hz"));
+    }
+    (!paths.is_empty()).then(|| format!("Session at {session_rate} Hz converted {}", paths.join(" and ")))
 }
 
 /// The "Input open:" line of an input, the recorder's or the player's held one.
