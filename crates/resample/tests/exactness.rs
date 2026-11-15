@@ -259,7 +259,7 @@ fn fraction_splits_near_zero(want: usize) -> Vec<(f64, i64)> {
         let off = ((next() % 7) as f64 - 3.0) / (1u64 << 42) as f64;
         let d = (step + mid + off) / 512.0;
         let x = if next() % 2 == 0 { k as f64 - d } else { k as f64 + d };
-        if !(x.abs() < 16.0) || d >= 16.0 || x == x.floor() {
+        if x.is_nan() || x.abs() >= 16.0 || d >= 16.0 || x == x.floor() {
             continue;
         }
         let below = x.floor() as i64;

@@ -29,8 +29,13 @@ fn main() {
     let frames = 32 * RATE + 2048;
     let data = noise(2 * frames);
     let src = Interleaved::new(&data, 2);
+    const RATES: [f64; 6] = [0.5, 1.059_463_094_359_295_3, 2.0, 4.0, 16.47, 32.0];
+    println!("transit-resample bench (ADR 0056 decision 8.8), read alone, release build");
+    println!(
+        "settings: output rate {RATE} Hz, channels 2 (interleaved), one output frame per read_frame call, {RATE} frames (one second) per run, median of {RUNS} runs, positions x = 1024.25 + n·q, rates q {RATES:?}"
+    );
     println!("{:<10} {:>10} {:>10} {:>10}", "q", "ns/frame", "% core", "budget %");
-    for q in [0.5, 1.059_463_094_359_295_3, 2.0, 4.0, 16.47, 32.0] {
+    for q in RATES {
         let mut runs = [0.0f64; RUNS];
         for run in &mut runs {
             let mut out = [0.0f32; 2];
