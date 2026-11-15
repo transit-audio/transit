@@ -240,6 +240,12 @@ mixer values. Muted and empty tracks have no stem; inactive tracks are omitted. 
 audio cannot render offline; those tracks keep their MIDI and are named in the result. The confirmation
 dialog states these limits before choosing a location.
 
+When the session has clips before bar 1 (the pre-count zone), the project starts at the bar line
+where the zone begins: everything in it (clips, markers, tempo and meter changes) moves later by
+those whole bars, so nothing sits before the project's start, and the stems start at that bar too.
+Bar 1 falls that many bars into the project: one bar in for a one-bar zone. Opened again in transit,
+such a project has no zone; its first bar is the zone's first bar. Without a zone nothing moves.
+
 ## Bounce
 
 File > Bounce… (Ctrl+Alt+B) writes the main mix or a bus over the selection, the cycle range or
@@ -249,8 +255,8 @@ lossy format for sharing: small files that play in every browser, phone and mess
 A 32-bit float file keeps levels above 0 dBFS as they are; 16-bit and 24-bit files clip at full scale.
 
 **Consolidated tracks** exports for another DAW: every audio, instrument and MIDI track gets one
-stem from the session start to the content end, including leading silence, muted or inactive
-material, and any real-time delay or track offset. Every MIDI or instrument track, including an empty one,
+stem from the start of the bar holding the session start (bar 1 without a pre-count zone) to the
+content end, including leading silence, muted or inactive material, and any real-time delay or track offset. Every MIDI or instrument track, including an empty one,
 gets a Standard MIDI File beside it. Rack clips, real-time properties, track offsets, clip edges,
 muted clips and loop repetitions follow playback; MIDI effects remain represented by the audio stem
 rather than generating new notes. A separate tempo-only SMF carries the session tempo, meter and
@@ -325,7 +331,10 @@ selected clip's start to the latest one's end, plus a two-second tail, and start
 start; clips outside the span are untouched. A span that starts in the pre-count zone prints from
 bar 1: the zone's part is in the printed file, hidden before the new clip's start (audio cannot sit
 before bar 1 yet), and what plays from bar 1 on, a held note's tail included, is what the source
-played. Clips that end before bar 1, tail included, are refused, since nothing of them would sound. With clips on several tracks the print is one new
+played. With **Mute** (the default), **Mute and deactivate** or **Hide**, what the source played
+before bar 1 is no longer heard after the print, and the status line says so; choose **Leave** to
+keep it sounding, or Undo. Clips that end before bar 1, tail included, are refused, since nothing
+of them would sound from bar 1. With clips on several tracks the print is one new
 track per source track, placed under each source, so the existing-track choice is unavailable, and
 one Undo restores them all. The source choice applies to the whole source track, not just the
 span: Mute mutes the track, as in Logic. The Edit item is disabled with no clip selected.
