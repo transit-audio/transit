@@ -439,9 +439,10 @@ impl StudioApp {
         let played = midi.as_ref().and_then(|m| m.timed(rate).iter().map(|(offset, _)| offset.saturating_add(1)).max());
         plan.end = Some([Some(end - plan.start), files.flatten(), played].into_iter().flatten().fold(1, Samples::max));
         let pushes = self.engine.undo_pushes();
+        let mut placed = Vec::new();
         if let Some((takes, problem)) = finished {
             let tracks = takes.len().max(1);
-            self.place_takes(&plan, takes, end, tracks);
+            placed = self.place_takes(&plan, takes, end, tracks);
             if let Some(p) = problem {
                 log::warn!("recording: {p}");
                 self.status = format!("{} ({p})", self.status);
@@ -454,7 +455,7 @@ impl StudioApp {
             self.midi_journal = journal;
             self.journal_midi(&midi, &plan, true);
             let journal = self.midi_journal.take();
-            self.place_midi_take(&plan, &midi, end);
+            placed.extend(self.place_midi_take(&plan, &midi, end));
             if let Some(journal) = journal {
                 self.hold_journal(journal, &plan);
             }
@@ -480,7 +481,25 @@ impl StudioApp {
             log::warn!("recording: the take was aligned without a validated audio device clock");
             self.status = format!("{}. {APPROXIMATE_TAKE}", self.status.trim_end_matches('.'));
         }
+        self.show_pickups(&placed, plan.start);
         self.report_lap_notes(said);
+    }
+
+    /// #707: a take whose count-in pickups start it before where recording began, and before the
+    /// view's left edge, scrolls the view back to its start, so what was played during the
+    /// count-in is in sight (the playhead never passed it). The take that makes the pre-count zone
+    /// and later ones alike; a take that starts at its record start leaves the view as the playhead
+    /// paged it.
+    fn show_pickups(&mut self, placed: &[transit_model::ClipId], record_start: Samples) {
+        let s = self.engine.session_arc();
+        // A take of an earlier lap lives on a playlist that is not the active one.
+        let first =
+            s.tracks.iter().flat_map(|t| t.playlists.iter()).flat_map(|p| p.clips.iter()).filter(|c| placed.contains(&c.id)).map(|c| c.start).min();
+        if let Some(first) = first
+            && first < record_start
+        {
+            self.scroll_back_to(first);
+        }
     }
 
     /// Where the engine's messages and its count of short last laps stand before a placement, for
@@ -561,7 +580,12 @@ impl StudioApp {
 
     /// Place a finished MIDI pass: one clip per armed track (per pass when loop recording), merged
     /// into a clip already under the take. Nothing played, nothing placed.
-    fn place_midi_take(&mut self, plan: &transit_engine::io::Recording, midi: &transit_playback::MidiTake, end: Samples) {
+    fn place_midi_take(
+        &mut self,
+        plan: &transit_engine::io::Recording,
+        midi: &transit_playback::MidiTake,
+        end: Samples,
+    ) -> Vec<transit_model::ClipId> {
         let events: Vec<_> = midi.timed(self.engine.session().sample_rate.hz()).iter().filter_map(|(offset, e)| rec_event(*offset, e)).collect();
         let ids = transit_engine::midi_take::place_midi_recording_wrapping(&mut self.engine, plan, &events, end - plan.start, self.take_cycle);
         if midi.dropped > 0 {
@@ -573,6 +597,7 @@ impl StudioApp {
         if early > 0 {
             self.status = format!("{}; {}", self.status.trim_end_matches('.'), before_count_in_note(early));
         }
+        ids
     }
 
     /// The status line, selection and take lanes after a MIDI pass placed `ids` (none: nothing played).
@@ -633,14 +658,15 @@ impl StudioApp {
     /// Slice 6: place finished take files. A take recorded over clips on its track goes on a new
     /// playlist that copies the old one (the engine does it inside the one "Record" undo step), so the old clips stay as the
     /// previous take (plan 06, L8: takes are track playlists). The new clips are selected and the
-    /// status line says what was recorded where. `end` is where the playhead stopped.
+    /// status line says what was recorded where. `end` is where the playhead stopped. Returns the
+    /// placed clips.
     pub(crate) fn place_takes(
         &mut self,
         plan: &transit_engine::io::Recording,
         takes: Vec<(TrackId, std::path::PathBuf)>,
         end: Samples,
         tracks: usize,
-    ) {
+    ) -> Vec<transit_model::ClipId> {
         let from = plan.punch.map_or(plan.start, |p| p.start.max(plan.start));
         let to = plan.punch.map_or(end, |p| p.end.min(end));
         let mut new_take = Vec::new();
@@ -658,13 +684,13 @@ impl StudioApp {
         if plan.pass.is_some() || (plan.cycle.is_some() && passes > 1) {
             self.show_new_takes(&ids);
             self.status = if passes > 1 { format!("Recorded {passes} takes") } else { format!("Loop-recorded {passes} take(s)") };
-            return;
+            return ids;
         }
         let s = self.engine.session_arc();
         let placed: Vec<(TrackId, &transit_model::Clip)> = ids.iter().filter_map(|id| s.find_clip(*id)).collect();
         let Some(longest) = placed.iter().map(|(_, c)| c.length).max() else {
             self.status = "Recorded nothing".into();
-            return;
+            return ids;
         };
         let mut names: Vec<String> = Vec::new();
         for (t, _) in &placed {
@@ -687,6 +713,7 @@ impl StudioApp {
         if let Some((t, _)) = placed.first() {
             self.ui.focus_track = Some(*t);
         }
+        ids
     }
 }
 

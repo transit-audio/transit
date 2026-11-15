@@ -802,6 +802,8 @@ mod rack_panel_tests;
 #[cfg(test)]
 mod recent_tests;
 #[cfg(test)]
+mod record_reveal_tests;
+#[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
 mod resonator_panel_tests;

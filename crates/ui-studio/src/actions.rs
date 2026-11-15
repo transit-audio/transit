@@ -250,12 +250,22 @@ impl StudioApp {
         let to = to.max(crate::arrange::trim_floor(self.engine.session(), clip, start_edge));
         let before = self.engine.session().start();
         let out = self.run("edit.trim_clip", json!({"clip": clip.0, edge: to}))?;
-        let s = self.engine.session();
-        let now = s.start();
-        if now < before && crate::at_or_after_start(s, s.edit.zoom.scroll) > now {
-            let _ = self.execute_ui("view.scroll", &json!({"to": now}));
+        let now = self.engine.session().start();
+        if now < before {
+            self.scroll_back_to(now);
         }
         Ok(out)
+    }
+
+    /// Scroll the view back so it starts at `at` when its left edge (the stored scroll, floored at
+    /// the session start as the arrangement draws it) is later; a view already showing `at` stays.
+    /// For content that just appeared left of the view: a trim that grows the pre-count zone, a
+    /// take whose count-in pickups start before the view (#707).
+    pub(crate) fn scroll_back_to(&mut self, at: Samples) {
+        let s = self.engine.session();
+        if crate::at_or_after_start(s, s.edit.zoom.scroll) > at {
+            let _ = self.execute_ui("view.scroll", &json!({"to": at}));
+        }
     }
 
     /// Split at the cursor: the selected clips under the cursor, or else every clip under the

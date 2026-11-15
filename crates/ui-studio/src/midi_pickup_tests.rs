@@ -14,29 +14,29 @@ use transit_playback::midi_capture::CapturedEvent;
 use transit_playback::record::start::Point;
 use transit_playback::timeline_map::Position;
 
-const BEAT: i64 = 24_000;
-const B: u64 = 24_000;
+pub(crate) const BEAT: i64 = 24_000;
+pub(crate) const B: u64 = 24_000;
 const TICKS: i64 = transit_time::TICKS_PER_QUARTER;
 /// The device frame the synthetic latch sits at, far enough in for a count-in before it.
-const LATCH: u64 = 1_000_000;
+pub(crate) const LATCH: u64 = 1_000_000;
 
-fn app() -> (StudioApp, TrackId) {
+pub(crate) fn app() -> (StudioApp, TrackId) {
     let mut app = StudioApp::new(Engine::default(), None, Services::default());
     let t = TrackId(app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
     app.run("mix.record_arm", json!({"tracks": [t.0], "value": true})).unwrap();
     (app, t)
 }
 
-fn on(frame: u64, track: TrackId, key: u8) -> CapturedEvent {
+pub(crate) fn on(frame: u64, track: TrackId, key: u8) -> CapturedEvent {
     CapturedEvent { frame, track, channel: 0, message: Message::NoteOn { key, velocity: 100, id: NoteId::NONE }, approximate: false }
 }
 
-fn off(frame: u64, track: TrackId, key: u8) -> CapturedEvent {
+pub(crate) fn off(frame: u64, track: TrackId, key: u8) -> CapturedEvent {
     CapturedEvent { message: Message::NoteOff { key, velocity: 0, id: NoteId::NONE }, ..on(frame, track, key) }
 }
 
 /// A finished pass latched at session sample `sample` (device frame [`LATCH`]).
-fn pass(track: TrackId, sample: i64, events: Vec<CapturedEvent>) -> MidiTake {
+pub(crate) fn pass(track: TrackId, sample: i64, events: Vec<CapturedEvent>) -> MidiTake {
     let start = Some(Point { host_ns: 0, output_frame: LATCH, position: Position { sample, fraction: 0, denominator: 1 } });
     MidiTake { tracks: vec![track], start, events, dropped: 0, device_rate: 48_000 }
 }
@@ -58,7 +58,7 @@ fn plan(start: i64, pass: Option<i64>, count_in: i64) -> transit_engine::io::Rec
 
 /// Record from `start` after a count-in of `count_in` samples to `stop` with `take` as the
 /// capture, then Stop through the host.
-fn record(app: &mut StudioApp, start: i64, count_in: i64, pass_len: Option<i64>, stop: i64, take: MidiTake) {
+pub(crate) fn record(app: &mut StudioApp, start: i64, count_in: i64, pass_len: Option<i64>, stop: i64, take: MidiTake) {
     app.record_start = start;
     app.take_plan = Some(plan(start, pass_len, count_in));
     app.engine.transport.recording = true;
