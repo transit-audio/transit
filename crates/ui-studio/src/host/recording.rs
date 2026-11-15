@@ -383,11 +383,17 @@ impl StudioApp {
         let plan = self.take_plan.take();
         // What the engine says while this pass is placed; the lap notes among it end the status line.
         let said = self.lap_mark();
-        let approximate = self.pass_approximate();
         let finished = self.recorder.as_mut().filter(|r| r.has_pending_take()).map(transit_playback::record::Recorder::finish);
         // Tests substitute only the device's finished files; placement and stop ordering stay real.
         #[cfg(test)]
         let finished = finished.or_else(|| self.finished_test_takes.take());
+        #[cfg(test)]
+        if finished.is_some() && self.test_approximate_at_finish {
+            self.test_approximate_start = true;
+        }
+        // Read after `finish`: the take writer's finalization can still place the start and mark it
+        // approximate (a placement that waited for the input clock, or a moved start, #587).
+        let approximate = self.pass_approximate();
         let midi = self.player.as_ref().and_then(Player::finish_midi_recording);
         #[cfg(test)]
         let midi = midi.or_else(|| self.finished_test_midi.take());

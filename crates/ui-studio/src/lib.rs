@@ -242,6 +242,10 @@ pub struct StudioApp {
     /// Makes the next Stop see an approximate start, standing in for the recorder's latch.
     #[cfg(test)]
     test_approximate_start: bool,
+    /// Makes the start approximate only while Stop finishes the take, as a placement that resolves
+    /// in the take writer's finalization marks it (#587).
+    #[cfg(test)]
+    test_approximate_at_finish: bool,
     /// A lap limit for cycle recording smaller than the engine's, so a test reaches it (#522).
     #[cfg(test)]
     test_lap_limit: Option<Samples>,
@@ -411,6 +415,8 @@ impl StudioApp {
             placed_journal: None,
             #[cfg(test)]
             test_approximate_start: false,
+            #[cfg(test)]
+            test_approximate_at_finish: false,
             #[cfg(test)]
             test_lap_limit: None,
             punch: None,

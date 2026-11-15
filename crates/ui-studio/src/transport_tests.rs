@@ -189,6 +189,11 @@ impl Drop for TakeFile {
 
 /// Stop a one-second audio take, the pass having started approximately or on a validated clock.
 fn stop_take(tag: &str, approximate: bool) -> T {
+    stop_take_marked(tag, approximate, false)
+}
+
+/// [`stop_take`], with `at_finish` marking the start approximate only while Stop finishes the take.
+fn stop_take_marked(tag: &str, approximate: bool, at_finish: bool) -> T {
     let take = TakeFile::new(tag);
     let mut t = T::new();
     let track = TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
@@ -207,6 +212,7 @@ fn stop_take(tag: &str, approximate: bool) -> T {
     });
     t.app.finished_test_takes = Some((vec![(track, take.0.to_path_buf())], None));
     t.app.test_approximate_start = approximate;
+    t.app.test_approximate_at_finish = at_finish;
     t.app.engine.transport.recording = true;
     t.app.start_play(96_000, None, None);
     t.stop(1);
@@ -222,6 +228,15 @@ fn a_take_that_started_without_a_validated_clock_says_so_once_at_stop() {
     assert_eq!(t.app.telemetry.approximate_takes, 1);
     t.frames(60);
     assert_eq!(t.app.telemetry.approximate_takes, 1, "counted at Stop only");
+}
+
+/// #587 review B1: the take writer's finalization can place the start and mark it approximate
+/// while Stop finishes the take; Stop still says so and counts it.
+#[test]
+fn a_take_marked_approximate_while_stop_finishes_it_still_says_so() {
+    let t = stop_take_marked("approximate-at-finish", false, true);
+    assert!(t.app.status.contains("Recorded with approximate alignment"), "{}", t.app.status);
+    assert_eq!(t.app.telemetry.approximate_takes, 1);
 }
 
 #[test]
