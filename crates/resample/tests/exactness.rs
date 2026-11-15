@@ -203,4 +203,74 @@ fn read_frame_is_decision_8_3_bit_for_bit() {
             assert_eq!((out[0].to_bits(), out[1].to_bits()), (want[0].to_bits(), want[1].to_bits()), "x = {x}, q = {q}");
         }
     }
+    // Within 16 frames of zero, on both sides, `x − k` can round, so the per-tap fractions of 8.3 need
+    // not share their bits: positions with full-precision fractions where they do not, read through an
+    // impulse on the tap whose fraction differs (its coefficient is then the output itself), and through
+    // the stereo noise. The review's six crafted positions first, then a search.
+    let mut near: Vec<(f64, i64)> = [0x400f_fdff_ffea_0001u64, 0x400f_fdff_3f1a_0001, 0x400f_fcff_ffe2_0001, 0x4007_fdff_ffea_0001, 0x4007_fdff_3f1a_0001, 0x4007_fcff_ffe2_0001]
+        .into_iter()
+        .map(|b| (f64::from_bits(b), 12))
+        .collect();
+    let crafted = near.len();
+    near.extend(fraction_splits_near_zero(400));
+    assert!(near.len() - crafted >= 100, "the search found only {} positions", near.len() - crafted);
+    assert!(near.iter().any(|&(x, _)| x < 0.0) && near.iter().any(|&(x, _)| x > 0.0));
+    let mut impulse = vec![0.0f32; 64];
+    for &(x, k) in &near {
+        impulse.fill(0.0);
+        impulse[k as usize] = 1.0;
+        for q in [1.0, 0.5, 1.0 / 32.0] {
+            let y = read(t, &impulse, x, q);
+            let want = literal_8_3(t, &impulse, 1, x, q)[0];
+            assert_eq!(y.to_bits(), want.to_bits(), "x = {x:?} ({:#018x}), impulse at {k}, q = {q}", x.to_bits());
+            read_frame(t, &src, x, q, &mut out);
+            let want = literal_8_3(t, &data, 2, x, q);
+            assert_eq!((out[0].to_bits(), out[1].to_bits()), (want[0].to_bits(), want[1].to_bits()), "x = {x:?}, noise, q = {q}");
+        }
+    }
+    println!("near zero: {crafted} crafted and {} searched positions", near.len() - crafted);
+}
+
+/// The f32 fraction decision 8.3 forms for one tap at q <= 1: `512·|x − k| − floor(512·|x − k|)`.
+fn tap_fraction(x: f64, k: i64) -> f32 {
+    let v = 512.0 * (x - k as f64).abs();
+    (v - v.floor()) as f32
+}
+
+/// Up to `want` positions in (−16, 16) with full-precision fractions where some tap at frame >= 0 has an
+/// f32 fraction different from the nearest tap on its side of x (the value a fixed stride would reuse),
+/// with that tap. Candidates aim the per-tap fraction near an f32 rounding midpoint, where the last
+/// bits of an inexact `x − k` decide the rounding; a deterministic integer generator picks the tap, the
+/// table step, the midpoint, the offset and the side.
+fn fraction_splits_near_zero(want: usize) -> Vec<(f64, i64)> {
+    let mut s: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut next = || {
+        s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        s >> 16
+    };
+    let mut found = Vec::new();
+    for _ in 0..200_000 {
+        if found.len() >= want {
+            break;
+        }
+        let k = (next() % 28) as i64; // the tap whose fraction is aimed at, frames 0 to 27
+        let step = (next() % 8192) as f64; // table step of 512·|x − k|
+        let mid = ((next() % (1 << 23)) as f64 + 0.5) / (1u64 << 24) as f64 + 0.5; // an f32 midpoint in [0.5, 1)
+        let off = ((next() % 7) as f64 - 3.0) / (1u64 << 42) as f64;
+        let d = (step + mid + off) / 512.0;
+        let x = if next() % 2 == 0 { k as f64 - d } else { k as f64 + d };
+        if !(x.abs() < 16.0) || d >= 16.0 || x == x.floor() {
+            continue;
+        }
+        let below = x.floor() as i64;
+        let (first, last) = (below - 15, below + 16);
+        let left: Vec<i64> = (first..=below).filter(|&j| (x - j as f64).abs() < 16.0).collect();
+        let right: Vec<i64> = (below + 1..=last).filter(|&j| (x - j as f64).abs() < 16.0).collect();
+        let split = |side: &[i64], reference: i64| side.iter().copied().find(|&j| j >= 0 && tap_fraction(x, j) != tap_fraction(x, reference));
+        let hit = left.first().and_then(|&r| split(&left, r)).or_else(|| right.first().and_then(|&r| split(&right, r)));
+        if let Some(j) = hit {
+            found.push((x, j));
+        }
+    }
+    found
 }

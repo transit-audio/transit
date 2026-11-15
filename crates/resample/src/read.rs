@@ -7,8 +7,21 @@ use crate::table::{PHASES, SincTable, ZERO_CROSSINGS};
 /// The largest rate the reader takes (decision 5.2's upper bound on `q`): above it the tap count, and
 /// so the work per sample, would grow without the bound decision 8.8 budgets.
 pub const MAX_RATE: f64 = 32.0;
-/// The largest position magnitude the reader takes, 2^50 frames (far beyond decision 5.5's 2^40; a
-/// position this large still carries a fraction below one frame).
+/// The largest position magnitude the reader takes, 2^50 frames: a position this large still carries a
+/// fraction (two bits), and the read never panics up to it.
+///
+/// This accepted domain is wider than the one where decision 8.4's bounds hold for the position a
+/// caller means. Rounding the position to f64 moves it by up to half an ulp of `x`, a phase error of
+/// at most `2π·(0.42/max(1, q))·ulp(x)/2` at the passband edge, which adds to the reader's own error. The
+/// bounds leave about 0.5 dB of margin over the worst reader error (1.3e-5 below the −73 dB bound,
+/// 7e-6 below −78 dB at q >= 1.5, where the edge frequency is at most 0.28 of the source rate), and the
+/// added error stays inside that margin while `|x| < 2^35` (ulp 2^-17: 1.0e-5 at q <= 1, 6.7e-6 at
+/// q = 1.5). 2^35 frames is 8.3 days at 48 kHz. The position error alone stays below −73 dB up to about
+/// 2^39 and reaches it near 2^40.
+///
+/// Callers compute each position directly, as `x0 + n·q` with an integer `n` (or rebase `x0`), never by
+/// adding `q` once per sample: the sum's rounding accumulates into a rate error (around 10 frames over
+/// an hour at 96 kHz).
 pub const MAX_POSITION: f64 = (1u64 << 50) as f64;
 
 /// A source the reader takes its taps from: frames of one or more channels at integer indices.
@@ -198,20 +211,23 @@ pub fn read_frame<S: Frames + ?Sized>(table: &SincTable, src: &S, x: f64, q: f64
             *acc += src.sample(ch, k) * c;
         }
     };
-    if q > 1.0 {
+    if q > 1.0 || !stride_exact(x) {
+        // Decision 8.3 tap by tap: `u = |x − k| / max(1, q)` formed in f64 for every tap.
         for k in range {
             tap(k, table.coefficient(tap_u(x, k, q)));
         }
-        let scale = (1.0 / q) as f32;
-        for acc in out.iter_mut() {
-            *acc *= scale;
+        if q > 1.0 {
+            let scale = (1.0 / q) as f32;
+            for acc in out.iter_mut() {
+                *acc *= scale;
+            }
         }
     } else {
-        // At q <= 1 every tap's `u` is its exact distance `|x − k|` (x − k is exact: it keeps x's
-        // fraction bits and is smaller), so `512·u` differs from tap to tap by exact multiples of 512 and
-        // every tap on one side of x shares the fraction `512·u − floor(512·u)` bit for bit: the
-        // coefficients are table reads at a fixed stride of 512, the same values
-        // `SincTable::coefficient` gives tap by tap (pinned by `read_frame_is_decision_8_3_bit_for_bit`).
+        // q <= 1 and 16 <= |x| <= 2^50 (see `stride_exact`): every `x − k` is exact, so `512·u` differs
+        // from tap to tap by exact multiples of 512 and every tap on one side of x shares the fraction
+        // `512·u − floor(512·u)` bit for bit. The coefficients are then table reads at a fixed stride of
+        // 512, the same values `SincTable::coefficient` gives tap by tap (pinned by
+        // `read_frame_is_decision_8_3_bit_for_bit`).
         let below = transit_math::f64::floor(x) as i64;
         let (mut i, f) = table.split(x - range.start as f64);
         for k in range.start..=below {
@@ -226,6 +242,24 @@ pub fn read_frame<S: Frames + ?Sized>(table: &SincTable, src: &S, x: f64, q: f64
             }
         }
     }
+}
+
+/// Whether the q <= 1 fixed-stride evaluation equals decision 8.3's per-tap arithmetic at `x`.
+///
+/// Proof. At q <= 1 every tap has `|x − k| < 16`. Let `x` lie in `[2^E, 2^(E+1))` in magnitude, so `x` is
+/// a multiple of `ulp(x) = 2^(E−52)`. (1) When `|x| >= 16`, `E >= 4`. (2) When `|x| <= 2^50` (the reader's
+/// domain, `accepts`), `ulp(x) <= 2^-2`, so every integer `k` is also a multiple of `ulp(x)`; this is the
+/// second condition, and it fails from `|x| >= 2^53`, where `ulp(x) > 1`. Then `x − k` is a multiple of
+/// `2^(E−52)` with magnitude below `16 <= 2^E`, so it fits in 53 significant bits and the subtraction is
+/// exact. `512·(x − k)` is exact (a power of two), its floor is exact, and `v − floor(v)` is exact
+/// (both lie in one binade step below 1), so the fraction is the same real number for every tap on one
+/// side. Below 16 the subtraction can round (for example `12 − x` with x in [2, 4) and a full 52-bit
+/// fraction), the per-tap fractions differ in their last bits, and after rounding to f32 they can
+/// differ by one ulp; the per-tap path is used there.
+#[inline]
+fn stride_exact(x: f64) -> bool {
+    let a = if x < 0.0 { -x } else { x };
+    a >= ZERO_CROSSINGS as f64 && a <= MAX_POSITION
 }
 
 /// One channel's output at source position `x` and rate `q` over a mono slice: [`read_frame`] with
