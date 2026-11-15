@@ -119,30 +119,131 @@ pub fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize, buf: &
     let i1 = usize::try_from(isect.end - pos).unwrap_or(0).min(frames);
     // Every read of the clip's source goes through `ClipReader::read` (a stretched clip through the
     // band-limited reader, ADR 0056 decision 8; #604), except the ring, which holds its output.
+    // A stretch of exactly 1 reads source frames directly, one channel at a time, as before #604:
+    // the common case keeps its cost (the reader's per-frame fetch is for stretched clips only).
+    let direct = map.stretch == 1.0;
     match audio.disk.as_deref() {
+        None if direct => mix_clip_direct(clip, pos, i0, i1, buf, &audio.buffer.channels, map.offset),
         None => {
             let mut src = Memory(&audio.buffer.channels);
             let nsrc = audio.buffer.channels.len();
             let reader = map.reader();
             mix_clip(clip, pos, i0, i1, buf, nsrc, |k, first, out| reader.read(k, &mut src, first, out));
         }
-        // The audio thread (and a render worker for it) only drains the clip's ring (ADR 0035).
+        // The audio thread (and a render worker for it) only drains the clip's ring (ADR 0035),
+        // which holds the mapped samples: one channel at a time, as before #604.
         Some(d) if on_audio_thread() => {
             let k0 = isect.start.saturating_sub(clip.start);
             match d.stream(&map, k0, i1.saturating_sub(i0)) {
-                Some(ring) => mix_clip(clip, pos, i0, i1, buf, d.channels(), |k, first, out| {
-                    for (c, o) in out.iter_mut().enumerate() {
-                        *o = ring.get(first + c, k);
-                    }
-                }),
+                Some(ring) => mix_clip_channels(clip, pos, i0, i1, buf, d.channels(), |c, k| ring.get(c, k)),
                 None => d.underrun(&map, k0),
             }
         }
         // Offline (bounce, export, consolidate): the same file, read here.
         Some(d) => {
             let reader = map.reader();
-            d.with_sync_source(|src| mix_clip(clip, pos, i0, i1, buf, d.channels(), |k, first, out| reader.read(k, src, first, out)));
+            d.with_sync_source(|src| {
+                if direct {
+                    mix_clip_channels(clip, pos, i0, i1, buf, d.channels(), |c, k| {
+                        let mut one = [0.0f32];
+                        reader.read(k, src, c, &mut one);
+                        one[0]
+                    });
+                } else {
+                    mix_clip(clip, pos, i0, i1, buf, d.channels(), |k, first, out| reader.read(k, src, first, out));
+                }
+            });
         }
+    }
+}
+
+/// [`mix_clip_channels`] for an in-memory clip with a stretch of exactly 1: source channel `c` at clip
+/// time `k` is frame `offset + content_pos(k)` of `src[c]` (0 before the first frame and past the
+/// last), the same samples [`transit_model::disk::ClipReader::read`] gives at q = 1 (pinned against the
+/// pre-#604 loop by `clip_direct_tests`). Each channel's slice is taken once per block.
+fn mix_clip_direct(clip: &Clip, pos: Samples, i0: usize, i1: usize, buf: &mut [Vec<f32>], src: &[Vec<f32>], offset: Samples) {
+    #[inline(always)]
+    fn at(s: &[f32], offset: Samples, rel: Samples) -> f32 {
+        usize::try_from(offset.saturating_add(rel)).ok().and_then(|i| s.get(i)).copied().unwrap_or(0.0)
+    }
+    let nsrc = src.len();
+    let ndst = buf.len();
+    if nsrc == 0 || ndst == 0 {
+        return;
+    }
+    if nsrc <= ndst {
+        for (ch, dst) in buf.iter_mut().enumerate() {
+            let s = src[ch % nsrc].as_slice();
+            gain_segments(clip, pos, i0, i1, |k, rel, gain| {
+                if let Some(d) = dst.get_mut(k) {
+                    *d += at(s, offset, clip.content_pos(rel)) * gain;
+                }
+            });
+        }
+    } else {
+        for (ch, dst) in buf.iter_mut().enumerate() {
+            let contributors = (nsrc - 1 - ch) / ndst + 1;
+            gain_segments(clip, pos, i0, i1, |k, rel, gain| {
+                let rel = clip.content_pos(rel);
+                let v = (ch..nsrc).step_by(ndst).map(|c| at(&src[c], offset, rel)).sum::<f32>() / contributors as f32;
+                if let Some(d) = dst.get_mut(k) {
+                    *d += v * gain;
+                }
+            });
+        }
+    }
+}
+
+/// Sum frames `i0..i1` of a block at `pos` of `clip` into `buf`, with its gain, reading source channel
+/// `c` at clip time `k` through `fetch(c, k)` (`nsrc` channels), one destination channel at a time:
+/// the loop from before #604, for reads that are one sample each (the ring, a direct offline read).
+fn mix_clip_channels(
+    clip: &Clip,
+    pos: Samples,
+    i0: usize,
+    i1: usize,
+    buf: &mut [Vec<f32>],
+    nsrc: usize,
+    mut fetch: impl FnMut(usize, Samples) -> f32,
+) {
+    if nsrc == 0 {
+        return;
+    }
+    let ndst = buf.len();
+    for (ch, dst) in buf.iter_mut().enumerate() {
+        let contributors = if nsrc > ndst { (nsrc - 1 - ch) / ndst + 1 } else { 1 };
+        gain_segments(clip, pos, i0, i1, |k, rel, gain| {
+            let v =
+                if nsrc > ndst { (ch..nsrc).step_by(ndst).map(|c| fetch(c, rel)).sum::<f32>() / contributors as f32 } else { fetch(ch % nsrc, rel) };
+            if let Some(d) = dst.get_mut(k) {
+                *d += v * gain;
+            }
+        });
+    }
+}
+
+/// For each frame `k` in `i0..i1` of a block at `pos`, its clip time and the clip gain there: the gain
+/// is evaluated every 32 samples and interpolated (fades and envelopes stay smooth), as every clip
+/// render does.
+#[inline(always)]
+fn gain_segments(clip: &Clip, pos: Samples, i0: usize, i1: usize, mut each: impl FnMut(usize, Samples, f32)) {
+    const STEP: usize = 32;
+    let mut i = i0;
+    while i < i1 {
+        let seg_end = (i + STEP).min(i1);
+        let rel0 = pos.saturating_add(i as i64).saturating_sub(clip.start);
+        // The last sample of this step, not the first sample of the next one, so a breakpoint
+        // on the boundary does not ramp the audio before it.
+        let rel1 = pos.saturating_add(seg_end.saturating_sub(1) as i64).saturating_sub(clip.start);
+        let g0 = clip.gain_at(rel0);
+        let g1 = clip.gain_at(rel1.min(clip.length));
+        let n = (seg_end - i).saturating_sub(1).max(1) as f32;
+        for k in i..seg_end {
+            let rel = pos.saturating_add(k as i64).saturating_sub(clip.start);
+            let t = (k - i) as f32 / n;
+            each(k, rel, g0 + (g1 - g0) * t);
+        }
+        i = seg_end;
     }
 }
 

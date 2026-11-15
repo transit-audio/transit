@@ -75,6 +75,8 @@ mod automation;
 /// each bar. Settings come from `setup.click_countoff` (`click.*` values).
 mod click;
 #[cfg(test)]
+mod clip_direct_tests;
+#[cfg(test)]
 mod clip_loop_tests;
 mod clips;
 mod compile;
@@ -155,8 +157,10 @@ mod touch;
 mod touch_tests;
 
 use automation::{apply_params, lerp_gain, pan_at, pan_segment, send_level, transport_at, volume_db_at};
-/// One clip into a strip buffer, as the plan renders it: public for the clip-path bench
-/// (`examples/clip_path_bench.rs`, ADR 0056 decision 8.8), not an API.
+/// One clip into a strip buffer, as the plan renders it: reachable only with the `testing` feature,
+/// for the tests and the clip-path bench (`examples/clip_path_bench.rs`, ADR 0056 decision 8.8, which
+/// builds with the dev-dependency on this crate that turns `testing` on); not an API.
+#[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub use clips::render_clip;
 pub use clips::render_clips;
