@@ -56,11 +56,15 @@ fn convert_with(input: &[f32], session: u32, device: u32, speeds: &[(usize, u32)
     let (mut pending, mut cursor, mut sizes) = (0, 0, partition.iter().cycle());
     let mut out = Vec::with_capacity(frames);
     let mut one = [0.0f32];
+    // The largest rate the schedule reaches bounds the tail a block keeps, as the player's 4x does.
+    let top = speeds.iter().map(|(_, s)| *s).max().unwrap_or(1000);
+    let q_max = f64::from(session) * f64::from(top) / (f64::from(device) * 1000.0);
     for k in 0..frames {
         let speed = speeds.iter().rev().find(|(from, _)| *from <= k).map_or(1000, |(_, s)| *s);
         let step = u64::from(session) * u64::from(speed);
         while phase.needs(pending, step) {
-            history.keep(&block, pending);
+            let tail = phase.reachable_tail(pending, step, q_max);
+            history.keep(&block, pending, tail);
             phase.remove(pending).unwrap();
             pending = *sizes.next().unwrap();
             for (slot, value) in block[0].iter_mut().zip(input.iter().skip(cursor).chain(std::iter::repeat(&0.0))).take(pending) {
@@ -126,6 +130,43 @@ fn equal_rates_pass_every_bit_through_whatever_the_partition() {
             assert_eq!(bits(&convert(&input, rate, rate, 1000, partition, 4998)), bits(&input[..4998]), "{rate} Hz, blocks {partition:?}");
         }
     }
+}
+
+/// B1 of the #601 review: equal rates at speed 1 cost what they did before the reader. Every output
+/// frame takes the integer fast path (no reader call), and each block keeps only the tail a read
+/// could still reach after a change to the fastest speed: `halo(4)` = 65 frames of each channel at
+/// 48 kHz on 48 kHz, against the one frame of 80 channel slots the linear converter kept (130 sample
+/// writes for a stereo block against 80). The player through its fake device makes no reader call
+/// at all at equal rates (`play` checks it).
+#[test]
+fn equal_rates_take_the_fast_path_and_keep_only_the_reachable_tail() {
+    use transit_resample::halo;
+    let input = noise(512 * 60, 3);
+    let mut phase = Phase::new(48_000).unwrap();
+    let mut history = History::new();
+    let mut block = vec![vec![0.0f32; 512]; 2];
+    let (step, q_max) = (48_000u64 * 1000, 4.0);
+    let (mut pending, mut cursor, mut blocks) = (0usize, 0usize, 0u64);
+    for k in 0..512 * 50 {
+        while phase.needs(pending, step) {
+            let tail = phase.reachable_tail(pending, step, q_max);
+            history.keep(&block, pending, tail);
+            phase.remove(pending).unwrap();
+            pending = 512;
+            for channel in &mut block {
+                channel.copy_from_slice(&input[cursor..cursor + 512]);
+            }
+            cursor += 512;
+            blocks += 1;
+        }
+        let i = phase.whole(step).expect("equal rates at speed 1 sit on whole frames");
+        assert_eq!(block[0][i].to_bits(), input[k].to_bits());
+        phase.advance(step).unwrap();
+    }
+    assert_eq!(history.reads(), 0);
+    // The first block kept nothing (nothing was pending); every later one its 65-frame tail.
+    assert_eq!(history.written(), (blocks - 1) * halo(4.0) as u64 * 2, "{blocks} blocks");
+    let _ = play(48_000, 48_000, 1000, &[512, 7, 1], 9_000);
 }
 
 /// A speed change moves the rate, never the position: the converter carries on from the exact
@@ -307,6 +348,9 @@ fn play(session: u32, device: u32, speed: u32, callbacks: &[usize], frames: usiz
         }
     }
     assert_eq!(audio.history.misses(), 0, "{session} -> {device}: a read outside the kept and the pending frames");
+    if session == device && speed == 1000 {
+        assert_eq!(audio.history.reads(), 0, "{session} Hz at speed 1: every frame takes the fast path");
+    }
     control.retire(audio.plans, audio.actions);
     (left, right, input)
 }

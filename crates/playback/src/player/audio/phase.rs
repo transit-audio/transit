@@ -50,12 +50,47 @@ impl Phase {
         step as f64 / self.denominator as f64
     }
 
+    /// The equal-rate fast path (B1 of the #601 review): at unit rate (`step == denominator`, the
+    /// session at the device's rate and speed 1) and a whole, non-negative position, the frame index
+    /// of the next output frame. Integer arithmetic only: no position, no span, no reader checks.
+    #[inline]
+    pub(super) fn whole(self, step: u64) -> Option<usize> {
+        if step as i64 != self.denominator || self.units < 0 || self.units % self.denominator != 0 {
+            return None;
+        }
+        usize::try_from(self.units / self.denominator).ok()
+    }
+
     /// The next output frame reads a frame after the pending block's last: render the next block
     /// first. At unit rate and a whole-frame position only that frame is read; otherwise every
     /// tap of the reader must be rendered.
     pub(super) fn needs(self, frames: usize, step: u64) -> bool {
+        if let Some(i) = self.whole(step) {
+            return i + 1 > frames;
+        }
         let (x, q) = self.position(step);
         band_limited::span(x, q).end > frames as i64
+    }
+
+    /// Frames of the pending block's tail (`frames` long) that a read can still reach once it is
+    /// removed, when later reads run at a rate of at most `q_max` (B1 of the #601 review). Proof: the
+    /// current read needs nothing before `s`, its span's first frame (`floor(x)` and the direct frame
+    /// at unit rate); positions only grow, so every later position `x' >= x >= s`, and a read at
+    /// `x'` with `q' <= q_max` reaches back at most `halo(q_max)` frames. So nothing before
+    /// `s - halo(q_max)` is read again: the tail is `frames - s + halo(q_max)` frames, at most
+    /// `halo(q_now) + 1 + halo(q_max)`. At unit rate and a whole position `s = x >= frames` (that is
+    /// when the block is removed), so the tail is `halo(q_max)` alone: 65 frames at equal rates with
+    /// the speed clamped to 4x.
+    pub(super) fn reachable_tail(self, frames: usize, step: u64, q_max: f64) -> usize {
+        let start = match self.whole(step) {
+            Some(i) => i as i64,
+            None => {
+                let (x, q) = self.position(step);
+                band_limited::span(x, q).start
+            }
+        };
+        let behind = (frames as i64 - start).max(0) as usize;
+        (behind + band_limited::halo(q_max)).min(HISTORY)
     }
 
     /// Move the origin to the next block's frame 0, `frames` after the pending block's. Only after
@@ -132,43 +167,70 @@ pub(super) const HOLD_CHANNELS: usize = transit_mix::MAX_CHANNELS + transit_mix:
 /// frame before the pending block's end, and its taps reach one more reach back.
 pub(super) const HISTORY: usize = 2 * (16 * transit_resample::MAX_RATE as usize + 1);
 
-/// The frames before the pending block that the converter's taps still reach (#525, #601): the
-/// last [`HISTORY`] rendered frames of each channel, in a ring. Fixed storage, allocated with the
-/// player and written only on the audio thread.
+/// The frames before the pending block that the converter's taps still reach (#525, #601): a ring
+/// of up to [`HISTORY`] frames of each channel, of which each block copies only the tail a read can
+/// still reach ([`Phase::reachable_tail`]). Fixed storage, allocated with the player and written
+/// only on the audio thread; never reallocated.
 pub(super) struct History {
     samples: Box<[f32]>,
     /// The ring index the next kept frame goes to.
     head: usize,
     /// Channels written since the last reset: the rest hold zeros.
     width: usize,
-    /// Output frames whose taps reached outside the kept and the pending frames (they read zeros
-    /// there). Never expected: the converter renders before a read needs it and keeps enough.
+    /// Contiguous stream frames the ring holds behind the pending block (a block copies its
+    /// reachable tail only, so frames before that tail are not held).
+    valid: usize,
+    /// Stream frames since the stream (re)started (a start, a locate, a layout change), capped:
+    /// frames before them are silence by design, not a miss.
+    since: usize,
+    /// Output frames whose taps reached frames of the stream the ring did not keep, or past the
+    /// pending block (they read zeros there). Never expected: the converter renders before a read
+    /// needs it and keeps what a read can reach.
     misses: u64,
+    /// Samples written into the ring, and output frames read through the reader (the tests count
+    /// the equal-rate cost).
+    #[cfg(test)]
+    written: u64,
+    #[cfg(test)]
+    reads: u64,
     table: &'static SincTable,
 }
 
 impl History {
     /// Allocates; on the control thread, with the player (the reader's shared table too).
     pub(super) fn new() -> Self {
-        Self { samples: vec![0.0; HOLD_CHANNELS * HISTORY].into_boxed_slice(), head: 0, width: 0, misses: 0, table: band_limited::table() }
+        Self {
+            samples: vec![0.0; HOLD_CHANNELS * HISTORY].into_boxed_slice(),
+            head: 0,
+            width: 0,
+            valid: 0,
+            since: 0,
+            misses: 0,
+            #[cfg(test)]
+            written: 0,
+            #[cfg(test)]
+            reads: 0,
+            table: band_limited::table(),
+        }
     }
 
-    /// Forget the kept frames: the stream restarts (a start, a locate, a stop, the transport's end).
+    /// Forget the kept frames: the stream restarts (a start, a locate, a stop, the transport's end,
+    /// a change of the plan's channel layout). Nothing is zeroed: frames before the restart read
+    /// silence because the ring holds none of them.
     pub(super) fn reset(&mut self) {
-        self.samples[..self.width * HISTORY].fill(0.0);
-        self.head = 0;
+        (self.head, self.valid, self.since) = (0, 0, 0);
     }
 
-    /// Keep the `frames` rendered frames of `block` before the next block overwrites them (the last
-    /// [`HISTORY`] of them). Channels the block does not have are silence, never frames kept from an
-    /// older layout.
-    pub(super) fn keep(&mut self, block: &[Vec<f32>], frames: usize) {
+    /// Keep the last `tail` of the `frames` rendered frames of `block` (all of them when the block is
+    /// shorter) before the next block overwrites them. Channels the block does not have are silence,
+    /// never frames kept from an older layout.
+    pub(super) fn keep(&mut self, block: &[Vec<f32>], frames: usize, tail: usize) {
         let width = block.len().min(HOLD_CHANNELS);
         if width < self.width {
             self.samples[width * HISTORY..self.width * HISTORY].fill(0.0);
         }
         self.width = width;
-        let skip = frames.saturating_sub(HISTORY);
+        let skip = frames.saturating_sub(tail.min(HISTORY));
         let count = frames - skip;
         for (channel, data) in block.iter().take(width).enumerate() {
             let ring = &mut self.samples[channel * HISTORY..(channel + 1) * HISTORY];
@@ -178,7 +240,13 @@ impl History {
                 at = if at + 1 == HISTORY { 0 } else { at + 1 };
             }
         }
+        #[cfg(test)]
+        {
+            self.written += (count * width) as u64;
+        }
         self.head = (self.head + count) % HISTORY;
+        self.valid = if skip > 0 { count } else { (self.valid + count).min(HISTORY) };
+        self.since = self.since.saturating_add(frames).min(2 * HISTORY);
     }
 
     /// The converter's output frame at `x` render frames from the pending block's frame 0 and rate
@@ -186,8 +254,13 @@ impl History {
     /// past the block's read 0). A whole-frame position at unit rate is that frame exactly
     /// (bit-exact pass-through at equal rates); otherwise the reader, decision 8.3.
     pub(super) fn frame(&mut self, block: &[Vec<f32>], pending: usize, x: f64, q: f64, out: &mut [f32]) {
+        #[cfg(test)]
+        {
+            self.reads += 1;
+        }
         let span = band_limited::span(x, q);
-        if span.start < -(HISTORY as i64) || span.end > pending as i64 {
+        let back = (-span.start).max(0) as usize;
+        if (back > self.valid && back <= self.since && self.valid < self.since) || span.end > pending as i64 {
             self.misses += 1;
         }
         let stream = Stream { history: self, block, pending, channels: block.len().min(out.len()) };
@@ -197,6 +270,16 @@ impl History {
     #[cfg(test)]
     pub(super) fn misses(&self) -> u64 {
         self.misses
+    }
+
+    #[cfg(test)]
+    pub(super) fn written(&self) -> u64 {
+        self.written
+    }
+
+    #[cfg(test)]
+    pub(super) fn reads(&self) -> u64 {
+        self.reads
     }
 }
 
@@ -221,7 +304,7 @@ impl Frames for Stream<'_> {
             return if k < self.pending { self.block.get(channel).and_then(|c| c.get(k)).copied().unwrap_or(0.0) } else { 0.0 };
         }
         let back = frame.unsigned_abs() as usize;
-        if back > HISTORY || channel >= self.history.width {
+        if back > self.history.valid || channel >= self.history.width {
             return 0.0;
         }
         let at = if self.history.head >= back { self.history.head - back } else { self.history.head + HISTORY - back };
@@ -313,7 +396,7 @@ mod tests {
         let mut history = History::new();
         let block = vec![(0..300).map(|n| n as f32).collect::<Vec<_>>(), (0..300).map(|n| -(n as f32)).collect()];
         for _ in 0..5 {
-            history.keep(&block, 300);
+            history.keep(&block, 300, HISTORY);
         }
         let stream = Stream { history: &history, block: &block, pending: 0, channels: 2 };
         // Five blocks of 300: the last HISTORY frames, the newest at -1.
@@ -325,10 +408,10 @@ mod tests {
         assert_eq!(stream.sample(0, -(HISTORY as i64) - 1), 0.0);
         // A narrower block leaves silence on the channels it lacks, never an older layout's frames,
         // also once a wider block comes back.
-        history.keep(&block[..1], 1);
+        history.keep(&block[..1], 1, HISTORY);
         let stream = Stream { history: &history, block: &block, pending: 0, channels: 2 };
         assert_eq!(stream.sample(1, -2), 0.0);
-        history.keep(&block, 1);
+        history.keep(&block, 1, HISTORY);
         let stream = Stream { history: &history, block: &block, pending: 0, channels: 2 };
         assert_eq!(stream.sample(1, -1), 0.0, "the new block's frame 0");
         for back in 2..=HISTORY as i64 {

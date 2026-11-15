@@ -12,6 +12,9 @@ use transit_mix::{PlanLimits, RenderTarget};
 use transit_time::{MAX_POSITION, Range, Samples};
 
 mod phase;
+/// The transport's speed range, in thousandths (0.1x to 4x).
+const MIN_SPEED: u32 = 100;
+const MAX_SPEED: u32 = 4000;
 use phase::{HOLD_CHANNELS, History, Phase};
 mod external;
 #[cfg(test)]
@@ -219,7 +222,7 @@ impl Transport {
     /// block boundary, so a command always runs at the speed requested when it was applied: the
     /// host stores a speed before it sends the command that relies on it (#522).
     fn apply_speed(&mut self, requested: u32, live: &mut plan_bridge::Processing<'_>) -> Result<(), timeline_map::MapError> {
-        let speed = requested.clamp(100, 4000);
+        let speed = requested.clamp(MIN_SPEED, MAX_SPEED);
         if speed == self.speed {
             return Ok(());
         }
@@ -555,6 +558,9 @@ pub(super) struct Audio {
     history: Box<History>,
     /// One output frame of the converter, every channel of the block.
     frame: Box<[f32; HOLD_CHANNELS]>,
+    /// The largest rate a read can run at on this device: the session over the device rate at the
+    /// fastest speed (4x). It bounds the history tail a block keeps.
+    q_max: f64,
     sample_rate: u32,
     device_rate: u32,
     faulted: bool,
@@ -661,6 +667,7 @@ impl Audio {
                 read,
                 history: Box::new(History::new()),
                 frame: Box::new([0.0; HOLD_CHANNELS]),
+                q_max: f64::from(target.sample_rate) * f64::from(MAX_SPEED) / (f64::from(device_rate.max(1)) * 1000.0),
                 sample_rate: target.sample_rate,
                 device_rate,
                 faulted: false,
@@ -1153,7 +1160,8 @@ impl Audio {
             while self.read.needs(self.pending, step) {
                 self.consumed(consumed)?;
                 consumed = 0;
-                self.history.keep(self.plans.output(), self.pending);
+                let tail = self.read.reachable_tail(self.pending, step, self.q_max);
+                self.history.keep(self.plans.output(), self.pending, tail);
                 self.read.remove(self.pending)?;
                 self.pending = 0;
                 self.plans.service(plans, true);
@@ -1173,11 +1181,18 @@ impl Audio {
             }
             let output = self.plans.output();
             let index = self.read.index();
-            let (x, q) = self.read.position(step);
+            // Equal rates at speed 1 and a whole position: the frame itself, as before #601.
+            let whole = self.read.whole(step).filter(|i| *i < self.pending);
             let width = output.len().min(HOLD_CHANNELS);
-            self.history.frame(output, self.pending, x, q, &mut self.frame[..width]);
+            if whole.is_none() {
+                let (x, q) = self.read.position(step);
+                self.history.frame(output, self.pending, x, q, &mut self.frame[..width]);
+            }
             let converted = &self.frame[..width];
-            let sample = |channel: usize| converted.get(channel).copied().unwrap_or(0.0);
+            let sample = |channel: usize| match whole {
+                Some(i) => output.get(channel).and_then(|c| c.get(i)).copied().unwrap_or(0.0),
+                None => converted.get(channel).copied().unwrap_or(0.0),
+            };
             {
                 // The block holds Main's channels, then the output sinks' (ADR 0015). With sinks,
                 // everything is summed per device channel first and clamped once after.
