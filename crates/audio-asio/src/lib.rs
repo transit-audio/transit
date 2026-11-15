@@ -50,6 +50,8 @@ mod session;
 mod stats;
 #[cfg(test)]
 mod stream_tests;
+#[cfg(test)]
+mod teardown_tests;
 mod watchdog;
 
 pub use driver::{

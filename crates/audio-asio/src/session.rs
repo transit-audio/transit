@@ -327,6 +327,9 @@ impl Session {
     fn rebuild(&mut self, name: &str, driver: &mut Driver) -> Result<(), ab::OpenError> {
         match std::mem::replace(&mut self.buffers, BufferState::Missing) {
             BufferState::Prepared(buffers) => {
+                // The table goes first: a failed `createBuffers` below must not leave addresses
+                // `disposeBuffers` made invalid for a buffer switch to write through.
+                self.forget_planes();
                 if let Err(code) = driver.dispose_buffers(buffers) {
                     log::warn!("{}", asio_error(name, "disposeBuffers", code));
                 }
@@ -364,6 +367,15 @@ impl Session {
         self.buffers = BufferState::Prepared(buffers);
         self.refresh_latencies(name, driver);
         Ok(())
+    }
+
+    /// Takes the buffer addresses out of the callback state (a buffer switch then finds no buffer
+    /// to touch), before `disposeBuffers` makes them invalid: the host never holds a buffer address
+    /// across `disposeBuffers` (#524).
+    fn forget_planes(&self) {
+        let state = self.installed.state();
+        state.set_output_ready(false);
+        state.with(|_, planes| *planes = PlaneTable::default());
     }
 
     /// `getLatencies` into the atomics the stamps read.
@@ -547,10 +559,11 @@ impl Session {
             side.state.store(DETACHED, Ordering::Release);
         }
         self.stop_if_idle(name, driver);
-        if let BufferState::Prepared(buffers) = std::mem::replace(&mut self.buffers, BufferState::Missing)
-            && let Err(code) = driver.dispose_buffers(buffers)
-        {
-            log::warn!("{}", asio_error(name, "disposeBuffers", code));
+        if let BufferState::Prepared(buffers) = std::mem::replace(&mut self.buffers, BufferState::Missing) {
+            self.forget_planes();
+            if let Err(code) = driver.dispose_buffers(buffers) {
+                log::warn!("{}", asio_error(name, "disposeBuffers", code));
+            }
         }
         // `self.installed` drops here: uninstalled, drained, freed.
     }

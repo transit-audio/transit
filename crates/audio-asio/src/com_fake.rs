@@ -54,7 +54,19 @@ pub(crate) struct FakeSpec {
     pub create_error: Option<i32>,
     pub start_error: Option<i32>,
     pub output_ready: bool,
+    /// The object's Nth `createBuffers` call (counted from 1) and every later one fail with
+    /// `ASE_NoMemory`.
+    pub create_fails_from: Option<usize>,
+    /// `disposeBuffers` fills every buffer with [`POISON`] and keeps it allocated
+    /// ([`Observed::disposed`]) instead of freeing it, so a write through a stale address shows.
+    pub poison_on_dispose: bool,
+    /// `disposeBuffers` (after the poison) delivers one buffer switch per half through the callback
+    /// table `createBuffers` was given: a driver whose callback thread races its own dispose.
+    pub switch_in_dispose: bool,
 }
+
+/// The byte a poisoning `disposeBuffers` fills the buffers with.
+pub(crate) const POISON: u8 = 0xDD;
 
 impl FakeSpec {
     pub(crate) fn new(name: &str, inputs: i32, outputs: i32, sample_type: i32) -> Self {
@@ -78,6 +90,9 @@ impl FakeSpec {
             create_error: None,
             start_error: None,
             output_ready: true,
+            create_fails_from: None,
+            poison_on_dispose: false,
+            switch_in_dispose: false,
         }
     }
 }
@@ -114,9 +129,41 @@ pub(crate) struct Observed {
     pub sent: Arc<AtomicBool>,
     /// Frames `getLatencies` adds to both of the spec's figures (a driver whose latency moved).
     pub extra_latency: AtomicU64,
+    /// The buffers a poisoning `disposeBuffers` kept (freed when this goes).
+    pub disposed: Mutex<Vec<FakeBuffer>>,
+}
+
+impl Drop for Observed {
+    fn drop(&mut self) {
+        for b in self.disposed.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).drain(..) {
+            free(b);
+        }
+    }
+}
+
+/// Frees both buffers of `b`.
+fn free(b: FakeBuffer) {
+    for address in b.addresses {
+        // SAFETY: each came from `Box::into_raw` of a `bytes`-long boxed slice in `create_buffers`
+        // and is freed once: by `dispose_buffers`, or for a poisoned one when `Observed` goes.
+        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(address as *mut u8, b.bytes)) });
+    }
 }
 
 impl Observed {
+    /// How many channels a poisoning `disposeBuffers` kept, and whether every byte of them still
+    /// holds [`POISON`] (nothing wrote through a disposed buffer's address).
+    pub(crate) fn poison(&self) -> (usize, bool) {
+        let disposed = self.disposed.lock().unwrap();
+        let intact = disposed.iter().all(|b| {
+            b.addresses.iter().all(|a| {
+                // SAFETY: a kept buffer of `b.bytes` bytes, freed only when `Observed` goes.
+                unsafe { std::slice::from_raw_parts(*a as *const u8, b.bytes) }.iter().all(|x| *x == POISON)
+            })
+        });
+        (disposed.len(), intact)
+    }
+
     fn call(&self, name: &'static str) {
         self.calls.lock().unwrap().push((name, std::thread::current().id()));
     }
@@ -159,6 +206,10 @@ struct FakeObject {
     rate: Mutex<f64>,
     spec: FakeSpec,
     observed: Arc<Observed>,
+    /// `createBuffers` calls so far.
+    creates: AtomicUsize,
+    /// The `ASIOCallbacks *` the last `createBuffers` was given (0 before).
+    callbacks: AtomicUsize,
 }
 
 /// The fake object behind `this`, recording the calling thread (a control call).
@@ -356,7 +407,12 @@ unsafe extern "C" fn create_buffers(this: *mut IAsio, infos: *mut abi::AsioBuffe
     if let Some(code) = obj.spec.create_error {
         return code;
     }
+    let nth = obj.creates.fetch_add(1, Ordering::SeqCst) + 1;
+    if obj.spec.create_fails_from.is_some_and(|from| nth >= from) {
+        return abi::ASE_NO_MEMORY;
+    }
     assert!(!cb.is_null(), "createBuffers gets the callback table");
+    obj.callbacks.store(cb as usize, Ordering::SeqCst);
     assert!(obj.observed.buffers.lock().unwrap().is_empty(), "createBuffers twice without disposeBuffers");
     // SAFETY: the SDK contract: `infos` holds `count` entries the driver fills.
     let infos = unsafe { std::slice::from_raw_parts_mut(infos, usize::try_from(count).unwrap()) };
@@ -379,11 +435,29 @@ unsafe extern "C" fn dispose_buffers(this: *mut IAsio) -> i32 {
     // SAFETY: called through a live object's vtable.
     let obj = unsafe { object(this) };
     obj.observed.call("disposeBuffers");
-    for b in obj.observed.buffers.lock().unwrap().drain(..) {
-        for address in b.addresses {
-            // SAFETY: each came from `Box::into_raw` of a `bytes`-long boxed slice in
-            // `create_buffers` and is freed once, here.
-            drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(address as *mut u8, b.bytes)) });
+    let created: Vec<FakeBuffer> = obj.observed.buffers.lock().unwrap().drain(..).collect();
+    for b in created {
+        if obj.spec.poison_on_dispose {
+            for address in b.addresses {
+                // SAFETY: a live buffer of `b.bytes` bytes from `create_buffers`; the host gave up
+                // its addresses by calling `disposeBuffers` (if it did not, the poison shows it).
+                unsafe { std::ptr::write_bytes(address as *mut u8, POISON, b.bytes) };
+            }
+            obj.observed.disposed.lock().unwrap().push(b);
+        } else {
+            free(b);
+        }
+    }
+    let table = obj.callbacks.load(Ordering::SeqCst) as *const abi::AsioCallbacks;
+    if obj.spec.switch_in_dispose && !table.is_null() {
+        // SAFETY: the `ASIOCallbacks *` `createBuffers` was given: the host's static table, valid
+        // for the life of the process and never written after initialization.
+        let switch = unsafe { (*table).bufferSwitch };
+        for half in 0..2 {
+            if let Some(switch) = switch {
+                // SAFETY: plain values, as a driver calls it.
+                unsafe { switch(half, abi::ASIO_TRUE) };
+            }
         }
     }
     abi::ASE_OK
@@ -448,7 +522,15 @@ pub(crate) fn create(spec: FakeSpec, observed: &Arc<Observed>) -> Driver {
     observed.max_live.fetch_max(live, Ordering::AcqRel);
     observed.created.fetch_add(1, Ordering::AcqRel);
     let rate = Mutex::new(spec.current_rate);
-    let obj = Box::new(FakeObject { vtbl: &VTBL, refs: AtomicU32::new(1), rate, spec, observed: Arc::clone(observed) });
+    let obj = Box::new(FakeObject {
+        vtbl: &VTBL,
+        refs: AtomicU32::new(1),
+        rate,
+        spec,
+        observed: Arc::clone(observed),
+        creates: AtomicUsize::new(0),
+        callbacks: AtomicUsize::new(0),
+    });
     // SAFETY: a fresh `FakeObject` whose first field is the vtable pointer, with one reference
     // that the `Driver` owns; released (and freed) through the vtable's `Release`.
     unsafe { Driver::from_raw(Box::into_raw(obj).cast()) }.expect("non-null")
