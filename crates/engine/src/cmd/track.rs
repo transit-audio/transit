@@ -724,7 +724,7 @@ fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut out = Vec::new();
     let mut left_out = false;
     for t in tracks {
-        let zone = silenced && e.session().track(t).is_some_and(|tr| tr.clips().iter().any(|c| c.start < 0));
+        let zone = silenced && e.session().track(t).is_some_and(super::clip_bounce::has_unmuted_zone);
         if let Some(id) = crate::io::bounce_track_range(e, t, destination, source, span)? {
             out.push(id);
             left_out |= zone;
