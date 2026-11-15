@@ -3,8 +3,11 @@
 //! **Why process-wide.** The ASIO callbacks are plain C functions without a user-data pointer, and
 //! ASIO allows one loaded driver per process (the host's `Slot`), so one callback table
 //! ([`table`]) and one installed [`CallbackState`] (behind the atomic pointer `CURRENT`) serve it.
-//! A state is installed before `createBuffers` and uninstalled, and drained, before
-//! `disposeBuffers` (#524); a second install while one is in place fails.
+//! A state is installed before `createBuffers`; a second install while one is in place fails.
+//! The host never holds a buffer address across `disposeBuffers` (#524): a rebuild disposes with
+//! the state installed but its addresses cleared and every claim on them waited out
+//! ([`CallbackState::forget_planes`]); the end of a session uninstalls and drains the state first
+//! ([`Installed::uninstall`]), so no callback is inside it, and only then disposes.
 //!
 //! **Which thread.** `bufferSwitch`/`bufferSwitchTimeInfo` run on a thread the driver owns (not the
 //! STA host thread), `asioMessage` and `sampleRateDidChange` on whatever thread the driver uses,
@@ -430,9 +433,11 @@ impl CallbackState {
             let bytes = self.silence_bytes.load(Ordering::SeqCst);
             if address != 0 && bytes != 0 {
                 // SAFETY: `address` is an output buffer `createBuffers` returned, `bytes` long, and
-                // published by `install_planes`; `forget_planes` clears it and then waits until no
-                // claim is held before `disposeBuffers` (the SeqCst argument there), and this
-                // switch holds this half's claim, so the buffer is alive. Every write to this half
+                // published by `install_planes`. It is alive: before a rebuild's `disposeBuffers`,
+                // `forget_planes` clears it and then waits until no claim is held (the SeqCst
+                // argument there), and this switch holds this half's claim; before the end of a
+                // session's `disposeBuffers`, `Installed::uninstall` waits until no callback is
+                // inside the state (this one is, counted in its `in_flight`). Every write to this half
                 // holds that claim, so no other write to it runs now; the driver works on the
                 // other half during this half's switch. No Rust reference to it is made.
                 unsafe { std::ptr::write_bytes(address as *mut u8, 0, bytes) };
