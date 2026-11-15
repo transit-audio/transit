@@ -442,6 +442,18 @@ impl Clip {
     }
 }
 
+/// The session load note for a clip on track `track` whose stretch [`Clip::sanitize_noting`] clamped
+/// (`note` is its note).
+pub fn stretch_load_note(track: &str, note: &str) -> String {
+    format!("track \"{track}\", {note}")
+}
+
+/// Whether `note`, a session load note, says a clip on track `track` had its stretch clamped
+/// ([`stretch_load_note`]): what an import of that track passes on.
+pub fn is_stretch_load_note(note: &str, track: &str) -> bool {
+    note.strip_prefix(&stretch_load_note(track, "clip \"")).is_some_and(|rest| rest.contains("\": its stretch "))
+}
+
 pub(crate) fn bound(at: &mut Samples) {
     *at = (*at).clamp(-MAX_POSITION, MAX_POSITION);
 }

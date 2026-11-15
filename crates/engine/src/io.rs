@@ -815,6 +815,9 @@ pub use recording::{
 mod one_sample_tests;
 
 #[cfg(test)]
+mod stretch_note_tests;
+
+#[cfg(test)]
 mod rate_tests {
     use super::*;
 

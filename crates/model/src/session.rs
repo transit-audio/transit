@@ -811,7 +811,7 @@ impl Session {
                 p.clips.retain(|c| c.length > 0);
                 for c in &mut p.clips {
                     if let Some(note) = c.sanitize_noting() {
-                        stretch_notes.push(format!("track \"{}\", {note}", t.name));
+                        stretch_notes.push(crate::clip::stretch_load_note(&t.name, &note));
                     }
                 }
                 p.sort();
