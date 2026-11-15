@@ -789,7 +789,7 @@ fn a_position_that_goes_back_invalidates_the_next_stamp_and_reanchors() {
 /// Holds the host thread inside a request until `release` gets a message (or is dropped), the
 /// way a stuck host is held in a driver call: it cannot tend (sweep) behind the test's back. Returns
 /// once the host is inside the request.
-fn hold_host<'scope>(scope: &'scope std::thread::Scope<'scope, '_>, host: &'scope crate::host::Host) -> std::sync::mpsc::Sender<()> {
+pub(crate) fn hold_host<'scope>(scope: &'scope std::thread::Scope<'scope, '_>, host: &'scope crate::host::Host) -> std::sync::mpsc::Sender<()> {
     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
     scope.spawn(move || {

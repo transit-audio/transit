@@ -456,13 +456,15 @@ impl ab::Stream for AsioStream {
     /// Stops this direction for good (a stopped stream is reopened, not restarted); the driver
     /// stops when no stream of it runs.
     ///
-    /// From inside a driver callback (this stream's own, say) or on the host thread, the stop
-    /// cannot wait for the host thread, and the driver's `stop` must not be called from inside its
-    /// own buffer switch: the direction stops at once (no later buffer switch calls it) and the
-    /// host thread finishes the stop when the callback has returned. It never blocks there.
+    /// The direction stops at once, before anything else (#524): no later buffer switch calls it,
+    /// even when the host thread is blocked (in a driver's control panel, say) and the request to
+    /// it fails; the host thread finishes the stop (the driver's `stop` when this was the last
+    /// stream) as soon as it is free. From inside a driver callback (this stream's own, say) or on
+    /// the host thread, the stop cannot wait for the host thread, and the driver's `stop` must not
+    /// be called from inside its own buffer switch, so it returns at once there and never blocks.
     fn stop(&self) -> Result<(), ab::OpenError> {
+        self.owner.0.request_stop();
         if callback::in_driver_callback() || self.host.on_host_thread() {
-            self.owner.0.request_stop();
             self.host.wake();
             return Ok(());
         }

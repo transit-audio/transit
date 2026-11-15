@@ -573,6 +573,8 @@ impl Session {
         if let Some(side) = self.side(direction) {
             let _ = side.state.compare_exchange(OPENED, STOPPED, Ordering::SeqCst, Ordering::SeqCst);
             let _ = side.state.compare_exchange(STARTED, STOPPED, Ordering::SeqCst, Ordering::SeqCst);
+            // The stream's own request, set before it asked for this stop, is served here.
+            side.take_stop_request();
         }
         self.quiesce(name, direction);
         self.stop_if_idle(name, driver);
