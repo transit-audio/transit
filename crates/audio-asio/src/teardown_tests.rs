@@ -197,6 +197,11 @@ fn a_callback_still_inside_at_the_close_leaks_the_buffers_and_the_driver_and_lat
         drop(stream);
         assert_eq!(buffer_calls(&other.observed), ["createBuffers", "disposeBuffers"], "the other session disposed its buffers");
         assert_eq!(other.observed.live.load(Ordering::Acquire), 0, "and released its driver");
+        // The end of the process while the callback is still stuck: the host thread ends without
+        // destroying the window the driver was given or leaving COM (which would unload the
+        // driver's DLL under the callback); the process exit cleans them up.
+        assert!(stuck.backend.host.shut_down(Duration::from_secs(10)), "the host thread ended");
+        assert_eq!(stuck.backend.host.exit_drops(), Some((0, 0)), "(windows destroyed, CoUninitialize calls) after a leak");
         // The stuck callback resumes: it writes into buffers and calls a driver that still exist.
         release.store(true, Ordering::SeqCst);
         driver.join().expect("the driver thread");
@@ -378,4 +383,19 @@ fn a_stop_while_the_host_thread_is_blocked_stops_the_direction_at_once_and_the_h
     }
     assert!(rig.observed.call_names().contains(&"stop"), "the host thread stopped the driver once it was free");
     drop(render);
+}
+
+/// The control of the leak's exit (#524): a host thread that leaked nothing destroys its window and
+/// leaves COM when it ends.
+#[test]
+fn a_host_thread_that_leaked_nothing_destroys_its_window_and_leaves_com_when_it_ends() {
+    let _guard = lock();
+    let rig = rig(spec());
+    let render = open_render(&rig, loud()).expect("render");
+    ab::Stream::start(&render).expect("start");
+    testing::switch_time_info(0, Some(0), None);
+    drop(render);
+    assert_eq!(rig.observed.live.load(Ordering::Acquire), 0, "the driver was released");
+    assert!(rig.backend.host.shut_down(Duration::from_secs(10)), "the host thread ended");
+    assert_eq!(rig.backend.host.exit_drops(), Some((1, 1)), "(windows destroyed, CoUninitialize calls) after a normal close");
 }

@@ -174,6 +174,9 @@ pub(crate) struct HostState {
     wake: Arc<Event>,
     /// The shortest stall limit of the sessions' watchdogs ([`crate::watchdog::STALL_FLOOR`]).
     watchdog_floor: Duration,
+    /// A driver was left loaded ([`HostState::leak`]): the thread's end then leaves its window and
+    /// its COM apartment to the process exit (#524).
+    leaked: bool,
 }
 
 impl HostState {
@@ -272,7 +275,7 @@ impl HostState {
 
     /// Releases the loaded driver: its session first (stop, callback state drained and freed,
     /// disposeBuffers), then the object. A session a callback did not leave leaks the driver
-    /// instead ([`leak`]).
+    /// instead ([`HostState::leak`]).
     fn release(&mut self) {
         if let Some(mut loaded) = self.loaded.take() {
             let drained = match loaded.session.take() {
@@ -282,7 +285,7 @@ impl HostState {
             if drained {
                 drop(loaded);
             } else {
-                leak(loaded);
+                self.leak(loaded);
             }
         }
     }
@@ -376,7 +379,7 @@ impl HostState {
             && !session.teardown(&loaded.entry.name, &mut loaded.driver)
         {
             if let Some(loaded) = self.loaded.take() {
-                leak(loaded);
+                self.leak(loaded);
             }
             return;
         }
@@ -414,23 +417,25 @@ impl HostState {
     pub(crate) fn buffer_size(&mut self, name: &str) -> Result<BufferSize, ab::OpenError> {
         self.with_driver(name, "getBufferSize", Driver::buffer_size)
     }
-}
 
-/// Leaves a driver loaded for the life of the process: a callback of it did not return when its
-/// session ended, so its buffers were not disposed and the object must stay valid for that callback
-/// (it may call `outputReady` when it resumes). Its slot stays taken, so no driver opens again in
-/// this process (#524).
-fn leak(loaded: Loaded) {
-    log::error!("{}", leaked_message(&loaded.entry.name));
-    let Loaded { driver, _slot: slot, .. } = loaded;
-    std::mem::forget(driver);
-    slot.leak();
+    /// Leaves a driver loaded for the life of the process: a callback of it did not return when
+    /// its session ended, so its buffers were not disposed and the object must stay valid for that
+    /// callback (it may call `outputReady` when it resumes). Its slot stays taken, so no driver
+    /// opens again in this process, and the thread's end leaves the window the driver was given
+    /// and the apartment its DLL was loaded in to the process exit (#524, [`run`]).
+    fn leak(&mut self, loaded: Loaded) {
+        log::error!("{}", leaked_message(&loaded.entry.name));
+        self.leaked = true;
+        let Loaded { driver, _slot: slot, .. } = loaded;
+        std::mem::forget(driver);
+        slot.leak();
+    }
 }
 
 /// What a load of any driver says after a driver was left loaded.
 fn leaked_message(name: &str) -> String {
     format!(
-        "ASIO driver \"{name}\" did not return from its audio callback when its streams closed, so it was left loaded; ASIO drivers cannot open again until transit restarts"
+        "an audio callback of ASIO driver \"{name}\" (often a plug-in) did not return when its streams closed, so the driver was left loaded; ASIO cannot open again until transit restarts"
     )
 }
 
@@ -454,6 +459,10 @@ struct Shared {
     /// Requests queued so far (tests wait on it to know a request is queued behind another).
     #[cfg(test)]
     sent: std::sync::atomic::AtomicUsize,
+    /// How many windows were destroyed and COM uninitializations made on the host thread before it
+    /// ended (`None` before it ended).
+    #[cfg(test)]
+    exit_drops: Mutex<Option<(u32, u32)>>,
 }
 
 /// The answer cell of one request: the caller waits on it, the host fills it unless the caller
@@ -510,6 +519,8 @@ impl Host {
             thread: AtomicU32::new(0),
             #[cfg(test)]
             sent: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            exit_drops: Mutex::new(None),
         });
         let (thread_wake, thread_shared) = (Arc::clone(&wake), Arc::clone(&shared));
         let thread = std::thread::Builder::new()
@@ -519,6 +530,11 @@ impl Host {
                     std::thread::sleep(delay);
                 }
                 run(loader, slot, watchdog_floor, &rx, thread_wake, &thread_shared, &started_tx);
+                #[cfg(test)]
+                {
+                    let drops = crate::com::exit_drops::DROPS.with(std::cell::Cell::get);
+                    *thread_shared.exit_drops.lock().unwrap_or_else(PoisonError::into_inner) = Some(drops);
+                }
                 let _ = exited_tx.send(());
             })
             .map_err(|e| ab::OpenError::Other(format!("could not start the ASIO host thread: {e}")))?;
@@ -640,6 +656,12 @@ impl Host {
         self.wake.set();
     }
 
+    /// (windows destroyed, `CoUninitialize` calls) on the host thread when it ended, `None` before.
+    #[cfg(test)]
+    pub(crate) fn exit_drops(&self) -> Option<(u32, u32)> {
+        *self.shared.exit_drops.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// How many requests were queued so far: one counted here is in the queue or served.
     #[cfg(test)]
     pub(crate) fn requests_sent(&self) -> usize {
@@ -708,7 +730,7 @@ fn run(
             return;
         }
     };
-    let mut state = HostState { loader, slot, sys_ref: window.sys_ref(), loaded: None, wake: Arc::clone(&wake), watchdog_floor };
+    let mut state = HostState { loader, slot, sys_ref: window.sys_ref(), loaded: None, wake: Arc::clone(&wake), watchdog_floor, leaked: false };
     let _ = started.send(Ok(()));
     'serve: loop {
         loop {
@@ -725,9 +747,19 @@ fn run(
         wake.pump_and_wait(tick);
     }
     state.release();
+    let leaked = state.leaked;
     drop(state);
-    drop(window);
-    drop(com);
+    if leaked {
+        // A leaked driver's DLL, its threads and possibly a callback still inside it stay alive:
+        // `CoUninitialize` would unload the DLLs this thread loaded under them, and the driver was
+        // given the window at `init`. Both are left to the process exit (#524).
+        log::warn!("ASIO: a driver was left loaded; the host thread ends without destroying its window or leaving COM");
+        std::mem::forget(window);
+        std::mem::forget(com);
+    } else {
+        drop(window);
+        drop(com);
+    }
 }
 
 fn serve(state: &mut HostState, job: Job, label: String, shared: &Shared) {

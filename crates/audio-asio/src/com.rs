@@ -430,9 +430,22 @@ impl StaGuard {
 
 impl Drop for StaGuard {
     fn drop(&mut self) {
+        #[cfg(test)]
+        exit_drops::DROPS.with(|d| d.set((d.get().0, d.get().1 + 1)));
         // SAFETY: balances the successful `CoInitializeEx` of `new` on the same thread; the host
-        // drops it after releasing every driver and destroying its window.
+        // drops it only after releasing every driver and destroying its window. When a driver was
+        // leaked (#524) the host forgets the guard instead, so this never unloads a DLL that a
+        // leaked driver's threads or callback still run in.
         unsafe { CoUninitialize() };
+    }
+}
+
+/// What the host thread's end dropped, counted on that thread (tests of the leak path, #524).
+#[cfg(test)]
+pub(crate) mod exit_drops {
+    thread_local! {
+        /// (windows destroyed, `CoUninitialize` calls) on this thread.
+        pub(crate) static DROPS: std::cell::Cell<(u32, u32)> = const { std::cell::Cell::new((0, 0)) };
     }
 }
 
@@ -472,8 +485,11 @@ impl MessageWindow {
 
 impl Drop for MessageWindow {
     fn drop(&mut self) {
+        #[cfg(test)]
+        exit_drops::DROPS.with(|d| d.set((d.get().0 + 1, d.get().1)));
         // SAFETY: the window was created on this thread by `new` and is destroyed once, here,
-        // after every driver given it as `sysRef` has been released.
+        // after every driver given it as `sysRef` has been released (the host forgets it instead
+        // when a driver was leaked, #524).
         let _ = unsafe { DestroyWindow(self.0) };
     }
 }
