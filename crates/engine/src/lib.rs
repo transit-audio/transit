@@ -547,6 +547,12 @@ impl Engine {
         self.undo.last().map(|h| &h.doc)
     }
 
+    /// The document `back` more Undos after the next one would bring back (`0`: the next one, as
+    /// [`Engine::undo_doc`]), for a jump through the history (issue #574).
+    pub fn undo_doc_back(&self, back: usize) -> Option<&Arc<Session>> {
+        self.undo.len().checked_sub(back + 1).and_then(|i| self.undo.get(i)).map(|h| &h.doc)
+    }
+
     /// The document Redo would bring back (see [`Engine::undo_doc`]).
     pub fn redo_doc(&self) -> Option<&Arc<Session>> {
         self.redo.last().map(|h| &h.doc)

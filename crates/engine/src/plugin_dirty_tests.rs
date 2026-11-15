@@ -35,3 +35,15 @@ fn undo_doc_and_redo_doc_are_what_undo_and_redo_bring_back() {
     assert!(Arc::ptr_eq(e.redo_doc().unwrap(), &after));
     assert!(e.undo_doc().is_none());
 }
+
+#[test]
+fn undo_doc_back_walks_the_history_from_the_next_undo() {
+    let mut e = crate::demo::demo_engine();
+    let first = e.session_arc();
+    e.execute("mix.mute", &json!({"track": "Kick"})).unwrap();
+    let second = e.session_arc();
+    e.execute("mix.solo", &json!({"track": "Kick"})).unwrap();
+    assert!(Arc::ptr_eq(e.undo_doc_back(0).unwrap(), &second));
+    assert!(Arc::ptr_eq(e.undo_doc_back(1).unwrap(), &first));
+    assert!(e.undo_doc_back(2).is_none());
+}
