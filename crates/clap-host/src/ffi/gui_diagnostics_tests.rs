@@ -135,10 +135,22 @@ fn settle_host(inst: &Instance) {
     assert!(g.window.as_ref().and_then(|w| w.surface_readout()).is_some(), "the host window lives on this thread");
 }
 
+/// The host window's frame and content ids, for failure messages next to the fixture's report.
+#[cfg(target_os = "linux")]
+fn host_ids(inst: &Instance) -> String {
+    let link = inst.link();
+    let g = link.lock();
+    g.window.as_ref().map_or_else(|| "no host window".to_owned(), |w| format!("host frame {:#x}, content {:#x}", w.raw().addr(), w.parent().addr()))
+}
+
 /// The only test in this process that maps a top-level window. X gives a closed client's
 /// resource ids to the next client, so the fixture's plug can get the id of a window another
-/// test just mapped and closed; a window manager still handling that window then moves the plug
-/// out of the content window (E74, #346: WSLg's Weston reparented it to its own window).
+/// test just closed; a window manager still handling that window then acts on the plug (E74,
+/// #346: WSLg's Weston reparented it to its own window). Only the host may move the plug: it
+/// maps, unmaps and sizes it to the content. The fixture records the plug's structure events,
+/// and `xembed-hosted` asserts before the state readouts that no other client acted on it, so
+/// interference fails with the plug's ids, parent, geometry and events printed (#349), not as
+/// a wrong map state or size.
 #[cfg(target_os = "linux")]
 #[test]
 fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
@@ -163,9 +175,15 @@ fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
     }
     // Mapped, not VIEWABLE: on the ambient display a window manager maps the top-level on its
     // own schedule (WSLg's XWM after an idle wake, #289), outside these bounded passes.
-    assert!(inst.load_state(b"CMD:xembed-mapped"), "the fixture never maps itself; the host must honor XEMBED_MAPPED");
-    assert!(inst.load_state(b"CMD:xembed-notified"), "the actual EMBEDDED_NOTIFY has the content ID and negotiated version 0");
-    assert!(inst.load_state(b"CMD:xembed-sized"), "the child's initial 123x45 size follows the resized content");
+    let ids = host_ids(&inst);
+    let hosted = "only the host moved the plug; the fixture printed what another client did (E74)";
+    assert!(inst.load_state(b"CMD:xembed-hosted"), "{hosted}; {ids}");
+    assert!(inst.load_state(b"CMD:xembed-mapped"), "the fixture never maps itself; the host must honor XEMBED_MAPPED; {ids}");
+    assert!(inst.load_state(b"CMD:xembed-notified"), "the actual EMBEDDED_NOTIFY has the content ID and negotiated version 0; {ids}");
+    assert!(
+        inst.load_state(b"CMD:xembed-sized"),
+        "the child's initial 123x45 size follows the resized content; the fixture printed the plug's state; {ids}"
+    );
     assert!(inst.load_state(b"CMD:xembed-unmap"));
     for _ in 0..64 {
         q.dispatch(256);
@@ -176,6 +194,7 @@ fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
             break;
         }
     }
-    assert!(inst.load_state(b"CMD:xembed-unmapped"));
+    assert!(inst.load_state(b"CMD:xembed-hosted"), "{hosted}; {ids}");
+    assert!(inst.load_state(b"CMD:xembed-unmapped"), "the host unmaps the plug that cleared XEMBED_MAPPED; {ids}");
     inst.link().close();
 }
