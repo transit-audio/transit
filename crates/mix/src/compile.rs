@@ -215,6 +215,8 @@ impl Drop for ReleaseOnUnwind<'_> {
 pub struct PlanCompiler {
     live_input: bool,
     low_latency_limit: Option<f64>,
+    /// Options > Monitor Armed Tracks: which tracks seed the low-latency path ([`low_latency_bypass`]).
+    monitor_armed: bool,
     bypass: BTreeSet<u64>,
     target: RenderTarget,
     limits: PlanLimits,
@@ -351,6 +353,11 @@ impl PlanCompiler {
         self.live_input = present;
     }
 
+    /// Whether a record-armed audio track is a live path for Low Latency (see [`MixEngine::monitor_armed`]).
+    pub fn set_monitor_armed(&mut self, on: bool) {
+        self.monitor_armed = on;
+    }
+
     /// Live-only preference. A fresh offline compiler keeps the empty override.
     pub fn set_low_latency(&mut self, limit_ms: Option<f64>) {
         self.low_latency_limit = limit_ms;
@@ -374,6 +381,7 @@ impl PlanCompiler {
         PlanCompiler {
             live_input: target.in_channels > 0,
             low_latency_limit: None,
+            monitor_armed: true,
             bypass: BTreeSet::new(),
             target: target.normalized(),
             limits,

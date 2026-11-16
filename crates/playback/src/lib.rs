@@ -92,6 +92,8 @@ struct Shared {
     /// A hosted plug-in's editor is open (set by the UI thread each frame): the engine keeps
     /// running while stopped, because such GUIs initialise and sync through `process` calls.
     editors_open: AtomicBool,
+    /// Options > Monitor Armed Tracks (per machine, on by default): the callback reads it each block.
+    monitor_armed: AtomicBool,
     metro: Metro,
     /// Mono, Dim, Ref, the monitor levels and the published loudness (#366).
     monitor: monitor_path::MonitorControls,

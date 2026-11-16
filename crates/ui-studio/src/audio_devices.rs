@@ -362,6 +362,7 @@ fn persist_audio(path: &std::path::Path, ui: &crate::UiState) -> Result<(), Stri
         "audio",
         vec![
             ("low_latency", serde_json::json!(ui.low_latency)),
+            ("monitor_armed", serde_json::json!(ui.monitor_armed)),
             ("low_latency_limit_ms", serde_json::json!(ui.low_latency_limit_ms)),
             ("audio", serde_json::to_value(&ui.audio).map_err(|e| e.to_string())?),
             ("io_maps", serde_json::to_value(&ui.io_maps).map_err(|e| e.to_string())?),

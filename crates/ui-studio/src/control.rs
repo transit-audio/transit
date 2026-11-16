@@ -104,7 +104,7 @@ fn handle(app: &mut SoundApp, ctx: &egui::Context, req: &ControlRequest) -> Opti
                 Err(e) => err(e),
             }
         }
-        "options.low_latency" | "options.middle_c" | "query.path_latency" => match app.run(&req.method, p.clone()) {
+        "options.low_latency" | "options.monitor_armed" | "options.middle_c" | "query.path_latency" => match app.run(&req.method, p.clone()) {
             Ok(v) => ok(v),
             Err(e) => err(e),
         },

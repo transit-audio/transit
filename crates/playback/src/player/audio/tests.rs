@@ -23,6 +23,7 @@ pub(super) fn fixture_session(device_rate: u32, session: Arc<Session>) -> (Contr
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
+        monitor_armed: AtomicBool::new(true),
         metro: crate::Metro::default(),
         monitor: Default::default(),
     });
@@ -185,6 +186,7 @@ fn owner_fixture() -> (crate::player::RuntimeControl<Command, ActionResult>, Aud
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
+        monitor_armed: AtomicBool::new(true),
         metro: crate::Metro::default(),
         monitor: Default::default(),
     });
@@ -325,6 +327,7 @@ fn invalid_audio_initialization_returns_every_endpoint_for_main_thread_retiremen
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             editors_open: AtomicBool::new(false),
+            monitor_armed: AtomicBool::new(true),
             metro: crate::Metro::default(),
             monitor: Default::default(),
         });
@@ -1040,6 +1043,7 @@ fn play_on_device(session: Session, channels: usize, io: Option<transit_model::I
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
+        monitor_armed: AtomicBool::new(true),
         metro: crate::Metro::default(),
         monitor: Default::default(),
     });
@@ -1102,6 +1106,7 @@ fn a_path_table_edit_on_an_open_stream_moves_main_through_the_published_plan() {
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(1000),
         editors_open: AtomicBool::new(false),
+        monitor_armed: AtomicBool::new(true),
         metro: crate::Metro::default(),
         monitor: Default::default(),
     });

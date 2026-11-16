@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn fake_factory(failing: bool) -> ab::fake::FakeBackend {
+pub(in crate::player::device) fn fake_factory(failing: bool) -> ab::fake::FakeBackend {
     let fake = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32));
     if failing {
         fake.fail_next_open(ab::OpenError::DeviceNotAvailable("scripted".into()));

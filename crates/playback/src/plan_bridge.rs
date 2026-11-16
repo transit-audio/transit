@@ -313,6 +313,8 @@ pub struct Control {
     /// External Instrument tracks whose MIDI port is missing (ADR 0020); read when a plan is prepared.
     no_port: Arc<[transit_model::TrackId]>,
     low_latency_limit: Option<f64>,
+    /// Options > Monitor Armed Tracks, as the next prepared plan's Low Latency selection reads it.
+    monitor_armed: bool,
     issued: PlanGeneration,
     meters: Arc<MeterBank>,
     pending_meters: Option<Arc<MeterBank>>,
@@ -378,6 +380,7 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
             io: Arc::new(IoMap::for_device("", "", target.in_channels, if target.out_channels == 0 { 2 } else { target.out_channels })),
             no_port: Arc::from(Vec::new()),
             low_latency_limit: None,
+            monitor_armed: true,
             issued: PlanGeneration::EMPTY,
             meters,
             pending_meters: None,
@@ -399,6 +402,15 @@ impl Control {
     /// change then travels like any other plan, with no device reopen.
     pub fn set_low_latency(&mut self, limit_ms: Option<f64>) {
         self.low_latency_limit = limit_ms;
+    }
+
+    /// Whether the next prepared plan counts a record-armed audio track as a live path for Low Latency.
+    pub fn set_monitor_armed(&mut self, on: bool) {
+        self.monitor_armed = on;
+    }
+
+    pub fn monitor_armed(&self) -> bool {
+        self.monitor_armed
     }
 
     pub fn low_latency_bypasses(&self) -> std::collections::BTreeSet<u64> {
@@ -476,6 +488,7 @@ impl Control {
         self.compiler.set_io(Arc::clone(&self.io));
         self.compiler.set_external_unavailable(Arc::clone(&self.no_port));
         self.compiler.set_low_latency(self.low_latency_limit);
+        self.compiler.set_monitor_armed(self.monitor_armed);
         let plan = self.compiler.compile_with_mode(request.session, self.compiler.active(), next, request.mode, make)?;
         self.issued = next;
         self.pending_meters = Some(Arc::clone(&buffers.meters));
@@ -650,6 +663,9 @@ impl Processing<'_> {
     pub fn set_processing(&mut self, monitor_only: bool, recording: bool, editors_open: bool) {
         self.audio.set_processing(monitor_only, recording, editors_open);
     }
+    pub fn set_monitor_armed(&mut self, on: bool) {
+        self.audio.set_monitor_armed(on);
+    }
     pub fn reset(&mut self) {
         self.audio.reset();
     }
@@ -789,6 +805,10 @@ impl Audio {
         self.mix.monitor_only = monitor_only;
         self.mix.recording = recording;
         self.mix.no_suspend = editors_open;
+    }
+    /// Options > Monitor Armed Tracks for the next block. A plain store: no lock, no allocation.
+    pub fn set_monitor_armed(&mut self, on: bool) {
+        self.mix.monitor_armed = on;
     }
     /// The click's trim and the record count-in, for the next block. Plain stores: no allocation.
     pub fn set_metronome(&mut self, gain: f32, count_in: Option<transit_mix::CountInClick>) {

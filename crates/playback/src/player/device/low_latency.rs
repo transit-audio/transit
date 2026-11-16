@@ -10,6 +10,19 @@ impl Player {
         Ok(())
     }
 
+    /// Options > Monitor Armed Tracks (a per-machine preference): the audio callback reads it from the
+    /// next block, and the next prepared plan's Low Latency selection follows it (request the
+    /// session again after a change).
+    pub fn set_monitor_armed(&self, on: bool) -> Result<(), PlayerError> {
+        self.shared.monitor_armed.store(on, std::sync::atomic::Ordering::Relaxed);
+        self.owner()?.set_monitor_armed(on);
+        Ok(())
+    }
+
+    pub fn requested_monitor_armed(&self) -> bool {
+        self.owner().map_or(true, |o| o.monitor_armed())
+    }
+
     pub fn requested_low_latency(&self) -> Option<f64> {
         self.owner().ok().and_then(|o| o.low_latency_limit())
     }

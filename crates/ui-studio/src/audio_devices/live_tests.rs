@@ -44,3 +44,21 @@ fn low_latency_preferences_survive_the_atomic_merge() {
     std::fs::remove_file(path).unwrap();
     std::fs::remove_dir(dir).unwrap();
 }
+
+#[test]
+fn monitor_armed_preference_survives_a_restart_and_a_missing_key_reads_on() {
+    let dir = transit_test_support::TestDir::new("monitor-armed");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("ui.json");
+    std::fs::write(&path, r#"{"unrelated":42}"#).unwrap();
+    assert!(serde_json::from_slice::<UiState>(&std::fs::read(&path).unwrap()).unwrap().monitor_armed, "an older file reads on");
+    let ui = UiState { monitor_armed: false, ..Default::default() };
+    persist_audio(&path, &ui).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(v["monitor_armed"], false);
+    assert_eq!(v["unrelated"], 42);
+    let loaded: UiState = serde_json::from_value(v).unwrap();
+    assert!(!loaded.monitor_armed);
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir(dir).unwrap();
+}

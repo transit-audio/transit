@@ -107,6 +107,8 @@ mod matrix;
 mod meter_rms;
 #[cfg(test)]
 mod meter_rms_tests;
+#[cfg(test)]
+mod monitor_armed_tests;
 pub use meter_rms::RMS_WINDOW_MS;
 use meter_rms::RmsWindow;
 mod midi;
@@ -881,6 +883,10 @@ pub struct MixEngine {
     pub monitor_only: bool,
     /// Recording: record-armed tracks hear their input (auto input).
     pub recording: bool,
+    /// Options > Monitor Armed Tracks (a per-machine preference, on by default): a record-armed audio
+    /// track hears its live input while stopped and while recording. Off: only Input Monitoring
+    /// does; recording is unchanged. Plain flag, set by the host each block.
+    pub monitor_armed: bool,
     /// Never leave a hosted effect unprocessed for silent input: every active insert runs every
     /// block. The host sets this while any plug-in editor is open, so an editor never freezes.
     pub no_suspend: bool,
@@ -947,6 +953,7 @@ impl MixEngine {
             input: Vec::new(),
             monitor_only: false,
             recording: false,
+            monitor_armed: true,
             no_suspend: false,
             metronome: false,
             metronome_gain: 1.0,

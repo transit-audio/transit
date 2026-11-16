@@ -18,17 +18,20 @@ fn open(t: &mut T, menu: &str) {
 }
 
 #[test]
-fn the_audio_menu_has_no_checks_so_every_row_and_the_note_start_12_inside_the_edge() {
+fn the_audio_menu_has_a_check_so_every_row_keeps_the_gutter_and_file_stays_plain() {
     let mut t = T::new();
     open(&mut t, "Audio");
     let devices = find(&t.app.arrange.bar_menu.clone(), "Audio Devices…");
     let p = Popup::of(&t, &devices);
-    p.insets_plain("Audio Devices…", None);
-    for row in ["Reconnect Device", "Scan Plug-ins", "No audio device (--no-audio)"] {
-        assert!(near(p.text_in(row), TEXT_IN_PLAIN), "{row} starts {} inside the edge, want 12", p.text_in(row));
+    p.insets("Audio Devices…", None);
+    for row in ["Reconnect Device", "Monitor Armed Tracks", "Scan Plug-ins", "No audio device (--no-audio)"] {
+        assert!(near(p.text_in(row), TEXT_IN), "{row} starts {} inside the edge, want 28", p.text_in(row));
     }
-    // Negative control in the same popup: the old gutter would put the text at 28.
-    assert!(!near(p.text_in("Audio Devices…"), TEXT_IN));
+    // Monitor Armed Tracks is on by default: its check sits in the gutter, an unchecked row's stays empty.
+    assert_eq!(p.checks_in(&find(&t.app.arrange.bar_menu.clone(), "Monitor Armed Tracks")), 1);
+    assert_eq!(p.checks_in(&devices), 0);
+    // Negative control in the same popup: the plain gutter would put the text at 12.
+    assert!(!near(p.text_in("Audio Devices…"), TEXT_IN_PLAIN));
     p.row(&devices);
     p.row(&find(&t.app.arrange.bar_menu.clone(), "Reconnect Device"));
     // The File menu (a submenu, Open Recent, and rows with no check) is plain too.
@@ -112,10 +115,7 @@ fn a_menu_bar_popup_opens_4_below_the_bar_and_does_not_jump_between_frames() {
                     frame.min.y,
                     bar_bottom + 4.0
                 );
-                assert!(
-                    near(text_rect.min.x - (frame.min.x + EDGE), if menu == "Audio" { TEXT_IN_PLAIN } else { TEXT_IN }),
-                    "{menu}: the gutter is right on the first frame"
-                );
+                assert!(near(text_rect.min.x - (frame.min.x + EDGE), TEXT_IN), "{menu}: the gutter is right on the first frame");
             }
             let item = bar_item(&t, menu);
             assert!(near(seen[0].0.min.x, item[0]), "{menu} at {zoom}: the popup's left edge {} is the item's {}", seen[0].0.min.x, item[0]);

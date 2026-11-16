@@ -1082,6 +1082,7 @@ impl Audio {
             frames = frames.min(usize::try_from(c.left).unwrap_or(usize::MAX));
         }
         self.plans.set_processing(!state.playing, state.recording, self.shared.editors_open.load(Ordering::Relaxed));
+        self.plans.set_monitor_armed(self.shared.monitor_armed.load(Ordering::Relaxed));
         let click = counting.map(|c| transit_mix::CountInClick { elapsed: c.plan.frames - c.left, beat: c.plan.beat, per_bar: c.plan.per_bar });
         // A real-time render keeps Main as an offline render would: without the metronome, which
         // is not delay-compensated and is never part of a bounce (ADR 0027 decision 1).

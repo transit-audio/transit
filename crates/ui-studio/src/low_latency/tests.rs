@@ -185,3 +185,30 @@ fn the_button_carries_the_zap_icon_and_a_click_toggles() {
     crate::tests::frames(&mut app, &ctx, 3, &mut now);
     assert!(app.ui.low_latency);
 }
+
+#[test]
+fn monitor_armed_tracks_is_a_per_machine_preference_the_session_never_sees() {
+    let mut engine = transit_engine::Engine::default();
+    engine.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Stereo, None);
+    let before = engine.session().to_json().unwrap();
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), Services::default());
+    assert!(app.ui.monitor_armed, "on by default");
+    let revision = app.engine.revision;
+    assert_eq!(app.run("options.monitor_armed", json!({})).unwrap(), json!({"value": false}), "omitted: toggles");
+    for _ in 0..4 {
+        step(&mut app);
+    }
+    assert!(!app.ui.monitor_armed);
+    assert!(!app.player.as_ref().unwrap().requested_monitor_armed(), "the player follows");
+    assert_eq!(app.engine.session().to_json().unwrap(), before, "the session is untouched");
+    assert_eq!(app.engine.revision, revision, "not a session edit");
+    assert_eq!(app.run("options.monitor_armed", json!({"value": false})).unwrap(), json!({"value": false}));
+    assert!(app.run("options.monitor_armed", json!({"value": "yes"})).is_err());
+    assert_eq!(app.run("options.monitor_armed", json!({"value": true})).unwrap(), json!({"value": true}));
+    for _ in 0..4 {
+        step(&mut app);
+    }
+    assert!(app.player.as_ref().unwrap().requested_monitor_armed());
+    assert_eq!(app.engine.session().to_json().unwrap(), before);
+}

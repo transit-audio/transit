@@ -27,6 +27,7 @@ macro_rules! ids {
 ids! {
     TransportLowLatency => "transport.low_latency",
     OptionsLowLatency => "options.low_latency",
+    OptionsMonitorArmed => "options.monitor_armed",
     OptionsMiddleC => "options.middle_c",
     AudioDevicesLowLatencyLimit => "audio_devices.low_latency_limit",
     DeviceLowLatencyBypass => "device.low_latency_bypass",

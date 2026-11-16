@@ -45,8 +45,9 @@ impl PlanCompiler {
             raw.insert((*track, INSTRUMENT_SLOT), if self.live_input && !spec.src.is_empty() { spec.latency as usize } else { 0 });
         }
         let selection_target = RenderTarget { in_channels: if self.live_input { self.target.in_channels } else { 0 }, ..self.target };
-        desc.bypass =
-            self.low_latency_limit.map_or_else(|| self.bypass.clone(), |limit| low_latency_bypass(s, &self.io, selection_target, &raw, limit));
+        desc.bypass = self
+            .low_latency_limit
+            .map_or_else(|| self.bypass.clone(), |limit| low_latency_bypass(s, &self.io, selection_target, &raw, limit, self.monitor_armed));
         let baseline = crate::low_latency::shared_latency(s, &self.io, selection_target, &raw, &BTreeSet::new());
         let effective = crate::low_latency::shared_latency(s, &self.io, selection_target, &raw, &desc.bypass);
         // Each track's planned instrument and insert latency, then the slowest path (F05).

@@ -471,6 +471,7 @@ impl MixEngine {
             input_offset: offset,
             monitor_only: self.monitor_only,
             recording: self.recording,
+            monitor_armed: self.monitor_armed,
             no_suspend: self.no_suspend,
             frame,
             io: Some(&*io),

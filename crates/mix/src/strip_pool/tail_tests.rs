@@ -39,8 +39,17 @@ fn claimed_aux_before_cell_entry_keeps_snapshot_across_render_boundary() {
     assert!(pool.cells.with(slot, |job| assert_eq!(job.busses.0.len(), 1)), "cell is free while Claimed");
     let plan = rig.eng.plan.as_deref_mut().unwrap();
     let empty = BusTable::default();
-    let live =
-        LiveInput { input: &[], input_offset: 0, monitor_only: false, recording: false, no_suspend: true, frame: N as u64, io: None, marker: None };
+    let live = LiveInput {
+        input: &[],
+        input_offset: 0,
+        monitor_only: false,
+        recording: false,
+        monitor_armed: true,
+        no_suspend: true,
+        frame: N as u64,
+        io: None,
+        marker: None,
+    };
     let b = PoolBlock {
         session: &plan.session,
         busses: &empty,
@@ -171,7 +180,17 @@ fn host<R>(rig: &mut PlanRig, f: impl FnOnce(&mut Host<'_, '_>, usize, usize) ->
             c.fill(0.75);
         }
     }
-    let live = LiveInput { input: &[], input_offset: 0, monitor_only: false, recording: false, no_suspend: true, frame: 0, io: None, marker: None };
+    let live = LiveInput {
+        input: &[],
+        input_offset: 0,
+        monitor_only: false,
+        recording: false,
+        monitor_armed: true,
+        no_suspend: true,
+        frame: 0,
+        io: None,
+        marker: None,
+    };
     let empty = BusTable::default();
     let deadline = Instant::now() + FAR;
     let b = PoolBlock {

@@ -1359,6 +1359,8 @@ mod external_measure_tests;
 #[cfg(test)]
 mod external_tests;
 #[cfg(test)]
+mod monitor_armed_tests;
+#[cfg(test)]
 mod realtime_render_tests;
 #[cfg(test)]
 mod tests;

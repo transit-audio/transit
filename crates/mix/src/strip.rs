@@ -35,6 +35,8 @@ pub(crate) struct LiveInput<'a> {
     pub(crate) input_offset: usize,
     pub(crate) monitor_only: bool,
     pub(crate) recording: bool,
+    /// [`MixEngine::monitor_armed`]: an armed audio track hears its input.
+    pub(crate) monitor_armed: bool,
     /// [`MixEngine::no_suspend`]: every insert runs every block.
     pub(crate) no_suspend: bool,
     /// The block's first render frame (plan mode: instrument events are due against it).
@@ -74,7 +76,10 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
         c.iter_mut().take(frames).for_each(|x| *x = 0.0);
     }
     match t.kind {
-        TrackKind::Audio if !live.input.is_empty() && (t.mixer.input_monitor || (t.mixer.record_arm && (live.monitor_only || live.recording))) => {
+        TrackKind::Audio
+            if !live.input.is_empty()
+                && (t.mixer.input_monitor || (live.monitor_armed && t.mixer.record_arm && (live.monitor_only || live.recording))) =>
+        {
             // Input monitoring: the track hears its hardware input instead of its clips.
             let n_in = live.input.len().max(1);
             let width = t.channels();

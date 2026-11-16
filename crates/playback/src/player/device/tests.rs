@@ -962,7 +962,7 @@ fn a_measurement_is_refused_without_a_live_input_or_on_an_unknown_channel_and_si
 
 /// A TASCAM Model 12 as the native ASIO backend presents it: one duplex driver with 12 inputs and
 /// 10 outputs, packed 24-bit, its channels named by `getChannelInfo`, reporting its latency.
-fn model12() -> ab::fake::FakeBackend {
+pub(super) fn model12() -> ab::fake::FakeBackend {
     let names = |prefix: &str, n: u16| (1..=n).map(|c| format!("{prefix} {c}")).collect();
     ab::fake::FakeBackend::new(ab::Format::new(48_000, 10, ab::SampleFormat::I24))
         .named("ASIO", "Model Mixer ASIO Driver")
@@ -971,7 +971,7 @@ fn model12() -> ab::fake::FakeBackend {
         .with_latency(std::time::Duration::from_micros(15_760))
 }
 
-fn asio_config() -> AudioConfig {
+pub(super) fn asio_config() -> AudioConfig {
     // Exclusive is asked for: ASIO has no such mode, so it must be ignored, not stepped down from.
     AudioConfig { backend: crate::Backend::NativeAsio, system: Some("ASIO".into()), share_device: false, ..Default::default() }
 }
@@ -1202,7 +1202,7 @@ fn a_driver_reset_request_stops_the_output_and_says_so_once() {
 }
 
 /// The data frames and block align of a WAV file.
-fn wav_data_frames(path: &std::path::Path) -> u64 {
+pub(super) fn wav_data_frames(path: &std::path::Path) -> u64 {
     let bytes = std::fs::read(path).unwrap();
     let (mut i, mut align) = (12, 0u16);
     while i + 8 <= bytes.len() {
@@ -1453,4 +1453,5 @@ mod jack_calibration;
 mod no_fallback;
 mod null;
 mod open;
-use open::{fake_factory, modes};
+pub(super) use open::fake_factory;
+use open::modes;

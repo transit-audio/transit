@@ -8,6 +8,9 @@ use super::*;
 #[serde(default)]
 pub struct UiState {
     pub low_latency: bool,
+    /// Audio > Monitor Armed Tracks: a record-armed audio track is heard (on by default). Per
+    /// machine, never in the session or its undo history.
+    pub monitor_armed: bool,
     #[serde(deserialize_with = "low_latency::deserialize_limit")]
     pub low_latency_limit_ms: f64,
     /// The audio device choice, kept with the preferences: per machine.
@@ -156,6 +159,7 @@ impl Default for UiState {
     fn default() -> Self {
         UiState {
             low_latency: false,
+            monitor_armed: true,
             low_latency_limit_ms: 0.0,
             audio: transit_playback::AudioConfig::default(),
             monitor: main_monitor::MonitorPrefs::default(),

@@ -333,6 +333,7 @@ fn play(session: u32, device: u32, speed: u32, callbacks: &[usize], frames: usiz
         playing: AtomicBool::new(false),
         speed: AtomicU32::new(speed),
         editors_open: AtomicBool::new(false),
+        monitor_armed: AtomicBool::new(true),
         metro: crate::Metro::default(),
         monitor: Default::default(),
     });

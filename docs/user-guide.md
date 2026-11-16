@@ -413,6 +413,10 @@ The mode and limit are saved per machine in ui.json, never in the session or und
 In **Audio > Audio Devices > I/O paths**, enable **Live (no shared padding)** on a named output other than Main to hear a cue as soon as its own sources align, without waiting for slower outputs.
 The checkbox is saved on this machine, leaves inserts active, and is ignored by offline renders.
 
+### Monitor Armed Tracks
+
+**Audio > Monitor Armed Tracks** is on by default: an armed audio track is heard while the transport is stopped and while you record, and plays what it already holds during playback. Turn it off when your interface has its own direct monitoring, so you do not hear the input twice (once from the interface, once through transit). With it off, arming an audio track does not monitor it, recording is unchanged (the take still holds the input), and a track's **Input Monitoring** button (I) still monitors it when you turn that on. Instrument and MIDI tracks are not affected: an armed instrument track still plays what you play into it. Low Latency follows the same rule: a track that is not monitored does not count as a live path. The choice is saved on this machine in ui.json, never in the session, and opening a session does not change it.
+
 ## Sampling what the computer plays
 
 To sample a browser video or another app, record it as you would a microphone. In

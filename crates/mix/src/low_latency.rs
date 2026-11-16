@@ -33,8 +33,15 @@ pub fn low_latency_frames(limit_ms: f64, rate: u32) -> usize {
 /// Longest prefixes/suffixes identify the union of over-budget paths without enumerating
 /// exponentially many paths through a branching bus graph. Each iteration removes one slot.
 #[must_use]
-pub fn low_latency_bypass(s: &Session, io: &transit_model::IoMap, target: RenderTarget, raw: &SlotLatencies, limit_ms: f64) -> BTreeSet<u64> {
-    let graph = Paths::new(s, io, target);
+pub fn low_latency_bypass(
+    s: &Session,
+    io: &transit_model::IoMap,
+    target: RenderTarget,
+    raw: &SlotLatencies,
+    limit_ms: f64,
+    monitor_armed: bool,
+) -> BTreeSet<u64> {
+    let graph = Paths::new(s, io, target, monitor_armed);
     let limit = low_latency_frames(limit_ms, target.sample_rate);
     let mut selected = BTreeSet::new();
     loop {
@@ -145,7 +152,7 @@ pub(crate) fn shared_latency(s: &Session, io: &transit_model::IoMap, target: Ren
             other = other.max(end);
         }
     }
-    let costs = Paths::new(s, io, target).costs(s, io, target, raw, selected, true);
+    let costs = Paths::new(s, io, target, true).costs(s, io, target, raw, selected, true);
     let master = costs.last().copied().unwrap_or(0);
     main.saturating_add(master).max(other)
 }
@@ -160,7 +167,9 @@ struct Paths {
 }
 
 impl Paths {
-    fn new(s: &Session, io: &transit_model::IoMap, target: RenderTarget) -> Self {
+    /// `monitor_armed` is Options > Monitor Armed Tracks: off, a record-armed audio track is not a
+    /// live path unless Input Monitoring is on (instrument and MIDI tracks stay seeds).
+    fn new(s: &Session, io: &transit_model::IoMap, target: RenderTarget, monitor_armed: bool) -> Self {
         let main = s.tracks.len() + s.busses.len();
         let mut route = RouteScratch::new();
         route.reserve(s);
@@ -205,7 +214,7 @@ impl Paths {
                 seeds[main] = true;
                 continue;
             }
-            seeds[i] = t.mixer.record_arm || t.mixer.input_monitor;
+            seeds[i] = t.mixer.input_monitor || (t.mixer.record_arm && (monitor_armed || t.kind != TrackKind::Audio));
             terminal[i] = sink::sink_routes(t, &sinks).iter().any(Option::is_some);
         }
         Self { main, edges, order, seeds, terminal, sinks }
@@ -299,12 +308,32 @@ mod tests {
         });
         let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 64, out_channels: 6, in_channels: 4 };
         let raw = SlotLatencies::from([((frozen, 1), 192), ((inactive, 0), 999), ((master, 0), 300)]);
-        let set = low_latency_bypass(&s, &io, target, &raw, 0.0);
+        let set = low_latency_bypass(&s, &io, target, &raw, 0.0, true);
         assert_eq!(set, BTreeSet::from([uid]));
         assert_eq!(shared_latency(&s, &io, target, &raw, &BTreeSet::new()), 800);
         assert_eq!(shared_latency(&s, &io, target, &raw, &set), 800);
         s.track_mut(frozen).unwrap().mixer.inserts[0] = None;
         assert_eq!(shared_latency(&s, &io, target, &raw, &BTreeSet::new()), 300);
         assert_eq!(shared_latency(&s, &io, target, &raw, &set), 100);
+    }
+
+    #[test]
+    fn an_armed_audio_track_seeds_the_path_only_while_armed_tracks_are_monitored() {
+        let mut s = Session::default();
+        let audio = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+        let monitored = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+        let synth = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+        s.track_mut(audio).unwrap().mixer.record_arm = true;
+        s.track_mut(monitored).unwrap().mixer.record_arm = true;
+        s.track_mut(monitored).unwrap().mixer.input_monitor = true;
+        s.track_mut(synth).unwrap().mixer.record_arm = true;
+        let io = transit_model::IoMap::for_device("test", "duplex", 2, 2);
+        let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 64, out_channels: 2, in_channels: 2 };
+        assert_eq!(&Paths::new(&s, &io, target, true).seeds[..3], [true, true, true]);
+        assert_eq!(
+            &Paths::new(&s, &io, target, false).seeds[..3],
+            [false, true, true],
+            "armed audio drops out; input monitoring and instruments stay"
+        );
     }
 }

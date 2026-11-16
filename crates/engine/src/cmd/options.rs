@@ -86,6 +86,7 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(view "options.middle_c", "Middle C", ["Options"], None, "{value?: \"C3\" | \"C4\"} (display only; commands always read C3 = 60)", always, |_, _| Err(bad("options.middle_c", "unavailable: requires the app machine-preference adapter"))),
         cmd!(view "options.low_latency", "Low Latency", ["Options"], None, "{value?: bool, limit_ms?: number}", always, |_, _| Err(bad("options.low_latency", "unavailable: requires the app machine-preference adapter"))),
+        cmd!(view "options.monitor_armed", "Monitor Armed Tracks", ["Audio"], None, "{value?: bool} (toggles when omitted); per machine, not a session edit; off: arming an audio track does not monitor its input (Input Monitoring still does)", always, |_, _| Err(bad("options.monitor_armed", "unavailable: requires the app machine-preference adapter"))),
         toggle!("options.quickpunch", "QuickPunch", ["Options"], Some("Cmd+Shift+P"), quickpunch),
         toggle!("options.pre_post_roll", "Pre/Post-Roll", ["Options"], Some("Cmd+K"), pre_post_roll),
         cmd!(

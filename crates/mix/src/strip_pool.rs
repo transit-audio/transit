@@ -77,6 +77,7 @@ struct Job {
     any_solo: bool,
     monitor_only: bool,
     recording: bool,
+    monitor_armed: bool,
     no_suspend: bool,
     frame: u64,
     /// The engine had live input this block (its emptiness is all a worker strip reads of it).
@@ -114,6 +115,7 @@ impl Job {
             any_solo: false,
             monitor_only: false,
             recording: false,
+            monitor_armed: true,
             no_suspend: false,
             frame: 0,
             duplex: false,
@@ -139,6 +141,7 @@ impl Job {
             any_solo,
             monitor_only,
             recording,
+            monitor_armed,
             no_suspend,
             frame,
             duplex,
@@ -161,6 +164,7 @@ impl Job {
                 input_offset: 0,
                 monitor_only: *monitor_only,
                 recording: *recording,
+                monitor_armed: *monitor_armed,
                 no_suspend: *no_suspend,
                 frame: *frame,
                 io: None,
@@ -1002,6 +1006,7 @@ impl StripPool {
             job.any_solo = b.any_solo;
             job.monitor_only = b.live.monitor_only;
             job.recording = b.live.recording;
+            job.monitor_armed = b.live.monitor_armed;
             job.no_suspend = b.live.no_suspend;
             job.frame = b.live.frame;
             job.duplex = !b.live.input.is_empty();

@@ -27,12 +27,17 @@ impl StudioApp {
             && p.has_requested_session(&session)
             && self.low_latency.revision == self.low_latency.published
             && p.requested_low_latency() == self.ui.low_latency.then_some(self.ui.low_latency_limit_ms)
+            && p.requested_monitor_armed() == self.ui.monitor_armed
         {
             return true;
         }
         let limit = self.ui.low_latency.then_some(self.ui.low_latency_limit_ms);
         if let Err(e) = p.set_low_latency(limit) {
             self.status = format!("Low Latency: {e:?}");
+            return false;
+        }
+        if let Err(e) = p.set_monitor_armed(self.ui.monitor_armed) {
+            self.status = format!("Monitor Armed Tracks: {e:?}");
             return false;
         }
         self.low_latency.pending = true;

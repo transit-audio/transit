@@ -102,6 +102,12 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         self.control.sessions.bridge.set_low_latency(if full { None } else { self.low_latency_limit });
         request
     }
+    pub fn set_monitor_armed(&mut self, on: bool) {
+        self.control.sessions.bridge.set_monitor_armed(on);
+    }
+    pub fn monitor_armed(&self) -> bool {
+        self.control.sessions.bridge.monitor_armed()
+    }
     pub fn low_latency_limit(&self) -> Option<f64> {
         self.low_latency_limit
     }

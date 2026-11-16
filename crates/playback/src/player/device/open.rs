@@ -78,6 +78,7 @@ impl Player {
             playing: AtomicBool::new(false),
             speed: AtomicU32::new(1000),
             editors_open: AtomicBool::new(false),
+            monitor_armed: AtomicBool::new(true),
             metro: crate::Metro::default(),
             monitor: Default::default(),
         })

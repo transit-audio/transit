@@ -389,7 +389,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Transport".into(), String::new(), transport_menu.response.rect));
                 let mut audio_items = Vec::new();
-                let audio_menu = crate::chrome::bar_menu(ui, "Audio", false, |ui| {
+                let audio_menu = crate::chrome::bar_menu(ui, "Audio", true, |ui| {
                     let name = app.player.as_ref().map_or("No audio device (--no-audio)".to_string(), |p| p.device_name.clone());
                     crate::chrome::menu_note(ui, egui::RichText::new(name).color(TOKENS.text_dim));
                     let b = ui.add(crate::chrome::MenuRow::new("Audio Devices…"));
@@ -405,6 +405,14 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                     audio_items.push(crate::mixer::MenuItem::at(ui, "Reconnect Device".into(), String::new(), b.rect));
                     if b.clicked() {
                         app.reconnect_audio_devices();
+                        ui.close();
+                    }
+                    // A per-machine check item, on by default (a command, not a session edit).
+                    let b = ui.add(crate::chrome::MenuRow::new("Monitor Armed Tracks").checked(app.ui.monitor_armed));
+                    crate::help::hover(ui, &b, crate::help::Id::OptionsMonitorArmed);
+                    audio_items.push(crate::mixer::MenuItem::at(ui, "Monitor Armed Tracks".into(), "options.monitor_armed".into(), b.rect));
+                    if b.clicked() {
+                        let _ = app.run("options.monitor_armed", json!({}));
                         ui.close();
                     }
                     if ui.add(crate::chrome::MenuRow::new("Scan Plug-ins")).clicked() {

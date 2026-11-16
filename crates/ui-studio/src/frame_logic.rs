@@ -87,6 +87,9 @@ impl StudioApp {
         if id == "options.low_latency" {
             return self.set_low_latency(&params);
         }
+        if id == "options.monitor_armed" {
+            return self.set_monitor_armed(&params);
+        }
         if id == "options.middle_c" {
             return self.set_middle_c(&params);
         }

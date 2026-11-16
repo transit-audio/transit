@@ -10,3 +10,8 @@ text = "The same per-machine Low Latency switch as the transport button. It does
 id = "options.middle_c"
 name = "Middle C"
 text = "The name MIDI note 60 carries in every transit window: C3 (the default) or C4 (scientific pitch). Display only: sessions and presets keep MIDI numbers, and commands read note names as C3 = 60 whatever this setting."
+
+[[entry]]
+id = "options.monitor_armed"
+name = "Monitor Armed Tracks"
+text = "On (the default): an armed audio track is heard while stopped and while recording. Off: arming does not monitor it, so an interface with its own direct monitoring is not heard twice; the take still records the input, and a track's Input Monitoring button (I) still monitors it. Instrument and MIDI tracks are not affected. Saved on this machine, never in the session."

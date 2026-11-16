@@ -43,6 +43,25 @@ impl StudioApp {
         Ok(json!({"value": self.ui.low_latency, "limit_ms": self.ui.low_latency_limit_ms}))
     }
 
+    /// `options.monitor_armed {value?}`: Audio > Monitor Armed Tracks. A per-machine preference (saved
+    /// in `ui.json`, never the session, never an undo step); without `value` it toggles. Answers `{value}`.
+    pub(crate) fn set_monitor_armed(&mut self, p: &Value) -> Result<Value, String> {
+        let value = match p.get("value") {
+            None | Some(Value::Null) => !self.ui.monitor_armed,
+            Some(v) => v.as_bool().ok_or("options.monitor_armed: value must be a boolean")?,
+        };
+        if value != self.ui.monitor_armed {
+            self.ui.monitor_armed = value;
+            // The callback reads it from the next block; the plan follows with the next publication.
+            if let Some(player) = &self.player {
+                let _ = player.set_monitor_armed(value);
+            }
+            self.save_audio_preferences();
+            self.sync_player_session();
+        }
+        Ok(json!({"value": self.ui.monitor_armed}))
+    }
+
     pub(crate) fn poll_low_latency(&mut self) {
         let Some(p) = &self.player else {
             self.engine.path_latency = Default::default();
