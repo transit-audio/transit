@@ -343,22 +343,41 @@ fn invalid_audio_initialization_returns_every_endpoint_for_main_thread_retiremen
 
 #[test]
 fn consumed_playhead_is_independent_of_render_ahead_and_callback_partition() {
-    for partitions in [&[1usize, 19, 3, 127, 64, 2][..], &[216][..]] {
+    // Without a loop, and with a loop of 1,000 frames that wraps inside callbacks (#724): the
+    // converter still renders its reach ahead of what the playhead shows, across every wrap.
+    for (partitions, looped) in [
+        (&[1usize, 19, 3, 127, 64, 2][..], None),
+        (&[216][..], None),
+        (&[1usize, 19, 3, 127, 64, 2, 441][..], Some(1_000i64)),
+        (&[216][..], Some(1_000)),
+    ] {
         let (mut control, mut audio, shared) = fixture(44_100);
-        control.send_action(Command::Play { from: 0, end: None, looped: None }, true).unwrap();
+        let range = looped.map(|end| Range { start: 0, end });
+        control.send_action(Command::Play { from: 0, end: None, looped: range }, true).unwrap();
         let mut frames = 0;
-        let mut saw_render_ahead = false;
-        for &count in partitions {
+        let (mut saw_render_ahead, mut wraps) = (false, 0);
+        // One pass of the partition without a loop; past three loop wraps with one.
+        let total: usize = if looped.is_some() { 3_500 } else { partitions.iter().sum() };
+        for &count in partitions.iter().cycle() {
+            if frames >= total {
+                break;
+            }
             let mut out = vec![1.0; count * 2];
             let ((), heap) = measure(|| fill(&mut audio, &mut out));
             assert!(heap.is_zero(), "{heap:?}");
             frames += count;
-            let expected = (frames as u64 * 48_000 / 44_100) as i64;
-            assert_eq!(shared.position.load(Ordering::Relaxed), expected);
-            saw_render_ahead |= audio.transport.render_position > expected;
+            let linear = (frames as u64 * 48_000 / 44_100) as i64;
+            let expected = looped.map_or(linear, |end| linear % end);
+            assert_eq!(shared.position.load(Ordering::Relaxed), expected, "{looped:?} after {frames} output frames");
+            let ahead = audio.transport.render_position - expected;
+            let ahead = looped.map_or(ahead, |end| ahead.rem_euclid(end));
+            assert!(ahead <= 20, "{looped:?}: rendered {ahead} frames ahead, no more than the converter's reach");
+            saw_render_ahead |= ahead > 0;
+            wraps = linear / looped.unwrap_or(i64::MAX);
             assert_eq!(audio.transport.timeline.next_output(), frames as u64);
         }
         assert!(saw_render_ahead);
+        assert!(looped.is_none() || wraps >= 3, "{wraps} wraps");
         control.retire(audio.plans, audio.actions);
     }
 }
