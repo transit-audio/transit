@@ -14,4 +14,4 @@ text = "The name MIDI note 60 carries in every transit window: C3 (the default) 
 [[entry]]
 id = "options.monitor_armed"
 name = "Monitor Armed Tracks"
-text = "On (the default): an armed audio track is heard while stopped and while recording. Off: arming does not monitor it, so an interface with its own direct monitoring is not heard twice; the take still records the input, and a track's Input Monitoring button (I) still monitors it. Instrument and MIDI tracks are not affected. Saved on this machine, never in the session."
+text = "On (the default): an armed audio track is heard while stopped and while recording. Off: arming does not monitor it, so an interface with its own direct monitoring is not heard twice; the take still records the input, and a track's Input Monitoring button (I) still monitors it. While recording with it off, an armed audio track plays what it already holds, as an unarmed track does, and its meter shows that, not the input. Instrument and MIDI tracks are not affected. Saved on this machine, never in the session."

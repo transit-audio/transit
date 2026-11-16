@@ -155,6 +155,14 @@ pub struct UiState {
     pub auto_lanes: Vec<automation::LaneView>,
 }
 
+impl UiState {
+    /// What a device opens with: the monitoring set and Monitor Armed Tracks, both per machine.
+    #[must_use]
+    pub fn monitor_settings(&self) -> transit_playback::monitor_path::MonitorSettings {
+        transit_playback::monitor_path::MonitorSettings { monitor_armed: self.monitor_armed, ..self.monitor.settings() }
+    }
+}
+
 impl Default for UiState {
     fn default() -> Self {
         UiState {

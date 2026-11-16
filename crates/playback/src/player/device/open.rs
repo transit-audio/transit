@@ -174,9 +174,11 @@ impl Player {
         };
         let mut player = Self::empty(device_rate);
         player.shared.monitor.store(monitor);
+        player.shared.monitor_armed.store(monitor.monitor_armed, std::sync::atomic::Ordering::Relaxed);
         player.epoch = EngineEpoch(key.generation);
         player.origin = reader.host_origin();
         let (mut owner, ports) = Owner::new(session, None, target, PlanLimits::default()).map_err(|e| e.to_string())?;
+        owner.set_monitor_armed(monitor.monitor_armed);
         let audition = match owner.register_source(sources::AUDITION_PORT) {
             Ok(token) => token,
             Err(error) => {

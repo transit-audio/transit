@@ -102,7 +102,7 @@ impl StudioApp {
 
     /// Reopen audio with editors closed before teardown. Never interrupt a recording.
     pub fn reconnect_audio(&mut self) {
-        let (monitor, null) = (self.ui.monitor.settings(), self.null_audio);
+        let (monitor, null) = (self.ui.monitor_settings(), self.null_audio);
         match self.reconnect_audio_using(true, |session, cfg| open_player(null, session, cfg, &monitor)) {
             Ok(captured) => {
                 self.reopen.reconnected();
@@ -205,7 +205,7 @@ impl StudioApp {
             self.reopen_with = Some(open);
             return result;
         }
-        let (monitor, null) = (self.ui.monitor.settings(), self.null_audio);
+        let (monitor, null) = (self.ui.monitor_settings(), self.null_audio);
         self.reconnect_audio_using(preserve, |session, cfg| open_player(null, session, cfg, &monitor))
     }
 

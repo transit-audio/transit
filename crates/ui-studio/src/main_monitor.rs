@@ -51,7 +51,7 @@ impl MonitorPrefs {
     #[must_use]
     pub fn settings(self) -> MonitorSettings {
         let p = self.sane();
-        MonitorSettings { mono: p.mono, dim: p.dim, reference: p.reference, level_db: p.level_db, reference_db: p.reference_db }
+        MonitorSettings { mono: p.mono, dim: p.dim, reference: p.reference, level_db: p.level_db, reference_db: p.reference_db, monitor_armed: true }
     }
 }
 

@@ -49,12 +49,15 @@ pub struct MonitorSettings {
     /// The monitor level and the level Ref recalls, in dB (−∞ to 0; see [`level_gain`]).
     pub level_db: f32,
     pub reference_db: f32,
+    /// Audio > Monitor Armed Tracks (#730): a device opens with it, so a reopened device's first block
+    /// already follows the saved choice. Not a [`MonitorControls`] field: `Shared` holds it.
+    pub monitor_armed: bool,
 }
 
 impl Default for MonitorSettings {
     /// Unity: every control off, both levels 0 dB.
     fn default() -> Self {
-        Self { mono: false, dim: false, reference: false, level_db: 0.0, reference_db: 0.0 }
+        Self { mono: false, dim: false, reference: false, level_db: 0.0, reference_db: 0.0, monitor_armed: true }
     }
 }
 
