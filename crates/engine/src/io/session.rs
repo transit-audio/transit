@@ -356,6 +356,13 @@ pub(super) fn store_media(dir: &Path, stem: &str, extension: &str, bytes: &[u8])
     Err(EngineError::Io(format!("{}: no free file name for {stem}", dir.display())))
 }
 
+/// Log what the parser said about a session this build could not read: the message the user sees leaves it out (#719).
+fn log_session_detail(file: &str, err: &transit_model::SessionError) {
+    if let Some(detail) = err.detail() {
+        log::warn!("{file}: unreadable session: {detail}");
+    }
+}
+
 /// Open a `.transit` (or older `.transit`) session and decode its audio files (missing files are reported, not fatal).
 pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
     open_session_linked(e, path, Path::new(path))
@@ -366,7 +373,10 @@ pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
 pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> Result<Vec<String>> {
     let started = std::time::Instant::now();
     let text = read_text(path)?;
-    let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| EngineError::Io(err.to_string()))?;
+    let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| {
+        log_session_detail(path, &err);
+        EngineError::Io(err.to_string())
+    })?;
     let dir = Path::new(path).parent().map(Path::to_path_buf).unwrap_or_default();
     let mut missing = Vec::new();
     let mut files = DecodedFiles::new();
@@ -643,7 +653,10 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
     } else {
         (String::from_utf8(bytes.to_vec()).map_err(|_| EngineError::Io(format!("{name}: not a transit session")))?, std::collections::HashMap::new())
     };
-    let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
+    let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| {
+        log_session_detail(name, &err);
+        EngineError::Io(format!("{name}: {err}"))
+    })?;
     let mut missing = Vec::new();
     let sampler_sources = sampler_sources(&s);
     repair_source_rates(&mut s, &sampler_sources);
@@ -1060,7 +1073,8 @@ mod bundle_tests {
         let said = open_session_bytes(&mut r, "Song.transit", v.to_string().as_bytes()).unwrap_err().to_string();
         assert!(said.starts_with("Song.transit: this file is a transit session (format version "), "{said}");
         assert!(said.contains("may have been saved by a different build of transit"), "{said}");
-        assert!(said.contains("Open it with the build that saved it"), "{said}");
+        assert!(said.ends_with("Open it with the build that saved it."), "{said}");
+        assert!(!said.contains("invalid type"), "the parser detail stays out of the message: {said}");
         let said = open_session_bytes(&mut r, "Song.transit", b"{ not json").unwrap_err().to_string();
         assert!(said.starts_with("Song.transit: not a transit session: "), "{said}");
         let said = open_session_bytes(&mut r, "Song.transit", &[0xff, 0xfe, 0x00]).unwrap_err().to_string();

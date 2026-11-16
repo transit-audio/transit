@@ -27,14 +27,34 @@ pub enum SessionError {
     Format(String),
     /// A file that is a transit session (it has a `format_version` this build knows and the tracks of
     /// one) whose fields this build cannot read: most likely another build saved it (#719).
+    /// The parser's detail is for the log ([`SessionError::detail`]), not the sentence.
     #[error(
-        "this file is a transit session (format version {version}) that this build cannot read: it may have been saved by a different build of transit. Open it with the build that saved it ({detail})"
+        "this file is a transit session (format version {version}) that this build cannot read: it may have been saved by a different build of transit. Open it with the build that saved it."
     )]
     OtherBuild { version: u32, detail: String },
-    #[error("session file version {0} is newer than this version of transit supports")]
+    #[error("{}", newer_build_text(*.0))]
     Version(u32),
     #[error("{0}")]
     Invalid(String),
+}
+
+/// The refusal for a session saved with a `format_version` newer than this build reads (#719).
+fn newer_build_text(version: u32) -> String {
+    format!(
+        "this file was saved by a newer transit (format version {version}); this build reads up to format version {}. Open it with that newer build, or update transit.",
+        Session::FORMAT_VERSION
+    )
+}
+
+impl SessionError {
+    /// What the parser said when a session could not be read (kept out of the message the user
+    /// sees; the caller logs it so a bug report still has it).
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            SessionError::OtherBuild { detail, .. } => Some(detail),
+            _ => None,
+        }
+    }
 }
 
 /// Session bit depth for recording/rendering.
@@ -1121,7 +1141,15 @@ mod tests {
         assert!(Session::from_json("{}").is_err());
         let mut v = serde_json::to_value(Session::default()).unwrap();
         v["format_version"] = serde_json::json!(999);
-        assert!(matches!(Session::from_json(&v.to_string()), Err(SessionError::Version(999))));
+        let err = Session::from_json(&v.to_string()).unwrap_err();
+        assert!(matches!(err, SessionError::Version(999)));
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "this file was saved by a newer transit (format version 999); this build reads up to format version {}. Open it with that newer build, or update transit.",
+                Session::FORMAT_VERSION
+            )
+        );
     }
 
     /// A session whose field has a shape this build cannot read says another build may have saved it,
@@ -1135,8 +1163,10 @@ mod tests {
         let said = err.to_string();
         assert!(said.contains("may have been saved by a different build of transit"), "{said}");
         assert!(said.contains(&format!("format version {}", Session::FORMAT_VERSION)), "{said}");
-        assert!(said.contains("Open it with the build that saved it"), "{said}");
-        assert!(!said.contains("not a transit session"), "{said}");
+        assert!(said.ends_with("Open it with the build that saved it."), "{said}");
+        assert!(!said.contains("not a transit session") && !said.contains("invalid type"), "the parser detail is not in the sentence: {said}");
+        assert!(err.detail().is_some_and(|d| d.contains("invalid type")), "{:?}", err.detail());
+        assert_eq!(SessionError::Format("x".into()).detail(), None);
     }
 
     #[test]
