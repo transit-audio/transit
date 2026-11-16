@@ -21,7 +21,7 @@ A desktop DAW in pure Rust with Ableton/Logic-style ergonomics and its own audio
 layer and egui UI.
 
 > [!NOTE]
-> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.7.2](https://github.com/transit-audio/transit/releases/tag/v0.7.2) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
+> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.7.3](https://github.com/transit-audio/transit/releases/tag/v0.7.3) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
 > correctness, stability and performance, measured on real hardware, ahead of new features.
 > Expect rough edges in the UI and some missing features; the audio engine, recording alignment
 > and device handling get fixed first, following [the engineering principles](docs/principles.md).
@@ -40,7 +40,7 @@ layer and egui UI.
 
 transit changes a default only after a measurement on the reference hardware. The multicore render became the default on two records: the [gate 6 run on a Focusrite Scarlett](docs/benchmarks/2026-10-28-scarlett-render-workers-gate-6.md) and the eight-hour endurance run recorded on [issue #130](https://github.com/transit-audio/transit/issues/130), both listed in the [benchmark index](docs/benchmarks/README.md).
 
-- Every defect that gets past a gate becomes an [escape record](docs/escapes) (40 so far) naming the gate that now catches it.
+- Every defect that gets past a gate becomes an [escape record](docs/escapes) (42 so far) naming the gate that now catches it.
 - Every design change is an [ADR](docs/adr) that cites its evidence, for example [ADR 0029](docs/adr/0029-strip-job-slots.md).
 - Every merge gets a [refutation review](docs/contributing/evidence/refutation-review.md) that tries to break it.
 - Design rounds come before code: the [judging-first record](docs/contributing/evidence/judging-first.md) counts what they bought.
@@ -50,13 +50,13 @@ Send us a measurement with the [measurement issue template](https://github.com/t
 
 ## Downloads
 
-The current release is [v0.7.2](https://github.com/transit-audio/transit/releases/tag/v0.7.2). The files are `transit-v0.7.2-windows-x86_64.msi` and `.zip`, `transit-v0.7.2-macos-arm64.dmg` and `.tar.gz`, `transit-v0.7.2-linux-x86_64.tar.gz`, and `transit-0.7.2-linux-x86_64.AppImage`, `.deb` and `.rpm`.
+The current release is [v0.7.3](https://github.com/transit-audio/transit/releases/tag/v0.7.3). The files are `transit-v0.7.3-windows-x86_64.msi` and `.zip`, `transit-v0.7.3-macos-arm64.dmg` and `.tar.gz`, `transit-v0.7.3-linux-x86_64.tar.gz`, and `transit-0.7.3-linux-x86_64.AppImage`, `.deb` and `.rpm`.
 
 - **Windows (x86_64):** one download, the `.zip` (portable) or the `.msi` (installer with the standard install dialogs and license; it registers `.transit` and `.transitz`). It has native WASAPI and native ASIO.
 - **macOS (Apple silicon):** the `.dmg`; open it and drag `transit.app` to Applications.
 - **Linux (x86_64):** the tarball; unpack it and run `transit`. Each release also carries an `.AppImage`, a `.deb` and an `.rpm` (see [Linux](#linux)).
 
-The Windows builds are unsigned: SmartScreen shows "More info", then "Run anyway". The macOS build is ad-hoc signed and not notarized: if the app is blocked, run `xattr -dr com.apple.quarantine /Applications/transit.app` or right-click it and choose Open.
+The Windows builds are unsigned: SmartScreen shows "More info", then "Run anyway". The macOS build of v0.7.3 is the first signed with a Developer ID and notarized by Apple (a release-workflow run on 2026-11-16 got both the app and the disk image accepted and stapled; no tester has yet confirmed opening it on a Mac, #674). It should no longer be blocked; if it is, run `xattr -dr com.apple.quarantine /Applications/transit.app` or right-click it and choose Open.
 
 v0.7.0 is the Sampler release: one kit with three views (Pads, Slices and Instrument) and kit presets, shown here beside the Compressor in the new device design.
 
@@ -271,7 +271,8 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Linux: native JACK/PipeWire backend (the Linux release builds carry it; under PipeWire it tries PipeWire's own JACK library first, so `pw-jack` should no longer be needed, a tester confirmation is pending). It plays and records duplex in one server cycle at the server's rate and buffer size, counts the server's xruns, and reopens by itself when the server changes its buffer size or rate or comes back after stopping.
 - Linux packages: an `.AppImage`, a `.deb` and an `.rpm` come with the tarball.
 - Audio Devices shows "Requested 128 · running at 256" when the device runs a different buffer size or rate than you asked for.
-- When the device runs at a different rate than the session, the converted output is the same whatever the buffer size (no wrong frames at block edges), and equal rates pass through bit for bit. The converter is linear interpolation, so run the device at the session's rate for the cleanest sound; its measured limits are in the [#525 record](docs/escapes/issue-525.md) and the [known issue](docs/known-issues/entries/device-rate-converter-quality.md).
+- When the device runs at a different rate than the session, the converted output is the same whatever the buffer size (no wrong frames at block edges), and equal rates pass through bit for bit. The converter is band-limited (the output and the live input, and System Audio under its drift servo), with its measured limits in the [#525 record](docs/escapes/issue-525.md) and the [known issue](docs/known-issues/entries/device-rate-converter-quality.md); it adds a little delay to live monitoring, so measure hardware inserts again at the rate you use. The live input also no longer drifts later after a loop wrap or a count-in end.
+- Audio clips with a stretch other than 1 (Conform to Tempo, Elastic Properties) play and render through a band-limited reader, in memory and from disk, so bounces, stems and freezes no longer print the old linear read's dull or folded treble. Neither command has a menu entry in v0.7.3 (#336).
 - System Audio input: record what the computer plays (a browser video, another app) on an audio track, with no cable. On Windows a WASAPI loopback capture of the output you choose, at its own rate and clock, with its latency and drift shown in Audio Devices; on Linux an output's PipeWire or PulseAudio monitor is named as System Audio.
 
 ### Sessions and rendering
@@ -279,12 +280,13 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Bounce the main mix or any bus over the selection or loop range to WAV, AIFF or FLAC at 16-bit, 24-bit or 32-bit float; float files keep every sample as it is, even above 0 dBFS.
 - Opus export for sharing: mix, stems and clips as `.opus` at 96 to 256 kb/s (160 by default), encoded by the reference libopus. No MP3, on purpose: Opus sounds better at every bitrate and its license is BSD.
 - Stems by output path from the Bounce dialog.
+- A take that could not be placed (an audio take wholly before bar 1, a deleted track, an unreadable file) is listed under Unplaced takes with its reason and file, and Save As keeps the listing working. A hosted plug-in's own state changes mark the session modified, and transit autosaves the plug-ins' settings every two minutes. ASIO close, reopen and stop are safe against a driver or plug-in that misbehaves, and a recording says when and where a take lost input.
 - Bounce in Place turns a track's clips, or only the selected clips, into audio: to a new track or an existing one, with the source left, muted or hidden, and its clips and takes always kept.
 - Full undo history; every edit is a command.
 - Autosave, and sessions saved as versioned, human-readable JSON in `.transit` files.
 - Long takes stay with their session: a session recovered after a crash keeps its long takes and offline files in its own folder, and Save As, Save Copy In and the first save of an untitled session copy long take files into the session's Audio Files folder; if a copy fails, the save fails naming the file and the earlier session file is left as it was. After the copy the open session plays that take from the new folder at once, and a save warning (a take that could not be moved) shows in the status line. An unreadable take refuses bounces and exports naming the take, instead of rendering silence. A preset name keeps its dots ("Bass v1.5" and "Bass v1.2" are two presets), and saving a track preset, Sampler kit or plug-in preset over an existing file through the command channel is refused unless the call says `replace: true`.
 - A launch splash that reports the audio device opening first, then plug-in scan progress, and Help > About with version info and a link to the transit repository.
-- Import audio and MIDI files; export MIDI. File > Open Session also opens a DAWproject (`.dawproject`, from Bitwig, Studio One, Cubase and others) as a new session: its tracks, note clips, tempo and meter, markers and MIDI expression. File > Export DAWproject writes those editable parts plus full-length WAV stems for audible audio and instrument tracks, and File > Bounce > Consolidated tracks writes one full-length stem per audio, instrument and MIDI track with a MIDI file per MIDI or instrument track and a tempo file (#261). File > Open Recent lists your last ten sessions (Ctrl+Shift+O).
+- Import audio and MIDI files; export MIDI. File > Open Session also opens a DAWproject (`.dawproject`, from Bitwig, Studio One, Cubase and others) as a new session: its tracks, note clips, tempo and meter, markers and MIDI expression. File > Export DAWproject writes those editable parts plus full-length WAV stems for audible audio and instrument tracks, and File > Bounce > Consolidated tracks writes one full-length stem per audio, instrument and MIDI track with a MIDI file per MIDI or instrument track and a tempo file (#261); in a session with clips before bar 1 those files start where the pre-count zone begins, and MIDI export writes each clip as it plays and leaves muted clips out. File > Open Recent lists your last ten sessions (Ctrl+Shift+O).
 - Browser preview: select a supported audio file in the Files tab and press play to hear it before you drag it in. A headphone toggle auto-previews each selection, and the preview has its own volume on a path that never records, meters or routes to a track. It stops on another file, on transport start or on Escape; every importer format works, including RF64.
 
 ### Under the hood
