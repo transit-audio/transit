@@ -56,13 +56,9 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 
 ## By area
 
-- Playback-loss notices must cover the whole scope of the action, including unselected clips
-  on a source track and mixed muted/unmuted clips (`../../escapes/issue-713.md`). Export-boundary
-  notices must cover a bar line between samples, the stored start sample and its neighbors
-  (`../../escapes/export-marker-origin.md`); an integer-sample bar line alone misses rounding errors.
-
 | You touch | Also run or extend | What it proves |
 |---|---|---|
+| A command that silences content as a side effect (a bounce or commit that mutes, deactivates or hides its source) | A test with unselected clips on the source track, and one with muted and unmuted clips mixed | The notice covers everything the action silences, not only what was selected (`../../escapes/issue-713.md`). |
 | Tier A core or its feature graph | Headless build and tests (#236): `headless-core`, default `hosting`/`devices` off and Tier B `std` on; exact commands below | Core and built-in slots work with no UI or host crates, including in the test dependency graph. Required, not implemented by the ADR amendment. |
 | Tier B DSP/instrument code or dependencies | Bare-metal compile: `dsp-bare-metal`, `cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p <crate>` for each enrolled crate, plus existing host tests under `std` | No target dependency on std; compile only, no hardware or firmware. New DSP crates enter immediately; existing candidates enter one per retrofit slice. |
 | Anything the audio callback runs (`crates/mix`, `crates/playback`) | `crates/mix/tests/plan_alloc_probe.rs`, `alloc_probe.rs`, `event_alloc_probe.rs`; `measure` in `crates/rt/src/testing.rs` | Zero allocations per block, counted by a counting allocator. |
