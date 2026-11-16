@@ -146,6 +146,9 @@ jobs:
   deny:
     name: deny (licenses)
     runs-on: ubuntu-22.04
+    # First landing only: this job has never run anywhere. It reports without failing the
+    # run until it has been seen green once; then this line goes (issue #736).
+    continue-on-error: true
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
