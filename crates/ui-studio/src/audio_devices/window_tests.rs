@@ -881,7 +881,14 @@ fn the_card_leaves_the_button_row_whole_on_the_asio_system_tab_at_150_percent() 
         input.wakes += 375;
         t.app.audio_devices.injected_backend = Some((Some(output), Some(input)));
         t.frames(2);
-        assert!(t.layout()["calibration"].as_str().unwrap().starts_with("not calibrated at the buffer size"), "the tall calibration note is shown");
+        // The native ASIO calibration line (the tall note on the System tab) exists only where native ASIO is compiled
+        // (64-bit Windows); the card's geometry, which the checks below cover, does not depend on it.
+        if transit_playback::devices::NATIVE_ASIO_COMPILED {
+            assert!(
+                t.layout()["calibration"].as_str().unwrap().starts_with("not calibrated at the buffer size"),
+                "the tall calibration note is shown"
+            );
+        }
         assert!(t.layout()["opened"][1].as_str().unwrap().contains("wakes 247/s"), "{}", t.layout()["opened"]);
         let c = t.layout()["controls"].clone();
         let window: [f32; 4] = serde_json::from_value(t.layout()["window"].clone()).unwrap();
