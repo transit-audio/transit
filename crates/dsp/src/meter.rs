@@ -1,5 +1,5 @@
 //! Level meters: an ITU-R BS.1770 loudness meter
-//! (gated integrated LUFS plus 4× oversampled true peak).
+//! (momentary, short-term and gated integrated LUFS plus 4× oversampled true peak).
 //!
 //! None of the `process` methods allocate.
 
@@ -214,6 +214,23 @@ impl LoudnessMeter {
             sum += self.sub.get(idx).copied().unwrap_or(0.0);
         }
         sum / n as f64
+    }
+
+    /// Momentary loudness (400 ms window), LUFS. -144 until 400 ms have been measured.
+    ///
+    /// Kept for the loudness meter's momentary readout; test-only until a caller exists (a max-momentary
+    /// readout would be added with the meter).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn momentary_lufs(&self) -> f32 {
+        if self.sub_filled < 4 { MIN_DB } else { lufs(self.recent_energy(4)) }
+    }
+
+    /// Short-term loudness (3 s window, or what is available so far), LUFS.
+    ///
+    /// Kept for the loudness meter's short-term readout; test-only until a caller exists.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn short_term_lufs(&self) -> f32 {
+        if self.sub_filled < 4 { MIN_DB } else { lufs(self.recent_energy(SUB_BLOCKS)) }
     }
 
     /// Gated integrated loudness (absolute gate -70 LUFS, relative gate -10 LU), LUFS.

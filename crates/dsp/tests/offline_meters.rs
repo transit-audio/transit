@@ -49,6 +49,8 @@ fn loudness_997hz_minus20_stereo_reads_minus20() {
     let mut m = LoudnessMeter::new(sr, 2);
     m.process(&[x.clone(), x], 48_000 * 10);
     assert!((m.integrated_lufs() + 20.0).abs() < 0.1, "integrated {}", m.integrated_lufs());
+    assert!((m.momentary_lufs() + 20.0).abs() < 0.1, "momentary {}", m.momentary_lufs());
+    assert!((m.short_term_lufs() + 20.0).abs() < 0.1, "short {}", m.short_term_lufs());
     assert!((m.true_peak_db() + 20.0).abs() < 0.2, "tp {}", m.true_peak_db());
 }
 
@@ -72,8 +74,9 @@ fn loudness_stays_bounded_at_low_sample_rates() {
         let mut m = LoudnessMeter::new(sr, 1);
         assert_eq!(m.sample_rate(), sr);
         m.process(&[sine(100.0, 0.5, sr, len)], len);
-        let level = m.integrated_lufs();
-        assert!(level.is_finite() && (-30.0..=0.0).contains(&level), "{sr}: {level}");
+        for level in [m.integrated_lufs(), m.momentary_lufs(), m.short_term_lufs()] {
+            assert!(level.is_finite() && (-30.0..=0.0).contains(&level), "{sr}: {level}");
+        }
     }
 }
 
@@ -85,6 +88,7 @@ fn loudness_gating_ignores_silence() {
     let mut m = LoudnessMeter::new(sr, 2);
     m.process(&[x.clone(), x], 48_000 * 25);
     assert!((m.integrated_lufs() + 20.0).abs() < 0.2, "{}", m.integrated_lufs());
+    assert!(m.momentary_lufs() < -100.0);
     m.reset();
     assert_eq!(m.integrated_lufs(), -144.0);
 }
