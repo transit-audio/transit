@@ -7,12 +7,21 @@ step posts those bullets. See [releasing.md](../releasing.md).
 
 ## Warnings
 
-Anything the reader must not miss starts with the warning triangle emoji (⚠️) before its bold lead
-sentence, in the file here and on the GitHub release page:
+The warning triangle emoji (⚠️) is for what can cost the reader work or needs them to act: a session or
+preset that an older or newer build cannot open, data that is dropped, a step to take before or after
+upgrading, known breakage on a platform. When everything carries one, the ones that matter are lost
+(v0.7.3 shipped with 21).
 
-- breaking changes and changed behavior (sessions, presets, mappings or sound that differ after upgrading);
-- issues with the release (known breakage, an affected platform), including a note added after publishing;
-- any callout that needs the reader's attention (back up first, an action to take).
+Layout, in this order, above `## Highlights`:
 
-Ordinary highlights, fixes and features get no emoji, and no other emoji is used. A note added to a
-published release goes on the GitHub release page and into the file here in the same change.
+- `## Before you upgrade`: only the items above, one bullet each, each starting with the triangle before
+  its bold lead sentence. Leave the section out when there are none.
+- `## Changed behavior`: sessions, exports, mappings or sound that differ after upgrading, as plain
+  bullets with no triangle, each saying where the details are.
+
+In `## Fixes` and `## Known issues` an entry gets a triangle only if it meets the rule in the first
+paragraph. A fix is not a warning: describe what was wrong and what happens now in one or two
+sentences, and leave the mechanism to the issue it links.
+
+No other emoji is used. A note added to a published release goes on the GitHub release page and into
+the file here in the same change.
