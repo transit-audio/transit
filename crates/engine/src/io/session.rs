@@ -1050,6 +1050,23 @@ mod bundle_tests {
         assert_eq!(r.session().tracks.len(), fresh.tracks.len());
     }
 
+    /// A session this build cannot read says another build may have saved it and names its format
+    /// version; text that is not a session still says it is not one (#719).
+    #[test]
+    fn a_session_with_an_unreadable_field_is_refused_naming_a_different_build() {
+        let mut v = serde_json::to_value(Session::default()).unwrap();
+        v["name"] = serde_json::json!({"structured": "where a string was"});
+        let mut r = Engine::default();
+        let said = open_session_bytes(&mut r, "Song.transit", v.to_string().as_bytes()).unwrap_err().to_string();
+        assert!(said.starts_with("Song.transit: this file is a transit session (format version "), "{said}");
+        assert!(said.contains("may have been saved by a different build of transit"), "{said}");
+        assert!(said.contains("Open it with the build that saved it"), "{said}");
+        let said = open_session_bytes(&mut r, "Song.transit", b"{ not json").unwrap_err().to_string();
+        assert!(said.starts_with("Song.transit: not a transit session: "), "{said}");
+        let said = open_session_bytes(&mut r, "Song.transit", &[0xff, 0xfe, 0x00]).unwrap_err().to_string();
+        assert_eq!(said, "Song.transit: not a transit session");
+    }
+
     #[test]
     fn hostile_bundles_are_errors_not_panics() {
         let mut r = Engine::default();

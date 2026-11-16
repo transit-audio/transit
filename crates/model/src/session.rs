@@ -25,6 +25,12 @@ pub const FEET_FRAMES_START: &str = "feet_frames.start";
 pub enum SessionError {
     #[error("not a transit session: {0}")]
     Format(String),
+    /// A file that is a transit session (it has a `format_version` this build knows and the tracks of
+    /// one) whose fields this build cannot read: most likely another build saved it (#719).
+    #[error(
+        "this file is a transit session (format version {version}) that this build cannot read: it may have been saved by a different build of transit. Open it with the build that saved it ({detail})"
+    )]
+    OtherBuild { version: u32, detail: String },
     #[error("session file version {0} is newer than this version of transit supports")]
     Version(u32),
     #[error("{0}")]
@@ -747,7 +753,15 @@ impl Session {
         let dropped_pages = crate::device_pages::dropped_page_notes(&v);
         let had_video = crate::legacy::drop_video(&mut v);
         let had_transport = crate::midi_transport::strip_session_rows(&mut v);
-        let mut s: Session = serde_json::from_value(v).map_err(|e| SessionError::Format(e.to_string()))?;
+        let looks_like_a_session = v.get("tracks").is_some_and(serde_json::Value::is_array);
+        let mut s: Session = serde_json::from_value(v).map_err(|e| {
+            let detail = e.to_string();
+            if looks_like_a_session {
+                SessionError::OtherBuild { version: u32::try_from(ver).unwrap_or(u32::MAX), detail }
+            } else {
+                SessionError::Format(detail)
+            }
+        })?;
         s.sanitize();
         if had_transport {
             s.load_notes.push(crate::midi_transport::MACHINE_ONLY.into());
@@ -1108,6 +1122,29 @@ mod tests {
         let mut v = serde_json::to_value(Session::default()).unwrap();
         v["format_version"] = serde_json::json!(999);
         assert!(matches!(Session::from_json(&v.to_string()), Err(SessionError::Version(999))));
+    }
+
+    /// A session whose field has a shape this build cannot read says another build may have saved it,
+    /// names the file's format version and what to do; text that is not a session still says so (#719).
+    #[test]
+    fn a_session_with_an_unreadable_field_names_a_different_build_and_its_format_version() {
+        let mut v = serde_json::to_value(Session::default()).unwrap();
+        v["name"] = serde_json::json!({"structured": "where a string was"});
+        let err = Session::from_json(&v.to_string()).unwrap_err();
+        assert!(matches!(err, SessionError::OtherBuild { version, .. } if version == Session::FORMAT_VERSION), "{err:?}");
+        let said = err.to_string();
+        assert!(said.contains("may have been saved by a different build of transit"), "{said}");
+        assert!(said.contains(&format!("format version {}", Session::FORMAT_VERSION)), "{said}");
+        assert!(said.contains("Open it with the build that saved it"), "{said}");
+        assert!(!said.contains("not a transit session"), "{said}");
+    }
+
+    #[test]
+    fn text_that_is_not_a_session_still_says_not_a_transit_session() {
+        for text in ["not json", "[1, 2]", "{\"format_version\": 1}", "{\"format_version\": 1, \"tracks\": 5}"] {
+            let said = Session::from_json(text).unwrap_err().to_string();
+            assert!(said.starts_with("not a transit session: "), "{text}: {said}");
+        }
     }
 
     #[test]
