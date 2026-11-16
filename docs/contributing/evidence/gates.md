@@ -25,6 +25,8 @@ Also `cargo xtask rt-targets` (cross-target check) when `crates/rt` or `crates/m
 Linux job of `.github/workflows/ci.yml` is the Linux compile proof. transit ships a desktop app only
 ([ADR 0032](../../adr/0032-transit-ships-a-desktop-app-only.md)): there is no web or wasm32 build, gate or CI job.
 
+Two dependency checks use `deny.toml`: the `deny` job of `ci.yml` gates the license allow list (it depends only on `Cargo.lock` and `deny.toml`), and `.github/workflows/advisories.yml` runs the RustSec advisory check weekly as a report, never a gate (a new advisory changes the result with no code change).
+
 ## Which checkout a gate checks
 
 A gate checks the checkout `cargo xtask` is run from, not the one the xtask binary was built in (#150): cargo reuses one binary across worktrees that share a `CARGO_TARGET_DIR`, so the root is resolved at run time. Every gate prints it as its first line, for example `layers: root E:/transit-wt-150`. Look for that line in a log before trusting a result.

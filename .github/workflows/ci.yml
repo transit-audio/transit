@@ -139,21 +139,21 @@ jobs:
         # that arrive meanwhile; test threads each open and close one, so the count reaches zero at any time.
         run: xvfb-run -a -s "-screen 0 1280x1024x24 -noreset" cargo test --locked -p transit-rt -p transit-vst3-host -p transit-clap-host -p transit-plugin-host
 
-  # Advisories and licenses (deny.toml, issue #736): the project is MIT OR Apache-2.0 and takes no
-  # GPL or AGPL dependency. The action is pinned by commit and ships cargo-deny 0.21.0 (its
-  # Dockerfile). A new RustSec advisory can fail this job with no change in the tree: that is the
-  # point of the check.
+  # Licenses (deny.toml, issue #736): the project is MIT OR Apache-2.0 and takes no GPL or AGPL
+  # dependency. This result depends only on Cargo.lock and deny.toml, so it can gate. Advisories are
+  # checked weekly in advisories.yml, because a new advisory changes the result with no code change.
+  # The action is pinned by commit (v2.0.20, 2026-05-28); its Dockerfile pins cargo-deny 0.19.8.
   deny:
-    name: deny (advisories, licenses)
+    name: deny (licenses)
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
+      - uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
         with:
           command: check
           arguments: --locked
-          command-arguments: advisories licenses
+          command-arguments: licenses
           rust-version: stable
 
   # crates/au-host and the objc2 code in crates/vst3-host compile only here.

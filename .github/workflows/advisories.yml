@@ -1,0 +1,29 @@
+# RustSec advisory report (issue #736). It is separate from ci.yml on purpose: a new advisory is
+# published without any change in this repository, so its result must never gate a push or a pull
+# request (a red main stops every landing). Weekly and on demand only; a failure here is a report
+# to read and triage, not a gate. The license check, which depends only on Cargo.lock and deny.toml,
+# is the `deny` job in ci.yml.
+name: Advisories
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: deny (advisories)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Pinned by commit: v2.0.20 (2026-05-28), whose Dockerfile pins cargo-deny 0.19.8.
+      - uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
+        with:
+          command: check
+          arguments: --locked
+          command-arguments: advisories
+          rust-version: stable

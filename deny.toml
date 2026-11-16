@@ -1,5 +1,6 @@
 # cargo-deny policy (issue #736, P1): RustSec advisories and licenses.
-# CI runs `cargo deny check advisories licenses` (job `deny` in .github/workflows/ci.yml).
+# CI gates `cargo deny check licenses` (job `deny` in .github/workflows/ci.yml); the weekly
+# .github/workflows/advisories.yml runs `check advisories` as a report, not a gate. Schema: cargo-deny 0.19.8.
 #
 # transit is MIT OR Apache-2.0 and must never take a GPL, AGPL or other strong-copyleft dependency.
 # The license check is an allow list: anything not named here fails, so a new GPL or AGPL crate is
