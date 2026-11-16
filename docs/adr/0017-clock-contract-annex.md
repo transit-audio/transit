@@ -3,7 +3,7 @@ title: Clock domains and timestamp quality: the clock contract annex to ADR 0012
 -->
 # ADR 0017: clock domains and timestamp quality
 
-- **Status:** proposed 2026-10-18; component-level G4 passed, hardware timing open; amended 2026-11-15, accepted after three judging rounds: the band-limited rate converters (Amendment 2026-11-15, below); amendment 2026-11-16, proposed: what the converters add after #724 (Amendment 2026-11-16, below)
+- **Status:** proposed 2026-10-18; component-level G4 passed, hardware timing open; amended 2026-11-15, accepted after three judging rounds: the band-limited rate converters (Amendment 2026-11-15, below); amendment 2026-11-16, proposed: corrections of fact after #724 (Amendment 2026-11-16, below)
 - Date: 2026-10-18. Status: proposed for joint review.
 - Parent: [ADR 0012](0012-midi-device-layer.md), gates G4 and G6.
 - Implementation status (2026-10-19 09:58 EDT): the original `f9078c7` jitter
@@ -92,16 +92,16 @@ session rate times the speed over the device rate. The plan is never rendered a 
 ahead, at a loop wrap or a count-in end inside a callback included (amended 2026-11-16, #724; it
 rendered a whole callback from the middle of a callback before). The live input converter reads
 up to 16·max(1, q) input frames past its position, q being the input rate over the session rate.
-The alignment keeps `halo(q)` = ceil(16·max(1, q)) + 1 input frames queued past the read (0 at
-equal rates), but the input's place on the plan's timeline is set where its first read stops
-because a frame's taps are not all queued yet: at input start it reads silence while the converter
-starts, at most 18 session frames at 48 kHz on a 44.1 kHz device, at most 16 at the other tested
-pairs and at most 31 at 96 kHz on 48 kHz, and at most one frame once after that (amended
-2026-11-16, #724). Both enter any round trip measured on the plan's timeline, together as a fixed
-figure per rate pair to within one plan frame (the Amendment 2026-11-16 below gives the figures);
+At its aligning read the ring discards queued input down to the read's input frames plus
+`halo(q)` = ceil(16·max(1, q)) + 1 (0 at equal rates) plus any slack. That is a target, met only
+when that much input is queued. With less queued, the first read stops at the first frame whose
+taps are not all queued, reads silence for the rest, and that stop sets the input's place; with
+more, the first read need not stop and the input sits further back (amended 2026-11-16, #724).
+Both enter any round trip measured on the plan's timeline, by an amount that depends on the converters' relative phase, the captured input history kept at alignment and the callback endpoints met afterward; the device buffer influences those but does not determine the result alone
+(the Amendment 2026-11-16 below gives what the tests pin);
 [ADR 0015](0015-io-routing-abstraction.md) section 5 and
 [ADR 0020](0020-external-instrument-device.md) decision 4 say how a stored figure accounts for
-them, so this delay is counted once.
+them (#709, not built), so this delay is counted once.
 
 The drift open item for a second device has one implemented rule so far, for System Audio
 loopback capture (#268, `crates/playback/src/system_audio.rs` and `system_audio_rate.rs`): the
@@ -323,57 +323,72 @@ limit included.
   reaching the reader with its fraction rounded down to 2^-32 frame; and B equal to `halo(q)` only
   for reads of a whole number of input frames. Round 2 found nothing further here; round 3 settled.
 
-## Amendment 2026-11-16: what the converters add after #724 (proposed)
+## Amendment 2026-11-16: corrections of fact after #724 (proposed)
 
 Proposed 2026-11-16, for judging together with the 2026-11-16 amendments of ADR 0015, 0020 and
 0052. It corrects the paragraph on the rate converters to the code that landed for #724
 (1af45806..12e06b36) and changes no decision of this record. Two sentences said the output renders
-up to 16·max(1, q) render frames "further ahead" and the input needs `halo(q)` "more" input frames.
-The first was not what the player did: it rendered a whole callback ahead whenever a block started
-in the middle of a callback (always at a converted rate, and after a loop wrap or a count-in end
-inside a callback at any rate), so the live input reached the plan about one callback late. The
-second named the alignment's queue, not what sets the input's place. Both are replaced in place
-(the paragraph after "Distinct coordinates").
+up to 16·max(1, q) render frames "further ahead" and the input's alignment keeps `halo(q)` "more"
+input frames. The first was not what the player did: it rendered a whole callback ahead whenever a
+block started in the middle of a callback (always at a converted rate, and after a loop wrap or a
+count-in end inside a callback at any rate), so the live input reached the plan about one callback
+late. The second stated a target of the alignment as if it were what places the input. Both are
+replaced in place (the paragraph after "Distinct coordinates").
 
-- **What is true now.** Each callback renders only up to the converter's reach at its last frame
-  (`Phase::reach` in `crates/playback/src/player/audio/phase.rs`). At equal rates and a whole-frame
-  position that is the callback's last frame exactly. The input converter's place is set at input
-  start by where its first read stops for want of queued input (`MonitorReader::render` in
-  `crates/playback/src/record/monitor.rs`); a later callback can need one input frame more, read
-  once as one frame of silence. A hold-back of one session frame in the first read was tried and
-  changes nothing, because that read's stop sets the place either way.
-- **The figure per rate pair.** A round trip on the plan's timeline at a converted rate is longer
-  than at equal rates by a figure fixed per rate pair to within one plan frame, at every device
-  buffer. Measured through the fake device (extra plan frames, session on device): 48 kHz on
-  44.1 kHz, 34 or 35; 44.1 on 48, 32 or 33; 48 on 96, 31 or 32; 96 on 48, 61; 48 on 88.2, 32 or 33;
-  44.1 on 88.2, 31 or 32; 48 on 176.4, 32 or 33; 48 on 192, 31 or 32; equal rates, 0. The test
-  admits the low figure or one more at every pair, so at 96 on 48 it pins 61 or 62; there every
-  position of both converters is a whole or half frame, and the start rule gives 61 at every
-  buffer. Which of the two figures a pair
-  gives depends on the converters' phases at the callback where the input starts (in the test, on
-  the device buffer): it is the rounding of whole frames against the two converters' fractional
-  reaches.
-- **Render-ahead bound.** The plan is rendered at most the output converter's reach ahead of what
-  the playhead shows: at most 20 frames at 48 kHz on 44.1 kHz, with and without loop wraps inside
-  callbacks. A live note due at once lands 17 plan frames late at 48 kHz on 44.1 kHz and 16 on
-  96 kHz, at every buffer from 64 to 512, and on time with the live input's 128-frame lookahead.
-- **Input start.** The input converter reads silence while it starts: at most 18 session frames at
-  48 kHz on 44.1 kHz, at most 16 at the other converted pairs tested and at most 31 at 96 kHz on
-  48 kHz; then at most one frame once. At equal rates it reads none, and nothing is discarded at
-  any pair.
-- **Evidence.** `the_converted_rate_term_does_not_depend_on_the_device_buffer` (eight rate pairs,
-  callbacks of 32, 64, 128, 192, 256, 512, 600 and 1,024 frames and three patterns of changing
-  size; the round trip over the equal-rate one, the start silence, the later silence, no frame
-  discarded, every click found with no spread) and
-  `a_long_warm_up_at_a_slow_drift_settles_to_the_same_figure` (35 at 48 kHz on 44.1 kHz with a
-  192-frame buffer after 4,000 callbacks, no later silence) in
-  `crates/playback/src/player/device/tests/converted_rate.rs`;
-  `consumed_playhead_is_independent_of_render_ahead_and_callback_partition` and
-  `seek_past_loop_end_continues_linearly_and_a_seek_back_engages_the_loop` in
-  `crates/playback/src/player/audio/tests.rs`;
-  `live_notes_at_a_converted_rate_are_late_by_at_most_the_converters_reach` in
-  `crates/playback/src/player/audio/midi/tests.rs`;
-  `a_loop_wrap_inside_a_callback_leaves_the_live_input_where_it_was` (at the session's rate the
-  live input stays where it was through loop wraps, with no silence).
-- **Not pinned.** The lower end of the start silence (the release notes give 15 frames) has no
-  test; only the upper bounds above are pinned.
+- **What the code does.** Each block is sized to the rest of the callback:
+  `let quantum = self.read.reach(callback_frames - at, step, self.plans.engine().max_block())?;`
+  (`crates/playback/src/player/audio.rs`), where `Phase::reach` returns the end of the last output
+  frame's span, `band_limited::span(x, q).end` (`crates/playback/src/player/audio/phase.rs`). At
+  equal rates and a whole-frame position that is the callback's last frame. The input is placed by
+  two lines of `crates/playback/src/record/monitor.rs`: the aligning read keeps
+  `read.saturating_add(lookahead).saturating_add(slack).max(last_push.saturating_add(lookahead))`
+  input frames, and the reader stops at the first frame where
+  `band_limited::span(x, q).end > queued as i64`. A plan that attaches an input calls only
+  `input.align_on_next_read()` (`crates/playback/src/plan_bridge.rs`), so an input can attach with
+  more than the target queued.
+- **What decides the added round trip.** The converters' relative phase, the captured input history kept at alignment and the callback endpoints met afterward; the device buffer influences those but does not determine the result alone. It is not a
+  function of the two rates.
+- **What the tests pin** (`crates/playback/src/player/device/tests/converted_rate.rs`; each run
+  starts the input empty, after four callbacks without capture; eleven callback patterns: 32, 64,
+  128, 192, 256, 512, 600 and 1,024 frames and three patterns of changing size). The round trip
+  over the equal-rate one, as a range the test allows at every pattern (session on device): 48 kHz
+  on 44.1 kHz, 34 to 35 plan frames; 44.1 on 48, 32 to 33; 48 on 96, 31 to 32; 96 on 48, 61 to 62;
+  48 on 88.2, 32 to 33; 44.1 on 88.2, 31 to 32; 48 on 176.4, 32 to 33; 48 on 192, 31 to 32; equal
+  rates, exactly 0. The test does not assert which value of a range occurs; one run is pinned
+  exactly: 35 at 48 on 44.1 with 192-frame callbacks after a warm-up of 4,000 callbacks, with no
+  later silence. The input reads silence while it starts, at most 18 session frames at 48 on 44.1,
+  at most 16 at the other converted pairs and at most 31 at 96 on 48, then at most one frame; no
+  input is discarded, every probe click is found and the clicks agree with no spread. The test
+  names: `the_converted_rate_term_does_not_depend_on_the_device_buffer`,
+  `a_long_warm_up_at_a_slow_drift_settles_to_the_same_figure`.
+- **What the figures are.** They are readings of the hardware probe, which adds its click after the
+  output converter: `fill_inner` calls `probe.add_click(frame, at)` on the converted frame, with
+  `at` from `self.read.index()`, the floor of the converter's position, and `HwProbe::add_click`
+  indexes the unconverted click with it. The click is held on the device frames whose position
+  falls on its plan frame instead of being converted. Averaged over a whole orbit of phases from a
+  whole-frame start, that hold lags by 73/147 of a plan frame at 48 on 44.1, 48 on 88.2 and 48 on
+  176.4, 159/320 at 44.1 on 48, 1/4 at 48 on 96 and 44.1 on 88.2, 3/8 at 48 on 192 and 0 at 96 on
+  48; a single click lags by its own phase, and `analyze` takes the best whole-frame lag. So the
+  figures are not the delay a send through the converter, a monitored input or an External
+  Instrument's return sees, and no test isolates the hold's share.
+- **Render-ahead bound.** At 48 kHz on 44.1 kHz the plan is rendered at most 20 frames ahead of
+  what the playhead shows, with and without loop wraps inside callbacks
+  (`consumed_playhead_is_independent_of_render_ahead_and_callback_partition`); a loop wrap renders
+  up to the callback's end and no further
+  (`seek_past_loop_end_continues_linearly_and_a_seek_back_engages_the_loop`). With a 48 kHz session,
+  a live note due at once lands 17 plan frames late on a 44.1 kHz device and 16 on a 96 kHz device,
+  at callbacks of 64 to 512 frames, and on time with the live input's 128-frame lookahead
+  (`live_notes_at_a_converted_rate_are_late_by_at_most_the_converters_reach`). At the session's
+  rate the live input stays where it was through loop wraps, with no silence
+  (`a_loop_wrap_inside_a_callback_leaves_the_live_input_where_it_was`).
+- **Stated limits of the current code, by reading, no test yet.** (1) At 48 on 192 with fixed
+  64-frame callbacks every callback ends at output phase 3/4, where the last tap leads by 15.25
+  render frames, not the 15.75 the phase lattice allows; the input then settles at an added round
+  trip of 31.0 plan frames, so the higher value of a range need not occur. (2) At 48 on 96 with
+  64-frame callbacks and enough input queued when the input attaches, the aligning read keeps
+  64 + 33 = 97 input frames, the first read never stops, and the next block, which starts 16 plan
+  frames after the callback's first output frame, reads input from 33 device frames before it: an
+  added round trip of 16 + 33/2 = 32.5 plan frames, above the range the tests pin. The #709 slice
+  must add tests for both.
+- **Not pinned.** The lower end of the start silence (the release notes gave 15 frames) has no
+  test.
