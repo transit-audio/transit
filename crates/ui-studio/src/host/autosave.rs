@@ -168,12 +168,12 @@ impl StudioApp {
                 }
                 self.status = match missing.len() {
                     0 => format!("Recovered “{}”. Save it to keep the changes.", left.name),
-                    n => format!("Recovered “{}”, but {n} audio file(s) are missing. Save it to keep the changes.", left.name),
+                    n => recovered_with_missing(&left.name, n),
                 };
                 match midi {
                     Ok(done) => {
                         if !done.clips.is_empty() {
-                            self.status = format!("{} {} recovered MIDI clip(s) from the interrupted recording.", self.status, done.clips.len());
+                            self.status = format!("{} {}", self.status, recovered_clips(done.clips.len()));
                         }
                         // Notes played before the count-in started are not in the take: said, as a normal Stop says it.
                         if done.before_count_in > 0 {
@@ -187,5 +187,29 @@ impl StudioApp {
             }
             Err(e) => self.status = format!("Couldn't recover “{}”: {e}", left.name),
         }
+    }
+}
+
+/// The status after recovering a session whose `n` audio files could not be found.
+fn recovered_with_missing(name: &str, n: usize) -> String {
+    let (count, verb) = (super::recording::counted(n, "audio file"), if n == 1 { "is" } else { "are" });
+    format!("Recovered “{name}”, but {count} {verb} missing. Save it to keep the changes.")
+}
+
+/// What recovery adds when `n` MIDI clips came back from the interrupted recording.
+fn recovered_clips(n: usize) -> String {
+    format!("{} from the interrupted recording.", super::recording::counted(n, "recovered MIDI clip"))
+}
+
+#[cfg(test)]
+mod plural_tests {
+    use super::*;
+
+    #[test]
+    fn recovery_counts_read_right_for_one_and_many() {
+        assert_eq!(recovered_with_missing("S", 1), "Recovered “S”, but 1 audio file is missing. Save it to keep the changes.");
+        assert_eq!(recovered_with_missing("S", 2), "Recovered “S”, but 2 audio files are missing. Save it to keep the changes.");
+        assert_eq!(recovered_clips(1), "1 recovered MIDI clip from the interrupted recording.");
+        assert_eq!(recovered_clips(2), "2 recovered MIDI clips from the interrupted recording.");
     }
 }

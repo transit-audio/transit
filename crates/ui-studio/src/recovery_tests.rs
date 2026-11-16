@@ -245,8 +245,8 @@ fn recovered_status(name: &str, offsets: &[i64]) -> String {
 #[test]
 fn a_recovered_take_says_how_many_notes_before_the_count_in_were_left_out() {
     let said = recovered_status("recovery-before-count-in", &[-36_000, -30_000, -12_000, 12_000]);
-    assert!(said.contains("recovered MIDI clip(s) from the interrupted recording"), "{said}");
+    assert!(said.contains("1 recovered MIDI clip from the interrupted recording"), "{said}");
     assert!(said.ends_with("; 2 notes played before recording began were not recorded."), "{said}");
     let said = recovered_status("recovery-no-early-notes", &[-12_000, 12_000]);
-    assert!(said.contains("recovered MIDI clip(s)") && !said.contains("not recorded"), "{said}");
+    assert!(said.contains("1 recovered MIDI clip") && !said.contains("not recorded"), "{said}");
 }
