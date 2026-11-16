@@ -7,7 +7,7 @@ scripting on CI, nothing extra installed in the signing job).
 
 | File | What |
 |---|---|
-| `background.svg` | Source of the background: the app icon (`assets/app-icon/transit.svg`, linked, not copied) cropped as a cover on the colour field (`#14a9c4`), Ink and Paper. Its text (Inter, JetBrains Mono) is outlined, so rendering it needs no fonts. No paper grain: noise doesn't compress, and this keeps `background.tiff` small. |
+| `background.svg` | Source of the background: on the left, the app icon (`assets/app-icon/transit.svg`, linked, not copied) cropped as a cover on its accent blue (`#4cb1f0`); on the right, the graphite wordmark (`assets/brand/transit-wordmark-graphite.svg`, linked) on the light panel color (`#f7f8f9`), two rules, and three signal-blue chevrons (`#4c9eff`) between the icons. It has no text, so rendering it needs no fonts. Flat fills only: noise doesn't compress, and this keeps `background.tiff` small. |
 | `background.tiff` | The background at 1x (660 × 400 px, 72 dpi) and 2x (1320 × 800 px, 144 dpi) in one HiDPI TIFF (16-colour palette, Deflate, sRGB). Goes to `.background/background.tiff`. |
 | `dmg-layout.DS_Store` | Finder's view settings for the volume: window size, icon size 128, transit.app at (326, 205), `Applications` at (574, 205), and the background. Goes to `.DS_Store` in the image; named so it isn't mistaken for (or ignored like) a Finder-generated `.DS_Store`. |
 | `generate.py` | Writes `background.tiff` and `dmg-layout.DS_Store` from the SVG and the layout above. |
@@ -22,7 +22,7 @@ The DMG file name (`transit-v<version>-macos-<arch>.dmg`) still carries the vers
 ## Rules
 
 - **Finder draws the icon labels in black in light and dark mode** when a window has a background,
-  so the area under both icons stays light (Paper).
+  so the area under both icons stays light.
 - **Nothing goes inside the icon boxes:** artwork keeps 10 pt clear of each 128 pt icon box and of
   the label strip under it.
 
@@ -37,6 +37,6 @@ python3 packaging/macos/dmg/generate.py   # needs resvg on PATH
 
 Both outputs are byte-for-byte reproducible and carry nothing from the machine that ran it: the
 SVG renders without any fonts, and `dmg-layout.DS_Store` is written from scratch, its background
-alias holding only the volume name and `/.background/background.tiff`. If you add text to the SVG,
+alias holding only the volume name and `/.background/background.tiff`. The SVG has no text; if you add any,
 outline it (`usvg` from resvg converts text to paths). The window is 660 × 432 with Finder's 32 pt
 title bar; the content area is 660 × 400.
