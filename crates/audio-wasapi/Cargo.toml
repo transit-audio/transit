@@ -11,8 +11,8 @@ repository.workspace = true
 transit-audio-backend.workspace = true
 transit-rt.workspace = true
 log.workspace = true
-windows-core = "0.62"
-windows = { version = "0.62", features = [
+windows-core.workspace = true
+windows = { workspace = true, features = [
     "Win32_Devices_FunctionDiscovery",
     "Win32_Foundation",
     "Win32_Media_Audio",

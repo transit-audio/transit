@@ -11,8 +11,8 @@ repository.workspace = true
 [target.'cfg(all(windows, target_pointer_width = "64"))'.dependencies]
 transit-audio-backend.workspace = true
 log.workspace = true
-windows-core = "0.62"
-windows = { version = "0.62", features = [
+windows-core.workspace = true
+windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_Com",
