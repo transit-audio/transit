@@ -106,3 +106,72 @@ fn dawproject_export_clamps_early_markers_and_reports_the_count() {
         assert_eq!(std::fs::read(path).unwrap(), std::fs::read(valid).unwrap());
     }
 }
+
+fn fractional_bar_start(command: &str) {
+    let dir = transit_test_support::TestDir::created("fractional-marker-origin");
+    for early in [false, true] {
+        let mut s = session(true, false);
+        s.sample_rate = transit_time::SampleRate::new(44_100).unwrap();
+        s.tempo.set_tempo(0, 128.0).unwrap();
+        let origin_tick = s.tempo.bar_start_tick(0);
+        let origin = s.tempo.tick_to_samples(origin_tick, s.sample_rate);
+        assert_eq!(origin, -82_688); // The ideal bar line is -82,687.5 samples.
+        assert!(s.tempo.samples_to_ticks_f(origin, s.sample_rate) < origin_tick as f64);
+        s.markers.clear();
+        for (name, at) in [("At start", origin), ("Later", origin + 1)] {
+            let id = s.add_marker(name, MarkerKind::Marker, 0, 0);
+            let m = s.markers.iter_mut().find(|m| m.id == id).unwrap();
+            m.start = at;
+            m.end = at;
+        }
+        if early {
+            let id = s.add_marker("One sample early", MarkerKind::Marker, 0, 0);
+            let m = s.markers.iter_mut().find(|m| m.id == id).unwrap();
+            m.start = origin - 1;
+            m.end = m.start;
+        }
+        let path = dir.join(format!("export-{early}.dawproject"));
+        let reply = export(&mut Engine::new(s), command, &path);
+        if command == "file.export_dawproject" {
+            let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+            let mut xml = String::new();
+            archive.by_name("project.xml").unwrap().read_to_string(&mut xml).unwrap();
+            let doc = roxmltree::Document::parse(&xml).unwrap();
+            let at_start = doc.descendants().find(|n| n.has_tag_name("Marker") && n.attribute("name") == Some("At start")).unwrap();
+            assert_eq!(at_start.attribute("time"), Some("0.000000000"));
+        } else {
+            let paths = if command == "file.bounce_consolidated" {
+                vec![
+                    std::path::PathBuf::from(reply["tempo_file"].as_str().unwrap()),
+                    std::path::PathBuf::from(reply["midi_files"][0].as_str().unwrap()),
+                ]
+            } else {
+                vec![path]
+            };
+            for path in paths {
+                let smf = transit_midi::read_smf(&std::fs::read(path).unwrap()).unwrap();
+                assert_eq!(smf.markers.iter().find(|(_, name)| name == "At start").unwrap().0, 0);
+            }
+        }
+        if early {
+            assert_eq!(reply["notice"], "1 marker before the export start was moved to the start.");
+        } else {
+            assert!(reply.get("notice").is_none(), "a marker on the start sample was not moved: {reply}");
+        }
+    }
+}
+
+#[test]
+fn midi_export_does_not_count_a_marker_on_a_fractional_bar_start() {
+    fractional_bar_start("file.export_midi");
+}
+
+#[test]
+fn consolidated_export_does_not_count_a_marker_on_a_fractional_bar_start() {
+    fractional_bar_start("file.bounce_consolidated");
+}
+
+#[test]
+fn dawproject_export_does_not_count_a_marker_on_a_fractional_bar_start() {
+    fractional_bar_start("file.export_dawproject");
+}

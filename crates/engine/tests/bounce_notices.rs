@@ -70,3 +70,70 @@ fn every_print_reports_newly_silenced_zone_content() {
         check(command, false, false);
     }
 }
+
+#[test]
+fn bouncing_later_clips_reports_the_unselected_pickup_it_silences() {
+    for source in ["mute", "mute_deactivate", "hide", "leave"] {
+        for (track_muted, clip_muted) in [(false, false), (true, false), (false, true)] {
+            let mut e = Engine::default();
+            let s = e.session_mut();
+            let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Source"));
+            let audio = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 4800]] };
+            let src = transit_engine::io::add_source(s, "Tone", audio, None, transit_audio_io::FileFormat::Wav);
+            let mut pickup = Clip::audio(s.new_clip_id(), "Unselected pickup", src, 0, -4800, 2400);
+            pickup.muted = clip_muted;
+            let later = Clip::audio(s.new_clip_id(), "Selected later", src, 0, 4800, 4800);
+            let id = later.id;
+            let tr = s.track_mut(t).unwrap();
+            tr.mixer.mute = track_muted;
+            tr.playlist_mut().unwrap().clips.extend([pickup, later]);
+            let render = |e: &Engine| transit_mix::render_range(e.session(), transit_time::Range::new(-4800, -2400), 256);
+            let audible = !track_muted && !clip_muted;
+            assert_eq!(render(&e).iter().flatten().any(|v| *v != 0.0), audible);
+            let reply = e.execute("clip.bounce", &json!({"clips": [id.0], "source": source})).unwrap();
+            assert_eq!(reply["tracks"].as_array().unwrap().len(), 1);
+            assert_eq!(render(&e).iter().flatten().any(|v| *v != 0.0), audible && source == "leave");
+            if audible && source != "leave" {
+                assert_eq!(
+                    reply["notice"], "The source track's content before bar 1 no longer plays; choose Leave as the source to keep it sounding.",
+                    "{source}: {reply}"
+                );
+            } else {
+                assert!(reply.get("notice").is_none(), "{source}: {reply}");
+            }
+        }
+    }
+}
+
+fn mixed_zone_clips(command: &str) {
+    for source in ["mute", "mute_deactivate", "hide", "leave"] {
+        let mut e = Engine::default();
+        let s = e.session_mut();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Mixed pickups"));
+        let audio = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 4800]] };
+        let src = transit_engine::io::add_source(s, "Tone", audio, None, transit_audio_io::FileFormat::Wav);
+        let mut muted = Clip::audio(s.new_clip_id(), "Muted pickup", src, 0, -4800, 1200);
+        muted.muted = true;
+        let audible = Clip::audio(s.new_clip_id(), "Audible pickup", src, 0, -2400, 4800);
+        let id = audible.id;
+        s.track_mut(t).unwrap().playlist_mut().unwrap().clips.extend([muted, audible]);
+        let reply = e.execute(command, &json!({"tracks": [t.0], "clips": [id.0], "source": source})).unwrap();
+        assert_eq!(reply["tracks"].as_array().unwrap().len(), 1);
+        assert_eq!(reply.get("notice").is_some(), source != "leave", "{command}, {source}: {reply}");
+    }
+}
+
+#[test]
+fn clip_bounce_reports_a_mix_of_muted_and_unmuted_zone_clips() {
+    mixed_zone_clips("clip.bounce");
+}
+
+#[test]
+fn track_bounce_reports_a_mix_of_muted_and_unmuted_zone_clips() {
+    mixed_zone_clips("track.bounce");
+}
+
+#[test]
+fn commit_reports_a_mix_of_muted_and_unmuted_zone_clips() {
+    mixed_zone_clips("track.commit");
+}

@@ -265,6 +265,7 @@ where the zone begins: everything in it (clips, markers, tempo and meter changes
 those whole bars, so nothing sits before the project's start, and the stems start at that bar too.
 Bar 1 falls that many bars into the project: one bar in for a one-bar zone. Opened again in transit,
 such a project has no zone; its first bar is the zone's first bar. Without a zone nothing moves.
+Markers before the export start are moved to the start, and the export says how many were moved.
 
 ## Bounce
 
@@ -297,6 +298,8 @@ start at bar 1, as before.
 left out, a note held over the end stops there, and a looped clip's repeats are written out. The
 notes are the clips' own: real-time properties, track offsets and MIDI effects are not applied.
 Muted clips are left out, since a MIDI file cannot mark them muted; muted tracks are included.
+MIDI file and consolidated exports move markers before the export start to the start and say how
+many were moved.
 
 With Opus the bit depth row gives way to **Bitrate**: 96, 128, 160 (the default), 192 or 256 kb/s
 for stereo; a mono bus offers 96 (the default), 128 or 160 kb/s.
@@ -318,7 +321,10 @@ five above); a `path` ending in `.opus` picks Opus on its own.
 Choose **Track > Bounce in Place** (Commit, **Alt+Shift+C**) to print the focused track through
 its inserts, before its fader. The print starts at bar 1 and ends two seconds after the last clip
 on the active playlist. Until audio can sit before bar 1, this print (and Commit) leaves out
-anything a track plays in the pre-count zone before bar 1; the source keeps it. With the source set to Mute, Mute and deactivate, or Hide, that part then no longer plays, and the status line says so; choose Leave to keep it sounding. The source's clips and take stacks are always preserved.
+anything a track plays in the pre-count zone before bar 1; the source keeps it. With the source set
+to Mute, Mute and deactivate, or Hide, the status line says when that part stops playing; choose
+Leave to keep it sounding. There is no notice if the source track or all its clips before bar 1
+were already muted. The source's clips and take stacks are always preserved.
 Every print (Bounce in Place, Commit, Freeze and File > Bounce) starts once every insert has already
 been running for a few seconds, as live play from a stop does, so a plug-in's start-up does not
 land in a print.
@@ -352,8 +358,9 @@ start; clips outside the span are untouched. A span that starts in the pre-count
 bar 1: the zone's part is in the printed file, hidden before the new clip's start (audio cannot sit
 before bar 1 yet), and what plays from bar 1 on, a held note's tail included, is what the source
 played. With **Mute** (the default), **Mute and deactivate** or **Hide**, what the source played
-before bar 1 is no longer heard after the print, and the status line says so; choose **Leave** to
-keep it sounding, or Undo. Clips that end before bar 1, tail included, are refused, since nothing
+before bar 1 is no longer heard after the print, including unselected clips outside the printed
+span. The status line says so unless that content was already muted; choose **Leave** to keep it
+sounding, or Undo. Clips that end before bar 1, tail included, are refused, since nothing
 of them would sound from bar 1. With clips on several tracks the print is one new
 track per source track, placed under each source, so the existing-track choice is unavailable, and
 one Undo restores them all. The source choice applies to the whole source track, not just the

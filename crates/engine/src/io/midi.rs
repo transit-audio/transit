@@ -53,17 +53,14 @@ pub fn export_midi(e: &Engine, only: Option<&[TrackId]>) -> Result<Vec<u8>> {
     export_midi_session(e.session(), only)
 }
 
-/// Report markers moved to the export start. Count before tick rounding so even a marker one
-/// sample before the boundary is disclosed. Arrangement-only exports omit other location kinds.
+/// Report markers moved to the export start. Compare stored samples with the rounded start sample:
+/// an ideal bar line can fall between samples. Arrangement-only exports omit other location kinds.
 pub(crate) fn export_marker_notice(s: &Session, arrangement_only: bool) -> Option<String> {
-    let origin = export_origin(s) as f64;
+    let origin = origin_sample(s, export_origin(s));
     let count = s
         .markers
         .iter()
-        .filter(|m| {
-            (!arrangement_only || (m.kind == transit_model::MarkerKind::Marker && m.track.is_none()))
-                && s.tempo.samples_to_ticks_f(m.start, s.sample_rate) < origin
-        })
+        .filter(|m| (!arrangement_only || (m.kind == transit_model::MarkerKind::Marker && m.track.is_none())) && m.start < origin)
         .count();
     match count {
         0 => None,

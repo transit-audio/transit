@@ -113,11 +113,9 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
             }
         }
     }
-    // A span that starts before bar 1 prints from bar 1 with that part hidden in the file (ADR 0052
-    // decision 10); when the source is also silenced, the part before bar 1 stops playing, and the
-    // reply says so instead of leaving it silent without a word.
-    let silenced_zone =
-        !matches!(source, BounceSource::Leave) && spans.iter().any(|(t, start, _)| *start < 0 && s.track(*t).is_some_and(has_unmuted_zone));
+    // The source choice silences the whole track, including unselected clips before bar 1.
+    // Check before printing changes the source state, regardless of the selected span (#713).
+    let silenced_zone = !matches!(source, BounceSource::Leave) && spans.iter().any(|(t, _, _)| s.track(*t).is_some_and(has_unmuted_zone));
     let mut out = Vec::new();
     for (t, start, end) in spans {
         let span = Range::new(start, end.saturating_add(tail));
@@ -138,10 +136,10 @@ pub(super) fn has_unmuted_zone(track: &transit_model::Track) -> bool {
     !track.mixer.mute && !track.inactive && track.clips().iter().any(|c| c.start < 0 && !c.muted)
 }
 
-/// The notice `clip.bounce` returns when the print hides audio before bar 1 and the source is muted,
-/// deactivated or hidden: that part no longer plays.
+/// The notice `clip.bounce` returns when it silences source content before bar 1, whether that
+/// content was printed or belongs to other clips outside the selected span.
 pub(crate) const ZONE_SILENCED_NOTICE: &str =
-    "The part before bar 1 is kept in the printed file but no longer plays; choose Leave as the source to keep it sounding.";
+    "The source track's content before bar 1 no longer plays; choose Leave as the source to keep it sounding.";
 
 /// The notice `track.bounce` and `track.commit` return when a printed track has content before
 /// bar 1 and its source is muted, deactivated or hidden: the print starts at bar 1, so that part

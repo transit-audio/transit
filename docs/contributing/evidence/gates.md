@@ -56,6 +56,11 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 
 ## By area
 
+- Playback-loss notices must cover the whole scope of the action, including unselected clips
+  on a source track and mixed muted/unmuted clips (`../../escapes/issue-713.md`). Export-boundary
+  notices must cover a bar line between samples, the stored start sample and its neighbors
+  (`../../escapes/export-marker-origin.md`); an integer-sample bar line alone misses rounding errors.
+
 | You touch | Also run or extend | What it proves |
 |---|---|---|
 | Tier A core or its feature graph | Headless build and tests (#236): `headless-core`, default `hosting`/`devices` off and Tier B `std` on; exact commands below | Core and built-in slots work with no UI or host crates, including in the test dependency graph. Required, not implemented by the ADR amendment. |
