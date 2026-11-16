@@ -431,3 +431,55 @@ fn a_full_capture_queue_drops_and_counts_and_playing_goes_on() {
     assert!(matches!(rig.capture.events()[4].message, Message::NoteOff { .. }));
     assert_eq!(rig.audio.plans.engine().event_tap().len(), 7, "the instrument gets every event");
 }
+
+/// The most plan frames any of 48 live notes lands after its due frame (0 for a note queued on
+/// time) on a device at `device` Hz with callbacks of `block` frames, each note arriving at a
+/// callback's first frame with `lookahead` device frames (the approximate path: no clock map).
+fn live_lateness(device: u32, block: usize, lookahead: u32) -> u32 {
+    let mut rig = Rig::new(device);
+    let template = rig.packet(0, 0, false);
+    rig.audio.transport.clock_map = None;
+    for _ in 0..50 {
+        rig.render(block);
+    }
+    let mut worst = 0;
+    for sequence in 0..48u64 {
+        let release = sequence % 2 == 1;
+        let mut packet = template;
+        packet.raw.seq = sequence;
+        packet.lookahead = lookahead;
+        if release {
+            packet.message = Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE };
+            packet.raw.bytes = [0x80, 60, 0];
+        }
+        rig.lane.send_note(packet, if release { action_lane::NoteKind::Off } else { action_lane::NoteKind::On }).unwrap();
+        // Through the callback the due frame falls in, and one more.
+        for _ in 0..lookahead as usize / block + 2 {
+            rig.render(block);
+        }
+        let tap = rig.audio.plans.engine().event_tap();
+        let record = tap.last().unwrap();
+        assert_eq!(record.arrival.sequence, sequence, "{device} {block} {lookahead}: every note reaches the instrument");
+        worst = worst.max(match record.outcome {
+            transit_mix::EventOutcome::Queued => 0,
+            transit_mix::EventOutcome::QueuedLate { frames } => frames,
+            other => panic!("{device} {block} {lookahead}: {other:?}"),
+        });
+    }
+    worst
+}
+
+/// #724: a live note played into a software instrument lands on its due frame at equal rates. At a
+/// converted device rate the plan is rendered the output converter's reach past the callback, so a
+/// note due at once lands at most that late (17 plan frames on 44.1 kHz, 16 on 96 kHz), whatever
+/// the device buffer, and one with the live input's 128-frame lookahead lands on time: never a
+/// callback late, as it did when a whole callback was rendered ahead.
+#[test]
+fn live_notes_at_a_converted_rate_are_late_by_at_most_the_converters_reach() {
+    for block in [64usize, 128, 192, 256, 512] {
+        for (device, reach) in [(48_000u32, 0u32), (44_100, 17), (96_000, 16)] {
+            assert_eq!(live_lateness(device, block, 0), reach, "48 kHz on {device}, {block}-frame callbacks, no lookahead");
+            assert_eq!(live_lateness(device, block, 128), 0, "48 kHz on {device}, {block}-frame callbacks, 128 frames of lookahead");
+        }
+    }
+}

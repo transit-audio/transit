@@ -116,9 +116,27 @@ impl Phase {
         self.units.div_euclid(self.denominator) as isize
     }
 
-    pub(super) fn quantum(self, output: usize, step: u64, max: usize) -> usize {
-        let frames = (output as u128 * u128::from(step)).div_ceil(self.denominator as u128);
-        frames.clamp(1, max.max(1) as u128) as usize
+    /// The render frames from the pending block's frame 0 that the next `output` output frames read
+    /// (the end of the last one's span), clamped to `1..=max`: what the rest of a callback with
+    /// `output` frames left needs rendered, and no more (#724). A block sized so ends with the
+    /// callback's last frame, so live input read for it is presented in the same callback, not
+    /// mostly in the next. At unit rate and a whole position it is the frames left exactly.
+    pub(super) fn reach(self, output: usize, step: u64, max: usize) -> Result<usize, MapError> {
+        let ahead = i64::try_from(output.saturating_sub(1))
+            .ok()
+            .zip(i64::try_from(step).ok())
+            .and_then(|(frames, step)| frames.checked_mul(step))
+            .and_then(|ahead| self.units.checked_add(ahead))
+            .ok_or(MapError::Arithmetic)?;
+        let last = Self { units: ahead, ..self };
+        let end = match last.whole(step) {
+            Some(i) => i64::try_from(i).map_err(|_| MapError::Arithmetic)?.saturating_add(1),
+            None => {
+                let (x, q) = last.position(step);
+                band_limited::span(x, q).end
+            }
+        };
+        Ok(end.clamp(1, max.max(1) as i64) as usize)
     }
 
     /// Output-device frames from the current output frame to render frame 0 of the next block

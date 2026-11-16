@@ -1175,9 +1175,8 @@ impl Audio {
         self.follow_speed()?;
         let mut step = u64::from(self.sample_rate) * u64::from(self.transport.speed);
         let callback_frames = out.len() / channels;
-        let mut quantum = self.read.quantum(callback_frames, step, self.plans.engine().max_block());
         let mut consumed = 0;
-        'frames: for frame in out.chunks_exact_mut(channels) {
+        'frames: for (at, frame) in out.chunks_exact_mut(channels).enumerate() {
             // The next block is rendered as soon as this output frame's taps reach into it (#525,
             // #601); the frames before it that the taps still reach are kept.
             while self.read.needs(self.pending, step) {
@@ -1195,11 +1194,11 @@ impl Audio {
                 // A speed changed since the callback began reaches the converter here, at the
                 // block boundary, with no frame rendered at the old one (#522).
                 self.follow_speed()?;
-                let now = u64::from(self.sample_rate) * u64::from(self.transport.speed);
-                if now != step {
-                    step = now;
-                    quantum = self.read.quantum(callback_frames, step, self.plans.engine().max_block());
-                }
+                step = u64::from(self.sample_rate) * u64::from(self.transport.speed);
+                // Only what this callback still reads (#724): up to the converter's reach at its
+                // last frame, never a whole callback started mid-callback, so the block ends with
+                // the callback and its live input is not held one callback late.
+                let quantum = self.read.reach(callback_frames - at, step, self.plans.engine().max_block())?;
                 self.render_next(quantum, actions)?;
                 // A new plan with another channel layout: the kept frames are the old layout's.
                 let layout = self.layout_key();

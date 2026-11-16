@@ -374,7 +374,11 @@ fn seek_past_loop_end_continues_linearly_and_a_seek_back_engages_the_loop() {
     control.send_action(Command::Locate(240), true).unwrap();
     fill(&mut audio, &mut out);
     assert_eq!(shared.position.load(Ordering::Relaxed), 48);
-    assert!(audio.transport.render_position > 48, "the unconsumed loop buffer must not advance the displayed playhead");
+    // The wrap renders only what the callback plays (#724): the 16 frames to the loop end, then 48
+    // from its start, nothing ahead. It used to render a whole callback after the wrap, holding the
+    // live input that much late. The playhead shown against a render ahead of it is pinned at a
+    // converted rate by `consumed_playhead_is_independent_of_render_ahead_and_callback_partition`.
+    assert_eq!(audio.transport.render_position, 48, "the wrap renders up to the callback's end and no further");
     control.retire(audio.plans, audio.actions);
 }
 
