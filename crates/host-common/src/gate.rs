@@ -22,6 +22,12 @@ pub struct Gate {
     in_pos: usize,
 }
 
+impl Default for Gate {
+    fn default() -> Gate {
+        Gate::new()
+    }
+}
+
 impl Gate {
     pub fn new() -> Gate {
         Gate { last: [0.0; MAX_CHANNELS], fade: 96, out_pos: 0, in_pos: usize::MAX }
