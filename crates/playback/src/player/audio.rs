@@ -938,6 +938,12 @@ impl Audio {
                 self.shared.metro.start_failure.store(failure as u8, Ordering::Relaxed);
             }
             self.transport.discard_pending = false;
+            // `record` placed the start sample at the output frame now being produced; restart
+            // the converter there as plain Record does (#724), or a converted rate presents the
+            // start sample the converter's reach later than the take is placed. At equal rates
+            // the converter is at this block's frame 0 already: nothing changes.
+            self.read.reset();
+            self.history.reset();
             self.publish_count_in();
         }
         let gain = f32::from_bits(self.shared.metro.gain.load(Ordering::Relaxed));
