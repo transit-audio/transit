@@ -275,14 +275,11 @@ pub fn list_devices(system: Option<&str>) -> Result<String, String> {
         return Ok(format_system(&transit_playback::devices::native_asio_system(None).ok_or("--system ASIO needs 64-bit Windows")?));
     }
     let backend = cpal_backend(system)?;
-    let mut text = format!("system: {}
-", backend.system());
+    let mut text = format!("system: {}\n", backend.system());
     for (label, direction) in [("outputs", ab::Direction::Output), ("inputs", ab::Direction::Input)] {
-        text.push_str(&format!("{label}:
-"));
+        text.push_str(&format!("{label}:\n"));
         for endpoint in backend.endpoints(direction).map_err(|e| e.to_string())? {
-            text.push_str(&format!("  {} ({} ch)
-", endpoint.name, endpoint.inputs.max(endpoint.outputs)));
+            text.push_str(&format!("  {} ({} ch)\n", endpoint.name, endpoint.inputs.max(endpoint.outputs)));
         }
     }
     Ok(text)
@@ -304,21 +301,17 @@ fn native_wasapi_system() -> Result<transit_playback::devices::AudioSystem, Stri
 /// loaded to be described) says its channel count is unknown; the system's diagnostics lead as
 /// `note:` lines, or `unavailable:` when it lists nothing.
 pub fn format_system(system: &transit_playback::devices::AudioSystem) -> String {
-    let mut text = format!("system: {} (native)
-", system.name);
+    let mut text = format!("system: {} (native)\n", system.name);
     let tag = if system.outputs.is_empty() && system.inputs.is_empty() { "unavailable" } else { "note" };
     for diagnostic in &system.diagnostics {
-        text.push_str(&format!("{tag}: {diagnostic}
-"));
+        text.push_str(&format!("{tag}: {diagnostic}\n"));
     }
     for (label, devices) in [("outputs", &system.outputs), ("inputs", &system.inputs)] {
-        text.push_str(&format!("{label}:
-"));
+        text.push_str(&format!("{label}:\n"));
         for d in devices {
             let channels = if d.max_channels == 0 { "channels unknown until opened".to_string() } else { format!("{} ch", d.max_channels) };
             let default = if d.is_default { " [default]" } else { "" };
-            text.push_str(&format!("  {} ({channels}){default}
-", d.name));
+            text.push_str(&format!("  {} ({channels}){default}\n", d.name));
         }
     }
     text
@@ -352,7 +345,7 @@ pub fn list_jack() -> Result<String, String> {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use transit_playback::backend::native::{system_from_endpoints, wasapi_system_from, Listing};
+    use transit_playback::backend::native::{Listing, system_from_endpoints, wasapi_system_from};
 
     fn endpoint(name: &str, inputs: u16, outputs: u16) -> ab::Endpoint {
         ab::Endpoint::new(name.into(), name.into(), "WASAPI".into(), inputs, outputs, Vec::new(), Arc::new(()))
@@ -369,13 +362,7 @@ mod tests {
             })
         };
         let text = format_system(&wasapi_system_from(list));
-        assert_eq!(text, "system: WASAPI (native)
-outputs:
-  Monitors (8 ch) [default]
-  Speakers (2 ch)
-inputs:
-  Microphone (1 ch)
-");
+        assert_eq!(text, "system: WASAPI (native)\noutputs:\n  Monitors (8 ch) [default]\n  Speakers (2 ch)\ninputs:\n  Microphone (1 ch)\n");
     }
 
     /// Drivers listed by registry name only say their channels are unknown, and a failed listing
@@ -386,16 +373,9 @@ inputs:
         let system = system_from_endpoints("ASIO", false, &[], &[], &installed, Vec::new());
         assert_eq!(
             format_system(&system),
-            "system: ASIO (native)
-outputs:
-  Model Mixer ASIO Driver (channels unknown until opened)
-inputs:
-  Model Mixer ASIO Driver (channels unknown until opened)
-"
+            "system: ASIO (native)\noutputs:\n  Model Mixer ASIO Driver (channels unknown until opened)\ninputs:\n  Model Mixer ASIO Driver (channels unknown until opened)\n"
         );
         let failed = wasapi_system_from(|_| Err("EnumAudioEndpoints failed".to_owned()));
-        assert!(format_system(&failed).starts_with("system: WASAPI (native)
-unavailable: WASAPI: EnumAudioEndpoints failed
-"));
+        assert!(format_system(&failed).starts_with("system: WASAPI (native)\nunavailable: WASAPI: EnumAudioEndpoints failed\n"));
     }
 }
