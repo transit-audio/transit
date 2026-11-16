@@ -20,7 +20,7 @@
 //! the same path. A choice that cannot be honored falls back to the default (the playback crate
 //! logs it); the fallback is said on the status line and in the window.
 
-mod card;
+pub(crate) mod card;
 mod jack_calibration;
 #[cfg(test)]
 mod live_tests;

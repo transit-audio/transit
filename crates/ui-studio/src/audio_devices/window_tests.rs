@@ -728,6 +728,7 @@ fn a_long_status_card_never_covers_the_button_row() {
             .with_fixed_buffer(128);
         let again = driver.clone();
         let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+        t.app.diag.machine = Some(crate::diagnostics::Machine { os: "Test OS".into(), cores: 4, ..Default::default() });
         t.app.ui.ui_zoom = zoom;
         t.screen = egui::vec2(1920.0, height) / zoom;
         t.frames(3);
@@ -763,6 +764,36 @@ fn a_long_status_card_never_covers_the_button_row() {
             );
         }
         assert!(card[1] >= window[1] && card[3] <= window[3], "{zoom} ppp at {height}: the card {card:?} is inside the window {window:?}");
+        assert_reserve_covers_the_sections(&t, &c);
+        // Copy diagnostics is how a report is made: it stays inside the card, visible, and answers a click, however
+        // far the lines are scrolled.
+        let copy = T::rect(&c, None, "copy_diagnostics");
+        assert!(
+            copy[0] >= card[0] - 0.5 && copy[2] <= card[2] + 0.5 && copy[1] >= card[1] - 0.5 && copy[3] <= card[3] + 0.5,
+            "{zoom} ppp: Copy diagnostics {copy:?} is inside the card {card:?}"
+        );
+        if notes > 2 {
+            // Scroll the lines to their end over the card: the first line leaves the card, the button does not.
+            let first = diag_lines(&c)[0];
+            t.events.push(egui::Event::PointerMoved(egui::pos2(mid(card).0, mid(card).1)));
+            t.events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -2_000.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: Default::default(),
+            });
+            t.frames(30);
+            let c = t.layout()["controls"].clone();
+            assert!(diag_lines(&c)[0][1] < first[1] - 20.0, "{zoom} ppp: the lines scrolled: {first:?} to {:?}", diag_lines(&c)[0]);
+            let copy = T::rect(&c, None, "copy_diagnostics");
+            assert!(
+                copy[1] >= card[1] - 0.5 && copy[3] <= card[3] + 0.5,
+                "{zoom} ppp: Copy diagnostics {copy:?} stays inside the card {card:?} after scrolling"
+            );
+            assert!(t.app.diag.copied.is_empty());
+            t.click(mid(copy));
+            assert!(!t.app.diag.copied.is_empty(), "{zoom} ppp: the pinned button copies the report");
+        }
     }
 }
 
@@ -787,4 +818,97 @@ fn no_status_line_piece_starts_with_punctuation() {
             assert!(!p.text.starts_with(|c: char| c.is_ascii_punctuation() || c.is_whitespace() || c == '\u{b7}'), "{:?} in {line}", p.text);
         }
     }
+}
+
+/// #732 as reported: ASIO at 1.5x in a window of about 800 x 700 points on the System tab, whose own content is tall
+/// (the calibration note wraps to two lines), with the telemetry as a running driver reports it (rates, large maxima)
+/// and a card of seven rows and more. The lines stay inside the card and the button row under it stays whole, apart
+/// from the card and from every line.
+#[test]
+fn the_card_leaves_the_button_row_whole_on_the_asio_system_tab_at_150_percent() {
+    use transit_audio_backend as ab;
+    use transit_playback::telemetry::StreamStats;
+    for notes in [0, 1, 2] {
+        let driver = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32))
+            .named("ASIO", "Focusrite USB ASIO")
+            .with_capture(2, true)
+            .with_fixed_buffer(128);
+        let again = driver.clone();
+        let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+        t.app.ui.ui_zoom = 1.5;
+        t.screen = egui::vec2(1920.0, 1200.0) / 1.5;
+        t.frames(3);
+        assert_eq!(t.ctx.pixels_per_point(), 1.5);
+        let cal = |period: u32| transit_playback::LoopbackCalibration {
+            device: "Focusrite USB ASIO".into(),
+            input: None,
+            mode: "asio".into(),
+            rate: 48_000,
+            period,
+            round_trip_frames: 1_000,
+            spread_frames: 7,
+            measured_at: "2026-10-23".into(),
+        };
+        t.app.ui.audio.calibrations = vec![cal(256), cal(64)];
+        let mut hist = [0u64; 16];
+        hist[0] = 90;
+        hist[5] = 40;
+        let mut output = StreamStats {
+            wakes: 1200,
+            wake_late_us: hist,
+            max_wake_late_us: 12_345,
+            service_us: hist,
+            max_service_us: 23_456,
+            busy_skips: 2,
+            overloads: 1,
+            ..Default::default()
+        };
+        let mut input = StreamStats { wakes: 1200, wake_late_us: hist, max_wake_late_us: 8_765, ..Default::default() };
+        t.app.audio_devices.injected_backend = Some((Some(output), Some(input)));
+        t.app.audio_devices.notes = (0..notes).map(|i| format!("A fallback note, number {i}")).collect();
+        t.open_window();
+        t.frames(3);
+        // A second sample a second later gives the wake rates the report shows.
+        t.time += 1.0;
+        output.wakes += 375;
+        input.wakes += 375;
+        t.app.audio_devices.injected_backend = Some((Some(output), Some(input)));
+        t.frames(2);
+        assert!(t.layout()["calibration"].as_str().unwrap().starts_with("not calibrated at the buffer size"), "the tall calibration note is shown");
+        assert!(t.layout()["opened"][1].as_str().unwrap().contains("wakes 247/s"), "{}", t.layout()["opened"]);
+        let c = t.layout()["controls"].clone();
+        let window: [f32; 4] = serde_json::from_value(t.layout()["window"].clone()).unwrap();
+        let card = T::rect(&c, None, "diag_card");
+        let lines = diag_lines(&c);
+        for key in ["apply", "revert", "reconnect", "rescan"] {
+            let b = T::rect(&c, None, key);
+            assert!(b[1] >= card[3] - 0.5, "notes {notes}: {key} {b:?} meets the card {card:?}");
+            for l in &lines {
+                assert!(l[3] <= b[1] + 0.5 || l[2] <= b[0] || l[0] >= b[2], "notes {notes}: a line {l:?} covers {key} {b:?}");
+            }
+            assert!(b[2] <= window[2] && b[3] <= window[3], "notes {notes}: {key} {b:?} is inside the window {window:?}");
+        }
+        for (i, l) in lines.iter().enumerate() {
+            assert!(
+                l[0] >= card[0] - 0.5 && l[2] <= card[2] + 0.5 && l[1] >= card[1] - 0.5 && l[3] <= card[3] + 0.5,
+                "notes {notes}: line {i} {l:?} runs out of the card {card:?}"
+            );
+        }
+        assert_reserve_covers_the_sections(&t, &c);
+    }
+}
+
+/// The rects of the card's lines, as the window records them.
+fn diag_lines(controls: &Value) -> Vec<[f32; 4]> {
+    controls.as_array().unwrap().iter().filter(|m| m["value"] == "diag_text").map(|m| serde_json::from_value(m["rect"].clone()).unwrap()).collect()
+}
+
+/// The room the card keeps free under it is an estimate (the sections are placed after it): it is at least what the
+/// section list and the separator measure.
+fn assert_reserve_covers_the_sections(t: &T, controls: &Value) {
+    let (first, last) = (T::rect(controls, None, "section_system"), T::rect(controls, None, "section_midi"));
+    let spacing = t.ctx.global_style().spacing.clone();
+    let measured = last[3] - first[1] + 2.0 * spacing.item_spacing.y + 1.0;
+    let reserved = crate::audio_devices::card::reserved_below(&spacing);
+    assert!(reserved >= measured, "the reserve {reserved} is at least the section list and separator {measured}");
 }
