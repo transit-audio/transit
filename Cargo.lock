@@ -4188,6 +4188,7 @@ dependencies = [
  "thiserror 2.0.21",
  "transit-clap-host",
  "transit-dsp",
+ "transit-host-common",
  "transit-rt",
  "transit-test-support",
  "windows-sys 0.61.2",
@@ -4262,6 +4263,16 @@ name = "transit-granular"
 version = "0.7.3"
 dependencies = [
  "transit-macro-osc-oracle",
+]
+
+[[package]]
+name = "transit-host-common"
+version = "0.7.3"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "transit-test-support",
 ]
 
 [[package]]
@@ -4528,6 +4539,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "transit-dsp",
+ "transit-host-common",
  "transit-rt",
  "transit-test-support",
  "transit-vst3-host",

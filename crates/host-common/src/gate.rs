@@ -9,9 +9,9 @@
 const FADE_SECONDS: f64 = 0.002;
 
 /// Per channel, at most this many (the host strips' cap).
-pub(crate) const MAX_CHANNELS: usize = 64;
+pub const MAX_CHANNELS: usize = 64;
 
-pub(crate) struct Gate {
+pub struct Gate {
     /// The last sample of each channel the plug-in put out.
     last: [f32; MAX_CHANNELS],
     /// Fade length in samples (at least 1).
@@ -23,12 +23,12 @@ pub(crate) struct Gate {
 }
 
 impl Gate {
-    pub(crate) fn new() -> Gate {
+    pub fn new() -> Gate {
         Gate { last: [0.0; MAX_CHANNELS], fade: 96, out_pos: 0, in_pos: usize::MAX }
     }
 
     /// The rate the plug-in is prepared for (sets the fade length).
-    pub(crate) fn set_rate(&mut self, sample_rate: f64) {
+    pub fn set_rate(&mut self, sample_rate: f64) {
         let n = (sample_rate * FADE_SECONDS).round();
         self.fade = if n.is_finite() && n >= 1.0 { n as usize } else { 1 };
     }
@@ -39,7 +39,7 @@ impl Gate {
 
     /// A block the plug-in is not called for: the first `ch` channels of `io` become the fade out
     /// of the last output (continued across skipped blocks), then silence.
-    pub(crate) fn skip(&mut self, io: &mut [Vec<f32>], ch: usize, frames: usize) {
+    pub fn skip(&mut self, io: &mut [Vec<f32>], ch: usize, frames: usize) {
         for (c, buf) in io.iter_mut().take(ch).enumerate() {
             let last = self.last.get(c).copied().unwrap_or(0.0);
             for (i, x) in buf.iter_mut().take(frames).enumerate() {
@@ -51,7 +51,7 @@ impl Gate {
     }
 
     /// A block the plug-in processed: faded in after skipped blocks, and its last samples kept.
-    pub(crate) fn processed(&mut self, io: &mut [Vec<f32>], ch: usize, frames: usize) {
+    pub fn processed(&mut self, io: &mut [Vec<f32>], ch: usize, frames: usize) {
         if self.in_pos < self.fade {
             for buf in io.iter_mut().take(ch) {
                 for (i, x) in buf.iter_mut().take(frames).enumerate() {

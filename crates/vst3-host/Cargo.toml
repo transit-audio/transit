@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 transit-dsp.workspace = true
+transit-host-common.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 log.workspace = true

@@ -79,6 +79,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-texture", 1),
     ("transit-modulator", 1),
     ("transit-random-sequencer", 1),
+    ("transit-host-common", 1),
     ("transit-clap-host", 1),
     ("transit-vst3-host", 1),
     ("transit-au-host", 1),

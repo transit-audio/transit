@@ -47,11 +47,11 @@ pub mod scan;
 
 #[allow(unsafe_code)]
 mod ffi;
-mod gate;
+use transit_host_common::gate;
 mod params;
 mod plugin;
 mod registry;
-mod scan_cache;
+use transit_host_common::scan_cache;
 mod trace;
 
 pub use plugin::Vst3Plugin;

@@ -1,0 +1,19 @@
+[package]
+name = "transit-host-common"
+description = "transit plug-in host code shared by the CLAP and VST3 hosts: the skipped-block fade gate and the scan cache with its child-process loader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+transit-test-support.workspace = true
+
+[lints]
+workspace = true

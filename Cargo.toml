@@ -41,6 +41,7 @@ transit-modulator = { path = "crates/modulator" }
 transit-random-sequencer = { path = "crates/random-sequencer" }
 transit-clap-host = { path = "crates/clap-host" }
 transit-vst3-host = { path = "crates/vst3-host" }
+transit-host-common = { path = "crates/host-common" }
 transit-au-host = { path = "crates/au-host" }
 transit-plugin-host = { path = "crates/plugin-host" }
 transit-model = { path = "crates/model" }
