@@ -22,6 +22,7 @@ mod exclusive;
 mod lifecycle;
 mod loopback;
 mod loopback_com;
+mod pair_cache;
 mod pairing;
 mod render_loop;
 mod stats;
@@ -64,6 +65,8 @@ struct WasapiEndpoint {
 pub struct WasapiBackend {
     watcher: Mutex<Option<Watcher>>,
     pairing: Option<String>,
+    /// The pairing answer of the open in progress (see [`pair_cache`]).
+    paired: pair_cache::PairCache<Result<EndpointInfo, ab::OpenError>>,
 }
 
 fn endpoint_of(info: &EndpointInfo, output: bool) -> ab::Endpoint {
@@ -161,6 +164,14 @@ impl WasapiBackend {
     /// The capture endpoint to use for `endpoint`: itself when it is a capture endpoint, else the
     /// one paired with the render endpoint.
     fn paired_input(&self, endpoint: &ab::Endpoint) -> Result<EndpointInfo, ab::OpenError> {
+        let Some(device) = endpoint.handle::<WasapiEndpoint>() else {
+            return Err(ab::OpenError::Other("the endpoint is not a WASAPI device".into()));
+        };
+        self.paired.get_or_compute(&device.id, || self.compute_paired_input(endpoint))
+    }
+
+    /// [`Self::paired_input`] asked of the system: two enumerations, each on its own MTA thread.
+    fn compute_paired_input(&self, endpoint: &ab::Endpoint) -> Result<EndpointInfo, ab::OpenError> {
         let device = endpoint.handle::<WasapiEndpoint>().ok_or_else(|| ab::OpenError::Other("the endpoint is not a WASAPI device".into()))?;
         let inputs = com::list_endpoints(false)?;
         if !device.output {
@@ -184,17 +195,20 @@ impl ab::Backend for WasapiBackend {
     }
 
     fn endpoints(&self, direction: ab::Direction) -> Result<Vec<ab::Endpoint>, ab::OpenError> {
+        self.paired.clear();
         let output = direction == ab::Direction::Output;
         Ok(com::list_endpoints(output)?.iter().map(|info| endpoint_of(info, output)).collect())
     }
 
     fn plan_render(&self, wish: &ab::OutputWish) -> Result<ab::Plan, String> {
+        self.paired.clear();
         let endpoints = com::list_endpoints(true).map_err(|e| e.to_string())?;
         let info = resolve(&endpoints, wish.device.as_deref(), "output").ok_or("no output device")?;
         Ok(ab::Plan { endpoint: endpoint_of(info, true), attempts: attempts(info, wish.rates.clone(), wish.period) })
     }
 
     fn plan_capture(&self, wish: &ab::InputWish) -> Result<ab::Plan, String> {
+        self.paired.clear();
         let endpoints = com::list_endpoints(false).map_err(|e| e.to_string())?;
         let info = resolve(&endpoints, wish.device.as_deref(), "input").ok_or("no input device")?;
         Ok(ab::Plan { endpoint: endpoint_of(info, false), attempts: attempts(info, wish.rate.into_iter().collect(), wish.period) })
@@ -237,6 +251,8 @@ impl ab::Backend for WasapiBackend {
         error: ab::ErrorCallback,
     ) -> Result<(Box<dyn ab::Stream>, ab::Achieved), ab::OpenError> {
         let device = endpoint.handle::<WasapiEndpoint>().ok_or_else(|| ab::OpenError::Other("the endpoint is not a WASAPI device".into()))?;
+        // An open resolves the pairing afresh: the device may have changed since the plan.
+        self.paired.clear();
         let id = if device.output { self.paired_input(endpoint)?.id } else { device.id.clone() };
         let (stream, achieved) = NativeStream::open_capture(OpenParams { id, request: *request, loopback: None }, capture, error)?;
         Ok((Box::new(stream), achieved))
