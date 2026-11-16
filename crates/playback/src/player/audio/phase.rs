@@ -148,6 +148,18 @@ impl Phase {
         if step == 0 { 0.0 } else { -(self.units as f64) / step as f64 }
     }
 
+    /// [`Phase::lead`] in whole output frames, to the nearest (a half rounds up), 0 when render
+    /// frame 0 of the next block is the current output frame or behind it. Integers only. Whole
+    /// whenever the frames rendered since the converter started convert to whole output frames
+    /// (a count-in bar of 96,000 frames at 48 kHz is 88,200 at 44.1 kHz).
+    pub(super) fn ahead(self, step: u64) -> u64 {
+        if step == 0 || self.units >= 0 {
+            return 0;
+        }
+        let (behind, step) = (-i128::from(self.units), i128::from(step));
+        u64::try_from((behind + step / 2) / step).unwrap_or(0)
+    }
+
     /// Output frames per render frame at `step`.
     pub(super) fn ratio(self, step: u64) -> f64 {
         if step == 0 { 1.0 } else { self.denominator as f64 / step as f64 }

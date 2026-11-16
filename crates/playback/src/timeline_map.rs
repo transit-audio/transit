@@ -196,6 +196,20 @@ impl Timeline {
         self.loop_active = engaged && loop_range.is_some_and(|(_, end)| self.position <= i128::from(end) * i128::from(self.rate.denominator));
         Ok(())
     }
+    /// Start a playing timeline `frames` output frames before its position, so it reaches the
+    /// position on the `frames`-th output frame after the next consumed one (a count-in latch at a
+    /// converted rate, #724: the frames before it still present what was rendered earlier).
+    /// Nothing changes for 0 frames or a parked timeline; whether a loop is engaged does not change.
+    pub fn lead_in(&mut self, frames: u64) -> Result<(), MapError> {
+        if frames == 0 || !self.playing {
+            return Ok(());
+        }
+        let back = i128::from(frames).checked_mul(i128::from(self.rate.numerator)).ok_or(MapError::Arithmetic)?;
+        let position = self.position.checked_sub(back).ok_or(MapError::Arithmetic)?;
+        Position::from_parts(position, self.rate.denominator)?;
+        self.position = position;
+        Ok(())
+    }
     pub fn next_output(&self) -> u64 {
         self.next_output
     }

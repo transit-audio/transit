@@ -244,19 +244,38 @@ impl Transport {
         looped: Option<Range>,
         live: &mut plan_bridge::Processing<'_>,
     ) -> ActionResult {
-        self.record_within(ticket, from, end, looped, live, None)
+        self.record_within(ticket, from, end, looped, live, None, 0)
     }
 
-    /// Retry a start that was waiting for the clock. Fails once `deadline` has passed.
-    fn retry_waiting(&mut self, live: &mut plan_bridge::Processing<'_>) -> Option<ActionResult> {
+    /// Retry a start that was waiting for the clock, `ahead` as [`Self::record_ahead`] takes it.
+    /// Fails once `deadline` has passed.
+    fn retry_waiting(&mut self, live: &mut plan_bridge::Processing<'_>, ahead: u64) -> Option<ActionResult> {
         let waiting = self.waiting.take()?;
         let now = self.timeline.next_output();
         let patience = if now <= waiting.deadline { waiting.deadline } else { 0 };
-        Some(self.record_within(waiting.ticket, waiting.from, waiting.end, waiting.looped, live, Some(patience)))
+        Some(self.record_within(waiting.ticket, waiting.from, waiting.end, waiting.looped, live, Some(patience), ahead))
+    }
+
+    /// [`Self::record`] from `from` at a block boundary where the converter runs on (the end of a
+    /// count-in, #724): the block about to render is presented `ahead` output frames after the next
+    /// consumed one, so that frame is the latch and the timeline reaches `from` there.
+    fn record_ahead(
+        &mut self,
+        ticket: start::Ticket,
+        from: Samples,
+        end: Option<Samples>,
+        looped: Option<Range>,
+        live: &mut plan_bridge::Processing<'_>,
+        ahead: u64,
+    ) -> ActionResult {
+        self.record_within(ticket, Some(from), end, looped, live, None, ahead)
     }
 
     /// `patience`: `None` on a fresh request (wait for the clock if it may validate), the deadline
-    /// of a start already waiting (`Some(0)` once it has passed: no more waiting).
+    /// of a start already waiting (`Some(0)` once it has passed: no more waiting). `ahead`: output
+    /// frames from the next consumed one to the frame presenting `from` (0 but for a start whose
+    /// converter runs on, [`Self::record_ahead`]).
+    #[allow(clippy::too_many_arguments)]
     fn record_within(
         &mut self,
         ticket: start::Ticket,
@@ -265,6 +284,7 @@ impl Transport {
         looped: Option<Range>,
         live: &mut plan_bridge::Processing<'_>,
         patience: Option<u64>,
+        ahead: u64,
     ) -> ActionResult {
         if self.speed != 1000 {
             // Backstop: a latch is published only at 1x (#522). The applied speed follows the
@@ -296,9 +316,13 @@ impl Transport {
             } else if !self.playing {
                 return Err(ActionResult::RecordingNotPlaying);
             }
-            let output_frame = timeline.next_output();
-            let basis = self.start_basis(output_frame, audio).map_err(ActionResult::RecordingClock)?;
             let position = timeline.position().map_err(ActionResult::Timeline)?;
+            // The timeline plays through the frames still presenting what was rendered before and
+            // reaches `from` on the frame that presents it (#724).
+            let ahead = if from.is_some() { ahead } else { 0 };
+            timeline.lead_in(ahead).map_err(ActionResult::Timeline)?;
+            let output_frame = timeline.next_output().checked_add(ahead).ok_or(ActionResult::Timeline(timeline_map::MapError::Arithmetic))?;
+            let basis = self.start_basis(output_frame, audio).map_err(ActionResult::RecordingClock)?;
             Ok((timeline, epoch, start::Point { host_ns: basis.host_ns, output_frame, position }, basis))
         })();
         let (timeline, epoch, point, basis) = match prepared {
@@ -919,7 +943,8 @@ impl Audio {
         if self.transport.waiting.is_some() {
             // The clock was warming up when Record arrived: try again at this block boundary.
             let mut live = self.plans.processing();
-            if let Some(result) = self.transport.retry_waiting(&mut live) {
+            let ahead = self.read.ahead(u64::from(self.sample_rate) * u64::from(self.transport.speed));
+            if let Some(result) = self.transport.retry_waiting(&mut live, ahead) {
                 if let Some(failure) = StartFailure::of(result) {
                     self.shared.metro.start_failure.store(failure as u8, Ordering::Relaxed);
                 }
@@ -929,21 +954,19 @@ impl Audio {
         if let Some(counting) = self.transport.count_in.filter(|c| c.left <= 0) {
             // The count-in ended exactly at the previous block's last sample: start Play and the
             // recording latch now, for the block about to render. Nothing is pending, so the reset
-            // `record` asks for would only discard the block rendered below.
+            // `record` asks for would only discard the block rendered below. The converter runs on,
+            // so anything sounding across the latch stays continuous: at a converted rate the block
+            // about to render is presented its lead after the next consumed frame, and that frame
+            // is the latch (#724). At equal rates the lead is 0.
             self.transport.count_in = None;
+            let ahead = self.read.ahead(u64::from(self.sample_rate) * u64::from(self.transport.speed));
             let mut live = self.plans.processing();
-            let result = self.transport.record(counting.ticket, Some(counting.from), counting.end, counting.looped, &mut live);
+            let result = self.transport.record_ahead(counting.ticket, counting.from, counting.end, counting.looped, &mut live, ahead);
             if let Some(failure) = StartFailure::of(result) {
                 // `record` cancelled the ticket and left the transport parked: tell Main why.
                 self.shared.metro.start_failure.store(failure as u8, Ordering::Relaxed);
             }
             self.transport.discard_pending = false;
-            // `record` placed the start sample at the output frame now being produced; restart
-            // the converter there as plain Record does (#724), or a converted rate presents the
-            // start sample the converter's reach later than the take is placed. At equal rates
-            // the converter is at this block's frame 0 already: nothing changes.
-            self.read.reset();
-            self.history.reset();
             self.publish_count_in();
         }
         let gain = f32::from_bits(self.shared.metro.gain.load(Ordering::Relaxed));

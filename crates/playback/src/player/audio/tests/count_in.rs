@@ -112,9 +112,8 @@ fn count_in_clicks_for_exactly_the_bar_then_play_and_the_recording_latch_start_o
 /// device rate as at equal rates. The click runs on through the latch (the session's click is on),
 /// so the first played beat's click must sit on the latch exactly as the count-in's first click
 /// sits on the output frame the count-in began at: the same click shape, its peak the same number
-/// of output frames after each. At a converted rate the latch restarts the converter as plain
-/// Record does, so the bar ends the converter's reach early (silence: the last click is long
-/// over): 15 output frames on 44.1 kHz, 31 on 96 kHz, never at equal rates.
+/// of output frames after each. The bar keeps its whole length in output frames: 96,000 session
+/// frames are 88,200 output frames at 44.1 kHz and 192,000 at 96 kHz.
 #[test]
 fn the_latch_presents_the_start_sample_at_a_converted_rate_too() {
     let peak = |out: &[f32], from: usize| {
@@ -124,10 +123,11 @@ fn the_latch_presents_the_start_sample_at_a_converted_rate_too() {
     for (rate, callback, bar) in [
         (48_000u32, 480usize, 96_000),
         (48_000, 700, 96_000),
-        (44_100, 441, 88_185),
-        (44_100, 700, 88_185),
-        (44_100, 128, 88_185),
-        (96_000, 512, 191_969),
+        (44_100, 441, 88_200),
+        (44_100, 700, 88_200),
+        (44_100, 128, 88_200),
+        (96_000, 512, 192_000),
+        (96_000, 700, 192_000),
     ] {
         let mut session = Session::default();
         session.edit.click = true;
@@ -149,6 +149,44 @@ fn the_latch_presents_the_start_sample_at_a_converted_rate_too() {
         let latch = latch.unwrap_or_else(|| panic!("{rate} {callback}: never latched")) - first;
         assert_eq!(latch, bar, "{rate} on a callback of {callback}: the count-in's length in output frames");
         assert_eq!(peak(&heard, latch as usize), peak(&heard, 0), "{rate} on a callback of {callback}: the played click against the latch");
+        control.retire(audio.plans, audio.actions);
+    }
+}
+
+/// #724: what sounds across the latch stays continuous at every device rate: the converter runs
+/// on through it. A steady 1 kHz sine from a track's Signal Generator (the count-in click at zero
+/// gain) moves by no more from one output frame to the next around the latch than it does anywhere
+/// in the bar.
+#[test]
+fn a_tone_sounding_across_the_latch_has_no_step_at_any_rate() {
+    for (rate, callback) in [(44_100u32, 441usize), (44_100, 128), (48_000, 480), (48_000, 700), (96_000, 512)] {
+        let mut session = Session::default();
+        session.edit.click = false;
+        let track = session.add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Stereo, None);
+        session.track_mut(track).unwrap().mixer.inserts.push(Some(transit_model::Insert::new("signal_generator")));
+        let (mut control, mut audio, shared, _start, reader) = counting_on(rate, session, 0, 1);
+        shared.metro.gain.store(0.0f32.to_bits(), Ordering::Relaxed);
+        let first = audio.transport.timeline.next_output();
+        let mut out = vec![0.0f32; callback * 2];
+        let mut heard = Vec::new();
+        let mut latch = None;
+        while heard.len() < 3 * rate as usize {
+            let now = audio.transport.timeline.next_output();
+            track_clock(&mut audio, rate, now);
+            fill(&mut audio, &mut out);
+            control.service(&mut make);
+            heard.extend(out.as_chunks::<2>().0.iter().map(|f| f[0]));
+            if let start::Status::Started(point) = reader.status() {
+                latch.get_or_insert(point.output_frame);
+            }
+        }
+        let latch = (latch.unwrap_or_else(|| panic!("{rate} {callback}: never latched")) - first) as usize;
+        let step = |range: std::ops::Range<usize>| heard[range].windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        // Steady: from a quarter of a second in (the level has settled) to well before the latch.
+        let normal = step(rate as usize / 4..latch - rate as usize / 10);
+        let across = step(latch - 200..latch + 200);
+        assert!(normal > 0.005, "{rate}: the tone sounds during the count-in ({normal})");
+        assert!(across <= normal * 1.001, "{rate} on a callback of {callback}: a step of {across} at the latch against {normal}");
         control.retire(audio.plans, audio.actions);
     }
 }

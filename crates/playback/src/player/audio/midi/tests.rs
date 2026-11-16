@@ -368,10 +368,36 @@ fn latched(rig: &mut Rig, reader: &start::Reader) -> start::Point {
 
 /// The pass's events as the take places them: session samples since the latch.
 fn offsets(rig: &mut Rig, point: start::Point) -> Vec<i64> {
+    offsets_on(rig, point, 48_000)
+}
+
+/// [`offsets`] on a device at `device` Hz.
+fn offsets_on(rig: &mut Rig, point: start::Point, device: u32) -> Vec<i64> {
     rig.capture.poll();
     let take =
-        crate::MidiTake { tracks: vec![rig.target.0], start: Some(point), events: rig.capture.events().to_vec(), dropped: 0, device_rate: 48_000 };
+        crate::MidiTake { tracks: vec![rig.target.0], start: Some(point), events: rig.capture.events().to_vec(), dropped: 0, device_rate: device };
     take.timed(48_000).iter().map(|(offset, _)| *offset).collect()
+}
+
+/// #724: at a converted device rate a pickup played on a count-in click lands on that click's
+/// place before the record start, as at equal rates: the latch is the output frame that presents
+/// the start sample, so the clicks and the take share one timeline. A count-in of 4,800 session
+/// frames (beats of 1,200); the pickup arrives on the output frame presenting beat 3 (2,400).
+#[test]
+fn a_pickup_on_a_count_in_click_lands_on_that_click_at_a_converted_rate_too() {
+    for device in [48_000u32, 44_100, 96_000] {
+        let mut rig = Rig::new(device);
+        // The count-in starts at the next callback's first frame, with the converter at frame 0.
+        let first = rig.audio.transport.timeline.next_output();
+        let (_start, reader) = counting_in(&mut rig, 1_000, 4_800);
+        let beat3 = first + 2_400 * u64::from(device) / 48_000;
+        rig.send(beat3, 0, false);
+        let point = latched(&mut rig, &reader);
+        let placed = offsets_on(&mut rig, point, device);
+        assert_eq!(point.output_frame - first, 4_800 * u64::from(device) / 48_000, "{device}: the bar's length in output frames");
+        assert_eq!(point.position.sample, 1_000);
+        assert_eq!(placed, [-2_400], "{device}: the pickup against the click it was played on");
+    }
 }
 
 #[test]
