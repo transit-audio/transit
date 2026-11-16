@@ -234,6 +234,16 @@ fn lost_events_are_reported() {
 }
 
 #[test]
+fn one_lost_event_is_reported_in_the_singular() {
+    let (mut app, t) = app();
+    let mut take = pass(t, Some(0), vec![on(LATCH, t, 60), off(LATCH + 100, t, 60)]);
+    take.dropped = 1;
+    record(&mut app, 0, None, 2 * BEAT, take);
+    assert!(app.status.contains("(1 note) on ") && app.status.ends_with("; 1 event lost"), "{}", app.status);
+    assert!(!app.status.contains("1 events"), "{}", app.status);
+}
+
+#[test]
 fn a_midi_only_pass_needs_an_open_audio_device() {
     let (mut app, _) = app();
     app.start_recording();
@@ -583,7 +593,7 @@ fn recording_within_one_lap_keeps_the_single_take_status() {
     tick(&mut app, 4 * BEAT + BEAT / 2);
     tick(&mut app, 4 * BEAT + BEAT);
     app.stop_play();
-    assert!(app.status.starts_with("Recorded 1 MIDI clip (1 notes) on"), "{}", app.status);
+    assert!(app.status.starts_with("Recorded 1 MIDI clip (1 note) on"), "{}", app.status);
 }
 
 #[test]

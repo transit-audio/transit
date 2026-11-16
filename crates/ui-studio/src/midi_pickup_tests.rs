@@ -193,7 +193,7 @@ fn a_note_before_the_count_in_started_is_reported_on_the_status_line() {
     let events = vec![on(LATCH - 4 * B - 10, t, 50), off(LATCH - 4 * B + 10, t, 50), on(LATCH + B, t, 60), off(LATCH + 2 * B, t, 60)];
     record(&mut app, 4 * BEAT, 4 * BEAT, None, 7 * BEAT, pass(t, 4 * BEAT, events));
     assert_eq!(spans(&app, t), [(4 * BEAT, 3 * BEAT)], "no pickup in the count-in: from the record start");
-    assert!(app.status.starts_with("Recorded 1 MIDI clip (1 notes) on "), "{}", app.status);
+    assert!(app.status.starts_with("Recorded 1 MIDI clip (1 note) on "), "{}", app.status);
     assert!(app.status.ends_with("; 1 note played before recording began was not recorded"), "{}", app.status);
 }
 

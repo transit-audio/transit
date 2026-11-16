@@ -589,7 +589,7 @@ impl StudioApp {
         let events: Vec<_> = midi.timed(self.engine.session().sample_rate.hz()).iter().filter_map(|(offset, e)| rec_event(*offset, e)).collect();
         let ids = transit_engine::midi_take::place_midi_recording_wrapping(&mut self.engine, plan, &events, end - plan.start, self.take_cycle);
         if midi.dropped > 0 {
-            self.status = format!("{} MIDI events were lost: the capture queue was full", midi.dropped);
+            self.status = format!("{}: the capture queue was full", events_lost(midi.dropped, true));
         }
         self.report_midi_take(midi, &ids);
         // Notes played before the count-in started are not in the take: said, never silent.
@@ -631,11 +631,11 @@ impl StudioApp {
             self.show_new_takes(ids);
         }
         let status = if passes > 1 {
-            format!("Recorded {passes} takes ({notes} notes) on {}", names.join(", "))
+            format!("Recorded {passes} takes ({}) on {}", counted(notes, "note"), names.join(", "))
         } else {
-            format!("Recorded {} MIDI clip{} ({notes} notes) on {}", ids.len(), if ids.len() == 1 { "" } else { "s" }, names.join(", "))
+            format!("Recorded {} MIDI clip{} ({}) on {}", ids.len(), if ids.len() == 1 { "" } else { "s" }, counted(notes, "note"), names.join(", "))
         };
-        self.status = if midi.dropped > 0 { format!("{status}; {} events lost", midi.dropped) } else { status };
+        self.status = if midi.dropped > 0 { format!("{status}; {}", events_lost(midi.dropped, false)) } else { status };
         let clips: Vec<u64> = ids.iter().map(|c| c.0).collect();
         let _ = self.run("edit.select", json!({"clips": clips}));
         if let Some((t, _)) = ids.first().and_then(|id| s.find_clip(*id)) {
@@ -683,7 +683,7 @@ impl StudioApp {
         // Cut into laps: loop recording, or a take that ran past the end of the loop it cycled over (#567).
         if plan.pass.is_some() || (plan.cycle.is_some() && passes > 1) {
             self.show_new_takes(&ids);
-            self.status = if passes > 1 { format!("Recorded {passes} takes") } else { format!("Loop-recorded {passes} take(s)") };
+            self.status = if passes > 1 { format!("Recorded {passes} takes") } else { format!("Loop-recorded {}", counted(passes, "take")) };
             return ids;
         }
         let s = self.engine.session_arc();
@@ -721,6 +721,22 @@ impl StudioApp {
 pub(crate) fn record_speed_refusal(speed: f32) -> String {
     let at = if (speed - 0.5).abs() < f32::EPSILON { "half speed".to_string() } else { format!("{speed}x speed") };
     format!("Cannot record at {at}: recording runs at normal speed only. Press Stop, then Record.")
+}
+
+/// `n` of `noun`, singular for one: "1 note", "2 notes".
+pub(crate) fn counted(n: usize, noun: &str) -> String {
+    if n == 1 { format!("1 {noun}") } else { format!("{n} {noun}s") }
+}
+
+/// What the status line says about `n` MIDI events lost to a full capture queue: the whole sentence
+/// start (`leading`, "3 MIDI events were lost") or the tail after a recording summary ("3 events lost").
+pub(crate) fn events_lost(n: u64, leading: bool) -> String {
+    match (leading, n == 1) {
+        (true, true) => "1 MIDI event was lost".into(),
+        (true, false) => format!("{n} MIDI events were lost"),
+        (false, true) => "1 event lost".into(),
+        (false, false) => format!("{n} events lost"),
+    }
 }
 
 /// What the status line adds when `n` notes were played before the count-in started (before the
@@ -767,4 +783,25 @@ fn rec_event(offset: Samples, e: &transit_playback::midi_capture::CapturedEvent)
         Message::Control14 { .. } => return None,
     };
     Some(transit_engine::midi_take::RecEvent { track: e.track, channel: e.channel, offset, msg })
+}
+
+#[cfg(test)]
+mod plural_tests {
+    use super::*;
+
+    #[test]
+    fn counts_in_the_status_line_are_singular_for_one() {
+        assert_eq!(counted(0, "note"), "0 notes");
+        assert_eq!(counted(1, "note"), "1 note");
+        assert_eq!(counted(2, "note"), "2 notes");
+        assert_eq!(format!("Loop-recorded {}", counted(1, "take")), "Loop-recorded 1 take");
+    }
+
+    #[test]
+    fn lost_events_read_right_for_one_and_many() {
+        assert_eq!(events_lost(1, true), "1 MIDI event was lost");
+        assert_eq!(events_lost(3, true), "3 MIDI events were lost");
+        assert_eq!(events_lost(1, false), "1 event lost");
+        assert_eq!(events_lost(3, false), "3 events lost");
+    }
 }
