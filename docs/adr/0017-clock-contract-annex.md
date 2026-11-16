@@ -92,9 +92,8 @@ session rate times the speed over the device rate. The plan is never rendered a 
 ahead, at a loop wrap or a count-in end inside a callback included (amended 2026-11-16, #724; it
 rendered a whole callback from the middle of a callback before). The live input converter reads
 up to 16·max(1, q) input frames past its position, q being the input rate over the session rate.
-At its aligning read the ring discards queued input down to the read's input frames plus
-`halo(q)` = ceil(16·max(1, q)) + 1 (0 at equal rates) plus any slack. That is a target, met only
-when that much input is queued. With less queued, the first read stops at the first frame whose
+At its aligning read the ring keeps at most max(read + `halo(q)` + slack, last push + `halo(q)`) input frames, where read is the read's input span rounded up, `halo(q)` = ceil(16·max(1, q)) + 1 (0 at equal rates), last push the capture block last pushed, and slack 0 on a paired device or max(read, last push) otherwise. That is a target, met only when that much
+input is queued. With less queued, the first read stops at the first frame whose
 taps are not all queued, reads silence for the rest, and that stop sets the input's place; with
 more, the first read need not stop and the input sits further back (amended 2026-11-16, #724).
 Both enter any round trip measured on the plan's timeline, by an amount that depends on the converters' relative phase, the captured input history kept at alignment and the callback endpoints met afterward; the device buffer influences those but does not determine the result alone
@@ -340,12 +339,13 @@ replaced in place (the paragraph after "Distinct coordinates").
   (`crates/playback/src/player/audio.rs`), where `Phase::reach` returns the end of the last output
   frame's span, `band_limited::span(x, q).end` (`crates/playback/src/player/audio/phase.rs`). At
   equal rates and a whole-frame position that is the callback's last frame. The input is placed by
-  two lines of `crates/playback/src/record/monitor.rs`: the aligning read keeps
+  two lines of `crates/playback/src/record/monitor.rs`: the aligning read keeps at most
   `read.saturating_add(lookahead).saturating_add(slack).max(last_push.saturating_add(lookahead))`
   input frames, and the reader stops at the first frame where
   `band_limited::span(x, q).end > queued as i64`. A plan that attaches an input calls only
   `input.align_on_next_read()` (`crates/playback/src/plan_bridge.rs`), so an input can attach with
-  more than the target queued.
+  more than the target queued. A stopped read does not advance the input's position. The backlog
+  test `a_click_through_the_input_converter_peaks_at_its_input_position_and_the_backlog_reports_the_look_ahead` shows B = `halo(q)` for its prefilled cases, in lockstep, with one read per capture block; that is not an invariant of every read (a callback split into several render blocks reads more than once per capture block).
 - **What decides the added round trip.** The converters' relative phase, the captured input history kept at alignment and the callback endpoints met afterward; the device buffer influences those but does not determine the result alone. It is not a
   function of the two rates.
 - **What the tests pin** (`crates/playback/src/player/device/tests/converted_rate.rs`; each run
