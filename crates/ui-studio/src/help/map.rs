@@ -131,8 +131,10 @@ pub fn status_segments(line: &str) -> Vec<Segment> {
                 out.push(segment(rest, Some(id)));
                 return out;
             }
-            for (i, piece) in rest.split(" · ").enumerate() {
-                let text = if i == 0 { piece.to_owned() } else { format!(" \u{b7} {piece}") };
+            // The separator ends the piece before it, so a row that breaks between pieces never starts with it.
+            let pieces: Vec<&str> = rest.split(" \u{b7} ").collect();
+            for (i, piece) in pieces.iter().enumerate() {
+                let text = if i + 1 < pieces.len() { format!("{piece} \u{b7} ") } else { (*piece).to_owned() };
                 out.push(Segment { text, id: open_piece(piece, i == 0) });
             }
             return out;
@@ -157,13 +159,14 @@ fn backend_segments(line: &str) -> Vec<Segment> {
     let Some(colon) = line.find(": ") else { return vec![segment(line, Some(Id::AudioDevicesBackend))] };
     let (prefix, body) = line.split_at(colon + 2);
     let mut out = vec![segment(prefix, Some(Id::AudioDevicesBackend))];
-    // A chunk starts where a separator is followed by the name of a figure; the words between
-    // (`p95 12 µs, max 30 µs`) stay with the figure before.
+    // A chunk starts at the name of a figure that follows a separator; the separator stays at the end of the chunk
+    // before, so no row starts with punctuation. The words between (`p95 12 µs, max 30 µs`) stay with the figure
+    // before.
     let mut starts = vec![0usize];
     for (at, sep) in body.match_indices("; ").chain(body.match_indices(", ")) {
         let rest = &body[at + sep.len()..];
         if BACKEND_FIGURES.iter().any(|(word, _)| rest.starts_with(word)) {
-            starts.push(at);
+            starts.push(at + sep.len());
         }
     }
     starts.sort_unstable();
@@ -171,8 +174,7 @@ fn backend_segments(line: &str) -> Vec<Segment> {
     for (i, start) in starts.iter().enumerate() {
         let end = starts.get(i + 1).copied().unwrap_or(body.len());
         let chunk = &body[*start..end];
-        let word = chunk.trim_start_matches([';', ',', ' ']);
-        let id = BACKEND_FIGURES.iter().find(|(w, _)| word.starts_with(w)).map(|(_, id)| *id);
+        let id = BACKEND_FIGURES.iter().find(|(w, _)| chunk.starts_with(w)).map(|(_, id)| *id);
         out.push(segment(chunk, id));
     }
     out

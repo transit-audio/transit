@@ -17,7 +17,6 @@ fn contents(ui: &mut egui::Ui, app: &mut StudioApp, (opened, audio_on): (&[Strin
     let (rect, clicked) = app.diagnostics_button_right(&mut corner, crate::help::Id::AudioDevicesCopyDiagnostics);
     controls.push(("Copy diagnostics".into(), "copy_diagnostics", rect));
     let (covered_to, left_of) = (corner.min_rect().bottom(), corner.min_rect().left() - ui.spacing().item_spacing.x);
-    controls.push(("Diagnostics card".into(), "diag_card", ui.max_rect()));
     // Every row is a scope, whose width is the room left of the button while the row starts beside it.
     let beside = |ui: &mut egui::Ui, controls: &mut Controls, add: &mut dyn FnMut(&mut egui::Ui)| {
         let room = if ui.cursor().top() < covered_to { (left_of - ui.cursor().left()).max(0.0) } else { ui.available_width() };
@@ -61,12 +60,19 @@ fn contents(ui: &mut egui::Ui, app: &mut StudioApp, (opened, audio_on): (&[Strin
 
 /// The card in the window's bottom-up column. Its height is not known until its lines are laid out, and the button
 /// must sit at its top, so the contents are laid out once in an invisible ui to measure them, then for real in a
-/// rect of that height.
+/// rect of that height. The card takes the room left above the button row, less what the section list below it needs:
+/// when its lines are taller than that, they scroll inside the card and nothing is drawn outside it (#732).
 pub(super) fn show(ui: &mut egui::Ui, app: &mut StudioApp, state: (&[String], bool), controls: &mut Controls) -> bool {
+    let margin = 8;
+    // The section list, the separator and one status row stay clear under the card.
+    let spacing = ui.spacing();
+    let below =
+        Section::ALL.len() as f32 * (spacing.interact_size.y + spacing.item_spacing.y) + 2.0 * spacing.item_spacing.y + 1.0 + spacing.interact_size.y;
+    let room = (ui.available_height() - below - 2.0 * margin as f32).max(crate::tokens::chrome::CONTROL_HEIGHT);
     egui::Frame::NONE
         .fill(TOKENS.bg)
         .corner_radius(egui::CornerRadius::same(crate::theme::RADIUS as u8))
-        .inner_margin(egui::Margin::same(8))
+        .inner_margin(egui::Margin::same(margin))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             let kept = controls.len();
@@ -74,9 +80,20 @@ pub(super) fn show(ui: &mut egui::Ui, app: &mut StudioApp, state: (&[String], bo
             let mut scratch = ui.new_child(egui::UiBuilder::new().id_salt("diagnostics_card_probe").max_rect(probe).invisible());
             contents(&mut scratch, app, state, controls);
             controls.truncate(kept);
-            let height = scratch.min_rect().height().max(crate::tokens::chrome::CONTROL_HEIGHT);
+            let wanted = scratch.min_rect().height().max(crate::tokens::chrome::CONTROL_HEIGHT);
+            let height = wanted.min(room);
             ui.allocate_ui_with_layout(egui::vec2(ui.max_rect().width(), height), egui::Layout::top_down(egui::Align::Min), |ui| {
-                contents(ui, app, state, controls)
+                controls.push(("Diagnostics card".into(), "diag_card", ui.max_rect()));
+                if wanted <= room {
+                    return contents(ui, app, state, controls);
+                }
+                // A scroll area takes its parent's layout: the contents are a column.
+                egui::ScrollArea::vertical()
+                    .id_salt("diagnostics_card_scroll")
+                    .max_height(height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| contents(ui, app, state, controls)).inner)
+                    .inner
             })
             .inner
         })

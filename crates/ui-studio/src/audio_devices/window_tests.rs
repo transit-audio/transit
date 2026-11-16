@@ -712,3 +712,79 @@ fn copy_diagnostics_is_in_the_cards_top_right_corner_and_no_line_runs_under_it()
         }
     }
 }
+
+/// A long status card (#732: ASIO with input open, the backend figures, output open and the hover hint, seven rows
+/// with two notes) never covers the button row under it, at 1x and 1.5x, on a tall and on a short screen. When the
+/// lines are taller than the room (twelve notes on a short screen) the card keeps to its rect and scrolls; the row,
+/// the section list and the window stay whole.
+#[test]
+fn a_long_status_card_never_covers_the_button_row() {
+    use transit_audio_backend as ab;
+    use transit_playback::telemetry::StreamStats;
+    for (zoom, height, notes) in [(1.0_f32, 800.0_f32, 2), (1.5, 1080.0, 2), (1.0, 400.0, 12), (1.5, 500.0, 12)] {
+        let driver = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32))
+            .named("ASIO", "Focusrite USB ASIO")
+            .with_capture(2, true)
+            .with_fixed_buffer(128);
+        let again = driver.clone();
+        let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+        t.app.ui.ui_zoom = zoom;
+        t.screen = egui::vec2(1920.0, height) / zoom;
+        t.frames(3);
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        let mut hist = [0u64; 16];
+        hist[0] = 90;
+        let output =
+            StreamStats { wakes: 1200, wake_late_us: hist, max_wake_late_us: 90, service_us: hist, max_service_us: 100, ..Default::default() };
+        let input = StreamStats { wakes: 800, wake_late_us: hist, ..Default::default() };
+        t.app.audio_devices.injected_backend = Some((Some(output), Some(input)));
+        t.app.ui.audio.buffer_size = Some(256);
+        t.app.audio_devices.notes = (0..notes).map(|i| format!("A fallback note, number {i}, that says what was tried")).collect();
+        t.open_window();
+        t.frames(3);
+        let c = t.layout()["controls"].clone();
+        let window: [f32; 4] = serde_json::from_value(t.layout()["window"].clone()).unwrap();
+        let card = T::rect(&c, None, "diag_card");
+        let texts: Vec<[f32; 4]> =
+            c.as_array().unwrap().iter().filter(|m| m["value"] == "diag_text").map(|m| serde_json::from_value(m["rect"].clone()).unwrap()).collect();
+        assert!(texts.len() >= 7, "{zoom} ppp: the card holds seven or more rows: {}", texts.len());
+        if notes <= 2 {
+            let low = texts.iter().map(|r| r[3]).fold(f32::MIN, f32::max);
+            assert!(low <= card[3] + 0.5, "{zoom} ppp: the lines fit the card, which has room: {low} in {card:?}");
+        }
+        let mut row = vec![T::rect(&c, None, "section_midi")];
+        row.extend(["apply", "revert", "reconnect", "rescan"].map(|key| T::rect(&c, None, key)));
+        for (i, b) in row.iter().enumerate() {
+            let apart = b[0] >= card[2] || b[2] <= card[0] || b[1] >= card[3] - 0.5 || b[3] <= card[1];
+            assert!(apart, "{zoom} ppp at {height}: control {i} {b:?} meets the card {card:?}");
+            assert!(
+                b[0] >= window[0] && b[2] <= window[2] && b[1] >= window[1] && b[3] <= window[3],
+                "{zoom} ppp at {height}: control {i} {b:?} is inside the window {window:?}"
+            );
+        }
+        assert!(card[1] >= window[1] && card[3] <= window[3], "{zoom} ppp at {height}: the card {card:?} is inside the window {window:?}");
+    }
+}
+
+/// #732: a status line broken between figures never starts a row with punctuation, so the separator ends the piece
+/// before it and the pieces still join back to the line.
+#[test]
+fn no_status_line_piece_starts_with_punctuation() {
+    use transit_playback::telemetry::StreamStats;
+    let hist = [1u64; 16];
+    let s = StreamStats { wakes: 10, wake_late_us: hist, service_us: hist, overloads: 1, busy_skips: 2, faults: 1, ..Default::default() };
+    let backend = format!("Backend (output / input, one ASIO driver): {}", StreamStats::asio_duplex_line(&s, &s, Some(("375/s", "375/s"))));
+    let lines = [
+        backend,
+        crate::telemetry::backend_line(&s, false, Some(375), transit_playback::telemetry::StatsBackend::Wasapi),
+        "Output open: Focusrite USB ASIO \u{b7} 48000 Hz \u{b7} 2 ch \u{b7} 128-sample buffer \u{b7} ASIO* \u{b7} f32 \u{b7} 5.3 ms out".to_owned(),
+    ];
+    for line in &lines {
+        let pieces = crate::help::map::status_segments(line);
+        assert!(pieces.len() > 3, "{line}");
+        assert_eq!(pieces.iter().map(|p| p.text.as_str()).collect::<String>(), *line);
+        for p in &pieces {
+            assert!(!p.text.starts_with(|c: char| c.is_ascii_punctuation() || c.is_whitespace() || c == '\u{b7}'), "{:?} in {line}", p.text);
+        }
+    }
+}
