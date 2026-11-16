@@ -66,6 +66,8 @@ fn a_tone_sounding_across_a_plain_start_has_no_step_at_any_rate() {
     session.edit.click = false;
     let track = session.add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Stereo, None);
     session.track_mut(track).unwrap().mixer.inserts.push(Some(transit_model::Insert::new("signal_generator")));
+    // Every case runs before the assertion, so a failure lists each start kind and rate it hits.
+    let mut failures = Vec::new();
     for kind in [Start::Play, Start::Record] {
         for (rate, frames) in
             [(44_100u32, 441usize), (44_100, 128), (44_100, 333), (96_000, 512), (96_000, 700), (96_000, 333), (48_000, 480), (48_000, 700)]
@@ -90,10 +92,13 @@ fn a_tone_sounding_across_a_plain_start_has_no_step_at_any_rate() {
             let normal = largest_step(&heard, rate as usize / 4..at - rate as usize / 10);
             let across = largest_step(&heard, at - 200..at + 400);
             assert!(normal > 0.005, "{kind:?} at {rate}: the tone sounds while stopped ({normal})");
-            assert!(across <= normal * 1.001, "{kind:?} at {rate} on a callback of {frames}: a step of {across} at the start against {normal}");
+            if across > normal * 1.001 {
+                failures.push(format!("{kind:?} at {rate} on a callback of {frames}: a step of {across} at the start against {normal}"));
+            }
             control.retire(audio.plans, audio.actions);
         }
     }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 /// The start position is presented on the output frame where the timeline reaches it, and a
@@ -110,8 +115,11 @@ fn a_plain_start_is_presented_on_the_frame_its_timeline_reaches_it() {
     };
     let mut session = Session::default();
     session.edit.click = true;
+    // Every case runs before the assertion; each records its first failure.
+    let mut failures = Vec::new();
     for kind in [Start::Play, Start::Record] {
         for (rate, sizes) in [(44_100u32, &[37usize, 128, 59, 441][..]), (96_000, &[512, 333, 700][..])] {
+            let mut failure = None;
             let reference = {
                 let (mut control, mut audio, _) = fixture_session(rate, Arc::new(session.clone()));
                 control.send_action(Command::Play { from: 0, end: None, looped: None }, true).unwrap();
@@ -141,22 +149,26 @@ fn a_plain_start_is_presented_on_the_frame_its_timeline_reaches_it() {
                 // From the latch on, the timeline runs from the start position.
                 let next = audio.transport.timeline.next_output();
                 let expected = ((next - latch) * 48_000 / u64::from(rate)) as i64;
-                assert_eq!(
-                    shared.position.load(Ordering::Relaxed),
-                    expected,
-                    "{kind:?} at {rate}: the position {} frames after the latch",
-                    next - latch
-                );
+                let shown = shared.position.load(Ordering::Relaxed);
+                if shown != expected && failure.is_none() {
+                    failure = Some(format!("{kind:?} at {rate}: the position {} frames after the latch is {shown}, not {expected}", next - latch));
+                }
             }
             if kind == Start::Record {
                 let start::Status::Started(point) = reader.status() else { panic!("{rate}: Record did not start: {:?}", reader.status()) };
-                assert_eq!(point.output_frame, latch, "{rate}: the latch is the frame presenting the start");
-                assert_eq!((point.position.sample, point.position.fraction), (0, 0), "{rate}: the latch is at the start position");
+                if point.output_frame != latch || (point.position.sample, point.position.fraction) != (0, 0) {
+                    failure.get_or_insert(format!("{kind:?} at {rate}: latched {point:?}, not output frame {latch} at position 0"));
+                }
             }
-            assert_eq!(peak(&heard, (latch - base) as usize), reference, "{kind:?} at {rate}: the first click against the latch");
+            let first = peak(&heard, (latch - base) as usize);
+            if first != reference {
+                failure.get_or_insert(format!("{kind:?} at {rate}: the first click peaks {first} frames after the latch, not {reference}"));
+            }
+            failures.extend(failure);
             control.retire(audio.plans, audio.actions);
         }
     }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 /// While a start leads in at a converted rate, the playhead shows the start position until the
@@ -216,5 +228,138 @@ fn the_playhead_holds_the_start_position_until_the_frame_that_presents_it() {
             assert!(shown.last().unwrap().1 > FROM + 64, "counted {counted} at {rate}: moved on");
             control.retire(audio.plans, audio.actions);
         }
+    }
+}
+
+/// #725 review: a start at speed 1 leaves equal rates passing samples through exactly. A transport
+/// end at half speed leaves the converter at a fractional phase (the host returns to speed 1 and
+/// sends no Stop); Play or Record from there must still give the source bit for bit from the frame
+/// that presents the start, as a start from a whole phase does.
+#[test]
+fn a_start_at_speed_one_after_a_half_speed_end_passes_samples_through_at_equal_rates() {
+    const FROM: Samples = 17;
+    const FRAMES: usize = 2_000;
+    let source = signal();
+    // A start from a whole phase: the converter passes every sample through.
+    let reference = {
+        let (mut control, mut audio, _shared, _start, _reader) = stopped(48_000, (*source).clone());
+        for _ in 0..20 {
+            callback(&mut control, &mut audio, 48_000, 333, &mut Vec::new());
+        }
+        assert_eq!(audio.read.ahead_after(audio.pending, STEP), 0);
+        control.send_action(Command::Play { from: FROM, end: None, looped: None }, true).unwrap();
+        let mut heard = Vec::new();
+        while heard.len() < FRAMES {
+            callback(&mut control, &mut audio, 48_000, 256, &mut heard);
+        }
+        control.retire(audio.plans, audio.actions);
+        heard
+    };
+    assert!(reference.iter().any(|v| *v != 0.0));
+    for kind in [Start::Play, Start::Record] {
+        let (mut control, mut audio, shared, _start, reader) = stopped(48_000, (*source).clone());
+        shared.speed.store(500, Ordering::Relaxed);
+        control.send_action(Command::Play { from: 0, end: Some(1_001), looped: None }, true).unwrap();
+        let mut calls = 0;
+        while audio.transport.playing || calls < 3 {
+            callback(&mut control, &mut audio, 48_000, 333, &mut Vec::new());
+            calls += 1;
+            assert!(calls < 100, "the half-speed pass never ended");
+        }
+        if audio.read.position(STEP / 2).0.fract() == 0.0 {
+            callback(&mut control, &mut audio, 48_000, 1, &mut Vec::new());
+        }
+        shared.speed.store(1_000, Ordering::Relaxed);
+        callback(&mut control, &mut audio, 48_000, 333, &mut Vec::new());
+        assert_ne!(audio.read.position(STEP).0.fract(), 0.0, "{kind:?}: the half-speed end left a fractional phase");
+        let base = audio.transport.timeline.next_output();
+        let latch = base + audio.read.ahead_after(audio.pending, STEP);
+        send(&mut control, kind, &reader, FROM);
+        let mut heard = Vec::new();
+        while heard.len() < (latch - base) as usize + FRAMES {
+            callback(&mut control, &mut audio, 48_000, 256, &mut heard);
+        }
+        if kind == Start::Record {
+            let start::Status::Started(point) = reader.status() else { panic!("Record did not start: {:?}", reader.status()) };
+            assert_eq!(point.output_frame, latch);
+        }
+        let played = &heard[(latch - base) as usize..][..FRAMES];
+        let first = played.iter().zip(&reference).position(|(a, b)| a.to_bits() != b.to_bits());
+        assert_eq!(first, None, "{kind:?}: the first frame after the start that is not the source sample");
+        control.retire(audio.plans, audio.actions);
+    }
+}
+
+/// #725 review: at equal rates a start has no lead, so the converter running on gives exactly what
+/// the old restart gave. Play and Record from a stop, then Play from another position while
+/// playing, against the same run with the converter restarted before each start's callback: every
+/// sample bit-identical, the lead 0 at every callback and no hold.
+#[test]
+fn equal_rate_starts_are_bit_identical_to_a_converter_restart() {
+    let mut session = Session::default();
+    session.edit.click = true;
+    let track = session.add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Stereo, None);
+    session.track_mut(track).unwrap().mixer.inserts.push(Some(transit_model::Insert::new("signal_generator")));
+    for kind in [Start::Play, Start::Record] {
+        for sizes in [&[480usize][..], &[700], &[37, 128, 700, 333, 1, 513]] {
+            let run = |restart: bool| {
+                let (mut control, mut audio, _shared, _start, reader) = stopped(48_000, session.clone());
+                let mut heard = Vec::new();
+                let mut frames = sizes.iter().cycle();
+                for n in 0..120 {
+                    if n == 40 || n == 80 {
+                        assert_eq!(audio.read.ahead_after(audio.pending, STEP), 0, "the lead at equal rates");
+                        // The second start is a Play from another position while playing.
+                        let (kind, from) = if n == 40 { (kind, 0) } else { (Start::Play, 3_000) };
+                        send(&mut control, kind, &reader, from);
+                        if restart {
+                            audio.restart_converter();
+                        }
+                    }
+                    callback(&mut control, &mut audio, 48_000, *frames.next().unwrap(), &mut heard);
+                    assert_eq!(audio.read.ahead_after(audio.pending, STEP), 0, "the lead at equal rates after a callback");
+                    assert!(audio.transport.hold.is_none(), "no hold at equal rates");
+                }
+                assert!(audio.transport.playing);
+                if kind == Start::Record {
+                    assert!(matches!(reader.status(), start::Status::Started(_)), "{:?}", reader.status());
+                }
+                control.retire(audio.plans, audio.actions);
+                heard
+            };
+            let (running_on, restarted) = (run(false), run(true));
+            assert!(running_on.iter().any(|v| *v != 0.0));
+            let first = running_on.iter().zip(&restarted).position(|(a, b)| a.to_bits() != b.to_bits());
+            assert_eq!(first, None, "{kind:?} on callbacks of {sizes:?}: the first frame that differs from a restart");
+        }
+    }
+}
+
+/// #725 review: a Play started within the converter's reach of a loop end wraps while it still
+/// leads in. The playhead holds the start position across that wrap until the frame that presents
+/// the start; a wrap used to end the hold early and show the lead's positions, a step back.
+#[test]
+fn the_hold_lasts_across_a_loop_wrap_inside_the_lead() {
+    const FROM: Samples = 995;
+    for rate in [44_100u32, 96_000] {
+        let (mut control, mut audio, shared, _start, _reader) = stopped(rate, Session::default());
+        for _ in 0..20 {
+            callback(&mut control, &mut audio, rate, 128, &mut Vec::new());
+        }
+        let latch = audio.transport.timeline.next_output() + audio.read.ahead_after(audio.pending, STEP);
+        control.send_action(Command::Play { from: FROM, end: None, looped: Some(Range { start: 0, end: 1_000 }) }, true).unwrap();
+        let mut wrapped_in_the_lead = false;
+        loop {
+            callback(&mut control, &mut audio, rate, 1, &mut Vec::new());
+            let next = audio.transport.timeline.next_output();
+            if next > latch {
+                break;
+            }
+            wrapped_in_the_lead |= audio.transport.render_position < FROM;
+            let shown = shared.position.load(Ordering::Relaxed);
+            assert_eq!(shown, FROM, "{rate}: shown {} output frames before the latch", latch - next);
+        }
+        assert!(wrapped_in_the_lead, "{rate}: the render wrapped before the latch");
+        control.retire(audio.plans, audio.actions);
     }
 }

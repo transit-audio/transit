@@ -170,6 +170,24 @@ impl Phase {
         u64::try_from((behind + step / 2) / step).unwrap_or(0)
     }
 
+    /// At unit rate (`step == denominator`: equal rates, speed 1), round the phase so the render
+    /// frame after the pending block of `frames` falls on the output frame [`Phase::ahead_after`]
+    /// names. A whole phase is unchanged, and so is any other rate. A start does this (#725): a
+    /// fraction left by another speed would otherwise keep equal rates reading through the filter
+    /// instead of passing samples through. The read position moves by at most half a frame while
+    /// the frames before the new block still present what was rendered earlier.
+    pub(super) fn realign(&mut self, frames: usize, step: u64) {
+        let denominator = i128::from(self.denominator);
+        let behind = (frames as i128) * denominator - i128::from(self.units);
+        if i128::from(step) != denominator || behind <= 0 || behind % denominator == 0 {
+            return;
+        }
+        let ahead = i128::from(self.ahead_after(frames, step));
+        if let Ok(units) = i64::try_from((frames as i128 - ahead) * denominator) {
+            self.units = units;
+        }
+    }
+
     /// [`Phase::ahead_after`] is exact: the frame after the pending block falls on an output frame.
     #[cfg(test)]
     pub(super) fn ahead_after_is_whole(self, frames: usize, step: u64) -> bool {

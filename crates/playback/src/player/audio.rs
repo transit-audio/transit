@@ -172,6 +172,10 @@ struct Transport {
     /// presents the start, the playhead shows `sample` rather than the frames before it, which
     /// still present what was rendered earlier.
     hold: Option<Hold>,
+    /// A start led in during this action pass: at unit rate the converter's phase is rounded to the
+    /// frame presenting it ([`Phase::realign`]), so equal rates pass samples through again after a
+    /// fraction left by another speed (#725).
+    realign: bool,
 }
 
 /// See [`Transport::hold`].
@@ -375,6 +379,7 @@ impl Transport {
             self.looped = looped;
             self.loop_engaged = looped.is_some_and(|r| from < r.end);
             self.discard_pending |= restart;
+            self.realign |= !restart;
             self.hold = (point.output_frame > timeline.next_output()).then_some(Hold { until: point.output_frame, sample: from });
             live.set_transport_epoch(transit_mix::TransportEpoch(epoch));
         }
@@ -446,7 +451,11 @@ impl Transport {
         self.epoch = epoch;
         self.playing = playing;
         self.looped = looped;
-        self.hold = None;
+        // A seek or a stop ends a hold; a loop wrap while a start leads in does not (the lead's
+        // frames may reach the loop end before the frame that presents the start).
+        if seek.is_some() || !playing {
+            self.hold = None;
+        }
         Ok(())
     }
 
@@ -456,11 +465,12 @@ impl Transport {
     /// timeline cannot represent (a start within it of the earliest position) restarts the
     /// converter instead, so the position is presented on the next consumed frame.
     fn lead_in(&mut self, from: Samples, ahead: u64) {
-        if ahead == 0 {
-            return;
-        }
         match self.timeline.lead_in(ahead) {
-            Ok(()) => self.hold = self.timeline.next_output().checked_add(ahead).map(|until| Hold { until, sample: from }),
+            Ok(()) if ahead == 0 => self.realign = true,
+            Ok(()) => {
+                self.hold = self.timeline.next_output().checked_add(ahead).map(|until| Hold { until, sample: from });
+                self.realign = true;
+            }
             Err(_) => self.discard_pending = true,
         }
     }
@@ -772,6 +782,7 @@ impl Audio {
                     waiting: None,
                     wait_frames: u64::from(device_rate),
                     hold: None,
+                    realign: false,
                 },
             },
             record_control,
@@ -866,6 +877,18 @@ impl Audio {
         self.history.reset();
     }
 
+    /// After commands or a start at a block boundary: restart the converter when one asked for it
+    /// (`discard_pending`), else, after a start that led in, round its phase at unit rate so equal
+    /// rates pass samples through from the frame presenting the start ([`Phase::realign`], #725).
+    fn converter_follows_starts(&mut self) {
+        let realign = std::mem::take(&mut self.transport.realign);
+        if std::mem::take(&mut self.transport.discard_pending) {
+            self.restart_converter();
+        } else if realign {
+            self.read.realign(self.pending, u64::from(self.sample_rate) * u64::from(self.transport.speed));
+        }
+    }
+
     /// The callback enters `phase` (#162): one clock read and relaxed stores.
     fn mark(&self, phase: crate::telemetry::Phase) {
         if let Some(marker) = &self.marker {
@@ -918,9 +941,7 @@ impl Audio {
             transport.command(event, live, ahead)
         });
         self.faulted |= report.faulted || self.transport.timeline_fault.is_some();
-        if std::mem::take(&mut self.transport.discard_pending) {
-            self.restart_converter();
-        }
+        self.converter_follows_starts();
         self.service_midi(budget);
         self.shared.playing.store(self.transport.playing && !self.faulted, Ordering::Relaxed);
         self.publish_count_in();
@@ -1002,9 +1023,7 @@ impl Audio {
                 if let Some(failure) = StartFailure::of(result) {
                     self.shared.metro.start_failure.store(failure as u8, Ordering::Relaxed);
                 }
-                if std::mem::take(&mut self.transport.discard_pending) {
-                    self.restart_converter();
-                }
+                self.converter_follows_starts();
             }
         }
         if let Some(counting) = self.transport.count_in.filter(|c| c.left <= 0) {
@@ -1022,9 +1041,7 @@ impl Audio {
                 // `record` cancelled the ticket and left the transport parked: tell Main why.
                 self.shared.metro.start_failure.store(failure as u8, Ordering::Relaxed);
             }
-            if std::mem::take(&mut self.transport.discard_pending) {
-                self.restart_converter();
-            }
+            self.converter_follows_starts();
             self.publish_count_in();
         }
         let gain = f32::from_bits(self.shared.metro.gain.load(Ordering::Relaxed));
