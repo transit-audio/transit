@@ -371,8 +371,14 @@ impl InputRing {
             // The input frames the read spans, in integers (an f64 product can round past a whole
             // number and keep one frame too many).
             let read = usize::try_from((frames as u128 * num as u128).div_ceil(den as u128)).unwrap_or(usize::MAX);
-            let slack = self.aligned_backlog_blocks.saturating_mul(read.max(self.last_push_frames.load(Ordering::Relaxed)));
-            let keep = read.saturating_add(self.lookahead_frames(session_rate)).saturating_add(slack);
+            let last_push = self.last_push_frames.load(Ordering::Relaxed);
+            let slack = self.aligned_backlog_blocks.saturating_mul(read.max(last_push));
+            // Never less than the capture block last pushed (#724): a callback the plan renders in
+            // several blocks (wider than its largest block) reads the whole capture, so the first
+            // block's read must not discard what the next block of the same callback reads. Only
+            // the paired slack (0) can fall below it.
+            let lookahead = self.lookahead_frames(session_rate);
+            let keep = read.saturating_add(lookahead).saturating_add(slack).max(last_push.saturating_add(lookahead));
             self.counters.discarded.fetch_add(reader.align(keep) as u64, Ordering::Relaxed);
         }
         let written = reader.render(out, frames, num, den);
