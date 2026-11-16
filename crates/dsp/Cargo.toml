@@ -43,6 +43,9 @@ transit-sampler-core = { workspace = true, features = ["std"] }
 transit-parametric-eq = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+# Turns the `testing` feature on for this crate's own test targets, so `cargo test -p transit-dsp` alone sees
+# the test-only items (`spectrum`, `offline::non_silent_ranges`).
+transit-dsp = { workspace = true, features = ["testing"] }
 proptest.workspace = true
 # Portable FFT and analysis math for the offline Macro Oscillator quality audit.
 transit-math.workspace = true
