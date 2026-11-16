@@ -3,7 +3,7 @@ title: Clock domains and timestamp quality: the clock contract annex to ADR 0012
 -->
 # ADR 0017: clock domains and timestamp quality
 
-- **Status:** proposed 2026-10-18; component-level G4 passed, hardware timing open; amended 2026-11-15, accepted after three judging rounds: the band-limited rate converters (Amendment 2026-11-15, below); amendment 2026-11-16, proposed: corrections of fact after #724 (Amendment 2026-11-16, below)
+- **Status:** proposed 2026-10-18; component-level G4 passed, hardware timing open; amended 2026-11-15, accepted after three judging rounds: the band-limited rate converters (Amendment 2026-11-15, below); amendment 2026-11-16, accepted after three judging rounds: corrections of fact after #724 (Amendment 2026-11-16, below)
 - Date: 2026-10-18. Status: proposed for joint review.
 - Parent: [ADR 0012](0012-midi-device-layer.md), gates G4 and G6.
 - Implementation status (2026-10-19 09:58 EDT): the original `f9078c7` jitter
@@ -322,9 +322,9 @@ limit included.
   reaching the reader with its fraction rounded down to 2^-32 frame; and B equal to `halo(q)` only
   for reads of a whole number of input frames. Round 2 found nothing further here; round 3 settled.
 
-## Amendment 2026-11-16: corrections of fact after #724 (proposed)
+## Amendment 2026-11-16: corrections of fact after #724
 
-Proposed 2026-11-16, for judging together with the 2026-11-16 amendments of ADR 0015, 0020 and
+Accepted 2026-11-16 after three judging rounds (proposed the same day), together with the 2026-11-16 amendments of ADR 0015, 0020 and
 0052. It corrects the paragraph on the rate converters to the code that landed for #724
 (1af45806..12e06b36) and changes no decision of this record. Two sentences said the output renders
 up to 16·max(1, q) render frames "further ahead" and the input's alignment keeps `halo(q)` "more"
