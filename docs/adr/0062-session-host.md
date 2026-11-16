@@ -1,406 +1,390 @@
 <!-- transit-index
-title: The session host: transport and recording orchestration move out of the interface crate into `transit-host` (layer 5), with one typed transport phase as the only truth (a real-time render included), explicit capabilities for every safety reader, status text arbitrated per transition, an explicit count-in stage from the audio thread, time as a clock capability, a restricted service facade so the interface can no longer name the Player, headless playback, and blocking work staged or moved off the interface thread
+title: The session host: transport and recording orchestration move out of the interface crate into `transit-host` (layer 5), with one typed transport phase as the only truth (a real-time render included), transport commands admitted synchronously, explicit capabilities for every safety reader, status text arbitrated per transition, the record start's stage published through its ticket, time as a clock capability, a restricted service facade so the interface can no longer name the Player, headless playback, and blocking work staged or moved off the interface thread
 -->
 # ADR 0062: The session host: one typed transport phase, outside the interface
 
-- **Status:** proposed 2026-11-16 (revised after judging round 1, same day)
+- **Status:** proposed 2026-11-16 (revised after judging rounds 1 and 2, same day)
 - **Date:** 2026-11-16
-- **Implementation:** not started. Slices S1, S2a to S2d, S3a to S3f, S4, S5a and S5b below; tracking issue #739 (topic B of #736). S1 and S2a to S2d land before hardware sync slice 1 (#733, ADR 0043); S3 onward runs beside sync and does not block it. The transition matrix, the simulation table, the reader assignments and the display examples are in the appendix [0062/tables.md](0062/tables.md), which is part of this record.
-- **Reopen when:** a record changes the Player so that it may live on another thread (alternative iii); sync slice 1 cannot express its machine as phase variants and matrix rows of this record (section 15); a measured device reopen on the reference machine holds the interface thread for more than one second after S5b; the display arbitration of section 6 fails the maintainer's feel-right check; a host file nears the 1,500-line budget and the split by concern does not fit section 11; headless recording is asked for (section 13).
+- **Implementation:** not started. Slices S1, S2a to S2e, S3a to S3f, S4, S5a and S5b below; tracking issue #739 (topic B of #736). S1 and S2a to S2e land before hardware sync slice 1 (#733, ADR 0043); S3 onward runs beside sync. The appendix [0062/tables.md](0062/tables.md) is part of this record: the transition matrix (A), the simulation (B), the reader assignments and clocks (C), the display examples (D), the status writers that are not mechanical (E), the facade assignments (F).
+- **Reopen when:** a record changes the Player so that it may live on another thread (alternative iii); ADR 0043 cannot add its states under the obligations of section 15; a measured device reopen on the reference machine holds the interface thread for more than one second after S5b; the display arbitration fails the maintainer's feel-right check; a host file nears the 1,500-line budget and the split by concern does not fit section 11; headless recording is asked for (section 13).
 
 ## Context
 
-The read-only inventory for #739 was taken at 3b12412e; every fact below was re-read at `main` 1a56b895. Paths are under `crates/ui-studio/src/` unless named; `P/` is `crates/playback/src/`, `E/` is `crates/engine/src/`.
+The inventory for #739 was taken at 3b12412e; every fact below was re-read at `main` 1a56b895. Paths are under `crates/ui-studio/src/` unless named; `P/` is `crates/playback/src/`, `E/` is `crates/engine/src/`.
 
-- **The host is the interface struct.** Transport and recording are methods on `StudioApp` (`lib.rs:214`), which holds the Player (`:218`), the request tracker (`:219`), the recorder (`:221`), the status line (`:267`) and egui types (`:319`, `:342`). `host/` is 4,241 lines with tests. 57 non-test interface files name the Player or `transit_playback`.
-- **The state is flags and text.** No type names the transport's states; each is a combination of `player_requests.*` (`host.rs:263-271`), `take_plan`, `Player::count_in()` (`P/player/device.rs:897-900`), `sim_count_in`, `engine.transport.{playing,recording}` and the status string. "Play pending" (`host/transport.rs:23`), "Stop pending" (`:41`), "Count-in" and "Record pending" (`host/recording.rs:153, 161`) are compared at `host.rs:343, 354, 380` and `host/transport.rs:59, 165`, and `status.rs:26-28` keeps them from ageing. Section 10 lists the defects this causes.
-- **Transport is started outside the host code too.** The real-time render starts Play inside `Player::start_realtime_render` (`P/player/device/realtime_render.rs:106`, called from `finish/realtime.rs:240`) and stops it on completion, failure and cancel (`:137`, `:165`, `:188` via `stop_and_release`). No host request tracks those calls.
-- **Where the step runs.** `logic()` (`frame_logic.rs:309`) drains control (`:325`), polls the Player (`:329`), follows a pass (`:335-337`), watches devices (`:355-357`), runs `handle_transport(dt)` (`:363`), the automation write pass (`:364`), session sync (`:365-369`), autosave (`:370-372`) and input (`:373-375`). MIDI transport buttons run in the drawing pass (`:467`) and call `handle_transport(0.0)` per event (`midi_transport.rs:270`).
-- **The Player stays on its thread.** "Main-thread facade. RuntimeControl deliberately makes this type !Send/!Sync." (`P/player/device.rs:69`); "Creating-thread owner" (`P/player/runtime.rs:20-23`). Whatever holds it runs on the thread that made it.
-- **Nothing headless plays.** `Headless` clears every transport request (`crates/automation/src/lib.rs:53-54`). The production null Player has "no input and no MIDI ports" (`P/player/device/null_open.rs:11-12`).
-- **Who needs it next.** ADR 0043 slice 1 needs "a deterministic state matrix" without a window (ADR 0043, Implementation); section 15 maps its ten requirements.
-- **Conventions.** None from Ableton or Logic applies to internal structure. Ableton Live "will not begin recording until the count-in is complete" and Logic's count-in "switches to record when it reaches" the playhead (both as quoted in ADR 0052, Context): both treat the count-in as not recording, which is this record's meaning of the flag. Transit still captures MIDI during the count-in on the audio thread (ADR 0052 decision 8); that capture is not the flag. No convention bears on which button pulses (B6) or when half speed ends (B7).
+- **The host is the interface struct.** Transport and recording are methods on `StudioApp` (`lib.rs:214`), which holds the Player (`:218`), the request tracker (`:219`), the recorder (`:221`), the status line (`:267`) and egui types (`:319`, `:342`). `host/` is 4,241 lines with tests; 57 non-test interface files name the Player or `transit_playback`.
+- **The state is flags and text.** No type names the transport's states: they are combinations of `player_requests.*` (`host.rs:263-271`), `take_plan`, `Player::count_in()`, `sim_count_in`, `engine.transport.{playing,recording}` and the status string, whose four waits are compared at `host.rs:343, 354, 380` and `host/transport.rs:59, 165` and never age (`status.rs:26-28`).
+- **Commands are queued, not admitted.** `transport.record` only pushes a request (`E/cmd/transport.rs:21`); the control channel drains up to 64 calls (`control.rs:53-56`, `app.run` at `:102`) before the frame polls the Player (`frame_logic.rs:325, 329`), so Record followed by Undo or a measurement evaluates both guards before anything knows a pass is starting.
+- **Transport is started outside the host code too.** `Player::start_realtime_render` calls `self.play` (`P/player/device/realtime_render.rs:106`) and its result and cancel paths call `self.stop` (`:137, :165, :188`); no host request tracks them.
+- **The Player stays on its thread.** "Main-thread facade. RuntimeControl deliberately makes this type !Send/!Sync." (`P/player/device.rs:69`); "Creating-thread owner" (`P/player/runtime.rs:20-23`).
+- **Nothing headless plays.** `Headless` clears every transport request (`crates/automation/src/lib.rs:53-54`). The null Player has "no input and no MIDI ports" (`P/player/device/null_open.rs:11-12`).
+- **Recording without a Player is not reachable outside test fixtures.** `arm_recorder` arms audio takes through a recorder that only a Player opens (`host/recording.rs:202-203, 265`; `host.rs:118-141`) and refuses MIDI without a Player (`host/recording.rs:212`); the simulated count-in is set only by the fixture at `midi_transport/tests.rs:138`.
+- **Who needs it next.** ADR 0043 slice 1 needs "a deterministic state matrix" without a window.
+- **Conventions.** None from Ableton or Logic applies to internal structure. Ableton Live "will not begin recording until the count-in is complete" and Logic's count-in "switches to record when it reaches" the playhead (as quoted in ADR 0052, Context): the count-in is not recording, which is this record's meaning of the flag. Transit still captures MIDI during the count-in on the audio thread (ADR 0052 decision 8); that capture is not the flag.
 
 ## Decision
 
 ### 1. Settled
 
-By the maintainer (2026-11-16): M1 orchestration moves into a host with no interface dependency and a typed transport state; M2 the flag disagreements are fixed in slice 2, each a named change with its own test; M3 S1 and S2 land before sync slice 1. Standing rules: no migrations while alpha; no interim user-facing surface a recorded plan replaces; exact where a professional could null-test; nothing audible changes that the user did not ask for; 1,500-line files; related defects become task lines on #739. Coordinator rulings after round 1 (R-A to R-K) are applied in sections 3 to 15 and listed under Judging round 1.
+By the maintainer (2026-11-16): M1 orchestration moves into a host with no interface dependency and a typed transport state; M2 the flag disagreements are fixed in slice 2, each named with its own test; M3 S1 and S2 land before sync slice 1. Standing rules: no migrations while alpha; no interim surface a recorded plan replaces; exact where a professional could null-test; nothing audible changes unasked; 1,500-line files; related defects become task lines on #739. Coordinator rulings R-A to R-K (after round 1) and S-1 to S-16 (after round 2) are applied below and listed under the judging responses.
 
-Nothing here changes capture, the latch or any saved file. One playback change is made: the record-start stage publication of section 5 (S2c).
+Nothing here changes capture, the latch or any saved file. Two playback changes are made, both in S2b: the record start publishes its stage through its ticket (section 5), and the real-time render returns its transport receipts (section 3).
 
 ### 2. The crate and the facade
 
-- `transit-host` at `crates/host`, `("transit-host", 5)` in `xtask/src/main.rs` `LAYERS`. Normal dependencies: `transit-engine`, `transit-playback` (L4), `transit-model`, `transit-mix`, `transit-time`, `serde_json`, `log`. A `native-jack` feature forwards to `transit-playback/native-jack`. `check_layers` bars UI crates (`:211`) and upward edges (`:219`; it rejects only `dl > layer`, so L5 to L4 and L5 to L5 pass); dev dependencies are skipped (`:208-209`). Unsafe stays forbidden.
-- `Host` owns the Player, the recorder, `PlayerRequests`, the phase and its facts, the simulation, starts, stops, locates, loops, recording, the MIDI journal lifetime, the autosaves that depend on transport, device reopen, and **every call that starts or stops the Player** (section 3, R-A). `StudioApp` holds `host`.
-- `Host::step(&mut self, engine: &mut Engine, status: &mut StatusLine, clock: &dyn HostClock, input: &StepInput, out: &mut Vec<HostEvent>)`. The host borrows the engine and the status line; it owns neither.
-- **The facade (R-B).** The interface never receives `&Player` or `&mut Player`. `Host` hands out narrow handles, each a struct borrowing the host that exposes only its permitted methods:
-
-| Handle | Permitted (Player methods behind it) | Interface users today |
-|---|---|---|
-| `PluginServices` | editors (`want_editor`, `drive_editors`, `close_editor`, `idle` edits as events), preset and state jobs, slot load and stuck state, retry, instrument and insert parameter echo | `editors.rs`, `editor_group.rs`, `plugin_header.rs`, `host_hang.rs`, `unresponsive.rs`, `devices.rs`, `mixer/inserts.rs`, `mixer/actions.rs`, `external_instrument.rs`, `sampler_panel/behavior.rs`, `scope_strip.rs` |
-| `Readouts` | meters snapshot, telemetry, MIDI input and output status, monitor activity, scope hub, plug-in timings, the playing and position pair of the step | `telemetry.rs`, `debug_log.rs`, `midi_monitor.rs`, `midi_output.rs`, `midi_input.rs`, `midi_learn.rs`, `mixer/channel.rs`, `arrange.rs`, `arrange/tracks.rs`, `about.rs`, `diagnostics.rs`, `render_measurement.rs` |
-| `LiveInput` | audition notes, step input, MIDI Learn capture | `keys.rs`, `keys/step.rs` |
-| `DeviceServices` | device listing, settings panel, low latency, I/O map, monitor controls, click level, calibration, measurement start, poll and cancel, preview player | `audio_devices.rs` and `audio_devices/*.rs`, `audio_devices_system.rs`, `hardware_measure.rs`, `hardware_ui.rs`, `external_measure.rs`, `io_settings.rs`, `low_latency.rs`, `main_monitor.rs`, `ui_state.rs`, `browser/preview.rs` |
-| none (moves into the host) | transport, recording, render transport, reopen, Player installation | `host.rs`, `host/*.rs`, `transport.rs` (to `:134`), `metronome.rs` (to `:96`), `midi_transport.rs` (to `:304`), `arrange/recording_preview.rs`, `frame_logic.rs`, `lib.rs`, `menus.rs`, `splash.rs:129-136`, `audio_connection.rs`, `finish/realtime.rs` |
-
-- **The edge.** At S3f `transit-ui-studio` loses its normal dependency on `transit-playback`; `transit-host` re-exports, item by item in `transit_host::data`, the plain data types the interface still names (meter snapshot, count-in plan, audio configuration and device listing, monitor settings, slot load, telemetry, MIDI status types). It never re-exports `Player`, `Recorder`, `RuntimeControl`, `Control` or `action_lane`. The dev dependency stays for test fakes; production interface code cannot name the Player. The opener closure in `Services` (today returning a `Player`) becomes `transit_host::OpenAudio`, opaque to the interface.
-- **The guard** becomes the type system plus one manifest rule (section 14). The source scan is a transitional lint only.
+- `transit-host` at `crates/host`, `("transit-host", 5)` in `xtask/src/main.rs` `LAYERS`. Normal dependencies: `transit-engine`, `transit-playback` (L4), `transit-model`, `transit-mix`, `transit-time`, `serde_json`, `log`; a `native-jack` feature forwards to `transit-playback/native-jack`. `check_layers` bars UI crates (`:211`) and upward edges (`:219`, `dl > layer` only); dev dependencies are skipped (`:208-209`). Unsafe stays forbidden.
+- `Host` owns the Player, the recorder, the request tracker, the phase and its facts, the simulation, every call that starts or stops the Player (section 3), recording, the MIDI journal lifetime, the autosaves that depend on transport, device reopen, and the connection machinery of `audio_connection.rs` (the `Connection` and `Editors` traits and their implementations become private to the host). `StudioApp` holds `host`.
+- `Host::admit(&mut self, engine, status, clock, input)` (section 9) and `Host::step(&mut self, engine, status, clock, input, out)`. The host borrows the engine and the status line.
+- **The facade.** The interface never receives `&Player` or `&mut Player`. `Host` hands out four narrow handles that expose only permitted methods: `PluginServices`, `Readouts`, `LiveInput`, `DeviceServices`. Their methods and the interface files that use them are in [tables.md](0062/tables.md), section F.
+- **The edge.** At S3f `transit-ui-studio` loses its normal dependency on `transit-playback`; `transit-host` re-exports, item by item in `transit_host::data`, the plain data types the interface still names. It never re-exports `Player`, `Recorder`, `RuntimeControl`, `Control` or `action_lane`, and no public host item returns, derefs to, aliases or names one in an associated type. The interface's dev dependency stays for test fakes; production interface code cannot name the Player. The opener closure in `Services` becomes `transit_host::OpenAudio`.
 
 ### 3. The transport phase
 
 ```rust
 pub enum TransportPhase {
     Stopped,
-    StartPending { seq: Sequence, from: Samples, prev: Prev },
+    StartPending { applied: bool },                    // the pending starts are a fact (below)
     Playing,
     RecordPending { seq: Sequence, ticket: Ticket, from: Option<Samples>, count_in: Option<CountIn> },
     CountIn { ticket: Ticket, from: Samples, plan: CountIn },
     WaitingForClock { ticket: Ticket, from: Option<Samples>, count_in: Option<CountIn> },
-    Recording { latch: Option<Point>, count_in: Option<CountIn> },
-    StopPending { stop: Option<Sequence>, record_off: Option<Sequence>, then: AfterStop },
-    Rendering { finishing: bool },
+    Recording { latch: Point, count_in: Option<CountIn> },
+    StopPending { stop: Option<Sequence>, then: AfterStop },
+    Rendering { play: Option<Sequence>, stop: Option<Sequence>, job: RenderJob },
 }
-pub enum Prev { Stopped, Playing }
-pub enum AfterStop { Park, Resume(Samples), Reset }
+pub enum AfterStop { Park { target: Option<Samples>, rtz: bool }, Resume(Samples), Reset }
+pub enum RenderJob { Live, Cancelling(CancelReason), Retired }
 ```
 
 | Variant | Data and why |
 |---|---|
-| `StartPending` | the Play request, its start, and `prev`: where a refused Play returns. A Play is validated before the audio thread changes anything (`P/player/audio.rs:445-453`), so a refused replacement Play leaves the old playback running |
-| `RecordPending` | the Record request, the record-start ticket (`P/record/start.rs:17-20`) to match the stage observation, the start (`None` for a punch), the count-in sent |
-| `CountIn`, `WaitingForClock` | the ticket; entered on the receipt or on the stage observation, whichever comes first (section 5) |
-| `Recording` | the latch (`None` only simulated); the count-in plan, kept for the take's plan fallback (`host/recording.rs:418`) |
-| `StopPending` | the Stop request and the record-off request (`finish_recording` sends `Recording(false)`, `host/recording.rs:378-381`), each `None` once acknowledged; Park leaves when `stop` is `None`, Resume when both are; `Reset` when a session replaced the document. Reset supersedes Resume (section 9) |
-| `Rendering` | a real-time render owns the transport (R-A); `finishing` once its result is taken or it is cancelled; it leaves for Stopped only when the step observes the Player not playing, so the phase never reads Stopped while the Player plays |
+| `StartPending` | entered while the set of pending starts is not empty; `applied` once any of them applied. When the set empties: Playing if any applied or playback is observed, else Stopped (S-2) |
+| `RecordPending` | the Record request, its full ticket (`P/record/start.rs:17-20`: engine epoch and sequence), the start (`None` for a punch), the count-in sent |
+| `CountIn`, `WaitingForClock` | the ticket; entered from the record start's stage (section 5) or the admission receipt, whichever is seen first |
+| `Recording` | the latch from the stage `Started(point)`; the count-in plan for the take's plan fallback (`host/recording.rs:418`). Only a Player records, so the latch is required |
+| `StopPending` | the Stop request (`None` once its frontier is reached). `Park.target`: a Locate during Park (S-6); `Park.rtz`: a second Stop during Park (D9). `Resume(at)`: a locate during a pass. `Reset`: a session replaced. Reset supersedes Resume |
+| `Rendering` | the render's Play and Stop sequences and its job (S-8); left only when the Play has settled (applied or refused), any Stop frontier is reached, the job is `Retired`, and playback is not observed |
 
-**Facts beside the phase** (not phases): speed `Normal | Half` (invariant: `Half` only in StartPending or Playing; every other transition sets `Normal` and `Player::set_speed(1.0)`, B7); the wanted loop, the loop last sent and the loop a pass records under; release, locate and session requests outstanding; observed playing and position (sampled together, B9); the working cursor and retained position (section 8); reopen state (waiting, gave up, `ReopenPending` while staged, S5b); `InputOpening` (S5b); `faulted`, set by `PlayerError::Faulted` or a Player fault and cleared only by replacing the Player; held commands (section 9); the MIDI transport `recovering` flag; the interlocks that stay in the interface (`measuring`, External Instrument measure; refused at `run`, `frame_logic.rs:47-66`); the backend, Player or simulated (simulated data in [tables.md](0062/tables.md), section B); ADR 0043's later facts (section 15).
+**Facts beside the phase:** pending starts (`(Sequence, Samples)` per Play-family request until its receipt, bounded at 16; a seventeenth is refused with the default refusal text); held commands (Park) and deferred commands (Resume); speed `Normal | Half` (invariant: `Half` only in StartPending or Playing; every other transition sets `Normal` and `Player::set_speed(1.0)`, B7); the wanted loop, the loop last sent and the loop a pass records under; locate, release and record-off requests outstanding (record-off is independent, S-7: it survives leaving StopPending until acknowledged or the Player is replaced); observed playing and position (sampled together, B9); the working cursor and retained position (section 8); reopen state, `ReopenPending`, `InputOpening` (S5b); `faulted` (set by `PlayerError::Faulted` or a Player fault, cleared only by replacing the Player); the MIDI transport `recovering` flag; the ingress cutoff (section 15); the interface-owned interlocks (measuring, External Instrument measure; refused at `run`, `frame_logic.rs:47-66`); the backend, Player or simulated.
 
-**The sweep for calls that start or stop the Player (R-A).** In the host already: `host/transport.rs` and `host/recording.rs` (play, stop, locate, set_loop, set_speed, record, set_recording, all_notes_off), and every `stop_play` caller (`host/reconnect.rs`, `host/autosave.rs:114-116`, `menus.rs:18-19`, `midi_transport.rs:162-173`, `frame_logic.rs:148-151`, `host/recording.rs:565`). Moving into the host: the real-time render (`finish/realtime.rs:190-330` around `start_realtime_render`, `realtime_render_result`, `cancel_realtime_render`), Player installation (`splash.rs:129-136`) and replacement (`audio_connection.rs:62-86`, `host/reconnect.rs:212-255`), which drop the old Player. Checked and not transport: the hardware probe, loop calibration and External Instrument measure refuse while playing and start no transport (`P/player/device.rs:265`, `P/player/device/calibrate.rs:25`, `P/player/device/external_measure.rs:31`); the browser preview is a separate player outside the plan (`Player::preview`), and the interface stops it on a playing edge (`browser/preview.rs:272`); audition notes (`Player::note`) start nothing.
+**Invariant (S-2), pinned by a test after every admission and every step:** Stopped implies no accepted transport request (start, Record, Stop, render Play or Stop) is outstanding and playback is not observed. A step that observes playback while Stopped and nothing outstanding adopts it (row O7: Playing, logged), so a late or untracked receipt can never leave the phase Stopped while the Player plays.
+
+**Calls that start or stop the Player (R-A).** Already host code: `host/transport.rs`, `host/recording.rs` and every `stop_play` caller (`host/reconnect.rs`, `host/autosave.rs:114-116`, `menus.rs:18-19`, `midi_transport.rs:162-173`, `frame_logic.rs:148-151`, `host/recording.rs:565`). Moving into the host: the render (`finish/realtime.rs:190-330`), Player installation (`splash.rs:129-136`) and replacement (`audio_connection.rs:26-86`, `host/reconnect.rs:212-255`). Checked, not transport: the hardware probe, loop calibration and External Instrument measure refuse while playing (`P/player/device.rs:265`, `P/player/device/calibrate.rs:25`, `P/player/device/external_measure.rs:31`); the browser preview is a separate player outside the plan; audition notes start nothing.
+
+**The render's receipts (S-8, a playback change in S2b).** `start_realtime_render` returns the Play's `Sequence` (a synchronous `play()` error stays its `Err`); the job keeps the `Sequence` of every Stop it submits, read with `realtime_render_stop()`; `cancel_realtime_render()` returns the Stop it submitted, if any. The host:
+- polls the render where `finish::step_bounce` calls `step_realtime` today (`finish.rs:809-811`, `frame_logic.rs:360`), block H3r of section 9;
+- applies, in that block, any cancel requested since the last poll before it collects a result, so a cancel requested in a step wins over a completion first seen in the same step; a result already collected in an earlier step stands and a later cancel is a no-op (`P/player/device/realtime_render.rs:184` finds no job);
+- on a refused Play receipt, cancels the job (no Stop needed) and leaves when the job is retired;
+- on a fault (no acknowledgment can arrive), cancels the job, which abandons the writer and removes the part files (`:182-190`), treats the transport requests as settled, and leaves for Stopped with `faulted` set;
+- on a cancel caused by a session replacement, shows "Render stopped: the session was replaced. Nothing was written."; by a reopen, today's `CANCELLED_REOPEN` (`finish/realtime.rs:26`).
 
 ### 4. The state table
 
-| Phase | Entered by | Audible | State text | Record button | Commands with an effect |
-|---|---|---|---|---|---|
-| Stopped | launch; refusals from a stop, stop completion, failures, device events, render end | no transport sound (live instruments sound, E3) | none | off | all |
-| StartPending | a Play-family request accepted | prev's sound (nothing, or the old playback) | Play pending | off | replacement starts, Toggle, Stop, Pause, Record, Locate (cursor only) |
-| Playing | Play applied | playback | none (outcome "Playing") | off | all but Play |
-| RecordPending | Record accepted | from stopped nothing; punch playback | Count-in when a count-in was sent, else Record pending | off | Toggle, Stop, Pause, Record (cancel), Locate (take-safe) |
-| CountIn | admission or stage | the click | Count-in | pulses while the published counter runs (as today, `transport.rs:193-197`) | the starts, Toggle, Stop, Pause, Record and HalfSpeed cancel; Locate take-safe |
-| WaitingForClock | admission without count-in, or stage | from stopped nothing (parked); punch playback | Record pending (B1) | lit | Toggle, Stop, Pause, Record (cancel), Locate (take-safe) |
-| Recording | latch | playback and capture | none (outcome "Recording") | lit | Toggle, Stop, Pause, Record (take finalized), Locate (take-safe) |
-| StopPending Park / Reset | a Stop-family request; device trouble; lap limit / ResetSession | playback until the audio thread applies Stop | Stop pending / none | off | Stop, Pause, Toggle re-send; Locate (cursor); starts and Record held (D4) |
-| StopPending Resume | Locate during a pass | as Park | Stop pending | off | Stop, Pause, Record drop the resume; Locate retargets; others deferred |
-| Rendering | a render started by the host | the render's playback | none (the render dialog shows progress) | off | all refused with the render's text; All Notes Off cancels the render first (today `finish/realtime.rs:164-171`) |
+| Phase | Audible | State text | Record button | Commands with an effect |
+|---|---|---|---|---|
+| Stopped | no transport sound (live instruments sound, E3) | none | off | all |
+| StartPending | the sound before the first start (nothing, or the old playback) | Play pending | off | starts (added to the set), Toggle, Stop, Pause, Record, Locate (cursor only) |
+| Playing | playback | none (outcome "Playing") | off | all but Play |
+| RecordPending | from stopped nothing; punch playback | Count-in when a count-in was sent, else Record pending | off | Toggle, Stop, Pause, Record (cancel), Locate (take-safe) |
+| CountIn | the click | Count-in | pulses while the published counter runs (as today, `transport.rs:193-197`) | the starts, Toggle, Stop, Pause, Record, HalfSpeed cancel; Locate take-safe |
+| WaitingForClock | from stopped nothing (parked); punch playback | Record pending (B1) | lit | Toggle, Stop, Pause, Record (cancel), Locate (take-safe) |
+| Recording | playback and capture | none (outcome "Recording") | lit | Toggle, Stop, Pause, Record (take finalized), Locate (take-safe) |
+| StopPending Park | playback until the audio thread applies Stop | Stop pending | off | starts, Toggle and Record held; Stop sets `rtz`; Locate sets the target |
+| StopPending Resume | as Park | Stop pending | off | Stop, Pause, Record drop the resume; Locate retargets; AllNotesOff at once; HalfSpeed refused; the rest deferred |
+| StopPending Reset | as Park | none | off | Stop, Pause re-send; everything else has no effect (S-5: discarded) |
+| Rendering | the render's playback | none (the render dialog shows progress) | off | all refused with the render's text, except All Notes Off (cancels the render first, `finish/realtime.rs:164-171`) and Scrub |
 
-### 5. Transitions
+### 5. Transitions and the record start's stage
 
-The total matrix is [tables.md](0062/tables.md), section A: every `TransportRequest` (`E/lib.rs:87-101`), every receipt kind (Play, Record start, record-off, Locate, Stop frontier, release frontier, Session rejection, untracked refusal, fault), the stage and playing observations, the render, device events, the live loop change, MIDI loss, the lap limit, held-command release. Each cell gives the phase entered, the effects, or the refusal; each cell that differs from today names its B or D item. The simulated transport has its own table (section B). The rules the matrix applies:
+The matrix is [tables.md](0062/tables.md), section A. It is total for this record's phases: every `TransportRequest` (`E/lib.rs:87-101`), every receipt kind, the stage observations, the render, the device events (input loss and input trouble separate, S-4), the live loop change, MIDI loss, the lap limit, held and deferred release. Cells that differ from today carry their B or D item. The simulation has its own table (section B). Rules:
 
-- **A command's target phase is entered when its Player request is accepted** (`Sent(kind, seq)`). A local refusal keeps the phase and posts its message; a Record refused after arming runs `finish_recording` (disarm, discard the journal), as `host/recording.rs:129-147` does. A Player error keeps the phase and posts the error; `PlayerError::Faulted` sets the `faulted` fact.
-- **While `faulted`**, the starts (Play family, HalfSpeed, Record) refuse with the fault's text until the Player is replaced; finalization runs with Player errors ignored (the recorder's take and the MIDI pass are finished from what the host already holds).
-- **Untracked refusals** still reach the status line (`host.rs:362-364`, pinned by `player_tests.rs:99-116`); stale receipts of a tracked kind clear nothing.
-- **Record-start stage (R-H).** The audio thread publishes, with one release store per change, `shared.metro.record_stage: AtomicU64` holding the record-start ticket's sequence (56 bits) and a stage code: 1 counting in, 2 waiting for the clock, 3 started, 4 failed, 5 cancelled. Writers: `count_in` (`P/player/audio.rs:372-413`), `record_within` when it waits (`:296-299`, `:332-340`) or starts (`:366`), the count-in end and the waiting retry in `render_next` (`:942-958`), every failure and cancel path. Reader: `Player::record_stage() -> Option<(Ticket, RecordStage)>`. A stage for another ticket is ignored. CountIn leaves only on stage 2, 3 or 4 (or the latch); nothing is inferred from elapsed time or from `count_in()` reading `None`. A step that misses the whole count-in sees stage 2 or 3 directly. The published counter (`count_in()`) stays the display's source for the countdown and the pulse.
+- **Admission (S-1).** A command's cell is applied when the command executes (section 9), and the Player request is submitted then; the phase and capabilities reflect it before the next command runs.
+- **Player errors, in this order:** `PlayerError::Faulted` sets `faulted` and applies row R13; an error from a call that cancels the record ticket before it fails (`Player::stop`, `locate`, `set_recording(false)` cancel first: `P/player/device.rs:319, 469-470, 475-476`) ends the pass like a cancelled stage (row O5) and leaves for the phase the transport is in; any other error keeps the phase and posts the error.
+- **While `faulted`**, every start refuses with the fault's text until the Player is replaced; finalization runs with Player errors ignored.
+- **Untracked refusals** still reach the status line (`host.rs:362-364`, `player_tests.rs:99-116`); stale receipts of a tracked kind clear nothing.
 
-### 6. Status text (R-E)
+**The stage (S-11, playback change in S2b).** The record start already publishes through its ticket-owned structure: one state word per runtime holding the ticket's sequence and flags, issued with `checked_add` and refusing exhaustion (`P/record/start.rs:10-13, 117-125`), validated against the full ticket by `Reader::status()` (`:232-250`). S2b widens its flags from two bits to three (`FLAGS = 7`, sequences step by 8; exhaustion still refused, never wrapped) and adds stages: `Pending`, `CountingIn`, `Waiting`, `Started(Point)`, `Failed(StartFailure)`, `Cancelled`. Writers, all on the audio thread except Main's cancel: `count_in` admission (`P/player/audio.rs:372-413`), `record_within` waiting (`:296-299, 332-340`), start (`start_placed`, `:349`), failure (the paths that store `start_failure` today, `:949, :967`), cancel (compare-and-exchange from any non-terminal stage, so a late audio-side write never overwrites `Cancelled`). The failure reason and the latch are payload words stored with release before the state word; the reader loads the state word with acquire, reads the payload, and revalidates the state word, the pattern `status()` already uses.
+- **Precedence:** `Reader::status()` is authoritative for the pass's lifecycle; `Started(point)` is the latch (`Recorder::applied_start` and `Player::midi_recording_latch` read the same reader); `Failed(reason)` gives the message. Action receipts only clear the request and give the refusal text when the receipt arrives first; the host records which ticket it reported, so one failure is said once. `count_in()` is display only. `take_start_failure()` (`P/player/device.rs:903-904`, a destructive untagged read) is deleted in S2c, when its consumer moves to the stage.
+- **Terminal stages (S-3):** `Cancelled` and `Failed` end the pass in RecordPending, CountIn and WaitingForClock: the prepared resources are finalized (`finish_recording`: disarm, discard the journal) and the phase becomes Playing if playback is observed, else Stopped. No phase waits for a latch that cannot come.
 
-- `StatusLine` (plain data, no egui; in the interface crate in S2c, in `transit-host` from S3b): `message: Option<Message { text, kind: Outcome | Note, rev, since }>`, `state: Option<State { text, rev }>`, `next_rev`. `status.set(text)` replaces `app.status = ...` at its 333 writers (a mechanical change in S2c); it takes a new revision when the text differs, and `say_again` (today's `StatusAge::restart`, #216) takes one for equal text. `StatusAge` ages only `message`.
-- `state_text(phase, facts)` is the one producer of state texts: ReopenPending "Reopening the audio device" over the phase's text ("Play pending", "Record pending", "Count-in", "Stop pending") over InputOpening "Opening the audio input" over release pending "All MIDI notes off pending". `is_state` is deleted.
-- **Shown:** `message` when it is newer (`rev`) than `state`, else `state`, else `message`, else empty.
-- **Arbitration, once per transition**, with the shown line before the transition as input, in the executor, in transition order: (1) the new state text takes a fresh revision if the line before showed a state text, nothing, or an Outcome; it keeps the old state revision if the line before showed a Note, so a recent failure stays visible; (2) an outcome ("Playing" on Play applied, "Recording" on the latch, "Stopped" on a Park completion, "All MIDI notes off" on the release frontier) is written as an Outcome message only if the line before showed a state text or nothing. The decision is carried in `HostEvent::PhaseChanged { from, to, shown_before, outcome_written }`.
-- The six sequences of round 1 are worked in [tables.md](0062/tables.md), section D, and each is an S2c test.
-- `ui.inspect`'s `status`, the status bar and the diagnostics report read the shown line; `StatusAge::last` keeps messages only.
+### 6. Status text
 
-### 7. Capabilities (R-D)
+- `StatusLine` (plain data): `message: Option<Message { text, kind: Outcome | Note, rev, since }>`, `state: Option<State { text, rev }>`, `next_rev`. `set(text)` takes a new revision when the text differs; `say_again` (today's `StatusAge::restart`, #216) takes one for equal text; `last_text()` returns the last written message, which is what `Err(self.status.clone())` returns today. `StatusAge` ages only `message`.
+- `state_text(phase, facts)` is the one producer: ReopenPending "Reopening the audio device" over the phase's text over InputOpening "Opening the audio input" over release pending "All MIDI notes off pending".
+- **Shown:** `message` when its `rev` exceeds `state.rev`, else `state`, else `message`, else empty.
+- **Arbitration, once per transition, with the shown line before it as input:** (1) the new state text takes a fresh revision when the line before showed a state text, nothing, or an Outcome; when it showed a Note, the new state keeps the old state's revision, or 0 when there was no state (below every message), so the Note stays visible. (2) An outcome ("Playing", "Recording", "Stopped", "All MIDI notes off") is written as an Outcome only when the line before showed a state text or nothing **and** no state text is live after the transition (S-12): release completing during Stop pending keeps "Stop pending"; Stop completing with a release outstanding keeps "All MIDI notes off pending". The decision is carried in `HostEvent::PhaseChanged { from, to, shown_before, outcome_written }`.
+- **Writers that are not mechanical (S-12):** sites that append to, read back, compare or return the status get their own treatment, listed in [tables.md](0062/tables.md), section E; the rest change `app.status = x` to `app.status.set(x)` and `self.status.clone()` to `self.status.last_text()`.
+- Nine worked sequences are in section D, each an S2d test. `ui.inspect`'s `status`, the status bar and the diagnostics report read the shown line.
 
-The host publishes, after every transition (not only at step end), into `engine.transport`:
+### 7. Capabilities
 
-| Field | Meaning, over the phase and facts |
+Published into `engine.transport` at every admission and every transition:
+
+| Field | Meaning |
 |---|---|
-| `playing` | playback observed: the sampled `Player::is_playing()` of the step, or the simulated state (B9) |
-| `position` | the observed position while not Stopped; the working cursor while Stopped (section 8); always published with `playing` |
+| `playing` | playback observed: the sampled `Player::is_playing()`, or the simulated state (B9) |
+| `position` | the observed position while not Stopped; the working cursor while Stopped; published with `playing` |
 | `recording` | `Recording` |
-| `record_engaged` (new) | `RecordPending`, `CountIn`, `WaitingForClock`, `Recording`, `StopPending Resume`; later ADR 0043's armed external start with Record |
-| `finalizing` (new) | resources still need finalization: a take plan, a recorder take pending, or a MIDI pass prepared |
-| `work_outstanding` (new) | a Play, Locate, Stop, Record start, record-off, release or render is outstanding, or a command is held |
-| `exclusive_ok` (new) | `Stopped`, not `work_outstanding`, not `finalizing`, not `faulted`: safe to start a measurement, a render, a sync mode change |
+| `record_engaged` (new) | RecordPending, CountIn, WaitingForClock, Recording, StopPending Resume |
+| `finalizing` (new) | a take plan, a recorder take pending, a MIDI pass prepared, or a record-off outstanding (S-7) |
+| `work_outstanding` (new) | a pending start, Record, Stop, Locate, record-off, release or render request, or a held or deferred command |
+| `exclusive_ok` (new) | Stopped, not `work_outstanding`, not `finalizing`, not `faulted` |
 
-Host-only predicates: `running()` (not Stopped, not StopPending Park or Reset: a pending start counts as running, ADR 0043 amendment), `transport_active()` (not Stopped), `sync_allowed()` (no Play, Locate, Record start or record-off outstanding; Stop and release do not block, exactly `frame_logic.rs:365`).
+Host-only: `running()` (not Stopped and not StopPending Park or Reset), `transport_active()` (not Stopped), `sync_allowed()` (no pending start, Locate, Record or record-off; Stop and release do not block, as `frame_logic.rs:365`). Expected truth table: `record_engaged` true exactly in RecordPending, CountIn, WaitingForClock, Recording and Resume; `exclusive_ok` false in every phase but a settled, healthy Stopped; `finalizing` and `work_outstanding` depend on resources and requests and may overlap `record_engaged`.
 
-Every reader is assigned to exactly one field or predicate in [tables.md](0062/tables.md), section C, including the judge's list. `recording_active()` is deleted. Readers that change what they block are tagged B12. Backend-local readers (`crates/mix/src/strip.rs:418`, `P/player/audio.rs:775, 871`, `P/player/device.rs:265, 966`, the measurement and render services) keep reading the audio side. `TransportStatus` derives `Serialize` (`E/lib.rs:105`), so the new fields appear in `transport.status` (`E/cmd/transport.rs:95`) and `session.inspect`'s `transport` (`E/inspect.rs:100`); `ui.inspect` (`lib.rs:664-665`) adds `record_engaged` explicitly. `docs/control-protocol.md` is updated in S2b, keeping its `recording_pass` contract (`:122-123`). No session file changes.
+Every reader is assigned to exactly one field or predicate in [tables.md](0062/tables.md), section C. `recording_active()` stays only as a test helper (`#[cfg(test)]`, `record_engaged || finalizing`) so `host/live_cycle_tests.rs:311, 336, 373` and `midi_transport/tests.rs:170` keep compiling unchanged. Backend-local readers keep reading the audio side. The new fields appear in `transport.status` (`E/cmd/transport.rs:95`) and `session.inspect`'s `transport` (`E/inspect.rs:100`); `ui.inspect` adds `record_engaged`; `docs/control-protocol.md` is updated in S2c, keeping its `recording_pass` contract (`:122-123`).
 
-### 8. Positions and synchronous effects (R-C)
+### 8. Positions and synchronous effects
 
-Within a step the host keeps a **working cursor** (initialized from `StepInput.cursor`) and the working positions; every command sees the effects of the commands before it in the same step.
+Within an admission or a step the host keeps a working cursor and working positions; each command sees the effects of the commands before it.
 
-| Effect | Side | Today |
-|---|---|---|
-| cursor move by a locate or a take-locate | synchronous (working cursor; `CursorTo` at step end for the interface's copy) | `set_cursor` before the next request, `host/transport.rs:145, 268` |
-| transport position, retained position | synchronous, published at once | `host/transport.rs:52, 66, 146, 223, 260, 270` |
-| a stopped cursor move from the interface | synchronous: `set_cursor` calls `host.cursor_moved(at)`, which publishes the position at once while Stopped | `lib.rs:537-539` |
-| selection after a placed take | synchronous: the host runs `edit.select` itself | `host/recording.rs:640, 712` |
-| Return to Zero on a second Stop | synchronous: `engine.execute("transport.rtz")` and its Locate handled before later requests | `host/transport.rs:238-241` |
-| undo squash of a Record operation | synchronous | `host/recording.rs:466-478` |
-| ResetSession's cursor, cursor track and focus clear | cursor synchronous (working cursor := session start); the rest deferred | `host/transport.rs:199-201` |
-| scroll back to pickups | deferred (`PickupsBefore`) | `host/recording.rs:493-503` |
-| focus track, take-lane visibility | deferred (`TakePlaced { focus, take_lanes }`) | `host/recording.rs:631, 642, 653, 714` |
-| gestures, copies, automation selection, meter displays on reset | deferred (`SessionReset`) | `host/transport.rs:191-198, 202-204` |
-| Record hint | deferred (`RecordHint`), stamped by the interface's frame clock | `host/recording.rs:27`, `midi_transport.rs:290` |
-| editor windows re-wanted after a replacement; plug-in editor edits applied to automation, Learn and merges | deferred (`EditorsReopened`, `EditorEdits`) | `host/reconnect.rs:231-235`; `host/plugin_state.rs:193-214` |
-
-Retained position: written on Park completion from the applied stop position read before parking (`host.rs:96-97`), by PlayExact and Locate (the target), by ResetSession (0); read by Continue.
-
-### 9. The step
-
-**Clock (R-F).** `trait HostClock { fn frame(&self) -> f64; fn monotonic(&self) -> Duration; fn calendar(&self) -> SystemTime; fn sleep(&self, d: Duration); }`. The host never calls the system clock. The interface implements it from egui's frame time and the system clocks; tests and the headless runner pass a stepped clock.
-
-| Timed thing | Clock |
+| Effect | Side |
 |---|---|
-| `dt` of the simulation and the simulated count-in; meter poll every 50 ms (`host/transport.rs:324`) | frame |
-| reopen attempts (`host/reconnect.rs:34, 86, 151`); time while the window is hidden does not count, as today | frame |
-| stream verification after a reopen (`audio_devices.rs:299-320, 340`) | frame |
-| Record hint lifetime (stamp and expiry, `lib.rs:653`) | frame, both on the interface side |
-| timed state read and autosave every two minutes (`host/timed_read.rs:42, 47, 57`) | monotonic |
-| MIDI journal flush interval (`E/midi_journal.rs:134, 140, 212`) | monotonic, passed into `Writer` (an engine signature change in S3b) |
-| MIDI journal file name (`E/midi_journal.rs:114`) | calendar, passed into `journal_path` (S3b) |
-| plan wait before captures (`host/state_guard.rs:215-241`) | monotonic and `sleep` |
-| hardware measurement deadlines (`hardware_measure.rs:21, 47`) when stepped (S5a) | monotonic |
-| exempt, inside a blocking Player service: the state read budget (`P/player/handles.rs:897-913`), the save deadline (`:31`) | the Player's own |
+| cursor move by a locate or take-locate (`host/transport.rs:145, 268`) | synchronous (working cursor); `CursorTo` for the interface's copy |
+| transport and retained positions (`host/transport.rs:52, 66, 146, 223, 260, 270`) | synchronous, published at once |
+| a stopped cursor move from the interface (`lib.rs:537-539`) | synchronous: `set_cursor` calls `host.cursor_moved(at)` |
+| selection after a placed take (`host/recording.rs:640, 712`) | synchronous: the host runs `edit.select` |
+| Return to Zero on a second Stop (`host/transport.rs:238-241`) | synchronous: `engine.execute("transport.rtz")` and its Locate admitted before the next command |
+| undo squash of a Record operation (`host/recording.rs:466-478`) | synchronous |
+| ResetSession's cursor clear (`host/transport.rs:199`) | synchronous (working cursor := session start) |
+| scroll to pickups, focus, take lanes, reset view clears, Record hint, editor re-want, editor edits | deferred events (`PickupsBefore`, `TakePlaced`, `SessionReset`, `RecordHint`, `EditorsReopened`, `EditorEdits`) |
 
-**Input.** `StepInput { dt, cursor, prefs: HostPrefs, pointer_down, touches_open, ingress_cancel_generation }`; `HostPrefs` copies count-in bars and switch, click level, monitor settings, audio configuration, low-latency limit and MIDI transport profiles. The timed read's gate is `pointer_down || touches_open || engine.merge_held()` (`host/timed_read.rs:75-76`).
+**Retained position (S-6):** on Park completion, `Park.target` when a Locate set it, else the applied stop position read before parking (`host.rs:96-97`); written by PlayExact and Locate (the target) and ResetSession (0); read by Continue. So Continue resumes from where the user put the cursor during Stop pending.
 
-**Order.** Today's `logic()` order is kept; only the MIDI buttons move.
+### 9. Admission and the step
+
+**Admission (S-1).** The engine's `TransportRequest` queue stays as the engine's hand-off buffer and is never carried across a command boundary when a host exists:
+- Every interface path that executes an engine command goes through one function, `StudioApp::execute` (today `run`, `execute_ui_merged`, `execute_with_mode` and the 21 direct `engine.execute` sites in the interface), which calls `host.admit` right after `engine.execute` returns. Admission first drains receipts (block H1 below) so the command sees every acknowledgment published so far, then applies each queued request through the matrix in order, submits the Player requests, and publishes the capabilities. The next command's guard therefore sees the new phase: Record then Undo refuses the Undo; Record then a measurement refuses the measurement.
+- The control channel's batch (`control.rs:53-56`) and MIDI transport buttons call `run`, so each call is admitted before the next is evaluated. MIDI buttons run right after the control drain in `logic()` (D7) and are decided against the admitted phase; buttons received during StopPending stay in the button queue, as today (`midi_transport.rs:224-227`), and are dispatched after the stop completes.
+- **Replies.** A transport command whose admission refuses returns `Err` with the refusal text (which also goes to the status line, as today); `Ok` means admitted: the phase moved and the Player request was submitted, not that it applied (B13). The MIDI dispatch's device-named Record refusal keeps its text: it treats an admission `Err` for an unarmed Record as its `refused` case (`midi_transport.rs:260-266, 288-292`).
+- **Engine only** (engine tests, a build with no host): requests stay in the queue as today; `Headless` clears them until S4 and admits them after.
+- A step that finds the queue not empty logs a defect and admits it first (a missed `execute` path).
+
+**Clock (R-F).** `trait HostClock { fn frame(&self) -> f64; fn monotonic(&self) -> Duration; fn calendar(&self) -> SystemTime; fn sleep(&self, d: Duration); }`; the host never calls the system clock. Timed things and their clocks are in [tables.md](0062/tables.md), section C, last part; the Player's own budgets inside its service calls are exempt (`P/player/handles.rs:31, 897-913`).
+
+**Input.** `StepInput { dt, cursor, prefs: HostPrefs, pointer_down, touches_open, ingress: IngressCutoff }`; `HostPrefs` copies count-in, click level, monitor settings, audio configuration, low-latency limit, MIDI transport profiles.
+
+**The step** handles receipts, observations, timers and device events only:
 
 | # | Block | Today |
 |---|---|---|
-| H1 | receipts in `poll_notices` order, then the stop and release frontiers; Park completion reads the applied position first | `frame_logic.rs:329`, `host.rs:82-114` |
+| H1 | receipts in `poll_notices` order, then the stop and release frontiers; Park completion reads the applied position, then releases held commands (they are admitted) unless the ingress cutoff or a superseding event cancelled them | `frame_logic.rs:329`, `host.rs:82-114` |
 | H2 | recording clock observation and journal; lap limit | `:335-337` |
-| H3 | output trouble, input trouble, reopen | `:355-357` |
-| H4 | click and monitor pushes; the Resume check (Reset supersedes it, below); observations: start failure, record stage, latch | `host/transport.rs:139-167` |
-| H5 | queued commands, first in first out | `:168-308` |
-| H6 | MIDI buttons in arrival order, each decided against the current phase and applied at once; MIDI loss | drawing pass today (`frame_logic.rs:467`); tagged D7 |
-| H7 | loop retarget; readback, natural end; simulation timers; meters | `host/transport.rs:309-386` |
+| H3 | output trouble, input trouble, input loss, reopen | `:355-357` |
+| H3r | render: pending cancels, then result poll | `:360` (`finish.rs:809-811`) |
+| H4 | click and monitor pushes; the record stage; the Resume check | `host/transport.rs:139-167` |
+| H5 | loop retarget; readback, natural end, adoption (O7); simulation timers; meters | `host/transport.rs:309-386` |
 | after | automation write pass; session sync when `sync_allowed()`; autosave; input | `frame_logic.rs:364-375` |
 
-- **Held and deferred commands.** A start or Record during StopPending Park is held and applied after completion (D4); during StopPending Resume, commands other than Stop, Pause, Record and ResetSession are deferred until the resumed pass starts or fails. A Stop, Pause or ResetSession drops every held start queued before it.
-- **Reset supersedes Resume.** Before H4 starts a resumed pass it scans the queued commands; a ResetSession, Stop, Pause or Record there turns Resume into Park (Reset for ResetSession). So a session opened during a take-locate never resumes recording (ADR 0043: "Opening a session always starts stopped").
-- **Resume uses the full start path.** It runs the Record start with all its refusals; a refusal leaves Stopped with the finished take preserved and the reason visible (ADR 0043:143-145), then the deferred commands run against Stopped.
-- **Ingress cancellation.** The host drops any held or deferred start whose source generation is not newer than `ingress_cancel_generation`; the generation itself is ADR 0043's (section 15).
-- **Device-free step (R-I).** S2b extracts the transport part of `logic()` into `StudioApp::step_host(&mut self, clock, input)` with no egui argument; `logic()` calls it, and `host::testing::device_free_app()` (test only) builds a `StudioApp` on a device-free Player and a stepped clock. This is the window-free adapter sync slice 1's gate uses before the crate move.
+**Held and deferred commands (S-5).**
+- Park holds starts, Toggle (a start, so Space twice restarts) and Record; they are admitted in order at completion. A held start is cancelled by a later Stop, by ResetSession, by a device reopen or replacement, by a fault, and by the ingress cutoff.
+- A second Stop during Park sets `rtz`; Return to Zero runs at completion (D9: today it depends on the observations of the moment, `host/transport.rs:228-241`).
+- Reset discards held and deferred commands: opening a session always starts stopped.
+- Resume defers every command except Stop, Pause, Record (they drop the resume), Locate (retargets), AllNotesOff (at once) and HalfSpeed (refused). When `stop` and record-off are both acknowledged, H4 checks for a superseding command already admitted (Reset, Stop, Pause, Record: then Park or Reset), else submits the full Record start at the target; the deferred commands are released when that Record's admission receipt or stage arrives (CountIn, WaitingForClock, Recording) or when it is refused (receipt or stage `Failed`/`Cancelled`, or a local refusal, which leaves Stopped with the finished take preserved and the reason visible). Not on submission, not only on the latch.
 
-**Events out** (`HostEvent`, in transition order): `PhaseChanged`, `Message`, `CursorTo`, `SessionReset`, `TakePlaced`, `PickupsBefore`, `RecordHint`, `EditorsReopened`, `EditorEdits`. Outcome text is written by the executor into `StatusLine` (section 6); the event records it.
+**Device-free step (R-I).** S2b extracts the transport part of `logic()` into `StudioApp::step_host(&mut self, clock, input)` with no egui argument, and adds `host::testing::device_free_app()`; this is the window-free adapter sync slice 1's gate uses before the crate move.
 
-**The pure core.** `next(phase, event, facts) -> Next { to, effects }` takes no strings and no Player; the executor performs the effects and feeds `Sent` or `NotSent` back in the same step.
+**The pure core.** `next(phase, event, facts) -> Next { to, effects }` takes no strings and no Player; the executor performs the effects and feeds `Sent` or `NotSent` back in the same admission or step.
 
 ### 10. Behavior changes
 
-"Read" = confirmed by reading `main` 1a56b895; round 1 confirmed each by reading too. Every test runs its negative control on the commit before its slice.
+Each is confirmed by reading `main` 1a56b895 (rounds 1 and 2 confirmed them too); every test runs its negative control on the commit before its slice. Tests are named in the Slices gates.
 
-| # | Today | Instead | Affected | Slice, test |
-|---|---|---|---|---|
-| B1 | Count-in admission and a start waiting for the clock answer `Applied` (`P/player/audio.rs:299, 340, 412`); any applied Record receipt sets the flag (`host.rs:349-355`) and the wait shows "Recording" | the flag only from the latch; the wait shows "Record pending" | `transport.status`, `session.inspect`, `ui.inspect` `recording`; wait text | S2b `recording_flag_is_false_through_the_count_in_and_true_from_the_latch`, `an_admitted_record_without_a_latch_is_waiting_not_recording` |
-| B2 | With a Player the flag stays until record-off or completion (`host/recording.rs:375-381`, `host/transport.rs:63`), so `recording_active()` (`host/recording.rs:281`) gates device changes, undo, recovery and the timed autosave while a Park or Reset stop is pending | StopPending Park and Reset are not `record_engaged`; Resume stays engaged | readers on `record_engaged` (section 7) | S2b `stop_ends_the_pass_at_once_and_device_changes_are_allowed_while_the_stop_is_pending` |
-| B3 | "Count-in" is written on sending (`host/recording.rs:149-154`) and replaced by "Recording" when `count_in_state()` reads `None` (`host/transport.rs:165-166`), even before admission | CountIn leaves only on the record stage | status text | S2c `count_in_text_stays_until_the_record_stage_moves_on`, `a_step_that_misses_the_whole_count_in_sees_waiting_or_recording` |
-| B4 | Only the displayed promotion is gated by text (`host.rs:343, 354, 380`; `host/transport.rs:59-60, 165-166`); requests and the flag change regardless (`host.rs:342, 348, 351-353, 388`) | section 6 | status line | S2c, the six display tests |
-| B5 | `reset()` keeps the text (`host.rs:280-282`); Reconnect while playing sends Stop (`host/reconnect.rs:227-228`), resets (`:245`) and writes nothing when capture succeeded (`:107-112`); `is_state` keeps "Stop pending" | replacement and reopen enter Stopped; text derived | status line | S2c `reconnect_while_playing_leaves_no_pending_text` |
-| B6 | A Record from stopped stores its sequence as `play` (`host/recording.rs:150-152`); Play pulses "Play pending" (`transport.rs:120, 127`) | `play_pending()` is StartPending only; the slow and stuck plug-in override stays (`:125-126`) | Play pulse, tooltip, click guard | S2c `a_record_start_does_not_pulse_play` |
-| B7 | Speed set before a fallible start (`host/transport.rs:289-292`, returns at `:12-21`, receipt `host.rs:362-366`) outlives a refused start; the simulation ignores speed (`host/transport.rs:361`) | the speed invariant; the simulation advances by `dt` times speed. The refusal of Record while playing at half speed stays (pinned by `host/live_cycle_tests.rs:366`) | Record after a refused half-speed start; `--no-audio` position | S2d `a_refused_half_speed_start_leaves_normal_speed_and_record_works`, `the_simulated_transport_plays_at_half_speed` |
-| B8 | A take-locate returns at `host/transport.rs:139-142`, skipping the pushes, readback and natural end | Resume is a phase; the block runs. Fresh meters stay suppressed while a Stop is pending (`:324`, unchanged) | playhead, click level, monitor during a take-locate | S2d `a_take_locate_keeps_reading_back_position_and_pushing_the_click_level` |
-| B9 | `is_playing()` reads the atomic (`lib.rs:637`); the copy (`host/transport.rs:312-317`) is read by `lib.rs:537`, `host.rs:47`, `host/reconnect.rs:29, 138`; `midi_monitor.rs:674` reads the Player directly | one playing and position pair per step; backend admission checks stay on the audio side | section 7's `playing` readers | S2d `every_reader_sees_the_playing_value_of_the_last_step`, `the_punch_decision_uses_the_step_sample` |
-| B10 | The count-in plan outlives the count-in (`host/recording.rs:154`, `host/transport.rs:58`); displays also check the counter (`metronome.rs:50-51, 61`) | the plan lives in phase data | none visible | S2c `the_count_in_plan_leaves_with_the_pass` |
-| B11 | Three positions (`midi_transport.rs:59`, `engine.transport.position`, `ui.cursor`; `host/transport.rs:52, 66`; `lib.rs:537-539`) | one owner (section 8); no timing change: a stopped cursor move still publishes at once | none visible | S2d `a_stopped_cursor_move_publishes_the_position_at_once`, `locate_then_play_in_one_step_plays_from_the_locate` |
-| B12 | Raw-flag readers do not block during RecordPending before admission (`actions.rs:11, 15`, `menus.rs:18, 402`, `E/lib.rs:770`); measurement admission checks only playing (`audio_devices.rs:481`, `hardware_ui.rs:105`, `hardware_measure.rs:187`, `external_measure.rs:227`, `finish/realtime.rs:139`, `E/lib.rs:414`, `E/cmd/external_instrument.rs:45`, `E/cmd/realtime_render.rs:115`) | `record_engaged` blocks from RecordPending on; exclusive operations need `exclusive_ok` (also refused during a pending start or stop, a finalizing take, an outstanding locate or release) | undo, width, replace, Reconnect, measurements, renders | S2b `undo_is_refused_from_the_record_request_on`, `a_measurement_is_refused_while_a_start_is_pending` |
+| # | Change | Slice |
+|---|---|---|
+| B1 | the recording flag only from the latch; the wait for the clock shows "Record pending" (`P/player/audio.rs:299, 340, 412`; `host.rs:349-355`) | S2c |
+| B2 | StopPending Park and Reset are not a record operation; Resume is (`host/recording.rs:375-381`, `host/transport.rs:63`, `host/recording.rs:281`) | S2c |
+| B3 | Count-in leaves only on the record start's stage (`host/recording.rs:149-154`, `host/transport.rs:165-166`) | S2d |
+| B4 | the displayed state is derived and arbitrated (`host.rs:343, 354, 380`) | S2d |
+| B5 | replacement and reopen leave no pending text (`host.rs:280-282`, `host/reconnect.rs:107-112, 227-228, 245`) | S2d |
+| B6 | a Record start no longer pulses Play; the plug-in loading override stays (`host/recording.rs:150-152`, `transport.rs:120-127`) | S2d |
+| B7 | the speed invariant; the simulation honors speed; the half-speed Record refusal stays (`host/transport.rs:12-21, 289-292, 361`; `host/live_cycle_tests.rs:366`) | S2e |
+| B8 | a take-locate keeps readback and pushes; meters still suppressed while Stop is pending (`host/transport.rs:139-142, 324`) | S2c (the early return goes with Resume as a phase) |
+| B9 | one playing and position pair per step, `midi_monitor.rs:674` included (`lib.rs:637`, `host/transport.rs:312-317`) | S2e |
+| B10 | the count-in plan lives in phase data (`host/recording.rs:154`, `host/transport.rs:58`) | S2d |
+| B11 | one owner for the positions, no timing change (`midi_transport.rs:59`, `lib.rs:537-539`) | S2e |
+| B12 | blocking changes, only for readers that newly block: the raw-flag readers block from RecordPending on (`actions.rs:11, 15`, `menus.rs:18, 402`, `E/lib.rs:770`); exclusive operations need `exclusive_ok`; the save, timed-read and plan-wait guards include the pending-start set and the render (tables C) | S2c |
+| B13 | a refused transport command replies `Err` at once (today `Ok`, then a status message) | S2c |
 
-**Related defects** (same code path; proposed task lines on #739, fixed in S2d):
+**Related defects** (proposed task lines on #739):
 
-| # | Today | Instead | Test |
+| # | Today | Instead | Slice |
 |---|---|---|---|
-| D1 | Play or Toggle while a start waits for the clock from stopped reaches `play_from_cursor` (`host/transport.rs:218-219, 246-249`); its Play calls `end_count_in` (`P/player/audio.rs:452`), cancelling the waiting ticket (`:417-418`) while the host keeps the plan | Play ignored; Toggle cancels like Stop | `play_while_waiting_for_the_clock_does_not_drop_the_record_start` |
-| D2 | PlayExact always calls `start_play` (`host/transport.rs:222-224`); PlaySelection cancels an observed count-in through Stop (`:273-275`) but otherwise starts Play (`:278-279`), during RecordPending before admission, WaitingForClock and Recording | ignored during RecordPending, WaitingForClock and Recording; PlayExact during CountIn cancels like Play | `play_from_a_position_during_a_pass_leaves_the_pass_alone` |
-| D3 | ResetSession during a take-locate waits behind the early return (`host/transport.rs:139-142`), so `start_recording` is attempted on the new document (`:148`) and refused for want of an armed track (`host/recording.rs:20-28`) | Reset supersedes Resume | `a_session_replaced_during_a_take_locate_does_not_attempt_a_resume` |
-| D4 | During Stop pending, starts and Record depend on the observations of the moment (`host/transport.rs:218, 246-249, 253-256`) and a Play can be sent with the Stop outstanding (`:21-23`) | held until the stop completes, then applied | `a_start_during_stop_pending_is_held_and_applied_when_stopped` |
-| D5 | Locate during Stop pending sends a Player Locate while the Player still plays (`host/transport.rs:268-270`, `:85-92`), and a loop change sends `set_loop` (`:128-133`) | cursor and retained position move; no Player request to a stopping Player (the stop parks at the cursor, the same end state) | `locate_during_stop_pending_parks_at_the_target` |
-| D6 | Pause while stopped sends a Stop (`host/transport.rs:244`) | no effect | `pause_while_stopped_does_nothing` |
-| D7 | MIDI buttons apply after the write pass, session sync and autosave, in the drawing pass (`frame_logic.rs:363-372, 467`) | applied in H6, before them | full `logic()` tests `a_midi_start_is_seen_by_the_same_frames_write_pass`, `midi_stop_ordering_survives_the_move` |
-| D8 | ResetSession during a real-time render sends Stop under the running render | the render is cancelled first, as a reopen does (`finish/realtime.rs:26`) | `a_session_replaced_during_a_render_cancels_it_first` |
+| D1 | Play or Toggle during a clock wait from stopped restarts playback and drops the record start (`host/transport.rs:218-219, 246-249`; `P/player/audio.rs:452, 417-418`) | Play ignored; Toggle cancels | S2c |
+| D2 | PlayExact and PlaySelection have no pass guard outside an observed count-in (`host/transport.rs:222-224, 273-279`) | ignored during RecordPending, WaitingForClock, Recording; PlayExact in CountIn cancels | S2c |
+| D3 | a session replaced during a take-locate attempts the resume on the new document (`host/transport.rs:139-148`) | Reset supersedes Resume | S2c |
+| D4 | starts during Stop pending depend on the moment's observations and can coexist with the Stop (`host/transport.rs:21-23, 218, 246-256`) | held, released at completion; Toggle counts as a start | S2c |
+| D5 | Locate or a loop change during Stop pending sends a request to a stopping Player (`host/transport.rs:85-92, 128-133, 268-270`) | sets the park target; nothing sent | S2c |
+| D6 | Pause while stopped sends a Stop (`host/transport.rs:244`) | no effect | S2e |
+| D7 | MIDI buttons run in the drawing pass after the write pass and autosave (`frame_logic.rs:363-372, 467`) | run after the control drain, admitted like any command | S2c |
+| D8 | ResetSession during a render sends Stop under it (`host/transport.rs:176-184`) | the render is cancelled first, with its own message | S2c |
+| D9 | a second Stop while a Stop is pending returns to zero only when the observations of the moment say stopped (`host/transport.rs:228-241`) | always, at completion | S2c |
 
 ### 11. The crate boundary and tests
 
 | Moves to `transit-host` | Slice |
 |---|---|
-| `host/phase.rs` (phase, facts, `next`, `state_text`, capabilities), `PlayerRequests` and receipts, the pure texts, `midi_transport::decode` and the button table, the count-in arithmetic | S3a |
-| `Host` with the Player and recorder; `host/transport.rs`, `host/recording.rs` (view effects as events), `host/autosave.rs`, `host/reconnect.rs`, `host/state_guard.rs`, `host/timed_read.rs`, `host/plugin_state.rs` minus `apply_edits` (an `EditorEdits` event, `:193-214`), the non-drawing parts of `midi_transport.rs`, `metronome.rs`, `transport.rs`; `StatusLine`; the render transport; `Connection for Player` (`audio_connection.rs:62-86`); Player installation (`splash.rs:129-136`) | S3b |
-| the four facades and their files (section 2) | S3c to S3e |
+| `host/phase.rs` (phase, facts, `next`, `state_text`, capabilities), the request tracker and receipts, the pure texts, `midi_transport::decode` and the button table, the count-in arithmetic | S3a |
+| `Host` with the Player and recorder; `host/transport.rs`, `host/recording.rs` (view effects as events), `host/autosave.rs`, `host/reconnect.rs`, `host/state_guard.rs`, `host/timed_read.rs`, `host/plugin_state.rs` minus `apply_edits` (`:193-214`, an `EditorEdits` event), the non-drawing parts of `midi_transport.rs`, `metronome.rs`, `transport.rs`; `StatusLine`; the render; `audio_connection.rs`; Player installation (`splash.rs:129-136`); the journal's clock parameters (`E/midi_journal.rs:114, 134-140, 212`) | S3b |
+| the four facades and their files | S3c to S3e |
 
-Stays in the interface: view state, `StatusAge` and drawing, meter ballistics (`host.rs:146`), `run` and its interlocks, window features, preferences.
-
-**Tests.** No window-free test is required to move. In S3b, test files that reach into moved fields change paths (`app.player` to the host's test accessors, `app.player_requests` to `app.host.requests_mut()`, and `take_plan`, `midi_transport`, `sim_count_in`, `record_start`, `take_cycle`, `recorder` likewise); tests that assign moved fields use test setters (`host::testing`), and time fields convert to the stepped clock. The reviewer checks the test diff holds only those kinds of edits. Tests needing a window stay; window-free ones may be ported to `Host` after S4.
+Stays: view state, `StatusAge` and drawing, meter ballistics, `run` and its interlocks, window features, preferences. Tests in S3b: test files reaching into moved fields change paths to the host's test accessors and setters (`host::testing`), and time fields to the stepped clock; the reviewer checks the test diff holds only those kinds of edits.
 
 ### 12. Blocking calls
 
 | # | Call | Target | Slice |
 |---|---|---|---|
-| 1 | device reopen (`audio_devices.rs:527`, Apply `:509`, `ui.set {audio}` `frame_logic.rs:291`, Reconnect `host/reconnect.rs:104`, automatic `:173`, a needed reopen in `host/plugin_state.rs:40-41`) | staged with `ReopenPending`: the reopen runs only in a pass after one that drew the text, the splash's precedent (`splash.rs:115-124`); a held Play is cancelled by Stop. The open and `preserve_audio_state` hold the Player: out of scope | S5b |
+| 1 | device reopen (`audio_devices.rs:509, 527`, `frame_logic.rs:291`, `host/reconnect.rs:104, 173`, `host/plugin_state.rs:40-41`) | staged: `ReopenPending` is shown, the reopen runs in a pass after one that drew it (the splash's precedent, `splash.rs:115-124`); a held Play is cancelled by Stop. The open itself holds the Player: out of scope | S5b |
 | 1a | ui.json write after verification (`audio_devices.rs:325-356`) | worker | S5a |
-| 2 | `io.measure_hardware_latency` sleep loop up to 8 s (`hardware_measure.rs:86-94, 21`) | stepped (`start_measure` `:98`, `step_measure` `:136`); the control request is parked and answered when done | S5a |
-| 3 | `wait_for_plan`, up to 150 ms (`host/state_guard.rs:215-241`) | out of scope, bounded; uses the clock capability | none |
-| 4 | plug-in state capture (`host/plugin_state.rs:105`; 500 ms, `P/player/handles.rs:31`) | out of scope; reopen with an ADR 0018 amendment | none |
-| 5 | `Autosaver::flush` (`E/autosave.rs:83-86`) via `autosave_to` | timed write by ticket; panic path, `close_autosave`, `recover` keep the flush | S5a |
+| 2 | `io.measure_hardware_latency` sleep loop up to 8 s (`hardware_measure.rs:21, 86-94`) | stepped (`start_measure` `:98`, `step_measure` `:136`); the control request is parked and answered when done, in order, and cancelled on disconnect | S5a |
+| 3 | `wait_for_plan` up to 150 ms (`host/state_guard.rs:215-241`) | out of scope, bounded; the clock capability | none |
+| 4 | plug-in state capture (500 ms, `P/player/handles.rs:31`) | out of scope; ADR 0018 amendment to reopen | none |
+| 5 | `Autosaver::flush` (`E/autosave.rs:83-86`) | timed write by ticket; panic, close and recovery keep the flush | S5a |
 | 6 | saves inside `engine.execute` | out of scope | none |
-| 7 | input open (`host.rs:118-141`) | staged with `InputOpening`; the open holds the Player: out of scope | S5b |
+| 7 | input open (`host.rs:118-141`) | staged with `InputOpening`; the open itself out of scope | S5b |
 | 8 | `machine_listing` (`audio_devices.rs:716`) | worker, as the ASIO listing (`:731`) | S5a |
-| 9 | quit, up to 10 s (`host.rs:75-78`) | out of scope | none |
+| 9 | quit (`host.rs:75-78`) | out of scope | none |
 | 10 | file pickers | #39 | none |
 
 Reopen condition for the out-of-scope parts: a record that lets a Player be created or dropped on a worker.
 
-### 13. Headless (S4, R-J)
+### 13. Headless (S4)
 
-- `Headless` holds a `Host`; it stops clearing `transport_requests` (`crates/automation/src/lib.rs:53-54`).
-- **Stepping.** `mcp::Server::serve` blocks on `input.lines()` (`crates/automation/src/mcp.rs:239-241`). S4 moves line reading to a reader thread that sends lines over a channel; the thread that created the Player loops on `recv_timeout(10 ms)`: a line is handled, a timeout steps the host. So natural ends, journal progress and autosave proceed while the client is idle. The loop owns a monotonic clock implementing `HostClock`; tests inject a stepped one.
-- **What it can do.** Production Headless opens `Player::with_null_device`: real-time paced playback, no input, no MIDI ports. So headless supports playback, every transport command, offline work and inspection. It cannot record: Record refuses with the existing "no audio input" and "no audio device is open to record MIDI" paths. Recording headless would need a virtual MIDI input on the null Player (the `transit-midi-io` `fake` backend made a production option) or a null audio input; that is a later record.
-- **Build.** `transit-automation`, and `transit-cli` through it, link `transit-playback`: cpal, the native backends on Windows, ALSA development files on Linux (`libasound2-dev`, already a gate prerequisite); `native-jack` is forwarded as an optional feature. `transit-engine` alone still builds without them. `Backend` has no `Send` bound (`crates/automation/src/lib.rs:22`).
-- Open point: none; the parked replies of S5a answer pending control requests.
+- `Headless` holds a `Host` and admits each command's requests inside `answer` (section 9).
+- **Replies.** `Ok` for Play means admitted (StartPending entered and the request submitted); `Err` with the refusal text otherwise. Record is refused explicitly, before arming or journaling, with "Recording needs an audio or MIDI input; this headless session has none.": the null Player is `Some`, so today's `None` refusal (`host/recording.rs:212`) would not fire and `prepare_midi_recording` would prepare a pass with no ports (`P/player/device.rs:390-403`).
+- **Stepping.** A reader thread reads lines and sends them over a channel; the thread that owns the Player handles at most a bounded amount of message work (one line, or up to 16 entries of a JSON-RPC batch) and then steps the host whenever the monotonic deadline (10 ms after the last step) has passed, and otherwise waits on the channel until that deadline. Continuous input cannot starve the step.
+- **Confinement.** Deferred host work (steps, natural ends, journal writes, autosave) runs inside the same `file_access::confine` scope as `answer` (`crates/automation/src/lib.rs:70-73`).
+- **Shutdown.** On EOF or disconnect: parked replies are cancelled with an error, the host stops the transport and runs its quit order (close autosave, close input, drop the Player), then the loop ends.
+- **Scope.** Playback through the null device, every transport command, offline work and inspection. Real-time measurements and renders refuse for want of a live device, as their guards already do. Recording would need a virtual MIDI input on the null Player or a null audio input: a later record.
+- **Build.** `transit-automation` and `transit-cli` link `transit-playback` (cpal, the native backends on Windows, ALSA development files on Linux); `native-jack` forwarded. `transit-engine` alone builds without them.
 
 ### 14. The guard
 
-- **Final (S3f):** the layer rule (`LAYERS`) and one forbidden normal edge in `check_layers`: `transit-ui-studio` may not depend on `transit-playback` (dev dependencies exempt, as `:208-209` already skips them). With the edge gone the interface cannot name the Player; a fixture test in `xtask/src/tests.rs` asserts the edge fails.
-- **Transitional lint (S3a to S3e):** `xtask/src/host_guard.rs` counts, per non-test interface file, calls of `Host::legacy_player()` (the temporary accessor S3b adds) and textual Player transport calls, on a ratchet table like `file_size::OVER_BUDGET` (`xtask/src/file_size.rs:11-38`). It is a review aid, not ownership: it misses aliases, paths through traits and multiline types and has known false positives (`hardware_measure.rs:276`, `keys.rs:915`). Each facade slice removes its rows; S3f deletes the lint and the accessor.
+- **Final (S3f):** the layer rule; one forbidden normal edge in `check_layers` (`transit-ui-studio` may not depend on `transit-playback`); an audit of the host's whole public surface (no item returns, derefs to, re-exports, aliases or exposes through an associated type or `impl Trait` bound a Player, Recorder or their control types), recorded in the S3f landing; a compile-fail fixture (a production-consumer crate depending only on `transit-host` that tries to name `Player` through every public item, expected to fail).
+- **Transitional lint (S3a to S3e):** `xtask/src/host_guard.rs` counts calls of `Host::legacy_player()` and textual transport calls per non-test interface file on a ratchet table (as `xtask/src/file_size.rs:11-38`). A review aid with known misses and false positives (`hardware_measure.rs:276`, `keys.rs:915`), not ownership. S3f deletes it and `legacy_player()`.
 
 ### 15. Relation to ADR 0043
 
 | Requirement | Here |
 |---|---|
-| 1. sync mode changed only stopped and finalized | `exclusive_ok`, published by S2b; the mode is ADR 0043's |
-| 2. Start/Continue/Stop/SPP with its own start pending | `StartPending`, `next()`, the matrix (S2a, S2b). An external start waiting for its first clock tick has no Player sequence: its shape is `TransportPhase::StartArmed { source: SourceGeneration, from: Samples, record: bool }`, entered on the source's Start or Continue, left for StartPending when the start is submitted, for Stopped on Stop, a device event, faulted or ResetSession; `record_engaged` when `record`. ADR 0043 adds it; S2a's reducer has no assumption that every pending state holds a sequence |
-| 3. duplicate suppression against a pending locate in the epoch | ADR 0043's; S1's `Receipt::Locate { seq, target, outcome }` keeps the target; ADR 0043 adds the applied epoch (`P/player/audio.rs:361, 411`) and the source generation |
-| 4. record engaged, "Waiting for external start" | ADR 0043's, as `StartArmed { record: true }` with the state text from `state_text()`; B1 is its precondition |
-| 5. sticky local Stop | ADR 0043's mechanism at ingress admission (ADR 0043:534-537). The host guarantees it can honor it: a Stop is never held behind a start; a Stop drops held starts queued before it; held and deferred starts older than `ingress_cancel_generation` are dropped |
-| 6. half speed and scrub refused in clock follow | ADR 0043's, as a condition on the HalfSpeed and Scrub rows; a refusal leaves phase, speed and position unchanged |
-| 7. readout through `TransportStatus` | ADR 0043's; S2b adds four fields to the same struct |
-| 8. applied transport moments for sending | ADR 0043's callback-published spans with generations and converter phase (ADR 0043:319); `PhaseChanged` is a control-thread observation and is not used for sending |
-| 9. slice 3 refusals, tempo, journal segments | unchanged; ADR 0043's |
-| 10. deterministic matrix without a window | the pure matrix test (S2a) and the device-free step (S2b), both before the crate move and before sync slice 1 |
+| 1. sync mode changed only stopped and finalized | `exclusive_ok` (S2c) |
+| 2. Start/Continue/Stop/SPP with its own start pending | the pending-start set, `next()`, the matrix; ADR 0043 adds its armed states by amendment (below) |
+| 3. duplicate suppression against a pending locate | the Locate receipt keeps sequence and target; ADR 0043 adds the applied epoch and source generation |
+| 4. record engaged, "Waiting for external start" | ADR 0043's state, under the obligations below; B1 is its precondition |
+| 5. sticky local Stop | ADR 0043's mechanism at ingress admission (ADR 0043:534-537). The host applies `StepInput.ingress` (`IngressCutoff { generation, offered_sequence }`, kept distinct as ADR 0043 defines them) at the start of every admission and before releasing any held or deferred command, so no queued or held start older than the cutoff is admitted after the Stop that set it |
+| 6. half speed and scrub refused in clock follow | ADR 0043's condition on those rows; a refusal leaves phase, speed and position unchanged |
+| 7. readout through `TransportStatus` | ADR 0043's; S2c adds four fields |
+| 8. applied moments for sending | ADR 0043's callback-published spans (ADR 0043:319); `PhaseChanged` is not used for sending |
+| 9. slice 3 refusals, tempo, journal | unchanged |
+| 10. a deterministic matrix without a window | the pure matrix (S2a) and the device-free step (S2b), before sync slice 1 |
 
-**What sync slice 1 extends:** `TransportPhase` (`StartArmed`), `TransportEvent` (a selected-source message with source generation and sequence), `next()` and its matrix test, `state_text()`, `TransportStatus`, `StepInput.ingress_cancel_generation`. Before S3a in `crates/ui-studio/src/host/phase.rs`, after in `crates/host/src/phase.rs`.
+**The matrix is total for this record's phases only (S-10).** ADR 0043 adds its states by amendment. Any added state must define: its row for every existing event and its column for every existing phase; its capabilities (`record_engaged`, `work_outstanding`, `exclusive_ok`); its state text; and its cancellation on local Stop, selected-source Stop, ingress overflow or loss, source replacement, session replacement, device failure and preparation failure. Input to that amendment, from round 2: three sub-states differ: (1) Record engaged locally, waiting for an external Start (it holds a prepared ticket); (2) an external Start or Continue received, waiting for its first following clock tick (it holds the start message's boundary, to reject an earlier tick); (3) a submitted recording action (this record's RecordPending).
 
-**Stale statements.** No ADR 0043 decision becomes false. The path statements "`crates/ui-studio/src/host/transport.rs` (exact-position starts and independent retained position)" (Implementation) and "Slice 0 must adapt `crates/ui-studio/src/host/transport.rs`" (2026-11-04 amendment) need a pointer amendment at S3b. Its Context sentence on `TransportStatus` describes its base and stays.
+**Stale statements.** No ADR 0043 decision becomes false. Its path statements naming `crates/ui-studio/src/host/transport.rs` (Implementation; 2026-11-04 amendment) need a pointer amendment at S3b.
 
 ### 16. Relation to ADR 0052
 
-ADR 0052's count-in and latch statements rely on the audio thread (decision 8 and the 2026-11-16 amendment: "The count-in bar keeps its full length in output frames" and the take starts where the record start is heard), on `count_in_for` (decision 3), on `plan_recording` writing `count_in` (decision 8) and on `recording_pass` (decision 12). None changes: the stage publication of section 5 only reports what the audio thread does and never schedules it. Path statements become stale at S3a and S3b (decisions 3, 4, 5, 7, 8) and need a pointer amendment.
+ADR 0052 relies on the audio thread (decision 8 and its 2026-11-16 amendment: "The count-in bar keeps its full length in output frames"), on `count_in_for`, on `plan_recording` writing `count_in` and on `recording_pass`. None changes: the stage only reports what the audio thread does. Path statements become stale at S3a and S3b and need a pointer amendment.
 
 ## Slices
 
-Every commit builds; every slice runs the full local Windows and Linux gates and is shippable alone. A writer of a meaning and every safety reader of that meaning change in the same slice (R-G). "Unchanged" = the test file is not edited.
+Every commit builds; every slice runs the full local gates and is shippable alone. Nothing consumes what a later slice supplies; a writer of a meaning and all its safety readers change together. "Unchanged" means the file is not edited. Sizes are changed lines including tests.
 
-**S1, derive the phase (no behavior change).** `host/phase.rs` with the types and a read-only `transport_phase()` derived from today's data plus metadata S1 adds to `PlayerRequests`: `play_from`, `play_prev`, the record request's `from`, count-in and ticket, and a `recording_kind: Start | Off` beside the shared `recording` sequence, so a completed Stop still awaiting record-off derives as StopPending Resume with `stop: None`. `notice` and `recovery` split into typed `classify` and `frontiers` behind wrappers with today's exact text and flag rules. Files: `host.rs`, `host/phase.rs`, `host/phase_tests.rs`, `host/recording.rs` and `host/transport.rs` (metadata writes only). About 200 lines and 250 of tests. Unchanged: every existing test. New: six derived-phase tests (Play to Playing, Stop to Stopped, Record without and with count-in, take-locate as Resume including the record-off wait, the simulated count-in) and `state_text_names_the_waits`. Feel-right: none.
+| Slice | Scope | Not in it | Size |
+|---|---|---|---|
+| S1 | read-only `transport_phase()` with request metadata (play start, record from, count-in, ticket, record-off kind); derivation precedence below; `classify`/`frontiers` behind wrappers | any behavior | about 500 |
+| S2a | the pure reducer, complete payloads, section A as a literal table; `transport_phase_matrix`, `the_matrix_has_no_empty_cell`, `stopped_implies_nothing_outstanding` (over the reducer), unused | any caller | about 900 |
+| S2b | groundwork, behavior unchanged: the device-free step adapter; the receipt-bearing render API with the render orchestrated through one function; the stage publication in the ticket structure (nothing reads the new stages yet; `take_start_failure` unchanged) | any consumer | about 1,000 |
+| S2c | the lifecycle becomes authoritative: synchronous admission, the pending-start set, cleanup and finalization, capabilities and every safety reader, engine guards, the render as a phase, the stage consumed, S-3 to S-7; B1, B2, B8, B12, B13, D1 to D5, D7 to D9 | display, speed | about 2,400 |
+| S2d | display arbitration and count-in reporting; the status writers (section E by hand, the rest mechanical); B3 to B6, B10 | lifecycle | about 1,400, of which about 400 mechanical |
+| S2e | speed, positions, the remaining readouts; B7, B9, B11, D6 | | about 700 |
+| S3a | the pure machine into `transit-host`; the transitional lint | Player | about 1,250 |
+| S3b | the Player into `Host`; clock and input types; journal clock parameters; `legacy_player()`; pointer amendments | facades | about 3,500 |
+| S3c / S3d / S3e | `PluginServices` / `Readouts` and `LiveInput` / `DeviceServices` | | about 500 each |
+| S3f | data re-exports; the edge removed; public-surface audit; compile-fail fixture; forbidden edge; `legacy_player()` and the lint deleted | | about 600 |
+| S4 | headless (section 13) | recording | about 500 |
+| S5a / S5b | section 12 | | about 400 each |
 
-**S2a, the pure reducer (unused).** `next()`, `TransportEvent` with full payloads, facts, effects; [tables.md](0062/tables.md) section A as a literal table; `transport_phase_matrix` (every phase and event), `the_matrix_has_no_empty_cell`, `recording_implies_record_engaged`. Files: `host/phase.rs`, `host/phase_tests.rs`. About 450 lines and 400 of tests. Unchanged: every existing test. Feel-right: none.
+**S2c is not one review sitting.** Its one safe cut: S2c-1 (admission, pending starts, lifecycle, capabilities with every reader, engine guards, S-3 to S-7, B1, B2, B8, B12, B13, D3 to D5, D7, D9; about 1,800) and S2c-2 (the render as a phase with D8, and the pass guards D1 and D2; about 600). Between them every guard is right: until S2c-2 the render stays an interlock refused at `run` (`finish/realtime.rs:174-177`) and counted in `work_outstanding` through a `render_running` fact, and D1 and D2 keep today's cells, whose ticket cancellation S-3 already finalizes. S2c-1 cannot be cut further: admission, the phase and the capabilities change the meaning of "a pass is under way" at once, and any split leaves a guard reading a meaning its writer does not produce yet.
 
-**S2b, the authoritative lifecycle.** The phase drives every start, stop, record and render call (render orchestration moves from `finish/realtime.rs` into the host executor); cleanup (`finish_recording`, record-off, faulted); `record_engaged`, `finalizing`, `work_outstanding`, `exclusive_ok` and every safety reader of section 7 with them, engine guards included; published after every transition; B1, B2, B12; the device-free step and `host::testing`. Files: `host.rs`, `host/*.rs`, `finish/realtime.rs`, `lib.rs`, `actions.rs`, `menus.rs`, `frame_logic.rs`, `audio_devices.rs`, `audio_devices/window.rs`, `hardware_measure.rs`, `hardware_ui.rs`, `external_measure.rs`, `midi_transport.rs`, `E/lib.rs`, `E/cmd/external_instrument.rs`, `E/cmd/realtime_render.rs`, `docs/control-protocol.md`. About 600 lines and 500 of tests. Edited tests: `player_tests.rs` to `classify` and `frontiers` (same cases); the 23 sites in 10 interface test files and `E/tests/recording.rs:8`, the `realtime_render.rs` test (`:211`) that set the recording flag as a stand-in for a pass now set the phase or `record_engaged`; `E/tests/session_transport.rs:9` gains `..Default::default()`; `midi_transport/tests.rs:138` sets the simulated count-in through `host::testing`; `state_guard_round3_tests.rs:31-34` sets a pending Play through `host::testing`. Unchanged: the rest of S1's list, `live_cycle_tests.rs` included. New: the B1, B2, B12 tests; render ownership (`the_phase_is_rendering_while_a_render_plays`, `the_phase_never_reads_stopped_while_the_render_stops`); Resume with audio and MIDI, deferred commands and an intervening edit (undo squash, `host/recording.rs:471-477`); journal handoff interrupted at each step (`host/autosave.rs:72-83`); host steps that miss a whole count-in. Feel-right: at Stop after a take the Record light goes off at once.
+**S1 derivation precedence** (first match wins): a render running (`finish.realtime.running`) -> Rendering; `player_requests.stop` Some -> StopPending (Resume when `take_locate` is Some, Reset when a `ResetSession` was processed this step, else Park); `take_locate` Some with a record-off outstanding -> StopPending Resume with `stop: None`; `take_plan` Some and a record request outstanding -> RecordPending; `take_plan` Some and `count_in_state()` Some -> CountIn; `take_plan` Some and a latch -> Recording; `take_plan` Some -> WaitingForClock; `player_requests.play` Some with play metadata -> StartPending; `is_playing()` -> Playing; else Stopped. Without a Player: `sim_count_in` Some -> CountIn (fixture only), `sim` Some -> Playing, else Stopped.
 
-**S2c, display and count-in.** `StatusLine`, revisions and arbitration; the 333 writers to `status.set`; `state_text` with reopen, input and release; the record-stage publication in playback (section 5); B3 to B6, B10. Files: `status.rs`, `lib.rs`, `transport.rs`, `metronome.rs`, `menus.rs`, the 333 writer sites (mechanical), `host/*.rs`, `P/player/audio.rs`, `P/player/device.rs`. About 400 lines plus the mechanical change, 400 of tests. Edited tests: `status.rs` `transport_waits_stay_until_the_transport_code_clears_them` (`:147`) becomes `a_state_text_stays_while_its_phase_holds_and_leaves_with_it`; state-text assertions read the shown line in `slice6_tests.rs` (`:404, :422, :455, :462-463`); `transport_tests.rs:317` and `plugin_retry_tests.rs:330` set StartPending through `host::testing`. Unchanged: the playback count-in tests (`P/player/audio/tests/count_in.rs:63, 118, 161`) and `a_pickup_on_a_count_in_click_lands_on_that_click_at_a_converted_rate_too`. New: the six display sequences, B3 to B6 and B10 tests, `the_record_stage_follows_count_in_wait_and_start` (playback). Feel-right: Record from stopped with a one-bar count-in: Play does not pulse; Count-in, then Recording; Stop pending, then Stopped; Reconnect while playing leaves no Stop pending.
+**Gates, per slice.**
+- **S1:** every existing test unchanged; new: six derived-phase tests and `state_text_names_the_waits`.
+- **S2a:** every existing test unchanged; the three reducer tests.
+- **S2b:** every existing test unchanged (the render test at `E/cmd/realtime_render.rs:208-213` included); new: `the_render_reports_its_play_and_stop_sequences`, `a_refused_render_start_returns_no_job`, `the_record_stage_follows_count_in_wait_start_fail_and_cancel` (playback, with exhaustion refused and a late audio write never overwriting `Cancelled`), `step_host_matches_logic_for_the_transport_part`.
+- **S2c:** edited: `player_tests.rs` to `classify`/`frontiers`; the 23 sites in 10 interface test files and `E/tests/recording.rs:8` that set the recording flag as a stand-in for a pass now set the phase or capabilities through `host::testing`; `E/cmd/realtime_render.rs:208-213` sets `playing` and `recording` capability-aware; `E/tests/session_transport.rs:9` gains `..Default::default()`; `midi_transport/tests.rs:138` uses a device-free count-in (the simulation no longer counts in); `state_guard_round3_tests.rs:31-34` sets a pending start through `host::testing`. Unchanged: `host/live_cycle_tests.rs` (the `recording_active()` test helper stays), `midi_transport/tests.rs:211, 257`, the playback count-in tests (`P/player/audio/tests/count_in.rs:63, 118, 161, 240-251`), `P/player/audio/midi/tests.rs:387`. New: every B and D test of the slice; `record_then_undo_in_one_drain_refuses_the_undo`, `record_then_measure_in_one_drain_refuses_the_measurement`; `an_older_play_applying_after_a_newer_refusal_leaves_playing`; `stopped_implies_nothing_outstanding` after every admission and step in the integration tests; `a_cancelled_ticket_ends_the_pass`, `a_failed_stop_that_cancelled_the_ticket_ends_the_pass`; `input_loss_keeps_recording`; `reset_discards_held_commands`; `continue_after_a_locate_during_stop_pending_resumes_at_the_target`; `record_off_outstanding_keeps_exclusive_ok_false`; render fault, cancel-versus-completion and session-replacement tests; Resume with audio and MIDI, deferred commands and an intervening edit; journal handoff interrupted at each step (`host/autosave.rs:72-83`).
+- **S2d:** edited: `status.rs:147` becomes `a_state_text_stays_while_its_phase_holds_and_leaves_with_it`; state-text assertions read the shown line in `slice6_tests.rs:404, 422, 455, 462-463`; `transport_tests.rs:317` and `plugin_retry_tests.rs:330` set StartPending through `host::testing`; tests asserting composed messages from section E sites keep their expected strings. New: the nine display sequences; B3 to B6 and B10 tests; `the_lap_limit_note_never_copies_a_state_text`.
+- **S2e:** unchanged: `host/live_cycle_tests.rs:304, 326, 342, 366`; new: B7, B9, B11, D6 tests.
+- **S3a to S5b:** as in their rows; S3b's test edits are mechanical paths only; S3f's completion gate is the audit and the compile-fail fixture.
 
-**S2d, speed, positions, ordering.** The speed invariant, working cursor and positions, held and deferred commands, Reset over Resume, H6; B7 to B9, B11, D1 to D8. Files: `host/*.rs`, `lib.rs`, `midi_transport.rs`, `frame_logic.rs`, `midi_monitor.rs`, `browser/preview.rs`, `automation/pass.rs` (reads the step's pair). About 400 lines and 500 of tests. Unchanged: S2c's list; `live_cycle_tests.rs` (the half-speed refusal at `:366` and the stalled-frame and later-lap tests at `:304, :326, :342`), `midi_transport/tests.rs` (`:211`, `:257`). New: B7 to B9, B11 and D tests; full-`logic()` ordering tests for H6. Any other moved expectation stops the slice for a ruling. Feel-right: Space twice quickly (stop, then play) restarts playback once the stop completes.
-
-**S3a, the pure machine into `transit-host`.** Crate, `LAYERS`, S3a row moved, the transitional lint. About 1,000 lines moved, 250 new. All S2d tests pass; the pure tests move unchanged.
-
-**S3b, the Player into `Host`.** The S3b row of section 11, `HostClock` and `StepInput` in the crate, the journal clock parameters (`E/midi_journal.rs`), `Host::legacy_player()` for the facade slices, the pointer amendments of ADR 0043 and ADR 0052. About 3,000 lines moved. Tests: section 11's mechanical edits only. Open point: split transport and recording from autosave, reconnect and state if one sitting cannot hold it.
-
-**S3c, `PluginServices`; S3d, `Readouts` and `LiveInput`; S3e, `DeviceServices`.** Each moves its files of section 2 off `legacy_player()` and removes their lint rows; 10 to 15 files and 300 to 600 lines each; their existing tests pass with path edits only.
-
-**S3f, the edge.** `transit_host::data` re-exports; `transit-ui-studio` drops its normal `transit-playback` dependency; the forbidden-edge rule; `legacy_player()` and the lint deleted. Small.
-
-**S4, headless.** Section 13. New: headless `transport.play` reaches Playing while the client is idle (stepped clock); a natural end finalizes with no client line; Record refuses with the no-input reason; the matrix's command rows through `Headless`.
-
-**S5a, S5b.** Section 12. S5a gate: the parked measurement reply arrives after stepping with a fake probe; the timed autosave never calls `flush`. S5b gate: the reopen runs only after a pass that drew `ReopenPending` (fake connection); a held Play starts after the reopen and is cancelled by Stop. That a desktop frame was presented is the feel-right check: Apply shows "Reopening the audio device" before the window waits.
-
-Order: S1, S2a, S2b, S2c, S2d (before sync slice 1); S3a to S3f, S4, S5a, S5b in order beside sync.
+**Feel-right items:** S2c: at Stop after a take the Record light goes off at once; Space twice quickly restarts playback once the stop completes. S2d: Record from stopped with a one-bar count-in: Play does not pulse; Count-in, then Recording; Stop pending, then Stopped; Reconnect while playing leaves no Stop pending. S5b: Apply shows "Reopening the audio device" before the window waits.
 
 ## Consequences
 
-- One value answers what the transport is doing, a real-time render included; status strings are display; a stray message can neither strand nor hide a state.
-- `recording` means capture; the engine's guards read named capabilities, and exclusive operations wait for a fully settled transport (B12).
-- The interface cannot name the Player after S3f; window code reaches it only through four facades.
-- Headless plays and steps itself; it does not record; `transit-cli` links the audio backends.
-- The host still runs on the interface thread; a slow driver open still holds the window, now announced first.
+- One value answers what the transport is doing, a render included; commands see each other's effects at once; status strings are display only.
+- `recording` means capture; the engine's guards read named capabilities; exclusive operations wait for a settled transport.
+- A refused transport command fails its call; `Ok` means admitted, not playing.
+- The interface cannot name the Player after S3f.
+- Headless plays and steps itself, does not record; `transit-cli` links the audio backends.
+- The host still runs on the interface thread; a slow driver open still holds the window, announced first.
 - About 4,000 lines move; ADR 0043 and ADR 0052 need pointer amendments at S3b.
 
 ## Alternatives rejected
 
-- **(i) Type the phase in place and never move**: nothing headless, the window types stay beside the machine, nothing to guard.
-- **(ii) The host in `transit-engine`**: every engine user would link the device backends and plug-in hosts, and the document crate would gain the Player's thread rule.
-- **(iii) A host actor on its own thread**: the Player is neither Send nor Sync by design.
-- **(iv) The host in `transit-playback`**: the device crate would depend on the document crate.
-- **(v) Strings as constants**: the text would still be the state.
-- **(vi) Phases per pass kind**: punch, cycle and pre-roll are plan data.
-- **(vii) A regex guard as the boundary** (round 1's draft): bypassed by aliases, traits and the render; kept only as a transitional lint.
-- **(viii) The render as an owned operation beside the phase**: the phase could then read Stopped while the render plays.
-- **(ix) Inferring the count-in end from the published counter or elapsed time**: misses whole count-ins (round 1, finding 9.5).
-
-## Choices made in this record
-
-1. Variants and data (section 3), `Prev`, the two acknowledgements of StopPending, `Rendering` as a phase.
-2. WaitingForClock shows "Record pending"; InputOpening "Opening the audio input"; ReopenPending "Reopening the audio device".
-3. Arbitration: a Note keeps priority across a state change; an Outcome never does.
-4. Capability names and the reader assignment.
-5. Held starts during Stop pending (D4), Pause while stopped a no-op (D6).
-6. MIDI buttons in H6 (D7) rather than after autosave.
-7. The record-stage atomic, 56-bit ticket plus code.
-8. Facades in four groups, removal of the playback edge, data re-exports.
-9. Headless steps on a 10 ms receive timeout; no headless recording.
+- **Type the phase in place and never move**: nothing headless, nothing to guard.
+- **The host in `transit-engine`**: every engine user would link the device backends, and the document crate would gain the Player's thread rule.
+- **A host actor on its own thread**: the Player is neither Send nor Sync by design.
+- **The host in `transit-playback`**: the device crate would depend on the document crate.
+- **Strings as constants**: the text would still be the state.
+- **A regex guard as the boundary**: bypassed by aliases, traits and the render; a transitional lint only.
+- **The render beside the phase, or left on the observed flag**: the phase could read Stopped while the render's requests or job are unsettled (round 2).
+- **Inferring the count-in end from the counter or elapsed time**: misses whole count-ins.
+- **Queued admission with publication after each transition** (round 1's revision): commands executed in one drain still evaluate their guards before the earlier command's transition (round 2).
+- **A truncated ticket in a new atomic** (round 1's revision): loses the engine epoch and the exhaustion refusal the ticket structure already has.
 
 ## Judging round 1: responses
 
-Round 1 (verdict REJECT) findings, numbered by its sections. Each was checked against `main` 1a56b895 before acceptance.
+Round 1 (REJECT): every finding was verified at `main` 1a56b895 and accepted; none rejected. Round 2 re-audited them; the ones it found not resolved are answered in the next section. Accepted and applied: B2 limited to Park and Reset; B4 restated; the B6 override kept; the B8 meter suppression kept; B11 without delay; D2 and D3 restated; the render brought under the host; replacement Play (now the pending-start set); Stop and Play no longer coexisting (D4); S1 metadata; the persistent fault; the missing matrix rows; untracked refusals posting; the untagged cells (D4 to D6 and matching cells); the working cursor; explicit capabilities; the missing readers; B12; the inspection and protocol surfaces; command-time freshness (now synchronous admission); the display rule; today's step order; the session-sync gate; the clock capability; the layer placement; a facade instead of a regex; the splash; `apply_edits`; the touches gate; test setters; headless build, stepping and capture; the S2 split; the four tests; integration coverage; S3 time conversions; S5 presentation; the ADR 0043 mappings; the round-1 rulings; the omissions list.
+
+## Judging round 2: responses
 
 | Finding | Disposition |
 |---|---|
-| 1. B1, B3, B5, B7, B9, B10, D1 confirmed | Kept. |
-| 1. B2: restrict to Park and Reset | Accepted: section 10 B2; Resume stays `record_engaged`. |
-| 1. B4 confirmed as restated | Kept with its corrected citations. |
-| 1. B6: the plug-in loading override | Accepted: kept (`transport.rs:125-126`), section 10. |
-| 1. B8: meters suppressed while Stop pending | Accepted: suppression unchanged (`host/transport.rs:324`); the test asserts readback and pushes, not fresh meters. |
-| 1. B11: delayed publication is a change | Accepted: no delay; `cursor_moved` publishes at once (section 8). |
-| 1. D2 wrong as generalized | Accepted: PlaySelection's count-in cancel is today's (`host/transport.rs:273-275`); D2 restated. |
-| 1. D3 an attempted resume | Accepted: restated. |
-| 2. Render drives transport outside the owner | Accepted: section 3 sweep, `Rendering`, S2b. |
-| 2. Replacement Play needs the previous state | Accepted: `StartPending.prev`; a refused Play returns to it (tables A). |
-| 2. Stop and Play coexist | Accepted: starts held during Stop pending (D4), so they no longer coexist. |
-| 2. S1 cannot derive the data | Accepted: S1 adds the metadata; StopPending holds optional acknowledgements. |
-| 2. Fault must persist | Accepted: `faulted` fact (sections 3, 5). |
-| 2. Missing rows (record-off, Locate, release, session, untracked, punch refusal, Resume results, NotSent cleanup, loop change, MIDI loss, simulation) | Accepted: all in tables A and B. |
-| 2. "Stale receipts dropped as today" incorrect | Accepted: section 5, untracked refusals post. |
-| 2. Untagged Stop-pending cells, output trouble in StartPending, CountIn light, half-speed Record refusal | Accepted: D4 to D6; output trouble in StartPending matches today (message only); the light follows the counter as today; the refusal is a row (tables A). |
-| 2. Deferred cursor breaks Locate then Play | Accepted: working cursor (section 8), test in S2d. |
-| 3. `!(playing \|\| pass)` does not implement `stopped()` | Accepted: explicit capabilities (section 7). |
-| 3. Engaged vs finalizing vs observed vs outstanding | Accepted: four fields; cleanup reads `finalizing`. |
-| 3. Missing readers | Accepted: all in tables C. |
-| 3. RecordPending newly blocked | Accepted: B12. |
-| 3. `session.inspect`, `ui.inspect`, protocol page | Accepted: section 7. |
-| 3. Step-end publication stale for command guards | Accepted: published after every transition. |
-| 4. Display rule unsound (six sequences) | Accepted: section 6; tables D; S2c tests. |
-| 5. Order differs from today | Accepted: section 9 keeps today's blocks; only H6 moves (D7); Park reads the applied position first. |
-| 5. Session sync gate excludes Stop and release | Accepted: `sync_allowed()`. |
-| 5. Hidden clocks | Accepted: `HostClock` and the clock table; the Player's budgets exempt. |
-| 6. Layer placement valid | Kept. |
-| 6. Regex guard not ownership | Accepted: facade and forbidden edge; the lint transitional (section 14). |
-| 6. Splash installs the Player | Accepted: moves in S3b. |
-| 6. `apply_edits` not pure | Accepted: `EditorEdits` event. |
-| 6. Gesture gate uses touches | Accepted: `touches_open` in the input. |
-| 6. Accessors cannot replace setters | Accepted: `host::testing` setters. |
-| 6. Build prerequisites; stepping; null Player capture | Accepted: section 13. |
-| 7. S1 metadata | Accepted. |
-| 7. S2 split and unsafe intermediate commits | Accepted: S2a to S2d, writers and readers together. |
-| 7. Four tests | Accepted: `session_transport.rs:9`, `midi_transport/tests.rs:138`, `state_guard_round3_tests.rs:31-34` edited in S2b; `live_cycle_tests.rs:366` unchanged. |
-| 7. Integration coverage | Accepted: S2b to S2d gates. |
-| 7. S3 time conversions, S5 presentation | Accepted: section 11, S5b. |
-| 8. Mappings 1 to 10 and the three accepted ADR 0043 statements | Accepted: section 15 rewritten; Resume full start path, ingress guarantee, Reset over Resume (section 9). |
-| 9. Rulings 1 to 8 | Accepted, each through the rows above. |
-| 10. Automation merge, preview, repaint, splash, input-loss messages, `edit.select` | Accepted: tables C (write pass, preview, repaint on `work_outstanding`), message-only input-loss rows (tables A), section 8 (`edit.select` synchronous). |
-
-No finding was rejected.
+| 1. Round-1 audit, items not resolved | Answered by the rows below. |
+| 2. Replacement Play loses history (A applies after B is refused) | Accepted. Verified at `P/player/audio.rs:445-453`. The pending starts are a set (section 3); test `an_older_play_applying_after_a_newer_refusal_leaves_playing`; invariant and adoption row O7. |
+| 2. Cancellation strands a pass | Accepted. Verified: `Player::stop` cancels at `P/player/device.rs:475` before `owner()` at `:476`; `count_in.rs:240-251` exercises a cancelled ticket. Terminal stages end the pass (section 5, row O5). |
+| 2. Input loss stops recording | Accepted. Verified at `host/reconnect.rs:57-66`. Rows V2 (trouble) and V6 (loss) split. |
+| 2. Reset and Park share holding | Accepted. Reset discards; Park holds (section 9). |
+| 2. Deferred release contradicts the table | Accepted. One release point: the resumed Record's admission receipt, stage or refusal (section 9, row H2). |
+| 2. D5 loses the retained target | Accepted. `Park.target`; retained := target (section 8). |
+| 2. Record-off cannot survive Park completion | Accepted. Record-off is an independent fact (sections 3, 7). |
+| 2. Simulation cannot construct CountIn | Accepted, scoped: simulated recording is unreachable outside a fixture (Context; `host/recording.rs:202-212, 265`); the simulation has Stopped and Playing only; `Recording.latch` is required. |
+| 2. Simulation events incomplete | Accepted. Section B is total, with wrap before end (`host/transport.rs:363-377`). |
+| 2. StartArmed not in the matrix | Accepted. Removed from the matrix; ADR 0043's obligations listed (section 15). |
+| 2. Rendering substates | Accepted. `play`, `stop`, `job` (section 3); rows E1 to E5. |
+| 2. E1 in Stopped lacks its guard | Accepted. E1 requires `exclusive_ok` (row E1). |
+| 2. Walks (a) to (h) | (a) matches the new rules (a Note before any state gives the state revision 0, section 6); (b) accepted, pending-start set; (c) confirmed preserved; (d) accepted: MIDI buttons during Stop pending stay in the button queue as today, so the same-step MIDI Locate does not move the cursor; (e) accepted, held and deferred cleared by Reset and reopen; (f) accepted, cancel message for a replacement (section 3); (g) accepted, Toggle held, second Stop tagged D9; (h) accepted, the simulation no longer counts in. |
+| 3. Capabilities overlap | Agreed; section 7 says they overlap. |
+| 3. Missing save and capture readers | Accepted. `host/plugin_state.rs:69-73`, `host/timed_read.rs:84-86`, `host/state_guard.rs:216-220` in tables C, with the changed-document qualification; B12. |
+| 3. Locate and release in `exclusive_ok` | Kept, as the judge recommends. |
+| 3. Freshness not solved | Accepted. Synchronous admission (section 9). |
+| 4. First state after a Note | Accepted. Revision 0 (section 6); sequence 7. |
+| 4. Outcomes hide live states | Accepted. No outcome while a state text is live (section 6); sequences 8 and 9. |
+| 4. Writers that append, read, compare or return | Accepted. Verified the ten sites and found more; tables E. |
+| 5. `record_stage` contract | Accepted. Published through the ticket structure with full identity and exhaustion refused; terminal payloads; precedence and deduplication; acquire and revalidation (section 5). |
+| 6. Rendering completion | Accepted. Receipt-bearing render API, fault path, cancel-versus-completion order, polling block H3r (section 3). |
+| 7. Public API leakage | Accepted. S3f audit and compile-fail fixture (section 14). |
+| 7. Facade assignments wrong | Accepted. Corrected in tables F. |
+| 7. `audio_connection.rs` traits | Accepted. Private to the host (section 2). |
+| 7. `legacy_player()` removal | Accepted. S3f's completion gate; S3f is not small. |
+| 8. Slices consume later slices | Accepted. Re-cut S2b to S2e (Slices). |
+| 8. Named tests | Accepted. `recording_active()` kept as a test helper; `midi_transport/tests.rs:211` preserved by the button queue; `:257` by `recovering`; render test capability-aware. |
+| 9. ADR 0043 mapping 5 | Accepted. Cutoff applied before held work; generation and offered sequence distinct (section 15). |
+| 9. Three sub-states | Recorded as input to ADR 0043's amendment (section 15). |
+| 10. B12, D4 to D8 | B12 narrowed to readers that newly block; D4 Toggle held; D5 target kept; D6 removed from the MIDI-loss row (that row keeps today's Stop); D7 and D8 kept with tests. |
+| 11. Headless | Accepted. Explicit refusal, bounded work and deadline stepping, reply meaning, confinement, shutdown (section 13). |
+| 12. Verdict classes 1 to 6 | Answered by the rows above. |
 
 ## Judging
 
