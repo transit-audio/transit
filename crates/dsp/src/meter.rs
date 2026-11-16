@@ -1,5 +1,5 @@
 //! Level meters: an ITU-R BS.1770 loudness meter
-//! (momentary, short-term and gated integrated LUFS plus 4× oversampled true peak).
+//! (gated integrated LUFS plus 4× oversampled true peak).
 //!
 //! None of the `process` methods allocate.
 
@@ -34,7 +34,6 @@ pub struct LoudnessMeter {
     tp_coefs: [[f32; TP_TAPS]; TP_PHASES],
     tp_hist: Vec<[f32; TP_TAPS]>,
     true_peak: f32,
-    max_momentary: f32,
 }
 
 /// Loudness from mean-square energy (BS.1770 eq. 2).
@@ -111,7 +110,6 @@ impl LoudnessMeter {
             tp_coefs,
             tp_hist: vec![[0.0; TP_TAPS]; channels],
             true_peak: 0.0,
-            max_momentary: MIN_DB,
         }
     }
 
@@ -140,7 +138,6 @@ impl LoudnessMeter {
         self.hist_energy.iter_mut().for_each(|v| *v = 0.0);
         self.tp_hist.iter_mut().for_each(|h| *h = [0.0; TP_TAPS]);
         self.true_peak = 0.0;
-        self.max_momentary = MIN_DB;
     }
 
     /// Feeds planar audio. Channels beyond the meter's channel count are ignored.
@@ -195,7 +192,6 @@ impl LoudnessMeter {
         if self.sub_filled >= 4 {
             let z = self.recent_energy(4);
             let l = lufs(z);
-            self.max_momentary = self.max_momentary.max(l);
             if l > HIST_MIN {
                 let bin = (((l - HIST_MIN) / HIST_STEP) as usize).min(HIST_BINS - 1);
                 if let (Some(c), Some(e)) = (self.hist_count.get_mut(bin), self.hist_energy.get_mut(bin)) {
@@ -218,16 +214,6 @@ impl LoudnessMeter {
             sum += self.sub.get(idx).copied().unwrap_or(0.0);
         }
         sum / n as f64
-    }
-
-    /// Momentary loudness (400 ms window), LUFS. -144 until 400 ms have been measured.
-    pub fn momentary_lufs(&self) -> f32 {
-        if self.sub_filled < 4 { MIN_DB } else { lufs(self.recent_energy(4)) }
-    }
-
-    /// Short-term loudness (3 s window, or what is available so far), LUFS.
-    pub fn short_term_lufs(&self) -> f32 {
-        if self.sub_filled < 4 { MIN_DB } else { lufs(self.recent_energy(SUB_BLOCKS)) }
     }
 
     /// Gated integrated loudness (absolute gate -70 LUFS, relative gate -10 LU), LUFS.

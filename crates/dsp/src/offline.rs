@@ -546,6 +546,10 @@ fn step_edge(ch: &[Vec<f32>], frame: usize, n: usize, sr: f32, high_passed: bool
 /// exceeds `threshold_db`. Silent gaps shorter than `min_len` samples do not split a region.
 /// Each region is padded by `pad_before`/`pad_after` (clamped to the buffer) and overlapping
 /// regions are merged.
+///
+/// Test-only (no production caller): the whole-buffer form of [`SilenceScan`], the oracle its block-wise
+/// tests compare against.
+#[cfg(any(test, feature = "testing"))]
 pub fn non_silent_ranges(ch: &[Vec<f32>], threshold_db: f32, min_len: usize, pad_before: usize, pad_after: usize) -> Vec<(usize, usize)> {
     let mut scan = SilenceScan::new(threshold_db, min_len as u64);
     scan.push(ch);
@@ -553,7 +557,7 @@ pub fn non_silent_ranges(ch: &[Vec<f32>], threshold_db: f32, min_len: usize, pad
     scan.finish(pad_before as u64, pad_after as u64).into_iter().map(|(s, e)| (at(s), at(e))).collect()
 }
 
-/// [`non_silent_ranges`] over audio that arrives a block at a time, so material of any length can
+/// `non_silent_ranges` over audio that arrives a block at a time, so material of any length can
 /// be scanned without holding all of it.
 pub struct SilenceScan {
     thr: f32,
@@ -596,7 +600,7 @@ impl SilenceScan {
         self.len = self.len.saturating_add(n);
     }
 
-    /// The regions found, padded and merged (see [`non_silent_ranges`]).
+    /// The regions found, padded and merged (see `non_silent_ranges`).
     pub fn finish(mut self, pad_before: u64, pad_after: u64) -> Vec<(u64, u64)> {
         if let Some(s) = self.start {
             self.raw.push((s, self.last_loud.saturating_add(1)));
@@ -615,8 +619,7 @@ impl SilenceScan {
 }
 
 /// Runs a plugin over whole buffers in blocks, compensating its latency so the output lines up
-/// with the input. The buffer length is unchanged (any tail past the end is dropped; see
-/// [`apply_plugin_with_tail`]).
+/// with the input. The buffer length is unchanged (any tail past the end is dropped).
 pub fn apply_plugin(ch: &mut [Vec<f32>], plugin: &mut dyn Plugin, sample_rate: f32) {
     let len = max_len(ch);
     let out = render(ch, plugin, sample_rate, len);
@@ -625,14 +628,6 @@ pub fn apply_plugin(ch: &mut [Vec<f32>], plugin: &mut dyn Plugin, sample_rate: f
             *d = s;
         }
     }
-}
-
-/// Like [`apply_plugin`] but returns new buffers extended by the plugin's tail (capped at 60 s).
-pub fn apply_plugin_with_tail(ch: &[Vec<f32>], plugin: &mut dyn Plugin, sample_rate: f32) -> Vec<Vec<f32>> {
-    let len = max_len(ch);
-    plugin.prepare(sane_sr(sample_rate), 1024, ch.len());
-    let tail = plugin.tail_samples().min((sane_sr(sample_rate) * 60.0) as usize);
-    render(ch, plugin, sample_rate, (len + tail).min(MAX_OFFLINE_SAMPLES))
 }
 
 fn render(ch: &[Vec<f32>], plugin: &mut dyn Plugin, sample_rate: f32, out_len: usize) -> Vec<Vec<f32>> {

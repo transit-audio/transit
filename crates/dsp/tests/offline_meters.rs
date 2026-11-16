@@ -49,8 +49,6 @@ fn loudness_997hz_minus20_stereo_reads_minus20() {
     let mut m = LoudnessMeter::new(sr, 2);
     m.process(&[x.clone(), x], 48_000 * 10);
     assert!((m.integrated_lufs() + 20.0).abs() < 0.1, "integrated {}", m.integrated_lufs());
-    assert!((m.momentary_lufs() + 20.0).abs() < 0.1, "momentary {}", m.momentary_lufs());
-    assert!((m.short_term_lufs() + 20.0).abs() < 0.1, "short {}", m.short_term_lufs());
     assert!((m.true_peak_db() + 20.0).abs() < 0.2, "tp {}", m.true_peak_db());
 }
 
@@ -74,9 +72,8 @@ fn loudness_stays_bounded_at_low_sample_rates() {
         let mut m = LoudnessMeter::new(sr, 1);
         assert_eq!(m.sample_rate(), sr);
         m.process(&[sine(100.0, 0.5, sr, len)], len);
-        for level in [m.integrated_lufs(), m.momentary_lufs(), m.short_term_lufs()] {
-            assert!(level.is_finite() && (-30.0..=0.0).contains(&level), "{sr}: {level}");
-        }
+        let level = m.integrated_lufs();
+        assert!(level.is_finite() && (-30.0..=0.0).contains(&level), "{sr}: {level}");
     }
 }
 
@@ -88,7 +85,6 @@ fn loudness_gating_ignores_silence() {
     let mut m = LoudnessMeter::new(sr, 2);
     m.process(&[x.clone(), x], 48_000 * 25);
     assert!((m.integrated_lufs() + 20.0).abs() < 0.2, "{}", m.integrated_lufs());
-    assert!(m.momentary_lufs() < -100.0);
     m.reset();
     assert_eq!(m.integrated_lufs(), -144.0);
 }
@@ -268,10 +264,6 @@ fn apply_plugin_compensates_latency() {
     let pos = x[0].iter().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs())).unwrap().0;
     assert_eq!(pos, 2000);
     assert!(p.latency() > 0, "the compressor's lookahead is reported as latency");
-
-    let mut r = create("room_reverb").unwrap();
-    let out = offline::apply_plugin_with_tail(&[vec![1.0; 100]], r.as_mut(), sr);
-    assert!(out[0].len() > 100 + 48_000);
 }
 
 #[test]

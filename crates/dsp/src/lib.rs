@@ -26,6 +26,8 @@ pub mod pan;
 mod params;
 pub mod pitch_detect;
 pub mod plugins;
+/// Test-only (no production caller; ADR 0054 builds its analyzer on the portable FFT instead).
+#[cfg(any(test, feature = "testing"))]
 pub mod spectrum;
 mod util;
 
