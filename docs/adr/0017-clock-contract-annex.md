@@ -359,7 +359,7 @@ replaced in place (the paragraph after "Distinct coordinates").
   later silence. The input reads silence while it starts, at most 18 session frames at 48 on 44.1,
   at most 16 at the other converted pairs and at most 31 at 96 on 48, then at most one frame; no
   input is discarded, every probe click is found and the clicks agree with no spread. The test
-  names: `the_converted_rate_term_does_not_depend_on_the_device_buffer`,
+  names: `hardware_probe_extra_delay_stays_within_the_tested_ranges`,
   `a_long_warm_up_at_a_slow_drift_settles_to_the_same_figure`.
 - **What the figures are.** They are readings of the hardware probe, which adds its click after the
   output converter: `fill_inner` calls `probe.add_click(frame, at)` on the converted frame, with

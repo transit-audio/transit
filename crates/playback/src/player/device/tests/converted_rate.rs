@@ -1,7 +1,10 @@
-//! #724: at a converted device rate the live input reaches the plan a fixed few frames after it
-//! does at equal rates (the two converters' look-ahead), whatever the device buffer, and the ring
-//! never runs dry once the stream has started; at any rate a loop wrap inside a callback moves
-//! nothing.
+//! #724: through a paired fake device, with capture starting into an empty ring after four
+//! callbacks without capture, the hardware probe's reading at a converted device rate exceeds the
+//! equal-rate one by an amount within a tested range per rate pair, at every callback pattern
+//! tested, and the ring reads silence only while the input converter starts and at most one frame
+//! after; at any rate a loop wrap inside a callback moves nothing. The probe adds its click after
+//! the output converter (`HwProbe::add_click` on the converted frame), so its readings are not the
+//! exact delay of a send through the converter.
 
 use super::*;
 
@@ -17,7 +20,8 @@ struct Probe {
 
 /// A paired duplex fake device at `device` Hz under a session at `session` Hz whose capture is the
 /// render's channel 0 delayed by `delay` device frames, with callbacks of `sizes` frames in turn.
-/// The hardware probe starts after `warm` callbacks with input. With `looped`, the transport plays
+/// Four callbacks run without capture, so capture starts into an empty ring. The hardware probe
+/// starts after `warm` callbacks with input. With `looped`, the transport plays
 /// a loop of that many session frames from 0 throughout.
 fn measure(session: u32, device: u32, delay: usize, sizes: &[usize], warm: usize, looped: Option<i64>) -> Probe {
     use ab::fake::{SliceSink, SliceSource};
@@ -95,14 +99,14 @@ fn extra(session: u32, device: u32, sizes: &[usize], warm: usize, looped: Option
 /// pattern (147 callbacks), so the measurement sees no settling.
 const WARM: usize = 300;
 
-/// Session and device rates; the extra plan frames the round trip takes at that pair over the
-/// equal-rate one (the output converter's reach plus the input converter's look-ahead), the low
-/// figure or one more; and the most silence the input converter's start reads. The one frame is
-/// the rounding of whole render frames against the converters' fractional reaches: the input's
-/// place is set by how far the first read falls short, and a later callback can need up to one
-/// input frame more, read as one frame of silence once (measured; a hold-back of one session frame
-/// in the first read changes nothing, as that read's stop sets the place either way). One callback
-/// is never in the figure.
+/// Session and device rates; the low end of the range of extra plan frames the probe may read at
+/// that pair over the equal-rate reading (the test allows that figure or one more and does not
+/// assert which occurs); and the most silence the input converter's start may read. With capture
+/// starting into an empty ring, the input's place is set where its first read stops for want of
+/// queued input, and a later callback can need one input frame more, read once as one frame of
+/// silence. Which figure occurs depends on the converters' relative phase, the input history kept
+/// at alignment and the callback endpoints met afterward; the buffer influences those but does not
+/// determine it alone. One callback is never in the figure.
 const PAIRS: [(u32, u32, i64, u64); 8] = [
     (48_000, 44_100, 34, 18),
     (44_100, 48_000, 32, 16),
@@ -117,7 +121,7 @@ const PAIRS: [(u32, u32, i64, u64); 8] = [
 const SIZES: [&[usize]; 11] = [&[32], &[64], &[128], &[192], &[256], &[512], &[600], &[1024], &[100, 37, 256], &[768, 64], &[600, 100]];
 
 #[test]
-fn the_converted_rate_term_does_not_depend_on_the_device_buffer() {
+fn hardware_probe_extra_delay_stays_within_the_tested_ranges() {
     for sizes in SIZES {
         for (session, device, low, start) in PAIRS {
             let (extra, p) = extra(session, device, sizes, WARM, None);
