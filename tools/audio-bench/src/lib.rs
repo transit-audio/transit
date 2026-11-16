@@ -260,21 +260,68 @@ pub fn asio_backend() -> Result<Box<dyn ab::Backend>, String> {
     Err("--backend asio needs 64-bit Windows".into())
 }
 
-/// The device names of a cpal system, for `--list-devices` (enumerates; opens no stream); the JACK
-/// system through the native JACK backend ([`list_jack`]).
+/// The devices of an audio system, for `--list-devices` (enumerates; opens no stream). The listing
+/// is the app's own: native WASAPI (the default system on Windows) and native ASIO (the installed
+/// drivers' registry names, none instantiated) list through `transit_playback::devices`, the JACK
+/// system through the native JACK backend ([`list_jack`]), any other system through cpal.
 pub fn list_devices(system: Option<&str>) -> Result<String, String> {
     if transit_playback::devices::is_jack_system(system) {
         return list_jack();
     }
+    if transit_playback::devices::native_wasapi_offered(system) {
+        return Ok(format_system(&native_wasapi_system()?));
+    }
+    if transit_playback::devices::native_asio_offered(system) {
+        return Ok(format_system(&transit_playback::devices::native_asio_system(None).ok_or("--system ASIO needs 64-bit Windows")?));
+    }
     let backend = cpal_backend(system)?;
-    let mut text = format!("system: {}\n", backend.system());
+    let mut text = format!("system: {}
+", backend.system());
     for (label, direction) in [("outputs", ab::Direction::Output), ("inputs", ab::Direction::Input)] {
-        text.push_str(&format!("{label}:\n"));
+        text.push_str(&format!("{label}:
+"));
         for endpoint in backend.endpoints(direction).map_err(|e| e.to_string())? {
-            text.push_str(&format!("  {} ({} ch)\n", endpoint.name, endpoint.inputs.max(endpoint.outputs)));
+            text.push_str(&format!("  {} ({} ch)
+", endpoint.name, endpoint.inputs.max(endpoint.outputs)));
         }
     }
     Ok(text)
+}
+
+/// The native WASAPI system as the app lists it (`IMMDeviceEnumerator`, default endpoint first).
+#[cfg(windows)]
+fn native_wasapi_system() -> Result<transit_playback::devices::AudioSystem, String> {
+    Ok(transit_playback::backend::native::wasapi_system())
+}
+
+#[cfg(not(windows))]
+fn native_wasapi_system() -> Result<transit_playback::devices::AudioSystem, String> {
+    Err("--system WASAPI needs Windows".into())
+}
+
+/// One native audio system in the cpal listing's shape: `system:`, then each direction's devices as
+/// `name (N ch)`, the default marked `[default]`. A driver listed by name only (ASIO drivers are not
+/// loaded to be described) says its channel count is unknown; the system's diagnostics lead as
+/// `note:` lines, or `unavailable:` when it lists nothing.
+pub fn format_system(system: &transit_playback::devices::AudioSystem) -> String {
+    let mut text = format!("system: {} (native)
+", system.name);
+    let tag = if system.outputs.is_empty() && system.inputs.is_empty() { "unavailable" } else { "note" };
+    for diagnostic in &system.diagnostics {
+        text.push_str(&format!("{tag}: {diagnostic}
+"));
+    }
+    for (label, devices) in [("outputs", &system.outputs), ("inputs", &system.inputs)] {
+        text.push_str(&format!("{label}:
+"));
+        for d in devices {
+            let channels = if d.max_channels == 0 { "channels unknown until opened".to_string() } else { format!("{} ch", d.max_channels) };
+            let default = if d.is_default { " [default]" } else { "" };
+            text.push_str(&format!("  {} ({channels}){default}
+", d.name));
+        }
+    }
+    text
 }
 
 /// The JACK system as the native JACK backend lists it (`--backend jack --list-devices`): each port
@@ -299,4 +346,56 @@ pub fn list_jack() -> Result<String, String> {
         }
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use transit_playback::backend::native::{system_from_endpoints, wasapi_system_from, Listing};
+
+    fn endpoint(name: &str, inputs: u16, outputs: u16) -> ab::Endpoint {
+        ab::Endpoint::new(name.into(), name.into(), "WASAPI".into(), inputs, outputs, Vec::new(), Arc::new(()))
+    }
+
+    /// The listing is the app's: a fake enumerator through the app's WASAPI mapping, default first
+    /// and marked, then the same names in the tool's text. No real endpoint is enumerated.
+    #[test]
+    fn the_native_wasapi_listing_names_the_endpoints_the_app_lists() {
+        let list = |direction| -> Result<Listing, String> {
+            Ok(match direction {
+                ab::Direction::Output => (vec![endpoint("Speakers", 0, 2), endpoint("Monitors", 0, 8)], Some("Monitors".to_owned())),
+                ab::Direction::Input => (vec![endpoint("Microphone", 1, 0)], None),
+            })
+        };
+        let text = format_system(&wasapi_system_from(list));
+        assert_eq!(text, "system: WASAPI (native)
+outputs:
+  Monitors (8 ch) [default]
+  Speakers (2 ch)
+inputs:
+  Microphone (1 ch)
+");
+    }
+
+    /// Drivers listed by registry name only say their channels are unknown, and a failed listing
+    /// leads with its diagnostic as `unavailable:`.
+    #[test]
+    fn a_name_only_asio_listing_says_channels_are_unknown_and_a_failure_says_why() {
+        let installed = ["Model Mixer ASIO Driver".to_owned()];
+        let system = system_from_endpoints("ASIO", false, &[], &[], &installed, Vec::new());
+        assert_eq!(
+            format_system(&system),
+            "system: ASIO (native)
+outputs:
+  Model Mixer ASIO Driver (channels unknown until opened)
+inputs:
+  Model Mixer ASIO Driver (channels unknown until opened)
+"
+        );
+        let failed = wasapi_system_from(|_| Err("EnumAudioEndpoints failed".to_owned()));
+        assert!(format_system(&failed).starts_with("system: WASAPI (native)
+unavailable: WASAPI: EnumAudioEndpoints failed
+"));
+    }
 }
