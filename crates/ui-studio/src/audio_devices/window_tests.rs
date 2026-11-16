@@ -748,7 +748,8 @@ fn a_long_status_card_never_covers_the_button_row() {
         let card = T::rect(&c, None, "diag_card");
         let texts: Vec<[f32; 4]> =
             c.as_array().unwrap().iter().filter(|m| m["value"] == "diag_text").map(|m| serde_json::from_value(m["rect"].clone()).unwrap()).collect();
-        assert!(texts.len() >= 7, "{zoom} ppp: the card holds seven or more rows: {}", texts.len());
+        // (Only the visible part of a line is recorded: a scrolled card shows fewer.)
+        assert!(texts.len() >= 7 || notes > 2, "{zoom} ppp: the card holds seven or more rows: {}", texts.len());
         if notes <= 2 {
             let low = texts.iter().map(|r| r[3]).fold(f32::MIN, f32::max);
             assert!(low <= card[3] + 0.5, "{zoom} ppp: the lines fit the card, which has room: {low} in {card:?}");
@@ -774,6 +775,7 @@ fn a_long_status_card_never_covers_the_button_row() {
         );
         if notes > 2 {
             // Scroll the lines to their end over the card: the first line leaves the card, the button does not.
+            assert_card_controls_inside(&c, card);
             let first = diag_lines(&c)[0];
             t.events.push(egui::Event::PointerMoved(egui::pos2(mid(card).0, mid(card).1)));
             t.events.push(egui::Event::MouseWheel {
@@ -784,7 +786,9 @@ fn a_long_status_card_never_covers_the_button_row() {
             });
             t.frames(30);
             let c = t.layout()["controls"].clone();
-            assert!(diag_lines(&c)[0][1] < first[1] - 20.0, "{zoom} ppp: the lines scrolled: {first:?} to {:?}", diag_lines(&c)[0]);
+            // Only the part of a line that shows is recorded, so scrolling shortens or drops the first lines.
+            assert!(diag_lines(&c)[0] != first, "{zoom} ppp: the lines scrolled: {first:?} to {:?}", diag_lines(&c)[0]);
+            assert_card_controls_inside(&c, card);
             let copy = T::rect(&c, None, "copy_diagnostics");
             assert!(
                 copy[1] >= card[1] - 0.5 && copy[3] <= card[3] + 0.5,
@@ -828,17 +832,20 @@ fn no_status_line_piece_starts_with_punctuation() {
 fn the_card_leaves_the_button_row_whole_on_the_asio_system_tab_at_150_percent() {
     use transit_audio_backend as ab;
     use transit_playback::telemetry::StreamStats;
-    for notes in [0, 1, 2] {
+    // Whole and fractional scales; the last case also shows the recording refusal under the card.
+    let cases = [1.25_f32, 1.5, 1.75].into_iter().flat_map(|zoom| [(zoom, 0, false), (zoom, 1, false), (zoom, 2, false), (zoom, 2, true)]);
+    for (zoom, notes, recording) in cases {
         let driver = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32))
             .named("ASIO", "Focusrite USB ASIO")
             .with_capture(2, true)
             .with_fixed_buffer(128);
         let again = driver.clone();
         let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
-        t.app.ui.ui_zoom = 1.5;
-        t.screen = egui::vec2(1920.0, 1200.0) / 1.5;
+        t.app.ui.ui_zoom = zoom;
+        t.screen = egui::vec2(1920.0, 1200.0) / zoom;
         t.frames(3);
-        assert_eq!(t.ctx.pixels_per_point(), 1.5);
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        t.app.engine.transport.recording = recording;
         let cal = |period: u32| transit_playback::LoopbackCalibration {
             device: "Focusrite USB ASIO".into(),
             input: None,
@@ -882,19 +889,34 @@ fn the_card_leaves_the_button_row_whole_on_the_asio_system_tab_at_150_percent() 
         let lines = diag_lines(&c);
         for key in ["apply", "revert", "reconnect", "rescan"] {
             let b = T::rect(&c, None, key);
-            assert!(b[1] >= card[3] - 0.5, "notes {notes}: {key} {b:?} meets the card {card:?}");
+            assert!(b[1] >= card[3] - 0.5, "{zoom} ppp, notes {notes}: {key} {b:?} meets the card {card:?}");
             for l in &lines {
-                assert!(l[3] <= b[1] + 0.5 || l[2] <= b[0] || l[0] >= b[2], "notes {notes}: a line {l:?} covers {key} {b:?}");
+                assert!(l[3] <= b[1] + 0.5 || l[2] <= b[0] || l[0] >= b[2], "{zoom} ppp, notes {notes}: a line {l:?} covers {key} {b:?}");
             }
-            assert!(b[2] <= window[2] && b[3] <= window[3], "notes {notes}: {key} {b:?} is inside the window {window:?}");
+            assert!(b[2] <= window[2] && b[3] <= window[3], "{zoom} ppp, notes {notes}: {key} {b:?} is inside the window {window:?}");
         }
         for (i, l) in lines.iter().enumerate() {
             assert!(
                 l[0] >= card[0] - 0.5 && l[2] <= card[2] + 0.5 && l[1] >= card[1] - 0.5 && l[3] <= card[3] + 0.5,
-                "notes {notes}: line {i} {l:?} runs out of the card {card:?}"
+                "{zoom} ppp, notes {notes}: line {i} {l:?} runs out of the card {card:?}"
             );
         }
         assert_reserve_covers_the_sections(&t, &c);
+    }
+}
+
+/// Every control the card records (its lines, the card, the button) lies inside the card's rect, also for lines
+/// scrolled partly or wholly out of it.
+fn assert_card_controls_inside(controls: &Value, card: [f32; 4]) {
+    for m in controls.as_array().unwrap() {
+        if matches!(m["value"].as_str(), Some("diag_text" | "diag_card" | "copy_diagnostics")) {
+            let r: [f32; 4] = serde_json::from_value(m["rect"].clone()).unwrap();
+            assert!(
+                r[0] >= card[0] - 0.5 && r[2] <= card[2] + 0.5 && r[1] >= card[1] - 0.5 && r[3] <= card[3] + 0.5,
+                "{} {r:?} is outside the card {card:?}",
+                m["value"]
+            );
+        }
     }
 }
 
@@ -904,11 +926,40 @@ fn diag_lines(controls: &Value) -> Vec<[f32; 4]> {
 }
 
 /// The room the card keeps free under it is an estimate (the sections are placed after it): it is at least what the
-/// section list and the separator measure.
+/// section list, the separator and, when it is shown, the recording refusal row measure.
 fn assert_reserve_covers_the_sections(t: &T, controls: &Value) {
     let (first, last) = (T::rect(controls, None, "section_system"), T::rect(controls, None, "section_midi"));
     let spacing = t.ctx.global_style().spacing.clone();
-    let measured = last[3] - first[1] + 2.0 * spacing.item_spacing.y + 1.0;
-    let reserved = crate::audio_devices::card::reserved_below(&spacing);
-    assert!(reserved >= measured, "the reserve {reserved} is at least the section list and separator {measured}");
+    let mut measured = last[3] - first[1] + 2.0 * spacing.item_spacing.y + 1.0;
+    let mut refusal = 0.0;
+    if let Some(row) = controls.as_array().unwrap().iter().find(|m| m["value"] == "refusal") {
+        let row: [f32; 4] = serde_json::from_value(row["rect"].clone()).unwrap();
+        measured += row[3] - row[1] + spacing.item_spacing.y;
+        let window: [f32; 4] = serde_json::from_value(t.layout()["window"].clone()).unwrap();
+        refusal = refusal_height_in(t, crate::audio_devices::REFUSED_RECORDING, window[2] - window[0] - 80.0);
+    }
+    let reserved = crate::audio_devices::card::reserved_below(&spacing, refusal);
+    assert!(reserved >= measured, "the reserve {reserved} is at least the section list, separator and refusal row {measured}");
+}
+
+/// `card::refusal_height` as the app's own ui measures it.
+fn refusal_height_in(t: &T, text: &str, width: f32) -> f32 {
+    let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, t.screen)), ..Default::default() };
+    let mut height = 0.0;
+    let mut out = t.ctx.run_ui(raw, |ui| height = crate::audio_devices::card::refusal_height(ui, text, width));
+    out.textures_delta.clear();
+    height
+}
+
+/// A refusal row that wraps counts its wrapped height in the reserve: at a width too narrow for the text the height
+/// is more than one row.
+#[test]
+fn the_reserve_counts_a_wrapped_refusal_row() {
+    let t = T::new();
+    let (wide, narrow) =
+        (refusal_height_in(&t, crate::audio_devices::REFUSED_RECORDING, 600.0), refusal_height_in(&t, crate::audio_devices::REFUSED_RECORDING, 90.0));
+    assert!(narrow > wide + 10.0, "wrapped {narrow} is taller than one row {wide}");
+    let spacing = t.ctx.global_style().spacing.clone();
+    let none = crate::audio_devices::card::reserved_below(&spacing, 0.0);
+    assert!((crate::audio_devices::card::reserved_below(&spacing, narrow) - none - narrow).abs() < 0.01);
 }

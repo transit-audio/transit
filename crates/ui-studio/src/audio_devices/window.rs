@@ -281,10 +281,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 }
                 lay.opened = opened_lines(app, ui.input(|i| i.time));
                 // The diagnostics sit in an inset card: the open devices, the backend figures (monospace) and the notes.
-                copy_diagnostics |= card::show(ui, app, (&lay.opened, audio_on), &mut controls);
+                copy_diagnostics |= card::show(ui, app, (&lay.opened, audio_on), recording.then_some(REFUSED_RECORDING), &mut controls);
                 if recording {
                     // An error (#326): the circle-alert in `meter.hot`, the message in `text`.
-                    crate::chrome::status_label(ui, REFUSED_RECORDING, 11.5, crate::chrome::Severity::Error);
+                    let shown = crate::chrome::status_label(ui, REFUSED_RECORDING, 11.5, crate::chrome::Severity::Error);
+                    controls.push((REFUSED_RECORDING.into(), "refusal", shown.rect));
                 }
                 ui.separator();
                 let body = egui::vec2(size.x, ui.available_height());

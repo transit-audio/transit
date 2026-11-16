@@ -29,7 +29,11 @@ fn contents(ui: &mut egui::Ui, app: &mut StudioApp, (opened, audio_on): (&[Strin
             ui.set_width(room);
             add(ui)
         });
-        controls.push(("Diagnostics line".into(), "diag_text", shown.response.rect));
+        // Only the part of a line that shows is recorded: a line scrolled out of the card is not a control there.
+        let visible = shown.response.rect.intersect(ui.clip_rect());
+        if visible.is_positive() {
+            controls.push(("Diagnostics line".into(), "diag_text", visible));
+        }
     };
     // The card has always read: notes, the open lines (the last first), then the hover hint.
     for n in app.audio_devices.notes.clone().iter().rev() {
@@ -63,14 +67,26 @@ fn contents(ui: &mut egui::Ui, app: &mut StudioApp, (opened, audio_on): (&[Strin
 }
 
 /// What sits under the card in the window's column and is not placed yet when the card is: the section list, the
-/// separator above the body, and one status row (the recording refusal). The sections are laid out after the card
-/// (above it in the bottom-up column), so their measured size is not known in this frame; the estimate is from the
-/// spacing, and the tests check it is at least what the section list measures.
-pub(crate) fn reserved_below(spacing: &egui::style::Spacing) -> f32 {
-    Section::ALL.len() as f32 * (crate::tokens::chrome::CONTROL_HEIGHT + spacing.item_spacing.y)
-        + 2.0 * spacing.item_spacing.y
-        + 1.0
-        + spacing.interact_size.y
+/// separator above the body, and the recording refusal row when it is shown (`refusal` is its height from
+/// [`refusal_height`], 0 when it is not). The sections are laid out after the card (above it in the bottom-up
+/// column), so their measured size is not known in this frame; the estimate is from the spacing, and the tests check
+/// it is at least what the section list and the refusal measure.
+pub(crate) fn reserved_below(spacing: &egui::style::Spacing, refusal: f32) -> f32 {
+    Section::ALL.len() as f32 * (crate::tokens::chrome::CONTROL_HEIGHT + spacing.item_spacing.y) + 2.0 * spacing.item_spacing.y + 1.0 + refusal
+}
+
+/// The height the refusal row takes in the column, with the gap above it: its text wrapped at `width` (the row does
+/// not wrap today, so this is an upper bound that also holds if it ever does), never less than a control row.
+pub(crate) fn refusal_height(ui: &egui::Ui, text: &str, width: f32) -> f32 {
+    let size = 11.5;
+    let text_width = (width - crate::chrome::glyph_size(size) - 3.0).max(1.0);
+    let galley = egui::WidgetText::from(egui::RichText::new(text).size(size)).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Wrap),
+        text_width,
+        egui::TextStyle::Body,
+    );
+    galley.size().y.max(ui.spacing().interact_size.y) + ui.spacing().item_spacing.y
 }
 
 /// The card in the window's bottom-up column. Its height is not known until its lines are laid out, and the button
@@ -78,13 +94,12 @@ pub(crate) fn reserved_below(spacing: &egui::style::Spacing) -> f32 {
 /// rect of that height. The card takes the room left above the button row, less [`reserved_below`]: when its lines
 /// are taller than that, they scroll under a pinned Copy diagnostics button inside the card and nothing is drawn
 /// outside it (#732).
-pub(super) fn show(ui: &mut egui::Ui, app: &mut StudioApp, state: (&[String], bool), controls: &mut Controls) -> bool {
-    let margin = 8;
-    let room = (ui.available_height() - reserved_below(ui.spacing()) - 2.0 * margin as f32).max(crate::tokens::chrome::CONTROL_HEIGHT);
-    egui::Frame::NONE
-        .fill(TOKENS.bg)
-        .corner_radius(egui::CornerRadius::same(crate::theme::RADIUS as u8))
-        .inner_margin(egui::Margin::same(margin))
+pub(super) fn show(ui: &mut egui::Ui, app: &mut StudioApp, state: (&[String], bool), refusal: Option<&str>, controls: &mut Controls) -> bool {
+    let frame =
+        egui::Frame::NONE.fill(TOKENS.bg).corner_radius(egui::CornerRadius::same(crate::theme::RADIUS as u8)).inner_margin(egui::Margin::same(8));
+    let below = reserved_below(ui.spacing(), refusal.map_or(0.0, |text| refusal_height(ui, text, ui.available_width())));
+    let room = (ui.available_height() - below - frame.total_margin().sum().y).max(crate::tokens::chrome::CONTROL_HEIGHT);
+    frame
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             let kept = controls.len();
