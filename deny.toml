@@ -1,0 +1,43 @@
+# cargo-deny policy (issue #736, P1): RustSec advisories and licenses.
+# CI runs `cargo deny check advisories licenses` (job `deny` in .github/workflows/ci.yml).
+#
+# transit is MIT OR Apache-2.0 and must never take a GPL, AGPL or other strong-copyleft dependency.
+# The license check is an allow list: anything not named here fails, so a new GPL or AGPL crate is
+# refused until someone reads this file and decides. The list below is what the dependency tree
+# held on 2026-11-16 (`cargo metadata --locked`, all targets).
+
+[advisories]
+version = 2
+# Vulnerabilities and unmaintained crates reached directly from this workspace fail the check.
+unmaintained = "workspace"
+# A yanked release in Cargo.lock is reported, not fatal.
+yanked = "warn"
+# Add an entry here only with the advisory id, the reason and the issue that removes it:
+# ignore = [{ id = "RUSTSEC-0000-0000", reason = "..." }]
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "0BSD",
+    "BSL-1.0",
+    "Unicode-3.0",
+    # Weak, file-level copyleft: symphonia (decoders), triple_buffer and audio_thread_priority are
+    # used unmodified as libraries.
+    "MPL-2.0",
+]
+# Licenses of data a single crate ships, allowed for that crate only.
+exceptions = [
+    # egui's bundled fonts.
+    { allow = ["OFL-1.1", "Ubuntu-font-1.0"], crate = "epaint_default_fonts" },
+    # The Mozilla root certificate list.
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+]
