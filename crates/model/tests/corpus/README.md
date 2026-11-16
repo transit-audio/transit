@@ -28,6 +28,8 @@ v0.7.1 is a patch with no new serialized feature (the `pre_count` need exists in
 
 v0.7.2 is a patch with no new serialized feature (what it adds to a recording's journal is not part of the session document), so its two files are the demo session and the same features session as v0.7.0, saved by the 0.7.2 code.
 
+v0.7.3 adds its two files. The v0.7.3 features session also carries a MIDI clip that starts before bar 1 (a pre-count zone, the `pre_count` need) holding a note stored before its start, which its left edge hides (the `midi_hidden_notes` need, ADR 0052). It carries no unplaced take: an entry is a load note, and the corpus test wants zero notes.
+
 One file is hand-written, not saved by a build: `v0.3.2-video.transit` has an audio track, a Video
 track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 (it opens with the video
 dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`

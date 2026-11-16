@@ -113,7 +113,32 @@ fn features_session() -> Session {
     add_v060_features(&mut s, inst, audio[0]);
     add_rack(&mut s);
     add_v070_features(&mut s, audio[1]);
+    add_v073_features(&mut s);
     s
+}
+
+/// What v0.7.3 serializes that v0.7.2 did not: a MIDI clip that starts before bar 1 (a pre-count zone,
+/// the `pre_count` need) and holds a note and a controller move at a stored tick before its start, which
+/// its left edge hides (the `midi_hidden_notes` need). An unplaced take is left out: its entry is a load
+/// note, and the corpus test wants none.
+fn add_v073_features(s: &mut Session) {
+    let sr = s.sample_rate;
+    let beat = sr.samples(0.5);
+    let q = TICKS_PER_QUARTER;
+    let track = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Pickups"));
+    let mut seq = Sequence::default();
+    // Two pickup notes inside the clip, and one stored before its start that the left edge hides.
+    seq.notes.push(Note { pitch: 55, velocity: 90, release_velocity: 64, channel: 0, start: -q / 2, length: q / 4 });
+    for (i, pitch) in [60u8, 62].into_iter().enumerate() {
+        seq.notes.push(Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start: i as i64 * q, length: q / 2 });
+    }
+    seq.sort();
+    let cid = s.new_clip_id();
+    let clip = Clip::midi(cid, "Pickups", -beat * 4, beat * 6, seq);
+    transit_engine::edit::place_clip(s, track, clip);
+    if let Some(t) = s.track_mut(track) {
+        t.instrument = Some(Insert::new(transit_model::DEFAULT_INSTRUMENT));
+    }
 }
 
 /// What v0.7.0 serializes: a Sampler kit (ADR 0041) on its own track, with two managed sources (one
