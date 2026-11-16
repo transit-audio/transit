@@ -239,7 +239,7 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         let Some(x) = s.source(src) else { continue };
         let frames = i64::try_from(x.frames).unwrap_or(0);
         let (pieces, merged, short) = take_pieces(start, pass, cycle, frames, end.unwrap_or(frames));
-        let early_laps = (pieces.len() > 1).then(|| pieces.iter().filter(|p| p.at < 0).count()).filter(|&laps| laps > 1);
+        let early_laps = (pieces.len() > 1).then(|| pieces.iter().filter(|p| p.at < 0).count());
         let (pieces, hidden) = from_bar_one(pieces);
         if pieces.is_empty() && hidden > 0 {
             let entry = transit_model::UnplacedTake::new(path.display().to_string(), "recorded before bar 1".into(), Some(src), false);
@@ -298,8 +298,11 @@ pub fn before_bar_one_note(seconds: f64, file: &str) -> String {
 
 /// Unlike a single take's leading audio, these stretches can occur throughout a cycle file.
 fn before_bar_one_laps_note(laps: usize, seconds: f64, file: &str) -> String {
-    let noun = if laps == 1 { "lap" } else { "laps" };
-    format!("{BEFORE_BAR_ONE_NOTE} (audio clips start at bar 1): a total of {seconds:.2} s from {laps} {noun} stays in {file}.")
+    if laps == 1 {
+        format!("{BEFORE_BAR_ONE_NOTE} (audio clips start at bar 1): {seconds:.2} s from 1 lap stay in {file}.")
+    } else {
+        format!("{BEFORE_BAR_ONE_NOTE} (audio clips start at bar 1): a total of {seconds:.2} s from {laps} laps stays in {file}.")
+    }
 }
 
 /// The pieces of a take as audio clips can hold them: from bar 1 on (ADR 0052 decision 11). A
@@ -812,7 +815,10 @@ mod record_tests {
             assert_eq!(
                 e.messages_since(mark),
                 [if laps == "1 lap" {
-                    before_bar_one_note(total.parse().unwrap(), path.to_str().unwrap())
+                    format!(
+                        "Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): {total} s from 1 lap stay in {}.",
+                        path.display()
+                    )
                 } else {
                     format!(
                         "Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): a total of {total} s from {laps} stays in {}.",

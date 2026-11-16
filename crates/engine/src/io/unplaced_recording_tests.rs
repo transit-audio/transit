@@ -289,7 +289,7 @@ fn crash_recovery_keeps_a_finished_or_interrupted_early_take_listed() {
 }
 
 #[test]
-fn one_early_lap_uses_the_single_take_note() {
+fn one_early_lap_after_the_first_uses_the_lap_note() {
     let dir = transit_test_support::TestDir::created("one-early-lap");
     let path = dir.join("Vox.wav");
     write_take(&path, 30_000);
@@ -297,7 +297,25 @@ fn one_early_lap_uses_the_single_take_note() {
     let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
     let plan = Recording { cycle: Some(Range::new(-12_000, 12_000)), ..Recording::new(6_000) };
     assert_eq!(place_recording(&mut e, &plan, vec![(t, path.clone())]).len(), 2);
-    assert_eq!(e.messages.last(), Some(&before_bar_one_note(0.25, path.to_str().unwrap())));
+    assert_eq!(
+        e.messages.last(),
+        Some(&format!("Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): 0.25 s from 1 lap stay in {}.", path.display()))
+    );
+}
+
+#[test]
+fn one_early_lap_at_the_start_uses_the_lap_note() {
+    let dir = transit_test_support::TestDir::created("first-early-lap");
+    let path = dir.join("Vox.wav");
+    write_take(&path, 36_000);
+    let mut e = Engine::default();
+    let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+    let plan = Recording { cycle: Some(Range::new(0, 12_000)), ..Recording::new(-12_000) };
+    assert_eq!(place_recording(&mut e, &plan, vec![(t, path.clone())]).len(), 2);
+    assert_eq!(
+        e.messages.last(),
+        Some(&format!("Audio recorded before bar 1 is not in the clip (audio clips start at bar 1): 0.25 s from 1 lap stay in {}.", path.display()))
+    );
 }
 
 #[test]
