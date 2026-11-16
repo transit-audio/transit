@@ -1,4 +1,4 @@
-# 2026-11-16, reference machine, no audio device: what does the band-limited reader cost by rate ratio?
+# 2026-11-16, Ryzen 9 5900X, no audio device: what does the band-limited reader cost by rate ratio?
 
 Issue #726. [ADR 0056](../adr/0056-audio-clip-editor.md) decision 8.8 sets a cost budget for the reader: a stereo clip at 48 kHz through the clip path costs at most max(1, q/2) percent of one core, where q is the read rate.
 
