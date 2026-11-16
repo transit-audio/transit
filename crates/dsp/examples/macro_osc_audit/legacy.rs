@@ -1,185 +1,12 @@
-//! Offline signal measurements; run with `cargo run --release --locked -p transit-dsp --example macro_osc_audit`.
-//! No audio/MIDI devices, product-stage access, or real-time assertions.
-use std::error::Error;
-use std::f64::consts::TAU;
-use transit_dsp::Plugin;
-use transit_dsp::plugins::macro_osc::{MODELS, MacroOscillator};
-use transit_math::{f64 as m, fft};
+// First-pass probes retained; the record preserves their original output.
+#![allow(dead_code)]
+use super::*;
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const HOST: usize = 128;
-const N: usize = 131_072;
-const MOD_N: usize = 524_288;
-const KEYS: [u8; 5] = [24, 48, 72, 96, 127];
-const REPRESENTATIVES: [usize; 3] = [8, 10, 19];
-
-fn db(power: f64) -> f64 {
-    10.0 * m::log10(power)
-}
-
-fn ideal(key: u8) -> f64 {
-    440.0 * m::exp2((f64::from(key) - 69.0) / 12.0)
-}
-
-// Eligibility describes these two knob settings, not every sound the model can make.
-fn exclusion(model: usize, bright: bool) -> Option<&'static str> {
-    match model {
-        0 if bright => Some("wave/sub mixture; subharmonics"),
-        2..=4 => Some("patch-dependent six-operator ratios, detuning and envelopes"),
-        6 | 7 | 14 => Some("multiple chord pitches / arpeggiation"),
-        10 => Some("noninteger FM ratio (default 12.16 semitones); feedback at maximum"),
-        15 => Some("speech/formants with possible unvoiced content"),
-        16 => Some("detuned stochastic grains"),
-        17 | 18 | 22 | 23 => Some("noise or inharmonic percussion"),
-        19 | 20 => Some("inharmonic physical modes"),
-        21 => Some("pitch envelope and nonlinear percussion"),
-        _ => None,
-    }
-}
-
-fn set(p: &mut MacroOscillator, name: &str, value: f32) -> Result<()> {
-    if !p.set_param(name, value) {
-        return Err(format!("unknown parameter {name}").into());
-    }
-    Ok(())
-}
-
-fn render(model: usize, sr: u32, keys: &[u8], extra: &[(&str, f32)], skip: usize, len: usize) -> Result<Vec<f64>> {
-    let mut p = MacroOscillator::new();
-    set(&mut p, "model", model as f32)?;
-    for &(name, value) in extra {
-        set(&mut p, name, value)?;
-    }
-    p.prepare(sr as f32, HOST, 2);
-    for &key in keys {
-        p.note_on(0, key, 127);
-    }
-    let mut io = vec![vec![0.0; HOST]; 2];
-    let mut out = Vec::with_capacity(len);
-    // Always drive full 128-frame calls, including the last call. Capture by sample index.
-    for start in (0..skip + len).step_by(HOST) {
-        for ch in &mut io {
-            ch.fill(0.0);
-        }
-        p.process(&mut io, HOST);
-        for (i, &v) in io[0].iter().enumerate() {
-            if !v.is_finite() || !io[1][i].is_finite() {
-                return Err(format!("nonfinite output: model {model}, rate {sr}, frame {}", start + i).into());
-            }
-            if (skip..skip + len).contains(&(start + i)) {
-                out.push(f64::from(v));
-            }
-        }
-    }
-    Ok(out)
-}
-
-struct Spectrum {
-    power: Vec<f64>,
-    bin: f64,
-}
-
-impl Spectrum {
-    fn new(x: &[f64], sr: u32) -> Result<Self> {
-        let n = x.len();
-        let mut table = vec![fft::Complex::default(); n / 2];
-        fft::twiddles::<f64>(&mut table).map_err(|e| e.to_string())?;
-        let mut windowed = Vec::with_capacity(n);
-        let mut w2 = 0.0;
-        for (i, &y) in x.iter().enumerate() {
-            let a = TAU * i as f64 / n as f64;
-            let w = 0.35875 - 0.48829 * m::cos(a) + 0.14128 * m::cos(2.0 * a) - 0.01168 * m::cos(3.0 * a);
-            w2 += w * w;
-            windowed.push(y * w);
-        }
-        let mut bins = vec![fft::Complex::default(); n / 2 + 1];
-        fft::forward_real(&table, &windowed, &mut bins).map_err(|e| e.to_string())?;
-        let power = bins
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                let sides = if i == 0 || i == n / 2 { 1.0 } else { 2.0 };
-                sides * (c.re * c.re + c.im * c.im) / (n as f64 * w2)
-            })
-            .collect();
-        Ok(Self { power, bin: f64::from(sr) / n as f64 })
-    }
-
-    fn frequency(&self, i: usize) -> f64 {
-        if i == 0 || i + 1 >= self.power.len() {
-            return i as f64 * self.bin;
-        }
-        let a = m::ln(self.power[i - 1].max(1e-300));
-        let b = m::ln(self.power[i].max(1e-300));
-        let c = m::ln(self.power[i + 1].max(1e-300));
-        let denominator = a - 2.0 * b + c;
-        let offset = if denominator.abs() > 1e-20 { (0.5 * (a - c) / denominator).clamp(-0.5, 0.5) } else { 0.0 };
-        (i as f64 + offset) * self.bin
-    }
-
-    fn at(&self, hz: f64) -> usize {
-        (m::round(hz / self.bin) as usize).min(self.power.len() - 1)
-    }
-
-    fn band(&self, hz: f64, bins: usize) -> f64 {
-        let i = self.at(hz);
-        self.power[i.saturating_sub(bins)..=(i + bins).min(self.power.len() - 1)].iter().sum()
-    }
-
-    fn fundamental(&self, expected: f64) -> (f64, f64) {
-        let lo = self.at(expected * 0.97).max(1);
-        let hi = self.at(expected * 1.03).max(lo);
-        let i = (lo..=hi).max_by(|&a, &b| self.power[a].total_cmp(&self.power[b])).unwrap_or(lo);
-        let power = self.band(i as f64 * self.bin, 4);
-        (if power > 0.0 { self.frequency(i) } else { f64::NAN }, power)
-    }
-
-    fn weak_reference(&self, power: f64) -> bool {
-        power <= 1e-12 || power <= self.power.iter().sum::<f64>() * 1e-8
-    }
-
-    fn harmonic(&self, hz: f64, f0: f64, guard: f64) -> bool {
-        let k = m::round(hz / f0).max(1.0);
-        (hz - k * f0).abs() <= (guard * self.bin).max(0.001 * k * f0)
-    }
-
-    fn residual(&self, f0: f64, guard: f64) -> f64 {
-        self.power.iter().enumerate().skip(6).filter(|(i, _)| !self.harmonic(*i as f64 * self.bin, f0, guard)).map(|(_, p)| p).sum()
-    }
-
-    // Peak centers only: no calling the skirt of an excluded tone a separate component.
-    fn strongest(&self, accept: impl Fn(f64) -> bool) -> (f64, f64) {
-        let mut best = (f64::NAN, 0.0);
-        for i in 2..self.power.len() - 1 {
-            if self.power[i] <= 0.0 || self.power[i] < self.power[i - 1] || self.power[i] < self.power[i + 1] {
-                continue;
-            }
-            let hz = self.frequency(i);
-            if !(20.0..20_000.0).contains(&hz) || !accept(hz) {
-                continue;
-            }
-            // A sidelobe outside a guard must never integrate back into the excluded main lobe.
-            // Apply the same selection to every integrated bin, including the audible-band limit.
-            let power = (i.saturating_sub(4)..=(i + 4).min(self.power.len() - 1))
-                .filter(|&j| {
-                    let f = j as f64 * self.bin;
-                    (20.0..20_000.0).contains(&f) && accept(f)
-                })
-                .map(|j| self.power[j])
-                .sum();
-            if power > best.1 {
-                best = (hz, power);
-            }
-        }
-        best
-    }
-}
-
-fn bright_params(bright: bool) -> Vec<(&'static str, f32)> {
+pub(super) fn bright_params(bright: bool) -> Vec<(&'static str, f32)> {
     if bright { vec![("harmonics", 100.0), ("timbre", 100.0), ("morph", 100.0)] } else { vec![] }
 }
 
-fn noise_section(models: &[usize], sr: u32) -> Result<()> {
+pub(super) fn noise_section(models: &[usize], sr: u32) -> Result<()> {
     println!("\n### Residual and level scaling, {sr} Hz\n");
     println!(
         "| Model | Reference | f0 Hz | Fundamental dBFS | Residual dBc | Residual dBFS | Low fundamental dBFS | Low residual dBc | Low residual dBFS | Residual change dB | Guard 5->8 change dB |"
@@ -219,7 +46,7 @@ fn noise_section(models: &[usize], sr: u32) -> Result<()> {
     Ok(())
 }
 
-fn alias_section(models: &[usize], sr: u32) -> Result<()> {
+pub(super) fn alias_section(models: &[usize], sr: u32) -> Result<()> {
     println!("\n### Keyboard / tuning, {sr} Hz\n");
     println!("| Model | Knobs | MIDI key | Ideal Hz | Candidate Hz | Cents | Reference dBFS | Strongest outside harmonics dBc | Hz | Status |");
     println!("|---|---|---:|---:|---:|---:|---:|---:|---:|---|");
@@ -256,7 +83,7 @@ fn alias_section(models: &[usize], sr: u32) -> Result<()> {
     Ok(())
 }
 
-fn probe_params() -> Vec<(&'static str, f32)> {
+pub(super) fn probe_params() -> Vec<(&'static str, f32)> {
     // Ratio 1, no phase modulation: a sine-like main output. Retain the public shaper.
     vec![
         ("harmonics", 100.0 * 30.0 / 128.0),
@@ -268,7 +95,7 @@ fn probe_params() -> Vec<(&'static str, f32)> {
     ]
 }
 
-fn images(s: &Spectrum, carrier: f64, rate: f64) -> [f64; 4] {
+pub(super) fn images(s: &Spectrum, carrier: f64, rate: f64) -> [f64; 4] {
     std::array::from_fn(|k| {
         let block_rate = 4000.0 * (k + 1) as f64;
         // Include center, the LFO's first two sidebands, and the window guard.
@@ -277,7 +104,7 @@ fn images(s: &Spectrum, carrier: f64, rate: f64) -> [f64; 4] {
     })
 }
 
-fn modulation_section() -> Result<()> {
+pub(super) fn modulation_section() -> Result<()> {
     println!("\n### Modulation stepping, 48000 Hz\n");
     println!(
         "| Destination | Shape | Hz | Amount % | Carrier dBFS | Image 1 dBc | Image 2 dBc | Image 3 dBc | Image 4 dBc | Baseline max image dBc | Off-comb dBc | Off-comb Hz |"
@@ -331,7 +158,7 @@ fn modulation_section() -> Result<()> {
     Ok(())
 }
 
-fn shaper_section() -> Result<()> {
+pub(super) fn shaper_section() -> Result<()> {
     println!("\n### Shaper filter and drive, 48000 Hz\n");
     println!("| Filter excitation | Carrier dBFS | Image 1 dBc | Image 2 dBc | Image 3 dBc | Image 4 dBc |");
     println!("|---|---:|---:|---:|---:|---:|");
@@ -370,13 +197,13 @@ fn shaper_section() -> Result<()> {
     Ok(())
 }
 
-fn levels(x: &[f64]) -> (f64, f64, usize) {
+pub(super) fn levels(x: &[f64]) -> (f64, f64, usize) {
     let peak = x.iter().fold(0.0_f64, |a, &b| a.max(b.abs()));
     let power = x.iter().map(|v| v * v).sum::<f64>() / x.len() as f64;
     (db(peak * peak), db(power), x.iter().filter(|v| v.abs() >= 1.0).count())
 }
 
-fn headroom_section() -> Result<()> {
+pub(super) fn headroom_section() -> Result<()> {
     println!("\n### Level and headroom, 48000 Hz\n");
     println!("| Model | Held peak dBFS | Held RMS dBFS | Held full-scale samples | Chord peak dBFS | Chord RMS dBFS | Chord full-scale samples |");
     println!("|---|---:|---:|---:|---:|---:|---:|");
@@ -390,7 +217,7 @@ fn headroom_section() -> Result<()> {
     Ok(())
 }
 
-fn sensitivity_section() -> Result<()> {
+pub(super) fn sensitivity_section() -> Result<()> {
     println!("\n### Capture sensitivity (same start, default C4; maximum knobs C7)\n");
     println!("| Model | N | C4 residual dBc | C7 maximum non-harmonic dBc | Hz |\n|---|---:|---:|---:|---:|");
     for model in [1, 5, 8, 9, 11, 12] {
@@ -410,7 +237,7 @@ fn sensitivity_section() -> Result<()> {
     Ok(())
 }
 
-fn calibration_section() -> Result<()> {
+pub(super) fn calibration_section() -> Result<()> {
     println!("\n### Analysis calibration (synthetic signals, not instrument measurements)\n");
     println!(
         "Half-peak sine at ideal middle C; then the same sine with rounding at step 1/32768, before a unity output gain. The low row reduces the sine by 40 dB BEFORE rounding. Same FFT and harmonic mask as section1; this contrasts with the instrument's post-conversion level knob."
@@ -441,7 +268,7 @@ fn calibration_section() -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
+pub(super) fn main() -> Result<()> {
     println!("## Program output: Macro Oscillator sound-quality audit\n");
     println!(
         "No arguments; fresh instrument per capture, voice seed=0x21+voice index; Plugin::note_on then Plugin::process, stereo, 128-frame calls, left output analyzed. No audio device. Velocity 127; eight voices; main output only; level -6 dB; macros 50%; shaper off unless specified. Scientific note names: C1=24, C3=48, C4/middle C=60, C5=72, C7=96; highest accepted MIDI key=127. A4=440 Hz."
