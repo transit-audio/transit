@@ -44,6 +44,8 @@ transit-parametric-eq = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 proptest.workspace = true
+# Portable FFT and analysis math for the offline Macro Oscillator quality audit.
+transit-math.workspace = true
 # The Texture's allocation probe (`tests/texture_alloc.rs`) counts heap use on the test thread.
 transit-rt = { workspace = true, features = ["testing"] }
 # The Cross Modulator's firmware-exact path is checked against the C++ oracle (dev-only, ADR 0033).

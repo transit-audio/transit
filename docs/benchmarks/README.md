@@ -8,6 +8,8 @@ measured by identical code, and by host time only.
 Hardware numbers are notes, never CI gates. Fake-device results prove the harness logic, not any
 hardware (see `../contributing/evidence/hardware-and-ci.md`). The fake mode runs inside `cargo xtask ci`.
 
+- [2026-11-15: Macro Oscillator sound-quality audit](2026-11-15-macro-oscillator-sound-quality-audit.md) — offline signal measurements across models, modulation, shaper, rates, and headroom; no decision.
+
 ## What each record decided
 
 A benchmark is only worth keeping if something followed from it. Each row names the question, the decision, and where that decision lives.
