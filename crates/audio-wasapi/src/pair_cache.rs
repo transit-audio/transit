@@ -20,10 +20,10 @@ impl<T: Clone> PairCache<T> {
     /// The cached answer for `key`, else `compute()` stored in its place. `compute` runs outside the
     /// lock, so a slow enumeration never blocks another caller.
     pub(crate) fn get_or_compute(&self, key: &str, compute: impl FnOnce() -> T) -> T {
-        if let Some((cached, value)) = self.slot.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
-            if cached == key {
-                return value.clone();
-            }
+        if let Some((cached, value)) = self.slot.lock().unwrap_or_else(PoisonError::into_inner).as_ref()
+            && cached == key
+        {
+            return value.clone();
         }
         let value = compute();
         *self.slot.lock().unwrap_or_else(PoisonError::into_inner) = Some((key.to_owned(), value.clone()));
