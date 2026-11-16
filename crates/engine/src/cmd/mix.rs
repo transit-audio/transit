@@ -472,11 +472,17 @@ fn insert_params(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     if !unknown.is_empty() {
         unknown.sort_unstable();
-        return Err(bad("mix.insert_params", format!("`{}` has no parameter(s): {}", info.id, unknown.join(", "))));
+        return Err(bad(
+            "mix.insert_params",
+            format!("`{}` has no {}: {}", info.id, transit_model::plural(unknown.len(), "parameter"), unknown.join(", ")),
+        ));
     }
     if !non_numeric.is_empty() {
         non_numeric.sort_unstable();
-        return Err(bad("mix.insert_params", format!("parameter(s) need a numeric value: {}", non_numeric.join(", "))));
+        return Err(bad(
+            "mix.insert_params",
+            format!("{} a numeric value: {}", if non_numeric.len() == 1 { "parameter needs" } else { "parameters need" }, non_numeric.join(", ")),
+        ));
     }
     let mut n = 0;
     for (k, v) in obj {

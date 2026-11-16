@@ -79,12 +79,16 @@ pub fn lines(s: &StuckCall, others: usize) -> Vec<String> {
         "Audio keeps playing. Saving keeps the state this plug-in had when it was last read, so changes made in it since then are not saved.".into(),
         END_TASK.into(),
         format!(
-            "Give up stops sending requests to the {} plug-in(s) on its thread until transit restarts (their audio keeps playing){WINDOW_PART}, and lets the plug-ins you add next load normally. If the plug-in may still recover (a dialog of its own), choose Later first.",
-            s.others() + 1
+            "Give up stops sending requests to the {} on its thread until transit restarts (their audio keeps playing){WINDOW_PART}, and lets the plug-ins you add next load normally. If the plug-in may still recover (a dialog of its own), choose Later first.",
+            transit_model::counted(s.others() + 1, "plug-in")
         ),
     ];
     if others > 0 {
-        out.push(format!("{others} more plug-in host thread(s) are not responding; Give up covers them too."));
+        out.push(format!(
+            "{} more plug-in host {} not responding; Give up covers them too.",
+            others,
+            if others == 1 { "thread is" } else { "threads are" }
+        ));
     }
     out
 }

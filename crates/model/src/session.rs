@@ -906,6 +906,16 @@ pub const MAX_NAME_CHARS: usize = 256;
 /// The most characters kept of a comment read from a file.
 pub const MAX_COMMENT_CHARS: usize = 4096;
 
+/// `noun`, or its plural (an `s` added) unless `n` is one: "note" for 1, "notes" for 0 and 2.
+pub fn plural(n: usize, noun: &str) -> String {
+    if n == 1 { noun.to_string() } else { format!("{noun}s") }
+}
+
+/// `n` of `noun`, singular for one, for messages: "1 note", "0 notes", "2 notes".
+pub fn counted(n: usize, noun: &str) -> String {
+    format!("{n} {}", plural(n, noun))
+}
+
 /// Cut `s` to at most `max` characters.
 pub fn truncate_chars(s: &mut String, max: usize) {
     if let Some((end, _)) = s.char_indices().nth(max) {
@@ -1174,6 +1184,14 @@ mod tests {
         for text in ["not json", "[1, 2]", "{\"format_version\": 1}", "{\"format_version\": 1, \"tracks\": 5}"] {
             let said = Session::from_json(text).unwrap_err().to_string();
             assert!(said.starts_with("not a transit session: "), "{text}: {said}");
+        }
+    }
+
+    #[test]
+    fn counts_in_messages_are_singular_for_one_only() {
+        for (n, noun, counted_text) in [(0, "note", "0 notes"), (1, "note", "1 note"), (2, "note", "2 notes"), (1, "take stack", "1 take stack")] {
+            assert_eq!(counted(n, noun), counted_text);
+            assert_eq!(plural(n, noun), if n == 1 { noun.to_string() } else { format!("{noun}s") });
         }
     }
 

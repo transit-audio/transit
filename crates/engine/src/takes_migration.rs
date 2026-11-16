@@ -5,6 +5,8 @@ use transit_model::{Session, TakeStack, TrackId};
 
 /// Summary of the load-time migration, also shown in the status line.
 pub const NOTE: &str = "recorded with an earlier build now show their laps as takes";
+/// [`NOTE`] for one track.
+pub const NOTE_ONE: &str = "recorded with an earlier build now shows its laps as takes";
 
 fn migrate(s: &mut Session, track: TrackId, base: usize, stack: &TakeStack) -> Result<(), String> {
     super::materialize(s, track, stack);
@@ -53,7 +55,7 @@ pub(crate) fn on_open(e: &mut Engine) {
         *e.session_mut() = migrated;
         e.push_undo("Migrate takes", before);
         notes.extend(candidates.iter().map(|(_, name, _, _)| format!("track \"{name}\": migrated earlier-build laps to numbered takes")));
-        notes.push(format!("{} track(s) {NOTE}", candidates.len()));
+        notes.push(format!("{} {}", transit_model::counted(candidates.len(), "track"), if candidates.len() == 1 { NOTE_ONE } else { NOTE }));
     }
     for note in notes {
         e.message(note);

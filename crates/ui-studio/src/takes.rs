@@ -57,7 +57,12 @@ impl StudioApp {
     pub(crate) fn reset_take_lanes_for_session(&mut self) {
         self.ui.takes_open.clear();
         if self.engine.undo_label() == Some("Migrate takes")
-            && let Some(note) = self.engine.messages.iter().rev().find(|m| m.ends_with(transit_engine::takes::migration::NOTE))
+            && let Some(note) = self
+                .engine
+                .messages
+                .iter()
+                .rev()
+                .find(|m| m.ends_with(transit_engine::takes::migration::NOTE) || m.ends_with(transit_engine::takes::migration::NOTE_ONE))
         {
             self.status.clone_from(note);
         }

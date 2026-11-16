@@ -725,7 +725,7 @@ pub(crate) fn record_speed_refusal(speed: f32) -> String {
 
 /// `n` of `noun`, singular for one: "1 note", "2 notes".
 pub(crate) fn counted(n: usize, noun: &str) -> String {
-    if n == 1 { format!("1 {noun}") } else { format!("{n} {noun}s") }
+    transit_model::counted(n, noun)
 }
 
 /// What the status line says about `n` MIDI events lost to a full capture queue: the whole sentence

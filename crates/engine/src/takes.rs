@@ -85,7 +85,8 @@ pub fn activate_clip(s: &mut Session, track: TrackId, clip: ClipId) -> Result<bo
 /// moved onto the active playlist.
 pub fn set_active(s: &mut Session, track: TrackId, index: usize, number: u32) -> Result<usize, Refusal> {
     let all = stacks(s, track)?;
-    let stack = all.get(index).ok_or_else(|| format!("the track has {} take stack(s); there is no stack {index}", all.len()))?;
+    let stack =
+        all.get(index).ok_or_else(|| format!("the track has {}; there is no stack {index}", transit_model::counted(all.len(), "take stack")))?;
     let take = stack.take(number).ok_or_else(|| format!("stack {index} has no take {number}"))?;
     materialize(s, track, stack);
     let active = s.track(track).map_or(0, |t| t.active_playlist);
@@ -154,7 +155,10 @@ fn chosen(all: Vec<TakeStack>, index: Option<usize>) -> Result<Vec<TakeStack>, R
         None => Ok(all),
         Some(i) => {
             let n = all.len();
-            all.into_iter().nth(i).map(|s| vec![s]).ok_or_else(|| format!("the track has {n} take stack(s); there is no stack {i}"))
+            all.into_iter()
+                .nth(i)
+                .map(|s| vec![s])
+                .ok_or_else(|| format!("the track has {}; there is no stack {i}", transit_model::counted(n, "take stack")))
         }
     }
 }

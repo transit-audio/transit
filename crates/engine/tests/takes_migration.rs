@@ -8,7 +8,7 @@ use transit_time::Range;
 
 const OLD: &str = include_str!("../../model/tests/corpus/v0.5.1-pre-take-lanes.transit");
 const CURRENT: &str = include_str!("../../model/tests/corpus/v0.6.0-takes.transit");
-const SUMMARY: &str = "2 track(s) recorded with an earlier build now show their laps as takes";
+const SUMMARY: &str = "2 tracks recorded with an earlier build now show their laps as takes";
 
 struct Dir(transit_test_support::TestDir);
 impl Dir {
@@ -119,7 +119,7 @@ fn frozen_tracks_are_reported_and_unchanged_while_other_tracks_migrate() {
     let e = from_bytes(&s.to_json().unwrap());
     assert_eq!(e.session().track(TrackId(2)), Some(&expected));
     assert!(e.messages.iter().any(|m| m.contains("track \"Vox\"") && m.contains("frozen")), "{:?}", e.messages);
-    assert!(e.messages.iter().any(|m| m == "1 track(s) recorded with an earlier build now show their laps as takes"));
+    assert!(e.messages.iter().any(|m| m == "1 track recorded with an earlier build now shows its laps as takes"));
     s.tracks.retain(|t| t.id == TrackId(2));
     let e = from_bytes(&s.to_json().unwrap());
     assert!(!e.is_dirty() && !e.can_undo());

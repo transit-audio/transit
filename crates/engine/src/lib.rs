@@ -749,7 +749,7 @@ impl Engine {
             return Err(bad("n must be at least 1".into()));
         }
         if n > self.undo.len() {
-            return Err(bad(format!("n is {n} but the history holds {} step(s)", self.undo.len())));
+            return Err(bad(format!("n is {n} but the history holds {}", transit_model::counted(self.undo.len(), "step"))));
         }
         let keep = self.undo.len() - n;
         let states: Vec<(TrackId, usize)> = self.undo.drain(keep + 1..).flat_map(|h| h.states).collect();

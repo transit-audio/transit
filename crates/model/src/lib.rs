@@ -83,7 +83,7 @@ pub use route_graph::{
 };
 pub use session::{
     BUNDLE_EXTENSION, BitDepthSetting, EditMode, EditState, FEET_FRAMES_START, MAX_COMMENT_CHARS, MAX_NAME_CHARS, SESSION_EXTENSION, Session,
-    SessionError, Tool, UNPLACED_NOTE, ZoomState, ZoomToggle, is_session_file, truncate_chars, unknown_needs, unknown_needs_note,
+    SessionError, Tool, UNPLACED_NOTE, ZoomState, ZoomToggle, counted, is_session_file, plural, truncate_chars, unknown_needs, unknown_needs_note,
 };
 pub use source::{Source, SourceAudio, SourcePool};
 pub use takes::{StackTake, TakeStack, same_material};
