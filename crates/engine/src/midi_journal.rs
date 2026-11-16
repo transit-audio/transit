@@ -291,12 +291,20 @@ impl Journal {
 /// "Record" undo step. The new clips are named `<Track>_recovered`; notes merged into a clip that
 /// was already there keep its name. Returns the clips touched; none when nothing was played.
 pub fn recover(e: &mut Engine, path: &Path) -> Result<Vec<ClipId>> {
-    recover_with_takes(e, path, Vec::new())
+    recover_with_takes(e, path, Vec::new()).map(|r| r.clips)
+}
+
+/// What [`recover_with_takes`] rebuilt: the clips touched, and how many note-ons played before the
+/// count-in started were left out of them, as a normal stop counts them (#704).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recovered {
+    pub clips: Vec<ClipId>,
+    pub before_count_in: usize,
 }
 
 /// [`recover`] for a pass that also recorded the audio `takes` (the recording plan's), so its laps
 /// are cut through the same end as its audio recovery cuts them.
-pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Take>) -> Result<Vec<ClipId>> {
+pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Take>) -> Result<Recovered> {
     let journal = read(path)?;
     let events = journal.events();
     let h = &journal.header;
@@ -317,6 +325,7 @@ pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Tak
     };
     let before = e.session_arc();
     let ids = crate::midi_take::place_midi_recording_wrapping(e, &plan, &events, stop, h.loop_range);
+    let before_count_in = crate::midi_take::played_before_count_in(&plan, &events);
     let mut named: Vec<(TrackId, usize)> = Vec::new();
     for id in &ids {
         if before.find_clip(*id).is_some() {
@@ -339,7 +348,7 @@ pub fn recover_with_takes(e: &mut Engine, path: &Path, takes: Vec<crate::io::Tak
             clip.name = name;
         }
     }
-    Ok(ids)
+    Ok(Recovered { clips: ids, before_count_in })
 }
 
 #[cfg(test)]
@@ -453,6 +462,39 @@ mod tests {
         // 120 bpm at 48 kHz: a beat is 24,000 samples, 960 ticks.
         let notes: Vec<_> = sequence.notes.iter().map(|n| (n.pitch, n.start, n.length, n.velocity)).collect();
         assert_eq!(notes, vec![(60, 960, 960, 90), (64, 2880, 960, 80)]);
+    }
+
+    /// A journal recorded after a count-in of 24,000 samples (a half second): its note-ons at the
+    /// `offsets` (samples from the latch), recovered into a fresh engine.
+    fn recovered_after_count_in(name: &str, offsets: &[i64]) -> Recovered {
+        let d = dir(name);
+        let path = d.join("s.midijournal");
+        let mut e = Engine::default();
+        let t = TrackId(e.execute("track.new", &serde_json::json!({"kind": "midi", "name": "Keys"})).unwrap()["tracks"][0].as_u64().unwrap());
+        let plan = Recording { start: 0, count_in: Some(24_000), ..Recording::new(0) };
+        let latch = Latch { output_frame: 100_000, position: 0, device_rate: 48_000, session_rate: 48_000 };
+        let h = Header::new(latch, &plan, None, vec![t]);
+        let mut records = Vec::new();
+        for (i, off) in offsets.iter().enumerate() {
+            let frame = u64::try_from(100_000 + off).unwrap();
+            let pitch = 60 + u8::try_from(i).unwrap();
+            records.push(Record { track: t, ..rec(frame, Msg::NoteOn { pitch, velocity: 90 }) });
+            records.push(Record { track: t, ..rec(frame + 4_000, Msg::NoteOff { pitch, velocity: 0 }) });
+        }
+        let mut w = Writer::new(path.clone());
+        w.append(&h, &records, records.len()).unwrap();
+        w.flush().unwrap();
+        recover_with_takes(&mut e, &path, Vec::new()).unwrap()
+    }
+
+    #[test]
+    fn a_recovered_take_counts_the_notes_played_before_the_count_in_started() {
+        // One note a quarter second before the count-in began, one inside it, one after the latch.
+        let r = recovered_after_count_in("before-count-in", &[-36_000, -12_000, 12_000]);
+        assert_eq!(r.before_count_in, 1);
+        assert!(!r.clips.is_empty(), "the notes from the count-in on are recovered");
+        let r = recovered_after_count_in("no-early-notes", &[-12_000, 12_000]);
+        assert_eq!(r.before_count_in, 0, "a pickup in the count-in is no early note");
     }
 
     /// A recovered journal of one note held across the loop end, with the session's Cycle state

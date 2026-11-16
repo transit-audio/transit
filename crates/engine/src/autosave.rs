@@ -514,16 +514,18 @@ pub fn midi_journal_usable(left: &Leftover) -> bool {
 }
 
 /// Rebuild the MIDI clips of the recording `left` was running, from its journal, into `e` (call
-/// after [`recover`]). Returns the clips made; none when it left no journal, nothing was played,
+/// after [`recover`]). Returns the clips made and the notes left out for playing before the
+/// count-in; no clips when it left no journal, nothing was played,
 /// or the autosave already holds the clips (the journal is then deleted). A journal that cannot
 /// be read is an error and is deleted with it, so recovery doesn't offer it again; one that isn't
 /// a journal in a recording folder is an error and left alone.
-pub fn recover_midi(e: &mut Engine, left: &Leftover) -> Result<Vec<transit_model::ClipId>> {
-    let Some(journal) = left.midi_journal.as_deref() else { return Ok(Vec::new()) };
+pub fn recover_midi(e: &mut Engine, left: &Leftover) -> Result<crate::midi_journal::Recovered> {
+    let none = || crate::midi_journal::Recovered { clips: Vec::new(), before_count_in: 0 };
+    let Some(journal) = left.midi_journal.as_deref() else { return Ok(none()) };
     trusted_journal(left, journal).map_err(|err| EngineError::Io(format!("the MIDI journal was not used: {err}")))?;
     if left.midi_placed {
         let _ = std::fs::remove_file(journal);
-        return Ok(Vec::new());
+        return Ok(none());
     }
     std::fs::File::open(journal).map_err(|err| io_error(journal, err))?;
     // The audio takes of the same pass: its laps are cut through the same end as theirs.
@@ -900,7 +902,7 @@ mod tests {
         assert!(left.midi_placed && left.midi_journal.as_deref() == Some(journal.as_path()));
         let mut e = Engine::default();
         e.execute("track.new", &json!({"kind": "midi"})).unwrap();
-        assert_eq!(recover_midi(&mut e, &left).unwrap(), Vec::new());
+        assert_eq!(recover_midi(&mut e, &left).unwrap().clips, Vec::new());
         assert!(e.session().tracks[0].clips().is_empty(), "nothing rebuilt");
         assert!(!journal.exists());
         let _ = std::fs::remove_dir_all(&dir);
@@ -915,7 +917,7 @@ mod tests {
         let track = transit_model::TrackId(e.execute("track.new", &json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
         journal_with_a_note(&journal, track);
         let left = left_with_journal(&root, &journal, false);
-        assert_eq!(recover_midi(&mut e, &left).unwrap().len(), 1);
+        assert_eq!(recover_midi(&mut e, &left).unwrap().clips.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

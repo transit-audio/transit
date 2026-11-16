@@ -204,7 +204,8 @@ played, it is in the clip and sounds. With nothing played, it is kept hidden bef
 as a start trim hides notes; drag the start edge back to reveal it.
 
 A note played before the count-in started (a key already going down as you pressed Record) is not
-in the take, and the status line says how many such notes were not recorded.
+in the take, and the status line says how many such notes were not recorded. After a crash, the
+recovery message says the same about the interrupted take.
 
 A session with clips before bar 1 lists the `pre_count` need: transit builds from before this
 feature warn when they open it, and moving its zone clips in one of those builds puts them on bar 1.

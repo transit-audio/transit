@@ -203,3 +203,50 @@ fn a_panic_in_a_frame_autosaves_and_the_app_carries_on() {
     assert!(next.engine.session().track_by_name("Vocal").is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A recovered MIDI take, from a journal of a recording that ran after a count-in of half a second,
+/// with a note-on at each of `offsets` (samples from the latch); the status line after recovery.
+fn recovered_status(name: &str, offsets: &[i64]) -> String {
+    use transit_engine::midi_journal::{Header, Latch, Record, Writer};
+    use transit_engine::midi_take::Msg;
+    let dir = folder(name);
+    let root = dir.join("Autosave");
+    let mut first = launch(&root);
+    first.run("track.new", json!({"kind": "midi", "name": "Keys"})).unwrap();
+    let track = first.engine.session().track_by_name("Keys").unwrap().id;
+    first.close_autosave();
+    drop(first);
+    let mut left = leftovers(&root).remove(0);
+    let journal = root.join("Untitled/Audio Files/Keys.midijournal");
+    std::fs::create_dir_all(journal.parent().unwrap()).unwrap();
+    let plan = transit_engine::io::Recording { count_in: Some(24_000), ..transit_engine::io::Recording::new(0) };
+    let h = Header::new(Latch { output_frame: 100_000, position: 0, device_rate: 48_000, session_rate: 48_000 }, &plan, None, vec![track]);
+    let mut records = Vec::new();
+    for (i, off) in offsets.iter().enumerate() {
+        let frame = u64::try_from(100_000 + off).unwrap();
+        let pitch = 60 + u8::try_from(i).unwrap();
+        let on = Record { frame, track, channel: 0, approximate: false, msg: Msg::NoteOn { pitch, velocity: 90 } };
+        records.push(on);
+        records.push(Record { frame: frame + 4_000, msg: Msg::NoteOff { pitch, velocity: 0 }, ..on });
+    }
+    let mut w = Writer::new(journal.clone());
+    w.append(&h, &records, records.len()).unwrap();
+    w.flush().unwrap();
+    left.midi_journal = Some(journal);
+    let mut next = launch(&root);
+    next.recover(&left);
+    let status = next.status.clone();
+    let _ = std::fs::remove_dir_all(&dir);
+    status
+}
+
+/// Recovery says how many notes played before the count-in started were left out, in the words a
+/// normal Stop uses (#704); with none left out it says nothing of the kind.
+#[test]
+fn a_recovered_take_says_how_many_notes_before_the_count_in_were_left_out() {
+    let said = recovered_status("recovery-before-count-in", &[-36_000, -30_000, -12_000, 12_000]);
+    assert!(said.contains("recovered MIDI clip(s) from the interrupted recording"), "{said}");
+    assert!(said.ends_with("; 2 notes played before recording began were not recorded."), "{said}");
+    let said = recovered_status("recovery-no-early-notes", &[-12_000, 12_000]);
+    assert!(said.contains("recovered MIDI clip(s)") && !said.contains("not recorded"), "{said}");
+}

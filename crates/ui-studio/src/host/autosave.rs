@@ -171,10 +171,16 @@ impl StudioApp {
                     n => format!("Recovered “{}”, but {n} audio file(s) are missing. Save it to keep the changes.", left.name),
                 };
                 match midi {
-                    Ok(clips) if !clips.is_empty() => {
-                        self.status = format!("{} {} recovered MIDI clip(s) from the interrupted recording.", self.status, clips.len());
+                    Ok(done) => {
+                        if !done.clips.is_empty() {
+                            self.status = format!("{} {} recovered MIDI clip(s) from the interrupted recording.", self.status, done.clips.len());
+                        }
+                        // Notes played before the count-in started are not in the take: said, as a normal Stop says it.
+                        if done.before_count_in > 0 {
+                            self.status =
+                                format!("{}; {}.", self.status.trim_end_matches('.'), super::recording::before_count_in_note(done.before_count_in));
+                        }
                     }
-                    Ok(_) => {}
                     Err(e) => self.status = format!("{} The MIDI take couldn't be recovered: {e}", self.status),
                 }
                 self.report_lap_notes(said);
