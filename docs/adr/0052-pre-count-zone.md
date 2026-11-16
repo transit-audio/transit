@@ -3,7 +3,7 @@ title: A pre-count zone before bar 1: one capture model (everything from the cou
 -->
 # ADR 0052: A pre-count zone before bar 1
 
-- **Status:** accepted 2026-11-11 (proposed 2026-11-10; settled after three judging rounds; the maintainer decided the product choices on 2026-11-10)
+- **Status:** accepted 2026-11-11 (proposed 2026-11-10; settled after three judging rounds; the maintainer decided the product choices on 2026-11-10); amendment 2026-11-16, proposed: the latch at a converted device rate (#724)
 - **Date:** 2026-11-10
 - **Implementation:** all slices built: 1, 2, 2b, 3, 4, 5, 6a and 6b landed; 7 (recording into the zone) built. Slices in the Slices section. Issues #441 (this decision), #440 (the stopgap it replaces), #327 (pickups, whose clip-start rule it changes), #442 (audio during the count-in), #330 (retrospective capture).
 - **Reopen when:** audio pickups (#442) need an audio clip to start before bar 1; a user asks to drag the session start by hand (Logic's project start marker); a tempo or meter change before bar 1 is asked for; a hardware sync output (ADR 0043) has to start a receiver inside the zone; or the derived session start costs a frame budget on a session with many clips.
@@ -100,7 +100,7 @@ A count-in from a later record start whose bar has another tempo can reach back 
 
 ### 8. Recording
 
-**The capture.** Nothing changes on the audio thread: MIDI capture already runs from the count-in start on the device-frame clock and stamps events against the latch (`crates/playback/src/player/audio.rs`). The three floors go:
+**The capture.** Nothing changes on the audio thread: MIDI capture already runs from the count-in start on the device-frame clock and stamps events against the latch (`crates/playback/src/player/audio.rs`). The latch is the output frame that presents the record start's first sample, at a converted device rate too, and the count-in bar keeps its full length there (amended 2026-11-16, #724: at a converted rate the latch was the output frame being produced, early by the output converter's lead). The three floors go:
 
 - `MidiTake::timed` drops `.max(floor)`.
 - `Journal::events` drops `.max(floor)`.
@@ -264,3 +264,12 @@ On 2026-11-10 the maintainer accepted the recommendations of the earlier open li
 ## Related
 
 [ADR 0019](0019-clip-internal-loops.md) and its 2026-11-09 amendment (tick grid, grid start and grid end), [ADR 0023](0023-session-compatibility-markers.md) (the `needs` list), [ADR 0026](0026-cycle-recording-stacks-takes.md) and its pickups amendment, [ADR 0039](0039-takes-and-comping.md) (take stacks), [ADR 0043](0043-hardware-sync-transport-and-clock.md) (Song Position), [ADR 0045](0045-design-language-in-code.md) (tokens). Issues #441, #440, #327, #442, #330.
+
+## Amendment 2026-11-16: the latch at a converted device rate (#724, proposed)
+
+Proposed 2026-11-16, for judging together with the 2026-11-16 amendments of ADR 0015, 0017 and 0020. It records what the code that landed for #724 (1af45806..12e06b36) does and changes no decision. Decision 8 says capture stamps events against the latch; that sentence gains, in place, which frame the latch is at a converted device rate.
+
+- **What changed.** At a converted device rate the latch was the output frame being produced when the take's first block was rendered. The output converter presents that block its lead later (15 output frames at 48 kHz on a 44.1 kHz device, per commit 251729a0), so the latch was early by that much against the frame where the record start is heard, and the take landed that much late against what was heard. Restarting the converter at the latch, tried first, ended the count-in bar early and stepped what sounded across it, and was replaced. Now the converter runs on through the count-in end: the block that starts the take is presented its lead after the next consumed output frame, that frame is the latch, and the timeline reaches the record start on it (`Transport::record_ahead` and `Timeline::lead_in`). At equal rates the lead is 0 and nothing changes.
+- **What it means for a take.** The count-in bar keeps its full length in output frames (96,000 session frames at 48 kHz are 88,200 output frames on a 44.1 kHz device and 192,000 on a 96 kHz device); the take starts on the frame where the record start is heard; a pickup played on a count-in click lands on that click's place before the record start; and what sounds across the latch (a monitored input, a held note, a tail) stays continuous.
+- **Evidence.** `the_latch_presents_the_start_sample_at_a_converted_rate_too` and `a_tone_sounding_across_the_latch_has_no_step_at_any_rate` (`crates/playback/src/player/audio/tests/count_in.rs`, devices at 44.1, 48 and 96 kHz under a 48 kHz plan, callbacks of 128 to 700 frames); `a_pickup_on_a_count_in_click_lands_on_that_click_at_a_converted_rate_too` (`crates/playback/src/player/audio/midi/tests.rs`).
+- **Not covered.** Starting Play or Record from a stop at a converted rate still restarts the converter and cuts audio that is sounding (#725).
