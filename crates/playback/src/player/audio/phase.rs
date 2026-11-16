@@ -153,11 +153,27 @@ impl Phase {
     /// whenever the frames rendered since the converter started convert to whole output frames
     /// (a count-in bar of 96,000 frames at 48 kHz is 88,200 at 44.1 kHz).
     pub(super) fn ahead(self, step: u64) -> u64 {
-        if step == 0 || self.units >= 0 {
+        self.ahead_after(0, step)
+    }
+
+    /// [`Phase::ahead`] for the block after a pending block of `frames`: whole output frames from
+    /// the next consumed one to the frame presenting the render frame after the pending block's
+    /// last, to the nearest (a half rounds up), 0 when that frame is the current one or behind it.
+    /// What a start applied while a block is pending waits for: the converter runs on and presents
+    /// the first block rendered for the start there (#725).
+    pub(super) fn ahead_after(self, frames: usize, step: u64) -> u64 {
+        let behind = (frames as i128) * i128::from(self.denominator) - i128::from(self.units);
+        if step == 0 || behind <= 0 {
             return 0;
         }
-        let (behind, step) = (-i128::from(self.units), i128::from(step));
+        let step = i128::from(step);
         u64::try_from((behind + step / 2) / step).unwrap_or(0)
+    }
+
+    /// [`Phase::ahead_after`] is exact: the frame after the pending block falls on an output frame.
+    #[cfg(test)]
+    pub(super) fn ahead_after_is_whole(self, frames: usize, step: u64) -> bool {
+        step != 0 && ((frames as i128) * i128::from(self.denominator) - i128::from(self.units)) % i128::from(step) == 0
     }
 
     /// Output frames per render frame at `step`.

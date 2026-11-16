@@ -2,7 +2,7 @@ use super::*;
 
 /// The clock service keeps the map current as callbacks run; a test that runs thousands of frames
 /// refits one that covers the frames around `frame`.
-fn track_clock(audio: &mut Audio, rate: u32, frame: u64) {
+pub(super) fn track_clock(audio: &mut Audio, rate: u32, frame: u64) {
     use crate::device_clock::{ClockFitter, Observation, Quality, Stamp};
     let key = audio.transport.clock_key;
     let mut fitter = ClockFitter::new(key);

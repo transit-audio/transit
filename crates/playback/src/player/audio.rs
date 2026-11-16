@@ -168,6 +168,17 @@ struct Transport {
     waiting: Option<Waiting>,
     /// How long such a start may wait, in output frames (one second).
     wait_frames: u64,
+    /// The shown position while a start leads in (#725): until the output frame `until`, which
+    /// presents the start, the playhead shows `sample` rather than the frames before it, which
+    /// still present what was rendered earlier.
+    hold: Option<Hold>,
+}
+
+/// See [`Transport::hold`].
+#[derive(Debug, Clone, Copy)]
+struct Hold {
+    until: u64,
+    sample: Samples,
 }
 
 /// A recording start that needs the device clock and is waiting for it to validate.
@@ -236,6 +247,9 @@ impl Transport {
         Ok(())
     }
 
+    /// A Record command without a count-in. `ahead`: output frames from the next consumed one to
+    /// the frame presenting the first block rendered after the command (the converter runs on
+    /// through a start, #725); a punch-in (`from` None) ignores it.
     fn record(
         &mut self,
         ticket: start::Ticket,
@@ -243,8 +257,9 @@ impl Transport {
         end: Option<Samples>,
         looped: Option<Range>,
         live: &mut plan_bridge::Processing<'_>,
+        ahead: u64,
     ) -> ActionResult {
-        self.record_within(ticket, from, end, looped, live, None, 0)
+        self.record_within(ticket, from, end, looped, live, None, ahead)
     }
 
     /// Retry a start that was waiting for the clock, `ahead` as [`Self::record_ahead`] takes it.
@@ -273,8 +288,10 @@ impl Transport {
 
     /// `patience`: `None` on a fresh request (wait for the clock if it may validate), the deadline
     /// of a start already waiting (`Some(0)` once it has passed: no more waiting). `ahead`: output
-    /// frames from the next consumed one to the frame presenting `from` (0 but for a start whose
-    /// converter runs on, [`Self::record_ahead`]).
+    /// frames from the next consumed one to the frame presenting `from`: the converter runs on
+    /// through every start (#724 at a count-in end, #725 otherwise), 0 at equal rates. A lead the
+    /// timeline cannot represent (a start within it of the earliest position) restarts the
+    /// converter instead, so `from` is presented on the next consumed frame.
     #[allow(clippy::too_many_arguments)]
     fn record_within(
         &mut self,
@@ -318,14 +335,14 @@ impl Transport {
             }
             let position = timeline.position().map_err(ActionResult::Timeline)?;
             // The timeline plays through the frames still presenting what was rendered before and
-            // reaches `from` on the frame that presents it (#724).
-            let ahead = if from.is_some() { ahead } else { 0 };
-            timeline.lead_in(ahead).map_err(ActionResult::Timeline)?;
+            // reaches `from` on the frame that presents it (#724, #725).
+            let requested = if from.is_some() { ahead } else { 0 };
+            let ahead = if timeline.lead_in(requested).is_ok() { requested } else { 0 };
             let output_frame = timeline.next_output().checked_add(ahead).ok_or(ActionResult::Timeline(timeline_map::MapError::Arithmetic))?;
             let basis = self.start_basis(output_frame, audio).map_err(ActionResult::RecordingClock)?;
-            Ok((timeline, epoch, start::Point { host_ns: basis.host_ns, output_frame, position }, basis))
+            Ok((timeline, epoch, start::Point { host_ns: basis.host_ns, output_frame, position }, basis, ahead != requested))
         })();
-        let (timeline, epoch, point, basis) = match prepared {
+        let (timeline, epoch, point, basis, restart) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
                 if let ActionResult::RecordingClock(reason) = error
@@ -357,7 +374,8 @@ impl Transport {
             self.end = end;
             self.looped = looped;
             self.loop_engaged = looped.is_some_and(|r| from < r.end);
-            self.discard_pending = true;
+            self.discard_pending |= restart;
+            self.hold = (point.output_frame > timeline.next_output()).then_some(Hold { until: point.output_frame, sample: from });
             live.set_transport_epoch(transit_mix::TransportEpoch(epoch));
         }
         // Punching in preserves already-rendered audio and DSP state. Monitoring
@@ -428,17 +446,35 @@ impl Transport {
         self.epoch = epoch;
         self.playing = playing;
         self.looped = looped;
+        self.hold = None;
         Ok(())
     }
 
-    fn command(&mut self, event: action_lane::Event<Command>, live: &mut plan_bridge::Processing<'_>) -> ActionResult {
+    /// Play from the position the timeline was just set to while the converter runs on (#725): the
+    /// timeline reaches it on the output frame presenting the first block rendered for it, `ahead`
+    /// frames after the next consumed one, and the playhead shows it until then. A lead the
+    /// timeline cannot represent (a start within it of the earliest position) restarts the
+    /// converter instead, so the position is presented on the next consumed frame.
+    fn lead_in(&mut self, from: Samples, ahead: u64) {
+        if ahead == 0 {
+            return;
+        }
+        match self.timeline.lead_in(ahead) {
+            Ok(()) => self.hold = self.timeline.next_output().checked_add(ahead).map(|until| Hold { until, sample: from }),
+            Err(_) => self.discard_pending = true,
+        }
+    }
+
+    /// `ahead`: output frames from the next consumed one to the frame presenting the first block
+    /// rendered after this command, which is where Play and Record start (#725).
+    fn command(&mut self, event: action_lane::Event<Command>, live: &mut plan_bridge::Processing<'_>, ahead: u64) -> ActionResult {
         let result = match event {
             action_lane::Event::Action { payload: Command::Record { ticket, from, end, looped, count_in }, .. } => {
                 return match (from, count_in) {
                     (Some(from), Some(plan)) => self.count_in(ticket, from, end, looped, plan, live),
                     _ => {
                         self.end_count_in();
-                        self.record(ticket, from, end, looped, live)
+                        self.record(ticket, from, end, looped, live, ahead)
                     }
                 };
             }
@@ -454,7 +490,8 @@ impl Transport {
                     self.render_position = from;
                     self.end = end;
                     self.loop_engaged = looped.is_some_and(|r| from < r.end);
-                    self.discard_pending = true;
+                    // The converter runs on: what is sounding stays continuous (#725).
+                    self.lead_in(from, ahead);
                     live.set_transport_epoch(transit_mix::TransportEpoch(self.epoch));
                 })
             }
@@ -538,7 +575,16 @@ impl Transport {
         if let Some(error) = error {
             return Err(error);
         }
-        shared.position.store(self.timeline.position()?.sample, Ordering::Relaxed);
+        let position = self.timeline.position()?.sample;
+        // A start leading in shows its own position until the frame that presents it (#725).
+        let shown = match self.hold {
+            Some(hold) if self.timeline.next_output() < hold.until => hold.sample,
+            _ => {
+                self.hold = None;
+                position
+            }
+        };
+        shared.position.store(shown, Ordering::Relaxed);
         shared.output_frame.store(self.timeline.next_output(), Ordering::Relaxed);
         shared.playing.store(self.playing, Ordering::Relaxed);
         Ok(())
@@ -725,6 +771,7 @@ impl Audio {
                     clock_now: None,
                     waiting: None,
                     wait_frames: u64::from(device_rate),
+                    hold: None,
                 },
             },
             record_control,
@@ -809,8 +856,10 @@ impl Audio {
     }
 
     /// Discard the pending block and the converter's history: the next output frame reads frame 0
-    /// of a fresh render. On a start, locate or stop (`discard_pending`) and at the transport's end;
-    /// a new device or stream builds a new `Audio`.
+    /// of a fresh render. On a locate, a stop or a count-in start (`discard_pending`) and at the
+    /// transport's end; a new device or stream builds a new `Audio`. Play and Record run the
+    /// converter on instead and lead in to the frame presenting their start (#725), unless the
+    /// timeline cannot represent that lead.
     fn restart_converter(&mut self) {
         self.pending = 0;
         self.read.reset();
@@ -848,6 +897,7 @@ impl Audio {
         let transport = &mut self.transport;
         let sources = &self.sources;
         let requested = &self.shared.speed;
+        let (read, pending, sample_rate) = (self.read, self.pending, u64::from(self.sample_rate));
         let report = self.actions.service(budget, &mut self.plans, &mut |event, live| {
             if let action_lane::Event::Action { payload: Command::Note(note), .. } = event
                 && !sources.permits(note.source.port, note.source.generation)
@@ -861,7 +911,11 @@ impl Audio {
                 live.fault();
                 return ActionResult::Timeline(error);
             }
-            transport.command(event, live)
+            // A start presents its first block where the converter, running on, reaches the frame
+            // after the pending block (#725); none is left once an earlier command of this pass
+            // asked for a restart.
+            let ahead = if transport.discard_pending { 0 } else { read.ahead_after(pending, sample_rate * u64::from(transport.speed)) };
+            transport.command(event, live, ahead)
         });
         self.faulted |= report.faulted || self.transport.timeline_fault.is_some();
         if std::mem::take(&mut self.transport.discard_pending) {
@@ -948,16 +1002,18 @@ impl Audio {
                 if let Some(failure) = StartFailure::of(result) {
                     self.shared.metro.start_failure.store(failure as u8, Ordering::Relaxed);
                 }
-                self.transport.discard_pending = false;
+                if std::mem::take(&mut self.transport.discard_pending) {
+                    self.restart_converter();
+                }
             }
         }
         if let Some(counting) = self.transport.count_in.filter(|c| c.left <= 0) {
             // The count-in ended exactly at the previous block's last sample: start Play and the
-            // recording latch now, for the block about to render. Nothing is pending, so the reset
-            // `record` asks for would only discard the block rendered below. The converter runs on,
-            // so anything sounding across the latch stays continuous: at a converted rate the block
+            // recording latch now, for the block about to render. The converter runs on, so
+            // anything sounding across the latch stays continuous: at a converted rate the block
             // about to render is presented its lead after the next consumed frame, and that frame
-            // is the latch (#724). At equal rates the lead is 0.
+            // is the latch (#724). At equal rates the lead is 0. Nothing is pending; a restart is
+            // asked for only when the timeline cannot represent the lead.
             self.transport.count_in = None;
             let ahead = self.read.ahead(u64::from(self.sample_rate) * u64::from(self.transport.speed));
             let mut live = self.plans.processing();
@@ -966,7 +1022,9 @@ impl Audio {
                 // `record` cancelled the ticket and left the transport parked: tell Main why.
                 self.shared.metro.start_failure.store(failure as u8, Ordering::Relaxed);
             }
-            self.transport.discard_pending = false;
+            if std::mem::take(&mut self.transport.discard_pending) {
+                self.restart_converter();
+            }
             self.publish_count_in();
         }
         let gain = f32::from_bits(self.shared.metro.gain.load(Ordering::Relaxed));
