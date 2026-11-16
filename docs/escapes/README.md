@@ -45,4 +45,5 @@ The list is generated from each record's `#` heading by `cargo xtask indexes`: a
 - [E82: Sampler admission converted native PCM despite the playback contract (#449)](issue-449.md)
 - [The device-rate converter held the last sample of every rendered block (#525)](issue-525.md)
 - [Bounce in Place silently muted unselected pickups (#713)](issue-713.md)
+- [Live input ran late at a converted device rate and drifted later after a loop wrap (#724)](issue-724.md)
 <!-- indexes:end -->
