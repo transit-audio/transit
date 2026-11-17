@@ -383,7 +383,7 @@ pub const TABLE: &[Shortcut] = &[
     row(A::SaveAs, "Save As…", CMD_SHIFT, Key::S, S::Global, "All DAWs. Checked before Save."),
     row(A::Save, "Save", CMD, Key::S, S::Global, "All DAWs."),
     row(A::BounceInPlace, "Commit… / Bounce in Place", ALT_SHIFT, Key::C, S::Global, "Track Commit opens the Bounce in Place form."),
-    row(A::Bounce, "Export Audio…", CMD_SHIFT, Key::R, S::Global, "Ableton (Export Audio/Video). Once Bounce…. Checked before Rename."),
+    row(A::Bounce, "Export Audio…", CMD_SHIFT, Key::R, S::Global, "Ableton (Export Audio/Video). Formerly Bounce…. Checked before Rename."),
     // Undo.
     row(A::Redo, "Redo", CMD_SHIFT, Key::Z, S::Global, "Cubase and Logic. Checked before Undo."),
     row(A::Redo, "Redo", CMD, Key::Y, S::Global, "Ableton on Windows."),
