@@ -444,7 +444,8 @@ pub(crate) struct Run {
     channels: usize,
     /// Every strip's fingerprint after each block.
     prints: Vec<Vec<Option<StripPrint>>>,
-    /// The same, readable (for a failure report).
+    /// The same, readable (for a failure report): recorded only by a replay of a failed check
+    /// ([`report`]), since building the strings every block is pure cost when nothing fails.
     states: Vec<Vec<Option<String>>>,
     /// Graph: the counted skips of each block, as the muted serial render mutes them.
     pub(crate) mutes: Vec<Vec<(usize, Mute)>>,
@@ -546,19 +547,22 @@ fn settle(rig: &mut Rig) {
     }
 }
 
-fn record(run: &mut Run, rig: &Rig) {
+fn record(run: &mut Run, rig: &Rig, states: bool) {
     run.channels = rig.out.len();
     for c in &rig.out {
         run.out.extend_from_slice(c);
     }
     run.prints.push(rig.mix.strip_prints());
-    run.states.push(rig.mix.strip_states());
+    if states {
+        run.states.push(rig.mix.strip_states());
+    }
     run.tails.push(rig.mix.tail_skips());
 }
 
 /// `top` through the task graph with `workers` render workers, replaying `schedule`; checks the
-/// realization (property 1) as it goes. `Err`: the realization broke the property.
-pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, change: Option<&Change>) -> Result<Run, String> {
+/// realization (property 1) as it goes. `Err`: the realization broke the property. `states`:
+/// also record every strip's readable state (for a failure report).
+pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, change: Option<&Change>, states: bool) -> Result<Run, String> {
     let mut rig = top.rig();
     assert_eq!(rig.mix.start_render_workers_with(64, workers), workers);
     // `graph_on` held: again after the worker start, where the process reads
@@ -687,7 +691,7 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
             }
             run.mutes.push(mutes);
             run.causes.push(causes);
-            record(&mut run, &rig);
+            record(&mut run, &rig, states);
             progress.fetch_add(1, Ordering::Release);
             for k in knobs.values() {
                 k.progress.fetch_add(1, Ordering::Release);
@@ -712,8 +716,9 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
     }
 }
 
-/// `top` serially with the blocks of `mutes` muted (and the same `change`).
-pub(crate) fn muted_run(top: &Topology, mutes: &[Vec<(usize, Mute)>], change: Option<&Change>) -> Run {
+/// `top` serially with the blocks of `mutes` muted (and the same `change`); `states` as in
+/// [`graph_run`].
+pub(crate) fn muted_run(top: &Topology, mutes: &[Vec<(usize, Mute)>], change: Option<&Change>, states: bool) -> Run {
     let rig = top.rig();
     let (top, mutes, change) = (top.clone(), mutes.to_vec(), change.cloned());
     let (rig, run) = as_callback(move || {
@@ -729,7 +734,7 @@ pub(crate) fn muted_run(top: &Topology, mutes: &[Vec<(usize, Mute)>], change: Op
             }
             rig.mix.mute_next_block(m);
             rig.block();
-            record(&mut run, &rig);
+            record(&mut run, &rig, states);
         }
         (rig, run)
     });
@@ -798,14 +803,45 @@ pub(crate) fn compare(top: &Topology, names: &HashMap<usize, String>, g: &Run, m
     Err(out)
 }
 
-/// The property for one schedule (see the module docs).
-fn check(top: &Topology, workers: usize, names: &HashMap<usize, String>, schedule: &Schedule, change: Option<&Change>) -> Result<(), String> {
-    let g = graph_run(top, workers, schedule, change)?;
+/// The property for one schedule (see the module docs); `states` as in [`graph_run`].
+fn check_with(
+    top: &Topology,
+    workers: usize,
+    names: &HashMap<usize, String>,
+    schedule: &Schedule,
+    change: Option<&Change>,
+    states: bool,
+) -> Result<(), String> {
+    let g = graph_run(top, workers, schedule, change, states)?;
     if g.conflicts != 0 {
         return Err(format!("{} protocol conflicts", g.conflicts));
     }
-    let m = muted_run(top, &g.mutes, change);
+    let m = muted_run(top, &g.mutes, change, states);
     compare(top, names, &g, &m)
+}
+
+/// The property for one schedule, without the readable states (what the seeds and the shrink
+/// run).
+fn check(top: &Topology, workers: usize, names: &HashMap<usize, String>, schedule: &Schedule, change: Option<&Change>) -> Result<(), String> {
+    check_with(top, workers, names, schedule, change, false)
+}
+
+/// The failure report for a check of `schedule` that failed with `first`: the same schedule
+/// replayed with every strip's readable state recorded (the schedule is deterministic; the
+/// states are built only here, never on a passing check). If the replay passes, `first` is
+/// returned as it was, with that said.
+pub(crate) fn report(
+    top: &Topology,
+    workers: usize,
+    names: &HashMap<usize, String>,
+    schedule: &Schedule,
+    change: Option<&Change>,
+    first: String,
+) -> String {
+    match check_with(top, workers, names, schedule, change, true) {
+        Err(e) => e,
+        Ok(()) => format!("{first}\n  (the replay with readable states passed: no states to show)"),
+    }
 }
 
 pub(crate) fn seeds(corpus: bool) -> Vec<u64> {
@@ -824,8 +860,9 @@ fn property(top: &Topology, workers: usize, seeds: &[u64]) -> Result<(), String>
     for &seed in seeds {
         let schedule = Schedule::seeded(seed ^ salt, &shape);
         let Err(why) = check(top, workers, &names, &schedule, None) else { continue };
+        let why = report(top, workers, &names, &schedule, None, why);
         let min = schedule.shrink(&mut |c: &Schedule| check(top, workers, &names, c, None).is_err());
-        let detail = check(top, workers, &names, &min, None).err().unwrap_or_default();
+        let detail = check_with(top, workers, &names, &min, None, true).err().unwrap_or_default();
         return Err(format!(
             "{} through {workers} workers, seed {seed} (TRANSIT_SCHED_SEED={seed}): {why}
 
@@ -933,6 +970,7 @@ pub(crate) fn post_fault_window(s: &Session, latency: usize) -> usize {
 pub(crate) fn regression(top: &Topology, workers: usize, schedule: &Schedule) {
     let (_, names) = shape(top, workers);
     if let Err(e) = check(top, workers, &names, schedule, None) {
+        let e = report(top, workers, &names, schedule, None, e);
         panic!("{}\n{e}", schedule.to_rust(&|s| names.get(&s).cloned().unwrap_or_default()));
     }
 }

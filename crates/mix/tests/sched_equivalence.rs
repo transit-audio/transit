@@ -124,12 +124,13 @@ fn a_graph_change_while_a_worker_holds_an_old_task_matches_the_muted_serial_rend
             // changes) held across it.
             let mut schedule = Schedule::seeded(seed, &Shape { last: 16, ..shape.clone() });
             schedule.holds.push(transit_rt::worker_set::schedule::Hold { block: 19, strip: bass, blocks: 1 });
-            let g = graph_run(&top, 2, &schedule, Some(&change)).unwrap_or_else(|e| panic!("{name}, seed {seed}: {e}"));
+            let g = graph_run(&top, 2, &schedule, Some(&change), false).unwrap_or_else(|e| panic!("{name}, seed {seed}: {e}"));
             assert_eq!(g.conflicts, 0, "{name}, seed {seed}: the new graph's results carry its identity");
             assert!(g.late_results >= 1, "{name}, seed {seed}: the old task's result retired unread");
             assert_eq!(g.causes[19].iter().find(|c| c.0 == bass).map(|c| c.1), Some(OverrunCause::Late), "{name}, seed {seed}");
-            let m = muted_run(&top, &g.mutes, Some(&change));
+            let m = muted_run(&top, &g.mutes, Some(&change), false);
             if let Err(e) = compare(&top, &names, &g, &m) {
+                let e = report(&top, 2, &names, &schedule, Some(&change), e);
                 panic!("{name}, seed {seed}:\n{}\n{e}", schedule.to_rust(&|s| names.get(&s).cloned().unwrap_or_default()));
             }
         }
