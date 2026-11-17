@@ -165,6 +165,7 @@ fn print_of(rig: &Rig, track: TrackId) -> StripPrint {
     rig.mix.strip_prints()[i].unwrap()
 }
 
+// timing: serial every render here is serial on the calling thread (`rig` forces it); no worker, no deadline
 #[test]
 fn two_renders_of_one_session_print_the_same_at_every_block() {
     let g = gate();
@@ -181,6 +182,7 @@ fn two_renders_of_one_session_print_the_same_at_every_block() {
 
 /// Section 14's targeted omission controls: each nudge changes one field of one strip, and that
 /// strip's print must differ in the part holding the field, nowhere else.
+// timing: serial every render here is serial on the calling thread (`rig` forces it); no worker, no deadline
 #[test]
 fn a_strip_differing_in_one_inventoried_field_prints_differently() {
     let g = gate();
@@ -221,6 +223,7 @@ fn a_strip_differing_in_one_inventoried_field_prints_differently() {
 /// Section 14's poison controls: storage the inventory calls unobservable, filled with a fixed
 /// pattern between blocks in one of two identical renders, changes no output and no print, and
 /// its write site reaches it.
+// timing: serial every render here is serial on the calling thread (`rig` forces it); no worker, no deadline
 #[test]
 fn poisoning_unobservable_storage_changes_no_output_and_no_print() {
     let g = gate();
@@ -281,6 +284,7 @@ fn adopt(rig: &mut Rig, s: &Session, generation: u64) {
 /// latent strip, reads no edge delayed, so its lines are idle; poisoned in one render, they change
 /// nothing, and once Kick's lookahead goes (block 8) its edges are delayed to Pad's latency, the
 /// line comes alive and its first write clears the ring before any read.
+// timing: serial every render here is serial on the calling thread (`rig` forces it); no worker, no deadline
 #[test]
 fn poisoning_an_idle_delay_line_changes_no_output_and_no_print() {
     let g = gate();
