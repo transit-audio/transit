@@ -42,6 +42,26 @@ pub struct RenderProgress {
     pub of: u64,
 }
 
+/// The transport Stops a real-time render's job submitted, or could not submit, since its last
+/// report (ADR 0062 section 11). Each Stop is reported once.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RenderStops {
+    /// Stops submitted since the last report, in submission order.
+    pub submitted: Vec<crate::action_lane::Sequence>,
+    /// A Stop the Player refused without a fault (busy, sequences exhausted) since the last report:
+    /// the caller owes it and retries it (ADR 0062 section 4). A Stop refused by a fault is not
+    /// owed: the fault retires everything.
+    pub owed: bool,
+}
+
+/// What a render poll, a cancel or a disposal returns: the Stop obligations not reported before,
+/// and the writer's result when there is one to collect.
+#[derive(Debug, Default)]
+pub struct RenderReport {
+    pub stops: RenderStops,
+    pub result: Option<Result<Rendered, RealtimeError>>,
+}
+
 /// Where a capture is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TapState {

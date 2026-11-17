@@ -10,7 +10,7 @@ use crate::StudioApp;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use transit_model::{MidiOutput, TrackId};
-use transit_playback::realtime_render::{FileSink, RealtimeError, RealtimeSpec, Rendered, StemSpec};
+use transit_playback::realtime_render::{FileSink, RealtimeError, RealtimeSpec, RenderReport, Rendered, StemSpec};
 
 /// The refusal of a transport start while a real-time render plays.
 pub(crate) const REFUSED_TRANSPORT: &str = "Rendering in real time: cancel the render first";
@@ -273,7 +273,9 @@ impl StudioApp {
             return f.result.take();
         }
         let Some(player) = self.player.as_ref() else { return Some(Err(RealtimeError::DeviceLost)) };
-        if let Some(done) = player.realtime_render_result() {
+        // The one render poll (ADR 0062 section 11). Its Stop obligations are not tracked until the
+        // render is a phase (slice S2e); today's render sends its Stops untracked.
+        if let Some(done) = player.realtime_render_poll().result {
             return Some(done);
         }
         if !player.realtime_render_running() {
@@ -313,21 +315,21 @@ impl StudioApp {
     }
 
     /// Cancel the running real-time render: the Player stops, releases the synths' notes and
-    /// removes the partial files before this returns.
-    pub(crate) fn cancel_realtime(&mut self) {
-        if self.finish.realtime.running.take().is_none() {
-            return;
-        }
+    /// removes the partial files before this returns. Returns what the cancel returned (the
+    /// render's Stops not reported before and a writer result that was already finished), which
+    /// the host tracks once the render is a phase (ADR 0062 section 11, slice S2e); `None` when
+    /// no render ran on a Player.
+    pub(crate) fn cancel_realtime(&mut self) -> Option<RenderReport> {
+        self.finish.realtime.running.take()?;
         #[cfg(test)]
         if let Some(f) = self.finish.realtime.fake.as_mut() {
             f.cancelled += 1;
             self.status = CANCELLED.into();
-            return;
+            return None;
         }
-        if let Some(p) = &self.player {
-            p.cancel_realtime_render();
-        }
+        let report = self.player.as_ref().map(transit_playback::Player::cancel_realtime_render);
         self.status = CANCELLED.into();
+        report
     }
 }
 

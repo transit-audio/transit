@@ -216,7 +216,7 @@ fn render(rig: &Rig, len: u64, sink: Box<dyn RenderSink>) -> Option<Result<crate
             until("the note-on is on the port", || sent(rig).contains(&vec![0x92, 60, 100]));
             heard = true;
         }
-        result = p.realtime_render_result();
+        result = p.realtime_render_poll().result;
         result.is_some()
     });
     until("the stop is applied by the device", || {
@@ -281,7 +281,7 @@ fn cancel_mid_render_releases_the_held_note_and_leaves_no_file() {
     assert!(!released(&sent(&rig)), "the note is held: {:x?}", sent(&rig));
     rig.player.cancel_realtime_render();
     assert!(!rig.player.realtime_render_running());
-    assert!(rig.player.realtime_render_result().is_none(), "nothing to collect");
+    assert!(rig.player.realtime_render_poll().result.is_none(), "nothing to collect");
     until("the note-off and All Notes Off after the note-on", || released(&sent(&rig)));
     assert!(!mix.exists() && !stem.exists(), "no file");
     assert_eq!(std::fs::read_dir(&rig.dir).unwrap().count(), 0, "no part file either");
@@ -329,14 +329,14 @@ fn an_overrun_fails_the_render_with_the_message() {
     let (mut started, mut failed) = (false, false);
     pump(&rig, (len as usize) / BLOCK + 100, |_, p| {
         started |= p.is_playing();
-        failed = p.realtime_render_result().is_some() || (started && !p.is_playing());
+        failed = p.realtime_render_poll().result.is_some() || (started && !p.is_playing());
         failed
     });
     assert!(failed, "the overrun stopped the render");
     drop(tx);
     let mut result = None;
     until("the writer gives up", || {
-        result = rig.player.realtime_render_result();
+        result = rig.player.realtime_render_poll().result;
         result.is_some()
     });
     let err = result.unwrap().unwrap_err();
@@ -383,7 +383,7 @@ fn a_device_lost_mid_render_releases_and_says_so() {
     assert!(rig.audio.inject_error(ab::Direction::Output, ab::StreamError::DeviceNotAvailable));
     let mut result = None;
     until("the render ends", || {
-        result = rig.player.realtime_render_result();
+        result = rig.player.realtime_render_poll().result;
         result.is_some()
     });
     assert_eq!(result.unwrap().unwrap_err(), RealtimeError::DeviceLost);
@@ -413,3 +413,6 @@ fn the_bounce_leaves_the_metronome_out_with_click_on() {
         assert!(extra.is_empty(), "channel {c}: click energy at {} samples, first {:?}", extra.len(), extra.first());
     }
 }
+
+/// ADR 0062 section 11: the render's kept Stops, owed Stops and refused-Play disposal.
+mod stops;
