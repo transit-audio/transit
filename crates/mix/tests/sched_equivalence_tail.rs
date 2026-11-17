@@ -15,8 +15,9 @@ fn s2_tail_scheduling_equivalence() {
     let _switch = graph_on();
     MixEngine::force_tail(true);
     let mut tops = builtin();
-    // The corpus cases keep their fixed eight-block window, outside the window rule (#742 ruling W-1).
-    tops.extend(corpus().into_iter().map(|(name, s)| Topology::new(&name, s, vec![]).outside_window_rule()));
+    // The corpus cases keep their fixed eight-block window (the opt-in tail test is outside the
+    // window rule of #742, unchanged by it).
+    tops.extend(corpus().into_iter().map(|(name, s)| Topology::new(&name, s, vec![])));
     every(&tops, &[174, 210, 17]);
     MixEngine::force_tail(false);
 }

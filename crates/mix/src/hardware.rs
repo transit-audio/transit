@@ -239,6 +239,60 @@ impl HwSlot {
         true
     }
 
+    /// Test seam (feature `testing`; ADR 0029, amendment for #742, section 14): the slot's
+    /// configuration, of an identical adopted plan (its spec, and the send buffers' shape, which the
+    /// compiler lays out from the sink's width and the block).
+    #[cfg(feature = "testing")]
+    pub(crate) fn record_config(&self, w: &mut transit_state_record::Writer<'_>) {
+        let HwSlot { spec, send, live: _ } = self;
+        let HwSpec { slot, sink, sink_width, src, latency, measured } = spec;
+        w.u16(*slot);
+        w.present(*sink, |w, k| w.u16(k));
+        w.u16(*sink_width);
+        w.usize(src.len());
+        src.iter().for_each(|&c| w.u16(c));
+        w.u32(*latency);
+        w.bool(*measured);
+        w.usize(send.len());
+        send.iter().for_each(|s| w.usize(s.len()));
+    }
+
+    /// Test seam (feature `testing`; #742 section 14): the slot's state. `live` is encoded (it
+    /// decides whether `flush` sums the send into its sink), and so is the send while it is live
+    /// (every channel, the whole buffer). While the slot is not live its send is unobservable:
+    /// `flush` returns before reading it, and `run`, the one place that sets `live`, first writes
+    /// every channel's `..frames` (the mono mix or a copy of the strip's channel), the only part
+    /// `flush` then reads. The gate's poison control of an idle send witnesses it
+    /// (`strip_state_completeness.rs`, `poisoning_an_idle_hardware_send_changes_no_output_and_no_print`).
+    #[cfg(feature = "testing")]
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let HwSlot { spec: _, send, live } = self;
+        w.bool(*live);
+        if *live {
+            send.iter().for_each(|s| w.f32s(s));
+        }
+    }
+
+    /// Test seam (feature `testing`): fills the send with `fill`'s pattern while the slot is not
+    /// live (the poison control); the values changed.
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison_idle_send(&mut self, fill: fn(&mut [Vec<f32>], usize) -> usize) -> usize {
+        if self.live { 0 } else { fill(&mut self.send, 0) }
+    }
+
+    /// Test seam (feature `testing`): the slot ran since the poison (it is live) and `left` finds
+    /// no pattern value in its send.
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison_reached(&self, left: fn(&[Vec<f32>], usize) -> usize) -> bool {
+        self.live && left(&self.send, 0) == 0
+    }
+
+    /// Test seam (feature `testing`): flips `live` (the omission control).
+    #[cfg(feature = "testing")]
+    pub(crate) fn nudge_live(&mut self) {
+        self.live = !self.live;
+    }
+
     /// Sum this block's send into its sink.
     pub(crate) fn flush(&self, sinks: &mut [Sink], frames: usize) {
         if !self.live {

@@ -339,20 +339,6 @@ pub(crate) struct Topology {
     pub(crate) blocks: usize,
     /// Blocks after the last hold (see the module docs).
     pub(crate) window: usize,
-    /// Where `window` comes from: the window rule (the default), or a fixed window a caller names
-    /// as outside it ([`Topology::outside_window_rule`]).
-    source: WindowSource,
-}
-
-/// Where a case's post-fault window comes from (#742 ruling W-1).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WindowSource {
-    /// The window rule (`structural_window`), or the built-in topologies' `WINDOW` over their
-    /// own test plug-ins: bound by section 14's hardware and External Instrument scope.
-    Rule,
-    /// A fixed window the caller sets outside the window rule (the opt-in tail test's corpus
-    /// cases, unchanged from before #742): not bound by that scope.
-    FixedOutsideRule,
 }
 
 const HOLD: &str = "hold";
@@ -372,22 +358,7 @@ impl Topology {
             t.mixer.inserts[last] = Some(i);
             knobs.insert(t.id, Arc::new(Knob::default()));
         }
-        Topology { name: name.into(), session, instruments, knobs: Arc::new(knobs), blocks: BLOCKS, window: WINDOW, source: WindowSource::Rule }
-    }
-
-    /// The case keeps its fixed window outside the window rule (#742 ruling W-1): the opt-in tail
-    /// test's eight-block corpus window, unchanged from before the amendment. Named at the call
-    /// site so that no case leaves the scope by a default.
-    pub(crate) fn outside_window_rule(mut self) -> Topology {
-        self.source = WindowSource::FixedOutsideRule;
-        self
-    }
-
-    /// Section 14's hardware and External Instrument scope (#742 ruling W-1), from the case's own
-    /// facts: its window comes from the window rule and is shorter than `full`, its full fallback
-    /// window in blocks (every instance counted as if no record were complete).
-    pub(crate) fn shortened(&self, full: usize) -> bool {
-        self.source == WindowSource::Rule && self.window < full
+        Topology { name: name.into(), session, instruments, knobs: Arc::new(knobs), blocks: BLOCKS, window: WINDOW }
     }
 
     /// The test plug-ins of `s` (a hold, a delay), else `None` for the usual factory.
@@ -615,7 +586,6 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
         let mut player = (!top.instruments.is_empty()).then(|| Player::new(top.instruments.len(), 210));
         let mut run = Run::default();
         let mut failure = None;
-        let mut full = None;
         for b in 0..top.blocks {
             if let Some(c) = change.as_ref().filter(|c| c.at == b) {
                 let held = b.checked_sub(1).is_some_and(|p| schedule.active(p).next().is_some());
@@ -721,17 +691,6 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
                 if let Some(why) = why.or_else(|| orphan.then(|| "upstream-missed with no key source that missed".to_string())) {
                     failure.get_or_insert(format!("block {b}, strip {d}: {why} (key edges {edges:?}, skips {causes:?})"));
                 }
-            }
-            // Section 14's scope (#742, ruling W-1): a strip with a hardware insert or an External
-            // Instrument has no inventoried state, so a case whose window the window rule shortened
-            // below its full fallback window (computed here, from the loaded instances after the
-            // first block, before any hold) may not hold or skip it.
-            if b == 0 {
-                full = Some(full_fallback(&rig.mix.strip_plugin_facts(), rig.mix.latency));
-            }
-            let scoped = full.is_some_and(|f| top.shortened(f));
-            if let Some(&i) = held.iter().chain(mutes.iter().map(|(i, _)| i)).find(|&&i| scoped && rig.mix.strip_external(i)) {
-                failure.get_or_insert(format!("block {b}, strip {i}: holds or skips a strip with a hardware insert or an External Instrument"));
             }
             run.mutes.push(mutes);
             run.causes.push(causes);
@@ -1008,32 +967,19 @@ pub(crate) struct Window {
     pub(crate) incomplete: Vec<String>,
     /// The instances whose tail plus latency is the longest contribution, with it in samples.
     pub(crate) set_by: Vec<String>,
-    /// The hardware insert and External Instrument entries of the case, sorted: pinned with the
-    /// reason "hardware and External Instrument slot state not inventoried (#742)".
-    pub(crate) uninventoried: Vec<String>,
-}
-
-/// A case's full fallback window in blocks: every instance's tail plus latency counted as if no
-/// record were complete, plus the plan's latency, at least `WINDOW` (#742 ruling W-1).
-pub(crate) fn full_fallback(facts: &[StripFacts], latency: usize) -> usize {
-    let full = facts.iter().flat_map(|s| s.audio.iter()).map(|a| a.tail + a.latency).max().unwrap_or(0);
-    (full + latency).div_ceil(BLOCK).max(WINDOW)
 }
 
 /// The window from a case's configured, loaded instances (`MixEngine::strip_plugin_facts` after
 /// the latency probe block): the tail plus latency of every instance whose record is not
 /// complete, and of a strip's instrument when its effective MIDI effect chain holds an effect
 /// without a complete record; the longest of them plus the plan's latency, in whole blocks, at
-/// least `WINDOW` (with every record complete: `WINDOW`, or the plan's latency if longer). A case
-/// with a hardware insert or an External Instrument keeps today's full fallback window instead:
-/// every instance counts as if no record were complete, until that slot state is inventoried
-/// (#742 ruling W-1).
+/// least `WINDOW` (with every record complete: `WINDOW`, or the plan's latency if longer). The
+/// strips' hardware insert and External Instrument slots are in the mix-state inventory (#742
+/// slice 1 push 2), so they set no fallback.
 pub(crate) fn structural_window(facts: &[StripFacts], latency: usize) -> Window {
     let mut longest = 0;
     let mut set_by = Vec::new();
     let mut incomplete = std::collections::BTreeSet::new();
-    let uninventoried: std::collections::BTreeSet<String> = facts.iter().flat_map(|s| s.external.iter().cloned()).collect();
-    let fallback = !uninventoried.is_empty();
     let mut take = |what: String, samples: usize| {
         if samples > longest {
             longest = samples;
@@ -1052,19 +998,12 @@ pub(crate) fn structural_window(facts: &[StripFacts], latency: usize) -> Window 
                 take(a.entry.clone(), a.tail + a.latency);
             } else if a.instrument && chain_incomplete {
                 take(format!("{} (its MIDI effect chain)", a.entry), a.tail + a.latency);
-            } else if fallback {
-                take(format!("{} (the case's fallback window)", a.entry), a.tail + a.latency);
             }
         }
     }
     set_by.sort();
     set_by.dedup();
-    Window {
-        blocks: (longest + latency).div_ceil(BLOCK).max(WINDOW),
-        incomplete: incomplete.into_iter().collect(),
-        set_by,
-        uninventoried: uninventoried.into_iter().collect(),
-    }
+    Window { blocks: (longest + latency).div_ceil(BLOCK).max(WINDOW), incomplete: incomplete.into_iter().collect(), set_by }
 }
 
 /// A minimal schedule from a failing seed, replayed as a named regression: `topology` through

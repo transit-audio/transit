@@ -132,6 +132,19 @@ impl ExtSlot {
         ExtSlot { spec }
     }
 
+    /// Test seam (feature `testing`; ADR 0029, amendment for #742, section 14): the slot holds only
+    /// its spec, the configuration of an identical adopted plan (the return's device channels and
+    /// C). It keeps nothing between blocks: `run` writes the strip's `buf`, whose own treatment is
+    /// the strip's.
+    #[cfg(feature = "testing")]
+    pub(crate) fn record_config(&self, w: &mut transit_state_record::Writer<'_>) {
+        let ExtSlot { spec } = self;
+        let ExtSpec { src, latency } = spec;
+        w.usize(src.len());
+        src.iter().for_each(|&c| w.u16(c));
+        w.u32(*latency);
+    }
+
     /// The frames this device adds when it plays (`duplex`: live input is open): C, else 0.
     pub(crate) fn latency(&self, duplex: bool) -> usize {
         if duplex && !self.spec.src.is_empty() { self.spec.latency as usize } else { 0 }

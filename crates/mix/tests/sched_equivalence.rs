@@ -96,7 +96,6 @@ fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_s
     assert!(cases.len() >= 2, "the released sessions with four or more live tracks");
     let mut tops = Vec::new();
     let mut pinned = Vec::new();
-    let mut uninventoried = Vec::new();
     for (name, s) in cases {
         let mut top = Topology::new(&name, s, vec![]);
         let (latency, facts) = {
@@ -108,25 +107,18 @@ fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_s
         top.window = window.blocks;
         top.blocks = 40 + top.window;
         println!(
-            "{name}: holds in blocks 2..40, post-fault window {} blocks ({} samples), plan latency {latency}, set by {}; incomplete: {}; not inventoried: {}",
+            "{name}: holds in blocks 2..40, post-fault window {} blocks ({} samples), plan latency {latency}, set by {}; incomplete: {}",
             top.window,
             top.window * BLOCK,
             window.set_by.join(", "),
-            window.incomplete.join(", "),
-            if window.uninventoried.is_empty() { "none".to_string() } else { window.uninventoried.join(", ") }
+            window.incomplete.join(", ")
         );
-        pinned.push((name.clone(), window.incomplete));
-        if !window.uninventoried.is_empty() {
-            uninventoried.push((name, window.uninventoried));
-        }
+        pinned.push((name, window.incomplete));
         tops.push(top);
     }
     let expected: Vec<(String, Vec<String>)> =
         INCOMPLETE.iter().map(|(n, e)| ((*n).to_string(), e.iter().map(|s| (*s).to_string()).collect())).collect();
     assert_eq!(pinned, expected, "the pinned (session, entry) pairs without a complete record changed (#742 section 14): update INCOMPLETE");
-    let expected: Vec<(String, Vec<String>)> =
-        UNINVENTORIED.iter().map(|(n, e)| ((*n).to_string(), e.iter().map(|s| (*s).to_string()).collect())).collect();
-    assert_eq!(uninventoried, expected, "the pinned hardware and External Instrument pairs changed (#742 ruling W-1): update UNINVENTORIED");
     every(&tops, &seeds);
 }
 
@@ -326,22 +318,6 @@ fn report_keeps_the_first_failure() {
     assert!(passed.starts_with("first\n") && passed.contains("passed"), "{passed}");
 }
 
-/// The (corpus session, entry) pairs of hardware inserts and External Instruments, pinned with the
-/// reason "hardware and External Instrument slot state not inventoried (#742)" (ruling W-1 of
-/// 2026-11-17): a case holding one keeps today's full fallback window, as if no record in it were
-/// complete, until slice 1 push 2 inventories `HwSlot` and `ExtSlot`.
-const UNINVENTORIED: &[(&str, &[&str])] = &[
-    ("v0.3.2-features.transit", &["external.instrument"]),
-    ("v0.4.0-features.transit", &["external.instrument"]),
-    ("v0.4.1-features.transit", &["external.instrument"]),
-    ("v0.5.0-features.transit", &["external.instrument"]),
-    ("v0.6.0-features.transit", &["external.instrument"]),
-    ("v0.7.0-features.transit", &["external.instrument"]),
-    ("v0.7.1-features.transit", &["external.instrument"]),
-    ("v0.7.2-features.transit", &["external.instrument"]),
-    ("v0.7.3-features.transit", &["external.instrument"]),
-];
-
 /// Found by the #742 strip inventory: with no worker, a keyed strip published and then taken back
 /// `Unstarted` kept its key entries' pending early-key frames (filled for a render that never
 /// happened), where the muted serial render, which never fills them, holds none. The keyed strip
@@ -355,20 +331,16 @@ fn regression_a_keyed_strip_taken_back_unstarted_forgets_its_pending_key() {
     regression(&top, 0, &Schedule::new(&[(lead, 2, 1)]));
 }
 
-/// Section 14's hardware and External Instrument scope (#742 ruling W-1), a permanent negative
-/// control: a features corpus case (its External Instrument keyed from Audio A by the corpus key
-/// edge) run on a window shorter than its full fallback window, with Audio A held so the External
-/// Instrument's strip is skipped as upstream-missed, fails the scope assertion; the same case
-/// named outside the window rule passes property 1.
+/// The hardware insert and External Instrument slots are in the mix-state inventory (#742 slice 1
+/// push 2: `HwSlot` and `ExtSlot` in the strip print), so a case may hold or skip their strips on a
+/// short window: a features corpus case on the eight-block window, Audio A held so that the
+/// External Instrument keyed from it by the corpus key edge is skipped as upstream-missed, equals
+/// its muted serial render.
 #[test]
-fn a_shortened_case_holding_or_skipping_an_external_instrument_fails_the_scope() {
+fn a_skipped_external_instrument_strip_equals_the_muted_serial_render_on_a_short_window() {
     let _on = graph_on();
     let (name, s) = corpus().into_iter().find(|(n, _)| n == "v0.3.2-features.transit").unwrap();
     let top = Topology::new(&name, s, vec![]);
     let audio_a = top.rig().mix.strip_index(track(&top.session, "Audio A")).unwrap();
-    let schedule = Schedule::new(&[(audio_a, 2, 1)]);
-    let err = graph_run(&top, 2, &schedule, None, false).err().expect("a shortened case may not skip the External Instrument strip");
-    assert!(err.contains("holds or skips a strip with a hardware insert or an External Instrument"), "{err}");
-    let outside = top.outside_window_rule();
-    assert!(graph_run(&outside, 2, &schedule, None, false).is_ok(), "a fixed window outside the window rule is not bound");
+    regression(&top, 2, &Schedule::new(&[(audio_a, 2, 1)]));
 }

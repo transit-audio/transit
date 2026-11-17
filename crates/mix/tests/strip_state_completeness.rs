@@ -16,8 +16,9 @@
 //!   ([`Poison`]): one of two identical renders fills it with a fixed pattern between blocks, the
 //!   outputs and prints must stay identical, and the buffer's write site must reach it.
 //!
-//! No restoration: the strip is not rebuilt from its record. Nothing here holds a strip with a
-//! hardware insert or an External Instrument (the scope assertions of `sched.rs` and the print).
+//! No restoration: the strip is not rebuilt from its record. The hardware insert and External
+//! Instrument slots (`HwSlot`, `ExtSlot`) are in the inventory too: their controls run on a fake
+//! duplex device whose live input is a fixed pattern (no device is opened).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 #[allow(dead_code)]
@@ -310,4 +311,126 @@ fn poisoning_an_idle_delay_line_changes_no_output_and_no_print() {
     }
     assert!(changed > 0, "the pattern changed the idle line");
     assert!(reached > 0, "the line came alive and its write reached the poisoned contents");
+}
+
+// ---- Hardware inserts and External Instruments (#742 slice 1 push 2) ----
+
+/// The fake duplex device of the hardware slots' controls: four channels each way.
+fn hw_io() -> transit_model::IoMap {
+    transit_model::IoMap::for_device("test", "fake duplex", 4, 4)
+}
+
+/// A session with a hardware insert (Kick, sending on "Out 3-4", returning on "In 3-4") and an
+/// External Instrument (Model D, returning on "In 1", its latency set by hand, sending to a port).
+fn hw_session() -> (Session, TrackId, TrackId) {
+    let mut s = Session::default();
+    s.edit.click = false;
+    s.edit.delay_compensation = true;
+    let (kick, _) = audio(&mut s, "Kick", kick(), ChannelFormat::Stereo);
+    s.track_mut(kick).unwrap().mixer.inserts[0] = Some(Insert::hardware("Out 3-4", "In 3-4"));
+    let synth = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
+    {
+        let t = s.track_mut(synth).unwrap();
+        let mut ins = Insert::external("In 1");
+        ins.external.as_mut().unwrap().manual_ms = Some(5.0);
+        t.instrument = Some(ins);
+        t.midi_output = transit_model::MidiOutput::External {
+            port: transit_model::MidiOutPort { backend: "fake".into(), name: "SYNTH".into(), ordinal: 0, id: String::new() },
+            channel: transit_model::MidiOutChannel::Channel(0),
+            offset_ms: 0.0,
+        };
+        t.mixer.output = Route::Main;
+    }
+    (s, kick, synth)
+}
+
+/// A serial engine on the fake duplex device with `s` adopted, and its output buffer (Main, then
+/// the sinks, so a hardware send that reaches its sink is in the output).
+fn hw_rig(s: &Session) -> (MixEngine, Vec<Vec<f32>>) {
+    let io = hw_io();
+    let target = transit_mix::RenderTarget {
+        device: transit_mix::DeviceGeneration(1),
+        sample_rate: SR,
+        max_block: BLOCK as u32,
+        out_channels: io.outputs,
+        in_channels: io.inputs,
+    };
+    MixEngine::force_serial(true);
+    let mut mix = MixEngine::realtime(target);
+    let mut comp = transit_mix::PlanCompiler::new(target, transit_mix::PlanLimits::default());
+    comp.set_io(Arc::new(io.clone()));
+    let mut make = |spec: &transit_mix::InstanceSpec, _: transit_mix::SlotGen| {
+        transit_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
+    };
+    let mut env = comp.compile(Arc::new(s.clone()), comp.active(), transit_mix::PlanGeneration::from_raw(1), &mut make).unwrap();
+    assert_eq!(mix.adopt_plan(&mut env), transit_mix::Adoption::Adopted);
+    comp.reclaim(env);
+    let width = transit_mix::main_channels(s) + transit_mix::plan_sinks(s, &io, io.outputs).channels();
+    (mix, vec![vec![0.0; BLOCK]; width])
+}
+
+/// Block `k`'s live input, the same in every render (no device: a fixed pattern on every input
+/// channel), present on even blocks only, so the hardware slot alternates between live and idle.
+fn hw_input(k: usize) -> Vec<Vec<f32>> {
+    if k % 2 == 1 {
+        return Vec::new();
+    }
+    (0..4).map(|c| (0..BLOCK).map(|i| ((k * BLOCK + i) * (c + 3) % 89) as f32 / 89.0 - 0.5).collect()).collect()
+}
+
+fn hw_block(mix: &mut MixEngine, out: &mut [Vec<f32>], k: usize) {
+    mix.input = hw_input(k);
+    mix.render_active((k * BLOCK) as i64, BLOCK, out);
+}
+
+/// The hardware insert's and the External Instrument's slots are in the strip print: two renders
+/// print the same at every block (live and idle), the External Instrument's return reaches the
+/// output, the hardware send reaches its sink, and a strip whose hardware slot differs only in
+/// `live` prints differently in the strip part.
+// timing: serial every render here is serial on the calling thread (`hw_rig` forces it); no worker, no deadline
+#[test]
+fn hardware_insert_and_external_instrument_slots_print_in_the_strip_part() {
+    let (s, kick, synth) = hw_session();
+    let ((mut a, mut oa), (mut b, mut ob)) = (hw_rig(&s), hw_rig(&s));
+    let (mut sent, mut returned) = (false, false);
+    let main = transit_mix::main_channels(&s);
+    for k in 0..BLOCKS {
+        hw_block(&mut a, &mut oa, k);
+        hw_block(&mut b, &mut ob, k);
+        assert_eq!(oa, ob, "block {k}: the output");
+        assert_eq!(a.strip_prints(), b.strip_prints(), "block {k}: the prints");
+        sent |= oa[main..].iter().flatten().any(|&x| x != 0.0);
+        returned |= k % 2 == 0 && oa[..main].iter().flatten().any(|&x| x != 0.0);
+    }
+    assert!(sent, "the hardware send reached its sink");
+    assert!(returned, "the live input reached Main");
+    let ext = |m: &MixEngine| m.strip_prints()[m.strip_index(synth).unwrap()].unwrap();
+    assert_eq!(ext(&a), ext(&b));
+    let print = |m: &MixEngine| m.strip_prints()[m.strip_index(kick).unwrap()].unwrap();
+    assert!(b.nudge(kick, Nudge::HwLive), "Kick has a hardware insert");
+    assert_eq!(print(&a).differing(&print(&b)), ["strip"], "HwLive: only the part holding the field differs");
+}
+
+/// The idle hardware send (section 14, `HwSlot`): filled with a fixed pattern after each block in
+/// which the slot did not run, in one of two identical renders, it changes no output and no print,
+/// and the next block's run writes over it before its sink reads it.
+// timing: serial every render here is serial on the calling thread (`hw_rig` forces it); no worker, no deadline
+#[test]
+fn poisoning_an_idle_hardware_send_changes_no_output_and_no_print() {
+    let (s, kick, _) = hw_session();
+    let ((mut a, mut oa), (mut b, mut ob)) = (hw_rig(&s), hw_rig(&s));
+    let (mut changed, mut reached) = (0, 0);
+    for k in 0..BLOCKS {
+        let poisoned = b.poison(kick, Poison::HwSend);
+        changed += poisoned;
+        hw_block(&mut a, &mut oa, k);
+        hw_block(&mut b, &mut ob, k);
+        reached += usize::from(poisoned > 0 && b.poison_reached(kick, Poison::HwSend));
+        assert_eq!(oa, ob, "block {k}: the output");
+        assert_eq!(a.strip_prints(), b.strip_prints(), "block {k}: the prints");
+    }
+    assert!(changed > 0, "the pattern changed the idle send");
+    // Poisoned before the first block and after every odd block (the slot idle), reached in the
+    // even block that follows.
+    assert_eq!(reached, BLOCKS / 2, "the run wrote over every poisoned send");
 }

@@ -22,10 +22,11 @@
 //!   the notes given and started, retries, the epoch, the note view);
 //! - **strip**: the strip's and its slots' own fields (section 14's inventory): a configuration
 //!   child (the identity of the adopted plan: generations, track, layout, routes, mode bypass,
-//!   each slot's layout, channels, suspendability and id), then a state child (latency and delay
-//!   compensation position, chase and edit flags, mute, touch ramps, clip effects, and per slot
-//!   the parameter values last pushed, the reported latency, failure, suspension and parameter
-//!   pass flags and a reading insert's note delay).
+//!   each slot's layout, channels, suspendability and id, the hardware inserts' and the External
+//!   Instrument's specs), then a state child (latency and delay compensation position, chase and
+//!   edit flags, mute, touch ramps, clip effects, per slot the parameter values last pushed, the
+//!   reported latency, failure, suspension and parameter pass flags and a reading insert's note
+//!   delay, and each hardware insert's `live` flag with its send while live).
 //!
 //! [`strip_print`] destructures every inventoried type exhaustively, so a new field does not
 //! compile until its treatment is decided; each field left out says why (configuration of an
@@ -372,11 +373,12 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
         track,
         id,
         layout,
-        // Scope assertions: the gate fails a case that holds or skips a strip with a hardware
-        // insert or an External Instrument (`MixEngine::strip_external`); a retained panic payload
-        // fails before any comparison (below).
-        hw: _,
-        ext: _,
+        // The hardware inserts' and the External Instrument's slots: each slot's spec in the
+        // configuration child, a hardware slot's `live` and its live send in the state child
+        // (`HwSlot::record_state` says why an idle send is unobservable).
+        hw,
+        ext,
+        // Scope assertion: a retained panic payload fails before any comparison (below).
         panic,
         // The pool's protocol stamp: legitimately different between the graph and the serial
         // render (property 1 and the conflict count cover it).
@@ -428,6 +430,9 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
             for s in slots(st) {
                 w.present(s, |w, s| slot_config(s, w));
             }
+            w.usize(hw.len());
+            hw.iter().for_each(|h| h.record_config(w));
+            w.present(ext.as_ref(), |w, x| x.record_config(w));
         });
         w.child(|w| {
             w.usize(*latency);
@@ -447,6 +452,7 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
             for s in slots(st) {
                 w.present(s, |w, s| slot_state(s, w));
             }
+            hw.iter().for_each(|h| h.record_state(w));
         });
     });
     StripPrint { track: *id, plugins: plugins_part, lines, midi, strip }
@@ -507,13 +513,6 @@ impl MixEngine {
                 Some(parts.join("; "))
             })
             .collect()
-    }
-
-    /// Strip `i` carries a hardware insert or an External Instrument (section 14's scope: such a
-    /// strip may not be held or skipped by a case; its state is not inventoried yet).
-    #[must_use]
-    pub fn strip_external(&self, i: usize) -> bool {
-        self.plan.as_deref().and_then(|p| p.tables.strips.get(i)).is_some_and(|s| !s.hw.is_empty() || s.ext.is_some())
     }
 }
 

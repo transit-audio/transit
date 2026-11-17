@@ -37,6 +37,8 @@ pub enum Nudge {
     LastOn,
     /// The first queued note-on's charge: a re-strike's 2 (it carries the old voice's off).
     RestrikeCost,
+    /// The strip's first hardware insert's `live` flag (it decides whether its send is summed).
+    HwLive,
 }
 
 impl MixEngine {
@@ -72,6 +74,7 @@ impl MixEngine {
                 true
             }
             Nudge::KeyPending => tables.keys.nudge_pending(i),
+            Nudge::HwLive => st.hw.first_mut().map(hardware::HwSlot::nudge_live).is_some(),
             Nudge::ClipFxToggle => st.clip_fx.0.first_mut().is_some_and(|(_, fx)| {
                 fx.eq_on = !fx.eq_on;
                 true
