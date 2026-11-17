@@ -308,3 +308,21 @@ fn derived_phase_agrees_with_todays_text_and_flags_when_the_session_is_replaced(
     run_until(&mut app, &mut seen, 20, is("Stopped"));
     assert_eq!(seen, ["Stopped", "StartPending", "Playing", "StopPending Reset", "Stopped"]);
 }
+
+#[test]
+fn a_player_replacement_forgets_the_old_players_request_metadata() {
+    let (mut app, _dir) = app();
+    app.run("transport.play", json!({})).unwrap();
+    app.handle_transport(0.0);
+    let sequence = app.player_requests.play.expect("the Play is tracked");
+    assert!(app.transport_observation().play_start_tracked);
+    app.player_requests.meta.record_off = Some(sequence);
+    // A Player replacement: the tracked requests and their metadata belong to the old Player.
+    app.player_requests.reset();
+    // Sequences restart for each Player, so the new Player's requests can reuse this number.
+    app.player_requests.play = Some(sequence);
+    app.player_requests.recording = Some(sequence);
+    let seen = app.transport_observation();
+    assert!(!seen.play_start_tracked, "the old Play's start is not the new request's");
+    assert!(!seen.record_off_tracked, "the old record-off is not the new request's");
+}

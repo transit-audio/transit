@@ -290,7 +290,12 @@ impl Default for PlayerRequests {
 
 impl PlayerRequests {
     pub(crate) fn reset(&mut self) {
-        let (error, meta) = (self.error.take(), std::mem::take(&mut self.meta));
+        let (error, mut meta) = (self.error.take(), std::mem::take(&mut self.meta));
+        // Sequences restart for each Player: what is keyed by an old Player's sequence must not
+        // match a new request. The stop reason and the pass (read only while its planned take
+        // lives) are not keyed that way.
+        meta.play_start = None;
+        meta.record_off = None;
         *self = Self { error, meta, ..Self::default() };
     }
 
