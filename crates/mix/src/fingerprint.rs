@@ -312,7 +312,8 @@ fn slot_state(s: &PluginSlot, w: &mut Writer<'_>) {
 
 /// Every slot of a strip, in order: the inserts, the instrument, then each clip's modules.
 fn slots(st: &Strip) -> impl Iterator<Item = Option<&PluginSlot>> {
-    let clips = st.clip_fx.0.iter().flat_map(|(_, fx)| [fx.eq.as_ref(), fx.comp.as_ref()]);
+    let ClipFxTable(chains) = &st.clip_fx;
+    let clips = chains.iter().flat_map(|(_, fx)| [fx.eq.as_ref(), fx.comp.as_ref()]);
     st.plugins.iter().map(Option::as_ref).chain(std::iter::once(st.instrument.as_ref())).chain(clips)
 }
 
@@ -382,6 +383,8 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
         rendered: _,
         touch,
     } = st;
+    // The clip-effect chains, sorted by clip id: the table holds nothing else.
+    let ClipFxTable(chains) = clip_fx;
     if panic.is_some() {
         panic!("strip {i} holds a retained panic payload: a case with one fails before any comparison (#742 section 14)");
     }
@@ -416,8 +419,8 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
             mode_bypass.iter().for_each(|&b| w.bool(b));
             w.bool(*key_pre);
             w.usize(plugins.len());
-            w.usize(clip_fx.0.len());
-            for (clip, fx) in &clip_fx.0 {
+            w.usize(chains.len());
+            for (clip, fx) in chains {
                 w.u64(*clip);
                 w.f32(fx.sr);
                 w.usize(fx.ch);
@@ -434,7 +437,7 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
             w.bool(*edited);
             w.bool(*muted);
             touch.record(w);
-            for (_, fx) in &clip_fx.0 {
+            for (_, fx) in chains {
                 let ClipFx { eq: _, comp: _, eq_on, comp_on, gain_db, lazy, sr: _, ch: _ } = fx;
                 w.bool(*eq_on);
                 w.bool(*comp_on);

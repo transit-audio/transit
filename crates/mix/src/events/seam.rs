@@ -25,12 +25,12 @@ use crate::strip_pool::{Parked, ParkedEvent};
 use crate::{Due, INSTRUMENT_SLOT, RenderFrame, SlotGen};
 use transit_state_record::Writer;
 
-/// A frame relative to the next block start: an overdue one is normalized to it. Asserts that a
-/// raw timestamp the form omits (one normalized) was due at or before the start (section 14).
+/// A frame relative to the next block start: an overdue one is normalized to it (section 14). Only
+/// a due time at or before the start is omitted this way, by construction, so the gate's
+/// obligation (each omitted raw timestamp was due at or before the next block start) holds
+/// without a runtime check.
 fn rel(due: u64, start: u64) -> u64 {
-    let r = due.saturating_sub(start);
-    assert!(r > 0 || due <= start, "a timestamp past the next block start was omitted");
-    r
+    due.saturating_sub(start)
 }
 
 /// The admission a parked event gets when the strip is back: readmission's checks (epoch,

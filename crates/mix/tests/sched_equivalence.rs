@@ -106,7 +106,6 @@ fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_s
         };
         let window = structural_window(&facts, latency);
         top.window = window.blocks;
-        top.shortened = window.shortened;
         top.blocks = 40 + top.window;
         println!(
             "{name}: holds in blocks 2..40, post-fault window {} blocks ({} samples), plan latency {latency}, set by {}; incomplete: {}; not inventoried: {}",
@@ -354,4 +353,22 @@ fn regression_a_keyed_strip_taken_back_unstarted_forgets_its_pending_key() {
     let top = Topology::new(&name, s, vec![]);
     let lead = top.rig().mix.strip_index(track(&top.session, "Lead")).unwrap();
     regression(&top, 0, &Schedule::new(&[(lead, 2, 1)]));
+}
+
+/// Section 14's hardware and External Instrument scope (#742 ruling W-1), a permanent negative
+/// control: a features corpus case (its External Instrument keyed from Audio A by the corpus key
+/// edge) run on a window shorter than its full fallback window, with Audio A held so the External
+/// Instrument's strip is skipped as upstream-missed, fails the scope assertion; the same case
+/// named outside the window rule passes property 1.
+#[test]
+fn a_shortened_case_holding_or_skipping_an_external_instrument_fails_the_scope() {
+    let _on = graph_on();
+    let (name, s) = corpus().into_iter().find(|(n, _)| n == "v0.3.2-features.transit").unwrap();
+    let top = Topology::new(&name, s, vec![]);
+    let audio_a = top.rig().mix.strip_index(track(&top.session, "Audio A")).unwrap();
+    let schedule = Schedule::new(&[(audio_a, 2, 1)]);
+    let err = graph_run(&top, 2, &schedule, None, false).err().expect("a shortened case may not skip the External Instrument strip");
+    assert!(err.contains("holds or skips a strip with a hardware insert or an External Instrument"), "{err}");
+    let outside = top.outside_window_rule();
+    assert!(graph_run(&outside, 2, &schedule, None, false).is_ok(), "a fixed window outside the window rule is not bound");
 }
