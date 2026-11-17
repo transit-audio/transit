@@ -96,7 +96,7 @@ impl KeyLine {
 
     /// Test seam (issue #210): the line's history, its write position and its read.
     #[cfg(feature = "testing")]
-    pub(crate) fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+    pub(crate) fn fingerprint(&self, h: &mut crate::fingerprint::PrintHasher) {
         crate::fingerprint::line_print(&self.line, h);
         crate::fingerprint::edge_print(&self.tap, h);
     }
@@ -132,7 +132,8 @@ pub(crate) struct KeyIn {
 impl KeyIn {
     /// Test seam (issue #210): this block's delay, whether the insert ran, and the line.
     #[cfg(feature = "testing")]
-    pub(crate) fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+    pub(crate) fn fingerprint(&self, h: &mut crate::fingerprint::PrintHasher) {
+        use std::hash::Hasher as _;
         h.write_u16(self.slot);
         h.write_usize(self.want);
         h.write_u8(u8::from(self.ran));
@@ -271,7 +272,8 @@ impl KeyBank {
     /// Test seam (issue #210): the entries keyed at `keyed`, in bank order: each one's delay
     /// and line (an entry lent to a render worker's job is skipped: the strip is away).
     #[cfg(feature = "testing")]
-    pub(crate) fn fingerprint_of(&self, keyed: usize, h: &mut dyn std::hash::Hasher) {
+    pub(crate) fn fingerprint_of(&self, keyed: usize, h: &mut crate::fingerprint::PrintHasher) {
+        use std::hash::Hasher as _;
         for e in self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent) {
             h.write_u16(e.spec.slot);
             h.write_usize(e.want);

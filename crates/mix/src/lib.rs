@@ -173,7 +173,7 @@ pub use events::{
 pub use external::{ExternalReport, ExternalState, external_report};
 pub use external_midi::{ExternalMidi, external_midi_events, external_notes_across};
 #[cfg(feature = "testing")]
-pub use fingerprint::{Fnv, StripPrint};
+pub use fingerprint::{PrintHasher, StripPrint};
 pub use graph::TailWhy;
 pub use hardware::{HardwareReport, HardwareState, hardware_report};
 pub use instance::{
