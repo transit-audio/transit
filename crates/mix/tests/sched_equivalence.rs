@@ -182,3 +182,14 @@ fn regression_a_pre_fader_key_from_a_silent_fader_early_held_with_no_worker() {
     let bass = bass_index(&top);
     regression(&top, 0, &Schedule::new(&[(bass, 30, 1)]));
 }
+
+/// The failure report keeps the first message in every case.
+#[test]
+fn report_keeps_the_first_failure() {
+    let first = || "first".to_string();
+    assert_eq!(sched::combine(first(), Err("first\n  states".into())), "first\n  states");
+    let differs = sched::combine(first(), Err("other".into()));
+    assert!(differs.starts_with("first\n") && differs.contains("failed differently") && differs.ends_with("other"), "{differs}");
+    let passed = sched::combine(first(), Ok(()));
+    assert!(passed.starts_with("first\n") && passed.contains("passed"), "{passed}");
+}

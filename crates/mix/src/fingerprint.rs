@@ -56,7 +56,10 @@ impl PrintHasher {
     }
 
     /// Every sample's bits, in order, two samples to a word (the first in the low half). The
-    /// slice's length is hashed by the caller (a line's length), as before.
+    /// slice's length is not hashed here: the caller hashes the line's `len` (its capacity, not
+    /// a buffer's length), as before. An odd tail is still unambiguous because every buffer's
+    /// length is fixed by the structure (the capacity plus one block; the channel count is the number of
+    /// buffers).
     ///
     /// Whole runs of eight samples go through four independent lanes (word `k` of each run into
     /// lane `k`), so the steps do not wait on each other; the lanes start from the state, each

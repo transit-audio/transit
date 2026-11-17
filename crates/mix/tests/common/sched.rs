@@ -828,8 +828,9 @@ fn check(top: &Topology, workers: usize, names: &HashMap<usize, String>, schedul
 
 /// The failure report for a check of `schedule` that failed with `first`: the same schedule
 /// replayed with every strip's readable state recorded (the schedule is deterministic; the
-/// states are built only here, never on a passing check). If the replay passes, `first` is
-/// returned as it was, with that said.
+/// states are built only here, never on a passing check). `first` is always kept; the replay's
+/// own result follows it when that differs (see [`combine`]), and a panic in the replay is
+/// caught and reported the same way.
 pub(crate) fn report(
     top: &Topology,
     workers: usize,
@@ -838,8 +839,21 @@ pub(crate) fn report(
     change: Option<&Change>,
     first: String,
 ) -> String {
-    match check_with(top, workers, names, schedule, change, true) {
-        Err(e) => e,
+    let replay = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check_with(top, workers, names, schedule, change, true)));
+    let replay = replay.unwrap_or_else(|p| {
+        let what = p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| (*s).to_string()));
+        Err(format!("panicked: {}", what.unwrap_or_else(|| "(no message)".into())))
+    });
+    combine(first, replay)
+}
+
+/// The report text from the first failure and the replay's result: the replay's message alone
+/// when it is the same failure with the states added, otherwise the first message followed by a
+/// labeled line saying what the replay gave.
+pub(crate) fn combine(first: String, replay: Result<(), String>) -> String {
+    match replay {
+        Err(e) if e.starts_with(&first) => e,
+        Err(e) => format!("{first}\n  (the replay with readable states failed differently:)\n{e}"),
         Ok(()) => format!("{first}\n  (the replay with readable states passed: no states to show)"),
     }
 }
