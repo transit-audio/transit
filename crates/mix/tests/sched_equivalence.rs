@@ -96,6 +96,7 @@ fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_s
     assert!(cases.len() >= 2, "the released sessions with four or more live tracks");
     let mut tops = Vec::new();
     let mut pinned = Vec::new();
+    let mut uninventoried = Vec::new();
     for (name, s) in cases {
         let mut top = Topology::new(&name, s, vec![]);
         let (latency, facts) = {
@@ -105,20 +106,28 @@ fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_s
         };
         let window = structural_window(&facts, latency);
         top.window = window.blocks;
+        top.fallback = window.fallback;
         top.blocks = 40 + top.window;
         println!(
-            "{name}: holds in blocks 2..40, post-fault window {} blocks ({} samples), plan latency {latency}, set by {}; incomplete: {}",
+            "{name}: holds in blocks 2..40, post-fault window {} blocks ({} samples), plan latency {latency}, set by {}; incomplete: {}; not inventoried: {}",
             top.window,
             top.window * BLOCK,
             window.set_by.join(", "),
-            window.incomplete.join(", ")
+            window.incomplete.join(", "),
+            if window.uninventoried.is_empty() { "none".to_string() } else { window.uninventoried.join(", ") }
         );
-        pinned.push((name, window.incomplete));
+        pinned.push((name.clone(), window.incomplete));
+        if !window.uninventoried.is_empty() {
+            uninventoried.push((name, window.uninventoried));
+        }
         tops.push(top);
     }
     let expected: Vec<(String, Vec<String>)> =
         INCOMPLETE.iter().map(|(n, e)| ((*n).to_string(), e.iter().map(|s| (*s).to_string()).collect())).collect();
     assert_eq!(pinned, expected, "the pinned (session, entry) pairs without a complete record changed (#742 section 14): update INCOMPLETE");
+    let expected: Vec<(String, Vec<String>)> =
+        UNINVENTORIED.iter().map(|(n, e)| ((*n).to_string(), e.iter().map(|s| (*s).to_string()).collect())).collect();
+    assert_eq!(uninventoried, expected, "the pinned hardware and External Instrument pairs changed (#742 ruling W-1): update UNINVENTORIED");
     every(&tops, &seeds);
 }
 
@@ -316,4 +325,33 @@ fn report_keeps_the_first_failure() {
     assert!(differs.starts_with("first\n") && differs.contains("failed differently") && differs.ends_with("other"), "{differs}");
     let passed = sched::combine(first(), Ok(()));
     assert!(passed.starts_with("first\n") && passed.contains("passed"), "{passed}");
+}
+
+/// The (corpus session, entry) pairs of hardware inserts and External Instruments, pinned with the
+/// reason "hardware and External Instrument slot state not inventoried (#742)" (ruling W-1 of
+/// 2026-11-17): a case holding one keeps today's full fallback window, as if no record in it were
+/// complete, until slice 1 push 2 inventories `HwSlot` and `ExtSlot`.
+const UNINVENTORIED: &[(&str, &[&str])] = &[
+    ("v0.3.2-features.transit", &["external.instrument"]),
+    ("v0.4.0-features.transit", &["external.instrument"]),
+    ("v0.4.1-features.transit", &["external.instrument"]),
+    ("v0.5.0-features.transit", &["external.instrument"]),
+    ("v0.6.0-features.transit", &["external.instrument"]),
+    ("v0.7.0-features.transit", &["external.instrument"]),
+    ("v0.7.1-features.transit", &["external.instrument"]),
+    ("v0.7.2-features.transit", &["external.instrument"]),
+    ("v0.7.3-features.transit", &["external.instrument"]),
+];
+
+/// Found by the #742 strip inventory: with no worker, a keyed strip published and then taken back
+/// `Unstarted` kept its key entries' pending early-key frames (filled for a render that never
+/// happened), where the muted serial render, which never fills them, holds none. The keyed strip
+/// is the v0.3.2 demo's Lead (the corpus key edge), held one block.
+#[test]
+fn regression_a_keyed_strip_taken_back_unstarted_forgets_its_pending_key() {
+    let _on = graph_on();
+    let (name, s) = corpus().into_iter().find(|(n, _)| n == "v0.3.2-demo.transit").unwrap();
+    let top = Topology::new(&name, s, vec![]);
+    let lead = top.rig().mix.strip_index(track(&top.session, "Lead")).unwrap();
+    regression(&top, 0, &Schedule::new(&[(lead, 2, 1)]));
 }

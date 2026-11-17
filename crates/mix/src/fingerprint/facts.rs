@@ -33,6 +33,9 @@ pub struct StripFacts {
     pub track: TrackId,
     pub audio: Vec<AudioFact>,
     pub midi: Vec<MidiFact>,
+    /// The strip's hardware inserts and External Instrument, by entry (`hardware.insert`,
+    /// `external.instrument`): slot state not inventoried yet (#742 ruling W-1).
+    pub external: Vec<String>,
 }
 
 impl MixEngine {
@@ -65,7 +68,9 @@ impl MixEngine {
                 .flat_map(|e| e.fx.chain_facts())
                 .map(|(entry, complete)| MidiFact { entry: entry.to_string(), complete })
                 .collect();
-            out.push(StripFacts { track: st.id, audio, midi });
+            let mut external: Vec<String> = st.hw.iter().map(|_| transit_model::HARDWARE_PLUGIN.to_string()).collect();
+            external.extend(st.ext.iter().map(|_| transit_model::EXTERNAL_INSTRUMENT_PLUGIN.to_string()));
+            out.push(StripFacts { track: st.id, audio, midi, external });
         }
         out
     }

@@ -266,3 +266,44 @@ fn poisoning_unobservable_storage_changes_no_output_and_no_print() {
         );
     }
 }
+
+/// Adopts `s` into `rig` (the same structure, other values: its instances are kept).
+fn adopt(rig: &mut Rig, s: &Session, generation: u64) {
+    let mut make = |spec: &transit_mix::InstanceSpec, _: transit_mix::SlotGen| {
+        transit_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
+    };
+    let mut env = rig.comp.compile(Arc::new(s.clone()), rig.comp.active(), transit_mix::PlanGeneration::from_raw(generation), &mut make).unwrap();
+    assert_eq!(rig.mix.adopt_plan(&mut env), transit_mix::Adoption::Adopted);
+    rig.comp.reclaim(env);
+}
+
+/// The idle delay compensation line's contents (the mix `DelayLine` while not live): Kick, the
+/// latent strip, reads no edge delayed, so its lines are idle; poisoned in one render, they change
+/// nothing, and once Kick's lookahead goes (block 8) its edges are delayed to Pad's latency, the
+/// line comes alive and its first write clears the ring before any read.
+#[test]
+fn poisoning_an_idle_delay_line_changes_no_output_and_no_print() {
+    let g = gate();
+    let mut later = g.session.clone();
+    later.track_mut(g.kick).unwrap().mixer.inserts[0].as_mut().unwrap().params.insert("lookahead".into(), 0.0);
+    let (mut a, mut b) = (rig(&g), rig(&g));
+    let (mut changed, mut reached) = (0, 0);
+    for k in 0..BLOCKS {
+        if k == 8 {
+            adopt(&mut a, &later, 2);
+            adopt(&mut b, &later, 2);
+        }
+        if k >= 3 {
+            changed += b.mix.poison(g.kick, Poison::IdleTap);
+        }
+        play(&mut a, g.synth, k);
+        play(&mut b, g.synth, k);
+        a.block();
+        b.block();
+        reached += usize::from(k >= 3 && b.mix.poison_reached(g.kick, Poison::IdleTap));
+        assert_eq!(a.out, b.out, "block {k}: the output");
+        assert_eq!(a.mix.strip_prints(), b.mix.strip_prints(), "block {k}: the prints");
+    }
+    assert!(changed > 0, "the pattern changed the idle line");
+    assert!(reached > 0, "the line came alive and its write reached the poisoned contents");
+}

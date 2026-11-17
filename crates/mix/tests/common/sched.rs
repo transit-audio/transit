@@ -339,6 +339,9 @@ pub(crate) struct Topology {
     pub(crate) blocks: usize,
     /// Blocks after the last hold (see the module docs).
     pub(crate) window: usize,
+    /// The case renders today's full fallback window (`Window::fallback`): it may hold or skip a
+    /// strip with a hardware insert or an External Instrument (#742 ruling W-1).
+    pub(crate) fallback: bool,
 }
 
 const HOLD: &str = "hold";
@@ -358,7 +361,7 @@ impl Topology {
             t.mixer.inserts[last] = Some(i);
             knobs.insert(t.id, Arc::new(Knob::default()));
         }
-        Topology { name: name.into(), session, instruments, knobs: Arc::new(knobs), blocks: BLOCKS, window: WINDOW }
+        Topology { name: name.into(), session, instruments, knobs: Arc::new(knobs), blocks: BLOCKS, window: WINDOW, fallback: false }
     }
 
     /// The test plug-ins of `s` (a hold, a delay), else `None` for the usual factory.
@@ -692,9 +695,11 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
                     failure.get_or_insert(format!("block {b}, strip {d}: {why} (key edges {edges:?}, skips {causes:?})"));
                 }
             }
-            // Section 14's scope (#742): a strip with a hardware insert or an External Instrument
-            // has no inventoried state, so no case may hold or skip it.
-            if let Some(&i) = held.iter().chain(mutes.iter().map(|(i, _)| i)).find(|&&i| rig.mix.strip_external(i)) {
+            // Section 14's scope (#742, ruling W-1): a strip with a hardware insert or an External
+            // Instrument has no inventoried state, so only a case on today's full fallback window
+            // may hold or skip it.
+            let scoped = !top.fallback;
+            if let Some(&i) = held.iter().chain(mutes.iter().map(|(i, _)| i)).find(|&&i| scoped && rig.mix.strip_external(i)) {
                 failure.get_or_insert(format!("block {b}, strip {i}: holds or skips a strip with a hardware insert or an External Instrument"));
             }
             run.mutes.push(mutes);
@@ -972,17 +977,28 @@ pub(crate) struct Window {
     pub(crate) incomplete: Vec<String>,
     /// The instances whose tail plus latency is the longest contribution, with it in samples.
     pub(crate) set_by: Vec<String>,
+    /// The hardware insert and External Instrument entries of the case, sorted: pinned with the
+    /// reason "hardware and External Instrument slot state not inventoried (#742)".
+    pub(crate) uninventoried: Vec<String>,
+    /// The case renders today's full fallback window (as if no record were complete): it has a
+    /// hardware insert or an External Instrument (#742 ruling W-1).
+    pub(crate) fallback: bool,
 }
 
 /// The window from a case's configured, loaded instances (`MixEngine::strip_plugin_facts` after
 /// the latency probe block): the tail plus latency of every instance whose record is not
 /// complete, and of a strip's instrument when its effective MIDI effect chain holds an effect
 /// without a complete record; the longest of them plus the plan's latency, in whole blocks, at
-/// least `WINDOW` (with every record complete: `WINDOW`, or the plan's latency if longer).
+/// least `WINDOW` (with every record complete: `WINDOW`, or the plan's latency if longer). A case
+/// with a hardware insert or an External Instrument keeps today's full fallback window instead:
+/// every instance counts as if no record were complete, until that slot state is inventoried
+/// (#742 ruling W-1).
 pub(crate) fn structural_window(facts: &[StripFacts], latency: usize) -> Window {
     let mut longest = 0;
     let mut set_by = Vec::new();
     let mut incomplete = std::collections::BTreeSet::new();
+    let uninventoried: std::collections::BTreeSet<String> = facts.iter().flat_map(|s| s.external.iter().cloned()).collect();
+    let fallback = !uninventoried.is_empty();
     let mut take = |what: String, samples: usize| {
         if samples > longest {
             longest = samples;
@@ -1001,12 +1017,20 @@ pub(crate) fn structural_window(facts: &[StripFacts], latency: usize) -> Window 
                 take(a.entry.clone(), a.tail + a.latency);
             } else if a.instrument && chain_incomplete {
                 take(format!("{} (its MIDI effect chain)", a.entry), a.tail + a.latency);
+            } else if fallback {
+                take(format!("{} (the case's fallback window)", a.entry), a.tail + a.latency);
             }
         }
     }
     set_by.sort();
     set_by.dedup();
-    Window { blocks: (longest + latency).div_ceil(BLOCK).max(WINDOW), incomplete: incomplete.into_iter().collect(), set_by }
+    Window {
+        blocks: (longest + latency).div_ceil(BLOCK).max(WINDOW),
+        incomplete: incomplete.into_iter().collect(),
+        set_by,
+        uninventoried: uninventoried.into_iter().collect(),
+        fallback,
+    }
 }
 
 /// A minimal schedule from a failing seed, replayed as a named regression: `topology` through

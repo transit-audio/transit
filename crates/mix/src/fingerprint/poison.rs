@@ -31,6 +31,8 @@ pub enum Poison {
     MidiB,
     /// The host's merge `merged`.
     MidiMerged,
+    /// The strip's delay compensation lines (`tap`, `tap_pre`) while idle: their contents.
+    IdleTap,
 }
 
 /// The pattern's value at position `k`: finite, nonzero, and changed from `prior` (its negation
@@ -78,6 +80,7 @@ impl MixEngine {
             Poison::Clipbuf => fill(&mut st.clipbuf, 0),
             Poison::Outbuf => fill(&mut st.outbuf, 0),
             Poison::KeyInScratch => st.key_in.iter_mut().map(|k| fill(&mut k.scratch, 0)).sum(),
+            Poison::IdleTap => [&mut st.tap, &mut st.tap_pre].into_iter().filter(|l| !l.live).map(|l| fill(&mut l.bufs, 0)).sum(),
             Poison::KeyBuf | Poison::KeyScratch => tables.keys.poison_of(i, target == Poison::KeyBuf, fill),
             Poison::MidiA | Poison::MidiB | Poison::MidiMerged => {
                 let which = match target {
@@ -91,7 +94,8 @@ impl MixEngine {
     }
 
     /// After a block: the poisoned storage's write site ran over it (no pattern value is left in
-    /// a float buffer; the MIDI host's storage carried events again).
+    /// a float buffer; the MIDI host's storage carried events again; an idle delay line came
+    /// alive and its first write cleared it).
     #[must_use]
     pub fn poison_reached(&self, track: TrackId, target: Poison) -> bool {
         let Some(p) = self.plan.as_deref() else { return false };
@@ -104,6 +108,8 @@ impl MixEngine {
             Poison::Clipbuf => left(&st.clipbuf, 0) == 0,
             Poison::Outbuf => left(&st.outbuf, 0) == 0,
             Poison::KeyInScratch => st.key_in.iter().all(|k| left(&k.scratch, 0) == 0),
+            // An idle line came alive this block: its write cleared the ring first.
+            Poison::IdleTap => st.tap.live && left(&st.tap.bufs, 0) == 0,
             Poison::KeyBuf | Poison::KeyScratch => p.tables.keys.poison_left_of(i, target == Poison::KeyBuf, left) == 0,
             Poison::MidiA | Poison::MidiB | Poison::MidiMerged => {
                 let which = match target {

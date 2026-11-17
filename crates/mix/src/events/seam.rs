@@ -11,9 +11,9 @@
 //! `InstrumentEvents::admit`: due-sorted insertion, coalescing, re-strike charges), at the strip's
 //! next block start, after the checks readmission makes (epoch, revocation, binding); the copy is
 //! then written. Due times are written relative to that start: an overdue one is normalized to
-//! it (0), a future one is preserved. The note and pedal ledgers are written by identity
-//! (source, then key and sender id; source and controller), sorted, and a queued action names
-//! its entry by identity, not by table index: raw table allocation is not compared. A deferred
+//! it (0), a future one is preserved. The note and pedal ledgers are written in table order and
+//! a queued action names its entry by table index, because release paths walk the tables in
+//! order and so the order reaches the output (ruling W-3 of 2026-11-17). A deferred
 //! ring's safety release is its own entry with its silence mask (delivery calls
 //! `release_instrument` for it); what is parked behind it is written as it stands, not admitted
 //! (it is admitted only after that release, a block later).
@@ -49,15 +49,6 @@ fn readmission(ev: &InstrumentEvent, start: u64, engine: &EngineEvents, binding:
         Due::Frame(RenderFrame(f)) => f.max(start),
     };
     engine.admission(&InstrumentEvent { due: Due::Frame(RenderFrame(due)), ..*ev }).ok()
-}
-
-/// The note entries' identity order (source, then key, then sender id).
-fn note_key(e: &NoteEntry) -> (u16, u8, u64, u8, u32) {
-    (e.source.port, e.source.channel, e.source.generation, e.key, e.sender.0)
-}
-
-fn pedal_key(p: &PedalEntry) -> (u16, u8, u64, u8) {
-    (p.source.port, p.source.channel, p.source.generation, p.cc)
 }
 
 impl InstrumentEvents {
@@ -141,18 +132,11 @@ impl InstrumentEvents {
             match *action {
                 Action::On(n) | Action::Off(n) => {
                     w.u8(if matches!(action, Action::On(_)) { 0 } else { 1 });
-                    w.present(notes.get(usize::from(n)), |w, e| {
-                        source_record(w, &e.source);
-                        w.u8(e.key);
-                        w.u32(e.sender.0);
-                    });
+                    w.u8(n);
                 }
                 Action::Down(n) | Action::Up(n) => {
                     w.u8(if matches!(action, Action::Down(_)) { 2 } else { 3 });
-                    w.present(pedals.get(usize::from(n)), |w, p| {
-                        source_record(w, &p.source);
-                        w.u8(p.cc);
-                    });
+                    w.u8(n);
                 }
                 Action::Reset => w.u8(4),
                 Action::Plain => w.u8(5),
@@ -160,36 +144,38 @@ impl InstrumentEvents {
             w.u8(*cost);
         }
         w.usize(*non_release);
-        // The ledgers by identity. An unused entry holds nothing observable: it is matched only
-        // while `used`, and `free_note`/`free_pedal` hand it out to be overwritten whole.
-        let mut open: Vec<&NoteEntry> = notes.iter().filter(|e| e.used).collect();
-        open.sort_by_key(|e| note_key(e));
-        w.usize(open.len());
-        for e in open {
-            let NoteEntry { used: _, source, key, sender, voice, ons, open, release_queued, retry_release, last_on } = e;
-            source_record(w, source);
-            w.u8(*key);
-            w.u32(sender.0);
-            w.i32(*voice);
-            w.u16(*ons);
-            w.u16(*open);
-            w.bool(*release_queued);
-            w.present(*retry_release, |w, v| w.u8(v));
-            w.u64(rel(*last_on, start));
+        // The ledgers in table order: release paths (`release_instrument`, an all-notes-off)
+        // walk the tables in order, so the order reaches the output (#742 ruling W-3). An unused
+        // entry holds nothing else observable: it is matched only while `used`, and
+        // `free_note`/`free_pedal` hand it out to be overwritten whole.
+        for e in notes {
+            let NoteEntry { used, source, key, sender, voice, ons, open, release_queued, retry_release, last_on } = e;
+            w.bool(*used);
+            if *used {
+                source_record(w, source);
+                w.u8(*key);
+                w.u32(sender.0);
+                w.i32(*voice);
+                w.u16(*ons);
+                w.u16(*open);
+                w.bool(*release_queued);
+                w.present(*retry_release, |w, v| w.u8(v));
+                w.u64(rel(*last_on, start));
+            }
         }
-        let mut held: Vec<&PedalEntry> = pedals.iter().filter(|p| p.used).collect();
-        held.sort_by_key(|p| pedal_key(p));
-        w.usize(held.len());
-        for p in held {
-            let PedalEntry { used: _, source, cc, down, value, downs, release_queued, retry_release, last_down } = p;
-            source_record(w, source);
-            w.u8(*cc);
-            w.bool(*down);
-            w.u8(*value);
-            w.u16(*downs);
-            w.bool(*release_queued);
-            w.present(*retry_release, |w, v| w.u8(v));
-            w.u64(rel(*last_down, start));
+        for p in pedals {
+            let PedalEntry { used, source, cc, down, value, downs, release_queued, retry_release, last_down } = p;
+            w.bool(*used);
+            if *used {
+                source_record(w, source);
+                w.u8(*cc);
+                w.bool(*down);
+                w.u8(*value);
+                w.u16(*downs);
+                w.bool(*release_queued);
+                w.present(*retry_release, |w, v| w.u8(v));
+                w.u64(rel(*last_down, start));
+            }
         }
         w.uints(64, holders.iter().flatten().map(|&v| u64::from(v)));
         w.uints(64, sent.iter().flatten().map(|&v| u64::from(v)));

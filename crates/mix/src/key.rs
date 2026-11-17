@@ -456,6 +456,19 @@ impl KeyBank {
         }
     }
 
+    /// Forgets the pending early-key frames of the entries keyed at `keyed` that are home: the
+    /// strip came back without rendering this block (`Unstarted`, faulted), so its keys were filled
+    /// for a render that never happened. Every later read of `pending` or of `buf` (an
+    /// `apply_pending`, a lend, a keyed insert's `get`) follows a new fill of the strip's keys in
+    /// the block that renders it, which overwrites both, so this changes no output; it keeps the
+    /// state canonical (a strip that missed the block holds what one never sent holds; #742
+    /// section 14). A plain store per entry: allocation-free, lock-free.
+    pub(crate) fn forget_pending(&mut self, keyed: usize) {
+        for e in self.entries.iter_mut().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent) {
+            e.pending = 0;
+        }
+    }
+
     /// Runs the early-key delay of every entry still pending (keyed at `keyed`, or all for
     /// `None`), once, as the strip renders. Nothing for an entry that is not pending.
     /// Allocation-free.

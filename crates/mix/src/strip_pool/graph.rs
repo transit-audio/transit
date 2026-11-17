@@ -169,6 +169,7 @@ impl StripPool {
                         OverrunCause::Unstarted => {
                             if self.away[i] && self.bring_home(i, st, events) {
                                 self.take_keys_back(i, keys);
+                                keys.forget_pending(i);
                             }
                         }
                         // The worker keeps it; the next blocks skip it until it is done.
@@ -180,6 +181,7 @@ impl StripPool {
                 Outcome::Faulted => {
                     if self.bring_home(i, st, events) {
                         self.take_keys_back(i, keys);
+                        keys.forget_pending(i);
                     }
                     self.silent[i] = true;
                     self.suspect_gen[i] = st.generation;

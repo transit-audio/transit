@@ -153,12 +153,14 @@ impl StripPool {
                     self.silent[i] = true;
                     if cause == OverrunCause::Unstarted && self.away[i] && self.bring_home(i, st, events) {
                         self.take_keys_back(i, keys);
+                        keys.forget_pending(i);
                         self.cells.with(i, |job| inputs.take_back(i, &mut job.busses));
                     }
                 }
                 Outcome::Faulted => {
                     if self.away[i] && self.bring_home(i, st, events) {
                         self.take_keys_back(i, keys);
+                        keys.forget_pending(i);
                         self.cells.with(i, |job| inputs.take_back(i, &mut job.busses));
                     }
                     self.silent[i] = true;
