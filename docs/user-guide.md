@@ -218,8 +218,9 @@ with none armed, nothing starts and the status line says so. There is no count-i
 in this case, because playback is already running; they apply when you press Record from a stop.
 
 What you record lands as a new take over the clips already under it. Audio always does: the
-old clips stay on the track as the previous take, and the new take plays. MIDI merges into a
-single clip it overlaps and keeps several as the previous take. See [Takes and comping](#takes-and-comping).
+old clips stay on the track as the previous take, and the new take plays. MIDI merges into the
+clip under it when there is just one; over several clips, those stay as the previous take. See
+[Takes and comping](#takes-and-comping).
 
 **Stop** (**Space**), or **Record** again, ends the take and stops playback. There is no punch out
 that keeps playing. Record does not punch into a selection or a marked range by itself: it starts at
