@@ -464,12 +464,7 @@ pub fn cell(row: Row, col: Col) -> &'static [Op] {
 /// phase and event has a cell, and a refusal keeps the phase.
 pub fn next(phase: &TransportPhase, event: &Event, facts: &Facts) -> Step {
     let mut run = Run { col: Col::of(phase), phase: *phase, effects: Vec::new(), event, facts };
-    let result = if run.holds() {
-        let row = event.row();
-        run.ops(matrix::header(row)).and_then(|go| if go { run.ops(cell(row, run.col)) } else { Ok(false) })
-    } else {
-        Ok(false)
-    };
+    let result = if run.holds() { run.row_ops(event.row()) } else { Ok(false) };
     match result {
         Err(refusal) => Step { phase: *phase, effects: Vec::new(), result: Err(refusal) },
         Ok(_) => {
@@ -558,6 +553,21 @@ impl Run<'_> {
             Event::ResumeCheck(_) => f.tracked.stops == 0 && f.owed_stop_since.is_none() && !f.tracked.record_off && !f.playing,
             _ => true,
         }
+    }
+
+    /// The row's every-column header, then its cell. D-6: in Rendering, where the header retires
+    /// every fact (R13, V3), the cell's render cancel comes first, so the retirement covers what
+    /// the cancel returned (its Stops are retired, neither tracked nor owed).
+    fn row_ops(&mut self, row: Row) -> Result<bool, Refusal> {
+        let header = matrix::header(row);
+        let cell = cell(row, self.col);
+        if self.col == Col::Rnd
+            && header.contains(&Op::RetireAll)
+            && let Some((&Op::CancelRender, rest)) = cell.split_first()
+        {
+            return Ok(self.ops(&[Op::CancelRender])? && self.ops(header)? && self.ops(rest)?);
+        }
+        Ok(self.ops(header)? && self.ops(cell)?)
     }
 
     /// Apply `ops` in order; `Ok(false)` when a guard stopped the cell.
@@ -891,8 +901,7 @@ impl Run<'_> {
                     if now.saturating_sub(since) >= OWED_STOP_DEADLINE {
                         // The expired deadline is checked first: fault_runtime(), then R13.
                         self.push(Effect::FaultRuntime);
-                        self.ops(matrix::header(Row::R13))?;
-                        return self.ops(cell(Row::R13, self.col));
+                        return self.row_ops(Row::R13);
                     }
                     self.push(Effect::RetryOwedStop);
                 }

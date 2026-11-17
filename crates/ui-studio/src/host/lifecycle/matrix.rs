@@ -328,7 +328,8 @@ const TH: &[Op] = &[Refuse(Refusal::Th)];
 const TD: &[Op] = &[Refuse(Refusal::Td)];
 const TX: &[Op] = &[Refuse(Refusal::Tx)];
 
-/// What an event name says for every column (R13, V3, V5), applied before the cell.
+/// What an event name says for every column (R13, V3, V5), applied before the cell; in Rendering,
+/// a header that retires every fact (R13, V3) applies after the cell's render cancel (D-6).
 pub fn header(row: Row) -> &'static [Op] {
     match row {
         // R13: "every column: every fact and owed Stop retired, groups closed, held and deferred

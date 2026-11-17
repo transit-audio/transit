@@ -26,6 +26,8 @@ pub use reducer::{
 pub(crate) use requests::{Classified, PassMeta, RequestMeta};
 
 #[cfg(test)]
+mod closure_tests;
+#[cfg(test)]
 mod matrix_tests;
 #[cfg(test)]
 mod tests;

@@ -1,8 +1,8 @@
 //! ADR 0062 slice S2a: the literal transition matrix and its pure reducer. `transport_phase_matrix`
 //! pins every cell of tables.md section A in a second, independent grid; the conditions the cells
 //! name are pinned branch by branch; `the_matrix_has_no_empty_cell` enumerates every phase, event,
-//! row and column; `stopped_implies_nothing_tracked` checks section 3's invariant over every
-//! transition into Stopped.
+//! row and column. Section 3's invariants are proven by the reachability closure in
+//! `closure_tests.rs`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use super::*;
@@ -306,7 +306,7 @@ fn matrix_conditions_follow_the_cell_text() {
     let live = TransportPhase::Rendering { job: RenderJob::Live };
     assert_eq!(
         run(live, Event::OwedStop { now: Duration::from_secs(3) }, owed).effects,
-        [Effect::FaultRuntime, Effect::RetireAll, Effect::SetFaulted, Effect::CancelRender(CancelReason::Fault), Effect::Message(Message::Fault)]
+        [Effect::FaultRuntime, Effect::CancelRender(CancelReason::Fault), Effect::RetireAll, Effect::SetFaulted, Effect::Message(Message::Fault)]
     );
 
     // The render: a cancel retires a live job only; settling waits; then the Reset continuation.
@@ -516,34 +516,10 @@ fn events(t: Ticket, older: Ticket) -> Vec<Event> {
     ]
 }
 
-/// Which outstanding requests can still move the transport: a test-side model beside the facts,
-/// which count outstanding identities only (the reducer cannot see it).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Capable {
-    /// The current group's starts.
-    current: bool,
-    /// Starts of groups a Stop closed.
-    closed: bool,
-    /// The pass's record-start continuation (its count-in or clock wait).
-    continuation: bool,
-}
-
-/// Facts a host can hold in `phase` after an event's own retirement, with what can still move
-/// the transport. Outstanding identities are generated wherever they can be tracked (record
-/// section 4: closed-group starts stay tracked until their receipts; `Started` does not retire
-/// Record). What can still move it:
-/// - Closed-group starts and the record continuation, in StopPending, until every Stop is
-///   acknowledged (an acknowledged Stop neutralizes earlier ordinary actions and record-start
-///   continuations, record section 4). Outside StopPending, the Stop that closed a group was
-///   acknowledged.
-/// - The current group's starts, in SP and RP. In CI, W and R the Record's action was processed
-///   (its stage or receipt was seen), and ordinary actions are processed in publication order
-///   (`P/player/control.rs:107-139`), so a start published before it has already been processed,
-///   either applied or terminally refused, and cannot execute later; only its receipt may be
-///   outstanding.
-/// - The record continuation in RP, CI and W (an admitted Record can still start from its
-///   clock wait); not in R (it has started).
-fn worlds(phase: &TransportPhase) -> Vec<(Facts, Capable)> {
+/// Facts for the totality sweep: every phase with the tracked, owed, group, held and render
+/// facts it can carry, playback on and off, faulted or not. (Section 3's invariants are proven
+/// over what the table reaches, in `closure_tests.rs`.)
+fn worlds(phase: &TransportPhase) -> Vec<Facts> {
     let col = Col::of(phase);
     let stopping = matches!(col, Col::Stp | Col::Str | Col::Stz);
     let members: &[u32] = if matches!(col, Col::Sp | Col::Rp | Col::Ci | Col::W | Col::R) { &[0, 1] } else { &[0] };
@@ -571,12 +547,6 @@ fn worlds(phase: &TransportPhase) -> Vec<(Facts, Capable)> {
                                         for &speed in speed {
                                             for release in [false, true] {
                                                 for faulted in [false, true] {
-                                                    let unacknowledged = stopping && (stops > 0 || owed.is_some());
-                                                    let capable = Capable {
-                                                        current: matches!(col, Col::Sp | Col::Rp),
-                                                        closed: unacknowledged,
-                                                        continuation: matches!(col, Col::Rp | Col::Ci | Col::W) || unacknowledged,
-                                                    };
                                                     let tracked = Tracked {
                                                         starts: members + closed,
                                                         record,
@@ -601,7 +571,7 @@ fn worlds(phase: &TransportPhase) -> Vec<(Facts, Capable)> {
                                                         finalizing: false,
                                                         reopen_pending: false,
                                                     };
-                                                    out.push((facts, capable));
+                                                    out.push(facts);
                                                 }
                                             }
                                         }
@@ -615,24 +585,6 @@ fn worlds(phase: &TransportPhase) -> Vec<(Facts, Capable)> {
         }
     }
     out
-}
-
-/// The host's retirement before the reducer runs: a Record receipt or terminal stage of the
-/// current ticket retires the Record, and a refusal or terminal stage ends its continuation.
-fn retire(event: &Event, mut facts: Facts, mut capable: Capable, current: Ticket) -> (Facts, Capable) {
-    if let Event::RecordAdmitted(t)
-    | Event::RecordStarted { ticket: t, .. }
-    | Event::RecordRefused { ticket: t, .. }
-    | Event::StageFailed(t)
-    | Event::StageCancelled(t) = *event
-        && t == current
-    {
-        facts.tracked.record = false;
-        if matches!(event, Event::RecordRefused { .. } | Event::StageFailed(_) | Event::StageCancelled(_)) {
-            capable.continuation = false;
-        }
-    }
-    (facts, capable)
 }
 
 #[test]
@@ -676,7 +628,7 @@ fn the_matrix_has_no_empty_cell() {
     let mut steps = 0usize;
     for phase in &phases {
         for event in &events {
-            for (facts, _) in worlds(phase) {
+            for facts in worlds(phase) {
                 let step = next(phase, event, &facts);
                 if step.result.is_err() {
                     assert_eq!((step.phase, step.effects.len()), (*phase, 0), "{phase:?} {event:?} {facts:?}");
@@ -686,51 +638,6 @@ fn the_matrix_has_no_empty_cell() {
         }
     }
     assert!(steps > 10_000, "{steps}");
-}
-
-#[test]
-fn stopped_implies_nothing_tracked() {
-    let (t, older) = tickets();
-    let events = events(t, older);
-    let mut entered = 0usize;
-    for phase in phases() {
-        for event in &events {
-            for (facts, capable) in worlds(&phase) {
-                let (facts, mut capable) = retire(event, facts, capable, t);
-                let step = next(&phase, event, &facts);
-                if step.phase != TransportPhase::Stopped || step.result.is_err() {
-                    continue;
-                }
-                let why = format!("{phase:?} {event:?} {facts:?} {capable:?} -> {:?}", step.effects);
-                let moving = step
-                    .effects
-                    .iter()
-                    .any(|e| matches!(e, Effect::SubmitStart(_) | Effect::SubmitStop | Effect::SubmitRecord { .. } | Effect::SubmitRenderPlay));
-                assert!(!moving, "Stopped with a request that moves the transport: {why}");
-                let exempt = facts.faulted || step.effects.contains(&Effect::SetFaulted) || step.effects.contains(&Effect::RetireAll);
-                if phase == TransportPhase::Stopped || exempt {
-                    continue;
-                }
-                // What the transition neutralized: every Stop acknowledged, or the pass finished.
-                if *event == Event::StopFrontier && facts.tracked.stops == 0 && facts.owed_stop_since.is_none() {
-                    capable = Capable { current: false, closed: false, continuation: false };
-                }
-                if step.effects.contains(&Effect::FinishPass) {
-                    capable.continuation = false;
-                }
-                let f = &facts;
-                assert!(!(capable.current && f.group.members > 0), "a current start can still move the transport: {why}");
-                assert!(!(capable.closed && f.tracked.starts > f.group.members), "a closed group's start can still move it: {why}");
-                assert!(!capable.continuation, "the record start can still move it: {why}");
-                assert_eq!(f.tracked.stops, 0, "a Stop is tracked: {why}");
-                assert!(f.owed_stop_since.is_none(), "a Stop is owed: {why}");
-                assert!(!f.playing, "playback is observed: {why}");
-                assert!(!f.tracked.render_play && f.tracked.render_stops == 0, "the render's requests are tracked: {why}");
-                entered += 1;
-            }
-        }
-    }
-    assert!(entered > 100, "transitions into Stopped checked: {entered}");
 }
 
 #[test]
