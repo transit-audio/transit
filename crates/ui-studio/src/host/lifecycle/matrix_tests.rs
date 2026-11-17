@@ -1,5 +1,5 @@
 //! ADR 0062 slice S2a: the literal transition matrix and its pure reducer. `transport_phase_matrix`
-//! pins every cell of tables.md section A in a second, independent grid; the conditions the cells
+//! (in `grid_tests.rs`) pins every cell of tables.md section A in full; the conditions the cells
 //! name are pinned branch by branch; `the_matrix_has_no_empty_cell` enumerates every phase, event,
 //! row and column. Section 3's invariants are proven by the reachability closure in
 //! `closure_tests.rs`.
@@ -33,88 +33,6 @@ fn ready(ticket: Ticket) -> RecordPrep {
 const PARK: TransportPhase = TransportPhase::StopPending { then: AfterStop::Park { end: ParkEnd::AtCursor } };
 const RETIRED: RenderJob = RenderJob::Retired { result: Some(RenderOutcome::Completed), reason: None, then_reset: false };
 
-/// The phase each column is pinned in; RND is a retired job for the rows that settle it.
-fn column_phase(col: Col, row: Row) -> TransportPhase {
-    let (t, _) = tickets();
-    match col {
-        Col::S => TransportPhase::Stopped,
-        Col::Sp => TransportPhase::StartPending,
-        Col::P => TransportPhase::Playing,
-        Col::Rp => TransportPhase::RecordPending { ticket: t, from: Some(0), count_in: Some(PLAN) },
-        Col::Ci => TransportPhase::CountIn { ticket: t, from: 0, plan: PLAN },
-        Col::W => TransportPhase::WaitingForClock { ticket: t, from: Some(0), count_in: None },
-        Col::R => TransportPhase::Recording { latch: point(), count_in: Some(PLAN) },
-        Col::Stp => PARK,
-        Col::Str => TransportPhase::StopPending { then: AfterStop::Resume(500) },
-        Col::Stz => TransportPhase::StopPending { then: AfterStop::Reset },
-        Col::Rnd if matches!(row, Row::R6 | Row::E5) => TransportPhase::Rendering { job: RETIRED },
-        Col::Rnd => TransportPhase::Rendering { job: RenderJob::Live },
-    }
-}
-
-/// The event each row is pinned with (the render's Play in RND for R1 and R2).
-fn row_event(row: Row, col: Col) -> Event {
-    let (t, _) = tickets();
-    let play_of = if col == Col::Rnd { PlayOf::Render } else { PlayOf::Group { current: true } };
-    match row {
-        Row::C1 => Event::Play,
-        Row::C2 => Event::PlayExact(AT),
-        Row::C3 => Event::PlaySelection,
-        Row::C4 => Event::TogglePlay,
-        Row::C5 => Event::Stop,
-        Row::C6 => Event::Pause,
-        Row::C7 => Event::Record(ready(t)),
-        Row::C8 => Event::Locate(AT),
-        Row::C9 => Event::HalfSpeed,
-        Row::C10 => Event::Scrub(AT),
-        Row::C11 => Event::AllNotesOff,
-        Row::C12 => Event::ResetSession,
-        Row::C13 => Event::RulerClick(AT),
-        Row::R1 => Event::PlayApplied(play_of),
-        Row::R2 => Event::PlayRefused(play_of),
-        Row::R3 => Event::RecordAdmitted(t),
-        Row::R4 => Event::RecordStarted { ticket: t, latch: point() },
-        Row::R5 => Event::RecordRefused { ticket: t, retired_by_stage: false },
-        Row::R6 => Event::StopFrontier,
-        Row::R7 => Event::RecordOffApplied,
-        Row::R8 => Event::RecordOffRefused,
-        Row::R9 => Event::LocateOrLoopReceipt { applied: false },
-        Row::R10 => Event::ReleaseFrontier,
-        Row::R11 => Event::SessionRejected,
-        Row::R12 => Event::UntrackedRefusal,
-        Row::R13 => Event::PlayerFaulted,
-        Row::O1 => Event::StageCountingIn(t),
-        Row::O2 => Event::StageWaiting(t),
-        Row::O3 => Event::StageStarted { ticket: t, latch: point() },
-        Row::O4 => Event::StageFailed(t),
-        Row::O5 => Event::StageCancelled(t),
-        Row::O6 => Event::StoppedByItself,
-        Row::O7 => Event::PlaybackObserved,
-        Row::E1 => Event::RenderStart,
-        Row::E2 => Event::RenderCancel(CancelReason::Dialog),
-        Row::E3a => Event::RenderPoll,
-        Row::E3 => Event::RenderResult(RenderOutcome::Completed),
-        Row::E5 => Event::RenderSettled,
-        Row::W1 => Event::OwedStop { now: Duration::from_secs(1) },
-        Row::V1 => Event::OutputTrouble,
-        Row::V2 => Event::InputTrouble,
-        Row::V3 => Event::DriverReset,
-        Row::V4a => Event::ReplaceRequested,
-        Row::V4b => Event::OldPlayerRetired,
-        Row::V5 => Event::MidiTransportLost,
-        Row::V6 => Event::InputLoss,
-        Row::L1 => Event::LoopChanged,
-        Row::T1 => Event::LapLimit,
-        Row::H2 => Event::ResumeCheck(ready(t)),
-    }
-}
-
-/// The facts each row is pinned with: nothing tracked, normal speed; an owed Stop for W1.
-fn row_facts(row: Row) -> Facts {
-    let owed_stop_since = (row == Row::W1).then_some(Duration::ZERO);
-    Facts { owed_stop_since, position: 70, cursor: 40, ..Facts::default() }
-}
-
 fn abbr(phase: &TransportPhase) -> &'static str {
     match phase {
         TransportPhase::Stopped => "S",
@@ -129,92 +47,6 @@ fn abbr(phase: &TransportPhase) -> &'static str {
         TransportPhase::StopPending { then: AfterStop::Reset } => "STz",
         TransportPhase::Rendering { .. } => "RND",
     }
-}
-
-/// A step written as tables.md writes a cell: a refusal's code; `hold`, `def`; `—` for no effect;
-/// otherwise the phase entered (or kept, with an effect), `!` when the pass ends.
-fn summary(before: &TransportPhase, step: &Step) -> String {
-    match step.result {
-        Err(refusal) => format!("{refusal:?}"),
-        Ok(Disposition::Held) => "hold".into(),
-        Ok(Disposition::Deferred) => "def".into(),
-        Ok(_) if step.effects.is_empty() && step.phase == *before => "—".into(),
-        Ok(_) => format!("{}{}", abbr(&step.phase), if step.effects.contains(&Effect::FinishPass) { "!" } else { "" }),
-    }
-}
-
-/// tables.md section A, cell by cell, as [`summary`] writes each outcome. A merged "every column"
-/// cell is spelled out; `—` in STz for C12 ("STz") is the phase kept with no effect. W is pinned as
-/// an explicit start (`from` given), so O6 W is "otherwise —"; the punch is pinned separately.
-#[rustfmt::skip]
-const GRID: [(Row, [&str; 11]); 49] = [
-    //          S       SP      P       RP      CI      W       R       STp     STr     STz     RND
-    (Row::C1,  ["SP",  "—",    "—",    "—",    "STp!", "—",    "—",    "hold", "def",  "—",    "Tn"]),
-    (Row::C2,  ["SP",  "SP",   "SP",   "—",    "STp!", "—",    "—",    "hold", "def",  "—",    "Tn"]),
-    (Row::C3,  ["SP",  "SP",   "SP",   "—",    "STp!", "—",    "—",    "hold", "def",  "—",    "Tn"]),
-    (Row::C4,  ["SP",  "STp",  "STp",  "STp!", "STp!", "STp!", "STp!", "hold", "def",  "—",    "Tn"]),
-    (Row::C5,  ["STp", "STp",  "STp",  "STp!", "STp!", "STp!", "STp!", "STp",  "STp",  "STz",  "Tn"]),
-    (Row::C6,  ["—",   "STp",  "STp",  "STp!", "STp!", "STp!", "STp!", "STp",  "STp",  "—",    "Tn"]),
-    (Row::C7,  ["RP",  "RP",   "RP",   "STp!", "STp!", "STp!", "STp!", "hold", "STp",  "—",    "Tn"]),
-    (Row::C8,  ["S",   "SP",   "P",    "STr!", "STr!", "STr!", "STr!", "STp",  "STr",  "—",    "Tn"]),
-    (Row::C9,  ["SP",  "SP",   "SP",   "Th",   "STp!", "Th",   "Th",   "hold", "Th",   "—",    "Tn"]),
-    (Row::C10, ["S",   "SP",   "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::C11, ["S",   "SP",   "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::C12, ["STz", "STz",  "STz",  "STz!", "STz!", "STz!", "STz!", "STz",  "STz",  "—",    "RND"]),
-    (Row::C13, ["S",   "SP",   "P",    "STr!", "STr!", "STr!", "STr!", "STp",  "STr",  "—",    "Tn"]),
-    (Row::R1,  ["—",   "P",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—"]),
-    (Row::R2,  ["S",   "S",    "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::R3,  ["—",   "—",    "—",    "CI",   "—",    "—",    "—",    "—",    "—",    "—",    "—"]),
-    (Row::R4,  ["—",   "—",    "—",    "R",    "R",    "R",    "—",    "—",    "—",    "—",    "—"]),
-    (Row::R5,  ["—",   "—",    "—",    "S!",   "S!",   "S!",   "—",    "—",    "—",    "—",    "—"]),
-    (Row::R6,  ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "S",    "STr",  "S",    "S"]),
-    (Row::R7,  ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "STr",  "—",    "—"]),
-    (Row::R8,  ["S",   "SP",   "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::R9,  ["S",   "SP",   "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::R10, ["S",   "SP",   "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::R11, ["S",   "SP",   "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::R12, ["S",   "SP",   "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::R13, ["S",   "S",    "S",    "S!",   "S!",   "S!",   "S!",   "S",    "S",    "S",    "S"]),
-    (Row::O1,  ["—",   "—",    "—",    "CI",   "—",    "—",    "—",    "—",    "—",    "—",    "—"]),
-    (Row::O2,  ["—",   "—",    "—",    "W",    "W",    "—",    "—",    "—",    "—",    "—",    "—"]),
-    (Row::O3,  ["—",   "—",    "—",    "R",    "R",    "R",    "—",    "—",    "—",    "—",    "—"]),
-    (Row::O4,  ["—",   "—",    "—",    "S!",   "S!",   "S!",   "—",    "—",    "—",    "—",    "—"]),
-    (Row::O5,  ["—",   "—",    "—",    "S!",   "S!",   "S!",   "—",    "—",    "—",    "—",    "—"]),
-    (Row::O6,  ["—",   "—",    "S",    "—",    "—",    "—",    "S!",   "—",    "—",    "—",    "—"]),
-    (Row::O7,  ["P",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—"]),
-    (Row::E1,  ["RND", "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "RenderRunning"]),
-    (Row::E2,  ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "RND"]),
-    (Row::E3a, ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "RND"]),
-    (Row::E3,  ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "RND"]),
-    (Row::E5,  ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "S"]),
-    (Row::W1,  ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::V1,  ["S",   "SP",   "STp",  "STp!", "STp!", "STp!", "STp!", "STp",  "STp",  "STz",  "RND"]),
-    (Row::V2,  ["S",   "SP",   "P",    "STp!", "STp!", "STp!", "STp!", "STp",  "STp",  "STz",  "RND"]),
-    (Row::V3,  ["S",   "S",    "S",    "S!",   "S!",   "S!",   "S!",   "S",    "S",    "S",    "S"]),
-    (Row::V4a, ["S",   "STp",  "STp",  "Td",   "Td",   "Td",   "Td",   "—",    "Td",   "—",    "RND"]),
-    (Row::V4b, ["S",   "S",    "S",    "S",    "S",    "S",    "S",    "S",    "S",    "S",    "S"]),
-    (Row::V5,  ["STp", "STp",  "STp",  "STp!", "STp!", "STp!", "STp!", "STp",  "STp",  "STz",  "RND"]),
-    (Row::V6,  ["S",   "SP",   "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "STz",  "RND"]),
-    (Row::L1,  ["S",   "SP",   "P",    "RP",   "CI",   "W",    "R",    "STp",  "STr",  "—",    "—"]),
-    (Row::T1,  ["—",   "—",    "—",    "—",    "—",    "—",    "STp!", "—",    "—",    "—",    "—"]),
-    (Row::H2,  ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "RP",   "—",    "—"]),
-];
-
-#[test]
-fn transport_phase_matrix() {
-    let mut wrong = Vec::new();
-    for (row, cells) in GRID {
-        for col in Col::ALL {
-            let before = column_phase(col, row);
-            let step = next(&before, &row_event(row, col), &row_facts(row));
-            let got = summary(&before, &step);
-            if got != cells[col.index()] {
-                wrong.push(format!("{row:?} {col:?}: want {}, got {got} ({step:?})", cells[col.index()]));
-            }
-        }
-    }
-    assert!(wrong.is_empty(), "{} cells differ:\n{}", wrong.len(), wrong.join("\n"));
-    assert_eq!(GRID.map(|(row, _)| row), Row::ALL, "the grid has every row, in tables.md order");
 }
 
 fn run(phase: TransportPhase, event: Event, facts: Facts) -> Step {
