@@ -470,6 +470,9 @@ fn check(phase: &TransportPhase, a: &Abs) -> Option<&'static str> {
         if a.render_play || a.render_stops {
             return Some("Stopped with the render's requests tracked");
         }
+        if a.held.is_some() || a.deferred > 0 {
+            return Some("Stopped with a held start or deferred commands (U-3)");
+        }
     }
     None
 }
@@ -494,6 +497,11 @@ fn explore(t: Ticket, older: Ticket) -> Closure {
             continue;
         }
         for (event, a) in events(&key.1, t, older) {
+            // Admission step 1 (record section 7): a Stop, Pause or ResetSession, or a Record in
+            // StopPending Resume, supersedes the held start and the deferred commands.
+            let supersedes = matches!(event, Event::Stop | Event::Pause | Event::ResetSession)
+                || (matches!(event, Event::Record(_)) && matches!(phase, TransportPhase::StopPending { then: AfterStop::Resume(_) }));
+            let a = if supersedes { Abs { held: None, deferred: 0, ..a } } else { a };
             for playing in [false, true] {
                 for reopen in [false, true] {
                     for finalizing in [false, true] {
@@ -534,7 +542,7 @@ fn stopped_implies_nothing_tracked() {
     assert!(c.seen.contains(&(0, Abs { faulted: true, ..Abs::default() })), "the faulted entry state is reached");
     // The closure reached its fixed point (the queue drained); an empty exploration cannot pass.
     assert!(
-        c.seen.len() > 80_000 && c.transitions > 15_000_000 && c.phases.len() > 30,
+        c.seen.len() > 30_000 && c.transitions > 6_000_000 && c.phases.len() > 30,
         "states {}, transitions {}, phases {}",
         c.seen.len(),
         c.transitions,
