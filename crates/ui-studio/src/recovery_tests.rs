@@ -298,3 +298,31 @@ fn a_recovered_pickup_in_the_pre_count_zone_counts_nothing() {
     assert_eq!(clips, 1);
     assert!(said.contains("1 recovered MIDI clip") && !said.contains("not recorded"), "{said}");
 }
+
+/// An autosave this build cannot read says why once, in the recovery sentence: no second opener
+/// ("Could not open ...") and no path into the private autosave folder (#719).
+#[test]
+fn recovering_an_unreadable_autosave_says_the_reason_once_without_the_folder() {
+    let dir = folder("recovery-unreadable");
+    let root = dir.join("Autosave");
+    let mut first = launch(&root);
+    first.run("session.save_as", json!({"path": dir.join("Song.transit")})).unwrap();
+    first.run("track.new", json!({"name": "Vocal"})).unwrap();
+    first.close_autosave();
+    drop(first);
+
+    let mut next = launch(&root);
+    let left = next.leftovers[0].clone();
+    let file = left.dir.join("session.transit");
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    v["name"] = json!({"structured": "where a string was"});
+    std::fs::write(&file, v.to_string()).unwrap();
+    next.recover(&left);
+    let said = next.status.clone();
+    assert!(said.starts_with("Couldn't recover “Song”: this file is a transit session (format version "), "{said}");
+    assert_eq!(said.matches("may have been saved by a different build").count(), 1, "{said}");
+    assert!(!said.contains("Could not open"), "{said}");
+    let folder_name = left.dir.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(!said.contains(&folder_name) && !said.contains("session.transit"), "{said}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -378,11 +378,22 @@ pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
 /// [`open_session`], following the media paths in it as if they were stored in the session file
 /// `links` (crash recovery: the session written beside the autosave, its paths from the original).
 pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> Result<Vec<String>> {
+    open_session_as(e, path, links, true)
+}
+
+/// [`open_session_linked`] for a caller that names what it was doing in its own sentence (crash
+/// recovery): a refusal is the model's reason alone, without "Could not open {file}: " and the
+/// private path of the file, so the caller's sentence does not stack a second opener on it (#719).
+pub(crate) fn open_session_reason(e: &mut Engine, path: &str, links: &Path) -> Result<Vec<String>> {
+    open_session_as(e, path, links, false)
+}
+
+fn open_session_as(e: &mut Engine, path: &str, links: &Path, name_file: bool) -> Result<Vec<String>> {
     let started = std::time::Instant::now();
     let text = read_text(path)?;
     let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| {
         log_session_detail(path, &err);
-        EngineError::Io(open_refusal(path, &err))
+        EngineError::Io(if name_file { open_refusal(path, &err) } else { err.to_string() })
     })?;
     let dir = Path::new(path).parent().map(Path::to_path_buf).unwrap_or_default();
     let mut missing = Vec::new();

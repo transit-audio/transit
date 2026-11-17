@@ -1,7 +1,7 @@
 //! Crash-recovery copies of open sessions, one folder each, written in the background, and the
 //! recovery of the ones left behind with unsaved work.
 
-use crate::io::{Recording, open_session_linked, sanitize_name};
+use crate::io::{Recording, open_session_reason, sanitize_name};
 use crate::{Engine, EngineError, Result};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -384,7 +384,7 @@ pub fn recover(e: &mut Engine, left: &Leftover) -> Result<Vec<String>> {
     let mut r = Engine::default();
     let session = session_in(&left.dir);
     let links = left.origin.as_deref().map_or(session.as_path(), Path::new);
-    let mut missing = open_session_linked(&mut r, &session.to_string_lossy(), links)?;
+    let mut missing = open_session_reason(&mut r, &session.to_string_lossy(), links)?;
     let mut s = r.session().clone();
     // The session belongs to the folder of the file it came from, not to the autosave folder it was
     // read from, which goes once it is recovered: a save resolves relative paths against this (#572).
