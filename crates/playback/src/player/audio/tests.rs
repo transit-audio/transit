@@ -126,13 +126,14 @@ fn cancelled_or_unclocked_recording_cannot_apply_play_or_start_a_newer_take() {
         assert!(!audio.transport.playing && !audio.transport.recording);
         if unavailable {
             // A clock that has not validated is waited for, up to a second, then the start fails.
-            assert_eq!(reader.status(), start::Status::Pending);
+            assert_eq!(reader.status(), start::Status::Waiting);
             for _ in 0..13_000 {
                 fill(&mut audio, &mut [0.0; 8]);
             }
             assert_eq!(shared.metro.start_failure.load(Ordering::Relaxed), StartFailure::Clock as u8);
         }
-        assert_eq!(reader.status(), start::Status::Cancelled);
+        let ended = if unavailable { start::Status::Failed(StartFailure::Clock) } else { start::Status::Cancelled };
+        assert_eq!(reader.status(), ended);
         if let Some(newer) = newer {
             assert_eq!(newer.status(), start::Status::Pending);
         }
@@ -1301,7 +1302,7 @@ fn a_clock_that_validates_within_the_wait_starts_the_audio_pass_without_refusal(
     for _ in 0..2_400 {
         fill(&mut audio, &mut [0.0; 8]); // 200 ms of 4-frame callbacks
     }
-    assert_eq!(reader.status(), start::Status::Pending);
+    assert_eq!(reader.status(), start::Status::Waiting);
     assert!(!audio.transport.playing);
     recording_clock(&mut audio, 48_000);
     fill(&mut audio, &mut [0.0; 8]);
@@ -1327,7 +1328,7 @@ fn a_non_duplex_audio_pass_without_any_clock_still_fails_with_the_clock_reason()
     for _ in 0..13_000 {
         fill(&mut audio, &mut [0.0; 8]);
     }
-    assert_eq!(reader.status(), start::Status::Cancelled);
+    assert_eq!(reader.status(), start::Status::Failed(StartFailure::Clock));
     assert_eq!(shared.metro.start_failure.load(Ordering::Relaxed), StartFailure::Clock as u8);
     assert!(!audio.transport.playing && !audio.transport.recording);
     control.retire(audio.plans, audio.actions);

@@ -1,16 +1,76 @@
 //! Recording starts are published by the applied audio action, not a UI receipt.
 //! A non-wrapping ticket prevents a delayed action from starting a later take.
+//!
+//! The state word is the ticket's sequence plus a three-bit stage (ADR 0062 section 6). The audio
+//! thread advances it monotonically, Pending, CountingIn, Waiting, then a terminal stage (Started,
+//! Failed or Cancelled), each by one strong compare-and-swap from the matching ticket's
+//! non-terminal state, never retried. Main's cancel retries when it loses to an advance, at most
+//! three times, and stops on a terminal stage.
 use crate::timeline_map::Position;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering};
 use transit_mix::EngineEpoch;
 
 pub(crate) mod mapping;
+#[cfg(test)]
+mod stage_tests;
 
-const FLAGS: u64 = 3;
+const FLAGS: u64 = 7;
+const CANCELLED: u64 = 0;
 const PENDING: u64 = 1;
 const STARTED: u64 = 2;
-const CANCELLED: u64 = 0;
+const COUNTING_IN: u64 = 3;
+const WAITING: u64 = 4;
+const FAILED: u64 = 5;
+/// Main's cancel loses to at most two advances (Pending to CountingIn to Waiting); the third
+/// attempt meets a non-terminal state it can cancel or a terminal one it leaves.
+const CANCEL_ATTEMPTS: usize = 3;
+
+/// Why a recording start did not happen. Travels to Main as a code in one atomic, so the audio
+/// thread allocates nothing to report it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartFailure {
+    /// The device clock map was lost or went stale during the count-in.
+    Clock = 1,
+    /// The transport timeline refused the position.
+    Timeline = 2,
+    /// The start position was out of range.
+    Position = 3,
+    /// The transport was not at normal speed (#522): recording runs at 1x only.
+    Speed = 4,
+}
+
+impl StartFailure {
+    pub(crate) fn from_code(code: u8) -> Option<Self> {
+        match code {
+            1 => Some(Self::Clock),
+            2 => Some(Self::Timeline),
+            3 => Some(Self::Position),
+            4 => Some(Self::Speed),
+            _ => None,
+        }
+    }
+
+    /// Plain words for the status line.
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Clock => "the audio device clock was not ready in time",
+            Self::Timeline => "the transport timeline refused the start position",
+            Self::Position => "the start position is out of range",
+            Self::Speed => "the transport was not at normal speed",
+        }
+    }
+}
+
+/// The order of the non-terminal stages; `None` for a terminal one.
+fn rank(stage: u64) -> Option<u8> {
+    match stage {
+        PENDING => Some(0),
+        COUNTING_IN => Some(1),
+        WAITING => Some(2),
+        _ => None,
+    }
+}
 
 /// One prepared recording operation within this runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,16 +87,29 @@ pub struct Point {
     pub position: Position,
 }
 
+/// The stage of one ticket's record start (ADR 0062 section 6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
+    /// Submitted, not yet applied by the audio thread.
     Pending,
+    /// Applied with a count-in that is clicking.
+    CountingIn,
+    /// Applied and waiting for the device clock (or normal speed) before it latches.
+    Waiting,
+    /// Latched at this applied boundary.
     Started(Point),
+    /// The audio thread refused the start for this reason.
+    Failed(StartFailure),
+    /// Cancelled (by Main, a later transport action, or a refusal without a reason), or superseded
+    /// by a later ticket.
     Cancelled,
 }
 
 struct Shared {
     engine: EngineEpoch,
     state: AtomicU64,
+    /// The [`StartFailure`] code of a Failed stage, stored before its compare-and-swap.
+    failure: AtomicU8,
     host_ns: AtomicU64,
     output_frame: AtomicU64,
     sample: AtomicI64,
@@ -99,6 +172,7 @@ pub fn pair(engine: EngineEpoch) -> (Control, Publisher) {
     let shared = Arc::new(Shared {
         engine,
         state: AtomicU64::new(0),
+        failure: AtomicU8::new(0),
         host_ns: AtomicU64::new(0),
         output_frame: AtomicU64::new(0),
         sample: AtomicI64::new(0),
@@ -139,6 +213,55 @@ impl Control {
 }
 
 impl Publisher {
+    /// The state word when it is `ticket`'s and not terminal.
+    fn live(&self, ticket: Ticket) -> Option<u64> {
+        if ticket.engine != self.shared.engine {
+            return None;
+        }
+        let state = self.shared.state.load(Ordering::Acquire);
+        (state & !FLAGS == ticket.sequence && rank(state & FLAGS).is_some()).then_some(state)
+    }
+
+    /// The one compare-and-swap of a publication, from the state `live` read; never retried.
+    fn publish(&self, current: u64, ticket: Ticket, stage: u64) -> bool {
+        self.shared.state.compare_exchange(current, ticket.sequence | stage, Ordering::Release, Ordering::Relaxed).is_ok()
+    }
+
+    /// Advance `ticket` to the non-terminal `stage`. True when the ticket is at `stage` after the
+    /// call (already there: nothing is written); false when the ticket is superseded, terminal,
+    /// past `stage`, or Main cancelled it between the read and the compare-and-swap.
+    fn advance(&mut self, ticket: Ticket, stage: u64) -> bool {
+        let Some(current) = self.live(ticket) else { return false };
+        match (rank(current & FLAGS), rank(stage)) {
+            (Some(from), Some(to)) if from == to => true,
+            (Some(from), Some(to)) if from < to => self.publish(current, ticket, stage),
+            _ => false,
+        }
+    }
+
+    /// Publish that `ticket`'s count-in is clicking. Bounded: no allocation, lock, wait or retry.
+    pub fn counting_in(&mut self, ticket: Ticket) -> bool {
+        self.advance(ticket, COUNTING_IN)
+    }
+
+    /// Publish that `ticket` waits for the device clock (or normal speed) before it latches.
+    pub fn waiting(&mut self, ticket: Ticket) -> bool {
+        self.advance(ticket, WAITING)
+    }
+
+    /// End `ticket` as refused: Failed with `failure` (its code stored first), or Cancelled when
+    /// the refusal has no reason. False when the ticket was already terminal or superseded.
+    pub fn fail(&mut self, ticket: Ticket, failure: Option<StartFailure>) -> bool {
+        let Some(current) = self.live(ticket) else { return false };
+        match failure {
+            Some(failure) => {
+                self.shared.failure.store(failure as u8, Ordering::Release);
+                self.publish(current, ticket, FAILED)
+            }
+            None => self.publish(current, ticket, CANCELLED),
+        }
+    }
+
     /// One bounded publication attempt; no allocation, lock, wait or retry.
     /// The mutable endpoint is the sole payload writer. Main may cancel/rearm
     /// between its check and CAS, but the older action then cannot publish.
@@ -147,14 +270,13 @@ impl Publisher {
     }
 
     /// As [`Publisher::start`], also publishing the input frame chosen without a host-time map
-    /// and whether the placement is approximate.
+    /// and whether the placement is approximate. Started is published from any non-terminal stage
+    /// of the ticket (a count-in or a clock wait ends in it).
     pub fn start_placed(&mut self, ticket: Ticket, point: Point, input_frame: Option<u64>, approximate: bool) -> bool {
         if point.position.denominator == 0 || point.position.fraction >= point.position.denominator {
             return false;
         }
-        if ticket.engine != self.shared.engine || self.shared.state.load(Ordering::Acquire) != ticket.sequence | PENDING {
-            return false;
-        }
+        let Some(current) = self.live(ticket) else { return false };
         self.shared.fallback_frame.store(input_frame.unwrap_or(NO_FRAME), Ordering::Release);
         self.shared.approximate.store(approximate, Ordering::Release);
         self.shared.host_ns.store(point.host_ns, Ordering::Release);
@@ -162,7 +284,7 @@ impl Publisher {
         self.shared.sample.store(point.position.sample, Ordering::Release);
         self.shared.fraction.store(point.position.fraction, Ordering::Release);
         self.shared.denominator.store(point.position.denominator, Ordering::Release);
-        self.shared.state.compare_exchange(ticket.sequence | PENDING, ticket.sequence | STARTED, Ordering::Release, Ordering::Relaxed).is_ok()
+        self.publish(current, ticket, STARTED)
     }
 
     /// Does this pass record audio input (so the take needs the input aligned to the output)?
@@ -180,19 +302,41 @@ impl Publisher {
         (next != NO_FRAME).then(|| next.saturating_sub(self.shared.input_block.load(Ordering::Relaxed)))
     }
 
-    /// Cancel this exact pending operation, including an action refused before Play.
+    /// Cancel this exact operation while it is not terminal (a later transport action withdrew
+    /// it): one compare-and-swap, never retried.
     pub fn cancel(&self, ticket: Ticket) {
-        cancel(&self.shared, ticket);
+        if let Some(current) = self.live(ticket) {
+            self.publish(current, ticket, CANCELLED);
+        }
     }
 }
 
+/// Main's cancel of `ticket` while it is not terminal.
 fn cancel(shared: &Shared, ticket: Ticket) {
+    cancel_with(shared, ticket, |_| {});
+}
+
+/// [`cancel`], with `between(attempt)` run between each attempt's read and its compare-and-swap,
+/// where a test interleaves the audio thread's advances. If publication wins, its boundary is
+/// retained for final take placement; a new ticket is a different identity and this stale
+/// cancellation cannot touch it. True when this call cancelled the ticket.
+fn cancel_with(shared: &Shared, ticket: Ticket, mut between: impl FnMut(usize)) -> bool {
     if ticket.engine != shared.engine {
-        return;
+        return false;
     }
-    // If publication wins, retain its boundary for final take placement. A new
-    // ticket is a different identity and this stale cancellation cannot touch it.
-    let _ = shared.state.compare_exchange(ticket.sequence | PENDING, ticket.sequence | CANCELLED, Ordering::AcqRel, Ordering::Relaxed);
+    let mut current = shared.state.load(Ordering::Acquire);
+    for attempt in 0..CANCEL_ATTEMPTS {
+        if current & !FLAGS != ticket.sequence || rank(current & FLAGS).is_none() {
+            return false;
+        }
+        between(attempt);
+        match shared.state.compare_exchange(current, ticket.sequence | CANCELLED, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return true,
+            // Lost to a stage advance (or a terminal stage, or a rearm): look again.
+            Err(seen) => current = seen,
+        }
+    }
+    false
 }
 
 impl Reader {
@@ -231,11 +375,23 @@ impl Reader {
     /// The validation therefore cannot accept the old state with newer words.
     pub fn status(&self) -> Status {
         let before = self.shared.state.load(Ordering::Acquire);
-        if before == self.ticket.sequence | PENDING {
-            return Status::Pending;
-        }
-        if before != self.ticket.sequence | STARTED {
+        if before & !FLAGS != self.ticket.sequence {
+            // A later ticket superseded this one.
             return Status::Cancelled;
+        }
+        match before & FLAGS {
+            PENDING => return Status::Pending,
+            COUNTING_IN => return Status::CountingIn,
+            WAITING => return Status::Waiting,
+            STARTED => {}
+            FAILED => {
+                let failure = StartFailure::from_code(self.shared.failure.load(Ordering::Acquire));
+                return match failure {
+                    Some(failure) if self.shared.state.load(Ordering::Acquire) == before => Status::Failed(failure),
+                    _ => Status::Cancelled,
+                };
+            }
+            _ => return Status::Cancelled,
         }
         let point = Point {
             host_ns: self.shared.host_ns.load(Ordering::Acquire),
@@ -464,7 +620,8 @@ mod tests {
             match reader.status() {
                 Status::Started(p) => assert_eq!(p, point(n)),
                 Status::Cancelled => {}
-                Status::Pending => panic!("cancelled start is still pending"),
+                Status::Pending | Status::CountingIn | Status::Waiting => panic!("cancelled start is still pending"),
+                Status::Failed(failure) => panic!("nothing refused this start: {failure:?}"),
             }
         }
         drop(send);
@@ -486,7 +643,8 @@ mod tests {
     #[test]
     fn identities_exhaust_without_aliasing_a_previous_recording() {
         let (mut control, mut audio) = pair(EngineEpoch(1));
-        control.next = u64::MAX - 7;
+        // Sequences step by 8 (three flag bits): the last one issued is `u64::MAX - 7`.
+        control.next = u64::MAX - 15;
         let last = control.prepare().unwrap();
         assert!(control.prepare().is_none());
         assert!(audio.start(last.ticket(), point(1)));

@@ -66,9 +66,9 @@ impl Mapping {
             self.last = Some(map);
         }
         let point = match self.start.status() {
-            Status::Pending => return false,
+            Status::Pending | Status::CountingIn | Status::Waiting => return false,
             Status::Started(point) => point,
-            Status::Cancelled => {
+            Status::Failed(_) | Status::Cancelled => {
                 self.shared.state.store(FAILED, Ordering::Release);
                 return true;
             }

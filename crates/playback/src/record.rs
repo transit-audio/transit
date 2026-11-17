@@ -744,7 +744,7 @@ struct WriterStart {
 
 impl WriterStart {
     fn finished(&self) -> Result<bool, &'static str> {
-        if self.placed || self.reader.status() == start::Status::Cancelled {
+        if self.placed || matches!(self.reader.status(), start::Status::Cancelled | start::Status::Failed(_)) {
             return Ok(true);
         }
         // Mapping can fail after the last write. Propagate that failure before
@@ -756,14 +756,14 @@ impl WriterStart {
     fn write(&mut self, shared: &Shared, takes: &mut [TakeWriter], block: &[f32], channels: usize) -> Result<(), String> {
         if !self.placed {
             match self.reader.status() {
-                start::Status::Pending => {}
+                start::Status::Pending | start::Status::CountingIn | start::Status::Waiting => {}
                 start::Status::Started(_) => {
                     if let Some(frame) = self.input_start.frame()? {
                         self.history.set_start(frame);
                         self.placed = true;
                     }
                 }
-                start::Status::Cancelled => {
+                start::Status::Cancelled | start::Status::Failed(_) => {
                     shared.stop_capture();
                     return Ok(());
                 }

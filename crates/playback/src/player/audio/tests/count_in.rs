@@ -69,12 +69,12 @@ fn count_in_clicks_for_exactly_the_bar_then_play_and_the_recording_latch_start_o
         let mut frames = 0usize;
         let mut clicked = 0usize;
         let mut after = 0usize;
-        while reader.status() == start::Status::Pending && frames < 200_000 {
+        while matches!(reader.status(), start::Status::Pending | start::Status::CountingIn | start::Status::Waiting) && frames < 200_000 {
             let now = audio.transport.timeline.next_output();
             track_clock(&mut audio, 48_000, now);
             fill(&mut audio, &mut out);
             control.service(&mut make);
-            if reader.status() == start::Status::Pending {
+            if matches!(reader.status(), start::Status::CountingIn | start::Status::Waiting) {
                 // Parked at the start: the position does not move and nothing is playing.
                 assert!(!audio.transport.playing && !audio.transport.recording);
                 assert_eq!(shared.position.load(Ordering::Relaxed), from);
@@ -206,7 +206,7 @@ fn count_in_click_is_four_beats_of_one_bar_with_the_accent_first() {
     }
     assert_eq!(blips.len(), 4, "a click on each beat");
     assert!(blips[0] > blips[1] && (blips[1] - blips[2]).abs() < 1e-3, "beat 1 is accented: {blips:?}");
-    assert!(matches!(reader.status(), start::Status::Pending | start::Status::Started(_)));
+    assert!(matches!(reader.status(), start::Status::CountingIn | start::Status::Waiting | start::Status::Started(_)));
     control.retire(audio.plans, audio.actions);
 }
 
@@ -265,7 +265,7 @@ fn a_failed_start_at_the_end_of_the_count_in_is_reported_and_leaves_the_transpor
     for _ in 0..300 {
         fill(&mut audio, &mut out);
     }
-    assert_eq!(reader.status(), start::Status::Cancelled);
+    assert_eq!(reader.status(), start::Status::Failed(StartFailure::Clock));
     assert!(!audio.transport.playing && !audio.transport.recording && audio.transport.count_in.is_none());
     assert_eq!(shared.metro.start_failure.load(Ordering::Relaxed), StartFailure::Clock as u8);
     control.retire(audio.plans, audio.actions);
@@ -317,4 +317,67 @@ fn metronome_gain_scales_the_click_and_changing_it_allocates_nothing() {
     };
     let (full, quarter) = (peak_of_beat_two(1.0), peak_of_beat_two(0.25));
     assert!(full > 0.0 && (quarter / full - 0.25).abs() < 0.02, "{full} {quarter}");
+}
+
+/// ADR 0062 section 6: the audio thread publishes the record start's stage as it goes: CountingIn
+/// while the bar clicks, Waiting while the start waits for the device clock, Started at the latch;
+/// Failed with its reason when the wait runs out; Cancelled when a transport action withdraws it.
+#[test]
+fn the_record_stage_follows_count_in_wait_start_fail_and_cancel() {
+    let mut out = vec![0.0f32; 480 * 2];
+    // The bar, then a clock wait (the map is lost during the count-in), then the start.
+    let (mut control, mut audio, _shared, _start, reader) = counting(0, 1);
+    assert_eq!(reader.status(), start::Status::Pending, "not applied yet");
+    fill(&mut audio, &mut out);
+    control.service(&mut make);
+    assert_eq!(reader.status(), start::Status::CountingIn);
+    audio.transport.clock_map = None;
+    let mut seen = vec![reader.status()];
+    for _ in 0..400 {
+        fill(&mut audio, &mut out);
+        control.service(&mut make);
+        if seen.last() != Some(&reader.status()) {
+            seen.push(reader.status());
+        }
+        if reader.status() != start::Status::CountingIn {
+            break;
+        }
+    }
+    assert_eq!(seen, [start::Status::CountingIn, start::Status::Waiting], "the bar ends into the clock wait");
+    assert!(!audio.transport.playing && !audio.transport.recording, "parked while it waits");
+    for _ in 0..50 {
+        let now = audio.transport.timeline.next_output();
+        track_clock(&mut audio, 48_000, now);
+        fill(&mut audio, &mut out);
+        control.service(&mut make);
+        if reader.status() != start::Status::Waiting {
+            break;
+        }
+    }
+    assert!(matches!(reader.status(), start::Status::Started(_)), "{:?}", reader.status());
+    assert!(audio.transport.playing && audio.transport.recording);
+    control.retire(audio.plans, audio.actions);
+
+    // A wait that runs out fails with its reason: the bar (200 callbacks) and the one-second wait
+    // (100 more) are over well within 400.
+    let (control, mut audio, _shared, _start, reader) = counting(0, 1);
+    fill(&mut audio, &mut out);
+    audio.transport.clock_map = None;
+    for _ in 0..400 {
+        fill(&mut audio, &mut out);
+    }
+    assert_eq!(reader.status(), start::Status::Failed(StartFailure::Clock));
+    control.retire(audio.plans, audio.actions);
+
+    // A Locate withdraws the count-in on the audio thread, without Main's cancel.
+    let (mut control, mut audio, _shared, _start, reader) = counting(0, 2);
+    fill(&mut audio, &mut out);
+    control.service(&mut make);
+    assert_eq!(reader.status(), start::Status::CountingIn);
+    control.send_action(Command::Locate(0), true).unwrap();
+    fill(&mut audio, &mut out);
+    control.service(&mut make);
+    assert_eq!(reader.status(), start::Status::Cancelled);
+    assert!(audio.transport.count_in.is_none() && !audio.transport.recording);
+    control.retire(audio.plans, audio.actions);
 }

@@ -68,21 +68,10 @@ struct Counting {
     left: Samples,
 }
 
-/// Why the recording start at the end of a count-in did not happen. Travels to Main as a code in
-/// one atomic, so the audio thread allocates nothing to report it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StartFailure {
-    /// The device clock map was lost or went stale during the count-in.
-    Clock = 1,
-    /// The transport timeline refused the position.
-    Timeline = 2,
-    /// The start position was out of range.
-    Position = 3,
-    /// The transport was not at normal speed (#522): recording runs at 1x only.
-    Speed = 4,
-}
+pub use crate::record::start::StartFailure;
 
 impl StartFailure {
+    /// The reason an action result refuses a recording start for; `None` when it gives none.
     fn of(result: ActionResult) -> Option<Self> {
         match result {
             ActionResult::RecordingClock(_) => Some(Self::Clock),
@@ -90,26 +79,6 @@ impl StartFailure {
             ActionResult::InvalidPosition => Some(Self::Position),
             ActionResult::RecordingSpeed => Some(Self::Speed),
             _ => None,
-        }
-    }
-
-    pub(crate) fn from_code(code: u8) -> Option<Self> {
-        match code {
-            1 => Some(Self::Clock),
-            2 => Some(Self::Timeline),
-            3 => Some(Self::Position),
-            4 => Some(Self::Speed),
-            _ => None,
-        }
-    }
-
-    /// Plain words for the status line.
-    pub fn reason(self) -> &'static str {
-        match self {
-            Self::Clock => "the audio device clock was not ready in time",
-            Self::Timeline => "the transport timeline refused the start position",
-            Self::Position => "the start position is out of range",
-            Self::Speed => "the transport was not at normal speed",
         }
     }
 }
@@ -317,9 +286,11 @@ impl Transport {
                 let now = self.timeline.next_output();
                 let deadline = patience.unwrap_or_else(|| now.saturating_add(self.wait_frames));
                 self.waiting = Some(Waiting { ticket, from, end, looped, deadline });
+                // The stage reports the wait (ADR 0062 section 6); the wait itself is as before.
+                self.record_start.waiting(ticket);
                 return ActionResult::Applied;
             }
-            self.record_start.cancel(ticket);
+            self.record_start.fail(ticket, StartFailure::of(ActionResult::RecordingSpeed));
             return ActionResult::RecordingSpeed;
         }
         let audio = self.record_start.audio_pass();
@@ -358,9 +329,11 @@ impl Transport {
                     let now = self.timeline.next_output();
                     let deadline = patience.unwrap_or_else(|| now.saturating_add(self.wait_frames));
                     self.waiting = Some(Waiting { ticket, from, end, looped, deadline });
+                    self.record_start.waiting(ticket);
                     return ActionResult::Applied;
                 }
-                self.record_start.cancel(ticket);
+                // Failure at its source: Failed with the reason, Cancelled when there is none.
+                self.record_start.fail(ticket, StartFailure::of(error));
                 return error;
             }
         };
@@ -406,7 +379,7 @@ impl Transport {
             || plan.frames <= 0
             || plan.beat <= 0
         {
-            self.record_start.cancel(ticket);
+            self.record_start.fail(ticket, StartFailure::of(ActionResult::InvalidPosition));
             return ActionResult::InvalidPosition;
         }
         // Same preconditions as the start itself, so a clock that cannot come good fails now, not
@@ -415,12 +388,12 @@ impl Transport {
         if let Err(reason) = self.start_basis(self.timeline.next_output(), audio)
             && !Self::clock_may_validate(reason)
         {
-            self.record_start.cancel(ticket);
+            self.record_start.fail(ticket, StartFailure::of(ActionResult::RecordingClock(reason)));
             return ActionResult::RecordingClock(reason);
         }
         self.end_count_in();
         if let Err(error) = self.change(Some(from), false, None) {
-            self.record_start.cancel(ticket);
+            self.record_start.fail(ticket, StartFailure::of(ActionResult::Timeline(error)));
             self.timeline_fault = Some(error);
             live.fault();
             return ActionResult::Timeline(error);
@@ -431,6 +404,9 @@ impl Transport {
         self.loop_engaged = false;
         self.discard_pending = true;
         self.count_in = Some(Counting { ticket, from, end, looped, plan, left: plan.frames });
+        // The stage reports the count-in (ADR 0062 section 6). A ticket Main already cancelled
+        // keeps Cancelled and the count-in runs as before, its start then refused at the end.
+        self.record_start.counting_in(ticket);
         live.set_transport_epoch(transit_mix::TransportEpoch(self.epoch));
         ActionResult::Applied
     }

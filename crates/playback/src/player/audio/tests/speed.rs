@@ -58,13 +58,13 @@ fn a_latch_is_never_published_at_another_speed() {
     control.send_action(Command::Record { ticket: reader.ticket(), from: Some(0), end: None, looped: None, count_in: None }, true).unwrap();
     let ((), heap) = measure(|| fill(&mut audio, &mut [0.0; 4_096]));
     assert!(heap.is_zero(), "{heap:?}");
-    assert_eq!(reader.status(), start::Status::Pending, "no latch at 0.5x");
+    assert_eq!(reader.status(), start::Status::Waiting, "no latch at 0.5x");
     assert!(!audio.transport.recording);
     // A second of 2,048-frame callbacks: still no latch, then the start fails.
     for _ in 0..24 {
         fill(&mut audio, &mut [0.0; 4_096]);
     }
-    assert_ne!(reader.status(), start::Status::Pending);
+    assert_eq!(reader.status(), start::Status::Failed(StartFailure::Speed));
     assert!(!matches!(reader.status(), start::Status::Started(_)), "it never records at another rate");
     assert_eq!(shared.speed.load(Ordering::Relaxed), 500, "the requested speed is left alone");
     start.cancel();

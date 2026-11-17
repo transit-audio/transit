@@ -958,3 +958,34 @@ fn substituted_zeros_the_ring_refused_are_counted_once() {
 }
 
 mod start_fallback;
+
+/// ADR 0062 section 6: a Failed stage finishes the writer's start as Cancelled does, without
+/// waiting for an input mapping, and stops the capture; CountingIn and Waiting wait as Pending.
+#[test]
+fn failed_finishes_the_writer_start() {
+    let (key, map, now) = recording_map();
+    let shared = Shared::new(CaptureRing::new(32));
+    shared.start_capture();
+    let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(5));
+    let reader = control.prepare().unwrap();
+    let ticket = reader.ticket();
+    let (mut mapping, input_start) = start::mapping::pair(reader.clone(), key);
+    let mut gate = WriterStart { reader: reader.clone(), history: start::History::new(1, 24), input_start, placed: false, next: None };
+    let mut takes: [TakeWriter; 0] = [];
+    assert_eq!(gate.finished(), Ok(false), "a pending start waits");
+    assert!(publisher.counting_in(ticket));
+    gate.write(&shared, &mut takes, &[], 1).unwrap();
+    assert_eq!(gate.finished(), Ok(false), "a count-in waits as Pending does");
+    assert!(shared.armed());
+    assert!(publisher.waiting(ticket));
+    gate.write(&shared, &mut takes, &[], 1).unwrap();
+    assert_eq!(gate.finished(), Ok(false), "a clock wait waits as Pending does");
+    assert!(!mapping.service(Some(map), Some(now)), "nothing to map before the start");
+    assert!(publisher.fail(ticket, Some(start::StartFailure::Clock)));
+    assert_eq!(reader.status(), start::Status::Failed(start::StartFailure::Clock));
+    // No mapping was serviced since: the writer does not wait for one.
+    assert_eq!(gate.finished(), Ok(true), "Failed finishes the writer's start");
+    gate.write(&shared, &mut takes, &[], 1).unwrap();
+    assert!(!shared.armed(), "Failed stops the capture, as Cancelled does");
+    assert!(mapping.service(Some(map), Some(now)), "the mapping ends too");
+}
