@@ -479,8 +479,8 @@ Coverage goes up. A complete record is compared, by digest, at every block. The 
   - as a dev-dependency; or
   - as an optional normal dependency that no feature other than `testing` enables, with `testing` absent from `default`.
 
-  The check reads `optional` and the features map from `cargo metadata` and reports any other use.
-- `docs/contributing/knowledge/layering.md`, the sentence "The standalone crates (`STANDALONE`: ...) have no production workspace dependencies apart from the `FOUNDATION` crates." gains, after "`FOUNDATION` crates": ", and the one testing-only exception: `transit-state-record` (the state-record codec of ADR 0029's #742 amendment), which any crate may name only as a dev-dependency or as an optional dependency that only its non-default `testing` feature enables; `cargo xtask layers` enforces exactly that".
+  Extend xtask's deserialized `Dependency` with `optional`, `rename` and requested `features`, and `Package` with its features map. Check dependency aliases and feature reachability, including implicit dependency features and indirect default activation. Reject non-testing activation and normal/build dependency requests that enable these testing paths outside testing-feature forwarding. Run TESTING_ONLY before the EXEMPT and DEV_ONLY early exits; test allowed dev/testing uses and these forbidden activation paths.
+- `docs/contributing/knowledge/layering.md`: replace the standalone rule's first sentence with: "The standalone crates listed in `STANDALONE` may have workspace dependencies only on `FOUNDATION` crates, as dev-dependencies, or on `transit-state-record` as an optional normal dependency enabled solely through their non-default `testing` feature. The named `TESTING_ONLY` check enforces that codec restriction for every crate." Add `state-record` to the L0 table and change sampler-core's "its only workspace dependency" to "its only production workspace dependency."
 
 **The seam** (feature `testing`, never on the audio path; there is no non-testing record path) adds three items to both `Plugin` and `midi_fx::MidiEffect`:
 - `fingerprint(&self, w: &mut transit_state_record::Writer<'_>)` writes the record. The `Writer` wraps any `core::hash::Hasher` and emits words through `write_u64` only. The default writes no state.
@@ -504,7 +504,7 @@ Why this form:
   | 3 | bool | 1, value 0 or 1 |
   | 4 | f32 | 1, its bits zero-extended |
   | 5 | f64 | 1 |
-  | 6 | run of `count` f32 | ceil(count / 2): two per word, the first in the low half; the high half of the last word is zero only when `count` is odd |
+  | 6 | run of `count` f32 | ceil(count / 2): two f32 values per word, first in the low half. For odd counts, the unused final high half must be zero; for even counts, it contains the final value, which may itself be zero. |
   | 7 | run of `count` bytes | ceil(count / 8), little-endian, the last word zero-padded |
   | 8 | run of `count` unsigned integers | `count` |
   | 9 | child record | `count` words, the child's whole encoding |
@@ -562,20 +562,21 @@ State behind a trait object is visited as concrete fields wherever the owner hol
   1. A reaches the boundary T through its history. B is either fresh or reaches T through a different history.
   2. A's record is taken losslessly. B restores it, consumes every word, and re-records exactly the same words.
   3. Both instances run the same continuation. The records must be equal at every block boundary, and the outputs bit-identical (for a MIDI effect, the emitted events with their offsets). A non-finite output sample fails the case.
-- **Boundaries and their obligations.** The boundaries are a coverage checklist. Each applicable boundary carries its own named continuation obligation, and its history runs as long as reaching the boundary needs (no common cap):
+- **Boundaries and their obligations.** The boundaries are a coverage checklist. Each applicable boundary carries its own named continuation obligation, and its history runs as long as reaching the boundary needs (no common cap). Each witness asserts that its named boundary was reached and its continuation obligation completed. An inapplicable boundary requires a code-backed explanation. A reset, retrigger or mode switch that overwrites the target state cannot serve as its observation witness; use a continuation that reads it first, or an overwrite proof with a mutation/poison witness.
 
   | Boundary T | The continuation must |
   |---|---|
   | 1. after `prepare`, before any `process` | run the first blocks with notes and parameter changes (first-block and lazy initialization) |
   | 2. after `reset` | the same, then release every note |
   | 3. every voice sounding, one stolen | steal again, then release all, until every voice is idle |
-  | 4. inside release tails | re-trigger during the tail, then run to the release's end |
+  | 4. inside release tails | Continue the restored release to its end without retriggering; in a separate branch, retrigger during release, release again, and run to idle. |
   | 5. mid-ramp | change the target again mid-ramp, then run until the ramp completes, plus one block |
-  | 6. after a mode or engine switch, dormant state non-default | revisit every dormant engine or mode and render at least one internal block in each |
-  | 7. subnormal feedback after a full-scale burst and silence (the history runs until the recorded feedback state is subnormal) | continue in silence, then a small input, until the flush threshold is crossed |
+  | 6. after a mode or engine switch, dormant state non-default | Revisit each dormant engine or mode with activating input/events and exercise its declared surviving-state spans; explicitly prove any state reset before read. |
+  | 7. At the implementation's tiny-feedback/flush boundary after burst and silence; require retained subnormal state only where reachable. | Continue through the actual flush or decay endpoint, then apply a small input. |
   | 8. inside an internal block | cross at least two internal-block edges with odd block lengths |
   | 9. events, parameter points or carries pending | deliver every one (run past the latest due frame), plus one block |
-  | 10. after a second `prepare` at another rate | prepare at a third rate and meet boundary 1's obligation |
+  | 10. after a second `prepare` at another rate | Meet boundary 1's obligation at the second rate before preparing at the third rate; then meet it again. |
+  | 11. Key released while sustain remains down | Preserve the sustained note through processing, release the pedal, then run to idle; include held and pedal-only keys together for Macro Oscillator. |
   | entry-specific: a frozen recording, a delay line, a generator | unfreeze and replay the whole recording span; read every line position (the line's span plus latency); draw from the generator |
 
   One duration calculator, fed the spans the inventory declares (line lengths, release times, recording spans) at the case's rate, turns each obligation into frames. A generic common continuation is not allowed.
@@ -599,7 +600,7 @@ State behind a trait object is visited as concrete fields wherever the owner hol
   | `Strip::plugins`, `instrument`, `chase`, `edited`, `muted`, `key_in`, `tap`, `tap_pre`, `edges`, `touch` (every slot and `last`), `clip_fx` | encoded, recursively |
   | `Strip::latency` | encoded: it survives ownership transfer (`table.latency = cell.latency`) and a blocked aux skips its recomputation |
   | `Strip::pdc_out`, `pdc_pos` | encoded (an inactive strip returns from `pdc_visit` before assigning them, so no overwrite proof holds) |
-  | `Strip::buf`, `pre`, `scratch`, `clipbuf`, `outbuf` | unobservable, each by its own overwrite-before-read argument naming its write site, witnessed by a poison control: one of two identical renders fills the buffer with a fixed pattern between blocks, and the outputs and digests must stay identical |
+  | `Strip::buf`, `pre`, `scratch`, `clipbuf`, `outbuf` | unobservable, each by its own overwrite-before-read argument naming its write site, witnessed by a poison control: one of two identical renders fills the buffer with a fixed pattern between blocks, and the outputs and digests must stay identical. Poison one buffer at a time with finite nonzero values verified to change its prior contents, preserving lengths and capacities. Exercise each claimed read path, including mono scratch, and assert that the witness reaches it. Mono `scratch`'s proof names the instrument's contract to overwrite its second output channel, and its witness poisons `scratch` on a mono strip with an instrument |
   | `Strip::meter`, `gr`, `failures`' report counters; `PluginSlot::tap`, `sample_tap` | output only (panels and reports) |
   | `Strip::rendered` | the pool's protocol stamp: legitimately different between graph and serial, covered by property 1 and the conflict count |
   | `Strip::hw`, `ext` | scope assertion: the gate fails a case in which a strip carrying a hardware insert or an External Instrument is held or skipped; such state is inventoried before a case that needs it may use the structural window |
@@ -609,26 +610,27 @@ State behind a trait object is visited as concrete fields wherever the owner hol
   | `PluginSlot::failed`, `errors_seen`, `fresh`, `quiet`, `output_silent`, `woken`, `parameter_pass`, `events`, `note_delay` | encoded |
   | `ClipFx`: `eq`, `comp` (each a slot, recursively), `eq_on`, `comp_on`, `gain_db`, `lazy`; `sr` and `ch` | encoded; `sr` and `ch` are configuration |
   | `MidiFxHost`: the stages, `len`, `clock`, `frames`, `out`, `given` and `given_len`, `retry` and `retry_len`, `epoch` (it decides whether a release is swallowed), `notes` | encoded; `epoch` and `clock` are kept as logical values |
-  | `MidiFxHost`: `capturing`, `a`/`a_len`, `b`, `merged` | boundary invariants: false and empty at every boundary, asserted by the gate |
+  | `MidiFxHost`: `capturing`, `a`/`a_len`, `b`, `merged` | Assert `capturing == false` and `a_len == 0`. The unused `a` contents and retained `b`/`merged` storage are unobservable only by individual overwrite-before-read proofs and poison witnesses; do not assert that `b` or `merged` is empty. |
   | `MidiFxHost::counts`; `InstrumentEvents::status` | telemetry |
   | `NoteDelay`: `source`, `len`, the live prefix `carry[..len]`, `clock`, `order`, `stand_in`, `skipped` | encoded |
   | `NoteView`: `len`, `events[..len]`, `full` (it refuses later starts) | encoded |
   | `InstrumentEvents`: delivered state (notes' `used`, `source`, `key`, `sender`, `voice`, `retry_release`; pedals' `used`, `source`, `cc`, `down`, `value`, `retry_release`; `holders`, `sent`, `writers`, `next_voice`, `rack_ports`, `in_rack`, `fx`) | encoded |
-  | `InstrumentEvents`: the queue and its admission bookkeeping (`Queued::due`, `action`, `cost`; `non_release`; notes' `ons`, `open`, `release_queued`, `last_on`; pedals' `downs`, `release_queued`, `last_down`) | in the canonical pending form below |
+  | `InstrumentEvents`: the queue and its admission bookkeeping (`Queued::due`, `action`, `cost`; `non_release`; notes' `ons`, `open`, `release_queued`, `last_on`; pedals' `downs`, `release_queued`, `last_down`) | the logical admission ledger and queue, encoded as stated in the canonical pending form below |
   | Key entries: `lent`, `line`, `want`, `pending`, and `buf`'s first `pending` frames while `pending > 0`; `buf` otherwise and `scratch` | encoded; the rest unobservable by overwrite proof and poison witness |
 
   The builder checks this table against the code before building. A field the code holds that is not in the table is classified in the same change.
 - **The canonical pending form.** A worker's pool parks an away strip's events outside its queue and readmits them later, so raw fields legitimately differ.
-  - The canonical form is one ordered sequence: the queue, then the pool's deferred ring, then an away strip's live events. Each entry gives its source, transport, message and action. A deferred ring's safety release (its silence mask, which delivery turns into `release_instrument`) is its own entry, carrying its mask.
+  - The canonical form is one ordered sequence: the queue, then the pool's deferred ring, then an away strip's live events. Each entry gives its source, transport, message and action. A deferred ring's safety release is its own entry, carrying its silence mask: delivery calls `release_instrument` for it, not ordinary controller delivery.
   - Due times are relative to the strip's next block start. An overdue event's nominal due time is normalized to that start; a future due time is preserved.
   - Both representations deliver under the same rules: offsets never decrease, and a note-off moves one sample past its note-on or waits, with everything behind it, for the next block (spill). Equal canonical sequences therefore deliver equal events at equal offsets.
+  - Queue, deferred ring and live events define readmission order. Canonicalization also applies due-sorted insertion, admission/coalescing rules and the explicit safety-release action before claiming equal delivery; raw action table indexes are not canonical identities.
   - The gate asserts, for each event whose raw timestamp the form omits, that it was due at or before the next block start.
-  - The admission bookkeeping is a function of the canonical sequence and the delivered state. The gate recomputes it from the queued representation and asserts that it equals the raw fields, so the derivation is checked rather than assumed.
+  - Encode the logical note/pedal admission ledger, including unmatched-on `open` counts, retry-related release flags and retained `last_on`/`last_down` timing, even when the queue is empty. Encode queued admission costs and logical action targets. Normalize queued-only reservations together with deferred readmissions rather than comparing raw table allocation. Derive only fields proved reconstructible: check queue counts and costs against the actual queued representation, not against still-parked events. Include omission controls for a coalesced same-key off, a retained timestamp and a re-strike charge.
 - **Targeted omission controls.** For each encoded field or group, a test drives two strips into states that differ only in that field and requires their records to differ: an `epoch` after a chain edit, a `retry` entry, an `Applied` entry and its sentinel, a `NoteDelay` stand-in, a `full` note view, a pending rack exit, a touch ramp mid-flight, a retained `latency`, a key with `pending > 0`, a `ClipFx` module toggle. Mutating the field out of the record must fail that test.
 - **When it lands.** The gate lands in push 1 of slice 1, with every plug-in declaration `false`. A scheduling-test divergence exposed by the larger record is a defect to hunt to its cause, not a field to drop.
 
 **The window rule.**
-- The case's contributions come from its configured, loaded instances: the instances the rig's compiled plan holds after the latency probe block, read through a testing seam (`MixEngine::strip_plugin_facts`: per instance, the registry entry, tail, latency and `print_complete`, including clip-effect modules and the effective MIDI effect chain, a rack's included). The current helper builds instances with no content, so an empty Sampler reads a zero tail; that cannot stand for a loaded kit.
+- The case's contributions come from its configured, loaded instances: the instances the rig's compiled plan holds after the latency probe block, read through a testing seam (`MixEngine::strip_plugin_facts`: for each audio instance, registry entry, tail, latency and `print_complete`, including clip modules; for each effective MIDI-chain instance, registry entry and `print_complete`, associated with its owning instrument, including rack effects). The current helper builds instances with no content, so an empty Sampler reads a zero tail; that cannot stand for a loaded kit.
 - The window counts the tail plus latency of every instance whose record is not complete. A strip whose effective MIDI effect chain holds an effect without a complete record also counts its instrument's tail and latency.
 - When everything is complete, the window is `WINDOW` (eight blocks), or the plan's latency in whole blocks if that is longer.
 - Digests are compared at every block for every home strip; audio is compared exactly over the shortened render.
@@ -644,7 +646,7 @@ Each slice lands on its own with main green. Any change to the seam, the codec o
      - `transit-state-record`, with its writer, reader and round-trip tests.
      - Its `LAYERS` row (L0) and `STANDALONE` entry, the `TESTING_ONLY` check and its tests, and the `layering.md` sentence (section 12).
      - The seam on `Plugin` and `MidiEffect`, defaults as in section 12.
-     - Migration of *every* existing writer to the one stream, with no other record path left: the mix's `line_print`, `edge_print`, `KeyLine`, `KeyIn` and `KeyBank::fingerprint_of`, `InstrumentEvents`' seam and the pool's `pending_midi` (both into the canonical pending form); `transit-dsp`'s `Smoother`, `DelayLine`, `Biquad`, dynamics, filter, utility, sampler and sampler adapter; `transit-sampler-core`'s sampler, voice and selection; `transit-instrument-core`'s shaper seam; `transit-parametric-eq`'s chain and gain-match prints; and the test fixtures (`sched.rs`'s Hold and Delay, `workers.rs`'s continuity instrument, the `midi_fx` testing Delay).
+     - Migration of *every* existing writer to the one stream, with no other record path left: the mix's `line_print`, `edge_print`, `KeyLine`, `KeyIn` and `KeyBank::fingerprint_of`, `InstrumentEvents`' seam and the pool's `pending_midi` (both into the canonical pending form); `transit-dsp`'s `Smoother`, `DelayLine`, `Biquad`, dynamics, filter, utility, sampler and sampler adapter; `transit-sampler-core`'s sampler, voice and selection; a new testing-only `Shaper` writer for the four filter memories currently exposed by `Shaper::filter_bits`, replacing sampler-core's raw-bit hashing of that accessor; `transit-parametric-eq`'s chain and gain-match prints; and the test fixtures (`sched.rs`'s Hold and Delay, `workers.rs`'s continuity instrument, a new writer for the testing MIDI Delay's `samples` field). Retain parametric-eq's chain and gain-match migration: their unit tests consume these prints even though current strips do not. Adapt those test sinks without dropping compared fields. Add `strip` to scheduling divergence diagnostics while retaining whole-StripPrint equality.
      - `strip_prints` computing the four digest parts over the stream.
      - The mix-state gate with its inventory table, canonical pending form, scope assertions, poison witnesses and omission controls.
      - The transplant harness with its boundary obligations, duration calculator, report and permanent negative controls.
@@ -675,9 +677,9 @@ Chorus and Maximizer, named in #742, are retired (ADR 0040) and render in no cor
 ### 17. Reopen when
 
 - an entry's state cannot be rebuilt from its own record; a hosted plug-in enters the corpus;
-- the Sampler pairs' fallback window becomes a material share of the gate's time (over a quarter of the corpus test's compared-render blocks or of its measured duration): this raises the Sampler task line's amendment;
+- the Sampler pairs' fallback window becomes a material share of the gate's time (over a quarter of the corpus test's compared-render blocks or of its measured duration): this raises the Sampler task line's amendment. With a fully loaded 44.1 kHz Sampler, the four Sampler cases' extra window is about 4 × (89 − 8) / 1,236 = 26 percent of the final corpus blocks, so this trigger can raise the Sampler follow-on right after the completion slices; that is intended;
 - a defect reaches the output past a complete record (the escape record names the gate class the evidence lacked);
-- with every eligible corpus record complete, the combined scheduling-plus-completeness gate measures more than ten minutes on the slowest CI runner. This is a measurement criterion, not a timing assertion in any test. The first combined measurement establishes numeric baselines for recorded bytes, peak memory and the runner's memory headroom; a later measurement that exceeds those baselines by half also reopens;
+- with every eligible corpus record complete, the combined scheduling-plus-completeness gate measures more than ten minutes on the slowest CI runner. This is a measurement criterion, not a timing assertion in any test. The first combined measurement establishes numeric baselines for recorded bytes, peak memory and available runner memory headroom; later recorded bytes or peak memory above 150% of baseline, or headroom below 50% of baseline, also reopen.
 - the per-block record cost outweighs the shortened render.
 
 ### 18. Expected cost
@@ -693,9 +695,9 @@ The figures:
 - **After slice 1, for example:** the v0.3.2 and v0.4.0 demo cases are set by their Plate Reverb (decay 2.5 s, pre-delay 20 ms, 3.37 s): 632 window blocks, 672 per render.
 - **After slices 1 to 6, with the Sampler false:**
   - 15 cases at 40 + 8 = 48 blocks.
-  - The v0.7.0 to v0.7.3 features cases keep the loaded Sampler's contribution. From the corpus patch, the longest zone is a one-shot of 14,000 source frames plus a 150 ms release. With the 151-sample plan latency, that is 21,351 samples (84 window blocks) for a 48 kHz source, or 22,589 (89) for a 44.1 kHz source: 124 to 129 blocks per render.
+  - The v0.7.0 to v0.7.3 features cases keep the loaded Sampler's contribution. From the corpus patch, the longest zone is a one-shot of 14,000 source frames plus a 150 ms release. With the 151-sample plan latency, that is 21,351 samples (84 window blocks) for a 48 kHz source, or 22,589 (89) for a 44.1 kHz source: 124 to 129 blocks per render. The corpus kit's 14,000-frame zone uses a 44.1 kHz source (the corpus file), so 129 is the figure for this kit.
   - In total, 4 × 2 × 2 × (15 × 48 + 4 × 124..129) = 19,456 to 19,776, about 1/66 of today.
-  - The test's printed windows give the exact figure. It is lower if the patch's sources do not load in the test, in which case the case says so.
+  - These Sampler figures are conditional on loaded sources, not the current test's measured result: the rig does not attach decoded audio today (`Session::pool` is skipped on load), so the test's printed windows give the exact figure, which is lower while the sources do not load, and the case says so.
   - A new corpus session without a Sampler then adds 768 blocks, instead of 60,640 or 90,672.
 - **Unchanged:** the built-in topologies, 67,584.
 
@@ -775,3 +777,16 @@ What these figures exclude:
    - Ten minutes is a measurement criterion.
    - Numeric memory and headroom baselines come from the first combined measurement.
 8. **Push 1.** Accepted. Every item of point 6 is explicit in slice 1's push 1.
+
+### 21. Judging round 3: responses
+
+1. §12 metadata sentence: applied as written.
+2. §12 layering instruction: applied as written, with the path `docs/contributing/knowledge/layering.md` as the bullet's lead.
+3. §12 tag-6 payload cell: applied as written.
+4. §13 witness assertions and the boundary 4, 6, 7 and 10 cells: applied as written. The sustain row is added as boundary 11.
+5. §14 buffer cell: applied as written. The mono `scratch` proof also names the instrument's second-output-channel contract and its witness.
+6. §14 MIDI host cell: applied as written.
+7. §14 admission ledger and readmission order: applied as written. The ledger text replaces the derivation bullet, the admission row points to it, and safety releases are stated as calling `release_instrument`.
+8. §14 facts parenthesis: applied as written.
+9. §15 migration list: applied as written, including `strip` in the scheduling divergence diagnostics with whole-StripPrint equality kept.
+10. §17 baseline sentence: applied as written. Section 17 also states the Sampler's 26 percent share and that the trigger is intended. Section 18 states that the Sampler figures are conditional on loaded sources and that the kit's source rate is 44.1 kHz.
