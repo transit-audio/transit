@@ -782,7 +782,10 @@ crate::record_struct!([] Frame { out, aux });
 crate::record_struct!(['a] EngineBank<'a> { additive_engine, bass_drum_engine, chiptune_engine, chord_engine, fm_engine, grain_engine, hihat_engine, modal_engine, noise_engine, particle_engine, phase_distortion_engine, six_op_engine, snare_drum_engine, speech_engine, string_engine, string_machine_engine, swarm_engine, virtual_analog_engine, virtual_analog_vcf_engine, waveshaping_engine, wavetable_engine, waveterrain_engine });
 
 #[cfg(feature = "testing")]
-crate::record_struct!(['a] Voice<'a> { engines, rng, resources, engine_quantizer, reload_resources, previous_engine_index, engine_cv, previous_note, trigger_state, decay_envelope, lpg_envelope, trigger_delay, out_post_processor, aux_post_processor, out_buffer, aux_buffer, sample_rate_hz, short_decay_scale, decay_tail_scale, a0_normalized, a0_firmware, tuning });
+// Configuration: `sample_rate_hz`, `short_decay_scale`, `decay_tail_scale`, `a0_firmware` (from the
+// rate, in `new`), `tuning` and `a0_normalized` (`set_tuning`, which the owner calls once at
+// construction); nothing else writes them.
+crate::record_struct!(['a] Voice<'a> { engines, rng, resources, engine_quantizer, reload_resources, previous_engine_index, engine_cv, previous_note, trigger_state, decay_envelope, lpg_envelope, trigger_delay, out_post_processor, aux_post_processor, out_buffer, aux_buffer } config { sample_rate_hz, short_decay_scale, decay_tail_scale, a0_normalized, a0_firmware, tuning });
 
 #[cfg(feature = "testing")]
 crate::record_struct!([] ChannelPostProcessor { limiter, lpg });

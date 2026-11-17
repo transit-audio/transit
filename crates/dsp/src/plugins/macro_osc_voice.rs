@@ -547,8 +547,10 @@ impl Slot {
     /// its bank, dormant ones included, its generator, envelopes, trigger delay, post-processors
     /// and tuning: `transit_macro_osc::record`), the last block's frames and mix, the keys, the
     /// note and velocities, the trigger and phrase flags, the age, loudness and quiet count, the
-    /// idle and rendered flags, the gains, the shaper, the seed (a reset reseeds from it) and the
-    /// last block's shape.
+    /// idle and rendered flags, the gains, the shaper and the last block's shape. The seed is
+    /// configuration (the slot's index). The last block's frames, mix, rendered flag, gains and
+    /// shape are encoded though unobservable: `render` writes each of them for a slot before
+    /// `render_block` reads it (the shape is read only by the panel's `newest`).
     pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
         use transit_macro_osc::record::Record;
         let Slot {
@@ -570,7 +572,9 @@ impl Slot {
             rendered,
             gain,
             shaper,
-            seed,
+            // Configuration: `voice_seed(Random::DEFAULT_SEED, index)`, set by `Slot::new`; only the
+            // test-only `MacroOscillator::set_seed` changes it.
+            seed: _,
             shape,
         } = self;
         voice.record(w);
@@ -588,7 +592,6 @@ impl Slot {
         w.bool(*rendered);
         w.f32s(&[gain.0, gain.1]);
         shaper.record_state(w);
-        w.u32(*seed);
         w.f32s(shape);
     }
 
@@ -614,7 +617,7 @@ impl Slot {
             rendered,
             gain,
             shaper,
-            seed,
+            seed: _,
             shape,
         } = self;
         voice.restore(r)?;
@@ -636,7 +639,6 @@ impl Slot {
         r.f32s(&mut g)?;
         *gain = (g[0], g[1]);
         shaper.restore_state(r)?;
-        *seed = r.u32()?;
         r.f32s(shape)
     }
 }

@@ -148,21 +148,25 @@ struct Clock {
 }
 
 impl Clock {
+    /// The transport at the script's frame clock: 3/4 (so a bar is not the default four quarter
+    /// notes), and a song position that drifts from the frame count by 1e-7 quarter notes per
+    /// frame, as a host's rounded position may, so a plug-in's own count from its anchor and a
+    /// fresh anchor give different positions.
     fn transport(&self) -> transit_dsp::Transport {
         let tempo = self.tempo.unwrap_or(120.0);
         let seconds = self.frames as f64 / f64::from(self.rate.max(1.0));
-        let quarters = seconds * tempo / 60.0;
+        let quarters = seconds * tempo / 60.0 + self.frames as f64 * 1e-7;
         transit_dsp::Transport {
             playing: self.tempo.is_some(),
             recording: false,
             tempo,
-            numerator: 4,
+            numerator: 3,
             denominator: 4,
             samples: self.frames as i64,
             seconds,
             quarters,
-            bar_start: (quarters / 4.0).floor() * 4.0,
-            bar: (quarters / 4.0).floor() as i64,
+            bar_start: (quarters / 3.0).floor() * 3.0,
+            bar: (quarters / 3.0).floor() as i64,
         }
     }
 }

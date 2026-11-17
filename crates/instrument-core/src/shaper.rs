@@ -454,9 +454,10 @@ impl Shaper {
     /// Test seam (feature `testing`, #742): the voice shaper's complete state: both envelopes,
     /// both filter sections and the coefficients last designed, both LFOs, the blocks since the
     /// note, the amp envelope's velocity scale, the matrix's LFO amount sums of the last block,
-    /// the note's random value, the generator, its seed (a reset reseeds from it) and the gate.
+    /// the note's random value, the generator and the gate. The seed is the owner's configuration
+    /// (a voice's index: set at construction, and a reset reseeds from that same value).
     pub fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
-        let Shaper { amp, filter_env, sections, coefs, lfo, since_note, amp_scale, lfo_amount_mod, random, rng, seed, gate } = self;
+        let Shaper { amp, filter_env, sections, coefs, lfo, since_note, amp_scale, lfo_amount_mod, random, rng, seed: _, gate } = self;
         amp.record_state(w);
         filter_env.record_state(w);
         sections.iter().for_each(|s| s.fingerprint(w));
@@ -467,13 +468,12 @@ impl Shaper {
         w.f32s(lfo_amount_mod);
         w.f32(*random);
         w.u32(*rng);
-        w.u32(*seed);
         w.bool(*gate);
     }
 
     /// Test seam (feature `testing`, #742): sets what [`Shaper::record_state`] wrote.
     pub fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
-        let Shaper { amp, filter_env, sections, coefs, lfo, since_note, amp_scale, lfo_amount_mod, random, rng, seed, gate } = self;
+        let Shaper { amp, filter_env, sections, coefs, lfo, since_note, amp_scale, lfo_amount_mod, random, rng, seed: _, gate } = self;
         amp.restore_state(r)?;
         filter_env.restore_state(r)?;
         sections.iter_mut().try_for_each(|s| s.restore(r))?;
@@ -484,7 +484,6 @@ impl Shaper {
         r.f32s(lfo_amount_mod)?;
         *random = r.f32()?;
         *rng = r.u32()?;
-        *seed = r.u32()?;
         *gate = r.bool()?;
         Some(())
     }

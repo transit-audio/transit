@@ -2,8 +2,8 @@
 //!
 //! Every checklist boundary applies to the Macro Oscillator and has a witness here; the entry-
 //! specific ones are its delay lines (the string engine's strings, the particle engine's diffuser,
-//! the string machine's ensemble, the voice's trigger delay), its generators and its transport
-//! anchor. The spans the inventory declares, fed to the one duration calculator:
+//! the string machine's ensemble, the voice's trigger delay), its generators, its transport anchor
+//! and controllers, the meter it holds after the transport stops, and a re-strike's open note-ons. The spans the inventory declares, fed to the one duration calculator:
 //! - `RELEASE`: a voice's release at the witnesses' Decay (15 %) to idle (its low-pass gate tail,
 //!   then [`transit_dsp::plugins::macro_osc::voice::QUIET_SECONDS`] of silence);
 //! - `RAMP`: the level smoother's ramp (a 20 ms time constant, settled within 1e-6);
@@ -357,6 +357,44 @@ fn witnesses() -> Vec<W> {
             reached: |p| obs(p).anchored && obs(p).held != 0,
             completed: |p| !obs(p).anchored && idle(p),
         },
+        // The meter after the transport stops: it played in 3/4 and was told it stopped; the
+        // continuation carries on with no transport (the synced LFO runs at the tempo over the
+        // bar it last heard), changes a parameter (the settings are worked out again from the
+        // bar it holds), and runs the shaped release to idle.
+        W {
+            boundary: Boundary::Entry("stopped transport"),
+            history: |rate| {
+                let mut h = setup(8);
+                h.extend(shaper_on());
+                h.extend([Step::Transport(Some(140.0)), Step::On(50, 100, 0), Step::Run(span(&[HOLD], rate)), Step::Transport(None)]);
+                h
+            },
+            continuation: |rate| {
+                vec![
+                    Step::Run(span(&[HOLD], rate)),
+                    Step::Param("lfo2_amount", 70.0),
+                    Step::Run(span(&[HOLD], rate)),
+                    Step::Off(50, 0),
+                    run_out(&[SHAPER_RELEASE], rate),
+                ]
+            },
+            reached: |p| !obs(p).anchored && obs(p).held != 0,
+            completed: idle,
+        },
+        // A key struck again before its first note's off (two open note-ons): the continuation's
+        // first off closes the older one and leaves the voice sounding; the second releases it.
+        W {
+            boundary: Boundary::Entry("re-strike"),
+            history: |rate| {
+                let mut h = setup(8);
+                h.extend([Step::Param("model", 8.0), Step::On(60, 100, 0), Step::Run(span(&[HOLD], rate)), Step::On(60, 80, 5)]);
+                h.push(Step::Run(span(&[HOLD], rate)));
+                h
+            },
+            continuation: |rate| vec![Step::Off(60, 0), Step::Run(span(&[HOLD], rate)), Step::Off(60, 3), run_out(&[RELEASE], rate)],
+            reached: |p| obs(p).held != 0,
+            completed: idle,
+        },
     ]
 }
 
@@ -373,8 +411,10 @@ fn in_release(p: &MacroOscillator) -> bool {
     o.sounding != 0 && o.held == 0
 }
 
-/// The shaper on (short envelopes, a resonant filter with key tracking and envelope, both LFOs:
-/// one free with a fade-in, one synced and retriggered) and a matrix row from LFO 1 to the cutoff.
+/// The shaper on (short envelopes, a resonant filter with key tracking and envelope, both LFOs
+/// free-running, so a new note takes the instrument's running phase: one with a fade-in, one
+/// synced to a bar division, anchored to the song position while the transport plays) and matrix
+/// rows from LFO 1 to the cutoff and from LFO 2 to Timbre.
 fn shaper_on() -> Vec<Step> {
     vec![
         Step::Param("shaper", 1.0),
@@ -389,12 +429,17 @@ fn shaper_on() -> Vec<Step> {
         Step::Param("lfo1_rate", 7.0),
         Step::Param("lfo1_fade", 30.0),
         Step::Param("lfo1_amount", 80.0),
+        Step::Param("lfo1_retrigger", 0.0),
         Step::Param("lfo2_sync", 1.0),
-        Step::Param("lfo2_retrigger", 1.0),
+        Step::Param("lfo2_retrigger", 0.0),
+        Step::Param("lfo2_division", 1.0),
         Step::Param("lfo2_amount", 50.0),
         Step::Param("mod1_source", 1.0),
         Step::Param("mod1_dest", 7.0),
         Step::Param("mod1_amount", 40.0),
+        Step::Param("mod8_source", 2.0),
+        Step::Param("mod8_dest", 3.0),
+        Step::Param("mod8_amount", 40.0),
     ]
 }
 
