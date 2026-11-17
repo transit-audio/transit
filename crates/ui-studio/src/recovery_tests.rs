@@ -204,31 +204,52 @@ fn a_panic_in_a_frame_autosaves_and_the_app_carries_on() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// What a recovered pass looked like: its tracks, the count-in and start of its plan, and the loop
+/// it cycled over, if any.
+struct Pass {
+    tracks: usize,
+    start: i64,
+    count_in: i64,
+    cycle: Option<transit_time::Range>,
+}
+
 /// A recovered MIDI take, from a journal of a recording that ran after a count-in of half a second,
 /// with a note-on at each of `offsets` (samples from the latch); the status line after recovery.
 fn recovered_status(name: &str, offsets: &[i64]) -> String {
+    recovered(name, &Pass { tracks: 1, start: 0, count_in: 24_000, cycle: None }, offsets).0
+}
+
+/// The status line after recovering `pass`, with a note-on at each of `offsets` on EVERY track, and
+/// the number of clips the session holds afterward.
+fn recovered(name: &str, pass: &Pass, offsets: &[i64]) -> (String, usize) {
     use transit_engine::midi_journal::{Header, Latch, Record, Writer};
     use transit_engine::midi_take::Msg;
     let dir = folder(name);
     let root = dir.join("Autosave");
     let mut first = launch(&root);
-    first.run("track.new", json!({"kind": "midi", "name": "Keys"})).unwrap();
-    let track = first.engine.session().track_by_name("Keys").unwrap().id;
+    for n in 0..pass.tracks {
+        first.run("track.new", json!({"kind": "midi", "name": format!("Keys{n}")})).unwrap();
+    }
+    let tracks: Vec<_> = (0..pass.tracks).map(|n| first.engine.session().track_by_name(&format!("Keys{n}")).unwrap().id).collect();
     first.close_autosave();
     drop(first);
     let mut left = leftovers(&root).remove(0);
     let journal = root.join("Untitled/Audio Files/Keys.midijournal");
     std::fs::create_dir_all(journal.parent().unwrap()).unwrap();
-    let plan = transit_engine::io::Recording { count_in: Some(24_000), ..transit_engine::io::Recording::new(0) };
-    let h = Header::new(Latch { output_frame: 100_000, position: 0, device_rate: 48_000, session_rate: 48_000 }, &plan, None, vec![track]);
+    let plan = transit_engine::io::Recording { count_in: Some(pass.count_in), cycle: pass.cycle, ..transit_engine::io::Recording::new(pass.start) };
+    let latch = Latch { output_frame: 100_000, position: pass.start, device_rate: 48_000, session_rate: 48_000 };
+    let h = Header::new(latch, &plan, pass.cycle, tracks.clone());
     let mut records = Vec::new();
-    for (i, off) in offsets.iter().enumerate() {
-        let frame = u64::try_from(100_000 + off).unwrap();
-        let pitch = 60 + u8::try_from(i).unwrap();
-        let on = Record { frame, track, channel: 0, approximate: false, msg: Msg::NoteOn { pitch, velocity: 90 } };
-        records.push(on);
-        records.push(Record { frame: frame + 4_000, msg: Msg::NoteOff { pitch, velocity: 0 }, ..on });
+    for (k, track) in tracks.iter().enumerate() {
+        for (i, off) in offsets.iter().enumerate() {
+            let frame = u64::try_from(100_000 + off).unwrap();
+            let pitch = 60 + u8::try_from(i + 10 * k).unwrap();
+            let on = Record { frame, track: *track, channel: 0, approximate: false, msg: Msg::NoteOn { pitch, velocity: 90 } };
+            records.push(on);
+            records.push(Record { frame: frame + 4_000, msg: Msg::NoteOff { pitch, velocity: 0 }, ..on });
+        }
     }
+    records.sort_by_key(|r| r.frame);
     let mut w = Writer::new(journal.clone());
     w.append(&h, &records, records.len()).unwrap();
     w.flush().unwrap();
@@ -236,8 +257,9 @@ fn recovered_status(name: &str, offsets: &[i64]) -> String {
     let mut next = launch(&root);
     next.recover(&left);
     let status = next.status.clone();
+    let clips = next.engine.session().tracks.iter().map(|t| t.clips().len()).sum();
     let _ = std::fs::remove_dir_all(&dir);
-    status
+    (status, clips)
 }
 
 /// Recovery says how many notes played before the count-in started were left out, in the words a
@@ -248,5 +270,31 @@ fn a_recovered_take_says_how_many_notes_before_the_count_in_were_left_out() {
     assert!(said.contains("1 recovered MIDI clip from the interrupted recording"), "{said}");
     assert!(said.ends_with("; 2 notes played before recording began were not recorded."), "{said}");
     let said = recovered_status("recovery-no-early-notes", &[-12_000, 12_000]);
+    assert!(said.contains("1 recovered MIDI clip") && !said.contains("not recorded"), "{said}");
+}
+
+/// A cycle recording recovers through the same count: early notes before the count-in are left out.
+#[test]
+fn a_recovered_cycle_take_counts_its_early_notes() {
+    let pass = Pass { tracks: 1, start: 0, count_in: 24_000, cycle: Some(transit_time::Range::new(0, 96_000)) };
+    let (said, _) = recovered("recovery-cycle-early", &pass, &[-36_000, 12_000]);
+    assert!(said.ends_with("; 1 note played before recording began was not recorded."), "{said}");
+}
+
+/// Two tracks recording: the count is the total, as at a normal Stop (one early note on each is 2).
+#[test]
+fn a_recovered_take_on_two_tracks_counts_the_early_notes_of_both() {
+    let pass = Pass { tracks: 2, start: 0, count_in: 24_000, cycle: None };
+    let (said, clips) = recovered("recovery-two-tracks-early", &pass, &[-36_000, 12_000]);
+    assert_eq!(clips, 2, "one clip per track");
+    assert!(said.ends_with("; 2 notes played before recording began were not recorded."), "{said}");
+}
+
+/// A pickup inside a count-in that reaches before bar 1 is a recorded note, not an early one.
+#[test]
+fn a_recovered_pickup_in_the_pre_count_zone_counts_nothing() {
+    let pass = Pass { tracks: 1, start: 0, count_in: 96_000, cycle: None };
+    let (said, clips) = recovered("recovery-pre-count-pickup", &pass, &[-48_000, 12_000]);
+    assert_eq!(clips, 1);
     assert!(said.contains("1 recovered MIDI clip") && !said.contains("not recorded"), "{said}");
 }

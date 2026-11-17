@@ -357,7 +357,7 @@ pub(super) fn store_media(dir: &Path, stem: &str, extension: &str, bytes: &[u8])
 }
 
 /// Log what the parser said about a session this build could not read: the message the user sees leaves it out (#719).
-fn log_session_detail(file: &str, err: &transit_model::SessionError) {
+pub(super) fn log_session_detail(file: &str, err: &transit_model::SessionError) {
     if let Some(detail) = err.detail() {
         log::warn!("{file}: unreadable session: {detail}");
     }

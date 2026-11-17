@@ -79,8 +79,9 @@ pub fn lines(s: &StuckCall, others: usize) -> Vec<String> {
         "Audio keeps playing. Saving keeps the state this plug-in had when it was last read, so changes made in it since then are not saved.".into(),
         END_TASK.into(),
         format!(
-            "Give up stops sending requests to the {} on its thread until transit restarts (their audio keeps playing){WINDOW_PART}, and lets the plug-ins you add next load normally. If the plug-in may still recover (a dialog of its own), choose Later first.",
-            transit_model::counted(s.others() + 1, "plug-in")
+            "Give up stops sending requests to the {} on its thread until transit restarts ({} audio keeps playing){WINDOW_PART}, and lets the plug-ins you add next load normally. If the plug-in may still recover (a dialog of its own), choose Later first.",
+            transit_model::counted(s.others() + 1, "plug-in"),
+            if s.others() == 0 { "its" } else { "their" }
         ),
     ];
     if others > 0 {
@@ -210,6 +211,17 @@ mod tests {
         assert!(!later.hides(&stuck(transit_plugin_host::call::EDITOR_OPEN, 130, 6)), "another call shows");
         assert!(!later.hides(&stuck(s.call, 5, 6)), "the thread stuck again in a new call shows");
         assert!(!later.hides(&StuckCall { thread: "plugin-host-1".into(), ..s.clone() }), "another thread shows");
+    }
+
+    #[test]
+    fn the_give_up_sentence_agrees_for_one_plug_in_and_for_more() {
+        let call = transit_plugin_host::call::WINDOW_MESSAGE;
+        let one = lines(&stuck(call, 130, 1), 1);
+        assert!(one[3].contains("to the 1 plug-in on its thread until transit restarts (its audio keeps playing)"), "{}", one[3]);
+        assert_eq!(one[4], "1 more plug-in host thread is not responding; Give up covers them too.");
+        let many = lines(&stuck(call, 130, 3), 2);
+        assert!(many[3].contains("to the 3 plug-ins on its thread until transit restarts (their audio keeps playing)"), "{}", many[3]);
+        assert_eq!(many[4], "2 more plug-in host threads are not responding; Give up covers them too.");
     }
 
     #[test]
