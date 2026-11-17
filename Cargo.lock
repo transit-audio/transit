@@ -812,7 +812,7 @@ dependencies = [
 [[package]]
 name = "cpal"
 version = "0.16.0"
-source = "git+https://github.com/derekmwright/cpal?rev=d7ede1c5543427f4ea3a2c30356faf99b2316558#d7ede1c5543427f4ea3a2c30356faf99b2316558"
+source = "git+https://github.com/transit-audio/cpal?rev=d7ede1c5543427f4ea3a2c30356faf99b2316558#d7ede1c5543427f4ea3a2c30356faf99b2316558"
 dependencies = [
  "alsa",
  "audio_thread_priority",

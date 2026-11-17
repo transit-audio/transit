@@ -131,6 +131,7 @@ codegen-units = 16
 debug = 0
 
 [patch.crates-io]
-# Reviewed WASAPI lifetime (upstream PR #1406), fork-only worker observation and signed timestamp fixes,
+# WASAPI lifetime fix on the 0.16 line (upstream merged the smaller form as PR #1407 on 2026-10-20; not in a cpal
+# release as of v0.18.2), fork-only worker observation and signed timestamp fixes,
 # and ALSA xrun recovery (an xrun seen while polling is recovered and capture restarted, #586).
-cpal = { git = "https://github.com/derekmwright/cpal", rev = "d7ede1c5543427f4ea3a2c30356faf99b2316558" }
+cpal = { git = "https://github.com/transit-audio/cpal", rev = "d7ede1c5543427f4ea3a2c30356faf99b2316558" }

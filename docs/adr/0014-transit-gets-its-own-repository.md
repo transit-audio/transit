@@ -47,7 +47,7 @@ Engine fixes may still be offered to `storytold/soundcraft` and to dependencies 
 
 - **What moves where.** The transit code, the `transit` branch history, product issues, releases, and CI move to the new repository. `derekmwright/soundcraft` keeps only the `fix/*` branches behind open upstream PRs.
 - **No fork-network link.** The link between transit and storytold is intentionally not kept. Upstream changes arrive by explicit cherry-pick or port, as they already do in practice.
-- **CPAL.** The CPAL fork stays at `derekmwright/cpal` as a thin patch fork (decision 2026-10-19).
+- **CPAL.** The CPAL fork stays at `derekmwright/cpal` as a thin patch fork (decision 2026-10-19). Moved to `transit-audio/cpal` on 2026-11-17, so the build does not depend on a personal account; the pinned commit carries the tag `transit-pin-2026-11-15`.
 - **Branch rule.** ADR 0003 (integration branch that only merges) applies to the new `main` unchanged. The "never pushed" rule ended only with the project owner's go.
 - **CI.** The matrix from ADR 0013 becomes ours to maintain in the new repository.
 
