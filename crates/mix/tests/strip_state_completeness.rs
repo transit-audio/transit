@@ -152,7 +152,7 @@ fn send(rig: &mut Rig, synth: TrackId, ahead: u64, message: Message, seq: u64) {
 /// Plays the Synth: a note every few blocks, its off two blocks later.
 fn play(rig: &mut Rig, synth: TrackId, b: usize) {
     let key = 48 + (b % 12) as u8;
-    if b % 4 == 0 {
+    if b.is_multiple_of(4) {
         send(rig, synth, 17, Message::NoteOn { key, velocity: 100, id: NoteId::NONE }, b as u64 * 2);
     }
     if b % 4 == 2 {

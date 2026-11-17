@@ -419,7 +419,7 @@ impl Plugin for Fixture {
             self.pos = (self.pos + 1) % self.line.len();
             self.rng = self.rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             let noise = (self.rng >> 8) as f32 / (1u32 << 24) as f32 - 0.5;
-            let click = if self.count % PERIOD as u64 == 0 { 0.25 } else { 0.0 };
+            let click = if self.count.is_multiple_of(PERIOD as u64) { 0.25 } else { 0.0 };
             self.count += 1;
             let y = self.cur * (x + 0.5 * delayed) + 0.001 * noise + click;
             for c in io.iter_mut() {
@@ -547,7 +547,7 @@ fn fixture() -> Entry<Fixture> {
                 boundary: Boundary::Entry("counter"),
                 history: |_| vec![Step::Run(PERIOD + 137)],
                 continuation: |rate| vec![Step::RunBlocks(frames(&[Span::Samples(2 * PERIOD)], rate), 7)],
-                reached: |p| p.count % PERIOD as u64 != 0,
+                reached: |p| !p.count.is_multiple_of(PERIOD as u64),
                 completed: none,
             },
             // The generator: advanced, then drawn from.

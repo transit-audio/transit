@@ -25,8 +25,9 @@ pub(crate) fn fingerprint(e: &crate::ParametricEq) -> Vec<u64> {
     #[derive(Default)]
     struct Words(Vec<u64>);
     impl core::hash::Hasher for Words {
-        fn write(&mut self, _: &[u8]) {
-            unreachable!("the record writer emits words only")
+        /// Never called: the record writer emits words only.
+        fn write(&mut self, bytes: &[u8]) {
+            self.0.extend(bytes.iter().map(|&b| u64::from(b)));
         }
         fn write_u64(&mut self, w: u64) {
             self.0.push(w);
