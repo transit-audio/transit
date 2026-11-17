@@ -280,7 +280,7 @@ fn matrix_conditions_follow_the_cell_text() {
     assert_eq!(refused_record(true, f).effects, []);
     assert_eq!(refused_record(false, f).effects, [Effect::FinishPass, Effect::Message(Message::PlayerRefusal), Effect::ReleaseDeferred]);
     assert_eq!(refused_record(false, Facts { playing: true, ..f }).phase, TransportPhase::Playing);
-    assert_eq!(refused_record(false, Facts { group: StartGroup { members: 0, applied: true }, ..f }).phase, TransportPhase::Playing);
+    assert_eq!(refused_record(false, Facts { group: StartGroup { members: 0, applied: true }, ..f }).phase, TransportPhase::Stopped, "D-4");
     assert_eq!(refused_record(false, Facts { group: StartGroup { members: 1, applied: false }, ..f }).phase, TransportPhase::StartPending);
 
     // Start groups.
@@ -536,10 +536,11 @@ struct Capable {
 ///   acknowledged (an acknowledged Stop neutralizes earlier ordinary actions and record-start
 ///   continuations, record section 4). Outside StopPending, the Stop that closed a group was
 ///   acknowledged.
-/// - The current group's starts, in SP and RP. In CI, W and R the Record's action was applied
-///   (its stage or receipt was seen), and ordinary actions apply in publication order
-///   (`P/player/control.rs:107-139`), so a start published before it was applied too; only its
-///   receipt may be outstanding.
+/// - The current group's starts, in SP and RP. In CI, W and R the Record's action was processed
+///   (its stage or receipt was seen), and ordinary actions are processed in publication order
+///   (`P/player/control.rs:107-139`), so a start published before it has already been processed,
+///   either applied or terminally refused, and cannot execute later; only its receipt may be
+///   outstanding.
 /// - The record continuation in RP, CI and W (an admitted Record can still start from its
 ///   clock wait); not in R (it has started).
 fn worlds(phase: &TransportPhase) -> Vec<(Facts, Capable)> {
@@ -806,4 +807,27 @@ fn judged_cells_follow_the_amended_text() {
     assert_eq!((applied.phase, applied.effects.len()), (TransportPhase::Stopped, 0));
     let refused = receipt(Event::PlayRefused(PlayOf::Group { current: false }));
     assert_eq!((refused.phase, refused.effects), (TransportPhase::Stopped, vec![Effect::Message(Message::PlayerRefusal)]));
+}
+
+/// Judging round 2's counterexample (D-4): in RP the current group has one Play applied and ended
+/// and another still outstanding; the Record fails before its audio action. The destination must
+/// be StartPending, so that the Player then stopping by itself cannot reach Stopped while that
+/// Play can still execute.
+#[test]
+fn a_failed_record_with_an_outstanding_start_waits_for_the_group() {
+    let (t, _) = tickets();
+    let rp = TransportPhase::RecordPending { ticket: t, from: Some(0), count_in: None };
+    let outstanding =
+        Facts { tracked: Tracked { starts: 1, ..Tracked::default() }, group: StartGroup { members: 1, applied: true }, ..Facts::default() };
+    for failure in [Event::StageCancelled(t), Event::StageFailed(t), Event::RecordRefused { ticket: t, retired_by_stage: false }] {
+        let failed = run(rp, failure, outstanding);
+        assert_eq!(failed.phase, TransportPhase::StartPending, "{failure:?}: the outstanding start decides");
+        assert!(failed.effects.contains(&Effect::FinishPass), "{failure:?}");
+        let then = run(failed.phase, Event::StoppedByItself, outstanding);
+        assert_ne!(then.phase, TransportPhase::Stopped, "{failure:?}: Stopped with a start that can still execute");
+    }
+    // With no outstanding member: Playing only when playback is observed, else Stopped.
+    let processed = Facts { group: StartGroup { members: 0, applied: true }, ..Facts::default() };
+    assert_eq!(run(rp, Event::StageCancelled(t), processed).phase, TransportPhase::Stopped);
+    assert_eq!(run(rp, Event::StageCancelled(t), Facts { playing: true, ..processed }).phase, TransportPhase::Playing);
 }

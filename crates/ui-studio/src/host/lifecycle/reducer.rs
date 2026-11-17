@@ -616,13 +616,15 @@ impl Run<'_> {
         }
     }
 
-    /// The destination after a failed or cancelled start (record section 4).
+    /// The destination after a failed, refused or cancelled start (record section 4, D-4).
     fn by_four(&self) -> TransportPhase {
+        // D-4: an outstanding member of the current group decides first, whatever its `applied`
+        // bit; a tracked member counts as outstanding until its receipt retires it.
         let f = self.facts;
-        if f.playing || f.group.applied {
-            TransportPhase::Playing
-        } else if f.group.members > 0 {
+        if f.group.members > 0 {
             TransportPhase::StartPending
+        } else if f.playing {
+            TransportPhase::Playing
         } else {
             TransportPhase::Stopped
         }
