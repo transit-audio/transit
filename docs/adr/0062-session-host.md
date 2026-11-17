@@ -484,4 +484,6 @@ Cells and sentences changed, and why:
 - Section 3: the D-5 invariant beside the Stopped invariant.
 - Section 7, admission step 1: the pre-supersession operation and its Stop requirement are preserved (D-1 exactly once).
 - Gates: S2d's integration gate for no observed playback in Stopped.
+- V1 and V2 in STr: "deferred discarded" added, applying U-3 (section 4: "A Stop, Reset, fault or the old Player's retirement empties both."); the device-trouble Stop out of Resume otherwise left the deferred commands stranded in Stopped. V5 already clears them in its heading.
+- C9 in S, SP and P: the half speed is set before the start is submitted, as today (`host/transport.rs:300-303`); an ordering clarification, no new decision.
 - R13 and V3 headings and RND cells, section 11: the cancel precedes the retirement in Rendering (D-6).
