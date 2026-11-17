@@ -106,7 +106,7 @@ fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_s
         };
         let window = structural_window(&facts, latency);
         top.window = window.blocks;
-        top.fallback = window.fallback;
+        top.shortened = window.shortened;
         top.blocks = 40 + top.window;
         println!(
             "{name}: holds in blocks 2..40, post-fault window {} blocks ({} samples), plan latency {latency}, set by {}; incomplete: {}; not inventoried: {}",
