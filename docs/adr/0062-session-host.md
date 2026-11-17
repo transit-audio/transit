@@ -5,7 +5,7 @@ title: The typed transport lifecycle: one transport phase is the truth for start
 
 - **Status:** accepted 2026-11-17 (proposed 2026-11-16; six judging rounds; narrowed to the lifecycle after round 3); Amended 2026-11-17 for #739 (slice S2a): the matrix made exact, see the amendment at the end
 - **Date:** 2026-11-16
-- **Implementation:** not started. Slices S1 and S2a to S2g below, all before hardware sync slice 1 (#733, ADR 0043). Tracking issue #739 (topic B of #736). The appendix [0062/tables.md](0062/tables.md) is part of this record: the transition matrix (A), the simulation (B), the reader assignments (C), the display examples (D), the status writers that are not mechanical (E).
+- **Implementation:** slice S1 landed at 8f9bf93c (the derived transport phase, read only); slice S2a is built and in review (the pure reducer over the literal matrix, unused by the app); S2b to S2g not started. Slices S1 and S2a to S2g below, all before hardware sync slice 1 (#733, ADR 0043). Tracking issue #739 (topic B of #736). The appendix [0062/tables.md](0062/tables.md) is part of this record: the transition matrix (A), the simulation (B), the reader assignments (C), the display examples (D), the status writers that are not mechanical (E).
 - **Reopen when:** ADR 0043 cannot add its states under the checklist of section 14; the display arbitration fails the maintainer's feel-right check; a lifecycle file nears the 1,500-line budget; one of the deferred records needs a lifecycle change this record does not allow; the owed-Stop deadline (section 4) is reached in practice.
 
 ## Context
@@ -70,7 +70,7 @@ A request becomes a tracked fact when its submission returns a sequence; prepara
 - **Start groups.** Play-family requests (Play, PlayExact, PlaySelection, HalfSpeed, a Toggle that starts) join the current group, which has an `applied` bit. A Stop closes the current group: its members stay tracked until their receipts retire them, but nothing from a closed group, its `applied` bit included, carries into the next. When the current group's last member retires, the phase becomes Playing if any member applied or playback is observed, else Stopped. The bound is the action lane (256 ordinary actions, `P/action_lane.rs:12`); exceeding it is the lane's existing refusal.
 - **Play A, then Record.** Record is admitted with A still in the current group; the phase is RecordPending; A's receipt later retires A with no phase change (its refusal text, if any, is shown). A Record from stopped no longer reuses the Play request (B6).
 - **Stage before receipt.** The stage moves the phase (CountIn, WaitingForClock, Recording); the later action receipt retires Record with no phase change. A refusal receipt after a `Failed` or `Cancelled` stage has already retired Record and shows nothing new for that ticket.
-- **A failed or cancelled start's destination** is decided when the terminal observation is handled: Playing if playback is observed or the current start group has an applied member; StartPending if the group still has members; else Stopped.
+- **A failed or cancelled start's destination** is decided when the terminal observation is handled (a Record that fails, is refused or is cancelled), in this order: StartPending whenever the current start group still has an outstanding member (a start that has not been processed: neither applied nor terminally refused), regardless of its `applied` bit; Playing when the group has no outstanding member and playback is observed; else Stopped. The host cannot tell a processed member whose receipt is still on its way from an unprocessed one, so a tracked member counts as outstanding until its receipt retires it.
 - **A fault, or the old Player's retirement,** retires every fact and owed Stop, closes every group, discards held and deferred work, and finalizes the prepared resources; cleanup calls that fail create no facts.
 - **Shutdown** closes autosave, finalizes resources and returns input before dropping the Player (`host.rs:70-78`). Actual shutdown retirement discharges all requests and owed Stops without waiting for further steps (`Player::drop` quiesces admission even if the stream Stop fails, `P/player/device.rs:1112-1121`); it does not install a new Player or clear the fault for reuse.
 
@@ -446,11 +446,13 @@ Round 6 (confirmation) accepted with six changes; each was checked against `main
 
 ## Amendment (S2a, 2026-11-17): the matrix made exact
 
-Found while encoding section A as a literal table (slice S2a); a judging round ruled on each reading, and the coordinator settled its three open points. All three keep today's behavior.
+Found while encoding section A as a literal table (slice S2a); a judging round ruled on each reading, and the coordinator settled its open points (D-1 to D-3 keep today's behavior; D-4 came from a second judging round).
 
 - **D-1.** A change of StopPending kind (C5, C6 and C7 in STr; C12 in STp and STr; V1, V2 and V5 in STr) always submits a new Stop, even when an earlier Stop is tracked or owed; a failed submission keeps the earliest owed deadline (section 4). Today `stop_play` always submits one, and a Resume whose Stop already retired would otherwise wait for a frontier that never comes.
 - **D-2.** Count-in payloads follow a preparation contract: `from=None` is a punch, `count_in=Some` requires `from=Some`, and the host preserves the pairing; the reducer leaves inconsistent input unchanged (section 3; R3 and O1 in RP).
 - **D-3.** E1 in RND refuses with today's text, "A real-time render is already running." (`finish/realtime.rs:191-192`).
+- **D-4.** A failed, refused or cancelled Record goes to StartPending whenever the current start group still has an outstanding member, regardless of `applied`; Playing only with no outstanding member and playback observed; else Stopped (section 4; the "by 4" rule of R5, O4 and O5 and the legend). Counterexample under the old order: in RP with one Play applied and ended and another still outstanding, the Record fails before its audio action and "by 4" chose Playing from the `applied` bit;
+  O6 in Playing then went to Stopped without neutralizing the outstanding Play, which could still execute, against section 3's invariant.
 
 Cells and sentences changed, and why:
 
@@ -471,3 +473,5 @@ Cells and sentences changed, and why:
 - Section 9: where PlayExact and Locate write retained.
 - Section 11: the cancellation result.
 - Slices: S2a's size is the built figure.
+- Section 4 and the legend's "by 4" (used by R5, O4 and O5): the failed-start destination order (D-4).
+- Implementation line: S1 landed and S2a built, replacing "not started".
