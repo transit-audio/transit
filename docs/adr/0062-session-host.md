@@ -61,6 +61,8 @@ pub enum RenderJob { Live, Retired { result: Option<RenderOutcome>, reason: Opti
 
 **Invariant, tested after every admission and every step:** Unless faulted, Stopped implies no outstanding request or record-start continuation still capable of moving the transport, no owed Stop, and no observed playback. Requests neutralized by an acknowledged later Stop may remain tracked until their own receipts arrive; they continue to block capabilities wherever section 8 requires nothing tracked. A step that observes playback while Stopped with nothing tracked adopts it (row O7: Playing, logged); adoption is off while `faulted`.
 
+**Invariant (D-5):** Playing never holds an outstanding current-group start: every entry into Playing is R1 or R2 with an empty group, the destination of section 4 with no outstanding member, or O7 adoption with nothing tracked, and a start admitted in Playing opens a new group in StartPending.
+
 ### 4. Request ownership
 
 A request becomes a tracked fact when its submission returns a sequence; preparation before that (arming, a journal, a plan) is cleaned up on a local refusal and is not a fact. Facts: the start groups; Record; record-off; Stop; Locate (each one tracked separately); release; `SetLoop` (`P/player/device.rs:315-316`); render Play; render Stop.
@@ -208,7 +210,7 @@ MIDI transport loss (`midi_transport.rs:162-173`) says "MIDI transport input los
 - **Stops are kept, not discarded (S2b, playback change).** The job keeps every Stop sequence it submits, from the moment of submission (today the capture-complete Stop at `P/player/device/realtime_render.rs:159-165` is sent before the unfinished-writer return at `:168-169`), and records a Stop it could not submit as owed. Every render poll reports newly submitted and unsent Stop obligations even when no result is ready. The host records the first-owed monotonic stamp on that poll and owns subsequent retries (section 4). The job retains previously submitted identities for cancellation reporting; repeated reports are deduplicated. Terminal result collection is independent of obligation reporting: `realtime_render_result()` returns the result when ready, and `cancel_realtime_render()` returns any obligations not yet reported and the writer's own result when the writer had already finished.
 - **A refused render Play** disposes of the job through a path that removes the part files and releases the External Instruments without calling Stop (today's `stop_and_release`, `:136-141`, always stops).
 - **Ordering, from what the code does.** A cancel admitted before the step's result poll takes the job (`slot.take()`, `:184`); a result collected first stands, and a later cancel finds no job: the job stays Retired with its collected result, and the phase waits for the render Stops' frontiers.
-- **Cancellation result.** The host processes the cancel's returned obligations and optional writer result before allowing E5 or another admission. Result feedback may fill a cancelled Retired job's empty result without replacing its reason or Reset continuation. A render-Play refusal preserves any already retired payload and reports its refusal once.
+- **Cancellation result.** The host processes the cancel's returned obligations and optional writer result before allowing E5 or another admission. Result feedback may fill a cancelled Retired job's empty result without replacing its reason or Reset continuation. A render-Play refusal preserves any already retired payload and reports its refusal once. In Rendering, R13 and V3 cancel the render first and then retire every fact, including what the cancel returned: its Stops are retired, neither tracked nor owed (a reset, reopened or faulted device cannot acknowledge them), and a writer result is still collected and reported.
 - **Leaving.** Rendering becomes Stopped when the job is Retired, the render Play and every render Stop are retired, no Stop is owed, and playback is not observed; then a pending Reset continuation runs.
 - **Files, as today.** Cancellation removes unfinished part files (`P/realtime_render/writer.rs:269-271`); anything the writer had already committed (each file is synced and renamed when it finishes, `:261-266`, main then stems, `:319-321`) may remain. The message for a cancel caused by a session replacement is "Render cancelled: the session was replaced." and, only when the cancel returned a successful finished result, "The finished files were kept."; a reopen keeps today's text (`finish/realtime.rs:26`).
 - **Fault and the blocking join.** No acknowledgment can arrive: the host cancels the job, which joins the writer (`P/player/device/realtime_render.rs:27-31`); the interface thread waits for that join. This record keeps that limitation (the deferred slow-calls record addresses it); Rendering stays owned and exclusive operations stay refused until the join returns, then the render facts are retired by the fault and the phase becomes Stopped with `faulted`.
@@ -446,13 +448,16 @@ Round 6 (confirmation) accepted with six changes; each was checked against `main
 
 ## Amendment (S2a, 2026-11-17): the matrix made exact
 
-Found while encoding section A as a literal table (slice S2a); a judging round ruled on each reading, and the coordinator settled its open points (D-1 to D-3 keep today's behavior; D-4 came from a second judging round).
+Found while encoding section A as a literal table (slice S2a); a judging round ruled on each reading, and the coordinator settled its open points (D-1 to D-3 keep today's behavior; D-4 came from a second judging round, D-5 and D-6 from the reachability closure).
 
 - **D-1.** A change of StopPending kind (C5, C6 and C7 in STr; C12 in STp and STr; V1, V2 and V5 in STr) always submits a new Stop, even when an earlier Stop is tracked or owed; a failed submission keeps the earliest owed deadline (section 4). Today `stop_play` always submits one, and a Resume whose Stop already retired would otherwise wait for a frontier that never comes.
 - **D-2.** Count-in payloads follow a preparation contract: `from=None` is a punch, `count_in=Some` requires `from=Some`, and the host preserves the pairing; the reducer leaves inconsistent input unchanged (section 3; R3 and O1 in RP).
 - **D-3.** E1 in RND refuses with today's text, "A real-time render is already running." (`finish/realtime.rs:191-192`).
 - **D-4.** A failed, refused or cancelled Record goes to StartPending whenever the current start group still has an outstanding member, regardless of `applied`; Playing only with no outstanding member and playback observed; else Stopped (section 4; the "by 4" rule of R5, O4 and O5 and the legend). Counterexample under the old order: in RP with one Play applied and ended and another still outstanding, the Record fails before its audio action and "by 4" chose Playing from the `applied` bit;
   O6 in Playing then went to Stopped without neutralizing the outstanding Play, which could still execute, against section 3's invariant.
+- **D-5.** Playing never holds an outstanding current-group start (section 3). Proven over what the table reaches: the tests' reachability closure from Stopped, over a finite abstraction of the phase, the tracked, owed and group facts and what can still execute, reaches a fixed point of 86,436 states and 16,136,300 transitions with both section 3 invariants holding on every one.
+- **D-6.** In Rendering, R13 and V3 cancel the render before their every-column retirement, which covers what the cancel returned (section 11). Path found by the closure under the old order: Stopped, E1 to Rendering with job Live;
+  V3 there retired every fact first, then the cancel's returned render Stops were tracked or owed, in Stopped.
 
 Cells and sentences changed, and why:
 
@@ -475,3 +480,5 @@ Cells and sentences changed, and why:
 - Slices: S2a's size is the built figure.
 - Section 4 and the legend's "by 4" (used by R5, O4 and O5): the failed-start destination order (D-4).
 - Implementation line: S1 landed and S2a built, replacing "not started".
+- Section 3: the D-5 invariant beside the Stopped invariant.
+- R13 and V3 headings and RND cells, section 11: the cancel precedes the retirement in Rendering (D-6).
