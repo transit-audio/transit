@@ -63,11 +63,38 @@ pub enum ParkEnd {
     ReturnToZero,
 }
 
-/// The real-time render's job. The retired job with its collected result arrives with the render
-/// as a phase (ADR 0062 slice S2e); until then a running render is always live.
+/// The real-time render's job (ADR 0062 sections 3 and 11). The derivation (slice S1) reads a
+/// running render as live; the retired job is produced only by the matrix's reducer (slice S2a)
+/// until the render is a phase (slice S2e).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderJob {
     Live,
+    /// The job was taken by a cancel or its result collected; the phase waits for the render's
+    /// Play and Stops to retire. `then_reset`: perform Reset after the render settles.
+    Retired {
+        result: Option<RenderOutcome>,
+        reason: Option<CancelReason>,
+        then_reset: bool,
+    },
+}
+
+/// What a collected render result says, for the settled message. The files and the message text
+/// stay with the render (slice S2e).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderOutcome {
+    Completed,
+    Failed,
+}
+
+/// Why a render was cancelled (tables.md section A, row E2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelReason {
+    Dialog,
+    AllNotesOff,
+    SessionReplaced,
+    Reopen,
+    DeviceLost,
+    Fault,
 }
 
 /// Why the host required the Stop it has pending, kept with the request so a pending Reset is
