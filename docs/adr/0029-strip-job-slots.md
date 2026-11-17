@@ -3,7 +3,7 @@ title: Per-strip job slots for the multicore strip render: one atomic state (`Id
 -->
 # ADR 0029: Per-strip job slots for the multicore strip render
 
-- **Status:** accepted 2026-10-29 (issue #124; proposed 2026-10-27). Slice 1, the slot protocol, is implemented in `transit-rt` `strip_jobs`; slice 2, the worker set and the deadline policy, in `transit-rt` `worker_set`; slice 3, the deferred-MIDI ring and the continuity test instrument, in `transit-rt` `midi_defer`; slice 4, the wiring into the live render path, in `crates/mix` `strip_pool`. The render workers are the default since 2026-10-29; `TRANSIT_RENDER_POOL=0` renders serially (deviation 18). Evidence: the gate 6 measurement on the reference hardware, 2026-10-28 ([benchmark](../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)), with #168 and #169 fixed after it, and the #130 endurance run, 2026-10-29 (eight hours at 64 frames with the workers on: the click sample-stable, no drift, no backend errors). Amended 2026-10-29 for #174: dependency-aware scheduling, see the amendment at the end; its slice 1 is implemented (section 10) and, since 2026-10-29, the default for keyed plans: they render through the task graph, `TRANSIT_RENDER_GRAPH=0` renders them serially (deviation 19; evidence: the section 8 measurement on the reference hardware, [benchmark](../benchmarks/2026-10-29-scarlett-keyed-session-graph-vs-serial.md), the gain-reduction regression of #179 and the scheduling-condition equivalence of #210). Slices 3 and 4 of the amendment remain proposed. Section 11 (slice 2, the tail) is implemented behind `TRANSIT_RENDER_TAIL=1`; the serial tail remains the default pending the paired measurement. Amendment for #742 proposed 2026-11-17: complete state records shorten the scheduling-condition gate's post-fault window; see the end.
+- **Status:** accepted 2026-10-29 (issue #124; proposed 2026-10-27). Slice 1, the slot protocol, is implemented in `transit-rt` `strip_jobs`; slice 2, the worker set and the deadline policy, in `transit-rt` `worker_set`; slice 3, the deferred-MIDI ring and the continuity test instrument, in `transit-rt` `midi_defer`; slice 4, the wiring into the live render path, in `crates/mix` `strip_pool`. The render workers are the default since 2026-10-29; `TRANSIT_RENDER_POOL=0` renders serially (deviation 18). Evidence: the gate 6 measurement on the reference hardware, 2026-10-28 ([benchmark](../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)), with #168 and #169 fixed after it, and the #130 endurance run, 2026-10-29 (eight hours at 64 frames with the workers on: the click sample-stable, no drift, no backend errors). Amended 2026-10-29 for #174: dependency-aware scheduling, see the amendment at the end; its slice 1 is implemented (section 10) and, since 2026-10-29, the default for keyed plans: they render through the task graph, `TRANSIT_RENDER_GRAPH=0` renders them serially (deviation 19; evidence: the section 8 measurement on the reference hardware, [benchmark](../benchmarks/2026-10-29-scarlett-keyed-session-graph-vs-serial.md), the gain-reduction regression of #179 and the scheduling-condition equivalence of #210). Slices 3 and 4 of the amendment remain proposed. Section 11 (slice 2, the tail) is implemented behind `TRANSIT_RENDER_TAIL=1`; the serial tail remains the default pending the paired measurement. Amendment for #742 accepted 2026-11-17: complete state records shorten the scheduling-condition gate's post-fault window; see the end.
 - **Date:** 2026-10-27
 - **Amends:** [ADR 0012](0012-midi-device-layer.md) gate G1 and [ADR 0013](0013-unsafe-only-in-soundcraft-rt.md) (the lock-free fan-out it names as a `transit-rt` residual)
 - **Reopen when:** the slot needs a field written outside its transitions, a second publisher appears, or a later slice cannot keep the callback's bound with this state machine.
@@ -453,7 +453,7 @@ Open before the default flips (#635): this special reclaim does not cover two pe
 - The returns-and-groups test corpus uses gain instead of a delay on Return B because this tree has no native delay plug-in; it is scheduling evidence, not the hosted measurement session.
 - The `strip_panics_order` tests follow this section's ordering (reset resumes the retained payload and adoption resumes before moving processors), because their previous expectations allowed processor reuse before panic reporting.
 
-## Amendment (#742): complete state records shorten the post-fault window (proposed 2026-11-17)
+## Amendment (#742): complete state records shorten the post-fault window (accepted 2026-11-17)
 
 Section 8's scheduling-condition gate compares a digest of every home strip's state at every block boundary. State that no print reads is covered by a post-fault window: the render continues past the last hold for the longest declared tail and latency of the case's plug-ins, plus the plan's latency (`post_fault_window`, `crates/mix/tests/common/sched.rs`). Most corpus plug-ins have no print, so each corpus case renders 20 s (the Macro Oscillator's tail floor) or 30 s (Resonator, Modal Voice) after its last hold. That is 1,302,320 compared-render blocks per run of the corpus test (section 18), and the figure grows with every release's corpus sessions. The test has outgrown the Realtime CI job's limit (#742).
 
@@ -520,7 +520,7 @@ Why this form:
 **Two comparisons, named separately.**
 - (a) The transplant gate compares lossless records, exactly.
 - (b) The scheduling test compares, per block and strip part, a 64-bit digest of the same word stream, produced by the mix's print hasher while the record is written.
-  - On main at the time of writing that hasher is byte-wise FNV-1a 64 (`Fnv`). The pending cheaper-hashing change replaces it with a word-wise mixing step.
+  - On main that hasher is the word-wise `PrintHasher` (one mixing step per 64-bit word), which replaced byte-wise FNV-1a 64 on 2026-11-17 (#742).
   - For either one, about 2^-64 per comparison is an estimate that rests on assuming the digests of different streams behave as independent uniform 64-bit values. It is not a proven bound, and digest equality is evidence, not proof.
   - Audio is compared exactly over the (shortened) window.
   - The scheduling test stores no lossless records. Each print costs O(state bytes) in words, headers included, and allocates nothing. Tag-6 runs halve the payload calls; they are not one call per chunk.
@@ -703,7 +703,7 @@ The figures:
 
 What these figures exclude:
 - Records cost O(state bytes) per strip and block, headers included, and complete port records are larger than today's prints.
-- Today's test also builds readable states every block (`strip_states` in `record`), which the pending hashing change removes.
+- Until the cheaper-hashing change of 2026-11-17 (#742) the test also built readable states every block (`strip_states` in `record`); they are now built only for a failure report.
 - The block reduction is not a runtime prediction. Cost evidence names the combined revision it measured.
 
 ### 19. Judging round 1: responses
