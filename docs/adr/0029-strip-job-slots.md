@@ -523,7 +523,7 @@ Why this form:
   - On main that hasher is the word-wise `PrintHasher` (one mixing step per 64-bit word), which replaced byte-wise FNV-1a 64 on 2026-11-17 (#742).
   - For either one, about 2^-64 per comparison is an estimate that rests on assuming the digests of different streams behave as independent uniform 64-bit values. It is not a proven bound, and digest equality is evidence, not proof.
   - Audio is compared exactly over the (shortened) window.
-  - The scheduling test stores no lossless records. Each print costs O(state bytes) in words, headers included, and allocates nothing. Tag-6 runs halve the payload calls; they are not one call per chunk.
+  - The scheduling test stores no lossless records. Each print costs O(state bytes) in words, headers included. It allocates only in the testing build, never on the real-time path: the vector `strip_prints` returns and, for a strip whose events the render workers' pool parked, the parked list, the ledger copy and the list of events left unadmitted. Tag-6 runs halve the payload calls; they are not one call per chunk.
 
 **Rules per kind of state.** Each rule is an inventory obligation.
 - Random numbers: the generator's state.
@@ -603,7 +603,7 @@ State behind a trait object is visited as concrete fields wherever the owner hol
   | `Strip::buf`, `pre`, `scratch`, `clipbuf`, `outbuf` | unobservable, each by its own overwrite-before-read argument naming its write site, witnessed by a poison control: one of two identical renders fills the buffer with a fixed pattern between blocks, and the outputs and digests must stay identical. Poison one buffer at a time with finite nonzero values verified to change its prior contents, preserving lengths and capacities. Exercise each claimed read path, including mono scratch, and assert that the witness reaches it. Mono `scratch`'s proof names the instrument's contract to overwrite its second output channel, and its witness poisons `scratch` on a mono strip with an instrument |
   | `Strip::meter`, `gr`, `failures`' report counters; `PluginSlot::tap`, `sample_tap` | output only (panels and reports) |
   | `Strip::rendered` | the pool's protocol stamp: legitimately different between graph and serial, covered by property 1 and the conflict count |
-  | `Strip::hw`, `ext` | not inventoried yet: a corpus case with a strip carrying a hardware insert or an External Instrument is pinned as (session, `hardware.insert` or `external.instrument`) with the reason "hardware and External Instrument slot state not inventoried (#742)" and keeps today's full fallback window, computed as if no record in the case were complete. Scope assertion: the gate fails a case that would use a shorter window while such a strip is held or skipped. `HwSlot` and `ExtSlot` are inventoried in push 2 (section 15) before any such case may shorten |
+  | `Strip::hw`, `ext` | not inventoried yet: a corpus case with a strip carrying a hardware insert or an External Instrument is pinned as (session, `hardware.insert` or `external.instrument`) with the reason "hardware and External Instrument slot state not inventoried (#742)" and keeps today's full fallback window, computed as if no record in the case were complete. Scope assertion: the gate fails a case whose window the window rule shortened below its full fallback window (`Topology::shortened`) while such a strip is held or skipped. The opt-in tail test's fixed eight-block corpus window (`sched_equivalence_tail`) is outside the window rule, unchanged from before this amendment, and not bound by it. `HwSlot` and `ExtSlot` are inventoried in push 2 (section 15) before any such case may shorten |
   | `Strip::panic` | scope assertion: a retained payload fails the case before any comparison; payloads are never compared |
   | `PluginSlot::applied` | encoded with the presence sentinel (section 12); `mismatch` is telemetry |
   | `PluginSlot::raw_latency` | encoded (its value feeds control-side latency decisions) |
@@ -798,7 +798,7 @@ What these figures exclude:
 
 ### 22. Rulings during push 1 (2026-11-17)
 
-- **W-1.** Hardware inserts and External Instruments: a corpus case with one is pinned with the reason "hardware and External Instrument slot state not inventoried (#742)" and keeps today's full fallback window; the scope assertion fails only a case on a shorter window; `HwSlot` and `ExtSlot` are inventoried in push 2.
+- **W-1.** Hardware inserts and External Instruments: a corpus case with one is pinned with the reason "hardware and External Instrument slot state not inventoried (#742)" and keeps today's full fallback window; the scope assertion fails only a case whose window the window rule shortened (`Topology::shortened`); the opt-in tail test's fixed eight-block window is unchanged and not bound by it; `HwSlot` and `ExtSlot` are inventoried in push 2.
 - **W-2.** A key entry's `pending` is cleared when its strip is taken back `Unstarted` or faulted (no path reads it before the next fill), and stays encoded with `buf[..pending]`; a named regression covers the zero-worker case the inventory exposed.
 - **W-3.** The canonical ledger keeps table order (release paths walk the tables in order); a table-order difference between the serial and worker renders is a finding.
 - **W-4.** Section 16's edits to section 8 are applied in push 1 (section 5 keeps every sentence).
