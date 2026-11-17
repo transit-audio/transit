@@ -101,6 +101,23 @@ impl Params {
     pub(crate) fn choice(&self, idx: usize) -> usize {
         choice_index(self.v(idx))
     }
+
+    /// Test seam (feature `testing`, #742): the parameter values the instance holds (state, section
+    /// 12). `info` and `by_id` are configuration: the registry entry's table and its sorted index,
+    /// built once in `new` and never written.
+    #[cfg(feature = "testing")]
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Params { info: _, values, by_id: _ } = self;
+        w.f32s(values);
+    }
+
+    /// Test seam (feature `testing`, #742): sets the values [`Params::record_state`] wrote (the
+    /// count must be the table's).
+    #[cfg(feature = "testing")]
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Params { info: _, values, by_id: _ } = self;
+        r.f32s(values)
+    }
 }
 
 /// A toggle's value read as on (the reading of [`Params::on`], for values kept outside a

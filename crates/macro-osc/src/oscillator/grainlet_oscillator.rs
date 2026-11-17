@@ -134,3 +134,8 @@ fn grainlet(carrier_phase: f32, formant_phase: f32, shape: f32, bleed: f32) -> f
     let formant = sine(formant_phase);
     carrier * (formant + bleed) / (1.0 + bleed)
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] GrainletOscillator { carrier_phase, formant_phase, next_sample, carrier_frequency, formant_frequency, carrier_shape, carrier_bleed });

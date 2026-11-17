@@ -118,3 +118,8 @@ impl Engine for VirtualAnalogVcfEngine {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] VirtualAnalogVcfEngine { svf, oscillator, sub_oscillator, previous_cutoff, previous_stage2_gain, previous_q, previous_gain, previous_sub_gain });

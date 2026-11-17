@@ -267,3 +267,17 @@ impl GrainEnvelope {
         self.amplitude
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SwarmEngine { swarm_voice });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SwarmVoice { rank, envelope, saw, sine });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] AdditiveSawOscillator { phase, next_sample, frequency, gain });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] GrainEnvelope { from, interval, phase, fm, amplitude, previous_size_ratio, filter_coefficient });

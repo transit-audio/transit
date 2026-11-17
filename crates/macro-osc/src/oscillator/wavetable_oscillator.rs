@@ -152,3 +152,11 @@ where
 
     (((a * f) - b_neg) * f + c) * f + x0
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] WavetableOscillator { phase, frequency, amplitude, waveform, lp, differentiator });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Differentiator { lp, previous });

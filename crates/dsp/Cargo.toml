@@ -11,8 +11,15 @@ repository.workspace = true
 # Test seams (`Plugin::fingerprint`, issue #210, over the state record codec of ADR 0029's #742
 # amendment); never enabled by the app.
 # `transit-sampler-core/testing` gives the Sampler's core path its state fingerprint;
-# `transit-parametric-eq/testing` the Parametric EQ core's (ADR 0054).
-testing = ["dep:transit-state-record", "transit-instrument-core/testing", "transit-sampler-core/testing", "transit-parametric-eq/testing"]
+# `transit-parametric-eq/testing` the Parametric EQ core's (ADR 0054); `transit-macro-osc/testing` the
+# Macro Oscillator voice's complete record and restore (#742).
+testing = [
+    "dep:transit-state-record",
+    "transit-instrument-core/testing",
+    "transit-sampler-core/testing",
+    "transit-parametric-eq/testing",
+    "transit-macro-osc/testing",
+]
 
 [dependencies]
 serde.workspace = true

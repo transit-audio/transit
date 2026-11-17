@@ -146,3 +146,8 @@ fn compute_detuning(mut detune: f32) -> f32 {
 
     (a + (b - a) * squash(squash(detune_fractional))) * sign
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] VirtualAnalogEngine { primary, auxiliary, sync, variable_saw, auxiliary_amount, xmod_amount, temp_buffer });

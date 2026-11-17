@@ -111,3 +111,8 @@ impl Engine for FmEngine {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] FmEngine { carrier_phase, modulator_phase, sub_phase, previous_carrier_frequency, previous_modulator_frequency, previous_amount, previous_feedback, previous_sample, sub_fir, carrier_fir });

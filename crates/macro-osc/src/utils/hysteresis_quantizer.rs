@@ -93,3 +93,11 @@ impl HysteresisQuantizer2 {
         self.quantized_value
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] HysteresisQuantizer { quantized_value });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] HysteresisQuantizer2 { num_steps, hysteresis, scale, offset, quantized_value });

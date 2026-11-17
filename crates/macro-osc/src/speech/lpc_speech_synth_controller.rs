@@ -433,6 +433,16 @@ const K8_LUT: [i8; 8] = [-64, -44, -24, -4, 16, 37, 57, 77];
 
 const K9_LUT: [i8; 8] = [-51, -33, -15, 4, 22, 32, 59, 77];
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!(['a] LpcSpeechSynthController<'a> { clock_phase, sample, next_sample, gain, synth, playback_frame, last_playback_frame, remaining_frame_samples, word_bank, sample_rate_hz, tuning });
+
+// `word_banks`: a reference to the immutable word bank data (`WORD_BANKS`), set in `new` and
+// never written, the same in every instance (configuration).
+#[cfg(feature = "testing")]
+crate::record_struct!(['a] LpcSpeechSynthWordBank<'a> { num_banks, loaded_bank, num_frames, num_words, word_boundaries, frames } config { word_banks });
+
 #[cfg(test)]
 mod tests {
     use super::LpcSpeechSynthController;

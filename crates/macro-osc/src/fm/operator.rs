@@ -136,3 +136,8 @@ pub fn render_operators<const N: usize, const MODULATION_SOURCE: i32, const ADDI
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Operator { phase, amplitude });

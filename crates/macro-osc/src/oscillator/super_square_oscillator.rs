@@ -125,3 +125,8 @@ impl SuperSquareOscillator {
         self.next_sample = next_sample;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SuperSquareOscillator { master_phase, slave_phase, next_sample, high, master_frequency, slave_frequency });

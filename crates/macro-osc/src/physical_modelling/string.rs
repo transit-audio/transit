@@ -200,6 +200,11 @@ impl String {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] String { string, stretch, iir_damping_filter, dc_blocker, delay, dispersion_noise, curved_bridge, src_phase, out_sample, sample_rate_hz });
+
 #[cfg(test)]
 mod tests {
     use super::String;

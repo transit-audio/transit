@@ -84,3 +84,8 @@ impl Engine for BassDrumEngine {
         );
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] BassDrumEngine { analog_bass_drum, synthetic_bass_drum, overdrive });

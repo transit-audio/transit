@@ -447,6 +447,49 @@ impl Shaper {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl Shaper {
+    /// Test seam (feature `testing`, #742): the voice shaper's complete state: both envelopes,
+    /// both filter sections and the coefficients last designed, both LFOs, the blocks since the
+    /// note, the amp envelope's velocity scale, the matrix's LFO amount sums of the last block,
+    /// the note's random value, the generator, its seed (a reset reseeds from it) and the gate.
+    pub fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Shaper { amp, filter_env, sections, coefs, lfo, since_note, amp_scale, lfo_amount_mod, random, rng, seed, gate } = self;
+        amp.record_state(w);
+        filter_env.record_state(w);
+        sections.iter().for_each(|s| s.fingerprint(w));
+        coefs.iter().for_each(|c| c.record_state(w));
+        lfo.iter().for_each(|l| l.record_state(w));
+        w.u32(*since_note);
+        w.f32(*amp_scale);
+        w.f32s(lfo_amount_mod);
+        w.f32(*random);
+        w.u32(*rng);
+        w.u32(*seed);
+        w.bool(*gate);
+    }
+
+    /// Test seam (feature `testing`, #742): sets what [`Shaper::record_state`] wrote.
+    pub fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Shaper { amp, filter_env, sections, coefs, lfo, since_note, amp_scale, lfo_amount_mod, random, rng, seed, gate } = self;
+        amp.restore_state(r)?;
+        filter_env.restore_state(r)?;
+        sections.iter_mut().try_for_each(|s| s.restore(r))?;
+        coefs.iter_mut().try_for_each(|c| c.restore_state(r))?;
+        lfo.iter_mut().try_for_each(|l| l.restore_state(r))?;
+        *since_note = r.u32()?;
+        *amp_scale = r.f32()?;
+        r.f32s(lfo_amount_mod)?;
+        *random = r.f32()?;
+        *rng = r.u32()?;
+        *seed = r.u32()?;
+        *gate = r.bool()?;
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

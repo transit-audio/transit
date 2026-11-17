@@ -109,3 +109,8 @@ impl Engine for NoiseEngine {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] NoiseEngine { clocked_noise, lp_hp_filter, bp_filter, previous_f0, previous_f1, previous_q, previous_mode, temp_buffer });

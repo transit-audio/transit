@@ -258,3 +258,11 @@ pub fn sine_pm(mut phase: u32, pm: f32) -> f32 {
 pub fn sine_raw(phase: u32) -> f32 {
     LUT_SINE[(phase >> (32 - LUT_SINE_BITS)) as usize]
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SineOscillator { phase, frequency, amplitude });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] FastSineOscillator { x, y, epsilon, amplitude });

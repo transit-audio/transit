@@ -765,3 +765,23 @@ fn svf_tick(g: f32, r: f32, h: f32, in_: f32, state_1: &mut f32, state_2: &mut f
     *state_2 = ftz(g_bp + lp);
     (hp, bp, lp)
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] DcBlocker { pole, x, y });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] OnePole { g, gi, state });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Svf { g, r, h, state_1, state_2 });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] NaiveSvf { f, damp, lp, bp });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] ModifiedSvf { f, fq, x, lp, bp });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] CrossoverSvf { f, fq, x, lp, bp });

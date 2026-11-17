@@ -88,3 +88,8 @@ impl ModalVoice {
         self.resonator.process(f0, structure, brightness, damping, temp_2, out);
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] ModalVoice { excitation_filter, resonator });

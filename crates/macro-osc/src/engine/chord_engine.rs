@@ -202,3 +202,10 @@ const REGISTRATIONS: [[f32; CHORD_NUM_HARMONICS * 2]; REGISTRATION_TABLE_SIZE] =
 ];
 
 const FADE_POINT: [f32; CHORD_NUM_VOICES] = [0.55, 0.47, 0.49, 0.51, 0.53];
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+// `wavetable`: references to immutable firmware tables, set in `new` and never written, the
+// same in every instance (configuration).
+#[cfg(feature = "testing")]
+crate::record_struct!(['a] ChordEngine<'a> { divide_down_voice, wavetable_voice, chords, morph_lp, timbre_lp } config { wavetable });

@@ -186,3 +186,8 @@ const PHONEMES: [[Phoneme; NUM_PHONEMES]; NUM_REGISTERS] = [
         Phoneme::new([Formant::new(63, 255), Formant::new(77, 40), Formant::new(100, 4), Formant::new(106, 2), Formant::new(110, 0)]),
     ],
 ];
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] NaiveSpeechSynth { pulse, frequency, click_duration, filter, pulse_coloration, sample_rate_hz, a0_normalized, tuning });

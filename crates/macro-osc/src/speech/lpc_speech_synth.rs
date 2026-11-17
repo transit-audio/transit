@@ -197,3 +197,50 @@ fn blend_coefficient<T: Into<f32>>(a: T, b: T, blend: f32, scale: i32) -> f32 {
 
     a_f + (b_f - a_f) * blend
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl LpcSpeechSynthFrame {
+    /// Every field as bytes (14), in declaration order, the 16-bit ones little-endian.
+    fn record_bytes(&self) -> [u8; 14] {
+        let Self { energy, period, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9 } = self;
+        let [a, b] = k0.to_le_bytes();
+        let [c, d] = k1.to_le_bytes();
+        [*energy, *period, a, b, c, d, *k2 as u8, *k3 as u8, *k4 as u8, *k5 as u8, *k6 as u8, *k7 as u8, *k8 as u8, *k9 as u8]
+    }
+
+    fn restore_bytes(&mut self, b: [u8; 14]) {
+        let Self { energy, period, k0, k1, k2, k3, k4, k5, k6, k7, k8, k9 } = self;
+        let [e, p, a0, a1, c0, c1, x2, x3, x4, x5, x6, x7, x8, x9] = b;
+        (*energy, *period) = (e, p);
+        *k0 = i16::from_le_bytes([a0, a1]);
+        *k1 = i16::from_le_bytes([c0, c1]);
+        for (k, x) in [k2, k3, k4, k5, k6, k7, k8, k9].into_iter().zip([x2, x3, x4, x5, x6, x7, x8, x9]) {
+            *k = x as i8;
+        }
+    }
+}
+
+#[cfg(feature = "testing")]
+impl crate::record::Record for LpcSpeechSynthFrame {
+    /// A frame is integers only: its fields as one byte run.
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        w.bytes(&self.record_bytes());
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let mut b = [0u8; 14];
+        r.bytes(&mut b)?;
+        self.restore_bytes(b);
+        Some(())
+    }
+    fn record_run(items: &[Self], w: &mut crate::record::Writer<'_>) {
+        crate::record::write_packed(w, items, Self::record_bytes);
+    }
+    fn restore_run(items: &mut [Self], r: &mut crate::record::Reader<'_>) -> Option<()> {
+        crate::record::read_packed(r, items, Self::restore_bytes)
+    }
+}
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] LpcSpeechSynth { phase, frequency, noise_energy, pulse_energy, next_sample, excitation_pulse_sample_index, k, s });

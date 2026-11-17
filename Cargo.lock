@@ -4290,7 +4290,9 @@ name = "transit-macro-osc"
 version = "0.7.3"
 dependencies = [
  "num-traits",
+ "transit-macro-osc",
  "transit-macro-osc-oracle",
+ "transit-state-record",
 ]
 
 [[package]]

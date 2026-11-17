@@ -58,3 +58,8 @@ impl Engine for SnareDrumEngine {
         );
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SnareDrumEngine { analog_snare_drum, synthetic_snare_drum });

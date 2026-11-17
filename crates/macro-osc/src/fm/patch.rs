@@ -115,3 +115,121 @@ pub struct ModulationParameters {
     pub waveform: u8,
     pub pitch_mod_sensitivity: u8,
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl Patch {
+    /// The packed size of a patch in the state record.
+    const RECORD_BYTES: usize = 156;
+
+    /// Every field, as bytes, in declaration order (exhaustive destructuring at every level).
+    fn record_bytes(&self) -> [u8; Self::RECORD_BYTES] {
+        let mut out = [0u8; Self::RECORD_BYTES];
+        let mut it = out.iter_mut();
+        let mut put = |b: u8| {
+            if let Some(x) = it.next() {
+                *x = b;
+            }
+        };
+        let Self { op, pitch_envelope, algorithm, feedback, reset_phase, modulations, transpose, name, active_operators } = self;
+        for o in op {
+            let Operator { envelope, keyboard_scaling, rate_scaling, amp_mod_sensitivity, velocity_sensitivity, level, mode, coarse, fine, detune } =
+                o;
+            let Envelope { rate, level: env_level } = envelope;
+            rate.iter().chain(env_level.iter()).for_each(|&b| put(b));
+            let KeyboardScaling { left_depth, right_depth, left_curve, right_curve, break_point } = keyboard_scaling;
+            for b in [
+                left_depth,
+                right_depth,
+                left_curve,
+                right_curve,
+                break_point,
+                rate_scaling,
+                amp_mod_sensitivity,
+                velocity_sensitivity,
+                level,
+                mode,
+                coarse,
+                fine,
+                detune,
+            ] {
+                put(*b);
+            }
+        }
+        let Envelope { rate, level } = pitch_envelope;
+        rate.iter().chain(level.iter()).for_each(|&b| put(b));
+        for b in [algorithm, feedback, reset_phase] {
+            put(*b);
+        }
+        let ModulationParameters { delay, rate, pitch_mod_depth, amp_mod_depth, reset_phase, waveform, pitch_mod_sensitivity } = modulations;
+        for b in [delay, rate, pitch_mod_depth, amp_mod_depth, reset_phase, waveform, pitch_mod_sensitivity, transpose] {
+            put(*b);
+        }
+        name.iter().for_each(|&b| put(b));
+        put(*active_operators);
+        out
+    }
+
+    /// Sets every field from [`Patch::record_bytes`].
+    fn restore_bytes(&mut self, bytes: [u8; Self::RECORD_BYTES]) {
+        let mut it = bytes.into_iter();
+        let mut get = || it.next().unwrap_or(0);
+        let Self { op, pitch_envelope, algorithm, feedback, reset_phase, modulations, transpose, name, active_operators } = self;
+        for o in op {
+            let Operator { envelope, keyboard_scaling, rate_scaling, amp_mod_sensitivity, velocity_sensitivity, level, mode, coarse, fine, detune } =
+                o;
+            let Envelope { rate, level: env_level } = envelope;
+            rate.iter_mut().chain(env_level.iter_mut()).for_each(|b| *b = get());
+            let KeyboardScaling { left_depth, right_depth, left_curve, right_curve, break_point } = keyboard_scaling;
+            for b in [
+                left_depth,
+                right_depth,
+                left_curve,
+                right_curve,
+                break_point,
+                rate_scaling,
+                amp_mod_sensitivity,
+                velocity_sensitivity,
+                level,
+                mode,
+                coarse,
+                fine,
+                detune,
+            ] {
+                *b = get();
+            }
+        }
+        let Envelope { rate, level } = pitch_envelope;
+        rate.iter_mut().chain(level.iter_mut()).for_each(|b| *b = get());
+        for b in [algorithm, feedback, reset_phase] {
+            *b = get();
+        }
+        let ModulationParameters { delay, rate, pitch_mod_depth, amp_mod_depth, reset_phase, waveform, pitch_mod_sensitivity } = modulations;
+        for b in [delay, rate, pitch_mod_depth, amp_mod_depth, reset_phase, waveform, pitch_mod_sensitivity, transpose] {
+            *b = get();
+        }
+        name.iter_mut().for_each(|b| *b = get());
+        *active_operators = get();
+    }
+}
+
+#[cfg(feature = "testing")]
+impl crate::record::Record for Patch {
+    /// A patch is integers only: its fields as one byte run.
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        w.bytes(&self.record_bytes());
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let mut b = [0u8; Self::RECORD_BYTES];
+        r.bytes(&mut b)?;
+        self.restore_bytes(b);
+        Some(())
+    }
+    fn record_run(items: &[Self], w: &mut crate::record::Writer<'_>) {
+        crate::record::write_packed(w, items, Patch::record_bytes);
+    }
+    fn restore_run(items: &mut [Self], r: &mut crate::record::Reader<'_>) -> Option<()> {
+        crate::record::read_packed(r, items, Patch::restore_bytes)
+    }
+}

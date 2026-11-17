@@ -88,3 +88,8 @@ impl Engine for ParticleEngine {
         self.diffuser.process(0.8 * diffusion * diffusion, 0.5 * diffusion + 0.25, out);
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] ParticleEngine { particle, diffuser, post_filter, temp_buffer });

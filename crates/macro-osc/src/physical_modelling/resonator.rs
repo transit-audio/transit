@@ -190,3 +190,11 @@ fn nth_harmonic_compensation(n: usize, mut stiffness: f32) -> f32 {
 
     1.0 / stretch_factor
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Resonator { resolution, mode_amplitude, mode_filters });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([const BATCH_SIZE: usize] ResonatorSvf<BATCH_SIZE> { state_1, state_2 });

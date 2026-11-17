@@ -71,3 +71,8 @@ impl Engine for GrainEngine {
         self.dc_blocker[1].process_buffer(aux, FilterMode::HighPass);
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] GrainEngine { grainlet, z_oscillator, dc_blocker });

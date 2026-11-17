@@ -248,6 +248,11 @@ impl<const SIZE: usize, F: Format> FxEngine<SIZE, F> {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([const SIZE: usize, F: Format] FxEngine<SIZE, F> where [F::T: crate::record::Record] { buffer, write_ptr, lfo, accumulator, previous_read, lfo_value });
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -166,3 +166,8 @@ impl SpeechEngine<'_> {
         self.speed = speed;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!(['a] SpeechEngine<'a> { word_bank_quantizer, naive_speech_synth, sam_speech_synth, lpc_speech_synth_controller, temp_buffer_1, temp_buffer_2, prosody_amount, speed });

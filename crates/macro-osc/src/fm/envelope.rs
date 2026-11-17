@@ -260,3 +260,32 @@ impl<const NUM_STAGES: usize> Default for PitchEnvelope<NUM_STAGES> {
         Self::new()
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl<const NUM_STAGES: usize> crate::record::Record for OperatorEnvelope<NUM_STAGES> {
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Self(e) = self;
+        e.record(w);
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Self(e) = self;
+        e.restore(r)
+    }
+}
+
+#[cfg(feature = "testing")]
+impl<const NUM_STAGES: usize> crate::record::Record for PitchEnvelope<NUM_STAGES> {
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Self(e) = self;
+        e.record(w);
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Self(e) = self;
+        e.restore(r)
+    }
+}
+
+#[cfg(feature = "testing")]
+crate::record_struct!([const NUM_STAGES: usize, const RESHAPE_ASCENDING_SEGMENTS: bool] Envelope<NUM_STAGES, RESHAPE_ASCENDING_SEGMENTS> { stage, phase, start, increment, level, scale });

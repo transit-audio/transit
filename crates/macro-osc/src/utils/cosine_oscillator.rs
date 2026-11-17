@@ -76,3 +76,8 @@ impl CosineOscillator {
         temp + 0.5
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] CosineOscillator { y1, y0, iir_coefficient, initial_amplitude });

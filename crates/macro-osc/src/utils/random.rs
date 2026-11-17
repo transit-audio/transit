@@ -63,6 +63,11 @@ impl Random {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Random { state });
+
 #[cfg(test)]
 mod tests {
     use super::*;

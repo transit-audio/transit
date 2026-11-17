@@ -116,3 +116,8 @@ impl SampleRateReducer {
         self.previous_sample = self.sample;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SampleRateReducer { phase, sample, previous_sample, next_sample });

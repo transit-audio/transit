@@ -387,3 +387,39 @@ impl Default for FmVoice<'_> {
         Self::new()
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl crate::record::Record for FmVoice<'_> {
+    /// Every field encoded. A present `outgoing` restored into a receiving voice without one
+    /// starts from a copy of the receiving `voice` (whose algorithm table it shares), then takes
+    /// every recorded field.
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Self { patch_index, struck_note, lfo, voice, parameters, outgoing, faded } = self;
+        patch_index.record(w);
+        struck_note.record(w);
+        lfo.record(w);
+        voice.record(w);
+        parameters.record(w);
+        w.present(outgoing.as_ref(), |w, v| v.record(w));
+        faded.record(w);
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Self { patch_index, struck_note, lfo, voice, parameters, outgoing, faded } = self;
+        patch_index.restore(r)?;
+        struck_note.restore(r)?;
+        lfo.restore(r)?;
+        voice.restore(r)?;
+        parameters.restore(r)?;
+        if r.bool()? {
+            outgoing.get_or_insert_with(|| voice.clone()).restore(r)?;
+        } else {
+            *outgoing = None;
+        }
+        faded.restore(r)
+    }
+}
+
+#[cfg(feature = "testing")]
+crate::record_struct!(['a] SixOpEngine<'a> { patches, patch_index_quantizer, voice, temp_buffer, acc_buffer, restart_buffer, active_voice, rendered_voice, sample_rate, tuning, same_pitch_restart });

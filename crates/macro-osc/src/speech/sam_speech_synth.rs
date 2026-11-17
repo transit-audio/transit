@@ -176,3 +176,8 @@ const FORMANT_AMPLITUDE_LUT: [f32; 16] = [
     0.03125000, 0.03756299, 0.04515131, 0.05427259, 0.06523652, 0.07841532, 0.09425646, 0.11329776, 0.13618570, 0.16369736, 0.19676682, 0.23651683,
     0.28429697, 0.34172946, 0.41076422, 0.49374509,
 ];
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SamSpeechSynth { phase, frequency, pulse_next_sample, pulse_lp, formant_phase, consonant_samples, consonant_index, sample_rate_hz });

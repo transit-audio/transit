@@ -237,3 +237,31 @@ fn squash(mut x: f32, a: f32) -> f32 {
 #[cfg(test)]
 #[path = "wave_terrain_engine_tests.rs"]
 mod tests;
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl crate::record::Record for WaveTerrainEngine<'_> {
+    /// Every field encoded; `user_terrain` as its presence: transit never sets one
+    /// (`Resources::default` has none), so restore refuses a present one.
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Self { path, offset, terrain_idx, temp_buffer_1, temp_buffer_2, user_terrain } = self;
+        path.record(w);
+        offset.record(w);
+        terrain_idx.record(w);
+        temp_buffer_1.record(w);
+        temp_buffer_2.record(w);
+        w.bool(user_terrain.is_some());
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Self { path, offset, terrain_idx, temp_buffer_1, temp_buffer_2, user_terrain } = self;
+        path.restore(r)?;
+        offset.restore(r)?;
+        terrain_idx.restore(r)?;
+        temp_buffer_1.restore(r)?;
+        temp_buffer_2.restore(r)?;
+        (!r.bool()?).then_some(())?;
+        *user_terrain = None;
+        Some(())
+    }
+}

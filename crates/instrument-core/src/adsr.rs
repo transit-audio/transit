@@ -87,3 +87,37 @@ impl Default for Adsr {
         Self::new()
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl Adsr {
+    /// Test seam (feature `testing`, #742): the complete state, its stage (tag 1, the variant's
+    /// position) and its level.
+    pub fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Adsr { stage, level } = self;
+        w.u8(match stage {
+            Stage::Idle => 0,
+            Stage::Attack => 1,
+            Stage::Decay => 2,
+            Stage::Sustain => 3,
+            Stage::Release => 4,
+        });
+        w.f32(*level);
+    }
+
+    /// Test seam (feature `testing`, #742): sets the state [`Adsr::record_state`] wrote.
+    pub fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Adsr { stage, level } = self;
+        *stage = match r.u8()? {
+            0 => Stage::Idle,
+            1 => Stage::Attack,
+            2 => Stage::Decay,
+            3 => Stage::Sustain,
+            4 => Stage::Release,
+            _ => return None,
+        };
+        *level = r.f32()?;
+        Some(())
+    }
+}

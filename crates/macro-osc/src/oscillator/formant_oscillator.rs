@@ -86,3 +86,8 @@ impl FormantOscillator {
         self.next_sample = next_sample;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] FormantOscillator { carrier_phase, formant_phase, next_sample, carrier_frequency, formant_frequency, phase_shift });

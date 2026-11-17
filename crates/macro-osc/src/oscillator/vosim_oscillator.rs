@@ -91,3 +91,8 @@ impl VosimOscillator {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] VosimOscillator { carrier_phase, formant_1_phase, formant_2_phase, carrier_frequency, formant_1_frequency, formant_2_frequency, carrier_shape });

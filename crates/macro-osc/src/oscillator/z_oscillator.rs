@@ -143,3 +143,8 @@ fn z(c: f32, d: f32, f: f32, mut shape: f32, mode: f32) -> f32 {
 
     (ramp_down * (offset + discontinuity) - offset) * contour
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] ZOscillator { carrier_phase, discontinuity_phase, formant_phase, next_sample, carrier_frequency, formant_frequency, carrier_shape, mode });

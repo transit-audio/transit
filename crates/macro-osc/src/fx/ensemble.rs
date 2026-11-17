@@ -100,6 +100,11 @@ impl Ensemble {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Ensemble { engine, amount, depth, phase_1, phase_2 });
+
 #[cfg(test)]
 mod tests {
     use super::Ensemble;

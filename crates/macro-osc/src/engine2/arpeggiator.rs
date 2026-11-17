@@ -131,3 +131,11 @@ impl Arpeggiator {
         self.note = self.note.max(0);
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_enum!(ArpeggiatorMode { Up, Down, UpDown, Random, Last });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Arpeggiator { mode, range, note, octave, direction });

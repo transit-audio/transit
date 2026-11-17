@@ -340,3 +340,100 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl<const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> crate::record::Record for Voice<'_, NUM_OPERATORS, NUM_ALGORITHMS> {
+    /// Every field encoded; `algorithms` as its presence: when present it is the six-operator
+    /// engine's one immutable table (`ALGORITHMS`, built once and never written), set by `init`,
+    /// which every voice runs at construction; restore requires the receiving voice's presence to
+    /// match and keeps its reference (the same table).
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Self {
+            algorithms,
+            sample_rate,
+            one_hz,
+            a0,
+            tuning,
+            gate,
+            operator,
+            operator_envelope,
+            pitch_envelope,
+            normalized_velocity,
+            note,
+            ratios,
+            level_headroom,
+            level,
+            feedback_state,
+            patch,
+            dirty,
+            restart,
+            keep_phase,
+        } = self;
+        w.bool(algorithms.is_some());
+        sample_rate.record(w);
+        one_hz.record(w);
+        a0.record(w);
+        tuning.record(w);
+        gate.record(w);
+        operator.record(w);
+        operator_envelope.record(w);
+        pitch_envelope.record(w);
+        normalized_velocity.record(w);
+        note.record(w);
+        ratios.record(w);
+        level_headroom.record(w);
+        level.record(w);
+        feedback_state.record(w);
+        patch.record(w);
+        dirty.record(w);
+        restart.record(w);
+        keep_phase.record(w);
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Self {
+            algorithms,
+            sample_rate,
+            one_hz,
+            a0,
+            tuning,
+            gate,
+            operator,
+            operator_envelope,
+            pitch_envelope,
+            normalized_velocity,
+            note,
+            ratios,
+            level_headroom,
+            level,
+            feedback_state,
+            patch,
+            dirty,
+            restart,
+            keep_phase,
+        } = self;
+        (r.bool()? == algorithms.is_some()).then_some(())?;
+        sample_rate.restore(r)?;
+        one_hz.restore(r)?;
+        a0.restore(r)?;
+        tuning.restore(r)?;
+        gate.restore(r)?;
+        operator.restore(r)?;
+        operator_envelope.restore(r)?;
+        pitch_envelope.restore(r)?;
+        normalized_velocity.restore(r)?;
+        note.restore(r)?;
+        ratios.restore(r)?;
+        level_headroom.restore(r)?;
+        level.restore(r)?;
+        feedback_state.restore(r)?;
+        patch.restore(r)?;
+        dirty.restore(r)?;
+        restart.restore(r)?;
+        keep_phase.restore(r)
+    }
+}
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] VoiceParameters { sustain, gate, note, velocity, brightness, envelope_control, pitch_mod, amp_mod });

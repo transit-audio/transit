@@ -186,6 +186,14 @@ impl Lfo {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_enum!(Waveform { Triangle, RampDown, RampUp, Square, Sine, SAndH });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Lfo { phase, frequency, delay_phase, delay_increment, value, random_value, one_hz, amp_mod_depth, pitch_mod_depth, waveform, reset_phase, phase_integral });
+
 #[cfg(test)]
 mod tests {
     use super::*;

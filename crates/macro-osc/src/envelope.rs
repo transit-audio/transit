@@ -106,6 +106,14 @@ impl DecayEnvelope {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] LpgEnvelope { vactrol_state, gain, frequency, hf_bleed, ramp_up });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] DecayEnvelope { value });
+
 #[cfg(test)]
 mod tests {
     use super::*;

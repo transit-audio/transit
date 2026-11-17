@@ -114,3 +114,8 @@ fn tame(mut f0: f32, harmonics: f32, order: f32) -> f32 {
 
     max_amount * max_amount * max_amount
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] WaveshapingEngine { slope, triangle, previous_shape, previous_wavefolder_gain, previous_overtone_gain });

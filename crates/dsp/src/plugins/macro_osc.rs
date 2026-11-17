@@ -716,7 +716,31 @@ impl Plugin for MacroOscillator {
     fn all_notes_off(&mut self) {
         self.push(0, Kind::AllOff);
     }
+
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// The Macro Oscillator's record is complete (ADR 0029, #742 section 13): its inventory is
+    /// `MacroOscillator::record_state` and what it calls, its witnesses are the transplant
+    /// harness's (`tests/print_completeness.rs`).
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
 }
+
+#[cfg(feature = "testing")]
+#[path = "macro_osc_record.rs"]
+mod record;
+#[cfg(feature = "testing")]
+pub use record::Observed;
 
 #[cfg(test)]
 #[path = "macro_osc_tests.rs"]

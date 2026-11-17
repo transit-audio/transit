@@ -78,3 +78,8 @@ impl Engine for ModalEngine {
         );
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] ModalEngine { voice, harmonics_lp, temp_buffer_1, temp_buffer_2 });

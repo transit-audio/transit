@@ -250,3 +250,14 @@ fn swing_vca(mut s: f32, gain: f32) -> f32 {
 fn linear_vca(s: f32, gain: f32) -> f32 {
     s * gain
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Hihat { sample_rate, envelope, noise_clock, noise_sample, sustain_gain, square_noise, ring_mod_noise, noise_coloration_svf, hpf });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SquareNoise { phase });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] RingModNoise { sample_rate, oscillator });

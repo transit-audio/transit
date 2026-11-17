@@ -207,6 +207,31 @@ impl Lfo {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl Lfo {
+    /// Test seam (feature `testing`, #742): the complete state (the phase, the held step, the
+    /// step before it, which the smooth random shape glides from, and the generator's state).
+    pub fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Lfo { phase, step, prev, rng } = self;
+        w.f64(*phase);
+        w.f32(*step);
+        w.f32(*prev);
+        w.u32(*rng);
+    }
+
+    /// Test seam (feature `testing`, #742): sets what [`Lfo::record_state`] wrote.
+    pub fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Lfo { phase, step, prev, rng } = self;
+        *phase = r.f64()?;
+        *step = r.f32()?;
+        *prev = r.f32()?;
+        *rng = r.u32()?;
+        Some(())
+    }
+}
+
 #[cfg(test)]
 #[path = "lfo_sync_tests.rs"]
 mod sync_tests;

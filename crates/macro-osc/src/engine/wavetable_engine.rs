@@ -233,3 +233,31 @@ fn clamp(mut x: f32, amount: f32) -> f32 {
 
     x
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl crate::record::Record for WavetableEngine<'_> {
+    /// Every field encoded; `wavetables` as whether it is the integrated table, the only one
+    /// transit gives it (`Resources::default`, and `new`): restore refuses any other.
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Self { phase, x_pre_lp, y_pre_lp, z_pre_lp, x_lp, y_lp, z_lp, previous_x, previous_y, previous_z, previous_f0, diff_out, wavetables } =
+            self;
+        for v in [phase, x_pre_lp, y_pre_lp, z_pre_lp, x_lp, y_lp, z_lp, previous_x, previous_y, previous_z, previous_f0] {
+            v.record(w);
+        }
+        diff_out.record(w);
+        w.bool(core::ptr::eq(*wavetables, &WAV_INTEGRATED_WAVES));
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Self { phase, x_pre_lp, y_pre_lp, z_pre_lp, x_lp, y_lp, z_lp, previous_x, previous_y, previous_z, previous_f0, diff_out, wavetables } =
+            self;
+        for v in [phase, x_pre_lp, y_pre_lp, z_pre_lp, x_lp, y_lp, z_lp, previous_x, previous_y, previous_z, previous_f0] {
+            v.restore(r)?;
+        }
+        diff_out.restore(r)?;
+        r.bool()?.then_some(())?;
+        *wavetables = &WAV_INTEGRATED_WAVES;
+        Some(())
+    }
+}

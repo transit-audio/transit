@@ -138,3 +138,8 @@ const REGISTRATIONS: [[f32; CHORD_NUM_HARMONICS * 2]; REGISTRATION_TABLE_SIZE] =
     [0.0, 0.5, 0.0, 0.5, 0.0, 0.0], // Square + Square
     [0.0, 1.0, 0.0, 0.0, 0.0, 0.0], // Square
 ];
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] StringMachineEngine { chords, ensemble, divide_down_voice, svf, morph_lp, timbre_lp });

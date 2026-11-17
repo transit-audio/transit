@@ -111,3 +111,8 @@ impl StringVoice {
         self.string.process(rng, f0, non_linearity, brightness, damping, temp_2, out);
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] StringVoice { excitation_filter, string, remaining_noise_samples });

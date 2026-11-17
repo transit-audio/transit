@@ -169,3 +169,8 @@ impl SyntheticSnareDrum {
         2.0 * triangle / (1.0 + triangle.abs())
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SyntheticSnareDrum { sample_rate_hz, phase, drum_amplitude, snare_amplitude, fm, sustain_gain, hold_counter, drum_lp, snare_hp, snare_lp });

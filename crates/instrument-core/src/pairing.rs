@@ -92,6 +92,24 @@ impl NotePairing {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl NotePairing {
+    /// Test seam (feature `testing`, #742): the complete state, every channel's and key's next
+    /// note-on number and oldest open one, as byte runs.
+    pub fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let NotePairing { ons, offs } = self;
+        ons.iter().chain(offs.iter()).for_each(|row| w.bytes(row));
+    }
+
+    /// Test seam (feature `testing`, #742): sets what [`NotePairing::record_state`] wrote.
+    pub fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let NotePairing { ons, offs } = self;
+        ons.iter_mut().chain(offs.iter_mut()).try_for_each(|row| r.bytes(row))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

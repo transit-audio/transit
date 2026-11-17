@@ -164,3 +164,8 @@ fn diode(mut x: f32) -> f32 {
         0.7 * x / (1.0 + x.abs())
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] AnalogBassDrum { pulse_remaining_samples, fm_pulse_remaining_samples, pulse, pulse_height, pulse_lp, fm_pulse_lp, retrig_pulse, lp_out, tone_lp, sustain_gain, resonator, oscillator, trigger_pulse_duration, fm_pulse_duration, pulse_decay_time, pulse_filter_time, retrig_pulse_duration });

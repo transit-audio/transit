@@ -162,3 +162,8 @@ impl AnalogSnareDrum {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] AnalogSnareDrum { pulse_remaining_samples, pulse, pulse_height, pulse_lp, noise_envelope, sustain_gain, resonator, noise_filter, oscillator, trigger_pulse_duration, pulse_decay_time });

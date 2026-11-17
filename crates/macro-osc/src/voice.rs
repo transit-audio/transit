@@ -744,6 +744,49 @@ fn apply_modulations(
     value
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl crate::record::Record for Resources<'_> {
+    /// The resources are loaded content (configuration): each reference as whether it is the
+    /// integrated default, the only resources transit gives a voice (`Resources::default`).
+    /// Restore refuses anything else and leaves the receiving voice's (default) references.
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Self { syx_bank_a, syx_bank_b, syx_bank_c, user_wave_terrain, wavetables } = self;
+        w.bool(core::ptr::eq(*syx_bank_a, &SYX_BANK_0));
+        w.bool(core::ptr::eq(*syx_bank_b, &SYX_BANK_1));
+        w.bool(core::ptr::eq(*syx_bank_c, &SYX_BANK_2));
+        w.bool(user_wave_terrain.is_none());
+        w.bool(core::ptr::eq(*wavetables, &WAV_INTEGRATED_WAVES));
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Self { syx_bank_a, syx_bank_b, syx_bank_c, user_wave_terrain, wavetables } = self;
+        let defaults = [
+            core::ptr::eq(*syx_bank_a, &SYX_BANK_0),
+            core::ptr::eq(*syx_bank_b, &SYX_BANK_1),
+            core::ptr::eq(*syx_bank_c, &SYX_BANK_2),
+            user_wave_terrain.is_none(),
+            core::ptr::eq(*wavetables, &WAV_INTEGRATED_WAVES),
+        ];
+        for d in defaults {
+            (r.bool()? && d).then_some(())?;
+        }
+        Some(())
+    }
+}
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Frame { out, aux });
+
+#[cfg(feature = "testing")]
+crate::record_struct!(['a] EngineBank<'a> { additive_engine, bass_drum_engine, chiptune_engine, chord_engine, fm_engine, grain_engine, hihat_engine, modal_engine, noise_engine, particle_engine, phase_distortion_engine, six_op_engine, snare_drum_engine, speech_engine, string_engine, string_machine_engine, swarm_engine, virtual_analog_engine, virtual_analog_vcf_engine, waveshaping_engine, wavetable_engine, waveterrain_engine });
+
+#[cfg(feature = "testing")]
+crate::record_struct!(['a] Voice<'a> { engines, rng, resources, engine_quantizer, reload_resources, previous_engine_index, engine_cv, previous_note, trigger_state, decay_envelope, lpg_envelope, trigger_delay, out_post_processor, aux_post_processor, out_buffer, aux_buffer, sample_rate_hz, short_decay_scale, decay_tail_scale, a0_normalized, a0_firmware, tuning });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] ChannelPostProcessor { limiter, lpg });
+
 #[cfg(test)]
 mod tests {
     use super::*;

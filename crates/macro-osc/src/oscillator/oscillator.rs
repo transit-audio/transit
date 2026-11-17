@@ -222,3 +222,8 @@ impl Oscillator {
         self.next_sample = next_sample;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Oscillator { phase, next_sample, lp_state, hp_state, high, frequency, pw, impulse_train_lp_coeff, impulse_train_gain });

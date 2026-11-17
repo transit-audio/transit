@@ -119,3 +119,8 @@ fn update_amplitudes(centroid: f32, slope: f32, bumps: f32, amplitudes: &mut [f3
         amplitudes[harmonic_indices[i]] *= sum;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] AdditiveEngine { harmonic_oscillator, amplitudes });

@@ -23,12 +23,19 @@
 //! generator) and one variant per field that leaves the field out of record and restore; the
 //! harness fails each variant and passes the full entry.
 //!
-//! No registry entry declares a complete record yet (slice 1, push 1 of #742): an entry turning
+//! The Macro Oscillator declares its record complete (slice 1, push 2 of #742): its witness set is
+//! `print_completeness/macro_osc.rs`. Every other entry's declaration is false; an entry turning
 //! true needs its witness set here, its inventory and its mutation record.
+//!
+//! A continuation runs A and B in lockstep (each block's records are compared and dropped), so a
+//! large record costs time, not memory.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::hash::Hasher;
 use transit_dsp::Plugin;
+
+#[path = "print_completeness/macro_osc.rs"]
+mod macro_osc;
 use transit_state_record::{Config, Reader, Writer};
 
 const RATES: [f32; 3] = [44_100.0, 48_000.0, 96_000.0];
@@ -90,6 +97,18 @@ enum Step {
     Param(&'static str, f32),
     Reset,
     Prepare(f32),
+    /// A note-on (key, velocity) at an offset into the next block (an offset past its end stays
+    /// pending into later blocks).
+    On(u8, u8, usize),
+    /// A note-off at an offset into the next block.
+    Off(u8, usize),
+    /// A raw MIDI message (a controller, pressure, pitch bend) at an offset into the next block.
+    Midi([u8; 3], usize),
+    /// The rack's macros, from now on.
+    Macros([f32; 8]),
+    /// The transport plays at this tempo from now on (`set_transport` before every block, at the
+    /// script's frame clock), or stops (`None`).
+    Transport(Option<f64>),
 }
 
 /// What a script did.
@@ -120,46 +139,94 @@ fn lengths(total: usize, seed: usize) -> impl Iterator<Item = usize> {
     })
 }
 
-/// Runs `steps` on `p` (`ch` channels); calls `each` after every `process` with the block's output.
+/// The transport a script plays: the tempo while it plays, the rate it counts frames at.
+#[derive(Clone, Copy, Default)]
+struct Clock {
+    frames: usize,
+    tempo: Option<f64>,
+    rate: f32,
+}
+
+impl Clock {
+    fn transport(&self) -> transit_dsp::Transport {
+        let tempo = self.tempo.unwrap_or(120.0);
+        let seconds = self.frames as f64 / f64::from(self.rate.max(1.0));
+        let quarters = seconds * tempo / 60.0;
+        transit_dsp::Transport {
+            playing: self.tempo.is_some(),
+            recording: false,
+            tempo,
+            numerator: 4,
+            denominator: 4,
+            samples: self.frames as i64,
+            seconds,
+            quarters,
+            bar_start: (quarters / 4.0).floor() * 4.0,
+            bar: (quarters / 4.0).floor() as i64,
+        }
+    }
+}
+
+/// Runs `steps` on every instance of `ps` alike (`ch` channels): one instance for a history, A
+/// and B in lockstep for a continuation. After every block, `each` gets the instances and each
+/// one's output, and may stop the run with a failure.
 fn run<P: Plugin + ?Sized>(
-    p: &mut P,
+    ps: &mut [Box<P>],
     ch: usize,
     steps: &[Step],
-    clock: &mut usize,
+    clock: &mut Clock,
     counts: &mut Counts,
-    mut each: impl FnMut(&mut P, &[Vec<f32>], usize),
-) {
-    let mut io = vec![vec![0.0f32; MAX_BLOCK]; ch];
+    mut each: impl FnMut(&[Box<P>], &[Vec<Vec<f32>>], usize) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut io = vec![vec![vec![0.0f32; MAX_BLOCK]; ch]; ps.len()];
     for (s, step) in steps.iter().enumerate() {
         let blocks: Vec<usize> = match *step {
-            Step::Run(n) => lengths(n, s * 7 + *clock).collect(),
+            Step::Run(n) => lengths(n, s * 7 + clock.frames).collect(),
             Step::RunBlocks(n, b) => (0..n.div_ceil(b)).map(|k| b.min(n - k * b)).collect(),
-            Step::Param(id, v) => {
-                p.set_param(id, v);
-                continue;
-            }
-            Step::Reset => {
-                p.reset();
-                continue;
-            }
-            Step::Prepare(rate) => {
-                p.prepare(rate, MAX_BLOCK, ch);
+            ref other => {
+                for p in ps.iter_mut() {
+                    match *other {
+                        Step::Param(id, v) => {
+                            p.set_param(id, v);
+                        }
+                        Step::Reset => p.reset(),
+                        Step::Prepare(rate) => p.prepare(rate, MAX_BLOCK, ch),
+                        Step::On(key, vel, at) => p.note_on(at, key, vel),
+                        Step::Off(key, at) => p.note_off(at, key),
+                        Step::Midi(msg, at) => p.midi(at, msg),
+                        Step::Macros(m) => p.set_rack_macros(&m),
+                        // At once (a stop is told once: no transport goes with later blocks).
+                        Step::Transport(tempo) => p.set_transport(&Clock { tempo, ..*clock }.transport()),
+                        Step::Run(_) | Step::RunBlocks(..) => {}
+                    }
+                }
+                match *other {
+                    Step::Prepare(rate) => clock.rate = rate,
+                    Step::Transport(t) => clock.tempo = t,
+                    _ => {}
+                }
                 continue;
             }
         };
         for n in blocks {
-            for (c, b) in io.iter_mut().enumerate() {
-                for (i, x) in b.iter_mut().take(n).enumerate() {
-                    *x = input(*clock + i, c);
+            for (p, io) in ps.iter_mut().zip(io.iter_mut()) {
+                for (c, b) in io.iter_mut().enumerate() {
+                    for (i, x) in b.iter_mut().take(n).enumerate() {
+                        *x = input(clock.frames + i, c);
+                    }
                 }
+                if clock.tempo.is_some() {
+                    p.set_transport(&clock.transport());
+                }
+                p.process(io, n);
+                counts.calls += 1;
             }
-            p.process(&mut io, n);
-            *clock += n;
+            clock.frames += n;
             counts.frames += n;
-            counts.calls += 1;
-            each(p, &io, n);
+            each(ps, &io, n)?;
         }
     }
+    Ok(())
 }
 
 // ---- Witnesses ----
@@ -212,6 +279,8 @@ struct Witness<P: ?Sized> {
 struct Entry<P: ?Sized> {
     id: &'static str,
     make: fn() -> Box<P>,
+    /// What a failure report shows of an instance (the witnesses' observations).
+    describe: fn(&P) -> String,
     witnesses: Vec<Witness<P>>,
     inapplicable: Vec<(Boundary, &'static str)>,
 }
@@ -225,15 +294,19 @@ struct Report {
     bytes: usize,
 }
 
-/// One case (section 13's steps 1 to 3).
+/// One case (section 13's steps 1 to 3). The continuation runs A and B in lockstep, so no record
+/// is stored past the block it is compared in.
 fn case<P: Plugin + ?Sized>(e: &Entry<P>, w: &Witness<P>, rate: f32, ch: usize, report: &mut Report) -> Result<(), String> {
     let at = |what: String| format!("{} {:?} at {rate} Hz, {ch} channel(s): {what}", e.id, w.boundary);
     let mut a = (e.make)();
     a.prepare(rate, MAX_BLOCK, ch);
-    let (mut clock, mut hist) = (0, Counts::default());
-    run(&mut *a, ch, &(w.history)(rate), &mut clock, &mut hist, |_, _, _| {});
+    let mut clock = Clock { rate, ..Clock::default() };
+    let mut hist = Counts::default();
+    let mut one = vec![a];
+    run(&mut one, ch, &(w.history)(rate), &mut clock, &mut hist, |_, _, _| Ok(())).map_err(at)?;
+    let a = one.pop().ok_or_else(|| at("no instance".into()))?;
     if !(w.reached)(&a) {
-        return Err(at("the history did not reach the boundary".into()));
+        return Err(at(format!("the history did not reach the boundary ({})", (e.describe)(&a))));
     }
     let rec = record(&*a);
     report.bytes += rec.len() * 8;
@@ -247,45 +320,41 @@ fn case<P: Plugin + ?Sized>(e: &Entry<P>, w: &Witness<P>, rate: f32, ch: usize, 
         return Err(at("the restored instance re-records other words".into()));
     }
     let script = (w.continuation)(rate);
-    let (mut ca, mut cb) = (Counts::default(), Counts::default());
-    let (mut outs_a, mut recs_a) = (Vec::new(), Vec::new());
-    let mut clock_a = clock;
-    run(&mut *a, ch, &script, &mut clock_a, &mut ca, |p, io, n| {
-        outs_a.push(io.iter().map(|c| c[..n].to_vec()).collect::<Vec<_>>());
-        recs_a.push(record(&*p));
-        assert!(p.print_complete(), "the declaration changed during the continuation");
-    });
+    let mut cont = Counts::default();
     let mut k = 0;
-    let mut failure = None;
-    let mut clock_b = clock;
-    run(&mut *b, ch, &script, &mut clock_b, &mut cb, |p, io, n| {
-        if failure.is_some() {
-            return;
+    let mut bytes = 0;
+    let mut both = vec![a, b];
+    run(&mut both, ch, &script, &mut clock, &mut cont, |ps, outs, n| {
+        let (pa, pb) = (&ps[0], &ps[1]);
+        assert!(pa.print_complete() && pb.print_complete(), "the declaration changed during the continuation");
+        let (oa, ob) = (&outs[0], &outs[1]);
+        if ob.iter().any(|c| c[..n].iter().any(|x| !x.is_finite())) {
+            return Err(format!("block {k}: a non-finite output sample"));
         }
-        let out: Vec<Vec<f32>> = io.iter().map(|c| c[..n].to_vec()).collect();
-        if out.iter().flatten().any(|x| !x.is_finite()) {
-            failure = Some(format!("block {k}: a non-finite output sample"));
-        } else if out.iter().flatten().zip(outs_a[k].iter().flatten()).any(|(x, y)| x.to_bits() != y.to_bits()) {
-            failure = Some(format!("block {k}: the outputs differ"));
-        } else if record(&*p) != recs_a[k] {
-            failure = Some(format!("block {k}: the records differ"));
+        if oa.iter().zip(ob).any(|(x, y)| x[..n].iter().zip(&y[..n]).any(|(x, y)| x.to_bits() != y.to_bits())) {
+            return Err(format!("block {k}: the outputs differ"));
         }
+        let ra = record(&**pa);
+        if record(&**pb) != ra {
+            return Err(format!("block {k}: the records differ"));
+        }
+        bytes += ra.len() * 8;
         k += 1;
-    });
-    if let Some(f) = failure {
-        return Err(at(f));
-    }
-    if !(w.completed)(&a) {
-        return Err(at("the continuation did not complete its obligation".into()));
+        Ok(())
+    })
+    .map_err(at)?;
+    if !(w.completed)(&both[0]) {
+        return Err(at(format!("the continuation did not complete its obligation ({})", (e.describe)(&both[0]))));
     }
     report.history += hist.frames;
-    report.continuation += ca.frames;
-    report.calls += hist.calls + ca.calls + cb.calls;
-    report.bytes += recs_a.iter().map(|r| r.len() * 8).sum::<usize>();
+    report.continuation += cont.frames;
+    report.calls += hist.calls + cont.calls;
+    report.bytes += bytes;
     Ok(())
 }
 
-/// Every witness of `e` in every configuration; the first failure, else the report lines.
+/// Every witness of `e` in every configuration; the first failure, else the report lines (each
+/// printed as its witness completes).
 fn harness<P: Plugin + ?Sized>(e: &Entry<P>) -> Result<Vec<String>, String> {
     for b in CHECKLIST {
         let witnessed = e.witnesses.iter().any(|w| w.boundary == b);
@@ -297,15 +366,24 @@ fn harness<P: Plugin + ?Sized>(e: &Entry<P>) -> Result<Vec<String>, String> {
     let mut lines = Vec::new();
     for w in &e.witnesses {
         let mut report = Report::default();
+        let t = std::time::Instant::now();
         for rate in RATES {
             for ch in CHANNELS {
                 case(e, w, rate, ch, &mut report)?;
             }
         }
+        // The elapsed time is reported, never asserted on.
         lines.push(format!(
-            "{} {:?}: history {} frames, continuation {} frames, {} process calls, {} bytes recorded",
-            e.id, w.boundary, report.history, report.continuation, report.calls, report.bytes
+            "{} {:?}: history {} frames, continuation {} frames, {} process calls, {} bytes recorded, {:.1} s",
+            e.id,
+            w.boundary,
+            report.history,
+            report.continuation,
+            report.calls,
+            report.bytes,
+            t.elapsed().as_secs_f64()
         ));
+        println!("{}", lines.last().map_or("", String::as_str));
     }
     Ok(lines)
 }
@@ -496,6 +574,7 @@ fn fixture() -> Entry<Fixture> {
     Entry {
         id: "fixture",
         make: Fixture::new,
+        describe: |p| format!("ramp steps {}, count {}, generator {}", p.steps, p.count, p.rng),
         witnesses: vec![
             // 1: first blocks with a parameter change (the fixture takes no notes).
             Witness {
@@ -579,16 +658,20 @@ fn the_full_fixture_passes_and_each_omission_variant_fails() {
         *OMIT.lock().unwrap() = Omit::Nothing;
         r
     };
-    let lines = run_with(Omit::Nothing).unwrap_or_else(|e| panic!("the full fixture failed: {e}"));
-    for l in &lines {
-        println!("{l}");
-    }
+    run_with(Omit::Nothing).unwrap_or_else(|e| panic!("the full fixture failed: {e}"));
     for omit in [Omit::Smoother, Omit::Line, Omit::Counter, Omit::Generator] {
         match run_with(omit) {
             Ok(_) => panic!("the variant without {omit:?} passed: a field left out of record and restore went unnoticed"),
             Err(e) => println!("variant without {omit:?} fails as it must: {e}"),
         }
     }
+}
+
+/// The Macro Oscillator's declaration (ADR 0029, #742 slice 1 push 2): every witness of its set
+/// in every configuration.
+#[test]
+fn the_macro_oscillator_record_is_complete() {
+    harness(&macro_osc::entry()).unwrap_or_else(|e| panic!("{e}"));
 }
 
 /// A witness set must cover the checklist: a boundary with neither a witness nor an explanation
@@ -636,7 +719,7 @@ fn the_harness_covers_every_entry_that_declares_a_complete_record() {
             covered.push(info.id);
         }
     }
-    // The witness sets the harness has for registry entries (none yet).
-    let witnessed: &[&str] = &[];
+    // The witness sets the harness has for registry entries.
+    let witnessed: &[&str] = &["macro_oscillator"];
     assert_eq!(covered, witnessed, "every entry declaring a complete record has a witness set in this harness");
 }

@@ -88,3 +88,8 @@ impl<const NUM_HARMONICS: usize> HarmonicOscillator<NUM_HARMONICS> {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([const NUM_HARMONICS: usize] HarmonicOscillator<NUM_HARMONICS> { phase, frequency, amplitude });

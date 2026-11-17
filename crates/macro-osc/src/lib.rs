@@ -22,6 +22,8 @@ pub mod fx;
 pub mod noise;
 pub mod oscillator;
 pub mod physical_modelling;
+#[cfg(feature = "testing")]
+pub mod record;
 pub mod resources;
 pub mod speech;
 pub mod utils;
@@ -102,3 +104,8 @@ impl SampleRate {
         Self::ALL.into_iter().find(|rate| rate.hz().to_bits() == hz.to_bits())
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_enum!(Tuning { Firmware, Concert });

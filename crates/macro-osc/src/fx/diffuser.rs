@@ -70,6 +70,11 @@ impl Diffuser {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Diffuser { engine, lp_decay, sample_rate_hz });
+
 #[cfg(test)]
 mod tests {
     use super::Diffuser;

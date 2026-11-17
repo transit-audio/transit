@@ -223,3 +223,14 @@ impl SyntheticBassDrumAttackNoise {
         self.lp - self.hp
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SyntheticBassDrum { sample_rate_hz, f0, phase, phase_noise, fm, fm_lp, body_env, body_env_lp, transient_env, transient_env_lp, sustain_gain, tone_lp, click, noise, body_env_pulse_width, fm_pulse_width });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SyntheticBassDrumClick { sample_rate_hz, lp, hp, filter });
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] SyntheticBassDrumAttackNoise { lp, hp });

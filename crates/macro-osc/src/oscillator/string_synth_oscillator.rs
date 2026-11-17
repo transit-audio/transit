@@ -129,3 +129,8 @@ impl StringSynthOscillator {
         self.segment = segment;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] StringSynthOscillator { phase, next_sample, segment, frequency, saw_8_gain, saw_4_gain, saw_2_gain, saw_1_gain });

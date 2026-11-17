@@ -150,3 +150,36 @@ pub fn magnitude(mode: Mode, slope24: bool, cutoff: f64, q: f64, sr: f64, freq: 
     let one = section_magnitude(mode, g, 1.0 / q, sr, freq);
     if slope24 { one * section_magnitude(mode, g, f64::from(K_BUTTERWORTH), sr, freq) } else { one }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl Section {
+    /// Test seam (feature `testing`, #742): sets the two integrator memories [`Section::fingerprint`]
+    /// wrote (its complete state).
+    pub fn restore(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Section { ic1, ic2 } = self;
+        *ic1 = r.f32()?;
+        *ic2 = r.f32()?;
+        Some(())
+    }
+}
+
+#[cfg(feature = "testing")]
+impl Coefs {
+    /// Test seam (feature `testing`, #742): the coefficients a voice designed last (state: they
+    /// are kept between blocks and a block that does not design reads them).
+    pub fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Coefs { k, a1, a2, a3 } = self;
+        w.f32s(&[*k, *a1, *a2, *a3]);
+    }
+
+    /// Test seam (feature `testing`, #742): sets what [`Coefs::record_state`] wrote.
+    pub fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Coefs { k, a1, a2, a3 } = self;
+        let mut v = [0.0f32; 4];
+        r.f32s(&mut v)?;
+        [*k, *a1, *a2, *a3] = v;
+        Some(())
+    }
+}

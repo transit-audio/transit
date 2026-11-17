@@ -49,8 +49,9 @@
 //! ([`Schedule::shrink`]) and printed as a Rust literal with the first divergence; the minimal
 //! schedule lands as a named regression test ([`regression`], see the template at the end).
 //!
-//! **Where no complete record reads the state** (no registry entry declares one yet, #742): the
-//! holds end `WINDOW` blocks before the end of the render and every corpus case states its
+//! **Where no complete record reads the state** (the Macro Oscillator declares one, #742 slice 1
+//! push 2; the other corpus entries do not yet): the holds end `WINDOW` blocks before the end of
+//! the render and every corpus case states its
 //! post-fault window from its configured, loaded instances (`MixEngine::strip_plugin_facts`
 //! after the latency probe block): the longest tail plus latency of an instance whose record is
 //! not complete (and of an instrument whose MIDI effect chain holds such an effect), plus the
@@ -128,22 +129,21 @@ fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_s
 /// test fails when the computed set differs, so an entry turning complete, or a corpus session
 /// adding an incomplete one, is a reviewed change here.
 const INCOMPLETE: &[(&str, &[&str])] = &[
-    ("v0.3.2-demo.transit", &["compressor", "eq_7band", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
-    ("v0.3.2-features.transit", &["compressor", "gain", "macro_oscillator", "plate_reverb"]),
-    ("v0.4.0-demo.transit", &["compressor", "eq_7band", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
-    ("v0.4.0-features.transit", &["compressor", "gain", "macro_oscillator", "plate_reverb"]),
-    ("v0.4.1-demo.transit", &["compressor", "eq_7band", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
-    ("v0.4.1-features.transit", &["compressor", "gain", "macro_oscillator", "plate_reverb"]),
-    ("v0.5.0-demo.transit", &["compressor", "eq_7band", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
-    ("v0.5.0-features.transit", &["compressor", "gain", "macro_oscillator", "plate_reverb"]),
-    ("v0.6.0-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    ("v0.3.2-demo.transit", &["compressor", "eq_7band", "gain", "plate_reverb", "saturator"]),
+    ("v0.3.2-features.transit", &["compressor", "gain", "plate_reverb"]),
+    ("v0.4.0-demo.transit", &["compressor", "eq_7band", "gain", "plate_reverb", "saturator"]),
+    ("v0.4.0-features.transit", &["compressor", "gain", "plate_reverb"]),
+    ("v0.4.1-demo.transit", &["compressor", "eq_7band", "gain", "plate_reverb", "saturator"]),
+    ("v0.4.1-features.transit", &["compressor", "gain", "plate_reverb"]),
+    ("v0.5.0-demo.transit", &["compressor", "eq_7band", "gain", "plate_reverb", "saturator"]),
+    ("v0.5.0-features.transit", &["compressor", "gain", "plate_reverb"]),
+    ("v0.6.0-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
     (
         "v0.6.0-features.transit",
         &[
             "compressor",
             "filter",
             "gain",
-            "macro_oscillator",
             "midi_transpose",
             "modal_voice",
             "plate_reverb",
@@ -153,14 +153,13 @@ const INCOMPLETE: &[(&str, &[&str])] = &[
             "tuner",
         ],
     ),
-    ("v0.7.0-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    ("v0.7.0-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
     (
         "v0.7.0-features.transit",
         &[
             "compressor",
             "filter",
             "gain",
-            "macro_oscillator",
             "midi_transpose",
             "modal_voice",
             "plate_reverb",
@@ -171,14 +170,13 @@ const INCOMPLETE: &[(&str, &[&str])] = &[
             "tuner",
         ],
     ),
-    ("v0.7.1-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    ("v0.7.1-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
     (
         "v0.7.1-features.transit",
         &[
             "compressor",
             "filter",
             "gain",
-            "macro_oscillator",
             "midi_transpose",
             "modal_voice",
             "plate_reverb",
@@ -189,14 +187,13 @@ const INCOMPLETE: &[(&str, &[&str])] = &[
             "tuner",
         ],
     ),
-    ("v0.7.2-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    ("v0.7.2-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
     (
         "v0.7.2-features.transit",
         &[
             "compressor",
             "filter",
             "gain",
-            "macro_oscillator",
             "midi_transpose",
             "modal_voice",
             "plate_reverb",
@@ -207,14 +204,13 @@ const INCOMPLETE: &[(&str, &[&str])] = &[
             "tuner",
         ],
     ),
-    ("v0.7.3-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    ("v0.7.3-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
     (
         "v0.7.3-features.transit",
         &[
             "compressor",
             "filter",
             "gain",
-            "macro_oscillator",
             "midi_transpose",
             "modal_voice",
             "plate_reverb",
@@ -225,7 +221,7 @@ const INCOMPLETE: &[(&str, &[&str])] = &[
             "tuner",
         ],
     ),
-    ("returns-and-groups.transit", &["compressor", "gain", "macro_oscillator", "room_reverb"]),
+    ("returns-and-groups.transit", &["compressor", "gain", "room_reverb"]),
 ];
 
 /// Gate (#210): a key edge removed, and one added, while a worker holds an old task: the plan is

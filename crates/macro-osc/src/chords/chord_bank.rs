@@ -155,3 +155,8 @@ const CHORDS: [[f32; CHORD_NUM_NOTES]; CHORD_NUM_CHORDS] = [
     [0.00, 4.00, 7.00, 11.00],  // M7
     [0.00, 4.00, 7.00, 12.00],  // M
 ];
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] ChordBank { chord_index_quantizer, ratios, note_count, sorted_ratios });

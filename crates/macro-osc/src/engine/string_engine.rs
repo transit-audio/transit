@@ -103,3 +103,8 @@ impl Engine for StringEngine {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] StringEngine { voice, f0, f0_delay, active_string, temp_buffer_1, temp_buffer_2 });

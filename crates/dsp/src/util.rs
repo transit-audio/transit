@@ -271,6 +271,16 @@ impl Smoother {
             w.f32(v);
         }
     }
+
+    /// Sets the complete state [`Smoother::fingerprint`] wrote (#742): the current value, the
+    /// target and the coefficient.
+    pub(crate) fn restore(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Smoother { cur, target, coef } = self;
+        *cur = r.f32()?;
+        *target = r.f32()?;
+        *coef = r.f32()?;
+        Some(())
+    }
 }
 
 #[cfg(feature = "testing")]

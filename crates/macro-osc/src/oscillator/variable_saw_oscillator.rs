@@ -108,3 +108,8 @@ fn compute_naive_sample(phase: f32, pw: f32, slope_up: f32, slope_down: f32, tri
 
     notch_saw * notch_amount + triangle * triangle_amount
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] VariableSawOscillator { phase, next_sample, previous_pw, high, frequency, pw, waveshape });

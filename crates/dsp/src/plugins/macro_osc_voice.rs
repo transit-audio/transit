@@ -510,3 +510,133 @@ impl Slot {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl NoteStack {
+    /// The complete state: every key slot (the ones past `len` included), `len`, and every key's
+    /// held flag.
+    fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let NoteStack { keys, len, held } = self;
+        w.bytes(keys);
+        w.usize(*len);
+        w.bytes(&held.map(u8::from));
+    }
+
+    fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let NoteStack { keys, len, held } = self;
+        r.bytes(keys)?;
+        *len = r.usize().filter(|&n| n <= keys.len())?;
+        let mut flags = [0u8; 128];
+        r.bytes(&mut flags)?;
+        for (h, f) in held.iter_mut().zip(flags) {
+            *h = match f {
+                0 => false,
+                1 => true,
+                _ => return None,
+            };
+        }
+        Some(())
+    }
+}
+
+#[cfg(feature = "testing")]
+impl Slot {
+    /// One voice's complete state (ADR 0029, #742 section 13): the port's voice (every engine of
+    /// its bank, dormant ones included, its generator, envelopes, trigger delay, post-processors
+    /// and tuning: `transit_macro_osc::record`), the last block's frames and mix, the keys, the
+    /// note and velocities, the trigger and phrase flags, the age, loudness and quiet count, the
+    /// idle and rendered flags, the gains, the shaper, the seed (a reset reseeds from it) and the
+    /// last block's shape.
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        use transit_macro_osc::record::Record;
+        let Slot {
+            voice,
+            frames,
+            mixed,
+            notes,
+            note,
+            velocity,
+            release_velocity,
+            last_trigger,
+            retrigger,
+            started,
+            shaped,
+            age,
+            loudness,
+            quiet,
+            idle,
+            rendered,
+            gain,
+            shaper,
+            seed,
+            shape,
+        } = self;
+        voice.record(w);
+        frames.record(w);
+        w.f32s(mixed);
+        notes.record_state(w);
+        w.f32s(&[*note, *velocity, *release_velocity]);
+        for b in [last_trigger, retrigger, started, shaped] {
+            w.bool(*b);
+        }
+        w.u64(*age);
+        w.f32(*loudness);
+        w.u32(*quiet);
+        w.bool(*idle);
+        w.bool(*rendered);
+        w.f32s(&[gain.0, gain.1]);
+        shaper.record_state(w);
+        w.u32(*seed);
+        w.f32s(shape);
+    }
+
+    /// Sets the state [`Slot::record_state`] wrote.
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        use transit_macro_osc::record::Record;
+        let Slot {
+            voice,
+            frames,
+            mixed,
+            notes,
+            note,
+            velocity,
+            release_velocity,
+            last_trigger,
+            retrigger,
+            started,
+            shaped,
+            age,
+            loudness,
+            quiet,
+            idle,
+            rendered,
+            gain,
+            shaper,
+            seed,
+            shape,
+        } = self;
+        voice.restore(r)?;
+        frames.restore(r)?;
+        r.f32s(mixed)?;
+        notes.restore_state(r)?;
+        let mut v = [0.0f32; 3];
+        r.f32s(&mut v)?;
+        [*note, *velocity, *release_velocity] = v;
+        for b in [last_trigger, retrigger, started, shaped] {
+            *b = r.bool()?;
+        }
+        *age = r.u64()?;
+        *loudness = r.f32()?;
+        *quiet = r.u32()?;
+        *idle = r.bool()?;
+        *rendered = r.bool()?;
+        let mut g = [0.0f32; 2];
+        r.f32s(&mut g)?;
+        *gain = (g[0], g[1]);
+        shaper.restore_state(r)?;
+        *seed = r.u32()?;
+        r.f32s(shape)
+    }
+}

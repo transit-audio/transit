@@ -115,3 +115,8 @@ where
         .unwrap_or_default()
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([T, const MAX_DELAY: usize] DelayLine<T, MAX_DELAY> where [T: crate::record::Record] { write_ptr, delay, line });
