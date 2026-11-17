@@ -266,8 +266,8 @@ fn witnesses() -> Vec<W> {
             completed: idle,
         },
         // 11: a key released while the sustain pedal stays down, beside a held key; the
-        // continuation keeps the sustained note sounding, releases the pedal, then the held key,
-        // and runs to idle.
+        // continuation keeps the sustained note sounding, releases the held key too while the
+        // pedal is still down (the pedal keeps it), then releases the pedal and runs to idle.
         W {
             boundary: Boundary::Sustain,
             history: |rate| {
@@ -277,7 +277,14 @@ fn witnesses() -> Vec<W> {
                 h
             },
             continuation: |rate| {
-                vec![Step::Run(span(&[HOLD], rate)), Step::Midi([0xB0, 64, 0], 3), Step::Run(97), Step::Off(64, 0), run_out(&[RELEASE], rate)]
+                vec![
+                    Step::Run(span(&[HOLD], rate)),
+                    Step::Off(64, 0),
+                    Step::Run(span(&[HOLD], rate)),
+                    Step::Midi([0xB0, 64, 0], 3),
+                    Step::Run(97),
+                    run_out(&[RELEASE], rate),
+                ]
             },
             reached: |p| obs(p).sustain && obs(p).pedalled != 0 && obs(p).held != 0,
             completed: |p| !obs(p).sustain && idle(p),
