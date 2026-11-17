@@ -1,8 +1,19 @@
-//! ADR 0062 slice S2a: section 3's invariants (the Stopped invariant and D-5) proven over what the
-//! matrix can reach. Starting from Stopped with nothing tracked (a new Player's state; the faulted
-//! variant after a fault is reached from it and checked to be), every event is applied with every admissible fact combination, the
-//! host's bookkeeping and a capability model are carried across transitions, and the exploration
-//! runs to a fixed point over a finite abstraction ([`Abs`]).
+//! ADR 0062 slice S2a: a reachability closure over the matrix. Starting from Stopped with nothing
+//! tracked (a new Player's state; the faulted variant after a fault is reached from it and checked
+//! to be), every admissible event is applied with the free observations each row reads, the host's
+//! bookkeeping and a capability model are carried across transitions, and the exploration runs to
+//! a fixed point over a finite abstraction ([`Abs`]).
+//!
+//! What it proves on every reachable state: D-5 (Playing holds no outstanding current-group
+//! start); Stopped's request side of section 3's invariant (unless faulted, nothing still capable
+//! of moving the transport, no Stop tracked or owed, no render request tracked); and a restricted
+//! playback assertion: a transition that enters Stopped from another phase, without a fault or a
+//! full retirement, does so with playback not observed. Every refusal keeps the phase with no
+//! effect.
+//!
+//! What it does not establish: observed playback is not carried, so a resident Stopped (staying
+//! Stopped while playback is observed) and the readback after V3 or V4b are left to S2d's
+//! integration gate over complete admissions and steps; section 3's speed invariant is S2g's.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use super::*;
@@ -51,7 +62,10 @@ const STARTS: [StartCommand; 6] = [
 /// and the capability model, beside the phase. Counts saturate at 2 ("two or more"): no cell
 /// distinguishes more than none, one and several (the group's `members > 0`, `stops > 0`, and
 /// closed starts as `starts > members`), and a decrement from 2 yields both 1 and 2. Deferred is
-/// none, some or full (the only bound a cell reads is the 32nd). Every value a phase carries
+/// none, some or full (the only bound a cell reads is the 32nd). The saturated comparison
+/// `starts > members` (closed-group starts exist) holds under its reachable-state qualification:
+/// capable closed starts coexist with no current group until a Stop neutralizes them, so
+/// saturation alone is not relied on to preserve the inequality. Every value a phase carries
 /// (tickets, positions, count-ins, render payloads) comes from the finite event set below, so the
 /// phases reached are finite too. Observed playback, a pending reopen and `finalizing` are not
 /// carried: they are chosen freely on every transition.
@@ -405,6 +419,13 @@ fn step(phase: &TransportPhase, event: &Event, a: &Abs, env: Env, t: Ticket, nes
     let mut out = Vec::new();
     for b in carry(&s.effects, start, matches!(phase, TransportPhase::Rendering { .. })) {
         let mut results = vec![(s.phase, b)];
+        let admits = s.effects.contains(&Effect::AdmitHeld) || s.effects.contains(&Effect::ResetContinuation);
+        if !nested && admits {
+            // The intermediate completion state is checked before the nested admission runs.
+            if let Some(what) = check(&s.phase, &b) {
+                return Err(format!("{what} at the completion before a nested admission: {phase:?} {event:?} {b:?}"));
+            }
+        }
         if !nested {
             if s.effects.contains(&Effect::AdmitHeld)
                 && let Some(Held { start: held, .. }) = f.held
@@ -475,11 +496,11 @@ fn explore(t: Ticket, older: Ticket) -> Closure {
             for playing in [false, true] {
                 for reopen in [false, true] {
                     for finalizing in [false, true] {
-                        // A pending reopen and `finalizing` are read only by starts and E1.
+                        // A pending reopen and `finalizing` are read only by starts and E1, and by
+                        // the rows that can admit a start or a Reset nested in their transition
+                        // (R6 with a held start, E5 with a Reset continuation).
                         if (reopen || finalizing)
-                            && event.row() != Row::E1
-                            && event.row() != Row::C7
-                            && !matches!(event.row(), Row::C1 | Row::C2 | Row::C3 | Row::C4 | Row::C9)
+                            && !matches!(event.row(), Row::C1 | Row::C2 | Row::C3 | Row::C4 | Row::C7 | Row::C9 | Row::E1 | Row::R6 | Row::E5)
                         {
                             continue;
                         }
@@ -512,7 +533,7 @@ fn stopped_implies_nothing_tracked() {
     assert!(c.seen.contains(&(0, Abs { faulted: true, ..Abs::default() })), "the faulted entry state is reached");
     // The closure reached its fixed point (the queue drained); an empty exploration cannot pass.
     assert!(
-        c.seen.len() > 50_000 && c.transitions > 10_000_000 && c.phases.len() > 30,
+        c.seen.len() > 80_000 && c.transitions > 15_000_000 && c.phases.len() > 30,
         "states {}, transitions {}, phases {}",
         c.seen.len(),
         c.transitions,
