@@ -738,3 +738,27 @@ fn a_failed_record_with_an_outstanding_start_waits_for_the_group() {
     assert_eq!(run(rp, Event::StageCancelled(t), processed).phase, TransportPhase::Stopped);
     assert_eq!(run(rp, Event::StageCancelled(t), Facts { playing: true, ..processed }).phase, TransportPhase::Playing);
 }
+
+/// The legend's global rule: while `faulted`, every start refuses with the fault's text, before
+/// the reopen, preparation, half-speed and recording-speed refusals its cell names.
+#[test]
+fn the_fault_refusal_comes_before_every_start_refusal() {
+    let (t, _) = tickets();
+    let faulted = Facts { faulted: true, ..Facts::default() };
+    let rp = TransportPhase::RecordPending { ticket: t, from: Some(0), count_in: None };
+    let cases = [
+        (TransportPhase::Stopped, Event::Play, Facts { reopen_pending: true, ..faulted }),
+        (TransportPhase::Stopped, Event::PlayExact(AT), Facts { reopen_pending: true, ..faulted }),
+        (TransportPhase::Stopped, Event::Record(RecordPrep::NoArmedTrack), faulted),
+        (TransportPhase::Stopped, Event::Record(RecordPrep::Cannot), faulted),
+        (TransportPhase::StartPending, Event::Record(ready(t)), Facts { speed: Speed::Half, ..faulted }),
+        (TransportPhase::Stopped, Event::HalfSpeed, Facts { reopen_pending: true, ..faulted }),
+        (rp, Event::HalfSpeed, faulted),
+    ];
+    for (phase, event, facts) in cases {
+        let step = next(&phase, &event, &facts);
+        assert_eq!((step.phase, step.effects.len(), step.result), (phase, 0, Err(Refusal::Faulted)), "{phase:?} {event:?}");
+    }
+    // Not faulted, the cell's own refusals stand.
+    assert_eq!(next(&rp, &Event::HalfSpeed, &Facts::default()).result, Err(Refusal::Th));
+}

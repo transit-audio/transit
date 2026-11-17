@@ -661,6 +661,11 @@ impl Run<'_> {
         let at = self.event.at();
         match op {
             Op::Dash | Op::Same | Op::Retired => {}
+            // While `faulted` every start refuses with the fault's text (the legend's global
+            // rule), before any other refusal its cell names.
+            Op::Tr | Op::Ta | Op::Te | Op::Ts | Op::Refuse(Refusal::Th) if f.faulted && self.event.start().is_some() => {
+                return Err(Refusal::Faulted);
+            }
             Op::Tr if f.reopen_pending => return Err(Refusal::Tr),
             Op::Ta if self.event.prep() == Some(RecordPrep::NoArmedTrack) => return Err(Refusal::Ta),
             Op::Te if self.event.prep() == Some(RecordPrep::Cannot) => return Err(Refusal::Te),
