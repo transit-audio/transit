@@ -16,12 +16,17 @@ fn output(status: u32, value: serde_json::Value) -> Output {
     }
 }
 
-fn package(name: &str, dependencies: &[(&str, Option<&str>)]) -> Package {
+pub(crate) fn package(name: &str, dependencies: &[(&str, Option<&str>)]) -> Package {
     Package {
         name: name.into(),
         manifest_path: PathBuf::from(format!("{name}/Cargo.toml")),
-        dependencies: dependencies.iter().map(|(name, kind)| Dependency { name: (*name).into(), kind: kind.map(str::to_string) }).collect(),
+        dependencies: dependencies.iter().map(|(name, kind)| dependency(name, *kind)).collect(),
+        features: Default::default(),
     }
+}
+
+pub(crate) fn dependency(name: &str, kind: Option<&str>) -> Dependency {
+    Dependency { name: name.into(), kind: kind.map(str::to_string), optional: false, rename: None, features: Vec::new(), uses_default_features: true }
 }
 
 #[test]

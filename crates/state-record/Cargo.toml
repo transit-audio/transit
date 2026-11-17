@@ -1,0 +1,12 @@
+[package]
+name = "transit-state-record"
+description = "transit's lossless state record codec for the testing seams (ADR 0029 amendment for #742): a word stream of tagged items, its writer over any hasher and its reader; no_std, no dependencies, used only through the testing features"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

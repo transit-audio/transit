@@ -7,6 +7,7 @@ mod help;
 mod ico;
 mod indexes;
 mod temp_dirs;
+mod testing_only;
 mod timing;
 
 use std::path::{Path, PathBuf};
@@ -67,6 +68,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-midi-io", 0),
     ("transit-midi", 0),
     ("transit-math", 0),
+    ("transit-state-record", 0),
     ("transit-dsp", 1),
     ("transit-macro-osc", 1),
     ("transit-instrument-core", 1),
@@ -92,11 +94,12 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-ui-studio", 6),
 ];
 /// Standalone crates have no workspace dependencies (dev-dependencies excepted) apart from the
-/// `FOUNDATION` crates.
+/// `FOUNDATION` crates, and the testing-only codec as the `TESTING_ONLY` check allows it.
 /// transit-audio-io left the list with #238: it takes the Opus codec from transit-opus (L0, ADR 0048).
 const STANDALONE: &[&str] = &[
     "transit-time",
     "transit-math",
+    "transit-state-record",
     "transit-opus",
     "transit-audio-backend",
     "transit-midi-io",
@@ -158,12 +161,29 @@ struct Package {
     name: String,
     manifest_path: PathBuf,
     dependencies: Vec<Dependency>,
+    /// The package's features map (for the `TESTING_ONLY` check).
+    #[serde(default)]
+    features: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 #[derive(serde::Deserialize)]
 struct Dependency {
     name: String,
     kind: Option<String>,
+    #[serde(default)]
+    optional: bool,
+    /// The dependency's key when the manifest renames it.
+    #[serde(default)]
+    rename: Option<String>,
+    /// The features the dependency requests.
+    #[serde(default)]
+    features: Vec<String>,
+    #[serde(default = "yes")]
+    uses_default_features: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn metadata_output(out: Output) -> Result<Metadata, String> {
@@ -179,6 +199,7 @@ fn metadata_output(out: Output) -> Result<Metadata, String> {
 
 fn check_layers(metadata: &Metadata, read_manifest: impl Fn(&Path) -> Result<String, String>) -> Result<(), String> {
     let mut problems = Vec::new();
+    let testing = testing_only::activating(metadata);
     for p in &metadata.packages {
         let name = p.name.as_str();
         if name.is_empty() || p.manifest_path.as_os_str().is_empty() {
@@ -189,6 +210,8 @@ fn check_layers(metadata: &Metadata, read_manifest: impl Fn(&Path) -> Result<Str
         if opts_out_of_forbid(&manifest).map_err(|e| format!("{name}: {e}"))? && !UNSAFE_ALLOWED.contains(&name) {
             problems.push(format!("{name}: opts out of unsafe_code = forbid but is not in the xtask unsafe allowlist"));
         }
+        // Before the exempt and dev-only exits: it binds every package (ADR 0029, #742).
+        testing_only::check_package(p, &testing, &mut problems);
         for d in &p.dependencies {
             if DEV_ONLY.contains(&d.name.as_str()) && d.kind.as_deref() != Some("dev") {
                 problems.push(format!("{name} depends on the dev-only crate {} (only a dev-dependency is allowed)", d.name));
@@ -213,7 +236,8 @@ fn check_layers(metadata: &Metadata, read_manifest: impl Fn(&Path) -> Result<Str
                 problems.push(format!("{name} (L{layer}) depends on UI crate {dn}"));
             }
             if metadata.packages.iter().any(|p| p.name == dn) {
-                if STANDALONE.contains(&name) && !FOUNDATION.contains(&dn) {
+                // The testing-only codec is the `TESTING_ONLY` check's to judge.
+                if STANDALONE.contains(&name) && !FOUNDATION.contains(&dn) && !testing_only::TESTING_ONLY.contains(&dn) {
                     problems.push(format!("{name} is standalone but depends on {dn}"));
                 }
                 if let Some(&(_, dl)) = LAYERS.iter().find(|(n, _)| *n == dn) {

@@ -17,6 +17,9 @@ transit-time = { path = "crates/time" }
 # The portable math seam (ADR 0055): every rendered crate takes its transcendental functions here.
 transit-math = { path = "crates/math" }
 transit-rt = { path = "crates/rt" }
+# The lossless state record of the testing seams (ADR 0029, #742): an optional dependency enabled only
+# through `testing` features, or a dev-dependency (xtask layers, TESTING_ONLY).
+transit-state-record = { path = "crates/state-record" }
 transit-audio-io = { path = "crates/audio-io" }
 transit-opus = { path = "crates/opus" }
 transit-audio-backend = { path = "crates/audio-backend" }

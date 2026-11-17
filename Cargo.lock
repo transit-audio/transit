@@ -4483,6 +4483,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-state-record"
+version = "0.7.3"
+
+[[package]]
 name = "transit-test-support"
 version = "0.7.3"
 

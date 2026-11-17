@@ -5,7 +5,7 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 
 | Layer | Crates |
 |---|---|
-| L0 | `time`, `rt`, `audio-io`, `opus`, `audio-backend`, `audio-wasapi`, `audio-asio`, `audio-jack`, `midi-io`, `midi`, `math` |
+| L0 | `time`, `rt`, `audio-io`, `opus`, `audio-backend`, `audio-wasapi`, `audio-asio`, `audio-jack`, `midi-io`, `midi`, `math`, `state-record` |
 | L1 | `dsp`, `instrument-core`, `sampler-core`, `resample`, `macro-osc`, `resonator`, `modal-voice`, `texture`, `granular`, `modulator`, `random-sequencer`, `clap-host`, `vst3-host`, `au-host`, `plugin-host` |
 | L2 | `model` (the session document) |
 | L3 | `mix` (the render engine) |
@@ -18,14 +18,12 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 
 - Every crate is registered in `LAYERS`; a new crate needs a row (and a layer you can justify).
 - No dependency points upward (dev-dependencies excepted).
-- The standalone crates (`STANDALONE`: `time`, `math`, `opus`, `audio-backend`, `midi-io`, `midi`,
-  `macro-osc`, `instrument-core`, `resample`, `resonator`, `texture`, `granular`, `modulator`, `random-sequencer`) have no
-  production workspace dependencies apart from the `FOUNDATION` crates. `FOUNDATION` holds only
+- The standalone crates listed in `STANDALONE` may have workspace dependencies only on `FOUNDATION` crates, as dev-dependencies, or on `transit-state-record` as an optional normal dependency enabled solely through their non-default `testing` feature. The named `TESTING_ONLY` check enforces that codec restriction for every crate. `FOUNDATION` holds only
   `math` (`transit-math`), the portable math seam every rendered crate takes its transcendental
   functions and its FFT from ([ADR 0055](../../adr/0055-portable-math.md) 2.1); it is itself standalone. `audio-io` was standalone until it took `opus`, the
   vendored libopus behind its Ogg Opus writer and reader (#238, ADR 0048, a same-layer L0 edge). `modal-voice` depends on `resonator` at L1, and
   `sampler-core` (the portable Sampler core, ADR 0041) on `instrument-core` at L1, its only
-  workspace dependency: never on `dsp`.
+  production workspace dependency: never on `dsp`.
   `dsp` was standalone until it took
   `macro-osc` for the Macro Oscillator built-in (#195, a same-layer edge: the built-ins'
   registry, `Plugin` trait and parameter tables live in `dsp`). `dsp` also depends on
