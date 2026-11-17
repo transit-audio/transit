@@ -3,7 +3,7 @@ title: The typed transport lifecycle: one transport phase is the truth for start
 -->
 # ADR 0062: The typed transport lifecycle
 
-- **Status:** proposed 2026-11-16 (revised after judging rounds 1 to 5, same day; narrowed to the lifecycle after round 3)
+- **Status:** accepted 2026-11-17 (proposed 2026-11-16; six judging rounds; narrowed to the lifecycle after round 3)
 - **Date:** 2026-11-16
 - **Implementation:** not started. Slices S1 and S2a to S2g below, all before hardware sync slice 1 (#733, ADR 0043). Tracking issue #739 (topic B of #736). The appendix [0062/tables.md](0062/tables.md) is part of this record: the transition matrix (A), the simulation (B), the reader assignments (C), the display examples (D), the status writers that are not mechanical (E).
 - **Reopen when:** ADR 0043 cannot add its states under the checklist of section 14; the display arbitration fails the maintainer's feel-right check; a lifecycle file nears the 1,500-line budget; one of the deferred records needs a lifecycle change this record does not allow; the owed-Stop deadline (section 4) is reached in practice.
