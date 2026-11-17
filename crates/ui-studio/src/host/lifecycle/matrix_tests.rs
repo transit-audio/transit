@@ -144,7 +144,8 @@ fn summary(before: &TransportPhase, step: &Step) -> String {
 }
 
 /// tables.md section A, cell by cell, as [`summary`] writes each outcome. A merged "every column"
-/// cell is spelled out; `—` in STz for C12 ("STz") is the phase kept with no effect.
+/// cell is spelled out; `—` in STz for C12 ("STz") is the phase kept with no effect. W is pinned as
+/// an explicit start (`from` given), so O6 W is "otherwise —"; the punch is pinned separately.
 #[rustfmt::skip]
 const GRID: [(Row, [&str; 11]); 49] = [
     //          S       SP      P       RP      CI      W       R       STp     STr     STz     RND
@@ -179,9 +180,9 @@ const GRID: [(Row, [&str; 11]); 49] = [
     (Row::O3,  ["—",   "—",    "—",    "R",    "R",    "R",    "—",    "—",    "—",    "—",    "—"]),
     (Row::O4,  ["—",   "—",    "—",    "S!",   "S!",   "S!",   "—",    "—",    "—",    "—",    "—"]),
     (Row::O5,  ["—",   "—",    "—",    "S!",   "S!",   "S!",   "—",    "—",    "—",    "—",    "—"]),
-    (Row::O6,  ["—",   "—",    "S",    "—",    "—",    "S!",   "S!",   "—",    "—",    "—",    "—"]),
+    (Row::O6,  ["—",   "—",    "S",    "—",    "—",    "—",    "S!",   "—",    "—",    "—",    "—"]),
     (Row::O7,  ["P",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—"]),
-    (Row::E1,  ["RND", "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tn"]),
+    (Row::E1,  ["RND", "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "Tx",   "RenderRunning"]),
     (Row::E2,  ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "RND"]),
     (Row::E3a, ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "RND"]),
     (Row::E3,  ["—",   "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "—",    "RND"]),
@@ -272,7 +273,7 @@ fn matrix_conditions_follow_the_cell_text() {
     assert_eq!(run(rp, Event::RecordAdmitted(t), f).phase, TransportPhase::WaitingForClock { ticket: t, from: Some(0), count_in: None });
     let with_plan = TransportPhase::RecordPending { ticket: t, from: Some(0), count_in: Some(PLAN) };
     assert_eq!(run(with_plan, Event::StageCountingIn(t), f).phase, TransportPhase::CountIn { ticket: t, from: 0, plan: PLAN });
-    assert_eq!(run(rp, Event::StageCountingIn(t), f).effects, [], "CELL O1 RP: no plan, no count-in phase");
+    assert_eq!(run(rp, Event::StageCountingIn(t), f).effects, [], "O1 in RP: no count-in, no effect");
     let latched = run(with_plan, Event::StageStarted { ticket: t, latch: point() }, f);
     assert_eq!(latched.phase, TransportPhase::Recording { latch: point(), count_in: Some(PLAN) });
     let refused_record = |retired_by_stage, facts| run(rp, Event::RecordRefused { ticket: t, retired_by_stage }, facts);
@@ -515,17 +516,44 @@ fn events(t: Ticket, older: Ticket) -> Vec<Event> {
     ]
 }
 
-/// Facts a host can hold in `phase` after an event's own retirement (record section 4). Starts
-/// and a Record submitted before a Stop or a stage the host has since observed were applied by
-/// the audio thread first (the action lane is ordered), so they cannot move the transport any
-/// more: a current group's members are generated in SP and RP only, a tracked Record in RP only.
-fn facts_for(phase: &TransportPhase) -> Vec<Facts> {
+/// Which outstanding requests can still move the transport: a test-side model beside the facts,
+/// which count outstanding identities only (the reducer cannot see it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Capable {
+    /// The current group's starts.
+    current: bool,
+    /// Starts of groups a Stop closed.
+    closed: bool,
+    /// The pass's record-start continuation (its count-in or clock wait).
+    continuation: bool,
+}
+
+/// Facts a host can hold in `phase` after an event's own retirement, with what can still move
+/// the transport. Outstanding identities are generated wherever they can be tracked (record
+/// section 4: closed-group starts stay tracked until their receipts; `Started` does not retire
+/// Record). What can still move it:
+/// - Closed-group starts and the record continuation, in StopPending, until every Stop is
+///   acknowledged (an acknowledged Stop neutralizes earlier ordinary actions and record-start
+///   continuations, record section 4). Outside StopPending, the Stop that closed a group was
+///   acknowledged.
+/// - The current group's starts, in SP and RP. In CI, W and R the Record's action was applied
+///   (its stage or receipt was seen), and ordinary actions apply in publication order
+///   (`P/player/control.rs:107-139`), so a start published before it was applied too; only its
+///   receipt may be outstanding.
+/// - The record continuation in RP, CI and W (an admitted Record can still start from its
+///   clock wait); not in R (it has started).
+fn worlds(phase: &TransportPhase) -> Vec<(Facts, Capable)> {
     let col = Col::of(phase);
     let stopping = matches!(col, Col::Stp | Col::Str | Col::Stz);
-    let members: &[u32] = if matches!(col, Col::Sp | Col::Rp) { &[0, 1] } else { &[0] };
+    let members: &[u32] = if matches!(col, Col::Sp | Col::Rp | Col::Ci | Col::W | Col::R) { &[0, 1] } else { &[0] };
     let stops: &[u32] = if stopping { &[0, 1] } else { &[0] };
     let owed: &[Option<Duration>] = if stopping || col == Col::Rnd { &[None, Some(Duration::ZERO)] } else { &[None] };
-    let record: &[bool] = if col == Col::Rp { &[false, true] } else { &[false] };
+    let record: &[bool] = match col {
+        Col::Rp => &[true],
+        Col::Ci | Col::W | Col::R | Col::Stp | Col::Str | Col::Stz => &[false, true],
+        _ => &[false],
+    };
+    let closed: &[u32] = if col == Col::Rnd { &[0] } else { &[0, 1] };
     let render: &[(bool, u32)] = if col == Col::Rnd { &[(false, 0), (true, 0), (false, 1)] } else { &[(false, 0)] };
     let held: &[Option<Held>] = if col == Col::Stp { &[None, Some(Held { start: StartCommand::Record, generation: 1 })] } else { &[None] };
     let speed: &[Speed] = if matches!(col, Col::Sp | Col::P) { &[Speed::Normal, Speed::Half] } else { &[Speed::Normal] };
@@ -536,27 +564,44 @@ fn facts_for(phase: &TransportPhase) -> Vec<Facts> {
                 for &stops in stops {
                     for &owed in owed {
                         for &record in record {
-                            for &(render_play, render_stops) in render {
-                                for &held in held {
-                                    for &speed in speed {
-                                        for release in [false, true] {
-                                            for faulted in [false, true] {
-                                                let tracked = Tracked { record, stops, release, render_play, render_stops, ..Tracked::default() };
-                                                out.push(Facts {
-                                                    tracked,
-                                                    group: StartGroup { members, applied },
-                                                    owed_stop_since: owed,
-                                                    held,
-                                                    deferred: if col == Col::Str { 32 } else { 0 },
-                                                    reset_generation: 1,
-                                                    speed,
-                                                    playing,
-                                                    position: 70,
-                                                    cursor: 40,
-                                                    faulted,
-                                                    finalizing: false,
-                                                    reopen_pending: false,
-                                                });
+                            for &closed in closed {
+                                for &(render_play, render_stops) in render {
+                                    for &held in held {
+                                        for &speed in speed {
+                                            for release in [false, true] {
+                                                for faulted in [false, true] {
+                                                    let unacknowledged = stopping && (stops > 0 || owed.is_some());
+                                                    let capable = Capable {
+                                                        current: matches!(col, Col::Sp | Col::Rp),
+                                                        closed: unacknowledged,
+                                                        continuation: matches!(col, Col::Rp | Col::Ci | Col::W) || unacknowledged,
+                                                    };
+                                                    let tracked = Tracked {
+                                                        starts: members + closed,
+                                                        record,
+                                                        stops,
+                                                        release,
+                                                        render_play,
+                                                        render_stops,
+                                                        ..Tracked::default()
+                                                    };
+                                                    let facts = Facts {
+                                                        tracked,
+                                                        group: StartGroup { members, applied },
+                                                        owed_stop_since: owed,
+                                                        held,
+                                                        deferred: if col == Col::Str { 32 } else { 0 },
+                                                        reset_generation: 1,
+                                                        speed,
+                                                        playing,
+                                                        position: 70,
+                                                        cursor: 40,
+                                                        faulted,
+                                                        finalizing: false,
+                                                        reopen_pending: false,
+                                                    };
+                                                    out.push((facts, capable));
+                                                }
                                             }
                                         }
                                     }
@@ -572,8 +617,8 @@ fn facts_for(phase: &TransportPhase) -> Vec<Facts> {
 }
 
 /// The host's retirement before the reducer runs: a Record receipt or terminal stage of the
-/// current ticket retires the Record.
-fn retire(event: &Event, mut facts: Facts, current: Ticket) -> Facts {
+/// current ticket retires the Record, and a refusal or terminal stage ends its continuation.
+fn retire(event: &Event, mut facts: Facts, mut capable: Capable, current: Ticket) -> (Facts, Capable) {
     if let Event::RecordAdmitted(t)
     | Event::RecordStarted { ticket: t, .. }
     | Event::RecordRefused { ticket: t, .. }
@@ -582,8 +627,11 @@ fn retire(event: &Event, mut facts: Facts, current: Ticket) -> Facts {
         && t == current
     {
         facts.tracked.record = false;
+        if matches!(event, Event::RecordRefused { .. } | Event::StageFailed(_) | Event::StageCancelled(_)) {
+            capable.continuation = false;
+        }
     }
-    facts
+    (facts, capable)
 }
 
 #[test]
@@ -627,7 +675,7 @@ fn the_matrix_has_no_empty_cell() {
     let mut steps = 0usize;
     for phase in &phases {
         for event in &events {
-            for facts in facts_for(phase) {
+            for (facts, _) in worlds(phase) {
                 let step = next(phase, event, &facts);
                 if step.result.is_err() {
                     assert_eq!((step.phase, step.effects.len()), (*phase, 0), "{phase:?} {event:?} {facts:?}");
@@ -646,13 +694,13 @@ fn stopped_implies_nothing_tracked() {
     let mut entered = 0usize;
     for phase in phases() {
         for event in &events {
-            for facts in facts_for(&phase) {
-                let facts = retire(event, facts, t);
+            for (facts, capable) in worlds(&phase) {
+                let (facts, mut capable) = retire(event, facts, capable, t);
                 let step = next(&phase, event, &facts);
                 if step.phase != TransportPhase::Stopped || step.result.is_err() {
                     continue;
                 }
-                let why = format!("{phase:?} {event:?} {facts:?} -> {:?}", step.effects);
+                let why = format!("{phase:?} {event:?} {facts:?} {capable:?} -> {:?}", step.effects);
                 let moving = step
                     .effects
                     .iter()
@@ -662,9 +710,17 @@ fn stopped_implies_nothing_tracked() {
                 if phase == TransportPhase::Stopped || exempt {
                     continue;
                 }
+                // What the transition neutralized: every Stop acknowledged, or the pass finished.
+                if *event == Event::StopFrontier && facts.tracked.stops == 0 && facts.owed_stop_since.is_none() {
+                    capable = Capable { current: false, closed: false, continuation: false };
+                }
+                if step.effects.contains(&Effect::FinishPass) {
+                    capable.continuation = false;
+                }
                 let f = &facts;
-                assert_eq!(f.group.members, 0, "a start is tracked: {why}");
-                assert!(!f.tracked.record, "the Record is tracked: {why}");
+                assert!(!(capable.current && f.group.members > 0), "a current start can still move the transport: {why}");
+                assert!(!(capable.closed && f.tracked.starts > f.group.members), "a closed group's start can still move it: {why}");
+                assert!(!capable.continuation, "the record start can still move it: {why}");
                 assert_eq!(f.tracked.stops, 0, "a Stop is tracked: {why}");
                 assert!(f.owed_stop_since.is_none(), "a Stop is owed: {why}");
                 assert!(!f.playing, "playback is observed: {why}");
@@ -674,4 +730,80 @@ fn stopped_implies_nothing_tracked() {
         }
     }
     assert!(entered > 100, "transitions into Stopped checked: {entered}");
+}
+
+#[test]
+fn judged_cells_follow_the_amended_text() {
+    let (t, _) = tickets();
+    let f = Facts { position: 70, cursor: 40, ..Facts::default() };
+    let live = TransportPhase::Rendering { job: RenderJob::Live };
+    let retired = |result, reason, then_reset| TransportPhase::Rendering { job: RenderJob::Retired { result, reason, then_reset } };
+
+    // A cancel that returned a finished result: E3 fills it, keeping the reason and the Reset.
+    let cancelled = run(live, Event::ResetSession, f).phase;
+    assert_eq!(cancelled, retired(None, Some(CancelReason::SessionReplaced), true));
+    let filled = run(cancelled, Event::RenderResult(RenderOutcome::Completed), f).phase;
+    assert_eq!(filled, retired(Some(RenderOutcome::Completed), Some(CancelReason::SessionReplaced), true));
+    assert_eq!(run(filled, Event::RenderResult(RenderOutcome::Failed), f).phase, filled, "a collected result stands");
+    let settled = run(filled, Event::RenderSettled, f);
+    let message = Message::RenderSettled { result: Some(RenderOutcome::Completed), reason: Some(CancelReason::SessionReplaced) };
+    assert_eq!(settled.effects, [Effect::Message(message), Effect::ResetContinuation]);
+    assert_eq!(run(live, Event::RenderResult(RenderOutcome::Failed), f).phase, retired(Some(RenderOutcome::Failed), None, false));
+
+    // A render-Play refusal: a live job is disposed and retired empty; a retired one keeps all.
+    let disposed = run(live, Event::PlayRefused(PlayOf::Render), f);
+    assert_eq!(disposed.phase, retired(None, None, false));
+    assert_eq!(disposed.effects, [Effect::Message(Message::PlayerRefusal), Effect::DisposeRenderWithoutStop]);
+    let late = run(cancelled, Event::PlayRefused(PlayOf::Render), f);
+    assert_eq!((late.phase, late.effects), (cancelled, vec![Effect::Message(Message::PlayerRefusal)]));
+    assert_eq!(run(live, Event::RenderStart, f).result, Err(Refusal::RenderRunning));
+
+    // O6 in W: only a punch ends the pass.
+    let punch = TransportPhase::WaitingForClock { ticket: t, from: None, count_in: None };
+    let stopped_start = TransportPhase::WaitingForClock { ticket: t, from: Some(0), count_in: None };
+    let ended = run(punch, Event::StoppedByItself, f);
+    assert_eq!((ended.phase, ended.effects), (TransportPhase::Stopped, vec![Effect::FinishPass]));
+    let kept = run(stopped_start, Event::StoppedByItself, f);
+    assert_eq!((kept.phase, kept.effects.len()), (stopped_start, 0));
+
+    // (Tr) on C2 and C3 in S; (Ta, Te) on C7 in SP and P; retained := at where section 9 says.
+    let reopen = Facts { reopen_pending: true, ..f };
+    assert_eq!(run(TransportPhase::Stopped, Event::PlayExact(AT), reopen).result, Err(Refusal::Tr));
+    assert_eq!(run(TransportPhase::Stopped, Event::PlaySelection, reopen).result, Err(Refusal::Tr));
+    assert_eq!(run(TransportPhase::StartPending, Event::Record(RecordPrep::NoArmedTrack), f).result, Err(Refusal::Ta));
+    assert_eq!(run(TransportPhase::Playing, Event::Record(RecordPrep::Cannot), f).result, Err(Refusal::Te));
+    let retained = Effect::SetRetained(AT);
+    for phase in [TransportPhase::StartPending, TransportPhase::Playing] {
+        assert!(run(phase, Event::PlayExact(AT), f).effects.contains(&retained), "{phase:?}");
+    }
+    assert!(!run(PARK, Event::PlayExact(AT), f).effects.contains(&retained), "a held PlayExact writes nothing yet");
+    let rp = TransportPhase::RecordPending { ticket: t, from: Some(0), count_in: None };
+    let take_safe = run(rp, Event::Locate(AT), f);
+    assert_eq!(take_safe.phase, TransportPhase::StopPending { then: AfterStop::Resume(AT) });
+    assert!(take_safe.effects.contains(&retained));
+    let retarget = run(TransportPhase::StopPending { then: AfterStop::Resume(500) }, Event::Locate(AT), f);
+    assert_eq!((retarget.phase, retarget.effects), (TransportPhase::StopPending { then: AfterStop::Resume(AT) }, vec![retained]));
+
+    // Leaving StartPending or Playing sets speed Normal, first; staying does not.
+    let half = Facts { speed: Speed::Half, ..f };
+    let stop = run(TransportPhase::Playing, Event::Stop, half);
+    assert_eq!(stop.effects, [Effect::SetSpeed(Speed::Normal), Effect::SubmitStop]);
+    assert_eq!(run(TransportPhase::StartPending, Event::PlayerFaulted, half).effects[0], Effect::SetSpeed(Speed::Normal));
+    assert!(!run(TransportPhase::Playing, Event::Locate(AT), half).effects.contains(&Effect::SetSpeed(Speed::Normal)));
+    assert_eq!(run(TransportPhase::StartPending, Event::Record(ready(t)), f).effects[0], Effect::SetSpeed(Speed::Normal));
+
+    // The count-in contract: a count-in without `from` changes nothing, not even the deferred.
+    let broken = TransportPhase::RecordPending { ticket: t, from: None, count_in: Some(PLAN) };
+    let admitted = run(broken, Event::RecordAdmitted(t), f);
+    assert_eq!((admitted.phase, admitted.effects.len()), (broken, 0));
+
+    // A Stop frontier preceding an older Play receipt: Stopped, and the late receipt changes
+    // nothing but its refusal text.
+    let older_play = Facts { tracked: Tracked { starts: 1, ..Tracked::default() }, ..f };
+    assert_eq!(run(PARK, Event::StopFrontier, older_play).phase, TransportPhase::Stopped);
+    let receipt = |event| run(TransportPhase::Stopped, event, f);
+    let applied = receipt(Event::PlayApplied(PlayOf::Group { current: false }));
+    assert_eq!((applied.phase, applied.effects.len()), (TransportPhase::Stopped, 0));
+    let refused = receipt(Event::PlayRefused(PlayOf::Group { current: false }));
+    assert_eq!((refused.phase, refused.effects), (TransportPhase::Stopped, vec![Effect::Message(Message::PlayerRefusal)]));
 }

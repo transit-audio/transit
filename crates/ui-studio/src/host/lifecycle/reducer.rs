@@ -11,7 +11,17 @@
 //!   [`Step::effects`], in the order the cell names it. Submitting a request is an effect; the host
 //!   tracks it (or owes a Stop it could not send, W1).
 //! - The record start's ticket is prepared by the host, outside the reducer: Record (C7) and the
-//!   Resume check (H2) carry it as [`RecordPrep`].
+//!   Resume check (H2) carry it as [`RecordPrep`]. The preparation contract (record section 3):
+//!   `from: None` is a punch into existing playback, `from: Some(at)` an explicit start, and a
+//!   count-in is prepared only with `from: Some(at)`. The reducer leaves a pass whose payloads
+//!   break the contract unchanged (R3 and O1 in RP).
+//! - R6, R7 and R8 in StopPending Resume only schedule the Resume check ([`Effect::ResumeCheck`]):
+//!   the host runs H2 at its H4 step with fresh facts and a prepared start, and H2 rechecks its
+//!   whole precondition.
+//! - Render result feedback: the host feeds a writer result a cancel returned through E3 before
+//!   it allows E5 or another admission (record section 11).
+//! - A transition out of StartPending or Playing into any other phase sets speed Normal (record
+//!   section 3, the matrix legend): [`next`] adds `SetSpeed(Normal)` first when the cell did not.
 //! - No clock: the owed-Stop deadline compares the monotonic time the event carries with the
 //!   first-owed stamp in the facts.
 
@@ -409,7 +419,8 @@ pub enum Effect {
     ReturnToZero,
     /// Admit the held start (current reset generation) as a nested admission.
     AdmitHeld,
-    /// Run the Resume check (H2) with a prepared record start.
+    /// Schedule the Resume check (H2) at H4; it rechecks its full precondition with fresh facts
+    /// before preparation and submission.
     ResumeCheck,
     /// Perform the Reset after the render settled.
     ResetContinuation,
@@ -462,6 +473,11 @@ pub fn next(phase: &TransportPhase, event: &Event, facts: &Facts) -> Step {
     match result {
         Err(refusal) => Step { phase: *phase, effects: Vec::new(), result: Err(refusal) },
         Ok(_) => {
+            let left_start_or_play = matches!(phase, TransportPhase::StartPending | TransportPhase::Playing)
+                && !matches!(run.phase, TransportPhase::StartPending | TransportPhase::Playing);
+            if left_start_or_play && !run.effects.contains(&Effect::SetSpeed(Speed::Normal)) {
+                run.effects.insert(0, Effect::SetSpeed(Speed::Normal));
+            }
             let has = |f: fn(&Effect) -> bool| run.effects.iter().any(f);
             let disposition = if has(|e| matches!(e, Effect::Hold(_))) {
                 Disposition::Held
@@ -579,8 +595,8 @@ impl Run<'_> {
 
     fn record(&mut self, punch: bool) -> Result<(), Refusal> {
         self.start_allowed()?;
-        // CELL C7 SP, C7 P: the cells name no Ta or Te, but RecordPending needs a prepared ticket,
-        // so an unprepared start refuses with its own preparation refusal.
+        // The cells name Ta and Te before RP; an unprepared start reaching here (an event without
+        // a preparation) refuses defensively, since RecordPending needs a prepared ticket.
         match self.event.prep() {
             Some(RecordPrep::Ready(s)) => {
                 self.phase = TransportPhase::RecordPending { ticket: s.ticket, from: s.from, count_in: s.count_in };
@@ -700,8 +716,8 @@ impl Run<'_> {
             Op::CancelRender => self.cancel_render(),
             Op::ThenReset => {
                 if let TransportPhase::Rendering { job: RenderJob::Retired { result, reason, .. } } = self.phase {
-                    // CELL C12 RND: a job already retired (E2: no effect) still takes the Reset
-                    // continuation.
+                    // C12 in RND: "job Retired: keep result and reason; in either case
+                    // then_reset := true".
                     self.phase = TransportPhase::Rendering { job: RenderJob::Retired { result, reason, then_reset: true } };
                 }
             }
@@ -729,11 +745,10 @@ impl Run<'_> {
                 }
             }
             Op::DisposeRender => {
-                if let (Event::PlayRefused(PlayOf::Render), TransportPhase::Rendering { job }) = (self.event, self.phase) {
-                    // CELL R2 RND: the cell names no phase; the disposed job is read as retired
-                    // with no result and no reason, so E5 settles it.
-                    let then_reset = matches!(job, RenderJob::Retired { then_reset: true, .. });
-                    self.phase = TransportPhase::Rendering { job: RenderJob::Retired { result: None, reason: None, then_reset } };
+                // R2 in RND: a live job is disposed without Stop and retired empty (E5 settles it);
+                // an already retired job keeps its entire payload.
+                if let (Event::PlayRefused(PlayOf::Render), TransportPhase::Rendering { job: RenderJob::Live }) = (self.event, self.phase) {
+                    self.phase = TransportPhase::Rendering { job: RenderJob::Retired { result: None, reason: None, then_reset: false } };
                     self.push(Effect::DisposeRenderWithoutStop);
                 }
             }
@@ -770,6 +785,11 @@ impl Run<'_> {
                 }
             }
             Op::ReleaseDeferred => self.push(Effect::ReleaseDeferred),
+            Op::Punch => {
+                if !matches!(self.phase, TransportPhase::WaitingForClock { from: None, .. }) {
+                    return Ok(false);
+                }
+            }
             Op::UnlessStageRetired => {
                 if let Event::RecordRefused { retired_by_stage: true, .. } = self.event {
                     return Ok(false);
@@ -853,8 +873,15 @@ impl Run<'_> {
             }
             Op::RenderPoll => self.push(Effect::TrackRenderObligations),
             Op::RenderResult => {
-                if let (Event::RenderResult(result), TransportPhase::Rendering { job: RenderJob::Live }) = (self.event, self.phase) {
-                    self.phase = TransportPhase::Rendering { job: RenderJob::Retired { result: Some(*result), reason: None, then_reset: false } };
+                // E3: Live becomes Retired with the result; a Retired job with no result gains it,
+                // keeping its reason and Reset continuation; a collected result stands.
+                if let (Event::RenderResult(result), TransportPhase::Rendering { job }) = (self.event, self.phase) {
+                    let job = match job {
+                        RenderJob::Live => RenderJob::Retired { result: Some(*result), reason: None, then_reset: false },
+                        RenderJob::Retired { result: None, reason, then_reset } => RenderJob::Retired { result: Some(*result), reason, then_reset },
+                        retired @ RenderJob::Retired { result: Some(_), .. } => retired,
+                    };
+                    self.phase = TransportPhase::Rendering { job };
                 }
             }
             Op::RetryOwed => {

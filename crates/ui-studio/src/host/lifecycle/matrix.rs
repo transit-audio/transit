@@ -8,8 +8,9 @@
 //! in an event name (O6, O7, E5, H2, W1) are checked by the reducer before the cell. The reducer
 //! ([`super::next`]) interprets the ops; nothing here reads facts.
 //!
-//! A cell whose text the reducer could not encode as written carries a comment `CELL <row> <col>`
-//! naming the reading chosen; the result note of the slice lists each one.
+//! The cells are the final reducer (the compatibility selectors are slice S2d's). A transition
+//! out of StartPending or Playing sets speed Normal (the legend; applied by the reducer, not
+//! written in each cell).
 
 use super::phase::{AfterStop, TransportPhase};
 
@@ -148,6 +149,8 @@ pub enum Refusal {
     Td,
     Tn,
     Tx,
+    /// E1 in RND: "A real-time render is already running."
+    RenderRunning,
     Faulted,
     DeferredFull,
 }
@@ -192,6 +195,8 @@ pub enum Op {
     Defer,
     /// `!`: the pass ends here.
     Finish,
+    /// O6 in W: `from absent (punch)`; otherwise the cell has no effect.
+    Punch,
     /// `STp`: StopPending Park with `end` AtCursor; Stop submitted (owed by W1 if refused).
     Park,
     /// `STp with end = ReturnToZero; submit Stop`.
@@ -232,15 +237,18 @@ pub enum Op {
     GroupApplied,
     /// R2 in SP: `current group empty: P if applied or playback observed, else S, speed Normal`.
     GroupRefused,
-    /// R2 in RND: `render Play: job disposed without Stop`.
+    /// R2 in RND: `render Play: if job Live, dispose without Stop and retain Rendering with job
+    /// Retired { result: None, reason: None, then_reset: false }; if already Retired, keep its
+    /// entire payload`.
     DisposeRender,
     /// `Tp`: the Player's refusal text.
     Tp,
     /// `Tf once per ticket`: the stage's failure text.
     Tf,
-    /// R3 in RP: `CI with a count-in, else W, unless a stage moved it`.
+    /// R3 in RP: `with both from and count_in, CI; with count_in absent, W; with count_in present
+    /// but from absent, no effect`.
     Admitted,
-    /// `CI` (stage CountingIn).
+    /// O1 in RP: `with both from and count_in: CI`; otherwise no effect.
     CountIn,
     /// `W` (stage Waiting).
     Wait,
@@ -263,7 +271,7 @@ pub enum Op {
     Stopped,
     /// `the held start (current reset generation) admitted`.
     AdmitHeld,
-    /// `Resume check (H2)`.
+    /// `schedule Resume check (H2) at H4`.
     ResumeCheck,
     /// E5: `S; the result's or the reason's message; then the Reset continuation if set`.
     Settle,
@@ -286,7 +294,9 @@ pub enum Op {
     RenderStart,
     /// E3a: `newly submitted Stops tracked, newly unsent ones owed by W1`.
     RenderPoll,
-    /// E3: `job Retired with the result`.
+    /// E3: `store the collected result: Live becomes Retired with reason None and then_reset
+    /// false; Retired with result None gains the result, preserving reason and then_reset; an
+    /// already collected result stands`.
     RenderResult,
     /// W1: `retried each tick, an expired deadline checked first; sent: tracked; 2 s unsent:
     /// fault_runtime(), then R13`.
@@ -321,8 +331,8 @@ const TX: &[Op] = &[Refuse(Refusal::Tx)];
 /// What an event name says for every column (R13, V3, V5), applied before the cell.
 pub fn header(row: Row) -> &'static [Op] {
     match row {
-        // R13 in S spells out what every column does: the other cells say only "S, msg".
-        // CELL R13 *: the S cell's retirement and `faulted` are read as the row's header.
+        // R13: "every column: every fact and owed Stop retired, groups closed, held and deferred
+        // discarded, resources finalized, `faulted`, adoption off".
         Row::R13 => &[RetireAll, Faulted],
         // V3: "every fact retired as in R13, without setting faulted".
         Row::V3 => &[RetireAll],
@@ -339,25 +349,24 @@ pub fn row(row: Row) -> [&'static [Op]; 11] {
         //                  S                              SP                     P                       RP                    CI                    W                     R                     STp                         STr                        STz                    RND
         // Commands
         Row::C1  => [&[Tr, Sp],                     D,                     D,                      D,                    &[Finish, Park],      D /* D1 */,           D,                    &[Hold] /* D4 */,           &[Defer],                  D,                     TN],
-        Row::C2  => [&[Sp, Retained],               &[Join],               &[NewGroup],            D /* D2 */,           &[Finish, Park] /* D2 */, D /* D2 */,       D /* D2 */,           &[Hold] /* D4 */,           &[Defer],                  D,                     TN],
-        Row::C3  => [&[Sp],                         &[Join],               &[NewGroup],            D /* D2 */,           &[Finish, Park],      D /* D2 */,           D /* D2 */,           &[Hold] /* D4 */,           &[Defer],                  D,                     TN],
+        Row::C2  => [&[Tr, Sp, Retained],           &[Join, Retained],     &[NewGroup, Retained],        D /* D2 */,           &[Finish, Park] /* D2 */, D /* D2 */,       D /* D2 */,           &[Hold] /* D4 */,           &[Defer],                  D,                     TN],
+        Row::C3  => [&[Tr, Sp],                     &[Join],               &[NewGroup],            D /* D2 */,           &[Finish, Park],      D /* D2 */,           D /* D2 */,           &[Hold] /* D4 */,           &[Defer],                  D,                     TN],
         Row::C4  => [&[Tr, Sp],                     &[Park, CloseGroup],   &[Park],                &[Finish, Park],      &[Finish, Park],      &[Finish, Park] /* D1 */, &[Finish, Park],  &[Hold] /* a start, D4 */,  &[Defer],                  D,                     TN],
-        // CELL C5 STr, C6 STr, C7 STr: "STp, resume dropped" names no Stop; Park submits one, as
-        // every entry into another StopPending kind does here (the resume's Stop may have retired).
+        // C5, C6, C7 in STr; C12 in STp and STr; V1, V2, V5 in STr: "submit Stop or owe it by W1"
+        // (a new Stop even when one is tracked or owed, record section 4): Park and Reset submit it.
         Row::C5  => [&[ParkRtz],                    &[Park, CloseGroup],   &[Park],                &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[EndRtz, DropHeld] /* D9 */, &[Park],                 &[ResendStop],         TN],
         Row::C6  => [D /* D6 */,                    &[Park, CloseGroup],   &[Park],                &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[DropHeld],                &[Park],                   D,                     TN],
         // C7 in STr: the restart is disabled before the drain; the Record is consumed here.
-        Row::C7  => [&[Tr, Ta, Te, Rp],             &[Ts, Rp],             &[Ts, RpPunch],         &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[Hold] /* D4 */,           &[Park, DiscardDeferred],  D,                     TN],
-        Row::C8  => [&[Cursor, Position, Retained], &[Cursor, Retained],   &[LocatePlayer, Cursor, Retained], &[Finish, TakeSafe], &[Finish, TakeSafe], &[Finish, TakeSafe], &[Finish, TakeSafe], &[EndTarget, Cursor] /* D5 */, &[Retarget],         D,                     TN],
+        Row::C7  => [&[Tr, Ta, Te, Rp],             &[Ts, Ta, Te, Rp],     &[Ts, Ta, Te, RpPunch],     &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[Hold] /* D4 */,           &[Park, DiscardDeferred],  D,                     TN],
+        Row::C8  => [&[Cursor, Position, Retained], &[Cursor, Retained],   &[LocatePlayer, Cursor, Retained], &[Finish, TakeSafe, Retained], &[Finish, TakeSafe, Retained], &[Finish, TakeSafe, Retained], &[Finish, TakeSafe, Retained], &[EndTarget, Cursor] /* D5 */, &[Retarget, Retained], D,                     TN],
         Row::C9  => [&[Tr, Sp, Half] /* B7 */,      &[Join, Half],         &[NewGroup, Half],      TH,                   &[Finish, Park],      TH,                   TH,                   &[Hold] /* D4 */,           TH,                        D,                     TN],
         Row::C10 => [&[Position],                   &[Position],           &[Position],            &[Position],          &[Position],          &[Position],          &[Position],          &[Position],                &[Position],               &[Position],           &[Position]],
         Row::C11 => [&[Release],                    &[Release],            &[Release],             &[Release],           &[Release],           &[Release],           &[Release],           &[Release],                 &[Release],                &[Release],            &[CancelRender, Release]],
-        // CELL C12 STp, C12 STr: Reset submits a Stop, as above.
         Row::C12 => [&[Reset],                      &[Reset, CloseGroup],  &[Reset],               &[Finish, Reset],     &[Finish, Reset],     &[Finish, Reset],     &[Finish, Reset],     &[Reset, DropHeld],         &[Reset, DiscardDeferred] /* D3 */, &[Same],      &[CancelRender, ThenReset] /* D8 */],
         Row::C13 => [&[AsC8] /* B14 */,             &[AsC8] /* B14 */,     &[AsC8] /* B14 */,      &[AsC8] /* B14 */,    &[AsC8],              &[AsC8],              &[AsC8],              &[AsC8] /* B14 */,          &[AsC8] /* B14 */,         D,                     TN /* B14 */],
         // Receipts
         Row::R1  => [D,                             &[GroupApplied],       D,                      D,                    D,                    D,                    D,                    D,                          D,                         D,                     &[Retired]],
-        Row::R2  => [&[Tp],                         &[Tp, GroupRefused],   &[Tp],                  &[Tp],                &[Tp],                &[Tp],                &[Tp],                &[Tp],                      &[Tp],                     &[Tp],                 &[DisposeRender]],
+        Row::R2  => [&[Tp],                         &[Tp, GroupRefused],   &[Tp],                  &[Tp],                &[Tp],                &[Tp],                &[Tp],                &[Tp],                      &[Tp],                     &[Tp],                 &[Tp, DisposeRender]],
         Row::R3  => [D,                             D,                     D,                      &[Admitted, ReleaseDeferred], D,            D,                    D,                    D,                          D,                         D,                     D],
         Row::R4  => [D,                             D,                     D,                      &[Latch, ReleaseDeferred], &[Latch],        &[Latch],             D /* never regresses */, D,                       D,                         D,                     D],
         Row::R5  => [D,                             D,                     D,                      &[UnlessStageRetired, Finish, ByFour, Tp, ReleaseDeferred], &[UnlessStageRetired, Finish, ByFour, Tp, ReleaseDeferred], &[UnlessStageRetired, Finish, ByFour, Tp, ReleaseDeferred], D, D, D, D, D],
@@ -368,26 +377,23 @@ pub fn row(row: Row) -> [&'static [Op]; 11] {
         Row::R10 => [&[NotesOff],                   &[NotesOff],           &[NotesOff],            &[NotesOff],          &[NotesOff],          &[NotesOff],          &[NotesOff],          &[NotesOff],                &[NotesOff],               &[NotesOff],           &[NotesOff]],
         Row::R11 => [&[Msg],                        &[Msg],                &[Msg],                 &[Msg],               &[Msg],               &[Msg],               &[Msg],               &[Msg],                     &[Msg],                    &[Msg],                &[Msg]],
         Row::R12 => [&[Tp],                         &[Tp],                 &[Tp],                  &[Tp],                &[Tp],                &[Tp],                &[Tp],                &[Tp],                      &[Tp],                     &[Tp],                 &[Tp]],
-        Row::R13 => [&[Msg],                        &[ToStopped, Msg],     &[ToStopped, Msg],      &[Finish, ToStopped, Msg], &[Finish, ToStopped, Msg], &[Finish, ToStopped, Msg], &[Finish, ToStopped, Msg], &[ToStopped, Msg], &[ToStopped, Msg], &[ToStopped, Msg], &[CancelRender, ToStopped, Msg]],
+        Row::R13 => [&[ToStopped, Msg],             &[ToStopped, Msg],     &[ToStopped, Msg],      &[Finish, ToStopped, Msg], &[Finish, ToStopped, Msg], &[Finish, ToStopped, Msg], &[Finish, ToStopped, Msg], &[ToStopped, Msg], &[ToStopped, Msg], &[ToStopped, Msg], &[CancelRender, ToStopped, Msg]],
         // Observations
-        // CELL R3 RP, O1 RP: CountIn needs `from` and the plan; without either the phase is kept.
+        // R3 and O1 in RP: CountIn only with both `from` and the count-in (the preparation contract,
+        // record section 3); otherwise no effect.
         Row::O1  => [D,                             D,                     D,                      &[CountIn, ReleaseDeferred], D,             D,                    D,                    D,                          D,                         D,                     D],
         Row::O2  => [D,                             D,                     D,                      &[Wait, ReleaseDeferred], &[Wait] /* B3 */, D,                    D,                    D,                          D,                         D,                     D],
         Row::O3  => [D,                             D,                     D,                      &[Latch, ReleaseDeferred], &[Latch],        &[Latch] /* B1 */,    D,                    D,                          D,                         D,                     D],
         Row::O4  => [D,                             D,                     D,                      &[Finish, ByFour, Tf, ReleaseDeferred], &[Finish, ByFour, Tf, ReleaseDeferred], &[Finish, ByFour, Tf, ReleaseDeferred], D, D, D, D, D],
         Row::O5  => [D,                             D,                     D,                      &[Finish, ByFour, ReleaseDeferred], &[Finish, ByFour, ReleaseDeferred], &[Finish, ByFour, ReleaseDeferred], D, D, D, D, D],
-        // CELL O6 W: "punch: S!"; the event (playback stopped by itself) can only occur after
-        // playback, which in W is a punch, so the cell applies whenever the event does.
-        Row::O6  => [D,                             D /* the group decides */, &[ToStopped, Normal], D,                  D,                    &[Finish, ToStopped], &[Finish, ToStopped], D,                          D,                         D,                     D],
+        Row::O6  => [D,                             D /* the group decides */, &[ToStopped, Normal], D,                  D,                    &[Punch, Finish, ToStopped], &[Finish, ToStopped], D,                          D,                         D,                     D],
         Row::O7  => [&[Adopt],                      D,                     D,                      D,                    D,                    D,                    D,                    D,                          D,                         D,                     D],
         // Render, device, loop, timers, owed Stops, Resume
-        // CELL E1 RND: "refused" names no text; Tn (the render's own refusal) is used.
-        Row::E1  => [&[RenderStart],                TX,                    TX,                     TX,                   TX,                   TX,                   TX,                   TX,                         TX,                        TX,                    TN],
+        Row::E1  => [&[RenderStart],                TX,                    TX,                     TX,                   TX,                   TX,                   TX,                   TX,                         TX,                        TX,                    &[Refuse(Refusal::RenderRunning)]],
         Row::E2  => [D,                             D,                     D,                      D,                    D,                    D,                    D,                    D,                          D,                         D,                     &[CancelRender]],
         Row::E3a => [D,                             D,                     D,                      D,                    D,                    D,                    D,                    D,                          D,                         D,                     &[RenderPoll]],
         Row::E3  => [D,                             D,                     D,                      D,                    D,                    D,                    D,                    D,                          D,                         D,                     &[RenderResult]],
         Row::E5  => [D,                             D,                     D,                      D,                    D,                    D,                    D,                    D,                          D,                         D,                     &[Settle]],
-        // CELL W1 S: "—; compatibility Pause enters STp": the compatibility selectors are S2d's.
         Row::W1  => [D,                             D,                     D,                      D,                    D,                    D,                    D,                    &[RetryOwed],               &[RetryOwed],              &[RetryOwed],          &[RetryOwed]],
         Row::V1  => [&[Msg],                        &[Msg] /* today */,    &[Park, Msg],           &[Finish, Park, Msg], &[Finish, Park, Msg], &[Finish, Park, Msg], &[Finish, Park, Msg], &[Msg],                     &[Park, Msg] /* resume dropped */, &[Msg],        &[CancelRender, Msg]],
         Row::V2  => [&[Msg],                        &[Msg],                &[Msg],                 &[Finish, Park, Msg], &[Finish, Park, Msg], &[Finish, Park, Msg], &[Finish, Park, Msg], &[Msg],                     &[Park, Msg],              &[Msg],                &[Msg]],
@@ -395,8 +401,7 @@ pub fn row(row: Row) -> [&'static [Op]; 11] {
         // V4a: "Preserve the phase and remaining obligations while replacement proceeds" is Same.
         Row::V4a => [&[NewPlayer] /* V4b */,        &[Park],               &[Park],                TD,                   TD,                   TD,                   TD,                   &[Same] /* B2, B5 */,       TD,                        &[Same],               &[CancelRender]],
         Row::V4b => [&[NewPlayer],                  &[NewPlayer],          &[NewPlayer],           &[NewPlayer],         &[NewPlayer],         &[NewPlayer],         &[NewPlayer],         &[NewPlayer],               &[NewPlayer],              &[NewPlayer],          &[NewPlayer]],
-        // CELL V1 STr, V2 STr, V5 STr: Park submits a Stop, as in C5.
-        Row::V5  => [&[Park] /* today sends Stop */, &[Park, CloseGroup],  &[Park],                &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[ResendStop],              &[Park],                   &[ResendStop],         &[Msg]],
+        Row::V5  => [&[Park] /* today sends Stop */, &[Park, CloseGroup],  &[Park],                &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[Finish, Park],      &[ResendStop],              &[Park, Msg],              &[ResendStop],         &[Msg]],
         Row::V6  => [&[Msg],                        &[Msg],                &[Msg],                 &[Msg],               &[Msg],               &[Msg],               &[Msg],               &[Msg],                     &[Msg],                    &[Msg],                &[Msg]],
         Row::L1  => [&[LoopSeen],                   &[SetLoop],            &[SetLoop],             &[KeepLoop],          &[KeepLoop],          &[KeepLoop],          &[KeepLoop],          &[LoopSeen] /* D5 */,       &[KeepLoop],               D,                     D],
         Row::T1  => [D,                             D,                     D,                      D,                    D,                    D,                    &[Finish, Park, LapNote], D,                      D,                         D,                     D],
