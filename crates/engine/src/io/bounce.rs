@@ -196,7 +196,7 @@ const MAX_BOUNCE_SECS: f64 = 4.0 * 3600.0;
 
 pub(crate) fn check_bounce_range(s: &Session, range: Range, command: &str) -> Result<()> {
     if range.len() > s.sample_rate.samples(MAX_BOUNCE_SECS) {
-        return Err(crate::cmd::bad(command, "bounces are limited to 4 hours"));
+        return Err(crate::cmd::bad(command, "exports are limited to 4 hours"));
     }
     Ok(())
 }

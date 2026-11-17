@@ -110,7 +110,7 @@ impl<W: Write + Seek> Writer<W> {
         }
         if channels > 2 {
             return Err(AudioError::Unsupported(format!(
-                "Opus export of {channels} channels: transit writes mono and stereo Opus only; fold the bounce down to stereo, or bounce WAV or FLAC"
+                "Opus export of {channels} channels: transit writes mono and stereo Opus only; fold the export down to stereo, or export WAV or FLAC"
             )));
         }
         let encoder = transit_opus::Encoder::new(transit_opus::EncoderSettings {

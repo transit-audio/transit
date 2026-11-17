@@ -617,8 +617,12 @@ fn file_bounce_writes_the_selection_with_the_length_asked_for() {
     t.midi_clip();
     t.app.run("edit.select", json!({"start": 0, "end": 48_000})).unwrap();
     t.menu("File");
-    t.menu("Bounce…");
-    assert!(t.app.finish.bounce_form.is_some(), "File > Bounce… opens the form");
+    t.frames(3);
+    let items: Vec<String> = t.app.arrange.bar_menu.iter().map(|m| m.label.clone()).collect();
+    assert!(items.iter().any(|l| l == "Export Audio…"), "File menu rows: {items:?}");
+    assert!(!items.iter().any(|l| l == "Bounce…"), "the mixdown row is Export Audio…: {items:?}");
+    t.menu("Export Audio…");
+    assert!(t.app.finish.bounce_form.is_some(), "File > Export Audio… opens the form");
     assert_eq!(t.inspect_dialog(), "bounce");
     let lay = t.app.finish.layout.bounce.clone().unwrap();
     let sel = lay.ranges.iter().find(|r| r.value == "selection").unwrap().rect;
@@ -639,7 +643,7 @@ fn file_bounce_writes_the_selection_with_the_length_asked_for() {
         t.frames(5);
     }
     assert!(t.app.finish.job.is_none(), "the bounce finished");
-    assert!(t.app.status.starts_with("Bounced to"), "{}", t.app.status);
+    assert!(t.app.status.starts_with("Exported to"), "{}", t.app.status);
     assert!(t.app.status.contains("mix.wav"), "{}", t.app.status);
     let (ch, bits, frames) = wav_frames(&out);
     assert_eq!((ch, bits, frames), (2, 16, 48_000), "stereo, 16-bit, one second");
@@ -671,14 +675,14 @@ fn bounce_cancels_from_the_form_and_from_progress_and_leaves_no_file() {
     t.app.start_bounce().unwrap();
     // A session switch is refused while it runs.
     assert!(t.app.run("session.new", json!({})).is_err());
-    assert!(t.app.status.contains("cancel the bounce"), "{}", t.app.status);
+    assert!(t.app.status.contains("cancel the export"), "{}", t.app.status);
     t.frames(3);
     assert!(t.app.finish.job.is_some(), "still bouncing");
     assert!(dir.0.join("whole.wav.part").exists(), "it writes a part file");
     let cancel = t.app.finish.cancel;
     t.click(mid(cancel));
     assert!(t.app.finish.job.is_none());
-    assert_eq!(t.app.status, "Bounce cancelled");
+    assert_eq!(t.app.status, "Export cancelled");
     assert!(!out.exists(), "a cancelled bounce leaves no file");
     assert!(!dir.0.join("whole.wav.part").exists(), "and no part file");
 }
@@ -788,7 +792,7 @@ fn bounce_to_an_existing_file_asks_and_choose_defaults_to_the_new_extension() {
         }
         t.frames(5);
     }
-    assert!(t.app.status.starts_with("Bounced to"), "{}", t.app.status);
+    assert!(t.app.status.starts_with("Exported to"), "{}", t.app.status);
     assert_ne!(std::fs::read(&out).unwrap(), b"old", "Enter replaced the file");
     // Choose... starts from the new format's extension.
     t.app.open_bounce();
@@ -951,7 +955,7 @@ fn stems_by_output_path_start_one_job_with_the_checked_paths() {
         t.frames(5);
     }
     assert!(t.app.finish.path_job.is_none(), "the stems finished");
-    assert!(t.app.status.starts_with("Bounced 2 stems"), "{}", t.app.status);
+    assert!(t.app.status.starts_with("Exported 2 stems"), "{}", t.app.status);
     assert!(t.app.status.contains("Out 5-6"), "the silent path is reported: {}", t.app.status);
     let mut files: Vec<_> = std::fs::read_dir(&dir.0).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     files.sort();
@@ -1104,7 +1108,7 @@ fn an_opus_bounce_follows_the_extension_and_carries_the_bitrate() {
         }
         t.frames(5);
     }
-    assert!(t.app.status.starts_with("Bounced to"), "{}", t.app.status);
+    assert!(t.app.status.starts_with("Exported to"), "{}", t.app.status);
     let out = dir.0.join("mix.opus");
     assert!(!dir.0.join("mix.wav").exists(), "a typed .wav is renamed for Opus");
     let bytes = std::fs::read(&out).unwrap();

@@ -79,8 +79,8 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         app.save_as();
                     }
                     ui.separator();
-                    let b = ui.add(crate::chrome::MenuRow::new("Bounce…").shortcut(label(A::Bounce)));
-                    app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Bounce…".into(), String::new(), b.rect));
+                    let b = ui.add(crate::chrome::MenuRow::new("Export Audio…").shortcut(label(A::Bounce)));
+                    app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Export Audio…".into(), String::new(), b.rect));
                     if b.clicked() {
                         ui.close();
                         app.open_bounce();

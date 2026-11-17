@@ -178,7 +178,7 @@ fn each_refusal_is_shown_before_starting() {
     let without = t.app.finish.external_buttons.0;
     t.click(without);
     assert!(t.fake().started.is_empty(), "offline: the Player was not asked");
-    assert!(t.app.status.contains("Left out: Model D") || t.app.status.starts_with("Bounced to"), "{}", t.app.status);
+    assert!(t.app.status.contains("Left out: Model D") || t.app.status.starts_with("Exported to"), "{}", t.app.status);
 }
 
 /// All MIDI Notes Off during a render cancels it (release, no file) instead of letting it finish

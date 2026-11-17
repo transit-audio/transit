@@ -1,10 +1,10 @@
 area = "bounce"
-title = "Bounce"
-link = "user-guide.md#bounce"
+title = "Export Audio"
+link = "user-guide.md#export-audio"
 
 [[entry]]
 id = "bounce.format"
-name = "Bounce format"
+name = "Export format"
 text = "WAV, AIFF and FLAC are lossless, at the bit depth you pick. Opus is transit's lossy format, for sharing: small files that play in every browser, phone and messaging app. transit does not write MP3: Opus sounds better at every bitrate and links under a BSD license, where the MP3 encoder is LGPL."
 
 [[entry]]

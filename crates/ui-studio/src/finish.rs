@@ -306,7 +306,7 @@ pub fn refuses(app: &mut StudioApp, id: &str) -> bool {
     }
     let replacing = matches!(id, "session.new" | "session.open" | "session.close" | "session.revert");
     if replacing {
-        app.status = "Finish or cancel the bounce first".into();
+        app.status = "Finish or cancel the export first".into();
     }
     replacing
 }
@@ -384,7 +384,7 @@ impl StudioApp {
 
     // ---- Bounce ----
 
-    /// File > Bounce…: open the form with the selection (or the whole song) and the main mix.
+    /// File > Export Audio…: open the form with the selection (or the whole song) and the main mix.
     pub fn open_bounce(&mut self) {
         if self.finish.job.is_some() || self.finish.path_job.is_some() || self.finish.consolidated_job.is_some() || self.dialog.is_some() {
             return;
@@ -429,7 +429,7 @@ impl StudioApp {
 
     /// Start the bounce the form describes: `file.bounce_mix`'s job, rendered a slice per frame.
     pub fn start_bounce(&mut self) -> Result<(), String> {
-        let Some(f) = self.finish.bounce_form.clone() else { return Err("no bounce form".into()) };
+        let Some(f) = self.finish.bounce_form.clone() else { return Err("no export form".into()) };
         let s = self.engine.session();
         let (start, end) = if f.consolidated {
             // From the bar holding the session start, as the engine renders it (ADR 0052 decision 10).
@@ -439,7 +439,7 @@ impl StudioApp {
             match f.range {
                 BounceRange::Selection if !bounce_range(s).is_empty() => (bounce_range(s).start, bounce_range(s).end),
                 BounceRange::Selection => {
-                    self.status = "Nothing is selected: pick a range, or bounce the whole song.".into();
+                    self.status = "Nothing is selected: pick a range, or export the whole song.".into();
                     return Err(self.status.clone());
                 }
                 // The whole song includes the pre-count zone (ADR 0052 decision 10).
@@ -462,7 +462,7 @@ impl StudioApp {
         }
         let mut path = std::path::PathBuf::from(f.path.trim());
         if f.path.trim().is_empty() || path.file_name().is_none() {
-            self.status = "Choose where to write the bounce.".into();
+            self.status = "Choose where to write the export.".into();
             return Err(self.status.clone());
         }
         path = fit_extension(&path, &f.format);
@@ -495,7 +495,7 @@ impl StudioApp {
             Ok(job) => {
                 self.finish.job = Some(job);
                 self.finish.bounce_form = None;
-                let status = format!("Bouncing to {}…{}", path.display(), left_out_note(&self.engine));
+                let status = format!("Exporting to {}…{}", path.display(), left_out_note(&self.engine));
                 self.status = self.with_state_notice(status);
                 Ok(())
             }
@@ -529,7 +529,7 @@ impl StudioApp {
                 Ok(job) => {
                     self.finish.replace = Replace::No;
                     let status = format!(
-                        "Bouncing consolidated tracks to {dir}...{}",
+                        "Exporting consolidated tracks to {dir}...{}",
                         left_out_note_for(&transit_engine::cmd::external_in_consolidated(self.engine.session()))
                     );
                     self.status = self.with_state_notice(status);
@@ -582,7 +582,7 @@ impl StudioApp {
             }
             Ok(job) => {
                 self.finish.replace = Replace::No;
-                let status = format!("Bouncing {} stems to {dir}...{}", job.files().len(), left_out_note(&self.engine));
+                let status = format!("Exporting {} stems to {dir}...{}", job.files().len(), left_out_note(&self.engine));
                 self.status = self.with_state_notice(status);
                 self.finish.path_job = Some(job);
                 self.finish.paths_request = Some(p);
@@ -637,7 +637,7 @@ impl StudioApp {
         if f.normalize {
             return Some("Normalize is not available in a real-time render".into());
         }
-        let Some((start, end)) = self.form_range(f) else { return Some("Nothing is selected: pick a range, or bounce the whole song.".into()) };
+        let Some((start, end)) = self.form_range(f) else { return Some("Nothing is selected: pick a range, or export the whole song.".into()) };
         let path = fit_extension(std::path::Path::new(f.path.trim()), &f.format);
         self.realtime_blocker(&Self::realtime_params(f, &path, start, end))
     }
@@ -687,7 +687,7 @@ impl StudioApp {
             job.cancel();
         }
         if self.finish.job.take().is_some() || self.finish.path_job.take().is_some() || self.finish.consolidated_job.is_some() {
-            self.status = "Bounce cancelled".into();
+            self.status = "Export cancelled".into();
         }
         self.cancel_realtime();
         self.finish.bounce_form = None;
@@ -829,7 +829,7 @@ pub fn step_bounce(app: &mut StudioApp, ctx: &egui::Context) {
         }
         Ok(Some(done)) => {
             app.finish.layout.last_bounce = Some(json!({"path": path, "seconds": secs, "bytes": done.bytes, "peak_db": done.peak_db}));
-            format!("Bounced to {path} ({secs:.1} s, peak {:.1} dBFS)", done.peak_db)
+            format!("Exported to {path} ({secs:.1} s, peak {:.1} dBFS)", done.peak_db)
         }
         Err(e) => e.to_string(),
     };
@@ -851,7 +851,7 @@ fn step_consolidated_bounce(app: &mut StudioApp, ctx: &egui::Context) {
         Some(Ok(done)) => {
             app.finish.layout.last_bounce =
                 Some(json!({"dir": dir, "files": done.files.len(), "midi_files": done.midi_files.len(), "tempo_file": done.tempo_file}));
-            let mut status = format!("Bounced {} stems, {} track MIDI files and a tempo map to {dir}", done.files.len(), done.midi_files.len());
+            let mut status = format!("Exported {} stems, {} track MIDI files and a tempo map to {dir}", done.files.len(), done.midi_files.len());
             if let Some(notice) = done.notice {
                 status.push_str(&format!(". {notice}"));
             }
@@ -879,7 +879,7 @@ fn step_path_bounce(app: &mut StudioApp, ctx: &egui::Context) {
             let empty: Vec<&str> = done.stems.iter().filter(|s| s.empty).map(|s| s.path.as_str()).collect();
             app.finish.layout.last_bounce = Some(json!({"dir": dir, "files": done.stems.len(), "empty": empty}));
             let note = if empty.is_empty() { String::new() } else { format!("; silent: {}", empty.join(", ")) };
-            format!("Bounced {} stems to {dir}{note}", done.stems.len())
+            format!("Exported {} stems to {dir}{note}", done.stems.len())
         }
         Err(e) => e.to_string(),
     };
@@ -939,7 +939,7 @@ fn choices_with_help(
     picked
 }
 
-/// File > Bounce: the form, then the progress window with Cancel (or Escape).
+/// File > Export Audio: the form, then the progress window with Cancel (or Escape).
 pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     if let Some((bar, of, fraction)) = app.realtime_progress() {
         let mut cancel = ctx.input(|i| hit(i, A::DialogCancel));
@@ -971,7 +971,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         let mut cancel = ctx.input(|i| hit(i, A::DialogCancel));
         egui::Modal::new(egui::Id::new("bounce_progress")).show(ctx, |ui| {
             ui.set_width(320.0);
-            ui.label(egui::RichText::new(format!("Bouncing {name}")).strong());
+            ui.label(egui::RichText::new(format!("Exporting {name}")).strong());
             ui.add(egui::ProgressBar::new(progress));
             ui.horizontal(|ui| {
                 let b = ui.button("Cancel");
@@ -1005,7 +1005,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     let resp = egui::Modal::new(egui::Id::new("bounce_form")).show(ctx, |ui| {
         ui.set_width(420.0);
         ui.spacing_mut().item_spacing = vec2(crate::theme::SPACE, crate::theme::SPACE);
-        ui.label(egui::RichText::new("Bounce").strong().size(15.0));
+        ui.label(egui::RichText::new("Export Audio").strong().size(15.0));
         let sel = bounce_range(&s);
         let sel_text = if sel.is_empty() {
             "Selection (none)".to_string()
@@ -1126,7 +1126,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         }
         ui.add_space(crate::theme::SPACE);
         ui.horizontal(|ui| {
-            let b = ui.button(format!("Bounce   {}", label(A::Bounce)));
+            let b = ui.button(format!("Export   {}", label(A::Bounce)));
             lay.ok = crate::arrange::r4(b.rect);
             go = b.clicked();
             let c = ui.button("Cancel");
@@ -1226,7 +1226,7 @@ fn external_question(app: &mut StudioApp, ctx: &egui::Context, names: &[String])
         let _ = app.bounce_without_external();
     } else if no {
         app.finish.external_question = None;
-        app.status = "Bounce not started".into();
+        app.status = "Export not started".into();
     }
 }
 
@@ -1257,7 +1257,7 @@ fn replace_question(app: &mut StudioApp, ctx: &egui::Context, f: &BounceForm) {
         let _ = app.start_bounce();
     } else if no {
         app.finish.replace = Replace::No;
-        app.status = "Bounce not started".into();
+        app.status = "Export not started".into();
     }
 }
 

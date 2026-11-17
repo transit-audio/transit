@@ -13,6 +13,7 @@ pub const MENUS: &str = include_str!("../catalog/menus.txt");
 /// Catalog path → command id, for entries whose label or menu differs from ours.
 pub const ALIASES: &[(&str, &str)] = &[
     ("File > Open > Session...", "session.open"),
+    ("File > Bounce Mix...", "file.bounce_mix"),
     ("Edit > Can't Undo", "edit.undo"),
     ("Edit > Can't Redo", "edit.redo"),
     ("Edit > Selection > Play Edit", "transport.play_selection"),

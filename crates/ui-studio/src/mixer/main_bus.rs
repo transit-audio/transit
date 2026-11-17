@@ -28,8 +28,8 @@ pub(super) fn monitor_toggles(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painte
         let lay = toggle::paint(p, r, label, role, on, key != "mono" || no_mono.is_none());
         crate::help::hover(ui, &resp, help);
         let tip = match key {
-            "mono" => "Mono: hear the mix summed to mono. Never in a bounce",
-            "dim" => "Dim: the monitor level 20 dB down. Never in a bounce",
+            "mono" => "Mono: hear the mix summed to mono. Never in an export or a bounce",
+            "dim" => "Dim: the monitor level 20 dB down. Never in an export or a bounce",
             _ => "Ref: hear the stored reference level. Alt+click stores the current monitor level as the reference",
         };
         let off_for = if key == "mono" { no_mono.as_deref() } else { None };

@@ -173,7 +173,7 @@ fn the_session_cannot_be_replaced_while_it_bounces() {
     let before = app.engine.session().name.clone();
     for id in ["session.new", "session.open", "session.close", "session.revert"] {
         assert!(app.run(id, json!({})).is_err(), "{id}");
-        assert_eq!(app.status, "Finish or cancel the bounce first");
+        assert_eq!(app.status, "Finish or cancel the export first");
         assert_eq!(app.engine.session().name, before, "{id}");
     }
     app.run("app.quit", json!({})).unwrap();

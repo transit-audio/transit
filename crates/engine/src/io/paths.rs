@@ -133,7 +133,7 @@ impl PathBounce {
             }
         }
         if names.is_empty() {
-            return Err(EngineError::BadParams(CMD.into(), "no output paths to bounce".into()));
+            return Err(EngineError::BadParams(CMD.into(), "no output paths to export".into()));
         }
         make_dir(dir)?;
         let ext = transit_audio_io::encode_extension(opts.format);

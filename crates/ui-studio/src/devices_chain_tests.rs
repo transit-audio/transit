@@ -504,7 +504,7 @@ fn a_bounce_with_an_external_instrument_asks_and_leaves_it_out_only_when_chosen(
     click(&mut app, mid(cancel));
     frames(&mut app, &ctx, 3, &mut time);
     assert!(app.finish.external_question.is_none() && app.finish.job.is_none());
-    assert_eq!(app.status, "Bounce not started");
+    assert_eq!(app.status, "Export not started");
     // Render without it: the bounce runs and the status names the track left out.
     assert!(app.start_bounce().is_err());
     frames(&mut app, &ctx, 3, &mut time);

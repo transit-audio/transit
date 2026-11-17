@@ -28,7 +28,7 @@ impl ConsolidatedJob {
             let mut job = job;
             loop {
                 if cancel.load(Ordering::Relaxed) {
-                    return Err(stopped_with(&job, "Bounce cancelled".into()));
+                    return Err(stopped_with(&job, "Export cancelled".into()));
                 }
                 let until = std::time::Instant::now() + std::time::Duration::from_millis(30);
                 match job.step(|| !cancel.load(Ordering::Relaxed) && std::time::Instant::now() < until) {
@@ -37,7 +37,7 @@ impl ConsolidatedJob {
                     Err(e) => return Err(stopped_with(&job, e.to_string())),
                 }
                 if cancel.load(Ordering::Relaxed) {
-                    return Err(stopped_with(&job, "Bounce cancelled".into()));
+                    return Err(stopped_with(&job, "Export cancelled".into()));
                 }
             }
         })
@@ -153,7 +153,7 @@ mod tests {
         app.finish.consolidated_job = Some(job);
         started.recv().unwrap();
         app.cancel_bounce();
-        assert_eq!(app.status, "Bounce cancelled");
+        assert_eq!(app.status, "Export cancelled");
         assert!(app.finish.consolidated_job.is_some(), "the worker stays registered until it exits, preventing an overlapping restart");
         release_send.send(()).unwrap();
         finished.recv().unwrap();
@@ -179,7 +179,7 @@ mod tests {
         let job = ConsolidatedJob::new(bounce).unwrap();
         job.cancel();
         job.wait_for_completion();
-        assert!(matches!(job.poll(), Some(Err(e)) if e == "Bounce cancelled"));
+        assert!(matches!(job.poll(), Some(Err(e)) if e == "Export cancelled"));
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "no final or part files");
         let _ = std::fs::remove_dir_all(&dir);
     }

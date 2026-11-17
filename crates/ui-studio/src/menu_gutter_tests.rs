@@ -36,9 +36,9 @@ fn the_audio_menu_has_a_check_so_every_row_keeps_the_gutter_and_file_stays_plain
     p.row(&find(&t.app.arrange.bar_menu.clone(), "Reconnect Device"));
     // The File menu (a submenu, Open Recent, and rows with no check) is plain too.
     open(&mut t, "File");
-    let bounce = find(&t.app.arrange.bar_menu.clone(), "Bounce…");
+    let bounce = find(&t.app.arrange.bar_menu.clone(), "Export Audio…");
     let p = Popup::of(&t, &bounce);
-    p.insets_plain("Bounce…", Some(&crate::shortcuts::label(crate::shortcuts::Action::Bounce)));
+    p.insets_plain("Export Audio…", Some(&crate::shortcuts::label(crate::shortcuts::Action::Bounce)));
     for row in ["New", "Save", "Open Recent", "Quit"] {
         assert!(near(p.text_in(row), TEXT_IN_PLAIN), "{row} starts at 12");
     }

@@ -263,3 +263,12 @@ fn the_shortcut_filter_searches_notes_and_spells_out_shift_plus() {
     assert!(TABLE.iter().any(|s| text(s) == "Shift+Plus"));
     assert!(!TABLE.iter().any(|s| text(s).ends_with("++")));
 }
+
+#[test]
+fn searching_bounce_still_finds_export_audio() {
+    use crate::shortcuts::{Action, filtered};
+    let rows: Vec<_> = filtered("bounce").into_iter().flat_map(|(_, r)| r).collect();
+    assert!(rows.iter().any(|r| r.action == Action::Bounce && r.label == "Export Audio…"), "Export Audio… is found by its old name");
+    assert!(rows.iter().any(|r| r.action == Action::BounceInPlace), "Bounce in Place keeps its name");
+    assert!(!filtered("export audio").is_empty());
+}

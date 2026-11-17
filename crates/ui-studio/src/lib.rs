@@ -183,7 +183,7 @@ pub enum Dialog {
     SaveChanges { then: (String, Value) },
     /// Delete several tracks, or tracks that hold clips (Delete key or the track menu).
     DeleteTracks { tracks: Vec<TrackId>, clips: bool },
-    /// File > Bounce: its form, then its progress (slice 6, `finish`).
+    /// File > Export Audio: its form, then its progress (slice 6, `finish`).
     Bounce,
     /// File > Export DAWproject: the stem fallback is stated before choosing a location.
     DawprojectExport,

@@ -188,8 +188,8 @@ to the first take, whose clip covers the count-in; later laps are one loop each.
 
 Recording from bar 1 with notes played during the count-in makes room before bar 1: the
 **pre-count zone**. Its bars count down from bar 1 (bar 0, bar -1, and so on), its lanes are drawn
-a little darker, Return to Zero (Home) goes to its start, Play from there plays the pickups, and a
-bounce or MIDI file export starts there. The zone lasts as long as a clip is in it: delete the clip
+a little darker, Return to Zero (Home) goes to its start, Play from there plays the pickups, and an
+audio or MIDI file export starts there. The zone lasts as long as a clip is in it: delete the clip
 or move it to bar 1 or later and the session starts at bar 1 again (undo brings it back). You can
 also record from the cursor in the zone, with a pre-roll that reaches into it, or with a cycle range
 that starts in it. Only MIDI clips sit before bar 1: an audio take that starts in the zone starts
@@ -268,9 +268,9 @@ Bar 1 falls that many bars into the project: one bar in for a one-bar zone. Open
 such a project has no zone; its first bar is the zone's first bar. Without a zone nothing moves.
 Markers before the export start are moved to the start, and the export says how many were moved.
 
-## Bounce
+## Export Audio
 
-File > Bounce… (Ctrl+Alt+B) writes the main mix or a bus over the selection, the cycle range or
+File > Export Audio… (Ctrl+Shift+R) writes the main mix or a bus over the selection, the cycle range or
 the whole song, or one file per output path (**Stems by output path**). **Format** is WAV, AIFF or
 FLAC, lossless at the bit depth you pick (16-bit, 24-bit or 32-bit float), or **Opus**, transit's
 lossy format for sharing: small files that play in every browser, phone and messaging app.
@@ -307,8 +307,8 @@ for stereo; a mono bus offers 96 (the default), 128 or 160 kb/s.
 The encoder is the reference libopus at its highest quality setting, with a variable bitrate that
 stays near the rate you pick, so a three-minute song at 160 kb/s is about 3.6 MB. Opus files are
 always 48 kHz: a session at another rate is converted as the file is written, and the file is
-exactly as long as the range you bounced. Opus is mono or stereo; a surround mix or path is refused
-(fold it down to stereo, or bounce WAV or FLAC). The destination's extension follows the format
+exactly as long as the range you exported. Opus is mono or stereo; a surround mix or path is refused
+(fold it down to stereo, or export WAV or FLAC). The destination's extension follows the format
 (`mix.wav` becomes `mix.opus`). transit does not export MP3: Opus sounds better at every bitrate,
 and its encoder is BSD-licensed where MP3's is LGPL. Importing MP3 still works, and `.opus` files
 import too.
@@ -326,7 +326,7 @@ anything a track plays in the pre-count zone before bar 1; the source keeps it. 
 to Mute, Mute and deactivate, or Hide, the status line says when that part stops playing; choose
 Leave to keep it sounding. There is no notice if the source track or all its clips before bar 1
 were already muted. The source's clips and take stacks are always preserved.
-Every print (Bounce in Place, Commit, Freeze and File > Bounce) starts once every insert has already
+Every print (Bounce in Place, Commit, Freeze and File > Export Audio) starts once every insert has already
 been running for a few seconds, as live play from a stop does, so a plug-in's start-up does not
 land in a print.
 
@@ -408,7 +408,7 @@ The button is lit while enabled and says pending until the prepared plan applies
 
 The button tooltip and diagnostics show **Path latency**, the adopted shared/Main engine latency plus the device's reported output latency. This is not a physical round-trip measurement or a latency promise for an unpadded cue. Unknown device output latency is shown as unknown; with Delay Compensation off the figure is unavailable because paths are not aligned. Copy diagnostics includes the same readout.
 
-The mode and limit are saved per machine in ui.json, never in the session or undo history. Offline bounce, freeze, commit, stems and Bounce in Place use the full user-enabled chain. A real-time render through the open Player temporarily requests the full chain and restores the machine preference afterward.
+The mode and limit are saved per machine in ui.json, never in the session or undo history. Offline export, freeze, commit, stems and Bounce in Place use the full user-enabled chain. A real-time render through the open Player temporarily requests the full chain and restores the machine preference afterward.
 
 In **Audio > Audio Devices > I/O paths**, enable **Live (no shared padding)** on a named output other than Main to hear a cue as soon as its own sources align, without waiting for slower outputs.
 The checkbox is saved on this machine, leaves inserts active, and is ignored by offline renders.
@@ -498,7 +498,7 @@ change it; moving an automation point only in time keeps its value.
 
 The main bus strip (the rightmost strip in the mixer) has a monitoring set beside its M: **Mono**,
 **Dim** and **Ref**. They change only what you hear from your speakers or headphones, after the
-master fader. A bounce, a freeze, a stem, a send and the meters never have them: a bounce made
+master fader. An export, a bounce, a freeze, a stem, a send and the meters never have them: a bounce made
 with Mono or Dim on is identical to one made with them off. They are settings of this computer,
 kept with the audio settings, not part of the session, and never an undo step.
 

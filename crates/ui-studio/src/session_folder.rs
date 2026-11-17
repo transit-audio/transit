@@ -1,4 +1,4 @@
-//! Where a session file dialog starts (#385): Save As, Open and Bounce.
+//! Where a session file dialog starts (#385): Save As, Open and Export Audio.
 //!
 //! Ableton and Logic agree: a session that has a file starts in its own folder; a new, never-saved
 //! session starts in the last folder a session was saved to or opened from on this machine
