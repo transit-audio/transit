@@ -210,6 +210,21 @@ recovery message says the same about the interrupted take.
 A session with clips before bar 1 lists the `pre_count` need: transit builds from before this
 feature warn when they open it, and moving its zone clips in one of those builds puts them on bar 1.
 
+## Punching in while playing
+
+Press **Record** (**R** or **F9**) while the transport is playing and recording starts at the
+playhead without stopping playback. Every record-enabled audio, MIDI and instrument track records;
+with none armed, nothing starts and the status line says so. There is no count-in and no pre-roll
+in this case, because playback is already running; they apply when you press Record from a stop.
+
+What you record lands as a new take over the clips already under it. Audio always does: the
+old clips stay on the track as the previous take, and the new take plays. MIDI merges into a
+single clip it overlaps and keeps several as the previous take. See [Takes and comping](#takes-and-comping).
+
+**Stop** (**Space**), or **Record** again, ends the take and stops playback. There is no punch out
+that keeps playing. Record does not punch into a selection or a marked range by itself: it starts at
+the playhead and runs until you stop it.
+
 ## Takes and comping
 
 With Cycle on, Record keeps a take per lap until Stop; recording over clips keeps the old clips as

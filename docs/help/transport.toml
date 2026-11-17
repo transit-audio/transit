@@ -39,7 +39,7 @@ key = "Space"
 [[entry]]
 id = "transport.record"
 name = "Record"
-text = "Records onto the armed tracks from the playhead. With the count-in on, the button pulses on each beat first. Arm a track with its R button before recording."
+text = "Records onto the armed tracks from the playhead. With the count-in on, the button pulses on each beat first. Arm a track with its R button before recording. Pressing Record while playing starts recording at the playhead with playback running and no count-in."
 key = "R or F9"
 
 [[entry]]
