@@ -272,3 +272,10 @@ fn searching_bounce_still_finds_export_audio() {
     assert!(rows.iter().any(|r| r.action == Action::BounceInPlace), "Bounce in Place keeps its name");
     assert!(!filtered("export audio").is_empty());
 }
+
+#[test]
+fn export_audio_command_lists_the_shortcut_the_table_binds() {
+    use crate::shortcuts::{Action, label};
+    let listed = transit_engine::find_command("file.bounce_mix").and_then(|c| c.shortcut).expect("file.bounce_mix lists a shortcut");
+    assert_eq!(listed.replace("Cmd+", "Ctrl+"), label(Action::Bounce), "the control-channel listing and the shortcuts table agree");
+}

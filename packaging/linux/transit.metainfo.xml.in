@@ -19,7 +19,7 @@
       <li>Non-destructive clip editing with fades, playlists, grids and markers</li>
       <li>A mixer with inserts, sends, buses, automation and metering</li>
       <li>Built-in EQ, dynamics, reverb, delay, modulation and instruments</li>
-      <li>Imports WAV, AIFF, FLAC, MP3 and MIDI; bounces to disk</li>
+      <li>Imports WAV, AIFF, FLAC, MP3 and MIDI; exports to disk</li>
     </ul>
     <p>Based on SoundCraft by storytold.</p>
   </description>
