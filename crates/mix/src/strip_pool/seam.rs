@@ -15,8 +15,26 @@
 //! the real deadline again.
 
 use super::*;
-use std::hash::Hasher;
 use transit_rt::strip_jobs::State;
+
+/// What the pool parked for a strip ([`StripPool::parked`]).
+#[derive(Default)]
+pub(crate) struct Parked {
+    /// The deferred ring's pending safety release: its silence mask.
+    pub(crate) silence: Option<u16>,
+    /// The ring's events, then the live events, in delivery order.
+    pub(crate) events: Vec<ParkedEvent>,
+}
+
+/// One parked event.
+pub(crate) enum ParkedEvent {
+    /// A tagged event with its identity (source, transport, message, binding, due).
+    Event(InstrumentEvent),
+    /// An untagged event: delivery releases the instrument for it.
+    Release,
+    /// A tagged event whose side-table entry is gone: delivery drops it (its bytes).
+    Dropped([u8; 3]),
+}
 
 /// A last-resort hang ceiling, not a latency claim: ten minutes without a claim turns a held strip no
 /// worker ever claims into a failure. It is the tests' own ceiling (`tests/common/stall.rs`, `HANG`): a
@@ -90,27 +108,26 @@ impl StripPool {
         }
     }
 
-    /// The messages parked for strip `i`, in delivery order: its deferred ring, then the live
-    /// events taken while it was away.
-    pub(crate) fn pending_midi(&self, i: usize, h: &mut dyn Hasher) {
+    /// The messages parked for strip `i`, in delivery order (#742's canonical pending form): its
+    /// deferred ring's safety release (its silence mask), the ring's events, then the live events
+    /// taken while it was away; each with the identity its side-table entry holds, or as it is
+    /// when it has none (delivery calls `release_instrument` for an untagged one and drops a
+    /// tagged one whose entry is gone).
+    pub(crate) fn parked(&self, i: usize) -> Parked {
         let side = self.side.get(i * SIDE..(i + 1) * SIDE).unwrap_or(&[]);
-        let put = |h: &mut dyn Hasher, e: &Event| {
-            if let Some(Some(ev)) = side.get(e.tag as usize) {
-                h.write(format!("{:?}", (ev.source, ev.transport, ev.message)).as_bytes());
-                h.write_u8(0);
-            } else {
-                h.write(format!("{:?}", (e.status, e.data1, e.data2)).as_bytes());
-                h.write_u8(1);
-            }
+        let of = |e: &Event| match side.get(e.tag as usize) {
+            Some(Some(ev)) => ParkedEvent::Event(*ev),
+            _ if e.tag == Event::NO_TAG => ParkedEvent::Release,
+            _ => ParkedEvent::Dropped([e.status, e.data1, e.data2]),
         };
+        let mut parked = Parked::default();
         if let Some(r) = self.defer.ring(i) {
-            r.events().iter().for_each(|e| put(h, e));
-            if r.is_silenced() {
-                h.write_u16(r.silence_mask());
-            }
+            parked.silence = r.is_silenced().then(|| r.silence_mask());
+            parked.events.extend(r.events().iter().map(of));
         }
         let n = self.live_len.get(i).copied().unwrap_or(0);
-        self.live.get(i * LIVE..i * LIVE + n).unwrap_or(&[]).iter().for_each(|e| put(h, e));
+        parked.events.extend(self.live.get(i * LIVE..i * LIVE + n).unwrap_or(&[]).iter().map(of));
+        parked
     }
 
     /// Strip `i`'s outcome this block (`None` past the pool's strips).

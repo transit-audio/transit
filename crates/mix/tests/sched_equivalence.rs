@@ -17,12 +17,15 @@
 //!    upstream-missed strip skipped, its keys not filled, its lines neither written nor idled, its
 //!    MIDI held; a late strip rendered and its output dropped, as its worker's late render moves
 //!    its state on), and the tail skips of the auxes keyed from a missed strip are the same;
-//! 3. at every block boundary, every strip's state fingerprint ([`transit_mix::StripPrint`]: the plug-ins'
-//!    state (the compressor's detector envelope, sidechain filters and lookahead lines, the test
-//!    delays' and the continuity instruments' state), the key alignment and delay compensation
-//!    lines (contents and write positions), and the instrument's delivered and pending MIDI) is
-//!    the same in both renders, for every strip that is home (a strip a worker holds has no
-//!    readable state until it is back).
+//! 3. at every block boundary, every strip's state digest ([`transit_mix::StripPrint`], 64-bit
+//!    digests of the state record stream: evidence, with a collision estimate of about 2^-64 per
+//!    comparison under a hash-distribution assumption; four parts: the plug-ins' state (the
+//!    compressor's detector envelope, sidechain filters and lookahead lines, the test delays' and
+//!    the continuity instruments' state), the key alignment and delay compensation lines
+//!    (contents and write positions), the instrument's delivered and pending MIDI in the canonical
+//!    pending form with its MIDI effect host, and the rest of the strip inventory of ADR 0029's
+//!    #742 amendment, section 14) is the same in both renders, for every strip that is home (a
+//!    strip a worker holds has no readable state until it is back).
 //!
 //! And across a graph change: a key edge added or removed while a worker holds an old task, the
 //! plan refused until the task is home, its result retired unread, and the new graph's output and
@@ -46,11 +49,14 @@
 //! ([`Schedule::shrink`]) and printed as a Rust literal with the first divergence; the minimal
 //! schedule lands as a named regression test ([`regression`], see the template at the end).
 //!
-//! **Where state cannot be read** (the corpus sessions' equalizers, saturator, chorus, reverb,
-//! limiter-mode compressor and synths have no fingerprint): the holds end `WINDOW` blocks before the end of the
-//! render and every corpus case states its post-fault window, the longest tail and latency of its
-//! plug-ins plus the plan's latency, rounded up to whole blocks; the render runs that long after
-//! the last hold, and every sample of it is compared.
+//! **Where no complete record reads the state** (no registry entry declares one yet, #742): the
+//! holds end `WINDOW` blocks before the end of the render and every corpus case states its
+//! post-fault window from its configured, loaded instances (`MixEngine::strip_plugin_facts`
+//! after the latency probe block): the longest tail plus latency of an instance whose record is
+//! not complete (and of an instrument whose MIDI effect chain holds such an effect), plus the
+//! plan's latency, rounded up to whole blocks, at least `WINDOW`; the render runs that long after
+//! the last hold, and every sample of it is compared. The (session, entry) pairs without a
+//! complete record are pinned (`INCOMPLETE`).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 #[allow(dead_code)]
@@ -80,8 +86,8 @@ fn the_continuity_session_equals_its_muted_serial_render_under_seeded_stall_sche
     every(&[Topology::new("the continuity session", s, ids)], &seeds(false));
 }
 
-/// Gate (#210): the corpus sessions with a key edge added (their equalizers, saturator, chorus,
-/// reverb, limiter-mode compressor and synths have no fingerprint: each case states its post-fault window).
+/// Gate (#210): the corpus sessions with a key edge added (state without a complete record: each
+/// case states its post-fault window, from its loaded instances, and the pairs that set it).
 #[test]
 fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_stall_schedules() {
     let _on = graph_on();
@@ -89,20 +95,138 @@ fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_s
     let cases = corpus();
     assert!(cases.len() >= 2, "the released sessions with four or more live tracks");
     let mut tops = Vec::new();
+    let mut pinned = Vec::new();
     for (name, s) in cases {
         let mut top = Topology::new(&name, s, vec![]);
-        let latency = {
+        let (latency, facts) = {
             let mut rig = top.rig();
             rig.block();
-            rig.mix.latency
+            (rig.mix.latency, rig.mix.strip_plugin_facts())
         };
-        top.window = post_fault_window(&top.session, latency);
+        let window = structural_window(&facts, latency);
+        top.window = window.blocks;
         top.blocks = 40 + top.window;
-        println!("{name}: holds in blocks 2..40, post-fault window {} blocks ({} samples)", top.window, top.window * BLOCK);
+        println!(
+            "{name}: holds in blocks 2..40, post-fault window {} blocks ({} samples), plan latency {latency}, set by {}; incomplete: {}",
+            top.window,
+            top.window * BLOCK,
+            window.set_by.join(", "),
+            window.incomplete.join(", ")
+        );
+        pinned.push((name, window.incomplete));
         tops.push(top);
     }
+    let expected: Vec<(String, Vec<String>)> =
+        INCOMPLETE.iter().map(|(n, e)| ((*n).to_string(), e.iter().map(|s| (*s).to_string()).collect())).collect();
+    assert_eq!(pinned, expected, "the pinned (session, entry) pairs without a complete record changed (#742 section 14): update INCOMPLETE");
     every(&tops, &seeds);
 }
+
+/// The (corpus session, registry entry) pairs whose record is not complete (ADR 0029, #742 section
+/// 14: rack MIDI chains and clip-effect modules included, the case's hold inserts (`gain`) and its
+/// added key compressor too). An incomplete pair keeps its full-tail post-fault window; the corpus
+/// test fails when the computed set differs, so an entry turning complete, or a corpus session
+/// adding an incomplete one, is a reviewed change here.
+const INCOMPLETE: &[(&str, &[&str])] = &[
+    ("v0.3.2-demo.transit", &["compressor", "eq_7band", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    ("v0.3.2-features.transit", &["compressor", "gain", "macro_oscillator", "plate_reverb"]),
+    ("v0.4.0-demo.transit", &["compressor", "eq_7band", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    ("v0.4.0-features.transit", &["compressor", "gain", "macro_oscillator", "plate_reverb"]),
+    ("v0.4.1-demo.transit", &["compressor", "eq_7band", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    ("v0.4.1-features.transit", &["compressor", "gain", "macro_oscillator", "plate_reverb"]),
+    ("v0.5.0-demo.transit", &["compressor", "eq_7band", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    ("v0.5.0-features.transit", &["compressor", "gain", "macro_oscillator", "plate_reverb"]),
+    ("v0.6.0-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    (
+        "v0.6.0-features.transit",
+        &[
+            "compressor",
+            "filter",
+            "gain",
+            "macro_oscillator",
+            "midi_transpose",
+            "modal_voice",
+            "plate_reverb",
+            "random_sequencer",
+            "resonator",
+            "time_stretcher",
+            "tuner",
+        ],
+    ),
+    ("v0.7.0-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    (
+        "v0.7.0-features.transit",
+        &[
+            "compressor",
+            "filter",
+            "gain",
+            "macro_oscillator",
+            "midi_transpose",
+            "modal_voice",
+            "plate_reverb",
+            "random_sequencer",
+            "resonator",
+            "sampler",
+            "time_stretcher",
+            "tuner",
+        ],
+    ),
+    ("v0.7.1-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    (
+        "v0.7.1-features.transit",
+        &[
+            "compressor",
+            "filter",
+            "gain",
+            "macro_oscillator",
+            "midi_transpose",
+            "modal_voice",
+            "plate_reverb",
+            "random_sequencer",
+            "resonator",
+            "sampler",
+            "time_stretcher",
+            "tuner",
+        ],
+    ),
+    ("v0.7.2-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    (
+        "v0.7.2-features.transit",
+        &[
+            "compressor",
+            "filter",
+            "gain",
+            "macro_oscillator",
+            "midi_transpose",
+            "modal_voice",
+            "plate_reverb",
+            "random_sequencer",
+            "resonator",
+            "sampler",
+            "time_stretcher",
+            "tuner",
+        ],
+    ),
+    ("v0.7.3-demo.transit", &["compressor", "eq_7band", "filter", "gain", "macro_oscillator", "plate_reverb", "saturator"]),
+    (
+        "v0.7.3-features.transit",
+        &[
+            "compressor",
+            "filter",
+            "gain",
+            "macro_oscillator",
+            "midi_transpose",
+            "modal_voice",
+            "plate_reverb",
+            "random_sequencer",
+            "resonator",
+            "sampler",
+            "time_stretcher",
+            "tuner",
+        ],
+    ),
+    ("returns-and-groups.transit", &["compressor", "gain", "macro_oscillator", "room_reverb"]),
+];
 
 /// Gate (#210): a key edge removed, and one added, while a worker holds an old task: the plan is
 /// refused until the task is home, the old result is retired unread, and the new graph's output

@@ -1,44 +1,66 @@
-//! Test seam (feature `testing`, issue #210, ADR 0029 amendment section 8): a deterministic
-//! fingerprint of each strip's state at a block boundary, so the scheduling-condition gate
-//! (`tests/sched_equivalence.rs`) compares the graph render with a serial render that has the
-//! same muted blocks on state, not only on output.
+//! Test seam (feature `testing`, issue #210; ADR 0029, amendment section 8 and the #742
+//! amendment, sections 12 and 14): a deterministic digest of each strip's state at a block
+//! boundary, so the scheduling-condition gate (`tests/sched_equivalence.rs`) compares the graph
+//! render with a serial render that has the same muted blocks on state, not only on output.
 //!
-//! Per strip, three hashes ([`PrintHasher`], the same on every platform and run):
+//! Every part is the [`PrintHasher`] digest of a state record's word stream
+//! ([`transit_state_record::Writer`]: typed items, floats under their own tags), written while
+//! it is hashed; nothing is stored. Per strip, four parts:
 //!
-//! - **plugins**: each insert's and the instrument's [`Plugin::fingerprint`] (the built-in
-//!   compressor's detector envelope, sidechain filters, lookahead lines and smoothers; a test
-//!   plug-in's own state);
+//! - **plugins**: each insert's, the instrument's and each clip-effect module's
+//!   [`Plugin::fingerprint`] (the built-in compressor's detector envelope, sidechain filters,
+//!   lookahead lines and smoothers; a test plug-in's own state; partial records until an entry
+//!   declares its record complete);
 //! - **lines**: the delay lines a skip must neither write nor idle: each keyed insert's
 //!   [`key::KeyIn`] line (its delay, its history, its write position, its read), the strip's delay
 //!   compensation lines (post and pre fader) and its edges' reads, and the [`key::KeyBank`] entry
-//!   lines keyed at the strip;
-//! - **midi**: the instrument's delivered event state (sounding notes, held pedals, the values
-//!   sent) and the messages still pending for it, in order: its queue, then what the render
-//!   workers' pool parked for it (the deferred ring, then the live events of an away strip).
-//!   Pending events are compared by message, not by due frame: a parked event is readmitted with
-//!   the frame it lands on, a queued one keeps its own (both land on the same sample).
+//!   lines keyed at the strip (with a key's pending early-key frames);
+//! - **midi**: the instrument's event state in section 14's canonical pending form (its queue,
+//!   then what the render workers' pool parked for it: the deferred ring, then the live events
+//!   of an away strip, admitted into a copy of the ledger; delivered notes and pedals; see
+//!   `events::seam`), then its MIDI effect host (stages with their effects' records and carries,
+//!   the notes given and started, retries, the epoch, the note view);
+//! - **strip**: the strip's and its slots' own fields (section 14's inventory): a configuration
+//!   child (the identity of the adopted plan: generations, track, layout, routes, mode bypass,
+//!   each slot's layout, channels, suspendability and id), then a state child (latency and delay
+//!   compensation position, chase and edit flags, mute, touch ramps, clip effects, and per slot
+//!   the parameter values last pushed, the reported latency, failure, suspension and parameter
+//!   pass flags and a reading insert's note delay).
 //!
-//! A strip a render worker holds has no fingerprint (its state is in the worker's cell).
-//! Nothing here runs on the audio path; it is compiled only with the feature.
+//! [`strip_print`] destructures every inventoried type exhaustively, so a new field does not
+//! compile until its treatment is decided; each field left out says why (configuration of an
+//! identical plan, output only, telemetry, a protocol stamp, a scope assertion, or unobservable
+//! by an overwrite-before-read argument that the mix-state gate's poison controls witness).
+//!
+//! A strip a render worker holds has no print (its state is in the worker's cell). Nothing here
+//! runs on the audio path; it is compiled only with the feature.
 
 use super::*;
 use std::hash::Hasher;
+use transit_state_record::Writer;
+
+mod facts;
+mod nudge;
+mod poison;
+pub use facts::{AudioFact, MidiFact, StripFacts};
+pub use nudge::Nudge;
+pub use poison::Poison;
 
 /// The strip print's hash, 64 bits, one step per 64-bit word (#742; it was byte-wise FNV-1a,
 /// which made hashing a third of the scheduling gate's time). Deterministic across runs,
-/// platforms and Rust versions (the standard library's hasher is not): every value enters as
-/// a little-endian word (`to_le_bytes`, `to_bits`, `usize` widened to `u64`), never in native
-/// byte order. Prints are compared only within one process run; no value is pinned.
+/// platforms and Rust versions (the standard library's hasher is not): the record writer gives
+/// it every value as a word through `write_u64` (floats by their bits under their own tags, see
+/// `transit_state_record`). Prints are compared only within one process run; no value is pinned.
 ///
 /// Each step is `state = mix(state ^ word)`, where `mix` is the SplitMix64 finalizer (xor-shift,
 /// multiply, xor-shift, multiply, xor-shift; both multipliers odd). Every operation of `mix` is
 /// invertible mod 2^64, so `mix` is a bijection. For a fixed state a step is therefore injective
-/// in the word, and for a fixed word it is a bijection of the state. So two inputs that differ
-/// in exactly one word (any single bit of any hashed sample) always end in different prints:
-/// the states differ right after that word, and every later step keeps them apart. Two inputs
+/// in the word, and for a fixed word it is a bijection of the state. So two streams that differ
+/// in exactly one word (any single bit of any recorded value) always end in different prints:
+/// the states differ right after that word, and every later step keeps them apart. Two streams
 /// that differ in several words collide only if `mix` maps the differences onto each other,
-/// which a full-avalanche permutation does with odds near 2^-64 (a plain rotate-xor-multiply
-/// step did not: two single-bit changes in neighboring samples collided in this module's tests).
+/// which a full-avalanche permutation does with odds near 2^-64 under the assumption that the
+/// digests of different streams behave as independent uniform values (an estimate, not a bound).
 #[derive(Clone, Copy, Debug)]
 pub struct PrintHasher(u64);
 
@@ -54,46 +76,7 @@ impl PrintHasher {
     fn word(&mut self, w: u64) {
         self.0 = mix(self.0 ^ w);
     }
-
-    /// Every sample's bits, in order, two samples to a word (the first in the low half). The
-    /// slice's length is not hashed here: the caller hashes the line's `len` (its capacity, not
-    /// a buffer's length), as before. An odd tail is still unambiguous because every buffer's
-    /// length is fixed by the structure (the capacity plus one block; the channel count is the number of
-    /// buffers).
-    ///
-    /// Whole runs of eight samples go through four independent lanes (word `k` of each run into
-    /// lane `k`), so the steps do not wait on each other; the lanes start from the state, each
-    /// with its own constant, and are then folded into the state one after another with the
-    /// ordinary step; the rest of the slice takes the ordinary step too. Each lane is the same
-    /// construction as the state, and the fold is injective in each lane, so the type docs'
-    /// argument holds: a slice that differs in one sample differs in one word of one lane (or
-    /// of the rest), and the print differs.
-    pub(crate) fn write_f32s(&mut self, v: &[f32]) {
-        let pair = |a: f32, b: f32| u64::from(a.to_bits()) | (u64::from(b.to_bits()) << 32);
-        let s = self.0;
-        let (mut l0, mut l1, mut l2, mut l3) = (s ^ LANES[0], s ^ LANES[1], s ^ LANES[2], s ^ LANES[3]);
-        let (runs, rest) = v.as_chunks::<8>();
-        for &[a, b, c, d, e, f, g, h] in runs {
-            l0 = mix(l0 ^ pair(a, b));
-            l1 = mix(l1 ^ pair(c, d));
-            l2 = mix(l2 ^ pair(e, f));
-            l3 = mix(l3 ^ pair(g, h));
-        }
-        for l in [l0, l1, l2, l3] {
-            self.word(l);
-        }
-        let (pairs, last) = rest.as_chunks::<2>();
-        for &[a, b] in pairs {
-            self.word(pair(a, b));
-        }
-        if let [last] = last {
-            self.word(u64::from(last.to_bits()));
-        }
-    }
 }
-
-/// The lanes' starting constants (distinct, so the lanes are not interchangeable).
-const LANES: [u64; 4] = [0x243f_6a88_85a3_08d3, 0x1319_8a2e_0370_7344, 0xa409_3822_299f_31d0, 0x082e_fa98_ec4e_6c89];
 
 /// The SplitMix64 finalizer: a bijection of `u64` with full avalanche (see [`PrintHasher`]).
 #[inline]
@@ -105,7 +88,7 @@ fn mix(mut x: u64) -> u64 {
 
 impl Hasher for PrintHasher {
     /// Eight bytes to a word, little-endian; a short tail is zero-padded, then the length is
-    /// hashed, so a tail of zero bytes still counts.
+    /// hashed, so a tail of zero bytes still counts. (The record writer never calls it.)
     fn write(&mut self, bytes: &[u8]) {
         let (words, tail) = bytes.as_chunks::<8>();
         for &w in words {
@@ -119,53 +102,8 @@ impl Hasher for PrintHasher {
         self.word(bytes.len() as u64);
     }
 
-    fn write_u8(&mut self, i: u8) {
-        self.word(u64::from(i));
-    }
-
-    fn write_u16(&mut self, i: u16) {
-        self.word(u64::from(i));
-    }
-
-    fn write_u32(&mut self, i: u32) {
-        self.word(u64::from(i));
-    }
-
     fn write_u64(&mut self, i: u64) {
         self.word(i);
-    }
-
-    fn write_u128(&mut self, i: u128) {
-        self.word(i as u64);
-        self.word((i >> 64) as u64);
-    }
-
-    fn write_usize(&mut self, i: usize) {
-        self.word(i as u64);
-    }
-
-    fn write_i8(&mut self, i: i8) {
-        self.write_u8(i as u8);
-    }
-
-    fn write_i16(&mut self, i: i16) {
-        self.write_u16(i as u16);
-    }
-
-    fn write_i32(&mut self, i: i32) {
-        self.write_u32(i as u32);
-    }
-
-    fn write_i64(&mut self, i: i64) {
-        self.write_u64(i as u64);
-    }
-
-    fn write_i128(&mut self, i: i128) {
-        self.write_u128(i as u128);
-    }
-
-    fn write_isize(&mut self, i: isize) {
-        self.write_usize(i as usize);
     }
 
     fn finish(&self) -> u64 {
@@ -182,19 +120,42 @@ pub struct StripPrint {
     pub plugins: u64,
     /// Its delay lines and those of the keys keyed at it.
     pub lines: u64,
-    /// Its instrument's event state and pending events.
+    /// Its instrument's event state, pending events and MIDI effect host.
     pub midi: u64,
+    /// The strip's and its slots' own fields (configuration, then state).
+    pub strip: u64,
 }
 
-/// A mix delay line: its flags, positions and, while it holds history, its contents.
-pub(crate) fn line_print(l: &DelayLine, h: &mut PrintHasher) {
-    h.write_u8(u8::from(l.live) | (u8::from(l.fresh) << 1));
-    h.write_usize(l.idx);
-    h.write_usize(l.len);
-    h.write_usize(l.written);
-    if l.live {
-        for b in &l.bufs {
-            h.write_f32s(b);
+impl StripPrint {
+    /// The names of the parts that differ from `other`'s, for a divergence report.
+    #[must_use]
+    pub fn differing(&self, other: &StripPrint) -> Vec<&'static str> {
+        let parts = [
+            ("plugins", self.plugins != other.plugins),
+            ("lines", self.lines != other.lines),
+            ("midi", self.midi != other.midi),
+            ("strip", self.strip != other.strip),
+        ];
+        parts.iter().filter(|p| p.1).map(|p| p.0).collect()
+    }
+}
+
+/// A mix delay line: its flags, positions and, while it holds history, its contents. An idle
+/// line's contents are unobservable: `DelayLine::write` clears the ring before writing an idle
+/// line, `read_x` reads nothing from one, and `take_history` hands a line that was not live on
+/// as not live (the gate's poison control of an idle line witnesses it).
+pub(crate) fn line_record(l: &DelayLine, w: &mut Writer<'_>) {
+    let DelayLine { bufs, idx, len, placeholder, live, written, fresh } = l;
+    w.bool(*live);
+    w.bool(*fresh);
+    w.bool(*placeholder);
+    w.usize(*idx);
+    w.usize(*len);
+    w.usize(*written);
+    w.usize(bufs.len());
+    if *live {
+        for b in bufs {
+            w.f32s(b);
         }
     }
 }
@@ -205,16 +166,294 @@ pub(crate) fn line_summary(l: &DelayLine) -> String {
 }
 
 /// An edge's read of a delay line (the delay it plays, its crossfade).
-pub(crate) fn edge_print(e: &EdgeTap, h: &mut PrintHasher) {
-    h.write_usize(e.eff);
-    h.write_usize(e.from);
-    h.write_usize(e.left);
-    h.write_u8(u8::from(e.pre) | (u8::from(e.init) << 1));
+pub(crate) fn edge_record(e: &EdgeTap, w: &mut Writer<'_>) {
+    let EdgeTap { eff, from, left, pre, init } = e;
+    w.usize(*eff);
+    w.usize(*from);
+    w.usize(*left);
+    w.bool(*pre);
+    w.bool(*init);
+}
+
+/// An event source (its port, channel and generation).
+pub(crate) fn source_record(w: &mut Writer<'_>, s: &events::Source) {
+    let events::Source { port, channel, generation } = s;
+    w.u16(*port);
+    w.u8(*channel);
+    w.u64(*generation);
+}
+
+/// A MIDI message: its discriminant, then that variant's fields.
+pub(crate) fn message_record(w: &mut Writer<'_>, m: &Message) {
+    match *m {
+        Message::NoteOn { key, velocity, id } => {
+            w.u8(0);
+            w.u8(key);
+            w.u8(velocity);
+            w.u32(id.0);
+        }
+        Message::NoteOff { key, velocity, id } => {
+            w.u8(1);
+            w.u8(key);
+            w.u8(velocity);
+            w.u32(id.0);
+        }
+        Message::PolyPressure { key, value, id } => {
+            w.u8(2);
+            w.u8(key);
+            w.u8(value);
+            w.u32(id.0);
+        }
+        Message::ChannelPressure { value } => {
+            w.u8(3);
+            w.u8(value);
+        }
+        Message::Control { cc, value } => {
+            w.u8(4);
+            w.u8(cc);
+            w.u8(value);
+        }
+        Message::Control14 { msb, value } => {
+            w.u8(5);
+            w.u8(msb);
+            w.u16(value);
+        }
+        Message::PitchBend { value } => {
+            w.u8(6);
+            w.u16(value);
+        }
+        Message::Program { program } => {
+            w.u8(7);
+            w.u8(program);
+        }
+    }
+}
+
+/// A plug-in event (its channel, the host's voice id and its message).
+pub(crate) fn event_record(w: &mut Writer<'_>, e: &PluginEvent) {
+    let PluginEvent { channel, note_id, message } = e;
+    w.u8(*channel);
+    w.i32(*note_id);
+    message_record(w, message);
+}
+
+/// A plug-in event at an offset in its block.
+pub(crate) fn timed_record(w: &mut Writer<'_>, e: &transit_dsp::midi_fx::TimedEvent) {
+    let transit_dsp::midi_fx::TimedEvent { offset, event } = e;
+    w.u32(*offset);
+    event_record(w, event);
+}
+
+/// The parameter values last pushed: the logical values (the inline prefix, or the prepared
+/// storage of a long map), each a presence bool for the `NaN` sentinel ("never pushed", section
+/// 12) and the value under the f32 tag; the prepared storage's length (it decides the long-map
+/// view). Inline values past `len` and the heap of a short map are refilled with the sentinel
+/// whenever the length changes (`Applied::values`), so they are unobservable. `mismatch` is
+/// telemetry.
+fn applied_record(a: &Applied, w: &mut Writer<'_>) {
+    let Applied { len, inline, heap, mismatch: _ } = a;
+    w.usize(*len);
+    w.usize(heap.len());
+    let values = if *len <= APPLIED_INLINE { inline.get(..*len).unwrap_or_default() } else { heap.as_slice() };
+    w.usize(values.len());
+    for &v in values {
+        w.present((!v.is_nan()).then_some(v), |w, v| w.f32(v));
+    }
+}
+
+/// A slot's configuration (section 14: of an identical adopted plan).
+fn slot_config(s: &PluginSlot, w: &mut Writer<'_>) {
+    w.u64(s.generation.get());
+    w.u16(s.layout);
+    w.usize(s.ch);
+    w.bool(s.suspendable);
+    w.bytes(s.id.as_bytes());
+}
+
+/// A slot's own state (its plug-in's record is in the plugins part, its instrument events in
+/// the midi part).
+fn slot_state(s: &PluginSlot, w: &mut Writer<'_>) {
+    let PluginSlot {
+        raw_latency,
+        // Configuration: `slot_config`.
+        id: _,
+        ch: _,
+        suspendable: _,
+        generation: _,
+        layout: _,
+        // The plugins part.
+        plugin: _,
+        applied,
+        failed,
+        errors_seen,
+        fresh,
+        quiet,
+        output_silent,
+        woken,
+        parameter_pass,
+        // The midi part (canonical pending form).
+        events: _,
+        note_delay,
+        // Output only: the panels' scope and analysis rings.
+        tap: _,
+        sample_tap: _,
+    } = s;
+    applied_record(applied, w);
+    w.usize(raw_latency.load(std::sync::atomic::Ordering::Relaxed));
+    w.bool(*failed);
+    w.u64(*errors_seen);
+    w.bool(*fresh);
+    w.usize(*quiet);
+    w.bool(*output_silent);
+    w.bool(*woken);
+    w.bool(*parameter_pass);
+    w.present(note_delay.as_ref(), |w, d| d.record_state(w));
+}
+
+/// Every slot of a strip, in order: the inserts, the instrument, then each clip's modules.
+fn slots(st: &Strip) -> impl Iterator<Item = Option<&PluginSlot>> {
+    let clips = st.clip_fx.0.iter().flat_map(|(_, fx)| [fx.eq.as_ref(), fx.comp.as_ref()]);
+    st.plugins.iter().map(Option::as_ref).chain(std::iter::once(st.instrument.as_ref())).chain(clips)
+}
+
+/// The digest of the record `f` writes.
+fn digest(f: impl FnOnce(&mut Writer<'_>)) -> u64 {
+    let mut h = PrintHasher::default();
+    f(&mut Writer::new(&mut h));
+    h.finish()
+}
+
+/// What the midi part needs besides the strip: the next block's start, what the pool parked for
+/// the strip, and the engine's admission state.
+struct MidiContext<'a> {
+    start: u64,
+    parked: strip_pool::Parked,
+    engine: &'a events::EngineEvents,
+}
+
+/// One home strip's print (see the module docs): every field of [`Strip`] is handed to its part
+/// or set aside with its reason.
+#[allow(clippy::panic)]
+fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) -> StripPrint {
+    let Strip {
+        mode_bypass,
+        // Unobservable, each overwritten before it is read (the gate's poison controls): `buf` by
+        // the clip render into it at the start of each block (`render_strip`), `pre` by the
+        // pre-fader copy before any pre-fader send or key reads it, `scratch` by the instrument's
+        // second output channel (its contract: an instrument writes every output channel; a mono
+        // strip lends `scratch` as that channel), `clipbuf` by each clip's render before its
+        // effects and the mix read it, `outbuf` by `DelayLine::read_x`, which clears and refills it.
+        buf: _,
+        pre: _,
+        key_pre,
+        scratch: _,
+        plugins,
+        instrument,
+        chase,
+        edited,
+        muted,
+        // Output only: the gain-reduction reading, the meter and the failure report counters.
+        gr: _,
+        meter: _,
+        failures: _,
+        clip_fx,
+        clipbuf: _,
+        latency,
+        key_in,
+        tap,
+        tap_pre,
+        outbuf: _,
+        pdc_out,
+        pdc_pos,
+        edges,
+        sink_routes,
+        generation,
+        track,
+        id,
+        layout,
+        // Scope assertions: the gate fails a case that holds or skips a strip with a hardware
+        // insert or an External Instrument (`MixEngine::strip_external`); a retained panic payload
+        // fails before any comparison (below).
+        hw: _,
+        ext: _,
+        panic,
+        // The pool's protocol stamp: legitimately different between the graph and the serial
+        // render (property 1 and the conflict count cover it).
+        rendered: _,
+        touch,
+    } = st;
+    if panic.is_some() {
+        panic!("strip {i} holds a retained panic payload: a case with one fails before any comparison (#742 section 14)");
+    }
+    let plugins_part = digest(|w| {
+        for s in slots(st) {
+            w.present(s, |w, s| s.plugin.fingerprint(w));
+        }
+    });
+    let lines = digest(|w| {
+        w.usize(key_in.len());
+        key_in.iter().for_each(|k| k.record(w));
+        line_record(tap, w);
+        line_record(tap_pre, w);
+        edges.iter().for_each(|e| edge_record(e, w));
+        keys.record_of(i, w);
+    });
+    let midi = digest(|w| {
+        let inst = instrument.as_ref().and_then(|s| s.events.as_deref().map(|e| (s.generation, e)));
+        w.present(inst, |w, (binding, ev)| ev.record_canonical(w, cx.start, &cx.parked, cx.engine, binding));
+    });
+    let strip = digest(|w| {
+        w.child(|w| {
+            w.u64(generation.get());
+            w.u16(*track);
+            w.u64(id.0);
+            w.u16(*layout);
+            w.usize(sink_routes.len());
+            for r in sink_routes {
+                w.present(*r, |w, r| w.usize(r));
+            }
+            w.usize(mode_bypass.len());
+            mode_bypass.iter().for_each(|&b| w.bool(b));
+            w.bool(*key_pre);
+            w.usize(plugins.len());
+            w.usize(clip_fx.0.len());
+            for (clip, fx) in &clip_fx.0 {
+                w.u64(*clip);
+                w.f32(fx.sr);
+                w.usize(fx.ch);
+            }
+            for s in slots(st) {
+                w.present(s, |w, s| slot_config(s, w));
+            }
+        });
+        w.child(|w| {
+            w.usize(*latency);
+            w.usize(*pdc_out);
+            w.usize(*pdc_pos);
+            w.bool(*chase);
+            w.bool(*edited);
+            w.bool(*muted);
+            touch.record(w);
+            for (_, fx) in &clip_fx.0 {
+                let ClipFx { eq: _, comp: _, eq_on, comp_on, gain_db, lazy, sr: _, ch: _ } = fx;
+                w.bool(*eq_on);
+                w.bool(*comp_on);
+                w.f32(*gain_db);
+                w.bool(*lazy);
+            }
+            for s in slots(st) {
+                w.present(s, |w, s| slot_state(s, w));
+            }
+        });
+    });
+    StripPrint { track: *id, plugins: plugins_part, lines, midi, strip }
 }
 
 impl MixEngine {
     /// Every strip of the active plan in table order (phase 1, then the auxes, then the rest),
-    /// with its fingerprint, or `None` while a render worker holds it. Off the audio path.
+    /// with its print, or `None` while a render worker holds it. Off the audio path. Panics on a
+    /// strip holding a retained panic payload, or a MIDI effect host caught mid-capture (section
+    /// 14's scope assertions).
     #[must_use]
     pub fn strip_prints(&self) -> Vec<Option<StripPrint>> {
         let Some(p) = self.plan.as_deref() else { return Vec::new() };
@@ -227,41 +466,15 @@ impl MixEngine {
                 if self.pool.as_ref().is_some_and(|pool| pool.is_away(i)) {
                     return None;
                 }
-                let mut plugins = PrintHasher::default();
-                for (k, slot) in st.plugins.iter().enumerate() {
-                    if let Some(slot) = slot {
-                        plugins.write_usize(k);
-                        slot.plugin.fingerprint(&mut plugins);
-                    }
-                }
-                if let Some(inst) = &st.instrument {
-                    plugins.write_u8(0xFF);
-                    inst.plugin.fingerprint(&mut plugins);
-                }
-                let mut lines = PrintHasher::default();
-                for k in &st.key_in {
-                    k.fingerprint(&mut lines);
-                }
-                line_print(&st.tap, &mut lines);
-                line_print(&st.tap_pre, &mut lines);
-                for e in &st.edges {
-                    edge_print(e, &mut lines);
-                }
-                tables.keys.fingerprint_of(i, &mut lines);
-                let mut midi = PrintHasher::default();
-                if let Some(ev) = st.instrument.as_ref().and_then(|s| s.events.as_deref()) {
-                    ev.fingerprint(&mut midi);
-                }
-                if let Some(pool) = &self.pool {
-                    pool.pending_midi(i, &mut midi);
-                }
-                Some(StripPrint { track: st.id, plugins: plugins.finish(), lines: lines.finish(), midi: midi.finish() })
+                let parked = self.pool.as_ref().map(|pool| pool.parked(i)).unwrap_or_default();
+                let cx = MidiContext { start: self.events.next_frame, parked, engine: &self.events };
+                Some(strip_print(st, i, &tables.keys, &cx))
             })
             .collect()
     }
 
     /// Every strip's state in readable form (the delay lines' flags and positions, each
-    /// plug-in's fingerprint), as [`MixEngine::strip_prints`] orders them: for a failure report.
+    /// plug-in's record digest), as [`MixEngine::strip_prints`] orders them: for a failure report.
     #[must_use]
     pub fn strip_states(&self) -> Vec<Option<String>> {
         let Some(p) = self.plan.as_deref() else { return Vec::new() };
@@ -278,7 +491,7 @@ impl MixEngine {
                 for (k, slot) in st.plugins.iter().enumerate() {
                     if let Some(slot) = slot {
                         let mut h = PrintHasher::default();
-                        slot.plugin.fingerprint(&mut h);
+                        slot.plugin.fingerprint(&mut Writer::new(&mut h));
                         parts.push(format!("insert {k} ({}): {:016x}", slot.id, h.finish()));
                     }
                 }
@@ -287,132 +500,19 @@ impl MixEngine {
                 }
                 parts.extend(tables.keys.summary_of(i));
                 parts.push(format!("output {}, pre-fader {}", line_summary(&st.tap), line_summary(&st.tap_pre)));
+                parts.push(format!("latency {}, delay compensation out {} at {}", st.latency, st.pdc_out, st.pdc_pos));
                 Some(parts.join("; "))
             })
             .collect()
     }
+
+    /// Strip `i` carries a hardware insert or an External Instrument (section 14's scope: such a
+    /// strip may not be held or skipped by a case; its state is not inventoried yet).
+    #[must_use]
+    pub fn strip_external(&self, i: usize) -> bool {
+        self.plan.as_deref().and_then(|p| p.tables.strips.get(i)).is_some_and(|s| !s.hw.is_empty() || s.ext.is_some())
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Samples with mixed bit patterns: signs, zeros, a subnormal, a NaN payload, infinities.
-    /// Nineteen of them: two runs of eight through the lanes, then a pair and a single sample
-    /// through the ordinary step, so every path of `write_f32s` is covered.
-    const SAMPLES: [u32; 19] = [
-        0x3f80_0000,
-        0x8000_0000,
-        0x0000_0001,
-        0x7fc0_0001,
-        0xbe99_999a,
-        0x0000_0000,
-        0x4049_0fdb,
-        0x7f80_0000,
-        0xff80_0000,
-        0x3e80_0000,
-        0x0000_0000,
-        0x0000_0000,
-        0x3f00_0000,
-        0xbf00_0000,
-        0x0080_0000,
-        0x3c23_d70a,
-        0x0000_0000,
-        0xc2c8_0000,
-        0x3f80_0000,
-    ];
-
-    fn samples() -> Vec<f32> {
-        SAMPLES.iter().map(|&b| f32::from_bits(b)).collect()
-    }
-
-    fn print_of(v: &[f32]) -> u64 {
-        let mut h = PrintHasher::default();
-        h.write_usize(v.len());
-        h.write_f32s(v);
-        h.finish()
-    }
-
-    /// Every single-bit change of every sample changes the print (the type docs' argument,
-    /// exhaustively over this slice), and no two of the 608 changed slices share a print.
-    #[test]
-    fn every_single_bit_of_every_sample_changes_the_print() {
-        let base = samples();
-        let mut seen = std::collections::HashSet::from([print_of(&base)]);
-        for i in 0..base.len() {
-            for bit in 0..32 {
-                let mut v = base.clone();
-                v[i] = f32::from_bits(v[i].to_bits() ^ (1 << bit));
-                assert!(seen.insert(print_of(&v)), "sample {i}, bit {bit}: the print did not change, or collided");
-            }
-        }
-    }
-
-    /// The same for the byte path (a plug-in's `write`), with a zero-padded tail.
-    #[test]
-    fn every_single_bit_of_a_byte_write_changes_the_print() {
-        let bytes: Vec<u8> = (0u8..13).map(|b| b.wrapping_mul(37)).collect();
-        let of = |b: &[u8]| {
-            let mut h = PrintHasher::default();
-            h.write(b);
-            h.finish()
-        };
-        let mut seen = std::collections::HashSet::from([of(&bytes)]);
-        for i in 0..bytes.len() {
-            for bit in 0..8 {
-                let mut b = bytes.clone();
-                b[i] ^= 1 << bit;
-                assert!(seen.insert(of(&b)), "byte {i}, bit {bit}: the print did not change, or collided");
-            }
-        }
-        // A trailing zero byte is not the same input.
-        let mut longer = bytes.clone();
-        longer.push(0);
-        assert_ne!(of(&bytes), of(&longer));
-    }
-
-    /// Negative control at the line level: a delay line that differs in one sample's lowest bit
-    /// has a different print; an idle line's contents are not part of its print (as before).
-    #[test]
-    fn a_delay_line_differing_in_one_sample_has_a_different_print() {
-        let line = |live: bool, nudge: Option<(usize, usize)>| {
-            let mut l = DelayLine::with_capacity(2, 61, 8);
-            for (c, b) in l.bufs.iter_mut().enumerate() {
-                for (k, s) in b.iter_mut().enumerate() {
-                    *s = (c * 100 + k) as f32 * 0.001;
-                }
-            }
-            if let Some((c, k)) = nudge {
-                l.bufs[c][k] = f32::from_bits(l.bufs[c][k].to_bits() ^ 1);
-            }
-            (l.live, l.idx, l.written) = (live, 5, 61);
-            let mut h = PrintHasher::default();
-            line_print(&l, &mut h);
-            h.finish()
-        };
-        let base = line(true, None);
-        for at in [(0, 0), (0, 7), (0, 68), (1, 0), (1, 30), (1, 34), (1, 68)] {
-            assert_ne!(line(true, Some(at)), base, "sample {at:?}");
-        }
-        assert_eq!(line(false, Some((1, 34))), line(false, None), "an idle line hashes no contents");
-    }
-
-    /// The hash is a fixed function of the words, identical on every platform (little-endian
-    /// words, `usize` widened): pinned over exact bit patterns only, no float arithmetic. This
-    /// pins the hasher, not any strip's print (prints are compared only within one run). The
-    /// value was computed by a separate model of the steps in arbitrary-precision integers,
-    /// not captured from this code.
-    #[test]
-    fn the_hash_of_fixed_words_is_pinned() {
-        let mut h = PrintHasher::default();
-        h.write_u8(0xa5);
-        h.write_u16(0x1234);
-        h.write_u32(0xdead_beef);
-        h.write_u64(0x0123_4567_89ab_cdef);
-        h.write_usize(48_000);
-        h.write_i32(-2);
-        h.write_f32s(&samples());
-        h.write(b"transit");
-        assert_eq!(h.finish(), 0x4aa0_df7a_291d_c918, "the pinned hash of fixed words");
-    }
-}
+mod tests;

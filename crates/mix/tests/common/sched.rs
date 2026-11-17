@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use transit_audio_io::AudioBuffer;
 use transit_dsp::Plugin;
-use transit_mix::{Adoption, InstanceSpec, MixEngine, Mute, NewInstance, PlanGeneration, RejectReason, SlotGen, StripPrint, create_instance};
+use transit_mix::{
+    Adoption, InstanceSpec, MixEngine, Mute, NewInstance, PlanGeneration, RejectReason, SlotGen, StripFacts, StripPrint, create_instance,
+};
 use transit_model::{Bus, BusId, ChannelFormat, Clip, Insert, KeyFrom, KeySource, Route, Session, SourceAudio, SourceId, Tap, TrackId, TrackKind};
 use transit_rt::worker_set::figures::StripFigures;
 use transit_rt::worker_set::schedule::{Schedule, Shape};
@@ -270,8 +272,8 @@ impl Plugin for Hold {
         }
         self.inner.process(io, frames);
     }
-    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
-        self.inner.fingerprint(h);
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.inner.fingerprint(w);
     }
 }
 
@@ -314,10 +316,11 @@ impl Plugin for Delay {
     fn latency(&self) -> usize {
         self.n
     }
-    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
-        h.write_usize(self.w);
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.usize(self.w);
+        w.usize(self.ring.len());
         for r in &self.ring {
-            r.iter().for_each(|v| h.write_u32(v.to_bits()));
+            w.f32s(r);
         }
     }
 }
@@ -689,6 +692,11 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
                     failure.get_or_insert(format!("block {b}, strip {d}: {why} (key edges {edges:?}, skips {causes:?})"));
                 }
             }
+            // Section 14's scope (#742): a strip with a hardware insert or an External Instrument
+            // has no inventoried state, so no case may hold or skip it.
+            if let Some(&i) = held.iter().chain(mutes.iter().map(|(i, _)| i)).find(|&&i| rig.mix.strip_external(i)) {
+                failure.get_or_insert(format!("block {b}, strip {i}: holds or skips a strip with a hardware insert or an External Instrument"));
+            }
             run.mutes.push(mutes);
             run.causes.push(causes);
             record(&mut run, &rig, states);
@@ -772,12 +780,7 @@ pub(crate) fn compare(top: &Topology, names: &HashMap<usize, String>, g: &Run, m
             if let (Some(x), Some(y)) = (x, y)
                 && x != y
             {
-                let what = [("plugins", x.plugins != y.plugins), ("lines", x.lines != y.lines), ("midi", x.midi != y.midi)]
-                    .iter()
-                    .filter(|w| w.1)
-                    .map(|w| w.0)
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let what = x.differing(y).join(", ");
                 let name = names.get(&i).cloned().unwrap_or_else(|| format!("strip {i}"));
                 let state = |r: &Run| r.states.get(b).and_then(|s| s.get(i).cloned().flatten()).unwrap_or_default();
                 note(
@@ -960,22 +963,50 @@ pub(crate) fn builtin() -> Vec<Topology> {
     ]
 }
 
-/// The longest state of `s` no fingerprint reads: every insert's and instrument's tail and
-/// latency, plus the plan's own latency, in whole blocks (at least `WINDOW`).
-pub(crate) fn post_fault_window(s: &Session, latency: usize) -> usize {
+/// A case's post-fault window (ADR 0029, #742 section 14's window rule) and what set it.
+pub(crate) struct Window {
+    /// Blocks rendered after the last hold.
+    pub(crate) blocks: usize,
+    /// The registry entries whose record is not complete (audio instances, clip-effect modules
+    /// and MIDI effects alike), sorted: the case's pinned set.
+    pub(crate) incomplete: Vec<String>,
+    /// The instances whose tail plus latency is the longest contribution, with it in samples.
+    pub(crate) set_by: Vec<String>,
+}
+
+/// The window from a case's configured, loaded instances (`MixEngine::strip_plugin_facts` after
+/// the latency probe block): the tail plus latency of every instance whose record is not
+/// complete, and of a strip's instrument when its effective MIDI effect chain holds an effect
+/// without a complete record; the longest of them plus the plan's latency, in whole blocks, at
+/// least `WINDOW` (with every record complete: `WINDOW`, or the plan's latency if longer).
+pub(crate) fn structural_window(facts: &[StripFacts], latency: usize) -> Window {
     let mut longest = 0;
-    for t in &s.tracks {
-        for ins in t.mixer.inserts.iter().flatten().chain(t.instrument.iter()) {
-            if let Some(n) = create_instance(&ins.plugin, None, SR as f32, BLOCK, 2) {
-                let mut p = n.plugin;
-                for (k, v) in &ins.params {
-                    p.set_param(k, *v);
-                }
-                longest = longest.max(p.tail_samples() + p.latency());
+    let mut set_by = Vec::new();
+    let mut incomplete = std::collections::BTreeSet::new();
+    let mut take = |what: String, samples: usize| {
+        if samples > longest {
+            longest = samples;
+            set_by.clear();
+        }
+        if samples == longest {
+            set_by.push(format!("{what} ({samples} samples)"));
+        }
+    };
+    for s in facts {
+        let chain_incomplete = s.midi.iter().any(|m| !m.complete);
+        incomplete.extend(s.midi.iter().filter(|m| !m.complete).map(|m| m.entry.clone()));
+        for a in &s.audio {
+            if !a.complete {
+                incomplete.insert(a.entry.clone());
+                take(a.entry.clone(), a.tail + a.latency);
+            } else if a.instrument && chain_incomplete {
+                take(format!("{} (its MIDI effect chain)", a.entry), a.tail + a.latency);
             }
         }
     }
-    (longest + latency).div_ceil(BLOCK).max(WINDOW)
+    set_by.sort();
+    set_by.dedup();
+    Window { blocks: (longest + latency).div_ceil(BLOCK).max(WINDOW), incomplete: incomplete.into_iter().collect(), set_by }
 }
 
 /// A minimal schedule from a failing seed, replayed as a named regression: `topology` through

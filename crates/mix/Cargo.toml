@@ -19,14 +19,18 @@ transit-model.workspace = true
 transit-rt.workspace = true
 log.workspace = true
 rayon.workspace = true
+# The lossless state record of the testing seams (ADR 0029, #742): enabled only through `testing`.
+transit-state-record = { workspace = true, optional = true }
 
 [features]
 # Test seams (state fingerprints, muted serial blocks, the deterministic deadline; issue #210);
 # never enabled by the app.
-testing = ["transit-dsp/testing", "transit-rt/testing"]
+testing = ["dep:transit-state-record", "transit-dsp/testing", "transit-rt/testing"]
 
 [dev-dependencies]
 transit-test-support.workspace = true
+# The test plug-ins write their state records (ADR 0029, #742).
+transit-state-record.workspace = true
 serde_json.workspace = true
 transit-rt = { workspace = true, features = ["testing"] }
 transit-mix = { path = ".", features = ["testing"] }

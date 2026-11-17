@@ -92,8 +92,8 @@ impl Plugin for Gain {
 
     /// The gain smoother.
     #[cfg(feature = "testing")]
-    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
-        self.g.fingerprint(h);
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.g.fingerprint(w);
     }
 }
 

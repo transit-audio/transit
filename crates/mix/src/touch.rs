@@ -163,6 +163,30 @@ pub(crate) fn param_key(p: &AutoParam) -> u64 {
     }
 }
 
+impl TouchRamps {
+    /// Test seam (feature `testing`, #742's omission controls): a ramp mid-flight in the first
+    /// slot (or one sample further into it, when it already holds one).
+    #[cfg(feature = "testing")]
+    pub(crate) fn nudge_ramp(&mut self) {
+        let s = &mut self.slots[0];
+        *s = if s.key == 0 { Slot { key: 0x5eed, held: false, left: 300, len: 600 } } else { Slot { left: s.left.saturating_sub(1), ..*s } };
+    }
+
+    /// Test seam (feature `testing`, #742 section 14): every slot (its key, held flag, ramp left
+    /// and length; a free slot is all zero) and the last block's frames.
+    #[cfg(feature = "testing")]
+    pub(crate) fn record(&self, w: &mut transit_state_record::Writer<'_>) {
+        let TouchRamps { slots, last } = self;
+        for Slot { key, held, left, len } in slots {
+            w.u64(*key);
+            w.bool(*held);
+            w.u32(*left);
+            w.u32(*len);
+        }
+        w.u32(*last);
+    }
+}
+
 fn plugin_key(slot: u8, name: &str) -> u64 {
     key_of(7, slot, name)
 }

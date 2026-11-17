@@ -4228,6 +4228,7 @@ dependencies = [
  "transit-resonator",
  "transit-rt",
  "transit-sampler-core",
+ "transit-state-record",
  "transit-texture",
 ]
 
@@ -4281,6 +4282,7 @@ name = "transit-instrument-core"
 version = "0.7.3"
 dependencies = [
  "libm",
+ "transit-state-record",
 ]
 
 [[package]]
@@ -4344,6 +4346,7 @@ dependencies = [
  "transit-model",
  "transit-resample",
  "transit-rt",
+ "transit-state-record",
  "transit-test-support",
  "transit-time",
  "transit-vst3-host",
@@ -4393,6 +4396,7 @@ name = "transit-parametric-eq"
 version = "0.7.3"
 dependencies = [
  "libm",
+ "transit-state-record",
 ]
 
 [[package]]
@@ -4480,6 +4484,7 @@ dependencies = [
  "libm",
  "transit-instrument-core",
  "transit-rt",
+ "transit-state-record",
 ]
 
 [[package]]

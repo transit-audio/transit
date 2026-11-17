@@ -1192,6 +1192,8 @@ mod seam;
 mod tail;
 #[cfg(feature = "testing")]
 pub(crate) use seam::pinned;
+#[cfg(feature = "testing")]
+pub(crate) use seam::{Parked, ParkedEvent};
 
 #[cfg(test)]
 pub(crate) mod tests;

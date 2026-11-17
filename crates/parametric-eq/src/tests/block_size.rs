@@ -41,7 +41,7 @@ fn third(e: &mut ParametricEq) {
 }
 
 /// Changes at frame 0 (after the reset) and at frame 3584, a multiple of 1, 7, 64 and 512.
-fn render(block: usize) -> (Vec<Vec<f32>>, u64) {
+fn render(block: usize) -> (Vec<Vec<f32>>, Vec<u64>) {
     let mut e = eq(48_000.0, 2);
     first(&mut e);
     e.reset();

@@ -266,20 +266,18 @@ pub(crate) fn sort_events<T: Copy>(ev: &mut [T], key: impl Fn(&T) -> usize) {
 /// Test seam (feature `testing`, issue #210): the state of the shared building blocks.
 #[cfg(feature = "testing")]
 impl Smoother {
-    pub(crate) fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+    pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
         for v in [self.cur, self.target, self.coef] {
-            h.write_u32(v.to_bits());
+            w.f32(v);
         }
     }
 }
 
 #[cfg(feature = "testing")]
 impl DelayLine {
-    pub(crate) fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
-        h.write_usize(self.pos);
-        h.write_usize(self.mask);
-        for v in &self.buf {
-            h.write_u32(v.to_bits());
-        }
+    pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.usize(self.pos);
+        w.usize(self.mask);
+        w.f32s(&self.buf);
     }
 }

@@ -569,13 +569,30 @@ pub trait Plugin: Send {
     fn voice_positions(&self, _out: &mut [u64; VOICE_SLOTS]) -> usize {
         0
     }
-    /// Test seam (feature `testing`, issue #210): writes the plug-in's DSP state (whatever a
-    /// later block's output depends on: detector envelopes, filter memories, delay-line contents
-    /// and write positions) into `h`, so a test can compare two renders' state at a block
-    /// boundary. The default writes nothing (a stateless plug-in, or one whose state cannot be
-    /// read). Never called on the audio path.
+    /// Test seam (feature `testing`, issue #210; ADR 0029, amendment for #742, section 12): writes
+    /// the plug-in's state record (whatever a later block's output depends on: detector envelopes,
+    /// filter memories, delay-line contents and write positions) into `w`, so a test can compare
+    /// two renders' state at a block boundary. A record [`Plugin::print_complete`] declares
+    /// complete is two children, the configuration and the state
+    /// ([`transit_state_record::Writer::record`]); a partial one writes the state it reads. The
+    /// default writes no state. Never called on the audio path.
     #[cfg(feature = "testing")]
-    fn fingerprint(&self, _h: &mut dyn std::hash::Hasher) {}
+    fn fingerprint(&self, _w: &mut transit_state_record::Writer<'_>) {}
+    /// Test seam (feature `testing`, #742): the registry entry declares its record complete
+    /// (section 12: every piece of state that can influence a later output sample is encoded,
+    /// behind a reviewed inventory and the transplant witnesses). The same for every
+    /// configuration, parameter set and point in an instance's life. The default: not complete.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        false
+    }
+    /// Test seam (feature `testing`, #742): sets the state from a record [`Plugin::fingerprint`]
+    /// wrote, consuming every word; `false` on any mismatch (section 12). An entry that declares
+    /// completeness implements it. The default: refused.
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, _r: &mut transit_state_record::Reader<'_>) -> bool {
+        false
+    }
     /// The transport for the next block, given before `process`.
     fn set_transport(&mut self, _transport: &Transport) {}
     /// Instruments: note events at sample offsets within the next block.

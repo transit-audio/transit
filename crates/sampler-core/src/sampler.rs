@@ -844,26 +844,26 @@ impl SamplerCore {
     /// The state fingerprint (voices, controllers, pad voices, render order): equal for equal
     /// schedules from reset, whatever the block sizes (Gate 6).
     #[cfg(any(test, feature = "testing"))]
-    pub fn fingerprint(&self, h: &mut dyn core::hash::Hasher) {
+    pub fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
         for v in &self.voices {
-            v.fingerprint(h);
+            v.fingerprint(w);
         }
         let c = &self.controls;
         for x in [c.wheel, c.bend, c.aftertouch].iter().chain(&c.poly).chain(&c.macros) {
-            h.write_u32(x.to_bits());
+            w.f32(*x);
         }
-        h.write_u8(u8::from(c.sustain));
+        w.bool(c.sustain);
         for p in &self.pad_voice {
-            let (vi, s) = p.unwrap_or((u8::MAX, 0));
-            h.write_u8(vi);
-            h.write_u64(s);
+            w.present(*p, |w, (vi, s)| {
+                w.u8(vi);
+                w.u64(s);
+            });
         }
-        for o in self.order.iter().take(self.order_len) {
-            h.write_u8(*o);
-        }
-        h.write_u64(self.serial);
+        let order = self.order.get(..self.order_len.min(self.order.len())).unwrap_or_default();
+        w.uints(order.len(), order.iter().map(|&o| u64::from(o)));
+        w.u64(self.serial);
         // The round robin's counters and random states (not the last block's transport state, which
         // the caller's context sets again each block).
-        self.rr.fingerprint(h);
+        self.rr.fingerprint(w);
     }
 }

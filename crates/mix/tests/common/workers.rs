@@ -177,16 +177,18 @@ impl Plugin for ContinuityPlugin {
     }
     /// The tone's phase, the transport and the continuity instrument's whole record (its report
     /// with the notes and pedals held now, its holes, every event with the sample it landed on).
-    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
-        h.write_u32(self.phase.to_bits());
-        h.write_u64(self.transport);
-        h.write_usize(self.events.len());
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.f32(self.phase);
+        w.u64(self.transport);
+        w.usize(self.events.len());
         let inst = self.shared.inst.lock().unwrap();
-        h.write(format!("{:?}{:?}", inst.report(), inst.holes()).as_bytes());
-        for l in inst.trace() {
-            h.write_u64(l.sample);
-            h.write(&[l.event.status, l.event.data1, l.event.data2]);
-            h.write_u32(l.event.offset);
+        w.bytes(format!("{:?}{:?}", inst.report(), inst.holes()).as_bytes());
+        let trace = inst.trace();
+        w.usize(trace.len());
+        for l in trace {
+            w.u64(l.sample);
+            w.bytes(&[l.event.status, l.event.data1, l.event.data2]);
+            w.u32(l.event.offset);
         }
     }
 }

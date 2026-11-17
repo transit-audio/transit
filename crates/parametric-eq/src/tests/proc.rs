@@ -19,10 +19,23 @@ pub(crate) fn run(e: &mut crate::ParametricEq, io: &mut [Vec<f32>], block: usize
     }
 }
 
-/// The processor's fingerprint as one number.
-pub(crate) fn fingerprint(e: &crate::ParametricEq) -> u64 {
-    use std::hash::Hasher;
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    e.fingerprint(&mut h);
-    h.finish()
+/// The processor's state record, every word kept (the comparisons are exact; #742 migrated the
+/// sink from a hash of the same fields).
+pub(crate) fn fingerprint(e: &crate::ParametricEq) -> Vec<u64> {
+    #[derive(Default)]
+    struct Words(Vec<u64>);
+    impl core::hash::Hasher for Words {
+        fn write(&mut self, _: &[u8]) {
+            unreachable!("the record writer emits words only")
+        }
+        fn write_u64(&mut self, w: u64) {
+            self.0.push(w);
+        }
+        fn finish(&self) -> u64 {
+            0
+        }
+    }
+    let mut h = Words::default();
+    e.fingerprint(&mut transit_state_record::Writer::new(&mut h));
+    h.0
 }

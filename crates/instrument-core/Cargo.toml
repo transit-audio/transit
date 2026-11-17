@@ -14,11 +14,13 @@ default = ["std"]
 # them (ADR 0037 Tier B; CI checks that configuration for thumbv7em-none-eabihf).
 std = []
 # Test seams (state fingerprints for dsp's `Plugin::fingerprint`, issue #210); never enabled by the app.
-testing = []
+testing = ["dep:transit-state-record"]
 
 [dependencies]
 # The float functions of the no-default (`no_std`) configuration only; unused with `std`.
 libm.workspace = true
+# The lossless state record of the testing seams (ADR 0029, #742): enabled only through `testing`.
+transit-state-record = { workspace = true, optional = true }
 
 [lints]
 workspace = true

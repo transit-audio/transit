@@ -652,6 +652,145 @@ impl MidiFxHost {
             n.epoch = previous;
         }
     }
+
+    /// Test seam (feature `testing`; ADR 0029, amendment for #742, section 14): the host's state
+    /// record at a block boundary. Scope: the host is not capturing and holds no collected
+    /// events (asserted). `a` beyond its empty prefix, `b` and `merged` are unobservable: each
+    /// is overwritten before it is read (`a` by `begin`'s collection and the chain's copy back
+    /// from `merged`, `b` by `self.b.clear()` before each effect writes it in `run`, `merged` by
+    /// `self.merged.clear()` before each merge), witnessed by the mix-state gate's poison
+    /// controls. `counts` is telemetry.
+    #[cfg(feature = "testing")]
+    pub(crate) fn record(&self, w: &mut transit_state_record::Writer<'_>) {
+        let MidiFxHost {
+            stages,
+            len,
+            capturing,
+            frames,
+            clock,
+            a: _,
+            a_len,
+            b: _,
+            merged: _,
+            out,
+            given,
+            given_len,
+            retry,
+            retry_len,
+            epoch,
+            counts: _,
+            notes,
+        } = self;
+        assert!(!*capturing && *a_len == 0, "a MIDI effect host captured or held events at a block boundary (section 14 scope)");
+        w.usize(stages.len());
+        for s in stages {
+            w.present(s.as_ref(), |w, Stage { uid, plugin, bypass, fx, carry, carry_len }| {
+                w.u64(*uid);
+                w.u64(*plugin);
+                w.bool(*bypass);
+                w.present(fx.as_ref(), |w, fx| {
+                    let e = fx.effect_ref();
+                    w.bytes(e.info().id.as_bytes());
+                    e.fingerprint(w);
+                });
+                w.usize(*carry_len);
+                for Carried { due, event } in carry.get(..*carry_len).unwrap_or(carry) {
+                    w.u64(*due);
+                    crate::fingerprint::event_record(w, event);
+                }
+            });
+        }
+        w.usize(*len);
+        w.u32(*frames);
+        w.u64(*clock);
+        let note = |w: &mut transit_state_record::Writer<'_>, n: &Note| {
+            let Note { used, channel, key, voice, epoch } = n;
+            w.bool(*used);
+            if *used {
+                w.u8(*channel);
+                w.u8(*key);
+                w.i32(*voice);
+                w.u32(*epoch);
+            }
+        };
+        out.iter().for_each(|n| note(w, n));
+        given.iter().for_each(|n| note(w, n));
+        w.usize(*given_len);
+        w.usize(*retry_len);
+        for e in retry.get(..*retry_len).unwrap_or(retry) {
+            crate::fingerprint::event_record(w, e);
+        }
+        w.u32(*epoch);
+        notes.record_state(w);
+    }
+
+    /// Test seam (feature `testing`, #742's omission controls): one field of the host (the
+    /// edit epoch, one more retry, the note view's `full`).
+    #[cfg(feature = "testing")]
+    pub(crate) fn nudge(&mut self, what: crate::Nudge) -> bool {
+        match what {
+            crate::Nudge::MidiEpoch => self.epoch = self.epoch.wrapping_add(1),
+            crate::Nudge::MidiRetry => {
+                let Some(slot) = self.retry.get_mut(self.retry_len) else { return false };
+                *slot = PluginEvent { channel: 0, note_id: PluginEvent::NO_ID, message: Message::NoteOff { key: 64, velocity: 0, id: NoteId::NONE } };
+                self.retry_len += 1;
+            }
+            crate::Nudge::NoteViewFull => self.notes.nudge_full(),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Test seam (feature `testing`, #742 section 14's window rule): each effect of the chain
+    /// (`stages[..len]`, the rack's then the track's) that holds one, bypassed or not: its
+    /// registry entry and whether it declares its record complete.
+    #[cfg(feature = "testing")]
+    pub(crate) fn chain_facts(&self) -> impl Iterator<Item = (&'static str, bool)> + '_ {
+        self.stages.iter().take(self.len).flatten().filter_map(|s| s.fx.as_ref()).map(|fx| {
+            let e = fx.effect_ref();
+            (e.info().id, e.print_complete())
+        })
+    }
+
+    /// Test seam (feature `testing`, #742 section 14's poison controls): fills retained storage
+    /// that is unobservable at a block boundary with a fixed pattern of events (`which`: 0 the
+    /// collection buffer `a`, 1 an effect's output `b`, 2 the merge `merged`), changing every
+    /// entry and keeping every length and cursor. Returns the entries changed.
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison(&mut self, which: u8) -> usize {
+        let junk = |k: usize| TimedEvent {
+            offset: (k % 61) as u32,
+            event: PluginEvent {
+                channel: (k % 16) as u8,
+                note_id: -77,
+                message: Message::NoteOn { key: (k % 128) as u8, velocity: 99, id: NoteId(9) },
+            },
+        };
+        match which {
+            0 => {
+                let mut n = 0;
+                for (k, e) in self.a.iter_mut().enumerate() {
+                    n += usize::from(*e != junk(k));
+                    *e = junk(k);
+                }
+                n
+            }
+            1 => self.b.poison(junk),
+            _ => self.merged.poison(junk),
+        }
+    }
+
+    /// Test seam (feature `testing`, #742): the last block went through the storage
+    /// [`MidiFxHost::poison`] filled (`a`: the collection's first entry was written; `b` and
+    /// `merged`: an effect or the merge wrote events), so a poison control reached its read path.
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison_reached(&self, which: u8) -> bool {
+        match which {
+            0 => self.a.first().is_some_and(|e| e.event.note_id != -77),
+            1 => self.b.events().next().is_some_and(|e| e.event.note_id != -77),
+            _ => self.merged.events().next().is_some_and(|e| e.event.note_id != -77),
+        }
+    }
 }
 
 #[cfg(test)]

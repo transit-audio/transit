@@ -30,7 +30,7 @@ fn run(c: &mut SamplerCore, frame: u64, events: &[Event], frames: usize) -> (Vec
 fn fingerprint(c: &SamplerCore) -> u64 {
     use core::hash::Hasher;
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    c.fingerprint(&mut h);
+    c.fingerprint(&mut transit_state_record::Writer::new(&mut h));
     h.finish()
 }
 

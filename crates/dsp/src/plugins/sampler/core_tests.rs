@@ -230,7 +230,7 @@ fn render(sync: bool, sizes: &[usize], playing: bool, total: usize) -> ([Vec<f32
     #[cfg_attr(not(feature = "testing"), allow(unused_mut))]
     let mut h = std::collections::hash_map::DefaultHasher::new();
     #[cfg(feature = "testing")]
-    s.fingerprint(&mut h);
+    s.fingerprint(&mut transit_state_record::Writer::new(&mut h));
     (([l, r]), std::hash::Hasher::finish(&h))
 }
 

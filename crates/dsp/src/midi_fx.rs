@@ -159,6 +159,22 @@ pub trait MidiEffect: Send {
     /// Transforms one block: `input` is sorted by offset, each below `frames`. Writes to `out`;
     /// an offset at or past `frames` is due in a later block.
     fn process(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>, frames: u32);
+    /// Test seam (feature `testing`; ADR 0029, amendment for #742, section 12): the effect's state
+    /// record, as [`crate::Plugin::fingerprint`]. The default writes no state.
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, _w: &mut transit_state_record::Writer<'_>) {}
+    /// Test seam (feature `testing`, #742): the entry declares its record complete, as
+    /// [`crate::Plugin::print_complete`]. The default: not complete.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        false
+    }
+    /// Test seam (feature `testing`, #742): sets the state from a record, as
+    /// [`crate::Plugin::restore_print`]. The default: refused.
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, _r: &mut transit_state_record::Reader<'_>) -> bool {
+        false
+    }
 }
 
 /// The built-in MIDI effects, in menu order.

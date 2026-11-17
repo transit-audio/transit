@@ -45,4 +45,10 @@ impl MidiEffect for Delay {
             out.push(TimedEvent { offset: e.offset.saturating_add(self.samples), event: e.event });
         }
     }
+
+    /// Its one field, the delay (#742: the test fixture's writer).
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Delay { samples } = self;
+        w.u32(*samples);
+    }
 }

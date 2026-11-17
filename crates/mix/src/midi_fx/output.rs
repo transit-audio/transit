@@ -43,6 +43,18 @@ impl Output {
         }
     }
 
+    /// Test seam (feature `testing`, #742): every entry's event becomes `junk(k)`, links, length
+    /// and cursors unchanged. Returns the entries changed.
+    #[cfg(feature = "testing")]
+    pub(super) fn poison(&mut self, junk: impl Fn(usize) -> TimedEvent) -> usize {
+        let mut n = 0;
+        for (k, e) in self.entries.iter_mut().enumerate() {
+            n += usize::from(e.event != junk(k));
+            e.event = junk(k);
+        }
+        n
+    }
+
     pub(super) fn clear(&mut self) {
         self.len = 0;
         self.first = END;

@@ -380,36 +380,38 @@ impl ParametricEq {
         }
     }
 
-    /// Hashes the processor's whole run state (sections, smoothers, ramps, clock, gain match).
+    /// Writes the processor's whole run state (sections, smoothers, ramps, clock, gain match) as a
+    /// state record (ADR 0029, #742: typed items over the state record codec).
     #[cfg(any(test, feature = "testing"))]
-    pub fn fingerprint<H: core::hash::Hasher>(&self, h: &mut H) {
-        h.write_u64(self.clock);
-        h.write_u8(self.stage2 as u8);
+    pub fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.u64(self.clock);
+        w.u8(self.stage2 as u8);
         for s in [&self.output, &self.match_gain] {
-            h.write_u64(s.cur.to_bits());
-            h.write_u64(s.target.to_bits());
+            w.f64(s.cur);
+            w.f64(s.target);
         }
         for b in &self.bands {
             for s in [&b.log2_f, &b.log2_q, &b.gain] {
-                h.write_u64(s.cur.to_bits());
-                h.write_u64(s.target.to_bits());
+                w.f64(s.cur);
+                w.f64(s.target);
             }
-            h.write_u32(b.ramp.pos);
-            h.write_u8(b.interp as u8);
+            w.u32(b.ramp.pos);
+            w.u8(b.interp as u8);
+            w.usize(b.prev.n_sos);
             for s in &b.prev.sos[..b.prev.n_sos] {
-                h.write_u64(s.a1.to_bits());
-                h.write_u64(s.m1.to_bits());
+                w.f64(s.a1);
+                w.f64(s.m1);
             }
-            h.write_i8(b.ramp.dir);
-            h.write_u8(b.processed as u8);
-            h.write_u8(b.kind as u8);
+            w.i8(b.ramp.dir);
+            w.u8(b.processed as u8);
+            w.u8(b.kind as u8);
             for st in &b.states {
                 for v in st.sos.iter().flatten() {
-                    h.write_u64(v.to_bits());
+                    w.f64(*v);
                 }
-                h.write_u64(st.fos.to_bits());
+                w.f64(st.fos);
             }
         }
-        self.gm.fingerprint(h);
+        self.gm.fingerprint(w);
     }
 }

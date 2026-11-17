@@ -15,15 +15,19 @@ default = ["std"]
 # explicitly to the shared primitives, whose workspace edge has default features off.
 std = ["transit-instrument-core/std"]
 # Test seams (the state fingerprint, issue #210); never enabled by the app.
-testing = ["transit-instrument-core/testing"]
+testing = ["dep:transit-state-record", "transit-instrument-core/testing"]
 
 [dependencies]
 # The shared instrument primitives (shaper, matrix; ADR 0041): the one workspace dependency, L1.
 transit-instrument-core.workspace = true
 # The float functions of the no-default (`no_std`) configuration only; unused with `std`.
 libm.workspace = true
+# The lossless state record of the testing seams (ADR 0029, #742): enabled only through `testing`.
+transit-state-record = { workspace = true, optional = true }
 
 [dev-dependencies]
+# The crate's own tests write the state fingerprint (`cfg(test)`) without the `testing` feature.
+transit-state-record.workspace = true
 # The shaper's filter-memory fingerprint seam for the crate's own state fingerprint tests.
 transit-instrument-core = { workspace = true, features = ["testing"] }
 # The allocation probe (`tests/realtime.rs`) counts heap use on the test thread.

@@ -31,6 +31,17 @@ impl EngineEvents {
     }
 }
 
+/// An event as the queue admits it ([`EngineEvents::admission`]): its due frame, how late it came
+/// and how far a release was advanced to the horizon, its transport (a stale release's dropped)
+/// and its message.
+pub(crate) struct Admission {
+    pub(crate) due: u64,
+    pub(crate) late: u64,
+    pub(crate) advanced: u64,
+    pub(crate) transport: Option<TransportEpoch>,
+    pub(crate) message: Message,
+}
+
 /// The instrument slot an event names, when it is a live, event-taking instrument.
 fn instrument_of<'a>(
     session: &Session,
@@ -93,16 +104,18 @@ impl EngineEvents {
         Ok(())
     }
 
-    /// Queues `ev` on `inst`, after the binding checks: the transport check, the due frame (late,
-    /// horizon) and the queue's own admission.
-    pub(crate) fn admit_into(&mut self, inst: &mut PluginSlot, ev: &InstrumentEvent) -> (EventOutcome, Option<u64>) {
+    /// What the queue's admission of `ev` gets, at the render clock's next frame: the transport
+    /// check, the due frame (late, horizon) and the message (a note-on with velocity 0 is a
+    /// note-off). `Err` with the outcome (and the frame) when refused before the queue. Shared
+    /// by [`EngineEvents::admit_into`] and the testing seam's canonical pending form.
+    pub(crate) fn admission(&self, ev: &InstrumentEvent) -> Result<Admission, (EventOutcome, Option<u64>)> {
         let release = is_release_message(&ev.message);
         // A release is never refused for transport staleness: its note or pedal may already sound.
         // It is no longer the old transport's either (a later change does not cancel it).
         let mut transport = ev.transport;
         if transport.is_some_and(|t| Some(t) != self.transport) {
             if !release {
-                return (EventOutcome::StaleTransport, None);
+                return Err((EventOutcome::StaleTransport, None));
             }
             transport = None;
         }
@@ -113,20 +126,30 @@ impl EngineEvents {
             Due::Frame(RenderFrame(f)) if f < next => (next, next - f, 0),
             Due::Frame(RenderFrame(f)) if f > horizon => {
                 if !release {
-                    return (EventOutcome::TooEarly, Some(f));
+                    return Err((EventOutcome::TooEarly, Some(f)));
                 }
                 (horizon, 0, f - horizon)
             }
             Due::Frame(RenderFrame(f)) => (f, 0, 0),
         };
-        let Some(events) = inst.events.as_deref_mut() else { return (EventOutcome::NoInstrument, None) };
-        let st = &mut self.status;
-        let frames = |n: u64| u32::try_from(n).unwrap_or(u32::MAX);
         // A note-on with velocity 0 is a note-off (ingress normally does this already).
         let message = match ev.message {
             Message::NoteOn { key, velocity: 0, id } => Message::NoteOff { key, velocity: 0, id },
             m => m,
         };
+        Ok(Admission { due, late, advanced, transport, message })
+    }
+
+    /// Queues `ev` on `inst`, after the binding checks: the transport check, the due frame (late,
+    /// horizon) and the queue's own admission.
+    pub(crate) fn admit_into(&mut self, inst: &mut PluginSlot, ev: &InstrumentEvent) -> (EventOutcome, Option<u64>) {
+        let Admission { due, late, advanced, transport, message } = match self.admission(ev) {
+            Ok(a) => a,
+            Err(refused) => return refused,
+        };
+        let Some(events) = inst.events.as_deref_mut() else { return (EventOutcome::NoInstrument, None) };
+        let st = &mut self.status;
+        let frames = |n: u64| u32::try_from(n).unwrap_or(u32::MAX);
         let outcome = match events.admit(due, ev.source, transport, message, st) {
             Admit::Queued if advanced > 0 => EventOutcome::ReleaseAdvanced { frames: frames(advanced) },
             Admit::Queued if late > 0 => EventOutcome::QueuedLate { frames: frames(late) },

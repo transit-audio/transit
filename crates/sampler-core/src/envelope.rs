@@ -163,9 +163,13 @@ impl Envelope {
         self.stage == Stage::Release
     }
 
+    /// Test seam (#742): the stage, its position, the level and the release's start level.
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn bits(&self) -> (u8, u32, u32, u32) {
-        (self.stage as u8, self.pos, self.level.to_bits(), self.from.to_bits())
+    pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.u8(self.stage as u8);
+        w.u32(self.pos);
+        w.f32(self.level);
+        w.f32(self.from);
     }
 }
 
@@ -198,9 +202,12 @@ impl Ramp {
         self.pos >= self.len
     }
 
+    /// Test seam (#742): the start gain, the position and the length.
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn bits(&self) -> (u32, u32, u32) {
-        (self.from.to_bits(), self.pos, self.len)
+    pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.f32(self.from);
+        w.u32(self.pos);
+        w.u32(self.len);
     }
 }
 

@@ -203,6 +203,35 @@ impl NoteDelay {
         self.clock = end;
         dropped
     }
+
+    /// Test seam (feature `testing`, #742's omission controls): toggles the stand-in alone.
+    #[cfg(feature = "testing")]
+    pub(crate) fn nudge_stand_in(&mut self) -> bool {
+        self.stand_in = match self.stand_in {
+            Some(_) => None,
+            None => Some(self.order),
+        };
+        true
+    }
+
+    /// Test seam (feature `testing`, #742 section 14): the followed source, the live prefix
+    /// `carry[..len]` (entries past it are not read), the clock, the order counter, the stand-in
+    /// and the skipped flag.
+    #[cfg(feature = "testing")]
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let NoteDelay { source, carry, len, clock, order, stand_in, skipped } = self;
+        w.present(*source, |w, g| w.u64(g.get()));
+        w.usize(*len);
+        for Pending { source, order, event } in carry.get(..*len).unwrap_or(carry) {
+            w.u64(*source);
+            w.u64(*order);
+            crate::fingerprint::event_record(w, event);
+        }
+        w.u64(*clock);
+        w.u64(*order);
+        w.present(*stand_in, |w, o| w.u64(o));
+        w.bool(*skipped);
+    }
 }
 
 #[cfg(test)]

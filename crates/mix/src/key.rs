@@ -94,11 +94,12 @@ impl KeyLine {
         self.tap = old.tap;
     }
 
-    /// Test seam (issue #210): the line's history, its write position and its read.
+    /// Test seam (issue #210, #742): the line's history, its write position and its read.
     #[cfg(feature = "testing")]
-    pub(crate) fn fingerprint(&self, h: &mut crate::fingerprint::PrintHasher) {
-        crate::fingerprint::line_print(&self.line, h);
-        crate::fingerprint::edge_print(&self.tap, h);
+    pub(crate) fn record(&self, w: &mut transit_state_record::Writer<'_>) {
+        let KeyLine { line, tap } = self;
+        crate::fingerprint::line_record(line, w);
+        crate::fingerprint::edge_record(tap, w);
     }
 
     /// Test seam (issue #210): the line's flags and positions, readable.
@@ -130,14 +131,17 @@ pub(crate) struct KeyIn {
 }
 
 impl KeyIn {
-    /// Test seam (issue #210): this block's delay, whether the insert ran, and the line.
+    /// Test seam (issue #210, #742): the keyed slot, this block's delay, whether the insert ran,
+    /// and the line. `scratch` is unobservable: `KeyLine::apply` writes it (`read_x`, which
+    /// clears and refills every channel) before the copy back reads it; the mix-state gate's
+    /// poison control witnesses it.
     #[cfg(feature = "testing")]
-    pub(crate) fn fingerprint(&self, h: &mut crate::fingerprint::PrintHasher) {
-        use std::hash::Hasher as _;
-        h.write_u16(self.slot);
-        h.write_usize(self.want);
-        h.write_u8(u8::from(self.ran));
-        self.line.fingerprint(h);
+    pub(crate) fn record(&self, w: &mut transit_state_record::Writer<'_>) {
+        let KeyIn { slot, want, line, ran, scratch: _ } = self;
+        w.u16(*slot);
+        w.usize(*want);
+        w.bool(*ran);
+        line.record(w);
     }
 
     pub(crate) fn new(slot: u16, ch: usize, cap: usize, block: usize) -> Self {
@@ -269,16 +273,68 @@ impl KeyBank {
         self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed).map(|e| e.line.history()).collect()
     }
 
-    /// Test seam (issue #210): the entries keyed at `keyed`, in bank order: each one's delay
-    /// and line (an entry lent to a render worker's job is skipped: the strip is away).
+    /// Test seam (issue #210, #742 section 14): the entries keyed at `keyed`, in bank order:
+    /// each one's spec (configuration), whether it is lent, its delay, its line, its pending
+    /// early-key frames and, while those are pending, the key's first `pending` frames (the
+    /// delay runs over them when the strip renders, `apply_pending`). The rest of `buf` and all
+    /// of `scratch` are unobservable: the next fill writes `buf` before the strip reads it, and
+    /// `KeyLine::apply` writes `scratch` before it reads it (the gate's poison controls).
     #[cfg(feature = "testing")]
-    pub(crate) fn fingerprint_of(&self, keyed: usize, h: &mut crate::fingerprint::PrintHasher) {
-        use std::hash::Hasher as _;
-        for e in self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent) {
-            h.write_u16(e.spec.slot);
-            h.write_usize(e.want);
-            e.line.fingerprint(h);
+    pub(crate) fn record_of(&self, keyed: usize, w: &mut transit_state_record::Writer<'_>) {
+        for e in self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed) {
+            let KeyEntry { spec, lent, buf, line, scratch: _, want, pending } = e;
+            let KeySpec { keyed, id, slot, from, pre, ch } = spec;
+            w.u16(*keyed);
+            w.u64(id.0);
+            w.u16(*slot);
+            match from {
+                KeyEnd::Strip(j) => {
+                    w.u8(0);
+                    w.u16(*j);
+                }
+                KeyEnd::Bus(b) => {
+                    w.u8(1);
+                    w.u64(b.0);
+                }
+            }
+            w.bool(*pre);
+            w.u16(*ch);
+            w.bool(*lent);
+            w.usize(*want);
+            line.record(w);
+            w.usize(*pending);
+            if *pending > 0 {
+                w.usize(buf.len());
+                for c in buf {
+                    w.f32s(c.get(..*pending).unwrap_or(c));
+                }
+            }
         }
+    }
+
+    /// Test seam (feature `testing`, #742's omission controls): the first entry keyed at `keyed`
+    /// gets one early-key frame pending (its key's first frame then enters the record).
+    #[cfg(feature = "testing")]
+    pub(crate) fn nudge_pending(&mut self, keyed: usize) -> bool {
+        let Some(e) = self.entries.iter_mut().find(|e| usize::from(e.spec.keyed) == keyed && !e.lent) else { return false };
+        e.pending = if e.pending == 0 { 1 } else { 0 };
+        true
+    }
+
+    /// Test seam (feature `testing`, #742 section 14's poison controls): `fill` over the entries
+    /// keyed at `keyed` that are home: `buf` past the pending early-key frames (`buf`), else
+    /// `scratch`. Returns what `fill` changed.
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison_of(&mut self, keyed: usize, buf: bool, fill: impl Fn(&mut [Vec<f32>], usize) -> usize) -> usize {
+        let mine = self.entries.iter_mut().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent);
+        mine.map(|e| if buf { fill(&mut e.buf, e.pending) } else { fill(&mut e.scratch, 0) }).sum()
+    }
+
+    /// Test seam (feature `testing`, #742): what [`KeyBank::poison_of`]'s pattern left, by `left`.
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison_left_of(&self, keyed: usize, buf: bool, left: impl Fn(&[Vec<f32>], usize) -> usize) -> usize {
+        let mine = self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent);
+        mine.map(|e| if buf { left(&e.buf, e.pending) } else { left(&e.scratch, 0) }).sum()
     }
 
     /// Test seam (issue #210 review): an entry keyed at `keyed` holds a key whose early-key delay

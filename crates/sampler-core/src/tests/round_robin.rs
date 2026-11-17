@@ -508,7 +508,7 @@ fn block_sizes_render_a_group_the_same() {
             at += n;
         }
         let mut h = DefaultHasher::new();
-        c.fingerprint(&mut h);
+        c.fingerprint(&mut transit_state_record::Writer::new(&mut h));
         (out, h.finish())
     };
     let (a, fa) = run(64);

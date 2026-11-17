@@ -309,9 +309,9 @@ impl CorePath {
 
     /// The state fingerprint (feature `testing`): the core's, the adapter's frame counter.
     #[cfg(feature = "testing")]
-    pub(super) fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
-        self.core.fingerprint(h);
-        h.write_u64(self.frame);
+    pub(super) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.core.fingerprint(w);
+        w.u64(self.frame);
     }
 
     /// The core, for the crate's tests.

@@ -182,9 +182,9 @@ pub(crate) fn butterworth_qs(order: usize) -> &'static [f32] {
 /// Test seam (feature `testing`, issue #210): the filter's memory.
 #[cfg(feature = "testing")]
 impl Biquad {
-    pub(crate) fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
-        h.write_u32(self.z1.to_bits());
-        h.write_u32(self.z2.to_bits());
+    pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.f32(self.z1);
+        w.f32(self.z2);
     }
 }
 

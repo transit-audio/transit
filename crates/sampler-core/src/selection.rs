@@ -194,16 +194,10 @@ impl RoundRobin {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn fingerprint(&self, h: &mut dyn core::hash::Hasher) {
-        h.write_u32(self.seed);
-        for m in &self.modes {
-            h.write_u8(*m as u8);
-        }
-        for c in &self.counters {
-            h.write_u16(*c);
-        }
-        for x in &self.random {
-            h.write_u32(*x);
-        }
+    pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.u32(self.seed);
+        w.uints(self.modes.len(), self.modes.iter().map(|&m| m as u64));
+        w.uints(self.counters.len(), self.counters.iter().map(|&c| u64::from(c)));
+        w.uints(self.random.len(), self.random.iter().map(|&x| u64::from(x)));
     }
 }

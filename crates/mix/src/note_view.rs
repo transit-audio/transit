@@ -117,6 +117,24 @@ impl NoteView {
         self.events.get(..self.len).unwrap_or_default()
     }
 
+    /// Test seam (feature `testing`, #742's omission controls): toggles `full` alone.
+    #[cfg(feature = "testing")]
+    pub(crate) fn nudge_full(&mut self) {
+        self.full = !self.full;
+    }
+
+    /// Test seam (feature `testing`, #742 section 14): the live prefix and whether the view is
+    /// full (it refuses later starts). Entries past `len` are not read (`events` is the prefix).
+    #[cfg(feature = "testing")]
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let NoteView { events, len, full } = self;
+        w.usize(*len);
+        for e in events.get(..*len).unwrap_or(events) {
+            crate::fingerprint::timed_record(w, e);
+        }
+        w.bool(*full);
+    }
+
     pub(crate) fn clear(&mut self) {
         self.len = 0;
         self.full = false;

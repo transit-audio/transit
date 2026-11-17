@@ -511,20 +511,15 @@ impl Plugin for Filter {
     }
 
     #[cfg(feature = "testing")]
-    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
-        h.write_u64(self.clock);
-        h.write_u32(self.env.level.to_bits());
-        h.write_u32(self.amp.level.to_bits());
-        h.write_u32(self.follower.level.to_bits());
-        let (phase, step, rng) = self.lfo.bits();
-        h.write_u64(phase);
-        h.write_u32(step);
-        h.write_u32(rng);
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.u64(self.clock);
+        w.f32(self.env.level);
+        w.f32(self.amp.level);
+        w.f32(self.follower.level);
+        self.lfo.fingerprint(w);
         for st in &self.state {
             for s in st {
-                let [a, b] = s.bits();
-                h.write_u32(a);
-                h.write_u32(b);
+                s.fingerprint(w);
             }
         }
     }

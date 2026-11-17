@@ -829,7 +829,8 @@ fn t5h_pool_adoption_orders_checkpoints_before_parked_delivery() {
     let queued = |rig: &PlanRig| {
         use std::hash::Hasher;
         let mut hash = std::hash::DefaultHasher::new();
-        rig.eng.plan.as_deref().unwrap().tables.strips[slot].instrument.as_ref().unwrap().events.as_deref().unwrap().fingerprint(&mut hash);
+        let events = rig.eng.plan.as_deref().unwrap().tables.strips[slot].instrument.as_ref().unwrap().events.as_deref().unwrap();
+        events.record_ledger(&mut transit_state_record::Writer::new(&mut hash), 0);
         hash.finish()
     };
     let before = queued(&rig);

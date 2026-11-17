@@ -494,44 +494,33 @@ impl Voice {
 
     /// The voice's state bits (the testing fingerprint, issue #210).
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn fingerprint(&self, h: &mut dyn core::hash::Hasher) {
-        h.write_u8(u8::from(self.active));
+    pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.bool(self.active);
         if !self.active {
             return;
         }
-        h.write_u16(self.zone);
-        h.write_u64(self.serial);
-        h.write_u64(self.released);
-        h.write_u64(self.head.pos.to_bits());
-        h.write_u8(u8::from(self.head.up) | u8::from(self.head.wrapped) << 1 | u8::from(self.held) << 2 | u8::from(self.sustained) << 3);
-        h.write_u64(self.step.to_bits());
-        let (stage, pos, level, from) = self.env.bits();
-        h.write_u8(stage);
-        h.write_u32(pos);
-        h.write_u32(level);
-        h.write_u32(from);
-        if let Some(f) = &self.fade {
-            let (a, b, c) = f.bits();
-            h.write_u32(a);
-            h.write_u32(b);
-            h.write_u32(c);
-        }
-        h.write_u32(self.grid);
-        h.write_u32(self.gains.0.to_bits());
-        h.write_u32(self.gains.1.to_bits());
-        h.write_u64(self.age);
+        w.u16(self.zone);
+        w.u64(self.serial);
+        w.u64(self.released);
+        w.f64(self.head.pos);
+        w.bool(self.head.up);
+        w.bool(self.head.wrapped);
+        w.bool(self.held);
+        w.bool(self.sustained);
+        w.f64(self.step);
+        self.env.fingerprint(w);
+        w.present(self.fade.as_ref(), |w, f| f.fingerprint(w));
+        w.u32(self.grid);
+        w.f32(self.gains.0);
+        w.f32(self.gains.1);
+        w.u64(self.age);
         for s in &self.shaper {
             for l in &s.lfo {
-                let (p, st, rng) = l.bits();
-                h.write_u64(p);
-                h.write_u32(st);
-                h.write_u32(rng);
+                l.fingerprint(w);
             }
-            h.write_u32(s.filter_env.level.to_bits());
-            for b in s.filter_bits().iter().flatten() {
-                h.write_u32(*b);
-            }
-            h.write_u32(s.random.to_bits());
+            w.f32(s.filter_env.level);
+            s.fingerprint_filter(w);
+            w.f32(s.random);
         }
     }
 }

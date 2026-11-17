@@ -197,9 +197,13 @@ impl Lfo {
         }
     }
 
+    /// Test seam (feature `testing`, #742): the phase, the held step and the generator's state,
+    /// each under its typed tag.
     #[cfg(feature = "testing")]
-    pub fn bits(&self) -> (u64, u32, u32) {
-        (self.phase.to_bits(), self.step.to_bits(), self.rng)
+    pub fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.f64(self.phase);
+        w.f32(self.step);
+        w.u32(self.rng);
     }
 }
 

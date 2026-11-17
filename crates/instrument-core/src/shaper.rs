@@ -437,11 +437,13 @@ impl Shaper {
         self.sections = [Section::default(); 2];
     }
 
-    /// The filter memories' bits (a state fingerprint seam, issue #210).
+    /// Test seam (feature `testing`, issue #210, #742): the four filter memories (two sections'
+    /// integrators), each under the f32 tag.
     #[cfg(feature = "testing")]
-    #[must_use]
-    pub fn filter_bits(&self) -> [[u32; 2]; 2] {
-        [self.sections[0].bits(), self.sections[1].bits()]
+    pub fn fingerprint_filter(&self, w: &mut transit_state_record::Writer<'_>) {
+        for s in &self.sections {
+            s.fingerprint(w);
+        }
     }
 }
 

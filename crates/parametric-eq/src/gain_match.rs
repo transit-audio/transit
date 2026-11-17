@@ -282,16 +282,16 @@ impl Scheduler {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn fingerprint<H: core::hash::Hasher>(&self, h: &mut H) {
+    pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
         for s in &self.stale {
-            h.write_u8(*s as u8);
+            w.bool(*s);
         }
-        h.write_usize(self.current.unwrap_or(usize::MAX));
-        h.write_usize(self.pos);
-        h.write_usize(self.last);
-        h.write_u64(self.match_db.to_bits());
+        w.present(self.current, |w, c| w.usize(c));
+        w.usize(self.pos);
+        w.usize(self.last);
+        w.f64(self.match_db);
         for v in &self.partials {
-            h.write_u64(v.to_bits());
+            w.f64(*v);
         }
     }
 }

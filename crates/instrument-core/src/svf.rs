@@ -106,9 +106,11 @@ impl Section {
         }
     }
 
+    /// Test seam (feature `testing`, #742): the two integrator memories.
     #[cfg(feature = "testing")]
-    pub fn bits(&self) -> [u32; 2] {
-        [self.ic1.to_bits(), self.ic2.to_bits()]
+    pub fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        w.f32(self.ic1);
+        w.f32(self.ic2);
     }
 }
 

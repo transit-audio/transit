@@ -155,9 +155,9 @@ impl Plugin for Sampler {
     }
 
     #[cfg(feature = "testing")]
-    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
         if let Some(c) = self.core.as_deref() {
-            c.fingerprint(h);
+            c.fingerprint(w);
         }
     }
 
