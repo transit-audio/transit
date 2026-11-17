@@ -26,7 +26,9 @@ jobs:
   rt:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # 75, not 45, until the corpus plug-ins have state fingerprints (#742): the scheduling
+    # corpus test is long compute and had no margin on the slowest runner.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +74,9 @@ jobs:
         run: cargo clippy -p transit-rt --all-targets --features force-fallback -- -D warnings
       - name: clippy (mix)
         run: cargo clippy -p transit-mix --all-targets -- -D warnings
+      # Built in its own step so a cold cache shows as compile time, not test time (#742).
+      - name: build tests
+        run: cargo test -p transit-rt -p transit-mix --no-run
       - name: test
         run: cargo test -p transit-rt -p transit-mix
       - name: test (rt, force-fallback)
