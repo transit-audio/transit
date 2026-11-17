@@ -410,6 +410,11 @@ impl Player {
             _ => None,
         }
     }
+    /// A clone of the prepared MIDI pass's ticket-owned record-start reader (its own, or the audio
+    /// take's it shares), for the host's transport phase; `None` when no MIDI pass is prepared.
+    pub fn midi_recording_reader(&self) -> Option<record::start::Reader> {
+        self.midi_pass.try_borrow().ok()?.as_ref().map(|pass| pass.reader.clone())
+    }
     /// Is a MIDI pass prepared and not yet finished?
     pub fn midi_recording_prepared(&self) -> bool {
         self.midi_pass.try_borrow().is_ok_and(|pass| pass.is_some())

@@ -20,6 +20,7 @@ impl StudioApp {
             prime_disk(self.engine.session(), from);
             let Some(sequence) = self.player_requests.result(&mut self.status, p.play(from, end, looped)) else { return };
             self.player_requests.play = Some(sequence);
+            self.player_requests.meta.play_start = Some((sequence, from));
             self.status = "Play pending".into();
         } else {
             self.sim = Some((from, end, looped));
@@ -29,8 +30,15 @@ impl StudioApp {
     }
 
     pub(crate) fn stop_play(&mut self) {
+        self.stop_play_for(lifecycle::StopReason::User);
+    }
+
+    /// [`StudioApp::stop_play`], keeping why the Stop was required for the transport phase.
+    fn stop_play_for(&mut self, reason: lifecycle::StopReason) {
         self.live_clear();
         if let Some(p) = &self.player {
+            let tracked = self.player_requests.stop.is_some();
+            self.player_requests.meta.stop_required(reason, tracked);
             // Half-speed is a separate command. Stop must not leave that rate for the next Play.
             p.set_speed(1.0);
             let stopped = self.player_requests.result(&mut self.status, p.stop());
@@ -174,6 +182,8 @@ impl StudioApp {
                     self.midi_transport.deferred.clear();
                     self.restore_pending = true;
                     if let Some(p) = &self.player {
+                        let tracked = self.player_requests.stop.is_some();
+                        self.player_requests.meta.stop_required(lifecycle::StopReason::Reset, tracked);
                         // Normal speed is stored before Stop is sent, as `stop_play` does.
                         p.set_speed(1.0);
                         if let Some(sequence) = self.player_requests.result(&mut self.status, p.stop()) {
@@ -181,6 +191,7 @@ impl StudioApp {
                         }
                         if let Some(sequence) = self.player_requests.result(&mut self.status, p.set_recording(false)) {
                             self.player_requests.recording = Some(sequence);
+                            self.player_requests.meta.record_off = Some(sequence);
                         }
                     }
                     self.sim = None;
@@ -260,7 +271,7 @@ impl StudioApp {
                     self.midi_transport.retained = at;
                     if self.recording_active() {
                         self.midi_transport.take_locate = Some(at);
-                        self.stop_play();
+                        self.stop_play_for(lifecycle::StopReason::Locate);
                         self.midi_transport.deferred.extend(reqs);
                         break;
                     }

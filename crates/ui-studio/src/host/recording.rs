@@ -107,6 +107,7 @@ impl StudioApp {
         count_in: Option<CountIn>,
     ) {
         let rate = self.recorder.as_ref().map_or(0, |r| r.sample_rate);
+        self.player_requests.meta.pass = None;
         self.record_clock = None;
         self.sim_laps = 0;
         // The loop this pass records under; Cycle edits made while it runs wait for its end (#81).
@@ -133,7 +134,8 @@ impl StudioApp {
         if let Some(p) = &self.player {
             let (from, end, looped) = play.map_or((None, None, None), |(from, end, looped)| (Some(from), end, looped));
             let _ = p.take_start_failure();
-            let started = if self.take_plan.as_ref().is_some_and(|plan| plan.takes.is_empty()) && p.midi_recording_prepared() {
+            let midi_only = self.take_plan.as_ref().is_some_and(|plan| plan.takes.is_empty()) && p.midi_recording_prepared();
+            let started = if midi_only {
                 // MIDI only: the latch is the capture pass's own.
                 p.record_midi_with_count_in(from, end, looped, count_in)
             } else if let Some(recorder) = self.recorder.as_ref() {
@@ -147,6 +149,10 @@ impl StudioApp {
                 return;
             };
             self.player_requests.recording = Some(sequence);
+            // The record start's ticket-owned reader, for the transport phase (ADR 0062 slice S1).
+            let reader =
+                if midi_only { p.midi_recording_reader() } else { self.recorder.as_ref().and_then(transit_playback::record::Recorder::start_reader) };
+            self.player_requests.meta.pass = reader.map(|reader| lifecycle::PassMeta { reader, request: sequence, from, count_in });
             if play.is_some() {
                 self.player_requests.play = Some(sequence);
             }
@@ -379,6 +385,7 @@ impl StudioApp {
             && let Some(sequence) = self.player_requests.result(&mut self.status, p.set_recording(false))
         {
             self.player_requests.recording = Some(sequence);
+            self.player_requests.meta.record_off = Some(sequence);
         }
         let plan = self.take_plan.take();
         // What the engine says while this pass is placed; the lap notes among it end the status line.

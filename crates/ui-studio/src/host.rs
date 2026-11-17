@@ -16,6 +16,7 @@
 //! state are left out. The automation write pass is in [`crate::automation::write_pass`] (slice 7).
 
 mod autosave;
+pub mod lifecycle;
 mod plugin_state;
 pub(crate) mod reconnect;
 mod recording;
@@ -268,18 +269,29 @@ pub(crate) struct PlayerRequests {
     release: Option<transit_playback::action_lane::Sequence>,
     pub(crate) recording: Option<transit_playback::action_lane::Sequence>,
     error: Option<String>,
+    /// What the transport phase is derived from besides the sequences (ADR 0062 slice S1).
+    pub(crate) meta: lifecycle::RequestMeta,
 }
 
 impl Default for PlayerRequests {
     fn default() -> Self {
-        Self { notices: [None; 64], play: None, locate: None, stop: None, release: None, recording: None, error: None }
+        Self {
+            notices: [None; 64],
+            play: None,
+            locate: None,
+            stop: None,
+            release: None,
+            recording: None,
+            error: None,
+            meta: lifecycle::RequestMeta::default(),
+        }
     }
 }
 
 impl PlayerRequests {
     pub(crate) fn reset(&mut self) {
-        let error = self.error.take();
-        *self = Self { error, ..Self::default() };
+        let (error, meta) = (self.error.take(), std::mem::take(&mut self.meta));
+        *self = Self { error, meta, ..Self::default() };
     }
 
     pub(crate) fn pending(&self) -> bool {
@@ -309,54 +321,30 @@ impl PlayerRequests {
         }
     }
 
-    /// Returns true when a refused start requires collecting an armed take.
+    /// Returns true when a refused start requires collecting an armed take. Today's text and
+    /// flag rules over [`PlayerRequests::classify`].
     pub(crate) fn notice(&mut self, notice: transit_playback::PlayerNotice, status: &mut String, recording: &mut bool) -> bool {
-        use transit_playback::{ActionResult, PlayerCommand, PlayerNotice, action_lane::Outcome, player::SessionOutcome};
-        match notice {
-            PlayerNotice::Session(n) => {
-                if let SessionOutcome::Rejected(reason) = n.outcome {
-                    self.fail(status, format!("Audio session {} rejected: {reason:?}", n.request.get()));
+        use transit_playback::{PlayerCommand, action_lane::Outcome};
+        match self.classify(notice) {
+            lifecycle::Classified::Session(rejected) => {
+                if let Some(text) = rejected {
+                    self.fail(status, text);
                 }
             }
-            PlayerNotice::Action(r) => {
-                let applied = r.outcome == Outcome::Applied
-                    && matches!(
-                        r.handler_result,
-                        Some(
-                            ActionResult::Applied
-                                | ActionResult::RecordingStarted(_)
-                                | ActionResult::Event(
-                                    transit_mix::EventOutcome::Queued
-                                        | transit_mix::EventOutcome::QueuedLate { .. }
-                                        | transit_mix::EventOutcome::ReleaseAdvanced { .. }
-                                        | transit_mix::EventOutcome::Coalesced
-                                )
-                        )
-                    );
-                if self.locate == Some(r.sequence) {
-                    self.locate = None;
+            lifecycle::Classified::Action { receipt: r, applied, play, record } => {
+                if play && applied && status == "Play pending" {
+                    *status = "Playing".into();
                 }
-                let play = self.play == Some(r.sequence);
-                let record = self.recording == Some(r.sequence);
-                if play {
-                    self.play = None;
-                    if applied && status == "Play pending" {
-                        *status = "Playing".into();
-                    }
-                }
-                if record {
-                    self.recording = None;
-                    if applied {
-                        match r.payload {
-                            PlayerCommand::Recording(on) => *recording = on,
-                            PlayerCommand::Record { .. } => {
-                                *recording = true;
-                                if status == "Record pending" {
-                                    *status = "Recording".into();
-                                }
+                if record && applied {
+                    match r.payload {
+                        PlayerCommand::Recording(on) => *recording = on,
+                        PlayerCommand::Record { .. } => {
+                            *recording = true;
+                            if status == "Record pending" {
+                                *status = "Recording".into();
                             }
-                            _ => {}
                         }
+                        _ => {}
                     }
                 }
                 if !applied && !matches!(r.outcome, Outcome::Stopped | Outcome::NotesReleased) {
@@ -369,23 +357,20 @@ impl PlayerRequests {
         false
     }
 
+    /// Today's text rules over [`PlayerRequests::frontiers`]; true when the tracked Stop retired.
     pub(crate) fn recovery(
         &mut self,
         frontiers: (transit_playback::action_lane::Sequence, transit_playback::action_lane::Sequence),
         status: &mut String,
     ) -> bool {
-        let stopped = self.stop.is_some_and(|s| frontiers.0 >= s);
-        if stopped {
-            self.stop = None;
-            if status == "Stop pending" {
-                *status = "Stopped".into();
-            }
+        let reached = self.frontiers(frontiers);
+        if reached.stop && status == "Stop pending" {
+            *status = "Stopped".into();
         }
-        if self.release.is_some_and(|s| frontiers.1 >= s) {
-            self.release = None;
+        if reached.release {
             *status = "All MIDI notes off".into();
         }
-        stopped
+        reached.stop
     }
 
     pub(crate) fn show_error(&mut self, status: &mut String) {
