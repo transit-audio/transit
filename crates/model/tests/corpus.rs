@@ -208,7 +208,7 @@ fn a_release_session_with_the_old_synth_opens_with_a_macro_oscillator_and_one_re
         let swapped = stored.tracks.iter().filter(|t| t.instrument.as_ref().is_some_and(|i| i.plugin == "subtractive_synth")).count();
         assert!(swapped > 0, "{name}");
         assert!(s.tracks.iter().all(|t| t.instrument.as_ref().is_none_or(|i| i.plugin != "subtractive_synth")), "{name}");
-        let status = format!("{swapped} track(s) used the retired Subtractive Synth and now carry the Macro Oscillator");
+        let status = transit_model::legacy_synth::summary(swapped);
         assert_eq!(s.load_notes.last(), Some(&status), "{name}: {:?}", s.load_notes);
         // Saved, it is an ordinary session: no old id, no note, and it loads clean and lossless.
         let saved = s.to_json().unwrap();

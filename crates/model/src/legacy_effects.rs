@@ -32,10 +32,10 @@ pub fn retired_name(plugin: &str) -> Option<&'static str> {
     RETIRED_EFFECTS.iter().find(|(id, _)| *id == plugin).map(|(_, name)| *name)
 }
 
-/// The one-line status of a load that removed devices: `N insert(s) used retired built-in effects and were removed`.
+/// The one-line status of a load that removed devices: `1 insert used retired built-in effects and was removed`, `2 inserts used ... and were removed`.
 #[must_use]
 pub fn status_line(removed: usize) -> String {
-    format!("{removed} insert(s) used retired built-in effects and were removed")
+    format!("{} used retired built-in effects and {} removed", crate::counted(removed, "insert"), if removed == 1 { "was" } else { "were" })
 }
 
 /// One occupied slot of a track that names a retired device: the automation slot, the label the
@@ -98,13 +98,13 @@ pub fn retire_inherited_effects(s: &mut Session) -> usize {
                 .sum();
             let mut dropped = Vec::new();
             if lanes > 0 {
-                dropped.push(format!("{lanes} automation lane(s)"));
+                dropped.push(crate::counted(lanes, "automation lane"));
             }
             if maps > 0 {
-                dropped.push(format!("{maps} MIDI mapping(s)"));
+                dropped.push(crate::counted(maps, "MIDI mapping"));
             }
             if macros > 0 {
-                dropped.push(format!("{macros} rack macro target(s)"));
+                dropped.push(crate::counted(macros, "rack macro target"));
             }
             let tail = if dropped.is_empty() { String::new() } else { format!("; dropped {}", dropped.join(", ")) };
             notes.push(format!("track \"{name}\", {label}: the retired {device} was removed{tail}"));
@@ -181,11 +181,11 @@ mod tests {
         assert_eq!(s.load_notes.len(), 4, "{:?}", s.load_notes);
         assert_eq!(
             s.load_notes[0],
-            "track \"Vox\", insert B: the retired Chorus was removed; dropped 1 automation lane(s), 1 MIDI mapping(s), 1 rack macro target(s)"
+            "track \"Vox\", insert B: the retired Chorus was removed; dropped 1 automation lane, 1 MIDI mapping, 1 rack macro target"
         );
-        assert_eq!(s.load_notes[1], "track \"Vox\", insert D: the retired Maximizer was removed; dropped 1 rack macro target(s)");
-        assert_eq!(s.load_notes[2], "track \"Gtr\", insert B: the retired Chorus was removed; dropped 1 MIDI mapping(s)");
-        assert_eq!(s.load_notes[3], "3 insert(s) used retired built-in effects and were removed");
+        assert_eq!(s.load_notes[1], "track \"Vox\", insert D: the retired Maximizer was removed; dropped 1 rack macro target");
+        assert_eq!(s.load_notes[2], "track \"Gtr\", insert B: the retired Chorus was removed; dropped 1 MIDI mapping");
+        assert_eq!(s.load_notes[3], "3 inserts used retired built-in effects and were removed");
         assert_eq!(retire_inherited_effects(&mut s), 0, "a second pass changes nothing");
         assert_eq!(s.load_notes.len(), 4);
     }
@@ -222,5 +222,12 @@ mod tests {
         let saved = loaded.to_json().unwrap();
         assert!(!saved.contains("phaser") && !saved.contains("load_notes"));
         assert!(Session::from_json_as_saved(&saved).unwrap().1.is_none(), "a saved removal loads clean");
+    }
+
+    /// The status says "1 insert ... was removed" for one, not "insert(s)" (#719).
+    #[test]
+    fn the_status_agrees_with_its_count() {
+        assert_eq!(status_line(1), "1 insert used retired built-in effects and was removed");
+        assert_eq!(status_line(2), "2 inserts used retired built-in effects and were removed");
     }
 }

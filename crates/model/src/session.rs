@@ -34,6 +34,12 @@ pub enum SessionError {
     OtherBuild { version: u32, detail: String },
     #[error("{}", newer_build_text(*.0))]
     Version(u32),
+    /// A `format_version` below the first one any build wrote (always 1, never 0): not a format
+    /// this build knows (#719).
+    #[error(
+        "this file says format version {0}, which is not a format this build knows: transit sessions start at format version 1. The file may be damaged or not a transit session; open a copy saved by transit."
+    )]
+    UnknownVersion(u32),
     #[error("{0}")]
     Invalid(String),
 }
@@ -769,6 +775,9 @@ impl Session {
         if ver > u64::from(Self::FORMAT_VERSION) {
             return Err(SessionError::Version(u32::try_from(ver).unwrap_or(u32::MAX)));
         }
+        if ver == 0 {
+            return Err(SessionError::UnknownVersion(0));
+        }
         let unknown = unknown_needs(&v, &Self::KNOWN_NEEDS);
         let dropped_pages = crate::device_pages::dropped_page_notes(&v);
         let had_video = crate::legacy::drop_video(&mut v);
@@ -1253,5 +1262,20 @@ mod tests {
         // A file from before paths, with the same variant in an output, loads as it always did.
         let old = saved.replace("Out 3-4", "Out 7-8");
         assert_eq!(Session::from_json(&old).unwrap().track(t).unwrap().mixer.output, crate::Route::Hardware("Out 7-8".into()));
+    }
+
+    /// Format version 0 was never written by any build (the version has been 1 since the first
+    /// commit): it is refused as a format this build does not know, naming the version (#719).
+    #[test]
+    fn format_version_zero_is_refused_as_unknown() {
+        let mut v = serde_json::to_value(Session::default()).unwrap();
+        v["format_version"] = serde_json::json!(0);
+        let err = Session::from_json(&v.to_string()).unwrap_err();
+        assert_eq!(err, SessionError::UnknownVersion(0));
+        let said = err.to_string();
+        assert!(said.contains("format version 0") && said.contains("not a format this build knows"), "{said}");
+        assert!(!said.contains("different build"), "{said}");
+        v["format_version"] = serde_json::json!(1);
+        assert!(Session::from_json(&v.to_string()).is_ok(), "control: version 1 reads");
     }
 }

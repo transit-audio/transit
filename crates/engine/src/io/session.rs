@@ -363,6 +363,13 @@ pub(super) fn log_session_detail(file: &str, err: &transit_model::SessionError) 
     }
 }
 
+/// The sentence shown when `file` (the path as given, like the other read errors of the app, or the
+/// bare name where a host has none) cannot be opened as a session: it starts with a capital and names
+/// the file, then says why in the model's words (#719).
+fn open_refusal(file: &str, err: &transit_model::SessionError) -> String {
+    format!("Could not open {file}: {err}")
+}
+
 /// Open a `.transit` (or older `.transit`) session and decode its audio files (missing files are reported, not fatal).
 pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
     open_session_linked(e, path, Path::new(path))
@@ -375,7 +382,7 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     let text = read_text(path)?;
     let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| {
         log_session_detail(path, &err);
-        EngineError::Io(err.to_string())
+        EngineError::Io(open_refusal(path, &err))
     })?;
     let dir = Path::new(path).parent().map(Path::to_path_buf).unwrap_or_default();
     let mut missing = Vec::new();
@@ -651,11 +658,14 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
     let (text, files) = if bytes.starts_with(b"PK\x03\x04") {
         read_bundle(bytes)?
     } else {
-        (String::from_utf8(bytes.to_vec()).map_err(|_| EngineError::Io(format!("{name}: not a transit session")))?, std::collections::HashMap::new())
+        (
+            String::from_utf8(bytes.to_vec()).map_err(|_| EngineError::Io(format!("Could not open {name}: not a transit session")))?,
+            std::collections::HashMap::new(),
+        )
     };
     let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| {
         log_session_detail(name, &err);
-        EngineError::Io(format!("{name}: {err}"))
+        EngineError::Io(open_refusal(name, &err))
     })?;
     let mut missing = Vec::new();
     let sampler_sources = sampler_sources(&s);
@@ -1071,14 +1081,36 @@ mod bundle_tests {
         v["name"] = serde_json::json!({"structured": "where a string was"});
         let mut r = Engine::default();
         let said = open_session_bytes(&mut r, "Song.transit", v.to_string().as_bytes()).unwrap_err().to_string();
-        assert!(said.starts_with("Song.transit: this file is a transit session (format version "), "{said}");
+        assert!(said.starts_with("Could not open Song.transit: this file is a transit session (format version "), "{said}");
         assert!(said.contains("may have been saved by a different build of transit"), "{said}");
         assert!(said.ends_with("Open it with the build that saved it."), "{said}");
         assert!(!said.contains("invalid type"), "the parser detail stays out of the message: {said}");
         let said = open_session_bytes(&mut r, "Song.transit", b"{ not json").unwrap_err().to_string();
-        assert!(said.starts_with("Song.transit: not a transit session: "), "{said}");
+        assert!(said.starts_with("Could not open Song.transit: not a transit session: "), "{said}");
         let said = open_session_bytes(&mut r, "Song.transit", &[0xff, 0xfe, 0x00]).unwrap_err().to_string();
-        assert_eq!(said, "Song.transit: not a transit session");
+        assert_eq!(said, "Could not open Song.transit: not a transit session");
+    }
+
+    /// Opened from a path (File > Open), the refusal starts with a capital and names the file, like
+    /// the other read errors of the app (#719); a format version 0 is refused as unknown.
+    #[test]
+    fn opening_an_unreadable_session_from_a_path_names_the_file_in_a_sentence() {
+        let dir = transit_test_support::TestDir::created("open-refusal");
+        let path = dir.join("Song.transit");
+        let mut v = serde_json::to_value(Session::default()).unwrap();
+        v["name"] = serde_json::json!({"structured": "where a string was"});
+        std::fs::write(&path, v.to_string()).unwrap();
+        let file = path.to_string_lossy().into_owned();
+        let mut r = Engine::default();
+        let said = r.execute("session.open", &serde_json::json!({"path": file})).unwrap_err().to_string();
+        assert!(said.starts_with(&format!("Could not open {file}: this file is a transit session (format version ")), "{said}");
+        assert!(said.ends_with("Open it with the build that saved it."), "{said}");
+        assert_eq!(said.matches("Song.transit").count(), 1, "the file is named once: {said}");
+        v["format_version"] = serde_json::json!(0);
+        std::fs::write(&path, v.to_string()).unwrap();
+        let said = r.execute("session.open", &serde_json::json!({"path": file})).unwrap_err().to_string();
+        assert!(said.starts_with(&format!("Could not open {file}: this file says format version 0")), "{said}");
+        assert!(said.contains("not a format this build knows"), "{said}");
     }
 
     #[test]

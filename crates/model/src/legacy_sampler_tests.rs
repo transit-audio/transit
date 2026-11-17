@@ -111,10 +111,10 @@ fn an_old_one_sample_sampler_opens_as_an_empty_kit_with_its_note() {
         opened.load_notes,
         vec![
             "track \"Keys\": the old one-sample Sampler was removed and is now an empty kit; its sample \"Hit.wav\" stays in the \
-             session's files and can be loaded onto a pad again; dropped 2 automation lane(s), 1 MIDI mapping(s), 1 rack macro \
-             target(s), 1 user page(s)"
+             session's files and can be loaded onto a pad again; dropped 2 automation lanes, 1 MIDI mapping, 1 rack macro \
+             target, 1 user page"
                 .to_string(),
-            "1 track(s) had the old one-sample Sampler and now have an empty Sampler kit".to_string(),
+            "1 track had the old one-sample Sampler and now has an empty Sampler kit".to_string(),
         ]
     );
 
@@ -147,7 +147,7 @@ fn a_one_sample_sampler_without_a_sample_or_targets_gets_the_short_note() {
         s.load_notes,
         vec![
             "track \"Empty\": the old one-sample Sampler was removed and is now an empty kit".to_string(),
-            "1 track(s) had the old one-sample Sampler and now have an empty Sampler kit".to_string(),
+            "1 track had the old one-sample Sampler and now has an empty Sampler kit".to_string(),
         ]
     );
     assert_eq!(retire_one_sample_sampler(&mut s), 0, "a second pass finds nothing");
@@ -227,4 +227,11 @@ fn a_track_line_is_found_by_its_track() {
     assert!(is_track_line(&line, "Keys"));
     assert!(!is_track_line(&line, "Key"));
     assert!(!is_track_line("track \"Keys\": something else", "Keys"));
+}
+
+/// The summary says "1 track ... has" for one and "2 tracks ... have" for more (#719).
+#[test]
+fn the_summary_agrees_with_its_count() {
+    assert_eq!(summary(1), "1 track had the old one-sample Sampler and now has an empty Sampler kit");
+    assert_eq!(summary(2), "2 tracks had the old one-sample Sampler and now have an empty Sampler kit");
 }

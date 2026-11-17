@@ -136,7 +136,11 @@ pub fn dropped_page_notes(v: &Value) -> Vec<String> {
         let mut note = |device: String, pages: Option<&Value>| {
             let dropped = pages.map_or(0, |p| read_pages(p).1);
             if dropped > 0 {
-                notes.push(format!("track `{name}`, {device}: {dropped} macro strip page(s) past the {MAX_USER_PAGES} a device keeps were dropped"));
+                notes.push(format!(
+                    "track `{name}`, {device}: {} past the {MAX_USER_PAGES} a device keeps {} dropped",
+                    crate::counted(dropped, "macro strip page"),
+                    if dropped == 1 { "was" } else { "were" }
+                ));
             }
         };
         note("instrument".into(), t.get("instrument").and_then(|i| i.get("pages")));

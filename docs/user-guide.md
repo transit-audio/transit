@@ -1280,8 +1280,8 @@ MIDI mappings, rack macro targets and user pages that pointed at those settings.
 converted. The sample file stays in the session (it is in the Clip List), so you can drop it onto
 a pad again. The load notes name every affected track, for example:
 
-- `track "Keys": the old one-sample Sampler was removed and is now an empty kit; its sample "Hit.wav" stays in the session's files and can be loaded onto a pad again; dropped 2 automation lane(s), 1 MIDI mapping(s)`
-- `1 track(s) had the old one-sample Sampler and now have an empty Sampler kit`
+- `track "Keys": the old one-sample Sampler was removed and is now an empty kit; its sample "Hit.wav" stays in the session's files and can be loaded onto a pad again; dropped 2 automation lanes, 1 MIDI mapping`
+- `1 track had the old one-sample Sampler and now has an empty Sampler kit`
 
 The session opens as modified, and the next save writes the empty kit. Tracks imported from an
 older session (`file.import_session_data`) and track presets that hold the old Sampler get the
@@ -1332,8 +1332,8 @@ assistant refuse them.
 
 A session saved by an older build that used one opens with that slot **empty**. The device's
 settings go with it, and so do the MIDI mappings, automation lanes and rack macro targets that
-pointed at it. Nothing else on the track changes. The status line reads "N insert(s) used retired
-built-in effects and were removed", and the load report lists each track,
+pointed at it. Nothing else on the track changes. The status line reads "2 inserts used retired
+built-in effects and were removed" ("1 insert used ... and was removed" for one), and the load report lists each track,
 slot and device by name, for example `track "Vox", insert B: the retired Chorus was removed`. The
 session opens as modified, so the removal shows when you save; until then the file still holds the
 old devices. A track that used the Drum Synth keeps its clips and notes but has no instrument until

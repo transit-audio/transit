@@ -10,8 +10,8 @@ use transit_model::legacy_sampler::{RETIRED_PARAMS, SAMPLER_ID, is_one_sample};
 use transit_model::{AutoParam, ChannelFormat, Insert, Session, Source, SourceId, TrackKind};
 
 const LINE: &str = "track \"Keys\": the old one-sample Sampler was removed and is now an empty kit; its sample \"hit.wav\" stays in \
-                    the session's files and can be loaded onto a pad again; dropped 1 automation lane(s)";
-const SUMMARY: &str = "1 track(s) had the old one-sample Sampler and now have an empty Sampler kit";
+                    the session's files and can be loaded onto a pad again; dropped 1 automation lane";
+const SUMMARY: &str = "1 track had the old one-sample Sampler and now has an empty Sampler kit";
 
 fn scratch(name: &str) -> transit_test_support::TestDir {
     let dir = transit_test_support::TestDir::new(&format!("one-sample-{name}"));

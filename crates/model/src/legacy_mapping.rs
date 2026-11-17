@@ -43,7 +43,7 @@ pub const OLD_MAPPING: [(f32, &str, [&str; 4]); 2] = [
     (SOURCE_KEY, "key_curve", ["key_harmonics", "key_timbre", "key_morph", "key_decay"]),
 ];
 
-/// How a load note about the migration begins: `N track(s) ...`.
+/// How a load note about the migration begins: `N tracks ...`.
 pub const MIGRATED_NOTE: &str = "had the Macro Oscillator's note-to-macro mapping, now rows of its modulation matrix";
 
 /// Added to the load note when a curve's MIDI mapping moved to a source with several rows.
@@ -283,12 +283,17 @@ pub fn migrate_session(s: &mut Session) -> usize {
     }
     if noted > 0 {
         use std::fmt::Write as _;
-        let mut note = format!("{noted} track(s) {MIGRATED_NOTE}");
+        let mut note = format!("{} {MIGRATED_NOTE}", crate::counted(noted, "track"));
         if curve_split {
             let _ = write!(note, "; {CURVE_MAPPING_NOTE}");
         }
         if lost > 0 {
-            let _ = write!(note, "; {lost} lane(s), mapping(s) or macro target(s) of a curve with no rows were dropped");
+            let _ = write!(
+                note,
+                "; {} (lanes, mappings or macro targets) of a curve with no rows {} dropped",
+                crate::counted(lost, "item"),
+                if lost == 1 { "was" } else { "were" }
+            );
         }
         s.load_notes.push(note);
     }
@@ -451,7 +456,7 @@ mod tests {
             .push(AutomationLane::new(AutoParam::Plugin { slot: AutoParam::INSTRUMENT_SLOT, param: "key_decay".into() }));
         assert!(migration_changes(&s2));
         assert_eq!(migrate_session(&mut s2), 1);
-        assert!(s2.load_notes.iter().any(|n| n.starts_with("1 track(s)") && !n.contains(CURVE_MAPPING_NOTE)), "{:?}", s2.load_notes);
+        assert!(s2.load_notes.iter().any(|n| n.starts_with("1 track ") && !n.contains(CURVE_MAPPING_NOTE)), "{:?}", s2.load_notes);
     }
 
     /// The old curve's travel picks the same choice on a row's curve: full travel S-curve (2), half

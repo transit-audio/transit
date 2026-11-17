@@ -219,7 +219,7 @@ fn a_preset_with_the_retired_subtractive_synth_gets_a_macro_oscillator_as_a_sess
     assert_eq!(ins.plugin, transit_model::legacy_synth::DEFAULT_INSTRUMENT);
     assert_eq!(ins.params.get("level"), Some(&transit_model::legacy_synth::SUBSTITUTE_LEVEL_DB), "the session load's substitute");
     assert!(!ins.params.contains_key("cutoff"));
-    assert_eq!(e.messages, vec![format!("1 track(s) {}", transit_model::legacy_synth::RETIRED_SYNTH_NOTE)]);
+    assert_eq!(e.messages, vec![transit_model::legacy_synth::summary(1)]);
 }
 
 #[test]

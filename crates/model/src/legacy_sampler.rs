@@ -37,9 +37,6 @@ pub const RETIRED_PARAMS: [&str; 19] = [
     "level",
 ];
 
-/// How the one-line summary of a load that dropped the instrument ends: `N track(s) ...`.
-pub const ONE_SAMPLE_NOTE: &str = "had the old one-sample Sampler and now have an empty Sampler kit";
-
 /// Whether `ins` is the retired one-sample Sampler: it names `sampler` and has no patch. A patch in
 /// any state (ready, of an unknown schema, kept opaque) is never one.
 #[must_use]
@@ -70,7 +67,7 @@ pub fn retire_slot(ins: &mut Insert) -> Option<Option<SourceId>> {
 }
 
 /// The load note for track `name`: `sample` is the file name of the old sample when the session
-/// still lists it, `dropped` what addressed the old parameters (`2 automation lane(s)`, ...).
+/// still lists it, `dropped` what addressed the old parameters (`2 automation lanes`, ...).
 #[must_use]
 pub fn track_line(name: &str, sample: Option<&str>, dropped: &[String]) -> String {
     let mut line = format!("{}the old one-sample Sampler was removed and is now an empty kit", line_start(name));
@@ -92,7 +89,7 @@ pub fn line_start(name: &str) -> String {
 /// The summary for `n` tracks.
 #[must_use]
 pub fn summary(n: usize) -> String {
-    format!("{n} track(s) {ONE_SAMPLE_NOTE}")
+    format!("{} had the old one-sample Sampler and now {} an empty Sampler kit", crate::counted(n, "track"), if n == 1 { "has" } else { "have" })
 }
 
 /// Whether the track line `line` is the one for track `name`.
@@ -135,13 +132,13 @@ pub fn retire_one_sample_sampler(s: &mut Session) -> usize {
         let file = sample.and_then(|sid| s.source(sid)).map(|src| file_name(&src.path).to_string());
         let mut dropped = Vec::new();
         if lanes > 0 {
-            dropped.push(format!("{lanes} automation lane(s)"));
+            dropped.push(crate::counted(lanes, "automation lane"));
         }
         let maps = s.midi_mappings.remove_where(
             |m| matches!((&m.strip, &m.control), (Strip::Track(x), Control::Plugin { slot: y, param }) if *x == id && *y == slot && is_retired(param)),
         );
         if maps > 0 {
-            dropped.push(format!("{maps} MIDI mapping(s)"));
+            dropped.push(crate::counted(maps, "MIDI mapping"));
         }
         let macros: usize = s
             .tracks
@@ -155,10 +152,10 @@ pub fn retire_one_sample_sampler(s: &mut Session) -> usize {
             })
             .sum();
         if macros > 0 {
-            dropped.push(format!("{macros} rack macro target(s)"));
+            dropped.push(crate::counted(macros, "rack macro target"));
         }
         if pages > 0 {
-            dropped.push(format!("{pages} user page(s)"));
+            dropped.push(crate::counted(pages, "user page"));
         }
         notes.push(track_line(&name, file.as_deref(), &dropped));
     }

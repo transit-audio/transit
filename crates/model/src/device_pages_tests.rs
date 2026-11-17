@@ -167,12 +167,20 @@ fn a_seventeenth_page_is_dropped_with_one_load_note_naming_the_track_and_device(
     assert_eq!(ins.pages.last().unwrap().name, "P15", "the first sixteen stay");
     assert_eq!(back.tracks[0].midi_effects[0].pages.len(), MAX_USER_PAGES, "sixteen is not too many");
     assert_eq!(back.load_notes.len(), 1, "{:?}", back.load_notes);
-    assert!(back.load_notes[0].contains("track `Keys`, insert b: 1 macro strip page"), "{}", back.load_notes[0]);
+    assert!(
+        back.load_notes[0].contains("track `Keys`, insert b: 1 macro strip page past the 16 a device keeps was dropped"),
+        "{}",
+        back.load_notes[0]
+    );
     let mut more = v.clone();
     more["tracks"][0]["instrument"]["pages"] = Value::Array(pages.iter().cycle().take(20).cloned().collect());
     let back = Session::from_json(&more.to_string()).unwrap();
     assert_eq!(back.load_notes.len(), 2, "one note per device: {:?}", back.load_notes);
-    assert!(back.load_notes.iter().any(|n| n.contains("track `Keys`, instrument: 4 macro strip page")), "{:?}", back.load_notes);
+    assert!(
+        back.load_notes.iter().any(|n| n.contains("track `Keys`, instrument: 4 macro strip pages past the 16 a device keeps were dropped")),
+        "{:?}",
+        back.load_notes
+    );
 }
 
 #[test]

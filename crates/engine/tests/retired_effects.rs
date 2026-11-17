@@ -10,7 +10,7 @@ use transit_model::{
 };
 use transit_time::Range;
 
-const STATUS: &str = "3 insert(s) used retired built-in effects and were removed";
+const STATUS: &str = "3 inserts used retired built-in effects and were removed";
 
 /// The session as an old build saved it: a Vox track with a kept Compressor, a Chorus and a
 /// Maximizer, a mapping, a lane and a rack macro on the Chorus (and a mapping, a lane and a macro
@@ -70,7 +70,7 @@ fn a_session_with_retired_inserts_opens_emptied_reported_counted_and_modified() 
     assert_eq!(
         lines,
         [
-            "track \"Vox\", insert B: the retired Chorus was removed; dropped 1 automation lane(s), 1 MIDI mapping(s), 1 rack macro target(s)",
+            "track \"Vox\", insert B: the retired Chorus was removed; dropped 1 automation lane, 1 MIDI mapping, 1 rack macro target",
             "track \"Vox\", insert C: the retired Maximizer was removed",
             "track \"Gtr\", insert E: the retired Phaser was removed",
             STATUS,

@@ -22,8 +22,16 @@ pub const DEFAULT_INSTRUMENT: &str = "macro_oscillator";
 /// to within about 2 dB of the old loudness on that golden.
 pub const SUBSTITUTE_LEVEL_DB: f32 = -19.5;
 
-/// How the one-line status of a load that substituted begins and ends: `N track(s) used ...`.
-pub const RETIRED_SYNTH_NOTE: &str = "used the retired Subtractive Synth and now carry the Macro Oscillator";
+/// The one-line status of a load that substituted for `n` tracks: `1 track used the retired
+/// Subtractive Synth and now carries the Macro Oscillator`, `2 tracks used ... now carry ...`.
+#[must_use]
+pub fn summary(n: usize) -> String {
+    format!(
+        "{} used the retired Subtractive Synth and now {} the Macro Oscillator",
+        crate::counted(n, "track"),
+        if n == 1 { "carries" } else { "carry" }
+    )
+}
 
 /// Does any track's instrument slot still name the retired synth?
 #[must_use]
@@ -56,13 +64,13 @@ pub fn retire_subtractive_synth(s: &mut Session) -> usize {
         }
         let mut dropped = Vec::new();
         if lanes > 0 {
-            dropped.push(format!("{lanes} automation lane(s)"));
+            dropped.push(crate::counted(lanes, "automation lane"));
         }
         let maps = s.midi_mappings.remove_where(
             |m| matches!((&m.strip, &m.control), (Strip::Track(x), Control::Plugin { slot, .. }) if *x == id && *slot == AutoParam::INSTRUMENT_SLOT),
         );
         if maps > 0 {
-            dropped.push(format!("{maps} MIDI mapping(s)"));
+            dropped.push(crate::counted(maps, "MIDI mapping"));
         }
         let macros: usize = s
             .tracks
@@ -76,13 +84,13 @@ pub fn retire_subtractive_synth(s: &mut Session) -> usize {
             })
             .sum();
         if macros > 0 {
-            dropped.push(format!("{macros} rack macro target(s)"));
+            dropped.push(crate::counted(macros, "rack macro target"));
         }
         if !dropped.is_empty() {
             notes.push(format!("track \"{name}\": the retired Subtractive Synth's parameters are gone; dropped {}", dropped.join(", ")));
         }
     }
-    notes.push(format!("{} track(s) {RETIRED_SYNTH_NOTE}", swapped.len()));
+    notes.push(summary(swapped.len()));
     s.load_notes.extend(notes);
     swapped.len()
 }
@@ -154,11 +162,11 @@ mod tests {
 
         assert_eq!(s.load_notes.len(), 2, "{:?}", s.load_notes);
         assert!(
-            s.load_notes[0].contains("\"Lead\"") && s.load_notes[0].contains("1 automation lane(s), 1 MIDI mapping(s), 1 rack macro target(s)"),
+            s.load_notes[0].contains("\"Lead\"") && s.load_notes[0].contains("1 automation lane, 1 MIDI mapping, 1 rack macro target"),
             "{:?}",
             s.load_notes
         );
-        assert_eq!(s.load_notes[1], "1 track(s) used the retired Subtractive Synth and now carry the Macro Oscillator");
+        assert_eq!(s.load_notes[1], "1 track used the retired Subtractive Synth and now carries the Macro Oscillator");
         assert_eq!(retire_subtractive_synth(&mut s), 0, "a second pass changes nothing");
         assert_eq!(s.load_notes.len(), 2);
     }
@@ -185,5 +193,12 @@ mod tests {
         let saved = loaded.to_json().unwrap();
         assert!(!saved.contains(RETIRED_SYNTH_ID) && !saved.contains("load_notes"));
         assert!(Session::from_json_as_saved(&saved).unwrap().1.is_none(), "a saved substitution loads clean");
+    }
+
+    /// The status says "1 track ... carries" for one and "2 tracks ... carry" for more (#719).
+    #[test]
+    fn the_summary_agrees_with_its_count() {
+        assert_eq!(summary(1), "1 track used the retired Subtractive Synth and now carries the Macro Oscillator");
+        assert_eq!(summary(2), "2 tracks used the retired Subtractive Synth and now carry the Macro Oscillator");
     }
 }
