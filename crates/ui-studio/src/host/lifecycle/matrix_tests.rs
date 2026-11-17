@@ -633,6 +633,10 @@ fn the_matrix_has_no_empty_cell() {
                 if step.result.is_err() {
                     assert_eq!((step.phase, step.effects.len()), (*phase, 0), "{phase:?} {event:?} {facts:?}");
                 }
+                // Each effect appears at most once in a step (the effect interface).
+                for (i, e) in step.effects.iter().enumerate() {
+                    assert!(!step.effects[i + 1..].contains(e), "{e:?} twice: {phase:?} {event:?} {:?}", step.effects);
+                }
                 steps += 1;
             }
         }
@@ -761,4 +765,28 @@ fn the_fault_refusal_comes_before_every_start_refusal() {
     }
     // Not faulted, the cell's own refusals stand.
     assert_eq!(next(&rp, &Event::HalfSpeed, &Facts::default()).result, Err(Refusal::Th));
+}
+
+/// The effect interface: `SubmitRecord` carries the prepared start and its punch comes from the
+/// start's `from`, never from observed playback; C9 sets the half speed before its start.
+#[test]
+fn the_effect_interface_carries_the_start_and_orders_half_speed_first() {
+    let (t, _) = tickets();
+    let explicit = RecordStart { ticket: t, from: Some(0), count_in: None };
+    let punch = RecordStart { ticket: t, from: None, count_in: None };
+    let playing = Facts { playing: true, ..Facts::default() };
+    let s = run(TransportPhase::Stopped, Event::Record(RecordPrep::Ready(explicit)), playing);
+    assert_eq!(s.effects, [Effect::SubmitRecord(explicit)]);
+    assert!(!explicit.punch(), "fresh playback does not make an explicit start a punch");
+    let p = run(TransportPhase::Playing, Event::Record(RecordPrep::Ready(punch)), playing);
+    assert!(p.effects.contains(&Effect::SubmitRecord(punch)) && punch.punch());
+    let resumed = run(TransportPhase::StopPending { then: AfterStop::Resume(AT) }, Event::ResumeCheck(RecordPrep::Ready(explicit)), Facts::default());
+    assert_eq!(resumed.effects, [Effect::SubmitRecord(explicit)]);
+
+    let half = Effect::SetSpeed(Speed::Half);
+    let start = Effect::SubmitStart(StartCommand::HalfSpeed);
+    let f = Facts::default();
+    assert_eq!(run(TransportPhase::Stopped, Event::HalfSpeed, f).effects, [half, Effect::NewGroup, start]);
+    assert_eq!(run(TransportPhase::StartPending, Event::HalfSpeed, f).effects, [half, start]);
+    assert_eq!(run(TransportPhase::Playing, Event::HalfSpeed, f).effects, [half, Effect::CloseGroup, Effect::NewGroup, start]);
 }

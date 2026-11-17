@@ -22,6 +22,18 @@
 //!   it allows E5 or another admission (record section 11).
 //! - A transition out of StartPending or Playing into any other phase sets speed Normal (record
 //!   section 3, the matrix legend): [`next`] adds `SetSpeed(Normal)` first when the cell did not.
+//!
+//! The effect interface the host applies (slices S2c and S2d):
+//! - Each effect appears at most once in a step: a second occurrence of an equal effect is
+//!   dropped, so a host never sees, and must not expect, two equal effects in one step (two
+//!   Stops in one step are one `SubmitStop`).
+//! - Effects are applied strictly in the order given. Identity and ordering are carried by order:
+//!   `NewGroup` precedes the `SubmitStart` that opens the group, `CancelRender` precedes the
+//!   retirement in Rendering (D-6), and C9's `SetSpeed(Half)` precedes its `SubmitStart`, as
+//!   today's code sets the speed before starting (`host/transport.rs:300-303`).
+//! - `SubmitRecord` carries the prepared start; whether it punches in is `RecordStart::punch`,
+//!   derived from its `from` (`None` is a punch, record section 3's preparation contract), never
+//!   from observed playback.
 //! - No clock: the owed-Stop deadline compares the monotonic time the event carries with the
 //!   first-owed stamp in the facts.
 
@@ -51,6 +63,13 @@ pub struct RecordStart {
     pub ticket: Ticket,
     pub from: Option<Samples>,
     pub count_in: Option<CountIn>,
+}
+
+impl RecordStart {
+    /// A punch into existing playback: prepared without a start position (record section 3).
+    pub fn punch(&self) -> bool {
+        self.from.is_none()
+    }
 }
 
 /// What preparing a record start gave: the start, or the local refusal (Ta, Te).
@@ -403,9 +422,8 @@ pub enum Effect {
     FinishPass,
     /// Submit a Stop; the host owes it (W1) if the Player refuses it without faulting.
     SubmitStop,
-    SubmitRecord {
-        punch: bool,
-    },
+    /// Submit the prepared record start (its punch is [`RecordStart::punch`]).
+    SubmitRecord(RecordStart),
     SubmitLocate(Samples),
     SubmitRelease,
     SubmitSetLoop,
@@ -483,7 +501,7 @@ pub fn next(phase: &TransportPhase, event: &Event, facts: &Facts) -> Step {
                     e,
                     Effect::SubmitStart(_)
                         | Effect::SubmitStop
-                        | Effect::SubmitRecord { .. }
+                        | Effect::SubmitRecord(_)
                         | Effect::SubmitLocate(_)
                         | Effect::SubmitRelease
                         | Effect::SubmitSetLoop
@@ -603,14 +621,14 @@ impl Run<'_> {
         Ok(())
     }
 
-    fn record(&mut self, punch: bool) -> Result<(), Refusal> {
+    fn record(&mut self) -> Result<(), Refusal> {
         self.start_allowed()?;
         // The cells name Ta and Te before RP; an unprepared start reaching here (an event without
         // a preparation) refuses defensively, since RecordPending needs a prepared ticket.
         match self.event.prep() {
             Some(RecordPrep::Ready(s)) => {
                 self.phase = TransportPhase::RecordPending { ticket: s.ticket, from: s.from, count_in: s.count_in };
-                self.push(Effect::SubmitRecord { punch });
+                self.push(Effect::SubmitRecord(s));
                 Ok(())
             }
             Some(RecordPrep::NoArmedTrack) => Err(Refusal::Ta),
@@ -716,8 +734,9 @@ impl Run<'_> {
             Op::DropHeld => self.push(Effect::DropHeld),
             Op::DiscardDeferred => self.push(Effect::DiscardDeferred),
             Op::ResendStop => self.push(Effect::SubmitStop),
-            Op::Rp => self.record(f.playing)?,
-            Op::RpPunch => self.record(true)?,
+            // RP and "RP punch" submit the prepared start alike: the host prepared a punch
+            // (`from: None`) where the cell says punch; the effect carries it either way.
+            Op::Rp | Op::RpPunch => self.record()?,
             Op::LocatePlayer => at.into_iter().for_each(|at| self.push(Effect::SubmitLocate(at))),
             Op::TakeSafe => {
                 if let Some(at) = at {
@@ -920,7 +939,7 @@ impl Run<'_> {
             Op::ResumeStart => match self.event.prep() {
                 Some(RecordPrep::Ready(s)) => {
                     self.phase = TransportPhase::RecordPending { ticket: s.ticket, from: s.from, count_in: s.count_in };
-                    self.push(Effect::SubmitRecord { punch: false });
+                    self.push(Effect::SubmitRecord(s));
                 }
                 Some(refused) => {
                     let reason = if refused == RecordPrep::NoArmedTrack { Refusal::Ta } else { Refusal::Te };

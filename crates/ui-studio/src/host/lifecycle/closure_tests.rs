@@ -316,7 +316,7 @@ fn carry(effects: &[Effect], start: Abs, rendering: bool) -> Vec<Abs> {
                     next.push(Abs { render_stops: true, ..a });
                     next.push(Abs { owed: true, ..a });
                 }
-                Effect::SubmitRecord { .. } => next.push(Abs { record: true, continuation: true, ..a }),
+                Effect::SubmitRecord(_) => next.push(Abs { record: true, continuation: true, ..a }),
                 Effect::SubmitLocate(_) | Effect::SubmitSetLoop => next.push(Abs { locates: true, ..a }),
                 Effect::SubmitRelease => next.push(Abs { release: true, ..a }),
                 Effect::SubmitRenderPlay => next.push(Abs { render_play: true, ..a }),
