@@ -4,11 +4,11 @@ use super::*;
 /// control being moved; Touch writes the control while it is held; Latch keeps writing it after
 /// release until Stop. Points go in every [`WRITE_STEP_S`] with `from`, which replaces what the
 /// pass runs over. The whole pass, and whatever is dragged during it, is one undo step.
-pub(crate) fn write_pass(app: &mut StudioApp, ctx: &egui::Context) {
+/// `held`: a pointer button is down this frame; `now`: the frame time (seconds). Taken as values,
+/// not from the window, so the device-free step runs it too (ADR 0062 section 2).
+pub(crate) fn write_pass(app: &mut StudioApp, held: bool, now: f64) {
     use AutomationMode as M;
     let playing = app.is_playing();
-    let held = ctx.input(|i| i.pointer.any_down());
-    let now = ctx.input(|i| i.time);
     app.auto.touches.retain(|x| x.fresh || (x.hold == Hold::Pointer && held) || matches!(x.hold, Hold::Until(u) if now <= u));
     sync_touched(app, held, now);
     let any = app.engine.session().tracks.iter().any(|t| matches!(t.mixer.automation_mode, M::Write | M::Touch | M::Latch | M::TouchLatch));

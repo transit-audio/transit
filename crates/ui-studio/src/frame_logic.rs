@@ -328,16 +328,14 @@ impl StudioApp {
         control::drain(self, ctx);
         let plugin_requests = service_plugin_requests();
         // E7: plug-in editors only work while `Player::idle` runs every frame.
-        self.apply_editor_edits();
-        self.poll_player();
+        // The host step's blocks (`step_host`, ADR 0062) run here in its order, window work between.
+        self.step_host_receipts();
         self.step_measure();
         self.step_external_measure();
         if self.audio_devices.measuring.is_some() || self.external_measure.running.is_some() {
             ctx.request_repaint();
         }
-        self.update_midi_live();
-        // After the pass's clock followed the transport (in `update_midi_live`).
-        self.end_recording_at_lap_limit();
+        self.step_host_clock();
         self.step_poll();
         editor_group::drive(self, ctx);
         self.drive_editors();
@@ -355,27 +353,14 @@ impl StudioApp {
         {
             self.engine.end_merge();
         }
-        self.watch_output();
-        self.watch_input();
-        self.step_reopen();
+        self.step_host_devices();
         self.save_good_audio();
         finish::step_bounce(self, ctx);
         import::step(self, ctx);
         crate::drops::step(self, ctx);
         // Stop the old playback before sending a replacement session to the audio thread.
         self.handle_transport(dt);
-        automation::write_pass(self, ctx);
-        if self.player_requests.play.is_none() && self.player_requests.locate.is_none() && self.player_requests.recording.is_none() {
-            self.sync_io();
-            self.sync_player_session();
-            self.poll_low_latency();
-        }
-        self.autosave_changes();
-        self.state_guard.pointer_down = ctx.input(|i| i.pointer.any_down());
-        self.autosave();
-        if self.recorder.is_none() && self.input_failure.is_none() && self.engine.session().needs_live_input() {
-            self.ensure_input();
-        }
+        self.step_host_after(ctx.input(|i| i.pointer.any_down()), now);
         // Autosave only runs on frames, and plugin editors are native windows egui never hears from.
         // egui takes its predicted frame time off every delay, so add it back.
         let editors = self.player.as_ref().is_some_and(Player::any_editor_open)

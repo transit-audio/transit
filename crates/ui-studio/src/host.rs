@@ -21,6 +21,11 @@ mod plugin_state;
 pub(crate) mod reconnect;
 mod recording;
 pub(crate) mod state_guard;
+mod step;
+#[cfg(test)]
+mod step_tests;
+#[cfg(test)]
+pub(crate) mod testing;
 mod timed_read;
 mod transport;
 
