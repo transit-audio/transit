@@ -362,10 +362,11 @@ impl Closure {
         self.phases.len() - 1
     }
 
-    fn reach(&mut self, key: Key, from: Option<(Key, String)>) {
+    /// Visit `key`; how it was reached is formatted only on its first visit.
+    fn reach(&mut self, key: Key, from: Option<(Key, &dyn Fn() -> String)>) {
         if self.seen.insert(key) {
-            if let Some(from) = from {
-                self.parent.insert(key, from);
+            if let Some((parent, how)) = from {
+                self.parent.insert(key, (parent, how()));
             }
             self.queue.push_back(key);
         }
@@ -511,8 +512,8 @@ fn explore(t: Ticket, older: Ticket) -> Closure {
                             Ok(states) => {
                                 for (next_phase, b) in states {
                                     let i = c.intern(next_phase);
-                                    let how = format!("{event:?}--> with {a:?} playing={playing}");
-                                    c.reach((i, b), Some((key, how)));
+                                    let how = || format!("{event:?}--> with {a:?} playing={playing}");
+                                    c.reach((i, b), Some((key, &how)));
                                 }
                             }
                         }
