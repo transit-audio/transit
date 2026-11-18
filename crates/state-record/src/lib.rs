@@ -23,8 +23,11 @@
 //! ([`Writer::record`]).
 //!
 //! The [`Writer`] wraps any [`core::hash::Hasher`] and emits every word through
-//! [`Hasher::write_u64`] only: the scheduling gate hashes the stream without storing it, the
-//! transplant gate's sink keeps every word. A child's header carries its word count, so the
+//! [`Hasher::write_u64`] only: the transplant gate's sink keeps every word. The scheduling gate
+//! hashes the stream without storing it, through [`Writer::digest`]: the writer feeds its
+//! [`Digest`] directly, one inlined mixing step per word with no dynamic call (a dynamic call per
+//! word cost the scheduling gate about 13 percent, #742), and the digest is the same value the
+//! [`Hasher`] path gives for the same words. A child's header carries its word count, so the
 //! writer measures a child first with a counting pass (O(items), not O(state): a run is counted
 //! from its length) and then writes it. Nothing allocates.
 //!
@@ -111,23 +114,100 @@ impl Config<'_> {
     }
 }
 
+/// The scheduling gate's digest of a word stream, 64 bits, one step per word: `state =
+/// mix(state ^ word)` from the FNV offset basis, where `mix` is the SplitMix64 finalizer
+/// (xor-shift, multiply, xor-shift, multiply, xor-shift; both multipliers odd). Every operation
+/// of `mix` is invertible mod 2^64, so for a fixed state a step is injective in the word and for
+/// a fixed word a bijection of the state: two streams that differ in exactly one word always end
+/// in different digests. Streams that differ in several words collide with odds near 2^-64
+/// under the assumption that digests of different streams behave as independent uniform values
+/// (an estimate, not a bound). Deterministic across runs, platforms and Rust versions; compared
+/// only within one process run, no value is pinned. (The mix crate's strip print hasher, moved
+/// here with #742 so the writer can feed it without a dynamic call.)
+#[derive(Clone, Copy, Debug)]
+pub struct Digest(u64);
+
+impl Default for Digest {
+    fn default() -> Self {
+        Digest(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Digest {
+    /// One step over a word (see the type docs).
+    #[inline]
+    pub fn word(&mut self, w: u64) {
+        self.0 = mix(self.0 ^ w);
+    }
+}
+
+/// The SplitMix64 finalizer: a bijection of `u64` with full avalanche (see [`Digest`]).
+#[inline]
+fn mix(mut x: u64) -> u64 {
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^ (x >> 31)
+}
+
+impl Hasher for Digest {
+    /// Eight bytes to a word, little-endian; a short tail is zero-padded, then the length is
+    /// hashed, so a tail of zero bytes still counts. (The record writer never calls it.)
+    fn write(&mut self, bytes: &[u8]) {
+        let (words, tail) = bytes.as_chunks::<8>();
+        for &w in words {
+            self.word(u64::from_le_bytes(w));
+        }
+        if !tail.is_empty() {
+            let mut last = [0u8; 8];
+            if let Some(d) = last.get_mut(..tail.len()) {
+                d.copy_from_slice(tail);
+            }
+            self.word(u64::from_le_bytes(last));
+        }
+        self.word(bytes.len() as u64);
+    }
+
+    fn write_u64(&mut self, i: u64) {
+        self.word(i);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+/// Where a writer's words go.
+enum Sink<'a> {
+    /// A counting pass: words are counted, not emitted.
+    Count,
+    /// The scheduling digest, fed directly (no dynamic call per word).
+    Digest(&'a mut Digest),
+    /// Any hasher (the transplant gate's lossless sink keeps every word).
+    Hasher(&'a mut dyn Hasher),
+}
+
 /// Writes a record's items into a hasher, word by word (see the crate docs).
 pub struct Writer<'a> {
-    /// `None`: a counting pass (words are counted, not emitted).
-    sink: Option<&'a mut dyn Hasher>,
+    sink: Sink<'a>,
     words: u64,
 }
 
 impl<'a> Writer<'a> {
     /// A writer emitting into `h`.
     pub fn new(h: &'a mut dyn Hasher) -> Self {
-        Writer { sink: Some(h), words: 0 }
+        Writer { sink: Sink::Hasher(h), words: 0 }
+    }
+
+    /// A writer feeding the scheduling digest `d` directly: the same digest as
+    /// `Writer::new(d)` gives, without a dynamic call per word.
+    pub fn digest(d: &'a mut Digest) -> Self {
+        Writer { sink: Sink::Digest(d), words: 0 }
     }
 
     /// A writer that only counts the words it would emit.
     #[must_use]
     pub fn counter() -> Writer<'static> {
-        Writer { sink: None, words: 0 }
+        Writer { sink: Sink::Count, words: 0 }
     }
 
     /// Words emitted (or counted) so far.
@@ -136,16 +216,19 @@ impl<'a> Writer<'a> {
         self.words
     }
 
+    #[inline]
     fn word(&mut self, w: u64) {
         self.words += 1;
-        if let Some(h) = self.sink.as_mut() {
-            h.write_u64(w);
+        match &mut self.sink {
+            Sink::Count => {}
+            Sink::Digest(d) => d.word(w),
+            Sink::Hasher(h) => h.write_u64(w),
         }
     }
 
     /// Payload words a counting pass skips without visiting them.
     fn skip(&mut self, n: u64) -> bool {
-        if self.sink.is_none() {
+        if matches!(self.sink, Sink::Count) {
             self.words += n;
             return true;
         }

@@ -32,6 +32,37 @@ fn words(f: impl FnOnce(&mut Writer<'_>)) -> Vec<u64> {
 
 const CONFIG: Config<'static> = Config { entry: "fixture", sample_rate: 48_000.0, max_block: 256, channels: 2, content: 0 };
 
+/// The digest path gives the same value as the hasher path for the same items (the scheduling
+/// gate's writer feeds its digest directly), counting passes included, for every tag.
+#[test]
+fn the_direct_digest_equals_the_digest_through_the_hasher_path() {
+    let write = |w: &mut Writer<'_>| {
+        w.record(&CONFIG, |w| {
+            w.u64(7);
+            w.i32(-9);
+            w.bool(true);
+            w.f32(1.5);
+            w.f64(-2.25);
+            w.f32s(&[0.5, -0.25, 3.0]);
+            w.bytes(b"nine bytes");
+            w.u64s(&[1, 2, 3]);
+            w.present(Some(4u8), |w, v| w.u8(v));
+            w.child(|w| w.u16(11));
+        });
+    };
+    let mut direct = Digest::default();
+    write(&mut Writer::digest(&mut direct));
+    let mut through = Digest::default();
+    write(&mut Writer::new(&mut through));
+    assert_eq!(direct.finish(), through.finish());
+    let mut fresh = Digest::default();
+    for w in words(write) {
+        fresh.write_u64(w);
+    }
+    assert_eq!(direct.finish(), fresh.finish(), "the digest of the stored words");
+    assert_ne!(direct.finish(), Digest::default().finish());
+}
+
 /// Every item, written then read back, with the reader exhausted at the end.
 #[test]
 fn every_item_round_trips() {

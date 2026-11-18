@@ -48,69 +48,13 @@ pub use nudge::Nudge;
 pub use poison::Poison;
 
 /// The strip print's hash, 64 bits, one step per 64-bit word (#742; it was byte-wise FNV-1a,
-/// which made hashing a third of the scheduling gate's time). Deterministic across runs,
-/// platforms and Rust versions (the standard library's hasher is not): the record writer gives
-/// it every value as a word through `write_u64` (floats by their bits under their own tags, see
-/// `transit_state_record`). Prints are compared only within one process run; no value is pinned.
-///
-/// Each step is `state = mix(state ^ word)`, where `mix` is the SplitMix64 finalizer (xor-shift,
-/// multiply, xor-shift, multiply, xor-shift; both multipliers odd). Every operation of `mix` is
-/// invertible mod 2^64, so `mix` is a bijection. For a fixed state a step is therefore injective
-/// in the word, and for a fixed word it is a bijection of the state. So two streams that differ
-/// in exactly one word (any single bit of any recorded value) always end in different prints:
-/// the states differ right after that word, and every later step keeps them apart. Two streams
-/// that differ in several words collide only if `mix` maps the differences onto each other,
-/// which a full-avalanche permutation does with odds near 2^-64 under the assumption that the
-/// digests of different streams behave as independent uniform values (an estimate, not a bound).
-#[derive(Clone, Copy, Debug)]
-pub struct PrintHasher(u64);
-
-impl Default for PrintHasher {
-    fn default() -> Self {
-        PrintHasher(0xcbf2_9ce4_8422_2325)
-    }
-}
-
-impl PrintHasher {
-    /// One step over a word (see the type docs).
-    #[inline]
-    fn word(&mut self, w: u64) {
-        self.0 = mix(self.0 ^ w);
-    }
-}
-
-/// The SplitMix64 finalizer: a bijection of `u64` with full avalanche (see [`PrintHasher`]).
-#[inline]
-fn mix(mut x: u64) -> u64 {
-    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    x ^ (x >> 31)
-}
-
-impl Hasher for PrintHasher {
-    /// Eight bytes to a word, little-endian; a short tail is zero-padded, then the length is
-    /// hashed, so a tail of zero bytes still counts. (The record writer never calls it.)
-    fn write(&mut self, bytes: &[u8]) {
-        let (words, tail) = bytes.as_chunks::<8>();
-        for &w in words {
-            self.word(u64::from_le_bytes(w));
-        }
-        if !tail.is_empty() {
-            let mut last = [0u8; 8];
-            last[..tail.len()].copy_from_slice(tail);
-            self.word(u64::from_le_bytes(last));
-        }
-        self.word(bytes.len() as u64);
-    }
-
-    fn write_u64(&mut self, i: u64) {
-        self.word(i);
-    }
-
-    fn finish(&self) -> u64 {
-        self.0
-    }
-}
+/// which made hashing a third of the scheduling gate's time): the record codec's
+/// [`transit_state_record::Digest`] (its docs say why two streams that differ in one word always
+/// differ, and what the collision estimate for several rests on), which the print's writer feeds
+/// directly ([`Writer::digest`]: no dynamic call per word). Deterministic across runs, platforms
+/// and Rust versions (the standard library's hasher is not). Prints are compared only within one
+/// process run; no value is pinned.
+pub type PrintHasher = transit_state_record::Digest;
 
 /// One strip's state at a block boundary (see the module docs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -321,7 +265,7 @@ fn slots(st: &Strip) -> impl Iterator<Item = Option<&PluginSlot>> {
 /// The digest of the record `f` writes.
 fn digest(f: impl FnOnce(&mut Writer<'_>)) -> u64 {
     let mut h = PrintHasher::default();
-    f(&mut Writer::new(&mut h));
+    f(&mut Writer::digest(&mut h));
     h.finish()
 }
 
@@ -500,7 +444,7 @@ impl MixEngine {
                 for (k, slot) in st.plugins.iter().enumerate() {
                     if let Some(slot) = slot {
                         let mut h = PrintHasher::default();
-                        slot.plugin.fingerprint(&mut Writer::new(&mut h));
+                        slot.plugin.fingerprint(&mut Writer::digest(&mut h));
                         parts.push(format!("insert {k} ({}): {:016x}", slot.id, h.finish()));
                     }
                 }
