@@ -877,14 +877,17 @@ impl EngineBank<'_> {
 //   every one of them before anything reads them (each engine assigns its outputs, or fills them
 //   with 0 before it sums into them), and the post-processors and the int16 conversion read them
 //   only after that; nothing else reads them. Witnesses: every case, every engine (the engine
-//   switch's revisits and one witness per engine, `print_completeness/macro_osc.rs`), with this
-//   group's omission mutation uncaught.
+//   switch's revisits and one witness per engine, `print_completeness/macro_osc.rs`), with the
+//   restored instance's buffers poisoned after the restore and after every block
+//   (`Voice::poison_unobservable`) against an unpoisoned twin.
 // - `decay_envelope`: read only through `apply_modulations`, as the internal envelope times a
 //   patch modulation amount, and the Macro Oscillator's patch carries none (`Slot::render` leaves
 //   `frequency_modulation_amount` and `morph_modulation_amount` at 0, and sets the timbre amount
 //   only for the chiptune model, whose internal envelope amplitude for Timbre is 0 in `render`);
-//   an owner that sets a modulation amount must encode it. Witnesses: every case, with this
-//   field's omission mutation uncaught.
+//   an owner that sets a modulation amount must encode it. Guard: `Slot::render` asserts this of
+//   every patch it renders in a testing build (`decay_envelope_unread`, transit-dsp's
+//   `macro_osc_voice.rs`). Witnesses: every case, with the restored instance's envelope poisoned
+//   after the restore and after every block against an unpoisoned twin.
 // The selected engine's index comes first, so restore knows which engine is dormant before it
 // reads the bank (`EngineBank::record_with`).
 #[cfg(feature = "testing")]
@@ -1001,7 +1004,12 @@ impl Voice<'_> {
     }
 
     /// Poison witnesses only: [`Voice::poison_engine`] for every engine.
+    /// Also the voice's block buffers and its decay envelope (unobservable, see the record).
     pub fn poison_unobservable(&mut self, p: &mut crate::record::Poison) {
+        use crate::record::Record;
+        self.out_buffer.poison(p);
+        self.aux_buffer.poison(p);
+        self.decay_envelope.poison(p);
         for index in 0..NUM_ENGINES {
             // The three six-operator models share one engine: poison it once.
             if !(3..=4).contains(&index) {

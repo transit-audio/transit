@@ -287,6 +287,16 @@ pub struct Observed {
 }
 
 impl MacroOscillator {
+    /// Poison witnesses only: overwrites every slot's unobservable state ([`Slot::poison_unobservable`],
+    /// the port voice's included) from a source seeded with `seed`; returns the values written.
+    pub fn poison_unobservable(&mut self, seed: u32) -> u64 {
+        let mut p = transit_macro_osc::record::Poison::new(seed);
+        for s in &mut self.slots {
+            s.poison_unobservable(&mut p);
+        }
+        p.count()
+    }
+
     /// The witnesses' observations (see [`Observed`]).
     #[must_use]
     pub fn observe(&self) -> Observed {

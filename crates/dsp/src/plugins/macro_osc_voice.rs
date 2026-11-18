@@ -568,15 +568,16 @@ impl Slot {
     }
 
     /// One voice's complete state (ADR 0029, #742 section 13): the port's voice (every engine of
-    /// its bank, dormant ones included, its generator, envelopes, trigger delay, post-processors
-    /// and tuning: `transit_macro_osc::record`), the last block's frames and mix, the keys, the
-    /// note and velocities, the trigger and phrase flags, the age, loudness and quiet count, the
-    /// idle flag and the shaper. The seed is configuration (the slot's index). Unobservable, each
-    /// written by `render` before anything reads it: `rendered` (set for every slot at the start of
-    /// each `render`, then read by `render_block`), and for a slot that renders `frames` (the
-    /// port's voice writes all twelve), `mixed` and `gain` (read by `render_block` only for slots
-    /// it rendered) and `shape` (read only by the panel's `newest`). Witnesses: every case, with
-    /// this group's omission mutation uncaught.
+    /// its bank, its generator, envelopes, trigger delay, post-processors and tuning:
+    /// `transit_macro_osc::record`, which leaves out a dormant engine's reset-rewritten state), the
+    /// keys, the note and velocities, the trigger and phrase flags, the age, loudness and quiet
+    /// count, the idle flag and the shaper. The seed is configuration (the slot's index).
+    /// Unobservable, each written by `render` before anything reads it: `rendered` (set for every
+    /// slot at the start of each `render`, then read by `render_block`), and for a slot that
+    /// renders `frames` (the port's voice writes all twelve), `mixed` and `gain` (read by
+    /// `render_block` only for slots it rendered) and `shape` (read only by the panel's `newest`).
+    /// Witnesses: every case, with the restored instance's fields poisoned after the restore and
+    /// after every block ([`Slot::poison_unobservable`]) against an unpoisoned twin.
     pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
         use transit_macro_osc::record::Record;
         let Slot {
@@ -656,5 +657,19 @@ impl Slot {
         *quiet = r.u32()?;
         *idle = r.bool()?;
         shaper.restore_state(r)
+    }
+
+    /// Poison witnesses only: overwrites the state the record leaves out as unobservable, the
+    /// slot's (`frames`, `mixed`, `rendered`, `gain`, `shape`) and the port voice's
+    /// (`Voice::poison_unobservable`), with values that differ from the ones they replace.
+    pub(crate) fn poison_unobservable(&mut self, p: &mut transit_macro_osc::record::Poison) {
+        use transit_macro_osc::record::Record;
+        self.frames.poison(p);
+        self.mixed.poison(p);
+        self.rendered.poison(p);
+        self.gain.0.poison(p);
+        self.gain.1.poison(p);
+        self.shape.poison(p);
+        self.voice.poison_unobservable(p);
     }
 }

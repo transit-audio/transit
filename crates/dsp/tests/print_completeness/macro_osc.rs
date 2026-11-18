@@ -564,5 +564,9 @@ pub(super) fn entry() -> Entry<MacroOscillator> {
         describe: |p| format!("{:?}", obs(p)),
         witnesses: witnesses(),
         inapplicable: vec![],
+        // The slots' last-block outputs, the port voice's block buffers and decay envelope, the
+        // dormant engines' reset-rewritten state, a dormant six-operator engine's patches and the
+        // speech frames no read reaches.
+        poison: Some(|p, k| p.poison_unobservable(k + 1)),
     }
 }

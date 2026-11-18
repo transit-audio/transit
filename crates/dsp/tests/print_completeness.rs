@@ -180,7 +180,7 @@ fn run<P: Plugin + ?Sized>(
     steps: &[Step],
     clock: &mut Clock,
     counts: &mut Counts,
-    mut each: impl FnMut(&[Box<P>], &[Vec<Vec<f32>>], usize) -> Result<(), String>,
+    mut each: impl FnMut(&mut [Box<P>], &[Vec<Vec<f32>>], usize) -> Result<(), String>,
 ) -> Result<(), String> {
     let mut io = vec![vec![vec![0.0f32; MAX_BLOCK]; ch]; ps.len()];
     for (s, step) in steps.iter().enumerate() {
@@ -287,6 +287,11 @@ struct Entry<P: ?Sized> {
     describe: fn(&P) -> String,
     witnesses: Vec<Witness<P>>,
     inapplicable: Vec<(Boundary, &'static str)>,
+    /// The poison witness for the state the inventory leaves out as unobservable (section 13):
+    /// when set, it poisons the restored instance B right after the restore and after every block
+    /// of the continuation (its argument numbers the block; it returns the values it wrote), and B
+    /// must still match the unpoisoned A in output and record.
+    poison: Option<fn(&mut P, u32) -> u64>,
 }
 
 /// One witness's actual cost, summed over its configurations.
@@ -323,6 +328,11 @@ fn case<P: Plugin + ?Sized>(e: &Entry<P>, w: &Witness<P>, rate: f32, ch: usize, 
     if record(&*b) != rec {
         return Err(at("the restored instance re-records other words".into()));
     }
+    if let Some(poison) = e.poison
+        && poison(&mut b, 0) == 0
+    {
+        return Err(at("the poison witness wrote nothing".into()));
+    }
     let script = (w.continuation)(rate);
     let mut cont = Counts::default();
     let mut k = 0;
@@ -344,6 +354,9 @@ fn case<P: Plugin + ?Sized>(e: &Entry<P>, w: &Witness<P>, rate: f32, ch: usize, 
         }
         bytes += ra.len() * 8;
         k += 1;
+        if let Some(poison) = e.poison {
+            poison(&mut ps[1], k as u32);
+        }
         Ok(())
     })
     .map_err(at)?;
@@ -651,6 +664,7 @@ fn fixture() -> Entry<Fixture> {
             (Boundary::Pending, "nothing pending: `set_param` applies at once (its ramp is boundary 5's)"),
             (Boundary::Sustain, "no keys or pedals: `Fixture` takes no notes"),
         ],
+        poison: None,
     }
 }
 
@@ -669,6 +683,19 @@ fn the_full_fixture_passes_and_each_omission_variant_fails() {
             Err(e) => println!("variant without {omit:?} fails as it must: {e}"),
         }
     }
+}
+
+/// The poison witness compares after poisoning: a poison that writes encoded, observable state
+/// (the fixture's counter) fails the harness.
+#[test]
+fn a_poison_that_reaches_observable_state_fails_the_harness() {
+    let mut e = fixture();
+    e.poison = Some(|p, _| {
+        p.count += 1;
+        1
+    });
+    let err = harness(&e).unwrap_err();
+    assert!(err.contains("differ"), "{err}");
 }
 
 /// The Macro Oscillator's declaration (ADR 0029, #742 slice 1 push 2): every witness of its set
