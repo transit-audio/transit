@@ -404,3 +404,24 @@ fn saving_a_kit_over_a_file_needs_replace() {
     e.execute(SAVE, &json!({"track": t, "path": d.0.join("Mine"), "replace": true})).unwrap();
     assert_ne!(std::fs::read(&file).unwrap(), before, "replace: true writes the kit");
 }
+
+#[test]
+fn a_kit_keeps_its_pad_levels_and_leaves_the_samplers_output_alone() {
+    // #753: Output is the instrument's, not the kit's. A kit file carries the zones' levels (the
+    // relative trims under Output) and no Output; a recall keeps the target Sampler's Output.
+    let d = Dir::new();
+    let (mut a, t) = setup();
+    build(&mut a, t, &d);
+    a.execute("mix.sampler_control", &json!({"track": t, "id": "zone002_level", "value": 4.5})).unwrap();
+    a.execute("mix.instrument_param", &json!({"track": t, "param": "output", "value": 3.0})).unwrap();
+    save_kit(&mut a, t, &d.0.join("levels"));
+    let text = std::fs::read_to_string(d.0.join("levels.tkit")).unwrap();
+    assert!(!text.contains("\"output\""), "the kit carries no Output: {text}");
+    let (mut b, u) = setup();
+    b.execute("mix.instrument_param", &json!({"track": u, "param": "output", "value": -20.0})).unwrap();
+    recall(&mut b, u, &d.0.join("levels.tkit"), false);
+    let controls = kit(&b, u).controls;
+    assert_eq!((controls.get("zone001_level"), controls.get("zone002_level")), (Some(&-6.0), Some(&4.5)), "the pads keep their levels");
+    let ins = b.session().track(u).unwrap().instrument.clone().unwrap();
+    assert_eq!(ins.params.get("output"), Some(&-20.0), "the target's Output is kept");
+}

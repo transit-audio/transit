@@ -53,6 +53,8 @@ fn spec(sources: Vec<Arc<dyn SampleSource>>, zones: Vec<Option<Zone>>, binds: &[
 /// A stereo core-path instance at 48 kHz.
 fn instance() -> (Sampler, Publisher) {
     let mut s = Sampler::new();
+    // Output at unity: these tests read the zones' own levels (#753's default is -12 dB).
+    s.set_param(OUTPUT_PARAM, 0.0);
     s.prepare(SR, 512, 2);
     let p = s.enable_core(7);
     (s, p)
@@ -301,9 +303,10 @@ fn slot_ids_are_stable_and_the_unprefixed_legacy_ids_are_retired() {
     for bad in ["zone000_level", "zone257_level", "zone01_level", "zone001level", "zone001_", "zone001_nope", "zoneabc_level", "level_zone001"] {
         assert_eq!(table.resolve(bad), None, "{bad}");
     }
-    // The table has no parameters: the 19 unprefixed legacy ids are retired (#455).
+    // The table holds only Output (#753): the 19 unprefixed legacy ids are retired (#455).
     let (mut s, mut p) = instance();
-    assert!(SAMPLER_INFO.params.is_empty());
+    assert_eq!(SAMPLER_INFO.params.iter().map(|p| p.id).collect::<Vec<_>>(), ["output"]);
+    assert_eq!(resolve("output"), None, "Output is not a slot id");
     assert!(!s.set_param("level", -6.0));
     assert_eq!(s.param("level"), None);
     assert_eq!(s.param("zone001_level"), Some(0.0));

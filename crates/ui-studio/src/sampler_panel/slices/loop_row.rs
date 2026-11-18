@@ -129,9 +129,7 @@ pub fn typed_tenths(text: &str) -> Option<u64> {
 
 /// The Playback panel's inner width at row width `w` (the sections' own split).
 fn playback_inner(w: f32) -> f32 {
-    let slot = sections::slot_at(w);
-    let amp = 4.0 * slot + 3.0 * sections::SLOT_GAP + 2.0 * tokens::layout::PANEL_PADDING[1];
-    w - tokens::layout::PANEL_GAP - amp - 2.0 * tokens::layout::PANEL_PADDING[1]
+    sections::widths(w).1 - 2.0 * tokens::layout::PANEL_PADDING[1]
 }
 
 /// The rows under the knobs: the loop row, then the warning line and the error banner when shown.

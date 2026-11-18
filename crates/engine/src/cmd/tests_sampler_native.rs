@@ -13,6 +13,8 @@ fn loaded(rate: u32, data: Vec<f32>) -> (Engine, TrackId) {
     let mut e = Engine::default();
     let t = instrument(&mut e);
     e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
+    // Output at unity, as the direct reference plays (#753's default is -12 dB).
+    e.execute("mix.instrument_param", &json!({"track": t, "param": "output", "value": 0.0})).unwrap();
     super::super::load_zone_bytes(&mut e, t, 0, "native.wav", &wav(rate, data)).unwrap();
     e.execute(
         "mix.sampler_zone_edit",

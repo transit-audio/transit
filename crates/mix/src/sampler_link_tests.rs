@@ -17,8 +17,16 @@ fn audio(v: f32) -> Arc<SourceAudio> {
     Arc::new(SourceAudio::new(AudioBuffer { sample_rate: SR, channels: vec![vec![v; 48_000]] }))
 }
 
-/// A Sampler track holding a long note 60, and pad 1 (note 60) bound to zone 1 over source 1.
+/// A Sampler track holding a long note 60, and pad 1 (note 60) bound to zone 1 over source 1;
+/// Output at unity (these tests read the zones' own levels; #753's default is -12 dB).
 fn session(patch: Option<PatchV1>) -> (Session, TrackId) {
+    let (mut s, t) = session_as_saved(patch);
+    s.track_mut(t).unwrap().instrument.as_mut().unwrap().params.insert("output".into(), 0.0);
+    (s, t)
+}
+
+/// [`session`] with no Output stored: the shape of a session saved before Output existed.
+fn session_as_saved(patch: Option<PatchV1>) -> (Session, TrackId) {
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     s.pool.insert(SourceId(1), audio(0.5));
@@ -197,6 +205,8 @@ fn rr_session(p: PatchV1, notes: usize) -> (Session, TrackId) {
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, (notes * STEP_FRAMES) as i64, seq));
     let mut ins = Insert::new("sampler");
     ins.sampler_patch = Some(SamplerPatch { state: PatchState::Ready(Box::new(p)) });
+    // Output at unity: the levels read are the alternatives' own (#753's default is -12 dB).
+    ins.params.insert("output".into(), 0.0);
     tr.instrument = Some(ins);
     (s, t)
 }
@@ -637,4 +647,43 @@ fn a_group_mode_edit_keeps_the_instance_and_prepares_no_more_than_a_zone_edit() 
     assert_eq!(uid(&s), first, "the same uid");
     assert_eq!(rig.comp.samplers.len(), 1);
     assert_eq!(rig.drops(), 0);
+}
+
+/// The held note's level after it settles, as a ratio to the zone's own (`kit(1)`, source 0.5).
+fn settled(s: &Session) -> f32 {
+    let mut rig = Rig::new();
+    assert_eq!(rig.publish(s), Adoption::Adopted);
+    last(&rig.render(8))
+}
+
+#[test]
+fn a_session_without_output_plays_the_sampler_12_db_quieter() {
+    // #753's stated break, pinned: a Sampler saved before Output existed stores no Output and
+    // plays at its -12 dB default after the upgrade. No migration writes a value.
+    let (old, t) = session_as_saved(Some(kit(1)));
+    assert!(old.track(t).unwrap().instrument.as_ref().unwrap().params.get("output").is_none());
+    let (unity, _) = session(Some(kit(1)));
+    let (a, b) = (settled(&old), settled(&unity));
+    assert!(b > 0.4, "the zone plays at unity Output: {b}");
+    let ratio = a / b;
+    assert!((ratio - transit_dsp::db_to_gain(-12.0)).abs() < 1.0e-6, "-12 dB: {ratio}");
+}
+
+#[test]
+fn a_stored_output_is_what_plays_and_an_edit_reaches_the_running_instance() {
+    let (mut s, t) = session(Some(kit(1)));
+    let unity = settled(&s);
+    s.track_mut(t).unwrap().instrument.as_mut().unwrap().params.insert("output".into(), -6.0);
+    let ratio = settled(&s) / unity;
+    assert!((ratio - transit_dsp::db_to_gain(-6.0)).abs() < 1.0e-6, "a fresh instance starts at the stored Output: {ratio}");
+    // An edit on a running instance reaches it through the parameter pass (and glides).
+    let mut rig = Rig::new();
+    assert_eq!(rig.publish(&s), Adoption::Adopted);
+    rig.render(8);
+    let made = rig.log.made.load(Ordering::Relaxed);
+    s.track_mut(t).unwrap().instrument.as_mut().unwrap().params.insert("output".into(), -48.0);
+    assert_eq!(rig.publish(&s), Adoption::Adopted);
+    let out = rig.render(64);
+    assert!(last(&out) < unity * 0.01, "the edit reached the instance: {}", last(&out));
+    assert_eq!(rig.log.made.load(Ordering::Relaxed), made, "the instance is kept");
 }

@@ -172,6 +172,8 @@ fn the_core_path_allocates_and_frees_nothing_on_the_audio_thread() {
             let mut id = [0u8; 32];
             assert!(s.set_param(fmt(&mut id, 1 + b % PADS, "level"), -(b as f32)));
             assert!(s.set_param(fmt(&mut id, 2, "cutoff"), 500.0 + 40.0 * b as f32));
+            // The instrument's Output (#753): a gliding gain on the summed output.
+            assert!(s.set_param("output", -12.0 + (b % 7) as f32 * 3.0));
             assert!(s.event(3, &PluginEvent { channel: 0, note_id: -1, message: Message::PitchBend { value: 4_000 + 300 * b as u16 } }));
         });
         rig.block(true);

@@ -189,7 +189,8 @@ pub struct PadRecord {
 /// One knob of the sections row as last drawn.
 #[derive(Debug, Clone)]
 pub struct KnobRecord {
-    /// `level`, `pan`, `transpose`, `cents`, `attack_ms`, `decay_ms`, `sustain`, `release_ms`.
+    /// `level`, `pan`, `transpose`, `cents`, `attack_ms`, `decay_ms`, `sustain`, `release_ms`, and
+    /// the instrument's `output` (#753).
     pub field: String,
     pub label: String,
     pub value: String,

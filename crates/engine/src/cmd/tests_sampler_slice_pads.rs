@@ -23,6 +23,8 @@ fn setup() -> (Engine, TrackId) {
     e.execute("track.new", &json!({"kind": "instrument", "format": "stereo"})).unwrap();
     let t = e.session().tracks.last().unwrap().id;
     e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
+    // Output at unity: these tests read the zones' own levels (#753's default is -12 dB).
+    e.execute("mix.instrument_param", &json!({"track": t, "param": "output", "value": 0.0})).unwrap();
     // A new patch starts its pads at 36; these tests were written for pads from 60.
     e.execute("mix.sampler_pad_start", &json!({"track": t, "note": 60})).unwrap();
     let rate = e.session().sample_rate.hz();
@@ -654,6 +656,10 @@ fn old_sessions_open_and_render_with_unchanged_hashes() {
     e.execute("session.save_as", &json!({"path": file})).unwrap();
     let mut back = Engine::default();
     back.execute("session.open", &json!({"path": file})).unwrap();
+    // #753: a session saved before Output existed plays its Sampler 12 dB quieter (the stated
+    // break, pinned in transit-mix's `sampler_link_tests`); at unity Output it renders as it did.
+    assert!(back.session().track(t).unwrap().instrument.as_ref().unwrap().params.get("output").is_none());
+    back.execute("mix.instrument_param", &json!({"track": t, "param": "output", "value": 0.0})).unwrap();
     let h = hash(&transit_mix::render_range(back.session(), Range::new(0, 72_000), 512));
     assert_eq!(h, OLD_SESSION_GOLDEN, "an old session renders as it did");
     assert_eq!(serde_json::to_value(patch(&back, t)).unwrap(), serde_json::to_value(patch(&e, t)).unwrap(), "and opens with its patch as saved");

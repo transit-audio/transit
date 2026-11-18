@@ -8,6 +8,12 @@
 //!   column with the trigger mode as a segmented control (One-shot, Gate) and Reverse and Key track
 //!   as option toggles (through `mix.sampler_zone_edit`).
 //! - **Amp Envelope:** Attack, Decay, Sustain, Release (`mix.sampler_zone_edit`).
+//! - **Output** (#753): the instrument-wide Output level (the Sampler's table parameter `output`,
+//!   -48 to 12 dB, default -12 dB, applied after the zones are summed), one size M knob in the same
+//!   slot, last in the row. It edits the instrument, not the selection: it stays live with an empty
+//!   pad or no zone, follows its automation lane, and writes through the built-in parameter path
+//!   (one undo step per gesture, MIDI Learn on its context menu) as every device knob does. The
+//!   row is shared by the three views, so Output shows on every one of them.
 //!
 //! The ranges are ADR 0041's; the time knobs take the legacy Sampler's log tapers (their floors,
 //! 0.1 ms and 1 ms, are the knobs'; a zone's zero is set by the command). A knob's drag or wheel
@@ -116,10 +122,19 @@ pub fn height(p: &egui::Painter) -> f32 {
 }
 
 /// The knob slot at row width `w`: up to [`SLOT`], shrinking with the row once the column is at its
-/// least.
+/// least. Nine slots: Playback's four, Amp Envelope's four and Output's one.
 pub fn slot_at(w: f32) -> f32 {
-    let fixed = space::PANEL_GAP + 4.0 * space::PANEL_PADDING[1] + 2.0 * DIVIDER_GAP + 1.0 + COLUMN_MIN + 6.0 * SLOT_GAP;
-    ((w - fixed) / 8.0).min(SLOT)
+    let fixed = 2.0 * space::PANEL_GAP + 6.0 * space::PANEL_PADDING[1] + 2.0 * DIVIDER_GAP + 1.0 + COLUMN_MIN + 6.0 * SLOT_GAP;
+    ((w - fixed) / 9.0).min(SLOT)
+}
+
+/// The row's split at width `w`: the knob slot and the Playback, Amp Envelope and Output panels'
+/// widths (Playback takes what the other two leave).
+pub fn widths(w: f32) -> (f32, f32, f32, f32) {
+    let slot = slot_at(w);
+    let amp = 4.0 * slot + 3.0 * SLOT_GAP + 2.0 * space::PANEL_PADDING[1];
+    let output = slot + 2.0 * space::PANEL_PADDING[1];
+    (slot, w - 2.0 * space::PANEL_GAP - amp - output, amp, output)
 }
 
 /// Draws the row into `rect`; returns its height.
@@ -151,14 +166,22 @@ pub(crate) fn show_zone(
 ) -> f32 {
     let t = &TOKENS;
     let zone = zone.cloned();
-    let slot = slot_at(rect.width());
+    let (slot, play_w, amp_w, out_w) = widths(rect.width());
     let knobs_w = 4.0 * slot + 3.0 * SLOT_GAP;
-    let amp_w = knobs_w + 2.0 * space::PANEL_PADDING[1];
-    let play_w = rect.width() - space::PANEL_GAP - amp_w;
     let play_r = Rect::from_min_size(rect.min, vec2(play_w, rect.height()));
     let amp_r = Rect::from_min_size(pos2(play_r.max.x + space::PANEL_GAP, rect.min.y), vec2(amp_w, rect.height()));
+    let out_r = Rect::from_min_size(pos2(amp_r.max.x + space::PANEL_GAP, rect.min.y), vec2(out_w, rect.height()));
     let play_in = panel(ui, play_r, "playback", out);
     let amp_in = panel(ui, amp_r, "amp", out);
+    let out_in = panel(ui, out_r, "output", out);
+    out.knobs.clear();
+    // Output edits the instrument, not the selection: drawn outside the dimmed body.
+    {
+        let p = ui.painter().clone();
+        section_label(&p, out_in.min, "Output");
+        let row_y = out_in.min.y + super::line_h(&p, &tokens::LABEL_SECTION) + LABEL_GAP;
+        output_knob(app, ui, dev, pos2(out_in.min.x, row_y), slot, lay, out);
+    }
     let mut body = child(ui, rect);
     if zone.is_none() {
         body.multiply_opacity(tokens::alpha::DISABLED_SECTION);
@@ -170,7 +193,6 @@ pub(crate) fn show_zone(
     section_label(&p, amp_in.min, "Amp Envelope");
     let row_y = play_in.min.y + label_h + LABEL_GAP;
     let shown = zone.clone().unwrap_or_default();
-    out.knobs.clear();
     for (row_x, fields) in [(play_in.min.x, playback_fields()), (amp_in.min.x, amp_fields())] {
         for (i, f) in fields.iter().enumerate() {
             let at = pos2(row_x + i as f32 * (slot + SLOT_GAP), row_y);
@@ -222,6 +244,53 @@ pub(crate) fn show_zone(
 /// The id of zone field `field`'s knob on the insert `uid` (its value field is `id.with("editing")`).
 pub fn knob_id(uid: u64, field: &str) -> egui::Id {
     egui::Id::new(("sampler_knob", uid, field))
+}
+
+/// The id of the Output knob on the insert `uid` (its value field is `id.with("editing")`).
+pub fn output_knob_id(uid: u64) -> egui::Id {
+    egui::Id::new(("sampler_output_knob", uid))
+}
+
+/// The Output knob (size M) centered in its slot at `at`: the instrument's table parameter, read
+/// and written as every device knob is (its automation, else the insert's value, else -12 dB).
+fn output_knob(app: &mut StudioApp, ui: &mut Ui, dev: Dev, at: egui::Pos2, slot: f32, lay: &mut EditorLayout, out: &mut SamplerLayout) {
+    use transit_dsp::plugins::sampler::OUTPUT_PARAM;
+    let size = knob::Size::M;
+    let cw = knob::cell(size).x;
+    let cell = Rect::from_min_size(pos2(at.x + (slot - cw) / 2.0, at.y), knob::cell(size));
+    let Some(p) = dev.param(OUTPUT_PARAM) else { return };
+    let v = dev.value(app, OUTPUT_PARAM);
+    let text = crate::middle_c::param_text(p, v, app.ui.middle_c);
+    let k = knob::Knob {
+        size,
+        label: p.name,
+        value_text: &text,
+        value: p.to_normalized(v),
+        default: p.to_normalized(p.default),
+        bipolar: bipolar(p),
+        modulation: None,
+        disabled: false,
+    };
+    let mut c = child(ui, cell);
+    let shown = knob::show(&mut c, output_knob_id(dev.uid()), &k);
+    let new = knob_value(p, &shown, app.ui.middle_c);
+    if shown.wheeled {
+        app.builtin_editor.devices.wheel_now = true;
+    }
+    if let Some(ctl) = crate::midi_learn::plugin_control(dev.key.1, p.id) {
+        let resp = &shown.response;
+        crate::chrome::context_menu(resp, app.learn_checks(dev.key.0, &ctl))
+            .id(resp.id.with("learn_ctx"))
+            .show(|ui| app.midi_learn_menu(ui, dev.key.0, ctl.clone()));
+        crate::midi_learn::mark(app, c.painter(), resp.rect, dev.key.0, ctl);
+    }
+    crate::help::hover(&c, &shown.response, crate::help::Id::SamplerOutput);
+    if let Some(n) = new {
+        crate::device_editor::set(app, dev, p.id, n);
+    }
+    let value = crate::middle_c::param_text(p, new.map_or(v, |n| p.clamp(n)), app.ui.middle_c);
+    lay.rows.push(crate::builtin_editor::RowLayout { param: p.id.to_string(), control: r4(cell), value: value.clone() });
+    out.knobs.push(KnobRecord { field: p.id.to_string(), label: p.name.to_string(), value, knob: shown.layout });
 }
 
 /// One knob (size M) centered in its slot at `at`.

@@ -31,6 +31,7 @@ fn param(field: &str) -> &'static transit_dsp::ParamInfo {
         "decay_ms" => &super::zone::DECAY,
         "sustain" => &super::zone::SUSTAIN,
         "release_ms" => &super::zone::RELEASE,
+        "output" => transit_dsp::plugins::sampler::SAMPLER_INFO.param("output").unwrap(),
         f => panic!("{f}"),
     }
 }
@@ -66,6 +67,7 @@ pub fn open_at(width: f32, min: Option<f32>) -> (T, TrackId, Vec<(String, String
         let (v, s) = widest(&p, info);
         match k.field.as_str() {
             "level" | "pan" => t.run("mix.sampler_control", json!({"track": tr.0, "id": format!("zone001_{}", k.field), "value": v})),
+            "output" => t.run("mix.instrument_param", json!({"track": tr.0, "param": "output", "value": v})),
             "sustain" => t.run("mix.sampler_zone_edit", json!({"track": tr.0, "zone": 1, "playback": {"sustain": v / 100.0}})),
             f => {
                 let mut fields = serde_json::Map::new();
@@ -207,9 +209,14 @@ fn the_minimum_width_is_the_narrowest_multiple_of_8_where_the_widest_readouts_fi
     // Negative control (the brief's): 80 narrower crowds.
     let (t, tr, _) = open_at(min - 80.0, Some(min - 80.0));
     assert!(!faults(&t, tr).is_empty(), "at {}", min - 80.0);
-    // The design width is clean too, with the knobs in their full 84 px slots.
+    // The design width is clean too, every knob in the same slot: since Output joined the row
+    // (#753) its nine slots share the row, so at the design width they are under the 84 px cap.
     let (t, tr, _) = open_at(super::DESIGN_WIDTH, None);
     assert_eq!(faults(&t, tr), Vec::<String>::new());
     let k = &t.panel(tr).knobs;
-    assert_eq!(k[1].knob.rect[0] - k[0].knob.rect[0], super::zone::SLOT + super::zone::SLOT_GAP);
+    let at = |f: &str| k.iter().find(|k| k.field == f).unwrap().knob.rect[0];
+    let pitch = at("pan") - at("level");
+    assert!(pitch < super::zone::SLOT + super::zone::SLOT_GAP && pitch >= 64.0 + super::zone::SLOT_GAP, "{pitch}");
+    // The knobs sit on the pixel grid, so two rows' pitches agree to within a pixel.
+    assert!((at("decay_ms") - at("attack_ms") - pitch).abs() <= 1.0, "one slot for every knob");
 }

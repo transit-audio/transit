@@ -661,6 +661,8 @@ fn zone_edit_without_the_new_keys_is_unchanged() {
     let mut e = Engine::default();
     let t = instrument(&mut e);
     e.execute("mix.sampler_new_patch", &json!({"track": t, "seed": 9})).unwrap();
+    // Output at unity: this test reads the zones' own levels (#753's default is -12 dB).
+    e.execute("mix.instrument_param", &json!({"track": t, "param": "output", "value": 0.0})).unwrap();
     e.execute("mix.sampler_pad_start", &json!({"track": t, "note": 60})).unwrap();
     let n = noise(24_000);
     let src = source_with(&mut e, 48_000, 24_000, |i| n[i]);

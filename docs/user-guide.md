@@ -572,6 +572,17 @@ live auxes combined. Live auxes count toward that threshold. Only an away tail s
 tail recovery path regardless of the switches or counts; away phase-1 strips alone use the
 existing recovery path.
 
+## Instrument level and the track fader
+
+Each built-in instrument has its own output level ahead of the track's fader: **Level** on the
+Macro Oscillator, Modal Voice, Texture Synth and Resonator, and **Output** on the Sampler (the last
+panel of the sections row, on every view). The fader starts at 0 dB, as in Ableton and Logic, so
+the instrument's level is where a new track keeps its headroom: the synths start at -6 dB, the
+Sampler at -12 dB, which leaves room for chords and stacked hits before the mix reaches full scale.
+The Sampler's pads and zones keep their own 0 dB Level as trims under Output. A session saved before
+the Sampler had Output plays its Sampler tracks 12 dB quieter: raise Output, or the track's fader,
+once.
+
 ## Macro Oscillator
 
 The Macro Oscillator is a built-in instrument (choose it from a track's instrument slot): up to 16

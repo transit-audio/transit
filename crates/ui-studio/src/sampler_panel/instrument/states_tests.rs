@@ -34,9 +34,15 @@ fn states_render_empty_with_the_drop_target_and_the_cards_ghosted() {
     assert!(!l.key_map.keys.is_empty(), "the keyboard stays");
     assert!(l.zone.is_none() && l.group_panel.is_none());
     assert_eq!(l.cards_opacity, tk::UNUSED_CONTROL_ALPHA, "the cards ghosted");
-    // The sections at 40 percent: their knobs take no input.
-    assert!(!t.panel(tr).knobs.is_empty());
-    assert!(t.panel(tr).knobs.iter().all(|k| k.knob.state == crate::widgets::knob::State::Disabled), "sections inert with no zone");
+    // The sections at 40 percent: their knobs take no input, except the instrument's Output
+    // (#753), which edits the instrument rather than a zone.
+    let knobs = t.panel(tr).knobs;
+    assert!(knobs.iter().any(|k| k.field != "output"));
+    assert!(
+        knobs.iter().filter(|k| k.field != "output").all(|k| k.knob.state == crate::widgets::knob::State::Disabled),
+        "sections inert with no zone"
+    );
+    assert!(knobs.iter().any(|k| k.field == "output" && k.knob.state != crate::widgets::knob::State::Disabled), "Output stays live");
 }
 
 #[test]

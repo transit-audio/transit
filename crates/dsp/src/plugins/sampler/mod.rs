@@ -38,10 +38,20 @@
 //! keeps equal by sending only the entries that changed. The slot ids are not in
 //! `SAMPLER_INFO.params` or the mix's inline parameter cache, and they are not automatable yet:
 //! the automation lanes would have to learn 28,928 ids (ADR 0041 "Capacities and admission").
+//!
+//! **Output** (#753). `SAMPLER_INFO.params` holds one instrument-wide parameter, `output` (dB,
+//! -48 to 12, default -12): the gain applied to the instance's output after the zones are summed,
+//! smoothed as the synths' Level is (a one-pole `util::Smoother`, 20 ms, per frame on the plug-in's
+//! output). It is an ordinary table parameter: stored in `Insert::params`, sent by the mix's
+//! parameter pass and automatable. It has no `zoneNNN_` prefix, so it is never a slot id; the pads
+//! and zones keep their 0 dB levels as relative trims under it. A session saved before it existed
+//! does not store it and plays at the -12 dB default (a stated break, no migration). At 0 dB the
+//! gain is exactly 1, so the output is the same bits as without it.
 
 use crate::event::PluginEvent;
-use crate::util::{sane_channels, sane_sr};
-use crate::{Category, Plugin, PluginInfo, Transport};
+use crate::params::lin;
+use crate::util::{Smoother, sane_channels, sane_sr};
+use crate::{Category, ParamInfo, Plugin, PluginInfo, Transport, Unit, db_to_gain};
 use transit_sampler_core::event::EventKind as CoreKind;
 
 mod adapter;
@@ -68,13 +78,21 @@ pub fn check_spec(spec: &PatchSpec) -> Result<(), PublishError> {
     handoff::check(spec).map(|_| ())
 }
 
-/// The Sampler has no table parameters: its controls are the zone slot ids (`params.rs`).
+/// The instrument-wide Output parameter's id.
+pub const OUTPUT_PARAM: &str = "output";
+/// Output's default (dB): new instances start with mixing headroom (#753).
+pub const OUTPUT_DEFAULT_DB: f32 = -12.0;
+
+/// The Sampler's one table parameter, Output; its other controls are the zone slot ids (`params.rs`).
+static SAMPLER_PARAMS: [ParamInfo; 1] = [lin(OUTPUT_PARAM, "Output", -48.0, 12.0, OUTPUT_DEFAULT_DB, Unit::Db)];
+
+/// The Sampler's table: Output only (the zone slot ids are not in it, `params.rs`).
 pub static SAMPLER_INFO: PluginInfo = PluginInfo {
     id: "sampler",
     name: "Sampler",
     short_name: "Sampler",
     category: Category::Instrument,
-    params: &[],
+    params: &SAMPLER_PARAMS,
     is_instrument: true,
     audiosuite: false,
     pages: &[],
@@ -86,6 +104,10 @@ pub struct Sampler {
     ch: usize,
     /// The core path (`None`: not switched yet, silent).
     core: Option<Box<CorePath>>,
+    /// Output (dB), as stored.
+    output_db: f32,
+    /// Output's gain, smoothed per frame.
+    output: Smoother,
 }
 
 impl Default for Sampler {
@@ -97,7 +119,27 @@ impl Default for Sampler {
 impl Sampler {
     #[must_use]
     pub fn new() -> Self {
-        Self { sr: 48_000.0, ch: 0, core: None }
+        let mut output = Smoother::new(db_to_gain(OUTPUT_DEFAULT_DB));
+        output.set_time(20.0, 48_000.0);
+        Self { sr: 48_000.0, ch: 0, core: None, output_db: OUTPUT_DEFAULT_DB, output }
+    }
+
+    /// Applies Output to the first `ch` channels of the block's `frames`: the smoothed gain per
+    /// frame, the same for every channel. A settled unity gain leaves the block untouched.
+    fn apply_output(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        let ch = self.ch.min(io.len());
+        let frames = crate::util::frames_in(io, frames, ch);
+        if !self.output.settling() && self.output.value().to_bits() == 1.0f32.to_bits() {
+            return;
+        }
+        for i in 0..frames {
+            let g = self.output.next();
+            for b in io.iter_mut().take(ch) {
+                if let Some(x) = b.get_mut(i) {
+                    *x *= g;
+                }
+            }
+        }
     }
 
     /// Switches this instance to the core path (ADR 0041) and returns the control side of its
@@ -123,18 +165,29 @@ impl Plugin for Sampler {
         &SAMPLER_INFO
     }
 
-    /// The zone slot ids, on the core path only.
+    /// Output, and the zone slot ids on the core path only.
     fn set_param(&mut self, id: &str, value: f32) -> bool {
+        if id == OUTPUT_PARAM {
+            let Some(info) = SAMPLER_PARAMS.first() else { return false };
+            self.output_db = info.clamp(value);
+            self.output.set(db_to_gain(self.output_db));
+            return true;
+        }
         self.core.as_deref_mut().is_some_and(|c| c.set_param(id, value))
     }
 
     fn param(&self, id: &str) -> Option<f32> {
+        if id == OUTPUT_PARAM {
+            return Some(self.output_db);
+        }
         self.core.as_deref().and_then(|c| c.param(id))
     }
 
     fn prepare(&mut self, sample_rate: f32, _max_block: usize, channels: usize) {
         self.sr = sane_sr(sample_rate);
         self.ch = sane_channels(channels);
+        self.output.set_time(20.0, self.sr);
+        self.output.snap();
         // As before the legacy renderer was retired: the core resets, then prepares at the rate.
         if let Some(c) = self.core.as_deref_mut() {
             c.reset();
@@ -143,6 +196,7 @@ impl Plugin for Sampler {
     }
 
     fn reset(&mut self) {
+        self.output.snap();
         if let Some(c) = self.core.as_deref_mut() {
             c.reset();
         }
@@ -158,12 +212,15 @@ impl Plugin for Sampler {
     fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
         if let Some(c) = self.core.as_deref() {
             c.fingerprint(w);
+            // Output's smoother carries state across blocks, as the voices' gains do.
+            w.f32(self.output.value());
         }
     }
 
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
         if let Some(c) = self.core.as_deref_mut() {
             c.process(io, frames, self.ch);
+            self.apply_output(io, frames);
             return;
         }
         for b in io.iter_mut().take(self.ch) {
@@ -233,6 +290,9 @@ mod core_tests_c2;
 
 #[cfg(test)]
 mod pads_tests;
+
+#[cfg(test)]
+mod output_tests;
 
 #[cfg(test)]
 mod positions_tests;

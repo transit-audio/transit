@@ -214,6 +214,8 @@ ids! {
     ResonatorStrums => "resonator.strums",
     ResonatorRate => "resonator.rate",
     ResonatorCredits => "resonator.credits",
+    // help\sampler.toml
+    SamplerOutput => "sampler.output",
     // help\sampler-kits.toml
     SamplerKitsField => "sampler_kits.field",
     SamplerKitsPrevious => "sampler_kits.previous",

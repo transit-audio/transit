@@ -28,7 +28,11 @@ fn the_window_is_the_device_window_with_the_shared_bar_and_a_footer() {
     assert_eq!((pads[1], pads[3]), (strip[1], strip[3]), "one hero row");
     assert_eq!(play[1] - pads[3], crate::tokens::layout::PANEL_GAP);
     assert_eq!(amp[0] - play[2], crate::tokens::layout::PANEL_GAP);
-    assert_eq!((play[0], amp[2]), (pads[0], strip[2]), "the rows share their edges");
+    // The instrument's Output (#753) closes the sections row.
+    let output = p.panel("output").unwrap();
+    assert_eq!(output[0] - amp[2], crate::tokens::layout::PANEL_GAP);
+    assert_eq!((output[1], output[3]), (play[1], play[3]), "one sections row");
+    assert_eq!((play[0], output[2]), (pads[0], strip[2]), "the rows share their edges");
     // The window holds its content exactly: the footer right under the sections row.
     assert_eq!(p.footer[1], play[3] + crate::tokens::layout::WINDOW_PADDING);
     // Negative control: a Macro Oscillator still opens its own panel, not this one.

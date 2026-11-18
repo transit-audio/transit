@@ -52,6 +52,8 @@ fn spec(sources: Vec<Arc<dyn SampleSource>>, zones: Vec<Option<Zone>>) -> PatchS
 
 fn instance() -> (Sampler, Publisher) {
     let mut s = Sampler::new();
+    // Output at unity: these tests read the zones' own levels (#753's default is -12 dB).
+    s.set_param(OUTPUT_PARAM, 0.0);
     s.prepare(SR, 512, 2);
     let p = s.enable_core(7);
     (s, p)

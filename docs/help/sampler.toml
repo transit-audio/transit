@@ -1,0 +1,9 @@
+# The Sampler's panel (the built-in instrument, ADR 0041).
+area = "sampler"
+title = "Sampler"
+link = "user-guide.md#instrument-level-and-the-track-fader"
+
+[[entry]]
+id = "sampler.output"
+name = "Output"
+text = "The whole instrument's output level, applied after every pad and zone is summed; the pads' and zones' own Level knobs are trims under it. The -12 dB default leaves headroom for stacked hits and the track fader. It shows on every view and can be automated."

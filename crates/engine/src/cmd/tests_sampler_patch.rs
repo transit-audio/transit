@@ -81,6 +81,8 @@ fn kit(e: &mut Engine, d: &Dir) -> TrackId {
     tone(&wav, 220.0, 48_000, 0.5, 2);
     let t = instrument(e);
     e.execute("mix.sampler_new_patch", &json!({"track": t, "seed": 9})).unwrap();
+    // Output at unity: these tests read the zones' own levels (#753's default is -12 dB).
+    e.execute("mix.instrument_param", &json!({"track": t, "param": "output", "value": 0.0})).unwrap();
     e.execute("mix.sampler_pad_start", &json!({"track": t, "note": 60})).unwrap();
     e.execute("mix.sampler_zone_source", &json!({"track": t, "zone": 1, "pad": 1, "path": s(&wav)})).unwrap();
     let src = patch(e, t).sources[0].source.0;
@@ -154,6 +156,8 @@ fn the_commands_edit_the_patch_atomically_and_refuse_bad_edits_whole() {
 fn direct(spec: dsp::PatchSpec, seed: u32, controls: &std::collections::BTreeMap<String, f32>, frames: usize) -> Vec<Vec<f32>> {
     use transit_dsp::event::{Message, NoteId, PluginEvent};
     let mut s = dsp::Sampler::new();
+    // At unity Output, as `kit` stores it (#753).
+    assert!(s.set_param("output", 0.0));
     s.prepare(48_000.0, 512, 2);
     let mut publisher = s.enable_sampler_core(seed).unwrap();
     publisher.publish(spec).unwrap();
