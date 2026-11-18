@@ -396,25 +396,26 @@ fn witnesses() -> Vec<W> {
             completed: idle,
         },
         // The allocator's loudness and the quiet count: the hi-hat model's hits decay faster than
-        // the loudness the allocator keeps falls, so at T (two voices held, two in their release,
-        // silent and counting down to idle) each voice's loudness is its remembered peak, not its
-        // present one, and the released voices are part way to idle; the continuation strikes keys
-        // that each take the quietest voice in its release, then releases everything to idle.
+        // the loudness the allocator keeps falls, so each voice's loudness is its remembered peak,
+        // not its present one. At T two voices are held and two are in their release, silent and
+        // counting down to idle: the older of those was struck loud, the younger soft, so the
+        // quietest is not the oldest. The continuation strikes one key, which takes the quietest
+        // voice in its release, lets the other count down to idle, then releases everything.
         W {
             boundary: Boundary::Entry("loudness and quiet count"),
             history: |rate| {
                 let mut h = setup(4);
                 h.push(Step::Param("model", 23.0));
-                for (i, key) in [48u8, 52, 55, 59].into_iter().enumerate() {
-                    h.push(Step::On(key, 60 + 20 * i as u8, 0));
+                for (key, vel) in [(48u8, 127u8), (52, 60), (55, 10), (59, 60)] {
+                    h.push(Step::On(key, vel, 0));
                     h.push(Step::Run(span(&[HOLD], rate)));
                 }
-                h.extend([Step::Off(55, 0), Step::Run(span(&[HOLD], rate)), Step::Off(48, 0), Step::Run(97)]);
+                h.extend([Step::Off(48, 0), Step::Run(span(&[HOLD], rate)), Step::Off(55, 0), Step::Run(97)]);
                 h
             },
             continuation: |rate| {
-                let mut c = vec![Step::On(62, 100, 0), Step::Run(span(&[HOLD], rate)), Step::On(64, 100, 0), Step::Run(span(&[HOLD], rate))];
-                for (k, key) in [52u8, 59, 62, 64].into_iter().enumerate() {
+                let mut c = vec![Step::On(62, 100, 0), Step::Run(span(&[HOLD], rate)), Step::Run(span(&[VISIT, HOLD], rate))];
+                for (k, key) in [52u8, 59, 62].into_iter().enumerate() {
                     c.push(Step::Off(key, k));
                 }
                 c.push(run_out(&[RELEASE], rate));
