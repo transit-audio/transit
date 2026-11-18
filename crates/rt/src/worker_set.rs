@@ -871,11 +871,14 @@ impl WorkerSet {
         std::sync::atomic::fence(Ordering::SeqCst);
         let n = self.threads.len();
         let mut woken = 0;
+        // One past the last worker visited: a woken worker must not be the next pass's first visit.
+        let mut next = self.wake_cursor;
         for k in 0..n {
             if woken >= count {
                 break;
             }
             let i = (self.wake_cursor + k) % n;
+            next = (i + 1) % n;
             let w = &self.shared.workers[i];
             if w.current.load(Ordering::Relaxed) != 0 {
                 continue;
@@ -893,7 +896,7 @@ impl WorkerSet {
             }
         }
         if n > 0 {
-            self.wake_cursor = (self.wake_cursor + woken.max(1)) % n;
+            self.wake_cursor = next;
         }
         woken
     }

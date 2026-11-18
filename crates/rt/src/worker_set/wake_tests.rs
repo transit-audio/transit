@@ -95,3 +95,20 @@ fn a_wake_reaches_a_parked_worker_while_an_awake_one_claims_a_strip_that_stalls(
     assert!(set.shutdown(STALL).is_empty());
     assert_eq!(set.jobs().faults(), 0);
 }
+
+/// Worker 0 is flagged (awake), so the pass skips it and wakes worker 1, the last one visited. The
+/// cursor must move to one past worker 1, which is 0: before the fix it advanced by the one wake,
+/// to 1, the worker just woken, and the next pass visited it first again.
+#[test]
+fn the_cursor_advances_past_the_last_worker_visited() {
+    let fake = Fake::new(2, Duration::ZERO);
+    let mut set = set_of(&fake, 2);
+    wait_parked(&set, 0, "after its first sweep");
+    wait_parked(&set, 1, "after its first sweep");
+    set.shared.workers[0].woken.store(true, Ordering::Release);
+
+    set.wake_cursor = 0;
+    set.wake(1);
+    assert_eq!(set.wake_cursor, 0, "the cursor must stop one past worker 1, the last visited");
+    assert!(set.shutdown(STALL).is_empty());
+}
