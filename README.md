@@ -201,6 +201,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 ### Instruments and effects
 
 - Hosts CLAP and VST3 plug-ins, with their own editor windows, saved state, and reported latency. A preset picked in a plug-in's own editor does not show as modified, Audio > Scan Plug-ins rescans every file, a scan that finds files and loads none says why, and Help > Debug Logging adds a trace of the calls between transit and each plug-in.
+- Audio Units (macOS) are not supported yet: a unit loads and processes audio, but its editor window cannot be opened, and sidechain inputs and extra buses are not connected ([#755](https://github.com/transit-audio/transit/issues/755)). Use the VST3 or CLAP build of a plug-in on the Mac.
 - The plug-in window header has a preset dropdown (Save, Save As…, Load…, previous/next), Bypass and a menu (Reset, Copy/Paste state, Delete, Show in chain). User presets are `.vstpreset` files other hosts can read.
 - Plug-in editors scale with the display: VST3 and CLAP editors receive the window's content scale, rescale when dragged between monitors with different scaling, and CLAP editors are sharp embedded and floating.
 - The device card shows Loading while a heavy plug-in instantiates.
