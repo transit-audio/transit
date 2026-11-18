@@ -145,11 +145,11 @@ fn usage_error(text: &str) -> Command {
 
 /// Classifies the arguments (without the program name) before anything else starts. `env_control` is
 /// `TRANSIT_CONTROL_PORT`; `slash_help` makes exactly `/?` mean help (Windows only; elsewhere an
-/// argument starting with `/` is a path).
+/// argument starting with `/` is a path); `ignore_psn` skips `-psn_*` arguments (macOS only).
 ///
 /// Help wins over every error. A lone `-` and any other argument starting with `-` that is not in
 /// [`FLAGS`] is an error; a path that starts with `-` goes after `--`.
-pub fn classify(args: &[String], env_control: Option<&str>, slash_help: bool) -> Command {
+pub fn classify(args: &[String], env_control: Option<&str>, slash_help: bool, ignore_psn: bool) -> Command {
     let mut help = slash_help && args.iter().any(|a| a == "/?");
     let (mut version, mut report) = (false, false);
     let (mut demo, mut no_audio, mut null_audio) = (false, false, false);
@@ -166,6 +166,10 @@ pub fn classify(args: &[String], env_control: Option<&str>, slash_help: bool) ->
             break;
         }
         if slash_help && arg == "/?" {
+            continue;
+        }
+        // macOS only: a Finder launch may pass a process serial number (`-psn_...`); unverified for current versions, kept as a guard.
+        if ignore_psn && arg.starts_with("-psn_") {
             continue;
         }
         if !arg.starts_with('-') {
@@ -243,7 +247,7 @@ mod tests {
     }
 
     fn run(values: &[&str]) -> Command {
-        classify(&a(values), None, false)
+        classify(&a(values), None, false, false)
     }
 
     fn launch(values: &[&str]) -> Launch {
@@ -265,11 +269,19 @@ mod tests {
         for args in [&["--help"][..], &["-h"], &["--demo", "-h"], &["--bogus", "--help"], &["song.transit", "--help"]] {
             assert_eq!(run(args), Command::Help, "{args:?}");
         }
-        assert_eq!(classify(&a(&["/?"]), None, true), Command::Help);
+        assert_eq!(classify(&a(&["/?"]), None, true, false), Command::Help);
         // Off Windows `/?` is a path; on Windows only the exact argument is help.
         assert_eq!(launch(&["/?"]).files, a(&["/?"]));
-        let other = classify(&a(&["/tmp/x.transit"]), None, true);
+        let other = classify(&a(&["/tmp/x.transit"]), None, true, false);
         assert!(matches!(other, Command::Run(l) if l.files == a(&["/tmp/x.transit"])));
+    }
+
+    #[test]
+    fn a_process_serial_number_argument_is_ignored_only_when_asked() {
+        assert_eq!(classify(&a(&["-psn_0_12345"]), None, false, true), run(&[]));
+        let with_path = classify(&a(&["-psn_0_12345", "s.transit"]), None, false, true);
+        assert!(matches!(with_path, Command::Run(l) if l.files == a(&["s.transit"])));
+        assert!(error(run(&["-psn_0_12345"])).contains("unknown option '-psn_0_12345'"));
     }
 
     #[test]
@@ -325,9 +337,9 @@ mod tests {
         assert!(error(run(&["--control"])).contains("--control requires a port from 0 to 65535"));
         assert!(error(run(&["--control", "70000"])).contains("Invalid control port"));
         assert!(error(run(&["--log", "--verbose"])).contains("--log requires directives"));
-        let from_env = classify(&a(&[]), Some("77"), false);
+        let from_env = classify(&a(&[]), Some("77"), false, false);
         assert!(matches!(from_env, Command::Run(l) if l.control_port == Some(77)));
-        assert!(error(classify(&a(&[]), Some("bad"), false)).contains("Invalid control port"));
+        assert!(error(classify(&a(&[]), Some("bad"), false, false)).contains("Invalid control port"));
         // --version still wins over the run-time combination checks, as before.
         assert_eq!(run(&["--version", "--no-audio", "--null-audio"]), Command::Version);
     }

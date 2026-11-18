@@ -439,7 +439,7 @@ fn main() -> eframe::Result {
     // usage errors answer here and start no window, audio device, plug-in scan or log file.
     // A release build on Windows has no console of its own: attach to the terminal that started it so
     // the answers can print there (without one, a message box carries the text).
-    let command = cli::classify(&args, std::env::var("TRANSIT_CONTROL_PORT").ok().as_deref(), cfg!(windows));
+    let command = cli::classify(&args, std::env::var("TRANSIT_CONTROL_PORT").ok().as_deref(), cfg!(windows), cfg!(target_os = "macos"));
     let launch = match command {
         cli::Command::Run(launch) => launch,
         cli::Command::Help => {
