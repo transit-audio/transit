@@ -258,14 +258,18 @@ impl StudioApp {
         let done: Option<u64> = None;
         let done = done.or_else(|| self.player.as_ref().and_then(|p| p.realtime_render_progress()).map(|p| p.done)).unwrap_or(0);
         let s = self.engine.session();
-        // The ruler's numbering, bars before bar 1 included (a render from the pre-count zone). The
-        // tick is rounded down: a sample on the bar's last tick is in that bar, not the next one.
-        let bar = |at: i64| s.tempo.bar_beat_at_tick((s.tempo.samples_to_ticks_f(at, s.sample_rate) + 1e-9).floor() as i64).bar;
-        let first = bar(r.range.start);
-        let of = bar((r.range.end - 1).max(r.range.start)) - first + 1;
+        // The ruler's numbering, bars before bar 1 included (a render from the pre-count zone).
+        // Keep its nearest-tick rounding for the inclusive start and current position. The end is
+        // exclusive, so an end at or before the barline's sample belongs to the preceding bar.
+        let first = s.tempo.bar_beat_at(r.range.start, s.sample_rate).bar;
+        let end = s.tempo.bar_beat_at(r.range.end, s.sample_rate);
+        let end_barline = s.tempo.tick_to_samples(s.tempo.bar_start_tick(end.bar), s.sample_rate);
+        let last = if end.beat == 1 && end.tick == 0 && r.range.end <= end_barline { end.bar.saturating_sub(1) } else { end.bar };
+        let of = last - first + 1;
         let at = r.range.start.saturating_add(i64::try_from(done).unwrap_or(0)).min(r.range.end - 1);
         let fraction = (done as f64 / r.range.len().max(1) as f64).clamp(0.0, 1.0) as f32;
-        Some(((bar(at) - first + 1).clamp(1, of.max(1)), of.max(1), fraction))
+        let current = s.tempo.bar_beat_at(at, s.sample_rate).bar;
+        Some(((current - first + 1).clamp(1, of.max(1)), of.max(1), fraction))
     }
 
     fn poll_realtime(&mut self) -> Option<Result<Rendered, RealtimeError>> {
