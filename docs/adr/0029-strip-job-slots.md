@@ -802,3 +802,13 @@ What these figures exclude:
 - **W-2.** A key entry's `pending` is cleared when its strip is taken back `Unstarted` or faulted (no path reads it before the next fill), and stays encoded with `buf[..pending]`; a named regression covers the zero-worker case the inventory exposed.
 - **W-3.** The canonical ledger keeps table order (release paths walk the tables in order); a table-order difference between the serial and worker renders is a finding.
 - **W-4.** Section 16's edits to section 8 are applied in push 1 (section 5 keeps every sentence).
+
+### 23. Rulings during push 2 (2026-11-18)
+
+Applications of sections 12 and 13; no judging round was run. Judged by the coordinator, with two independent code reviews.
+
+- **X-1.** The W-1 pins and the scope assertion are removed: the hardware-insert and External Instrument slots are inventoried (spec in the configuration child; `live`, and the send buffer while live, in the state child; the idle send unobservable with a poison witness).
+- **X-2.** After each driver's drive, every home key entry's `pending` is cleared, replacing W-2's per-strip clear, so the protocol-fault paths are covered; the scheduling gate asserts it after every block.
+- **X-3.** The Macro Oscillator declares completeness. Unobservable by overwrite proof and permanent poison witness: the slots' last-block outputs; the voice's block buffers; the voice's decay envelope (guarded by a testing assertion that the adapter sets no modulation amount the envelope scales, except Timbre on the chiptune model where the port zeroes its weight); in every engine other than the selected one, exactly the fields that engine's `reset()` rewrites in full on a switch; speech frames at and past the loaded bank's frame count. Derived and rebuilt on restore: the loaded bank's speech frames and the six-operator patches.
+- **X-4.** The speech-frame claim rests on a precondition: no integrated word bank has an empty word, and each has fewer frames than the frame capacity. A test pinning it is owed (#742).
+- **X-5.** Section 17's cost line was raised by this push and answered by shrinking the record: the first build's record (about 171,000 words per instance) made the one-seed corpus test 3.2 times slower; at about 47,600 words the full scheduling test binary measures 901 s against 975 s before the push, and the corpus test alone 225 s against 187 s. The remaining excess is the five features cases that keep the Modal Voice window until slices 3 to 5. Landing is accepted on the whole-binary figure. Digesting complete records less often than every block stays an open option for a judging round.
