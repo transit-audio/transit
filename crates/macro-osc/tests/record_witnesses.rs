@@ -139,8 +139,9 @@ fn restoring_rebuilds_the_six_operator_patches_into_a_voice_holding_another_bank
 }
 
 /// The speech frames: A speaks from one word bank, B from another; B restores A's record and must
-/// then speak A's bank (every word, struck in turn; the unread frames past the bank's end
-/// poisoned at every block).
+/// then speak A's bank: the start of every word, struck in turn, then the last word to its end and
+/// held on its last frame, the bank's last (`num_frames - 1`), whose blended neighbor is the first
+/// unread frame. The unread frames are poisoned at every block.
 #[test]
 fn restoring_rebuilds_the_speech_frames_into_a_voice_holding_another_word_bank() {
     const SPEECH: usize = 15;
@@ -158,9 +159,11 @@ fn restoring_rebuilds_the_speech_frames_into_a_voice_holding_another_word_bank()
         assert!(b.restore(&mut r).is_some() && r.finish());
         assert_eq!(record(&b), rec, "the restored voice re-records other words");
         let mut p = Poison::new(7);
-        for k in 0..40 * 40 {
-            let morph = (k / 40) as f32 / 40.0;
-            let gate = k % 40 < 30;
+        // A frame plays for 1200 samples (40 frames per second at 48 kHz), 100 blocks: a word of
+        // up to 150 frames ends within the held part.
+        let (strikes, held) = (40 * 40, 15_000);
+        for k in 0..strikes + held {
+            let (morph, gate) = if k < strikes { ((k / 40) as f32 / 40.0, k % 40 < 30) } else { (1.0, k > strikes) };
             assert_eq!(block(&mut a, SPEECH, bank, morph, gate, 57.0), block(&mut b, SPEECH, bank, morph, gate, 57.0), "bank {bank}, block {k}: the outputs differ");
             assert_eq!(record(&a), record(&b), "bank {bank}, block {k}: the records differ");
             b.poison_unobservable(&mut p);
