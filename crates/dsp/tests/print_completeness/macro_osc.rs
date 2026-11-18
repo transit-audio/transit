@@ -427,6 +427,33 @@ fn witnesses() -> Vec<W> {
             reached: |p| obs(p).held.count_ones() == 2 && obs(p).sounding.count_ones() == 4 && obs(p).counting.count_ones() == 2,
             completed: idle,
         },
+        // The allocator's loudness when the quietest released voice is not the oldest: the virtual
+        // analog model's level follows the velocity, two voices struck loud (the oldest) and soft
+        // are released together, so at T the soft one has the lower remembered peak; the
+        // continuation strikes a key, which takes that voice, then releases everything.
+        W {
+            boundary: Boundary::Entry("loudness"),
+            history: |rate| {
+                let mut h = setup(4);
+                h.push(Step::Param("model", 8.0));
+                for (key, vel) in [(48u8, 127u8), (52, 90), (55, 15), (59, 90)] {
+                    h.push(Step::On(key, vel, 0));
+                    h.push(Step::Run(span(&[HOLD], rate)));
+                }
+                h.extend([Step::Off(48, 0), Step::Off(55, 0), Step::Run(span(&[Span::Seconds(0.005)], rate))]);
+                h
+            },
+            continuation: |rate| {
+                let mut c = vec![Step::On(62, 100, 0), Step::Run(span(&[HOLD], rate))];
+                for (k, key) in [52u8, 59, 62].into_iter().enumerate() {
+                    c.push(Step::Off(key, k));
+                }
+                c.push(run_out(&[RELEASE], rate));
+                c
+            },
+            reached: |p| obs(p).held.count_ones() == 2 && obs(p).sounding.count_ones() == 4,
+            completed: idle,
+        },
     ];
     // Every engine active at T, in the middle of a note: an engine that resets on a switch (so its
     // dormant state is not read again) is still recorded while it plays.
