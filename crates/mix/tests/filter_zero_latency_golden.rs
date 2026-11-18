@@ -13,7 +13,10 @@ fn zero_latency_filter_amp_envelope_golden() {
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     let cid = s.new_clip_id();
     let tr = s.track_mut(t).unwrap();
-    tr.instrument = Some(Insert::new("macro_oscillator"));
+    let mut synth = Insert::new("macro_oscillator");
+    // The level the golden was captured at, the default before #753.
+    synth.params.insert("level".into(), -6.0);
+    tr.instrument = Some(synth);
     let instrument = transit_dsp::create("macro_oscillator").unwrap();
     assert_eq!(instrument.latency(), 0);
     let mut filter = Insert::new("filter");

@@ -175,7 +175,7 @@ fn a_frozen_track_accepts_a_pages_edit_and_keeps_its_freeze() {
     assert_eq!(tr.freeze_hash(), hash, "the freeze hash is unchanged");
     assert_eq!(tr.freeze, Some(frozen), "the track stays frozen");
     // Control: a real parameter edit on the frozen track is still refused.
-    let err = e.execute("mix.instrument_param", &json!({"track": t, "param": "level", "value": -12.0})).unwrap_err();
+    let err = e.execute("mix.instrument_param", &json!({"track": t, "param": "level", "value": -18.0})).unwrap_err();
     assert!(matches!(err, crate::EngineError::TrackFrozen), "{err}");
     let err = e.execute("mix.insert_param", &json!({"track": t, "slot": "b", "param": e.session().tracks[0].mixer.inserts[1].as_ref().unwrap().params.keys().next().unwrap().clone(), "value": 0.5})).unwrap_err();
     assert!(matches!(err, crate::EngineError::TrackFrozen), "{err}");

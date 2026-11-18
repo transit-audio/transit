@@ -116,7 +116,7 @@ pub(super) static PARAMS: [ParamInfo; COUNT] = table!(
         choice("quality", "Quality", &QUALITIES, 3),
         toggle("mono_grains", "Mono Grains", false),
         lin("velocity", "Velocity", 0.0, 100.0, 50.0, Unit::Percent),
-        lin("level", "Level", -48.0, 6.0, -6.0, Unit::Db),
+        lin("level", "Level", -48.0, 6.0, -12.0, Unit::Db),
         lin("bend_range", "Bend Range", 0.0, 24.0, 2.0, Unit::Semitones),
         toggle("shaper", "Shaper", false),
         log("amp_attack", "Amp Attack", 0.5, 10_000.0, 2.0, Unit::Ms),

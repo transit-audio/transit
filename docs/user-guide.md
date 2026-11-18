@@ -577,11 +577,12 @@ existing recovery path.
 Each built-in instrument has its own output level ahead of the track's fader: **Level** on the
 Macro Oscillator, Modal Voice, Texture Synth and Resonator, and **Output** on the Sampler (the last
 panel of the sections row, on every view). The fader starts at 0 dB, as in Ableton and Logic, so
-the instrument's level is where a new track keeps its headroom: the synths start at -6 dB, the
-Sampler at -12 dB, which leaves room for chords and stacked hits before the mix reaches full scale.
-The Sampler's pads and zones keep their own 0 dB Level as trims under Output. A session saved before
-the Sampler had Output plays its Sampler tracks 12 dB quieter: raise Output, or the track's fader,
-once.
+the instrument's level is where a new track keeps its headroom: the synths and the Sampler all
+start at -12 dB, which leaves room for chords and stacked hits before the mix reaches full scale. A
+factory preset that sets no level loads at the same -12 dB. The Sampler's pads and zones keep their
+own 0 dB Level as trims under Output. A session saved before this change plays an instrument that
+never stored its level quieter: a synth added from Add Track or an import and never touched by 6 dB,
+a Sampler by 12 dB. Raise its Level or Output, or the track's fader, once.
 
 ## Macro Oscillator
 
@@ -625,7 +626,7 @@ analog stages. Their license notices are in **Help > About transit**.
   Off).
 - **Aux Mix** crossfades to the model's auxiliary output, a variation of the sound. **Level** is
   the output level; at 0 dB the instrument peaks at full scale (one LSB, 0.0003 dB, under 0 dBFS),
-  and the -6 dB default leaves headroom on the track.
+  and the -12 dB default leaves headroom for chords and the track fader.
 - **Tuning**: the port plays at concert pitch, the A above middle C (MIDI 69) at 440 Hz. The original firmware's arithmetic is
   kept bit-exact in transit's code for its tests; the module itself plays in tune because its audio
   clock runs at the rate that arithmetic assumes.

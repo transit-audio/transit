@@ -24,8 +24,16 @@ fn unchanged_tempo_render_goldens() {
         s.tempo.set_tempo(0, bpm).unwrap();
         let tr = &mut s.tracks[0];
         let instrument = tr.instrument.as_mut().unwrap();
-        for (k, v) in [("shaper", 1.0), ("lfo2_sync", 1.0), ("lfo2_retrigger", 0.0), ("mod1_source", 2.0), ("mod1_dest", 1.0), ("mod1_amount", 25.0)]
-        {
+        // `level` -6: the level the goldens were captured at, the default before #753.
+        for (k, v) in [
+            ("level", -6.0),
+            ("shaper", 1.0),
+            ("lfo2_sync", 1.0),
+            ("lfo2_retrigger", 0.0),
+            ("mod1_source", 2.0),
+            ("mod1_dest", 1.0),
+            ("mod1_amount", 25.0),
+        ] {
             instrument.params.insert(k.into(), v);
         }
         for (at, value) in [(0, -3.0), (371, -9.0), (4721, -2.0), (22013, -6.0)] {

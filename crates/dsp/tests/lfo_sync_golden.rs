@@ -15,6 +15,8 @@ fn render(device: &str, division: usize, numerator: u32, denominator: u32, block
     } else {
         &[
             ("voices", 0.0),
+            // The level the golden was captured at, the default before #753.
+            ("level", -6.0),
             ("model", 8.0),
             ("lfo1_sync", 1.0),
             ("lfo1_retrigger", 0.0),

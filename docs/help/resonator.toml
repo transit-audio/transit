@@ -51,7 +51,7 @@ text = "How far apart the two outputs sit: at 100% the left is the module's firs
 [[entry]]
 id = "resonator.level"
 name = "Level"
-text = "The instrument's output level; the -6 dB default leaves headroom for several ringing voices. The module's own limiter keeps each output near full scale at 0 dB."
+text = "The instrument's output level; the -12 dB default leaves headroom for several ringing voices. The module's own limiter keeps each output near full scale at 0 dB."
 
 [[entry]]
 id = "resonator.tune"

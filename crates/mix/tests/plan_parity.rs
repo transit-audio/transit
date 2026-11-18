@@ -135,6 +135,10 @@ fn builtin(id: &str) -> Insert {
     for p in transit_dsp::plugin_info(id).unwrap().params {
         ins.params.insert(p.id.to_string(), p.default);
     }
+    // The goldens were captured with the synths at -6 dB, their default before #753.
+    if matches!(id, "macro_oscillator" | "modal_voice" | "resonator" | "texture_synth") {
+        ins.params.insert("level".into(), -6.0);
+    }
     ins
 }
 

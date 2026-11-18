@@ -40,7 +40,8 @@
 //!   auxiliary outputs by `aux_mix`, scaled by `level`, summed in voice order and written to every
 //!   channel (with a matrix row on Level or Pan, each voice's gains into the left and right sums;
 //!   the first channel is the left, the second the right, any other their mean). One voice at `level` 0 dB peaks within 0.0003 dB of 0 dBFS; voices add, so chords
-//!   want a lower level (the -6 dB default leaves 6 dB of headroom for one voice).
+//!   want a lower level (the -12 dB default leaves 12 dB of headroom for one voice, room for a chord
+//!   and the track fader).
 //! - Tuning: concert pitch (A4 = 440 Hz, `transit_macro_osc::Tuning::Concert`), as the module plays:
 //!   its audio clock runs at the firmware's corrected rate. The firmware's arithmetic, 4.6 cents sharp
 //!   at a true 48 kHz, stays bit-exact in the crate for the null tests only.

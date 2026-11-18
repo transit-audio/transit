@@ -50,6 +50,8 @@ fn render(p: &mut dyn Plugin, frames: usize, ons: &[(usize, u8)]) -> u64 {
 fn resonator(tonic: Option<f32>) -> u64 {
     let mut p = transit_dsp::create("resonator").unwrap();
     assert!(p.set_param("model", 1.0) && p.set_param("structure", 10.0));
+    // The level the golden was captured at, the default before #753.
+    assert!(p.set_param("level", -6.0));
     if let Some(t) = tonic {
         assert!(p.set_param("tonic", t));
     }

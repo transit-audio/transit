@@ -54,6 +54,9 @@ fn set(p: &mut MacroOscillator, name: &str, value: f32) -> Result<()> {
 fn render(model: usize, sr: u32, keys: &[u8], extra: &[(&str, f32)], skip: usize, len: usize) -> Result<Vec<f64>> {
     let mut p = MacroOscillator::new();
     set(&mut p, "model", model as f32)?;
+    // The audit's recorded captures are at level -6 dB, the default when it ran (#753 moved the
+    // default to -12 dB); set explicitly so the record still describes what this program does.
+    set(&mut p, "level", -6.0)?;
     for &(name, value) in extra {
         set(&mut p, name, value)?;
     }

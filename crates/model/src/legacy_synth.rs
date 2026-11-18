@@ -15,7 +15,8 @@ pub const RETIRED_SYNTH_ID: &str = "subtractive_synth";
 /// The plug-in id of the default instrument (the Macro Oscillator; `transit-dsp` registers it).
 pub const DEFAULT_INSTRUMENT: &str = "macro_oscillator";
 
-/// The `level` (dB) a substituted Macro Oscillator gets. Its default (-6 dB) plays about 13.5 dB louder
+/// The `level` (dB) a substituted Macro Oscillator gets, an absolute level (not an offset from the
+/// default, which #753 moved from -6 to -12 dB). At -6 dB the Macro Oscillator plays about 13.5 dB louder
 /// than the old synth did at its defaults: the instrument plan-parity golden peaked at 0.0569 with the
 /// old synth and 0.2680 with the Macro Oscillator (20 log10(0.0569 / 0.2680) = -13.46 dB), and the
 /// held-notes golden at 0.271 against 1.346 (-13.9 dB). -6 - 13.5 = -19.5 dB brings a substituted track

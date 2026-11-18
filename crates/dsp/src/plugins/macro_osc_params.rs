@@ -98,7 +98,7 @@ pub(crate) static PARAMS: [ParamInfo; COUNT] = table!(
         lin("decay", "Decay", 0.0, 100.0, 50.0, Unit::Percent),
         lin("lpg_color", "LPG Color", 0.0, 100.0, 50.0, Unit::Percent),
         lin("aux_mix", "Aux Mix", 0.0, 100.0, 0.0, Unit::Percent),
-        lin("level", "Level", -48.0, 6.0, -6.0, Unit::Db),
+        lin("level", "Level", -48.0, 6.0, -12.0, Unit::Db),
         lin("tune", "Tune", -24.0, 24.0, 0.0, Unit::Semitones),
         lin("bend_range", "Bend Range", 0.0, 24.0, 2.0, Unit::Semitones),
         choice("mod_wheel", "Mod Wheel", &WHEEL_DESTINATIONS, 0),

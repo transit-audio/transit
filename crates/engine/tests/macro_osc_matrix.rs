@@ -111,6 +111,9 @@ fn off_by_default_the_render_is_the_build_before_243() {
 /// velocities, 300 blocks of 256 frames, both channels.
 fn preset_render(params: &[(String, f32)]) -> u64 {
     let mut m = transit_dsp::create(ID).unwrap();
+    // The level the golden was captured at, the default before #753 (the presets store none; a
+    // recall now plays at the -12 dB default, as a new instance does).
+    assert!(m.set_param("level", -6.0));
     for (k, v) in params {
         assert!(m.set_param(k, *v), "{k}");
     }
