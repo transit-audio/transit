@@ -265,6 +265,11 @@ fn progress_keeps_barline_boundaries_at_133_bpm() {
     let current = session.tempo.tick_to_samples(current_tick, session.sample_rate);
     let end = session.tempo.tick_to_samples(end_tick, session.sample_rate);
     assert_eq!(session.tempo.bar_beat_at(start, session.sample_rate).bar, 3);
+    assert_eq!(
+        session.tempo.bar_beat_at(end - 1, session.sample_rate),
+        session.tempo.bar_beat_at(end, session.sample_rate),
+        "the preceding sample also rounds to the bar line"
+    );
     assert_eq!(session.tempo.bar_beat_at(end, session.sample_rate).bar, 5);
     assert_eq!(session.tempo.bar_beat_at(end + 1, session.sample_rate).bar, 5, "the next sample still rounds to the bar line");
 
@@ -280,7 +285,10 @@ fn progress_keeps_barline_boundaries_at_133_bpm() {
     assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((1, 2)), "the start is bar 3 of 2");
     app.finish.realtime.fake.as_mut().unwrap().done = u64::try_from(current - start).unwrap();
     assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((2, 2)), "the current position is bar 4 of 2");
-    app.finish.realtime.running.as_mut().unwrap().range.end += 1;
+    app.finish.realtime.running.as_mut().unwrap().range.end -= 1;
     app.finish.realtime.fake.as_mut().unwrap().done = 0;
+    assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((1, 2)), "one sample before the bar line excludes bar 5");
+    app.finish.realtime.running.as_mut().unwrap().range.end = end;
+    app.finish.realtime.running.as_mut().unwrap().range.end += 1;
     assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((1, 3)), "one sample past the bar line includes bar 5");
 }
