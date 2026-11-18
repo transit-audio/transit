@@ -216,7 +216,7 @@ fn the_minimum_width_is_the_narrowest_multiple_of_8_where_the_widest_readouts_fi
     let k = &t.panel(tr).knobs;
     let at = |f: &str| k.iter().find(|k| k.field == f).unwrap().knob.rect[0];
     let pitch = at("pan") - at("level");
-    assert!(pitch < super::zone::SLOT + super::zone::SLOT_GAP && pitch >= 64.0 + super::zone::SLOT_GAP, "{pitch}");
+    assert!((64.0 + super::zone::SLOT_GAP..super::zone::SLOT + super::zone::SLOT_GAP).contains(&pitch), "{pitch}");
     // The knobs sit on the pixel grid, so two rows' pitches agree to within a pixel.
     assert!((at("decay_ms") - at("attack_ms") - pitch).abs() <= 1.0, "one slot for every knob");
 }

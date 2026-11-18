@@ -658,7 +658,7 @@ fn old_sessions_open_and_render_with_unchanged_hashes() {
     back.execute("session.open", &json!({"path": file})).unwrap();
     // #753: a session saved before Output existed plays its Sampler 12 dB quieter (the stated
     // break, pinned in transit-mix's `sampler_link_tests`); at unity Output it renders as it did.
-    assert!(back.session().track(t).unwrap().instrument.as_ref().unwrap().params.get("output").is_none());
+    assert!(!back.session().track(t).unwrap().instrument.as_ref().unwrap().params.contains_key("output"));
     back.execute("mix.instrument_param", &json!({"track": t, "param": "output", "value": 0.0})).unwrap();
     let h = hash(&transit_mix::render_range(back.session(), Range::new(0, 72_000), 512));
     assert_eq!(h, OLD_SESSION_GOLDEN, "an old session renders as it did");

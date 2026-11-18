@@ -661,7 +661,7 @@ fn a_session_without_output_plays_the_sampler_12_db_quieter() {
     // #753's stated break, pinned: a Sampler saved before Output existed stores no Output and
     // plays at its -12 dB default after the upgrade. No migration writes a value.
     let (old, t) = session_as_saved(Some(kit(1)));
-    assert!(old.track(t).unwrap().instrument.as_ref().unwrap().params.get("output").is_none());
+    assert!(!old.track(t).unwrap().instrument.as_ref().unwrap().params.contains_key("output"));
     let (unity, _) = session(Some(kit(1)));
     let (a, b) = (settled(&old), settled(&unity));
     assert!(b > 0.4, "the zone plays at unity Output: {b}");
