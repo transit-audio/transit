@@ -313,6 +313,45 @@ fn poisoning_an_idle_delay_line_changes_no_output_and_no_print() {
     assert!(reached > 0, "the line came alive and its write reached the poisoned contents");
 }
 
+/// The idle contents of the key lines (the mix `DelayLine` of a `KeyIn` and of a key entry while
+/// not live): the session starts with Kick's and Pad's lookahead off, so the Synth's key from Kick
+/// arrives on time (its `KeyIn` line idle) and Pad's key from Bass needs no early delay (its
+/// entry's line idle). Poisoned in one render, they change nothing; at block 8 the lookahead comes
+/// back, the key from Kick arrives late and the one from Bass early, both lines come alive and
+/// each one's first write clears the ring before any read.
+// timing: serial every render here is serial on the calling thread (`rig` forces it); no worker, no deadline
+#[test]
+fn poisoning_idle_key_lines_changes_no_output_and_no_print() {
+    let g = gate();
+    let mut early = g.session.clone();
+    for t in [g.kick, g.pad] {
+        early.track_mut(t).unwrap().mixer.inserts[0].as_mut().unwrap().params.insert("lookahead".into(), 0.0);
+    }
+    let start = Gate { session: early, ..gate() };
+    for (target, track) in [(Poison::IdleKeyIn, g.synth), (Poison::IdleKeyEntry, g.pad)] {
+        let (mut a, mut b) = (rig(&start), rig(&start));
+        let (mut changed, mut reached) = (0, 0);
+        for k in 0..BLOCKS {
+            if k == 8 {
+                adopt(&mut a, &g.session, 2);
+                adopt(&mut b, &g.session, 2);
+            }
+            if k >= 3 {
+                changed += b.mix.poison(track, target);
+            }
+            play(&mut a, g.synth, k);
+            play(&mut b, g.synth, k);
+            a.block();
+            b.block();
+            reached += usize::from(k >= 3 && b.mix.poison_reached(track, target));
+            assert_eq!(a.out, b.out, "{target:?}, block {k}: the output");
+            assert_eq!(a.mix.strip_prints(), b.mix.strip_prints(), "{target:?}, block {k}: the prints");
+        }
+        assert!(changed > 0, "{target:?}: the pattern changed the idle line");
+        assert!(reached > 0, "{target:?}: the line came alive and its write reached the poisoned contents");
+    }
+}
+
 // ---- Hardware inserts and External Instruments (#742 slice 1 push 2) ----
 
 /// The fake duplex device of the hardware slots' controls: four channels each way.

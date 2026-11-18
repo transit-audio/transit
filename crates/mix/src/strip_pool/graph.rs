@@ -169,7 +169,6 @@ impl StripPool {
                         OverrunCause::Unstarted => {
                             if self.away[i] && self.bring_home(i, st, events) {
                                 self.take_keys_back(i, keys);
-                                keys.forget_pending(i);
                             }
                         }
                         // The worker keeps it; the next blocks skip it until it is done.
@@ -181,7 +180,6 @@ impl StripPool {
                 Outcome::Faulted => {
                     if self.bring_home(i, st, events) {
                         self.take_keys_back(i, keys);
-                        keys.forget_pending(i);
                     }
                     self.silent[i] = true;
                     self.suspect_gen[i] = st.generation;
@@ -196,6 +194,9 @@ impl StripPool {
                 self.live_len[i] = 0;
             }
         }
+        // The drive is over and every strip that came home is back: forget what was filled for a
+        // render that never happened (`KeyBank::forget_home_pending`).
+        keys.forget_home_pending();
         self.mirror();
     }
 }

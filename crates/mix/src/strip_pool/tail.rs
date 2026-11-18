@@ -153,14 +153,12 @@ impl StripPool {
                     self.silent[i] = true;
                     if cause == OverrunCause::Unstarted && self.away[i] && self.bring_home(i, st, events) {
                         self.take_keys_back(i, keys);
-                        keys.forget_pending(i);
                         self.cells.with(i, |job| inputs.take_back(i, &mut job.busses));
                     }
                 }
                 Outcome::Faulted => {
                     if self.away[i] && self.bring_home(i, st, events) {
                         self.take_keys_back(i, keys);
-                        keys.forget_pending(i);
                         self.cells.with(i, |job| inputs.take_back(i, &mut job.busses));
                     }
                     self.silent[i] = true;
@@ -174,6 +172,9 @@ impl StripPool {
                 self.live_len[i] = 0;
             }
         }
+        // The drive is over and every strip that came home is back: forget what was filled for a
+        // render that never happened (`KeyBank::forget_home_pending`).
+        keys.forget_home_pending();
         if Instant::now().saturating_duration_since(deadline) > OVERSHOOT {
             self.note_host_overshoot();
         }

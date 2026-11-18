@@ -102,6 +102,20 @@ impl KeyLine {
         crate::fingerprint::edge_record(tap, w);
     }
 
+    /// Test seam (feature `testing`, #742 section 14's poison controls): `fill` over the line's
+    /// contents while it is idle (not live); what `fill` changed (0 for a live line).
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison_idle(&mut self, fill: impl Fn(&mut [Vec<f32>], usize) -> usize) -> usize {
+        if self.line.live { 0 } else { fill(&mut self.line.bufs, 0) }
+    }
+
+    /// Test seam (feature `testing`, #742): the line is live and `left` finds no pattern in it
+    /// (it came alive and its first write cleared the ring).
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison_idle_reached(&self, left: impl Fn(&[Vec<f32>], usize) -> usize) -> bool {
+        self.line.live && left(&self.line.bufs, 0) == 0
+    }
+
     /// Test seam (issue #210): the line's flags and positions, readable.
     #[cfg(feature = "testing")]
     pub(crate) fn summary(&self) -> String {
@@ -330,6 +344,22 @@ impl KeyBank {
         mine.map(|e| if buf { fill(&mut e.buf, e.pending) } else { fill(&mut e.scratch, 0) }).sum()
     }
 
+    /// Test seam (feature `testing`, #742 section 14's poison controls): `fill` over the idle lines
+    /// of the entries keyed at `keyed` that are home ([`KeyLine::poison_idle`]).
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison_idle_lines_of(&mut self, keyed: usize, fill: impl Fn(&mut [Vec<f32>], usize) -> usize) -> usize {
+        let mine = self.entries.iter_mut().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent);
+        mine.map(|e| e.line.poison_idle(&fill)).sum()
+    }
+
+    /// Test seam (feature `testing`, #742): every entry keyed at `keyed` that is home has a live
+    /// line with no pattern left ([`KeyLine::poison_idle_reached`]); false when there is none.
+    #[cfg(feature = "testing")]
+    pub(crate) fn poison_idle_lines_reached(&self, keyed: usize, left: impl Fn(&[Vec<f32>], usize) -> usize) -> bool {
+        let mut mine = self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent).peekable();
+        mine.peek().is_some() && mine.all(|e| e.line.poison_idle_reached(&left))
+    }
+
     /// Test seam (feature `testing`, #742): what [`KeyBank::poison_of`]'s pattern left, by `left`.
     #[cfg(feature = "testing")]
     pub(crate) fn poison_left_of(&self, keyed: usize, buf: bool, left: impl Fn(&[Vec<f32>], usize) -> usize) -> usize {
@@ -456,15 +486,19 @@ impl KeyBank {
         }
     }
 
-    /// Forgets the pending early-key frames of the entries keyed at `keyed` that are home: the
-    /// strip came back without rendering this block (`Unstarted`, faulted), so its keys were filled
-    /// for a render that never happened. Every later read of `pending` or of `buf` (an
-    /// `apply_pending`, a lend, a keyed insert's `get`) follows a new fill of the strip's keys in
-    /// the block that renders it, which overwrites both, so this changes no output; it keeps the
-    /// state canonical (a strip that missed the block holds what one never sent holds; #742
-    /// section 14). A plain store per entry: allocation-free, lock-free.
-    pub(crate) fn forget_pending(&mut self, keyed: usize) {
-        for e in self.entries.iter_mut().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent) {
+    /// Forgets the pending early-key frames of every entry that is home, after the strip graph's
+    /// drive: by then every strip that rendered this block took its pending frames (on the
+    /// callback, `apply_pending` in `render_here`; on a worker, the job's own `apply_pending`
+    /// before the render, whose bank comes home with `take_back`), so what is left was filled for
+    /// a render that never happened (taken back `Unstarted`, faulted, or a protocol fault: a send
+    /// that failed, a lend that could not be made, a job that never rendered). Every later read of
+    /// `pending` or of `buf` (an `apply_pending`, a lend, a keyed insert's `get`) follows a new
+    /// fill of the strip's keys in the block that renders it, which overwrites both, so this
+    /// changes no output; it keeps the state canonical (a strip that missed the block holds what
+    /// one never sent holds; #742 section 14). Lent entries are a worker's and are left alone. A
+    /// plain store per entry: allocation-free, lock-free.
+    pub(crate) fn forget_home_pending(&mut self) {
+        for e in self.entries.iter_mut().filter(|e| !e.lent) {
             e.pending = 0;
         }
     }

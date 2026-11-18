@@ -676,6 +676,12 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
                     ));
                 }
             }
+            // After the drive no home strip's key entries hold pending early-key frames: a strip that
+            // rendered took them, and what was filled for a render that never happened is forgotten
+            // (#742: `KeyBank::forget_home_pending`, the protocol-fault paths included).
+            if let Some(i) = (0..after.len()).find(|&i| !rig.mix.strip_claimed(i) && rig.mix.strip_keys_pending(i)) {
+                failure.get_or_insert(format!("block {b}, strip {i}: a home key entry still holds pending early-key frames"));
+            }
             // Independently of the graph's tables: from the session's key edges, a strip keyed
             // from a strip that missed the block misses it as upstream-missed (or, still held by a
             // worker, busy: A2), and an upstream-missed strip has a source that missed.

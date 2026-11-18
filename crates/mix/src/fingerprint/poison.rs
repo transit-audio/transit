@@ -35,6 +35,10 @@ pub enum Poison {
     IdleTap,
     /// Each hardware insert's send while the slot is not live.
     HwSend,
+    /// Each keyed insert's `KeyIn` line while idle: its contents.
+    IdleKeyIn,
+    /// The lines of the key entries keyed at the strip while idle: their contents.
+    IdleKeyEntry,
 }
 
 /// The pattern's value at position `k`: finite, nonzero, and changed from `prior` (its negation
@@ -84,6 +88,8 @@ impl MixEngine {
             Poison::KeyInScratch => st.key_in.iter_mut().map(|k| fill(&mut k.scratch, 0)).sum(),
             Poison::IdleTap => [&mut st.tap, &mut st.tap_pre].into_iter().filter(|l| !l.live).map(|l| fill(&mut l.bufs, 0)).sum(),
             Poison::HwSend => st.hw.iter_mut().map(|h| h.poison_idle_send(fill)).sum(),
+            Poison::IdleKeyIn => st.key_in.iter_mut().map(|k| k.line.poison_idle(fill)).sum(),
+            Poison::IdleKeyEntry => tables.keys.poison_idle_lines_of(i, fill),
             Poison::KeyBuf | Poison::KeyScratch => tables.keys.poison_of(i, target == Poison::KeyBuf, fill),
             Poison::MidiA | Poison::MidiB | Poison::MidiMerged => {
                 let which = match target {
@@ -115,6 +121,9 @@ impl MixEngine {
             Poison::IdleTap => st.tap.live && left(&st.tap.bufs, 0) == 0,
             // The slot ran (it is live again) and its write covered the send.
             Poison::HwSend => !st.hw.is_empty() && st.hw.iter().all(|h| h.poison_reached(left)),
+            // An idle line came alive this block: its first write cleared the ring.
+            Poison::IdleKeyIn => !st.key_in.is_empty() && st.key_in.iter().all(|k| k.line.poison_idle_reached(left)),
+            Poison::IdleKeyEntry => p.tables.keys.poison_idle_lines_reached(i, left),
             Poison::KeyBuf | Poison::KeyScratch => p.tables.keys.poison_left_of(i, target == Poison::KeyBuf, left) == 0,
             Poison::MidiA | Poison::MidiB | Poison::MidiMerged => {
                 let which = match target {
