@@ -258,8 +258,9 @@ impl StudioApp {
         let done: Option<u64> = None;
         let done = done.or_else(|| self.player.as_ref().and_then(|p| p.realtime_render_progress()).map(|p| p.done)).unwrap_or(0);
         let s = self.engine.session();
-        // The ruler's numbering, bars before bar 1 included (a render from the pre-count zone).
-        let bar = |at: i64| s.tempo.bar_beat_at(at, s.sample_rate).bar;
+        // The ruler's numbering, bars before bar 1 included (a render from the pre-count zone). The
+        // tick is rounded down: a sample on the bar's last tick is in that bar, not the next one.
+        let bar = |at: i64| s.tempo.bar_beat_at_tick((s.tempo.samples_to_ticks_f(at, s.sample_rate) + 1e-9).floor() as i64).bar;
         let first = bar(r.range.start);
         let of = bar((r.range.end - 1).max(r.range.start)) - first + 1;
         let at = r.range.start.saturating_add(i64::try_from(done).unwrap_or(0)).min(r.range.end - 1);

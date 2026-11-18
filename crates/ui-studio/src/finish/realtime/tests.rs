@@ -92,9 +92,7 @@ fn render_in_real_time_runs_shows_bars_and_cancel_releases() {
     assert_eq!((spec.stems[0].track, spec.stems[0].channels.as_slice(), spec.stems[0].latency), (t.track, &[0u16][..], 960));
     assert_eq!(spec.preroll, 960, "the pre-roll is max(C, one block)");
     t.frames(2);
-    let s = t.app.engine.session();
-    let of = s.tempo.bar_beat_at(191_999, s.sample_rate).bar - s.tempo.bar_beat_at(0, s.sample_rate).bar + 1;
-    assert!(of >= 2, "{of}");
+    let of = 2;
     assert_eq!(t.app.realtime_progress().map(|p| (p.0, p.1)), Some((1, of)), "bar 1 of {of}");
     t.fake().done = 191_999;
     t.frames(2);
@@ -223,15 +221,33 @@ fn a_render_from_the_pre_count_zone_counts_its_bars() {
         tracks: Vec::new(),
         uncompensated: Vec::new(),
     });
-    // Counted as the existing test counts: from the bar holding the start to the bar holding the
-    // last sample (`end - 1` rounds to the next bar's first tick here, as it does at bar 1).
+    // Bars -1, 0 and 1: the last sample (BAR - 1) is in bar 1, so the range covers three bars.
     let s = app.engine.session();
-    let bar = |at: i64| s.tempo.bar_beat_at(at, s.sample_rate).bar;
-    assert_eq!(bar(-2 * BAR), -1, "the render starts in bar -1");
-    let of = bar(BAR - 1) - bar(-2 * BAR) + 1;
-    assert!(of >= 3, "{of}");
+    assert_eq!(s.tempo.bar_beat_at(-2 * BAR, s.sample_rate).bar, -1, "the render starts in bar -1");
+    let of = 3;
     assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((1, of)), "bar -1 is the first");
     app.finish.realtime.fake.as_mut().unwrap().done = 144_000;
     assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((2, of)), "bar 0 is the second");
+    app.finish.realtime.running = None;
+}
+
+/// "bar N of M" counts the bars the range covers (ADR 0027): a range ending on a bar line (two
+/// bars, 0 to 192 000 at 120 bpm) reads "of 2", not "of 3", because its last sample is still in
+/// bar 2; a range ending inside a bar counts that bar.
+#[test]
+fn progress_counts_the_bars_the_range_covers() {
+    const BAR: i64 = 96_000;
+    let mut app = StudioApp::new(transit_engine::Engine::new(transit_model::Session::default()), None, Services::default());
+    app.finish.realtime.fake = Some(FakeRender::default());
+    for (end, bars) in [(2 * BAR, 2), (BAR, 1), (3 * BAR / 2, 2)] {
+        app.finish.realtime.running = Some(super::Rendering {
+            path: "mix.wav".into(),
+            stems: Vec::new(),
+            range: transit_time::Range::new(0, end),
+            tracks: Vec::new(),
+            uncompensated: Vec::new(),
+        });
+        assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((1, bars)), "a range 0 to {end} covers {bars} bars");
+    }
     app.finish.realtime.running = None;
 }
