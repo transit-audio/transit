@@ -7,6 +7,9 @@
 //!   record (so B's dormant fields are a new voice's, not A's), its unobservable state is poisoned,
 //!   and both switch back and play; outputs and records must stay identical at every block, with B
 //!   poisoned again at every block boundary.
+//! - Derived: the six-operator patches and the speech frames are rebuilt by restore from the
+//!   recorded engine and word bank. The transplant goes into a B whose bank differs, so a value
+//!   kept from the receiver would change the output.
 
 use std::hash::Hasher;
 use transit_macro_osc::SampleRate;
@@ -60,8 +63,9 @@ fn instance(index: usize) -> usize {
     if (2..=4).contains(&index) { 2 } else { index }
 }
 
-/// Engines whose reset rewrites state the record leaves out while they are dormant.
-const WITH_DORMANT: [usize; 9] = [6, 7, 12, 14, 15, 16, 18, 19, 20];
+/// Engines whose reset (or, for the six-operator engine, the bank load on activation) rewrites
+/// state the record leaves out while they are dormant.
+const WITH_DORMANT: [usize; 12] = [2, 3, 4, 6, 7, 12, 14, 15, 16, 18, 19, 20];
 
 /// A voice restored from `a`'s record (a new voice, so its dormant state is a new voice's).
 fn transplant(a: &Voice) -> Voice<'static> {
@@ -105,6 +109,60 @@ fn a_dormant_engines_reset_state_is_unobservable_across_a_switch_to_it_for_every
             let fb = block(&mut b, e, h, m, gate, key);
             assert_eq!(fa, fb, "engine {e}, block {k}: the outputs differ");
             assert_eq!(record(&a), record(&b), "engine {e}, block {k}: the records differ");
+            b.poison_unobservable(&mut p);
+        }
+    }
+}
+
+/// The six-operator patches: A plays model 2 (bank A), B model 3 (bank B); B restores A's record
+/// and must then play bank A's patches (every patch index, struck in turn).
+#[test]
+fn restoring_rebuilds_the_six_operator_patches_into_a_voice_holding_another_bank() {
+    for (model, other) in [(2usize, 3usize), (3, 4), (4, 2)] {
+        let mut a = Voice::new(SampleRate::Hz48000);
+        let mut b = Voice::new(SampleRate::Hz48000);
+        for k in 0..60 {
+            block(&mut a, model, 0.1, 0.5, k < 50, 60.0);
+            block(&mut b, other, 0.1, 0.5, k < 50, 60.0);
+        }
+        let rec = record(&a);
+        let mut r = Reader::new(&rec);
+        assert!(b.restore(&mut r).is_some() && r.finish());
+        assert_eq!(record(&b), rec, "the restored voice re-records other words");
+        for k in 0..32 * 12 {
+            let h = (k / 12) as f32 / 32.0 + 0.01;
+            let gate = k % 12 < 9;
+            assert_eq!(block(&mut a, model, h, 0.5, gate, 55.0), block(&mut b, model, h, 0.5, gate, 55.0), "model {model}, block {k}: the outputs differ");
+            assert_eq!(record(&a), record(&b), "model {model}, block {k}: the records differ");
+        }
+    }
+}
+
+/// The speech frames: A speaks from one word bank, B from another; B restores A's record and must
+/// then speak A's bank (every word, struck in turn; the unread frames past the bank's end
+/// poisoned at every block).
+#[test]
+fn restoring_rebuilds_the_speech_frames_into_a_voice_holding_another_word_bank() {
+    const SPEECH: usize = 15;
+    // HARMONICS chooses the word bank in the speech engine's upper range.
+    for (bank, other) in [(0.79f32, 0.58f32), (0.58, 0.95), (0.95, 0.79)] {
+        let mut a = Voice::new(SampleRate::Hz48000);
+        let mut b = Voice::new(SampleRate::Hz48000);
+        for k in 0..80 {
+            block(&mut a, SPEECH, bank, 0.3, k < 70, 60.0);
+            block(&mut b, SPEECH, other, 0.3, k < 70, 60.0);
+        }
+        assert_ne!(record(&a), record(&b), "the two voices hold the same word bank");
+        let rec = record(&a);
+        let mut r = Reader::new(&rec);
+        assert!(b.restore(&mut r).is_some() && r.finish());
+        assert_eq!(record(&b), rec, "the restored voice re-records other words");
+        let mut p = Poison::new(7);
+        for k in 0..40 * 40 {
+            let morph = (k / 40) as f32 / 40.0;
+            let gate = k % 40 < 30;
+            assert_eq!(block(&mut a, SPEECH, bank, morph, gate, 57.0), block(&mut b, SPEECH, bank, morph, gate, 57.0), "bank {bank}, block {k}: the outputs differ");
+            assert_eq!(record(&a), record(&b), "bank {bank}, block {k}: the records differ");
             b.poison_unobservable(&mut p);
         }
     }

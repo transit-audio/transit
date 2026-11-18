@@ -115,12 +115,18 @@ impl SixOpEngine<'_> {
     }
 
     pub fn load_syx_bank(&mut self, bank: &[u8; 4096]) {
-        for (i, patch) in self.patches.iter_mut().enumerate() {
-            (*patch).unpack(&bank[i * SYX_SIZE..]);
-        }
+        self.unpack_bank(bank);
 
         for voice in self.voice.iter_mut() {
             voice.unload_patch();
+        }
+    }
+
+    /// Unpacks the bank's 32 patches (the first half of [`SixOpEngine::load_syx_bank`]; the
+    /// record's restore rebuilds the patches with it).
+    pub(crate) fn unpack_bank(&mut self, bank: &[u8; 4096]) {
+        for (i, patch) in self.patches.iter_mut().enumerate() {
+            (*patch).unpack(&bank[i * SYX_SIZE..]);
         }
     }
 }
@@ -421,5 +427,26 @@ impl crate::record::Record for FmVoice<'_> {
     }
 }
 
+// `patches`: not encoded.
+// - Derived while a six-operator model (2, 3 or 4) is the selected engine: the switch to it ran
+//   `load_syx_bank` with that model's bank (`Voice::render`, the engine selection; also on a
+//   resource reload), which unpacks all 32 patches, and nothing else writes them (`render` reads
+//   them only through `load_patch`, which copies one). The banks are the voice's resources, the
+//   integrated banks in transit (configuration: the voice's record refuses others). The voice's
+//   restore rebuilds them with `unpack_bank`, the function `load_syx_bank` runs, from the
+//   selected model's bank (`Voice`'s `Record::restore`).
+// - Unobservable while no six-operator model is selected: every switch to one runs
+//   `load_syx_bank` before the engine renders, which rewrites all 32. Witnesses: poisoned while
+//   dormant, then switched to (`tests/record_witnesses.rs`); a transplant into a voice holding
+//   another bank (same file).
 #[cfg(feature = "testing")]
-crate::record_struct!(['a] SixOpEngine<'a> { patches, patch_index_quantizer, voice, temp_buffer, acc_buffer, restart_buffer, active_voice, rendered_voice, sample_rate, tuning, same_pitch_restart });
+crate::record_struct!(['a] SixOpEngine<'a> { patch_index_quantizer, voice, temp_buffer, acc_buffer, restart_buffer, active_voice, rendered_voice, sample_rate, tuning, same_pitch_restart } derived { patches });
+
+#[cfg(feature = "testing")]
+impl SixOpEngine<'_> {
+    /// Poison witnesses only: poisons the patches (while no six-operator model is selected).
+    pub(crate) fn poison_patches(&mut self, p: &mut crate::record::Poison) {
+        use crate::record::Record;
+        self.patches.poison(p);
+    }
+}

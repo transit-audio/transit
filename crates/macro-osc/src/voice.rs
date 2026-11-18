@@ -966,7 +966,18 @@ impl crate::record::Record for Voice<'_> {
         lpg_envelope.restore(r)?;
         trigger_delay.restore(r)?;
         out_post_processor.restore(r)?;
-        aux_post_processor.restore(r)
+        aux_post_processor.restore(r)?;
+        // Derived: a selected six-operator model's patches, unpacked from its bank (see
+        // `SixOpEngine`'s record).
+        if let Some(model @ 2..=4) = *previous_engine_index {
+            let bank = match model {
+                2 => resources.syx_bank_a,
+                3 => resources.syx_bank_b,
+                _ => resources.syx_bank_c,
+            };
+            engines.six_op_engine.unpack_bank(bank);
+        }
+        Some(())
     }
 }
 
@@ -976,7 +987,17 @@ impl Voice<'_> {
     /// the state the record leaves out of the engine at `index` (nothing when it is the selected
     /// engine or keeps nothing out while dormant).
     pub fn poison_engine(&mut self, index: usize, p: &mut crate::record::Poison) {
-        self.engines.poison_dormant_engine(self.previous_engine_index, index, p);
+        let active = self.previous_engine_index;
+        // The three six-operator models share one engine.
+        let dormant = !active.is_some_and(|a| a == index || ((2..=4).contains(&a) && (2..=4).contains(&index)));
+        if index == 15 {
+            // The speech frames no read reaches (all of them while dormant).
+            self.engines.speech_engine.poison_unread_frames(dormant, p);
+        }
+        if (2..=4).contains(&index) && dormant {
+            self.engines.six_op_engine.poison_patches(p);
+        }
+        self.engines.poison_dormant_engine(active, index, p);
     }
 
     /// Poison witnesses only: [`Voice::poison_engine`] for every engine.

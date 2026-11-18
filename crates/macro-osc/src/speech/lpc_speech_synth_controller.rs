@@ -442,11 +442,105 @@ crate::record_struct!(['a] LpcSpeechSynthController<'a> { clock_phase, sample, n
 
 // `word_banks`: a reference to the immutable word bank data (`WORD_BANKS`), set in `new` and
 // never written, the same in every instance (configuration).
-// Reset (left out while the speech engine is dormant): `loaded_bank`, `num_frames`, `num_words`
-// (`reset` assigns `None`, 0 and 0). The word boundaries and the frames are not rewritten by the
-// reset and stay encoded.
+// The word bank's record. Encoded: `num_banks` and `word_boundaries`, then, except while the speech
+// engine is dormant, `loaded_bank`, `num_frames` and `num_words` (`reset` assigns `None`, 0 and 0;
+// every switch to the engine calls it). Configuration: `word_banks`, a reference to the immutable
+// word bank data (`WORD_BANKS`), set in `new` and never written, the same in every instance.
+// `frames`: not encoded.
+// - Derived: `frames[..num_frames]` while `loaded_bank` is `Some(bank)`. `load(bank)` decoded them
+//   from that bank's data, and nothing else writes `frames` (`load_next_word` is the only writer;
+//   `frames()` lends them to the synth's `play_frame`, which reads them). Restore rebuilds them
+//   with `load` itself (`rebuild_frames`) and checks the counts and word boundaries `load` derives
+//   against the recorded ones.
+// - Unobservable: every other frame: those at and past `num_frames` (left by an earlier, longer
+//   bank), and all of them while `loaded_bank` is `None` (after `reset`, and so in a dormant
+//   engine). Every read of these frames is in a controller `render` with a word bank (`bank !=
+//   -1`), which first calls `load(bank)`: afterwards `loaded_bank` is `Some(bank)` and
+//   `frames[..num_frames]` are that bank's. The reads (`render`, the two `play_frame` calls):
+//   scan mode plays `address * (num_frames - 1.0001)` with `address` (MORPH) in [0, 1],
+//   interpolated, so it reads frames up to `num_frames - 1`; playback plays `playback_frame`, which
+//   `get_word_boundaries` sets within the bank's frames (`load` resets it when the bank changes;
+//   a consonant from the vowel mode never outlives its render, which moves it past its last
+//   frame and back to -1), with a blend of exactly 0, so the next frame, at most `num_frames`, is
+//   read and cancelled: `a + (b - a) * 0.0 == a` for the finite values a frame gives
+//   (`blend_coefficient`, `play_frame_blend`). Witnesses: poisoned at every block of a transplant
+//   into a voice holding another bank (`tests/record_witnesses.rs`) and of every transplant
+//   harness witness (`crates/dsp/tests/print_completeness.rs`).
 #[cfg(feature = "testing")]
-crate::record_struct!(['a] LpcSpeechSynthWordBank<'a> { num_banks, word_boundaries, frames } reset { loaded_bank, num_frames, num_words } config { word_banks });
+impl crate::record::Record for LpcSpeechSynthWordBank<'_> {
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        self.record_dormant(w);
+        let Self { loaded_bank, num_frames, num_words, .. } = self;
+        loaded_bank.record(w);
+        num_frames.record(w);
+        num_words.record(w);
+    }
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        self.restore_dormant(r)?;
+        let Self { loaded_bank, num_frames, num_words, .. } = self;
+        loaded_bank.restore(r)?;
+        num_frames.restore(r)?;
+        num_words.restore(r)?;
+        self.rebuild_frames()
+    }
+    fn record_dormant(&self, w: &mut crate::record::Writer<'_>) {
+        let Self { word_banks: _, num_banks, loaded_bank: _, num_frames: _, num_words: _, word_boundaries, frames: _ } = self;
+        num_banks.record(w);
+        word_boundaries.record(w);
+    }
+    fn restore_dormant(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Self { word_banks: _, num_banks, loaded_bank: _, num_frames: _, num_words: _, word_boundaries, frames: _ } = self;
+        num_banks.restore(r)?;
+        word_boundaries.restore(r)
+    }
+    fn poison(&mut self, p: &mut crate::record::Poison) {
+        let Self { word_banks: _, num_banks, loaded_bank, num_frames, num_words, word_boundaries, frames: _ } = self;
+        num_banks.poison(p);
+        word_boundaries.poison(p);
+        loaded_bank.poison(p);
+        num_frames.poison(p);
+        num_words.poison(p);
+    }
+    fn poison_dormant(&mut self, p: &mut crate::record::Poison) {
+        let Self { word_banks: _, num_banks: _, loaded_bank, num_frames, num_words, word_boundaries: _, frames: _ } = self;
+        loaded_bank.poison(p);
+        num_frames.poison(p);
+        num_words.poison(p);
+    }
+}
+
+#[cfg(feature = "testing")]
+impl LpcSpeechSynthWordBank<'_> {
+    /// Rebuilds the derived frames from the restored `loaded_bank` with `load` (see the record's
+    /// comment); `None` when the bank does not load or `load` derives other counts or boundaries
+    /// than the record holds.
+    fn rebuild_frames(&mut self) -> Option<()> {
+        let Some(bank) = self.loaded_bank else {
+            return Some(());
+        };
+        let (frames, words, boundaries) = (self.num_frames, self.num_words, self.word_boundaries);
+        self.loaded_bank = None;
+        let same = self.load(bank) && self.num_frames == frames && self.num_words == words && self.word_boundaries == boundaries;
+        same.then_some(())
+    }
+
+    /// Poison witnesses only: poisons the frames no read reaches before a load rewrites them (see
+    /// the record's comment): all of them when `all` (a dormant engine) or no bank is loaded,
+    /// otherwise those at and past `num_frames`.
+    pub(crate) fn poison_unread_frames(&mut self, all: bool, p: &mut crate::record::Poison) {
+        use crate::record::Record;
+        let from = if all || self.loaded_bank.is_none() { 0 } else { self.num_frames };
+        self.frames.iter_mut().skip(from).for_each(|f| f.poison(p));
+    }
+}
+
+#[cfg(feature = "testing")]
+impl LpcSpeechSynthController<'_> {
+    /// Poison witnesses only (see [`LpcSpeechSynthWordBank::poison_unread_frames`]).
+    pub(crate) fn poison_unread_frames(&mut self, all: bool, p: &mut crate::record::Poison) {
+        self.word_bank.poison_unread_frames(all, p);
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -240,6 +240,12 @@ impl crate::record::Record for LpcSpeechSynthFrame {
     fn restore_run(items: &mut [Self], r: &mut crate::record::Reader<'_>) -> Option<()> {
         crate::record::read_packed(r, items, Self::restore_bytes)
     }
+    /// Every byte moved by a nonzero step (wrapping), so every field changes.
+    fn poison(&mut self, p: &mut crate::record::Poison) {
+        let mut b = self.record_bytes();
+        b.iter_mut().for_each(|x| *x = x.wrapping_add(p.step()));
+        self.restore_bytes(b);
+    }
 }
 
 #[cfg(feature = "testing")]

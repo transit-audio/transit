@@ -171,4 +171,12 @@ impl SpeechEngine<'_> {
 
 // Reset via: `lpc_speech_synth_controller` (`reset` calls its `reset`; nothing else).
 #[cfg(feature = "testing")]
+impl SpeechEngine<'_> {
+    /// Poison witnesses only: the word bank's frames no read reaches (see the word bank's record).
+    pub(crate) fn poison_unread_frames(&mut self, all: bool, p: &mut crate::record::Poison) {
+        self.lpc_speech_synth_controller.poison_unread_frames(all, p);
+    }
+}
+
+#[cfg(feature = "testing")]
 crate::record_struct!(['a] SpeechEngine<'a> { word_bank_quantizer, naive_speech_synth, sam_speech_synth, temp_buffer_1, temp_buffer_2, prosody_amount, speed } reset_via { lpc_speech_synth_controller });
