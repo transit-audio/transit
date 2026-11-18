@@ -580,9 +580,10 @@ panel of the sections row, on every view). The fader starts at 0 dB, as in Ablet
 the instrument's level is where a new track keeps its headroom: the synths and the Sampler all
 start at -12 dB, which leaves room for chords and stacked hits before the mix reaches full scale. A
 factory preset that sets no level loads at the same -12 dB. The Sampler's pads and zones keep their
-own 0 dB Level as trims under Output. A session saved before this change plays an instrument that
-never stored its level quieter: a synth added from Add Track or an import and never touched by 6 dB,
-a Sampler by 12 dB. Raise its Level or Output, or the track's fader, once.
+own 0 dB Level as trims under Output. A session saved before this change plays an instrument
+whose level was never set quieter: a synth whose Level knob was never moved by 6 dB (unless it was
+added from the browser or a factory preset was recalled on it, which stored the level), a Sampler
+by 12 dB. Raise its Level or Output, or the track's fader, once.
 
 ## Macro Oscillator
 
