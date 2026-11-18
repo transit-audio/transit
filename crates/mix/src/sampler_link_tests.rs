@@ -687,3 +687,32 @@ fn a_stored_output_is_what_plays_and_an_edit_reaches_the_running_instance() {
     assert!(last(&out) < unity * 0.01, "the edit reached the instance: {}", last(&out));
     assert_eq!(rig.log.made.load(Ordering::Relaxed), made, "the instance is kept");
 }
+
+/// The held note's level, a Sampler with Output `db` added to a running engine while it plays: the
+/// track holds no instrument for the first blocks, then the plan with the Sampler is adopted and
+/// the note (its clip moved to start after the adoption) plays through the fresh instance.
+fn added_while_playing(db: f32) -> f32 {
+    let (mut with, t) = session(Some(kit(1)));
+    with.track_mut(t).unwrap().instrument.as_mut().unwrap().params.insert("output".into(), db);
+    let clip = &mut with.track_mut(t).unwrap().playlist_mut().unwrap().clips[0];
+    clip.start = 16 * BLOCK as i64;
+    let mut without = with.clone();
+    without.track_mut(t).unwrap().instrument = None;
+    let mut rig = Rig::new();
+    assert_eq!(rig.publish(&without), Adoption::Adopted);
+    rig.render(8);
+    assert_eq!(rig.publish(&with), Adoption::Adopted);
+    // From the adoption at block 8 to the note at block 16, then 4 blocks into the note.
+    last(&rig.render(12))
+}
+
+#[test]
+fn a_sampler_added_while_playing_starts_at_its_stored_output() {
+    // No transport reset reaches an instance made while the engine plays, so only the fresh
+    // instance's own initialization (`snap_initial_params`) puts its Output where it is stored:
+    // without it, Output would still be gliding up from the -12 dB default here.
+    let unity = added_while_playing(0.0);
+    assert!(unity > 0.4, "the added Sampler plays: {unity}");
+    let ratio = added_while_playing(-6.0) / unity;
+    assert!((ratio - transit_dsp::db_to_gain(-6.0)).abs() < 1.0e-6, "starts at the stored -6 dB: {ratio}");
+}

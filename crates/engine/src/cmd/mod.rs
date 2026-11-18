@@ -334,12 +334,22 @@ pub fn tracks_required(e: &Engine, cmd: &str, p: &Value) -> Result<Vec<TrackId>>
 /// (CLAP, VST3, Audio Unit) keeps its settings in its own state, so its map starts empty:
 /// the defaults it reports are often 0, and pushing them would overwrite what it loads by itself
 /// (Rhapsody came up with its volume and pan at minimum).
-pub(super) fn fill_default_params(ins: &mut transit_model::Insert, info: &transit_dsp::PluginInfo) {
+pub(crate) fn fill_default_params(ins: &mut transit_model::Insert, info: &transit_dsp::PluginInfo) {
     if transit_mix::is_third_party(info.id) {
         return;
     }
     for pi in info.params {
         ins.params.insert(pi.id.to_string(), pi.default);
+    }
+}
+
+/// [`fill_default_params`] for an insert made from its id alone: a built-in's table, looked up by
+/// its id, written whole (#753); a hosted plug-in or an unknown id keeps its empty map. Every
+/// command or import that creates a device calls this; loading a session never does, so a map
+/// stored empty stays empty.
+pub(crate) fn fill_builtin_defaults(ins: &mut transit_model::Insert) {
+    if let Some(info) = transit_dsp::plugin_info(&ins.plugin) {
+        fill_default_params(ins, info);
     }
 }
 

@@ -652,6 +652,8 @@ fn old_sessions_open_and_render_with_unchanged_hashes() {
         p.set_pad(PadEntry { zone: Some(1), ..p.pad(1) });
     });
     notes(&mut e, t, &[(60, 0), (61, 1)]);
+    // An older build stored no instrument parameters for this Sampler (#753 now stores Output).
+    e.session_mut().track_mut(t).unwrap().instrument.as_mut().unwrap().params.clear();
     let file = d.path("old.transit");
     e.execute("session.save_as", &json!({"path": file})).unwrap();
     let mut back = Engine::default();

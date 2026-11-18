@@ -99,10 +99,12 @@ fn a_new_patch_leaves_the_one_sample_field_unset() {
     let mut e = Engine::default();
     let t = instrument(&mut e);
     // A new patch on another instrument's track: a Sampler with an empty kit, no one-sample field
-    // and no parameter values (the 19 legacy ids are retired, #455); undo brings the instrument back.
+    // and none of the 19 retired legacy ids (#455): its table, Output, at its default (#753); undo
+    // brings the instrument back.
     e.execute("mix.sampler_new_patch", &json!({"track": t})).unwrap();
     let ins = e.session().track(t).unwrap().instrument.clone().unwrap();
-    assert!(ins.plugin == "sampler" && ins.sample.is_none() && ins.sampler_patch.is_some() && ins.params.is_empty(), "{ins:?}");
+    assert!(ins.plugin == "sampler" && ins.sample.is_none() && ins.sampler_patch.is_some(), "{ins:?}");
+    assert_eq!(ins.params.iter().map(|(k, v)| (k.as_str(), *v)).collect::<Vec<_>>(), [("output", -12.0)], "{ins:?}");
     assert!(e.execute("mix.sampler_new_patch", &json!({"track": t})).is_err(), "one patch per Sampler");
     e.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(e.session().track(t).unwrap().instrument.as_ref().unwrap().plugin, "macro_oscillator");

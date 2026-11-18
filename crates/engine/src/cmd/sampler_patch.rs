@@ -228,7 +228,9 @@ fn new_patch(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, "the track's Sampler already has a patch"));
     }
     if !tr.instrument.as_ref().is_some_and(|i| i.plugin == SAMPLER) {
-        tr.instrument = Some(Insert::new(SAMPLER));
+        let mut ins = Insert::new(SAMPLER);
+        super::fill_builtin_defaults(&mut ins);
+        tr.instrument = Some(ins);
     }
     if let Some(ins) = tr.instrument.as_mut() {
         empty_kit(ins, seed);

@@ -34,7 +34,9 @@ pub fn import_midi_bytes(e: &mut Engine, bytes: &[u8], at: Samples, tempo_map: b
         transit_model::truncate_chars(&mut name, transit_model::MAX_NAME_CHARS);
         let id = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some(&name));
         if let Some(t) = s.track_mut(id) {
-            t.instrument = Some(transit_model::Insert::new(transit_model::DEFAULT_INSTRUMENT));
+            let mut ins = transit_model::Insert::new(transit_model::DEFAULT_INSTRUMENT);
+            crate::cmd::fill_builtin_defaults(&mut ins);
+            t.instrument = Some(ins);
         }
         let end_tick = base_tick.saturating_add(tr.sequence.end_tick().max(1));
         let len = s.tempo.tick_to_samples(end_tick, s.sample_rate).saturating_sub(at);

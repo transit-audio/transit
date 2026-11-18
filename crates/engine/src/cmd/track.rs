@@ -253,6 +253,7 @@ fn new_track(e: &mut Engine, p: &Value) -> Result<Value> {
             }
             if kind == TrackKind::Instrument {
                 let mut ins = transit_model::Insert::new(instrument.clone().unwrap_or_else(|| transit_model::DEFAULT_INSTRUMENT.into()));
+                super::fill_builtin_defaults(&mut ins);
                 super::sampler_patch::new_instance(&mut ins);
                 t.instrument = Some(ins);
             }

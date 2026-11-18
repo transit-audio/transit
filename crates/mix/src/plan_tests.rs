@@ -62,6 +62,11 @@ impl Plugin for Probe {
     fn reset(&mut self) {
         self.inner.reset();
     }
+    // Forwarded, not the trait's default (a reset): a fresh instance's initialization is the
+    // plug-in's own, as it is without the probe (#753's added-while-playing Output test).
+    fn snap_initial_params(&mut self) {
+        self.inner.snap_initial_params();
+    }
     fn set_param(&mut self, id: &str, v: f32) -> bool {
         self.inner.set_param(id, v)
     }

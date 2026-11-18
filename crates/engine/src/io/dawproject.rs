@@ -386,7 +386,9 @@ fn track<'a>(cx: &mut Cx, s: &mut Session, t: Node<'a, '_>, ids: &mut BTreeMap<&
         let id = s.add_track(kind, format, Some(&name));
         if let Some(tr) = s.track_mut(id) {
             if kind == TrackKind::Instrument {
-                tr.instrument = Some(transit_model::Insert::new(transit_model::DEFAULT_INSTRUMENT));
+                let mut ins = transit_model::Insert::new(transit_model::DEFAULT_INSTRUMENT);
+                crate::cmd::fill_builtin_defaults(&mut ins);
+                tr.instrument = Some(ins);
             }
             if let Some(c) = ch {
                 mixer(cx, &mut tr.mixer, c);
