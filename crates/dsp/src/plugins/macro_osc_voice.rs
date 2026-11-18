@@ -553,16 +553,19 @@ impl Slot {
     /// its bank, dormant ones included, its generator, envelopes, trigger delay, post-processors
     /// and tuning: `transit_macro_osc::record`), the last block's frames and mix, the keys, the
     /// note and velocities, the trigger and phrase flags, the age, loudness and quiet count, the
-    /// idle and rendered flags, the gains, the shaper and the last block's shape. The seed is
-    /// configuration (the slot's index). The last block's frames, mix, rendered flag, gains and
-    /// shape are encoded though unobservable: `render` writes each of them for a slot before
-    /// `render_block` reads it (the shape is read only by the panel's `newest`).
+    /// idle flag and the shaper. The seed is configuration (the slot's index). Unobservable, each
+    /// written by `render` before anything reads it: `rendered` (set for every slot at the start of
+    /// each `render`, then read by `render_block`), and for a slot that renders `frames` (the
+    /// port's voice writes all twelve), `mixed` and `gain` (read by `render_block` only for slots
+    /// it rendered) and `shape` (read only by the panel's `newest`). Witnesses: every case, with
+    /// this group's omission mutation uncaught.
     pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
         use transit_macro_osc::record::Record;
         let Slot {
             voice,
-            frames,
-            mixed,
+            // Unobservable (see `record_state`'s docs): `frames`, `mixed`, `rendered`, `gain`, `shape`.
+            frames: _,
+            mixed: _,
             notes,
             note,
             velocity,
@@ -575,17 +578,15 @@ impl Slot {
             loudness,
             quiet,
             idle,
-            rendered,
-            gain,
+            rendered: _,
+            gain: _,
             shaper,
             // Configuration: `voice_seed(Random::DEFAULT_SEED, index)`, set by `Slot::new`; only the
             // test-only `MacroOscillator::set_seed` changes it.
             seed: _,
-            shape,
+            shape: _,
         } = self;
         voice.record(w);
-        frames.record(w);
-        w.f32s(mixed);
         notes.record_state(w);
         w.f32s(&[*note, *velocity, *release_velocity]);
         for b in [last_trigger, retrigger, started, shaped] {
@@ -595,10 +596,7 @@ impl Slot {
         w.f32(*loudness);
         w.u32(*quiet);
         w.bool(*idle);
-        w.bool(*rendered);
-        w.f32s(&[gain.0, gain.1]);
         shaper.record_state(w);
-        w.f32s(shape);
     }
 
     /// Sets the state [`Slot::record_state`] wrote.
@@ -606,8 +604,9 @@ impl Slot {
         use transit_macro_osc::record::Record;
         let Slot {
             voice,
-            frames,
-            mixed,
+            // Unobservable (see `record_state`'s docs): `frames`, `mixed`, `rendered`, `gain`, `shape`.
+            frames: _,
+            mixed: _,
             notes,
             note,
             velocity,
@@ -620,15 +619,13 @@ impl Slot {
             loudness,
             quiet,
             idle,
-            rendered,
-            gain,
+            rendered: _,
+            gain: _,
             shaper,
             seed: _,
-            shape,
+            shape: _,
         } = self;
         voice.restore(r)?;
-        frames.restore(r)?;
-        r.f32s(mixed)?;
         notes.restore_state(r)?;
         let mut v = [0.0f32; 3];
         r.f32s(&mut v)?;
@@ -640,11 +637,6 @@ impl Slot {
         *loudness = r.f32()?;
         *quiet = r.u32()?;
         *idle = r.bool()?;
-        *rendered = r.bool()?;
-        let mut g = [0.0f32; 2];
-        r.f32s(&mut g)?;
-        *gain = (g[0], g[1]);
-        shaper.restore_state(r)?;
-        r.f32s(shape)
+        shaper.restore_state(r)
     }
 }

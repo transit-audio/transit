@@ -785,7 +785,20 @@ crate::record_struct!(['a] EngineBank<'a> { additive_engine, bass_drum_engine, c
 // Configuration: `sample_rate_hz`, `short_decay_scale`, `decay_tail_scale`, `a0_firmware` (from the
 // rate, in `new`), `tuning` and `a0_normalized` (`set_tuning`, which the owner calls once at
 // construction); nothing else writes them.
-crate::record_struct!(['a] Voice<'a> { engines, rng, resources, engine_quantizer, reload_resources, previous_engine_index, engine_cv, previous_note, trigger_state, decay_envelope, lpg_envelope, trigger_delay, out_post_processor, aux_post_processor, out_buffer, aux_buffer } config { sample_rate_hz, short_decay_scale, decay_tail_scale, a0_normalized, a0_firmware, tuning });
+// Unobservable:
+// - `out_buffer`, `aux_buffer`: `render` hands their first `size` frames to the engine, which writes
+//   every one of them before anything reads them (each engine assigns its outputs, or fills them
+//   with 0 before it sums into them), and the post-processors and the int16 conversion read them
+//   only after that; nothing else reads them. Witnesses: every case, every engine (the engine
+//   switch's revisits and one witness per engine, `print_completeness/macro_osc.rs`), with this
+//   group's omission mutation uncaught.
+// - `decay_envelope`: read only through `apply_modulations`, as the internal envelope times a
+//   patch modulation amount, and the Macro Oscillator's patch carries none (`Slot::render` leaves
+//   `frequency_modulation_amount` and `morph_modulation_amount` at 0, and sets the timbre amount
+//   only for the chiptune model, whose internal envelope amplitude for Timbre is 0 in `render`);
+//   an owner that sets a modulation amount must encode it. Witnesses: every case, with this
+//   field's omission mutation uncaught.
+crate::record_struct!(['a] Voice<'a> { engines, rng, resources, engine_quantizer, reload_resources, previous_engine_index, engine_cv, previous_note, trigger_state, lpg_envelope, trigger_delay, out_post_processor, aux_post_processor } config { sample_rate_hz, short_decay_scale, decay_tail_scale, a0_normalized, a0_firmware, tuning } unobservable { decay_envelope, out_buffer, aux_buffer });
 
 #[cfg(feature = "testing")]
 crate::record_struct!([] ChannelPostProcessor { limiter, lpg });

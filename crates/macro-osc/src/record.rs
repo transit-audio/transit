@@ -7,12 +7,14 @@
 //! reachable: [`record_struct!`] writes both functions with one exhaustive destructuring of
 //! `Self { .. }` and no rest pattern, so a new field does not compile until its treatment is
 //! decided; [`record_enum!`] matches every variant. A field is either encoded, in declaration
-//! order, or named in the macro's `config` list with a comment saying why: the voice's
-//! configuration (its rate and what is computed from it at construction, which the record's
-//! configuration child pins) or a reference to immutable content (a firmware table, a word bank),
-//! which is the same in every instance. Nothing is derived: what an implementation could
-//! recompute (a coefficient, a scale) is encoded, so restore never keeps the receiving
-//! instance's own value of state. Scratch buffers are encoded too (no overwrite proofs needed).
+//! order, or named in the macro's `config` list with a comment saying why (the voice's
+//! configuration: its rate and what is computed from it at construction, which the record's
+//! configuration child pins, or a reference to immutable content, a firmware table or a word
+//! bank, the same in every instance), or in its `unobservable` list with the argument and the
+//! witness (only the voice's block buffers and its decay envelope, `voice.rs`). Nothing is
+//! derived: what an implementation could recompute (a coefficient, a scale) is encoded, so
+//! restore never keeps the receiving instance's own value of state. The engines' scratch
+//! buffers are encoded too (no overwrite proofs needed).
 //!
 //! Runs: an `f32` run is one tag-6 item; `u8`, `i8`, `u16` and `i16` runs are packed little-endian
 //! into tag-7 items of at most [`CHUNK`] bytes behind a count (integers, never floats, under the
@@ -203,20 +205,21 @@ impl<T: Record + Default> Record for Option<T> {
 }
 
 /// Writes [`Record`] for a struct: one exhaustive destructuring of `Self { .. }` (no rest
-/// pattern) in both functions. The first list is encoded in order; the optional `config` list is
-/// left out, each with a comment at the call site saying why (configuration, or a reference to
-/// immutable content). The leading brackets hold the impl's generics (empty for none), and an
-/// optional `where [..]` its bounds.
+/// pattern) in both functions. The first list is encoded in order; the optional `config` and
+/// `unobservable` lists are left out, each with a comment at the call site saying why
+/// (configuration, a reference to immutable content, or an overwrite-before-read or never-read
+/// argument naming the witness that exercises it). The leading brackets hold the impl's generics
+/// (empty for none), and an optional `where [..]` its bounds.
 #[macro_export]
 macro_rules! record_struct {
-    ([$($g:tt)*] $ty:ty $(where [$($w:tt)*])? { $($f:ident),* $(,)? } $(config { $($c:ident),* $(,)? })?) => {
+    ([$($g:tt)*] $ty:ty $(where [$($w:tt)*])? { $($f:ident),* $(,)? } $(config { $($c:ident),* $(,)? })? $(unobservable { $($u:ident),* $(,)? })?) => {
         impl<$($g)*> $crate::record::Record for $ty $(where $($w)*)? {
             fn record(&self, w: &mut $crate::record::Writer<'_>) {
-                let Self { $($f,)* $($($c: _,)*)? } = self;
+                let Self { $($f,)* $($($c: _,)*)? $($($u: _,)*)? } = self;
                 $( $crate::record::Record::record($f, w); )*
             }
             fn restore(&mut self, r: &mut $crate::record::Reader<'_>) -> Option<()> {
-                let Self { $($f,)* $($($c: _,)*)? } = self;
+                let Self { $($f,)* $($($c: _,)*)? $($($u: _,)*)? } = self;
                 $( $crate::record::Record::restore($f, r)?; )*
                 Some(())
             }

@@ -92,7 +92,7 @@ fn hold_of(engine: f32) -> Span {
 }
 
 fn witnesses() -> Vec<W> {
-    vec![
+    let mut v = vec![
         // 1: after prepare, before any process.
         W {
             boundary: Boundary::AfterPrepare,
@@ -427,7 +427,47 @@ fn witnesses() -> Vec<W> {
             reached: |p| obs(p).held.count_ones() == 2 && obs(p).sounding.count_ones() == 4 && obs(p).counting.count_ones() == 2,
             completed: idle,
         },
-    ]
+    ];
+    // Every engine active at T, in the middle of a note: an engine that resets on a switch (so its
+    // dormant state is not read again) is still recorded while it plays.
+    v.extend(engine_witnesses());
+    v
+}
+
+/// The engine at T of [`engine_witnesses`]' witness for `E`: a note held on it for `VISIT`.
+fn engine_history<const E: u8>(rate: f32) -> Vec<Step> {
+    let mut h = setup(8);
+    h.extend([Step::Param("model", f32::from(E)), Step::On(50, 110, 5), Step::Run(span(&[VISIT], rate))]);
+    h
+}
+
+/// The note goes on, is released, and its tail plays for `VISIT`.
+fn engine_continuation<const E: u8>(rate: f32) -> Vec<Step> {
+    vec![Step::Run(span(&[VISIT], rate)), Step::Off(50, 2), Step::Run(span(&[VISIT], rate))]
+}
+
+fn engine_reached<const E: u8>(p: &MacroOscillator) -> bool {
+    obs(p).engines[0] == Some(usize::from(E)) && obs(p).held & 1 == 1
+}
+
+fn engine_completed<const E: u8>(p: &MacroOscillator) -> bool {
+    obs(p).engines[0] == Some(usize::from(E)) && obs(p).held == 0
+}
+
+/// One witness per engine (the 24 of the bank): see [`witnesses`].
+fn engine_witnesses() -> Vec<W> {
+    macro_rules! each {
+        ($($e:literal),*) => {
+            vec![$(W {
+                boundary: Boundary::Entry(concat!("engine ", stringify!($e), " at T")),
+                history: engine_history::<$e>,
+                continuation: engine_continuation::<$e>,
+                reached: engine_reached::<$e>,
+                completed: engine_completed::<$e>,
+            }),*]
+        };
+    }
+    each!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
 }
 
 /// Two notes released into their tails, which are still playing at T.
