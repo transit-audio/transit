@@ -164,11 +164,6 @@ impl LogArgs {
         }
         Ok(out)
     }
-
-    /// Whether `args[i]` is the value of a `--log` flag, not a file to open.
-    pub fn is_value(args: &[String], i: usize) -> bool {
-        i > 0 && args.get(i - 1).is_some_and(|p| p == "--log")
-    }
 }
 
 /// The filter this run starts with: the directives, where they came from, and whether our own
@@ -706,8 +701,6 @@ mod tests {
         assert_eq!(a, LogArgs { verbose: false, log: Some("debug".into()), stderr: true });
         assert!(LogArgs::parse(&args(&["--log"])).is_err());
         assert!(LogArgs::parse(&args(&["--log", "--verbose"])).is_err(), "a flag is not directives");
-        let list = args(&["--log", "debug", "a.transit"]);
-        assert!(LogArgs::is_value(&list, 1) && !LogArgs::is_value(&list, 0) && !LogArgs::is_value(&list, 2));
     }
 
     #[test]

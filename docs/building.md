@@ -35,6 +35,20 @@ The log is `logs/transit.log` in that folder. `--verbose`, `--log <directives>` 
 
 `transit --report [path]` writes a diagnostics text file (version and build, OS, CPU, audio stack versions, the device lists, the saved audio settings and the last 200 log lines) to `transit-report-<YYYYMMDD-HHMM>.txt` in the current directory (the time is UTC) or to `path`, prints where, and exits. It needs no display, opens no audio stream and hides the user name and home folder. The report starts with a `Generated:` line (UTC). The Windows release has no console of its own: started from a terminal, `--report` and `--version` print there; started from a shortcut, the path (or the error) shows in a small message box. The file is written either way. Audio Devices and Callback Telemetry have a Copy diagnostics button with the same text, plus the open-device lines and counters of the running session.
 
+## Command line
+
+`transit [options] [session.transit ...]`. `transit --help` prints this list and exits; an unknown option is an error that starts nothing.
+
+- `--help`, `-h`: print the options and exit.
+- `--version`, `-V`: print the version and exit.
+- `--report [path]`: write the diagnostics file and exit (above).
+- `--demo` (also `--sample`): start with the demo session.
+- `--no-audio`: run with no audio player at all.
+- `--null-audio`: run on a silent device; no audio hardware is listed or opened (`docs/troubleshooting.md`).
+- `--control <port>`: start the localhost control server (`0` picks a free port).
+- `--verbose`, `--log <directives>`, `--log-stderr`: log detail and filter (see [Troubleshooting](troubleshooting.md)).
+- `--`: everything after it is a session path, even one that starts with `-`.
+
 ## The update check
 
 transit checks once a day, after the splash, whether a newer release exists (Help > Check for Updates… runs it on demand). The check is a single anonymous request to GitHub's public API (`api.github.com/repos/transit-audio/transit/releases`); nothing else is sent, and nothing is downloaded or installed. Turn it off with Help > Check for New Versions on Launch, or set `TRANSIT_NO_UPDATE_CHECK=1` (CI, tests, packagers; this also disables the Help entry).

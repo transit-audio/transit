@@ -1,6 +1,6 @@
 //! transit desktop app: the studio UI over the transit engine.
 //!
-//! Usage: `transit --report [path]` writes a diagnostics file and exits (not with `--null-audio`); otherwise `transit [--demo] [--control <port>] [--no-audio | --null-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
+//! Usage: `transit --help` lists every flag (the table is `cli::FLAGS`; unknown options are errors, #741); `transit --report [path]` writes a diagnostics file and exits (not with `--null-audio`); otherwise `transit [--demo] [--control <port>] [--no-audio | --null-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
 //!
 //! `--null-audio` is a diagnostic: the player, the mixer and hosted plug-ins (with their editors) run
 //! on a silent device (48 kHz, stereo, 512 frames, paced at real time, output discarded) and no
@@ -22,6 +22,7 @@
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod cli;
 mod config;
 mod control_server;
 mod drop_cursor;
@@ -434,59 +435,54 @@ fn main() -> eframe::Result {
         transit_engine::shutdown_plugin_hosts();
         return Ok(());
     }
-    // `--report`: write the diagnostics file and exit, before the logger (so the log it reads is not
-    // rotated), the window and any audio device.
+    // Classify the arguments before anything with a side effect (#741): help, version, report and
+    // usage errors answer here and start no window, audio device, plug-in scan or log file.
     // A release build on Windows has no console of its own: attach to the terminal that started it so
-    // `--report` and `--version` can print there (without one, a message box carries the text).
-    let report_target = report::parse(&args);
-    let console = (report_target.is_some() || args.iter().any(|a| a == "--version" || a == "-V")) && transit_rt::attach_parent_console();
-    if let Some(target) = report_target {
-        if let Some(refusal) = report_refusal(&args) {
-            say(console, &format!("transit --report: {refusal}"));
+    // the answers can print there (without one, a message box carries the text).
+    let command = cli::classify(&args, std::env::var("TRANSIT_CONTROL_PORT").ok().as_deref(), cfg!(windows));
+    let launch = match command {
+        cli::Command::Run(launch) => launch,
+        cli::Command::Help => {
+            let console = transit_rt::attach_parent_console();
+            say(console, cli::help_text().trim_end());
+            return Ok(());
+        }
+        cli::Command::Version => {
+            let console = transit_rt::attach_parent_console();
+            say(console, &format!("transit {}", env!("CARGO_PKG_VERSION")));
+            return Ok(());
+        }
+        cli::Command::Error(text) => {
+            let console = transit_rt::attach_parent_console();
+            say(console, &text);
             std::process::exit(1);
         }
-        let prefs = load_prefs();
-        let profile_mappings = prefs.as_ref().map_or(0, |ui| ui.midi_profile.len());
-        let settings = prefs.map(|ui| ui.audio).unwrap_or_default();
-        let log_dir = if prefs_enabled() { config::config_dir().map(|d| d.join(logging::LOG_DIR)) } else { None };
-        match report::run(target, log_dir, settings, profile_mappings) {
-            Ok(path) => {
-                say(console, &path.display().to_string());
-                std::process::exit(0);
-            }
-            Err(e) => {
-                say(console, &format!("transit --report: {e}"));
-                std::process::exit(1);
+        // `--report`: write the diagnostics file and exit, before the logger (so the log it reads is
+        // not rotated), the window and any audio device.
+        cli::Command::Report(target) => {
+            let console = transit_rt::attach_parent_console();
+            let prefs = load_prefs();
+            let profile_mappings = prefs.as_ref().map_or(0, |ui| ui.midi_profile.len());
+            let settings = prefs.map(|ui| ui.audio).unwrap_or_default();
+            let log_dir = if prefs_enabled() { config::config_dir().map(|d| d.join(logging::LOG_DIR)) } else { None };
+            match report::run(target, log_dir, settings, profile_mappings) {
+                Ok(path) => {
+                    say(console, &path.display().to_string());
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    say(console, &format!("transit --report: {e}"));
+                    std::process::exit(1);
+                }
             }
         }
-    }
-    let parsed_log_args = logging::LogArgs::parse(&args);
-    let log_args = parsed_log_args.clone().unwrap_or_default();
+    };
+    let cli::Launch { demo, no_audio, null_audio, control_port, files } = launch;
+    let log_args = logging::LogArgs::parse(&args).unwrap_or_default();
     let (logger, resolved) = match logging::install(&log_args) {
         Some((logger, resolved)) => (Some(logger), Some(resolved)),
         None => (None, None),
     };
-    parsed_log_args.map_err(|error| eframe::Error::AppCreation(error.into()))?;
-    if args.iter().any(|a| a == "--version" || a == "-V") {
-        say(console, &format!("transit {}", env!("CARGO_PKG_VERSION")));
-        return Ok(());
-    }
-    let demo = args.iter().any(|a| a == "--demo" || a == "--sample");
-    let no_audio = args.iter().any(|a| a == "--no-audio");
-    let null_audio = args.iter().any(|a| a == NULL_AUDIO_FLAG);
-    if no_audio && null_audio {
-        return Err(eframe::Error::AppCreation("--no-audio and --null-audio cannot be combined".into()));
-    }
-    let control_port =
-        parse_control_port(&args, std::env::var("TRANSIT_CONTROL_PORT").ok().as_deref()).map_err(|error| eframe::Error::AppCreation(error.into()))?;
-    let files: Vec<String> = args
-        .iter()
-        .enumerate()
-        .filter(|(i, a)| {
-            !(a.starts_with("--") || (i > &0 && args.get(i - 1).is_some_and(|p| p == "--control")) || logging::LogArgs::is_value(&args, *i))
-        })
-        .map(|(_, a)| a.clone())
-        .collect();
     log::info!("transit {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
     if prefs_enabled() {
         config::migrate_legacy_config();
