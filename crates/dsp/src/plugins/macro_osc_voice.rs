@@ -543,6 +543,12 @@ impl NoteStack {
 
 #[cfg(feature = "testing")]
 impl Slot {
+    /// The voice is released, silent and counting down to idle (its quiet count is not 0): the
+    /// transplant harness's witnesses read it.
+    pub(crate) fn counting(&self) -> bool {
+        !self.idle && self.quiet > 0
+    }
+
     /// One voice's complete state (ADR 0029, #742 section 13): the port's voice (every engine of
     /// its bank, dormant ones included, its generator, envelopes, trigger delay, post-processors
     /// and tuning: `transit_macro_osc::record`), the last block's frames and mix, the keys, the

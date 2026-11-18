@@ -404,13 +404,16 @@ fn witnesses() -> Vec<W> {
         W {
             boundary: Boundary::Entry("loudness and quiet count"),
             history: |rate| {
+                // Morph sets a drum model's decay: at 0 a hit is over within a few milliseconds.
                 let mut h = setup(4);
-                h.push(Step::Param("model", 23.0));
+                h.extend([Step::Param("model", 23.0), Step::Param("morph", 0.0)]);
                 for (key, vel) in [(48u8, 127u8), (52, 60), (55, 10), (59, 60)] {
                     h.push(Step::On(key, vel, 0));
                     h.push(Step::Run(span(&[HOLD], rate)));
                 }
-                h.extend([Step::Off(48, 0), Step::Run(span(&[HOLD], rate)), Step::Off(55, 0), Step::Run(97)]);
+                // Both released within the quiet span (50 ms) before T, 45 and 35 ms, each silent by then.
+                let (gap, wait) = (Span::Seconds(0.01), Span::Seconds(0.035));
+                h.extend([Step::Off(48, 0), Step::Run(span(&[gap], rate)), Step::Off(55, 0), Step::Run(span(&[wait], rate))]);
                 h
             },
             continuation: |rate| {
@@ -421,7 +424,7 @@ fn witnesses() -> Vec<W> {
                 c.push(run_out(&[RELEASE], rate));
                 c
             },
-            reached: |p| obs(p).held.count_ones() == 2 && obs(p).sounding.count_ones() == 4,
+            reached: |p| obs(p).held.count_ones() == 2 && obs(p).sounding.count_ones() == 4 && obs(p).counting.count_ones() == 2,
             completed: idle,
         },
     ]
@@ -443,7 +446,7 @@ fn in_release(p: &MacroOscillator) -> bool {
 /// The shaper on (short envelopes, a resonant filter with key tracking and envelope, both LFOs
 /// free-running, so a new note takes the instrument's running phase: one with a fade-in, one
 /// synced to a bar division, anchored to the song position while the transport plays) and matrix
-/// rows from LFO 1 to the cutoff and from LFO 2 to Timbre.
+/// rows from LFO 1 to the cutoff, from LFO 2 to Timbre and from the note's random value to Morph.
 fn shaper_on() -> Vec<Step> {
     vec![
         Step::Param("shaper", 1.0),
@@ -469,6 +472,9 @@ fn shaper_on() -> Vec<Step> {
         Step::Param("mod8_source", 2.0),
         Step::Param("mod8_dest", 3.0),
         Step::Param("mod8_amount", 40.0),
+        Step::Param("mod9_source", 12.0),
+        Step::Param("mod9_dest", 4.0),
+        Step::Param("mod9_amount", 30.0),
     ]
 }
 

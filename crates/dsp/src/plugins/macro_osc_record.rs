@@ -270,6 +270,8 @@ pub struct Observed {
     pub held: u32,
     /// Bit `i`: only the pedal keeps voice `i` (it sounds a key no longer held).
     pub pedalled: u32,
+    /// Bit `i`: voice `i` is released, silent and counting down to idle (its quiet count is not 0).
+    pub counting: u32,
     /// The sustain pedal is down.
     pub sustain: bool,
     /// The level smoother is still moving toward its target.
@@ -297,6 +299,7 @@ impl MacroOscillator {
             sounding: bits(&|s| !s.idle),
             held: bits(&|s| s.notes.any_held()),
             pedalled: bits(&|s| s.sounding() && !s.notes.any_held()),
+            counting: bits(&Slot::counting),
             sustain: self.sustain,
             ramping: self.level.settling(),
             pos: self.pos,
