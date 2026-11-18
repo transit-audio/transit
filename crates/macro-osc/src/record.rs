@@ -123,7 +123,7 @@ impl Poison {
         1 + (self.next() & 7) as u8
     }
 
-    /// A finite positive float in [0.0625, 0.5625] other than `old`.
+    /// A finite positive float below 1 other than `old`.
     #[must_use]
     pub fn f32(&mut self, old: f32) -> f32 {
         let v = 0.0625 + self.next() as f32 / 33_554_432.0;
