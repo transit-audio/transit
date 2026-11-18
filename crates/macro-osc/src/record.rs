@@ -362,6 +362,7 @@ impl<T: Record + Default> Record for Option<T> {
 /// - `config`, `unobservable`, `derived`: left out, each with a comment at the call site saying
 ///   why (configuration, a reference to immutable content, an overwrite-before-read or never-read
 ///   argument naming its witness, or the function restore re-derives it with).
+///
 /// The leading brackets hold the impl's generics (empty for none), and an optional `where [..]`
 /// its bounds.
 #[macro_export]
