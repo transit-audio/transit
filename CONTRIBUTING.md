@@ -39,6 +39,14 @@ A pull request from outside merges only on green CI.
 
 Tests take scratch folders from `transit_test_support::TestDir` (removed when the test ends); `cargo xtask temp-dirs` rejects a direct system temp directory call. `transit-*` folders left in the system temp directory by older runs are safe to delete.
 
+## Picking up an issue
+
+- An assigned issue is being worked on. Pick an unassigned one; "good first issue" and "help wanted"
+  are good places to start.
+- Before you start, comment on the issue or open a draft pull request with "Fixes #N" in the
+  description, so nobody duplicates your work.
+- If you stop, say so on the issue so someone else can take it.
+
 ## Adding a known issue or an escape record
 
 The indexes in `docs/known-issues/README.md`, `docs/adr/README.md` and `docs/escapes/README.md` are
