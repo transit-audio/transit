@@ -276,3 +276,7 @@ mod tests {
         assert_eq!(instrument_of(&e, audio), None);
     }
 }
+
+#[cfg(test)]
+#[path = "tests_instrument_defaults.rs"]
+mod defaults_tests;
