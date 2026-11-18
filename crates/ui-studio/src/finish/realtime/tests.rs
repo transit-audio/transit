@@ -251,3 +251,36 @@ fn progress_counts_the_bars_the_range_covers() {
     }
     app.finish.realtime.running = None;
 }
+
+/// At tempos whose bar lines fall between samples, nearest-tick rounding keeps a bar-line start
+/// in that bar. The exclusive end is treated as the last bar only when it is not itself a bar line.
+#[test]
+fn progress_keeps_barline_boundaries_at_133_bpm() {
+    let mut session = transit_model::Session::default();
+    session.tempo.set_tempo(0, 133.0).unwrap();
+    let start_tick = session.tempo.bar_start_tick(3);
+    let current_tick = session.tempo.bar_start_tick(4);
+    let end_tick = session.tempo.bar_start_tick(5);
+    let start = session.tempo.tick_to_samples(start_tick, session.sample_rate);
+    let current = session.tempo.tick_to_samples(current_tick, session.sample_rate);
+    let end = session.tempo.tick_to_samples(end_tick, session.sample_rate);
+    assert_eq!(session.tempo.bar_beat_at(start, session.sample_rate).bar, 3);
+    assert_eq!(session.tempo.bar_beat_at(end, session.sample_rate).bar, 5);
+    assert_eq!(session.tempo.bar_beat_at(end + 1, session.sample_rate).bar, 5, "the next sample still rounds to the bar line");
+
+    let mut app = StudioApp::new(transit_engine::Engine::new(session), None, Services::default());
+    app.finish.realtime.fake = Some(FakeRender::default());
+    app.finish.realtime.running = Some(super::Rendering {
+        path: "mix.wav".into(),
+        stems: Vec::new(),
+        range: transit_time::Range::new(start, end),
+        tracks: Vec::new(),
+        uncompensated: Vec::new(),
+    });
+    assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((1, 2)), "the start is bar 3 of 2");
+    app.finish.realtime.fake.as_mut().unwrap().done = u64::try_from(current - start).unwrap();
+    assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((2, 2)), "the current position is bar 4 of 2");
+    app.finish.realtime.running.as_mut().unwrap().range.end += 1;
+    app.finish.realtime.fake.as_mut().unwrap().done = 0;
+    assert_eq!(app.realtime_progress().map(|p| (p.0, p.1)), Some((1, 3)), "one sample past the bar line includes bar 5");
+}
