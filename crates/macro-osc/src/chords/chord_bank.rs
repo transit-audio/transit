@@ -158,5 +158,9 @@ const CHORDS: [[f32; CHORD_NUM_NOTES]; CHORD_NUM_CHORDS] = [
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset (left out while the owning engine is dormant), each rewritten in full by `reset`: every
+// ratio and every note count (from the `CHORDS` constants), then all four sorted ratios (`sort`
+// writes each from `ratio`, which reads the ratios just written at the quantizer's chord index,
+// then sorts them). The chord index quantizer is not rewritten and stays encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!([] ChordBank { chord_index_quantizer, ratios, note_count, sorted_ratios });
+crate::record_struct!([] ChordBank { chord_index_quantizer } reset { ratios, note_count, sorted_ratios });

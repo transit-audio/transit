@@ -106,5 +106,8 @@ impl Engine for StringEngine {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset (left out while dormant): `f0_delay` (`reset` calls `DelayLine::reset`, which rewrites every
+// field). Reset via: `voice` (`reset` calls each string voice's `reset`). The pitches, the active
+// string and the scratch buffers are not rewritten by the reset and stay encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!([] StringEngine { voice, f0, f0_delay, active_string, temp_buffer_1, temp_buffer_2 });
+crate::record_struct!([] StringEngine { f0, active_string, temp_buffer_1, temp_buffer_2 } reset { f0_delay } reset_via { voice });

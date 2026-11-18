@@ -158,5 +158,6 @@ impl Engine for ChiptuneEngine {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset via: `chords` (`reset` calls `ChordBank::reset`; nothing else).
 #[cfg(feature = "testing")]
-crate::record_struct!([] ChiptuneEngine { voice, bass, chords, arpeggiator, arpeggiator_pattern_selector, envelope_shape, envelope_state, aux_envelope_amount, sample_rate });
+crate::record_struct!([] ChiptuneEngine { voice, bass, arpeggiator, arpeggiator_pattern_selector, envelope_shape, envelope_state, aux_envelope_amount, sample_rate } reset_via { chords });

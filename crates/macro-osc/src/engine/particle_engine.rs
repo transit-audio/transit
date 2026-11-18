@@ -91,5 +91,6 @@ impl Engine for ParticleEngine {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset via: `diffuser` (`reset` calls `Diffuser::reset`: its ring and write position).
 #[cfg(feature = "testing")]
-crate::record_struct!([] ParticleEngine { particle, diffuser, post_filter, temp_buffer });
+crate::record_struct!([] ParticleEngine { particle, post_filter, temp_buffer } reset_via { diffuser });

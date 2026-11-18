@@ -11,10 +11,22 @@
 //! configuration: its rate and what is computed from it at construction, which the record's
 //! configuration child pins, or a reference to immutable content, a firmware table or a word
 //! bank, the same in every instance), or in its `unobservable` list with the argument and the
-//! witness (only the voice's block buffers and its decay envelope, `voice.rs`). Nothing is
-//! derived: what an implementation could recompute (a coefficient, a scale) is encoded, so
-//! restore never keeps the receiving instance's own value of state. The engines' scratch
-//! buffers are encoded too (no overwrite proofs needed).
+//! witness (the voice's block buffers and its decay envelope, `voice.rs`), or in its `derived`
+//! list with the function restore rebuilds it with (the six-operator patches, `voice.rs`; the
+//! speech frames, `lpc_speech_synth_controller.rs`). What an implementation could recompute (a
+//! coefficient, a scale) is otherwise encoded, so restore never keeps the receiving instance's
+//! own value of state. The engines' scratch buffers are encoded too (no overwrite proofs needed).
+//!
+//! Dormant engines: every engine switch calls the new engine's `reset()` (`voice.rs`, the engine
+//! selection), so state that reset rewrites in full, before anything reads it, is unobservable
+//! while the engine is dormant. The voice writes the selected engine with [`Record::record`] and
+//! every other with [`Record::record_dormant`], which leaves out the fields a type's `reset` list
+//! names and writes its `reset_via` fields by their own `record_dormant` (the macro's lists, each
+//! with its overwrite argument at the call site). Restore leaves the left-out fields as the
+//! receiving voice holds them: the switch to the engine rewrites them, so the reset gives the same
+//! state as on the recorded voice. Witnesses: `tests/record_witnesses.rs` (every engine: a
+//! poisoned transplant across a switch to it) and the transplant harness's witnesses with the
+//! restored instance poisoned at every block (`crates/dsp/tests/print_completeness.rs`).
 //!
 //! Runs: an `f32` run is one tag-6 item; `u8`, `i8`, `u16` and `i16` runs are packed little-endian
 //! into tag-7 items of at most [`CHUNK`] bytes behind a count (integers, never floats, under the
@@ -50,6 +62,72 @@ pub trait Record {
     {
         (r.usize()? == items.len()).then_some(())?;
         items.iter_mut().try_for_each(|x| x.restore(r))
+    }
+
+    /// Writes the value as it is recorded while the engine owning it is dormant (see the module
+    /// docs): by default, everything.
+    fn record_dormant(&self, w: &mut Writer<'_>) {
+        self.record(w);
+    }
+
+    /// Restores what [`Record::record_dormant`] wrote, leaving what it left out.
+    fn restore_dormant(&mut self, r: &mut Reader<'_>) -> Option<()> {
+        self.restore(r)
+    }
+
+    /// Poison witnesses only: overwrites every encoded field (left-out ones are not touched) with
+    /// a finite value that differs from the one it replaces. A type no witness poisons whole keeps
+    /// this default, which panics.
+    fn poison(&mut self, p: &mut Poison) {
+        let _ = p;
+        unimplemented!("{} has no poison", core::any::type_name::<Self>());
+    }
+
+    /// Poison witnesses only: poisons what [`Record::record_dormant`] leaves out (by default,
+    /// nothing).
+    fn poison_dormant(&mut self, p: &mut Poison) {
+        let _ = p;
+    }
+}
+
+/// The poison witnesses' value source: every value it gives differs from the value it replaces,
+/// and every float is finite and positive, so a witness that poisons a field changes its contents.
+#[derive(Debug)]
+pub struct Poison {
+    state: u32,
+    count: u64,
+}
+
+impl Poison {
+    /// A source starting from `seed`.
+    #[must_use]
+    pub fn new(seed: u32) -> Self {
+        Poison { state: seed.wrapping_mul(0x9e37_79b9) | 1, count: 0 }
+    }
+
+    /// Values written so far.
+    #[must_use]
+    pub fn count(&self) -> u64 {
+        self.count
+    }
+
+    fn next(&mut self) -> u32 {
+        self.count += 1;
+        self.state = self.state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        self.state >> 8
+    }
+
+    /// A step from 1 to 8 (an integer's poison adds it, wrapping, so the value always changes).
+    #[must_use]
+    pub fn step(&mut self) -> u8 {
+        1 + (self.next() & 7) as u8
+    }
+
+    /// A finite positive float in [0.0625, 0.5625] other than `old`.
+    #[must_use]
+    pub fn f32(&mut self, old: f32) -> f32 {
+        let v = 0.0625 + self.next() as f32 / 33_554_432.0;
+        if v.to_bits() == old.to_bits() { v + 0.25 } else { v }
     }
 }
 
@@ -108,6 +186,9 @@ impl Record for f32 {
     fn restore_run(items: &mut [Self], r: &mut Reader<'_>) -> Option<()> {
         r.f32s(items)
     }
+    fn poison(&mut self, p: &mut Poison) {
+        *self = p.f32(*self);
+    }
 }
 
 impl Record for f64 {
@@ -118,6 +199,10 @@ impl Record for f64 {
         *self = r.f64()?;
         Some(())
     }
+    fn poison(&mut self, p: &mut Poison) {
+        let v = f64::from(p.f32(0.0));
+        *self = if v.to_bits() == self.to_bits() { v + 0.25 } else { v };
+    }
 }
 
 impl Record for bool {
@@ -127,6 +212,10 @@ impl Record for bool {
     fn restore(&mut self, r: &mut Reader<'_>) -> Option<()> {
         *self = r.bool()?;
         Some(())
+    }
+    fn poison(&mut self, p: &mut Poison) {
+        let _ = p.step();
+        *self = !*self;
     }
 }
 
@@ -140,6 +229,9 @@ macro_rules! record_int {
             fn restore(&mut self, r: &mut Reader<'_>) -> Option<()> {
                 *self = r.$r()?;
                 Some(())
+            }
+            fn poison(&mut self, p: &mut Poison) {
+                *self = self.wrapping_add(p.step() as $t);
             }
         }
     };
@@ -168,6 +260,9 @@ macro_rules! record_small_int {
             fn restore_run(items: &mut [Self], r: &mut Reader<'_>) -> Option<()> {
                 read_packed(r, items, |x, b| *x = <$t>::from_le_bytes(b))
             }
+            fn poison(&mut self, p: &mut Poison) {
+                *self = self.wrapping_add(p.step() as $t);
+            }
         }
     };
 }
@@ -177,12 +272,35 @@ record_small_int!(i8, i8, i8);
 record_small_int!(u16, u16, u16);
 record_small_int!(i16, i16, i16);
 
+/// The dormant form of a run: a count, then each element's dormant form.
+fn record_dormant_run<T: Record>(items: &[T], w: &mut Writer<'_>) {
+    w.usize(items.len());
+    items.iter().for_each(|x| x.record_dormant(w));
+}
+
+fn restore_dormant_run<T: Record>(items: &mut [T], r: &mut Reader<'_>) -> Option<()> {
+    (r.usize()? == items.len()).then_some(())?;
+    items.iter_mut().try_for_each(|x| x.restore_dormant(r))
+}
+
 impl<T: Record, const N: usize> Record for [T; N] {
     fn record(&self, w: &mut Writer<'_>) {
         T::record_run(self, w);
     }
     fn restore(&mut self, r: &mut Reader<'_>) -> Option<()> {
         T::restore_run(self, r)
+    }
+    fn record_dormant(&self, w: &mut Writer<'_>) {
+        record_dormant_run(self, w);
+    }
+    fn restore_dormant(&mut self, r: &mut Reader<'_>) -> Option<()> {
+        restore_dormant_run(self, r)
+    }
+    fn poison(&mut self, p: &mut Poison) {
+        self.iter_mut().for_each(|x| x.poison(p));
+    }
+    fn poison_dormant(&mut self, p: &mut Poison) {
+        self.iter_mut().for_each(|x| x.poison_dormant(p));
     }
 }
 
@@ -193,6 +311,18 @@ impl<T: Record> Record for Box<[T]> {
     }
     fn restore(&mut self, r: &mut Reader<'_>) -> Option<()> {
         T::restore_run(self, r)
+    }
+    fn record_dormant(&self, w: &mut Writer<'_>) {
+        record_dormant_run(self, w);
+    }
+    fn restore_dormant(&mut self, r: &mut Reader<'_>) -> Option<()> {
+        restore_dormant_run(self, r)
+    }
+    fn poison(&mut self, p: &mut Poison) {
+        self.iter_mut().for_each(|x| x.poison(p));
+    }
+    fn poison_dormant(&mut self, p: &mut Poison) {
+        self.iter_mut().for_each(|x| x.poison_dormant(p));
     }
 }
 
@@ -209,26 +339,78 @@ impl<T: Record + Default> Record for Option<T> {
             Some(())
         }
     }
+    /// A present value is poisoned; an absent one becomes present (the presence changes).
+    fn poison(&mut self, p: &mut Poison) {
+        match self {
+            Some(v) => v.poison(p),
+            None => {
+                let _ = p.step();
+                *self = Some(T::default());
+            }
+        }
+    }
 }
 
 /// Writes [`Record`] for a struct: one exhaustive destructuring of `Self { .. }` (no rest
-/// pattern) in both functions. The first list is encoded in order; the optional `config` and
-/// `unobservable` lists are left out, each with a comment at the call site saying why
-/// (configuration, a reference to immutable content, or an overwrite-before-read or never-read
-/// argument naming the witness that exercises it). The leading brackets hold the impl's generics
-/// (empty for none), and an optional `where [..]` its bounds.
+/// pattern) in every function. Lists, all optional after the first:
+/// - the first list: encoded, in order;
+/// - `reset`: encoded, after the first list, except while the owning engine is dormant: the type's
+///   reset (named at the call site) rewrites each of these fields in full, from constants and
+///   other recorded state, before anything reads it (section 13's overwrite proof);
+/// - `reset_via`: encoded, after `reset`; while the owning engine is dormant, each is written by
+///   its own [`Record::record_dormant`], because the type's reset calls that field's reset;
+/// - `config`, `unobservable`, `derived`: left out, each with a comment at the call site saying
+///   why (configuration, a reference to immutable content, an overwrite-before-read or never-read
+///   argument naming its witness, or the function restore re-derives it with).
+/// The leading brackets hold the impl's generics (empty for none), and an optional `where [..]`
+/// its bounds.
 #[macro_export]
 macro_rules! record_struct {
-    ([$($g:tt)*] $ty:ty $(where [$($w:tt)*])? { $($f:ident),* $(,)? } $(config { $($c:ident),* $(,)? })? $(unobservable { $($u:ident),* $(,)? })?) => {
+    ([$($g:tt)*] $ty:ty $(where [$($w:tt)*])? { $($f:ident),* $(,)? }
+        $(reset { $($z:ident),* $(,)? })?
+        $(reset_via { $($v:ident),* $(,)? })?
+        $(config { $($c:ident),* $(,)? })?
+        $(unobservable { $($u:ident),* $(,)? })?
+        $(derived { $($d:ident),* $(,)? })?) => {
         impl<$($g)*> $crate::record::Record for $ty $(where $($w)*)? {
             fn record(&self, w: &mut $crate::record::Writer<'_>) {
-                let Self { $($f,)* $($($c: _,)*)? $($($u: _,)*)? } = self;
+                let Self { $($f,)* $($($z,)*)? $($($v,)*)? $($($c: _,)*)? $($($u: _,)*)? $($($d: _,)*)? } = self;
                 $( $crate::record::Record::record($f, w); )*
+                $($( $crate::record::Record::record($z, w); )*)?
+                $($( $crate::record::Record::record($v, w); )*)?
             }
             fn restore(&mut self, r: &mut $crate::record::Reader<'_>) -> Option<()> {
-                let Self { $($f,)* $($($c: _,)*)? $($($u: _,)*)? } = self;
+                let Self { $($f,)* $($($z,)*)? $($($v,)*)? $($($c: _,)*)? $($($u: _,)*)? $($($d: _,)*)? } = self;
                 $( $crate::record::Record::restore($f, r)?; )*
+                $($( $crate::record::Record::restore($z, r)?; )*)?
+                $($( $crate::record::Record::restore($v, r)?; )*)?
                 Some(())
+            }
+            fn record_dormant(&self, w: &mut $crate::record::Writer<'_>) {
+                let _ = &w;
+                let Self { $($f,)* $($($z: _,)*)? $($($v,)*)? $($($c: _,)*)? $($($u: _,)*)? $($($d: _,)*)? } = self;
+                $( $crate::record::Record::record($f, w); )*
+                $($( $crate::record::Record::record_dormant($v, w); )*)?
+            }
+            fn restore_dormant(&mut self, r: &mut $crate::record::Reader<'_>) -> Option<()> {
+                let _ = &r;
+                let Self { $($f,)* $($($z: _,)*)? $($($v,)*)? $($($c: _,)*)? $($($u: _,)*)? $($($d: _,)*)? } = self;
+                $( $crate::record::Record::restore($f, r)?; )*
+                $($( $crate::record::Record::restore_dormant($v, r)?; )*)?
+                Some(())
+            }
+            fn poison(&mut self, p: &mut $crate::record::Poison) {
+                let _ = &p;
+                let Self { $($f,)* $($($z,)*)? $($($v,)*)? $($($c: _,)*)? $($($u: _,)*)? $($($d: _,)*)? } = self;
+                $( $crate::record::Record::poison($f, p); )*
+                $($( $crate::record::Record::poison($z, p); )*)?
+                $($( $crate::record::Record::poison($v, p); )*)?
+            }
+            fn poison_dormant(&mut self, p: &mut $crate::record::Poison) {
+                let _ = &p;
+                let Self { $($f: _,)* $($($z,)*)? $($($v,)*)? $($($c: _,)*)? $($($u: _,)*)? $($($d: _,)*)? } = self;
+                $($( $crate::record::Record::poison($z, p); )*)?
+                $($( $crate::record::Record::poison_dormant($v, p); )*)?
             }
         }
     };
@@ -267,6 +449,27 @@ macro_rules! record_enum {
                 )+
                 let _ = k;
                 None
+            }
+            /// The next variant (the first after the last).
+            fn poison(&mut self, p: &mut $crate::record::Poison) {
+                let _ = p.step();
+                let mut k = 0u8;
+                let mut index = 0u8;
+                $(
+                    if matches!(self, Self::$v) {
+                        index = k;
+                    }
+                    k += 1;
+                )+
+                let next = (index + 1) % k;
+                k = 0;
+                $(
+                    if next == k {
+                        *self = Self::$v;
+                    }
+                    k += 1;
+                )+
+                let _ = k;
             }
         }
     };

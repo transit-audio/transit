@@ -141,5 +141,6 @@ const REGISTRATIONS: [[f32; CHORD_NUM_HARMONICS * 2]; REGISTRATION_TABLE_SIZE] =
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset via: `chords` and `ensemble` (`reset` calls `ChordBank::reset` and `Ensemble::reset`).
 #[cfg(feature = "testing")]
-crate::record_struct!([] StringMachineEngine { chords, ensemble, divide_down_voice, svf, morph_lp, timbre_lp });
+crate::record_struct!([] StringMachineEngine { divide_down_voice, svf, morph_lp, timbre_lp } reset_via { chords, ensemble });

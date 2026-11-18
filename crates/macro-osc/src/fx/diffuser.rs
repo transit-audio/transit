@@ -72,8 +72,10 @@ impl Diffuser {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset via: `engine` (`Diffuser::reset` calls `clear`, which calls `FxEngine::clear`). `lp_decay`
+// is not rewritten by the reset (only by `init`) and stays encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!([] Diffuser { engine, lp_decay, sample_rate_hz });
+crate::record_struct!([] Diffuser { lp_decay, sample_rate_hz } reset_via { engine });
 
 #[cfg(test)]
 mod tests {

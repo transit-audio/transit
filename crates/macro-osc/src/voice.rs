@@ -778,10 +778,97 @@ impl crate::record::Record for Resources<'_> {
 #[cfg(feature = "testing")]
 crate::record_struct!([] Frame { out, aux });
 
+/// Calls `$m!` with every engine field of [`EngineBank`], in declaration order, and the engine
+/// indices that select it ([`EngineBank::get`]; a unit test checks the two agree).
 #[cfg(feature = "testing")]
-crate::record_struct!(['a] EngineBank<'a> { additive_engine, bass_drum_engine, chiptune_engine, chord_engine, fm_engine, grain_engine, hihat_engine, modal_engine, noise_engine, particle_engine, phase_distortion_engine, six_op_engine, snare_drum_engine, speech_engine, string_engine, string_machine_engine, swarm_engine, virtual_analog_engine, virtual_analog_vcf_engine, waveshaping_engine, wavetable_engine, waveterrain_engine });
+macro_rules! engine_fields {
+    ($m:ident) => {
+        $m! {
+            additive_engine: [12],
+            bass_drum_engine: [21],
+            chiptune_engine: [7],
+            chord_engine: [14],
+            fm_engine: [10],
+            grain_engine: [11],
+            hihat_engine: [23],
+            modal_engine: [20],
+            noise_engine: [17],
+            particle_engine: [18],
+            phase_distortion_engine: [1],
+            six_op_engine: [2, 3, 4],
+            snare_drum_engine: [22],
+            speech_engine: [15],
+            string_engine: [19],
+            string_machine_engine: [6],
+            swarm_engine: [16],
+            virtual_analog_engine: [8],
+            virtual_analog_vcf_engine: [0],
+            waveshaping_engine: [9],
+            wavetable_engine: [13],
+            waveterrain_engine: [5],
+        }
+    };
+}
 
+/// The bank's record (feature `testing`): every engine as a concrete field, in declaration order;
+/// the selected engine (`active`, the voice's `previous_engine_index`) whole, every other dormant
+/// (see `crate::record`: a dormant engine's reset-rewritten state is left out, because every
+/// switch to it calls its `reset()` in `Voice::render` before it renders).
 #[cfg(feature = "testing")]
+impl EngineBank<'_> {
+    fn selects(active: Option<usize>, indices: &[usize]) -> bool {
+        active.is_some_and(|a| indices.contains(&a))
+    }
+
+    fn record_with(&self, active: Option<usize>, w: &mut crate::record::Writer<'_>) {
+        use crate::record::Record;
+        macro_rules! go {
+            ($($f:ident: [$($i:literal),+]),* $(,)?) => {
+                let Self { $($f),* } = self;
+                $( if Self::selects(active, &[$($i),+]) { $f.record(w) } else { $f.record_dormant(w) } )*
+            };
+        }
+        engine_fields!(go);
+    }
+
+    fn restore_with(&mut self, active: Option<usize>, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        use crate::record::Record;
+        macro_rules! go {
+            ($($f:ident: [$($i:literal),+]),* $(,)?) => {
+                let Self { $($f),* } = self;
+                $( if Self::selects(active, &[$($i),+]) { $f.restore(r)? } else { $f.restore_dormant(r)? } )*
+            };
+        }
+        engine_fields!(go);
+        Some(())
+    }
+
+    /// Poisons the state a dormant engine's record leaves out (the engine at `index`, when it is
+    /// not the selected one); the poison witnesses' hook.
+    fn poison_dormant_engine(&mut self, active: Option<usize>, index: usize, p: &mut crate::record::Poison) {
+        use crate::record::Record;
+        macro_rules! go {
+            ($($f:ident: [$($i:literal),+]),* $(,)?) => {
+                let Self { $($f),* } = self;
+                $( if [$($i),+].contains(&index) && !Self::selects(active, &[$($i),+]) { $f.poison_dormant(p) } )*
+            };
+        }
+        engine_fields!(go);
+    }
+
+    /// Each engine field's address and the indices that select it (the table's unit test).
+    #[cfg(test)]
+    fn field_addresses(&self) -> [(*const (), &'static [usize]); 22] {
+        macro_rules! go {
+            ($($f:ident: [$($i:literal),+]),* $(,)?) => {{
+                let Self { $($f),* } = self;
+                [$( (core::ptr::from_ref($f).cast::<()>(), &[$($i),+][..]) ),*]
+            }};
+        }
+        engine_fields!(go)
+    }
+}
+
 // Configuration: `sample_rate_hz`, `short_decay_scale`, `decay_tail_scale`, `a0_firmware` (from the
 // rate, in `new`), `tuning` and `a0_normalized` (`set_tuning`, which the owner calls once at
 // construction); nothing else writes them.
@@ -798,7 +885,110 @@ crate::record_struct!(['a] EngineBank<'a> { additive_engine, bass_drum_engine, c
 //   only for the chiptune model, whose internal envelope amplitude for Timbre is 0 in `render`);
 //   an owner that sets a modulation amount must encode it. Witnesses: every case, with this
 //   field's omission mutation uncaught.
-crate::record_struct!(['a] Voice<'a> { engines, rng, resources, engine_quantizer, reload_resources, previous_engine_index, engine_cv, previous_note, trigger_state, lpg_envelope, trigger_delay, out_post_processor, aux_post_processor } config { sample_rate_hz, short_decay_scale, decay_tail_scale, a0_normalized, a0_firmware, tuning } unobservable { decay_envelope, out_buffer, aux_buffer });
+// The selected engine's index comes first, so restore knows which engine is dormant before it
+// reads the bank (`EngineBank::record_with`).
+#[cfg(feature = "testing")]
+impl crate::record::Record for Voice<'_> {
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Self {
+            engines,
+            rng,
+            resources,
+            engine_quantizer,
+            reload_resources,
+            previous_engine_index,
+            engine_cv,
+            previous_note,
+            trigger_state,
+            decay_envelope: _,
+            lpg_envelope,
+            trigger_delay,
+            out_post_processor,
+            aux_post_processor,
+            out_buffer: _,
+            aux_buffer: _,
+            sample_rate_hz: _,
+            short_decay_scale: _,
+            decay_tail_scale: _,
+            a0_normalized: _,
+            a0_firmware: _,
+            tuning: _,
+        } = self;
+        previous_engine_index.record(w);
+        engines.record_with(*previous_engine_index, w);
+        rng.record(w);
+        resources.record(w);
+        engine_quantizer.record(w);
+        reload_resources.record(w);
+        engine_cv.record(w);
+        previous_note.record(w);
+        trigger_state.record(w);
+        lpg_envelope.record(w);
+        trigger_delay.record(w);
+        out_post_processor.record(w);
+        aux_post_processor.record(w);
+    }
+
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Self {
+            engines,
+            rng,
+            resources,
+            engine_quantizer,
+            reload_resources,
+            previous_engine_index,
+            engine_cv,
+            previous_note,
+            trigger_state,
+            decay_envelope: _,
+            lpg_envelope,
+            trigger_delay,
+            out_post_processor,
+            aux_post_processor,
+            out_buffer: _,
+            aux_buffer: _,
+            sample_rate_hz: _,
+            short_decay_scale: _,
+            decay_tail_scale: _,
+            a0_normalized: _,
+            a0_firmware: _,
+            tuning: _,
+        } = self;
+        previous_engine_index.restore(r)?;
+        engines.restore_with(*previous_engine_index, r)?;
+        rng.restore(r)?;
+        resources.restore(r)?;
+        engine_quantizer.restore(r)?;
+        reload_resources.restore(r)?;
+        engine_cv.restore(r)?;
+        previous_note.restore(r)?;
+        trigger_state.restore(r)?;
+        lpg_envelope.restore(r)?;
+        trigger_delay.restore(r)?;
+        out_post_processor.restore(r)?;
+        aux_post_processor.restore(r)
+    }
+}
+
+#[cfg(feature = "testing")]
+impl Voice<'_> {
+    /// Poison witnesses only: overwrites, with values that differ from the ones they replace,
+    /// the state the record leaves out of the engine at `index` (nothing when it is the selected
+    /// engine or keeps nothing out while dormant).
+    pub fn poison_engine(&mut self, index: usize, p: &mut crate::record::Poison) {
+        self.engines.poison_dormant_engine(self.previous_engine_index, index, p);
+    }
+
+    /// Poison witnesses only: [`Voice::poison_engine`] for every engine.
+    pub fn poison_unobservable(&mut self, p: &mut crate::record::Poison) {
+        for index in 0..NUM_ENGINES {
+            // The three six-operator models share one engine: poison it once.
+            if !(3..=4).contains(&index) {
+                self.poison_engine(index, p);
+            }
+        }
+    }
+}
 
 #[cfg(feature = "testing")]
 crate::record_struct!([] ChannelPostProcessor { limiter, lpg });
@@ -823,6 +1013,21 @@ mod tests {
         }
         assert_eq!(long, short);
         whole.render(&patch, &modulations, &mut []);
+    }
+
+    /// The record's engine table (`engine_fields!`) names, for every index, the field `get`
+    /// returns, and each index once.
+    #[cfg(feature = "testing")]
+    #[test]
+    fn the_record_s_engine_table_agrees_with_get() {
+        let mut voice = Voice::new(SampleRate::Hz48000);
+        let fields = voice.engines.field_addresses();
+        for index in 0..NUM_ENGINES {
+            let selected: Vec<_> = fields.iter().filter(|(_, ix)| ix.contains(&index)).collect();
+            assert_eq!(selected.len(), 1, "engine {index} is named {} times", selected.len());
+            let engine = core::ptr::from_mut(voice.engines.get(index).unwrap().0).cast::<()>().cast_const();
+            assert_eq!(selected[0].0, engine, "engine {index}: the table names another field");
+        }
     }
 
     #[test]

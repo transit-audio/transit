@@ -114,5 +114,7 @@ impl StringVoice {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset via: `string` (`reset` calls `String::reset`). The excitation filter and the noise count
+// are not rewritten by the reset and stay encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!([] StringVoice { excitation_filter, string, remaining_noise_samples });
+crate::record_struct!([] StringVoice { excitation_filter, remaining_noise_samples } reset_via { string });

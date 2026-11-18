@@ -202,8 +202,15 @@ impl String {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset (left out while the string engine is dormant), each rewritten in full by `reset` from
+// constants and `sample_rate_hz`: `string` and `stretch` (`DelayLine::reset` writes every element,
+// the delay and the write position, `utils/delay_line.rs`), `iir_damping_filter` (`Svf::init`
+// designs its coefficients from constants and clears both states, `utils/filter.rs`),
+// `dc_blocker` (`DcBlocker::init` sets both memories and the pole from the rate), the dispersion
+// noise, the bridge, the upsampler phase and both of its samples. `delay` is not rewritten by the
+// reset (only by `init`) and stays encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!([] String { string, stretch, iir_damping_filter, dc_blocker, delay, dispersion_noise, curved_bridge, src_phase, out_sample, sample_rate_hz });
+crate::record_struct!([] String { delay, sample_rate_hz } reset { string, stretch, iir_damping_filter, dc_blocker, dispersion_noise, curved_bridge, src_phase, out_sample });
 
 #[cfg(test)]
 mod tests {

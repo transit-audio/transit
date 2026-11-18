@@ -250,8 +250,12 @@ impl<const SIZE: usize, F: Format> FxEngine<SIZE, F> {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset (left out while the owning engine is dormant): `buffer` and `write_ptr`, which `clear`
+// (here, `Clear`) rewrites in full, zeros and 0, and which every owner's reset reaches: the
+// particle engine's (`Diffuser::reset`) and the string machine's (`Ensemble::reset`). The LFOs,
+// the accumulator, the last read and the LFO values are not rewritten and stay encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!([const SIZE: usize, F: Format] FxEngine<SIZE, F> where [F::T: crate::record::Record] { buffer, write_ptr, lfo, accumulator, previous_read, lfo_value });
+crate::record_struct!([const SIZE: usize, F: Format] FxEngine<SIZE, F> where [F::T: crate::record::Record] { lfo, accumulator, previous_read, lfo_value } reset { buffer, write_ptr });
 
 #[cfg(test)]
 mod tests {

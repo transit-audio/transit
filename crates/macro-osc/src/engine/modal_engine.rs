@@ -81,5 +81,11 @@ impl Engine for ModalEngine {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset (left out while dormant): `voice`. `reset` calls `ModalVoice::init`, which rewrites both
+// fields in full (`physical_modelling/modal_voice.rs`): the excitation filter (`ResonatorSvf::init`
+// zeroes both state arrays) and the resonator (`Resonator::init(0.015, MAX_NUM_MODES)`: the
+// resolution, all 24 mode amplitudes from a cosine oscillator started at a constant, and all
+// `MAX_NUM_MODES / MODE_BATCH_SIZE` mode filters, which is every one, `physical_modelling/resonator.rs`).
+// The smoothed harmonics and the scratch buffers are not rewritten and stay encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!([] ModalEngine { voice, harmonics_lp, temp_buffer_1, temp_buffer_2 });
+crate::record_struct!([] ModalEngine { harmonics_lp, temp_buffer_1, temp_buffer_2 } reset { voice });

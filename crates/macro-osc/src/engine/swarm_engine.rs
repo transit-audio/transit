@@ -270,8 +270,13 @@ impl GrainEnvelope {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset (left out while dormant): `swarm_voice`. `reset` calls every voice's `init` with its rank
+// (a function of its index), and `SwarmVoice::init` rewrites every field: the rank, the grain
+// envelope (`GrainEnvelope::init`, all seven fields from constants), the saw
+// (`AdditiveSawOscillator::init`, all four) and the sine (`FastSineOscillator::init`, all four,
+// `oscillator/sine_oscillator.rs`).
 #[cfg(feature = "testing")]
-crate::record_struct!([] SwarmEngine { swarm_voice });
+crate::record_struct!([] SwarmEngine {} reset { swarm_voice });
 
 #[cfg(feature = "testing")]
 crate::record_struct!([] SwarmVoice { rank, envelope, saw, sine });

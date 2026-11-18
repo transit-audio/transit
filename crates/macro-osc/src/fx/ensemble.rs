@@ -102,8 +102,10 @@ impl Ensemble {
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset via: `engine` (`Ensemble::reset` calls `clear`, which calls `FxEngine::clear`). The
+// amount, depth and phases are not rewritten by the reset and stay encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!([] Ensemble { engine, amount, depth, phase_1, phase_2 });
+crate::record_struct!([] Ensemble { amount, depth, phase_1, phase_2 } reset_via { engine });
 
 #[cfg(test)]
 mod tests {

@@ -122,5 +122,7 @@ fn update_amplitudes(centroid: f32, slope: f32, bumps: f32, amplitudes: &mut [f3
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset (left out while dormant): `amplitudes` (`reset` assigns all of them 0). The harmonic
+// oscillators are not rewritten and stay encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!([] AdditiveEngine { harmonic_oscillator, amplitudes });
+crate::record_struct!([] AdditiveEngine { harmonic_oscillator } reset { amplitudes });

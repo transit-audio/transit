@@ -435,13 +435,18 @@ const K9_LUT: [i8; 8] = [-51, -33, -15, 4, 22, 32, 59, 77];
 
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
+// Reset via: `word_bank` (`reset` calls `LpcSpeechSynthWordBank::reset`; nothing else: the playback
+// position, the clock and the synth are not rewritten and stay encoded).
 #[cfg(feature = "testing")]
-crate::record_struct!(['a] LpcSpeechSynthController<'a> { clock_phase, sample, next_sample, gain, synth, playback_frame, last_playback_frame, remaining_frame_samples, word_bank, sample_rate_hz, tuning });
+crate::record_struct!(['a] LpcSpeechSynthController<'a> { clock_phase, sample, next_sample, gain, synth, playback_frame, last_playback_frame, remaining_frame_samples, sample_rate_hz, tuning } reset_via { word_bank });
 
 // `word_banks`: a reference to the immutable word bank data (`WORD_BANKS`), set in `new` and
 // never written, the same in every instance (configuration).
+// Reset (left out while the speech engine is dormant): `loaded_bank`, `num_frames`, `num_words`
+// (`reset` assigns `None`, 0 and 0). The word boundaries and the frames are not rewritten by the
+// reset and stay encoded.
 #[cfg(feature = "testing")]
-crate::record_struct!(['a] LpcSpeechSynthWordBank<'a> { num_banks, loaded_bank, num_frames, num_words, word_boundaries, frames } config { word_banks });
+crate::record_struct!(['a] LpcSpeechSynthWordBank<'a> { num_banks, word_boundaries, frames } reset { loaded_bank, num_frames, num_words } config { word_banks });
 
 #[cfg(test)]
 mod tests {

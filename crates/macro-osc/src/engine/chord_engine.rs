@@ -207,5 +207,6 @@ const FADE_POINT: [f32; CHORD_NUM_VOICES] = [0.55, 0.47, 0.49, 0.51, 0.53];
 
 // `wavetable`: references to immutable firmware tables, set in `new` and never written, the
 // same in every instance (configuration).
+// Reset via: `chords` (`reset` calls `ChordBank::reset`; nothing else).
 #[cfg(feature = "testing")]
-crate::record_struct!(['a] ChordEngine<'a> { divide_down_voice, wavetable_voice, chords, morph_lp, timbre_lp } config { wavetable });
+crate::record_struct!(['a] ChordEngine<'a> { divide_down_voice, wavetable_voice, morph_lp, timbre_lp } reset_via { chords } config { wavetable });
