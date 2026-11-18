@@ -104,7 +104,8 @@ fn a_dormant_engines_reset_state_is_unobservable_across_a_switch_to_it_for_every
         assert_eq!(record(&a), record(&b), "engine {e}: poisoning changed the record");
         // Switch back to `e` and play it: strikes, releases and a held note, past its lines.
         for k in 0..PLAY + 120 {
-            let (h, m, gate, key) = (0.2 + 0.6 * (k % 11) as f32 / 11.0, 0.3 + 0.4 * (k % 5) as f32 / 5.0, k % 200 < 150, 50.0 + (k / 200) as f32 * 3.0);
+            let (h, m, gate, key) =
+                (0.2 + 0.6 * (k % 11) as f32 / 11.0, 0.3 + 0.4 * (k % 5) as f32 / 5.0, k % 200 < 150, 50.0 + (k / 200) as f32 * 3.0);
             let fa = block(&mut a, e, h, m, gate, key);
             let fb = block(&mut b, e, h, m, gate, key);
             assert_eq!(fa, fb, "engine {e}, block {k}: the outputs differ");
@@ -132,7 +133,11 @@ fn restoring_rebuilds_the_six_operator_patches_into_a_voice_holding_another_bank
         for k in 0..32 * 12 {
             let h = (k / 12) as f32 / 32.0 + 0.01;
             let gate = k % 12 < 9;
-            assert_eq!(block(&mut a, model, h, 0.5, gate, 55.0), block(&mut b, model, h, 0.5, gate, 55.0), "model {model}, block {k}: the outputs differ");
+            assert_eq!(
+                block(&mut a, model, h, 0.5, gate, 55.0),
+                block(&mut b, model, h, 0.5, gate, 55.0),
+                "model {model}, block {k}: the outputs differ"
+            );
             assert_eq!(record(&a), record(&b), "model {model}, block {k}: the records differ");
         }
     }
@@ -164,7 +169,11 @@ fn restoring_rebuilds_the_speech_frames_into_a_voice_holding_another_word_bank()
         let (strikes, held) = (40 * 40, 15_000);
         for k in 0..strikes + held {
             let (morph, gate) = if k < strikes { ((k / 40) as f32 / 40.0, k % 40 < 30) } else { (1.0, k > strikes) };
-            assert_eq!(block(&mut a, SPEECH, bank, morph, gate, 57.0), block(&mut b, SPEECH, bank, morph, gate, 57.0), "bank {bank}, block {k}: the outputs differ");
+            assert_eq!(
+                block(&mut a, SPEECH, bank, morph, gate, 57.0),
+                block(&mut b, SPEECH, bank, morph, gate, 57.0),
+                "bank {bank}, block {k}: the outputs differ"
+            );
             assert_eq!(record(&a), record(&b), "bank {bank}, block {k}: the records differ");
             b.poison_unobservable(&mut p);
         }
