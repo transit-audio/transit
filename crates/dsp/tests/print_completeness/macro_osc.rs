@@ -468,9 +468,20 @@ fn engine_history<const E: u8>(rate: f32) -> Vec<Step> {
     h
 }
 
-/// The note goes on, is released, and its tail plays for `VISIT`.
+/// The note goes on; Harmonics moves and the held key is struck again (a six-operator engine
+/// then loads a patch it had not loaded, from the patches its restore rebuilt, and the speech
+/// engine changes word bank); the note is released and its tail plays for `VISIT`.
 fn engine_continuation<const E: u8>(rate: f32) -> Vec<Step> {
-    vec![Step::Run(span(&[VISIT], rate)), Step::Off(50, 2), Step::Run(span(&[VISIT], rate))]
+    vec![
+        Step::Run(span(&[VISIT], rate)),
+        Step::Param("harmonics", 90.0),
+        Step::On(50, 100, 3),
+        Step::Run(span(&[VISIT], rate)),
+        // One release for each strike.
+        Step::Off(50, 2),
+        Step::Off(50, 5),
+        Step::Run(span(&[VISIT], rate)),
+    ]
 }
 
 fn engine_reached<const E: u8>(p: &MacroOscillator) -> bool {
