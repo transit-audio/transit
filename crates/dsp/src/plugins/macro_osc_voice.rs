@@ -479,6 +479,11 @@ impl Slot {
             level_patched: true,
             ..Modulations::default()
         };
+        #[cfg(feature = "testing")]
+        assert!(
+            decay_envelope_unread(&patch, &mods),
+            "the patch lets the port's decay envelope reach the output: its record leaves the envelope out as unobservable (transit_macro_osc::voice); encode it before setting a modulation amount"
+        );
         self.voice.render(&patch, &mods, &mut self.frames);
         let mut silent = true;
         for (y, f) in self.mixed.iter_mut().zip(&self.frames) {
@@ -539,6 +544,19 @@ impl NoteStack {
         }
         Some(())
     }
+}
+
+/// The guard on the port record's `decay_envelope` claim (feature `testing`; ADR 0029, #742): the
+/// port reads the envelope only as a patch modulation amount times the envelope
+/// (`apply_modulations`), so it cannot reach the output while the patch has no frequency or morph
+/// amount and a Timbre amount only on the chiptune model with its internal Timbre envelope off
+/// (trigger patched, Timbre unpatched), and the engine modulation is 0, so the engine the voice
+/// selects is the patch's (its quantizer returns its base for a modulation of 0). `Slot::render`
+/// asserts it for every patch it renders.
+#[cfg(feature = "testing")]
+fn decay_envelope_unread(patch: &Patch, mods: &Modulations) -> bool {
+    let timbre = patch.timbre_modulation_amount == 0.0 || (patch.engine == CHIPTUNE && mods.trigger_patched && !mods.timbre_patched);
+    patch.frequency_modulation_amount == 0.0 && patch.morph_modulation_amount == 0.0 && timbre && mods.engine == 0.0
 }
 
 #[cfg(feature = "testing")]
