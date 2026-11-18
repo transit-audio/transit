@@ -62,6 +62,13 @@ pub fn write_packed<T, const N: usize>(w: &mut Writer<'_>, items: &[T], pack: im
     const { assert!(N > 0 && N <= CHUNK) };
     w.usize(items.len() * N);
     let mut buf = [0u8; CHUNK];
+    if w.counting() {
+        // The same items, unpacked: a counting pass reads only each chunk's length.
+        for chunk in items.chunks(CHUNK / N) {
+            w.bytes(buf.get(..chunk.len() * N).unwrap_or_default());
+        }
+        return;
+    }
     for chunk in items.chunks(CHUNK / N) {
         let mut n = 0;
         for (it, dst) in chunk.iter().zip(buf.as_chunks_mut::<N>().0) {
@@ -297,6 +304,9 @@ mod tests {
     fn packed_runs_round_trip_and_check_their_length() {
         let a: [i16; 300] = core::array::from_fn(|i| (i as i16).wrapping_mul(-311));
         let rec = words(&a);
+        let mut count = Writer::counter();
+        a.record(&mut count);
+        assert_eq!(count.words(), rec.len() as u64, "the counting pass counts the words the writing pass emits");
         let mut b = [0i16; 300];
         let mut r = Reader::new(&rec);
         b.restore(&mut r).unwrap();

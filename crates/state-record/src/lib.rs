@@ -216,6 +216,14 @@ impl<'a> Writer<'a> {
         self.words
     }
 
+    /// True on a counting pass (words are counted, not emitted), so a caller may skip computing
+    /// a payload whose word count it knows (byte and float runs are skipped this way already).
+    /// The items it writes must stay the same: `child` checks the writing pass against the count.
+    #[must_use]
+    pub fn counting(&self) -> bool {
+        matches!(self.sink, Sink::Count)
+    }
+
     #[inline]
     fn word(&mut self, w: u64) {
         self.words += 1;
