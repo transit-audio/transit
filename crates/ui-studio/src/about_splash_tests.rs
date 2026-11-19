@@ -110,12 +110,31 @@ fn the_help_menu_opens_about_with_wordmark_version_and_credit() {
     // #238: libopus's credit and BSD notice.
     assert!(crate::about::THIRD_PARTY.contains("Opus export and import: libopus 1.6.1"));
     assert!(notices.contains("Third-party licenses: transit-opus") && notices.contains("Copyright 2001-2023 Xiph.Org"));
+    // #737: the trademark notices, worded as the owners' guidelines ask.
+    assert_eq!(about["trademarks"], crate::about::TRADEMARKS);
+    assert!(crate::about::TRADEMARKS.contains("VST is a registered trademark of Steinberg Media Technologies GmbH."));
+    assert!(crate::about::TRADEMARKS.contains("ASIO is a registered trademark of Steinberg Media Technologies GmbH."));
     let w = rect(&about["wordmark"]);
     assert!((w[2] - w[0] - 260.0).abs() < 1.5, "260 points wide: {w:?}");
     assert!(((w[2] - w[0]) / (w[3] - w[1]) - 3.0).abs() < 0.05, "3:1, never stretched");
     let win = rect(&about["window"]);
     let cx = (win[0] + win[2]) / 2.0;
     assert!((cx - 700.0).abs() < 2.0, "centered: {win:?}");
+}
+
+/// #737: the About window, the README, `ATTRIBUTION.md` and the site footer carry the same notice lines.
+#[test]
+fn the_trademark_notices_match_on_every_public_surface() {
+    let surfaces = [
+        ("README.md", include_str!("../../../README.md")),
+        ("ATTRIBUTION.md", include_str!("../../../ATTRIBUTION.md")),
+        ("site footer", include_str!("../../../site/layouts/_partials/site-footer.html")),
+    ];
+    for line in crate::about::TRADEMARKS.lines() {
+        for (name, text) in surfaces {
+            assert!(text.contains(line), "{name} lacks the notice line: {line}");
+        }
+    }
 }
 
 #[test]

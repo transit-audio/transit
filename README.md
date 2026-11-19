@@ -383,4 +383,6 @@ Issues are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Background on past d
 - [docs/contributing/](docs/contributing/README.md): evidence and knowledge notes.
 - [docs/known-issues/](docs/known-issues/README.md): accepted, tracked limitations.
 
-ASIO is a trademark of Steinberg Media Technologies GmbH, registered in Europe and other countries.
+VST is a registered trademark of Steinberg Media Technologies GmbH.
+ASIO is a registered trademark of Steinberg Media Technologies GmbH.
+Mac and macOS are trademarks of Apple Inc., registered in the U.S. and other countries and regions.

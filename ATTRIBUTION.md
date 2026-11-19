@@ -95,6 +95,14 @@ configuration in `crates/opus/VENDOR.md`); NOTICE and Help > About transit carry
 | `crates/opus/vendor/` | Xiph.Org Foundation, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon (libopus) | https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz (SHA-256 `6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1`) | BSD-3-Clause (`crates/opus/LICENSE-THIRD-PARTY`) |
 | `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++ (the macro oscillator, the resonator, the modal voice, the granular texture processor, the texture synthesizer, the meta-modulator and the random sampler), for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
 
+## Trademarks
+
+transit uses these names to say what it works with. It uses no logo of any of them.
+
+VST is a registered trademark of Steinberg Media Technologies GmbH.
+ASIO is a registered trademark of Steinberg Media Technologies GmbH.
+Mac and macOS are trademarks of Apple Inc., registered in the U.S. and other countries and regions.
+
 ## Fonts
 
 SoundCraft bundles no font files; the transit app bundles IBM Plex Sans and IBM Plex Mono (rows under Files). SoundCraft uses the default fonts shipped inside the `egui` crate

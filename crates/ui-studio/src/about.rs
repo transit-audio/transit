@@ -1,5 +1,5 @@
 //! Help > About transit: the wordmark, the version, the repository link, the fork credit to SoundCraft, the licenses, the
-//! third-party credits and notices (the Macro Oscillator's, ADR 0033; libopus's, ADR 0048) and a button that copies the facts a bug report needs.
+//! trademark notices (#737), the third-party credits and notices (the Macro Oscillator's, ADR 0033; libopus's, ADR 0048) and a button that copies the facts a bug report needs.
 
 use crate::StudioApp;
 use crate::arrange::{R4, r4};
@@ -51,6 +51,12 @@ pub const THIRD_PARTY_NOTICES: &str = concat!(
 ",
     include_str!("../../opus/LICENSE-THIRD-PARTY")
 );
+/// Trademark notices, worded as the owners' guidelines ask (#737): Steinberg's VST and ASIO usage guidelines
+/// (section 15 of each) and Apple's trademark attribution example. The README, `ATTRIBUTION.md` and the site footer
+/// carry the same lines; a test keeps all four in step.
+pub const TRADEMARKS: &str = "VST is a registered trademark of Steinberg Media Technologies GmbH.
+ASIO is a registered trademark of Steinberg Media Technologies GmbH.
+Mac and macOS are trademarks of Apple Inc., registered in the U.S. and other countries and regions.";
 /// Wordmark width in points.
 const WORDMARK_W: f32 = 260.0;
 
@@ -70,6 +76,7 @@ pub struct AboutState {
     pub credit: String,
     pub licenses: String,
     pub third_party: String,
+    pub trademarks: String,
     pub copy: R4,
     pub close: R4,
     /// What the Copy button put on the clipboard last.
@@ -139,6 +146,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 ui.add_space(SPACE / 2.0);
                 s.third_party = THIRD_PARTY.to_string();
                 ui.label(egui::RichText::new(THIRD_PARTY).color(TOKENS.text_dim).size(11.0));
+                ui.add_space(SPACE / 2.0);
+                s.trademarks = TRADEMARKS.to_string();
+                ui.label(egui::RichText::new(TRADEMARKS).color(TOKENS.text_dim).size(11.0));
                 egui::CollapsingHeader::new("Third-party notices").id_salt("about_notices").show(ui, |ui| {
                     egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
                         ui.label(egui::RichText::new(THIRD_PARTY_NOTICES).monospace().size(10.0).color(TOKENS.text_dim));
