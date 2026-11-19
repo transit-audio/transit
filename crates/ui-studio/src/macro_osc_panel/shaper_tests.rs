@@ -1,7 +1,7 @@
 //! The Shaper: its section bar (enable is the parameter, collapse the per-user view setting), the
 //! dim of a disabled section, the filter's segmented controls and response well, and the LFOs.
 
-use super::shaper::{SHAPES, env_curve, freq_x, lfo_curve, response_db, section_key, x_freq};
+use super::shaper::{SHAPES, env_curve, freq_x, lfo_curve, lfo_cycles_shown, lfo_fade_fraction, lfo_segments, response_db, section_key, x_freq};
 use super::test_rig::{T, mid};
 use crate::tokens::alpha;
 use crate::widgets::display_well;
@@ -376,4 +376,64 @@ fn the_resonance_peak_is_drawn_whole_with_the_cutoffs_point_on_it_and_the_slope_
     assert_eq!(display_well::floor_alpha(0.0, w.floor_fade), 0.0, "no ink along the floor");
     assert_eq!(display_well::floor_alpha(w.floor_fade, w.floor_fade), 1.0, "full ink from the fade's top");
     assert_eq!(display_well::floor_alpha(0.5, 0.0), 1.0, "a well without a fade draws its whole curve");
+}
+
+#[test]
+fn the_lfo_well_follows_the_rate_knob_over_its_whole_range() {
+    let rate = |i: usize| 0.05_f32 * (800.0_f32).powf(i as f32 / 2000.0);
+    let mut prev = lfo_cycles_shown(rate(0));
+    assert!((prev - 0.5).abs() < 1e-4, "half a cycle at 0.05 Hz");
+    for i in 1..=2000 {
+        let c = lfo_cycles_shown(rate(i));
+        assert!(c > prev, "cycles must strictly increase: step {i} gave {c} after {prev}");
+        prev = c;
+    }
+    assert!((prev - 12.0).abs() < 1e-3, "a dozen cycles at 40 Hz");
+    let two = lfo_cycles_shown(2.0);
+    assert!((2.8..3.0).contains(&two), "the default rate shows a readable few cycles: {two}");
+}
+
+#[test]
+fn the_fade_shares_the_waves_time_scale() {
+    for hz in [0.05_f32, 0.25, 2.0, 4.0, 40.0] {
+        let window = lfo_cycles_shown(hz) / hz;
+        let f = lfo_fade_fraction(100.0, hz);
+        assert!((f - (0.1 / window).clamp(0.0, 1.0)).abs() < 1e-6, "{hz} Hz: {f}");
+    }
+    assert!(lfo_fade_fraction(100.0, 0.05) < 0.02 && lfo_fade_fraction(100.0, 40.0) > 0.3, "same fade, shorter window, bigger share");
+    assert_eq!(lfo_fade_fraction(2000.0, 40.0), 1.0, "clamps at the full width");
+    assert_eq!(lfo_fade_fraction(0.0, 2.0), 0.0);
+}
+
+#[test]
+fn the_trace_samples_scale_with_the_cycles_shown_within_a_cap() {
+    assert_eq!(lfo_segments(0.5), 120, "floor");
+    assert_eq!(lfo_segments(12.0), 288);
+    assert_eq!(lfo_segments(1000.0), 480, "cap");
+    let mut prev = 0;
+    for c in [0.5, 2.0, 6.0, 9.0, 12.0] {
+        let n = lfo_segments(c);
+        assert!(n >= prev && (120..=480).contains(&n));
+        prev = n;
+    }
+    // At the top every shape keeps at least 20 samples a cycle, and the stepped shapes are stable.
+    for shape in 0..SHAPES.len() {
+        let (a, _) = lfo_curve(shape, 12.0, 0.0, 1.0);
+        let (b, _) = lfo_curve(shape, 12.0, 0.0, 1.0);
+        assert_eq!(a, b, "shape {shape} draws the same every frame");
+        assert_eq!(a.len(), 289);
+        assert!(a.iter().all(|p| (0.0..=1.0).contains(&p[1])));
+    }
+    let (saw, _) = lfo_curve(2, 12.0, 0.0, 1.0);
+    let wraps = saw.windows(2).filter(|w| w[1][1] < w[0][1] - 0.5).count();
+    assert_eq!(wraps, 12, "the saw: one fall at each cycle boundary, the last at the right edge");
+    let (sq, _) = lfo_curve(3, 12.0, 0.0, 1.0);
+    let flips = sq.windows(2).filter(|w| (w[1][1] - w[0][1]).abs() > 0.5).count();
+    assert_eq!(flips, 24, "the square: two edges per cycle, each on one sample step");
+}
+
+#[test]
+fn sync_keeps_two_cycles_in_the_trace() {
+    let (t, _) = lfo_curve(0, 2.0, 0.0, 1.0);
+    assert_eq!(t.len(), 121);
 }

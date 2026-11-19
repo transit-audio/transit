@@ -176,16 +176,47 @@ pub fn env_curve(a: f32, d: f32, s: f32, r: f32) -> Vec<[f32; 2]> {
     vec![[0.0, 0.0], [xa, top], [xd, s], [xs, s], [1.0, 0.0]]
 }
 
+/// The LFO's Rate range in Hz (the `lfo<n>_rate` parameter's), the ends of the well's scale.
+const LFO_RATE_MIN_HZ: f32 = 0.05;
+const LFO_RATE_MAX_HZ: f32 = 40.0;
+/// Cycles the well shows at the ends of the rate range: half a cycle at 0.05 Hz, a dozen at
+/// 40 Hz. On the log scale between them 2 Hz (the default) shows about 2.9 cycles over 1.4 s.
+const LFO_CYCLES_MIN: f32 = 0.5;
+const LFO_CYCLES_MAX: f32 = 12.0;
+/// Trace points per shown cycle, with a floor and a cap, so a dozen cycles do not alias.
+const LFO_POINTS_PER_CYCLE: f32 = 24.0;
+const LFO_POINTS_MIN: usize = 120;
+const LFO_POINTS_MAX: usize = 480;
+
+/// The cycles the LFO well shows at `rate_hz` (HZ mode): log in the rate across the whole
+/// parameter range, so every position of the Rate knob moves the drawing. Strictly increasing.
+pub fn lfo_cycles_shown(rate_hz: f32) -> f32 {
+    let x = (rate_hz.clamp(LFO_RATE_MIN_HZ, LFO_RATE_MAX_HZ) / LFO_RATE_MIN_HZ).ln() / (LFO_RATE_MAX_HZ / LFO_RATE_MIN_HZ).ln();
+    LFO_CYCLES_MIN * (LFO_CYCLES_MAX / LFO_CYCLES_MIN).powf(x)
+}
+
+/// The fade-in as a fraction of the well's width in HZ mode: the fade time over the window the
+/// trace shows (`cycles / rate_hz` seconds), so the fade and the wave share one time scale.
+pub fn lfo_fade_fraction(fade_ms: f32, rate_hz: f32) -> f32 {
+    let window_s = lfo_cycles_shown(rate_hz) / rate_hz.clamp(LFO_RATE_MIN_HZ, LFO_RATE_MAX_HZ);
+    (fade_ms / 1000.0 / window_s).clamp(0.0, 1.0)
+}
+
+/// The number of segments the trace is sampled into for `cycles` shown.
+pub fn lfo_segments(cycles: f32) -> usize {
+    ((cycles * LFO_POINTS_PER_CYCLE).ceil() as usize).clamp(LFO_POINTS_MIN, LFO_POINTS_MAX)
+}
+
 /// The LFO's trace: `shape` (the parameter's order) over `cycles`, its fade-in over the first
 /// `fade` of the width, scaled by `amount` (0..1); y in 0..1 around 0.5. And the fade envelope.
 pub fn lfo_curve(shape: usize, cycles: f32, fade: f32, amount: f32) -> (Vec<[f32; 2]>, Vec<[f32; 2]>) {
-    const N: usize = 120;
+    let n = lfo_segments(cycles);
     // Fixed steps for the random shapes, so the drawing is the same every frame.
     const STEPS: [f32; 8] = [0.6, -0.4, 0.9, -0.8, 0.2, -0.1, 0.7, -0.6];
-    let mut trace = Vec::with_capacity(N + 1);
+    let mut trace = Vec::with_capacity(n + 1);
     let mut env = Vec::new();
-    for i in 0..=N {
-        let t = i as f32 / N as f32;
+    for i in 0..=n {
+        let t = i as f32 / n as f32;
         let ph = t * cycles;
         let f = ph.fract();
         let v = match shape {
@@ -488,8 +519,14 @@ fn lfo(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, n: usize, lay: &m
     );
     // The trace.
     let sync = dev.on(app, &id("sync"));
-    let cycles = if sync { 2.0 } else { (dev.value(app, &id("rate")) * 2.0).clamp(0.5, 8.0) };
-    let fade = (dev.value(app, &id("fade")) / 2000.0).clamp(0.0, 1.0);
+    // SYNC keeps its two cycles and the fade against two seconds: the panel does not know the
+    // tempo, so the real window of a division is not available here.
+    let (cycles, fade) = if sync {
+        (2.0, (dev.value(app, &id("fade")) / 2000.0).clamp(0.0, 1.0))
+    } else {
+        let rate = dev.value(app, &id("rate"));
+        (lfo_cycles_shown(rate), lfo_fade_fraction(dev.value(app, &id("fade")), rate))
+    };
     let (trace, env) = lfo_curve(dev.index(app, &id("shape")), cycles, fade, dev.value(app, &id("amount")) / 100.0);
     let wr = Rect::from_min_size(pos2(inner.min.x, sy + segmented::HEIGHT + GAP), vec2(inner.width(), LFO_WELL_H));
     well(ui, dev, wr, &format!("lfo{n}"), &display_well::Well::default(), out);
