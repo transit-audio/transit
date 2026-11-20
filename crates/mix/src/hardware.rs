@@ -121,11 +121,11 @@ pub(crate) fn specs_of(t: &Track, io: &IoMap, sinks: &[SinkSpec], in_channels: u
         let Some(h) = ins.as_ref().and_then(|i| i.hardware.as_ref()).filter(|h| h.disabled.is_none()) else { continue };
         let Ok(slot) = u16::try_from(slot) else { continue };
         let sink = sinks.iter().position(|k| k.name.eq_ignore_ascii_case(&h.send));
-        // A return path that clashes with an output path is unavailable (ADR 0015, amendment for
-        // #431, rule 10): the insert runs the flagged dry bypass, never another channel.
+        // An unavailable return path (a clash with an output path, a channel past the open input;
+        // ADR 0015, amendment for #431, rule 10) fails as a whole: the insert runs the flagged dry
+        // bypass, never another channel.
         let src = io
-            .input_path(&h.ret)
-            .filter(|p| io.input_unavailable(p) != Some(transit_model::InputUnavailable::Clash))
+            .available_input(&h.ret)
             .filter(|p| p.channels.iter().all(|&c| in_channels == 0 || c < in_channels))
             .map(|p| p.channels.clone())
             .unwrap_or_default();
@@ -224,7 +224,8 @@ impl HwSlot {
         for (k, dst) in buf.iter_mut().enumerate() {
             // A mono return feeds every channel of a wider strip.
             let dev = usize::from(self.spec.src.get(k.min(last)).copied().unwrap_or(0));
-            let src = input.get(dev % input.len()).map(|c| c.get(offset..).unwrap_or(&[]));
+            // A channel the live input does not deliver is silent: never wrapped to another input.
+            let src = input.get(dev).map(|c| c.get(offset..).unwrap_or(&[]));
             let dst = dst.get_mut(..frames).unwrap_or(&mut []);
             match src {
                 Some(src) => {

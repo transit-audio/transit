@@ -47,7 +47,6 @@ fn claimed_aux_before_cell_entry_keeps_snapshot_across_render_boundary() {
         monitor_armed: true,
         no_suspend: true,
         frame: N as u64,
-        io: None,
         marker: None,
     };
     let b = PoolBlock {
@@ -188,7 +187,6 @@ fn host<R>(rig: &mut PlanRig, f: impl FnOnce(&mut Host<'_, '_>, usize, usize) ->
         monitor_armed: true,
         no_suspend: true,
         frame: 0,
-        io: None,
         marker: None,
     };
     let empty = BusTable::default();

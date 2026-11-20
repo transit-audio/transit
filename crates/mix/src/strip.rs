@@ -41,8 +41,6 @@ pub(crate) struct LiveInput<'a> {
     pub(crate) no_suspend: bool,
     /// The block's first render frame (plan mode: instrument events are due against it).
     pub(crate) frame: u64,
-    /// The machine's I/O paths, which resolve an input route's name (a label's number is the fallback).
-    pub(crate) io: Option<&'a transit_model::IoMap>,
     /// The callback's phase marker (#162), when the engine has one: strips say which they are in.
     pub(crate) marker: Option<&'a transit_rt::phase_marker::PhaseMarker>,
 }
@@ -59,6 +57,15 @@ pub(crate) struct StripRender<'a> {
 
 /// Source → trim → inserts → (pre-fader copy) → mute/fader for one strip. Independent of other
 /// strips except that aux inputs read `busses`, so non-aux strips can run in parallel.
+/// The compiled input route of `t` on the machine's table `io` (control thread; see
+/// `Strip::input_route`): for a named input route, the device channel of each strip channel, all
+/// `None` when the route is unavailable; `None` for any other route.
+pub(crate) fn input_route(t: &Track, io: &transit_model::IoMap) -> Option<Vec<Option<u16>>> {
+    let Route::Hardware(name) = &t.mixer.input else { return None };
+    let width = t.channels();
+    Some(transit_model::resolve_input(io, name, width).unwrap_or_else(|_| vec![None; width]))
+}
+
 pub(crate) fn process_strip(t: &Track, strip: &mut Strip, block: &StripRender<'_>) {
     if let Some(marker) = block.live.marker {
         let phase = if is_aux(t) { Phase::Auxes } else { Phase::StripRender };
@@ -80,13 +87,14 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
             if !live.input.is_empty()
                 && (t.mixer.input_monitor || (live.monitor_armed && t.mixer.record_arm && (live.monitor_only || live.recording))) =>
         {
-            // Input monitoring: the track hears its hardware input instead of its clips.
+            // Input monitoring: the track hears its hardware input instead of its clips. A named
+            // input route reads the channels the compiler resolved (no name lookup here); an
+            // unavailable one, or System Audio that does not run, is silent, never another input.
             let n_in = live.input.len().max(1);
-            let width = t.channels();
             for (k, dst) in strip.buf.iter_mut().enumerate() {
-                // System Audio (#268) is silent while it does not run, never another input.
-                let channel = match &t.mixer.input {
-                    Route::Hardware(h) => transit_model::live_input_channel(live.io, h, k, width, n_in),
+                let channel = match (&t.mixer.input, &strip.input_route) {
+                    (Route::Hardware(_), Some(route)) => route.get(k).copied().flatten().map(usize::from),
+                    (Route::Hardware(_), None) => None,
                     _ => Some(k % n_in),
                 };
                 if let Some(src) = channel.and_then(|c| live.input.get(c)) {

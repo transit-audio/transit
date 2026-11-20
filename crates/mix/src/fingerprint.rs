@@ -313,6 +313,7 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
         pdc_pos,
         edges,
         sink_routes,
+        input_route,
         generation,
         track,
         id,
@@ -361,6 +362,10 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
             for r in sink_routes {
                 w.present(*r, |w, r| w.usize(r));
             }
+            w.present(input_route.as_ref(), |w, r| {
+                w.usize(r.len());
+                r.iter().for_each(|c| w.present(*c, |w, c| w.u16(c)));
+            });
             w.usize(mode_bypass.len());
             mode_bypass.iter().for_each(|&b| w.bool(b));
             w.bool(*key_pre);

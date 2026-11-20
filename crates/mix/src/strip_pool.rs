@@ -167,7 +167,6 @@ impl Job {
                 monitor_armed: *monitor_armed,
                 no_suspend: *no_suspend,
                 frame: *frame,
-                io: None,
                 marker,
             };
             let block = StripRender { s, busses, live: &live, pos: *pos, frames: *frames, any_solo: *any_solo, keys };

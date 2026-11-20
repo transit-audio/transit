@@ -578,6 +578,11 @@ struct Strip {
     edges: [EdgeTap; SEND_SLOTS + 1],
     /// Compiled sink indices for output and send edges.
     sink_routes: Vec<Option<usize>>,
+    /// Plan mode: the device input channel each strip channel monitors for a named input route
+    /// (`Route::Hardware`), resolved by the compiler against the machine's table
+    /// ([`transit_model::resolve_input`]; every entry `None` when the route is unavailable). `None`
+    /// for any other route. The audio thread reads these indices only: no name lookup, no table.
+    input_route: Option<Vec<Option<u16>>>,
     failures: PluginFailures,
     /// The strip's identity across plans. [`SlotGen::VACANT`] in a strip shell that waits for a
     /// move and in a strip whose state moved out.
@@ -841,6 +846,7 @@ impl Strip {
             pdc_pos: 0,
             edges: [EdgeTap::default(); SEND_SLOTS + 1],
             sink_routes: Vec::new(),
+            input_route: None,
             failures: PluginFailures::default(),
             generation: SlotGen::VACANT,
             track: 0,

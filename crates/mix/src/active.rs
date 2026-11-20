@@ -462,7 +462,6 @@ impl MixEngine {
         if !tail_eligible {
             tables.prepare_block(s, pos, frames, sample_rate, !self.input.is_empty(), status, self.pool.as_ref());
         }
-        let io = Arc::clone(&tables.io);
 
         let any_solo = s.tracks.iter().any(|t| t.mixer.solo && !t.inactive);
         let track = |st: &Strip| s.tracks.get(usize::from(st.track));
@@ -474,7 +473,6 @@ impl MixEngine {
             monitor_armed: self.monitor_armed,
             no_suspend: self.no_suspend,
             frame,
-            io: Some(&*io),
             marker: self.marker.as_deref(),
         };
         let mark = |phase: Phase, strip: Option<u32>| {

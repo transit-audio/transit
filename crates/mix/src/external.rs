@@ -80,9 +80,9 @@ fn has_port(t: &Track, no_port: &[TrackId]) -> bool {
 
 /// The device input channels of `t`'s return on an `in_channels`-wide input (0: not known).
 fn return_channels(ret: &str, io: &IoMap, in_channels: u16) -> Option<Vec<u16>> {
-    // A return that clashes with an output path has no return (amendment for #431, rule 10).
-    io.input_path(ret)
-        .filter(|p| io.input_unavailable(p) != Some(transit_model::InputUnavailable::Clash))
+    // An unavailable return (a clash, a channel past the open input) has no return as a whole: no
+    // partial channels and no compensation (amendment for #431, rule 10).
+    io.available_input(ret)
         .filter(|p| !p.channels.is_empty() && p.channels.iter().all(|&c| in_channels == 0 || c < in_channels))
         .map(|p| p.channels.clone())
 }
@@ -264,6 +264,29 @@ mod tests {
         assert_eq!(state("In 9", Some(20.0), true, false), ExternalState::MissingReturn);
         assert_eq!(state("In 1", Some(20.0), false, false), ExternalState::NoInput);
         assert_eq!(state("In 1", Some(20.0), true, true), ExternalState::NoPort);
+    }
+
+    /// Review of 652509f3, must-fix 1: a return path that is partly past the open input is
+    /// unavailable as a whole: no partial channels and no compensation, whether the plan was built
+    /// before the capture attached (`in_channels` 0) or after.
+    #[test]
+    fn a_partly_available_return_is_no_return_and_no_compensation() {
+        use transit_model::{ChannelFormat, InputMap, IoDirection, IoPath};
+        let record = InputMap {
+            system: "test".into(),
+            device: "duplex".into(),
+            inputs: 2,
+            defaults_for: 2,
+            paths: vec![IoPath { live: false, name: "Synth".into(), direction: IoDirection::Input, channels: vec![0, 5], format: ChannelFormat::Stereo }],
+        };
+        let io = IoMap::for_device("test", "duplex", 0, 2).compose(Some(&record));
+        let (s, t) = track("Synth", Some(20.0));
+        for in_channels in [0, 2] {
+            let spec = spec_of(s.track(t).unwrap(), &io, in_channels, 48_000, &[]).unwrap();
+            assert!(spec.src.is_empty(), "no partial return (in_channels {in_channels})");
+            assert_eq!(spec.latency, 0, "no compensation without a return (in_channels {in_channels})");
+            assert_eq!(external_report(&s, &io, in_channels, true, 48_000, &[])[0].state, ExternalState::MissingReturn);
+        }
     }
 
     #[test]

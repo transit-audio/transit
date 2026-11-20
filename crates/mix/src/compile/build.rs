@@ -118,6 +118,7 @@ impl PlanCompiler {
             st.ext = desc.external.iter().find(|(id, _)| *id == t.id).map(|(_, sp)| crate::external::ExtSlot::new(sp.clone()));
             st.clipbuf = vec![vec![0.0; block]; ch];
             st.sink_routes = desc.sink_routes.get(si).cloned().unwrap_or_default();
+            st.input_route = desc.input_routes.get(si).cloned().flatten();
             st.key_pre = desc.keys.iter().any(|k| k.pre && k.from == KeyEnd::Strip(si as u16));
             // A line for the strip's own signal before each keyed insert, in case its key arrives late.
             st.key_in = desc.keys.iter().filter(|k| usize::from(k.keyed) == si).map(|k| KeyIn::new(k.slot, ch, cap, block)).collect();

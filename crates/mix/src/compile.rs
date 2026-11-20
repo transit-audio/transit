@@ -126,8 +126,11 @@ struct Desc {
     sinks: Vec<SinkSpec>,
     /// Resolved output/send sink indices, in strip render order.
     sink_routes: Vec<Vec<Option<usize>>>,
-    /// The machine's input paths (monitoring resolves input names through the active plan's copy).
+    /// The machine's input paths.
     inputs: Vec<IoPath>,
+    /// Each strip's monitored input channels for a named input route, resolved here (control
+    /// thread) so the render reads indices only (see `Strip::input_route`), in strip render order.
+    input_routes: Vec<Option<Vec<Option<u16>>>>,
     /// The hardware inserts: their sinks, return channels and measured latency (ADR 0015 section 5).
     hardware: Vec<(TrackId, crate::hardware::HwSpec)>,
     /// The External Instruments: their return channels and latency (ADR 0020).
@@ -857,6 +860,7 @@ impl PlanCompiler {
         desc.sinks = plan_sinks(s, &self.io, self.target.out_channels).sinks;
         desc.sink_routes = rows.iter().filter_map(|&ti| s.tracks.get(ti)).map(|t| sink::sink_routes(t, &desc.sinks)).collect();
         desc.inputs = self.io.paths_of(IoDirection::Input).cloned().collect();
+        desc.input_routes = rows.iter().filter_map(|&ti| s.tracks.get(ti)).map(|t| crate::strip::input_route(t, &self.io)).collect();
         for t in rows.iter().filter_map(|&ti| s.tracks.get(ti)).filter(|t| t.kind != TrackKind::Vca) {
             for spec in crate::hardware::specs_of(t, &self.io, &desc.sinks, self.target.in_channels, self.target.sample_rate) {
                 desc.hardware.push((t.id, spec));
