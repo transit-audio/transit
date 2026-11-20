@@ -3,7 +3,7 @@
 //! real libjack would call (`process`, buffer size, sample rate, xrun, info shutdown) through the
 //! same safe engine and handlers `crate::callback` calls.
 
-use crate::api::{ClientError, JackApi, JackClient, PhysicalPort};
+use crate::api::{ClientError, JackApi, JackClient, PhysicalPort, PortName};
 use crate::engine::{Clock, Cycle, Engine, InputPlanes, OutputPlanes, Shared};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
@@ -57,6 +57,9 @@ struct State {
     links: Vec<(String, String)>,
     /// Audio and MIDI ports of other clients: (full name, a JACK output, audio).
     others: Vec<(String, bool, bool)>,
+    /// Ports whose names are not valid UTF-8: (the fake's key for the port, the lossy form libjack's
+    /// bytes would give). The binding reports such a name as `Err(lossy)` (`api::PortName`).
+    invalid: Vec<(String, String)>,
     /// Every connect a transit client asked for, in order (made, existing or refused).
     connects: Vec<(String, String)>,
     /// A connect of a pair already linked makes a second link (PipeWire's libjack) instead of
@@ -120,6 +123,7 @@ impl FakeServer {
             usecs: 1_000_000,
             links: Vec::new(),
             others: Vec::new(),
+            invalid: Vec::new(),
             connects: Vec::new(),
             duplicates: false,
             race: None,
@@ -230,6 +234,11 @@ impl FakeServer {
         self.lock().refuse = text.map(str::to_owned);
     }
 
+    /// A physical port appears, after the ports the server listed before it.
+    pub(crate) fn add_physical(&self, name: &str, capture: bool) {
+        self.lock().ports.push(PhysicalPort { name: name.to_owned(), capture });
+    }
+
     /// A physical port goes away (a device profile with fewer channels), and its links with it.
     pub(crate) fn remove_physical(&self, name: &str) {
         let mut state = self.lock();
@@ -264,6 +273,14 @@ impl FakeServer {
     /// Another client registers an audio port (`output`: a JACK output, data can be read from it).
     pub(crate) fn add_port(&self, name: &str, output: bool) {
         self.lock().others.push((name.to_owned(), output, true));
+    }
+
+    /// Another client registers an audio port whose name is not valid UTF-8: `key` names it in the
+    /// fake (for `outside_link`), `shown` is the lossy form, which may equal another port's name.
+    pub(crate) fn add_port_with_invalid_name(&self, key: &str, shown: &str, output: bool) {
+        let mut state = self.lock();
+        state.others.push((key.to_owned(), output, true));
+        state.invalid.push((key.to_owned(), shown.to_owned()));
     }
 
     /// Another client registers a MIDI port.
@@ -493,14 +510,22 @@ impl JackClient for FakeClient {
         partners(&self.server.lock().links, port)
     }
 
-    fn links(&self, input: bool, index: usize) -> Vec<String> {
+    fn links(&self, input: bool, index: usize) -> Vec<PortName> {
         let state = self.server.lock();
         let ours = state.clients[self.index].ports.iter().filter(|(_, i)| *i == input).nth(index).map(|(name, _)| name.clone());
-        ours.map(|port| partners(&state.links, &port)).unwrap_or_default()
+        let partners = ours.map(|port| partners(&state.links, &port)).unwrap_or_default();
+        let named = |name: String| match state.invalid.iter().find(|(key, _)| *key == name) {
+            Some((_, shown)) => Err(shown.clone()),
+            None => Ok(name),
+        };
+        partners.into_iter().map(named).collect()
     }
 
+    /// As the binding: only a port whose name is exactly `name` (so never one whose name is not
+    /// valid UTF-8).
     fn has_port(&self, name: &str, output: bool) -> bool {
-        self.server.lock().port(name) == Some((output, true))
+        let state = self.server.lock();
+        !state.invalid.iter().any(|(key, _)| key == name) && state.port(name) == Some((output, true))
     }
 
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {

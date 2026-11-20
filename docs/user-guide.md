@@ -420,7 +420,8 @@ With the **JACK** audio system (Native JACK, under JACK 2 or PipeWire), transit 
 with ports `in_1`, `in_2`... and `out_1`, `out_2`... It links `out_N` to the output device's N-th
 playback port and the input device's N-th capture port to `in_N`, unless you start it with
 `TRANSIT_JACK_AUTOCONNECT=0`. Links you make yourself, in a graph tool or with `jack_connect`, are
-yours: transit never removes one.
+yours: transit never explicitly disconnects one. (Closing transit's client, below, takes every
+link of its ports with it; that is the server's rule for a client that goes away.)
 
 transit sometimes has to close its client and open a new one: when the server's buffer size or
 rate changes (under PipeWire, another program asking for a smaller buffer is enough), when you
@@ -431,13 +432,17 @@ ports were linked to its ports, and links them again on the new client, under wh
 server gave it.
 
 A link does not come back when its port no longer means the same thing: after you choose another
-input or output device, links on that side are dropped, and a port the new device does not have
-(fewer channels) loses its links. A port that went away meanwhile (the program was closed) cannot
-be linked either, and under PipeWire a `jack.self-connect-mode` setting that refuses links to a
-client's own ports keeps them from coming back. In each case the status line and Audio Devices say which links were not
-restored, and the log names each one. Nothing comes back after the server itself stopped: its
-links were gone with it. The links are read just before the old client closes, so a link you change
-in that same instant may not be caught.
+input or output device, links on that side are dropped, and a port whose device channel changed
+(fewer channels, or the device lists its ports in another order) loses its links. A link to a port
+that is no longer there as an audio port of the same direction (the program was closed) cannot be
+made either, nor one to a port whose name is not valid UTF-8 (transit cannot be sure which port such
+a name means), and under PipeWire a `jack.self-connect-mode` setting that refuses links to a
+client's own ports keeps them from coming back. In each case the status line and Audio Devices say
+which links were not restored, and the log names each one. If the server stopped during the
+reopen, nothing comes back, even when it is running again by the time the new client opens. Two
+limits: a server restart wholly inside the instant between closing the old client and opening the
+new one is seen by neither, and the links are read just before the old client closes, so a link
+you change in that same instant may not be caught.
 
 ### Low Latency mode
 

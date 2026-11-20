@@ -677,7 +677,7 @@ impl Session {
             return None;
         }
         let client = self.client.as_ref()?;
-        Some(links::take(client.as_ref(), &self.ports(), self.id))
+        Some(links::take(client.as_ref(), &self.ports(), self.id, Arc::clone(&self.shared)))
     }
 
     /// Restores `snapshot`, taken from an earlier session, on this started client.

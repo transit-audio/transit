@@ -16,7 +16,7 @@
 //! code may still run (a callback, a thread a failed open left behind) must not be unmapped, and
 //! jackd2's libjack stays mapped after `dlclose` anyway.
 
-use crate::api::{ClientError, JackApi, JackClient, PhysicalPort};
+use crate::api::{ClientError, JackApi, JackClient, PhysicalPort, PortName};
 use crate::callback::{self, CallbackState};
 use crate::engine::{Engine, Shared};
 use crate::library;
@@ -280,14 +280,29 @@ unsafe fn owned(text: *const c_char) -> String {
     unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned()
 }
 
-/// Copies a NULL-terminated array of port names libjack returned, then frees it with `jack_free`.
+/// A port name from libjack, copied exactly ([`PortName`]): `Ok` when its bytes are valid UTF-8,
+/// else `Err` with a lossy form for messages only. JACK names are byte strings; a lossy copy could
+/// make two different ports one name (#431 review).
+///
+/// # Safety
+///
+/// As for [`owned`], with `text` non-null.
+unsafe fn exact(text: *const c_char) -> PortName {
+    // SAFETY: the caller's contract, which is `owned`'s: a NUL-terminated port name libjack
+    // returned, valid for this call.
+    let bytes = unsafe { CStr::from_ptr(text) };
+    bytes.to_str().map(str::to_owned).map_err(|_| bytes.to_string_lossy().into_owned())
+}
+
+/// Copies a NULL-terminated array of port names libjack returned, exactly ([`exact`]), then frees
+/// it with `jack_free`.
 ///
 /// # Safety
 ///
 /// `array` must be null, or the not yet freed result of a call of `fns`' library that jack.h
 /// documents as "a NULL-terminated array of" port names whose "caller is responsible for calling
 /// jack_free()" (jack_get_ports, jack_port_get_all_connections); the caller does not use it after.
-unsafe fn names_of(fns: &JackFns, array: *mut *const c_char) -> Vec<String> {
+unsafe fn names_of(fns: &JackFns, array: *mut *const c_char) -> Vec<PortName> {
     let mut found = Vec::new();
     if array.is_null() {
         return found;
@@ -301,7 +316,7 @@ unsafe fn names_of(fns: &JackFns, array: *mut *const c_char) -> Vec<String> {
         }
         // SAFETY: a non-NULL entry of the array, a NUL-terminated port name valid until the
         // jack_free below, after this copy.
-        found.push(unsafe { owned(entry) });
+        found.push(unsafe { exact(entry) });
     }
     // SAFETY: jack.h, jack_free: "The free function to be used on memory returned by
     // jack_port_get_connections, jack_port_get_all_connections, jack_get_ports and
@@ -334,8 +349,13 @@ impl LibClient {
             }
             // SAFETY: `entry` is a non-NULL entry of the array above, a NUL-terminated port name
             // that stays valid until `jack_free` below, after this copy.
-            let name = unsafe { owned(entry) };
-            found.push(PhysicalPort { name, capture });
+            match unsafe { exact(entry) } {
+                Ok(name) => found.push(PhysicalPort { name, capture }),
+                // A device port is linked and compared by name (its group, transit's own links, a
+                // restored link's channel meaning): a name that is not UTF-8 is left out rather
+                // than turned into a name another port may have (#431 review).
+                Err(shown) => log::warn!("JACK: the port \"{shown}\" is left out: its name is not valid UTF-8"),
+            }
         }
         // SAFETY: jack.h, jack_free: "The free function to be used on memory returned by
         // jack_port_get_connections, jack_port_get_all_connections, jack_get_ports and
@@ -504,10 +524,10 @@ impl JackClient for LibClient {
         // jack_port_by_name on this open client.
         let array = unsafe { (self.fns.port_get_all_connections)(self.client, handle) };
         // SAFETY: `array` is jack_port_get_all_connections' result (above), used only here.
-        unsafe { names_of(self.fns, array) }
+        unsafe { names_of(self.fns, array) }.into_iter().map(|name| name.unwrap_or_else(|shown| shown)).collect()
     }
 
-    fn links(&self, input: bool, index: usize) -> Vec<String> {
+    fn links(&self, input: bool, index: usize) -> Vec<PortName> {
         let ports = if input { &self.inputs } else { &self.outputs };
         let Some(&port) = ports.get(index) else { return Vec::new() };
         // SAFETY: jack.h, jack_port_get_all_connections: "@return a null-terminated array of full
@@ -537,7 +557,8 @@ impl JackClient for LibClient {
         // a control thread calls it. No pointer to another client's port is taken: only names.
         let array = unsafe { (self.fns.get_ports)(self.client, pattern.as_ptr(), AUDIO_TYPE.as_ptr(), flags) };
         // SAFETY: `array` is jack_get_ports' result (above), used only here.
-        unsafe { names_of(self.fns, array) }.iter().any(|found| found == name)
+        // Only a name that is valid UTF-8 can equal `name` exactly; a lossy copy of another never does.
+        unsafe { names_of(self.fns, array) }.iter().any(|found| found.as_deref() == Ok(name))
     }
 
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {
@@ -608,7 +629,9 @@ const char *jack_get_version_string(void) { return FAKE_ID; }
 char *jack_get_client_name(void *client) { return (char *)FAKE_ID; }
 uint32_t jack_get_sample_rate(void *client) { return 48000; }
 uint32_t jack_get_buffer_size(void *client) { return 128; }
-const char **jack_get_ports(void *client, const char *name, const char *type, unsigned long flags) { return NULL; }
+/* One port name that is not UTF-8: its lossy copy is "App:out_" U+FFFD, the name another port may have. */
+static const char *fake_names[] = { "App:out_\xFF", NULL };
+const char **jack_get_ports(void *client, const char *name, const char *type, unsigned long flags) { return fake_names; }
 void jack_free(void *ptr) {}
 void *jack_port_register(void *client, const char *name, const char *type, unsigned long flags, unsigned long size) { return &fake_port; }
 const char *jack_port_name(const void *port) { return FAKE_ID ":port"; }
@@ -622,7 +645,7 @@ int jack_deactivate(void *client) { return 0; }
 int jack_connect(void *client, const char *source, const char *destination) { return 0; }
 int jack_set_buffer_size(void *client, uint32_t frames) { return 0; }
 void *jack_port_by_name(void *client, const char *name) { return NULL; }
-const char **jack_port_get_all_connections(const void *client, const void *port) { return NULL; }
+const char **jack_port_get_all_connections(const void *client, const void *port) { return fake_names; }
 #ifndef FAKE_LACKS_PORT_BUFFER
 void *jack_port_get_buffer(void *port, uint32_t frames) { return NULL; }
 #endif
@@ -741,6 +764,36 @@ uint64_t jack_get_time(void) { return 0; }
         assert_eq!(selection.error(), Some(ClientError::ServerNotRunning));
         let missing = loader.probe("/nonexistent/libjack.so.0");
         assert!(matches!(missing, Outcome::LoadFailed(_)), "{missing:?}");
+    }
+
+    /// #431 review: JACK port names are bytes. A linked port named `App:out_\xFF` reads back as
+    /// `Err` with its lossy form, never as the name "App:out_\u{FFFD}" (which another port may
+    /// carry); the exact lookup never matches it; and the snapshot saves no link to it, only a note.
+    #[test]
+    fn a_port_name_that_is_not_utf8_is_never_a_link_identity() {
+        let (_fakes, paths) =
+            build("bytes", "libjackfake-bytes.so.0", &[Fake { file: "libjack.so.0", id: "bytes", connects: true, lacks_port_buffer: false }]);
+        let mut loader = DlLoader::default();
+        assert_eq!(loader.probe(&paths[0]), Outcome::Connected);
+        let fns: &'static JackFns = Box::leak(Box::new(loader.connected.unwrap().1));
+        let mut status = 0;
+        // SAFETY: the fake's jack_client_open (a constant name, a live status), no variadic argument.
+        let client = unsafe { (fns.client_open)(c"transit".as_ptr(), sys::JackNoStartServer, &mut status) };
+        // SAFETY: the fake returns a static port for any name.
+        let port = unsafe { (fns.port_register)(client, c"in_1".as_ptr(), AUDIO_TYPE.as_ptr(), sys::JackPortIsInput, 0) };
+        let lib = LibClient { fns, client, inputs: vec![port], outputs: Vec::new(), state: std::ptr::null_mut() };
+        let lossy = "App:out_\u{FFFD}".to_owned();
+        assert_eq!(lib.links(true, 0), [Err(lossy.clone())], "the bytes are not passed off as a name");
+        assert!(!lib.has_port(&lossy, true), "the lossy form never finds the port of other bytes");
+        let side = crate::links::Ports {
+            input: true,
+            names: vec!["transit:in_1".into()],
+            meaning: crate::links::Meaning { endpoint: "system".into(), channels: vec!["system:capture_1".into()] },
+            own: Vec::new(),
+        };
+        let snapshot = crate::links::take(&lib, &[side], 1, Arc::new(Shared::new(48_000, 128)));
+        assert!(snapshot.links.is_empty(), "nothing saved under a name that is not the port's");
+        assert_eq!(snapshot.unsaved, [format!("in_1 from {lossy} (the port's name is not valid UTF-8)")]);
     }
 
     /// The callback state outlives `jack_client_close` and is freed only after it returned (a

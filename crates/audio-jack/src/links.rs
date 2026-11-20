@@ -24,15 +24,24 @@
 //!   port's links first, so a duplicate is never asked for, and a connect that answers `EEXIST`
 //!   (another client made the link in between) is a success too. A connect's success is checked by
 //!   reading the link back: PipeWire's `jack.self-connect-mode` can answer 0 and make no link to a
-//!   client's own port, and that is a failed restore like a refused connect. A remote port that
-//!   is gone, or no longer an audio port of the right direction, is a failed restore, logged once
-//!   and not retried; so is a connect the server refuses.
+//!   client's own port, and that is a failed restore like a refused connect. A remote name with no
+//!   audio port of the right direction now (gone, or another type or direction) is a failed
+//!   restore, logged once and not retried; so is a connect the server refuses.
+//! - **Names.** JACK port names are byte strings. A linked port whose name is not valid UTF-8 is
+//!   not saved (a lossy copy could name another port); the restore says so. Every saved name is
+//!   the port's exact bytes.
 //! - **Limits.** Best effort: a graph edit racing with the snapshot or the deactivation cannot be
 //!   made atomic by this scheme. After a server shutdown the client is gone before anything can be
-//!   read, so nothing is saved and nothing restored.
+//!   read, so nothing is saved; and a shutdown the old client saw at any time after the snapshot
+//!   (its shutdown flag travels with the snapshot), or that the new client saw, discards the
+//!   snapshot, so nothing is restored on a server that went down meanwhile. A restart wholly inside
+//!   the gap between the old client's close and the new client's open is seen by no client and is
+//!   not detectable through the calls transit binds.
 
 use crate::api::JackClient;
+use crate::engine::Shared;
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 /// One of transit's ports: its direction and its index (`in_{index + 1}`, `out_{index + 1}`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,12 +93,16 @@ pub(crate) struct Ports {
 
 /// The links of one reopen operation (the [`transit_audio_backend::LinkSnapshot`] the JACK
 /// backend makes): taken from session `from`, consumed once by a later session's client.
-#[derive(Debug)]
 pub(crate) struct Snapshot {
     pub(crate) from: u64,
     pub(crate) links: Vec<Saved>,
+    /// Links that could not be saved ("in_1 from <lossy name> (...)"), said at the restore.
+    pub(crate) unsaved: Vec<String>,
     pub(crate) inputs: Option<Meaning>,
     pub(crate) outputs: Option<Meaning>,
+    /// The originating session's callback state: its shutdown flag, set by the server's shutdown
+    /// callback whenever it comes, discards the snapshot at the restore.
+    pub(crate) origin: Arc<Shared>,
 }
 
 impl Snapshot {
@@ -100,13 +113,23 @@ impl Snapshot {
 
 /// Reads every link of `sides`' ports on `client` and keeps those that are not transit's own.
 /// A control-thread call, with the session's lock held, before the client is deactivated.
-pub(crate) fn take(client: &dyn JackClient, sides: &[Ports], from: u64) -> Snapshot {
+pub(crate) fn take(client: &dyn JackClient, sides: &[Ports], from: u64, origin: Arc<Shared>) -> Snapshot {
     let local = |name: &str| sides.iter().find_map(|side| side.names.iter().position(|n| n == name).map(|index| Local { input: side.input, index }));
     let mut links = Vec::new();
+    let mut unsaved = Vec::new();
     for side in sides {
         for (index, name) in side.names.iter().enumerate() {
             let ours = Local { input: side.input, index };
             for theirs in client.links(side.input, index) {
+                let theirs = match theirs {
+                    Ok(theirs) => theirs,
+                    Err(shown) => {
+                        let what = format!("{} {} {shown}", ours.label(), if side.input { "from" } else { "to" });
+                        log::warn!("JACK: not saving the link {what}: the port's name is not valid UTF-8");
+                        unsaved.push(format!("{what} (the port's name is not valid UTF-8)"));
+                        continue;
+                    }
+                };
                 let pair = if side.input { (theirs.clone(), name.clone()) } else { (name.clone(), theirs.clone()) };
                 if side.own.contains(&pair) {
                     continue;
@@ -125,7 +148,7 @@ pub(crate) fn take(client: &dyn JackClient, sides: &[Ports], from: u64) -> Snaps
         }
     }
     let meaning = |input: bool| sides.iter().find(|s| s.input == input).map(|s| s.meaning.clone());
-    Snapshot { from, links, inputs: meaning(true), outputs: meaning(false) }
+    Snapshot { from, links, unsaved, inputs: meaning(true), outputs: meaning(false), origin }
 }
 
 /// A `jack_get_ports` name pattern (a POSIX extended regular expression, under JACK 2 and
@@ -204,17 +227,30 @@ fn changed(snapshot: &Snapshot, sides: &[Ports], end: Local) -> Option<String> {
     None
 }
 
+/// "in_1 from Player:out_L": a saved link as the messages name it.
+fn describe(link: &Saved) -> String {
+    let far = match &link.far {
+        Far::Remote(name) => name.clone(),
+        Far::Local(end) => end.label(),
+    };
+    format!("{} {} {far}", link.ours.label(), if link.ours.input { "from" } else { "to" })
+}
+
 /// Restores `snapshot` on `client`, the replacement client whose directions are `sides`, after it
 /// started. Every failure and drop is logged here, once; nothing is retried.
 pub(crate) fn restore(client: &mut dyn JackClient, sides: &[Ports], snapshot: &Snapshot) -> Restored {
-    let mut done = Restored::default();
+    let mut done = Restored { failed: snapshot.unsaved.clone(), ..Restored::default() };
+    if snapshot.origin.shutdown() {
+        // Rule 6: nothing is restored after a server shutdown, even one that came after the
+        // snapshot was read.
+        let why = "the server stopped during the reopen";
+        log::warn!("JACK: not restoring {} links made outside transit: {why}", snapshot.links.len());
+        done.failed.extend(snapshot.links.iter().map(|link| format!("{} ({why})", describe(link))));
+        return done;
+    }
     let name = |end: Local| sides.iter().find(|s| s.input == end.input).and_then(|s| s.names.get(end.index)).cloned();
     for link in &snapshot.links {
-        let far_text = match &link.far {
-            Far::Remote(name) => name.clone(),
-            Far::Local(end) => end.label(),
-        };
-        let what = format!("{} {} {far_text}", link.ours.label(), if link.ours.input { "from" } else { "to" });
+        let what = describe(link);
         let why = changed(snapshot, sides, link.ours).or_else(|| match &link.far {
             Far::Local(end) => changed(snapshot, sides, *end),
             Far::Remote(_) => None,
@@ -229,8 +265,9 @@ pub(crate) fn restore(client: &mut dyn JackClient, sides: &[Ports], snapshot: &S
             Far::Remote(remote) => {
                 // The remote port must still be an audio port that can feed (or be fed by) ours.
                 if !client.has_port(remote, link.ours.input) {
-                    log::warn!("JACK: not restoring the link {what}: the port is gone");
-                    done.failed.push(format!("{what} (the port is gone)"));
+                    let why = "no audio port with that name and direction now";
+                    log::warn!("JACK: not restoring the link {what}: {why}");
+                    done.failed.push(format!("{what} ({why})"));
                     continue;
                 }
                 remote.clone()
@@ -242,7 +279,7 @@ pub(crate) fn restore(client: &mut dyn JackClient, sides: &[Ports], snapshot: &S
         };
         // A link already there counts as restored without a connect, so a duplicate is never
         // asked for (a server could make a second link of the same pair).
-        let linked = |client: &dyn JackClient| client.links(link.ours.input, link.ours.index).contains(&theirs);
+        let linked = |client: &dyn JackClient| client.links(link.ours.input, link.ours.index).iter().any(|n| n.as_deref() == Ok(theirs.as_str()));
         if linked(&*client) {
             done.restored += 1;
             continue;

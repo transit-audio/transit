@@ -21,6 +21,11 @@ impl PhysicalPort {
     }
 }
 
+/// A port name as libjack gave it. JACK names are byte strings, not always UTF-8: `Ok` holds a
+/// name whose bytes are valid UTF-8, so the `String` is the exact identity; `Err` holds a lossy
+/// form of any other name, for messages only. It is never stored, compared or connected (#431).
+pub(crate) type PortName = Result<String, String>;
+
 /// Why a client did not open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientError {
@@ -82,9 +87,10 @@ pub(crate) trait JackClient: Send {
     /// The full names of the ports linked to this client's `index`-th registered input port (when
     /// `input`) or output port, whichever client made the links (`jack_port_get_all_connections`
     /// on the port this client owns). Empty when there is no such port (#431, rule 6).
-    fn links(&self, input: bool, index: usize) -> Vec<String>;
+    fn links(&self, input: bool, index: usize) -> Vec<PortName>;
     /// Whether an audio port named exactly `name` exists: one that data can be read from when
-    /// `output` (a JACK output port), else one that can receive data (`jack_get_ports`).
+    /// `output` (a JACK output port), else one that can receive data (`jack_get_ports`). Only a
+    /// port whose name is exactly `name`, byte for byte, counts.
     fn has_port(&self, name: &str, output: bool) -> bool;
     /// Asks the server for a new quantum (`jack_set_buffer_size`): every client of the server gets
     /// it. Called from the open path (ADR 0021, 2026-10-25 amendment) on the thread that opens the

@@ -312,7 +312,11 @@ fn a_vanished_or_changed_remote_port_is_a_failed_restore_and_not_retried() {
     let new = open(&backend, Choice::default()).unwrap();
     let note = new.render.restore_links(snapshot).expect("a diagnostic");
     assert!(note.starts_with("JACK: 2 links made outside transit were not restored"), "{note}");
-    assert!(note.contains("in_1 from Player:out_L (the port is gone)") && note.contains("in_2 from Synth:out (the port is gone)"), "{note}");
+    assert!(
+        note.contains("in_1 from Player:out_L (no audio port with that name and direction now)")
+            && note.contains("in_2 from Synth:out (no audio port with that name and direction now)"),
+        "{note}"
+    );
     assert!(server.linked("transit:out_1", "Recorder:in_1"), "the other link came back");
     let tried = |port: &str| server.connects().iter().filter(|(a, _)| a == port).count();
     assert_eq!((tried("Player:out_L"), tried("Synth:out")), (0, 0), "checked before connecting, never asked");
@@ -407,6 +411,107 @@ fn a_snapshot_restores_only_on_a_later_client() {
     open_now.capture.stop().unwrap();
     open_now.render.stop().unwrap();
     assert!(open_now.render.snapshot_links().is_none());
+}
+
+/// #431 review: two remote ports whose names differ only in bytes that are not UTF-8 collapse to
+/// one name under a lossy copy. The one linked to transit (its name not UTF-8) is not saved, so the
+/// restore never links the other one, which carries the lossy form as its real name.
+#[test]
+fn a_linked_port_whose_name_is_not_utf8_is_not_saved_and_never_confused_with_another() {
+    let server = server();
+    server.add_port("App:out_\u{FFFD}", true);
+    server.add_port_with_invalid_name("App:out_<0xFF>", "App:out_\u{FFFD}", true);
+    let backend = manual(&server);
+    let old = open(&backend, Choice::default()).unwrap();
+    server.outside_link("App:out_<0xFF>", "transit:in_1");
+    server.outside_link("Player:out_L", "transit:in_2");
+    let (new, note) = reopen(&backend, old, Choice::default());
+    let _new = new.unwrap();
+    let note = note.expect("a diagnostic");
+    assert!(note.contains("in_1 from App:out_\u{FFFD} (the port's name is not valid UTF-8)"), "{note}");
+    assert!(!server.linked("App:out_\u{FFFD}", "transit:in_1"), "never the other port");
+    assert!(!server.connects().iter().any(|(a, _)| a.starts_with("App:out_")), "nothing asked for under that name");
+    assert!(server.linked("Player:out_L", "transit:in_2"), "the other link came back");
+}
+
+/// #431 review: the server shuts down after the snapshot was read (while the old Player's editors
+/// close) and is back before the replacement opens. The old client saw the shutdown, so the
+/// snapshot is discarded: nothing is restored on the restarted server, and the user is told.
+#[test]
+fn a_server_shutdown_after_the_snapshot_restores_nothing() {
+    let server = server();
+    let backend = manual(&server);
+    let old = open(&backend, Choice::default()).unwrap();
+    server.outside_link("Player:out_L", "transit:in_1");
+    let snapshot = old.render.snapshot_links().expect("read before the shutdown");
+    server.shutdown();
+    server.restart();
+    drop(old);
+    let new = open(&backend, Choice::default()).unwrap();
+    let note = new.render.restore_links(snapshot).expect("a diagnostic");
+    assert!(note.contains("in_1 from Player:out_L (the server stopped during the reopen)"), "{note}");
+    assert!(!server.linked("Player:out_L", "transit:in_1"));
+    assert!(!server.connects().iter().any(|(a, _)| a == "Player:out_L"), "no restore was tried");
+}
+
+/// #431 review: the server goes down during the reopen, after the old client closed: the
+/// replacement does not open, the operation ends with its snapshot, and the open after the server's
+/// return restores nothing.
+#[test]
+fn a_server_shutdown_during_the_reopen_restores_nothing() {
+    let server = server();
+    let backend = manual(&server);
+    let old = open(&backend, Choice::default()).unwrap();
+    server.outside_link("Player:out_L", "transit:in_1");
+    let snapshot = old.render.snapshot_links().unwrap();
+    drop(old);
+    server.shutdown();
+    assert!(open(&backend, Choice::default()).is_err(), "no server, no replacement");
+    drop(snapshot);
+    server.restart();
+    let _later = open(&backend, Choice::default()).unwrap();
+    assert!(!server.linked("Player:out_L", "transit:in_1"));
+    assert!(!server.connects().iter().any(|(a, _)| a == "Player:out_L"));
+}
+
+#[test]
+fn outside_links_come_back_after_a_reopen_for_a_rate_change() {
+    let server = server();
+    let backend = manual(&server);
+    let old = open(&backend, Choice::default()).unwrap();
+    server.outside_link("Player:out_L", "transit:in_1");
+    server.outside_link("transit:out_1", "Recorder:in_1");
+    server.set_sample_rate(44_100);
+    backend.tick();
+    assert_eq!(*old.errors.lock().unwrap(), [ab::StreamError::ResetRequested; 2], "the rate change asks to reopen");
+    let (new, note) = reopen(&backend, old, Choice::default());
+    let _new = new.unwrap();
+    assert_eq!(note, None);
+    assert!(server.linked("Player:out_L", "transit:in_1") && server.linked("transit:out_1", "Recorder:in_1"));
+}
+
+/// The same input device lists its capture ports in another order after the reopen: each of
+/// transit's input ports now stands for another device channel, so its outside links are dropped
+/// with the diagnostic, never moved onto another source. The output side kept its meaning.
+#[test]
+fn a_channel_reorder_on_the_same_device_drops_the_links_of_the_channels_that_moved() {
+    let server = server();
+    let backend = manual(&server);
+    let old = open(&backend, Choice::default()).unwrap();
+    server.outside_link("Player:out_L", "transit:in_1");
+    server.outside_link("Player:out_R", "transit:in_2");
+    server.outside_link("transit:out_1", "Recorder:in_1");
+    let snapshot = old.render.snapshot_links().unwrap();
+    drop(old);
+    server.remove_physical("system:capture_1");
+    server.add_physical("system:capture_1", true);
+    let new = open(&backend, Choice::default()).unwrap();
+    assert!(server.linked("system:capture_2", "transit:in_1"), "the device's order changed");
+    let note = new.render.restore_links(snapshot).expect("a diagnostic");
+    assert!(note.contains("in_1 from Player:out_L (in_1 now stands for another channel)"), "{note}");
+    assert!(note.contains("in_2 from Player:out_R (in_2 now stands for another channel)"), "{note}");
+    assert!(!server.linked("Player:out_L", "transit:in_1") && !server.linked("Player:out_R", "transit:in_2"));
+    assert!(server.linked("transit:out_1", "Recorder:in_1"));
 }
 
 /// Rule 6: transit never disconnects. The function table and the client trait have no disconnect

@@ -234,8 +234,8 @@ fn server_a_link_made_outside_comes_back_after_a_reopen() {
     let name = backend.client_name().expect("a client");
     let (out_1, in_1) = (format!("{name}:out_1"), format!("{name}:in_1"));
     backend.with_client(|c| c.connect(&out_1, &in_1)).unwrap().unwrap();
-    assert_eq!(backend.with_client(|c| c.links(true, 0)), Some(vec![out_1.clone()]), "in_1's links, read through its own port");
-    assert_eq!(backend.with_client(|c| c.links(false, 0)), Some(vec![in_1.clone()]));
+    assert_eq!(backend.with_client(|c| c.links(true, 0)), Some(vec![Ok(out_1.clone())]), "in_1's links, read through its own port");
+    assert_eq!(backend.with_client(|c| c.links(false, 0)), Some(vec![Ok(in_1.clone())]));
     assert_eq!(backend.with_client(|c| c.links(true, 99)), Some(Vec::new()), "no such port: no links");
     let lookups = backend
         .with_client(|c| (c.has_port(&out_1, true), c.has_port(&out_1, false), c.has_port(&format!("{name}:out_.*"), true), c.has_port(&in_1, false)))

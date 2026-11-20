@@ -259,6 +259,10 @@ impl StudioApp {
             self.player_requests.reset();
             note
         };
+        // Audio Devices shows it on every reopen path (Apply rebuilds the notes with it again).
+        if let Some(note) = &self.audio_devices.link_note {
+            self.audio_devices.notes.push(note.clone());
+        }
         if self.engine.session().needs_live_input() {
             self.ensure_input();
         }

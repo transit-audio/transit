@@ -41,8 +41,13 @@ fn apply_restores_the_links_and_says_what_did_not_come_back() {
     with_links(&mut t, LOST);
     t.app.apply_audio(AudioConfig::default()).unwrap();
     assert_one_restore_around_the_reopen(&trace(&t));
-    assert!(t.app.audio_devices.notes.iter().any(|n| n == LOST), "{:?}", t.app.audio_devices.notes);
+    assert_eq!(in_window(&t), 1, "{:?}", t.app.audio_devices.notes);
     assert!(t.app.status.contains(LOST), "{}", t.app.status);
+}
+
+/// How many times the Audio Devices window lists the note.
+fn in_window(t: &T) -> usize {
+    t.app.audio_devices.notes.iter().filter(|n| *n == LOST).count()
 }
 
 #[test]
@@ -52,12 +57,15 @@ fn reconnect_restores_the_links_from_the_window_and_from_the_menu() {
     t.app.reconnect_audio_devices();
     assert_one_restore_around_the_reopen(&trace(&t));
     assert!(t.app.status.contains(LOST), "{}", t.app.status);
+    assert_eq!(in_window(&t), 1);
+    t.app.audio_devices.notes.clear();
 
     with_links(&mut t, LOST);
     t.app.status.clear();
     t.app.reconnect_audio();
     assert_one_restore_around_the_reopen(&trace(&t));
     assert_eq!(t.app.status, LOST);
+    assert_eq!(in_window(&t), 1, "the window says it too");
 }
 
 /// A JACK quantum or rate change reaches the app as a reset request, which the automatic reopen
@@ -71,6 +79,7 @@ fn the_automatic_reopen_after_a_reset_restores_the_links() {
     t.app.step_reopen();
     assert_one_restore_around_the_reopen(&trace(&t));
     assert!(t.app.status.ends_with(LOST), "{}", t.app.status);
+    assert_eq!(in_window(&t), 1, "the window says it too");
 }
 
 /// A device without links of other programs (every system but native JACK): nothing is read and

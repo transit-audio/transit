@@ -312,6 +312,31 @@ mod tests {
         fn monitor(&self, input: &FakeInput) -> Result<(), String> {
             self.inner.monitor(input)
         }
+        // Reads links as the fake does; restores as a connection of another audio system does
+        // (the trait's default discards the snapshot).
+        fn snapshot_links(&self) -> Option<LinkSnapshot> {
+            self.inner.snapshot_links()
+        }
+    }
+
+    /// #431 rule 6 at the seam: a reopen that ends before the old device closes drops the snapshot
+    /// it read (nothing restored later from it), and a replacement of another audio system
+    /// discards the snapshot it is handed.
+    #[test]
+    fn an_abandoned_reopen_drops_its_snapshot_and_another_system_discards_it() {
+        let trace = Trace::default();
+        let mut inner = FakeConnection::new(AudioConfig::default(), Rc::clone(&trace));
+        inner.links = Some("not restored".into());
+        let mut player = Some(RefusingConnection { inner, refusal: Cell::new(Some(PlayerError::Busy)) });
+        let mut input = None;
+        trace.borrow_mut().clear();
+        let open = || RefusingConnection { inner: FakeConnection::new(AudioConfig::default(), Rc::clone(&trace)), refusal: Cell::new(None) };
+        assert!(replace(&mut player, &mut input, open).is_err());
+        assert_eq!(*trace.borrow(), ["snapshot links", "close editors"], "read, then abandoned with the call");
+        player.as_ref().unwrap().refusal.set(None);
+        trace.borrow_mut().clear();
+        assert_eq!(replace(&mut player, &mut input, open), Ok(None), "another system: discarded, nothing said");
+        assert_eq!(*trace.borrow(), ["snapshot links", "close editors", "drop output", "open output"]);
     }
 
     #[test]
