@@ -551,9 +551,15 @@ impl IoMap {
         self.paths.remove(i);
         match removed {
             IoDirection::Output => self.hardware_latency.retain(|m| !m.send.eq_ignore_ascii_case(name)),
+            // Only the figures that came back through this input: another input's path of the
+            // same name keeps its own (amendment for #431, rule 13).
             IoDirection::Input => {
-                self.hardware_latency.retain(|m| !m.ret.eq_ignore_ascii_case(name));
-                self.external_latency.retain(|m| !m.ret.eq_ignore_ascii_case(name));
+                let kept: Vec<HardwareLatency> =
+                    self.hardware_latency.iter().filter(|m| !(m.ret.eq_ignore_ascii_case(name) && self.returns_through(&m.input_device))).cloned().collect();
+                self.hardware_latency = kept;
+                let kept: Vec<ExternalLatency> =
+                    self.external_latency.iter().filter(|m| !(m.ret.eq_ignore_ascii_case(name) && self.returns_through(&m.input_device))).cloned().collect();
+                self.external_latency = kept;
             }
         }
         Ok(())

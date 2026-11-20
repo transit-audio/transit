@@ -254,3 +254,16 @@ fn saving_splits_the_table_and_keeps_an_old_input_half_as_read() {
     assert_eq!(fresh.compose(Some(&input)), map);
     assert!(serde_json::to_string(&fresh).is_ok_and(|s| !s.contains("input_device")), "no new field in an output record");
 }
+
+/// Removing an input path takes the figures that came back through it on this input only: another
+/// input's path of the same name keeps its measurement.
+#[test]
+fn removing_an_input_path_keeps_another_inputs_figures() {
+    let mut out = IoMap::for_device("JACK", "HDMI", 0, 4);
+    out.set_hardware_latency(hw("group-a", 300));
+    out.set_hardware_latency(hw("group-b", 400));
+    let (mut b, _) = adopt_input(&out, &[], &[], "group-b", 2);
+    b.remove_path("In 1").unwrap();
+    assert_eq!(b.hardware_latency.len(), 1, "B's figure went with its path");
+    assert_eq!(b.hardware_latency[0].input_device, "group-a", "A's stays");
+}
