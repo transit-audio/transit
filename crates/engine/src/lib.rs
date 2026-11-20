@@ -443,9 +443,12 @@ impl Engine {
     /// Keep an External Instrument measurement (per machine: no undo step, the session stays
     /// clean), replacing the one with the same port, return, rate and buffer (ADR 0020 decision
     /// 5). The host passes the table on to the audio thread.
-    /// The figure is stamped with the input its return came through (amendment for #431, rule 13).
+    /// A figure that names no input is stamped with the one open now; the app names the input the
+    /// measurement started through (amendment for #431, rule 13).
     pub fn store_external_latency(&mut self, mut m: transit_model::ExternalLatency) {
-        m.input_device.clone_from(&self.io.input_device);
+        if m.input_device.is_empty() {
+            m.input_device.clone_from(&self.io.input_device);
+        }
         let mut io = self.io.clone();
         io.set_external_latency(m);
         self.set_io_map(io);

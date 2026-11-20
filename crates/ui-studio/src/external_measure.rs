@@ -27,6 +27,9 @@ pub(crate) const CANCELLED: &str = "Measurement cancelled. Nothing was stored.";
 /// The extra time past a run's length before a silent device counts as gone.
 const GRACE: Duration = Duration::from_secs(5);
 
+/// Said when a result belongs to another input, output or rate than the device open now.
+pub const DEVICE_CHANGED: &str = "The audio device changed since this measurement: nothing kept. Measure again.";
+
 /// A Measure the card started and has not collected yet.
 #[derive(Debug, Clone)]
 pub struct Running {
@@ -35,6 +38,10 @@ pub struct Running {
     ret: String,
     rate: u32,
     buffer: u32,
+    /// Where it is measured, taken when it starts (review of 652509f3, must-fix 2): the input the
+    /// return comes through and the output device's table key. The result carries them to Keep.
+    input_device: String,
+    output: (String, String),
     began: Instant,
     wait: Duration,
 }
@@ -49,6 +56,9 @@ pub struct Outcome {
     pub keep: Option<ExternalLatency>,
     /// The result was stored: the card's state line says it ("Measured ... on ..."), not this.
     pub stored: bool,
+    /// The output device's table key the held result was measured on (`keep` carries its input
+    /// and rate); Keep stores it only while all three are still the open ones.
+    pub keep_on: (String, String),
 }
 
 /// A stand-in for the Player's Measure, driven by tests.
@@ -280,7 +290,10 @@ impl StudioApp {
             player.external_measure_duration()
         };
         self.external_measure.outcome = None;
-        self.external_measure.running = Some(Running { track: t, port, ret, rate, buffer, began: Instant::now(), wait: wait + GRACE });
+        let io = self.engine.io_map();
+        let (input_device, output) = (io.input_device.clone(), (io.system.clone(), io.device.clone()));
+        self.external_measure.running =
+            Some(Running { track: t, port, ret, rate, buffer, input_device, output, began: Instant::now(), wait: wait + GRACE });
         Ok(())
     }
 
@@ -328,20 +341,33 @@ impl StudioApp {
                     spread_frames: m.spread.round() as u32,
                     notes: m.found,
                     measured_at: now_secs(),
-                    input_device: String::new(),
+                    input_device: r.input_device.clone(),
                 };
                 let said = result_text(&m, r.rate);
                 if m.needs_keep(r.rate) {
-                    Outcome { track: r.track, text: format!("{said}. {}", spread_text(m.spread_ms(r.rate))), keep: Some(record), stored: false }
-                } else {
+                    let text = format!("{said}. {}", spread_text(m.spread_ms(r.rate)));
+                    Outcome { track: r.track, text, keep: Some(record), stored: false, keep_on: r.output.clone() }
+                } else if self.measured_here(&record, &r.output) {
                     self.store_external(record);
-                    Outcome { track: r.track, text: said, keep: None, stored: true }
+                    Outcome { track: r.track, text: said, keep: None, stored: true, keep_on: r.output.clone() }
+                } else {
+                    Outcome { track: r.track, text: DEVICE_CHANGED.into(), keep: None, stored: false, keep_on: r.output.clone() }
                 }
             }
-            Err(e) => Outcome { track: r.track, text: error_text(&e, &r.ret), keep: None, stored: false },
+            Err(e) => Outcome { track: r.track, text: error_text(&e, &r.ret), keep: None, stored: false, keep_on: r.output.clone() },
         };
         self.status.clone_from(&outcome.text);
         self.external_measure.outcome = Some(outcome);
+    }
+
+    /// Whether a result measured through `record`'s input at its rate on the output `output` belongs
+    /// to the device open now: the same input identity, output device and session rate.
+    fn measured_here(&self, record: &ExternalLatency, output: &(String, String)) -> bool {
+        let io = self.engine.io_map();
+        !record.input_device.is_empty()
+            && record.input_device == io.input_device
+            && (io.system.as_str(), io.device.as_str()) == (output.0.as_str(), output.1.as_str())
+            && record.rate == self.engine.session().sample_rate.hz()
     }
 
     fn store_external(&mut self, record: ExternalLatency) {
@@ -352,8 +378,16 @@ impl StudioApp {
 
     /// Keep: store the held result of `t`'s last Measure (its spread was above 1 ms).
     pub(crate) fn keep_external_measure(&mut self, t: TrackId) -> Result<(), String> {
-        let held = self.external_measure.outcome.as_mut().filter(|o| o.track == t).and_then(|o| o.keep.take());
-        let record = held.ok_or("No measurement is waiting to be kept.")?;
+        let held = self.external_measure.outcome.as_mut().filter(|o| o.track == t).and_then(|o| o.keep.take().map(|k| (k, o.keep_on.clone())));
+        let (record, on) = held.ok_or("No measurement is waiting to be kept.")?;
+        // A result measured through another input, on another output or at another rate is never
+        // kept for the device open now (review of 652509f3, must-fix 2).
+        if !self.measured_here(&record, &on) {
+            if let Some(o) = self.external_measure.outcome.as_mut() {
+                o.text = DEVICE_CHANGED.into();
+            }
+            return Err(DEVICE_CHANGED.into());
+        }
         let text = format!("Kept: {}", measured_text(&record));
         self.store_external(record);
         if let Some(o) = self.external_measure.outcome.as_mut() {
@@ -367,17 +401,24 @@ impl StudioApp {
     /// Cancel the running Measure (Cancel, a device reopen) and leave `say` on the card. The
     /// Player releases the note through the MIDI output thread. Nothing is stored.
     pub(crate) fn cancel_external_measure(&mut self, say: &str) {
-        let Some(r) = self.external_measure.running.take() else { return };
+        let Some(r) = self.external_measure.running.take() else {
+            // A result waiting for Keep belongs to the device it was measured on: a reopen drops it.
+            if let Some(o) = self.external_measure.outcome.as_mut().filter(|o| o.keep.is_some()) {
+                o.keep = None;
+                o.text = say.into();
+            }
+            return;
+        };
         #[cfg(test)]
         if let Some(f) = self.external_measure.fake.as_mut() {
             f.cancelled += 1;
-            self.external_measure.outcome = Some(Outcome { track: r.track, text: say.into(), keep: None, stored: false });
+            self.external_measure.outcome = Some(Outcome { track: r.track, text: say.into(), keep: None, stored: false, keep_on: r.output.clone() });
             return;
         }
         if let Some(p) = &self.player {
             p.cancel_external_measure();
         }
-        self.external_measure.outcome = Some(Outcome { track: r.track, text: say.into(), keep: None, stored: false });
+        self.external_measure.outcome = Some(Outcome { track: r.track, text: say.into(), keep: None, stored: false, keep_on: r.output });
     }
 
     /// `instrument.measure_external {track?, action?}`: start (returns at once), cancel, keep, or

@@ -47,6 +47,9 @@ pub enum MeasureKind {
 const POSITION_GRACE: Duration = Duration::from_secs(1);
 
 /// A measurement the window started and has not collected yet.
+/// Said when a measurement finishes on another input, output or rate than it started on.
+pub const MEASURE_DEVICE_CHANGED: &str = "the audio device changed while measuring: nothing stored";
+
 #[derive(Debug, Clone)]
 pub struct Pending {
     send: String,
@@ -54,6 +57,12 @@ pub struct Pending {
     rate: u32,
     began: Instant,
     pub(crate) kind: MeasureKind,
+    /// Where it is measured, taken when it starts (review of 652509f3, must-fix 2): the input
+    /// identity, the output device's table key and, for a loop, its calibration key. A result is
+    /// stored only while these are still the open ones.
+    input_device: String,
+    output: (String, String),
+    loop_key: Option<transit_playback::devices::CalibrationKey>,
 }
 
 /// A stand-in for the Player's probe, driven by tests.
@@ -177,7 +186,10 @@ impl StudioApp {
             MeasureKind::Insert => self.engine.session().sample_rate.hz(),
             MeasureKind::Loop => self.player.as_ref().map_or(self.engine.session().sample_rate.hz(), |p| p.device_rate),
         };
-        let pending = Pending { send: send.into(), ret: ret.into(), rate, began: Instant::now(), kind };
+        let io = self.engine.io_map();
+        let (input_device, output) = (io.input_device.clone(), (io.system.clone(), io.device.clone()));
+        let loop_key = if kind == MeasureKind::Loop { self.loop_key() } else { None };
+        let pending = Pending { send: send.into(), ret: ret.into(), rate, began: Instant::now(), kind, input_device, output, loop_key };
         #[cfg(test)]
         if let Some(f) = self.audio_devices.fake_probe.as_mut() {
             f.started.push((out, back));
@@ -244,6 +256,13 @@ impl StudioApp {
 
     /// Store a finished measurement in the table and say it: the one place both paths end.
     fn finish_measure(&mut self, pending: &Pending, outcome: Result<Measured, ProbeError>) -> Result<Value, String> {
+        let io = self.engine.io_map();
+        let here = io.input_device == pending.input_device
+            && (io.system.as_str(), io.device.as_str()) == (pending.output.0.as_str(), pending.output.1.as_str())
+            && (pending.kind == MeasureKind::Loop || pending.rate == self.engine.session().sample_rate.hz());
+        if !here || (pending.kind == MeasureKind::Loop && self.loop_key() != pending.loop_key) {
+            return Err(MEASURE_DEVICE_CHANGED.into());
+        }
         if pending.kind == MeasureKind::Loop {
             return self.finish_loop(pending, outcome);
         }

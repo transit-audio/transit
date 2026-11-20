@@ -193,11 +193,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         app.io_input
             .as_ref()
             .filter(|i| i.identity == io.input_device)
-            .map(|i| crate::audio_devices_io::InputDevice { name: &i.name, channels: i.channels })
+            .map(|i| crate::audio_devices_io::InputDevice { name: &i.name, channels: i.channels, ambiguous: i.identity.is_empty() })
             // A table set by a command rather than composed from an open input names its identity.
             .or_else(|| {
                 (!io.input_device.is_empty())
-                    .then(|| crate::audio_devices_io::InputDevice { name: &io.input_device, channels: usize::from(io.inputs) })
+                    .then(|| crate::audio_devices_io::InputDevice { name: &io.input_device, channels: usize::from(io.inputs), ambiguous: false })
             }),
         output_channels,
     );

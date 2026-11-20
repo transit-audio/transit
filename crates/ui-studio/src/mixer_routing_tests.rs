@@ -610,3 +610,22 @@ fn a_midi_strip_has_the_output_destination_button_next_to_its_input() {
     assert_eq!(s.midi_output_label, "MIDI to Synth OUT · Ch 2");
     assert!(!s.midi_output_missing, "without a player nothing is known to be missing");
 }
+
+/// #431 review follow-up: the track's input menu marks an unavailable input path with why and
+/// offers no numbered input past channel 32 on a wider device.
+#[test]
+fn the_input_menu_marks_unavailable_paths_and_stops_at_channel_32() {
+    use crate::mixer::{RoutingChoice, input_choices};
+    use transit_model::{ChannelFormat, InputMap, IoDirection, IoMap, IoPath, TrackKind};
+    let mut s = transit_model::Session::default();
+    let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("A"));
+    let path = |name: &str, channels: Vec<u16>| IoPath { live: false, name: name.into(), direction: IoDirection::Input, channels, format: ChannelFormat::Mono };
+    let record = InputMap { system: "JACK".into(), device: "Big".into(), inputs: 40, defaults_for: 0, paths: vec![path("Far", vec![38]), path("Vox", vec![0])] };
+    let mut io = IoMap::for_device("JACK", "Big", 0, 2).compose(Some(&record));
+    io.inputs = 2;
+    let labels: Vec<String> =
+        input_choices(&s, s.track(t).unwrap(), 40, &io).into_iter().filter_map(|c| if let RoutingChoice::Entry { label, .. } = c { Some(label) } else { None }).collect();
+    assert!(labels.iter().any(|l| l.starts_with("Far") && l.contains("(unavailable: out of range: the input has 2 channels open)")), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "Vox (In 1)"), "{labels:?}");
+    assert!(labels.contains(&"In 32".to_string()) && !labels.contains(&"In 33".to_string()), "{labels:?}");
+}

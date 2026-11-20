@@ -216,7 +216,14 @@ pub fn output_choices(s: &Session, t: &Track, io: &IoMap) -> Vec<RoutingChoice> 
 /// path covers, so a renamed path replaces its label.
 fn push_hardware_inputs(v: &mut Vec<RoutingChoice>, io: &IoMap, n: usize, width: usize) {
     let named: Vec<&IoPath> = io.paths_of(IoDirection::Input).filter(|p| p.channels.len() == width).collect();
-    v.extend(named.iter().map(|p| RoutingChoice::Entry { label: path_label(p), value: p.name.clone() }));
+    // An unavailable path stays pickable (the session keeps names) and says why (#431).
+    let label = |p: &IoPath| match io.input_unavailable(p) {
+        Some(why) => format!("{} (unavailable: {why})", path_label(p)),
+        None => path_label(p),
+    };
+    v.extend(named.iter().map(|p| RoutingChoice::Entry { label: label(p), value: p.name.clone() }));
+    // No numeric choice past the channels the table can use (#431 Q6: 32).
+    let n = n.min(transit_model::MAX_DEVICE_CHANNELS);
     let covered = |first: usize| {
         let want: Vec<u16> = (first - 1..first - 1 + width).filter_map(|c| u16::try_from(c).ok()).collect();
         named.iter().any(|p| p.channels == want)

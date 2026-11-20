@@ -221,3 +221,97 @@ fn a_jack_input_group_has_its_own_record() {
     assert_eq!(inputs(app.engine.io_map()), ["In 1"]);
     assert_eq!(app.ui.input_maps.iter().map(InputMap::key).collect::<Vec<_>>(), [("JACK", "USB Mic")]);
 }
+
+/// A separately opened input (cpal: ALSA) with a saved "Guitar" on channel 5.
+fn separate_input_app(inputs: u16) -> (StudioApp, ab::fake::FakeBackend) {
+    let driver = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32)).named("ALSA", "pipewire").with_capture(inputs, false);
+    let cfg = AudioConfig { system: Some("ALSA".into()), output: Some("pipewire".into()), ..AudioConfig::default() };
+    let engine = transit_engine::Engine::default();
+    let player = Player::open_fake_native_asio(engine.session_arc(), &cfg, &driver).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    app.ui.audio = cfg;
+    app.ui.input_maps.push(InputMap {
+        system: "ALSA".into(),
+        device: "pipewire".into(),
+        inputs: 8,
+        defaults_for: 8,
+        paths: vec![IoPath { direction: IoDirection::Input, ..out("Guitar", vec![4]) }],
+    });
+    app.sync_io();
+    (app, driver)
+}
+
+/// Review of 652509f3, must-fix 3: opening the input composes its saved table before capture is
+/// attached, so a take planned at once (no frame, no `sync_io` in between) reads the saved path.
+#[test]
+fn a_take_planned_right_after_the_input_opens_reads_its_saved_path() {
+    let (mut app, _driver) = separate_input_app(8);
+    assert!(app.engine.io_map().input_path("Guitar").is_none(), "no input yet");
+    let t = app.engine.session_mut().add_track(transit_model::TrackKind::Audio, ChannelFormat::Mono, Some("Gtr"));
+    let track = app.engine.session_mut().track_mut(t).unwrap();
+    track.mixer.input = transit_model::Route::Hardware("Guitar".into());
+    track.mixer.record_arm = true;
+    app.ensure_input();
+    let r = app.recorder.as_ref().expect("the input opened");
+    assert_eq!(app.engine.io_map().available_input("Guitar").map(|p| p.channels.clone()), Some(vec![4]), "composed before any frame");
+    assert_eq!(app.player.as_ref().unwrap().io_map().input_path("Guitar").map(|p| p.channels.clone()), Some(vec![4]), "and the plan has it");
+    assert_eq!(transit_engine::io::input_refusal(&app.engine, r.channels, r.system_channel()), None);
+    let dir = transit_test_support::TestDir::new("take-after-open");
+    let plan = transit_engine::io::plan_takes_with(&app.engine, &dir, r.channels, r.system_channel());
+    assert_eq!(plan[0].1, [4], "channel 5, never channel 1");
+}
+
+/// Must-fix 3 across a reopen: the new device's table is composed with its input before that input
+/// is attached (as Reconnect does: replace the player, mark the table for adoption, take the input).
+#[test]
+fn after_a_reopen_the_input_is_attached_with_its_composed_table() {
+    let (mut app, driver) = separate_input_app(8);
+    app.ensure_input();
+    app.close_input();
+    let fresh = Player::open_fake_native_asio(app.engine.session_arc(), &app.ui.audio, &driver).unwrap();
+    app.player = Some(fresh);
+    app.io_adopt = true;
+    app.ensure_input();
+    assert!(app.recorder.is_some());
+    assert!(app.player.as_ref().unwrap().io_map().available_input("Guitar").is_some(), "the new plan has the saved path when capture attaches");
+    assert!(!app.io_adopt, "adopted with the input");
+}
+
+/// First-record admission for a separate input: its first open makes its record (keyed by its own
+/// identity) with the defaults for its width; the output record keeps no input half.
+#[test]
+fn a_separate_inputs_first_open_makes_its_record() {
+    let driver = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32)).named("ALSA", "pipewire").with_capture(2, false);
+    let cfg = AudioConfig { system: Some("ALSA".into()), output: Some("pipewire".into()), ..AudioConfig::default() };
+    let engine = transit_engine::Engine::default();
+    let player = Player::open_fake_native_asio(engine.session_arc(), &cfg, &driver).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    app.ui.audio = cfg;
+    app.sync_io();
+    assert!(app.ui.input_maps.is_empty(), "no input yet, no record");
+    app.ensure_input();
+    let keys: Vec<(&str, &str)> = app.ui.input_maps.iter().map(InputMap::key).collect();
+    assert_eq!(keys, [("ALSA", "pipewire")]);
+    assert_eq!(app.ui.input_maps[0].defaults_for, 2);
+    assert_eq!(inputs(app.engine.io_map()), ["In 1", "In 2", "In 1-2"]);
+    assert_eq!(app.ui.io_maps[0].inputs, 0);
+}
+
+/// Must-fix 4 in the app: an input without an identity (two devices of one name) gets this open's
+/// defaults, reads no saved record, writes none, and no measurement applies through it.
+#[test]
+fn an_input_without_an_identity_saves_nothing_and_takes_no_measurement() {
+    let endpoint = wasapi();
+    endpoint.pair_capture(Some(("", "USB Audio")));
+    let engine = transit_engine::Engine::default();
+    let player = Player::open_fake_native_wasapi(engine.session_arc(), &wasapi_config(), &endpoint).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    app.ui.input_maps.push(InputMap { system: "WASAPI".into(), device: String::new(), inputs: 2, defaults_for: 2, paths: Vec::new() });
+    app.sync_io();
+    assert_eq!(inputs(app.engine.io_map()), ["In 1", "In 2", "In 1-2"], "this open's defaults, not a saved empty record");
+    app.engine.store_hardware_latency("Out 1-2", "In 1", 500);
+    app.sync_io();
+    assert_eq!(app.engine.io_map().hardware_latency("Out 1-2", "In 1", 48_000), None, "no measurement applies without an identity");
+    assert_eq!(app.ui.input_maps.len(), 1, "nothing written for it");
+    assert!(app.ui.input_maps[0].paths.is_empty(), "the old record untouched");
+}

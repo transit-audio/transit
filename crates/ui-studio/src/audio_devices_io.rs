@@ -163,7 +163,13 @@ pub const ADD_DEFAULTS_TIP: &str =
 pub struct InputDevice<'a> {
     pub name: &'a str,
     pub channels: usize,
+    /// Two input devices share this name (cpal): it has no identity, so its paths are this open's
+    /// defaults and nothing is saved for it (amendment for #431, rule 8).
+    pub ambiguous: bool,
 }
+
+/// Said after the input in the heading when two input devices share its name.
+pub const AMBIGUOUS_INPUT: &str = "two input devices share this name: its paths are not saved and no measurement applies";
 
 /// The heading line: both devices and their channels (rule 14), "Input: <device>, N channels.
 /// Output: <device>, M channels." A device wider than the 32-channel table says that only the
@@ -178,6 +184,7 @@ pub fn heading(io: &IoMap, input: Option<InputDevice<'_>>, output_channels: usiz
         }
     };
     let input = match input {
+        Some(i) if i.ambiguous => format!("Input: {}, {} ({AMBIGUOUS_INPUT}).", i.name, capped(i.channels)),
         Some(i) => format!("Input: {}, {}.", i.name, capped(i.channels)),
         None => "Input: not open.".to_string(),
     };
@@ -524,7 +531,8 @@ pub fn hardware_section(
                 let figure = if io.returns_through(&m.input_device) {
                     frames_text(m.round_trip_frames, rate)
                 } else {
-                    format!("{}, {MEASURE_AGAIN_ROW}", frames_text(m.round_trip_frames, rate))
+                    let why = if m.input_device.is_empty() { MEASURE_AGAIN_UNKNOWN } else { MEASURE_AGAIN_ROW };
+                    format!("{}, {why}", frames_text(m.round_trip_frames, rate))
                 };
                 ui.label(&figure);
                 layout.rows.push(format!("{pair}: {figure}"));
@@ -549,6 +557,8 @@ pub fn hardware_section(
 
 /// Beside a listed round trip measured through another input than the one open: it is not used.
 pub const MEASURE_AGAIN_ROW: &str = "through another input: measure again";
+/// The same for a figure stored before inputs were recorded, whose input is not established.
+pub const MEASURE_AGAIN_UNKNOWN: &str = "through an unknown input: measure again";
 
 /// What a finished measurement says: "612 frames (12.8 ms) ±2".
 pub fn measured_text(frames: u32, spread: u32, rate: u32) -> String {
@@ -636,15 +646,19 @@ mod tests {
     fn the_heading_names_both_devices_and_says_when_only_32_channels_are_used() {
         let io = IoMap::for_device("JACK", "Big", 32, 32);
         assert_eq!(
-            heading(&io, Some(InputDevice { name: "Big", channels: 40 }), 40),
+            heading(&io, Some(InputDevice { name: "Big", channels: 40, ambiguous: false }), 40),
             "Input: Big, 40 channels (the first 32 are used). Output: Big, 40 channels (the first 32 are used)."
         );
         let io = IoMap::for_device("WASAPI", "Speakers", 0, 2);
         assert_eq!(
-            heading(&io, Some(InputDevice { name: "Microphone", channels: 1 }), 2),
+            heading(&io, Some(InputDevice { name: "Microphone", channels: 1, ambiguous: false }), 2),
             "Input: Microphone, 1 channel. Output: Speakers, 2 channels."
         );
         assert_eq!(heading(&io, None, 0), "Input: not open. Output: Speakers, 2 channels.");
+        assert_eq!(
+            heading(&io, Some(InputDevice { name: "USB Audio", channels: 2, ambiguous: true }), 2),
+            format!("Input: USB Audio, 2 channels ({AMBIGUOUS_INPUT}). Output: Speakers, 2 channels.")
+        );
     }
 
     #[test]

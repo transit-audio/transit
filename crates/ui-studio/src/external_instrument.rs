@@ -39,6 +39,8 @@ pub fn state_line(report: Option<&ExternalReport>, live: bool, port: Option<&str
 /// The card's state when the chain was measured only through another input than the one open
 /// (or one whose identity is not established): the figure is not used.
 pub const MEASURE_AGAIN_INPUT: &str = "Measure again: measured through another input";
+/// The same when the figure was stored before inputs were recorded (its input is unknown).
+pub const MEASURE_AGAIN_UNKNOWN: &str = "Measure again: measured through an unknown input";
 
 fn plain_state(report: Option<&ExternalReport>, port: Option<&str>, rate: u32) -> String {
     match port {
@@ -309,7 +311,9 @@ pub(crate) fn card(
         && live
         && app.engine.io_map().external_latency_elsewhere(p, &r.ret)
     {
-        (state, stale) = (MEASURE_AGAIN_INPUT.to_string(), true);
+        let io = app.engine.io_map();
+        let named = io.external_latency.iter().any(|m| m.chain_is(p, &r.ret) && !m.input_device.is_empty());
+        (state, stale) = ((if named { MEASURE_AGAIN_INPUT } else { MEASURE_AGAIN_UNKNOWN }).to_string(), true);
     }
     let ok = report.as_ref().is_some_and(|x| x.state == ExternalState::Ready) && port.is_none() && live;
     // A refusal or a result waiting for Keep is said where the state is, until the next Measure.

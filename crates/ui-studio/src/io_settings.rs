@@ -22,7 +22,7 @@ pub struct OpenInput {
 }
 
 impl OpenInput {
-    fn of(r: &transit_playback::record::Recorder) -> Self {
+    pub(crate) fn of(r: &transit_playback::record::Recorder) -> Self {
         Self { identity: r.input_identity.id.clone(), name: r.input_identity.name.clone(), channels: r.device_channels() }
     }
 
@@ -47,6 +47,9 @@ pub fn adopt(saved: &[IoMap], opened: &IoMap) -> IoMap {
 /// is open. Returns the input record to keep, when there is an input.
 pub fn compose(output: &IoMap, input: Option<&OpenInput>, inputs: &[InputMap], outputs: &[IoMap]) -> (IoMap, Option<InputMap>) {
     match input {
+        // An input without an identity (two devices share its name, cpal): this open's defaults,
+        // no saved record read or written (amendment for #431, rule 8).
+        Some(i) if i.identity.is_empty() => (transit_model::adopt_input(output, &[], &[], "", i.width()).0, None),
         Some(i) => {
             let (map, record) = transit_model::adopt_input(output, inputs, outputs, &i.identity, i.width());
             (map, Some(record))
@@ -96,35 +99,50 @@ impl StudioApp {
     /// engine's table to the audio thread and the preferences. Without a real device (`--no-audio`,
     /// the silent fallback) there is nothing to open or keep; the silent device of `--null-audio`
     /// gets its table, but it is not this machine's, so neither half is ever saved. An input that
-    /// failed to open changes no record.
+    /// failed to open changes no record. An input the app opens itself is composed before it is
+    /// attached ([`StudioApp::open_input_composed`]); this catches the input the player holds.
     pub(crate) fn sync_io(&mut self) {
-        // A Player waiting to be reopened after a driver reset gets the table with its successor.
-        let Some(player) = self.player.as_ref().filter(|p| !p.silent && p.reopen_cause().is_none()) else { return };
-        let keep = !player.null_device();
-        let input = self.open_input();
-        let output = if self.io_adopt {
-            Some(adopt(&self.ui.io_maps, &player.io_map()))
-        } else if input.is_some() && input != self.io_input {
-            // An input opened as its own device after the output (cpal: ALSA, CoreAudio), or
-            // another one: the input half follows it; the output half is the engine's.
-            Some(self.engine.io_map().compose(None))
-        } else {
-            None
-        };
-        if let Some(output) = output {
-            let (map, record) = compose(&output, input.as_ref(), &self.ui.input_maps, &self.ui.io_maps);
-            if let Some(record) = record.filter(|_| keep) {
-                remember_input(&mut self.ui.input_maps, record);
-            }
-            self.engine.set_io_map(map);
-            self.io_adopt = false;
-            self.io_input = input;
+        if self.io_player().is_none() {
+            return;
         }
+        let input = self.open_input();
+        if self.io_adopt || (input.is_some() && input != self.io_input) {
+            self.compose_io(input);
+        } else {
+            self.push_io();
+        }
+    }
+
+    /// The Player a table goes to: a real one, not waiting to be reopened after a driver reset (it
+    /// gets the table with its successor).
+    fn io_player(&self) -> Option<&transit_playback::Player> {
+        self.player.as_ref().filter(|p| !p.silent && p.reopen_cause().is_none())
+    }
+
+    /// Compose the engine's table for `input` (the output's record: the opened device's on a new
+    /// open, else the engine's own output half) and pass it to the audio thread at once.
+    pub(crate) fn compose_io(&mut self, input: Option<OpenInput>) {
+        let Some(player) = self.io_player() else { return };
+        let keep = !player.null_device();
+        let output = if self.io_adopt { adopt(&self.ui.io_maps, &player.io_map()) } else { self.engine.io_map().compose(None) };
+        let (map, record) = compose(&output, input.as_ref(), &self.ui.input_maps, &self.ui.io_maps);
+        if let Some(record) = record.filter(|_| keep) {
+            remember_input(&mut self.ui.input_maps, record);
+        }
+        self.engine.set_io_map(map);
+        self.io_adopt = false;
+        self.io_input = input;
+        self.push_io();
+    }
+
+    /// Pass the engine's table to the audio thread and keep both halves, when it changed.
+    fn push_io(&mut self) {
         if self.io_pushed == self.engine.io_revision() {
             return;
         }
         let map = self.engine.io_map().clone();
-        let Some(player) = self.player.as_ref() else { return };
+        let Some(player) = self.io_player() else { return };
+        let keep = !player.null_device();
         if player.set_io(map.clone()).is_ok() {
             if keep {
                 remember(&mut self.ui.io_maps, &map);
@@ -132,6 +150,21 @@ impl StudioApp {
             }
             self.io_pushed = self.engine.io_revision();
         }
+    }
+
+    /// Open the input and compose its saved table before it is attached (amendment for #431, rule
+    /// 8; review of 652509f3, must-fix 3): there is no state in which capture feeds the plan, or a
+    /// take is planned, while the engine's table lacks this input's half. One step, so no caller can
+    /// attach first and compose later.
+    pub(crate) fn open_input_composed(&mut self) -> Result<transit_playback::record::Recorder, String> {
+        use crate::audio_connection::Connection;
+        let cfg = self.ui.audio.clone();
+        let player = self.player.as_ref().ok_or("no audio device")?;
+        let r = Connection::open_input(player, &cfg)?;
+        self.compose_io(Some(OpenInput::of(&r)));
+        let player = self.player.as_ref().ok_or("no audio device")?;
+        Connection::monitor(player, &r)?;
+        Ok(r)
     }
 }
 

@@ -134,8 +134,11 @@ impl StudioApp {
         if self.recorder.is_some() || self.input_failure.is_some() {
             return;
         }
-        let Some(p) = &self.player else { return };
-        match p.monitored_input(&self.ui.audio) {
+        if self.player.is_none() {
+            return;
+        }
+        // The input's saved table is composed before capture is attached (#431).
+        match self.open_input_composed() {
             Ok(r) => {
                 self.recorder = Some(r);
             }

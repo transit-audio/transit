@@ -263,11 +263,12 @@ impl StudioApp {
         if let Some(note) = &self.audio_devices.link_note {
             self.audio_devices.notes.push(note.clone());
         }
+        // The new device's table is composed with its input before that input is attached.
+        self.io_adopt = true;
         if self.engine.session().needs_live_input() {
             self.ensure_input();
         }
         self.audio_devices.begin_verification();
-        self.io_adopt = true;
         Ok(captured)
     }
 }

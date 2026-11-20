@@ -319,3 +319,47 @@ fn the_devices_row_is_as_tall_as_its_tallest_card_and_shrinks_back_without_the_e
     assert_eq!(high - low, CARD_H - (crate::devices::PANE_H - 16.0), "the External Instrument's card sets the row ({high} vs {low})");
     assert!((crate::devices::PANE_H - 2.0..=crate::devices::PANE_H).contains(&low), "stock cards keep the row of old: {low}");
 }
+
+/// Review of 652509f3, must-fix 2: a result waiting for Keep belongs to the input, output and rate
+/// it was measured on. Measure through input A, reopen on input B (which has its own figure), Keep:
+/// nothing is stored for B and B's figure is untouched; a reopen also drops the waiting result.
+#[test]
+fn a_result_waiting_for_keep_is_never_kept_for_another_input() {
+    let mut t = rig();
+    t.click(t.card().external_measure);
+    t.fake().result = Some(measured(1000, 62.0));
+    t.frames(3);
+    assert!(t.stored().is_empty(), "waiting for Keep");
+    // The device reopens on another input B of the same output, which has its own figure.
+    let b = ExternalLatency {
+        port_id: String::new(),
+        port_name: "MODEL D".into(),
+        ret: "In 1".into(),
+        rate: 48_000,
+        buffer: 64,
+        frames: 777,
+        spread_frames: 1,
+        notes: 8,
+        measured_at: 1,
+        input_device: "Input B".into(),
+    };
+    let mut io = transit_model::IoMap::for_device("ASIO", "Focusrite USB ASIO", 0, 2);
+    io.external_latency.push(b.clone());
+    let record = transit_model::InputMap { system: "ASIO".into(), device: "Input B".into(), inputs: 2, defaults_for: 2, paths: Vec::new() };
+    let mut composed = io.compose(Some(&record));
+    composed.add_default_inputs(2);
+    t.app.engine.set_io_map(composed);
+    let kept = t.app.run("instrument.measure_external", json!({"track": t.track.0, "action": "keep"}));
+    assert!(kept.is_err(), "refused: {kept:?}");
+    assert_eq!(t.stored(), [b.clone()], "nothing stored for B, and B's figure untouched");
+    assert!(t.app.external_measure.outcome.as_ref().is_some_and(|o| o.keep.is_none()), "the waiting result is dropped");
+    // A reopen with a result waiting drops it too (cancellation used to return early).
+    let mut t = rig();
+    t.click(t.card().external_measure);
+    t.fake().result = Some(measured(1000, 62.0));
+    t.frames(3);
+    t.app.cancel_external_measure(crate::external_measure::CANCELLED_REOPEN);
+    assert!(t.app.external_measure.outcome.as_ref().is_some_and(|o| o.keep.is_none() && o.text == crate::external_measure::CANCELLED_REOPEN));
+    assert!(t.app.run("instrument.measure_external", json!({"track": t.track.0, "action": "keep"})).is_err());
+    assert!(t.stored().is_empty());
+}

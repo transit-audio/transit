@@ -253,6 +253,9 @@ fn change_width_remaps_hardware_inputs_and_undo_restores_both() {
             in_channels: 0,
         };
         let mut compiler = transit_mix::PlanCompiler::new(target, transit_mix::PlanLimits::default());
+        // The machine's table says the input has four channels (labels resolve only while their
+        // channels are open: the ruling of 2026-11-20; before it a label wrapped to any input).
+        compiler.set_io(std::sync::Arc::new(transit_model::IoMap { inputs: 4, ..transit_model::IoMap::default() }));
         let mut make = |spec: &transit_mix::InstanceSpec, _: transit_mix::SlotGen| {
             transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 64, spec.ch)
         };
