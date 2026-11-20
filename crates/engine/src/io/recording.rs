@@ -3,17 +3,27 @@
 use super::*;
 
 /// The record-enabled audio tracks, each with the input channels it records (those its input
-/// route names, "In 3" → 2, wrapped to the device's `input_channels`) and a new take file
-/// `<track>_<NN>.wav` in the `Audio Files` of the session's folder (`unsaved_dir` until it is saved).
+/// route resolves to on this machine, [`transit_model::resolve_input`]; `usize::MAX`, a channel no
+/// frame has, where it is silent) and a new take file `<track>_<NN>.wav` in the `Audio Files` of the
+/// session's folder (`unsaved_dir` until it is saved).
 pub fn plan_takes(e: &Engine, unsaved_dir: &Path, input_channels: usize) -> Vec<(TrackId, Vec<usize>, PathBuf)> {
     plan_takes_with(e, unsaved_dir, input_channels, e.io_map().system_audio.map(usize::from))
+}
+
+/// The machine's table as the open recorder delivers it: its own channels (the live input without
+/// the System Audio pair that starts at `system_audio`) are the open input's.
+fn recording_table(e: &Engine, input_channels: usize, system_audio: Option<usize>) -> transit_model::IoMap {
+    let mut io = e.io_map().clone();
+    io.system_audio = system_audio.and_then(|c| u16::try_from(c).ok());
+    let own = system_audio.unwrap_or(input_channels).min(transit_model::MAX_DEVICE_CHANNELS);
+    io.inputs = u16::try_from(own).unwrap_or(u16::MAX);
+    io
 }
 
 /// [`plan_takes`] for an input whose System Audio pair (#268) starts at `system_audio`, as the open
 /// recorder says (`None`: it does not run, and a track on it records silence).
 pub fn plan_takes_with(e: &Engine, unsaved_dir: &Path, input_channels: usize, system_audio: Option<usize>) -> Vec<(TrackId, Vec<usize>, PathBuf)> {
-    let mut io = e.io_map().clone();
-    io.system_audio = system_audio.and_then(|c| u16::try_from(c).ok());
+    let io = recording_table(e, input_channels, system_audio);
     let dir = e.path.as_deref().and_then(|p| Path::new(p).parent()).unwrap_or(unsaved_dir);
     let s = e.session();
     let take_no = s.sources.len() + 1;
@@ -21,17 +31,17 @@ pub fn plan_takes_with(e: &Engine, unsaved_dir: &Path, input_channels: usize, sy
         .iter()
         .filter(|t| t.mixer.record_arm && t.kind == TrackKind::Audio && !t.inactive)
         .map(|t| {
-            // The same resolution as the mix's input monitoring: a path by its name in this
-            // machine's table, else the number in the label.
-            // System Audio (#268) that does not run records silence (a channel no frame has).
-            let inputs = (0..t.channels())
-                .map(|k| match &t.mixer.input {
-                    transit_model::Route::Hardware(h) => {
-                        transit_model::live_input_channel(Some(&io), h, k, t.channels(), input_channels).unwrap_or(usize::MAX)
-                    }
-                    _ => k % input_channels.max(1),
-                })
-                .collect();
+            // The same resolution as the mix's input monitoring. An unavailable route, a channel
+            // the input lacks and System Audio that does not run record silence, never another
+            // channel ([`input_refusal`] refuses the first before a take starts).
+            let width = t.channels();
+            let inputs = match &t.mixer.input {
+                transit_model::Route::Hardware(h) => match transit_model::resolve_input(&io, h, width) {
+                    Ok(route) => route.into_iter().map(|c| c.map_or(usize::MAX, usize::from)).collect(),
+                    Err(_) => vec![usize::MAX; width],
+                },
+                _ => (0..width).map(|k| k % input_channels.max(1)).collect(),
+            };
             let file = |n: usize| dir.join("Audio Files").join(format!("{}_{n:02}.wav", sanitize_name(&t.name)));
             let path = (take_no..take_no + 1_000).map(file).find(|p| !p.exists()).unwrap_or_else(|| file(take_no));
             (t.id, inputs, path)
@@ -39,23 +49,23 @@ pub fn plan_takes_with(e: &Engine, unsaved_dir: &Path, input_channels: usize, sy
         .collect()
 }
 
-/// Why recording cannot start: every record-enabled audio track whose input names an input path
-/// of this machine's table that cannot be used now (it has an output path's name, or a channel
-/// past the open input; ADR 0015, amendment for #431, rule 10), with the path named. `None` when
-/// every armed input resolves. Such a track would otherwise record silence; it never records
-/// another channel.
-pub fn input_refusal(e: &Engine) -> Option<String> {
-    let io = e.io_map();
+/// Why recording cannot start: every record-enabled audio track whose input route is unavailable
+/// on this machine (an input path with an output path's name or a channel past the open input, a
+/// label naming a channel the input lacks, or a name the table does not hold; ADR 0015, amendment
+/// for #431, rule 10, and the ruling of 2026-11-20), with the name. `input_channels` and
+/// `system_audio` are the open recorder's, as for [`plan_takes_with`]. `None` when every armed
+/// input resolves. Such a track would otherwise record silence; it never records another channel.
+pub fn input_refusal(e: &Engine, input_channels: usize, system_audio: Option<usize>) -> Option<String> {
+    let io = recording_table(e, input_channels, system_audio);
     let why: Vec<String> = e
         .session()
         .tracks
         .iter()
         .filter(|t| t.mixer.record_arm && t.kind == TrackKind::Audio && !t.inactive)
         .filter_map(|t| match &t.mixer.input {
-            transit_model::Route::Hardware(h) => match io.input_state(h) {
-                Some(Err(why)) => Some(format!("track `{}` cannot record: the input path `{h}` is unavailable ({why})", t.name)),
-                _ => None,
-            },
+            transit_model::Route::Hardware(h) => transit_model::resolve_input(&io, h, t.channels())
+                .err()
+                .map(|why| format!("track `{}` cannot record: the input `{h}` is unavailable ({why})", t.name)),
             _ => None,
         })
         .collect();
@@ -682,8 +692,9 @@ mod record_tests {
 
     /// ADR 0015, amendment for #431, rule 10: an armed input that names an unavailable input path
     /// (an output path's name, or a channel past the open input) refuses to record with the path
-    /// named, and would record silence, never channel 1 or a wrapped channel. A name the table does
-    /// not have keeps its label meaning.
+    /// named, and would record silence, never channel 1 or a wrapped channel. Since the ruling of
+    /// 2026-11-20 a label keeps its number only while its channels are open, and any other name the
+    /// table does not hold is unavailable too.
     #[test]
     fn an_unavailable_input_path_refuses_to_record_and_never_records_another_channel() {
         use transit_model::{ChannelFormat, IoDirection, IoPath, Route};
@@ -709,24 +720,33 @@ mod record_tests {
         e.session_mut().track_mut(clash).unwrap().mixer.input = Route::Hardware("Out 3-4".into());
         let far = armed(&mut e, "Far", "mono", "Far");
         let label = armed(&mut e, "Label", "mono", "In 2");
-        let why = input_refusal(&e).expect("refused");
+        // The ruling of 2026-11-20: a label past the input, and any name the table lacks, refuse too.
+        let past = armed(&mut e, "Past", "mono", "In 3");
+        let bass = armed(&mut e, "Bass", "mono", "In 1");
+        e.session_mut().track_mut(bass).unwrap().mixer.input = Route::Hardware("Bass DI".into());
+        let why = input_refusal(&e, 2, None).expect("refused");
         assert!(
-            why.contains("track `Clash` cannot record: the input path `Out 3-4` is unavailable (same name as an output path: rename one)"),
+            why.contains("track `Clash` cannot record: the input `Out 3-4` is unavailable (same name as an output path: rename one)"),
             "{why}"
         );
         assert!(
-            why.contains("track `Far` cannot record: the input path `Far` is unavailable (out of range: the input has 2 channels open)"),
+            why.contains("track `Far` cannot record: the input `Far` is unavailable (out of range: the input has 2 channels open)"),
             "{why}"
         );
+        assert!(why.contains("track `Past` cannot record: the input `In 3` is unavailable (out of range: the input has 2 channels open)"), "{why}");
+        assert!(why.contains("track `Bass` cannot record: the input `Bass DI` is unavailable (no input path of that name on this input)"), "{why}");
         assert!(!why.contains("Label"), "{why}");
         let plan = plan_takes(&e, &dir, 2);
         let channels = |t: TrackId| plan.iter().find(|p| p.0 == t).map(|p| p.1.clone()).unwrap();
         assert_eq!(channels(clash), [usize::MAX], "silence, never channel 1 or 4");
         assert_eq!(channels(far), [usize::MAX], "silence, never a wrap to channel 2");
-        assert_eq!(channels(label), [1], "a name the table lacks keeps its label meaning");
-        e.session_mut().track_mut(clash).unwrap().mixer.record_arm = false;
-        e.session_mut().track_mut(far).unwrap().mixer.record_arm = false;
-        assert_eq!(input_refusal(&e), None);
+        assert_eq!(channels(label), [1], "a label whose channel is open keeps its number");
+        assert_eq!(channels(past), [usize::MAX], "In 3 on two inputs: silence, never a wrap to channel 1");
+        assert_eq!(channels(bass), [usize::MAX], "a name the table lacks: silence, never channel 1");
+        for t in [clash, far, past, bass] {
+            e.session_mut().track_mut(t).unwrap().mixer.record_arm = false;
+        }
+        assert_eq!(input_refusal(&e, 2, None), None);
     }
 
     #[test]
@@ -754,7 +774,9 @@ mod record_tests {
         write_take(&dir.join("Audio Files/Vox_01.wav"), 10);
         let plan = plan_takes(&e, &dir, 4);
         assert_eq!(plan, vec![(vox, vec![1], dir.join("Audio Files/Vox_02.wav")), (gtr, vec![2, 3], dir.join("Audio Files/Gtr_01.wav"))]);
-        assert_eq!(plan_takes(&e, &dir, 2)[1].1, vec![0, 1]);
+        // In 3-4 on a two-channel input: unavailable, silence; it used to wrap to In 1-2 (the
+        // ruling of 2026-11-20).
+        assert_eq!(plan_takes(&e, &dir, 2)[1].1, vec![usize::MAX, usize::MAX]);
 
         let session = dir.join("Song.transit").to_string_lossy().into_owned();
         e.execute("session.save_as", &json!({"path": session})).unwrap();

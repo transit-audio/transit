@@ -271,7 +271,7 @@ impl StudioApp {
         let Some(r) = &mut self.recorder else { return Err("no audio input device".into()) };
         // An armed input on an unavailable input path refuses, naming it (ADR 0015, amendment for
         // #431, rule 10): it would record silence, and never records another channel.
-        if let Some(why) = transit_engine::io::input_refusal(&self.engine) {
+        if let Some(why) = transit_engine::io::input_refusal(&self.engine, r.channels, r.system_channel()) {
             return Err(why);
         }
         let plan = transit_engine::io::plan_takes_with(&self.engine, &unsaved_dir, r.channels, r.system_channel());

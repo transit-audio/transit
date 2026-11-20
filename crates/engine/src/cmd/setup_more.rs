@@ -278,6 +278,13 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
             Some(other) => Err(bad(id, format!("direction is input or output, not `{other}`"))),
         }
     };
+    // Buses and I/O paths share one namespace (ADR 0015 section 1.4): a path never takes a bus's name.
+    let bus_name = |n: &str| -> Result<()> {
+        match e.session().bus_by_name(n.trim()) {
+            Some(_) => Err(bad(id, format!("`{}` is a bus of this session; a path needs another name", n.trim()))),
+            None => Ok(()),
+        }
+    };
     match action {
         "list" => return Ok(io_map_state(e)),
         "set" => {
@@ -312,11 +319,13 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
             let direction = direction()?.unwrap_or(IoDirection::Output);
             let channels = channels()?;
             let format = transit_model::ChannelFormat::for_channels(channels.len());
+            bus_name(&name()?)?;
             io.add_path(IoPath { live: if p.get("live").is_some() { live()? } else { false }, name: name()?, direction, channels, format })
                 .map_err(refuse)?;
         }
         "rename_path" => {
             let to = str_param(p, "new_name").ok_or_else(|| bad(id, "`new_name` required"))?;
+            bus_name(to)?;
             io.rename_path_in(&name()?, direction()?, to).map_err(refuse)?;
         }
         "remove_path" => io.remove_path_in(&name()?, direction()?).map_err(refuse)?,
@@ -669,6 +678,16 @@ mod tests {
         assert_eq!(r["unavailable_inputs"], json!([{"name": "Far", "why": "out of range: the input has 2 channels open"}]));
         let mut none = Engine::default();
         assert!(matches!(none.execute("setup.io_map", &json!({"action": "add_default_inputs"})), Err(crate::EngineError::BadParams(..))));
+        // Buses and paths share one namespace, case-insensitively, both ways.
+        e.execute("setup.io", &json!({"action": "create_bus", "name": "Drums"})).unwrap();
+        for params in [
+            json!({"action": "add_path", "direction": "input", "name": "drums", "channels": [0]}),
+            json!({"action": "rename_path", "name": "Talkback", "direction": "input", "new_name": "DRUMS"}),
+        ] {
+            let refused = e.execute("setup.io_map", &params);
+            assert!(matches!(&refused, Err(crate::EngineError::BadParams(_, why)) if why.contains("is a bus of this session")), "{params}: {refused:?}");
+        }
+        assert!(matches!(e.execute("setup.io", &json!({"action": "create_bus", "name": "talkback"})), Err(crate::EngineError::BadParams(..))));
     }
 
     #[test]
