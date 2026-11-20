@@ -808,13 +808,19 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
     // The fade shapes are checkable rows: the menu has checks when the click was on a fade.
     let on_fade = app.arrange.menu_target.is_some_and(|(c, side)| side.is_some() && s.find_clip(c).is_some());
     crate::chrome::context_menu(&resp, on_fade).show(|ui| {
+        // A clip's menu holds clip actions only (Ableton's and Logic's clip menus hold no track
+        // creation); the "Add ... Track" rows are the empty lane's menu (#728).
+        let on_clip = app.arrange.menu_target.is_some_and(|(c, _)| s.find_clip(c).is_some());
         if let Some((clip, side)) = app.arrange.menu_target.filter(|(c, _)| s.find_clip(*c).is_some()) {
+            let mut drawn = false;
             if let Some(side) = side
                 && crate::fades::shape_items(app, ui, clip, side)
             {
                 ui.close();
             }
+            drawn |= side.is_some();
             if crate::fades::overlap(s, clip).is_some() {
+                drawn = true;
                 let b = ui.add(crate::chrome::MenuRow::new("Crossfade"));
                 app.arrange.menu.retain(|m| m.label != "Crossfade");
                 app.arrange.menu.push(crate::mixer::MenuItem::at(ui, "Crossfade".into(), String::new(), b.rect));
@@ -827,27 +833,17 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
             if let Some((t, _)) = s.find_clip(clip)
                 && let Some(stack) = s.track(t).and_then(|tr| app.takes_of(tr).stacks.iter().position(|st| st.contains(clip)))
             {
+                drawn = true;
                 take_lanes::flatten_item(app, ui, t, Some(stack));
             }
+            if drawn {
+                ui.separator();
+            }
+        }
+        if !on_clip {
+            add_track_rows(app, ui);
             ui.separator();
         }
-        if ui.add(crate::chrome::MenuRow::new("Add Mono Audio Track")).clicked() {
-            let _ = app.add_audio_track("mono");
-            ui.close();
-        }
-        if ui.add(crate::chrome::MenuRow::new("Add Stereo Audio Track")).clicked() {
-            let _ = app.add_audio_track("stereo");
-            ui.close();
-        }
-        if ui.add(crate::chrome::MenuRow::new("Add Instrument Track")).clicked() {
-            let _ = app.add_track("instrument");
-            ui.close();
-        }
-        if ui.add(crate::chrome::MenuRow::new("Add MIDI Track")).clicked() {
-            let _ = app.add_track("midi");
-            ui.close();
-        }
-        ui.separator();
         if ui.add(crate::chrome::MenuRow::new("Paste at Cursor")).clicked() {
             let _ = app.paste_at_cursor();
             ui.close();
@@ -862,6 +858,26 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
         ui.separator();
         crate::edit_tools::context_menu_items(app, ui);
     });
+}
+
+/// The empty lane's "Add ... Track" rows.
+fn add_track_rows(app: &mut StudioApp, ui: &mut Ui) {
+    if ui.add(crate::chrome::MenuRow::new("Add Mono Audio Track")).clicked() {
+        let _ = app.add_audio_track("mono");
+        ui.close();
+    }
+    if ui.add(crate::chrome::MenuRow::new("Add Stereo Audio Track")).clicked() {
+        let _ = app.add_audio_track("stereo");
+        ui.close();
+    }
+    if ui.add(crate::chrome::MenuRow::new("Add Instrument Track")).clicked() {
+        let _ = app.add_track("instrument");
+        ui.close();
+    }
+    if ui.add(crate::chrome::MenuRow::new("Add MIDI Track")).clicked() {
+        let _ = app.add_track("midi");
+        ui.close();
+    }
 }
 
 /// A loop-handle drag as it would land.

@@ -230,13 +230,56 @@ fn a_clip_context_menu_has_the_chrome_rows_and_bounce_in_place_still_opens_its_f
     // No fade was clicked, so the clip menu has no checkable row (#418): the text starts 12 in.
     p.insets_plain(tool.label(), Some(&label(tool.action().unwrap())));
     p.insets_plain("Rename", Some(&label(A::Rename)));
-    for row in ["Add Mono Audio Track", "Paste at Cursor", "Split at Cursor", "Bounce in Place", "Color"] {
+    for row in ["Paste at Cursor", "Split at Cursor", "Bounce in Place", "Color"] {
         assert!(near(p.text_in(row), TEXT_IN_PLAIN), "{row} starts 12 inside the edge");
     }
     p.row(&bounce);
     t.click(bounce.rect, "primary");
     assert!(matches!(t.app.dialog, Some(crate::Dialog::BounceInPlace)), "{}", t.app.status);
     assert_eq!(t.app.bounce_place.clips, vec![clip]);
+}
+
+const ADD_ROWS: [&str; 4] = ["Add Mono Audio Track", "Add Stereo Audio Track", "Add Instrument Track", "Add MIDI Track"];
+
+/// Where `label` is drawn inside the popup that holds `anchor` (a recorded row), if it is.
+fn drawn_in(t: &T, anchor: &MenuItem, label: &str) -> Option<Rect> {
+    let frame = Popup::of(t, anchor).frame;
+    texts(&t.shapes, label).into_iter().find(|r| frame.contains(r.center()))
+}
+
+#[test]
+fn a_clip_context_menu_has_clip_actions_and_no_add_track_rows_while_an_empty_lane_keeps_them() {
+    let mut t = T::new();
+    let keys = t.track("instrument", "Keys");
+    t.app.run("midi.new_clip", json!({"track": keys.0, "start": 10_000, "length": 40_000})).unwrap();
+    let clip = t.app.engine.session().track(keys).unwrap().clips()[0].id;
+    t.app.engine.session_mut().edit.selected_clips = vec![clip];
+    t.frames(3);
+    let at = t.app.arrange.layout.clips.iter().find(|c| c.id == clip.0).unwrap().rect;
+    t.click(at, "secondary");
+    let bounce = find(&t.app.arrange.menu, "Bounce in Place");
+    for row in ["Split at Cursor", "Rename", "Color"] {
+        assert!(drawn_in(&t, &bounce, row).is_some(), "the clip menu has {row}");
+    }
+    for row in ADD_ROWS {
+        assert!(drawn_in(&t, &bounce, row).is_none(), "the clip menu has no {row} row");
+    }
+    // The empty lane, right of the clip: the track rows come first and still add tracks.
+    t.frames(2);
+    let tl = t.app.arrange.layout.timeline;
+    let h = t.header(keys);
+    let lane = [tl[2] - 60.0, h[1] + 4.0, tl[2] - 40.0, h[3] - 4.0];
+    // The first click only closes the clip's menu.
+    t.click(lane, "primary");
+    t.click(lane, "secondary");
+    let menu = t.app.arrange.menu.clone();
+    let bounce = find(&menu, "Bounce in Place");
+    let ys: Vec<f32> = ADD_ROWS.iter().map(|r| drawn_in(&t, &bounce, r).unwrap_or_else(|| panic!("the lane menu has {r}")).min.y).collect();
+    assert!(ys.windows(2).all(|w| w[0] < w[1]), "the track rows are in order: {ys:?}");
+    assert!(ys[3] < drawn_in(&t, &bounce, "Split at Cursor").unwrap().min.y, "the track rows come before the clip rows");
+    let before = t.app.engine.session().tracks.len();
+    t.click(drawn_in(&t, &bounce, "Add MIDI Track").map(|r| [r.min.x, r.min.y, r.max.x, r.max.y]).unwrap(), "primary");
+    assert_eq!(t.app.engine.session().tracks.len(), before + 1, "{}", t.app.status);
 }
 
 #[test]
