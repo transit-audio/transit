@@ -215,20 +215,36 @@ impl JackBackend {
         ServerState::Running(Server { rate, buffer, devices, virtual_devices })
     }
 
-    /// The listing a session answers, if one is open (see [`Self::probe`]); `None` without a
-    /// session, after a server shutdown, or for an inactive session without a listing.
+    /// The listing a session answers, if one is open (see [`Self::probe`]): through the active
+    /// client, or the open's own listing while the client is not active yet. `None` (so the caller
+    /// probes afresh) without a session, without its client (the watcher took it after a server
+    /// shutdown), once the server shut the client down, and for an inactive session without a
+    /// listing.
+    ///
+    /// The shutdown callback does not take the session lock, so the server can shut the client
+    /// down while it is being read: the flag is read again after the last read, and when it is set
+    /// everything read is discarded and the caller probes afresh, as for a session that is gone.
+    /// (The handle stays valid until transit's own close, which the lock excludes.)
     fn session_listing(&self) -> Option<Server> {
         let guard = lock(&self.slot);
         let session = guard.as_ref()?;
         let client = session.client.as_ref()?;
-        if !session.active || session.shared.shutdown() {
+        if session.shared.shutdown() {
+            return None;
+        }
+        if !session.active {
             return session.listing.as_deref().cloned();
         }
         let (rate, buffer) = (client.sample_rate(), client.buffer_size());
         let physical = client.physical_ports();
-        let devices = devices::group(&physical, rate, buffer);
         let owned = [client.name()];
-        let virtual_devices = devices::virtual_groups(&client.output_ports(), &physical, &owned, rate, buffer);
+        let outputs = client.output_ports();
+        if session.shared.shutdown() {
+            log::info!("JACK: the server shut the client down while it was listed; listing afresh");
+            return None;
+        }
+        let devices = devices::group(&physical, rate, buffer);
+        let virtual_devices = devices::virtual_groups(&outputs, &physical, &owned, rate, buffer);
         Some(Server { rate, buffer, devices, virtual_devices })
     }
 
@@ -564,8 +580,12 @@ struct Side {
     panic_reported: bool,
     /// What this side's start asked for and what each connect returned (#760 rule 3).
     asked: Vec<Asked>,
-    /// The watcher's next tick looks for `asked` among this side's links, once.
+    /// The watcher looks for `asked` among this side's links, once, after a later process cycle.
     check_due: bool,
+    /// The process cycles counted right after this side's connects, and the ticks the check has
+    /// waited for a later cycle to complete.
+    connect_cycle: u64,
+    check_ticks: u32,
 }
 
 impl Side {
@@ -743,6 +763,8 @@ impl Session {
             panic_reported: false,
             asked: Vec::new(),
             check_due: false,
+            connect_cycle: 0,
+            check_ticks: 0,
         });
         Ok(generation)
     }
@@ -805,8 +827,10 @@ impl Session {
                 asked.push(Asked { source, destination, returned });
             }
         }
+        let cycles_after_connects = self.shared.cycles();
         if let Some(side) = self.side_mut(generation) {
             (side.asked, side.check_due) = (asked, true);
+            (side.connect_cycle, side.check_ticks) = (cycles_after_connects, 0);
         }
         self.shared.side(output).set_state(engine::STARTED);
         Ok(())
@@ -934,25 +958,52 @@ impl Session {
     }
 
     /// The startup check (#760 rules 3 and 6), on the watcher's tick under the session lock: each
-    /// side started since the last tick has its asked links looked for once; when every side has
-    /// started and been checked, the reported latency is read once for the session. Bounded: one
-    /// read per asked pair and per device port, no wait. Never on a latched client (no watcher runs
-    /// there) nor before the figures settled.
+    /// started side's asked links are looked for once, at the first tick after a process cycle
+    /// that began after its connects has completed (the server shows a link from a later graph
+    /// cycle on); when every side has started and been checked, the reported latency is read once
+    /// for the session. A side whose cycle does not come within [`startup::CHECK_TICKS`] ticks is
+    /// not checked, and one neutral line says so ([`startup::LINK_CHECK_SKIPPED`]). Bounded: one
+    /// read per asked pair and per device port, no wait. Never on a latched client (no watcher
+    /// runs there) nor before the figures settled.
+    ///
+    /// The shutdown callback does not take the session lock: the flag is read again after the
+    /// reads, and when the server shut the client down meanwhile nothing read is published.
     fn startup_check(&mut self) {
-        if !self.settled || self.rebuild || !self.active {
+        if !self.settled || self.rebuild || !self.active || self.shared.shutdown() {
             return;
         }
         let Some(client) = self.client.as_deref() else { return };
+        let cycles = self.shared.cycles();
+        let (mut links, mut skipped) = (Vec::new(), false);
         for side in self.sides.iter_mut().filter(|s| s.check_due) {
+            if !side.asked.is_empty() && !startup::cycle_completed_since(side.connect_cycle, cycles) {
+                side.check_ticks += 1;
+                if side.check_ticks < startup::CHECK_TICKS {
+                    continue;
+                }
+                side.check_due = false;
+                skipped = true;
+                continue;
+            }
             side.check_due = false;
-            self.link_lines.extend(startup::link_lines(client, !side.output(), &side.names, &side.asked, self.pipewire));
+            links.extend(startup::link_lines(client, !side.output(), &side.names, &side.asked, self.pipewire));
         }
         let started = |s: &Side| self.shared.side(s.output()).state() == engine::STARTED;
-        if self.latency_line.is_some() || self.sides.is_empty() || !self.sides.iter().all(|s| started(s) && !s.check_due) {
+        let ready = self.latency_line.is_none() && !self.sides.is_empty() && self.sides.iter().all(|s| started(s) && !s.check_due);
+        let ports = |output: bool| self.sides.iter().find(|s| s.output() == output).map(|s| s.meaning.channels.as_slice());
+        let latency = if ready { startup::latency_line(client, ports(true), ports(false), self.rate) } else { None };
+        if self.shared.shutdown() {
+            log::info!("JACK: the server shut the client down during the startup check; nothing of it is shown");
             return;
         }
-        let ports = |output: bool| self.sides.iter().find(|s| s.output() == output).map(|s| s.meaning.channels.as_slice());
-        self.latency_line = startup::latency_line(client, ports(true), ports(false), self.rate);
+        self.link_lines.extend(links);
+        if skipped && !self.link_lines.iter().any(|l| l == startup::LINK_CHECK_SKIPPED) {
+            log::info!("JACK: no process cycle completed after the connects within the startup check's bound; the links were not checked");
+            self.link_lines.push(startup::LINK_CHECK_SKIPPED.to_owned());
+        }
+        if latency.is_some() {
+            self.latency_line = latency;
+        }
     }
 
     /// The Audio Devices lines of this session (#760 rule 6, rule 3): the graph, the latency

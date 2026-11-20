@@ -2,23 +2,44 @@
 //! the Audio Devices lines it makes. Display only: nothing here feeds a stamp, `Achieved.latency`,
 //! `Stream::latency`, Path latency or compensation.
 //!
-//! - **transit's own links.** At the watcher's first tick after a direction's connection attempts,
-//!   each pair it asked for is looked for among its port's links (`jack_port_get_all_connections`
-//!   on the port transit owns). A pair not seen is one line, historical and one-shot: a link that
-//!   appears later does not update it, and nothing is retried. Nothing is asked, and nothing read,
-//!   with auto-connect off.
+//! - **transit's own links.** Once a process cycle that began after a direction's connection
+//!   attempts has completed (the server shows a new link from a later graph cycle on), at the
+//!   watcher's next tick, each pair it asked for is looked for among its port's links
+//!   (`jack_port_get_all_connections` on the port transit owns). A pair not seen is one line,
+//!   historical and one-shot: a link that appears later does not update it, and nothing is
+//!   retried. When no such cycle completes within [`CHECK_TICKS`] ticks, no link is called
+//!   missing and one neutral line says the check could not run. Nothing is asked, and nothing
+//!   read, with auto-connect off.
 //! - **The graph and the reported latency.** The graph's rate and buffer size as the active client
 //!   reported them (the buffer "observed" once a process cycle ran with it), and the latency the
 //!   server reports for the device ports each side stands for, read once per session at that same
 //!   tick, labeled as reported, never as measured. Under PipeWire a fixed sentence follows.
 //!
 //! The watcher's tick runs these reads on its own thread under the session lock, with no wait: one
-//! read per asked pair and per device port.
+//! read per asked pair and per device port. The server's shutdown callback takes no lock of
+//! transit's, so a shutdown seen after the reads publishes nothing of them.
 
 use crate::api::{JackClient, Latency};
 
 /// Under PipeWire, after the graph and latency lines (rule 6), verbatim.
 pub const PIPEWIRE_STAGES: &str = "PipeWire may perform rate conversion and add buffering. JACK does not identify those stages separately or establish which delays are included in these reported ranges.";
+
+/// How many watcher ticks a side's link check waits for a process cycle that began after its
+/// connects to complete: 100 ticks, about 2 s at the shipping 20 ms period. Two cycles at the
+/// largest block the backend serves (8192 frames) at 44.1 kHz take about 0.37 s, so the bound
+/// leaves five times that for a slow first cycle; past it no link is called missing.
+pub(crate) const CHECK_TICKS: u32 = 100;
+
+/// Said once, instead of any link line, when the bound passed with no completed process cycle
+/// after the connects: nothing is claimed about the links.
+pub const LINK_CHECK_SKIPPED: &str = "The startup link check could not run: no process cycle completed within about 2 seconds of the start.";
+
+/// Whether a process cycle that began after `before` cycles had been counted (the count right
+/// after the connects) has completed by `now`. The count rises as a cycle begins and cycles run
+/// one at a time, so a second cycle beginning means the first one after the connects is done.
+pub(crate) fn cycle_completed_since(before: u64, now: u64) -> bool {
+    now >= before.saturating_add(2)
+}
 
 /// One link a direction's start asked for, and what `jack_connect` said (`None`: success).
 #[derive(Debug, Clone)]
@@ -128,6 +149,13 @@ mod tests {
         assert_eq!(side_text("input", &[Latency::NoPort, Latency::NoPort], 48_000), "input not reported");
         assert_eq!(side_text("output", &[Latency::NoFunction], 48_000), "output not reported", "the library lacks the call");
         assert_eq!(side_text("output", &[], 48_000), "output not reported", "no device port");
+    }
+
+    #[test]
+    fn a_cycle_counts_as_completed_only_once_the_next_one_began() {
+        assert!(!cycle_completed_since(7, 7), "no cycle since the connects");
+        assert!(!cycle_completed_since(7, 8), "the first one may still run");
+        assert!(cycle_completed_since(7, 9));
     }
 
     #[test]

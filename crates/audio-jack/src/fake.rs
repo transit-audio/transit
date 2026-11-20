@@ -95,6 +95,18 @@ struct State {
     latency_reads: u32,
     /// Link reads of transit's own ports so far ([`JackClient::links`]).
     link_reads: u32,
+    /// The server stops as the next read of this kind begins ([`Read`]); the read still answers
+    /// (the client handle stays valid until transit closes it). The shutdown callback runs on
+    /// another thread and takes no lock of transit's.
+    shutdown_during: Option<Read>,
+}
+
+/// A client read the fake can stop the server in ([`FakeServer::shutdown_during`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Read {
+    PhysicalPorts,
+    Links,
+    Latency,
 }
 
 /// How the fake answers as PipeWire's JACK library (amendment for #760, "The fake gains a PipeWire
@@ -204,6 +216,7 @@ impl FakeServer {
             no_latency_call: false,
             latency_reads: 0,
             link_reads: 0,
+            shutdown_during: None,
         };
         Self { state: Arc::new(Mutex::new(state)) }
     }
@@ -261,6 +274,36 @@ impl FakeServer {
     /// Link reads of transit's own ports so far.
     pub(crate) fn link_reads(&self) -> u32 {
         self.lock().link_reads
+    }
+
+    /// One graph cycle: links made and not shown yet come one cycle closer to showing.
+    fn graph_cycle(state: &mut State) {
+        for (_, left) in &mut state.unseen {
+            *left = left.saturating_sub(1);
+        }
+        let (shown, unseen): (Vec<_>, Vec<_>) = std::mem::take(&mut state.unseen).into_iter().partition(|(_, left)| *left == 0);
+        state.unseen = unseen;
+        state.links.extend(shown.into_iter().map(|(link, _)| link));
+    }
+
+    /// The server stops as the next read of kind `read` begins; the read still answers.
+    pub(crate) fn shutdown_during(&self, read: Read) {
+        self.lock().shutdown_during = Some(read);
+    }
+
+    /// Stops the server when `read` is the scripted one (with no lock of the fake's held).
+    fn maybe_shutdown(&self, read: Read) {
+        let due = {
+            let mut state = self.lock();
+            let due = state.shutdown_during == Some(read);
+            if due {
+                state.shutdown_during = None;
+            }
+            due
+        };
+        if due {
+            self.shutdown();
+        }
     }
 
     /// A link goes away (another program removed it).
@@ -366,6 +409,7 @@ impl FakeServer {
         }
         let clock = {
             let mut state = self.lock();
+            Self::graph_cycle(&mut state);
             let clock = Clock { current_frames: state.frames, current_usecs: state.usecs, now_usecs: state.usecs + late_us };
             state.frames = state.frames.wrapping_add(frames);
             state.usecs += u64::from(frames) * 1_000_000 / u64::from(state.rate.max(1));
@@ -572,12 +616,7 @@ impl JackApi for FakeServer {
         let due = {
             let mut state = self.lock();
             state.usecs += u64::try_from(period.as_micros()).unwrap_or(u64::MAX);
-            for (_, left) in &mut state.unseen {
-                *left = left.saturating_sub(1);
-            }
-            let (shown, unseen): (Vec<_>, Vec<_>) = std::mem::take(&mut state.unseen).into_iter().partition(|(_, left)| *left == 0);
-            state.unseen = unseen;
-            state.links.extend(shown.into_iter().map(|(link, _)| link));
+            Self::graph_cycle(&mut state);
             for (left, _) in &mut state.scheduled {
                 *left = left.saturating_sub(1);
             }
@@ -686,6 +725,7 @@ impl JackClient for FakeClient {
     }
 
     fn physical_ports(&self) -> Vec<PhysicalPort> {
+        self.server.maybe_shutdown(Read::PhysicalPorts);
         let state = self.server.lock();
         state.ports.iter().filter(|p| p.capture).chain(state.ports.iter().filter(|p| !p.capture)).cloned().collect()
     }
@@ -791,6 +831,7 @@ impl JackClient for FakeClient {
     }
 
     fn links(&self, input: bool, index: usize) -> Vec<PortName> {
+        self.server.maybe_shutdown(Read::Links);
         let mut state = self.server.lock();
         state.link_reads += 1;
         let ours = state.clients[self.index].ports.iter().filter(|(_, i)| *i == input).nth(index).map(|(name, _)| name.clone());
@@ -812,6 +853,7 @@ impl JackClient for FakeClient {
     /// JACK 2: the server's one quantum changes at once, for every client. PipeWire: the client's
     /// own node forces it while the client is active (pj:5413-5437, keys.h:173-174).
     fn latency_range(&self, name: &str, playback: bool) -> Latency {
+        self.server.maybe_shutdown(Read::Latency);
         let mut state = self.server.lock();
         if state.no_latency_call {
             return Latency::NoFunction;
