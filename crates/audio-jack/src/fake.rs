@@ -6,7 +6,7 @@
 use crate::api::{ClientError, JackApi, JackClient, PhysicalPort, PortName};
 use crate::engine::{Clock, Cycle, Engine, InputPlanes, OutputPlanes, Shared};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// What the fake server knows of one client.
 #[derive(Debug, Default)]
@@ -70,6 +70,11 @@ struct State {
     /// PipeWire's `jack.self-connect-mode` for links with an end on a transit port: `ignore-*`
     /// answers 0 and makes no link; `fail-*` answers 1.
     self_connect: SelfConnect,
+    /// JACK 2's double-buffered graph: a link a connect makes shows only after this many graph
+    /// cycles (0: at once). Each [`JackApi::await_graph`] is one cycle.
+    link_delay: u32,
+    /// Links made and not shown yet, with the graph cycles left until they show.
+    unseen: Vec<((String, String), u32)>,
 }
 
 /// The fake's `jack.self-connect-mode`.
@@ -95,6 +100,12 @@ impl State {
     /// Removes every link with an end in `ports`.
     fn unlink(&mut self, ports: &[String]) {
         self.links.retain(|(a, b)| !ports.contains(a) && !ports.contains(b));
+        self.unseen.retain(|((a, b), _)| !ports.contains(a) && !ports.contains(b));
+    }
+
+    /// Whether the graph holds `link`, shown or not yet.
+    fn holds(&self, link: &(String, String)) -> bool {
+        self.links.contains(link) || self.unseen.iter().any(|(l, _)| l == link)
     }
 }
 
@@ -128,6 +139,8 @@ impl FakeServer {
             duplicates: false,
             race: None,
             self_connect: SelfConnect::Allow,
+            link_delay: 0,
+            unseen: Vec::new(),
         };
         Self { state: Arc::new(Mutex::new(state)) }
     }
@@ -257,6 +270,13 @@ impl FakeServer {
     /// pair is served (a graph edit racing the restore).
     pub(crate) fn link_appears_on_connect(&self, source: &str, destination: &str) {
         self.lock().race = Some((source.to_owned(), destination.to_owned()));
+    }
+
+    /// From now on a link a connect makes shows in the graph only after `cycles` graph cycles (JACK
+    /// 2 switches to the graph state a connect wrote at the start of a later cycle, postponed while
+    /// the previous graph has not finished).
+    pub(crate) fn delaying_links(&self, cycles: u32) {
+        self.lock().link_delay = cycles;
     }
 
     /// From now on transit's connects are served under this `jack.self-connect-mode`.
@@ -394,6 +414,24 @@ impl JackApi for FakeServer {
         self.lock().version.clone()
     }
 
+    /// One graph cycle of `period`, on the stepped clock: links not shown yet come one cycle
+    /// closer to showing.
+    fn await_graph(&self, period: Duration) {
+        let mut state = self.lock();
+        state.usecs += u64::try_from(period.as_micros()).unwrap_or(u64::MAX);
+        for (_, left) in &mut state.unseen {
+            *left = left.saturating_sub(1);
+        }
+        let (shown, unseen): (Vec<_>, Vec<_>) = std::mem::take(&mut state.unseen).into_iter().partition(|(_, left)| *left == 0);
+        state.unseen = unseen;
+        state.links.extend(shown.into_iter().map(|(link, _)| link));
+    }
+
+    /// The fake's stepped clock (µs), advanced by cycles and graph waits only.
+    fn now_us(&self) -> u64 {
+        self.lock().usecs
+    }
+
     fn open_client(&self, name: &str) -> Result<Box<dyn JackClient>, ClientError> {
         let mut state = self.lock();
         if !state.library {
@@ -480,7 +518,7 @@ impl JackClient for FakeClient {
         state.connects.push(link.clone());
         if state.race.as_ref() == Some(&link) {
             state.race = None;
-            if !state.links.contains(&link) {
+            if !state.holds(&link) {
                 state.links.push(link.clone());
             }
         }
@@ -498,8 +536,13 @@ impl JackClient for FakeClient {
             SelfConnect::Ignore => return Ok(()),
             SelfConnect::Fail => return Err("jack_connect returned 1".into()),
         }
-        if state.duplicates || !state.links.contains(&link) {
-            state.links.push(link.clone());
+        if state.duplicates || !state.holds(&link) {
+            if state.link_delay > 0 {
+                let delay = state.link_delay;
+                state.unseen.push((link.clone(), delay));
+            } else {
+                state.links.push(link.clone());
+            }
             state.clients[self.index].connections.push(link);
         }
         Ok(())

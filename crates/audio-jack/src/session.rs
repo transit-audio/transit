@@ -680,8 +680,9 @@ impl Session {
         Some(links::take(client.as_ref(), &self.ports(), self.id, Arc::clone(&self.shared)))
     }
 
-    /// Restores `snapshot`, taken from an earlier session, on this started client.
-    fn restore(&mut self, snapshot: &links::Snapshot) -> Option<String> {
+    /// Restores `snapshot`, taken from an earlier session, on this started client: what it did,
+    /// with the links the server accepted and does not show yet left to [`Session::confirm`].
+    fn restore(&mut self, snapshot: &links::Snapshot) -> Option<links::Restored> {
         if snapshot.from >= self.id {
             log::warn!("JACK: a link snapshot is restored only on a later client; discarded");
             return None;
@@ -692,7 +693,24 @@ impl Session {
         }
         let ports = self.ports();
         let client = self.client.as_mut()?;
-        links::restore(client.as_mut(), &ports, snapshot).note()
+        Some(links::restore(client.as_mut(), &ports, snapshot))
+    }
+
+    /// One read of the links a restore still waits for (#431). `None` once this client is no
+    /// longer started (stopped, or the server shut it down): nothing more will show.
+    fn confirm(&self, done: &mut links::Restored) -> Option<bool> {
+        if !self.active || self.shared.shutdown() {
+            return None;
+        }
+        let client = self.client.as_ref()?;
+        Some(links::confirm(client.as_ref(), done))
+    }
+
+    /// One period of the server's graph, the step of the restore's confirmation: at least 1 ms, at
+    /// most the confirmation's whole limit.
+    fn period(&self) -> Duration {
+        let micros = u64::from(self.buffer) * 1_000_000 / u64::from(self.rate.max(1));
+        Duration::from_micros(micros).clamp(Duration::from_millis(1), links::CONFIRM_LIMIT)
     }
 }
 
@@ -874,10 +892,32 @@ impl ab::Stream for JackStream {
 
     /// Restores a snapshot of an earlier client of this backend on this stream's started client,
     /// once (it is consumed here). Another backend's snapshot is discarded.
+    ///
+    /// Links the server accepted but its graph does not show yet are read again once per period
+    /// until they show or [`links::CONFIRM_LIMIT`] has passed (a graph switch the server postponed;
+    /// see `links`). The wait is on this control thread with the session's lock released: the lock
+    /// is held for the restore and then for each read only, as long as one read-back held it
+    /// before.
     fn restore_links(&self, snapshot: ab::LinkSnapshot) -> Option<String> {
         let snapshot = snapshot.downcast::<links::Snapshot>().ok()?;
-        let mut guard = lock(&self.slot);
-        guard.as_mut().filter(|s| s.id == self.session)?.restore(&snapshot)
+        let (mut done, period) = {
+            let mut guard = lock(&self.slot);
+            let session = guard.as_mut().filter(|s| s.id == self.session)?;
+            (session.restore(&snapshot)?, session.period())
+        };
+        let limit = u64::try_from(links::CONFIRM_LIMIT.as_micros()).unwrap_or(u64::MAX);
+        let start = self.api.now_us();
+        let mut why = None;
+        while !done.pending.is_empty() && self.api.now_us().saturating_sub(start) < limit {
+            self.api.await_graph(period);
+            let guard = lock(&self.slot);
+            if guard.as_ref().filter(|s| s.id == self.session).and_then(|s| s.confirm(&mut done)).is_none() {
+                why = Some("transit's client stopped before the server showed it");
+                break;
+            }
+        }
+        links::finish(&mut done, why);
+        done.note()
     }
 }
 

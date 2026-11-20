@@ -27,6 +27,15 @@
 //!   client's own port, and that is a failed restore like a refused connect. A remote name with no
 //!   audio port of the right direction now (gone, or another type or direction) is a failed
 //!   restore, logged once and not retried; so is a connect the server refuses.
+//! - **Confirming.** A link a connect made is not always visible at once: JACK 2 writes it into the
+//!   graph's next state, and a read returns the current state after waiting at most one 1.1-period
+//!   sleep; the server switches states only at the start of a cycle whose previous graph finished
+//!   (a late client postpones it up to the client timeout, 500 ms by default on a server that does
+//!   not run in real time). So a connect that answered 0 and is not read back yet is pending
+//!   ([`Restored::pending`]): the stream reads the pending links again once per period, on the
+//!   control thread with the session's lock taken only for each read, until all show or
+//!   [`CONFIRM_LIMIT`] has passed; what is still missing then is a failed restore. Nothing is
+//!   connected again while confirming.
 //! - **Names.** JACK port names are byte strings. A linked port whose name is not valid UTF-8 is
 //!   not saved (a lossy copy could name another port); the restore says so. Every saved name is
 //!   the port's exact bytes.
@@ -42,6 +51,15 @@ use crate::api::JackClient;
 use crate::engine::Shared;
 use std::fmt::Write as _;
 use std::sync::Arc;
+use std::time::Duration;
+
+/// How long a restore waits for links the server accepted to show in the graph before it calls
+/// them failed. It covers JACK 2's longest default postponement of a graph switch, the 500 ms client
+/// timeout of a server that does not run in real time (`JackControlAPI.cpp`; a real-time server's is
+/// two periods), plus the next cycle at a large quantum (8192 frames at 44.1 kHz is 186 ms). Spent
+/// in full only when a link never shows (PipeWire's `jack.self-connect-mode` set to ignore), once
+/// per reopen for all links together.
+pub(crate) const CONFIRM_LIMIT: Duration = Duration::from_millis(750);
 
 /// One of transit's ports: its direction and its index (`in_{index + 1}`, `out_{index + 1}`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,11 +186,24 @@ pub(crate) fn exact_pattern(name: &str) -> String {
     pattern
 }
 
+/// A link the server accepted (`jack_connect` answered 0) that the graph does not show yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Pending {
+    pub(crate) ours: Local,
+    pub(crate) theirs: String,
+    /// The link as the messages name it.
+    pub(crate) what: String,
+}
+
 /// What a restore did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Restored {
     /// Links made again, or found already made.
     pub(crate) restored: usize,
+    /// Links accepted and not shown yet, for [`confirm`] to read again until [`finish`].
+    pub(crate) pending: Vec<Pending>,
+    /// How many links the snapshot held, for the log line of [`finish`].
+    pub(crate) total: usize,
     /// "in_1 from Player:out_L (the input device changed)": links dropped because the port no
     /// longer means what it meant.
     pub(crate) dropped: Vec<String>,
@@ -236,10 +267,17 @@ fn describe(link: &Saved) -> String {
     format!("{} {} {far}", link.ours.label(), if link.ours.input { "from" } else { "to" })
 }
 
+/// Whether `ours` is linked to `theirs` in the graph `client` reads.
+fn linked(client: &dyn JackClient, ours: Local, theirs: &str) -> bool {
+    client.links(ours.input, ours.index).iter().any(|n| n.as_deref() == Ok(theirs))
+}
+
 /// Restores `snapshot` on `client`, the replacement client whose directions are `sides`, after it
-/// started. Every failure and drop is logged here, once; nothing is retried.
+/// started. Every failure and drop is logged once, here or in [`finish`]; nothing is connected
+/// twice. A link the server accepted and the graph does not show yet is left in
+/// [`Restored::pending`] for the caller to [`confirm`].
 pub(crate) fn restore(client: &mut dyn JackClient, sides: &[Ports], snapshot: &Snapshot) -> Restored {
-    let mut done = Restored { failed: snapshot.unsaved.clone(), ..Restored::default() };
+    let mut done = Restored { failed: snapshot.unsaved.clone(), total: snapshot.links.len(), ..Restored::default() };
     if snapshot.origin.shutdown() {
         // Rule 6: nothing is restored after a server shutdown, even one that came after the
         // snapshot was read.
@@ -279,29 +317,44 @@ pub(crate) fn restore(client: &mut dyn JackClient, sides: &[Ports], snapshot: &S
         };
         // A link already there counts as restored without a connect, so a duplicate is never
         // asked for (a server could make a second link of the same pair).
-        let linked = |client: &dyn JackClient| client.links(link.ours.input, link.ours.index).iter().any(|n| n.as_deref() == Ok(theirs.as_str()));
-        if linked(&*client) {
+        if linked(&*client, link.ours, &theirs) {
             done.restored += 1;
             continue;
         }
         let (source, destination) = if link.ours.input { (&theirs, &ours) } else { (&ours, &theirs) };
         match client.connect(source, destination) {
             // The answer alone is not trusted: PipeWire's `jack.self-connect-mode` (a link with one
-            // end on the client's own port) can answer 0 and make no link. The link is read back.
-            Ok(()) if linked(&*client) => done.restored += 1,
-            Ok(()) => {
-                let why = "the server did not make it; its self-connect setting may refuse links to transit's ports";
-                log::warn!("JACK: not restoring the link {what}: {why}");
-                done.failed.push(format!("{what} ({why})"));
-            }
+            // end on the client's own port) can answer 0 and make no link. The link is read back,
+            // now and, while it does not show, by `confirm` until the limit.
+            Ok(()) if linked(&*client, link.ours, &theirs) => done.restored += 1,
+            Ok(()) => done.pending.push(Pending { ours: link.ours, theirs, what }),
             Err(e) => {
                 log::warn!("JACK: not restoring the link {what}: {e}");
                 done.failed.push(format!("{what} ({e})"));
             }
         }
     }
-    if !snapshot.links.is_empty() {
-        log::info!("JACK: restored {} of {} links made outside transit", done.restored, snapshot.links.len());
-    }
     done
+}
+
+/// Reads the pending links of `done` again on `client`; those the graph shows now are restored.
+/// Connects nothing. Returns whether any link is still pending.
+pub(crate) fn confirm(client: &dyn JackClient, done: &mut Restored) -> bool {
+    let before = done.pending.len();
+    done.pending.retain(|p| !linked(client, p.ours, &p.theirs));
+    done.restored += before - done.pending.len();
+    !done.pending.is_empty()
+}
+
+/// Ends a restore: a link still pending is a failed restore, for `why` (`None`: the graph never
+/// showed it within [`CONFIRM_LIMIT`]).
+pub(crate) fn finish(done: &mut Restored, why: Option<&str>) {
+    let why = why.unwrap_or("the server did not make it; its self-connect setting may refuse links to transit's ports");
+    for pending in std::mem::take(&mut done.pending) {
+        log::warn!("JACK: not restoring the link {}: {why}", pending.what);
+        done.failed.push(format!("{} ({why})", pending.what));
+    }
+    if done.total > 0 {
+        log::info!("JACK: restored {} of {} links made outside transit", done.restored, done.total);
+    }
 }

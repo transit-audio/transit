@@ -3,7 +3,8 @@
 //! library, `crate::fake` over a scripted server, so everything above runs in tests anywhere.
 
 use crate::engine::{Engine, Shared};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 /// One physical audio port of the server, by its full name ("system:capture_1").
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +59,19 @@ pub(crate) trait JackApi: Send + Sync {
     /// the last selection, `None` before the first, or where nothing is chosen (the fake server).
     fn library(&self) -> Option<crate::library::Selection> {
         None
+    }
+    /// Waits about `period` on the calling control thread while the server runs its graph: never
+    /// under the session's lock, never from a JACK callback. A link a connect made can show in
+    /// [`JackClient::links`] only at a later graph cycle: JACK 2 writes it into the graph's next
+    /// state and the server switches to that state at the start of a cycle whose previous graph
+    /// finished (#431, the restore's confirmation).
+    fn await_graph(&self, period: Duration) {
+        std::thread::sleep(period);
+    }
+    /// A monotonic clock in microseconds, for the cap on [`JackApi::await_graph`] waits.
+    fn now_us(&self) -> u64 {
+        static ORIGIN: OnceLock<Instant> = OnceLock::new();
+        u64::try_from(ORIGIN.get_or_init(Instant::now).elapsed().as_micros()).unwrap_or(u64::MAX)
     }
 }
 

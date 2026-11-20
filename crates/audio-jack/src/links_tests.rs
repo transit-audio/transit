@@ -275,6 +275,58 @@ fn a_connect_the_server_ignores_or_refuses_is_a_failed_restore() {
     }
 }
 
+/// The period of [`server`]'s graph in µs (256 frames at 48 kHz), the confirmation's step.
+const PERIOD_US: u64 = 256 * 1_000_000 / 48_000;
+
+/// JACK 2's double-buffered graph: `jack_connect` answers 0 at once, but the link shows only after
+/// the server switched to the graph state the connect wrote, cycles later when a late client
+/// postpones the switch. The restore reads the link again once per graph cycle until it shows:
+/// restored, no diagnostic, nothing connected twice, and no longer waited than the cycles it took.
+#[test]
+fn a_link_the_graph_shows_cycles_after_the_connect_counts_as_restored() {
+    let server = server();
+    let backend = manual(&server);
+    let old = open(&backend, Choice::default()).unwrap();
+    server.outside_link("Player:out_L", "transit:in_1");
+    server.outside_link("transit:out_1", "Recorder:in_1");
+    let snapshot = old.render.snapshot_links().unwrap();
+    drop(old);
+    let new = open(&backend, Choice::default()).unwrap();
+    server.delaying_links(3);
+    let before = server.connects().len();
+    let start = JackApi::now_us(&server);
+    assert_eq!(new.render.restore_links(snapshot), None, "both came back; neither is called failed");
+    assert!(server.linked("Player:out_L", "transit:in_1") && server.linked("transit:out_1", "Recorder:in_1"));
+    assert_eq!(server.connects().len() - before, 2, "each asked for once; confirming connects nothing");
+    assert_eq!(JackApi::now_us(&server) - start, 3 * PERIOD_US, "waited the three graph cycles and no more");
+}
+
+/// A link the server accepted and never shows (PipeWire's self-connect ignore mode, or a graph
+/// that stays stalled) is a failed restore once the confirmation's limit has passed, not later: the
+/// wait is bounded by `links::CONFIRM_LIMIT` plus at most one period.
+#[test]
+fn a_link_the_graph_never_shows_is_a_failed_restore_at_the_limit() {
+    let server = server();
+    let backend = manual(&server);
+    let old = open(&backend, Choice::default()).unwrap();
+    server.outside_link("Player:out_L", "transit:in_1");
+    let snapshot = old.render.snapshot_links().unwrap();
+    drop(old);
+    let new = open(&backend, Choice::default()).unwrap();
+    server.delaying_links(u32::MAX);
+    let start = JackApi::now_us(&server);
+    let note = new.render.restore_links(snapshot).expect("a diagnostic");
+    assert!(
+        note.contains("in_1 from Player:out_L (the server did not make it; its self-connect setting may refuse links to transit's ports)"),
+        "{note}"
+    );
+    let waited = JackApi::now_us(&server) - start;
+    let limit = u64::try_from(crate::links::CONFIRM_LIMIT.as_micros()).unwrap();
+    assert!((limit..limit + PERIOD_US).contains(&waited), "waited {waited} µs for a limit of {limit} µs");
+    let tried = server.connects().iter().filter(|(a, _)| a == "Player:out_L").count();
+    assert_eq!(tried, 1, "asked once, not retried while confirming");
+}
+
 /// JACK 2: another client makes the link between the restore's look and its connect; the connect
 /// answers `EEXIST`, which counts as restored, and nothing is retried.
 #[test]

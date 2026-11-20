@@ -234,6 +234,11 @@ fn server_a_link_made_outside_comes_back_after_a_reopen() {
     let name = backend.client_name().expect("a client");
     let (out_1, in_1) = (format!("{name}:out_1"), format!("{name}:in_1"));
     backend.with_client(|c| c.connect(&out_1, &in_1)).unwrap().unwrap();
+    // JACK 2 shows the link once the server switched to the graph state the connect wrote, at the
+    // start of a cycle whose previous graph finished: a stalled client (the stalled-cycle test runs
+    // on the same server at the same time) postpones it past the one 1.1-period wait inside the
+    // read. The patchbay's link is in place once the graph shows it.
+    wait_for("the graph to show the link", Duration::from_secs(10), || backend.with_client(|c| c.links(true, 0)) == Some(vec![Ok(out_1.clone())]));
     assert_eq!(backend.with_client(|c| c.links(true, 0)), Some(vec![Ok(out_1.clone())]), "in_1's links, read through its own port");
     assert_eq!(backend.with_client(|c| c.links(false, 0)), Some(vec![Ok(in_1.clone())]));
     assert_eq!(backend.with_client(|c| c.links(true, 99)), Some(Vec::new()), "no such port: no links");
@@ -255,6 +260,56 @@ fn server_a_link_made_outside_comes_back_after_a_reopen() {
     assert_eq!(restored, [format!("{name}:out_1")]);
     drop(capture);
     drop(render);
+}
+
+/// The restore's confirmation against JACK 2 (#431): another client stalls its cycle while the
+/// restore connects, so the server postpones the switch to the graph state the connect wrote (a
+/// switch waits for the previous graph to finish), past the one 1.1-period wait inside
+/// `jack_port_get_all_connections`. The link shows only after the stall, and it is restored, not
+/// called failed.
+#[test]
+fn server_a_link_restored_while_another_client_stalls_the_graph_counts_as_restored() {
+    let Some(_server) = server_or_skip("server_a_link_restored_while_another_client_stalls_the_graph_counts_as_restored") else { return };
+    // The other client: a second backend (its own JACK client) whose render callback, once asked,
+    // says so and then sleeps through many cycles.
+    let other = real().without_auto_connect();
+    let (stall, stalling) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let (ask, inside) = (Arc::clone(&stall), Arc::clone(&stalling));
+    let stall_cb: ab::RenderCallback = Box::new(move |_| {
+        if ask.swap(false, Ordering::SeqCst) {
+            inside.store(true, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(150));
+        }
+    });
+    let (other_capture, other_render, _, _, _) = open_duplex(&other, stall_cb, Box::new(|_| {}));
+    other_capture.start().unwrap();
+    other_render.start().unwrap();
+
+    let backend = real().without_auto_connect();
+    let (render_cb, capture_cb) = silent();
+    let (capture, render, _, _, _) = open_duplex(&backend, render_cb, capture_cb);
+    capture.start().unwrap();
+    render.start().unwrap();
+    let name = backend.client_name().expect("a client");
+    let (out_1, in_1) = (format!("{name}:out_1"), format!("{name}:in_1"));
+    backend.with_client(|c| c.connect(&out_1, &in_1)).unwrap().unwrap();
+    wait_for("the graph to show the link", Duration::from_secs(10), || backend.with_client(|c| c.links(true, 0)) == Some(vec![Ok(out_1.clone())]));
+    let snapshot = render.snapshot_links().expect("an active client's links");
+    drop(capture);
+    drop(render);
+    let (render_cb, capture_cb) = silent();
+    let (capture, render, _, _, _) = open_duplex(&backend, render_cb, capture_cb);
+    capture.start().unwrap();
+    render.start().unwrap();
+    stall.store(true, Ordering::SeqCst);
+    wait_for("the other client's stall", Duration::from_secs(10), || stalling.load(Ordering::SeqCst));
+    assert_eq!(render.restore_links(snapshot), None, "the link shows after the stall and counts as restored");
+    let name = backend.client_name().expect("a client");
+    assert_eq!(backend.with_client(|c| c.links(true, 0)), Some(vec![Ok(format!("{name}:out_1"))]));
+    drop(capture);
+    drop(render);
+    drop(other_render);
+    drop(other_capture);
 }
 
 /// A dummy server of the test's own, named by `JACK_DEFAULT_SERVER`; killed on drop.
