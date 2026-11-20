@@ -78,3 +78,28 @@ fn a_voice_turned_on_mid_gate_transplants() {
     }
     assert!(caught_paths > 0, "the continuation emitted nothing");
 }
+
+/// The quantizers' level hysteresis: Steps put the level at 4 before T (7 × 0.6 = 4.2); at T it
+/// drops to where the kept level rounds to 4 and a fresh quantizer's to 3 (7 × 0.515 = 3.6), so the
+/// pitches after T follow the restored level.
+#[test]
+fn the_quantizer_level_hysteresis_transplants() {
+    let before = Settings { gate_length: 0.5, voices: Voices::All, steps: 0.6, rate: 13, ..Settings::default() };
+    let after = Settings { steps: 0.515, ..before };
+    let mut a = Sequencer::new(11, true);
+    for k in 0..300 {
+        block(&mut a, &before, k);
+    }
+    let rec = record(&a);
+    let mut b = Sequencer::new(1, false);
+    let mut r = Reader::new(&rec);
+    b.restore(&mut r).expect("the restore takes the record");
+    assert!(r.finish(), "the restore reads every word");
+    let mut p = Poison::new(5);
+    b.poison_unobservable(&mut p);
+    for k in 300..900 {
+        assert_eq!(block(&mut a, &after, k), block(&mut b, &after, k), "block {k}: the emitted events differ");
+        assert_eq!(record(&a), record(&b), "block {k}: the records differ");
+        b.poison_unobservable(&mut p);
+    }
+}
