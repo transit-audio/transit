@@ -79,13 +79,13 @@ fn a_voice_turned_on_mid_gate_transplants() {
     assert!(caught_paths > 0, "the continuation emitted nothing");
 }
 
-/// The quantizers' level hysteresis: Steps put the level at 4 before T (7 × 0.6 = 4.2); at T it
-/// drops to where the kept level rounds to 4 and a fresh quantizer's to 3 (7 × 0.515 = 3.6), so the
-/// pitches after T follow the restored level.
+/// The quantizers' level hysteresis: Steps put the level at 1 before T (7 × 0.2 = 1.4); at T it
+/// drops to where the kept level rounds to 1 (quantized to the scale) and a fresh quantizer's to 0
+/// (not quantized; 7 × 0.0857 = 0.6), so the pitches after T follow the restored level.
 #[test]
 fn the_quantizer_level_hysteresis_transplants() {
-    let before = Settings { gate_length: 0.5, voices: Voices::All, steps: 0.6, rate: 13, ..Settings::default() };
-    let after = Settings { steps: 0.515, ..before };
+    let before = Settings { gate_length: 0.5, voices: Voices::All, steps: 0.2, rate: 13, ..Settings::default() };
+    let after = Settings { steps: 0.0857, ..before };
     let mut a = Sequencer::new(11, true);
     for k in 0..300 {
         block(&mut a, &before, k);
