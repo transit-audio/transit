@@ -633,3 +633,35 @@ The round on the revision returned ACCEPT WITH CHANGES with six edits. The coord
 | 4: one eligibility rule | Accepted. The requested names (`audio-jack/src/lib.rs:73-75`) are not the assigned ones. | Rule 1's eligibility, used by the listing and by saved-name resolution (rule 2); slice C gates for an assigned probe name and a saved excluded choice. |
 | 5: the timing hypothesis and the experiment | Accepted. | The `node.lock-quantum=true` default recorded in Context; H1 an observation question; rule 12 records drivers exercised, unchanged forced settings, requested versus achieved buffer size, links right after opening and after a minute, and "untested" when no other driver is exercised; rule 13's cross-driver claim removed; H2's blocking outcome unchanged. |
 | 6: the status table | Accepted. | Rows 2, 5 and 11 corrected; the old experiment marked superseded, its H3 outcome kept in the Deferred block. Stable names are no longer said to guarantee a stable port order (Context, rule 5). |
+
+## Revision 2026-11-20 (#431 slice A, #759): an input name that cannot be resolved is unavailable
+
+Accepted 2026-11-20 by the coordinator under the maintainer's delegation, after an independent review of slice A found the retained fallback to be a wrong-channel risk. Listed for the maintainer's later review with the other choices of the #431 amendment.
+
+**Supersedes**, for inputs only, section 1.5's sentence "A missing input falls back to the first input path of the same width, else silence with a flag", and the numeric wrap that the implementation applied to legacy channel labels. Section 1.4's "never records a wrong channel" is the rule this revision enforces. Output resolution in section 1.5 is unchanged.
+
+**Rule.** A track's input name resolves against the composed input table of the capture endpoint actually opened (rule 8 of the #431 amendment), and against nothing else.
+
+1. A name the composed table holds resolves to that path, when every channel the path names exists on the open input. Otherwise the path is unavailable as a whole.
+2. A legacy label of exactly `In N` or `In N-M` that the table does not hold keeps its numeric meaning only while every channel it names exists on the open input. Otherwise it is unavailable. It never wraps to another channel.
+3. Any other name the composed table does not hold is unavailable. There is no fallback to channel 1, to channels 1-2, or to the first input path of the same width.
+
+**Unavailable means:** the track monitors silence, recording on it is refused with a message that names the input, and the session keeps the name so the right machine or device restores the routing. Nothing is rewritten.
+
+**Why.** Each fallback records or monitors a channel the user did not choose, with no sign that it happened. A refusal that names the input costs one visit to the track's input picker; a take recorded from the wrong channel costs the take.
+
+**Stated break (alpha, no migration).** A session whose track input names a path this machine's input table does not hold used to record from channel 1 (or the wrapped channel). It now refuses until an input is chosen. Release notes carry it under "Changed behavior".
+
+### What slice A's reviews added to this revision
+
+Three independent review rounds of slice A found paths where the rule above, or rule 8's "no substitution", did not yet hold. Each is now part of the record.
+
+4. **One resolver.** An input route resolves only through the machine's composed table: an input path whose channels are all open on the input device and whose name no output path has gives its channels. No device input channel at or past `MAX_DEVICE_CHANNELS` (32) is read.
+5. **Resolved at compile time.** The plan compiler resolves each strip's input route to device channel indices; the audio thread reads those indices only and performs no name lookup.
+6. **Returns fail as a whole.** An unavailable hardware insert return or External Instrument return is no return: the insert runs the flagged dry bypass, the External Instrument has no return and no compensation. Returns take table paths only (the default tables hold every "In N", and a return has no mono fan-out).
+7. **Compose before capture.** Opening an input composes its saved table and passes it to the plan before capture is attached. The held-input paths that attach inside the player (hardware probe, External Instrument measure, real-time render) are reached only after the app has synchronized the table.
+8. **cpal (ALSA, CoreAudio): no substitution, no shared identity.** An input the user chose that is not present opens no input and is named in the error; with no choice the system default opens. When two present input devices have the same name, the input has no identity: it opens with default paths, no input record is read or written for it, and no measurement applies through it.
+9. **Measurement provenance.** A measurement carries the input identity, output device and rate it started with; it is stored, or kept, only while all three are the open ones, and a reopen discards a result waiting for Keep. No measurement of any kind starts or is stored through an input without an identity (hardware insert Measure, External Instrument measure, loopback calibration), and the control channel's `setup.io_map set` refuses a map that adds a measurement naming no input. Measurements without an input identity that are already on disk keep their legacy reading (the output device).
+10. **One namespace on edit.** Adding or renaming a path to a name a bus already has is refused, case-insensitively (section 1.4). Saved tables load as before.
+
+**Stated breaks, ALSA and macOS.** A chosen input that is unplugged or renamed no longer records from the system default: no input opens and the missing one is named. Two connected inputs with one name record with default paths, unsaved edits and no measurements, and the I/O paths page says why.
