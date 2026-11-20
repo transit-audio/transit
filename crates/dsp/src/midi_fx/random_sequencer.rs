@@ -314,11 +314,12 @@ impl MidiEffect for RandomSequencer {
 }
 
 /// Test seam (feature `testing`; ADR 0029, amendment for #742, sections 12 and 13): the record.
-/// Encoded: the parameter values and the sequencer (`transit_random_sequencer::record`: every field
-/// but its refused-event counts and the velocity voltage it draws before each use). Unobservable, under the host's contract that it gives the
-/// transport and the sample rate before every `process` (the `MidiEffect` documentation; the mix's
-/// MIDI effect host does, for every stage, at the start of each block): `transport` and
-/// `sample_rate`, which only `process` reads.
+/// Encoded: the parameter values, the sequencer (`transit_random_sequencer::record`: every field
+/// but its refused-event counts and the velocity voltage it draws before each use), and the
+/// transport and sample rate it holds. Those two are encoded, not left to the host: the mix's MIDI
+/// effect host gives both at the start of each block, but an event taken between blocks
+/// (`MidiFxHost::take` outside a block, as a revoked source's releases are sent) runs `process`
+/// with the ones held from the last block.
 #[cfg(feature = "testing")]
 impl RandomSequencer {
     fn config() -> transit_state_record::Config<'static> {
@@ -329,36 +330,55 @@ impl RandomSequencer {
 
     pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
         use transit_random_sequencer::record::Record;
-        let RandomSequencer { values, sequencer, transport: _, sample_rate: _ } = self;
+        let RandomSequencer { values, sequencer, transport, sample_rate } = self;
         w.record(&Self::config(), |w| {
             w.f32s(values);
             sequencer.record(w);
+            let Transport { playing, recording, tempo, numerator, denominator, samples, seconds, quarters, bar_start, bar } = transport;
+            w.bool(*playing);
+            w.bool(*recording);
+            w.f64(*tempo);
+            w.u32(*numerator);
+            w.u32(*denominator);
+            w.i64(*samples);
+            w.f64(*seconds);
+            w.f64(*quarters);
+            w.f64(*bar_start);
+            w.i64(*bar);
+            w.f64(*sample_rate);
         });
     }
 
     pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
         use transit_random_sequencer::record::Record;
         let config = Self::config();
-        let RandomSequencer { values, sequencer, transport: _, sample_rate: _ } = self;
+        let RandomSequencer { values, sequencer, transport, sample_rate } = self;
         r.record(&config, |r| {
             r.f32s(values)?;
-            sequencer.restore(r)
+            sequencer.restore(r)?;
+            *transport = Transport {
+                playing: r.bool()?,
+                recording: r.bool()?,
+                tempo: r.f64()?,
+                numerator: r.u32()?,
+                denominator: r.u32()?,
+                samples: r.i64()?,
+                seconds: r.f64()?,
+                quarters: r.f64()?,
+                bar_start: r.f64()?,
+                bar: r.i64()?,
+            };
+            *sample_rate = r.f64()?;
+            Some(())
         })
     }
 
-    /// Poison witnesses only: overwrites the held transport and sample rate (the host gives both
-    /// again before the next `process`) and the sequencer's refused-event counts; returns the
-    /// values written.
+    /// Poison witnesses only: overwrites the sequencer's refused-event counts and what else its
+    /// record leaves out; returns the values written.
     pub fn poison_unobservable(&mut self, seed: u32) -> u64 {
         let mut p = transit_random_sequencer::record::Poison::new(seed);
         self.sequencer.poison_unobservable(&mut p);
-        let k = f64::from(seed % 97 + 1);
-        self.transport.playing = !self.transport.playing;
-        self.transport.tempo += k;
-        self.transport.samples = self.transport.samples.wrapping_add(seed as i64 + 1);
-        self.transport.quarters += k;
-        self.sample_rate += k;
-        p.count() + 5
+        p.count()
     }
 
     /// Scheduled events waiting for their beat, and voices sounding a key (the witnesses'

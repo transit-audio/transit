@@ -748,8 +748,10 @@ impl Live {
 ///   unobservable: they are read only in `process_block`'s voice loop (`render_modal_voice`:
 ///   resonators `..polyphony`; `render_string_voice`: strings `voice + string * polyphony` over the
 ///   model's string count, pluckers `..polyphony`), which runs after `configure_resonators` in the
-///   same block; that re-initializes exactly the read set of the model and polyphony whenever
-///   `dirty` is set (`init` sets it, and so do `set_model` with a new model and `set_polyphony`),
+///   same block; whenever `dirty` is set it re-initializes at least the read set of the model and
+///   polyphony (the modal resonators `..polyphony`; for a string model all eight strings and the
+///   pluckers `..polyphony`). `init` sets `dirty`, and so do `set_model` with a new model and
+///   `set_polyphony`,
 ///   and only those two calls change the model or the polyphony. So an element outside the read
 ///   set while `dirty` is clear, and every element while it is set, is re-initialized before its
 ///   next read;

@@ -251,7 +251,8 @@ crate::record_struct!([] ScaleOffset { scale, offset });
 #[cfg(feature = "testing")]
 // Encoded: the last drawn voltage and its quantization (the Sequencer's `key` reads them when a
 // gate is high without a new pulse) and the quantizers (their hysteresis state). Unobservable for
-// the one owner with a declared record, the Sequencer, which drives a channel only through
+// the Sequencer as owner only (a standalone snapshot of a channel driven through `process` would
+// need them encoded), the one owner with a declared record, which drives a channel only through
 // `tick` and sets every parameter at the start of every tick, before a channel is read (`Sequencer::apply`: spread, bias, steps,
 // scale index, register mode, scale offset): the parameters, and what only `process` reads
 // (`previous_steps`, `previous_phase`, `reacquisition_counter`, `previous_voltage`,

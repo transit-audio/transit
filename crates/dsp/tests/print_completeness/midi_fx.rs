@@ -35,6 +35,11 @@ pub(super) enum MStep {
     Locate(i64),
     /// The host's sample rate from now on.
     Rate(f64),
+    /// Events taken between blocks, as the mix's MIDI effect host takes a revoked source's
+    /// releases outside a block (`MidiFxHost::take` while not capturing): each runs through
+    /// `process` alone, one frame long, at offset 0, with no transport or rate given first, so the
+    /// effect plays with the ones it holds.
+    Between(Vec<(u32, u8, i32, Message)>),
 }
 
 /// The transport and rate a script runs at.
@@ -158,6 +163,20 @@ fn run(
             MStep::Transport(t) => clock.tempo = *t,
             MStep::Locate(s) => clock.samples = *s,
             MStep::Rate(r) => clock.rate = *r,
+            MStep::Between(list) => {
+                for &(_, channel, note_id, message) in list {
+                    let input = [TimedEvent { offset: 0, event: PluginEvent { channel, note_id, message } }];
+                    let mut outs = Vec::new();
+                    for f in fx.iter_mut() {
+                        let mut buf = [TimedEvent::EMPTY; OUT];
+                        let mut out = MidiOut::new(&mut buf);
+                        f.effect().process(&input, &mut out, 1);
+                        outs.push((out.events().to_vec(), out.refused(), out.refused_ons()));
+                    }
+                    blocks += 1;
+                    each(fx, &outs)?;
+                }
+            }
         }
     }
     Ok(blocks)
@@ -667,6 +686,25 @@ fn random_sequencer() -> MEntry {
                         MStep::Run(blocks(BAR, rate), BLOCK),
                     ]
                 },
+                reached: |_| true,
+                completed: |_| true,
+            },
+            // Events taken between blocks (a revoked source's releases): at T the transport plays;
+            // the continuation's first calls run before any block gives a transport, so the
+            // sequencer plays with the transport and rate it holds; then blocks go on.
+            MWitness {
+                boundary: Boundary::Entry("events between blocks"),
+                history: |rate| {
+                    let mut h = sequencer_setup();
+                    h.extend([
+                        MStep::Param("thru", 1.0),
+                        MStep::Param("gate_length", 90.0),
+                        MStep::Transport(Some(120.0)),
+                        MStep::Run(blocks(BAR, rate), BLOCK),
+                    ]);
+                    h
+                },
+                continuation: |rate| vec![MStep::Between(vec![off(0, 1, 60), off(0, 2, 62)]), MStep::Run(blocks(BAR, rate), BLOCK)],
                 reached: |_| true,
                 completed: |_| true,
             },

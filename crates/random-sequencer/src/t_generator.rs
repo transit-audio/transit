@@ -575,7 +575,8 @@ crate::record_enum!(Range { Quarter, Normal, Times4 });
 #[cfg(feature = "testing")]
 crate::record_struct!([] DividerPattern { ratios, length });
 #[cfg(feature = "testing")]
-// Unobservable for the one owner with a declared record, the Sequencer (it never runs
+// Unobservable for the Sequencer as owner only (a standalone snapshot of a `TGenerator` driven
+// through `process` would need them encoded), the one owner with a declared record (it never runs
 // `TGenerator::process`, the only reader of `master_phase`, `phase_difference` and
 // `jitter_multiplier`; it keeps its own clock and calls `jitter_multiplier_for`, which reads
 // neither): those three. Poisoned in every Random Sequencer witness (`Sequencer::poison_unobservable`).
