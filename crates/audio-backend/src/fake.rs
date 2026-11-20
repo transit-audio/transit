@@ -45,6 +45,12 @@ struct State {
     /// Other input devices a duplex open may record from instead of this device's own inputs, as
     /// one JACK client links its inputs to any port group ([`Backend::duplex_capture_endpoint`]).
     inputs: Vec<FakeInput>,
+    /// What every stream reports once started, as native JACK's active client does: the buffer it
+    /// settled on ([`Stream::period`]), a rebuild it latched ([`Stream::needs_rebuild`]) and a
+    /// declined buffer request ([`Stream::period_declined`]).
+    started_period: Option<u32>,
+    needs_rebuild: bool,
+    period_declined: bool,
 }
 
 /// One more input device of a JACK-like client: its ports in order, and whether it is a virtual
@@ -237,6 +243,20 @@ impl FakeBackend {
     /// The next stream start fails with `error`.
     pub fn fail_next_start(&self, error: OpenError) {
         self.lock().fail_start = Some(error);
+    }
+    /// From now on every stream reports `period` as the buffer it settled on once started
+    /// ([`Stream::period`]; `None`: `Achieved` holds), as native JACK's active client.
+    pub fn set_started_period(&self, period: Option<u32>) {
+        self.lock().started_period = period;
+    }
+    /// From now on every stream reports that it latched a rebuild ([`Stream::needs_rebuild`]): the
+    /// running rate is not the one the caller prepared for.
+    pub fn set_needs_rebuild(&self, latched: bool) {
+        self.lock().needs_rebuild = latched;
+    }
+    /// From now on every stream reports its buffer request declined ([`Stream::period_declined`]).
+    pub fn set_period_declined(&self, declined: bool) {
+        self.lock().period_declined = declined;
     }
     /// Every open so far, in order.
     pub fn opens(&self) -> Vec<(Direction, OpenRequest)> {
@@ -496,6 +516,16 @@ impl Stream for FakeStream {
     }
     fn opened_capture(&self) -> Option<CaptureEndpoint> {
         self.opened.clone()
+    }
+    fn period(&self) -> Option<u32> {
+        let state = self.lock();
+        state.started_period.filter(|_| !self.loopback && !state.needs_rebuild)
+    }
+    fn needs_rebuild(&self) -> bool {
+        !self.loopback && self.lock().needs_rebuild
+    }
+    fn period_declined(&self) -> bool {
+        !self.loopback && self.lock().period_declined
     }
     fn snapshot_links(&self) -> Option<LinkSnapshot> {
         let links = self.lock().links.clone();

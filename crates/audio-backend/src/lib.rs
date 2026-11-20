@@ -574,6 +574,25 @@ pub trait Stream {
     fn opened_capture(&self) -> Option<CaptureEndpoint> {
         None
     }
+    /// The buffer size the device settled on once started, where it can differ from
+    /// [`Achieved::period`] (native JACK: the active client's committed buffer, ADR 0021, amendment
+    /// for #760, rule 1). Read once, after the starts, on a control thread. `None` (the default):
+    /// `Achieved` holds, or the stream latched a rebuild ([`Stream::needs_rebuild`]).
+    fn period(&self) -> Option<u32> {
+        None
+    }
+    /// Whether the started device runs at a rate other than the one the caller prepared for, so
+    /// it delivers no audio and must be reopened before any user callback runs (native JACK, rule 1
+    /// of the same amendment). False by default.
+    fn needs_rebuild(&self) -> bool {
+        false
+    }
+    /// Whether the device refused the buffer size the open asked for (native JACK under PipeWire:
+    /// `jack_set_buffer_size` returned an error), as distinct from a request whose result has not
+    /// arrived. False by default.
+    fn period_declined(&self) -> bool {
+        false
+    }
 }
 
 /// Where the samples of a render block go: the adapter lends scratch, converts to the device
