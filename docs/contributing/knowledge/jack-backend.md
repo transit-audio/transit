@@ -53,6 +53,15 @@ and the duplex process engine (audio plays and records).
 - `JackBackend::probe` opens a short-lived client `transit-probe` with `JackNoStartServer`. Three
   states: library missing ("JACK library not found: install pipewire-jack (PipeWire) or JACK"), no server ("JACK/PipeWire server not running"), or running with its groups. The
   first two are the system's diagnostic in Audio Devices, with no device.
+- One probe per open (ADR 0021 amendment for #760, rule 4): the endpoint `plan_render` resolves
+  carries its listing, and the duplex input resolves against it. While the session's client is
+  active, enumeration (a rescan, the listing) reads through it with no probe; while it exists but
+  is not active, the open's listing answers. Before registering, the open checks that the group's
+  ports, as the session client sees them, are the listing's in the same order: a group that went
+  away is the absent input ("The chosen input ... is not present"), a reordered input "The ports
+  of input \"X\" changed while it opened; no input opened. Use Reconnect.", a changed output
+  "JACK: the ports of \"X\" changed while the device opened". `Auto` probes once more before it
+  picks the backend.
 
 ## Requested versus achieved
 
@@ -136,6 +145,17 @@ with no lock held:
 - A rate or quantum other than the open ones: `ResetRequested` once per new pair, so the Player
   reopens at the server's settings (the transport stops; a take is kept).
 - Xruns: `StreamStats::overloads` (and the next stamp is invalid); not an error.
+- The startup check (#760 rules 3 and 6, `src/startup.rs`), at the first tick after each
+  direction's start, never on a latched client: each link transit asked for that its port does not
+  show is a line, "Link from X to Y was not observed at the startup check." (with what
+  `jack_connect` returned, and under PipeWire the `jack.self-connect-mode` hint); once every
+  direction has started, the latency the server reports for the device ports is read once
+  (`jack_port_get_latency_range`, optional in the table). Audio Devices shows, under the open
+  lines, "Graph: ..." (the buffer "observed" once a cycle ran with it), "Latency reported at
+  startup: ...; not measured, Measure measures the loop" and, under PipeWire, the sentence that
+  PipeWire may convert the rate and add buffering. Display only: Path latency, `Achieved.latency`
+  and compensation do not change. Bounded: one read per asked link and per device port, on the
+  watcher's thread, no wait.
 - `StreamStats` per direction: wakes, overloads, resets, faults, busy skips, position jumps, service
   time and lateness histograms.
 
