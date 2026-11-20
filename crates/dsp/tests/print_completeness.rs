@@ -25,7 +25,8 @@
 //!
 //! The Macro Oscillator declares its record complete (slice 1, push 2 of #742): its witness set is
 //! `print_completeness/macro_osc.rs`; the Resonator and the Modal Voice (slice 3)
-//! `print_completeness/resonator.rs` and `print_completeness/modal_voice.rs`.
+//! `print_completeness/resonator.rs` and `print_completeness/modal_voice.rs`; the Time Stretcher
+//! (slice 4) `print_completeness/time_stretcher.rs`.
 //! Every other entry's declaration is false; an entry turning true needs its witness set here, its
 //! inventory and its mutation record.
 //!
@@ -42,6 +43,8 @@ mod macro_osc;
 mod modal_voice;
 #[path = "print_completeness/resonator.rs"]
 mod resonator;
+#[path = "print_completeness/time_stretcher.rs"]
+mod time_stretcher;
 use transit_state_record::{Config, Reader, Writer};
 
 const RATES: [f32; 3] = [44_100.0, 48_000.0, 96_000.0];
@@ -100,6 +103,9 @@ enum Step {
     Run(usize),
     /// The same, in blocks of exactly `block`.
     RunBlocks(usize, usize),
+    /// `frames` of silent input (zero on every channel), in maximum blocks: an effect's input
+    /// stops (a burst, then silence).
+    Silent(usize),
     Param(&'static str, f32),
     Reset,
     Prepare(f32),
@@ -190,9 +196,11 @@ fn run<P: Plugin + ?Sized>(
 ) -> Result<(), String> {
     let mut io = vec![vec![vec![0.0f32; MAX_BLOCK]; ch]; ps.len()];
     for (s, step) in steps.iter().enumerate() {
+        let silent = matches!(step, Step::Silent(_));
         let blocks: Vec<usize> = match *step {
             Step::Run(n) => lengths(n, s * 7 + clock.frames).collect(),
             Step::RunBlocks(n, b) => (0..n.div_ceil(b)).map(|k| b.min(n - k * b)).collect(),
+            Step::Silent(n) => (0..n.div_ceil(MAX_BLOCK)).map(|k| MAX_BLOCK.min(n - k * MAX_BLOCK)).collect(),
             ref other => {
                 for p in ps.iter_mut() {
                     match *other {
@@ -207,7 +215,7 @@ fn run<P: Plugin + ?Sized>(
                         Step::Macros(m) => p.set_rack_macros(&m),
                         // At once (a stop is told once: no transport goes with later blocks).
                         Step::Transport(tempo) => p.set_transport(&Clock { tempo, ..*clock }.transport()),
-                        Step::Run(_) | Step::RunBlocks(..) => {}
+                        Step::Run(_) | Step::RunBlocks(..) | Step::Silent(_) => {}
                     }
                 }
                 match *other {
@@ -222,7 +230,7 @@ fn run<P: Plugin + ?Sized>(
             for (p, io) in ps.iter_mut().zip(io.iter_mut()) {
                 for (c, b) in io.iter_mut().enumerate() {
                     for (i, x) in b.iter_mut().take(n).enumerate() {
-                        *x = input(clock.frames + i, c);
+                        *x = if silent { 0.0 } else { input(clock.frames + i, c) };
                     }
                 }
                 if clock.tempo.is_some() {
@@ -725,6 +733,13 @@ fn the_modal_voice_record_is_complete() {
     harness(&modal_voice::entry()).unwrap_or_else(|e| panic!("{e}"));
 }
 
+/// The Time Stretcher's declaration (ADR 0029, #742 slice 4): every witness of its set in every
+/// configuration.
+#[test]
+fn the_time_stretcher_record_is_complete() {
+    harness(&time_stretcher::entry()).unwrap_or_else(|e| panic!("{e}"));
+}
+
 /// A witness set must cover the checklist: a boundary with neither a witness nor an explanation
 /// fails the harness before any case runs.
 #[test]
@@ -771,6 +786,6 @@ fn the_harness_covers_every_entry_that_declares_a_complete_record() {
         }
     }
     // The witness sets the harness has for registry entries.
-    let witnessed: &[&str] = &["macro_oscillator", "resonator", "modal_voice"];
+    let witnessed: &[&str] = &["time_stretcher", "macro_oscillator", "resonator", "modal_voice"];
     assert_eq!(covered, witnessed, "every entry declaring a complete record has a witness set in this harness");
 }

@@ -13,7 +13,8 @@ repository.workspace = true
 # `transit-sampler-core/testing` gives the Sampler's core path its state fingerprint;
 # `transit-parametric-eq/testing` the Parametric EQ core's (ADR 0054); `transit-macro-osc/testing` the
 # Macro Oscillator voice's complete record and restore (#742); `transit-resonator/testing` and
-# `transit-modal-voice/testing` the Resonator's and the Modal Voice's parts' (#742 slice 3).
+# `transit-modal-voice/testing` the Resonator's and the Modal Voice's parts' (#742 slice 3);
+# `transit-granular/testing` the Time Stretcher's processor (#742 slice 4).
 testing = [
     "dep:transit-state-record",
     "transit-instrument-core/testing",
@@ -22,6 +23,7 @@ testing = [
     "transit-macro-osc/testing",
     "transit-resonator/testing",
     "transit-modal-voice/testing",
+    "transit-granular/testing",
 ]
 
 [dependencies]

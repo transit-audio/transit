@@ -118,3 +118,45 @@ impl Path {
         self.up.pull(kernel)
     }
 }
+
+/// Test seam (feature `testing`; ADR 0029, amendment for #742): the path's state record.
+/// Configuration (fixed by the rates and the block at construction, which the owner's
+/// configuration child pins): `rate`, `block`, `latency`, and each converter's own configuration.
+/// Encoded: both converters' state, every gathered frame (all of `frames`, so no overwrite
+/// argument is needed for the ones past `fill`), `fill`. Unobservable: `starved`, a count no
+/// rendering reads (the tests' `starved()` only).
+#[cfg(feature = "testing")]
+impl Path {
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Path { rate: _, block: _, down, up, latency: _, frames, fill, starved: _ } = self;
+        down.record_state(w);
+        up.record_state(w);
+        for f in frames {
+            w.f32s(f);
+        }
+        w.usize(*fill);
+    }
+
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Path { rate: _, block, down, up, latency: _, frames, fill, starved: _ } = self;
+        down.restore_state(r)?;
+        up.restore_state(r)?;
+        for f in frames.iter_mut() {
+            r.f32s(f)?;
+        }
+        *fill = r.usize().filter(|x| x < block)?;
+        Some(())
+    }
+
+    /// Poison witnesses only: overwrites `starved` and both converters' scratch; returns the
+    /// values written.
+    pub(crate) fn poison_unobservable(&mut self, seed: u32) -> u64 {
+        self.starved = self.starved.wrapping_add(u64::from(seed) | 1);
+        1 + self.down.poison_unobservable(seed) + self.up.poison_unobservable(seed.wrapping_add(1))
+    }
+
+    /// Codec frames gathered toward the next firmware block (the witnesses' observation).
+    pub(crate) fn fill(&self) -> usize {
+        self.fill
+    }
+}
