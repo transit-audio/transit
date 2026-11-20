@@ -19,8 +19,8 @@ pub struct InputMap {
     pub paths: Vec<IoPath>,
     /// A JACK virtual input's ordered port names when this record was first made, or when the
     /// user last used the current ports (rule 5's baseline); written only for virtual devices. A
-    /// reopen never replaces it.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// reopen never replaces it; a hardware open clears it. Always written, even empty, so the
+    /// settings merge (which keeps fields a save leaves out) cannot bring a cleared one back.
     pub ports: Vec<String>,
 }
 
@@ -115,8 +115,15 @@ impl IoMap {
     /// addresses: a different stream reusing a port name is not detected.
     #[must_use]
     pub fn ports_changed(&self, p: &IoPath) -> bool {
-        !self.input_ports.is_empty()
-            && p.channels.iter().any(|&c| self.input_baseline.get(usize::from(c)).is_none_or(|b| self.input_ports.get(usize::from(c)) != Some(b)))
+        p.channels.iter().any(|&c| self.port_changed_at(c))
+    }
+
+    /// Whether device input channel `c` (0-based) of the open virtual input is not the port the
+    /// baseline has there (changed, gone, or past the baseline); false for every other input.
+    #[must_use]
+    pub fn port_changed_at(&self, c: u16) -> bool {
+        let c = usize::from(c);
+        !self.input_ports.is_empty() && self.input_baseline.get(c).is_none_or(|b| self.input_ports.get(c) != Some(b))
     }
 
     /// Whether the open virtual input's ports differ from the baseline (the I/O paths page then
@@ -157,22 +164,32 @@ pub fn adopt_input(output: &IoMap, inputs: &[InputMap], outputs: &[IoMap], ident
     adopt_input_ports(output, inputs, outputs, identity, width, &[])
 }
 
-/// [`adopt_input`] for an input whose ports guard its paths: `ports` are a JACK virtual input's ordered port names at this open (rule 5), empty for any
-/// other input: the record's first creation takes them as its baseline; a saved record keeps its
-/// own (a reopen never replaces it), so paths over ports that changed are unavailable
-/// ([`IoMap::ports_changed`]).
+/// [`adopt_input`] for an input whose ports guard its paths: `ports` are a JACK virtual input's
+/// ordered port names at this open (rule 5), empty for any other input.
+///
+/// - A virtual open takes `ports` as the baseline only when the record holds no path at that
+///   moment: no saved paths and none imported from an older both-halves table (review of slice C,
+///   must-fix 1). A saved record keeps its own baseline (a reopen never replaces it), and paths
+///   with no baseline stay unavailable until the user uses the current ports.
+/// - A hardware open (`ports` empty) clears any baseline the record kept: its paths are made over
+///   the hardware's channels, not over a virtual device's ports (must-fix 2).
 #[must_use]
 pub fn adopt_input_ports(output: &IoMap, inputs: &[InputMap], outputs: &[IoMap], identity: &str, width: u16, ports: &[String]) -> (IoMap, InputMap) {
     let key = (output.system.as_str(), identity);
     let saved = inputs.iter().rfind(|r| r.key() == key);
     let empty = saved.is_some_and(|r| r.paths.is_empty());
-    let record = saved.cloned().unwrap_or_else(|| {
-        let mut record = InputMap { system: output.system.clone(), device: identity.into(), ports: ports.to_vec(), ..InputMap::default() };
+    let mut record = saved.cloned().unwrap_or_else(|| {
+        let mut record = InputMap { system: output.system.clone(), device: identity.into(), ..InputMap::default() };
         if let Some(old) = outputs.iter().rfind(|m| m.key() == key) {
             record.paths = old.paths_of(IoDirection::Input).cloned().collect();
         }
         record
     });
+    if ports.is_empty() {
+        record.ports.clear();
+    } else if record.ports.is_empty() && record.paths.is_empty() {
+        record.ports = ports.to_vec();
+    }
     let width = width.min(MAX_DEVICE_CHANNELS as u16);
     let mut map = output.compose(Some(&InputMap { inputs: width, ..record.clone() }));
     map.input_ports = ports.to_vec();

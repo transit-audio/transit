@@ -419,8 +419,8 @@ fn owned_server_a_shutdown_is_device_loss_and_the_server_back_is_a_reopen() {
 
 /// ADR 0015, amendment for #431, slice C, through the real binding: the listing without the
 /// physical flag finds another client's output port as a virtual device, while transit's own
-/// session client (by the name the server gave it) and the server's physical groups are not
-/// virtual devices; a chosen virtual device resolves, and its ports guard its paths.
+/// session client (by the name the server gave it) and clients with physical capture ports are not
+/// virtual devices (skips, and passes, without a server); a chosen virtual device resolves, and its ports guard its paths.
 #[test]
 fn server_another_clients_output_port_is_a_virtual_device_and_transits_own_is_not() {
     let Some(_server) = server_or_skip("server_another_clients_output_port_is_a_virtual_device_and_transits_own_is_not") else { return };
@@ -438,7 +438,12 @@ fn server_another_clients_output_port_is_a_virtual_device_and_transits_own_is_no
     let device = found.virtual_devices.iter().find(|d| d.name == source_name).unwrap_or_else(|| panic!("{source_name} not in {virtuals:?}"));
     assert_eq!(device.capture, std::slice::from_ref(&port));
     assert!(!virtuals.contains(&ours.as_str()), "transit's own client ({ours}) is offered: {virtuals:?}");
-    assert!(found.devices.iter().all(|d| !virtuals.contains(&d.name.as_str())), "a physical group is never a virtual device: {virtuals:?}");
+    // A group with physical output (capture) ports is never a virtual device; one that only plays
+    // physically may have one of its name (a sink's monitor ports), so only capture groups count.
+    assert!(
+        found.devices.iter().filter(|d| !d.capture.is_empty()).all(|d| !virtuals.contains(&d.name.as_str())),
+        "a client with physical output ports is never a virtual device: {virtuals:?}"
+    );
     let plan = backend.plan_render(&ab::OutputWish::default()).unwrap();
     let on = backend.duplex_capture_endpoint(&plan.endpoint, &ab::InputWish { device: Some(source_name.clone()), ..Default::default() }).unwrap();
     assert_eq!(backend.guarded_ports(&on), ["out_L"]);

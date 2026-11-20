@@ -413,6 +413,24 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Review of #431 slice C, must-fix 2: a hardware open clears a virtual input's baseline; the
+    /// save must not bring the old one back through the merge that keeps fields a save leaves out.
+    #[test]
+    fn a_cleared_port_baseline_stays_cleared_through_the_settings_merge() {
+        let dir = transit_test_support::TestDir::new("input-baseline");
+        let path = dir.join("ui.json");
+        let mut ui = transit_ui_studio::UiState::default();
+        let mut record = transit_engine::model::InputMap { system: "JACK".into(), device: "Interface".into(), ..Default::default() };
+        record.ports = vec!["monitor_FL".into(), "monitor_FR".into()];
+        ui.input_maps.push(record.clone());
+        save_ui(&path, &ui).unwrap();
+        assert_eq!(load_ui(&path).unwrap().unwrap().input_maps[0].ports, record.ports);
+        ui.input_maps[0].ports.clear();
+        save_ui(&path, &ui).unwrap();
+        assert!(load_ui(&path).unwrap().unwrap().input_maps[0].ports.is_empty(), "the cleared baseline is not revived");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn recent_files_round_trip_through_ui_json_and_old_files_load_without_them() {
         let dir = transit_test_support::TestDir::new("recent-files");

@@ -431,9 +431,11 @@ pub fn fallback_notes(cfg: &AudioConfig, systems: Option<&[AudioSystem]>, opened
     notes
 }
 
-/// The note for a saved input that `systems` does not list (the default input records instead;
-/// on JACK no input opens, and a virtual device counts as listed, amendment for #431, rules 2 and
-/// 4); `None` when it is listed, when none is saved, and on ASIO (the input is the output's driver).
+/// The note for a saved input that `systems` does not list; `None` when it is listed, when none is
+/// saved, and on ASIO (the input is the output's driver). Only WASAPI records from the default input
+/// instead (its endpoint resolution falls back to the first endpoint); on JACK (amendment for
+/// #431, rule 4, where a virtual device counts as listed) and on cpal's systems (ALSA, CoreAudio:
+/// `backend::cpal::pick_input` refuses an absent choice since slice A) no input opens.
 fn input_note(cfg: &AudioConfig, systems: &[AudioSystem]) -> Option<String> {
     let want = cfg.input.as_deref()?;
     let asio = cfg.system.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(devices::ASIO_SYSTEM));
@@ -441,10 +443,10 @@ fn input_note(cfg: &AudioConfig, systems: &[AudioSystem]) -> Option<String> {
     let jack = devices::is_jack_system(Some(&sys.name));
     let listed = sys.inputs.iter().chain(sys.virtual_inputs.iter().filter(|_| jack)).any(|d| d.name == want);
     (!listed).then(|| {
-        if jack {
-            format!("Input “{want}” is not present; no input opens.")
-        } else {
+        if devices::is_wasapi_system(Some(&sys.name)) {
             format!("Input “{want}” is not available; recording uses the default input.")
+        } else {
+            format!("Input “{want}” is not present; no input opens.")
         }
     })
 }

@@ -44,7 +44,11 @@ fn the_first_creation_of_a_virtual_input_table_sets_the_baseline() {
     let out = IoMap::for_device("JACK", "Scarlett", 0, 2);
     let (hw, record) = adopt_input(&out, &[], &[], "USB Mic", 1);
     assert!(record.ports.is_empty() && hw.input_ports.is_empty());
-    assert!(serde_json::to_value(&record).unwrap().get("ports").is_none(), "not written for a hardware group");
+    assert_eq!(
+        serde_json::to_value(&record).unwrap()["ports"],
+        serde_json::json!([]),
+        "empty for a hardware group, written so a merge cannot revive one"
+    );
 }
 
 /// The slice C gate: the same width, another order. Every path over a moved index is unavailable
@@ -117,6 +121,66 @@ fn a_record_without_a_baseline_opened_as_a_virtual_device_reads_nothing_unconfir
     assert!(record.ports.is_empty(), "a reopen never sets the baseline");
     assert!(available(&map).is_empty());
     assert!(map.ports_mismatch());
+}
+
+/// Review of slice C, must-fix 1: an older both-halves table under the group's name (hardware
+/// paths, `Mic` on channel 0) and no input record; the hardware ports are gone and the client's
+/// monitor ports remain, so the saved choice resolves to the virtual device of that name. The
+/// imported paths take no baseline: `Mic` is unavailable, never the monitor.
+#[test]
+fn imported_hardware_paths_take_no_baseline_from_a_virtual_open() {
+    let mut old = IoMap::for_device("JACK", "Interface", 2, 2);
+    old.add_path(IoPath { live: false, name: "Mic".into(), direction: IoDirection::Input, channels: vec![0], format: crate::ChannelFormat::Mono })
+        .unwrap();
+    let out = IoMap::for_device("JACK", "Scarlett", 0, 2);
+    let (map, record) = adopt_input_ports(&out, &[], &[old], "Interface", 2, &ports(&["monitor_FL", "monitor_FR"]));
+    assert!(record.ports.is_empty(), "no baseline for imported paths");
+    assert_eq!(why(&map, "Mic"), Some(InputUnavailable::PortsChanged));
+    assert_eq!(resolve_input(&map, "Mic", 1), Err(InputUnavailable::PortsChanged), "monitoring and recording read nothing");
+    assert!(map.ports_mismatch(), "Use the current ports is offered");
+}
+
+/// Must-fix 2: a virtual open sets the baseline; the same name opens as hardware later, where the
+/// user makes `Mic` on channel 0 and the record is saved; the hardware ports go away again and the
+/// monitor ports are unchanged. The hardware open cleared the baseline, so `Mic` is held back.
+#[test]
+fn a_hardware_open_clears_the_baseline_so_later_hardware_paths_are_held_back() {
+    let out = IoMap::for_device("JACK", "Scarlett", 0, 2);
+    let monitor = ports(&["monitor_FL", "monitor_FR"]);
+    let (_, first) = adopt_input_ports(&out, &[], &[], "Interface", 2, &monitor);
+    assert_eq!(first.ports, monitor);
+    let (mut hardware, record) = adopt_input(&out, &[first], &[], "Interface", 2);
+    assert!(record.ports.is_empty() && hardware.input_baseline.is_empty(), "a device opened as hardware is hardware");
+    hardware
+        .add_path(IoPath { live: false, name: "Mic".into(), direction: IoDirection::Input, channels: vec![0], format: crate::ChannelFormat::Mono })
+        .unwrap();
+    let saved = hardware.input_record(2).unwrap();
+    assert!(saved.ports.is_empty(), "the saved record keeps no baseline");
+    let (map, again) = adopt_input_ports(&out, &[saved], &[], "Interface", 2, &monitor);
+    assert!(again.ports.is_empty(), "a record with paths takes no baseline silently");
+    assert_eq!(resolve_input(&map, "Mic", 1), Err(InputUnavailable::PortsChanged));
+}
+
+/// Must-fix 3: a 5.1 track on the stereo path (or the label) `In 1-2` reads channels 1 to 6; the
+/// third port changed, so the whole input is unavailable for that track, not only paths over it.
+#[test]
+fn a_wider_track_is_held_back_by_a_changed_port_its_route_expands_onto() {
+    let six = ["A", "B", "C", "D", "E", "F"];
+    let mut saved = Vec::new();
+    let first = open(&mut saved, &six);
+    assert!(resolve_input(&first, "In 1-2", 6).is_ok());
+    let map = open(&mut saved, &["A", "B", "X", "D", "E", "F"]);
+    assert!(map.available_input("In 1-2").is_some(), "the path's own ports did not change");
+    assert_eq!(resolve_input(&map, "In 1-2", 2).map(|r| r.len()), Ok(2), "a stereo track reads only its two");
+    assert_eq!(resolve_input(&map, "In 1-2", 6), Err(InputUnavailable::PortsChanged), "the named path, expanded");
+    let mut no_path = map.clone();
+    no_path.remove_path_in("In 1-2", Some(IoDirection::Input)).unwrap();
+    assert_eq!(resolve_input(&no_path, "In 1-2", 6), Err(InputUnavailable::PortsChanged), "the legacy label, expanded");
+    // Past the baseline: a group that came back wider, the track expanding onto a new port.
+    let mut short = Vec::new();
+    open(&mut short, &["A", "B"]);
+    let wider = open(&mut short, &["A", "B", "C"]);
+    assert_eq!(resolve_input(&wider, "In 1-2", 3), Err(InputUnavailable::PortsChanged));
 }
 
 fn hw(input_ports: &[&str]) -> HardwareLatency {

@@ -64,3 +64,79 @@ fn set_keeps_the_guard_of_the_open_input() {
     assert!(e.io_map().ports_mismatch(), "a script cannot confirm ports: the guard is the device's");
     assert_eq!(e.io_map().input_baseline, ["output_FL", "output_FR"]);
 }
+
+fn armed(e: &mut Engine, name: &str, format: &str, input: &str) {
+    let id = e.execute("track.new", &json!({"name": name, "format": format})).unwrap()["tracks"][0].as_u64().unwrap();
+    e.execute("track.input", &json!({"tracks": [id], "input": input})).unwrap();
+    e.execute("mix.record_arm", &json!({"tracks": [id], "value": true})).unwrap();
+}
+
+const PORTS_CHANGED: &str = "ports changed: use the current ports, or wait for the original ones";
+
+/// Review of slice C, must-fix 1, end to end: an older both-halves table `Interface` with `Mic` on
+/// channel 0, no input record; the hardware ports are gone, the monitor ports remain, so the saved
+/// choice (the preference off) resolves to the virtual device. Recording on `Mic` is refused.
+#[test]
+fn imported_hardware_paths_refuse_to_record_over_a_virtual_device_of_the_same_name() {
+    let mut e = Engine::default();
+    let mut old = IoMap::for_device("JACK", "Interface", 2, 2);
+    let mic = transit_model::IoPath {
+        live: false,
+        name: "Mic".into(),
+        direction: transit_model::IoDirection::Input,
+        channels: vec![0],
+        format: transit_model::ChannelFormat::Mono,
+    };
+    old.add_path(mic).unwrap();
+    let out = IoMap::for_device("JACK", "Scarlett", 0, 2);
+    let (map, _) = transit_model::adopt_input_ports(&out, &[], &[old], "Interface", 2, &["monitor_FL".into(), "monitor_FR".into()]);
+    e.set_io_map(map);
+    armed(&mut e, "Vox", "mono", "Mic");
+    let why = crate::io::input_refusal(&e, 2, None).expect("refused");
+    assert_eq!(why, format!("track `Vox` cannot record: the input `Mic` is unavailable ({PORTS_CHANGED})"));
+}
+
+/// Must-fix 2, end to end: the virtual open sets the baseline, a hardware open clears it, `Mic` is
+/// made and saved, the hardware ports go away again: recording on `Mic` is refused.
+#[test]
+fn a_path_made_on_hardware_refuses_to_record_over_the_virtual_device_later() {
+    let mut e = Engine::default();
+    let out = IoMap::for_device("JACK", "Scarlett", 0, 2);
+    let monitor: Vec<String> = vec!["monitor_FL".into(), "monitor_FR".into()];
+    let (_, first) = transit_model::adopt_input_ports(&out, &[], &[], "Interface", 2, &monitor);
+    let (hardware, _) = transit_model::adopt_input(&out, &[first], &[], "Interface", 2);
+    e.set_io_map(hardware);
+    e.execute("setup.io_map", &json!({"action": "add_path", "direction": "input", "name": "Mic", "channels": [0]})).unwrap();
+    let saved = e.io_map().input_record(2).unwrap();
+    assert!(saved.ports.is_empty());
+    let (map, _) = transit_model::adopt_input_ports(&out, &[saved], &[], "Interface", 2, &monitor);
+    e.set_io_map(map);
+    armed(&mut e, "Vox", "mono", "Mic");
+    let why = crate::io::input_refusal(&e, 2, None).expect("refused");
+    assert_eq!(why, format!("track `Vox` cannot record: the input `Mic` is unavailable ({PORTS_CHANGED})"));
+}
+
+/// Must-fix 3, end to end: six ports, the third changed, a 5.1 track on `In 1-2` (the path, then
+/// the label): recording is refused and the take plan reads silence on every channel.
+#[test]
+fn a_wide_track_over_a_changed_port_refuses_to_record_and_plans_silence() {
+    let six: Vec<String> = ["A", "B", "C", "D", "E", "F"].iter().map(|p| (*p).to_string()).collect();
+    let reopened: Vec<String> = ["A", "B", "X", "D", "E", "F"].iter().map(|p| (*p).to_string()).collect();
+    let out = IoMap::for_device("JACK", "Scarlett", 0, 2);
+    let (_, record) = transit_model::adopt_input_ports(&out, &[], &[], "Firefox", 6, &six);
+    let (map, _) = transit_model::adopt_input_ports(&out, &[record], &[], "Firefox", 6, &reopened);
+    for label in [false, true] {
+        let mut e = Engine::default();
+        let mut map = map.clone();
+        if label {
+            map.remove_path_in("In 1-2", Some(transit_model::IoDirection::Input)).unwrap();
+        }
+        e.set_io_map(map);
+        armed(&mut e, "Surround", "5.1", "In 1-2");
+        let why = crate::io::input_refusal(&e, 6, None).expect("refused");
+        assert_eq!(why, format!("track `Surround` cannot record: the input `In 1-2` is unavailable ({PORTS_CHANGED})"), "label {label}");
+        let dir = transit_test_support::TestDir::new("takes-ports");
+        let plan = crate::io::plan_takes(&e, &dir, 6);
+        assert_eq!(plan[0].1, vec![usize::MAX; 6], "silence, never port X (label {label})");
+    }
+}

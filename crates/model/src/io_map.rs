@@ -351,23 +351,25 @@ pub fn resolve_input(io: &IoMap, name: &str, strip: usize) -> Result<Vec<Option<
     if is_system_audio(name) {
         return Ok((0..strip).map(|k| io.system_audio.and_then(|first| u16::try_from(usize::from(first) + k % 2).ok())).collect());
     }
-    if let Some(state) = io.input_state(name) {
+    let route: Vec<Option<u16>> = if let Some(state) = io.input_state(name) {
         let p = state?;
-        return Ok((0..strip).map(|k| within(p.source_channel(k, strip))).collect());
-    }
-    let (first, last) = label_channels(name).ok_or(InputUnavailable::Missing)?;
-    if last >= open {
-        return Err(InputUnavailable::OutOfRange { opened: io.inputs });
-    }
-    // A label reads ports as a path does: over a virtual input's changed ports it is unavailable
-    // too (amendment for #431, rule 5), never another stream.
-    let over =
-        IoPath { live: false, name: String::new(), direction: IoDirection::Input, channels: (first..=last).collect(), format: ChannelFormat::Mono };
-    if io.ports_changed(&over) {
+        (0..strip).map(|k| within(p.source_channel(k, strip))).collect()
+    } else {
+        let (first, last) = label_channels(name).ok_or(InputUnavailable::Missing)?;
+        if last >= open {
+            return Err(InputUnavailable::OutOfRange { opened: io.inputs });
+        }
+        let mono = first == last && strip <= 2;
+        (0..strip).map(|k| if mono { Some(first) } else { within(usize::from(first) + k) }).collect()
+    };
+    // The port-mapping guard over every channel the route reads, after a wider strip's expansion
+    // (amendment for #431, rule 5; review of slice C, must-fix 3): one read over a changed port, or
+    // a port the baseline never confirmed, makes the whole input unavailable, for paths and labels
+    // alike. Here, where the expansion happens, so monitoring, recording and every check agree.
+    if route.iter().flatten().any(|&c| io.port_changed_at(c)) {
         return Err(InputUnavailable::PortsChanged);
     }
-    let mono = first == last && strip <= 2;
-    Ok((0..strip).map(|k| if mono { Some(first) } else { within(usize::from(first) + k) }).collect())
+    Ok(route)
 }
 
 /// [`resolve_input`]'s channel for strip channel `k`, or `None` (silent, or the route unavailable);

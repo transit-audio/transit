@@ -229,4 +229,20 @@ fn the_jack_input_note_counts_virtual_devices_and_says_no_input_opens() {
     let cfg = |input: &str| AudioConfig { system: Some("JACK".into()), input: Some(input.into()), ..Default::default() };
     assert!(fallback_notes(&cfg("Firefox"), Some(&systems), &Opened::default()).is_empty(), "a virtual device is listed");
     assert_eq!(fallback_notes(&cfg("OBS"), Some(&systems), &Opened::default()), ["Input “OBS” is not present; no input opens."]);
+    // cpal's systems (ALSA, CoreAudio) open no input for an absent choice since slice A; WASAPI
+    // still opens its default endpoint.
+    for (system, note) in
+        [("ALSA", "Input “OBS” is not present; no input opens."), ("WASAPI", "Input “OBS” is not available; recording uses the default input.")]
+    {
+        let listing = [transit_playback::devices::AudioSystem {
+            name: system.into(),
+            is_default: true,
+            outputs: Vec::new(),
+            inputs: Vec::new(),
+            diagnostics: Vec::new(),
+            virtual_inputs: Vec::new(),
+        }];
+        let want = AudioConfig { system: Some(system.into()), input: Some("OBS".into()), ..Default::default() };
+        assert_eq!(fallback_notes(&want, Some(&listing), &Opened::default()), [note], "{system}");
+    }
 }
