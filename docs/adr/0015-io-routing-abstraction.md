@@ -665,3 +665,7 @@ Three independent review rounds of slice A found paths where the rule above, or 
 10. **One namespace on edit.** Adding or renaming a path to a name a bus already has is refused, case-insensitively (section 1.4). Saved tables load as before.
 
 **Stated breaks, ALSA and macOS.** A chosen input that is unplugged or renamed no longer records from the system default: no input opens and the missing one is named. Two connected inputs with one name record with default paths, unsaved edits and no measurements, and the I/O paths page says why.
+
+## Revision 2026-11-20 (#431 rule 12): the PipeWire check runs on the released build
+
+Decided by the maintainer on 2026-11-20. Rule 12 of the #431 amendment made the experiment on a real PipeWire machine a gate for slice C and for the release. No test build can reach the tester before a release, so slice C landed on review and the fake-server and dummy-server tests alone, and the check runs on the released build (v0.7.4) instead. Its steps and questions are unchanged. "Show virtual devices" stays off by default; what the check finds is fixed in a following patch release, and the release notes say that this part has not yet run on a real PipeWire machine.
