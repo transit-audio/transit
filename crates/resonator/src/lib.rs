@@ -23,6 +23,8 @@ mod modal;
 mod note_filter;
 mod part;
 mod plucker;
+#[cfg(feature = "testing")]
+pub mod record;
 mod resources;
 mod reverb;
 pub mod stmlib;

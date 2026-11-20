@@ -280,3 +280,34 @@ impl KarplusString {
         self.previous_damping_compensation = damping_compensation_modulation.value();
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+// `DampingFilter::init` is `*self = Self::default()`: every field.
+#[cfg(feature = "testing")]
+crate::record_struct!([] DampingFilter {} reset { x, x_, brightness, brightness_increment, damping, damping_increment });
+// Reset: `KarplusString::init` writes every field but `src_phase` (the low-pitch resampler's phase,
+// which survives re-initialization on the module too): the delay lines and filters by their own
+// `init`, every scalar and both sample pairs. `src_phase` is encoded.
+#[cfg(feature = "testing")]
+crate::record_struct!([] KarplusString { src_phase } reset {
+    frequency,
+    dispersion,
+    brightness,
+    damping,
+    position,
+    delay,
+    clamped_position,
+    previous_dispersion,
+    previous_damping_compensation,
+    enable_dispersion,
+    dispersion_noise,
+    out_sample,
+    aux_sample,
+    curved_bridge,
+    string,
+    stretch,
+    fir_damping_filter,
+    iir_damping_filter,
+    dc_blocker,
+});

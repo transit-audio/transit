@@ -265,3 +265,24 @@ impl ModalResonator {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] ModalResonator {
+    frequency,
+    geometry,
+    brightness,
+    position,
+    previous_position,
+    damping,
+    modulation_frequency,
+    modulation_offset,
+    lfo_phase,
+    bow_signal,
+    resolution,
+    f,
+    f_bow,
+    d_bow,
+    clock_divider,
+});

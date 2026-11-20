@@ -468,6 +468,52 @@ impl FmPairVoice {
     }
 }
 
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] FirDownsampler { ptr, buffer });
+// Unobservable: `behind` (`Spatializer::process` writes `behind[..size]` through the low-pass
+// before it reads those frames, and reads no others).
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Spatializer { left, right, angle, distance, fixed_position, behind_filter } unobservable { behind });
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] FmOscillator { fm_amount, previous_sample, phase_carrier, phase_mod });
+// The block's scratch buffers: never encoded (the voice lists them unobservable); this impl is the
+// poison witnesses'.
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Buffers { external_fm_oversampled, osc_oversampled, osc });
+// Unobservable: `buffers` (each oscillator's pass writes every frame it reads: `upsample` the
+// oversampled external FM, `FmOscillator::process` the oversampled output, the FIR downsampler
+// `osc[..size]`, before anything reads them).
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] FmPairVoice {
+    previous_gate,
+    envelope,
+    level_state,
+    damping,
+    feedback,
+    osc_level,
+    external_fm_state,
+    oscillator,
+    iir_downsampler,
+    fir_downsampler,
+    filter,
+    spatializer,
+} unobservable { buffers });
+
+#[cfg(feature = "testing")]
+impl FmPairVoice {
+    /// Poison witnesses only: overwrites the scratch buffers and each spatializer's `behind`.
+    pub(crate) fn poison_unobservable(&mut self, p: &mut transit_resonator::record::Poison) {
+        use transit_resonator::record::Record as _;
+        self.buffers.poison(p);
+        for s in &mut self.spatializer {
+            s.behind.poison(p);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -151,3 +151,10 @@ impl ModalResonator {
         self.previous_position = position.value();
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+// Reset: `ModalResonator::init` initializes every mode filter (`Svf::init`: all its fields) and
+// writes every scalar, the resolution included (`set_resolution`): every field.
+#[cfg(feature = "testing")]
+crate::record_struct!([] ModalResonator {} reset { frequency, structure, brightness, position, previous_position, damping, resolution, f });

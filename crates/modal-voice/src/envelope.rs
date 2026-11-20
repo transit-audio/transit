@@ -139,6 +139,27 @@ impl Envelope {
     }
 }
 
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+transit_resonator::record_enum!(Shape { Linear, Exponential, Quartic });
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Envelope {
+    level,
+    time,
+    shape,
+    segment,
+    start_value,
+    value,
+    phase,
+    num_segments,
+    sustain_point,
+    loop_start,
+    loop_end,
+    hard_reset,
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -85,3 +85,8 @@ impl Tube {
         self.delay_ptr = d;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Tube { delay_ptr, zero_state, pole_state, delay_line });

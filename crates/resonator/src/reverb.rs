@@ -276,3 +276,10 @@ impl Reverb {
         self.lp_decay_2 = lp_2;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+// Every field: the reverb is not re-initialized by a model switch (only by the part's `Init`), so
+// its memory outlasts any stretch of time the string-and-reverb model is not selected.
+#[cfg(feature = "testing")]
+crate::record_struct!([] Reverb { buffer, write_ptr, lfo, amount, input_gain, reverb_time, diffusion, lp, lp_decay_1, lp_decay_2 });

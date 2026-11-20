@@ -290,3 +290,31 @@ impl KarplusString {
         self.previous_damping_compensation = damping_compensation_modulation.value();
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] DampingFilter { x, x_, brightness, brightness_increment, damping, damping_increment });
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] KarplusString {
+    frequency,
+    dispersion,
+    brightness,
+    damping,
+    position,
+    delay,
+    clamped_position,
+    previous_dispersion,
+    previous_damping_compensation,
+    enable_dispersion,
+    dispersion_noise,
+    src_phase,
+    out_sample,
+    aux_sample,
+    curved_bridge,
+    string,
+    stretch,
+    fir_damping_filter,
+    iir_damping_filter,
+    dc_blocker,
+});

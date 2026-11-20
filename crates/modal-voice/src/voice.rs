@@ -325,3 +325,42 @@ impl Voice {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+// The block's scratch buffers: never encoded (the voice lists them unobservable); this impl is the
+// poison witnesses'.
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Buffers { bow, bow_strength, blow, strike });
+// Unobservable: `buffers` (`Voice::process` writes every frame it reads in the block before reading
+// it: the bow exciter `bow[..size]`, the blow exciter `blow[..size]` (then the tube and the diffuser
+// work on those frames in place), the strike exciter `strike[..size]`, and the excitation loop
+// `bow_strength[i]` before frame `i` reads it; the damping after the loop reads `bow_strength[0]`,
+// written by its first pass, the block being at least one frame).
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Voice {
+    envelope,
+    tube,
+    bow,
+    blow,
+    strike,
+    diffuser,
+    resonator,
+    string,
+    dc_blocker,
+    strength,
+    envelope_value,
+    exciter_level,
+    previous_gate,
+    resonator_model,
+    chord_index,
+} unobservable { buffers });
+
+#[cfg(feature = "testing")]
+impl Voice {
+    /// Poison witnesses only: overwrites the scratch buffers.
+    pub(crate) fn poison_unobservable(&mut self, p: &mut transit_resonator::record::Poison) {
+        use transit_resonator::record::Record as _;
+        self.buffers.poison(p);
+    }
+}

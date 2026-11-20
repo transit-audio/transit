@@ -111,6 +111,13 @@ impl<const N: usize> DelayLine<N> {
     }
 }
 
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+// `DelayLine::init` clears every element and writes the delay and the write pointer: every field.
+#[cfg(feature = "testing")]
+crate::record_struct!([const N: usize] DelayLine<N> {} reset { line, write_ptr, delay });
+
 #[cfg(test)]
 mod tests {
     use super::*;

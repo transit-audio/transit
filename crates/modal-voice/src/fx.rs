@@ -333,3 +333,10 @@ impl Reverb {
         self.lp_decay_2 = lp_2;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Diffuser { buffer, write_ptr });
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Reverb { buffer, write_ptr, lfo, amount, input_gain, reverb_time, diffusion, lp, lp_decay_1, lp_decay_2 });

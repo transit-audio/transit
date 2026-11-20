@@ -204,6 +204,14 @@ impl NaiveSvf {
     }
 }
 
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Svf { g, r, h, state_1, state_2 });
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] NaiveSvf { f, damp, lp, bp });
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,12 +9,18 @@ repository.workspace = true
 license = "(MIT OR Apache-2.0) AND MIT"
 publish = false
 
+[features]
+# The state record of the testing seams (ADR 0029, amendment for #742): every type's record and
+# restore, over the resonator's record module. Never a default feature.
+testing = ["transit-resonator/testing"]
+
 [dependencies]
 # The flush-to-zero float and the stmlib helpers the two firmwares share (the same stmlib commit).
 transit-resonator = { workspace = true }
 
 [dev-dependencies]
 transit-macro-osc-oracle = { path = "../macro-osc-oracle" }
+transit-modal-voice = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

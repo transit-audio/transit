@@ -69,3 +69,10 @@ impl Plucker {
         self.svf.process_block(out, FilterMode::LowPass);
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+// Reset: `Plucker::init` initializes the filter and the comb (every field of each) and writes the
+// remaining count and the comb period. The comb gain is written only by `trigger`: encoded.
+#[cfg(feature = "testing")]
+crate::record_struct!([] Plucker { comb_filter_gain } reset { svf, comb_filter, remaining_samples, comb_filter_period });

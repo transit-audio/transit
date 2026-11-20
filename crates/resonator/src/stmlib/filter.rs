@@ -214,6 +214,18 @@ impl DcBlocker {
     }
 }
 
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+// `Svf::init` sets the coefficients (`set_f_q`) and clears both states: every field.
+#[cfg(feature = "testing")]
+crate::record_struct!([] Svf {} reset { g, r, h, state_1, state_2 });
+#[cfg(feature = "testing")]
+crate::record_struct!([] NaiveSvf { f, damp, lp, bp });
+// `DcBlocker::init(pole)` writes every field (the pole from its argument, a constant at each call site).
+#[cfg(feature = "testing")]
+crate::record_struct!([] DcBlocker {} reset { pole, x, y });
+
 #[cfg(test)]
 mod tests {
     use super::*;

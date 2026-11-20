@@ -113,3 +113,18 @@ fn insertion_sort(values: &mut [F; ORDER]) {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] NoteFilter {
+    previous_values,
+    note,
+    stable_note,
+    delayed_stable_note,
+    coefficient,
+    stable_coefficient,
+    fast_coefficient,
+    slow_coefficient,
+    lag_coefficient,
+});

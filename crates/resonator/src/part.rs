@@ -694,6 +694,230 @@ impl Resonator {
     }
 }
 
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_enum!(ResonatorModel { Modal, SympatheticStrings, InharmonicString, FmVoice, QuantizedSympatheticStrings, StringAndReverb });
+
+/// Which of the part's per-voice and per-string state a later block can read before
+/// `configure_resonators` re-initializes it (see the `Record` implementation of [`Resonator`]).
+#[cfg(feature = "testing")]
+#[derive(Clone, Copy)]
+struct Live {
+    /// Modal resonators `..modal` are read.
+    modal: usize,
+    /// Strings `..strings` are read.
+    strings: usize,
+    /// Pluckers `..pluckers` are read.
+    pluckers: usize,
+}
+
+#[cfg(feature = "testing")]
+impl Live {
+    /// The read set of the configured model and polyphony; nothing while `dirty` (the next block's
+    /// `configure_resonators` re-initializes whatever the model then reads before it reads it).
+    fn of(dirty: bool, model: ResonatorModel, polyphony: usize) -> Self {
+        let p = polyphony.clamp(1, MAX_POLYPHONY);
+        if dirty {
+            return Live { modal: 0, strings: 0, pluckers: 0 };
+        }
+        match model {
+            ResonatorModel::Modal => Live { modal: p, strings: 0, pluckers: 0 },
+            ResonatorModel::FmVoice => Live { modal: 0, strings: 0, pluckers: 0 },
+            // `render_string_voice`: string `voice + string * polyphony` over `2 * MAX_POLYPHONY /
+            // polyphony` strings per voice for the sympathetic models, one otherwise.
+            m if m.is_sympathetic() => Live { modal: 0, strings: (p * (2 * MAX_POLYPHONY / p)).min(NUM_STRINGS), pluckers: p },
+            _ => Live { modal: 0, strings: p, pluckers: p },
+        }
+    }
+}
+
+/// The part's record (ADR 0029, #742 sections 12 and 13), by exhaustive destructuring:
+/// - **encoded**, first, the scalars the read set depends on (`bypass`, `dirty`, `model`,
+///   `active_voice`, `step_counter`, `polyphony`); then every string LFO, FM voice, excitation
+///   filter, DC blocker and note (all four voices: a polyphony change brings a voice's filters back
+///   into use with the state they kept); the note filter, the reverb (whole: a model switch does
+///   not re-initialize it, so its memory outlasts any stretch the string-and-reverb model is not
+///   selected), the limiter, the random generator, `strum_keeps_voice_notes` and
+///   `blocks_since_strum`;
+/// - **the modal resonators, strings and pluckers**: each one in the read set of the configured
+///   model and polyphony (`Live::of`) whole; every other one in its dormant form
+///   (`Record::record_dormant`), which leaves out what its re-initialization rewrites in full (a
+///   modal resonator: everything; a string: everything but the low-pitch resampler's phase; a
+///   plucker: everything but its comb gain; the argument at each type's record). Why that is
+///   unobservable: they are read only in `process_block`'s voice loop (`render_modal_voice`:
+///   resonators `..polyphony`; `render_string_voice`: strings `voice + string * polyphony` over the
+///   model's string count, pluckers `..polyphony`), which runs after `configure_resonators` in the
+///   same block; that re-initializes exactly the read set of the model and polyphony whenever
+///   `dirty` is set (`init` sets it, and so do `set_model` with a new model and `set_polyphony`),
+///   and only those two calls change the model or the polyphony. So an element outside the read
+///   set while `dirty` is clear, and every element while it is set, is re-initialized before its
+///   next read;
+/// - **unobservable** (each block writes them before it reads them, argument at the
+///   destructuring): the block buffers `resonator_input`, `sympathetic_resonator_input`,
+///   `noise_burst_buffer`, `out_buffer`, `aux_buffer`.
+///
+/// Witnesses: the transplant harness (`crates/dsp/tests/print_completeness.rs`, the resonator's
+/// set) restores into fresh instances and poisons the restored part's buffers and dormant state
+/// after the restore and after every block (`Resonator::poison_unobservable`).
+#[cfg(feature = "testing")]
+impl crate::record::Record for Resonator {
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Resonator {
+            bypass,
+            dirty,
+            model,
+            active_voice,
+            step_counter,
+            polyphony,
+            resonator,
+            string,
+            lfo,
+            fm_voice,
+            excitation_filter,
+            dc_blocker,
+            plucker,
+            note,
+            note_filter,
+            // Unobservable: `process_block` writes `resonator_input[..size]` for each voice before
+            // that voice's render reads it (the input, or silence for a voice that is not active);
+            // `render_string_voice` writes `sympathetic_resonator_input[..size]` at string 0 before
+            // the sympathetic strings (1 and up, only with the internal exciter) read it;
+            // `Plucker::process` writes every frame of `noise_burst_buffer[..size]` before it is
+            // added; each model's render writes `out_buffer[..size]` and `aux_buffer[..size]`
+            // (`ModalResonator::process` and `FmVoice::process` assign every frame,
+            // `render_string_voice` fills them with zero first), and `process_block` reads only
+            // those frames (zipped with the block's outputs).
+            resonator_input: _,
+            sympathetic_resonator_input: _,
+            noise_burst_buffer: _,
+            out_buffer: _,
+            aux_buffer: _,
+            reverb,
+            limiter,
+            random,
+            strum_keeps_voice_notes,
+            blocks_since_strum,
+        } = self;
+        bypass.record(w);
+        dirty.record(w);
+        model.record(w);
+        active_voice.record(w);
+        step_counter.record(w);
+        polyphony.record(w);
+        let live = Live::of(*dirty, *model, *polyphony);
+        for (i, x) in resonator.iter().enumerate() {
+            if i < live.modal { x.record(w) } else { x.record_dormant(w) }
+        }
+        for (i, x) in string.iter().enumerate() {
+            if i < live.strings { x.record(w) } else { x.record_dormant(w) }
+        }
+        for (i, x) in plucker.iter().enumerate() {
+            if i < live.pluckers { x.record(w) } else { x.record_dormant(w) }
+        }
+        lfo.record(w);
+        fm_voice.record(w);
+        excitation_filter.record(w);
+        dc_blocker.record(w);
+        note.record(w);
+        note_filter.record(w);
+        reverb.record(w);
+        limiter.record(w);
+        random.record(w);
+        strum_keeps_voice_notes.record(w);
+        blocks_since_strum.record(w);
+    }
+
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let Resonator {
+            bypass,
+            dirty,
+            model,
+            active_voice,
+            step_counter,
+            polyphony,
+            resonator,
+            string,
+            lfo,
+            fm_voice,
+            excitation_filter,
+            dc_blocker,
+            plucker,
+            note,
+            note_filter,
+            resonator_input: _,
+            sympathetic_resonator_input: _,
+            noise_burst_buffer: _,
+            out_buffer: _,
+            aux_buffer: _,
+            reverb,
+            limiter,
+            random,
+            strum_keeps_voice_notes,
+            blocks_since_strum,
+        } = self;
+        bypass.restore(r)?;
+        dirty.restore(r)?;
+        model.restore(r)?;
+        active_voice.restore(r)?;
+        step_counter.restore(r)?;
+        polyphony.restore(r)?;
+        ((1..=MAX_POLYPHONY).contains(polyphony) && *active_voice < MAX_POLYPHONY && *step_counter < PING_PATTERN.len()).then_some(())?;
+        let live = Live::of(*dirty, *model, *polyphony);
+        for (i, x) in resonator.iter_mut().enumerate() {
+            if i < live.modal { x.restore(r)? } else { x.restore_dormant(r)? }
+        }
+        for (i, x) in string.iter_mut().enumerate() {
+            if i < live.strings { x.restore(r)? } else { x.restore_dormant(r)? }
+        }
+        for (i, x) in plucker.iter_mut().enumerate() {
+            if i < live.pluckers { x.restore(r)? } else { x.restore_dormant(r)? }
+        }
+        lfo.restore(r)?;
+        fm_voice.restore(r)?;
+        excitation_filter.restore(r)?;
+        dc_blocker.restore(r)?;
+        note.restore(r)?;
+        note_filter.restore(r)?;
+        reverb.restore(r)?;
+        limiter.restore(r)?;
+        random.restore(r)?;
+        strum_keeps_voice_notes.restore(r)?;
+        blocks_since_strum.restore(r)
+    }
+}
+
+#[cfg(feature = "testing")]
+impl Resonator {
+    /// Poison witnesses only: overwrites what the record leaves out, the block buffers and the
+    /// dormant state of every modal resonator, string and plucker outside the read set, with
+    /// finite values that differ from the ones they replace.
+    pub fn poison_unobservable(&mut self, p: &mut crate::record::Poison) {
+        use crate::record::Record as _;
+        for b in [&mut self.resonator_input, &mut self.sympathetic_resonator_input, &mut self.noise_burst_buffer, &mut self.out_buffer, &mut self.aux_buffer] {
+            b.poison(p);
+        }
+        let live = Live::of(self.dirty, self.model, self.polyphony);
+        for x in self.resonator.iter_mut().skip(live.modal) {
+            x.poison_dormant(p);
+        }
+        for x in self.string.iter_mut().skip(live.strings) {
+            x.poison_dormant(p);
+        }
+        for x in self.plucker.iter_mut().skip(live.pluckers) {
+            x.poison_dormant(p);
+        }
+    }
+
+    /// What the transplant witnesses observe: the configured model, the polyphony, whether a
+    /// re-initialization is pending (`dirty`), and the active voice.
+    #[must_use]
+    pub fn observe(&self) -> (ResonatorModel, usize, bool, usize) {
+        (self.model, self.polyphony, self.dirty, self.active_voice)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

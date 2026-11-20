@@ -324,3 +324,23 @@ impl Exciter {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+transit_resonator::record_enum!(Model { GranularSamplePlayer, SamplePlayer, Mallet, Plectrum, Particles, Flow, Noise });
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Exciter {
+    model,
+    parameter,
+    timbre,
+    lp,
+    damp_state,
+    particle_state,
+    particle_range,
+    damping,
+    signature,
+    phase,
+    delay,
+    plectrum_delay,
+});

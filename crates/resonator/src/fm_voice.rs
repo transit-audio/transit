@@ -238,3 +238,30 @@ impl FmVoice {
         self.previous_feedback_amount = feedback_amount.value();
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Follower { low_mid_filter, mid_high_filter, attack, decay, detector, centroid });
+#[cfg(feature = "testing")]
+crate::record_struct!([] FmVoice {
+    carrier_frequency,
+    ratio,
+    brightness,
+    damping,
+    position,
+    feedback_amount,
+    previous_carrier_frequency,
+    previous_modulator_frequency,
+    previous_brightness,
+    previous_damping,
+    previous_feedback_amount,
+    amplitude_envelope,
+    brightness_envelope,
+    gain,
+    fm_amount,
+    carrier_phase,
+    modulator_phase,
+    previous_sample,
+    follower,
+});

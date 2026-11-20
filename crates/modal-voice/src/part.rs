@@ -509,6 +509,159 @@ impl ModalVoice {
     }
 }
 
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+transit_resonator::record_enum!(ResonatorModel { Modal, String, Strings });
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Patch {
+    exciter_envelope_shape,
+    exciter_bow_level,
+    exciter_bow_timbre,
+    exciter_blow_level,
+    exciter_blow_meta,
+    exciter_blow_timbre,
+    exciter_strike_level,
+    exciter_strike_meta,
+    exciter_strike_timbre,
+    resonator_geometry,
+    resonator_brightness,
+    resonator_damping,
+    resonator_position,
+    space,
+});
+// Encoded: the five values only `init` and `seed` write. Unobservable: the fourteen panel
+// controls, which `process` copies from `controls` (`set_controls`) before anything reads them
+// (`ModalVoice::process`, its first statement after the length checks); nothing else reads them.
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] FPatch {
+    exciter_signature,
+    resonator_modulation_frequency,
+    resonator_modulation_offset,
+    reverb_diffusion,
+    reverb_lp,
+} unobservable {
+    exciter_envelope_shape,
+    exciter_bow_level,
+    exciter_bow_timbre,
+    exciter_blow_level,
+    exciter_blow_meta,
+    exciter_blow_timbre,
+    exciter_strike_level,
+    exciter_strike_meta,
+    exciter_strike_timbre,
+    resonator_geometry,
+    resonator_brightness,
+    resonator_damping,
+    resonator_position,
+    space,
+});
+
+#[cfg(feature = "testing")]
+impl FPatch {
+    /// Poison witnesses only: overwrites the fourteen panel controls the record leaves out.
+    fn poison_controls(&mut self, p: &mut transit_resonator::record::Poison) {
+        use transit_resonator::record::Record as _;
+        for x in [
+            &mut self.exciter_envelope_shape,
+            &mut self.exciter_bow_level,
+            &mut self.exciter_bow_timbre,
+            &mut self.exciter_blow_level,
+            &mut self.exciter_blow_meta,
+            &mut self.exciter_blow_timbre,
+            &mut self.exciter_strike_level,
+            &mut self.exciter_strike_meta,
+            &mut self.exciter_strike_timbre,
+            &mut self.resonator_geometry,
+            &mut self.resonator_brightness,
+            &mut self.resonator_damping,
+            &mut self.resonator_position,
+            &mut self.space,
+        ] {
+            x.poison(p);
+        }
+    }
+}
+// The block's scratch buffers: never encoded (the part lists them unobservable); this impl is the
+// poison witnesses'.
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] Buffers { blow, strike, main, aux, raw, center, sides });
+
+// The part's record (ADR 0029, #742 sections 12 and 13). Encoded: the patch's seeded values, the
+// voice and the FM pair whole (the voice's dormant resonators, the strings while the modal bank
+// plays and the bank while a string model plays, and the FM pair while it is not selected included:
+// a model switch or `set_easter_egg` does not re-initialize them, so the state they kept is read
+// again when they are selected), `panic`, `bypass`, `easter_egg`, the resonator meter's integrator
+// `resonator_level` (it decides `panic`), the reverb, the model and the random generator.
+// Unobservable:
+// - `buffers`: `process` writes `blow[..size]` and `strike[..size]` from the inputs first, fills
+//   `main[..size]` and `aux[..size]` with zero before the mixdown adds to them, and the selected
+//   voice writes `raw`, `center` and `sides` over `..size` before the mixdown reads them (the FM
+//   pair through its oscillators' `+=` after `center` and `sides` are zeroed, the voice by assigning
+//   `raw[i]` in its excitation loop and its resonator writing or zeroing `center` and `sides`);
+//   nothing reads a frame at or past `size`;
+// - `previous_gate`: written by every non-bypassed `process`, read nowhere (the voice keeps its
+//   own); `note`: written by every non-bypassed `process` before it is read, read nowhere else;
+// - `scaled_exciter_level`, `scaled_resonator_level`: the panel meters, written by every
+//   non-bypassed `process` and read only by `exciter_level` and `resonator_level`, which the
+//   rendering never calls;
+// - `controls` and `raw_share`, under the owner's obligation to write every control
+//   (`patch_mut`) and the raw share (`set_raw_share`) before every `process` call: the instrument
+//   does, in `render_block`, right before its one `process` call (`ModalVoice::poison_owner_written`
+//   is the witness for that owner only).
+// Witnesses: the transplant harness's modal voice set, with the restored part's unobservable state
+// poisoned after the restore and after every block (`ModalVoice::poison_unobservable` and
+// `ModalVoice::poison_owner_written`), and the port's own transplant witnesses
+// (`tests/record_witnesses.rs`) for what the instrument never sets (a seed, bypass, the runaway
+// guard's `panic`).
+#[cfg(feature = "testing")]
+transit_resonator::record_struct!([] ModalVoice {
+    patch,
+    voice,
+    fm_pair,
+    panic,
+    bypass,
+    easter_egg,
+    resonator_level,
+    reverb,
+    resonator_model,
+    random,
+} unobservable { buffers, controls, raw_share, previous_gate, note, scaled_exciter_level, scaled_resonator_level });
+
+#[cfg(feature = "testing")]
+impl ModalVoice {
+    /// Poison witnesses only: overwrites what the record leaves out as unobservable for any owner
+    /// (the part's, the voice's and the FM pair's scratch buffers and each FM spatializer's
+    /// `behind`, `previous_gate`, `note`, the meters, the patch's panel controls) with finite values
+    /// that differ from the old ones.
+    pub fn poison_unobservable(&mut self, p: &mut transit_resonator::record::Poison) {
+        use transit_resonator::record::Record as _;
+        self.buffers.poison(p);
+        self.voice.poison_unobservable(p);
+        self.fm_pair.poison_unobservable(p);
+        self.previous_gate.poison(p);
+        self.note.poison(p);
+        self.scaled_exciter_level.poison(p);
+        self.scaled_resonator_level.poison(p);
+        self.patch.poison_controls(p);
+    }
+
+    /// Poison witnesses only, for an owner that writes every control and the raw share before
+    /// every `process` call (see the record's comment): overwrites `controls` and `raw_share`.
+    pub fn poison_owner_written(&mut self, p: &mut transit_resonator::record::Poison) {
+        use transit_resonator::record::Record as _;
+        self.controls.poison(p);
+        self.raw_share.poison(p);
+    }
+
+    /// Test seam: raises the runaway guard's flag, as a resonator output past its limit does (the
+    /// port's transplant witnesses hold a part at that boundary).
+    pub fn force_panic(&mut self) {
+        self.panic = true;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
