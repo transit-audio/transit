@@ -10,8 +10,9 @@ use transit_resonator::stmlib::random::Random;
 use transit_resonator::stmlib::{integral_fractional, semitones_to_ratio};
 
 use crate::dsp::{Mode, Svf, index};
+use crate::noise::SMP_NOISE_SAMPLE;
 use crate::resources::{LUT_APPROX_SVF_G, LUT_APPROX_SVF_GAIN, LUT_APPROX_SVF_H, LUT_APPROX_SVF_R, SMP_BOUNDARIES};
-use crate::samples::{SMP_NOISE_SAMPLE, SMP_SAMPLE_DATA};
+use crate::samples::SMP_SAMPLE_DATA;
 
 /// `EXCITER_FLAG_RISING_EDGE`.
 pub(crate) const RISING_EDGE: u8 = 1;

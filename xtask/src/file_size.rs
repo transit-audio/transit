@@ -30,7 +30,12 @@ pub const MAX_LINES: usize = 1500;
 pub const OVER_BUDGET: &[(&str, usize)] = &[];
 
 /// Data-table files exempt from `MAX_LINES`, as (repo-relative path, one-line reason). Each must pass `check_data_only`.
-pub const DATA_TABLES: &[(&str, &str)] = &[];
+pub const DATA_TABLES: &[(&str, &str)] = &[
+    ("crates/modal-voice/src/samples.rs", "the firmware's strike sample table (128013 int16), generated from elements/resources.cc"),
+    ("crates/modal-voice/src/noise.rs", "the firmware's blow noise table (40963 int16), generated from elements/resources.cc"),
+    ("crates/random-sequencer/src/resources/icdf.rs", "the 45 inverse-cdf tables of the beta distributions, generated from marbles/resources.cc"),
+    ("crates/texture/src/wavetables.rs", "the synth's integrated wavetable (49920 int16 plus one wave of zeros), generated from beads/resources.cc"),
+];
 
 /// Checks `files` (repo-relative path, line count) against `MAX_LINES`, `table` and `data_tables`. Reports every problem.
 pub fn check_file_size(files: &[(String, usize)], table: &[(&str, usize)], data_tables: &[(&str, &str)]) -> Result<(), String> {

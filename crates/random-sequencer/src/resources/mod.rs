@@ -8,11 +8,7 @@
 // Table data, verbatim.
 #![allow(clippy::approx_constant, clippy::excessive_precision, clippy::unreadable_literal)]
 
-mod icdf_0;
-mod icdf_1;
-mod icdf_2;
-mod icdf_3;
-mod icdf_4;
+mod icdf;
 
 /// Narrows double literals to `float`, as a C++ `const float` initializer does.
 const fn narrow<const N: usize>(x: &[f64; N]) -> [f32; N] {
@@ -113,19 +109,19 @@ pub(crate) static LUT_LOGIT: [f32; 257] = narrow(&LUT_LOGIT_LITERALS);
 /// C++'s order, each row padded with its last spread and the last row repeated.
 #[rustfmt::skip]
 pub(crate) static DISTRIBUTIONS: [&[f32; ICDF_SIZE]; 60] = [
-    &icdf_0::DIST_ICDF_0_0, &icdf_0::DIST_ICDF_0_1, &icdf_0::DIST_ICDF_0_2, &icdf_0::DIST_ICDF_0_3, &icdf_0::DIST_ICDF_0_4,
-    &icdf_0::DIST_ICDF_0_5, &icdf_0::DIST_ICDF_0_6, &icdf_0::DIST_ICDF_0_7, &icdf_0::DIST_ICDF_0_8, &icdf_0::DIST_ICDF_0_8,
-    &icdf_1::DIST_ICDF_1_0, &icdf_1::DIST_ICDF_1_1, &icdf_1::DIST_ICDF_1_2, &icdf_1::DIST_ICDF_1_3, &icdf_1::DIST_ICDF_1_4,
-    &icdf_1::DIST_ICDF_1_5, &icdf_1::DIST_ICDF_1_6, &icdf_1::DIST_ICDF_1_7, &icdf_1::DIST_ICDF_1_8, &icdf_1::DIST_ICDF_1_8,
-    &icdf_2::DIST_ICDF_2_0, &icdf_2::DIST_ICDF_2_1, &icdf_2::DIST_ICDF_2_2, &icdf_2::DIST_ICDF_2_3, &icdf_2::DIST_ICDF_2_4,
-    &icdf_2::DIST_ICDF_2_5, &icdf_2::DIST_ICDF_2_6, &icdf_2::DIST_ICDF_2_7, &icdf_2::DIST_ICDF_2_8, &icdf_2::DIST_ICDF_2_8,
-    &icdf_3::DIST_ICDF_3_0, &icdf_3::DIST_ICDF_3_1, &icdf_3::DIST_ICDF_3_2, &icdf_3::DIST_ICDF_3_3, &icdf_3::DIST_ICDF_3_4,
-    &icdf_3::DIST_ICDF_3_5, &icdf_3::DIST_ICDF_3_6, &icdf_3::DIST_ICDF_3_7, &icdf_3::DIST_ICDF_3_8, &icdf_3::DIST_ICDF_3_8,
-    &icdf_4::DIST_ICDF_4_0, &icdf_4::DIST_ICDF_4_1, &icdf_4::DIST_ICDF_4_2, &icdf_4::DIST_ICDF_4_3, &icdf_4::DIST_ICDF_4_4,
-    &icdf_4::DIST_ICDF_4_5, &icdf_4::DIST_ICDF_4_6, &icdf_4::DIST_ICDF_4_7, &icdf_4::DIST_ICDF_4_8, &icdf_4::DIST_ICDF_4_8,
-    &icdf_4::DIST_ICDF_4_0, &icdf_4::DIST_ICDF_4_1, &icdf_4::DIST_ICDF_4_2, &icdf_4::DIST_ICDF_4_3, &icdf_4::DIST_ICDF_4_4,
-    &icdf_4::DIST_ICDF_4_5, &icdf_4::DIST_ICDF_4_6, &icdf_4::DIST_ICDF_4_7, &icdf_4::DIST_ICDF_4_8, &icdf_4::DIST_ICDF_4_8,
+    &icdf::DIST_ICDF_0_0, &icdf::DIST_ICDF_0_1, &icdf::DIST_ICDF_0_2, &icdf::DIST_ICDF_0_3, &icdf::DIST_ICDF_0_4,
+    &icdf::DIST_ICDF_0_5, &icdf::DIST_ICDF_0_6, &icdf::DIST_ICDF_0_7, &icdf::DIST_ICDF_0_8, &icdf::DIST_ICDF_0_8,
+    &icdf::DIST_ICDF_1_0, &icdf::DIST_ICDF_1_1, &icdf::DIST_ICDF_1_2, &icdf::DIST_ICDF_1_3, &icdf::DIST_ICDF_1_4,
+    &icdf::DIST_ICDF_1_5, &icdf::DIST_ICDF_1_6, &icdf::DIST_ICDF_1_7, &icdf::DIST_ICDF_1_8, &icdf::DIST_ICDF_1_8,
+    &icdf::DIST_ICDF_2_0, &icdf::DIST_ICDF_2_1, &icdf::DIST_ICDF_2_2, &icdf::DIST_ICDF_2_3, &icdf::DIST_ICDF_2_4,
+    &icdf::DIST_ICDF_2_5, &icdf::DIST_ICDF_2_6, &icdf::DIST_ICDF_2_7, &icdf::DIST_ICDF_2_8, &icdf::DIST_ICDF_2_8,
+    &icdf::DIST_ICDF_3_0, &icdf::DIST_ICDF_3_1, &icdf::DIST_ICDF_3_2, &icdf::DIST_ICDF_3_3, &icdf::DIST_ICDF_3_4,
+    &icdf::DIST_ICDF_3_5, &icdf::DIST_ICDF_3_6, &icdf::DIST_ICDF_3_7, &icdf::DIST_ICDF_3_8, &icdf::DIST_ICDF_3_8,
+    &icdf::DIST_ICDF_4_0, &icdf::DIST_ICDF_4_1, &icdf::DIST_ICDF_4_2, &icdf::DIST_ICDF_4_3, &icdf::DIST_ICDF_4_4,
+    &icdf::DIST_ICDF_4_5, &icdf::DIST_ICDF_4_6, &icdf::DIST_ICDF_4_7, &icdf::DIST_ICDF_4_8, &icdf::DIST_ICDF_4_8,
+    &icdf::DIST_ICDF_4_0, &icdf::DIST_ICDF_4_1, &icdf::DIST_ICDF_4_2, &icdf::DIST_ICDF_4_3, &icdf::DIST_ICDF_4_4,
+    &icdf::DIST_ICDF_4_5, &icdf::DIST_ICDF_4_6, &icdf::DIST_ICDF_4_7, &icdf::DIST_ICDF_4_8, &icdf::DIST_ICDF_4_8,
 ];
 
 /// `dist_icdf_4_3`: the jitter's beta(3, 3) with a fatter tail.
-pub(crate) static DIST_ICDF_4_3: &[f32; ICDF_SIZE] = &icdf_4::DIST_ICDF_4_3;
+pub(crate) static DIST_ICDF_4_3: &[f32; ICDF_SIZE] = &icdf::DIST_ICDF_4_3;

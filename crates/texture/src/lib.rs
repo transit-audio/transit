@@ -43,8 +43,8 @@ pub mod stmlib;
 mod synth;
 mod trigger;
 mod wavetables;
-mod wavetables_a;
-mod wavetables_b;
+#[cfg(test)]
+mod wavetables_tests;
 
 pub use input::{InputStage, SoftClipping};
 pub use processor::Texture;

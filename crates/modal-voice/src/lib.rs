@@ -24,18 +24,14 @@ mod exciter;
 mod fm_pair;
 mod fx;
 mod modal;
-mod noise_1;
-mod noise_2;
+mod noise;
 mod part;
 mod resources;
 mod resources_sine;
 mod samples;
-mod samples_1;
-mod samples_2;
-mod samples_3;
-mod samples_4;
-mod samples_5;
 mod string;
+#[cfg(test)]
+mod table_tests;
 mod tube;
 mod voice;
 

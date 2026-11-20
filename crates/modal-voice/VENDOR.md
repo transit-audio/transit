@@ -28,7 +28,7 @@ Rack's Audible Instruments (GPLv3).
 | `elements/dsp/tube.{h,cc}` | `src/tube.rs` |
 | `elements/dsp/ominous_voice.{h,cc}` (the hidden voice) | `src/fm_pair.rs` (`FmPairVoice`) |
 | `elements/dsp/fx/{fx_engine,diffuser,reverb}.h` | `src/fx.rs` (`Diffuser` on 32-bit memory, `Reverb` on 16-bit memory) |
-| `elements/resources.cc` (18 float tables, `lut_sine`, the sample tables) | `src/resources.rs`, `src/resources_sine.rs`, `src/samples_1.rs` to `samples_5.rs`, `src/noise_1.rs`, `src/noise_2.rs` (generated), joined in `src/samples.rs` |
+| `elements/resources.cc` (18 float tables, `lut_sine`, the sample tables) | `src/resources.rs`, `src/resources_sine.rs`, `src/samples.rs`, `src/noise.rs` (generated; the two sample tables are data tables, one whole file each) |
 | `stmlib/dsp/filter.h` (`Svf` with its coefficient setters, normalized band-pass and multimode output; `NaiveSvf` with its exact tuning), `stmlib/dsp/dsp.h` (`InterpolateWrap`) | `src/dsp.rs` |
 | `stmlib/dsp/{dsp,units,delay_line,cosine_oscillator,parameter_interpolator}.h`, `filter.h` (`DCBlocker`, the tangent approximations), `stmlib/utils/random.h` | reused from transit's resonator port (`transit_resonator::stmlib`, the same stmlib commit) with its `F` float |
 
