@@ -3,7 +3,7 @@ title: I/O routing abstraction: a per-machine IoMap of named I/O paths of any wi
 -->
 # ADR 0015: I/O routing abstraction: a device channel map, named paths, one route graph
 
-- **Status:** accepted 2026-10-21 (direction pre-approved by the project owner; refutation review round 1 resolved); amendment 2026-11-04, Low Latency mode landed; amendment 2026-11-15, accepted after three judging rounds: a stored round trip excludes the rate converters' look-ahead (#709, not built); amendment 2026-11-16, accepted after three judging rounds: corrections of fact after #724; amendment 2026-11-16, accepted after three judging rounds: the #709 converter term on paired devices (#709, not built, v0.7.4); amendment 2026-11-20, accepted after one judging round: the server's sources as one input device (#431, with #759 and #689; not built)
+- **Status:** accepted 2026-10-21 (direction pre-approved by the project owner; refutation review round 1 resolved); amendment 2026-11-04, Low Latency mode landed; amendment 2026-11-15, accepted after three judging rounds: a stored round trip excludes the rate converters' look-ahead (#709, not built); amendment 2026-11-16, accepted after three judging rounds: corrections of fact after #724; amendment 2026-11-16, accepted after three judging rounds: the #709 converter term on paired devices (#709, not built, v0.7.4); amendment 2026-11-20, accepted after one judging round: the server's sources as one input device (#431, with #759 and #689; not built); revision 2026-11-20, proposed: virtual devices in the Input list replace the source list, which moves to Deferred (#431)
 - **Date:** 2026-10-21
 - **Implementation:** Slice 0 and slices (a) to (e) landed, including (d) hardware inserts f1add1e+074baac. The master hardware repair (#322) and the live cue flag landed as the prerequisites of (f). Slice (f) Low Latency mode landed with the per-machine preference, deterministic insert override, adopted-state display and shared/Main path-latency query.
 - **Reopen when:** a slice's gate proves unmeasurable on the reference machine; or upstream SoundCraft lands its own multi-output or sidechain model that we should converge with; or the TASCAM Model 12 shows that device channel counts differ between input and output (or between USB modes) enough that one channel-map shape cannot describe both; or dependency layers for key edges prove too costly in slice (c) (fallback in section 4). WASAPI shared mode exposing one channel count is a stated limit, not a reopen trigger (section 1).
@@ -237,14 +237,16 @@ Accepted 2026-11-16 after three judging rounds (proposed the same day). Not buil
 
 **Cost.** Changes in `crates/playback` (the alignment, the bridge, the probe) and in `crates/model` and `crates/mix` (provenance and lookup). Latency at a converted rate becomes T at every buffer and attachment, not a probe reading that varies with phase. The change from today is T minus the delay the code gives now, which can be a fraction of a frame either way. A null test of a send and return through the converters then has no converter timing residue. The converters' passband and alias error, and a hardware delay that is not a whole number of plan frames, still prevent a bit-exact null at a converted rate.
 
-## Amendment (#431, accepted 2026-11-20): the server's sources as one input device
+## Amendment (#431, accepted 2026-11-20; revision proposed 2026-11-20): the server's sources as one input device
 
-Proposed 2026-11-19, accepted 2026-11-20 after one judging round with changes (responses below); not built. Issue #431, with #759 (input paths) and #689 (a stored round trip after the input changes). It adds an input endpoint on the native JACK system ([ADR 0021](0021-native-linux-audio-over-the-jack-client-api.md)), moves the input half of section 1.3's table to the input device, and states transit's rule for graph links. ADR 0021 is not changed: quantum and rate changes keep its reset and reopen (rule 7). Sentences of this record that the amendment supersedes:
+Proposed 2026-11-19, accepted 2026-11-20 after one judging round with changes (responses below); not built. **Revised the same day, revision proposed** (see "Revision 2026-11-20" at the end): the maintainer cut the scope from a curated source list to one preference, "Show virtual devices", in the Input list. Rules 1 to 5, 10, 12 and 13 and slice C are rewritten. The source list is kept, whole, under Deferred, and slice D is withdrawn. Rules 6 to 9, 11 and 14 keep their numbers, so the briefs for slices A and B still point at the right rules. The heading's title is historical: in the revised scope, one input device at a time may be any group the server offers.
+
+Issue #431, with #759 (input paths) and #689 (a stored round trip after the input changes). The amendment lets the native JACK system ([ADR 0021](0021-native-linux-audio-over-the-jack-client-api.md)) offer non-physical port groups as input devices, moves the input half of section 1.3's table to the input device, and states transit's rule for graph links. ADR 0021 is not changed: quantum and rate changes keep its reset and reopen (rule 7). Sentences of this record that the amendment supersedes:
 
 - Section 1.3, "keyed on audio system plus device name": for the input half, the key becomes the identity of the capture endpoint actually opened (rule 8).
-- Section 1.5, "A missing input falls back to the first input path of the same width, else silence with a flag": on the source list endpoint, and on every backend for an input path whose name clashes with an output path, a missing, clashing or unavailable input monitors silence and refuses to record (rule 10). Section 1.4's "never records a wrong channel" is kept, and these cases enforce it.
+- Section 1.5, "A missing input falls back to the first input path of the same width, else silence with a flag": on every backend, an input path whose name clashes with an output path monitors silence and refuses to record (rule 10). Section 1.4's "never records a wrong channel" is kept, and this case enforces it.
 
-Every other rule of sections 1 to 7 stands. Paths below are relative to `crates/` at `transit` 4020713a. Each statement about today's code cites the line read; anything not read is marked *open question* or *hypothesis*.
+Every other rule of sections 1 to 7 stands. Paths below are relative to `crates/` at `transit` 4020713a; the revision was checked at a04e4fde, which changes nothing under `crates/`. Each statement about today's code cites the line read; anything not read is marked *open question* or *hypothesis*.
 
 ### Context
 
@@ -260,9 +262,145 @@ A tester's desktop runs PipeWire with dozens of nodes: hardware captures, virtua
 - **Which device the input is.** The recorder's `device_name` is the name of the endpoint object passed to the capture open (`playback/src/record.rs:247`, `491`), which is not always the capture endpoint actually opened. On ASIO and native WASAPI the object passed is the output's own endpoint (the trait default returns `render.clone()`, `audio-backend/src/lib.rs:647-649`). Native WASAPI then opens the capture endpoint paired with that render endpoint, resolved afresh at each open (`audio-wasapi/src/lib.rs:244-258`, the resolution at `256`), so the recorder's name is the output's while the stream comes from another endpoint. JACK resolves the chosen group into the endpoint it passes (`session.rs:324-336`); cpal opens its input as its own device (`playback/src/backend/cpal.rs:346-350`).
 - **Track inputs resolve by name, with a numeric fallback.** `input_channel` resolves a name through the table, else keeps the label meaning ("In 3" is channel 3), and an unrecognized name falls back to channel 0 (`io_map.rs:229-242`); `live_input_channel` wraps a device path to the live channel count and keeps "System Audio" silent when it does not run (`io_map.rs:254-266`). The System Audio pair is Windows only (`playback/src/system_audio.rs:192-200`); on Linux "System Audio" is only the Input list's label for a monitor source (`ui-studio/src/audio_devices_system.rs:71-78`).
 
-Convention: Ableton and Logic both take every input from the one chosen input device and let the user name and pair its channels (Ableton's Input Config, Logic's I/O Labels). Neither offers other applications' streams as inputs. On a JACK or PipeWire server those streams are ports like any other, which is why #431 asks for them. The source list keeps the convention's shape (choose the input in Audio Devices, name its channels as paths, pick a path per track) and only widens what a channel can be.
+- **A chosen input that is missing falls back today.** When the chosen group is not on the server, the duplex input logs a warning and opens the output's own group if it has capture ports, else the first group with capture ports (`session.rs:319-336`). The recorder then carries the name of the group that actually opened (`record.rs:491`). The Input dropdown shows a saved choice that is not offered as "Not available (falls back to the default)" (`ui-studio/src/audio_devices/window.rs:25-31`). Switching the audio system clears the chosen output and input (`window.rs:323-326`). Nothing reopens the input when a group appears or comes back: no registration callback is bound (above), and the JACK backend does not implement the trait's device-change hook, whose default reports that it cannot (`audio-backend/src/lib.rs:704`, not overridden in `audio-jack/src/session.rs:295-380`).
+- **What PipeWire's JACK library reports.** These facts were read from the library's public source, MIT (`pipewire-jack/src/pipewire-jack.c` at upstream commit 0e30a57, line numbers from that commit):
+  - A port is reported `JackPortIsPhysical` only when its PipeWire property `port.physical` is set (3964-3970). A virtual sink, a virtual source or an application stream is physical only if its node sets that property.
+  - A sink's monitor ports are shown by default (`jack.show-monitor`, 3980, default at 4521), under the sink's own client name (`jack.merge-monitor`, 4523, and 3737-3740).
+  - A client's name is the node's description, else its nick, else its name. The application's name is put in front ("<app>/<name>") when it differs (3866-3885). The media title is never used.
+  - Several streams from one PipeWire client share one client name (3890-3893), and a port whose full name is already taken gets "-<object serial>" appended (3745-3748).
+
+  Inferred: an application playing one stream keeps its client and port names across restarts. An application playing several streams from one process presents them as one group whose later ports carry a serial that changes, so that group's channel count and order can change between opens. A virtual sink or virtual source with a fixed name is stable. Which of the tester's nodes set `port.physical` is still to be read on the machine (rule 12).
+
+Convention: Ableton and Logic both take every input from the one chosen input device and let the user name and pair its channels (Ableton's Input Config, Logic's I/O Labels). Neither offers other applications' streams as inputs. On a JACK or PipeWire server those streams are ports like any other, which is why #431 asks for them. The revised rule keeps the convention exactly: one chosen input device, its channels named as paths. It only lets that device be a virtual one. Mixing several sources stays in the server, where virtual sinks already do it.
 
 ### Decision
+
+1. **Show virtual devices (revised 2026-11-20).** On the native JACK system, Audio Devices > Input gets one checkbox, **Show virtual devices**, off by default. It is saved per machine as `AudioConfig.jack_show_virtual: bool` (serde default false) beside `input` (`playback/src/devices.rs:167-203`).
+   - *Off.* Today's list: port groups of the ports the server marks physical (`ffi.rs:286-293`), grouped by client (`devices.rs:116-132`).
+   - *On.* The list also offers every *virtual device*: the audio output ports of one client that the server does not mark physical, grouped by the same rule. That includes a virtual sink's monitor ports, a virtual source and an application's output, as far as the server presents them as output ports.
+   - *Excluded.* transit's own session client (by the name the server gave it, `JackClient::name`, `api.rs:62-63`), its probe client (`PROBE_NAME`, `audio-jack/src/lib.rs:75`), and MIDI ports, excluded by type as today (`ffi.rs:293`).
+   - *No mixing.* Physical and non-physical ports are never mixed in one device. A client that has physical audio output ports is listed as today, and its non-physical output ports are not offered (a stated limit).
+   - *The server's flag only.* Classification is the server's physical flag and nothing else. Nothing is grouped or labeled by a kind guessed from port names, except the existing monitor label (rule 13, *Feedback*).
+   - *The output side.* It lists physical playback ports only, as today.
+   - *No choice made.* With no chosen input (`AudioConfig.input` empty), the input keeps resolving among physical groups only, the output's own and then the first (`session.rs:332-335`). So turning the preference on never changes an input the user did not choose.
+   - *The note.* One line under the checkbox: "Virtual sinks and sources keep their names. An application playing several streams appears as one device whose channels can change between opens."
+
+2. **A virtual device opens like a port group (revised 2026-11-20).** A virtual device is chosen, opened, linked and saved exactly like a hardware port group:
+   - One input device at a time.
+   - transit registers one input port per port of the group and links the group's i-th port to `in_i` through the existing loop (`session.rs:482-514`, `502-509`, `556-563`).
+   - The choice is saved by name in `AudioConfig.input` (`playback/src/devices.rs:176`).
+   - The open resolves a saved name among all groups, physical and virtual, whatever the preference: the preference filters only what the list offers.
+   - Its input identity (rule 8) is the group name.
+
+   There is no list of sources and no per-entry state.
+
+3. **The chosen input is always shown (revised 2026-11-20).** On the JACK system the dropdown shows the chosen input under its own name whenever it is present, with the preference on or off. When it is absent, it shows "<name> (not present: no input opens)" (rule 4) instead of today's "Not available (falls back to the default)" (`window.rs:25-31`). Turning the preference off never hides or clears the active choice.
+
+4. **A chosen input that is absent opens no input (revised 2026-11-20).**
+   - *At open.* On the JACK system, a chosen input that is not on the server opens no input, for virtual and hardware groups alike. The open's existing soft input failure (`open.rs:547`) carries "The chosen input "<name>" is not present; no input opened. Use Reconnect when it is back." No other group is substituted. This replaces the fallback in `duplex_capture_endpoint` (`session.rs:326-331`) when a choice is made; with no choice, the default resolution of rule 1 is unchanged.
+   - *While running.* When a chosen group's ports go away, transit's input ports are left unlinked and deliver silence, and transit is not told (Context). That ports which go away leave no link is *inferred* from the server removing a port; it is not read here.
+   - *When it comes back.* Nothing reopens or relinks the input. The user presses Reconnect or Apply. No callback is added for this.
+   - *What changes for hardware users.* Only an explicit choice that is absent behaves differently. Today it records from the output's own group or the first group (`session.rs:332-335`), a source the user did not choose. A system switch clears the choice (`window.rs:323-326`), so a name from another system does not reach this rule. A PipeWire profile change that renames a hardware node today also makes a saved output of the old name fail to open (`session.rs:158-163`), so that case already needs a new choice.
+   - *Alternative left to the judge.* Apply the rule to virtual groups only, and keep the hardware fallback. Recommended: both, because the fallback records a wrong source, which slice A's rules exist to prevent.
+
+5. **Channel order and stability (revised 2026-11-20).** A virtual device's channels are its ports in the order the server lists them (`ffi.rs:298-308`; grouping keeps that order, `devices.rs:116-132`), named by the ports' short names (`devices.rs:36-39`), as for hardware.
+   - *Dependable.* A virtual sink's monitor or a virtual source keeps its names (Context), so its channels stay put.
+   - *Not stable.* An application playing several streams is offered, but its channel count and order can change between opens (Context), and the note of rule 1 says so.
+   - *Width changes.* Slice A's rules cover a width change: paths that do not fit become unavailable and keep their definitions, widening re-enables them (rule 9), and a clashing name never records another channel (rule 10).
+   - *Order changes.* An order change at the same width is not detected, because port names are addresses, not identities. A path over channel k then reads whatever port is k-th. That is the stated cost of offering such a group. Rule 6 drops a restored outside link whose port changed.
+
+6. **transit does not explicitly disconnect outside links, and preserves eligible links across its own reopen.** This holds for every port group, physical or virtual. transit makes only its own links (the group's i-th capture port to `in_i`, `out_i` to the group's i-th playback port) and binds no disconnect call. Closing the client drops every link of its ports (Context), so a reopen restores the others:
+   - *The snapshot.* The snapshot belongs to one explicit reopen operation and is transferred outside the dying backend session. It is consumed once by that operation's replacement client. Quitting, switching servers or abandoning the operation discards it. It is not saved.
+   - *Taking it.* The snapshot is taken on a control thread before the first deactivation, never in a JACK callback or the Player's error callback, with `jack_port_get_all_connections` (bound today for tests only, `ffi.rs:461-494`). Snapshot and client lifetime operations are serialized. A transit endpoint is stored as direction plus local port index and mapped to the replacement client's actual assigned name. A remote endpoint is stored by exact full name, and its direction and type are validated before connecting.
+   - *Restoring.* Existing links, including `EEXIST`, count as restored. A port disappearing between enumeration and connection is a failed restore, logged once and not retried. A link to `in_k` or `out_k` beyond the new port count is dropped and logged. Links equal to configured transit links are classified as transit links, even if another client originally made them.
+   - *Meaning.* Outside links are restored only where the transit port keeps its endpoint and channel meaning. An endpoint change, or a group whose k-th port has another name after the reopen (a virtual device's ports can change, rule 5), changes that meaning for the affected ports and drops their saved links with a visible diagnostic. It does not attach an old patch to a different source. (Revised 2026-11-20: this was "a source-list edit or endpoint change".)
+   - *Limits.* After a server shutdown the client is gone before anything can be read (`session.rs:614-625`), so nothing is restored then. The snapshot is best effort: graph edits racing with the snapshot or the deactivation cannot be made atomic by this scheme.
+   - *What a user sees.* Today a quantum change stops the transport, keeps the take up to that point and reopens the device, and every hand-made link to transit's ports is gone. After slice B the same happens, and the links come back.
+
+7. **Timing changes keep ADR 0021's reset and reopen.** Quantum and rate changes retain ADR 0021's existing reset/reopen behavior: stop transport, preserve the take and reopen (Context). Uninterrupted quantum changes are deferred to a separate timing-contract amendment (Deferred) and are not a prerequisite for virtual devices. A virtual device may run on another driver, so Audio Devices warns, under **Show virtual devices** and in the hover of each virtual device in the Input list (revised 2026-11-20; this was the source list page): "Choosing a virtual device can change the server's buffer size or rate; transit then stops, keeps the take and reopens."
+
+8. **The input half of the table belongs to the input device.** The saved tables are kept per side. Output paths, Main, `hardware_latency` and `external_latency` stay in `UiState.io_maps`, keyed by (audio system, output device) as today (`ui-studio/src/ui_state.rs:24-25`). Input paths move to a new `UiState.input_maps: Vec<InputMap>` (ui.json key `input_maps`, serde default, bounded at 64 like `io_maps`, `io_settings.rs:10-11`), keyed by (audio system, input identity).
+   - *Input identity.* Input-map and measurement identity comes from the capture endpoint actually opened, reported by the backend; display names are separate. A backend's stable endpoint identifier is used where available, otherwise the backend's exact name, with its stated rename and duplicate-name limitation. ASIO uses its driver's identity, JACK the group name, a hardware or a virtual device (revised 2026-11-20; the reserved source list identity went with the source list), native WASAPI the resolved capture endpoint identifier (`audio-wasapi/src/lib.rs:256`), not the render endpoint's name, and cpal its input device's name. The capture open reports this identity (a new field beside `Achieved`; the recorder's `device_name`, `record.rs:491`, stays the display name).
+   - *No substitution.* An unavailable or ambiguously identified input does not select another device's saved map. A failed input open does not erase its saved paths.
+   - *The record.* `InputMap { system, device, inputs, defaults_for, paths }`: `device` is the input identity, `inputs` the open input's channel count, and `defaults_for` the width the default input paths were last made for (rule 9). A missing `input_maps` record and an explicitly empty one differ: the first may take an old table's input half (rule 11), the second is the user's empty table and is never refilled automatically.
+   - *Composition.* The engine keeps one `IoMap` (`engine/src/lib.rs:333-351`): the output record's outputs, Main and measurements, plus the input record's count and paths. `IoMap` gains `input_device: String` (serde default empty) naming the input record. Saving splits it again (rule 11 for records older builds wrote).
+   - *Clashes.* Names stay unique across both directions (section 1.4, `io_map.rs:369-381`). When a record's input path has the name of an output path of the record it joins, the input path is unresolved on every backend (rule 10). It stays in its record and is listed on the I/O paths page with "same name as an output path: rename one".
+   - *Silent device.* `--null-audio` saves neither half (`io_settings.rs:44-45`, `63-66`).
+
+9. **Default input paths follow the width.** This applies to every port group, physical or virtual, and to every other system.
+   - *Wider.* When the open input has more channels than `defaults_for`, the defaults for the new width are added ("In 1" per channel and stereo pairs, `io_map.rs:288-307`). Generated defaults never overwrite an existing definition: a name already present, a user path or a renamed default is left as it is.
+   - *Narrower.* A narrower open makes out-of-range paths unavailable but retains their definitions; widening re-enables them.
+   - *When it changes.* `defaults_for` becomes the open width only after a successful input open, not after an input failure.
+   - *Removed defaults.* A default the user removed stays removed while the width does not grow past `defaults_for`. A record without `defaults_for` counts as 0 (#759 case 1, rule 11).
+
+10. **Names and resolution (revised 2026-11-20; the source list's naming and resolution rules moved to Deferred).**
+    - *Clashes, on every backend.* An input path whose name clashes with an output path (rule 8) is unresolved. It monitors silence and refuses recording with the path named in the error. It never falls through to a numeric channel (`io_map.rs:240-241` today) or wraps to another channel (`io_map.rs:265` today). A hardware insert using it gets the existing flagged dry bypass, an External Instrument gets an unavailable return, and calibration refuses it. This supersedes section 1.5's fallback for this case (opening paragraph) and keeps section 1.4's "never records a wrong channel".
+    - *Default names.* Every port group, physical or virtual, keeps the defaults "In 1" and "In 1-2" (section 1.2), made by rule 9. Defaults are never regenerated automatically. **Add default paths** (rule 14) is the explicit, idempotent exception: it fills missing defaults without duplicating renamed paths or altering existing definitions. Names use the existing case-insensitive comparison (`io_map.rs:328-330`) and the reserved "System Audio" (`io_map.rs:13-15`, `373-375`); a collision with a bus follows section 1.4 (the bus wins and the route is flagged).
+    - *Other unresolved names.* On a port group, physical or virtual, other unresolved names keep today's label meaning (`io_map.rs:236-242`). A session's "In 1" on a virtual device reads its first port.
+
+11. **Tables saved by older builds.** Old input paths are preserved on disk, not imported. An older build wrote one table per (system, output device) holding both halves, in the serialized `IoMap` form (`io_map.rs:169-194`; `IoPath.live` is absent from files written before it existed, `io_map.rs:30-32`).
+    - *Never erased.* A new build reads and writes only the output half of a record an older build saved. The struct already carries every field of that form (`io_map.rs:173-184`, `serde(default)` and no unknown-field refusal at `171-172`), so a new build that saves the record writes its `inputs` and input `paths` back exactly as it read them, and applies no input-side reconcile to them. No new field is needed, and nothing in a new build reads them except the next bullet. A record that a new build creates has `inputs: 0` and no input paths.
+    - *Automatic use only where ownership is established.* When no `input_maps` record exists for the open input identity, and an old record's key is that actual input identity, its input half is the starting input record. This happens, for example, on ASIO, where driver, output and input are one, or for a JACK group that was earlier the output and is now the input. Paths that do not fit are unavailable (rule 9), and the defaults for the open width are added once, because there is no `defaults_for` (#759 case 1: a table that says 2 inputs but holds no input paths gets "In 1", "In 2" and "In 1-2"). Otherwise the input record starts from the defaults for the open input.
+    - *No inference.* The ownership of a separate capture device is never inferred from an output key. A native WASAPI record is keyed by the render endpoint's name (`open.rs:462`, `512`) and does not establish which paired capture endpoint its input paths belonged to, so it is not used for the input.
+    - *Measurements.* An old measurement is applied only when its actual return identity is established, that is, when the old record's key is the open input identity as above; equality of two display names is insufficient. Otherwise it is retained and shows "measure again".
+    - *Downgrade.* An older build reading a preserved record sees its own input half. Reading a record a new build created, it sees 0 inputs and makes its own default input paths (`io_map.rs:559-566`).
+    - *Import.* An explicit action that copies an old input half into the selected input device is deferred until someone needs it (Deferred).
+
+    The release notes carry, under "Before you upgrade": "⚠️ **Input paths now belong to the actual input device.** Output paths are kept. Input paths you made by hand for an input that was a different device from the output are not shown for that input; they stay in the settings file, unused. On Windows, a WASAPI input paired with an output gets its own paths, starting from the defaults. A hardware insert or External Instrument measurement whose return input cannot be established says Measure again. Going back to an older build may show default inputs."
+
+12. **Experiment on a real PipeWire machine (revised 2026-11-20; bounded; gates slice C and the release).** Fakes cannot show which nodes a desktop marks physical, or what the server does when transit links a node on another driver. On the tester's machine, transit runs on Native JACK, and the forced quantum and rate settings are read with `pw-metadata -n settings 0` at the start and end.
+    1. Record `pw-jack jack_lsp -c -p` (port flags and links) for the record.
+    2. Turn **Show virtual devices** on. Pick a virtual sink's monitor and record a take of something playing into that sink.
+    3. Pick a virtual source and record a take.
+    4. For each pick, note whether choosing it changed transit's buffer size or rate (its "JACK:" log lines, `pw-top -b -n 3` before and after). If it did, the take ends, is kept and the device reopens (rule 7): expected and documented, not a failure.
+    5. After a minute of recording, record `pw-link -l` once to see whether transit's links to the virtual device are still there (H2).
+
+    About 15 minutes. *Hypotheses:* H1, choosing a device on another driver can change transit's quantum but not its rate; H2, the session manager does not remove links it did not make.
+    - *If H1's unchanged-rate prediction is false,* keep reset/reopen and take preservation, document the observed trigger, and make no uninterrupted-recording claim.
+    - *If H2 is false,* transit does not fight the session manager by reconnecting. Slice C and the release remain blocked until a tested coexistence configuration is documented or a revised link-ownership design is accepted.
+
+    One run supports the tested configuration, not every PipeWire desktop.
+
+13. **Interactions.**
+    - *Hardware inserts and External Instruments (#689).* `HardwareLatency` and `ExternalLatency` gain `input_device: String` (serde default empty): the input identity the return came through (rule 8). A measurement through a virtual device is valid only while that group's port names, in order, are the ones it was measured through. Slice C stores them with the measurement, and a mismatch shows "measure again" (revised 2026-11-20; this was the source list's mapping). A figure whose identity or ports do not match is not applied; the insert shows "measure again" and counts zero, as an unmeasured insert does (section 5). Old figures follow rule 11. Section 5's duplex rule is met: every port group arrives on the one client and callback (`session.rs:338-342`).
+    - *The recorder's clock.* A virtual device adds no clock domain on transit's side. It reaches transit's capture callback in the same process cycle as the render, so the input stays paired (2026-11-16 #709 amendment, rule 1), and the retained-history refusal ("recording start fell outside retained input history", `playback/src/record/start.rs:410`, `496-501`) is not changed by this amendment. That the server brings a node on another driver into the graph's cycle before transit's callback sees it is a *hypothesis* (rule 12, H1).
+    - *Latency.* A shared callback establishes delivery coordinates, not equal physical capture latency. Ordinary inputs receive no automatic compensation for another application's processing, buffering or cross-driver resampling. Monitoring includes that delay; PDC and Low Latency mode cannot remove unreported upstream delay. The latency readout does not claim to include it. Port latencies are not read today (`session.rs:797-800`); reading `jack_port_get_latency_range` is ADR 0021 slice 3, not this amendment.
+    - *Feedback (revised 2026-11-20).* Choosing the monitor of the output transit plays to, with monitoring on, makes a loop. Today:
+      - The Input list labels a Linux monitor source "System Audio (monitor of <output>)" from its name alone, through `monitor_label(&d.name, &[])` (`ui-studio/src/audio_devices_system.rs:71-78`).
+      - The rule that recognizes a JACK group whose capture ports are all `monitor_*` (`playback/src/system_audio.rs:796-805`) is used only for the system notes (`playback/src/backend/native.rs:283-286`). The Input list's `DeviceInfo` carries no channel names (`playback/src/devices.rs:460-470`).
+
+      The minimum:
+      - In the Input list, a group whose ports are all `monitor_*` gets that existing label; slice C passes its port names to `monitor_label`. This existing rule is the one label taken from port names (rule 1).
+      - When the group's name is the chosen output's, the label adds ", transit's output", and its hover says "Monitoring this input plays the output back into itself."
+      - Choosing an input never turns on a track's monitoring.
+      - A loop through another application cannot be seen by the route graph and is not detected.
+    - *Sessions and offline render.* The preference and the input maps remain machine preferences. Sessions carry path names only; moving a session never copies or guesses device names. Offline bounce, freeze and stems retain section 1.5's machine independence and existing external-hardware treatment; they neither open JACK ports nor bake machine input mappings into the session.
+    - *Headless and control commands.* Headless operation and control-channel device commands use the same validation, actual-input identity, map composition and absent-input rule as the UI. The preference is set through the same command path as the other audio settings.
+    - *System Audio.* The Windows pair is unchanged (`system_audio.rs:192-200`). On Linux, a sink's monitor may be offered as a virtual device (rule 1) and is labeled as above.
+    - *The 32-channel cap.* A virtual device is a port group and follows the same cap. The JACK backend asks for every port of a group with no 32 cap (`session.rs:171-185`, `346-349`), while the table caps at 32 (`io_map.rs:269-274`); what a wider group does downstream was not read. Slice A resolves it before landing: the existing 32-channel limit is enforced safely, or the behavior beyond 32 is explicit and bounded.
+    - *`--null-audio` and `--no-audio`.* Unchanged; no JACK client.
+    - *Other systems.* There is no virtual-devices preference outside JACK, but rules 8 to 11 apply everywhere. On ASIO the input identity is the driver, as the output's, so input paths stay where they are; ASIO also gets rule 9's default repair and rule 10's unresolved state for clashing names. Native WASAPI's input identity is the paired capture endpoint, so its input paths start from the defaults (rule 11) and change when the pairing changes. On cpal's separate input (ALSA, CoreAudio) the input table is the input device's. The output side, ALSA through cpal, CoreAudio, WASAPI and ASIO get no other change.
+    - *File sizes.* `ui-studio/src/audio_devices.rs` has 1383 lines and `model/src/io_map.rs` 925; new code goes into new files.
+
+14. **The I/O paths page.** When inputs are open and the input record has no available path, the Inputs list says "No input paths" and offers **Add default paths**, beside today's Add (`ui-studio/src/audio_devices_io.rs:285-338`). It is one click and idempotent: rule 9's defaults, never duplicating a renamed path or changing an existing definition. Unavailable paths are listed with why (out of range or name clash). The heading line names both devices, "Input: <device>, N channels. Output: <device>, M channels.", instead of "Channels open on this device" (`audio_devices_io.rs:251`).
+
+### Deferred
+
+- **Outputs to arbitrary destinations** (a destination list linking `out_k` to another client's input port). Outputs carry Main, sink padding and the live-cue opt-out (section 6). A link to an application that feeds back into a listed source makes a loop the route graph cannot see. The tester's need is an input. This is a later amendment, when someone asks; until then outputs are port groups, and rule 6 keeps eligible outside links to `out_k` across reopens.
+- **Uninterrupted quantum changes (#591 item 3) need their own timing-contract amendment.** It must decide:
+  - Stamps: an `Invalid` stamp clears the clock fitter's observations and published map (`playback/src/device_clock.rs:312-316`).
+  - Recording starts: pending starts, retained-history boundaries, current block metadata and published start mappings need an explicit transition.
+  - Compensation keys: a stale calibration or External Instrument compensation must be withdrawn at the first affected audio block, which UI polling cannot ensure.
+  - Plug-ins: process calls must stay within their prepared maximum; backend scratch capacity alone proves nothing about that contract.
+  - Converters: converter alignment and compensation change together, including the accepted #709 rules.
+  - A running take: placement and latency across the change need a decision, not merely "continues".
+- **Importing old input paths.** An explicit action that copies an old table's preserved input half into the selected input device, showing its old output key and channel mapping. Deferred until someone needs it (rule 11).
+
+- **The source list.** Accepted on 2026-11-20 and cut the same day by the maintainer: a curated list of ports with per-entry presence, replace, reorder and rename handling is more machinery than the need, which is to pick a virtual source as the input. Mixing several sources is what the user's PipeWire setup already does with virtual sinks. The accepted text is kept below so that it can be picked up as it stands. **Reopen when** someone needs several separate sources at once inside transit.
+
+#### The source list as accepted on 2026-11-20 (deferred; not built)
+
+In this block, "rule 1" to "rule 5" and "rule 10" mean the items below, and "slices C and D" mean the two slices at its end. Rules 6 to 9, 11 and 14 are the amendment's own. Two parts would have to be revisited when it is picked up. Rule 6's restore by port index already covers changed meaning, so a reorder is a case of it. The port registration and rename callbacks of rule 4 are not bound by the revised scope.
 
 1. **The source list is an input endpoint of the JACK system.** Beside the port groups, Audio Devices > Input on the native JACK system offers one more entry, **Source list**, with its channel count ("Source list · 5 ch"). Choosing it makes the input the user's list of sources (rule 2); choosing a port group keeps today's behavior. The output stays a port group. The name is reserved: a port group whose client name is exactly "Source list" is not offered as an input device under that name (its ports can still be added to the list). The working name "All sources" is not used, because the endpoint carries the sources the user chose, not every source. Other systems list no such entry. The entry is not offered until the page that edits the list exists (slices C and D).
 
@@ -289,30 +427,6 @@ Convention: Ableton and Logic both take every input from the one chosen input de
    - *Measurements.* A replacement, a removal or a changed return-channel mapping invalidates the affected hardware insert, External Instrument and loopback calibration measurements. Retaining a path name alone does not validate a measurement.
    - *One operation.* The configuration, the path changes and the reopen form one operation. A failed open leaves a visible unavailable configuration and never substitutes another source.
 
-6. **transit does not explicitly disconnect outside links, and preserves eligible links across its own reopen.** This holds for the source list and for port groups. transit makes only its own links (the group's i-th capture port to `in_i`, entry k to `in_k`, `out_i` to the group's i-th playback port) and binds no disconnect call. Closing the client drops every link of its ports (Context), so a reopen restores the others:
-   - *The snapshot.* The snapshot belongs to one explicit reopen operation and is transferred outside the dying backend session. It is consumed once by that operation's replacement client. Quitting, switching servers or abandoning the operation discards it. It is not saved.
-   - *Taking it.* The snapshot is taken on a control thread before the first deactivation, never in a JACK callback or the Player's error callback, with `jack_port_get_all_connections` (bound today for tests only, `ffi.rs:461-494`). Snapshot and client lifetime operations are serialized. A transit endpoint is stored as direction plus local port index and mapped to the replacement client's actual assigned name. A remote endpoint is stored by exact full name, and its direction and type are validated before connecting.
-   - *Restoring.* Existing links, including `EEXIST`, count as restored. A port disappearing between enumeration and connection is a failed restore, logged once and not retried. A link to `in_k` or `out_k` beyond the new port count is dropped and logged. Links equal to configured transit links are classified as transit links, even if another client originally made them.
-   - *Meaning.* Outside links are restored only where the transit port keeps its endpoint and channel meaning. A source-list edit or endpoint change that changes that meaning drops the affected saved links with a visible diagnostic; it does not attach an old patch to a different source.
-   - *Limits.* After a server shutdown the client is gone before anything can be read (`session.rs:614-625`), so nothing is restored then. The snapshot is best effort: graph edits racing with the snapshot or the deactivation cannot be made atomic by this scheme.
-   - *What a user sees.* Today a quantum change stops the transport, keeps the take up to that point and reopens the device, and every hand-made link to transit's ports is gone. After slice B the same happens, and the links come back.
-
-7. **Timing changes keep ADR 0021's reset and reopen.** Quantum and rate changes retain ADR 0021's existing reset/reopen behavior: stop transport, preserve the take and reopen (Context). Uninterrupted quantum changes are deferred to a separate timing-contract amendment (Deferred) and are not a prerequisite for the source list. Audio Devices warns, on the source list page and in the hover of Add a source, that linking or reappearing sources may change server timing and end a take: "Linking a source can change the server's buffer size or rate; transit then stops, keeps the take and reopens."
-
-8. **The input half of the table belongs to the input device.** The saved tables are kept per side. Output paths, Main, `hardware_latency` and `external_latency` stay in `UiState.io_maps`, keyed by (audio system, output device) as today (`ui-studio/src/ui_state.rs:24-25`). Input paths move to a new `UiState.input_maps: Vec<InputMap>` (ui.json key `input_maps`, serde default, bounded at 64 like `io_maps`, `io_settings.rs:10-11`), keyed by (audio system, input identity).
-   - *Input identity.* Input-map and measurement identity comes from the capture endpoint actually opened, reported by the backend; display names are separate. A backend's stable endpoint identifier is used where available, otherwise the backend's exact name, with its stated rename and duplicate-name limitation. ASIO uses its driver's identity, JACK the group name or the reserved source list identity, native WASAPI the resolved capture endpoint identifier (`audio-wasapi/src/lib.rs:256`), not the render endpoint's name, and cpal its input device's name. The capture open reports this identity (a new field beside `Achieved`; the recorder's `device_name`, `record.rs:491`, stays the display name).
-   - *No substitution.* An unavailable or ambiguously identified input does not select another device's saved map. A failed input open does not erase its saved paths.
-   - *The record.* `InputMap { system, device, inputs, defaults_for, paths }`: `device` is the input identity, `inputs` the open input's channel count, and `defaults_for` the width the default input paths were last made for (rule 9). A missing `input_maps` record and an explicitly empty one differ: the first may take an old table's input half (rule 11), the second is the user's empty table and is never refilled automatically.
-   - *Composition.* The engine keeps one `IoMap` (`engine/src/lib.rs:333-351`): the output record's outputs, Main and measurements, plus the input record's count and paths. `IoMap` gains `input_device: String` (serde default empty) naming the input record. Saving splits it again (rule 11 for records older builds wrote).
-   - *Clashes.* Names stay unique across both directions (section 1.4, `io_map.rs:369-381`). When a record's input path has the name of an output path of the record it joins, the input path is unresolved on every backend (rule 10). It stays in its record and is listed on the I/O paths page with "same name as an output path: rename one".
-   - *Silent device.* `--null-audio` saves neither half (`io_settings.rs:44-45`, `63-66`).
-
-9. **Default input paths follow the width.** This applies to a port group and to every other system; the source list's table uses rule 10.
-   - *Wider.* When the open input has more channels than `defaults_for`, the defaults for the new width are added ("In 1" per channel and stereo pairs, `io_map.rs:288-307`). Generated defaults never overwrite an existing definition: a name already present, a user path or a renamed default is left as it is.
-   - *Narrower.* A narrower open makes out-of-range paths unavailable but retains their definitions; widening re-enables them.
-   - *When it changes.* `defaults_for` becomes the open width only after a successful input open, not after an input failure.
-   - *Removed defaults.* A default the user removed stays removed while the width does not grow past `defaults_for`. A record without `defaults_for` counts as 0 (#759 case 1, rule 11).
-
 10. **Names and resolution on the source list.**
     - *Default names.* When an entry is added, defaults are made for it. Take the entry's client part C (before the first `:`) and short name S. S gets a tag: L when S, lowercased, ends in `fl`, `_l` or `left`; R when it ends in `fr`, `_r` or `right`; otherwise the tag is S itself. The mono path is "C tag" (for example "Music L"). When the new entry and the entry before it have the same C and the tags L then R, the stereo path "C L/R" over the two channels is added as well.
     - *Collisions.* Names use the existing case-insensitive comparison (`io_map.rs:328-330`). A name taken by any path of the composed table, by the reserved "System Audio" (`io_map.rs:13-15`, `373-375`) or by a bus of the open session (section 1.4's shared namespace) gets " (2)", " (3)" and so on, the lowest free number. A user rename is kept.
@@ -320,78 +434,8 @@ Convention: Ableton and Logic both take every input from the one chosen input de
     - *Port groups.* The port group defaults keep "In 1" and "In 1-2" (section 1.2).
     - *Resolution.* On the source list endpoint, inputs resolve only through valid input paths. Missing, conflicting or unavailable paths monitor silence and refuse recording with the path named in the error; they never fall through to a numeric channel (`io_map.rs:240-241` today) or wrap to another channel (`io_map.rs:265` today). Hardware inserts use the existing flagged dry bypass, External Instruments have an unavailable return, and calibration refuses an unavailable return. The same unresolved state applies on every backend to an input path that clashes with an output path (rule 8). This supersedes section 1.5's fallback for these cases (opening paragraph) and keeps section 1.4's "never records a wrong channel". On port groups, other unresolved names keep today's label meaning.
 
-11. **Tables saved by older builds.** Old input paths are preserved on disk, not imported. An older build wrote one table per (system, output device) holding both halves, in the serialized `IoMap` form (`io_map.rs:169-194`; `IoPath.live` is absent from files written before it existed, `io_map.rs:30-32`).
-    - *Never erased.* A new build reads and writes only the output half of a record an older build saved. The struct already carries every field of that form (`io_map.rs:173-184`, `serde(default)` and no unknown-field refusal at `171-172`), so a new build that saves the record writes its `inputs` and input `paths` back exactly as it read them, and applies no input-side reconcile to them. No new field is needed, and nothing in a new build reads them except the next bullet. A record that a new build creates has `inputs: 0` and no input paths.
-    - *Automatic use only where ownership is established.* When no `input_maps` record exists for the open input identity, and an old record's key is that actual input identity, its input half is the starting input record. This happens, for example, on ASIO, where driver, output and input are one, or for a JACK group that was earlier the output and is now the input. Paths that do not fit are unavailable (rule 9), and the defaults for the open width are added once, because there is no `defaults_for` (#759 case 1: a table that says 2 inputs but holds no input paths gets "In 1", "In 2" and "In 1-2"). Otherwise the input record starts from the defaults for the open input.
-    - *No inference.* The ownership of a separate capture device is never inferred from an output key. A native WASAPI record is keyed by the render endpoint's name (`open.rs:462`, `512`) and does not establish which paired capture endpoint its input paths belonged to, so it is not used for the input.
-    - *Measurements.* An old measurement is applied only when its actual return identity is established, that is, when the old record's key is the open input identity as above; equality of two display names is insufficient. Otherwise it is retained and shows "measure again".
-    - *Downgrade.* An older build reading a preserved record sees its own input half. Reading a record a new build created, it sees 0 inputs and makes its own default input paths (`io_map.rs:559-566`).
-    - *Import.* An explicit action that copies an old input half into the selected input device is deferred until someone needs it (Deferred).
+Slices of the source list, as accepted:
 
-    The release notes carry, under "Before you upgrade": "⚠️ **Input paths now belong to the actual input device.** Output paths are kept. Input paths you made by hand for an input that was a different device from the output are not shown for that input; they stay in the settings file, unused. On Windows, a WASAPI input paired with an output gets its own paths, starting from the defaults. A hardware insert or External Instrument measurement whose return input cannot be established says Measure again. Going back to an older build may show default inputs."
-
-12. **Experiment on a real PipeWire machine (bounded; gates slice C and the release).** Fakes cannot show what the server does when a link crosses drivers.
-    - *Setup.* On the tester's machine, transit runs on Native JACK with forced quantum and rate settings held constant through the run (read with `pw-metadata -n settings 0` at the start and end). The list is edited only while stopped.
-    - *Live linking.* Preconfigure an absent source (a music player that is not running, then a Bluetooth or USB headset microphone that is off), start playback, then start that source; repeat while recording a take. Separately, with the player running, make an outside cross-driver link to `transit:in_1` in a graph tool without reopening transit.
-    - *Capture.* For each case: transit's own callback rate and quantum (its log lines with "JACK:"); `pw-top -b -n 3` before and after (each node's driver, quantum and rate); `pw-link -l` with which links transit made and which the tester made; `pw-jack jack_lsp -c -p` (port flags, Q1); whether the take continued or was ended and kept, and whether it has audio from the source.
-    - *H2.* Test with transit-made and outside-made links: an explicit disconnect of a transit-made link while its source stays present, then an unrelated registration event (start and stop another player), then an Apply of the same device (rule 6), then a minute of playback, reading `pw-link -l` after each.
-    - *H3.* Restart the player alone and compare its port names (Q2).
-    - *Hypotheses.* H1: linking a node driven by another driver can change transit's quantum but not its rate. H2: the session manager does not remove links it did not make. H3: an application's port names are the same after it restarts.
-    - *If H1's unchanged-rate prediction is false,* retain reset/reopen and take preservation, document the observed trigger, and make no uninterrupted-recording claim. A failure to merge drivers is not itself a failure if the server still delivers valid audio to transit's callback.
-    - *If H2 is false,* transit does not fight the session manager by repeatedly reconnecting. It reports the disconnected configured source. Slice C and the release remain blocked until a tested coexistence configuration is documented or a revised link-ownership design is accepted.
-    - *If H3 is false,* retain exact-name matching and require stopped replacement; do not guess another port identity.
-
-    One run supports the tested configuration, not every PipeWire desktop.
-
-13. **Interactions.**
-    - *Hardware inserts and External Instruments (#689).* `HardwareLatency` and `ExternalLatency` gain `input_device: String` (serde default empty): the input identity the return came through (rule 8). On the source list, measurement validity includes the resolved return sources and channel mapping, not merely the constant identity "Source list"; a changed mapping or a source replacement requires measuring again (rule 5). A figure whose identity or mapping does not match is not applied; the insert shows "measure again" and counts zero, as an unmeasured insert does (section 5). Old figures follow rule 11. Section 5's duplex rule is met: every source arrives on the one client and callback (`session.rs:338-342`).
-    - *The recorder's clock.* The source list adds no clock domain on transit's side: every source reaches transit's capture callback in the same process cycle as the render, so the input stays paired (2026-11-16 #709 amendment, rule 1), and the retained-history refusal ("recording start fell outside retained input history", `playback/src/record/start.rs:410`, `496-501`) is not changed by this amendment. That the server brings a source on another driver into the graph's cycle before transit's callback sees it is a *hypothesis* (rule 12, H1).
-    - *Latency.* A shared callback establishes delivery coordinates, not equal physical capture latency. Ordinary inputs receive no automatic compensation for another application's processing, buffering or cross-driver resampling. Monitoring includes that delay; PDC and Low Latency mode cannot remove unreported upstream delay. The latency readout does not claim to include it. Port latencies are not read today (`session.rs:797-800`); reading `jack_port_get_latency_range` per source is ADR 0021 slice 3, not this amendment.
-    - *Feedback.* Software monitoring can complete a feedback loop through an external application; the internal route graph cannot detect that loop. Source selection does not enable monitoring automatically.
-    - *Sessions and offline render.* Source lists and input maps remain machine preferences. Sessions carry path names only; moving a session never copies or guesses source addresses. Offline bounce, freeze and stems retain section 1.5's machine independence and existing external-hardware treatment; they neither open JACK sources nor bake machine input mappings into the session.
-    - *Headless and control commands.* Headless operation and control-channel device commands use the same validation, actual-input identity, map composition and transport guards as the UI. An unsupported source-list mutation returns unavailable; it must not bypass those guards.
-    - *System Audio.* The Windows pair is unchanged (`system_audio.rs:192-200`). On Linux, a sink's monitor is a source like any other and may be listed.
-    - *The 32-channel cap.* The list stops at 32 (rule 2). The JACK backend asks for every port of a group with no 32 cap (`session.rs:171-185`, `346-349`), while the table caps at 32 (`io_map.rs:269-274`); what a wider group does downstream was not read. Slice A resolves it before landing: the existing 32-channel limit is enforced safely, or the behavior beyond 32 is explicit and bounded.
-    - *`--null-audio` and `--no-audio`.* Unchanged; no JACK client.
-    - *Other systems.* There is no source list outside JACK, but rules 8 to 11 apply everywhere. On ASIO the input identity is the driver, as the output's, so input paths stay where they are; ASIO also gets rule 9's default repair and rule 10's unresolved state for clashing names. Native WASAPI's input identity is the paired capture endpoint, so its input paths start from the defaults (rule 11) and change when the pairing changes. On cpal's separate input (ALSA, CoreAudio) the input table is the input device's. cpal's ALSA path gets no source list.
-    - *File sizes.* `ui-studio/src/audio_devices.rs` has 1383 lines and `model/src/io_map.rs` 925; the source list page and `InputMap` go into new files.
-
-14. **The I/O paths page.** When inputs are open and the input record has no available path, the Inputs list says "No input paths" and offers **Add default paths**, beside today's Add (`ui-studio/src/audio_devices_io.rs:285-338`). It is one click and idempotent: rule 9's defaults for a port group, rule 10's for every entry of the list, never duplicating a renamed path or changing an existing definition. Unavailable paths are listed with why (out of range, source removed, name clash). The heading line names both devices, "Input: <device>, N channels. Output: <device>, M channels.", instead of "Channels open on this device" (`audio_devices_io.rs:251`). On the source list, each entry shows present, not present or could not link, and outside links to its port are listed separately (rule 3).
-
-### Deferred
-
-- **Outputs to arbitrary destinations** (a destination list linking `out_k` to another client's input port). Outputs carry Main, sink padding and the live-cue opt-out (section 6). A link to an application that feeds back into a listed source makes a loop the route graph cannot see. The tester's need is an input. This is a later amendment, when someone asks; until then outputs are port groups, and rule 6 keeps eligible outside links to `out_k` across reopens.
-- **Uninterrupted quantum changes (#591 item 3) need their own timing-contract amendment.** It must decide:
-  - Stamps: an `Invalid` stamp clears the clock fitter's observations and published map (`playback/src/device_clock.rs:312-316`).
-  - Recording starts: pending starts, retained-history boundaries, current block metadata and published start mappings need an explicit transition.
-  - Compensation keys: a stale calibration or External Instrument compensation must be withdrawn at the first affected audio block, which UI polling cannot ensure.
-  - Plug-ins: process calls must stay within their prepared maximum; backend scratch capacity alone proves nothing about that contract.
-  - Converters: converter alignment and compensation change together, including the accepted #709 rules.
-  - A running take: placement and latency across the change need a decision, not merely "continues".
-- **Importing old input paths.** An explicit action that copies an old table's preserved input half into the selected input device, showing its old output key and channel mapping. Deferred until someone needs it (rule 11).
-
-### Slices
-
-Slices land in the order A, B, C, D. A and B can land independently; B's snapshot design already supports C's changed-meaning exclusions (rule 6). Each slice ships alone and gets a refutation review (ADR 0009). The `audio-jack` tests run over the fake server on every platform (`audio-jack/src/lib.rs:34`, `fake.rs`), and slices touching `audio-jack` also run the Linux gate. All slices keep the repository gates and the quoted-unsafe review. Fake watcher ticks and timestamps are driven explicitly, so "within one tick" never becomes a wall-clock assertion. A new binding call is exercised through the real FFI binding as well as the fake trait methods: a `server_*` test, skipped where no server answers, run once by the builder against a local dummy JACK 2 server and recorded in the result note.
-
-- **(A) Per-side tables, the #759 repair and the page** (rules 8, 9, 10's unresolved state, 11 and 14, and rule 13's `input_device`). `model` (a new `input_map.rs`, `HardwareLatency`, `ExternalLatency`, the resolver), `ui-studio` (`io_settings.rs`, `ui_state.rs`, `audio_devices_io.rs`, the hardware page), `engine` (`set_io_map` composition, recording refusal), `playback` and the backends (the opened capture identity: ASIO, native WASAPI, JACK, cpal). Medium. Gates:
-  - Fixtures written as JSON in the serialized form v0.7.0 to v0.7.3 wrote: an `io_maps` entry with 2 inputs and only output paths; one with 2 inputs, "In 1", "In 2", "In 1-2" and a user input path; one without `live`; one keyed by a JACK group that is now only the input; one native WASAPI record. Each is loaded and checked against rule 11, saved and reloaded, and its input half compared byte for byte with what was read.
-  - #759 case 1 gets its defaults once. Case 2: a 2-channel, then 1-channel, then 2-channel input ends with "In 1", "In 2", "In 1-2" available and keeps a user path. Shrinking and restoring a custom multichannel path keeps its definition. A default removed while the width holds stays removed.
-  - A failed input open changes neither `defaults_for` nor the saved paths. A missing `input_maps` record and an explicitly empty one behave as rule 8 says.
-  - Native WASAPI, capture endpoint A then B under one output: two input records, and a measurement taken through A is not applied through B (#689's test, with the JACK group case).
-  - ASIO tables load with the same paths and Main.
-  - Case-insensitive and bus collisions; a cross-half clash is unresolved, monitors silence and refuses recording with the path named.
-  - The page's Add default paths makes rule 9's set and is idempotent; `--null-audio` saves no input record.
-  - Q6: a fake-server open of a 40-port group through the Player shows the 32-channel limit enforced safely, or an explicit bounded behavior.
-- **(B) Eligible outside links survive transit's reopens** (rule 6). `audio-jack` (`session.rs`; `ffi.rs`: the connection read out of `cfg(test)`, with its SAFETY note), `playback` (the reopen operation carrying the snapshot). Small to medium. The fake gains other clients that link to transit's ports, and counts disconnect requests. Gates:
-  - An outside link to `in_1` and one from `out_2` exist again after a quantum-and-rate reset.
-  - A server shutdown restores no snapshot.
-  - The replacement client's assigned name differs (`transit-01`) and links still land on the right ports.
-  - Duplicate links and `EEXIST` count as restored; a vanished endpoint is a logged failure, not retried.
-  - A failed open discards the snapshot; an endpoint change and a reorder drop the links whose meaning changed, with the diagnostic.
-  - A link equal to transit's own counts as transit's.
-  - With auto-connect off, nothing of transit's own is linked and outside links are still restored.
-  - The fake's disconnect count stays 0.
 - **(C) The source list endpoint** (rules 1 to 4, with rule 2's validation). `audio-jack` (`devices.rs`, `session.rs`, `sys.rs`, `ffi.rs`, `callback.rs`: the source listing, the reserved endpoint, the registration and rename callbacks and the watcher's presence tracking), `playback` (`AudioConfig.jack_sources`, `open.rs` passing the list). Medium; new `unsafe` under the quoted-review rule. The public endpoint is not offered until slice D lands. The fake gains non-physical ports with owners, ports that appear, go away and are renamed with events, and connect failing for an absent port. Gates:
   - The endpoint lists the list length; the open registers one port per entry and links each present entry to its port.
   - An absent entry contributes silence and the other channels keep their positions; external audio linked to an absent entry's port arrives and is shown as an outside link.
@@ -409,45 +453,86 @@ Slices land in the order A, B, C, D. A and B can land independently; B's snapsho
   - Every transport guard (playback, recording, count-in, pending record start, active measurement) refuses through the UI and through the commands; an edit while stopped reopens once.
   - Add default paths is idempotent; the timing warning shows.
 
-**Untested without real hardware:** which ports PipeWire marks physical; how it names application and monitor ports, and whether an application reuses a name; whether the registration and rename callbacks arrive under PipeWire as under JACK 2; driver, quantum and rate changes when a link crosses drivers; how session managers other than the tested one treat transit's links; upstream processing latency per source; feedback through external applications. Rule 12 covers the first five once, for the tested configuration.
+Alternatives of the source list, as accepted:
+
+- **A fixed pool of 32 input ports, so list edits need no reopen.** Every graph tool would show 32 transit inputs, and the capture would be 32 channels wide for a two-source list. Reopening on an edit while stopped is the existing path.
+- **Identify sources by application rather than port name.** JACK gives no application identity, and guessing from similar names could attach the wrong source (rule 2).
+
+### Slices
+
+Slices land in the order A, B, C (revised 2026-11-20: the source list's slices C and D are withdrawn and kept under Deferred). A and B can land independently. B's snapshot design covers a group whose ports change between opens (rule 6). Each slice ships alone and gets a refutation review (ADR 0009). The `audio-jack` tests run over the fake server on every platform (`audio-jack/src/lib.rs:34`, `fake.rs`), and slices touching `audio-jack` also run the Linux gate. All slices keep the repository gates and the quoted-unsafe review. Fake watcher ticks and timestamps are driven explicitly, so "within one tick" never becomes a wall-clock assertion. A new binding call is exercised through the real FFI binding as well as the fake trait methods: a `server_*` test, skipped where no server answers, run once by the builder against a local dummy JACK 2 server and recorded in the result note.
+
+- **(A) Per-side tables, the #759 repair and the page** (rules 8, 9, 10's unresolved state, 11 and 14, and rule 13's `input_device`). `model` (a new `input_map.rs`, `HardwareLatency`, `ExternalLatency`, the resolver), `ui-studio` (`io_settings.rs`, `ui_state.rs`, `audio_devices_io.rs`, the hardware page), `engine` (`set_io_map` composition, recording refusal), `playback` and the backends (the opened capture identity: ASIO, native WASAPI, JACK, cpal). Medium. Gates:
+  - Fixtures written as JSON in the serialized form v0.7.0 to v0.7.3 wrote: an `io_maps` entry with 2 inputs and only output paths; one with 2 inputs, "In 1", "In 2", "In 1-2" and a user input path; one without `live`; one keyed by a JACK group that is now only the input; one native WASAPI record. Each is loaded and checked against rule 11, saved and reloaded, and its input half compared byte for byte with what was read.
+  - #759 case 1 gets its defaults once. Case 2: a 2-channel, then 1-channel, then 2-channel input ends with "In 1", "In 2", "In 1-2" available and keeps a user path. Shrinking and restoring a custom multichannel path keeps its definition. A default removed while the width holds stays removed.
+  - A failed input open changes neither `defaults_for` nor the saved paths. A missing `input_maps` record and an explicitly empty one behave as rule 8 says.
+  - Native WASAPI, capture endpoint A then B under one output: two input records, and a measurement taken through A is not applied through B (#689's test, with the JACK group case).
+  - ASIO tables load with the same paths and Main.
+  - Case-insensitive and bus collisions; a cross-half clash is unresolved, monitors silence and refuses recording with the path named.
+  - The page's Add default paths makes rule 9's set and is idempotent; `--null-audio` saves no input record.
+  - Q6: a fake-server open of a 40-port group through the Player shows the 32-channel limit enforced safely, or an explicit bounded behavior.
+- **(B) Eligible outside links survive transit's reopens** (rule 6). `audio-jack` (`session.rs`; `ffi.rs`: the connection read out of `cfg(test)`, with its SAFETY note), `playback` (the reopen operation carrying the snapshot). Small to medium. The fake gains other clients that link to transit's ports, and counts disconnect requests. Gates:
+  - An outside link to `in_1` and one from `out_2` exist again after a quantum-and-rate reset.
+  - A server shutdown restores no snapshot.
+  - The replacement client's assigned name differs (`transit-01`) and links still land on the right ports.
+  - Duplicate links and `EEXIST` count as restored; a vanished endpoint is a logged failure, not retried.
+  - A failed open discards the snapshot; an endpoint change and a group whose k-th port changed between opens (revised 2026-11-20; this was "a reorder") drop the links whose meaning changed, with the diagnostic.
+  - A link equal to transit's own counts as transit's.
+  - With auto-connect off, nothing of transit's own is linked and outside links are still restored.
+  - The fake's disconnect count stays 0.
+- **(C) Virtual devices in the Input list** (revised 2026-11-20; rules 1 to 5, rule 7's warning, rule 13's monitor label and the measurement's port names). `audio-jack` covers enumeration of non-physical output ports, the exclusions, resolving a saved name among all groups, and the absent-input refusal in `duplex_capture_endpoint`; listing without the physical flag is a change inside `ffi.rs` under its quoted SAFETY notes, with no new libjack function. `playback` covers `AudioConfig.jack_show_virtual`, the listing in `backend/native.rs` and the input failure text. `ui-studio` covers the checkbox, its note and warning, the dropdown and the label. `engine` or the control channel carries the preference. Small to medium. Gates, over the fake server:
+  - The listing with the preference off is today's; with it on, it adds the non-physical groups, and the output list is unchanged.
+  - transit's own client (also under an assigned name such as `transit-01`), its probe client and MIDI ports are never offered. A client with physical audio output ports gets no virtual entry.
+  - With no chosen input, turning the preference on changes nothing about which group opens.
+  - A chosen virtual input is shown, and opens, with the preference off.
+  - A chosen input that is absent, virtual or hardware, opens no input, links no other group, and its name is in the message; after it returns, Reconnect opens it.
+  - A group whose port count changes between opens keeps slice A's table rules: paths that do not fit are unavailable and keep their definitions, and widening re-enables them.
+  - A group whose k-th port name changes at the same width drops a restored outside link to `in_k` (rule 6). A measurement through it shows "measure again".
+  - The monitor label, including ", transit's output" when the group is the chosen output.
+  - The preference is set and read through a headless or control-channel path.
+  - Rule 12's experiment runs before this slice lands and before the release.
+
+**Untested without real hardware:** which of a desktop's nodes set `port.physical`; driver, quantum and rate changes when transit links a node on another driver; how session managers treat transit's links; upstream processing latency of a virtual device; feedback through external applications. Rule 12 covers the first three once, for the tested configuration.
 
 ### Alternatives considered
 
-- **Every port of the server as a channel (#431's first proposal, "JACK (all ports)").** The tester's graph has more ports than the 32-channel cap, and the set changes as applications start and stop. A channel number would then point to another port after each change, and a saved path could read the wrong source without a word. A user-ordered list keeps numbers stable and a missing source silent.
+- **The source list** (the accepted design before the revision; Deferred). It is more machinery than picking one virtual source, and mixing sources is done in the server with virtual sinks.
+- **Every port of the server as a channel (#431's first proposal, "JACK (all ports)").** The tester's graph has more ports than the 32-channel cap, and the set changes as applications start and stop. A channel number would then point to another port after each change, and a saved path could read the wrong source without a word.
 - **Keep external patching and document it.** It works today, but nobody finds it, and every reopen, a quantum change included, drops the patch (Context). Rule 6 fixes the second half for everyone who keeps patching by hand; a quantum change still reopens (rule 7).
-- **A graph window inside transit.** It duplicates the system's graph tools, is a large UI to build and keep, and puts routing outside the I/O paths, where Ableton and Logic keep it in the device preferences. Revisit if outputs to destinations (Deferred) need more than a list.
-- **Open several port groups at once as separate input devices.** One client can link any port, so several devices would only add clients and clocks to a problem one list solves.
-- **A fixed pool of 32 input ports, so list edits need no reopen.** Every graph tool would show 32 transit inputs, and the capture would be 32 channels wide for a two-source list. Reopening on an edit while stopped is the existing path.
-- **Identify sources by application rather than port name.** JACK gives no application identity, and guessing from similar names could attach the wrong source (rule 2).
-- **The native PipeWire API.** ADR 0021 already rejects it for now (JACK 2 users left out, a much larger `unsafe` surface). The source list needs nothing the JACK API lacks.
+- **Always list virtual devices, with no preference.** The tester's graph has dozens of nodes; a default list of every application stream buries the interfaces most users want. Off by default keeps today's list.
+- **Label devices by a kind guessed from their names** (sink monitor, application, virtual source). PipeWire's names are descriptions and application names (Context), not kinds. The server's physical flag is the one classification it gives, plus the existing monitor label.
+- **A graph window inside transit.** It duplicates the system's graph tools, is a large UI to build and keep, and puts routing outside the I/O paths, where Ableton and Logic keep it in the device preferences.
+- **The native PipeWire API.** ADR 0021 already rejects it for now (JACK 2 users left out, a much larger `unsafe` surface). Virtual devices need nothing the JACK API lacks.
 
 ### Consequences
 
-- On a JACK or PipeWire server, any source the server offers can be a track input, named for what it is, without a graph tool. Linking a source can still change the server's timing, and then the take ends (kept) and the device reopens (rule 7).
+- On a JACK or PipeWire server, a virtual sink's monitor or a virtual source can be the input, without a graph tool, after one checkbox. Choosing one can still change the server's timing, and then the take ends (kept) and the device reopens (rule 7).
+- An application with several streams can be chosen, but its channels may move between opens; the page says so.
+- A chosen input that is absent now opens no input instead of recording from another device.
 - Hand-made links now come back after transit's own reopens (slice B), except after a server shutdown.
 - Input paths stop being reshaped by the output's table. A narrower input no longer deletes paths.
 - Hand-made input paths for an input that was a different device from the output are not shown for that input after upgrading. They stay on disk, unused. Native WASAPI inputs start from defaults and follow the paired capture endpoint (rule 11, "Before you upgrade").
-- An unresolved input on the source list, or a clashing name anywhere, is silent and refuses to record instead of falling back to a channel number.
-- Two more callbacks in the `unsafe` binding, quoted and tested over the fake and once against a real server.
-- Editing the source list needs a stopped transport.
+- An input path whose name clashes with an output path is silent and refuses to record instead of falling back to a channel number.
+- No new callback in the `unsafe` binding: slice B promotes an existing test-only call, and slice C changes the flags of an existing one.
 
 ### Reopen when
 
+- Someone needs several separate sources at once inside transit: pick up the deferred source list.
 - Rule 12 finds H2 false (the server or session manager removes transit's links), and a revised link-ownership design is needed.
-- Application port names change across restarts often enough (H3, Q2) that replacing entries by hand is a burden; then the list needs another identity (for example the PipeWire node name the port belongs to).
-- The registration or rename notifications are not delivered under PipeWire's JACK library (Q5), and control-side reconciliation proves too costly.
+- Applications with several streams are commonly needed with stable channels; that needs an identity finer than the group name.
 - A timing-contract amendment for uninterrupted quantum changes (Deferred) is accepted; rule 7 is then revisited.
-- Users need more than 32 sources, ask for outputs to destinations, or need old input paths imported (Deferred).
+- Users need outputs to destinations or old input paths imported (Deferred).
 - ADR 0021 moves Linux audio to the native PipeWire API.
 
 ### Open questions (each with the cheapest check)
 
-- **Q1.** Does PipeWire's JACK library mark sink monitor ports, virtual sources and application outputs `JackPortIsPhysical`? Check: `pw-jack jack_lsp -p` on the tester's machine (already on ADR 0021's tester checklist); rule 12 records it.
-- **Q2.** Are an application's port names the same after it restarts, or does the server add a suffix? Check: `pw-jack jack_lsp` before and after restarting one player (rule 12).
-- **Q3.** Does linking a source on another driver change transit's quantum or rate (H1)? Check: rule 12.
-- **Q4.** Does the session manager remove or move links transit made to application streams (H2)? Check: rule 12's H2 sequence.
-- **Q5.** What guarantee does the applicable header give for `jack_set_port_registration_callback` and `jack_set_port_rename_callback` (the thread they run on, and when they may be installed), and does PipeWire's library deliver them for every add, removal and rename? Check: quote the header's text in the binding's SAFETY note; one `server_*` test against a local dummy JACK 2 server; rule 12 for PipeWire.
-- **Q6.** What a group of more than 32 ports does downstream. No longer open at landing: it is a gate of slice A.
+- **Q1.** Partly answered from the library's source (Context): a port is physical only when its node sets `port.physical`. Which of the tester's nodes set it is still open. Check: `pw-jack jack_lsp -c -p`, rule 12 step 1.
+- **Q2.** Answered from the library's source (Context): a single stream keeps its names; several streams from one process share a client name, and later ports carry a changing serial. Nothing further is needed for the revised scope.
+- **Q3.** Does choosing a device on another driver change transit's quantum or rate (H1)? Check: rule 12 step 4.
+- **Q4.** Does the session manager remove links transit made (H2)? Check: rule 12 step 5.
+- **Q5.** Moot for the revised scope: no registration or rename callback is bound. It returns with the deferred source list.
+- **Q6.** What a group of more than 32 ports does downstream. Not open at landing: it is a gate of slice A.
+- **Q7.** Rule 4 for hardware groups too, or for virtual groups only? Recommended: both. Left to the revision's judging round.
 
 ## Judging round 1 (#431): responses
 
@@ -475,3 +560,47 @@ The round returned ACCEPT WITH CHANGES with twelve edits. Where the coordinator 
 | 10: audible and offline limits | Accepted. | Rule 13: latency, feedback, sessions and offline render, headless and control commands; Q6 made a slice A gate. |
 | 11: experiment design | Accepted. | Rule 12: stopped edits, preconfigured absent sources started live, an outside link without reopening, H2 and H3 tested separately, held forced settings, and the outcome of each failed hypothesis. |
 | 12: slices and gates | Accepted. | Slices A, B, C, D, with C's endpoint offered only after D and the experiment gating C and the release; every listed gate added; explicit ticks; the real binding exercised once; untested list expanded. |
+
+## Revision 2026-11-20 (#431, scope cut by the maintainer; proposed)
+
+Proposed 2026-11-20; it gets one short judging round.
+
+**What was cut, and why.** The maintainer cut the source list, rules 1 to 5 and the source list parts of rules 10, 12 and 13, with slices C and D as accepted. A curated list of ports with per-entry presence, replace, reorder and rename handling is more machinery than the need, "pick a virtual source as my input". Mixing several sources is something the user's PipeWire setup already does with virtual sinks. The accepted text is kept whole under Deferred, with its reopen condition.
+
+**What replaces it.**
+- Rule 1: one per-machine preference, **Show virtual devices**, off by default, that adds non-physical port groups to the Input list.
+- Rules 2 and 3: such a device opens, links and is saved like a hardware group, and the chosen input is always shown.
+- Rule 4: a chosen input that is absent opens no input.
+- Rule 5: channel order and stability as the server gives them.
+- Rule 13: the existing monitor label is used in the Input list, with a warning when it is transit's own output.
+
+**Choices the maintainer has now made himself:**
+- Virtual devices are behind one preference, off by default.
+- No source list.
+
+**What did not change.** These keep their numbers and their text, apart from the dated wording notes in rules 6 and 7:
+- Rules 6 to 9, 11 and 14, so the briefs for slices A and B still hold.
+- Slice A in full, with Q6 as its gate.
+- Slice B's gates. One gate's wording changes for the same mechanism: "a reorder" becomes "a group whose k-th port changed between opens".
+- Quantum and rate changes keep the reset and reopen (rule 7), with the warning moved to the preference.
+- The output side lists hardware port groups only.
+- No other system gets the preference.
+
+**The twelve edits of judging round 1, after the cut.**
+
+| Edit | Still applies? |
+| --- | --- |
+| 1: Context overstatements | Stands. |
+| 2: names are addresses | Moves to Deferred with the source list. The revised rule 5 states the same limit for a virtual device's ports: names are addresses, and an order change at the same width is not detected. |
+| 3: no relink on unrelated events | Moves to Deferred. The revised scope binds no registration callback and relinks nothing on its own (rule 4). |
+| 4: shared-client reopen, whole paths | Moves to Deferred with list edits. Its measurement rule survives in rule 13: a measurement through a virtual device is tied to the group's ports. |
+| 5: no wrong-source fallback | The unresolved-name rule for clashing names on every backend stands (rule 10). The source list's resolution and naming parts move to Deferred. |
+| 6: restore transaction | Stands (rule 6, slice B). |
+| 7: keep reset and reopen | Stands (rule 7). |
+| 8: actual capture identity | Stands (rule 8). For JACK the identity is the group name, hardware or virtual. |
+| 9: preserve legacy information | Stands, with the coordinator's change (rule 11). |
+| 10: audible and offline limits | Stands (rule 13), worded for virtual devices. |
+| 11: experiment design | The parts about list edits and live linking move to Deferred. The revised rule 12 is shorter: preference on, a virtual sink's monitor, a virtual source, the buffer size and links noted, the port flags recorded. Its H1 and H2 outcomes stand. |
+| 12: slices and gates | A and B stand. The source list's C and D gates move to Deferred; the new slice C has its own gates. |
+
+**Open for this round.** Q7: rule 4 for hardware groups too (recommended), or for virtual groups only.
