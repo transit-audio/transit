@@ -195,7 +195,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             .filter(|i| i.identity == io.input_device)
             .map(|i| crate::audio_devices_io::InputDevice { name: &i.name, channels: i.channels })
             // A table set by a command rather than composed from an open input names its identity.
-            .or_else(|| (!io.input_device.is_empty()).then(|| crate::audio_devices_io::InputDevice { name: &io.input_device, channels: usize::from(io.inputs) })),
+            .or_else(|| {
+                (!io.input_device.is_empty())
+                    .then(|| crate::audio_devices_io::InputDevice { name: &io.input_device, channels: usize::from(io.inputs) })
+            }),
         output_channels,
     );
     let mut editor = std::mem::take(&mut app.audio_devices.io_editor);

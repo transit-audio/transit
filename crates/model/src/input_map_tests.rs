@@ -176,7 +176,14 @@ fn add_default_paths_is_idempotent_and_skips_renamed_defaults() {
 }
 
 fn hw(input_device: &str, frames: u32) -> HardwareLatency {
-    HardwareLatency { send: "Out 3-4".into(), ret: "In 1".into(), round_trip_frames: frames, rate: 48_000, measured_at: 1, input_device: input_device.into() }
+    HardwareLatency {
+        send: "Out 3-4".into(),
+        ret: "In 1".into(),
+        round_trip_frames: frames,
+        rate: 48_000,
+        measured_at: 1,
+        input_device: input_device.into(),
+    }
 }
 
 /// #689 and rule 13: a figure measured through input A is not applied through B; it stays for A.
@@ -242,10 +249,7 @@ fn saving_splits_the_table_and_keeps_an_old_input_half_as_read() {
     map.add_path(path("Cue", IoDirection::Output, vec![1])).unwrap();
     let kept = map.output_record(Some(&old));
     assert_eq!(kept.inputs, 2);
-    assert_eq!(
-        kept.paths_of(IoDirection::Input).cloned().collect::<Vec<_>>(),
-        old.paths_of(IoDirection::Input).cloned().collect::<Vec<_>>()
-    );
+    assert_eq!(kept.paths_of(IoDirection::Input).cloned().collect::<Vec<_>>(), old.paths_of(IoDirection::Input).cloned().collect::<Vec<_>>());
     assert!(kept.path("Cue").is_some() && kept.input_device.is_empty());
     let fresh = map.output_record(None);
     assert_eq!((fresh.inputs, fresh.paths_of(IoDirection::Input).count()), (0, 0), "a new record has no input half");

@@ -14,14 +14,34 @@ use transit_model::{IoDirection, IoMap, IoPath, MAX_PATH_WIDTH};
 /// One edit of the path table: one `setup.io_map` command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IoEdit {
-    Add { direction: IoDirection, name: String, channels: Vec<u16> },
+    Add {
+        direction: IoDirection,
+        name: String,
+        channels: Vec<u16>,
+    },
     /// The edits of one path name its direction: an input path may share an output path's name
     /// until one is renamed (ADR 0015, amendment for #431, rule 8).
-    Rename { name: String, direction: IoDirection, new_name: String },
-    Remove { name: String, direction: IoDirection },
-    SetChannels { name: String, direction: IoDirection, channels: Vec<u16> },
-    SetMain { name: String },
-    SetLive { name: String, live: bool },
+    Rename {
+        name: String,
+        direction: IoDirection,
+        new_name: String,
+    },
+    Remove {
+        name: String,
+        direction: IoDirection,
+    },
+    SetChannels {
+        name: String,
+        direction: IoDirection,
+        channels: Vec<u16>,
+    },
+    SetMain {
+        name: String,
+    },
+    SetLive {
+        name: String,
+        live: bool,
+    },
     /// Add default paths: the default input paths the table lacks (rule 14), idempotent.
     AddDefaultInputs,
 }
@@ -134,7 +154,8 @@ pub fn input_note(inputs: u16, failure: Option<&str>) -> Option<String> {
 /// What the Inputs list says when inputs are open and no input path can be used (rule 14).
 pub const NO_INPUT_PATHS: &str = "No input paths";
 /// The hover of Add default paths.
-pub const ADD_DEFAULTS_TIP: &str = "Add the default input paths this input lacks (In 1, In 2, ... and the stereo pairs); paths you renamed or made stay as they are.";
+pub const ADD_DEFAULTS_TIP: &str =
+    "Add the default input paths this input lacks (In 1, In 2, ... and the stereo pairs); paths you renamed or made stay as they are.";
 
 /// The input the table's input half belongs to, as the page names it: the capture endpoint's
 /// display name and its own channel count (which can exceed the table's cap).
@@ -619,7 +640,10 @@ mod tests {
             "Input: Big, 40 channels (the first 32 are used). Output: Big, 40 channels (the first 32 are used)."
         );
         let io = IoMap::for_device("WASAPI", "Speakers", 0, 2);
-        assert_eq!(heading(&io, Some(InputDevice { name: "Microphone", channels: 1 }), 2), "Input: Microphone, 1 channel. Output: Speakers, 2 channels.");
+        assert_eq!(
+            heading(&io, Some(InputDevice { name: "Microphone", channels: 1 }), 2),
+            "Input: Microphone, 1 channel. Output: Speakers, 2 channels."
+        );
         assert_eq!(heading(&io, None, 0), "Input: not open. Output: Speakers, 2 channels.");
     }
 

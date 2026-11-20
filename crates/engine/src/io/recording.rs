@@ -690,7 +690,13 @@ mod record_tests {
         let dir = transit_test_support::TestDir::new("takes-unavailable");
         let mut e = Engine::default();
         let out = transit_model::IoMap::for_device("ASIO", "x", 0, 4);
-        let path = |name: &str, channels: Vec<u16>| IoPath { live: false, name: name.into(), direction: IoDirection::Input, channels, format: ChannelFormat::Mono };
+        let path = |name: &str, channels: Vec<u16>| IoPath {
+            live: false,
+            name: name.into(),
+            direction: IoDirection::Input,
+            channels,
+            format: ChannelFormat::Mono,
+        };
         let record = transit_model::InputMap {
             system: "ASIO".into(),
             device: "x".into(),
@@ -704,8 +710,14 @@ mod record_tests {
         let far = armed(&mut e, "Far", "mono", "Far");
         let label = armed(&mut e, "Label", "mono", "In 2");
         let why = input_refusal(&e).expect("refused");
-        assert!(why.contains("track `Clash` cannot record: the input path `Out 3-4` is unavailable (same name as an output path: rename one)"), "{why}");
-        assert!(why.contains("track `Far` cannot record: the input path `Far` is unavailable (out of range: the input has 2 channels open)"), "{why}");
+        assert!(
+            why.contains("track `Clash` cannot record: the input path `Out 3-4` is unavailable (same name as an output path: rename one)"),
+            "{why}"
+        );
+        assert!(
+            why.contains("track `Far` cannot record: the input path `Far` is unavailable (out of range: the input has 2 channels open)"),
+            "{why}"
+        );
         assert!(!why.contains("Label"), "{why}");
         let plan = plan_takes(&e, &dir, 2);
         let channels = |t: TrackId| plan.iter().find(|p| p.0 == t).map(|p| p.1.clone()).unwrap();

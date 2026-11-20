@@ -4,10 +4,9 @@
 //! the real conversion of an adapter or plain `f32` slices ([`SliceSink`], [`SliceSource`]).
 
 use crate::{
-    Achieved, Backend, BackendFactory, Calibration, CaptureBlock, CaptureCallback, CaptureEndpoint, CaptureSource, Direction, Endpoint, ErrorCallback,
-    Format,
-    InputWish, Mode, OpenError, OpenRequest, OutputWish, Period, Plan, RenderBlock, RenderCallback, RenderSink, SCRATCH_FRAMES, SampleFormat, Stamp,
-    Stream, StreamError, StreamStats, WorkerPriority,
+    Achieved, Backend, BackendFactory, Calibration, CaptureBlock, CaptureCallback, CaptureEndpoint, CaptureSource, Direction, Endpoint,
+    ErrorCallback, Format, InputWish, Mode, OpenError, OpenRequest, OutputWish, Period, Plan, RenderBlock, RenderCallback, RenderSink,
+    SCRATCH_FRAMES, SampleFormat, Stamp, Stream, StreamError, StreamStats, WorkerPriority,
 };
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;

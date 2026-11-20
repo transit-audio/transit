@@ -55,7 +55,14 @@ fn target(io: &IoMap) -> RenderTarget {
 fn io(measured: Option<usize>) -> IoMap {
     let mut io = IoMap::for_device("test", "fake duplex", 4, 4);
     if let Some(frames) = measured {
-        io.set_hardware_latency(HardwareLatency { send: SEND.into(), ret: RET.into(), round_trip_frames: frames as u32, rate: SR, measured_at: 1, input_device: String::new()  });
+        io.set_hardware_latency(HardwareLatency {
+            send: SEND.into(),
+            ret: RET.into(),
+            round_trip_frames: frames as u32,
+            rate: SR,
+            measured_at: 1,
+            input_device: String::new(),
+        });
     }
     io
 }

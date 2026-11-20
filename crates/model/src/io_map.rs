@@ -250,7 +250,13 @@ impl IoPath {
 /// (section 1.2: the labels sessions already use).
 pub fn default_input_paths(inputs: u16) -> Vec<IoPath> {
     let inputs = inputs.min(MAX_DEVICE_CHANNELS as u16);
-    let mono = (0..inputs).map(|c| IoPath { live: false, name: label("In", c, 1), direction: IoDirection::Input, channels: vec![c], format: ChannelFormat::Mono });
+    let mono = (0..inputs).map(|c| IoPath {
+        live: false,
+        name: label("In", c, 1),
+        direction: IoDirection::Input,
+        channels: vec![c],
+        format: ChannelFormat::Mono,
+    });
     let pairs = (0..inputs / 2).map(|i| 2 * i).map(|c| IoPath {
         live: false,
         name: label("In", c, 2),
@@ -554,11 +560,19 @@ impl IoMap {
             // Only the figures that came back through this input: another input's path of the
             // same name keeps its own (amendment for #431, rule 13).
             IoDirection::Input => {
-                let kept: Vec<HardwareLatency> =
-                    self.hardware_latency.iter().filter(|m| !(m.ret.eq_ignore_ascii_case(name) && self.returns_through(&m.input_device))).cloned().collect();
+                let kept: Vec<HardwareLatency> = self
+                    .hardware_latency
+                    .iter()
+                    .filter(|m| !(m.ret.eq_ignore_ascii_case(name) && self.returns_through(&m.input_device)))
+                    .cloned()
+                    .collect();
                 self.hardware_latency = kept;
-                let kept: Vec<ExternalLatency> =
-                    self.external_latency.iter().filter(|m| !(m.ret.eq_ignore_ascii_case(name) && self.returns_through(&m.input_device))).cloned().collect();
+                let kept: Vec<ExternalLatency> = self
+                    .external_latency
+                    .iter()
+                    .filter(|m| !(m.ret.eq_ignore_ascii_case(name) && self.returns_through(&m.input_device)))
+                    .cloned()
+                    .collect();
                 self.external_latency = kept;
             }
         }
@@ -589,7 +603,10 @@ impl IoMap {
     pub fn set_hardware_latency(&mut self, m: HardwareLatency) {
         let input = self.figure_input(&m.input_device).to_string();
         let same = |o: &HardwareLatency| {
-            o.rate == m.rate && o.send.eq_ignore_ascii_case(&m.send) && o.ret.eq_ignore_ascii_case(&m.ret) && self.figure_input(&o.input_device) == input
+            o.rate == m.rate
+                && o.send.eq_ignore_ascii_case(&m.send)
+                && o.ret.eq_ignore_ascii_case(&m.ret)
+                && self.figure_input(&o.input_device) == input
         };
         let kept: Vec<HardwareLatency> = self.hardware_latency.iter().filter(|o| !same(o)).cloned().collect();
         self.hardware_latency = kept;
@@ -701,7 +718,10 @@ impl IoMap {
             self.paths.splice(at..at, missing);
             self.main = fresh.main;
             // A former cue can become the fallback Main when the device loses output channels.
-            self.paths.iter_mut().filter(|p| p.direction == IoDirection::Output && p.name.eq_ignore_ascii_case(&self.main)).for_each(|p| p.live = false);
+            self.paths
+                .iter_mut()
+                .filter(|p| p.direction == IoDirection::Output && p.name.eq_ignore_ascii_case(&self.main))
+                .for_each(|p| p.live = false);
         }
         true
     }

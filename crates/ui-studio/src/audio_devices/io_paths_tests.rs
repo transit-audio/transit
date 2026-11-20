@@ -225,7 +225,13 @@ fn the_heading_names_both_devices_and_no_input_paths_offers_the_defaults() {
 fn an_unavailable_input_path_is_listed_with_why() {
     use transit_model::{ChannelFormat, InputMap, IoDirection, IoPath};
     let mut t = with_window();
-    let path = |name: &str, channels: Vec<u16>| IoPath { live: false, name: name.into(), direction: IoDirection::Input, channels, format: ChannelFormat::Mono };
+    let path = |name: &str, channels: Vec<u16>| IoPath {
+        live: false,
+        name: name.into(),
+        direction: IoDirection::Input,
+        channels,
+        format: ChannelFormat::Mono,
+    };
     let record = InputMap {
         system: "ASIO".into(),
         device: "Mic Pre".into(),

@@ -641,7 +641,8 @@ mod tests {
         use transit_model::{ChannelFormat, InputMap, IoDirection, IoMap, IoPath};
         let mut e = Engine::default();
         let mut out = IoMap::for_device("ASIO", "x", 0, 4);
-        out.add_path(IoPath { live: false, name: "Cue".into(), direction: IoDirection::Output, channels: vec![3], format: ChannelFormat::Mono }).unwrap();
+        out.add_path(IoPath { live: false, name: "Cue".into(), direction: IoDirection::Output, channels: vec![3], format: ChannelFormat::Mono })
+            .unwrap();
         let record = InputMap {
             system: "ASIO".into(),
             device: "mic pre".into(),

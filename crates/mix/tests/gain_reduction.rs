@@ -561,7 +561,14 @@ fn a_hardware_insert_ahead_of_the_keyed_insert() {
     const D: usize = 700;
     let (send, ret) = ("Out 3-4", "In 3-4");
     let mut io = IoMap::for_device("test", "fake duplex", 4, 4);
-    io.set_hardware_latency(HardwareLatency { send: send.into(), ret: ret.into(), round_trip_frames: D as u32, rate: SR, measured_at: 1, input_device: String::new()  });
+    io.set_hardware_latency(HardwareLatency {
+        send: send.into(),
+        ret: ret.into(),
+        round_trip_frames: D as u32,
+        rate: SR,
+        measured_at: 1,
+        input_device: String::new(),
+    });
     let mut s = latent(0, 0, 0, 0.0);
     let c = track(&s, "Carrier");
     s.track_mut(c).unwrap().mixer.inserts[0] = Some(Insert::hardware(send, ret));
