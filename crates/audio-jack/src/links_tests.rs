@@ -248,6 +248,33 @@ fn a_link_that_already_exists_counts_as_restored_and_is_never_duplicated() {
     assert_eq!(server.graph().len(), 6, "transit's own four and the two outside links, each once");
 }
 
+/// PipeWire's `jack.self-connect-mode` applies to a restored link (one end is transit's own port):
+/// `ignore-*` answers 0 and makes no link, `fail-*` answers 1. The link is read back, so both are
+/// failed restores, said once with the hint, and not retried.
+#[test]
+fn a_connect_the_server_ignores_or_refuses_is_a_failed_restore() {
+    for mode in [crate::fake::SelfConnect::Ignore, crate::fake::SelfConnect::Fail] {
+        let server = server();
+        let backend = manual(&server);
+        let old = open(&backend, Choice::default()).unwrap();
+        server.outside_link("Player:out_L", "transit:in_1");
+        let snapshot = old.render.snapshot_links().unwrap();
+        drop(old);
+        let new = open(&backend, Choice::default()).unwrap();
+        server.set_self_connect(mode);
+        let note = new.render.restore_links(snapshot).expect("a diagnostic");
+        assert!(note.contains("in_1 from Player:out_L"), "{mode:?}: {note}");
+        if mode == crate::fake::SelfConnect::Ignore {
+            assert!(note.contains("the server did not make it; its self-connect setting may refuse links to transit's ports"), "{note}");
+        } else {
+            assert!(note.contains("jack_connect returned 1"), "{note}");
+        }
+        assert!(!server.linked("Player:out_L", "transit:in_1"));
+        let tried = server.connects().iter().filter(|(a, _)| a == "Player:out_L").count();
+        assert_eq!(tried, 1, "{mode:?}: asked once, not retried");
+    }
+}
+
 /// JACK 2: another client makes the link between the restore's look and its connect; the connect
 /// answers `EEXIST`, which counts as restored, and nothing is retried.
 #[test]

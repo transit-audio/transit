@@ -433,7 +433,8 @@ server gave it.
 A link does not come back when its port no longer means the same thing: after you choose another
 input or output device, links on that side are dropped, and a port the new device does not have
 (fewer channels) loses its links. A port that went away meanwhile (the program was closed) cannot
-be linked either. In each case the status line and Audio Devices say which links were not
+be linked either, and under PipeWire a `jack.self-connect-mode` setting that refuses links to a
+client's own ports keeps them from coming back. In each case the status line and Audio Devices say which links were not
 restored, and the log names each one. Nothing comes back after the server itself stopped: its
 links were gone with it. The links are read just before the old client closes, so a link you change
 in that same instant may not be caught.

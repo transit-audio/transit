@@ -21,9 +21,10 @@
 //!   source list of slice C, where an edit changes some positions) drops only the links of the
 //!   positions that changed: slice C fills `channels` with each entry's source name.
 //! - **Restoring.** A link that already exists counts as restored: it is looked for among the
-//!   port's links first (PipeWire's libjack makes a duplicate for a connect of an existing pair
-//!   rather than answering `EEXIST`), and a connect that answers `EEXIST` (JACK 2, when another
-//!   client made the link in between) is a success too. A remote port that
+//!   port's links first, so a duplicate is never asked for, and a connect that answers `EEXIST`
+//!   (another client made the link in between) is a success too. A connect's success is checked by
+//!   reading the link back: PipeWire's `jack.self-connect-mode` can answer 0 and make no link to a
+//!   client's own port, and that is a failed restore like a refused connect. A remote port that
 //!   is gone, or no longer an audio port of the right direction, is a failed restore, logged once
 //!   and not retried; so is a connect the server refuses.
 //! - **Limits.** Best effort: a graph edit racing with the snapshot or the deactivation cannot be
@@ -239,15 +240,23 @@ pub(crate) fn restore(client: &mut dyn JackClient, sides: &[Ports], snapshot: &S
                 None => continue,
             },
         };
-        // A link already there counts as restored without a connect: PipeWire's libjack makes a
-        // second link for a connect of an existing pair instead of answering EEXIST.
-        if client.links(link.ours.input, link.ours.index).contains(&theirs) {
+        // A link already there counts as restored without a connect, so a duplicate is never
+        // asked for (a server could make a second link of the same pair).
+        let linked = |client: &dyn JackClient| client.links(link.ours.input, link.ours.index).contains(&theirs);
+        if linked(&*client) {
             done.restored += 1;
             continue;
         }
         let (source, destination) = if link.ours.input { (&theirs, &ours) } else { (&ours, &theirs) };
         match client.connect(source, destination) {
-            Ok(()) => done.restored += 1,
+            // The answer alone is not trusted: PipeWire's `jack.self-connect-mode` (a link with one
+            // end on the client's own port) can answer 0 and make no link. The link is read back.
+            Ok(()) if linked(&*client) => done.restored += 1,
+            Ok(()) => {
+                let why = "the server did not make it; its self-connect setting may refuse links to transit's ports";
+                log::warn!("JACK: not restoring the link {what}: {why}");
+                done.failed.push(format!("{what} ({why})"));
+            }
             Err(e) => {
                 log::warn!("JACK: not restoring the link {what}: {e}");
                 done.failed.push(format!("{what} ({e})"));

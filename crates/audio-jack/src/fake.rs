@@ -64,6 +64,17 @@ struct State {
     duplicates: bool,
     /// Another client makes this link just before transit's connect of it is served.
     race: Option<(String, String)>,
+    /// PipeWire's `jack.self-connect-mode` for links with an end on a transit port: `ignore-*`
+    /// answers 0 and makes no link; `fail-*` answers 1.
+    self_connect: SelfConnect,
+}
+
+/// The fake's `jack.self-connect-mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SelfConnect {
+    Allow,
+    Ignore,
+    Fail,
 }
 
 impl State {
@@ -112,6 +123,7 @@ impl FakeServer {
             connects: Vec::new(),
             duplicates: false,
             race: None,
+            self_connect: SelfConnect::Allow,
         };
         Self { state: Arc::new(Mutex::new(state)) }
     }
@@ -236,6 +248,11 @@ impl FakeServer {
     /// pair is served (a graph edit racing the restore).
     pub(crate) fn link_appears_on_connect(&self, source: &str, destination: &str) {
         self.lock().race = Some((source.to_owned(), destination.to_owned()));
+    }
+
+    /// From now on transit's connects are served under this `jack.self-connect-mode`.
+    pub(crate) fn set_self_connect(&self, mode: SelfConnect) {
+        self.lock().self_connect = mode;
     }
 
     /// How many times `source` -> `destination` is linked (more than once only on a duplicating
@@ -457,6 +474,12 @@ impl JackClient for FakeClient {
             (Some((true, a)), Some((false, b))) if a == b => {}
             (None, _) | (_, None) => return Err("jack_connect returned -1 (no such port)".into()),
             _ => return Err("jack_connect returned -1 (wrong direction or type)".into()),
+        }
+        // Every connect a transit client makes has one end on its own port.
+        match state.self_connect {
+            SelfConnect::Allow => {}
+            SelfConnect::Ignore => return Ok(()),
+            SelfConnect::Fail => return Err("jack_connect returned 1".into()),
         }
         if state.duplicates || !state.links.contains(&link) {
             state.links.push(link.clone());
