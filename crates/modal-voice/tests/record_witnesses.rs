@@ -126,15 +126,15 @@ fn a_raised_runaway_guard_transplants() {
     transplant(&mut a, ModalVoice::new(), 400, |k| (k % 40 < 25, None));
 }
 
-/// The resonator meter's integrator just below the runaway guard at T (it decays slowly; the
-/// guard trips at 200): the continuation's blocks keep it there or trip the guard only if the
-/// restored value is the recorded one.
+/// The resonator meter's integrator far above the runaway guard at T (as after a blow-up; it
+/// decays by 0.0005 of itself a sample, and the guard trips at 200): the next blocks trip the guard
+/// and reset the resonators only if the restored value is the recorded one.
 #[test]
-fn a_resonator_level_near_the_guard_transplants() {
+fn a_resonator_level_past_the_guard_transplants() {
     let mut a = ModalVoice::new();
     for k in 0..50 {
         block(&mut a, k % 20 < 12, k);
     }
-    a.force_resonator_level(199.99);
+    a.force_resonator_level(1.0e6);
     transplant(&mut a, ModalVoice::new(), 300, |k| (k % 40 < 25, None));
 }

@@ -126,3 +126,18 @@ fn an_fm_voice_with_an_input_transplants() {
     b.set_model(ResonatorModel::FmVoice);
     transplant(&mut a, b, 300, |k| (k % 30 == 0, 18.0, None));
 }
+
+/// A note that glides by less than the note filter's jump threshold (0.4 semitones) a block, as a
+/// pitch CV does (the instrument's notes only jump, by whole semitones, at strums): the filter's
+/// adaptive lag coefficients then shape the pitch.
+#[test]
+fn a_gliding_note_transplants() {
+    let mut a = Resonator::new();
+    a.set_model(ResonatorModel::InharmonicString);
+    for k in 0..40 {
+        block(&mut a, k == 2, 10.0 + 0.05 * k as f32, k);
+    }
+    let mut b = Resonator::new();
+    b.set_model(ResonatorModel::InharmonicString);
+    transplant(&mut a, b, 200, |k| (false, 12.0 + 0.07 * k as f32, None));
+}

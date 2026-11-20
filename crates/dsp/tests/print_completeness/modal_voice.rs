@@ -471,6 +471,20 @@ fn witnesses() -> Vec<W> {
             completed: |p| obs(p).keys == 0,
         },
     ];
+    // The chord strings' hysteresis: Geometry picked chord 4 before T; the continuation lowers it
+    // to where the chord the voice keeps (4) and a fresh voice's (0) round to different chords,
+    // then plays on and releases.
+    v.push(W {
+        boundary: Boundary::Entry("chord hysteresis"),
+        history: |rate| {
+            let mut h = setup();
+            h.extend([Step::Param("model", STRINGS), Step::Param("geometry", 45.0), Step::On(52, 110, 0), Step::Run(span(&[HOLD, HOLD], rate))]);
+            h
+        },
+        continuation: |rate| vec![Step::Param("geometry", 34.5), Step::Run(span(&[LINES], rate)), Step::Off(52, 0), run_out(&[SHAPER_RELEASE], rate)],
+        reached: |p| obs(p).model == 2 && obs(p).keys == 1,
+        completed: idle,
+    });
     v.extend(model_witnesses());
     v
 }
