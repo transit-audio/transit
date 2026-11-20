@@ -39,6 +39,29 @@ pub fn plan_takes_with(e: &Engine, unsaved_dir: &Path, input_channels: usize, sy
         .collect()
 }
 
+/// Why recording cannot start: every record-enabled audio track whose input names an input path
+/// of this machine's table that cannot be used now (it has an output path's name, or a channel
+/// past the open input; ADR 0015, amendment for #431, rule 10), with the path named. `None` when
+/// every armed input resolves. Such a track would otherwise record silence; it never records
+/// another channel.
+pub fn input_refusal(e: &Engine) -> Option<String> {
+    let io = e.io_map();
+    let why: Vec<String> = e
+        .session()
+        .tracks
+        .iter()
+        .filter(|t| t.mixer.record_arm && t.kind == TrackKind::Audio && !t.inactive)
+        .filter_map(|t| match &t.mixer.input {
+            transit_model::Route::Hardware(h) => match io.input_state(h) {
+                Some(Err(why)) => Some(format!("track `{}` cannot record: the input path `{h}` is unavailable ({why})", t.name)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    (!why.is_empty()).then(|| why.join("; "))
+}
+
 /// A recording's plan, made when it starts: each record-enabled track's take file, where the
 /// takes start on the timeline, the loop length they split into when loop recording, and the
 /// punch range they're trimmed to.
@@ -655,6 +678,43 @@ mod record_tests {
         assert_eq!(channels(quad), [4, 5, 6, 7], "wider than stereo: the channels after it, as before");
         // The same names, resolved by the mix: one function (`transit_model::input_channel`).
         assert_eq!(transit_model::input_channel(Some(e.io_map()), "Guitar", 0, 1), Some(4));
+    }
+
+    /// ADR 0015, amendment for #431, rule 10: an armed input that names an unavailable input path
+    /// (an output path's name, or a channel past the open input) refuses to record with the path
+    /// named, and would record silence, never channel 1 or a wrapped channel. A name the table does
+    /// not have keeps its label meaning.
+    #[test]
+    fn an_unavailable_input_path_refuses_to_record_and_never_records_another_channel() {
+        use transit_model::{ChannelFormat, IoDirection, IoPath, Route};
+        let dir = transit_test_support::TestDir::new("takes-unavailable");
+        let mut e = Engine::default();
+        let out = transit_model::IoMap::for_device("ASIO", "x", 0, 4);
+        let path = |name: &str, channels: Vec<u16>| IoPath { live: false, name: name.into(), direction: IoDirection::Input, channels, format: ChannelFormat::Mono };
+        let record = transit_model::InputMap {
+            system: "ASIO".into(),
+            device: "x".into(),
+            inputs: 2,
+            defaults_for: 2,
+            paths: vec![path("Out 3-4", vec![1]), path("Far", vec![5]), path("In 1", vec![0])],
+        };
+        e.set_io_map(out.compose(Some(&record)));
+        let clash = armed(&mut e, "Clash", "mono", "In 1");
+        e.session_mut().track_mut(clash).unwrap().mixer.input = Route::Hardware("Out 3-4".into());
+        let far = armed(&mut e, "Far", "mono", "Far");
+        let label = armed(&mut e, "Label", "mono", "In 2");
+        let why = input_refusal(&e).expect("refused");
+        assert!(why.contains("track `Clash` cannot record: the input path `Out 3-4` is unavailable (same name as an output path: rename one)"), "{why}");
+        assert!(why.contains("track `Far` cannot record: the input path `Far` is unavailable (out of range: the input has 2 channels open)"), "{why}");
+        assert!(!why.contains("Label"), "{why}");
+        let plan = plan_takes(&e, &dir, 2);
+        let channels = |t: TrackId| plan.iter().find(|p| p.0 == t).map(|p| p.1.clone()).unwrap();
+        assert_eq!(channels(clash), [usize::MAX], "silence, never channel 1 or 4");
+        assert_eq!(channels(far), [usize::MAX], "silence, never a wrap to channel 2");
+        assert_eq!(channels(label), [1], "a name the table lacks keeps its label meaning");
+        e.session_mut().track_mut(clash).unwrap().mixer.record_arm = false;
+        e.session_mut().track_mut(far).unwrap().mixer.record_arm = false;
+        assert_eq!(input_refusal(&e), None);
     }
 
     #[test]

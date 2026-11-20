@@ -18,7 +18,7 @@
 //! engine holds.
 
 use super::{MAX_LATENCY, Session, Track, TrackId, TrackKind};
-use transit_model::{ExternalSource, IoDirection, IoMap};
+use transit_model::{ExternalSource, IoMap};
 
 /// What an External Instrument will do on this machine, as far as the plan knows (the MIDI port's
 /// presence comes from the playback layer's output thread).
@@ -80,8 +80,10 @@ fn has_port(t: &Track, no_port: &[TrackId]) -> bool {
 
 /// The device input channels of `t`'s return on an `in_channels`-wide input (0: not known).
 fn return_channels(ret: &str, io: &IoMap, in_channels: u16) -> Option<Vec<u16>> {
-    io.path(ret)
-        .filter(|p| p.direction == IoDirection::Input && !p.channels.is_empty() && p.channels.iter().all(|&c| in_channels == 0 || c < in_channels))
+    // A return that clashes with an output path has no return (amendment for #431, rule 10).
+    io.input_path(ret)
+        .filter(|p| io.input_unavailable(p) != Some(transit_model::InputUnavailable::Clash))
+        .filter(|p| !p.channels.is_empty() && p.channels.iter().all(|&c| in_channels == 0 || c < in_channels))
         .map(|p| p.channels.clone())
 }
 

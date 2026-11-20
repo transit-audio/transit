@@ -285,6 +285,18 @@ impl Player {
         Ok(player)
     }
 
+    /// A native WASAPI Player over a scripted render endpoint whose paired capture endpoint the
+    /// fake reports at each open ([`ab::fake::FakeBackend::pair_capture`]), for the caller's
+    /// device-free tests.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn open_fake_native_wasapi(session: Arc<Session>, cfg: &AudioConfig, endpoint: &ab::fake::FakeBackend) -> Result<Self, String> {
+        let fallback = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32));
+        let mut player = Self::open_native(session, cfg, Box::new(endpoint.clone()), &fallback, NativeKind::Wasapi)?;
+        player.fake_only = true;
+        Ok(player)
+    }
+
     /// [`Self::open_fake_native_asio`], or the silent runtime with its error when it does not open
     /// (as [`Self::with_config`] does), for the caller's device-free tests.
     #[cfg(feature = "test-hooks")]
@@ -622,6 +634,13 @@ impl Player {
             if let HeldInput::Held(Some(recorder)) = player.input.get_mut() {
                 log_input_open(recorder, step.native, &system, request.period, request.mode);
             }
+            // The default table's input half is the input that opened (ADR 0015, amendment for
+            // #431, rule 8): its identity as the backend reported it, or none when it did not open.
+            let input_identity = match player.input.get_mut() {
+                HeldInput::Held(Some(recorder)) => recorder.input_identity.id.clone(),
+                _ => String::new(),
+            };
+            Arc::make_mut(player.io.get_mut()).input_device = input_identity;
             player.device_name = name.clone();
             player.paired_input.clone_from(&paired);
             player.device_system = system.clone();

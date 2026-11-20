@@ -244,7 +244,14 @@ pub struct Recorder {
     _stream: Option<Box<dyn transit_audio_backend::Stream>>,
     clock: Option<crate::device_clock::MaintainedClock>,
     record_start: Option<start::Reader>,
+    /// The display name of the endpoint the capture open was asked for (the output's on ASIO and
+    /// native WASAPI); not an identity ([`Self::input_identity`]).
     pub device_name: String,
+    /// The capture endpoint actually opened, as the backend reported it (ADR 0015, amendment for
+    /// #431, rule 8): the key of the input's paths and of its measurements. ASIO's driver, the JACK
+    /// port group, native WASAPI's paired capture endpoint (never the render endpoint), cpal's
+    /// input device.
+    pub input_identity: ab::CaptureEndpoint,
     pub sample_rate: u32,
     /// The live input's width: the device's channels, then the System Audio pair when it runs.
     pub channels: usize,
@@ -476,6 +483,7 @@ impl Recorder {
             .map_err(|error| ab::OpenError::Other(error.into()))?;
         let (capture, on_error) = capture_callbacks(&shared, &monitor, callback_clock, progress, loop_probe, tap);
         let (stream, achieved) = backend.open_capture(endpoint, request, capture, on_error)?;
+        let input_identity = stream.opened_capture().unwrap_or_else(|| ab::CaptureEndpoint { id: endpoint.id.clone(), name: endpoint.name.clone() });
         let clock = crate::device_clock::MaintainedClock::start(clock)
             .map_err(|error| {
                 log::warn!("input clock maintenance unavailable: {error}");
@@ -489,6 +497,7 @@ impl Recorder {
             clock,
             record_start: None,
             device_name: endpoint.name.clone(),
+            input_identity,
             sample_rate: format.rate,
             channels,
             system_audio: system,
@@ -540,6 +549,7 @@ impl Recorder {
             clock: None,
             record_start: None,
             device_name: name.into(),
+            input_identity: ab::CaptureEndpoint { id: name.into(), name: name.into() },
             sample_rate: 48_000,
             channels: 1,
             system_audio: crate::system_audio::SystemAudio::Off,

@@ -62,7 +62,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "I/O Paths...",
             ["Setup"],
             None,
-            "{action?: list|set|add_path|rename_path|remove_path|set_channels|set_main|set_live, name?, new_name?, direction?: input|output, channels?: [0-based device channels], live?: bool, map?: IoMap} — this machine's device paths (per machine: no undo step, session untouched)",
+            "{action?: list|set|add_path|rename_path|remove_path|set_channels|set_main|set_live|add_default_inputs, name?, new_name?, direction?: input|output, channels?: [0-based device channels], live?: bool, map?: IoMap} — this machine's device paths (per machine: no undo step, session untouched); input paths belong to the open input device; direction picks one side of a name both sides use; add_default_inputs adds the missing default input paths",
             always,
             io_map_setup
         ),
@@ -248,7 +248,12 @@ fn io_map_state(e: &Engine) -> Value {
     let io = e.io_map();
     let overlaps: Vec<Value> = io.overlaps().into_iter().map(|(a, b, c)| json!({"a": a, "b": b, "channel": c})).collect();
     let unresolved = e.unresolved_routes();
-    json!({"io": io, "overlaps": overlaps, "unresolved": unresolved})
+    // Input paths kept but not usable now, with why (ADR 0015, amendment for #431, rules 9 and 10).
+    let unavailable: Vec<Value> = io
+        .paths_of(transit_model::IoDirection::Input)
+        .filter_map(|p| io.input_unavailable(p).map(|why| json!({"name": p.name, "why": why.to_string()})))
+        .collect();
+    json!({"io": io, "overlaps": overlaps, "unresolved": unresolved, "unavailable_inputs": unavailable})
 }
 
 /// `setup.io_map`: the machine's I/O paths. Not a session edit (the table is per machine, kept by
@@ -265,26 +270,46 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
     };
     let mut io = e.io_map().clone();
     let live = || p.get("live").and_then(Value::as_bool).ok_or_else(|| bad(id, "`live` must be a boolean"));
+    let direction = || -> Result<Option<IoDirection>> {
+        match str_param(p, "direction") {
+            Some("input") => Ok(Some(IoDirection::Input)),
+            Some("output") => Ok(Some(IoDirection::Output)),
+            None => Ok(None),
+            Some(other) => Err(bad(id, format!("direction is input or output, not `{other}`"))),
+        }
+    };
     match action {
         "list" => return Ok(io_map_state(e)),
         "set" => {
             let map: IoMap = serde_json::from_value(p.get("map").cloned().ok_or_else(|| bad(id, "`map` required"))?)
                 .map_err(|error| bad(id, format!("`map` is not an I/O map: {error}")))?;
-            // Counts are bounded like a device's: a path beyond them is refused by `add_path`.
+            // Counts are bounded like a device's: an output path beyond them is refused by
+            // `add_path`. An input path past the input count is kept, unavailable, as a narrower
+            // input keeps it (amendment for #431, rule 9). The input's identity stays the one the
+            // device opened: a script cannot move measurements to another input (rule 8).
             let cap = transit_model::MAX_DEVICE_CHANNELS as u16;
-            let mut checked = IoMap { paths: Vec::new(), inputs: map.inputs.min(cap), outputs: map.outputs.min(cap), ..map.clone() };
+            let mut checked = IoMap {
+                paths: Vec::new(),
+                inputs: map.inputs.min(cap),
+                outputs: map.outputs.min(cap),
+                input_device: io.input_device.clone(),
+                ..map.clone()
+            };
             for path in map.paths {
-                checked.add_path(path).map_err(refuse)?;
+                if path.direction == IoDirection::Input && path.channels.iter().any(|&c| c >= checked.inputs) {
+                    // Every check but the range, against the widest input.
+                    let mut wide = IoMap { inputs: cap, ..checked.clone() };
+                    wide.add_path(path).map_err(refuse)?;
+                    checked.paths = wide.paths;
+                } else {
+                    checked.add_path(path).map_err(refuse)?;
+                }
             }
             checked.set_main(&map.main).map_err(refuse)?;
             io = checked;
         }
         "add_path" => {
-            let direction = match str_param(p, "direction") {
-                Some("input") => IoDirection::Input,
-                Some("output") | None => IoDirection::Output,
-                Some(other) => return Err(bad(id, format!("direction is input or output, not `{other}`"))),
-            };
+            let direction = direction()?.unwrap_or(IoDirection::Output);
             let channels = channels()?;
             let format = transit_model::ChannelFormat::for_channels(channels.len());
             io.add_path(IoPath { live: if p.get("live").is_some() { live()? } else { false }, name: name()?, direction, channels, format })
@@ -292,10 +317,23 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         "rename_path" => {
             let to = str_param(p, "new_name").ok_or_else(|| bad(id, "`new_name` required"))?;
-            io.rename_path(&name()?, to).map_err(refuse)?;
+            io.rename_path_in(&name()?, direction()?, to).map_err(refuse)?;
         }
-        "remove_path" => io.remove_path(&name()?).map_err(refuse)?,
-        "set_channels" => io.set_channels(&name()?, channels()?).map_err(refuse)?,
+        "remove_path" => io.remove_path_in(&name()?, direction()?).map_err(refuse)?,
+        "set_channels" => io.set_channels_in(&name()?, direction()?, channels()?).map_err(refuse)?,
+        // The I/O paths page's Add default paths (rule 14): idempotent, so a second run adds none.
+        "add_default_inputs" => {
+            if io.inputs == 0 {
+                return Err(bad(id, "no input channels are open"));
+            }
+            let added = io.add_default_inputs(io.inputs);
+            if added > 0 {
+                e.set_io_map(io);
+            }
+            let mut state = io_map_state(e);
+            state["added"] = json!(added);
+            return Ok(state);
+        }
         "set_live" => io.set_live(&name()?, live()?).map_err(refuse)?,
         "set_main" => io.set_main(&name()?).map_err(refuse)?,
         other => return Err(bad(id, format!("unknown action `{other}`"))),
@@ -594,6 +632,44 @@ mod tests {
         assert!(matches!(e.execute("setup.io_map", &json!({"action": "set", "map": map})), Err(crate::EngineError::BadParams(..))));
     }
 
+    /// ADR 0015, amendment for #431: the control channel's commands go through the same table
+    /// rules as the page: Add default paths is idempotent, `direction` picks one side of a clash,
+    /// `set` keeps an input path past the input count (unavailable) and never moves the input's
+    /// identity, and the state lists the unavailable inputs with why.
+    #[test]
+    fn io_map_commands_follow_the_input_rules_of_the_page() {
+        use transit_model::{ChannelFormat, InputMap, IoDirection, IoMap, IoPath};
+        let mut e = Engine::default();
+        let mut out = IoMap::for_device("ASIO", "x", 0, 4);
+        out.add_path(IoPath { live: false, name: "Cue".into(), direction: IoDirection::Output, channels: vec![3], format: ChannelFormat::Mono }).unwrap();
+        let record = InputMap {
+            system: "ASIO".into(),
+            device: "mic pre".into(),
+            inputs: 2,
+            defaults_for: 2,
+            paths: vec![IoPath { live: false, name: "Cue".into(), direction: IoDirection::Input, channels: vec![1], format: ChannelFormat::Mono }],
+        };
+        e.set_io_map(out.compose(Some(&record)));
+        let r = e.execute("setup.io_map", &json!({})).unwrap();
+        assert_eq!(r["unavailable_inputs"], json!([{"name": "Cue", "why": "same name as an output path: rename one"}]));
+        let r = e.execute("setup.io_map", &json!({"action": "add_default_inputs"})).unwrap();
+        assert_eq!(r["added"], 2, "In 1 and In 1-2; In 2 reads the clashing path's channel already");
+        let revision = e.io_revision();
+        let r = e.execute("setup.io_map", &json!({"action": "add_default_inputs"})).unwrap();
+        assert_eq!((r["added"].clone(), e.io_revision()), (json!(0), revision), "idempotent, and no change is no new table");
+        e.execute("setup.io_map", &json!({"action": "rename_path", "name": "Cue", "direction": "input", "new_name": "Talkback"})).unwrap();
+        assert!(e.io_map().available_input("Talkback").is_some());
+        assert_eq!(e.io_map().path("Cue").map(|p| p.direction), Some(IoDirection::Output), "the output kept its name");
+        let mut map = e.io_map().clone();
+        map.input_device = "another input".into();
+        map.paths.push(IoPath { live: false, name: "Far".into(), direction: IoDirection::Input, channels: vec![7], format: ChannelFormat::Mono });
+        let r = e.execute("setup.io_map", &json!({"action": "set", "map": map})).unwrap();
+        assert_eq!(e.io_map().input_device, "mic pre", "the identity is the device's, not the script's");
+        assert_eq!(r["unavailable_inputs"], json!([{"name": "Far", "why": "out of range: the input has 2 channels open"}]));
+        let mut none = Engine::default();
+        assert!(matches!(none.execute("setup.io_map", &json!({"action": "add_default_inputs"})), Err(crate::EngineError::BadParams(..))));
+    }
+
     #[test]
     fn io_map_commands_refuse_bad_paths_and_leave_the_table_alone() {
         let mut e = Engine::default();
@@ -642,7 +718,8 @@ mod tests {
         let mut map = transit_model::IoMap::for_device("ASIO", "TASCAM", 12, 10);
         map.rename_path("Out 3-4", "Cue").unwrap();
         e.execute("setup.io_map", &json!({"action": "set", "map": map})).unwrap();
-        assert_eq!(e.io_map(), &map);
+        // The input's identity is the open device's (none here), never the script's (#431, rule 8).
+        assert_eq!(e.io_map(), &transit_model::IoMap { input_device: String::new(), ..map.clone() });
         map.paths[0].channels = vec![40];
         assert!(e.execute("setup.io_map", &json!({"action": "set", "map": map})).is_err());
     }

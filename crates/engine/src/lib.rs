@@ -410,7 +410,13 @@ impl Engine {
                 .ok_or_else(|| cmd::bad(id, format!("no {what} path `{name}` on this device")))
         };
         let out = find(send, IoDirection::Output, "output")?;
-        let back = find(ret, IoDirection::Input, "input")?;
+        // A return that clashes with an output path or lies past the open input is refused
+        // (amendment for #431, rule 10): the click is never timed on another channel.
+        let back = match self.io.input_state(ret) {
+            Some(Ok(p)) => p.channels.clone(),
+            Some(Err(why)) => return Err(cmd::bad(id, format!("the input path `{ret}` is unavailable ({why})"))),
+            None => find(ret, IoDirection::Input, "input")?,
+        };
         if self.transport.playing || self.transport.recording {
             return Err(cmd::bad(id, "stop the transport before measuring"));
         }

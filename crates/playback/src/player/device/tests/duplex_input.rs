@@ -65,3 +65,27 @@ fn a_chosen_input_that_is_missing_falls_back_and_the_output_still_opens() {
     assert_eq!(native.capture_opens(), ["Headset"]);
     assert_eq!(input_of(&player).0, "Headset", "the recorder names the device that opened, so the app can say the choice is missing");
 }
+
+/// ADR 0015, amendment for #431, rule 8: the input's identity is the capture endpoint the backend
+/// opened. Native WASAPI opens the capture endpoint paired with the render endpoint, resolved at
+/// each open: two opens of one output with two different pairings give two identities, and
+/// neither is the render endpoint's name. JACK's is the chosen group.
+#[test]
+fn the_input_identity_is_the_capture_endpoint_that_opened() {
+    let wasapi = fake_factory(false).named("WASAPI", "Speakers (Interface)").with_capture(2, true);
+    let cfg = AudioConfig::default();
+    let open_wasapi = || Player::open_native_kind(Arc::new(Session::default()), &cfg, &wasapi, &fake_factory(false), NativeKind::Wasapi).unwrap();
+    wasapi.pair_capture(Some(("{capture-a}", "Microphone (Interface)")));
+    let a = open_wasapi();
+    assert_eq!(a.held_input_identity().map(|e| (e.id, e.name)), Some(("{capture-a}".into(), "Microphone (Interface)".into())));
+    assert_eq!(a.io_map().input_device, "{capture-a}");
+    assert_eq!(a.io_map().key(), ("WASAPI", "Speakers (Interface)"), "the output's table is still keyed by the output");
+    drop(a);
+    wasapi.pair_capture(Some(("{capture-b}", "Line In (Interface)")));
+    let b = open_wasapi();
+    assert_eq!(b.io_map().input_device, "{capture-b}", "another pairing is another input");
+    let jack = jack("Headset", 2);
+    let player = open(&jack, Some("Mic"));
+    assert_eq!(player.held_input_identity().map(|e| e.id), Some("Mic".into()));
+    assert_eq!(player.io_map().input_device, "Mic");
+}

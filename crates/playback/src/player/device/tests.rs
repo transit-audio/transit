@@ -1453,5 +1453,6 @@ mod jack_calibration;
 mod no_fallback;
 mod null;
 mod open;
+mod wide_group;
 pub(super) use open::fake_factory;
 use open::modes;

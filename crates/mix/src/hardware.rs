@@ -13,7 +13,7 @@
 //! (the device is not duplex, or this is an offline render) or a path is unresolved.
 
 use super::{MAX_LATENCY, Session, Sink, Track, TrackId, TrackKind, sink::SinkSpec};
-use transit_model::{Insert, IoDirection, IoMap};
+use transit_model::{Insert, IoMap};
 
 /// What a hardware insert slot will do on this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,9 +121,12 @@ pub(crate) fn specs_of(t: &Track, io: &IoMap, sinks: &[SinkSpec], in_channels: u
         let Some(h) = ins.as_ref().and_then(|i| i.hardware.as_ref()).filter(|h| h.disabled.is_none()) else { continue };
         let Ok(slot) = u16::try_from(slot) else { continue };
         let sink = sinks.iter().position(|k| k.name.eq_ignore_ascii_case(&h.send));
+        // A return path that clashes with an output path is unavailable (ADR 0015, amendment for
+        // #431, rule 10): the insert runs the flagged dry bypass, never another channel.
         let src = io
-            .path(&h.ret)
-            .filter(|p| p.direction == IoDirection::Input && p.channels.iter().all(|&c| in_channels == 0 || c < in_channels))
+            .input_path(&h.ret)
+            .filter(|p| io.input_unavailable(p) != Some(transit_model::InputUnavailable::Clash))
+            .filter(|p| p.channels.iter().all(|&c| in_channels == 0 || c < in_channels))
             .map(|p| p.channels.clone())
             .unwrap_or_default();
         let measured = io.hardware_latency(&h.send, &h.ret, rate);

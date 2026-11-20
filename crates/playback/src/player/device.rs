@@ -237,6 +237,12 @@ impl Player {
         self.input.try_borrow().is_ok_and(|held| matches!(*held, HeldInput::Held(Some(_))))
     }
 
+    /// The capture endpoint the held input opened (ADR 0015, amendment for #431, rule 8), while the
+    /// player holds it.
+    pub fn held_input_identity(&self) -> Option<transit_audio_backend::CaptureEndpoint> {
+        self.with_held_input(|r| r.input_identity.clone())
+    }
+
     /// Reads the held input (rate, channels, buffer, latency, stats) while the player has it;
     /// `None` once the recorder has taken it, or when there is none.
     pub fn with_held_input<R>(&self, read: impl FnOnce(&record::Recorder) -> R) -> Option<R> {

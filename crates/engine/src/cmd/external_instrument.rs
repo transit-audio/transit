@@ -54,10 +54,12 @@ pub fn measure_blocker(e: &Engine, t: transit_model::TrackId) -> std::result::Re
     if device.ret.is_empty() {
         return Err("Choose the return input".into());
     }
-    if !e.io_map().path(&device.ret).is_some_and(|p| p.direction == transit_model::IoDirection::Input) {
-        return Err(format!("Return {} is not on this interface", device.ret));
+    match e.io_map().input_state(&device.ret) {
+        None => Err(format!("Return {} is not on this interface", device.ret)),
+        // An unavailable return (amendment for #431, rule 10): never measured through another channel.
+        Some(Err(why)) => Err(format!("Return {} is unavailable ({why})", device.ret)),
+        Some(Ok(_)) => Ok(()),
     }
-    Ok(())
 }
 
 /// `instrument.measure_external`: the engine checks the request; the notes and the recording are
@@ -329,7 +331,8 @@ mod tests {
         };
         e.store_external_latency(m.clone());
         e.store_external_latency(m.clone());
-        assert_eq!(e.io_map().external_latency, vec![m], "one per key");
+        // Stamped with the input its return came through (ADR 0015, amendment for #431, rule 13).
+        assert_eq!(e.io_map().external_latency, vec![transit_model::ExternalLatency { input_device: "Scarlett".into(), ..m }], "one per key");
         assert_ne!(e.io_revision(), revision, "the host passes the table on");
         assert_eq!(e.is_dirty(), dirty, "the session is untouched");
     }
