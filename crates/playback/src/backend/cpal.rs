@@ -322,7 +322,15 @@ impl ab::Backend for CpalBackend {
 
     #[cfg(not(target_os = "freebsd"))]
     fn plan_capture(&self, wish: &ab::InputWish) -> Result<ab::Plan, String> {
-        let device = device_on(self.host, wish.device.as_deref(), false).ok_or("no audio input device")?;
+        // ADR 0015, amendment for #431, rule 8: a chosen input that is not present opens no input
+        // (never another device), and two present inputs of one name have no identity.
+        let devices: Vec<cpal::Device> = self.host.input_devices().map(Iterator::collect).unwrap_or_default();
+        let names: Vec<Option<String>> = devices.iter().map(device_name).collect();
+        let default = self.host.default_input_device();
+        let (device, unique) = match pick_input(&names, wish.device.as_deref(), default.as_ref().and_then(device_name).as_deref())? {
+            InputPick::Listed { at, unique } => (devices.get(at).cloned().ok_or("no audio input device")?, unique),
+            InputPick::Default { unique } => (default.ok_or("no audio input device")?, unique),
+        };
         let cfg = input_config(&device, wish.rate, self.host.id().name())?;
         let buffer = buffer_size_on(wish.period, cfg.buffer_size(), self.host.id().name(), &name_of(&device).unwrap_or_default());
         // The chosen buffer size first; if the device refuses it, its default.
@@ -335,7 +343,13 @@ impl ab::Backend for CpalBackend {
             .map(|buffer_size| request(&cpal::StreamConfig { buffer_size, ..cfg.config() }, cfg.sample_format()))
             .collect::<Result<_, _>>()?;
         let name = name_of(&device).unwrap_or_else(|| "Input".into());
-        Ok(ab::Plan { endpoint: endpoint(device, name, self.system(), cfg.channels(), 0, Vec::new()), attempts })
+        let mut endpoint = endpoint(device, name, self.system(), cfg.channels(), 0, Vec::new());
+        // An ambiguous name is no identity: the input gets this open's defaults and no saved table
+        // or measurement of either device (the app reads an empty identity so).
+        if !unique {
+            endpoint.id.clear();
+        }
+        Ok(ab::Plan { endpoint, attempts })
     }
 
     #[cfg(target_os = "freebsd")]
@@ -649,6 +663,32 @@ fn observed_wasapi(status: cpal::platform::WasapiThreadPriorityStatus) -> ab::Wo
     }
 }
 
+/// Which input device a capture open takes (ADR 0015, amendment for #431, rule 8), over the
+/// input device names in enumeration order (`None`: the device reports no name).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(target_os = "freebsd", allow(dead_code))]
+pub(crate) enum InputPick {
+    /// The listed device at `at`, the first of the chosen name; `unique` when no other has it.
+    Listed { at: usize, unique: bool },
+    /// No input is chosen: the system's default input; `unique` when no listed device shares its name.
+    Default { unique: bool },
+}
+
+/// The input device to open for the chosen name `wish`: the listed device of that name (ambiguous
+/// when two share it), and an error naming it when none is present: never the default instead.
+/// With no choice, the system default (`default` is its name).
+#[cfg_attr(target_os = "freebsd", allow(dead_code))]
+pub(crate) fn pick_input(names: &[Option<String>], wish: Option<&str>, default: Option<&str>) -> Result<InputPick, String> {
+    let count = |want: &str| names.iter().filter(|n| n.as_deref() == Some(want)).count();
+    match wish {
+        Some(want) => {
+            let at = names.iter().position(|n| n.as_deref() == Some(want)).ok_or_else(|| format!("the input `{want}` is not connected"))?;
+            Ok(InputPick::Listed { at, unique: count(want) == 1 })
+        }
+        None => Ok(InputPick::Default { unique: default.is_none_or(|d| count(d) <= 1) }),
+    }
+}
+
 /// The named output (or input) device of `host`, else its default device.
 pub(crate) fn device_on(host: &cpal::Host, name: Option<&str>, output: bool) -> Option<cpal::Device> {
     find_device(host, name, output)
@@ -777,6 +817,24 @@ pub(crate) fn buffer_size(want: Option<u32>, supported: &cpal::SupportedBufferSi
 mod tests {
     use super::*;
     use crate::devices::STANDARD_BUFFERS;
+
+    /// ADR 0015, amendment for #431, rule 8 over a device list: a chosen input that is not present
+    /// opens nothing (named in the error, never the default); two present inputs of one name are
+    /// ambiguous whichever comes first; no choice opens the default, ambiguous when it shares its name.
+    #[test]
+    fn an_input_pick_never_substitutes_and_flags_two_devices_of_one_name() {
+        let list = |names: &[&str]| names.iter().map(|n| Some((*n).to_string())).collect::<Vec<_>>();
+        let two = list(&["Built-in Microphone", "USB Audio", "USB Audio", "Line In"]);
+        assert_eq!(pick_input(&two, Some("Headset"), Some("Built-in Microphone")), Err("the input `Headset` is not connected".into()));
+        assert_eq!(pick_input(&two, Some("Line In"), None), Ok(InputPick::Listed { at: 3, unique: true }));
+        assert_eq!(pick_input(&two, Some("USB Audio"), None), Ok(InputPick::Listed { at: 1, unique: false }));
+        let swapped = list(&["USB Audio", "Line In", "Built-in Microphone", "USB Audio"]);
+        assert_eq!(pick_input(&swapped, Some("USB Audio"), None), Ok(InputPick::Listed { at: 0, unique: false }), "order swapped: still ambiguous");
+        assert_eq!(pick_input(&swapped, Some("Line In"), None), Ok(InputPick::Listed { at: 1, unique: true }));
+        assert_eq!(pick_input(&two, None, Some("Built-in Microphone")), Ok(InputPick::Default { unique: true }), "first run opens the default");
+        assert_eq!(pick_input(&two, None, Some("USB Audio")), Ok(InputPick::Default { unique: false }));
+        assert_eq!(pick_input(&[], None, None), Ok(InputPick::Default { unique: true }));
+    }
     use cpal::{SampleFormat, SupportedBufferSize, SupportedStreamConfigRange};
 
     fn range(channels: u16, format: SampleFormat) -> SupportedStreamConfigRange {
