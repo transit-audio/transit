@@ -53,7 +53,7 @@ A good brief is the biggest token saver. Include:
   ([escape record](evidence/escape-record.md)); never patch around a defect, keep the repro.
 - No Rust file over 1500 lines. `cargo xtask file-size` is a ratchet over the `OVER_BUDGET` table: a
   listed file may only shrink, an unlisted one may not cross the line. Never grow a file near the
-  budget; split it by concern as a pure move first, then add the code ([`evidence/gates.md`](evidence/gates.md)).
+  budget; split it by concern as a pure move first, then add the code. A data table (a file that only holds a lookup table, kept whole and named for what it holds) is exempt through a reviewed row in `DATA_TABLES` in `xtask/src/file_size.rs`, and the gate checks the file holds data only ([`evidence/gates.md`](evidence/gates.md)).
 - A test that needs a scratch folder takes it from `transit_test_support::TestDir`, which removes it when the test ends; `cargo xtask temp-dirs` rejects a direct system temp directory call ([`evidence/gates.md`](evidence/gates.md)).
 - Tests do not assert scheduling or real-clock outcomes (E49 class). A freshness or rate comes from the
   message's own stamp (E59), and a test that compares file times sets them itself (E60). A playback

@@ -13,7 +13,7 @@ Before changing code, read:
 Three rules agents break most often:
 
 - **File budget.** No Rust file over 1500 lines; `cargo xtask file-size` is a ratchet. Never grow a
-  file near the budget, split it by concern as a pure move first ([`gates.md`](docs/contributing/evidence/gates.md)).
+  file near the budget, split it by concern as a pure move first ([`gates.md`](docs/contributing/evidence/gates.md)). A file that only holds a lookup table is a data table: one file, exempt by a reviewed row in `DATA_TABLES` in `xtask/src/file_size.rs`.
 - **No real-clock assertions.** A test never asserts scheduling or wall-clock outcomes; inject the
   stamps and the readout (`cargo xtask timing`, [escapes](docs/escapes/)).
 - **Never rerun a failed test.** Not to pass it, and not to capture its message: read the output,

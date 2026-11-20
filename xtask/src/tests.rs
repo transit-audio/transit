@@ -218,36 +218,98 @@ fn sized(files: &[(&str, usize)]) -> Vec<(String, usize)> {
 
 #[test]
 fn file_size_under_budget_passes() {
-    assert!(file_size::check_file_size(&sized(&[("crates/a/src/lib.rs", 1500)]), &[]).is_ok());
+    assert!(file_size::check_file_size(&sized(&[("crates/a/src/lib.rs", 1500)]), &[], &[]).is_ok());
 }
 
 #[test]
 fn file_size_unlisted_file_over_budget_fails() {
-    let error = file_size::check_file_size(&sized(&[("crates/a/src/lib.rs", 1501)]), &[]).unwrap_err();
+    let error = file_size::check_file_size(&sized(&[("crates/a/src/lib.rs", 1501)]), &[], &[]).unwrap_err();
     assert!(error.contains("crates/a/src/lib.rs") && error.contains("1501") && error.contains("#149"), "{error}");
 }
 
 #[test]
 fn file_size_listed_file_over_its_budget_fails() {
-    let error = file_size::check_file_size(&sized(&[("big.rs", 2001)]), &[("big.rs", 2000)]).unwrap_err();
+    let error = file_size::check_file_size(&sized(&[("big.rs", 2001)]), &[("big.rs", 2000)], &[]).unwrap_err();
     assert!(error.contains("big.rs") && error.contains("2001") && error.contains("2000") && error.contains("split it by concern"), "{error}");
 }
 
 #[test]
 fn file_size_listed_file_that_shrank_under_budget_must_leave_the_table() {
-    let error = file_size::check_file_size(&sized(&[("big.rs", 1400)]), &[("big.rs", 2000)]).unwrap_err();
+    let error = file_size::check_file_size(&sized(&[("big.rs", 1400)]), &[("big.rs", 2000)], &[]).unwrap_err();
     assert!(error.contains("remove it from OVER_BUDGET") && error.contains("big.rs"), "{error}");
 }
 
 #[test]
 fn file_size_listed_file_that_is_gone_must_leave_the_table() {
-    let error = file_size::check_file_size(&[], &[("gone.rs", 2000)]).unwrap_err();
+    let error = file_size::check_file_size(&[], &[("gone.rs", 2000)], &[]).unwrap_err();
     assert!(error.contains("no longer exists") && error.contains("remove it from OVER_BUDGET"), "{error}");
 }
 
 #[test]
 fn file_size_listed_file_that_grew_but_stays_within_budget_passes() {
-    assert!(file_size::check_file_size(&sized(&[("big.rs", 1900), ("ok.rs", 10)]), &[("big.rs", 2000)]).is_ok());
+    assert!(file_size::check_file_size(&sized(&[("big.rs", 1900), ("ok.rs", 10)]), &[("big.rs", 2000)], &[]).is_ok());
+}
+
+const TABLE: &str = "//! A table.\n#![forbid(unsafe_code)]\n\n/// Doc.\n#[rustfmt::skip]\npub(crate) static T: [i16; 3] = [\n    1, -2, 3,\n];\n\nconst LEN: usize = 2 + 1;\npub(crate) static U: [f32; LEN] = super::narrow(&LITERALS);\nuse crate::x::Y;\n";
+
+#[test]
+fn data_table_of_any_length_passes_and_is_data() {
+    let mut text = String::from(TABLE);
+    for _ in 0..5000 {
+        text.push_str("pub(crate) static MORE: [i16; 2] = [1, 2];\n");
+    }
+    assert!(file_size::check_data_only(&text).is_ok());
+    let rows = [("t.rs", "a table")];
+    assert!(file_size::check_file_size(&sized(&[("t.rs", file_size::count_lines(text.as_bytes()))]), &[], &rows).is_ok());
+}
+
+#[test]
+fn data_table_with_code_fails() {
+    for (code, word) in [
+        ("fn f() -> i16 { 0 }\n", "text that is not"),
+        ("const fn join() -> i16 { 0 };\n", "`fn`"),
+        ("impl X { }\n", "text that is not"),
+        ("const X: i16 = if A { 1 } else { 2 };\n", "`if`"),
+        ("const X: i16 = match A { _ => 1 };\n", "`match`"),
+        ("const X: i16 = { let a = 1; a };\n", "`let`"),
+        ("const X: () = assert!(true);\n", "macro invocation"),
+        ("static F: &dyn Fn(i16) -> i16 = &|x| x;\n", "`|`"),
+        ("macro_rules! m { () => {} }\n", "text that is not"),
+        ("#[cfg(test)]\nmod tests { }\n", "text that is not"),
+        ("const X: i16 = 1\n", "text that is not"),
+        ("static mut X: i16 = 1;\n", "`mut`"),
+        ("static X: &str = r#\"raw\"#;\n", "raw string"),
+    ] {
+        let error = file_size::check_data_only(&format!("{TABLE}{code}")).unwrap_err();
+        assert!(error.contains(word) && error.contains("line "), "{code}: {error}");
+    }
+}
+
+#[test]
+fn data_table_ignores_code_words_in_comments_and_strings() {
+    let text =
+        "// fn if match\n/* impl { } */\n/// `fn` docs\nstatic S: &str = \"fn if | ; {\";\nstatic C: char = ';';\nstatic L: &'static str = \"x\";\n";
+    assert!(file_size::check_data_only(text).is_ok());
+}
+
+#[test]
+fn data_table_row_for_a_missing_file_fails() {
+    let error = file_size::check_file_size(&sized(&[("ok.rs", 10)]), &[], &[("gone.rs", "a table")]).unwrap_err();
+    assert!(error.contains("gone.rs") && error.contains("does not exist") && error.contains("DATA_TABLES"), "{error}");
+}
+
+#[test]
+fn data_table_under_the_budget_needs_no_exemption() {
+    let error = file_size::check_file_size(&sized(&[("t.rs", 1500)]), &[], &[("t.rs", "a table")]).unwrap_err();
+    assert!(error.contains("t.rs") && error.contains("remove it from DATA_TABLES"), "{error}");
+}
+
+#[test]
+fn data_table_row_does_not_exempt_other_files_or_overlap_over_budget() {
+    let error = file_size::check_file_size(&sized(&[("t.rs", 3000), ("code.rs", 3000)]), &[], &[("t.rs", "a table")]).unwrap_err();
+    assert!(error.contains("code.rs") && !error.contains("t.rs:") && error.contains("DATA_TABLES"), "{error}");
+    let error = file_size::check_file_size(&sized(&[("t.rs", 3000)]), &[("t.rs", 3000)], &[("t.rs", "a table")]).unwrap_err();
+    assert!(error.contains("both OVER_BUDGET and DATA_TABLES"), "{error}");
 }
 
 #[test]

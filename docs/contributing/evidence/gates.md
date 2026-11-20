@@ -56,6 +56,8 @@ No Rust file under `crates/`, `apps/`, `tools/` or `xtask/` may exceed 1500 line
 
 To split a file: cut it by concern (one module per responsibility, not per size), as a pure move that changes no code (`git diff --color-moved` shows no residue), with tests next to the code they test. Then lower or remove its row in the same commit. Do not raise a budget or add a row to make a change pass.
 
+One exemption exists: a data table. A data table is a file that only holds a lookup table ported or generated from a reference implementation (a sample table, a wavetable, a set of curves), kept as one file named for what it holds rather than split by number or letter to fit the budget. An exemption is a row in `DATA_TABLES` in `xtask/src/file_size.rs` with a one-line reason, reviewed like any other change; the gate then checks the file holds only `use`, `const` and `static` items and attributes (no function, `impl`, `match`, `if`, loop, closure or macro), that it exists, and that it is over the budget (the exact rule is the module doc of `xtask/src/file_size.rs`). Code and test files never qualify.
+
 ## By area
 
 | You touch | Also run or extend | What it proves |
