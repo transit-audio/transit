@@ -81,6 +81,15 @@ fn server_open_registers_ports_and_connects_them_to_the_device() {
     let name = backend.client_name().expect("a client");
     assert!(name.starts_with(crate::CLIENT_NAME), "{name}");
     let group = backend.plan_render(&ab::OutputWish::default()).unwrap().endpoint.handle::<crate::JackDevice>().unwrap().clone();
+    // JACK 2 shows a link a connect made only once its graph switched to the state the connect
+    // wrote, at the start of a later cycle (the startup check's rule, `startup::cycle_completed_since`):
+    // the links are read once a process cycle that began after both starts' connects has completed.
+    // Until #760 slice 3 the `plan_render` above opened a probe client, whose round trips gave the
+    // graph that time by accident; it now lists through the session's client at once.
+    let after_connects = render.stats().unwrap().wakes;
+    wait_for("a cycle after the connects", Duration::from_secs(10), || {
+        crate::startup::cycle_completed_since(after_connects, render.stats().unwrap().wakes)
+    });
     let out_1 = backend.with_client(|c| c.connections(&format!("{name}:out_1"))).unwrap();
     assert_eq!(out_1, [group.playback[0].clone()], "out_1 feeds the device's first playback port");
     if let Some(first_capture) = group.capture.first() {
