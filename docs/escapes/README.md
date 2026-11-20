@@ -44,6 +44,7 @@ The list is generated from each record's `#` heading by `cargo xtask indexes`: a
 - [E81: four tests counted on a race's outcome or a real-clock instant under load (#423, #381, #436)](issue-436.md)
 - [E82: Sampler admission converted native PCM despite the playback contract (#449)](issue-449.md)
 - [The device-rate converter held the last sample of every rendered block (#525)](issue-525.md)
+- [A fix for saved I/O tables could not reach the tables the bug had already saved (#690, #759)](issue-690.md)
 - [Bounce in Place silently muted unselected pickups (#713)](issue-713.md)
 - [Live input ran late at a converted device rate and drifted later after a loop wrap (#724)](issue-724.md)
 <!-- indexes:end -->
