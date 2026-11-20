@@ -130,3 +130,16 @@ fn a_mode_switch_transplants() {
         }
     });
 }
+
+/// A quality change between blocks (the Time Stretcher's restart sets it inside a host block, so a
+/// host block can end with the buffer reset still pending): the next block clears and re-lays the
+/// memory only if the restored flag says so.
+#[test]
+fn a_pending_buffer_reset_transplants() {
+    let mut a = make(Quality::Stereo, PlaybackMode::Stretch);
+    for k in 0..600 {
+        block(&mut a, k);
+    }
+    a.set_quality(Quality::Mono);
+    transplant(&mut a, make(Quality::Stereo, PlaybackMode::Stretch), 900, |_, _| {});
+}
