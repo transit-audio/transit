@@ -267,15 +267,18 @@ pub fn default_input_paths(inputs: u16) -> Vec<IoPath> {
     mono.chain(pairs).collect()
 }
 
-/// Why an input path the table defines cannot be heard or recorded (ADR 0015, amendment for #431,
-/// rules 8 to 10): it monitors silence, refuses to record, a hardware insert returning on it runs
-/// dry and an External Instrument has no return. It never falls back to another channel.
+/// Why an input route cannot be heard or recorded (ADR 0015, amendment for #431, rules 8 to 10,
+/// and the coordinator's ruling of 2026-11-20 on absent names): it monitors silence, refuses to
+/// record, a hardware insert returning on it runs dry and an External Instrument has no return. It
+/// never falls back to another channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputUnavailable {
     /// An output path has the same name (the two halves met in one table).
     Clash,
-    /// A channel is not open: the input is narrower than the path (or not open at all).
+    /// A channel is not open: the input is narrower than the path or label (or not open at all).
     OutOfRange { opened: u16 },
+    /// The table holds no input path of that name, and it is not a label ("In 3", "In 3-4").
+    Missing,
 }
 
 impl std::fmt::Display for InputUnavailable {
@@ -285,31 +288,63 @@ impl std::fmt::Display for InputUnavailable {
             InputUnavailable::OutOfRange { opened: 0 } => write!(f, "out of range: no input channels are open"),
             InputUnavailable::OutOfRange { opened: 1 } => write!(f, "out of range: the input has 1 channel open"),
             InputUnavailable::OutOfRange { opened } => write!(f, "out of range: the input has {opened} channels open"),
+            InputUnavailable::Missing => write!(f, "no input path of that name on this input"),
         }
     }
 }
 
-/// The device input channel (not yet wrapped to the channels the device opened) strip channel `k`
-/// of a `strip`-channel strip listens to or records for an input route named `name`, or `None`
-/// when the name is an unavailable input path ([`InputUnavailable`]: silence, never another
-/// channel). One function for the mix's monitoring and the recorder, so they cannot disagree (ADR
-/// 0015 section 1.4). A name in `io`'s table resolves through it, so a path renamed "Guitar" on
-/// channel 5 is channel 5. A name that is not there (an old session, or one made on another
-/// machine) keeps the label meaning it always had: the number in "In 3" or "In 3-4" is the first
-/// channel (amendment for #431, rule 10: "on port groups, other unresolved names keep today's
-/// label meaning"). A mono label ("In 3") feeds both sides of a stereo strip, as a mono path in
-/// the table does.
-pub fn input_channel(io: Option<&IoMap>, name: &str, k: usize, strip: usize) -> Option<usize> {
-    if let Some(state) = io.and_then(|m| m.input_state(name)) {
-        return state.ok().map(|p| p.source_channel(k, strip));
+/// The channels (0-based, first and last) a legacy label names: exactly "In N" or "In N-M", with
+/// N at least 1 and M at least N; `None` for any other name.
+fn label_channels(name: &str) -> Option<(u16, u16)> {
+    let rest = name.strip_prefix("In ")?;
+    let number = |t: &str| (!t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())).then(|| t.parse::<u16>().ok()).flatten().filter(|&n| n >= 1);
+    match rest.split_once('-') {
+        None => number(rest).map(|n| (n - 1, n - 1)),
+        Some((a, b)) => {
+            let (a, b) = (number(a)?, number(b)?);
+            (b >= a).then_some((a - 1, b - 1))
+        }
     }
-    let first = name.trim_start_matches("In ").split(['-', ' ']).next().and_then(|n| n.parse::<usize>().ok()).map_or(0, |n| n.saturating_sub(1));
-    Some(if strip <= 2 && is_mono_label(name) { first } else { first.saturating_add(k) })
 }
 
-/// Whether `name` is a one-channel input label: "In " and a number, nothing after it.
-fn is_mono_label(name: &str) -> bool {
-    name.strip_prefix("In ").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+/// The device input channel each strip channel of a `strip`-channel strip reads for an input route
+/// named `name` on `io` (`None`: that strip channel is silent), or why the route is unavailable as a
+/// whole. The one resolution for the mix's monitoring (resolved when the plan is compiled), the
+/// recorder and every check: they cannot disagree (ADR 0015 section 1.4).
+///
+/// - An input path of the table resolves through it ("Guitar" on channel 5 is channel 5), unless it
+///   is unavailable (a clash with an output path, a channel past the open input).
+/// - A legacy label, exactly "In N" or "In N-M", that the table does not hold keeps its numeric
+///   meaning only while every channel it names is open; otherwise it is unavailable, never wrapped.
+/// - Any other name the table does not hold is unavailable: no fallback to channel 1 or to another
+///   path (the ruling of 2026-11-20; the session keeps the name, so the right machine restores it).
+/// - System Audio is its pair after the device's channels while it runs, else silent.
+///
+/// A mono path or label feeds both sides of a stereo strip (#681); a strip wider than its path takes
+/// the channels after the path's last one, each silent when it is not open. No channel at or past
+/// [`MAX_DEVICE_CHANNELS`] is ever read (#431 Q6).
+pub fn resolve_input(io: &IoMap, name: &str, strip: usize) -> Result<Vec<Option<u16>>, InputUnavailable> {
+    let open = io.inputs.min(MAX_DEVICE_CHANNELS as u16);
+    let within = |c: usize| u16::try_from(c).ok().filter(|&c| c < open);
+    if is_system_audio(name) {
+        return Ok((0..strip).map(|k| io.system_audio.and_then(|first| u16::try_from(usize::from(first) + k % 2).ok())).collect());
+    }
+    if let Some(state) = io.input_state(name) {
+        let p = state?;
+        return Ok((0..strip).map(|k| within(p.source_channel(k, strip))).collect());
+    }
+    let (first, last) = label_channels(name).ok_or(InputUnavailable::Missing)?;
+    if last >= open {
+        return Err(InputUnavailable::OutOfRange { opened: io.inputs });
+    }
+    let mono = first == last && strip <= 2;
+    Ok((0..strip).map(|k| if mono { Some(first) } else { within(usize::from(first) + k) }).collect())
+}
+
+/// [`resolve_input`]'s channel for strip channel `k`, or `None` (silent, or the route unavailable);
+/// `None` too without a table.
+pub fn input_channel(io: Option<&IoMap>, name: &str, k: usize, strip: usize) -> Option<usize> {
+    resolve_input(io?, name, strip).ok()?.get(k).copied().flatten().map(usize::from)
 }
 
 /// Whether an input route named `name` is the System Audio path.
@@ -317,21 +352,10 @@ pub fn is_system_audio(name: &str) -> bool {
     name.trim().eq_ignore_ascii_case(SYSTEM_AUDIO_PATH)
 }
 
-/// The live input channel strip channel `k` (of `strip`) of an input route named `name` reads, among the
-/// `live` channels the input delivers, or `None` for silence. The one resolution for the mix's
-/// monitoring and the recorder. A device path wraps to the live channels as it always has
-/// ([`input_channel`]); an unavailable input path is silent; a device channel at or past
-/// [`MAX_DEVICE_CHANNELS`] is never read (#431 Q6: a JACK port group of more than 32 ports opens
-/// them all, and the table stops at 32). System Audio is its pair (a mono strip hears the left
-/// side), and silent while it does not run, never another input.
+/// [`input_channel`] among the `live` channels the input delivers now: `None` (silence) when the
+/// resolved channel is not among them. Never wraps.
 pub fn live_input_channel(io: Option<&IoMap>, name: &str, k: usize, strip: usize, live: usize) -> Option<usize> {
-    if is_system_audio(name) {
-        let first = usize::from(io?.system_audio?);
-        let channel = first + k % 2;
-        return (channel < live).then_some(channel);
-    }
-    let channel = input_channel(io, name, k, strip)? % live.max(1);
-    (channel < MAX_DEVICE_CHANNELS).then_some(channel)
+    input_channel(io, name, k, strip).filter(|&c| c < live)
 }
 
 impl IoMap {
@@ -868,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn input_names_resolve_through_the_table_and_fall_back_to_the_label() {
+    fn input_names_resolve_through_the_table_and_labels_only_while_their_channels_are_open() {
         let mut m = IoMap::for_device("ASIO", "x", 8, 2);
         m.add_path(IoPath { live: false, name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono })
             .unwrap();
@@ -879,13 +903,19 @@ mod tests {
         assert_eq!((input_channel(Some(&m), "Pair", 0, 2), input_channel(Some(&m), "Pair", 1, 2)), (Some(6), Some(1)));
         assert_eq!(input_channel(Some(&m), "In 3", 0, 2), Some(2));
         assert_eq!(input_channel(Some(&m), "In 3-4", 1, 2), Some(3));
-        // Not in the table: the number in the label, as before.
-        assert_eq!(input_channel(Some(&m), "In 12", 0, 2), Some(11));
-        assert_eq!(input_channel(Some(&m), "In 12", 1, 2), Some(11), "a mono label feeds both sides too");
-        assert_eq!(input_channel(None, "In 3-4", 1, 2), Some(3));
-        assert_eq!(input_channel(None, "Guitar", 0, 2), Some(0));
-        // An output path is not an input (and no input path has its name): the label rule, as before.
-        assert_eq!(input_channel(Some(&m), "Out 1-2", 0, 2), Some(0));
+        // A label the table does not hold keeps its number only while its channels are open
+        // (the ruling of 2026-11-20): "In 12" on 8 inputs is unavailable, never a wrap.
+        m.remove_path("In 3-4").unwrap();
+        assert_eq!(resolve_input(&m, "In 3-4", 2), Ok(vec![Some(2), Some(3)]), "a label not in the table, its channels open");
+        assert_eq!(resolve_input(&m, "In 12", 2), Err(InputUnavailable::OutOfRange { opened: 8 }));
+        assert_eq!(resolve_input(&m, "In 7-9", 2), Err(InputUnavailable::OutOfRange { opened: 8 }), "every channel it names");
+        assert_eq!(input_channel(Some(&m), "In 12", 0, 2), None);
+        // Any other name the table does not hold is unavailable: no channel 1.
+        assert_eq!(resolve_input(&m, "Bass", 1), Err(InputUnavailable::Missing));
+        assert_eq!(resolve_input(&m, "In 0", 1), Err(InputUnavailable::Missing), "not a label");
+        assert_eq!(resolve_input(&m, "In 4-3", 1), Err(InputUnavailable::Missing), "not a label");
+        assert_eq!(resolve_input(&m, "Out 1-2", 2), Err(InputUnavailable::Missing), "an output path is not an input");
+        assert_eq!(input_channel(None, "In 3-4", 1, 2), None, "no table, no input");
     }
 
     /// #681: a one-channel input gets its default "In 1" however the table arrives (opened with
@@ -908,7 +938,7 @@ mod tests {
         let eight = IoMap::for_device("test", "x", 8, 2);
         let all = |name: &str, strip: usize| (0..strip).map(|k| input_channel(Some(&eight), name, k, strip).unwrap()).collect::<Vec<_>>();
         assert_eq!(all("In 3", 4), [2, 3, 4, 5], "a quad track on In 3, as before #681");
-        assert_eq!(all("In 12", 4), [11, 12, 13, 14], "a mono label not in the table, as before");
+        assert_eq!(resolve_input(&eight, "In 7", 4), Ok(vec![Some(6), Some(7), None, None]), "channels past the input are silent, never wrapped");
         assert_eq!(all("In 3", 2), [2, 2]);
     }
 
@@ -924,7 +954,7 @@ mod tests {
         assert_eq!(live_input_channel(Some(&m), "System Audio", 0, 2, 2), None, "the live input lacks the pair (it did not open)");
         assert_eq!(live_input_channel(None, "System Audio", 0, 2, 4), None);
         assert_eq!(live_input_channel(Some(&m), "In 2", 0, 2, 4), Some(1), "device paths resolve as before");
-        assert_eq!(live_input_channel(Some(&m), "In 3", 0, 2, 2), Some(0), "and wrap to the live channels as before");
+        assert_eq!(live_input_channel(Some(&m), "In 3", 0, 2, 2), None, "a label past the input is unavailable, never a wrap");
         let path = |name: &str| IoPath {
             live: false,
             name: name.into(),
