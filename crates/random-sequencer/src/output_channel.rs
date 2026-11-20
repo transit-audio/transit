@@ -249,7 +249,15 @@ impl<const N: usize> OutputChannel<N> {
 #[cfg(feature = "testing")]
 crate::record_struct!([] ScaleOffset { scale, offset });
 #[cfg(feature = "testing")]
-crate::record_struct!([const N: usize] OutputChannel<N> {
+// Encoded: the last drawn voltage and its quantization (the Sequencer's `key` reads them when a
+// gate is high without a new pulse) and the quantizers (their hysteresis state). Unobservable for
+// the one owner with a declared record, the Sequencer, which drives a channel only through
+// `tick` and sets every parameter at the start of every tick, before a channel is read (`Sequencer::apply`: spread, bias, steps,
+// scale index, register mode, scale offset): the parameters, and what only `process` reads
+// (`previous_steps`, `previous_phase`, `reacquisition_counter`, `previous_voltage`,
+// `register_value`, `register_transposition`, the lag processor). Poisoned in every Random Sequencer
+// witness (`Sequencer::poison_unobservable`).
+crate::record_struct!([const N: usize] OutputChannel<N> { voltage, quantized_voltage, quantizer } unobservable {
     spread,
     bias,
     steps,
@@ -261,9 +269,32 @@ crate::record_struct!([const N: usize] OutputChannel<N> {
     previous_phase,
     reacquisition_counter,
     previous_voltage,
-    voltage,
-    quantized_voltage,
     scale_offset,
     lag_processor,
-    quantizer,
 });
+
+#[cfg(feature = "testing")]
+impl<const N: usize> OutputChannel<N> {
+    /// Poison witnesses only: what the Sequencer never reads or sets before each block (the
+    /// record's comment), with values that differ from the old ones. The scale index and the
+    /// register mode keep their values (both are set before every tick; a poisoned index would
+    /// only be clamped).
+    pub(crate) fn poison_owner_set(&mut self, p: &mut crate::record::Poison) {
+        use crate::record::Record as _;
+        for x in [
+            &mut self.spread,
+            &mut self.bias,
+            &mut self.steps,
+            &mut self.register_value,
+            &mut self.register_transposition,
+            &mut self.previous_steps,
+            &mut self.previous_phase,
+            &mut self.previous_voltage,
+        ] {
+            x.poison(p);
+        }
+        self.reacquisition_counter.poison(p);
+        self.scale_offset.poison(p);
+        self.lag_processor.poison(p);
+    }
+}

@@ -886,6 +886,9 @@ impl Sequencer {
         self.dropped_ons.poison(p);
         self.y.poison(p);
         self.core.t.poison_phases(p);
+        for c in &mut self.core.channels {
+            c.poison_owner_set(p);
+        }
     }
 
     /// Scheduled events waiting for their beat (the witnesses' observation).
