@@ -338,7 +338,8 @@ transit_resonator::record_struct!([] Buffers { bow, bow_strength, blow, strike }
 // `bow_strength[i]` before frame `i` reads it; the damping after the loop reads `bow_strength[0]`,
 // written by its first pass, the block being at least one frame).
 // Unobservable: `resonator_model` (`ModalVoice::process` sets it, `set_resonator_model`, right before
-// every `Voice::process`, the only reader).
+// every `Voice::process`, the only reader); `exciter_level`, the exciter meter's follower, read only
+// by `exciter_level()` for the part's panel meter, which the rendering never reads.
 #[cfg(feature = "testing")]
 transit_resonator::record_struct!([] Voice {
     envelope,
@@ -352,18 +353,18 @@ transit_resonator::record_struct!([] Voice {
     dc_blocker,
     strength,
     envelope_value,
-    exciter_level,
     previous_gate,
     chord_index,
-} unobservable { buffers, resonator_model });
+} unobservable { buffers, resonator_model, exciter_level });
 
 #[cfg(feature = "testing")]
 impl Voice {
-    /// Poison witnesses only: overwrites the scratch buffers and the resonator model the part
-    /// sets before every block.
+    /// Poison witnesses only: overwrites the scratch buffers, the resonator model the part sets
+    /// before every block, and the exciter meter's follower.
     pub(crate) fn poison_unobservable(&mut self, p: &mut transit_resonator::record::Poison) {
         use transit_resonator::record::Record as _;
         self.buffers.poison(p);
         self.resonator_model.poison(p);
+        self.exciter_level.poison(p);
     }
 }

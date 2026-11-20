@@ -575,6 +575,10 @@ crate::record_enum!(Range { Quarter, Normal, Times4 });
 #[cfg(feature = "testing")]
 crate::record_struct!([] DividerPattern { ratios, length });
 #[cfg(feature = "testing")]
+// Unobservable for the one owner with a declared record, the Sequencer (it never runs
+// `TGenerator::process`, the only reader of `master_phase`, `phase_difference` and
+// `jitter_multiplier`; it keeps its own clock and calls `jitter_multiplier_for`, which reads
+// neither): those three. Poisoned in every Random Sequencer witness (`Sequencer::poison_unobservable`).
 crate::record_struct!([] TGenerator {
     one_hertz,
     model,
@@ -584,9 +588,6 @@ crate::record_struct!([] TGenerator {
     jitter,
     pulse_width_mean,
     pulse_width_std,
-    master_phase,
-    jitter_multiplier,
-    phase_difference,
     previous_external_ramp_value,
     use_external_clock,
     divider_pattern_length,
@@ -603,4 +604,15 @@ crate::record_struct!([] TGenerator {
     pattern,
     pattern_started,
     restarted,
-});
+} unobservable { master_phase, phase_difference, jitter_multiplier });
+
+#[cfg(feature = "testing")]
+impl TGenerator {
+    /// Poison witnesses only: the phases the Sequencer never reads.
+    pub(crate) fn poison_phases(&mut self, p: &mut crate::record::Poison) {
+        use crate::record::Record as _;
+        self.master_phase.poison(p);
+        self.phase_difference.poison(p);
+        self.jitter_multiplier.poison(p);
+    }
+}

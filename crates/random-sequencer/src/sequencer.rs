@@ -885,6 +885,7 @@ impl Sequencer {
         self.dropped.poison(p);
         self.dropped_ons.poison(p);
         self.y.poison(p);
+        self.core.t.poison_phases(p);
     }
 
     /// Scheduled events waiting for their beat (the witnesses' observation).

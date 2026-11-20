@@ -640,6 +640,36 @@ fn random_sequencer() -> MEntry {
                 reached: |b| sequencer_obs(b).1 > 0,
                 completed: |_| true,
             },
+            // A voice turned on mid-gate: its gate high and no new pulse, so it plays its
+            // channel's last drawn voltage; at T Play has just changed from gate 1 alone to every
+            // voice. The continuation plays on and changes the steps and spread (the quantizers'
+            // hysteresis).
+            MWitness {
+                boundary: Boundary::Entry("voice turned on mid-gate"),
+                history: |rate| {
+                    let mut h = sequencer_setup();
+                    h.extend([
+                        MStep::Param("play", 1.0),
+                        MStep::Param("gate_length", 95.0),
+                        MStep::Param("steps", 80.0),
+                        MStep::Transport(Some(120.0)),
+                    ]);
+                    h.extend([MStep::Run(blocks(BAR, rate), BLOCK), MStep::Param("play", 4.0)]);
+                    h
+                },
+                continuation: |rate| {
+                    vec![
+                        MStep::Run(blocks(BAR, rate), BLOCK),
+                        MStep::Param("steps", 30.0),
+                        MStep::Param("spread", 80.0),
+                        MStep::Run(blocks(BAR, rate), BLOCK),
+                        MStep::Param("steps", 65.0),
+                        MStep::Run(blocks(BAR, rate), BLOCK),
+                    ]
+                },
+                reached: |_| true,
+                completed: |_| true,
+            },
             // The loop frozen: Freeze locks the recorded decisions; the continuation plays the
             // loop's whole length twice, then unfreezes.
             MWitness {
