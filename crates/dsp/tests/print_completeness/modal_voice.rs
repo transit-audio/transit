@@ -485,6 +485,58 @@ fn witnesses() -> Vec<W> {
         reached: |p| obs(p).model == 2 && obs(p).keys == 1,
         completed: idle,
     });
+    // The shaper switched while the gate is up (the held-note crossfade over a shaper block): on
+    // and holding at T; the continuation turns it off and on again under the held note, then
+    // releases.
+    v.push(W {
+        boundary: Boundary::Entry("shaper switch while held"),
+        history: |rate| {
+            let mut h = setup();
+            h.extend(shaper_on());
+            h.extend([Step::On(55, 100, 0), Step::Run(span(&[HOLD], rate))]);
+            h
+        },
+        continuation: |rate| {
+            vec![
+                Step::Param("shaper", 0.0),
+                Step::RunBlocks(span(&[HOLD], rate), 5),
+                Step::Param("shaper", 1.0),
+                Step::RunBlocks(span(&[HOLD], rate), 7),
+                Step::Off(55, 0),
+                run_out(&[SHAPER_RELEASE], rate),
+            ]
+        },
+        reached: |p| obs(p).gate && !obs(p).fresh,
+        completed: idle,
+    });
+    // Strings below the delay line's reach (a string's resampler runs when its period passes
+    // the 2048-sample line): a low note on the one-string model at T; the continuation plays
+    // lower, switches to the modal bank and back, and plays again.
+    v.push(W {
+        boundary: Boundary::Entry("low strings"),
+        history: |rate| {
+            let mut h = setup();
+            h.extend([Step::Param("damping", 85.0), Step::Param("model", STRING), Step::On(14, 120, 0), Step::Run(span(&[LINES, HOLD], rate))]);
+            h
+        },
+        continuation: |rate| {
+            vec![
+                Step::On(12, 110, 0),
+                Step::Run(span(&[LINES], rate)),
+                Step::Param("model", MODAL),
+                Step::Run(span(&[HOLD], rate)),
+                Step::Param("model", STRING),
+                Step::On(16, 110, 0),
+                Step::Run(span(&[LINES, HOLD], rate)),
+                Step::Off(14, 0),
+                Step::Off(12, 0),
+                Step::Off(16, 0),
+                run_out(&[SHAPER_RELEASE], rate),
+            ]
+        },
+        reached: |p| obs(p).model == 1 && obs(p).keys == 1,
+        completed: idle,
+    });
     v.extend(model_witnesses());
     v
 }
