@@ -76,8 +76,8 @@ fn transplant(a: &mut Resonator, mut b: Resonator, blocks: usize, script: Script
 fn a_bypassed_part_transplants() {
     let mut a = Resonator::new();
     a.set_model(ResonatorModel::SympatheticStrings);
-    for k in 0..40 {
-        block(&mut a, k % 9 == 0, 12.0 + k as f32, k);
+    for k in 0..40usize {
+        block(&mut a, k.is_multiple_of(9), 12.0 + k as f32, k);
     }
     a.set_bypass(true);
     block(&mut a, false, 0.0, 99);
@@ -109,7 +109,7 @@ fn an_odd_polyphony_strum_order_transplants() {
     }
     let mut b = Resonator::new();
     b.set_polyphony(3);
-    transplant(&mut a, b, 300, |k| (k % 25 == 0, 14.0 + (k / 25) as f32, None));
+    transplant(&mut a, b, 300, |k| (k.is_multiple_of(25), 14.0 + (k / 25) as f32, None));
 }
 
 /// The FM voice fed by the audio input (its envelope follower tracks the input; the instrument
@@ -119,12 +119,12 @@ fn an_fm_voice_with_an_input_transplants() {
     let mut a = Resonator::new();
     a.set_model(ResonatorModel::FmVoice);
     a.set_polyphony(2);
-    for k in 0..60 {
-        block(&mut a, k % 20 == 0, 20.0 + (k / 20) as f32, k);
+    for k in 0..60usize {
+        block(&mut a, k.is_multiple_of(20), 20.0 + (k / 20) as f32, k);
     }
     let mut b = Resonator::new();
     b.set_model(ResonatorModel::FmVoice);
-    transplant(&mut a, b, 300, |k| (k % 30 == 0, 18.0, None));
+    transplant(&mut a, b, 300, |k| (k.is_multiple_of(30), 18.0, None));
 }
 
 /// A note that glides by less than the note filter's jump threshold (0.4 semitones) a block, as a

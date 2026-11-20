@@ -45,7 +45,7 @@ fn parameters(k: usize) -> Parameters {
         feedback: 0.3,
         reverb: 0.4,
         freeze: false,
-        trigger: k % 97 == 0,
+        trigger: k.is_multiple_of(97),
         gate: false,
     }
 }

@@ -345,7 +345,7 @@ fn transpose() -> MEntry {
                         ev.push((
                             u32::from(k),
                             k % 3,
-                            if k % 2 == 0 { i32::from(k) } else { -1 },
+                            if k.is_multiple_of(2) { i32::from(k) } else { -1 },
                             Message::NoteOn { key: 30 + k, velocity: 90, id: NoteId::NONE },
                         ));
                     }
@@ -363,7 +363,7 @@ fn transpose() -> MEntry {
                         ev.push((
                             1 + u32::from(k),
                             k % 3,
-                            if k % 2 == 0 { i32::from(k) } else { -1 },
+                            if k.is_multiple_of(2) { i32::from(k) } else { -1 },
                             Message::NoteOff { key: 30 + k, velocity: 0, id: NoteId::NONE },
                         ));
                     }
