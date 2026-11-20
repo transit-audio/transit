@@ -464,11 +464,12 @@ impl Engine {
     /// measurement started through (amendment for #431, rule 13).
     /// Nothing is stored, and `false` returned, without an input identity ([`NO_INPUT_IDENTITY`]).
     pub fn store_external_latency(&mut self, mut m: transit_model::ExternalLatency) -> bool {
-        if m.input_device.is_empty() {
-            m.input_device.clone_from(&self.io.input_device);
+        // No store while the open input has no identity, even for a figure that names one.
+        if self.io.input_device.is_empty() {
+            return false;
         }
         if m.input_device.is_empty() {
-            return false;
+            m.input_device.clone_from(&self.io.input_device);
         }
         let mut io = self.io.clone();
         io.set_external_latency(m);

@@ -244,6 +244,10 @@ fn io_state(s: &Session) -> Value {
     json!({"busses": s.busses, "outputs": s.outputs})
 }
 
+/// Why `setup.io_map set` refuses a map: it carries a measurement that names no input and that this
+/// machine's table does not already hold.
+pub const UNNAMED_MEASUREMENT: &str = "the map carries a measurement that names no input and is not already in this machine's table; measurements are tied to the input they came back through, so take it with Measure instead";
+
 fn io_map_state(e: &Engine) -> Value {
     let io = e.io_map();
     let overlaps: Vec<Value> = io.overlaps().into_iter().map(|(a, b, c)| json!({"a": a, "b": b, "channel": c})).collect();
@@ -294,6 +298,14 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
             // `add_path`. An input path past the input count is kept, unavailable, as a narrower
             // input keeps it (amendment for #431, rule 9). The input's identity stays the one the
             // device opened: a script cannot move measurements to another input (rule 8).
+            // A figure that names no input reads as one stored before inputs were recorded
+            // (amendment for #431, rule 13): `set` keeps such figures the table already holds,
+            // and never adds one.
+            let new_unnamed = map.hardware_latency.iter().any(|m| m.input_device.is_empty() && !io.hardware_latency.contains(m))
+                || map.external_latency.iter().any(|m| m.input_device.is_empty() && !io.external_latency.contains(m));
+            if new_unnamed {
+                return Err(bad(id, UNNAMED_MEASUREMENT));
+            }
             let cap = transit_model::MAX_DEVICE_CHANNELS as u16;
             let mut checked = IoMap {
                 paths: Vec::new(),
@@ -645,6 +657,74 @@ mod tests {
     /// rules as the page: Add default paths is idempotent, `direction` picks one side of a clash,
     /// `set` keeps an input path past the input count (unavailable) and never moves the input's
     /// identity, and the state lists the unavailable inputs with why.
+    /// Review of 6917787c: `set` keeps figures the table already holds (legacy ones without an
+    /// input included) and refuses a map that adds a figure naming no input, which would read as
+    /// one stored before inputs were recorded; the table is left as it was.
+    #[test]
+    fn io_map_set_never_adds_a_measurement_that_names_no_input() {
+        use transit_model::{ExternalLatency, HardwareLatency, IoMap};
+        let mut e = Engine::default();
+        let hw = |frames: u32, input: &str| HardwareLatency {
+            send: "Out 3-4".into(),
+            ret: "In 3-4".into(),
+            round_trip_frames: frames,
+            rate: 48_000,
+            measured_at: 1,
+            input_device: input.into(),
+        };
+        let mut table = IoMap::for_device("ASIO", "x", 4, 4);
+        table.hardware_latency.push(hw(600, ""));
+        e.set_io_map(table.clone());
+        e.execute("setup.io_map", &json!({"action": "set", "map": table})).unwrap();
+        assert_eq!(e.io_map().hardware_latency, [hw(600, "")], "a figure the table holds is kept as it is");
+        let before = (e.io_map().clone(), e.io_revision());
+        let mut added = table.clone();
+        added.hardware_latency.push(hw(700, ""));
+        let refused = e.execute("setup.io_map", &json!({"action": "set", "map": added}));
+        assert!(matches!(&refused, Err(crate::EngineError::BadParams(_, why)) if why == UNNAMED_MEASUREMENT), "{refused:?}");
+        let mut external = table.clone();
+        external.external_latency.push(ExternalLatency {
+            port_id: String::new(),
+            port_name: "MODEL D".into(),
+            ret: "In 1".into(),
+            rate: 48_000,
+            buffer: 64,
+            frames: 955,
+            spread_frames: 1,
+            notes: 8,
+            measured_at: 1,
+            input_device: String::new(),
+        });
+        assert!(e.execute("setup.io_map", &json!({"action": "set", "map": external})).is_err(), "nor an External Instrument figure");
+        assert_eq!((e.io_map().clone(), e.io_revision()), before, "the table is left as it was");
+        let mut named = table.clone();
+        named.hardware_latency.push(hw(700, "x"));
+        e.execute("setup.io_map", &json!({"action": "set", "map": named})).unwrap();
+        assert_eq!(e.io_map().hardware_latency.len(), 2, "a figure that names its input is accepted");
+    }
+
+    /// Review of 6917787c: no External Instrument figure is stored while the open input has no
+    /// identity, even one that names an input.
+    #[test]
+    fn no_external_figure_is_stored_without_an_input_identity() {
+        let mut e = Engine::default();
+        assert!(e.io_map().input_device.is_empty());
+        let named = transit_model::ExternalLatency {
+            port_id: String::new(),
+            port_name: "MODEL D".into(),
+            ret: "In 1".into(),
+            rate: 48_000,
+            buffer: 64,
+            frames: 955,
+            spread_frames: 1,
+            notes: 8,
+            measured_at: 1,
+            input_device: "Mic".into(),
+        };
+        assert!(!e.store_external_latency(named));
+        assert!(e.io_map().external_latency.is_empty());
+    }
+
     #[test]
     fn io_map_commands_follow_the_input_rules_of_the_page() {
         use transit_model::{ChannelFormat, InputMap, IoDirection, IoMap, IoPath};
