@@ -468,7 +468,11 @@ open to the next. transit remembers the ports a virtual device had when its path
 the device comes back with other ports, or the same ports in another order, every path over a port
 that changed is listed as unavailable ("ports changed"): it is silent and refuses to record, and its
 definition is kept. It works again when the original ports return, or when you press **Use the
-current ports** on the I/O paths page while the transport is stopped. transit can tell a changed
+current ports** on the I/O paths page while the transport is stopped. The same holds when a
+name that was a hardware device comes back as a virtual one (its hardware ports gone, a monitor
+left): paths made on the hardware, or brought over from an older build's table, are off until you
+use the current ports. A track wider than its path also reads the ports after it; if one of those
+changed, that track's input is off as a whole. transit can tell a changed
 port name, not a different stream that reuses the same name. A hardware insert or External
 Instrument measurement made through a virtual device, and a loopback calibration, apply only while
 the device has the ports they were measured through; otherwise they say **Measure again**.
