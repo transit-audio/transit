@@ -22,6 +22,7 @@
 
 pub(crate) mod card;
 mod fake_json;
+pub(crate) mod jack_buffer;
 mod jack_calibration;
 pub(crate) mod jack_inputs;
 #[cfg(test)]
@@ -68,7 +69,8 @@ pub(crate) struct AsioListing {
 }
 /// Said under the rate and buffer lists where the device must be open to be described (an ASIO
 /// driver other than the one that runs): the lists are the standard choices until Apply.
-/// Said under the buffer list on the JACK system: Apply asks the server.
+/// Said under the buffer list on the JACK system under JACK 2: Apply asks the server (under
+/// PipeWire, [`jack_buffer::JACK_PIPEWIRE_BUFFER_NOTE`]).
 pub const JACK_BUFFER_NOTE: &str = "Changes the JACK server's buffer size for all clients.";
 pub const STALE_NOTE: &str = "updates after Apply";
 /// The "Input open:" line before any input opened (and after none failed).

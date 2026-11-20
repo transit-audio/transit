@@ -114,12 +114,20 @@ pub fn auto_jack_candidate(cfg: &AudioConfig) -> bool {
 
 /// The Audio Devices note of the JACK system, once for all its port groups (#146): the server (name
 /// and version), its rate (the server's) and the buffer it runs. Picking another buffer size asks
-/// the server to change it, for all its clients; the server can also be pinned (PipeWire's
-/// `pw-metadata`).
+/// the server for it (JACK 2: for all its clients; PipeWire: for transit's own node while its
+/// client is active); the server can also be pinned (PipeWire's `pw-metadata`).
 pub fn jack_note(server: &str, rate: u32, buffer: u32) -> String {
     format!(
         "Native JACK ({server}) runs at {rate} Hz (the server's rate) with a {buffer}-sample buffer; a size picked here is requested of the server on Apply. To pin one instead (PipeWire: pw-metadata -n settings 0 clock.force-quantum {buffer}; JACK 2: jackd -p {buffer})"
     )
+}
+
+/// Whether the JACK system `system` is served by PipeWire's JACK library: its note
+/// ([`jack_note`]) names the server as the library names itself ("PipeWire 1.0.5"). Under
+/// PipeWire a chosen buffer size is a request on transit's own node that ends with its client, not
+/// a change of the server's buffer size (ADR 0021, amendment for #760, rule 2).
+pub fn jack_runs_pipewire(system: &AudioSystem) -> bool {
+    devices::is_jack_system(Some(&system.name)) && system.diagnostics.iter().any(|note| note.starts_with("Native JACK (PipeWire"))
 }
 
 /// One endpoint as the settings window lists it: its channel count in `direction`, the standard
@@ -508,6 +516,10 @@ mod tests {
         if !cfg!(windows) && !devices::NATIVE_JACK_COMPILED {
             assert!(factory_for(&auto_jack).is_none(), "a build without the backend stays cpal");
         }
+        let listed = |note: String| system_from_endpoints(devices::JACK_SYSTEM, false, &[], &[], &[], vec![note]);
+        assert!(jack_runs_pipewire(&listed(jack_note("PipeWire 1.0.5", 48_000, 1024))), "PipeWire's library names itself");
+        assert!(!jack_runs_pipewire(&listed(jack_note("JACK 1.9.20", 48_000, 1024))), "JACK 2");
+        assert!(!jack_runs_pipewire(&listed(jack_note("JACK", 48_000, 1024))), "a library that does not say");
         assert_eq!(
             jack_note("JACK 1.9.20", 48_000, 128),
             "Native JACK (JACK 1.9.20) runs at 48000 Hz (the server's rate) with a 128-sample buffer; a size picked here is requested of the server on Apply. To pin one instead (PipeWire: pw-metadata -n settings 0 clock.force-quantum 128; JACK 2: jackd -p 128)"

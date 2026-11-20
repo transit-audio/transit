@@ -127,6 +127,7 @@ pub fn record(figures: &Figures, device: &str, input: Option<&str>, mode: &str, 
         spread_frames: figures.spread_frames,
         measured_at: measured_at.to_owned(),
         input_ports: Vec::new(),
+        running_period: false,
     }
 }
 

@@ -138,6 +138,7 @@ impl Player {
             plan_input: Cell::new(false),
             system_audio: Cell::new(None),
             device_buffer: None,
+            device_buffer_declined: false,
             silent: true,
             null_device: false,
         }
@@ -516,17 +517,12 @@ impl Player {
             }
             // On ASIO the loop depends on the buffer the driver runs, which it may choose itself (its
             // panel's size for "driver buffer", a fixed-size driver's one size): the calibration is
-            // looked up by the achieved buffer after the open and handed to both streams then.
+            // looked up by the achieved buffer after the open and handed to both streams then. On
+            // JACK the buffer is known only once the client is active: the calibration is looked up
+            // after the starts by the settled buffer (ADR 0021, amendment for #760, rule 7), and no
+            // request carries one.
             let asio = system == devices::ASIO_SYSTEM;
-            request.calibration = if !duplex || asio {
-                None
-            } else if jack {
-                devices::CalibrationKey::of(&system, &name, opened_input, &request)
-                    .map(|key| key.with_ports(&input_ports))
-                    .and_then(|key| cfg.jack_calibration(&key).and_then(devices::LoopbackCalibration::to_backend))
-            } else {
-                cfg.calibration_for(&system, &name, paired.as_deref(), &request)
-            };
+            request.calibration = if !duplex || asio || jack { None } else { cfg.calibration_for(&system, &name, paired.as_deref(), &request) };
             let (rate, channels) = (request.format.rate, request.format.channels);
             let mut io = IoMap::for_device(&system, &name, inputs, channels);
             // System Audio (#268) rides on the duplex input as the pair after its channels; the
@@ -618,6 +614,41 @@ impl Player {
             if system_audio && let HeldInput::Held(Some(recorder)) = player.input.get_mut() {
                 recorder.attach_system_audio(crate::system_audio::open(cfg));
             }
+            // Native JACK settles its rate and buffer once the client is active (ADR 0021, amendment
+            // for #760, rule 1): read once, here, after both starts. A rate the Player was not
+            // built for latched a rebuild; otherwise the settled buffer (a stream that reports none
+            // keeps `Achieved`) is the device's and keys the calibration, resolved now and handed to
+            // both directions (rule 7).
+            let (mut settled, mut rebuild) = (None, false);
+            let mut calibration = calibration;
+            if jack && let Some(stream) = player.stream.as_ref() {
+                rebuild = stream.needs_rebuild();
+                settled = stream.period().or(achieved.period.frames()).filter(|_| !rebuild);
+                player.device_buffer_declined = stream.period_declined();
+                if let Some(frames) = settled {
+                    keyed.period = ab::Period::Frames(frames);
+                }
+                calibration = if duplex && !rebuild {
+                    devices::CalibrationKey::of(&system, &name, opened_input, &keyed)
+                        .map(|key| key.with_ports(&input_ports).settled())
+                        .and_then(|key| cfg.jack_calibration(&key).and_then(devices::LoopbackCalibration::to_backend))
+                } else {
+                    None
+                };
+                if calibration.is_some() {
+                    let output = stream.set_calibration(calibration);
+                    let input = match player.input.get_mut() {
+                        HeldInput::Held(Some(recorder)) => recorder.set_calibration(calibration),
+                        _ => false,
+                    };
+                    // The JACK engine's frame times do not use a calibration yet (ADR 0021, 2026-10-25
+                    // amendment); the Player keeps it for its clock map and the page.
+                    log::debug!("the JACK calibration of {name} handed to the output ({output}) and the input ({input})");
+                }
+                if let (HeldInput::Held(Some(recorder)), Some(frames)) = (player.input.get_mut(), settled) {
+                    recorder.buffer_frames = Some(frames);
+                }
+            }
             log::info!(
                 "{}",
                 crate::open_log::describe(&crate::open_log::OpenReport {
@@ -652,7 +683,7 @@ impl Player {
             player.paired_input.clone_from(&paired);
             player.device_system = system.clone();
             player.device_channels = achieved.format.channels;
-            player.device_buffer = achieved.period.frames();
+            player.device_buffer = if jack { settled } else { achieved.period.frames() };
             // The render workers' share follows the device's callback length, which the engine
             // learns at the first callback (#172); said here, on control, with the same rule.
             if let Some(frames) = player.device_buffer.filter(|_| !transit_mix::MixEngine::serial_forced()) {
@@ -681,10 +712,20 @@ impl Player {
             } else {
                 cfg.input_pairing.as_deref().or(paired.as_deref())
             };
-            player.calibration_key =
-                if duplex { devices::CalibrationKey::of(&system, &name, key_input, &keyed).map(|key| key.with_ports(&input_ports)) } else { None };
+            // On JACK the key holds the settled buffer, so a measurement stored under it says its
+            // period is the running one; none while a rebuild is due.
+            player.calibration_key = match (duplex, jack) {
+                (false, _) => None,
+                (true, false) => devices::CalibrationKey::of(&system, &name, key_input, &keyed).map(|key| key.with_ports(&input_ports)),
+                (true, true) if rebuild => None,
+                (true, true) => devices::CalibrationKey::of(&system, &name, key_input, &keyed).map(|key| key.with_ports(&input_ports).settled()),
+            };
             player.calibration = calibration;
             player.silent = false;
+            if rebuild {
+                log::warn!("audio output: {name} runs at another rate than the one prepared; reopening before any audio");
+                player.latch_rebuild();
+            }
             // A unit test enables a fake MIDI backend itself: no test reaches the system's MIDI
             // ports (a session naming a real synth's port would otherwise open it and play it).
             // Nor does the silent device's run (`--null-audio`): it is a diagnostic beside the user's

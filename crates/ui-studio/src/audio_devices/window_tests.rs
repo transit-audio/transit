@@ -301,6 +301,30 @@ fn a_system_note_without_a_device_prefix_shows_once_whichever_output_is_selected
     }
 }
 
+/// ADR 0021, amendment for #760, rule 2: under PipeWire's JACK library the note under the buffer
+/// list says the size is a request that lives with transit's device, not a change for every client.
+#[test]
+fn the_buffer_note_on_a_pipewire_jack_system_says_the_size_is_a_request() {
+    for (server, expected) in [
+        ("PipeWire 1.0.7", crate::audio_devices::jack_buffer::JACK_PIPEWIRE_BUFFER_NOTE),
+        ("JACK 1.9.22", "Changes the JACK server's buffer size for all clients."),
+    ] {
+        let note = transit_playback::backend::native::jack_note(server, 48_000, 1024);
+        let mut t = T::new();
+        t.control(
+            "audio.fake_devices",
+            json!({"systems": [{"name": "JACK", "is_default": true,
+                "outputs": [{"name": "system", "is_default": true, "buffer_min": 64, "buffer_max": 2048}], "diagnostics": [note]}]}),
+        )
+        .unwrap();
+        t.open_window();
+        t.pick("system", "JACK");
+        let notes: Vec<Value> =
+            t.layout()["controls"].as_array().unwrap().iter().filter(|c| c["value"] == "jack_buffer_note").map(|c| c["label"].clone()).collect();
+        assert_eq!(notes, [json!(expected)], "{server}");
+    }
+}
+
 #[test]
 fn picking_another_driver_shows_the_pending_line_highlights_apply_and_lists_the_selected_backends_choices() {
     let mut t = T::new();
@@ -857,6 +881,7 @@ fn the_card_leaves_the_button_row_whole_on_the_asio_system_tab_at_150_percent() 
             spread_frames: 7,
             measured_at: "2026-10-23".into(),
             input_ports: Vec::new(),
+            running_period: false,
         };
         t.app.ui.audio.calibrations = vec![cal(256), cal(64)];
         let mut hist = [0u64; 16];

@@ -11,6 +11,7 @@ fn calibration(device: &str, input: Option<&str>, rate: u32, period: u32) -> tra
         spread_frames: 25,
         measured_at: "2026-10-21".into(),
         input_ports: Vec::new(),
+        running_period: false,
     }
 }
 
@@ -169,6 +170,7 @@ fn the_asio_calibration_line_names_the_buffer_size_and_rate_it_was_measured_at()
         spread_frames: 7,
         measured_at: "2026-10-23".into(),
         input_ports: Vec::new(),
+        running_period: false,
     };
     // The requested buffer does not matter: the line keys on the buffer the open driver runs.
     let cfg = AudioConfig { buffer_size: Some(128), calibrations: vec![at(256, 48_000, 1_196), at(64, 48_000, 333)], ..Default::default() };
@@ -449,6 +451,34 @@ fn a_jack_calibration_measured_through_another_input_group_is_not_applied_and_th
         } else {
             assert_eq!(t.app.audio_devices.notes, [JACK_NOTE]);
             assert_eq!(t.app.status, JACK_NOTE, "the calibration note alone: no \"Choose another\"");
+        }
+    }
+}
+
+/// ADR 0021, amendment for #760, rule 7: a JACK record an earlier build stored (keyed by the
+/// requested buffer, without the marker that its period is the one the server ran) is kept and not
+/// applied, and the page asks for it to be measured again; a record that carries the marker applies.
+#[test]
+fn a_jack_calibration_an_earlier_build_stored_is_not_applied_and_the_page_asks_to_measure_again() {
+    const NOTE: &str =
+        "The loopback calibration of “Headset” was saved without the buffer size the JACK server ran, so it is not applied: measure again.";
+    let record = measured_on_mic(&T::new());
+    assert!(record.running_period);
+    for (stored, applies) in [(transit_playback::LoopbackCalibration { running_period: false, ..record.clone() }, false), (record, true)] {
+        let mut t = T::new();
+        t.control("audio.fake_devices", jack_listing()).unwrap();
+        let saved = jack_cfg("Mic", vec![stored.clone()]);
+        let player = transit_playback::Player::open_fake_native_jack(t.app.engine.session_arc(), &saved, &jack_client()).unwrap();
+        assert_eq!(player.calibration.is_some(), applies);
+        t.app.player = Some(player);
+        t.app.ui.audio = saved;
+        t.frames(2);
+        if applies {
+            assert!(t.app.audio_devices.notes.is_empty(), "{:?}", t.app.audio_devices.notes);
+        } else {
+            assert_eq!(t.app.audio_devices.notes, [NOTE]);
+            assert_eq!(t.app.status, NOTE, "the calibration note alone: no \"Choose another\"");
+            assert_eq!(t.app.ui.audio.calibrations, [stored], "the record stays in the settings");
         }
     }
 }

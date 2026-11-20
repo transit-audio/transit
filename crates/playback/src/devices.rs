@@ -286,6 +286,12 @@ pub struct LoopbackCalibration {
     /// these ports. Empty for every other input.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub input_ports: Vec<String>,
+    /// On JACK, `period` is the buffer the active client ran when the loop was measured (ADR 0021,
+    /// amendment for #760, rule 7). A JACK record without it was keyed by the requested buffer
+    /// (0 when none was chosen), whatever the server ran: it stays in the file, is not applied,
+    /// and asks to be measured again. Unused on other systems.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub running_period: bool,
 }
 
 impl LoopbackCalibration {
@@ -327,6 +333,9 @@ pub struct CalibrationKey {
     /// The open virtual input's ordered port names on JACK ([`LoopbackCalibration::input_ports`]);
     /// empty for every other input.
     pub input_ports: Vec<String>,
+    /// On JACK, `period` is the buffer the started client settled on
+    /// ([`LoopbackCalibration::running_period`]).
+    pub running_period: bool,
 }
 
 impl CalibrationKey {
@@ -341,6 +350,7 @@ impl CalibrationKey {
             rate: request.format.rate,
             period: request.period.frames().unwrap_or(0),
             input_ports: Vec::new(),
+            running_period: false,
         })
     }
 
@@ -348,6 +358,14 @@ impl CalibrationKey {
     #[must_use]
     pub fn with_ports(mut self, ports: &[String]) -> Self {
         self.input_ports = ports.to_vec();
+        self
+    }
+
+    /// This JACK key, whose period is the buffer the started client settled on (rule 7 of ADR 0021's
+    /// amendment for #760): a record stored under it says so.
+    #[must_use]
+    pub fn settled(mut self) -> Self {
+        self.running_period = true;
         self
     }
 
@@ -363,6 +381,7 @@ impl CalibrationKey {
             spread_frames,
             measured_at: measured_at.to_owned(),
             input_ports: self.input_ports.clone(),
+            running_period: self.running_period,
         }
     }
 }
@@ -467,9 +486,16 @@ impl AudioConfig {
     /// Through a virtual input it applies only while the group's ports, in order, are the ones it
     /// was measured through (ADR 0015, amendment for #431, rule 13); a record without them, or
     /// with others, does not apply and needs measuring again.
+    ///
+    /// Only a record whose period is the buffer the client ran applies (ADR 0021, amendment for
+    /// #760, rule 7): one an earlier build stored, keyed by the requested buffer, does not
+    /// ([`Self::jack_calibration_unproven`]).
     pub fn jack_calibration(&self, key: &CalibrationKey) -> Option<&LoopbackCalibration> {
         self.calibrations.iter().find(|c| {
-            c.of_output(key) && jack_input_matches(c.input.as_deref(), &key.device, key.input.as_deref()) && c.input_ports == key.input_ports
+            c.running_period
+                && c.of_output(key)
+                && jack_input_matches(c.input.as_deref(), &key.device, key.input.as_deref())
+                && c.input_ports == key.input_ports
         })
     }
 
@@ -480,7 +506,9 @@ impl AudioConfig {
         if self.jack_calibration(key).is_some() {
             return None;
         }
-        self.calibrations.iter().find(|c| c.of_output(key) && jack_input_matches(c.input.as_deref(), &key.device, key.input.as_deref()))
+        self.calibrations
+            .iter()
+            .find(|c| c.running_period && c.of_output(key) && jack_input_matches(c.input.as_deref(), &key.device, key.input.as_deref()))
     }
 
     /// A saved calibration of `key`'s output, mode, rate and period that does not apply on JACK
@@ -490,7 +518,25 @@ impl AudioConfig {
         if self.jack_calibration(key).is_some() {
             return None;
         }
-        self.calibrations.iter().find(|c| c.of_output(key))
+        self.calibrations.iter().find(|c| c.running_period && c.of_output(key))
+    }
+
+    /// A JACK record an earlier build stored for `key`'s output, mode, rate and input group, at any
+    /// period: it lacks the evidence that its period is the buffer the server ran (a stored 256
+    /// may have been measured while 1024 ran), so it stays in the file, is not applied, and asks
+    /// to be measured again (ADR 0021, amendment for #760, rule 7). `None` when a record applies,
+    /// or none of an earlier build is saved. Measuring again under the same key replaces it.
+    pub fn jack_calibration_unproven(&self, key: &CalibrationKey) -> Option<&LoopbackCalibration> {
+        if self.jack_calibration(key).is_some() {
+            return None;
+        }
+        self.calibrations.iter().find(|c| {
+            !c.running_period
+                && c.device.eq_ignore_ascii_case(&key.device)
+                && c.mode == key.mode
+                && c.rate == key.rate
+                && jack_input_matches(c.input.as_deref(), &key.device, key.input.as_deref())
+        })
     }
 }
 
@@ -767,6 +813,7 @@ mod tests {
             spread_frames: 25,
             measured_at: "2026-10-21".into(),
             input_ports: Vec::new(),
+            running_period: false,
         }
     }
 

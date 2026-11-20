@@ -649,10 +649,15 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                     ui.end_row();
                                                 }
                                                 if devices::is_jack_system(draft.system.as_deref()) {
-                                                    ui.label("");
-                                                    let shown = ui.label(egui::RichText::new(JACK_BUFFER_NOTE).color(TOKENS.text_dim).size(11.0));
-                                                    controls.push((JACK_BUFFER_NOTE.into(), "jack_buffer_note", shown.rect));
-                                                    ui.end_row();
+                                                    // What a size means on this server (#760, rule 2).
+                                                    for line in app.jack_buffer_lines(sys) {
+                                                        ui.label("");
+                                                        let shown = ui.add(
+                                                            egui::Label::new(egui::RichText::new(line).color(TOKENS.text_dim).size(11.0)).wrap(),
+                                                        );
+                                                        controls.push((line.into(), "jack_buffer_note", shown.rect));
+                                                        ui.end_row();
+                                                    }
                                                     // The system's own notes, the ones that name no device ("<device>: " ones show
                                                     // under that device): once, where the buffer is chosen (#146).
                                                     for note in sys.into_iter().flat_map(|s| s.system_notes()) {

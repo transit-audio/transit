@@ -13,14 +13,22 @@ fn client(system: &str) -> ab::fake::FakeBackend {
 }
 
 /// Open the output on a fresh client of `system` with the input `input` and the saved
-/// `calibrations`; the Player and the calibration each stream was asked to open with.
+/// `calibrations`; the Player and the calibration each stream got. On JACK no open request carries
+/// one: it is resolved after the starts by the settled buffer and handed to both streams (ADR 0021,
+/// amendment for #760, rule 7), so what each stream got is what it was handed. On any other system
+/// it is what each stream was asked to open with.
 fn open(system: &str, input: Option<&str>, calibrations: &[crate::LoopbackCalibration]) -> (Player, Vec<Option<ab::Calibration>>) {
     let native = client(system);
     let cfg = AudioConfig { input: input.map(str::to_owned), calibrations: calibrations.to_vec(), ..Default::default() };
     let player =
         Player::open_native_kind(Arc::new(Session::default()), &cfg, &native, &fake_factory(false), NativeKind::Jack).expect("the output opens");
-    let asked = native.opens().into_iter().map(|(_, request)| request.calibration).collect();
-    (player, asked)
+    let asked: Vec<_> = native.opens().into_iter().map(|(_, request)| request.calibration).collect();
+    if system != "JACK" {
+        return (player, asked);
+    }
+    assert!(asked.iter().all(Option::is_none), "no JACK open request carries a calibration");
+    let handed = native.live_calibrations().into_iter().map(|(_, calibration)| calibration).collect();
+    (player, handed)
 }
 
 /// A loop measured under `key`: 480 frames (10 ms at 48 kHz) with a 25 frame bound.
@@ -38,13 +46,13 @@ fn a_calibration_measured_through_one_input_group_does_not_apply_after_a_switch_
     // The same group again: the calibration reaches both streams and the Player.
     let (same, asked) = open("JACK", Some("Mic"), &saved);
     assert_eq!(same.calibration, record.to_backend());
-    assert_eq!(asked, [record.to_backend(), record.to_backend()], "the input and the output open calibrated");
+    assert_eq!(asked, [record.to_backend(), record.to_backend()], "the output and the input are handed it");
     // Another group: nothing applies, and the record that did not is what the app reports.
     let (other, asked) = open("JACK", Some("Line"), &saved);
     let other_key = other.calibration_key.clone().expect("a key");
     assert_eq!(other_key.input.as_deref(), Some("Line"));
     assert_eq!(other.calibration, None, "a calibration through Mic is not Line's");
-    assert_eq!(asked, [None, None], "neither stream opens with it");
+    assert!(asked.is_empty(), "neither stream is handed it");
     let cfg = AudioConfig { calibrations: saved.to_vec(), ..Default::default() };
     assert_eq!(cfg.jack_calibration_elsewhere(&other_key), Some(&record), "it is reported as needing a new measurement");
     assert_eq!(cfg.jack_calibration_elsewhere(&key), None, "nothing to report where it applies");
@@ -60,7 +68,7 @@ fn a_record_without_an_input_applies_to_the_outputs_own_group_only() {
     let (own, asked) = open("JACK", None, std::slice::from_ref(&old));
     assert_eq!((own.calibration, asked), (old.to_backend(), vec![old.to_backend(), old.to_backend()]), "it measured this group");
     let (mic, asked) = open("JACK", Some("Mic"), std::slice::from_ref(&old));
-    assert_eq!((mic.calibration, asked), (None, vec![None, None]), "it did not measure Mic");
+    assert_eq!((mic.calibration, asked), (None, vec![]), "it did not measure Mic");
 }
 
 #[test]

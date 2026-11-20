@@ -779,6 +779,7 @@ fn fake_calibration(rate: u32) -> crate::LoopbackCalibration {
         spread_frames: 25,
         measured_at: "2026-10-21".into(),
         input_ports: Vec::new(),
+        running_period: false,
     }
 }
 
@@ -1008,6 +1009,7 @@ fn a_native_asio_driver_opens_every_channel_capture_first_in_its_one_mode() {
         spread_frames: 2,
         measured_at: "2026-10-22".into(),
         input_ports: Vec::new(),
+        running_period: false,
     };
     let cfg = AudioConfig { calibrations: vec![calibration], ..asio_config() };
     let player = open_asio(&fake, &cfg);
@@ -1452,6 +1454,7 @@ mod converted_rate;
 mod duplex_input;
 mod fake_only;
 mod jack_calibration;
+mod jack_settled;
 mod no_fallback;
 mod null;
 mod open;

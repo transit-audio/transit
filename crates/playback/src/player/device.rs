@@ -156,6 +156,9 @@ pub struct Player {
     /// table handed to the plan gets ([`IoMap::system_audio`]).
     system_audio: Cell<Option<u16>>,
     pub device_buffer: Option<u32>,
+    /// The device refused the buffer size the open asked for (native JACK under PipeWire,
+    /// [`ab::Stream::period_declined`]).
+    pub device_buffer_declined: bool,
     pub silent: bool,
     /// The silent device of a `--null-audio` run ([`Self::with_null_device`]): no hardware, no
     /// input, no MIDI ports; also set on its silent fallback, so no path of this Player reaches a
@@ -1316,13 +1319,30 @@ fn error_callback(
         }
         let gone = reset || stalled || matches!(error, ab::StreamError::DeviceNotAvailable);
         if gone {
-            if let Some(signal) = &signal {
-                signal.fault();
-            }
-            fault.gone.store(true, Ordering::Release);
-            shared.playing.store(false, Ordering::Release);
+            device_gone(&fault, &shared, signal.as_ref());
         }
         fault.telemetry.error(matches!(error, ab::StreamError::DeviceNotAvailable));
+    }
+}
+
+/// The device stopped delivering: the plan is told, the output goes silent and the transport
+/// stops. No logging or formatting (the error callback runs it on the backend's thread).
+fn device_gone(fault: &Fault, shared: &Shared, signal: Option<&plan_bridge::RuntimeIdentity>) {
+    if let Some(signal) = signal {
+        signal.fault();
+    }
+    fault.gone.store(true, Ordering::Release);
+    shared.playing.store(false, Ordering::Release);
+}
+
+impl Player {
+    /// A started device that latched a rebuild ([`ab::Stream::needs_rebuild`]: native JACK found
+    /// the graph at another rate than the Player was built for, ADR 0021, amendment for #760, rule
+    /// 1): the Player is left as a driver's reset request leaves it, Play and Record refused, until
+    /// the app's reopen builds a new one at the running rate.
+    pub(super) fn latch_rebuild(&self) {
+        self.fault.reset.store(true, Ordering::Release);
+        device_gone(&self.fault, &self.shared, self.failure_signal.as_ref());
     }
 }
 
