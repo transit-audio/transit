@@ -259,7 +259,7 @@ backend silently opened the first driver instead, which the hardware run of 2026
 Hardware (2026-10-22, `hardware_scarlett_duplex_streams_two_seconds` and
 `hardware_model12_duplex_streams_two_seconds`, capture then render, every channel, two seconds of
 silence): the Scarlett at 48 kHz and 64 frames granted 64, reported latencies 188 in / 140 out frames
-(572 / 620 at its preferred 256), 1494 buffer switches with late p95 998 us (the burst delivery that the
+(572 / 620 at its preferred 256), 1494 buffer switches with late p95 998 us (the burst delivery that
 made the bench's old gap heuristic over-count), service p95 15 us, 0 overloads, position jumps or resets, every stamp valid; the Model 12 at
 44.1 kHz with its fixed 256-frame buffer, 12 in and 10 out of packed `ASIOSTInt24LSB`, latencies
 300 / 695 frames, 297 switches with late p95 256 us, service p95 64 us, 0 overloads, jumps or resets.
