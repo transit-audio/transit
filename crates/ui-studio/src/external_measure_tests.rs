@@ -351,7 +351,7 @@ fn a_result_waiting_for_keep_is_never_kept_for_another_input() {
     t.app.engine.set_io_map(composed);
     let kept = t.app.run("instrument.measure_external", json!({"track": t.track.0, "action": "keep"}));
     assert!(kept.is_err(), "refused: {kept:?}");
-    assert_eq!(t.stored(), [b.clone()], "nothing stored for B, and B's figure untouched");
+    assert_eq!(t.stored(), std::slice::from_ref(&b), "nothing stored for B, and B's figure untouched");
     assert!(t.app.external_measure.outcome.as_ref().is_some_and(|o| o.keep.is_none()), "the waiting result is dropped");
     // A reopen with a result waiting drops it too (cancellation used to return early).
     let mut t = rig();
