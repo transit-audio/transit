@@ -58,6 +58,8 @@ pub mod library;
 mod links;
 #[cfg(test)]
 mod links_tests;
+#[cfg(test)]
+mod probe_tests;
 pub mod search;
 #[cfg(all(test, target_os = "linux", feature = "libjack"))]
 mod server_tests;

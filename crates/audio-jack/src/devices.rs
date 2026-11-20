@@ -26,6 +26,10 @@ pub struct JackDevice {
     /// mark physical, of a client with no physical output port, offered as an input only. Its
     /// ports can change between opens (rule 5), so its ordered port names guard its paths.
     pub virtual_device: bool,
+    /// The listing this group came from, on the endpoint a plan resolved (ADR 0021, amendment for
+    /// #760, rule 4): the same open resolves its input against it instead of probing again. It
+    /// belongs to that one open; `None` on the groups inside a listing.
+    pub listing: Option<Arc<Server>>,
 }
 
 impl JackDevice {
@@ -149,6 +153,7 @@ pub(crate) fn group(ports: &[PhysicalPort], rate: u32, buffer: u32) -> Vec<JackD
                     rate,
                     buffer,
                     virtual_device: false,
+                    listing: None,
                 });
                 devices.len() - 1
             }
@@ -157,6 +162,17 @@ pub(crate) fn group(ports: &[PhysicalPort], rate: u32, buffer: u32) -> Vec<JackD
         if port.capture { device.capture.push(port.name.clone()) } else { device.playback.push(port.name.clone()) }
     }
     devices
+}
+
+/// The ports of the group `device` in `direction` as `client` sees them now, in the server's order
+/// (a physical group's physical ports, a virtual device's output ports): what the open validates
+/// the listing's ports against (rule 4, "Before use").
+pub(crate) fn current_ports(client: &dyn crate::api::JackClient, device: &JackDevice, direction: ab::Direction) -> Vec<String> {
+    let input = direction == ab::Direction::Input;
+    if device.virtual_device {
+        return client.output_ports().into_iter().filter(|p| client_of(p) == device.name).collect();
+    }
+    client.physical_ports().into_iter().filter(|p| p.capture == input && p.group() == device.name).map(|p| p.name).collect()
 }
 
 /// The client part of a full port name: before the first `:`.
@@ -187,6 +203,7 @@ pub(crate) fn virtual_groups(outputs: &[String], physical: &[PhysicalPort], owne
                 rate,
                 buffer,
                 virtual_device: true,
+                listing: None,
             }),
         }
     }

@@ -116,23 +116,33 @@ fn transits_own_clients_are_never_offered_under_the_names_the_server_assigned() 
     foreign_session.register_port("out_1", false).unwrap();
     let mut foreign_probe = backend.open_other_client(crate::PROBE_NAME).unwrap();
     foreign_probe.register_port("out_1", false).unwrap();
-    let (_capture, _render, _) = open(&backend, "Scarlett", None).unwrap();
-    let ours = backend.client_name().unwrap();
-    assert_ne!(ours, crate::CLIENT_NAME, "the server made the session's name unique");
-    // The probe will be "transit-probe-02": a port under that name stands for one of its own.
+    // Enumeration with no session opens a probe; the server names it "transit-probe-02", and a
+    // port under that name stands for one of its own.
     server.add_port("transit-probe-02:out_1", true);
     let found = running(&backend);
     let probe = server.clients(|c| c.last().unwrap().name.clone());
     assert_eq!(probe, "transit-probe-02", "the probe's assigned name differs from the one asked for");
+    assert!(!names(&found.virtual_devices).contains(&probe.as_str()), "{:?}", names(&found.virtual_devices));
+    let wish = ab::InputWish { device: Some(probe.clone()), ..Default::default() };
+    let plan = backend.plan_render(&ab::OutputWish { device: Some("Scarlett".into()), ..Default::default() }).unwrap();
+    assert_eq!(backend.duplex_capture_endpoint(&plan.endpoint, &wish).unwrap_err(), ab::absent_input(&probe), "the probe is not an input");
+    // That probe closed with the enumeration (the scripted port stood for it).
+    server.remove_port("transit-probe-02:out_1");
+    // With the session open, enumeration reads through the session's client (no probe, #760 rule
+    // 4) and excludes it by its assigned name.
+    let (_capture, _render, _) = open(&backend, "Scarlett", None).unwrap();
+    let ours = backend.client_name().unwrap();
+    assert_ne!(ours, crate::CLIENT_NAME, "the server made the session's name unique");
+    let clients = server.clients(<[_]>::len);
+    let found = running(&backend);
+    assert_eq!(server.clients(<[_]>::len), clients, "no probe while the session runs");
     let offered = names(&found.virtual_devices);
-    assert!(!offered.contains(&ours.as_str()) && !offered.contains(&probe.as_str()), "{offered:?}");
+    assert!(!offered.contains(&ours.as_str()), "{offered:?}");
     assert!(offered.contains(&crate::CLIENT_NAME) && offered.contains(&crate::PROBE_NAME), "other programs' clients are offered: {offered:?}");
     // A saved choice naming either of transit's clients is not an input: it is absent (rule 2, 4).
     let plan = backend.plan_render(&ab::OutputWish { device: Some("Scarlett".into()), ..Default::default() }).unwrap();
-    for name in [ours.as_str(), probe.as_str()] {
-        let wish = ab::InputWish { device: Some(name.into()), ..Default::default() };
-        assert_eq!(backend.duplex_capture_endpoint(&plan.endpoint, &wish).unwrap_err(), ab::absent_input(name));
-    }
+    let wish = ab::InputWish { device: Some(ours.clone()), ..Default::default() };
+    assert_eq!(backend.duplex_capture_endpoint(&plan.endpoint, &wish).unwrap_err(), ab::absent_input(&ours));
     let wish = ab::InputWish { device: Some("Midi Through".into()), ..Default::default() };
     assert_eq!(backend.duplex_capture_endpoint(&plan.endpoint, &wish).unwrap_err(), ab::absent_input("Midi Through"), "MIDI is never an input");
 }

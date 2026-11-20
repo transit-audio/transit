@@ -183,10 +183,15 @@ impl JackBackend {
         format!("Native JACK ({})", self.server_name())
     }
 
-    /// Opens a short-lived probe client (`JackNoStartServer`: no server is ever started), reads the
-    /// server's rate, quantum, physical ports and eligible virtual devices, and closes it. A
-    /// control-thread call, never under the session's lock.
+    /// The server's rate, quantum, physical ports and eligible virtual devices. While a session's
+    /// client is active they are read through it, under the session lock, with no probe; while it
+    /// exists but is not active, the open's own listing answers (no rate getter on an inactive
+    /// client). Otherwise a short-lived probe client (`JackNoStartServer`: no server is ever
+    /// started) reads them and closes (ADR 0021, amendment for #760, rule 4). A control-thread call.
     pub fn probe(&self) -> ServerState {
+        if let Some(server) = self.session_listing() {
+            return ServerState::Running(server);
+        }
         let client = match self.api.open_client(crate::PROBE_NAME) {
             Ok(client) => client,
             Err(error) => {
@@ -210,6 +215,23 @@ impl JackBackend {
         ServerState::Running(Server { rate, buffer, devices, virtual_devices })
     }
 
+    /// The listing a session answers, if one is open (see [`Self::probe`]); `None` without a
+    /// session, after a server shutdown, or for an inactive session without a listing.
+    fn session_listing(&self) -> Option<Server> {
+        let guard = lock(&self.slot);
+        let session = guard.as_ref()?;
+        let client = session.client.as_ref()?;
+        if !session.active || session.shared.shutdown() {
+            return session.listing.as_deref().cloned();
+        }
+        let (rate, buffer) = (client.sample_rate(), client.buffer_size());
+        let physical = client.physical_ports();
+        let devices = devices::group(&physical, rate, buffer);
+        let owned = [client.name()];
+        let virtual_devices = devices::virtual_groups(&client.output_ports(), &physical, &owned, rate, buffer);
+        Some(Server { rate, buffer, devices, virtual_devices })
+    }
+
     fn running(&self) -> Result<Server, String> {
         match self.probe() {
             ServerState::Running(server) => Ok(server),
@@ -221,7 +243,11 @@ impl JackBackend {
     /// is named among every eligible group, physical or virtual, whatever the preference (rule 2);
     /// a named input that is not there is absent (rule 4).
     fn find(&self, direction: ab::Direction, device: Option<&str>) -> Result<ab::Endpoint, String> {
-        let server = self.running()?;
+        Self::find_in(&Arc::new(self.running()?), direction, device)
+    }
+
+    /// [`Self::find`] in `server`, one open's listing, which the endpoint then carries.
+    fn find_in(server: &Arc<Server>, direction: ab::Direction, device: Option<&str>) -> Result<ab::Endpoint, String> {
         let usable = |d: &JackDevice| !d.ports(direction).is_empty();
         let found = match device {
             Some(name) if direction == ab::Direction::Input => server.input(name).ok_or_else(|| ab::absent_input(name))?,
@@ -234,7 +260,8 @@ impl JackBackend {
             }
             None => server.devices.iter().find(|d| usable(d)).ok_or_else(|| format!("JACK: no port group has {direction:?} ports"))?,
         };
-        Ok(found.endpoint(direction))
+        let device = JackDevice { listing: Some(Arc::clone(server)), ..found.clone() };
+        Ok(device.endpoint(direction))
     }
 
     /// The one request to try: `f32`, every port of the group, at the planned rate.
@@ -299,6 +326,9 @@ impl JackBackend {
             *guard = Some(Session::new(client, opened, request.format.rate, id, Arc::clone(&self.remembered)));
         }
         let Some(session) = guard.as_mut() else { return Err(ab::OpenError::Other("JACK: no session".into())) };
+        if session.listing.is_none() {
+            session.listing.clone_from(&device.listing);
+        }
         // The provisional rate (PipeWire: the plan's; JACK 2: the client's, whatever was asked, as
         // before). The start rebuilds when the active graph runs another than the prepared one.
         let format = ab::Format::new(session.rate, channels, ab::SampleFormat::F32);
@@ -432,13 +462,18 @@ impl ab::Backend for JackBackend {
     /// (rule 1, "No choice made").
     fn duplex_capture_endpoint(&self, render: &ab::Endpoint, wish: &ab::InputWish) -> Result<ab::Endpoint, String> {
         let device = render.handle::<JackDevice>().ok_or("the endpoint is not a JACK port group")?;
+        // The render plan's listing: one probe per open (#760 rule 4).
+        let listing = match &device.listing {
+            Some(listing) => Arc::clone(listing),
+            None => Arc::new(self.running()?),
+        };
         if let Some(name) = wish.device.as_deref() {
-            return self.find(ab::Direction::Input, Some(name)).inspect_err(|why| log::warn!("JACK: {why}"));
+            return Self::find_in(&listing, ab::Direction::Input, Some(name)).inspect_err(|why| log::warn!("JACK: {why}"));
         }
         if !device.capture.is_empty() {
             return Ok(render.clone());
         }
-        self.find(ab::Direction::Input, None)
+        Self::find_in(&listing, ab::Direction::Input, None)
     }
 
     /// One process callback runs the capture callback, then the render callback (K22: the live
@@ -598,6 +633,9 @@ pub(crate) struct Session {
     /// reported at startup (read once, when every direction has started and been checked).
     link_lines: Vec<String>,
     latency_line: Option<String>,
+    /// The listing the open's plan came from: enumeration's answer while this client is not active
+    /// (#760 rule 4).
+    listing: Option<Arc<Server>>,
     shared: Arc<Shared>,
     sides: Vec<Side>,
     active: bool,
@@ -627,6 +665,7 @@ impl Session {
             held: None,
             link_lines: Vec::new(),
             latency_line: None,
+            listing: None,
             // Unknown until the client is active (rule 1, "Publication").
             shared: Arc::new(Shared::new(engine::UNKNOWN, engine::UNKNOWN)),
             sides: Vec::new(),
@@ -660,6 +699,22 @@ impl Session {
         }
         let client = self.client.as_mut().ok_or_else(|| ab::OpenError::DeviceNotAvailable(crate::SERVER_NOT_RUNNING.into()))?;
         let input = direction == ab::Direction::Input;
+        // Before use (#760 rule 4): the group's ports as the session's client sees them now must
+        // be the listing's, in its order; a group that went away or changed fails visibly (rules
+        // 4 and 5 of ADR 0015's #431 amendment) and nothing else is substituted.
+        let current = devices::current_ports(client.as_ref(), device, direction);
+        if current.as_slice() != device.ports(direction) {
+            log::warn!(
+                "JACK: the ports of \"{}\" changed between the listing and the open: {:?}, now {current:?}",
+                device.name,
+                device.ports(direction)
+            );
+            return Err(ab::OpenError::DeviceNotAvailable(match (input, current.is_empty()) {
+                (true, true) => ab::absent_input(&device.name),
+                (true, false) => format!("The ports of input \"{}\" changed while it opened; no input opened. Use Reconnect.", device.name),
+                (false, _) => format!("JACK: the ports of \"{}\" changed while the device opened", device.name),
+            }));
+        }
         // A direction dropped before any start left its state detached; this open starts it afresh.
         self.shared.side(!input).set_state(engine::OPENED);
         let device_ports = device.ports(direction);
