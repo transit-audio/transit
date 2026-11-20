@@ -436,7 +436,7 @@ fn server_another_clients_output_port_is_a_virtual_device_and_transits_own_is_no
     let ServerState::Running(found) = backend.probe() else { panic!("the server went away") };
     let virtuals: Vec<&str> = found.virtual_devices.iter().map(|d| d.name.as_str()).collect();
     let device = found.virtual_devices.iter().find(|d| d.name == source_name).unwrap_or_else(|| panic!("{source_name} not in {virtuals:?}"));
-    assert_eq!(device.capture, [port.clone()]);
+    assert_eq!(device.capture, std::slice::from_ref(&port));
     assert!(!virtuals.contains(&ours.as_str()), "transit's own client ({ours}) is offered: {virtuals:?}");
     assert!(found.devices.iter().all(|d| !virtuals.contains(&d.name.as_str())), "a physical group is never a virtual device: {virtuals:?}");
     let plan = backend.plan_render(&ab::OutputWish::default()).unwrap();
