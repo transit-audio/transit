@@ -111,7 +111,6 @@ impl<const N: usize> DelayLine<N> {
     }
 }
 
-
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
 // `DelayLine::init` clears every element and writes the delay and the write pointer: every field.

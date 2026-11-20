@@ -214,7 +214,6 @@ impl DcBlocker {
     }
 }
 
-
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
 // `Svf::init` sets the coefficients (`set_f_q`) and clears both states: every field.

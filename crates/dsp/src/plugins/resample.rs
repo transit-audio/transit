@@ -183,7 +183,6 @@ impl transit_texture::checkpoint::State for Converter {
     }
 }
 
-
 /// Test seam (feature `testing`; ADR 0029, amendment for #742): the converter's state record.
 /// Configuration (fixed by the rate pair and the extra delay at construction, which the owner's
 /// configuration child pins): `identity`, `lp`, `mp`, `j`, `fc`, `span`, `rows`, `mask`, `start`.

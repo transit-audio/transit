@@ -694,7 +694,6 @@ impl Resonator {
     }
 }
 
-
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
 #[cfg(feature = "testing")]
@@ -895,7 +894,13 @@ impl Resonator {
     /// finite values that differ from the ones they replace.
     pub fn poison_unobservable(&mut self, p: &mut crate::record::Poison) {
         use crate::record::Record as _;
-        for b in [&mut self.resonator_input, &mut self.sympathetic_resonator_input, &mut self.noise_burst_buffer, &mut self.out_buffer, &mut self.aux_buffer] {
+        for b in [
+            &mut self.resonator_input,
+            &mut self.sympathetic_resonator_input,
+            &mut self.noise_burst_buffer,
+            &mut self.out_buffer,
+            &mut self.aux_buffer,
+        ] {
             b.poison(p);
         }
         let live = Live::of(self.dirty, self.model, self.polyphony);

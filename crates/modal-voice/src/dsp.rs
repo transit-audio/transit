@@ -204,7 +204,6 @@ impl NaiveSvf {
     }
 }
 
-
 // ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
 
 #[cfg(feature = "testing")]

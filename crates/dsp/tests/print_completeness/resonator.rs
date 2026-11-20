@@ -219,7 +219,12 @@ fn witnesses() -> Vec<W> {
             history: |rate| {
                 let mut h = setup(4);
                 h.extend(shaper_on());
-                h.extend([Step::On(57, 100, 0), Step::Run(span(&[HOLD], rate)), Step::Param("level", -30.0), Step::RunBlocks(span(&[HOLD], rate) / 2, 13)]);
+                h.extend([
+                    Step::On(57, 100, 0),
+                    Step::Run(span(&[HOLD], rate)),
+                    Step::Param("level", -30.0),
+                    Step::RunBlocks(span(&[HOLD], rate) / 2, 13),
+                ]);
                 h
             },
             continuation: |rate| vec![Step::RunBlocks(29, 7), Step::Param("level", 3.0), Step::Run(frames(&[RAMP], rate))],
@@ -271,7 +276,9 @@ fn witnesses() -> Vec<W> {
                 h.extend([Step::Run(span(&[HOLD], rate)), Step::Off(36, 0), run_out(&[Span::Seconds(3.0)], rate)]);
                 h
             },
-            continuation: |rate| vec![Step::Run(997), Step::On(72, 1, 5), Step::Run(span(&[HOLD], rate)), Step::Off(72, 0), run_out(&[SHAPER_RELEASE], rate)],
+            continuation: |rate| {
+                vec![Step::Run(997), Step::On(72, 1, 5), Step::Run(span(&[HOLD], rate)), Step::Off(72, 0), run_out(&[SHAPER_RELEASE], rate)]
+            },
             reached: idle,
             completed: idle,
         },
@@ -424,7 +431,13 @@ fn witnesses() -> Vec<W> {
                 h
             },
             continuation: |rate| {
-                vec![Step::Run(span(&[HOLD], rate)), Step::Param("lfo2_amount", 70.0), Step::Run(span(&[HOLD], rate)), Step::Off(50, 0), run_out(&[SHAPER_RELEASE], rate)]
+                vec![
+                    Step::Run(span(&[HOLD], rate)),
+                    Step::Param("lfo2_amount", 70.0),
+                    Step::Run(span(&[HOLD], rate)),
+                    Step::Off(50, 0),
+                    run_out(&[SHAPER_RELEASE], rate),
+                ]
             },
             reached: |p| !obs(p).anchored && obs(p).held,
             completed: idle,
@@ -455,7 +468,9 @@ fn witnesses() -> Vec<W> {
                 h.extend([Step::Midi([0xB0, 120, 0], 300), Step::Midi([0xB0, 123, 0], 400), Step::Run(100)]);
                 h
             },
-            continuation: |rate| vec![Step::Run(600), Step::On(55, 100, 0), Step::Run(span(&[HOLD], rate)), Step::Off(55, 0), run_out(&[SHAPER_RELEASE], rate)],
+            continuation: |rate| {
+                vec![Step::Run(600), Step::On(55, 100, 0), Step::Run(span(&[HOLD], rate)), Step::Off(55, 0), run_out(&[SHAPER_RELEASE], rate)]
+            },
             reached: |p| obs(p).pending == 2,
             completed: idle,
         },
