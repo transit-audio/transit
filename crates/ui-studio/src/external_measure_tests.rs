@@ -363,3 +363,17 @@ fn a_result_waiting_for_keep_is_never_kept_for_another_input() {
     assert!(t.app.run("instrument.measure_external", json!({"track": t.track.0, "action": "keep"})).is_err());
     assert!(t.stored().is_empty());
 }
+
+/// Review of 5e15a5d7: without an input identity (two connected inputs share its name) the
+/// External Instrument Measure does not start, says why, and stores nothing.
+#[test]
+fn measure_does_not_start_through_an_input_without_an_identity() {
+    let mut t = rig();
+    let mut io = t.app.engine.io_map().clone();
+    io.input_device.clear();
+    t.app.engine.set_io_map(io);
+    let refused = t.app.run("instrument.measure_external", json!({"track": t.track.0, "action": "start"}));
+    assert!(refused.as_ref().is_err_and(|why| why.contains(transit_engine::NO_INPUT_IDENTITY)), "{refused:?}");
+    assert!(t.fake().started.is_empty(), "nothing started");
+    assert!(t.stored().is_empty());
+}

@@ -58,6 +58,7 @@ pub fn measure_blocker(e: &Engine, t: transit_model::TrackId) -> std::result::Re
         None => Err(format!("Return {} is not on this interface", device.ret)),
         // An unavailable return (amendment for #431, rule 10): never measured through another channel.
         Some(Err(why)) => Err(format!("Return {} is unavailable ({why})", device.ret)),
+        Some(Ok(_)) if e.io_map().input_device.is_empty() => Err(crate::NO_INPUT_IDENTITY.into()),
         Some(Ok(_)) => Ok(()),
     }
 }

@@ -257,7 +257,8 @@ impl StudioApp {
     /// Store a finished measurement in the table and say it: the one place both paths end.
     fn finish_measure(&mut self, pending: &Pending, outcome: Result<Measured, ProbeError>) -> Result<Value, String> {
         let io = self.engine.io_map();
-        let here = io.input_device == pending.input_device
+        let here = !pending.input_device.is_empty()
+            && io.input_device == pending.input_device
             && (io.system.as_str(), io.device.as_str()) == (pending.output.0.as_str(), pending.output.1.as_str())
             && (pending.kind == MeasureKind::Loop || pending.rate == self.engine.session().sample_rate.hz());
         if !here || (pending.kind == MeasureKind::Loop && self.loop_key() != pending.loop_key) {
@@ -269,7 +270,9 @@ impl StudioApp {
         let (send, ret, rate) = (&pending.send, &pending.ret, pending.rate);
         match outcome {
             Ok(m) => {
-                self.engine.store_hardware_latency(send, ret, m.round_trip_frames);
+                if !self.engine.store_hardware_latency(send, ret, m.round_trip_frames) {
+                    return Err(transit_engine::NO_INPUT_IDENTITY.into());
+                }
                 self.sync_io();
                 let ms = f64::from(m.round_trip_frames) * 1000.0 / f64::from(rate.max(1));
                 self.status = format!("{send} \u{2192} {ret}: {} frames ({ms:.1} ms)", m.round_trip_frames);

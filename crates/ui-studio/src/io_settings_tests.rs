@@ -309,9 +309,51 @@ fn an_input_without_an_identity_saves_nothing_and_takes_no_measurement() {
     app.ui.input_maps.push(InputMap { system: "WASAPI".into(), device: String::new(), inputs: 2, defaults_for: 2, paths: Vec::new() });
     app.sync_io();
     assert_eq!(inputs(app.engine.io_map()), ["In 1", "In 2", "In 1-2"], "this open's defaults, not a saved empty record");
-    app.engine.store_hardware_latency("Out 1-2", "In 1", 500);
+    assert!(!app.engine.store_hardware_latency("Out 1-2", "In 1", 500), "nothing is stored without an identity");
     app.sync_io();
     assert_eq!(app.engine.io_map().hardware_latency("Out 1-2", "In 1", 48_000), None, "no measurement applies without an identity");
     assert_eq!(app.ui.input_maps.len(), 1, "nothing written for it");
     assert!(app.ui.input_maps[0].paths.is_empty(), "the old record untouched");
+}
+
+/// Review of 5e15a5d7, must-fix: no measurement is taken or stored through an input without an
+/// identity (two connected inputs share its name). An existing figure for the same pair and rate is
+/// not replaced; when one device leaves and the name is unique again, no figure from the ambiguous
+/// time applies to the one that stays.
+#[test]
+fn no_measurement_is_stored_through_an_input_without_an_identity() {
+    let endpoint = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32)).named("WASAPI", "USB Audio").with_capture(2, true);
+    let cfg = wasapi_config();
+    let engine = transit_engine::Engine::default();
+    let session = engine.session_arc();
+    endpoint.pair_capture(Some(("", "USB Audio")));
+    let player = Player::open_fake_native_wasapi(std::sync::Arc::clone(&session), &cfg, &endpoint).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    let other = transit_model::HardwareLatency {
+        send: "Out 1-2".into(),
+        ret: "In 1".into(),
+        round_trip_frames: 300,
+        rate: 48_000,
+        measured_at: 1,
+        input_device: "Other Mic".into(),
+    };
+    app.ui.io_maps.push({
+        let mut record = IoMap::for_device("WASAPI", "USB Audio", 0, 2);
+        record.hardware_latency.push(other.clone());
+        record
+    });
+    app.sync_io();
+    assert!(app.engine.io_map().input_device.is_empty(), "two inputs of one name: no identity");
+    let refused = app.engine.hardware_measurement("Out 1-2", "In 1");
+    assert!(matches!(&refused, Err(transit_engine::EngineError::BadParams(_, why)) if why == transit_engine::NO_INPUT_IDENTITY), "{refused:?}");
+    assert!(!app.engine.store_hardware_latency("Out 1-2", "In 1", 500));
+    app.sync_io();
+    assert_eq!(app.engine.io_map().hardware_latency, std::slice::from_ref(&other), "the existing figure is not replaced");
+    assert_eq!(app.ui.io_maps[0].hardware_latency, [other], "nor in the saved record");
+    // One device leaves: the name is unique, the input has its identity, and nothing measured
+    // while it was ambiguous applies.
+    endpoint.pair_capture(Some(("USB Audio", "USB Audio")));
+    reopen(&mut app, Player::open_fake_native_wasapi(session, &cfg, &endpoint).unwrap());
+    assert_eq!(app.engine.io_map().input_device, "USB Audio");
+    assert_eq!(app.engine.io_map().hardware_latency("Out 1-2", "In 1", 48_000), None);
 }

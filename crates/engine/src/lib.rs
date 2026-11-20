@@ -278,6 +278,12 @@ impl Default for Engine {
     }
 }
 
+/// Why no measurement runs or is stored through the open input: it has no identity (two connected
+/// input devices share its name, cpal), so a figure could not be tied to one of them (ADR 0015,
+/// amendment for #431, rules 8 and 13).
+pub const NO_INPUT_IDENTITY: &str =
+    "Two connected inputs share this name, so a measurement cannot be tied to one of them: nothing is measured or stored.";
+
 impl Engine {
     pub fn new(session: Session) -> Self {
         install_panic_hook();
@@ -417,6 +423,11 @@ impl Engine {
             Some(Err(why)) => return Err(cmd::bad(id, format!("the input path `{ret}` is unavailable ({why})"))),
             None => find(ret, IoDirection::Input, "input")?,
         };
+        // A measurement is tied to the input it came back through; without an identity it would
+        // read as a figure from before inputs were recorded (amendment for #431, rule 13).
+        if self.io.input_device.is_empty() {
+            return Err(cmd::bad(id, NO_INPUT_IDENTITY));
+        }
         if self.transport.playing || self.transport.recording {
             return Err(cmd::bad(id, "stop the transport before measuring"));
         }
@@ -424,8 +435,13 @@ impl Engine {
     }
 
     /// Keep a measured round trip for the pair at the session's rate (per machine: no undo step,
-    /// the session stays clean). The host passes the table on to the audio thread.
-    pub fn store_hardware_latency(&mut self, send: &str, ret: &str, round_trip_frames: u32) {
+    /// the session stays clean). The host passes the table on to the audio thread. Nothing is
+    /// stored, and `false` returned, when the open input has no identity ([`NO_INPUT_IDENTITY`]):
+    /// an empty identity on a figure means "stored before inputs were recorded", never "unknown".
+    pub fn store_hardware_latency(&mut self, send: &str, ret: &str, round_trip_frames: u32) -> bool {
+        if self.io.input_device.is_empty() {
+            return false;
+        }
         let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let mut io = self.io.clone();
         io.set_hardware_latency(transit_model::HardwareLatency {
@@ -438,6 +454,7 @@ impl Engine {
             input_device: self.io.input_device.clone(),
         });
         self.set_io_map(io);
+        true
     }
 
     /// Keep an External Instrument measurement (per machine: no undo step, the session stays
@@ -445,13 +462,18 @@ impl Engine {
     /// 5). The host passes the table on to the audio thread.
     /// A figure that names no input is stamped with the one open now; the app names the input the
     /// measurement started through (amendment for #431, rule 13).
-    pub fn store_external_latency(&mut self, mut m: transit_model::ExternalLatency) {
+    /// Nothing is stored, and `false` returned, without an input identity ([`NO_INPUT_IDENTITY`]).
+    pub fn store_external_latency(&mut self, mut m: transit_model::ExternalLatency) -> bool {
         if m.input_device.is_empty() {
             m.input_device.clone_from(&self.io.input_device);
+        }
+        if m.input_device.is_empty() {
+            return false;
         }
         let mut io = self.io.clone();
         io.set_external_latency(m);
         self.set_io_map(io);
+        true
     }
 
     pub fn session(&self) -> &Session {

@@ -833,6 +833,22 @@ mod hardware_inserts {
         assert_eq!(t.layout()["hardware"]["result"], crate::hardware_measure::MEASURE_DEVICE_CHANGED);
     }
 
+    /// Review of 5e15a5d7: no hardware insert Measure through an input without an identity.
+    #[test]
+    fn measure_does_not_start_through_an_input_without_an_identity() {
+        let mut t = with_fake_probe();
+        let mut io = t.app.engine.io_map().clone();
+        io.input_device.clear();
+        t.app.engine.set_io_map(io);
+        pick_pair(&mut t);
+        let refused = t.app.start_measure("Out 3-4", "In 3-4");
+        assert!(refused.as_ref().is_err_and(|why| why.contains(transit_engine::NO_INPUT_IDENTITY)), "{refused:?}");
+        // The loopback calibration goes through the same check.
+        let refused = t.app.start_loop_measure("Out 1-2", "In 1-2");
+        assert!(refused.as_ref().is_err_and(|why| why.contains(transit_engine::NO_INPUT_IDENTITY)), "{refused:?}");
+        assert!(probe(&mut t).started.is_empty() && t.app.engine.io_map().hardware_latency.is_empty());
+    }
+
     #[test]
     fn a_failed_measurement_says_why_and_stores_nothing() {
         let mut t = with_fake_probe();
