@@ -15,6 +15,14 @@ impl StudioApp {
         let player = self.player.as_ref().filter(|p| !p.silent && p.calibration.is_none() && devices::is_jack_system(Some(&p.device_system)))?;
         let key = player.calibration_key.as_ref()?;
         let opened = key.input.as_deref()?;
+        // Measured through this input group, over other ports of a virtual device (or before its
+        // ports were recorded): measure again (amendment for #431, rule 13).
+        if self.ui.audio.jack_calibration_ports_changed(key).is_some() {
+            return Some(format!(
+                "The loopback calibration of “{}” was measured through other ports of input “{opened}”: measure again.",
+                key.device
+            ));
+        }
         let saved = self.ui.audio.jack_calibration_elsewhere(key)?;
         let measured = saved.input.as_deref().unwrap_or(&key.device);
         Some(format!("The loopback calibration of “{}” was measured with input “{measured}” and does not apply to input “{opened}”.", key.device))

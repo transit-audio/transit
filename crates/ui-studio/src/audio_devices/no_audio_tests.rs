@@ -20,6 +20,7 @@ fn a_run_without_audio_lists_no_machine_device_and_creates_no_driver() {
         outputs: Vec::new(),
         inputs: Vec::new(),
         diagnostics: Vec::new(),
+        virtual_inputs: Vec::new(),
     };
     t.app.audio_devices.machine = Some((
         vec![wasapi],

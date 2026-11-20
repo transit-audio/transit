@@ -87,6 +87,11 @@ pub struct HardwareLatency {
     /// rule 13); empty for a figure stored before it was recorded (see [`IoMap::returns_through`]).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub input_device: String,
+    /// A JACK virtual input's ordered port names the return came through (rule 13): the figure
+    /// applies only while the input has exactly these ports ([`IoMap::figure_applies`]). Empty for
+    /// every other input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_ports: Vec<String>,
 }
 
 /// A measured External Instrument latency C (ADR 0020 decisions 4 and 5): the plan frames from
@@ -120,6 +125,10 @@ pub struct ExternalLatency {
     /// The identity of the input device the return came through (as [`HardwareLatency::input_device`]).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub input_device: String,
+    /// A virtual input's ordered port names the return came through (as
+    /// [`HardwareLatency::input_ports`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_ports: Vec<String>,
 }
 
 impl ExternalLatency {
@@ -210,6 +219,14 @@ pub struct IoMap {
     /// not open, and a route to it is then silent.
     #[serde(skip)]
     pub system_audio: Option<u16>,
+    /// The port-mapping guard of a JACK virtual input (ADR 0015, amendment for #431, rule 5; not
+    /// saved here: the input record keeps the baseline, [`crate::InputMap::ports`]). `input_ports`
+    /// is the open virtual input's ordered port names, empty for every other input (no guard);
+    /// `input_baseline` the ones its paths were made over.
+    #[serde(skip)]
+    pub input_ports: Vec<String>,
+    #[serde(skip)]
+    pub input_baseline: Vec<String>,
 }
 
 impl Default for IoMap {
@@ -275,6 +292,10 @@ pub fn default_input_paths(inputs: u16) -> Vec<IoPath> {
 pub enum InputUnavailable {
     /// An output path has the same name (the two halves met in one table).
     Clash,
+    /// A JACK virtual input's port under one of the path's channels changed or went away since the
+    /// path was made (amendment for #431, rule 5): unavailable until the original ports return or
+    /// the user uses the current ports.
+    PortsChanged,
     /// A channel is not open: the input is narrower than the path or label (or not open at all).
     OutOfRange { opened: u16 },
     /// The table holds no input path of that name, and it is not a label ("In 3", "In 3-4").
@@ -285,6 +306,7 @@ impl std::fmt::Display for InputUnavailable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InputUnavailable::Clash => write!(f, "same name as an output path: rename one"),
+            InputUnavailable::PortsChanged => write!(f, "ports changed: use the current ports, or wait for the original ones"),
             InputUnavailable::OutOfRange { opened: 0 } => write!(f, "out of range: no input channels are open"),
             InputUnavailable::OutOfRange { opened: 1 } => write!(f, "out of range: the input has 1 channel open"),
             InputUnavailable::OutOfRange { opened } => write!(f, "out of range: the input has {opened} channels open"),
@@ -336,6 +358,13 @@ pub fn resolve_input(io: &IoMap, name: &str, strip: usize) -> Result<Vec<Option<
     let (first, last) = label_channels(name).ok_or(InputUnavailable::Missing)?;
     if last >= open {
         return Err(InputUnavailable::OutOfRange { opened: io.inputs });
+    }
+    // A label reads ports as a path does: over a virtual input's changed ports it is unavailable
+    // too (amendment for #431, rule 5), never another stream.
+    let over =
+        IoPath { live: false, name: String::new(), direction: IoDirection::Input, channels: (first..=last).collect(), format: ChannelFormat::Mono };
+    if io.ports_changed(&over) {
+        return Err(InputUnavailable::PortsChanged);
     }
     let mono = first == last && strip <= 2;
     Ok((0..strip).map(|k| if mono { Some(first) } else { within(usize::from(first) + k) }).collect())
@@ -393,6 +422,8 @@ impl IoMap {
             external_latency: Vec::new(),
             buffer: None,
             system_audio: None,
+            input_ports: Vec::new(),
+            input_baseline: Vec::new(),
         }
     }
 
@@ -426,7 +457,10 @@ impl IoMap {
         if self.paths.iter().any(|o| o.direction == IoDirection::Output && o.name.eq_ignore_ascii_case(&p.name)) {
             return Some(InputUnavailable::Clash);
         }
-        p.channels.iter().any(|&c| c >= self.inputs).then_some(InputUnavailable::OutOfRange { opened: self.inputs })
+        if p.channels.iter().any(|&c| c >= self.inputs) {
+            return Some(InputUnavailable::OutOfRange { opened: self.inputs });
+        }
+        self.ports_changed(p).then_some(InputUnavailable::PortsChanged)
     }
 
     /// The input path named `name` and whether it can be used; `None` when the table has no input
@@ -610,7 +644,12 @@ impl IoMap {
     pub fn hardware_latency(&self, send: &str, ret: &str, rate: u32) -> Option<u32> {
         self.hardware_latency
             .iter()
-            .find(|m| m.rate == rate && m.send.eq_ignore_ascii_case(send) && m.ret.eq_ignore_ascii_case(ret) && self.returns_through(&m.input_device))
+            .find(|m| {
+                m.rate == rate
+                    && m.send.eq_ignore_ascii_case(send)
+                    && m.ret.eq_ignore_ascii_case(ret)
+                    && self.figure_applies(&m.input_device, &m.input_ports)
+            })
             .map(|m| m.round_trip_frames)
     }
 
@@ -668,7 +707,7 @@ impl IoMap {
     #[must_use]
     pub fn external_measurement(&self, port: &MidiOutPort, ret: &str, rate: u32, buffer: Option<u32>) -> Option<ExternalLookup> {
         // Only a figure whose return came through the input open now (amendment for #431, rule 13).
-        let chain = || self.external_latency.iter().filter(|m| m.chain_is(port, ret) && self.returns_through(&m.input_device));
+        let chain = || self.external_latency.iter().filter(|m| m.chain_is(port, ret) && self.figure_applies(&m.input_device, &m.input_ports));
         // A device that does not say its buffer is keyed 0, as it was when measured.
         let buffer = buffer.unwrap_or(0);
         if let Some(m) = chain().rfind(|m| m.rate == rate && m.buffer == buffer) {
@@ -979,6 +1018,7 @@ mod tests {
             rate,
             measured_at: 7,
             input_device: String::new(),
+            input_ports: Vec::new(),
         };
         m.set_hardware_latency(at(300, 48_000));
         m.set_hardware_latency(at(500, 44_100));
@@ -1006,6 +1046,7 @@ mod tests {
             notes: 8,
             measured_at: at,
             input_device: String::new(),
+            input_ports: Vec::new(),
         }
     }
 

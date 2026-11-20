@@ -283,6 +283,9 @@ impl Default for Engine {
 /// amendment for #431, rules 8 and 13).
 pub const NO_INPUT_IDENTITY: &str =
     "Two connected inputs share this name, so a measurement cannot be tied to one of them: nothing is measured or stored.";
+/// Why Use the current ports (ADR 0015, amendment for #431, rule 5) is refused while the
+/// transport runs.
+pub const USE_PORTS_STOPPED: &str = "Stop the transport to use the current ports.";
 
 impl Engine {
     pub fn new(session: Session) -> Self {
@@ -452,6 +455,8 @@ impl Engine {
             measured_at: at,
             // The input the click came back through (ADR 0015, amendment for #431, rule 13).
             input_device: self.io.input_device.clone(),
+            // And over which ports, for a virtual input (rule 13).
+            input_ports: self.io.input_ports.clone(),
         });
         self.set_io_map(io);
         true
@@ -470,6 +475,10 @@ impl Engine {
         }
         if m.input_device.is_empty() {
             m.input_device.clone_from(&self.io.input_device);
+        }
+        // A virtual input's ports, when the figure came back through the input open now.
+        if m.input_ports.is_empty() && m.input_device == self.io.input_device {
+            m.input_ports.clone_from(&self.io.input_ports);
         }
         let mut io = self.io.clone();
         io.set_external_latency(m);

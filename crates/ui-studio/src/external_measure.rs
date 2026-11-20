@@ -342,6 +342,7 @@ impl StudioApp {
                     notes: m.found,
                     measured_at: now_secs(),
                     input_device: r.input_device.clone(),
+                    input_ports: Vec::new(),
                 };
                 let said = result_text(&m, r.rate);
                 if m.needs_keep(r.rate) {
@@ -471,6 +472,7 @@ mod tests {
             notes: 8,
             measured_at: 1_792_800_000,
             input_device: String::new(),
+            input_ports: Vec::new(),
         }
     }
 

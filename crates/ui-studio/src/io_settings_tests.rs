@@ -158,6 +158,7 @@ fn an_older_asio_table_loads_with_its_paths_and_keeps_its_input_half_on_disk() {
         rate: 48_000,
         measured_at: 1,
         input_device: String::new(),
+        input_ports: Vec::new(),
     });
     let read = serde_json::to_string(&old).unwrap();
     let driver = asio(2);
@@ -236,6 +237,7 @@ fn separate_input_app(inputs: u16) -> (StudioApp, ab::fake::FakeBackend) {
         inputs: 8,
         defaults_for: 8,
         paths: vec![IoPath { direction: IoDirection::Input, ..out("Guitar", vec![4]) }],
+        ports: Vec::new(),
     });
     app.sync_io();
     (app, driver)
@@ -306,7 +308,14 @@ fn an_input_without_an_identity_saves_nothing_and_takes_no_measurement() {
     let engine = transit_engine::Engine::default();
     let player = Player::open_fake_native_wasapi(engine.session_arc(), &wasapi_config(), &endpoint).unwrap();
     let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
-    app.ui.input_maps.push(InputMap { system: "WASAPI".into(), device: String::new(), inputs: 2, defaults_for: 2, paths: Vec::new() });
+    app.ui.input_maps.push(InputMap {
+        system: "WASAPI".into(),
+        device: String::new(),
+        inputs: 2,
+        defaults_for: 2,
+        paths: Vec::new(),
+        ports: Vec::new(),
+    });
     app.sync_io();
     assert_eq!(inputs(app.engine.io_map()), ["In 1", "In 2", "In 1-2"], "this open's defaults, not a saved empty record");
     assert!(!app.engine.store_hardware_latency("Out 1-2", "In 1", 500), "nothing is stored without an identity");
@@ -336,6 +345,7 @@ fn no_measurement_is_stored_through_an_input_without_an_identity() {
         rate: 48_000,
         measured_at: 1,
         input_device: "Other Mic".into(),
+        input_ports: Vec::new(),
     };
     app.ui.io_maps.push({
         let mut record = IoMap::for_device("WASAPI", "USB Audio", 0, 2);
@@ -378,6 +388,7 @@ fn a_jack_reconnect_restores_the_links_and_attaches_the_input_with_its_table() {
         inputs: 2,
         defaults_for: 2,
         paths: vec![IoPath { direction: IoDirection::Input, ..out("Guitar", vec![1]) }],
+        ports: Vec::new(),
     });
     let t = app.engine.session_mut().add_track(transit_model::TrackKind::Audio, ChannelFormat::Mono, Some("Gtr"));
     let track = app.engine.session_mut().track_mut(t).unwrap();

@@ -416,3 +416,33 @@ fn owned_server_a_shutdown_is_device_loss_and_the_server_back_is_a_reopen() {
     capture.start().unwrap();
     wait_for("cycles after the reopen", Duration::from_secs(10), || render.stats().unwrap().wakes > 10);
 }
+
+/// ADR 0015, amendment for #431, slice C, through the real binding: the listing without the
+/// physical flag finds another client's output port as a virtual device, while transit's own
+/// session client (by the name the server gave it) and the server's physical groups are not
+/// virtual devices; a chosen virtual device resolves, and its ports guard its paths.
+#[test]
+fn server_another_clients_output_port_is_a_virtual_device_and_transits_own_is_not() {
+    let Some(_server) = server_or_skip("server_another_clients_output_port_is_a_virtual_device_and_transits_own_is_not") else { return };
+    let backend = real().without_auto_connect();
+    let mut source = backend.open_other_client("virtual-source-test").expect("another client");
+    let source_name = source.name();
+    let port = source.register_port("out_L", false).expect("an output port");
+    let (render_cb, capture_cb) = silent();
+    let (capture, render, _, _, _) = open_duplex(&backend, render_cb, capture_cb);
+    capture.start().unwrap();
+    render.start().unwrap();
+    let ours = backend.client_name().expect("a client");
+    let ServerState::Running(found) = backend.probe() else { panic!("the server went away") };
+    let virtuals: Vec<&str> = found.virtual_devices.iter().map(|d| d.name.as_str()).collect();
+    let device = found.virtual_devices.iter().find(|d| d.name == source_name).unwrap_or_else(|| panic!("{source_name} not in {virtuals:?}"));
+    assert_eq!(device.capture, [port.clone()]);
+    assert!(!virtuals.contains(&ours.as_str()), "transit's own client ({ours}) is offered: {virtuals:?}");
+    assert!(found.devices.iter().all(|d| !virtuals.contains(&d.name.as_str())), "a physical group is never a virtual device: {virtuals:?}");
+    let plan = backend.plan_render(&ab::OutputWish::default()).unwrap();
+    let on = backend.duplex_capture_endpoint(&plan.endpoint, &ab::InputWish { device: Some(source_name.clone()), ..Default::default() }).unwrap();
+    assert_eq!(backend.guarded_ports(&on), ["out_L"]);
+    drop(capture);
+    drop(render);
+    source.close().unwrap();
+}

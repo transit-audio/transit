@@ -234,6 +234,7 @@ mod tests {
             notes: 8,
             measured_at: 1,
             input_device: String::new(),
+            input_ports: Vec::new(),
         };
         assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().latency, 0, "not measured");
         io.set_external_latency(measured);
@@ -284,6 +285,7 @@ mod tests {
                 channels: vec![0, 5],
                 format: ChannelFormat::Stereo,
             }],
+            ports: Vec::new(),
         };
         let io = IoMap::for_device("test", "duplex", 0, 2).compose(Some(&record));
         let (s, t) = track("Synth", Some(20.0));

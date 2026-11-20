@@ -632,6 +632,7 @@ fn the_input_menu_marks_unavailable_paths_and_stops_at_channel_32() {
         inputs: 40,
         defaults_for: 0,
         paths: vec![path("Far", vec![38]), path("Vox", vec![0])],
+        ports: Vec::new(),
     };
     let mut io = IoMap::for_device("JACK", "Big", 0, 2).compose(Some(&record));
     io.inputs = 2;

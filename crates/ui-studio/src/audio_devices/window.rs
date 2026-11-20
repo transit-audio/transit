@@ -219,6 +219,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let cal_result = app.audio_devices.calibration_result.clone();
     let mut cal_action = None;
     let rate = app.engine.session().sample_rate.hz();
+    // The output transit plays to when none is chosen (the JACK monitor label, amendment for #431,
+    // rule 13), and whether Use the current ports may run (rule 5).
+    let running_output = app.player.as_ref().filter(|p| !p.silent).map(|p| p.device_name.clone());
+    let stopped = !recording && !app.is_playing();
+    let mut virtual_toggled = None;
     let system_view = app.system_audio_view();
     let mut system_meter = app.audio_devices.system_meter;
     let mut open = true;
@@ -455,9 +460,26 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                             .collect()
                                                     })
                                                     .unwrap_or_default();
-                                                let (rect, text) = choose(ui, "input", audio_on && !asio, &mut draft.input, &ins, &mut lay.items);
+                                                // On JACK: virtual devices behind Show virtual devices, the chosen input always
+                                                // shown, an absent one said by name (amendment for #431, rules 1, 3 and 13).
+                                                let jack = devices::is_jack_system(draft.system.as_deref());
+                                                let (rect, text) = match sys.filter(|_| jack) {
+                                                    Some(s) => {
+                                                        let output = draft.output.clone().or_else(|| running_output.clone());
+                                                        let entries = super::jack_inputs::entries(s, &draft, output.as_deref());
+                                                        super::jack_inputs::choose(ui, audio_on, &mut draft.input, &entries, &mut lay.items)
+                                                    }
+                                                    None => choose(ui, "input", audio_on && !asio, &mut draft.input, &ins, &mut lay.items),
+                                                };
                                                 controls.push((text, "input", rect));
                                                 ui.end_row();
+                                                if jack && draft.backend != Backend::Cpal {
+                                                    let mut on = draft.jack_show_virtual;
+                                                    if super::jack_inputs::virtual_rows(ui, audio_on, &mut on, &mut controls) {
+                                                        draft.jack_show_virtual = on;
+                                                        virtual_toggled = Some(on);
+                                                    }
+                                                }
                                                 if asio {
                                                     ui.label("");
                                                     ui.label(
@@ -655,6 +677,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                 &mut editor,
                                                 &mut io_items,
                                             );
+                                            if let Some(edit) = super::jack_inputs::ports_row(ui, &io, stopped, &mut io_items) {
+                                                io_edit = Some(edit);
+                                            }
                                             crate::audio_devices_system::section(
                                                 ui,
                                                 &mut draft,
@@ -692,6 +717,13 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     lay.hardware = hw_layout;
     lay.draft = draft.clone();
     lay.notes = app.audio_devices.notes.clone();
+    // Show virtual devices filters the list only: kept at once, never a pending change or a reopen.
+    if let Some(on) = virtual_toggled {
+        app.ui.audio.jack_show_virtual = on;
+        if let Some(base) = app.audio_devices.base.as_mut() {
+            base.jack_show_virtual = on;
+        }
+    }
     app.audio_devices.draft = draft.clone();
     app.audio_devices.layout = lay;
     app.audio_devices.system_meter = system_meter;

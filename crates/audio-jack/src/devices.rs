@@ -22,6 +22,10 @@ pub struct JackDevice {
     /// The server's rate and quantum when it was listed.
     pub rate: u32,
     pub buffer: u32,
+    /// A virtual device (ADR 0015, amendment for #431, rule 1): output ports the server does not
+    /// mark physical, of a client with no physical output port, offered as an input only. Its
+    /// ports can change between opens (rule 5), so its ordered port names guard its paths.
+    pub virtual_device: bool,
 }
 
 impl JackDevice {
@@ -70,14 +74,31 @@ fn clamp(n: usize) -> u16 {
 pub struct Server {
     pub rate: u32,
     pub buffer: u32,
-    /// The port groups, in the order their first port appeared.
+    /// The port groups of the physical ports, in the order their first port appeared.
     pub devices: Vec<JackDevice>,
+    /// The eligible virtual devices ([`virtual_groups`]), capture ports only, in the order their
+    /// first port appeared. Listed whatever the preference: it filters only what the Input list
+    /// offers, and a saved name resolves among them always (rule 2).
+    pub virtual_devices: Vec<JackDevice>,
 }
 
 impl Server {
-    /// The endpoints of the groups with ports in `direction`.
+    /// The endpoints of the physical groups with ports in `direction` (today's lists).
     pub fn endpoints(&self, direction: ab::Direction) -> Vec<ab::Endpoint> {
         self.devices.iter().filter(|d| !d.ports(direction).is_empty()).map(|d| d.endpoint(direction)).collect()
+    }
+
+    /// The input endpoints of the virtual devices.
+    pub fn virtual_endpoints(&self) -> Vec<ab::Endpoint> {
+        self.virtual_devices.iter().map(|d| d.endpoint(ab::Direction::Input)).collect()
+    }
+
+    /// The input named `name` among every eligible group (rules 1 and 2): a physical group with
+    /// capture ports, else a virtual device. A name that is neither, such as a client transit owns
+    /// or a group that only plays, is not an input.
+    pub fn input(&self, name: &str) -> Option<&JackDevice> {
+        let physical = self.devices.iter().find(|d| d.name == name && !d.capture.is_empty());
+        physical.or_else(|| self.virtual_devices.iter().find(|d| d.name == name))
     }
 }
 
@@ -121,12 +142,53 @@ pub(crate) fn group(ports: &[PhysicalPort], rate: u32, buffer: u32) -> Vec<JackD
         let index = match devices.iter().position(|d| d.name == port.group()) {
             Some(index) => index,
             None => {
-                devices.push(JackDevice { name: port.group().to_owned(), capture: Vec::new(), playback: Vec::new(), rate, buffer });
+                devices.push(JackDevice {
+                    name: port.group().to_owned(),
+                    capture: Vec::new(),
+                    playback: Vec::new(),
+                    rate,
+                    buffer,
+                    virtual_device: false,
+                });
                 devices.len() - 1
             }
         };
         let device = &mut devices[index];
         if port.capture { device.capture.push(port.name.clone()) } else { device.playback.push(port.name.clone()) }
+    }
+    devices
+}
+
+/// The client part of a full port name: before the first `:`.
+fn client_of(port: &str) -> &str {
+    port.split_once(':').map_or(port, |(client, _)| client)
+}
+
+/// The eligible virtual devices (ADR 0015, amendment for #431, rule 1's one eligibility rule): the
+/// audio output ports in `outputs` that are not in `physical`, grouped by client in order of first
+/// appearance, keeping the server's port order. A client with any physical output port gets no
+/// virtual device (physical and non-physical ports are never mixed), and a client whose name is in
+/// `owned` (transit's session and probe clients, by the names the server assigned) gets none.
+/// MIDI ports are not in `outputs` (the listing asks for the audio type).
+pub(crate) fn virtual_groups(outputs: &[String], physical: &[PhysicalPort], owned: &[String], rate: u32, buffer: u32) -> Vec<JackDevice> {
+    let captures: Vec<&str> = physical.iter().filter(|p| p.capture).map(|p| p.name.as_str()).collect();
+    let mut devices: Vec<JackDevice> = Vec::new();
+    for port in outputs.iter().filter(|p| !captures.contains(&p.as_str())) {
+        let client = client_of(port);
+        if captures.iter().any(|c| client_of(c) == client) || owned.iter().any(|o| o == client) {
+            continue;
+        }
+        match devices.iter_mut().find(|d| d.name == client) {
+            Some(device) => device.capture.push(port.clone()),
+            None => devices.push(JackDevice {
+                name: client.to_owned(),
+                capture: vec![port.clone()],
+                playback: Vec::new(),
+                rate,
+                buffer,
+                virtual_device: true,
+            }),
+        }
     }
     devices
 }

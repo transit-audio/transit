@@ -41,6 +41,8 @@ pub fn state_line(report: Option<&ExternalReport>, live: bool, port: Option<&str
 pub const MEASURE_AGAIN_INPUT: &str = "Measure again: measured through another input";
 /// The same when the figure was stored before inputs were recorded (its input is unknown).
 pub const MEASURE_AGAIN_UNKNOWN: &str = "Measure again: measured through an unknown input";
+/// The same, measured through this JACK virtual input over other ports than it has now.
+pub const MEASURE_AGAIN_PORTS: &str = "Measure again: measured through other ports of this input";
 
 fn plain_state(report: Option<&ExternalReport>, port: Option<&str>, rate: u32) -> String {
     match port {
@@ -313,7 +315,16 @@ pub(crate) fn card(
     {
         let io = app.engine.io_map();
         let named = io.external_latency.iter().any(|m| m.chain_is(p, &r.ret) && !m.input_device.is_empty());
-        (state, stale) = ((if named { MEASURE_AGAIN_INPUT } else { MEASURE_AGAIN_UNKNOWN }).to_string(), true);
+        // Through this input, over other ports of a JACK virtual device (amendment for #431, rule 13).
+        let this_input = io.external_latency.iter().any(|m| m.chain_is(p, &r.ret) && io.returns_through(&m.input_device));
+        let text = if this_input {
+            MEASURE_AGAIN_PORTS
+        } else if named {
+            MEASURE_AGAIN_INPUT
+        } else {
+            MEASURE_AGAIN_UNKNOWN
+        };
+        (state, stale) = (text.to_string(), true);
     }
     let ok = report.as_ref().is_some_and(|x| x.state == ExternalState::Ready) && port.is_none() && live;
     // A refusal or a result waiting for Keep is said where the state is, until the next Measure.

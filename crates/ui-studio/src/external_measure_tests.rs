@@ -342,10 +342,12 @@ fn a_result_waiting_for_keep_is_never_kept_for_another_input() {
         notes: 8,
         measured_at: 1,
         input_device: "Input B".into(),
+        input_ports: Vec::new(),
     };
     let mut io = transit_model::IoMap::for_device("ASIO", "Focusrite USB ASIO", 0, 2);
     io.external_latency.push(b.clone());
-    let record = transit_model::InputMap { system: "ASIO".into(), device: "Input B".into(), inputs: 2, defaults_for: 2, paths: Vec::new() };
+    let record =
+        transit_model::InputMap { system: "ASIO".into(), device: "Input B".into(), inputs: 2, defaults_for: 2, paths: Vec::new(), ports: Vec::new() };
     let mut composed = io.compose(Some(&record));
     composed.add_default_inputs(2);
     t.app.engine.set_io_map(composed);

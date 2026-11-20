@@ -778,6 +778,7 @@ fn fake_calibration(rate: u32) -> crate::LoopbackCalibration {
         round_trip_frames: 480,
         spread_frames: 25,
         measured_at: "2026-10-21".into(),
+        input_ports: Vec::new(),
     }
 }
 
@@ -1006,6 +1007,7 @@ fn a_native_asio_driver_opens_every_channel_capture_first_in_its_one_mode() {
         round_trip_frames: 1_059,
         spread_frames: 2,
         measured_at: "2026-10-22".into(),
+        input_ports: Vec::new(),
     };
     let cfg = AudioConfig { calibrations: vec![calibration], ..asio_config() };
     let player = open_asio(&fake, &cfg);

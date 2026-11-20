@@ -255,7 +255,8 @@ impl StudioApp {
         if ns.plugin_dirs != self.ui.plugin_dirs {
             return Err("plugin folders can't be changed over the control channel".into());
         }
-        let audio_changed = ns.audio != self.ui.audio;
+        // Show virtual devices filters the JACK Input list only: it reopens nothing.
+        let audio_changed = transit_playback::AudioConfig { jack_show_virtual: self.ui.audio.jack_show_virtual, ..ns.audio.clone() } != self.ui.audio;
         if audio_changed && self.recording_active() {
             return Err(audio_devices::REFUSED_RECORDING.into());
         }

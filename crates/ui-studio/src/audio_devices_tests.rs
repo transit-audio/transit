@@ -16,6 +16,8 @@ mod null_audio_tests;
 mod selection_tests;
 #[path = "audio_devices/system_audio_tests.rs"]
 mod system_audio_tests;
+#[path = "audio_devices/virtual_inputs_tests.rs"]
+mod virtual_inputs_tests;
 #[path = "audio_devices/window_tests.rs"]
 mod window_tests;
 
@@ -518,6 +520,7 @@ fn audio_patch_merges_fields_and_rejects_zero_atomically() {
             share_device: true,
             system_audio: false,
             system_audio_output: None,
+            jack_show_virtual: false,
         }
     );
     let before = t.app.ui.audio.clone();
@@ -823,7 +826,14 @@ mod hardware_inserts {
         let mut t = with_fake_probe();
         pick_pair(&mut t);
         t.click(mid(item(&t, "hw_measure", "Measure")));
-        let other = transit_model::InputMap { system: "ASIO".into(), device: "Other".into(), inputs: 4, defaults_for: 0, paths: Vec::new() };
+        let other = transit_model::InputMap {
+            system: "ASIO".into(),
+            device: "Other".into(),
+            inputs: 4,
+            defaults_for: 0,
+            paths: Vec::new(),
+            ports: Vec::new(),
+        };
         let mut io = t.app.engine.io_map().compose(Some(&other));
         io.add_default_inputs(4);
         t.app.engine.set_io_map(io);
@@ -1239,9 +1249,17 @@ fn asio_listing_for(selected: Option<&str>) -> transit_playback::devices::AudioS
         sample_rates: vec![44_100, 48_000],
         buffer_min: None,
         buffer_max: None,
+        channel_names: Vec::new(),
     };
     let list = vec![device("Focusrite USB ASIO"), device("Model Mixer ASIO Driver")];
-    transit_playback::devices::AudioSystem { name: "ASIO".into(), is_default: false, outputs: list.clone(), inputs: list, diagnostics: Vec::new() }
+    transit_playback::devices::AudioSystem {
+        name: "ASIO".into(),
+        is_default: false,
+        outputs: list.clone(),
+        inputs: list,
+        diagnostics: Vec::new(),
+        virtual_inputs: Vec::new(),
+    }
 }
 
 /// A scripted ASIO lister that records what it was asked to probe and waits on `latch`.

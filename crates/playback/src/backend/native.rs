@@ -133,7 +133,7 @@ fn describe(endpoint: &ab::Endpoint, direction: ab::Direction, is_default: bool)
     let sample_rates = devices::STANDARD_RATES.iter().copied().filter(|r| formats.iter().any(|f| f.min_rate <= *r && *r <= f.max_rate)).collect();
     let buffer_min = formats.iter().filter_map(|f| f.period.map(|p| p.0)).min();
     let buffer_max = formats.iter().filter_map(|f| f.period.map(|p| p.1)).max();
-    DeviceInfo { name: endpoint.name.clone(), is_default, max_channels, sample_rates, buffer_min, buffer_max }
+    DeviceInfo { name: endpoint.name.clone(), is_default, max_channels, sample_rates, buffer_min, buffer_max, channel_names: Vec::new() }
 }
 
 /// The settings window's entry of a native audio system: its endpoints per direction (the first
@@ -160,6 +160,7 @@ pub fn system_from_endpoints(
         outputs: list(outputs, ab::Direction::Output),
         inputs: list(inputs, ab::Direction::Input),
         diagnostics,
+        virtual_inputs: Vec::new(),
     }
 }
 
@@ -292,6 +293,7 @@ pub fn jack_system() -> AudioSystem {
                 &[],
                 notes,
             );
+            jack_inputs(&mut system, server);
             // Under PipeWire the buffer list is the server's quantum range (#230).
             if name.starts_with("PipeWire")
                 && let Some(clock) = crate::pipewire::clock()
@@ -308,11 +310,31 @@ pub fn jack_system() -> AudioSystem {
     }
 }
 
+/// The JACK system's inputs as the Input list needs them (ADR 0015, amendment for #431, rules 1 and
+/// 13): every input group's port names (for the monitor label), and the eligible virtual devices,
+/// listed whatever the preference (the list filters them). A virtual device is never the default.
+#[cfg(all(target_os = "linux", feature = "native-jack"))]
+fn jack_inputs(system: &mut AudioSystem, server: &transit_audio_jack::Server) {
+    for input in &mut system.inputs {
+        if let Some(group) = server.input(&input.name) {
+            input.channel_names = group.channel_names(ab::Direction::Input);
+        }
+    }
+    system.virtual_inputs = server
+        .virtual_devices
+        .iter()
+        .map(|group| DeviceInfo {
+            channel_names: group.channel_names(ab::Direction::Input),
+            ..describe(&group.endpoint(ab::Direction::Input), ab::Direction::Input, false)
+        })
+        .collect();
+}
+
 /// The JACK system under a PipeWire server (#230): every port group offers the quanta the server
 /// allows, and the server's line (its default quantum, range and a forced one) is a system note.
 pub fn apply_server_clock(system: &mut AudioSystem, clock: &crate::pipewire::ServerClock) {
     if let Some(range) = clock.quantum_range() {
-        for device in system.outputs.iter_mut().chain(system.inputs.iter_mut()) {
+        for device in system.outputs.iter_mut().chain(system.inputs.iter_mut()).chain(system.virtual_inputs.iter_mut()) {
             crate::pipewire::clamp_range(device, range);
         }
     }

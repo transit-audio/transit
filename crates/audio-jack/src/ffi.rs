@@ -327,14 +327,19 @@ unsafe fn names_of(fns: &JackFns, array: *mut *const c_char) -> Vec<PortName> {
 }
 
 impl LibClient {
-    /// `jack_get_ports` for physical audio ports with `flags`, copied, the array freed.
-    fn ports(&self, flags: c_ulong, capture: bool) -> Vec<PhysicalPort> {
-        let flags = flags | sys::JackPortIsPhysical;
+    /// `jack_get_ports` for audio ports with `flags`, and only the server's physical ones when
+    /// `physical` (#431 slice C lists every output port too: the same call without that flag),
+    /// copied, the array freed.
+    fn ports(&self, flags: c_ulong, capture: bool, physical: bool) -> Vec<PhysicalPort> {
+        let flags = if physical { flags | sys::JackPortIsPhysical } else { flags };
         // SAFETY: jack.h, jack_get_ports: "@param port_name_pattern A regular expression used to
         // select ports by name. If NULL or of zero length, no selection based on name will be
         // carried out." (NULL); "@param type_name_pattern" (our NUL-terminated audio type);
-        // "@return a NULL-terminated array of ports that match the specified arguments. The caller
-        // is responsible for calling jack_free() any non-NULL returned value." `self.client` is open.
+        // "@param flags A value used to select ports by their flags. If zero, no selection based
+        // on flags will be carried out." (a direction, with or without the physical flag: a value,
+        // never a pointer); "@return a NULL-terminated array of ports that match the specified
+        // arguments. The caller is responsible for calling jack_free() any non-NULL returned
+        // value." `self.client` is open.
         let array = unsafe { (self.fns.get_ports)(self.client, std::ptr::null(), AUDIO_TYPE.as_ptr(), flags) };
         let mut found = Vec::new();
         if array.is_null() {
@@ -422,9 +427,14 @@ impl JackClient for LibClient {
 
     /// Capture ports are JACK outputs (audio leaves them), playback ports JACK inputs.
     fn physical_ports(&self) -> Vec<PhysicalPort> {
-        let mut ports = self.ports(sys::JackPortIsOutput, true);
-        ports.extend(self.ports(sys::JackPortIsInput, false));
+        let mut ports = self.ports(sys::JackPortIsOutput, true, true);
+        ports.extend(self.ports(sys::JackPortIsInput, false, true));
         ports
+    }
+
+    /// Every audio output port, physical or not: `jack_get_ports` with the output flag alone.
+    fn output_ports(&self) -> Vec<String> {
+        self.ports(sys::JackPortIsOutput, true, false).into_iter().map(|p| p.name).collect()
     }
 
     fn register_port(&mut self, short: &str, input: bool) -> Result<String, String> {

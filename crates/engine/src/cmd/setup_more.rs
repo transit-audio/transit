@@ -62,7 +62,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "I/O Paths...",
             ["Setup"],
             None,
-            "{action?: list|set|add_path|rename_path|remove_path|set_channels|set_main|set_live|add_default_inputs, name?, new_name?, direction?: input|output, channels?: [0-based device channels], live?: bool, map?: IoMap} — this machine's device paths (per machine: no undo step, session untouched); input paths belong to the open input device; direction picks one side of a name both sides use; add_default_inputs adds the missing default input paths",
+            "{action?: list|set|add_path|rename_path|remove_path|set_channels|set_main|set_live|add_default_inputs|use_current_ports, name?, new_name?, direction?: input|output, channels?: [0-based device channels], live?: bool, map?: IoMap} — this machine's device paths (per machine: no undo step, session untouched); input paths belong to the open input device; direction picks one side of a name both sides use; add_default_inputs adds the missing default input paths; use_current_ports (stopped only) makes a virtual input's ports now open the ones its paths read",
             always,
             io_map_setup
         ),
@@ -257,7 +257,9 @@ fn io_map_state(e: &Engine) -> Value {
         .paths_of(transit_model::IoDirection::Input)
         .filter_map(|p| io.input_unavailable(p).map(|why| json!({"name": p.name, "why": why.to_string()})))
         .collect();
-    json!({"io": io, "overlaps": overlaps, "unresolved": unresolved, "unavailable_inputs": unavailable})
+    // A virtual input's ports and the ones its paths were made over (rule 5); empty otherwise.
+    let ports = json!({"open": io.input_ports, "baseline": io.input_baseline, "changed": io.ports_mismatch()});
+    json!({"io": io, "overlaps": overlaps, "unresolved": unresolved, "unavailable_inputs": unavailable, "input_ports": ports})
 }
 
 /// `setup.io_map`: the machine's I/O paths. Not a session edit (the table is per machine, kept by
@@ -312,6 +314,9 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
                 inputs: map.inputs.min(cap),
                 outputs: map.outputs.min(cap),
                 input_device: io.input_device.clone(),
+                // Nor the port-mapping guard: the ports are the device's (rule 5).
+                input_ports: io.input_ports.clone(),
+                input_baseline: io.input_baseline.clone(),
                 ..map.clone()
             };
             for path in map.paths {
@@ -354,6 +359,17 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
             let mut state = io_map_state(e);
             state["added"] = json!(added);
             return Ok(state);
+        }
+        // The I/O paths page's Use the current ports (amendment for #431, rule 5): only while the
+        // transport is stopped, and only when the open virtual input's ports differ.
+        "use_current_ports" => {
+            if e.transport.playing || e.transport.recording {
+                return Err(bad(id, crate::USE_PORTS_STOPPED));
+            }
+            if !io.ports_mismatch() {
+                return Err(bad(id, "the input's ports are the ones its paths read"));
+            }
+            io.use_current_ports();
         }
         "set_live" => io.set_live(&name()?, live()?).map_err(refuse)?,
         "set_main" => io.set_main(&name()?).map_err(refuse)?,
@@ -570,6 +586,10 @@ fn import_session_data(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 #[cfg(test)]
+#[path = "io_ports_tests.rs"]
+mod io_ports_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -671,6 +691,7 @@ mod tests {
             rate: 48_000,
             measured_at: 1,
             input_device: input.into(),
+            input_ports: Vec::new(),
         };
         let mut table = IoMap::for_device("ASIO", "x", 4, 4);
         table.hardware_latency.push(hw(600, ""));
@@ -694,6 +715,7 @@ mod tests {
             notes: 8,
             measured_at: 1,
             input_device: String::new(),
+            input_ports: Vec::new(),
         });
         assert!(e.execute("setup.io_map", &json!({"action": "set", "map": external})).is_err(), "nor an External Instrument figure");
         assert_eq!((e.io_map().clone(), e.io_revision()), before, "the table is left as it was");
@@ -720,6 +742,7 @@ mod tests {
             notes: 8,
             measured_at: 1,
             input_device: "Mic".into(),
+            input_ports: Vec::new(),
         };
         assert!(!e.store_external_latency(named));
         assert!(e.io_map().external_latency.is_empty());
@@ -738,6 +761,7 @@ mod tests {
             inputs: 2,
             defaults_for: 2,
             paths: vec![IoPath { live: false, name: "Cue".into(), direction: IoDirection::Input, channels: vec![1], format: ChannelFormat::Mono }],
+            ports: Vec::new(),
         };
         e.set_io_map(out.compose(Some(&record)));
         let r = e.execute("setup.io_map", &json!({})).unwrap();

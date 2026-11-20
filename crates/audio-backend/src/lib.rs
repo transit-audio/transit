@@ -518,6 +518,12 @@ impl StreamStats {
 /// stream once ([`Stream::restore_links`]); dropping it discards it.
 pub type LinkSnapshot = Box<dyn Any + Send>;
 
+/// What the open says when the input the user chose is not there (ADR 0015, amendment for #431,
+/// rule 4): no input opens, and no other device is substituted.
+pub fn absent_input(name: &str) -> String {
+    format!("The chosen input \"{name}\" is not present; no input opened. Use Reconnect when it is back.")
+}
+
 /// The capture endpoint a stream actually opened (ADR 0015, amendment for #431, rule 8): its
 /// stable identifier within the system and its display name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -692,6 +698,12 @@ pub trait Backend {
     /// another device or falling back to another backend.
     fn missing_device(&self, _name: &str) -> Option<String> {
         None
+    }
+    /// The ordered port names of a capture endpoint whose ports can change between opens (a JACK
+    /// virtual device, ADR 0015, amendment for #431, rule 5): the port-mapping guard compares them
+    /// with the ones its paths were made over. Empty for every other endpoint (the default).
+    fn guarded_ports(&self, _endpoint: &Endpoint) -> Vec<String> {
+        Vec::new()
     }
     /// The names of `endpoint`'s channels in `direction`, in device channel order, where the
     /// system reports them (ASIO: `getChannelInfo`); empty when it does not. For a duplex endpoint

@@ -714,6 +714,7 @@ mod record_tests {
             inputs: 2,
             defaults_for: 2,
             paths: vec![path("Out 3-4", vec![1]), path("Far", vec![5]), path("In 1", vec![0])],
+            ports: Vec::new(),
         };
         e.set_io_map(out.compose(Some(&record)));
         let clash = armed(&mut e, "Clash", "mono", "In 1");

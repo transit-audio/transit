@@ -252,6 +252,10 @@ pub struct Recorder {
     /// port group, native WASAPI's paired capture endpoint (never the render endpoint), cpal's
     /// input device.
     pub input_identity: ab::CaptureEndpoint,
+    /// A JACK virtual device's ordered port names at this open ([`ab::Backend::guarded_ports`]):
+    /// the port-mapping guard of its paths and measurements (amendment for #431, rule 5). Empty for
+    /// every other input.
+    pub input_ports: Vec<String>,
     pub sample_rate: u32,
     /// The live input's width: the device's channels, then the System Audio pair when it runs.
     pub channels: usize,
@@ -484,6 +488,7 @@ impl Recorder {
         let (capture, on_error) = capture_callbacks(&shared, &monitor, callback_clock, progress, loop_probe, tap);
         let (stream, achieved) = backend.open_capture(endpoint, request, capture, on_error)?;
         let input_identity = stream.opened_capture().unwrap_or_else(|| ab::CaptureEndpoint { id: endpoint.id.clone(), name: endpoint.name.clone() });
+        let input_ports = backend.guarded_ports(endpoint);
         let clock = crate::device_clock::MaintainedClock::start(clock)
             .map_err(|error| {
                 log::warn!("input clock maintenance unavailable: {error}");
@@ -498,6 +503,7 @@ impl Recorder {
             record_start: None,
             device_name: endpoint.name.clone(),
             input_identity,
+            input_ports,
             sample_rate: format.rate,
             channels,
             system_audio: system,
@@ -550,6 +556,7 @@ impl Recorder {
             record_start: None,
             device_name: name.into(),
             input_identity: ab::CaptureEndpoint { id: name.into(), name: name.into() },
+            input_ports: Vec::new(),
             sample_rate: 48_000,
             channels: 1,
             system_audio: crate::system_audio::SystemAudio::Off,

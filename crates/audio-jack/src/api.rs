@@ -86,6 +86,10 @@ pub(crate) trait JackClient: Send {
     fn buffer_size(&self) -> u32;
     /// The server's physical audio ports, capture ports first, each in the server's order.
     fn physical_ports(&self) -> Vec<PhysicalPort>;
+    /// The full names of every audio output port of the server (ports data can be read from),
+    /// physical or not, in the server's order, transit's own included (#431 slice C: virtual
+    /// devices). A name that is not valid UTF-8 is left out, as in [`JackClient::physical_ports`].
+    fn output_ports(&self) -> Vec<String>;
     /// Registers this client's audio port `short` (`in_1`, `out_1`...): an input of ours (fed from
     /// a capture port) when `input`, else an output. Returns its full name.
     fn register_port(&mut self, short: &str, input: bool) -> Result<String, String>;

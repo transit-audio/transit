@@ -19,11 +19,19 @@ pub struct OpenInput {
     pub identity: String,
     pub name: String,
     pub channels: usize,
+    /// A JACK virtual device's ordered port names at this open (the port-mapping guard, amendment
+    /// for #431, rule 5); empty for every other input.
+    pub ports: Vec<String>,
 }
 
 impl OpenInput {
     pub(crate) fn of(r: &transit_playback::record::Recorder) -> Self {
-        Self { identity: r.input_identity.id.clone(), name: r.input_identity.name.clone(), channels: r.device_channels() }
+        Self {
+            identity: r.input_identity.id.clone(),
+            name: r.input_identity.name.clone(),
+            channels: r.device_channels(),
+            ports: r.input_ports.clone(),
+        }
     }
 
     fn width(&self) -> u16 {
@@ -51,7 +59,7 @@ pub fn compose(output: &IoMap, input: Option<&OpenInput>, inputs: &[InputMap], o
         // no saved record read or written (amendment for #431, rule 8).
         Some(i) if i.identity.is_empty() => (transit_model::adopt_input(output, &[], &[], "", i.width()).0, None),
         Some(i) => {
-            let (map, record) = transit_model::adopt_input(output, inputs, outputs, &i.identity, i.width());
+            let (map, record) = transit_model::adopt_input_ports(output, inputs, outputs, &i.identity, i.width(), &i.ports);
             (map, Some(record))
         }
         None => (output.compose(None), None),

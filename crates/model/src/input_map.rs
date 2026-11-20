@@ -17,6 +17,11 @@ pub struct InputMap {
     pub inputs: u16,
     pub defaults_for: u16,
     pub paths: Vec<IoPath>,
+    /// A JACK virtual input's ordered port names when this record was first made, or when the
+    /// user last used the current ports (rule 5's baseline); written only for virtual devices. A
+    /// reopen never replaces it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<String>,
 }
 
 impl InputMap {
@@ -40,10 +45,13 @@ impl IoMap {
                 map.input_device.clone_from(&input.device);
                 map.inputs = input.inputs.min(MAX_DEVICE_CHANNELS as u16);
                 map.paths.extend(input.paths.iter().filter(|p| p.direction == IoDirection::Input).cloned());
+                map.input_baseline.clone_from(&input.ports);
             }
             None => {
                 map.input_device.clear();
                 map.inputs = 0;
+                map.input_baseline.clear();
+                map.input_ports.clear();
             }
         }
         map
@@ -61,6 +69,8 @@ impl IoMap {
         record.paths.extend(old.into_iter().flat_map(|o| o.paths.iter().filter(|p| p.direction == IoDirection::Input).cloned()));
         record.buffer = None;
         record.system_audio = None;
+        record.input_ports.clear();
+        record.input_baseline.clear();
         record
     }
 
@@ -74,6 +84,7 @@ impl IoMap {
             inputs: self.inputs,
             defaults_for,
             paths: self.paths_of(IoDirection::Input).cloned().collect(),
+            ports: self.input_baseline.clone(),
         })
     }
 
@@ -97,6 +108,38 @@ impl IoMap {
     pub fn lacks_input_paths(&self) -> bool {
         self.inputs > 0 && self.paths_of(IoDirection::Input).all(|p| self.input_unavailable(p).is_some())
     }
+
+    /// Whether the port-mapping guard holds `p` back (rule 5): the open input is a virtual device
+    /// and the port under one of `p`'s channels is not the one the baseline has there (changed, or
+    /// gone; a channel past the baseline counts as changed: it was never confirmed). Port names are
+    /// addresses: a different stream reusing a port name is not detected.
+    #[must_use]
+    pub fn ports_changed(&self, p: &IoPath) -> bool {
+        !self.input_ports.is_empty()
+            && p.channels.iter().any(|&c| self.input_baseline.get(usize::from(c)).is_none_or(|b| self.input_ports.get(usize::from(c)) != Some(b)))
+    }
+
+    /// Whether the open virtual input's ports differ from the baseline (the I/O paths page then
+    /// offers Use the current ports); false for every other input.
+    #[must_use]
+    pub fn ports_mismatch(&self) -> bool {
+        !self.input_ports.is_empty() && self.input_ports != self.input_baseline
+    }
+
+    /// Use the current ports: the open virtual input's ports become the baseline, so every path over
+    /// them is available again. The caller refuses it while the transport runs.
+    pub fn use_current_ports(&mut self) {
+        self.input_baseline.clone_from(&self.input_ports);
+    }
+
+    /// Whether a measurement whose return came through `input_device`, with a virtual input's
+    /// `ports` (rule 13), applies to the input open now: through that input
+    /// ([`IoMap::returns_through`]) and over exactly the ports open now (both empty for any input
+    /// but a virtual device). A figure without ports through a virtual input needs measuring again.
+    #[must_use]
+    pub fn figure_applies(&self, input_device: &str, ports: &[String]) -> bool {
+        self.returns_through(input_device) && ports == self.input_ports.as_slice()
+    }
 }
 
 /// The engine's table after an input opened successfully, `width` channels wide, as `identity` on
@@ -111,11 +154,20 @@ impl IoMap {
 /// `width`. A failed input open calls nothing here, so it changes no record.
 #[must_use]
 pub fn adopt_input(output: &IoMap, inputs: &[InputMap], outputs: &[IoMap], identity: &str, width: u16) -> (IoMap, InputMap) {
+    adopt_input_ports(output, inputs, outputs, identity, width, &[])
+}
+
+/// [`adopt_input`] for an input whose ports guard its paths: `ports` are a JACK virtual input's ordered port names at this open (rule 5), empty for any
+/// other input: the record's first creation takes them as its baseline; a saved record keeps its
+/// own (a reopen never replaces it), so paths over ports that changed are unavailable
+/// ([`IoMap::ports_changed`]).
+#[must_use]
+pub fn adopt_input_ports(output: &IoMap, inputs: &[InputMap], outputs: &[IoMap], identity: &str, width: u16, ports: &[String]) -> (IoMap, InputMap) {
     let key = (output.system.as_str(), identity);
     let saved = inputs.iter().rfind(|r| r.key() == key);
     let empty = saved.is_some_and(|r| r.paths.is_empty());
     let record = saved.cloned().unwrap_or_else(|| {
-        let mut record = InputMap { system: output.system.clone(), device: identity.into(), ..InputMap::default() };
+        let mut record = InputMap { system: output.system.clone(), device: identity.into(), ports: ports.to_vec(), ..InputMap::default() };
         if let Some(old) = outputs.iter().rfind(|m| m.key() == key) {
             record.paths = old.paths_of(IoDirection::Input).cloned().collect();
         }
@@ -123,6 +175,7 @@ pub fn adopt_input(output: &IoMap, inputs: &[InputMap], outputs: &[IoMap], ident
     });
     let width = width.min(MAX_DEVICE_CHANNELS as u16);
     let mut map = output.compose(Some(&InputMap { inputs: width, ..record.clone() }));
+    map.input_ports = ports.to_vec();
     if width > record.defaults_for && !empty {
         map.add_default_inputs(width);
     }
@@ -133,3 +186,7 @@ pub fn adopt_input(output: &IoMap, inputs: &[InputMap], outputs: &[IoMap], ident
 #[cfg(test)]
 #[path = "input_map_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "input_ports_tests.rs"]
+mod ports_tests;

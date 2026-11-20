@@ -80,6 +80,7 @@ fn null_app() -> (T, Arc<StepClock>, Arc<AtomicUsize>) {
         outputs: Vec::new(),
         inputs: Vec::new(),
         diagnostics: Vec::new(),
+        virtual_inputs: Vec::new(),
     };
     app.audio_devices.machine = Some((
         vec![wasapi],

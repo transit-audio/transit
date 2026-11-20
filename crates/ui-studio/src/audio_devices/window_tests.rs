@@ -563,6 +563,7 @@ fn the_window_lists_the_native_wasapi_system_as_the_default_on_windows() {
         outputs: Vec::new(),
         inputs: Vec::new(),
         diagnostics: Vec::new(),
+        virtual_inputs: Vec::new(),
     });
     let mut t = T::new();
     t.app.audio_devices.fake.as_mut().expect("the rig's stand-in devices").systems = systems;
@@ -855,6 +856,7 @@ fn the_card_leaves_the_button_row_whole_on_the_asio_system_tab_at_150_percent() 
             round_trip_frames: 1_000,
             spread_frames: 7,
             measured_at: "2026-10-23".into(),
+            input_ports: Vec::new(),
         };
         t.app.ui.audio.calibrations = vec![cal(256), cal(64)];
         let mut hist = [0u64; 16];

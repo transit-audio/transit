@@ -742,6 +742,7 @@ mod tests {
             sample_rates: vec![44100, 48000],
             buffer_min: Some(32),
             buffer_max: Some(4096),
+            channel_names: Vec::new(),
         };
         Report {
             generated: 1_700_000_000,
@@ -760,6 +761,7 @@ mod tests {
                 outputs: vec![dev("Speakers")],
                 inputs: Vec::new(),
                 diagnostics: vec!["driver X: busy".into()],
+                virtual_inputs: Vec::new(),
             }],
             devices_note: None,
             settings: AudioConfig {
@@ -831,6 +833,7 @@ mod tests {
             sample_rates: vec![48000],
             buffer_min: Some(128),
             buffer_max: Some(128),
+            channel_names: Vec::new(),
         };
         let note = transit_playback::backend::native::jack_note("PipeWire 1.0.7", 48_000, 128);
         let jack = AudioSystem {
@@ -839,6 +842,7 @@ mod tests {
             outputs: vec![dev("system"), dev("Scarlett"), dev("Monitor")],
             inputs: vec![dev("system"), dev("Scarlett"), dev("Monitor")],
             diagnostics: vec![note],
+            virtual_inputs: Vec::new(),
         };
         let report = Report { systems: vec![jack], ..fake() };
         let text = report.render_on(&Redaction::default(), false);
@@ -914,6 +918,7 @@ mod tests {
             sample_rates: if channels == 0 { transit_playback::devices::STANDARD_RATES.to_vec() } else { vec![48000] },
             buffer_min: (channels > 0).then_some(64),
             buffer_max: (channels > 0).then_some(1024),
+            channel_names: Vec::new(),
         }
     }
 
@@ -924,6 +929,7 @@ mod tests {
             outputs: devices.to_vec(),
             inputs: devices.to_vec(),
             diagnostics: Vec::new(),
+            virtual_inputs: Vec::new(),
         }
     }
 

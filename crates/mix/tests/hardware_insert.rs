@@ -62,6 +62,7 @@ fn io(measured: Option<usize>) -> IoMap {
             rate: SR,
             measured_at: 1,
             input_device: String::new(),
+            input_ports: Vec::new(),
         });
     }
     io
@@ -265,6 +266,7 @@ fn an_insert_on_the_last_channels_of_a_12_in_10_out_device_sends_and_returns_the
         rate: SR,
         measured_at: 1,
         input_device: String::new(),
+        input_ports: Vec::new(),
     });
     let mut s = session();
     let dry = impulse_track(&mut s, "Dry");

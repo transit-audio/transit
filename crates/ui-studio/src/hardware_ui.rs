@@ -34,7 +34,9 @@ pub fn pairs(io: &IoMap, rate: u32) -> Vec<Pair> {
     let mut out: Vec<Pair> = io
         .hardware_latency
         .iter()
-        .filter(|m| m.rate == rate && is(&m.send, IoDirection::Output) && is(&m.ret, IoDirection::Input) && io.returns_through(&m.input_device))
+        .filter(|m| {
+            m.rate == rate && is(&m.send, IoDirection::Output) && is(&m.ret, IoDirection::Input) && io.figure_applies(&m.input_device, &m.input_ports)
+        })
         .map(|m| Pair { send: m.send.clone(), ret: m.ret.clone(), frames: Some(m.round_trip_frames) })
         .collect();
     for s in io.paths_of(IoDirection::Output) {

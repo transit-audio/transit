@@ -60,7 +60,7 @@ pub use clip::{
 };
 pub use device_pages::{DeviceRef, MAX_USER_PAGES, PagesError, UserPage};
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
-pub use input_map::{InputMap, adopt_input};
+pub use input_map::{InputMap, adopt_input, adopt_input_ports};
 pub use io_map::{
     ExternalLatency, ExternalLookup, ExternalSource, HardwareLatency, InputUnavailable, IoDirection, IoError, IoMap, IoPath, MAX_DEVICE_CHANNELS,
     MAX_PATH_WIDTH, SYSTEM_AUDIO_PATH, default_input_paths, input_channel, is_system_audio, live_input_channel, resolve_input,

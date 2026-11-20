@@ -337,6 +337,7 @@ fn recorder(shared: &Arc<Shared>) -> Recorder {
         record_start: None,
         device_name: "Mic In".into(),
         input_identity: ab::CaptureEndpoint { id: "Mic In".into(), name: "Mic In".into() },
+        input_ports: Vec::new(),
         sample_rate: 48_000,
         channels: 1,
         system_audio: crate::system_audio::SystemAudio::Off,

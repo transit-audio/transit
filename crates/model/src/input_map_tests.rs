@@ -100,7 +100,7 @@ fn a_missing_record_and_an_explicitly_empty_one_differ() {
     assert_eq!(inputs(&map), ["In 1", "In 2", "In 1-2", "Mic"]);
     assert_eq!((record.defaults_for, record.inputs), (2, 2));
     // Explicitly empty: the user's empty table, never refilled, not even from the old half.
-    let empty = InputMap { system: "ASIO".into(), device: "Interface".into(), inputs: 2, defaults_for: 2, paths: Vec::new() };
+    let empty = InputMap { system: "ASIO".into(), device: "Interface".into(), inputs: 2, defaults_for: 2, paths: Vec::new(), ports: Vec::new() };
     let (map, record) = adopt_input(&out, std::slice::from_ref(&empty), std::slice::from_ref(&old), "Interface", 4);
     assert!(inputs(&map).is_empty() && map.lacks_input_paths());
     assert_eq!(record.defaults_for, 4);
@@ -141,6 +141,7 @@ fn an_input_path_that_clashes_with_an_output_path_is_unavailable() {
         inputs: 2,
         defaults_for: 2,
         paths: vec![path("cue", IoDirection::Input, vec![1]), path("In 1", IoDirection::Input, vec![0])],
+        ports: Vec::new(),
     };
     let (map, _) = adopt_input(&out, std::slice::from_ref(&record), &[], "Mic Pre", 2);
     assert_eq!(map.input_state("Cue"), Some(Err(InputUnavailable::Clash)));
@@ -183,6 +184,7 @@ fn hw(input_device: &str, frames: u32) -> HardwareLatency {
         rate: 48_000,
         measured_at: 1,
         input_device: input_device.into(),
+        input_ports: Vec::new(),
     }
 }
 
@@ -228,6 +230,7 @@ fn an_external_instrument_figure_applies_only_through_its_input() {
         notes: 8,
         measured_at: 1,
         input_device: "group-a".into(),
+        input_ports: Vec::new(),
     };
     let mut out = IoMap::for_device("JACK", "Headset", 0, 2);
     out.set_external_latency(fig);

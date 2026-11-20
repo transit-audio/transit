@@ -1,6 +1,7 @@
 //! #682: the duplex input follows the chosen input device. The one client links `in_N` to the
-//! capture ports of the port group the input wish names, not to the output's group; a missing or
-//! absent choice falls back to the output's group, then to the first group that records.
+//! capture ports of the port group the input wish names, not to the output's group; with no choice,
+//! the output's group, then the first group that records. A choice that is not there opens no
+//! input (ADR 0015, amendment for #431, rule 4).
 
 use crate::JackBackend;
 use crate::fake::FakeServer;
@@ -88,14 +89,21 @@ fn no_chosen_input_keeps_the_outputs_group_and_without_one_takes_the_first_that_
     assert_eq!((hdmi.group.as_str(), hdmi.channels), ("Mic", 1), "the first group that records, as a plan with no device chosen");
 }
 
+/// ADR 0015, amendment for #431, rule 4: a chosen input that is not there opens no input and says
+/// so by name; no other group is substituted, whatever the output.
 #[test]
-fn a_chosen_input_that_does_not_exist_falls_back_and_the_endpoint_names_the_group_opened() {
-    let opened = open(&pipewire(), "Headset", Some("Second Mic"));
-    assert_eq!((opened.group.as_str(), opened.channels), ("Headset", 2), "the output's group, named so the app can say so");
-    let hdmi = open(&pipewire(), "HDMI", Some("Second Mic"));
-    assert_eq!(hdmi.group, "Mic", "an output without capture ports falls back to the first group that records");
-    // A group that only plays is not an input either.
-    assert_eq!(open(&pipewire(), "Headset", Some("HDMI")).group, "Headset");
+fn a_chosen_input_that_does_not_exist_opens_no_input_and_names_it() {
+    let server = pipewire();
+    let backend = backend(&server);
+    for output in ["Headset", "HDMI"] {
+        let plan = backend.plan_render(&ab::OutputWish { device: Some(output.into()), ..Default::default() }).unwrap();
+        for absent in ["Second Mic", "HDMI"] {
+            let wish = ab::InputWish { device: Some(absent.into()), ..Default::default() };
+            let error = backend.duplex_capture_endpoint(&plan.endpoint, &wish).unwrap_err();
+            assert_eq!(error, ab::absent_input(absent), "a group that only plays is not an input either");
+        }
+    }
+    assert_eq!(server.open_clients(), 0, "no client was opened for an input");
 }
 
 #[test]
@@ -103,7 +111,8 @@ fn with_no_group_that_records_there_is_no_input_to_open() {
     let server = FakeServer::running(48_000, 256, &[("HDMI:playback_FL", false), ("HDMI:playback_FR", false)]);
     let backend = backend(&server);
     let plan = backend.plan_render(&ab::OutputWish::default()).unwrap();
-    let wish = ab::InputWish { device: Some("Mic".into()), ..Default::default() };
-    let error = backend.duplex_capture_endpoint(&plan.endpoint, &wish).unwrap_err();
+    let error = backend.duplex_capture_endpoint(&plan.endpoint, &ab::InputWish::default()).unwrap_err();
     assert!(error.contains("no port group has Input ports"), "{error}");
+    let wish = ab::InputWish { device: Some("Mic".into()), ..Default::default() };
+    assert_eq!(backend.duplex_capture_endpoint(&plan.endpoint, &wish).unwrap_err(), ab::absent_input("Mic"));
 }

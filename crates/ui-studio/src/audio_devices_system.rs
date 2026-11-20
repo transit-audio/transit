@@ -70,7 +70,7 @@ pub fn status_line(view: &View, draft_on: bool) -> String {
 
 /// The Input list's label of a device: a Linux monitor source as System Audio, else as it is.
 pub fn input_label(d: &DeviceInfo) -> String {
-    match system_audio::monitor_label(&d.name, &[]) {
+    match system_audio::monitor_label(&d.name, &d.channel_names) {
         Some(label) if d.max_channels > 0 => format!("{label} · {} ch", d.max_channels),
         Some(label) => label,
         None => crate::audio_devices::device_label(d),
@@ -213,6 +213,7 @@ mod tests {
             sample_rates: Vec::new(),
             buffer_min: None,
             buffer_max: None,
+            channel_names: Vec::new(),
         };
         assert_eq!(input_label(&device("Monitor of Built-in Audio", 2)), "System Audio (monitor of Built-in Audio) · 2 ch");
         assert_eq!(input_label(&device("Scarlett 2i2 USB", 2)), "Scarlett 2i2 USB · 2 ch");

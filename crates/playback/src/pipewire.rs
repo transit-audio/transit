@@ -253,7 +253,15 @@ mod tests {
         update: id:0 key:'clock.force-rate' value:'0' type:''\n";
 
     fn device(name: &str, min: Option<u32>, max: Option<u32>) -> DeviceInfo {
-        DeviceInfo { name: name.into(), is_default: false, max_channels: 2, sample_rates: vec![48_000], buffer_min: min, buffer_max: max }
+        DeviceInfo {
+            name: name.into(),
+            is_default: false,
+            max_channels: 2,
+            sample_rates: vec![48_000],
+            buffer_min: min,
+            buffer_max: max,
+            channel_names: Vec::new(),
+        }
     }
 
     #[test]
@@ -281,6 +289,7 @@ mod tests {
             outputs: vec![device("default", Some(1), Some(4_194_304)), device("hw:CARD=PCH,DEV=0", Some(64), Some(16_384))],
             inputs: vec![device("default", Some(1), Some(4_194_304))],
             diagnostics: Vec::new(),
+            virtual_inputs: Vec::new(),
         };
         apply_to_alsa(&mut system, &clock, true);
         assert_eq!(system.outputs[0].buffer_sizes(), [256, 512, 1024, 2048, 4096, 8192]);
@@ -312,6 +321,7 @@ mod tests {
             outputs: vec![device("default", Some(1), Some(4_194_304))],
             inputs: Vec::new(),
             diagnostics: Vec::new(),
+            virtual_inputs: Vec::new(),
         };
         apply_to_alsa(&mut system, &parse_settings(FORCED).unwrap(), false);
         assert_eq!((system.outputs[0].buffer_min, system.diagnostics.len()), (Some(1), 0), "left alone");

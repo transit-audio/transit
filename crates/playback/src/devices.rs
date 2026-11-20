@@ -200,6 +200,11 @@ pub struct AudioConfig {
     pub system_audio: bool,
     /// The output System Audio captures (its name or id); `None` is the system's default output.
     pub system_audio_output: Option<String>,
+    /// Native JACK (ADR 0015, amendment for #431, rule 1): the Input list also offers virtual
+    /// devices (clients whose output ports the server does not mark physical: an application's
+    /// stream, a sink's monitor, a virtual source). Off by default. It filters only what the list
+    /// offers: a chosen input opens whatever it says, and it never reopens a device.
+    pub jack_show_virtual: bool,
 }
 
 /// The saved backend through [`Backend::loaded`].
@@ -223,6 +228,7 @@ impl Default for AudioConfig {
             share_device: true,
             system_audio: false,
             system_audio_output: None,
+            jack_show_virtual: false,
         }
     }
 }
@@ -275,6 +281,11 @@ pub struct LoopbackCalibration {
     pub spread_frames: u32,
     /// UTC date of the measurement (`YYYY-MM-DD`).
     pub measured_at: String,
+    /// On JACK, a virtual input's ordered port names the loop came back through (ADR 0015,
+    /// amendment for #431, rule 13): the calibration applies only while the group has exactly
+    /// these ports. Empty for every other input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_ports: Vec<String>,
 }
 
 impl LoopbackCalibration {
@@ -313,6 +324,9 @@ pub struct CalibrationKey {
     pub rate: u32,
     /// The requested period in frames; 0 is the driver's default.
     pub period: u32,
+    /// The open virtual input's ordered port names on JACK ([`LoopbackCalibration::input_ports`]);
+    /// empty for every other input.
+    pub input_ports: Vec<String>,
 }
 
 impl CalibrationKey {
@@ -326,7 +340,15 @@ impl CalibrationKey {
             mode: calibration_mode(system, request.mode)?.to_owned(),
             rate: request.format.rate,
             period: request.period.frames().unwrap_or(0),
+            input_ports: Vec::new(),
         })
+    }
+
+    /// This key with the open virtual input's ordered port names (empty for any other input).
+    #[must_use]
+    pub fn with_ports(mut self, ports: &[String]) -> Self {
+        self.input_ports = ports.to_vec();
+        self
     }
 
     /// The record of a loop measured under this key.
@@ -340,6 +362,7 @@ impl CalibrationKey {
             round_trip_frames,
             spread_frames,
             measured_at: measured_at.to_owned(),
+            input_ports: self.input_ports.clone(),
         }
     }
 }
@@ -440,7 +463,23 @@ impl AudioConfig {
 
     /// The saved calibration of the JACK pair `key` names: its output, mode, rate and period, and
     /// an input that matches the group that opened by [`jack_input_matches`] (#683).
+    ///
+    /// Through a virtual input it applies only while the group's ports, in order, are the ones it
+    /// was measured through (ADR 0015, amendment for #431, rule 13); a record without them, or
+    /// with others, does not apply and needs measuring again.
     pub fn jack_calibration(&self, key: &CalibrationKey) -> Option<&LoopbackCalibration> {
+        self.calibrations.iter().find(|c| {
+            c.of_output(key) && jack_input_matches(c.input.as_deref(), &key.device, key.input.as_deref()) && c.input_ports == key.input_ports
+        })
+    }
+
+    /// A saved calibration of `key`'s output and input group, mode, rate and period that does not
+    /// apply because the virtual input's ports changed since it was measured, or it names none
+    /// (rule 13); `None` otherwise.
+    pub fn jack_calibration_ports_changed(&self, key: &CalibrationKey) -> Option<&LoopbackCalibration> {
+        if self.jack_calibration(key).is_some() {
+            return None;
+        }
         self.calibrations.iter().find(|c| c.of_output(key) && jack_input_matches(c.input.as_deref(), &key.device, key.input.as_deref()))
     }
 
@@ -467,6 +506,10 @@ pub struct DeviceInfo {
     /// Buffer range the device reports (`None` when it does not say).
     pub buffer_min: Option<u32>,
     pub buffer_max: Option<u32>,
+    /// The device's channel names where the listing knows them (a JACK port group's ports' short
+    /// names, for the monitor label, ADR 0015, amendment for #431, rule 13); empty otherwise.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub channel_names: Vec<String>,
 }
 
 impl DeviceInfo {
@@ -524,6 +567,10 @@ pub struct AudioSystem {
     /// Devices of the system that could not be listed, with why ("<driver>: <problem>"): the
     /// native ASIO backend's per-driver diagnostics. Empty for cpal's systems.
     pub diagnostics: Vec<String>,
+    /// Native JACK's virtual devices (ADR 0015, amendment for #431, rule 1), input only: listed
+    /// whatever the preference, which filters what the Input list offers. Empty elsewhere.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub virtual_inputs: Vec<DeviceInfo>,
 }
 
 impl AudioSystem {
@@ -658,7 +705,14 @@ pub fn cpal_audio_systems() -> Vec<AudioSystem> {
                 host.output_devices().map(|ds| ds.filter_map(|d| describe(&d, def_out.as_deref(), true)).collect()).unwrap_or_default();
             let inputs: Vec<DeviceInfo> =
                 host.input_devices().map(|ds| ds.filter_map(|d| describe(&d, def_in.as_deref(), false)).collect()).unwrap_or_default();
-            let mut system = AudioSystem { name: id.name().to_string(), is_default: id == default_id, outputs, inputs, diagnostics: Vec::new() };
+            let mut system = AudioSystem {
+                name: id.name().to_string(),
+                is_default: id == default_id,
+                outputs,
+                inputs,
+                diagnostics: Vec::new(),
+                virtual_inputs: Vec::new(),
+            };
             // PipeWire's ALSA plug-in (#230): its devices offer the buffers whose periods the
             // server allows, with the server's quantum under them.
             if system.name.eq_ignore_ascii_case("ALSA")
@@ -687,6 +741,7 @@ pub(crate) fn add_unlisted(list: &mut Vec<DeviceInfo>, installed: &[String]) {
                 sample_rates: STANDARD_RATES.to_vec(),
                 buffer_min: None,
                 buffer_max: None,
+                channel_names: Vec::new(),
             });
         }
     }
@@ -711,6 +766,7 @@ mod tests {
             round_trip_frames: 480,
             spread_frames: 25,
             measured_at: "2026-10-21".into(),
+            input_ports: Vec::new(),
         }
     }
 
@@ -807,6 +863,7 @@ mod tests {
             share_device: true,
             system_audio: true,
             system_audio_output: Some("Speakers".into()),
+            jack_show_virtual: true,
         };
         let s = serde_json::to_string(&c).unwrap();
         assert_eq!(serde_json::from_str::<AudioConfig>(&s).unwrap(), c);
@@ -956,6 +1013,7 @@ mod tests {
             sample_rates: vec![48_000],
             buffer_min: Some(64),
             buffer_max: Some(1024),
+            channel_names: Vec::new(),
         };
         let mut list = vec![open.clone()];
         add_unlisted(&mut list, &["Open Driver".into(), "Other Driver".into()]);

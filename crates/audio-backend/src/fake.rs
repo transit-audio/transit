@@ -42,6 +42,18 @@ struct State {
     /// stream snapshots before a reopen ([`Stream::snapshot_links`]); and what a restore received.
     links: Vec<String>,
     restored: Vec<String>,
+    /// Other input devices a duplex open may record from instead of this device's own inputs, as
+    /// one JACK client links its inputs to any port group ([`Backend::duplex_capture_endpoint`]).
+    inputs: Vec<FakeInput>,
+}
+
+/// One more input device of a JACK-like client: its ports in order, and whether it is a virtual
+/// device (its ports guard its paths, [`Backend::guarded_ports`]).
+#[derive(Debug, Clone)]
+struct FakeInput {
+    name: String,
+    ports: Vec<String>,
+    virtual_device: bool,
 }
 
 /// The scripted backend. Clones share one script and one set of streams.
@@ -64,10 +76,10 @@ pub struct FakeBackend {
     fixed_buffer: Option<Arc<Mutex<u32>>>,
     /// The mix format of the render endpoint a loopback capture records; `None` refuses loopback.
     loopback_format: Option<Format>,
-    /// Other input devices (name, channels) a duplex open may record from instead of this device's
-    /// own inputs, as one JACK client links its inputs to any port group
-    /// ([`Backend::duplex_capture_endpoint`]); empty keeps the trait's default.
-    capture_devices: Vec<(String, u16)>,
+    /// The client records from other input devices too (any was added, [`Self::with_capture_device`]),
+    /// as JACK's one client: a chosen input that is not there then opens no input (ADR 0015,
+    /// amendment for #431, rule 4). Without, the trait's default.
+    jack_like: bool,
 }
 
 impl FakeBackend {
@@ -86,14 +98,38 @@ impl FakeBackend {
             strict: false,
             fixed_buffer: None,
             loopback_format: None,
-            capture_devices: Vec::new(),
+            jack_like: false,
         }
     }
     /// One more input device `name` with `channels` inputs that a duplex open records from when
     /// the input wish names it (see the field). Its channels are named `name:capture_1..`.
-    pub fn with_capture_device(mut self, name: &str, channels: u16) -> Self {
-        self.capture_devices.push((name.into(), channels));
+    pub fn with_capture_device(self, name: &str, channels: u16) -> Self {
+        let ports = (1..=channels).map(|i| format!("{name}:capture_{i}")).collect();
+        self.with_input(FakeInput { name: name.into(), ports, virtual_device: false })
+    }
+    /// One more input device `name` that is a JACK virtual device with `ports`, in order.
+    pub fn with_virtual_device(self, name: &str, ports: &[&str]) -> Self {
+        self.with_input(FakeInput { name: name.into(), ports: ports.iter().map(|p| (*p).to_owned()).collect(), virtual_device: true })
+    }
+    fn with_input(mut self, input: FakeInput) -> Self {
+        self.lock().inputs.push(input);
+        self.jack_like = true;
         self
+    }
+    /// From the next open on, the input device `name` has `ports` (in this order), or is gone
+    /// (`None`), as a JACK group whose ports changed or that went away.
+    pub fn set_input_ports(&self, name: &str, ports: Option<&[&str]>) {
+        let mut state = self.lock();
+        match (state.inputs.iter().position(|i| i.name == name), ports) {
+            (Some(at), Some(ports)) => state.inputs[at].ports = ports.iter().map(|p| (*p).to_owned()).collect(),
+            (Some(at), None) => {
+                state.inputs.remove(at);
+            }
+            (None, Some(ports)) => {
+                state.inputs.push(FakeInput { name: name.into(), ports: ports.iter().map(|p| (*p).to_owned()).collect(), virtual_device: true });
+            }
+            (None, None) => {}
+        }
     }
     /// From the next capture open on, the stream reports that it opened the capture endpoint `id`
     /// named `name` (`None`: the endpoint passed), as native WASAPI does for the input paired with
@@ -115,8 +151,14 @@ impl FakeBackend {
         self.lock().capture_endpoints.clone()
     }
     fn capture_device(&self, name: &str) -> Option<Endpoint> {
-        let (name, channels) = self.capture_devices.iter().find(|(n, _)| n == name)?;
-        Some(Endpoint::new(name.clone(), name.clone(), self.system.clone(), *channels, 0, Vec::new(), Arc::new(())))
+        let state = self.lock();
+        let input = state.inputs.iter().find(|i| i.name == name)?;
+        let channels = u16::try_from(input.ports.len()).unwrap_or(u16::MAX);
+        Some(Endpoint::new(input.name.clone(), input.name.clone(), self.system.clone(), channels, 0, Vec::new(), Arc::new(())))
+    }
+    /// The ports of the other input device `name` now; `None` when there is none of that name.
+    fn input_ports(&self, name: &str) -> Option<(Vec<String>, bool)> {
+        self.lock().inputs.iter().find(|i| i.name == name).map(|i| (i.ports.clone(), i.virtual_device))
     }
     /// Loopback captures open at `format` (the render endpoint's mix format).
     pub fn with_loopback(mut self, format: Format) -> Self {
@@ -303,18 +345,30 @@ impl Backend for FakeBackend {
         Ok(Plan { endpoint: self.endpoint(Direction::Input), attempts: vec![request] })
     }
     fn capture_with_render(&self, _render: &Endpoint) -> bool {
-        self.duplex && (self.capture_channels > 0 || !self.capture_devices.is_empty())
+        self.duplex && (self.capture_channels > 0 || self.jack_like)
     }
-    /// With other input devices: the wished one, else this device's own inputs, else the first
-    /// other one (the JACK backend's order); without any, the trait's default.
+    /// With other input devices (the JACK backend's order): the wished one, this device's own
+    /// inputs when it names this device, and no input at all for a wish that is not there (rule
+    /// 4); with no wish, this device's own inputs, else the first other one that is not virtual.
+    /// Without any, the trait's default.
     fn duplex_capture_endpoint(&self, render: &Endpoint, wish: &InputWish) -> Result<Endpoint, String> {
-        if let Some(chosen) = wish.device.as_deref().and_then(|name| self.capture_device(name)) {
-            return Ok(chosen);
-        }
-        if self.capture_devices.is_empty() || self.capture_channels > 0 {
+        if !self.jack_like {
             return Ok(render.clone());
         }
-        self.capture_devices.first().and_then(|(name, _)| self.capture_device(name)).ok_or_else(|| "no input device".into())
+        if let Some(name) = wish.device.as_deref() {
+            if name == self.name && self.capture_channels > 0 {
+                return Ok(render.clone());
+            }
+            return self.capture_device(name).ok_or_else(|| crate::absent_input(name));
+        }
+        if self.capture_channels > 0 {
+            return Ok(render.clone());
+        }
+        let first = self.lock().inputs.iter().find(|i| !i.virtual_device).map(|i| i.name.clone());
+        first.and_then(|name| self.capture_device(&name)).ok_or_else(|| "no input device".into())
+    }
+    fn guarded_ports(&self, endpoint: &Endpoint) -> Vec<String> {
+        self.input_ports(&endpoint.name).filter(|(_, virtual_device)| *virtual_device).map(|(ports, _)| ports).unwrap_or_default()
     }
     /// A duplex fake is pumped as one driver cycle: the test delivers the capture, then the render.
     fn capture_precedes_render(&self, endpoint: &Endpoint) -> bool {
@@ -322,7 +376,10 @@ impl Backend for FakeBackend {
     }
     fn channel_names(&self, endpoint: &Endpoint, direction: Direction) -> Vec<String> {
         match direction {
-            Direction::Input if endpoint.name != self.name => (1..=endpoint.inputs).map(|i| format!("{}:capture_{i}", endpoint.name)).collect(),
+            Direction::Input if endpoint.name != self.name => self
+                .input_ports(&endpoint.name)
+                .map(|(ports, _)| ports)
+                .unwrap_or_else(|| (1..=endpoint.inputs).map(|i| format!("{}:capture_{i}", endpoint.name)).collect()),
             Direction::Input => self.names.0.clone(),
             Direction::Output => self.names.1.clone(),
         }

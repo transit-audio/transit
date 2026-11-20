@@ -44,6 +44,9 @@ pub enum IoEdit {
     },
     /// Add default paths: the default input paths the table lacks (rule 14), idempotent.
     AddDefaultInputs,
+    /// Use the current ports: a virtual input's ports open now become the ones its paths read
+    /// (rule 5).
+    UseCurrentPorts,
 }
 
 fn direction_text(direction: IoDirection) -> &'static str {
@@ -67,6 +70,7 @@ impl IoEdit {
             IoEdit::SetMain { name } => json!({"action": "set_main", "name": name}),
             IoEdit::SetLive { name, live } => json!({"action": "set_live", "name": name, "live": live}),
             IoEdit::AddDefaultInputs => json!({"action": "add_default_inputs"}),
+            IoEdit::UseCurrentPorts => json!({"action": "use_current_ports"}),
         }
     }
 }
@@ -528,10 +532,17 @@ pub fn hardware_section(
                 let pair = format!("{} → {}", m.send, m.ret);
                 ui.label(&pair);
                 // A figure through another input is listed, not used: "measure again" (rule 13).
-                let figure = if io.returns_through(&m.input_device) {
+                // Through a JACK virtual input, also over other ports than now (rule 13).
+                let figure = if io.figure_applies(&m.input_device, &m.input_ports) {
                     frames_text(m.round_trip_frames, rate)
                 } else {
-                    let why = if m.input_device.is_empty() { MEASURE_AGAIN_UNKNOWN } else { MEASURE_AGAIN_ROW };
+                    let why = if m.input_device.is_empty() {
+                        MEASURE_AGAIN_UNKNOWN
+                    } else if io.returns_through(&m.input_device) {
+                        MEASURE_AGAIN_PORTS
+                    } else {
+                        MEASURE_AGAIN_ROW
+                    };
                     format!("{}, {why}", frames_text(m.round_trip_frames, rate))
                 };
                 ui.label(&figure);
@@ -559,6 +570,8 @@ pub fn hardware_section(
 pub const MEASURE_AGAIN_ROW: &str = "through another input: measure again";
 /// The same for a figure stored before inputs were recorded, whose input is not established.
 pub const MEASURE_AGAIN_UNKNOWN: &str = "through an unknown input: measure again";
+/// The same, for a figure through a JACK virtual input whose ports changed since (rule 13).
+pub const MEASURE_AGAIN_PORTS: &str = "through other ports of this input: measure again";
 
 /// What a finished measurement says: "612 frames (12.8 ms) ±2".
 pub fn measured_text(frames: u32, spread: u32, rate: u32) -> String {

@@ -1,7 +1,7 @@
 //! #682: a duplex open takes its input from the endpoint `Backend::duplex_capture_endpoint` gives.
 //! On JACK that is the chosen input's port group; the input's channel count, the I/O table's inputs,
 //! the input channel names and the recorder's device name all follow it, and a chosen input that
-//! is missing falls back without failing the output open. The scripted backend stands in for JACK's
+//! is missing opens no input without failing the output open (ADR 0015, amendment for #431, rule 4). The scripted backend stands in for JACK's
 //! one client (`with_capture_device`); the JACK backend's own choice is tested over its fake server.
 
 use super::*;
@@ -57,13 +57,43 @@ fn no_chosen_input_keeps_the_outputs_own_inputs() {
     assert_eq!((input_of(&player).1, input_of(&player).2), (2, 2));
 }
 
+/// ADR 0015, amendment for #431, rule 4: a chosen input that is missing opens no input and says so
+/// by name, with the output still open; no other group is substituted. Once it is back, the next
+/// open (Reconnect) opens it.
 #[test]
-fn a_chosen_input_that_is_missing_falls_back_and_the_output_still_opens() {
+fn a_chosen_input_that_is_missing_opens_no_input_and_the_output_still_opens() {
     let native = jack("Headset", 2);
     let player = open(&native, Some("Second Mic"));
     assert!(!player.silent && native.running(ab::Direction::Output), "the output open does not fail on the input");
-    assert_eq!(native.capture_opens(), ["Headset"]);
-    assert_eq!(input_of(&player).0, "Headset", "the recorder names the device that opened, so the app can say the choice is missing");
+    assert!(native.capture_opens().is_empty(), "no other group was opened");
+    let (name, ..) = input_of(&player);
+    assert_eq!(name, format!("failed: the audio input did not open with the output ({})", ab::absent_input("Second Mic")));
+    assert_eq!(player.io_map().inputs, 0);
+    drop(player);
+    native.set_input_ports("Second Mic", Some(&["capture_1"]));
+    let back = open(&native, Some("Second Mic"));
+    assert_eq!(input_of(&back).0, "Second Mic", "back: Reconnect opens it");
+}
+
+/// Rule 5: a virtual device's ordered port names reach the recorder (the guard of its paths) and
+/// the calibration key; a hardware group carries none.
+#[test]
+fn a_virtual_input_carries_its_ports_and_a_hardware_group_none() {
+    let native = jack("Headset", 2).with_virtual_device("Firefox", &["output_FL", "output_FR"]);
+    let player = open(&native, Some("Firefox"));
+    let ports = |player: &Player| match &*player.input.borrow() {
+        HeldInput::Held(Some(recorder)) => recorder.input_ports.clone(),
+        _ => vec!["no input".into()],
+    };
+    assert_eq!(ports(&player), ["output_FL", "output_FR"]);
+    assert_eq!(player.calibration_key.as_ref().map(|k| k.input_ports.clone()), Some(vec!["output_FL".into(), "output_FR".into()]));
+    assert_eq!(player.input_channel_names, ["output_FL", "output_FR"]);
+    drop(player);
+    let mic = open(&native, Some("Mic"));
+    assert!(ports(&mic).is_empty() && mic.calibration_key.as_ref().is_some_and(|k| k.input_ports.is_empty()));
+    drop(mic);
+    let none = open(&native, None);
+    assert_eq!(input_of(&none).0, "Headset", "with no choice the input is never a virtual device");
 }
 
 /// ADR 0015, amendment for #431, rule 8: the input's identity is the capture endpoint the backend

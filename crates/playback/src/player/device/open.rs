@@ -489,6 +489,12 @@ impl Player {
             Some(Ok(input)) if jack => Some(input.name.as_str()),
             _ => None,
         };
+        // A virtual input's ordered port names: its calibration was measured through exactly these
+        // (amendment for #431, rule 13); empty for a hardware group.
+        let input_ports = match &capture {
+            Some(Ok(input)) if jack => backend.guarded_ports(input),
+            _ => Vec::new(),
+        };
         // Every output the stream opened, and the duplex input's channels, get default paths; the
         // app replaces them with this machine's saved table (`set_io`), keyed by the output.
         let inputs = match &capture {
@@ -516,6 +522,7 @@ impl Player {
                 None
             } else if jack {
                 devices::CalibrationKey::of(&system, &name, opened_input, &request)
+                    .map(|key| key.with_ports(&input_ports))
                     .and_then(|key| cfg.jack_calibration(&key).and_then(devices::LoopbackCalibration::to_backend))
             } else {
                 cfg.calibration_for(&system, &name, paired.as_deref(), &request)
@@ -674,7 +681,8 @@ impl Player {
             } else {
                 cfg.input_pairing.as_deref().or(paired.as_deref())
             };
-            player.calibration_key = if duplex { devices::CalibrationKey::of(&system, &name, key_input, &keyed) } else { None };
+            player.calibration_key =
+                if duplex { devices::CalibrationKey::of(&system, &name, key_input, &keyed).map(|key| key.with_ports(&input_ports)) } else { None };
             player.calibration = calibration;
             player.silent = false;
             // A unit test enables a fake MIDI backend itself: no test reaches the system's MIDI

@@ -112,6 +112,7 @@ fn a_narrowed_native_row_is_a_difference() {
         sample_rates,
         buffer_min,
         buffer_max,
+        channel_names: Vec::new(),
     };
     let cpal = [row(Some(0), Some(u32::MAX), vec![44_100, 48_000])];
     assert!(row_differences("output", &cpal, &[row(None, None, vec![48_000, 44_100])]).is_empty(), "same sizes and rates");

@@ -37,6 +37,7 @@ fn io() -> IoMap {
         inputs: 2,
         defaults_for: 6,
         paths: vec![path("Far", vec![5]), path("In 2", vec![1])],
+        ports: Vec::new(),
     };
     IoMap::for_device("test", "duplex", 0, 4).compose(Some(&record))
 }

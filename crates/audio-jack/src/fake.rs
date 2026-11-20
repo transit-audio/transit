@@ -295,6 +295,16 @@ impl FakeServer {
         self.lock().others.push((name.to_owned(), output, true));
     }
 
+    /// Another client's audio port changes its name (a stream that came back with another serial):
+    /// it keeps its place in the server's order, and its links go.
+    pub(crate) fn rename_port(&self, name: &str, to: &str) {
+        let mut state = self.lock();
+        state.unlink(&[name.to_owned()]);
+        if let Some(port) = state.others.iter_mut().find(|(n, _, _)| n == name) {
+            port.0 = to.to_owned();
+        }
+    }
+
     /// Another client registers an audio port whose name is not valid UTF-8: `key` names it in the
     /// fake (for `outside_link`), `shown` is the lossy form, which may equal another port's name.
     pub(crate) fn add_port_with_invalid_name(&self, key: &str, shown: &str, output: bool) {
@@ -480,6 +490,18 @@ impl JackClient for FakeClient {
     fn physical_ports(&self) -> Vec<PhysicalPort> {
         let state = self.server.lock();
         state.ports.iter().filter(|p| p.capture).chain(state.ports.iter().filter(|p| !p.capture)).cloned().collect()
+    }
+
+    /// As the binding: physical capture ports, then other clients' audio outputs, then the output
+    /// ports of clients that are open (transit's own among them); a name that is not valid UTF-8
+    /// is left out.
+    fn output_ports(&self) -> Vec<String> {
+        let state = self.server.lock();
+        let physical = state.ports.iter().filter(|p| p.capture).map(|p| p.name.clone());
+        let others = state.others.iter().filter(|(name, output, audio)| *output && *audio && !state.invalid.iter().any(|(key, _)| key == name));
+        let clients =
+            state.clients.iter().filter(|c| !c.closed).flat_map(|c| c.ports.iter().filter(|(_, input)| !input).map(|(name, _)| name.clone()));
+        physical.chain(others.map(|(name, _, _)| name.clone())).chain(clients).collect()
     }
 
     fn register_port(&mut self, short: &str, input: bool) -> Result<String, String> {

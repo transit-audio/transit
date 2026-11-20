@@ -238,6 +238,7 @@ fn an_unavailable_input_path_is_listed_with_why() {
         inputs: 2,
         defaults_for: 2,
         paths: vec![path("Out 3-4", vec![0]), path("Far", vec![5]), path("In 1", vec![0])],
+        ports: Vec::new(),
     };
     let out = t.app.engine.io_map().compose(None);
     t.app.engine.set_io_map(out.compose(Some(&record)));

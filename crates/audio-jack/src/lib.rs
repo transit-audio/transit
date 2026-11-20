@@ -63,6 +63,8 @@ mod session;
 mod sys;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod virtual_tests;
 
 pub use devices::{JackDevice, Server, ServerState};
 pub use session::{AUTO_CONNECT_ENV, JackBackend, auto_connect_from, server_name};

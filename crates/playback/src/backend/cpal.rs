@@ -725,7 +725,15 @@ pub(crate) fn describe(d: &cpal::Device, default_name: Option<&str>, output: boo
             buffer_max = Some(buffer_max.map_or(*max, |m| m.max(*max)));
         }
     }
-    Some(DeviceInfo { is_default: default_name == Some(name.as_str()), name, max_channels, sample_rates, buffer_min, buffer_max })
+    Some(DeviceInfo {
+        is_default: default_name == Some(name.as_str()),
+        name,
+        max_channels,
+        sample_rates,
+        buffer_min,
+        buffer_max,
+        channel_names: Vec::new(),
+    })
 }
 
 /// One cpal host per audio system for the whole process, created on first use (a handful at most,
@@ -995,6 +1003,7 @@ mod tests {
             sample_rates: vec![48_000],
             buffer_min: Some(64),
             buffer_max: Some(1024),
+            channel_names: Vec::new(),
         };
         assert_eq!(d.buffer_sizes(), [64, 128, 256, 512, 1024]);
         let open = DeviceInfo { buffer_min: None, buffer_max: None, ..d };

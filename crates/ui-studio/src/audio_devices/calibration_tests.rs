@@ -10,6 +10,7 @@ fn calibration(device: &str, input: Option<&str>, rate: u32, period: u32) -> tra
         round_trip_frames: 480,
         spread_frames: 25,
         measured_at: "2026-10-21".into(),
+        input_ports: Vec::new(),
     }
 }
 
@@ -167,6 +168,7 @@ fn the_asio_calibration_line_names_the_buffer_size_and_rate_it_was_measured_at()
         round_trip_frames: frames,
         spread_frames: 7,
         measured_at: "2026-10-23".into(),
+        input_ports: Vec::new(),
     };
     // The requested buffer does not matter: the line keys on the buffer the open driver runs.
     let cfg = AudioConfig { buffer_size: Some(128), calibrations: vec![at(256, 48_000, 1_196), at(64, 48_000, 333)], ..Default::default() };

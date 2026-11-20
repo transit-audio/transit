@@ -74,3 +74,35 @@ fn other_systems_keep_the_pairing_key_whatever_input_opened() {
     let (mic, asked) = open("Fake", Some("Mic"), std::slice::from_ref(&record));
     assert_eq!((mic.calibration, asked), (record.to_backend(), vec![record.to_backend(), record.to_backend()]));
 }
+
+/// ADR 0015, amendment for #431, rule 13: a calibration measured through a virtual input applies
+/// only while the group's ports, in order, are the ones it was measured through. After the order
+/// changes, or for a record without the ports, nothing applies and the record is reported as
+/// needing a new measurement.
+#[test]
+fn a_calibration_through_a_virtual_input_applies_only_over_the_same_ports() {
+    let client = client("JACK").with_virtual_device("Firefox", &["output_FL", "output_FR"]);
+    let open_on = |calibrations: &[crate::LoopbackCalibration]| {
+        let cfg = AudioConfig { input: Some("Firefox".into()), calibrations: calibrations.to_vec(), ..Default::default() };
+        Player::open_native_kind(Arc::new(Session::default()), &cfg, &client, &fake_factory(false), NativeKind::Jack).expect("the output opens")
+    };
+    let player = open_on(&[]);
+    let key = player.calibration_key.clone().expect("a key");
+    assert_eq!(key.input_ports, ["output_FL", "output_FR"]);
+    drop(player);
+    let record = measured(&key);
+    assert_eq!(record.input_ports, key.input_ports, "the record keeps the ports it was measured through");
+    let same = open_on(std::slice::from_ref(&record));
+    assert_eq!(same.calibration, record.to_backend());
+    drop(same);
+    client.set_input_ports("Firefox", Some(&["output_FR", "output_FL"]));
+    let moved = open_on(std::slice::from_ref(&record));
+    assert_eq!(moved.calibration, None, "another port order: no stale correction");
+    let moved_key = moved.calibration_key.clone().expect("a key");
+    let cfg = AudioConfig { calibrations: vec![record.clone()], ..Default::default() };
+    assert_eq!(cfg.jack_calibration_ports_changed(&moved_key), Some(&record), "measure again");
+    drop(moved);
+    let unbound = crate::LoopbackCalibration { input_ports: Vec::new(), ..record };
+    let missing = open_on(std::slice::from_ref(&unbound));
+    assert_eq!(missing.calibration, None, "a record without the mapping does not apply to a virtual input");
+}

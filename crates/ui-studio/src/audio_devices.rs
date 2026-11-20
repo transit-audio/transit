@@ -23,6 +23,7 @@
 pub(crate) mod card;
 mod fake_json;
 mod jack_calibration;
+pub(crate) mod jack_inputs;
 #[cfg(test)]
 mod live_tests;
 mod period;
@@ -430,13 +431,22 @@ pub fn fallback_notes(cfg: &AudioConfig, systems: Option<&[AudioSystem]>, opened
     notes
 }
 
-/// The note for a saved input that `systems` does not list (the default input records instead);
-/// `None` when it is listed, when none is saved, and on ASIO (the input is the output's driver).
+/// The note for a saved input that `systems` does not list (the default input records instead;
+/// on JACK no input opens, and a virtual device counts as listed, amendment for #431, rules 2 and
+/// 4); `None` when it is listed, when none is saved, and on ASIO (the input is the output's driver).
 fn input_note(cfg: &AudioConfig, systems: &[AudioSystem]) -> Option<String> {
     let want = cfg.input.as_deref()?;
     let asio = cfg.system.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(devices::ASIO_SYSTEM));
     let sys = pick_system(systems, cfg.system.as_deref()).filter(|_| !asio)?;
-    (!sys.inputs.iter().any(|d| d.name == want)).then(|| format!("Input “{want}” is not available; recording uses the default input."))
+    let jack = devices::is_jack_system(Some(&sys.name));
+    let listed = sys.inputs.iter().chain(sys.virtual_inputs.iter().filter(|_| jack)).any(|d| d.name == want);
+    (!listed).then(|| {
+        if jack {
+            format!("Input “{want}” is not present; no input opens.")
+        } else {
+            format!("Input “{want}” is not available; recording uses the default input.")
+        }
+    })
 }
 
 impl StudioApp {
@@ -697,6 +707,7 @@ impl StudioApp {
                 outputs: Vec::new(),
                 inputs: Vec::new(),
                 diagnostics: Vec::new(),
+                virtual_inputs: Vec::new(),
             });
             self.start_asio_listing(lister);
         }

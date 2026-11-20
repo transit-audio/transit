@@ -128,7 +128,8 @@ impl JackBackend {
     }
 
     /// Opens a short-lived probe client (`JackNoStartServer`: no server is ever started), reads the
-    /// server's rate, quantum and physical ports, and closes it. A control-thread call.
+    /// server's rate, quantum, physical ports and eligible virtual devices, and closes it. A
+    /// control-thread call, never under the session's lock.
     pub fn probe(&self) -> ServerState {
         let client = match self.api.open_client(crate::PROBE_NAME) {
             Ok(client) => client,
@@ -140,11 +141,17 @@ impl JackBackend {
             }
         };
         let (rate, buffer) = (client.sample_rate(), client.buffer_size());
-        let devices = devices::group(&client.physical_ports(), rate, buffer);
+        let physical = client.physical_ports();
+        let devices = devices::group(&physical, rate, buffer);
+        // The clients transit owns, by the names the server assigned (rule 1: either may have
+        // been made unique): this probe, and the session's client while one is open.
+        let mut owned = vec![client.name()];
+        owned.extend(lock(&self.slot).as_ref().and_then(|s| s.client.as_ref().map(|c| c.name())));
+        let virtual_devices = devices::virtual_groups(&client.output_ports(), &physical, &owned, rate, buffer);
         if let Err(e) = client.close() {
             log::warn!("JACK: closing the probe client: {e}");
         }
-        ServerState::Running(Server { rate, buffer, devices })
+        ServerState::Running(Server { rate, buffer, devices, virtual_devices })
     }
 
     fn running(&self) -> Result<Server, String> {
@@ -154,11 +161,14 @@ impl JackBackend {
         }
     }
 
-    /// The group named `device`, else the first with ports in `direction`.
+    /// The group named `device`, else the first physical group with ports in `direction`. An input
+    /// is named among every eligible group, physical or virtual, whatever the preference (rule 2);
+    /// a named input that is not there is absent (rule 4).
     fn find(&self, direction: ab::Direction, device: Option<&str>) -> Result<ab::Endpoint, String> {
         let server = self.running()?;
         let usable = |d: &JackDevice| !d.ports(direction).is_empty();
         let found = match device {
+            Some(name) if direction == ab::Direction::Input => server.input(name).ok_or_else(|| ab::absent_input(name))?,
             Some(name) => {
                 let d = server.devices.iter().find(|d| d.name == name).ok_or_else(|| format!("JACK: no port group named \"{name}\""))?;
                 if !usable(d) {
@@ -330,17 +340,15 @@ impl ab::Backend for JackBackend {
     }
 
     /// The port group the duplex input links `in_N` to (#682): the one client records from any
-    /// group, so the chosen input is honored when it names a group with capture ports; else the
-    /// output's own group when it has capture ports (the behavior before a choice was read); else
-    /// the first group that has some, as a plan with no device chosen takes. A missing chosen input
-    /// falls back the same way and is logged; the endpoint's name says which group opened.
+    /// group, so a chosen input is the eligible group of that name, physical or virtual (ADR 0015,
+    /// amendment for #431, rule 2). A chosen input that is not there opens no input and says so by
+    /// name; no other group is substituted (rule 4). With no choice, the output's own group when it
+    /// has capture ports, else the first physical group that has some: never a virtual device
+    /// (rule 1, "No choice made").
     fn duplex_capture_endpoint(&self, render: &ab::Endpoint, wish: &ab::InputWish) -> Result<ab::Endpoint, String> {
         let device = render.handle::<JackDevice>().ok_or("the endpoint is not a JACK port group")?;
         if let Some(name) = wish.device.as_deref() {
-            match self.find(ab::Direction::Input, Some(name)) {
-                Ok(chosen) => return Ok(chosen),
-                Err(why) => log::warn!("{why}: the input falls back"),
-            }
+            return self.find(ab::Direction::Input, Some(name)).inspect_err(|why| log::warn!("JACK: {why}"));
         }
         if !device.capture.is_empty() {
             return Ok(render.clone());
@@ -364,6 +372,12 @@ impl ab::Backend for JackBackend {
     /// The ports' short names.
     fn channel_names(&self, endpoint: &ab::Endpoint, direction: ab::Direction) -> Vec<String> {
         endpoint.handle::<JackDevice>().map(|d| d.channel_names(direction)).unwrap_or_default()
+    }
+
+    /// A virtual device's capture ports' short names, in order (rule 5's port-mapping guard);
+    /// nothing for a physical group, whose ports do not change between opens.
+    fn guarded_ports(&self, endpoint: &ab::Endpoint) -> Vec<String> {
+        endpoint.handle::<JackDevice>().filter(|d| d.virtual_device).map(|d| d.channel_names(ab::Direction::Input)).unwrap_or_default()
     }
 
     /// Registers `out_1..out_n` on the session's client (opening it when there is none). The
