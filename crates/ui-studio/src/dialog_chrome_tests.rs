@@ -200,3 +200,37 @@ fn dawproject_export_discloses_the_fallback_then_enter_chooses_a_location() {
     assert!(t.app.status.starts_with("Exported DAWproject to "), "{}", t.app.status);
     let _ = std::fs::remove_file(&path);
 }
+
+/// The dialog layout gate (#735) on the chrome's modal questions, at 1x and 1.5x: with tracks that
+/// carry very long names the question wraps, and the buttons stay whole under it.
+#[test]
+fn the_chrome_modals_keep_their_buttons_whole_with_the_longest_questions() {
+    use crate::layout_gate;
+    let long = "A very long track name that runs past any sensible width for a dialog 0123456789 0123456789";
+    for zoom in layout_gate::SCALES {
+        let mut t = T::new();
+        t.app.ui.ui_zoom = zoom;
+        let mut all = t.tracks.clone();
+        for i in 0..6 {
+            let r = t.app.run("track.new", json!({"kind": "audio", "name": format!("{long} {i}")})).unwrap();
+            all.push(TrackId(r["tracks"][0].as_u64().unwrap()));
+        }
+        t.frames(3);
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        let cases = [
+            ("delete_tracks", Dialog::DeleteTracks { tracks: all.clone(), clips: true }),
+            ("delete_take", Dialog::DeleteTake { track: all[3], take: 2 }),
+            ("save_changes", Dialog::SaveChanges { then: ("session.new".into(), json!({})) }),
+            ("dawproject_export", Dialog::DawprojectExport),
+        ];
+        for (id, dialog) in cases {
+            let layer = layout_gate::modal(id);
+            layout_gate::watch(&t.ctx, layer);
+            t.app.dialog = Some(dialog);
+            t.frames(3);
+            layout_gate::assert_clean(&t.ctx, layer);
+            t.app.dialog = None;
+            t.frames(2);
+        }
+    }
+}

@@ -245,3 +245,20 @@ fn the_splash_reports_the_device_stage_before_the_scan_stage() {
     // The device-free player counts as not opened: its failure shows for exactly one frame.
     assert_eq!(t.app.splash.stages, ["device", "failed", "scan"], "the device stage comes before the scan stage");
 }
+
+/// The dialog layout gate (#735) on About transit, at 1x and 1.5x.
+#[test]
+fn the_about_window_keeps_its_buttons_whole() {
+    let layer = crate::layout_gate::window("About transit");
+    for zoom in crate::layout_gate::SCALES {
+        let mut t = T::new();
+        crate::layout_gate::watch(&t.ctx, layer);
+        t.app.ui.ui_zoom = zoom;
+        t.app.about.app_version = "9.9.9-a-version-string-that-is-longer-than-any-release".into();
+        t.menu("Help");
+        t.menu("About transit…");
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        assert_eq!(t.inspect()["about"]["open"], true);
+        crate::layout_gate::assert_clean(&t.ctx, layer);
+    }
+}

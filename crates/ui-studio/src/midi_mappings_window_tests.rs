@@ -333,3 +333,24 @@ fn the_range_fields_have_one_width_that_fits_100_percent_and_line_up_across_rows
         assert!(hi1[2] - lo1[0] <= 144.0 + 0.01, "both fit the Range column at {ppp}: {fields:?}");
     }
 }
+
+/// The dialog layout gate (#735) on the MIDI Mappings window: with the longest port names and
+/// several rows, at 1x and 1.5x, no button covers another button or any text, and every button is
+/// inside the window.
+#[test]
+fn the_mappings_window_keeps_its_buttons_whole_with_the_longest_port_names() {
+    let layer = crate::layout_gate::window("MIDI Mappings");
+    for zoom in crate::layout_gate::SCALES {
+        let screen = (1920.0 / zoom, 1080.0 / zoom);
+        let (mut app, ctx, t) = new_app(screen.0, screen.1);
+        ctx.set_pixels_per_point(zoom);
+        crate::layout_gate::watch(&ctx, layer);
+        for cc in 0..8u8 {
+            map(&mut app, &format!("{} {cc}", "Very Long Controller Port Name ".repeat(6)), &format!("track:{}:volume", t.0), cc);
+        }
+        app.ui.midi_mappings.size = [0.0, 0.0];
+        open(&mut app, &ctx, screen);
+        assert_eq!(ctx.pixels_per_point(), zoom);
+        crate::layout_gate::assert_clean(&ctx, layer);
+    }
+}

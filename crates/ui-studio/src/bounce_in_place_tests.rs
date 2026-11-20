@@ -579,3 +579,50 @@ fn the_track_form_says_when_the_part_before_bar_1_stops_playing() {
     t.app.run("track.commit", json!({"tracks": [track.0]})).unwrap();
     assert!(t.app.status.starts_with("The part before bar 1 is not in the print"), "{}", t.app.status);
 }
+
+const LONG_NAME: &str = "A very long track name that runs past any sensible width for a dialog 0123456789 0123456789";
+
+/// The dialog layout gate (#735) on the Bounce in Place form: with the longest track names, the
+/// longest source row (the existing track chosen, the dropdown holding a long name) and a span line
+/// for several clips, no button covers another control or text and every button is inside the
+/// window, at 1x and 1.5x.
+#[test]
+fn the_bounce_in_place_form_keeps_its_buttons_whole_with_the_longest_content() {
+    let layer = crate::layout_gate::modal("bounce_in_place");
+    for zoom in crate::layout_gate::SCALES {
+        let mut t = T::new();
+        crate::layout_gate::watch(&t.ctx, layer);
+        t.app.ui.ui_zoom = zoom;
+        let source = t.track(LONG_NAME, "audio");
+        let dest = t.track(&format!("{LONG_NAME} (print)"), "audio");
+        t.source();
+        t.app.focus_header(source, false);
+        t.app.open_bounce_in_place();
+        t.frames();
+        t.click(t.app.bounce_place.layout.existing_track);
+        t.app.bounce_place.destination = Some(dest);
+        t.frames();
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        assert!(t.app.bounce_place.existing, "the existing-track row, with its drop-down, is the tallest form");
+        crate::layout_gate::assert_clean(&t.ctx, layer);
+    }
+}
+
+/// The same gate on Show Hidden Tracks with the most rows and the longest names.
+#[test]
+fn the_hidden_tracks_form_keeps_its_buttons_whole_with_many_long_names() {
+    let layer = crate::layout_gate::modal("hidden_tracks");
+    for zoom in crate::layout_gate::SCALES {
+        let mut t = T::new();
+        crate::layout_gate::watch(&t.ctx, layer);
+        t.app.ui.ui_zoom = zoom;
+        let ids: Vec<u64> = (0..14).map(|i| t.track(&format!("{LONG_NAME} {i}"), "audio").0).collect();
+        t.app.run("track.hide", json!({"tracks": ids, "hidden": true})).unwrap();
+        t.frames();
+        t.menu("Track");
+        t.menu("Show Hidden Tracks…");
+        assert!(matches!(t.app.dialog, Some(Dialog::HiddenTracks)));
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        crate::layout_gate::assert_clean(&t.ctx, layer);
+    }
+}

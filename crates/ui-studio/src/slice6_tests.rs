@@ -1179,3 +1179,40 @@ fn the_bounce_request_names_the_bitrate_for_opus_only() {
 
 #[path = "take_lanes_tests.rs"]
 mod take_lanes;
+
+/// The dialog layout gate (#735) on Export Audio and Undo History, at 1x and 1.5x: a destination
+/// path as long as a real one and many steps with long track names.
+#[test]
+fn the_export_form_and_undo_history_keep_their_buttons_whole_with_the_longest_content() {
+    use crate::layout_gate::{self, SCALES};
+    let long = "A very long track name that runs past any sensible width for a dialog 0123456789 0123456789";
+    for zoom in SCALES {
+        let mut t = T::new();
+        let (form, history) = (layout_gate::modal("bounce_form"), layout_gate::window("Undo History"));
+        layout_gate::watch(&t.ctx, form);
+        layout_gate::watch(&t.ctx, history);
+        t.app.ui.ui_zoom = zoom;
+        t.midi_clip();
+        let a = t.track(json!({"kind": "audio", "name": long}));
+        for i in 0..24 {
+            t.app.run("track.rename", json!({"track": a.0, "name": format!("{long} {i}")})).unwrap();
+        }
+        t.app.run("edit.select", json!({"start": 0, "end": 48_000})).unwrap();
+        t.menu("File");
+        t.frames(3);
+        t.menu("Export Audio…");
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        assert!(t.app.finish.bounce_form.is_some());
+        let at = t.app.finish.layout.bounce.clone().unwrap().path;
+        t.click(mid(at));
+        t.key("A", json!({"command": true}));
+        t.typed(&format!("{}/{}.wav", "C:/Users/someone/Music/Projects/A Very Long Project Folder Name".repeat(3), long));
+        layout_gate::assert_clean(&t.ctx, form);
+        t.key("Escape", json!({}));
+        t.frames(3);
+        t.menu("Edit");
+        t.menu("Undo History");
+        assert!(t.app.ui.show_history);
+        layout_gate::assert_clean(&t.ctx, history);
+    }
+}

@@ -761,6 +761,8 @@ mod inactive_hatch_tests;
 #[cfg(test)]
 mod keys_tests;
 #[cfg(test)]
+mod layout_gate;
+#[cfg(test)]
 mod loop_hue_tests;
 #[cfg(test)]
 mod main_monitor_tests;

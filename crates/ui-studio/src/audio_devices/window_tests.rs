@@ -361,7 +361,7 @@ fn a_driver_that_must_be_open_to_be_described_marks_its_lists_stale() {
 }
 
 /// The sidebar sections and what each must show (#107).
-const SECTIONS: [&str; 4] = ["section_system", "section_io", "section_hardware", "section_midi"];
+pub(super) const SECTIONS: [&str; 4] = ["section_system", "section_io", "section_hardware", "section_midi"];
 
 fn inside(outer: [f32; 4], inner: [f32; 4]) -> bool {
     inner[0] >= outer[0] - 0.5 && inner[1] >= outer[1] - 0.5 && inner[2] <= outer[2] + 0.5 && inner[3] <= outer[3] + 0.5
