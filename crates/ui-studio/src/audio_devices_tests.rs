@@ -816,6 +816,23 @@ mod hardware_inserts {
         assert!(t.app.status.contains("612 frames"), "{}", t.app.status);
     }
 
+    /// Review of 652509f3, must-fix 2, on the hardware insert Measure: a result that arrives after
+    /// the input changed (another input of the same output) is not stored for the new input.
+    #[test]
+    fn a_measurement_that_finishes_on_another_input_stores_nothing() {
+        let mut t = with_fake_probe();
+        pick_pair(&mut t);
+        t.click(mid(item(&t, "hw_measure", "Measure")));
+        let other = transit_model::InputMap { system: "ASIO".into(), device: "Other".into(), inputs: 4, defaults_for: 0, paths: Vec::new() };
+        let mut io = t.app.engine.io_map().compose(Some(&other));
+        io.add_default_inputs(4);
+        t.app.engine.set_io_map(io);
+        probe(&mut t).result = Some(done(612, 2));
+        t.frames(3);
+        assert!(t.app.engine.io_map().hardware_latency.is_empty(), "nothing stored for the other input");
+        assert_eq!(t.layout()["hardware"]["result"], crate::hardware_measure::MEASURE_DEVICE_CHANGED);
+    }
+
     #[test]
     fn a_failed_measurement_says_why_and_stores_nothing() {
         let mut t = with_fake_probe();

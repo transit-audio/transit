@@ -24,8 +24,20 @@ const LEN: usize = 4_096;
 /// An output-only device record with the input record of a two-channel input that keeps "Far" on
 /// channel 6 (unavailable) and "In 2" on channel 2.
 fn io() -> IoMap {
-    let path = |name: &str, channels: Vec<u16>| IoPath { live: false, name: name.into(), direction: IoDirection::Input, channels, format: ChannelFormat::Mono };
-    let record = InputMap { system: "test".into(), device: "duplex".into(), inputs: 2, defaults_for: 6, paths: vec![path("Far", vec![5]), path("In 2", vec![1])] };
+    let path = |name: &str, channels: Vec<u16>| IoPath {
+        live: false,
+        name: name.into(),
+        direction: IoDirection::Input,
+        channels,
+        format: ChannelFormat::Mono,
+    };
+    let record = InputMap {
+        system: "test".into(),
+        device: "duplex".into(),
+        inputs: 2,
+        defaults_for: 6,
+        paths: vec![path("Far", vec![5]), path("In 2", vec![1])],
+    };
     IoMap::for_device("test", "duplex", 0, 4).compose(Some(&record))
 }
 

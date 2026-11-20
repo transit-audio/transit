@@ -725,14 +725,8 @@ mod record_tests {
         let bass = armed(&mut e, "Bass", "mono", "In 1");
         e.session_mut().track_mut(bass).unwrap().mixer.input = Route::Hardware("Bass DI".into());
         let why = input_refusal(&e, 2, None).expect("refused");
-        assert!(
-            why.contains("track `Clash` cannot record: the input `Out 3-4` is unavailable (same name as an output path: rename one)"),
-            "{why}"
-        );
-        assert!(
-            why.contains("track `Far` cannot record: the input `Far` is unavailable (out of range: the input has 2 channels open)"),
-            "{why}"
-        );
+        assert!(why.contains("track `Clash` cannot record: the input `Out 3-4` is unavailable (same name as an output path: rename one)"), "{why}");
+        assert!(why.contains("track `Far` cannot record: the input `Far` is unavailable (out of range: the input has 2 channels open)"), "{why}");
         assert!(why.contains("track `Past` cannot record: the input `In 3` is unavailable (out of range: the input has 2 channels open)"), "{why}");
         assert!(why.contains("track `Bass` cannot record: the input `Bass DI` is unavailable (no input path of that name on this input)"), "{why}");
         assert!(!why.contains("Label"), "{why}");

@@ -277,7 +277,13 @@ mod tests {
             device: "duplex".into(),
             inputs: 2,
             defaults_for: 2,
-            paths: vec![IoPath { live: false, name: "Synth".into(), direction: IoDirection::Input, channels: vec![0, 5], format: ChannelFormat::Stereo }],
+            paths: vec![IoPath {
+                live: false,
+                name: "Synth".into(),
+                direction: IoDirection::Input,
+                channels: vec![0, 5],
+                format: ChannelFormat::Stereo,
+            }],
         };
         let io = IoMap::for_device("test", "duplex", 0, 2).compose(Some(&record));
         let (s, t) = track("Synth", Some(20.0));

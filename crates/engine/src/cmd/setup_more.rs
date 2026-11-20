@@ -685,7 +685,10 @@ mod tests {
             json!({"action": "rename_path", "name": "Talkback", "direction": "input", "new_name": "DRUMS"}),
         ] {
             let refused = e.execute("setup.io_map", &params);
-            assert!(matches!(&refused, Err(crate::EngineError::BadParams(_, why)) if why.contains("is a bus of this session")), "{params}: {refused:?}");
+            assert!(
+                matches!(&refused, Err(crate::EngineError::BadParams(_, why)) if why.contains("is a bus of this session")),
+                "{params}: {refused:?}"
+            );
         }
         assert!(matches!(e.execute("setup.io", &json!({"action": "create_bus", "name": "talkback"})), Err(crate::EngineError::BadParams(..))));
     }
