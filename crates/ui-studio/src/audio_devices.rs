@@ -173,6 +173,9 @@ pub struct AudioDevicesState {
     pub fake: Option<FakeDevices>,
     /// Fallbacks found at the last reopen (or at startup).
     pub notes: Vec<String>,
+    /// What the last reopen could not bring back of the links other programs made to the device's
+    /// ports (native JACK, ADR 0015 amendment #431 rule 6).
+    pub(crate) link_note: Option<String>,
     startup_checked: bool,
     /// The (wanted, opened) input already reported, so it is said once.
     input_reported: Option<(String, String)>,
@@ -553,6 +556,7 @@ impl StudioApp {
         };
         let mut notes = fallback_notes(&cfg, self.audio_devices.systems.as_deref(), &opened);
         notes.extend(self.player.as_ref().and_then(|p| p.backend_note.clone()));
+        notes.extend(self.audio_devices.link_note.clone());
         let calibration = self.jack_calibration_note();
         notes.extend(calibration.clone());
         notes.extend(self.not_opened_note());

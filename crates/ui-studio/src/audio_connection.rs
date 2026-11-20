@@ -4,7 +4,7 @@
 use std::{cell::RefCell, rc::Rc};
 use transit_dsp::{EditorWindowRequest, EditorWindowState};
 use transit_model::TrackId;
-use transit_playback::{AudioConfig, Player, record::Recorder, telemetry::CallbackTelemetry};
+use transit_playback::{AudioConfig, LinkSnapshot, Player, record::Recorder, telemetry::CallbackTelemetry};
 
 pub(crate) trait Editors {
     fn close_editors(&self) -> Result<(), String>;
@@ -32,6 +32,17 @@ pub(crate) trait Connection: Editors {
         let r = self.open_input(cfg)?;
         self.monitor(&r)?;
         Ok(r)
+    }
+    /// The links other programs made to the device's ports, read before a reopen closes anything
+    /// (ADR 0015, amendment #431, rule 6; native JACK only).
+    fn snapshot_links(&self) -> Option<LinkSnapshot> {
+        None
+    }
+    /// Restores, once, the snapshot of the connection this one replaced; the diagnostic when some
+    /// links were not restored.
+    fn restore_links(&mut self, snapshot: LinkSnapshot) -> Option<String> {
+        drop(snapshot);
+        None
     }
 }
 
@@ -70,9 +81,25 @@ impl Connection for Player {
     fn monitor(&self, r: &Recorder) -> Result<(), String> {
         self.set_input(std::sync::Arc::clone(&r.monitor)).map(|_| ()).map_err(|e| e.to_string())
     }
+    fn snapshot_links(&self) -> Option<LinkSnapshot> {
+        Player::snapshot_links(self)
+    }
+    fn restore_links(&mut self, snapshot: LinkSnapshot) -> Option<String> {
+        Player::restore_links(self, snapshot)
+    }
 }
 
-pub(crate) fn replace<P: Connection>(player: &mut Option<P>, input: &mut Option<P::Input>, open: impl FnOnce() -> P) -> Result<(), String> {
+/// The one reopen of the audio device (Apply, Reconnect, the automatic reopen after a driver or
+/// server reset). Links other programs made to the device's ports (native JACK) are read here, on
+/// this control thread, before anything of the old connection closes; the snapshot belongs to this
+/// call alone and is restored once on the replacement after it opened, or dropped with the call
+/// when it ends early (ADR 0015, amendment #431, rule 6). Returns what was not restored.
+pub(crate) fn replace<P: Connection>(
+    player: &mut Option<P>,
+    input: &mut Option<P::Input>,
+    open: impl FnOnce() -> P,
+) -> Result<Option<String>, String> {
+    let links = player.as_ref().and_then(Connection::snapshot_links);
     if let Some(p) = player.as_ref() {
         p.close_editors()?;
         p.close_input(input)?;
@@ -82,8 +109,10 @@ pub(crate) fn replace<P: Connection>(player: &mut Option<P>, input: &mut Option<
     }
     // Assignment must finish (including Drop) before the loader runs.
     *player = None;
-    *player = Some(open());
-    Ok(())
+    let mut opened = open();
+    let note = links.and_then(|links| opened.restore_links(links));
+    *player = Some(opened);
+    Ok(note)
 }
 
 pub(crate) type Trace = Rc<RefCell<Vec<&'static str>>>;
@@ -99,6 +128,9 @@ pub(crate) struct FakeConnection {
     pub editor_pending: bool,
     /// The fake host thread's editor windows (issue #173).
     pub windows: RefCell<FakeWindows>,
+    /// The device has links other programs made (#431, rule 6): a reopen snapshots them, and the
+    /// restore on the replacement says this when it is not empty (what was not restored).
+    pub links: Option<String>,
     trace: Trace,
 }
 
@@ -113,6 +145,7 @@ impl FakeConnection {
             editor_error: None,
             editor_pending: false,
             windows: RefCell::default(),
+            links: None,
             trace,
         }
     }
@@ -223,6 +256,17 @@ impl Connection for FakeConnection {
     fn open_input(&self, _cfg: &AudioConfig) -> Result<FakeInput, String> {
         self.trace.borrow_mut().push("open input");
         Ok(FakeInput(Rc::clone(&self.trace)))
+    }
+    fn snapshot_links(&self) -> Option<LinkSnapshot> {
+        let links = self.links.clone()?;
+        self.trace.borrow_mut().push("snapshot links");
+        Some(Box::new(links))
+    }
+    fn restore_links(&mut self, snapshot: LinkSnapshot) -> Option<String> {
+        self.trace.borrow_mut().push("restore links");
+        let note = *snapshot.downcast::<String>().ok()?;
+        self.links = Some(String::new());
+        (!note.is_empty()).then_some(note)
     }
     fn monitor(&self, _input: &FakeInput) -> Result<(), String> {
         self.trace.borrow_mut().push("connect monitor");

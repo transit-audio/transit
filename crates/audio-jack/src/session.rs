@@ -9,7 +9,9 @@
 //!   JACK callbacks and activates the client, then connects that direction's ports to its device's
 //!   ports (`out_i` to the i-th playback port, the i-th capture port to `in_i`; not when the backend
 //!   was made without auto-connect); the other direction's `start` connects its own. Connections a
-//!   user makes in a patchbay later are left alone. A stop is for good (it returns once no process
+//!   user makes in a patchbay later are left alone, and a reopen brings them back: the reopen
+//!   reads them before the old client goes and restores them on the new one (`crate::links`,
+//!   [`ab::Stream::snapshot_links`]). A stop is for good (it returns once no process
 //!   callback is inside that direction); when no direction runs, the client is deactivated.
 //!   Dropping the last stream deactivates and closes it, and only then frees the engine.
 //! - The watcher thread (`transit-jack-watch`, every 20 ms while the client is active) reads the
@@ -26,6 +28,7 @@
 use crate::api::{JackApi, JackClient};
 use crate::devices::{self, JackDevice, Server, ServerState};
 use crate::engine::{self, Engine, EngineSide, Shared};
+use crate::links;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::JoinHandle;
@@ -281,6 +284,16 @@ impl JackBackend {
         self.api.open_client(name)
     }
 
+    /// One watcher tick of the open session, on the caller's thread (tests drive the ticks
+    /// explicitly with a watcher period long enough that its own thread never ticks).
+    #[cfg(test)]
+    pub(crate) fn tick(&self) {
+        let id = lock(&self.slot).as_ref().map(|s| s.id);
+        if let Some(id) = id {
+            let _ = watch_once(&Arc::downgrade(&self.slot), id);
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn with_timing(mut self, watch: Duration, reconnect_period: Duration, reconnect_window: Duration) -> Self {
         self.timing = Timing { watch, reconnect_period, reconnect_window };
@@ -407,8 +420,11 @@ struct Side {
     direction: ab::Direction,
     /// The user callback until the first start moves it into the engine.
     waiting: Option<Waiting>,
-    /// (source, destination) pairs to connect at this side's start.
+    /// (source, destination) pairs to connect at this side's start: transit's own links.
     connections: Vec<(String, String)>,
+    /// The full names of this side's ports, by index, and what each stands for (#431, rule 6).
+    names: Vec<String>,
+    meaning: links::Meaning,
     error: SharedError,
     /// A panic of this side's user callback was reported.
     panic_reported: bool,
@@ -501,15 +517,20 @@ impl Session {
         self.shared.side(!input).set_state(engine::OPENED);
         let device_ports = device.ports(direction);
         let mut connections = Vec::with_capacity(usize::from(channels));
+        let mut names = Vec::with_capacity(usize::from(channels));
         for i in 0..usize::from(channels) {
             let short = if input { format!("in_{}", i + 1) } else { format!("out_{}", i + 1) };
             let ours = client.register_port(&short, input).map_err(|e| ab::OpenError::Other(format!("JACK: registering {short}: {e}")))?;
             if let Some(theirs) = device_ports.get(i).filter(|_| auto_connect) {
-                connections.push(if input { (theirs.clone(), ours) } else { (ours, theirs.clone()) });
+                connections.push(if input { (theirs.clone(), ours.clone()) } else { (ours.clone(), theirs.clone()) });
             }
+            names.push(ours);
         }
+        // Port i stands for the device's i-th port, linked or not (auto-connect off).
+        let channels = (0..names.len()).map(|i| device_ports.get(i).cloned().unwrap_or_default()).collect();
+        let meaning = links::Meaning { endpoint: device.name.clone(), channels };
         let error = Arc::new(Mutex::new(error));
-        self.sides.push(Side { generation, direction, waiting: Some(waiting), connections, error, panic_reported: false });
+        self.sides.push(Side { generation, direction, waiting: Some(waiting), connections, names, meaning, error, panic_reported: false });
         Ok(generation)
     }
 
@@ -640,6 +661,38 @@ impl Session {
 
     fn errors(&self, error: ab::StreamError) -> Vec<(SharedError, ab::StreamError)> {
         self.sides.iter().map(|s| (Arc::clone(&s.error), error)).collect()
+    }
+
+    /// Every direction's ports, what they stand for and transit's own links (#431, rule 6).
+    fn ports(&self) -> Vec<links::Ports> {
+        let side = |s: &Side| links::Ports { input: !s.output(), names: s.names.clone(), meaning: s.meaning.clone(), own: s.connections.clone() };
+        self.sides.iter().map(side).collect()
+    }
+
+    /// The links of this active client's ports, read under the session lock before a reopen
+    /// deactivates it. Nothing after a server shutdown: the client is gone (or going), and its
+    /// links with it.
+    fn snapshot(&self) -> Option<links::Snapshot> {
+        if !self.active || self.shared.shutdown() {
+            return None;
+        }
+        let client = self.client.as_ref()?;
+        Some(links::take(client.as_ref(), &self.ports(), self.id))
+    }
+
+    /// Restores `snapshot`, taken from an earlier session, on this started client.
+    fn restore(&mut self, snapshot: &links::Snapshot) -> Option<String> {
+        if snapshot.from >= self.id {
+            log::warn!("JACK: a link snapshot is restored only on a later client; discarded");
+            return None;
+        }
+        if !self.active || self.shared.shutdown() {
+            log::warn!("JACK: the client did not start; {} links made outside transit are not restored", snapshot.links.len());
+            return None;
+        }
+        let ports = self.ports();
+        let client = self.client.as_mut()?;
+        links::restore(client.as_mut(), &ports, snapshot).note()
     }
 }
 
@@ -808,6 +861,23 @@ impl ab::Stream for JackStream {
     /// changes and the server's return as resets, a server shutdown or a panic as a fault.
     fn stats(&self) -> Option<ab::StreamStats> {
         Some(self.shared.stats(self.direction == ab::Direction::Output))
+    }
+
+    /// The links of every port of this stream's client that are not transit's own (#431, rule 6),
+    /// for the reopen operation to hold while this client closes. A control-thread call, before
+    /// the reopen stops or drops anything; never a JACK callback or an error callback.
+    fn snapshot_links(&self) -> Option<ab::LinkSnapshot> {
+        let guard = lock(&self.slot);
+        let snapshot = guard.as_ref().filter(|s| s.id == self.session)?.snapshot()?;
+        Some(Box::new(snapshot))
+    }
+
+    /// Restores a snapshot of an earlier client of this backend on this stream's started client,
+    /// once (it is consumed here). Another backend's snapshot is discarded.
+    fn restore_links(&self, snapshot: ab::LinkSnapshot) -> Option<String> {
+        let snapshot = snapshot.downcast::<links::Snapshot>().ok()?;
+        let mut guard = lock(&self.slot);
+        guard.as_mut().filter(|s| s.id == self.session)?.restore(&snapshot)
     }
 }
 

@@ -79,6 +79,13 @@ pub(crate) trait JackClient: Send {
     /// The full names of the ports `port` is connected to (`jack_port_get_all_connections`).
     #[cfg(test)]
     fn connections(&self, port: &str) -> Vec<String>;
+    /// The full names of the ports linked to this client's `index`-th registered input port (when
+    /// `input`) or output port, whichever client made the links (`jack_port_get_all_connections`
+    /// on the port this client owns). Empty when there is no such port (#431, rule 6).
+    fn links(&self, input: bool, index: usize) -> Vec<String>;
+    /// Whether an audio port named exactly `name` exists: one that data can be read from when
+    /// `output` (a JACK output port), else one that can receive data (`jack_get_ports`).
+    fn has_port(&self, name: &str, output: bool) -> bool;
     /// Asks the server for a new quantum (`jack_set_buffer_size`): every client of the server gets
     /// it. Called from the open path (ADR 0021, 2026-10-25 amendment) on the thread that opens the
     /// client, never from a JACK callback.

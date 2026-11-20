@@ -53,6 +53,9 @@ pub use player::{
 pub use player::{Clock, Deferred, Factory, PluginTestHooks};
 pub use player::{EditorOpened, LoadedIn};
 pub use player::{MapHeard, MapSpec};
+/// What a reopen holds of the device's links between the old Player and its replacement
+/// ([`Player::snapshot_links`]).
+pub use transit_audio_backend::LinkSnapshot;
 pub use transit_midi_io::TRANSPORT_CAPACITY;
 pub use transit_plugin_host::{GaveUp, LoadPhase, Quarantined, RELOG_EVERY, StuckCall, loading_text, seconds_text};
 

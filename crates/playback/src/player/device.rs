@@ -1337,6 +1337,7 @@ mod rate_tests {
 mod calibrate;
 mod external_measure;
 mod fault_api;
+mod links_api;
 mod low_latency;
 mod midi_map_api;
 #[cfg(test)]

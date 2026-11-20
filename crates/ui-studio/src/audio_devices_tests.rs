@@ -6,6 +6,8 @@
 mod calibration_tests;
 #[path = "audio_devices/layout_gate_tests.rs"]
 mod layout_gate_tests;
+#[path = "audio_devices/link_restore_tests.rs"]
+mod link_restore_tests;
 #[path = "audio_devices/no_audio_tests.rs"]
 mod no_audio_tests;
 #[path = "audio_devices/null_audio_tests.rs"]

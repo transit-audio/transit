@@ -109,6 +109,9 @@ impl StudioApp {
                 if !captured {
                     self.status = STATE_FROM_DOCUMENT.into();
                 }
+                if let Some(note) = self.audio_devices.link_note.clone() {
+                    self.status = note;
+                }
             }
             Err(error) => self.player_requests.fail(&mut self.status, error),
         }
@@ -194,6 +197,11 @@ impl StudioApp {
             self.status.push(' ');
             self.status.push_str(STATE_FROM_DOCUMENT);
         }
+        // Only a restore on a reopened device says anything here.
+        if let Some(note) = &self.audio_devices.link_note {
+            self.status.push(' ');
+            self.status.push_str(note);
+        }
     }
 
     /// [`Self::reconnect_audio_using`] with the Player the app opens (in tests, the scripted one
@@ -235,15 +243,22 @@ impl StudioApp {
         }
         self.input_failure = None;
         let cfg = self.ui.audio.clone();
-        if let Some(f) = &mut self.audio_devices.fake {
+        // The links other programs made to the device's ports come back with the reopen (native
+        // JACK); what did not is said by the caller.
+        self.audio_devices.link_note = None;
+        self.audio_devices.link_note = if let Some(f) = &mut self.audio_devices.fake {
             let trace = std::rc::Rc::clone(&f.trace);
-            crate::audio_connection::replace(&mut f.connection, &mut f.input, || crate::audio_connection::FakeConnection::new(cfg.clone(), trace))?;
+            let note = crate::audio_connection::replace(&mut f.connection, &mut f.input, || {
+                crate::audio_connection::FakeConnection::new(cfg.clone(), trace)
+            })?;
             f.reopened.push(cfg);
+            note
         } else {
             let session = self.engine.session_arc();
-            crate::audio_connection::replace(&mut self.player, &mut self.recorder, || open(session, &cfg))?;
+            let note = crate::audio_connection::replace(&mut self.player, &mut self.recorder, || open(session, &cfg))?;
             self.player_requests.reset();
-        }
+            note
+        };
         if self.engine.session().needs_live_input() {
             self.ensure_input();
         }

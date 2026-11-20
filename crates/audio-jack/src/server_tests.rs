@@ -219,6 +219,44 @@ fn server_a_stalled_cycle_is_counted_as_an_xrun() {
     assert!(backend.has_session());
 }
 
+/// ADR 0015 (#431) rule 6 through the real binding: the links of transit's own ports
+/// (`jack_port_get_all_connections`) and the exact port lookup (`jack_get_ports` with an escaped,
+/// anchored pattern) as the snapshot and the restore use them, then a reopen that brings back a
+/// link transit did not make itself (auto-connect off: `out_1` to `in_1`, as a patchbay would).
+#[test]
+fn server_a_link_made_outside_comes_back_after_a_reopen() {
+    let Some(_server) = server_or_skip("server_a_link_made_outside_comes_back_after_a_reopen") else { return };
+    let backend = real().without_auto_connect();
+    let (render_cb, capture_cb) = silent();
+    let (capture, render, _, _, _) = open_duplex(&backend, render_cb, capture_cb);
+    capture.start().unwrap();
+    render.start().unwrap();
+    let name = backend.client_name().expect("a client");
+    let (out_1, in_1) = (format!("{name}:out_1"), format!("{name}:in_1"));
+    backend.with_client(|c| c.connect(&out_1, &in_1)).unwrap().unwrap();
+    assert_eq!(backend.with_client(|c| c.links(true, 0)), Some(vec![out_1.clone()]), "in_1's links, read through its own port");
+    assert_eq!(backend.with_client(|c| c.links(false, 0)), Some(vec![in_1.clone()]));
+    assert_eq!(backend.with_client(|c| c.links(true, 99)), Some(Vec::new()), "no such port: no links");
+    let lookups = backend
+        .with_client(|c| (c.has_port(&out_1, true), c.has_port(&out_1, false), c.has_port(&format!("{name}:out_.*"), true), c.has_port(&in_1, false)))
+        .unwrap();
+    assert_eq!(lookups, (true, false, false, true), "exact name and direction only");
+
+    let snapshot = render.snapshot_links().expect("an active client's links");
+    drop(capture);
+    drop(render);
+    let (render_cb, capture_cb) = silent();
+    let (capture, render, _, _, _) = open_duplex(&backend, render_cb, capture_cb);
+    capture.start().unwrap();
+    render.start().unwrap();
+    assert_eq!(render.restore_links(snapshot), None, "everything came back");
+    let name = backend.client_name().expect("a client");
+    let restored = backend.with_client(|c| c.connections(&format!("{name}:in_1"))).unwrap();
+    assert_eq!(restored, [format!("{name}:out_1")]);
+    drop(capture);
+    drop(render);
+}
+
 /// A dummy server of the test's own, named by `JACK_DEFAULT_SERVER`; killed on drop.
 struct OwnedServer {
     name: String,

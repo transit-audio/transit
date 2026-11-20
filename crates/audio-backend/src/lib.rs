@@ -512,6 +512,12 @@ impl StreamStats {
     }
 }
 
+/// What a backend read of the links other programs made to its ports before a reopen (ADR 0015,
+/// amendment #431, rule 6): opaque to everything but the backend that made it. It belongs to one
+/// reopen operation, which holds it while the old stream closes and hands it to the replacement
+/// stream once ([`Stream::restore_links`]); dropping it discards it.
+pub type LinkSnapshot = Box<dyn Any + Send>;
+
 /// A running (or startable) stream. Dropping it closes the device.
 pub trait Stream {
     fn start(&self) -> Result<(), OpenError>;
@@ -533,6 +539,19 @@ pub trait Stream {
     fn set_calibration(&self, calibration: Option<Calibration>) -> bool {
         let _ = calibration;
         false
+    }
+    /// The links other programs made to this stream's device ports, read on a control thread
+    /// before anything of the stream closes, for one reopen to restore ([`LinkSnapshot`]). `None`
+    /// where the backend has no such links (the default: only the native JACK backend has them).
+    fn snapshot_links(&self) -> Option<LinkSnapshot> {
+        None
+    }
+    /// Restores a snapshot another stream of the same backend took before this one opened, once,
+    /// on a control thread after this stream started. Returns a diagnostic for the user when some
+    /// links were not restored. The default discards the snapshot (another audio system).
+    fn restore_links(&self, snapshot: LinkSnapshot) -> Option<String> {
+        drop(snapshot);
+        None
     }
 }
 

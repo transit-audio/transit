@@ -96,7 +96,6 @@ impl JackFns {
                 set_buffer_size: required(library, c"jack_set_buffer_size")?,
                 #[cfg(test)]
                 port_by_name: required(library, c"jack_port_by_name")?,
-                #[cfg(test)]
                 port_get_all_connections: required(library, c"jack_port_get_all_connections")?,
                 port_get_buffer: required(library, c"jack_port_get_buffer")?,
                 get_time: required(library, c"jack_get_time")?,
@@ -279,6 +278,37 @@ unsafe fn owned(text: *const c_char) -> String {
     // the full name of the jack_port_t", the entries of jack_get_ports' "NULL-terminated array of
     // ports"), valid until the client, port or array is released, which happens after this copy.
     unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned()
+}
+
+/// Copies a NULL-terminated array of port names libjack returned, then frees it with `jack_free`.
+///
+/// # Safety
+///
+/// `array` must be null, or the not yet freed result of a call of `fns`' library that jack.h
+/// documents as "a NULL-terminated array of" port names whose "caller is responsible for calling
+/// jack_free()" (jack_get_ports, jack_port_get_all_connections); the caller does not use it after.
+unsafe fn names_of(fns: &JackFns, array: *mut *const c_char) -> Vec<String> {
+    let mut found = Vec::new();
+    if array.is_null() {
+        return found;
+    }
+    for i in 0.. {
+        // SAFETY: the array is NULL-terminated (the caller's contract) and `i` stops at that entry,
+        // so every read is inside it.
+        let entry = unsafe { *array.add(i) };
+        if entry.is_null() {
+            break;
+        }
+        // SAFETY: a non-NULL entry of the array, a NUL-terminated port name valid until the
+        // jack_free below, after this copy.
+        found.push(unsafe { owned(entry) });
+    }
+    // SAFETY: jack.h, jack_free: "The free function to be used on memory returned by
+    // jack_port_get_connections, jack_port_get_all_connections, jack_get_ports and
+    // jack_get_internal_client_name functions." `array` is such a result, non-null, freed once
+    // here, and no entry is used afterwards (each was copied above).
+    unsafe { (fns.free)(array.cast::<c_void>()) };
+    found
 }
 
 impl LibClient {
@@ -473,24 +503,41 @@ impl JackClient for LibClient {
         // thread calls it); "You need not be the owner of the port". `handle` came from
         // jack_port_by_name on this open client.
         let array = unsafe { (self.fns.port_get_all_connections)(self.client, handle) };
-        let mut found = Vec::new();
-        if array.is_null() {
-            return found;
-        }
-        for i in 0.. {
-            // SAFETY: the array is NULL-terminated (above) and `i` stops at that entry.
-            let entry = unsafe { *array.add(i) };
-            if entry.is_null() {
-                break;
-            }
-            // SAFETY: a non-NULL entry of the array, a NUL-terminated port name valid until the
-            // jack_free below, after this copy.
-            found.push(unsafe { owned(entry) });
-        }
-        // SAFETY: jack.h: "The caller is responsible for calling jack_free() on any non-NULL
-        // returned value." Freed once; no entry is used afterwards.
-        unsafe { (self.fns.free)(array.cast::<c_void>()) };
-        found
+        // SAFETY: `array` is jack_port_get_all_connections' result (above), used only here.
+        unsafe { names_of(self.fns, array) }
+    }
+
+    fn links(&self, input: bool, index: usize) -> Vec<String> {
+        let ports = if input { &self.inputs } else { &self.outputs };
+        let Some(&port) = ports.get(index) else { return Vec::new() };
+        // SAFETY: jack.h, jack_port_get_all_connections: "@return a null-terminated array of full
+        // port names to which the @a port is connected. If none, returns NULL." and "1) You may not
+        // call this function from code that is executed in response to a JACK event. For example,
+        // you cannot use it in a GraphReordered handler." (a control thread calls it, holding the
+        // session lock: the snapshot of a reopen, never a JACK callback); "2) You need not be the
+        // owner of the port to get information about its connections." (it is ours anyway).
+        // `port` came from jack_port_register on this client, which is open (`close_now` clears
+        // the port list with the client), so the pointer is live.
+        let array = unsafe { (self.fns.port_get_all_connections)(self.client, port) };
+        // SAFETY: `array` is jack_port_get_all_connections' result (above), used only here.
+        unsafe { names_of(self.fns, array) }
+    }
+
+    fn has_port(&self, name: &str, output: bool) -> bool {
+        // An anchored, escaped pattern (jack_get_ports takes a regular expression), and the names
+        // returned compared exactly, so no other port can stand in for the one named.
+        let Ok(pattern) = CString::new(crate::links::exact_pattern(name)) else { return false };
+        let flags = if output { sys::JackPortIsOutput } else { sys::JackPortIsInput };
+        // SAFETY: jack.h, jack_get_ports: "@param port_name_pattern A regular expression used to
+        // select ports by name." (our anchored pattern, NUL-terminated); "@param type_name_pattern A
+        // regular expression used to select ports by type." (the audio type, as in `ports`);
+        // "@param flags A value used to select ports by their flags." (the direction); "@return a
+        // NULL-terminated array of ports that match the specified arguments. The caller is
+        // responsible for calling jack_free() any non-NULL returned value." `self.client` is open;
+        // a control thread calls it. No pointer to another client's port is taken: only names.
+        let array = unsafe { (self.fns.get_ports)(self.client, pattern.as_ptr(), AUDIO_TYPE.as_ptr(), flags) };
+        // SAFETY: `array` is jack_get_ports' result (above), used only here.
+        unsafe { names_of(self.fns, array) }.iter().any(|found| found == name)
     }
 
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {

@@ -53,6 +53,35 @@ struct State {
     /// The frame counter and JACK's clock, µs, at the next cycle's start.
     frames: u32,
     usecs: u64,
+    /// Every link of the graph (source, destination), whichever client made it.
+    links: Vec<(String, String)>,
+    /// Audio and MIDI ports of other clients: (full name, a JACK output, audio).
+    others: Vec<(String, bool, bool)>,
+    /// Every connect a transit client asked for, in order (made, existing or refused).
+    connects: Vec<(String, String)>,
+    /// A connect of a pair already linked makes a second link (PipeWire's libjack) instead of
+    /// answering `EEXIST` (JACK 2).
+    duplicates: bool,
+    /// Another client makes this link just before transit's connect of it is served.
+    race: Option<(String, String)>,
+}
+
+impl State {
+    /// (a JACK output, audio) of the port `name`, if it exists.
+    fn port(&self, name: &str) -> Option<(bool, bool)> {
+        if let Some(p) = self.ports.iter().find(|p| p.name == name) {
+            return Some((p.capture, true));
+        }
+        if let Some((_, output, audio)) = self.others.iter().find(|(n, _, _)| n == name) {
+            return Some((*output, *audio));
+        }
+        self.clients.iter().filter(|c| !c.closed).flat_map(|c| &c.ports).find(|(n, _)| n == name).map(|(_, input)| (!input, true))
+    }
+
+    /// Removes every link with an end in `ports`.
+    fn unlink(&mut self, ports: &[String]) {
+        self.links.retain(|(a, b)| !ports.contains(a) && !ports.contains(b));
+    }
 }
 
 /// The scripted server. Clones share it.
@@ -78,6 +107,11 @@ impl FakeServer {
             version: None,
             frames: 0,
             usecs: 1_000_000,
+            links: Vec::new(),
+            others: Vec::new(),
+            connects: Vec::new(),
+            duplicates: false,
+            race: None,
         };
         Self { state: Arc::new(Mutex::new(state)) }
     }
@@ -179,11 +213,88 @@ impl FakeServer {
         self.cycle_at(frames, 100, outputs, inputs)
     }
 
+    /// From now on the server refuses clients with `text` (`None`: it takes them again).
+    pub(crate) fn set_refusing(&self, text: Option<&str>) {
+        self.lock().refuse = text.map(str::to_owned);
+    }
+
+    /// A physical port goes away (a device profile with fewer channels), and its links with it.
+    pub(crate) fn remove_physical(&self, name: &str) {
+        let mut state = self.lock();
+        state.ports.retain(|p| p.name != name);
+        state.unlink(&[name.to_owned()]);
+    }
+
+    /// From now on a connect of a pair already linked makes a second link, as PipeWire's libjack
+    /// does, instead of answering `EEXIST`.
+    pub(crate) fn duplicating_links(self) -> Self {
+        self.lock().duplicates = true;
+        self
+    }
+
+    /// Another client makes `source` -> `destination` just before transit's next connect of that
+    /// pair is served (a graph edit racing the restore).
+    pub(crate) fn link_appears_on_connect(&self, source: &str, destination: &str) {
+        self.lock().race = Some((source.to_owned(), destination.to_owned()));
+    }
+
+    /// How many times `source` -> `destination` is linked (more than once only on a duplicating
+    /// server).
+    pub(crate) fn link_count(&self, source: &str, destination: &str) -> usize {
+        self.lock().links.iter().filter(|(a, b)| a == source && b == destination).count()
+    }
+
+    /// Another client registers an audio port (`output`: a JACK output, data can be read from it).
+    pub(crate) fn add_port(&self, name: &str, output: bool) {
+        self.lock().others.push((name.to_owned(), output, true));
+    }
+
+    /// Another client registers a MIDI port.
+    pub(crate) fn add_midi_port(&self, name: &str, output: bool) {
+        self.lock().others.push((name.to_owned(), output, false));
+    }
+
+    /// Another client's port goes away, and its links with it.
+    pub(crate) fn remove_port(&self, name: &str) {
+        let mut state = self.lock();
+        state.others.retain(|(n, _, _)| n != name);
+        state.unlink(&[name.to_owned()]);
+    }
+
+    /// Another client (a patchbay) links `source` to `destination`. Panics on a link the server
+    /// would refuse, so a test cannot script an impossible graph.
+    pub(crate) fn outside_link(&self, source: &str, destination: &str) {
+        let mut state = self.lock();
+        let (from, to) = (state.port(source), state.port(destination));
+        assert!(matches!((from, to), (Some((true, a)), Some((false, b))) if a == b), "{source} -> {destination} is not a link the server makes");
+        let link = (source.to_owned(), destination.to_owned());
+        if !state.links.contains(&link) {
+            state.links.push(link);
+        }
+    }
+
+    /// Every link of the graph, in the order it was made.
+    pub(crate) fn graph(&self) -> Vec<(String, String)> {
+        self.lock().links.clone()
+    }
+
+    /// Whether `source` is linked to `destination`.
+    pub(crate) fn linked(&self, source: &str, destination: &str) -> bool {
+        self.lock().links.iter().any(|(a, b)| a == source && b == destination)
+    }
+
+    /// Every connect transit's clients asked for, in order.
+    pub(crate) fn connects(&self) -> Vec<(String, String)> {
+        self.lock().connects.clone()
+    }
+
     /// The server stops: libjack calls the info shutdown callback of every active client.
     pub(crate) fn shutdown(&self) {
         let shared: Vec<Arc<Shared>> = {
             let mut state = self.lock();
             state.running = false;
+            // The graph goes with the server.
+            state.links.clear();
             state.clients.iter().filter(|c| c.active && !c.closed).filter_map(|c| c.shared.clone()).collect()
         };
         for s in shared {
@@ -326,32 +437,47 @@ impl JackClient for FakeClient {
         })
     }
 
+    /// As jack_connect: an active client, an output port to an input port of one type; a link that
+    /// exists is fine (`EEXIST`, mapped to success as `crate::ffi` does) and is not made twice,
+    /// unless the server duplicates links (PipeWire's libjack).
     fn connect(&mut self, source: &str, destination: &str) -> Result<(), String> {
-        self.record(|c, _| {
-            if !c.active {
-                return Err("connect needs an active client".into());
+        let mut state = self.server.lock();
+        let link = (source.to_owned(), destination.to_owned());
+        state.connects.push(link.clone());
+        if state.race.as_ref() == Some(&link) {
+            state.race = None;
+            if !state.links.contains(&link) {
+                state.links.push(link.clone());
             }
-            c.connections.push((source.to_owned(), destination.to_owned()));
-            Ok(())
-        })
+        }
+        if !state.clients[self.index].active {
+            return Err("connect needs an active client".into());
+        }
+        match (state.port(source), state.port(destination)) {
+            (Some((true, a)), Some((false, b))) if a == b => {}
+            (None, _) | (_, None) => return Err("jack_connect returned -1 (no such port)".into()),
+            _ => return Err("jack_connect returned -1 (wrong direction or type)".into()),
+        }
+        if state.duplicates || !state.links.contains(&link) {
+            state.links.push(link.clone());
+            state.clients[self.index].connections.push(link);
+        }
+        Ok(())
     }
 
     #[cfg(test)]
     fn connections(&self, port: &str) -> Vec<String> {
-        self.record(|c, _| {
-            c.connections
-                .iter()
-                .filter_map(|(a, b)| {
-                    if a == port {
-                        Some(b.clone())
-                    } else if b == port {
-                        Some(a.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        })
+        partners(&self.server.lock().links, port)
+    }
+
+    fn links(&self, input: bool, index: usize) -> Vec<String> {
+        let state = self.server.lock();
+        let ours = state.clients[self.index].ports.iter().filter(|(_, i)| *i == input).nth(index).map(|(name, _)| name.clone());
+        ours.map(|port| partners(&state.links, &port)).unwrap_or_default()
+    }
+
+    fn has_port(&self, name: &str, output: bool) -> bool {
+        self.server.lock().port(name) == Some((output, true))
     }
 
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {
@@ -363,22 +489,44 @@ impl JackClient for FakeClient {
         Ok(())
     }
 
+    /// jack.h: "disconnect all ports belonging to it, since inactive clients have no port
+    /// connections."
     fn deactivate(&mut self) -> Result<(), String> {
-        self.record(|c, _| {
-            c.active = false;
-            c.deactivations += 1;
-            c.connections.clear();
-            Ok(())
-        })
+        let mut state = self.server.lock();
+        let ports: Vec<String> = state.clients[self.index].ports.iter().map(|(p, _)| p.clone()).collect();
+        state.unlink(&ports);
+        let c = &mut state.clients[self.index];
+        c.active = false;
+        c.deactivations += 1;
+        c.connections.clear();
+        Ok(())
     }
 
     fn close(self: Box<Self>) -> Result<(), String> {
-        self.record(|c, _| {
-            c.active = false;
-            c.closed = true;
-            c.engine = None;
-            c.closed_on = std::thread::current().name().map(str::to_owned);
-            Ok(())
-        })
+        let mut state = self.server.lock();
+        let ports: Vec<String> = state.clients[self.index].ports.iter().map(|(p, _)| p.clone()).collect();
+        state.unlink(&ports);
+        let c = &mut state.clients[self.index];
+        c.active = false;
+        c.closed = true;
+        c.engine = None;
+        c.closed_on = std::thread::current().name().map(str::to_owned);
+        Ok(())
     }
+}
+
+/// The ports linked to `port` in `links`.
+fn partners(links: &[(String, String)], port: &str) -> Vec<String> {
+    links
+        .iter()
+        .filter_map(|(a, b)| {
+            if a == port {
+                Some(b.clone())
+            } else if b == port {
+                Some(a.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
 }

@@ -103,8 +103,9 @@ pub(crate) struct JackFns {
     /// `jack_port_t * jack_port_by_name (jack_client_t *client, const char *port_name)` (tests only)
     #[cfg(test)]
     pub(crate) port_by_name: unsafe extern "C" fn(*mut jack_client_t, *const c_char) -> *mut jack_port_t,
-    /// `const char ** jack_port_get_all_connections (const jack_client_t *client, const jack_port_t *port)` (tests only)
-    #[cfg(test)]
+    /// `const char ** jack_port_get_all_connections (const jack_client_t *client, const jack_port_t *port)`
+    /// (the links of transit's own ports before a reopen, #431 rule 6; no call that removes a link
+    /// is in this table)
     pub(crate) port_get_all_connections: unsafe extern "C" fn(*const jack_client_t, *const jack_port_t) -> *mut *const c_char,
     /// `void * jack_port_get_buffer (jack_port_t *port, jack_nframes_t)` (process thread)
     pub(crate) port_get_buffer: unsafe extern "C" fn(*mut jack_port_t, jack_nframes_t) -> *mut c_void,
