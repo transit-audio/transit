@@ -444,6 +444,40 @@ limits: a server restart wholly inside the instant between closing the old clien
 new one is seen by neither, and the links are read just before the old client closes, so a link
 you change in that same instant may not be caught.
 
+#### Recording an application or a virtual device
+
+The Input list shows the devices the server marks as hardware. To record what an application plays
+(a browser, a streaming tool), a sink's monitor or a virtual source, tick **Show virtual devices**
+under the Input list in **Audio > Audio Devices** (Native JACK only; off by default). The list then
+also offers every program or virtual device that has audio output ports and no hardware ports,
+each by its client name, for example "Firefox". transit's own client is never offered. Choose one
+and press **Apply**, as for any input: transit links its ports to `in_1`, `in_2`... in the order the
+server lists them, and its input paths ("In 1", "In 1-2"...) are its own. The checkbox only changes
+what the list shows: ticking it reopens nothing, and an input you chose stays chosen and shown when
+you untick it. With no input chosen, transit still opens a hardware input, never a virtual one.
+A sink's monitor is listed as **System Audio (monitor of ...)**; when it is the monitor of the
+output transit plays to, the entry adds ", transit's output", because monitoring it plays the
+output back into itself.
+
+Choosing a virtual device can make the server change its buffer size or rate; transit then stops,
+keeps the take and reopens, as for any buffer size change. Another program's processing delay is
+not known to transit and is not compensated.
+
+An application playing several streams at once shows as one device whose ports can change from one
+open to the next. transit remembers the ports a virtual device had when its paths were made. When
+the device comes back with other ports, or the same ports in another order, every path over a port
+that changed is listed as unavailable ("ports changed"): it is silent and refuses to record, and its
+definition is kept. It works again when the original ports return, or when you press **Use the
+current ports** on the I/O paths page while the transport is stopped. transit can tell a changed
+port name, not a different stream that reuses the same name. A hardware insert or External
+Instrument measurement made through a virtual device, and a loopback calibration, apply only while
+the device has the ports they were measured through; otherwise they say **Measure again**.
+
+An input you chose that is not on the server, hardware or virtual, opens no input: the output keeps
+running, and Audio Devices and the status line say "The chosen input "..." is not present; no input
+opened. Use Reconnect when it is back." The Input list shows it as "... (not present: no input
+opens)". transit never records from another device instead. When it is back, press **Reconnect**.
+
 ### Input and output paths
 
 **Audio > Audio Devices > I/O paths** names channels of the open devices as paths ("In 1",
@@ -454,7 +488,7 @@ all, but transit uses the first 32 and says so there.
 
 Output paths and Main belong to the output device. Input paths belong to the input device that
 actually opened: on ASIO the driver (input and output are one), on WASAPI the input Windows pairs
-with the output, on JACK the chosen input port group, on ALSA and CoreAudio the input device.
+with the output, on JACK the chosen input port group (hardware or virtual), on ALSA and CoreAudio the input device.
 Switching to another input brings that input's own paths; switching back brings the first ones
 back. On ALSA and CoreAudio an input you chose that is not connected opens no input (Audio
 Devices names it); transit never records from another device instead. When two connected input
@@ -468,8 +502,9 @@ added. A default you removed stays removed until the input opens wider than befo
 open and no input path can be used, the Inputs list says "No input paths" and offers **Add default
 paths**, which adds the defaults that are missing and changes nothing else.
 
-An input path is unavailable when it needs a channel the input does not have, or when an output
-path has the same name (rename one of them). A track's input that names no input path of this
+An input path is unavailable when it needs a channel the input does not have, when an output
+path has the same name (rename one of them), or, on a JACK virtual device, when a port under it
+changed (above). A track's input that names no input path of this
 input is unavailable too, except a plain label such as "In 3" or "In 3-4", which reads those
 channels while the input has them. A track on an unavailable input hears silence and refuses to
 record, naming the input; it never records another channel. The session keeps the name, so the
@@ -528,9 +563,10 @@ session, so move it into place by ear. If transit (or another app) has that outp
 exclusive mode, Windows refuses the capture and Audio Devices says so; pick another output or open
 the device shared. The input itself opens with the track's input, so System Audio needs an input
 device to ride on. On Linux the PipeWire or PulseAudio monitor of an output arrives as an input
-already and is listed as **System Audio (monitor of ...)** where transit can tell; if none is
-listed, route the monitor to transit's input in pavucontrol's Recording tab or in qpwgraph. macOS
-needs a virtual audio device for now.
+already and is listed as **System Audio (monitor of ...)** where transit can tell; on Native JACK,
+tick **Show virtual devices** to list monitors and applications (see "Recording an application or a
+virtual device"); otherwise route the monitor to transit's input in pavucontrol's Recording tab or
+in qpwgraph. macOS needs a virtual audio device for now.
 
 System Audio records what the computer plays, as a loopback cable would. You are responsible for
 the rights to what you record.
