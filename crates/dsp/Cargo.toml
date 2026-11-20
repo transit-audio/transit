@@ -12,13 +12,16 @@ repository.workspace = true
 # amendment); never enabled by the app.
 # `transit-sampler-core/testing` gives the Sampler's core path its state fingerprint;
 # `transit-parametric-eq/testing` the Parametric EQ core's (ADR 0054); `transit-macro-osc/testing` the
-# Macro Oscillator voice's complete record and restore (#742).
+# Macro Oscillator voice's complete record and restore (#742); `transit-resonator/testing` and
+# `transit-modal-voice/testing` the Resonator's and the Modal Voice's parts' (#742 slice 3).
 testing = [
     "dep:transit-state-record",
     "transit-instrument-core/testing",
     "transit-sampler-core/testing",
     "transit-parametric-eq/testing",
     "transit-macro-osc/testing",
+    "transit-resonator/testing",
+    "transit-modal-voice/testing",
 ]
 
 [dependencies]

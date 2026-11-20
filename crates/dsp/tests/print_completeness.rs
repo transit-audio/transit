@@ -24,8 +24,10 @@
 //! harness fails each variant and passes the full entry.
 //!
 //! The Macro Oscillator declares its record complete (slice 1, push 2 of #742): its witness set is
-//! `print_completeness/macro_osc.rs`. Every other entry's declaration is false; an entry turning
-//! true needs its witness set here, its inventory and its mutation record.
+//! `print_completeness/macro_osc.rs`; the Resonator and the Modal Voice (slice 3)
+//! `print_completeness/resonator.rs` and `print_completeness/modal_voice.rs`.
+//! Every other entry's declaration is false; an entry turning true needs its witness set here, its
+//! inventory and its mutation record.
 //!
 //! A continuation runs A and B in lockstep (each block's records are compared and dropped), so a
 //! large record costs time, not memory.
@@ -36,6 +38,10 @@ use transit_dsp::Plugin;
 
 #[path = "print_completeness/macro_osc.rs"]
 mod macro_osc;
+#[path = "print_completeness/modal_voice.rs"]
+mod modal_voice;
+#[path = "print_completeness/resonator.rs"]
+mod resonator;
 use transit_state_record::{Config, Reader, Writer};
 
 const RATES: [f32; 3] = [44_100.0, 48_000.0, 96_000.0];
@@ -705,6 +711,20 @@ fn the_macro_oscillator_record_is_complete() {
     harness(&macro_osc::entry()).unwrap_or_else(|e| panic!("{e}"));
 }
 
+/// The Resonator's declaration (ADR 0029, #742 slice 3): every witness of its set in every
+/// configuration.
+#[test]
+fn the_resonator_record_is_complete() {
+    harness(&resonator::entry()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// The Modal Voice's declaration (ADR 0029, #742 slice 3): every witness of its set in every
+/// configuration.
+#[test]
+fn the_modal_voice_record_is_complete() {
+    harness(&modal_voice::entry()).unwrap_or_else(|e| panic!("{e}"));
+}
+
 /// A witness set must cover the checklist: a boundary with neither a witness nor an explanation
 /// fails the harness before any case runs.
 #[test]
@@ -751,6 +771,6 @@ fn the_harness_covers_every_entry_that_declares_a_complete_record() {
         }
     }
     // The witness sets the harness has for registry entries.
-    let witnessed: &[&str] = &["macro_oscillator"];
+    let witnessed: &[&str] = &["macro_oscillator", "resonator", "modal_voice"];
     assert_eq!(covered, witnessed, "every entry declaring a complete record has a witness set in this harness");
 }

@@ -183,6 +183,53 @@ impl transit_texture::checkpoint::State for Converter {
     }
 }
 
+
+/// Test seam (feature `testing`; ADR 0029, amendment for #742): the converter's state record.
+/// Configuration (fixed by the rate pair and the extra delay at construction, which the owner's
+/// configuration child pins): `identity`, `lp`, `mp`, `j`, `fc`, `span`, `rows`, `mask`, `start`.
+/// Encoded: both history rings whole, `n_in`, `base`, `rem`. Unobservable: `scratch` (read only
+/// by `pull` when `rows` is empty, right after `Kernel::row` writes every one of its taps).
+#[cfg(feature = "testing")]
+impl Converter {
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Converter { identity: _, lp: _, mp: _, j: _, fc: _, span: _, rows: _, scratch: _, hist, mask: _, n_in, base, rem, start: _ } = self;
+        for h in hist {
+            w.f32s(h);
+        }
+        w.i64(*n_in);
+        w.i64(*base);
+        w.i64(*rem);
+    }
+
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Converter { identity: _, lp, mp: _, j: _, fc: _, span: _, rows: _, scratch: _, hist, mask: _, n_in, base, rem, start: _ } = self;
+        for h in hist.iter_mut() {
+            r.f32s(h)?;
+        }
+        *n_in = r.i64()?;
+        *base = r.i64()?;
+        *rem = r.i64().filter(|x| (0..*lp).contains(x))?;
+        Some(())
+    }
+
+    /// Input samples pushed past the next output's newest one (the witnesses' observation).
+    pub(crate) fn ahead(&self) -> i64 {
+        self.n_in - self.base
+    }
+
+    /// Poison witnesses only: overwrites `scratch` with finite values that differ from the old
+    /// ones; returns how many it wrote.
+    pub(crate) fn poison_unobservable(&mut self, seed: u32) -> u64 {
+        let mut s = seed.wrapping_mul(0x9e37_79b9) | 1;
+        for x in &mut self.scratch {
+            s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let v = 0.0625 + (s >> 8) as f32 / 33_554_432.0;
+            *x = if v.to_bits() == x.to_bits() { v + 0.25 } else { v };
+        }
+        self.scratch.len() as u64
+    }
+}
+
 #[cfg(test)]
 mod checkpoint_tests {
     use super::*;
