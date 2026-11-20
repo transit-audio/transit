@@ -15,8 +15,11 @@ const MAX_SAVED: usize = 64;
 /// not known to the stream (a separate input device) keeps the saved input count.
 pub fn adopt(saved: &[IoMap], opened: IoMap) -> IoMap {
     let Some(mut map) = saved.iter().find(|m| m.key() == opened.key()).cloned() else { return opened };
-    let inputs = if opened.inputs > 0 { opened.inputs } else { map.inputs };
-    map.reconcile(inputs, opened.outputs);
+    map.reconcile_outputs(opened.outputs);
+    if opened.inputs > 0 && opened.inputs != map.inputs {
+        map.inputs = opened.inputs.min(transit_model::MAX_DEVICE_CHANNELS as u16);
+        map.add_default_inputs(map.inputs);
+    }
     // Where System Audio sits in the live input is the open input's, never the saved table's.
     map.system_audio = opened.system_audio;
     map
@@ -27,7 +30,11 @@ pub fn adopt(saved: &[IoMap], opened: IoMap) -> IoMap {
 pub fn with_input_count(map: &IoMap, input: Option<usize>) -> Option<IoMap> {
     let inputs = u16::try_from(input?).unwrap_or(u16::MAX);
     let mut next = map.clone();
-    next.adopt_inputs(inputs).then_some(next)
+    (next.inputs != inputs).then(|| {
+        next.inputs = inputs.min(transit_model::MAX_DEVICE_CHANNELS as u16);
+        next.add_default_inputs(next.inputs);
+        next
+    })
 }
 
 /// Keep `map` as its device's table (most recent last).

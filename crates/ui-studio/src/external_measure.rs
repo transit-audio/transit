@@ -328,6 +328,7 @@ impl StudioApp {
                     spread_frames: m.spread.round() as u32,
                     notes: m.found,
                     measured_at: now_secs(),
+                    input_device: String::new(),
                 };
                 let said = result_text(&m, r.rate);
                 if m.needs_keep(r.rate) {
@@ -428,6 +429,7 @@ mod tests {
             spread_frames: 19,
             notes: 8,
             measured_at: 1_792_800_000,
+            input_device: String::new(),
         }
     }
 

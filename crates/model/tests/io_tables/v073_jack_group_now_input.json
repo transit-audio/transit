@@ -1,0 +1,52 @@
+{
+  "system": "JACK",
+  "device": "USB Audio",
+  "inputs": 2,
+  "outputs": 2,
+  "paths": [
+    {
+      "name": "Out 1-2",
+      "direction": "Output",
+      "channels": [
+        0,
+        1
+      ],
+      "format": "Stereo",
+      "live": false
+    },
+    {
+      "name": "In 1",
+      "direction": "Input",
+      "channels": [
+        0
+      ],
+      "format": "Mono",
+      "live": false
+    },
+    {
+      "name": "Synth",
+      "direction": "Input",
+      "channels": [
+        0,
+        1
+      ],
+      "format": "Stereo",
+      "live": false
+    }
+  ],
+  "main": "Out 1-2",
+  "hardware_latency": [],
+  "external_latency": [
+    {
+      "port_id": "",
+      "port_name": "MODEL D",
+      "ret": "Synth",
+      "rate": 48000,
+      "buffer": 1024,
+      "frames": 1061,
+      "spread_frames": 19,
+      "notes": 8,
+      "measured_at": 1762000000
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "system": "WASAPI",
+  "device": "Speakers (Scarlett 2i2 USB)",
+  "inputs": 2,
+  "outputs": 2,
+  "paths": [
+    {
+      "name": "Out 1-2",
+      "direction": "Output",
+      "channels": [
+        0,
+        1
+      ],
+      "format": "Stereo",
+      "live": false
+    },
+    {
+      "name": "In 1",
+      "direction": "Input",
+      "channels": [
+        0
+      ],
+      "format": "Mono",
+      "live": false
+    },
+    {
+      "name": "Mic",
+      "direction": "Input",
+      "channels": [
+        1
+      ],
+      "format": "Mono",
+      "live": false
+    }
+  ],
+  "main": "Out 1-2",
+  "hardware_latency": [
+    {
+      "send": "Out 1-2",
+      "ret": "Mic",
+      "round_trip_frames": 1800,
+      "rate": 48000,
+      "measured_at": 1762000000
+    }
+  ],
+  "external_latency": []
+}

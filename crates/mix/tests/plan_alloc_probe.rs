@@ -357,7 +357,7 @@ fn hardware_inserts_allocate_nothing_when_added_bypassed_remeasured_and_removed(
     no_cost("add a hardware insert (unmeasured)", &rig.edit(&s));
     assert!(rig.out[2].iter().any(|x| *x != 0.0), "the send path carries the track");
     assert!(rig.out[0].iter().any(|x| *x != 0.0), "and the return plays on Main");
-    let at = |frames| HardwareLatency { send: "Out 3-4".into(), ret: "In 3-4".into(), round_trip_frames: frames, rate: SR, measured_at: 1 };
+    let at = |frames| HardwareLatency { send: "Out 3-4".into(), ret: "In 3-4".into(), round_trip_frames: frames, rate: SR, measured_at: 1, input_device: String::new()  };
     io.set_hardware_latency(at(900));
     rig.compiler.set_io(Arc::new(io.clone()));
     no_cost("a measurement lands", &rig.edit(&s));

@@ -231,6 +231,7 @@ mod tests {
             spread_frames: 20,
             notes: 8,
             measured_at: 1,
+            input_device: String::new(),
         };
         assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().latency, 0, "not measured");
         io.set_external_latency(measured);

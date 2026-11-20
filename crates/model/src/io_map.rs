@@ -83,6 +83,10 @@ pub struct HardwareLatency {
     /// Seconds since the Unix epoch when it was measured (0 when unknown).
     #[serde(default)]
     pub measured_at: u64,
+    /// The identity of the input device the return came through (ADR 0015, amendment for #431,
+    /// rule 13); empty for a figure stored before it was recorded (see [`IoMap::returns_through`]).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub input_device: String,
 }
 
 /// A measured External Instrument latency C (ADR 0020 decisions 4 and 5): the plan frames from
@@ -113,6 +117,9 @@ pub struct ExternalLatency {
     /// Seconds since the Unix epoch when it was measured (0 when unknown).
     #[serde(default)]
     pub measured_at: u64,
+    /// The identity of the input device the return came through (as [`HardwareLatency::input_device`]).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub input_device: String,
 }
 
 impl ExternalLatency {
@@ -128,7 +135,8 @@ impl ExternalLatency {
         self.port_is(port) && self.ret.eq_ignore_ascii_case(ret)
     }
 
-    /// Same key: port, return, rate and buffer.
+    /// Same key: port, return, rate and buffer (the input device is compared by the table, which
+    /// knows what an empty one stands for).
     #[must_use]
     pub fn same_key(&self, other: &ExternalLatency) -> bool {
         let port = MidiOutPort { name: other.port_name.clone(), id: other.port_id.clone(), ..MidiOutPort::default() };
@@ -168,11 +176,22 @@ pub struct ExternalLookup {
 
 /// One device's channel counts and path table. `inputs` and `outputs` are the counts the stream
 /// opened (stored here, so one device in two USB modes is one entry that adapts).
+///
+/// Since the amendment for #431 (rule 8) the saved tables are per side: this struct is the output
+/// record (outputs, Main, measurements; keyed by system and output device) and, composed with an
+/// [`crate::InputMap`], the table the engine holds ([`IoMap::compose`]). A record an older build
+/// saved holds both halves; its input half is written back as it was read and is read only where
+/// its key is the open input's identity ([`crate::adopt_input`]).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct IoMap {
     pub system: String,
     pub device: String,
+    /// The identity of the input device whose record the input half came from (the capture
+    /// endpoint actually opened, rule 8); empty when no input is composed in. Not saved in an
+    /// output record.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub input_device: String,
     pub inputs: u16,
     pub outputs: u16,
     pub paths: Vec<IoPath>,
@@ -226,19 +245,60 @@ impl IoPath {
     }
 }
 
+/// The default input paths for an input `inputs` channels wide (capped at
+/// [`MAX_DEVICE_CHANNELS`]): "In 1" per channel, then the stereo pairs "In 1-2", "In 3-4"
+/// (section 1.2: the labels sessions already use).
+pub fn default_input_paths(inputs: u16) -> Vec<IoPath> {
+    let inputs = inputs.min(MAX_DEVICE_CHANNELS as u16);
+    let mono = (0..inputs).map(|c| IoPath { live: false, name: label("In", c, 1), direction: IoDirection::Input, channels: vec![c], format: ChannelFormat::Mono });
+    let pairs = (0..inputs / 2).map(|i| 2 * i).map(|c| IoPath {
+        live: false,
+        name: label("In", c, 2),
+        direction: IoDirection::Input,
+        channels: vec![c, c + 1],
+        format: ChannelFormat::Stereo,
+    });
+    mono.chain(pairs).collect()
+}
+
+/// Why an input path the table defines cannot be heard or recorded (ADR 0015, amendment for #431,
+/// rules 8 to 10): it monitors silence, refuses to record, a hardware insert returning on it runs
+/// dry and an External Instrument has no return. It never falls back to another channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputUnavailable {
+    /// An output path has the same name (the two halves met in one table).
+    Clash,
+    /// A channel is not open: the input is narrower than the path (or not open at all).
+    OutOfRange { opened: u16 },
+}
+
+impl std::fmt::Display for InputUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputUnavailable::Clash => write!(f, "same name as an output path: rename one"),
+            InputUnavailable::OutOfRange { opened: 0 } => write!(f, "out of range: no input channels are open"),
+            InputUnavailable::OutOfRange { opened: 1 } => write!(f, "out of range: the input has 1 channel open"),
+            InputUnavailable::OutOfRange { opened } => write!(f, "out of range: the input has {opened} channels open"),
+        }
+    }
+}
+
 /// The device input channel (not yet wrapped to the channels the device opened) strip channel `k`
-/// of a `strip`-channel strip listens to or records for an input route named `name`. One function for the mix's monitoring
-/// and the recorder, so they cannot disagree (ADR 0015 section 1.4). A name in `io`'s table
-/// resolves through it, so a path renamed "Guitar" on channel 5 is channel 5. A name that is not
-/// there (an old session, or one made on another machine) keeps the label meaning it always had:
-/// the number in "In 3" or "In 3-4" is the first channel. A mono label ("In 3") feeds both sides
-/// of a stereo strip, as a mono path in the table does.
-pub fn input_channel(io: Option<&IoMap>, name: &str, k: usize, strip: usize) -> usize {
-    if let Some(p) = io.and_then(|m| m.path(name)).filter(|p| p.direction == IoDirection::Input) {
-        return p.source_channel(k, strip);
+/// of a `strip`-channel strip listens to or records for an input route named `name`, or `None`
+/// when the name is an unavailable input path ([`InputUnavailable`]: silence, never another
+/// channel). One function for the mix's monitoring and the recorder, so they cannot disagree (ADR
+/// 0015 section 1.4). A name in `io`'s table resolves through it, so a path renamed "Guitar" on
+/// channel 5 is channel 5. A name that is not there (an old session, or one made on another
+/// machine) keeps the label meaning it always had: the number in "In 3" or "In 3-4" is the first
+/// channel (amendment for #431, rule 10: "on port groups, other unresolved names keep today's
+/// label meaning"). A mono label ("In 3") feeds both sides of a stereo strip, as a mono path in
+/// the table does.
+pub fn input_channel(io: Option<&IoMap>, name: &str, k: usize, strip: usize) -> Option<usize> {
+    if let Some(state) = io.and_then(|m| m.input_state(name)) {
+        return state.ok().map(|p| p.source_channel(k, strip));
     }
     let first = name.trim_start_matches("In ").split(['-', ' ']).next().and_then(|n| n.parse::<usize>().ok()).map_or(0, |n| n.saturating_sub(1));
-    if strip <= 2 && is_mono_label(name) { first } else { first.saturating_add(k) }
+    Some(if strip <= 2 && is_mono_label(name) { first } else { first.saturating_add(k) })
 }
 
 /// Whether `name` is a one-channel input label: "In " and a number, nothing after it.
@@ -254,15 +314,18 @@ pub fn is_system_audio(name: &str) -> bool {
 /// The live input channel strip channel `k` (of `strip`) of an input route named `name` reads, among the
 /// `live` channels the input delivers, or `None` for silence. The one resolution for the mix's
 /// monitoring and the recorder. A device path wraps to the live channels as it always has
-/// ([`input_channel`]); System Audio is its pair (a mono strip hears the left side), and silent
-/// while it does not run, never another input.
+/// ([`input_channel`]); an unavailable input path is silent; a device channel at or past
+/// [`MAX_DEVICE_CHANNELS`] is never read (#431 Q6: a JACK port group of more than 32 ports opens
+/// them all, and the table stops at 32). System Audio is its pair (a mono strip hears the left
+/// side), and silent while it does not run, never another input.
 pub fn live_input_channel(io: Option<&IoMap>, name: &str, k: usize, strip: usize, live: usize) -> Option<usize> {
     if is_system_audio(name) {
         let first = usize::from(io?.system_audio?);
         let channel = first + k % 2;
         return (channel < live).then_some(channel);
     }
-    Some(input_channel(io, name, k, strip) % live.max(1))
+    let channel = input_channel(io, name, k, strip)? % live.max(1);
+    (channel < MAX_DEVICE_CHANNELS).then_some(channel)
 }
 
 impl IoMap {
@@ -285,30 +348,13 @@ impl IoMap {
             });
             c += width;
         }
-        for c in 0..inputs {
-            paths.push(IoPath {
-                live: false,
-                name: label("In", c, 1),
-                direction: IoDirection::Input,
-                channels: vec![c],
-                format: ChannelFormat::Mono,
-            });
-        }
-        let mut c = 0;
-        while c + 1 < inputs {
-            paths.push(IoPath {
-                live: false,
-                name: label("In", c, 2),
-                direction: IoDirection::Input,
-                channels: vec![c, c + 1],
-                format: ChannelFormat::Stereo,
-            });
-            c += 2;
-        }
+        paths.extend(default_input_paths(inputs));
         let main = paths.iter().find(|p| p.direction == IoDirection::Output).map_or_else(|| "Out 1-2".to_string(), |p| p.name.clone());
         IoMap {
             system: system.into(),
             device: device.into(),
+            // One device in both directions (ASIO's driver, a duplex fake): the input is the device.
+            input_device: if inputs > 0 { device.into() } else { String::new() },
             inputs,
             outputs,
             paths,
@@ -325,8 +371,59 @@ impl IoMap {
         (&self.system, &self.device)
     }
 
+    /// The path named `name` (an output first when an input path clashes with it).
     pub fn path(&self, name: &str) -> Option<&IoPath> {
         self.paths.iter().find(|p| p.name.eq_ignore_ascii_case(name))
+    }
+
+    /// The position of the path named `name`, of `direction` when given (a clash leaves two paths
+    /// of one name, one per direction, until one is renamed), else the first.
+    fn position(&self, name: &str, direction: Option<IoDirection>) -> Result<usize, IoError> {
+        self.paths
+            .iter()
+            .position(|p| p.name.eq_ignore_ascii_case(name) && direction.is_none_or(|d| p.direction == d))
+            .ok_or_else(|| IoError::Missing(name.into()))
+    }
+
+    /// The input path named `name`, available or not.
+    pub fn input_path(&self, name: &str) -> Option<&IoPath> {
+        self.paths.iter().find(|p| p.direction == IoDirection::Input && p.name.eq_ignore_ascii_case(name))
+    }
+
+    /// Why the input path `p` of this table cannot be used now, or `None` when it can: a name an
+    /// output path also has, or a channel past the open input's count.
+    pub fn input_unavailable(&self, p: &IoPath) -> Option<InputUnavailable> {
+        if self.paths.iter().any(|o| o.direction == IoDirection::Output && o.name.eq_ignore_ascii_case(&p.name)) {
+            return Some(InputUnavailable::Clash);
+        }
+        p.channels.iter().any(|&c| c >= self.inputs).then_some(InputUnavailable::OutOfRange { opened: self.inputs })
+    }
+
+    /// The input path named `name` and whether it can be used; `None` when the table has no input
+    /// path of that name.
+    pub fn input_state(&self, name: &str) -> Option<Result<&IoPath, InputUnavailable>> {
+        let p = self.input_path(name)?;
+        Some(self.input_unavailable(p).map_or(Ok(p), Err))
+    }
+
+    /// The input path named `name` when it can be used now.
+    pub fn available_input(&self, name: &str) -> Option<&IoPath> {
+        self.input_state(name)?.ok()
+    }
+
+    /// Whether a measurement whose return came through `input_device` applies to the input open
+    /// now (amendment for #431, rules 11 and 13). A figure that names its input applies only while
+    /// that input is open. A figure stored before inputs were recorded (empty) applies only where
+    /// its return's identity is established: this record's key is the open input's identity (one
+    /// device in both directions, as ASIO's driver). Equal display names elsewhere are not enough.
+    #[must_use]
+    pub fn returns_through(&self, input_device: &str) -> bool {
+        !self.input_device.is_empty() && self.input_device == self.figure_input(input_device)
+    }
+
+    /// The input a figure came back through: its own, or for an older figure this record's device.
+    fn figure_input<'a>(&'a self, input_device: &'a str) -> &'a str {
+        if input_device.is_empty() { &self.device } else { input_device }
     }
 
     pub fn paths_of(&self, direction: IoDirection) -> impl Iterator<Item = &IoPath> {
@@ -366,7 +463,8 @@ impl IoMap {
         Ok(())
     }
 
-    /// Names are unique across both directions.
+    /// Names are unique across both directions. Output paths stay ahead of input paths, as the
+    /// composed table has them ([`IoMap::compose`]).
     pub fn add_path(&mut self, mut path: IoPath) -> Result<(), IoError> {
         path.name = path.name.trim().to_string();
         self.validate(&path)?;
@@ -376,7 +474,11 @@ impl IoMap {
         if self.path(&path.name).is_some() {
             return Err(IoError::Duplicate(path.name));
         }
-        self.paths.push(path);
+        let at = match path.direction {
+            IoDirection::Output => self.paths.iter().position(|p| p.direction == IoDirection::Input).unwrap_or(self.paths.len()),
+            IoDirection::Input => self.paths.len(),
+        };
+        self.paths.insert(at, path);
         Ok(())
     }
 
@@ -384,6 +486,11 @@ impl IoMap {
     /// in the engine rewrites a `Route::Hardware`, so a route left naming the old name is an
     /// unresolved route (silent, listed by the engine), not a silent change of destination.
     pub fn rename_path(&mut self, name: &str, to: &str) -> Result<(), IoError> {
+        self.rename_path_in(name, None, to)
+    }
+
+    /// [`Self::rename_path`] of the path of `direction` (one side of a clash).
+    pub fn rename_path_in(&mut self, name: &str, direction: Option<IoDirection>, to: &str) -> Result<(), IoError> {
         let to = to.trim();
         if to.is_empty() {
             return Err(IoError::EmptyName);
@@ -391,11 +498,12 @@ impl IoMap {
         if is_system_audio(to) {
             return Err(IoError::Reserved(to.into()));
         }
-        if self.path(to).is_some_and(|p| !p.name.eq_ignore_ascii_case(name)) {
+        let i = self.position(name, direction)?;
+        if self.paths.iter().enumerate().any(|(j, p)| j != i && p.name.eq_ignore_ascii_case(to)) {
             return Err(IoError::Duplicate(to.into()));
         }
-        let p = self.paths.iter_mut().find(|p| p.name.eq_ignore_ascii_case(name)).ok_or_else(|| IoError::Missing(name.into()))?;
-        if self.main.eq_ignore_ascii_case(&p.name) {
+        let p = &mut self.paths[i];
+        if p.direction == IoDirection::Output && self.main.eq_ignore_ascii_case(&p.name) {
             self.main = to.into();
         }
         p.name = to.into();
@@ -414,7 +522,12 @@ impl IoMap {
 
     /// Replace a path's channels (its format follows the new width).
     pub fn set_channels(&mut self, name: &str, channels: Vec<u16>) -> Result<(), IoError> {
-        let i = self.paths.iter().position(|p| p.name.eq_ignore_ascii_case(name)).ok_or_else(|| IoError::Missing(name.into()))?;
+        self.set_channels_in(name, None, channels)
+    }
+
+    /// [`Self::set_channels`] of the path of `direction` (one side of a clash).
+    pub fn set_channels_in(&mut self, name: &str, direction: Option<IoDirection>, channels: Vec<u16>) -> Result<(), IoError> {
+        let i = self.position(name, direction)?;
         let mut next = self.paths[i].clone();
         next.format = format_of(channels.len());
         next.channels = channels;
@@ -424,32 +537,56 @@ impl IoMap {
     }
 
     pub fn remove_path(&mut self, name: &str) -> Result<(), IoError> {
-        if self.main.eq_ignore_ascii_case(name) {
+        self.remove_path_in(name, None)
+    }
+
+    /// [`Self::remove_path`] of the path of `direction` (one side of a clash). The measurements
+    /// that used it go with it: an output's as a send, an input's as a return.
+    pub fn remove_path_in(&mut self, name: &str, direction: Option<IoDirection>) -> Result<(), IoError> {
+        let i = self.position(name, direction)?;
+        let removed = self.paths[i].direction;
+        if removed == IoDirection::Output && self.main.eq_ignore_ascii_case(name) {
             return Err(IoError::MainPath);
         }
-        let before = self.paths.len();
-        self.paths.retain(|p| !p.name.eq_ignore_ascii_case(name));
-        if self.paths.len() == before {
-            return Err(IoError::Missing(name.into()));
+        self.paths.remove(i);
+        match removed {
+            IoDirection::Output => self.hardware_latency.retain(|m| !m.send.eq_ignore_ascii_case(name)),
+            IoDirection::Input => {
+                self.hardware_latency.retain(|m| !m.ret.eq_ignore_ascii_case(name));
+                self.external_latency.retain(|m| !m.ret.eq_ignore_ascii_case(name));
+            }
         }
-        self.hardware_latency.retain(|m| !m.send.eq_ignore_ascii_case(name) && !m.ret.eq_ignore_ascii_case(name));
-        self.external_latency.retain(|m| !m.ret.eq_ignore_ascii_case(name));
         Ok(())
     }
 
     /// The measured round trip, in frames, of a hardware insert sending on `send` and returning on
-    /// `ret` at session rate `rate`; `None` when that pair was not measured at that rate.
+    /// `ret` at session rate `rate` through the input open now ([`Self::returns_through`]); `None`
+    /// when that pair was not measured at that rate through this input.
     #[must_use]
     pub fn hardware_latency(&self, send: &str, ret: &str, rate: u32) -> Option<u32> {
         self.hardware_latency
             .iter()
-            .find(|m| m.rate == rate && m.send.eq_ignore_ascii_case(send) && m.ret.eq_ignore_ascii_case(ret))
+            .find(|m| m.rate == rate && m.send.eq_ignore_ascii_case(send) && m.ret.eq_ignore_ascii_case(ret) && self.returns_through(&m.input_device))
             .map(|m| m.round_trip_frames)
     }
 
-    /// Store a measurement, replacing the one for the same pair and rate.
+    /// Whether the pair has a figure at `rate` that does not apply to the input open now (it came
+    /// back through another input, or its input is not established): "measure again".
+    #[must_use]
+    pub fn hardware_latency_elsewhere(&self, send: &str, ret: &str, rate: u32) -> bool {
+        self.hardware_latency(send, ret, rate).is_none()
+            && self.hardware_latency.iter().any(|m| m.rate == rate && m.send.eq_ignore_ascii_case(send) && m.ret.eq_ignore_ascii_case(ret))
+    }
+
+    /// Store a measurement, replacing the one for the same pair, rate and return input (a figure
+    /// through another input stays, for when that input is open again).
     pub fn set_hardware_latency(&mut self, m: HardwareLatency) {
-        self.hardware_latency.retain(|o| !(o.rate == m.rate && o.send.eq_ignore_ascii_case(&m.send) && o.ret.eq_ignore_ascii_case(&m.ret)));
+        let input = self.figure_input(&m.input_device).to_string();
+        let same = |o: &HardwareLatency| {
+            o.rate == m.rate && o.send.eq_ignore_ascii_case(&m.send) && o.ret.eq_ignore_ascii_case(&m.ret) && self.figure_input(&o.input_device) == input
+        };
+        let kept: Vec<HardwareLatency> = self.hardware_latency.iter().filter(|o| !same(o)).cloned().collect();
+        self.hardware_latency = kept;
         self.hardware_latency.push(m);
     }
 
@@ -460,9 +597,13 @@ impl IoMap {
         self.hardware_latency.len() != before
     }
 
-    /// Store an External Instrument measurement, replacing the one with the same key.
+    /// Store an External Instrument measurement, replacing the one with the same key and return
+    /// input.
     pub fn set_external_latency(&mut self, m: ExternalLatency) {
-        self.external_latency.retain(|o| !o.same_key(&m));
+        let input = self.figure_input(&m.input_device).to_string();
+        let kept: Vec<ExternalLatency> =
+            self.external_latency.iter().filter(|o| !(o.same_key(&m) && self.figure_input(&o.input_device) == input)).cloned().collect();
+        self.external_latency = kept;
         self.external_latency.push(m);
     }
 
@@ -479,7 +620,8 @@ impl IoMap {
     /// and 3). `None` when the chain was never measured on this machine.
     #[must_use]
     pub fn external_measurement(&self, port: &MidiOutPort, ret: &str, rate: u32, buffer: Option<u32>) -> Option<ExternalLookup> {
-        let chain = || self.external_latency.iter().filter(|m| m.chain_is(port, ret));
+        // Only a figure whose return came through the input open now (amendment for #431, rule 13).
+        let chain = || self.external_latency.iter().filter(|m| m.chain_is(port, ret) && self.returns_through(&m.input_device));
         // A device that does not say its buffer is keyed 0, as it was when measured.
         let buffer = buffer.unwrap_or(0);
         if let Some(m) = chain().rfind(|m| m.rate == rate && m.buffer == buffer) {
@@ -491,6 +633,13 @@ impl IoMap {
             _ => Some(m),
         })?;
         Some(ExternalLookup { frames: m.frames_at(rate), source: ExternalSource::Stale(m.clone()) })
+    }
+
+    /// Whether `port` returning on `ret` was measured, but only through another input than the
+    /// one open now (or one not established): the card says "measure again".
+    #[must_use]
+    pub fn external_latency_elsewhere(&self, port: &MidiOutPort, ret: &str) -> bool {
+        self.external_measurement(port, ret, 0, None).is_none() && self.external_latency.iter().any(|m| m.chain_is(port, ret))
     }
 
     /// The latency C of `t`'s External Instrument at `rate`, by decision 4's lookup: `manual_ms`
@@ -528,52 +677,27 @@ impl IoMap {
         }
     }
 
-    /// Adopt the counts a device opened with: paths that no longer fit are dropped; a table left
-    /// without its Main path gets the defaults back, and a table that had no inputs gets the
-    /// default input paths (#690: a table saved while the input did not open). Paths the user
-    /// made stay, and a default removed or renamed while the count stays is not restored.
-    /// Returns whether anything changed.
-    pub fn reconcile(&mut self, inputs: u16, outputs: u16) -> bool {
-        let cap = MAX_DEVICE_CHANNELS as u16;
-        let (inputs, outputs) = (inputs.min(cap), outputs.min(cap));
-        if (inputs, outputs) == (self.inputs, self.outputs) {
+    /// Adopt the output count a device opened with: output paths that no longer fit are dropped,
+    /// and a table left without its Main path gets the default output paths back. The input half
+    /// is not touched: it follows the input device ([`crate::adopt_input`], amendment for #431,
+    /// rules 8 and 11). Returns whether anything changed.
+    pub fn reconcile_outputs(&mut self, outputs: u16) -> bool {
+        let outputs = outputs.min(MAX_DEVICE_CHANNELS as u16);
+        if outputs == self.outputs {
             return false;
         }
-        let had_inputs = self.inputs;
-        self.inputs = inputs;
         self.outputs = outputs;
-        let fits: Vec<bool> = self.paths.iter().map(|p| p.channels.iter().all(|&c| c < self.opened(p.direction))).collect();
-        let mut fits = fits.into_iter();
-        self.paths.retain(|_| fits.next().unwrap_or(false));
-        if self.path(&self.main).is_none() {
-            let fresh = Self::for_device(&self.system, &self.device, inputs, outputs);
-            for p in fresh.paths {
-                if self.path(&p.name).is_none() {
-                    self.paths.push(p);
-                }
-            }
+        self.paths.retain(|p| p.direction == IoDirection::Input || p.channels.iter().all(|&c| c < outputs));
+        if self.paths_of(IoDirection::Output).all(|p| !p.name.eq_ignore_ascii_case(&self.main)) {
+            let fresh = Self::for_device(&self.system, &self.device, 0, outputs);
+            let at = self.paths.iter().position(|p| p.direction == IoDirection::Input).unwrap_or(self.paths.len());
+            let missing: Vec<IoPath> = fresh.paths.into_iter().filter(|p| self.path(&p.name).is_none()).collect();
+            self.paths.splice(at..at, missing);
             self.main = fresh.main;
             // A former cue can become the fallback Main when the device loses output channels.
-            self.paths.iter_mut().filter(|p| p.name.eq_ignore_ascii_case(&self.main)).for_each(|p| p.live = false);
-        }
-        if had_inputs == 0 {
-            let fresh = Self::for_device(&self.system, &self.device, inputs, outputs);
-            for p in fresh.paths.into_iter().filter(|p| p.direction == IoDirection::Input) {
-                if self.path(&p.name).is_none() {
-                    self.paths.push(p);
-                }
-            }
+            self.paths.iter_mut().filter(|p| p.direction == IoDirection::Output && p.name.eq_ignore_ascii_case(&self.main)).for_each(|p| p.live = false);
         }
         true
-    }
-
-    /// Adopt the channel count of an input that opened as its own device (cpal: ALSA, CoreAudio),
-    /// which the output's open cannot know (#429): paths beyond it are dropped as in
-    /// [`Self::reconcile`], and a table that had no inputs gets the default input paths. The same
-    /// count changes nothing, so input paths the user removed stay removed. Returns whether
-    /// anything changed.
-    pub fn adopt_inputs(&mut self, inputs: u16) -> bool {
-        self.reconcile(inputs, self.outputs)
     }
 
     /// Pairs of output paths that share a device channel (they sum there), with the first shared
@@ -704,15 +828,17 @@ mod tests {
     fn a_new_channel_count_keeps_what_fits_and_rebuilds_a_missing_main() {
         let mut m = IoMap::for_device("ASIO", "TASCAM", 12, 10);
         m.add_path(out("Mine", vec![0, 1])).unwrap();
-        assert!(!m.reconcile(12, 10));
-        assert!(m.reconcile(2, 2));
-        assert_eq!((m.inputs, m.outputs), (2, 2));
-        assert!(m.path("Out 5-6").is_none() && m.path("In 7").is_none());
+        assert!(!m.reconcile_outputs(10));
+        assert!(m.reconcile_outputs(2));
+        assert_eq!((m.inputs, m.outputs), (12, 2), "the input half is the input device's, never touched here");
+        assert!(m.path("Out 5-6").is_none() && m.path("In 7").is_some());
         assert!(m.path("Mine").is_some() && m.path("Out 1-2").is_some());
-        let mut moved = IoMap::for_device("ASIO", "x", 0, 4);
+        let mut moved = IoMap::for_device("ASIO", "x", 2, 4);
         moved.set_main("Out 3-4").unwrap();
-        moved.reconcile(0, 2);
+        moved.reconcile_outputs(2);
         assert_eq!(moved.main, "Out 1-2");
+        assert_eq!(names(&moved, IoDirection::Output), ["Out 1-2"]);
+        assert_eq!(names(&moved, IoDirection::Input), ["In 1", "In 2", "In 1-2"], "a Main repair adds no input paths");
     }
 
     #[test]
@@ -722,18 +848,18 @@ mod tests {
             .unwrap();
         m.add_path(IoPath { live: false, name: "Pair".into(), direction: IoDirection::Input, channels: vec![6, 1], format: ChannelFormat::Stereo })
             .unwrap();
-        assert_eq!(input_channel(Some(&m), "Guitar", 0, 2), 4);
-        assert_eq!(input_channel(Some(&m), "guitar", 1, 2), 4, "a stereo strip on a mono path hears it on both sides (#681)");
-        assert_eq!((input_channel(Some(&m), "Pair", 0, 2), input_channel(Some(&m), "Pair", 1, 2)), (6, 1));
-        assert_eq!(input_channel(Some(&m), "In 3", 0, 2), 2);
-        assert_eq!(input_channel(Some(&m), "In 3-4", 1, 2), 3);
+        assert_eq!(input_channel(Some(&m), "Guitar", 0, 2), Some(4));
+        assert_eq!(input_channel(Some(&m), "guitar", 1, 2), Some(4), "a stereo strip on a mono path hears it on both sides (#681)");
+        assert_eq!((input_channel(Some(&m), "Pair", 0, 2), input_channel(Some(&m), "Pair", 1, 2)), (Some(6), Some(1)));
+        assert_eq!(input_channel(Some(&m), "In 3", 0, 2), Some(2));
+        assert_eq!(input_channel(Some(&m), "In 3-4", 1, 2), Some(3));
         // Not in the table: the number in the label, as before.
-        assert_eq!(input_channel(Some(&m), "In 12", 0, 2), 11);
-        assert_eq!(input_channel(Some(&m), "In 12", 1, 2), 11, "a mono label feeds both sides too");
-        assert_eq!(input_channel(None, "In 3-4", 1, 2), 3);
-        assert_eq!(input_channel(None, "Guitar", 0, 2), 0);
-        // An output path is not an input.
-        assert_eq!(input_channel(Some(&m), "Out 1-2", 0, 2), 0);
+        assert_eq!(input_channel(Some(&m), "In 12", 0, 2), Some(11));
+        assert_eq!(input_channel(Some(&m), "In 12", 1, 2), Some(11), "a mono label feeds both sides too");
+        assert_eq!(input_channel(None, "In 3-4", 1, 2), Some(3));
+        assert_eq!(input_channel(None, "Guitar", 0, 2), Some(0));
+        // An output path is not an input (and no input path has its name): the label rule, as before.
+        assert_eq!(input_channel(Some(&m), "Out 1-2", 0, 2), Some(0));
     }
 
     /// #681: a one-channel input gets its default "In 1" however the table arrives (opened with
@@ -743,11 +869,7 @@ mod tests {
     fn a_one_channel_input_has_its_default_path_and_a_stereo_strip_hears_it_on_both_sides() {
         let one = IoMap::for_device("test", "x", 1, 2);
         assert_eq!(names(&one, IoDirection::Input), ["In 1"]);
-        let mut narrowed = IoMap::for_device("test", "x", 2, 2);
-        assert!(narrowed.reconcile(1, 2));
-        assert_eq!(names(&narrowed, IoDirection::Input), ["In 1"]);
-        let mut late = IoMap::for_device("test", "x", 0, 2);
-        assert!(late.adopt_inputs(1));
+        let (late, _) = crate::adopt_input(&IoMap::for_device("test", "x", 0, 2), &[], &[], "x", 1);
         assert_eq!(names(&late, IoDirection::Input), ["In 1"]);
         let both =
             |m: &IoMap, name: &str, live: usize| (live_input_channel(Some(m), name, 0, 2, live), live_input_channel(Some(m), name, 1, 2, live));
@@ -758,7 +880,7 @@ mod tests {
         assert_eq!(both(&two, "In 1-2", 2), (Some(0), Some(1)), "a stereo path is unchanged");
         // Wider than stereo: unchanged, a mono path or label continues past its channel.
         let eight = IoMap::for_device("test", "x", 8, 2);
-        let all = |name: &str, strip: usize| (0..strip).map(|k| input_channel(Some(&eight), name, k, strip)).collect::<Vec<_>>();
+        let all = |name: &str, strip: usize| (0..strip).map(|k| input_channel(Some(&eight), name, k, strip).unwrap()).collect::<Vec<_>>();
         assert_eq!(all("In 3", 4), [2, 3, 4, 5], "a quad track on In 3, as before #681");
         assert_eq!(all("In 12", 4), [11, 12, 13, 14], "a mono label not in the table, as before");
         assert_eq!(all("In 3", 2), [2, 2]);
@@ -794,7 +916,14 @@ mod tests {
     fn hardware_latency_is_per_pair_and_rate_and_follows_removed_paths() {
         let mut m = IoMap::for_device("ASIO", "x", 4, 4);
         assert_eq!(m.hardware_latency("Out 3-4", "In 3-4", 48_000), None);
-        let at = |frames, rate| HardwareLatency { send: "Out 3-4".into(), ret: "In 3-4".into(), round_trip_frames: frames, rate, measured_at: 7 };
+        let at = |frames, rate| HardwareLatency {
+            send: "Out 3-4".into(),
+            ret: "In 3-4".into(),
+            round_trip_frames: frames,
+            rate,
+            measured_at: 7,
+            input_device: String::new(),
+        };
         m.set_hardware_latency(at(300, 48_000));
         m.set_hardware_latency(at(500, 44_100));
         m.set_hardware_latency(at(310, 48_000));
@@ -820,6 +949,7 @@ mod tests {
             spread_frames: 19,
             notes: 8,
             measured_at: at,
+            input_device: String::new(),
         }
     }
 
@@ -856,7 +986,7 @@ mod tests {
         assert_eq!(m.external_measurement(&d, "In 2", 48_000, Some(64)), None);
         assert!(m.hardware_latency.is_empty(), "a separate table");
         // A port id wins over the name when both have one.
-        let mut byid = IoMap::default();
+        let mut byid = IoMap::for_device("ASIO", "Scarlett", 2, 2);
         byid.set_external_latency(ExternalLatency { port_id: "usb-1".into(), ..ext("MODEL D", "In 1", 48_000, 64, 900, 1) });
         assert!(byid.external_measurement(&port("Renamed", "usb-1"), "In 1", 48_000, Some(64)).is_some());
         assert!(byid.external_measurement(&port("MODEL D", "usb-2"), "In 1", 48_000, Some(64)).is_none());
@@ -891,27 +1021,6 @@ mod tests {
         t.midi_output = MidiOutput::Internal;
         t.instrument = Some(Insert::external("In 1"));
         assert_eq!(m.external_latency_of(&t, 48_000), None, "no port, no measurement");
-    }
-
-    /// #429: an ALSA output opens its table with no inputs; the separate input's count arrives
-    /// later and must give the table its inputs and their default paths, keeping the outputs.
-    #[test]
-    fn a_separate_input_count_gives_the_table_its_inputs_and_default_paths() {
-        let mut m = IoMap::for_device("ALSA", "pipewire", 0, 2);
-        m.add_path(out("Cue", vec![1])).unwrap();
-        assert!(m.adopt_inputs(2));
-        assert_eq!(m.inputs, 2);
-        assert_eq!(names(&m, IoDirection::Input), ["In 1", "In 2", "In 1-2"]);
-        assert!(m.path("Cue").is_some(), "the output paths stay");
-        m.remove_path("In 1").unwrap();
-        m.remove_path("In 1-2").unwrap();
-        m.remove_path("In 2").unwrap();
-        assert!(!m.adopt_inputs(2), "the same count changes nothing: removed input paths stay removed");
-        assert_eq!(names(&m, IoDirection::Input), Vec::<&str>::new());
-        m.add_path(IoPath { direction: IoDirection::Input, format: ChannelFormat::Mono, ..out("In 1", vec![0]) }).unwrap();
-        m.add_path(IoPath { direction: IoDirection::Input, format: ChannelFormat::Stereo, ..out("In 1-2", vec![0, 1]) }).unwrap();
-        assert!(m.adopt_inputs(1));
-        assert_eq!(names(&m, IoDirection::Input), ["In 1"], "a narrower input drops the paths beyond it and adds none back");
     }
 
     #[test]

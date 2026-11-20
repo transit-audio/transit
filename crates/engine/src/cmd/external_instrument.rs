@@ -325,6 +325,7 @@ mod tests {
             spread_frames: 19,
             notes: 8,
             measured_at: 1,
+            input_device: String::new(),
         };
         e.store_external_latency(m.clone());
         e.store_external_latency(m.clone());

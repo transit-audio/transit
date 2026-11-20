@@ -1,0 +1,45 @@
+{
+  "system": "ASIO",
+  "device": "Model Mixer ASIO Driver",
+  "inputs": 12,
+  "outputs": 10,
+  "paths": [
+    {
+      "name": "Out 1-2",
+      "direction": "Output",
+      "channels": [
+        0,
+        1
+      ],
+      "format": "Stereo"
+    },
+    {
+      "name": "Out 3-4",
+      "direction": "Output",
+      "channels": [
+        2,
+        3
+      ],
+      "format": "Stereo"
+    },
+    {
+      "name": "In 1",
+      "direction": "Input",
+      "channels": [
+        0
+      ],
+      "format": "Mono"
+    },
+    {
+      "name": "Vocal",
+      "direction": "Input",
+      "channels": [
+        11
+      ],
+      "format": "Mono"
+    }
+  ],
+  "main": "Out 1-2",
+  "hardware_latency": [],
+  "external_latency": []
+}

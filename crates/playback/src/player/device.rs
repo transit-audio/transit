@@ -196,11 +196,12 @@ impl Player {
         Arc::clone(&self.io.borrow())
     }
     /// Use `io` as the path table. The opened output count stays the stream's (a different count
-    /// is a reopen), so paths that do not fit are dropped; the table reaches the audio thread as
-    /// a plan, with no device reopen.
+    /// is a reopen), so output paths that do not fit are dropped; the input half is the input
+    /// device's and is left as it is (paths past the open input are unavailable, not dropped). The
+    /// table reaches the audio thread as a plan, with no device reopen.
     pub fn set_io(&self, mut io: IoMap) -> Result<SessionRequestId, PlayerError> {
         let opened = if self.silent { io.outputs } else { self.device_channels };
-        io.reconcile(io.inputs, opened);
+        io.reconcile_outputs(opened);
         // The buffer the device runs: part of an External Instrument measurement's key (ADR 0020
         // decision 5), so the plan picks the measurement made at this buffer.
         io.buffer = if self.silent { None } else { self.device_buffer };

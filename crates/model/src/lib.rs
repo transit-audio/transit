@@ -17,6 +17,7 @@ pub mod gain_lane;
 pub use frozen_recording::FrozenRecording;
 pub mod disk;
 mod ids;
+mod input_map;
 mod io_map;
 pub mod legacy;
 pub mod legacy_effects;
@@ -59,9 +60,10 @@ pub use clip::{
 };
 pub use device_pages::{DeviceRef, MAX_USER_PAGES, PagesError, UserPage};
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
+pub use input_map::{InputMap, adopt_input};
 pub use io_map::{
-    ExternalLatency, ExternalLookup, ExternalSource, HardwareLatency, IoDirection, IoError, IoMap, IoPath, MAX_DEVICE_CHANNELS, MAX_PATH_WIDTH,
-    SYSTEM_AUDIO_PATH, input_channel, is_system_audio, live_input_channel,
+    ExternalLatency, ExternalLookup, ExternalSource, HardwareLatency, InputUnavailable, IoDirection, IoError, IoMap, IoPath, MAX_DEVICE_CHANNELS,
+    MAX_PATH_WIDTH, SYSTEM_AUDIO_PATH, default_input_paths, input_channel, is_system_audio, live_input_channel,
 };
 pub use markers::{Group, MarkerKind, MemoryLocation};
 pub use midi_effect::{MAX_MIDI_EFFECTS, MIDI_EFFECT_SLOT, MidiEffectSlot};

@@ -1,0 +1,21 @@
+{
+  "system": "JACK",
+  "device": "Headset",
+  "inputs": 2,
+  "outputs": 2,
+  "paths": [
+    {
+      "name": "Out 1-2",
+      "direction": "Output",
+      "channels": [
+        0,
+        1
+      ],
+      "format": "Stereo",
+      "live": false
+    }
+  ],
+  "main": "Out 1-2",
+  "hardware_latency": [],
+  "external_latency": []
+}

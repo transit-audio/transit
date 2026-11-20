@@ -654,7 +654,7 @@ mod record_tests {
         assert_eq!(channels(wide), [4, 4], "a stereo track on a mono path records it on both sides (#681)");
         assert_eq!(channels(quad), [4, 5, 6, 7], "wider than stereo: the channels after it, as before");
         // The same names, resolved by the mix: one function (`transit_model::input_channel`).
-        assert_eq!(transit_model::input_channel(Some(e.io_map()), "Guitar", 0, 1), 4);
+        assert_eq!(transit_model::input_channel(Some(e.io_map()), "Guitar", 0, 1), Some(4));
     }
 
     #[test]

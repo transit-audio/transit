@@ -24,7 +24,7 @@ fn a_device_shrink_clears_live_when_a_cue_becomes_fallback_main() {
     map.set_main("Out 3-4").unwrap();
     map.set_live("Out 1-2", true).unwrap();
     assert!(map.path("Out 1-2").unwrap().live);
-    map.reconcile(2, 2);
+    map.reconcile_outputs(2);
     assert_eq!(map.main, "Out 1-2");
     assert!(!map.path(&map.main).unwrap().live);
     assert!(map.validate(map.path(&map.main).unwrap()).is_ok());

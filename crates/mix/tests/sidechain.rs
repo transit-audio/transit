@@ -482,6 +482,7 @@ fn a_key_after_a_hardware_insert_is_aligned() {
         round_trip_frames: D as u32,
         rate: SR,
         measured_at: 1,
+        input_device: String::new(),
     });
     let reference = latent_kick_to_bass(0, 0, 0, Tap::Post, 0.0);
     let (base, base_latency) = render_latent(&reference);

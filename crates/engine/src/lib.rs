@@ -428,6 +428,8 @@ impl Engine {
             round_trip_frames,
             rate: self.doc.sample_rate.hz(),
             measured_at: at,
+            // The input the click came back through (ADR 0015, amendment for #431, rule 13).
+            input_device: self.io.input_device.clone(),
         });
         self.set_io_map(io);
     }
@@ -435,7 +437,9 @@ impl Engine {
     /// Keep an External Instrument measurement (per machine: no undo step, the session stays
     /// clean), replacing the one with the same port, return, rate and buffer (ADR 0020 decision
     /// 5). The host passes the table on to the audio thread.
-    pub fn store_external_latency(&mut self, m: transit_model::ExternalLatency) {
+    /// The figure is stamped with the input its return came through (amendment for #431, rule 13).
+    pub fn store_external_latency(&mut self, mut m: transit_model::ExternalLatency) {
+        m.input_device.clone_from(&self.io.input_device);
         let mut io = self.io.clone();
         io.set_external_latency(m);
         self.set_io_map(io);
