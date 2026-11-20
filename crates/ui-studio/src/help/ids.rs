@@ -88,6 +88,7 @@ ids! {
     AudioDevicesGraph => "audio_devices.graph",
     AudioDevicesLatencyReported => "audio_devices.latency_reported",
     AudioDevicesLinkCheck => "audio_devices.link_check",
+    AudioDevicesLinkCheckSkipped => "audio_devices.link_check_skipped",
     AudioDevicesBackend => "audio_devices.backend",
     AudioDevicesWakes => "audio_devices.wakes",
     AudioDevicesGapOverPeriod => "audio_devices.gap_over_period",

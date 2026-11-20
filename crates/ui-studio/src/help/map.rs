@@ -153,6 +153,8 @@ pub fn status_segments(line: &str) -> Vec<Segment> {
         Some(Id::AudioDevicesLatencyReported)
     } else if line.starts_with("Link from ") {
         Some(Id::AudioDevicesLinkCheck)
+    } else if line.starts_with("The startup link check could not run") {
+        Some(Id::AudioDevicesLinkCheckSkipped)
     } else if line.starts_with("Recovery:") {
         Some(Id::AudioDevicesRecovery)
     } else {

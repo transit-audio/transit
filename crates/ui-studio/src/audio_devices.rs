@@ -660,8 +660,10 @@ impl StudioApp {
             (None, Some(f)) => f.systems.clone(),
             (None, None) => Vec::new(), // listed by the worker, see `request_diagnostics`
         };
-        // The lines the window shows, as last drawn; computed when the window has not drawn them.
-        let opened = if self.audio_devices.layout.opened.is_empty() { opened_lines(self, now) } else { self.audio_devices.layout.opened.clone() };
+        // The lines the window shows, computed now: the last drawn ones can be a closed device's
+        // (a reopen or another audio system since the last draw, #760 round 3). A wake rate keeps
+        // its last figure when sampled again within its span, so copying does not disturb it.
+        let opened = opened_lines(self, now);
         let telemetry = match (&self.player, self.telemetry.injected) {
             (Some(p), _) => Some(p.callback_telemetry()),
             (None, injected) => injected,

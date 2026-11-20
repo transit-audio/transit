@@ -1,5 +1,9 @@
 use super::*;
 
+/// Why an automatic reopen did not count when the device opened but at once asked to be reopened
+/// again (native JACK found the graph at another rate than the Player was built for, #760).
+pub(crate) const REOPENED_AND_ASKED_AGAIN: &str = "it opened, then asked to be reopened again";
+
 /// The Player a device open makes: the silent device in a `--null-audio` run (`null_audio`; no
 /// audio system is asked, whatever `cfg` says), else the saved choices `cfg`. The launch open and
 /// every reopen go through here, so a `--null-audio` run never reaches the hardware.
@@ -181,6 +185,7 @@ impl StudioApp {
         let what = self.reopen.cause().map_or("driver reset", ReopenCause::text);
         let why = match &result {
             Err(error) => error.clone(),
+            Ok(_) if player.is_some_and(|p| !p.silent && p.reopen_cause().is_some()) => REOPENED_AND_ASKED_AGAIN.to_owned(),
             Ok(_) => player.and_then(Player::initial_error).unwrap_or("it did not open").to_owned(),
         };
         self.status = if opened {

@@ -51,12 +51,33 @@ fn a_rate_that_keeps_moving_stops_at_the_three_attempt_limit() {
     assert_eq!(opens(&client), 1 + transit_playback::reopen::REOPEN_ATTEMPTS as usize, "the open and three attempts");
     assert!(t.app.reopen.gave_up());
     assert!(
-        t.app.status.contains("did not reopen after the driver reset (it did not open), after 3 attempts. Use Audio › Reconnect Device."),
+        t.app.status.contains(
+            "did not reopen after the driver reset (it opened, then asked to be reopened again), after 3 attempts. Use Audio › Reconnect Device."
+        ),
         "{}",
         t.app.status
     );
     run(&mut t, &client, 600);
     assert_eq!(opens(&client), 4, "no loop");
+}
+
+/// #760 round 3: Copy diagnostics carries the lines of the device open now, not the last drawn
+/// ones, which can be a closed device's (a reopen or another audio system since the last draw).
+#[test]
+fn copy_diagnostics_carries_the_open_devices_lines_not_the_last_drawn_ones() {
+    let client = jack_client();
+    client.set_device_lines(&[
+        "Graph: 48000 Hz, buffer 1024 (reported by transit's active client)",
+        "The startup link check could not run: no process cycle completed within about 2 seconds of the start.",
+    ]);
+    let mut t = rig(&client);
+    t.open_window();
+    assert!(t.app.audio_devices.layout.opened.iter().any(|l| l.starts_with("Graph: ")), "drawn");
+    // Another device opens (the silent runtime here) and no frame is drawn before the copy.
+    t.app.player = Some(transit_playback::Player::prepare_device_free(t.app.engine.session_arc()).unwrap());
+    let report = t.app.diagnostics_report(t.time);
+    assert!(!report.opened.iter().any(|l| l.starts_with("Graph: ") || l.starts_with("The startup link check")), "{:?}", report.opened);
+    assert!(report.opened.iter().any(|l| l.starts_with("Output open: ")), "{:?}", report.opened);
 }
 
 /// #760 slice 2: native JACK's display-only lines (the graph, the latency reported at startup,
@@ -71,17 +92,24 @@ fn the_jack_device_lines_show_under_the_open_lines_with_their_help() {
         "Latency reported at startup: output 256 frames (5.3 ms), input not reported; not measured, Measure measures the loop",
         "PipeWire may perform rate conversion and add buffering. JACK does not identify those stages separately or establish which delays are included in these reported ranges.",
         "Link from transit:out_1 to Headset:playback_1 was not observed at the startup check.",
+        "The startup link check could not run: no process cycle completed within about 2 seconds of the start.",
     ];
     client.set_device_lines(&lines);
     let mut t = rig(&client);
     t.open_window();
     let opened = t.app.audio_devices.layout.opened.clone();
     let at = opened.iter().position(|l| l == lines[0]).unwrap_or_else(|| panic!("{opened:?}"));
-    assert_eq!(&opened[at..at + 4], lines, "together, in order");
+    assert_eq!(&opened[at..at + 5], lines, "together, in order");
     assert!(opened[..at].iter().any(|l| l.starts_with("Output open:")), "under the output line");
     let ids: Vec<Option<Id>> = lines.iter().map(|l| status_segments(l)[0].id).collect();
     assert_eq!(
         ids,
-        [Some(Id::AudioDevicesGraph), Some(Id::AudioDevicesLatencyReported), Some(Id::AudioDevicesGraph), Some(Id::AudioDevicesLinkCheck)]
+        [
+            Some(Id::AudioDevicesGraph),
+            Some(Id::AudioDevicesLatencyReported),
+            Some(Id::AudioDevicesGraph),
+            Some(Id::AudioDevicesLinkCheck),
+            Some(Id::AudioDevicesLinkCheckSkipped)
+        ]
     );
 }

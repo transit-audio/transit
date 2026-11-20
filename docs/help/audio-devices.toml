@@ -86,6 +86,11 @@ name = "Link not observed"
 text = "Native JACK: one link transit asked for between its ports and the device's was not there when transit looked, once, right after the device started. It says what jack_connect returned when that was an error. Under PipeWire a setting such as jack.self-connect-mode can refuse links to transit's ports. A link that appears later does not clear the line; nothing is retried. Connect the ports in a patchbay, or press Reconnect."
 
 [[entry]]
+id = "audio_devices.link_check_skipped"
+name = "Link check not run"
+text = "Native JACK: transit looks for its own links once, after a process cycle that began after it connected its ports has completed, because the server shows a new link only from a later cycle. No cycle completed within about two seconds of the start, so transit did not look and claims nothing about the links. A stalled or very slow server does this; check the links in a patchbay, or press Reconnect."
+
+[[entry]]
 id = "audio_devices.backend"
 name = "Backend counters"
 text = "The device loop's own figures since the stream opened. Healthy is gap over period and service far below one buffer period, and no skipped wakes, timeouts, faults or driver events. Hover each figure for what it counts."

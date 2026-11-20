@@ -145,10 +145,14 @@ with no lock held:
 - A rate or quantum other than the open ones: `ResetRequested` once per new pair, so the Player
   reopens at the server's settings (the transport stops; a take is kept).
 - Xruns: `StreamStats::overloads` (and the next stamp is invalid); not an error.
-- The startup check (#760 rules 3 and 6, `src/startup.rs`), at the first tick after each
-  direction's start, never on a latched client: each link transit asked for that its port does not
-  show is a line, "Link from X to Y was not observed at the startup check." (with what
-  `jack_connect` returned, and under PipeWire the `jack.self-connect-mode` hint); once every
+- The startup check (#760 rules 3 and 6, `src/startup.rs`), never on a latched client: at the
+  first tick after a process cycle that began after a direction's connects has completed (the
+  server shows a new link from a later cycle on), each link transit asked for that its port does
+  not show is a line, "Link from X to Y was not observed at the startup check." (with what
+  `jack_connect` returned, and under PipeWire the `jack.self-connect-mode` hint); with no such
+  cycle within 100 ticks (about 2 s) no link is called missing and one line says "The startup link
+  check could not run: no process cycle completed within about 2 seconds of the start."; a server
+  shutdown seen after the reads publishes nothing of them, and a rescan does the same; once every
   direction has started, the latency the server reports for the device ports is read once
   (`jack_port_get_latency_range`, optional in the table). Audio Devices shows, under the open
   lines, "Graph: ..." (the buffer "observed" once a cycle ran with it), "Latency reported at
