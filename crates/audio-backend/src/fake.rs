@@ -5,7 +5,7 @@
 
 use crate::{
     Achieved, Backend, BackendFactory, Calibration, CaptureBlock, CaptureCallback, CaptureEndpoint, CaptureSource, Direction, Endpoint,
-    ErrorCallback, Format, InputWish, Mode, OpenError, OpenRequest, OutputWish, Period, Plan, RenderBlock, RenderCallback, RenderSink,
+    ErrorCallback, Format, InputWish, LinkSnapshot, Mode, OpenError, OpenRequest, OutputWish, Period, Plan, RenderBlock, RenderCallback, RenderSink,
     SCRATCH_FRAMES, SampleFormat, Stamp, Stream, StreamError, StreamStats, WorkerPriority,
 };
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -38,6 +38,10 @@ struct State {
     /// The capture endpoint a capture open on this device reports it opened, as native WASAPI
     /// reports the endpoint paired with its render endpoint ([`Stream::opened_capture`]).
     paired_capture: Option<CaptureEndpoint>,
+    /// Links other programs made to the device's ports (one description each), which a render
+    /// stream snapshots before a reopen ([`Stream::snapshot_links`]); and what a restore received.
+    links: Vec<String>,
+    restored: Vec<String>,
 }
 
 /// The scripted backend. Clones share one script and one set of streams.
@@ -94,6 +98,15 @@ impl FakeBackend {
     /// From the next capture open on, the stream reports that it opened the capture endpoint `id`
     /// named `name` (`None`: the endpoint passed), as native WASAPI does for the input paired with
     /// its render endpoint, resolved afresh at each open.
+    /// The device has links other programs made (`links`, one description each), as a JACK server
+    /// does: a render stream snapshots them and a restore on another render stream records them.
+    pub fn set_links(&self, links: &[&str]) {
+        self.lock().links = links.iter().map(|l| (*l).to_string()).collect();
+    }
+    /// What restores have received so far, in order.
+    pub fn restored_links(&self) -> Vec<String> {
+        self.lock().restored.clone()
+    }
     pub fn pair_capture(&self, endpoint: Option<(&str, &str)>) {
         self.lock().paired_capture = endpoint.map(|(id, name)| CaptureEndpoint { id: id.into(), name: name.into() });
     }
@@ -426,6 +439,15 @@ impl Stream for FakeStream {
     }
     fn opened_capture(&self) -> Option<CaptureEndpoint> {
         self.opened.clone()
+    }
+    fn snapshot_links(&self) -> Option<LinkSnapshot> {
+        let links = self.lock().links.clone();
+        (self.direction == Direction::Output && !links.is_empty()).then(|| Box::new(links) as LinkSnapshot)
+    }
+    fn restore_links(&self, snapshot: LinkSnapshot) -> Option<String> {
+        let links = snapshot.downcast::<Vec<String>>().ok()?;
+        self.lock().restored.extend(*links);
+        None
     }
 }
 

@@ -357,3 +357,41 @@ fn no_measurement_is_stored_through_an_input_without_an_identity() {
     assert_eq!(app.engine.io_map().input_device, "USB Audio");
     assert_eq!(app.engine.io_map().hardware_latency("Out 1-2", "In 1", 48_000), None);
 }
+
+/// Slice A with slice B on one reconnect over native JACK: the links other programs made are
+/// snapshotted before the old client closes and restored on the new one, and the reopened input is
+/// attached only with its saved table composed (Guitar on its channel), with no frame between.
+#[test]
+fn a_jack_reconnect_restores_the_links_and_attaches_the_input_with_its_table() {
+    let client = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32))
+        .named("JACK", "HDMI")
+        .with_capture(0, true)
+        .with_capture_device("USB Mic", 2);
+    let cfg = AudioConfig { backend: Backend::NativeJack, system: Some("JACK".into()), input: Some("USB Mic".into()), ..AudioConfig::default() };
+    let engine = transit_engine::Engine::default();
+    let player = Player::open_fake_native_jack(engine.session_arc(), &cfg, &client).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    app.ui.audio = cfg.clone();
+    app.ui.input_maps.push(InputMap {
+        system: "JACK".into(),
+        device: "USB Mic".into(),
+        inputs: 2,
+        defaults_for: 2,
+        paths: vec![IoPath { direction: IoDirection::Input, ..out("Guitar", vec![1]) }],
+    });
+    let t = app.engine.session_mut().add_track(transit_model::TrackKind::Audio, ChannelFormat::Mono, Some("Gtr"));
+    let track = app.engine.session_mut().track_mut(t).unwrap();
+    track.mixer.input = transit_model::Route::Hardware("Guitar".into());
+    track.mixer.input_monitor = true;
+    app.sync_io();
+    app.ensure_input();
+    client.set_links(&["player:out_l -> transit:in_1"]);
+    let reopened = app.reconnect_audio_using(false, |session, cfg| Player::open_fake_native_jack(session, cfg, &client).unwrap());
+    assert_eq!(reopened, Ok(true));
+    assert_eq!(client.restored_links(), ["player:out_l -> transit:in_1"], "slice B: the link came back on the new client");
+    assert!(app.recorder.is_some(), "the input reopened for the monitored track");
+    let plan = app.player.as_ref().unwrap().io_map();
+    assert_eq!(plan.input_device, "USB Mic");
+    assert_eq!(plan.available_input("Guitar").map(|p| p.channels.clone()), Some(vec![1]), "slice A: composed before capture attached");
+    assert!(!app.io_adopt);
+}
