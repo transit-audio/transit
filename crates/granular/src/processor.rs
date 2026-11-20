@@ -680,9 +680,14 @@ impl Granular {
 #[cfg(feature = "testing")]
 crate::record_enum!(PlaybackMode { Granular, Stretch });
 // The processor's record (ADR 0029, #742 sections 12 and 13). Every field is encoded but
-// `buffer_size` (configuration: the memory sizes the constructor fixes); the scratch frames
-// (`input`, the downsampled pair, `output`) are encoded too, so no overwrite argument is needed for
-// them, and `feedback` is state (the next block reads it before writing it). Each audio buffer
+// `buffer_size` (configuration: the memory sizes the constructor fixes) and the scratch frames,
+// unobservable: `process_block` writes `input[..size]` from the codec frames before anything reads
+// it; at low fidelity `src_down` writes every frame of `input_downsampled[..size / 2]` the granular
+// pass reads and `src_up` every frame of `output[..size / 2 * 2]` (an odd block's last frame is
+// zeroed); the stretch player writes every frame of its output (`*frame = 0`, then the windows add)
+// and the grain player likewise, before the diffuser, the filters, the feedback copy and the
+// reverb read `output[..size]`; nothing reads a frame past the block. `feedback` is state (the next
+// block reads it before writing it). Each audio buffer
 // leaves out the memory past its live extent (`audio_buffer.rs`). The granular player and the
 // random generator are encoded although the Time Stretcher never leaves the stretch mode: the
 // port's own transplant witnesses (`tests/record_witnesses.rs`) play the granular mode.
@@ -707,23 +712,24 @@ crate::record_struct!([] Granular {
     fb_filter,
     lp_filter,
     hp_filter,
-    input,
-    input_downsampled,
-    output_downsampled,
-    output,
     feedback,
     src_down,
     src_up,
-} config { buffer_size });
+} config { buffer_size } unobservable { input, input_downsampled, output_downsampled, output });
 
 #[cfg(feature = "testing")]
 impl Granular {
-    /// Poison witnesses only: overwrites each audio buffer's memory past its live extent with
-    /// values that differ from the old ones.
+    /// Poison witnesses only: overwrites each audio buffer's memory past its live extent and the
+    /// scratch frames with values that differ from the old ones.
     pub fn poison_unobservable(&mut self, p: &mut crate::record::Poison) {
+        use crate::record::Record as _;
         for b in &mut self.buffers {
             b.poison_unobservable(p);
         }
+        self.input.poison(p);
+        self.input_downsampled.poison(p);
+        self.output_downsampled.poison(p);
+        self.output.poison(p);
     }
 
     /// What the transplant witnesses observe: the frozen-recording crossfade counter and the

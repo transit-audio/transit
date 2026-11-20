@@ -10,7 +10,7 @@
 //!   by `prepare`), and the path's configuration (`Path::record_state`);
 //! - **encoded**, in the state child: the parameter values; the path (both converters, the
 //!   gathered codec frames and their count); the firmware's processor (`transit_granular::record`:
-//!   every field, the recording whole, frozen or not, which no declared tail covers; each audio
+//!   every field but its scratch frames, the recording whole, frozen or not, which no declared tail covers; each audio
 //!   buffer's memory past its live extent left out, `audio_buffer.rs`); the Trigger gate as the
 //!   last firmware block saw it; the running and the wanted quality; the restart fade; `idle`.
 //!
