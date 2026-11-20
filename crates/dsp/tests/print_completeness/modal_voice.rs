@@ -510,27 +510,27 @@ fn witnesses() -> Vec<W> {
         completed: idle,
     });
     // Strings below the delay line's reach (a string's resampler runs when its period passes
-    // the 2048-sample line): a low note on the one-string model at T; the continuation plays
+    // the 2048-sample line, below 15.6 Hz at 32 kHz): a note under it on the one-string model at T; the continuation plays
     // lower, switches to the modal bank and back, and plays again.
     v.push(W {
         boundary: Boundary::Entry("low strings"),
         history: |rate| {
             let mut h = setup();
-            h.extend([Step::Param("damping", 85.0), Step::Param("model", STRING), Step::On(14, 120, 0), Step::Run(span(&[LINES, HOLD], rate))]);
+            h.extend([Step::Param("damping", 85.0), Step::Param("model", STRING), Step::On(4, 120, 0), Step::Run(span(&[LINES, HOLD], rate))]);
             h
         },
         continuation: |rate| {
             vec![
-                Step::On(12, 110, 0),
+                Step::On(2, 110, 0),
                 Step::Run(span(&[LINES], rate)),
                 Step::Param("model", MODAL),
                 Step::Run(span(&[HOLD], rate)),
                 Step::Param("model", STRING),
-                Step::On(16, 110, 0),
+                Step::On(6, 110, 0),
                 Step::Run(span(&[LINES, HOLD], rate)),
-                Step::Off(14, 0),
-                Step::Off(12, 0),
-                Step::Off(16, 0),
+                Step::Off(4, 0),
+                Step::Off(2, 0),
+                Step::Off(6, 0),
                 run_out(&[SHAPER_RELEASE], rate),
             ]
         },
