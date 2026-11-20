@@ -15,11 +15,19 @@ use transit_model::{IoDirection, IoMap, IoPath, MAX_PATH_WIDTH};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IoEdit {
     Add { direction: IoDirection, name: String, channels: Vec<u16> },
-    Rename { name: String, new_name: String },
-    Remove { name: String },
-    SetChannels { name: String, channels: Vec<u16> },
+    /// The edits of one path name its direction: an input path may share an output path's name
+    /// until one is renamed (ADR 0015, amendment for #431, rule 8).
+    Rename { name: String, direction: IoDirection, new_name: String },
+    Remove { name: String, direction: IoDirection },
+    SetChannels { name: String, direction: IoDirection, channels: Vec<u16> },
     SetMain { name: String },
     SetLive { name: String, live: bool },
+    /// Add default paths: the default input paths the table lacks (rule 14), idempotent.
+    AddDefaultInputs,
+}
+
+fn direction_text(direction: IoDirection) -> &'static str {
+    if direction == IoDirection::Input { "input" } else { "output" }
 }
 
 impl IoEdit {
@@ -27,14 +35,18 @@ impl IoEdit {
     pub fn params(&self) -> Value {
         match self {
             IoEdit::Add { direction, name, channels } => {
-                let direction = if *direction == IoDirection::Input { "input" } else { "output" };
-                json!({"action": "add_path", "direction": direction, "name": name, "channels": channels})
+                json!({"action": "add_path", "direction": direction_text(*direction), "name": name, "channels": channels})
             }
-            IoEdit::Rename { name, new_name } => json!({"action": "rename_path", "name": name, "new_name": new_name}),
-            IoEdit::Remove { name } => json!({"action": "remove_path", "name": name}),
-            IoEdit::SetChannels { name, channels } => json!({"action": "set_channels", "name": name, "channels": channels}),
+            IoEdit::Rename { name, direction, new_name } => {
+                json!({"action": "rename_path", "name": name, "direction": direction_text(*direction), "new_name": new_name})
+            }
+            IoEdit::Remove { name, direction } => json!({"action": "remove_path", "name": name, "direction": direction_text(*direction)}),
+            IoEdit::SetChannels { name, direction, channels } => {
+                json!({"action": "set_channels", "name": name, "direction": direction_text(*direction), "channels": channels})
+            }
             IoEdit::SetMain { name } => json!({"action": "set_main", "name": name}),
             IoEdit::SetLive { name, live } => json!({"action": "set_live", "name": name, "live": live}),
+            IoEdit::AddDefaultInputs => json!({"action": "add_default_inputs"}),
         }
     }
 }
@@ -119,11 +131,51 @@ pub fn input_note(inputs: u16, failure: Option<&str>) -> Option<String> {
     (inputs == 0).then(|| failure.map_or_else(|| INPUT_NOT_OPEN.to_string(), |why| format!("The input device did not open: {why}")))
 }
 
+/// What the Inputs list says when inputs are open and no input path can be used (rule 14).
+pub const NO_INPUT_PATHS: &str = "No input paths";
+/// The hover of Add default paths.
+pub const ADD_DEFAULTS_TIP: &str = "Add the default input paths this input lacks (In 1, In 2, ... and the stereo pairs); paths you renamed or made stay as they are.";
+
+/// The input the table's input half belongs to, as the page names it: the capture endpoint's
+/// display name and its own channel count (which can exceed the table's cap).
+#[derive(Debug, Clone, Copy)]
+pub struct InputDevice<'a> {
+    pub name: &'a str,
+    pub channels: usize,
+}
+
+/// The heading line: both devices and their channels (rule 14), "Input: <device>, N channels.
+/// Output: <device>, M channels." A device wider than the 32-channel table says that only the
+/// first 32 are used (ADR 0015 section 1.1).
+pub fn heading(io: &IoMap, input: Option<InputDevice<'_>>, output_channels: usize) -> String {
+    let count = |n: usize| if n == 1 { "1 channel".to_string() } else { format!("{n} channels") };
+    let capped = |n: usize| {
+        if n > transit_model::MAX_DEVICE_CHANNELS {
+            format!("{} (the first {} are used)", count(n), transit_model::MAX_DEVICE_CHANNELS)
+        } else {
+            count(n)
+        }
+    };
+    let input = match input {
+        Some(i) => format!("Input: {}, {}.", i.name, capped(i.channels)),
+        None => "Input: not open.".to_string(),
+    };
+    format!("{input} Output: {}, {}.", io.device, capped(output_channels.max(usize::from(io.outputs))))
+}
+
+/// Why an input path is listed but unavailable, for its row; `None` when it can be used.
+pub fn unavailable_text(io: &IoMap, p: &IoPath) -> Option<String> {
+    if p.direction != IoDirection::Input {
+        return None;
+    }
+    io.input_unavailable(p).map(|why| format!("Unavailable: {why}"))
+}
+
 /// The edit a click on channel `c` of `p`'s picker makes, or `None` when it would leave the path
 /// without channels (the engine refuses a path 0 channels wide; #429 sent it eight times).
 pub fn channel_edit(p: &IoPath, c: u16) -> Option<IoEdit> {
     let channels = toggled(&p.channels, c);
-    (!channels.is_empty()).then(|| IoEdit::SetChannels { name: p.name.clone(), channels })
+    (!channels.is_empty()).then(|| IoEdit::SetChannels { name: p.name.clone(), direction: p.direction, channels })
 }
 
 /// What the Hardware inserts subsection asks for this frame.
@@ -160,10 +212,10 @@ pub struct IoEditor {
     hw_ret: Option<String>,
     /// What the last measurement said.
     pub hw_result: String,
-    /// A path being renamed: (its name, the text so far).
-    rename: Option<(String, String)>,
-    /// The path whose channels are being picked.
-    editing: Option<String>,
+    /// A path being renamed: (its name, its direction, the text so far).
+    rename: Option<(String, IoDirection, String)>,
+    /// The path whose channels are being picked, and its direction.
+    editing: Option<(String, IoDirection)>,
     new_output: String,
     new_input: String,
     /// The engine's refusal of the last edit, shown on the page in its words until an edit is
@@ -194,7 +246,7 @@ impl IoEditor {
             IoEdit::Add { direction: IoDirection::Output, .. } => self.new_output.clear(),
             IoEdit::Add { direction: IoDirection::Input, .. } => self.new_input.clear(),
             IoEdit::Rename { .. } => self.rename = None,
-            IoEdit::Remove { name } if self.editing.as_deref() == Some(name) => self.editing = None,
+            IoEdit::Remove { name, direction } if self.editing.as_ref().is_some_and(|(n, d)| n == name && d == direction) => self.editing = None,
             _ => {}
         }
     }
@@ -235,7 +287,8 @@ pub fn channel_text(c: u16, names: &[String]) -> String {
 
 /// The section. Returns the edit the user made this frame, if any; controls are listed in `items`
 /// (label shown, value the control) for `ui.inspect` and tests. `names` labels the channels;
-/// `input_note` says why there are no input channels ([`input_note`]).
+/// `input_note` says why there are no input channels ([`input_note`]); `heading` names both
+/// devices ([`heading`]).
 #[allow(clippy::too_many_arguments)]
 pub fn section(
     ui: &mut egui::Ui,
@@ -243,12 +296,14 @@ pub fn section(
     wasapi: bool,
     names: &ChannelNames,
     input_note: Option<&str>,
+    heading: &str,
     ed: &mut IoEditor,
     items: &mut Vec<MenuItem>,
 ) -> Option<IoEdit> {
     let mut edit = None;
     ui.label(egui::RichText::new("I/O paths").strong());
-    dim(ui, format!("Channels open on this device: {} in, {} out.", io.inputs, io.outputs));
+    let r = ui.label(egui::RichText::new(heading).color(TOKENS.text_dim).size(11.5));
+    items.push(MenuItem::at(ui, heading.to_string(), "io_heading".into(), r.rect));
     if !ed.refusal.is_empty() {
         let r = crate::chrome::status_label(ui, ed.refusal.clone(), 11.5, crate::chrome::Severity::Error);
         items.push(MenuItem::at(ui, ed.refusal.clone(), "io_refusal".into(), r.rect));
@@ -292,8 +347,8 @@ pub fn section(
                 }
             });
         });
-        if let Some(name) = ed.editing.clone()
-            && let Some(p) = io.path(&name).filter(|p| p.direction == direction)
+        if let Some((name, editing)) = ed.editing.clone()
+            && let Some(p) = io.paths_of(direction).find(|p| editing == direction && p.name.eq_ignore_ascii_case(&name))
         {
             ui.horizontal_wrapped(|ui| {
                 dim(ui, format!("{} channels (1 to {MAX_PATH_WIDTH}):", p.name));
@@ -306,6 +361,18 @@ pub fn section(
                     if b.clicked() && next.is_some() {
                         edit = next;
                     }
+                }
+            });
+        }
+        // Inputs open and no input path usable: say so and offer the defaults (rule 14).
+        if direction == IoDirection::Input && io.lacks_input_paths() {
+            ui.horizontal(|ui| {
+                let r = crate::chrome::status_label(ui, NO_INPUT_PATHS, 11.5, crate::chrome::Severity::Warning);
+                items.push(MenuItem::at(ui, NO_INPUT_PATHS.into(), "io_no_inputs".into(), r.rect));
+                let b = ui.button("Add default paths");
+                items.push(MenuItem::at(ui, "Add default paths".into(), "io_add_defaults".into(), b.rect));
+                if b.on_hover_text(ADD_DEFAULTS_TIP).clicked() {
+                    edit = Some(IoEdit::AddDefaultInputs);
                 }
             });
         }
@@ -352,7 +419,8 @@ pub fn hardware_section(
     ui.label(egui::RichText::new("Hardware inserts").strong());
     dim(ui, "Time the round trip through outboard gear: a click plays on the send path and is found again on the return path.");
     let outputs: Vec<&str> = io.paths_of(IoDirection::Output).map(|p| p.name.as_str()).collect();
-    let inputs: Vec<&str> = io.paths_of(IoDirection::Input).map(|p| p.name.as_str()).collect();
+    // Only a return the open input can deliver (amendment for #431, rule 10).
+    let inputs: Vec<&str> = io.paths_of(IoDirection::Input).filter(|p| io.input_unavailable(p).is_none()).map(|p| p.name.as_str()).collect();
     // A pick that no longer names a path is dropped.
     if ed.hw_send.as_deref().is_some_and(|n| !outputs.contains(&n)) {
         ed.hw_send = None;
@@ -431,8 +499,14 @@ pub fn hardware_section(
             for m in measured {
                 let pair = format!("{} → {}", m.send, m.ret);
                 ui.label(&pair);
-                ui.label(frames_text(m.round_trip_frames, rate));
-                layout.rows.push(format!("{pair}: {}", frames_text(m.round_trip_frames, rate)));
+                // A figure through another input is listed, not used: "measure again" (rule 13).
+                let figure = if io.returns_through(&m.input_device) {
+                    frames_text(m.round_trip_frames, rate)
+                } else {
+                    format!("{}, {MEASURE_AGAIN_ROW}", frames_text(m.round_trip_frames, rate))
+                };
+                ui.label(&figure);
+                layout.rows.push(format!("{pair}: {figure}"));
                 ui.horizontal(|ui| {
                     let b = ui.add_enabled(blocked.is_none() && !running, egui::Button::new("Remeasure").small());
                     items.push(MenuItem::at(ui, "Remeasure".into(), format!("hw_remeasure:{pair}"), b.rect));
@@ -452,45 +526,61 @@ pub fn hardware_section(
     (action, layout)
 }
 
+/// Beside a listed round trip measured through another input than the one open: it is not used.
+pub const MEASURE_AGAIN_ROW: &str = "through another input: measure again";
+
 /// What a finished measurement says: "612 frames (12.8 ms) ±2".
 pub fn measured_text(frames: u32, spread: u32, rate: u32) -> String {
     format!("{} ±{spread}", crate::hardware_ui::frames_text(frames, rate))
 }
 
 fn path_row(ui: &mut egui::Ui, io: &IoMap, p: &IoPath, ed: &mut IoEditor, items: &mut Vec<MenuItem>, edit: &mut Option<IoEdit>) {
-    if let Some((_, buf)) = ed.rename.as_mut().filter(|(n, _)| *n == p.name) {
+    if let Some((_, _, buf)) = ed.rename.as_mut().filter(|(n, d, _)| *n == p.name && *d == p.direction) {
         let r = crate::chrome::text_field(ui, egui::TextEdit::singleline(buf).desired_width(130.0));
         r.request_focus();
         if r.lost_focus() {
             if ui.input(|i| i.key_pressed(egui::Key::Enter)) && *buf != p.name {
-                *edit = Some(IoEdit::Rename { name: p.name.clone(), new_name: buf.clone() });
+                *edit = Some(IoEdit::Rename { name: p.name.clone(), direction: p.direction, new_name: buf.clone() });
             } else {
                 ed.rename = None;
             }
         }
     } else {
-        let main = p.name.eq_ignore_ascii_case(&io.main);
-        ui.label(if main { format!("{} (Main)", p.name) } else { p.name.clone() });
+        let main = p.direction == IoDirection::Output && p.name.eq_ignore_ascii_case(&io.main);
+        // An unavailable input is listed with why (rule 14): its definition is kept for repair.
+        match unavailable_text(io, p) {
+            Some(why) => {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(&p.name).color(TOKENS.text_dim));
+                    let r = crate::chrome::status_label(ui, why.clone(), 11.0, crate::chrome::Severity::Warning);
+                    items.push(MenuItem::at(ui, why, format!("io_unavailable:{}", p.name), r.rect));
+                });
+            }
+            None => {
+                ui.label(if main { format!("{} (Main)", p.name) } else { p.name.clone() });
+            }
+        }
     }
     ui.label(channel_label(&p.channels));
     ui.label(format!("{} ch", p.channels.len()));
-    let can = !p.name.eq_ignore_ascii_case(&io.main);
+    let can = !(p.direction == IoDirection::Output && p.name.eq_ignore_ascii_case(&io.main));
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             let b = ui.small_button("Channels");
             items.push(MenuItem::at(ui, "Channels".into(), format!("io_channels:{}", p.name), b.rect));
             if b.clicked() {
-                ed.editing = if ed.editing.as_deref() == Some(p.name.as_str()) { None } else { Some(p.name.clone()) };
+                let this = (p.name.clone(), p.direction);
+                ed.editing = if ed.editing.as_ref() == Some(&this) { None } else { Some(this) };
             }
             let b = ui.small_button("Rename");
             items.push(MenuItem::at(ui, "Rename".into(), format!("io_rename:{}", p.name), b.rect));
             if b.clicked() {
-                ed.rename = Some((p.name.clone(), p.name.clone()));
+                ed.rename = Some((p.name.clone(), p.direction, p.name.clone()));
             }
             let b = ui.add_enabled(can, egui::Button::new("Remove").small());
             items.push(MenuItem::at(ui, "Remove".into(), format!("io_remove:{}", p.name), b.rect));
             if b.on_disabled_hover_text("Main plays here: choose another path for Main first.").clicked() {
-                *edit = Some(IoEdit::Remove { name: p.name.clone() });
+                *edit = Some(IoEdit::Remove { name: p.name.clone(), direction: p.direction });
             }
         });
         if can && p.direction == IoDirection::Output {
@@ -519,6 +609,20 @@ mod tests {
         assert_eq!(channel_label(&[]), "");
     }
 
+    /// Rule 14's heading, and section 1.1's note for a device wider than the 32-channel table
+    /// (#431 Q6: a JACK port group of 40 ports).
+    #[test]
+    fn the_heading_names_both_devices_and_says_when_only_32_channels_are_used() {
+        let io = IoMap::for_device("JACK", "Big", 32, 32);
+        assert_eq!(
+            heading(&io, Some(InputDevice { name: "Big", channels: 40 }), 40),
+            "Input: Big, 40 channels (the first 32 are used). Output: Big, 40 channels (the first 32 are used)."
+        );
+        let io = IoMap::for_device("WASAPI", "Speakers", 0, 2);
+        assert_eq!(heading(&io, Some(InputDevice { name: "Microphone", channels: 1 }), 2), "Input: Microphone, 1 channel. Output: Speakers, 2 channels.");
+        assert_eq!(heading(&io, None, 0), "Input: not open. Output: Speakers, 2 channels.");
+    }
+
     #[test]
     fn toggling_a_channel_keeps_the_set_in_order() {
         assert_eq!(toggled(&[0, 1], 3), [0, 1, 3]);
@@ -531,7 +635,15 @@ mod tests {
         let add = IoEdit::Add { direction: IoDirection::Input, name: "Mic".into(), channels: vec![2] };
         assert_eq!(add.params(), json!({"action": "add_path", "direction": "input", "name": "Mic", "channels": [2]}));
         assert_eq!(IoEdit::SetMain { name: "Out 3-4".into() }.params(), json!({"action": "set_main", "name": "Out 3-4"}));
-        assert_eq!(IoEdit::Remove { name: "Cue".into() }.params(), json!({"action": "remove_path", "name": "Cue"}));
+        assert_eq!(
+            IoEdit::Remove { name: "Cue".into(), direction: IoDirection::Output }.params(),
+            json!({"action": "remove_path", "name": "Cue", "direction": "output"})
+        );
+        assert_eq!(
+            IoEdit::Rename { name: "Cue".into(), direction: IoDirection::Input, new_name: "Talkback".into() }.params(),
+            json!({"action": "rename_path", "name": "Cue", "direction": "input", "new_name": "Talkback"})
+        );
+        assert_eq!(IoEdit::AddDefaultInputs.params(), json!({"action": "add_default_inputs"}));
     }
 
     #[test]

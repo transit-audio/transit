@@ -369,6 +369,7 @@ fn persist_audio(path: &std::path::Path, ui: &crate::UiState) -> Result<(), Stri
             ("low_latency_limit_ms", serde_json::json!(ui.low_latency_limit_ms)),
             ("audio", serde_json::to_value(&ui.audio).map_err(|e| e.to_string())?),
             ("io_maps", serde_json::to_value(&ui.io_maps).map_err(|e| e.to_string())?),
+            ("input_maps", serde_json::to_value(&ui.input_maps).map_err(|e| e.to_string())?),
         ],
     )
 }
@@ -1063,7 +1064,7 @@ fn calibration_measure(
 ) -> (Option<CalibrationAction>, CalibrationLayout) {
     use transit_model::IoDirection;
     let outputs: Vec<&str> = io.paths_of(IoDirection::Output).map(|p| p.name.as_str()).collect();
-    let inputs: Vec<&str> = io.paths_of(IoDirection::Input).map(|p| p.name.as_str()).collect();
+    let inputs: Vec<&str> = io.paths_of(IoDirection::Input).filter(|p| io.input_unavailable(p).is_none()).map(|p| p.name.as_str()).collect();
     *send = pick_path(send.as_deref(), draft.calibration_send.as_deref(), Some(io.main.as_str()), &outputs);
     *ret = pick_path(ret.as_deref(), draft.calibration_return.as_deref(), None, &inputs);
     let running = progress.is_some();

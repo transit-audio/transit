@@ -178,7 +178,7 @@ fn merge_ui(raw: &mut serde_json::Value, previous: &serde_json::Value, current: 
                 } else {
                     let identity: &[&str] = match key.as_str() {
                         "recent_files" => &["path"],
-                        "io_maps" => &["system", "device"],
+                        "io_maps" | "input_maps" => &["system", "device"],
                         "paths" => &["name", "direction"],
                         "hardware_latency" => &["send", "ret", "rate"],
                         _ => &[],

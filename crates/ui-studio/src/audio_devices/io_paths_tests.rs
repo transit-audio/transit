@@ -197,3 +197,48 @@ fn a_failed_input_open_says_why_on_the_card() {
     assert!(lines.contains(&"Input open: failed: snd_pcm_open: Device or resource busy".to_string()), "{lines:?}");
     assert!(!lines.iter().any(|l| l == crate::audio_devices::INPUT_NOT_YET), "{lines:?}");
 }
+
+/// ADR 0015, amendment for #431, rule 14: the heading names both devices; with inputs open and no
+/// usable input path the Inputs list says so and offers Add default paths, one command that makes
+/// the defaults (and is gone once there are paths).
+#[test]
+fn the_heading_names_both_devices_and_no_input_paths_offers_the_defaults() {
+    let mut t = with_window();
+    let heading = "Input: TASCAM Model 12, 4 channels. Output: TASCAM Model 12, 4 channels.";
+    item(&t, "io_heading", heading);
+    assert!(t.layout()["controls"].as_array().unwrap().iter().all(|c| c["value"] != "io_add_defaults"), "paths exist: no offer");
+    for name in ["In 1", "In 2", "In 3", "In 4", "In 1-2", "In 3-4"] {
+        t.app.engine.execute("setup.io_map", &json!({"action": "remove_path", "name": name, "direction": "input"})).unwrap();
+    }
+    t.frames(3);
+    item(&t, "io_no_inputs", crate::audio_devices_io::NO_INPUT_PATHS);
+    let revision = t.app.engine.io_revision();
+    t.click(mid(item(&t, "io_add_defaults", "Add default paths")));
+    assert_eq!(t.app.engine.io_revision(), revision + 1, "one command");
+    let names: Vec<&str> = t.app.engine.io_map().paths_of(transit_model::IoDirection::Input).map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["In 1", "In 2", "In 3", "In 4", "In 1-2", "In 3-4"]);
+    assert!(t.layout()["controls"].as_array().unwrap().iter().all(|c| c["value"] != "io_add_defaults"), "the offer is gone");
+}
+
+/// Rule 14: an unavailable input path is listed with why, not hidden and not deleted.
+#[test]
+fn an_unavailable_input_path_is_listed_with_why() {
+    use transit_model::{ChannelFormat, InputMap, IoDirection, IoPath};
+    let mut t = with_window();
+    let path = |name: &str, channels: Vec<u16>| IoPath { live: false, name: name.into(), direction: IoDirection::Input, channels, format: ChannelFormat::Mono };
+    let record = InputMap {
+        system: "ASIO".into(),
+        device: "Mic Pre".into(),
+        inputs: 2,
+        defaults_for: 2,
+        paths: vec![path("Out 3-4", vec![0]), path("Far", vec![5]), path("In 1", vec![0])],
+    };
+    let out = t.app.engine.io_map().compose(None);
+    t.app.engine.set_io_map(out.compose(Some(&record)));
+    t.frames(3);
+    item(&t, "io_unavailable:Out 3-4", "Unavailable: same name as an output path: rename one");
+    item(&t, "io_unavailable:Far", "Unavailable: out of range: the input has 2 channels open");
+    assert!(t.layout()["controls"].as_array().unwrap().iter().all(|c| c["value"] != "io_unavailable:In 1"));
+    assert!(t.layout()["controls"].as_array().unwrap().iter().all(|c| c["value"] != "io_no_inputs"), "In 1 is usable");
+    item(&t, "io_heading", "Input: Mic Pre, 2 channels. Output: TASCAM Model 12, 4 channels.");
+}

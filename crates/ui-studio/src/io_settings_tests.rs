@@ -1,0 +1,223 @@
+//! The machine's I/O tables per side (ADR 0015, amendment for #431): the app composes the engine's
+//! table from the output record and the open input's record, and keeps both halves apart.
+#![allow(clippy::unwrap_used)]
+
+use super::*;
+use std::sync::Arc;
+use transit_audio_backend as ab;
+use transit_model::{ChannelFormat, IoDirection, IoPath};
+use transit_playback::{AudioConfig, Backend, Player};
+
+fn tascam() -> IoMap {
+    IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10)
+}
+
+fn out(name: &str, channels: Vec<u16>) -> IoPath {
+    let format = ChannelFormat::for_channels(channels.len());
+    IoPath { live: false, name: name.into(), direction: IoDirection::Output, channels, format }
+}
+
+fn inputs(m: &IoMap) -> Vec<&str> {
+    m.paths_of(IoDirection::Input).map(|p| p.name.as_str()).collect()
+}
+
+/// `--null-audio`: the silent device's table reaches the engine and the player, and neither half
+/// is added to the saved tables in `ui.json`.
+#[test]
+fn a_null_audio_run_saves_no_table_for_the_silent_device() {
+    use transit_playback::backend::null::{self, PaceClock, StepClock};
+    let engine = transit_engine::Engine::default();
+    let clock = StepClock::new();
+    let player = Player::with_null_device_clock(engine.session_arc(), Arc::clone(&clock) as Arc<dyn PaceClock>);
+    clock.settle();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    app.null_audio = true;
+    assert!(app.player.as_ref().is_some_and(|p| p.null_device() && !p.silent));
+    app.sync_io();
+    assert_eq!(app.engine.io_map().key(), (null::SYSTEM, null::DEVICE), "the engine holds the silent device's table");
+    assert_eq!(app.io_pushed, app.engine.io_revision(), "the table went to the player");
+    assert!(app.ui.io_maps.is_empty(), "no output record for the silent device: {:?}", app.ui.io_maps);
+    assert!(app.ui.input_maps.is_empty(), "no input record either: {:?}", app.ui.input_maps);
+}
+
+#[test]
+fn an_unknown_device_gets_its_defaults_and_a_known_one_its_saved_outputs() {
+    let mut saved = Vec::new();
+    assert_eq!(adopt(&saved, &tascam()), tascam());
+    let mut mine = tascam();
+    mine.add_path(out("Cue", vec![8, 9])).unwrap();
+    remember(&mut saved, &mine);
+    assert!(adopt(&saved, &tascam()).path("Cue").is_some());
+    assert_eq!(saved[0].inputs, 0, "a record a new build makes has no input half");
+    assert!(inputs(&saved[0]).is_empty());
+    let other = IoMap::for_device("ASIO", "Scarlett 2i2", 2, 2);
+    assert_eq!(adopt(&saved, &other).paths.len(), other.paths.len());
+}
+
+#[test]
+fn one_device_in_another_usb_mode_adapts_its_saved_outputs() {
+    let mut mine = tascam();
+    mine.add_path(out("Cue", vec![8, 9])).unwrap();
+    mine.add_path(out("Pair", vec![2, 3])).unwrap();
+    let mut saved = Vec::new();
+    remember(&mut saved, &mine);
+    let two = adopt(&saved, &IoMap::for_device("ASIO", "TASCAM Model 12", 2, 2));
+    assert_eq!(two.outputs, 2, "the opened output count is stored inside the record");
+    assert!(two.path("Cue").is_none() && two.path("Pair").is_none(), "output paths beyond the opened channels are dropped");
+    assert!(two.path("Out 1-2").is_some());
+}
+
+#[test]
+fn remembering_replaces_by_device_and_is_bounded() {
+    let mut saved = Vec::new();
+    remember(&mut saved, &tascam());
+    remember(&mut saved, &tascam());
+    assert_eq!(saved.len(), 1);
+    for n in 0..(MAX_SAVED + 5) {
+        remember(&mut saved, &IoMap::for_device("ASIO", &format!("device {n}"), 2, 2));
+    }
+    assert_eq!(saved.len(), MAX_SAVED);
+    assert_eq!(saved.last().map(|m| m.device.as_str()), Some("device 68"));
+    let mut records = Vec::new();
+    for n in 0..(MAX_SAVED + 1) {
+        remember_input(&mut records, InputMap { system: "JACK".into(), device: format!("group {n}"), ..InputMap::default() });
+    }
+    assert_eq!(records.len(), MAX_SAVED);
+}
+
+/// A scripted native WASAPI render endpoint with two inputs; its paired capture is set per open.
+fn wasapi() -> ab::fake::FakeBackend {
+    ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32)).named("WASAPI", "Speakers (Interface)").with_capture(2, true)
+}
+
+fn wasapi_config() -> AudioConfig {
+    AudioConfig { backend: Backend::NativeWasapi, system: Some("WASAPI".into()), ..AudioConfig::default() }
+}
+
+/// The app reopens on another Player, as Reconnect does.
+fn reopen(app: &mut StudioApp, player: Player) {
+    app.player = Some(player);
+    app.io_adopt = true;
+    app.sync_io();
+}
+
+/// Rule 8 and #689 on native WASAPI: one output, capture endpoint A, then B: two input records
+/// keyed by the capture endpoints' identities (never the render endpoint's name), and a hardware
+/// insert round trip measured through A is not applied through B, then applies again through A.
+#[test]
+fn two_paired_capture_endpoints_under_one_output_are_two_input_tables() {
+    let endpoint = wasapi();
+    let cfg = wasapi_config();
+    let engine = transit_engine::Engine::default();
+    let session = engine.session_arc();
+    endpoint.pair_capture(Some(("{capture-a}", "Microphone (Interface)")));
+    let player = Player::open_fake_native_wasapi(Arc::clone(&session), &cfg, &endpoint).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    app.sync_io();
+    assert_eq!(app.engine.io_map().input_device, "{capture-a}");
+    assert_eq!(app.io_input.as_ref().map(|i| i.name.as_str()), Some("Microphone (Interface)"));
+    app.engine.execute("setup.io_map", &serde_json::json!({"action": "rename_path", "name": "In 2", "new_name": "Vox"})).unwrap();
+    app.engine.store_hardware_latency("Out 1-2", "Vox", 1_234);
+    app.sync_io();
+    endpoint.pair_capture(Some(("{capture-b}", "Line In (Interface)")));
+    reopen(&mut app, Player::open_fake_native_wasapi(Arc::clone(&session), &cfg, &endpoint).unwrap());
+    let keys: Vec<(&str, &str)> = app.ui.input_maps.iter().map(InputMap::key).collect();
+    assert_eq!(keys, [("WASAPI", "{capture-a}"), ("WASAPI", "{capture-b}")], "two input records");
+    assert_eq!(app.ui.io_maps.len(), 1, "one output record");
+    assert_eq!(inputs(app.engine.io_map()), ["In 1", "In 2", "In 1-2"], "B starts from the defaults");
+    let io = app.engine.io_map();
+    assert_eq!(io.hardware_latency("Out 1-2", "Vox", 48_000), None, "not applied through B");
+    assert!(io.hardware_latency_elsewhere("Out 1-2", "Vox", 48_000), "measure again");
+    endpoint.pair_capture(Some(("{capture-a}", "Microphone (Interface)")));
+    reopen(&mut app, Player::open_fake_native_wasapi(Arc::clone(&session), &cfg, &endpoint).unwrap());
+    assert_eq!(inputs(app.engine.io_map()), ["In 1", "Vox", "In 1-2"], "A's paths again");
+    assert_eq!(app.engine.io_map().hardware_latency("Out 1-2", "Vox", 48_000), Some(1_234), "and its round trip");
+}
+
+/// A scripted native ASIO driver: output, input and driver are one.
+fn asio(inputs: u16) -> ab::fake::FakeBackend {
+    ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32)).named("ASIO", "Scarlett 2i2 USB").with_capture(inputs, true)
+}
+
+fn asio_config() -> AudioConfig {
+    AudioConfig { backend: Backend::NativeAsio, system: Some("ASIO".into()), ..AudioConfig::default() }
+}
+
+/// Rule 11 on ASIO: a both-halves record an older build saved loads with the same paths and Main,
+/// its round trip applies (the return's identity is established), and saving keeps the old input
+/// half exactly as it was read while the input record takes the edits.
+#[test]
+fn an_older_asio_table_loads_with_its_paths_and_keeps_its_input_half_on_disk() {
+    let mut old = IoMap::for_device("ASIO", "Scarlett 2i2 USB", 2, 2);
+    old.input_device.clear();
+    old.add_path(IoPath { direction: IoDirection::Input, ..out("Guitar", vec![1]) }).unwrap();
+    old.hardware_latency.push(transit_model::HardwareLatency {
+        send: "Out 1-2".into(),
+        ret: "Guitar".into(),
+        round_trip_frames: 612,
+        rate: 48_000,
+        measured_at: 1,
+        input_device: String::new(),
+    });
+    let read = serde_json::to_string(&old).unwrap();
+    let driver = asio(2);
+    let engine = transit_engine::Engine::default();
+    let player = Player::open_fake_native_asio(engine.session_arc(), &asio_config(), &driver).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    app.ui.io_maps.push(old.clone());
+    app.sync_io();
+    let io = app.engine.io_map().clone();
+    assert_eq!(io.paths, old.paths, "the same paths");
+    assert_eq!(io.main, old.main);
+    assert_eq!(io.hardware_latency("Out 1-2", "Guitar", 48_000), Some(612));
+    app.engine.execute("setup.io_map", &serde_json::json!({"action": "remove_path", "name": "In 2"})).unwrap();
+    app.sync_io();
+    assert_eq!(serde_json::to_string(&app.ui.io_maps[0]).unwrap(), read, "the old record is written back as it was read");
+    assert_eq!(app.ui.input_maps.len(), 1);
+    assert!(app.ui.input_maps[0].paths.iter().all(|p| p.name != "In 2"), "the edit is the input record's");
+}
+
+/// Rule 8 and 9: a failed input open makes no record and changes none; the composed table then has
+/// no input half (the page says why), and the saved record is untouched.
+#[test]
+fn a_failed_input_open_changes_no_record() {
+    let driver = asio(2);
+    let engine = transit_engine::Engine::default();
+    let session = engine.session_arc();
+    let player = Player::open_fake_native_asio(Arc::clone(&session), &asio_config(), &driver).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    app.sync_io();
+    app.engine.execute("setup.io_map", &serde_json::json!({"action": "remove_path", "name": "In 2"})).unwrap();
+    app.sync_io();
+    let before = app.ui.input_maps.clone();
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0].defaults_for, 2);
+    // The next open's input fails (the capture opens first, and its failure is soft).
+    driver.fail_next_open(ab::OpenError::Other("the input is busy".into()));
+    let failed = Player::open_fake_native_asio(Arc::clone(&session), &asio_config(), &driver).unwrap();
+    assert!(!failed.holds_input());
+    reopen(&mut app, failed);
+    assert_eq!(app.ui.input_maps, before, "no record changed, defaults_for included");
+    assert_eq!((app.engine.io_map().inputs, inputs(app.engine.io_map()).len()), (0, 0));
+    assert!(app.engine.io_map().input_device.is_empty());
+    assert_eq!(app.ui.io_maps[0].inputs, 0, "the output record has no input half");
+}
+
+/// #682 on JACK: the input is another port group; its record is keyed by that group, and the
+/// output record by the output group.
+#[test]
+fn a_jack_input_group_has_its_own_record() {
+    let client = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32))
+        .named("JACK", "HDMI")
+        .with_capture(0, true)
+        .with_capture_device("USB Mic", 1);
+    let cfg = AudioConfig { backend: Backend::NativeJack, system: Some("JACK".into()), input: Some("USB Mic".into()), ..AudioConfig::default() };
+    let engine = transit_engine::Engine::default();
+    let player = Player::open_fake_native_jack(engine.session_arc(), &cfg, &client).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
+    app.sync_io();
+    assert_eq!(app.engine.io_map().key(), ("JACK", "HDMI"));
+    assert_eq!((app.engine.io_map().input_device.as_str(), app.engine.io_map().inputs), ("USB Mic", 1));
+    assert_eq!(inputs(app.engine.io_map()), ["In 1"]);
+    assert_eq!(app.ui.input_maps.iter().map(InputMap::key).collect::<Vec<_>>(), [("JACK", "USB Mic")]);
+}

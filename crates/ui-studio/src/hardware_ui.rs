@@ -34,7 +34,7 @@ pub fn pairs(io: &IoMap, rate: u32) -> Vec<Pair> {
     let mut out: Vec<Pair> = io
         .hardware_latency
         .iter()
-        .filter(|m| m.rate == rate && is(&m.send, IoDirection::Output) && is(&m.ret, IoDirection::Input))
+        .filter(|m| m.rate == rate && is(&m.send, IoDirection::Output) && is(&m.ret, IoDirection::Input) && io.returns_through(&m.input_device))
         .map(|m| Pair { send: m.send.clone(), ret: m.ret.clone(), frames: Some(m.round_trip_frames) })
         .collect();
     for s in io.paths_of(IoDirection::Output) {
@@ -46,6 +46,10 @@ pub fn pairs(io: &IoMap, rate: u32) -> Vec<Pair> {
     }
     out
 }
+
+/// A hardware insert card whose pair was measured only through another input than the one open
+/// (or one whose identity is not established): the figure counts zero, as unmeasured.
+pub const MEASURE_AGAIN: &str = "Measure again";
 
 /// What a device card says in place of the editor button.
 pub fn state_text(state: &HardwareState, latency: Option<u32>, rate: u32) -> String {

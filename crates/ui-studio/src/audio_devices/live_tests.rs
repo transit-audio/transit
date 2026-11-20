@@ -20,8 +20,10 @@ fn live_cue_survives_the_atomic_ui_json_merge_and_device_adoption() {
     assert_eq!(value["io_maps"][0]["paths"][1]["live"], true);
     assert_eq!(value["unrelated_preference"], 42);
     let loaded: UiState = serde_json::from_slice(&bytes).unwrap();
-    let adopted = io_settings::adopt(&loaded.io_maps, IoMap::for_device("test", "duplex", 2, 4));
-    assert_eq!(adopted, map);
+    let adopted = io_settings::adopt(&loaded.io_maps, &IoMap::for_device("test", "duplex", 2, 4));
+    // The output record (ADR 0015, amendment for #431): the outputs with their cue flag, no input half.
+    assert_eq!(adopted, map.output_record(None));
+    assert!(adopted.path("Out 3-4").is_some_and(|p| p.live));
     std::fs::remove_file(file).unwrap();
     std::fs::remove_dir(dir).unwrap();
 }

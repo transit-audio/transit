@@ -185,6 +185,19 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         .unwrap_or_default();
     // Why the input has no channels, beside its disabled Add (#429).
     let input_note = crate::audio_devices_io::input_note(io.inputs, app.input_failure.as_deref());
+    // Both devices by name (ADR 0015, amendment for #431, rule 14): the input the table's input
+    // half belongs to, and the output with the channels its stream opened.
+    let output_channels = app.player.as_ref().filter(|p| !p.silent && p.device_name == io.device).map_or(0, |p| usize::from(p.device_channels));
+    let heading = crate::audio_devices_io::heading(
+        &io,
+        app.io_input
+            .as_ref()
+            .filter(|i| i.identity == io.input_device)
+            .map(|i| crate::audio_devices_io::InputDevice { name: &i.name, channels: i.channels })
+            // A table set by a command rather than composed from an open input names its identity.
+            .or_else(|| (!io.input_device.is_empty()).then(|| crate::audio_devices_io::InputDevice { name: &io.input_device, channels: usize::from(io.inputs) })),
+        output_channels,
+    );
     let mut editor = std::mem::take(&mut app.audio_devices.io_editor);
     editor.follow(&io);
     let mut io_edit = None;
@@ -632,6 +645,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                 wasapi,
                                                 &channel_names,
                                                 input_note.as_deref(),
+                                                &heading,
                                                 &mut editor,
                                                 &mut io_items,
                                             );

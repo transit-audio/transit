@@ -21,8 +21,12 @@ pub struct UiState {
     /// The Audio Devices window's last section (`audio_devices::Section::key`): per machine, in
     /// `ui.json`, never in the session.
     pub audio_devices_section: String,
-    /// This machine's I/O paths, one table per audio system plus device (ADR 0015).
+    /// This machine's I/O paths, one output record per audio system plus output device (ADR 0015;
+    /// a record an older build saved also holds an input half, kept as it was read).
     pub io_maps: Vec<transit_model::IoMap>,
+    /// This machine's input paths, one record per audio system plus the identity of the capture
+    /// endpoint actually opened (ADR 0015, amendment for #431, rule 8). Older files have none.
+    pub input_maps: Vec<transit_model::InputMap>,
     /// File > Open Recent: sessions last opened or saved here, most recent first (at most 10).
     /// A per-machine preference; never part of the document or its undo history.
     pub recent_files: Vec<recent::RecentFile>,
@@ -173,6 +177,7 @@ impl Default for UiState {
             monitor: main_monitor::MonitorPrefs::default(),
             audio_devices_section: String::new(),
             io_maps: Vec::new(),
+            input_maps: Vec::new(),
             recent_files: Vec::new(),
             last_session_dir: None,
             plugin_dirs: plugin_scan::PluginDirs::default(),
@@ -346,6 +351,8 @@ mod round_trip_tests {
         ui.plugin_dirs.vst3.push("D:/VST3".into());
         ui.plugin_dirs.clap.push("D:/CLAP".into());
         ui.io_maps.push(transit_model::IoMap::for_device("WASAPI", "Speakers", 2, 2));
+        let (_, input) = transit_model::adopt_input(&ui.io_maps[0], &[], &[], "{capture}", 2);
+        ui.input_maps.push(input);
         ui.recent_files.push(super::recent::RecentFile { path: "C:/a/b.transit".into(), opened_at: 7 });
         ui.last_session_dir = Some("C:/a".into());
         let mut v = save(&ui);

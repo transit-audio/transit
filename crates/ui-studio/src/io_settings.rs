@@ -1,75 +1,134 @@
-//! The machine's I/O paths (ADR 0015), kept with the preferences in `ui.json` (`UiState.io_maps`),
-//! one table per audio system plus device name. A device that opens takes its saved table (the
-//! opened channel counts are stored inside it, so one device in two USB modes is one entry); the
-//! engine holds the live one (`setup.io_map`), and every change reaches the audio thread as a plan,
-//! never a reopen.
+//! The machine's I/O paths (ADR 0015), kept with the preferences in `ui.json`, per side since the
+//! amendment for #431 (rule 8): output records in `UiState.io_maps`, one per audio system plus
+//! output device (outputs, Main, measurements), and input records in `UiState.input_maps`, one per
+//! audio system plus the identity of the capture endpoint actually opened. The engine holds one
+//! composed table (`setup.io_map`); every change reaches the audio thread as a plan, never a
+//! reopen, and is split again into the two records when it is kept.
 
 use crate::StudioApp;
-use transit_model::IoMap;
+use transit_model::{InputMap, IoMap};
 
-/// Tables kept in the preferences; the oldest go first.
+/// Records kept in the preferences, per side; the oldest go first.
 const MAX_SAVED: usize = 64;
 
-/// The table to use for a device that just opened: its saved one made to fit `opened` (the default
-/// table for the channels the stream has), else `opened` itself. A device whose input count is
-/// not known to the stream (a separate input device) keeps the saved input count.
-pub fn adopt(saved: &[IoMap], opened: IoMap) -> IoMap {
-    let Some(mut map) = saved.iter().find(|m| m.key() == opened.key()).cloned() else { return opened };
-    map.reconcile_outputs(opened.outputs);
-    if opened.inputs > 0 && opened.inputs != map.inputs {
-        map.inputs = opened.inputs.min(transit_model::MAX_DEVICE_CHANNELS as u16);
-        map.add_default_inputs(map.inputs);
+/// The input composed into the engine's table: the capture endpoint's identity (the key of its
+/// record and of its measurements), its display name, and its own channel count (without the
+/// System Audio pair; it may exceed the table's 32-channel cap, which the page says).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenInput {
+    pub identity: String,
+    pub name: String,
+    pub channels: usize,
+}
+
+impl OpenInput {
+    fn of(r: &transit_playback::record::Recorder) -> Self {
+        Self { identity: r.input_identity.id.clone(), name: r.input_identity.name.clone(), channels: r.device_channels() }
     }
+
+    fn width(&self) -> u16 {
+        u16::try_from(self.channels).unwrap_or(u16::MAX)
+    }
+}
+
+/// The output record for a device that just opened: its saved one with the output count the
+/// stream has (output paths that no longer fit are dropped), else the defaults `opened` holds. The
+/// input half is not looked at here ([`compose`]).
+pub fn adopt(saved: &[IoMap], opened: &IoMap) -> IoMap {
+    let mut map = saved.iter().rfind(|m| m.key() == opened.key()).cloned().unwrap_or_else(|| opened.clone());
+    map.reconcile_outputs(opened.outputs);
     // Where System Audio sits in the live input is the open input's, never the saved table's.
     map.system_audio = opened.system_audio;
     map
 }
 
-/// The table with the open input's own channel count (`input`, without the System Audio pair), or
-/// `None` when there is no open input or the table already has that count and its input paths.
-pub fn with_input_count(map: &IoMap, input: Option<usize>) -> Option<IoMap> {
-    let inputs = u16::try_from(input?).unwrap_or(u16::MAX);
-    let mut next = map.clone();
-    (next.inputs != inputs).then(|| {
-        next.inputs = inputs.min(transit_model::MAX_DEVICE_CHANNELS as u16);
-        next.add_default_inputs(next.inputs);
-        next
-    })
+/// The engine's table: `output`'s outputs, Main and measurements with the input half of `input`'s
+/// record (rules 9 and 11, [`transit_model::adopt_input`]), or with no input half when no input
+/// is open. Returns the input record to keep, when there is an input.
+pub fn compose(output: &IoMap, input: Option<&OpenInput>, inputs: &[InputMap], outputs: &[IoMap]) -> (IoMap, Option<InputMap>) {
+    match input {
+        Some(i) => {
+            let (map, record) = transit_model::adopt_input(output, inputs, outputs, &i.identity, i.width());
+            (map, Some(record))
+        }
+        None => (output.compose(None), None),
+    }
 }
 
-/// Keep `map` as its device's table (most recent last).
+/// Keep `map`'s output half as its output device's record (most recent last): an older build's
+/// record under the same key keeps its input half exactly as it was read (rule 11).
 pub fn remember(saved: &mut Vec<IoMap>, map: &IoMap) {
-    saved.retain(|m| m.key() != map.key());
-    saved.push(map.clone());
+    let old = saved.iter().rfind(|m| m.key() == map.key()).cloned();
+    let record = map.output_record(old.as_ref());
+    saved.retain(|m| m.key() != record.key());
+    saved.push(record);
     let excess = saved.len().saturating_sub(MAX_SAVED);
     saved.drain(..excess);
 }
 
+/// Keep an input record (most recent last).
+pub fn remember_input(saved: &mut Vec<InputMap>, record: InputMap) {
+    saved.retain(|r| r.key() != record.key());
+    saved.push(record);
+    let excess = saved.len().saturating_sub(MAX_SAVED);
+    saved.drain(..excess);
+}
+
+/// Keep `map`'s input half as its input's record, with the `defaults_for` the record already has
+/// (it changes only when an input opens). Nothing when no input is composed in.
+pub fn remember_inputs_of(saved: &mut Vec<InputMap>, map: &IoMap) {
+    let defaults_for = saved.iter().rfind(|r| r.key() == (map.system.as_str(), map.input_device.as_str())).map_or(0, |r| r.defaults_for);
+    if let Some(record) = map.input_record(defaults_for) {
+        remember_input(saved, record);
+    }
+}
+
 impl StudioApp {
-    /// Once per opened device, give the engine this machine's table for it; afterwards pass every
-    /// change of the engine's table to the audio thread and the preferences. Without a real
-    /// device (`--no-audio`, the silent fallback) there is nothing to open or keep; the silent
-    /// device of `--null-audio` gets its table, but it is not this machine's, so it is never saved.
+    /// The input open now: the app's recorder, else the one the player holds (opened with the
+    /// output). `None` when no input opened (not asked for yet, or it failed).
+    pub(crate) fn open_input(&self) -> Option<OpenInput> {
+        self.recorder.as_ref().map(OpenInput::of).or_else(|| self.player.as_ref()?.with_held_input(OpenInput::of))
+    }
+
+    /// Once per opened device, give the engine this machine's table for it, composed from the
+    /// output's record and the open input's (ADR 0015, amendment for #431); again whenever another
+    /// input (or the same one at another width) opens; afterwards pass every change of the
+    /// engine's table to the audio thread and the preferences. Without a real device (`--no-audio`,
+    /// the silent fallback) there is nothing to open or keep; the silent device of `--null-audio`
+    /// gets its table, but it is not this machine's, so neither half is ever saved. An input that
+    /// failed to open changes no record.
     pub(crate) fn sync_io(&mut self) {
         // A Player waiting to be reopened after a driver reset gets the table with its successor.
         let Some(player) = self.player.as_ref().filter(|p| !p.silent && p.reopen_cause().is_none()) else { return };
-        if self.io_adopt {
-            let map = adopt(&self.ui.io_maps, (*player.io_map()).clone());
+        let keep = !player.null_device();
+        let input = self.open_input();
+        let output = if self.io_adopt {
+            Some(adopt(&self.ui.io_maps, &player.io_map()))
+        } else if input.is_some() && input != self.io_input {
+            // An input opened as its own device after the output (cpal: ALSA, CoreAudio), or
+            // another one: the input half follows it; the output half is the engine's.
+            Some(self.engine.io_map().compose(None))
+        } else {
+            None
+        };
+        if let Some(output) = output {
+            let (map, record) = compose(&output, input.as_ref(), &self.ui.input_maps, &self.ui.io_maps);
+            if let Some(record) = record.filter(|_| keep) {
+                remember_input(&mut self.ui.input_maps, record);
+            }
             self.engine.set_io_map(map);
             self.io_adopt = false;
-        }
-        // An input that opened as its own device (cpal: ALSA, CoreAudio) has a count the output's
-        // open could not know (#429): the table takes it, so its input paths can be made.
-        if let Some(map) = with_input_count(self.engine.io_map(), self.recorder.as_ref().map(|r| r.device_channels())) {
-            self.engine.set_io_map(map);
+            self.io_input = input;
         }
         if self.io_pushed == self.engine.io_revision() {
             return;
         }
         let map = self.engine.io_map().clone();
+        let Some(player) = self.player.as_ref() else { return };
         if player.set_io(map.clone()).is_ok() {
-            if !player.null_device() {
+            if keep {
                 remember(&mut self.ui.io_maps, &map);
+                remember_inputs_of(&mut self.ui.input_maps, &map);
             }
             self.io_pushed = self.engine.io_revision();
         }
@@ -77,131 +136,5 @@ impl StudioApp {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use transit_model::{ChannelFormat, IoDirection, IoPath};
-
-    /// `--null-audio`: the silent device's table reaches the engine and the player, and nothing is
-    /// added to the saved tables in `ui.json`.
-    #[test]
-    fn a_null_audio_run_saves_no_table_for_the_silent_device() {
-        use std::sync::Arc;
-        use transit_playback::backend::null::{self, PaceClock, StepClock};
-        let engine = transit_engine::Engine::default();
-        let clock = StepClock::new();
-        let player = transit_playback::Player::with_null_device_clock(engine.session_arc(), Arc::clone(&clock) as Arc<dyn PaceClock>);
-        clock.settle();
-        let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
-        app.null_audio = true;
-        assert!(app.player.as_ref().is_some_and(|p| p.null_device() && !p.silent));
-        app.sync_io();
-        assert_eq!(app.engine.io_map().key(), (null::SYSTEM, null::DEVICE), "the engine holds the silent device's table");
-        assert_eq!(app.io_pushed, app.engine.io_revision(), "the table went to the player");
-        assert!(app.ui.io_maps.is_empty(), "no table kept for the silent device: {:?}", app.ui.io_maps);
-    }
-
-    fn tascam() -> IoMap {
-        IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10)
-    }
-
-    #[test]
-    fn an_unknown_device_gets_its_defaults_and_a_known_one_its_saved_table() {
-        let mut saved = Vec::new();
-        assert_eq!(adopt(&saved, tascam()), tascam());
-        let mut mine = tascam();
-        mine.add_path(IoPath {
-            live: false,
-            name: "Cue".into(),
-            direction: IoDirection::Output,
-            channels: vec![8, 9],
-            format: ChannelFormat::Stereo,
-        })
-        .unwrap();
-        remember(&mut saved, &mine);
-        assert_eq!(adopt(&saved, tascam()), mine);
-        assert_eq!(
-            adopt(&saved, IoMap::for_device("ASIO", "Scarlett 2i2", 2, 2)).paths.len(),
-            IoMap::for_device("ASIO", "Scarlett 2i2", 2, 2).paths.len()
-        );
-    }
-
-    #[test]
-    fn one_device_in_another_usb_mode_adapts_its_saved_table() {
-        let mut mine = tascam();
-        mine.add_path(IoPath {
-            live: false,
-            name: "Cue".into(),
-            direction: IoDirection::Output,
-            channels: vec![8, 9],
-            format: ChannelFormat::Stereo,
-        })
-        .unwrap();
-        mine.add_path(IoPath {
-            live: false,
-            name: "Pair".into(),
-            direction: IoDirection::Output,
-            channels: vec![2, 3],
-            format: ChannelFormat::Stereo,
-        })
-        .unwrap();
-        let mut saved = Vec::new();
-        remember(&mut saved, &mine);
-        let two = adopt(&saved, IoMap::for_device("ASIO", "TASCAM Model 12", 2, 2));
-        assert_eq!((two.inputs, two.outputs), (2, 2), "the opened counts are stored inside the table");
-        assert!(two.path("Cue").is_none() && two.path("Pair").is_none(), "paths beyond the opened channels are dropped");
-        assert!(two.path("Out 1-2").is_some());
-        // The stream knows no input count for a separate input device: the saved one stays.
-        let separate = adopt(&saved, IoMap::for_device("ASIO", "TASCAM Model 12", 0, 10));
-        assert_eq!((separate.inputs, separate.outputs), (12, 10));
-    }
-
-    /// #429: on ALSA the output opens the table with 0 inputs and the input opens as its own device;
-    /// its count reaches the table, so the I/O page reads it and input paths can be made.
-    #[test]
-    fn the_open_inputs_count_reaches_a_table_opened_without_inputs() {
-        let alsa = IoMap::for_device("ALSA", "pipewire", 0, 2);
-        let map = with_input_count(&alsa, Some(2)).expect("the input's count is adopted");
-        assert_eq!((map.inputs, map.outputs), (2, 2));
-        assert!(map.path("In 1-2").is_some_and(|p| p.direction == IoDirection::Input));
-        assert!(with_input_count(&map, Some(2)).is_none(), "nothing to change");
-        assert!(with_input_count(&alsa, None).is_none(), "no open input: the table stays");
-    }
-
-    /// #690: a table saved while the input did not open (0 inputs) gets the default input paths
-    /// when the same device opens duplex with an input (the opened table carries the count); the
-    /// user's paths stay, and a default the user then removes stays removed.
-    #[test]
-    fn a_saved_table_without_inputs_gets_the_default_input_paths_when_inputs_open() {
-        let mut saved_map = IoMap::for_device("test", "duplex", 0, 2);
-        saved_map
-            .add_path(IoPath { live: false, name: "Cue".into(), direction: IoDirection::Output, channels: vec![1], format: ChannelFormat::Mono })
-            .unwrap();
-        let mut saved = Vec::new();
-        remember(&mut saved, &saved_map);
-        let inputs = |m: &IoMap| m.paths_of(IoDirection::Input).map(|p| p.name.clone()).collect::<Vec<_>>();
-        let duplex = adopt(&saved, IoMap::for_device("test", "duplex", 1, 2));
-        assert_eq!(duplex.inputs, 1);
-        assert_eq!(inputs(&duplex), ["In 1"]);
-        assert!(duplex.path("Cue").is_some(), "the user's path stays");
-        assert!(with_input_count(&duplex, Some(1)).is_none(), "nothing left for the input count to add");
-        let two = adopt(&saved, IoMap::for_device("test", "duplex", 2, 2));
-        assert_eq!(inputs(&two), ["In 1", "In 2", "In 1-2"]);
-        let mut edited = duplex.clone();
-        edited.remove_path("In 1").unwrap();
-        remember(&mut saved, &edited);
-        assert!(inputs(&adopt(&saved, IoMap::for_device("test", "duplex", 1, 2))).is_empty(), "a removed default stays removed");
-    }
-
-    #[test]
-    fn remembering_replaces_by_device_and_is_bounded() {
-        let mut saved = Vec::new();
-        remember(&mut saved, &tascam());
-        remember(&mut saved, &tascam());
-        assert_eq!(saved.len(), 1);
-        for n in 0..(MAX_SAVED + 5) {
-            remember(&mut saved, &IoMap::for_device("ASIO", &format!("device {n}"), 2, 2));
-        }
-        assert_eq!(saved.len(), MAX_SAVED);
-        assert_eq!(saved.last().map(|m| m.device.as_str()), Some("device 68"));
-    }
-}
+#[path = "io_settings_tests.rs"]
+mod tests;

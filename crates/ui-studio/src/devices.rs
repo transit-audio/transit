@@ -662,7 +662,14 @@ fn hardware_state(
 ) {
     let rate = app.engine.session().sample_rate.hz();
     let report = app.hardware_reports().into_iter().find(|r| r.track == t && r.slot == slot);
-    let text = report.as_ref().map_or_else(String::new, |r| crate::hardware_ui::state_text(&r.state, r.latency, rate));
+    let text = report.as_ref().map_or_else(String::new, |r| {
+        // A round trip measured through another input is not used (amendment for #431, rule 13).
+        if r.state == transit_mix::HardwareState::Unmeasured && app.engine.io_map().hardware_latency_elsewhere(&r.send, &r.ret, rate) {
+            crate::hardware_ui::MEASURE_AGAIN.to_string()
+        } else {
+            crate::hardware_ui::state_text(&r.state, r.latency, rate)
+        }
+    });
     let disabled = h.disabled.is_some();
     let resp = ui.interact(eb.intersect(lane), ui.id().with(("hardware_state", t.0, slot)), Sense::click());
     pc.rect_filled(eb, crate::theme::RADIUS, if resp.hovered() && disabled { TOKENS.button_hover } else { TOKENS.button });

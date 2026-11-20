@@ -269,6 +269,11 @@ impl StudioApp {
         let name = transit_engine::io::sanitize_name(&self.engine.session().name);
         let unsaved_dir = self.autosave_dir.as_ref().map_or_else(std::env::temp_dir, |d| d.join(name));
         let Some(r) = &mut self.recorder else { return Err("no audio input device".into()) };
+        // An armed input on an unavailable input path refuses, naming it (ADR 0015, amendment for
+        // #431, rule 10): it would record silence, and never records another channel.
+        if let Some(why) = transit_engine::io::input_refusal(&self.engine) {
+            return Err(why);
+        }
         let plan = transit_engine::io::plan_takes_with(&self.engine, &unsaved_dir, r.channels, r.system_channel());
         if plan.is_empty() {
             return Err("no audio track is record-enabled".into());

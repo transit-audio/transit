@@ -36,6 +36,10 @@ pub fn state_line(report: Option<&ExternalReport>, live: bool, port: Option<&str
     (plain_state(report, port, rate), false)
 }
 
+/// The card's state when the chain was measured only through another input than the one open
+/// (or one whose identity is not established): the figure is not used.
+pub const MEASURE_AGAIN_INPUT: &str = "Measure again: measured through another input";
+
 fn plain_state(report: Option<&ExternalReport>, port: Option<&str>, rate: u32) -> String {
     match port {
         Some("") => return "No MIDI port: choose one on the Out button".into(),
@@ -298,7 +302,15 @@ pub(crate) fn card(
         _ => None,
     };
     let report = app.external_reports().into_iter().find(|x| x.track == t);
-    let (state, stale) = state_line(report.as_ref(), live, port.as_deref(), s.sample_rate.hz(), app.device_buffer());
+    let (mut state, mut stale) = state_line(report.as_ref(), live, port.as_deref(), s.sample_rate.hz(), app.device_buffer());
+    // A figure measured through another input is not used (ADR 0015, amendment for #431, rule 13).
+    if let (Some(r), MidiOutput::External { port: p, .. }) = (report.as_ref(), &output)
+        && r.state == ExternalState::Unmeasured
+        && live
+        && app.engine.io_map().external_latency_elsewhere(p, &r.ret)
+    {
+        (state, stale) = (MEASURE_AGAIN_INPUT.to_string(), true);
+    }
     let ok = report.as_ref().is_some_and(|x| x.state == ExternalState::Ready) && port.is_none() && live;
     // A refusal or a result waiting for Keep is said where the state is, until the next Measure.
     let said = app.external_measure.outcome.as_ref().filter(|o| o.track == t && !o.stored).map(|o| o.text.clone());
