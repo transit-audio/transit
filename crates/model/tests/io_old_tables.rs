@@ -3,7 +3,8 @@
 //! v0.6.x (without `live`). The fixtures follow those versions' structs field for field (`git show
 //! v0.7.2:crates/model/src/io_map.rs`, `v0.6.2` for the form without `live`), pretty-printed as
 //! `ui.json` is. Each is loaded, used as rule 11 says, saved as a new build saves it and reloaded,
-//! and its input half compared with what was read.
+//! and its input half compared with what was read: the definitions survive (a file from before
+//! `IoPath.live` gains `"live": false` when it is written again, so the literal bytes do not).
 #![allow(clippy::unwrap_used)]
 
 use serde_json::Value;
@@ -33,7 +34,8 @@ fn raw_half(text: &str) -> Value {
 }
 
 /// Saved as a new build saves it (the output record keeps the old input half as read), written,
-/// reloaded: the input half is byte for byte what was read, and matches the file's.
+/// reloaded: the re-serialized input half equals what was read, and the file's values with a
+/// missing `live` read as its default.
 fn saved_and_reloaded(text: &str, old: &IoMap, composed: &IoMap) -> IoMap {
     let record = composed.output_record(Some(old));
     let written = serde_json::to_vec_pretty(&record).unwrap();

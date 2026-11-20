@@ -20,8 +20,10 @@
    defaults and a user path, no `live`, a JACK group that is now only the input, and a native
    WASAPI record. `a_v072_table_with_inputs_and_no_input_paths_gets_the_defaults_once` fails
    without the fix (ADR 0015, amendment for #431, rule 11: an older table's input half has no
-   `defaults_for`, so the defaults are made once). Each fixture is also saved and reloaded and its
-   input half compared byte for byte with what was read.
+   `defaults_for`, so the defaults are made once). Each fixture is also saved and reloaded, and its
+   input half (the count and the input path definitions, re-serialized) compared with what was
+   read and with the file's values; a file from before `IoPath.live` gains `"live": false` when it
+   is written again, so the definitions survive, not the literal bytes.
 5. **Gate class.** A change to how saved per-machine settings are read or repaired is tested over
    fixtures in the serialized form every older build in support wrote, including the forms a known
    defect wrote, never only over values today's constructors make.
