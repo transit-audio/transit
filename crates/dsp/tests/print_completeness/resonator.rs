@@ -475,6 +475,111 @@ fn witnesses() -> Vec<W> {
             completed: idle,
         },
     ];
+    // The output limiter turning the gain down: loud strums at full brightness and long damping
+    // push its peak follower above 1 at T; the continuation strums again while the peak decays
+    // (its release is 0.00002 a sample), so the restored peak decides the gain.
+    v.push(W {
+        boundary: Boundary::Entry("limiter"),
+        history: |rate| {
+            let mut h = setup(4);
+            h.extend([Step::Param("damping", 90.0), Step::Param("brightness", 100.0), Step::Param("accent", 0.0), Step::Param("model", SYMPATHETIC)]);
+            for key in [40u8, 47, 52, 59] {
+                h.extend([Step::On(key, 127, 0), Step::Run(span(&[HOLD], rate))]);
+            }
+            h
+        },
+        continuation: |rate| {
+            let mut c = Vec::new();
+            for key in [43u8, 50, 55] {
+                c.extend([Step::On(key, 127, 0), Step::Run(span(&[VISIT], rate))]);
+            }
+            for key in [40u8, 47, 52, 59, 43, 50, 55] {
+                c.push(Step::Off(key, 0));
+            }
+            c.push(run_out(&[SHAPER_RELEASE], rate));
+            c
+        },
+        reached: |p| obs(p).limiter_peak > 1.0,
+        completed: |p| !obs(p).held,
+    });
+    // A chord's strums mid-way at T: the first strum played, the others waiting for their part
+    // blocks, which come within the stable note's delay of it (the strum rule the instrument keeps
+    // on reads how many blocks passed since the last strum); the continuation plays them and
+    // strums the chord again.
+    v.push(W {
+        boundary: Boundary::Entry("queued strums"),
+        history: |rate| {
+            let mut h = setup(4);
+            h.extend([Step::Param("model", SYMPATHETIC), Step::On(40, 120, 0), Step::Run(span(&[HOLD, HOLD], rate))]);
+            h.extend([Step::On(48, 110, 0), Step::On(52, 100, 0), Step::On(55, 90, 0), Step::RunBlocks(25, 25)]);
+            h
+        },
+        continuation: |rate| {
+            let mut c =
+                vec![Step::RunBlocks(200, 8), Step::On(43, 110, 0), Step::On(47, 100, 0), Step::On(50, 90, 0), Step::Run(span(&[HOLD], rate))];
+            for key in [40u8, 48, 52, 55, 43, 47, 50] {
+                c.push(Step::Off(key, 0));
+            }
+            c.push(run_out(&[SHAPER_RELEASE], rate));
+            c
+        },
+        reached: |p| (1..3).contains(&obs(p).strums),
+        completed: idle,
+    });
+    // Strings below the delay line's reach (a string's resampler runs when its period passes
+    // the 2048-sample line; its phase survives re-initialization): low strums sounding at T, the
+    // continuation strums lower and higher, through a model switch away and back.
+    v.push(W {
+        boundary: Boundary::Entry("low strings"),
+        history: |rate| {
+            let mut h = setup(1);
+            h.extend([
+                Step::Param("damping", 80.0),
+                Step::Param("tonic", 0.0),
+                Step::Param("model", INHARMONIC),
+                Step::On(13, 120, 0),
+                Step::Run(span(&[STRING, HOLD], rate)),
+            ]);
+            h
+        },
+        continuation: |rate| {
+            vec![
+                Step::On(12, 110, 0),
+                Step::Run(span(&[STRING], rate)),
+                Step::Param("model", MODAL),
+                Step::Run(span(&[HOLD], rate)),
+                Step::Param("model", INHARMONIC),
+                Step::On(15, 110, 0),
+                Step::Run(span(&[STRING, HOLD], rate)),
+                Step::Off(13, 0),
+                Step::Off(12, 0),
+                Step::Off(15, 0),
+                run_out(&[SHAPER_RELEASE], rate),
+            ]
+        },
+        reached: |p| obs(p).held && obs(p).model == transit_resonator::ResonatorModel::InharmonicString,
+        completed: idle,
+    });
+    // A key kept only by the pedal (released while it was down, no other key held): it alone
+    // keeps the shapers gated; the continuation runs on, then lifts the pedal.
+    v.push(W {
+        boundary: Boundary::Entry("pedal-only key"),
+        history: |rate| {
+            let mut h = setup(4);
+            h.extend(shaper_on());
+            h.extend([
+                Step::Midi([0xB0, 64, 127], 0),
+                Step::On(62, 100, 2),
+                Step::Run(span(&[HOLD], rate)),
+                Step::Off(62, 3),
+                Step::Run(span(&[HOLD], rate)),
+            ]);
+            h
+        },
+        continuation: |rate| vec![Step::Run(span(&[VISIT], rate)), Step::Midi([0xB0, 64, 0], 3), run_out(&[SHAPER_RELEASE], rate)],
+        reached: |p| obs(p).pedalled && !obs(p).held && obs(p).gate,
+        completed: |p| !obs(p).sustain && idle(p),
+    });
     v.extend(model_witnesses());
     v
 }

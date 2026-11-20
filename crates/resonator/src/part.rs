@@ -916,10 +916,10 @@ impl Resonator {
     }
 
     /// What the transplant witnesses observe: the configured model, the polyphony, whether a
-    /// re-initialization is pending (`dirty`), and the active voice.
+    /// re-initialization is pending (`dirty`), the active voice, and the output limiter's peak.
     #[must_use]
-    pub fn observe(&self) -> (ResonatorModel, usize, bool, usize) {
-        (self.model, self.polyphony, self.dirty, self.active_voice)
+    pub fn observe(&self) -> (ResonatorModel, usize, bool, usize, f32) {
+        (self.model, self.polyphony, self.dirty, self.active_voice, self.limiter.peak())
     }
 }
 

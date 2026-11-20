@@ -111,3 +111,18 @@ fn an_odd_polyphony_strum_order_transplants() {
     b.set_polyphony(3);
     transplant(&mut a, b, 300, |k| (k % 25 == 0, 14.0 + (k / 25) as f32, None));
 }
+
+/// The FM voice fed by the audio input (its envelope follower tracks the input; the instrument
+/// feeds silence, so only this witness moves it): T mid-play, the continuation strums on.
+#[test]
+fn an_fm_voice_with_an_input_transplants() {
+    let mut a = Resonator::new();
+    a.set_model(ResonatorModel::FmVoice);
+    a.set_polyphony(2);
+    for k in 0..60 {
+        block(&mut a, k % 20 == 0, 20.0 + (k / 20) as f32, k);
+    }
+    let mut b = Resonator::new();
+    b.set_model(ResonatorModel::FmVoice);
+    transplant(&mut a, b, 300, |k| (k % 30 == 0, 18.0, None));
+}

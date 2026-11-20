@@ -13,6 +13,12 @@ pub struct Limiter {
 }
 
 impl Limiter {
+    /// The peak follower's level (the transplant witnesses read it, feature `testing`).
+    #[cfg(feature = "testing")]
+    pub(crate) fn peak(&self) -> f32 {
+        self.peak.0
+    }
+
     /// `Init`.
     pub fn init(&mut self) {
         self.peak = F(0.5);

@@ -294,6 +294,8 @@ pub struct Observed {
     pub polyphony: usize,
     pub dirty: bool,
     pub active_voice: usize,
+    /// The output limiter's peak follower (above 1 it turns the gain down).
+    pub limiter_peak: f32,
     /// A key is held down; a key is kept by the pedal; the pedal is down.
     pub held: bool,
     pub pedalled: bool,
@@ -329,12 +331,13 @@ impl ResonatorInstrument {
     /// The witnesses' observations (see [`Observed`]).
     #[must_use]
     pub fn observe(&self) -> Observed {
-        let (model, polyphony, dirty, active_voice) = self.part.observe();
+        let (model, polyphony, dirty, active_voice, limiter_peak) = self.part.observe();
         Observed {
             model,
             polyphony,
             dirty,
             active_voice,
+            limiter_peak,
             held: self.held.iter().any(|h| *h),
             pedalled: self.pedalled.iter().any(|h| *h),
             sustain: self.sustain,

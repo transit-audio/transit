@@ -659,6 +659,12 @@ impl ModalVoice {
     pub fn force_panic(&mut self) {
         self.panic = true;
     }
+
+    /// Test seam: sets the resonator meter's integrator (the runaway guard raises `panic` when it
+    /// reaches 200), so the port's witnesses hold a part just below the guard.
+    pub fn force_resonator_level(&mut self, level: f32) {
+        self.resonator_level = F(level);
+    }
 }
 
 #[cfg(test)]
