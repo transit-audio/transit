@@ -149,3 +149,10 @@ impl Quantizer {
         quantized_voltage
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Level { bitmask, first, last });
+#[cfg(feature = "testing")]
+crate::record_struct!([] Quantizer { voltage, level, feedback, base_interval, base_interval_reciprocal, num_degrees, level_quantizer });

@@ -4451,6 +4451,8 @@ name = "transit-random-sequencer"
 version = "0.7.3"
 dependencies = [
  "transit-macro-osc-oracle",
+ "transit-random-sequencer",
+ "transit-state-record",
 ]
 
 [[package]]

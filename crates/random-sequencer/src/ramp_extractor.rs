@@ -322,3 +322,35 @@ impl RampExtractor {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Pulse { on_duration, total_duration, bucket, pulse_width });
+#[cfg(feature = "testing")]
+crate::record_struct!([] RampExtractor {
+    current_pulse,
+    history,
+    next_bucket,
+    prediction_hash_table,
+    predicted_period,
+    prediction_accuracy,
+    average_pulse_width,
+    train_phase,
+    frequency,
+    max_train_phase,
+    reset_frequency,
+    target_frequency,
+    lp_coefficient,
+    f_ratio,
+    next_f_ratio,
+    next_max_train_phase,
+    reset_counter,
+    reset_interval,
+    audio_rate,
+    num_consistent_audio_rate_pulses,
+    max_frequency,
+    audio_rate_period,
+    audio_rate_period_hysteresis,
+    reset_at_next_pulse,
+});

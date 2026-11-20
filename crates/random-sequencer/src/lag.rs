@@ -57,3 +57,8 @@ impl LagProcessor {
         crossfade(self.lp_state, interp, interp_amount)
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] LagProcessor { ramp_start, ramp_value, lp_state, previous_phase });

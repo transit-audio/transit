@@ -9,8 +9,17 @@ repository.workspace = true
 license = "(MIT OR Apache-2.0) AND MIT"
 publish = false
 
+[features]
+# The state record of the testing seams (ADR 0029, amendment for #742): `record` and every type's
+# record and restore. Never a default feature.
+testing = ["dep:transit-state-record"]
+
+[dependencies]
+transit-state-record = { workspace = true, optional = true }
+
 [dev-dependencies]
 transit-macro-osc-oracle = { path = "../macro-osc-oracle" }
+transit-random-sequencer = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

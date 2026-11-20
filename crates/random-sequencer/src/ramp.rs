@@ -176,3 +176,12 @@ impl SlaveRamp {
         (output_phase, gate)
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Ratio { p, q });
+#[cfg(feature = "testing")]
+crate::record_struct!([] RampDivider { phase, train_phase, max_train_phase, f_ratio, reset_counter, reset_at_next_pulse });
+#[cfg(feature = "testing")]
+crate::record_struct!([] SlaveRamp { phase, max_phase, ratio, pulse_width, target, pulse_length, bernoulli, must_complete });

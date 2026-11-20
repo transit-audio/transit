@@ -31,6 +31,8 @@ mod quantizer;
 mod ramp;
 mod ramp_extractor;
 mod random;
+#[cfg(feature = "testing")]
+pub mod record;
 mod resources;
 mod scale_recorder;
 pub mod scales;

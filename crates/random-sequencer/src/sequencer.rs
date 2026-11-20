@@ -812,3 +812,87 @@ pub fn velocity_of(y: F) -> u8 {
     let v = v as u8;
     v
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Core { stream, t, sequences, channels });
+
+/// A scheduled event: its beat, then what it plays (the variant's position, then its fields).
+#[cfg(feature = "testing")]
+impl crate::record::Record for Scheduled {
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let Scheduled { beat, what } = self;
+        w.f64(*beat);
+        match *what {
+            Pending::On { voice, key, velocity } => {
+                w.u8(0);
+                w.usize(voice);
+                w.u8(key);
+                w.u8(velocity);
+            }
+            Pending::Off { voice, key } => {
+                w.u8(1);
+                w.usize(voice);
+                w.u8(key);
+            }
+        }
+    }
+
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        self.beat = r.f64()?;
+        self.what = match r.u8()? {
+            0 => Pending::On { voice: r.usize()?, key: r.u8()?, velocity: r.u8()? },
+            1 => Pending::Off { voice: r.usize()?, key: r.u8()? },
+            _ => return None,
+        };
+        Some(())
+    }
+}
+
+// The sequencer's record (ADR 0029, #742 sections 12 and 13): every field encoded (the whole
+// pending schedule, entries past `pending_len` included), but `dropped` and `dropped_ons`:
+// unobservable, counts of refused events no rendering reads (the Random Sequencer effect reads
+// only how much they grew within one `process` call, to report it to the chain's overflow count).
+#[cfg(feature = "testing")]
+crate::record_struct!([] Sequencer {
+    seed,
+    latch,
+    core,
+    started,
+    playing,
+    next_samples,
+    k,
+    k_div,
+    tick_beat,
+    first_tick,
+    phase_difference,
+    pattern_tick,
+    scheduled,
+    sounding,
+    y,
+    pending,
+    pending_len,
+} unobservable { dropped, dropped_ons });
+
+#[cfg(feature = "testing")]
+impl Sequencer {
+    /// Poison witnesses only: moves the refused-event counts (which the record leaves out).
+    pub fn poison_unobservable(&mut self, p: &mut crate::record::Poison) {
+        use crate::record::Record as _;
+        self.dropped.poison(p);
+        self.dropped_ons.poison(p);
+    }
+
+    /// Scheduled events waiting for their beat (the witnesses' observation).
+    #[must_use]
+    pub fn pending_len(&self) -> usize {
+        self.pending_len
+    }
+
+    /// Voices sounding a key now (the witnesses' observation).
+    #[must_use]
+    pub fn sounding_voices(&self) -> usize {
+        self.sounding.iter().filter(|s| s.is_some()).count()
+    }
+}

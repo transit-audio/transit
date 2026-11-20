@@ -243,3 +243,27 @@ impl<const N: usize> OutputChannel<N> {
         self.previous_steps = steps_modulation.value();
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] ScaleOffset { scale, offset });
+#[cfg(feature = "testing")]
+crate::record_struct!([const N: usize] OutputChannel<N> {
+    spread,
+    bias,
+    steps,
+    scale_index,
+    register_mode,
+    register_value,
+    register_transposition,
+    previous_steps,
+    previous_phase,
+    reacquisition_counter,
+    previous_voltage,
+    voltage,
+    quantized_voltage,
+    scale_offset,
+    lag_processor,
+    quantizer,
+});

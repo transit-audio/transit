@@ -250,3 +250,25 @@ impl RandomSequence {
         self.step = self.length - 1;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] RandomStream { state });
+#[cfg(feature = "testing")]
+crate::record_struct!([] RandomSequence {
+    loop_,
+    history,
+    loop_write_head,
+    length,
+    step,
+    record_head,
+    replay_head,
+    replay_start,
+    replay_hash,
+    replay_shift,
+    deja_vu,
+    redo_read,
+    redo_write,
+    redo_write_history,
+});

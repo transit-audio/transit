@@ -565,3 +565,42 @@ impl TGenerator {
         }
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_enum!(Model { CoinToss, Clusters, Drums, Independent, Divider, ThreeStates, Markov });
+#[cfg(feature = "testing")]
+crate::record_enum!(Range { Quarter, Normal, Times4 });
+#[cfg(feature = "testing")]
+crate::record_struct!([] DividerPattern { ratios, length });
+#[cfg(feature = "testing")]
+crate::record_struct!([] TGenerator {
+    one_hertz,
+    model,
+    range,
+    rate,
+    bias,
+    jitter,
+    pulse_width_mean,
+    pulse_width_std,
+    master_phase,
+    jitter_multiplier,
+    phase_difference,
+    previous_external_ramp_value,
+    use_external_clock,
+    divider_pattern_length,
+    streak_counter,
+    markov_history,
+    markov_history_ptr,
+    drum_pattern_step,
+    drum_pattern_index,
+    sequence,
+    ramp_extractor,
+    slave_ramp,
+    bias_quantizer,
+    rate_quantizer,
+    pattern,
+    pattern_started,
+    restarted,
+});
