@@ -674,3 +674,62 @@ impl Granular {
         self.previous_mode = Some(self.mode);
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_enum!(PlaybackMode { Granular, Stretch });
+// The processor's record (ADR 0029, #742 sections 12 and 13). Every field is encoded but
+// `buffer_size` (configuration: the memory sizes the constructor fixes); the scratch frames
+// (`input`, the downsampled pair, `output`) are encoded too, so no overwrite argument is needed for
+// them, and `feedback` is state (the next block reads it before writing it). Each audio buffer
+// leaves out the memory past its live extent (`audio_buffer.rs`). The granular player and the
+// random generator are encoded although the Time Stretcher never leaves the stretch mode: the
+// port's own transplant witnesses (`tests/record_witnesses.rs`) play the granular mode.
+#[cfg(feature = "testing")]
+crate::record_struct!([] Granular {
+    stereo,
+    low_fidelity,
+    silence,
+    bypass,
+    reset_buffers,
+    mode,
+    previous_mode,
+    freeze_lp,
+    dry_wet,
+    random,
+    buffers,
+    player,
+    ws_player,
+    correlator,
+    diffuser,
+    reverb,
+    fb_filter,
+    lp_filter,
+    hp_filter,
+    input,
+    input_downsampled,
+    output_downsampled,
+    output,
+    feedback,
+    src_down,
+    src_up,
+} config { buffer_size });
+
+#[cfg(feature = "testing")]
+impl Granular {
+    /// Poison witnesses only: overwrites each audio buffer's memory past its live extent with
+    /// values that differ from the old ones.
+    pub fn poison_unobservable(&mut self, p: &mut crate::record::Poison) {
+        for b in &mut self.buffers {
+            b.poison_unobservable(p);
+        }
+    }
+
+    /// What the transplant witnesses observe: the frozen-recording crossfade counter and the
+    /// write head of the first buffer, and whether a buffer reset is pending.
+    #[must_use]
+    pub fn observe(&self) -> (i32, i32, bool) {
+        (self.buffers[0].crossfade(), self.buffers[0].head(), self.reset_buffers)
+    }
+}

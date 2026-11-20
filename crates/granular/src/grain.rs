@@ -174,3 +174,23 @@ impl Grain {
         self.phase = phase;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_enum!(GrainQuality { Low, Medium, High });
+#[cfg(feature = "testing")]
+crate::record_struct!([] Grain {
+    first_sample,
+    phase,
+    phase_increment,
+    pre_delay,
+    envelope_smoothness,
+    envelope_slope,
+    envelope_phase,
+    envelope_phase_increment,
+    gain_l,
+    gain_r,
+    active,
+    recommended_quality,
+});

@@ -131,6 +131,11 @@ impl Correlator {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Correlator { source, destination, offset, increment, size, candidate, best_score, best_match, done });
+
 #[cfg(test)]
 mod tests {
     use super::*;

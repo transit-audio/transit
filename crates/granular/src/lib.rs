@@ -28,6 +28,8 @@ pub mod float;
 mod fx;
 mod grain;
 mod processor;
+#[cfg(feature = "testing")]
+pub mod record;
 mod resources;
 mod sample_player;
 mod sample_rate_converter;

@@ -58,3 +58,9 @@ impl SampleRateConverter {
         self.history_ptr = ptr;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+// `up` is configuration: the direction the constructor fixes.
+#[cfg(feature = "testing")]
+crate::record_struct!([] SampleRateConverter { history, history_ptr } config { up });

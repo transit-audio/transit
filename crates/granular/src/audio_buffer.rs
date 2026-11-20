@@ -263,6 +263,79 @@ impl AudioBuffer {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_enum!(Resolution { Linear16, MuLaw8 });
+
+/// The live extent of the memory, bytes: the `size + INTERPOLATION_TAIL` samples `init` cleared
+/// last (every read and write stays below it), at the resolution's width.
+#[cfg(feature = "testing")]
+fn live_bytes(resolution: Resolution, size: i32) -> usize {
+    let elements = usize::try_from(size.saturating_add(INTERPOLATION_TAIL)).unwrap_or(0);
+    match resolution {
+        Resolution::Linear16 => elements * 2,
+        Resolution::MuLaw8 => elements,
+    }
+}
+
+/// The buffer's record (ADR 0029, #742 sections 12 and 13): `resolution`, `size`, `write_head`,
+/// `crossfade_counter`, the crossfade `tail` (it survives `init`), then the memory's live extent
+/// (`live_bytes`: the recording, frozen or not, whole). Unobservable: the memory past the live
+/// extent. Every read (`read`: an index wrapped below `size`, plus at most 3 for the Hermite
+/// interpolator) and every write (`write`: the head below `size`, mirrored below
+/// `size + INTERPOLATION_TAIL`) stays inside the extent, and the only call that sets a larger one,
+/// `init`, first clears exactly the new extent (`clear` zeroes everything). Witness: the transplant
+/// harness poisons the bytes past the extent after the restore and after every block
+/// (`AudioBuffer::poison_unobservable`).
+#[cfg(feature = "testing")]
+impl crate::record::Record for AudioBuffer {
+    fn record(&self, w: &mut crate::record::Writer<'_>) {
+        let AudioBuffer { memory, resolution, size, write_head, crossfade_counter, tail } = self;
+        resolution.record(w);
+        size.record(w);
+        write_head.record(w);
+        crossfade_counter.record(w);
+        tail.record(w);
+        let n = live_bytes(*resolution, *size).min(memory.len());
+        u8::record_run(memory.get(..n).unwrap_or_default(), w);
+    }
+
+    fn restore(&mut self, r: &mut crate::record::Reader<'_>) -> Option<()> {
+        let AudioBuffer { memory, resolution, size, write_head, crossfade_counter, tail } = self;
+        resolution.restore(r)?;
+        size.restore(r)?;
+        write_head.restore(r)?;
+        crossfade_counter.restore(r)?;
+        tail.restore(r)?;
+        let n = live_bytes(*resolution, *size);
+        (n <= memory.len() && *size >= 0 && (0..=(*size).max(0)).contains(write_head)).then_some(())?;
+        u8::restore_run(memory.get_mut(..n)?, r)
+    }
+
+    fn poison(&mut self, p: &mut crate::record::Poison) {
+        let _ = p;
+        unimplemented!("the transplant witnesses poison only the buffer's unobservable bytes");
+    }
+}
+
+#[cfg(feature = "testing")]
+impl AudioBuffer {
+    /// Samples kept in the crossfade tail while frozen (the witnesses' observation).
+    pub(crate) fn crossfade(&self) -> i32 {
+        self.crossfade_counter
+    }
+
+    /// Poison witnesses only: overwrites the memory past the live extent.
+    pub(crate) fn poison_unobservable(&mut self, p: &mut crate::record::Poison) {
+        use crate::record::Record as _;
+        let n = live_bytes(self.resolution, self.size).min(self.memory.len());
+        for b in self.memory.iter_mut().skip(n) {
+            b.poison(p);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

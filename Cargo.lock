@@ -4264,7 +4264,9 @@ dependencies = [
 name = "transit-granular"
 version = "0.7.3"
 dependencies = [
+ "transit-granular",
  "transit-macro-osc-oracle",
+ "transit-state-record",
 ]
 
 [[package]]

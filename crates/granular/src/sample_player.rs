@@ -203,3 +203,19 @@ impl GranularSamplePlayer {
         one_pole(&mut self.grain_size_hint, grain_size, F(0.1));
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] GranularSamplePlayer {
+    max_num_grains,
+    num_midfi_grains,
+    stereo,
+    num_grains,
+    gain_normalization,
+    grain_size_hint,
+    grain_rate_phasor,
+    grains,
+    available_grains,
+    envelope_buffer,
+});

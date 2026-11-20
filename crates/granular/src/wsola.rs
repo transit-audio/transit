@@ -282,3 +282,25 @@ impl WsolaPlayer {
         self.search_target = target_position;
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Window { first_sample, phase, phase_increment, envelope_phase_increment, done, half, regenerated });
+#[cfg(feature = "testing")]
+crate::record_struct!([] WsolaPlayer {
+    windows,
+    window_size,
+    stereo,
+    pitch,
+    smoothed_pitch,
+    position,
+    size_factor,
+    next_pitch_ratio,
+    correlator_loaded,
+    search_source,
+    search_target,
+    env_phase,
+    env_phase_increment,
+    elapsed,
+});

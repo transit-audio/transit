@@ -49,3 +49,8 @@ impl Random {
         F::from_u32(self.get_word()) / 4_294_967_296.0
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Random { state });

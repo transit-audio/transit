@@ -159,6 +159,11 @@ impl Svf {
     }
 }
 
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+crate::record_struct!([] Svf { g, r, h, state_1, state_2 });
+
 #[cfg(test)]
 mod tests {
     use super::*;
