@@ -5,22 +5,33 @@
 //!   (`in_1..` or `out_1..`); the user callback waits with the session. The other direction joins
 //!   the same client while neither has started (the Player opens capture first, as on ASIO). An
 //!   open after a start is refused, as is a second open of one direction.
+//! - The open makes no rate or buffer size read under PipeWire before activation (an inactive
+//!   client reports its own request or the server's default, not what the graph runs) and asks for
+//!   a chosen buffer size on every client it opens; under JACK 2 it asks only for a size other than
+//!   the server's, and reads both, as before (ADR 0021, amendment for #760, rules 1 and 2).
+//!   `Achieved` holds the plan's provisional figures.
 //! - The first `start` builds the process engine from both directions' callbacks, installs the
-//!   JACK callbacks and activates the client, then connects that direction's ports to its device's
+//!   JACK callbacks and activates the client, settles the active client's rate and buffer size
+//!   (`crate::settle`: the publication, the request window under PipeWire), and, when the graph
+//!   runs the rate the caller prepared for, connects that direction's ports to its device's
 //!   ports (`out_i` to the i-th playback port, the i-th capture port to `in_i`; not when the backend
 //!   was made without auto-connect); the other direction's `start` connects its own. Connections a
 //!   user makes in a patchbay later are left alone, and a reopen brings them back: the reopen
 //!   reads them before the old client goes and restores them on the new one (`crate::links`,
 //!   [`ab::Stream::snapshot_links`]). A stop is for good (it returns once no process
 //!   callback is inside that direction); when no direction runs, the client is deactivated.
-//!   Dropping the last stream deactivates and closes it, and only then frees the engine.
+//!   Dropping the last stream deactivates and closes it, and only then frees the engine. Under
+//!   another rate the start latches a rebuild instead: neither direction starts, no port connects,
+//!   and the stream says so ([`ab::Stream::needs_rebuild`]); the caller reopens. Under PipeWire the
+//!   backend remembers the last rate an active session observed and plans the next open at it (a
+//!   hint: a server shutdown clears it).
 //! - The watcher thread (`transit-jack-watch`, every 20 ms while the client is active) reads the
 //!   flags the callbacks set ([`Shared`]) and calls the streams' error callbacks: a server
 //!   shutdown is [`ab::StreamError::DeviceNotAvailable`] once, and the dead client is closed there
 //!   (jack.h: `jack_client_close` "cannot be called directly in the context of the thread that calls
 //!   the shutdown callback"); the watcher then polls for the server (a probe client every 2 s for
 //!   30 s) and, when one answers, requests a reset ([`ab::StreamError::ResetRequested`]), which the
-//!   Player's reopen path serves. A sample rate or a quantum other than the open ones is a reset
+//!   Player's reopen path serves. A sample rate or a quantum other than the settled ones is a reset
 //!   request once per new pair (the Player reopens at the server's new settings). A user callback
 //!   that panicked is [`ab::StreamError::Other`] once to its direction. Xruns are counted. Error
 //!   callbacks run with no lock held, so one may stop its stream.
@@ -29,7 +40,8 @@ use crate::api::{JackApi, JackClient};
 use crate::devices::{self, JackDevice, Server, ServerState};
 use crate::engine::{self, Engine, EngineSide, Shared};
 use crate::links;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use crate::settle::{self, Init};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -55,17 +67,29 @@ fn lock(slot: &Mutex<Option<Session>>) -> MutexGuard<'_, Option<Session>> {
     slot.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The timing knobs of the watcher (shorter in tests).
+/// The timing knobs of the watcher (shorter in tests) and of the start's settling.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Timing {
     pub(crate) watch: Duration,
     pub(crate) reconnect_period: Duration,
     pub(crate) reconnect_window: Duration,
+    /// The start's request window and its step (the watcher period, which tests that drive the
+    /// watcher by hand lengthen; the window keeps its own).
+    pub(crate) window: Duration,
+    pub(crate) window_step: Duration,
+    pub(crate) init: Init,
 }
 
 impl Default for Timing {
     fn default() -> Self {
-        Self { watch: WATCH_PERIOD, reconnect_period: RECONNECT_PERIOD, reconnect_window: RECONNECT_WINDOW }
+        Self {
+            watch: WATCH_PERIOD,
+            reconnect_period: RECONNECT_PERIOD,
+            reconnect_window: RECONNECT_WINDOW,
+            window: settle::REQUEST_WINDOW,
+            window_step: WATCH_PERIOD,
+            init: Init::default(),
+        }
     }
 }
 
@@ -77,6 +101,8 @@ pub struct JackBackend {
     next_generation: Arc<AtomicU64>,
     timing: Timing,
     auto_connect: bool,
+    /// Under PipeWire, the last rate an active session observed (0: none): the next plan's rate.
+    remembered: Arc<AtomicU32>,
 }
 
 /// Whether the value of [`AUTO_CONNECT_ENV`] keeps the automatic connections (unset or anything
@@ -101,7 +127,36 @@ pub fn server_name(version: Option<&str>) -> String {
 
 impl JackBackend {
     pub(crate) fn with_api(api: Arc<dyn JackApi>) -> Self {
-        Self { api, slot: Arc::default(), next_generation: Arc::new(AtomicU64::new(1)), timing: Timing::default(), auto_connect: true }
+        Self {
+            api,
+            slot: Arc::default(),
+            next_generation: Arc::new(AtomicU64::new(1)),
+            timing: Timing::default(),
+            auto_connect: true,
+            remembered: Arc::default(),
+        }
+    }
+
+    /// Whether the library is PipeWire's (its version string names it, as [`server_name`] reads it).
+    fn pipewire(&self) -> bool {
+        self.server_name().starts_with("PipeWire")
+    }
+
+    /// The rate a plan opens at for a group the probe listed at `listed`: under PipeWire the
+    /// remembered rate when there is one (rule 1: a hint, used alike for the render request, the
+    /// capture format and the provisional `Achieved`), else the listing's.
+    fn planned_rate(&self, listed: u32) -> u32 {
+        match self.remembered.load(Ordering::Relaxed) {
+            0 => listed,
+            rate if self.pipewire() => rate,
+            _ => listed,
+        }
+    }
+
+    /// The rate the backend remembers (tests).
+    #[cfg(test)]
+    pub(crate) fn remembered_rate(&self) -> Option<u32> {
+        Some(self.remembered.load(Ordering::Relaxed)).filter(|r| *r != 0)
     }
 
     /// This backend without the automatic connections: transit's ports are registered and left for
@@ -181,14 +236,15 @@ impl JackBackend {
         Ok(found.endpoint(direction))
     }
 
-    /// The one request to try: `f32`, every port of the group, at the server's rate and quantum.
-    fn plan(endpoint: ab::Endpoint, direction: ab::Direction, period: Option<u32>) -> Result<ab::Plan, String> {
+    /// The one request to try: `f32`, every port of the group, at the planned rate.
+    fn plan(&self, endpoint: ab::Endpoint, direction: ab::Direction, period: Option<u32>) -> Result<ab::Plan, String> {
         let device = endpoint.handle::<JackDevice>().ok_or("the endpoint is not a JACK port group")?;
-        let format = ab::Format::new(device.rate, clamp(device.ports(direction).len()), ab::SampleFormat::F32);
+        let format = ab::Format::new(self.planned_rate(device.rate), clamp(device.ports(direction).len()), ab::SampleFormat::F32);
         let request = ab::OpenRequest {
             format,
-            // A chosen buffer size is asked of the server when the client opens (it changes the
-            // quantum of every client of the server); none keeps the server's.
+            // A chosen buffer size is asked of the server when the client opens (JACK 2: the
+            // quantum of every client of the server; PipeWire: a force on transit's own node while
+            // it is active); none keeps the server's.
             period: period.map_or(ab::Period::Default, ab::Period::Frames),
             mode: ab::Mode::Shared,
             origin: ab::HostOrigin::default(),
@@ -213,22 +269,37 @@ impl JackBackend {
         let direction = callback.direction();
         let mut guard = lock(&self.slot);
         if guard.is_none() {
+            let pipewire = self.pipewire();
             let mut client = self.api.open_client(crate::CLIENT_NAME).map_err(|e| ab::OpenError::DeviceNotAvailable(e.to_string()))?;
-            // A chosen buffer size is asked of the server once, as the client opens, here on the
-            // opening thread (never a JACK callback). A refusal is not an error: the stream opens
-            // at the server's quantum and the achieved figure says so. A server that applies it
-            // later (PipeWire) reaches the buffer size callback, which requests a reopen.
-            if let Some(frames) = request.period.frames()
-                && frames != client.buffer_size()
-                && let Err(e) = client.set_buffer_size(frames)
-            {
-                log::warn!("JACK: the server did not take a {frames}-frame buffer: {e}");
-            }
-            let (rate, buffer) = (client.sample_rate(), client.buffer_size());
-            *guard = Some(Session::new(client, rate, buffer, self.next_generation.fetch_add(1, Ordering::Relaxed)));
+            // A chosen buffer size is asked for as the client opens, here on the opening thread
+            // (never a JACK callback). A refusal is not an error: the stream opens at the server's
+            // quantum and the stream says the request was declined. Under JACK 2 it changes the
+            // server's quantum for every client, so it is asked only when it differs. Under
+            // PipeWire it is a force on transit's own node that holds only while this client is
+            // active, so every client asks, with no read of an inactive client to compare with
+            // (an inactive client reports its own request or the server's default, not what the
+            // graph runs); it arrives after activation, inside the start's request window.
+            let requested = request.period.frames();
+            let current = if pipewire { None } else { Some(client.buffer_size()) };
+            let declined = match requested.filter(|frames| current != Some(*frames)) {
+                Some(frames) => {
+                    client.set_buffer_size(frames).inspect_err(|e| log::warn!("JACK: the server did not take a {frames}-frame buffer: {e}")).is_err()
+                }
+                None => false,
+            };
+            // The provisional figures: the plan's under PipeWire; under JACK 2 the client's, as
+            // before. The start settles the active client's (rule 1).
+            let opened = if pipewire {
+                Opened { rate: request.format.rate, buffer: device.buffer, pipewire, requested, declined }
+            } else {
+                Opened { rate: client.sample_rate(), buffer: client.buffer_size(), pipewire, requested, declined }
+            };
+            let id = self.next_generation.fetch_add(1, Ordering::Relaxed);
+            *guard = Some(Session::new(client, opened, request.format.rate, id, Arc::clone(&self.remembered)));
         }
         let Some(session) = guard.as_mut() else { return Err(ab::OpenError::Other("JACK: no session".into())) };
-        // The stream runs at the server's rate whatever was asked (the Player resamples).
+        // The provisional rate (PipeWire: the plan's; JACK 2: the client's, whatever was asked, as
+        // before). The start rebuilds when the active graph runs another than the prepared one.
         let format = ab::Format::new(session.rate, channels, ab::SampleFormat::F32);
         let waiting = Waiting { callback, format, origin: request.origin };
         let generation = self.next_generation.fetch_add(1, Ordering::Relaxed);
@@ -272,6 +343,12 @@ impl JackBackend {
         lock(&self.slot).as_ref().and_then(|s| s.client.as_ref().map(|c| c.name()))
     }
 
+    /// The open session's callback state (tests against a real server).
+    #[cfg(all(test, target_os = "linux", feature = "libjack"))]
+    pub(crate) fn session_shared(&self) -> Option<Arc<Shared>> {
+        lock(&self.slot).as_ref().map(|s| Arc::clone(&s.shared))
+    }
+
     /// Whether a session is open.
     #[cfg(test)]
     pub(crate) fn has_session(&self) -> bool {
@@ -306,7 +383,14 @@ impl JackBackend {
 
     #[cfg(test)]
     pub(crate) fn with_timing(mut self, watch: Duration, reconnect_period: Duration, reconnect_window: Duration) -> Self {
-        self.timing = Timing { watch, reconnect_period, reconnect_window };
+        self.timing = Timing { watch, reconnect_period, reconnect_window, ..self.timing };
+        self
+    }
+
+    /// This backend settling its first figures from the first process cycle (rule 1's fallback).
+    #[cfg(test)]
+    pub(crate) fn with_first_cycle_init(mut self) -> Self {
+        self.timing.init = Init::FirstCycle;
         self
     }
 }
@@ -327,11 +411,11 @@ impl ab::Backend for JackBackend {
     }
 
     fn plan_render(&self, wish: &ab::OutputWish) -> Result<ab::Plan, String> {
-        Self::plan(self.find(ab::Direction::Output, wish.device.as_deref())?, ab::Direction::Output, wish.period)
+        self.plan(self.find(ab::Direction::Output, wish.device.as_deref())?, ab::Direction::Output, wish.period)
     }
 
     fn plan_capture(&self, wish: &ab::InputWish) -> Result<ab::Plan, String> {
-        Self::plan(self.find(ab::Direction::Input, wish.device.as_deref())?, ab::Direction::Input, wish.period)
+        self.plan(self.find(ab::Direction::Input, wish.device.as_deref())?, ab::Direction::Input, wish.period)
     }
 
     /// One client, one process callback for both directions.
@@ -362,11 +446,11 @@ impl ab::Backend for JackBackend {
         endpoint.handle::<JackDevice>().is_some()
     }
 
-    /// `f32`, every capture port of the group, at the server's rate (a requested rate is not
-    /// applied: the server dictates it).
+    /// `f32`, every capture port of the group, at the planned rate, the render plan's (a requested
+    /// rate is not applied: the server dictates it).
     fn capture_format(&self, endpoint: &ab::Endpoint, _rate: Option<u32>) -> Result<ab::Format, String> {
         let device = endpoint.handle::<JackDevice>().ok_or("the endpoint is not a JACK port group")?;
-        Ok(ab::Format::new(device.rate, clamp(device.capture.len()), ab::SampleFormat::F32))
+        Ok(ab::Format::new(self.planned_rate(device.rate), clamp(device.capture.len()), ab::SampleFormat::F32))
     }
 
     /// The ports' short names.
@@ -471,13 +555,38 @@ impl Watcher {
     }
 }
 
+/// What the open of the session's client found and asked for.
+struct Opened {
+    /// The provisional figures, until the start settles the active client's.
+    rate: u32,
+    buffer: u32,
+    pipewire: bool,
+    requested: Option<u32>,
+    declined: bool,
+}
+
 /// The open client and its directions.
 pub(crate) struct Session {
     id: u64,
     /// `None` once the server shut the client down (the watcher closed it).
     client: Option<Box<dyn JackClient>>,
+    /// The session's rate and buffer size: provisional until the first start, then settled from
+    /// the active client (rule 1).
     rate: u32,
     buffer: u32,
+    /// The rate the caller (the Player and its recorder) prepared for: the plan's.
+    prepared_rate: u32,
+    pipewire: bool,
+    requested: Option<u32>,
+    declined: bool,
+    /// The start settled the figures.
+    settled: bool,
+    /// The reset latch: the graph runs another rate than the prepared one; nothing starts.
+    rebuild: bool,
+    /// The backend's remembered rate (PipeWire), shared with it.
+    remembered: Arc<AtomicU32>,
+    /// The watcher logged the first process cycle's figures.
+    first_cycle_logged: bool,
     shared: Arc<Shared>,
     sides: Vec<Side>,
     active: bool,
@@ -489,13 +598,23 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    fn new(client: Box<dyn JackClient>, rate: u32, buffer: u32, id: u64) -> Self {
+    fn new(client: Box<dyn JackClient>, opened: Opened, prepared_rate: u32, id: u64, remembered: Arc<AtomicU32>) -> Self {
+        let Opened { rate, buffer, pipewire, requested, declined } = opened;
         Self {
             id,
             client: Some(client),
             rate,
             buffer,
-            shared: Arc::new(Shared::new(rate, buffer)),
+            prepared_rate,
+            pipewire,
+            requested,
+            declined,
+            settled: false,
+            rebuild: false,
+            remembered,
+            first_cycle_logged: false,
+            // Unknown until the client is active (rule 1, "Publication").
+            shared: Arc::new(Shared::new(engine::UNKNOWN, engine::UNKNOWN)),
             sides: Vec::new(),
             active: false,
             watcher: None,
@@ -565,7 +684,8 @@ impl Session {
         engine
     }
 
-    /// Starts one direction: activates the client at the first start, then connects its ports.
+    /// Starts one direction: activates the client at the first start and settles its figures, then
+    /// connects its ports; under a latched rebuild neither.
     fn start(&mut self, generation: u64, slot: &Slot, api: &Arc<dyn JackApi>, timing: Timing) -> Result<(), ab::OpenError> {
         let output = self.side_mut(generation).map(|s| s.output()).ok_or_else(|| ab::OpenError::Other("JACK: the stream was closed".into()))?;
         match self.shared.side(output).state() {
@@ -582,11 +702,17 @@ impl Session {
             let Some(client) = self.client.as_mut() else { return Err(ab::OpenError::DeviceNotAvailable(crate::SERVER_NOT_RUNNING.into())) };
             client.activate(shared, engine).map_err(|e| ab::OpenError::Other(format!("JACK: activating the client: {e}")))?;
             self.active = true;
-            log::info!("JACK: client \"{}\" active at {} Hz, quantum {}", client.name(), self.rate, self.buffer);
+            self.settle(api.as_ref(), timing)?;
+            if self.rebuild {
+                return Ok(());
+            }
             match spawn_watcher(Arc::downgrade(slot), self.id, Arc::clone(api), timing) {
                 Ok(watcher) => self.watcher = Some(watcher),
                 Err(e) => log::warn!("JACK: the watcher thread did not start ({e}); a server shutdown will not be reported"),
             }
+        }
+        if self.rebuild {
+            return Ok(());
         }
         let connections = self.side_mut(generation).map(|s| s.connections.clone()).unwrap_or_default();
         if let Some(client) = self.client.as_mut() {
@@ -597,6 +723,42 @@ impl Session {
             }
         }
         self.shared.side(output).set_state(engine::STARTED);
+        Ok(())
+    }
+
+    /// After activation, on this thread under the session lock: settles the active client's rate
+    /// and buffer size (`crate::settle`), commits them as the baseline the watcher compares with,
+    /// and latches a rebuild when the rate is not the prepared one. A failed settle (a server
+    /// shutdown in the request window, no cycle in first-cycle initialization) deactivates the
+    /// client and fails the start.
+    fn settle(&mut self, api: &dyn JackApi, timing: Timing) -> Result<(), ab::OpenError> {
+        let ask = settle::Ask {
+            pipewire: self.pipewire,
+            requested: self.requested,
+            declined: self.declined,
+            prepared_rate: self.prepared_rate,
+            init: timing.init,
+        };
+        let Some(client) = self.client.as_ref() else { return Err(ab::OpenError::DeviceNotAvailable(crate::SERVER_NOT_RUNNING.into())) };
+        let name = client.name();
+        let settled = settle::settle(&self.shared, api, timing.window_step, timing.window, &ask, || (client.sample_rate(), client.buffer_size()));
+        let settled = match settled {
+            Ok(settled) => settled,
+            Err(e) => {
+                self.deactivate();
+                return Err(e);
+            }
+        };
+        (self.rate, self.buffer, self.settled) = (settled.rate, settled.buffer, true);
+        self.reset_for = (settled.rate, settled.buffer);
+        if self.pipewire {
+            self.remembered.store(settled.rate, Ordering::Relaxed);
+        }
+        log::info!("JACK: client \"{name}\" active at {} Hz, quantum {}", self.rate, self.buffer);
+        if settled.rebuild {
+            self.rebuild = true;
+            log::warn!("JACK: the graph runs {} Hz, not the {} Hz transit prepared for: rebuilding before any audio", self.rate, self.prepared_rate);
+        }
         Ok(())
     }
 
@@ -650,6 +812,8 @@ impl Session {
         if self.shared.shutdown() && !self.shutdown_reported {
             self.shutdown_reported = true;
             self.active = false;
+            // The graph may come back at another rate: no hint survives a server shutdown.
+            self.remembered.store(0, Ordering::Relaxed);
             for output in [true, false] {
                 let side = self.shared.side(output);
                 if side.state() == engine::STARTED {
@@ -665,9 +829,18 @@ impl Session {
                 reports.push((Arc::clone(&side.error), ab::StreamError::Other));
             }
         }
+        // The figures of the first process cycle, once, for the tester's sitting (rule 9's Q1).
+        if !self.first_cycle_logged && self.shared.cycles() > 0 {
+            self.first_cycle_logged = true;
+            log::info!("JACK: the first process cycle ran {} frames at {} Hz", self.shared.last_frames(), self.shared.sample_rate());
+        }
         let now = (self.shared.sample_rate(), self.shared.buffer_size());
-        if now != (self.rate, self.buffer) && now != self.reset_for {
+        if self.settled && now != (self.rate, self.buffer) && now != self.reset_for {
             self.reset_for = now;
+            // An active session observed this rate: the reopen plans at it (PipeWire's hint).
+            if self.pipewire && now.0 != engine::UNKNOWN {
+                self.remembered.store(now.0, Ordering::Relaxed);
+            }
             reports.extend(self.errors(ab::StreamError::ResetRequested));
         }
         Tick { reports, dead: None, done: false }
@@ -882,6 +1055,24 @@ impl ab::Stream for JackStream {
     /// Port latencies are slice 3.
     fn latency(&self) -> Option<Duration> {
         None
+    }
+
+    /// The buffer size the start settled from the active client (ADR 0021, amendment for #760,
+    /// rule 1); `None` before the start, or when it latched a rebuild.
+    fn period(&self) -> Option<u32> {
+        let guard = lock(&self.slot);
+        guard.as_ref().filter(|s| s.id == self.session && s.settled && !s.rebuild).map(|s| s.buffer)
+    }
+
+    /// The start found the graph at another rate than the one the caller prepared for: no
+    /// direction started, nothing connected; the caller reopens.
+    fn needs_rebuild(&self) -> bool {
+        lock(&self.slot).as_ref().is_some_and(|s| s.id == self.session && s.rebuild)
+    }
+
+    /// The server refused the buffer size the open asked for (`jack_set_buffer_size` failed).
+    fn period_declined(&self) -> bool {
+        lock(&self.slot).as_ref().is_some_and(|s| s.id == self.session && s.declined)
     }
 
     /// The process thread and its priority are the server's.

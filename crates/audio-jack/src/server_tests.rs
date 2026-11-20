@@ -94,6 +94,45 @@ fn server_open_registers_ports_and_connects_them_to_the_device() {
     assert!(capture_errors.lock().unwrap().is_empty() && render_errors.lock().unwrap().is_empty());
 }
 
+/// ADR 0021, amendment for #760, slice 1, through the real binding: the figures an inactive client
+/// reads, the active client's after `jack_activate`, the buffer size callbacks the activation
+/// brought, and the buffer the session settled on. A dummy JACK 2 server checks the binding and
+/// classic behavior only (nothing about PipeWire's caches or forces); the figures are printed for
+/// the result note.
+#[test]
+fn server_the_session_settles_the_active_clients_figures() {
+    let Some(server) = server_or_skip("server_the_session_settles_the_active_clients_figures") else { return };
+    let backend = real();
+    let inactive = {
+        let probe = backend.open_other_client("transit-760-probe").expect("a client of our own");
+        let figures = (probe.sample_rate(), probe.buffer_size());
+        probe.close().expect("closes");
+        figures
+    };
+    let (render_cb, capture_cb) = silent();
+    let (capture, render, achieved, capture_errors, render_errors) = open_duplex(&backend, render_cb, capture_cb);
+    assert_eq!(render.period(), None, "nothing settled before the start");
+    capture.start().unwrap();
+    render.start().unwrap();
+    let active = backend.with_client(|c| (c.sample_rate(), c.buffer_size())).expect("the session's client");
+    let shared = backend.session_shared().expect("the session");
+    eprintln!(
+        "server_the_session_settles_the_active_clients_figures: inactive {inactive:?}, active {active:?}, provisional {:?}, settled {:?}, buffer size callbacks {}",
+        (achieved.format.rate, achieved.period),
+        render.period(),
+        shared.buffer_callbacks()
+    );
+    assert_eq!(active, (server.rate, server.buffer), "the active client reads the server's figures");
+    assert_eq!(render.period(), Some(active.1), "the settled buffer is the active client's");
+    assert_eq!((shared.sample_rate(), shared.buffer_size()), active, "what the session observes");
+    assert!(!render.needs_rebuild(), "the dummy server runs the rate the listing gave");
+    wait_for("process callbacks", Duration::from_secs(10), || render.stats().unwrap().wakes > 10);
+    assert_eq!(render.stats().unwrap().resets, 0, "no reset after the start");
+    drop(capture);
+    drop(render);
+    assert!(capture_errors.lock().unwrap().is_empty() && render_errors.lock().unwrap().is_empty());
+}
+
 /// What the loopback test's callbacks saw: per capture block its device position and samples;
 /// whether every capture ran before the render of its cycle.
 #[derive(Default)]

@@ -24,6 +24,10 @@ pub(crate) struct ClientRecord {
     pub(crate) shared: Option<Arc<Shared>>,
     /// The process engine `activate` was given, dropped at close (as `crate::ffi` frees it).
     pub(crate) engine: Option<EngineSlot>,
+    /// Reads of the rate or the buffer size while the client was not active.
+    pub(crate) inactive_reads: u32,
+    /// PipeWire: the quantum this client forces while it is active (`node.force-quantum`).
+    pub(crate) force: Option<u32>,
 }
 
 /// The engine of an active fake client.
@@ -75,6 +79,47 @@ struct State {
     link_delay: u32,
     /// Links made and not shown yet, with the graph cycles left until they show.
     unseen: Vec<((String, String), u32)>,
+    /// PipeWire's JACK library (ADR 0021, amendment for #760: the fake's PipeWire mode); `None`
+    /// is JACK 2's behavior (one global quantum, applied at once).
+    pipewire: Option<PipeWireMode>,
+    /// What the graph does after a number of graph steps ([`JackApi::await_graph`]), in order.
+    scheduled: Vec<(u32, Event)>,
+}
+
+/// How the fake answers as PipeWire's JACK library (amendment for #760, "The fake gains a PipeWire
+/// mode"). The running figures are the server's `rate` and `buffer`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PipeWireMode {
+    /// What an inactive client without a `node.latency` request reports: the server's defaults
+    /// (`clock.rate`, `clock.quantum`), not what the graph runs.
+    pub(crate) default: (u32, u32),
+    /// The client's own `node.latency` request (`PIPEWIRE_LATENCY`): an inactive client reports it.
+    pub(crate) latency: Option<(u32, u32)>,
+    /// The figure the buffer size callback reports synchronously inside `jack_activate`; `None`:
+    /// the running buffer (or the client's force, when it arrives at once).
+    pub(crate) activation_buffer: Option<u32>,
+    /// A position that is stale after activation: the getters of an active client report it
+    /// until the first process cycle corrects it.
+    pub(crate) stale: Option<(u32, u32)>,
+    /// Graph steps between a client's activation (or a request while active) and the arrival of
+    /// the quantum it forces; 0 arrives at activation.
+    pub(crate) force_delay: u32,
+    /// The quantum the driver picks once the forcing client deactivates or closes; `None` keeps
+    /// the forced one.
+    pub(crate) restore: Option<u32>,
+}
+
+/// Something the fake's graph does after some graph steps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Event {
+    /// The quantum changes (another client's force, or a client's own request arriving).
+    Quantum(u32),
+    /// The graph's rate changes.
+    Rate(u32),
+    /// The server stops.
+    Shutdown,
+    /// One process cycle of this many frames on the active client, with no port buffers.
+    Cycle(u32),
 }
 
 /// The fake's `jack.self-connect-mode`.
@@ -141,8 +186,45 @@ impl FakeServer {
             self_connect: SelfConnect::Allow,
             link_delay: 0,
             unseen: Vec::new(),
+            pipewire: None,
+            scheduled: Vec::new(),
         };
         Self { state: Arc::new(Mutex::new(state)) }
+    }
+
+    /// PipeWire's JACK library over one stereo device node, the graph running at `rate` and
+    /// quantum `buffer`, the server's defaults (what an inactive client reports) at `default`.
+    pub(crate) fn pipewire(rate: u32, buffer: u32, default: (u32, u32)) -> Self {
+        let server = Self::running(
+            rate,
+            buffer,
+            &[("Scarlett:capture_AUX0", true), ("Scarlett:capture_AUX1", true), ("Scarlett:playback_AUX0", false), ("Scarlett:playback_AUX1", false)],
+        );
+        server.set_version("1.0.5 (PipeWire 1.0.5)");
+        server.lock().pipewire = Some(PipeWireMode { default, ..PipeWireMode::default() });
+        server
+    }
+
+    /// Changes the PipeWire mode's script.
+    pub(crate) fn script_pipewire(&self, f: impl FnOnce(&mut PipeWireMode)) {
+        if let Some(mode) = self.lock().pipewire.as_mut() {
+            f(mode);
+        }
+    }
+
+    /// `event` happens after `steps` more graph steps.
+    pub(crate) fn schedule(&self, steps: u32, event: Event) {
+        self.lock().scheduled.push((steps, event));
+    }
+
+    /// One graph step on the stepped clock, as a wait of `period` would be.
+    pub(crate) fn step(&self, period: Duration) {
+        JackApi::await_graph(self, period);
+    }
+
+    /// How many times a client read the rate or the buffer size while it was not active.
+    pub(crate) fn inactive_reads(&self, client: usize) -> u32 {
+        self.clients(|c| c.get(client).map_or(0, |c| c.inactive_reads))
     }
 
     /// JACK 2 with one stereo interface: `system:capture_1..2`, `system:playback_1..2`.
@@ -225,6 +307,17 @@ impl FakeServer {
     /// cycle start the callback reads `jack_get_time`. False when no client is active.
     pub(crate) fn cycle_at(&self, frames: u32, late_us: u64, outputs: &mut [Vec<f32>], inputs: &[Vec<f32>]) -> bool {
         let Some(engine) = self.active_engine() else { return false };
+        // PipeWire: no process callback runs before the notify thread delivered the graph's
+        // figures (pj:2081-2084), so a stale position is corrected, with its callbacks, first.
+        let corrected = {
+            let mut state = self.lock();
+            let stale = state.pipewire.as_mut().and_then(|mode| mode.stale.take());
+            stale.map(|_| (state.rate, state.buffer))
+        };
+        if let (Some((rate, buffer)), Some(shared)) = (corrected, self.active_shared()) {
+            shared.on_sample_rate(rate);
+            shared.on_buffer_size(buffer);
+        }
         let clock = {
             let mut state = self.lock();
             let clock = Clock { current_frames: state.frames, current_usecs: state.usecs, now_usecs: state.usecs + late_us };
@@ -377,7 +470,10 @@ impl FakeServer {
         }
     }
 
-    /// The quantum changes (PipeWire, when another client asks for a smaller one).
+    /// The quantum changes and the active client's buffer size callback reports it (JACK 2: any
+    /// client's `jack_set_buffer_size`; PipeWire: a force, the restore after a forcing client left,
+    /// a node moved between drivers or a driver resume, since every JACK client locks the quantum by
+    /// default, ADR 0021, amendment for #760, rule 7).
     pub(crate) fn set_buffer_size(&self, frames: u32) {
         self.lock().buffer = frames;
         if let Some(shared) = self.active_shared() {
@@ -427,14 +523,32 @@ impl JackApi for FakeServer {
     /// One graph cycle of `period`, on the stepped clock: links not shown yet come one cycle
     /// closer to showing.
     fn await_graph(&self, period: Duration) {
-        let mut state = self.lock();
-        state.usecs += u64::try_from(period.as_micros()).unwrap_or(u64::MAX);
-        for (_, left) in &mut state.unseen {
-            *left = left.saturating_sub(1);
+        let due = {
+            let mut state = self.lock();
+            state.usecs += u64::try_from(period.as_micros()).unwrap_or(u64::MAX);
+            for (_, left) in &mut state.unseen {
+                *left = left.saturating_sub(1);
+            }
+            let (shown, unseen): (Vec<_>, Vec<_>) = std::mem::take(&mut state.unseen).into_iter().partition(|(_, left)| *left == 0);
+            state.unseen = unseen;
+            state.links.extend(shown.into_iter().map(|(link, _)| link));
+            for (left, _) in &mut state.scheduled {
+                *left = left.saturating_sub(1);
+            }
+            let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut state.scheduled).into_iter().partition(|(left, _)| *left == 0);
+            state.scheduled = later;
+            due
+        };
+        for (_, event) in due {
+            match event {
+                Event::Quantum(frames) => self.set_buffer_size(frames),
+                Event::Rate(rate) => self.set_sample_rate(rate),
+                Event::Shutdown => self.shutdown(),
+                Event::Cycle(frames) => {
+                    self.cycle(frames, &mut [], &[]);
+                }
+            }
         }
-        let (shown, unseen): (Vec<_>, Vec<_>) = std::mem::take(&mut state.unseen).into_iter().partition(|(_, left)| *left == 0);
-        state.unseen = unseen;
-        state.links.extend(shown.into_iter().map(|(link, _)| link));
     }
 
     /// The fake's stepped clock (µs), advanced by cycles and graph waits only.
@@ -472,6 +586,42 @@ impl FakeClient {
         let State { clients, running, .. } = &mut *state;
         f(&mut clients[self.index], running)
     }
+
+    /// One of the (rate, buffer) figures this client reads now.
+    fn read(&self, pick: impl Fn((u32, u32)) -> u32) -> u32 {
+        let mut state = self.server.lock();
+        let running = (state.rate, state.buffer);
+        let client = &mut state.clients[self.index];
+        let active = client.active;
+        if !active {
+            client.inactive_reads += 1;
+        }
+        let figures = match &state.pipewire {
+            Some(mode) if !active => mode.latency.unwrap_or(mode.default),
+            Some(PipeWireMode { stale: Some(stale), .. }) => *stale,
+            _ => running,
+        };
+        pick(figures)
+    }
+
+    /// PipeWire: the force this client holds arrives at the graph, now or after the mode's delay.
+    fn force_arrives(&self, frames: u32) {
+        let delay = self.server.lock().pipewire.as_ref().map_or(0, |m| m.force_delay);
+        if delay == 0 {
+            self.server.set_buffer_size(frames);
+        } else {
+            self.server.schedule(delay, Event::Quantum(frames));
+        }
+    }
+
+    /// PipeWire: the client stops forcing (it deactivated or closed): the driver picks its own.
+    fn force_ends(&self) {
+        let mut state = self.server.lock();
+        let had = state.clients[self.index].force.take().is_some();
+        if let Some(restore) = state.pipewire.as_ref().and_then(|m| m.restore).filter(|_| had) {
+            state.buffer = restore;
+        }
+    }
 }
 
 impl JackClient for FakeClient {
@@ -479,12 +629,14 @@ impl JackClient for FakeClient {
         self.record(|c, _| c.name.clone())
     }
 
+    /// JACK 2: the server's rate. PipeWire: an inactive client's request or the default; an active
+    /// client's stale position until the first cycle; else the graph's rate.
     fn sample_rate(&self) -> u32 {
-        self.server.lock().rate
+        self.read(|figures| figures.0)
     }
 
     fn buffer_size(&self) -> u32 {
-        self.server.lock().buffer
+        self.read(|figures| figures.1)
     }
 
     fn physical_ports(&self) -> Vec<PhysicalPort> {
@@ -516,19 +668,36 @@ impl JackClient for FakeClient {
     }
 
     fn activate(&mut self, shared: Arc<Shared>, engine: Engine) -> Result<(), String> {
-        self.record(|c, running| {
+        self.record(|c, running| -> Result<(), String> {
             if !*running {
                 return Err("the server is gone".into());
             }
             if c.shared.is_some() {
                 return Err("the callbacks are installed once".into());
             }
-            c.shared = Some(shared);
+            c.shared = Some(Arc::clone(&shared));
             c.engine = Some(EngineSlot(Arc::new(Mutex::new(engine))));
             c.active = true;
             c.activations += 1;
             Ok(())
-        })
+        })?;
+        // PipeWire: activation clears the cached buffer size and calls the buffer size callback
+        // synchronously with the position the client then holds (pj:4920-4921, pj:4955-4958); a
+        // force the client holds arrives at the graph now or later.
+        let pipewire = self.server.lock().pipewire.clone();
+        let force = self.record(|c, _| c.force);
+        if let Some(mode) = pipewire {
+            let delay = mode.force_delay;
+            if let Some(frames) = force.filter(|_| delay == 0) {
+                self.server.lock().buffer = frames;
+            }
+            let buffer = self.server.lock().buffer;
+            shared.on_buffer_size(mode.activation_buffer.unwrap_or(buffer));
+            if let Some(frames) = force.filter(|_| delay > 0) {
+                self.server.schedule(delay, Event::Quantum(frames));
+            }
+        }
+        Ok(())
     }
 
     /// As jack_connect: an active client, an output port to an input port of one type; a link that
@@ -593,18 +762,31 @@ impl JackClient for FakeClient {
         !state.invalid.iter().any(|(key, _)| key == name) && state.port(name) == Some((output, true))
     }
 
+    /// JACK 2: the server's one quantum changes at once, for every client. PipeWire: the client's
+    /// own node forces it while the client is active (pj:5413-5437, keys.h:173-174).
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {
         self.server.lock().quantum_requests.push(frames);
         if let Some(text) = self.server.lock().refuse_quantum.clone() {
             return Err(text);
         }
-        self.server.set_buffer_size(frames);
+        if self.server.lock().pipewire.is_none() {
+            self.server.set_buffer_size(frames);
+            return Ok(());
+        }
+        let active = self.record(|c, _| {
+            c.force = Some(frames);
+            c.active
+        });
+        if active {
+            self.force_arrives(frames);
+        }
         Ok(())
     }
 
     /// jack.h: "disconnect all ports belonging to it, since inactive clients have no port
     /// connections."
     fn deactivate(&mut self) -> Result<(), String> {
+        self.force_ends();
         let mut state = self.server.lock();
         let ports: Vec<String> = state.clients[self.index].ports.iter().map(|(p, _)| p.clone()).collect();
         state.unlink(&ports);
@@ -616,6 +798,7 @@ impl JackClient for FakeClient {
     }
 
     fn close(self: Box<Self>) -> Result<(), String> {
+        self.force_ends();
         let mut state = self.server.lock();
         let ports: Vec<String> = state.clients[self.index].ports.iter().map(|(p, _)| p.clone()).collect();
         state.unlink(&ports);

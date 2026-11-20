@@ -61,7 +61,9 @@ pub(crate) trait JackApi: Send + Sync {
         None
     }
     /// Waits about `period` on the calling control thread while the server runs its graph: never
-    /// under the session's lock, never from a JACK callback. A link a connect made can show in
+    /// from a JACK callback, and under the session's lock only in the start's request window
+    /// (`crate::settle`), when no watcher runs and only atomics the callbacks store are read
+    /// between waits. A link a connect made can show in
     /// [`JackClient::links`] only at a later graph cycle: JACK 2 writes it into the graph's next
     /// state and the server switches to that state at the start of a cycle whose previous graph
     /// finished (#431, the restore's confirmation).
@@ -80,9 +82,11 @@ pub(crate) trait JackApi: Send + Sync {
 pub(crate) trait JackClient: Send {
     /// The client's name as the server made it (`jack_get_client_name`).
     fn name(&self) -> String;
-    /// The server's rate (`jack_get_sample_rate`).
+    /// The server's rate (`jack_get_sample_rate`). Under PipeWire an inactive client answers its
+    /// own `node.latency` request or the server's default, not what the graph runs (ADR 0021,
+    /// amendment for #760): the session reads it only once its client is active.
     fn sample_rate(&self) -> u32;
-    /// The server's current quantum (`jack_get_buffer_size`).
+    /// The server's current quantum (`jack_get_buffer_size`), with the same caveat.
     fn buffer_size(&self) -> u32;
     /// The server's physical audio ports, capture ports first, each in the server's order.
     fn physical_ports(&self) -> Vec<PhysicalPort>;
@@ -110,9 +114,11 @@ pub(crate) trait JackClient: Send {
     /// `output` (a JACK output port), else one that can receive data (`jack_get_ports`). Only a
     /// port whose name is exactly `name`, byte for byte, counts.
     fn has_port(&self, name: &str, output: bool) -> bool;
-    /// Asks the server for a new quantum (`jack_set_buffer_size`): every client of the server gets
-    /// it. Called from the open path (ADR 0021, 2026-10-25 amendment) on the thread that opens the
-    /// client, never from a JACK callback.
+    /// Asks the server for a new quantum (`jack_set_buffer_size`): under JACK 2 every client of the
+    /// server gets it; under PipeWire it forces the quantum of this client's own node while the
+    /// client is active, on the graph of the driver it follows, and ends when the client
+    /// deactivates or closes (ADR 0021, amendment for #760, rule 2). Called from the open path on
+    /// the thread that opens the client, never from a JACK callback.
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String>;
     /// Removes the client from the process graph and disconnects its ports (`jack_deactivate`).
     fn deactivate(&mut self) -> Result<(), String>;

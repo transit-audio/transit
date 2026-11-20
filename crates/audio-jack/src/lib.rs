@@ -22,8 +22,11 @@
 //!   rule). The first `start` builds the engine, installs the callbacks, activates the client and
 //!   connects the ports to the device's (unless `TRANSIT_JACK_AUTOCONNECT=0`); dropping the last
 //!   stream deactivates and closes it ([`session`]). The server dictates the rate and the quantum:
-//!   `Achieved` reports them, whatever was requested. Links other clients made to transit's ports
-//!   come back after transit's own reopen (`links`, ADR 0015 amendment #431 rule 6).
+//!   `Achieved` holds the plan's provisional figures, and the start settles the active client's
+//!   (`settle`, ADR 0021 amendment #760 rules 1 and 2), which `Stream::period` reports; a rate
+//!   other than the prepared one latches a rebuild (`Stream::needs_rebuild`) before any audio.
+//!   Links other clients made to transit's ports come back after transit's own reopen (`links`,
+//!   ADR 0015 amendment #431 rule 6).
 //! - **Process** (`engine`): one callback per cycle runs the capture callback, then the render
 //!   callback (`capture_precedes_render`), with stamps from `jack_get_cycle_times` and the frame
 //!   counter as the device position. It and every other callback store atomics only; a watcher
@@ -59,6 +62,9 @@ pub mod search;
 #[cfg(all(test, target_os = "linux", feature = "libjack"))]
 mod server_tests;
 mod session;
+mod settle;
+#[cfg(test)]
+mod settle_tests;
 #[cfg(all(target_os = "linux", feature = "libjack"))]
 mod sys;
 #[cfg(test)]

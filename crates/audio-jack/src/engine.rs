@@ -41,6 +41,9 @@ pub(crate) const STOPPED: u8 = 2;
 /// The stream was dropped; its callback stays allocated (never called) until the client closes.
 pub(crate) const DETACHED: u8 = 3;
 
+/// A rate or buffer size not observed yet: the session's figures before its client is active.
+pub(crate) const UNKNOWN: u32 = 0;
+
 /// What the control side and the process callback share for one direction.
 #[derive(Debug)]
 pub(crate) struct SideShared {
@@ -155,11 +158,15 @@ pub(crate) struct Shared {
     xruns: AtomicU64,
     /// The server shut the client down (`jack_on_info_shutdown`).
     shutdown: AtomicBool,
-    /// The server's quantum: `jack_get_buffer_size` at open, then each buffer size callback.
+    /// The server's quantum: [`UNKNOWN`] until the client is active, then each buffer size callback
+    /// or the control thread's read right after activation, whichever came first.
     buffer_size: AtomicU32,
     /// Buffer size callbacks that changed the quantum.
     buffer_changes: AtomicU64,
-    /// The server's rate: `jack_get_sample_rate` at open, then each sample rate callback.
+    /// Tests: every buffer size callback (the real binding's, against a server).
+    #[cfg(test)]
+    buffer_callbacks: AtomicU64,
+    /// The server's rate: as `buffer_size`, with the sample rate callback.
     sample_rate: AtomicU32,
     /// Reset requests the watcher delivered (a rate or quantum change, the server back after a stop).
     resets: AtomicU64,
@@ -188,6 +195,8 @@ impl Shared {
             shutdown: AtomicBool::new(false),
             buffer_size: AtomicU32::new(buffer_size),
             buffer_changes: AtomicU64::new(0),
+            #[cfg(test)]
+            buffer_callbacks: AtomicU64::new(0),
             sample_rate: AtomicU32::new(sample_rate),
             resets: AtomicU64::new(0),
             faults: AtomicU64::new(0),
@@ -212,11 +221,24 @@ impl Shared {
         self.xruns.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// The buffer size callback: the quantum the next process callbacks get.
+    /// The buffer size callback: the quantum the next process callbacks get. The first figure after
+    /// [`UNKNOWN`] (PipeWire's library calls this synchronously inside `jack_activate`) is the
+    /// session's first observation, not a change.
     pub(crate) fn on_buffer_size(&self, frames: u32) {
-        if self.buffer_size.swap(frames, Ordering::Relaxed) != frames {
+        #[cfg(test)]
+        self.buffer_callbacks.fetch_add(1, Ordering::Relaxed);
+        let old = self.buffer_size.swap(frames, Ordering::Relaxed);
+        if old != frames && old != UNKNOWN {
             self.buffer_changes.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// The control thread, right after `jack_activate` returned (ADR 0021, amendment for #760,
+    /// rule 1): stores the active client's `rate` and `buffer` each only while it is still
+    /// [`UNKNOWN`], so a figure a callback published first is never overwritten.
+    pub(crate) fn publish_active(&self, rate: u32, buffer: u32) {
+        let _ = self.sample_rate.compare_exchange(UNKNOWN, rate, Ordering::Relaxed, Ordering::Relaxed);
+        let _ = self.buffer_size.compare_exchange(UNKNOWN, buffer, Ordering::Relaxed, Ordering::Relaxed);
     }
 
     /// The sample rate callback.
@@ -234,12 +256,10 @@ impl Shared {
         self.shutdown.load(Ordering::Acquire)
     }
 
-    #[cfg(test)]
     pub(crate) fn cycles(&self) -> u64 {
         self.cycles.load(Ordering::Relaxed)
     }
 
-    #[cfg(test)]
     pub(crate) fn last_frames(&self) -> u32 {
         self.last_frames.load(Ordering::Relaxed)
     }
@@ -255,6 +275,11 @@ impl Shared {
     #[cfg(test)]
     pub(crate) fn buffer_changes(&self) -> u64 {
         self.buffer_changes.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn buffer_callbacks(&self) -> u64 {
+        self.buffer_callbacks.load(Ordering::Relaxed)
     }
 
     pub(crate) fn sample_rate(&self) -> u32 {
@@ -478,7 +503,6 @@ pub(crate) struct Engine {
     last_frames: u32,
     last_arrival: Option<Instant>,
     xruns_seen: u64,
-    rate: u32,
     /// Tests: panic inside the engine itself (outside the user callbacks) once a direction is in
     /// flight.
     #[cfg(test)]
@@ -487,7 +511,6 @@ pub(crate) struct Engine {
 
 impl Engine {
     pub(crate) fn new(shared: Arc<Shared>) -> Self {
-        let rate = shared.sample_rate().max(1);
         let xruns_seen = shared.xruns();
         Self {
             shared,
@@ -497,7 +520,6 @@ impl Engine {
             last_frames: 0,
             last_arrival: None,
             xruns_seen,
-            rate,
             #[cfg(test)]
             fault: false,
         }
@@ -521,7 +543,10 @@ impl Engine {
         shared.last_frames.store(cycle.frames, Ordering::Relaxed);
         let frames = cycle.frames as usize;
         if let Some(previous) = self.last_arrival {
-            let due = previous + Duration::from_nanos(u64::from(self.last_frames) * 1_000_000_000 / u64::from(self.rate));
+            // The rate the callbacks or the start published (unknown before activation: the
+            // engine is built before the client is active, ADR 0021, amendment for #760, rule 1).
+            let rate = shared.sample_rate().max(1);
+            let due = previous + Duration::from_nanos(u64::from(self.last_frames) * 1_000_000_000 / u64::from(rate));
             let late = cycle.arrival.saturating_duration_since(due);
             Shared::record(&shared.late_us, &shared.max_late_us, u64::try_from(late.as_micros()).unwrap_or(u64::MAX));
         }
