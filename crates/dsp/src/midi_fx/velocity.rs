@@ -98,6 +98,48 @@ impl MidiEffect for Velocity {
             out.push(ev);
         }
     }
+
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// The record is complete (ADR 0029, #742 section 13): its inventory is `record_state`, its
+    /// witnesses the transplant harness's MIDI effect set (`tests/print_completeness/midi_fx.rs`).
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
+}
+
+/// Test seam (feature `testing`; ADR 0029, amendment for #742, sections 12 and 13): the record is
+/// the four parameter values, every field (Velocity keeps nothing else between blocks).
+#[cfg(feature = "testing")]
+impl Velocity {
+    fn config() -> transit_state_record::Config<'static> {
+        // A MIDI effect has no rate, block or channel configuration of its own (the rate comes
+        // with every block, `set_sample_rate`): only the entry.
+        transit_state_record::Config { entry: VELOCITY_INFO.id, sample_rate: 0.0, max_block: 0, channels: 0, content: 0 }
+    }
+
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Velocity { scale, offset, min, max } = self;
+        w.record(&Self::config(), |w| w.f32s(&[*scale, *offset, *min, *max]));
+    }
+
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let config = Self::config();
+        let Velocity { scale, offset, min, max } = self;
+        let mut v = [0.0f32; 4];
+        r.record(&config, |r| r.f32s(&mut v))?;
+        [*scale, *offset, *min, *max] = v;
+        Some(())
+    }
 }
 
 #[cfg(test)]

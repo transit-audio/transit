@@ -26,7 +26,8 @@
 //! The Macro Oscillator declares its record complete (slice 1, push 2 of #742): its witness set is
 //! `print_completeness/macro_osc.rs`; the Resonator and the Modal Voice (slice 3)
 //! `print_completeness/resonator.rs` and `print_completeness/modal_voice.rs`; the Time Stretcher
-//! (slice 4) `print_completeness/time_stretcher.rs`.
+//! (slice 4) `print_completeness/time_stretcher.rs`; the built-in MIDI effects (slice 5)
+//! `print_completeness/midi_fx.rs`, with its own runner for the `MidiEffect` seam.
 //! Every other entry's declaration is false; an entry turning true needs its witness set here, its
 //! inventory and its mutation record.
 //!
@@ -39,6 +40,8 @@ use transit_dsp::Plugin;
 
 #[path = "print_completeness/macro_osc.rs"]
 mod macro_osc;
+#[path = "print_completeness/midi_fx.rs"]
+mod midi_fx;
 #[path = "print_completeness/modal_voice.rs"]
 mod modal_voice;
 #[path = "print_completeness/resonator.rs"]
@@ -740,6 +743,15 @@ fn the_time_stretcher_record_is_complete() {
     harness(&time_stretcher::entry()).unwrap_or_else(|e| panic!("{e}"));
 }
 
+/// The built-in MIDI effects' declarations (ADR 0029, #742 slice 5): Transpose, Velocity and the
+/// Random Sequencer, every witness at every rate.
+#[test]
+fn the_midi_effect_records_are_complete() {
+    for e in midi_fx::entries() {
+        midi_fx::harness(&e).unwrap_or_else(|err| panic!("{err}"));
+    }
+}
+
 /// A witness set must cover the checklist: a boundary with neither a witness nor an explanation
 /// fails the harness before any case runs.
 #[test]
@@ -786,6 +798,7 @@ fn the_harness_covers_every_entry_that_declares_a_complete_record() {
         }
     }
     // The witness sets the harness has for registry entries.
-    let witnessed: &[&str] = &["time_stretcher", "macro_oscillator", "resonator", "modal_voice"];
+    let witnessed: &[&str] =
+        &["time_stretcher", "macro_oscillator", "resonator", "modal_voice", "midi_transpose", "midi_velocity", "random_sequencer"];
     assert_eq!(covered, witnessed, "every entry declaring a complete record has a witness set in this harness");
 }

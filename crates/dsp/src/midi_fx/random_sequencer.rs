@@ -294,6 +294,79 @@ impl MidiEffect for RandomSequencer {
         out.add_refused(u32::try_from(others).unwrap_or(u32::MAX));
         out.add_refused_ons(u32::try_from(ons).unwrap_or(u32::MAX));
     }
+
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// The record is complete (ADR 0029, #742 section 13): its inventory is `record_state`, its
+    /// witnesses the transplant harness's MIDI effect set (`tests/print_completeness/midi_fx.rs`).
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
+}
+
+/// Test seam (feature `testing`; ADR 0029, amendment for #742, sections 12 and 13): the record.
+/// Encoded: the parameter values and the sequencer (`transit_random_sequencer::record`: every field
+/// but its refused-event counts). Unobservable, under the host's contract that it gives the
+/// transport and the sample rate before every `process` (the `MidiEffect` documentation; the mix's
+/// MIDI effect host does, for every stage, at the start of each block): `transport` and
+/// `sample_rate`, which only `process` reads.
+#[cfg(feature = "testing")]
+impl RandomSequencer {
+    fn config() -> transit_state_record::Config<'static> {
+        // A MIDI effect has no rate, block or channel configuration of its own (the rate comes
+        // with every block, `set_sample_rate`): only the entry.
+        transit_state_record::Config { entry: RANDOM_SEQUENCER_INFO.id, sample_rate: 0.0, max_block: 0, channels: 0, content: 0 }
+    }
+
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        use transit_random_sequencer::record::Record;
+        let RandomSequencer { values, sequencer, transport: _, sample_rate: _ } = self;
+        w.record(&Self::config(), |w| {
+            w.f32s(values);
+            sequencer.record(w);
+        });
+    }
+
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        use transit_random_sequencer::record::Record;
+        let config = Self::config();
+        let RandomSequencer { values, sequencer, transport: _, sample_rate: _ } = self;
+        r.record(&config, |r| {
+            r.f32s(values)?;
+            sequencer.restore(r)
+        })
+    }
+
+    /// Poison witnesses only: overwrites the held transport and sample rate (the host gives both
+    /// again before the next `process`) and the sequencer's refused-event counts; returns the
+    /// values written.
+    pub fn poison_unobservable(&mut self, seed: u32) -> u64 {
+        let mut p = transit_random_sequencer::record::Poison::new(seed);
+        self.sequencer.poison_unobservable(&mut p);
+        let k = f64::from(seed % 97 + 1);
+        self.transport.playing = !self.transport.playing;
+        self.transport.tempo += k;
+        self.transport.samples = self.transport.samples.wrapping_add(seed as i64 + 1);
+        self.transport.quarters += k;
+        self.sample_rate += k;
+        p.count() + 5
+    }
+
+    /// Scheduled events waiting for their beat, and voices sounding a key (the witnesses'
+    /// observations).
+    #[must_use]
+    pub fn observe(&self) -> (usize, usize) {
+        (self.sequencer.pending_len(), self.sequencer.sounding_voices())
+    }
 }
 
 #[cfg(test)]

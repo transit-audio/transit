@@ -14,7 +14,8 @@ repository.workspace = true
 # `transit-parametric-eq/testing` the Parametric EQ core's (ADR 0054); `transit-macro-osc/testing` the
 # Macro Oscillator voice's complete record and restore (#742); `transit-resonator/testing` and
 # `transit-modal-voice/testing` the Resonator's and the Modal Voice's parts' (#742 slice 3);
-# `transit-granular/testing` the Time Stretcher's processor (#742 slice 4).
+# `transit-granular/testing` the Time Stretcher's processor (#742 slice 4);
+# `transit-random-sequencer/testing` the Random Sequencer's (#742 slice 5).
 testing = [
     "dep:transit-state-record",
     "transit-instrument-core/testing",
@@ -24,6 +25,7 @@ testing = [
     "transit-resonator/testing",
     "transit-modal-voice/testing",
     "transit-granular/testing",
+    "transit-random-sequencer/testing",
 ]
 
 [dependencies]

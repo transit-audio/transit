@@ -149,6 +149,96 @@ impl MidiEffect for Transpose {
             out.push(TimedEvent { offset: e.offset, event: ev });
         }
     }
+
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// The record is complete (ADR 0029, #742 section 13): its inventory is `record_state`, its
+    /// witnesses the transplant harness's MIDI effect set (`tests/print_completeness/midi_fx.rs`).
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
+}
+
+/// Test seam (feature `testing`; ADR 0029, amendment for #742, sections 12 and 13): the record.
+/// Encoded: the shift, then the used entries of the note table (count, then each one's index,
+/// voice id, channel, key and the shift its note-on got, or none). Unobservable: an unused entry's
+/// other fields (every read, `find`, checks `used` first, and a note-on writes a whole entry into
+/// the first unused slot) and `full` (a count of dropped note-ons nothing in `process` reads).
+#[cfg(feature = "testing")]
+impl Transpose {
+    fn config() -> transit_state_record::Config<'static> {
+        // A MIDI effect has no rate, block or channel configuration of its own (the rate comes
+        // with every block, `set_sample_rate`): only the entry.
+        transit_state_record::Config { entry: TRANSPOSE_INFO.id, sample_rate: 0.0, max_block: 0, channels: 0, content: 0 }
+    }
+
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Transpose { semitones, held, full: _ } = self;
+        w.record(&Self::config(), |w| {
+            w.f32(*semitones);
+            w.usize(held.iter().filter(|h| h.used).count());
+            for (i, h) in held.iter().enumerate().filter(|(_, h)| h.used) {
+                let Held { used: _, voice, channel, key, shift } = h;
+                w.usize(i);
+                w.i32(*voice);
+                w.u8(*channel);
+                w.u8(*key);
+                w.present(*shift, |w, s| w.i8(s));
+            }
+        });
+    }
+
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let config = Self::config();
+        let Transpose { semitones, held, full: _ } = self;
+        r.record(&config, |r| {
+            *semitones = r.f32()?;
+            let n = r.usize().filter(|&n| n <= TRANSPOSE_NOTES)?;
+            for h in held.iter_mut() {
+                h.used = false;
+            }
+            let mut last = None;
+            for _ in 0..n {
+                let i = r.usize().filter(|&i| i < TRANSPOSE_NOTES && last.is_none_or(|l| i > l))?;
+                last = Some(i);
+                let h = held.get_mut(i)?;
+                *h = Held { used: true, voice: r.i32()?, channel: r.u8()?, key: r.u8()?, shift: r.present(|r| r.i8())? };
+            }
+            Some(())
+        })
+    }
+
+    /// Poison witnesses only: overwrites every unused entry's fields but `used`, and `full`;
+    /// returns the values written.
+    pub fn poison_unobservable(&mut self, seed: u32) -> u64 {
+        let mut n = 0;
+        let s = seed.wrapping_mul(0x9e37_79b9) | 1;
+        for (i, h) in self.held.iter_mut().enumerate().filter(|(_, h)| !h.used) {
+            let k = s.wrapping_add(i as u32);
+            h.voice = h.voice.wrapping_add((k % 7 + 1) as i32);
+            h.channel = h.channel.wrapping_add((k % 5 + 1) as u8) & 0x0F;
+            h.key = h.key.wrapping_add((k % 3 + 1) as u8) & 0x7F;
+            h.shift = Some(h.shift.map_or(3, |x| x.wrapping_add(1)));
+            n += 4;
+        }
+        self.full = self.full.wrapping_add(seed | 1);
+        n + 1
+    }
+
+    /// Notes the table remembers (the witnesses' observation).
+    #[must_use]
+    pub fn remembered(&self) -> usize {
+        self.held.iter().filter(|h| h.used).count()
+    }
 }
 
 #[cfg(test)]
