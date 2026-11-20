@@ -614,6 +614,32 @@ fn random_sequencer() -> MEntry {
                 reached: |b| sequencer_obs(b).1 == 0,
                 completed: |_| true,
             },
+            // Notes sounding at T (long gates on every voice); the continuation stops the
+            // transport (each sounding note gets its off) and starts it again elsewhere.
+            MWitness {
+                boundary: Boundary::Entry("stop while sounding"),
+                history: |rate| {
+                    let mut h = sequencer_setup();
+                    h.extend([
+                        MStep::Param("gate_length", 98.0),
+                        MStep::Param("length_random", 0.0),
+                        MStep::Transport(Some(120.0)),
+                        MStep::Run(blocks(BAR, rate), BLOCK),
+                    ]);
+                    h
+                },
+                continuation: |rate| {
+                    vec![
+                        MStep::Transport(None),
+                        MStep::Run(4, BLOCK),
+                        MStep::Locate(500_000),
+                        MStep::Transport(Some(120.0)),
+                        MStep::Run(blocks(BAR, rate), BLOCK),
+                    ]
+                },
+                reached: |b| sequencer_obs(b).1 > 0,
+                completed: |_| true,
+            },
             // The loop frozen: Freeze locks the recorded decisions; the continuation plays the
             // loop's whole length twice, then unfreezes.
             MWitness {

@@ -315,7 +315,7 @@ impl MidiEffect for RandomSequencer {
 
 /// Test seam (feature `testing`; ADR 0029, amendment for #742, sections 12 and 13): the record.
 /// Encoded: the parameter values and the sequencer (`transit_random_sequencer::record`: every field
-/// but its refused-event counts). Unobservable, under the host's contract that it gives the
+/// but its refused-event counts and the velocity voltage it draws before each use). Unobservable, under the host's contract that it gives the
 /// transport and the sample rate before every `process` (the `MidiEffect` documentation; the mix's
 /// MIDI effect host does, for every stage, at the start of each block): `transport` and
 /// `sample_rate`, which only `process` reads.

@@ -246,7 +246,8 @@ fn witnesses() -> Vec<W> {
                 h
             },
             continuation: |rate| {
-                let mut c = Vec::new();
+                // The gate stays high first: no new edge, unless the gate was not high before.
+                let mut c = vec![Step::Run(span(&[FADE], rate))];
                 for _ in 0..4 {
                     c.extend([
                         Step::Param("trigger", 0.0),

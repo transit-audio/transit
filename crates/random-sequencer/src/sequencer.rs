@@ -851,9 +851,11 @@ impl crate::record::Record for Scheduled {
 }
 
 // The sequencer's record (ADR 0029, #742 sections 12 and 13): every field encoded (the whole
-// pending schedule, entries past `pending_len` included), but `dropped` and `dropped_ons`:
-// unobservable, counts of refused events no rendering reads (the Random Sequencer effect reads
-// only how much they grew within one `process` call, to report it to the chain's overflow count).
+// pending schedule, entries past `pending_len` included), but, unobservable: `dropped` and
+// `dropped_ons`, counts of refused events no rendering reads (the Random Sequencer effect reads
+// only how much they grew within one `process` call, to report it to the chain's overflow count);
+// and `y`, the velocity voltage, drawn at every tick before that tick starts any note (its one
+// reader, `start_voice`, runs only inside a tick, after the draw).
 #[cfg(feature = "testing")]
 crate::record_struct!([] Sequencer {
     seed,
@@ -870,18 +872,19 @@ crate::record_struct!([] Sequencer {
     pattern_tick,
     scheduled,
     sounding,
-    y,
     pending,
     pending_len,
-} unobservable { dropped, dropped_ons });
+} unobservable { dropped, dropped_ons, y });
 
 #[cfg(feature = "testing")]
 impl Sequencer {
-    /// Poison witnesses only: moves the refused-event counts (which the record leaves out).
+    /// Poison witnesses only: moves the refused-event counts and the last velocity voltage (which
+    /// the record leaves out).
     pub fn poison_unobservable(&mut self, p: &mut crate::record::Poison) {
         use crate::record::Record as _;
         self.dropped.poison(p);
         self.dropped_ons.poison(p);
+        self.y.poison(p);
     }
 
     /// Scheduled events waiting for their beat (the witnesses' observation).
