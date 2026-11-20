@@ -96,6 +96,13 @@ The rate half reflects the rate of the open attempt, not a value the device repo
   leaves them to a patchbay. A stop is for good and returns once no cycle is inside that direction;
   when no direction runs the client is deactivated; the last drop closes it and only then frees the
   engine (the user callbacks drop on that control thread).
+- Links other clients made survive transit's own reopens (ADR 0015, amendment #431, rule 6;
+  `src/links.rs`). The app's one reopen seam (`ui-studio` `audio_connection::replace`) takes
+  `Stream::snapshot_links` from the old Player before anything closes, holds it while the old client
+  closes, and hands it once to the new Player's `Stream::restore_links`. transit's ends are saved as
+  direction plus port index, remote ends by exact name (checked with an anchored `jack_get_ports`
+  before the connect); links equal to transit's own configured links are not saved; a port whose
+  endpoint or channel changed drops its links with a note. No disconnect call is bound.
 - `Achieved` is the server's rate (the Player resamples) and the quantum it runs after the backend asked for the chosen one; a refused request leaves the server's own.
 
 ## The process callback

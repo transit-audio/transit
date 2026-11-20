@@ -414,6 +414,30 @@ a choice and press **Apply**, or press **Reconnect**. If a saved output or input
 the system's default opens instead and transit says so at startup and on Apply, for example
 "Output “X” is not available; using “Y”."
 
+### Audio on Linux: JACK and PipeWire
+
+With the **JACK** audio system (Native JACK, under JACK 2 or PipeWire), transit is one JACK client
+with ports `in_1`, `in_2`... and `out_1`, `out_2`... It links `out_N` to the output device's N-th
+playback port and the input device's N-th capture port to `in_N`, unless you start it with
+`TRANSIT_JACK_AUTOCONNECT=0`. Links you make yourself, in a graph tool or with `jack_connect`, are
+yours: transit never removes one.
+
+transit sometimes has to close its client and open a new one: when the server's buffer size or
+rate changes (under PipeWire, another program asking for a smaller buffer is enough), when you
+press **Reconnect**, and when you **Apply** in Audio Devices. A buffer size or rate change still
+stops the transport and ends a take: the take is kept up to there, the device reopens at the new
+settings, and the links you made come back. Before the old client closes, transit notes which other
+ports were linked to its ports, and links them again on the new client, under whatever name the
+server gave it.
+
+A link does not come back when its port no longer means the same thing: after you choose another
+input or output device, links on that side are dropped, and a port the new device does not have
+(fewer channels) loses its links. A port that went away meanwhile (the program was closed) cannot
+be linked either. In each case the status line and Audio Devices say which links were not
+restored, and the log names each one. Nothing comes back after the server itself stopped: its
+links were gone with it. The links are read just before the old client closes, so a link you change
+in that same instant may not be caught.
+
 ### Low Latency mode
 
 Turn on **Low Latency** in the transport bar or **Options** when playing an instrument or monitoring an input through a long effect chain. It temporarily bypasses eligible software audio inserts on armed or monitored tracks, their downstream buses, and the master. The master is included even when no track is armed. Inserts with the largest reported latency are bypassed first; equal latencies use stable track and insert identities.
