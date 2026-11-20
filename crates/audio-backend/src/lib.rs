@@ -518,6 +518,14 @@ impl StreamStats {
 /// stream once ([`Stream::restore_links`]); dropping it discards it.
 pub type LinkSnapshot = Box<dyn Any + Send>;
 
+/// The capture endpoint a stream actually opened (ADR 0015, amendment for #431, rule 8): its
+/// stable identifier within the system and its display name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureEndpoint {
+    pub id: String,
+    pub name: String,
+}
+
 /// A running (or startable) stream. Dropping it closes the device.
 pub trait Stream {
     fn start(&self) -> Result<(), OpenError>;
@@ -551,6 +559,13 @@ pub trait Stream {
     /// links were not restored. The default discards the snapshot (another audio system).
     fn restore_links(&self, snapshot: LinkSnapshot) -> Option<String> {
         drop(snapshot);
+        None
+    }
+    /// The capture endpoint this stream opened, where it is not the endpoint passed to
+    /// [`Backend::open_capture`]: native WASAPI opens the capture endpoint paired with a render
+    /// endpoint, resolved afresh at each open. `None` (the default): the endpoint passed is the one
+    /// opened (ASIO's driver, a JACK port group, a cpal input device).
+    fn opened_capture(&self) -> Option<CaptureEndpoint> {
         None
     }
 }

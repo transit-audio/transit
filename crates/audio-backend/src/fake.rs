@@ -4,7 +4,8 @@
 //! the real conversion of an adapter or plain `f32` slices ([`SliceSink`], [`SliceSource`]).
 
 use crate::{
-    Achieved, Backend, BackendFactory, Calibration, CaptureBlock, CaptureCallback, CaptureSource, Direction, Endpoint, ErrorCallback, Format,
+    Achieved, Backend, BackendFactory, Calibration, CaptureBlock, CaptureCallback, CaptureEndpoint, CaptureSource, Direction, Endpoint, ErrorCallback,
+    Format,
     InputWish, Mode, OpenError, OpenRequest, OutputWish, Period, Plan, RenderBlock, RenderCallback, RenderSink, SCRATCH_FRAMES, SampleFormat, Stamp,
     Stream, StreamError, StreamStats, WorkerPriority,
 };
@@ -35,6 +36,9 @@ struct State {
     fail_loopback: Option<OpenError>,
     /// The endpoint name of every capture open, in order.
     capture_endpoints: Vec<String>,
+    /// The capture endpoint a capture open on this device reports it opened, as native WASAPI
+    /// reports the endpoint paired with its render endpoint ([`Stream::opened_capture`]).
+    paired_capture: Option<CaptureEndpoint>,
 }
 
 /// The scripted backend. Clones share one script and one set of streams.
@@ -87,6 +91,12 @@ impl FakeBackend {
     pub fn with_capture_device(mut self, name: &str, channels: u16) -> Self {
         self.capture_devices.push((name.into(), channels));
         self
+    }
+    /// From the next capture open on, the stream reports that it opened the capture endpoint `id`
+    /// named `name` (`None`: the endpoint passed), as native WASAPI does for the input paired with
+    /// its render endpoint, resolved afresh at each open.
+    pub fn pair_capture(&self, endpoint: Option<(&str, &str)>) {
+        self.lock().paired_capture = endpoint.map(|(id, name)| CaptureEndpoint { id: id.into(), name: name.into() });
     }
     /// The endpoint name of every capture open so far, in order.
     pub fn capture_opens(&self) -> Vec<String> {
@@ -246,8 +256,9 @@ impl FakeBackend {
             Some(size) => Period::Frames(*size.lock().unwrap_or_else(PoisonError::into_inner)),
             None => request.period,
         };
+        let opened = if direction == Direction::Input { state.paired_capture.clone() } else { None };
         Ok((
-            Box::new(FakeStream { state: Arc::clone(&self.state), direction, latency: self.latency, loopback: false }),
+            Box::new(FakeStream { state: Arc::clone(&self.state), direction, latency: self.latency, loopback: false, opened }),
             Achieved { buffer_frames: period.frames(), latency: self.latency, ..Achieved::requested(request.format, period) },
         ))
     }
@@ -353,7 +364,7 @@ impl Backend for FakeBackend {
         }
         let format = self.loopback_format.ok_or_else(|| OpenError::Other("the fake device has no loopback".into()))?;
         state.loopback = Some(capture);
-        let stream = FakeStream { state: Arc::clone(&self.state), direction: Direction::Input, latency: self.latency, loopback: true };
+        let stream = FakeStream { state: Arc::clone(&self.state), direction: Direction::Input, latency: self.latency, loopback: true, opened: None };
         Ok((Box::new(stream), Achieved { latency: self.latency, ..Achieved::requested(format, Period::Default) }))
     }
 }
@@ -370,6 +381,8 @@ struct FakeStream {
     latency: Option<Duration>,
     /// A loopback capture's stream (its own slot, apart from the device's two directions).
     loopback: bool,
+    /// What a capture stream reports it opened ([`FakeBackend::pair_capture`] at its open).
+    opened: Option<CaptureEndpoint>,
 }
 
 impl FakeStream {
@@ -411,6 +424,9 @@ impl Stream for FakeStream {
     fn set_calibration(&self, calibration: Option<Calibration>) -> bool {
         self.lock().calibrations.push((self.direction, calibration));
         true
+    }
+    fn opened_capture(&self) -> Option<CaptureEndpoint> {
+        self.opened.clone()
     }
 }
 
@@ -465,6 +481,23 @@ mod tests {
 
     fn fake() -> FakeBackend {
         FakeBackend::new(Format::new(48_000, 2, SampleFormat::F32))
+    }
+
+    /// A capture stream reports the endpoint paired at its open, as native WASAPI does; a render
+    /// stream and an unpaired capture report none (the endpoint passed is the one opened).
+    #[test]
+    fn a_capture_stream_reports_the_endpoint_paired_at_its_open() {
+        let fake = fake().with_capture(2, true);
+        let plan = fake.plan_render(&OutputWish::default()).unwrap();
+        let open = |fake: &FakeBackend| fake.open_capture(&plan.endpoint, &plan.attempts[0], Box::new(|_| {}), Box::new(|_| {})).unwrap().0;
+        assert_eq!(open(&fake).opened_capture(), None);
+        fake.pair_capture(Some(("capture-a", "Mic (A)")));
+        let a = open(&fake);
+        fake.pair_capture(Some(("capture-b", "Mic (B)")));
+        assert_eq!(a.opened_capture(), Some(CaptureEndpoint { id: "capture-a".into(), name: "Mic (A)".into() }), "fixed at its open");
+        assert_eq!(open(&fake).opened_capture().map(|e| e.id), Some("capture-b".into()));
+        let render = fake.open_render(&plan.endpoint, &plan.attempts[0], Box::new(|_| {}), Box::new(|_| {})).unwrap().0;
+        assert_eq!(render.opened_capture(), None);
     }
 
     #[test]

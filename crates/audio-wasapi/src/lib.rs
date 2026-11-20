@@ -251,10 +251,14 @@ impl ab::Backend for WasapiBackend {
         error: ab::ErrorCallback,
     ) -> Result<(Box<dyn ab::Stream>, ab::Achieved), ab::OpenError> {
         let device = endpoint.handle::<WasapiEndpoint>().ok_or_else(|| ab::OpenError::Other("the endpoint is not a WASAPI device".into()))?;
-        // An open resolves the pairing afresh: the device may have changed since the plan.
+        // An open resolves the pairing afresh: the device may have changed since the plan. The
+        // stream says which capture endpoint it opened: the input's identity is that endpoint's,
+        // never the render endpoint's (ADR 0015, amendment for #431, rule 8).
         self.paired.clear();
-        let id = if device.output { self.paired_input(endpoint)?.id } else { device.id.clone() };
-        let (stream, achieved) = NativeStream::open_capture(OpenParams { id, request: *request, loopback: None }, capture, error)?;
+        let paired = if device.output { Some(self.paired_input(endpoint)?) } else { None };
+        let id = paired.as_ref().map_or_else(|| device.id.clone(), |info| info.id.clone());
+        let (mut stream, achieved) = NativeStream::open_capture(OpenParams { id, request: *request, loopback: None }, capture, error)?;
+        stream.opened_capture = paired.map(|info| ab::CaptureEndpoint { id: info.id, name: info.name });
         Ok((Box::new(stream), achieved))
     }
 

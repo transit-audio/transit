@@ -1007,6 +1007,9 @@ pub(crate) struct NativeStream {
     priority: Arc<AtomicU8>,
     latency: Option<Duration>,
     stats: Arc<LoopStats>,
+    /// The capture endpoint a duplex open resolved from its render endpoint (see
+    /// [`ab::Stream::opened_capture`]); `None` for a render stream or a capture endpoint opened as itself.
+    pub(crate) opened_capture: Option<ab::CaptureEndpoint>,
 }
 
 impl NativeStream {
@@ -1070,6 +1073,7 @@ impl NativeStream {
             priority,
             latency,
             stats,
+            opened_capture: None,
         };
         Ok((stream, opened.achieved))
     }
@@ -1114,6 +1118,10 @@ impl ab::Stream for NativeStream {
 
     fn stats(&self) -> Option<ab::StreamStats> {
         Some(self.stats.snapshot())
+    }
+
+    fn opened_capture(&self) -> Option<ab::CaptureEndpoint> {
+        self.opened_capture.clone()
     }
 }
 
