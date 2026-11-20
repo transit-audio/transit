@@ -4,6 +4,8 @@
 
 #[path = "audio_devices/calibration_tests.rs"]
 mod calibration_tests;
+#[path = "audio_devices/jack_rebuild_tests.rs"]
+mod jack_rebuild_tests;
 #[path = "audio_devices/layout_gate_tests.rs"]
 mod layout_gate_tests;
 #[path = "audio_devices/link_restore_tests.rs"]

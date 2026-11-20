@@ -585,3 +585,29 @@ fn a_name_pattern_matches_only_the_name() {
     assert_eq!(crate::links::exact_pattern("App (2):out.L [x]*"), r"^App \(2\):out\.L \[x\]\*$");
     assert_eq!(crate::links::exact_pattern(r"a\b|c^d$e+f?g{1}"), r"^a\\b\|c\^d\$e\+f\?g\{1\}$");
 }
+
+/// #760 slice 1 review: a replacement client that latched a rebuild (the graph runs another rate
+/// than it was prepared for) is silent and about to be replaced, so it restores nothing; it keeps
+/// the snapshot, and the reopen that replaces it hands it on, so the rebuilt client restores it.
+#[test]
+fn a_client_that_latched_a_rebuild_restores_no_links_and_the_rebuilt_client_does() {
+    let server = FakeServer::pipewire(48_000, 256, (48_000, 256));
+    server.add_port("Player:out_L", true);
+    let backend = manual(&server);
+    let old = open(&backend, Choice::default()).unwrap();
+    server.outside_link("Player:out_L", "transit:in_1");
+    // The graph moves to 44.1 kHz: the replacement, planned at the remembered 48 kHz, latches.
+    server.set_sample_rate(44_100);
+    let (latched, note) = reopen(&backend, old, Choice::default());
+    let latched = latched.unwrap();
+    assert!(latched.render.needs_rebuild());
+    assert_eq!(note, None, "nothing failed: nothing was tried");
+    assert!(!server.linked("Player:out_L", "transit:in_1"), "the latched client restored nothing");
+    assert!(server.connects().iter().all(|(a, _)| a != "Player:out_L"), "not even asked for");
+    // The automatic reopen takes the held snapshot back; the rebuilt client restores it.
+    let (rebuilt, note) = reopen(&backend, latched, Choice::default());
+    let rebuilt = rebuilt.unwrap();
+    assert!(!rebuilt.render.needs_rebuild());
+    assert_eq!(note, None);
+    assert!(server.linked("Player:out_L", "transit:in_1"), "the rebuilt client restored the outside link");
+}

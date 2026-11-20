@@ -587,6 +587,8 @@ pub(crate) struct Session {
     remembered: Arc<AtomicU32>,
     /// The watcher logged the first process cycle's figures.
     first_cycle_logged: bool,
+    /// Under the latch: the link snapshot a restore handed this client, for the rebuilt one.
+    held: Option<links::Snapshot>,
     shared: Arc<Shared>,
     sides: Vec<Side>,
     active: bool,
@@ -613,6 +615,7 @@ impl Session {
             rebuild: false,
             remembered,
             first_cycle_logged: false,
+            held: None,
             // Unknown until the client is active (rule 1, "Publication").
             shared: Arc::new(Shared::new(engine::UNKNOWN, engine::UNKNOWN)),
             sides: Vec::new(),
@@ -859,7 +862,13 @@ impl Session {
     /// The links of this active client's ports, read under the session lock before a reopen
     /// deactivates it. Nothing after a server shutdown: the client is gone (or going), and its
     /// links with it.
-    fn snapshot(&self) -> Option<links::Snapshot> {
+    ///
+    /// A client that latched a rebuild holds the snapshot a restore handed it instead of its own
+    /// links (it made none and restored none): the rebuilt client restores that one.
+    fn snapshot(&mut self) -> Option<links::Snapshot> {
+        if self.rebuild {
+            return self.held.take();
+        }
         if !self.active || self.shared.shutdown() {
             return None;
         }
@@ -1090,8 +1099,8 @@ impl ab::Stream for JackStream {
     /// for the reopen operation to hold while this client closes. A control-thread call, before
     /// the reopen stops or drops anything; never a JACK callback or an error callback.
     fn snapshot_links(&self) -> Option<ab::LinkSnapshot> {
-        let guard = lock(&self.slot);
-        let snapshot = guard.as_ref().filter(|s| s.id == self.session)?.snapshot()?;
+        let mut guard = lock(&self.slot);
+        let snapshot = guard.as_mut().filter(|s| s.id == self.session)?.snapshot()?;
         Some(Box::new(snapshot))
     }
 
@@ -1103,11 +1112,20 @@ impl ab::Stream for JackStream {
     /// see `links`). The wait is on this control thread with the session's lock released: the lock
     /// is held for the restore and then for each read only, as long as one read-back held it
     /// before.
+    ///
+    /// A client that latched a rebuild ([`ab::Stream::needs_rebuild`]) restores nothing: it is
+    /// silent and about to be replaced. It keeps the snapshot, and the reopen that replaces it
+    /// takes it back ([`ab::Stream::snapshot_links`]) for the rebuilt client to restore.
     fn restore_links(&self, snapshot: ab::LinkSnapshot) -> Option<String> {
         let snapshot = snapshot.downcast::<links::Snapshot>().ok()?;
         let (mut done, period) = {
             let mut guard = lock(&self.slot);
             let session = guard.as_mut().filter(|s| s.id == self.session)?;
+            if session.rebuild {
+                log::info!("JACK: the client latched a rebuild; {} links made outside transit wait for the rebuilt client", snapshot.links.len());
+                session.held = Some(*snapshot);
+                return None;
+            }
             (session.restore(&snapshot)?, session.period())
         };
         let limit = u64::try_from(links::CONFIRM_LIMIT.as_micros()).unwrap_or(u64::MAX);

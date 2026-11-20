@@ -51,6 +51,9 @@ struct State {
     started_period: Option<u32>,
     needs_rebuild: bool,
     period_declined: bool,
+    /// The streams of the next this-many device opens (counted at each render open, the second of
+    /// a duplex open) report a latched rebuild, as native JACK's do when the graph runs another rate.
+    latch_opens: u32,
 }
 
 /// One more input device of a JACK-like client: its ports in order, and whether it is a virtual
@@ -254,6 +257,11 @@ impl FakeBackend {
     pub fn set_needs_rebuild(&self, latched: bool) {
         self.lock().needs_rebuild = latched;
     }
+    /// The streams of the next `opens` device opens report a latched rebuild
+    /// ([`Stream::needs_rebuild`]); later opens do not (unless [`Self::set_needs_rebuild`]).
+    pub fn latch_next_opens(&self, opens: u32) {
+        self.lock().latch_opens = opens;
+    }
     /// From now on every stream reports its buffer request declined ([`Stream::period_declined`]).
     pub fn set_period_declined(&self, declined: bool) {
         self.lock().period_declined = declined;
@@ -331,8 +339,12 @@ impl FakeBackend {
             None => request.period,
         };
         let opened = if direction == Direction::Input { state.paired_capture.clone() } else { None };
+        let latched = state.latch_opens > 0;
+        if latched && direction == Direction::Output {
+            state.latch_opens -= 1;
+        }
         Ok((
-            Box::new(FakeStream { state: Arc::clone(&self.state), direction, latency: self.latency, loopback: false, opened }),
+            Box::new(FakeStream { state: Arc::clone(&self.state), direction, latency: self.latency, loopback: false, opened, latched }),
             Achieved { buffer_frames: period.frames(), latency: self.latency, ..Achieved::requested(request.format, period) },
         ))
     }
@@ -453,7 +465,14 @@ impl Backend for FakeBackend {
         }
         let format = self.loopback_format.ok_or_else(|| OpenError::Other("the fake device has no loopback".into()))?;
         state.loopback = Some(capture);
-        let stream = FakeStream { state: Arc::clone(&self.state), direction: Direction::Input, latency: self.latency, loopback: true, opened: None };
+        let stream = FakeStream {
+            state: Arc::clone(&self.state),
+            direction: Direction::Input,
+            latency: self.latency,
+            loopback: true,
+            opened: None,
+            latched: false,
+        };
         Ok((Box::new(stream), Achieved { latency: self.latency, ..Achieved::requested(format, Period::Default) }))
     }
 }
@@ -472,6 +491,8 @@ struct FakeStream {
     loopback: bool,
     /// What a capture stream reports it opened ([`FakeBackend::pair_capture`] at its open).
     opened: Option<CaptureEndpoint>,
+    /// This stream latched a rebuild ([`FakeBackend::latch_next_opens`]).
+    latched: bool,
 }
 
 impl FakeStream {
@@ -519,10 +540,10 @@ impl Stream for FakeStream {
     }
     fn period(&self) -> Option<u32> {
         let state = self.lock();
-        state.started_period.filter(|_| !self.loopback && !state.needs_rebuild)
+        state.started_period.filter(|_| !self.loopback && !state.needs_rebuild && !self.latched)
     }
     fn needs_rebuild(&self) -> bool {
-        !self.loopback && self.lock().needs_rebuild
+        !self.loopback && (self.latched || self.lock().needs_rebuild)
     }
     fn period_declined(&self) -> bool {
         !self.loopback && self.lock().period_declined
