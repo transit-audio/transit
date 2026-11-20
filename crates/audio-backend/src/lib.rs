@@ -593,6 +593,13 @@ pub trait Stream {
     fn period_declined(&self) -> bool {
         false
     }
+    /// Display-only lines the backend reports about the open device for Audio Devices (native
+    /// JACK: the graph, the latency reported at startup, links not observed at the startup check;
+    /// ADR 0021, amendment for #760, rules 3 and 6). A control-thread read; they feed nothing.
+    /// Empty by default.
+    fn device_lines(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Where the samples of a render block go: the adapter lends scratch, converts to the device

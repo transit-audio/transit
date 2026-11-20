@@ -27,6 +27,17 @@ impl PhysicalPort {
 /// form of any other name, for messages only. It is never stored, compared or connected (#431).
 pub(crate) type PortName = Result<String, String>;
 
+/// What the server reported as one port's latency (`jack_port_get_latency_range`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Latency {
+    /// The range, in frames (min, max).
+    Range(u32, u32),
+    /// No port of that name (it went away), so nothing was read.
+    NoPort,
+    /// The library lacks the call (it is `JACK_WEAK_EXPORT` in jack.h).
+    NoFunction,
+}
+
 /// Why a client did not open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientError {
@@ -114,6 +125,10 @@ pub(crate) trait JackClient: Send {
     /// `output` (a JACK output port), else one that can receive data (`jack_get_ports`). Only a
     /// port whose name is exactly `name`, byte for byte, counts.
     fn has_port(&self, name: &str, output: bool) -> bool;
+    /// The latency the server reports for the port named `name`: its playback latency when
+    /// `playback` (a device's playback port), else its capture latency. A control-thread call;
+    /// read once per session, at the watcher's startup check (ADR 0021, amendment for #760, rule 6).
+    fn latency_range(&self, name: &str, playback: bool) -> Latency;
     /// Asks the server for a new quantum (`jack_set_buffer_size`): under JACK 2 every client of the
     /// server gets it; under PipeWire it forces the quantum of this client's own node while the
     /// client is active, on the graph of the driver it follows, and ends when the client

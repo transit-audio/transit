@@ -3,7 +3,7 @@
 //! real libjack would call (`process`, buffer size, sample rate, xrun, info shutdown) through the
 //! same safe engine and handlers `crate::callback` calls.
 
-use crate::api::{ClientError, JackApi, JackClient, PhysicalPort, PortName};
+use crate::api::{ClientError, JackApi, JackClient, Latency, PhysicalPort, PortName};
 use crate::engine::{Clock, Cycle, Engine, InputPlanes, OutputPlanes, Shared};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -84,6 +84,17 @@ struct State {
     pipewire: Option<PipeWireMode>,
     /// What the graph does after a number of graph steps ([`JackApi::await_graph`]), in order.
     scheduled: Vec<(u32, Event)>,
+    /// The latency each port reports, by (name, playback); a port not listed reports zero ("Before
+    /// a port is connected, this returns the default latency: zero", jack.h).
+    latencies: Vec<(String, bool, (u32, u32))>,
+    /// Ports whose latency the read cannot report (gone between the listing and the read).
+    unreported: Vec<String>,
+    /// The library lacks `jack_port_get_latency_range`.
+    no_latency_call: bool,
+    /// Latency reads so far.
+    latency_reads: u32,
+    /// Link reads of transit's own ports so far ([`JackClient::links`]).
+    link_reads: u32,
 }
 
 /// How the fake answers as PipeWire's JACK library (amendment for #760, "The fake gains a PipeWire
@@ -188,6 +199,11 @@ impl FakeServer {
             unseen: Vec::new(),
             pipewire: None,
             scheduled: Vec::new(),
+            latencies: Vec::new(),
+            unreported: Vec::new(),
+            no_latency_call: false,
+            latency_reads: 0,
+            link_reads: 0,
         };
         Self { state: Arc::new(Mutex::new(state)) }
     }
@@ -220,6 +236,36 @@ impl FakeServer {
     /// One graph step on the stepped clock, as a wait of `period` would be.
     pub(crate) fn step(&self, period: Duration) {
         JackApi::await_graph(self, period);
+    }
+
+    /// The port `name` reports the latency range `range` for `playback` (else capture).
+    pub(crate) fn set_latency(&self, name: &str, playback: bool, range: (u32, u32)) {
+        self.lock().latencies.push((name.to_owned(), playback, range));
+    }
+
+    /// The latency read of `name` cannot report it.
+    pub(crate) fn unreported_latency(&self, name: &str) {
+        self.lock().unreported.push(name.to_owned());
+    }
+
+    /// The library lacks `jack_port_get_latency_range`.
+    pub(crate) fn without_latency_call(&self) {
+        self.lock().no_latency_call = true;
+    }
+
+    /// Latency reads so far.
+    pub(crate) fn latency_reads(&self) -> u32 {
+        self.lock().latency_reads
+    }
+
+    /// Link reads of transit's own ports so far.
+    pub(crate) fn link_reads(&self) -> u32 {
+        self.lock().link_reads
+    }
+
+    /// A link goes away (another program removed it).
+    pub(crate) fn unlink(&self, source: &str, destination: &str) {
+        self.lock().links.retain(|(a, b)| !(a == source && b == destination));
     }
 
     /// How many times a client read the rate or the buffer size while it was not active.
@@ -745,7 +791,8 @@ impl JackClient for FakeClient {
     }
 
     fn links(&self, input: bool, index: usize) -> Vec<PortName> {
-        let state = self.server.lock();
+        let mut state = self.server.lock();
+        state.link_reads += 1;
         let ours = state.clients[self.index].ports.iter().filter(|(_, i)| *i == input).nth(index).map(|(name, _)| name.clone());
         let partners = ours.map(|port| partners(&state.links, &port)).unwrap_or_default();
         let named = |name: String| match state.invalid.iter().find(|(key, _)| *key == name) {
@@ -764,6 +811,19 @@ impl JackClient for FakeClient {
 
     /// JACK 2: the server's one quantum changes at once, for every client. PipeWire: the client's
     /// own node forces it while the client is active (pj:5413-5437, keys.h:173-174).
+    fn latency_range(&self, name: &str, playback: bool) -> Latency {
+        let mut state = self.server.lock();
+        if state.no_latency_call {
+            return Latency::NoFunction;
+        }
+        state.latency_reads += 1;
+        if state.unreported.iter().any(|n| n == name) || state.port(name).is_none() {
+            return Latency::NoPort;
+        }
+        let (min, max) = state.latencies.iter().find(|(n, p, _)| n == name && *p == playback).map_or((0, 0), |(_, _, range)| *range);
+        Latency::Range(min, max)
+    }
+
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {
         self.server.lock().quantum_requests.push(frames);
         if let Some(text) = self.server.lock().refuse_quantum.clone() {

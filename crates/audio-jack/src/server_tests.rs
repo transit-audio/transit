@@ -133,6 +133,29 @@ fn server_the_session_settles_the_active_clients_figures() {
     assert!(capture_errors.lock().unwrap().is_empty() && render_errors.lock().unwrap().is_empty());
 }
 
+/// ADR 0021, amendment for #760, slice 2, through the real binding: the watcher's startup check
+/// reads transit's links back (`jack_port_get_all_connections`) and the reported latency of the
+/// device's ports (`jack_port_by_name`, `jack_port_get_latency_range`). Against the dummy JACK 2
+/// server every asked link is there; the lines are printed for the result note.
+#[test]
+fn server_the_startup_check_reads_the_links_and_the_reported_latency() {
+    let Some(_server) = server_or_skip("server_the_startup_check_reads_the_links_and_the_reported_latency") else { return };
+    let backend = real();
+    let (render_cb, capture_cb) = silent();
+    let (capture, render, _, capture_errors, render_errors) = open_duplex(&backend, render_cb, capture_cb);
+    capture.start().unwrap();
+    render.start().unwrap();
+    let latency = || render.device_lines().iter().any(|l| l.starts_with("Latency reported at startup:"));
+    wait_for("the startup check", Duration::from_secs(10), latency);
+    let lines = render.device_lines();
+    eprintln!("server_the_startup_check_reads_the_links_and_the_reported_latency: {lines:?}");
+    assert!(lines[0].starts_with("Graph: "), "{lines:?}");
+    assert!(!lines.iter().any(|l| l.starts_with("Link from")), "every asked link is observed: {lines:?}");
+    drop(capture);
+    drop(render);
+    assert!(capture_errors.lock().unwrap().is_empty() && render_errors.lock().unwrap().is_empty());
+}
+
 /// What the loopback test's callbacks saw: per capture block its device position and samples;
 /// whether every capture ran before the render of its cycle.
 #[derive(Default)]

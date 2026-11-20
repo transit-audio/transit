@@ -41,6 +41,7 @@ use crate::devices::{self, JackDevice, Server, ServerState};
 use crate::engine::{self, Engine, EngineSide, Shared};
 use crate::links;
 use crate::settle::{self, Init};
+use crate::startup::{self, Asked};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::JoinHandle;
@@ -526,6 +527,10 @@ struct Side {
     error: SharedError,
     /// A panic of this side's user callback was reported.
     panic_reported: bool,
+    /// What this side's start asked for and what each connect returned (#760 rule 3).
+    asked: Vec<Asked>,
+    /// The watcher's next tick looks for `asked` among this side's links, once.
+    check_due: bool,
 }
 
 impl Side {
@@ -589,6 +594,10 @@ pub(crate) struct Session {
     first_cycle_logged: bool,
     /// Under the latch: the link snapshot a restore handed this client, for the rebuilt one.
     held: Option<links::Snapshot>,
+    /// The startup check's lines (#760 rules 3 and 6): asked links not observed, and the latency
+    /// reported at startup (read once, when every direction has started and been checked).
+    link_lines: Vec<String>,
+    latency_line: Option<String>,
     shared: Arc<Shared>,
     sides: Vec<Side>,
     active: bool,
@@ -616,6 +625,8 @@ impl Session {
             remembered,
             first_cycle_logged: false,
             held: None,
+            link_lines: Vec::new(),
+            latency_line: None,
             // Unknown until the client is active (rule 1, "Publication").
             shared: Arc::new(Shared::new(engine::UNKNOWN, engine::UNKNOWN)),
             sides: Vec::new(),
@@ -666,7 +677,18 @@ impl Session {
         let channels = (0..names.len()).map(|i| device_ports.get(i).cloned().unwrap_or_default()).collect();
         let meaning = links::Meaning { endpoint: device.name.clone(), channels };
         let error = Arc::new(Mutex::new(error));
-        self.sides.push(Side { generation, direction, waiting: Some(waiting), connections, names, meaning, error, panic_reported: false });
+        self.sides.push(Side {
+            generation,
+            direction,
+            waiting: Some(waiting),
+            connections,
+            names,
+            meaning,
+            error,
+            panic_reported: false,
+            asked: Vec::new(),
+            check_due: false,
+        });
         Ok(generation)
     }
 
@@ -718,12 +740,18 @@ impl Session {
             return Ok(());
         }
         let connections = self.side_mut(generation).map(|s| s.connections.clone()).unwrap_or_default();
+        let mut asked = Vec::with_capacity(connections.len());
         if let Some(client) = self.client.as_mut() {
-            for (source, destination) in &connections {
-                if let Err(e) = client.connect(source, destination) {
+            for (source, destination) in connections {
+                let returned = client.connect(&source, &destination).err();
+                if let Some(e) = &returned {
                     log::warn!("JACK: connecting {source} to {destination}: {e}");
                 }
+                asked.push(Asked { source, destination, returned });
             }
+        }
+        if let Some(side) = self.side_mut(generation) {
+            (side.asked, side.check_due) = (asked, true);
         }
         self.shared.side(output).set_state(engine::STARTED);
         Ok(())
@@ -832,6 +860,7 @@ impl Session {
                 reports.push((Arc::clone(&side.error), ab::StreamError::Other));
             }
         }
+        self.startup_check();
         // The figures of the first process cycle, once, for the tester's sitting (rule 9's Q1).
         if !self.first_cycle_logged && self.shared.cycles() > 0 {
             self.first_cycle_logged = true;
@@ -847,6 +876,45 @@ impl Session {
             reports.extend(self.errors(ab::StreamError::ResetRequested));
         }
         Tick { reports, dead: None, done: false }
+    }
+
+    /// The startup check (#760 rules 3 and 6), on the watcher's tick under the session lock: each
+    /// side started since the last tick has its asked links looked for once; when every side has
+    /// started and been checked, the reported latency is read once for the session. Bounded: one
+    /// read per asked pair and per device port, no wait. Never on a latched client (no watcher runs
+    /// there) nor before the figures settled.
+    fn startup_check(&mut self) {
+        if !self.settled || self.rebuild || !self.active {
+            return;
+        }
+        let Some(client) = self.client.as_deref() else { return };
+        for side in self.sides.iter_mut().filter(|s| s.check_due) {
+            side.check_due = false;
+            self.link_lines.extend(startup::link_lines(client, !side.output(), &side.names, &side.asked, self.pipewire));
+        }
+        let started = |s: &Side| self.shared.side(s.output()).state() == engine::STARTED;
+        if self.latency_line.is_some() || self.sides.is_empty() || !self.sides.iter().all(|s| started(s) && !s.check_due) {
+            return;
+        }
+        let ports = |output: bool| self.sides.iter().find(|s| s.output() == output).map(|s| s.meaning.channels.as_slice());
+        self.latency_line = startup::latency_line(client, ports(true), ports(false), self.rate);
+    }
+
+    /// The Audio Devices lines of this session (#760 rule 6, rule 3): the graph, the latency
+    /// reported at startup once read, PipeWire's sentence, and the asked links not observed.
+    /// Nothing before the figures settled or under a latched rebuild.
+    fn device_lines(&self) -> Vec<String> {
+        if !self.settled || self.rebuild {
+            return Vec::new();
+        }
+        let observed = self.shared.cycles() > 0 && self.shared.last_frames() == self.buffer;
+        let mut lines = vec![startup::graph_line(self.rate, self.buffer, observed)];
+        lines.extend(self.latency_line.clone());
+        if self.pipewire {
+            lines.push(startup::PIPEWIRE_STAGES.to_owned());
+        }
+        lines.extend(self.link_lines.iter().cloned());
+        lines
     }
 
     fn errors(&self, error: ab::StreamError) -> Vec<(SharedError, ab::StreamError)> {
@@ -1077,6 +1145,11 @@ impl ab::Stream for JackStream {
     /// direction started, nothing connected; the caller reopens.
     fn needs_rebuild(&self) -> bool {
         lock(&self.slot).as_ref().is_some_and(|s| s.id == self.session && s.rebuild)
+    }
+
+    /// The graph, the latency reported at startup and the startup link check (display only).
+    fn device_lines(&self) -> Vec<String> {
+        lock(&self.slot).as_ref().filter(|s| s.id == self.session).map(Session::device_lines).unwrap_or_default()
     }
 
     /// The server refused the buffer size the open asked for (`jack_set_buffer_size` failed).

@@ -16,7 +16,7 @@
 //! code may still run (a callback, a thread a failed open left behind) must not be unmapped, and
 //! jackd2's libjack stays mapped after `dlclose` anyway.
 
-use crate::api::{ClientError, JackApi, JackClient, PhysicalPort, PortName};
+use crate::api::{ClientError, JackApi, JackClient, Latency, PhysicalPort, PortName};
 use crate::callback::{self, CallbackState};
 use crate::engine::{Engine, Shared};
 use crate::library;
@@ -73,7 +73,8 @@ impl JackFns {
     unsafe fn load(library: &libloading::Library) -> Result<JackFns, String> {
         // SAFETY: each name is paired with the field whose type sys.rs declares from that name's
         // jack.h prototype (jack_get_cycle_times and jack_get_version_string are
-        // JACK_OPTIONAL_WEAK_EXPORT there, hence optional here); the caller keeps the library loaded.
+        // JACK_OPTIONAL_WEAK_EXPORT there, and jack_port_get_latency_range JACK_WEAK_EXPORT, hence
+        // optional here); the caller keeps the library loaded.
         unsafe {
             Ok(JackFns {
                 client_open: required(library, c"jack_client_open")?,
@@ -94,13 +95,13 @@ impl JackFns {
                 deactivate: required(library, c"jack_deactivate")?,
                 connect: required(library, c"jack_connect")?,
                 set_buffer_size: required(library, c"jack_set_buffer_size")?,
-                #[cfg(test)]
                 port_by_name: required(library, c"jack_port_by_name")?,
                 port_get_all_connections: required(library, c"jack_port_get_all_connections")?,
                 port_get_buffer: required(library, c"jack_port_get_buffer")?,
                 get_time: required(library, c"jack_get_time")?,
                 get_cycle_times: symbol(library, c"jack_get_cycle_times"),
                 get_version_string: symbol(library, c"jack_get_version_string"),
+                port_get_latency_range: symbol(library, c"jack_port_get_latency_range"),
             })
         }
     }
@@ -551,6 +552,31 @@ impl JackClient for LibClient {
         let array = unsafe { (self.fns.port_get_all_connections)(self.client, port) };
         // SAFETY: `array` is jack_port_get_all_connections' result (above), used only here.
         unsafe { names_of(self.fns, array) }
+    }
+
+    fn latency_range(&self, port: &str, playback: bool) -> Latency {
+        let Some(get) = self.fns.port_get_latency_range else { return Latency::NoFunction };
+        let Ok(c_port) = CString::new(port) else { return Latency::NoPort };
+        // SAFETY: jack.h, jack_port_by_name: "@return address of the jack_port_t named @a
+        // port_name." (NULL when there is none). The client is open; the name is NUL-terminated; a
+        // control thread calls it (the watcher's startup check, under the session lock).
+        let handle = unsafe { (self.fns.port_by_name)(self.client, c_port.as_ptr()) };
+        if handle.is_null() {
+            return Latency::NoPort;
+        }
+        let mode = if playback { sys::JackPlaybackLatency } else { sys::JackCaptureLatency };
+        let mut range = sys::jack_latency_range_t::default();
+        // SAFETY: jack.h, jack_port_get_latency_range: "return the latency range defined by @a mode
+        // for @a port, in frames." "This function is best used from callbacks, specifically the
+        // latency callback. Before a port is connected, this returns the default latency: zero."
+        // (a figure, never a fault: the readout is labeled "reported at startup"). `handle` came
+        // from jack_port_by_name on this open client in this same call, on this thread, with no
+        // other call between; jack.h states no lifetime for a handle to another client's port, so
+        // it is used once, here, and never kept. `range` is a live `jack_latency_range_t`
+        // (types.h's two `jack_nframes_t`, `repr(C)`), written by the call; `mode` is one of
+        // JackLatencyCallbackMode's two members.
+        unsafe { get(handle, mode, &raw mut range) };
+        Latency::Range(range.min, range.max)
     }
 
     fn has_port(&self, name: &str, output: bool) -> bool {

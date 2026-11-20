@@ -71,6 +71,21 @@ name = "Requested versus running"
 text = "You asked for a buffer size or sample rate and the device runs at another, or a saved size the device no longer offers opened at the nearest one it does. Any device can step down to what it offers. Under PipeWire through ALSA the line reads Buffer, period and the server's quantum instead: the server sets the period, change it with pw-metadata -n settings 0 clock.force-quantum or use the JACK system. Otherwise change the value in the lists or in the driver's own settings, then press Reconnect."
 
 [[entry]]
+id = "audio_devices.graph"
+name = "Graph"
+text = "Native JACK: the rate and buffer size of the graph transit's device runs in, as transit's active client reported them; the buffer reads observed once a process cycle ran with it. The rate is that of transit's graph, not of every device the server drives. Under PipeWire a fixed sentence follows: PipeWire may convert the rate or add buffering, and JACK cannot say which."
+
+[[entry]]
+id = "audio_devices.latency_reported"
+name = "Latency reported at startup"
+text = "Native JACK: the latency the server reported for the device ports, read once when the device opened, per side, with the range across ports and how many could not be read. It is what the server says, not a measurement, and it can be stale until the next reopen. It does not change Path latency or any compensation; the loop is measured by Measure."
+
+[[entry]]
+id = "audio_devices.link_check"
+name = "Link not observed"
+text = "Native JACK: one link transit asked for between its ports and the device's was not there when transit looked, once, right after the device started. It says what jack_connect returned when that was an error. Under PipeWire a setting such as jack.self-connect-mode can refuse links to transit's ports. A link that appears later does not clear the line; nothing is retried. Connect the ports in a patchbay, or press Reconnect."
+
+[[entry]]
 id = "audio_devices.backend"
 name = "Backend counters"
 text = "The device loop's own figures since the stream opened. Healthy is gap over period and service far below one buffer period, and no skipped wakes, timeouts, faults or driver events. Hover each figure for what it counts."

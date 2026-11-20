@@ -147,6 +147,12 @@ pub fn status_segments(line: &str) -> Vec<Segment> {
         Some(Id::DiagnosticsPathLatency)
     } else if line.starts_with("Requested") {
         Some(Id::AudioDevicesRequested)
+    } else if line.starts_with("Graph: ") || line.starts_with("PipeWire may perform rate conversion") {
+        Some(Id::AudioDevicesGraph)
+    } else if line.starts_with("Latency reported at startup:") {
+        Some(Id::AudioDevicesLatencyReported)
+    } else if line.starts_with("Link from ") {
+        Some(Id::AudioDevicesLinkCheck)
     } else if line.starts_with("Recovery:") {
         Some(Id::AudioDevicesRecovery)
     } else {

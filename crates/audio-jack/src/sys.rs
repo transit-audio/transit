@@ -45,6 +45,24 @@ pub(crate) const JackPortIsOutput: c_ulong = 0x2;
 /// physical I/O connector."
 pub(crate) const JackPortIsPhysical: c_ulong = 0x4;
 
+/// types.h: `typedef enum JackLatencyCallbackMode jack_latency_callback_mode_t;` (a C enum: `int`
+/// sized), "Type of Latency Callback (Capture or Playback)".
+pub(crate) type jack_latency_callback_mode_t = c_uint;
+/// types.h, JackLatencyCallbackMode, its first member (0): "Latency Callback for Capture Latency."
+pub(crate) const JackCaptureLatency: jack_latency_callback_mode_t = 0;
+/// types.h, JackLatencyCallbackMode, its second member (1): "Latency Callback for Playback Latency."
+pub(crate) const JackPlaybackLatency: jack_latency_callback_mode_t = 1;
+
+/// types.h: `struct _jack_latency_range { jack_nframes_t min; jack_nframes_t max; };` ("the new
+/// latency API operates on Ranges"; no packing macro on it), `typedef struct _jack_latency_range
+/// jack_latency_range_t;`
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct jack_latency_range_t {
+    pub(crate) min: jack_nframes_t,
+    pub(crate) max: jack_nframes_t,
+}
+
 /// types.h: `typedef int (*JackProcessCallback)(jack_nframes_t nframes, void *arg);`
 pub(crate) type ProcessCallback = unsafe extern "C" fn(jack_nframes_t, *mut c_void) -> c_int;
 /// types.h: `typedef int (*JackBufferSizeCallback)(jack_nframes_t nframes, void *arg);` (and
@@ -100,8 +118,8 @@ pub(crate) struct JackFns {
     pub(crate) connect: unsafe extern "C" fn(*mut jack_client_t, *const c_char, *const c_char) -> c_int,
     /// `int jack_set_buffer_size (jack_client_t *client, jack_nframes_t nframes)`
     pub(crate) set_buffer_size: unsafe extern "C" fn(*mut jack_client_t, jack_nframes_t) -> c_int,
-    /// `jack_port_t * jack_port_by_name (jack_client_t *client, const char *port_name)` (tests only)
-    #[cfg(test)]
+    /// `jack_port_t *jack_port_by_name (jack_client_t *, const char *port_name) JACK_OPTIONAL_WEAK_EXPORT;`
+    /// (every libjack exports it; required, as before)
     pub(crate) port_by_name: unsafe extern "C" fn(*mut jack_client_t, *const c_char) -> *mut jack_port_t,
     /// `const char ** jack_port_get_all_connections (const jack_client_t *client, const jack_port_t *port)`
     /// (the links of transit's own ports before a reopen, #431 rule 6; no call that removes a link
@@ -117,4 +135,8 @@ pub(crate) struct JackFns {
         Option<unsafe extern "C" fn(*const jack_client_t, *mut jack_nframes_t, *mut jack_time_t, *mut jack_time_t, *mut c_float) -> c_int>,
     /// `const char * jack_get_version_string(void) JACK_OPTIONAL_WEAK_EXPORT;` (`None` where missing)
     pub(crate) get_version_string: Option<unsafe extern "C" fn() -> *const c_char>,
+    /// `void jack_port_get_latency_range (jack_port_t *port, jack_latency_callback_mode_t mode,
+    /// jack_latency_range_t *range) JACK_WEAK_EXPORT;` (the startup latency readout, ADR 0021
+    /// amendment for #760 rule 6; `None` where missing)
+    pub(crate) port_get_latency_range: Option<unsafe extern "C" fn(*mut jack_port_t, jack_latency_callback_mode_t, *mut jack_latency_range_t)>,
 }

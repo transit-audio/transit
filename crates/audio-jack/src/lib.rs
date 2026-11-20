@@ -65,6 +65,9 @@ mod session;
 mod settle;
 #[cfg(test)]
 mod settle_tests;
+mod startup;
+#[cfg(test)]
+mod startup_tests;
 #[cfg(all(target_os = "linux", feature = "libjack"))]
 mod sys;
 #[cfg(test)]

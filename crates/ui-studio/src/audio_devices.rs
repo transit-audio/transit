@@ -1182,6 +1182,8 @@ pub(crate) fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
         }
         None => lines.push("Output open: none".into()),
     }
+    // Native JACK's display-only lines under the open lines (#760 rules 3 and 6).
+    lines.extend(app.player.as_ref().map(transit_playback::Player::device_lines).unwrap_or_default());
     // PipeWire through ALSA: the buffer, the period the callbacks see, the server's quantum (#230).
     lines.extend(period::stream_line(app));
     let output = app.player.as_ref().and_then(|p| p.backend_stats());

@@ -17,4 +17,15 @@ impl Player {
     pub fn restore_links(&self, snapshot: ab::LinkSnapshot) -> Option<String> {
         self.stream.as_ref().and_then(|stream| stream.restore_links(snapshot))
     }
+
+    /// The open device's display-only lines for Audio Devices (native JACK: the graph, the latency
+    /// reported at startup, PipeWire's sentence, links not observed at the startup check; ADR 0021,
+    /// amendment for #760, rules 3 and 6). Empty elsewhere and for a silent runtime. They feed
+    /// nothing: Path latency and compensation keep `output_latency`.
+    pub fn device_lines(&self) -> Vec<String> {
+        if self.silent {
+            return Vec::new();
+        }
+        self.stream.as_ref().map(|stream| stream.device_lines()).unwrap_or_default()
+    }
 }

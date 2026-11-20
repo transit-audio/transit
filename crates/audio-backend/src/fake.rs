@@ -54,6 +54,8 @@ struct State {
     /// The streams of the next this-many device opens (counted at each render open, the second of
     /// a duplex open) report a latched rebuild, as native JACK's do when the graph runs another rate.
     latch_opens: u32,
+    /// The display-only lines every stream reports ([`Stream::device_lines`]).
+    device_lines: Vec<String>,
 }
 
 /// One more input device of a JACK-like client: its ports in order, and whether it is a virtual
@@ -261,6 +263,11 @@ impl FakeBackend {
     /// ([`Stream::needs_rebuild`]); later opens do not (unless [`Self::set_needs_rebuild`]).
     pub fn latch_next_opens(&self, opens: u32) {
         self.lock().latch_opens = opens;
+    }
+    /// From now on every stream reports these display-only lines ([`Stream::device_lines`]), as
+    /// native JACK's report the graph, the latency reported at startup and the link check.
+    pub fn set_device_lines(&self, lines: &[&str]) {
+        self.lock().device_lines = lines.iter().map(|l| (*l).to_owned()).collect();
     }
     /// From now on every stream reports its buffer request declined ([`Stream::period_declined`]).
     pub fn set_period_declined(&self, declined: bool) {
@@ -547,6 +554,9 @@ impl Stream for FakeStream {
     }
     fn period_declined(&self) -> bool {
         !self.loopback && self.lock().period_declined
+    }
+    fn device_lines(&self) -> Vec<String> {
+        if self.loopback { Vec::new() } else { self.lock().device_lines.clone() }
     }
     fn snapshot_links(&self) -> Option<LinkSnapshot> {
         let links = self.lock().links.clone();
