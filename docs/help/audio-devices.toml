@@ -123,7 +123,7 @@ text = "Failures that ended the stream, such as the device being lost or a faile
 [[entry]]
 id = "audio_devices.overloads"
 name = "Overloads"
-text = "Overloads the driver reported to transit (ASIO overloads, JACK xruns). Healthy is 0. If it counts up with dropouts, raise the buffer size or reduce the session's load."
+text = "Overloads the driver reported to transit (ASIO overloads, JACK xruns). On PipeWire: xruns the device driver reported (the first one may not be reported); transit's own late cycles are not counted here, and some show as position jumps. Healthy is 0. If it counts up with dropouts, raise the buffer size or reduce the session's load."
 
 [[entry]]
 id = "audio_devices.busy_skips"

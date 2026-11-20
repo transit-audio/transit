@@ -20,8 +20,11 @@ pub const ALSA_PERIODS: u32 = 4;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ServerClock {
     pub rate: Option<u32>,
-    /// The default quantum (`clock.quantum`); the graph runs at the smallest quantum its clients
-    /// ask for, inside the allowed range, unless one is forced.
+    /// The default quantum (`clock.quantum`). The graph can move to a smaller quantum a client
+    /// asks for, inside the allowed range, unless one is forced or a client that locks the quantum
+    /// is active on the driver: every JACK client does by default, and then only a force, the
+    /// restore after a forcing client left, a node moved between drivers or a driver resume
+    /// changes it (ADR 0021, amendment for #760, rule 7).
     pub quantum: Option<u32>,
     pub min_quantum: Option<u32>,
     pub max_quantum: Option<u32>,

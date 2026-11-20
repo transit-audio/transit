@@ -145,14 +145,17 @@ with no lock held:
 untouched default (no system and no device named); otherwise it is cpal's ALSA host
 (`playback::backend::native::auto_jack_candidate`, ADR 0021 amendment 2026-10-25). The Audio
 Devices note under the chosen port group says "Native JACK (<server>) runs at <rate> Hz with a
-<n>-sample buffer", "Changes the JACK server's buffer size for all clients." and the `pw-metadata` hint
+<n>-sample buffer", what a chosen size means on that server (JACK 2: "Changes the JACK server's buffer size for
+all clients."; PipeWire: a request on transit's own node while its device is active, which a forced
+quantum or another program's request can override and which ends when the device closes, ADR 0021
+amendment for #760, rule 2) and the `pw-metadata` hint
 for pinning; the buffer list offers 64 to 2048 with the running size marked.
 
 ## Tester steps (Linux)
 
-1. Start a JACK or PipeWire-JACK server and open transit (`pw-jack transit` where `libjack` is not on the loader path).
+1. Start a JACK or PipeWire-JACK server and open transit (`pw-jack` is no longer needed: transit finds PipeWire's library, #430).
 2. Audio > Audio Devices: pick the JACK system and Native JACK. "Driver change pending: press Apply to switch to JACK." shows and Apply is highlighted; the lists already show the server's choices.
-3. Pick a buffer size (the running one is marked) and press Apply. The server's buffer size changes for every client.
+3. Pick a buffer size (the running one is marked) and press Apply. Under JACK 2 the server's buffer size changes for every client; under PipeWire transit's device asks for it while it is open (opening can pause up to half a second more while the request arrives), and "Requested N · running at M" shows when something overrides it.
 4. Check the "Output open" line for the size the server runs. "Requested N · running at M" means the server did not take it; pin a size with `pw-metadata` instead.
 5. Run `transit --report` (works over SSH, opens no device) and attach the file it writes to the issue. The window's Copy diagnostics button puts the same text on the clipboard.
 

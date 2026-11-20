@@ -109,7 +109,7 @@ target/release/audio-bench --backend jack --list-devices
 - **The server must be running.** transit never starts one (`JackNoStartServer`); with none it says
   "JACK/PipeWire server not running". The server sets the rate and the quantum; under PipeWire pin
   the quantum (`pw-metadata -n settings 0 clock.force-quantum 128`) or start transit with
-  `PIPEWIRE_QUANTUM=128/48000`.
+  `PIPEWIRE_QUANTUM=128/48000`, which pins the rate (48000) as well as the quantum.
 - **Buffer, period and quantum.** Under JACK (and PipeWire's JACK library) the buffer size is the
   period is the server's quantum: one number. Through ALSA it is not: transit's buffer size is the
   ALSA buffer, cpal splits it into 4 periods, PipeWire's ALSA plug-in runs transit's node at the
