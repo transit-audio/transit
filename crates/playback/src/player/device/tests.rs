@@ -107,7 +107,7 @@ fn reentrant_control_and_input_requests_refuse_without_losing_ownership() {
     assert_eq!(player.close_input(&mut recorder), Err(PlayerError::Busy));
     assert_eq!(recorder.as_ref().unwrap().device_name, "caller input");
     drop(input);
-    *player.input.borrow_mut() = HeldInput::Held(Some(record::Recorder::detached("held input")));
+    *player.input.borrow_mut() = HeldInput::Held(Some(Box::new(record::Recorder::detached("held input"))));
     assert_eq!(player.close_input(&mut recorder), Err(PlayerError::Busy));
     assert!(recorder.is_some());
     *player.input.borrow_mut() = HeldInput::Held(None);

@@ -548,7 +548,7 @@ impl Player {
                     )
                 });
                 match built {
-                    Ok(recorder) => HeldInput::Held(Some(recorder)),
+                    Ok(recorder) => HeldInput::Held(Some(Box::new(recorder))),
                     // Both streams must open in the same mode: an exclusive output beside a shared
                     // input would have the Windows mixer holding the device the output owns. So an
                     // exclusive input the ladder can answer fails the whole open, and the next

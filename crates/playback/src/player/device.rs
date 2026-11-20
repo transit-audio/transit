@@ -1060,7 +1060,7 @@ impl Player {
             HeldInput::Held(slot) => {
                 let recorder = slot.take().ok_or("audio input is already open")?;
                 recorder.monitor.clear_monitor();
-                Ok(recorder)
+                Ok(*recorder)
             }
             HeldInput::Failed(error) => Err(error.clone()),
         }
@@ -1076,7 +1076,7 @@ impl Player {
         }
         let Some(recorder) = recorder.take() else { return Ok(()) };
         if let HeldInput::Held(slot @ None) = &mut *input {
-            *slot = Some(recorder);
+            *slot = Some(Box::new(recorder));
         }
         Ok(())
     }

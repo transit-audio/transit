@@ -191,8 +191,9 @@ enum HeldInput {
     /// None: the input opens on demand, through the backend that serves the output
     /// ([`player::Player::open_input`]).
     No,
-    /// The input, while the player holds it (`None` while the UI has it).
-    Held(Option<record::Recorder>),
+    /// The input, while the player holds it (`None` while the UI has it). Boxed: a recorder is
+    /// far larger than the other variants.
+    Held(Option<Box<record::Recorder>>),
     /// It could not open with the output (or the ASIO device has no inputs), and must not open
     /// later while the output runs.
     Failed(String),
