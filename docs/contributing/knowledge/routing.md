@@ -13,6 +13,12 @@ query.path_latency reads the latest adopted plan/device status mirrored into Eng
 - **Per machine:** an `IoMap` describes the device's channels and the named input and output paths
   a user built (settings, not the session). Code: `crates/playback/src/devices.rs`,
   `crates/ui-studio/src/audio_devices.rs` and `io_settings.rs`.
+- **Per side** ([ADR 0015, amendment for #431](../../adr/0015-io-routing-abstraction.md), rule 8):
+  `UiState.io_maps` holds output records keyed by (system, output device), `UiState.input_maps`
+  holds `InputMap` records keyed by (system, the capture endpoint actually opened, as the backend
+  reports it: `Recorder::input_identity`, from `Stream::opened_capture`). The engine holds one
+  composed table (`IoMap::compose`, `transit_model::adopt_input`); `io_settings::remember` splits
+  it again, and writes back an older build's input half as it was read.
 - **Per session:** tracks, buses and sends name their destinations by string, such as
   `Route::Hardware(name)` (`crates/model/src/mixer.rs`). The session carries names only, so a
   session moves between machines and each machine resolves the names against its own map.
@@ -35,9 +41,17 @@ with a test that loads a loop from a file.
   one-channel path or a plain "In N" label hears that channel on both sides. Wider paths, and
   strips wider than stereo, take the path's channels in order and then the channels after its last
   one, as before. ADR 0015 does not state this rule yet.
-- I/O table reconcile (`IoMap::reconcile`, #690): a table that had no inputs gets the default input
-  paths when the device opens with inputs; a table without its Main gets the defaults back; user
-  paths stay, and a default removed or renamed while the count stays is not restored.
+- Output reconcile (`IoMap::reconcile_outputs`): output paths past the opened outputs are dropped;
+  a table without its Main gets the default outputs back. It never touches the input half.
+- Input defaults (`adopt_input`, rule 9): paths past the open input are kept and unavailable;
+  wider than `defaults_for` adds the missing defaults (by name and by channel set, so a renamed
+  default is not duplicated); `defaults_for` changes only after a successful input open.
+- Unavailable inputs (`IoMap::input_state`, rule 10): an input path that shares an output path's
+  name or needs a channel past the open input resolves to silence, refuses recording
+  (`transit_engine::io::input_refusal`) and is no hardware insert or External Instrument return. A
+  name the table lacks keeps its label meaning. Device input channels at or past 32 are never read.
+- Measurements (rule 13): `HardwareLatency`/`ExternalLatency.input_device` name the input the
+  return came through; `IoMap::returns_through` decides whether one applies.
 
 ## Hardware inserts
 

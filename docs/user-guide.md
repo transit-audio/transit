@@ -444,6 +444,42 @@ limits: a server restart wholly inside the instant between closing the old clien
 new one is seen by neither, and the links are read just before the old client closes, so a link
 you change in that same instant may not be caught.
 
+### Input and output paths
+
+**Audio > Audio Devices > I/O paths** names channels of the open devices as paths ("In 1",
+"In 1-2", "Out 3-4", or names you give them), and tracks, sends and inserts pick a path by name.
+The heading names both devices with their channel counts, for example "Input: Scarlett 2i2 USB,
+2 channels. Output: Scarlett 2i2 USB, 2 channels." A device with more than 32 channels opens them
+all, but transit uses the first 32 and says so there.
+
+Output paths and Main belong to the output device. Input paths belong to the input device that
+actually opened: on ASIO the driver (input and output are one), on WASAPI the input Windows pairs
+with the output, on JACK the chosen input port group, on ALSA and CoreAudio the input device.
+Switching to another input brings that input's own paths; switching back brings the first ones
+back.
+
+A new input gets "In 1" per channel and the stereo pairs. When the input opens narrower than its
+paths, the paths that need channels it lacks are listed as unavailable, with why, and kept; when it
+opens wider again they work again, and the default paths of the new width that are missing are
+added. A default you removed stays removed until the input opens wider than before. When inputs are
+open and no input path can be used, the Inputs list says "No input paths" and offers **Add default
+paths**, which adds the defaults that are missing and changes nothing else.
+
+An input path is unavailable when it needs a channel the input does not have, or when an output
+path has the same name (rename one of them). A track on an unavailable input path hears silence and
+refuses to record, naming the path; it never records another channel. A hardware insert returning
+on it runs dry, an External Instrument has no return, and measuring through it is refused.
+
+A hardware insert or External Instrument measurement remembers the input it came back through and
+is used only while that input is open; through another input the card says **Measure again** and
+the insert counts no latency, as an unmeasured one does. Paths and measurements are saved on this
+machine in ui.json, never in the session.
+
+Upgrading from v0.7.3 or older: output paths are kept. Input paths made by hand for an input that
+was a different device from the output are not shown for that input; they stay in the settings
+file, unused. A WASAPI input starts from the default paths. A measurement whose return input cannot
+be established says **Measure again**. Going back to an older build may show default input paths.
+
 ### Low Latency mode
 
 Turn on **Low Latency** in the transport bar or **Options** when playing an instrument or monitoring an input through a long effect chain. It temporarily bypasses eligible software audio inserts on armed or monitored tracks, their downstream buses, and the master. The master is included even when no track is armed. Inserts with the largest reported latency are bypassed first; equal latencies use stable track and insert identities.
