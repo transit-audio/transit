@@ -99,7 +99,7 @@ the plug-in reports to `learn_touched`, the first of this editor's becomes the t
 `check_param` refuses a hosted parameter the host registry does not list (hidden, read-only and meter parameters are never listed).
 
 A hosted instrument's parameter goes through `mix.instrument_param` like a hosted insert's through `mix.insert_param` (it took only
-built-in instruments until the fix for K83, so a mapped move of one changed nothing): the session holds the value, the mix hands it to the
+built-in instruments until it was fixed, so a mapped move of one changed nothing): the session holds the value, the mix hands it to the
 plug-in with `set_param`, and the plug-in host tells the controller (`setParamNormalized`) on its main thread, so the editor's knob follows.
 
 ## Hosted VST3 parameters

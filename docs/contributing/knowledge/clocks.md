@@ -119,7 +119,7 @@ Tests: `crates/playback/src/device_clock/tests.rs`, `crates/playback/tests/backe
 
 ## Capture gaps
 
-A native WASAPI capture packet flagged `DATA_DISCONTINUITY` has frames missing before it (the first packet after Start carries the flag without a loss and is ignored); the loop sizes the gap from the clock-position jump (QPC delta if unreadable), clamps it to one second, and delivers that many zero frames first (`crates/audio-wasapi/src/capture_loop.rs`, K16).
+A native WASAPI capture packet flagged `DATA_DISCONTINUITY` has frames missing before it (the first packet after Start carries the flag without a loss and is ignored); the loop sizes the gap from the clock-position jump (QPC delta if unreadable), clamps it to one second, and delivers that many zero frames first (`crates/audio-wasapi/src/capture_loop.rs`).
 
 ## Proposed MIDI hardware sync (ADR 0043)
 

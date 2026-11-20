@@ -225,7 +225,7 @@ a second direction at another rate, and a `sampleRateDidChange` under a running 
 that reopens. What it measures is how unevenly the driver calls, not whether a callback was late
 for its buffer: the Scarlett at 48 kHz / 64 (1333 us) delivers on 1 ms USB frames, switches 1, 1
 and 2 ms apart (751 a second), so a third of them read 667 us and the p95 bin edge prints 1024 us
-while service p95 is 16 us and nothing overloads, skips or jumps (K26's burst delivery; the
+while service p95 is 16 us and nothing overloads, skips or jumps (the driver's burst delivery; the
 2026-10-22 hardware run's "late p95 998 us" below is the same figure). The Audio Devices Backend
 line and the diagnostics report therefore name it `gap over period` for ASIO, show the driver-event
 counters always and WASAPI's skipped, padding and packets never, and print one line for a duplex
@@ -259,8 +259,8 @@ backend silently opened the first driver instead, which the hardware run of 2026
 Hardware (2026-10-22, `hardware_scarlett_duplex_streams_two_seconds` and
 `hardware_model12_duplex_streams_two_seconds`, capture then render, every channel, two seconds of
 silence): the Scarlett at 48 kHz and 64 frames granted 64, reported latencies 188 in / 140 out frames
-(572 / 620 at its preferred 256), 1494 buffer switches with late p95 998 us (the burst delivery of known
-issue K26), service p95 15 us, 0 overloads, position jumps or resets, every stamp valid; the Model 12 at
+(572 / 620 at its preferred 256), 1494 buffer switches with late p95 998 us (the burst delivery that the
+made the bench's old gap heuristic over-count), service p95 15 us, 0 overloads, position jumps or resets, every stamp valid; the Model 12 at
 44.1 kHz with its fixed 256-frame buffer, 12 in and 10 out of packed `ASIOSTInt24LSB`, latencies
 300 / 695 frames, 297 switches with late p95 256 us, service p95 64 us, 0 overloads, jumps or resets.
 The loopback rows are in `docs/benchmarks/` (sections "Native ASIO").
@@ -358,7 +358,7 @@ same test read B = 448. On drivers whose loop phase changes between starts, such
 
 By sample position the Scarlett 2i2's getLatencies sum matches the measured loop within 1-5 frames at
 48 kHz (64: 333 vs 328; 128: 647 vs 648; 256: 1196 vs 1192; 512: 2188 vs 2184). The sign-flipping error
-in the 2026-10-23 benchmark was an artifact of timing clicks by callback arrival (K26 bursts; see the
+in the 2026-10-23 benchmark was an artifact of timing clicks by callback arrival (burst delivery; see the
 correction appended to [that page](../../benchmarks/2026-10-23-ryzen-5900x-scarlett-2i2-asio-reported-vs-measured.md)).
 Measure refines placement by those few frames and catches a loop that came up a buffer off. Without a
 Measure the driver's figures are used, which on the Scarlett at 48 kHz are already within about 5 frames;
@@ -407,7 +407,7 @@ they are unverified at 44.1 kHz and on other drivers, and on drivers whose loop 
 - **The bench.** `audio-bench --backend asio --loopback` prints the same figure ("app calibration ... by
   sample position") beside the driver's figures in frames, and `--settings` writes it under the `asio`
   key. Its table's "Round trip" column is timed by callback arrival, which a driver that delivers
-  callbacks in bursts (the Scarlett at 32 and 64 frames, known issue K26) shifts by up to a period
+  callbacks in bursts (the Scarlett at 32 and 64 frames) shifts by up to a period
   against the positions; compare the two lines of one run.
 - **The stamp-time figure is retired over ASIO.** Before #20 the bench calibrated from the stamps' own
   frame times (capture frame time minus render frame time of each click). Over ASIO those are the

@@ -132,7 +132,7 @@ Hosted plug-ins (CLAP, VST3) live on the plug-in host thread ([ADR 0018](../../a
   refused as still loading and the read carries on. Adding a plug-in with parameter values
   reads it there too, waiting up to the 10 s request timeout.
 - **VST3 modules** are entered outside the loaded-module lock: a hung module entry blocks later
-  loads of that binary only (K38, closed).
+  loads of that binary only (issue #56).
 - **macOS** runs these jobs inline on the UI thread (AppKit), as before ADR 0018.
 
 Offline renders (bounce, stems, freeze) make, process and destroy their instances on the thread

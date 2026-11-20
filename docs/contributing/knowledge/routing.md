@@ -50,7 +50,7 @@ uses it. The send sums unaligned by design: the measured trip spans from the sin
 (`HardwareState`): Ready, Unmeasured (runs, no latency), NoInput, MissingSend, MissingReturn (dry) and
 Disabled (dry, with a reason). Conflicts: an ordinary route to a path an insert sends on is refused, and
 so is an insert whose send path is already a route target; opening a session runs the same check and
-disables offenders. Offline paths print the insert dry. Gaps: K18 to K22.
+disables offenders. Offline paths print the insert dry. Gaps: K19, K20 and K22.
 Tests: `crates/mix/tests/hardware_insert.rs`, `crates/engine/tests/hardware_insert.rs`.
 
 Hardware inserts also run on the master (#322). Sink planning and compiler metadata include its hardware sends; master processing calls the same hardware-slot branch as ordinary tracks and flushes sends without alignment. Its measured round trip contributes to the master-chain sum M in shared latency L. Missing paths, disabled or bypassed slots, and absent duplex input stay dry; offline deliverables stay dry too. The session keeps only the hardware path names and user insert settings.
