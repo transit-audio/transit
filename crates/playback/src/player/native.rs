@@ -243,9 +243,13 @@ pub(super) struct Native {
     muted: Vec<Muted>,
     /// The MIDI Learn mappings Main wants matched (ADR 0028).
     wanted: super::midi_map::Wanted,
-    /// What ties the worker to this Player's runtime, held until the first service: a replacement
-    /// Player hands it to the worker of the Native it adopts instead (#760).
-    unbound: Option<handoff::Unbound>,
+    /// What ties the worker to this Player's runtime, until it has all gone through at a service:
+    /// a replacement Player hands it to the worker of the Native it adopts instead (#760).
+    unbound: Option<handoff::Bind>,
+    /// Audio device handovers so far (#760): the token of the latest.
+    handovers: u64,
+    /// Each input's cutoff at a replacement's boundary, for the routes that service registers.
+    floor: Vec<(u64, u64)>,
 }
 
 impl Native {
@@ -276,7 +280,9 @@ impl Native {
             monitor,
             muted: Vec::new(),
             wanted: super::midi_map::Wanted::new(),
-            unbound: Some(handoff::Unbound { lane, echo, tap: tap_in }),
+            unbound: Some(handoff::Bind::new(lane, echo, tap_in)),
+            handovers: 0,
+            floor: Vec::new(),
         })
     }
 
@@ -351,6 +357,12 @@ impl Native {
     /// The MIDI Learn events since the last call, with the candidate's port named.
     pub(super) fn take_map_events(&self) -> Vec<super::MapMsg> {
         use super::midi_map::MapEvent;
+        if self.before_boundary() {
+            // Published from what arrived while no runtime was open (#760): no effect.
+            drop(self.worker.take_map_events());
+            drop(self.wanted.take_moves());
+            return Vec::new();
+        }
         let epoch = self.wanted.epoch();
         let moves = self.wanted.take_moves().into_iter().map(|(index, value, seq)| super::MapMsg::Move { epoch, index, value, seq });
         moves
@@ -486,7 +498,10 @@ impl Native {
     }
 
     pub(super) fn service(&mut self, owner: &mut Owner, epoch: EngineEpoch) {
-        self.bind();
+        // No route of this runtime before the worker has taken all of it (#760).
+        if !self.bind() {
+            return;
+        }
         self.follow_storms();
         let Some(io) = &self.io else { return };
         if io.finished.load(Ordering::Acquire) || owner.faulted() {
@@ -690,7 +705,9 @@ impl Native {
                     }
                 };
                 used[port] = true;
-                if let Err(error) = owner.cancel_source_before(token, boundary.cutoff()) {
+                // At a replacement's boundary every input's routes take the cutoff drawn there.
+                let cutoff = self.floor.iter().find(|(open, _)| open == id).map_or_else(|| boundary.cutoff(), |(_, cutoff)| *cutoff);
+                if let Err(error) = owner.cancel_source_before(token, cutoff) {
                     self.status.error = Some(error.to_string());
                     if let Ok(request) = owner.revoke_source(token) {
                         self.retired.push(request);
@@ -719,13 +736,9 @@ impl Native {
                 }
             }
         }
+        self.floor.clear();
         // MIDI Learn: hand the worker a fresh snapshot when the list or the open ports changed.
-        let ids: Vec<Option<u64>> = (0..self.wanted.len())
-            .map(|spec| {
-                let name = self.wanted.port_of(spec)?;
-                self.inputs.iter().find(|i| !i.closed && !i.lost && i.key.to_string() == name).and_then(|i| i.attached.as_ref().map(|(id, _)| *id))
-            })
-            .collect();
+        let ids = self.map_ids();
         if let Some(snapshot) = self.wanted.rebuild(ids)
             && let Err(error) = self.worker.set_maps(snapshot)
         {
@@ -736,6 +749,16 @@ impl Native {
 }
 
 impl Native {
+    /// The ingress input id of each wanted mapping's port, `None` for a port not open.
+    fn map_ids(&self) -> Vec<Option<u64>> {
+        (0..self.wanted.len())
+            .map(|spec| {
+                let name = self.wanted.port_of(spec)?;
+                self.inputs.iter().find(|i| !i.closed && !i.lost && i.key.to_string() == name).and_then(|i| i.attached.as_ref().map(|(id, _)| *id))
+            })
+            .collect()
+    }
+
     fn port_name(&self, key: &PortKey) -> String {
         self.status.inputs.iter().find(|p| same_port(&p.key, key)).map_or_else(|| key.to_string(), |p| p.display_name.clone())
     }

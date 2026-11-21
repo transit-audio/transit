@@ -6,7 +6,7 @@ use super::*;
 impl Fixture {
     /// The reopen's first half: the MIDI side handed over, then this runtime retired (the old
     /// Player drops after the handover).
-    fn hand_over(self) -> Native {
+    pub(super) fn hand_over(self) -> Native {
         let Self { mut native, owner, ports, midi, .. } = self;
         native.hand_off();
         drop(midi);

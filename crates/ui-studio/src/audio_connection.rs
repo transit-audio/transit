@@ -338,6 +338,12 @@ mod tests {
         fn snapshot_links(&self) -> Option<LinkSnapshot> {
             self.inner.snapshot_links()
         }
+        // Says when the reopen takes the MIDI inputs (#760): never on a refused reopen, whose old
+        // connection keeps them.
+        fn take_midi_inputs(&self) -> Option<MidiInputs> {
+            self.inner.trace.borrow_mut().push("take midi");
+            None
+        }
     }
 
     /// #431 rule 6 at the seam: a reopen that ends before the old device closes drops the snapshot
@@ -357,7 +363,7 @@ mod tests {
         player.as_ref().unwrap().refusal.set(None);
         trace.borrow_mut().clear();
         assert_eq!(replace(&mut player, &mut input, open), Ok(None), "another system: discarded, nothing said");
-        assert_eq!(*trace.borrow(), ["snapshot links", "close editors", "drop output", "open output"]);
+        assert_eq!(*trace.borrow(), ["snapshot links", "close editors", "take midi", "drop output", "open output"]);
     }
 
     #[test]
@@ -371,12 +377,12 @@ mod tests {
             let open = || RefusingConnection { inner: FakeConnection::new(AudioConfig::default(), Rc::clone(&trace)), refusal: Cell::new(None) };
             assert_eq!(replace(&mut player, &mut input, open), Err(refusal.to_string()));
             assert!(player.is_some() && input.is_some());
-            assert_eq!(*trace.borrow(), ["close editors"]);
+            assert_eq!(*trace.borrow(), ["close editors"], "a refused reopen leaves the MIDI inputs with the old connection");
             // Main becomes available, or the caller has finished and collected the take.
             player.as_ref().unwrap().refusal.set(None);
             trace.borrow_mut().clear();
             replace(&mut player, &mut input, open).unwrap();
-            assert_eq!(*trace.borrow(), ["close editors", "drop input", "drop output", "open output"]);
+            assert_eq!(*trace.borrow(), ["close editors", "drop input", "take midi", "drop output", "open output"]);
             assert!(input.is_none());
         }
     }

@@ -393,6 +393,9 @@ pub(super) struct Wanted {
     /// Tells this Native from the one a reconnect replaces; epochs start from it, so a new
     /// Native's epochs never equal an old one's.
     generation: u32,
+    /// The worker holds a snapshot this side no longer stands for ([`Self::renew`]): the next
+    /// rebuild hands it one even when the list is empty.
+    force: bool,
 }
 
 static GENERATIONS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
@@ -401,6 +404,18 @@ impl Wanted {
     pub fn new() -> Self {
         let generation = GENERATIONS.fetch_add(1, Ordering::Relaxed);
         Wanted { epoch: generation.wrapping_mul(1 << 16), generation, ..Default::default() }
+    }
+
+    /// The mappings as a replacement Player's (an audio device reopen carried the worker, #760):
+    /// a new generation and epoch, fresh value cells (nothing the worker published before counts),
+    /// and a snapshot for the worker at the next rebuild. The list and the learn flag stay.
+    pub fn renew(&mut self) {
+        let generation = GENERATIONS.fetch_add(1, Ordering::Relaxed);
+        self.generation = generation;
+        self.epoch = generation.wrapping_mul(1 << 16);
+        self.cells = self.specs.iter().map(|_| Arc::new(Cell::new(0.0))).collect();
+        self.force = self.sent.is_some();
+        self.sent = None;
     }
 
     /// Total publishes of every mapping so far; a change since the last look means the controller
@@ -476,9 +491,10 @@ impl Wanted {
     /// port opened or closed (`ids` are the ingress input ids, `None` for a closed port).
     pub fn rebuild(&mut self, ids: Vec<Option<u64>>) -> Option<Arc<Snapshot>> {
         self.retired.retain(|old| Arc::strong_count(old) > 1);
-        if self.sent.is_none() && self.specs.is_empty() {
+        if self.sent.is_none() && self.specs.is_empty() && !self.force {
             return None;
         }
+        self.force = false;
         if self.sent.as_ref().is_some_and(|(epoch, sent)| *epoch == self.epoch && *sent == ids) {
             return None;
         }

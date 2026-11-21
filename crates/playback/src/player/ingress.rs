@@ -104,6 +104,15 @@ struct Shared {
     /// Tests: the storm detector is off, so a feedback loop can be shown to form.
     #[cfg(test)]
     storm_off: AtomicBool,
+    /// Tests: the worker takes no step (its update queue fills), as a starved thread would.
+    #[cfg(test)]
+    stall: AtomicBool,
+    /// The latest audio device handover Main started (#760): while it is above the last one the
+    /// worker resumed, nothing is matched, learned or captured.
+    suspend: AtomicU64,
+    /// The latest handover the worker has seen at the start of a step: everything it published
+    /// before that is already in the map ring.
+    suspend_seen: AtomicU64,
 }
 
 /// Main's per-open cancellation identity. Capture/publish all port cutoffs
@@ -156,7 +165,7 @@ pub struct Route {
     pub self_echo: bool,
 }
 
-struct Input {
+pub(super) struct Input {
     id: u64,
     consumer: InputConsumer,
     routes: Vec<(sources::Permit, Route)>,
@@ -297,7 +306,7 @@ impl Drop for Input {
     }
 }
 
-enum Update {
+pub(super) enum Update {
     Buttons(Vec<(u64, bool, Vec<transit_model::MidiSource>)>),
     Input(Box<Input>),
     Echo(super::midi_out::Producer),
@@ -312,6 +321,13 @@ enum Update {
     /// The action lane of the runtime the worker feeds now: its first, or the replacement's after an
     /// audio device reopen (the inputs, their consumers and this thread outlive the reopen, #760).
     Lane(Box<action_lane::Control<Packet, ActionResult>>),
+    /// The replacement's boundary (#760): every input skips, for MIDI Learn, mapped controls and
+    /// transport capture, what it offered before its cutoff, forgets what a mapping or a capture
+    /// held, and the suspension of handover `token` ends.
+    Resume {
+        token: u64,
+        cutoffs: Vec<(u64, u64)>,
+    },
 }
 
 /// Control-side handle. Drop closes admission immediately and wakes the worker;
@@ -338,7 +354,7 @@ impl Worker {
         Self::start_on(Some(lane), idle)
     }
 
-    /// A worker that feeds no runtime until [`Worker::set_lane`]. It routes nothing before then
+    /// A worker that feeds no runtime until [`Update::Lane`]. It routes nothing before then
     /// (routes are only sent after the lane).
     pub(super) fn start_unbound(idle: Duration) -> std::io::Result<Self> {
         Self::start_on(None, idle)
@@ -363,6 +379,7 @@ impl Worker {
             maps: None,
             map_out,
             map_pass_on: false,
+            resumed: 0,
             #[cfg(test)]
             between_check_and_push: None,
             #[cfg(test)]
@@ -371,6 +388,11 @@ impl Worker {
         let thread = std::thread::Builder::new().name("transit-midi-ingress".into()).spawn(move || {
             let mut linger = 0u32;
             while !pump.shared.stop.load(Ordering::Acquire) {
+                #[cfg(test)]
+                if pump.shared.stall.load(Ordering::Acquire) {
+                    std::thread::park_timeout(Duration::from_millis(1));
+                    continue;
+                }
                 if pump.step() {
                     linger = LINGER;
                 }
@@ -479,27 +501,26 @@ impl Worker {
         Ok(applied)
     }
 
-    /// Points the worker at a runtime's action lane: the first, or a replacement Player's after an
-    /// audio device reopen (#760). Packets still in the old lane belonged to the old runtime and go
-    /// with it; Main sends the new routes after this, so nothing is routed to the old lane again.
-    pub(super) fn set_lane(&mut self, lane: action_lane::Control<Packet, ActionResult>) -> Result<(), &'static str> {
-        self.attach.try_send(Update::Lane(Box::new(lane))).map_err(|_| "MIDI lane queue unavailable")?;
+    /// Offers `update` (the runtime's lane, echo producer, monitor tap, a mapping snapshot or a
+    /// boundary) without waiting; a full queue hands it back for a later try.
+    pub(super) fn offer(&mut self, update: Update) -> Result<(), Update> {
+        self.attach.try_send(update).map_err(|error| match error {
+            mpsc::TrySendError::Full(update) | mpsc::TrySendError::Disconnected(update) => update,
+        })?;
         self.thread.thread().unpark();
         Ok(())
     }
 
-    /// Hands the worker the output thread's echo producer (#61).
-    pub(super) fn set_echo(&mut self, echo: super::midi_out::Producer) -> Result<(), &'static str> {
-        self.attach.try_send(Update::Echo(echo)).map_err(|_| "MIDI echo queue unavailable")?;
+    /// Starts handover `token` of an audio device reopen (#760): from the worker's next step on,
+    /// nothing is matched, learned or captured until [`Update::Resume`] of that token.
+    pub(super) fn suspend(&self, token: u64) {
+        self.shared.suspend.store(token, Ordering::Release);
         self.thread.thread().unpark();
-        Ok(())
     }
 
-    /// Hands the worker the MIDI Monitor's input tap (#91).
-    pub(super) fn set_monitor(&mut self, tap: Tap) -> Result<(), &'static str> {
-        self.attach.try_send(Update::Monitor(tap)).map_err(|_| "MIDI monitor queue unavailable")?;
-        self.thread.thread().unpark();
-        Ok(())
+    /// The latest handover the worker has taken up.
+    pub(super) fn suspend_seen(&self) -> u64 {
+        self.shared.suspend_seen.load(Ordering::Acquire)
     }
 
     /// Swaps in the MIDI Learn mappings (ADR 0028). The worker owns a reference until the next swap.
@@ -617,6 +638,13 @@ impl Worker {
     pub(super) fn disable_storm_detector(&self) {
         self.shared.storm_off.store(true, Ordering::Release);
     }
+
+    /// Tests: holds the worker away from its steps (`true`) or lets it run again.
+    #[cfg(test)]
+    pub(super) fn stall(&self, on: bool) {
+        self.shared.stall.store(on, Ordering::Release);
+        self.thread.thread().unpark();
+    }
 }
 impl Drop for Worker {
     fn drop(&mut self) {
@@ -630,7 +658,7 @@ impl Drop for Worker {
 
 struct Pump {
     transport_out: transport::Sender,
-    /// None until Main hands over the runtime's lane ([`Worker::set_lane`]).
+    /// None until Main hands over the runtime's lane ([`Update::Lane`]).
     lane: Option<action_lane::Control<Packet, ActionResult>>,
     receive: Receiver<Update>,
     inputs: Vec<Input>,
@@ -645,6 +673,8 @@ struct Pump {
     map_out: rtrb::Producer<MapEvent>,
     /// Whether the matcher ran on the last step, so a start skips the backlog.
     map_pass_on: bool,
+    /// The last handover whose boundary the worker applied ([`Update::Resume`]).
+    resumed: u64,
     /// Tests: runs after the route check and before the echo push, where a preemption can land.
     #[cfg(test)]
     between_check_and_push: Option<Box<dyn FnMut() + Send>>,
@@ -726,6 +756,17 @@ impl Pump {
                 }
                 Ok(Update::Maps(maps)) => self.maps = Some(maps),
                 Ok(Update::Lane(lane)) => self.lane = Some(*lane),
+                Ok(Update::Resume { token, cutoffs }) => {
+                    for input in &mut self.inputs {
+                        if let Some((_, cutoff)) = cutoffs.iter().find(|(id, _)| *id == input.id) {
+                            input.mon.map_next = input.mon.map_next.max(*cutoff);
+                            input.mon.capture.next = input.mon.capture.next.max(*cutoff);
+                        }
+                        input.mon.held.fill(0);
+                        input.mon.captured = [0; 32];
+                    }
+                    self.resumed = self.resumed.max(token);
+                }
                 Ok(Update::Routes { id, routes, applied }) => {
                     if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) {
                         for (old, old_route) in &input.routes {
@@ -849,6 +890,13 @@ impl Pump {
         // the worker held while it was off; a port attached in this same step opened after Main
         // turned the matcher on (an armed learn opens every port), so its backlog is all news and
         // its first message may be the learn's candidate (#160).
+        // An audio device handover (#760) suspends matching, learning and capture until its
+        // boundary; what the worker published before it took the suspension up is in the ring now.
+        let suspend = self.shared.suspend.load(Ordering::Acquire);
+        let suspended = suspend > self.resumed;
+        if suspended {
+            self.shared.suspend_seen.store(suspend, Ordering::Release);
+        }
         let learning = self.shared.learn.load(Ordering::Acquire);
         for input in &mut self.inputs {
             let Input { id, consumer, mon, buttons_enabled, .. } = input;
@@ -860,7 +908,9 @@ impl Pump {
                     host_arrival_ns: raw.host_arrival_ns,
                     backend_time_us: 0,
                 };
-                let captured = if raw.seq >= mon.capture.next {
+                let captured = if suspended {
+                    None
+                } else if raw.seq >= mon.capture.next {
                     mon.capture.next = raw.seq.saturating_add(1);
                     let captured = transport::capture(mon, *id, short, &mut self.map_out, &self.shared);
                     if let Some(consume) = captured
@@ -878,9 +928,10 @@ impl Pump {
                 }
             });
         }
-        let pass_on = learning
-            || self.maps.as_deref().is_some_and(|maps| !maps.is_empty())
-            || self.inputs.iter().any(|i| !i.buttons.is_empty() || i.mon.capture.pending() || i.mon.captured.iter().any(|bits| *bits != 0));
+        let pass_on = !suspended
+            && (learning
+                || self.maps.as_deref().is_some_and(|maps| !maps.is_empty())
+                || self.inputs.iter().any(|i| !i.buttons.is_empty() || i.mon.capture.pending() || i.mon.captured.iter().any(|bits| *bits != 0)));
         if pass_on {
             let first = !self.map_pass_on;
             for (index, input) in self.inputs.iter_mut().enumerate() {
@@ -894,7 +945,10 @@ impl Pump {
                 map_pass(input, self.maps.as_deref(), &mut self.map_out, &self.shared);
             }
         }
-        self.map_pass_on = pass_on;
+        // A suspension is not the matcher turning off: its boundary decides what is skipped.
+        if !suspended {
+            self.map_pass_on = pass_on;
+        }
         // A fixed amount of work even under continuous MIDI traffic. Round-robin
         // across ports prevents one input backlog from starving another release.
         for _ in 0..BATCH {
@@ -1087,6 +1141,7 @@ impl Drop for Pump {
                 Ok(Update::Maps(maps)) => drop(maps),
                 Ok(Update::Buttons(buttons)) => drop(buttons),
                 Ok(Update::Lane(lane)) => drop(lane),
+                Ok(Update::Resume { .. }) => {}
                 Ok(Update::Routes { routes, .. }) => {
                     for (permit, _) in routes {
                         permit.invalidate();

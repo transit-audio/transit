@@ -15,7 +15,7 @@ pub(super) struct Buttons {
     active: bool,
     profiles: transit_model::TransportProfiles,
     sending: Vec<MidiOutPort>,
-    cutoffs: BTreeMap<u64, u64>,
+    pub(super) cutoffs: BTreeMap<u64, u64>,
     sent: Vec<(u64, bool, Vec<transit_model::MidiSource>)>,
 }
 
@@ -124,6 +124,10 @@ impl Native {
 
     pub(crate) fn take_buttons(&mut self) -> (bool, Vec<ButtonEvent>) {
         let (mut lost, events) = self.worker.take_transport();
+        if self.before_boundary() {
+            // Offered while no runtime was open (#760): the boundary's cutoffs refuse the rest.
+            return (false, Vec::new());
+        }
         for input in &self.inputs {
             if let Some((_, boundary)) = &input.attached {
                 let input_lost = boundary.take_transport_loss();
