@@ -464,4 +464,17 @@ fn a_term_run_stores_both_figures_and_the_card_follows_the_alignment() {
     t.frames(2);
     assert_eq!(t.card().external_state, "Manual: 20.0 ms");
     assert_eq!((t.report().latency, t.report().aligned_latency), (Some(960), Some(960)), "no automatic term");
+    // #709 round 3: at equal rates, the alignment invalid, the manual value shows no hint (as valid),
+    // and so does a figure measured at equal rates.
+    t.app.audio_devices.fake_device_rate = Some(48_000);
+    t.app.audio_devices.fake_alignment = Some(Alignment::Invalid);
+    t.frames(2);
+    assert_eq!(t.card().external_state, "Manual: 20.0 ms");
+    t.app.run("instrument.external", json!({"track": t.track.0, "manual_ms": null})).unwrap();
+    let mut io = t.app.engine.io_map().clone();
+    io.external_latency[0].device_rate = 48_000;
+    io.external_latency[0].normalized_frames = Some(955);
+    t.app.engine.set_io_map(io);
+    t.frames(2);
+    assert_eq!(t.card().external_state, format!("Measured 19.9 ms on {today} at 48 kHz/64"));
 }

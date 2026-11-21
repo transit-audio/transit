@@ -180,6 +180,16 @@ pub fn measured_hint(measured: u32, term: bool, running: Option<u32>, alignment:
     (rate_hint(measured, running) || term != (alignment == Alignment::Valid)).then_some(LatencyHint::MeasureAgain)
 }
 
+/// The alignment the hints compare against (not the one the plan's figure follows): at equal rates
+/// (the device at `session`) an invalid alignment reads as a valid one, so "timing changed" never
+/// shows there and [`measured_hint`] falls through to its other checks (#709 round 3: T is 0 at
+/// equal rates; a figure measured at another device rate still says "measure again at this rate" by
+/// rule 8, and the plan keeps using the measured total while the alignment is not claimed).
+#[must_use]
+pub fn hint_alignment(alignment: Alignment, session: u32, running: Option<u32>) -> Alignment {
+    if alignment == Alignment::Invalid && running == Some(session) { Alignment::Valid } else { alignment }
+}
+
 /// The hint of a manual value (rule 7): "timing changed: stop at 1x, then check the manual latency"
 /// while the alignment is invalid, else none. It never gets a measurement-provenance hint.
 #[must_use]

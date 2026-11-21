@@ -205,15 +205,17 @@ pub fn progress_text(p: Progress) -> String {
 #[must_use]
 pub fn latency_text(frames: u32, source: &ExternalSource, rate: u32, buffer: Option<u32>, timing: crate::hardware_ui::Timing) -> (String, bool) {
     use crate::hardware_ui::{TIMING_CHANGED_MANUAL, hint_text};
+    // At equal rates "timing changed" never shows (#709 round 3).
+    let alignment = transit_model::hint_alignment(timing.alignment, rate, timing.device_rate);
     match source {
         ExternalSource::Manual => {
             let text = format!("Manual: {:.1} ms", ms(f64::from(frames), rate));
-            match transit_model::manual_hint(timing.alignment) {
+            match transit_model::manual_hint(alignment) {
                 Some(_) => (format!("{text}: {TIMING_CHANGED_MANUAL}"), true),
                 None => (text, false),
             }
         }
-        ExternalSource::Measured(m) => match m.hint(timing.device_rate, timing.alignment) {
+        ExternalSource::Measured(m) => match m.hint(timing.device_rate, alignment) {
             Some(hint) => (format!("{}: {}", measured_text(m), hint_text(hint)), true),
             None => (measured_text(m), false),
         },

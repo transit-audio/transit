@@ -63,8 +63,8 @@ pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
 pub use input_map::{InputMap, adopt_input, adopt_input_ports};
 pub use io_map::{
     Alignment, ExternalLatency, ExternalLookup, ExternalSource, HardwareLatency, InputUnavailable, IoDirection, IoError, IoMap, IoPath, LatencyHint,
-    MAX_DEVICE_CHANNELS, MAX_PATH_WIDTH, SYSTEM_AUDIO_PATH, converter_term, default_input_paths, input_channel, is_system_audio, live_input_channel,
-    manual_hint, measured_hint, rate_hint, resolve_input,
+    MAX_DEVICE_CHANNELS, MAX_PATH_WIDTH, SYSTEM_AUDIO_PATH, converter_term, default_input_paths, hint_alignment, input_channel, is_system_audio,
+    live_input_channel, manual_hint, measured_hint, rate_hint, resolve_input,
 };
 pub use markers::{Group, MarkerKind, MemoryLocation};
 pub use midi_effect::{MAX_MIDI_EFFECTS, MIDI_EFFECT_SLOT, MidiEffectSlot};

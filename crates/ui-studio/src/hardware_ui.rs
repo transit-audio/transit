@@ -189,7 +189,10 @@ impl StudioApp {
     pub(crate) fn hardware_hint(&self, send: &str, ret: &str) -> Option<LatencyHint> {
         let rate = self.engine.session().sample_rate.hz();
         let timing = self.timing();
-        self.engine.io_map().hardware_figure(send, ret, rate).and_then(|m| m.hint(timing.device_rate, timing.alignment))
+        self.engine
+            .io_map()
+            .hardware_figure(send, ret, rate)
+            .and_then(|m| m.hint(timing.device_rate, transit_model::hint_alignment(timing.alignment, rate, timing.device_rate)))
     }
 
     /// Why Measure is off right now.

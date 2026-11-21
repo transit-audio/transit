@@ -178,3 +178,49 @@ fn a_figure_without_term_provenance_says_measure_again_where_the_term_is_in_forc
     t.frames(2);
     assert_eq!(row(&t), json!([format!("Out 3-4 \u{2192} In 3-4: 612 frames (12.8 ms), measured with another input timing: {MEASURE_AGAIN_RATE}")]));
 }
+
+/// #709 round 3: at equal rates (the device at the session's rate) "timing changed" never shows,
+/// with the alignment invalid: a figure measured at another device rate says "measure again at this
+/// rate" (rule 8), one measured at equal rates says nothing, one without a device rate keeps rule 6's
+/// hint: each exactly what it says with a valid alignment. The figure in use is unchanged (the
+/// measured total while the alignment is not claimed). At a converted rate "timing changed" stays.
+#[test]
+fn at_equal_rates_an_invalid_alignment_shows_no_timing_hint() {
+    let mut t = with_fake_probe(48_000);
+    t.app.audio_devices.fake_alignment = Some(Alignment::Invalid);
+    let set = |t: &mut T, device_rate: u32, normalized: Option<u32>| {
+        let mut io = t.app.engine.io_map().clone();
+        io.set_hardware_latency(transit_model::HardwareLatency {
+            send: "Out 3-4".into(),
+            ret: "In 3-4".into(),
+            round_trip_frames: 612,
+            rate: 48_000,
+            measured_at: 1,
+            input_device: io.input_device.clone(),
+            input_ports: Vec::new(),
+            device_rate,
+            normalized_frames: normalized,
+        });
+        t.app.engine.set_io_map(io);
+        t.frames(2);
+    };
+    let plain = "Out 3-4 \u{2192} In 3-4: 612 frames (12.8 ms)";
+    // Measured at 44.1 kHz with the term: rule 8, and the measured total in use.
+    set(&mut t, 44_100, Some(578));
+    assert_eq!(row(&t), json!([format!("{plain}, measured with the device at 44.1 kHz: {MEASURE_AGAIN_RATE}")]));
+    assert_eq!(t.app.hardware_hint("Out 3-4", "In 3-4"), Some(LatencyHint::MeasureAgain));
+    assert_eq!(t.app.shown_latency(Some(612), Some(578)), Some(612), "the plan's figure is not changed");
+    // Measured at equal rates with the term: nothing to say.
+    set(&mut t, 48_000, Some(612));
+    assert_eq!(row(&t), json!([plain]));
+    assert_eq!(t.app.hardware_hint("Out 3-4", "In 3-4"), None);
+    // No device rate recorded: rule 6's own hint.
+    set(&mut t, 0, None);
+    assert_eq!(row(&t), json!([format!("{plain}, device rate not recorded: {MEASURE_AGAIN_RATE}")]));
+    // The same figures with the device at 44.1 kHz (T = 34 in force when valid): "timing changed".
+    set(&mut t, 48_000, Some(612));
+    t.app.audio_devices.fake_device_rate = Some(44_100);
+    t.frames(2);
+    assert_eq!(row(&t), json!([format!("{plain}, {TIMING_CHANGED}")]));
+    assert_eq!(t.app.hardware_hint("Out 3-4", "In 3-4"), Some(LatencyHint::TimingChanged));
+}

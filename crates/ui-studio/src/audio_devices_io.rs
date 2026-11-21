@@ -583,7 +583,8 @@ pub const MEASURE_AGAIN_PORTS: &str = "through other ports of this input: measur
 /// ([`transit_model::measured_hint`]).
 pub fn rate_row(m: &transit_model::HardwareLatency, timing: crate::hardware_ui::Timing) -> Option<String> {
     use crate::hardware_ui::{MEASURE_AGAIN_RATE, TIMING_CHANGED};
-    let hint = m.hint(timing.device_rate, timing.alignment)?;
+    // At equal rates "timing changed" never shows (#709 round 3): the hints read an invalid alignment as valid.
+    let hint = m.hint(timing.device_rate, transit_model::hint_alignment(timing.alignment, m.rate, timing.device_rate))?;
     Some(if hint == transit_model::LatencyHint::TimingChanged {
         TIMING_CHANGED.to_string()
     } else if m.device_rate == 0 {
