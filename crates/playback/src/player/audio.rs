@@ -20,6 +20,8 @@ mod align;
 mod external;
 #[cfg(test)]
 pub(in crate::player) use external::FRAME_CLOCK_BASE;
+#[cfg(test)]
+pub(in crate::player) use external::MEASURE_NOTE_STAMPS;
 mod midi;
 
 #[derive(Debug, Clone, Copy)]

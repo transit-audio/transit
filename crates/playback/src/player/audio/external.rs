@@ -19,6 +19,14 @@ std::thread_local! {
     pub(in crate::player) static FRAME_CLOCK_BASE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
 }
 
+#[cfg(test)]
+std::thread_local! {
+    /// Test seam (#709): on the calling thread (the test's device callback), the presentation
+    /// stamp `at_ns` of every External Instrument Measure note-on, in order, exactly as it is
+    /// pushed onto the MIDI output thread's ring (`External::measure`).
+    pub(in crate::player) static MEASURE_NOTE_STAMPS: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// The callback-entry host time of `output_frame` at `device_rate` under [`FRAME_CLOCK_BASE`],
 /// when a test set it on this thread.
 #[cfg(test)]
@@ -142,6 +150,10 @@ impl External {
         let at_ns = block.host_for(true).unwrap_or(0);
         let out = &mut self.out;
         probe.block(input, frames, |e| {
+            #[cfg(test)]
+            if e.bytes[0] & 0xF0 == 0x90 {
+                MEASURE_NOTE_STAMPS.with_borrow_mut(|stamps| stamps.push(at_ns));
+            }
             out.push(OutEvent { kind: Kind::Message, track: e.track, at_ns, bytes: e.bytes, len: 3, delay_ns: 0 });
         });
     }

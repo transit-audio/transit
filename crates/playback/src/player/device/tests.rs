@@ -1452,6 +1452,7 @@ fn a_live_loop_survives_the_document_edit_that_superseded_its_snapshot() {
 
 mod converted_rate;
 mod duplex_input;
+mod external_converted;
 mod fake_only;
 mod jack_calibration;
 mod jack_settled;
