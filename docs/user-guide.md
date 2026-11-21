@@ -522,6 +522,15 @@ cannot name, the card says **Measure again** and the insert counts no latency, a
 one does. A result waiting for **Keep** is dropped when the device, its input or the rate changes. Paths and measurements are saved on this
 machine in ui.json, never in the session.
 
+A measurement also remembers the rate the audio device ran at. When the device runs at another rate
+than that (a 44.1 kHz interface measured, a 48 kHz interface now, whatever the session's rate), the
+figure is still used as measured and the insert's card, the table in Audio Devices and the External
+Instrument's card add **measure again at this rate**: the interface's own delay and transit's rate
+conversion can both differ at another rate. A measurement saved by v0.7.4 or older did not record
+the device's rate, so it shows the same hint at every rate, the session's own included, until you
+measure it again once. A manual External Instrument latency is yours and is never changed or
+flagged.
+
 Upgrading from v0.7.3 or older: output paths are kept. Input paths made by hand for an input that
 was a different device from the output are not shown for that input; they stay in the settings
 file, unused. A WASAPI input starts from the default paths. A measurement whose return input cannot
