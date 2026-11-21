@@ -16,7 +16,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
    `cargo test -p transit-engine --test corpus_generate -- --ignored --nocapture write_corpus_files` (the name keeps the other generators, which write the rack and take fixtures, from writing files for this release). Extend the features session
    in `crates/engine/tests/corpus_generate.rs` first if the release serializes something new, then run
    `cargo test -p transit-model` and commit the two files (`crates/model/tests/corpus/README.md`). Never
-   regenerate an earlier release's files.
+   regenerate an earlier release's files. A new release's two files also need their two rows in `INCOMPLETE` in `crates/mix/tests/sched_equivalence.rs` (copy the previous release's rows; the test prints the computed sets if they differ).
 
 4. Housekeeping, before the tag:
    - Re-read `AGENTS.md` and everything it points to (`CLAUDE.md`, `docs/contributing/agents.md`,

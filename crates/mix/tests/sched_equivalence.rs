@@ -147,6 +147,8 @@ const INCOMPLETE: &[(&str, &[&str])] = &[
     ("v0.7.2-features.transit", &["compressor", "filter", "gain", "plate_reverb", "sampler", "tuner"]),
     ("v0.7.3-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
     ("v0.7.3-features.transit", &["compressor", "filter", "gain", "plate_reverb", "sampler", "tuner"]),
+    ("v0.7.4-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
+    ("v0.7.4-features.transit", &["compressor", "filter", "gain", "plate_reverb", "sampler", "tuner"]),
     ("returns-and-groups.transit", &["compressor", "gain", "room_reverb"]),
 ];
 
