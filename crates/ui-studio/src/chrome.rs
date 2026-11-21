@@ -357,7 +357,8 @@ pub fn tool_footer<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let r = ui.max_rect();
     ui.painter().line_segment([egui::pos2(r.min.x - body_x, y), egui::pos2(r.max.x + body_x, y)], Stroke::new(1.0, TOKENS.line));
     ui.add_space(c::TOOL_FOOTER_PADDING[0]);
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add).inner
+    // One control high: a bare right-to-left layout would centre the buttons in all the room below.
+    ui.allocate_ui_with_layout(vec2(ui.available_width(), c::CONTROL_HEIGHT), egui::Layout::right_to_left(egui::Align::Center), add).inner
 }
 
 /// The menu bar's items (`MenuBar::style`): 22 high, 8 px a side, radius 4, no border; the open

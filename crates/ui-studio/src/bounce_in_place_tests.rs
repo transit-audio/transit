@@ -583,12 +583,12 @@ fn the_track_form_says_when_the_part_before_bar_1_stops_playing() {
 const LONG_NAME: &str = "A very long track name that runs past any sensible width for a dialog 0123456789 0123456789";
 
 /// The dialog layout gate (#735) on the Bounce in Place form: with the longest track names, the
-/// longest source row (the existing track chosen, the dropdown holding a long name) and a span line
-/// for several clips, no button covers another control or text and every button is inside the
+/// longest source row (the existing track chosen, the dropdown holding a long name), a span line
+/// for several clips and the before-bar-1 warning showing, no button covers another control or text and every button is inside the
 /// window, at 1x and 1.5x.
 #[test]
 fn the_bounce_in_place_form_keeps_its_buttons_whole_with_the_longest_content() {
-    let layer = crate::layout_gate::modal("bounce_in_place");
+    let layer = crate::layout_gate::window("Bounce in Place");
     for zoom in crate::layout_gate::SCALES {
         let mut t = T::new();
         crate::layout_gate::watch(&t.ctx, layer);
@@ -596,6 +596,7 @@ fn the_bounce_in_place_form_keeps_its_buttons_whole_with_the_longest_content() {
         let source = t.track(LONG_NAME, "audio");
         let dest = t.track(&format!("{LONG_NAME} (print)"), "audio");
         t.source();
+        audio_clip_at(&mut t, source, -48_000, 96_000);
         t.app.focus_header(source, false);
         t.app.open_bounce_in_place();
         t.frames();
@@ -604,7 +605,159 @@ fn the_bounce_in_place_form_keeps_its_buttons_whole_with_the_longest_content() {
         t.frames();
         assert_eq!(t.ctx.pixels_per_point(), zoom);
         assert!(t.app.bounce_place.existing, "the existing-track row, with its drop-down, is the tallest form");
+        assert!(t.app.bounce_place.layout.zone_warning != [0.0; 4], "and the before-bar-1 warning, the tallest Source row, is showing");
         crate::layout_gate::assert_clean(&t.ctx, layer);
+    }
+}
+
+/// An audio clip of `len` samples starting at `start` (before bar 1 when negative) on `track`.
+/// No command places audio before bar 1 yet, so it is put on the playlist directly.
+fn audio_clip_at(t: &mut T, track: TrackId, start: i64, len: i64) -> transit_model::ClipId {
+    let s = t.app.engine.session_mut();
+    let buf = transit_audio_io::AudioBuffer { sample_rate: s.sample_rate.hz(), channels: vec![vec![0.25; len as usize]] };
+    let src = transit_engine::io::add_source(s, "Keys", buf, None, transit_audio_io::FileFormat::Wav);
+    let id = s.new_clip_id();
+    s.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::audio(id, "Keys", src, 0, start, len));
+    t.frames();
+    id
+}
+
+/// #731: the range line reads in bars and beats as the ruler's loop brace writes a range, and the
+/// pre-count zone counts down 0, -1, ... instead of printing a negative time.
+#[test]
+fn the_range_line_reads_in_bars_and_beats_with_the_pre_count_counting_down() {
+    // 120 bpm in 4/4 at 48 kHz: a bar is 96 000 samples, a beat 24 000.
+    for (start, len, line) in [
+        (-48_000, 96_000, "1 clip on 1 track, 0.3 – 1.3"),
+        (-96_000, 192_000, "1 clip on 1 track, 0.1 – 2.1 · 2 bars"),
+        (-192_000, 192_000, "1 clip on 1 track, -1.1 – 1.1 · 2 bars"),
+        (96_000, 96_000, "1 clip on 1 track, 2.1 – 3.1 · 1 bar"),
+    ] {
+        let mut t = T::new();
+        let track = t.track("Keys", "audio");
+        let clip = audio_clip_at(&mut t, track, start, len);
+        select(&mut t, &[clip.0]);
+        t.app.open_bounce_clips();
+        t.frames();
+        assert_eq!(t.app.bounce_place.layout.span_text, line);
+        assert_ne!(t.app.bounce_place.layout.span, [0.0; 4], "the line is drawn");
+    }
+}
+
+/// #731: the form is the design language's tool window: a title bar, two sections under the
+/// `label.section` style, the default button (Bounce) rightmost at the bottom right with Cancel
+/// left of it, and a line under Source saying what the choice does.
+#[test]
+fn the_form_is_a_titled_window_with_sections_and_the_default_button_at_the_bottom_right() {
+    let layer = crate::layout_gate::window("Bounce in Place");
+    let mut t = T::new();
+    t.source();
+    t.app.open_bounce_in_place();
+    t.frames();
+    assert!(crate::title_bar::title_line(&t.ctx, layer).is_some(), "the window has its compact title bar");
+    let l = t.app.bounce_place.layout.clone();
+    assert_eq!(l.sections, ["Destination", "Source"]);
+    assert!(l.bounce_button.default && !l.cancel_button.default, "Bounce is the default button, Cancel a standard one");
+    assert_eq!((l.bounce_button.fill, l.bounce_button.ink), (crate::theme::TOKENS.signal, crate::theme::TOKENS.surface_inset));
+    assert!(l.bounce_button.enabled);
+    assert!(l.bounce[0] > l.cancel[2], "Bounce is right of Cancel: {l:?}");
+    let centre = |r: [f32; 4]| (r[1] + r[3]) / 2.0;
+    assert!((centre(l.bounce) - centre(l.cancel)).abs() < 1.0, "one row of buttons");
+    // The body padding, 16 and the 1 px edge, keep the pair off the window's right and bottom edges.
+    let zoom = t.ctx.pixels_per_point();
+    assert_eq!(zoom, 1.0);
+    assert!((l.window[2] - l.bounce[2] - 17.0).abs() < 1.5, "Bounce sits at the bottom right: {l:?}");
+    assert!(l.window[3] - l.bounce[3] < 30.0 && l.window[3] > l.bounce[3], "the footer is the window's last row: {l:?}");
+    // Every source choice says what it does, in the text under the control.
+    for (i, source) in [Source::Leave, Source::Mute, Source::MuteDeactivate, Source::Hide].into_iter().enumerate() {
+        t.click(t.app.bounce_place.layout.sources[i]);
+        assert_eq!(t.app.bounce_place.source, source);
+        assert_eq!(t.app.bounce_place.layout.source_hint_text, source.hint());
+        assert_ne!(t.app.bounce_place.layout.source_hint, [0.0; 4]);
+    }
+}
+
+/// #731: the track picker sits beside Existing track and takes input only with it.
+#[test]
+fn the_track_picker_sits_beside_existing_track_and_takes_input_only_with_it() {
+    let mut t = T::new();
+    let source = t.track("Source", "audio");
+    t.track("Print", "audio");
+    t.app.focus_header(source, false);
+    t.app.open_bounce_in_place();
+    t.frames();
+    let l = t.app.bounce_place.layout.clone();
+    assert!(!l.dropdown_enabled);
+    assert!(l.dropdown[0] >= l.existing_track[2], "right of the Existing track segment: {l:?}");
+    assert!(l.dropdown[1] < l.existing_track[3] && l.dropdown[3] > l.existing_track[1], "on its row: {l:?}");
+    t.click(l.dropdown);
+    assert!(t.app.bounce_place.layout.destinations.is_empty(), "with New track chosen the picker opens nothing");
+    t.click(l.existing_track);
+    assert!(t.app.bounce_place.layout.dropdown_enabled);
+    t.click(t.app.bounce_place.layout.dropdown);
+    assert_eq!(t.app.bounce_place.layout.destinations.len(), 1, "with Existing track chosen it lists the eligible tracks");
+}
+
+/// #731: the before-bar-1 line is on the Source row only when the bounce will say it afterwards:
+/// the source choice silences content before bar 1. Never for Leave, never without such content.
+/// Each case also runs the bounce and checks that the status line carries the same words (#700,
+/// #713: the clip form speaks for the whole source track, selected clips or not).
+#[test]
+fn the_form_warns_about_the_part_before_bar_1_exactly_when_the_bounce_would_say_it() {
+    #[derive(Clone, Copy, Debug)]
+    enum Form {
+        Track,
+        ClipBeforeBar1,
+        OtherClipBeforeBar1,
+        NothingBeforeBar1,
+        MutedSource,
+    }
+    for form in [Form::Track, Form::ClipBeforeBar1, Form::OtherClipBeforeBar1, Form::NothingBeforeBar1, Form::MutedSource] {
+        for (i, source) in [Source::Leave, Source::Mute, Source::MuteDeactivate, Source::Hide].into_iter().enumerate() {
+            let mut t = T::new();
+            let track = t.track("Keys", "audio");
+            let (zone, after) = match form {
+                Form::NothingBeforeBar1 => (None, audio_clip_at(&mut t, track, 96_000, 96_000)),
+                _ => (Some(audio_clip_at(&mut t, track, -48_000, 96_000)), audio_clip_at(&mut t, track, 96_000, 96_000)),
+            };
+            if matches!(form, Form::MutedSource) {
+                t.app.engine.session_mut().track_mut(track).unwrap().mixer.mute = true;
+            }
+            match form {
+                Form::Track => {
+                    t.app.focus_header(track, false);
+                    t.app.open_bounce_in_place();
+                }
+                Form::ClipBeforeBar1 | Form::MutedSource => {
+                    select(&mut t, &[zone.unwrap().0]);
+                    t.app.open_bounce_clips();
+                }
+                Form::OtherClipBeforeBar1 | Form::NothingBeforeBar1 => {
+                    select(&mut t, &[after.0]);
+                    t.app.open_bounce_clips();
+                }
+            }
+            t.frames();
+            t.click(t.app.bounce_place.layout.sources[i]);
+            assert_eq!(t.app.bounce_place.source, source);
+            let l = t.app.bounce_place.layout.clone();
+            let applies = !matches!(source, Source::Leave) && !matches!(form, Form::NothingBeforeBar1 | Form::MutedSource);
+            assert_eq!(l.zone_warning != [0.0; 4], applies, "{form:?} {source:?}: {l:?}");
+            if applies {
+                assert!(l.zone_warning_text.contains("before bar 1"), "{}", l.zone_warning_text);
+                assert!(l.zone_warning[1] >= l.source_hint[3], "the card is on the Source row, under the control: {l:?}");
+                assert!(l.zone_warning[3] <= l.bounce[1], "and above the buttons: {l:?}");
+                assert!(l.window[0] < l.zone_warning[0] && l.zone_warning[2] < l.window[2], "inside the window: {l:?}");
+            } else {
+                assert!(l.zone_warning_text.is_empty());
+            }
+            t.key("Enter");
+            assert!(t.app.dialog.is_none(), "{form:?} {source:?}: {}", t.app.status);
+            assert_eq!(t.app.status.contains(&l.zone_warning_text) && applies, applies, "{form:?} {source:?}: {}", t.app.status);
+            if !applies {
+                assert!(!t.app.status.contains("before bar 1"), "{form:?} {source:?}: {}", t.app.status);
+            }
+        }
     }
 }
 
