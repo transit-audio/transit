@@ -12,10 +12,12 @@
 //!   `Achieved` holds the plan's provisional figures.
 //! - The first `start` builds the process engine from both directions' callbacks, installs the
 //!   JACK callbacks and activates the client, settles the active client's rate and buffer size
-//!   (`crate::settle`: the publication, the request window under PipeWire), and, when the graph
+//!   (`crate::settle`: the publication, the settling window under PipeWire), and, when the graph
 //!   runs the rate the caller prepared for, connects that direction's ports to its device's
 //!   ports (`out_i` to the i-th playback port, the i-th capture port to `in_i`; not when the backend
-//!   was made without auto-connect); the other direction's `start` connects its own. Connections a
+//!   was made without auto-connect); the other direction's `start` connects its own. Under
+//!   PipeWire both directions' ports are connected at the first start, before the settling window,
+//!   since the graph's buffer size can follow the links (#760). Connections a
 //!   user makes in a patchbay later are left alone, and a reopen brings them back: the reopen
 //!   reads them before the old client goes and restores them on the new one (`crate::links`,
 //!   [`ab::Stream::snapshot_links`]). A stop is for good (it returns once no process
@@ -23,7 +25,9 @@
 //!   Dropping the last stream deactivates and closes it, and only then frees the engine. Under
 //!   another rate the start latches a rebuild instead: neither direction starts, no port connects,
 //!   and the stream says so ([`ab::Stream::needs_rebuild`]); the caller reopens. Under PipeWire the
-//!   backend remembers the last rate an active session observed and plans the next open at it (a
+//!   backend remembers the last rate and buffer size an active session observed ([`Hints`]): the
+//!   next open plans at the rate, and its settling window waits for the buffer size, so a reopen
+//!   for a buffer size the graph moved to does not reopen again when it finds the same one (a
 //!   hint: a server shutdown clears it).
 //! - The watcher thread (`transit-jack-watch`, every 20 ms while the client is active) reads the
 //!   flags the callbacks set ([`Shared`]) and calls the streams' error callbacks: a server
@@ -102,8 +106,36 @@ pub struct JackBackend {
     next_generation: Arc<AtomicU64>,
     timing: Timing,
     auto_connect: bool,
-    /// Under PipeWire, the last rate an active session observed (0: none): the next plan's rate.
-    remembered: Arc<AtomicU32>,
+    /// Under PipeWire, the last rate and buffer size an active session observed: the next open's.
+    remembered: Arc<Hints>,
+}
+
+/// What an active session last observed under PipeWire (0: nothing): the rate the next plan opens
+/// at (rule 1) and the buffer size the next start's settling window waits for (`crate::settle`).
+/// Hints: a server shutdown clears both.
+#[derive(Debug, Default)]
+pub(crate) struct Hints {
+    rate: AtomicU32,
+    period: AtomicU32,
+}
+
+impl Hints {
+    fn keep(&self, rate: u32, period: u32) {
+        for (hint, value) in [(&self.rate, rate), (&self.period, period)] {
+            if value != engine::UNKNOWN {
+                hint.store(value, Ordering::Relaxed);
+            }
+        }
+    }
+
+    fn clear(&self) {
+        self.rate.store(0, Ordering::Relaxed);
+        self.period.store(0, Ordering::Relaxed);
+    }
+
+    fn period(&self) -> Option<u32> {
+        Some(self.period.load(Ordering::Relaxed)).filter(|p| *p != 0)
+    }
 }
 
 /// Whether the value of [`AUTO_CONNECT_ENV`] keeps the automatic connections (unset or anything
@@ -147,7 +179,7 @@ impl JackBackend {
     /// remembered rate when there is one (rule 1: a hint, used alike for the render request, the
     /// capture format and the provisional `Achieved`), else the listing's.
     fn planned_rate(&self, listed: u32) -> u32 {
-        match self.remembered.load(Ordering::Relaxed) {
+        match self.remembered.rate.load(Ordering::Relaxed) {
             0 => listed,
             rate if self.pipewire() => rate,
             _ => listed,
@@ -157,7 +189,13 @@ impl JackBackend {
     /// The rate the backend remembers (tests).
     #[cfg(test)]
     pub(crate) fn remembered_rate(&self) -> Option<u32> {
-        Some(self.remembered.load(Ordering::Relaxed)).filter(|r| *r != 0)
+        Some(self.remembered.rate.load(Ordering::Relaxed)).filter(|r| *r != 0)
+    }
+
+    /// The buffer size the backend remembers (tests).
+    #[cfg(test)]
+    pub(crate) fn remembered_period(&self) -> Option<u32> {
+        self.remembered.period()
     }
 
     /// This backend without the automatic connections: transit's ports are registered and left for
@@ -582,6 +620,8 @@ struct Side {
     asked: Vec<Asked>,
     /// The watcher looks for `asked` among this side's links, once, after a later process cycle.
     check_due: bool,
+    /// This side's links were asked for (at its start; under PipeWire at the first start).
+    connected: bool,
     /// The process cycles counted right after this side's connects, and the ticks the check has
     /// waited for a later cycle to complete.
     connect_cycle: u64,
@@ -643,8 +683,8 @@ pub(crate) struct Session {
     settled: bool,
     /// The reset latch: the graph runs another rate than the prepared one; nothing starts.
     rebuild: bool,
-    /// The backend's remembered rate (PipeWire), shared with it.
-    remembered: Arc<AtomicU32>,
+    /// The backend's hints (PipeWire), shared with it.
+    remembered: Arc<Hints>,
     /// The watcher logged the first process cycle's figures.
     first_cycle_logged: bool,
     /// Under the latch: the link snapshot a restore handed this client, for the rebuilt one.
@@ -667,7 +707,7 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    fn new(client: Box<dyn JackClient>, opened: Opened, prepared_rate: u32, id: u64, remembered: Arc<AtomicU32>) -> Self {
+    fn new(client: Box<dyn JackClient>, opened: Opened, prepared_rate: u32, id: u64, remembered: Arc<Hints>) -> Self {
         let Opened { rate, buffer, pipewire, requested, declined } = opened;
         Self {
             id,
@@ -763,6 +803,7 @@ impl Session {
             panic_reported: false,
             asked: Vec::new(),
             check_due: false,
+            connected: false,
             connect_cycle: 0,
             check_ticks: 0,
         });
@@ -816,7 +857,16 @@ impl Session {
         if self.rebuild {
             return Ok(());
         }
-        let connections = self.side_mut(generation).map(|s| s.connections.clone()).unwrap_or_default();
+        self.connect(generation);
+        self.shared.side(output).set_state(engine::STARTED);
+        Ok(())
+    }
+
+    /// Asks for one side's links, once, and arms its startup check.
+    fn connect(&mut self, generation: u64) {
+        let Some(side) = self.side_mut(generation).filter(|s| !s.connected) else { return };
+        side.connected = true;
+        let connections = side.connections.clone();
         let mut asked = Vec::with_capacity(connections.len());
         if let Some(client) = self.client.as_mut() {
             for (source, destination) in connections {
@@ -832,27 +882,34 @@ impl Session {
             (side.asked, side.check_due) = (asked, true);
             (side.connect_cycle, side.check_ticks) = (cycles_after_connects, 0);
         }
-        self.shared.side(output).set_state(engine::STARTED);
-        Ok(())
     }
 
     /// After activation, on this thread under the session lock: settles the active client's rate
     /// and buffer size (`crate::settle`), commits them as the baseline the watcher compares with,
-    /// and latches a rebuild when the rate is not the prepared one. A failed settle (a server
-    /// shutdown in the request window, no cycle in first-cycle initialization) deactivates the
-    /// client and fails the start.
+    /// and latches a rebuild when the rate is not the prepared one. Under PipeWire, at the prepared
+    /// rate, every direction's ports are linked before the settling window: the graph's buffer
+    /// size can follow the links (#760, the 2026-11-21 report). A failed settle (a server shutdown
+    /// in the window, no cycle in first-cycle initialization) deactivates the client and fails the
+    /// start.
     fn settle(&mut self, api: &dyn JackApi, timing: Timing) -> Result<(), ab::OpenError> {
         let ask = settle::Ask {
             pipewire: self.pipewire,
             requested: self.requested,
             declined: self.declined,
             prepared_rate: self.prepared_rate,
+            hint: self.remembered.period(),
             init: timing.init,
         };
+        let mut clock = settle::Clock::new(api, timing.window_step, timing.window);
         let Some(client) = self.client.as_ref() else { return Err(ab::OpenError::DeviceNotAvailable(crate::SERVER_NOT_RUNNING.into())) };
         let name = client.name();
-        let settled = settle::settle(&self.shared, api, timing.window_step, timing.window, &ask, || (client.sample_rate(), client.buffer_size()));
-        let settled = match settled {
+        let observed = settle::observe(&self.shared, &mut clock, &ask, || (client.sample_rate(), client.buffer_size()));
+        let linked = (observed.is_ok() && self.pipewire && self.shared.sample_rate() == self.prepared_rate).then(|| {
+            let generations: Vec<u64> = self.sides.iter().map(|s| s.generation).collect();
+            generations.into_iter().for_each(|generation| self.connect(generation));
+            self.shared.cycles()
+        });
+        let settled = match observed.and_then(|()| settle::wait(&self.shared, &mut clock, &ask, linked)) {
             Ok(settled) => settled,
             Err(e) => {
                 self.deactivate();
@@ -862,7 +919,7 @@ impl Session {
         (self.rate, self.buffer, self.settled) = (settled.rate, settled.buffer, true);
         self.reset_for = (settled.rate, settled.buffer);
         if self.pipewire {
-            self.remembered.store(settled.rate, Ordering::Relaxed);
+            self.remembered.keep(settled.rate, settled.buffer);
         }
         log::info!("JACK: client \"{name}\" active at {} Hz, quantum {}", self.rate, self.buffer);
         if settled.rebuild {
@@ -922,8 +979,8 @@ impl Session {
         if self.shared.shutdown() && !self.shutdown_reported {
             self.shutdown_reported = true;
             self.active = false;
-            // The graph may come back at another rate: no hint survives a server shutdown.
-            self.remembered.store(0, Ordering::Relaxed);
+            // The graph may come back at other figures: no hint survives a server shutdown.
+            self.remembered.clear();
             for output in [true, false] {
                 let side = self.shared.side(output);
                 if side.state() == engine::STARTED {
@@ -948,9 +1005,10 @@ impl Session {
         let now = (self.shared.sample_rate(), self.shared.buffer_size());
         if self.settled && now != (self.rate, self.buffer) && now != self.reset_for {
             self.reset_for = now;
-            // An active session observed this rate: the reopen plans at it (PipeWire's hint).
-            if self.pipewire && now.0 != engine::UNKNOWN {
-                self.remembered.store(now.0, Ordering::Relaxed);
+            // An active session observed these figures: the reopen plans at the rate and settles
+            // for the buffer size (PipeWire's hints).
+            if self.pipewire {
+                self.remembered.keep(now.0, now.1);
             }
             reports.extend(self.errors(ab::StreamError::ResetRequested));
         }

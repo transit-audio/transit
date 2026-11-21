@@ -13,26 +13,26 @@ use std::time::Duration;
 use transit_audio_backend::{self as ab, Backend, Stream};
 
 /// The window's step (the watcher period), as the start takes it.
-const STEP: Duration = crate::session::WATCH_PERIOD;
+pub(crate) const STEP: Duration = crate::session::WATCH_PERIOD;
 
 /// A backend whose watcher thread never ticks (the test calls [`JackBackend::tick`]).
-fn backend_on(server: &FakeServer) -> JackBackend {
+pub(crate) fn backend_on(server: &FakeServer) -> JackBackend {
     JackBackend::with_api(Arc::new(server.clone())).with_timing(Duration::from_secs(3600), Duration::from_secs(3600), Duration::from_secs(1))
 }
 
-type Errors = Arc<Mutex<Vec<ab::StreamError>>>;
+pub(crate) type Errors = Arc<Mutex<Vec<ab::StreamError>>>;
 
 /// Both directions of one open, the errors either reported, and how often a user callback ran.
-struct Opened {
-    capture: Box<dyn Stream>,
-    render: Box<dyn Stream>,
-    errors: Errors,
-    calls: Arc<AtomicU32>,
-    achieved: ab::Achieved,
+pub(crate) struct Opened {
+    pub(crate) capture: Box<dyn Stream>,
+    pub(crate) render: Box<dyn Stream>,
+    pub(crate) errors: Errors,
+    pub(crate) calls: Arc<AtomicU32>,
+    pub(crate) achieved: ab::Achieved,
 }
 
 impl Opened {
-    fn start(&self) -> Result<(), ab::OpenError> {
+    pub(crate) fn start(&self) -> Result<(), ab::OpenError> {
         self.capture.start()?;
         self.render.start()
     }
@@ -40,7 +40,7 @@ impl Opened {
 
 /// Plans the render on the default group with buffer size `period`, then opens capture and render
 /// (the Player's duplex order), the capture at the format the backend gives for the render plan.
-fn open(backend: &JackBackend, period: Option<u32>) -> Opened {
+pub(crate) fn open(backend: &JackBackend, period: Option<u32>) -> Opened {
     let plan = backend.plan_render(&ab::OutputWish { channels: 2, period, ..Default::default() }).expect("render plan");
     let request = plan.attempts[0];
     let format = backend.capture_format(&plan.endpoint, Some(request.format.rate)).expect("capture format");
@@ -72,11 +72,11 @@ fn session_client(server: &FakeServer) -> usize {
 }
 
 /// Session clients opened so far (each open or reopen makes one).
-fn session_opens(server: &FakeServer) -> usize {
+pub(crate) fn session_opens(server: &FakeServer) -> usize {
     server.clients(|c| c.iter().filter(|c| c.name == crate::CLIENT_NAME).count())
 }
 
-fn errors(opened: &Opened) -> Vec<ab::StreamError> {
+pub(crate) fn errors(opened: &Opened) -> Vec<ab::StreamError> {
     opened.errors.lock().unwrap().clone()
 }
 
@@ -151,14 +151,21 @@ fn a_request_that_never_arrives_leaves_the_running_size_and_reopens_do_not_loop(
 }
 
 #[test]
-fn a_declined_request_is_said_and_opens_no_window() {
+fn a_declined_request_is_said_and_not_waited_for() {
     let server = FakeServer::pipewire(48_000, 1024, (48_000, 1024)).refusing_quantum("jack_set_buffer_size returned 1");
+    // A driver runs the client every step: the window ends at the first cycle after the links.
+    server.driving();
     let backend = backend_on(&server);
     let opened = open(&backend, Some(256));
     assert!(opened.render.period_declined() && opened.capture.period_declined());
     let before = server.now_us();
     opened.start().unwrap();
-    assert_eq!(server.now_us(), before, "no wait for a request that will not arrive");
+    // One step: the wait (20 ms) and the driven cycle of 1024 frames at 48 kHz on the fake clock.
+    assert_eq!(
+        server.now_us() - before,
+        20_000 + 1024 * 1_000_000 / 48_000,
+        "one step for the first cycle, no wait for a request that will not arrive"
+    );
     assert_eq!(opened.render.period(), Some(1024));
     drop(opened);
     // Control: an accepted request is not declined.
@@ -300,8 +307,10 @@ fn a_shutdown_in_the_window_aborts_the_start() {
 }
 
 #[test]
-fn a_stale_read_after_activation_costs_one_reset_and_first_cycle_init_none() {
+fn a_stale_read_after_activation_is_settled_past_and_costs_no_reset() {
     // The position right after activation is stale (256); the first cycle runs the graph's 1024.
+    // Before #760's report this cost one reset after the start; the settling window now waits for
+    // the first cycle after the links, as first-cycle initialization waits for the first cycle.
     for first_cycle in [false, true] {
         let server = FakeServer::pipewire(48_000, 1024, (48_000, 1024));
         server.script_pipewire(|m| {
@@ -313,17 +322,11 @@ fn a_stale_read_after_activation_costs_one_reset_and_first_cycle_init_none() {
         let opened = open(&backend, None);
         opened.start().unwrap();
         assert_eq!(opened.calls.load(Ordering::SeqCst), 0, "a cycle before the start finished reaches no user callback");
-        if first_cycle {
-            assert_eq!(opened.render.period(), Some(1024), "the first cycle's nframes");
-        } else {
-            assert_eq!(opened.render.period(), Some(256), "the stale read");
-            server.step(STEP);
-            server.step(STEP);
-        }
+        assert_eq!(opened.render.period(), Some(1024), "the first cycle's nframes, not the stale read ({first_cycle})");
+        server.step(STEP);
         backend.tick();
         backend.tick();
-        let resets = if first_cycle { 0 } else { 2 };
-        assert_eq!(errors(&opened).len(), resets, "first-cycle init: {first_cycle}");
+        assert!(errors(&opened).is_empty(), "no reset (first-cycle init: {first_cycle})");
     }
 }
 

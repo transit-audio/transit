@@ -99,6 +99,9 @@ struct State {
     /// (the client handle stays valid until transit closes it). The shutdown callback runs on
     /// another thread and takes no lock of transit's.
     shutdown_during: Option<Read>,
+    /// A driver runs the active client: every graph step ([`JackApi::await_graph`]) ends with one
+    /// process cycle at the graph's quantum, with no port buffers.
+    driving: bool,
 }
 
 /// A client read the fake can stop the server in ([`FakeServer::shutdown_during`]).
@@ -130,6 +133,14 @@ pub(crate) struct PipeWireMode {
     /// The quantum the driver picks once the forcing client deactivates or closes; `None` keeps
     /// the forced one.
     pub(crate) restore: Option<u32>,
+    /// Every activation, not only the first: the getters report this stale position (and the
+    /// buffer size callback inside `jack_activate` its buffer) until the first process cycle
+    /// corrects it (#760, the 2026-11-21 report: every fresh client read 2048 and ran 1024).
+    pub(crate) stale_each: Option<(u32, u32)>,
+    /// Every activation: the graph runs this quantum first, then moves to the second figure after
+    /// the given number of graph steps (the report's round whose first cycle ran 2048 and the
+    /// change to 1024 came after it).
+    pub(crate) moves_each: Option<(u32, u32, u32)>,
 }
 
 /// Something the fake's graph does after some graph steps.
@@ -217,6 +228,7 @@ impl FakeServer {
             latency_reads: 0,
             link_reads: 0,
             shutdown_during: None,
+            driving: false,
         };
         Self { state: Arc::new(Mutex::new(state)) }
     }
@@ -239,6 +251,12 @@ impl FakeServer {
         if let Some(mode) = self.lock().pipewire.as_mut() {
             f(mode);
         }
+    }
+
+    /// From now on every graph step ends with one process cycle of the active client (a driver
+    /// runs it), at the quantum the graph runs then.
+    pub(crate) fn driving(&self) {
+        self.lock().driving = true;
     }
 
     /// `event` happens after `steps` more graph steps.
@@ -634,6 +652,13 @@ impl JackApi for FakeServer {
                 }
             }
         }
+        let driven = {
+            let state = self.lock();
+            state.driving.then_some(state.buffer)
+        };
+        if let Some(frames) = driven {
+            self.cycle(frames, &mut [], &[]);
+        }
     }
 
     /// The fake's stepped clock (µs), advanced by cycles and graph waits only.
@@ -772,7 +797,15 @@ impl JackClient for FakeClient {
         // force the client holds arrives at the graph now or later.
         let pipewire = self.server.lock().pipewire.clone();
         let force = self.record(|c, _| c.force);
-        if let Some(mode) = pipewire {
+        if let Some(mut mode) = pipewire {
+            if let Some(stale) = mode.stale_each {
+                (mode.stale, mode.activation_buffer) = (Some(stale), Some(stale.1));
+                self.server.script_pipewire(|m| m.stale = Some(stale));
+            }
+            if let Some((first, steps, then)) = mode.moves_each {
+                self.server.lock().buffer = first;
+                self.server.schedule(steps, Event::Quantum(then));
+            }
             let delay = mode.force_delay;
             if let Some(frames) = force.filter(|_| delay == 0) {
                 self.server.lock().buffer = frames;

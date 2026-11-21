@@ -60,6 +60,8 @@ mod links;
 mod links_tests;
 #[cfg(test)]
 mod probe_tests;
+#[cfg(test)]
+mod quantum_tests;
 pub mod search;
 #[cfg(all(test, target_os = "linux", feature = "libjack"))]
 mod server_tests;
