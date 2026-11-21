@@ -424,8 +424,13 @@ yours: transit never explicitly disconnects one. (Closing transit's client, belo
 link of its ports with it; that is the server's rule for a client that goes away.)
 
 transit sometimes has to close its client and open a new one: when the server's buffer size or
-rate changes (under PipeWire, another program asking for a smaller buffer is enough), when you
-press **Reconnect**, and when you **Apply** in Audio Devices. A buffer size or rate change still
+rate changes while the device runs (under PipeWire: another program forcing a buffer size, a forcing
+program leaving, or the graph moving transit to another driver), when you press **Reconnect**, and
+when you **Apply** in Audio Devices. When the device opens under PipeWire, transit links its ports
+first and waits, at most half a second, for the buffer size the graph settles on, and it remembers
+that size for the next open, so the device does not reopen just because it started; a size that
+moves after the start costs one reopen, which then settles on the new size. (This start behavior
+has been checked against a simulated server only so far, not yet on a PipeWire desktop.) A buffer size or rate change still
 stops the transport and ends a take: the take is kept up to there, the device reopens at the new
 settings, and the links you made come back. Before the old client closes, transit notes which other
 ports were linked to its ports, and links them again on the new client, under whatever name the

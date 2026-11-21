@@ -143,7 +143,12 @@ with no lock held:
   Then a probe client every 2 s for 30 s; when a server answers, `ResetRequested`, and the Player's
   reopen path opens a new client. After 30 s the user reconnects.
 - A rate or quantum other than the open ones: `ResetRequested` once per new pair, so the Player
-  reopens at the server's settings (the transport stops; a take is kept).
+  reopens at the server's settings (the transport stops; a take is kept). Under PipeWire the
+  backend remembers that rate and quantum (`session::Hints`; a shutdown clears them): the reopen
+  plans at the rate, and its start, which links both directions before settling, waits up to
+  500 ms for that quantum, or with no hint and no request for the first cycle after the links
+  (`src/settle.rs`, #760), so a client that reads a stale figure after activation settles on what
+  the graph runs and the reopen does not loop.
 - Xruns: `StreamStats::overloads` (and the next stamp is invalid); not an error.
 - The startup check (#760 rules 3 and 6, `src/startup.rs`), never on a latched client: at the
   first tick after a process cycle that began after a direction's connects has completed (the
