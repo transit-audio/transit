@@ -599,6 +599,9 @@ pub(super) struct Audio {
     probe: Option<Arc<crate::hardware_probe::HwProbe>>,
     /// The probe's plan frame at the start of the pending block, while it is running.
     probe_block: Option<u64>,
+    /// The pending block's live input was read with the #709 term in force: only then does the
+    /// probe's click go through the output converter's reader (elsewhere it is the click as before).
+    probe_aligned: bool,
     /// The External Instrument Measure (control arms it; this thread sends its notes through
     /// the MIDI output ring and records the return).
     ext_probe: Option<Arc<crate::external_probe::ExtProbe>>,
@@ -729,6 +732,7 @@ impl Audio {
                 capture: None,
                 probe: None,
                 probe_block: None,
+                probe_aligned: false,
                 ext_probe: None,
                 render_tap: None,
                 preview: None,
@@ -1154,6 +1158,7 @@ impl Audio {
         }
         // The hardware probe records the return of this block; the click for it is added as the
         // block plays (`fill_inner`).
+        self.probe_aligned = self.plans.input_aligned();
         self.probe_block = self.probe.as_ref().and_then(|p| {
             p.note_alignment(self.plans.input_aligned());
             p.record_block(self.plans.input(), frames)
@@ -1368,11 +1373,17 @@ impl Audio {
                     }
                 }
             }
-            // The click is read through the output converter like the render (#709): the block's
-            // frame itself where the converter passes frames through, else its reader at `x`.
+            // With the #709 term in force the click is read through the output converter like the
+            // render (the block's frame itself where the converter passes frames through, else its
+            // reader at `x`); elsewhere it is the click as before, at the render frame at or before
+            // the output frame (index -1: the previous block's last frame).
             if let (Some(probe), Some(origin)) = (&self.probe, self.probe_block) {
-                let (x, q) = self.read.position(step);
-                probe.add_click(frame, origin, whole, x, q);
+                if self.probe_aligned {
+                    let (x, q) = self.read.position(step);
+                    probe.add_click(frame, origin, whole, x, q);
+                } else if let Some(at) = origin.checked_add_signed(self.read.index() as i64) {
+                    probe.add_click_at(frame, at);
+                }
                 for out in frame.iter_mut() {
                     *out = out.clamp(-1.0, 1.0);
                 }

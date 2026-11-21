@@ -219,9 +219,10 @@ fn a_backlog_that_changes_mid_run_refuses_and_the_note_is_released() {
 }
 
 /// #709: on a paired device the extra capture block moves the capture count off the output count,
-/// which invalidates the aligned read's anchor for that callback; the next callback re-anchors, so B
-/// does not move, but the run had blocks with and without the term in force and is refused all the
-/// same (nothing stored), and the note is released.
+/// which invalidates the anchor for that callback, so the run had blocks with and without the term
+/// in force and is refused (nothing stored), and the note is released. At equal rates the input is
+/// the ordinary reader's (round 2): the block stays queued as in v0.7.4, so the timing stays
+/// changed after the re-anchor and the ring says so.
 #[test]
 fn an_alignment_that_changes_mid_run_refuses_on_a_paired_device() {
     let rig = rig(false, 0);
@@ -230,8 +231,8 @@ fn an_alignment_that_changes_mid_run_refuses_on_a_paired_device() {
     let Some(Err(MeasureError::InputAlignmentChanged { first, last })) = run.result else {
         panic!("expected the alignment refusal: {:?}", run.result)
     };
-    assert_eq!(first, last, "B did not move: the paired ring re-anchored");
-    assert_eq!(rig.player.input_alignment(), transit_model::Alignment::Valid, "re-anchored");
+    assert_eq!(last - first, BLOCK as u32, "B moved by the queued block, as in v0.7.4");
+    assert_eq!(rig.player.input_alignment(), transit_model::Alignment::Invalid, "the extra block stays queued");
     assert!(!rig.player.external_measure_running());
     until("All Notes Off", || released(&messages(&rig)));
 }

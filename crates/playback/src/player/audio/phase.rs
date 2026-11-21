@@ -112,7 +112,6 @@ impl Phase {
 
     /// The render frame at or before the next output frame (negative: a frame of an earlier block,
     /// which [`History`] keeps).
-    #[cfg(test)]
     pub(super) fn index(self) -> isize {
         self.units.div_euclid(self.denominator) as isize
     }

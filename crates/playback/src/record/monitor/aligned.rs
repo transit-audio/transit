@@ -87,6 +87,15 @@ impl InputRing {
         }
         let Some((mut reader, frames)) = self.begin_read(out, frames) else { return false };
         match self.anchor(&mut reader, session_rate, at) {
+            // Equal rates: the ordinary read, always, so the monitored stream is the one v0.7.4 read
+            // in every sequence (a backlog built at another speed plays through). The block counts
+            // as aligned only when that read stopped exactly where rule 3 puts its next frame (T = 0).
+            Ok(_) if self.rate == session_rate => {
+                self.read_queued(&mut reader, out, frames, session_rate);
+                let aligned = Self::at_rule_3(&reader, self.accepted_frames.load(Ordering::Acquire), frames, at);
+                self.alignment.store(if aligned { ALIGNED } else { INVALID }, Ordering::Relaxed);
+                aligned
+            }
             Ok(newest) => {
                 self.read_at(&mut reader, out, frames, session_rate, at, newest);
                 self.alignment.store(ALIGNED, Ordering::Relaxed);
@@ -101,9 +110,30 @@ impl InputRing {
         }
     }
 
+    /// At equal rates, after the ordinary read of `frames` frames: whether its next frame is rule 3's
+    /// (the newest captured frame plus `frames` less the callback's last output position, T = 0).
+    fn at_rule_3(reader: &MonitorReader, accepted: u64, frames: usize, at: Coordinates) -> bool {
+        let den = reader.den.max(1);
+        if reader.units.rem_euclid(den) != 0 || at.units.rem_euclid(at.den) != 0 {
+            return false;
+        }
+        let next = i128::from(reader.removed_frames) + i128::from(reader.units.div_euclid(den));
+        let rule_3 = i128::from(accepted) - 1 + frames as i128 - i128::from(at.units.div_euclid(at.den));
+        next == rule_3
+    }
+
     /// Check (or set) the same-cycle anchor; the newest captured frame's index from the queue's
     /// front when the read can be aligned.
     fn anchor(&self, reader: &mut MonitorReader, session_rate: u32, at: Coordinates) -> Result<i128, Unaligned> {
+        // Whether this callback's capture arrived: the accepted count grew since the previous
+        // callback's reads. Only such a cycle can re-anchor (a cycle without capture has no
+        // same-cycle pair, however many of them follow each other).
+        let accepted = self.accepted_frames.load(Ordering::Acquire);
+        if at.output != reader.cycle_output {
+            reader.cycle_output = at.output;
+            reader.cycle_fresh = accepted > reader.cycle_accepted;
+        }
+        reader.cycle_accepted = accepted;
         let losses = self.losses.load(Ordering::Acquire);
         if losses != reader.losses_seen {
             reader.losses_seen = losses;
@@ -118,12 +148,14 @@ impl InputRing {
         if !at.valid || (self.rate == session_rate && at.units.rem_euclid(at.den) != 0) {
             return Err(Unaligned::Invalid);
         }
-        let accepted = self.accepted_frames.load(Ordering::Acquire);
         if accepted == 0 {
             return Err(Unaligned::NotApplicable);
         }
         // A plan adopting the ring, or a clear, re-anchors at once (K22's moment, in coordinates).
-        if self.align_pending.swap(false, Ordering::AcqRel) {
+        // At equal rates the ordinary read keeps the request: K22's own alignment does it there.
+        let realign =
+            if self.rate == session_rate { self.align_pending.load(Ordering::Acquire) } else { self.align_pending.swap(false, Ordering::AcqRel) };
+        if realign {
             reader.anchor = None;
             reader.held = None;
         }
@@ -136,7 +168,7 @@ impl InputRing {
                 reader.held = Some(at.output);
                 return Err(Unaligned::Invalid);
             }
-            None if reader.held == Some(at.output) => return Err(Unaligned::Invalid),
+            None if reader.held == Some(at.output) || !reader.cycle_fresh => return Err(Unaligned::Invalid),
             None => {
                 reader.anchor = Some(pair);
                 reader.held = None;

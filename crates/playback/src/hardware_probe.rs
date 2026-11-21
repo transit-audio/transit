@@ -281,6 +281,26 @@ impl HwProbe {
         usize::try_from(offset).ok().and_then(|o| self.template.get(o)).copied().unwrap_or(0.0)
     }
 
+    /// Audio thread: add the click, when plan frame `t` falls inside one, to the send channels of
+    /// the device frame `out`: the click as it was before #709, at the render frame at or before the
+    /// output frame. Where the #709 term does not apply (separate streams, an alignment that is not
+    /// valid) the probe emits exactly this. Only the send channels are touched.
+    pub fn add_click_at(&self, out: &mut [f32], t: u64) {
+        // As before #709, to the bit: a template sample that is exactly 0 is still added.
+        let first = frames_of(self.rate, START_MS);
+        if t < first || t >= frames_of(self.rate, DURATION_MS) {
+            return;
+        }
+        let offset = (t - first) % frames_of(self.rate, INTERVAL_MS).max(1);
+        let Some(&x) = usize::try_from(offset).ok().and_then(|o| self.template.get(o)) else { return };
+        let n = usize::from(self.send_n.load(Ordering::Relaxed)).min(MAX_PROBE_CHANNELS);
+        for ch in self.send.iter().take(n) {
+            if let Some(o) = out.get_mut(usize::from(ch.load(Ordering::Relaxed))) {
+                *o += x;
+            }
+        }
+    }
+
     /// Audio thread: add the click train, read through the output converter, to the send channels
     /// of the device frame `out` (#709; ADR 0015, Amendment 2026-11-16, the build list): `origin` is
     /// the plan frame of the pending block's frame 0, and the converter reads that block's frame

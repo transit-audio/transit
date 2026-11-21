@@ -287,6 +287,62 @@ fn a_counted_loss_invalidates_the_anchor_even_when_the_counts_agree() {
     assert!(sim.callback(128, true, true, true).iter().all(|r| r.aligned), "re-anchored at the next pair");
 }
 
+/// Round 2, must-fix 2: capture absent for several callbacks in a row never reports an aligned
+/// block (no same-cycle pair exists), and the first callback whose capture arrives re-anchors.
+#[test]
+fn sustained_capture_absence_never_aligns_and_the_first_fresh_capture_recovers() {
+    for (session, device) in [(48_000, 44_100), (48_000, 48_000)] {
+        let mut sim = Sim::new(session, device, 0, 512);
+        sim.ring.align_on_next_read();
+        for _ in 0..10 {
+            sim.callback(128, true, true, true);
+        }
+        assert_eq!(sim.ring.alignment(), transit_model::Alignment::Valid);
+        for k in 0..6 {
+            let reads = sim.callback(128, false, true, true);
+            assert!(reads.iter().all(|r| !r.aligned), "{session} on {device}: absent callback {k} reported aligned");
+            assert_eq!(sim.ring.alignment(), transit_model::Alignment::Invalid, "{session} on {device}: absent callback {k}");
+        }
+        assert!(sim.callback(128, true, true, true).iter().all(|r| r.aligned), "{session} on {device}: the first fresh capture recovers");
+    }
+}
+
+/// Round 2, must-fix 1: at equal rates the monitored stream is the ordinary reader's in every
+/// sequence, bit for bit: speed 1, then 0.5 (half the plan frames per callback, the alignment not
+/// valid: a backlog builds), back at 1, then a stop and a locate at 1 (the alignment valid again).
+/// A second ring fed the same capture and read only by `pop_into` (the read of v0.7.4) is the
+/// reference. The ring reports the backlog's changed timing as not aligned.
+#[test]
+fn at_equal_rates_the_stream_is_the_ordinary_readers_across_speed_stop_and_locate() {
+    let (rate, b) = (48_000u32, 128usize);
+    let den = 1000 * i64::from(rate);
+    let ring = InputRing::with_pairing(1, rate, true);
+    let reference = InputRing::with_pairing(1, rate, true);
+    ring.align_on_next_read();
+    reference.align_on_next_read();
+    let input = signal(48_000);
+    let mut output = 0u64;
+    let (mut at, mut compared) = (0usize, 0usize);
+    // (callbacks, plan frames read per callback, alignment valid): 1x, 0.5x, 1x, Stop at 1x, Locate.
+    for (callbacks, read, valid) in [(20, b, true), (40, b / 2, false), (20, b, false), (20, b, true), (20, b, true)] {
+        for _ in 0..callbacks {
+            ring.push(&input[at..at + b]);
+            reference.push(&input[at..at + b]);
+            at += b;
+            output += b as u64;
+            let coordinates = Coordinates { output: output - 1, units: (read as i64 - 1) * den, den, term: 0, valid };
+            let (mut got, mut want) = (vec![vec![9.0f32; read]], vec![vec![7.0f32; read]]);
+            ring.pop_aligned(&mut got, read, rate, coordinates);
+            reference.pop_into(&mut want, read, rate);
+            let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+            assert_eq!(bits(&got[0]), bits(&want[0]), "read {compared}: the stream differs from the ordinary reader's");
+            compared += 1;
+        }
+    }
+    assert_eq!(ring.telemetry(), reference.telemetry());
+    assert_eq!(ring.alignment(), transit_model::Alignment::Invalid, "the backlog left at 0.5x is a changed timing");
+}
+
 /// Rule 10 at the ring: coordinates whose alignment is not valid read as before (the ring reports
 /// Invalid and the block is not aligned); once valid again the read is the reference at once,
 /// whatever the ordinary reads left queued (a new alignment from coordinates). A clear re-anchors at

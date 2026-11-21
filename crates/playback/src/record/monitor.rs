@@ -61,6 +61,11 @@ struct MonitorReader {
     /// The output frame of the callback in which a loss invalidated the anchor: the re-anchor waits
     /// for another callback's pair (that callback's capture may be the one that lost frames).
     held: Option<u64>,
+    /// The output frame of the callback the last read belonged to, the accepted count at that read,
+    /// and whether that callback's capture arrived (the count grew since the callback before).
+    cycle_output: u64,
+    cycle_accepted: u64,
+    cycle_fresh: bool,
 }
 
 /// The queued input as the reader sees it: the queue's front frame at index 0, zeros outside.
@@ -275,6 +280,9 @@ impl InputRing {
                 anchor: None,
                 losses_seen: 0,
                 held: None,
+                cycle_output: u64::MAX,
+                cycle_accepted: 0,
+                cycle_fresh: false,
             }),
         );
         // On macOS `std::sync::Mutex` is a lazily boxed `pthread_mutex_t`: the first lock or
