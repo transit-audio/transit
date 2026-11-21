@@ -353,12 +353,14 @@ impl StripMeter {
     }
 
     fn measure(&mut self, bufs: &[Vec<f32>], frames: usize, gr: f32, host_frame: u64) {
-        self.measure_slices(bufs.iter().map(|b| b.get(..frames).unwrap_or(&[])), gr, host_frame);
+        self.measure_slices(bufs.iter().map(|b| b.get(..frames).unwrap_or(&[])), 0, gr, host_frame);
     }
 
     /// [`Self::measure`] over one slice per channel (the block's frames of each), so a reading can
-    /// come from buffers other than the strip's own (#730, `input_meter`). Allocation-free.
-    fn measure_slices<'a>(&mut self, chans: impl Iterator<Item = &'a [f32]> + Clone, gr: f32, host_frame: u64) {
+    /// come from buffers other than the strip's own (#730, `input_meter`). A channel shorter than
+    /// `block` frames (none to read) counts the rest as silence, so its RMS window still moves.
+    /// Allocation-free.
+    fn measure_slices<'a>(&mut self, chans: impl Iterator<Item = &'a [f32]> + Clone, block: usize, gr: f32, host_frame: u64) {
         let append = self.host_frame == Some(host_frame);
         self.host_frame = Some(host_frame);
         for (p, b) in self.peaks.iter_mut().zip(chans.clone()) {
@@ -368,6 +370,7 @@ impl StripMeter {
         // Every sub-block is new frames, so each one goes into the window (no append rule).
         for ((r, w), b) in self.rms_channels.iter_mut().zip(self.rms_window.iter_mut()).zip(chans) {
             w.push(b);
+            w.push_silence(block.saturating_sub(b.len()));
             *r = w.rms();
         }
         let last = self.peaks.len().saturating_sub(1);

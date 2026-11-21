@@ -65,6 +65,29 @@ impl RmsWindow {
         }
     }
 
+    /// Adds `frames` of silence, exactly as [`Self::push`] of that many zeros (a block with no
+    /// samples to measure still moves the window, so an earlier level decays). Allocation-free.
+    pub(crate) fn push_silence(&mut self, mut frames: usize) {
+        if self.bin_frames == 0 {
+            return;
+        }
+        while frames > 0 {
+            let room = self.bin_frames.saturating_sub(self.cur_frames).max(1);
+            let n = u32::try_from(frames).unwrap_or(u32::MAX).min(room);
+            self.cur_frames += n;
+            frames -= n as usize;
+            if self.cur_frames >= self.bin_frames {
+                if let Some(b) = self.bins.get_mut(self.next) {
+                    *b = self.cur;
+                }
+                self.next = (self.next + 1) % BINS;
+                self.filled = (self.filled + 1).min(BINS);
+                self.cur = 0.0;
+                self.cur_frames = 0;
+            }
+        }
+    }
+
     /// The RMS over the window (linear), or over the frames measured so far while it fills.
     pub(crate) fn rms(&self) -> f32 {
         let whole: f64 = self.bins.iter().sum();
