@@ -631,7 +631,7 @@ fn main() -> eframe::Result {
         Ok(Ok(())) => Ok(()),
         Ok(Err(stop)) => {
             if let Some(message) = &stop.message {
-                graphics_fallback::show_failure(message);
+                graphics_fallback::show_failure(message, graphics_fallback::Channel::for_launch(control_port));
             }
             drop(temporary_autosave);
             Err(stop.error)

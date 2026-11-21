@@ -143,17 +143,33 @@ pub fn describe(backends: Backends) -> String {
     if names.is_empty() { "no backend".into() } else { names.join(" + ") }
 }
 
-/// Tell the user when nothing could start. Windows has no console for a shortcut launch, so a
-/// message box; elsewhere standard error.
-pub fn show_failure(text: &str) {
+/// Where the failure text goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel {
+    /// A message box (Windows only; elsewhere this falls back to standard error).
+    Dialog,
+    Stderr,
+}
+
+impl Channel {
+    /// An ordinary launch gets the dialog (a shortcut launch has no console). A `--control` run is
+    /// automation: nothing could dismiss a dialog, since the control server has not started when
+    /// graphics fails, so it gets standard error.
+    pub fn for_launch(control_port: Option<u16>) -> Channel {
+        if control_port.is_some() { Channel::Stderr } else { Channel::Dialog }
+    }
+}
+
+/// Tell the user when nothing could start. The text is always in the log too.
+pub fn show_failure(text: &str, channel: Channel) {
+    log::error!("{text}");
     #[cfg(windows)]
-    {
+    if channel == Channel::Dialog {
         rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("transit").set_description(text).show();
+        return;
     }
-    #[cfg(not(windows))]
-    {
-        eprintln!("{text}");
-    }
+    let _ = channel;
+    eprintln!("{text}");
 }
 
 #[cfg(test)]
@@ -172,8 +188,9 @@ mod tests {
     ) -> impl FnMut(Option<Backends>, Option<&Fallback>) -> Result<(), Failure<&'static str>> + 'a {
         move |asked, fallback| {
             calls.push((asked, fallback.cloned()));
-            match asked {
-                Some(b) if working.contains(&b) => Ok(()),
+            // `None` is the platform's own way: the plan's default (DirectX 12 in these tests).
+            match asked.unwrap_or(Backends::DX12) {
+                b if working.contains(&b) => Ok(()),
                 _ => Err(Failure::Graphics { reason: "no surface".into(), error: "wgpu" }),
             }
         }
@@ -259,6 +276,31 @@ mod tests {
         let message = stop.message.expect("the user is told");
         assert!(message.contains("Vulkan (asked for by WGPU_BACKEND): no surface"), "{message}");
         assert!(message.contains("DirectX 12: event loop recreated") && message.contains("logs/transit.log"), "{message}");
+    }
+
+    #[test]
+    fn no_override_and_the_default_works_runs_once_without_a_notice() {
+        let mut calls = Vec::new();
+        assert!(run(&plan(None), None, fake(&[Backends::DX12], &mut calls)).is_ok());
+        // The platform's own way (`None`), no fallback announced.
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, None);
+    }
+
+    #[test]
+    fn a_control_run_gets_standard_error_and_an_ordinary_launch_the_dialog() {
+        assert_eq!(Channel::for_launch(None), Channel::Dialog);
+        assert_eq!(Channel::for_launch(Some(9000)), Channel::Stderr);
+        // The text comes from `run` before the channel is chosen, so it is the same for both.
+        let text = |control| {
+            let Err(stop) = run(&plan(None), None, |_, _| Err::<(), _>(Failure::Graphics { reason: "no surface".into(), error: "wgpu" })) else {
+                panic!("nothing works")
+            };
+            let _ = Channel::for_launch(control);
+            stop.message
+        };
+        assert_eq!(text(None), text(Some(9000)));
+        assert!(text(None).is_some());
     }
 
     #[test]
