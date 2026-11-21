@@ -384,3 +384,18 @@ fn the_channels_hold_independently() {
     assert!(hold_db(&d, 0) < -6.0 - 0.5, "left began to fall at 2 s: {}", hold_db(&d, 0));
     assert!((hold_db(&d, 1) + 6.0).abs() < 1e-3, "right is still holding");
 }
+
+/// A mono strip's meter is one bar: the engine meters a strip before its pan, so a second bar
+/// would only repeat the first. A stereo strip keeps one bar a side.
+#[test]
+fn a_mono_strip_has_one_meter_bar_and_a_stereo_strip_two() {
+    let mut app = app();
+    let mono = new_track(&mut app, json!({"kind": "audio", "format": "mono"}));
+    let stereo = new_track(&mut app, json!({"kind": "audio", "format": "stereo"}));
+    app.ui.show_mixer = true;
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    frames(&mut app, &ctx, 3, &mut time);
+    let wells = |t| strip(&app, t).meter_layout.expect("the meter").wells.len();
+    assert_eq!((wells(mono), wells(stereo)), (1, 2));
+}

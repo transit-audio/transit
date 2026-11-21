@@ -4,7 +4,8 @@ use super::*;
 /// vertical channel meter fed with the strip's fall-off reading, the engine's RMS per channel (the
 /// solid `meter.ok` layer over the 35 percent peak, #395), peak hold and clip latch, its grid
 /// lines at `marks` (the scale's placed labels beside it, Meter grid). The main bus has the wider
-/// bars.
+/// bars. A `mono` strip has one bar, centered where the pair would sit: the engine meters a strip
+/// before its pan, so a second bar would only repeat the first.
 pub(super) fn strip_meter(
     p: &egui::Painter,
     x: f32,
@@ -12,12 +13,16 @@ pub(super) fn strip_meter(
     marks: &[Option<f32>],
     d: &crate::MeterDisplay,
     main: bool,
+    mono: bool,
 ) -> crate::widgets::level_meter::ChannelMeterLayout {
     use crate::widgets::level_meter::{Channel, paint_channel};
     let db = |lin: f32| if lin > 0.0 { 20.0 * lin.log10() } else { f32::NEG_INFINITY };
     let channels =
         [0, 1].map(|c| Channel { peak_db: db(d.falloff[c]), rms_db: Some(db(d.rms[c])), hold_db: Some(db(d.hold[c])), clip: d.clip_ch[c] });
     let bar = if main { crate::tokens::fader::METER_BAR_MAIN } else { crate::tokens::fader::METER_BAR };
+    if mono {
+        return paint_channel(p, x + (bar + crate::tokens::fader::METER_GAP) / 2.0, travel, bar, marks, &channels[..1]);
+    }
     paint_channel(p, x, travel, bar, marks, &channels)
 }
 
