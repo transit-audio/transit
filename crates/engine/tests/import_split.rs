@@ -98,3 +98,77 @@ fn a_hidden_track_below_is_passed_over_for_the_next_shown_mono_track() {
     assert!(clips(&e, hidden).is_empty(), "nothing lands on a track the Edit window hides");
     assert_eq!(clips(&e, b), vec![(0, 480, "LAV-2.R".to_string(), 1, -0.25)]);
 }
+
+#[test]
+fn a_frozen_or_occupied_mono_track_below_is_never_edited_and_the_file_lands_whole() {
+    let d = transit_test_support::TestDir::new("import-split-guarded");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("LAV-2.wav");
+    std::fs::write(&wav, stereo_wav(480, 16_384, -8_192)).unwrap();
+    let path = wav.to_string_lossy();
+    let mut e = Engine::default();
+    let (a, b) = (track(&mut e, "mono"), track(&mut e, "mono"));
+    // The last track has no track below: the file lands whole on it.
+    e.execute("file.import_audio", &json!({"path": path, "track": b})).unwrap();
+    let below = clips(&e, b);
+    e.execute("file.import_audio", &json!({"path": path, "track": a})).unwrap();
+    assert_eq!(clips(&e, a), vec![(0, 480, "LAV-2".to_string(), 2, 0.5)], "B holds a clip there: whole on A");
+    assert_eq!(clips(&e, b), below, "B is untouched");
+    e.execute("file.import_audio", &json!({"path": path, "track": a, "at": 960})).unwrap();
+    assert_eq!(clips(&e, b).len(), 2, "B is free from 960: the split lands there");
+    e.execute("track.freeze", &json!({"tracks": [b]})).unwrap();
+    let undo = e.undo_history().len();
+    e.execute("file.import_audio", &json!({"path": path, "track": a, "at": 4_800})).unwrap();
+    assert_eq!(clips(&e, a).last().map(|c| (c.0, c.3)), Some((4_800, 2)), "B is frozen: whole on A");
+    assert_eq!(e.undo_history().len(), undo + 1);
+}
+
+#[test]
+fn split_to_mono_tracks_puts_each_channel_of_a_stereo_clip_on_a_new_mono_track_below() {
+    let d = transit_test_support::TestDir::new("split-to-mono");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("LAV-2.wav");
+    std::fs::write(&wav, stereo_wav(4_800, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    let mics = e.execute("track.new", &json!({"kind": "audio", "format": "stereo", "name": "Mics"})).unwrap()["tracks"][0].as_u64().unwrap();
+    track(&mut e, "mono");
+    e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": mics, "at": 960})).unwrap();
+    let cid = e.session().track(TrackId(mics)).unwrap().clips()[0].id.0;
+    let undo = e.undo_history().len();
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [cid]})).unwrap();
+    let names: Vec<String> = e.session().tracks.iter().map(|t| t.name.clone()).collect();
+    assert_eq!(names[..3], ["Mics", "Mics L", "Mics R"], "the new tracks sit right below: {names:?}");
+    let (l, r) = (r["tracks"][0].as_u64().unwrap(), r["tracks"][1].as_u64().unwrap());
+    assert_eq!(clips(&e, l), vec![(960, 4_800, "LAV-2.L".to_string(), 1, 0.5)]);
+    assert_eq!(clips(&e, r), vec![(960, 4_800, "LAV-2.R".to_string(), 1, -0.25)]);
+    assert!(e.session().find_clip(transit_engine::model::ClipId(cid)).unwrap().1.muted, "the original is muted");
+    assert_eq!(e.undo_history().len(), undo + 1, "one undo step");
+    e.undo();
+    assert_eq!(e.session().tracks.len(), 2, "one undo takes the tracks back");
+    assert!(!e.session().find_clip(transit_engine::model::ClipId(cid)).unwrap().1.muted);
+}
+
+#[test]
+fn split_to_mono_tracks_writes_a_mono_file_per_channel_for_a_take_played_from_disk() {
+    let d = transit_test_support::TestDir::new("split-to-mono-disk");
+    std::fs::create_dir_all(&*d).unwrap();
+    let take = d.join("Take.wav");
+    std::fs::write(&take, stereo_wav(4_800, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    // A take longer than this plays from its file (ADR 0035): 0.001 minutes is 2880 frames.
+    e.session_mut().edit.values.insert(transit_model::disk::STREAM_MINUTES_KEY.into(), 0.001);
+    let mics = track(&mut e, "stereo");
+    let ids = transit_engine::io::add_recording_take(&mut e, &transit_engine::io::Recording::new(0), vec![(TrackId(mics), take)], false);
+    assert!(e.session().sources.last().is_some_and(|s| s.disk), "the take plays from disk");
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [ids[0].0]})).unwrap();
+    for (i, (side, want)) in [("L", 0.5), ("R", -0.25)].into_iter().enumerate() {
+        let t = r["tracks"][i].as_u64().unwrap();
+        let s = e.session();
+        let c = &s.track(TrackId(t)).unwrap().clips()[0];
+        let transit_engine::model::ClipContent::Audio { source, .. } = c.content else { panic!("an audio clip") };
+        let src = s.source(source).unwrap();
+        assert!(src.disk && src.channels == 1 && src.path.ends_with(&format!("Take.{side}.wav")), "{src:?}");
+        let disk = s.pool.get(source).unwrap().disk.clone().unwrap();
+        assert_eq!((disk.frames(), disk.with_sync(|read| read(0, 4_799))), (4_800, Some(want)), "Take.{side}.wav holds that channel");
+    }
+}

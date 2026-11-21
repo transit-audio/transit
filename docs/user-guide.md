@@ -902,9 +902,12 @@ into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as 
 file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
 platforms it lands as soon as the pointer moves after you let go (see the known issues). A stereo
 or wider file that lands on a mono audio track with as many mono tracks below it (in the Edit
-window's order) splits across them in one undo step: each channel becomes its own mono file,
-`<name>.L` and `<name>.R`, saved to `Audio Files`; with fewer mono tracks below, the file lands
-whole on the one track.
+window's order, none frozen and none holding a clip where the file goes) splits across them in
+one undo step: each channel becomes its own mono file, `<name>.L` and `<name>.R` (`.1`, `.2`… past
+stereo), saved to `Audio Files`; otherwise the file lands whole on the one track. To split a clip
+already in the session, such as two microphones recorded onto one stereo track, right-click it and
+choose **Split to Mono Tracks**: each channel goes to a new mono track below the clip's track, the
+original clip is muted, and a take played from its file gets one mono WAV per channel beside it.
 
 Right-click a pad and choose **Clear pad** to empty it and reset its name, choke group, mute,
 and solo. Delete or Backspace does the same for the selected pad while the Sampler window has
