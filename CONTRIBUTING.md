@@ -30,6 +30,9 @@ cargo xtask indexes --validate   # the known-issue and escape entry files are we
 cargo xtask indexes --check      # the generated tables match the entry files; a pull request that only adds an entry file skips this (main regenerates)
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core   # Tier B bare-metal check (ADR 0037); `rustup target add thumbv7em-none-eabihf` once
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core      # Tier B bare-metal check (ADR 0041)
+cargo check --locked --target thumbv7em-none-eabihf -p transit-math                                     # Tier B bare-metal check (ADR 0055)
+cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-parametric-eq     # Tier B bare-metal check (ADR 0054)
+cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-resample
 cargo xtask rt-targets   # only when crates/rt or crates/mix changed
 ```
 
@@ -80,7 +83,7 @@ the table. You need no toolchain; the GitHub web editor works (add the file, ope
 
 Rules:
 
-- `unsafe` only in the crates on the xtask allowlist (`cargo xtask layers` enforces it): `rt`, the native audio backends `audio-wasapi` and `audio-asio` (COM, Win32 and ASIO driver calls) and `audio-jack` (libjack calls and their callbacks), and the plug-in host crates' SDK-interface code (`clap-host`, `vst3-host`, `au-host`). Every block carries a `// SAFETY:` comment, and the refutation review quotes each one (ADR 0013 and its amendments).
+- `unsafe` only in the crates on the xtask allowlist (`cargo xtask layers` enforces it): `rt`, the native audio backends `audio-wasapi` and `audio-asio` (COM, Win32 and ASIO driver calls) and `audio-jack` (libjack calls and their callbacks), the plug-in host crates' SDK-interface code (`clap-host`, `vst3-host`, `au-host`), the libopus C API in `opus`'s `src/ffi.rs` (ADR 0048), and the dev-only C++ oracle's `src/ffi.rs` (`macro-osc-oracle`, ADR 0033). Every block carries a `// SAFETY:` comment, and the refutation review quotes each one (ADR 0013 and its amendments).
 - No panics in non-test code; return errors.
 - No Rust file over 1500 lines (`cargo xtask file-size`); split by concern before adding to a file near the budget. A data table (a file that only holds a lookup table, kept whole) is exempt through a reviewed row in `DATA_TABLES` in `xtask/src/file_size.rs`; the gate checks the file holds data only.
 - Tests do not assert scheduling or real-clock outcomes, and a failing test is never rerun to make it pass

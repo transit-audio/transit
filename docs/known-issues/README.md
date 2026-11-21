@@ -128,7 +128,7 @@ existed keep their K numbers and their historical order.
 
 - Published Windows builds open audio through native WASAPI and native ASIO only (ADR 0046,
   `../releasing.md`); a device only the retired cpal path could open stays closed with the reason (K111).
-- Windows builds are unsigned. The macOS build of v0.7.3 is signed with a Developer ID and notarized by Apple, confirmed on Apple silicon (#674); earlier macOS builds are ad-hoc signed and not notarized.
+- Windows builds are unsigned. macOS builds since v0.7.3 are signed with a Developer ID and notarized by Apple, confirmed on Apple silicon (#674); earlier macOS builds are ad-hoc signed and not notarized.
 - Creating a heavy plug-in (a large instrument) can block the UI for the duration of the create.
 - Live MIDI input is WinMM-based and its timing may be flagged approximate when the device clock
   fit is unavailable (`../contributing/knowledge/clocks.md`).

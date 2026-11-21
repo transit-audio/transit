@@ -47,7 +47,7 @@ A good brief is the biggest token saver. Include:
 ## Repo rules agents must know
 
 - Commit by pathspec (`git commit -- <paths>`), never `git add -A`. No attribution or co-author lines.
-- `unsafe` only in the crates on the xtask allowlist (`cargo xtask layers` enforces it): `rt`, the native audio backends `audio-wasapi` and `audio-asio` (COM, Win32 and ASIO driver calls) and `audio-jack` (libjack calls and their callbacks), the plug-in host crates' SDK-interface code (`clap-host`, `vst3-host`, `au-host`), and the dev-only C++ oracle's `src/ffi.rs` (`macro-osc-oracle`, ADR 0033). Every block carries a `// SAFETY:` comment, and the refutation review quotes each one ([ADR 0013](../adr/0013-unsafe-only-in-soundcraft-rt.md) and its amendments).
+- `unsafe` only in the crates on the xtask allowlist (`cargo xtask layers` enforces it): `rt`, the native audio backends `audio-wasapi` and `audio-asio` (COM, Win32 and ASIO driver calls) and `audio-jack` (libjack calls and their callbacks), the plug-in host crates' SDK-interface code (`clap-host`, `vst3-host`, `au-host`), the libopus C API in `opus`'s `src/ffi.rs` (ADR 0048), and the dev-only C++ oracle's `src/ffi.rs` (`macro-osc-oracle`, ADR 0033). Every block carries a `// SAFETY:` comment, and the refutation review quotes each one ([ADR 0013](../adr/0013-unsafe-only-in-soundcraft-rt.md) and its amendments).
 - American English in code, comments, UI strings and docs.
 - An escaped defect gets an escape record and a gate-class rule
   ([escape record](evidence/escape-record.md)); never patch around a defect, keep the repro.
@@ -106,6 +106,8 @@ cargo xtask indexes --check
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core
 cargo check --locked --target thumbv7em-none-eabihf -p transit-math
+cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-parametric-eq
+cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-resample
 ```
 
 (plus `cargo xtask rt-targets` when `crates/rt` or `crates/mix` changed), run on Windows and on

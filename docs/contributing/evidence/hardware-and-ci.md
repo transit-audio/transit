@@ -14,12 +14,18 @@ need green CI. Jobs:
   hosts, the workspace clippy (`--all-targets`, `-D warnings`), the library-only clippy of
   `transit-mix`, `transit-plugin-host`, `transit-dsp` and `transit-rt` (#215), and the workspace tests.
 - `linux`: the packaging version checks (`xtask/tests/packaging-version.sh`), `cargo fmt --check`,
-  `cargo xtask timing`, the bare-metal checks of `transit-instrument-core`, `transit-sampler-core`
-  (ADR 0037 Tier B) and `transit-math` (ADR 0055), the host library check, both clippy runs as on Windows, the native JACK clippy and
+  `cargo xtask timing`, the device-free `audio-bench` run (the fake backend for two seconds), the
+  bare-metal checks of `transit-instrument-core`, `transit-sampler-core` (ADR 0037 Tier B),
+  `transit-math` (ADR 0055), `transit-parametric-eq` (ADR 0054) and `transit-resample`, the host library check, both clippy runs as on Windows, the native JACK clippy and
   tests, the workspace tests (the UI tests on Mesa's CPU Vulkan driver), and the plug-in editor window
   tests under Xvfb. It is the Linux compile proof.
 - `macos`: the host library check, the workspace clippy and the workspace tests (`crates/au-host`
   and the objc2 code compile only there).
+- `deny (licenses)`: `cargo deny check licenses` against `deny.toml` (#736). It reports without
+  failing the run until it has been seen green once.
+
+`.github/workflows/advisories.yml` runs the RustSec advisory check weekly and on demand. It is a
+report, never a gate: a new advisory changes its result with no change in the repository.
 
 `.github/workflows/indexes.yml` carries the generated-index checks (ADR 0050): every pull request,
 including one that touches only an entry file, runs `cargo xtask indexes --validate`, and a push to
@@ -29,11 +35,10 @@ when they changed and runs `--check`.
 `rt.yml` (the realtime-crate platform matrix) runs on pushes and pull requests that touch `crates/rt`,
 `crates/mix` or the workspace manifest, and on tags. `release.yml` runs only on release tags and
 manual dispatch. The gate does not call `cargo xtask ci` as a whole: `rt-targets` is covered by
-`rt.yml`, and the bench step is not run. Cargo calls use `--locked`, so a stale `Cargo.lock` (which
+`rt.yml`, and its device-free bench step (`audio-bench-fake`) runs in the `linux` job. Cargo calls use `--locked`, so a stale `Cargo.lock` (which
 also pins the patched cpal revision) fails the build.
 
-Not gated: FreeBSD, `cargo xtask rt-targets` and the device-free `audio-bench` run, dependency
-advisories (no `deny.toml`), and every hardware test. Hardware tests are `#[ignore]`d and never CI
+Not gated: FreeBSD, dependency advisories (the weekly report above), and every hardware test. Hardware tests are `#[ignore]`d and never CI
 gates: they need a real device and a person (see below).
 
 The Windows release job builds one target, `windows-x86_64` (native WASAPI and native ASIO are in
