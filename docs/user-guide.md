@@ -534,7 +534,8 @@ is used as measured and says **measure again at this rate** whenever the device'
 timing differs from the measurement's.
 
 After the transport plays at another speed, the input timing stays changed until you stop (or locate)
-at 1x: until then measured figures are used as measured and say **timing changed: stop at 1x, then
+at 1x (with the interface at the session's own rate, where the input is read exactly as before, until you
+reopen the audio device): until then measured figures are used as measured and say **timing changed: stop at 1x, then
 measure again**, and a manual External Instrument latency says **timing changed: stop at 1x, then check
 the manual latency**. A measurement saved by v0.7.4 or older did not record the device's rate, so it
 shows **measure again at this rate** at every rate, the session's own included, until you measure it
