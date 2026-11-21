@@ -900,7 +900,11 @@ drop, so nothing behind it is reached. Anywhere else, a browser drag lands on th
 header, mixer strip or device chain where you let go, and a file from the file manager is imported
 into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as the session, a MIDI
 file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
-platforms it lands as soon as the pointer moves after you let go (see the known issues).
+platforms it lands as soon as the pointer moves after you let go (see the known issues). A stereo
+or wider file that lands on a mono audio track with as many mono tracks below it (in the Edit
+window's order) splits across them in one undo step: each channel becomes its own mono file,
+`<name>.L` and `<name>.R`, saved to `Audio Files`; with fewer mono tracks below, the file lands
+whole on the one track.
 
 Right-click a pad and choose **Clear pad** to empty it and reset its name, choke group, mute,
 and solo. Delete or Backspace does the same for the selected pad while the Sampler window has
