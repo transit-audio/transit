@@ -16,7 +16,7 @@ pub(super) struct Buttons {
     profiles: transit_model::TransportProfiles,
     sending: Vec<MidiOutPort>,
     pub(super) cutoffs: BTreeMap<u64, u64>,
-    sent: Vec<(u64, bool, Vec<transit_model::MidiSource>)>,
+    pub(super) sent: Vec<(u64, bool, Vec<transit_model::MidiSource>)>,
 }
 
 impl Buttons {

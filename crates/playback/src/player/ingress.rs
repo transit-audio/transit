@@ -922,7 +922,10 @@ impl Pump {
                 } else {
                     mon.capture.disposition(raw.seq)
                 };
-                if independent && raw.bytes[0] != 0xf8 && *buttons_enabled && captured.is_none() {
+                // Suspended (#760), a transport copy is not forwarded: what precedes the boundary
+                // has no effect, and what follows it is captured (Learn) or not once the worker
+                // resumes, from the musical copy it keeps.
+                if independent && !suspended && raw.bytes[0] != 0xf8 && *buttons_enabled && captured.is_none() {
                     self.transport_out.push(*id, raw);
                     worked = true;
                 }

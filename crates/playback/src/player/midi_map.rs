@@ -62,6 +62,9 @@ impl MapSpec {
 pub struct Cell {
     /// The control's value (0..1, in the control's own travel) as Main last saw it.
     current: AtomicU32,
+    /// The value Main last gave (`current` also takes the worker's publications): what a renewed
+    /// cell starts from.
+    main: AtomicU32,
     /// How many events of this entry Main has applied.
     applied: AtomicU32,
     /// What the worker last published, and how many it has published.
@@ -87,6 +90,7 @@ impl Cell {
     pub fn new(current: f32) -> Self {
         Cell {
             current: AtomicU32::new(current.to_bits()),
+            main: AtomicU32::new(current.to_bits()),
             applied: AtomicU32::new(0),
             published: AtomicU32::new(current.to_bits()),
             published_n: AtomicU32::new(0),
@@ -127,6 +131,7 @@ impl Cell {
     /// Main, once a frame: the control's value now, and how many events of this entry it has applied.
     pub fn set_value(&self, current: f32, applied: u32) {
         self.current.store(current.to_bits(), Ordering::Relaxed);
+        self.main.store(current.to_bits(), Ordering::Relaxed);
         self.applied.store(applied, Ordering::Relaxed);
     }
 
@@ -407,13 +412,15 @@ impl Wanted {
     }
 
     /// The mappings as a replacement Player's (an audio device reopen carried the worker, #760):
-    /// a new generation and epoch, fresh value cells (nothing the worker published before counts),
-    /// and a snapshot for the worker at the next rebuild. The list and the learn flag stay.
+    /// a new generation and epoch, fresh value cells (nothing the worker published before counts;
+    /// each starts from the value Main last gave its control, so pickup and scaled takeover compare
+    /// against the control, not against zero), and a snapshot for the worker at the next rebuild.
+    /// The list and the learn flag stay.
     pub fn renew(&mut self) {
         let generation = GENERATIONS.fetch_add(1, Ordering::Relaxed);
         self.generation = generation;
         self.epoch = generation.wrapping_mul(1 << 16);
-        self.cells = self.specs.iter().map(|_| Arc::new(Cell::new(0.0))).collect();
+        self.cells = self.cells.iter().map(|cell| Arc::new(Cell::new(f32::from_bits(cell.main.load(Ordering::Relaxed))))).collect();
         self.force = self.sent.is_some();
         self.sent = None;
     }

@@ -97,6 +97,9 @@ struct IoThread {
     stop: Arc<AtomicBool>,
     finished: Arc<AtomicBool>,
     thread: std::thread::JoinHandle<()>,
+    /// Tests: the device thread takes no request (its queue fills), as one stuck in a driver would.
+    #[cfg(test)]
+    stall: Arc<AtomicBool>,
 }
 
 impl IoThread {
@@ -106,6 +109,10 @@ impl IoThread {
         let stop = Arc::new(AtomicBool::new(false));
         let finished = Arc::new(AtomicBool::new(false));
         let (end, done) = (Arc::clone(&stop), Arc::clone(&finished));
+        #[cfg(test)]
+        let stall = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        let stalled = Arc::clone(&stall);
         let thread = std::thread::Builder::new().name("transit-midi-devices".into()).spawn(move || {
             struct Finished(Arc<AtomicBool>);
             impl Drop for Finished {
@@ -155,7 +162,11 @@ impl IoThread {
                         Err(TrySendError::Disconnected(_)) => break,
                     }
                 }
-                if pending.is_none() {
+                #[cfg(test)]
+                let take = !stalled.load(Ordering::Acquire);
+                #[cfg(not(test))]
+                let take = true;
+                if pending.is_none() && take {
                     match requests.try_recv() {
                         Ok(Request::Open { id, key }) => {
                             pending = Some(if handles.len() >= sources::PORTS {
@@ -182,7 +193,15 @@ impl IoThread {
             // unplug and application shutdown. No Main/audio join is required.
             drop(handles);
         })?;
-        Ok(Self { send, receive, stop, finished, thread })
+        Ok(Self {
+            send,
+            receive,
+            stop,
+            finished,
+            thread,
+            #[cfg(test)]
+            stall,
+        })
     }
 
     fn request(&self, request: Request) -> Result<(), &'static str> {
@@ -250,6 +269,8 @@ pub(super) struct Native {
     handovers: u64,
     /// Each input's cutoff at a replacement's boundary, for the routes that service registers.
     floor: Vec<(u64, u64)>,
+    /// Closes the device thread's full queue refused at a handover, sent again before any open.
+    closing: Vec<u64>,
 }
 
 impl Native {
@@ -283,6 +304,7 @@ impl Native {
             unbound: Some(handoff::Bind::new(lane, echo, tap_in)),
             handovers: 0,
             floor: Vec::new(),
+            closing: Vec::new(),
         })
     }
 
@@ -513,6 +535,8 @@ impl Native {
             self.status.error = Some("MIDI devices stopped; reconnect audio to reopen MIDI".into());
             return;
         }
+        // An open the handover let go is closed before a port is opened again (#760).
+        self.closing.retain(|id| io.request(Request::Close(*id)).is_err());
         for _ in 0..sources::PORTS {
             match io.receive.try_recv() {
                 Ok(Reply::Ports(ports)) => self.status.inputs = ports,
@@ -639,7 +663,9 @@ impl Native {
         self.inputs
             .retain(|input| !input.closed || (input.failed && !input.lost && self.status.inputs.iter().any(|port| same_port(&port.key, &input.key))));
         let monitoring = self.monitor.enabled();
-        if !routes.is_empty() || monitoring || self.wanted.wants_any() || self.status.inputs.iter().any(|p| self.buttons.enabled(&p.key)) {
+        if self.closing.is_empty()
+            && (!routes.is_empty() || monitoring || self.wanted.wants_any() || self.status.inputs.iter().any(|p| self.buttons.enabled(&p.key)))
+        {
             for port in &self.status.inputs {
                 if self.inputs.len() == sources::PORTS
                     || !(monitoring

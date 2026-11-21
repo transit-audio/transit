@@ -4,7 +4,8 @@
 //! MIDI Learn list) stay; what belongs to the old runtime goes (its routes and sources, and the
 //! output thread, whose drop releases what the echo held on external destinations, as a reopen did
 //! before). Inputs that are not open (a failed open, an open still in flight) are let go, so the
-//! replacement tries them again, as a reopen always did.
+//! replacement tries them again, as a reopen always did; a close the device thread's full queue
+//! refuses is kept and sent again before any port is opened.
 //!
 //! From the handover on, the worker matches, learns and captures nothing. The replacement
 //! ([`Native::adopt`]) gives the carried side its own action lane, output thread and monitor, sent
@@ -100,6 +101,7 @@ impl Native {
         self.handovers += 1;
         self.worker.suspend(self.handovers);
         let io = self.io.as_ref();
+        let closing = &mut self.closing;
         self.inputs.retain_mut(|input| {
             for binding in input.routes.drain(..) {
                 binding.port.invalidate();
@@ -109,10 +111,8 @@ impl Native {
             if input.attached.is_some() {
                 return true;
             }
-            if !input.closed
-                && let Some(io) = io
-            {
-                let _ = io.request(Request::Close(input.id));
+            if !input.closed && io.is_some_and(|io| io.request(Request::Close(input.id)).is_err()) {
+                closing.push(input.id);
             }
             false
         });
