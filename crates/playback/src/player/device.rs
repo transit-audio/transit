@@ -158,8 +158,8 @@ pub struct Player {
     /// table handed to the plan gets ([`IoMap::system_audio`]).
     system_audio: Cell<Option<u16>>,
     pub device_buffer: Option<u32>,
-    /// The device refused the buffer size the open asked for (native JACK under PipeWire,
-    /// [`ab::Stream::period_declined`]).
+    /// The buffer size the open asked for was not fulfilled: refused, or accepted and not kept
+    /// (native JACK under PipeWire, [`ab::Stream::period_declined`]).
     pub device_buffer_declined: bool,
     pub silent: bool,
     /// The silent device of a `--null-audio` run ([`Self::with_null_device`]): no hardware, no

@@ -593,9 +593,9 @@ pub trait Stream {
     fn rate(&self) -> Option<u32> {
         None
     }
-    /// Whether the device refused the buffer size the open asked for (native JACK under PipeWire:
-    /// `jack_set_buffer_size` returned an error), as distinct from a request whose result has not
-    /// arrived. False by default.
+    /// Whether the buffer size the open asked for was not fulfilled (native JACK under PipeWire:
+    /// `jack_set_buffer_size` returned an error, or the request was accepted and the committed
+    /// buffer differs), as distinct from a request whose result has not arrived. False by default.
     fn period_declined(&self) -> bool {
         false
     }

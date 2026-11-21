@@ -2,8 +2,9 @@
 //! #760, rule 2). Under JACK 2 a chosen size changes the server's buffer size for every client.
 //! Under PipeWire it is a request on transit's own node that holds while transit's device is
 //! active: a forced quantum or another program's request can override it, closing the device ends
-//! it, and a request the library refused is said as declined, apart from one whose result has not
-//! arrived (the "Requested … · running at …" line compares with the settled figure).
+//! it, and a request that was not fulfilled (the library refused it, or accepted it and the
+//! graph did not keep it) is said as declined, apart from one whose result has not arrived (the
+//! "Requested … · running at …" line compares with the settled figure).
 
 use super::JACK_BUFFER_NOTE;
 use crate::StudioApp;
@@ -15,7 +16,7 @@ pub const JACK_PIPEWIRE_BUFFER_NOTE: &str = "Requests this buffer size from Pipe
 pub const JACK_BUFFER_DECLINED: &str = "PipeWire declined the request.";
 
 /// The notes under the buffer list for a JACK system served by PipeWire's library or not, with
-/// the open device's request declined or not (only PipeWire's refusal is said here).
+/// the open device's request fulfilled or not (said only under PipeWire).
 pub fn jack_buffer_notes(pipewire: bool, declined: bool) -> Vec<&'static str> {
     match (pipewire, declined) {
         (false, _) => vec![JACK_BUFFER_NOTE],

@@ -63,7 +63,8 @@ impl ab::Stream for JackStream {
     }
 
     /// The start found the graph at another rate than the one the caller prepared for: no
-    /// direction started, nothing connected; the caller reopens.
+    /// direction started (under PipeWire links made before the settling window may exist on this
+    /// client, which the reopen replaces); the caller reopens.
     fn needs_rebuild(&self) -> bool {
         lock(&self.slot).as_ref().is_some_and(|s| s.id == self.session && s.rebuild)
     }
@@ -78,7 +79,9 @@ impl ab::Stream for JackStream {
         Some(self.shared.sample_rate()).filter(|r| *r != engine::UNKNOWN)
     }
 
-    /// The server refused the buffer size the open asked for (`jack_set_buffer_size` failed).
+    /// The buffer size the open asked for was not fulfilled: the library refused it
+    /// (`jack_set_buffer_size` failed), or, under PipeWire on a start that latched no rebuild, it
+    /// was accepted and the committed buffer differs (not kept).
     fn period_declined(&self) -> bool {
         lock(&self.slot).as_ref().is_some_and(|s| s.id == self.session && (s.declined || s.not_kept))
     }
