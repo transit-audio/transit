@@ -74,7 +74,7 @@ pub struct Stop<E> {
 /// Run `start`, retrying once with the platform default when an override failed on graphics.
 /// `start` gets the backend choice to apply (`None`: the platform's own way) and the fallback to
 /// announce when it is the retry. `log_path` is named in the error text.
-pub fn run<E>(
+pub fn run<E: std::fmt::Display>(
     plan: &Plan,
     log_path: Option<&Path>,
     mut start: impl FnMut(Option<Backends>, Option<&Fallback>) -> Result<(), Failure<E>>,
@@ -94,7 +94,13 @@ pub fn run<E>(
     log::warn!("graphics: {} (from WGPU_BACKEND) could not start; retrying with {}: {reason}", describe(fallback.failed), describe(fallback.used));
     match start(Some(plan.default), Some(&fallback)) {
         Ok(()) => Ok(()),
-        Err(Failure::Other(error)) => Err(Stop { error, message: None }),
+        // After a graphics failure any error ends in the text, so the user is never left with nothing.
+        Err(Failure::Other(error)) => {
+            let second = error.to_string();
+            log::error!("graphics: the retry with {} failed: {second}", describe(plan.default));
+            let message = failure_text(&[(first, &reason), (plan.default, &second)], true, log_path);
+            Err(Stop { error, message: Some(message) })
+        }
         Err(Failure::Graphics { reason: second, error }) => {
             log::error!("graphics: {} could not start either: {second}", describe(plan.default));
             let message = failure_text(&[(first, &reason), (plan.default, &second)], true, log_path);
@@ -233,6 +239,26 @@ mod tests {
             panic!("the error passes through")
         };
         assert_eq!((calls, stop.error, stop.message), (1, "app creation", None));
+    }
+
+    #[test]
+    fn override_fails_then_the_retry_returns_a_non_graphics_error_still_tells_the_user() {
+        let mut calls = 0;
+        let log = PathBuf::from("logs/transit.log");
+        let Err(stop) = run(&plan(Some(Backends::VULKAN)), Some(&log), |_, _| {
+            calls += 1;
+            if calls == 1 {
+                Err(Failure::Graphics { reason: "no surface".into(), error: "first" })
+            } else {
+                Err(Failure::Other("event loop recreated"))
+            }
+        }) else {
+            panic!("both attempts failed")
+        };
+        assert_eq!((calls, stop.error), (2, "event loop recreated"));
+        let message = stop.message.expect("the user is told");
+        assert!(message.contains("Vulkan (asked for by WGPU_BACKEND): no surface"), "{message}");
+        assert!(message.contains("DirectX 12: event loop recreated") && message.contains("logs/transit.log"), "{message}");
     }
 
     #[test]
