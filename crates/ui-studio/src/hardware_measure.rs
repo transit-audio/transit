@@ -63,6 +63,9 @@ pub struct Pending {
     input_device: String,
     output: (String, String),
     loop_key: Option<transit_playback::devices::CalibrationKey>,
+    /// The rate the device runs at, stored with an insert's figure (#709); a result is stored only
+    /// while the device still runs at it.
+    device_rate: Option<u32>,
 }
 
 /// A stand-in for the Player's probe, driven by tests.
@@ -189,7 +192,8 @@ impl StudioApp {
         let io = self.engine.io_map();
         let (input_device, output) = (io.input_device.clone(), (io.system.clone(), io.device.clone()));
         let loop_key = if kind == MeasureKind::Loop { self.loop_key() } else { None };
-        let pending = Pending { send: send.into(), ret: ret.into(), rate, began: Instant::now(), kind, input_device, output, loop_key };
+        let device_rate = self.device_rate();
+        let pending = Pending { send: send.into(), ret: ret.into(), rate, began: Instant::now(), kind, input_device, output, loop_key, device_rate };
         #[cfg(test)]
         if let Some(f) = self.audio_devices.fake_probe.as_mut() {
             f.started.push((out, back));
@@ -260,7 +264,8 @@ impl StudioApp {
         let here = !pending.input_device.is_empty()
             && io.input_device == pending.input_device
             && (io.system.as_str(), io.device.as_str()) == (pending.output.0.as_str(), pending.output.1.as_str())
-            && (pending.kind == MeasureKind::Loop || pending.rate == self.engine.session().sample_rate.hz());
+            && (pending.kind == MeasureKind::Loop
+                || (pending.rate == self.engine.session().sample_rate.hz() && pending.device_rate == self.device_rate()));
         if !here || (pending.kind == MeasureKind::Loop && self.loop_key() != pending.loop_key) {
             return Err(MEASURE_DEVICE_CHANGED.into());
         }
@@ -270,7 +275,7 @@ impl StudioApp {
         let (send, ret, rate) = (&pending.send, &pending.ret, pending.rate);
         match outcome {
             Ok(m) => {
-                if !self.engine.store_hardware_latency(send, ret, m.round_trip_frames) {
+                if !self.engine.store_hardware_latency(send, ret, m.round_trip_frames, pending.device_rate.unwrap_or(0)) {
                     return Err(transit_engine::NO_INPUT_IDENTITY.into());
                 }
                 self.sync_io();

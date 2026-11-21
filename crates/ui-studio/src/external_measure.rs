@@ -44,6 +44,8 @@ pub struct Running {
     output: (String, String),
     began: Instant,
     wait: Duration,
+    /// The rate the device runs at, stored with the figure (#709).
+    device_rate: Option<u32>,
 }
 
 /// What the card says after a Measure, until the next one on that track.
@@ -195,11 +197,17 @@ pub fn progress_text(p: Progress) -> String {
 }
 
 /// What the card's state line says about the latency of a playing device: the manual value, the
-/// measurement of this key, or one made at another rate or buffer; `true` (a warning) for the last.
+/// measurement of this key, or one made at another rate or buffer; `true` (a warning) for the last,
+/// and for a measurement of this key taken with the device at another rate than `device_rate` or
+/// stored before the device's rate was recorded ("measure again at this rate", #709; used as
+/// measured). A manual value never gets that hint.
 #[must_use]
-pub fn latency_text(frames: u32, source: &ExternalSource, rate: u32, buffer: Option<u32>) -> (String, bool) {
+pub fn latency_text(frames: u32, source: &ExternalSource, rate: u32, buffer: Option<u32>, device_rate: Option<u32>) -> (String, bool) {
     match source {
         ExternalSource::Manual => (format!("Manual: {:.1} ms", ms(f64::from(frames), rate)), false),
+        ExternalSource::Measured(m) if m.rate_hint(device_rate) => {
+            (format!("{}: {}", measured_text(m), crate::hardware_ui::MEASURE_AGAIN_RATE), true)
+        }
         ExternalSource::Measured(m) => (measured_text(m), false),
         ExternalSource::Stale(m) => (stale_text(m, rate, buffer), true),
     }
@@ -292,8 +300,18 @@ impl StudioApp {
         self.external_measure.outcome = None;
         let io = self.engine.io_map();
         let (input_device, output) = (io.input_device.clone(), (io.system.clone(), io.device.clone()));
-        self.external_measure.running =
-            Some(Running { track: t, port, ret, rate, buffer, input_device, output, began: Instant::now(), wait: wait + GRACE });
+        self.external_measure.running = Some(Running {
+            track: t,
+            port,
+            ret,
+            rate,
+            buffer,
+            input_device,
+            output,
+            began: Instant::now(),
+            wait: wait + GRACE,
+            device_rate: self.device_rate(),
+        });
         Ok(())
     }
 
@@ -343,6 +361,7 @@ impl StudioApp {
                     measured_at: now_secs(),
                     input_device: r.input_device.clone(),
                     input_ports: Vec::new(),
+                    device_rate: r.device_rate.unwrap_or(0),
                 };
                 let said = result_text(&m, r.rate);
                 if m.needs_keep(r.rate) {
@@ -369,6 +388,7 @@ impl StudioApp {
             && record.input_device == io.input_device
             && (io.system.as_str(), io.device.as_str()) == (output.0.as_str(), output.1.as_str())
             && record.rate == self.engine.session().sample_rate.hz()
+            && self.device_rate() == Some(record.device_rate)
     }
 
     fn store_external(&mut self, record: ExternalLatency) {
@@ -473,6 +493,7 @@ mod tests {
             measured_at: 1_792_800_000,
             input_device: String::new(),
             input_ports: Vec::new(),
+            device_rate: 0,
         }
     }
 
@@ -518,7 +539,7 @@ mod tests {
             "The return clipped: lower the synth or the input gain and measure again."
         );
         assert_eq!(progress_text(Progress { note: 3, of: 8, level: 0.0 }), "Measuring\u{2026} 3/8");
-        assert_eq!(latency_text(960, &ExternalSource::Manual, 48_000, Some(64)), ("Manual: 20.0 ms".into(), false));
-        assert!(latency_text(955, &ExternalSource::Stale(record(48_000, 64, 955)), 48_000, Some(128)).1, "a warning");
+        assert_eq!(latency_text(960, &ExternalSource::Manual, 48_000, Some(64), None), ("Manual: 20.0 ms".into(), false));
+        assert!(latency_text(955, &ExternalSource::Stale(record(48_000, 64, 955)), 48_000, Some(128), Some(48_000)).1, "a warning");
     }
 }

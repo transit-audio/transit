@@ -92,6 +92,34 @@ pub struct HardwareLatency {
     /// every other input.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub input_ports: Vec<String>,
+    /// The rate the audio device ran at when it was measured, in Hz (ADR 0015, Amendment
+    /// 2026-11-16 on the #709 converter term, rule 5); 0 for a figure stored before it was
+    /// recorded (rule 6). Not part of the key. See [`HardwareLatency::rate_hint`].
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub device_rate: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+/// Whether a measured figure taken with the device at `measured` Hz (0: not recorded) shows the
+/// hint "measure again at this rate" while the device runs at `running` (`None`: no device open):
+/// a figure without a recorded device rate shows it at every rate, equal rates included (ADR 0015,
+/// Amendment 2026-11-16 on the #709 converter term, rule 6), and any other figure whenever the
+/// device runs at another rate than it was measured at (rule 8): the hardware's own delay can
+/// change with the rate. The figure itself is used as stored either way.
+#[must_use]
+pub fn rate_hint(measured: u32, running: Option<u32>) -> bool {
+    measured == 0 || running.is_some_and(|r| r != measured)
+}
+
+impl HardwareLatency {
+    /// [`rate_hint`] for this figure with the device running at `running`.
+    #[must_use]
+    pub fn rate_hint(&self, running: Option<u32>) -> bool {
+        rate_hint(self.device_rate, running)
+    }
 }
 
 /// A measured External Instrument latency C (ADR 0020 decisions 4 and 5): the plan frames from
@@ -129,9 +157,18 @@ pub struct ExternalLatency {
     /// [`HardwareLatency::input_ports`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub input_ports: Vec<String>,
+    /// The rate the audio device ran at when it was measured (as [`HardwareLatency::device_rate`]).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub device_rate: u32,
 }
 
 impl ExternalLatency {
+    /// [`rate_hint`] for this figure with the device running at `running`.
+    #[must_use]
+    pub fn rate_hint(&self, running: Option<u32>) -> bool {
+        rate_hint(self.device_rate, running)
+    }
+
     /// Whether this measurement was made through `port`: by id when both have one, else by name.
     #[must_use]
     pub fn port_is(&self, port: &MidiOutPort) -> bool {
@@ -644,15 +681,19 @@ impl IoMap {
     /// when that pair was not measured at that rate through this input.
     #[must_use]
     pub fn hardware_latency(&self, send: &str, ret: &str, rate: u32) -> Option<u32> {
-        self.hardware_latency
-            .iter()
-            .find(|m| {
-                m.rate == rate
-                    && m.send.eq_ignore_ascii_case(send)
-                    && m.ret.eq_ignore_ascii_case(ret)
-                    && self.figure_applies(&m.input_device, &m.input_ports)
-            })
-            .map(|m| m.round_trip_frames)
+        self.hardware_figure(send, ret, rate).map(|m| m.round_trip_frames)
+    }
+
+    /// The measurement [`Self::hardware_latency`] uses, for what the UI says about it (its device
+    /// rate: [`HardwareLatency::rate_hint`]).
+    #[must_use]
+    pub fn hardware_figure(&self, send: &str, ret: &str, rate: u32) -> Option<&HardwareLatency> {
+        self.hardware_latency.iter().find(|m| {
+            m.rate == rate
+                && m.send.eq_ignore_ascii_case(send)
+                && m.ret.eq_ignore_ascii_case(ret)
+                && self.figure_applies(&m.input_device, &m.input_ports)
+        })
     }
 
     /// Whether the pair has a figure at `rate` that does not apply to the input open now (it came
@@ -1021,6 +1062,7 @@ mod tests {
             measured_at: 7,
             input_device: String::new(),
             input_ports: Vec::new(),
+            device_rate: 0,
         };
         m.set_hardware_latency(at(300, 48_000));
         m.set_hardware_latency(at(500, 44_100));
@@ -1049,6 +1091,7 @@ mod tests {
             measured_at: at,
             input_device: String::new(),
             input_ports: Vec::new(),
+            device_rate: 0,
         }
     }
 

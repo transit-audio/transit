@@ -235,6 +235,7 @@ mod tests {
             measured_at: 1,
             input_device: String::new(),
             input_ports: Vec::new(),
+            device_rate: 0,
         };
         assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().latency, 0, "not measured");
         io.set_external_latency(measured);

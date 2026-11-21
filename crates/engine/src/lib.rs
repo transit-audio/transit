@@ -441,7 +441,9 @@ impl Engine {
     /// the session stays clean). The host passes the table on to the audio thread. Nothing is
     /// stored, and `false` returned, when the open input has no identity ([`NO_INPUT_IDENTITY`]):
     /// an empty identity on a figure means "stored before inputs were recorded", never "unknown".
-    pub fn store_hardware_latency(&mut self, send: &str, ret: &str, round_trip_frames: u32) -> bool {
+    /// `device_rate` is the rate the audio device ran at while measuring (ADR 0015, Amendment
+    /// 2026-11-16 on the #709 converter term, rule 5).
+    pub fn store_hardware_latency(&mut self, send: &str, ret: &str, round_trip_frames: u32, device_rate: u32) -> bool {
         if self.io.input_device.is_empty() {
             return false;
         }
@@ -457,6 +459,7 @@ impl Engine {
             input_device: self.io.input_device.clone(),
             // And over which ports, for a virtual input (rule 13).
             input_ports: self.io.input_ports.clone(),
+            device_rate,
         });
         self.set_io_map(io);
         true

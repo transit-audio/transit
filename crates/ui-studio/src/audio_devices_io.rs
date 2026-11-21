@@ -440,7 +440,7 @@ pub fn section(
 pub fn hardware_section(
     ui: &mut egui::Ui,
     io: &IoMap,
-    rate: u32,
+    (rate, device_rate): (u32, Option<u32>),
     blocked: Option<&str>,
     progress: Option<(u32, u32)>,
     ed: &mut IoEditor,
@@ -534,7 +534,12 @@ pub fn hardware_section(
                 // A figure through another input is listed, not used: "measure again" (rule 13).
                 // Through a JACK virtual input, also over other ports than now (rule 13).
                 let figure = if io.figure_applies(&m.input_device, &m.input_ports) {
-                    frames_text(m.round_trip_frames, rate)
+                    // Used as measured; with the hint when the device's rate differs or is not
+                    // recorded (ADR 0015, Amendment 2026-11-16 on the #709 converter term).
+                    match rate_row(m.device_rate, device_rate) {
+                        Some(why) => format!("{}, {why}", frames_text(m.round_trip_frames, rate)),
+                        None => frames_text(m.round_trip_frames, rate),
+                    }
                 } else {
                     let why = if m.input_device.is_empty() {
                         MEASURE_AGAIN_UNKNOWN
@@ -572,6 +577,21 @@ pub const MEASURE_AGAIN_ROW: &str = "through another input: measure again";
 pub const MEASURE_AGAIN_UNKNOWN: &str = "through an unknown input: measure again";
 /// The same, for a figure through a JACK virtual input whose ports changed since (rule 13).
 pub const MEASURE_AGAIN_PORTS: &str = "through other ports of this input: measure again";
+
+/// Beside a listed round trip that applies, measured with the device at `measured` Hz (0: not
+/// recorded) while it runs at `running`: why it says "measure again at this rate", `None` when it
+/// does not ([`transit_model::rate_hint`]).
+pub fn rate_row(measured: u32, running: Option<u32>) -> Option<String> {
+    use crate::hardware_ui::MEASURE_AGAIN_RATE;
+    if !transit_model::rate_hint(measured, running) {
+        return None;
+    }
+    Some(if measured == 0 {
+        format!("device rate not recorded: {MEASURE_AGAIN_RATE}")
+    } else {
+        format!("measured with the device at {}: {MEASURE_AGAIN_RATE}", crate::external_measure::rate_text(measured))
+    })
+}
 
 /// What a finished measurement says: "612 frames (12.8 ms) ±2".
 pub fn measured_text(frames: u32, spread: u32, rate: u32) -> String {

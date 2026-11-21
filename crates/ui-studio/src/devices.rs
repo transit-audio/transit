@@ -667,7 +667,8 @@ fn hardware_state(
         if r.state == transit_mix::HardwareState::Unmeasured && app.engine.io_map().hardware_latency_elsewhere(&r.send, &r.ret, rate) {
             crate::hardware_ui::MEASURE_AGAIN.to_string()
         } else {
-            crate::hardware_ui::state_text(&r.state, r.latency, rate)
+            // A figure from another device rate, or stored without one, is used with the hint (#709).
+            crate::hardware_ui::card_text(&r.state, r.latency, rate, app.hardware_rate_hint(&r.send, &r.ret))
         }
     });
     let disabled = h.disabled.is_some();
@@ -677,6 +678,8 @@ fn hardware_state(
     pc.with_clip_rect(eb.intersect(lane)).text(eb.center(), Align2::CENTER_CENTER, &text, FontId::proportional(10.5), ink);
     let resp = resp.on_hover_text(if disabled {
         "Make the insert again to switch it on"
+    } else if text.ends_with(crate::hardware_ui::MEASURE_AGAIN_RATE) {
+        crate::hardware_ui::RATE_HINT_TIP
     } else {
         "The round trip through the hardware, measured in Audio Devices"
     });

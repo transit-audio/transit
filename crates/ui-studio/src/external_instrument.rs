@@ -20,9 +20,17 @@ pub const MENU_LABEL: &str = "External Instrument";
 /// `live` (an audio device is open), and `port` (`None`: a port is chosen and present; else its
 /// label when missing, or an empty string when none is chosen), and whether it is a warning (a
 /// measurement of another rate or buffer in use). `rate` converts frames to ms and `buffer` is
-/// the open device's, against which a measurement is "measure again".
+/// the open device's, against which a measurement is "measure again"; `device_rate` the rate the
+/// device runs at, against which a measurement is "measure again at this rate" (#709).
 #[must_use]
-pub fn state_line(report: Option<&ExternalReport>, live: bool, port: Option<&str>, rate: u32, buffer: Option<u32>) -> (String, bool) {
+pub fn state_line(
+    report: Option<&ExternalReport>,
+    live: bool,
+    port: Option<&str>,
+    rate: u32,
+    buffer: Option<u32>,
+    device_rate: Option<u32>,
+) -> (String, bool) {
     if !live {
         return ("No audio device".into(), false);
     }
@@ -31,7 +39,7 @@ pub fn state_line(report: Option<&ExternalReport>, live: bool, port: Option<&str
         && port.is_none()
         && let (Some(frames), Some(source)) = (r.latency, r.source.as_ref())
     {
-        return crate::external_measure::latency_text(frames, source, rate, buffer);
+        return crate::external_measure::latency_text(frames, source, rate, buffer, device_rate);
     }
     (plain_state(report, port, rate), false)
 }
@@ -306,7 +314,7 @@ pub(crate) fn card(
         _ => None,
     };
     let report = app.external_reports().into_iter().find(|x| x.track == t);
-    let (mut state, mut stale) = state_line(report.as_ref(), live, port.as_deref(), s.sample_rate.hz(), app.device_buffer());
+    let (mut state, mut stale) = state_line(report.as_ref(), live, port.as_deref(), s.sample_rate.hz(), app.device_buffer(), app.device_rate());
     // A figure measured through another input is not used (ADR 0015, amendment for #431, rule 13).
     if let (Some(r), MidiOutput::External { port: p, .. }) = (report.as_ref(), &output)
         && r.state == ExternalState::Unmeasured
@@ -501,7 +509,7 @@ mod tests {
     }
 
     fn state_text(report: Option<&ExternalReport>, live: bool, port: Option<&str>, rate: u32, buffer: Option<u32>) -> String {
-        state_line(report, live, port, rate, buffer).0
+        state_line(report, live, port, rate, buffer, None).0
     }
 
     fn report(state: ExternalState, latency: Option<u32>) -> ExternalReport {

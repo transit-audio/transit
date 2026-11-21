@@ -204,6 +204,10 @@ pub struct AudioDevicesState {
     /// `poll_measure` read this instead of the wall clock.
     #[cfg(test)]
     pub(crate) measure_elapsed: Option<std::time::Duration>,
+    /// The rate the device runs at (tests, without a Player): [`StudioApp::device_rate`] reads it
+    /// first. With a fake probe or a fake External Instrument Measure and no value, the session's.
+    #[cfg(test)]
+    pub(crate) fake_device_rate: Option<u32>,
     /// Scripted device-loop counters (output, input) standing in for the streams, so tests can
     /// render the Backend lines without a native backend.
     #[cfg(test)]

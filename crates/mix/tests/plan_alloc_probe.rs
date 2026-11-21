@@ -365,6 +365,7 @@ fn hardware_inserts_allocate_nothing_when_added_bypassed_remeasured_and_removed(
         measured_at: 1,
         input_device: String::new(),
         input_ports: Vec::new(),
+        device_rate: 0,
     };
     io.set_hardware_latency(at(900));
     rig.compiler.set_io(Arc::new(io.clone()));

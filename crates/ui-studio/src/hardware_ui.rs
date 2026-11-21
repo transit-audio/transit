@@ -53,6 +53,21 @@ pub fn pairs(io: &IoMap, rate: u32) -> Vec<Pair> {
 /// (or one whose identity is not established): the figure counts zero, as unmeasured.
 pub const MEASURE_AGAIN: &str = "Measure again";
 
+/// The hint beside a measured figure that was taken with the audio device at another rate than it
+/// runs at now, or stored before the device's rate was recorded (ADR 0015, Amendment 2026-11-16 on
+/// the #709 converter term, rules 6 and 8). The figure is still used as stored.
+pub const MEASURE_AGAIN_RATE: &str = "measure again at this rate";
+
+/// The hover text of a card that shows [`MEASURE_AGAIN_RATE`].
+pub const RATE_HINT_TIP: &str = "The round trip was measured with the audio device at another rate, or before transit recorded the \
+     device's rate. It is used as measured; Measure again in Audio Devices at the rate the device runs now.";
+
+/// [`state_text`], with [`MEASURE_AGAIN_RATE`] after a Ready insert's latency when `rate_hint`.
+pub fn card_text(state: &HardwareState, latency: Option<u32>, rate: u32, rate_hint: bool) -> String {
+    let text = state_text(state, latency, rate);
+    if rate_hint && *state == HardwareState::Ready { format!("{text}: {MEASURE_AGAIN_RATE}") } else { text }
+}
+
 /// What a device card says in place of the editor button.
 pub fn state_text(state: &HardwareState, latency: Option<u32>, rate: u32) -> String {
     match state {
@@ -98,6 +113,27 @@ impl StudioApp {
         let io = self.engine.io_map();
         let duplex = self.player.as_ref().is_some_and(|p| p.duplex());
         transit_mix::hardware_report(self.engine.session(), io, io.outputs, io.inputs, duplex, self.engine.session().sample_rate.hz())
+    }
+
+    /// The rate the open audio device runs at, `None` without one: what a measurement records and
+    /// what its "measure again at this rate" hint compares against.
+    pub(crate) fn device_rate(&self) -> Option<u32> {
+        #[cfg(test)]
+        if let Some(rate) = self.audio_devices.fake_device_rate {
+            return Some(rate);
+        }
+        #[cfg(test)]
+        if self.audio_devices.fake_probe.is_some() || self.external_measure.fake.is_some() {
+            return Some(self.engine.session().sample_rate.hz());
+        }
+        self.player.as_ref().filter(|p| !p.silent).map(|p| p.device_rate)
+    }
+
+    /// Whether the figure the hardware insert sending on `send` and returning on `ret` uses shows
+    /// [`MEASURE_AGAIN_RATE`] (no figure: no hint).
+    pub(crate) fn hardware_rate_hint(&self, send: &str, ret: &str) -> bool {
+        let rate = self.engine.session().sample_rate.hz();
+        self.engine.io_map().hardware_figure(send, ret, rate).is_some_and(|m| m.rate_hint(self.device_rate()))
     }
 
     /// Why Measure is off right now.

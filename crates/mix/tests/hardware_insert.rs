@@ -63,6 +63,7 @@ fn io(measured: Option<usize>) -> IoMap {
             measured_at: 1,
             input_device: String::new(),
             input_ports: Vec::new(),
+            device_rate: 0,
         });
     }
     io
@@ -179,6 +180,31 @@ fn compensation_lines_the_insert_up_with_a_parallel_dry_track() {
     assert_eq!(hits(&off.main), [AT, AT + D]);
 }
 
+/// #709 (ADR 0015, Amendment 2026-11-16 on the converter term, rules 5 and 6): the device rate a
+/// figure was measured at is provenance for the "measure again at this rate" hint only. With no
+/// term in force, a figure stored without a device rate, one measured at the session's rate and one
+/// measured with the device at another rate are all used as stored: the plan reports the same
+/// latency and renders the same output, bit for bit, as the figure from before the field existed.
+#[test]
+fn the_device_rate_of_a_figure_changes_neither_its_latency_nor_the_output() {
+    let mut s = session();
+    impulse_track(&mut s, "Dry");
+    let t = impulse_track(&mut s, "Outboard");
+    s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::hardware(SEND, RET));
+    let base = render(&s, &io(Some(D)), true, D);
+    assert_eq!((base.latency, hits(&base.main)), (D, vec![AT + D]), "the figure without a device rate aligns as measured");
+    for device_rate in [SR, 44_100, 96_000] {
+        let mut map = io(None);
+        map.set_hardware_latency(HardwareLatency { device_rate, ..io(Some(D)).hardware_latency[0].clone() });
+        let r = render(&s, &map, true, D);
+        assert_eq!(r.latency, D, "device rate {device_rate}: not adjusted");
+        let first = r.main.iter().zip(&base.main).position(|(a, b)| a.to_bits() != b.to_bits());
+        assert_eq!(first, None, "device rate {device_rate}: first differing frame");
+        let report = hardware_report(&s, &map, 4, 4, true, SR);
+        assert_eq!((report[0].state.clone(), report[0].latency), (HardwareState::Ready, Some(D as u32)));
+    }
+}
+
 #[test]
 fn an_unmeasured_insert_reports_nothing_and_the_strip_is_late() {
     let mut s = session();
@@ -267,6 +293,7 @@ fn an_insert_on_the_last_channels_of_a_12_in_10_out_device_sends_and_returns_the
         measured_at: 1,
         input_device: String::new(),
         input_ports: Vec::new(),
+        device_rate: 0,
     });
     let mut s = session();
     let dry = impulse_track(&mut s, "Dry");

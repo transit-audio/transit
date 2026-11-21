@@ -343,6 +343,7 @@ fn a_result_waiting_for_keep_is_never_kept_for_another_input() {
         measured_at: 1,
         input_device: "Input B".into(),
         input_ports: Vec::new(),
+        device_rate: 0,
     };
     let mut io = transit_model::IoMap::for_device("ASIO", "Focusrite USB ASIO", 0, 2);
     io.external_latency.push(b.clone());
@@ -378,4 +379,47 @@ fn measure_does_not_start_through_an_input_without_an_identity() {
     assert!(refused.as_ref().is_err_and(|why| why.contains(transit_engine::NO_INPUT_IDENTITY)), "{refused:?}");
     assert!(t.fake().started.is_empty(), "nothing started");
     assert!(t.stored().is_empty());
+}
+
+/// #709 (ADR 0020's 2026-11-16 amendment, from ADR 0015's on the #709 converter term, rules 5, 6
+/// and 8): Measure records the rate the device ran at. At another device rate the figure is used as
+/// measured and the card says "measure again at this rate" as a warning; a figure stored before the
+/// rate was recorded says it at every rate, equal rates included; a manual value never does; and a
+/// result that arrives after the device's rate changed is not stored.
+#[test]
+fn measure_records_the_device_rate_and_the_card_says_measure_again_at_another_rate() {
+    use crate::hardware_ui::MEASURE_AGAIN_RATE;
+    let mut t = rig();
+    t.app.audio_devices.fake_device_rate = Some(44_100);
+    t.click(t.card().external_measure);
+    t.fake().result = Some(measured(955, 19.0));
+    t.frames(3);
+    assert_eq!(t.stored()[0].device_rate, 44_100, "the running device rate is kept");
+    let measured_line = format!("Measured 19.9 ms on {} at 48 kHz/64", transit_playback::devices::utc_today());
+    assert_eq!((t.card().external_state, t.card().external_severity), (measured_line.clone(), None));
+    t.app.audio_devices.fake_device_rate = Some(48_000);
+    t.frames(2);
+    assert_eq!(t.card().external_state, format!("{measured_line}: {MEASURE_AGAIN_RATE}"));
+    assert_eq!(t.card().external_severity, Some(crate::chrome::Severity::Warning));
+    assert_eq!(t.report().latency, Some(955), "used as measured");
+    // Stored before the rate was recorded: the hint at the session's own rate too, used as stored.
+    let mut io = t.app.engine.io_map().clone();
+    io.external_latency[0].device_rate = 0;
+    t.app.engine.set_io_map(io);
+    t.frames(2);
+    assert_eq!(t.card().external_state, format!("{measured_line}: {MEASURE_AGAIN_RATE}"));
+    assert_eq!(t.report().latency, Some(955));
+    // A manual value: no measurement hint.
+    t.app.run("instrument.external", json!({"track": t.track.0, "manual_ms": 20.0})).unwrap();
+    t.frames(2);
+    assert_eq!((t.card().external_state.as_str(), t.card().external_severity), ("Manual: 20.0 ms", None));
+    // A result that arrives after the device's rate changed stores nothing.
+    let mut t = rig();
+    t.app.audio_devices.fake_device_rate = Some(44_100);
+    t.click(t.card().external_measure);
+    t.app.audio_devices.fake_device_rate = Some(48_000);
+    t.fake().result = Some(measured(955, 19.0));
+    t.frames(3);
+    assert!(t.stored().is_empty());
+    assert_eq!(t.app.status, crate::external_measure::DEVICE_CHANGED);
 }

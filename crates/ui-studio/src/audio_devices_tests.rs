@@ -713,6 +713,8 @@ fn reorder_keeps_the_editor_wanted_until_the_plan_adopts() {
 
 #[path = "audio_devices/io_paths_tests.rs"]
 mod io_paths;
+#[path = "audio_devices/rate_hint_tests.rs"]
+mod rate_hint;
 
 mod hardware_inserts {
     use super::io_paths::{item, with_window};
@@ -722,7 +724,7 @@ mod hardware_inserts {
     fn measured() -> T {
         let mut t = with_window();
         t.section("section_hardware");
-        t.app.engine.store_hardware_latency("Out 3-4", "In 3-4", 612);
+        t.app.engine.store_hardware_latency("Out 3-4", "In 3-4", 612, 48_000);
         t.frames(3);
         t
     }
