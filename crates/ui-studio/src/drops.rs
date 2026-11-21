@@ -117,15 +117,17 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
     // cursor that still names the closing one's tracks.
     if let Some(session) = offer.paths.iter().find(|p| opens_session(&p.to_string_lossy())) {
         let left = offer.paths.len() - 1;
-        open_path(app, &session.to_string_lossy());
         if left > 0 {
+            // Said first, so a session that fails to open replaces it with its own reason.
             let name = session.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
             app.status = format!(
-                "Opening {name}: the other {left} dropped file{} not imported; drop {} on the session once it is open",
-                if left == 1 { " was" } else { "s were" },
+                "{left} file{} dropped with {name} {} not imported; drop {} on the session once it is open",
+                if left == 1 { "" } else { "s" },
+                if left == 1 { "was" } else { "were" },
                 if left == 1 { "it" } else { "them" }
             );
         }
+        open_path(app, &session.to_string_lossy());
         return;
     }
     let snap = !ctx.input(|i| i.modifiers.shift);
@@ -198,6 +200,9 @@ fn open_path_at(app: &mut StudioApp, p: &str, at: Option<(Option<TrackId>, Optio
             Some((track, time)) => (track, time.unwrap_or_else(|| app.cursor())),
             None => (app.cursor_track().filter(audio), app.cursor()),
         };
+        // Where the engine puts it (a cursor before bar 1 imports at 0), so the next file of the
+        // drop starts where this one really ends.
+        let time = time.max(0);
         let mut params = serde_json::json!({"path": p, "at": time});
         if let Some(t) = track {
             params["track"] = serde_json::json!(t.0);

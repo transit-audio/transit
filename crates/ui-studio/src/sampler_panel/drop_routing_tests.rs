@@ -222,7 +222,7 @@ fn a_drop_that_opens_a_session_opens_it_and_imports_nothing_else() {
     let s = t.app.engine.session();
     assert!(s.tracks.iter().any(|tr| tr.name == "Synth"), "B is open");
     assert!(s.tracks.iter().all(|tr| tr.clips().is_empty()), "nothing else is imported");
-    assert!(t.app.status.contains("2 dropped files were not imported"), "{}", t.app.status);
+    assert!(t.app.status.contains("2 files dropped with B.transit were not imported"), "{}", t.app.status);
 }
 
 /// Files dropped at the cursor (here on a MIDI lane, which takes no audio) follow each other on
@@ -239,4 +239,27 @@ fn files_dropped_at_the_cursor_follow_each_other_on_its_track() {
     t.drop_files(vec![one, two], mid(lane));
     let clips: Vec<(String, i64)> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| (c.name.clone(), c.start)).collect();
     assert_eq!(clips, [("One".to_string(), 48_000), ("Two".to_string(), 52_800)]);
+}
+
+/// With the cursor before bar 1 (a count-in session's pre-count zone), files dropped at the cursor
+/// still follow each other: the first lands at 0, where the engine puts it, and the next after it.
+#[test]
+fn files_dropped_at_a_cursor_before_bar_one_follow_each_other_from_zero() {
+    let mut t = T::new();
+    let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let m = t.app.run("track.new", serde_json::json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap();
+    // A pickup clip at -96 000 opens the pre-count zone (ADR 0052), so the cursor can sit before 0.
+    let s = t.app.engine.session_mut();
+    let id = s.new_clip_id();
+    let pickup = transit_model::Clip::midi(id, "Pickup", -96_000, 48_000, Default::default());
+    s.track_mut(TrackId(m)).unwrap().playlist_mut().unwrap().clips.push(pickup);
+    t.frames(3);
+    t.app.ui.cursor = -48_000;
+    t.app.ui.cursor_track = Some(TrackId(a));
+    assert_eq!(t.app.cursor(), -48_000, "the cursor is before bar 1");
+    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == m).unwrap().lane;
+    let (one, two) = (t.sample("One.wav", 4_800), t.sample("Two.wav", 4_800));
+    t.drop_files(vec![one, two], mid(lane));
+    let clips: Vec<(String, i64)> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| (c.name.clone(), c.start)).collect();
+    assert_eq!(clips, [("One".to_string(), 0), ("Two".to_string(), 4_800)]);
 }
