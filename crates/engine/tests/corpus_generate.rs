@@ -114,7 +114,21 @@ fn features_session() -> Session {
     add_rack(&mut s);
     add_v070_features(&mut s, audio[1]);
     add_v073_features(&mut s);
+    add_v074_features(&mut s);
     s
+}
+
+/// What v0.7.4 serializes that v0.7.3 did not (#753): a built-in instrument stores its whole parameter
+/// table at the build's defaults, so the Sampler's new Output (-12 dB) and each synth's Level (-12 dB)
+/// are in the file. Every instrument of the session gets its table, as a track added in the app does.
+fn add_v074_features(s: &mut Session) {
+    for t in &mut s.tracks {
+        let Some(ins) = t.instrument.as_mut() else { continue };
+        let Some(info) = transit_dsp::plugin_info(&ins.plugin) else { continue };
+        for p in info.params {
+            ins.params.entry(p.id.to_string()).or_insert(p.default);
+        }
+    }
 }
 
 /// What v0.7.3 serializes that v0.7.2 did not: a MIDI clip that starts before bar 1 (a pre-count zone,

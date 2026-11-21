@@ -30,6 +30,8 @@ v0.7.2 is a patch with no new serialized feature (what it adds to a recording's 
 
 v0.7.3 adds its two files. The v0.7.3 features session also carries a MIDI clip that starts before bar 1 (a pre-count zone, the `pre_count` need) holding a note stored before its start, which its left edge hides (the `midi_hidden_notes` need, ADR 0052). It carries no unplaced take: an entry is a load note, and the corpus test wants zero notes.
 
+v0.7.4 adds its two files. In them every built-in instrument stores its whole parameter table at the build's defaults (#753), as a track added in the app does: the Sampler's Output and each synth's Level are saved at -12 dB, where a v0.7.3 file stores none.
+
 One file is hand-written, not saved by a build: `v0.3.2-video.transit` has an audio track, a Video
 track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 (it opens with the video
 dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`
