@@ -4,8 +4,9 @@ use super::*;
 /// vertical channel meter fed with the strip's fall-off reading, the engine's RMS per channel (the
 /// solid `meter.ok` layer over the 35 percent peak, #395), peak hold and clip latch, its grid
 /// lines at `marks` (the scale's placed labels beside it, Meter grid). The main bus has the wider
-/// bars. A `mono` strip has one bar, centered where the pair would sit: the engine meters a strip
-/// before its pan, so a second bar would only repeat the first.
+/// bars. A `mono` strip (a mono audio track; a mono instrument still renders in stereo) has one
+/// bar, centered where the pair would sit: the engine meters a strip before its pan, so a second
+/// bar would only repeat the first.
 pub(super) fn strip_meter(
     p: &egui::Painter,
     x: f32,
@@ -21,7 +22,8 @@ pub(super) fn strip_meter(
         [0, 1].map(|c| Channel { peak_db: db(d.falloff[c]), rms_db: Some(db(d.rms[c])), hold_db: Some(db(d.hold[c])), clip: d.clip_ch[c] });
     let bar = if main { crate::tokens::fader::METER_BAR_MAIN } else { crate::tokens::fader::METER_BAR };
     if mono {
-        return paint_channel(p, x + (bar + crate::tokens::fader::METER_GAP) / 2.0, travel, bar, marks, &channels[..1]);
+        // On a whole point, so the well's 1 px edge stays sharp at 1x.
+        return paint_channel(p, (x + (bar + crate::tokens::fader::METER_GAP) / 2.0).round(), travel, bar, marks, &channels[..1]);
     }
     paint_channel(p, x, travel, bar, marks, &channels)
 }
