@@ -401,4 +401,6 @@ fn a_mono_strip_has_one_meter_bar_and_a_stereo_strip_two() {
     frames(&mut app, &ctx, 3, &mut time);
     let wells = |t| strip(&app, t).meter_layout.expect("the meter").wells.len();
     assert_eq!((wells(mono), wells(stereo), wells(instrument), wells(midi)), (1, 2, 2, 1));
+    let well = strip(&app, mono).meter_layout.expect("the meter").wells[0];
+    assert_eq!(well[0], well[0].round(), "the mono well sits on a whole pixel at 1x: {well:?}");
 }
